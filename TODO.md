@@ -1451,12 +1451,6 @@ to the corpus and follow rc
   ([design-generation.md](docs/design-generation.md#configuration-and-command-catalogs)). A module
   with malformed metadata is left out with a problem that `run/2` drops unshown; the generator
   should refuse it at build time (`erlang/apps/erx_shell/src/erx_shell_namespace.erl`).
-* [Medium] shell, lines through a record stage at the terminal: a line of a file or program read
-  into a `line` record prints through the line escape, so `cat f | sort` shows a tab as `\t` and a
-  backslash as `\\` where `cat f` shows them as they are. Decide whether a `line` record made from
-  bytes is the program's data, printed with only the control, bidirectional and invalid-UTF-8
-  escapes, or attributed text, as design-shell.md has it now
-  ([design-shell.md](docs/design-shell.md#pipelines), `erlang/apps/erx_shell/src/erx_render.erl`).
 * [Low] shell, `where`'s glob budget is per comparison and its work is repeated per record: each
   `~` gets its own 2^24 steps, so a 4 KiB predicate of many `~` comparisons spends many times that
   on one record, and each comparison re-tokenizes its pattern and rebuilds the field's character

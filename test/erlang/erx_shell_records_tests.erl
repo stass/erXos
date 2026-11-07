@@ -25,7 +25,12 @@ run([], Ctx) ->
     [erx_cmd:emit(Ctx, Record) || Record <- records()],
     ok;
 run([<<"hostile">>], Ctx) ->
-    erx_cmd:emit(Ctx, #{name => ok(<<27, "]0;pwned", 7>>), n => ok(<<27, "[2J">>)}).
+    erx_cmd:emit(Ctx, #{name => ok(<<27, "]0;pwned", 7>>), n => ok(<<27, "[2J">>)});
+%% Attributed text with a tab and a backslash, alone and as a `line` field,
+%% which a command may name so without making its value a line of data.
+run([<<"tabbed">>], Ctx) ->
+    erx_cmd:emit(Ctx, #{name => ok(<<"a\tb\\c">>)}),
+    erx_cmd:emit(Ctx, [line], #{line => ok(<<"d\te\\f">>)}).
 
 records() ->
     [#{name => ok(<<"init">>), n => ok(10)},
@@ -290,6 +295,54 @@ records_through_cat_are_escaped_test() ->
     ?assertEqual(nomatch, binary:match(Alone, <<27>>)),
     ?assertEqual({<<"|">>, Alone}, run_line(<<"recs hostile | cat">>)),
     ?assertEqual({<<"||">>, Alone}, run_line(<<"recs hostile | cat | cat -">>)).
+
+%% A line of a file is the file's data: through a record stage it reaches a
+%% file exactly as read, and the terminal with its tab and backslash
+%% unchanged and only its controls escaped: CR, backspace, ESC, a C1
+%% control as UTF-8 and as a raw byte, a bidirectional override and bytes
+%% that are not UTF-8.
+lines_of_bytes_are_data_test() ->
+    with_scratch_dir(
+      fun(Dir) ->
+              In = list_to_binary(filename:join(Dir, "in")),
+              Out = list_to_binary(filename:join(Dir, "out")),
+              Bytes = <<"b\tx\\y\n", "a", 27, "[2J\n", "c\x{9b}1m"/utf8, "\n",
+                        "d\r\b", 16#9b, "\x{202e}"/utf8, 16#c0, 16#80, "\n">>,
+              ok = file:write_file(In, Bytes),
+              ?assertEqual({<<"|">>, <<"a\\x1b[2J\nb\tx\\y\nc\\u{9b}1m\n"
+                                       "d\\x0d\\x08\\x9b\\u{202e}\\xc0\\x80\n">>},
+                           run_line(<<"cat ", In/binary, " | sort">>)),
+              ?assertEqual({<<"|">>, <<"b\tx\\y\n">>}, run_line(<<"cat ", In/binary, " | where 'line ~ b*'">>)),
+              ?assertEqual({<<"|">>, <<>>}, run_line(<<"cat ", In/binary, " | sort >", Out/binary>>)),
+              ?assertEqual({ok, <<"a", 27, "[2J\n", "b\tx\\y\n", "c\x{9b}1m\n"/utf8,
+                                  "d\r\b", 16#9b, "\x{202e}"/utf8, 16#c0, 16#80, "\n">>},
+                           file:read_file(Out))
+      end).
+
+%% Text a command attributes to a source keeps the line escape, whatever its
+%% field is named: a tab shows as `\t` and a backslash as `\\`.
+attributed_text_keeps_the_line_escape_test() ->
+    ?assertEqual({<<>>, <<"a\\tb\\\\c\nd\\te\\\\f\n">>}, run_line(<<"recs tabbed">>)),
+    ?assertEqual({<<"|">>, <<"a\\tb\\\\c\nd\\te\\\\f\n">>}, run_line(<<"recs tabbed | cat">>)).
+
+%% Only a record of one data value holding no newline, as every line read
+%% is, is a line of data; a data value holding a newline, or beside other
+%% fields, renders as attributed text, so it never splits a row or a field.
+data_that_is_not_a_line_is_escaped_as_text_test() ->
+    Data = #{line => {data, {ok, <<"a\nb\tc">>}}},
+    ?assertEqual(<<"a\\nb\\tc\n">>, table([{[line], Data}])),
+    ?assertEqual(<<"a\\nb\\tc\n">>, erx_render:line([line], Data)),
+    Line = #{line => {data, {ok, <<"a\tb">>}}, n => ok(1)},
+    ?assertEqual(lines([["line", sp(2), "n"], ["a\\tb", sp(2), "1"]]), table([{[line, n], Line}])),
+    ?assertEqual(<<"a\\tb\t1\n">>, erx_render:line([line, n], Line)).
+
+with_scratch_dir(Test) ->
+    Dir = filename:join(filename:basedir(user_cache, "erx_shell_records_tests"),
+                        integer_to_list(erlang:unique_integer([positive]))),
+    ok = filelib:ensure_path(Dir),
+    try Test(Dir)
+    after file:del_dir_r(Dir)
+    end.
 
 %% `sort` without `-k` orders records of different field lists totally: a
 %% key list that is a prefix of another sorts first.

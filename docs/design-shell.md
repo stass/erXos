@@ -123,7 +123,8 @@ The shell's state is a few Erlang terms in the session's domain:
                  programs := [2..16#7fffffff],% process ids, at each spawn
                  group_leader := pid(),       % inherited by its Erlang processes
                  state := foreground | background | paused}.
--type record() :: #{atom() => erx_schema:attr()}.   % fields its command declares
+-type record() :: #{atom() => erx_schema:attr() | data()}.  % fields its command declares
+-type data() :: {data, {ok, binary()}}.            % a line of bytes, the shell's own
 ```
 
 The command namespace is a map from name to `command()`, built when the
@@ -139,7 +140,9 @@ The command server keeps the jobs and the session's process table
 ([design-programs.md](design-programs.md#the-parties)). A record's
 fields are atoms its command declares; its values are the inspector's
 `attr()` values, each with a status and a reporter
-([design-live.md](design-live.md#inspection-records)).
+([design-live.md](design-live.md#inspection-records)), or a line of a
+file or program as `data()`, a value of the shell's own that never
+reaches the inspector ("Pipelines").
 
 ## Algorithms and behavior
 
@@ -365,7 +368,8 @@ stage passes the next its records as messages, at most 256 in flight, so
 records rather than text. A record is a map from field names, atoms its
 command declares in order, to `attr()` values, each with its status and
 reporter as in [Inspection records](design-live.md#inspection-records), so
-a value the inspector could not get stays `unknown` through every stage.
+a value the inspector could not get stays `unknown` through every stage,
+or to a line of data, below.
 One renderer, `erx_render`, which `/proc` shares, prints an `ok` value
 bare and every other value as its status, `[unknown]`, `[partial]`,
 `[unsupported]`, `[timeout 500]` or `[error]`. `where` keeps a record when
@@ -459,8 +463,13 @@ where a stage meets something that reads bytes:
   first record holds, and a record of another shape starts a new table. A
   table of one column has no header and nothing to align, so it prints
   each value as it comes: lines read into `line` records, `ls` and
-  `count` print one value a line with no header, each through the line
-  escape, so a tab or backslash of a line shows as `\t` or `\\`. A table
+  `count` print one value a line with no header. A record that is one
+  line of data, below, shows as the data: its tab and
+  backslash unchanged, and only its C0 and C1 controls other than tab,
+  DEL, bidirectional overrides, invisible format characters and invalid
+  UTF-8 escaped, as the line escape writes them; every other value, a
+  `ps` field or an `ls` name, is text attributed to its source and keeps
+  the line escape, so a tab of it shows as `\t`. A table
   of more columns holds its first
   256 records, and at most 1 MiB of their text, to measure its columns,
   then prints every later record of its shape at those widths, a wider
@@ -474,10 +483,22 @@ where a stage meets something that reads bytes:
   its fields in declared order, separated by tabs, each value printed by
   `erx_render` with its tabs, newlines and backslashes written as `\t`,
   `\n` and `\\`, with no header and no other change, so `awk`, `cut` and
-  `wc -l` see one record per line and exactly the data;
+  `wc -l` see one record per line and exactly the data; a record that is
+  one line of data is written as its bytes and a newline, so
+  `cat f | sort > g` changes no byte of a line;
 * bytes arriving at an Erlang command from a native program or a file
-  become one record per line with one field, `line`, so
-  `where 'line ~ *error*'` filters lines.
+  become one record per line with one field, `line`, whose value is the
+  line without its newline as **data**, `{data, {ok, Bytes}}`, rather
+  than text a reporter names, so `where 'line ~ *error*'` filters lines.
+  Only a record of one data value holding no newline, as every line read
+  is, is a line of data; any other record, data beside other fields
+  among them, renders as attributed text, so data never splits a row or
+  a field. Whatever a command marks as data, its controls are still
+  escaped at the terminal, so the mark changes only how tab and
+  backslash print, never what reaches the terminal raw. With its backslash unchanged, a line holding
+  the text `\x1b` shows as one holding ESC does: the data escape is not
+  reversible, and the terminal's view of a line is no evidence of its
+  bytes.
 
 ### Starting programs
 

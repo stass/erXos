@@ -138,14 +138,16 @@ read(Ctx) ->
 -doc """
 The next record of standard input with the order of its fields, or `eof`.
 A line, from a file or a program, becomes a record of one field, `line`,
-its text without the newline.
+its text without the newline as data, `{data, {ok, Bytes}}`, which the
+terminal and a file show unchanged but for the terminal's escape of
+controls (erx_render).
 """.
 -spec read_record(ctx()) -> {[atom()], rec()} | eof.
 read_record(Ctx) ->
     case next(Ctx) of
         {record, Fields, Record} -> {Fields, Record};
         eof -> eof;
-        Line -> {[line], #{line => {runtime, {ok, chomp(Line)}}}}
+        Line -> {[line], #{line => {data, {ok, chomp(Line)}}}}
     end.
 
 chomp(Line) ->
