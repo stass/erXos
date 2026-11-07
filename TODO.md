@@ -261,11 +261,15 @@ it; git history is the record of completed work.
 * [Low] stopgap, `fiasco/l4re-core/libgcc`: the root links `libgcc.a` for `long double`'s helpers, under GPL-3.0-only WITH GCC-exception-3.1. Replace it with compiler-rt's builtins.
 * [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root writes no `erx_boot_info` page for a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff) says it does, and it seeds no `rng.c`.
 * [Medium] tooling, `tools/lib/erx/oracle_qemu.rb`: the suites' events reach the host on the
-  console's serial line, which the kernel, the root and ERTS's C output (`erx_output_write`)
-  also write, at any byte. Console writers never split an event line, as `erx_console` writes
-  each `display_string` whole, but a C writer can; the frame's length and CRC-32 then reject
-  it, its sequence number's gap shows it lost, and the run reports itself incomplete rather
-  than read it. Move the events to the host
+  console's serial line, which the kernel, the root and ERTS's C output also write, at any
+  byte. No process holds `erx_tty_owner`, so `display_string` writes straight to the console, and
+  `liberx/backend/fiasco/console.c` hands the kernel at most 488 bytes
+  (`L4_VCON_WRITE_SIZE`) per call, so another thread's write can land inside an event line
+  longer than that: a stdlib run on one CPU lost a peer_SUITE case start this way. The frame's
+  length and CRC-32 then reject it, its sequence number's gap shows it lost, and the run is
+  read as far as it can be and reports itself incomplete; a case whose start was lost is
+  unknown, and so is every run of a case either side ran more than once, since the lost start
+  would number its later runs one too low. Move the events to the host
   link (`/pl011@9040000`, M4), which only the host link's own sink writes.
 * [Medium] tooling, `tools/lib/erx/pack.rb`, `pack_wire.rb`: `ERX_PACK_TEST_CODE` is set only
   by `ProductionImage#build_test_image`; other packers that carry test code (`BootImage#build`

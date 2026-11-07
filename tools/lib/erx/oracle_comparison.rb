@@ -57,9 +57,10 @@ module Erx
     # damaged event lines skipped, when there were any), "unreadable: why", or a state
     # of the host that never ran the guest (qemu_failed: why, host_failed: why); `cases`
     # maps each CaseKey to a status of STATUSES or UNRESOLVED_STATUSES; `seconds` is the
-    # run's wall-clock time, nil when no record of it exists.
-    Side = Data.define(:state, :cases, :seconds) do
-      def initialize(state:, cases:, seconds: nil) = super
+    # run's wall-clock time, nil when no record of it exists; `lost` is how many of its
+    # event lines were damaged or missing.
+    Side = Data.define(:state, :cases, :seconds, :lost) do
+      def initialize(state:, cases:, seconds: nil, lost: 0) = super
     end
     # One case's two statuses and its verdict. `attempt` is nil only for a
     # table row that names no case either run reached.
@@ -194,7 +195,7 @@ module Erx
     # stream that cannot be read yields no cases, so every case is unknown
     # there.
     def side(events:, command_state:, detail: nil, skipped: 0, seconds: nil)
-      report = OracleResults.read(xml: nil, events: events, command: { 'state' => command_state })
+      report = OracleResults.read(xml: nil, events: events, command: { 'state' => command_state }, lost: skipped)
       cut_off = cut_off_status(command_state: command_state, skipped: skipped)
       cases = report.fetch('cases').to_h do |record|
         status = record.fetch('status')
@@ -204,7 +205,7 @@ module Erx
       end
       Side.new(state: run_state(complete: report.fetch('complete'), command_state: command_state, detail: detail,
                                 skipped: skipped),
-                cases: cases, seconds: seconds)
+                cases: cases, seconds: seconds, lost: skipped)
     rescue Error => error
       Side.new(state: "unreadable: #{error.message}", cases: {}, seconds: seconds)
     end
@@ -234,9 +235,11 @@ module Erx
     # every table row of a suite that ran that accounts for no difference.
     def compare(stock:, erxos:, known:, runtime: nil)
       keys = stock.cases.keys | erxos.cases.keys
+      repeated = keys.select { |key| key.attempt > 1 }.map(&:identity).uniq
       listed = keys.to_h { |key| [key, known.select { |row| row.covers?(key) }.max_by(&:specificity)] }
       rows = keys.map do |key|
-        row(key, stock: status_of(stock, key), erxos: status_of(erxos, key), listed: listed.fetch(key))
+        row(key, stock: status_of(stock, key, repeated: repeated), erxos: status_of(erxos, key, repeated: repeated),
+                 listed: listed.fetch(key))
       end
       finished = stock.state == 'complete' && erxos.state == 'complete'
       used = rows.zip(keys).filter_map { |row, key| listed.fetch(key) if %w[known changed unresolved].include?(row.verdict) }
@@ -246,8 +249,12 @@ module Erx
 
     # What a side shows for a case: its recorded result, else, for a group
     # configuration function the side never ran, the skip of the cases under
-    # that group, and otherwise unknown.
-    def status_of(side, key)
+    # that group, and otherwise unknown. A side that lost an event line may
+    # have lost a case's start, which numbers that case's later runs one too
+    # low, so it claims no run of a case either side ran more than once.
+    def status_of(side, key, repeated:)
+      return 'unknown' if side.lost.positive? && repeated.include?(key.identity)
+
       side.cases.fetch(key) { skipped_group_function(side, key) || 'unknown' }
     end
     private_class_method :status_of

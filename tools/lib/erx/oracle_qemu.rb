@@ -36,14 +36,15 @@ module Erx
   # halt ends the machine.
   #
   # The events reach the host on the console's serial line, which they share
-  # with the kernel's, the root's and ERTS's own C output. In the system domain
-  # erlang:display_string/2 reaches erx_console, which writes each call's
-  # bytes to the UART whole and unchanged (docs/design-runtime.md, "The console
-  # and standard I/O"), so console writers never split an event line; only a C
-  # writer can, at any byte. Each event frame carries a sequence number, its
-  # length and a CRC-32, so a damaged line is counted, never read, a lost one
-  # shows as a gap, and a run that lost one is reported as incomplete:
-  # TODO.md holds that residual.
+  # with the kernel's, the root's and ERTS's own C output, and
+  # erlang:display_string/2 is C output too: its write(2) reaches the stopgap's
+  # console write, which hands the kernel at most one call's worth
+  # (L4_VCON_WRITE_SIZE, 488 bytes) at a time, so another thread's write can
+  # land inside a longer event line, a case start with a long log path among
+  # them. Each event frame carries a sequence number, its length and a
+  # CRC-32, so a damaged line is counted, never read, a lost one shows as a
+  # gap, and a run that lost one is read as far as it can be and reported as
+  # incomplete (OracleResults.read's `lost`): TODO.md holds that residual.
   class OracleQemu
     WORK = '/tmp/ct'
     # The machine the suites run on. OTP's suites need more than the development

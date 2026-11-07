@@ -60,10 +60,15 @@ begin
       bytes = (mutate_xml ? xml_seed : records_seed).dup.b
       random.rand(1..8).times { bytes.setbyte(random.rand(bytes.bytesize), random.rand(256)) }
       File.binwrite(xml, mutate_xml ? bytes : xml_seed)
+      lost = random.rand(2)
+      # A stream that lost lines is missing whole ones, as a torn frame leaves it.
+      bytes = bytes.lines.tap { |lines| lines.delete_at(random.rand(lines.size)) }.join if lost.positive? && !mutate_xml
       File.binwrite(events, mutate_xml ? records_seed : bytes)
       begin
-        # Exercise the production event reducer and optional XML decoder.
-        result = Erx::OracleResults.read(xml: xml, events: events, command: { 'state' => 'succeeded' })
+        # Exercise the production event reducer, whole or with lines lost, and
+        # the optional XML decoder.
+        result = Erx::OracleResults.read(xml: xml, events: events, command: { 'state' => 'succeeded' },
+                                         lost: lost)
         JSON.generate(result)
       rescue Erx::Error
         # Invalid inputs are an ordinary parser result; other exceptions fail.

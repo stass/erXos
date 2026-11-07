@@ -23,23 +23,27 @@ module Erx
 
     module_function
 
-    def read(xml:, events:, command:)
-      evidence = read_events(events)
-      observed_cases = controller_cases(evidence)
-      selection = selected_jobs(evidence)
-      independent = case_lifecycle(evidence)
+    # `lost` is how many event lines the host found damaged or missing in the
+    # output the stream came from (OracleComparison.printed_events). A stream
+    # that lost a line is incomplete whatever else it holds, so none of its
+    # completeness evidence is checked, and an event whose start was on a
+    # lost line is set aside; the cases it can still name are read.
+    def read(xml:, events:, command:, lost: 0)
+      whole = lost.zero?
+      evidence = read_events(events, whole: whole)
+      observed_cases = controller_cases(evidence, whole: whole)
+      # Unknown, not empty, in a stream that is not whole.
+      selection = if whole
+                    selected_jobs(evidence)
+                  else
+                    { 'id' => nil, 'sealed' => nil, 'closure' => nil, 'complete' => false, 'jobs' => nil }
+                  end
       cases = observed_cases.fetch('cases')
       counts = counts_for(cases.select { |record| record.fetch('kind') == 'testcase' })
       common_test_counts = counts_for(cases)
       suite_skip_counts = counts_for(cases.select { |record| record.fetch('kind') == 'suite_skip' })
       observed = evidence.reverse.find { |event| event.fetch('event') == 'test_stats' }
-      completed = evidence.any? { |event| event.fetch('event') == 'test_done' }
-      started = evidence.any? { |event| event.fetch('event') == 'test_start' }
-      reconciled = observed && common_test_counts.all? { |status, count| observed[status] == count }
-      matched = identity_counts(cases) == identity_counts(independent.fetch('cases')) &&
-                configuration_counts(cases) == configuration_counts(independent.fetch('cases'))
-      complete = started && completed && reconciled && matched && !cases.empty? &&
-                 observed_cases.fetch('outstanding').empty? && independent.fetch('outstanding').empty? &&
+      complete = whole && complete_run?(evidence, observed_cases: observed_cases, totals: observed) &&
                  selection.fetch('complete')
       metadata = attach_xml(cases, xml: xml)
       state = if command.fetch('state') == 'timed_out'
@@ -62,7 +66,10 @@ module Erx
 
     # One reference belongs to one execution. A terminal event can only finish
     # that reference; repetitions and parallel cases never share mutable state.
-    def controller_cases(events)
+    # In a stream that is not whole, a finish whose start was on a lost line
+    # names no case and is set aside. The lost start numbers that case's later
+    # runs one too low; OracleComparison.status_of claims none of them.
+    def controller_cases(events, whole:)
       records = {}
       attempts = Hash.new(0)
       group_bindings = {}
@@ -83,6 +90,7 @@ module Erx
             'log' => event.fetch('log'), 'detail' => '' }
         when 'case_finish'
           record = records[event.fetch('id')]
+          next if record.nil? && !whole
           raise Error, 'controller case finished without its start' unless record
           raise Error, 'duplicate controller case finish' unless record.fetch('status') == 'incomplete'
           record['status'] = event.fetch('status')
@@ -102,6 +110,23 @@ module Erx
       { 'cases' => cases, 'outstanding' => cases.select { |record| record.fetch('status') == 'incomplete' } }
     end
     private_class_method :controller_cases
+
+    # Whether a whole stream shows a run that started, finished every case it
+    # started, and whose totals and independent case events agree with the
+    # controller's cases.
+    # `totals` is Common Test's last test_stats event.
+    def complete_run?(events, observed_cases:, totals:)
+      independent = case_lifecycle(events)
+      cases = observed_cases.fetch('cases')
+      completed = events.any? { |event| event.fetch('event') == 'test_done' }
+      started = events.any? { |event| event.fetch('event') == 'test_start' }
+      reconciled = totals && counts_for(cases).all? { |status, count| totals[status] == count }
+      matched = identity_counts(cases) == identity_counts(independent.fetch('cases')) &&
+                configuration_counts(cases) == configuration_counts(independent.fetch('cases'))
+      !!(started && completed && reconciled && matched && !cases.empty? &&
+         observed_cases.fetch('outstanding').empty? && independent.fetch('outstanding').empty?)
+    end
+    private_class_method :complete_run?
 
     def selected_jobs(events)
       jobs = {}
@@ -404,7 +429,9 @@ module Erx
     end
     private_class_method :read_bounded
 
-    def read_events(path)
+    # The events of `path`, each checked on its own and, in a whole stream,
+    # in the order a run makes them.
+    def read_events(path, whole:)
       return [] unless File.file?(path)
       events = read_bounded(path, limit: MAX_EVENTS_BYTES).lines.map do |line|
         raise Error, 'oracle event exceeds byte bound' if line.bytesize > 32 * 1024
@@ -421,7 +448,7 @@ module Erx
         validate_event_fields(event)
         event
       end
-      validate_event_order(events)
+      validate_event_order(events) if whole
       events
     end
     private_class_method :read_events

@@ -167,6 +167,67 @@ class OracleComparisonTest < Minitest::Test
     assert_equal 'unknown', erxos_statuses(erxos).fetch('same')
   end
 
+# What another thread wrote to the console while an event's write was half
+# done, as a stdlib run's serial log shows: the end of a crash report's line
+# and the next line of it.
+OTHER_WRITER = "185\r\n      stack_size: 42\r\n"
+
+# The frames of `records` with the one at `index` torn by OTHER_WRITER: its
+# last three bytes, the JSON's closing "]}" or "}}" and the newline, come
+# after the other writer's bytes, so the frame's own line is short.
+def torn(records, index)
+  frames(records).each_with_index.map do |line, at|
+    at == index ? "#{line[0..-4]}#{OTHER_WRITER}#{line[-3..]}" : line
+  end.join
+end
+
+# A start whose frame another writer tore: the run lost an event and is
+# incomplete, but every case it can still name is read. A lost case start
+# leaves its case unknown; a lost Common Test event leaves every case.
+def test_a_torn_start_leaves_its_case_unknown_and_the_run_readable
+  expected = { 'case_start' => 'unknown', 'tc_start' => 'passed', 'test_start' => 'passed' }
+  expected.each do |kind, same|
+    lines = records(ERXOS)
+    erxos, printed = streamed_side(torn(lines, lines.index { |json| json.include?(%("event":"#{kind}")) }), 'succeeded')
+    assert_equal [1, 'incomplete: 1 event lines damaged or lost'], [printed.skipped, erxos.state], kind
+    assert_equal ERXOS.merge('same' => same), erxos_statuses(erxos), kind
+  end
+end
+
+# A finish with no start in a stream that lost no line is a stream that
+# does not hold together, not a lost event.
+def test_a_finish_without_its_start_in_a_whole_stream_is_unreadable
+  lines = records(ERXOS).reject { |json| json.include?('"case_start"') && json.include?('"testcase":"same"') }
+  erxos, printed = streamed_side(frames(lines).join, 'succeeded')
+  assert_equal 0, printed.skipped
+  assert_equal 'unreadable: controller case finished without its start', erxos.state
+end
+
+# Stock runs "same" twice and passes both; erXos fails its first run, whose
+# start is lost, and passes its second, which the stream then numbers as the
+# first. Neither run is claimed, so no row agrees or differs on a run erXos's
+# stream cannot place.
+def test_a_lost_start_claims_no_run_of_a_repeated_case
+  twice = lambda do |status|
+    lines = records(STOCK)
+    run = lines.select { |json| json.include?('"testcase":"same"') || json.include?('"id":"#Ref<0.0.0>"') }
+    again = run.map { |json| json.sub('#Ref<0.0.0>', '#Ref<0.0.99>') }
+    run.each { |json| lines[lines.index(json)] = json.sub('"passed"', %("#{status}")) }
+    lines.insert(lines.index { |json| json.include?('"test_stats"') }, *again)
+    [lines, lines.index { |json| json.include?('"case_start"') && json.include?('"testcase":"same"') }]
+  end
+  stock_lines, = twice.call('passed')
+  stock_path = File.join(@directory, 'stock.jsonl')
+  File.write(stock_path, stock_lines.map { |json| "#{json}\n" }.join)
+  stock = Erx::OracleComparison.side(events: stock_path, command_state: 'succeeded')
+  lines, index = twice.call('failed')
+  erxos, = streamed_side(torn(lines, index), 'succeeded')
+  rows = Erx::OracleComparison.compare(stock: stock, erxos: erxos, known: []).rows
+  same = rows.select { |row| row.testcase == 'same' }
+  assert_equal [[1, 'passed', 'unknown'], [2, 'passed', 'unknown']], same.map { |row| [row.attempt, row.stock, row.erxos] }
+  assert_equal 'same', rows.find { |row| row.testcase == 'stale' }.verdict
+end
+
   def test_a_serial_consoles_crlf_line_ends_are_accepted
     output = frames(records(ERXOS)).map { |line| line.gsub("\n", "\r\n") }.join
     erxos, printed = streamed_side(output, 'succeeded')
