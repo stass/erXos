@@ -1452,6 +1452,23 @@ it; git history is the record of completed work.
   its counts (discarded, stray replies) reach no inspector record yet; and
   `tools/erx files` serves one client at a time and reaches only QEMU's UNIX
   socket, like `load` and `watch`.
+* [Medium] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`),
+  review findings open: (1) a flush of a pending flush is answered at once,
+  before the flush it names, so the client may reuse that tag while its
+  answer is still coming; it should wait behind that flush; (2) `version`
+  resets the pending count while the grants still hold those requests, so
+  repeated versions pile abandoned requests on a shared grant: count them as
+  draining until their replies arrive; (3) the bridge's pool (4,096) equals
+  the system domain's grant pool, so a host can spend every `/data` fid of the
+  system domain: a smaller pool, or a grant of the bridge's own; (4)
+  `files_trees` defaults to `[proc, data]` in every build where the design
+  says release builds list none; no `proc` tree is mounted yet. Low: a
+  flushed walk the grant abandons keeps its new fid; `version` is discarded
+  when 64 tags are in use; the namespace entry's `ro` is not applied; the
+  bridge's own clunk replies count as stray; `trees` reads global state from
+  the core; `FilesRelay#relay` lets a credit timeout end the whole relay;
+  `NinepClient#walk` raises NoMethodError on a reply under 2 bytes;
+  readability of `grant_down/2` and the two forms of a waiting flush.
 * [Low] live, host-link driver (`erlang/apps/erx_uart/src/erx_pl011.erl`):
   the design's driver buffers at most 64 KiB of received bytes and drops
   and counts beyond that (design-system.md, "Drivers"); erx_pl011 sends
