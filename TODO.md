@@ -487,6 +487,10 @@ it; git history is the record of completed work.
   socket suites, `standard_error_SUITE`, `wrap_log_reader_SUITE`, `zlib_SUITE`, `zzz_SUITE`) and the group functions of `gen_tcp_socket_SUITE`,
   `interactive_shell_SUITE`, `net_SUITE` and `prim_net_SUITE` that an incomplete run leaves unresolved, and refresh
   their rows.
+  compiler and stdlib tables are refreshed from runs that boot it; rerun the kernel and emulator groups and refresh
+  their tables. The kernel.txt rows of application_SUITE `script_start`, `distr_changed_tc1` and
+  `distr_changed_tc2` and global_SUITE `global_groups_change` give the old boot script as their cause, which no
+  longer holds; their cause is unknown until the rerun.
 * [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,
   whose kernel and stdlib specifications are the bootstrap's (11.0.3, 8.0.4), not the release's. The transcript it
   compares does not read them; boot it from `OracleHosted.write_boot_script` so no hosted tree carries them.
