@@ -16,11 +16,12 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
-#include <strings.h>
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/mem.h"
 #include "liberx/backend/core/object_info.h"
 
 #define THREAD_BITS	(8 * sizeof(((erx_info_facts_t *)NULL)->threads))
