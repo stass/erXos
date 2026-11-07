@@ -184,21 +184,6 @@ it; git history is the record of completed work.
   `stdlib_SUITE_data` and two doctest guides. A code generation bug that shows only under `no_opt` or `r26` passes
   the oracle. Building each group's suite directory from its own `release_tests_spec` would run the group as stock
   defines it, and replace `RELEASED_HEADERS`.
-* [High] `config/provenance/import-notices.json`, `tools/lib/erx/pack_provenance.rb`: the tree holds no copy of the
-  Unicode License v3 text, so no file whose license is `Unicode-3.0` can enter an image: the pack refuses
-  `otp/lib/stdlib/test/unicode_util_SUITE_data/GraphemeBreakTest.txt` (and its `LineBreakTest.txt` and
-  `NormalizationTest.txt`, OTP's `uc_spec/vendor.info`) with "selected import grant ... has no checked notice
-  document", and the QEMU oracle cannot run stdlib's `unicode_util_SUITE`, which blocks adding stdlib to
-  `CHECKED_GROUPS`. The fix is a checked-in notice document for `Unicode-3.0`, its bytes pinned (for example from
-  the SPDX license list or unicode.org's `license.txt`) and listed in the profile; its source and pin are the owner's
-  call.
-* [High] `liberx/backend/fiasco/root.ld` (`erx_fiasco_image_start = 0x44000000`): `boot/stopgap-root` is a fixed
-  `EXEC` image linked 64 MiB above the start of QEMU `virt`'s RAM, and the boot archive is loaded from near the start
-  of RAM, so an archive over about 62 MiB overlaps it and `erx_boot_place_role` (`kernel/core/boot_place.c`) stops
-  the boot with `boot/stopgap-root: place_overlap`. The QEMU oracle's stdlib image (stdlib's suites with their 25 MB
-  of `_data`, 82 MB in all) does not boot, which blocks adding stdlib to `CHECKED_GROUPS`. Linking the root
-  position-independent, as the kernel is, would let the plan place it after the archive and remove the size limit;
-  `tools/lib/erx/native_crash.rb` (`IMAGE_FIRST`) assumes the fixed address and changes with it.
 * [Medium] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): a whole
   group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
   `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
