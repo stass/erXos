@@ -207,7 +207,7 @@ Third-party components are allowed when they pay for themselves.
     language just to change its language.
 
 Development tools are a separate question. If a build or development tool is
-missing, install it via Homebrew (`~/homebrew`) or ask me to install it. Do not
+missing, install it via Homebrew (`/opt/homebrew`) or ask me to install it. Do not
 work around a missing tool.
 
 **Track every long-running command** (builds, QEMU runs, test suites,
