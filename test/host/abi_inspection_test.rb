@@ -354,9 +354,9 @@ class AbiInspectionTest < Minitest::Test
     assert_equal %w[kernel liberx\ trace], inspection.stopgaps.fetch('liberx_trace').then { |gap| [gap.category, gap.label] }
   end
 
-  # The checked-in table, which the drift check holds to the plan.
+  # The generated table in the build tree.
   def test_the_host_table_matches_the_schema
-    load File.join(ROOT, 'tools/generated/abi_inspection.rb')
+    require_relative '../../tools/lib/erx/generated_abi_inspection'
     generated = Erx::ABI::Generated::Inspection
     inspection = Erx::ABI::Generator.plan(root: ROOT).schema.inspection
     assert_equal inspection.version, generated::SCHEMA

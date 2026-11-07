@@ -104,7 +104,9 @@ module Erx
 
       # Makes output (by default root/build/gen) hold exactly what the
       # generators compute from root, regenerating only when the stamp no
-      # longer matches. Safe to call from many processes at once.
+      # longer matches. Safe to call from many processes at once. A block
+      # runs with the result while the lock is still held, so another
+      # caller's regeneration cannot move the tree away while it reads.
       def ensure(root:, output: nil, generators: GENERATORS)
         root = File.realpath(root)
         output = File.expand_path(output || File.join(root, OUTPUT))
@@ -114,16 +116,40 @@ module Erx
 
         with_lock(output) do
           remove_leftovers(output)
-          if fresh?(output, root: root, generators: generators)
-            Result.new(status: :fresh, output: output)
-          else
-            plans = generators.map { |generator| [generator.name, generator.plan.call(root)] }
-            publish(output, files: combine(plans, generators: generators))
-            Result.new(status: :generated, output: output)
-          end
+          result = if fresh?(output, root: root, generators: generators)
+                     Result.new(status: :fresh, output: output)
+                   else
+                     plans = generators.map { |generator| [generator.name, generator.plan.call(root)] }
+                     publish(output, files: combine(plans, generators: generators))
+                     Result.new(status: :generated, output: output)
+                   end
+          yield result if block_given?
+          result
         end
       rescue SystemCallError => error
         raise Error, "cannot generate into #{output || root}: #{error.message}"
+      end
+
+      # Loads one generated Ruby file (a path of tools/generated/) from the
+      # build tree of the repository whose code is running, after making that
+      # tree fresh, and under its lock. The one way the tools' own Ruby loads
+      # a generated file: each loader beside this file (generated_abi.rb and
+      # the like) loads what the generated file uses, then calls this once;
+      # no generator may reach a loader (test/host/generated_loading_test.rb).
+      # The generated file itself loads nothing, so nothing nested here takes
+      # the lock again.
+      def require_ruby(relative)
+        unless relative.start_with?('tools/generated/') && relative.end_with?('.rb')
+          raise Error, "#{relative} is not a generated Ruby file"
+        end
+
+        checked_path(relative)
+        self.ensure(root: CODE_ROOT) do |result|
+          file = File.join(result.output, relative)
+          raise Error, "#{relative} is not in the generated tree #{result.output}" unless File.file?(file)
+
+          require file
+        end
       end
 
       private
@@ -343,11 +369,29 @@ module Erx
         end
       end
 
+      # The lock is per open file, so a second ensure of the same output on
+      # this thread (any fiber), from a generator or from a file a block
+      # loads, would wait on its own lock forever; it is refused instead.
+      # Held locks are named by the lock file's real path, so another
+      # spelling of the same tree is the same lock.
       def with_lock(output)
         FileUtils.mkdir_p(File.dirname(output))
-        File.open("#{output}.lock", File::RDWR | File::CREAT, 0o644) do |lock|
+        lock_path = File.join(File.realpath(File.dirname(output)), "#{File.basename(output)}.lock")
+        held = Thread.current.thread_variable_get(:erx_generated_locks) ||
+               Thread.current.thread_variable_set(:erx_generated_locks, [])
+        if held.include?(lock_path)
+          raise Error, "ensure of #{output} called again while it is held: " \
+                       'a generator or a generated file loads a generated file'
+        end
+
+        File.open(lock_path, File::RDWR | File::CREAT, 0o644) do |lock|
           lock.flock(File::LOCK_EX)
-          yield
+          held.push(lock_path)
+          begin
+            yield
+          ensure
+            held.delete(lock_path)
+          end
         end
       end
 

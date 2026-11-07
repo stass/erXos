@@ -240,7 +240,18 @@ stamp, is ASCII-only, checked by its generator and again by `ensure`. The genera
 libraries load no generated file, so a tree without `build/gen/` can
 always build it; `test/host/generated_test.rb` checks that, the stamp,
 the lock and that two runs into different roots at different times give
-byte-identical trees.
+byte-identical trees. The host tools' Ruby loads a generated Ruby file
+(`tools/generated/*.rb` beneath `build/gen/`) only through a loader
+beside `generated.rb`, such as `generated_abi.rb`: it loads what the
+generated file uses, which itself loads nothing, then calls
+`Erx::Generated.require_ruby`, which makes the tree fresh and requires
+the file while holding the lock; a second `ensure` of the same tree
+inside the first is refused, since it would wait on its own lock.
+`tools/erx` loads such files as it starts, so an input a generator
+refuses stops every command with that generator's diagnostic.
+`test/host/generated_loading_test.rb`
+checks from the sources that no generator reaches a loader or a
+generated file and that nothing else loads one except through a loader.
 
 ## Images and guests
 

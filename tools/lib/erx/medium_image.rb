@@ -3,7 +3,7 @@
 # frozen_string_literal: true
 
 require 'tmpdir'
-require_relative '../../generated/abi'
+require_relative 'generated_abi'
 require_relative 'block_image'
 require_relative 'error'
 

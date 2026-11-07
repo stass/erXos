@@ -516,9 +516,9 @@ it; git history is the record of completed work.
   to a file the tree itself writes (for example as `%73tatus`).
 * [Low] build tree of generated files, `tools/lib/erx/generated.rb`: a reader that does not hold `build/gen.lock`
   (a compiler started after `Erx::Generated.ensure` returned) can find `build/gen/` missing, between the two renames
-  of a regeneration that another process started because an input changed meanwhile. When consumers move to
-  `build/gen/`, either have long readers take the lock shared, or publish versioned trees behind a link replaced by
-  rename.
+  of a regeneration that another process started because an input changed meanwhile. The Ruby loaders
+  (`Erx::Generated.require_ruby`) read under the lock; for the compilers, either have long readers take the lock
+  shared, or publish versioned trees behind a link replaced by rename.
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so

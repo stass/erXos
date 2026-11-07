@@ -5,7 +5,7 @@
 require_relative 'chokepoints'
 require_relative 'core_archive'
 require_relative 'declaration_files'
-require_relative '../../generated/abi'
+require_relative 'generated_abi'
 
 module Erx
   # The chokepoint rules M1 binds, as data (docs/design-kernel.md,

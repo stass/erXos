@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 
 # The kernel watchdog's contract, written from the design's statements and
 # the core's documented choices where the design is silent, rather than

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 
 # The reference for the scheduler core: docs/design-scheduler.md's rules, on
 # arrays and plain recursion, sharing nothing with kernel/sched/sched.c. It

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 
 # An independent model of the budget accounting, judged against the budget
 # core through test/fixtures/budget_driver.c. The core keeps counters and

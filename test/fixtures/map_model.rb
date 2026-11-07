@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../../generated/terminal_tables'
+require_relative 'generated_terminal_tables'
 
 module Erx
   # The host tool's line escape, the twin of erx_text:escape_line/1

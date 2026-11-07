@@ -4,7 +4,7 @@
 
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/abi_binary'
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 require_relative '../fixtures/abi_manifest_fixture'
 
 class AbiBinaryTest < Minitest::Test

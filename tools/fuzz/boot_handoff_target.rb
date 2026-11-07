@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../generated/abi'
+require_relative '../lib/erx/generated_abi'
 
 # The boot handoff record's reader. An input is one byte, whose low bit moves the
 # record off its alignment, then the record in the layout of abi/kernel.txt. The seeds

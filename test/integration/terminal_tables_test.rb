@@ -7,7 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/json_input'
-require_relative '../../tools/generated/terminal_tables'
+require_relative '../../tools/lib/erx/generated_terminal_tables'
 
 class TerminalTablesTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze

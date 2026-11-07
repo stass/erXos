@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../../generated/abi'
+require_relative 'generated_abi'
 require_relative 'runner'
 
 module Erx

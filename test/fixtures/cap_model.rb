@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 
 # An independent model of the capability core (kernel/core/cap.c), written
 # from docs/design-kernel.md ("Objects and capabilities", "Rights",

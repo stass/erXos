@@ -3,7 +3,7 @@
 # frozen_string_literal: true
 
 require 'set'
-require_relative '../../tools/generated/abi'
+require_relative '../../tools/lib/erx/generated_abi'
 
 # A reference model of one space's translation tables and of everything a TLB
 # may cache from them, used to judge invalidation plans independently of the
