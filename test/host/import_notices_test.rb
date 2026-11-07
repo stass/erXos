@@ -76,10 +76,10 @@ class ImportNoticesTest < Minitest::Test
 
   def test_unicode_test_data_carries_the_checked_unicode_licence_text
     %w[GraphemeBreakTest.txt LineBreakTest.txt NormalizationTest.txt].each do |name|
-      record = record_for("otp/lib/stdlib/test/unicode_util_SUITE_data/#{name}")
+      record, notices = record_for("otp/lib/stdlib/test/unicode_util_SUITE_data/#{name}")
       assert_equal 'Unicode-3.0', record.fetch('license'), name
-      assert_includes record.fetch('notice'), File.binread(File.join(ROOT, 'config/provenance/notices/Unicode-3.0.txt'))
-      assert_includes record.fetch('notice'), 'UNICODE LICENSE V3'
+      assert_includes notices, File.binread(File.join(ROOT, 'config/provenance/notices/Unicode-3.0.txt'))
+      assert_includes notices, 'UNICODE LICENSE V3'
       assert_equal ['config/provenance/notices/Unicode-3.0.txt'],
                    record.fetch('notice_documents').map { |doc| doc.fetch('path') }
     end
