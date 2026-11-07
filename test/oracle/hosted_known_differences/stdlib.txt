@@ -197,6 +197,12 @@ y2k_SUITE           -           date_2001_01_01                      failed    u
 y2k_SUITE           -           date_2001_02_29                      failed    upstream bug (TODO.md): tz_next_date returns its argument when local time is UTC, as it is on erXos
 y2k_SUITE           -           date_2004_02_29                      failed    upstream bug (TODO.md): tz_next_date returns its argument when local time is UTC, as it is on erXos
 
+# q() ends the Erlang shell, not the runtime, so it is a shell-local
+# command (docs/design-shell.md, "Compatibility and migration"); the case
+# asserts that shell:local_func() lists nothing beyond stock's local
+# commands, and erXos's list has q as well.
+shell_SUITE         restricted  start_restricted_from_shell          failed    q() is a shell-local command that ends the Erlang shell, not the runtime (design-shell.md, "Compatibility and migration")
+
 # Bugs until explained: differences not yet traced to a cause, each
 # listed in TODO.md's stdlib oracle item.
 edlin_expand_SUITE  -           filename_completion                  failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
