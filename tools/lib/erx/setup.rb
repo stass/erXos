@@ -7,6 +7,7 @@ require_relative 'error'
 require_relative 'runner'
 require_relative 'dependencies'
 require_relative 'json_input'
+require_relative 'rc_oracle'
 require_relative 'bounded_file'
 
 module Erx
@@ -17,10 +18,11 @@ module Erx
   # The decision of what to run (Setup.plan) is a pure function of what exists;
   # Setup#call gathers that and performs the steps in order.
   class Setup
-    # Sources the gates need (libc-test is for the native libc canary suite). tla-tools is left out on purpose: only
+    # Sources the gates need (libc-test is for the native libc canary suite, plan9port for the command shell's rc
+    # oracle, which `make check` compares the shell against). tla-tools is left out on purpose: only
     # `make check-tla` uses it, and its pin is a separate matter. The OCI
     # oracle image is left out because the native oracle does not use it.
-    SOURCE_IDS = %w[otp musl arm-registers libc-test].freeze
+    SOURCE_IDS = %w[otp musl arm-registers libc-test plan9port].freeze
 
     Step = Data.define(:name, :kind, :argv, :deadline)
 
@@ -34,7 +36,9 @@ module Erx
       Step.new(name: 'oracle-emu', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[oracle build --backend native --flavour emu]),
       Step.new(name: 'runtime', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
-               argv: %w[build runtime])
+               argv: %w[build runtime]),
+      Step.new(name: 'rc-oracle', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
+               argv: %w[build rc-oracle])
     ].freeze
 
     ALL_STEPS = (SOURCE_IDS.map do |id|
@@ -83,6 +87,7 @@ module Erx
       when 'oracle-jit' then File.file?(File.join(@root, 'build/oracle/jit/build.json'))
       when 'oracle-emu' then File.file?(File.join(@root, 'build/oracle/emu/build.json'))
       when 'runtime' then File.file?(File.join(@root, 'build/runtime/hosted/release/system.pack'))
+      when 'rc-oracle' then File.file?(File.join(@root, RcOracle::OUTPUT, 'rc'))
       end
     end
 

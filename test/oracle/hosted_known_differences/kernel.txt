@@ -27,7 +27,6 @@ file_SUITE     files  allocate_file_size  user_skip  file:allocate/3 answers eno
 
 # The case matches prim_file's descriptor internals, which erXos's files
 # do not share.
-file_SUITE     -      read_line_1         failed     the case inspects prim_file descriptor internals
 
 # Phase 1 limits, one row per suite and status where every difference has
 # the one cause, else per case; each reason names the cause the case shows.

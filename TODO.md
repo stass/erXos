@@ -482,20 +482,6 @@ it; git history is the record of completed work.
 * [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,
   whose kernel and stdlib specifications are the bootstrap's (11.0.3, 8.0.4), not the release's. The transcript it
   compares does not read them; boot it from `OracleHosted.write_boot_script` so no hosted tree carries them.
-* [Medium] `/tmp` (`erx_file_remote`, `erx_ramfs`): a `prim_file:read_file` racing a `prim_file:rename` that replaces
-  its name answered `enoent` at the 1,848th of up to 4,999 reads (prim_file_SUITE `read_file_rename_race`, kernel.txt). A rename
-  replaces its target atomically, so a reader sees the old file or the new one. Find whether the client's walk and
-  open or the server's release of the replaced node opens the window, and pin it in
-  `test/integration/prim_file_compare.erl`.
-* [Medium] `tools/lib/erx/oracle_hosted.rb` (`fill_tree`): the oracle's release boots OTP's tracked
-  `bootstrap/bin/start.boot`, whose application specifications carry the bootstrap's versions (kernel 11.0.3, stdlib
-  8.0.4) where the shipped `.app` files say 11.0.4 and 8.1.1. So `application:which_applications()` reports versions
-  the release does not hold, and `systools:make_script` on a release file built from them answers `error`
-  (`no_valid_version`): application_SUITE `script_start`, `distr_changed_tc1` and `distr_changed_tc2` and global_SUITE
-  `global_groups_change` fail there (kernel.txt), before they reach their peers. Boot the tree from a boot script made
-  from the tree's own `.app` files, as `ReleaseFiles#boot_file` makes the system's (not the system's own, which starts
-  erXos's services), and rerun every group, since all of them boot through it; those four cases then fail at their
-  peers, and their rows take the peer reason.
 * [Low] `/tmp` (`erx_file_remote`, `erx_ramfs_core`): a `list_dir` or a `[read, directory]` open of a directory that a
   rename of another directory replaces between the client's walk and its `lopen` answers `enoent`, where FreeBSD
   answers the old listing or the new one; the tree refuses to open a removed directory, and cannot tell that open from
@@ -517,14 +503,8 @@ it; git history is the record of completed work.
   erXos in the group run and agree with stock when run with fewer suites; inet_res_SUITE's 8 lookup cases failed on
   erXos in the group run and auto_skip on both sides with fewer suites (their rows were deleted); gen_tcp_misc_SUITE
   `bidirectional_traffic` failed on stock in the group run and skips on both sides with fewer suites. A result that
-  depends on which suites ran before it in the runtime may be an erXos bug. Rerun the whole group once the boot script
-  above is fixed and explain each. Reports: erxos-history `oracle-hosted/2026-11-06-kernel` and `2026-11-06-kernel-2`.
-* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
-  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
-  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
-  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
-  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
-  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
+  depends on which suites ran before it in the runtime may be an erXos bug. Rerun the whole group (the item on
+  rerunning every group) and explain each. Reports: erxos-history `oracle-hosted/2026-11-06-kernel` and `2026-11-06-kernel-2`.
 * [Medium] `test/oracle/hosted_known_differences/compiler.txt`, `tools/lib/erx/oracle_qemu.rb`: OTP's compiler
   group runs whole in the system domain under QEMU HVF (`tools/erx oracle qemu --suites compiler`): 1030 same and
   the hosted table's 8 known rows, each with the same erXos status, but compile_SUITE `pre_load_check` differs:
@@ -535,18 +515,6 @@ it; git history is the record of completed work.
   Both erXos sides read one table (design-build.md), so a row naming erXos's `passed` would be stale on hosted:
   if the cause is timing, the table needs a way to name a case whose stock result is not stable. Until then
   `make check-oracle` does not run the group. Reports: erxos-history `oracle-qemu/2026-11-06-compiler`.
-* [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
-  parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
-  `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page
-  (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
-  backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
-  word, and a checkpoint of `parked N of N` at the shell.
-* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
-  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
-  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
-  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
-  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
-  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.

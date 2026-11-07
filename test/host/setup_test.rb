@@ -16,8 +16,8 @@ class SetupTest < Minitest::Test
 
   def test_fresh_tree_runs_every_step_in_order
     assert_equal NAMES, Erx::Setup.plan({}).map(&:name)
-    assert_equal NAMES.first(4), %w[source-otp source-musl source-arm-registers source-libc-test]
-    assert_equal %w[oracle-jit oracle-emu runtime], NAMES.last(3)
+    assert_equal NAMES.first(5), %w[source-otp source-musl source-arm-registers source-libc-test source-plan9port]
+    assert_equal %w[oracle-jit oracle-emu runtime rc-oracle], NAMES.last(4)
   end
 
   def test_complete_tree_runs_nothing
