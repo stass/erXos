@@ -34,6 +34,15 @@ module Erx
       list.split(',').map(&:strip).reject(&:empty?)
     end
 
+    # erlc's -I flags for every application's include directory under root, relative to root,
+    # so one application can include another's headers; a module compiled from the host
+    # (ErlangCompile) gets the same.
+    def self.include_flags(root:)
+      APPLICATIONS.map { |application| File.join(source(application), 'include') }
+                  .select { |directory| File.directory?(File.join(root, directory)) }
+                  .flat_map { |directory| ['-I', directory] }
+    end
+
     # Every file a build compiles or copies, as absolute paths: the sources the release's
     # receipts name for these applications.
     def self.sources(root:)
@@ -79,11 +88,7 @@ module Erx
 
     # Every application's include directory, so one application can include another's
     # generated headers by name.
-    def includes
-      APPLICATIONS.map { |application| File.join(self.class.source(application), 'include') }
-                  .select { |directory| File.directory?(File.join(@root, directory)) }
-                  .flat_map { |directory| ['-I', directory] }
-    end
+    def includes = self.class.include_flags(root: @root)
 
     def check_modules(application, listed:, compiled:)
       return if listed.sort == compiled.sort

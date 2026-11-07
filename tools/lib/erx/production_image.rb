@@ -14,6 +14,8 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'fiasco_provenance'
 require_relative 'hostlink_guest'
+require_relative 'reload_guest'
+require_relative 'code_watch'
 require_relative 'json_input'
 require_relative 'manifest'
 require_relative 'native_root'
@@ -583,6 +585,7 @@ module Erx
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
           console_boot(accel, count, built)
           hostlink_boot(accel, count, built) if count == cpus.first
+          reload_boot(accel, count, built) if count == cpus.max && count >= 4
           parked_log_boot(accel, count, built)
           idle_boot(accel, count, built)
           # This boot's transcript is its whole result: it raises if the refusal is missing.
@@ -652,6 +655,25 @@ module Erx
             .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
                  command_line: COMMAND_LINES[accel], directory: hostlink_directory(accel),
                  link: ->(socket) { HostlinkGuest.call(socket, build: built.build_id) }, link_seconds: HostlinkGuest::SECONDS)
+      end
+
+      # M4's reload and bad-hash checks (ReloadGuest): the guest boots with the probe's
+      # start expression, and the host installs the probe and reloads the subject in a loop.
+      def reload_boot(accel, count, built)
+        compile = ErlangCompile.for_tree(root: @root)
+        sources = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/reload-probe'))
+        modules = ReloadGuest.compile(compile: compile, root: @root, directory: sources,
+                                      versions: ReloadGuest::VERSIONS)
+        line = [COMMAND_LINES[accel], "erx.arg=-eval erx.arg=#{ReloadGuest::START}"].compact.join(' ')
+        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count, extra_arguments: 2)
+        directory = File.join(@root, 'build/qemu', "rl-#{accel}-#{Process.pid}")
+        Qemu.new(root: @root, runner: @runner, program: @qemu)
+            .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
+                 command_line: line, directory: directory, link_seconds: ReloadGuest::SECONDS,
+                 link: lambda { |socket|
+                   ReloadGuest.call(socket, build: built.build_id, modules: modules,
+                                            serial: File.join(File.dirname(socket), 'serial.log'), cpus: count)
+                 })
       end
 
       # A run directory whose socket path fits a UNIX socket's (QemuPlan::SOCKET_PATH_MAX).

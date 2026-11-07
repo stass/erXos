@@ -1399,6 +1399,22 @@ it; git history is the record of completed work.
   lists, by default none, and an 8 KiB message limit. Take both from the
   manifest (its `development` flag or a facet list) once the system domain
   can read it.
+* [Medium] live, `tools/erx watch` (`tools/lib/erx/code_watch.rb`,
+  `tools/lib/erx/code_commands.rb`): after the guest reboots, its installs are
+  gone (design-live.md, "The code store": "the host installs again"), but the
+  watch sends only sources that change from then on. Remember what the watch
+  loaded and send it all again when a hello finds a new boot (the build's
+  session history or a boot counter in the hello would tell). Also: a module
+  whose bytes did not change is loaded again, and a second such load purges,
+  ending processes still in its old code; skip a module whose hash equals the
+  last one loaded.
+* [Low] live, `tools/erx load` (`tools/lib/erx/code_load.rb`): the store may
+  free a blob that `missing` reported as held, to make room for a later blob
+  of the same batch (erx_code_store.erl), and the load then answers
+  `{error, {missing, Hashes}}`; send the named blobs, when all are of the
+  batch, and load again once.
+* [Low] live, `tools/erx load` and `watch`: they reach only QEMU's UNIX
+  socket (`--socket`); a board's serial line needs a raw-mode tty opener.
 * [Low] live, host-link client (`tools/lib/erx/hostlink_client.rb`): it has no
   host tests of its own, only the production image's host link boot; drive it
   against `erx_hostlink_session` on stock OTP or a scripted IO (credit, hello
@@ -1412,10 +1428,6 @@ it; git history is the record of completed work.
   and counts beyond that (design-system.md, "Drivers"); erx_pl011 sends
   every drain to its owner's mailbox, which only the host's keeping to its
   credit bounds. The console's line has the same gap.
-* [Medium] live, `tools/erx load`: the install facet and `erx_code` serve the
-  missing-blob exchange over the host link (`HostlinkClient`), but no
-  `tools/erx` command drives it yet; `erx load` and `erx watch` into the
-  system domain need only the client and the code service's three requests.
 * [Low] shell, parser choices to settle against plan9port's rc once its
   oracle runs: `|[a=b]` is read as descriptor a of the left command to b of
   the right one, which may be the reverse of rc's lex.c; an empty operand

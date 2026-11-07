@@ -33,6 +33,7 @@ require_relative 'lib/erx/test_pool'
 require_relative 'lib/erx/bench'
 require_relative 'lib/erx/bench_g3'
 require_relative 'lib/erx/toolchain_provenance'
+require_relative 'lib/erx/code_commands'
 
 module Erx
   ROOT = File.expand_path('..', __dir__)
@@ -103,6 +104,8 @@ module Erx
         check_erofs_oracle(command_arguments, **collaborators)
       when 'check-oracle'
         check_oracle(command_arguments, **collaborators)
+      when 'load', 'watch'
+        code_command(command, command_arguments)
       when '--help', '-h', nil
         help(command_arguments, **collaborators)
       else
@@ -552,8 +555,15 @@ module Erx
     # `words`, at least one, as prose: "a", "a and b", "a, b and c".
     def self.word_list(words) = [words[0..-2].join(', '), words.last].reject(&:empty?).join(' and ')
 
+    # tools/erx load and watch (CodeCommands), with the oracle's erlc for sources.
+    def self.code_command(command, arguments)
+      compile = ErlangCompile.for_tree(root: ROOT)
+      CodeCommands.public_send(command, arguments, connect: CodeCommands.method(:connect_socket), compile: compile,
+                                                   out: Terminal.method(:puts))
+    end
+
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | status | setup [--jobs N]')
       0
     end
 
