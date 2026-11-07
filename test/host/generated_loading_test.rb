@@ -127,13 +127,13 @@ class GeneratedLoadingTest < Minitest::Test
     plant('tools/lib/erx/abi_model.rb', "require_relative 'generated_abi'")
     assert_includes generator_violations(@directory),
                     'tools/lib/erx/generated_abi.rb loads a generated file through Erx::Generated.require_ruby ' \
-                    '(reached by tools/gen_abi.rb -> tools/lib/erx/abi.rb -> tools/lib/erx/abi_model.rb)'
+                    '(reached by tools/lib/erx/generated.rb -> tools/lib/erx/abi.rb -> tools/lib/erx/abi_model.rb)'
   end
 
   def test_a_generator_loading_a_generated_copy_is_caught
     plant('tools/lib/erx/hardware.rb', "  require_relative '../../generated/abi'")
     assert_includes generator_violations(@directory),
-                    'tools/lib/erx/hardware.rb loads tools/generated/abi.rb (reached by tools/gen_hw.rb)'
+                    'tools/lib/erx/hardware.rb loads tools/generated/abi.rb (reached by tools/lib/erx/generated.rb)'
   end
 
   def test_a_generator_load_computed_at_run_time_is_caught
@@ -141,7 +141,7 @@ class GeneratedLoadingTest < Minitest::Test
     assert_includes generator_violations(@directory),
                     'tools/lib/erx/terminal_rules.rb loads a path computed at run time, which this check cannot ' \
                     'follow: File.join(root, "build/gen/x.rb") ' \
-                    '(reached by tools/gen_terminal.rb -> tools/lib/erx/terminal_generation.rb)'
+                    '(reached by tools/lib/erx/generated.rb -> tools/lib/erx/terminal_generation.rb)'
   end
 
   def test_a_new_generator_script_is_checked
