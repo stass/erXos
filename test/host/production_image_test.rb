@@ -201,6 +201,56 @@ class ProductionImageTest < Minitest::Test
     assert_match erlang.fetch(:pattern), "1> #{eshell}"
   end
 
+  # The kernel records boot types erl at the command shell, each collector in turn at the
+  # Erlang shell, and the summary last. No selector takes the echo of its own typed line,
+  # nor the shell's redraw of it, both lines of a real transcript, and the summary's line
+  # must carry the stopgap table's statuses exactly: each mutant line, one status off, is
+  # refused.
+  def test_the_kernel_records_boot_reads_each_collector_and_holds_the_summary_to_the_table
+    run = Erx::ProductionImage::Run
+    points = run.kernel_record_checkpoints(cpus: 4)
+    typed = points.filter_map { |point| point[:type] }.drop_while { |line| line != "erl\r" }
+    calls = %w[machine cpus group budget threads].map { |call| %(io:format("~w~n",[erx_kernel_records:#{call}()]).\r) }
+    assert_equal ["erl\r", *calls, run::KERNEL_RECORD_SUMMARY], typed
+    selectors = points.select { |point| point.fetch(:name).start_with?('kernel-record-') }
+    assert_equal %w[machine cpus group budget threads summary], selectors.map { |point| point.fetch(:name).delete_prefix('kernel-record-') }
+    selectors.zip(typed.drop(1)).each_with_index do |(point, line), at|
+      echo = "#{at + 1}> #{line.chomp("\r")}\r\n"
+      refute_match point.fetch(:pattern), echo, point.fetch(:name)
+      refute_match point.fetch(:pattern), "\e[A\e[J#{echo}", point.fetch(:name)
+      refute_match point.fetch(:pattern), "ok\r\n", point.fetch(:name)
+    end
+    machine = '#{id => 0,path => [],kind => machine,schema => 1,attrs => #{cpus_online => {kernel,{ok,4}}},children => [cpus]}'
+    assert_match selectors.first.fetch(:pattern), "#{machine}\r\n"
+    assert_match selectors[1].fetch(:pattern), "{ok,[#{machine.sub('kind => machine', 'kind => cpu')}]}\r\n"
+
+    verify = points.last.fetch(:verify)
+    group = '[{parked,{kernel,{ok,4}}},{ready,{kernel,{ok,0}}}]'
+    good = "{object_info,[{cpus_online,{kernel,{ok,4}}}],{ok,4,[]},#{group}," \
+           "[{used,{{stopgap,liberx_pool},{partial,812}}}],{ok,9,[]}}\r\n"
+    verify.call(good)
+    verify.call("3> #{good}")
+    { 'cpus_online unsupported' => good.sub('[{cpus_online,{kernel,{ok,4}}}]', '[]'),
+      'another CPU count' => good.sub('{ok,4}}}]', '{ok,1}}}]'),
+      'another machine attribute reported' => good.sub('[{cpus_online,', '[{build,{kernel,{ok,1}}},{cpus_online,'),
+      'a CPU listing cut short' => good.sub('{ok,4,[]}', '{partial,4,[]}'),
+      'a CPU listing of another length' => good.sub('{ok,4,[]}', '{ok,3,[]}'),
+      'a CPU attribute reported' => good.sub('{ok,4,[]}', '{ok,4,[{idle_time,{kernel,{ok,7}}}]}'),
+      'used reported as the kernel' => good.sub('{{stopgap,liberx_pool},{partial,812}}', '{kernel,{ok,812}}'),
+      'used under another stopgap' => good.sub('liberx_pool', 'liberx_umtx'),
+      'used of zero' => good.sub('{partial,812}', '{partial,0}'),
+      'used unsupported' => good.sub('[{used,{{stopgap,liberx_pool},{partial,812}}}]', '[]'),
+      'a cpuset no set configured' => good.sub('[{parked,', '[{cpuset,{kernel,{ok,15}}},{parked,'),
+      'a group attribute missing' => good.sub(',{ready,{kernel,{ok,0}}}', ''),
+      'no threads listed' => good.sub('{ok,9,[]}', '{ok,0,[]}'),
+      'a thread listing cut short' => good.sub('{ok,9,[]}', '{partial,9,[]}'),
+      'a thread state reported' => good.sub('{ok,9,[]}', '{ok,9,[{state,{kernel,{ok,running}}}]}'),
+      'bytes after the summary' => good.sub("}\r\n", "}x\r\n") }.each do |what, line|
+      refute_equal good, line, what
+      assert_raises(Erx::Error, what) { verify.call(line) }
+    end
+  end
+
   # A test image's kernel says so right after the development warning; a production boot's
   # transcript has no such line.
   def test_a_test_image_transcript_carries_its_mark_after_the_development_warning

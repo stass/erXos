@@ -456,8 +456,7 @@ it; git history is the record of completed work.
   every derived attribute with all-ok inputs. `erx_fiasco_pool_put` holds `held_pages` at 0 on a put of a page never
   taken, a liberx bug it hides rather than reports. The group topic maps every `erx_group_info` failure to
   `ERX_ENOTSUP`, not `ERX_EINVAL` alone; a CPU listing ends at the first gap in the map; the root's window to
-  `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root). The QEMU check that
-  calls `erx_kernel_records` from `erl` at the console is not written yet.
+  `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root).
 * [Medium] kernel reports, `liberx` and `abi/erx_abi.txt` (design-abi's
   [Inspection schema](docs/design-abi.md#inspection-schema)):
   `erx_info_budget` declares only the fields master and the budget redesign on branch `design-budget-caps` agree on

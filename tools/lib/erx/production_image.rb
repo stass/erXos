@@ -382,6 +382,21 @@ module Erx
                              '[lists:keymember(A,1,application:loaded_applications())||A<-[compiler,runtime_tools]],' \
                              "erx_probe:f(),element(1,dbg:tracer()),dbg:stop()}.\r"
 
+      # The collectors of erx_kernel_records, in the order the boot types them, each with how
+      # its answer starts: one record, or a listing's status and records. The Erlang shell
+      # writes each answer whole on one line with ~w (docs/design-stopgap.md, "Reporting
+      # kernel objects"); the line typed for it starts io:format, so only the answer matches.
+      KERNEL_RECORD_ANSWERS = { 'machine' => /\A(?:[0-9]+> )?#\{/n, 'cpus' => /\A(?:[0-9]+> )?\{(?:ok|partial),\[/n,
+                                'group' => /\A(?:[0-9]+> )?#\{/n, 'budget' => /\A(?:[0-9]+> )?#\{/n,
+                                'threads' => /\A(?:[0-9]+> )?\{(?:ok|partial),\[/n }.freeze
+      # The five records again, each without its {kernel,unsupported} attributes, so what is
+      # left is what the stopgap reports: for a listing its status, its length and the
+      # attributes any of its records reports.
+      KERNEL_RECORD_SUMMARY = 'U=fun(R)->lists:sort([{K,V}||K:=V<-maps:get(attrs,R),V=/={kernel,unsupported}]) end,' \
+                              'L=fun({S,Rs})->{S,length(Rs),lists:usort(lists:append([U(R)||R<-Rs]))} end,' \
+                              'M=erx_kernel_records,io:format("~w~n",[{object_info,U(M:machine()),L(M:cpus()),' \
+                              "U(M:group()),U(M:budget()),L(M:threads())}]).\r"
+
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
         @root = File.expand_path(root)
@@ -462,6 +477,44 @@ module Erx
          { name: 'idle-parked', pattern: /erx: root task: group: parked #{executors} of #{executors}\r*\n\z/n,
            seconds: EVAL_SECONDS }.freeze].freeze
       end
+
+      # The kernel-object records at the Erlang shell, at the statuses design-stopgap.md's
+      # "Reporting kernel objects" table gives. Of the attributes only the kernel could
+      # report, just these are ok: the machine's cpus_online and the system group's parked
+      # and ready. The group's cpuset would be ok once a set is configured, and nothing
+      # configures the system group's. The budget's used is partial, with reporter
+      # liberx_pool, and above zero. Every other attribute is unsupported with reporter
+      # kernel, and the CPUs and the system domain's threads are listed whole. Each answer
+      # types the next collector, the last types the summary, and the summary's line must
+      # be exactly that.
+      def self.kernel_record_checkpoints(cpus:)
+        typed = [*KERNEL_RECORD_ANSWERS.keys.map { |call| %(io:format("~w~n",[erx_kernel_records:#{call}()]).\r) },
+                 KERNEL_RECORD_SUMMARY]
+        answers = KERNEL_RECORD_ANSWERS.zip(typed.drop(1)).map do |(call, start), type|
+          { name: "kernel-record-#{call}", pattern: start, seconds: EVAL_SECONDS, type: type }.freeze
+        end
+        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
+         RELEASE_SHELL.merge(type: ERL_LINE).freeze, ERLANG_SHELL.merge(type: typed.first).freeze, *answers,
+         { name: 'kernel-record-summary', pattern: /\A(?:[0-9]+> )?\{object_info,/n, seconds: EVAL_SECONDS,
+           verify: whole_line(kernel_record_line(cpus: cpus), speaker: 'the kernel records read') }.freeze].freeze
+      end
+
+      # The summary line KERNEL_RECORD_SUMMARY writes on a machine of cpus CPUs: the fixed
+      # text escaped, with a pattern only where a number may vary.
+      def self.kernel_record_line(cpus:)
+        any_number = '[0-9]+'
+        positive = '[1-9][0-9]*'
+        text = ->(fixed) { Regexp.escape(fixed) }
+        ok = ->(key, value) { "#{text.call("{#{key},{kernel,{ok,")}#{value}#{text.call('}}}')}" }
+        machine = text.call('[') + ok.call('cpus_online', cpus) + text.call(']')
+        cpu_listing = text.call("{ok,#{cpus},[]}")
+        group = text.call('[') + ok.call('parked', any_number) + ',' + ok.call('ready', any_number) + text.call(']')
+        budget = text.call('[{used,{{stopgap,liberx_pool},{partial,') + positive + text.call('}}}]')
+        threads = text.call('{ok,') + positive + text.call(',[]}')
+        summary = text.call('{object_info,') + [machine, cpu_listing, group, budget, threads].join(',') + text.call('}')
+        /\A(?:[0-9]+> )?#{summary}\r*\n\z/n
+      end
+      private_class_method :kernel_record_line
 
       # A person at the serial console. The first line, erl, is typed at the boot's development
       # warning, before the driver starts, so the FIFO holds it when the driver takes the UART,
@@ -590,6 +643,7 @@ module Erx
           reload_boot(accel, count, built) if count == cpus.max && count >= 4
           parked_log_boot(accel, count, built)
           idle_boot(accel, count, built)
+          kernel_records_boot(accel, count, built)
           # This boot's transcript is its whole result: it raises if the refusal is missing.
           boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
@@ -718,6 +772,12 @@ module Erx
       def idle_boot(accel, count, built)
         boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.idle_checkpoints(cpus: count, root: @root),
                                   command_line: [COMMAND_LINES[accel], GROUP_REPORT_WORD].compact.join(' '))
+      end
+
+      # The kernel-object records, read at the Erlang shell (Run.kernel_record_checkpoints).
+      def kernel_records_boot(accel, count, built)
+        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.kernel_record_checkpoints(cpus: count),
+                                  command_line: COMMAND_LINES[accel])
       end
 
       def judge_missed_pet(serial)
