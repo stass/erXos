@@ -25,7 +25,11 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   target, Rust with the `wasm32-unknown-unknown` target, and Java. v64's
   `LICENSE` and `LICENSE.MIT` are copied beside the built files, as their
   BSD and MIT licenses require. `--v64 DIR` instead takes a v64 tree whose
-  `build/` already holds both files, and builds nothing.
+  `build/` already holds both files, and builds nothing. `npm ci` fetches
+  from the npm registry: the site build alone is exempt from the rule that
+  npm packages install offline from a fetched store, because v64 pins its
+  tools with its own lockfile and nothing it fetches reaches an erXos
+  image.
 * `--image` is the erXos boot image, by default
   `build/production-image/interactive/image.boot`. It is stored
   gzip-compressed as `image-<digest>.boot.gz`; `boot.json` gives the page
@@ -40,8 +44,9 @@ recorded session; the Boot button needs the built site.
 
 `.github/workflows/site.yml` runs the same steps on GitHub, by hand only,
 and uploads `build/site` as a Pages artifact. It does not build the erXos
-image, which needs the whole erXos toolchain; it downloads one from a URL
-given with its SHA-256, such as a release asset.
+image, which needs the whole erXos toolchain; it downloads a release
+asset's `image.boot`, named by its URL and SHA-256 as the workflow's
+inputs, and refuses one whose digest differs.
 
 `ruby test/host/site_test.rb` tests the build step.
 
