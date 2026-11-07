@@ -207,18 +207,12 @@ it; git history is the record of completed work.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
   with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
   case, trace why `dbg` is not found, and fix it or reword the row with its cause.
-* [Medium] `tools/lib/erx/oracle_suites.rb`: suites are compiled on the host with a relative source path, and
-  shell_docs_SUITE's `init_per_suite` recompiles itself with `c:c`, which finds no source on the guest, so the suite is
-  auto-skipped on erXos. A harness bug: compile the suites with the guest path of their copied source.
 * [Medium] `test/oracle/hosted_known_differences/stdlib.txt`: stdlib differences not yet traced to a cause, each a row
   citing this item: edlin_expand_SUITE `filename_completion`, `function_parameter_completion`;
-  erl_pp_SUITE `import_export`; escript_SUITE `archive_script`, `archive_script_file_access` (compilation
+  escript_SUITE `archive_script`, `archive_script_file_access` (compilation
   error); filename_SUITE `absname`, `absname_bin` (`enoent`),
   `t_basedir_xdg` (`HOME` is unset on the erXos side); qlc_SUITE `evaluator`; shell_SUITE `otp_5435`, `records`;
-  stdlib_SUITE `app_test`; epp_SUITE `deterministic_include`, `nondeterministic_include`; rand_SUITE `doctests`;
-  gen_server_SUITE `handle_event_timeout` (failed in both runs, at load average about 86). ets_SUITE `smp_insert` and
-  gen_server_SUITE `handle_event_timeout_plain` passed in the full run and failed in the rerun, so they are not in the
-  table; rerun them on an idle host.
+  stdlib_SUITE `app_test`; rand_SUITE `doctests`.
 * [Medium] `otp/erts/preloaded/src/prim_file.erl` (`read/2`) and the file server's read: `file:read(Fd, N)` with an
   absurd N (file_sorter_SUITE `misc` reads a 2^128-1 length field) answers data or `eof` where stock answers `einval` or
   `enomem`, so the case gets `premature_eof` instead of `bad_object`. Read the size path; refuse sizes past the limit
@@ -496,10 +490,11 @@ it; git history is the record of completed work.
 * [Medium] `tools/lib/erx/oracle_comparison.rb` (`skipped_group_function`): a group function that erXos never
   recorded shows as `auto_skip`, inferred from the skipped cases under its group, and the report prints it like
   a status Common Test recorded. Give the inferred status its own name in the report and the table.
-* [Medium] `test/oracle/hosted_known_differences/*.txt`: every group's rows come from runs that booted the oracle's
-  tree from OTP's `bootstrap/bin/start.boot`, whose kernel and stdlib versions (11.0.3, 8.0.4) are not the shipped
-  ones (11.0.4, 8.1.1). The tree boots its own start_clean (`OracleHosted.write_boot_script`); rerun every group and
-  refresh its table. The kernel.txt rows of application_SUITE `script_start`, `distr_changed_tc1` and
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`, `emulator.txt`: their rows come from runs that booted the
+  oracle's tree from OTP's `bootstrap/bin/start.boot`, whose kernel and stdlib versions (11.0.3, 8.0.4) are not the
+  shipped ones (11.0.4, 8.1.1). The tree boots its own start_clean (`OracleHosted.write_boot_script`), and the
+  compiler and stdlib tables are refreshed from runs that boot it; rerun the kernel and emulator groups and refresh
+  their tables. The kernel.txt rows of application_SUITE `script_start`, `distr_changed_tc1` and
   `distr_changed_tc2` and global_SUITE `global_groups_change` give the old boot script as their cause, which no
   longer holds; their cause is unknown until the rerun.
 * [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,

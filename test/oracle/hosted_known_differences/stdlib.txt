@@ -192,25 +192,16 @@ y2k_SUITE           -           date_2001_01_01                      failed    u
 y2k_SUITE           -           date_2001_02_29                      failed    upstream bug (TODO.md): tz_next_date returns its argument when local time is UTC, as it is on erXos
 y2k_SUITE           -           date_2004_02_29                      failed    upstream bug (TODO.md): tz_next_date returns its argument when local time is UTC, as it is on erXos
 
-# Harness bug: the suite is compiled on the host, and its recorded source path
-# names no file of the guest.
-shell_docs_SUITE    *           *                                    auto_skip harness bug (TODO.md): init_per_suite recompiles the suite with c:c from a source path the guest does not hold
-shell_docs_SUITE    -           init_per_suite                       failed    harness bug (TODO.md): init_per_suite recompiles the suite with c:c from a source path the guest does not hold
-
 # Bugs until explained: differences not yet traced to a cause, each
 # listed in TODO.md's stdlib oracle item.
 edlin_expand_SUITE  -           filename_completion                  failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 edlin_expand_SUITE  -           function_parameter_completion        failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
-epp_SUITE           -           deterministic_include                failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
-epp_SUITE           -           nondeterministic_include             failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
-erl_pp_SUITE        attributes  import_export                        failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 escript_SUITE       -           archive_script                       failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 escript_SUITE       -           archive_script_file_access           failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 file_sorter_SUITE   -           misc                                 failed    bug (TODO.md): file:read with an absurd size answers eof, not einval
 filename_SUITE      -           absname                              failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 filename_SUITE      -           absname_bin                          failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 filename_SUITE      -           t_basedir_xdg                        failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
-gen_server_SUITE    -           handle_event_timeout                 failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 qlc_SUITE           evaluation  evaluator                            failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 rand_SUITE          -           doctests                             failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 shell_SUITE         -           otp_5435                             failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
