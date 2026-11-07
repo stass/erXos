@@ -17,7 +17,10 @@
  * touches no register: only erx_device reads a device, and a driver's first reads, of the
  * transport's magic, version and device id, find whether a disk is behind it. A second
  * kind is one more row. The console is not a row: two UARTs share its role and
- * compatible string, and machine.console names which one (console_read).
+ * compatible string, and machine.console names which one (console_read). The host link's
+ * UART is the other of the two, named by machine.hostlink, and becomes the record
+ * hostlink_kind describes, which the host link's driver alone asks for
+ * (docs/design-live.md, "The host link").
  */
 typedef struct device_kind {
 	uint32_t	 role;		/* ERX_MF_DEVICE_ROLE_* */
@@ -29,6 +32,9 @@ typedef struct device_kind {
 static const device_kind_t device_kinds[] = {
 	{ ERX_MF_DEVICE_ROLE_BLOCK, "virtio,mmio", "block", "virtio_mmio" },
 };
+
+/* Selected by machine.hostlink's path, among the UARTs of its driver's compatible string. */
+static const device_kind_t hostlink_kind = { ERX_MF_DEVICE_ROLE_UART, "arm,pl011", "hostlink", "pl011" };
 
 /* erx_manifest_open checked every string against the table, so these reads stay inside it. */
 static const uint8_t *
@@ -85,6 +91,9 @@ device_kind(const erx_manifest_view_t *view, const erx_mf_device_t *device)
 {
 	if (device->selector != ERX_MF_SELECTOR_DT)
 		return (NULL);
+	if (device->role == hostlink_kind.role && string_is(view, &device->compatible, hostlink_kind.compatible) &&
+	    view->header.hostlink.length != 0 && string_equal(view, &device->path, &view->header.hostlink))
+		return (&hostlink_kind);
 	for (size_t at = 0; at < sizeof(device_kinds) / sizeof(device_kinds[0]); at++) {
 		if (device->role == device_kinds[at].role && string_is(view, &device->compatible, device_kinds[at].compatible))
 			return (&device_kinds[at]);

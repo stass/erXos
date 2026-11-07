@@ -413,7 +413,8 @@ The same flag makes `erts_start_schedulers` wait for every normal and dirty CPU 
 **Device paths.** Each suite run dumps QEMU's own device tree (`-machine virt,dumpdtb`) and
 checks each device path and `compatible` of [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json)
 against it. `/pl011@9040000` exists only when QEMU is given a second `-serial`, which the
-harness does not give yet: nothing opens the host link before M3.
+harness gives every guest: QEMU's null device, or the host link's UNIX socket
+([design-live.md](design-live.md#the-host-link)).
 
 ## The call table
 

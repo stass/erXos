@@ -42,7 +42,7 @@ typedef struct erx_boot_console {
 #define ERX_BOOT_DEVICE_WORDS_MAX	(sizeof("-erx") + sizeof("device") + 2 * 16 + 4 * 21)
 
 typedef struct erx_boot_device {
-	const char	*role;		/* the record's role word: "block" */
+	const char	*role;		/* the record's role word: "block" or "hostlink" */
 	const char	*peripheral;	/* the peripheral's name in the CMSIS-SVD source */
 	uint64_t	base;		/* the register window */
 	uint64_t	size;

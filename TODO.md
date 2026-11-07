@@ -284,9 +284,6 @@ it; git history is the record of completed work.
   per-entry test flags in the packer (ORed into the header, checked against the entries by
   `erx_index_check`); every packer then marks its test image, and the lexical
   `test-image-builder` check (`Checks::TEST_IMAGE_BUILDERS`) can go.
-* [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
-  places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
-  the host link's first consumer, M4.
 * [Medium] stopgap, `tools/lib/erx/production_image.rb`: the root's link attributes `libl4sys.p.a`,
   `libsigma0.a` and the boot cores whole, under a license the recipe states, and its dependency
   files leave out Fiasco's and the compiler's headers. The boot cores are stated as BSD-2-Clause
@@ -1376,6 +1373,49 @@ it; git history is the record of completed work.
     that fails the host grammar or the message limit becomes
     `{error, system_limit}`; `message_max` bounds both directions, so a
     release build's 8 KiB limit also bounds replies.
+  * The root (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`) answers
+    `{open, Name}` for a facet the design lists whose service does not
+    exist yet with `{error, unsupported}`, and any other request, an
+    unlisted name included, with `{error, badarg}`.
+* [Medium] security, host-link session identifiers
+  (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `entropy/0`): the system
+  domain has no entropy source, so a session identifier is `rand:bytes/1`
+  under the seed `rand` takes from the time and the node, which the design
+  accepts only in trusted development modes. Draw it from the machine's
+  random source once the system domain has one.
+* [Medium] live, host-link sink check: "only the host link's own sink
+  writes its UART" holds because erx_hostlink alone asks for the `hostlink`
+  device record and owns its erx_pl011, but no build check refuses another
+  module that names that record, and erx_pl011 writes whatever any process
+  sends it as `{erx_console_output, From, Bytes}`, so the rule rests on no
+  other process learning the driver's pid. Have the driver take output only
+  from its owner (an alias the owner holds, since `From` is the console's
+  reply token), which makes the rule hold for both lines by construction,
+  and add the record check beside `DevicePosters`.
+* [Medium] live, host-link facets in a release build
+  (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `root/2`): the root offers
+  the install facet and takes 16 MiB messages whatever the build, where
+  design-live.md gives a release build's host only the facets its manifest
+  lists, by default none, and an 8 KiB message limit. Take both from the
+  manifest (its `development` flag or a facet list) once the system domain
+  can read it.
+* [Low] live, host-link client (`tools/lib/erx/hostlink_client.rb`): it has no
+  host tests of its own, only the production image's host link boot; drive it
+  against `erx_hostlink_session` on stock OTP or a scripted IO (credit, hello
+  repeats, stale grants). It keeps replies to calls nobody awaits without a
+  bound, and a payload it refuses loses the rest of that read's frames.
+* [Low] live, host link (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`): the
+  terminal and files streams' bodies are dropped uncounted until their
+  consumers exist, so the inspector cannot see the loss.
+* [Low] live, host-link driver (`erlang/apps/erx_uart/src/erx_pl011.erl`):
+  the design's driver buffers at most 64 KiB of received bytes and drops
+  and counts beyond that (design-system.md, "Drivers"); erx_pl011 sends
+  every drain to its owner's mailbox, which only the host's keeping to its
+  credit bounds. The console's line has the same gap.
+* [Medium] live, `tools/erx load`: the install facet and `erx_code` serve the
+  missing-blob exchange over the host link (`HostlinkClient`), but no
+  `tools/erx` command drives it yet; `erx load` and `erx watch` into the
+  system domain need only the client and the code service's three requests.
 * [Low] shell, parser choices to settle against plan9port's rc once its
   oracle runs: `|[a=b]` is read as descriptor a of the left command to b of
   the right one, which may be the reverse of rc's lex.c; an empty operand

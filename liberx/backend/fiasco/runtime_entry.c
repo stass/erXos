@@ -43,6 +43,7 @@ static const char	*release_read(const erx_boot_handoff_view_t *, erx_boot_manife
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
 static size_t		 console_uart_build(const erx_boot_console_t *);
 static size_t		 boot_build(erx_boot_pair_t);
+static size_t		 build_id_words(const erx_boot_handoff_view_t *);
 static size_t		 word_append(char *, size_t, size_t, const char *);
 static size_t		 console_uart_number(char *, uint64_t);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
@@ -50,10 +51,10 @@ static size_t		 line_append(char *, size_t, erx_boot_words_t);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /*
- * The manifest's words, the console's, the boot pair's, each device record's, then each erx.arg
- * word, which takes a byte and its NUL at the least.
+ * The manifest's words, the console's, the boot pair's, the build's, each device record's, then
+ * each erx.arg word, which takes a byte and its NUL at the least.
  */
-static erx_boot_words_t arg_words[3 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
+static erx_boot_words_t arg_words[4 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
 /* -erx console_uart BASE SIZE LINE: three numbers, each at most UINT64_MAX's 20 digits and its NUL. */
 #define CONSOLE_UART_NUMBER_MAX	(20 + 1)
 static const char console_uart_prefix[] = "-erx\0console_uart";
@@ -64,6 +65,15 @@ static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_DEVICE_WORDS_MAX];
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
 static const char boot_prefix[] = "-erx\0boot";
 static char boot_words[sizeof(boot_prefix) + sizeof("unknown") + sizeof("none")];
+/*
+ * -erx build ID: the boot image's build identifier, its bytes read as one big-endian number in
+ * decimal and its NUL. init reads an -erx word's values as terms, so a value must scan as one,
+ * which hexadecimal digits do not (2255e43f is an illegal integer); a decimal number always does.
+ */
+static const char build_prefix[] = "-erx\0build";
+static char build_words[sizeof(build_prefix) + CONSOLE_UART_NUMBER_MAX];
+_Static_assert(sizeof(((erx_boot_handoff_view_t *)0)->build_id) == sizeof(uint64_t),
+    "the build identifier is one 64-bit number");
 
 const erx_boot_info_t *
 erx_boot_info(void)
@@ -182,7 +192,8 @@ release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manife
 
 /*
  * The manifest's system_args, what its driver opens of the console's device entry, the boot
- * value and slot of the handoff, each device record (docs/design-stopgap.md, "Device records"),
+ * value and slot of the handoff, the boot image's build identifier, which the host link's hello
+ * reports (docs/design-live.md, "The host link"), each device record (docs/design-stopgap.md, "Device records"),
  * then each erx.arg word of the kernel command line, in its order. A plain word joins the flag
  * before it, which erx_pl011 expects. A manifest with no console entry has no such words, and
  * the driver's start then says why the console has none.
@@ -203,6 +214,7 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	if (boot_length == 0)
 		return ("the handoff: a boot value or slot that has no name");
 	arg_words[(*nargs)++] = (erx_boot_words_t){ boot_words, boot_length };
+	arg_words[(*nargs)++] = (erx_boot_words_t){ build_words, build_id_words(handoff) };
 	for (size_t at = 0; at < manifest->device_count; at++) {
 		const size_t length = erx_boot_device_words(&manifest->devices[at], device_words[at], sizeof(device_words[at]));
 
@@ -239,6 +251,23 @@ boot_build(erx_boot_pair_t boot)
 	if (used != 0)
 		used = word_append(boot_words, sizeof(boot_words), used, slot);
 	return (used);
+}
+
+/*
+ * Writes -erx build ID into build_words, the handoff's build identifier read big-endian, as the
+ * root's identity line prints its bytes in order, in decimal, and returns their whole length,
+ * the last NUL included. build_words holds the prefix and the longest number, so no write fails.
+ */
+static size_t
+build_id_words(const erx_boot_handoff_view_t *handoff)
+{
+	uint64_t id = 0;
+
+	for (size_t at = 0; at < sizeof(build_prefix); at++)
+		build_words[at] = build_prefix[at];
+	for (size_t at = 0; at < sizeof(handoff->build_id); at++)
+		id = id << 8 | handoff->build_id[at];
+	return (sizeof(build_prefix) + console_uart_number(build_words + sizeof(build_prefix), id));
 }
 
 /* NAME and its NUL at WORDS + USED, within SIZE bytes; returns the new length, or 0 if they do not fit. */

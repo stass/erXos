@@ -1414,8 +1414,8 @@ which belongs to the system domain on every platform and is served there
 by a driver like the console's, beside `erx_hostlink`; the system
 manifest names the UART by its device-tree path; under QEMU it is a UNIX
 socket
-(`-serial unix:build/hostlink.sock,server=on,wait=off` after the console's
-`-serial`).
+(`-serial unix:build/qemu/RUN/hostlink.sock,server=on,wait=off` after the
+console's `-serial`, in the run's owner-only directory).
 
 The transport has one trusted physical or local peer. The harness creates
 its UNIX socket in an owner-only directory with access restricted to that

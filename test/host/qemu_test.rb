@@ -65,6 +65,20 @@ class QemuTest < Minitest::Test
     assert_equal 'file,id=serial0,path=serial,input-path=keys', typed.fetch(typed.index('-chardev') + 1)
   end
 
+  # The host link's UART (docs/design-live.md, "The host link") is the second serial line on
+  # every plan: QEMU's null device, or a UNIX socket QEMU listens on without waiting for a client.
+  def test_the_second_serial_line_is_the_host_links
+    serials = lambda do |argv|
+      argv.each_index.select { |at| argv[at] == '-serial' }.map { |at| argv[at + 1] }
+    end
+    assert_equal %w[file:serial null], serials.call(Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial'))
+    linked = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', hostlink: '/run/x/hostlink.sock')
+    assert_equal ['file:serial', 'unix:/run/x/hostlink.sock,server=on,wait=off'], serials.call(linked)
+    ['relative.sock', '/a,b.sock', "/a\0b", "/#{'a' * Erx::QemuPlan::SOCKET_PATH_MAX}"].each do |path|
+      assert_raises(Erx::Error, path) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', hostlink: path) }
+    end
+  end
+
   def test_a_console_serial_line_is_this_terminal_with_the_monitor_muxed
     console = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE)
     assert_equal 'mon:stdio', console.fetch(console.index('-serial') + 1)
@@ -91,7 +105,7 @@ class QemuTest < Minitest::Test
     plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
     assert_equal plain, Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [])
     assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m 512 -display none
-                    -monitor none -nic none -no-reboot -serial file:serial -kernel image], plain
+                    -monitor none -nic none -no-reboot -serial file:serial -serial null -kernel image], plain
   end
 
   def test_a_disk_is_a_raw_drive_with_a_virtio_blk_device_on_a_non_legacy_transport

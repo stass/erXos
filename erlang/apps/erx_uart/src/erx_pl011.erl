@@ -1,10 +1,13 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The console driver of an Arm PrimeCell UART PL011 (docs/design-runtime.md, "The console
-%% and standard I/O"; Arm DDI 0183G for the register rules cited below). It speaks the
-%% driver's messages that erx_console documents and passes bytes unchanged both ways: what
-%% a terminal does with them is the tty layer's business, above this module.
+%% The driver of an Arm PrimeCell UART PL011 (docs/design-runtime.md, "The console and
+%% standard I/O"; Arm DDI 0183G for the register rules cited below), for the console and for
+%% the host link's line (docs/design-live.md, "The host link"). It speaks the driver's
+%% messages that erx_console documents to the one process it serves, its owner, and passes
+%% bytes unchanged both ways: what a terminal does with them is the tty layer's business,
+%% above this module, and the host link's bytes are erx_hostlink's. The owner is the line's
+%% one sink: only it sends the driver bytes to write.
 %%
 %% Receiving: FIFO interrupts fire when a level is crossed (3-17), so one delivery drains
 %% the FIFO to empty, and the receive timeout is unmasked with the receive interrupt, since
@@ -21,8 +24,8 @@
 
 -module(erx_pl011).
 
--export([start_link/1]).
--export([init/1]).
+-export([start_link/1, start_link/2]).
+-export([init/2]).
 -export([console_uart/1]).
 
 %% The spec's one line.
@@ -43,21 +46,32 @@
 -define(BUSY_READS, 100000).
 -define(FULL_WAIT_MS, 1).
 
+%% The console's driver, on the UART of `-erx console_uart`. Terminal is true: a person's
+%% terminal is on the line, so the group edits lines.
 -spec start_link(Console :: pid()) -> {ok, pid(), Terminal :: boolean()}.
 start_link(Console) ->
-    proc_lib:start_link(?MODULE, init, [Console]).
+    proc_lib:start_link(?MODULE, init, [console, Console]).
 
-%% Terminal is true: a person's terminal is on the line, so the group edits lines.
--spec init(pid()) -> no_return().
-init(Console) ->
-    {ok, Dev} = erx_device:open(spec()),
+%% The driver of the UART Spec, a device record (erx_device_record), for Owner.
+-spec start_link(erx_device:spec(), Owner :: pid()) -> {ok, pid()}.
+start_link(Spec, Owner) ->
+    proc_lib:start_link(?MODULE, init, [Spec, Owner]).
+
+-spec init(console | erx_device:spec(), pid()) -> no_return().
+init(console, Console) ->
+    start(spec(), Console, {ok, self(), true});
+init(Spec, Owner) ->
+    start(Spec, Owner, {ok, self()}).
+
+start(Spec, Owner, Ack) ->
+    {ok, Dev} = erx_device:open(Spec),
     reprogram(Dev),
     ok = erx_device:irq_bind(Dev, ?RX_LINE),
     ok = erx_device:write_field(Dev, imsc, rxim, 1),
     ok = erx_device:write_field(Dev, imsc, rtim, 1),
-    proc_lib:init_ack({ok, self(), true}),
-    deliver_input(Dev, Console),
-    loop(Dev, Console).
+    proc_lib:init_ack(Ack),
+    deliver_input(Dev, Owner),
+    loop(Dev, Owner).
 
 %% The root's words from the manifest's device entry for the console, as the boot information
 %% carries them to init's arguments. A failure exits with a stated reason, so a malformed
@@ -157,43 +171,43 @@ set_divisors(Dev, 0) ->
 set_divisors(_Dev, _Divisor) ->
     ok.
 
-loop(Dev, Console) ->
+loop(Dev, Owner) ->
     receive
         {erx_irq, Dev, ?RX_LINE} ->
-            take_input(Dev, Console),
-            loop(Dev, Console);
+            take_input(Dev, Owner),
+            loop(Dev, Owner);
         {erx_console_output, From, Bytes} ->
-            send(Dev, Console, iolist_to_binary(Bytes)),
-            Console ! {erx_console_written, From},
-            loop(Dev, Console);
+            send(Dev, Owner, iolist_to_binary(Bytes)),
+            Owner ! {erx_console_written, From},
+            loop(Dev, Owner);
         _Other ->
-            loop(Dev, Console)
+            loop(Dev, Owner)
     end.
 
-send(_Dev, _Console, <<>>) ->
+send(_Dev, _Owner, <<>>) ->
     ok;
-send(Dev, Console, Bytes = <<Byte, Rest/binary>>) ->
+send(Dev, Owner, Bytes = <<Byte, Rest/binary>>) ->
     case erx_device:read_field(Dev, fr, txff) of
         0 ->
             ok = erx_device:write(Dev, dr, Byte),
-            send(Dev, Console, Rest);
+            send(Dev, Owner, Rest);
         1 ->
             receive
-                {erx_irq, Dev, ?RX_LINE} -> take_input(Dev, Console)
+                {erx_irq, Dev, ?RX_LINE} -> take_input(Dev, Owner)
             after ?FULL_WAIT_MS -> ok
             end,
-            send(Dev, Console, Bytes)
+            send(Dev, Owner, Bytes)
     end.
 
-take_input(Dev, Console) ->
-    deliver_input(Dev, Console),
+take_input(Dev, Owner) ->
+    deliver_input(Dev, Owner),
     ok = erx_device:irq_ack(Dev, ?RX_LINE).
 
-deliver_input(Dev, Console) ->
+deliver_input(Dev, Owner) ->
     ok = erx_device:write(Dev, icr, erx_device:read(Dev, mis)),
     case drain(Dev, <<>>) of
         <<>> -> ok;
-        Bytes -> Console ! {erx_console_input, Bytes}
+        Bytes -> Owner ! {erx_console_input, Bytes}
     end.
 
 %% Reading DR pops a byte, so each word is read once and its data decoded from that word.

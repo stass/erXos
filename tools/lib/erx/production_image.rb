@@ -13,6 +13,7 @@ require_relative 'deterministic_transcript'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'fiasco_provenance'
+require_relative 'hostlink_guest'
 require_relative 'json_input'
 require_relative 'manifest'
 require_relative 'native_root'
@@ -347,11 +348,12 @@ module Erx
       # An erx. word of no known kind, which refuses the boot.
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name and the node flag with its name, before the page's words, and
-      # the five words of -erx console_uart and the four of -erx boot VALUE SLOT, which the
-      # root adds to the manifest's.
-      ARGUMENTS_ALWAYS = 12
+      # the five words of -erx console_uart, the four of -erx boot VALUE SLOT and the three of
+      # -erx build ID, which the root adds to the manifest's.
+      ARGUMENTS_ALWAYS = 15
       # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
-      # for the block unit's one device (docs/design-stopgap.md, "Device records").
+      # for the block unit's one device and the host link's UART (docs/design-stopgap.md,
+      # "Device records").
       DEVICE_RECORD_WORDS = 8
       # What a plain erx.arg word used to break: it joins the last flag's arguments.
       CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
@@ -415,7 +417,7 @@ module Erx
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
-        records = source.scan(/^unit block$/).size * DEVICE_RECORD_WORDS
+        records = source.scan(/^unit (?:block|hostlink)$/).size * DEVICE_RECORD_WORDS
         arguments = ARGUMENTS_ALWAYS + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code
@@ -580,6 +582,7 @@ module Erx
           prove_pet(accel, count, built) if count == cpus.first
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
           console_boot(accel, count, built)
+          hostlink_boot(accel, count, built) if count == cpus.first
           parked_log_boot(accel, count, built)
           idle_boot(accel, count, built)
           # This boot's transcript is its whole result: it raises if the refusal is missing.
@@ -639,6 +642,20 @@ module Erx
 
         raise Error, "a stopped pet ended the machine #{waited.round(1)} seconds after it stopped, not within #{earliest} to #{latest}"
       end
+
+      # The host link end to end (HostlinkGuest), from this host over QEMU's socket to the
+      # system domain's second UART, once the boot has reached the command shell. The guest
+      # must report this image's build in its hello.
+      def hostlink_boot(accel, count, built)
+        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count)
+        Qemu.new(root: @root, runner: @runner, program: @qemu)
+            .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
+                 command_line: COMMAND_LINES[accel], directory: hostlink_directory(accel),
+                 link: ->(socket) { HostlinkGuest.call(socket, build: built.build_id) }, link_seconds: HostlinkGuest::SECONDS)
+      end
+
+      # A run directory whose socket path fits a UNIX socket's (QemuPlan::SOCKET_PATH_MAX).
+      def hostlink_directory(accel) = File.join(@root, 'build/qemu', "hl-#{accel}-#{Process.pid}")
 
       def console_boot(accel, count, built)
         boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.console_checkpoints,

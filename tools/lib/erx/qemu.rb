@@ -41,6 +41,9 @@ module Erx
     # at 0x0a003e00, which the development manifest names as the block device
     # (config/manifest/qemu-virt-development.txt), and each next disk to the bus below.
     LAST_TRANSPORT = 31
+    # The longest path a UNIX socket takes on macOS, the primary host: sun_path's 104
+    # bytes less the NUL.
+    SOCKET_PATH_MAX = 103
 
     # A raw disk image the guest sees as a virtio-blk device on the virtio-mmio
     # bus. Its path is absolute, so QEMU reads it as a file and never as a
@@ -60,7 +63,7 @@ module Erx
 
     def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
-             disks: [])
+             disks: [], hostlink: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
@@ -88,7 +91,8 @@ module Erx
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, *(deterministic ? DETERMINISTIC_ARGUMENTS : []), '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
-       *disk_arguments(disks), '-no-reboot', *serial_arguments(serial, serial_input), '-kernel', image,
+       *disk_arguments(disks), '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
+       '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(command_line ? ['-append', command_line] : []),
        *(dtb ? ['-dtb', dtb] : [])].freeze
     end
@@ -104,6 +108,20 @@ module Erx
          '-device', "virtio-blk-device,drive=disk#{index},bus=virtio-mmio-bus.#{LAST_TRANSPORT - index}"]
       end
       DISK_TRANSPORT_ARGUMENTS + drives
+    end
+
+    # The second serial line, after the console's, which QEMU virt places at
+    # /pl011@9040000, the UART the development manifest names as machine.hostlink
+    # (docs/design-live.md, "The host link"). Every plan has it, so the system domain's
+    # host link always finds its UART: on a UNIX socket QEMU listens on, at the path
+    # given, without waiting for a client, or on QEMU's null device. The socket's
+    # directory must be the caller's own and owner-only (OutputDirectory, mode 0700).
+    def hostlink_arguments(path)
+      return ['-serial', 'null'] if path.nil?
+      raise Error, 'invalid host link socket path' unless path.is_a?(String) && path.start_with?('/') &&
+                                                        path.bytesize <= SOCKET_PATH_MAX && !path.match?(/[\0,]/)
+
+      ['-serial', "unix:#{path},server=on,wait=off"]
     end
 
     # The guest's serial line writes to a file; with serial_input, a path QEMU reads,
@@ -267,24 +285,35 @@ module Erx
     # until QEMU exits, and a guest still running at the deadline fails it, as
     # does one that exits before its transcript is complete. Otherwise the
     # harness ends the guest at the last checkpoint.
+    #
+    # With link, a callable, the guest's host link UART is a UNIX socket, hostlink.sock in
+    # the run's owner-only directory, and once the transcript is whole link runs in a
+    # thread of its own with that path; link_seconds lengthens the run's deadline, which
+    # also bounds link. The guest ends when link returns, and an error link raises is the
+    # run's, a failure of the socket as an Erx::Error. The report holds link's result under
+    # 'link'. The guest, not link, ends a run with machine_end, so the two do not combine.
     def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil, disks: [])
+            dtb: nil, disks: [], link: nil, link_seconds: 0)
+      raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
+
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
       raise Error, "guest image does not exist: #{image}" unless File.file?(image)
       matcher = Transcript.new(checkpoints: checkpoints)
-      deadline = checkpoints.sum { |point| point.fetch(:seconds) } + 5
+      deadline = checkpoints.sum { |point| point.fetch(:seconds) } + link_seconds + 5
       directory ||= File.join(@root, 'build/qemu', "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
       directory = OutputDirectory.prepare(root: @root, path: directory, mode: 0o700)
       serial = File.join(directory, 'serial.log')
+      socket = link && File.join(directory, 'hostlink.sock')
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
                            cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd, command_line: command_line,
-                           dtb: dtb, disks: disks)
+                           dtb: dtb, disks: disks, hostlink: socket)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       typing = nil
+      session = nil
       begin
         typing = keyboard && open_keyboard(keyboard)
         version = @runner.run([@program, '--version'], name: 'qemu-version', deadline: 10)
@@ -293,9 +322,13 @@ module Erx
         stop_guest = lambda do |_log|
           transcript_whole = matcher.consume(serial, elapsed: elapsed(guest_started))
           typing&.write(matcher.take_typed)
-          transcript_whole && !machine_end
+          next transcript_whole && !machine_end unless link
+
+          session ||= start_link(link, socket) if transcript_whole
+          !session.nil? && !session.alive?
         end
         @runner.run(argv, name: "qemu-#{accel}", deadline: deadline, success: stop_guest)
+        report['link'] = session.value if session
         matcher.drain(serial, elapsed: elapsed(guest_started))
         raise Error, 'QEMU exited before completing its transcript' unless matcher.done?
         report['state'] = 'passed'
@@ -309,6 +342,7 @@ module Erx
         report['state'] = 'failed'
         raise
       ensure
+        session&.kill&.join
         typing&.close
         report['state'] = 'cancelled' if report['state'] == 'running'
         report['elapsed_seconds'] = elapsed(started)
@@ -318,6 +352,15 @@ module Erx
     end
 
     private
+
+    # The host link session in a thread of its own, its socket's failures as Erx::Error.
+    def start_link(link, socket)
+      Thread.new do
+        link.call(socket)
+      rescue SystemCallError, IOError => e
+        raise Error, "host link socket #{socket}: #{e.message}"
+      end.tap { |thread| thread.report_on_exception = false }
+    end
 
     # A FIFO held open both ways, so QEMU's open of it never blocks and its read never
     # sees an end of file between the bytes the transcript types.

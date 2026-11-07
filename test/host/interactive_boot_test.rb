@@ -45,7 +45,8 @@ class InteractiveBootTest < Minitest::Test
     argv = Erx::InteractiveBoot.argv(accel: 'hvf', cpus: 2, image: '/tree/build/image.boot')
     assert_equal 'qemu-system-aarch64', argv.first
     assert_equal 'mon:stdio', argv.fetch(argv.index('-serial') + 1)
-    assert_equal 1, argv.count('-serial')
+    # The console is the first serial line; the second, the host link's UART, is QEMU's null device.
+    assert_equal %w[mon:stdio null], argv.each_index.select { |at| argv[at] == '-serial' }.map { |at| argv[at + 1] }
     assert_includes argv, '-no-reboot'
     assert_equal '/tree/build/image.boot', argv.fetch(argv.index('-kernel') + 1)
     assert_equal '2', argv.fetch(argv.index('-smp') + 1)

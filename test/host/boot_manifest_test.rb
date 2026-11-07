@@ -88,17 +88,22 @@ class BootManifestTest < Minitest::Test
     RUNTIME_LIMIT_FIELDS.map { |field| values.fetch(field) }
   end
 
-  # The device records (docs/design-stopgap.md, "Device records"): the one device of a unit
-  # the system domain holds whose role and compatible string are a row of device_kinds, with
-  # the platform record's window, line and DMA memory. The console and host-link UARTs are
-  # no row, so they give none.
-  def test_the_block_unit_gives_the_one_device_record
+  # The device records (docs/design-stopgap.md, "Device records"), in the order of the device
+  # table: the host link's UART, which machine.hostlink names by its path (docs/design-live.md,
+  # "The host link"), and the one device of a unit the system domain holds whose role and
+  # compatible string are a row of device_kinds, each with the platform record's window, line
+  # and DMA memory. The console's UART, a UART of the same compatible string in a unit the
+  # system domain holds, is no record, so there are two: erx_pl011 reads -erx console_uart.
+  def test_the_block_and_hostlink_units_give_one_device_record_each
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "devices 1\n"
+    assert_includes output, "devices 2\n"
+    assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
+                            "words-erx device hostlink pl011 151257088 4096 40 0 exact 1 short 0\n"
     assert_includes output, "device block virtio_mmio 167788032 512 79 2097152 " \
                             "words-erx device block virtio_mmio 167788032 512 79 2097152 exact 1 short 0\n"
   end
+
 
   # A missing disk is a normal state: a manifest with no block unit reads, and has no record.
   def test_a_manifest_without_the_block_unit_has_no_device_record
@@ -106,8 +111,8 @@ class BootManifestTest < Minitest::Test
     refute_equal @source, source
     output, status = read(admitted(source))
     assert status.success?, output
-    assert_includes output, "devices 0\n"
-    refute_match(/^device /, output)
+    assert_includes output, "devices 1\n"
+    refute_match(/^device block /, output)
   end
 
   # The record's peripheral is a name the device NIF's table has, from the CMSIS-SVD source.
