@@ -1,0 +1,15 @@
+# Here documents and command substitution of command output.
+x=hello
+cat <<EOF
+one $x
+two
+EOF
+cat <<'EOF'
+literal $x
+EOF
+echo three > f
+echo four >> f
+y=`{cat f}
+echo $#y $y
+z=`{echo a b | cat}
+echo $#z $z

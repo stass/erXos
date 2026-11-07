@@ -1,0 +1,226 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+-module(erx_shell_runner_tests).
+-moduledoc """
+EUnit cases of the command shell's runner and what it stands on: the
+pipe's bounds and ends, the command namespace, the renderer, the
+command context and the runner's commands, statuses and globbing. The
+module is also a command module of its own, for commands that misbehave
+on purpose: `crashy`, `yes` and `hog`.
+""".
+
+-include_lib("eunit/include/eunit.hrl").
+
+-erx_command(testcmd).
+-erx_usage("testcmd crash | yes | hog").
+
+-export([run/2]).
+
+%%% The test command
+
+run([<<"crash">>], _Ctx) -> error(on_purpose);
+run([<<"yes">>], Ctx) -> yes(Ctx);
+run([<<"hog">>], _Ctx) -> {error, length(lists:seq(1, 1 bsl 26))};
+run(_Args, _Ctx) -> {error, usage}.
+
+yes(Ctx) -> erx_cmd:emit(Ctx, <<"y\n">>), yes(Ctx).
+
+%%% The pipe
+
+pipe_lines_test() ->
+    Pipe = erx_shell_pipe:new(),
+    writer(Pipe, [{bytes, <<"one\ntw">>}, {bytes, <<"o\nlast">>}]),
+    ?assertEqual({line, <<"one\n">>}, erx_shell_pipe:get(Pipe)),
+    ?assertEqual({line, <<"two\n">>}, erx_shell_pipe:get(Pipe)),
+    ?assertEqual({line, <<"last">>}, erx_shell_pipe:get(Pipe)),
+    ?assertEqual(eof, erx_shell_pipe:get(Pipe)).
+
+pipe_record_ends_a_partial_line_test() ->
+    Pipe = erx_shell_pipe:new(),
+    writer(Pipe, [{bytes, <<"part">>}, {record, [a], #{a => 1}}]),
+    ?assertEqual({line, <<"part">>}, erx_shell_pipe:get(Pipe)),
+    ?assertEqual({record, [a], #{a => 1}}, erx_shell_pipe:get(Pipe)),
+    ?assertEqual(eof, erx_shell_pipe:get(Pipe)).
+
+%% Bytes written one at a time merge, so 300 of them never fill the count.
+pipe_merges_bytes_test() ->
+    Pipe = erx_shell_pipe:new(),
+    writer(Pipe, lists:duplicate(300, {bytes, <<"x">>}) ++ [{bytes, <<"\n">>}]),
+    ?assertEqual({line, binary:copy(<<"x">>, 300)}, strip(erx_shell_pipe:get(Pipe))),
+    ?assertEqual(eof, erx_shell_pipe:get(Pipe)).
+
+pipe_line_too_long_test() ->
+    Pipe = erx_shell_pipe:new(),
+    writer(Pipe, [{bytes, binary:copy(<<"x">>, 70000)}]),
+    ?assertEqual({error, line_too_long}, erx_shell_pipe:get(Pipe)).
+
+%% The 257th record waits until the reader takes one.
+pipe_bounds_records_in_flight_test() ->
+    Pipe = erx_shell_pipe:new(),
+    Self = self(),
+    writer(Pipe, [{record, [n], #{n => N}} || N <- lists:seq(1, 257)], fun() -> Self ! all_put end),
+    ?assertEqual(nothing, receive all_put -> put_all after 200 -> nothing end),
+    ?assertEqual({record, [n], #{n => 1}}, erx_shell_pipe:get(Pipe)),
+    ?assertEqual(put_all, receive all_put -> put_all after 5000 -> nothing end).
+
+pipe_epipe_when_reader_ends_test() ->
+    Pipe = erx_shell_pipe:new(),
+    Reader = spawn(fun() -> receive stop -> ok end end),
+    erx_shell_pipe:attach(Pipe, read, Reader),
+    ?assertEqual(ok, erx_shell_pipe:put(Pipe, {bytes, <<"a\n">>})),
+    Ref = monitor(process, Reader),
+    Reader ! stop,
+    receive {'DOWN', Ref, _, _, _} -> ok end,
+    ?assertEqual({error, epipe}, erx_shell_pipe:put(Pipe, {bytes, <<"b\n">>})).
+
+pipe_here_document_test() ->
+    Pipe = erx_shell_pipe:from_binary(<<"a\nb\n">>),
+    ?assertEqual([{line, <<"a\n">>}, {line, <<"b\n">>}, eof],
+                 [erx_shell_pipe:get(Pipe) || _ <- [1, 2, 3]]).
+
+pipe_from_missing_file_test() ->
+    ?assertEqual({error, enoent}, erx_shell_pipe:from_file(<<"/nonexistent/erx/file">>)).
+
+writer(Pipe, Items) -> writer(Pipe, Items, fun() -> ok end).
+
+writer(Pipe, Items, Done) ->
+    Pid = spawn(fun() -> receive go -> ok end,
+                         [ok = erx_shell_pipe:put(Pipe, Item) || Item <- Items],
+                         Done()
+                end),
+    erx_shell_pipe:attach(Pipe, write, Pid),
+    Pid ! go.
+
+strip({line, Line}) -> {line, string:trim(Line, trailing, "\n")}.
+
+%%% The namespace
+
+attributes(Command, Usage) -> [{erx_command, [Command]}, {erx_usage, Usage}].
+
+namespace_entries_and_conflicts_test() ->
+    {Table, Problems} = erx_shell_namespace:build(
+                          [{m_echo, attributes(echo, "echo"), [{run, 2}]},
+                           {m_one, attributes(dup, "dup"), [{run, 2}]},
+                           {m_two, attributes(dup, "dup"), [{run, 2}]},
+                           {m_cd, attributes(cd, "cd"), [{run, 2}]},
+                           {m_plain, [{vsn, [1]}], []}]),
+    ?assertEqual([], Problems),
+    ?assertMatch({erlang, #{module := m_echo, usage := <<"echo">>, needs := []}},
+                 erx_shell_namespace:lookup(<<"echo">>, Table)),
+    ?assertEqual({conflict, [m_one, m_two]}, erx_shell_namespace:lookup(<<"dup">>, Table)),
+    ?assertEqual({found, <<"dup: unresolved, declared by m_one and m_two">>},
+                 erx_shell_namespace:whatis(<<"dup">>, Table)),
+    ?assertEqual({builtin, cd}, erx_shell_namespace:lookup(<<"cd">>, Table)),
+    ?assertEqual(not_found, erx_shell_namespace:lookup(<<"./echo">>, Table)),
+    ?assertEqual(not_found, erx_shell_namespace:whatis(<<"nosuch">>, Table)).
+
+namespace_refuses_malformed_metadata_test() ->
+    {Table, Problems} = erx_shell_namespace:build(
+                          [{m_nousage, [{erx_command, [a]}], [{run, 2}]},
+                           {m_norun, attributes(b, "b"), [{run, 1}]},
+                           {m_needs, attributes(c, "c") ++ [{erx_needs, ["x"]}], [{run, 2}]}]),
+    ?assertEqual([{m_nousage, malformed_metadata}, {m_norun, no_run},
+                  {m_needs, malformed_metadata}], Problems),
+    ?assertEqual(#{<<"cd">> => {builtin, cd}}, Table).
+
+%%% The renderer and the context
+
+render_statuses_test() ->
+    ?assertEqual([<<"7">>, <<"[partial]">>, <<"[unknown]">>, <<"[unsupported]">>,
+                  <<"[timeout 500]">>, <<"[error]">>],
+                 [erx_render:value({runtime, V})
+                  || V <- [{ok, 7}, {partial, 1}, unknown, unsupported, {timeout, 500}, {error, x}]]).
+
+render_line_test() ->
+    Record = #{b => {runtime, {ok, <<"x\ty\\">>}}, a => {runtime, unknown}},
+    ?assertEqual(<<"[unknown]\tx\\ty\\\\\n">>, erx_render:line([a, b, c], Record, bytes)),
+    Hostile = #{a => {runtime, {ok, <<27, "[1m", 16#ff, "\x{202e}"/utf8>>}}},
+    ?assertEqual(<<"\\x1b[1m\\xff\\u{202e}\n">>, erx_render:line([a], Hostile, terminal)).
+
+cmd_path_test() ->
+    ?assertEqual(<<"/a/c">>, erx_cmd:path(<<"/a/b">>, <<"../c">>)),
+    ?assertEqual(<<"/">>, erx_cmd:path(<<"/a">>, <<"../../..">>)),
+    ?assertEqual(<<"/x/y">>, erx_cmd:path(<<"/a">>, <<"/x/./y/">>)).
+
+cmd_getopt_test() ->
+    ?assertEqual({ok, "rf", [<<"a">>]}, erx_cmd:getopt([<<"-r">>, <<"-f">>, <<"a">>], "rf")),
+    ?assertEqual({ok, "", [<<"-x">>]}, erx_cmd:getopt([<<"--">>, <<"-x">>], "rf")),
+    ?assertEqual({error, usage}, erx_cmd:getopt([<<"-x">>], "rf")).
+
+%%% The runner
+
+runner_state(Facets, Err) ->
+    {Table, []} = erx_shell_namespace:build(
+                    [{Module, Module:module_info(attributes), Module:module_info(exports)}
+                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_echo, erx_cmd_true, erx_cmd_cp, erx_cmd_mv, erx_cmd_rm]]),
+    erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => null, 2 => Err},
+                           table => Table, facets => Facets}).
+
+run_status(Argv, State) ->
+    {Status, _} = (erx_shell_runner:runner())({run, Argv, #{}}, State),
+    Status.
+
+runner_statuses_test() ->
+    Pipe = erx_shell_pipe:new(),
+    erx_shell_pipe:attach(Pipe, read, self()),
+    State = runner_state(#{}, {pipe, Pipe}),
+    ?assertEqual(<<"no_facet">>, run_status([<<"ps">>], State)),
+    ?assertEqual(<<"not found">>, run_status([<<"nosuch">>], State)),
+    ?assertEqual(<<"usage">>, run_status([<<"testcmd">>], State)),
+    ?assertMatch(<<"{error,on_purpose}">>, run_status([<<"testcmd">>, <<"crash">>], State)),
+    ?assertEqual([{line, <<"ps: no_facet\n">>}, {line, <<"nosuch: not found\n">>},
+                  {line, <<"usage: testcmd crash | yes | hog\n">>},
+                  {line, <<"testcmd: crashed: {error,on_purpose}\n">>}],
+                 [erx_shell_pipe:get(Pipe) || _ <- [1, 2, 3, 4]]).
+
+%% A command past its heap limit is killed and the shell goes on.
+runner_heap_limit_test_() ->
+    {timeout, 60, fun() ->
+        ?assertEqual(<<"killed">>, run_status([<<"testcmd">>, <<"hog">>], runner_state(#{}, null)))
+    end}.
+
+%% A writer whose reader ended stops with `broken pipe`, whatever it writes.
+runner_pipeline_epipe_test() ->
+    {ok, Shell} = run_source(<<"testcmd yes | true">>),
+    ?assertEqual(<<"broken pipe|">>, erx_shell_eval:status(Shell)).
+
+runner_glob_test() ->
+    Dir = scratch_dir(),
+    [ok = file:write_file(filename:join(Dir, Name), <<>>) || Name <- ["a1", "a2", "b1", ".a3"]],
+    Cwd = list_to_binary(Dir),
+    ?assertEqual([<<"a1">>, <<"a2">>], erx_shell_runner:glob([{src, <<"a*">>}], Cwd)),
+    ?assertEqual([<<".a3">>], erx_shell_runner:glob([{src, <<".a*">>}], Cwd)),
+    ?assertEqual([], erx_shell_runner:glob([{lit, <<"a">>}, {src, <<"9*">>}], Cwd)),
+    Absolute = [<<Cwd/binary, "/b1">>],
+    ?assertEqual(Absolute, erx_shell_runner:glob([{lit, Cwd}, {src, <<"/b*">>}], <<"/">>)).
+
+run_source(Source) ->
+    Shell = erx_shell_eval:new(#{}, erx_shell_runner:runner(), runner_state(#{}, null)),
+    erx_shell_eval:run_source(Source, Shell).
+
+scratch_dir() ->
+    Dir = filename:join(filename:basedir(user_cache, "erx_shell_runner_tests"),
+                        integer_to_list(erlang:unique_integer([positive]))),
+    ok = filelib:ensure_path(Dir),
+    Dir.
+
+%% A copy onto itself is refused, and the file keeps its bytes.
+runner_cp_onto_itself_test() ->
+    Dir = list_to_binary(scratch_dir()),
+    {ok, Shell} = run_source(<<"echo x > ", Dir/binary, "/f; cp ", Dir/binary, "/f ", Dir/binary>>),
+    ?assertEqual(<<"identical">>, erx_shell_eval:status(Shell)),
+    ?assertEqual({ok, <<"x\n">>}, file:read_file(filename:join(Dir, "f"))).
+
+%% rm refuses an operand whose last component is `.` or `..`.
+runner_rm_dot_test() ->
+    Dir = list_to_binary(scratch_dir()),
+    {ok, Shell} = run_source(<<"rm -r ", Dir/binary, "/.">>),
+    ?assertEqual(<<"invalid argument">>, erx_shell_eval:status(Shell)),
+    ?assert(filelib:is_dir(Dir)).
+
+%% A background block leaves no message in the evaluator's mailbox.
+runner_background_leaves_no_message_test() ->
+    {ok, _} = run_source(<<"{true} &">>),
+    timer:sleep(100),
+    ?assertEqual({messages, []}, process_info(self(), messages)).

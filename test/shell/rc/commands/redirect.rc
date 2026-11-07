@@ -1,0 +1,11 @@
+# Redirections to files of the working directory, through the namespace.
+echo one > f
+echo two >> f
+cat f
+cat < f
+echo to-null > /dev/null
+echo err >[1=2]
+{echo a; echo b} > g
+cat f g
+cat g >> f
+cat f

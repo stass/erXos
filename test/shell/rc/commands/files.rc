@@ -1,0 +1,15 @@
+# Making, copying, moving and removing files.
+mkdir d
+echo text > d/f
+cp d/f g
+cat g
+mv g d/h
+ls d
+mkdir -p d/e/f
+ls d/e
+rm d/f
+ls d
+rm -r d/e
+ls d
+rm -f nosuch
+echo status $status

@@ -1,0 +1,12 @@
+# Pipelines between Erlang commands, and their statuses.
+echo one | cat
+echo two | cat | cat | cat
+{echo a; echo b} | cat
+echo x > f
+cat f | cat
+cat < f | cat
+false | true
+echo status $status
+true | false
+echo status $status
+echo e >[2=1] |[2] cat

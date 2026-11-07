@@ -424,7 +424,8 @@ module Erx
       # types the next line: a line with a mistake rubbed out, under which the sum is 4 where
       # the mistake is a syntax error, an output longer than any FIFO, a debug log record,
       # what erlang:processes() lists, and a module compiled and a tracer started with
-      # compiler and runtime_tools loaded and neither started.
+      # compiler and runtime_tools loaded and neither started, and an rc line the command
+      # shell runs with its Erlang commands.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: "1+1.\r").freeze : point
@@ -447,7 +448,11 @@ module Erx
                        whole: /\A(?:[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n, type: LOAD_ONLY_EXPRESSION),
          # The echo of the line starts {ok,M,B}=, so only the answer matches.
          console_point('load-only', /\A(?:[0-9]+> )?\{load_only,/n,
-                       whole: /\A(?:[0-9]+> )?\{load_only,\[false,false\],\[true,true\],compiled,ok,ok\}\r*\n\z/n)].freeze
+                       whole: /\A(?:[0-9]+> )?\{load_only,\[false,false\],\[true,true\],compiled,ok,ok\}\r*\n\z/n,
+                       type: RC_EXPRESSION),
+         # The echo of the line holds `echo rc:`, so only the output starts with rc:.
+         console_point('rc-output', /\A(?:[0-9]+> )?rc: /n, whole: /\A(?:[0-9]+> )?rc: 2 hello world f \|\r*\n\z/n),
+         console_point('rc-ending', /\A(?:[0-9]+> )?\{ok,<<>>\}\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the
@@ -575,6 +580,14 @@ module Erx
       # The record comes about the pet deadline D after the suspension, not at once and not
       # long after: the first would mean a watchdog that is not waiting for pets, the second
       # one that needs the machine's help to end it.
+      # An rc line that the command shell runs with its Erlang commands, in a directory of
+      # its own under /tmp: redirections to a file, a pipeline, substitutions, ls and ps.
+      # Its one line of output names the line count, the file's words, ls's one name and
+      # the statuses of `ps | cat`, then the Erlang shell prints how the source ended.
+      RC_EXPRESSION = 'erx_shell_script:run(<<"mkdir /tmp/rc; cd /tmp/rc; echo hello > f; echo world >> f; ' \
+                      'x=`{cat f | cat}; y=`{ls | cat}; ps | cat > p; s=$status; ' \
+                      'echo rc: $#x $x $y $s">>).' "\r"
+
       def judge_missed_pet_time(checkpoints, proof)
         at = ->(name) { checkpoints.find { |point| point.fetch('name') == name }.fetch('elapsed_seconds') }
         waited = at.call('watchdog-fired') - at.call('pet-stopped')

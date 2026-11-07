@@ -1,0 +1,3 @@
+# A file that cannot be read: the diagnostic and the status differ from the host's cat.
+cat nofile
+echo status $status

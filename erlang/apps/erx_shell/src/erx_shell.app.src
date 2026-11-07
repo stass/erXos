@@ -2,18 +2,38 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The command shell with rc's language (docs/design-shell.md): its tokenizer
-%% and its parser, pure functions from a line or script to a syntax tree,
-%% and its evaluator, which runs a tree through a runner it is handed.
-%% Its interactive layer runs the shell on the console, with a stand-in
-%% runner until the command namespace exists.
+%% and its parser, pure functions from a line or script to a syntax tree; its
+%% evaluator, which runs a tree through a runner it is handed; the runner of
+%% the session's domain with its pipes and command namespace; the erx_cmd
+%% behaviour and the first Erlang commands (erx_cmd_*); and its interactive
+%% layer, which runs the shell on the console. It starts nothing of its own:
+%% erx_shell_script:run/2 runs a source in a process of the caller's.
 {application, erx_shell,
  [{description, "erXos command shell"},
   {vsn, "1"},
-  {modules, [erx_shell,
+  {modules, [erx_cmd,
+             erx_cmd_cat,
+             erx_cmd_cp,
+             erx_cmd_echo,
+             erx_cmd_false,
+             erx_cmd_ls,
+             erx_cmd_mkdir,
+             erx_cmd_mount,
+             erx_cmd_mv,
+             erx_cmd_ps,
+             erx_cmd_pwd,
+             erx_cmd_rm,
+             erx_cmd_true,
+             erx_render,
+             erx_shell,
              erx_shell_basic_runner,
              erx_shell_eval,
              erx_shell_lex,
-             erx_shell_parse]},
+             erx_shell_namespace,
+             erx_shell_parse,
+             erx_shell_pipe,
+             erx_shell_runner,
+             erx_shell_script]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

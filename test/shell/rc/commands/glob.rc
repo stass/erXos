@@ -1,0 +1,12 @@
+# Globbing against the working directory.
+echo > a1; echo > a2; echo > b1
+echo a*
+echo *1
+echo [ab]2
+echo none*
+mkdir d
+echo > d/x; echo > d/y
+echo d/*
+echo */x
+echo 'a*'
+for (i in a?) echo got $i

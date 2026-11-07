@@ -1270,11 +1270,12 @@ to the corpus and follow rc
   and says it cannot show the body, status `not supported`. Write the
   printer, following rc's pcmd.c, and drop the corpus's pinned
   difference `whatis-function.rc` (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
-* [Medium] shell, the evaluator's builtins to come: `.`, `cd`, `wait`
+* [Medium] shell, the evaluator's builtins to come: `.`, `wait`
   and `flag` (rc's), and `erl`, `within`, `jobs`, `fg`, `bg` and `kill`;
   each is an effect, so each goes behind the runner of `erx_shell_eval`
-  with the command and job pieces of Track S. Until then their names
-  reach the runner as commands. `.` runs a file's units in the current
+  with the command and job pieces of Track S (`cd` is the runner's,
+  `erx_shell_runner`). Until then their names
+  reach the runner as commands and give `not found`. `.` runs a file's units in the current
   shell, which `{run, Argv, Vars}` cannot express: it needs a request that
   reads the file for run_source/2; `flag`'s `-e`, `-x` and `-v` are
   evaluator state, which the evaluator does not hold
@@ -1404,6 +1405,37 @@ to the corpus and follow rc
   throws into values by hand (`apart` through run_unit/2, `with_redirs`);
   build every body through one constructor that does it
   (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Medium] shell, the command catalog is read at run time: `erx_shell_namespace:from_applications/1`
+  loads the shell application's modules and reads their `-erx_command`, `-erx_usage`, `-erx_needs`
+  and `-erx_fields` attributes each time `erx_shell:run/2` starts, where the design has a generated,
+  checked catalog bound to each module's blob hash and republished around code replacement
+  ([design-generation.md](docs/design-generation.md#configuration-and-command-catalogs)). A module
+  with malformed metadata is left out with a problem that `run/2` drops unshown; the generator
+  should refuse it at build time (`erlang/apps/erx_shell/src/erx_shell_namespace.erl`).
+* [Medium] shell, records at the terminal: `erx_cmd:emit/2` writes a record toward the terminal as
+  a tab-separated line through the line escape, where the design has aligned columns under a header
+  line ([design-shell.md](docs/design-shell.md#pipelines)); that needs the renderer to see a run of
+  records, not one (`erlang/apps/erx_shell/src/erx_cmd.erl`, `erx_render.erl`).
+* [Low] shell, the runner's pieces not done yet: `<{...}` and `>{...}` are refused, since the
+  namespace has no path that names a pipe; a background block's redirected files close when the
+  redirection's request ends, so `{cmd &} > f` loses what `cmd` writes after that; a substitution's
+  output is bounded by the evaluator's heap alone; the first Erlang commands lack `i`, `bind`,
+  `unmount` and `mount` with arguments, which change the namespace through `erx_ns`
+  (`erlang/apps/erx_shell/src/erx_shell_runner.erl`).
+* [Medium] shell, the runner's review findings left open (`erlang/apps/erx_shell/src/erx_shell_runner.erl`):
+  a stream has no direction, so `` x=`{cat >[0=1]} `` reads the write end of its own pipe and hangs the
+  session; give `{pipe, Pid}` a direction and answer `ebadf` to a read of a write end. Stage, command and
+  evaluator processes are monitored, not linked, so a killed evaluator or stage leaves its children
+  running and `{while(){}} &` runs until reboot; link each to its starter. A substitution's output has
+  no bound but the evaluator's heap, so `` x=`{cat big} `` ends the whole source rather than one stage;
+  cap it and record the bound in design-shell.md. The runner's and commands' diagnostics (`not found`,
+  `cd`, `can't open`, `erx_cmd:report/3`, crash text) carry file names raw to the terminal; decide in
+  design-shell.md whether they pass the line escape. Glob keeps a non-directory before `/` (`echo */`
+  lists files) and resolves `f/..` by name. Stages and background blocks are admitted with no stage
+  allowance at all (see pipeline admission below). `cat` reads lines bounded at 64 KiB where a byte
+  command wants `erx_shell_pipe:get_chunk/1`; the design's `line` records from bytes are binary lines
+  in `erx_cmd:read/1`. A pump treats a read error as end of input; `ls` and glob skip names that are
+  not UTF-8 (`list_dir_all`); the pipe's merge scans up to 64 KiB per one-byte write.
 * [Medium] shell, pipeline admission: each pipeline stage is admitted at
   its full `max_heap_size`, 16 MiB, against an eighth of the session's
   budget, so a 128 MiB session admits one stage and `ps | where | sort`
