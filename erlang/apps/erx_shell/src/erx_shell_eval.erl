@@ -815,72 +815,9 @@ is_pattern(Item) ->
                  ({lit, _}) -> false
               end, Item).
 
-matches(Text, Item) ->
-    match(tokens(marked(Item)), characters(Text), none).
-
-%% The item's characters, each marked as a pattern character or not.
-marked(Item) ->
-    [{Kind, C} || {Kind, Text} <- Item, C <- characters(Text)].
+matches(Text, Item) -> erx_shell_glob:match(Text, Item).
 
 %% Characters of a text: code points where it is UTF-8, bytes elsewhere.
 characters(<<>>) -> [];
 characters(<<C/utf8, Rest/binary>>) -> [C | characters(Rest)];
 characters(<<B, Rest/binary>>) -> [{byte, B} | characters(Rest)].
-
-%% Compiles marked characters into match tokens. A class runs from an
-%% unquoted `[` to the next `]`, whatever its characters' quoting, as in
-%% rc; a `[` with no `]` after it makes the pattern match nothing, as in
-%% rc's glob.c.
-tokens([]) -> [];
-tokens([{src, $*} | Rest]) -> [star | tokens(Rest)];
-tokens([{src, $?} | Rest]) -> [any | tokens(Rest)];
-tokens([{src, $[} | Rest]) ->
-    {Inside, Members} = case Rest of
-                            [{_, $~} | Tail] -> {false, Tail};
-                            _ -> {true, Rest}
-                        end,
-    case ranges(Members, []) of
-        {ok, Ranges, After} -> [{class, Inside, Ranges} | tokens(After)];
-        unterminated -> [never]
-    end;
-tokens([{_, C} | Rest]) -> [{char, C} | tokens(Rest)].
-
-%% A class's members up to its `]`, as rc's glob.c reads them: the
-%% character after a `-` always ends the range, `]` included, reversed
-%% bounds are swapped, and a class with no `]` is malformed and matches
-%% nothing.
-ranges([{_, $]} | After], Acc) -> {ok, Acc, After};
-ranges([{_, Low}, {_, $-}, {_, High} | Rest], Acc) ->
-    ranges(Rest, [ordered(Low, High) | Acc]);
-ranges([{_, C} | Rest], Acc) -> ranges(Rest, [{C, C} | Acc]);
-ranges([], _Acc) -> unterminated.
-
-ordered(Low, High) when is_integer(Low), is_integer(High), High < Low ->
-    {High, Low};
-ordered(Low, High) -> {Low, High}.
-
-%% Matching with one backtracking point, the last `*`: on a mismatch the
-%% star takes one more character. Linear in the text for each star, and
-%% iterative, so a long pattern or text never deepens the stack.
-match([star | Tokens], Chars, _Back) -> match(Tokens, Chars, {Tokens, Chars});
-match([Token | Tokens], [C | Chars], Back) ->
-    case one(Token, C) of
-        true -> match(Tokens, Chars, Back);
-        false -> retry(Back)
-    end;
-match([], [], _Back) -> true;
-match(_, _, Back) -> retry(Back).
-
-retry({Tokens, [_ | Chars]}) -> match(Tokens, Chars, {Tokens, Chars});
-retry(_) -> false.
-
-one(never, _C) -> false;
-one(any, _C) -> true;
-one({char, Want}, C) -> Want =:= C;
-one({class, Inside, Ranges}, C) ->
-    In = lists:any(fun({Low, High}) -> in_range(C, Low, High) end, Ranges),
-    In =:= Inside.
-
-in_range(C, Low, High) when is_integer(C), is_integer(Low), is_integer(High) ->
-    Low =< C andalso C =< High;
-in_range(C, Low, High) -> C =:= Low orelse C =:= High.

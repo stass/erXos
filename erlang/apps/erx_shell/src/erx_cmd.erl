@@ -34,16 +34,32 @@ variables), its working directory, its three standard streams and its
 facets. Every path a command takes from its arguments goes through
 path/2, against the context's working directory, since the shell's
 working directory is the session's and not the runtime's. A command
-writes with emit/2 and say/2 and reads with read/1 or read_line/1; a
-write that cannot be done, such as one to a pipe whose reader has ended,
-ends the command at once with that error as its status, as `SIGPIPE`
-ends a program. Facets are reached only through facet/2.
+writes with emit/2, emit/3 and say/2 and reads with read/1 or
+read_record/1; a write that cannot be done, such as one to
+a pipe whose reader has ended, ends the command at once with that error
+as its status, as `SIGPIPE` ends a program. Facets are reached only
+through facet/2.
+
+Records toward the terminal render as a table (erx_render), which holds
+its first records to measure its columns. That table is the one piece of
+state a command's writes keep, in the process dictionary of the process
+that writes, so a command writes from the process run/2 runs in. Every
+other write of that process to the terminal prints what the table holds
+first, so the terminal shows the command's writes in the order it made
+them, and the shell calls finish/0 when run/2 returns, so nothing stays
+held. A stage that is killed, by its heap limit or a signal, loses the
+records its table holds, as a killed program loses its stdio buffer.
+
+No command turns a record into bytes: read/1 and read_record/1 give a
+record with the order of its fields, which a stage passes on with emit/3,
+so the one place a record becomes text is emit/3, which renders it for
+the stream it meets, escaped toward the terminal.
 """.
 
--export([emit/2, say/2, report/3, read/1, read_line/1, facet/2, path/2,
-         cwd/1, env/2, getopt/2, format_error/1]).
+-export([emit/2, emit/3, say/2, report/3, read/1, read_record/1, finish/0,
+         facet/2, path/2, cwd/1, env/2, getopt/2, format_error/1]).
 
--export_type([ctx/0, stream/0]).
+-export_type([ctx/0, stream/0, rec/0]).
 
 -callback run(Args :: [binary()], Ctx :: ctx()) ->
     ok | {error, usage} | {error, {reported, term()}} | {error, term()}.
@@ -63,24 +79,38 @@ ends a program. Facets are reached only through facet/2.
                  stderr := stream(),
                  facets := #{atom() => term()}}.
 
+%% A record: its fields, atoms its command declares, and their values
+%% (`record()` names Erlang's own record type).
+-type rec() :: #{atom() => erx_render:attr()}.
+
 %% A record is at most 64 KiB, as external_size/1 measures it.
 -define(MAX_RECORD, 1 bsl 16).
+%% The key of the writing process's terminal table: {Write, erx_render:table()}.
+-define(TABLE, {?MODULE, table}).
 
 -doc """
 Writes bytes, or a record of the command's declared fields, to standard
-output: a record passes whole to a neighbouring Erlang stage and is
-rendered as a line toward a file or the terminal.
+output: a record passes whole to a neighbouring Erlang stage, is rendered
+as a line toward a file and joins the table toward the terminal.
 """.
--spec emit(ctx(), iodata() | #{atom() => erx_render:attr()}) -> ok.
-emit(#{stdout := Out, fields := Fields}, Record) when is_map(Record) ->
+-spec emit(ctx(), iodata() | rec()) -> ok.
+emit(#{fields := Fields} = Ctx, Record) when is_map(Record) ->
+    emit(Ctx, Fields, Record);
+emit(#{stdout := Out}, Bytes) ->
+    write(Out, iolist_to_binary(Bytes)).
+
+-doc """
+Writes a record with its fields in the order given, as a stage that
+passes on records it read does with the order they came with.
+""".
+-spec emit(ctx(), [atom()], rec()) -> ok.
+emit(#{stdout := Out}, Fields, Record) when is_list(Fields), is_map(Record) ->
     erlang:external_size(Record) =< ?MAX_RECORD orelse stop(record_too_large),
     case Out of
         {pipe, Pipe} -> written(erx_shell_pipe:put(Pipe, {record, Fields, Record}));
-        {tty, _} -> write(Out, erx_render:line(Fields, Record, terminal));
-        _ -> write(Out, erx_render:line(Fields, Record, bytes))
-    end;
-emit(#{stdout := Out}, Bytes) ->
-    write(Out, iolist_to_binary(Bytes)).
+        {tty, Write} -> tabulate(Write, fun(Table) -> erx_render:table_record(Fields, Record, Table) end);
+        _ -> write(Out, erx_render:line(Fields, Record))
+    end.
 
 -doc "Writes bytes to standard error.".
 -spec say(ctx(), iodata()) -> ok.
@@ -94,22 +124,47 @@ report(#{name := Name} = Ctx, Subject, Reason) ->
 
 -doc """
 The next item of standard input: a line, with its newline unless it is
-the last and has none, a record from a neighbouring Erlang stage, or
-`eof`. A line over 64 KiB ends the command with `line too long`.
+the last and has none, a record from a neighbouring Erlang stage with
+the order of its fields, or `eof`. A line over 64 KiB ends the command
+with `line too long`.
 """.
--spec read(ctx()) -> binary() | #{atom() => erx_render:attr()} | eof.
+-spec read(ctx()) -> binary() | {[atom()], rec()} | eof.
 read(Ctx) ->
     case next(Ctx) of
-        {record, _Fields, Record} -> Record;
+        {record, Fields, Record} -> {Fields, Record};
         Other -> Other
     end.
 
--doc "The next line of standard input, a record rendered as one, or `eof`.".
--spec read_line(ctx()) -> binary() | eof.
-read_line(Ctx) ->
+-doc """
+The next record of standard input with the order of its fields, or `eof`.
+A line, from a file or a program, becomes a record of one field, `line`,
+its text without the newline.
+""".
+-spec read_record(ctx()) -> {[atom()], rec()} | eof.
+read_record(Ctx) ->
     case next(Ctx) of
-        {record, Fields, Record} -> erx_render:line(Fields, Record, bytes);
-        Other -> Other
+        {record, Fields, Record} -> {Fields, Record};
+        eof -> eof;
+        Line -> {[line], #{line => {runtime, {ok, chomp(Line)}}}}
+    end.
+
+chomp(Line) ->
+    Size = byte_size(Line) - 1,
+    case Line of
+        <<Text:Size/binary, "\n">> -> Text;
+        _ -> Line
+    end.
+
+
+-doc """
+Prints what the terminal's table holds. The shell calls it when run/2
+returns, and every other write to the terminal calls it first.
+""".
+-spec finish() -> ok.
+finish() ->
+    case get(?TABLE) of
+        undefined -> ok;
+        {Write, _Table} -> tabulate(Write, fun erx_render:table_flush/1)
     end.
 
 next(#{stdin := {pipe, Pipe}}) ->
@@ -197,9 +252,23 @@ write({pipe, Pipe}, Bytes) -> written(erx_shell_pipe:put(Pipe, {bytes, Bytes}));
 write({dev, Device}, Bytes) ->
     written(file:write(Device, Bytes));
 write({tty, Write}, Bytes) ->
+    finish(),
     written(Write(Bytes));
 write(null, _Bytes) -> ok;
 write(closed, _Bytes) -> stop(ebadf).
+
+%% Steps the terminal table of this process and prints what it answers.
+tabulate(Write, Step) ->
+    Table = case get(?TABLE) of
+                undefined -> erx_render:table();
+                {_Write, Held} -> Held
+            end,
+    {Bytes, Next} = Step(Table),
+    put(?TABLE, {Write, Next}),
+    case iolist_size(Bytes) of
+        0 -> ok;
+        _ -> written(Write(Bytes))
+    end.
 
 written(ok) -> ok;
 written({error, Reason}) -> stop(Reason).

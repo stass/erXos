@@ -5,7 +5,8 @@
 %% and its parser, pure functions from a line or script to a syntax tree; its
 %% evaluator, which runs a tree through a runner it is handed; the runner of
 %% the session's domain with its pipes and command namespace; the erx_cmd
-%% behaviour and the first Erlang commands (erx_cmd_*); and its interactive
+%% behaviour and the first Erlang commands (erx_cmd_*), among them the record
+%% stages where, sort and count; and its interactive
 %% layer, which runs the shell on the console. It starts nothing of its own:
 %% erx_shell_script:run/2 runs a source in a process of the caller's.
 {application, erx_shell,
@@ -13,6 +14,7 @@
   {vsn, "1"},
   {modules, [erx_cmd,
              erx_cmd_cat,
+             erx_cmd_count,
              erx_cmd_cp,
              erx_cmd_echo,
              erx_cmd_false,
@@ -23,16 +25,20 @@
              erx_cmd_ps,
              erx_cmd_pwd,
              erx_cmd_rm,
+             erx_cmd_sort,
              erx_cmd_true,
+             erx_cmd_where,
              erx_render,
              erx_shell,
              erx_shell_eval,
+             erx_shell_glob,
              erx_shell_lex,
              erx_shell_namespace,
              erx_shell_parse,
              erx_shell_pipe,
              erx_shell_runner,
-             erx_shell_script]},
+             erx_shell_script,
+             erx_shell_where]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

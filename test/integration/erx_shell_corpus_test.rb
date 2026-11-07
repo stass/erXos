@@ -24,7 +24,7 @@ class ErxShellCorpusTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORPUS = File.join(ROOT, 'test/shell/rc/corpus')
   SOURCES = %w[erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
-               erlang/apps/erx_shell/src/erx_shell_eval.erl
+               erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
                test/erlang/erx_shell_fake_runner.erl].map { |path| File.join(ROOT, path) }.freeze
 
   Run = Data.define(:stdout, :stderr, :status)

@@ -14,7 +14,8 @@ require 'tmpdir'
 class ErxShellTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
-               erlang/apps/erx_shell/src/erx_shell_eval.erl erlang/apps/erx_shell/src/erx_shell.erl
+               erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
+               erlang/apps/erx_shell/src/erx_shell.erl
                test/erlang/erx_shell_basic_runner.erl
                test/erlang/erx_shell_tests.erl].map { |path| File.join(ROOT, path) }.freeze
 

@@ -374,6 +374,18 @@ neither true nor false, so `where` drops such a record and `where -u`
 lists those it could not decide, and `sort` places them last: no stage
 turns a status into a value.
 
+The first record stages are `where [-u] predicate ...`, whose arguments
+join with spaces into one predicate, `sort [-r] [-k field] ...` and
+`count`. A stage that passes records on keeps the order of fields each
+came with. `sort` orders by the fields `-k` names, the first first, or by
+each record's own fields in order when it names none; integers sort as
+numbers before every other value, which sorts as its text as `erx_render`
+prints it, byte by byte, so the order is total; a record that lacks a key,
+or whose key's value is not `ok`, sorts after every record that has one,
+with `-r` too; and the sort is stable. `sort` holds its whole input, within
+its stage's `max_heap_size`. `count` emits one record, `count`, of how many
+records or lines it read.
+
 **Bounds.** A record is at most 64 KiB, as `erlang:external_size/1`
 measures it, and a stage that would send a larger one fails with
 `record too large`; a stage holds at most 256 records and 1 MiB of them in
@@ -410,6 +422,14 @@ op     := "=" | "!=" | "<" | "<=" | ">" | ">=" | "~"
 value  := INTEGER | 'QUOTED STRING' | WORD
 ```
 
+A WORD is a run of bytes other than blanks, parentheses, quotes and the
+operators' characters `=!<>~`; a WORD of digits, with an optional leading
+`-`, is an INTEGER; `and`, `or` and `not` are keywords, and a quoted string
+is rc's, with `''` for a quote. Each `(` and each `not` is a level of
+nesting. A FIELD that names no existing atom names a field no record has,
+so parsing makes no atom; a predicate that does not parse fails with what
+is wrong and the byte where, never echoing the input.
+
 A predicate is true, false or **undecided**, by Kleene's three-valued
 logic: `not` exchanges true and false and keeps undecided; `and` is false
 when either side is false, true when both are true, and undecided
@@ -419,7 +439,8 @@ or whose value is not `ok`, is undecided. Two integers compare as numbers;
 any other pair compares as text, the field's value as `erx_render` prints
 it against the literal's text, byte by byte, so for a field `n` holding
 10, `n < 9` is false and `n < '9'` is true. `~` matches the field's text
-against a glob, as rc's `~` does, with an iterative matcher that keeps one
+against a glob, as rc's `~` does, a WORD's pattern characters live and a
+quoted string's literal, with an iterative matcher that keeps one
 point to backtrack to, so a match takes at most the text's length times
 the pattern's length in steps; one that would take more than 2^24 steps is
 undecided. So every predicate is decided, or reported undecided, in
@@ -432,8 +453,23 @@ one holder and the session knows them all
 ([design-pipes.md](design-pipes.md#making-a-pipe)). Text appears only
 where a stage meets something that reads bytes:
 
-* at the terminal, records render as aligned columns under a header line,
-  whose values `erx_render` writes with the line escape;
+* at the terminal, records render as aligned columns under a header line
+  of the field names, whose names and values `erx_render` writes with the
+  line escape and measures as escaped. A table's shape is the fields its
+  first record holds, and a record of another shape starts a new table. A
+  table of one column has no header and nothing to align, so it prints
+  each value as it comes: lines read into `line` records, `ls` and
+  `count` print one value a line with no header, each through the line
+  escape, so a tab or backslash of a line shows as `\t` or `\\`. A table
+  of more columns holds its first
+  256 records, and at most 1 MiB of their text, to measure its columns,
+  then prints every later record of its shape at those widths, a wider
+  value pushing the rest of its row right rather than being cut; a column
+  whose values include an integer and no other `ok` value is aligned
+  right. The command's process keeps the table, prints what it holds
+  before any other write of that command to the terminal, so the terminal
+  shows the command's writes in order, and prints the rest when `run/2`
+  returns;
 * toward a native program or a file, each record renders as one line of
   its fields in declared order, separated by tabs, each value printed by
   `erx_render` with its tabs, newlines and backslashes written as `\t`,
@@ -643,8 +679,10 @@ facet's name, from which `erx_cmd:facet(Ctx, Name)` returns the facet or
 `{error, no_facet}`. A module declares the facets it needs with
 `-erx_needs(Names)`, which the shell checks before it runs the command.
 `erx_cmd:emit/2` writes a record or a line to standard output, waiting
-while 256 records are in flight to the next stage, and `erx_cmd:read/1`
-takes the next record, line or `eof` from standard input
+while 256 records are in flight to the next stage, `erx_cmd:emit/3`
+passes a record on with the order of fields it came with,
+`erx_cmd:read/1` takes the next record, line or `eof` from standard input,
+and `erx_cmd:read_record/1` takes a line as a `line` record
 ([Pipelines](#pipelines)). No other source of authority exists for a
 command: the system domain's services are reached only through facets in
 the context.

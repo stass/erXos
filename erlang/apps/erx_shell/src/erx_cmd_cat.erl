@@ -4,8 +4,9 @@
 -module(erx_cmd_cat).
 -moduledoc """
 `cat [file ...]`: writes each file in turn, or standard input for none
-and for `-`, unchanged. A record from a neighbouring stage is written as
-its line. A file that cannot be read is reported and the rest are still
+and for `-`, unchanged. A record from a neighbouring stage passes on as
+a record, so it meets a file, a stage or the terminal as any record does,
+escaped at the terminal. A file that cannot be read is reported and the rest are still
 written; the first such error is the status.
 """.
 
@@ -37,8 +38,9 @@ cat(File, Ctx) ->
     end.
 
 copy_input(Ctx) ->
-    case erx_cmd:read_line(Ctx) of
+    case erx_cmd:read(Ctx) of
         eof -> ok;
+        {Fields, Record} -> erx_cmd:emit(Ctx, Fields, Record), copy_input(Ctx);
         Line -> erx_cmd:emit(Ctx, Line), copy_input(Ctx)
     end.
 

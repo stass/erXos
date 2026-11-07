@@ -1451,15 +1451,32 @@ to the corpus and follow rc
   ([design-generation.md](docs/design-generation.md#configuration-and-command-catalogs)). A module
   with malformed metadata is left out with a problem that `run/2` drops unshown; the generator
   should refuse it at build time (`erlang/apps/erx_shell/src/erx_shell_namespace.erl`).
-* [Medium] shell, records at the terminal: `erx_cmd:emit/2` writes a record toward the terminal as
-  a tab-separated line through the line escape, where the design has aligned columns under a header
-  line ([design-shell.md](docs/design-shell.md#pipelines)); that needs the renderer to see a run of
-  records, not one (`erlang/apps/erx_shell/src/erx_cmd.erl`, `erx_render.erl`).
+* [Medium] shell, lines through a record stage at the terminal: a line of a file or program read
+  into a `line` record prints through the line escape, so `cat f | sort` shows a tab as `\t` and a
+  backslash as `\\` where `cat f` shows them as they are. Decide whether a `line` record made from
+  bytes is the program's data, printed with only the control, bidirectional and invalid-UTF-8
+  escapes, or attributed text, as design-shell.md has it now
+  ([design-shell.md](docs/design-shell.md#pipelines), `erlang/apps/erx_shell/src/erx_render.erl`).
+* [Low] shell, `where`'s glob budget is per comparison and its work is repeated per record: each
+  `~` gets its own 2^24 steps, so a 4 KiB predicate of many `~` comparisons spends many times that
+  on one record, and each comparison re-tokenizes its pattern and rebuilds the field's character
+  list; thread one budget through `erx_shell_where:eval/2` and compile each pattern at parse/1
+  (`erlang/apps/erx_shell/src/erx_shell_where.erl`, `erx_shell_glob.erl`).
+* [Low] shell, `where` cannot write rc's negated class: `~` is an operator character, so
+  `a ~ [~x]` does not parse and a quoted pattern is literal; let a WORD in a value hold `~`
+  (`erlang/apps/erx_shell/src/erx_shell_where.erl`).
+* [Low] shell, every write of an Erlang command to the terminal must go through `erx_cmd` from the
+  process run/2 runs in, or its records' table flushes out of order; a build check that only
+  `erx_cmd` and the runner unpack a `{tty, Write}` stream would make that hold by construction
+  (`erlang/apps/erx_shell/src/erx_cmd.erl`).
+* [Low] shell, the terminal's table measures a value by its characters (`string:length/1`), so an
+  East Asian wide character, which takes two columns, misaligns the rest of its row; measure display
+  width from the terminal tables (`erlang/apps/erx_shell/src/erx_render.erl`).
 * [Low] shell, the runner's pieces not done yet: `<{...}` and `>{...}` are refused, since the
   namespace has no path that names a pipe; a background block's redirected files close when the
   redirection's request ends, so `{cmd &} > f` loses what `cmd` writes after that; a substitution's
-  output is bounded by the evaluator's heap alone; the first Erlang commands lack `i`, `bind`,
-  `unmount` and `mount` with arguments, which change the namespace through `erx_ns`
+  output is bounded by the evaluator's heap alone; the first Erlang commands lack `i`, `select`,
+  `bind`, `unmount` and `mount` with arguments, which change the namespace through `erx_ns`
   (`erlang/apps/erx_shell/src/erx_shell_runner.erl`).
 * [Medium] shell, the Erlang file utilities (`erlang/apps/erx_shell/src/erx_cmd_*.erl`): `echo`, `cat`, `ls`,
   `pwd`, `mkdir`, `rm`, `mv` and `cp` are erXos's own and replace toybox's applets of those names, but each takes

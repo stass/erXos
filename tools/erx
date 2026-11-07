@@ -314,6 +314,8 @@ module Erx
                    name: 'fuzz-erx-path', deadline: 900, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_shell_parse.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-shell-parse', deadline: 1000, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_shell_where.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-shell-where', deadline: 1000, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_erofs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-erofs', deadline: 1800, chdir: ROOT, env: environment)
       end

@@ -134,9 +134,9 @@ render_statuses_test() ->
 
 render_line_test() ->
     Record = #{b => {runtime, {ok, <<"x\ty\\">>}}, a => {runtime, unknown}},
-    ?assertEqual(<<"[unknown]\tx\\ty\\\\\n">>, erx_render:line([a, b, c], Record, bytes)),
-    Hostile = #{a => {runtime, {ok, <<27, "[1m", 16#ff, "\x{202e}"/utf8>>}}},
-    ?assertEqual(<<"\\x1b[1m\\xff\\u{202e}\n">>, erx_render:line([a], Hostile, terminal)).
+    ?assertEqual(<<"[unknown]\tx\\ty\\\\\n">>, erx_render:line([a, b, c], Record)),
+    Hostile = <<27, "[1m", 16#ff, "\x{202e}"/utf8>>,
+    ?assertEqual(<<"\\x1b[1m\\xff\\u{202e}">>, erx_render:escape(Hostile)).
 
 cmd_path_test() ->
     ?assertEqual(<<"/a/c">>, erx_cmd:path(<<"/a/b">>, <<"../c">>)),

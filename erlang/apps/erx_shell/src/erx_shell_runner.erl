@@ -159,14 +159,25 @@ command(#{name := Name, module := Module, usage := Usage, needs := Needs, fields
     end.
 
 %% What run/2 gave, or how it stopped: a write it could not do, or a crash.
+%% However it ended, the records its terminal table holds are printed then.
 invoke(Module, Args, Ctx) ->
-    try Module:run(Args, Ctx) of
-        ok -> ok;
-        {error, _} = Error -> Error;
-        Other -> {crashed, {bad_return, Other}}
+    Result = try Module:run(Args, Ctx) of
+                 ok -> ok;
+                 {error, _} = Error -> Error;
+                 Other -> {crashed, {bad_return, Other}}
+             catch
+                 throw:{erx_cmd_stop, Reason} -> {stopped, Reason};
+                 Class:Reason -> {crashed, {Class, Reason}}
+             end,
+    %% The first failure is the status: printing the held records can fail
+    %% only a command that had not failed already.
+    try erx_cmd:finish() of
+        ok -> Result
     catch
-        throw:{erx_cmd_stop, Reason} -> {stopped, Reason};
-        Class:Reason -> {crashed, {Class, Reason}}
+        throw:{erx_cmd_stop, Reason2} when Result =:= ok -> {stopped, Reason2};
+        throw:{erx_cmd_stop, _} -> Result;
+        Class2:Reason2 when Result =:= ok -> {crashed, {Class2, Reason2}};
+        _:_ -> Result
     end.
 
 %% A command's status and the diagnostic it did not write itself. A write
@@ -244,7 +255,7 @@ capture(Body, S) ->
 drain(Pipe, Acc) ->
     case erx_shell_pipe:get_chunk(Pipe) of
         {bytes, Bytes} -> drain(Pipe, [Acc, Bytes]);
-        {record, Fields, Record} -> drain(Pipe, [Acc, erx_render:line(Fields, Record, bytes)]);
+        {record, Fields, Record} -> drain(Pipe, [Acc, erx_render:line(Fields, Record)]);
         eof -> iolist_to_binary(Acc)
     end.
 

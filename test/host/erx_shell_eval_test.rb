@@ -14,7 +14,8 @@ require 'tmpdir'
 class ErxShellEvalTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
-               erlang/apps/erx_shell/src/erx_shell_eval.erl test/erlang/erx_shell_fake_runner.erl
+               erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
+               test/erlang/erx_shell_fake_runner.erl
                test/erlang/erx_shell_eval_tests.erl].map { |path| File.join(ROOT, path) }.freeze
 
   def test_evaluator_cases_pass_under_eunit
