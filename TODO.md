@@ -381,6 +381,31 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] live, `erx_source` (`erlang/apps/erx/src/erx_source.erl`): nothing ties a module's `src` file to
+  its beam, so an edited, unrecompiled source shows lines the module was not compiled from, and a location in
+  an included file is looked up by base name in the module's own `src` and `include`, so a header of another
+  application with the same base name shows its lines. Have the build record the source's digest in the beam
+  and refuse a mismatch, and accept an included file only when its directory is the module's own; record the
+  rule in design-live.md, "From a process to its source".
+* [Medium] live, `erx_source`: a reload and purge between the process's location read and the module's
+  version read shows the old version's line against the new source; lines/1 rechecks the version and old code
+  around the source read, which narrows the window without closing it. A `process_info` item that returns the
+  current location with the identity of that module instance closes it, as the design's process record
+  ("its module's version") implies.
+* [Medium] live, the shortcuts' collision test (`test/erlang/erx_shortcut_tests.erl`): the shell's commands
+  come from `shell:local_func/0`, which leaves out `ft`, `td` and `exit` that `local_func/8` handles before
+  `shell_default`; derive the names from `local_func/8`'s clauses and add auto-imported BIFs
+  (`erl_internal:bif/2`). The design's test that a shortcut shadows a shell-defined function of its name and
+  arity is not written either.
+* [Low] live, `erx_source`: the source read follows symbolic links and checks the size before reading rather
+  than reading at most the cap, and a rendered line is not cut at a width, so a 4 MiB line (32 MiB of
+  expanded tabs) reaches the console whole. Read with `file:read(Fd, Max + 1)` after `read_link_info`, and cut
+  each line with a visible marker.
+* [Low] live, the QEMU check of `erx:source/1`: the release ships no `src`, so a console point must compile a
+  module into a `src`/`ebin` tree on a writable file system and show a waiting process's line; it also needs
+  OTP's `otp_SUITE:undefined_functions` under `check-oracle` to accept `shell_default`'s call of
+  `erx:source/1`.
+
 * [Low] files, `erx_9p` codec (`tools/lib/erx/abi_emit_wire.rb`, `abi/protocols/9p.txt`): a packed list's
   per-element size (`packed @p9_dirent_fixed`, 24) is declared rather than derived from the dirent tuple's wire
   widths, so a change to `dirent` would make the grammar's `packed_dirents/1` disagree with the bytes the codec
