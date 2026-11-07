@@ -42,6 +42,9 @@ class AbiInspectionTest < Minitest::Test
 
   # A report of kind thing: its one kernel attribute size, and the mask.
   REPORT = <<~ABI
+    enum info_kind u32
+      value basic 0
+      value thing 1
     flags info_thing_reported u32
       bit size 0
     layout erx_info_thing wire_le 4 8
@@ -297,12 +300,14 @@ class AbiInspectionTest < Minitest::Test
   def test_a_topic_named_after_a_kind_needs_its_report_layout
     topics = "enum info_kind u32\n  value basic 0\n  value thing 1\n"
     assert_refused(BASE, /topic thing has no report layout erx_info_thing/, root: topics)
-    model(BASE, root: topics + REPORT)
+    model(BASE, root: REPORT)
+    assert_refused(BASE, /report layouts erx_info_thing need the topic enum info_kind/,
+                   root: REPORT.sub("enum info_kind u32\n  value basic 0\n  value thing 1\n", ''))
     model(BASE, root: "enum info_kind u32\n  value basic 0\n")
   end
 
   # The build's own generator refuses the checked-in ABI with one seeded
-  # mismatch: the budget layout's watch field spelt as the design once did.
+  # mismatch: the budget layout's watch field spelt threshold.
   def test_the_checked_in_abi_fails_with_a_seeded_mismatch
     Dir.mktmpdir('erx-inspection-seed-') do |root|
       FileUtils.cp_r(File.join(ROOT, 'abi'), root)

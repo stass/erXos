@@ -455,7 +455,15 @@ it; git history is the record of completed work.
   until then shows `unsupported`. `erx_info_machine` has no field for `development` or `dma_profile`, since the
   design does not say how a boolean or a closed atom set travels in a report, so both read as clear bits; and the
   `group` kind declares only the five attributes `erx_info_group` carries, not design-live's throttling,
-  executors, child groups or the policy's intent.
+  executors, child groups or the policy's intent. `tools/lib/erx/abi_inspection.rb`'s report check compares
+  names only: nothing ties `erx_info_cpu`'s `ready_threads` count 64 to `urgency_counts`' 64 (both copies of
+  `@urgency_max + 1`), the `capacity` type's 64000 to `@cpu_limit * 1000`, a field's width to its integer type's
+  range, or says how `build`'s 8 raw bytes render as `text build_id`; require an array field exactly for a list
+  attribute, with its count, and a scalar wide enough. The check exempts a field named `id` in any report layout,
+  wider than design-abi's counting topics. design-kernel's [Threads](docs/design-kernel.md#threads) declares
+  `erx_thread_state_t` and `erx_wait_kind_t` with `ERX_TS_*` names that clash with the generated ABI's typedefs and
+  `ERX_THREAD_STATE_*`; it should use the ABI's. `erx_backend_group_report`'s reported bits are pinned only by the
+  `function_api` guest case, not by a host test in `test/host/group_report_test.rb`.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).

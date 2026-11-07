@@ -3,7 +3,7 @@
   "architecture": "aarch64",
   "inputs": {
     "abi/arch/aarch64.txt": "c8dc02d9f86e48ec36c93a90e020a216c2cdaaade5a7d4e6e2aeba6830f2bebb",
-    "abi/erx_abi.txt": "aea9ca6fd8c925df00c80da337338b7c00c6437509ed6f992bf04325c3a5490f",
+    "abi/erx_abi.txt": "72c864ea594b46f3d8adb8c28f956a90fa60c4dac00d061917fc6b3120136c01",
     "abi/formats/elf64.txt": "2f94a4ae3151b6fbe1047ba77a03de6e7220aefc2147e349b694f76deb9e5562",
     "abi/formats/erofs.txt": "34e03e4dd27df42821d3b49a1632d5cef8f61914d2702942228e8b5c26f1f154",
     "abi/formats/mbr.txt": "df6638490ea485f3c412ca4920ef8c52094a1b5090a0b7a1d2c08ab051d3b526",
@@ -28,7 +28,7 @@
     "tools/lib/erx/abi_emit_ruby.rb": "6d1351d908d7f4042e1dc8941ad44fcd7ed15c58c77e37f4c2e67a7d9f72c315",
     "tools/lib/erx/abi_emit_support.rb": "6a00bc1bd1619c38759bb731631b14f5082c0bee7fb3af03c6d44fe7ccdef805",
     "tools/lib/erx/abi_emit_wire.rb": "ff05ab4751951ad513e3664a0459d226151285de1b2270db9aeb340c4a844f13",
-    "tools/lib/erx/abi_inspection.rb": "ccfce695f1dfffa7460f3acd19ab943de31451b35cf2c50c2195a1e06c16ccdb",
+    "tools/lib/erx/abi_inspection.rb": "819f9ab1904580ee1e2cc8a1efe4d0f34626efe63c1c16b58930e910ef5b22a6",
     "tools/lib/erx/abi_model.rb": "98dee47fcd90d719f154288cd7300ff8ffbc470a54e7b48f7d195062ba6bc9ff",
     "tools/lib/erx/abi_names.rb": "89db962a6fb61c7f33106c2710e5216d1c74d2f09798244634515d670577d7e7",
     "tools/lib/erx/abi_protocol.rb": "aecd2e24964cac1d8a0e89f7faa2041ea3403627c9449155e5b61de2acdcfbcf",

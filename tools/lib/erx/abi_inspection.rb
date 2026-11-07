@@ -355,8 +355,8 @@ module Erx
           words = unquoted(line)
           keywords = [0, 3, 5, 7, 9]
           optional = words.drop(ATTRIBUTE_WORDS.size)
-          unless words.size >= ATTRIBUTE_WORDS.size && words.values_at(*keywords) == ATTRIBUTE_WORDS.values_at(*keywords) &&
-                 (optional.empty? || (optional.size == DERIVED_WORDS.size && optional.first == DERIVED_WORDS.first))
+          derived_tail = optional.empty? || (optional.size == DERIVED_WORDS.size && optional.first == DERIVED_WORDS.first)
+          unless words.size >= ATTRIBUTE_WORDS.size && words.values_at(*keywords) == ATTRIBUTE_WORDS.values_at(*keywords) && derived_tail
             line.fail!("expected #{ATTRIBUTE_WORDS.join(' ')} [#{DERIVED_WORDS.join(' ')}]")
           end
           key = plain(words[1], line)
@@ -384,13 +384,13 @@ module Erx
         # At most one stopgap stands in for each category, so a collector that
         # learns a value is partial knows whose count it is.
         def reporters(text, line, stopgaps)
-          listed = names(text, line).each do |name|
-            next if CATEGORIES.include?(name)
-
-            stopgap = stopgaps[name] || line.fail!("undefined reporter #{name}")
-            line.fail!("stopgap #{name} is listed without its category #{stopgap.category}") unless text.split(',').include?(stopgap.category)
+          listed = names(text, line)
+          gaps = listed.reject { |name| CATEGORIES.include?(name) }
+                       .map { |name| stopgaps[name] || line.fail!("undefined reporter #{name}") }
+          gaps.each do |stopgap|
+            line.fail!("stopgap #{stopgap.name} is listed without its category #{stopgap.category}") unless listed.include?(stopgap.category)
           end
-          listed.filter_map { |name| stopgaps[name] }.group_by(&:category).each do |category, group|
+          gaps.group_by(&:category).each do |category, group|
             line.fail!("stopgaps #{group.map(&:name).join(' and ')} both stand in for #{category}") if group.size > 1
           end
           listed
@@ -515,11 +515,15 @@ module Erx
         def check_reports(kinds)
           types = @root.fetch(:types)
           topics = types[TOPICS]
+          reports = types.keys.grep(/\Aerx_info_/)
+          if !reports.empty? && !(topics.is_a?(EnumType) && !topics.flags)
+            @declaration.fail!("report layouts #{reports.join(', ')} need the topic enum #{TOPICS}")
+          end
           kinds.each do |kind, attrs|
             name = "erx_info_#{kind}"
             layout = types[name]
             if layout
-              check_report(name, layout, attrs)
+              check_report(kind, name, layout, attrs)
             elsif topics.is_a?(EnumType) && topics.members.key?(kind)
               line_of(kind).fail!("topic #{kind} has no report layout #{name}")
             end
@@ -527,27 +531,29 @@ module Erx
         end
 
         # Every field but REPORTED and RECORD_ID names an attribute of the kind
-        # that lists kernel and is not derived, and REPORTED is a flags type
-        # whose bits are exactly those fields' names.
-        def check_report(name, layout, attrs)
-          line_of(name.delete_prefix('erx_info_')).fail!("#{name} is not a layout") unless layout.is_a?(Layout)
-          fields = [*layout.fields, layout.tail].compact
-          reported = fields.find { |field| field.name == REPORTED } || layout.line.fail!("#{name} has no #{REPORTED} field")
+        # that lists kernel and is not derived.
+        def check_report(kind, name, layout, attrs)
+          line_of(kind).fail!("#{name} is not a layout") unless layout.is_a?(Layout)
+          layout.tail&.line&.fail!("report layout #{name} has no tail")
+          reported = layout.fields.find { |field| field.name == REPORTED } || layout.line.fail!("#{name} has no #{REPORTED} field")
+          attribute_fields = layout.fields.reject { |field| [REPORTED, RECORD_ID].include?(field.name) }
+          attribute_fields.each do |field|
+            attr = attrs.find { |item| item.key == field.name && item.reporters.include?('kernel') } ||
+                   field.line.fail!("#{name} field #{field.name} names no attribute of its kind that lists kernel")
+            field.line.fail!("#{name} field #{field.name} is a derived attribute") unless attr.derived.empty?
+          end
+          check_mask(name, reported, attribute_fields.map(&:name))
+        end
+
+        # REPORTED is a flags field whose bits are exactly the attribute fields' names.
+        def check_mask(name, reported, fields)
           unless reported.type.is_a?(EnumType) && reported.type.flags && !reported.array?
             reported.line.fail!("#{REPORTED} of #{name} is not a flags field")
           end
-          attribute_fields = fields.reject { |field| [REPORTED, RECORD_ID].include?(field.name) }
-          attribute_fields.each do |field|
-            attr = attrs.find { |item| item.key == field.name }
-            unless attr&.reporters&.include?('kernel')
-              field.line.fail!("#{name} field #{field.name} names no attribute of its kind that lists kernel")
-            end
-            field.line.fail!("#{name} field #{field.name} is a derived attribute") unless attr.derived.empty?
-          end
           bits = reported.type.members.keys
-          stray = bits - attribute_fields.map(&:name)
+          stray = bits - fields
           reported.line.fail!("#{REPORTED} bit #{stray.first} of #{name} names no attribute field") unless stray.empty?
-          unmarked = attribute_fields.map(&:name) - bits
+          unmarked = fields - bits
           reported.line.fail!("#{name} field #{unmarked.first} has no #{REPORTED} bit") unless unmarked.empty?
         end
 

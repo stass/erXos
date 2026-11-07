@@ -13,7 +13,7 @@
 
 schema_test() ->
     ?assertEqual(1, erx_schema:schema()),
-    ?assertEqual([machine, cpu, budget, domain, process, module, listing], erx_schema:kinds()).
+    ?assertEqual([machine, cpu, group, budget, domain, thread, process, module, listing], erx_schema:kinds()).
 
 %% An attribute each reporter may report, and one it may not. The collector names the
 %% reporter, so a frame's own tag is never read.
@@ -84,7 +84,7 @@ match(_, _) -> false.
 
 every_path_resolves_to_exactly_one_declaration_test() ->
     Declarations = erx_schema:declarations(),
-    ?assertEqual(13, length(Declarations)),
+    ?assertEqual(18, length(Declarations)),
     [begin
          {Path, Texts} = samples(Pattern),
          ?assertEqual([Declaration], matching(Path)),
@@ -98,6 +98,9 @@ machine_wide_paths_are_marked_test() ->
     Visible = fun(Path) -> {ok, #{visible := V}} = erx_schema:resolve(Path), V end,
     ?assertEqual([all], Visible([cpus, 0])),
     ?assertEqual([all], Visible([budgets, 1])),
+    ?assertEqual([all], Visible([groups, 1])),
+    ?assertEqual([], Visible([domains, 4, group])),
+    ?assertEqual([], Visible([domains, 4, threads, 7])),
     ?assertEqual([], Visible([domains, 4, budget])),
     ?assertEqual([], Visible([processes, self()])),
     {ok, Processes} = erx_schema:resolve([domains, 4, processes]),
@@ -114,3 +117,9 @@ fields_test() ->
     {ok, Keys} = erx_schema:attributes(budget),
     ?assertEqual({ok, Keys}, erx_schema:fields(budget, proc, release)),
     ?assertEqual([kind, guarantee, cap, used], lists:sublist(Keys, 4)).
+
+%% A derived attribute names its inputs; one a report carries names none.
+derived_test() ->
+    ?assertMatch({ok, #{derived := [used, carved, lent]}}, erx_schema:attribute(budget, spending)),
+    ?assertMatch({ok, #{derived := []}}, erx_schema:attribute(budget, used)),
+    ?assertMatch({ok, #{derived := []}}, erx_schema:attribute(thread, state)).

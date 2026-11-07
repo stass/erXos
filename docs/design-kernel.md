@@ -1330,7 +1330,7 @@ any budget to the root holds at most `ERX_BUDGET_DEPTH_MAX` budgets.
   refused, with one software IRQ object per watched budget.
 * **Inspecting.** `erx_object_info` on a budget reports, in its own
   topic, `ERX_INFO_BUDGET`, `kind`, `guarantee`, `cap`, `used`,
-  `carved`, `lent`, `pinned` and `watch`, the `threshold` its watch set, from which the inspector derives the spending, the
+  `carved`, `lent`, `pinned` and `watch`, the watch's threshold in pages, from which the inspector derives the spending, the
   room, which is zero when the spending is at or above the cap, the
   **deficit**, the spending above the cap after a shrink, the
   borrowing, and what a destroy of the budget would give back to its

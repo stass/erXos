@@ -442,7 +442,8 @@ layout erx_info_group wire_le 8 32
   field ready u32 24
   field reported info_group_reported 28
 
-# ERX_INFO_BUDGET: kind holds a budget_kind.
+# ERX_INFO_BUDGET: kind holds a budget_kind, and watch the threshold in pages
+# that erx_budget_watch set, 0 when none is: never the watch's IRQ object.
 flags info_budget_reported u32
   bit kind 0
   bit guarantee 1
