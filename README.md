@@ -249,14 +249,21 @@ ok
   boot-selection record and boots the slot it names. The shell then reads
   the release's files from that slot's EROFS image at `/images/release`.
   The funnel does not check image hashes yet; that is M11.
-* **The command shell has begun.** `erx_shell` holds rc's tokenizer and
-  parser in Erlang, with a fuzz target and plan9port's rc built as the
-  host oracle. The evaluator, commands and job control are not built.
+* **The command shell works at the console.** `erx_shell:start().` at
+  the Erlang shell starts an rc-language command shell, written in
+  Erlang: variables, lists, `for`, `if`, functions, pipelines,
+  redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
+  Its commands are Erlang commands (`echo`, `cat`, `ls`, `mkdir`, `rm`,
+  `mv`, `cp`, `ps`, `mount`, `true`, `false`). Its language is checked
+  against plan9port's rc, built on the host as the oracle. Job
+  control, record pipelines (`where`, `sort`, `count`) and running
+  programs are not on master yet.
 * **Hosted mode** runs the runtime as a macOS process. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
   case with stock OTP, and each known difference is classified by cause
   (`test/oracle/hosted_known_differences/`). On QEMU the system domain
-  runs kernel's `file_SUITE` and stdlib's `filelib_SUITE` against stock.
+  runs OTP's whole compiler group, kernel's `file_SUITE` and stdlib's
+  `filelib_SUITE` against stock.
 * **The release** carries kernel, stdlib, compiler and runtime_tools (the
   last two loaded, not started), and the erXos applications `erx`,
   `erx_files`, `erx_uart`, `erx_blk` and `erx_shell`.
