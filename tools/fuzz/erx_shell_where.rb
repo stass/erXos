@@ -18,7 +18,8 @@ require 'tmpdir'
 # logic and the grammar's precedence (docs/design-shell.md, "Verification and testing").
 module ErxShellWhereFuzz
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx_shell/src/erx_render.erl
+  SOURCES = %w[erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx/src/erx_text.erl
+               erlang/apps/erx_shell/src/erx_render.erl
                erlang/apps/erx_shell/src/erx_shell_glob.erl].map { |path| File.join(ROOT, path) }.freeze
   WHERE_SOURCE = File.join(ROOT, 'erlang/apps/erx_shell/src/erx_shell_where.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_shell_where_fuzz.erl')

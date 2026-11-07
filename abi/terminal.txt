@@ -4,6 +4,9 @@
 # (log records, names, inspector output) on one visible line. A program's own
 # output is not such text and does not pass through it. Tab and newline are
 # controls (Cc), so the line escape renders them like any other.
+# The field escape, which /proc writes its files through, is injective: it
+# writes tab, newline and backslash as \t, \n and \\, and each byte of a
+# character the line escape renders, or of invalid UTF-8, as its field token.
 terminal 1
 unicode 17.0.0
 input unicode_data otp/lib/stdlib/uc_spec/UnicodeData.txt
@@ -16,3 +19,4 @@ kernel_ascii 0020 007E
 token codepoint <U+ 4 6 >
 token byte <0x 2 2 >
 token kernel \x 2 2 -
+token field \x 2 2 -

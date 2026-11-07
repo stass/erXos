@@ -33,7 +33,9 @@ Decisions every reader of this document needs:
   `ls` escapes odd file names. A log line, a domain's name, an inspection
   record and what the host tool prints from the guest pass through the
   line escape, so one record is one line and cannot pass for another's.
-  Data everywhere else stays exact. The rules come from one source,
+  `/proc`, which is inspector output, writes such text already escaped,
+  by an injective escape of its own. Data everywhere else stays exact,
+  `cat`, pipes and files included. The rules come from one source,
   `abi/terminal.txt`, from which a generator produces each displayer's
   tables, the kernel's an ASCII-only subset.
 * **Release consoles log in.** A release build's console starts with a
@@ -151,7 +153,8 @@ Non-functional:
 
 * **Exact output, labelled text escaped.** A program's bytes reach the
   operator's terminal as its tty's flags leave them (V1); text labelled
-  with its source reaches it only through the line escape (V9).
+  with its source reaches it only through the line escape or, in a file of
+  `/proc`, the field escape (V9).
 * **Bounded parsing.** The host link's bytes are untrusted in every build:
   bounded frames, CRC, the frame grammar for payloads.
 * **Latency budgets**, under HVF: an inspection of one process over the
@@ -242,7 +245,7 @@ with it.
 | **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; no session ever holds the facet, so no route into a session reaches the system shell ([Window tokens](#window-tokens)); the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain; a release manifest that marks a terminal window secure fails the manifest check | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a principal holding the facet who logs in at a terminal window that is not secure gets no system shell; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read; the manifest check refuses a release manifest marking a window secure; a seeded console that grants the facet at a line that is not secure fails; the routes into a session are tested under [Window tokens](#window-tokens) |
 | **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login, or, at a window a window token opened, the principal of the session that asked for it; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again; a line gets a principal without a login only from a token the console minted for a session's own request, and every shell at it is then that principal's ([Window tokens](#window-tokens)). A terminal window thus carries its principal's authority, as a UNIX terminal does, and a compromised display domain has the authority of the shells in its windows and what any window system has, as an X11 or Wayland server does, and nothing beyond: no system shell, which a release build never connects at a window, no presence at the machine and nothing of a principal that neither uses the display nor types at it ([Window tokens](#window-tokens)) | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached; a shell without a login whose session the display chose | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails; the token tests are under [Window tokens](#window-tokens) |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
-| **V9.** Text labelled with its source is displayed only through the line escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records and the shell's records (a line a command read from a file or a program is that writer's output, not labelled text, and prints as its bytes), and the host tool's printer; the kernel's log escapes on entry with its own ASCII class | a renderer that prints a name or a value raw; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
+| **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records and the shell's records (a line a command read from a file or a program is that writer's output, not labelled text, and prints as its bytes), and the host tool's printer; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
 
 ## Data model
 
@@ -421,8 +424,9 @@ message.
 `abi/terminal.txt` is the one source of the line escape's rules. It names
 the Unicode general categories and properties whose characters are escaped,
 the closed list of exceptions, the grammar of the escape tokens and the
-bytes the kernel's log passes. A Ruby generator reads it together with the
-Unicode data OTP 29.1.2 carries (`lib/stdlib/uc_spec/UnicodeData.txt` and
+bytes the kernel's log passes, and the field escape's byte token, which the
+generator refuses unless it keeps the field escape injective. A Ruby
+generator reads it together with the Unicode data OTP 29.1.2 carries (`lib/stdlib/uc_spec/UnicodeData.txt` and
 `DerivedCoreProperties.txt`, Unicode 17.0.0) and produces the Erlang tables
 of `erx_text`, the Ruby tables of the host tool, the TypeScript table of
 the web client ([design-web.md](design-web.md#the-client)), and the
@@ -948,11 +952,14 @@ its session's end.
 ### Attributed text
 
 Text is UTF-8 wherever it flows: Erlang strings and binaries, text files,
-the terminal and every protocol. Data in files, in pipes, in `/proc` and in
-records stays exact, and a program's output reaches its tty exact. Only
+the terminal and every protocol. Data in files, in pipes and in records
+stays exact, and a program's output reaches its tty exact. Only
 **attributed text**, text shown under the name of its source, is escaped,
 by whatever displays it, as `ls` escapes odd file names: a name a domain
 chose or a log line a domain wrote must not pass for something else.
+`/proc` is the one producer of files that escapes: what it writes is
+inspector output, which `cat` shows as the bytes of a file, so it writes
+its reporters' text already escaped, by the field escape below.
 
 * `erx_console` escapes domain records and the names in its menu and its
   login prompt.
@@ -963,7 +970,9 @@ chose or a log line a domain wrote must not pass for something else.
   line a command read as bytes, which is its writer's output, not
   labelled text, and reaches the terminal as through `cat`. Toward a
   file or a pipe it writes its reversible framing instead
-  ([Pipelines](design-shell.md#pipelines)).
+  ([Pipelines](design-shell.md#pipelines)), and what it writes there is
+  data from then on, as FreeBSD's `ls > f` writes names unescaped: `cat f`
+  shows a name a domain chose as its bytes.
 * The host tool's printer escapes everything it prints from the guest:
   `inspect`, `source`, `trace`, the events stream and any guest bytes it
   quotes in a diagnostic. The one thing it does not escape is the terminal
@@ -973,6 +982,8 @@ chose or a log line a domain wrote must not pass for something else.
   outside printable ASCII in text it did not write as `\xNN`, since it
   carries no Unicode table
   ([design-kernel.md](design-kernel.md#console-log-and-panic)).
+* `erx_procfs` writes every field of a `/proc` file through the field
+  escape ([The /proc tree](#the-proc-tree)).
 
 The **line escape**, `erx_text:escape_line/1` and its Ruby twin, renders
 these visibly, from the generated tables:
@@ -1001,12 +1012,25 @@ text holding the eight characters `<U+202E>` looks like text that held
 U+202E. The line escape is not the framing toward bytes, which writes
 only tab, newline and backslash as `\t`, `\n` and `\\` so that a record
 stays one line and changes nothing else
-([Pipelines](design-shell.md#pipelines), [The /proc
-tree](#the-proc-tree)); a value written toward bytes is framed, and a
-value written to a terminal is escaped instead. The escape takes whole
-text, since a record is
-whole when it is displayed, and holds no state between calls. One record is
-one line under its source's name.
+([Pipelines](design-shell.md#pipelines)); a value written toward bytes is
+framed, and a value written to a terminal is escaped instead. The escape
+takes whole text, since a record is whole when it is displayed, and holds
+no state between calls. One record is one line under its source's name.
+
+The **field escape**, `erx_text:escape_field/1`, is how `/proc` writes
+attributed text into a file. It is the framing toward bytes with the line
+escape's classes added: tab, newline and backslash become `\t`, `\n` and
+`\\`, every byte of a character the line escape renders and every byte the
+line escape writes as a byte token become `\x` and two upper-case
+hexadecimal digits, such as `\xE2\x80\xAE` for U+202E and `\xC0` for a
+stray `0xC0`, and everything else passes unchanged. Text without those
+classes is written as the framing writes it. Because the backslash is
+always doubled and `\x` never stands for a tab, a newline or a backslash,
+the field escape is injective: `erx_text:unescape_field/1` recovers the
+exact bytes and refuses text the field escape does not write, either a
+backslash that starts no escape or a form the escape writes differently,
+such as a raw tab or `\x41`. What it writes holds no character the line
+escape changes, so a display that escapes it again shows it as it is.
 
 **Secrets.** A term `{erx_secret, Text}`, the form in which a widget's
 secret input reaches its application
@@ -1159,10 +1183,18 @@ until the facet ends.
   `erx_render`, as in records ([Pipelines](design-shell.md#pipelines)): an
   `ok` value bare and every other value as its status, `[unknown]`,
   `[partial]`, `[unsupported]`, `[timeout 500]` or `[error]`, so a file
-  never fabricates (V2). Tabs, newlines and backslashes in a value are
-  written as `\t`, `\n` and `\\`, so each line is one attribute; every
-  other byte stays exact, so `cat` shows it as `cat` shows any file, and
-  `erx_render` escapes it.
+  never fabricates (V2). A file of `/proc` is inspector output, text its
+  reporters chose: every field of a `status` file, and every line of a
+  `source`, `crash` or `log` file, is written through the field escape
+  ([Attributed text](#attributed-text)), so each line is one attribute,
+  no byte a domain chose reaches a reader as a control, and `cat` shows
+  the file at a terminal as it shows any file. The field escape is
+  injective, so a program that reads the file can recover each value's
+  exact bytes with `erx_text:unescape_field/1` or its rules: the bytes
+  the reporter gave, so a line of `/proc/kernel/log`, which the kernel
+  log already escaped, shows each of its backslashes doubled. Only
+  `/proc`'s generated content is escaped: `cat`, pipes and files still
+  pass their bytes unchanged.
 * **Snapshots.** Opening a file runs one inspector query, whose deadline
   is the inspector's own (500 ms by default), and reads see that snapshot
   until the file is closed; a record is at most 64 KiB, and a larger one is
@@ -1847,6 +1879,11 @@ reference tables and field projections are covered by the drift check.
   each shown as tokens, and with the escape removed from any one of those the
   comparison fails. A test re-derives the classes from OTP's Unicode data, and
   the host tool's source check has a seeded print that skips its printer.
+  `erx_text` and the host tool's twin answer one shared file of vectors, at
+  least one for each class, and a `/proc` file of a domain whose names hold
+  every class shows no raw control under `cat` and unescapes to the names'
+  exact bytes. The field escape's fuzz target checks that unescaping
+  inverts it over random bytes and refuses what it does not write.
 * **Logs:** a domain that floods log records past its rate, sends records
   of other shapes or oversized text, or writes control characters in them
   leaves one escaped line per accepted record under its own id and
@@ -2066,10 +2103,18 @@ principal what another loaded, and a blob kept once cannot be charged to
 two budgets. Per-principal stores and overlays, with none persisted for
 the system configuration, delete all three problems.
 
-**Escaping in the data.** `/proc` and the record writer would escape what
-they produce. It loses: data would no longer be exact and the encoding would
-not be injective. Escaping where text is displayed under its source keeps
-every other path exact.
+**Escaping in the data.** The record writer, pipes and files would escape
+what they carry. It loses: data would no longer be exact. Escaping where
+text is displayed under its source keeps every other path exact. `/proc`
+is the exception, because nothing in it is data: everything it writes is
+inspector output, so it escapes by the injective field escape, and a
+reader that needs the bytes recovers them exactly.
+
+**Rendering `/proc` at the terminal.** `cat` or the shell would recognise a
+file of `/proc` and pass it through the line escape. It loses: `cat` writes
+a file's bytes and cannot tell where they came from, a native program
+reading the file would still pass the bytes on raw, and the shell would
+need to know which server a path reaches.
 
 **Filtering program output at the console.** The console would escape what
 programs write and pass an allowlist of control sequences, with a mode for

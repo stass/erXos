@@ -33,7 +33,8 @@ them.
 
 Toward the terminal, records render as a table: aligned columns under a
 header line of the field names, every value and name passed through the
-line escape, escape/1, since a record's text is attributed to its source.
+line escape, erx_text:escape_line/1, since a record's text is attributed to
+its source.
 A line of data is not: it is a program's own output, which reaches the
 terminal unchanged as on UNIX, so its bytes are written as they are.
 A table's shape is the fields its first record holds, and a record of
@@ -53,12 +54,13 @@ bytes to write; erx_cmd keeps one for a command that writes to the
 terminal and flushes it before any other write there.
 """.
 
--export([value/1, line/2, escape/1, table/0, table_record/3, table_flush/1]).
+-export([value/1, line/2, table/0, table_record/3, table_flush/1]).
 
 -export_type([attr/0, data/0, table/0]).
 
-%% An inspector value with its reporter, or a line of data.
--type attr() :: {kernel | service | runtime,
+%% An inspector value with its reporter, a stopgap reporter by the name the
+%% inspection schema declares, or a line of data.
+-type attr() :: {kernel | service | runtime | {stopgap, atom()},
                  {ok, term()} | {partial, term()} | unknown | unsupported
                  | {timeout, pos_integer()} | {error, term()}}
               | data().
@@ -161,7 +163,7 @@ hold(Shape, Rows, Count, Bytes) ->
 %% Measures the header and the held rows, oldest first, and prints them.
 %% A table of one column has no header and prints each value bare.
 print([_, _ | _] = Shape, Rows) ->
-    Lines = [[{escape(atom_to_binary(Field)), name} || Field <- Shape] | Rows],
+    Lines = [[{erx_text:escape_line(atom_to_binary(Field)), name} || Field <- Shape] | Rows],
     Columns = [column(Cells) || Cells <- transpose(Lines)],
     {[row(Cells, Columns) || Cells <- Lines], {printing, Shape, Columns}};
 print(Shape, Rows) ->
@@ -215,52 +217,11 @@ cells(Attrs) ->
         values -> [cell(Attr) || Attr <- Attrs]
     end.
 
-cell({_Reporter, {ok, Value}} = Attr) when is_integer(Value) -> {escape(value(Attr)), integer};
-cell({_Reporter, {ok, _}} = Attr) -> {escape(value(Attr)), text};
-cell(Attr) -> {escape(value(Attr)), status}.
+cell(Attr) -> {erx_text:escape_line(value(Attr)), kind(Attr)}.
 
--doc """
-The line escape for text attributed to a source on its way to the
-terminal: tab, newline and backslash as `\t`, `\n` and `\\`, every other
-C0 control, DEL and byte that is not UTF-8 as `\xNN`, and every code
-point the terminal tables mark unsafe (C1 controls, bidirectional
-overrides, invisible format characters, unassigned) as `\u{N}`.
-""".
--spec escape(binary()) -> binary().
-escape(Text) -> iolist_to_binary(escape(Text, [])).
-
-escape(<<>>, Acc) ->
-    lists:reverse(Acc);
-escape(<<C, Rest/binary>>, Acc) when C =:= $\t; C =:= $\n; C =:= $\\ ->
-    escape(Rest, [separator(C) | Acc]);
-escape(<<C, Rest/binary>>, Acc) when C < 16#20; C =:= 16#7f ->
-    escape(Rest, [hex_byte(C) | Acc]);
-escape(<<C, Rest/binary>>, Acc) when C < 16#80 ->
-    escape(Rest, [C | Acc]);
-escape(<<Point/utf8, Rest/binary>>, Acc) ->
-    case unsafe(Point) of
-        true -> escape(Rest, [io_lib:format("\\u{~.16b}", [Point]) | Acc]);
-        false -> escape(Rest, [<<Point/utf8>> | Acc])
-    end;
-escape(<<C, Rest/binary>>, Acc) ->
-    escape(Rest, [hex_byte(C) | Acc]).
-
-hex_byte(C) -> io_lib:format("\\x~2.16.0b", [C]).
-
-unsafe(Point) ->
-    Ranges = erx_text_tables:unicode_unsafe_ranges(),
-    within(Point, Ranges, 1, tuple_size(Ranges)).
-
-%% Binary search of the sorted, disjoint ranges.
-within(_Point, _Ranges, Low, High) when Low > High ->
-    false;
-within(Point, Ranges, Low, High) ->
-    Mid = (Low + High) div 2,
-    case element(Mid, Ranges) of
-        {First, _} when Point < First -> within(Point, Ranges, Low, Mid - 1);
-        {_, Last} when Point > Last -> within(Point, Ranges, Mid + 1, High);
-        _ -> true
-    end.
+kind({_Reporter, {ok, Value}}) when is_integer(Value) -> integer;
+kind({_Reporter, {ok, _}}) -> text;
+kind(_Attr) -> status.
 
 text(Value) when is_binary(Value) -> Value;
 text(Value) when is_integer(Value) -> integer_to_binary(Value);

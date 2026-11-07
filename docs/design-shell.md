@@ -470,7 +470,7 @@ where a stage meets something that reads bytes:
   names, and a program's output reaches a tty unchanged
   ([The tty](design-live.md#the-tty)); every other value, a
   `ps` field or an `ls` name, is text attributed to its source and keeps
-  the line escape, so a tab of it shows as `\t`. A table
+  the line escape, so a tab of it shows as `<U+0009>`. A table
   of more columns holds its first
   256 records, and at most 1 MiB of their text, to measure its columns,
   then prints every later record of its shape at those widths, a wider

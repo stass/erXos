@@ -15,7 +15,8 @@ class ErxShellRecordsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
-  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_text_tables.erl'), File.join(APPLICATION, 'erx_cmd.erl'),
+  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
+             File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_shell_records_tests.erl')].uniq.freeze
 

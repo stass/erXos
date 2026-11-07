@@ -10,6 +10,9 @@ module Erx
   module TerminalRules
     UNICODE_MAX = 0x10ffff
     CATEGORIES = %w[Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn].freeze
+    # The escape tokens: the line escape's code point and byte, the kernel log's
+    # byte, and the /proc field escape's byte.
+    TOKENS = %w[byte codepoint field kernel].freeze
     SINGLETONS = %w[terminal unicode unsafe_categories unsafe_property exceptions invalid_scalars kernel_ascii].freeze
     OUTPUTS = %w[include/erx/terminal_ascii.h erlang/apps/erx/src/erx_text_tables.erl
                  tools/generated/terminal_tables.rb tools/generated/terminal_notices.json
@@ -79,13 +82,22 @@ module Erx
         [name, path]
       when 'token'
         name, prefix, first, last, suffix = values
-        unless values.size == 5 && %w[codepoint byte kernel].include?(name) &&
+        unless values.size == 5 && TOKENS.include?(name) &&
                [prefix, suffix].all? { |part| part.match?(/\A[!-~]{1,8}\z/) }
           raise Error, 'invalid escape token grammar'
         end
         minimum = decimal(first, maximum: 6)
         maximum = decimal(last, maximum: 6)
         raise Error, 'invalid escape token width' unless minimum.positive? && minimum <= maximum
+        # A byte token writes one byte in exactly two digits; a code point token
+        # must have room for U+10FFFF.
+        raise Error, 'invalid byte token width' if name != 'codepoint' && [minimum, maximum] != [2, 2]
+        raise Error, 'invalid code point token width' if name == 'codepoint' && maximum < 6
+        # The field escape is injective only if every token it writes starts
+        # with the backslash it doubles and differs from its \t, \n and \\.
+        if name == 'field' && !(prefix.match?(/\A\\[!-~]\z/) && !['\\', 't', 'n'].include?(prefix[1]) && suffix == '-')
+          raise Error, 'the field token must be a backslash and one character other than t, n or a backslash'
+        end
         [name, { 'prefix' => prefix, 'minimum' => minimum, 'maximum' => maximum,
                  'suffix' => suffix == '-' ? '' : suffix, 'digits' => 'uppercase_hex' }]
       end
@@ -95,7 +107,7 @@ module Erx
     def validate_model(model)
       raise Error, 'incomplete terminal rules' unless (SINGLETONS - model.keys).empty?
       raise Error, 'incomplete terminal input list' unless model.fetch('input').keys.sort == %w[properties unicode_data]
-      raise Error, 'incomplete escape token grammar' unless model.fetch('token').keys.sort == %w[byte codepoint kernel]
+      raise Error, 'incomplete escape token grammar' unless model.fetch('token').keys.sort == TOKENS
     end
     private_class_method :validate_model
 

@@ -48,7 +48,9 @@ class TerminalGenerationTest < Minitest::Test
   # that tab and newline are escaped.
   def test_the_source_declares_only_the_line_escape_rules
     model = Erx::TerminalRules.source(source)
-    assert_equal %w[byte codepoint kernel], model.fetch('token').keys.sort
+    assert_equal %w[byte codepoint field kernel], model.fetch('token').keys.sort
+    assert_equal({ 'prefix' => '\x', 'minimum' => 2, 'maximum' => 2,
+                   'suffix' => '', 'digits' => 'uppercase_hex' }, model.fetch('token').fetch('field'))
     assert_equal [0x200c, 0x200d, 0xfe0e, 0xfe0f], model.fetch('exceptions')
     assert_equal({ 'prefix' => '<U+', 'minimum' => 4, 'maximum' => 6,
                    'suffix' => '>', 'digits' => 'uppercase_hex' }, model.fetch('token').fetch('codepoint'))
@@ -60,7 +62,15 @@ class TerminalGenerationTest < Minitest::Test
     [source + "unknown value\n", source + "terminal 1\n", source.sub('unicode 17.0.0', 'unicode latest'),
      source.sub('unsafe_categories Cc', 'unsafe_categories Cq'), source.sub('200C 200D', '200C 200C'),
      source.sub('token byte <0x 2 2 >', 'token byte <0x 0 2 >'),
-     source.sub(/^token kernel .*\n/, ''), source.sub(/^input properties .*\n/, ''),
+     source.sub(/^token kernel .*\n/, ''), source.sub(/^token field .*\n/, ''),
+     source.sub('token byte <0x 2 2 >', 'token byte <0x 2 3 >'),
+     source.sub('token codepoint <U+ 4 6 >', 'token codepoint <U+ 4 5 >'),
+     # A field token that could be read as \t, \n or \\, or is not a
+     # backslash form, would make the field escape ambiguous.
+     *['\t 2 2 -', 'x 2 2 -', '\x 2 2 ;', '\\\\ 2 2 -', '\x 2 3 -', '\xy 2 2 -'].map do |forged|
+       source.sub('token field \x 2 2 -', "token field #{forged}")
+     end,
+     source.sub(/^input properties .*\n/, ''),
      source + "pass strict 0009 000A\n", source + "sequence prim_tty cursor_up 1B5B - - 41 none\n",
      source + "input prim_tty otp/lib/kernel/src/prim_tty.erl\n", "\xff".b, 'x' * 65_537].each do |bytes|
       assert_raises(Erx::Error) { Erx::TerminalRules.source(bytes) }

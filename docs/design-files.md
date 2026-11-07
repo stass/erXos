@@ -2235,6 +2235,18 @@ match it; the shell's completion shows the stored bytes. Escaping for
 display belongs to whatever displays a name under its source
 ([design-live.md](design-live.md#attributed-text)).
 
+A file's contents are its bytes too: no server and no client changes
+them on the way, so `cat`, pipes and files pass them exactly. One server
+writes escaped text: `/proc`. Everything in it is inspector output, text
+a domain or a runtime reported under its own name, which `cat` writes to
+a terminal as the bytes of a file, so the tree writes every field
+through the field escape, `erx_text:escape_field/1`: tab, newline and
+backslash as `\t`, `\n` and `\\`, and every byte of a control, format
+character, separator, unassigned or invisible character, and of invalid
+UTF-8, as `\xNN`. The escape is injective, and `erx_text:unescape_field/1`
+recovers a value's exact bytes
+([design-live.md](design-live.md#the-proc-tree)).
+
 ## Interfaces
 
 * **`erx_ns`**, in every runtime: `bind/2,3`, `mount/3`, `unmount/1`,

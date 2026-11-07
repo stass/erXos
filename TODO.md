@@ -387,13 +387,6 @@ it; git history is the record of completed work.
   `[kernel, trace]` repeat the fields of the crash-record and trace-record layouts, and the grammar has no form
   that takes a kind's attributes from a root `layout`, so they would be copied by hand. Add one (`fields @layout`)
   before those kinds are declared.
-* [High] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): a `status` file frames only tab,
-  newline and backslash and keeps every other byte, and `cat` writes a file's bytes unchanged, so
-  `cat /proc/processes/P/status` at a terminal shows a domain's chosen names (ESC, OSC 52, CSI) raw, which V9 does
-  not allow for attributed text. design-live's "`erx_render` escapes it" and design-shell's rule that bytes reaching
-  an Erlang command become `line` records leave open whether `cat`'s output is rendered. Decide: frame every class
-  of the line escape toward bytes too (an injective backslash form), or render `/proc` content through the line
-  escape at a terminal, or record it as a residual.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).

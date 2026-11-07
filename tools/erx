@@ -334,6 +334,11 @@ module Erx
                    name: 'fuzz-erx-shell-parse', deadline: 1000, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_shell_where.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-shell-where', deadline: 1000, chdir: ROOT, env: environment)
+        %w[line field].each do |target|
+          runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_text.rb'), '--target', target,
+                      '--seed', options.fetch(:seed).to_s],
+                     name: "fuzz-erx-text-#{target}", deadline: 1500, chdir: ROOT, env: environment)
+        end
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_erofs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-erofs', deadline: 1800, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_hostlink_frame.rb'), '--seed', options.fetch(:seed).to_s],
@@ -374,7 +379,8 @@ module Erx
 
     def self.fuzz_ruby(runner:, environment:, seconds:, seed:)
       %w[test/fuzz/abi.rb test/fuzz/qemu_transcript.rb test/fuzz/cli_status.rb tools/fuzz/oracle_results.rb tools/fuzz/crash_frame.rb
-         tools/fuzz/boot_record.rb tools/fuzz/erofs_manifest.rb tools/fuzz/etf.rb tools/fuzz/hostlink_frame.rb].each do |path|
+         tools/fuzz/boot_record.rb tools/fuzz/erofs_manifest.rb tools/fuzz/etf.rb tools/fuzz/hostlink_frame.rb
+         tools/fuzz/line_escape.rb].each do |path|
         runner.run([RbConfig.ruby, File.join(ROOT, path), '--seconds', seconds.to_s, '--seed', seed.to_s],
                    name: "fuzz-#{File.basename(path, '.rb').tr('_', '-')}", deadline: seconds + 30,
                    chdir: ROOT, env: environment)

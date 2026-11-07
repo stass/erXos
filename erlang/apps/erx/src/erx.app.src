@@ -20,6 +20,7 @@
              erx_manifest,
              erx_ns,
              erx_stdio,
+             erx_text,
              erx_text_tables,
              erx_watchdog]},
   {registered, [erx_console, erx_ns, erx_watchdog]},

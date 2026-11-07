@@ -184,7 +184,7 @@ lines(Lines) -> iolist_to_binary([[Line, $\n] || Line <- Lines]).
 %% Widths are measured on the escaped text, which is what the terminal shows.
 table_escapes_values_test() ->
     Hostile = #{a => ok(<<27, "[1m", 16#ff, "\x{202e}"/utf8>>), b => ok(<<"x\ty">>)},
-    ?assertEqual(lines([["a", sp(20), "b"], ["\\x1b[1m\\xff\\u{202e}", sp(2), "x\\ty"]]),
+    ?assertEqual(lines([["a", sp(26), "b"], ["<U+001B>[1m<0xFF><U+202E>", sp(2), "x<U+0009>y"]]),
                  table([{[a, b], Hostile}])).
 
 table_of_one_column_prints_bare_test() ->
@@ -320,10 +320,10 @@ lines_of_bytes_are_data_test() ->
       end).
 
 %% Text a command attributes to a source keeps the line escape, whatever its
-%% field is named: a tab shows as `\t` and a backslash as `\\`.
+%% field is named: a tab shows as `<U+0009>` and a backslash as itself.
 attributed_text_keeps_the_line_escape_test() ->
-    ?assertEqual({<<>>, <<"a\\tb\\\\c\nd\\te\\\\f\n">>}, run_line(<<"recs tabbed">>)),
-    ?assertEqual({<<"|">>, <<"a\\tb\\\\c\nd\\te\\\\f\n">>}, run_line(<<"recs tabbed | cat">>)).
+    ?assertEqual({<<>>, <<"a<U+0009>b\\c\nd<U+0009>e\\f\n">>}, run_line(<<"recs tabbed">>)),
+    ?assertEqual({<<"|">>, <<"a<U+0009>b\\c\nd<U+0009>e\\f\n">>}, run_line(<<"recs tabbed | cat">>)).
 
 %% One table of one column may hold lines of data and attributed records of
 %% the same field: each line of data, an empty one too, shows as its bytes,
@@ -333,7 +333,7 @@ data_beside_attributed_lines_in_one_column_test() ->
       fun(Dir) ->
               In = list_to_binary(filename:join(Dir, "in")),
               ok = file:write_file(In, <<"z\tq\\r", 27, "[1m\n\n">>),
-              ?assertEqual({<<"|">>, <<"z\tq\\r", 27, "[1m\n\n", "a\\tb\\\\c\nd\\te\\\\f\n">>},
+              ?assertEqual({<<"|">>, <<"z\tq\\r", 27, "[1m\n\n", "a<U+0009>b\\c\nd<U+0009>e\\f\n">>},
                            run_line(<<"{cat ", In/binary, "; recs tabbed} | cat">>))
       end).
 
@@ -342,10 +342,10 @@ data_beside_attributed_lines_in_one_column_test() ->
 %% fields, renders as attributed text, so it never splits a row or a field.
 data_that_is_not_a_line_is_escaped_as_text_test() ->
     Data = #{line => {data, {ok, <<"a\nb\tc">>}}},
-    ?assertEqual(<<"a\\nb\\tc\n">>, table([{[line], Data}])),
+    ?assertEqual(<<"a<U+000A>b<U+0009>c\n">>, table([{[line], Data}])),
     ?assertEqual(<<"a\\nb\\tc\n">>, erx_render:line([line], Data)),
     Line = #{line => {data, {ok, <<"a\tb">>}}, n => ok(1)},
-    ?assertEqual(lines([["line", sp(2), "n"], ["a\\tb", sp(2), "1"]]), table([{[line, n], Line}])),
+    ?assertEqual(lines([["line", sp(8), "n"], ["a<U+0009>b", sp(2), "1"]]), table([{[line, n], Line}])),
     ?assertEqual(<<"a\\tb\t1\n">>, erx_render:line([line, n], Line)).
 
 with_scratch_dir(Test) ->
