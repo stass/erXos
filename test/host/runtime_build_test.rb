@@ -292,14 +292,21 @@ class RuntimeBuildTest < Minitest::Test
     assert_match(/stale/, assert_raises(Erx::Error) { check_current }.message)
   end
 
-  # The generated tree's otp/ goes over otp/'s copy, so its bytes win where both
-  # hold a path, and the generated tree is current before anything reads it.
-  def test_the_generated_otp_files_go_over_the_copy
-    write_otp(GRAMMAR, 'tracked')
+  # The generated tree's otp/ joins otp/'s copy, and the generated tree is
+  # current before anything reads it.
+  def test_the_generated_otp_files_join_the_copy
     build
     assert_operator @generated.calls, :>=, 1
     assert_equal 'generated', File.read(File.join(@output.root, GRAMMAR))
-    assert_operator @runner.steps.index('runtime-copy'), :<, @runner.steps.index('runtime-copy-generated')
+  end
+
+  # A file of otp/ at a generated file's path is refused before the copy, so
+  # neither stands in for the other.
+  def test_an_otp_file_at_a_generated_path_is_refused
+    write_otp(GRAMMAR, 'tracked')
+    error = assert_raises(Erx::Error) { build }
+    assert_match(/otp\/#{Regexp.escape(GRAMMAR)} is at the path of the generated/, error.message)
+    refute_includes @runner.steps, 'runtime-copy'
   end
 
   def test_a_file_that_left_the_generated_tree_leaves_the_copy

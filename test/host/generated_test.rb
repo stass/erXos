@@ -71,6 +71,33 @@ class GeneratedTest < Minitest::Test
     assert_equal "/* alpha */\n", output('out/a.h')
   end
 
+  # check-reproducible's builds each regenerate the tree, fresh or not.
+  def test_regenerate_rewrites_a_fresh_tree
+    ensure_tree
+    result = Erx::Generated.ensure(root: @root, output: @output, generators: [fake], regenerate: true)
+    assert_equal :generated, result.status
+    assert_equal 2, calls
+    assert_equal :fresh, ensure_tree.status
+  end
+
+  # The generator scripts write one generator's files into a directory of the
+  # caller's choosing, never into the build's own tree, which holds them all.
+  def test_generate_one_writes_one_generator_and_refuses_the_build_tree
+    output = File.join(@directory, 'hardware')
+    Erx::Generated.generate_one('hardware', root: ROOT, output: output)
+    stamp = JSON.parse(File.read(File.join(output, Erx::Generated::STAMP)))
+    assert_equal ['hardware'], stamp.fetch('generators')
+    assert(stamp.fetch('outputs').keys.all? { |relative| relative.start_with?('include/erx/') })
+    assert_includes stamp.fetch('outputs').keys, 'include/erx/mmio.h'
+    build_tree = File.join(@directory, 'tree')
+    FileUtils.mkdir_p(build_tree)
+    error = assert_raises(Erx::Generated::Error) do
+      Erx::Generated.generate_one('abi', root: build_tree, output: File.join(build_tree, 'build/gen'))
+    end
+    assert_match(/holds every generator's files/, error.message)
+    assert_raises(Erx::Generated::Error) { Erx::Generated.generate_one('nothing', root: ROOT, output: output) }
+  end
+
   def test_an_edited_input_regenerates
     ensure_tree
     File.binwrite(File.join(@root, 'in/a.txt'), 'beta')
@@ -293,37 +320,48 @@ class GeneratedTest < Minitest::Test
     end
   end
 
-  # Generation depends only on its inputs: two runs from different working
-  # directories, at different times and in different time zones, into
-  # differently named output roots, give byte-identical trees.
-  def test_generation_is_deterministic
+  # Generation depends only on its recorded inputs. The files the build's
+  # stamp names (its reads and glob expansions) are copied into two source
+  # roots at different paths, with different modification times, and
+  # generated from different working directories and time zones into
+  # differently named output roots; the two trees are byte-identical to each
+  # other and to the build's own. A generator reading an unrecorded file
+  # fails here. otp/ORIGIN.md, which the terminal generator checks its inputs
+  # against without recording it (TerminalRules.generation), is copied too.
+  def test_generation_depends_only_on_its_recorded_inputs
+    reference = File.join(@directory, 'reference/gen')
+    Erx::Generated.ensure(root: ROOT, output: reference)
+    stamp = JSON.parse(File.read(File.join(reference, Erx::Generated::STAMP)))
+    inputs = (stamp.fetch('reads').keys + stamp.fetch('globs').values.flatten + ['otp/ORIGIN.md']).uniq
     script = "require ARGV.fetch(0)\nErx::Generated.ensure(root: ARGV.fetch(1), output: ARGV.fetch(2))\n"
-    trees = [%w[first UTC], %w[second-tree Asia/Kathmandu]].map do |name, zone|
+    runs = [['first', 'UTC', Time.utc(2001, 1, 1)], ['second-tree', 'Asia/Kathmandu', Time.utc(2033, 6, 15)]]
+    trees = runs.map do |name, zone, time|
+      root = File.join(@directory, name, 'source')
+      inputs.each do |relative|
+        copy = File.join(root, relative)
+        FileUtils.mkdir_p(File.dirname(copy))
+        FileUtils.cp(File.join(ROOT, relative), copy)
+        File.utime(time, time, copy)
+      end
       output = File.join(@directory, name, 'out')
       FileUtils.mkdir_p(File.join(@directory, name, 'cwd'))
-      ruby(script, LIBRARY, ROOT, output, env: { 'TZ' => zone }, chdir: File.join(@directory, name, 'cwd'))
-      Dir.glob('**/*', File::FNM_DOTMATCH, base: output).sort
-         .select { |relative| File.file?(File.join(output, relative)) }
-         .to_h { |relative| [relative, File.binread(File.join(output, relative))] }
+      ruby(script, LIBRARY, root, output, env: { 'TZ' => zone }, chdir: File.join(@directory, name, 'cwd'))
+      tree_bytes(output)
     end
-    assert_includes trees.first.keys, '.stamp.json'
+    assert_operator trees.first.size, :>=, 30
+    assert_includes trees.first.keys, Erx::Generated::STAMP
     assert_equal trees.first, trees.last
-  end
-
-  # While the tracked copies exist they are what the drift checks pin, so
-  # the build tree must hold the same bytes.
-  def test_real_tree_matches_the_tracked_outputs_and_is_then_fresh
-    output = File.join(@directory, 'real/gen')
-    assert_equal :generated, Erx::Generated.ensure(root: ROOT, output: output).status
-    files = Dir.glob('**/*', base: output).select { |relative| File.file?(File.join(output, relative)) }
-    assert_operator files.size, :>=, 30
-    files.each do |relative|
-      assert_equal File.binread(File.join(ROOT, relative)), File.binread(File.join(output, relative)), relative
-    end
-    assert_equal :fresh, Erx::Generated.ensure(root: ROOT, output: output).status
+    assert_equal tree_bytes(reference), trees.first
   end
 
   private
+
+  # Every regular file beneath output, relative path => bytes.
+  def tree_bytes(output)
+    Dir.glob('**/*', File::FNM_DOTMATCH, base: output).sort
+       .select { |relative| File.file?(File.join(output, relative)) }
+       .to_h { |relative| [relative, File.binread(File.join(output, relative))] }
+  end
 
   def ruby(script, *arguments, env: {}, chdir: ROOT)
     stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, '-rjson', '-e', script, *arguments,

@@ -3,35 +3,31 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'fileutils'
-require 'optparse'
-require_relative 'lib/erx/abi'
+# Writes the ABI generator's files alone into a directory, to read them
+# outside a build. The build generates every generator's files into
+# build/gen itself (tools/erx generate, Erx::Generated.ensure).
 
-options = { root: File.expand_path('..', __dir__), output: nil, architecture: 'aarch64', check: false }
+require 'optparse'
+require_relative 'lib/erx/generated'
+require_relative 'lib/erx/runner'
+
+options = { root: File.expand_path('..', __dir__), output: nil }
 parser = OptionParser.new do |flags|
-  flags.banner = 'Usage: ruby tools/gen_abi.rb [--check] [--root PATH] [--output PATH]'
-  flags.on('--root PATH', 'Read beneath this repository') { |path| options[:root] = File.expand_path(path) }
-  flags.on('--output PATH', 'Publish or check beneath this directory (default: the root)') do |path|
-    options[:output] = File.expand_path(path)
+  flags.banner = 'Usage: ruby tools/gen_abi.rb --output PATH [--root PATH]'
+  flags.on('--root PATH', 'Read beneath this repository') { |path| options[:root] = path }
+  flags.on('--output PATH', 'Write into this directory, empty or an earlier output of this script') do |path|
+    options[:output] = path
   end
-  flags.on('--architecture NAME', 'Select the architecture declaration file') { |name| options[:architecture] = name }
-  flags.on('--check', 'Compare generated paths and bytes without publishing') { options[:check] = true }
   flags.on('--help', 'Show this help') { puts flags; exit 0 }
 end
 
 begin
   parser.parse!
   raise OptionParser::InvalidArgument, ARGV.join(' ') unless ARGV.empty?
-  plan = Erx::ABI::Generator.plan(root: options.fetch(:root), architecture: options.fetch(:architecture))
-  output = options.fetch(:output) || options.fetch(:root)
-  FileUtils.mkdir_p(output) unless options.fetch(:check)
-  if options.fetch(:check)
-    Erx::ABI::Generator.check(plan, root: output)
-    Erx::Terminal.puts("ABI: #{plan.files.size} generated artifacts match")
-  else
-    Erx::ABI::Generator.publish(plan, root: output)
-    Erx::Terminal.puts("ABI: published #{plan.files.size} generated artifacts")
-  end
+  raise OptionParser::MissingArgument, '--output' unless options.fetch(:output)
+
+  result = Erx::Generated.generate_one('abi', root: options.fetch(:root), output: options.fetch(:output))
+  Erx::Terminal.puts("ABI: generated files in #{result.output}")
 rescue OptionParser::ParseError => error
   Erx::Terminal.puts(error.message)
   exit 2

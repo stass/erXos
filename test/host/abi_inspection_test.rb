@@ -8,8 +8,8 @@ require_relative '../../tools/lib/erx/abi'
 
 # The reader of the inspection schema (docs/design-abi.md, "Inspection schema"):
 # one seeded bad schema for each rule of the grammar, the shape of a resolved
-# schema, the generated outputs of the checked-in schema, and the drift check
-# on them. test/host/erx_schema_test.rb runs the generated Erlang.
+# schema, and the generated outputs of the checked-in schema.
+# test/host/erx_schema_test.rb runs the generated Erlang.
 class AbiInspectionTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   ROOT_SOURCE = <<~ABI
@@ -366,20 +366,6 @@ class AbiInspectionTest < Minitest::Test
     assert_equal inspection.trace_rows.transform_values(&:reporter), generated::TRACE_ROWS
     assert_equal ['processes', { type: 'pid' }], generated::PATHS.last.fetch(:segments)
     assert generated::PATHS.frozen? && generated::PATHS.last.fetch(:segments).last.frozen?
-  end
-
-  def test_drift_check_catches_a_stale_schema_output
-    plan = Erx::ABI::Generator.plan(root: ROOT)
-    %w[erlang/apps/erx/src/generated/erx_schema.erl tools/generated/abi_inspection.rb].each do |output|
-      Dir.mktmpdir('erx-inspection-drift-') do |root|
-        Erx::ABI::Generator.publish(plan, root: root)
-        assert Erx::ABI::Generator.check(plan, root: root)
-        path = File.join(root, output)
-        File.binwrite(path, File.binread(path).sub('liberx pool', 'liberx_pool'))
-        error = assert_raises(Erx::Error) { Erx::ABI::Generator.check(plan, root: root) }
-        assert_match(/stale #{Regexp.escape(output)}/, error.message)
-      end
-    end
   end
 
   def test_a_root_without_inspection_cannot_plan_outputs

@@ -36,17 +36,14 @@ module Erx
     def self.generated(application) = File.join(Generated::OUTPUT, source(application))
 
     # An application's modules, relative to the root: src/**/*.erl of its directory in
-    # the tree and in the generated tree. A path both hold is compiled from the generated
-    # tree, and refused unless the two files are the same bytes, so a hand edit to a
-    # generated file is never dropped unseen.
+    # the tree and in the generated tree. A file in the tree at a generated module's path
+    # is refused, so neither copy silently stands in for the other.
     def self.modules(root:, application:)
       tree, generated = [source(application), generated(application)].map do |directory|
         Dir.glob('src/**/*.erl', base: File.join(root, directory)).to_h { |path| [path, File.join(directory, path)] }
       end
       tree.merge(generated) do |_path, written, made|
-        next made if File.binread(File.join(root, written)) == File.binread(File.join(root, made))
-
-        raise Error, "#{written} differs from the generated #{made}"
+        raise Error, "#{written} is at the path of the generated #{made}; remove it"
       end.sort.map(&:last)
     end
 

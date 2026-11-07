@@ -114,83 +114,37 @@ class TerminalGenerationTest < Minitest::Test
     end
   end
 
-  def test_missing_stale_and_orphan_outputs_are_detected_without_rewriting
-    plan = self.class.output_plan
-    Dir.mktmpdir('erx-terminal-drift-') do |directory|
-      Erx::TerminalRules.publish(plan, root: directory)
-      assert Erx::TerminalRules.check(plan, root: directory)
-      target = File.join(directory, 'include/erx/terminal_ascii.h')
-      File.write(target, 'stale')
-      assert_raises(Erx::Error) { Erx::TerminalRules.check(plan, root: directory) }
-      assert_equal 'stale', File.read(target)
-      Erx::TerminalRules.publish(plan, root: directory)
-      File.write(File.join(directory, 'tools/generated/terminal_orphan.rb'), 'orphan')
-      assert_raises(Erx::Error) { Erx::TerminalRules.check(plan, root: directory) }
-      Erx::TerminalRules.publish(plan, root: directory)
-      refute File.exist?(File.join(directory, 'tools/generated/terminal_orphan.rb'))
-      File.unlink(target)
-      assert_raises(Erx::Error) { Erx::TerminalRules.check(plan, root: directory) }
-    end
-  end
-
-  def test_publication_accepts_only_the_complete_owned_output_plan
-    Dir.mktmpdir('erx-terminal-owner-') do |directory|
-      root = File.join(directory, 'root')
-      FileUtils.mkdir_p(root)
-      invalid = self.class.output_plan.merge('../escape' => 'unexpected output')
-      assert_raises(Erx::Error) { Erx::TerminalRules.publish(invalid, root: root) }
-      refute File.exist?(File.join(directory, 'escape'))
-    end
-  end
-
-  def test_later_linked_output_parent_is_rejected_before_rewriting_an_earlier_file
-    plan = Erx::TerminalRules::OUTPUTS.to_h { |path| [path, 'new generated output'] }.freeze
-    Dir.mktmpdir('erx-terminal-preflight-') do |directory|
-      root = File.join(directory, 'root')
-      outside = File.join(directory, 'outside')
-      FileUtils.mkdir_p(File.join(root, 'include/erx'))
-      Dir.mkdir(outside)
-      target = File.join(root, 'include/erx/terminal_ascii.h')
-      File.binwrite(target, 'keep existing output')
-      File.symlink(outside, File.join(root, 'erlang'))
-      assert_raises(Erx::Error) { Erx::TerminalRules.publish(plan, root: root) }
-      assert_equal 'keep existing output', File.binread(target)
-      assert_empty Dir.children(outside)
-    end
-  end
-
   # ORIGIN.md lists every imported OTP file, so rebuilding any preloaded beam
   # rewrites it. Only the import rows of the two Unicode inputs bear on the
-  # generated files, so a root whose ORIGIN.md differs elsewhere stays current.
-  def test_an_unrelated_origin_entry_leaves_the_record_current
+  # generated files, so a root whose ORIGIN.md differs elsewhere generates the
+  # same files from the same recorded reads, and the build tree stays fresh.
+  def test_an_unrelated_origin_entry_leaves_the_plan_unchanged
     Dir.mktmpdir('erx-terminal-origin-') do |directory|
       plain = generation_root(File.join(directory, 'plain'))
       wider = generation_root(File.join(directory, 'wider'),
                               extra: { 'otp/lib/kernel/ebin/unrelated.beam' => 'rebuilt beam' })
       refute_equal File.binread(File.join(plain, 'otp/ORIGIN.md')), File.binread(File.join(wider, 'otp/ORIGIN.md'))
-      Erx::TerminalRules.publish(Erx::TerminalRules.plan(root: plain), root: wider)
-      assert Erx::TerminalRules.check(Erx::TerminalRules.plan(root: wider), root: wider)
+      assert_equal Erx::TerminalRules.generation(root: plain), Erx::TerminalRules.generation(root: wider)
     end
   end
 
   # Re-importing an input with different bytes changes what generation reads,
-  # so the record written from the old import is stale even though the tables
-  # come out the same (the added line is a comment and changes no interval).
+  # so the recorded reads change and the build tree regenerates, even though the
+  # tables come out the same (the added line is a comment and changes no interval).
   # The same bytes edited in place carry the change notice that ORIGIN.md
   # accepts, yet generation refuses them: it reads only imported bytes.
-  def test_a_reimported_input_makes_the_record_stale
+  def test_a_reimported_input_changes_the_recorded_reads
     properties = 'otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt'
     version_line, *rest = File.binread(File.join(ROOT, properties)).lines
     edited = [version_line, "# Modified by erXos: terminal generation fixture\n", *rest].join
     Dir.mktmpdir('erx-terminal-reimport-') do |directory|
       plain = generation_root(File.join(directory, 'plain'))
       changed = generation_root(File.join(directory, 'changed'), extra: { properties => edited })
-      old_plan = Erx::TerminalRules.plan(root: plain)
-      new_plan = Erx::TerminalRules.plan(root: changed)
-      assert_equal old_plan.slice(*Erx::TerminalRules::OUTPUTS.take(3)), new_plan.slice(*Erx::TerminalRules::OUTPUTS.take(3))
-      Erx::TerminalRules.publish(old_plan, root: changed)
-      error = assert_raises(Erx::Error) { Erx::TerminalRules.check(new_plan, root: changed) }
-      assert_match(%r{\Aterminal generation drift: .*abi/terminal_generated\.json}, error.message)
+      old_plan = Erx::TerminalRules.generation(root: plain)
+      new_plan = Erx::TerminalRules.generation(root: changed)
+      tables = Erx::TerminalRules::OUTPUTS.take(3)
+      assert_equal old_plan.files.slice(*tables), new_plan.files.slice(*tables)
+      refute_equal old_plan.reads.fetch(properties), new_plan.reads.fetch(properties)
       File.binwrite(File.join(plain, properties), edited)
       error = assert_raises(Erx::Error) { Erx::TerminalRules.plan(root: plain) }
       assert_equal 'terminal input differs from its pinned OTP origin', error.message

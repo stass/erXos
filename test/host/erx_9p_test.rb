@@ -11,10 +11,9 @@ require_relative '../../tools/lib/erx/generated'
 
 # The file protocol's 9P2000.L codec: test/erlang/erx_9p_tests.erl, the EUnit cases of
 # the generated erx_9p, run on stock's emulator (ERX_ERL and ERX_ERLC, which make check
-# supplies) with the generated grammar beside it, against the checked-in module and
-# against one generated from a table that gives ENOENT another number, which must fail;
-# the drift check on a stale codec; and the table's refusals of malformed error lists
-# and wire options.
+# supplies) with the generated grammar beside it, against the module the build generates
+# and against one generated from a table that gives ENOENT another number, which must
+# fail; and the table's refusals of malformed error lists and wire options.
 class Erx9pTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
@@ -38,18 +37,6 @@ class Erx9pTest < Minitest::Test
     output, status = eunit(source)
     refute status.success?, output
     assert_match(/lerror_test/, output)
-  end
-
-  def test_drift_check_finds_a_stale_codec
-    plan = Erx::ABI::Generator.plan(root: ROOT)
-    Dir.mktmpdir('erx-9p-codec-drift-') do |root|
-      Erx::ABI::Generator.publish(plan, root: root)
-      assert Erx::ABI::Generator.check(plan, root: root)
-      path = File.join(root, CODEC)
-      File.binwrite(path, File.binread(path).sub('when Size > Msize ->', 'when Size > Msize + 1 ->'))
-      error = assert_raises(Erx::Error) { Erx::ABI::Generator.check(plan, root: root) }
-      assert_match(%r{stale #{Regexp.escape(CODEC)}}, error.message)
-    end
   end
 
   def test_malformed_errors_and_wire_options_are_refused

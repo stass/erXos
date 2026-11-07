@@ -139,8 +139,15 @@ module Erx
       # They read the generated tree too, each file under the path it
       # mirrors, so a rule's scope and sites hold for a generated file as for
       # a tracked one, and no generated file escapes them by living in the
-      # build tree. A generated file stands in for a listed one of its name.
+      # build tree. No listed file may sit at a generated file's path: the
+      # generated file is the only copy, so neither silently stands in for
+      # the other in a rule, an include or a compile.
       generated = generated_sources
+      shadowing = listed_set.intersection(generated.keys).sort
+      unless shadowing.empty?
+        raise Error, "these files are at the paths of generated files, which the build generates into " \
+                     "#{Generated::OUTPUT}; remove them: #{shadowing.first(8).join(', ')}"
+      end
       Chokepoints.enforce(@chokepoints, root: @root, names: (listed | generated.keys).sort,
                                         imported: method(:chokepoint_upstream?), sources: generated)
       true

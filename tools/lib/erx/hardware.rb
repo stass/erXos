@@ -4,11 +4,8 @@
 
 require 'rexml/parsers/pullparser'
 require 'digest'
-require 'tmpdir'
-require 'fileutils'
 require_relative 'json_input'
 require_relative 'bounded_file'
-require_relative 'output_directory'
 require_relative 'generation_plan'
 
 module Erx
@@ -587,77 +584,5 @@ module Erx
 
     # The generated header of one device's accessors, relative to the root.
     def device_header_path(device) = "include/erx/hw/#{device.name.downcase}.h"
-
-    def output_inventory(root:)
-      directory = File.join(root, 'include/erx/hw')
-      raise Error, 'hardware output directory is a symlink' if File.symlink?(directory)
-      paths = ['include/erx/mmio.h']
-      if File.directory?(directory)
-        Dir.children(directory).sort.each do |name|
-          path = File.join(directory, name)
-          stat = File.lstat(path)
-          raise Error, 'unexpected directory in hardware output inventory' if stat.directory?
-          paths << path.delete_prefix(root + '/')
-        end
-      end
-      paths.sort
-    end
-
-    def check_outputs(plan, root:)
-      root = File.realpath(root)
-      validate_output_locations(plan, root: root)
-      stale = (plan.keys | output_inventory(root: root)).sort.select do |relative|
-        path = File.join(root, relative)
-        !plan.key?(relative) || !File.file?(path) || File.symlink?(path) ||
-          BoundedFile.read(path, maximum: plan.fetch(relative).bytesize) != plan.fetch(relative)
-      end
-      raise Error, "hardware generation drift: #{stale.join(', ')}" unless stale.empty?
-      true
-    rescue SystemCallError => error
-      raise Error, "cannot check hardware outputs: #{error.message}"
-    end
-
-    def publish_outputs(plan, root:)
-      root = File.realpath(root)
-      validate_output_locations(plan, root: root)
-      inventory = output_inventory(root: root)
-      plan.each do |relative, bytes|
-        path = File.join(root, relative)
-        directory = OutputDirectory.prepare(root: root, path: File.dirname(path))
-        temporary = File.join(directory, ".#{File.basename(path)}.#{Process.pid}.tmp")
-        created = false
-        begin
-          File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o644) do |file|
-            created = true
-            file.write(bytes)
-          end
-          File.rename(temporary, path)
-        ensure
-          File.unlink(temporary) if created && File.file?(temporary) && !File.symlink?(temporary)
-        end
-      end
-      (inventory - plan.keys).each { |relative| File.unlink(File.join(root, relative)) }
-      true
-    rescue SystemCallError => error
-      raise Error, "cannot publish hardware outputs: #{error.message}"
-    end
-
-    def validate_output_locations(plan, root:)
-      valid = plan.is_a?(Hash) && plan.key?('include/erx/mmio.h') && plan.all? do |path, bytes|
-        path.is_a?(String) && path.ascii_only? &&
-          (path == 'include/erx/mmio.h' || /\Ainclude\/erx\/hw\/[a-z][a-z0-9_]{0,62}\.h\z/.match?(path)) &&
-          bytes.is_a?(String) && !bytes.empty? && bytes.ascii_only?
-      end
-      raise Error, 'invalid hardware output plan' unless valid
-      plan.keys.each do |relative|
-        OutputDirectory.check(root: root, path: File.dirname(File.join(root, relative)))
-        path = File.join(root, relative)
-        if File.exist?(path) && !File.symlink?(path) && !File.file?(path)
-          raise Error, 'hardware output destination is not a regular file'
-        end
-      end
-      true
-    end
-    private_class_method :validate_output_locations
   end
 end

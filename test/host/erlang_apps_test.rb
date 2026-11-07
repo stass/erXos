@@ -36,20 +36,13 @@ class ErlangAppsTest < Minitest::Test
                  ErlangApps.modules(root: @root, application: 'erx').sort
   end
 
-  # While the tree still holds a copy of a generated file, the build compiles the
-  # generated tree's, so it never reads stale bytes.
-  def test_the_generated_file_is_compiled_where_both_hold_a_path
+  # The generated file is the only copy: a file in the tree at its path is refused,
+  # whatever its bytes, so neither silently stands in for the other.
+  def test_a_tree_file_at_a_generated_path_is_refused
+    write('build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
     write('erlang/apps/erx/src/generated/erx_manifest.erl')
-    write('build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
-    assert_equal ['build/gen/erlang/apps/erx/src/generated/erx_manifest.erl'],
-                 ErlangApps.modules(root: @root, application: 'erx')
-  end
-
-  def test_a_tree_file_that_differs_from_the_generated_one_is_refused
-    write('build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
-    write('erlang/apps/erx/src/generated/erx_manifest.erl', 'edited by hand')
     error = assert_raises(Erx::Error) { ErlangApps.modules(root: @root, application: 'erx') }
-    assert_match(%r{erlang/apps/erx/src/generated/erx_manifest.erl differs}, error.message)
+    assert_match(%r{erlang/apps/erx/src/generated/erx_manifest.erl is at the path of the generated}, error.message)
   end
 
   def test_the_receipts_sources_name_generated_modules_and_the_resource_file

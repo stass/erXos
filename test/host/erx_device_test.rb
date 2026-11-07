@@ -35,8 +35,8 @@ class ErxDeviceTest < Minitest::Test
       FileUtils.cp(FIXTURE, File.join(tree, 'hw/svd/fixture.svd'))
       # erx_device.c names the virtio registers the NIF owns, so the tree has their source too.
       FileUtils.cp(File.join(ROOT, 'hw/svd/virtio_mmio/virtio_mmio.svd'), File.join(tree, 'hw/svd/virtio_mmio.svd'))
-      Erx::Hardware.publish_outputs(Erx::Hardware.output_plan(root: tree), root: tree)
-      assert_match(/^erx_device fixture done$/, run_harness('-DERX_DEVICE_FIXTURE', '-I', File.join(tree, 'include')))
+      Erx::Generated.generate_one('hardware', root: tree, output: File.join(tree, 'gen'))
+      assert_match(/^erx_device fixture done$/, run_harness('-DERX_DEVICE_FIXTURE', '-I', File.join(tree, 'gen/include')))
     end
   end
 

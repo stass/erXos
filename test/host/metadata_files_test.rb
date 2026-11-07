@@ -39,7 +39,8 @@ class MetadataFilesTest < Minitest::Test
 
   def test_hardware_source_rejects_fifo_before_parsing
     fifo('hw/svd/input.svd')
-    assert_prompt_rejection([RbConfig.ruby, File.join(@repository, 'tools/gen_hw.rb'), '--root', @root])
+    assert_prompt_rejection([RbConfig.ruby, File.join(@repository, 'tools/gen_hw.rb'), '--root', @root,
+                             '--output', File.join(@root, 'out')])
   end
 
   def test_architecture_policy_rejects_fifo_before_parsing

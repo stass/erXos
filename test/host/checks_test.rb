@@ -55,16 +55,26 @@ class ChecksTest < Minitest::Test
     assert_match(%r{fiasco-headers-in-backend: kernel/core/b.c:1}, error.message)
   end
 
-  # A generated file is read under the path it mirrors, and stands in for
-  # a tracked file of that name.
+  # A generated file is read under the path it mirrors.
   def test_chokepoint_rules_read_generated_files_under_their_mirrored_paths
     write('.gitignore', "/build/\n")
-    write('kernel/generated/b.c', "int value;\n")
     plan = Erx::GenerationPlan.new(files: { 'kernel/generated/b.c' => "#include <l4/sys/ipc.h>\n" }, reads: {})
     generator = Erx::Generated::Generator.new(name: 'fixture', code: {}, plan: ->(_root) { plan })
     error = assert_raises(Erx::Error) { checks(generators: [generator]).run }
     assert_match(%r{fiasco-headers-in-backend: kernel/generated/b.c:1}, error.message)
     refute_match(%r{build/gen}, error.message)
+  end
+
+  # The generated file is the only copy: a listed file at its path, tracked or
+  # not, fails the check, whatever its bytes.
+  def test_a_listed_file_at_a_generated_path_is_refused
+    write('.gitignore', "/build/\n")
+    plan = Erx::GenerationPlan.new(files: { 'include/erx/made.h' => "int value;\n" }, reads: {})
+    generator = Erx::Generated::Generator.new(name: 'fixture', code: {}, plan: ->(_root) { plan })
+    assert checks(generators: [generator]).run
+    write('include/erx/made.h', "int value;\n")
+    error = assert_raises(Erx::Error) { checks(generators: [generator]).run }
+    assert_match(%r{at the paths of generated files.*include/erx/made.h}, error.message)
   end
 
   # An import below kernel/ is linked into the kernel with the cores, so the

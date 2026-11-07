@@ -99,19 +99,6 @@ class HardwareTest < Minitest::Test
     end
   end
 
-  def test_drift_missing_modified_and_orphaned_outputs
-    plan = Erx::Hardware.output_plan(root: @root)
-    assert_raises(Erx::Error) { Erx::Hardware.check_outputs(plan, root: @root) }
-    Erx::Hardware.publish_outputs(plan, root: @root)
-    assert Erx::Hardware.check_outputs(plan, root: @root)
-    File.binwrite(File.join(@root, 'include/erx/hw/orphan.h'), 'orphan')
-    assert_raises(Erx::Error) { Erx::Hardware.check_outputs(plan, root: @root) }
-    Erx::Hardware.publish_outputs(plan, root: @root)
-    assert Erx::Hardware.check_outputs(plan, root: @root)
-    File.binwrite(File.join(@root, 'include/erx/mmio.h'), 'modified')
-    assert_raises(Erx::Error) { Erx::Hardware.check_outputs(plan, root: @root) }
-  end
-
   def test_unpublishable_name_is_rejected_before_any_output
     source = @source.sub('<name>PL011</name><baseAddress>', "<name>#{'A' * 256}</name><baseAddress>")
     File.binwrite(File.join(@root, 'hw/svd/pl011/pl011.svd'), source)
@@ -128,19 +115,11 @@ class HardwareTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::Hardware.output_plan(root: @root) }
   end
 
-  def test_invalid_output_inventory_is_rejected_before_publication
-    plan = Erx::Hardware.output_plan(root: @root)
-    FileUtils.mkdir_p(File.join(@root, 'include/erx/hw/unexpected'))
-    target = File.join(@root, 'include/erx/mmio.h')
-    File.binwrite(target, 'original output')
-    assert_raises(Erx::Error) { Erx::Hardware.publish_outputs(plan, root: @root) }
-    assert_equal 'original output', File.binread(target)
-    refute File.exist?(File.join(@root, 'include/erx/hw/pl011.h'))
-  end
-
   def test_generated_accessors_compile_and_preserve_neighbor_bits
-    plan = Erx::Hardware.output_plan(root: @root)
-    Erx::Hardware.publish_outputs(plan, root: @root)
+    Erx::Hardware.output_plan(root: @root).each do |relative, bytes|
+      FileUtils.mkdir_p(File.dirname(File.join(@root, relative)))
+      File.binwrite(File.join(@root, relative), bytes)
+    end
     source = File.join(@root, 'accessors.c')
     File.binwrite(source, <<~C)
       #include "erx/hw/pl011.h"

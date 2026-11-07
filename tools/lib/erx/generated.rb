@@ -118,10 +118,12 @@ module Erx
 
       # Makes output (by default root/build/gen) hold exactly what the
       # generators compute from root, regenerating only when the stamp no
-      # longer matches. Safe to call from many processes at once. A block
-      # runs with the result while the lock is still held, so another
-      # caller's regeneration cannot move the tree away while it reads.
-      def ensure(root:, output: nil, generators: GENERATORS)
+      # longer matches, or always with regenerate: true (a build that must not
+      # reuse an earlier build's tree, as check-reproducible's two builds).
+      # Safe to call from many processes at once. A block runs with the
+      # result while the lock is still held, so another caller's
+      # regeneration cannot move the tree away while it reads.
+      def ensure(root:, output: nil, generators: GENERATORS, regenerate: false)
         root = File.realpath(root)
         output = File.expand_path(output || File.join(root, OUTPUT))
         if root == output || root.start_with?("#{output}/")
@@ -130,7 +132,7 @@ module Erx
 
         with_lock(output) do
           remove_leftovers(output)
-          result = if fresh?(output, root: root, generators: generators)
+          result = if !regenerate && fresh?(output, root: root, generators: generators)
                      Result.new(status: :fresh, output: output)
                    else
                      plans = generators.map { |generator| [generator.name, generator.plan.call(root)] }
@@ -142,6 +144,21 @@ module Erx
         end
       rescue SystemCallError => error
         raise Error, "cannot generate into #{output || root}: #{error.message}"
+      end
+
+      # Generates the files of the one generator named into output, a
+      # directory of the caller's choosing that is empty or an earlier such
+      # tree: what tools/gen_abi.rb, gen_hw.rb and gen_terminal.rb run, to
+      # read one generator's files outside a build. root's own build/gen is
+      # refused, because ensure keeps that tree whole.
+      def generate_one(name, root:, output:)
+        generator = GENERATORS.find { |candidate| candidate.name == name }
+        raise Error, "no generator is named #{name}" unless generator
+        if resolved(output) == File.join(File.realpath(root), OUTPUT)
+          raise Error, "#{output} is the build's generated tree, which holds every generator's files"
+        end
+
+        self.ensure(root: root, output: output, generators: [generator])
       end
 
       # Loads one generated Ruby file (a path of tools/generated/) from the
@@ -415,6 +432,16 @@ module Erx
 
           into[key] = value
         end
+      end
+
+      # path with its longest existing prefix resolved through links, so two
+      # spellings of one place compare equal before it exists.
+      def resolved(path)
+        path = File.expand_path(path)
+        return File.realpath(path) if File.exist?(path)
+
+        parent = File.dirname(path)
+        parent == path ? path : File.join(resolved(parent), File.basename(path))
       end
 
       def code_digests(generators) = generators.map(&:code).reduce({}, :merge).sort.to_h

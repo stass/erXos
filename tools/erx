@@ -57,8 +57,6 @@ module Erx
         check(command_arguments, **collaborators)
       when 'generate'
         generate(command_arguments, **collaborators)
-      when 'check-generated'
-        check_generated(command_arguments, **collaborators)
       when 'check-reproducible'
         check_reproducible(command_arguments, **collaborators)
       when 'check-fuzz'
@@ -141,7 +139,6 @@ module Erx
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       checks_class.new(root: ROOT, runner: runner).run
       arch_terms.check(root: ROOT)
-      generated(runner: runner)
       rc_oracle.call(runner: runner)
       runtime.call(runner: runner) do |environment|
         stack_proof(runner: runner, environment: environment)
@@ -186,21 +183,6 @@ module Erx
       no_arguments(arguments)
       Terminal.puts("generated files in #{tree.output}: #{tree.status == :fresh ? 'up to date' : 'regenerated'}")
       0
-    end
-
-    def self.check_generated(arguments, runner_class: Runner)
-      no_arguments(arguments)
-      generated(runner: runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
-      Terminal.puts('ABI, hardware and terminal artifacts match')
-      0
-    end
-
-    def self.generated(runner:)
-      { 'gen_abi.rb' => 60, 'gen_hw.rb' => 60,
-        'gen_terminal.rb' => 120 }.each do |script, deadline|
-        runner.run([RbConfig.ruby, File.join(ROOT, 'tools', script), '--check'],
-                   name: "check-#{script.delete_suffix('.rb').tr('_', '-')}", deadline: deadline, chdir: ROOT)
-      end
     end
 
     # The checked LLVM resource-header inventory is the fixture's provenance
@@ -276,7 +258,6 @@ module Erx
     def self.check_sanitizers(arguments, runner_class: Runner, runtime: method(:with_test_runtime))
       no_arguments(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      generated(runner: runner)
       tests = SanitizerTests.discover(root: ROOT)
       runtime.call(runner: runner) do |environment|
         run_tests(tests.map { |test| File.join(ROOT, test) }, runner: runner, name: 'sanitizer-tests',
@@ -326,7 +307,6 @@ module Erx
         raise OptionParser::InvalidArgument, 'fuzz budget, seed or trailing arguments outside bounds'
       end
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      generated(runner: runner)
       runtime.call(runner: runner) do |environment|
         c_fuzzer.call(runner: runner, environment: environment, runs: options.fetch(:runs), seed: options.fetch(:seed))
         ruby_fuzzer.call(runner: runner, environment: environment, seconds: options.fetch(:seconds), seed: options.fetch(:seed))
@@ -603,7 +583,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
       0
     end
 
@@ -1083,7 +1063,7 @@ module Erx
       0
     end
 
-    private_class_method :generated, :host_environment, :with_test_runtime,
+    private_class_method :host_environment, :with_test_runtime,
                          :run_tests, :fuzz_c, :fuzz_ruby, :no_arguments, :status_record
   end
 end

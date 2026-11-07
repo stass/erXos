@@ -17,9 +17,10 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks", check: 'ArchTerms', test: 'test/host/arch_terms_test.rb'
         ),
         Chokepoints::Elsewhere.new(
-          name: 'generated-files', rule: 'generated files are never edited',
-          design: "#{KERNEL}#chokepoint-checks", check: 'the generators\' --check drift runs',
-          test: 'test/host/abi_generation_test.rb'
+          name: 'generated-files', rule: 'generated files are never checked in or edited',
+          design: "#{KERNEL}#chokepoint-checks",
+          check: 'Checks (no listed file at a generated path) and Erx::Generated (an edited output fails its stamp)',
+          test: 'test/host/generated_test.rb'
         ),
         Chokepoints::Elsewhere.new(
           name: 'kernel-stack-proof', rule: 'kernel C recurses only through musttail, and every frame is proven',

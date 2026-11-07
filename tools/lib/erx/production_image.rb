@@ -13,6 +13,7 @@ require_relative 'deterministic_transcript'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'fiasco_provenance'
+require_relative 'generated'
 require_relative 'files_guest'
 require_relative 'hostlink_guest'
 require_relative 'reload_guest'
@@ -211,7 +212,8 @@ module Erx
     private :assemble
 
     # The same inputs give byte-identical images: two whole builds of the runtime, each
-    # packed into a clean directory of its own name with its release medium, compared
+    # from a generated tree of its own (build/gen regenerated before it) and packed into
+    # a clean directory of its own name with its release medium, compared
     # part by part by SHA-256, read as a stream. A path under those directories that
     # reached an output shows; OTP and musl build at one path both times, so a path of
     # theirs does not. Fiasco's own assembly has its own test
@@ -222,6 +224,7 @@ module Erx
 
       (first, first_medium), (second, second_medium) = %w[first second].map do |name|
         @runtime.clean
+        Generated.ensure(root: @root, regenerate: true)
         build_medium(directory: File.join(directory, name))
       end
       first_digests = digests(first, first_medium)

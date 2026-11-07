@@ -105,16 +105,12 @@ class TopLevelCliTest < Minitest::Test
     end
   end
 
-  def test_check_runs_every_generation_gate_and_native_integration
+  def test_check_runs_the_stack_proof_and_native_integration
     commands = []
     with_checks(commands) do |collaborators|
       status, output = run_cli('check', **collaborators)
       assert_equal 0, status, output
     end
-    generated = commands.select { |_argv, options| options.fetch(:name).start_with?('check-gen-') }
-    scripts = generated.map { |argv, _options| File.basename(argv[1]) }.sort
-    assert_equal %w[gen_abi.rb gen_hw.rb gen_terminal.rb], scripts
-    assert generated.all? { |argv, _options| argv.last == '--check' }
     proof = commands.find { |_argv, options| options.fetch(:name) == 'stack-proof' }
     assert proof, 'check runs the stack proof'
     assert proof.first[1].end_with?('/tools/stack_proof.rb')
@@ -330,7 +326,7 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_commands_refuse_unsupported_collaborators
-    %w[check generate check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
+    %w[check generate check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
       assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
     end
   end
@@ -366,12 +362,6 @@ class TopLevelCliTest < Minitest::Test
 
   def test_generate_refuses_trailing_arguments
     status, output = run_cli('generate', 'ignored')
-    assert_equal 2, status
-    assert_includes output, 'unexpected arguments'
-  end
-
-  def test_generation_gate_refuses_trailing_arguments
-    status, output = run_cli('check-generated', 'ignored', runner_class: UnexpectedRunner)
     assert_equal 2, status
     assert_includes output, 'unexpected arguments'
   end

@@ -11,9 +11,9 @@ require_relative '../../tools/lib/erx/generated'
 
 # The file protocol's frame profile: test/erlang/erx_9p_grammar_tests.erl, the EUnit cases
 # of the generated erx_9p_grammar, run on stock's emulator (ERX_ERL and ERX_ERLC, which make
-# check supplies) against the checked-in module and against one generated from a table
-# whose name bound admits 256 bytes, which must fail; the drift check on a stale module;
-# and the table's refusals of malformed protocol declarations.
+# check supplies) against the module the build generates and against one generated from
+# a table whose name bound admits 256 bytes, which must fail; and the table's refusals of
+# malformed protocol declarations.
 class Erx9pGrammarTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated module the cases run against is in build/gen.
@@ -36,18 +36,6 @@ class Erx9pGrammarTest < Minitest::Test
     output, status = eunit(source)
     refute status.success?, output
     assert_match(/name_test/, output)
-  end
-
-  def test_drift_check_finds_a_stale_grammar
-    plan = Erx::ABI::Generator.plan(root: ROOT)
-    Dir.mktmpdir('erx-9p-drift-') do |root|
-      Erx::ABI::Generator.publish(plan, root: root)
-      assert Erx::ABI::Generator.check(plan, root: root)
-      path = File.join(root, GENERATED)
-      File.binwrite(path, File.binread(path).sub('byte_size(Value) =< ?NAME_MAX', 'byte_size(Value) =< 256'))
-      error = assert_raises(Erx::Error) { Erx::ABI::Generator.check(plan, root: root) }
-      assert_match(%r{stale #{Regexp.escape(GENERATED)}}, error.message)
-    end
   end
 
   def test_malformed_protocol_declarations_are_refused

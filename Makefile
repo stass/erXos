@@ -10,9 +10,9 @@ DOCKER_CONTEXT ?=
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build run check check-sources status setup fetch check-tla check-rc-oracle check-hw generate-hw check-arch-terms
+.PHONY: all build run check check-sources status setup fetch check-tla check-rc-oracle check-arch-terms
 .PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
-.PHONY: generate check-generated check-abi generate-abi check-terminal generate-terminal
+.PHONY: generate
 .PHONY: check-reproducible check-fuzz check-erofs-oracle check-sanitizers check-asan check-ubsan check-tsan
 .PHONY: check-runtime-seam check-runtime-hosted
 .PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
@@ -30,9 +30,6 @@ check:
 
 generate:
 	$(RUBY) tools/erx generate
-
-check-generated:
-	$(RUBY) tools/erx check-generated
 
 check-reproducible:
 	$(RUBY) tools/erx check-reproducible
@@ -115,24 +112,6 @@ check-rc-oracle:
 	$(RUBY) test/integration/rc_oracle_test.rb
 	ERX_ERL=$(CURDIR)/build/oracle/jit/install/bin/erl ERX_ERLC=$(CURDIR)/build/oracle/jit/install/bin/erlc \
 		$(RUBY) test/integration/erx_shell_corpus_test.rb
-
-check-hw:
-	$(RUBY) tools/gen_hw.rb --check
-
-generate-hw:
-	$(RUBY) tools/gen_hw.rb
-
-check-abi:
-	$(RUBY) tools/gen_abi.rb --check
-
-generate-abi:
-	$(RUBY) tools/gen_abi.rb
-
-check-terminal:
-	$(RUBY) tools/gen_terminal.rb --check
-
-generate-terminal:
-	$(RUBY) tools/gen_terminal.rb
 
 check-arch-terms:
 	$(RUBY) tools/erx check-arch-terms

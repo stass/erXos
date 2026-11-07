@@ -3,31 +3,35 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'fileutils'
-require 'optparse'
-require_relative 'lib/erx/terminal_generation'
+# Writes the Terminal generator's files alone into a directory, to read them
+# outside a build. The build generates every generator's files into
+# build/gen itself (tools/erx generate, Erx::Generated.ensure).
 
-options = { root: File.expand_path('..', __dir__), output: nil, check: false }
+require 'optparse'
+require_relative 'lib/erx/generated'
+require_relative 'lib/erx/runner'
+
+options = { root: File.expand_path('..', __dir__), output: nil }
 parser = OptionParser.new do |flags|
-  flags.banner = 'Usage: ruby tools/gen_terminal.rb [--check] [--root PATH] [--output PATH]'
-  flags.on('--root PATH') { |path| options[:root] = File.expand_path(path) }
-  flags.on('--output PATH') { |path| options[:output] = File.expand_path(path) }
-  flags.on('--check') { options[:check] = true }
-  flags.on('--help') { puts flags; exit 0 }
+  flags.banner = 'Usage: ruby tools/gen_terminal.rb --output PATH [--root PATH]'
+  flags.on('--root PATH', 'Read beneath this repository') { |path| options[:root] = path }
+  flags.on('--output PATH', 'Write into this directory, empty or an earlier output of this script') do |path|
+    options[:output] = path
+  end
+  flags.on('--help', 'Show this help') { puts flags; exit 0 }
 end
+
 begin
   parser.parse!
   raise OptionParser::InvalidArgument, ARGV.join(' ') unless ARGV.empty?
-  plan = Erx::TerminalRules.plan(root: options.fetch(:root))
-  output = options.fetch(:output) || options.fetch(:root)
-  FileUtils.mkdir_p(output) unless options.fetch(:check)
-  if options.fetch(:check)
-    Erx::TerminalRules.check(plan, root: output)
-  else
-    Erx::TerminalRules.publish(plan, root: output)
-  end
-  puts "Terminal: #{plan.size} artifacts #{options.fetch(:check) ? 'match' : 'published'}"
-rescue OptionParser::ParseError, Erx::Error => error
+  raise OptionParser::MissingArgument, '--output' unless options.fetch(:output)
+
+  result = Erx::Generated.generate_one('terminal', root: options.fetch(:root), output: options.fetch(:output))
+  Erx::Terminal.puts("Terminal: generated files in #{result.output}")
+rescue OptionParser::ParseError => error
+  Erx::Terminal.puts(error.message)
+  exit 2
+rescue Erx::Error => error
   Erx::Terminal.puts(error.message)
   exit 1
 end

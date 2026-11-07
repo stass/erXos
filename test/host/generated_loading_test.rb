@@ -43,9 +43,9 @@ class GeneratedLoadingTest < Minitest::Test
   # Erx::Generated.require_ruby's own `require file`, which no generator
   # calls.
   COMPUTED_LOADS = [[GENERATOR_LIBRARY, 'file']].freeze
-  # Where generated files live: the tracked copies until they leave the
-  # tree, and the build tree. A computed load is suspect when its text
-  # names generated files at all.
+  # Where generated files live: the build tree, and tools/generated, the
+  # path a generated Ruby file mirrors there, which a stray load would name.
+  # A computed load is suspect when its text names generated files at all.
   GENERATED = %r{\A(?:tools/generated|build)/}
   NAMES_GENERATED = /generated/
 
