@@ -6,8 +6,6 @@ require 'rbconfig'
 require_relative 'error'
 require_relative 'runner'
 require_relative 'dependencies'
-require_relative 'json_input'
-require_relative 'bounded_file'
 require_relative 'rc_oracle'
 
 module Erx
@@ -19,11 +17,16 @@ module Erx
   # The decision of what to run (Setup.plan) is a pure function of what exists;
   # Setup#call gathers that and performs the steps in order.
   class Setup
-    # Sources the gates need (libc-test is for the native libc canary suite,
-    # plan9port for the rc oracle). tla-tools is left out on purpose: only
-    # `make check-tla` uses it, and its pin is a separate matter. The OCI
-    # oracle image is left out because the native oracle does not use it.
-    SOURCE_IDS = %w[otp musl arm-registers libc-test plan9port].freeze
+    # Setup fetches every source deps.lock pins except these, which only a
+    # gate of their own uses; each says which. A tar, git or file source
+    # deps.lock gains is fetched by setup without an edit here; setup cannot
+    # obtain an OCI image offline, so one must be named here.
+    SKIPPED_SOURCES = {
+      'tla-tools' => 'only `make check-tla` runs TLC',
+      'oracle-toolchain' => 'the OCI oracle image, which the native oracle does not use',
+      'linux-guest-kernel' => 'only `make check-erofs-oracle` boots the Linux guest',
+      'linux-guest-busybox' => 'only `make check-erofs-oracle` boots the Linux guest'
+    }.freeze
 
     Step = Data.define(:name, :kind, :argv, :deadline)
 
@@ -42,14 +45,17 @@ module Erx
                argv: %w[build rc-oracle])
     ].freeze
 
-    ALL_STEPS = (SOURCE_IDS.map do |id|
-      Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300)
-    end + COMMAND_STEPS).freeze
+    # Every step for deps.lock's sources: each source setup fetches, in
+    # deps.lock's order, then the builds that read them.
+    def self.steps(sources)
+      fetched = sources.map { |source| source.fetch('id') }.reject { |id| SKIPPED_SOURCES.key?(id) }
+      fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } + COMMAND_STEPS
+    end
 
     # present: a hash of step name => true when the step's output is valid.
-    # Returns the steps still to run, in dependency order.
-    def self.plan(present)
-      ALL_STEPS.reject { |step| present.fetch(step.name, false) }
+    # Returns the steps still to run, in their order.
+    def self.plan(present, steps:)
+      steps.reject { |step| present.fetch(step.name, false) }
     end
 
     # Where another checkout keeps verified archives, derived from a cache
@@ -65,10 +71,11 @@ module Erx
       @jobs = jobs
       @env = env
       @dependencies = Dependencies.new(root: @root, runner: @runner)
+      @steps = self.class.steps(@dependencies.sources)
     end
 
     def call
-      steps = self.class.plan(present)
+      steps = plan
       return [] if steps.empty?
 
       toolchain = toolchain_env
@@ -76,8 +83,10 @@ module Erx
       steps.map(&:name)
     end
 
+    def plan = self.class.plan(present, steps: @steps)
+
     def present
-      ALL_STEPS.to_h { |step| [step.name, valid?(step)] }
+      @steps.to_h { |step| [step.name, valid?(step)] }
     end
 
     private
@@ -102,15 +111,7 @@ module Erx
       false
     end
 
-    def source_valid?(id)
-      marker = File.join(@root, 'build/third_party', id, '.source.json')
-      return false if File.symlink?(marker) || !File.file?(marker)
-
-      JsonInput.parse(BoundedFile.read(marker, maximum: 65_536), max_bytes: 65_536,
-                      label: 'source download record') == @dependencies.sources.find { |source| source['id'] == id }
-    rescue Error
-      false
-    end
+    def source_valid?(id) = @dependencies.fetched?(id)
 
     def perform(step, toolchain)
       Terminal.puts("setup: #{step.name}")
@@ -132,30 +133,26 @@ module Erx
 
     # Never touches the network: the archive comes from a checkout's
     # verified downloads, or is already here from `make fetch`.
+    # The archive's own failures say how to get it; a stale tree's say what to remove.
     def obtain_source(id)
-      if @cache
-        origin = File.join(self.class.archive_directory(@cache), archive_name(id))
+      begin
+        local_archive(id)
+      rescue Error => e
+        raise Error, "#{e.message}; run `make fetch` or set ERX_SOURCE_CACHE to another checkout's build/third_party"
+      end
+      @dependencies.fetch(source_id: id)
+    end
+
+    # Dependencies#fetch would download a missing archive; setup must not.
+    def local_archive(id)
+      archive = @dependencies.archive_path_of(id)
+      if @cache && !File.file?(archive)
+        origin = File.join(self.class.archive_directory(@cache), File.basename(archive))
         raise Error, "source not found in ERX_SOURCE_CACHE: #{origin}" unless File.file?(origin)
 
         @dependencies.adopt(id, from: origin)
       end
-      require_local_archive(id)
-      @dependencies.fetch(source_id: id)
-    rescue Error => e
-      raise Error, "#{e.message}; run `make fetch` or set ERX_SOURCE_CACHE to another checkout's build/third_party"
-    end
-
-    # Dependencies#fetch would download a missing archive; setup must not.
-    def require_local_archive(id)
-      return if File.file?(File.join(@root, 'build/downloads', archive_name(id)))
-
-      raise Error, "source #{id} is not downloaded"
-    end
-
-    def archive_name(id)
-      @dependencies.sources.find { |source| source['id'] == id }.then do |source|
-        "#{id}-#{source.fetch('sha256')}.tar.gz"
-      end
+      raise Error, "source #{id} is not downloaded" unless File.file?(archive)
     end
 
     # The LLVM tools the native builds need, when the caller has not chosen.

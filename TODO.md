@@ -467,16 +467,21 @@ it; git history is the record of completed work.
   A `CommandError` from `qemu --version` timing out maps to `timed_out`, and a QEMU or HVF crash
   after the bootstrap memory line maps to `failed`, so host problems read as erXos's; the
   `cancelled` branch (line 208) is unreachable from `run_guest`, which passes no `cancelled:`.
+* [Low] tooling, fetched source paths: `tools/fuzz/lfs_image_target.rb:8`,
+  `test/host/erx_littlefs_test.rb:18` and `tools/lib/erx/libc_test.rb:24` spell a source's
+  unpacked directory (`littlefs-2.11.3`, `libc-test-63e36e9`) by hand, so a pin bump in
+  `deps.lock` fails them with a missing-file compiler error, and they read the tree without
+  checking its provenance record. Route them through `Dependencies#fetched_tree`, as the ERTS
+  build does (`Runtime::FETCHED_SOURCES`); `RcOracle::Build#source_tree` repeats the same check
+  by hand. Also `otp/erts/emulator/Makefile.in`: a make of the emulator run outside
+  `tools/erx` gets no `ERX_LITTLEFS` and fails on a missing `/lfs.c`.
 * [Low] tooling, `tools/lib/erx/libc_test.rb:158,270-279,454-457`, `tools/lib/erx/setup.rb`: (1)
   Every serial line between a test's run and end lines that matches `FILE.c:N: ` is
   attributed to that test, including kernel or root C output; a spurious disagreement, never a
   false pass. Require the `src/` path form `t_error` prints. (2) The libc-test make rules
   depend on sources only, and `forget_programs` deletes only `.elf`, so objects built under old
   `FLAGS` are reused; hash the flags into the rule or delete the objects when they change.
-  (3) `setup.rb:114-125`: with `ERX_SOURCE_CACHE` set, setup raises if the cache lacks an
-  archive this tree already has; the catch-all rescue appends "run `make fetch`..." to every
-  error, including a SHA-256 mismatch; `archive_name` duplicates `Dependencies#archive_path`
-  (expose and reuse it); the source steps' `deadline: 300` is never used. (4)
+  (3) `setup.rb`: the source steps' `deadline: 300` is never used. (4)
   `setup.rb:141-143`: `toolchain_env` hard-codes `/opt/homebrew/...` where Homebrew lives in
   `~/homebrew` and Linux is a host, and passes nothing silently when neither path exists;
   report when no toolchain is found. (5) `leftovers` reads the flavour out of `step.argv`;

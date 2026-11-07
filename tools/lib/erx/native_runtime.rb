@@ -47,6 +47,7 @@ module Erx
     # Make decides what is stale, so a build after no change costs seconds. Fiasco's build
     # must have run.
     def build(jobs: 4)
+      fetched_sources # refuses a source that is not fetched, before any step
       @oracle.verify(HOST_OTP_FLAVOUR)
       FileUtils.rm_f(self.class.record_path(@output))
       digest = self.class.source_digest(root: @root)
@@ -133,7 +134,7 @@ module Erx
         'ERX_LLVM_BIN' => @tools,
         'ERX_SYSROOT' => @sysroot,
         'ERX_TREE' => @root
-      ).freeze
+      ).merge(fetched_sources).freeze
     end
 
     def resource_directory

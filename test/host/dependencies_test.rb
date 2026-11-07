@@ -172,6 +172,43 @@ class DependenciesTest < Minitest::Test
     assert_equal 'safe', File.read(extracted_file)
   end
 
+  # Pins of the one cached archive, as fixture and other, and a pin of other
+  # bytes, as bad.
+  def two_sources
+    prepare_cached_source
+    entry = JSON.parse(File.read(File.join(@directory, 'deps.lock'))).fetch('sources').first
+    sources = [entry, entry.merge('id' => 'other'), entry.merge('id' => 'bad', 'sha256' => '0' * 64)]
+    File.write(File.join(@directory, 'deps.lock'), JSON.generate('version' => 1, 'sources' => sources))
+    runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
+    [Erx::Dependencies.new(root: @directory, runner: runner), entry]
+  end
+
+  # A directory an older fetch wrote, whose record lacks a field deps.lock's
+  # entry has, is refused with what to do about it, and the sources after it
+  # are still fetched. Each failure is reported after its source's id.
+  def test_a_stale_source_names_its_fix_and_does_not_stop_the_others
+    dependencies, entry = two_sources
+    stale = File.join(@directory, 'build/third_party/fixture')
+    FileUtils.mkdir_p(stale)
+    File.write(File.join(stale, '.source.json'), JSON.generate(entry.except('kind')))
+    error = assert_raises(Erx::Error) { dependencies.fetch(cache: @cache) }
+    assert_equal "fixture: build/third_party/fixture does not hold deps.lock's pin of fixture; " \
+                 'remove it and run `ruby tools/erx fetch --source fixture`; ' \
+                 'bad: source SHA-256 mismatch: bad', error.message
+    assert_equal 'safe', File.read(File.join(@directory, 'build/third_party/other/source-1/file'))
+    refute dependencies.fetched?('fixture')
+    assert dependencies.fetched?('other')
+  end
+
+  def test_fetched_tree_is_the_pinned_directory_of_a_recorded_fetch
+    dependencies, = two_sources
+    error = assert_raises(Erx::Error) { dependencies.fetched_tree('other') }
+    assert_equal 'source other is not fetched; run `ruby tools/erx fetch --source other`', error.message
+    dependencies.fetch(cache: @cache, source_id: 'other')
+    assert_equal File.join(@directory, 'build/third_party/other/source-1'), dependencies.fetched_tree('other')
+    assert_raises(Erx::Error) { dependencies.fetched_tree('unpinned') }
+  end
+
   def test_fetch_refuses_symlink_destination
     dependencies = prepare_cached_source
     dependencies.fetch(cache: @cache)

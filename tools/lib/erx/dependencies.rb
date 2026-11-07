@@ -101,16 +101,31 @@ module Erx
       if cache && selected.any? { |source| source.fetch('kind') == 'oci' }
         raise Error, 'OCI images use the Docker cache; fetch them explicitly without --cache'
       end
-      selected.each do |source|
-        if source.fetch('kind') == 'oci'
-          fetch_image(source)
-          next
-        end
-        archive = archive_path(source)
-        obtain(source, archive: archive, cache: cache)
-        verify(source, archive: archive)
-        publish(source, archive: archive)
-      end
+      # Each source is fetched on its own, so one that fails leaves the others
+      # fetched; the failures are reported together at the end, each after its id.
+      failures = selected.filter_map { |source| failure_of(source, cache: cache) }
+      raise Error, failures.join('; ') unless failures.empty?
+    end
+
+    # Whether build/third_party/ID holds what fetch published for deps.lock's
+    # pin of ID: its provenance record equals the pin's entry.
+    def fetched?(id) = recorded?(pinned(id))
+
+    # The unpacked tree of a tar or git source as fetch published it, for a
+    # build that compiles from it. Raises with the command that fetches it
+    # when the source is absent or holds another pin.
+    def fetched_tree(id)
+      source = pinned(id)
+      raise Error, "#{id} is a #{source.fetch('kind')} source, not a tree" unless %w[tar git].include?(source.fetch('kind'))
+
+      destination = File.join(@root, 'build/third_party', id)
+      raise Error, "source #{id} is not fetched; #{fetch_command(id)}" unless File.exist?(destination) || File.symlink?(destination)
+      raise Error, stale(id) unless recorded?(source)
+
+      tree = source.fetch('directory') == '.' ? destination : File.join(destination, source.fetch('directory'))
+      raise Error, stale(id) unless File.directory?(tree) && !File.symlink?(tree)
+
+      tree
     end
 
     # Takes a source archive from another checkout's downloads directory, but
@@ -132,6 +147,9 @@ module Erx
       end
       archive
     end
+
+    # Where fetch keeps source id's verified download, by its kind's file name.
+    def archive_path_of(id) = archive_path(pinned(id))
 
     def archive_for(id)
       source = sources.find { |entry| entry.fetch('id') == id }
@@ -272,6 +290,47 @@ module Erx
       end
     end
 
+    def pinned(id)
+      sources.find { |source| source.fetch('id') == id } or raise Error, "deps.lock pins no source #{id}"
+    end
+
+    def fetch_command(id) = "run `ruby tools/erx fetch --source #{id}`"
+
+    def stale(id) = "build/third_party/#{id} does not hold deps.lock's pin of #{id}; remove it and #{fetch_command(id)}"
+
+    # What went wrong fetching source, or nil when it was fetched.
+    def failure_of(source, cache:)
+      fetch_source(source, cache: cache)
+      nil
+    rescue Error, SystemCallError => e
+      "#{source.fetch('id')}: #{e.message}"
+    end
+
+    def fetch_source(source, cache:)
+      return fetch_image(source) if source.fetch('kind') == 'oci'
+
+      archive = archive_path(source)
+      obtain(source, archive: archive, cache: cache)
+      verify(source, archive: archive)
+      publish(source, archive: archive)
+    end
+
+    # A record another fetch wrote, of another pin or of an older deps.lock
+    # schema, is not this pin's: there is no reading of old records.
+    def recorded?(source)
+      destination = File.join(@root, 'build/third_party', source.fetch('id'))
+      marker = File.join(destination, '.source.json')
+      return false unless File.directory?(destination) && !File.symlink?(destination) &&
+                          File.file?(marker) && !File.symlink?(marker)
+
+      JsonInput.parse(BoundedFile.read(marker, maximum: 65_536), max_bytes: 65_536,
+                      label: 'source download record') == source
+    rescue JsonInput::Unsupported
+      raise
+    rescue Error
+      false
+    end
+
     def verify(source, archive:)
       unless Digest::SHA256.hexdigest(BoundedFile.read(archive, maximum: MAX_ARCHIVE_BYTES)) == source.fetch('sha256')
         raise Error, "source SHA-256 mismatch: #{source.fetch('id')}"
@@ -283,15 +342,7 @@ module Erx
       OutputDirectory.prepare(root: @root, path: parent)
       destination = File.join(parent, source.fetch('id'))
       raise Error, "source destination is a symlink: #{destination}" if File.symlink?(destination)
-      if File.exist?(destination)
-        marker = File.join(destination, '.source.json')
-        unless File.directory?(destination) && File.file?(marker) &&
-               !File.symlink?(marker) &&
-               JsonInput.parse(BoundedFile.read(marker, maximum: 65_536), max_bytes: 65_536,
-                               label: 'source download record') == source
-          raise Error, "source directory has unknown provenance: #{destination}"
-        end
-      end
+      raise Error, stale(source.fetch('id')) if File.exist?(destination) && !recorded?(source)
 
       Dir.mktmpdir('.source-', parent) do |temporary|
         extracted = File.join(temporary, 'tree')

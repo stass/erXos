@@ -10,27 +10,51 @@ require 'json'
 require_relative '../../tools/lib/erx/setup'
 
 class SetupTest < Minitest::Test
-  NAMES = Erx::Setup::ALL_STEPS.map(&:name).freeze
+  LOCK = Erx::DependencySchema.parse(File.binread(File.expand_path('../../deps.lock', __dir__)))
+  NAMES = Erx::Setup.steps(LOCK).map(&:name).freeze
+  PINNED = LOCK.map { |source| source.fetch('id') }.freeze
 
   def everything(value) = NAMES.to_h { |name| [name, value] }
 
   def test_fresh_tree_runs_every_step_in_order
-    assert_equal NAMES, Erx::Setup.plan({}).map(&:name)
-    assert_equal NAMES.first(5), %w[source-otp source-musl source-arm-registers source-libc-test source-plan9port]
+    assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK)).map(&:name)
+    assert_equal NAMES.length - 4, NAMES.take_while { |name| name.start_with?('source-') }.length
     assert_equal %w[oracle-jit oracle-emu runtime rc-oracle], NAMES.last(4)
   end
 
   def test_complete_tree_runs_nothing
-    assert_empty Erx::Setup.plan(everything(true))
+    assert_empty Erx::Setup.plan(everything(true), steps: Erx::Setup.steps(LOCK))
   end
 
   def test_only_missing_steps_run
     present = everything(true).merge('source-musl' => false, 'runtime' => false)
-    assert_equal %w[source-musl runtime], Erx::Setup.plan(present).map(&:name)
+    assert_equal %w[source-musl runtime], Erx::Setup.plan(present, steps: Erx::Setup.steps(LOCK)).map(&:name)
   end
 
-  def test_tla_tools_is_not_a_step
-    refute(NAMES.any? { |name| name.include?('tla') })
+  # Every pinned source is fetched by setup or skipped with its reason, and a
+  # skip names a source deps.lock still pins.
+  def test_every_pinned_source_is_fetched_or_skipped_with_a_reason
+    fetched = NAMES.filter_map { |name| name.delete_prefix('source-') if name.start_with?('source-') }
+    assert_equal PINNED.sort, (fetched + Erx::Setup::SKIPPED_SOURCES.keys).sort
+    assert_empty fetched & Erx::Setup::SKIPPED_SOURCES.keys
+    Erx::Setup::SKIPPED_SOURCES.each_value { |reason| refute_empty reason.strip }
+    assert_includes Erx::Setup::SKIPPED_SOURCES.keys, 'tla-tools'
+  end
+
+  # Setup obtains a source offline from a downloaded archive, which an OCI
+  # image is not.
+  def test_every_fetched_source_is_of_a_kind_setup_obtains_offline
+    fetched = LOCK.reject { |source| Erx::Setup::SKIPPED_SOURCES.key?(source.fetch('id')) }
+    assert_empty fetched.map { |source| source.fetch('kind') } - %w[tar git file]
+  end
+
+  # The ERTS build compiles littlefs, so a checkout set up before deps.lock
+  # pinned it must fetch it: setup's sources come from deps.lock.
+  def test_a_tree_without_littlefs_fetches_it
+    Dir.mktmpdir('erx-setup-') do |root|
+      FileUtils.copy_file(File.expand_path('../../deps.lock', __dir__), File.join(root, 'deps.lock'))
+      assert_includes Erx::Setup.new(root: root).plan.map(&:name), 'source-littlefs'
+    end
   end
 
   def test_archive_directory_is_the_sibling_downloads_of_the_cache
