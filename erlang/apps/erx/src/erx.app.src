@@ -33,6 +33,7 @@
              erx_stdio,
              erx_text,
              erx_text_tables,
+             erx_trace,
              erx_trace_ring,
              erx_tracer,
              erx_watchdog]},

@@ -252,6 +252,50 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # erx_trace_ring's BIFs over the hosted backend's ring (docs/design-live.md, "Tracing"):
+  # the clock pair, a read from the present that later finds the executors' parks and
+  # wakes, each marked cpu_unknown with thread and space 0 (a host thread has neither),
+  # the kernel's row refused as unsupported, a cursor past the head refused as inval, and badarg for a cursor of 2^64 - 1 or more, a Max
+  # outside 1 to 512 and an unknown source. Then erx:trace/1 itself: its refusals, a
+  # kernel trace that prints the kernel row unsupported and the backend's events, and a
+  # trace of the shell's own process that prints its in and out.
+  def test_the_trace_ring_bifs_and_erx_trace_run_in_the_release
+    assert_answers(
+      '{Mono, Clock} = erx_trace_ring:clocks(), {is_integer(Mono), is_integer(Clock) andalso Clock > 0}.' =>
+        /^\{true,true\}$/,
+      '[{cpu_unknown, Unknown}] = erx_abi_events:flags(trace_record_flags), ' \
+      '{ok, [], Head, 0} = erx_trace_ring:read(backend, present, 512), timer:sleep(200), ' \
+      '{ok, Records, Next, 0} = erx_trace_ring:read(backend, Head, 512), ' \
+      '{Records =/= [], Next =:= Head + length(Records), lists:all(fun({T, E, _, F, Th, Sp, {_, _, _}}) -> ' \
+      'T > 0 andalso E >= 1 andalso E =< 5 andalso F band Unknown =/= 0 andalso Th =:= 0 andalso Sp =:= 0 end, Records)}.' =>
+        /^\{true,true,true\}$/,
+      '{erx_trace_ring:read({kernel, 0}, present, 1), erx_trace_ring:read(backend, 1 bsl 64 - 2, 1)}.' =>
+        /^\{\{error,unsupported\},\{error,inval\}\}$/,
+      '[element(1, element(2, catch erx_trace_ring:read(S, C, M))) || {S, C, M} <- [{backend, 1 bsl 64 - 1, 1}, ' \
+      '{backend, 1 bsl 64, 1}, {backend, -1, 1}, {backend, present, 0}, {backend, present, 513}, {nope, present, 1}, ' \
+      '{{kernel, -1}, present, 1}]].' => /^\[badarg,badarg,badarg,badarg,badarg,badarg,badarg\]$/,
+      '{erx:trace(#{}), erx:trace(#{select => lists:duplicate(17, 4)}), erx:trace(#{select => [5]}), ' \
+      'erx:trace(#{select => [4], colour => red}), erx:trace(#{frames => true, kernel => true})}.' =>
+        /^\{\{error,badarg\},\s*\{error,badarg\},\s*\{error,scope\},\s*\{error,badarg\},\s*\{error,badarg\}\}$/,
+      '{ok, K} = erx:trace(#{kernel => true}), timer:sleep(300), erx:trace_stop(K), timer:sleep(100), kernel_done.' =>
+        /^ *\d+\.\d{9} kernel unsupported \[kernel\]$.*^ *\d+\.\d{9} backend (?:park|wake) \S+=\S+ slot=\d+ cpu=unknown thread=\d+ space=\d+ \[liberx trace\]$.*^kernel_done$/m,
+      '{ok, S} = erx:trace(#{select => [self()]}), timer:sleep(50), erx:trace_stop(S), timer:sleep(100), self_done.' =>
+        /^ *\d+\.\d{9} erts (?:in|out) pid=<[0-9.]+> domain=4 mfa=.* \[runtime\]$.*^self_done$/m,
+      # The spawn option {sensitive, true} (OTP edit 51): a session over every process sees
+      # a process spawned without it run, and never one spawned with it.
+      'Seen = fun(Opts) -> Col = spawn(fun() -> receive {go, Fr, Pr} -> timer:sleep(100), ' \
+      'Fr ! {seen, [x || {trace, Qr, _, _} <- element(2, process_info(self(), messages)), Qr =:= Pr] =/= []} end end), ' \
+      'Ses = trace:session_create(sensitive_test, Col, []), trace:process(Ses, all, true, [running]), ' \
+      'Pr = spawn_opt(fun() -> timer:sleep(10) end, Opts), Col ! {go, self(), Pr}, ' \
+      'receive {seen, Bo} -> trace:session_destroy(Ses), Bo end end, {Seen([]), Seen([{sensitive, true}])}.' =>
+        /^\{true,false\}$/,
+      # Two traces of every process at once, each printing what feeds the other and
+      # itself, end when stopped: the window bounds what each has out.
+      '{ok, TA} = erx:trace(#{select => [4]}), {ok, TB} = erx:trace(#{select => [4]}), timer:sleep(300), ' \
+      'erx:trace_stop(TA), erx:trace_stop(TB), timer:sleep(300), both_done.' => /^both_done$/
+    )
+  end
+
   # The CRC-32C per-byte primitive, a static NIF, runs in the release: the same expression
   # and answer as the boot from a release medium (Erx::MediumBoot::CRC32C_EXPRESSION). There
   # the expression follows another that binds shell variables, so here the shell holds

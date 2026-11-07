@@ -25,7 +25,7 @@
 -module(erx_tracer).
 -moduledoc "erx:trace's merger: the sources' reads into one stream ordered by erx_clock_ns.".
 
--export([new/1, ring/4, erts/5, release/2, emit/3, convert/2]).
+-export([new/1, ring/4, erts/5, release/2, flush/1, dropped/3, emit/3, convert/2]).
 -export_type([merger/0, row/0, source/0, entry/0, clock_pair/0]).
 
 -define(HOLD_NS, 100000000).
@@ -93,6 +93,16 @@ Pair taken for the batch, at Now (erx_clock_ns, taken before the batch was drain
           {merger(), [entry()]}.
 erts(Merger, Domain, Messages, Pair, Now) ->
     take(Merger, {erts, Domain}, [erts_entry(Domain, Message, Pair) || Message <- Messages], Now).
+
+-doc "Every held entry, in time order, for a trace that ends: nothing is left behind.".
+-spec flush(merger()) -> {merger(), [entry()]}.
+flush(#merger{held = Held} = Merger) ->
+    {Merger#merger{held = [], sent = latest(Merger#merger.sent, Held)}, Held}.
+
+-doc "The dropped entry of Row at Time: Count of its entries were not delivered.".
+-spec dropped(row(), pos_integer(), non_neg_integer()) -> entry().
+dropped(Row, Count, Time) ->
+    entry(Time, Row, dropped, #{count => Count}, false).
 
 -doc "The held entries that may go out at Now, in time order.".
 -spec release(merger(), non_neg_integer()) -> {merger(), [entry()]}.

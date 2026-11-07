@@ -125,6 +125,15 @@ refused_read_test() ->
     {M4, []} = erx_tracer:ring(M3, {kernel, 0}, ok([park(8)]), 9),
     ?assertMatch({_, [#{time := 8}]}, erx_tracer:release(M4, 9)).
 
+%% A trace that ends sends what it still holds, in time order.
+flush_test() ->
+    M0 = erx_tracer:new([backend, {kernel, 0}]),
+    {M1, []} = erx_tracer:ring(M0, backend, ok([park(30), park(10)]), 40),
+    {M2, []} = erx_tracer:release(M1, 40),
+    {M3, Out} = erx_tracer:flush(M2),
+    ?assertEqual([10, 30], times(Out)),
+    ?assertMatch({_, []}, erx_tracer:flush(M3)).
+
 emit_test() ->
     Ref = make_ref(),
     ok = erx_tracer:emit(self(), Ref, [#{time => 1}]),

@@ -408,6 +408,11 @@ it; git history is the record of completed work.
   OTP's `otp_SUITE:undefined_functions` under `check-oracle` to accept `shell_default`'s call of
   `erx:source/1`.
 
+* [Low] build, generated Erlang (`tools/lib/erx/abi.rb`, `abi/generated.json`): the ABI
+  generators' Erlang outputs (`erlang/apps/erx/src/generated/*.erl`,
+  `otp/erts/preloaded/src/erx_9p_grammar.erl`) are checked in under a drift check, against
+  CLAUDE.md's "Generated files are not checked in"; generate them into the build tree and have
+  the Erlang builds and host tests (`test/host/erx_trace_test.rb` among them) read them there.
 * [Low] files, `erx_9p` codec (`tools/lib/erx/abi_emit_wire.rb`, `abi/protocols/9p.txt`): a packed list's
   per-element size (`packed @p9_dirent_fixed`, 24) is declared rather than derived from the dirent tuple's wire
   widths, so a change to `dirent` would make the grammar's `packed_dirents/1` disagree with the bytes the codec
@@ -2409,18 +2414,45 @@ document's "residual risks accepted" paragraph.
   a test that the
   park core's `trace` effect writes one `park` and one `wake` per sleeping park, none for one that
   returns at once, with the returned status (`test/fixtures/fiasco_park_driver.c`'s is a no-op);
-  and the hosted ring through the function API. P2's remainder: a test of the BIFs
-  `erx_trace_ring:read/3` and `clocks/0` (their argument refusals, the records' fields and a
-  bignum cursor) on the hosted runtime, which needs that ring, or on QEMU in P3; the merger
-  (`erx_tracer`) has no case for a read refused with a status other than `notsup`, which the
-  design does not name; `erx_tracer:erts/5` takes the system domain's own trace messages and
-  crashes on another shape, so P4's relay records need their own validation before they reach
-  it; the BIF's 32 KiB buffer comes from `erts_alloc`, which ends the VM when memory runs out,
-  where `erts_alloc_fnf` and `{error, nomem}` would not; and the generated `erx_status_name`
-  table is sized by the most negative status, so a sparse status would need a bound in the
-  model or a switch. P3, `erx:trace` in the system domain with the `native_trace` suite on four
-  CPUs; P4, the trace facet, the relay, frame tracing and the host link's events stream, which need
-  M5's connections, since the stopgap offers no lanes.
+  and the hosted ring through the function API. P2's remainder: `erx_tracer:erts/5` takes the
+  system domain's own trace messages, which `erx_trace:classify/2` checks for shape, so P4's
+  relay records need their own validation before they reach it; the BIF's 32 KiB buffer comes
+  from `erts_alloc`, which ends the VM when memory runs out, where `erts_alloc_fnf` and
+  `{error, nomem}` would not; and the generated `erx_status_name` table is sized by the most
+  negative status, so a sparse status would need a bound in the model or a switch. P3's
+  remainder: the `native_trace` suite's test task started and stopped, with its `space_start`
+  and `space_end`; the merger's `unsupported` and `error` entries go out at once without moving
+  its latest sent time, so a held entry with an earlier time prints after them unmarked
+  (`erx_tracer:ring/4`); the kernel rings are counted from ERTS's `logical_processors`, which
+  falls back to one CPU when unknown and on erXos's kernel may disagree with the kernel's
+  count, where `liberx` or the boot information should give it; a well-formed `trace_ts`
+  tuple any system-domain process sends the trace process is shown as the runtime's event,
+  and the alias that is a trace's reference is its stop authority, though a reference can be
+  forged inside a node, which both matter once a trace's receiver or caller is in another
+  domain (P4); ERTS delivers session messages without flow control, so a session over many
+  busy processes on several schedulers can outpace the one trace process that discards the
+  excess, and its mailbox then grows; and `check/3` and the session message's shape need fuzz
+  targets once Specs and relayed records come from other domains. The window's review left
+  these open: `deliver/3` stamps a `dropped` entry with `Now` when a delivery has no
+  entries, so it can print ahead of held entries up to 100 ms older, unmarked (emit it only
+  with entries, at the first one's time); the trace process should run with a
+  `max_heap_size` that kills it, so its held entries (a forged far-future `trace_ts` is
+  never released while a ring is read), its batch and its on-heap mailbox are bounded by
+  construction, and the merger's `lists:merge` over the held list after every read belongs
+  on the performance watch list; `{sensitive, true}` also hides the process's messages,
+  dictionary and stack from `process_info` and crash dumps and stops call and seq tracing,
+  which OTP edit 51 and "Tracing" should say, or a narrower spawn flag should replace it;
+  design-live.md's "The end" says a trace whose receiver ended delivered what it held, and
+  design-stopgap.md's row says the workload's lines do not feed the trace, though the
+  backend row records the parks and wakes printing causes; the printer is spawned before
+  the session opens, so a refusal can print `erx:trace failed: noproc` after
+  `{error, scope}` (spawn it after `open_session/1`); a caller that dies while the trace
+  starts leaves a trace nobody can stop; a forged `{erx_trace_ack, Ref}` can open a stuck
+  receiver's window (P4); `erlang.erl`'s `spawn_opt_option()` lacks `{sensitive,
+  boolean()}`; `expect()`'s `session` boolean shares a name with the session handle; and
+  `park_then_wake?` mutates a set inside `any?`. P4, the trace facet, the
+  relay, frame tracing and the host link's events stream, which need M5's connections, since
+  the stopgap offers no lanes.
 * [Medium] code service, installed storage (`erlang/apps/erx_code/src/erx_code.erl`):
   the install arena, `erx_code:install_beam/2` and the runtime's
   `ERX_BOOT_INSTALLED_ONLY` refusal with `{error, not_installed}`

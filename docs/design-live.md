@@ -1401,19 +1401,48 @@ An `erts` event is OTP's message tag, with the pid, the domain and the
 message's other elements as fields (`in` and `out` carry `mfa`). A
 ring event is its `trace_event` name, with `cpu` (an integer, or
 `unknown` when the record sets `cpu_unknown`), `thread`, `space` and its
-named arguments as fields. Three events report on
+named arguments as fields. Four events report on
 a row itself: `unsupported`, with no fields, once at the trace's start
 for a row shown as unsupported, `error`, with `status`, for a ring whose
-read was refused, and `overwritten`, with
-`count`, for records a ring lost before they were read. The shell's
+read was refused, `overwritten`, with
+`count`, for records a ring lost before they were read, and `dropped`,
+with `count`, for entries the trace did not deliver.
+
+**Flow control.** The receiving process acknowledges the stream in
+windows: it sends `{erx_trace_ack, Ref}` after every 64 entries it has
+handled (`erx_trace:handled/2` counts them), and the trace has at most
+a window of 256 entries out beyond those acknowledged, however many
+acknowledgements arrive. An entry that finds the window shut is dropped
+and counted by row, and so is a session message past the 4,096 one
+round of 10 ms takes; the next delivery starts with one `dropped` entry
+per row, with the count, at the time of the first entry it delivers,
+and a trace that ends reports what it still counts. A slow receiver, a
+receiver that never acknowledges, or a trace whose output feeds itself
+(the console's driver traced while the shell prints) therefore holds at
+most 256 entries in the receiver and counters in the trace, and two
+traces at once hold twice that. A receiver that acknowledges entries it
+has not handled can only fill its own mailbox. The trace's own
+processes, the trace process and the printer, are spawned with the
+spawn option `{sensitive, true}` (OTP edit 51 of
+[design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), which makes a
+process sensitive from its first instruction, so no trace session, its
+own or another's, ever sees them run, whatever it selects.
+
+**The end.** The receiver holds a monitor of the trace process, whose
+pid `erx_trace:start/3` returns and which spawns the shell's printer
+and so is known to it. The trace process ends `normal` after a stop or
+when the receiver ends, having delivered what it still held; any other
+reason is a failure, and the printer then prints one escaped line,
+`erx:trace failed:` and the reason. The shell's
 printer writes one line per entry, the time in seconds, the row, the
-event, each field as `name=value` and the reporter's label in brackets,
+event, each field as `name=value` (`pid` and `domain` first, `cpu`,
+`thread` and `space` last, the others by name) and the reporter's label in brackets,
 with `late` after a late one:
 
 ```
    40.993000112 kernel unsupported [kernel]
    41.207113520 backend irq_deliver label=1 cpu=unknown thread=6 space=1 [liberx trace]
-   41.207119044 backend wake slot=2 result=ok cpu=unknown thread=4 space=1 [liberx trace]
+   41.207119044 backend wake result=ok slot=2 cpu=unknown thread=4 space=1 [liberx trace]
    41.207131870 erts in pid=<0.91.0> domain=4 mfa=timer:sleep/1 [runtime]
 ```
 
@@ -2121,7 +2150,19 @@ reference tables and field projections are covered by the drift check.
   fails. `erx_trace_ring:read/3` with a bignum cursor raises `badarg`,
   which a BIF seeded to truncate it fails. A traced process scheduled in a function whose name holds an
   escape sequence and a newline, whose line shows them escaped, which a
-  printer seeded to skip `erx_text:escape_line/1` fails. The stopgap's
+  printer seeded to skip `erx_text:escape_line/1` fails. The trace
+  process's decisions, in host tests: a receiver that never acknowledges
+  gets 256 entries of 1,000 and then one `dropped` entry per row with the
+  count, which a window seeded to stay open, or to drop without
+  reporting, fails; a hundred acknowledgements open the window to 256
+  and no further, which a window seeded without its cap fails; a round's
+  batch past 4,096 session messages counts the rest as dropped; a
+  `trace_ts` tuple of the wrong shape, and a stop, acknowledgement,
+  timer or monitor message with another reference, are ignored, which a
+  check seeded to take them fails; a full read is read again and a
+  refused ring is read no more. A process spawned with
+  `{sensitive, true}` under a trace session over every process is never
+  seen, where one spawned without it is, on the hosted runtime. The stopgap's
   ring and its four-CPU case are in
   [design-stopgap.md](design-stopgap.md#verification).
 * **Host link:** session replacement; a recorded hello and its calls

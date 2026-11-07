@@ -41,7 +41,9 @@ class ErxTracerTest < Minitest::Test
     'refused waited' => Seed.new("Rest = Merger#merger{waiting = maps:remove(Source, Waiting)},\n    case maps:is_key(Source, Waiting) of",
                                  "Rest = Merger,\n    case maps:is_key(Source, Waiting) of", 'refused_read_test'),
     'refused shown' => Seed.new('true -> {Rest, [entry(Now, row(Source), error, refusal_fields(Source, Status), false)]};',
-                                'true -> {Rest, []};', 'refused_read_test')
+                                'true -> {Rest, []};', 'refused_read_test'),
+    'flush' => Seed.new('{Merger#merger{held = [], sent = latest(Merger#merger.sent, Held)}, Held}.',
+                        '{Merger#merger{held = [], sent = latest(Merger#merger.sent, Held)}, []}.', 'flush_test')
   }.freeze
 
   def test_every_case_passes

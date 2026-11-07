@@ -9,7 +9,7 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([i/0, i/1, source/1]).
+-export([i/0, i/1, source/1, trace/1, trace_stop/1]).
 
 %%% Source lines: erx:source/1.
 
@@ -64,3 +64,24 @@ build(Sections) ->
         {[], {ok, #{attrs := #{development := {kernel, {ok, true}}}}}} -> development;
         _ -> release
     end.
+
+%%% The tracer: erx:trace/1 and erx:trace_stop/1.
+
+%% The scope of the caller's trace facet. In Phase 1 every shell runs in the system
+%% domain, whose facet is the system shell's, of scope `all`; a session's own facet
+%% replaces it when sessions run in their domains.
+-define(TRACE_SCOPE, all).
+
+-doc """
+Starts a trace of processes, frames or kernel events (erx_trace) that prints one
+line per event in the shell, `Spec` as in docs/design-live.md, "Tracing";
+`{error, badarg}`, `{error, no_facet}` or `{error, scope}` when it is refused.
+""".
+-spec trace(term()) -> {ok, reference()} | {error, badarg | no_facet | scope}.
+trace(Spec) ->
+    erx_trace:print(Spec, ?TRACE_SCOPE).
+
+-doc "Ends the trace that erx:trace/1 returned Ref for.".
+-spec trace_stop(reference()) -> ok.
+trace_stop(Ref) ->
+    erx_trace:stop(Ref).
