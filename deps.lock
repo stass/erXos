@@ -103,6 +103,27 @@
       "filename": "busybox-static-arm64.deb",
       "license": "GPL-2.0-only; the EROFS oracle guest only, never part of an image",
       "status": "permanent"
+    },
+    {
+      "id": "v64",
+      "kind": "git",
+      "version": "87d26deb9a77c2e98b4b684f39cc72ba9065d76a",
+      "url": "https://github.com/speedyHKjournalist/v64.git",
+      "commit": "87d26deb9a77c2e98b4b684f39cc72ba9065d76a",
+      "sha256": "a4b07e231ac6d0cab179286f42fddd8e67dfd9a27ad118c5b22b91d06bebfce2",
+      "directory": "v64-87d26de",
+      "license": "BSD-2-Clause AND MIT",
+      "status": "permanent"
+    },
+    {
+      "id": "closure-compiler",
+      "kind": "file",
+      "version": "v20210601",
+      "url": "https://repo1.maven.org/maven2/com/google/javascript/closure-compiler/v20210601/closure-compiler-v20210601.jar",
+      "sha256": "64f161c65a3dba42c9a4f5a79db335ac0e757fcba486cd7928205ac4c258ef08",
+      "filename": "closure-compiler-v20210601.jar",
+      "license": "Apache-2.0",
+      "status": "permanent"
     }
   ]
 }

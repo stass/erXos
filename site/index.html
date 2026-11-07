@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
 <link rel="stylesheet" href="style.css">
+<script type="module" src="terminal.js"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -41,36 +42,62 @@
     UNIX.</p>
   </div>
   <div class="hero-side">
-    <div>
-      <div class="lights" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    <div class="terminal" id="console">
+      <div class="terminal-bar">
+        <span><span class="dot"></span><span class="name">erXos</span> console</span>
+        <span data-erx-state>Recorded session</span>
       </div>
-      <div class="lights-caption label" aria-hidden="true">
-        <span>Processes</span><span>Running</span>
+      <!--
+        Without JavaScript this window shows a recorded session. terminal.js
+        replaces the <pre> with an xterm.js terminal attached to erXos
+        running in the browser under v64. See site/README.md.
+      -->
+      <div id="erx-terminal" data-erx-terminal="recorded">
+<pre>             __  __
+   ___  _ __ \ \/ /  ___   ___
+  / _ \| '__| \  /  / _ \ / __|
+ |  __/| |    /  \ | (_) |\__ \
+  \___||_|   /_/\_\ \___/ |___/
+
+erXos
+development build: trusted code only
+Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
+
+Eshell V17.1.1 (press Ctrl+G to abort, type help(). for help)
+
+<span class="c">% Write a file to /tmp, served by a RAM file system written in
+% Erlang, and read it back.</span>
+<span class="p">2&gt;</span> file:write_file("/tmp/hello.txt", &lt;&lt;"hello from erXos\n"&gt;&gt;), file:read_file("/tmp/hello.txt").
+{ok,&lt;&lt;"hello from erXos\n"&gt;&gt;}
+
+<span class="c">% Start a process that divides by zero, and catch its crash
+% with a monitor. The shell carries on.</span>
+<span class="p">3&gt;</span> {_, Ref} = spawn_monitor(fun() -&gt; 1 / erlang:list_to_integer("0") end), receive {'DOWN', Ref, process, _, {Reason, _}} -&gt; {crashed, Reason} end.
+=ERROR REPORT==== 1-Jan-1970::00:00:03.403519 ===
+Error in process &lt;0.103.0&gt; with exit value:
+{badarith,[{erlang,'/',[1,0],[{error_info,#{module =&gt; erl_erts_errors}}]}]}
+
+{crashed,badarith}
+
+<span class="c">% Define a ring: N processes, each passing a counted-down
+% token to the next, until it reaches zero.</span>
+<span class="p">4&gt;</span> Ring = fun(N, Laps) -&gt; Last = lists:foldl(fun(_, Next) -&gt; spawn(fun Loop() -&gt; receive 0 -&gt; Next ! 0; T -&gt; Next ! T - 1, Loop() end end) end, self(), lists:seq(1, N)), Alive = erlang:system_info(process_count), Last ! N * Laps, (fun Wait() -&gt; receive 0 -&gt; ok; T -&gt; Last ! T - 1, Wait() end end)(), io:format("~b processes alive; one token went round a ring of ~b, ~b messages~n", [Alive, N, N * Laps]) end.
+#Fun&lt;erl_eval.41.130099583&gt;
+
+<span class="c">% Run it: 50,000 processes alive at once, one token,
+% a million messages.</span>
+<span class="p">5&gt;</span> Ring(50000, 20).
+50039 processes alive; one token went round a ring of 50000, 1000000 messages
+ok</pre>
       </div>
+      <div class="terminal-controls" data-erx-controls hidden>
+        <div class="progress" data-erx-progress hidden><span></span></div>
+        <button type="button" class="boot" data-erx-boot>Boot erXos</button>
+        <button type="button" class="reset" data-erx-reset hidden>Reset</button>
+        <span class="status" role="status" aria-live="polite" data-erx-status>Runs in your browser</span>
+      </div>
+      <p class="terminal-hint" data-erx-hint hidden>At the <code>1&gt;</code> prompt, try <code>erx_shell:start().</code>, then <code>ls /</code> and <code>ps</code>.</p>
     </div>
-    <dl class="spec label">
-      <dt>Kernel</dt><dd>Capability microkernel</dd>
-      <dt>System</dt><dd>Erlang/OTP</dd>
-      <dt>Surface</dt><dd>UNIX</dd>
-      <dt>Target</dt><dd>AArch64 &middot; QEMU virt</dd>
-      <dt>Stage</dt><dd>Phase 1 &middot; early</dd>
-    </dl>
   </div>
 </section>
 
@@ -291,67 +318,73 @@
 <section class="section" id="try" aria-labelledby="try-title">
   <header>
     <span class="label"><b>05</b> / Try it</span>
-    <h2 id="try-title">A shell, a crash, a ring of 50,000.</h2>
+    <h2 id="try-title">The real thing, in your browser.</h2>
   </header>
   <div>
-    <div class="prose">
-      <p>Here is erXos booting in QEMU. A few lines go to the shell. They
-      write a file to <code>/tmp</code>, catch a crash with a monitor, and
-      pass a token around a ring of 50,000 processes. Soon this panel will
-      run erXos itself, in your browser.</p>
-    </div>
-
-    <div class="terminal">
-      <div class="terminal-bar">
-        <span><span class="dot"></span>erXos console</span>
-        <span>Recorded session</span>
+    <div class="try">
+      <div class="prose">
+        <p>The console at the top of this page runs erXos itself. Press
+        <strong>Boot erXos</strong> and your browser downloads the same boot
+        image that QEMU runs, then starts it on v64, an AArch64 machine
+        emulated in WebAssembly. The kernel, the system domain and the
+        Erlang shell all come up inside the page, in a few seconds.</p>
+        <p>Nothing runs on a server, and nothing you type leaves your
+        machine. Reset starts the machine again from the same image.</p>
       </div>
-      <!--
-        In-browser terminal goes here. The terminal step replaces the
-        contents of #erx-terminal with an xterm.js terminal attached to
-        erXos running in the browser. Keep the recorded <pre> as the
-        fallback when JavaScript is off. See site/README.md.
-      -->
-      <div id="erx-terminal" data-erx-terminal="recorded">
-<pre>             __  __
-   ___  _ __ \ \/ /  ___   ___
-  / _ \| '__| \  /  / _ \ / __|
- |  __/| |    /  \ | (_) |\__ \
-  \___||_|   /_/\_\ \___/ |___/
-
-erXos
-development build: trusted code only
-Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
-
-Eshell V17.1.1 (press Ctrl+G to abort, type help(). for help)
-
-<span class="c">% Write a file to /tmp, served by a RAM file system written in
-% Erlang, and read it back.</span>
-<span class="p">2&gt;</span> file:write_file("/tmp/hello.txt", &lt;&lt;"hello from erXos\n"&gt;&gt;), file:read_file("/tmp/hello.txt").
-{ok,&lt;&lt;"hello from erXos\n"&gt;&gt;}
-
-<span class="c">% Start a process that divides by zero, and catch its crash
-% with a monitor. The shell carries on.</span>
-<span class="p">3&gt;</span> {_, Ref} = spawn_monitor(fun() -&gt; 1 / erlang:list_to_integer("0") end), receive {'DOWN', Ref, process, _, {Reason, _}} -&gt; {crashed, Reason} end.
-=ERROR REPORT==== 1-Jan-1970::00:00:03.403519 ===
-Error in process &lt;0.103.0&gt; with exit value:
-{badarith,[{erlang,'/',[1,0],[{error_info,#{module =&gt; erl_erts_errors}}]}]}
-
-{crashed,badarith}
-
-<span class="c">% Define a ring: N processes, each passing a counted-down
-% token to the next, until it reaches zero.</span>
-<span class="p">4&gt;</span> Ring = fun(N, Laps) -&gt; Last = lists:foldl(fun(_, Next) -&gt; spawn(fun Loop() -&gt; receive 0 -&gt; Next ! 0; T -&gt; Next ! T - 1, Loop() end end) end, self(), lists:seq(1, N)), Alive = erlang:system_info(process_count), Last ! N * Laps, (fun Wait() -&gt; receive 0 -&gt; ok; T -&gt; Last ! T - 1, Wait() end end)(), io:format("~b processes alive; one token went round a ring of ~b, ~b messages~n", [Alive, N, N * Laps]) end.
-#Fun&lt;erl_eval.41.130099583&gt;
-
-<span class="c">% Run it: 50,000 processes alive at once, one token,
-% a million messages.</span>
-<span class="p">5&gt;</span> Ring(50000, 20).
-50039 processes alive; one token went round a ring of 50000, 1000000 messages
-ok</pre>
+      <div>
+        <div class="lights" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="lights-caption label" aria-hidden="true">
+          <span>Processes</span><span>Running</span>
+        </div>
+        <dl class="spec label">
+          <dt>Kernel</dt><dd>Capability microkernel</dd>
+          <dt>System</dt><dd>Erlang/OTP</dd>
+          <dt>Surface</dt><dd>UNIX</dd>
+          <dt>Target</dt><dd>AArch64 &middot; QEMU virt</dd>
+          <dt>Stage</dt><dd>Phase 1 &middot; early</dd>
+        </dl>
       </div>
     </div>
-  </div>
+    <div class="cells">
+      <div>
+        <span class="label"><b>T1</b></span>
+        <h3>Erlang first</h3>
+        <p>The console opens in the Erlang shell. Write a file to the RAM
+        file system and read it back:
+        <code>file:write_file("/tmp/hi", "hello"), file:read_file("/tmp/hi").</code></p>
+      </div>
+      <div>
+        <span class="label"><b>T2</b></span>
+        <h3>Then the command shell</h3>
+        <p><code>erx_shell:start().</code> starts the rc-language command
+        shell, itself an Erlang program.</p>
+      </div>
+      <div>
+        <span class="label"><b>T3</b></span>
+        <h3>Look around</h3>
+        <p><code>ls /</code> lists the root of the namespace.
+        <code>ps</code> lists the processes, which are Erlang
+        processes.</p>
+      </div>
+    </div>
+</div>
 </section>
 
 </main>

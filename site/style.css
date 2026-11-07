@@ -178,44 +178,48 @@ p:last-child {
 
 /* ---- Hero -------------------------------------------------------------- */
 
+/*
+ * The hero is split: the pitch on the left, the live console on the right,
+ * both above the fold on a desktop screen.
+ */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   border-bottom: 1px solid var(--rule);
 }
 
 .hero-main {
-  padding: 56px 40px 48px 0;
+  padding: 48px 40px 40px 0;
   border-right: 1px solid var(--rule);
 }
 
 .logo {
   display: block;
-  width: min(100%, 560px);
+  width: min(100%, 420px);
   height: auto;
   color: var(--ink);
-  margin: 0 0 40px -1.5%;
+  margin: 0 0 32px -1.5%;
 }
 
 .hero h1 {
-  font-size: clamp(30px, 4.2vw, 50px);
+  font-size: clamp(28px, 3vw, 40px);
   font-weight: 800;
   max-width: 17ch;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .hero .lede {
-  font-size: 19px;
+  font-size: 17px;
   max-width: 34em;
   color: var(--ink);
 }
 
 .hero-side {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 32px;
-  padding: 56px 0 48px 40px;
+  padding: 48px 0 40px 40px;
+}
+
+.hero .terminal {
+  margin-top: 0;
 }
 
 .spec {
@@ -484,8 +488,10 @@ p:last-child {
 /* ---- Terminal ---------------------------------------------------------- */
 
 /*
- * The terminal panel. Today it holds a recorded session; the in-browser
- * erXos replaces the contents of #erx-terminal (see site/README.md).
+ * The console window. It holds a recorded session until the visitor boots
+ * erXos; terminal.js then puts an xterm.js terminal in #erx-terminal (see
+ * site/README.md). The screen keeps one height, about 24 rows, in both
+ * states, so booting does not move the page.
  */
 .terminal {
   margin-top: 36px;
@@ -506,6 +512,11 @@ p:last-child {
   color: var(--code-dim);
 }
 
+.terminal-bar .name {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
 .terminal-bar .dot {
   display: inline-block;
   width: 8px;
@@ -516,15 +527,123 @@ p:last-child {
 }
 
 #erx-terminal {
-  min-height: 24em;
+  position: relative;
+  height: 400px;
 }
 
 .terminal pre {
+  height: 100%;
   margin: 0;
-  padding: 18px 20px 22px;
-  overflow-x: auto;
-  font: 13px/1.55 var(--mono);
+  padding: 14px 16px;
+  overflow: auto;
+  font: 13px/1.5 var(--mono);
   white-space: pre;
+}
+
+.xterm-host {
+  position: absolute;
+  inset: 12px 4px 12px 14px;
+}
+
+.terminal-controls {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border-top: 1px solid #2c2b28;
+}
+
+.terminal-controls[hidden],
+.terminal-controls [hidden],
+.terminal-hint[hidden] {
+  display: none;
+}
+
+.terminal-controls button {
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 9px 14px;
+  border: 1px solid var(--code-prompt);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.terminal-controls .boot {
+  background: var(--code-prompt);
+  color: #121211;
+}
+
+.terminal-controls .reset {
+  background: transparent;
+  color: var(--code-ink);
+  border-color: var(--code-dim);
+}
+
+.terminal-controls button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.terminal-controls button:focus-visible {
+  outline: 2px solid var(--code-ink);
+  outline-offset: 2px;
+}
+
+.terminal-controls .status {
+  flex: 1 1 12em;
+  font: 12px/1.4 var(--mono);
+  color: var(--code-dim);
+}
+
+/* A thin bar along the top edge of the controls. */
+.progress {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #2c2b28;
+}
+
+.progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--code-prompt);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .progress span {
+    transition: width 0.2s linear;
+  }
+}
+
+.terminal-hint {
+  margin: 0;
+  padding: 0 14px 12px;
+  font: 12px/1.5 var(--mono);
+  color: var(--code-dim);
+}
+
+.terminal-hint code {
+  background: none;
+  padding: 0;
+  color: var(--code-ink);
+}
+
+/* "Try it": what runs, beside the front panel of lights. */
+.try {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 32px 40px;
+  margin-bottom: 36px;
+}
+
+.try .spec {
+  margin-top: 24px;
 }
 
 .terminal .c {
@@ -573,7 +692,11 @@ p:last-child {
   }
 
   .hero-side {
-    padding: 32px 0 40px;
+    padding: 28px 0 40px;
+  }
+
+  .try {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .section,
@@ -619,8 +742,16 @@ p:last-child {
   }
 
   .terminal pre {
-    font-size: 12px;
-    padding: 14px;
+    font-size: 11px;
+    padding: 12px;
+  }
+
+  #erx-terminal {
+    height: 340px;
+  }
+
+  .xterm-host {
+    inset: 10px 2px 10px 10px;
   }
 }
 

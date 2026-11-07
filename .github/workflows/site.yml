@@ -1,0 +1,59 @@
+# Builds the website (site/README.md) into a GitHub Pages artifact.
+#
+# Manual only, and it deploys nothing: it uploads build/site as a Pages
+# artifact. Publishing needs a deploy job and Pages enabled for the
+# repository, which are the owner's decision.
+#
+# The erXos image needs the full erXos toolchain (the cross compilers, the
+# OTP and Fiasco builds), which this job does not set up. It takes the image
+# from a URL instead, normally a release asset, and checks it against the
+# SHA-256 given with it.
+#
+# Before enabling: pin each action below to a full commit SHA.
+name: site
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_url:
+        description: URL of an interactive production image.boot (e.g. a release asset)
+        required: true
+      image_sha256:
+        description: SHA-256 of that image.boot
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ruby clang lld default-jre-headless make
+          rustup target add wasm32-unknown-unknown
+      - name: Fetch the pinned v64 and Closure Compiler
+        run: |
+          tools/erx fetch --source v64
+          tools/erx fetch --source closure-compiler
+      - name: Download the erXos image
+        env:
+          IMAGE_URL: ${{ inputs.image_url }}
+          IMAGE_SHA256: ${{ inputs.image_sha256 }}
+        run: |
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --output image.boot "$IMAGE_URL"
+          echo "$IMAGE_SHA256  image.boot" | sha256sum --check
+      - name: Build v64 and assemble the site
+        run: ruby tools/build_site.rb --image image.boot
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
