@@ -72,10 +72,7 @@ module Erx
         exclusions = profile.fetch('exclusions').dup
         if component == 'otp'
           exclusions.concat(select_otp_applications(selected, applications: profile.fetch('applications')))
-          profile.fetch('exclusions').each do |excluded|
-            path = File.join(selected, excluded.fetch('path'))
-            File.unlink(path) if File.file?(path)
-          end
+          profile.fetch('exclusions').each { |excluded| remove_exclusion(selected, excluded.fetch('path')) }
         end
         Origin.new(root: selected).write(repository: profile.fetch('repository'),
                                          revision: profile.fetch('revision'),
@@ -133,6 +130,20 @@ module Erx
       end
       FileUtils.remove_entry(backup)
     end
+
+    # An excluded path leaves the unpacked tree whole, file or directory, so the
+    # origin record lists nothing beneath it. The profile is checked in, but its
+    # path still names only a place inside root.
+    def remove_exclusion(root, relative)
+      if !relative.is_a?(String) || relative.start_with?('/') ||
+         relative.split('/', -1).any? { |part| ['', '.', '..'].include?(part) }
+        raise Error, "invalid import exclusion #{relative.inspect}"
+      end
+
+      path = File.join(root, relative)
+      FileUtils.remove_entry(path) if File.exist?(path) || File.symlink?(path)
+    end
+    private_class_method :remove_exclusion
 
     def select_otp_applications(root, applications:)
       library = File.join(root, 'lib')

@@ -10,7 +10,7 @@ require 'zlib'
 require_relative '../../tools/import_origins'
 
 class OracleImportsTest < Minitest::Test
-  def fixture_import(project, bad_notice:)
+  def fixture_import(project, bad_notice:, extra: {})
     FileUtils.mkdir_p(File.join(project, 'config/imports'))
     FileUtils.copy_file(File.expand_path('../../config/imports/otp.json', __dir__), File.join(project, 'config/imports/otp.json'))
     original = File.join(project, 'original/otp_src_29.1.2')
@@ -18,6 +18,10 @@ class OracleImportsTest < Minitest::Test
     FileUtils.mkdir_p(File.join(original, 'lib/megaco'))
     File.write(File.join(original, 'lib/kernel/keep.erl'), bad_notice ? "%% SPDX-License-Identifier: NOASSERTION\n" : "%% SPDX-License-Identifier: Apache-2.0\n")
     File.write(File.join(original, 'lib/megaco/not-selected'), 'original')
+    extra.each do |path, bytes|
+      FileUtils.mkdir_p(File.dirname(File.join(original, path)))
+      File.write(File.join(original, path), bytes)
+    end
     FileUtils.copy_entry(original, File.join(project, 'otp'))
     stream = StringIO.new(''.b)
     Gem::Package::TarWriter.new(stream) do |tar|
@@ -50,6 +54,32 @@ class OracleImportsTest < Minitest::Test
     attribution = Erx::Attribution.for_file('lib/stdlib/test/re_SUITE_data/old_pcre1/testoutput1',
                                            bytes: 'fixture without a header', sidecar: nil, review: profile)
     assert_equal 'BSD-3-Clause', attribution.fetch('license')
+  end
+
+  # A re-import applies the profile's exclusions, so every exclusion otp/ORIGIN.md
+  # records is one of them, or an application outside the profile's set, which the
+  # import prunes on its own; otherwise a re-import would bring back the prebuilt
+  # beams and boot scripts and record them as imported.
+  def test_the_import_profile_excludes_what_the_origin_record_excludes
+    profile = JSON.parse(File.read(File.expand_path('../../config/imports/otp.json', __dir__)))
+    recorded = Erx::Origin.new(root: File.expand_path('../../otp', __dir__)).inventory.fetch('exclusions')
+                          .map { |exclusion| exclusion.fetch('path') }
+    pruned = recorded.select do |path|
+      path.match?(%r{\Alib/[^/]+\z}) && !profile.fetch('applications').include?(File.basename(path))
+    end
+    assert_empty recorded - pruned - profile.fetch('exclusions').map { |exclusion| exclusion.fetch('path') }
+    assert_includes recorded, 'erts/ebin'
+  end
+
+  # An excluded directory leaves the import whole, as an excluded file does.
+  def test_an_excluded_directory_leaves_the_import
+    Dir.mktmpdir('erx-otp-excluded-') do |project|
+      fixture_import(project, bad_notice: false, extra: { 'erts/ebin/prim_file.beam' => 'prebuilt' })
+      Erx::ImportOrigins.write(root: project, component: 'otp')
+      refute File.exist?(File.join(project, 'otp/erts/ebin'))
+      excluded = Erx::Origin.new(root: File.join(project, 'otp')).inventory.fetch('exclusions')
+      assert_includes excluded.map { |exclusion| exclusion.fetch('path') }, 'erts/ebin'
+    end
   end
 
   def test_mixed_musl_grants_are_recorded_together
