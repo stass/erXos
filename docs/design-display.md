@@ -1125,6 +1125,18 @@ position of the fault.
   manifest that keeps logins off the display leaves `console_line` unset,
   which removes its terminal windows. This is the trust an X server or a
   Wayland compositor has, stated.
+* **On the stopgap.** QEMU `virt` under the stopgap Fiasco, as the harness
+  starts it, has no IOMMU, so virtio-gpu and virtio-input attach over
+  virtio-mmio and are unconfined. The development manifest gives them to
+  the display domain, the Phase 1 manifest check allows that in a
+  development build, and the display domain is then in the trusted base,
+  as the paragraph above says of any development build that holds such a
+  device; a draw client that compromises it reaches all memory through the
+  gpu's DMA. The release manifest's refusal is unchanged, and the drivers,
+  window tokens, secure terminal windows and logins are the same code on
+  both. Moving the devices to virtio-pci behind the IOMMU on erXos's kernel
+  changes their device records and DMA profiles, not their drivers
+  ([design-system.md](design-system.md#devices)).
 * **Input** is routed by the policy to one window per event, and nothing
   lets a client write another window's input. Under the single policy
   the service chord never reaches the application, and while the service

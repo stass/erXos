@@ -813,6 +813,22 @@ cannot take the ends, and `ENOMEM` for the session's budget or the
 program's. The session's own processes get their pipes the same way,
 without an install, since the capabilities stay in the session's table.
 
+**On the stopgap.** The pipe server, the handler and `liberx` are the same
+code. On the stopgap Fiasco each create, bind and install is a request to
+the backend's root service: the lane and the lock page are memory objects
+it maps into the holders (R1), the doorbells IRQ objects it binds to the
+holder task's readiness dispatcher (R3), and the installs `erx_cap_pass`
+in its creator's case (R4)
+([design-stopgap.md](design-stopgap.md#the-call-table)). Budgets are
+records there (R6), so `ENOMEM` comes from the root's pool rather than the
+session's budget. The ends a holder may use are the rights the root
+service records and checks at each request; that a program which bypasses
+`liberx` cannot widen them, that `TRIGGER` comes without the right to bind,
+and the ownership of ends as a kernel fact are erXos's kernel's
+([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)). End of
+stream follows from the session's records of holders, user-mode code, and
+holds on both.
+
 ### Inherited ends
 
 A program never hands its own end to another program. When a spawn or a

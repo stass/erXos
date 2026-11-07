@@ -1143,6 +1143,25 @@ timeout passes first, after which the domain service has stopped and
 destroyed the domain, so in every error case nothing of it remains (A4,
 [design-domains.md](design-domains.md#principals-sessions-and-quotas)).
 
+**On the stopgap.** The plan, its checks and its undo are the same code.
+Each step's kernel call is a request to the stopgap's root service, the
+one owner of every Fiasco object, served on its one thread
+([design-stopgap.md](design-stopgap.md#the-root-service)): step 1's
+budgets and step 3's groups are records with nothing charged or enforced
+(R6), so K32's walls do not hold; step 2's space is a Fiasco task with its
+parent recorded, so the domain's end ends its sub-spaces (R2), and its
+faults reach the root service as Fiasco's fault messages, which become
+the domain's crash record; step 4's sides and bells are R1 and R3; and
+step 6's installs are R4, their rights recorded in the root service's
+handle table and checked at each request
+([the call table](design-stopgap.md#the-call-table)). That a domain which
+bypasses `liberx` is held to those rights, that its charges stay within
+its walls and that its exit record follows its last runnable thread are
+erXos's kernel's
+([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)); what the
+stopgap means for connections and for the domains' invariants is in
+[design-domains.md](design-domains.md#on-the-stopgap).
+
 Domain ids come from a counter in the domain service that only grows and
 starts at 4, since stock `erlang:setnode/2` raises a creation below 4 to
 4: the system domain is 4, and when the counter would pass 2^32 - 2,
@@ -2003,6 +2022,29 @@ and through a mapping it makes for those writes, during its boot and at
 a panic or the machine's end, and the driver owns it otherwise
 ([design-kernel.md](design-kernel.md#console-log-and-panic)).
 
+**On the stopgap.** The device service, the manifest's placement, the
+drivers and their supervisors are the same code. Behind
+`erx_dom_device_give`, the stopgap's root service maps a device's register
+windows and contiguous memory into the holding domain's task and binds
+each of its interrupt lines to that task's readiness dispatcher (R7,
+[design-stopgap.md](design-stopgap.md#the-call-table)). QEMU `virt`, as
+the harness starts it, has no IOMMU and attaches its devices over
+virtio-mmio, so every DMA device on the stopgap is unconfined. The
+development manifest still gives each device to its own domain: the block
+device to the storage domain, which runs the block driver and the file
+systems, littlefs as its sub-space port; the network device to the network
+domain; virtio-gpu and virtio-input to the display domain. The Phase 1
+manifest check allows these unconfined devices in a development build, and
+property 9 refuses them in a release manifest as it does on erXos's kernel;
+the stopgap builds no release. Drivers die and restart under their
+supervisors as this section describes, but their DMA reaches all memory,
+so a driver, or a domain that parses hostile bytes beside one, can reach
+every domain through its device. DMA windows, MSIs and the lifetime of
+device buffers are erXos's kernel's
+([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)), and moving
+a device to virtio-pci behind the IOMMU then changes its device record and
+its DMA profile, not its driver.
+
 #### Drivers
 
 A **driver** is an Erlang process under a supervisor in the domain that
@@ -2238,6 +2280,17 @@ split and the oracle for behaviour and throughput, never the source: an
 sDDF driver may run as a stopgap shim, imported as erXos's code with an
 origin file, under a row of its own
 ([design.md](design.md#dependencies)).
+
+A measurement taken on the stopgap Fiasco admits no native driver. There
+an interrupt reaches its driver through a dispatcher thread, and its
+acknowledgement, like most kernel calls, is a request to the root
+service, which serves the whole machine on one thread
+([design-stopgap.md](design-stopgap.md#interrupts-and-readiness)), so an
+Erlang driver that misses a device's timing there may be missing the
+stopgap's, and a shim admitted on that number would work around the
+stopgap rather than the device. Such a measurement is recorded with the
+stopgap named, and the row's decision waits for the same measurement on
+erXos's kernel.
 
 | Device | Board | Measurement | Shim | Tracked by |
 | --- | --- | --- | --- | --- |

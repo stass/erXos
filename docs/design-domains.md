@@ -325,6 +325,59 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each party writes exactly one memory object of a connection and maps the other's read-only; the system domain carves the connection's children and creates both sides and both bells from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
 | **D17.** A domain's end reaches each peer behind everything the domain published on their lane | the kernel posts a space's exit record only when no thread of it can run, so the dead domain's write position is final; a runtime told that a connection is down first drains that lane to the position it reads then, waiting on nothing the dead domain would have to do, and only then fires its links and monitors with the peer's processes | a runtime that acts on a connection down before draining; a stop reported while a thread can still run | a test that kills a domain mid-burst on every CPU and checks that each peer sees the burst, then the death |
 
+## On the stopgap
+
+Until erXos's kernel is written, domains and their connections run on the
+stopgap Fiasco behind the same kernel interface
+([design-stopgap.md](design-stopgap.md)). Everything this document
+specifies above `liberx` is the same code on both: the domain service, the
+funnel, the peer, exports, introductions, the wake handshake and the
+domain library's creation plan. What stands behind the kernel calls is the
+backend's rows R1 to R4 and R6
+([the call table](design-stopgap.md#the-call-table)):
+
+* a connection's sides are memory objects of the root task's pool, which
+  the root service maps into both parties with the rights the domain
+  library asks for (R1); destroying one revokes it in every task that maps
+  it;
+* a bell is an IRQ object that the root service creates and binds to the
+  consumer task's readiness dispatcher, and any holder triggers it (R3);
+* the domain library installs a connection's objects into both parties
+  with `erx_cap_pass` in its creator's case (R4); passing at an IPC
+  rendezvous stays refused, and no connection needs it;
+* a domain's space is a Fiasco task that the root service creates with its
+  parent recorded and ends with its sub-spaces; its exit record carries the
+  exit status, or `crash` from Fiasco's fault message (R2);
+* budgets and groups are records (R6): every field reports `unsupported`,
+  and nothing is charged or enforced.
+
+D1 to D6, D9, D12 and D13 rest on user-mode code, and hold on the stopgap
+for every domain whose runtime goes through `liberx`. Three rest on the
+kernel, and erXos's kernel alone guarantees them
+([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)): D7, since a
+stop on the stopgap is the root service deleting a task and then its
+sub-spaces, one request at a time on its one thread; D16's charging, since
+no budget is charged, though each side still has one writer because the
+root service maps the reader's copy read-only; and D17, since the stopgap
+does not promise that an exit record follows the last runnable thread
+(K18). Nothing on the stopgap holds a domain that bypasses `liberx` and
+calls Fiasco itself; development builds run trusted code only.
+
+The tests of [Verification and testing](#verification-and-testing) run on
+the stopgap with three limits. The hostile runtimes run, and their verdicts
+on frames (what the funnel accepts, refuses and decodes, and what a forged
+sender or name gets) count; their bounds on memory charged to a budget, on
+CPU grants and on an innocent peer's latency are reported `unsupported`
+and checked on erXos's kernel. The capability-table checks read the root
+service's handle tables, so they prove what the service records, not what
+a kernel enforces. Lane and wake timings are provisional: a bell on the
+stopgap is an IRQ object behind the root service, which serves the whole
+machine on one thread, so no code above `liberx` may depend on a bell's
+latency, and no decision is taken from those numbers. The hosted backend carries the same rows, each domain
+a macOS process, so the lane, connection and funnel tests also run there
+under the sanitizers
+([design-runtime.md](design-runtime.md#hosted-mode)).
+
 ## Data model
 
 ### Domain ids, pids and references

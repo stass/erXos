@@ -199,6 +199,15 @@ It holds a **login facet** of the system domain's `erx_web_login`, whose
 two operations are `login` and `logout`. It holds no inspect, trace,
 console or shell facet.
 
+**On the stopgap.** The web domain runs on the stopgap Fiasco as designed:
+a configured domain holding its login facet, reached through the host
+tool's front end over the host link, and through the network front end
+once the network domain gives it a network facet. Nothing in this document
+changes there. What the stopgap does not enforce is the wall around the
+domain and W8's charge to the principal: budgets are records, so W8's
+bounds hold as the web domain's own limits but nothing is charged
+([design-domains.md](design-domains.md#on-the-stopgap)).
+
 **A browser is a display.** The display domain owns screens and input
 devices and serves windows; the web domain owns browser connections and
 serves the same widget service. Both serve `abi/services/display.txt`
