@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # /proc (docs/design-live.md, "The /proc tree"): test/erlang/erx_procfs_tests.erl runs on
 # stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources as
@@ -13,7 +14,11 @@ require 'tmpdir'
 # reads a kernel record.
 class ErxProcfsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
+  # The sources below that build/gen holds rather than the tree.
+  GENERATED = %w[erlang/apps/erx/src/generated/erx_schema.erl erlang/apps/erx/src/erx_text_tables.erl].freeze
   # erx_fs first: the tree names it as its behaviour.
   BEHAVIOUR = %w[erlang/apps/erx_files/src/erx_fs.erl].freeze
   SOURCES = %w[
@@ -79,7 +84,7 @@ class ErxProcfsTest < Minitest::Test
 
   FAULTS.each_with_index do |fault, index|
     define_method(:"test_seeded_fault_#{index}_is_caught") do
-      original = File.read(File.join(ROOT, fault.file))
+      original = File.read(located(fault.file))
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       output, status = eunit({ fault.file => original.sub(fault.from) { fault.to } })
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
@@ -102,10 +107,14 @@ class ErxProcfsTest < Minitest::Test
   end
 
   def source_path(work, source, replaced)
-    return File.join(ROOT, source) unless replaced.key?(source)
+    return located(source) unless replaced.key?(source)
 
     File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
   end
+
+  # Where a source of SOURCES is: build/gen for a generated one, otherwise the tree.
+  def located(source) =
+    GENERATED.include?(source) ? Erx::Generated.path(source, root: ROOT) : File.join(ROOT, source)
 
   def compile(work, paths)
     output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-I', INCLUDE,

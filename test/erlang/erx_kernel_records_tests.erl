@@ -10,7 +10,7 @@
 -module(erx_kernel_records_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../../erlang/apps/erx/include/generated/erx_abi.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(BUDGET_PATH, [domains, 4, budget]).
 -define(KIND, ?ERX_INFO_BUDGET_REPORTED_KIND).

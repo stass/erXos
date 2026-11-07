@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_source_tests.erl, the EUnit cases of erx_source, the
 # lines of source a process is at, and of erx:source/1, against the modules
@@ -13,10 +14,11 @@ require 'tmpdir'
 # into a directory under the working directory, a fresh one for each run.
 class ErxSourceTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx/src/erx_text.erl
-               erlang/apps/erx/src/erx_source.erl erlang/apps/erx/src/erx.erl
-               test/erlang/erx_source_tests.erl]
-            .map { |path| File.join(ROOT, path) }.freeze
+  # The generated sources named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
+             *%w[erlang/apps/erx/src/erx_text.erl erlang/apps/erx/src/erx_source.erl erlang/apps/erx/src/erx.erl
+                 test/erlang/erx_source_tests.erl].map { |path| File.join(ROOT, path) }].freeze
 
   def test_source_cases_pass_under_eunit
     Dir.mktmpdir('erx-source-test') do |work|

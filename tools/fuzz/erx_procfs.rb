@@ -5,19 +5,24 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of /proc's entry names, erx_procfs_core:child/2 and walk/3
-# (test/erlang/erx_procfs_fuzz.erl), compiled from the checked-in sources with the schema,
-# the inspector and the renderer they call, and run alone on stock's emulator (ERX_ERL and
-# ERX_ERLC, the oracle's), so it needs no hosted build. It runs the sources as they are,
-# then a copy of erx_procfs_core whose child/2 lets a name hold "/", which must fail: a
-# name "/cpus" at the root would then read as cpus in a second spelling.
+# (test/erlang/erx_procfs_fuzz.erl), compiled from source with the schema, the inspector
+# and the renderer they call (the generated schema and text tables from build/gen), and
+# run alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so it needs no
+# hosted build. It runs the sources as they are, then a copy of erx_procfs_core whose
+# child/2 lets a name hold "/", which must fail: a name "/cpus" at the root would then
+# read as cpus in a second spelling.
 module ErxProcfsFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   CORE = 'erlang/apps/erx_files/src/erx_procfs_core.erl'
+  GENERATED = %w[erlang/apps/erx/src/generated/erx_schema.erl erlang/apps/erx/src/erx_text_tables.erl]
+              .map { |source| Erx::Generated.path(source, root: ROOT) }.freeze
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   SOURCES = %w[
-    erlang/apps/erx/src/generated/erx_schema.erl
-    erlang/apps/erx/src/erx_text_tables.erl
     erlang/apps/erx/src/erx_text.erl
     erlang/apps/erx/src/erx_object_info.erl
     erlang/apps/erx/src/erx_kernel_records.erl
@@ -49,9 +54,9 @@ module ErxProcfsFuzz
     Dir.mktmpdir('erx-procfs-fuzz') do |work|
       core_path = File.join(work, 'erx_procfs_core.erl')
       File.binwrite(core_path, core_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', File.join(ROOT, 'erlang/apps/erx/include'),
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE,
                                        '-o', work, core_path,
-                                       *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
+                                       *GENERATED, *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

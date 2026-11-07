@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/native_root'
+require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
 
@@ -47,7 +48,8 @@ class TraceRingTest < Minitest::Test
   def build(source, name:, flags: [])
     output = File.join(@directory, name.tr(' ', '-'))
     log, status = Open3.capture2e(compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread',
-                                  *@sanitizer_flags, *flags, '-I', File.join(ROOT, 'include'), '-I', ROOT, source,
+                                  *@sanitizer_flags, *flags, *Erx::Generated.include_flags(root: ROOT),
+                                  '-I', File.join(ROOT, 'include'), '-I', ROOT, source,
                                   File.join(ROOT, DRIVER), '-o', output, stdin_data: '')
     assert status.success?, log
     output

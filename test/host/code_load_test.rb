@@ -6,8 +6,9 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/code_commands'
 require_relative '../../tools/lib/erx/reload_guest'
+require_relative '../fixtures/generated_tree'
 
-# The tree, for erlc's include directories.
+# The tree, for erlc's include directories; the generated ones are in its build/gen.
 module Erx
   ROOT_FOR_TESTS = File.expand_path('../..', __dir__)
 end
@@ -214,7 +215,11 @@ class ErlangCompileTest < Minitest::Test
     assert_equal '/out/m.beam', compile.call('src/m.erl', output: '/out')
     argv, options = runner.runs.first
     assert_equal ['/oracle/erlc', '+deterministic', '+debug_info'], argv.first(3)
-    assert_includes argv.each_cons(2).to_a, ['-I', 'erlang/apps/erx/include']
+    includes = argv.each_cons(2).select { |flag, _| flag == '-I' }.map(&:last)
+    generated = includes.index(File.join(Erx::Generated::OUTPUT, 'erlang/apps/erx/include'))
+    refute_nil generated, includes.inspect
+    tree = includes.index('erlang/apps/erx/include')
+    assert generated < tree, includes.inspect if tree
     assert_equal ['-o', '/out', File.expand_path('src/m.erl')], argv.last(3)
     assert_equal Erx::Oracle::CLEAN_ERLANG_ENV, options[:env]
     assert options[:deadline].positive?

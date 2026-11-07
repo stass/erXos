@@ -5,15 +5,19 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_tracer_tests.erl on stock's emulator (ERX_ERL and ERX_ERLC, which
-# make check supplies) against erx_tracer and the checked-in generated erx_abi_events and
-# erx_schema, then each seed: a one-line flip of erx_tracer.erl that the case it names
+# make check supplies) against erx_tracer and the generated erx_abi_events and erx_schema
+# from build/gen, then each seed: a one-line flip of erx_tracer.erl that the case it names
 # must catch.
 class ErxTracerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erx_tracer.erl generated/erx_abi_events.erl generated/erx_schema.erl]
-            .map { |name| File.join(ROOT, 'erlang/apps/erx/src', name) }.freeze
+  # The generated sources named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_tracer.erl'),
+             *%w[generated/erx_abi_events.erl generated/erx_schema.erl]
+               .map { |name| Erx::Generated.path(File.join('erlang/apps/erx/src', name), root: ROOT) }].freeze
   TRACER = SOURCES.first
   # A one-line flip of erx_tracer.erl and the case that must catch it.
   Seed = Data.define(:original, :replacement, :test)

@@ -11,7 +11,7 @@
 -module(erx_inspector_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../../erlang/apps/erx/include/generated/erx_abi.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(SYSTEM, 4).
 

@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of the host link's 9P bridge core, erx_hostlink_9p
 # (test/erlang/erx_hostlink_9p_fuzz.erl), compiled with the generated codec and grammar
@@ -18,11 +19,13 @@ require 'tmpdir'
 # between the host and the machine").
 module ErxHostlink9pFuzz
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = [File.join(ROOT, 'otp/erts/preloaded/src/erx_9p_grammar.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/generated/erx_9p.erl')].freeze
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  SOURCES = %w[otp/erts/preloaded/src/erx_9p_grammar.erl erlang/apps/erx/src/generated/erx_9p.erl]
+            .map { |source| Erx::Generated.path(source, root: ROOT) }.freeze
   CORE_SOURCE = File.join(ROOT, 'erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_hostlink_9p_fuzz.erl')
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   POOL_CHECK = 'map_size(Fids) >= Pool -> {error, emfile};'
   NO_POOL_CHECK = 'map_size(Fids) > Pool -> {error, emfile};'
   CHAIN_ORDER = 'seq = Seq + 1}, []}'

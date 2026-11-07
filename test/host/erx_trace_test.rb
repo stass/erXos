@@ -5,14 +5,19 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_trace_tests.erl, the check of erx:trace/1's Spec, the printed line
 # and the trace process's pure decisions, on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies), then each
 # seed: a one-line flip of erx_trace.erl that the case it names must catch.
 class ErxTraceTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erx_trace.erl erx_tracer.erl erx_text.erl erx_text_tables.erl generated/erx_abi_events.erl
-               generated/erx_schema.erl].map { |name| File.join(ROOT, 'erlang/apps/erx/src', name) }.freeze
+  # The generated sources named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  SOURCES = [*%w[erx_trace.erl erx_tracer.erl erx_text.erl]
+               .map { |name| File.join(ROOT, 'erlang/apps/erx/src', name) },
+             *%w[erx_text_tables.erl generated/erx_abi_events.erl generated/erx_schema.erl]
+               .map { |name| Erx::Generated.path(File.join('erlang/apps/erx/src', name), root: ROOT) }].freeze
   TRACE = SOURCES.first
   # A one-line flip of erx_trace.erl and the case that must catch it.
   Seed = Data.define(:original, :replacement, :test)

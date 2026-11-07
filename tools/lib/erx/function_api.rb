@@ -37,7 +37,7 @@ module Erx
     GUEST = HostedSources::GUEST
     HOSTED_SOURCES = HostedSources::ALL
     NATIVE_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'liberx/backend/core/refused.c',
-                      'liberx/backend/fiasco/api_names.c', 'liberx/generated/abi_reader.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c", "#{GUEST}/device_cases.c"].freeze
+                      'liberx/backend/fiasco/api_names.c', 'build/gen/liberx/generated/abi_reader.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c", "#{GUEST}/device_cases.c"].freeze
     # Each case's patience in the guest is 60 seconds: a stall fails its own line.
     CASE_SECONDS = 90
     # The join loop's deletions each wait for a grace period, which across CPUs under TCG takes far longer.
