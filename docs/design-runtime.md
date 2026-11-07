@@ -411,8 +411,9 @@ of behaviour, however many lines it touches:
 | `beam/break.c` | 47. the break menu prints no clear-screen sequence, so it asks no terminal whether to |
 | `lib/stdlib/src/erl_parse.erl` | 48. the generated parser has no `-file` line naming the machine that generated it, since `stdlib` would not rebuild after a source edit with one |
 | `emulator/Makefile.in` | 49. `erl_compile_flags.h` holds `N/A` for the flags and `config.h` on erXos's targets, since they name host paths and `erlang:system_info(compile_info)` would serve them from the image |
+| `lib/stdlib/src/shell_default.erl` | 50. exports erXos's shortcuts, each a one-line call of its `erx` function ([design-live.md](design-live.md#erlang-in-every-domain)) |
 
-Forty-nine edits outside `sys/erxos`, in forty-eight files, the JIT's
+Fifty edits outside `sys/erxos`, in forty-nine files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's

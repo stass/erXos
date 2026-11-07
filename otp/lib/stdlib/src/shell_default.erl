@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: exports erXos's shortcuts, each a one-line call of its erx function.
+%%
 %% %CopyrightEnd%
 %%
 
@@ -72,6 +74,11 @@ code:load_abs("$PATH/user_default").
          ic/0,ir/1,ir/0,il/0,ipb/0,ipb/1,iaa/1,iaa/2,ist/1,ia/1,ia/2,ia/3,
          ia/4,ip/0]).
 -export(['$handle_undefined_function'/2]).
+%% erXos's shortcuts (docs/design-live.md, "Erlang, in every domain"): each
+%% is a one-line call of its erx function, with no authority of its own.
+%% test/erlang/erx_shortcut_tests.erl fails if one has the name of a shell
+%% command or the name and arity of one of OTP's own exports here.
+-export([source/1]).
 -import(io, [format/1]).
 
 -doc "Print the help for all shell commands.".
@@ -240,6 +247,13 @@ iv()            -> calli(iv, []).
 
 calli(F, Args) ->
     c:appcall(debugger, i, F, Args).
+
+-doc """
+erXos: prints the source lines around a process's current location or a
+function's first line, as `erx:source/1` does.
+""".
+-spec source(pid() | mfa()) -> ok | {error, term()}.
+source(Target) -> erx:source(Target).
 
 -doc false.
 '$handle_undefined_function'(Func, Args) ->
