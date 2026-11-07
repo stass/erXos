@@ -8,6 +8,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/manifest_context'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_blk_image_tests.erl, the EUnit cases of the windows on the booted
 # slot's EROFS images and an image window's refusal of writes, against erx_blk_image,
@@ -17,7 +18,9 @@ require_relative '../fixtures/manifest_context'
 # release image where the fixture puts it, in two extents, and with no window on it.
 class ErxBlkImageTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erlang/apps/erx/src/generated/erx_manifest.erl erlang/apps/erx_blk/src/erx_blk_image.erl erlang/apps/erx_blk/src/erx_blk_window.erl erlang/apps/erx_blk/src/erx_blk_table.erl
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_manifest.erl erlang/apps/erx_blk/src/erx_blk_image.erl erlang/apps/erx_blk/src/erx_blk_window.erl erlang/apps/erx_blk/src/erx_blk_table.erl
                test/erlang/erx_blk_image_tests.erl].freeze
   TWO_EXTENTS = [{ 'slot_offset' => 128 << 20, 'length' => 4096 },
                  { 'slot_offset' => (128 << 20) + 8192, 'length' => 4096 }].freeze
@@ -31,7 +34,7 @@ class ErxBlkImageTest < Minitest::Test
   def test_image_window_cases_pass_under_eunit
     Dir.mktmpdir('erx-blk-image-test') do |work|
       manifests.each { |name, bytes| File.binwrite(File.join(work, "manifest-#{name}"), bytes) }
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'erlang/apps/erx/include'),
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'),
                                        '-o', work, *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

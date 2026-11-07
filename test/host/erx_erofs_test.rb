@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_erofs_tests.erl, the EUnit cases of the EROFS reader and its
 # funnel, and of its open files, erx_erofs_file, against erx_erofs, erx_erofs_file and
@@ -14,9 +15,11 @@ require 'tmpdir'
 # tools/fuzz/erx_erofs.rb, seeds the reader's faults.
 class ErxErofsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   SOURCES = %w[otp/erts/preloaded/src/erx_verity.erl otp/erts/preloaded/src/erx_erofs.erl
                otp/erts/preloaded/src/erx_erofs_file.erl test/erlang/erx_erofs_tests.erl].map { |path| File.join(ROOT, path) }.freeze
-  INCLUDES = %w[erlang/apps/erx/include otp/lib/kernel/include].flat_map { |dir| ['-I', File.join(ROOT, dir)] }.freeze
+  INCLUDES = %w[build/gen/erlang/apps/erx/include otp/lib/kernel/include].flat_map { |dir| ['-I', File.join(ROOT, dir)] }.freeze
   FIXTURES = File.join(ROOT, 'test/fixtures/erofs')
 
   def test_reader_cases_pass_under_eunit

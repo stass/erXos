@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_9p_grammar, the generated decoder of the file protocol's terms,
 # compiled from the checked-in generated source and run alone on stock's emulator (ERX_ERL
@@ -12,7 +13,9 @@ require 'tmpdir'
 # admits 256 bytes, which must fail: that shows the reference reads the name bound.
 module Erx9pGrammarFuzz
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  MODULE_SOURCE = File.join(ROOT, 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_9p_grammar_fuzz.erl')
   NAME_BOUND = "is_name(Value) ->\n    is_binary(Value)\n        andalso byte_size(Value) =< ?NAME_MAX\n"
   WRONG_BOUND = "is_name(Value) ->\n    is_binary(Value)\n        andalso byte_size(Value) =< ?NAME_MAX + 1\n"

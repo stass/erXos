@@ -71,8 +71,8 @@ module Erx
 
     # An application's headers: the plain files include/*.hrl at the top of its include/
     # in the tree. Nothing builds them, so each ships as it is and is its own source. A
-    # subdirectory, such as erx's include/generated, holds build headers and does not ship;
-    # a link is refused, so no header ships another file's bytes under its name.
+    # subdirectory does not ship, nor does a generated header, which is in build/gen; a
+    # link is refused, so no header ships another file's bytes under its name.
     def self.headers(root:, application:)
       include = File.join(root, source_directory(application), 'include')
       Dir.glob('*.hrl', base: include).sort.map do |name|
@@ -141,18 +141,29 @@ module Erx
       end
     end
 
-    # The source a built file is compiled from. A file with none named is a failure, so
-    # no file reaches the archive without its licence.
+    # The source a built file is compiled from: for erXos's applications one of the
+    # modules ErlangApps compiles, generated ones included. A file with none named is a
+    # failure, so no file reaches the archive without its licence.
     def sources_of(application, name)
       source = File.join(@root, self.class.source_directory(application), 'src')
       base = File.basename(name, '.*')
       return [File.join(source, "#{base}.app.src")] if name.end_with?('.app')
 
-      found = %w[erl yrl xrl].map { |extension| File.join(source, "#{base}.#{extension}") }.find { |path| File.file?(path) } ||
-              Dir.glob(File.join(@root, self.class.source_directory(application), '**', "#{base}.erl")).min
+      found = ErlangApps::APPLICATIONS.include?(application) ? erxos_source(application, base) : otp_source(application, base)
       raise Error, "no source in #{self.class.source_directory(application)} for #{name}" unless found
 
       [found]
+    end
+
+    def erxos_source(application, base)
+      module_path = ErlangApps.modules(root: @root, application: application).find { |path| File.basename(path, '.erl') == base }
+      module_path && File.join(@root, module_path)
+    end
+
+    def otp_source(application, base)
+      directory = File.join(@root, self.class.source_directory(application))
+      %w[erl yrl xrl].map { |extension| File.join(directory, 'src', "#{base}.#{extension}") }.find { |path| File.file?(path) } ||
+        Dir.glob(File.join(directory, '**', "#{base}.erl")).min
     end
 
     def version(application) = self.class.app_version(File.join(@otp, 'lib', application, 'ebin'), application)

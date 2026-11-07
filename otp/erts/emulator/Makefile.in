@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources and littlefs (from $(ERX_TREE)/littlefs) into the emulator and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file.
+# Modified by erXos: builds erXos sources and littlefs (from $(ERX_TREE)/littlefs) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file.
 #
 # %CopyrightBegin%
 #
@@ -991,7 +991,7 @@ $(OBJDIR)/%.o: drivers/$(STOCK_OSTYPE)/%.c
 	$(V_CC) $(CFLAGS) $(INCLUDES) -Idrivers/common -Idrivers/$(STOCK_OSTYPE) -I../etc/$(STOCK_OSTYPE) -c $< -o $@
 
 # prim_file_nif.h names erx_prim_file.c's view of a path, a release name list (erx/release_fs.h).
-$(OBJDIR)/prim_file_nif.o: CFLAGS += -I$(ERX_TREE)/include
+$(OBJDIR)/prim_file_nif.o: CFLAGS += -I$(ERX_GEN)/include -I$(ERX_TREE)/include
 
 $(OBJDIR)/%.o: nifs/common/%.c
 	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
@@ -1019,7 +1019,7 @@ $(OBJDIR)/sha256c.o: $(ERX_TREE)/kernel/crypto/sha2/sha256c.c
 	$(V_CC) $(CFLAGS) -I$(ERX_TREE)/include -c $< -o $@
 
 $(OBJDIR)/%.o: nifs/erxos/%.c
-	$(V_CC) $(CFLAGS) -I$(ERX_TREE) -I$(ERX_TREE)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
+	$(V_CC) $(CFLAGS) -I$(ERX_GEN) -I$(ERX_GEN)/include -I$(ERX_TREE) -I$(ERX_TREE)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
 $(OBJDIR)/%.o: nifs/$(STOCK_OSTYPE)/%.c
 	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -I../etc/$(STOCK_OSTYPE) -c $< -o $@
@@ -1520,7 +1520,7 @@ $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(NIF_COMMON_SRC) > $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
-	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_TREE) -I$(ERX_TREE)/include $(LFS_CFLAGS) $(wildcard nifs/erxos/*.c) >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_GEN) -I$(ERX_GEN)/include -I$(ERX_TREE) -I$(ERX_TREE)/include $(LFS_CFLAGS) $(wildcard nifs/erxos/*.c) >> $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_TREE)/include $(ERX_TREE)/kernel/crypto/sha2/sha256c.c >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)

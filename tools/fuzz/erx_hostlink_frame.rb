@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of the host link's deframer, erx_hostlink_frame and erx_hostlink_stream's
 # receiver (test/erlang/erx_hostlink_frame_fuzz.erl), compiled from source and run on
@@ -18,6 +19,8 @@ require 'tmpdir'
 # testing").
 module ErxHostlinkFrameFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   SOURCE_DIR = File.join(ROOT, 'erlang/apps/erx_hostlink/src')
   FRAME_SOURCE = File.join(SOURCE_DIR, 'erx_hostlink_frame.erl')
   STREAM_SOURCE = File.join(SOURCE_DIR, 'erx_hostlink_stream.erl')
@@ -57,7 +60,7 @@ module ErxHostlinkFrameFuzz
       paths = { 'erx_hostlink_frame.erl' => frame_text, 'erx_hostlink_stream.erl' => stream_text }.map do |name, text|
         File.join(work, name).tap { |path| File.binwrite(path, text) }
       end
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'erlang/apps/erx/include'),
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'),
                                        '-o', work, *paths, *SOURCES, stdin_data: '')
       raise output unless status.success?
 

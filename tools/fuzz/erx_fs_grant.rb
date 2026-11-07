@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_fs_grant, the pure core of each erx_fs grant: random sequences of
 # frames and local messages, decoded by erx_9p_grammar, through the core over
@@ -15,10 +16,12 @@ require 'tmpdir'
 # shows the sequences reach the pool's bound and the check reads it.
 module ErxFsGrantFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
-  SOURCES = [GRANT, 'otp/erts/preloaded/src/erx_9p_grammar.erl', 'test/erlang/erx_fs_test_tree.erl',
+  SOURCES = [GRANT, 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl', 'test/erlang/erx_fs_test_tree.erl',
              'test/erlang/erx_fs_grant_fuzz.erl'].freeze
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   POOL_BOUND = 'map_size(Fids) >= Pool -> {error, emfile};'
   WRONG_POOL_BOUND = 'map_size(Fids) > Pool -> {error, emfile};'
   DEADLINE_SECONDS = '300'

@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs the EUnit cases of erx_schema on stock's emulator (ERX_ERL and ERX_ERLC, which
 # make check supplies): test/erlang/erx_schema_tests.erl against the checked-in module
@@ -13,10 +14,12 @@ require_relative '../../tools/lib/erx/abi'
 # the module generated from test/fixtures/inspection_forms, which uses every form.
 class ErxSchemaTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated module the cases run against is in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   FORMS = File.join(ROOT, 'test/fixtures/inspection_forms')
 
   def test_checked_in_schema_cases_pass_under_eunit
-    eunit('erx_schema_tests', File.binread(File.join(ROOT, Erx::ABI::InspectionEmitter::ERLANG_PATH)))
+    eunit('erx_schema_tests', File.binread(File.join(ROOT, Erx::Generated::OUTPUT, Erx::ABI::InspectionEmitter::ERLANG_PATH)))
   end
 
   def test_every_form_passes_under_eunit

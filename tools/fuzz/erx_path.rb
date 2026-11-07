@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_path, the path resolver (test/erlang/erx_path_fuzz.erl): random
 # trees, tables and paths resolved against the reference model of FreeBSD's vfs_lookup
@@ -16,11 +17,13 @@ require 'tmpdir'
 # breaks and that the comparison and the properties read what they claim to.
 module ErxPathFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   MODULE_SOURCE = File.join(ROOT, 'otp/erts/preloaded/src/erx_path.erl')
   TARGET_SOURCES = %w[erx_path_fuzz erx_path_model erx_path_tree].map do |name|
     File.join(ROOT, "test/erlang/#{name}.erl")
   end.freeze
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   DEADLINE_SECONDS = '300'
 
   # A fault, the text of erx_path it replaces and the replacement, and the failure the

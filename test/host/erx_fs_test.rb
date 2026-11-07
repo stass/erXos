@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../../tools/lib/erx/generated'
 
 # The erx_fs grant and the domain's file version counter: test/erlang/erx_fs_tests.erl and
 # erx_fs_version_tests.erl run on stock's emulator (ERX_ERL and ERX_ERLC, which make check
@@ -15,8 +16,10 @@ require_relative '../../tools/lib/erx/abi'
 # in the protocol table reaches the grant through the grammar generated from it.
 class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   SOURCES = %w[
-    otp/erts/preloaded/src/erx_9p_grammar.erl
+    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     erlang/apps/erx_files/src/erx_fs_grant.erl
     erlang/apps/erx_files/src/erx_fs.erl
     erlang/apps/erx_files/src/erx_fs_version.erl
@@ -28,7 +31,7 @@ class ErxFsTest < Minitest::Test
     test/erlang/erx_fs_version_tests.erl
   ].freeze
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
-  GRAMMAR = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
+  GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
   VERSION = 'erlang/apps/erx_files/src/erx_fs_version.erl'
   TABLE = 'abi/protocols/9p.txt'
 
@@ -205,7 +208,8 @@ class ErxFsTest < Minitest::Test
       FileUtils.cp_r(File.join(ROOT, 'abi'), root)
       File.write(File.join(root, TABLE), text)
       schema = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))
-      { GRAMMAR => Erx::ABI::ProtocolEmitter.outputs(schema).fetch(GRAMMAR) }
+      # The generator names the grammar by its path beneath build/gen.
+      { GRAMMAR => Erx::ABI::ProtocolEmitter.outputs(schema).fetch(GRAMMAR.delete_prefix("#{Erx::Generated::OUTPUT}/")) }
     end
   end
 
@@ -217,8 +221,8 @@ class ErxFsTest < Minitest::Test
 
         File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
       end
-      compile(work, paths, includes: [File.join(ROOT, 'erlang/apps/erx/include')])
-      compile(work, TESTS.map { |test| File.join(ROOT, test) }, includes: [File.join(ROOT, 'erlang/apps/erx/include')])
+      compile(work, paths, includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')])
+      compile(work, TESTS.map { |test| File.join(ROOT, test) }, includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')])
       # A grant a seeded fault crashes would print a crash report into the middle of
       # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',

@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_schema:resolve_text/1, the reader of the path text /proc and the
 # host hand the inspector, compiled from the checked-in generated module and run alone on
@@ -13,7 +14,9 @@ require 'tmpdir'
 # must fail: that shows the target holds every path to its one spelling.
 module ErxSchemaFuzz
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/generated/erx_schema.erl')
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  MODULE_SOURCE = File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_schema.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_schema_fuzz.erl')
   PLAIN = 'plain(Byte) -> lists:member(Byte, "_+,:=@-").'
   PLAIN_WITH_DOT = 'plain(Byte) -> lists:member(Byte, "_+,:=@-.").'

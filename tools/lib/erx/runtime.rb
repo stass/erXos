@@ -7,6 +7,7 @@ require 'fileutils'
 require 'open3'
 require_relative 'erlang_apps'
 require_relative 'error'
+require_relative 'generated'
 require_relative 'hosted_sources'
 require_relative 'oracle'
 require_relative 'output_directory'
@@ -28,12 +29,16 @@ module Erx
     LIBERX_SOURCES = [*HostedSources::ALL.reject { |source| source.start_with?(HostedSources::GUEST) },
                       'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/hosted/start.c'].freeze
-    # What the hosted archive is compiled from and the release's manifest, for the build record:
-    # the generated C among them is under build/gen.
-    LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 liberx
-                      build/gen/include build/gen/kernel build/gen/liberx].freeze
-    # Every tree a runtime is built from, whose digest marks a build stale.
-    SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES].freeze
+    # The tracked trees the hosted archive and the release's manifest are compiled from, for
+    # the build record; their generated C is in the generated tree, which SOURCE_TREES adds.
+    LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 liberx].freeze
+    # Every tree a runtime is built from, whose digest marks a build stale: the
+    # generated tree among them, so a change to a generator's input does too.
+    SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES, Generated::OUTPUT].freeze
+    # What the build copies over the OTP copy from the generated tree: the files the
+    # generators write beneath otp/, such as erts/preloaded/src/erx_9p_grammar.erl. The
+    # emulator still embeds the checked-in beams of otp/erts/preloaded/ebin (TODO.md).
+    GENERATED_OTP = File.join(Generated::OUTPUT, 'otp')
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
     # OTP's applications in the release, each built by both runtimes: what a shell needs,
@@ -71,19 +76,27 @@ module Erx
 
     # Whether what is built is what the tree holds: a check that read an older
     # build, or the remains of a failed one, would report on code that is gone.
-    def self.check_current(root:)
+    def self.check_current(root:, generated: Generated)
       record = record_path(output(root: root))
       raise Error, 'hosted runtime not built: run tools/erx build runtime' unless File.file?(record)
-      return if File.read(record) == source_digest(root: root)
+      return if File.read(record) == source_digest(root: root, generated: generated)
 
       raise Error, "hosted runtime is stale, a file under #{SOURCE_TREES.join(', ')} changed: run tools/erx build runtime"
     end
 
     def self.record_path(output) = File.join(output.root, '.erx-build-record')
 
-    def self.source_digest(root:)
+    # Brings the generated tree up to date first (generated is Erx::Generated or a
+    # stand-in), so an edit to a generator's input changes the digest as an edit to
+    # otp/ does, and whoever digests reads the tree the build reads. The tree's stamp
+    # is left out: it names the generators' code too, and a change there that writes
+    # the same files changes no build.
+    def self.source_digest(root:, generated: Generated)
+      generated.ensure(root: root)
+      stamp = File.join(Generated::OUTPUT, Generated::STAMP)
       digests = SOURCE_TREES.flat_map do |tree|
         Dir.glob(File.join(tree, '**/*'), File::FNM_DOTMATCH, base: root).sort.filter_map do |path|
+          next if path == stamp
           absolute = File.join(root, path)
           "#{path} #{Digest::SHA256.file(absolute).hexdigest}" if File.file?(absolute)
         end
@@ -100,10 +113,11 @@ module Erx
     end
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                   oracle: Oracle.new(root: root, runner: runner), sdk_root: nil)
+                   oracle: Oracle.new(root: root, runner: runner), sdk_root: nil, generated: Generated)
       @root = File.expand_path(root)
       @runner = runner
       @oracle = oracle
+      @generated = generated
       @sdk_root = sdk_root
       @output = self.class.output(root: @root)
       OutputDirectory.check(root: @root, path: File.join(@root, 'build/runtime/hosted'))
@@ -114,7 +128,8 @@ module Erx
 
       @oracle.verify(HOST_OTP_FLAVOUR)
       FileUtils.rm_f(self.class.record_path(@output))
-      digest = self.class.source_digest(root: @root)
+      # Also brings build/gen up to date, which the steps below read.
+      digest = self.class.source_digest(root: @root, generated: @generated)
       build_liberx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
@@ -154,16 +169,23 @@ module Erx
     end
 
     # OTP's build holds no record of what its tree held. A change to what configure
-    # reads starts again from an empty copy, and a file that left otp/ leaves the copy.
-    # These records live in the copy, so removing the copy forgets them too.
+    # reads starts again from an empty copy, and a file that left otp/ or the generated
+    # tree's otp/ leaves the copy. These records live in the copy, so removing the copy
+    # forgets them too. The generated files go in after otp/'s, so where both hold a
+    # path the copy holds the generated bytes.
     def copy_sources
       otp = File.join(@root, 'otp')
+      generated = File.join(@root, GENERATED_OTP)
       inputs = self.class.configure_inputs(otp: otp)
       stamp = self.class.configure_stamp(otp: otp, inputs: inputs, sdk_root: sdk_root)
       FileUtils.rm_rf(@output.root) unless stored(in_copy('.erx-configure-stamp')) == stamp
       FileUtils.mkdir_p(@output.root)
       @runner.run(['rsync', '-a', *BUILT_BEAMS, "#{otp}/", "#{@output.root}/"], name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
-      paths = Dir.glob('**/*', File::FNM_DOTMATCH, base: otp).sort
+      if File.directory?(generated)
+        @runner.run(['rsync', '-a', "#{generated}/", "#{@output.root}/"], name: 'runtime-copy-generated',
+                                                                            deadline: DEADLINES.fetch(:copy))
+      end
+      paths = [otp, generated].flat_map { |tree| Dir.glob('**/*', File::FNM_DOTMATCH, base: tree) }.uniq.sort
       (stored(in_copy('.erx-paths')).to_s.lines(chomp: true) - paths).each { |path| FileUtils.rm_f(in_copy(path)) }
       File.write(in_copy('.erx-paths'), paths.join("\n"))
       remove_orphan_beams(otp)
@@ -229,7 +251,8 @@ module Erx
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root,
-        'ERX_TREE' => @root
+        'ERX_TREE' => @root,
+        'ERX_GEN' => File.join(@root, Generated::OUTPUT)
       ).freeze
     end
 

@@ -22,7 +22,9 @@ require_relative '../lib/erx/generated'
 # the verdicts.
 module ErxManifestFuzz
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/generated/erx_manifest.erl')
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  MODULE_SOURCE = File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_manifest_fuzz.erl')
   C_SOURCES = %w[build/gen/liberx/generated/abi_reader.c tools/fuzz/manifest_fuzz.c tools/fuzz/manifest_verdicts.c].freeze
   RESERVED = 'ensure((Unsigned band maps:get(zero, Field)) =:= 0,'

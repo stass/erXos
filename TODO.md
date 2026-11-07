@@ -957,7 +957,10 @@ it; git history is the record of completed work.
 * [Low] build, `otp/erts/preloaded/ebin`: the preloaded beams erXos changes (`prim_file`, `erx_9p_grammar`,
   `erx_file_remote`) are compiled by hand with the oracle's `erlc` and checked in, each recorded in
   `otp/ORIGIN.md`; building them from source in the runtime build, under `make check-reproducible`, would
-  remove the hand step and the hashes to keep.
+  remove the hand step and the hashes to keep. Until then the runtime build copies the generated
+  `erx_9p_grammar.erl` from build/gen into its OTP copy and counts it in its build record, but compiles
+  nothing from it, and the hand-run preloaded Makefile finds no `erx_9p_grammar.erl` once the tracked copy
+  leaves `otp/erts/preloaded/src`.
 * [Low] runtime, `tools/fuzz/release_names_fuzz.c`: the oracle does not check that an accepted name is valid
   UTF-8, and walks only an empty release, so the walk's cursor past the first name is not fuzzed.
 * [Low] runtime, `erx_prim_file.c`: `efile_set_cwd` is dead since stock `set_cwd_nif` went;

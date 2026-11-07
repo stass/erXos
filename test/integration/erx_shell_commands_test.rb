@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/rc_oracle'
+require_relative '../../tools/lib/erx/generated'
 
 # The command shell's runner against its oracle (docs/design-shell.md,
 # "Verification and testing"): every script of test/shell/rc/commands runs
@@ -18,10 +19,12 @@ require_relative '../../tools/lib/erx/rc_oracle'
 # and pinned there to erx_shell's own output.
 class ErxShellCommandsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   CORPUS = File.join(ROOT, 'test/shell/rc/commands')
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
-  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
+  SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort].uniq.freeze
 

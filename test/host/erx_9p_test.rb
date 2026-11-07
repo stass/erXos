@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../../tools/lib/erx/generated'
 
 # The file protocol's 9P2000.L codec: test/erlang/erx_9p_tests.erl, the EUnit cases of
 # the generated erx_9p, run on stock's emulator (ERX_ERL and ERX_ERLC, which make check
@@ -16,12 +17,15 @@ require_relative '../../tools/lib/erx/abi'
 # and wire options.
 class Erx9pTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  # Generated files, by the paths the generator names them; build/gen holds them there.
   CODEC = 'erlang/apps/erx/src/generated/erx_9p.erl'
   GRAMMAR = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
   TABLE = 'abi/protocols/9p.txt'
 
   def test_codec_cases_pass_under_eunit
-    output, status = eunit(File.binread(File.join(ROOT, CODEC)))
+    output, status = eunit(File.binread(File.join(ROOT, Erx::Generated::OUTPUT, CODEC)))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
@@ -115,7 +119,7 @@ class Erx9pTest < Minitest::Test
       codec_path = File.join(work, 'erx_9p.erl')
       File.binwrite(codec_path, codec_text)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, codec_path,
-                                       File.join(ROOT, GRAMMAR), File.join(ROOT, 'test/erlang/erx_9p_tests.erl'),
+                                       File.join(ROOT, Erx::Generated::OUTPUT, GRAMMAR), File.join(ROOT, 'test/erlang/erx_9p_tests.erl'),
                                        stdin_data: '')
       assert status.success?, output
       Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

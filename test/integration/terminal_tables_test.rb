@@ -49,7 +49,7 @@ class TerminalTablesTest < Minitest::Test
 
   def test_erlang_and_ruby_tables_have_identical_normalized_values
     @runner.run(runtime_command(@erlc, ['-Werror', '-o', @directory,
-                                       File.join(ROOT, 'erlang/apps/erx/src/erx_text_tables.erl')]),
+                                       File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl')]),
                 name: 'compile-terminal-erlang', deadline: 30, chdir: @directory)
     value = erlang('Ranges = [[A,B] || {A,B} <- tuple_to_list(erx_text_tables:unicode_unsafe_ranges())], ' \
                     'io:put_chars(json:encode(#{<<"ranges">> => Ranges, <<"catalog">> => erx_text_tables:catalog()})), halt().')

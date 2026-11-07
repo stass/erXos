@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_9p, the generated codec of the file protocol's 9P2000.L bytes,
 # compiled from the checked-in generated sources (the codec and the grammar it is checked
@@ -13,8 +14,10 @@ require 'tmpdir'
 # the oversized rounds reach the check (docs/design-files.md#verification).
 module Erx9pFuzz
   ROOT = File.expand_path('../..', __dir__)
-  CODEC_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/generated/erx_9p.erl')
-  GRAMMAR_SOURCE = File.join(ROOT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  CODEC_SOURCE = File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_9p.erl')
+  GRAMMAR_SOURCE = File.join(ROOT, 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_9p_fuzz.erl')
   MSIZE_CHECK = "        <<Size:32/little, _/binary>> when Size > Msize ->\n            {error, msize};\n"
   NO_MSIZE_CHECK = "        <<Size:32/little, _/binary>> when Size > 16#ffffffff ->\n            {error, msize};\n"

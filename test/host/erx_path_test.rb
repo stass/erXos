@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_path_tests.erl, the EUnit cases of the path resolver, against
 # erx_path compiled from source with warnings as errors on stock's emulator (ERX_ERL and
@@ -12,9 +13,11 @@ require 'tmpdir'
 # it through. The fuzz target, tools/fuzz/erx_path.rb, seeds the design's faults.
 class ErxPathTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   SOURCES = %w[otp/erts/preloaded/src/erx_path.erl test/erlang/erx_path_tree.erl
                test/erlang/erx_path_tests.erl].map { |path| File.join(ROOT, path) }.freeze
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
 
   def test_resolver_cases_pass_under_eunit
     output, status = eunit

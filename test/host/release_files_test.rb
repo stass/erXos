@@ -71,6 +71,15 @@ class ReleaseFilesTest < Minitest::Test
                  receipt)
   end
 
+  # A generated module's receipt names the file the build compiled, in build/gen.
+  def test_a_generated_modules_receipt_names_its_generated_source
+    Erx::Generated.ensure(root: ROOT)
+    write(@otp, 'lib/erx/ebin/erx_manifest.beam', 'beam')
+    entry = entries.find { |candidate| candidate.fetch('path') == "system/lib/erx-#{VERSION}/ebin/erx_manifest.beam" }
+    source = 'build/gen/erlang/apps/erx/src/generated/erx_manifest.erl'
+    assert_equal [reference(source)], JSON.parse(File.read(entry.fetch('receipt'))).fetch('sources')
+  end
+
   def test_the_release_ships_every_header_of_kernel_and_stdlib
     paths = entries.map { |entry| entry.fetch('path') }
     %w[kernel stdlib].each do |application|

@@ -4,6 +4,7 @@
 
 require 'tmpdir'
 require_relative 'error'
+require_relative 'generated'
 require_relative 'bounded_file'
 require_relative 'erofs_image'
 require_relative 'erofs_manifest'
@@ -35,8 +36,8 @@ module Erx
     READER_SOURCES = %w[otp/erts/preloaded/src/erx_verity.erl otp/erts/preloaded/src/erx_erofs.erl
                         otp/erts/preloaded/src/erx_erofs_file.erl test/erlang/erx_erofs_tests.erl
                         test/erlang/erx_erofs_manifest.erl].freeze
-    # The generated erx_abi.hrl's directory comes first.
-    READER_INCLUDES = %w[build/gen/erlang/apps/erx/include erlang/apps/erx/include otp/lib/kernel/include].freeze
+    # erx_abi.hrl, which the readers include, is generated into build/gen.
+    READER_INCLUDES = [File.join(Generated::OUTPUT, 'erlang/apps/erx/include'), 'otp/lib/kernel/include'].freeze
 
     # One image's result: the files Linux saw (nil when it did not mount the image),
     # the reader's refusal, and what keeps the image from passing. Every outcome is of
@@ -104,6 +105,7 @@ module Erx
     def reader_log(paths, work)
       code = File.join(work, 'reader')
       Dir.mkdir(code)
+      Generated.ensure(root: @root)
       includes = READER_INCLUDES.flat_map { |directory| ['-I', File.join(@root, directory)] }
       @runner.run([@environment.fetch('ERX_ERLC'), '-Werror', *includes, '-o', code,
                    *READER_SOURCES.map { |path| File.join(@root, path) }],

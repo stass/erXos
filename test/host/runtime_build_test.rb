@@ -39,7 +39,7 @@ class RuntimeBuildTest < Minitest::Test
       raise Erx::Error, "#{name} failed" if name == fail_step
 
       case name
-      when 'runtime-copy' then FileUtils.cp_r("#{argv[-2]}.", argv[-1], preserve: true)
+      when 'runtime-copy', 'runtime-copy-generated' then FileUtils.cp_r("#{argv[-2]}.", argv[-1], preserve: true)
       when 'runtime-emulator' then make_emulator
       when 'serving-set' then serving_log
       end
@@ -77,6 +77,31 @@ class RuntimeBuildTest < Minitest::Test
     def erl_path(_flavour) = '/nonexistent/bin/erl'
   end
 
+  # Stands in for Erx::Generated: ensure makes build/gen hold exactly files, paths
+  # relative to it, and a stamp naming stamp_code, and counts its calls.
+  class FakeGenerated
+    attr_accessor :files, :stamp_code
+    attr_reader :calls
+
+    def initialize
+      @files = {}
+      @stamp_code = 'one'
+      @calls = 0
+    end
+
+    def ensure(root:)
+      @calls += 1
+      output = File.join(root, Erx::Generated::OUTPUT)
+      FileUtils.rm_rf(output)
+      files.merge(Erx::Generated::STAMP => stamp_code).each do |path, text|
+        FileUtils.mkdir_p(File.dirname(File.join(output, path)))
+        File.write(File.join(output, path), text)
+      end
+    end
+  end
+
+  GRAMMAR = 'erts/preloaded/src/erx_9p_grammar.erl'
+
   def setup
     skip 'the hosted runtime builds only on macOS' unless RUBY_PLATFORM.include?('darwin')
 
@@ -97,6 +122,8 @@ class RuntimeBuildTest < Minitest::Test
     write_tree(Erx::ServingSet::GENERATED, Erx::ServingSet.render(SERVING_LIST))
     write_otp('erts/preloaded/src/Makefile', "PRE_LOADED_ERL_MODULES = \\\n\tinit \\\n\terlang\n\n" \
                                               "PRE_LOADED_BEAM_MODULES = \\\n\tprim_eval\n")
+    @generated = FakeGenerated.new
+    @generated.files = { File.join('otp', GRAMMAR) => 'generated' }
     @output = Runtime.output(root: @root)
     @runner = RecordingRunner.new(@output, log_dir: File.join(@root, 'logs'))
     # What xref answers in a tree whose serving list is current: the list, preloaded
@@ -118,8 +145,10 @@ class RuntimeBuildTest < Minitest::Test
 
   def build
     @runner.steps.clear
-    Runtime.new(root: @root, runner: @runner, oracle: FakeOracle.new, sdk_root: @sdk).build
+    Runtime.new(root: @root, runner: @runner, oracle: FakeOracle.new, sdk_root: @sdk, generated: @generated).build
   end
+
+  def check_current = Runtime.check_current(root: @root, generated: @generated)
 
   def configured? = @runner.steps.include?('runtime-configure')
 
@@ -252,21 +281,56 @@ class RuntimeBuildTest < Minitest::Test
   end
 
   def test_the_record_says_whether_the_build_matches_the_tree
-    assert_match(/not built/, assert_raises(Erx::Error) { Runtime.check_current(root: @root) }.message)
+    assert_match(/not built/, assert_raises(Erx::Error) { check_current }.message)
     build
-    Runtime.check_current(root: @root)
+    check_current
     write_otp('otp_only.c', 'changed')
-    assert_match(/stale/, assert_raises(Erx::Error) { Runtime.check_current(root: @root) }.message)
+    assert_match(/stale/, assert_raises(Erx::Error) { check_current }.message)
     build
-    Runtime.check_current(root: @root)
+    check_current
     write_tree(Runtime::LIBERX_SOURCES.first, 'changed')
-    assert_match(/stale/, assert_raises(Erx::Error) { Runtime.check_current(root: @root) }.message)
+    assert_match(/stale/, assert_raises(Erx::Error) { check_current }.message)
+  end
+
+  # The generated tree's otp/ goes over otp/'s copy, so its bytes win where both
+  # hold a path, and the generated tree is current before anything reads it.
+  def test_the_generated_otp_files_go_over_the_copy
+    write_otp(GRAMMAR, 'tracked')
+    build
+    assert_operator @generated.calls, :>=, 1
+    assert_equal 'generated', File.read(File.join(@output.root, GRAMMAR))
+    assert_operator @runner.steps.index('runtime-copy'), :<, @runner.steps.index('runtime-copy-generated')
+  end
+
+  def test_a_file_that_left_the_generated_tree_leaves_the_copy
+    build
+    @generated.files = {}
+    build
+    refute_path_exists File.join(@output.root, GRAMMAR)
+  end
+
+  # OTP's makefiles and the cross file read the generated headers through ERX_GEN.
+  def test_configure_and_make_see_the_generated_tree
+    build
+    %w[runtime-configure runtime-emulator runtime-kernel].each do |step|
+      assert_equal File.join(@root, Erx::Generated::OUTPUT), @runner.options.fetch(step).fetch(:env).fetch('ERX_GEN'), step
+    end
+  end
+
+  # A generator's input changing changes what ensure writes, which marks the build
+  # stale; a stamp naming other generator code over the same files does not.
+  def test_the_record_covers_the_generated_tree_but_not_its_stamp
+    build
+    @generated.stamp_code = 'two'
+    check_current
+    @generated.files = { File.join('otp', GRAMMAR) => 'regenerated' }
+    assert_match(/stale/, assert_raises(Erx::Error) { check_current }.message)
   end
 
   def test_a_failed_build_leaves_no_record
     build
     @runner.fail_step = 'runtime-emulator'
     assert_raises(Erx::Error) { build }
-    assert_match(/not built/, assert_raises(Erx::Error) { Runtime.check_current(root: @root) }.message)
+    assert_match(/not built/, assert_raises(Erx::Error) { check_current }.message)
   end
 end

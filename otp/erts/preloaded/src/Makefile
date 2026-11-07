@@ -18,7 +18,7 @@
 # limitations under the License.
 #
 # Modified by erXos: prim_socket, prim_net and socket_registry are removed;
-# erx_file_remote, erx_path, erx_verity, erx_erofs, erx_erofs_file and the generated erx_9p_grammar are added, and the erXos ABI's Erlang header is on the include path.
+# erx_file_remote, erx_path, erx_verity, erx_erofs, erx_erofs_file and the generated erx_9p_grammar are added, and the erXos ABI's Erlang header, which erXos's build generates into $(ERX_GEN), is on the include path.
 #
 # %CopyrightEnd%
 # 
@@ -89,7 +89,8 @@ KERNEL_SRC=$(ERL_TOP)/lib/kernel/src
 KERNEL_INCLUDE=$(ERL_TOP)/lib/kernel/include
 STDLIB_INCLUDE=$(ERL_TOP)/lib/stdlib/include
 
-ERX_INCLUDE=$(ERL_TOP)/../erlang/apps/erx/include
+ERX_GEN ?= $(ERL_TOP)/../build/gen
+ERX_INCLUDE=$(ERX_GEN)/erlang/apps/erx/include
 
 ERL_COMPILE_FLAGS += -I$(KERNEL_SRC) -I$(KERNEL_INCLUDE) -I$(ERX_INCLUDE) +nowarn_deprecated_catch
 

@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_shell_runner_tests.erl, the EUnit cases of the command
 # shell's runner, its pipes, its command namespace, the renderer and the
@@ -14,9 +15,11 @@ require 'tmpdir'
 # agreement with plan9port's rc is test/integration/erx_shell_commands_test.rb's.
 class ErxShellRunnerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
-  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
+  SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_shell_runner_tests.erl')].uniq.freeze

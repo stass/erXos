@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of the block driver's parse of the boot medium's partition table,
 # erx_blk_table:admit/4, and of a window's check, place/3, compiled from source and run
@@ -14,9 +15,11 @@ require 'tmpdir'
 # partition to the medium.
 module ErxBlkTableFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_table.erl')
   SOURCES = [File.join(ROOT, 'test/erlang/erx_blk_table_fuzz.erl')].freeze
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   WITHIN = '?ERX_MEDIUM_DATA_START + Sectors =< Capacity'
   ANYWHERE = 'true'
   DEADLINE_SECONDS = '120'

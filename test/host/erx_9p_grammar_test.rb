@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../../tools/lib/erx/generated'
 
 # The file protocol's frame profile: test/erlang/erx_9p_grammar_tests.erl, the EUnit cases
 # of the generated erx_9p_grammar, run on stock's emulator (ERX_ERL and ERX_ERLC, which make
@@ -15,12 +16,14 @@ require_relative '../../tools/lib/erx/abi'
 # and the table's refusals of malformed protocol declarations.
 class Erx9pGrammarTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated module the cases run against is in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   GENERATED = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
   TABLE = 'abi/protocols/9p.txt'
   NAME_KIND = 'text name max @name_max utf8'
 
   def test_grammar_cases_pass_under_eunit
-    output, status = eunit(File.binread(File.join(ROOT, GENERATED)))
+    output, status = eunit(File.binread(File.join(ROOT, Erx::Generated::OUTPUT, GENERATED)))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
@@ -104,7 +107,7 @@ class Erx9pGrammarTest < Minitest::Test
   # directory_fids/1 answers for every operation the table declares and for nothing
   # else: a clause per operation, and none that matches any request.
   def test_directory_fids_has_a_clause_per_operation_and_no_catch_all
-    source = File.binread(File.join(ROOT, GENERATED))
+    source = File.binread(File.join(ROOT, Erx::Generated::OUTPUT, GENERATED))
     protocol = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)).protocols.first
     clauses = source.scan(/^directory_fids\(\{(\w+)[,}]/).flatten
     assert_equal protocol.fetch(:operations).map { |operation| operation.fetch(:name) }.sort, clauses.sort

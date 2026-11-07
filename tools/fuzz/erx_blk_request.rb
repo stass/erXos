@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of the block driver's parse of what a device wrote,
 # erx_blk_request:decode/2, and of its request checks, compiled from source and run alone
@@ -13,10 +14,12 @@ require 'tmpdir'
 # request, which must fail: that shows the reference holds a completion to its exact size.
 module ErxBlkRequestFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_request.erl')
   SOURCES = [File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_write.erl'),
              File.join(ROOT, 'test/erlang/erx_blk_request_fuzz.erl')].freeze
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   EXACT = '<<Data:Size/binary, Status:8>> ->'
   TOO_LONG = '<<Data:Size/binary, Status:8, _/binary>> ->'
   DEADLINE_SECONDS = '120'

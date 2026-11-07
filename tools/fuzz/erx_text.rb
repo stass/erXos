@@ -6,6 +6,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/error'
+require_relative '../lib/erx/generated'
 
 # The fuzz targets of erx_text's line escape and field escape
 # (test/erlang/erx_text_fuzz.erl), one per escape, compiled from source with
@@ -19,7 +20,9 @@ require_relative '../lib/erx/error'
 # backslash, and one whose inverse accepts text the escape does not write.
 module ErxTextFuzz
   ROOT = File.expand_path('../..', __dir__)
-  TABLES = File.join(ROOT, 'erlang/apps/erx/src/erx_text_tables.erl')
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  TABLES = File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl')
   TEXT_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_text_fuzz.erl')
   DEADLINE_SECONDS = '150'

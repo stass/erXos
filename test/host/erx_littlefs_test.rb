@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # The littlefs NIF (otp/erts/emulator/nifs/erxos/erx_littlefs_nif.c) built for the host,
 # loaded into the stock OTP 29.1.2 runtime, and driven with erx_lfs over a RAM window by
@@ -14,6 +15,8 @@ require 'tmpdir'
 # littlefs under both sanitizers.
 class ErxLittlefsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   LITTLEFS = File.join(ROOT, 'littlefs')
   OTP = File.join(ROOT, 'build/oracle/jit/install/lib/erlang')
@@ -61,7 +64,7 @@ class ErxLittlefsTest < Minitest::Test
     File.write(File.join(directory, 'erx_log.erl'), LOG_STUB)
     sources = [File.join(directory, 'erx_log.erl'), *MODULES.map { |path| File.join(ROOT, path) }]
     output, status = Open3.capture2e(clean_environment, File.join(OTP, 'bin/erlc'), '-pa', directory,
-                                     '-I', File.join(ROOT, 'erlang/apps/erx/include'), '-o', directory,
+                                     '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'), '-o', directory,
                                      *sources, stdin_data: '')
     assert status.success?, output
   end

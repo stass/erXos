@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_ns_tests.erl, the EUnit cases of the namespace table's one
 # writer, against erx_ns compiled from source with warnings as errors on stock's
@@ -15,11 +16,13 @@ require 'tmpdir'
 # registered as erx_ns_log.
 class ErxNsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   SOURCES = %w[erlang/apps/erx/src/erx_ns.erl test/erlang/erx_ns_prim_stub.erl
                test/erlang/erx_ns_tests.erl otp/erts/preloaded/src/erx_erofs.erl
                otp/erts/preloaded/src/erx_verity.erl test/erlang/erx_erofs_tests.erl]
             .map { |path| File.join(ROOT, path) }.freeze
-  INCLUDES = %w[erlang/apps/erx/include otp/lib/kernel/include].flat_map { |dir| ['-I', File.join(ROOT, dir)] }.freeze
+  INCLUDES = %w[build/gen/erlang/apps/erx/include otp/lib/kernel/include].flat_map { |dir| ['-I', File.join(ROOT, dir)] }.freeze
   FIXTURES = File.join(ROOT, 'test/fixtures/erofs')
   LOG_STUB = <<~ERLANG
     -module(erx_log).

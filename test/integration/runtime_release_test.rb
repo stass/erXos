@@ -58,7 +58,7 @@ class RuntimeReleaseTest < Minitest::Test
   def test_erxos_modules_are_in_their_own_applications
     paths = @table.map(&:first)
     Erx::ErlangApps::APPLICATIONS.each do |application|
-      sources = Dir.glob('src/**/*.erl', base: File.join(ROOT, Erx::ErlangApps.source(application)))
+      sources = Erx::ErlangApps.modules(root: ROOT, application: application)
       beams = paths.filter_map { |path| path[%r{\Asystem/lib/#{application}-[^/]+/ebin/([^/]+\.beam)\z}, 1] }
       assert_equal sources.map { |source| "#{File.basename(source, '.erl')}.beam" }.sort, beams.sort, application
     end

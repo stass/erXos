@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_ramfs_tests.erl, the EUnit cases of /tmp's grant over its real tree,
 # on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources
@@ -13,9 +14,11 @@ require 'tmpdir'
 # it, which shows that case runs the code the fault breaks.
 class ErxRamfsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   APP = 'erlang/apps/erx_files/src'
   SOURCES = %W[
-    otp/erts/preloaded/src/erx_9p_grammar.erl
+    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     #{APP}/erx_fs_grant.erl #{APP}/erx_fs.erl #{APP}/erx_fs_version.erl
     #{APP}/erx_ramfs.erl #{APP}/erx_ramfs_core.erl
   ].freeze
@@ -85,8 +88,8 @@ class ErxRamfsTest < Minitest::Test
 
         File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
       end
-      compile(work, paths, includes: [File.join(ROOT, 'erlang/apps/erx/include')], strict: replaced.empty?)
-      compile(work, [File.join(ROOT, TESTS)], includes: [File.join(ROOT, 'erlang/apps/erx/include')], strict: true)
+      compile(work, paths, includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')], strict: replaced.empty?)
+      compile(work, [File.join(ROOT, TESTS)], includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')], strict: true)
       Open3.capture2e('gtimeout', '-k', '10', RUN_DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'logger:set_primary_config(level, none), ' \
                       "halt(case eunit:test(erx_ramfs_tests, [verbose, {scale_timeouts, #{TIMEOUT_SCALE}}]) " \

@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_file_remote's request function and walk reader: random batches of walks, stats
 # and mkdirs through refused/2 against a model (test/erlang/erx_file_remote_fuzz.erl),
@@ -16,10 +17,12 @@ require 'tmpdir'
 # chunks before. That shows the inputs reach each check and the model checks them.
 module ErxFileRemoteFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   MODULE_SOURCE = File.join(ROOT, 'otp/erts/preloaded/src/erx_file_remote.erl')
-  GRAMMAR_SOURCE = File.join(ROOT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
+  GRAMMAR_SOURCE = File.join(ROOT, 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_file_remote_fuzz.erl')
-  INCLUDES = %w[otp/lib/kernel/include erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
+  INCLUDES = %w[otp/lib/kernel/include build/gen/erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
   Mutant = Data.define(:what, :from, :to, :caught_by)
   MUTANTS = [
     Mutant.new(what: 'a client sending ".."', from: "dot_dot({walk, _, _, [<<\"..\">> | _]}) -> true;\n",

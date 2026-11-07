@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # erx_file_remote is preloaded and calls only BIFs and preloaded modules (T6 of
 # docs/design-tmp.md): whatever process reaches a server's path runs it, the code server
@@ -18,15 +19,17 @@ require 'tmpdir'
 # must be caught.
 class ErxFileRemoteTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   SOURCES = { 'erx_file_remote' => 'otp/erts/preloaded/src/erx_file_remote.erl',
-              'erx_9p_grammar' => 'otp/erts/preloaded/src/erx_9p_grammar.erl',
+              'erx_9p_grammar' => 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl',
               'erx_path' => 'otp/erts/preloaded/src/erx_path.erl',
               'erx_verity' => 'otp/erts/preloaded/src/erx_verity.erl',
               'erx_erofs' => 'otp/erts/preloaded/src/erx_erofs.erl',
               'erx_erofs_file' => 'otp/erts/preloaded/src/erx_erofs_file.erl' }
             .transform_values { |path| File.join(ROOT, path) }.freeze
   PRELOAD_MAKEFILE = File.join(ROOT, 'otp/erts/preloaded/src/Makefile')
-  INCLUDES = %w[otp/lib/kernel/include erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
+  INCLUDES = %w[otp/lib/kernel/include build/gen/erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
   FID = "fid() ->\n    prim_file:erx_fid().\n"
   SEEDED_FID = "fid() ->\n    _ = lists:usort([]),\n    prim_file:erx_fid().\n"
   # Prints each call to another module as `Module Function Arity Builtin`.

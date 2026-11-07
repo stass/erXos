@@ -17,6 +17,7 @@ require_relative '../../tools/lib/erx/release'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
+require_relative '../../tools/lib/erx/generated'
 
 # The release file system against stock's prim_file (design-runtime.md, Files and
 # Verification). One set of prim_file calls runs twice over the same files: on the
@@ -28,6 +29,8 @@ require_relative '../../tools/lib/erx/runtime_seam'
 # `make check`, which does not build the runtime.
 class RuntimePrimFileTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   OUTPUT = Erx::Runtime.output(root: ROOT)
   # The bootstrap boot script's code path names OTP's three; erXos's own, whose watchdog
   # kernel_sup starts, join it by -pa.
@@ -781,7 +784,7 @@ class RuntimePrimFileTest < Minitest::Test
 
   def compile_driver(tree)
     client = File.read(File.join(ROOT, CLIENT))
-    includes = [File.join(ROOT, 'otp/lib/kernel/include'), File.join(ROOT, 'erlang/apps/erx/include')]
+    includes = [File.join(ROOT, 'otp/lib/kernel/include'), File.join(ROOT, 'build/gen/erlang/apps/erx/include')]
     erlc(GRANT_SOURCES.map { |source| File.join(ROOT, source) }, "#{tree}/test/ebin", includes)
     SEEDS.each do |name, (passage, fault)|
       assert_equal 1, client.scan(passage).size, "the #{name} seed's passage is in the client once"

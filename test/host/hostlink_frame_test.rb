@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/hostlink_frame'
+require_relative '../../tools/lib/erx/generated'
 
 # The host link's frame layer on both sides (docs/design-live.md, "Host link frames"): the
 # Ruby layer, tools/lib/erx/hostlink_frame.rb, against the shared vectors of
@@ -17,6 +18,8 @@ require_relative '../../tools/lib/erx/hostlink_frame'
 # test/erlang/host_bytes/erx_bytes.erl standing in for the CRC NIF.
 class HostlinkFrameTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   F = Erx::HostlinkFrame
   VECTORS = File.join(ROOT, 'test/fixtures/hostlink_frames.txt')
   ERLANG = %w[erlang/apps/erx_hostlink/src/erx_hostlink_frame.erl erlang/apps/erx_hostlink/src/erx_hostlink_stream.erl
@@ -213,7 +216,7 @@ class HostlinkFrameTest < Minitest::Test
   private
 
   def compile(work, *extra)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'erlang/apps/erx/include'),
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'),
                                      '-o', work, *ERLANG, *extra, stdin_data: '')
     assert status.success?, output
   end

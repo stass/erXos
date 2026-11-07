@@ -49,7 +49,8 @@ module Erx
     def build(jobs: 4)
       @oracle.verify(HOST_OTP_FLAVOUR)
       FileUtils.rm_f(self.class.record_path(@output))
-      digest = self.class.source_digest(root: @root)
+      # Also brings build/gen up to date, which the steps below read.
+      digest = self.class.source_digest(root: @root, generated: @generated)
       libc = build_sysroot(jobs: jobs)
       build_liberx
       copy_sources
@@ -133,6 +134,7 @@ module Erx
         'ERX_LLVM_BIN' => @tools,
         'ERX_SYSROOT' => @sysroot,
         'ERX_TREE' => @root,
+        'ERX_GEN' => File.join(@root, Generated::OUTPUT),
         # root.ld's place for ERTS's own links (otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf).
         'ERX_ROOT_PLACE_FLAGS' => NativeRoot.place_flags(NativeRoot::PLACE).map { |flag| "-Wl,#{flag}" }.join(' ')
       ).freeze

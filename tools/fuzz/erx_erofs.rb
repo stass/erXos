@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_erofs, the EROFS reader, and erx_verity, its funnel
 # (test/erlang/erx_erofs_fuzz.erl): the fixture images mkfs.erofs wrote read as the
@@ -16,11 +17,13 @@ require 'tmpdir'
 # the cases reach the code each fault breaks and the properties read what they claim.
 module ErxErofsFuzz
   ROOT = File.expand_path('../..', __dir__)
+  # The generated sources and headers named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
   PRELOADED = File.join(ROOT, 'otp/erts/preloaded/src')
   READER = File.join(PRELOADED, 'erx_erofs.erl')
   SOURCES = [File.join(PRELOADED, 'erx_verity.erl'),
              *%w[erx_erofs_tests erx_erofs_fuzz].map { |name| File.join(ROOT, "test/erlang/#{name}.erl") }].freeze
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   # file.hrl, for the reader's #file_info{}.
   KERNEL_INCLUDE = File.join(ROOT, 'otp/lib/kernel/include')
   FIXTURES = File.join(ROOT, 'test/fixtures/erofs')

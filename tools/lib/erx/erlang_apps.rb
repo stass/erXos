@@ -4,6 +4,7 @@
 
 require 'fileutils'
 require_relative 'error'
+require_relative 'generated'
 require_relative 'oracle'
 require_relative 'serving_set'
 
@@ -13,7 +14,10 @@ module Erx
   # every application's files from (docs/design.md, the tree layout). Each build starts
   # from an empty ebin, so a module that left the tree leaves the release, and the
   # application file is the .app.src as written, refused unless it lists exactly the
-  # modules compiled, so systools and the code server see what the release holds.
+  # modules compiled, so systools and the code server see what the release holds. An
+  # application's generated modules and headers are in the generated tree, at the same
+  # paths under build/gen/erlang/apps/<application> (Erx::Generated), and compile with
+  # its own.
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
@@ -28,27 +32,48 @@ module Erx
     # The tree's directory of an application, relative to the root.
     def self.source(application) = File.join(SOURCE, application)
 
+    # The generated tree's directory of an application, relative to the root.
+    def self.generated(application) = File.join(Generated::OUTPUT, source(application))
+
+    # An application's modules, relative to the root: src/**/*.erl of its directory in
+    # the tree and in the generated tree. A path both hold is compiled from the generated
+    # tree, and refused unless the two files are the same bytes, so a hand edit to a
+    # generated file is never dropped unseen.
+    def self.modules(root:, application:)
+      tree, generated = [source(application), generated(application)].map do |directory|
+        Dir.glob('src/**/*.erl', base: File.join(root, directory)).to_h { |path| [path, File.join(directory, path)] }
+      end
+      tree.merge(generated) do |_path, written, made|
+        next made if File.binread(File.join(root, written)) == File.binread(File.join(root, made))
+
+        raise Error, "#{written} differs from the generated #{made}"
+      end.sort.map(&:last)
+    end
+
     # The module list of an application file's text, which names each by its bare atom.
     def self.modules_of(text, label:)
       list = text[/\{modules,\s*\[([^\]]*)\]\}/m, 1] or raise Error, "#{label} lists no modules"
       list.split(',').map(&:strip).reject(&:empty?)
     end
 
-    # erlc's -I flags for every application's include directory under root, relative to root,
+    # erlc's -I flags for every application's include directory under root, those under
+    # build/gen ahead of the tree's, relative to root,
     # so one application can include another's headers; a module compiled from the host
     # (ErlangCompile) gets the same.
     def self.include_flags(root:)
-      APPLICATIONS.map { |application| File.join(source(application), 'include') }
-                  .select { |directory| File.directory?(File.join(root, directory)) }
-                  .flat_map { |directory| ['-I', directory] }
+      generated = APPLICATIONS.map { |application| generated(application) }
+      tree = APPLICATIONS.map { |application| source(application) }
+      [*generated, *tree].map { |directory| File.join(directory, 'include') }
+                         .select { |directory| File.directory?(File.join(root, directory)) }
+                         .flat_map { |directory| ['-I', directory] }
     end
 
     # Every file a build compiles or copies, as absolute paths: the sources the release's
     # receipts name for these applications.
     def self.sources(root:)
       APPLICATIONS.flat_map do |application|
-        directory = File.join(root, source(application))
-        Dir.glob('src/**/*.{erl,app.src}', base: directory).sort.map { |path| File.join(directory, path) }
+        [*modules(root: root, application: application), File.join(source(application), 'src', "#{application}.app.src")]
+          .map { |path| File.join(root, path) }
       end
     end
 
@@ -73,7 +98,7 @@ module Erx
 
     def build_application(application, otp:)
       source = self.class.source(application)
-      modules = Dir.glob('src/**/*.erl', base: File.join(@root, source)).sort.map { |path| File.join(source, path) }
+      modules = self.class.modules(root: @root, application: application)
       resource = File.read(File.join(@root, source, 'src', "#{application}.app.src"))
       check_modules(application, listed: self.class.modules_of(resource, label: "#{application}.app.src"),
                                  compiled: modules.map { |path| File.basename(path, '.erl') })
@@ -93,7 +118,8 @@ module Erx
     def check_modules(application, listed:, compiled:)
       return if listed.sort == compiled.sort
 
-      raise Error, "#{application}.app.src lists #{listed.sort.join(' ')} but #{SOURCE}/#{application}/src holds " \
+      raise Error, "#{application}.app.src lists #{listed.sort.join(' ')} but #{application}'s sources, in " \
+                   "#{self.class.source(application)}/src and #{self.class.generated(application)}/src, hold " \
                    "#{compiled.sort.join(' ')}"
     end
   end
