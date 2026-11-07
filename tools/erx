@@ -141,7 +141,7 @@ module Erx
     # rebuild the stopgap kernel, boot it under QEMU, need the stock OTP
     # suites' runtime, need the hosted runtime built, or need plan9port or
     # Arm's register archive fetched.
-    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_ct_oracle oracle_reporter qemu_gate_mutant rc_oracle runtime_console runtime_device runtime_hosted_smoke runtime_literal_token runtime_prim_file runtime_release sysreg_refresh].freeze
+    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_ct_oracle oracle_reporter qemu_gate_mutant rc_oracle runtime_console runtime_device runtime_hosted_smoke runtime_literal_token runtime_prim_file runtime_release sysreg_refresh oracle_log_tree].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }

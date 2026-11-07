@@ -151,12 +151,14 @@ check-oracle:
 
 # OTP's suites for /tmp on the hosted runtime and on stock OTP, compared
 # case by case (tools/erx oracle hosted); the fast route of check-oracle.
-# The reporter's own tests run first, on stock OTP (make oracle-bootstrap).
+# The reporter's own tests run first, on stock OTP (make oracle-bootstrap),
+# then its log tree's, on both.
 check-oracle-hosted:
 	ERX_ERL=$(CURDIR)/build/oracle/jit/install/bin/erl ERX_ERLC=$(CURDIR)/build/oracle/jit/install/bin/erlc \
 		$(RUBY) test/integration/oracle_reporter_test.rb
 	ERX_ERL=$(CURDIR)/build/oracle/jit/install/bin/erl ERX_ERLC=$(CURDIR)/build/oracle/jit/install/bin/erlc \
 		$(RUBY) test/integration/oracle_ct_oracle_test.rb
+	$(RUBY) test/integration/oracle_log_tree_test.rb
 	$(RUBY) tools/erx oracle hosted
 
 check-oracle-host:

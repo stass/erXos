@@ -147,9 +147,9 @@ class OracleCliTest < Minitest::Test
     line = Erx::OracleQemu.command_line(accel: 'tcg', limit: 2048)
     words = line.split(' ')
     assert_equal "erx.watchdog=#{Erx::ProductionImage::Run::TCG_WATCHDOG}", words.first
-    assert_equal %w[-pa /lib/common_test/ebin -pa /lib/sasl/ebin -pa /lib/syntax_tools/ebin -pa /lib/tools/ebin -pa /test/ct/reporter
+    assert_equal %W[-pa /lib/common_test/ebin -pa /lib/sasl/ebin -pa /lib/syntax_tools/ebin -pa /lib/tools/ebin -pa /test/ct/reporter
                     -run erx_ct_oracle main
-                    /test/ct/suites /tmp/ct], words.drop(1).map { |word| word.delete_prefix('erx.arg=') }
+                    /test/ct/suites /tmp/ct /ct-logs 268435456], words.drop(1).map { |word| word.delete_prefix('erx.arg=') }
     assert words.drop(1).all? { |word| word.start_with?('erx.arg=') }
     refute_includes Erx::OracleQemu.command_line(accel: 'hvf', limit: 2048), 'erx.watchdog'
   end

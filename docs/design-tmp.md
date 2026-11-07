@@ -1,8 +1,8 @@
 # The RAM file system at `/tmp`
 
 Every domain that runs ERTS has a writable directory at `/tmp`, held in
-the domain's own memory and lost when the domain ends. It is where Common
-Test writes its logs and `priv_dir` directories, where OTP's test suites
+the domain's own memory and lost when the domain ends. It is where OTP's
+test suites get their `priv_dir` directories under Common Test,
 compile and load modules, and where a session's programs keep scratch
 files. Its contract is set elsewhere: a RAM file system per domain, in the
 domain's memory and charged to its budget, with a cap of its own, the
@@ -664,7 +664,9 @@ the code under test ran.
   bytes and a link text of 4,095 bytes are accepted and made. Seeded: a grant that skips the checks for a sender in its own
   domain.
 * **OTP's suites.** `file_SUITE`, `filelib_SUITE` and a Common Test run
-  writing its logs and `priv_dir` under `/tmp`, compared case by case
+  with each `priv_dir` under `/tmp` and its logs on a RAM file system
+  of their own, so a suite that fills `/tmp` fails only its own cases,
+  compared case by case
   with stock OTP 29.1.2 on the host by `tools/erx oracle hosted`
   (`make check-oracle-hosted`), the fast route on the hosted runtime;
   a difference not in its table of known differences, each listed with

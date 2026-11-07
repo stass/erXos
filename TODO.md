@@ -502,24 +502,19 @@ it; git history is the record of completed work.
   report when no toolchain is found. (5) `leftovers` reads the flavour out of `step.argv`;
   store it on `Step`. `ERX_SOURCE_CACHE` names `build/third_party` but setup reads the sibling
   `build/downloads` (`archive_directory`); name the directory actually read.
-* [Medium] `test/oracle/common_test/test_server_ctrl.erl` (`start_minor_log_file1`),
-  `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): Common Test's own logs share `/tmp` with the suites
-  under test, so a suite that fills `/tmp` ends its own job and stops the suites after it. The kernel group therefore
-  cannot run whole on erXos. `sendfile_SUITE`'s `init_per_suite` writes one file in 51 writes of 10 MiB (510 MiB) into
-  its `priv_dir` without checking the results. The writes stop at the cap: the hook's note reads `erx-oracle-note
-  sendfile_SUITE priv_dir 166133770`. Common Test then fails to write case 7's log (`io:put_chars` `badarg`, cause
-  `{device,enospc}`, in `start_minor_log_file1`), and the suite job exits. So `end_per_suite` and `post_end_per_suite`
-  never run, and every later suite is killed with `cannot_create_log_dir` `enospc` until the run's end deletes the
-  file. Hosted run of `sendfile_SUITE`, `seq_trace_SUITE` and `standard_error_SUITE`: erxos-history
-  `oracle-hosted/2026-11-06-kernel-tmp-cleanup`. The event reporter survives `enospc`, and `erx_ct_oracle` deletes each
-  suite's `priv_dir` when the suite ends, so only a suite that fills the cap by itself stops a run. `file_SUITE`'s bench
-  group also writes 256 MiB (`large_writes`, deleted in `end_per_group`), but it has not stopped a run. The fix is the
-  owner's choice:
-  * give Common Test's logs space the suites cannot take, for example a second tree beside `/tmp`;
-  * raise the cap above the largest suite's use (about 640 MiB), with the system baseline grown to match;
-  * or make the oracle's `test_server_ctrl` drop a log it cannot write. That is an open-ended list of write sites: 12
-    direct `io:put_chars` calls in `test_server_ctrl` alone, plus `ct_logs`.
-  Until then, the kernel group on erXos runs without `sendfile_SUITE`, and the 14 rows of that suite stay unclassified.
+* [Low] `test/oracle/common_test/test_server_ctrl.erl` (`file:set_cwd` in `run_test_case` and three other sites),
+  `tools/lib/erx/oracle_suites.rb` (`ERXOS_LOG_CAP`): on erXos Common Test's logs have a RAM file system of their own
+  (`/ct-logs`, 256 MiB), apart from `/tmp` where each `priv_dir` and `data_dir` is, so a suite that fills `/tmp` fails
+  only its own cases. Suites still reach the log tree two ways: each case runs with its current directory set to the
+  `ct_run.*` directory, as on stock, so a relative path a suite writes lands there (stock's kernel group leaves a 1.7 MB
+  `hostnames_nodedir/erl_crash.dump`), and what a case prints goes to its case log (stock's heart_SUITE prints 144 MB
+  into `node_start_soon_after_crash`'s). A group that writes or prints more than the cap there still stops the run.
+  Moving the current directory to the suites' tree also needs Common Test's own relative writes found first
+  (`start_log_file` writes `last_test.html` through `filename:absname/1`). The other way round, what a suite leaves on
+  `/tmp` outside its `priv_dir` (files in its `data_dir` copy or straight in `/tmp`, or a `priv_dir` whose deletion
+  failed, which is only noted) stays there, and once that fills `/tmp`, every later suite's job ends in
+  `start_log_file`, where `filelib:ensure_path/1` cannot make its `priv_dir` (the hosted run answered `enoent`). Making
+  a `priv_dir` that cannot be made fail only its suite would close that.
 * [Medium] `tools/lib/erx/oracle_qemu.rb` (`command_line`): the guest's runtime still gets `-pa /lib/<app>/ebin`
   for the stock applications, which its code server also lists from `/lib`, as the hosted runtime's did. Check
   `code:get_path()` on the guest and drop the `-pa` words (`OracleHosted.erxos_command` is the model), and its

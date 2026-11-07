@@ -23,10 +23,11 @@ class OracleHostedTest < Minitest::Test
     assert_empty code_paths.select { |path| path.start_with?('/lib/') }
   end
 
-  # erx_ct_oracle runs every suite the suite directory holds, so none is named.
+  # erx_ct_oracle runs every suite the suite directory holds, so none is named,
+  # with the work directory under /tmp and the logs on a tree of their own.
   def test_the_reporter_and_the_suite_directory_are_passed
     assert_includes code_paths, '/test/ct/reporter'
-    assert_equal %w[main /test/ct/suites /tmp/ct], command.last(3)
+    assert_equal %W[main /test/ct/suites /tmp/ct /ct-logs 268435456], command.last(5)
   end
 end
 

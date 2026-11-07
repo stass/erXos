@@ -289,6 +289,8 @@ pg_SUITE                     monitor  *                            failed     ca
 pg_SUITE                     basic    overlay_missing              failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
 pg_SUITE                     basic    protocol_upgrade             failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
 sendfile_SUITE               *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+sendfile_SUITE               -        t_sendfile_sendduring        auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport in init_per_testcase, so the case skips
+sendfile_SUITE               -        t_sendfile_recvduring        auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport in init_per_testcase, so the case skips
 seq_trace_SUITE              *        *                            failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 socket_SUITE                 *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 socket_SUITE                 *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run

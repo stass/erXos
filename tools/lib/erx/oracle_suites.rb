@@ -45,6 +45,19 @@ module Erx
     # erl2html2 parses each suite with syntax_tools' epp_dodger, and cover is
     # in tools.
     STOCK_APPLICATIONS = %w[common_test sasl syntax_tools tools].freeze
+    # Where Common Test logs on erXos: a RAM file system of its own, which
+    # erx_ct_oracle mounts, so a suite that fills /tmp, where its priv_dir
+    # and data_dir are, fails only its own cases. Its cap, 256 MiB, is above
+    # the 100 MB of logs stock's kernel group writes besides heart_SUITE's
+    # 144 MB case log (a peer case erXos does not run; erxos-history
+    # oracle-hosted/2026-11-06-kernel-ct-logs), and the system domain's
+    # memory covers it beside /tmp's on the oracle's machines
+    # (OracleQemu::MACHINE; the hosted runtime has no bound of its own).
+    ERXOS_LOGS = '/ct-logs'
+    ERXOS_LOG_CAP = 256 << 20
+    # erx_ct_oracle's arguments on erXos: the suites, the work directory
+    # under /tmp, and the log tree.
+    def self.erxos_arguments(work) = ['/test/ct/suites', work, ERXOS_LOGS, ERXOS_LOG_CAP.to_s]
     # Generated headers of stock's source tree that a group's test Makefile
     # installs beside its suites (release_tests_spec), by group, each with the
     # file it is generated from, which the image's receipt names as its
@@ -101,13 +114,14 @@ module Erx
        "overall: #{failed.empty? ? 'PASS' : "FAIL (#{failed.join(', ')})"}\n"].join
     end
 
-    def initialize(root:, out:, runner:, deadline:, group:)
+    # `source` is the directory the suites come from, by default the group's.
+    def initialize(root:, out:, runner:, deadline:, group:, source: File.join(root, GROUPS.fetch(group)))
       @root = root
       @out = out
       @runner = runner
       @deadline = deadline
       @group = group
-      @source = File.join(root, GROUPS.fetch(group))
+      @source = source
     end
 
     # The group's table, whose rows may name only the group's suites, so none

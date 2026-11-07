@@ -6,41 +6,66 @@
 Runs OTP suites under Common Test for `tools/erx oracle hosted`
 (design-tmp.md, Verification, "OTP's suites"), on erXos and on stock alike.
 
-`main([SuiteDir, WorkDir])` copies `SuiteDir`, the compiled suites and
-their `_data` directories, to `WorkDir/suites`, so each `data_dir` is
-writable as it is in a stock checkout. It runs every suite of the copy,
-in name order. Common Test's logs, and so every `priv_dir`, go under
-`WorkDir/logs`. The events `erx_oracle_events` records go to
-`WorkDir/logs/events.jsonl` and, as each happens, to standard output as
-one line after the prefix `erx-oracle-event `: on erXos `WorkDir` is
-under `/tmp`, which the host cannot read once the runtime is gone, and a
-run cut off by its deadline has still printed every finished case. The
-text log of each suite follows, each line after `erx-oracle-log `. The
-node then halts with 0; the comparison judges the run by its events, not
-by the exit status.
+`main([SuiteDir, WorkDir | Logs])` copies `SuiteDir`, the compiled
+suites and their `_data` directories, to `WorkDir/suites`, so each
+`data_dir` is writable as it is in a stock checkout. It runs every suite
+of the copy, in name order. Each suite's `priv_dir` goes under
+`WorkDir/priv` (the patched `test_server_ctrl` reads that root from
+`ERX_ORACLE_PRIV_ROOT`), so what the suites are handed to write in is
+one tree. Common Test's logs go to another: `WorkDir/logs` on stock,
+where `Logs` is `[]`, and on erXos, where it is `[LogDir, Cap]`, a RAM
+file system of `Cap` bytes this module mounts at `LogDir`. On erXos
+`WorkDir` is under `/tmp`, whose cap the whole group shares, and a suite
+that fills it (sendfile_SUITE writes 510 MiB) can then fail only its
+own cases: Common Test still writes its logs, the suite still ends, and
+its `priv_dir` is deleted before the next suite starts.
 
-The module is also the run's Common Test hook. On erXos the whole group
-shares `/tmp`'s cap, so the hook deletes each suite's `priv_dir` once the
-suite is done with it, and prints `erx-oracle-note SUITE priv_dir BYTES`,
-the logical size of the regular files the suite left there, so a run's
-log says what used `/tmp`. The `_data` copies stay: a suite may read
-another's (string_SUITE reads unicode_util_SUITE_data).
+The events `erx_oracle_events` records go to `events.jsonl` in the log
+directory and, as each happens, to standard output as one line after the
+prefix `erx-oracle-event `: the host cannot read erXos's file systems
+once the runtime is gone, and a run cut off by its deadline has still
+printed every finished case. The text log of each suite follows, each
+line after `erx-oracle-log `. The node then halts with 0; the comparison
+judges the run by its events, not by the exit status.
+
+The module is also the run's Common Test hook. It deletes each suite's
+`priv_dir` once the suite is done with it, and prints `erx-oracle-note
+SUITE priv_dir BYTES`, the logical size of the regular files the suite
+left there, so a run's log says what used `/tmp`. The `_data` copies
+stay: a suite may read another's (string_SUITE reads
+unicode_util_SUITE_data).
 """.
 
 -include_lib("kernel/include/file.hrl").
 
 -export([main/1]).
--export([init/2, pre_init_per_suite/3, post_end_per_suite/4, terminate/1]).
+-export([init/2, pre_init_per_suite/3, post_init_per_suite/4, post_end_per_suite/4, terminate/1]).
 
 %% The hook's state: the priv_dir not yet deleted, with the suite it
 %% belongs to, or none.
 -type pending() :: none | {module(), file:filename()}.
 
+%% Stock: the logs beside the work directory. erXos: the logs on a RAM
+%% file system of Cap bytes mounted at LogDir, whose tree process is
+%% registered as erx_ct_oracle_logs. The host tool passes both forms.
 -spec main([string()]) -> no_return().
 main([SuiteDir, WorkDir]) ->
+    run(SuiteDir, WorkDir, filename:join(WorkDir, "logs"));
+main([SuiteDir, WorkDir, LogDir, Cap]) ->
+    {ok, _} = erx_ramfs_sup:start_link(list_to_integer(Cap), list_to_binary(LogDir), erx_ct_oracle_logs),
+    run(SuiteDir, WorkDir, LogDir).
+
+%% Runs the suites of SuiteDir from a copy under WorkDir, with the logs in
+%% LogDir, and halts. It makes WorkDir/priv and names it in
+%% ERX_ORACLE_PRIV_ROOT, where the patched test_server_ctrl puts each
+%% priv_dir, and which delete_priv_dir/1 deletes under only.
+-spec run(file:filename(), file:filename(), file:filename()) -> no_return().
+run(SuiteDir, WorkDir, LogDir) ->
     Copy = filename:join(WorkDir, "suites"),
-    LogDir = filename:join(WorkDir, "logs"),
+    Priv = filename:join(WorkDir, "priv"),
     ok = copy_tree(SuiteDir, Copy),
+    ok = filelib:ensure_path(Priv),
+    true = os:putenv("ERX_ORACLE_PRIV_ROOT", Priv),
     Events = filename:join(LogDir, "events.jsonl"),
     ok = filelib:ensure_dir(Events),
     true = os:putenv("ERX_ORACLE_EVENTS", Events),
@@ -61,14 +86,29 @@ init(_Id, _Options) ->
     {ok, none}.
 
 -doc """
-Takes note of the suite's priv_dir. A suite whose init_per_suite fails
-ends without post_end_per_suite, so what an earlier suite left is deleted
-here, as the next suite starts.
+Takes note of the suite's priv_dir. Any priv_dir still pending is an
+earlier suite's that ended without either post function; it is deleted
+first.
 """.
 -spec pre_init_per_suite(module(), term(), pending()) -> {term(), pending()}.
 pre_init_per_suite(Suite, Config, Pending) ->
     ok = delete_priv_dir(Pending),
     {Config, pending(Suite, Config)}.
+
+-doc """
+Deletes the suite's priv_dir when init_per_suite failed or skipped the
+suite, which then ends without end_per_suite and post_end_per_suite: the
+next suite's priv_dir is made before any hook of it runs, so a full tree
+left until then would fail that suite too. Return is the Config list when
+init_per_suite succeeded, and {fail, _}, {skip, _} or how it crashed
+otherwise; this is the run's only hook, so no later one changes it.
+""".
+-spec post_init_per_suite(module(), term(), term(), pending()) -> {term(), pending()}.
+post_init_per_suite(_Suite, _Config, Return, Pending) when is_list(Return) ->
+    {Return, Pending};
+post_init_per_suite(_Suite, _Config, Return, Pending) ->
+    ok = delete_priv_dir(Pending),
+    {Return, none}.
 
 -doc "Deletes the suite's priv_dir once end_per_suite is done.".
 -spec post_end_per_suite(module(), term(), term(), pending()) -> {term(), pending()}.
@@ -120,8 +160,14 @@ delete_priv_dir({Suite, Dir}) ->
     true = erlang:display_string(stdout, unicode:characters_to_binary(Note)),
     ok.
 
-%% Whether Dir ends in ct_run.*/*.Suite.logs/run.*/log_private.
+%% Whether Dir is under the priv_dir root and ends in
+%% ct_run.*/*.Suite.logs/run.*/log_private.
 suite_priv_dir(Suite, Dir) ->
+    Root = os:getenv("ERX_ORACLE_PRIV_ROOT"),
+    is_list(Root) andalso lists:prefix(filename:split(Root), filename:split(Dir))
+        andalso own_priv_dir(Suite, Dir).
+
+own_priv_dir(Suite, Dir) ->
     case lists:reverse(filename:split(Dir)) of
         ["log_private", "run." ++ _, SuiteLogs, "ct_run." ++ _ | _] ->
             lists:suffix("." ++ atom_to_list(Suite) ++ ".logs", SuiteLogs);

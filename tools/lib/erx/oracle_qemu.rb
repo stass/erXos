@@ -54,7 +54,9 @@ module Erx
     # near the 64 MiB the development layout leaves bootstrap for it. A 2 GiB
     # machine, whose Fiasco keeps about 123 MiB for kernel memory where the
     # development machine's keeps 32 MiB, gives the system domain 1 GiB more;
-    # nothing else of the manifest changes. The manifest's arithmetic would leave
+    # nothing else of the manifest changes, and that 1 GiB also holds the 256 MiB
+    # cap of Common Test's log tree (OracleSuites::ERXOS_LOG_CAP) beside /tmp's.
+    # The manifest's arithmetic would leave
     # the archive 480 MiB; the root's fixed place holds it to about 187 MiB
     # (liberx/backend/fiasco/root.ld).
     MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024)
@@ -68,7 +70,7 @@ module Erx
     # names it. Common Test copies its jQuery files beside its HTML logs and
     # stops without them, so each gets an erXos stand-in; its tile image is
     # only named in that HTML, and SASL's deps.mk is build glue, so both are
-    # left out. The logs stay in the guest's /tmp, and nothing reads them.
+    # left out. The logs stay in the guest's log tree, and nothing reads them.
     JQUERY = 'test/oracle/ct-priv-stand-in.js'
     STAND_INS = { 'common_test' => %w[priv/jquery-latest.js priv/jquery-migrate.js priv/jquery.tablesorter.min.js]
                                      .to_h { |path| [path, JQUERY] } }.freeze
@@ -123,7 +125,7 @@ module Erx
     # refused here.
     def self.command_line(accel:, limit:)
       paths = [*OracleSuites::STOCK_APPLICATIONS.map { |application| "/lib/#{application}/ebin" }, '/test/ct/reporter']
-      arguments = [*paths.flat_map { |path| ['-pa', path] }, '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', WORK]
+      arguments = [*paths.flat_map { |path| ['-pa', path] }, '-run', 'erx_ct_oracle', 'main', *OracleSuites.erxos_arguments(WORK)]
       line = [ProductionImage::Run::COMMAND_LINES[accel], *arguments.map { |argument| "erx.arg=#{argument}" }].compact.join(' ')
       raise Error, "the oracle's kernel command line is #{line.bytesize} bytes, over the #{limit} the kernel takes" if line.bytesize > limit
 

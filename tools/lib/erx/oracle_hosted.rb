@@ -19,8 +19,8 @@ require_relative 'runtime'
 
 module Erx
   # `tools/erx oracle hosted`: one group of OTP's suites (OracleSuites)
-  # under Common Test on erXos's hosted runtime, with the logs and every
-  # priv_dir under /tmp, and on stock OTP 29.1.2 on the host, then compared
+  # under Common Test on erXos's hosted runtime, with every priv_dir under
+  # /tmp and the logs on a tree of their own, and on stock OTP 29.1.2 on the host, then compared
   # case by case by OracleComparison.
   #
   # Both sides run the same compiled suites and the same reporter
@@ -32,7 +32,8 @@ module Erx
   # under `out`: the release tree and archive, both event streams, the
   # command logs and report.txt.
   class OracleHosted
-    # erXos's working directory: suites, logs and priv_dirs all live in /tmp.
+    # erXos's working directory in /tmp, which holds the suites' copy and
+    # their priv_dirs; the logs have a tree of their own (OracleSuites::ERXOS_LOGS).
     ERXOS_WORK = '/tmp/ct'
     MAX_OUTPUT_BYTES = 256 * 1024 * 1024
     ARCHIVE_BUDGET = 512 * 1024 * 1024
@@ -47,17 +48,20 @@ module Erx
     # every suite of /test/ct/suites, which holds the selection.
     def self.erxos_command(beam:, archive:)
       [beam, archive, '-noshell', '-pa', '/test/ct/reporter',
-       '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', ERXOS_WORK]
+       '-run', 'erx_ct_oracle', 'main', *OracleSuites.erxos_arguments(ERXOS_WORK)]
     end
 
-    def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', 'clang'))
+    # `source` is the directory the suites come from, by default the group's;
+    # the oracle's own tests run fixture suites with the group's table.
+    def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', 'clang'), source: nil)
       @root = File.realpath(root)
       @out = claim(out)
       @deadline = deadline
       @compiler = compiler
       @runner = Runner.new(owner_root: @out, log_dir: File.join(@out, 'logs'))
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
-      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group)
+      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group,
+                                 source: source || File.join(@root, OracleSuites::GROUPS.fetch(group)))
     end
 
     # Runs `suites`, names of the group's suites, on both sides and compares

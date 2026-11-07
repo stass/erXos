@@ -8,15 +8,17 @@ require 'json'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/oracle'
 require_relative '../../tools/lib/erx/oracle_guest'
+require_relative '../../tools/lib/erx/oracle_suites'
 
-# erx_ct_oracle and erx_oracle_events on stock OTP: what a run leaves in its
-# work directory, which on erXos is /tmp under its cap, and how the event
-# report survives a refused write.
+# The reporter (erx_ct_oracle, erx_oracle_events and the patched
+# test_server_ctrl) on stock OTP: what a run leaves in its work directory,
+# which on erXos is /tmp under its cap, and how the event report survives a
+# refused write.
 class OracleCtOracleTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # Run in name order: the failing suite's priv_dir goes when the passing
-  # one starts, the passing one's when it ends, and the trailing one's,
-  # whose init_per_suite fails too, when the run ends.
+  # Run in name order: the failing suite's priv_dir goes when its
+  # init_per_suite fails, the passing one's when it ends, and the trailing
+  # one's, whose init_per_suite fails too, when that fails.
   CLEANUP_SUITES = %w[oracle_cleanup_failing_SUITE oracle_cleanup_passing_SUITE
                       oracle_cleanup_trailing_SUITE].freeze
 
@@ -45,7 +47,8 @@ class OracleCtOracleTest < Minitest::Test
       assert_equal 'passed', done.fetch(%w[oracle_cleanup_passing_SUITE writes_priv])
       notes = File.read(result.fetch('log')).scan(/^erx-oracle-note (\S+) priv_dir (\d+)$/)
       assert_equal CLEANUP_SUITES.map { |suite| [suite, '1024'] }, notes
-      assert_empty Dir.glob(File.join(work, 'logs/**/log_private'))
+      assert_empty Dir.glob(File.join(work, '{logs,priv}/**/log_private'))
+      refute_empty Dir.glob(File.join(work, 'priv/ct_run.*/*.logs/run.*')), 'each priv_dir was under work/priv'
       refute_empty Dir.glob(File.join(work, 'logs/ct_run.*/*.logs/run.*/suite.log'))
       assert File.file?(File.join(work, 'suites/oracle_cleanup_failing_SUITE_data/payload.txt'))
     end
@@ -90,17 +93,20 @@ class OracleCtOracleTest < Minitest::Test
       with_native_runtime(oracle) do |runtime|
         reporter = File.join(directory, 'reporter')
         FileUtils.mkdir_p(reporter)
-        %w[erx_oracle_events.erl erx_ct_oracle.erl].each do |source|
-          compile(runner, runtime, File.join(ROOT, 'test/oracle', source), reporter)
+        Erx::OracleSuites::REPORTER.each do |source|
+          # The imported test_server_ctrl keeps upstream's warnings, as the oracle compiles it.
+          flags = source.start_with?('common_test/') ? [] : Erx::ContainerOracleJob::REPORTER_FLAGS
+          compile(runner, runtime, File.join(ROOT, 'test/oracle', source), reporter, flags: flags)
         end
         yield runner, runtime, directory
       end
     end
   end
 
-  def compile(runner, runtime, source, out)
-    include_path = File.join(runtime.fetch('source'), 'lib/common_test/include')
-    runner.run([runtime.fetch('erlc'), *Erx::ContainerOracleJob::REPORTER_FLAGS, '-I', include_path,
+  def compile(runner, runtime, source, out, flags: Erx::ContainerOracleJob::REPORTER_FLAGS)
+    common_test = File.join(runtime.fetch('source'), 'lib/common_test')
+    runner.run([runtime.fetch('erlc'), *flags, '-I', File.join(common_test, 'include'),
+                '-I', File.join(common_test, 'src'),
                 '-o', out, source],
                name: 'oracle-ct-oracle-compile', deadline: 60, env: Erx::Oracle::CLEAN_ERLANG_ENV)
   end

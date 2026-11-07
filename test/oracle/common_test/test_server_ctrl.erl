@@ -19,7 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: emit reporting-only case observations at their owner; refuse a node start and find no old release without distribution.
+%% Modified by erXos: emit reporting-only case observations at their owner; refuse a node start and find no old release without distribution; put each priv_dir under ERX_ORACLE_PRIV_ROOT when it is set.
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 -module(test_server_ctrl).
 -moduledoc false.
@@ -1750,14 +1750,37 @@ start_log_file() ->
     make_html_link(LinkName ++ ?html_ext, HtmlName,
 		   filename:basename(Dir)),
 
-    PrivDir = filename:join(TestDir1, ?priv_dir),
-    ok = file:make_dir(PrivDir),
+    PrivDir = erx_priv_dir(TestDir1, ""),
+    ok = filelib:ensure_path(PrivDir),
     put(test_server_priv_dir,PrivDir++"/"),
     print_timestamp(major, "Suite started at "),
 
     LogInfo = [{topdir,Dir},{rundir,lists:flatten(TestDir1)}],
     test_server_sup:framework_call(report, [loginfo,LogInfo]),
     {ok,TestDir1}.
+
+%% erXos priv_dir root begin.
+%% The priv_dir of the log directory RunDir, with Ext after its name. With
+%% ERX_ORACLE_PRIV_ROOT unset it is RunDir/log_private, as stock's. The
+%% erXos oracle sets it, and the priv_dir is then the same relative path
+%% under that root as RunDir is under the log root (the directory above
+%% the ct_run.* directory, from this process's test_server_framework_logdir),
+%% so a suite filling its priv_dir's tree cannot fill the one Common Test
+%% logs to. The root holds priv_dirs and their ct_run.*/*.Suite.logs/run.*
+%% parents, which keep each one's shape. The HTML logs' links relative to
+%% the run directory's log_private then point at nothing.
+erx_priv_dir(RunDir, Ext) ->
+    case os:getenv("ERX_ORACLE_PRIV_ROOT") of
+        false ->
+            filename:join(RunDir, ?priv_dir) ++ Ext;
+        Root ->
+            LogRoot = filename:split(filename:dirname(get(test_server_framework_logdir))),
+            Run = filename:split(RunDir),
+            lists:prefix(LogRoot, Run) orelse
+                exit({erx_priv_dir_outside_log_root, RunDir, filename:join(LogRoot)}),
+            filename:join([Root | lists:nthtail(length(LogRoot), Run)] ++ [?priv_dir]) ++ Ext
+    end.
+%% erXos priv_dir root end.
 
 log_file_error(Error, Dir) ->
     exit({cannot_create_log_dir,{Error,lists:flatten(Dir)}}).
@@ -3862,7 +3885,7 @@ run_test_case1(Ref, Num, Mod, Func, Args, RunInit,
 		       true ->
 			    lists:flatten(io_lib:format(".~w", [Num]))
 		    end,
-		PrivDir = filename:join(RunDir, ?priv_dir) ++ Ext,
+		PrivDir = erx_priv_dir(RunDir, Ext),
 		if PrivDirMode == auto_per_tc ->
 			ok = file:make_dir(PrivDir);
 		   PrivDirMode == manual_per_tc ->

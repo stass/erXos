@@ -56,8 +56,9 @@ handle_event(Event, {Report, Sequence}) ->
     end.
 
 %% Appends one event to the report, or gives the report up when the write
-%% is refused. On erXos the report shares /tmp with the suites under test,
-%% and a suite may fill it (sendfile_SUITE writes 510 MiB): the run goes on,
+%% is refused. On erXos the report is on Common Test's log tree, which the
+%% suites reach only through their current directory and what their cases
+%% print, and a suite may still fill it: the run goes on,
 %% and the host, which judges erXos's side by the frames on standard output
 %% only, still gets every event. Nothing is written to the file after the
 %% refused event, so it never holds test_done, the last event, and its
