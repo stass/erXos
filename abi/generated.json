@@ -9,7 +9,7 @@
     "abi/formats/mbr.txt": "df6638490ea485f3c412ca4920ef8c52094a1b5090a0b7a1d2c08ab051d3b526",
     "abi/formats/virtio.txt": "831cb0a16c2090832835ba775a3ba9129efe05d5e2ddd6b25c77c5fd00767c03",
     "abi/inspection.txt": "052dd40aa0dad9ce34ad8ac9b6a2b1a0b0b0bf7de69c7974e897b07058763bb7",
-    "abi/kernel.txt": "15f7b86b64075a030b4b7a44b8964e37332443cf92a5028f90d1940bba0b6a1a",
+    "abi/kernel.txt": "e8d269d28f38a702a7a0123bef3595e03c470103b5113ae7bbc64f417adcf184",
     "abi/manifest.txt": "942fe33326a3ff2aa7c00fd4fc67dd842a7070aaa656760ca90c57fb0788f682",
     "abi/medium.txt": "3ace7b53911ceb8b005e16eaa2c122eef036f1911d39152a1fa6ad95a52903a7",
     "abi/protocols/9p.txt": "3881214ebc81cdfe0396affd0b93cc8784e9962e7a4e132943432df955b6bd60",

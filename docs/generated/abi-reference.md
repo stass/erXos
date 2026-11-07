@@ -562,6 +562,15 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_THREAD_STATE_WAITING` | 3 |
 | `ERX_TIME_PAGE_VERSION` | 1 |
 | `ERX_TLB_BY_ADDRESS_MAX` | 64 |
+| `ERX_TRACE_EVENT_IRQ_DELIVER` | 3 |
+| `ERX_TRACE_EVENT_PARK` | 1 |
+| `ERX_TRACE_EVENT_SPACE_END` | 5 |
+| `ERX_TRACE_EVENT_SPACE_START` | 4 |
+| `ERX_TRACE_EVENT_WAKE` | 2 |
+| `ERX_TRACE_READ_MAX` | 512 |
+| `ERX_TRACE_RECORD_CPU_UNKNOWN` | 1 |
+| `ERX_TRACE_RECORD_FLAGS_KNOWN` | 1 |
+| `ERX_TRACE_RING_RECORDS` | 4096 |
 | `ERX_URGENCY_MAX` | 63 |
 | `ERX_USER_BASE_MIN` | 65536 |
 | `ERX_UTCB_BRS` | 58 |
@@ -1508,6 +1517,21 @@ Storage: `shared`. Prefix size: 48. Alignment: 8.
 | `shift` | `u32` | 32 | 1 |
 | `reserved` | `u32` | 36 | 1 |
 | `wall_offset_ns` | `i64` | 40 | 1 |
+
+### `erx_trace_record_t`
+
+Storage: `shared`. Prefix size: 64. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `seq` | `u64` | 0 | 1 |
+| `time_ns` | `u64` | 8 | 1 |
+| `event` | `u32` | 16 | 1 |
+| `cpu` | `u16` | 20 | 1 |
+| `flags` | `u16` | 22 | 1 |
+| `thread` | `u64` | 24 | 1 |
+| `space` | `u64` | 32 | 1 |
+| `arg` | `u64` | 40 | 3 |
 
 ### `erx_uframe_t`
 

@@ -6653,6 +6653,177 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_trace_record"] = Layout.new(
+        name: "erx_trace_record".b,
+        storage: "shared".b,
+        alignment: 8,
+        size: 64,
+        fields: [
+          Field.new(
+            name: "seq".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "time_ns".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "event".b,
+            type: types.fetch("u32"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cpu".b,
+            type: types.fetch("u16"),
+            offset: 20,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 65535
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("u16"),
+            offset: 22,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 65535
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "thread".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "space".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "arg".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: 3,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: {
+          :field => "seq".b,
+          :terminal => 18446744073709551615,
+          :exhaustion => "@limit".b,
+          :recovery => "none".b,
+          :line => source_line
+        }.freeze,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_uframe"] = Layout.new(
         name: "erx_uframe".b,
         storage: "shared".b,
@@ -10780,6 +10951,28 @@ module Erx
         flags: false,
         allowed: nil
       ).freeze
+      types["trace_event"] = EnumType.new(
+        name: "trace_event".b,
+        base: types.fetch("u32"),
+        members: {
+          "irq_deliver".b => 3,
+          "park".b => 1,
+          "space_end".b => 5,
+          "space_start".b => 4,
+          "wake".b => 2
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
+      types["trace_record_flags"] = EnumType.new(
+        name: "trace_record_flags".b,
+        base: types.fetch("u16"),
+        members: {
+          "cpu_unknown".b => 1
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
       types["uaddr"] = ScalarType.new(
         name: "uaddr".b,
         base: types.fetch("u64"),
@@ -12077,6 +12270,7 @@ module Erx
           "erx_runtime_limits".b,
           "erx_saved_thread".b,
           "erx_time_page".b,
+          "erx_trace_record".b,
           "erx_uframe".b,
           "erx_vcpu".b,
           "erx_utcb".b,
@@ -12154,6 +12348,8 @@ module Erx
           "system_manifest_path".b,
           "thread_class".b,
           "thread_state".b,
+          "trace_event".b,
+          "trace_record_flags".b,
           "uaddr".b,
           "upage".b,
           "urgency".b,
@@ -15451,6 +15647,60 @@ module Erx
           "tlb_by_address_max".b => Constant.new(
             name: "tlb_by_address_max".b,
             value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_event_irq_deliver".b => Constant.new(
+            name: "trace_event_irq_deliver".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_event_park".b => Constant.new(
+            name: "trace_event_park".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_event_space_end".b => Constant.new(
+            name: "trace_event_space_end".b,
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_event_space_start".b => Constant.new(
+            name: "trace_event_space_start".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_event_wake".b => Constant.new(
+            name: "trace_event_wake".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_read_max".b => Constant.new(
+            name: "trace_read_max".b,
+            value: 512,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "trace_record_cpu_unknown".b => Constant.new(
+            name: "trace_record_cpu_unknown".b,
+            value: 1,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "trace_record_flags_known".b => Constant.new(
+            name: "trace_record_flags_known".b,
+            value: 1,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "trace_ring_records".b => Constant.new(
+            name: "trace_ring_records".b,
+            value: 4096,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
