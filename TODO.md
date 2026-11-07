@@ -193,6 +193,12 @@ it; git history is the record of completed work.
   error); filename_SUITE `absname`, `absname_bin` (`enoent`),
   `t_basedir_xdg` (`HOME` is unset on the erXos side); qlc_SUITE `evaluator`; shell_SUITE `otp_5435`, `records`;
   stdlib_SUITE `app_test`; rand_SUITE `doctests`.
+* [Medium] `otp/lib/stdlib/src/shell.erl` (restricted shell): shell_SUITE `start_restricted_from_shell` is a
+  known difference because `q()` is a shell-local command (design-shell.md, "Compatibility and migration"), so it
+  stops at its local-function list and its later checks never run on erXos: that a restricted shell refuses each
+  local function, `shell:stop_restricted/0`, and the cleared `restricted_shell` env. Add an erXos test that runs
+  those checks with `q` in the list and pins `q()` in a restricted shell ending that shell unchecked by the
+  restricted module.
 * [Medium] `otp/erts/preloaded/src/prim_file.erl` (`read/2`) and the file server's read: `file:read(Fd, N)` with an
   absurd N (file_sorter_SUITE `misc` reads a 2^128-1 length field) answers data or `eof` where stock answers `einval` or
   `enomem`, so the case gets `premature_eof` instead of `bad_object`. Read the size path; refuse sizes past the limit

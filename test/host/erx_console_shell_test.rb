@@ -7,7 +7,8 @@ require 'open3'
 require 'tmpdir'
 
 # Runs test/erlang/erx_console_shell_tests.erl, the EUnit cases of the console's choice of
-# its first shell and of what follows that shell's end, against erx_console compiled from
+# its first shell, of what follows that shell's end and of the group shell:whereis/0
+# reports, against erx_console compiled from
 # source on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies); the
 # decisions are pure, so they need no hosted build.
 class ErxConsoleShellTest < Minitest::Test

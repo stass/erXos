@@ -46,10 +46,10 @@
 -behaviour(gen_server).
 
 -export([start/0, run_shell/1, write/1]).
--export([input/2, first_shell/1, after_first_shell/2]).
+-export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--export_type([input_event/0, first_shell/0, after_first_shell/0]).
+-export_type([input_event/0, first_shell/0, after_first_shell/0, shell/0]).
 
 -type input_event() :: {data, unicode:unicode_binary()} | interrupt | menu.
 %% The shell the console starts on its first group: the command shell, or none when
@@ -58,6 +58,8 @@
 %% What follows the first group's end: a fresh command shell, or the runtime's end with
 %% this status once no input can come.
 -type after_first_shell() :: restart | {halt, 0 | 1}.
+%% A shell's start function, as group:start/3 takes it.
+-type shell() :: {module(), atom(), [term()]}.
 
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
@@ -72,9 +74,9 @@
                 size :: {pos_integer(), pos_integer()},
                 terminal :: boolean(),
                 %% The groups run_shell/1 started, innermost first, each with its caller
-                %% to answer when it ends. The innermost gets the input, or `base` when
-                %% there are none (current/1).
-                shells = [] :: [{pid(), gen_server:from()}],
+                %% to answer when it ends and the shell it runs. The innermost gets the
+                %% input, or `base` when there are none (current/1).
+                shells = [] :: [{pid(), gen_server:from(), shell()}],
                 %% Whether the input has ended: each group that gets the input from then
                 %% on is told so.
                 input_ended = false :: boolean(),
@@ -99,7 +101,7 @@ takes the console: the Erlang shell from the command shell's `erl`
 erx_shell:start/0. The Erlang shell's group completes Erlang, as on stock;
 any other shell's completes nothing.
 """.
--spec run_shell({module(), atom(), [term()]}) -> ok | {error, term()}.
+-spec run_shell(shell()) -> ok | {error, term()}.
 run_shell(Shell = {Module, Function, Args})
   when is_atom(Module), is_atom(Function), is_list(Args) ->
     gen_server:call(?MODULE, {run_shell, Shell}, infinity).
@@ -125,15 +127,13 @@ init([]) ->
                 none -> User;
                 Shell -> start_shell(Shell, Terminal)
             end,
-    %% Where group:whereis_shell/0 looks, as it looks in user_drv.
-    put(current_group, Group),
     erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
-    {ok, #state{driver = DriverPid,
-                base = Group,
-                user = User,
-                tty = TTY,
-                size = ?DEFAULT_SIZE,
-                terminal = Terminal}}.
+    {ok, gets_input(#state{driver = DriverPid,
+                           base = Group,
+                           user = User,
+                           tty = TTY,
+                           size = ?DEFAULT_SIZE,
+                           terminal = Terminal})}.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
 banner(TTY, Driver) ->
@@ -178,6 +178,18 @@ after_first_shell(_Reason, false) -> restart;
 after_first_shell(normal, true) -> {halt, 0};
 after_first_shell(_Reason, true) -> {halt, 1}.
 
+-doc """
+The group user_drv:whereis_group/0 reports, in which group:whereis_shell/0, and with
+it shell:whereis/0, finds the shell, given the groups run_shell/1 started, innermost
+first: the innermost one if it runs the Erlang shell, and `undefined` otherwise. shell:get_state/0, which edlin_expand calls, waits for the
+Erlang shell's answer to `{shell_state, From}`; a command shell never sends one, so with
+a command shell in front there is no Erlang shell to report, as with -noshell on stock.
+The first group never runs the Erlang shell (first_shell/1).
+""".
+-spec erlang_shell_group([{pid(), gen_server:from(), shell()}]) -> pid() | undefined.
+erlang_shell_group([{Group, _Caller, {shell, start, _Args}} | _]) -> Group;
+erlang_shell_group(_Shells) -> undefined.
+
 %% Starts Shell on a new group with the options every shell but the Erlang shell
 %% gets: no completion, since the Erlang shell's would complete Erlang.
 start_shell(Shell, Terminal) ->
@@ -199,10 +211,10 @@ tty_options(false) -> #{input => cooked, output => raw}.
 handle_call({run_shell, Shell = {shell, start, _}}, From, State = #state{shells = Shells, terminal = Terminal}) ->
     %% The Erlang shell completes Erlang, as on stock.
     New = group:start(self(), Shell, group_options(Terminal)),
-    {noreply, gets_input(State#state{shells = [{New, From} | Shells]})};
+    {noreply, gets_input(State#state{shells = [{New, From, Shell} | Shells]})};
 handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal = Terminal}) ->
     New = start_shell(Shell, Terminal),
-    {noreply, gets_input(State#state{shells = [{New, From} | Shells]})};
+    {noreply, gets_input(State#state{shells = [{New, From, Shell} | Shells]})};
 handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
     {noreply, State};
@@ -259,7 +271,7 @@ handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
 handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, shells = Shells,
                                                   terminal = Terminal, input_ended = Ended}) ->
     case lists:keytake(Pid, 1, Shells) of
-        {value, {Pid, Caller}, Others} ->
+        {value, {Pid, Caller, _Shell}, Others} ->
             %% A shell run_shell/1 started has ended, and its group with it, in whatever
             %% order: its caller gets how it ended, which the group's first exit carries
             %% from its shell, and the input goes to the innermost group left. The group's
@@ -316,15 +328,17 @@ is_group(Pid, #state{user = User, base = Base, shells = Shells}) ->
 
 %% The group that gets the input: the innermost shell run_shell/1 started, or the one
 %% the console started with.
-current(#state{shells = [{Group, _Caller} | _]}) -> Group;
+current(#state{shells = [{Group, _Caller, _Shell} | _]}) -> Group;
 current(#state{base = Base}) -> Base.
 
-%% State once its current group has the input: group:whereis_shell/0 finds that group,
-%% and it reads the input's end if the input has ended. Telling a group twice is
+%% State once its current group has the input: group:whereis_shell/0 finds that group if
+%% it runs the Erlang shell (erlang_shell_group/1), and the group reads the input's end
+%% if the input has ended. Telling a group twice is
 %% harmless, as a second end of input is to a terminal.
 gets_input(State = #state{input_ended = Ended}) ->
     Group = current(State),
-    put(current_group, Group),
+    %% Not always Group: only the Erlang shell's group answers shell:get_state/0.
+    put(current_group, erlang_shell_group(State#state.shells)),
     [Group ! {self(), eof} || Ended],
     State.
 

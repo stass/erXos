@@ -159,7 +159,8 @@ flush() ->
 
 -spec whereis_group() -> pid() | undefined.
 whereis_group() ->
-    %% erXos: erx_console keeps the shell's group where this process does.
+    %% erXos: erx_console keeps the Erlang shell's group, if one has the input, where
+    %% this process does.
     Drv = case whereis(?MODULE) of
               undefined -> whereis(erx_console);
               Pid -> Pid
