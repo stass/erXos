@@ -372,8 +372,9 @@ modified dependencies live in `otp/`, `musl/` and `fiasco/`, each with
 its recorded origin.
 
 `make check` is the everyday gate. It verifies the oracle runtime, the
-source provenance and the ASCII rule. It checks every generated
-artifact: ABI, hardware, system registers and terminal tables. It runs
+source provenance and the ASCII rule. It generates every
+artifact (ABI, hardware, system registers and terminal tables) into
+`build/gen/`, none of which is checked in. It runs
 the host tests, compares the generated text tables in Erlang with Ruby,
 and runs the native ELF and archive integrations. It never runs the full
 stock OTP suites and never downloads.

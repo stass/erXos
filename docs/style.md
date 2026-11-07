@@ -612,8 +612,8 @@ APIs do not use `method_missing`, and interpolated strings never reach
 `eval`. Each metaprogrammed surface explains what it generates and has a
 test exercising a generated member. If plain code is within about
 20 percent of the length, prefer plain code. These techniques do not
-replace the readable generated files and drift checks required by the ABI
-and hardware contracts.
+replace the readable generated files and determinism checks required by the
+ABI and hardware contracts.
 
 ## Applying the guide
 

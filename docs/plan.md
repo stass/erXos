@@ -77,8 +77,8 @@ Ground rules:
   replacement, a
   documented improvement with a test, or a bug in the stopgap recorded as
   such.
-* **Checks before the code they police.** The generators, the drift check,
-  the stack proof and each chokepoint check land before or with the first
+* **Checks before the code they police.** The generators and the
+  generated-tree tests, the stack proof and each chokepoint check land before or with the first
   code they constrain; every parser of untrusted input lands with its fuzz
   target.
 * **Development builds run only trusted code** until M11, and say so in the
@@ -271,7 +271,7 @@ than building every later service before the usable slice.
 
 | Work | When | Required result |
 | --- | --- | --- |
-| Declaration model and generation checks | M0 | explicit ABI fragments with one qualified type/name namespace; complete-input validation, deterministic output inventory and drift checks for paths and bytes; typed layouts and assertions; status/errno/fault/signal mapping infrastructure; valid-input builders, boundary mutations and fuzz entry points alongside each parser; invalid-schema and stale/missing/orphaned-output tests |
+| Declaration model and generation checks | M0 | explicit ABI fragments with one qualified type/name namespace; complete-input validation, deterministic generation into the build tree, with a test that the tree depends only on its recorded inputs and an ASCII refusal; typed layouts and assertions; status/errno/fault/signal mapping infrastructure; valid-input builders, boundary mutations and fuzz entry points alongside each parser; invalid-schema tests, and refusal of a file checked in or edited at a generated output's path |
 | Startup from the packed manifest | M3 | the root task and `erx_manifest` read the system domain's records and its console device from the packed manifest through the generated readers; no second compiled configuration table |
 | Inspection and host-facing service bindings | M4 | `abi/inspection.txt` generates builders, C/Erlang/Ruby types/validators, path/field/status/unit tables and shell/host/`/proc` projections; host-exposed service operations generate Ruby clients; independent tests reject unknown keys and reply mismatches and preserve each status/reporter; generated docs and fuzz scaffolding land with the interfaces |
 | First generated service interface and the rest of the startup descriptors | 1b-A | console/service operations generate C/Erlang clients, admission/dispatch and bounded replies with scope policy in the handler; source checks refuse bypasses; the checked manifest's packed descriptors supply boot order, configured domains' devices, configured facets and watchdog liveness |
@@ -363,7 +363,7 @@ generated file and finds it unchanged.
   [design-platforms.md](design-platforms.md#qemu-virt) configures it under
   both accelerators, `-no-reboot`, serial output in logs, named lines
   awaited under named deadlines, transcripts compared with expected ones.
-* The generators and the drift check: `abi/erx_abi.txt`, its explicit
+* The generators and the generated-tree tests: `abi/erx_abi.txt`, its explicit
   inspection/service fragments and `abi/arch/aarch64.txt`, with the shared
   declaration model, input/output inventories, generated reference tables
   and test/fuzz scaffolding of [Generation work](#generation-work), and
@@ -430,8 +430,8 @@ The TLC runner's tests pass, including targeted expected failures, wrong
 properties, parser errors, incomplete runs, cache invalidation and empty
 filters; the separate `check-tla` entry point reports missing tools as an
 error and performs no network access. Generation rejects invalid schemas
-before publishing output and fails drift checks for changed, missing and
-orphaned files. Independent fixtures check generated parsers and mappings.
+before publishing output, regenerates the tree when an input or output
+changes, and refuses a generated file checked in or edited. Independent fixtures check generated parsers and mappings.
 
 **Gate G0.** The import: the licence scan and link closure of the Fiasco
 set, which name the GPL-headed files the stopgap keeps
@@ -2479,7 +2479,7 @@ Each is small, adds its tests, and leaves `make check` green.
 6. **ABI generator.** `abi/erx_abi.txt`, the Ruby generator, and the
    generated header for status codes, rights and limits, with golden tests.
 7. **Hardware sources.** The SVD generator and the system-register
-   extractor with golden tests, the drift check, and the SVD file of QEMU
+   extractor with golden tests, the generated-tree tests, and the SVD file of QEMU
    `virt`'s console UART as the first input.
 8. **Boot image.** `tools/erx pack` writing `ERXPACK`
    deterministically, with its `NOTICES` file, the C17 validator built for

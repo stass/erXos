@@ -2068,7 +2068,8 @@ exercise every status/reporter combination, unauthorized paths and fields,
 unknown keys without atom creation, and hostile names in every projection.
 They check that rendering never turns missing data into success and that a
 development-only field never reaches a release projection. The generated
-reference tables and field projections are covered by the drift check.
+reference tables and field projections are generated into the build tree and fall under the
+determinism test of the generated tree.
 
 * **Exact output:** the test of V1, on the console and on the host tool's
   `console` command. A seeded escaping step in `output/3` or in the console's

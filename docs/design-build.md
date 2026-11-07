@@ -200,18 +200,14 @@ The ABI generator reads the complete declaration closure before emitting
 anything. Names and numeric identifiers are unique in their namespaces;
 layouts have explicit typed fields, sizes and alignment. References and
 all bounds are validated before output construction. Generated output is
-ASCII and deterministic. A checked inventory owns the output paths; drift
-checking compares both the path set and every byte, including missing and
-orphaned outputs. Parsers have production-entry fuzz targets and independent
+ASCII and deterministic. Parsers have production-entry fuzz targets and independent
 negative fixtures.
 
 The source inventory includes the neutral ABI root, explicit fragments,
 the architecture binding, hardware register sources and escape rules.
-The output inventory declares each generator's owned paths and generated
-documentation regions. Generation stages all outputs before publication;
-drift checking writes to a private temporary tree and never repairs the
-working tree. An unknown declaration, output path collision or unsupported
-layout fails before an output changes. Later service schemas land with
+Each generator's plan declares its output paths. Generation stages all
+outputs before publication. An unknown declaration, output path collision
+or unsupported layout fails before an output changes. Later service schemas land with
 their consumers, under [Generated interfaces and representations](design-generation.md).
 
 Generated files live in the build tree, not the repository.
@@ -219,7 +215,7 @@ Generated files live in the build tree, not the repository.
 `tools/erx generate` and `make generate`) publishes every generator's plan
 into one output root, `build/gen/`, which mirrors repository-relative
 paths, so `-I build/gen -I build/gen/include` resolves the same include
-lines a tracked copy would; `Erx::Generated.path` names one file in it.
+lines an in-tree file would; `Erx::Generated.path` names one file in it.
 Each generator returns an `Erx::GenerationPlan`: its outputs, the digest of
 every input file it read and the expansion of every glob it discovered
 inputs with, so a new output or input needs no change outside the
@@ -228,9 +224,8 @@ and globs, the digest of every Ruby file beneath the running code's
 `tools/lib` with the Ruby, `json` and `rexml` versions it runs on, and the
 digest of every output. The tree is fresh exactly when all of these still
 hold and it holds nothing else; otherwise `ensure` regenerates all of it,
-and files whose bytes are unchanged keep their modification time. A
-generator's drift record of tracked outputs (`abi/generated.json`,
-`abi/terminal_generated.json`) is not part of its build plan. `ensure`
+and files whose bytes are unchanged keep their modification time. An
+edited or missing output fails the stamp and is regenerated. `ensure`
 holds an exclusive lock on `build/gen.lock` for its check and publish,
 writes a new tree into a staging directory beside `build/gen/` and moves
 it into place by rename, so every caller of `ensure` finds one complete
@@ -252,6 +247,30 @@ refuses stops every command with that generator's diagnostic.
 `test/host/generated_loading_test.rb`
 checks from the sources that no generator reaches a loader or a
 generated file and that nothing else loads one except through a loader.
+
+No generated file is checked in or edited. Its properties hold as follows:
+
+* The tree is a function of its recorded inputs.
+  `test_generation_depends_only_on_its_recorded_inputs` copies the files the
+  stamp records into two source roots at different paths and modification
+  times, generates each from a different working directory and time zone into
+  differently named output roots, and requires both trees to be
+  byte-identical to each other and to the build's own. A generator that
+  reads an unrecorded input fails it. `make check-reproducible` regenerates
+  `build/gen/` before each of its two builds.
+* `Erx::Generated` refuses any output that is not ASCII before anything is
+  written.
+* `Erx::Checks`, the source check of `make check`, refuses a listed file
+  (tracked, or untracked and not ignored) at a generated output's path;
+  `ErlangApps.modules` refuses an application source file at a generated
+  module's path; and the runtime build's OTP copy refuses an `otp/` file at
+  the path of a generated `build/gen/otp/` file. An edit to a file in
+  `build/gen/` fails the stamp and is regenerated.
+
+`ruby tools/gen_abi.rb --output DIR [--root PATH]` (likewise
+`tools/gen_hw.rb` and `tools/gen_terminal.rb`) writes that one generator's
+files alone into `DIR`, which is empty or an earlier output of the script,
+for reading them outside a build; it refuses the build's own `build/gen/`.
 
 ## Images and guests
 
@@ -502,7 +521,7 @@ rebuilds with identical bytes for the archive, the single bootable file
 and the two-file form, the single file's archive equal to the two-file
 archive, both forms booting under the harness, and the boot validator's
 configured sanitizer and fuzz budgets. `make check` is offline and runs
-ordinary host checks and generation drift. `make check-tla` remains a
+ordinary host checks, which include the generated-tree tests. `make check-tla` remains a
 separate gate; a missing requested tool is an error rather than a skip.
 
 ### What the gates run
@@ -537,10 +556,4 @@ that forgets `require 'minitest/autorun'` cannot silently run nothing.
 `TODO.md` and `docs/todo-performance.md` merge by line union
 (`.gitattributes`), so concurrent additions to these lists never
 conflict; an entry edited on both sides can stay in both forms, which the
-next reader tidies. Generated ABI outputs are functions of their sources:
-`tools/land COMMIT` cherry-picks one commit, and when only those outputs
-conflict it removes them, runs `tools/gen_abi.rb`, proves the result with
-`--check` and continues. Any other conflict stops the pick with the files
-listed; `tools/land --continue` finishes it once they are resolved and added.
-A clean pick whose outputs are stale has them regenerated into it. Edits
-outside the index are refused, so what is generated from is what is committed.
+next reader tidies.

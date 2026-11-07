@@ -16,7 +16,8 @@ derive an immutable output plan containing every output path and byte.
 Filesystem reads and publication surround these stages. An invalid
 declaration produces a diagnostic with its file, line, qualified name and
 rule, and publishes nothing. Publication errors fail the command; a
-subsequent drift check does not treat a partial publication as success.
+partial publication leaves a tree that fails its stamp, so the next build
+regenerates it.
 
 The model describes representation and structural validation. It does not
 decide whether to create a domain, admit a grant, transfer authority or
@@ -1444,8 +1445,10 @@ array cannot supply missing data.
 ## Output inventory and publication
 
 One immutable inventory lists the resolved input paths and all derived
-output paths. Paths are normalized relative paths below the repository
-root, without traversal or symlinks. Output bytes depend only on source
+output paths. Paths are normalized relative paths, without traversal or
+symlinks, and name inputs below the repository root and outputs below the
+build's generated tree, `build/gen/`, which mirrors repository-relative
+paths. No output is checked in. Output bytes depend only on source
 bytes and the generator, never wall-clock time, locale, filesystem
 enumeration order or absolute checkout path. Declarations keep their
 declared field order; unordered sets and documentation tables use
@@ -1453,7 +1456,7 @@ qualified-name byte order. Every artifact names its sources and generator
 and carries the project's BSD-2-Clause notice and copyright for
 Stanislav Sedov <stas@deglitch.com>.
 
-The output families have explicit locations:
+The output families have explicit locations, shown relative to `build/gen/`:
 
 | Location | Contents |
 | --- | --- |
@@ -1475,18 +1478,16 @@ serving as an independent oracle. Direct boundary mutations exercise
 the production reader entrypoints in each generated language.
 
 The inventory enumerates individual paths rather than accepting arbitrary
-files below those directories. A drift check regenerates into an isolated
-temporary tree, compares paths and bytes with the inventory, and also
-checks the owned output directories and marked document regions for
-unlisted artifacts. A stale inventory cannot hide an orphan. Generated
-sections are replaced as whole delimited regions; malformed, duplicated
-or missing delimiters fail. Handwritten prose outside them is preserved.
+files below those directories. The generated tree is regenerated whole,
+so an output the inventory no longer lists does not survive, and a file
+edited or added by hand fails the tree's stamp. The determinism test
+and the ASCII refusal of `Erx::Generated` ([Generation](design-build.md#generation))
+hold the byte-for-byte and ASCII properties.
 
-All outputs are derived and validated before any publication. Each file
-is written to a sibling temporary file and renamed into place. A process
-or filesystem failure can interrupt a multi-file publication; the command
-fails and the complete inventory must pass the drift check before the
-tree is accepted. A failed schema check does not reach this effect stage.
+All outputs are derived and validated before any publication. The tree is
+staged beside `build/gen/` and moved into place by rename, so a process or
+filesystem failure leaves the earlier tree or none, and the command fails.
+A failed schema check does not reach this effect stage.
 
 ## Verification
 

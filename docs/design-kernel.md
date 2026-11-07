@@ -7900,8 +7900,9 @@ the Erlang code therefore agree by construction, and every list the
 dispatch depends on (calls, rights, types, pass sets, charged budgets,
 executor rules) is closed by the generator rather than kept complete by
 hand.
-Generated files are ASCII and readable, are checked in, and nothing edits
-them by hand: the drift check covers them. The same declarations produce
+Generated files are ASCII and readable, are generated into `build/gen/`
+and never checked in, and nothing edits them by hand: the source check
+refuses a file at a generated output's path. The same declarations produce
 typed log/trace emitters and decoders, diagnostic names, API reference
 tables and parser test/fuzz scaffolding under
 [Generated interfaces and representations](design-generation.md). Emitter
@@ -7912,9 +7913,9 @@ generator's own output never supplies its sole expected test answers.
 ### Hardware register sources
 
 Device registers and system registers each have one checked-in source, and
-Ruby generators produce every accessor from it. A drift check, part of
-`make check`, regenerates every generated file into a scratch directory and
-fails the build when a checked-in one differs.
+Ruby generators produce every accessor from it into `build/gen/` during
+the build, regenerating the whole tree when an input or a generator
+changes, so no generated file is checked in or can be stale.
 
 **Device registers** are described in CMSIS-SVD files under `hw/svd/`, one
 per device that erXos code touches, written by erXos from the devices'
@@ -8465,7 +8466,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | data holds no code pointer outside an allowlist | every absolute relocation in a data section of the image that targets text belongs to an allowlisted table: the generated handler table | relocations of the linked image |
 | only `liberx`'s `fiasco` backend issues Fiasco calls | outside `liberx/backend/fiasco/`, no object includes an `l4sys` header or contains a system-call trap other than erXos's, and no erXos source outside it references `l4_` symbols | syntax trees, disassembly |
 | an architecture's terms appear only in its layer and its documents | `make check-arch-terms`: no term of an architecture's checked-in term list, `hw/arch_terms/<arch>.txt`, appears in generic sources, generic generated files, `abi/erx_abi.txt` or a generic design document; `kernel/arch/<arch>/`, `liberx`'s per-architecture directories, `abi/arch/<arch>.txt`, `hw/sysreg/<arch>.json`, the term list itself, the architecture's binding document, the platform binding, the research records and [design.md](design.md#dependencies)'s dependency table, which names every dependency, board firmware included, are exempt; an architecture's name is not one of its terms | text search |
-| generated files are never edited | the drift check | regeneration |
+| generated files are never checked in or edited | the source check's refusal of a file at a generated output's path | regeneration of `build/gen/` |
 | kernel C recurses only through `musttail` | the stack proof's cycle rule | disassembly |
 
 The checks bind erXos's kernel and the C17 code erXos adds to the stopgap;
@@ -8765,7 +8766,7 @@ the user*. No departure rests on taste alone.
 | Boot | `bootstrap` loads the modules, sigma0 is the root pager and `moe` the root task, whose fault is a page fault to sigma0 or an exception to its handler while the machine runs on | the kernel validates the boot image and starts the system domain itself as the root task, with no root pager and no native root task beside it; every domain's space is a child of the root task's, so every domain ends with it | the boot image format is erXos's own, memory objects need no root pager, and one root holds policy and mechanism for domains in one place, Erlang policy over a C17 domain library | the boot image would carry L4Re's module model, and a native root task would hold a domain table of its own that a restart of the system runtime has to reconcile | needed by erXos; decided by the user for the system domain as root |
 | The root task's end | a fault of the root task halts its thread or reaches its pager, and the machine stays up with nothing above the kernel able to act | a fault of the root task, its halt outside an ordered shutdown, and a missed watchdog deadline each write a crash record and end the machine through the panic path, by `erx.panic`, a reset in release builds (K31) | the root task holds the root authority and is every domain's parent, so nothing can recover it, and a reset with a record is the honest end, as OTP's `heart` resets a node whose runtime stops answering | a machine that is up with no root task, answering nothing, with nothing to reconcile and nothing to show for it | decided by the user |
 | Watchdog | no kernel watchdog; L4Re leaves a board's watchdog to a driver | a kernel watchdog the root task pets, armed when the root task starts, with a boot deadline, whose missed deadline ends the machine after a crash record, and the board's hardware watchdog reloaded by the kernel from its own timer for as long as the kernel runs ([The watchdog](#the-watchdog)) | a hung system runtime is otherwise an up machine that answers nothing; the two timers have one owner each, so a kernel hang and a runtime hang both end in a reset and the runtime's never fires without its record | a hung root task would stay hung until a human resets the board | decided by the user |
-| The ABI | hand-written `l4sys` headers | every call, right, status and layout generated from `abi/erx_abi.txt`, with a drift check ([The ABI file](#the-abi-file)) | one source for the kernel, `liberx`, the runtimes and Erlang | headers that drift from the kernel | needed by erXos |
+| The ABI | hand-written `l4sys` headers | every call, right, status and layout generated from `abi/erx_abi.txt` into the build tree ([The ABI file](#the-abi-file)) | one source for the kernel, `liberx`, the runtimes and Erlang | headers that drift from the kernel | needed by erXos |
 | Code mappings | a flexpage may carry read, write and execute together, so a pager may map a page writable and executable | no mapping is writable and executable, and no page is executable while another mapping or a confined device can write it (K8): code lives in the boot image's slices and in sealed paged objects, and a JIT object is writable at one address and executable at another of its one space, which no other space and no device can map, its runtime publishing code by an explicit step | no code is writable where it runs, or anywhere else | a pager could map writable code, and a writable alias could change code a mapping executes | needed by erXos |
 | Kernel debugger | JDB, an in-kernel debugger | none in erXos's kernel; inspection through `INSPECT`, the trace ring and the host's tools; the stopgap keeps JDB in development builds | less code and less to attack in kernel mode | interactive debugging in the kernel | defensible |
 

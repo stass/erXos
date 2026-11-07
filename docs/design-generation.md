@@ -172,9 +172,10 @@ jobs, executable bodies and the shell parser remain ordinary code/state.
 
 Generation emits the factual parts of API documentation: signatures,
 operation identifiers, fields, variants, units, bounds, declared rights
-and error mappings. These are delimited generated sections in the owning
-design/reference documents, checked for drift. Handwritten examples and
-architectural rationale are separate from those sections. A reference
+and error mappings. These are generated reference documents in the build tree (the ABI's is
+`build/gen/docs/generated/abi-reference.md`), not copies in the design
+documents. Handwritten examples and architectural rationale stay in the
+design documents. A reference
 table does not become another input to the generator.
 
 Each generated parser lands with input builders and a fuzz entry point
@@ -209,9 +210,11 @@ and checked arithmetic rather than packed-structure casts or unchecked
 pointer arithmetic over input. Data tables contain no new function-pointer
 escape from the kernel's listed call targets.
 
-`make check` regenerates into a temporary tree and compares output paths
-and bytes with the declared generated artifacts, catching stale, missing
-and orphaned outputs. Every generated artifact identifies its source and
+Generated artifacts are never checked in: the build generates them into
+`build/gen/`, regenerating the whole tree when an input or a generator
+changes ([Generation](design-build.md#generation)). A test generates the
+tree from the same inputs in different places and times and requires
+identical bytes. Every generated artifact identifies its source and
 generator. Schema parsers reject unknown declarations; targets refuse
 unsupported ABI/schema versions with a diagnostic. No generator emits
 migration code or readers for old erXos formats.

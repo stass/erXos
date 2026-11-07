@@ -1308,7 +1308,7 @@ Each passing case has a seeded failure that proves the code ran.
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
 | Only the display driver's process calls `erx_device:fill/3` and `post/4` on the display device | the same xref check |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
-| Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's operations and events | the generated-output drift check |
+| Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's operations and events | the generated tree's determinism test, and a source check that no other module reads those bytes |
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |
 | `erx_term` and `erx_ui_server` call no facet | an xref check that neither module nor its callees reach `erx_facet` clients |
 | Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu`, `erx_ui_erlang` and `erx_term` |

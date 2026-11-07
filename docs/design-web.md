@@ -35,7 +35,7 @@ Decisions every reader of this document needs:
 * **One source for the protocol.** `abi/protocols/web.txt` declares every
   message; a Ruby generator emits the Erlang codec the web domain uses
   and the TypeScript codec and types the client uses, and the generated
-  files are checked for drift like every other generated output. The
+  files are generated into the build tree like every other generated output. The
   widget changes inside it are the binary form of `abi/formats/ui.txt`
   that the display declares for renderers outside Erlang. The client's
   `hello` carries one hash over every source generated into the client,
@@ -113,12 +113,10 @@ inspector path, so a link is a function of the value, not of the page.
 **What it builds on.** The escape's tables come from
 `tools/gen_terminal.rb`, which reads `abi/terminal.txt` and OTP's Unicode
 data and writes `erlang/apps/erx/src/erx_text_tables.erl`,
-`tools/generated/terminal_tables.rb` and the kernel's ASCII class, listed
-in `abi/terminal_generated.json` and checked with `--check`. This design
-adds outputs and entries to the ABI generator's drift check (`make check`
-regenerating into a temporary tree against `abi/generated.json`'s output
-inventory and owned globs), to the inspection schema `abi/inspection.txt`
-and to the pinned fetch step (`tools/erx fetch` over `deps.lock`), and
+`tools/generated/terminal_tables.rb` and the kernel's ASCII class, into
+`build/gen/`. This design adds outputs to the ABI generator, which fall
+under the generated tree's determinism test and ASCII refusal, to the
+inspection schema `abi/inspection.txt` and to the pinned fetch step (`tools/erx fetch` over `deps.lock`), and
 `.ts` and `.tsx` files to the source ASCII check (`Erx::SourceText`).
 
 ## Requirements
@@ -971,17 +969,17 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | No handwritten client source writes an HTML or code sink | a source check over `web/src` outside `generated/` that fails on `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `writeln`, `srcdoc`, `createContextualFragment`, `DOMParser`, `eval`, `new Function`, a string passed to `setTimeout` or `setInterval`, and a `javascript:` literal; its test is a seeded file with each |
 | Only `Text` reads a `MachineText`'s bytes | the class's field is private to `text.tsx`; a source check that no other file names it, whose test is a seeded file that does |
 | Only `hrefOf` writes an `href` | a source check that every `href` in `.tsx` is `hrefOf(...)`, whose test is a seeded literal `href` |
-| Only the generated codecs encode or decode the protocol | the generated-output drift check, and a source check that no other module of the web domain or the client reads a message's bytes, whose test is a seeded module that does |
+| Only the generated codecs encode or decode the protocol | the generated tree's determinism test, and a source check that no other module of the web domain or the client reads a message's bytes, whose test is a seeded module that does |
 | The web domain's release calls no inspect, trace, console or shell client | an xref check over the release, whose test is a seeded call of `erx:inspect/2` in a module of the release |
 | Only the front ends write HTTP headers, from the generated table | a source check that `Content-Type`, `Set-Cookie` and the security headers appear only in `erx_web_cowboy` and `Erx::Web`, as the table's names, whose test is a seeded header literal elsewhere |
 | `Erx::Web` serves only the bundle's inventory | a source check that its file reads go through the inventory lookup, whose test is a seeded `File.read` |
 
-The drift check covers the TypeScript side as it covers Erlang and C:
+The generated tree covers the TypeScript side as it covers Erlang and C:
 the protocol's, `ui.txt`'s and the inspection schema's TypeScript files
-are outputs of `abi/generated.json`, under an owned glob
-`web/src/generated/*`, and the escape table is an output of
-`abi/terminal_generated.json`, so `make check` regenerates each into a
-temporary tree and fails on a stale, missing or orphaned file; `tsc
+are outputs of the ABI generator, under `web/src/generated/*` of
+`build/gen/`, and the escape table is an output of the terminal
+generator, so each is regenerated with the tree, falls under its
+determinism test and ASCII refusal, and cannot be checked in or edited; `tsc
 --noEmit` then fails on handwritten client code that no longer fits the
 generated types. The generated TypeScript is ASCII-only, names its source
 and generator, and is never edited. The ASCII check covers the client's
@@ -1116,7 +1114,7 @@ library for the host tool's server; TypeScript for the client. And:
   and its facets, the console's login.
 * [design-system.md](design-system.md#the-manifest): the manifest check.
 * [design-generation.md](design-generation.md#build-contract): generated
-  outputs and the drift check.
+  outputs and the generated tree.
 * The WebSocket Protocol, RFC 6455; HTTP Semantics, RFC 9110; Cookies,
   RFC 6265 and the `SameSite` attribute and cookie prefixes of its
   revision; Content Security Policy Level 3 and Trusted Types, W3C; Fetch

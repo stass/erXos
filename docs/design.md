@@ -477,7 +477,7 @@ owns it:
 | A program's bytes reach a terminal as its tty's flags leave them | one owner per tty, one pure output function, and nothing after it reads the bytes | [design-live.md](design-live.md#invariants) V1 |
 | Text labelled with its source is displayed only through the line escape | each display builds its line with the escape, from one generated table | [design-live.md](design-live.md#invariants) V9 |
 | Only the system shell types expressions into the system domain, and only a login at a secure console line opens it | the console starts a system shell only under the system-shell facet, which it grants to a login at a line the manifest marks `secure`, holds itself and ends with that login; no session ever holds it | [design-live.md](design-live.md#invariants) V6 |
-| The kernel, `liberx`, the runtimes and Erlang agree on the ABI, and code agrees with the hardware's registers | all are generated from `abi/erx_abi.txt`, the CMSIS-SVD files and the system-register specification, and a drift check fails the build on a stale file | [One source](#one-source-for-the-abi-and-the-hardware) |
+| The kernel, `liberx`, the runtimes and Erlang agree on the ABI, and code agrees with the hardware's registers | all are generated from `abi/erx_abi.txt`, the CMSIS-SVD files and the system-register specification, and the build generates every output into `build/gen/`, so no checked-in copy can be stale | [One source](#one-source-for-the-abi-and-the-hardware) |
 | No kernel stack overflows | every thread's kernel stack is proven, for every kernel configuration that is built, to hold its deepest kernel path with the deepest interrupt path on top, and every other stack its entry's; interrupt handlers are checked never to nest; kernel code recurses only through `musttail` calls; stacks have guard pages | [Bounded stacks](#bounded-stacks) |
 
 ## Decisions
@@ -652,9 +652,12 @@ scaffolding derived from these declarations. Startup descriptors are the
 checked manifest's own packed arrays, and command catalogs derive from
 release metadata; neither adds another configuration source.
 
-A drift check regenerates into a temporary tree and compares output paths
-and bytes, refusing stale, missing and orphaned generated artifacts.
-Nobody edits a generated file, hand-packs register bits or copies a constant.
+Generated files are never checked in: the build generates every output into
+`build/gen/` from the inputs, regenerates it whole when an input, a
+generator or an output changes, refuses an output that is not ASCII, and
+the source check refuses a file at a generated output's path. A test
+generates the tree from the same inputs in different places and times and
+requires identical bytes. Nobody edits a generated file, hand-packs register bits or copies a constant.
 
 ### Chokepoint checks
 
@@ -693,7 +696,7 @@ tests.
 | only `erx_dom_destroy` and `erx_dom_retire` destroy a domain's budgets, and the domain library installs into a domain's table only through `erx_dom_install`, never a gate of another domain | a source check over `liberx`'s system layer that budget destruction and the install calls are referenced only from those functions, with a seeded violation | [design-system.md](design-system.md#the-domain-library) |
 | only the manifest's two readers, the generated C reader and the Erlang module `erx_manifest`, read the system manifest | a source check and a check over the system release's BEAM files that the manifest is read only through them, each with a seeded violation | [design-system.md](design-system.md#the-manifest) |
 | no release lets `global` or `pg` span domains | a release-build check that fails the build on a release that sets `connect_all` to true, with a seeded violation | [design-runtime.md](design-runtime.md#erlang-visible-behaviour) |
-| generated files are fresh | the drift check | [One source](#one-source-for-the-abi-and-the-hardware) |
+| no generated file is checked in or edited | the source check's refusal of a file at a generated output's path; the stamp of `build/gen/`, which regenerates an edited output | [One source](#one-source-for-the-abi-and-the-hardware) |
 | a file of an imported tree that differs from its import says so, and every file in an image has known provenance and an allowed licence | each file's SHA-256 against the record in its tree's `ORIGIN.md`, and its header searched for erXos's notice; every packed file's provenance and licence, from the linker's maps, the compiler's dependency files and the packer's list | [Licences and notices](#licences-and-notices) |
 | only the domain library's one ending function destroys a domain's budget, which deletes its space with everything else it paid for, and the domain service reaches it only after it has let go of everything it was given of the domain | a source check over `liberx`'s system layer that a domain's budget is destroyed only in that function, with a seeded violation; a check over the system release's BEAM files with the compiler's call graph that the NIF behind it is called only from the domain service's ending path | [design-system.md](design-system.md#ending-a-domain) |
 | only the slot writer writes a slot or the boot-selection record | the device service derives those windows from the medium layout and grants them to the slot writer alone; a test that every other request for them fails | [design-storage.md](design-storage.md#system-updates) |
@@ -1571,7 +1574,7 @@ absence as a known difference.
 | System identifiers | the rule `[a-z0-9][a-z0-9._-]*`, 1 to 63 bytes | [design-system.md](design-system.md#identifiers) | `erx_ident:new/1` |
 | Inspection records | schema 1 | [design-live.md](design-live.md#inspection-records) | the host tool's decoder |
 | Escape rules (`abi/terminal.txt`) | generated per build, checked by build identifier | [design-live.md](design-live.md#escape-rules) | generated escapers |
-| Register descriptions (`hw/svd/**/*.svd`, CMSIS-SVD) | the SVD schema's | [One source](#one-source-for-the-abi-and-the-hardware) | the generator and the drift check |
+| Register descriptions (`hw/svd/**/*.svd`, CMSIS-SVD) | the SVD schema's | [One source](#one-source-for-the-abi-and-the-hardware) | the generator and its determinism test |
 | System-register specifications (`hw/sysreg/<arch>.json`) | the release of the architecture's specification each was extracted from | [One source](#one-source-for-the-abi-and-the-hardware) | its reader; `tools/erx sysreg refresh --verify` compares it with the release on demand |
 
 ## Repository layout
@@ -1702,7 +1705,7 @@ The layers of testing:
 | --- | --- | --- |
 | Unit and property tests of the functional cores (the kernel's core, the scheduler's machines, the funnel, the lane protocol, the channel protocol, the domain library's plans, the adapter's decisions, the device NIF's address checks, `erx_etf`, the boot-image validator, the update state machine) | built for the host, under ASan, UBSan and, for concurrent code, TSan; protocol state machines explored exhaustively | host |
 | Protocol models | independent TLA+/TLC models with finite scopes, good and deliberately broken configurations, reachability witnesses and implementation mappings | host, `make check-tla` |
-| Build checks | the chokepoint checks, the stack proof and cycle checks, the drift check over output paths and bytes; generator rejection tests and seeded violations; generated parser scaffolding complemented by independent fixtures and oracles | every build |
+| Build checks | the chokepoint checks, the stack proof and cycle checks, the generated tree's determinism test and ASCII refusal; generator rejection tests and seeded violations; generated parser scaffolding complemented by independent fixtures and oracles | every build |
 | Hosted mode | runtimes, the domain library and the system services on `liberx`'s hosted backend, with OTP's suites, under the sanitizers and `lldb` | host |
 | Conformance | every kernel call's contract, run identically on both kernels for every call the stopgap carries | QEMU, HVF |
 | Transcript tests | boot, shell sessions, domain lifecycle, connections taken down, driver restarts, a watchdog reset, scripted through the console and the host link | QEMU, HVF, with one boot smoke test under TCG; a test that passes under only one accelerator is a bug until explained |
