@@ -529,7 +529,7 @@ it; git history is the record of completed work.
 * [Low] build tree of generated files, `tools/lib/erx/runtime.rb`, `core_archive.rb`, `test/host/*_test.rb`: the
   generated tree's include directories are spelled out by hand in each FLAGS constant (`-I build/gen -I
   build/gen/include ... -I build/gen/kernel/generated`) and in host tests beside `Generated.include_flags`. No file
-  of the tree sits at a generated path (`Checks` refuses one), so their order decides nothing; derive
+  of the tree sits at a generated path (`Generated.ensure` refuses one), so their order decides nothing; derive
   every list from `Generated.include_flags` and drop the repetition.
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
