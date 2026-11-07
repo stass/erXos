@@ -173,6 +173,17 @@ class TopLevelCliTest < Minitest::Test
   # A stale rc oracle, built from another pin, is rebuilt, and the rebuilt one is located.
   def test_ensure_rc_oracle_rebuilds_a_stale_build
     write_rc_oracle(commit: '0' * 40)
+    assert_rebuilt_by_ensure_rc_oracle
+  end
+
+  # A build record cut short does not parse; ensure_rc_oracle rebuilds over it rather than
+  # failing check.
+  def test_ensure_rc_oracle_rebuilds_over_a_corrupt_record
+    File.write(write_rc_oracle(commit: nil), '{"source": ')
+    assert_rebuilt_by_ensure_rc_oracle
+  end
+
+  def assert_rebuilt_by_ensure_rc_oracle
     builds = []
     test = self
     build_class = Class.new do

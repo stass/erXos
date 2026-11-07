@@ -36,7 +36,7 @@ const MILESTONES = [
     { marker: "L4Re Microkernel", label: "Kernel up" },
     { marker: "erx: root task", label: "Starting the system domain" },
     { marker: "Erlang/OTP 29", label: "Starting Erlang" },
-    { marker: "Eshell V", label: "Ready: type at the prompt" },
+    { marker: "rc: the command shell", label: "Ready: type at the prompt" },
 ];
 // The download is the first part of the progress bar; each milestone
 // fills an equal share of the rest.

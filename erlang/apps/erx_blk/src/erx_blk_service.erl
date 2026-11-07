@@ -98,8 +98,8 @@ serve({ok, Windows}) ->
                              || Window = {Role, _Start, _Sectors} <- Windows ++ image_windows()]),
     log("partition table admitted; ~b windows", [map_size(Served)]),
     {served, Served};
-%% A machine without a disk is a configuration, so it has no line here, as it has none from
-%% erx_blk.
+%% no_device is either a machine without a disk, a configuration that has no line, or a disk
+%% erx_blk refused, which erx_blk has already logged: either way, no second line here.
 serve({error, no_device}) ->
     {refused, no_device};
 serve({error, Reason}) ->

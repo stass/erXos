@@ -98,6 +98,8 @@ module Erx
       stamp = begin
         JsonInput.parse(BoundedFile.read(stamp_path, maximum: 65_536), max_bytes: 65_536,
                         label: 'rc oracle build record')
+      rescue JsonInput::Unsupported
+        raise
       rescue Error => e
         raise StaleBuild, "rc oracle in #{output} has an unreadable build record (#{e.message}); " \
                           'run tools/erx build rc-oracle'
