@@ -20,8 +20,9 @@ from a report. ERTS answers every attribute of a live process, so each is
 * `location` is `{Module, Function, Arity, File, Line}`. Code that
   carries no line table (a preloaded module, a BIF) has no source
   position, and ERTS knows that fully: its location is `ok` with the file
-  `<<>>` and the line 0, which no source position has, as an empty
-  registered name says the process has none.
+  `<<>>` and the line 0, which mean "no source position", since no real
+  position has either. A process with no registered name likewise has
+  the registered name `<<>>`.
 
 A name whose UTF-8 is longer than the schema's 255 bytes is
 `{error, invalid}`, as erx_schema:validate_record/1 makes every value
@@ -34,15 +35,20 @@ The pure core, record/3, takes ERTS's answer as data.
 -export([process/2]).
 -export([record/3, info_keys/0]).
 
-%% The schema's bound on a list of pids.
--define(MAX_PIDS, 1000).
-
 %%% Effects: the questions put to this runtime.
 
 -doc "The record of a live process of this runtime, owned by Domain; `none` when it is gone.".
 -spec process(pid(), non_neg_integer()) -> {ok, erx_schema:record()} | none.
 process(Pid, Domain) when node(Pid) =:= node() ->
-    record(Pid, erlang:process_info(Pid, info_keys()), Domain).
+    record(Pid, info(Pid), Domain).
+
+%% A pid of this node's name but of another creation, an earlier
+%% incarnation's, is not this runtime's: process_info/2 refuses it, and it
+%% names no live process here.
+info(Pid) ->
+    try erlang:process_info(Pid, info_keys())
+    catch error:badarg -> undefined
+    end.
 
 %%% The pure core.
 
@@ -97,8 +103,12 @@ location({Module, Function, Arity}, File, Line) -> {Module, Function, Arity, Fil
 
 %% The pids an item holds: ok when they are all it holds and within the
 %% bound, partial otherwise.
-pids(Item, Pids) when length(Pids) =:= length(Item), length(Pids) =< ?MAX_PIDS -> {ok, Pids};
-pids(_Item, Pids) -> {partial, lists:sublist(Pids, ?MAX_PIDS)}.
+pids(Item, Pids) ->
+    {ok, {list, pid, Bound}} = erx_schema:type(pids),
+    case length(Pids) =:= length(Item) andalso length(Pids) =< Bound of
+        true -> {ok, Pids};
+        false -> {partial, lists:sublist(Pids, Bound)}
+    end.
 
 %% The value erx_schema accepts for the attribute, or {error, invalid}.
 checked(Key, Reporter, Value) ->

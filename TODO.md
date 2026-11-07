@@ -457,6 +457,18 @@ it; git history is the record of completed work.
   taken, a liberx bug it hides rather than reports. The group topic maps every `erx_group_info` failure to
   `ERX_ENOTSUP`, not `ERX_EINVAL` alone; a CPU listing ends at the first gap in the map; the root's window to
   `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root).
+  `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root). The QEMU check that
+  calls `erx_kernel_records` from `erl` at the console is not written yet.
+* [Medium] inspector (`erlang/apps/erx/src/erx_inspector.erl`, `erx.erl`, `erx_process_records.erl`):
+  `erx:i/0,1` inspect at scope `all` because every Phase 1 shell runs in the system domain; take the scope from
+  the caller's inspect facet, with `{error, no_facet}`, when sessions run in their own domains. The Phase 1 runtime
+  does not run at its domain's creation, so a process record says `domain 4` beside a pid printed `<0.N.S>`
+  (design-domains, Text). The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written
+  in `erx_inspector`; have `erx_schema` export the page and the schema mark which machine paths a scoped facet
+  reads. A thread past a partial listing's end is answered `{error, scope}`, as one that does not exist.
+  Not collected yet: `[groups]`, `[budgets]`, `[domains]` and a domain's record, modules, exports, connections
+  and paginated `[domains, Id, processes]`; `erx:inspect/2`, `erx:ps/0`, `erx:domains/0` and the `shell_default`
+  shortcuts.
 * [Medium] kernel reports, `liberx` and `abi/erx_abi.txt` (design-abi's
   [Inspection schema](docs/design-abi.md#inspection-schema)):
   `erx_info_budget` declares only the fields master and the budget redesign on branch `design-budget-caps` agree on

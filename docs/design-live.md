@@ -1692,8 +1692,8 @@ grant's rights and bounds (V3).
 
 | Function | Contract |
 | --- | --- |
-| `erx:i() -> ok` | `erx:i([])`: the machine's record, the root of every path |
-| `erx:i(Path) -> ok` | renders the record for `Path` in the shell, through the caller's inspect facet |
+| `erx:i() -> ok` | the machine at a glance, through the caller's inspect facet: the machine's record, the root of every path, then each CPU, the caller's domain's group, budget and threads, and the processes, threads and processes a row each, every value with its reporter, within 80 columns |
+| `erx:i(Path) -> ok \| {error, scope \| unsupported}` | renders the record for `Path` in the shell, through the caller's inspect facet, every value with its reporter; `scope` for a path outside the facet's scope or one that names nothing |
 | `erx:domains() -> ok` | lists every domain the caller's inspect facet covers: id, name, principal, state, memory, CPU time and process count, each value marked with its reporter |
 | `erx:ps() -> ok` | lists every process of every domain the caller's inspect facet covers, by domain, and under a session its programs: pid or program number, registered name or program name, current function, reductions, memory and queue length, each marked with its reporter; the `ps` command emits the same fields as records |
 | `erx:inspect(Path, Options) -> {ok, record()} \| {error, Reason}` | `Options` holds `offset`, `limit` and `timeout`; `Reason` includes `scope` and `no_facet` |

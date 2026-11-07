@@ -217,7 +217,31 @@ overview_names_a_cells_own_reporter_test() ->
            attrs := (maps:get(attrs, A))#{reductions := {service, {ok, 7}}}},
     Text = iolist_to_binary(erx_render:overview([{[processes], {ok, [A, B]}}], release)),
     ?assertMatch({match, _}, re:run(Text, <<"\n  by +runtime +runtime +runtime">>)),
-    ?assertMatch({match, _}, re:run(Text, <<"7 \\(service\\)">>)).
+        ?assertMatch({match, _}, re:run(Text, <<"\\(service\\) 7">>)).
+
+status_cells_are_never_cut_test() ->
+    {ok, A} = erx_process_records:record(self(), info(), ?SYSTEM),
+    Name = list_to_binary(lists:duplicate(60, $n)),
+    B = A#{attrs := (maps:get(attrs, A))#{state := {runtime, {ok, garbage_collecting}},
+                                          registered_name := {runtime, {ok, Name}},
+                                          location := {runtime, {timeout, 500}}}},
+    Text = iolist_to_binary(erx_render:overview([{[processes], {ok, [B]}}], release)),
+    ?assertMatch({match, _}, re:run(Text, <<"\\[timeout 500\\]\n">>)).
+
+machine_paths_are_closed_to_scoped_callers_test() ->
+    ?assertEqual(error, reachable([domains], [?SYSTEM])),
+    ?assertEqual({ok, machine}, reachable([domains], all)),
+    ?assertEqual({ok, machine}, reachable([processes], [?SYSTEM])).
+
+repeated_thread_makes_a_partial_listing_test() ->
+    Report = fun(Id) -> {ok, <<Id:64/little, 0:32/little, 0:32/little, 0:32/little, 0:32/little>>} end,
+    Answers = fun(0) -> Report(10); (1) -> Report(10); (2) -> Report(12);
+                 (_) -> {error, ?ERX_ERANGE} end,
+    Path = [domains, ?SYSTEM, threads],
+    Listed = erx_kernel_records:listing(thread, Answers, 0, 128),
+    ?assertMatch({ok, #{children := {partial, [10, 12]}}}, erx_inspector:listing(Path, Listed)),
+    Once = erx_kernel_records:listing(thread, fun(1) -> Report(11); (N) -> Answers(N) end, 0, 128),
+    ?assertMatch({ok, #{children := [10, 11, 12]}}, erx_inspector:listing(Path, Once)).
 
 %% The overview of a machine whose kernel answers nothing, with this node's
 %% processes and a process whose name is as long as the schema allows,

@@ -33,7 +33,7 @@ collector here is `{error, unsupported}`.
 """.
 
 -export([inspect/2, entries/2, overview/1]).
--export([scoped/3, reachable/3]).
+-export([scoped/3, reachable/3, listing/2]).
 -export_type([scope/0, answer/0, entries/0]).
 
 -type scope() :: all | [non_neg_integer()].
@@ -44,6 +44,10 @@ collector here is `{error, unsupported}`.
 
 %% The most entries one listing gives: erx_schema's page.
 -define(PAGE, 1000).
+%% The machine's paths a scoped caller reaches: the machine's record, with
+%% only the attributes that reveal nothing of other domains, and the
+%% processes, listing only its own domains' (docs/design-live.md, "Scopes").
+-define(SCOPED_MACHINE_PATHS, [[], [processes]]).
 
 -doc "The record of Path as Scope may see it.".
 -spec inspect(term(), scope()) -> answer().
@@ -97,19 +101,29 @@ declared path, and a pid of a runtime this inspector does not reach.
 """.
 -spec reachable(term(), {ok, erx_schema:declaration()} | {error, unknown_path}, scope()) ->
           {ok, owner()} | error.
-reachable(Path, {ok, #{visible := Visible}}, Scope) ->
-    case {owner(Path), lists:member(all, Visible) andalso Scope =/= all} of
-        {_, true} -> error;
-        {none, false} -> error;
-        {machine, false} -> {ok, machine};
-        {{domain, Domain} = Owner, false} ->
-            case covered(Scope, Domain) of
-                true -> {ok, Owner};
-                false -> error
-            end
-    end;
 reachable(_Path, {error, unknown_path}, _Scope) ->
-    error.
+    error;
+reachable(Path, {ok, #{visible := Visible}}, Scope) when Scope =/= all ->
+    case lists:member(all, Visible) of
+        true -> error;
+        false -> reachable(Path, Scope)
+    end;
+reachable(Path, {ok, _Declaration}, Scope) ->
+    reachable(Path, Scope).
+
+%% A path no declaration closes to a scoped caller: a domain's when its
+%% domain is in the scope; the machine's only when it is one a scoped
+%% caller may read, so a machine-wide path declared later is closed to
+%% scoped callers until it is named here.
+reachable(Path, Scope) ->
+    case owner(Path) of
+        none -> error;
+        {domain, Domain} = Owner -> answer(covered(Scope, Domain), Owner);
+        machine -> answer(Scope =:= all orelse lists:member(Path, ?SCOPED_MACHINE_PATHS), machine)
+    end.
+
+answer(true, Owner) -> {ok, Owner};
+answer(false, _Owner) -> error.
 
 covered(all, _Domain) -> true;
 covered(Domains, Domain) -> lists:member(Domain, Domains).
@@ -145,21 +159,30 @@ project(Error, _Owner, _Scope) -> Error.
 
 %%% Collection: each path from its reporter.
 
+%% One clause per path shape this inspector collects; a domain path is
+%% collected only for the system domain, the one whose objects the root
+%% names, and every other domain names nothing it reaches.
 collect([], _Scope) ->
     {ok, erx_kernel_records:machine()};
 collect([processes, Pid], _Scope) ->
     found(erx_process_records:process(Pid, erx_kernel_records:system_domain()));
-collect([Kind, _Id] = Path, Scope) when Kind =:= cpus ->
-    entry(Path, enumerate([Kind], Scope));
+collect([cpus, _Index] = Path, Scope) ->
+    entry(Path, enumerate([cpus], Scope));
 collect([domains, Domain | Rest] = Path, Scope) ->
-    case {Domain =:= erx_kernel_records:system_domain(), Rest} of
-        {false, _} -> {error, scope};
-        {true, [group]} -> {ok, erx_kernel_records:group()};
-        {true, [budget]} -> {ok, erx_kernel_records:budget()};
-        {true, [threads, _Thread]} -> entry(Path, enumerate([domains, Domain, threads], Scope));
-        {true, _} -> listing(Path, enumerate(Path, Scope))
+    case Domain =:= erx_kernel_records:system_domain() of
+        true -> system_domain(Path, Rest, Scope);
+        false -> {error, scope}
     end;
 collect(Path, Scope) ->
+    listing(Path, enumerate(Path, Scope)).
+
+system_domain(_Path, [group], _Scope) ->
+    {ok, erx_kernel_records:group()};
+system_domain(_Path, [budget], _Scope) ->
+    {ok, erx_kernel_records:budget()};
+system_domain([domains, Domain, threads, _Thread] = Path, _Rest, Scope) ->
+    entry(Path, enumerate([domains, Domain, threads], Scope));
+system_domain(Path, _Rest, Scope) ->
     listing(Path, enumerate(Path, Scope)).
 
 %% The records of a listing's entries.
@@ -183,21 +206,29 @@ enumerate(_Path, _Scope) ->
 page(Items) when length(Items) =< ?PAGE -> {ok, Items};
 page(Items) -> {partial, lists:sublist(Items, ?PAGE)}.
 
-%% The one record of a listing's entries whose path is Path.
+%% The first record of a listing's entries whose path is Path. An entry
+%% the listing does not hold names nothing, as a process that is gone.
 entry(Path, {_Status, Records}) ->
     case [Record || #{path := P} = Record <- Records, P =:= Path] of
-        [Record] -> {ok, Record};
+        [Record | _] -> {ok, Record};
         [] -> {error, scope}
     end;
 entry(_Path, Error) ->
     Error.
 
-%% A listing's record: its entries' ids as its children.
+-doc """
+The record of the listing at Path from its entries: their ids as its
+children. A listing read an index at a time can meet an entry twice when
+entries come and go between reads; it keeps the first and is partial,
+since what it holds is no longer one snapshot.
+""".
+-spec listing([erx_schema:segment()], entries()) -> answer().
 listing(Path, {Status, Records}) when is_list(Records) ->
     Ids = [Id || #{id := Id} <- Records],
-    Children = case Status of
-                   ok -> Ids;
-                   partial -> {partial, Ids}
+    Distinct = distinct(Ids),
+    Children = case Status =:= ok andalso length(Distinct) =:= length(Ids) of
+                   true -> Ids;
+                   false -> {partial, Distinct}
                end,
     {ok, _} = erx_schema:validate_record(#{schema => erx_schema:schema(), path => Path,
                                            kind => listing, id => lists:last(Path),
@@ -205,5 +236,15 @@ listing(Path, {Status, Records}) when is_list(Records) ->
 listing(_Path, Error) ->
     Error.
 
+distinct(Ids) ->
+    {Kept, _Seen} = lists:foldl(fun(Id, {Kept, Seen}) ->
+                                        case sets:is_element(Id, Seen) of
+                                            true -> {Kept, Seen};
+                                            false -> {[Id | Kept], sets:add_element(Id, Seen)}
+                                        end
+                                end, {[], sets:new([{version, 2}])}, Ids),
+    lists:reverse(Kept).
+
+%% A process that is gone names nothing.
 found({ok, Record}) -> {ok, Record};
 found(none) -> {error, scope}.

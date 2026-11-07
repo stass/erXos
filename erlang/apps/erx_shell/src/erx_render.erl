@@ -262,12 +262,13 @@ What erx:i/0 prints, from erx_inspector:overview/1's sections: each under
 its path, a record as erx:i/1 shows it but without its children, each CPU
 as such a record, and threads and processes as tables of a row each,
 with a line under the header (`by`) naming each column's reporter; a cell
-whose reporter is not its column's carries its own in parentheses. A path
-the inspector does not answer shows its status. Below them, the scope of
-each stopgap reporter named. Every line fits 80 columns: a text column
-other than the last is cut at 20 columns and the last at what is left,
-the end of a cut value shown as `...`, as FreeBSD's ps cuts its last
-column; erx:i/1 shows any record whole.
+whose reporter is not its column's starts with its own in parentheses. A
+path the inspector does not answer shows its status. Below them, the
+scope of each stopgap reporter named. Lines are kept within 80 columns,
+counted as characters: a text column other than the last is cut at 20
+columns and the last at what is left, the end of a cut value shown as
+`...`, as FreeBSD's ps cuts its last column; a status and an integer are
+never cut, so a row of very wide integers may pass 80. erx:i/1 shows any record whole.
 """.
 -spec overview([{[erx_schema:segment()], erx_inspector:answer() | erx_inspector:entries()}],
                release | development) -> iodata().
@@ -333,14 +334,14 @@ rows([#{attrs := First} | _] = Records, IdLabel, Columns) ->
             || #{id := Id, attrs := Attrs} <- Records],
     layout([Header, By | Rows], ?SCREEN).
 
-%% A row's cell: the value, a location by its function alone, with its
-%% reporter when it is not its column's; an attribute the record does not
-%% hold is an empty cell.
+%% A row's cell: the value, a location by its function alone, after its
+%% reporter when that is not its column's, so a cut never takes the
+%% reporter; an attribute the record does not hold is an empty cell.
 row_cell({ok, {Reporter, _} = Attr}, Reporter) ->
     cell(brief(Attr));
 row_cell({ok, {Reporter, _} = Attr}, _Column) ->
     {Text, Kind} = cell(brief(Attr)),
-    {<<Text/binary, " (", (reporter_label(Reporter))/binary, ")">>, Kind};
+    {<<"(", (reporter_label(Reporter))/binary, ") ", Text/binary>>, Kind};
 row_cell(error, _Column) ->
     {<<>>, text}.
 
@@ -377,7 +378,7 @@ layout(Lines, Width) ->
               || Cells <- Cut],
     layout(Fitted, infinity).
 
-cut({_Text, integer} = Cell, _Width) ->
+cut({_Text, Kind} = Cell, _Width) when Kind =:= integer; Kind =:= status ->
     Cell;
 cut({Text, Kind} = Cell, Width) ->
     case width(Text) > Width of
