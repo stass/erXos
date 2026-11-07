@@ -659,21 +659,21 @@ module Erx
                  link: ->(socket) { HostlinkGuest.call(socket, build: built.build_id) }, link_seconds: HostlinkGuest::SECONDS)
       end
 
-# M4's files check (FilesGuest): the guest boots writing a file into /tmp with tmp
-# among its host link's files trees, and the host reads it through tools/erx files.
-def files_boot(accel, count, built)
-  line = [COMMAND_LINES[accel], FilesGuest.command_line].compact.join(' ')
-  points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count,
-                                  extra_arguments: FilesGuest::ARGUMENTS.size)
-  directory = File.join(@root, 'build/qemu', "fl-#{accel}-#{Process.pid}")
-  Qemu.new(root: @root, runner: @runner, program: @qemu)
-      .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
-           command_line: line, directory: directory, link_seconds: FilesGuest::SECONDS,
-           link: lambda { |socket|
-             FilesGuest.call(socket, root: @root, build: built.build_id,
-                                     serial: File.join(File.dirname(socket), 'serial.log'))
-           })
-end
+      # M4's files check (FilesGuest): the guest boots writing a file into /tmp with tmp
+      # among its host link's files trees, and the host reads it through tools/erx files.
+      def files_boot(accel, count, built)
+        line = [COMMAND_LINES[accel], FilesGuest.command_line].compact.join(' ')
+        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count,
+                                        extra_arguments: FilesGuest::ARGUMENTS.size)
+        directory = File.join(@root, 'build/qemu', "fl-#{accel}-#{Process.pid}")
+        Qemu.new(root: @root, runner: @runner, program: @qemu)
+            .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
+                 command_line: line, directory: directory, link_seconds: FilesGuest::SECONDS,
+                 link: lambda { |socket|
+                   FilesGuest.call(socket, root: @root, build: built.build_id,
+                                           serial: File.join(File.dirname(socket), 'serial.log'))
+                 })
+      end
 
       # M4's reload and bad-hash checks (ReloadGuest): the guest boots with the probe's
       # start expression, and the host installs the probe and reloads the subject in a loop.

@@ -91,25 +91,25 @@ module Erx
       end
     end
 
-# Sends body, one 9P2000.L message, on the files stream (docs/design-live.md, "Files
-# between the host and the machine"), within credit like any frame.
-def send_files(body)
-  raise Error, 'no host link session: send a hello first' unless @session
-  raise HostlinkFrame::TooLarge, "a files message of #{body.bytesize} bytes" if body.bytesize > HostlinkFrame::BODY_MAX
+    # Sends body, one 9P2000.L message, on the files stream (docs/design-live.md, "Files
+    # between the host and the machine"), within credit like any frame.
+    def send_files(body)
+      raise Error, 'no host link session: send a hello first' unless @session
+      raise HostlinkFrame::TooLarge, "a files message of #{body.bytesize} bytes" if body.bytesize > HostlinkFrame::BODY_MAX
 
-  transmit([@sender.frame(:files, body)])
-end
+      transmit([@sender.frame(:files, body)])
+    end
 
-# The files stream's messages from the target, in order, waiting at most seconds for
-# the first when none is held. Each is the target's bytes, untrusted.
-def take_files(seconds)
-  pump(seconds) if @files.empty?
-  @files.shift(@files.size)
-end
+    # The files stream's messages from the target, in order, waiting at most seconds for
+    # the first when none is held. Each is the target's bytes, untrusted.
+    def take_files(seconds)
+      pump(seconds) if @files.empty?
+      @files.shift(@files.size)
+    end
 
-# The link, for a caller that waits on it beside other IO; it must read only through
-# take_files or await.
-def io = @io
+    # The link, for a caller that waits on it beside other IO; it must read only through
+    # take_files or await.
+    def io = @io
 
     # The next call identifier of the session; identifiers grow within a session.
     def next_id = (@last_id += 1)
@@ -140,6 +140,9 @@ def io = @io
 
       @receiver.session = id
       @sender = HostlinkFrame::Sender.new(id)
+      # Credit is the session's: the initial bytes again, and the target's grants
+      # counted from zero (abi/protocols/hostlink.txt).
+      @credit = HostlinkFrame::Credit.new
       @last_id = 0
       @session = Session.new(id: id, build: build, versions: versions)
     end

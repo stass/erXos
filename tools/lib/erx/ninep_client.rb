@@ -64,6 +64,8 @@ module Erx
     # The qids walked; fewer than names when the walk stopped part way.
     def walk(fid, new_fid, names)
       reply = rpc(:walk, [fid, new_fid, names.size].pack('VVv') + names.map { |name| string(name) }.join)
+      raise Refused, "a walk reply of #{reply.bytesize} bytes, short of its count" if reply.bytesize < 2
+
       count = reply.unpack1('v')
       raise Refused, "a walk reply of #{count} qids for #{names.size} names" if count > names.size ||
                                                                                reply.bytesize != 2 + (count * QID)

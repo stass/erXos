@@ -106,7 +106,9 @@ module Erx
         end
         @link.take_files(0).each { |body| client.write(body) }
       end
-    rescue Framing => e
+    rescue Framing, HostlinkClient::Timeout => e
+      # A client that broke the framing, or whose messages the target gave no credit
+      # for in time, loses its connection; the next client gets a session of its own.
       @out.call("files: #{e.message}; the client's connection ends")
     rescue Errno::EPIPE, Errno::ECONNRESET
       nil

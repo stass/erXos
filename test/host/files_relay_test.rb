@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'socket'
 require 'tmpdir'
+require 'timeout'
 require_relative '../../tools/lib/erx/etf'
 require_relative '../../tools/lib/erx/files_relay'
 require_relative '../../tools/lib/erx/ninep_client'
@@ -128,11 +129,44 @@ class FilesRelayTest < Minitest::Test
     end
   end
 
+  def test_a_credit_timeout_ends_only_the_client
+    with_relay(connections: 2, deadline: 1) do |listen, target|
+      UNIXSocket.open(listen) do |io|
+        # Three of the largest messages outrun the session's 16 KiB of credit, which the
+        # target never adds to.
+        message = [8192, 100, 0].pack('VCv') + ("\0" * (8192 - 7))
+        3.times { io.write(message) }
+        assert io.wait_readable(10), 'the relay neither answered nor closed the connection'
+        Timeout.timeout(10) { io.read }
+      end
+      # The relay serves the next client, in a session with credit of its own.
+      UNIXSocket.open(listen) { |io| assert_equal 8192, Erx::NinepClient.new(io: io, deadline: 10).version }
+      assert_equal 2, target.sessions
+    end
+  end
+
+  def test_a_short_walk_reply_is_refused
+    client_io, server_io = UNIXSocket.pair
+    server = Thread.new do
+      size = server_io.read(4).unpack1('V')
+      tag = server_io.read(size - 4).unpack1('x1v')
+      server_io.write([8, Erx::NinepClient::TYPES.fetch(:walk) + 1, tag].pack('VCv') + "\1")
+    end
+    client = Erx::NinepClient.new(io: client_io, deadline: 5)
+    error = assert_raises(Erx::NinepClient::Refused) { client.walk(1, 2, ['f']) }
+    assert_match(/walk reply/, error.message)
+  ensure
+    server&.join(5)
+    client_io&.close
+    server_io&.close
+  end
+
   private
 
   # A relay on a socket in a fresh owner-only directory, linked to a FakeTarget over a
   # socket pair, serving connections clients; yields the socket's path and the target.
-  def with_relay(connections:)
+  # deadline bounds each wait of the relay's host link, for credit among others.
+  def with_relay(connections:, deadline: 10)
     Dir.mktmpdir('erx-files') do |directory|
       File.chmod(0o700, directory)
       listen = File.join(directory, 'files.sock')
@@ -140,7 +174,7 @@ class FilesRelayTest < Minitest::Test
       target = FakeTarget.new(guest, &ANSWER)
       target_thread = Thread.new { target.run }
       lines = Queue.new
-      relay = Erx::FilesRelay.new(link: Erx::HostlinkClient.new(io: host, deadline: 10), listen: listen,
+      relay = Erx::FilesRelay.new(link: Erx::HostlinkClient.new(io: host, deadline: deadline), listen: listen,
                                   out: ->(line) { lines << line })
       relay_thread = Thread.new { relay.serve(connections: connections) }
       lines.pop
