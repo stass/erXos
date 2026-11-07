@@ -33,7 +33,8 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   image. `--v64 DIR` instead takes a tree an earlier run built, such as
   `build/site-v64`, and builds nothing.
 * The licence notices of what the two files contain ship beside them in
-  `v64/`: v64's `LICENSE` (BSD-2-Clause) and `LICENSE.MIT`; `NOTICES`,
+  `v64/`: v64's `LICENSE` (BSD-2-Clause) and `LICENSE.MIT`, published with a
+  `.txt` suffix so a static host serves them as text; `NOTICES.txt`,
   every copyright block of the third-party C compiled into the core
   (Berkeley SoftFloat, BSD-3-Clause, and zstd, BSD-3-Clause, with zstd's
   licence text from `otp/erts/emulator/zstd/LICENSE`, which zstd's
@@ -53,7 +54,10 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   names that carry their digests. `index.html` names the script and
   `boot.json`, which the page fetches past the browser's cache, names
   the image and v64's two files, so after a redeploy a browser never
-  pairs one deployment's module with another's core.
+  pairs one deployment's module with another's core. A browser holding
+  a stale `index.html` (GitHub Pages lets it be cached for ten minutes)
+  asks for a `terminal.js` the new deployment no longer has, so its Boot
+  button stays inert until a reload.
 * `--serve PORT` then serves `build/site/` on `127.0.0.1:PORT` until
   interrupted. Any static file server works too; the page needs no
   special headers, because the guest has one core and the page
@@ -68,7 +72,8 @@ image, which needs the whole erXos toolchain; it downloads a release
 asset's `image.boot`, named by its URL and SHA-256 as the workflow's
 inputs, and refuses one whose digest differs. Its third input names the
 release tag or commit the image was built from, for the source link.
-Runs queue in one `pages` group, so two deployments never overlap.
+Runs share one `pages` concurrency group, so two deployments never
+overlap; a run waiting there is replaced by a newer dispatch.
 
 To publish: in the repository settings, set Pages to deploy from GitHub
 Actions; attach an interactive production `image.boot` to a release; then

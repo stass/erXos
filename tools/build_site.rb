@@ -4,8 +4,9 @@
 # frozen_string_literal: true
 
 # Assembles the website in build/site (see site/README.md) and, with
-# --serve, serves it on 127.0.0.1. Exits 0 on success, 1 on failure and 2
-# on a usage error.
+# --serve, serves it on 127.0.0.1. Exits 0 on success or when the server is
+# interrupted, 1 on failure, 2 on a usage error and 130 when a build is
+# interrupted.
 
 require 'optparse'
 require_relative 'lib/erx/runner'
@@ -52,7 +53,10 @@ begin
   manifest = Erx::Site.publish(plan, out: options.fetch(:out))
   puts "Site: #{options.fetch(:out)} (image #{manifest.fetch(:bytes)} bytes, " \
        "#{manifest.fetch(:compressed_bytes)} compressed, source #{source.ref})"
-  Erx::Site.serve(dir: options.fetch(:out), port: options.fetch(:serve)) if options[:serve]
+  if options[:serve]
+    options[:serving] = true
+    Erx::Site.serve(dir: options.fetch(:out), port: options.fetch(:serve))
+  end
 rescue Erx::Error => error
   Erx::Terminal.puts(error.message)
   exit 1
@@ -60,5 +64,6 @@ rescue SystemCallError => error
   Erx::Terminal.puts("build_site: #{error.message}")
   exit 1
 rescue Interrupt
-  exit 0
+  # Stopping the server is the normal end; interrupting a build is not.
+  exit(options[:serving] ? 0 : 130)
 end

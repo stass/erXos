@@ -44,8 +44,8 @@ class SiteTest < Minitest::Test
       assert_match %r{\Av64/libv86-[0-9a-f]{16}\.mjs\z}, module_name
       assert_equal 'build/libv86.mjs', File.read(File.join(out, module_name))
       assert_match %r{\Av64/v86-arm64-[0-9a-f]{16}\.wasm\z}, manifest.dig(:emulator, :wasm)
-      assert_equal 'build/NOTICES', File.read(File.join(out, 'v64/NOTICES'))
-      assert_equal 'LICENSE.MIT', File.read(File.join(out, 'v64/LICENSE.MIT'))
+      assert_equal 'build/NOTICES', File.read(File.join(out, 'v64/NOTICES.txt'))
+      assert_equal 'LICENSE.MIT', File.read(File.join(out, 'v64/LICENSE.MIT.txt'))
       assert File.file?(File.join(out, 'v64/COPYRIGHT-rust-library.html'))
       refute File.exist?(File.join(out, 'terminal.js')), 'only the digest-named terminal.js is published'
       assert_equal File.binread(image), Zlib.gunzip(File.binread(File.join(out, manifest.fetch(:image))))

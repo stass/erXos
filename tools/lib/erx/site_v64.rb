@@ -29,11 +29,13 @@ module Erx
     # files this build writes into the staged tree.
     NOTICE_FILE = 'build/NOTICES'
     RUST_NOTICE_FILE = 'build/COPYRIGHT-rust-library.html'
-    NOTICES = { 'LICENSE' => 'LICENSE', 'LICENSE.MIT' => 'LICENSE.MIT', 'NOTICES' => NOTICE_FILE,
+    # Published with .txt names, so a static host serves them as text.
+    NOTICES = { 'LICENSE.txt' => 'LICENSE', 'LICENSE.MIT.txt' => 'LICENSE.MIT', 'NOTICES.txt' => NOTICE_FILE,
                 'COPYRIGHT-rust-library.html' => RUST_NOTICE_FILE }.freeze
 
     NPM_DEADLINE = 900
-    MAKE_DEADLINE = 2700
+    # Inside the workflow's 45-minute job, so the deadline can name make.
+    MAKE_DEADLINE = 1800
 
     # The sources the two targets compile, as v64's Makefile names them:
     # the bundle's CORE_FILES, BROWSER_FILES and LIB_FILES, and the core's
@@ -73,8 +75,10 @@ module Erx
 
       runner.run(%w[npm ci --ignore-scripts --no-audit --no-fund], name: 'site-v64-npm', deadline: NPM_DEADLINE,
                                                                      chdir: staging)
+      # The GLES plugin's rule reruns `npm ci` when esbuild looks older
+      # than package.json; the environment keeps install scripts off there too.
       runner.run(['make', '-C', staging, "CLOSURE=#{closure}", *TARGETS.values], name: 'site-v64-make',
-                                                                                 deadline: MAKE_DEADLINE)
+                 deadline: MAKE_DEADLINE, env: { 'npm_config_ignore_scripts' => 'true' })
       File.write(File.join(staging, NOTICE_FILE), notices(tree: staging, root:))
       FileUtils.cp(rust_library_notice(runner:, chdir: staging), File.join(staging, RUST_NOTICE_FILE))
       staging
