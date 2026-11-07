@@ -126,11 +126,11 @@ what readers without JavaScript see, and what everyone sees before
 booting. The hint and the source line are page text below the case.
 
 With JavaScript, `terminal.js` shows a "Boot erXos" key, the download
-size and the simulated machine, `ARMv8-A · 1 core · 512 MiB RAM`. On a
+size and the simulated machine, `ARMv8-A · 1 core · 160 MiB RAM`. On a
 click it loads xterm.js (from jsDelivr, pinned to an exact version and
 checked by Subresource Integrity), v64 and the image, showing a progress
 bar on the case; checks the image against `boot.json`; and boots it with
-512 MiB of guest memory and one core (`RAM_MIB` and `CPU_CORES`, the one
+160 MiB of guest memory and one core (`RAM_MIB` and `CPU_CORES`, the one
 place to change each, from which the readout is built too), v64's
 page-tier JIT on and the kernel command line `erx.watchdog=1,30,600`.
 The machine's serial console is attached to the terminal, and the status

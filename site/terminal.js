@@ -16,7 +16,7 @@
 
 // Guest memory and cores. One constant each, so either changes in one
 // place; the readout on the case is built from the same two.
-const RAM_MIB = 512;
+const RAM_MIB = 160;
 const CPU_CORES = 1;
 const CMDLINE = "erx.watchdog=1,30,600";
 const MANIFEST = "boot.json";
