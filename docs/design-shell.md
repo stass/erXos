@@ -182,7 +182,9 @@ what a terminal needs added:
   whole unit runs in an evaluator process of its own, so `Ctrl-C` ends it
   and the shell reads on with the variables it had before it and `$status`
   saying the line was interrupted; `Ctrl-C`
-  while a line is typed drops the unit read so far. A unit that does not
+  while a line is typed drops the unit read so far. A foreground line is
+  a job, so what it starts ends with it, by its job tag
+  ([Job control](#job-control)). A unit that does not
   parse is reported, sets `$status` as in a script and is skipped; `exit`
   and the end of input, `Ctrl-D`, end the shell.
 * **One evaluator per stage.** A pipeline's stage, a command substitution

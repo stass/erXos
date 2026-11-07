@@ -28,6 +28,18 @@ spends its life blocked in a group's `get_line` and in waiting for a
 unit, and the group, which links to it, owns it. A unit's process is
 monitored, never linked.
 
+What a line starts ends with it. A unit's process has a group leader of
+its own, the line's, which passes the io protocol on to the shell's
+group, and every process the unit starts, and every process those start,
+inherits it unless it sets a leader of its own; it stands in for the
+job tag of docs/design-shell.md, "Jobs and their tags". When `Ctrl-C`, the heap limit or a crash ends the line, the
+shell kills every process whose group leader is the line's, as an
+application master kills its application's processes; when the line
+ends of itself, those still running, its background blocks, get the
+shell's group as their group leader and run on. Either way the line's
+leader then ends. The runner needs no rule of its own for this, and its
+state from the line is dropped with the line's process.
+
 In Phase 1 the shell takes the system domain's console from the Erlang
 shell: start/0, typed at the Erlang shell, has erx_console run it on a
 group of its own until it ends, and the Erlang shell then reads on.
@@ -38,11 +50,11 @@ Everything outside the language is the runner's (erx_shell_eval's
 shell runs on, `#{write := fun((iodata()) -> ok)}`, whose `write` puts a
 unit's output on the line as bytes, unchanged but for the terminal's own
 newline processing, and returns once they are written.
-erx_shell_basic_runner is the default.
+erx_shell_runner, the runner of the session's domain, is the default.
 """.
 
 -export([start/0, start/1, server/1]).
--export([after_parse/3, prompt/2, reader/1]).
+-export([after_parse/3, prompt/2, reader/1, hand_over/2]).
 
 -export_type([options/0, terminal/0, reader/0]).
 
@@ -89,7 +101,7 @@ as it is by default, and `Ctrl-C` reaches it, not the caller.
 """.
 -spec start(options()) -> ok | {error, term()}.
 start(Options) when is_map(Options) ->
-    Runner = maps:get(runner, Options, erx_shell_basic_runner),
+    Runner = maps:get(runner, Options, erx_shell_runner),
     Terminal = maps:get(terminal, Options, #{write => fun erx_console:write/1}),
     erx_console:run_shell({?MODULE, server, [{Runner, Terminal}]}).
 
@@ -239,39 +251,51 @@ shell({syntax_error, _Message, Sh}) -> Sh;
 shell({error, _Message, Sh}) -> Sh.
 
 %% Runs Evaluate, which calls the evaluator and through it the runner, in a
-%% process of its own, which Ctrl-C ends, and returns whether the shell goes
-%% on and with what. A crash ends the process with a fixed reason and no
-%% report, since a crash's reason and stack carry the shell's variables
-%% and the runner's state, which must not reach a log.
+%% process of its own under the line's own group leader, which Ctrl-C ends,
+%% and returns whether the shell goes on and with what, once the processes
+%% the line started have ended or joined the shell's group (end_line/3). A
+%% crash ends the process with a fixed reason and no report, since a
+%% crash's reason and stack carry the shell's variables and the runner's
+%% state, which must not reach a log.
 run(Evaluate, Sh, Write) ->
+    Group = group_leader(),
+    Leader = line_leader(Group),
     Heap = #{size => ?UNIT_HEAP_BYTES div erlang:system_info(wordsize),
              kill => true, error_logger => false, include_shared_binaries => true},
     Unit = fun() ->
+                   %% First, so that every process the line starts inherits
+                   %% the line's leader.
+                   true = group_leader(Leader, self()),
                    Outcome = try Evaluate()
                              catch _Class:_Reason -> crashed
                              end,
                    exit({?MODULE, Outcome})
            end,
     {Pid, Ref} = spawn_opt(Unit, [monitor, {max_heap_size, Heap}]),
-    wait(group_leader(), Pid, Ref, Sh, Write).
+    {Fate, Next} = wait(Group, Pid, Ref, Sh, Write),
+    ok = end_line(Fate, Leader, Group),
+    Next.
 
+%% How the unit ended: what becomes of the processes the line started,
+%% `adopt` when the line ended of itself and `kill` otherwise, and whether
+%% the shell goes on.
 wait(Group, Pid, Ref, Sh, Write) ->
     receive
         {'DOWN', Ref, process, Pid, {?MODULE, {exit, _Sh1}}} ->
-            stop;
+            {adopt, stop};
         {'DOWN', Ref, process, Pid, {?MODULE, crashed}} ->
             ok = Write(<<"rc: the line crashed\n">>),
-            {continue, Sh};
+            {kill, {continue, Sh}};
         {'DOWN', Ref, process, Pid, {?MODULE, Outcome}} ->
             %% A fault of the language was written by the evaluator; a
             %% terminal reads on.
-            {continue, shell(Outcome)};
+            {adopt, {continue, shell(Outcome)}};
         {'DOWN', Ref, process, Pid, killed} ->
             ok = Write(<<"rc: the line passed its heap limit\n">>),
-            {continue, Sh};
+            {kill, {continue, Sh}};
         {'DOWN', Ref, process, Pid, _Crash} ->
             ok = Write(<<"rc: the line crashed\n">>),
-            {continue, Sh};
+            {kill, {continue, Sh}};
         {'EXIT', Group, interrupt} ->
             %% Ctrl-C while the unit runs: it ends, and the shell keeps the
             %% state it had before the unit. The terminal shows the key as a
@@ -279,9 +303,75 @@ wait(Group, Pid, Ref, Sh, Write) ->
             exit(Pid, kill),
             receive {'DOWN', Ref, process, Pid, _} -> ok end,
             ok = Write(<<"^C\n">>),
-            {continue, Sh};
+            {kill, {continue, Sh}};
         {'EXIT', Group, _Reason} ->
-            %% The group, and with it the terminal, is gone.
+            %% The group, and with it the terminal, is gone, so no group is
+            %% left to hand the line's processes to: they end with it.
             exit(Pid, kill),
-            stop
+            receive {'DOWN', Ref, process, Pid, _} -> ok end,
+            {kill, stop}
+    end.
+
+%%% A line's processes
+
+%% The group leader of a line's processes: it passes each io request on to
+%% the shell's group, which answers the requester itself, drops any other
+%% message, and ends when the shell does or end_line/3 kills it.
+line_leader(Group) ->
+    Shell = self(),
+    spawn(fun() -> forward(Group, monitor(process, Shell)) end).
+
+forward(Group, ShellRef) ->
+    receive
+        {io_request, _From, _ReplyAs, _Request} = Request ->
+            Group ! Request,
+            forward(Group, ShellRef);
+        {'DOWN', ShellRef, process, _, _} ->
+            ok;
+        _Other ->
+            forward(Group, ShellRef)
+    end.
+
+%% Kills the processes the line's leader leads, or gives them the shell's
+%% group as their leader, and then kills the line's leader. Each pass looks
+%% at every process. exit/2 and group_leader/2 are signals, and the next
+%% pass's process_info/2 is a signal from the same sender to the same
+%% process, which arrives after them, so a process a pass killed or handed
+%% over is not found again; one started meanwhile is found by the next
+%% pass. The passes end when one finds none, as application_master's
+%% kill_all_procs does. A process may end between being found and being
+%% acted on: exit/2 ignores that, and hand_over/2 allows for it.
+end_line(Fate, Leader, Group) ->
+    Act = case Fate of
+              kill -> fun(Pid) -> exit(Pid, kill) end;
+              adopt -> fun(Pid) -> hand_over(Group, Pid) end
+          end,
+    ok = each_process_led_by(Leader, Act),
+    exit(Leader, kill),
+    ok.
+
+-doc """
+Gives Pid the shell's group, Group, as its group leader, and returns `ok`,
+as end_line/3 hands over a line's processes; a process that has ended
+meanwhile is left as it is. Exported for the tests.
+""".
+-spec hand_over(pid(), pid()) -> ok.
+hand_over(Group, Pid) ->
+    try group_leader(Group, Pid) of
+        true -> ok
+    catch
+        %% Group is a pid, so badarg means that Pid has ended.
+        error:badarg -> ok
+    end.
+
+%% The leader is excluded only for clarity: its own group leader is the
+%% shell's group.
+each_process_led_by(Leader, Act) ->
+    case [Pid || Pid <- processes(), Pid =/= Leader,
+                 process_info(Pid, group_leader) =:= {group_leader, Leader}] of
+        [] ->
+            ok;
+        Led ->
+            lists:foreach(Act, Led),
+            each_process_led_by(Leader, Act)
     end.

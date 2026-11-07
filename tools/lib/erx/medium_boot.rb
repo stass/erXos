@@ -96,10 +96,14 @@ module Erx
     # The command shell on the console (docs/design-shell.md), started from the Erlang
     # shell: each line it shows, and what the person then types. The banner says it has
     # the input, so nothing is typed before; a variable, a loop that echoes it, a line
-    # continued on the next, whose prompt is empty, a syntax error, and exit, after
-    # which the Erlang shell answers again. The line editor echoes each line as typed and
-    # then redraws it after cursor movements, which no pattern here matches; it rings the
-    # bell at a `}` with no `{` on its line.
+    # continued on the next, whose prompt is empty, and a syntax error. Then its Erlang
+    # commands: a file in /tmp written by a redirection and read back, a pipeline that
+    # lists the release's applications, of which stdlib's line is matched, a directory
+    # made beside the file and both listed in order, a name no command has, and `cd`
+    # with `pwd`; and exit, after which the Erlang shell answers again. Lines between
+    # the matched ones, such as the other applications, are passed over. The line editor
+    # echoes each line as typed and then redraws it after cursor movements, which no
+    # pattern here matches; it rings the bell at a `}` with no `{` on its line.
     COMMAND_SHELL = [
       ['rc-banner', /\Arc: the command shell; exit ends it\r*\n\z/n, "x=(a b c)\r"],
       ['rc-assign', /\A; x=\(a b c\)\r*\n\z/n, "for(i in $x) echo $i\r"],
@@ -110,7 +114,14 @@ module Erx
       ['rc-open', /\A; \{\r*\n\z/n, "echo con tinued}\r"],
       ['rc-continued-line', /\Aecho con tinued\}\a?\r*\n\z/n, nil],
       ['rc-continued', /\Acon tinued\r*\n\z/n, "echo a)\r"],
-      ['rc-syntax-error', /\Arc: syntax error at line 1, column 7: unexpected '\)'\r*\n\z/n, "exit\r"],
+      ['rc-syntax-error', /\Arc: syntax error at line 1, column 7: unexpected '\)'\r*\n\z/n,
+       "echo hello >/tmp/x; cat /tmp/x\r"],
+      ['rc-file', /\Ahello\r*\n\z/n, "ls /images/release/system/lib | cat\r"],
+      ['rc-pipeline', /\Astdlib-[0-9][0-9.]*\r*\n\z/n, "mkdir /tmp/d; ls /tmp\r"],
+      ['rc-mkdir', /\Ad\r*\n\z/n, nil],
+      ['rc-ls-file', /\Ax\r*\n\z/n, "nosuch\r"],
+      ['rc-not-found', /\Anosuch: not found\r*\n\z/n, "cd /tmp; pwd\r"],
+      ['rc-pwd', %r{\A/tmp\r*\n\z}n, "exit\r"],
       ['rc-exit', /\A; exit\r*\n\z/n, nil],
       ['rc-returned', /\Aok\r*\n\z/n, "rc_ended.\r"],
       ['erlang-shell-again', /\Arc_ended\r*\n\z/n, nil]

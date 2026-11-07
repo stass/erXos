@@ -26,7 +26,6 @@
              erx_cmd_true,
              erx_render,
              erx_shell,
-             erx_shell_basic_runner,
              erx_shell_eval,
              erx_shell_lex,
              erx_shell_namespace,

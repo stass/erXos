@@ -7,7 +7,7 @@ require 'open3'
 require 'tmpdir'
 
 # Runs test/erlang/erx_shell_tests.erl, the EUnit cases of the command shell's
-# interactive layer (erx_shell), over the parser, the evaluator and the stand-in runner,
+# interactive layer (erx_shell), over the parser, the evaluator and a test runner (erx_shell_basic_runner),
 # compiled from source with warnings as errors on stock's emulator (ERX_ERL and ERX_ERLC,
 # which make check supplies). A session through the console itself is
 # test/integration/runtime_console_test.rb's.
@@ -15,7 +15,7 @@ class ErxShellTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
                erlang/apps/erx_shell/src/erx_shell_eval.erl erlang/apps/erx_shell/src/erx_shell.erl
-               erlang/apps/erx_shell/src/erx_shell_basic_runner.erl
+               test/erlang/erx_shell_basic_runner.erl
                test/erlang/erx_shell_tests.erl].map { |path| File.join(ROOT, path) }.freeze
 
   def test_interactive_layer_cases_pass_under_eunit

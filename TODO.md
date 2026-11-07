@@ -1302,19 +1302,30 @@ to the corpus and follow rc
   the source's start, would hold that state in one place; split
   `outcome()` then into a unit's and a source's, since `run_unit` never
   gives `syntax_error` (`erlang/apps/erx_shell/src/erx_shell_parse.erl`).
-* [Medium] shell, the interactive layer's stand-in runner:
-  `erx_shell_basic_runner` knows `echo`, `true` and `false` and refuses
-  redirections, pipelines and substitutions until the command namespace's
-  runner replaces it as `erx_shell:start/1`'s default
-  (`erlang/apps/erx_shell/src/erx_shell_basic_runner.erl`).
-* [Medium] shell, what a runner owns when a line is cut short: `Ctrl-C` or
-  the heap limit ends the line's process and the shell keeps its state
-  from before the line, so runner state the line built is lost and
-  processes it started (pipeline stages, open files) are not ended, while
-  a background job must outlive its line. The runner seam needs a stated
-  rule, such as a `Runner:interrupted/1` callback or an owner process per
-  line, before the command namespace's runner lands
-  (`erlang/apps/erx_shell/src/erx_shell.erl`, docs/design-shell.md).
+* [Medium] shell, a line's processes are found by group leader, not by
+  job tag: until the runtime's job tags exist (docs/design-shell.md,
+  "Jobs and their tags"), `erx_shell` runs each unit under a group leader
+  of its own that forwards io to the shell's group; on `Ctrl-C`, the heap
+  limit or a crash it kills every process that leader leads, and on a
+  normal end it hands them to the shell's group (`end_line/3`). The group
+  leader is a field any process can change, so a process that sets its
+  own escapes the line, one whose leader code in the line re-points to
+  the line's is killed with it, and work done by servers outside the line
+  is not the line's. Replace it with the job tag
+  (`erlang/apps/erx_shell/src/erx_shell.erl`).
+* [Medium] shell, a script's processes when its evaluator is killed:
+  `erx_shell_script:run/2` runs a source in an evaluator process with a
+  heap limit, and when the limit kills it the stages, commands and pipes
+  it started run on. The interactive layer ends a line's processes
+  through the line's own group leader (`erx_shell:end_line/3`); the
+  script runner should do the same, sharing that code
+  (`erlang/apps/erx_shell/src/erx_shell_script.erl`).
+* [Low] shell, background blocks of an interrupted line: `Ctrl-C` ends
+  every process the line started, its background blocks included, while
+  rc's `&` jobs ignore the interrupt and run on. Job control
+  (docs/design-shell.md, "Job control") decides what a background job
+  belongs to; until then a block started by an interrupted line ends with
+  it (`erlang/apps/erx_shell/src/erx_shell.erl`).
 * [Medium] shell, `erx_shell` as a `gen_statem` with `reading` and
   `running` states: the shell is a plain process, as Eshell's evaluator
   is, but the group protocol is plain messages, so a state machine could
@@ -1365,17 +1376,22 @@ to the corpus and follow rc
   (`test/integration/runtime_console_test.rb`).
 * [Low] shell, a line outlives its shell: the line's process is
   monitored, not linked, so a shell killed outright leaves a running line
-  spinning (`erlang/apps/erx_shell/src/erx_shell.erl`, `run/3`).
+  spinning. The line's group leader already monitors the shell and ends
+  with it; killing every process it leads at that moment, as `end_line/3`
+  does, would end the line too (`erlang/apps/erx_shell/src/erx_shell.erl`,
+  `run/3`, `forward/2`).
 * [Low] shell, the 4 MiB heap limit counts the variables a line starts
   with: once they near it, every later line passes its limit, even
   `x=()`; bound what the shell keeps, or limit a line to its starting
   state plus 4 MiB (`erlang/apps/erx_shell/src/erx_shell.erl`).
 * [Low] shell, whether a diagnostic that names a command is program
   output or text attributed to a source: the evaluator writes `Name: not
-  found` and `whatis`'s `Name=value` raw, the stand-in runner names no
-  command for want of an escaper; once substitutions exist a program's
-  output reaches those names. Decide in docs/design-shell.md and make the
-  two agree (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+  found` and `whatis`'s `Name=value` raw, and so does the runner's `Name:
+  not found`, while erx_render escapes what it shows; a substitution
+  carries a program's output into those names. Decide in
+  docs/design-shell.md and make them agree
+  (`erlang/apps/erx_shell/src/erx_shell_eval.erl`,
+  `erlang/apps/erx_shell/src/erx_shell_runner.erl`).
 * [Medium] shell, `Ctrl-D` does not end the command shell at the console:
   edlin binds it to forward delete, and a group in edlin mode that is sent
   `eof` ends the edited line without a newline and waits for more, so

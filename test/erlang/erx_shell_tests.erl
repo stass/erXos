@@ -119,6 +119,32 @@ session_test_() ->
                                                    {line, <<"echo a)\n">>}, eof], ?MODULE)
                                   end))]}.
 
+%% Every process a line starts, and those they start, ends with the line
+%% when Ctrl-C ends it; those a line leaves running when it ends of itself
+%% stay, under the session's group. `start` returns once both of its
+%% processes run, before `hang`, so the interrupt finds them.
+line_processes_test_() ->
+    {timeout, 30,
+     fun() ->
+             {Group, Shown} = session_group([{interrupt, 1, <<"start a; hang\n">>},
+                                             {line, <<"start b\n">>}, eof],
+                                            erx_shell_basic_runner),
+             Left = [whereis(b), whereis(b_child)],
+             Leaders = [process_info(Pid, group_leader) || Pid <- Left],
+             [exit(Pid, kill) || Pid <- Left, is_pid(Pid)],
+             ?assertEqual([{prompt, <<"; ">>}, {out, <<"^C\n">>},
+                           {prompt, <<"; ">>}, {prompt, <<"; ">>}], Shown),
+             ?assertEqual([undefined, undefined], [whereis(a), whereis(a_child)]),
+             ?assertEqual([{group_leader, Group}, {group_leader, Group}], Leaders)
+     end}.
+
+%% A process the line leaves may end before it is handed over to the
+%% session's group; handing it over then is no fault of the shell's.
+hand_over_ended_test() ->
+    {Pid, Ref} = spawn_monitor(fun() -> ok end),
+    receive {'DOWN', Ref, process, Pid, _} -> ok end,
+    ?assertEqual(ok, erx_shell:hand_over(self(), Pid)).
+
 %% Runs the shell over Script, a list of what each get_line gets: `{line,
 %% Bytes}`, `interrupted`, `eof`, or `{interrupt, Count, Bytes}`, a line
 %% after which the group interrupts the shell Count times. Returns what the
@@ -127,9 +153,14 @@ session(Script) ->
     session(Script, erx_shell_basic_runner).
 
 session(Script, Runner) ->
+    {_Group, Shown} = session_group(Script, Runner),
+    Shown.
+
+%% session/2 that also returns the group the shell ran on.
+session_group(Script, Runner) ->
     Parent = self(),
     Group = spawn_link(fun() -> group(Parent, Script, Runner) end),
-    receive {Group, Shown} -> Shown end.
+    receive {Group, Shown} -> {Group, Shown} end.
 
 group(Parent, Script, Runner) ->
     process_flag(trap_exit, true),

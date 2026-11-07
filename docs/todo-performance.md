@@ -326,3 +326,4 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   constant. Fixes on the table: a byte-at-a-time table of 256 entries, slicing by eight,
   then the AArch64 instructions chosen by feature detection in the architecture layer,
   the portable code staying as their oracle in the same test.
+* [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.

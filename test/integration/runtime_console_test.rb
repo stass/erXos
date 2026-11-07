@@ -409,6 +409,21 @@ class RuntimeConsoleTest < Minitest::Test
     end
   end
 
+  # The command shell runs Erlang commands: a pipeline, a name no command has, and a
+  # file in the runtime's own /tmp that a redirection writes and cat reads back.
+  def test_the_command_shell_runs_erlang_commands
+    with_erxos do |session|
+      [["erx_shell:start().\r", /^rc: the command shell; exit ends it\n; \z/],
+       ["echo a b | cat\r", /^; echo a b \| cat\na b\n; \z/],
+       ["nosuch\r", /^nosuch: not found\n; \z/],
+       ["echo hello >/tmp/x; cat /tmp/x\r", /^; echo hello >\/tmp\/x; cat \/tmp\/x\nhello\n; \z/],
+       ["exit\r", /^; exit\nok\n2> \z/]].each do |keys, pattern|
+        session.type(keys)
+        session.wait_for(pattern)
+      end
+    end
+  end
+
   # Two shells started through erx_console:run_shell/1 whose processes wait for `stop`;
   # the outer one ends first, with a reason, and each caller prints how its shell ended
   # through `user`, which is always shown. The Erlang shell writes while a shell is above
