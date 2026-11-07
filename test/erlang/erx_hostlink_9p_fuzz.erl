@@ -13,8 +13,15 @@ by random bytes; replies of the grants, well formed or not, to the aliases
 the bridge used and to aliases it never made; and grants that end. After
 every step it checks what the bridge promises: it never crashes, every
 message it sends the host is one 9P2000.L reply within the stream's msize,
-every request it sends a grant passes the grammar, and its fid table, tags
-and pending requests stay within their bounds.
+every request it sends a grant passes the grammar, and its fid table, tags,
+pending and draining requests stay within their bounds.
+
+It also checks the order of the answers as a host sees them: it keeps the
+tags the host has in use, from each request the bridge admitted (one it did
+not count as discarded) until its answer, and a version frees them all. An
+answer on a tag not in use fails, and so does an answer on a tag after the
+`Rflush` of a flush that named it, until the host uses the tag again: the
+host may reuse a tag once a flush of it is answered (flush(5)).
 """.
 
 -export([run/1]).
@@ -37,12 +44,13 @@ run([Seed]) ->
 round(Bridge, Grants) ->
     Open = {host, erx_9p:encode(0, {version, ?MSIZE, <<"9P2000.L">>}), make_ref(), 0},
     {Opened, _} = erx_hostlink_9p:step(Open, Bridge),
-    lists:foldl(fun(_, {Br, Aliases}) -> step(Br, Aliases, Grants) end, {Opened, []}, lists:seq(1, ?STEPS)).
+    lists:foldl(fun(_, {Br, Aliases, Host}) -> step(Br, Aliases, Host, Grants) end, {Opened, [], #{}},
+                lists:seq(1, ?STEPS)).
 
-step(Bridge, Aliases, Grants) ->
+step(Bridge, Aliases, Host, Grants) ->
     Event = case rand:uniform(40) of
-                N when N =< 24 -> {host, host_bytes(), make_ref(), rand:uniform(1000000)};
-                N when N =< 39, Aliases =/= [] -> {reply, pick(Aliases), reply()};
+                N when N =< 24 -> {host, host_bytes(Host), make_ref(), rand:uniform(1000000)};
+                N when N =< 30, Aliases =/= [] -> {reply, pick(Aliases), reply()};
                 N when N =< 39 -> {reply, make_ref(), reply()};
                 40 -> {grant_down, pick(Grants)}
             end,
@@ -51,7 +59,51 @@ step(Bridge, Aliases, Grants) ->
     check_bounds(erx_hostlink_9p:info(Bridge1)),
     Sent = [Alias || {grant, _, Alias, _} <- Effects],
     Answered = case Event of {reply, Replied, _} -> [Replied]; _ -> [] end,
-    {Bridge1, lists:sublist(Sent ++ (Aliases -- Answered), 64)}.
+    Host1 = admitted(Event, Bridge, Bridge1, Host),
+    Host2 = lists:foldl(fun answered/2, Host1, [Bytes || {host, Bytes} <- Effects]),
+    %% The aliases a grant may still answer: what the bridge sent, less what
+    %% was answered or forgotten, so what a version forgot drains in time.
+    Forgotten = [Alias || {unalias, Alias} <- Effects],
+    {Bridge1, Sent ++ ((Aliases -- Answered) -- Forgotten), Host2}.
+
+%% The host's tags in use once the bridge took Event: a request it admitted
+%% enters, with a reference of its own and, for a flush, the reference of the
+%% request in use on the tag it names; a version the bridge serves frees
+%% every tag first, and one whose msize it refuses frees none.
+admitted({host, Bytes, _, _}, Before, After, Host) ->
+    Discarded = maps:get(counts, erx_hostlink_9p:info(Before)) =/= maps:get(counts, erx_hostlink_9p:info(After)),
+    case erx_9p:decode(Bytes, ?MSIZE) of
+        {ok, _, {reply, _, _}} -> Host;
+        {ok, _, _} when Discarded -> Host;
+        {ok, Tag, {version, Msize, _}} when Msize >= 4096 -> #{Tag => {make_ref(), version}};
+        {ok, Tag, {flush, Old}} -> Host#{Tag => {make_ref(), {flush, Old, in_use(Old, Host)}}};
+        {ok, Tag, _} -> Host#{Tag => {make_ref(), request}};
+        {error, _} -> Host
+    end;
+admitted(_Event, _Before, _After, Host) ->
+    Host.
+
+in_use(Tag, Host) ->
+    case Host of
+        #{Tag := {Ref, _}} -> Ref;
+        #{} -> none
+    end.
+
+%% One answer to the host: its tag must be in use; a flush's answer frees the
+%% tag it named too, when the request it flushed is still in use there.
+answered(Bytes, Host) ->
+    {ok, Tag, {reply, _, _}} = erx_9p:decode(Bytes, ?MSIZE),
+    case maps:take(Tag, Host) of
+        {{_, {flush, Old, Ref}}, Rest} when Ref =/= none ->
+            case Rest of
+                #{Old := {Ref, _}} -> maps:remove(Old, Rest);
+                #{} -> Rest
+            end;
+        {_, Rest} ->
+            Rest;
+        error ->
+            erlang:error({answer_out_of_order, Tag, Host})
+    end.
 
 check_effect({host, Bytes}) ->
     case erx_9p:decode(Bytes, ?MSIZE) of
@@ -68,18 +120,18 @@ check_effect({clunk, Grant, Fid}) when is_pid(Grant), is_integer(Fid) -> ok;
 check_effect({unalias, Alias}) when is_reference(Alias) -> ok;
 check_effect(Effect) -> erlang:error({unknown_effect, Effect}).
 
-check_bounds(#{fids := Fids, tags := Tags, requests := Requests} = Info) ->
-    case Fids =< ?POOL andalso Tags =< 64 andalso Requests >= 0 andalso Requests =< 32
-        andalso Requests =< Tags of
+check_bounds(#{fids := Fids, tags := Tags, draining := Draining, requests := Requests} = Info) ->
+    case Fids =< ?POOL andalso Tags + Draining =< 64 andalso Requests >= 0 andalso Requests =< 32
+        andalso Requests =< Tags + Draining of
         true -> ok;
         false -> erlang:error({out_of_bounds, Info})
     end.
 
 %% A request's bytes, valid or damaged.
-host_bytes() ->
+host_bytes(Host) ->
     Tag = rand:uniform(80) - 1,
     %% A field the codec refuses, such as a name of "..", has no bytes to send.
-    Valid = try erx_9p:encode(Tag, request())
+    Valid = try erx_9p:encode(Tag, request(Host))
             catch error:badarg -> erx_9p:encode(Tag, {clunk, 1})
             end,
     case rand:uniform(8) of
@@ -94,20 +146,22 @@ flip(Bytes) ->
     <<Head:At/binary, Byte, Tail/binary>> = Bytes,
     <<Head/binary, (Byte bxor rand:uniform(255)), Tail/binary>>.
 
-request() ->
-    Fid = fun() -> rand:uniform(12) - 1 end,
+request(Host) ->
+    Fid = fun() -> rand:uniform(6) - 1 end,
     Name = fun() -> pick([<<"a">>, <<"f">>, <<"..">>, <<"x">>]) end,
     Version = fun() -> {version, pick([4095, 4096, 8192, 65560]), pick([<<"9P2000.L">>, <<"9P2000">>])} end,
-    Requests = [          fun() -> {auth, Fid(), <<"u">>, <<"a">>, 0} end,
-          fun() -> {attach, Fid(), pick([?NOFID, 3]), <<"u">>, pick([<<"a">>, <<"b">>, <<"c">>]), 0} end,
-          fun() -> {walk, Fid(), Fid(), [Name() || _ <- lists:seq(1, rand:uniform(4) - 1)]} end,
+    %% Requests that make fids come three times as often, so the fid table fills.
+    Attach = fun() -> {attach, Fid(), pick([?NOFID, 3]), <<"u">>, pick([<<"a">>, <<"b">>, <<"c">>]), 0} end,
+    Walk = fun() -> {walk, Fid(), Fid(), [Name() || _ <- lists:seq(1, rand:uniform(4) - 1)]} end,
+    Requests = [Attach, Attach, Attach, Walk, Walk, Walk,
+          fun() -> {auth, Fid(), <<"u">>, <<"a">>, 0} end,
           fun() -> {lopen, Fid(), pick([0, 1, 2])} end,
           fun() -> {read, Fid(), rand:uniform(100), pick([1, 100, 8192, 65536])} end,
           fun() -> {readdir, Fid(), 0, pick([1, 8192, 65536])} end,
           fun() -> {write, Fid(), 0, rand:bytes(rand:uniform(64))} end,
           fun() -> {clunk, Fid()} end,
           fun() -> {remove, Fid()} end,
-          fun() -> {flush, rand:uniform(80) - 1} end,
+          fun() -> {flush, flushed_tag(Host)} end,
           fun() -> {renameat, Fid(), Name(), Fid(), Name()} end,
           fun() -> {xattrwalk, Fid(), Fid(), <<>>} end,
           fun() -> {getattr, Fid(), 16#3fff} end,
@@ -127,3 +181,11 @@ reply() ->
 
 pick(List) ->
     lists:nth(rand:uniform(length(List)), List).
+
+%% The tag a flush names: half of them a tag the host has in use, so a flush
+%% of a pending flush comes up; the rest any tag, in use or not.
+flushed_tag(Host) ->
+    case rand:uniform(2) of
+        1 when map_size(Host) > 0 -> pick(maps:keys(Host));
+        _ -> rand:uniform(80) - 1
+    end.

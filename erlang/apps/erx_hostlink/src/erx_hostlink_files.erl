@@ -19,20 +19,24 @@ fresh alias and a fid for each, and hands the core's host messages back as
 request; anything else it receives is dropped. Each alias is made with
 `erlang:alias([reply])`, so it ends with its one reply.
 
-Which trees the host may reach is the host-link configuration's
-(`files_trees` in `erx_hostlink`'s environment, atoms: `proc` and `data` in
-development builds), and each is found among the system domain's namespace
-entries as the grant mounted with that tree name and no root below it
-(`tree_grant/3`).
+Which trees the host may reach is the host-link configuration's:
+`files_trees` in `erx_hostlink`'s environment, a list of atoms, when it sets
+one, and otherwise the build's (`default_trees/1`): `proc` and `data` in a
+development build, none in a release build. The build's kind is the system
+manifest's development flag, which the image build checks against the kind
+it builds, so the bridge reads it there; a manifest it cannot read lists
+none. Each tree is found among the system domain's namespace entries as the
+grant mounted with that tree name and no root below it (`tree_grant/3`).
 """.
 
--export([start/2, tree_grant/3, configured_trees/0]).
+-export([start/2, tree_grant/3, configured_trees/0, default_trees/1, manifest_flags/1]).
 -export([init/2]).
 
-%% The bridge's heap: its tables are bounded by the pool, 4,096 fids, and 64
+-include("generated/erx_abi.hrl").
+
+%% The bridge's heap: its tables are bounded by the pool, 256 fids, and 64
 %% tags, and a message it holds by the stream's msize.
 -define(MAX_HEAP_WORDS, 1048576).
--define(DEFAULT_TREES, [proc, data]).
 
 -doc """
 Starts a bridge for `Link`, the host link's process, and monitors it from the
@@ -49,7 +53,13 @@ start(Link, Options) ->
 -spec init(pid(), map()) -> no_return().
 init(Link, Options) ->
     _ = erlang:monitor(process, Link),
-    Trees = maps:get(trees, Options, fun(Aname) -> tree_grant(Aname, configured_trees(), prim_file:erx_table()) end),
+    Trees = case Options of
+                #{trees := Given} ->
+                    Given;
+                #{} ->
+                    Names = configured_trees(),
+                    fun(Aname) -> tree_grant(Aname, Names, prim_file:erx_table()) end
+            end,
     Draw = maps:get(draw_fid, Options, fun prim_file:erx_fid/0),
     Bridge = erx_hostlink_9p:new((maps:with([pool], Options))#{trees => Trees}),
     loop(Link, Draw, Bridge).
@@ -100,12 +110,48 @@ tree_grant(Aname, Names, Table) ->
         _ -> error
     end.
 
--doc "The trees the host link's configuration lists, as the names attach's Aname takes.".
+-doc """
+The trees the host may reach, as the names attach's Aname takes: those the
+host link's configuration lists, or the build's when it lists none.
+""".
 -spec configured_trees() -> [binary()].
 configured_trees() ->
-    case application:get_env(erx_hostlink, files_trees, ?DEFAULT_TREES) of
-        Names when is_list(Names) ->
+    case application:get_env(erx_hostlink, files_trees) of
+        {ok, Names} when is_list(Names) ->
             [atom_to_binary(Name) || Name <- Names, is_atom(Name)];
-        _ ->
-            []
+        {ok, _} ->
+            [];
+        undefined ->
+            default_trees(manifest_flags(file:read_file(manifest_path())))
     end.
+
+-doc """
+The trees a build serves when its configuration lists none, from its system
+manifest's flags: `proc` and `data` in a development build, and none in a
+release build or when the flags are `unknown` (docs/design-live.md, "Files
+between the host and the machine"). Pure, for the tests.
+""".
+-spec default_trees(non_neg_integer() | unknown) -> [binary()].
+default_trees(Flags) when is_integer(Flags), Flags band ?ERX_MANIFEST_DEVELOPMENT =/= 0 ->
+    [<<"proc">>, <<"data">>];
+default_trees(_Flags) ->
+    [].
+
+-doc "The flags of the system manifest `file:read_file/1` returned, or `unknown`. Pure, for the tests.".
+-spec manifest_flags({ok, binary()} | {error, term()}) -> non_neg_integer() | unknown.
+manifest_flags({ok, Manifest}) ->
+    maybe
+        {ok, View} ?= erx_manifest:open(Manifest),
+        {ok, #{flags := Flags}} ?= erx_manifest:header(View),
+        Flags
+    else
+        _ -> unknown
+    end;
+manifest_flags({error, _}) ->
+    unknown.
+
+%% The system manifest in the system domain's namespace, where the system
+%% release's tree is the root.
+manifest_path() ->
+    <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
+    <<"/", Path/binary>>.

@@ -1452,23 +1452,31 @@ it; git history is the record of completed work.
   its counts (discarded, stray replies) reach no inspector record yet; and
   `tools/erx files` serves one client at a time and reaches only QEMU's UNIX
   socket, like `load` and `watch`.
+* [Low] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`),
+  review findings open: a flushed walk the grant abandons keeps its new fid;
+  the namespace entry's `ro` is not applied; the bridge's own clunk replies
+  count as stray; the tree lookup reads the namespace table on each attach;
+  no `proc` tree is mounted yet; and the system manifest has no field for
+  the trees a release build lists, so a release build serves none.
 * [Medium] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`),
-  review findings open: (1) a flush of a pending flush is answered at once,
-  before the flush it names, so the client may reuse that tag while its
-  answer is still coming; it should wait behind that flush; (2) `version`
-  resets the pending count while the grants still hold those requests, so
-  repeated versions pile abandoned requests on a shared grant: count them as
-  draining until their replies arrive; (3) the bridge's pool (4,096) equals
-  the system domain's grant pool, so a host can spend every `/data` fid of the
-  system domain: a smaller pool, or a grant of the bridge's own; (4)
-  `files_trees` defaults to `[proc, data]` in every build where the design
-  says release builds list none; no `proc` tree is mounted yet. Low: a
-  flushed walk the grant abandons keeps its new fid; `version` is discarded
-  when 64 tags are in use; the namespace entry's `ro` is not applied; the
-  bridge's own clunk replies count as stray; `trees` reads global state from
-  the core; `FilesRelay#relay` lets a credit timeout end the whole relay;
-  `NinepClient#walk` raises NoMethodError on a reply under 2 bytes;
-  readability of `grant_down/2` and the two forms of a waiting flush.
+  second review's findings: (1) several flushes of one request each go to
+  the grant, and one the grant refuses is held behind the request, so its
+  `Rflush` can precede earlier flushes' and break flush(5)'s order: hold a
+  flush whose target already has one behind the last such flush, so at most
+  one reaches the grant, and have the fuzz model count earlier flushes of a
+  request answered with a later one; grant_down orders them the same way;
+  (2) `version` sends no flush for what it forgets, so a request that blocks
+  at the grant (a waiting `lock`) drains forever and holds the 32-request
+  bound: flush each forgotten request on a draining alias; (3) the bridge
+  shares the system domain's grants, whose 64 in-flight slots it can fill,
+  so "always has room for their flushes" holds only for the bridge's own use:
+  a grant of the bridge's own, or a smaller cap per grant; (4) the
+  `requests` count is kept by hand at six sites and `waiting` beside `tags`:
+  derive both from split request and flush maps. Low: the fuzz never checks
+  that every admitted tag is answered by a round's end; `info/1` does not
+  report `waiting`; the bridge reads the whole manifest at each session's
+  start; design-live.md still says the host tool counts credit from its
+  hello's first byte, where it now counts from the hello's reply.
 * [Low] live, host-link driver (`erlang/apps/erx_uart/src/erx_pl011.erl`):
   the design's driver buffers at most 64 KiB of received bytes and drops
   and counts beyond that (design-system.md, "Drivers"); erx_pl011 sends

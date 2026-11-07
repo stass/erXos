@@ -18,11 +18,18 @@ that performs what `step/2` returns.
 * the negotiated `msize`, `none` until a `version` names 9P2000.L;
 * a fid table from each fid the host chose to `{Grant, GrantFid}`, the
   grant of its tree and a fid the bridge drew for it on that grant, at most
-  the pool's entries (4,096, a grant's pool). Fids are the host's to choose,
-  so the bridge renames them: it holds every grant fid itself, as their
-  owner, and the grants end them all when the bridge ends;
-* a tag table from each tag in use to the alias its request was sent to,
-  and for each alias what is pending there.
+  the pool's entries, 256, as many as a session's program holds on a grant,
+  so the host never spends the fids the grant's other owners need
+  (docs/design-files.md, "Bounds"). Fids are the host's to choose, so the
+  bridge renames them: it holds every grant fid itself, as their owner, and
+  the grants end them all when the bridge ends;
+* a tag table from each tag in use to the alias its request or flush was
+  sent to, or to `held` for a flush the bridge holds itself, and for each
+  alias what is pending there;
+* for each tag, the flushes held behind it, answered right after its own
+  answer, in the order they came;
+* the requests and flushes a `version` forgot that their grants still
+  hold, which drain until their replies arrive.
 
 **The fid table follows the requests as they are sent.** A request that
 makes a fid (attach, a walk to a new fid, xattrwalk) enters it when the
@@ -33,29 +40,37 @@ takes the fid out when it is sent, since it ends the fid whatever its
 outcome. A request names fids of one grant only: one that names fids of two
 trees fails with `exdev`, as a rename across file systems does.
 
-**Bounds.** At most 32 requests and 64 tags are pending, so a grant, which
-admits 64 requests in flight with the flushes waiting on them, has room for
-a flush of every request the bridge sent it. A request beyond 32 fails with
-`emfile`, a clunk or remove there still ends its fid. A message beyond 64
-tags, one whose tag is pending, one that fails the codec and one that is
-not a request are discarded and counted, never answered
-(docs/design-live.md, "Failure handling"). A read's or readdir's `Count` is
-cut to what an `Rread` of the negotiated `msize` holds, and `lopen`'s and
-`lcreate`'s `Iounit` is answered as `msize` less 24, Linux's and QEMU's
-`P9_IOHDRSZ`, so every reply fits the stream. A reply is held to its request
-with the grammar's reply check before it is used; one that fails it, or
-does not encode within `msize`, reaches the host as `eio`.
+**Bounds.** At most 32 requests are pending and 64 tags in use, and what
+drains counts against both, so what the bridge has at its grants never
+exceeds the 64 requests a grant admits in flight with the flushes waiting
+on them, and a grant has room for a flush of every request the bridge sent
+it. A request beyond 32 fails with `emfile`, a clunk or remove there still
+ends its fid. A message beyond 64 tags, one whose tag is in use, one that
+fails the codec and one that is not a request are discarded and counted,
+never answered (docs/design-live.md, "Failure handling"). A read's or
+readdir's `Count` is cut to what an `Rread` of the negotiated `msize`
+holds, and `lopen`'s and `lcreate`'s `Iounit` is answered as `msize` less
+24, Linux's and QEMU's `P9_IOHDRSZ`, so every reply fits the stream. A
+reply is held to its request with the grammar's reply check before it is
+used; one that fails it, or does not encode within `msize`, reaches the host
+as `eio`.
 
 **Flush.** A flush of a pending request is sent to that request's grant,
 which answers it only after it answered or abandoned the request, and its
-`Rflush` goes to the host then; a flush of anything else is answered at
-once. A grant that refuses the flush at its bound leaves the flush waiting
-on the request's reply.
+`Rflush` goes to the host then. A flush the grant refuses at its bound is
+held behind the request. A flush of a flush, sent or held, is held behind
+that flush, so its `Rflush` never comes before the one it names and the host
+reuses no tag while an answer on it may still come, as flush(5) asks. A
+flush of a tag not in use is answered at once.
 
-**Version and ends.** A `version` resets the session, as 9P2000.L says:
-every fid is clunked on its grant and every pending request forgotten, so
-its late reply is dropped. A grant that ends fails every request pending on
-it with `eio`, answers the flushes waiting on them and forgets its fids.
+**Version and ends.** A `version` is served whatever tags are in use, and
+resets the session, as 9P2000.L says, unless its `msize` is below 4,096,
+which is refused as any request is: every fid is clunked on its grant,
+every tag freed and every pending request and flush forgotten, its late
+reply never answered. What it forgot drains until its grant replies,
+abandons it at a flush, or ends. A grant that ends fails every request
+pending on it with `eio`, answers the flushes waiting on them and forgets
+its fids and what drains on it.
 
 `step/2` takes one event and returns the next state and the effects, in
 order:
@@ -65,8 +80,8 @@ order:
   `{erx_9p, Alias, Owner, Request}`, the bridge's process the owner;
 * `{monitor, Grant}`: watch `Grant` and report its end as `grant_down`;
 * `{clunk, Grant, Fid}`: clunk `Fid` on `Grant`, whose answer nobody awaits;
-* `{unalias, Alias}`: the alias the event brought is not used, or its
-  request is forgotten.
+* `{unalias, Alias}`: no reply is awaited at `Alias`: the event brought it
+  and it is not used, or its request is forgotten.
 """.
 
 -export([new/1, step/2, info/1]).
@@ -87,23 +102,25 @@ order:
 -define(IOHDRSZ, 24).
 -define(REQUESTS_MAX, 32).
 -define(TAGS_MAX, 64).
--define(DEFAULT_POOL, 4096).
+%% A session's program's fids on a grant (docs/design-files.md, "Bounds").
+-define(DEFAULT_POOL, 256).
 
-%% A request sent to a grant: the edge's tag, the grant, the request as the
-%% grant received it and as the host sent it, and the tags of flushes that
-%% wait for its reply because the grant refused them.
+%% A request or flush sent to a grant: the edge's tag, the grant, the request
+%% as the grant received it and as the host sent it.
 -record(pending, {tag :: 0..16#ffff,
                   grant :: pid(),
                   request :: tuple(),
-                  edge :: tuple(),
-                  flushes = [] :: [0..16#ffff]}).
+                  edge :: tuple()}).
 
 -record(bridge, {trees :: trees(),
                  pool :: pos_integer(),
                  msize = none :: none | ?MSIZE_MIN..?MSIZE_MAX,
                  fids = #{} :: #{non_neg_integer() => {pid(), non_neg_integer()}},
-                 tags = #{} :: #{0..16#ffff => reference()},
+                 tags = #{} :: #{0..16#ffff => reference() | held},
                  pending = #{} :: #{reference() => #pending{}},
+                 waiting = #{} :: #{0..16#ffff => [0..16#ffff]},
+                 draining = #{} :: #{reference() => #pending{}},
+                 %% Pending requests, flushes not counted, draining ones counted.
                  requests = 0 :: non_neg_integer(),
                  grants = #{} :: #{pid() => true},
                  counts = #{} :: #{atom() => pos_integer()}}).
@@ -146,25 +163,31 @@ step({reply, Alias, Reply}, #bridge{pending = Pending} = B) ->
         {Request, Rest} ->
             answered(Request, Reply, B#bridge{pending = Rest, requests = B#bridge.requests - 1});
         error ->
-            {count(stray_reply, B), []}
+            drained(Alias, Reply, B)
     end;
 step({grant_down, Grant}, B) ->
     grant_down(Grant, B).
 
 -doc "Counts and sizes, for the inspector and the tests: never a name or a byte of data.".
 -spec info(bridge()) -> map().
-info(#bridge{msize = Msize, fids = Fids, tags = Tags, requests = Requests, counts = Counts}) ->
-    #{msize => Msize, fids => map_size(Fids), tags => map_size(Tags), requests => Requests,
-      counts => Counts}.
+info(#bridge{msize = Msize, fids = Fids, tags = Tags, draining = Draining, requests = Requests,
+             counts = Counts}) ->
+    #{msize => Msize, fids => map_size(Fids), tags => map_size(Tags), draining => map_size(Draining),
+      requests => Requests, counts => Counts}.
 
 %%% A message of the host
 
+admit(Tag, {version, Msize, Version} = Request, Alias, _Drawn, B) when Msize >= ?MSIZE_MIN ->
+    %% A version resets the session, so no tag of it stands in its way.
+    version(Tag, Request, Msize, Version, Alias, B);
 admit(Tag, _Request, Alias, _Drawn, #bridge{tags = Tags} = B) when is_map_key(Tag, Tags) ->
     discard(tag_in_use, Alias, B);
-admit(_Tag, _Request, Alias, _Drawn, #bridge{tags = Tags} = B) when map_size(Tags) >= ?TAGS_MAX ->
+admit(_Tag, _Request, Alias, _Drawn, #bridge{tags = Tags, draining = Draining} = B)
+  when map_size(Tags) + map_size(Draining) >= ?TAGS_MAX ->
     discard(tags_full, Alias, B);
-admit(Tag, {version, Msize, Version} = Request, Alias, _Drawn, B) ->
-    version(Tag, Request, Msize, Version, Alias, B);
+admit(Tag, {version, _, _} = Request, Alias, _Drawn, B) ->
+    %% An msize below what 9P2000.L's peers accept: refused, the session kept.
+    local(Tag, Request, {error, einval}, Alias, B);
 admit(Tag, Request, Alias, _Drawn, #bridge{msize = none} = B) ->
     %% 9P2000.L opens a session with version; nothing else is served before it.
     local(Tag, Request, {error, einval}, Alias, B);
@@ -183,36 +206,47 @@ admit(Tag, Request, Alias, Drawn, B) ->
 
 %% A version opens the session afresh: the smaller msize, or unknown for
 %% another protocol, which leaves no session.
-version(Tag, Request, Msize, _Version, Alias, B) when Msize < ?MSIZE_MIN ->
-    local(Tag, Request, {error, einval}, Alias, B);
 version(Tag, Request, Msize, Version, Alias, B) ->
     Agreed = min(Msize, ?MSIZE_MAX),
-    {B1, Reset} = reset(B),
+    {B1, Clunks} = reset(B),
     {Session, Answer} = case Version of
                             ?VERSION -> {Agreed, ?VERSION};
                             _ -> {none, ?UNKNOWN}
                         end,
     {B2, Reply} = local(Tag, Request, {ok, Agreed, Answer}, Alias, B1#bridge{msize = Session}),
-    {B2, Reset ++ Reply}.
+    {B2, Clunks ++ Reply}.
 
-%% Every fid clunked on its grant and every pending request forgotten.
-reset(#bridge{fids = Fids, pending = Pending} = B) ->
+%% Every fid clunked on its grant, every tag freed, and every pending request
+%% and flush forgotten: each drains, its alias open for the reply its grant
+%% still owes, and a request still counts among the pending ones.
+reset(#bridge{fids = Fids, pending = Pending, draining = Draining} = B) ->
     Clunks = [{clunk, Grant, Fid} || {Grant, Fid} <- maps:values(Fids)],
-    Forgotten = [{unalias, Alias} || Alias <- maps:keys(Pending)],
-    {B#bridge{fids = #{}, tags = #{}, pending = #{}, requests = 0}, Clunks ++ Forgotten}.
+    {B#bridge{fids = #{}, tags = #{}, pending = #{}, waiting = #{},
+              draining = maps:merge(Draining, Pending)},
+     Clunks}.
 
+%% A flush of a request pending at a grant goes to that grant. A flush of a
+%% flush, sent or held, is held behind it. A flush of a tag not in use is
+%% answered at once.
 flush(Tag, Request, OldTag, Alias, #bridge{tags = Tags, pending = Pending} = B) ->
     case Tags of
-        #{OldTag := OldAlias} when element(1, (map_get(OldAlias, Pending))#pending.request) =/= flush ->
-            #pending{grant = Grant} = map_get(OldAlias, Pending),
-            Renamed = {flush, OldAlias},
-            Entry = #pending{tag = Tag, grant = Grant, request = Renamed, edge = Request},
-            {B#bridge{tags = Tags#{Tag => Alias}, pending = Pending#{Alias => Entry}},
-             [{grant, Grant, Alias, Renamed}]};
+        #{OldTag := OldAlias} ->
+            case Pending of
+                #{OldAlias := #pending{grant = Grant, request = Old}} when element(1, Old) =/= flush ->
+                    Renamed = {flush, OldAlias},
+                    Entry = #pending{tag = Tag, grant = Grant, request = Renamed, edge = Request},
+                    {B#bridge{tags = Tags#{Tag => Alias}, pending = Pending#{Alias => Entry}},
+                     [{grant, Grant, Alias, Renamed}]};
+                #{} ->
+                    {hold(Tag, OldTag, B), [{unalias, Alias}]}
+            end;
         #{} ->
-            %% A completed, unknown or flush request: answered at once.
             local(Tag, Request, ok, Alias, B)
     end.
+
+%% The flush Tag held behind OldTag: answered right after OldTag's answer.
+hold(Tag, OldTag, #bridge{tags = Tags, waiting = Waiting} = B) ->
+    B#bridge{tags = Tags#{Tag => held}, waiting = Waiting#{OldTag => maps:get(OldTag, Waiting, []) ++ [Tag]}}.
 
 %% The grant a request goes to and the request with the grant's fids, or the
 %% error the bridge answers itself.
@@ -311,21 +345,17 @@ clamped(Request, _B) ->
 
 %%% Replies of the grants
 
-answered(#pending{tag = Tag, grant = Grant, request = Renamed, edge = Request, flushes = Flushes},
-         Reply, #bridge{tags = Tags} = B) ->
-    B1 = B#bridge{tags = maps:remove(Tag, Tags)},
+answered(#pending{tag = Tag, grant = Grant, request = Renamed, edge = Request}, Reply, B) ->
     {Checked, Stray} = case erx_9p_grammar:decode_reply(Renamed, Reply) of
                            {ok, Held} -> {Held, []};
                            {error, eio} -> {{error, eio}, made_fid_clunk(Request, Renamed, Grant)}
                        end,
-    B2 = case made(Request, Checked) of
-             true -> B1;
-             false -> unmade(Request, Renamed, Grant, B1)
+    B1 = case made(Request, Checked) of
+             true -> B;
+             false -> unmade(Request, Renamed, Grant, B)
          end,
-    Answer = encoded(Tag, Request, edge_reply(Request, Checked, B2), B2),
-    Released = [encoded(Flush, {flush, Tag}, ok, B2) || Flush <- lists:reverse(Flushes)],
-    {B2#bridge{tags = maps:without(Flushes, B2#bridge.tags)},
-     Stray ++ [{host, Answer} | [{host, Bytes} || Bytes <- Released]]}.
+    {B2, Answers} = finish(Tag, Request, edge_reply(Request, Checked, B1), B1),
+    {B2, Stray ++ Answers}.
 
 %% Whether a request that makes a fid made it: an attach or xattrwalk that
 %% succeeded, a walk that walked every name. Any other request makes none.
@@ -361,41 +391,84 @@ edge_reply({Opens, _, _, _, _, _}, {ok, Qid, _Iounit}, B) when Opens =:= lcreate
 edge_reply(_Request, Reply, _B) ->
     Reply.
 
-%% A flush answered by its grant. ok: the flushed request was answered or
-%% abandoned, and an abandoned one is forgotten. A refusal: the flush waits
-%% for the request's reply, or is answered now if that already came.
+%% A flush answered by its grant, in one of three cases:
+%% * ok while its request is pending: the grant abandoned the request, which
+%%   is forgotten with no answer of its own, and the flushes held behind it
+%%   are answered before this one;
+%% * any other reply while its request is pending, a refusal at the grant's
+%%   bound or one that fails the grammar: held behind the request;
+%% * any reply once the request was answered: answered now.
 flushed(#pending{tag = Tag, request = {flush, OldAlias}, edge = Request}, Reply,
-        #bridge{tags = Tags, pending = Pending} = B) ->
+        #bridge{pending = Pending} = B) ->
     case {Reply, Pending} of
-        {{error, _}, #{OldAlias := #pending{flushes = Flushes} = Old}} ->
-            {B#bridge{pending = Pending#{OldAlias := Old#pending{flushes = [Tag | Flushes]}}}, []};
-        {ok, #{OldAlias := #pending{tag = OldTag, flushes = Flushes}}} ->
-            B1 = B#bridge{tags = maps:without([Tag, OldTag | Flushes], Tags),
-                          pending = maps:remove(OldAlias, Pending),
-                          requests = B#bridge.requests - 1},
-            Released = [{host, encoded(Flush, {flush, OldTag}, ok, B1)} || Flush <- lists:reverse(Flushes)],
-            {B1, [{unalias, OldAlias} | Released] ++ [{host, encoded(Tag, Request, ok, B1)}]};
+        {Refused, #{OldAlias := #pending{tag = OldTag}}} when Refused =/= ok ->
+            {hold(Tag, OldTag, B), []};
+        {ok, #{OldAlias := #pending{tag = OldTag}}} ->
+            B1 = B#bridge{pending = maps:remove(OldAlias, Pending), requests = B#bridge.requests - 1},
+            {B2, Released} = release(OldTag, B1#bridge{tags = maps:remove(OldTag, B1#bridge.tags)}),
+            {B3, Answers} = finish(Tag, Request, ok, B2),
+            {B3, [{unalias, OldAlias} | Released] ++ Answers};
         _ ->
-            B1 = B#bridge{tags = maps:remove(Tag, Tags)},
-            {B1, [{host, encoded(Tag, Request, ok, B1)}]}
+            finish(Tag, Request, ok, B)
     end.
 
-%% A grant that ended: its requests fail with eio, then its flushes are
-%% answered, and its fids are forgotten.
-grant_down(Grant, #bridge{pending = Pending, fids = Fids, grants = Grants} = B) ->
-    {Requests, Flushes} = lists:partition(fun({_, #pending{request = R}}) -> element(1, R) =/= flush end,
-                                          [P || {_, #pending{grant = G}} = P <- maps:to_list(Pending), G =:= Grant]),
-    B1 = B#bridge{pending = maps:without([Alias || {Alias, _} <- Requests ++ Flushes], Pending),
-                  requests = B#bridge.requests - length(Requests),
+%% A reply to what a version forgot: nothing reaches the host. A flush that
+%% abandoned its draining request ends that request too, since no reply of
+%% its own will come.
+drained(Alias, Reply, #bridge{draining = Draining, requests = Requests} = B) ->
+    case maps:take(Alias, Draining) of
+        {#pending{request = {flush, OldAlias}}, Rest} when Reply =:= ok, is_map_key(OldAlias, Rest) ->
+            {B#bridge{draining = maps:remove(OldAlias, Rest), requests = Requests - 1},
+             [{unalias, OldAlias}]};
+        {#pending{request = {flush, _}}, Rest} ->
+            {B#bridge{draining = Rest}, []};
+        {#pending{}, Rest} ->
+            {B#bridge{draining = Rest, requests = Requests - 1}, []};
+        error ->
+            {count(stray_reply, B), []}
+    end.
+
+%% A grant that ended: its requests fail with eio, then the flushes it held
+%% are answered, each followed by the flushes held behind it; its fids and
+%% what drains on it are forgotten.
+grant_down(Grant, #bridge{pending = Pending, draining = Draining, fids = Fids, grants = Grants} = B) ->
+    Mine = [Entry || {_, #pending{grant = G}} = Entry <- maps:to_list(Pending), G =:= Grant],
+    {Flushes, Requests} = lists:partition(fun({_, #pending{request = R}}) -> element(1, R) =:= flush end, Mine),
+    Drained = [Entry || {_, #pending{grant = G}} = Entry <- maps:to_list(Draining), G =:= Grant],
+    DrainedRequests = [A || {A, #pending{request = R}} <- Drained, element(1, R) =/= flush],
+    Aliases = [Alias || {Alias, _} <- Mine ++ Drained],
+    B1 = B#bridge{pending = maps:without(Aliases, Pending),
+                  draining = maps:without(Aliases, Draining),
+                  requests = B#bridge.requests - length(Requests) - length(DrainedRequests),
                   fids = maps:filter(fun(_, {G, _}) -> G =/= Grant end, Fids),
                   grants = maps:remove(Grant, Grants)},
-    Failed = lists:append([[{host, encoded(T, R, {error, eio}, B1)} |
-                            [{host, encoded(F, {flush, T}, ok, B1)} || F <- lists:reverse(Waiting)]]
-                           || {_, #pending{tag = T, edge = R, flushes = Waiting}} <- Requests]),
-    Answered = [{host, encoded(T, R, ok, B1)} || {_, #pending{tag = T, edge = R}} <- Flushes],
-    Tags = lists:append([[T | W] || {_, #pending{tag = T, flushes = W}} <- Requests ++ Flushes]),
-    Unaliased = [{unalias, Alias} || {Alias, _} <- Requests ++ Flushes],
-    {B1#bridge{tags = maps:without(Tags, B1#bridge.tags)}, Unaliased ++ Failed ++ Answered}.
+    {B2, Failed} = finish_all([{T, R, {error, eio}} || {_, #pending{tag = T, edge = R}} <- Requests], B1),
+    {B3, Answered} = finish_all([{T, R, ok} || {_, #pending{tag = T, edge = R}} <- Flushes], B2),
+    {B3, [{unalias, Alias} || Alias <- Aliases] ++ Failed ++ Answered}.
+
+%%% Answers to the host
+
+%% Tag's answer, Request's Reply, then the flushes held behind Tag; Tag and
+%% theirs are free once answered.
+finish(Tag, Request, Reply, #bridge{tags = Tags} = B) ->
+    B1 = B#bridge{tags = maps:remove(Tag, Tags)},
+    Answer = {host, encoded(Tag, Request, Reply, B1)},
+    {B2, Released} = release(Tag, B1),
+    {B2, [Answer | Released]}.
+
+finish_all(Answers, B) ->
+    lists:foldl(fun({Tag, Request, Reply}, {Acc, Effects}) ->
+                        {Acc1, More} = finish(Tag, Request, Reply, Acc),
+                        {Acc1, Effects ++ More}
+                end, {B, []}, Answers).
+
+%% The flushes held behind Tag, answered ok in the order they came. Each
+%% holds at most the flushes behind it, so the depth is within the 64 tags.
+release(Tag, #bridge{waiting = Waiting} = B) ->
+    case maps:take(Tag, Waiting) of
+        {Flushes, Rest} -> finish_all([{Flush, {flush, Tag}, ok} || Flush <- Flushes], B#bridge{waiting = Rest});
+        error -> {B, []}
+    end.
 
 %%% Helpers
 

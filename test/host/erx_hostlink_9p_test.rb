@@ -14,7 +14,8 @@ class ErxHostlink9pTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   GENERATED = File.join(ROOT, 'build/gen')
   SOURCES = [File.join(GENERATED, 'otp/erts/preloaded/src/erx_9p_grammar.erl'),
-             *%w[erlang/apps/erx/src/generated/erx_9p.erl erlang/apps/erx_files/src/erx_fs_grant.erl
+             *%w[erlang/apps/erx/src/generated/erx_9p.erl erlang/apps/erx/src/generated/erx_manifest.erl
+                 erlang/apps/erx_files/src/erx_fs_grant.erl
                  erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_version.erl
                  erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl erlang/apps/erx_hostlink/src/erx_hostlink_files.erl]
                .map { |source| File.join(ROOT, source) }].freeze

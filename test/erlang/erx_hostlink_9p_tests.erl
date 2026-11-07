@@ -253,9 +253,123 @@ version_clunks_every_fid_and_forgets_pending_requests_test() ->
     {Bridge1, ReadAlias, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
     {Bridge2, _, Effects} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Bridge1),
     ?assert(lists:member({clunk, A, 101}, Effects)),
-    ?assert(lists:member({unalias, ReadAlias}, Effects)),
-    ?assertMatch(#{fids := 0, tags := 0, requests := 0}, erx_hostlink_9p:info(Bridge2)),
+    ?assertMatch(#{fids := 0, tags := 0}, erx_hostlink_9p:info(Bridge2)),
     {_, []} = erx_hostlink_9p:step({reply, ReadAlias, {ok, <<>>}}, Bridge2).
+
+flush_of_a_flush_at_the_grant_waits_behind_it_test() ->
+    {Bridge, _, _} = attached(),
+    {Bridge1, ReadAlias, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
+    {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Bridge3, Alias, Effects} = host(5, {flush, 4}, 0, Bridge2),
+    %% Tag 4 may still be answered, so tag 5's answer must not come first.
+    ?assertEqual([], answers(Effects)),
+    ?assertEqual([], sent(Effects)),
+    ?assert(lists:member({unalias, Alias}, Effects)),
+    {Bridge4, E4} = erx_hostlink_9p:step({reply, ReadAlias, {ok, <<"ab">>}}, Bridge3),
+    ?assertEqual([{3, {ok, <<"ab">>}}], answers(E4)),
+    {Bridge5, E5} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Bridge4),
+    ?assertEqual([{4, ok}, {5, ok}], answers(E5)),
+    ?assertMatch(#{tags := 0, requests := 0}, erx_hostlink_9p:info(Bridge5)).
+
+flush_of_a_refused_flush_waits_behind_it_test() ->
+    {Bridge, _, _} = attached(),
+    {Bridge1, ReadAlias, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
+    {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Bridge3, []} = erx_hostlink_9p:step({reply, FlushAlias, {error, emfile}}, Bridge2),
+    {Bridge4, _, Effects} = host(5, {flush, 4}, 0, Bridge3),
+    ?assertEqual([], answers(Effects)),
+    {Bridge5, E5} = erx_hostlink_9p:step({reply, ReadAlias, {ok, <<>>}}, Bridge4),
+    ?assertEqual([{3, {ok, <<>>}}, {4, ok}, {5, ok}], answers(E5)),
+    ?assertMatch(#{tags := 0}, erx_hostlink_9p:info(Bridge5)).
+
+flush_of_an_abandoned_requests_flush_follows_it_test() ->
+    {Bridge, _, _} = attached(),
+    {Bridge1, _, _} = host(3, {lock, 1, 1, 1, 0, 0, 1, <<"c">>}, 0, Bridge),
+    {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Bridge3, _, _} = host(5, {flush, 4}, 0, Bridge2),
+    {Bridge4, E4} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Bridge3),
+    ?assertEqual([{4, ok}, {5, ok}], answers(E4)),
+    ?assertMatch(#{tags := 0, requests := 0}, erx_hostlink_9p:info(Bridge4)).
+
+version_counts_forgotten_requests_until_their_replies_test() ->
+    {Bridge, _, _} = attached(),
+    {Full, Aliases} = lists:foldl(fun(Tag, {Acc, As}) ->
+                                          {Acc1, A, _} = host(Tag, {read, 1, 0, 1}, 0, Acc),
+                                          {Acc1, [A | As]}
+                                  end, {Bridge, []}, lists:seq(10, 41)),
+    {Reset, _, Effects} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Full),
+    %% The grant still holds the 32 reads: their aliases stay open for the replies.
+    ?assertEqual([], [A || {unalias, A} <- Effects, lists:member(A, Aliases)]),
+    ?assertMatch(#{requests := 32, draining := 32, tags := 0}, erx_hostlink_9p:info(Reset)),
+    {_, _, Refused} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}, 101, Reset),
+    ?assertEqual({2, {error, emfile}}, answer(Refused)),
+    Drained = lists:foldl(fun(A, Acc) ->
+                                  {Acc1, []} = erx_hostlink_9p:step({reply, A, {ok, <<"x">>}}, Acc),
+                                  Acc1
+                          end, Reset, Aliases),
+    ?assertMatch(#{requests := 0, draining := 0}, erx_hostlink_9p:info(Drained)),
+    {_, _, Admitted} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}, 101, Drained),
+    ?assertMatch([_], sent(Admitted)).
+
+version_drains_a_flush_that_abandons_its_request_test() ->
+    {Bridge, A, _} = attached(),
+    {Bridge1, LockAlias, _} = host(3, {lock, 1, 1, 1, 0, 0, 1, <<"c">>}, 0, Bridge),
+    {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Reset, _, _} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Bridge2),
+    ?assertMatch(#{requests := 1, draining := 2}, erx_hostlink_9p:info(Reset)),
+    {Drained, Effects} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Reset),
+    ?assertEqual([{unalias, LockAlias}], Effects),
+    ?assertMatch(#{requests := 0, draining := 0}, erx_hostlink_9p:info(Drained)),
+    %% A grant that ends takes what drains on it too.
+    {Reset2, _, _} = host(6, {version, ?MSIZE, <<"9P2000.L">>}, 0, Bridge1),
+    {Down, _} = erx_hostlink_9p:step({grant_down, A}, Reset2),
+    ?assertMatch(#{requests := 0, draining := 0}, erx_hostlink_9p:info(Down)).
+
+draining_requests_and_flushes_hold_tags_test() ->
+    {Bridge, _, _} = attached(),
+    Full = lists:foldl(fun(Tag, Acc) -> element(1, host(Tag, {read, 1, 0, 1}, 0, Acc)) end,
+                       Bridge, lists:seq(10, 41)),
+    Flushed = lists:foldl(fun(Tag, Acc) -> element(1, host(Tag + 100, {flush, Tag}, 0, Acc)) end,
+                          Full, lists:seq(10, 41)),
+    {Reset, _, _} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Flushed),
+    ?assertMatch(#{draining := 64}, erx_hostlink_9p:info(Reset)),
+    {Counted, _, Effects} = host(6, {flush, 1}, 0, Reset),
+    ?assertEqual([], answers(Effects)),
+    ?assertMatch(#{counts := #{tags_full := 1}}, erx_hostlink_9p:info(Counted)).
+
+version_is_answered_on_a_pending_tag_and_with_every_tag_in_use_test() ->
+    {Bridge, _, _} = attached(),
+    {Bridge1, _, _} = host(3, {read, 1, 0, 1}, 0, Bridge),
+    {_, _, OnPending} = host(3, {version, ?MSIZE, <<"9P2000.L">>}, 0, Bridge1),
+    ?assertEqual({3, {ok, ?MSIZE, <<"9P2000.L">>}}, answer(OnPending)),
+    Full = lists:foldl(fun(Tag, Acc) -> element(1, host(Tag, {flush, 3}, 0, Acc)) end,
+                       Bridge1, lists:seq(10, 72)),
+    ?assertMatch(#{tags := 64}, erx_hostlink_9p:info(Full)),
+    {_, _, AllInUse} = host(7, {version, ?MSIZE, <<"9P2000.L">>}, 0, Full),
+    ?assertEqual({7, {ok, ?MSIZE, <<"9P2000.L">>}}, answer(AllInUse)).
+
+the_fid_table_holds_256_fids_by_default_test() ->
+    {Bridge, _, _} = attached(),
+    Walked = lists:foldl(fun(Fid, Acc) ->
+                                 {Acc1, Alias, _} = host(3, {walk, 1, Fid, []}, Fid + 100, Acc),
+                                 element(1, erx_hostlink_9p:step({reply, Alias, {ok, []}}, Acc1))
+                         end, Bridge, lists:seq(2, 256)),
+    ?assertMatch(#{fids := 256}, erx_hostlink_9p:info(Walked)),
+    {_, _, Full} = host(3, {walk, 1, 257, []}, 357, Walked),
+    ?assertEqual({3, {error, emfile}}, answer(Full)).
+
+%%% The trees a build serves ----------------------------------------------
+
+a_development_build_serves_the_designs_trees_test() ->
+    ?assertEqual([<<"proc">>, <<"data">>], erx_hostlink_files:default_trees(1)),
+    %% A partial boot is a development build's too.
+    ?assertEqual([<<"proc">>, <<"data">>], erx_hostlink_files:default_trees(3)).
+
+a_release_build_or_an_unread_manifest_serves_none_test() ->
+    ?assertEqual([], erx_hostlink_files:default_trees(0)),
+    ?assertEqual([], erx_hostlink_files:default_trees(unknown)),
+    ?assertEqual(unknown, erx_hostlink_files:manifest_flags({error, enoent})),
+    ?assertEqual(unknown, erx_hostlink_files:manifest_flags({ok, <<"not a manifest">>})).
 
 %%% The bridge process over a real grant ---------------------------------
 

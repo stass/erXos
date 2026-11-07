@@ -812,8 +812,9 @@ its `file:posix()` atom through a generated table of Linux's numbers.
 
 A **9P bridge** joins an edge to the grants inside: it keeps, for the
 edge's 9P session, a table from the edge's fids to fids it holds on a
-grant and from the edge's tags to aliases, at most the grant's pool of
-entries, and relays each message through `erx_9p` in one direction and as
+grant, at most 256, as many as a session's program holds, so an edge
+never spends the fids a grant's other owners need, and from the edge's
+tags to aliases, and relays each message through `erx_9p` in one direction and as
 a term in the other, holding each reply to its request
 ([Bounds](#bounds)). The host link's bridge serves erXos's trees to a
 client on the host; the host-tree domain's bridge serves QEMU's 9P server

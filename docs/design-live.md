@@ -1604,8 +1604,11 @@ largest message of every operation, and no message is reassembled.
 grant of the tree that `attach`'s `Aname` names, among the trees the
 host-link configuration lists: in development builds `proc`, the
 inspector's tree at scope `all`, and `data`, the data partition's root; in
-release builds the trees the system manifest lists, by default none. An
-`attach` naming another tree fails with `enoent`. On the host, `tools/erx
+release builds the trees the system manifest lists, by default none. The
+bridge tells the two apart by the system manifest's development flag,
+which the image build checks against the kind of build it makes, so one
+source decides; a manifest it cannot read lists none. An `attach` naming
+another tree fails with `enoent`. On the host, `tools/erx
 files` relays a UNIX socket in the harness's owner-only directory to the
 files stream, checking each message's size field against the stream's
 `msize` and nothing more, so any 9P2000.L client of the host mounts the
@@ -1618,11 +1621,18 @@ answers some messages without a grant: `version`, with the smaller
 `msize`; anything but `version` before a session is open, and an
 `attach` whose `Afid` is not `NOFID`, with `einval`; `auth` with
 `enotsup`; a request on a fid it does not hold with `ebadf`; one that
-names fids of two trees with `exdev`. It keeps at most 32 requests
-pending, so a grant, which admits 64 in flight with the flushes waiting
-on them, always has room for their flushes, and 64 tags; a request
-beyond 32 fails with `emfile`, and a message beyond 64 tags or on a tag
-still pending is discarded and counted. It cuts a `read`'s or
+names fids of two trees with `exdev`. It holds at most 256 fids, as many
+as a session's program holds on a grant
+([design-files.md](design-files.md#bounds)), and a fid beyond them fails
+with `emfile`. It keeps at most 32 requests pending and 64 tags in use,
+so a grant, which admits 64 in flight with the flushes waiting on them,
+always has room for their flushes; a request beyond 32 fails with
+`emfile`, and a message beyond 64 tags or on a tag in use is discarded
+and counted. A `version` resets the session whatever tags are in use; the
+requests and flushes it forgets still count against both bounds until
+their grants answer them, since the grants still hold them. A flush of a
+flush is answered only after the flush it names, so the host never reuses
+a tag while an answer on it may still come. It cuts a `read`'s or
 `readdir`'s `Count` to what an `Rread` of the session's `msize` holds
 and answers `lopen`'s and `lcreate`'s `Iounit` as `msize` less 24, so
 every reply fits a frame.
