@@ -1309,7 +1309,11 @@ a runtime report trusted or let a decoder bypass the output escaper
   answering delays the stream by at most 100 ms and holds at most 100 ms
   of the others' events; an event that arrives after later ones went out
   is printed at once, marked `late`, never dropped. The merger does not
-  wait for a row whose call answered `ERX_ENOTSUP`.
+  wait for a row whose call answered `ERX_ENOTSUP`. A ring read refused
+  with any other status shows one `error` entry for that ring, with the
+  status as `status`, a kernel ring's CPU as `cpu` and the row's
+  reporter; the trace reads that ring no more, does not wait for it, and
+  goes on with the others.
 * **Scope.** A trace facet has a scope, as an inspect facet does. A scoped
   trace facet traces only the processes and programs of its domains,
   through each domain's own runtime, and only the frames those domains
@@ -1397,9 +1401,10 @@ An `erts` event is OTP's message tag, with the pid, the domain and the
 message's other elements as fields (`in` and `out` carry `mfa`). A
 ring event is its `trace_event` name, with `cpu` (an integer, or
 `unknown` when the record sets `cpu_unknown`), `thread`, `space` and its
-named arguments as fields. Two events report on
+named arguments as fields. Three events report on
 a row itself: `unsupported`, with no fields, once at the trace's start
-for a row shown as unsupported, and `overwritten`, with
+for a row shown as unsupported, `error`, with `status`, for a ring whose
+read was refused, and `overwritten`, with
 `count`, for records a ring lost before they were read. The shell's
 printer writes one line per entry, the time in seconds, the row, the
 event, each field as `name=value` and the reporter's label in brackets,

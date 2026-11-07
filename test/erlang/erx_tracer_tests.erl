@@ -109,6 +109,22 @@ kernel_unsupported_test() ->
     {M6, []} = erx_tracer:erts(M5, 4, [], {0, 0}, 9),
     ?assertMatch({_, [#{time := 7}]}, erx_tracer:release(M6, 9)).
 
+%% A read refused with a status other than unsupported shows one error entry for its ring,
+%% with the status and the row's reporter, and that ring is no longer waited for.
+refused_read_test() ->
+    M0 = erx_tracer:new([backend, {kernel, 0}, {kernel, 1}]),
+    {M1, Now} = erx_tracer:ring(M0, {kernel, 1}, {error, limit}, 5),
+    ?assertEqual([#{time => 5, row => kernel, event => error, fields => #{status => limit, cpu => 1},
+                    reporter => kernel, late => false}], Now),
+    {M2, Backend} = erx_tracer:ring(M1, backend, {error, inval}, 6),
+    ?assertMatch([#{row := backend, event := error, fields := #{status := inval},
+                    reporter := {stopgap, liberx_trace}}], Backend),
+    %% Once for the ring: a second refusal of it adds nothing.
+    {M3, []} = erx_tracer:ring(M2, backend, {error, inval}, 7),
+    %% Neither refused ring holds the stream: the remaining ring's record goes out on its own.
+    {M4, []} = erx_tracer:ring(M3, {kernel, 0}, ok([park(8)]), 9),
+    ?assertMatch({_, [#{time := 8}]}, erx_tracer:release(M4, 9)).
+
 emit_test() ->
     Ref = make_ref(),
     ok = erx_tracer:emit(self(), Ref, [#{time => 1}]),

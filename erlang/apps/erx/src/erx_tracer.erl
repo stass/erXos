@@ -16,7 +16,9 @@
 %% entry goes out once every source still waited for has shown its time, or once it is
 %% 100 ms old. An entry older than one already sent goes out at once, marked late, never
 %% dropped. A source whose read answers unsupported stops being waited for: a row the
-%% kernel reports shows one unsupported entry, a stopgap's row is left out. Every reporter
+%% kernel reports shows one unsupported entry, a stopgap's row is left out. A ring whose
+%% read is refused with any other status shows one error entry with that status and stops
+%% being waited for, and the trace goes on with the other sources. Every reporter
 %% comes from erx_schema:trace_row/1, and every event name from erx_abi_events, so nothing
 %% here makes an atom from a record.
 
@@ -56,18 +58,27 @@ new(Sources) ->
 
 -doc """
 Takes one erx_trace_ring:read/3 result of a ring, read at Now (erx_clock_ns, taken before
-the read), and returns the entries that go out at once (late ones, and a row's one
-unsupported entry). A refusal other than unsupported is not handled.
+the read), and returns the entries that go out at once (late ones, a row's one unsupported
+entry, and a ring's one error entry). A refused ring is no longer waited for; its caller
+reads it no more.
 """.
 -spec ring(merger(), backend | {kernel, non_neg_integer()},
            {ok, [erx_trace_ring:ring_record()], non_neg_integer(), non_neg_integer()}
-           | {error, unsupported}, non_neg_integer()) -> {merger(), [entry()]}.
+           | {error, atom()}, non_neg_integer()) -> {merger(), [entry()]}.
 ring(#merger{waiting = Waiting, reported = Reported} = Merger, Source, {error, unsupported}, Now) ->
     Row = row(Source),
     Rest = Merger#merger{waiting = maps:remove(Source, Waiting)},
     case {reporter(Row), maps:is_key(Source, Waiting) andalso not lists:member(Row, Reported)} of
         {kernel, true} -> {Rest#merger{reported = [Row | Reported]}, [entry(Now, Row, unsupported, #{}, false)]};
         {_Reporter, _First} -> {Rest, []}
+    end;
+ring(#merger{waiting = Waiting} = Merger, Source, {error, Status}, Now) when is_atom(Status) ->
+    %% Any other refusal (inval, limit, ...): one entry with the status and the row's
+    %% reporter, whichever reporter it is, and the trace goes on without this ring.
+    Rest = Merger#merger{waiting = maps:remove(Source, Waiting)},
+    case maps:is_key(Source, Waiting) of
+        true -> {Rest, [entry(Now, row(Source), error, refusal_fields(Source, Status), false)]};
+        false -> {Rest, []}
     end;
 ring(Merger, Source, {ok, Records, _Next, Overwritten}, Now) ->
     Row = row(Source),
@@ -149,6 +160,10 @@ latest(_Sent, Out) -> maps:get(time, lists:last(Out)).
 overwritten(_Row, 0, _Entries, _Now) -> [];
 overwritten(Row, Count, [], Now) -> [entry(Now, Row, overwritten, #{count => Count}, false)];
 overwritten(Row, Count, [#{time := Time} | _], _Now) -> [entry(Time, Row, overwritten, #{count => Count}, false)].
+
+%% The fields of a ring's error entry: the status, and the CPU of a kernel ring.
+refusal_fields({kernel, Cpu}, Status) -> #{status => Status, cpu => Cpu};
+refusal_fields(backend, Status) -> #{status => Status}.
 
 row({kernel, _Cpu}) -> kernel;
 row({erts, _Domain}) -> erts;

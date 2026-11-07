@@ -37,7 +37,11 @@ class ErxTracerTest < Minitest::Test
     'unsupported' => Seed.new('{kernel, true} -> {Rest#merger{reported = [Row | Reported]}, [entry(Now, Row, unsupported, #{}, false)]};',
                               '{kernel, true} -> {Rest, []};', 'kernel_unsupported_test'),
     'once' => Seed.new('maps:is_key(Source, Waiting) andalso not lists:member(Row, Reported)', 'true',
-                       'kernel_unsupported_test')
+                       'kernel_unsupported_test'),
+    'refused waited' => Seed.new("Rest = Merger#merger{waiting = maps:remove(Source, Waiting)},\n    case maps:is_key(Source, Waiting) of",
+                                 "Rest = Merger,\n    case maps:is_key(Source, Waiting) of", 'refused_read_test'),
+    'refused shown' => Seed.new('true -> {Rest, [entry(Now, row(Source), error, refusal_fields(Source, Status), false)]};',
+                                'true -> {Rest, []};', 'refused_read_test')
   }.freeze
 
   def test_every_case_passes
