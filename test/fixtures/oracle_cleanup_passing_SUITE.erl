@@ -19,8 +19,8 @@ writes_priv(Config) ->
 
 %% Makes a directory in priv_dir by its path relative to the current
 %% directory, as tar_SUITE:borderline does to keep its names short: in
-%% stock Common Test the current directory is the run directory and
-%% priv_dir is its log_private.
+%% stock Common Test the current directory is the ct_run.* directory and
+%% priv_dir is below it, in *.logs/run.*/log_private.
 priv_dir_under_cwd(Config) ->
     {ok, Cwd} = file:get_cwd(),
     Priv = proplists:get_value(priv_dir, Config),

@@ -160,7 +160,7 @@ peer_SUITE          tcp         attached_cntrl_channel_handler_crash user_skip c
 # The oracle's priv_dir on erXos is under /tmp, not below the case's
 # current directory on /ct-logs as stock's is (TODO.md, the /ct-logs
 # residual), and borderline names its priv_dir relative to that directory.
-tar_SUITE           -           borderline                           failed    harness: priv_dir is not below the current directory, so make_dir of the relative name answers enoent
+tar_SUITE           -           borderline                           failed    harness bug (TODO.md): priv_dir is not below the current directory, so make_dir of the relative name answers enoent
 
 # The hosted runtime opens no ports, and ets_SUITE takes hd(erlang:ports()).
 ets_SUITE           -           t_match_spec_run                     failed    cannot run: make_port takes hd(erlang:ports()), and the hosted runtime opens no ports

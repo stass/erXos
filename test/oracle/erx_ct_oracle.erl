@@ -47,20 +47,22 @@ unicode_util_SUITE_data).
 -export([main/1]).
 -export([init/2, pre_init_per_suite/3, post_init_per_suite/4, post_end_per_suite/4, terminate/1]).
 
-%% The hook's state: the directory every priv_dir is under, which the
-%% hook deletes under only, and the priv_dir not yet deleted, with the
-%% suite it belongs to, or none.
+%% The priv_dir not yet deleted, with the suite it belongs to, or none.
 -type pending() :: none | {module(), file:filename()}.
+%% The hook's state: the absolute directory every priv_dir is under, the
+%% only one the hook deletes in, and what is pending.
 -type state() :: {file:filename(), pending()}.
 
 %% Stock: the logs beside the work directory, and each priv_dir where
-%% stock Common Test puts it, in the log tree; ERX_ORACLE_PRIV_ROOT stays
-%% unset. erXos: the logs on a RAM file system of Cap bytes mounted at
-%% LogDir, whose tree process is registered as erx_ct_oracle_logs, and
-%% each priv_dir under WorkDir/priv, named in ERX_ORACLE_PRIV_ROOT for the
-%% patched test_server_ctrl. The host tool passes both forms.
+%% stock Common Test puts it, in the log tree; ERX_ORACLE_PRIV_ROOT is
+%% unset, also when the caller's environment set it. erXos: the logs on a
+%% RAM file system of Cap bytes mounted at LogDir, whose tree process is
+%% registered as erx_ct_oracle_logs, and each priv_dir under WorkDir/priv,
+%% named in ERX_ORACLE_PRIV_ROOT for the patched test_server_ctrl. The host
+%% tool passes both forms.
 -spec main([string()]) -> no_return().
 main([SuiteDir, WorkDir]) ->
+    true = os:unsetenv("ERX_ORACLE_PRIV_ROOT"),
     LogDir = filename:join(WorkDir, "logs"),
     ok = filelib:ensure_path(LogDir),
     run(SuiteDir, WorkDir, LogDir, resolved_dir(LogDir));
@@ -76,6 +78,8 @@ main([SuiteDir, WorkDir, LogDir, Cap]) ->
 %% once entered, which follows symbolic links (macOS's /var is
 %% /private/var). Common Test names its log directory so, and with it
 %% every stock priv_dir, so the hook's prefix test compares like names.
+%% It moves the whole node's current directory for a moment, so it runs
+%% only before Common Test starts.
 resolved_dir(Dir) ->
     {ok, Cwd} = file:get_cwd(),
     ok = file:set_cwd(Dir),
@@ -86,7 +90,8 @@ resolved_dir(Dir) ->
 %% Runs the suites of SuiteDir from a copy under WorkDir, with the logs in
 %% LogDir and every priv_dir under PrivRoot, and halts. The hook deletes
 %% under PrivRoot only.
--spec run(file:filename(), file:filename(), file:filename(), file:filename()) -> no_return().
+-spec run(file:filename(), file:filename(), file:filename(),
+          file:filename()) -> no_return().
 run(SuiteDir, WorkDir, LogDir, PrivRoot) ->
     Copy = filename:join(WorkDir, "suites"),
     ok = copy_tree(SuiteDir, Copy),
@@ -104,9 +109,15 @@ run(SuiteDir, WorkDir, LogDir, PrivRoot) ->
      || Log <- filelib:wildcard(filename:join(LogDir, "ct_run.*/*.logs/run.*/suite.log"))],
     erlang:halt(0).
 
--doc "Starts the hook with the priv_dir root run/4 passes and no priv_dir pending.".
+-doc """
+Starts the hook with the priv_dir root run/4 passes and no priv_dir
+pending. A root that is missing, relative or `/` would let the prefix
+test pass anything, so the hook refuses to start with one.
+""".
 -spec init(term(), file:filename()) -> {ok, state()}.
 init(_Id, PrivRoot) ->
+    absolute = filename:pathtype(PrivRoot),
+    true = length(filename:split(PrivRoot)) > 1,
     {ok, {PrivRoot, none}}.
 
 -doc """
@@ -156,7 +167,8 @@ pending(_Suite, _Config) ->
     none.
 
 %% Deletes a suite's priv_dir under PrivRoot and notes the bytes it held,
-%% or why it was not deleted; a failed deletion costs space, not the run. Only the
+%% or why it was not deleted; a failed deletion costs space, not the run.
+%% Only the
 %% directory Common Test made for this suite alone is deleted,
 %% .../ct_run.*/*.Suite.logs/run.*/log_private; a job that ran several
 %% suites would name another. Common Test sets it before any of the
