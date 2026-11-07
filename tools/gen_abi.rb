@@ -3,13 +3,17 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'optparse'
 require_relative 'lib/erx/abi'
 
-options = { root: File.expand_path('..', __dir__), architecture: 'aarch64', check: false }
+options = { root: File.expand_path('..', __dir__), output: nil, architecture: 'aarch64', check: false }
 parser = OptionParser.new do |flags|
-  flags.banner = 'Usage: ruby tools/gen_abi.rb [--check] [--root PATH]'
-  flags.on('--root PATH', 'Read and publish beneath this repository') { |path| options[:root] = File.expand_path(path) }
+  flags.banner = 'Usage: ruby tools/gen_abi.rb [--check] [--root PATH] [--output PATH]'
+  flags.on('--root PATH', 'Read beneath this repository') { |path| options[:root] = File.expand_path(path) }
+  flags.on('--output PATH', 'Publish or check beneath this directory (default: the root)') do |path|
+    options[:output] = File.expand_path(path)
+  end
   flags.on('--architecture NAME', 'Select the architecture declaration file') { |name| options[:architecture] = name }
   flags.on('--check', 'Compare generated paths and bytes without publishing') { options[:check] = true }
   flags.on('--help', 'Show this help') { puts flags; exit 0 }
@@ -19,11 +23,13 @@ begin
   parser.parse!
   raise OptionParser::InvalidArgument, ARGV.join(' ') unless ARGV.empty?
   plan = Erx::ABI::Generator.plan(root: options.fetch(:root), architecture: options.fetch(:architecture))
+  output = options.fetch(:output) || options.fetch(:root)
+  FileUtils.mkdir_p(output) unless options.fetch(:check)
   if options.fetch(:check)
-    Erx::ABI::Generator.check(plan, root: options.fetch(:root))
+    Erx::ABI::Generator.check(plan, root: output)
     Erx::Terminal.puts("ABI: #{plan.files.size} generated artifacts match")
   else
-    Erx::ABI::Generator.publish(plan, root: options.fetch(:root))
+    Erx::ABI::Generator.publish(plan, root: output)
     Erx::Terminal.puts("ABI: published #{plan.files.size} generated artifacts")
   end
 rescue OptionParser::ParseError => error

@@ -249,7 +249,7 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_commands_refuse_unsupported_collaborators
-    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
+    %w[check generate check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
       assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
     end
   end
@@ -271,6 +271,12 @@ class TopLevelCliTest < Minitest::Test
     status, output = run_cli('check-fuzz', '--runs', '0', runner_class: UnexpectedRunner)
     assert_equal 2, status
     assert_includes output, 'outside bounds'
+  end
+
+  def test_generate_refuses_trailing_arguments
+    status, output = run_cli('generate', 'ignored')
+    assert_equal 2, status
+    assert_includes output, 'unexpected arguments'
   end
 
   def test_generation_gate_refuses_trailing_arguments

@@ -14,12 +14,13 @@ require_relative 'abi_emit_support'
 require_relative 'abi_emit_erlang'
 require_relative 'abi_emit_protocol'
 require_relative 'abi_emit_wire'
+require_relative 'generation_plan'
 require_relative 'json_input'
 require_relative 'output_directory'
 
 module Erx
   module ABI
-    OutputPlan = Struct.new(:schema, :files, :inventory, keyword_init: true)
+    OutputPlan = Struct.new(:schema, :files, :inventory, :reads, keyword_init: true)
 
     module Generator
       INVENTORY = 'abi/generated.json'
@@ -73,8 +74,19 @@ module Erx
         files[INVENTORY] = JSON.pretty_generate(inventory) + "\n"
         raise SchemaError, 'generated inventory exceeds its byte bound' if files.fetch(INVENTORY).bytesize > MAX_INVENTORY_BYTES
         result = OutputPlan.new(schema: schema, files: files.sort.to_h.freeze,
-                                inventory: inventory.freeze).freeze
+                                inventory: inventory.freeze, reads: source_inputs).freeze
         Model.freeze_value(result)
+      end
+
+      # The plan in the shape Erx::Generated publishes into the build tree.
+      # Every ABI source is named by an include from the two roots, so the
+      # files read are the complete input record and no glob is needed. The
+      # inventory is the drift record of the tracked outputs and hashes the
+      # generator's own files as found beneath root, which the build tree's
+      # stamp does not track, so it is not published there.
+      def generation(root:, architecture: 'aarch64')
+        result = plan(root: root, architecture: architecture)
+        GenerationPlan.new(files: result.files.except(INVENTORY), reads: result.reads)
       end
 
       # The complete destination plan is checked before the first write. Every

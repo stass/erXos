@@ -22,6 +22,7 @@ require_relative 'lib/erx/debug_log_probe'
 require_relative 'lib/erx/qemu_gate'
 require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
+require_relative 'lib/erx/generated'
 require_relative 'lib/erx/arch_terms'
 require_relative 'lib/erx/sysreg'
 require_relative 'lib/erx/oracle_container'
@@ -42,6 +43,8 @@ module Erx
       case command
       when 'check'
         check(command_arguments, **collaborators)
+      when 'generate'
+        generate(command_arguments, **collaborators)
       when 'check-generated'
         check_generated(command_arguments, **collaborators)
       when 'check-reproducible'
@@ -146,6 +149,15 @@ module Erx
       raise Error, 'no integration tests found' if tests.empty?
 
       tests.map { |test| File.join(root, 'test/integration', test) }
+    end
+
+    # Brings build/gen up to date with the generators' inputs; a no-op when
+    # its stamp still matches.
+    def self.generate(arguments)
+      no_arguments(arguments)
+      result = Generated.ensure(root: ROOT)
+      Terminal.puts("generated files in #{result.output}: #{result.status == :fresh ? 'up to date' : 'regenerated'}")
+      0
     end
 
     def self.check_generated(arguments, runner_class: Runner)
@@ -516,7 +528,7 @@ module Erx
     def self.word_list(words) = [words[0..-2].join(', '), words.last].reject(&:empty?).join(' and ')
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | status | setup [--jobs N]')
       0
     end
 

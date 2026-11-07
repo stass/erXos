@@ -214,6 +214,34 @@ working tree. An unknown declaration, output path collision or unsupported
 layout fails before an output changes. Later service schemas land with
 their consumers, under [Generated interfaces and representations](design-generation.md).
 
+Generated files live in the build tree, not the repository.
+`Erx::Generated.ensure` (`tools/lib/erx/generated.rb`, exposed as
+`tools/erx generate` and `make generate`) publishes every generator's plan
+into one output root, `build/gen/`, which mirrors repository-relative
+paths, so `-I build/gen -I build/gen/include` resolves the same include
+lines a tracked copy would; `Erx::Generated.path` names one file in it.
+Each generator returns an `Erx::GenerationPlan`: its outputs, the digest of
+every input file it read and the expansion of every glob it discovered
+inputs with, so a new output or input needs no change outside the
+generator. The tree's stamp, `build/gen/.stamp.json`, records those reads
+and globs, the digest of every Ruby file beneath the running code's
+`tools/lib` with the Ruby, `json` and `rexml` versions it runs on, and the
+digest of every output. The tree is fresh exactly when all of these still
+hold and it holds nothing else; otherwise `ensure` regenerates all of it,
+and files whose bytes are unchanged keep their modification time. A
+generator's drift record of tracked outputs (`abi/generated.json`,
+`abi/terminal_generated.json`) is not part of its build plan. `ensure`
+holds an exclusive lock on `build/gen.lock` for its check and publish,
+writes a new tree into a staging directory beside `build/gen/` and moves
+it into place by rename, so every caller of `ensure` finds one complete
+tree; it replaces only a directory that is empty or carries a stamp, and
+refuses an output that contains its source root. Every output, and the
+stamp, is ASCII-only, checked by its generator and again by `ensure`. The generator
+libraries load no generated file, so a tree without `build/gen/` can
+always build it; `test/host/generated_test.rb` checks that, the stamp,
+the lock and that two runs into different roots at different times give
+byte-identical trees.
+
 ## Images and guests
 
 The packer constructs ERXPACK from a validated whole-image plan. Paths,

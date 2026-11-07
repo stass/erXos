@@ -9,6 +9,7 @@ require 'fileutils'
 require_relative 'json_input'
 require_relative 'bounded_file'
 require_relative 'output_directory'
+require_relative 'generation_plan'
 
 module Erx
   module Hardware
@@ -22,6 +23,9 @@ module Erx
     ELEMENTS_MAX = 256
     # Headers the device table owns under include/erx/hw, so no peripheral may be named for one.
     DEVICE_HEADERS = %w[device_types device_table device_access device_owned].freeze
+    # Every SVD file beneath hw/svd is an input; generation discovers them.
+    SVD_GLOB = 'hw/svd/**/*.svd'
+    MAX_SVD_BYTES = 4 * 1024 * 1024
     CONTAINERS = %w[device peripherals peripheral addressBlock registers register fields field
                     enumeratedValues enumeratedValue].freeze
     module_function
@@ -529,8 +533,18 @@ module Erx
 
     # All parsing and rendering completes before the first output is written.
     # The directory is owned by this frontend, making orphan checks explicit.
-    def output_plan(root:)
-      devices = devices(root: root)
+    def output_plan(root:) = render_outputs(parse_devices(svd_inputs(root: root)))
+
+    # The plan in the shape Erx::Generated publishes into the build tree: the
+    # SVD files are discovered by SVD_GLOB, so its expansion is recorded too.
+    def generation(root:)
+      inputs = svd_inputs(root: root)
+      GenerationPlan.new(files: render_outputs(parse_devices(inputs)),
+                         reads: inputs.transform_values { |bytes| Digest::SHA256.hexdigest(bytes) },
+                         globs: { SVD_GLOB => inputs.keys })
+    end
+
+    def render_outputs(devices)
       names = devices.map { |device| device.name.downcase }
       raise Error, 'SVD device names collide' unless names.uniq == names
       raise Error, 'SVD device is named for a device table header' unless (names & DEVICE_HEADERS).empty?
@@ -542,22 +556,34 @@ module Erx
                  'include/erx/hw/device_table.h' => device_table_header(devices).freeze,
                  'include/erx/hw/device_access.h' => device_access_header.freeze,
                  'include/erx/hw/device_owned.h' => device_owned_header(devices).freeze }
-      devices.each_with_object(tables) do |device, files|
-        files[device_header_path(device)] = device_header(device).freeze
-      end.freeze
+      files = devices.each_with_object(tables) do |device, outputs|
+        outputs[device_header_path(device)] = device_header(device).freeze
+      end
+      raise Error, 'generated hardware output is not ASCII' unless files.values.all?(&:ascii_only?)
+
+      files.freeze
     end
+    private_class_method :render_outputs
 
     # Every device the SVD inventory describes, parsed, in path order.
-    def devices(root:)
-      devices = Dir.glob(File.join(root, 'hw/svd/**/*.svd')).sort.map do |path|
-        parse_svd(BoundedFile.read(path, maximum: 4 * 1024 * 1024))
-      end
-      raise Error, 'hardware input inventory is empty' if devices.empty?
+    def devices(root:) = parse_devices(svd_inputs(root: root))
 
-      devices
+    # The bytes of every SVD file, keyed by its path relative to the root.
+    def svd_inputs(root:)
+      root = File.expand_path(root)
+      inputs = Dir.glob(SVD_GLOB, base: root).sort.to_h do |relative|
+        [relative, BoundedFile.read(File.join(root, relative), maximum: MAX_SVD_BYTES)]
+      end
+      raise Error, 'hardware input inventory is empty' if inputs.empty?
+
+      inputs
     rescue SystemCallError => error
       raise Error, "cannot read hardware input: #{error.message}"
     end
+    private_class_method :svd_inputs
+
+    def parse_devices(inputs) = inputs.values.map { |bytes| parse_svd(bytes) }
+    private_class_method :parse_devices
 
     # The generated header of one device's accessors, relative to the root.
     def device_header_path(device) = "include/erx/hw/#{device.name.downcase}.h"

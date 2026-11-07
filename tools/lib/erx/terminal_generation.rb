@@ -6,19 +6,35 @@ require 'fileutils'
 require 'tmpdir'
 require_relative 'terminal_rules'
 require_relative 'output_directory'
+require_relative 'generation_plan'
 
 module Erx
   module TerminalRules
     module_function
 
-    def plan(root:)
+    # The drift record of the tracked outputs. It hashes the generator's own
+    # files as found beneath root, which the build tree's stamp does not
+    # track, so it is not published there.
+    MANIFEST = 'abi/terminal_generated.json'
+
+    def plan(root:) = compose(root: root).files
+
+    # The plan in the shape Erx::Generated publishes into the build tree:
+    # abi/terminal.txt names every other input, so the files read are the
+    # complete input record of every output but the drift record.
+    def generation(root:)
+      composed = compose(root: root)
+      GenerationPlan.new(files: composed.files.except(MANIFEST), reads: composed.reads)
+    end
+
+    def compose(root:)
       root = File.realpath(root)
       source_bytes = read_input(File.join(root, 'abi/terminal.txt'), maximum: 65_536)
       model = source(source_bytes)
-      origin = Origin.new(root: File.join(root, 'otp')).check
+      origin = Origin.new(root: File.join(root, 'otp'))
       inputs = model.fetch('input').to_h do |name, path|
         bytes = read_input(File.join(root, path), maximum: 8 * 1024 * 1024)
-        record = origin.fetch('files')[path.delete_prefix('otp/')]
+        record = origin.imported_file(path.delete_prefix('otp/'))
         unless record && Digest::SHA256.hexdigest(bytes) == record.fetch('sha256') &&
                record.fetch('license') == LICENSE
           raise Error, 'terminal input differs from its pinned OTP origin'
@@ -47,13 +63,16 @@ module Erx
       hashes = (generators + ['abi/terminal.txt']).to_h do |path|
         [path, Digest::SHA256.file(File.join(root, path)).hexdigest]
       end.merge(input_hashes)
-      files[OUTPUTS[4]] = JSON.pretty_generate('version' => 1, 'inputs' => hashes.sort.to_h,
+      files[MANIFEST] = JSON.pretty_generate('version' => 1, 'inputs' => hashes.sort.to_h,
                                               'outputs' => OUTPUTS.sort) + "\n"
       raise Error, 'generated terminal output is not ASCII' unless files.values.all?(&:ascii_only?)
-      files.sort.to_h.transform_values(&:freeze).freeze
+      GenerationPlan.new(files: files.transform_values(&:freeze),
+                         reads: input_hashes.merge('abi/terminal.txt' => Digest::SHA256.hexdigest(source_bytes)))
     rescue SystemCallError => error
       raise Error, "cannot read terminal generation input: #{error.message}"
     end
+
+    private_class_method :compose
 
     def ascii_header(model)
       first, last = model.fetch('kernel_ascii').fetch('range')
