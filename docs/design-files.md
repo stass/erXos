@@ -440,9 +440,9 @@ a root fid, as 9P2000.L says; the host link's bridge, whose client starts
 afresh with a new host-link session, serves only the `version` that opens
 its session
 ([design-live.md](design-live.md#files-between-the-host-and-the-machine)).
-Inside the machine, a grant is one client
-domain's session with the server from the moment the server makes it, and
-every process of the client domain shares it, so a `version` there is
+Inside the machine, a grant is one client domain's session with the
+server from the moment the server makes it, and every process of the
+client domain shares it, so a `version` there is
 answered with the protocol's name and the smaller of the client's message
 size and 65,560, and resets nothing: one process's `version` must not
 clunk the fids of the many processes that share the grant. That is the

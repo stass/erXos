@@ -65,7 +65,7 @@ On every trace it checks, as the host and the grant see the bridge:
                 trace = [] :: list()}).
 
 %% Requests, tags and host messages of each configuration.
--define(CONFIGURATIONS, [{1, 2, 5}, {2, 4, 5}, {3, 6, 5}]).
+-define(CONFIGURATIONS, [{1, 2, 5}, {2, 2, 5}, {3, 2, 5}, {2, 4, 5}, {3, 6, 5}]).
 
 run() ->
     lists:foreach(fun({Requests, Tags, Budget}) ->
@@ -182,7 +182,7 @@ effect({unalias, Alias}, #world{outstanding = Outstanding} = W) ->
     W#world{outstanding = lists:keydelete(Alias, 1, Outstanding)};
 effect({host, Bytes}, W) ->
     {ok, Tag, {reply, Operation, Reply}} = erx_9p:decode(Bytes, ?MSIZE),
-    refused(Operation, Reply) orelse fail(version_served, {Tag, Reply}, W),
+    answer_allowed(Operation, Reply) orelse fail(version_served, {Tag, Reply}, W),
     answered(Tag, W);
 effect({monitor, _}, W) ->
     W;
@@ -192,9 +192,9 @@ effect({clunk, _, _}, W) ->
 %%% The checks
 
 %% (e): the session is open, so a version's answer is an error.
-refused(version, {error, _}) -> true;
-refused(version, _Served) -> false;
-refused(_Operation, _Reply) -> true.
+answer_allowed(version, {error, _}) -> true;
+answer_allowed(version, _Served) -> false;
+answer_allowed(_Operation, _Reply) -> true.
 
 %% One answer on Tag, as the host takes it: (a) and (c).
 answered(Tag, #world{host = Host, abandonable = Abandonable} = W) ->

@@ -56,8 +56,8 @@ use, requests and flushes together, so what the bridge has at its grants
 never exceeds 64. A request beyond 32 fails with `emfile`; a message that
 would take a 65th tag, one whose tag is in use, one that fails the codec
 and one that is not a request are discarded and counted, never answered
-(docs/design-live.md, "Failure handling"). A read's or readdir's `Count` is cut to what an `Rread` of the
-negotiated `msize` holds, and `lopen`'s and `lcreate`'s `Iounit` is
+(docs/design-live.md, "Failure handling"). A read's or readdir's `Count`
+is cut to what an `Rread` of the negotiated `msize` holds, and `lopen`'s and `lcreate`'s `Iounit` is
 answered as `msize` less 24, Linux's and QEMU's `P9_IOHDRSZ`, so every
 reply fits the stream. A reply is held to its request with the grammar's
 reply check before it is used; one that fails it, or does not encode within
@@ -195,23 +195,31 @@ info(#bridge{msize = Msize, fids = Fids, counts = Counts} = B) ->
 
 %%% A message of the host
 
-%% A message is held to its tag, which must be free, and to the tags bound,
-%% which a message answered here does not count against.
+%% A message is held to its tag, which must be free, and, when its plan
+%% holds the tag in the slot table, to the tags bound.
 admit(Tag, _Request, _Drawn, #bridge{slots = Slots} = B) when is_map_key(Tag, Slots) ->
     {count(tag_in_use, B), []};
 admit(Tag, Request, Drawn, #bridge{slots = Slots, tags_max = TagsMax} = B) ->
-    case plan(Request, Drawn, B) of
-        {answer, _} = Plan -> carry_out(Tag, Request, Plan, Drawn, B);
-        Plan when map_size(Slots) < TagsMax -> carry_out(Tag, Request, Plan, Drawn, B);
-        _Plan -> {count(tags_full, B), []}
+    Plan = plan(Request, Drawn, B),
+    case takes_tag(Plan) andalso map_size(Slots) >= TagsMax of
+        false -> carry_out(Tag, Request, Plan, Drawn, B);
+        true -> {count(tags_full, B), []}
     end.
+
+%% Whether a plan holds its tag in the slot table: a request forwarded to a
+%% grant or a flush added to a chain. Every other message is answered at once.
+takes_tag({forward, _, _}) -> true;
+takes_tag({chain, _, _}) -> true;
+takes_tag({answer, _}) -> false;
+takes_tag({open, _, _, _}) -> false.
 
 %% What a message asks of the bridge, decided before anything changes:
 %% a session opened, answered here, forwarded to a grant, or a flush added
 %% to a chain.
 plan({version, Msize, Version}, _Drawn, #bridge{msize = none}) when Msize >= ?MSIZE_MIN ->
-    %% No session is open, so nothing is in flight: the smaller msize, or
-    %% unknown for another protocol, which opens none.
+    %% No session is open, so the slot table is empty, since nothing but a
+    %% version is served before one and none ever closes: the smaller
+    %% msize, or unknown for another protocol, which opens none.
     Agreed = min(Msize, ?MSIZE_MAX),
     case Version of
         ?VERSION -> {open, Agreed, Agreed, ?VERSION};

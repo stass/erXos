@@ -2449,9 +2449,9 @@ document's "residual risks accepted" paragraph.
   listing the allowed `ERTS_IS_PROC_SENSITIVE` sites would enforce; a kill of the trace
   process during its start raises in the caller of `start/3` instead of returning an
   error; `expect()`'s `session` boolean shares a name with the session handle; and
-  `park_then_wake?` mutates a set inside `any?`. P4, the trace facet, the
-  relay, frame tracing and the host link's events stream, is M5's in plan.md: it needs M5's
-  connections, since the stopgap offers no lanes.
+  `park_then_wake?` mutates a set inside `any?`. P4 (the trace facet, the relay, frame
+  tracing and trace records on the host link's events stream) belongs to M5 in plan.md, since
+  it needs M5's connections and the stopgap offers no lanes.
 * [Medium] code service, installed storage (`erlang/apps/erx_code/src/erx_code.erl`):
   the install arena, `erx_code:install_beam/2` and the runtime's
   `ERX_BOOT_INSTALLED_ONLY` refusal with `{error, not_installed}`

@@ -81,7 +81,10 @@ step(Event, Bridge, Aliases, Host) ->
     %% The aliases a grant may still answer: what the bridge sent, less what
     %% was answered or what the bridge awaits no more.
     Unaliased = [Alias || {unalias, Alias} <- Effects],
-    {Bridge1, Sent ++ ((Aliases -- Answered) -- Unaliased), Host2}.
+    Held = Sent ++ ((Aliases -- Answered) -- Unaliased),
+    %% What the grants hold is within the tags bound too.
+    length(Held) =< 64 orelse erlang:error({out_of_bounds, grants_hold, length(Held)}),
+    {Bridge1, Held, Host2}.
 
 %% The host's tags in use once the bridge took Event: a request it admitted
 %% enters, with an id from a clock of its own and, for a flush, the id of what

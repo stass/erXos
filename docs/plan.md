@@ -669,12 +669,12 @@ complete.
 calls, credit, the 1,025th facet) pass; a module reloaded in a loop on four
 CPUs never runs stale code; a blob one bit off its hash
 never loads; every character class of the line escape has its test at each
-display; `file:read_file("/proc/processes/D.N.S/status")` in the
-system shell, where `D.N.S` is a pid as `pid_to_list` writes it, less its
+display; `file:read_file("/proc/processes/0.N.S/status")` in the
+system shell, `0.N.S` being a pid as `pid_to_list` writes it less its
 brackets, returns every status the inspector can report; every value only
 the kernel could report shows `unsupported` with its reporter, and budget
-`used` shows `partial` with reporter `liberx pool`, each with a test; a file read through
-`tools/erx files` equals its
+`used` shows `partial` with reporter `liberx pool`, each with a test; a
+file read through `tools/erx files` equals its
 source on the machine; the fuzz targets of the deframer, `erx_path`,
 the 9P2000.L codec and each escaper run their budgets clean; the oracle's
 suites meet M3's standard on the interpreter image in the system domain, with
@@ -726,8 +726,8 @@ and watch the machine come back from the reset with nothing to reconcile.
   ([design-runtime.md](design-runtime.md#connections-in-erts),
   [design-domains.md](design-domains.md#exports)).
 * **Tracing across domains**: the trace facet and the trace relay in each
-  traced domain, tracing of cross-domain frames, and the host link's
-  events stream ([design-live.md](design-live.md#tracing)).
+  traced domain, tracing of cross-domain frames, and trace records on the
+  host link's events stream ([design-live.md](design-live.md#tracing)).
 * **The domain library and the system services**: the domain library's
   full creation plan with undo, its fault thread and gate, end
   classification and `{domain_down, D, Info}`, connection down with its

@@ -114,6 +114,20 @@ a_version_in_a_session_is_refused_and_changes_nothing_test() ->
     ?assertEqual([{3, {ok, <<"ab">>}}], answers(E3)),
     ?assertMatch(#{fids := 1, tags := 0}, erx_hostlink_9p:info(Bridge3)).
 
+a_flush_at_the_grant_outlives_a_refused_version_test() ->
+    {Bridge, _, _} = attached(),
+    {Bridge1, LockAlias, _} = host(3, {lock, 1, 1, 1, 0, 0, 1, <<"c">>}, 0, Bridge),
+    {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Bridge3, _, Refused} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Bridge2),
+    ?assertEqual([{5, {error, einval}}], answers(Refused)),
+    ?assertEqual([], sent(Refused)),
+    %% The grant abandons the lock at the flush: the flush is answered on its
+    %% tag and the lock's alias is given up, as with no version between.
+    {Bridge4, E4} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Bridge3),
+    ?assertEqual([{4, ok}], answers(E4)),
+    ?assert(lists:member({unalias, LockAlias}, E4)),
+    ?assertMatch(#{tags := 0, awaited := 0, fids := 1}, erx_hostlink_9p:info(Bridge4)).
+
 a_version_on_a_tag_in_use_is_discarded_and_with_every_tag_in_use_refused_test() ->
     {Bridge, _, _} = attached(),
     {Bridge1, _, _} = host(3, {read, 1, 0, 1}, 0, Bridge),

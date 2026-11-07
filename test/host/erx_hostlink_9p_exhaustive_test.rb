@@ -40,8 +40,8 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
                             broken: 'seq = Seq - 1}, []}'),
     # (d) A message admitted with every tag of the bound in use takes one tag past it.
     past_the_tags_bound: Fault.new(property: /out_of_bounds/,
-                                   text: 'Plan when map_size(Slots) < TagsMax ->',
-                                   broken: 'Plan when map_size(Slots) =< TagsMax ->'),
+                                   text: 'takes_tag(Plan) andalso map_size(Slots) >= TagsMax of',
+                                   broken: 'takes_tag(Plan) andalso map_size(Slots) > TagsMax of'),
     # (e) A version in an open session is served as if it opened one.
     version_served: Fault.new(property: /version_served/,
                               text: 'plan({version, Msize, Version}, _Drawn, #bridge{msize = none}) when',
@@ -56,7 +56,7 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
   def test_every_interleaving_keeps_the_bridges_promises
     output, status = enumerate(File.binread(CORE))
     assert status.success?, output
-    assert_equal 3, output.scan(/^exhaustive: .* traces, \d+ steps ok$/).size, output
+    assert_equal 5, output.scan(/^exhaustive: .* traces, \d+ steps ok$/).size, output
   end
 
   FAULTS.each do |name, fault|

@@ -1825,8 +1825,8 @@ as a session's program holds on a grant
 ([design-files.md](design-files.md#bounds)), and a fid beyond them fails
 with `emfile`. It keeps at most 32 requests pending and at most 64 tags
 in use, requests and flushes together, at its grants or held; a request
-beyond 32 fails with `emfile`, and a message beyond 64, or on a tag in
-use, is discarded and counted. The grants are the system
+beyond 32 fails with `emfile`, and a message that would take a 65th tag,
+or one on a tag in use, is discarded and counted. The grants are the system
 domain's own, shared with its processes, and a grant's 64 requests in
 flight cannot be reserved, so a flush the bridge sends may still be
 refused there, and it then waits behind its request. The flushes of one
