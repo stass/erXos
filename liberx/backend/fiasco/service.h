@@ -43,8 +43,9 @@ uint64_t	erx_fiasco_task_ended_cap(uint64_t task);
 uint64_t	erx_fiasco_service_thread(void);
 
 /*
- * Task calls of the call table. parent, fault, label and budget are accepted and
- * ignored; cap_limit bounds the task's handle table, counting ERX_CAP_NULL as erXos's
+ * Task calls of the call table. fault is ERX_CAP_NULL or a gate the caller holds,
+ * else ERX_ETYPE, and the space's records go to it with label as their label;
+ * parent and budget are accepted and ignored; cap_limit bounds the task's handle table, counting ERX_CAP_NULL as erXos's
  * kernel does, and outside 2 to ERX_CAPS_MAX is ERX_EINVAL; only the root makes a task. image is ignored and entry is the boot
  * archive's; *start is where the task's first thread will start. A task stops itself
  * with ERX_CAP_SELF, and on success that call does not return; the root may stop a task.
@@ -65,6 +66,22 @@ int	erx_space_stop(uint64_t space, int64_t status);
 int	erx_cap_dup(uint64_t cap, uint64_t *copy) ERX_WARN_UNUSED_RESULT;
 int	erx_cap_close(uint64_t cap) ERX_WARN_UNUSED_RESULT;
 int	erx_object_destroy(uint64_t object) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * Fault gates (docs/design-stopgap.md, "Fault gates"): a gate carries the fault and
+ * exit records of the spaces made naming it, and nothing else. budget is ignored. A
+ * bind's thread is ERX_CAP_SELF_THREAD or a handle of one of the caller's own
+ * threads, another task's ERX_ENOTSUP; ERX_CAP_NULL unbinds, and a bind replaces the
+ * thread bound before. label is ignored: a record's label is its space's. A destroy
+ * drops the gate's records and leaves its spaces with no gate, whose later records
+ * are dropped. erx_ipc_wait takes the oldest record of the gates bound to the
+ * calling thread into the head of its UTCB's mr, an erx_fault_t, and its label into
+ * *label, or waits for one until the deadline, ERX_ETIMEDOUT; a thread no gate is
+ * bound to waits for its deadline.
+ */
+int	erx_gate_create(uint64_t budget, uint64_t *gate) ERX_WARN_UNUSED_RESULT;
+int	erx_gate_bind(uint64_t gate, uint64_t thread, uint64_t label) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_wait(uint64_t deadline, uint64_t *label) ERX_WARN_UNUSED_RESULT;
 int	erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes,
 	    erx_fiasco_reply_t *reply);
 

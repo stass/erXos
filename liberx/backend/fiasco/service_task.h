@@ -78,11 +78,19 @@ uint64_t	erx_fiasco_task_gate_slot(uint32_t task);
  */
 void		*erx_fiasco_task_record(uint32_t task, uint32_t index);
 
+/*
+ * The task and index a thread handle names for the caller: its own handle is the
+ * index, and the root's handle of another task's thread carries the task above it.
+ * ERX_EINVAL for a handle that names no live task's index. Defined in service.c.
+ */
+int	erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *index)
+	    ERX_WARN_UNUSED_RESULT;
+
 /* The archive that erx_image_map reads, which outlives every call. */
 void		erx_fiasco_task_set_archive(const erx_pack_view_t *view);
 
 /* The bodies. caller is the calling task; each result is the call table's. */
-int	erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t cap_limit, uint64_t *space);
+int	erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_request_t *request, uint64_t *space);
 int	erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start);
 int	erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status);
 int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status);
@@ -97,7 +105,10 @@ int	erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_phys
 int	erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contiguous_request_t *request, uint64_t *mem);
 int	erx_fiasco_task_vm_map_body(uint32_t caller, const erx_fiasco_vm_map_request_t *request);
 
-/* A task's fault: its crash record, then its end. The root's own fault never comes here. */
+/*
+ * A task's fault: a fault record at its space's fault gate, its thread left blocked;
+ * with no fault gate, its crash record, then its end. The root's own fault never comes here.
+ */
 void	erx_fiasco_task_fault(uint32_t task, const erx_crash_fault_t *fault);
 
 #endif /* ERX_FIASCO_SERVICE_TASK_H */

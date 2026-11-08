@@ -10,16 +10,17 @@ require_relative 'qemu'
 require_relative 'runner'
 
 module Erx
-  # Memory objects mapped between the root and two tasks on native Fiasco: the root
+  # Memory objects mapped between the root and two tasks on native Fiasco, and fault
+  # gates that take the tasks' records: the root
   # test/guest/native_space/guest.c and the tasks' program.c beside it. Each case says
   # one line, and the transcript must show each passed, in order.
   module NativeSpace
     MEMORY_MIB = 512
     PROGRAM_PATH = 'boot/native-space'
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
-                    'test/guest/native_space/guest.c'].freeze
+                    'liberx/backend/core/refused.c', 'test/guest/native_space/guest.c'].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_space/program.c'].freeze
-    CASES = %w[program_found writer_released between_tasks bounds revoke].freeze
+    CASES = %w[program_found writer_released between_tasks bounds revoke gate_refusals gate_queue].freeze
     CASE_LINE = /\Aerx: space: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function

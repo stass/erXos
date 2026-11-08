@@ -359,12 +359,16 @@ enum fiasco_call u32
   value cap_dup 26
   value cap_close 27
   value object_destroy 28
+  value gate_create 29
+  value gate_bind 30
+  value gate_wait 31
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
   value irq_trigger 35
   value time_set_wall 36
   value irq_unbind 37
+  value gate_cancel 38
 
 # erx_object_info's topics and the report each writes (docs/design-abi.md,
 # "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
@@ -643,6 +647,26 @@ layout erx_fiasco_task_join_request wire_le 8 16
 layout erx_fiasco_cap_request wire_le 8 16
   field caller u64 0
   field cap u64 8
+
+# erx_gate_create: the gate's handle is the reply's first word.
+layout erx_fiasco_gate_create_request wire_le 8 16
+  field caller u64 0
+  field budget u64 8
+
+# erx_gate_bind: thread is ERX_CAP_NULL, ERX_CAP_SELF_THREAD or a handle of
+# one of the caller's own threads.
+layout erx_fiasco_gate_bind_request wire_le 8 32
+  field caller u64 0
+  field gate u64 8
+  field thread u64 16
+  field label u64 24
+
+# erx_ipc_wait's two requests, gate_wait and gate_cancel, name only the
+# caller. A wait's reply says in its first word whether a record was taken,
+# with its label in the second and its words in the caller's public UTCB; a
+# cancel's, whether the caller was still listed.
+layout erx_fiasco_gate_wait_request wire_le 8 8
+  field caller u64 0
 
 layout erx_fiasco_reply wire_le 8 32
   field status i64 0

@@ -434,6 +434,22 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
+  hand-declared `erx_ipc_wait(deadline, *label)` returns no tag, while design-kernel.md's "Receiving"
+  returns the tag and the label. Settle the target signature before the domain library's fault thread
+  (DL2) and a session's gate worker call it, and decide whether BK8b's IRQ deliveries share the same
+  open wait.
+* [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a
+  fault takes any free entry of its space's pool, since Fiasco's fault message names only the task, so
+  its record's thread is unknown and design-stopgap.md's "a fault in its thread's record" does not
+  hold. A task that reaps a faulted thread and faults again at that index can run its pool out, and
+  later records are dropped. A Fiasco gate per thread, labelled with task and index, as each thread's
+  pager would name the thread and make the bound hold by construction; decide whether that is worth it
+  on the stopgap or a residual until erXos's kernel.
+* [Low] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`gate_space.dropped`): records a
+  gone gate drops are counted but nothing reports the count; the inspector's space report (SV4) should
+  show it.
+
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/task_refused.c`: in a task,
   `erx_vm_free_pages` reports 0 while commits through the service still succeed, an
   invented count that `api.h`'s exact contract does not allow; it should answer

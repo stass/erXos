@@ -74,6 +74,11 @@ int	erx_thread_read(uint64_t thread) ERX_WARN_UNUSED_RESULT;
 int	erx_thread_write(uint64_t thread) ERX_WARN_UNUSED_RESULT;
 int	erx_thread_set_urgency(uint64_t thread, uint64_t urgency) ERX_WARN_UNUSED_RESULT;
 int	erx_irq_route(uint64_t irq, uint64_t cpu) ERX_WARN_UNUSED_RESULT;
+/* No gate carries a message (docs/design-stopgap.md, "IPC gates and where transfer fits"). */
+int	erx_ipc_call(uint64_t gate, uint64_t tag, uint64_t send_by, uint64_t reply_by) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_send(uint64_t gate, uint64_t tag, uint64_t send_by) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_reply(uint64_t tag) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_reply_wait(uint64_t tag, uint64_t wait_by) ERX_WARN_UNUSED_RESULT;
 
 /* Waits. Correct within a space. A wake that finds no waiter counts none. */
 int	erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline);

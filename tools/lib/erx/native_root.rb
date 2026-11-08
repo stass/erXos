@@ -37,7 +37,8 @@ module Erx
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory and objects: the effects over sigma0 and the four pure cores.
     VM = %W[#{BACKEND}/vm.c #{BACKEND}/page_pool.c #{BACKEND}/object.c liberx/backend/core/vm_table.c
-            liberx/backend/core/grow_table.c liberx/backend/core/handles.c].freeze
+            liberx/backend/core/grow_table.c liberx/backend/core/handles.c #{BACKEND}/fault_gate.c
+            liberx/backend/core/gate.c].freeze
     # The root service and what it runs on: threads, waits and the end path. The
     # crash writer comes in source, since Fiasco's boot archive holds no crash core.
     SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
@@ -55,8 +56,8 @@ module Erx
     # A task's own program: its entry, its console and memcpy, and the stubs and
     # threads it reaches the service through.
     TASK = %W[#{BACKEND}/arch/aarch64/task_start.S #{BACKEND}/task_start.c #{BACKEND}/console.c #{BACKEND}/root_mem.c
-              #{BACKEND}/service_stubs.c #{BACKEND}/thread.c #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c
-              #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/time_table.c
+              #{BACKEND}/service_stubs.c liberx/backend/core/gate.c liberx/backend/core/grow_table.c #{BACKEND}/thread.c
+              #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/time_table.c
               #{BACKEND}/arch/aarch64/clock.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/trace_stub.c].freeze
     # The root that checks the handoff and the archive and has nothing to run: the boot
     # suite's. The archive's core comes from Fiasco's boot archive, which does not hold the

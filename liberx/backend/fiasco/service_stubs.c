@@ -19,6 +19,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
+#include "liberx/backend/core/gate.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -316,6 +317,77 @@ erx_object_destroy(uint64_t object)
 	erx_fiasco_reply_t reply;
 
 	return (erx_fiasco_service_call(ERX_FIASCO_CALL_OBJECT_DESTROY, &request, sizeof(request), &reply));
+}
+
+int
+erx_gate_create(uint64_t budget, uint64_t *gate)
+{
+	const erx_fiasco_gate_create_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_GATE_CREATE, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*gate = reply.first;
+	return (status);
+}
+
+int
+erx_gate_bind(uint64_t gate, uint64_t thread, uint64_t label)
+{
+	const erx_fiasco_gate_bind_request_t request = { .caller = erx_fiasco_thread_self()->index, .gate = gate,
+	    .thread = thread, .label = label };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_GATE_BIND, &request, sizeof(request), &reply));
+}
+
+/* erx_ipc_wait's effects: its two requests and the calling thread's semaphore. */
+static bool
+stub_gate_take(void *context, int *status)
+{
+	const erx_fiasco_gate_wait_request_t request = { .caller = erx_fiasco_thread_self()->index };
+	erx_fiasco_reply_t reply;
+
+	*status = erx_fiasco_service_call(ERX_FIASCO_CALL_GATE_WAIT, &request, sizeof(request), &reply);
+	if (*status != ERX_OK || reply.first == 0)
+		return (false);
+	*(uint64_t *)context = reply.second;
+	return (true);
+}
+
+static bool
+stub_gate_down(void *context, uint64_t deadline)
+{
+	(void)context;
+	return (erx_fiasco_semaphore_down(erx_fiasco_thread_self()->semaphore, deadline));
+}
+
+static bool
+stub_gate_cancel(void *context)
+{
+	const erx_fiasco_gate_wait_request_t request = { .caller = erx_fiasco_thread_self()->index };
+	erx_fiasco_reply_t reply;
+
+	(void)context;
+	/* A refused cancel cannot happen for a listed caller; reading it as taken off owes an up that may never come. */
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_GATE_CANCEL, &request, sizeof(request), &reply) != ERX_OK ||
+	    reply.first != 0);
+}
+
+static void
+stub_gate_absorb(void *context)
+{
+	(void)context;
+	(void)erx_fiasco_semaphore_down(erx_fiasco_thread_self()->semaphore, ERX_WAIT_FOREVER);
+}
+
+static const erx_backend_gate_wait_effects_t stub_gate_effects = { .take = stub_gate_take, .down = stub_gate_down,
+    .cancel = stub_gate_cancel, .absorb = stub_gate_absorb };
+
+int
+erx_ipc_wait(uint64_t deadline, uint64_t *label)
+{
+	return (erx_backend_gate_wait(&stub_gate_effects, label, deadline));
 }
 
 int

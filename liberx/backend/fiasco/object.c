@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -167,6 +168,9 @@ object_release(uint32_t index)
 	switch ((erx_backend_object_kind_t)erx_backend_object_at(&object_records, index)->kind) {
 	case ERX_BACKEND_OBJECT_MEMORY:
 		erx_fiasco_vm_object_free(index);
+		break;
+	case ERX_BACKEND_OBJECT_GATE:
+		erx_fiasco_gate_free(index);
 		break;
 	case ERX_BACKEND_OBJECT_FREE:
 	case ERX_BACKEND_OBJECT_RETIRED:

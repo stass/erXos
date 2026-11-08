@@ -565,7 +565,8 @@ case_unsupported_refused(void)
 {
 	return (erx_thread_stop(0) == ERX_ENOTSUP && erx_thread_read(0) == ERX_ENOTSUP &&
 	    erx_thread_write(0) == ERX_ENOTSUP && erx_thread_set_urgency(0, 1) == ERX_ENOTSUP &&
-	    erx_irq_route(0, 0) == ERX_ENOTSUP);
+	    erx_irq_route(0, 0) == ERX_ENOTSUP && erx_ipc_call(0, 0, 0, 0) == ERX_ENOTSUP &&
+	    erx_ipc_send(0, 0, 0) == ERX_ENOTSUP && erx_ipc_reply(0) == ERX_ENOTSUP && erx_ipc_reply_wait(0, 0) == ERX_ENOTSUP);
 }
 
 /*

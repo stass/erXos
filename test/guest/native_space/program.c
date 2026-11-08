@@ -7,7 +7,8 @@
  * The tasks of the mapping suite, loaded from the boot image by
  * test/guest/native_space/guest.c, which maps their pages before their first thread
  * runs. The status is the report: 0 is success, any other names the first step that
- * went wrong, and a revoked reader ends by its fault.
+ * went wrong, and a revoked reader's fault goes to its fault gate, where it stays
+ * blocked until the root stops it.
  */
 
 #include <stdatomic.h>
@@ -50,7 +51,7 @@ mode_reader(void)
 	return (erx_vm_release(ERX_CAP_SELF, SHARED_ADDR, SHARED_PAGES * PAGE) == ERX_OK ? 0 : 21);
 }
 
-/* Reads until the root's destroy revokes the page, so the next read faults and ends the task. */
+/* Reads until the root's destroy revokes the page, so the next read faults at the task's gate. */
 static int64_t
 mode_revoked(uint64_t slot)
 {

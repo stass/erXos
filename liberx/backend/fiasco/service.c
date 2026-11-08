@@ -8,7 +8,8 @@
  * calls' bodies. It runs each body to its end before the next receive, so what
  * only it touches needs no lock, and a body never sends a request. A fault is one
  * more message, never answered: every committed page is already mapped, so the
- * fault of a root thread ends the machine and a task's fault ends the task. The
+ * fault of a root thread ends the machine, and a task's goes to its fault gate or,
+ * with none, ends the task. The
  * service's own fault goes to sigma0, which repairs nothing: a recorded gap.
  */
 
@@ -32,6 +33,7 @@
 #include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
+#include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service.h"
@@ -373,8 +375,17 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	case ERX_FIASCO_CALL_VM_MAP:
 		return (erx_fiasco_task_vm_map_body(decoded->task, words));
 	case ERX_FIASCO_CALL_SPACE_CREATE:
-		return (erx_fiasco_task_create_body(decoded->task, ((const erx_fiasco_space_create_request_t *)words)->flags,
-		    ((const erx_fiasco_space_create_request_t *)words)->cap_limit, &reply->first));
+		return (erx_fiasco_task_create_body(decoded->task, words, &reply->first));
+	case ERX_FIASCO_CALL_GATE_CREATE:
+		return (erx_fiasco_gate_create_body(decoded->task, ((const erx_fiasco_gate_create_request_t *)words)->budget,
+		    &reply->first));
+	case ERX_FIASCO_CALL_GATE_BIND:
+		return (erx_fiasco_gate_bind_body(decoded->task, decoded->caller, ((const erx_fiasco_gate_bind_request_t *)words)->gate,
+		    ((const erx_fiasco_gate_bind_request_t *)words)->thread));
+	case ERX_FIASCO_CALL_GATE_WAIT:
+		return (erx_fiasco_gate_wait_body(decoded->task, decoded->caller, &reply->first, &reply->second));
+	case ERX_FIASCO_CALL_GATE_CANCEL:
+		return (erx_fiasco_gate_cancel_body(decoded->task, decoded->caller, &reply->first));
 	case ERX_FIASCO_CALL_CAP_DUP:
 		return (erx_fiasco_cap_dup_body(decoded->task, ((const erx_fiasco_cap_request_t *)words)->cap, &reply->first));
 	case ERX_FIASCO_CALL_CAP_CLOSE:
@@ -523,14 +534,20 @@ service_thread_handle(uint32_t caller, uint32_t task, uint32_t index)
 static bool
 service_thread_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *index)
 {
+	return (erx_fiasco_thread_handle_name(caller, handle, task, index) == ERX_OK);
+}
+
+int
+erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *index)
+{
 	const uint64_t named = handle >> SERVICE_HANDLE_TASK_SHIFT;
 
 	if ((named != 0 && caller != ERX_FIASCO_TASK_ROOT) || named > UINT32_MAX ||
 	    (handle & SERVICE_HANDLE_INDEX_MASK) >= ERX_FIASCO_THREADS_MAX)
-		return (false);
+		return (ERX_EINVAL);
 	*task = named != 0 ? (uint32_t)named : caller;
 	*index = (uint32_t)(handle & SERVICE_HANDLE_INDEX_MASK);
-	return (erx_fiasco_task_live(*task));
+	return (erx_fiasco_task_live(*task) ? ERX_OK : ERX_EINVAL);
 }
 
 /*
@@ -561,6 +578,9 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	from = erx_fiasco_task_record(caller, (uint32_t)request->caller);
 	if (record == NULL || from == NULL)
 		return (ERX_EINVAL);
+	/* A task's thread may fault, and its fault takes an entry it has before it runs. */
+	if (task != ERX_FIASCO_TASK_ROOT && erx_fiasco_gate_thread_room(task, index) != ERX_OK)
+		return (ERX_ENOMEM);
 	if (service_failed(l4_factory_create_thread(L4_BASE_FACTORY_CAP, erx_fiasco_task_thread_cap(task, index))))
 		return (ERX_ENOMEM);
 	if (service_failed(l4_factory_create(L4_BASE_FACTORY_CAP, L4_PROTO_SEMAPHORE,
@@ -701,6 +721,7 @@ service_thread_delete(uint32_t task, uint32_t index)
 
 	row->threads[index] = ERX_FIASCO_TASK_THREAD_ABSENT;
 	row->affinity[index] = 0;
+	erx_fiasco_gate_thread_gone(task, index);
 	if (task == ERX_FIASCO_TASK_ROOT)
 		erx_fiasco_trace_set_mask(index, 0);
 	if (service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_task_thread_cap(task, index))) ||
@@ -748,7 +769,7 @@ erx_fiasco_test_thread_priority(uint32_t index, uint32_t priority, uint64_t mask
 }
 #endif
 
-/* The root's fault ends the machine; a task's ends only the task. */
+/* The root's fault ends the machine; a task's goes to its fault gate, or ends only the task. */
 static void
 service_fault(uint32_t task, const erx_crash_fault_t *fault)
 {

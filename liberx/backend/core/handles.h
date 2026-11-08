@@ -34,7 +34,8 @@
 typedef enum erx_backend_object_kind {
 	ERX_BACKEND_OBJECT_FREE = 0,
 	ERX_BACKEND_OBJECT_RETIRED,
-	ERX_BACKEND_OBJECT_MEMORY
+	ERX_BACKEND_OBJECT_MEMORY,
+	ERX_BACKEND_OBJECT_GATE
 } erx_backend_object_kind_t;
 
 /* For erx_backend_handle_find: any live kind will do. */

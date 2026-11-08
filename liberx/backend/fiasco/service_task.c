@@ -33,6 +33,7 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/core/device_check.h"
 #include "liberx/backend/core/grow_table.h"
+#include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
@@ -49,7 +50,7 @@ static uint64_t	task_slot(uint32_t, uint32_t);
 static bool	task_failed(l4_msgtag_t);
 static bool	task_objects_make(uint32_t);
 static void	task_teardown(uint32_t);
-static void	task_end(uint32_t, int64_t);
+static void	task_end(uint32_t, uint32_t, int64_t);
 static void	task_delete(uint64_t);
 static bool	task_segment_load(uint32_t, const uint8_t *, const erx_elf_load_t *, uint64_t);
 static int	task_fill_pages(uint32_t, const void *);
@@ -87,6 +88,8 @@ erx_fiasco_task_table_init(void)
 	if (erx_backend_grow_table_room(&task_rows, 1) != ERX_OK)
 		return ("memory: the pool cannot hold the task table");
 	reason = erx_fiasco_object_init();
+	if (reason == NULL)
+		reason = erx_fiasco_gate_init();
 	if (reason != NULL)
 		return (reason);
 	erx_fiasco_task(ERX_FIASCO_TASK_ROOT)->state = ERX_FIASCO_TASK_LIVE;
@@ -240,14 +243,17 @@ task_objects_make(uint32_t task)
 }
 
 int
-erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t cap_limit, uint64_t *space)
+erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_request_t *request, uint64_t *space)
 {
-	uint32_t task = 1;
+	const uint64_t flags = request->flags, cap_limit = request->cap_limit;
+	uint32_t task = 1, gate;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
 	if ((flags & ~(uint64_t)ERX_SPACE_JIT) != 0 || cap_limit < 2 || cap_limit > ERX_CAPS_MAX)
 		return (ERX_EINVAL);
+	if (erx_fiasco_gate_named(caller, request->fault, &gate) != ERX_OK)
+		return (ERX_ETYPE);
 	while (task < erx_backend_grow_table_capacity(&task_rows) && erx_fiasco_task(task)->state != ERX_FIASCO_TASK_ABSENT)
 		task++;
 	/* A row past the capacity takes a page that stays the table's if the range table cannot open. */
@@ -260,11 +266,17 @@ erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t cap_limit,
 		erx_fiasco_object_task_close(task);
 		return (ERX_ENOMEM);
 	}
+	if (erx_fiasco_gate_space_open(task, gate, request->label) != ERX_OK) {
+		erx_fiasco_vm_task_close(task);
+		erx_fiasco_object_task_close(task);
+		return (ERX_ENOMEM);
+	}
 
 	*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_LIVE, .flags = (uint32_t)flags };
 	if (!task_objects_make(task)) {
 		/* No thread ever ran, so nobody waits on the ended semaphore and no status is owed. */
 		task_teardown(task);
+		erx_fiasco_gate_space_close(task);
 		task_delete(erx_fiasco_task_ended_cap(task));
 		*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ABSENT };
 		return (ERX_ENOMEM);
@@ -364,16 +376,22 @@ task_teardown(uint32_t task)
 			task_delete(erx_fiasco_task_semaphore_cap(task, index));
 	task_delete(erx_fiasco_task_gate_cap(task));
 	task_delete(erx_fiasco_task_cap(task));
+	erx_fiasco_gate_task_gone(task);
 	erx_fiasco_vm_task_close(task);
 	erx_fiasco_object_task_close(task);
 }
 
-/* A task that ran ends here. The row keeps its status for the join, which the ended semaphore's up lets go. */
+/*
+ * A task that ran ends here, stopped by the task stopper. The row keeps its status for
+ * the join, which the ended semaphore's up lets go, and the exit record goes to the
+ * space's fault gate once no thread of it can run.
+ */
 static void
-task_end(uint32_t task, int64_t status)
+task_end(uint32_t task, uint32_t stopper, int64_t status)
 {
 	task_teardown(task);
 	*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .status = status };
+	erx_fiasco_gate_exit(task, stopper, status);
 	erx_fiasco_trace_service(ERX_TRACE_EVENT_SPACE_END, (uint64_t)task + 1, (uint64_t)status, 0);
 	(void)l4_semaphore_up(erx_fiasco_task_ended_cap(task));
 }
@@ -390,7 +408,7 @@ erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status)
 		return (ERX_ERIGHTS);
 	if (target == ERX_FIASCO_TASK_ROOT)
 		erx_fiasco_end(NULL, ERX_END_OFF);
-	task_end((uint32_t)target, status);
+	task_end((uint32_t)target, caller, status);
 	return (target == caller ? ERX_FIASCO_NO_REPLY : ERX_OK);
 }
 
@@ -405,6 +423,7 @@ erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status)
 	if (!erx_fiasco_task_space_decode(space, &task) || erx_fiasco_task(task)->state != ERX_FIASCO_TASK_ENDED)
 		return (ERX_EINVAL);
 	*status = erx_fiasco_task(task)->status;
+	erx_fiasco_gate_space_close(task);
 	task_delete(erx_fiasco_task_ended_cap(task));
 	erx_fiasco_task(task)->state = ERX_FIASCO_TASK_ABSENT;
 	return (ERX_OK);
@@ -516,8 +535,10 @@ erx_fiasco_task_mem_dma_body(uint32_t caller, uint64_t mem, uint64_t offset, uin
 void
 erx_fiasco_task_fault(uint32_t task, const erx_crash_fault_t *fault)
 {
+	if (erx_fiasco_gate_fault(task, fault))
+		return;
 	erx_fiasco_task_crash_write(fault);
-	task_end(task, ERX_FIASCO_TASK_STATUS_FAULT);
+	task_end(task, task, ERX_FIASCO_TASK_STATUS_FAULT);
 }
 
 #ifdef ERX_FIASCO_TEST_HOOKS
