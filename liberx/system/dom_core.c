@@ -5,7 +5,8 @@
 
 /*
  * The domain library's pure core: the planning entries with their origin
- * constructors, the creation planner, the whole-plan check and the undo of a failed creation,
+ * constructors, the creation planner, the whole-plan check, the undo of a
+ * failed creation and the record of an applied one in the view,
  * and the validation of a principal's configuration
  * (docs/design-system.md, "The domain library" and "Creating a domain").
  * Nothing here performs a kernel call; the apply phase performs a plan's
@@ -87,8 +88,7 @@ _Static_assert(sizeof(erx_runtime_limits_t) == 64 &&
 static bool	dom_add(uint64_t, uint64_t, uint64_t *);
 static bool	dom_page_aligned(uint64_t);
 static uint32_t	dom_popcount(uint64_t);
-static const erx_dom_principal_t *dom_principal(const erx_dom_view_t *,
-		    uint32_t);
+static erx_dom_principal_t *dom_principal(const erx_dom_view_t *, uint32_t);
 static bool	dom_grant_rate(const erx_grant_t *, uint64_t *);
 static bool	dom_grant_fits(const erx_grant_t *, const erx_grant_t *);
 static bool	dom_system_reserve(const erx_dom_view_t *, const erx_grant_t *);
@@ -147,7 +147,8 @@ dom_popcount(uint64_t bits)
 	return ((uint32_t)__builtin_popcountll(bits));
 }
 
-static const erx_dom_principal_t *
+/* The principal numbered number, writable for erx_dom_plan_record. */
+static erx_dom_principal_t *
 dom_principal(const erx_dom_view_t *view, uint32_t number)
 {
 	if (number == 0)
@@ -783,6 +784,75 @@ dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	if ((status = erx_dom_plan_check(&draft)) != ERX_OK)
 		return (status);
 	*plan = draft;
+	return (ERX_OK);
+}
+
+/*
+ * The connection number after number: numbers only grow within a boot,
+ * and 0 marks them spent once the last is taken.
+ */
+static uint32_t
+dom_next_number(uint32_t number)
+{
+	return (number == UINT32_MAX ? 0 : number + 1);
+}
+
+erx_status_t
+erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
+{
+	const erx_dom_spec_t *spec = &plan->spec;
+	bool service = spec->origin.kind == ERX_DOM_CONFIGURED;
+	bool connected = plan->connection_row != ERX_DOM_NO_ROW;
+	erx_dom_principal_t *principal;
+	erx_dom_connection_t *row;
+	erx_dom_t *dom;
+	uint64_t carved;
+
+	/* Everything is checked before anything is written. */
+	principal = dom_principal(view, spec->principal);
+	if (principal == NULL || principal->domains == UINT32_MAX ||
+	    !dom_add(principal->carved, spec->memory, &carved) ||
+	    !dom_add(carved, spec->outer, &carved) ||
+	    plan->slot >= view->max_domains ||
+	    view->domains[plan->slot].id != 0 ||
+	    (service && view->nservice_grants >= view->max_domains))
+		return (ERX_EINVAL);
+	/* The slot's id is 0, so this also refuses an id of 0. */
+	for (uint32_t index = 0; index < view->max_domains; index++)
+		if (view->domains[index].id == spec->id)
+			return (ERX_EINVAL);
+	/* The system connection, when there is one, takes the next number. */
+	if (!connected && plan->connection != 0)
+		return (ERX_EINVAL);
+	if (connected && (plan->connection_row >= view->max_connections ||
+	    view->connections[plan->connection_row].number != 0 ||
+	    plan->connection == 0 || plan->connection != view->next_connection))
+		return (ERX_EINVAL);
+
+	dom = &view->domains[plan->slot];
+	dom->id = spec->id;
+	dom->principal = spec->principal;
+	dom->origin = spec->origin;
+	dom->state = ERX_DOM_BUILT;
+	dom->flags = spec->flags;
+	dom->system_connection = plan->connection;
+	dom->connections = spec->connections;
+	dom->labels = connected ? ERX_DOM_SYSTEM_LABEL : 0;
+	dom->stop = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
+	dom->end = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
+	memset(&dom->record, 0, sizeof(dom->record));
+	principal->domains++;
+	principal->carved = carved;
+	if (service)
+		view->service_grants[view->nservice_grants++] = spec->grant;
+	if (connected) {
+		row = &view->connections[plan->connection_row];
+		row->number = plan->connection;
+		row->a = ERX_DOM_SYSTEM_ID;
+		row->b = spec->id;
+		row->closing = false;
+		view->next_connection = dom_next_number(plan->connection);
+	}
 	return (ERX_OK);
 }
 

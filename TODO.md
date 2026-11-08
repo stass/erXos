@@ -457,12 +457,34 @@ it; git history is the record of completed work.
   file refuses `erx_boot_info` with a zero page and `erx_time_wall_ns` as unavailable,
   so the domain runtime image (`runtimes/emu`) ends at its boot page until a task's
   start (BK11) and ERTS in a domain (RT1) serve them.
-* [Medium] packer, `tools/lib/erx/production_image.rb` (`DOMAIN_APPLICATIONS`): every
-  domain release the manifest's rows name holds kernel and stdlib alone, since a domain
-  row names a release and nothing declares its applications; and a test image's
-  `domains:` is checked against no manifest row, since the test manifest is the
-  development one grown. Decide where a domain release's applications are declared, and
-  build test images' releases from their manifest's rows too.
+* [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`), before
+  DL2's apply phase calls it: the counts it keeps (a principal's `domains` and
+  `carved`, the flat `service_grants` list) have no inverse, since `erx_dom_t` keeps
+  neither `memory`, `outer` nor the grant, so a destroy, retire or restart cannot take
+  them back, and a restarted configured domain would count its grant twice. Derive
+  them from the records instead, as a party's connections are derived from the rows
+  (store `memory`, `outer` and the grant in the record), which deletes `service_grants`
+  and its capacity check. Also: the record fills only the plan-made fields and leaves
+  the capability fields of a reused slot for the applier, so one function should write
+  the whole record from the plan and the apply's made objects; dropping `const` on the
+  view's tables lets every planner write them, so give the record functions their own
+  writable tables and keep the planners' view const; and a stale partial-boot plan (no
+  connection number) passes record's re-checks, which a view generation stamped into
+  each plan would refuse whole. The host planner records each plan at once and meets
+  none of these. Found by MF1b's review.
+* [Low] manifest check, `tools/host/dom_plan.c`: a refusal of property 12 names the
+  status alone (`inval` covers a grant past `system`, the reserve, files and limits),
+  so the operator cannot tell which sum failed; and the fuzz target's
+  "a second plan of one id is refused" holds by the full table (`max_domains` 2 in
+  `tools/fuzz/dom_core_fuzz.c`), not by the duplicate-id check. Have the planner print
+  the refusing check, and give the fuzz view a third record.
+* [Low] docs, `docs/design-domains.md` ("connections" quota): it counts the system
+  connection in a domain's `connections` quota; the library (`life_connections`) and
+  design-system.md do not, and property 12 enforces the library's reading.
+* [Medium] packer, `tools/lib/erx/production_image.rb` (`build_test_image`): a test
+  image's `domains:` is checked against no manifest row, since the test manifest is the
+  development one grown. Build test images' domain releases from their manifest's rows,
+  as the production image does.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_and_place`):
   facet records are refused (`unsupported`, naming M5) after properties 2, 10 and 11
   are proved over them, because a facet's operations and parameters resolve against its
@@ -475,15 +497,6 @@ it; git history is the record of completed work.
   system domain's reservation for `max_domains` admitted domains (property 4) is not
   counted against `root_memory`; design-abi.md has the production admission planner
   derive it, and nothing on the stopgap enforces it.
-* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap`): property 12 plans
-  each configured row alone against a just-booted view, and what the library counts
-  across domains is re-derived in Ruby: the principal quota tally, the connection count
-  (domains plus introductions) and property 13's exact rational sum, which the library
-  computes in rounded thousandths (`dom_grant_rate`), so four grants of 0.1871 CPU under a
-  1-CPU system with reserve 250 pass here and fail at boot; a domain's own `connections`
-  quota against its introductions is not checked. By construction: have
-  `tools/host/dom_plan.c` plan the rows in boot order, apply each plan to its view, plan
-  the introductions too, and delete the Ruby sums.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#normalize_domains`): a
   configured domain's limits record (memory, outer, lane, connections, crash, flags,
   peer-held bounds) is not held to its principal's `ceiling_limits`, which design-abi.md

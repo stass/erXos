@@ -365,13 +365,13 @@ seeded violation and each refusal with a seeded record:
 | 1 one holder per device and unit | kept; a holder is the system domain or a configured domain | |
 | 2 facets name servers | kept, with introductions: a facet names a service of the manifest, served by the system domain or a configured domain | |
 | 3 PCIe configuration space | QEMU `virt` drives no bridge in Phase 1, so no holder is allowed and no `pci` device is placed | M9 |
-| 4 budgets and grants sum | kept for `root_memory`, baseline, shares, the configured domains' budgets and grants and `max_domains`; `root_startup` by the rule below. The sums are checked at build time; nothing enforces them at run time ([Budgets and groups as records](#budgets-and-groups-as-records)) | Track K (`root_startup`, enforcement) |
+| 4 budgets and grants sum | kept for `root_memory`, baseline, shares, the configured domains' budgets and grants and `max_domains`; the configured domains' sums are the planner's (property 12); `root_startup` by the rule below. The sums are checked at build time; nothing enforces them at run time ([Budgets and groups as records](#budgets-and-groups-as-records)) | Track K (`root_startup`, enforcement) |
 | 5 names | kept | |
 | 6 no JIT in the root | kept; a full boot may use the native root image, since the interpreter image is not yet the root | |
 | 7 the sealing secret | `sealing` is `none`, no entry carries `ERX_ENTRY_SEAL`, no TPM | M11 |
 | 8 partitions and devices reach holders | kept: the UARTs are the system domain's; the slot and data windows are the system domain's or a storage domain's, as the manifest places them; only the network domain holds the network device; the display domain holds the gpu and input devices; no vault partition | M11 (vault) |
 | 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the network domain's net device among them, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
-| 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_configured`, as on erXos's kernel; 13 is a configuration check and nothing enforces grants at run time | |
+| 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_configured` in boot order and `erx_dom_plan_connect` over the introductions, recording each plan, as on erXos's kernel, so the configured domains' sums of 4 and 13 are the planner's; 13 is a configuration check and nothing enforces grants at run time | |
 
 **The root startup rule** is a sanity check, not a proof: the root entry's
 loadable segments plus `system_baseline` fit `root_memory`, and `root_memory`
@@ -443,7 +443,7 @@ OTP's suites ask for more than the development baseline holds (compiler's
 | `boot_stand_in_root_path` | file | the root as an ELF file, which `bootstrap` loads |
 | `system/root` | image | the same program as an image, the header's root entry, which the root startup rule sizes |
 | `system_manifest_path`, `system/NOTICES` | file | what `Pack#build` generates |
-| `domains/<name>/...` | file | a domain release's files, `<name>` the release's name; the index is sorted, so each release is one run of whole entries, which the domain library slices, and none carries the system mark. The release provider strips the prefix, as it strips `system/`. `<name>` is a manifest identifier, and a domain row's `release @artifact.<name>` names the run: its first entry and its count of files |
+| `domains/<name>/...` | file | a domain release's files, `<name>` the release's name, whose applications the build's release table defines under that name; the index is sorted, so each release is one run of whole entries, which the domain library slices, and none carries the system mark. The release provider strips the prefix, as it strips `system/`. `<name>` is a manifest identifier, and a domain row's `release @artifact.<name>` names the run: its first entry and its count of files |
 | `runtimes/emu` | image | the domain runtime image: the interpreter ERTS linked as a task's program at `task.ld`'s fixed addresses, since `erx_image_map` loads only an `ERX_IMAGE_FIXED` image; one image for every domain, named as `erx_domain`'s spec names its flavour, with BeamAsm's beside it as `runtimes/jit`. It carries no system mark, since the root does not run it, and a domain row's `runtime @artifact.emu` names it |
 
 The root is stored twice because `bootstrap` reads an ELF file while the archive's

@@ -1422,7 +1422,9 @@ baseline and worst admitted-domain reservation. The domain planner is
 the production `erx_dom_plan_configured` pure core built for the host; a
 different implementation or a placeholder success is not its oracle.
 Property 12 invokes it for each configured-domain or partial-boot child
-specification. With no child specifications it makes zero calls; that
+specification, in boot order, against a view in which every earlier plan
+is recorded, and `erx_dom_plan_connect` likewise for each introduction.
+With no child specifications it makes zero calls; that
 universal check holds over the empty set, without pretending a planner
 ran. Initial-root startup remains a separate required plan under the
 resource check, including its private image memory, stack, UTCB and boot

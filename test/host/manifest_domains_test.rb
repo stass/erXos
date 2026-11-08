@@ -17,21 +17,21 @@ class ManifestDomainsTest < Minitest::Test
   APP_LIMITS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
                "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                "  peer_held 4096\n  peer_held_total 4096\n"
-  UNCAPPED = "share wide\n  quota_ns uncapped\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 1000\n" \
-             "  capacity_first 0\n  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n"
 
-  # Each domain's status, in row order; [] plans every domain.
+  # Each domain's status, in boot order, and each introduction's; [] plans them all.
   class RecordingPlanner
     attr_reader :views
 
-    def initialize(statuses = [])
+    def initialize(statuses = [], introductions: [])
       @statuses = statuses
+      @introductions = introductions
       @views = []
     end
 
     def call(view)
       @views << view
-      view.fetch('domains').each_index.map { |index| @statuses.fetch(index, 0) }
+      { 'domains' => view.fetch('domains').each_index.map { |index| @statuses.fetch(index, 0) },
+        'introductions' => view.fetch('introductions').each_index.map { |index| @introductions.fetch(index, 0) } }
     end
   end
 
@@ -51,9 +51,9 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   # The rows, with the system principal's domain quota covering them, and max_domains
-  # covering that quota and the rows, as properties 12 and 4 ask.
+  # the sum of the quotas, as property 4 asks.
   def with_domains(*rows)
-    @plain.sub("  domains 0\n", "  domains #{rows.size}\n").sub('max_domains 0', "max_domains #{2 * rows.size}") +
+    @plain.sub("  domains 0\n", "  domains #{rows.size}\n").sub('max_domains 0', "max_domains #{rows.size}") +
       APP_LIMITS + rows.join
   end
 
@@ -88,7 +88,7 @@ class ManifestDomainsTest < Minitest::Test
     assert_equal [@codec.member('mf_domain_flags', 'rescue'), 0], domains.map { |row| row.fetch('flags') }
     assert_equal [[3, 5]] * 2, domains.map { |row| row.values_at('restarts', 'restart_period_s') }
     assert_equal [0, 1], rows(view, 'boot_order').map { |row| row.fetch('domain') }
-    assert_equal 4, view.header.fetch('max_domains')
+    assert_equal 2, view.header.fetch('max_domains')
   end
 
   def test_the_report_counts_the_planned_domains
@@ -98,11 +98,13 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   # Property 12's view: the machine just booted, its principals numbered from 1, the
-  # pack's files and each row with its profile resolved.
+  # pack's files, each row in boot order with its profile resolved, and each
+  # introduction's parties as places in that order.
   def test_the_planner_sees_every_row_against_the_booted_machine
-    admit
+    admit("#{@source}introduce @domain.beta @domain.alpha\n")
     view = @planner.views.fetch(0)
-    assert_equal({ 'max_domains' => 4, 'max_connections' => 4, 'system_lane' => 4096, 'system_reserve' => 250 },
+    assert_equal [{ 'a' => 0, 'b' => 1 }], view.fetch('introductions')
+    assert_equal({ 'max_domains' => 2, 'max_connections' => 4, 'system_lane' => 4096, 'system_reserve' => 250 },
                  view.fetch('machine').except('system_grant'))
     assert_equal [1, 1], view.fetch('domains').map { |row| row.fetch('principal') }
     assert_equal [[4_194_304, 1_048_576, 0, 2]] * 2,
@@ -173,25 +175,11 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'introduce', source)
   end
 
-  # Property 4 over the configured domains.
-  def test_domain_budgets_over_their_principal_are_refused
-    refused(Erx::Manifest::Invalid, 4, 'domain.limits', @source.sub("limits app\n  memory 4194304", "limits app\n  memory 8388608"))
-  end
-
-  def test_a_domain_grant_over_system_is_refused
-    source = UNCAPPED + @source.sub("limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users",
-                                    "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.wide")
-    refused(Erx::Manifest::Invalid, 4, 'domain.grant', source)
-  end
-
-  def test_a_sub_space_grant_over_its_domain_is_refused
-    source = UNCAPPED + @source.sub("  spaces none\n  lane 4096\n  connections 2\n  crash 0\n  flags none\n",
-                                    "  spaces @share.wide\n  lane 4096\n  connections 2\n  crash 0\n  flags spaces\n")
-    refused(Erx::Manifest::Invalid, 4, 'limits.spaces', source)
-  end
-
-  def test_configured_domains_count_against_max_domains
-    refused(Erx::Manifest::Invalid, 4, 'principals.domains', @source.sub('max_domains 4', 'max_domains 3'))
+  # Property 4: every living domain, configured or requested, is one of its
+  # principal's quota, so the quotas alone sum within max_domains; the configured
+  # domains' budgets and grants are the planner's (test/host/dom_planner_test.rb).
+  def test_principal_quotas_over_max_domains_are_refused
+    refused(Erx::Manifest::Invalid, 4, 'principals.domains', @source.sub('max_domains 2', 'max_domains 1'))
   end
 
   # Property 5 over the configured domains and the services they serve.
@@ -236,11 +224,6 @@ class ManifestDomainsTest < Minitest::Test
   def test_arguments_and_environment_over_the_boot_page_are_refused
     long = "  args \"#{'a' * 1500}\"\n  env \"X=#{'b' * 1500}\"\n"
     refused(Erx::Manifest::Invalid, 12, 'domain.args', with_domains(self.class.domain('alpha') + long))
-  end
-
-  def test_introductions_take_connection_rows
-    source = "#{@source.sub('max_connections 4', 'max_connections 2')}introduce @domain.alpha @domain.beta\n"
-    refused(Erx::Manifest::Invalid, 12, 'machine.max_connections', source)
   end
 
   # Property 7: no secret domain, since no entry carries the sealing secret.
@@ -295,6 +278,12 @@ class ManifestDomainsTest < Minitest::Test
     assert_match(/beta with nomem/, error.message)
   end
 
+  def test_an_introduction_the_library_refuses_fails_the_build
+    error = refused(Erx::Manifest::Invalid, 12, 'introduce', "#{@source}introduce @domain.alpha @domain.beta\n",
+                    planner: RecordingPlanner.new(introductions: [-7]))
+    assert_match(/introduction of alpha and beta with limit/, error.message)
+  end
+
   def test_configured_domains_without_a_planner_fail_closed
     refused(Erx::Manifest::Unsupported, 12, 'planner', planner: nil)
   end
@@ -309,23 +298,7 @@ class ManifestDomainsTest < Minitest::Test
     end
   end
 
-  # The boot builds every row, so together they fit what the library counts across
-  # domains, though each row is planned alone.
-  def test_configured_domains_over_their_principal_quota_are_refused
-    refused(Erx::Manifest::Invalid, 12, 'domain.principal', @source.sub("  domains 2\n", "  domains 1\n"))
-  end
-
-  def test_configured_domains_over_the_connection_table_are_refused
-    refused(Erx::Manifest::Invalid, 12, 'machine.max_connections', @source.sub('max_connections 4', 'max_connections 1'))
-  end
-
   def test_a_partial_boot_configures_no_domains
     refused(Erx::Manifest::Invalid, 12, 'domain', @source.sub('flags development', 'flags development,partial_boot'))
-  end
-
-  # Property 13: the service domains' grants leave system_reserve of system.
-  def test_grants_over_the_headroom_are_refused
-    source = with_domains(*%w[alpha beta gamma].map { |name| self.class.domain(name) })
-    refused(Erx::Manifest::Invalid, 13, 'domain.grant', source)
   end
 end

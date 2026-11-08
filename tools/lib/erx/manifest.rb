@@ -402,8 +402,9 @@ module Erx
         normalize_profiles(rows)
         principals = normalize_principals(rows, users_cpus, users_rate)
         max_domains = number(machine, 'max_domains')
-        if principals.sum { |row| row.fetch('domains') } + records('domain').size > max_domains
-          invalid('principal domain quotas and configured domains exceed max_domains', 4, 'principals.domains')
+        # Every living domain, configured or requested, is one of its principal's quota.
+        if principals.sum { |row| row.fetch('domains') } > max_domains
+          invalid('principal domain quotas exceed max_domains', 4, 'principals.domains')
         end
         normalize_units(rows)
         device_memory = rows.fetch('devices').sum { |device| device.fetch('dma_memory') }
@@ -851,7 +852,6 @@ module Erx
       def check_and_place(rows, root_memory:, baseline:, max_domains:)
         check_identity(rows.fetch('devices'))
         rows['domains'] = normalize_domains(rows)
-        check_domain_resources(rows)
         services = records('service').map { |record| [record, normalize_service(record)] }
                                      .sort_by { |_record, row| [row.fetch('name'), row.fetch('server')] }
         rows['services'] = services.map(&:last)
@@ -941,36 +941,6 @@ module Erx
         artifact
       end
 
-      # Property 4 for the configured domains: their two budgets within their
-      # principal's, each grant and sub-space grant within its parent's; and 13: the
-      # service domains' grants within system's rate less system_reserve of it.
-      def check_domain_resources(rows)
-        limits = rows.fetch('limits')
-        domains = rows.fetch('domains')
-        rows.fetch('principals').each_with_index do |principal, index|
-          carved = domains.select { |domain| domain.fetch('principal') == index }
-                          .sum { |domain| limits.fetch(domain.fetch('limits')).values_at('memory', 'outer').sum }
-          invalid('configured domains\' budgets exceed their principal\'s', 4, 'domain.limits') if carved > principal.fetch('memory')
-        end
-        system_cpus, system_rate = system_share
-        rates = domains.map do |domain|
-          profile = limits.fetch(domain.fetch('limits'))
-          cpus, rate = effective_share(profile.fetch('grant'), system_cpus)
-          invalid('a configured domain\'s grant exceeds system', 4, 'domain.grant') if rate > system_rate
-          if (profile.fetch('flags') & @codec.member('mf_limits_flags', 'spaces')) != 0 &&
-             effective_share(profile.fetch('spaces'), cpus).last > rate
-            invalid('sub-space grant exceeds domain', 4, 'limits.spaces')
-          end
-          rate
-        end
-        reserve = number(@source.machine, 'system_reserve')
-        return if rates.sum <= system_rate * Rational(1000 - reserve, 1000)
-
-        invalid('configured domains\' grants leave less than system_reserve of system', 13, 'domain.grant')
-      end
-
-      def system_share = effective_share(share(@source.machine, 'system_share'), @context.platform.fetch('cpuset'))
-
       def normalize_service(record)
         name = service_name(record)
         invalid('service name is not a system identifier', 5, 'service.name') unless name.match?(Frontend::IDENTIFIER)
@@ -1028,36 +998,40 @@ module Erx
         end
       end
 
-      # Property 12: the domain library's host build plans every configured domain
-      # against the view of a machine just booted. With no domains there is nothing to
-      # plan; with some, a missing planner fails closed. Each row is planned alone, and
-      # the boot builds them all, so together they must also fit what the library
-      # counts across domains: each principal's domain quota, which the library charges
-      # a configured domain to as to any other, and the connection table, where each
-      # takes its system connection and each introduction one more. Their budgets and grants are summed under
-      # properties 4 and 13.
+      # Property 12: the domain library's host build plans every configured domain in
+      # boot order, then every introduction, against a model machine that records each
+      # plan as the boot does. So the configured domains' share of properties 4 and 13
+      # (each principal's domain quota and budget, each grant within system and the
+      # service grants within its reserve) and the connection rows are the library's own
+      # judgment, in its own arithmetic. With no domains there is nothing to plan; with
+      # some, a missing planner fails closed.
       def check_plans(rows, max_domains:)
         domains = rows.fetch('domains')
         return if domains.empty?
         raise Unsupported.new('configured domains need the domain library\'s host planner', property: 12, field: 'planner') unless @planner
 
-        domains.map { |domain| domain.fetch('principal') }.tally.each do |principal, count|
-          invalid('a principal\'s configured domains exceed its domain quota', 12, 'domain.principal') if
-            count > rows.fetch('principals').fetch(principal).fetch('domains')
+        order = rows.fetch('boot_order').map { |step| step.fetch('domain') }
+        statuses = @planner.call(plan_view(rows, order: order, max_domains: max_domains))
+        order.zip(statuses.fetch('domains')).each do |index, status|
+          refuse_plan(status, "configured domain #{domains.fetch(index).fetch('name')}", 'domain')
         end
-        invalid('configured domains\' system connections exceed max_connections', 12, 'machine.max_connections') if
-          domains.size + rows.fetch('introductions').size > number(@source.machine, 'max_connections')
-        statuses = @planner.call(plan_view(rows, max_domains: max_domains))
-        domains.zip(statuses).each do |domain, status|
-          next if status.zero?
-
-          name = (@codec.schema.statuses || {}).key(status) || status
-          invalid("the domain library refuses configured domain #{domain.fetch('name')} with #{name}", 12, 'domain')
+        rows.fetch('introductions').zip(statuses.fetch('introductions')).each do |row, status|
+          names = row.values_at('from', 'to').map { |index| domains.fetch(index).fetch('name') }
+          refuse_plan(status, "the introduction of #{names.join(' and ')}", 'introduce')
         end
       end
 
-      # The planner's view (DomainPlanner#call) from the normalized rows and the catalog.
-      def plan_view(rows, max_domains:)
+      # Refuses the manifest naming what the library refused; status 0 passes.
+      def refuse_plan(status, what, field)
+        return if status.zero?
+
+        name = (@codec.schema.statuses || {}).key(status) || status
+        invalid("the domain library refuses #{what} with #{name}", 12, field)
+      end
+
+      # The planner's view (DomainPlanner#call) from the normalized rows and the catalog,
+      # its domains in boot order and each introduction's parties their places in it.
+      def plan_view(rows, order:, max_domains:)
         machine = @source.machine
         spaces = @codec.member('mf_limits_flags', 'spaces')
         limits = rows.fetch('limits')
@@ -1066,7 +1040,11 @@ module Erx
             'default_limits' => startup_limits(rows, row.fetch('default_limits')),
             'ceiling_limits' => startup_limits(rows, row.fetch('ceiling_limits')) }
         end
-        domains = rows.fetch('domains').map do |domain|
+        place = order.each_with_index.to_h
+        introductions = rows.fetch('introductions').map do |row|
+          { 'a' => place.fetch(row.fetch('from')), 'b' => place.fetch(row.fetch('to')) }
+        end
+        domains = order.map { |index| rows.fetch('domains').fetch(index) }.map do |domain|
           profile = limits.fetch(domain.fetch('limits'))
           { 'principal' => domain.fetch('principal') + 1, 'spaces' => (profile.fetch('flags') & spaces).zero? ? 0 : 1,
             'release' => domain.fetch('release'), 'release_files' => domain.fetch('release_files'),
@@ -1079,7 +1057,8 @@ module Erx
                          'system_lane' => number(machine, 'system_lane'),
                          'system_reserve' => number(machine, 'system_reserve'),
                          'system_grant' => share(machine, 'system_share') },
-          'principals' => principals, 'files' => @context.catalog.map { |row| plan_file(row) }, 'domains' => domains }
+          'principals' => principals, 'files' => @context.catalog.map { |row| plan_file(row) }, 'domains' => domains,
+          'introductions' => introductions }
       end
 
       # erx_runtime_limits_t from a limits record: its runtime-limits profile and its

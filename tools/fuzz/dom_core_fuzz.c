@@ -17,7 +17,13 @@
  *   fit what each carved budget pays for within its size (the outer
  *   budget's crash area and system child, the child's sides and bells);
  *   undo, once fully applied, by destroying exactly its carved budgets,
- *   the last carved first.
+ *   the last carved first;
+ *   record into the view it was planned against, leaving the domain's
+ *   record, its principal within its quota and budget, the service
+ *   grants and its system connection's row as the plan named them, so a
+ *   second plan of the same id is refused.
+ * A connection's plan, likewise, records into its view, and a second plan
+ * of the same pair takes another row and the next number.
  */
 
 #include <stdbool.h>
@@ -32,8 +38,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 #define FUZZ_MIB	(UINT64_C(1) << 20)
 
-static erx_dom_t fuzz_domains[2] = { { .id = 9 }, { 0 } };
-static erx_dom_connection_t fuzz_connections[2] = { { .number = 1 }, { 0 } };
+static const erx_dom_t fuzz_domains[2] = { { .id = 9 }, { 0 } };
+static const erx_dom_connection_t fuzz_connections[2] = {
+	{ .number = 1 }, { 0 }
+};
 
 static const erx_dom_file_t fuzz_files[] = {
 	{ ERX_ENTRY_IMAGE, 0, true, 0 },
@@ -137,7 +145,7 @@ typedef struct fuzz_input {
 static void
 fuzz_life(const fuzz_input_t *in, bool connect)
 {
-	static const erx_dom_principal_t held = { .number = 1 };
+	erx_dom_principal_t held = { .number = 1 };
 	erx_dom_t doms[3];
 	erx_dom_connection_t conns[3];
 	erx_dom_device_entry_t devs[2];
@@ -146,7 +154,7 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	    .next_connection = in->next, .system_space = 4000,
 	    .devices = devs, .device_records = in->dev_records,
 	    .ndevices = 2, .principals = &held, .nprincipals = 1 };
-	erx_dom_link_plan_t link;
+	erx_dom_link_plan_t link, again;
 	erx_dom_device_plan_t give;
 	erx_dom_obj_t made[ERX_DOM_DEVICE_STEPS];
 	erx_dom_principal_t principal;
@@ -190,6 +198,19 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 			    link.steps[index].kind == ERX_DOM_STEP_MEM &&
 			    link.steps[index].budget != ERX_DOM_OBJ_LINK_BUDGET_A))
 				abort();
+		/* The record is what the next plan of the pair sees. */
+		if (erx_dom_link_record(&view, &link) != ERX_OK ||
+		    conns[link.row].number != link.number ||
+		    conns[link.row].a != in->a || conns[link.row].b != in->b ||
+		    doms[link.a_slot].labels != link.steps[4].label ||
+		    doms[link.b_slot].labels != link.steps[5].label ||
+		    view.next_connection != (link.number == UINT32_MAX ? 0 :
+		    link.number + 1))
+			abort();
+		if (erx_dom_plan_connect(&view, in->a, in->b, in->a_reads,
+		    in->b_reads, &again) == ERX_OK &&
+		    (again.row == link.row || again.number != view.next_connection))
+			abort();
 		return;
 	}
 	if (erx_dom_plan_disconnect(&view, in->number, &teardown) == ERX_OK &&
@@ -294,6 +315,38 @@ fuzz_check(const fuzz_input_t *in, uint32_t origin, const erx_dom_view_t *view,
 }
 
 /*
+ * Records an accepted plan into the view it was planned against: it must
+ * fit, and leave the record, the principal's counts within its quota and
+ * budget, the service grants and the system connection's row as the plan
+ * named them.
+ */
+static void
+fuzz_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
+{
+	const erx_dom_spec_t *spec = &plan->spec;
+	const erx_dom_principal_t *principal = &view->principals[0];
+	const erx_dom_t *dom = &view->domains[plan->slot];
+	const erx_dom_connection_t *row;
+	uint32_t services = view->nservice_grants;
+
+	if (erx_dom_plan_record(view, plan) != ERX_OK || dom->id != spec->id ||
+	    dom->state != ERX_DOM_BUILT ||
+	    dom->system_connection != plan->connection ||
+	    principal->domains > principal->domains_max ||
+	    principal->carved > principal->memory ||
+	    view->nservice_grants != services +
+	    (spec->origin.kind == ERX_DOM_CONFIGURED) ||
+	    view->nservice_grants > view->max_domains)
+		abort();
+	if (plan->connection_row != ERX_DOM_NO_ROW) {
+		row = &view->connections[plan->connection_row];
+		if (row->number != plan->connection ||
+		    row->a != ERX_DOM_SYSTEM_ID || row->b != spec->id)
+			abort();
+	}
+}
+
+/*
  * The input: one byte picking the entry (0 request, 1 configured, 2
  * partial boot, 3 connect, 4 disconnect, retire, stop and the record
  * step), then patches, each a little-endian u16 offset into the
@@ -341,8 +394,12 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .share = fuzz_grant(UINT64_C(5000000), 0x3),
 		    .default_limits = fuzz_limits(1), .ceiling_limits = fuzz_limits(2) },
 	};
-	erx_dom_view_t view = { .domains = fuzz_domains, .max_domains = 2,
-	    .connections = fuzz_connections, .max_connections = 2,
+	erx_dom_t domains[2];
+	erx_dom_connection_t connections[2];
+	erx_grant_t services[2];
+	erx_dom_view_t view = { .domains = domains, .max_domains = 2,
+	    .connections = connections, .max_connections = 2,
+	    .service_grants = services,
 	    .principals = &principal, .nprincipals = 1, .files = fuzz_files,
 	    .nfiles = sizeof(fuzz_files) / sizeof(fuzz_files[0]),
 	    .configured = &in.configured, .nconfigured = 1,
@@ -372,6 +429,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		at += count;
 	}
 
+	/* Each run starts from the same records; a record writes only these. */
+	memcpy(domains, fuzz_domains, sizeof(domains));
+	memcpy(connections, fuzz_connections, sizeof(connections));
+	memset(services, 0, sizeof(services));
 	if (bytes[0] % 5 >= 3) {
 		fuzz_life(&in, bytes[0] % 5 == 3);
 		return (0);
@@ -391,7 +452,23 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		status = erx_dom_plan_partial(&view, in.id, in.row, &plan);
 		break;
 	}
+	if (status != ERX_OK)
+		return (0);
+	fuzz_check(&in, origin, &view, &plan);
+	fuzz_record(&view, &plan);
+	switch (origin) {
+	case ERX_DOM_REQUEST:
+		status = erx_dom_plan_request(&view, &in.req, &in.limits,
+		    in.given, &plan);
+		break;
+	case ERX_DOM_CONFIGURED:
+		status = erx_dom_plan_configured(&view, in.id, in.row, &plan);
+		break;
+	default:
+		status = erx_dom_plan_partial(&view, in.id, in.row, &plan);
+		break;
+	}
 	if (status == ERX_OK)
-		fuzz_check(&in, origin, &view, &plan);
+		abort();
 	return (0);
 }

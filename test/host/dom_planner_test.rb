@@ -11,22 +11,28 @@ require_relative '../../tools/lib/erx/runner'
 require_relative '../fixtures/manifest_context'
 
 # Property 12 with the domain library's own host build: the manifest check runs
-# erx_dom_plan_configured (liberx/system/dom_core.c) through tools/host/dom_plan.c,
-# which PackTools builds, so a configured domain the library refuses fails the build.
+# the library (liberx/system/dom_core.c and dom_life.c) through tools/host/dom_plan.c,
+# which PackTools builds, planning the configured domains in boot order and then the
+# introductions, each plan recorded before the next. So a configured domain or an
+# introduction the library refuses fails the build, and what the library counts
+# across domains is judged by the library alone: each seed below is one sum it holds.
 class DomPlannerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  DOMAINS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
-            "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
-            "  peer_held 4096\n  peer_held_total 4096\n" \
-            "domain alpha\n  principal @principal.system\n  limits @limits.app\n  kind service\n  flags none\n" \
-            "  runtime @artifact.emu\n  release @artifact.app\n  restarts 3\n  restart_period_s 5\n"
+  LIMITS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
+           "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
+           "  peer_held 4096\n  peer_held_total 4096\n"
+  DOMAINS = "#{LIMITS}domain alpha\n  principal @principal.system\n  limits @limits.app\n  kind service\n" \
+            "  flags none\n  runtime @artifact.emu\n  release @artifact.app\n  restarts 3\n  restart_period_s 5\n"
+  UNCAPPED = "share wide\n  quota_ns uncapped\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 1000\n" \
+             "  capacity_first 0\n  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n"
+  NARROW = UNCAPPED.sub('share wide', 'share narrow').sub('quota_ns uncapped', 'quota_ns 5000000')
 
   def setup
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
-    @source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
-                  .sub("  domains 0\n", "  domains 1\n").sub('max_domains 0', 'max_domains 2') + DOMAINS
+    @plain = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    @source = with_domains('alpha')
     @directory = Dir.mktmpdir('dom-planner-')
     @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
     tools = Erx::PackTools.build(root: ROOT, owner_root: @directory, directory: File.join(@directory, 'tools'),
@@ -41,6 +47,21 @@ class DomPlannerTest < Minitest::Test
 
   def admit(source) = Erx::Manifest.admit(source: source, codec: @codec, context: @context, planner: @planner)
 
+  # The named domains of the app profile, the system principal's quota covering them
+  # and max_domains the sum of the quotas; share names the profile's grant in place of
+  # users, NARROW's half a CPU keeping three domains within system's reserve.
+  def with_domains(*names, quota: names.size, share: 'users')
+    rows = names.map { |name| DOMAINS.delete_prefix(LIMITS).sub('domain alpha', "domain #{name}") }
+    limits = LIMITS.sub('grant @share.users', "grant @share.#{share}")
+    @plain.sub("  domains 0\n", "  domains #{quota}\n").sub('max_domains 0', "max_domains #{quota}") + limits + rows.join
+  end
+
+  def refused(source, field, message)
+    error = assert_raises(Erx::Manifest::Invalid) { admit(source) }
+    assert_equal [12, field], [error.property, error.field], error.message
+    assert_match message, error.message
+  end
+
   def test_the_library_plans_a_configured_domain
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
   end
@@ -50,6 +71,72 @@ class DomPlannerTest < Minitest::Test
     error = assert_raises(Erx::Manifest::Invalid) { admit(@source.sub("limits app\n  memory 4194304", "limits app\n  memory 4194305")) }
     assert_equal 12, error.property
     assert_match(/alpha with inval/, error.message)
+  end
+
+  # Two grants whose exact rates sum to 2.25 CPUs, what system's 3 CPUs keep past the
+  # reserve, which the library's thousandths, each rounded up, put one over: planned in
+  # boot order against the first's record, the second is refused.
+  def test_grants_within_the_reserve_only_in_exact_arithmetic_fail_the_build
+    shares = { 'up' => 11_250_001, 'down' => 11_249_999 }.map do |name, quota|
+      "share #{name}\n  quota_ns #{quota}\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 1000\n" \
+        "  capacity_first 0\n  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n"
+    end
+    rows = { 'alpha' => 'up', 'beta' => 'down' }.map do |name, share|
+      DOMAINS.sub("limits app\n", "limits #{name}\n").sub('grant @share.users', "grant @share.#{share}")
+             .sub('domain alpha', "domain #{name}").sub('@limits.app', "@limits.#{name}")
+    end
+    source = shares.join + @source.delete_suffix(DOMAINS).sub("  domains 1\n", "  domains 2\n")
+                                  .sub('max_domains 1', 'max_domains 4') + rows.join
+    refused(source, 'domain', /configured domain beta with inval/)
+  end
+
+  def test_a_third_whole_cpu_past_the_reserve_fails_the_build
+    refused(with_domains('alpha', 'beta', 'gamma'), 'domain', /configured domain gamma with inval/)
+  end
+
+  def test_budgets_past_their_principal_fail_at_the_domain_that_overflows
+    refused(with_domains('alpha', 'beta').sub("limits app\n  memory 4194304", "limits app\n  memory 8388608"),
+            'domain', /configured domain beta with nomem/)
+  end
+
+  def test_domains_past_their_principal_quota_fail_the_build
+    refused(NARROW + with_domains('alpha', 'beta', 'gamma', quota: 2, share: 'narrow'), 'domain',
+            /configured domain gamma with limit/)
+  end
+
+  def test_a_grant_past_system_fails_the_build
+    source = UNCAPPED + with_domains('alpha', share: 'wide')
+    refused(source, 'domain', /configured domain alpha with inval/)
+  end
+
+  def test_a_sub_space_grant_past_its_domain_fails_the_build
+    source = UNCAPPED + with_domains('alpha').sub("  spaces none\n  lane 4096\n  connections 2\n  crash 0\n  flags none\n",
+                                                  "  spaces @share.wide\n  lane 4096\n  connections 2\n  crash 0\n  flags spaces\n")
+    refused(source, 'domain', /configured domain alpha with inval/)
+  end
+
+  def test_system_connections_past_the_table_fail_the_build
+    source = with_domains('alpha', 'beta').sub('max_connections 4', 'max_connections 1').sub('  connections 2', '  connections 1')
+    refused(source, 'domain', /configured domain beta with limit/)
+  end
+
+  def test_introductions_within_every_bound_are_admitted
+    source = "#{NARROW}#{with_domains('alpha', 'beta', 'gamma', share: 'narrow').sub('max_connections 4', 'max_connections 5')}" \
+             "introduce @domain.alpha @domain.beta\nintroduce @domain.beta @domain.gamma\n"
+    assert_equal 3, admit(source).report.fetch('child_plan_instances')
+  end
+
+  def test_an_introduction_past_the_connection_table_fails_the_build
+    source = "#{with_domains('alpha', 'beta').sub('max_connections 4', 'max_connections 2')}introduce @domain.alpha @domain.beta\n"
+    refused(source, 'introduce', /introduction of alpha and beta with limit/)
+  end
+
+  # Each recorded introduction counts against both parties' connections quota.
+  def test_an_introduction_past_a_partys_connections_quota_fails_the_build
+    source = NARROW + with_domains('alpha', 'beta', 'gamma', share: 'narrow').sub('max_connections 4', 'max_connections 6')
+                                                                            .sub('  connections 2', '  connections 1')
+    source += "introduce @domain.alpha @domain.beta\nintroduce @domain.alpha @domain.gamma\n"
+    refused(source, 'introduce', /introduction of alpha and gamma with limit/)
   end
 
   def test_a_runtime_without_an_accepted_image_fails_the_build
@@ -68,10 +155,12 @@ class DomPlannerTest < Minitest::Test
     end
   end
 
-  def test_the_reply_must_hold_one_status_per_row
-    assert_equal [0, -6], Erx::DomainPlanner.statuses("domain 0 0\ndomain 1 -6\n", rows: 2)
-    ["domain 0 0\n", "domain 1 0\ndomain 0 0\n", "domain 0 0\ndomain 1 x\n"].each do |reply|
-      assert_raises(Erx::Error) { Erx::DomainPlanner.statuses(reply, rows: 2) }
+  def test_the_reply_must_hold_one_status_per_domain_and_introduction
+    assert_equal({ 'domains' => [0, -6], 'introductions' => [-7] },
+                 Erx::DomainPlanner.statuses("domain 0 0\ndomain 1 -6\nintroduce 0 -7\n", domains: 2, introductions: 1))
+    ["domain 0 0\ndomain 1 0\n", "domain 1 0\ndomain 0 0\nintroduce 0 0\n", "domain 0 0\ndomain 1 x\nintroduce 0 0\n",
+     "domain 0 0\nintroduce 0 0\ndomain 1 0\n", "domain 0 0\ndomain 1 0\nintroduce 1 0\n"].each do |reply|
+      assert_raises(Erx::Error, reply) { Erx::DomainPlanner.statuses(reply, domains: 2, introductions: 1) }
     end
   end
 end

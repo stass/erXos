@@ -5,27 +5,40 @@
 
 /*
  * The manifest check's host run of the domain library's planner
- * (docs/design-system.md, "The manifest", property 12): it plans every
- * configured-domain row with erx_dom_plan_configured against the view of a
- * machine just booted, so a domain the library would refuse fails the
- * build, not the boot.
+ * (docs/design-system.md, "The manifest", property 12). Starting from the
+ * view of a machine just booted, it plans each configured domain with
+ * erx_dom_plan_configured in boot order and then each introduction with
+ * erx_dom_plan_connect, and records every plan it makes in the view with
+ * erx_dom_plan_record or erx_dom_link_record before planning the next, as
+ * the boot does once each plan is applied. So what the library counts
+ * across domains (the principals' quotas and budgets, the service grants
+ * against system's reserve, the connection rows and each domain's
+ * connections quota) is the library's own judgment, and a manifest it
+ * would refuse fails the build, not the boot.
  *
  * Its one argument names a text file the packer writes, one record per
  * line, every value a decimal integer, in this order: one machine line,
- * then the principal, file and domain lines.
+ * then the principal, file, domain and introduce lines.
  *
  *   machine MAX_DOMAINS MAX_CONNECTIONS SYSTEM_LANE SYSTEM_RESERVE GRANT
  *   principal MEMORY DOMAINS GRANT LIMITS LIMITS
  *   file KIND FLAGS IMAGE_OK IMAGE_FLAGS
  *   domain PRINCIPAL SPACES RELEASE RELEASE_FILES RUNTIME MEMORY OUTER
  *       GRANT GRANT LIMITS LANE CONNECTIONS
+ *   introduce DOMAIN DOMAIN
  *
  * A GRANT is erx_share_t's ten fields in layout order and a LIMITS the
  * eleven fields of erx_runtime_limits_t but its reserved word; SPACES is 1
  * for a domain that holds SPACES and 0 otherwise. Principal
- * n (from 1) is the nth principal line. It prints `domain ROW STATUS` for
- * each domain line, STATUS erx_status_t's value, and exits 0; a malformed
- * input prints nothing and exits 2.
+ * n (from 1) is the nth principal line. The domain lines come in boot
+ * order, and domain line n (from 0) is configured row n, with domain id
+ * ERX_DOM_SYSTEM_ID + 1 + n. An introduce line names two domain lines; each
+ * party reads a side of its own profile's lane size, as the boot sizes it.
+ * It prints `domain N STATUS` for each domain line and then
+ * `introduce N STATUS` for each introduce line, N its place among its kind
+ * from 0 and STATUS erx_status_t's value, and exits 0; a plan refused is
+ * not recorded, and the planning goes on. A malformed input prints nothing
+ * and exits 2.
  */
 
 #include <errno.h>
@@ -41,6 +54,11 @@
 
 #define DOM_PLAN_ROWS_MAX	65536u	/* each table's bound, the manifest's */
 #define DOM_PLAN_WORDS_MAX	64u	/* the longest line's words */
+
+/* An introduction: two domain lines, from 0. */
+typedef struct dom_plan_pair {
+	uint32_t	a, b;
+} dom_plan_pair_t;
 
 /* One line split into its words: the keyword and up to 63 numbers. */
 typedef struct dom_plan_line {
@@ -162,19 +180,22 @@ int
 main(int argc, char **argv)
 {
 	static erx_dom_plan_t plan;
+	erx_dom_link_plan_t link;
 	erx_dom_principal_t *principals = NULL;
 	erx_dom_configured_t *configured = NULL;
 	erx_dom_file_t *files = NULL;
+	dom_plan_pair_t *pairs = NULL;
 	erx_dom_principal_t *principal;
 	erx_dom_configured_t *row;
 	erx_dom_file_t *file;
-	erx_dom_t *domains;
-	erx_dom_connection_t *connections;
+	dom_plan_pair_t *pair;
 	erx_dom_view_t view;
 	dom_plan_line_t line;
-	uint32_t nprincipals = 0, nconfigured = 0, nfiles = 0;
+	uint32_t nprincipals = 0, nconfigured = 0, nfiles = 0, npairs = 0;
 	uint32_t principal_room = 0, configured_room = 0, file_room = 0;
+	uint32_t pair_room = 0;
 	uint32_t kind, flags, ok, spaces, stage = 0;
+	erx_status_t status;
 	char *text, *cursor, *end, *next;
 	size_t length;
 	bool machine = false;
@@ -231,7 +252,8 @@ main(int argc, char **argv)
 			file->kind = (uint8_t)kind;
 			file->flags = (uint8_t)flags;
 			file->image_ok = ok != 0;
-		} else if (strcmp(line.keyword, "domain") == 0 && machine) {
+		} else if (strcmp(line.keyword, "domain") == 0 && machine &&
+		    stage <= 3) {
 			stage = 3;
 			if (!dom_plan_grow((void **)&configured, &nconfigured,
 			    &configured_room, sizeof(*configured)))
@@ -252,6 +274,15 @@ main(int argc, char **argv)
 			    !dom_plan_u32(&line, &row->connections))
 				return (2);
 			row->flags = spaces != 0 ? ERX_DOM_SPACES : 0;
+		} else if (strcmp(line.keyword, "introduce") == 0 && machine) {
+			stage = 4;
+			if (!dom_plan_grow((void **)&pairs, &npairs, &pair_room,
+			    sizeof(*pairs)))
+				return (2);
+			pair = &pairs[npairs++];
+			if (!dom_plan_u32(&line, &pair->a) || pair->a >= nconfigured ||
+			    !dom_plan_u32(&line, &pair->b) || pair->b >= nconfigured)
+				return (2);
 		} else
 			return (2);
 		if (line.used != line.count)
@@ -260,13 +291,19 @@ main(int argc, char **argv)
 	if (!machine || nconfigured > ERX_DOM_ID_MAX - ERX_DOM_SYSTEM_ID)
 		return (2);
 
-	/* The machine just booted: every record free, no connection made. */
-	domains = calloc(view.max_domains + 1, sizeof(*domains));
-	connections = calloc(view.max_connections + 1, sizeof(*connections));
-	if (domains == NULL || connections == NULL)
+	/*
+	 * The machine just booted: every record free, no connection made, no
+	 * service grant admitted. One spare entry each keeps a zero-sized
+	 * table a valid allocation.
+	 */
+	view.domains = calloc(view.max_domains + 1, sizeof(*view.domains));
+	view.connections = calloc(view.max_connections + 1,
+	    sizeof(*view.connections));
+	view.service_grants = calloc(view.max_domains + 1,
+	    sizeof(*view.service_grants));
+	if (view.domains == NULL || view.connections == NULL ||
+	    view.service_grants == NULL)
 		return (2);
-	view.domains = domains;
-	view.connections = connections;
 	view.principals = principals;
 	view.nprincipals = nprincipals;
 	view.files = files;
@@ -274,9 +311,22 @@ main(int argc, char **argv)
 	view.configured = configured;
 	view.nconfigured = nconfigured;
 	view.next_connection = 1;
-	for (uint32_t index = 0; index < nconfigured; index++)
-		printf("domain %" PRIu32 " %d\n", index,
-		    (int)erx_dom_plan_configured(&view,
-		    ERX_DOM_SYSTEM_ID + 1 + index, index, &plan));
+
+	for (uint32_t index = 0; index < nconfigured; index++) {
+		status = erx_dom_plan_configured(&view,
+		    ERX_DOM_SYSTEM_ID + 1 + index, index, &plan);
+		if (status == ERX_OK)
+			status = erx_dom_plan_record(&view, &plan);
+		printf("domain %" PRIu32 " %d\n", index, (int)status);
+	}
+	for (uint32_t index = 0; index < npairs; index++) {
+		pair = &pairs[index];
+		status = erx_dom_plan_connect(&view,
+		    ERX_DOM_SYSTEM_ID + 1 + pair->a, ERX_DOM_SYSTEM_ID + 1 + pair->b,
+		    configured[pair->a].lane, configured[pair->b].lane, &link);
+		if (status == ERX_OK)
+			status = erx_dom_link_record(&view, &link);
+		printf("introduce %" PRIu32 " %d\n", index, (int)status);
+	}
 	return (fflush(stdout) == 0 ? 0 : 2);
 }

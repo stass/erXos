@@ -385,8 +385,8 @@ violation fails the build with the property, the record and the field:
    principal's; the shares of `system` and `users` sum within the root
    group, the configured domains' grants within `system`, the principals'
    shares within `users`, and each sub-space grant within its domain's;
-   and the principals' quotas of domains, with the configured domains, sum
-   within `max_domains`.
+   and the principals' quotas of domains sum within `max_domains`, every
+   living domain, configured or requested, being one of its principal's.
 5. **Every name is a system identifier,** the host name included, and so
    is every pooled name a principal's `names` quota allows
    ([Identifiers](#identifiers)); no two configured domains or principals
@@ -448,10 +448,15 @@ violation fails the build with the property, the record and the field:
     the rescue configuration starts names the system release or another
     domain it starts, and it starts no domain that holds a network device.
 12. **Every child domain can be built:** the check runs the host build of
-    `erx_dom_plan_configured` and `erx_dom_plan_partial` over each
-    configured-domain or partial-boot child's row against the view of a machine just booted with
-    `root_memory`, so a domain the library would refuse fails the build,
-    not the boot. An empty set of children needs no planner invocation;
+    `erx_dom_plan_configured` over the configured domains in the boot
+    order, or `erx_dom_plan_partial` over a partial boot's children, and
+    `erx_dom_plan_connect` over the introductions, starting from the view
+    of a machine just booted with `root_memory` and recording each plan in
+    the view as the boot does (`erx_dom_plan_record`,
+    `erx_dom_link_record`), so a domain or introduction the library would
+    refuse fails the build, not the boot, and properties 4 and 13 over
+    the configured domains are the planner's own judgment, in its own
+    arithmetic. An empty set of children needs no planner invocation;
     a nonempty set requires the production planner and fails closed
     when it is unavailable.
 13. **The system configuration leaves headroom in `system`:** with each grant
@@ -1076,8 +1081,9 @@ baseline remains the manifest's; runtime changes do not edit it.
    `grant`; for a configured origin, that the complete service-grant
    set satisfies the same system-reserve predicate as the manifest
    checker; that the principal holds fewer
-   domains than its quota and the machine fewer than the manifest's
-   `max_domains`; that `ERX_DOM_SECRET` is set exactly when the release is
+   domains than its quota, so that a record is free, since every living
+   domain is one of its principal's and the quotas sum within the
+   manifest's `max_domains`; that `ERX_DOM_SECRET` is set exactly when the release is
    the one marked `ERX_ENTRY_SEAL`, and that no other living domain holds
    the sealing page then; and that the ending record is not installed,
    since no domain is created once the machine is ending. It returns a
@@ -1146,7 +1152,12 @@ baseline remains the manifest's; runtime changes do not edit it.
       ([design-runtime.md](design-runtime.md#data-model));
    7. create the first thread, a worker in the domain's group, with the
       boot information page's address as its argument, stopped;
-   8. enter `ERX_DOM_BUILT`.
+   8. record the plan in the library's view with `erx_dom_plan_record`,
+      the function the manifest check's host planner records with
+      (property 12): the record enters `ERX_DOM_BUILT`, the principal
+      counts the domain and its two budgets, a configured domain's grant
+      joins the admitted service grants, and the system connection takes
+      its row and number.
 3. **Return** the domain's record, with the connection's number and
    the system domain's values of its connection's objects, or the
    failing step's status after undoing what was applied, which is
@@ -1960,9 +1971,11 @@ also has a `names` quota, 64 by default, of node names it may bind within
 the boot ([Identifiers](#identifiers)), so that the atoms the system
 domain makes of peer node names are bounded by the sum of the quotas the
 manifest gives, beside the configured domains' own names. The manifest's
-quotas, with the domains it lists, sum within `max_domains`, which the
-manifest check proves, so no principal can take another's domains, as
-budgets keep one principal's memory from another's. Principal numbers are
+quotas sum within `max_domains`, which the manifest check proves, and
+every living domain, configured or requested, is one of its principal's,
+so a creation within a quota always finds a record and no principal can
+take another's domains, as budgets keep one principal's memory from
+another's. Principal numbers are
 fixed within a boot.
 
 ### Devices

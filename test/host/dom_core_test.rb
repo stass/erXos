@@ -70,7 +70,11 @@ class DomCoreTest < Minitest::Test
     'configured grant not fitted to system' =>
       ["if (!dom_grant_fits(&spec->grant, &view->system_grant) ||\n\t\t    !dom_system_reserve",
        'if (!dom_system_reserve'],
-    'request strings tail kept' => ['memset(spec->strings + used, 0, sizeof(spec->strings) - used);', '(void)used;']
+    'request strings tail kept' => ['memset(spec->strings + used, 0, sizeof(spec->strings) - used);', '(void)used;'],
+    'record forgets the principal domain count' => ["\tprincipal->domains++;\n", ''],
+    'record forgets the service grant' =>
+      ["\t\tview->service_grants[view->nservice_grants++] = spec->grant;\n", "\t\t(void)0;\n"],
+    'record overwrites a taken slot' => ["\t    view->domains[plan->slot].id != 0 ||\n", '']
   }.freeze
 
   def setup
@@ -125,6 +129,28 @@ class DomCoreTest < Minitest::Test
     expected.each { |name, status| assert_equal status, results.fetch(name), name }
   end
 
+  # erx_dom_plan_record: the record, the principal's domains and carved bytes, the
+  # service grants, the next connection number and the plan's connection row after
+  # each record. Recorded plans are what the next plan sees, so the fourth domain
+  # is past the quota of three; a plan that no longer fits leaves the view as it was.
+  RECORDS = {
+    'configured' => '0 id=6 state=2 labels=1 connection=1 principal=1,5242880 services=1 next=2 row=1,4,6',
+    'configured_again' => '0 id=7 state=2 labels=1 connection=2 principal=2,10485760 services=2 next=3 row=2,4,7',
+    'partial' => '0 id=8 state=2 labels=0 connection=0 principal=3,11599872 services=2 next=3 row=-',
+    'quota_spent' => ELIMIT.to_s,
+    'twice' => '-1 id=6 state=2 labels=1 connection=1 principal=1,5242880 services=1 next=2 row=1,4,6',
+    'slot_taken' => '-1 id=9 state=0 labels=0 connection=0 principal=0,0 services=0 next=1 row=0,0,0',
+    'not_next' => '-1 id=0 state=0 labels=0 connection=0 principal=0,0 services=0 next=2 row=0,0,0',
+    'unknown_principal' => '-1 id=0 state=0 labels=0 connection=0 principal=0,0 services=0 next=1 row=0,0,0',
+    'services_full' => '-1 id=0 state=0 labels=0 connection=0 principal=0,0 services=4 next=1 row=0,0,0',
+    'carve_overflow' => '-1 id=0 state=0 labels=0 connection=0 principal=0,18446744073709551615 services=0 next=1 row=0,0,0'
+  }.freeze
+
+  def test_each_record_moves_the_view_as_the_domain_then_lives
+    results = run_driver(driver, 'record').to_h { |line| line.split(' ', 3).then { |_, name, rest| [name, rest] } }
+    assert_equal RECORDS, results
+  end
+
   # The planning entries build the specification themselves: what a
   # request leaves out is the principal's default, and the origin, the
   # version, the crash area, the system lane and the CPU parent are the
@@ -158,14 +184,16 @@ class DomCoreTest < Minitest::Test
       mutated = File.join(@directory, "mutant-#{name.tr(' ', '-')}.c")
       File.write(mutated, text.sub(from) { to })
       mutant = build_driver(mutated, name: "mutant-#{name.tr(' ', '-')}")
-      lines = %w[explore cases seeded principal].flat_map { |mode| run_driver(mutant, mode, check: false) }
+      lines = MODES.flat_map { |mode| run_driver(mutant, mode, check: false) }
       refute_equal clean_lines, lines, "mutant survived: #{name}"
     end
   end
 
   private
 
-  def clean_lines = @clean_lines ||= %w[explore cases seeded principal].flat_map { |mode| run_driver(driver, mode) }
+  MODES = %w[explore cases seeded principal record].freeze
+
+  def clean_lines = @clean_lines ||= MODES.flat_map { |mode| run_driver(driver, mode) }
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 

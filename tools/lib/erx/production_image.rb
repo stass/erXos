@@ -81,10 +81,14 @@ module Erx
 
     # The domain releases an image carries are those its manifest's domain rows name
     # (domain_releases), and with any of them the one runtime image every domain runs.
-    # Each holds the applications every domain boots through, kernel and stdlib
-    # (ReleaseFiles.domain); the manifest names a release, not its applications. The
-    # development manifest configures no domains, so the production image carries
-    # neither; a test image may carry some (build_test_image's domains).
+    # The build's release table defines a domain release's applications under its name
+    # (docs/design-stopgap.md, "The production image"); the manifest only names the
+    # release, so two rows naming one release cannot disagree on what it holds. Until a
+    # domain needs more, this one list, the applications every domain boots through,
+    # stands for the table under every name (ReleaseFiles.domain); domain_releases reads
+    # a table by name once one does. The development manifest configures no domains, so
+    # the production image carries neither; a test image may carry some
+    # (build_test_image's domains).
     DOMAIN_APPLICATIONS = %w[kernel stdlib].freeze
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the

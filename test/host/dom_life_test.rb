@@ -43,6 +43,13 @@ class DomLifeTest < Minitest::Test
     'connect_numbers_spent' => ELIMIT, 'connect_labels_spent' => ELIMIT,
     'connect_labels_last' => '0 number=20 row=2 slots=0,1 labels=2147483647,4 children=77824,77824',
     'connect_labels_unset' => ELIMIT,
+    # erx_dom_link_record: row 2, the parties' labels and the next number after it.
+    'record_ok' => '0 row=20,5,6 labels=2,4 next=21', 'record_then_quota' => ELIMIT,
+    'record_twice' => '-1 row=20,5,6 labels=2,4 next=21',
+    'record_stale_slot' => '-1 row=0,0,0 labels=1,3 next=20',
+    'record_not_next' => '-1 row=0,0,0 labels=1,3 next=21',
+    'record_row_out' => '-1 row=0,0,0 labels=1,3 next=20',
+    'record_last_number' => '0 row=4294967295,5,6 labels=2,4 next=0',
     'disconnect_system' => '0 kind=1 index=0 destroy=511',
     'disconnect_pair' => '0 kind=1 index=3 destroy=521,621',
     'disconnect_zero' => EINVAL, 'disconnect_unknown' => EINVAL,
@@ -123,6 +130,10 @@ DEVICES = {
     'connect admits an ended domain' =>
       ['dom->state == ERX_DOM_RUNNING);', 'dom->state == ERX_DOM_RUNNING ||' \
                                           ' dom->state == ERX_DOM_ENDED);', 'case connect_ended '],
+    'link record skips a label' => ["\tda->labels++;\n", '', 'case record_ok '],
+    'link record keeps the next number' =>
+      ['view->next_connection = plan->number == UINT32_MAX ? 0 : plan->number + 1;',
+       'view->next_connection = plan->number;', 'case record_ok '],
     'a record with no system label connects' =>
       ['dom->labels >= ERX_DOM_SYSTEM_LABEL &&', 'true &&', 'case connect_labels_unset '],
     'stop takes a kernel status' => ['status == ERX_EXIT_PARENT || ', '', 'act stop_parent_status '],

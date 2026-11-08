@@ -6,10 +6,10 @@
 /*
  * The domain library's pure core after creation (docs/design-system.md,
  * "Introducing two domains" and "Ending a domain"): the connection planner
- * with its check and undo; the teardowns of disconnect, the destroy at an
- * exit record and retire; the end classifier; and the steps that turn a
- * record at the library's fault gate, or a stop request, into what the
- * library does next; and a device's give with its check and undo
+ * with its check, undo and record; the teardowns of disconnect, the
+ * destroy at an exit record and retire; the end classifier; and the steps
+ * that turn a record at the library's fault gate, or a stop request,
+ * into what the library does next; and a device's give with its check and undo
  * ("Devices"). Nothing here performs a kernel call.
  *
  * A domain's end runs through its record's states: built or running; then,
@@ -272,6 +272,47 @@ erx_dom_link_undo(const erx_dom_link_plan_t *plan, uint32_t applied,
     erx_dom_obj_t *undo)
 {
 	return (erx_dom_steps_undo(plan->steps, plan->nsteps, applied, undo));
+}
+
+erx_status_t
+erx_dom_link_record(erx_dom_view_t *view, const erx_dom_link_plan_t *plan)
+{
+	erx_dom_connection_t *row;
+	erx_dom_t *da, *db;
+
+	/*
+	 * Everything is checked before anything is written. life_slot names
+	 * no record for an id outside the domains', so a slot that matches
+	 * is in range.
+	 */
+	if (plan->a == plan->b || life_slot(view, plan->a) != plan->a_slot ||
+	    life_slot(view, plan->b) != plan->b_slot ||
+	    plan->a_slot == view->max_domains ||
+	    plan->b_slot == view->max_domains ||
+	    plan->row >= view->max_connections ||
+	    view->connections[plan->row].number != 0 || plan->number == 0 ||
+	    plan->number != view->next_connection)
+		return (ERX_EINVAL);
+	da = &view->domains[plan->a_slot];
+	db = &view->domains[plan->b_slot];
+	/* Each bell the plan bound takes its party's next label, below the split. */
+	if (da->labels >= ERX_LABEL_SPLIT - 1 || db->labels >= ERX_LABEL_SPLIT - 1 ||
+	    plan->steps[4].kind != ERX_DOM_STEP_BELL ||
+	    plan->steps[4].label != da->labels + 1 ||
+	    plan->steps[5].kind != ERX_DOM_STEP_BELL ||
+	    plan->steps[5].label != db->labels + 1)
+		return (ERX_EINVAL);
+
+	row = &view->connections[plan->row];
+	row->number = plan->number;
+	row->a = plan->a;
+	row->b = plan->b;
+	row->closing = false;
+	da->labels++;
+	db->labels++;
+	/* Numbers only grow within a boot; 0 marks them spent. */
+	view->next_connection = plan->number == UINT32_MAX ? 0 : plan->number + 1;
+	return (ERX_OK);
 }
 
 erx_status_t

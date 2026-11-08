@@ -257,14 +257,17 @@ typedef struct erx_dom_partial {
  * library lock. The tables are the library's own; the rest is fixed at
  * boot from the checked system manifest and the boot image, except
  * service_grants, the grants of the living configured domains under
- * system, and ending.
+ * system, and ending. The planners read the view through a const
+ * pointer; erx_dom_plan_record and erx_dom_link_record write the domain
+ * records, the connection rows, the principals' counts, the service
+ * grants and next_connection, so those tables are not const.
  */
 typedef struct erx_dom_view {
-	const erx_dom_t		*domains;	/* max_domains records */
+	erx_dom_t		*domains;	/* max_domains records */
 	uint32_t		 max_domains;
-	const erx_dom_connection_t *connections;	/* max_connections rows */
+	erx_dom_connection_t	*connections;	/* max_connections rows */
 	uint32_t		 max_connections;
-	const erx_dom_principal_t *principals;
+	erx_dom_principal_t	*principals;
 	uint32_t		 nprincipals;
 	const erx_dom_device_entry_t *devices;	/* the catalogue: ndevices entries */
 	const erx_dom_device_t	*device_records; /* ndevices records, entry for entry */
@@ -279,7 +282,7 @@ typedef struct erx_dom_view {
 	erx_runtime_limits_t	 native_limits;
 	erx_grant_t		 system_grant;	/* system's grant */
 	uint32_t		 system_reserve;	/* thousandths of system's rate */
-	const erx_grant_t	*service_grants;
+	erx_grant_t		*service_grants; /* room for max_domains */
 	uint32_t		 nservice_grants;
 	uint32_t		 system_lane;	/* the manifest's */
 	uint32_t		 next_connection; /* the next connection's number:
@@ -480,6 +483,27 @@ erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_plan_t *plan);
 
 /*
+ * Records a creation plan in the view it was planned against, as the
+ * domain then lives: the plan's slot becomes the domain's record, built,
+ * with its id, principal, origin, flags and connections quota, and, with
+ * a system connection, that connection's number and the first bell
+ * label; its principal counts one more domain and carves its two
+ * budgets; a configured domain's grant joins the service grants; and the
+ * system connection takes its row and number. The record's capabilities
+ * are left as they are, for the apply phase to fill from its effects.
+ * The manifest check's host planner (tools/host/dom_plan.c) records each
+ * configured domain's plan before planning the next; the apply phase,
+ * which the domain library's run-time half brings (DL2), is to call it
+ * once a plan's steps have all succeeded, so the view the host plans
+ * against and the one the boot keeps move by the same function.
+ * ERX_OK; ERX_EINVAL, with the view unchanged, for a plan that does not
+ * fit the view: a slot or row out of range or taken, an id a record
+ * holds, an unknown principal, a connection number not the view's next,
+ * a carve past 64 bits, or no room for one more service grant.
+ */
+erx_status_t	erx_dom_plan_record(erx_dom_view_t *, const erx_dom_plan_t *plan);
+
+/*
  * erx_dom_principal's validation of a principal's configuration, from the
  * manifest's principal row: a nonzero number no principal of the view
  * holds (ERX_EEXIST otherwise); a nonzero, page-aligned budget; a share
@@ -563,6 +587,20 @@ erx_status_t	erx_dom_link_check(const erx_dom_link_plan_t *plan);
 /* The undo of a connection whose first `applied` steps were applied. */
 uint32_t	erx_dom_link_undo(const erx_dom_link_plan_t *plan,
 		    uint32_t applied, erx_dom_obj_t *undo);
+
+/*
+ * Records a connection's plan in the view, as erx_dom_plan_record does a
+ * creation's: its row holds the connection's number and parties, each
+ * party's record takes the bell label the plan bound, and the view's next
+ * connection number moves past it. A party's count of connections is the
+ * rows that name it, so nothing else counts them. ERX_OK; ERX_EINVAL,
+ * with the view unchanged, for a plan that does not fit the view: a
+ * party's slot out of range or not the party's, a row out of range or
+ * taken, a number not the view's next, or a bell label not the party's
+ * next or not below ERX_LABEL_SPLIT.
+ */
+erx_status_t	erx_dom_link_record(erx_dom_view_t *,
+		    const erx_dom_link_plan_t *plan);
 
 /*
  * What a disconnect, the destroy at an exit record or a retire does: it

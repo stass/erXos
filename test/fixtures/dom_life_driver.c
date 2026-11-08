@@ -39,6 +39,7 @@ static erx_dom_device_t device_records[NDEVICES];
 static unsigned long failures;
 
 static void	device_explore(void);
+static void	link_record_cases(void);
 
 static const char *const step_names[] = {
 	"CARVE", "SPACE", "GROUP", "MEM", "BELL", "SLICE", "IMAGE_MAP", "MAP",
@@ -71,18 +72,18 @@ reset_view(void)
 	    .a = ERX_DOM_SYSTEM_ID, .b = 6, .budget_b = { 611 } };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
 	    .connections = connections, .max_connections = NCONNECTIONS,
-    .next_connection = 20, .system_space = SYSTEM_SPACE,
-    .devices = devices, .device_records = device_records,
-    .ndevices = 2 };
-memset(devices, 0, sizeof(devices));
-memset(device_records, 0, sizeof(device_records));
-devices[0] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
-    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
-devices[1] = (erx_dom_device_entry_t){ .nranges = 2, .nlines = 2,
-    .ranges = { { 0x10000000, 0x4000 }, { 0x10010000, 0x1000 } },
-    .confined = true };
-for (uint32_t index = 0; index < NDEVICES; index++)
-	device_records[index].index = index;
+	    .next_connection = 20, .system_space = SYSTEM_SPACE,
+	    .devices = devices, .device_records = device_records,
+	    .ndevices = 2 };
+	memset(devices, 0, sizeof(devices));
+	memset(device_records, 0, sizeof(device_records));
+	devices[0] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
+	devices[1] = (erx_dom_device_entry_t){ .nranges = 2, .nlines = 2,
+	    .ranges = { { 0x10000000, 0x4000 }, { 0x10010000, 0x1000 } },
+	    .confined = true };
+	for (uint32_t index = 0; index < NDEVICES; index++)
+		device_records[index].index = index;
 }
 
 /*
@@ -246,6 +247,54 @@ connect_case(const char *name, uint32_t a, uint32_t b, uint32_t a_reads,
 	    (unsigned long long)plan.steps[1].size);
 }
 
+/*
+ * erx_dom_link_record of a plan of connect(5, 6), shown by row 2, the row
+ * that plan takes, the parties' labels and the next number.
+ */
+static void
+link_record_case(const char *name, const erx_dom_link_plan_t *plan)
+{
+	erx_status_t status = erx_dom_link_record(&view, plan);
+
+	printf("case %s %d row=%u,%u,%u labels=%u,%u next=%u\n", name, status,
+	    connections[2].number, connections[2].a, connections[2].b,
+	    domains[0].labels, domains[1].labels, view.next_connection);
+}
+
+static void
+link_record_cases(void)
+{
+	erx_dom_link_plan_t plan;
+
+	/* The record is what the next plan sees: 6's one connection is taken. */
+	reset_view();
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK)
+		failures++;
+	link_record_case("record_ok", &plan);
+	connect_case("record_then_quota", 5, 6, 65536, 16384);
+	link_record_case("record_twice", &plan);
+
+	/* A plan that no longer fits the view leaves it as it was. */
+	reset_view();
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK)
+		failures++;
+	domains[0].id = 9;
+	link_record_case("record_stale_slot", &plan);
+	domains[0].id = 5;
+	view.next_connection = 21;
+	link_record_case("record_not_next", &plan);
+	plan.row = NCONNECTIONS;
+	view.next_connection = 20;
+	link_record_case("record_row_out", &plan);
+
+	/* The last number spends them. */
+	reset_view();
+	view.next_connection = UINT32_MAX;
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK)
+		failures++;
+	link_record_case("record_last_number", &plan);
+}
+
 static void
 teardown_case(const char *name, erx_status_t status,
     const erx_dom_teardown_t *teardown)
@@ -335,6 +384,7 @@ connect_cases(void)
 	connect_case("connect_labels_last", 5, 6, 65536, 65536);
 	domains[0].labels = 0;
 	connect_case("connect_labels_unset", 5, 6, 65536, 65536);
+	link_record_cases();
 }
 
 static void
@@ -652,7 +702,7 @@ main(int argc, char **argv)
 		teardown_cases();
 		end_cases();
 		device_cases();
-		return (0);
+		return (failures == 0 ? 0 : 1);
 	}
 	if (argc == 2 && strcmp(argv[1], "seeded") == 0) {
 		seeded();

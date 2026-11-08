@@ -609,6 +609,89 @@ seeded(void)
 }
 
 /*
+ * What a plan's record left in the view: the slot's record, the
+ * principal's counts, the service grants, the next connection number and
+ * the plan's connection row, or "-" for none.
+ */
+static void
+print_record(const char *name, erx_status_t status, const erx_dom_plan_t *plan)
+{
+	const erx_dom_t *dom = &domains[plan->slot % NDOMAINS];
+	const erx_dom_connection_t *row;
+
+	printf("record %s %d id=%u state=%d labels=%u connection=%u "
+	    "principal=%u,%llu services=%u next=%u", name, (int)status, dom->id,
+	    (int)dom->state, dom->labels, dom->system_connection,
+	    principal.domains, (unsigned long long)principal.carved,
+	    view.nservice_grants, view.next_connection);
+	if (plan->connection_row >= NCONNECTIONS) {
+		printf(" row=-\n");
+		return;
+	}
+	row = &connections[plan->connection_row];
+	printf(" row=%u,%u,%u\n", row->number, row->a, row->b);
+}
+
+/* A configured domain's plan, id 6, against a reset view. */
+static erx_dom_plan_t
+configured_plan(void)
+{
+	erx_dom_plan_t plan;
+
+	reset_view();
+	if (erx_dom_plan_configured(&view, 6, 0, &plan) != ERX_OK)
+		failures++;
+	return (plan);
+}
+
+/*
+ * erx_dom_plan_record: each recorded plan is what the next plan sees, a
+ * configured domain's grant joins the service grants and its system
+ * connection takes the next number, a partial-boot domain takes neither,
+ * and a plan that no longer fits the view leaves it as it was.
+ */
+static int
+records(void)
+{
+	erx_dom_spec_t req = base_request();
+	erx_dom_plan_t plan, spent;
+
+	plan = configured_plan();
+	print_record("configured", erx_dom_plan_record(&view, &plan), &plan);
+	if (erx_dom_plan_configured(&view, 7, 0, &plan) != ERX_OK)
+		failures++;
+	print_record("configured_again", erx_dom_plan_record(&view, &plan),
+	    &plan);
+	if (erx_dom_plan_partial(&view, 8, 0, &plan) != ERX_OK)
+		failures++;
+	print_record("partial", erx_dom_plan_record(&view, &plan), &plan);
+	req.id = 9;
+	printf("record quota_spent %d\n",
+	    (int)erx_dom_plan_request(&view, &req, NULL, 0, &spent));
+
+	plan = configured_plan();
+	(void)erx_dom_plan_record(&view, &plan);
+	print_record("twice", erx_dom_plan_record(&view, &plan), &plan);
+	plan = configured_plan();
+	domains[plan.slot].id = 9;
+	print_record("slot_taken", erx_dom_plan_record(&view, &plan), &plan);
+	plan = configured_plan();
+	view.next_connection = 2;
+	print_record("not_next", erx_dom_plan_record(&view, &plan), &plan);
+	plan = configured_plan();
+	plan.spec.principal = 9;
+	print_record("unknown_principal", erx_dom_plan_record(&view, &plan),
+	    &plan);
+	plan = configured_plan();
+	view.nservice_grants = NDOMAINS;
+	print_record("services_full", erx_dom_plan_record(&view, &plan), &plan);
+	plan = configured_plan();
+	principal.carved = UINT64_MAX;
+	print_record("carve_overflow", erx_dom_plan_record(&view, &plan), &plan);
+	return (failures == 0 ? 0 : 1);
+}
+
+/*
  * erx_dom_principal_check over a configuration with one field broken per
  * case, against a view that holds principal 1.
  */
@@ -685,6 +768,9 @@ main(int argc, char **argv)
 		return (seeded());
 	if (argc == 2 && strcmp(argv[1], "principal") == 0)
 		return (principals());
-	fprintf(stderr, "usage: dom_core_driver explore|cases|seeded|principal\n");
+	if (argc == 2 && strcmp(argv[1], "record") == 0)
+		return (records());
+	fprintf(stderr,
+	    "usage: dom_core_driver explore|cases|seeded|principal|record\n");
 	return (2);
 }
