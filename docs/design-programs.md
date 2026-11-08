@@ -1736,6 +1736,26 @@ ordinary code above this: `__stdio_write` repeats on a short count, and a failed
 `write` sets `F_ERR` and discards its buffer (`musl/src/stdio/__stdio_write.c`),
 as it does on any UNIX.
 
+**Status: `VSTATUS` and `SIGINFO`.** `termios` has FreeBSD's `VSTATUS`
+character, `^T` by default, and its `NOKERNINFO` flag, clear by default.
+With `ISIG`, `ICANON` and `IEXTEN` set, the line discipline turns the
+character into a status request for the foreground job. The shell then
+writes a status line for the job, unless `NOKERNINFO` is set, and asks the
+handler of each of the job's programs to send it `SIGINFO`
+([design-shell.md](design-shell.md#ctrl-t-status-and-the-info-request)).
+`SIGINFO`'s default action is to ignore it, as on FreeBSD, so only a
+program that catches it notices: a ported `cp`, `dd`, `sleep` or `fetch`
+prints its own progress, as on FreeBSD. A `SIGINFO` from the terminal
+carries the origin that a `SIGINT` from `Ctrl-C` carries. Linux has no
+`SIGINFO`, `VSTATUS` or `NOKERNINFO`, so erXos's musl defines all three,
+and the ABI file's signal and `termios` tables list them. `SIGINFO` takes
+number 30, with `SIGPWR` as its alias, since all 31 of musl's standard
+numbers are taken and erXos sends no power-failure signal; that shared
+number keeps `SIGINFO`'s default, to ignore. musl defines no `TIOCSTAT`,
+so a ported program that uses it under `#ifdef` builds without it. `stty
+status` and `stty kerninfo` set the character and the flag, as FreeBSD's
+`stty` does.
+
 **Pseudo-terminals, in the second tier.** A session's own tty is a
 **pseudo-terminal** whose master is the console. In the second tier a program
 can make another: `posix_openpt` gives it the master side, and the slave side
@@ -1745,8 +1765,11 @@ runs between the sides
 ([design-live.md](design-live.md#the-tty)). With `ISIG`, the characters for
 interrupt, quit and suspend become `SIGINT`, `SIGQUIT` and `SIGTSTP` for
 the terminal's foreground process group, sent through the handlers as any
-signal is; a change of the window's size sends `SIGWINCH`; the master's
-close sends `SIGHUP`.
+signal is; with `ICANON` and `IEXTEN` also set, the status character makes
+the relay write the group's status line and send the group `SIGINFO`
+([design-shell.md](design-shell.md#ctrl-t-status-and-the-info-request)); a
+change of the window's size sends `SIGWINCH`; the master's close sends
+`SIGHUP`.
 
 **Process groups and sessions, in the second tier.** A program may create
 a process group or a session within its job, with `setpgid` and `setsid`,

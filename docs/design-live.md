@@ -499,6 +499,14 @@ on the host:
   outside `erx_tty`'s table fails with `EINVAL`.
 * `size(Rows, Columns, Tty)` takes a new window size, each from 1 to 65,535,
   and refuses any other.
+* `status(Line, Room, Tty)` returns the bytes of a status line for the
+  master. They start with a newline when the output column, which
+  `output/3` keeps, is not 0. It returns nothing when `NOKERNINFO` is set,
+  as FreeBSD's `tty_signal_pgrp` prints nothing then
+  (`sys/kern/tty.c:1542-1543`), and when `Room` is under 256
+  bytes, as FreeBSD prints its status line only with that much room
+  (`sys/kern/tty.c:2067-2072`), or too small for the whole line, so a
+  status line is never cut.
 
 The owner carries out what they return and owns the timers, so time reaches the
 machine only as `timer`, and the exploration on the host drives it event by
@@ -520,9 +528,14 @@ event.
 * `ECHO`, `ISIG` and `OPOST` are flags of their own, which `cfmakeraw` clears
   with the rest, so a tty made raw with it delivers `Ctrl-Z` as data.
 * With `ISIG`, `VINTR`, `VQUIT` and `VSUSP` signal the foreground group.
+  With `ICANON` and `IEXTEN` also set, `VSTATUS` gives the event `info`
+  for the foreground job. The key is not echoed, nothing is flushed, and the
+  line typed so far is kept, as on FreeBSD
+  ([design-shell.md](design-shell.md#ctrl-t-status-and-the-info-request)).
 
-A new tty starts cooked, with `ECHO`, `ISIG`, `ICRNL`, `OPOST` and `ONLCR`
-set.
+A new tty starts cooked, with `ECHO`, `ISIG`, `ICANON`, `IEXTEN`, `ICRNL`,
+`OPOST` and `ONLCR` set, and `VSTATUS` `^T`, as FreeBSD's defaults have
+them (`sys/sys/ttydefaults.h:46-50`, `:71`).
 
 **A shell's line editor is a program on a raw tty.** `group`, `edlin` and
 `prim_tty` are to a shell what readline is to `bash`. While the shell

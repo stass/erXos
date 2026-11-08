@@ -601,8 +601,8 @@ A command for `system` is rc, not sh. The common translations:
 
 `&` runs a pipeline in the background; `jobs` lists the jobs, `fg` and
 `bg` take a job's number, `Ctrl-Z` stops the foreground job, `Ctrl-C`
-interrupts it, and `kill %N` ends a job, with `SIGTERM` unless a signal is
-named.
+interrupts it, `Ctrl-T` reports on it ([`Ctrl-T`](#ctrl-t-status-and-the-info-request)),
+and `kill %N` ends a job, with `SIGTERM` unless a signal is named.
 
 **The terminal relay** is the process of the session's domain that owns
 the session's tty ([design-live.md](design-live.md#the-tty)) and serves
@@ -708,6 +708,169 @@ kill's `-s NAME`, `-NAME`, `-NUMBER` and `-l`; on a job of Erlang commands
 and `CONT` continues it in the background. When the shell ends, for any
 reason, its jobs end with it, so no job outlives its session.
 
+#### `Ctrl-T`: status and the info request
+
+`Ctrl-T` asks what the foreground job is doing, as FreeBSD's `VSTATUS`
+does. On FreeBSD 15.1 the terminal does two things in order. With
+`ISIG`, `ICANON` and `IEXTEN` set, the line discipline takes the `VSTATUS`
+character, `^T` by default, echoes nothing and keeps the line typed so far
+(`sys/kern/tty_ttydisc.c:1101-1106`). `tty_signal_pgrp` then prints a status
+line from `tty_info` unless `NOKERNINFO` is set, and sends `SIGINFO` to the
+foreground process group (`sys/kern/tty.c:1531-1551`). `SIGINFO` is ignored by
+default (`sys/kern/kern_sig.c:233`), so only a program that catches it
+answers: `cp` writes `from -> to  45%` to its standard error
+(`bin/cp/utils.c:223-228`), `rm` writes the path it removed last
+(`bin/rm/rm.c:265-268`), `sleep` writes `about N second(s) left out of the
+original M` (`bin/sleep/sleep.c:116-126`), and `dd` and `fetch` write their
+transfer counts; `cat` and `mv` do not catch it.
+
+**The construction: a third terminal signal of the job.** `Ctrl-T` takes
+the path `Ctrl-Z` takes. The line discipline turns it into the event
+`info`. The relay passes `info` to the shell's group, and the group passes
+it to the shell, which alone knows its jobs. The job table answers with
+one effect, `{info, Tags}`. `Tags` are the jobs in the foreground: the
+line, and the job the line waits for in `fg`, the same jobs `Ctrl-C` ends.
+The shell carries the effect out over the members `{terminate, Tag}`
+reaches: the processes that carry the tags, and the programs the command
+server records for the job. Carrying it out takes two steps, in FreeBSD's
+order: write the status line, which the tty drops when its `NOKERNINFO` is
+set; then deliver the info request to each member. Each requirement follows:
+
+* **The shell prints the line.** It is the one party that knows both kinds
+  of member of the foreground job. The line discipline is a pure machine
+  that knows no process, and the relay knows the job's programs but not its
+  Erlang processes. FreeBSD's kernel prints the line because it holds the
+  process group; in erXos the shell holds the job.
+* **Order.** The line is written before any request is sent, so it comes
+  before every member's answer, as on FreeBSD.
+* **No foreground job.** The table answers `{info, []}`, and the line
+  ends with FreeBSD's text for that case, below; no request goes out.
+* **At the prompt.** While the shell prompts, the tty is raw with `ISIG`
+  clear, so `Ctrl-T` is a key for `edlin`, which transposes two
+  characters. FreeBSD's `sh` does the same in emacs mode: libedit clears
+  `ICANON` and `IEXTEN` while it edits and binds `^T` to
+  `ed-transpose-chars` (`contrib/libedit/tty.c:79-88`,
+  `contrib/libedit/map.c:90`).
+* **In `erl`.** The Erlang shell has no jobs. At its prompt and while it
+  evaluates, `Ctrl-T` is input for its editor, as it is for stock OTP on
+  FreeBSD, whose raw tty has `ICANON` clear
+  ([design-live.md](design-live.md#the-tty)).
+
+The shell runs each report in a short-lived process of its own, which
+reads the members, writes the line and then sends the requests. So a slow
+read, such as a member in a command domain whose agent answers late,
+delays only that report, never `Ctrl-C` or the prompt.
+
+**The status line** has FreeBSD's form (`sys/kern/tty_info.c:306-309`,
+`:388-394`), with two spaces before `cmd:`:
+
+```
+load: L  cmd: NAME PID [STATE] R.RRr U.UUu S.SSs P% Kk
+```
+
+A pure module, `erx_tty_info`, named after FreeBSD's file, chooses the
+member and formats the line. Each value is an inspection attribute
+([design-live.md](design-live.md#inspection-records)). A value that is `ok`
+is formatted as FreeBSD formats its field: seconds to hundredths,
+truncated; percent and KiB as integers. Any other value prints as
+`erx_render`'s token for its status, `[unknown]`, `[unsupported]`,
+`[partial]` or `[timeout N]`, followed by the field's letter, as in
+`[unsupported]u`; an unknown `STATE` shows as its token alone, in place of
+the bracketed state. So an unknown value is never shown as a number. The
+values come from the session's own process table, which is also the
+source of its `ps` ([design-live.md](design-live.md#the-command-shell)), so no
+inspect facet is needed:
+
+| Field | An Erlang process | A program |
+| --- | --- | --- |
+| `L` | `[unsupported]`: no reporter keeps a load average within a session's scope, and a machine-wide one would cross it | the same |
+| `NAME` | its registered name, else its `proc_lib` label when that is an atom or a binary, else the function it started in. Each stage's first process is labelled with its command's name, and the line's process with `rc` | its name, as `ps` shows it |
+| `PID` | its pid as `ps` prints it, `<D.N.S>` | its process id |
+| `STATE` | `running` (status `running` or `garbage_collecting`), `runnable`, `suspended` or `exiting`; while it waits in `receive`, the function it waits in, `M:F/A`, which stands where FreeBSD shows the wait channel | the chosen thread's state as the kernel reports it: `running`, `runnable` or its wait kind; `suspended` when the program is paused |
+| `R` | time since the shell started it, for the line's process and a stage's first process; `[unknown]` for any other, since the runtime keeps no start time | time since it started, from the command server's table |
+| `U`, `S` | `[unsupported]`: the runtime keeps no CPU time per process | `U` is its group's CPU time, as `getrusage` reports it ([design-programs.md](design-programs.md#the-posix-lite-personality)); `S` is `[unsupported]`, since the kernel does not split the two |
+| `P` | `[unsupported]` | `[unsupported]`: no decayed average is kept |
+| `K` | its memory as `process_info/2` reports it, in KiB, rounded up | its sub-space's charges, in KiB |
+
+`NAME` and `STATE` are text the member's domain or program reported. Each
+is cut at a character boundary, `NAME` at 19 bytes (FreeBSD's
+`MAXCOMLEN`) and `STATE` at 32 bytes, since an Erlang function name is
+longer than a wait channel. Each then goes through the line escape, so a
+name that holds a control sequence shows as tokens. A member that ends
+while it is read gives `[unknown]` for each value it no longer has, as in
+`ps`.
+
+**Choosing the member** follows FreeBSD's `proc_compare`
+(`tty_info.c:164-216`) with the measures erXos keeps:
+
+1. a member that is running or runnable comes before one that is neither;
+2. one that is not ending comes before one that is;
+3. a program comes before an Erlang process, since its record carries the
+   kernel's measures;
+4. more work comes first: CPU time for a program, reductions for an Erlang
+   process;
+5. the highest pid wins.
+
+FreeBSD ranks by recent CPU use, a decayed average; neither the kernel nor
+the runtime keeps one per process, so step 4 uses the total. In a program,
+the line shows its first running thread, else its first runnable one,
+else its first thread.
+
+**Where it goes.** The line reaches the terminal as one status write, which
+the relay hands to `erx_tty`'s `status/3`
+([design-live.md](design-live.md#the-tty)). That function returns the line,
+starting with a newline when the tty's output column is not 0. It returns
+nothing when `NOKERNINFO` is set or the tty has less than 256 bytes of
+room. These are FreeBSD's rules (`tty.c:1542-1543`, `tty_info.c:300-309`,
+`tty.c:2067-2072`). It also returns nothing when the room is less than the
+whole line, so a line is never cut. A dropped line is not an error, and
+the requests still go out.
+
+With no foreground job, the line is `load: L  no foreground process
+group`. When the foreground jobs have no member left, it is `load: L  empty
+foreground process group`. These are FreeBSD's texts (`tty_info.c:311-324`).
+
+**The info request.**
+
+* **Programs.** The shell asks each program's handler to send it
+  `SIGINFO`, as the relay asks for `SIGINT`
+  ([design-programs.md](design-programs.md#the-terminal)). A program that
+  does not catch it runs on.
+* **Erlang commands opt in**, as a program catches `SIGINFO`. A process
+  calls `erx_cmd:catch_info()`, which sets the key `'$erx_info'` in its
+  own dictionary. The shell reads that key in the same `process_info/2`
+  call that reads the member's values. It sends `{erx_cmd, info}` to each
+  member that set the key, and sends nothing to any other member. A
+  spawned helper inherits nothing: each process that wants requests opts
+  in. `erx_cmd:info_requested()` takes every pending request without
+  waiting and returns whether there was one, so requests coalesce as a
+  pending signal does. A process that waits in `receive` matches
+  `{erx_cmd, info}` itself. The request does not go to the job's group
+  leader: the leader is only the route of input and output, and passing
+  requests on would make it keep a list of who asked. It does not go to
+  every process either: an unexpected message lengthens the queue of a
+  process that never reads it, and `gen_server` logs it.
+* **What answers.** The Erlang commands answer as FreeBSD's tools do. `cp`
+  copies in pieces of 64 KiB, checks for a request between pieces, and
+  writes `from -> to  N%` to its standard error, the percent three columns
+  wide. `rm` writes the path it removed last to its standard output. `cat`,
+  `mv`, `ls` and `sort` do not opt in.
+
+`kill -s INFO %N`, `kill -INFO %N` and `kill -29 %N` deliver the info
+request to a job and print no status line, as FreeBSD's `kill` does;
+`INFO` is listed by `kill -l`. On a pseudo-terminal of the second tier, the
+relay knows the foreground process group, so the relay builds the line with
+`erx_tty_info` from the command server's table for that group's programs,
+and then has their handlers send `SIGINFO`.
+
+The system domain's console runs no line discipline
+([design-live.md](design-live.md#the-tty)). There, `erx_console` maps
+`Ctrl-T` to the event `info`, as it maps `Ctrl-Z` to `suspend`. A
+command shell's group passes `info` to the shell, unless the input request
+it is serving is the shell's own, in which case `Ctrl-T` is `edlin`'s key.
+The Erlang shell's group gets it as the key. The console's output column
+is unknown, so the line always starts with a newline there.
+
 ## Interfaces
 
 **Erlang commands** implement `erx_cmd`:
@@ -743,7 +906,10 @@ while 256 records are in flight to the next stage, `erx_cmd:emit/3`
 passes a record on with the order of fields it came with,
 `erx_cmd:read/1` takes the next record, line or `eof` from standard input,
 and `erx_cmd:read_record/1` takes a line as a `line` record
-([Pipelines](#pipelines)). No other source of authority exists for a
+([Pipelines](#pipelines)). `erx_cmd:catch_info/0` opts the calling process
+in to `Ctrl-T`'s info request, and `erx_cmd:info_requested/0` takes the
+requests pending for it
+([`Ctrl-T`](#ctrl-t-status-and-the-info-request)). No other source of authority exists for a
 command: the system domain's services are reached only through facets in
 the context.
 
@@ -894,6 +1060,51 @@ remain independent of catalog generation.
   and a `SIGCONT` that another program of the POSIX session sends to a
   member of a stopped job, after which `jobs` shows the job running and
   `fg` brings back its other members.
+* **`Ctrl-T`** ([`Ctrl-T`](#ctrl-t-status-and-the-info-request)). Each case
+  is paired with a seeded fault that makes it fail:
+  * `erx_tty`'s exploration: `VSTATUS` with `ISIG`, `ICANON` and `IEXTEN`
+    set gives `info`, echoes nothing and keeps the partial line; with any
+    of the three clear, it is an ordinary byte. The same cases run
+    differentially against a host pseudo-terminal with `NOKERNINFO` set,
+    since macOS's tty takes `VSTATUS` as FreeBSD's does. Dropping the
+    `IEXTEN` condition, or echoing the key, fails the test.
+  * `status/3`: a leading newline at a column other than 0, and nothing
+    when there is less than 256 bytes of room. Removing either rule fails
+    the test.
+  * `erx_tty_info`: the choice of member, checked exhaustively over small
+    sets of members against a model of the five rules; swapping rules 1
+    and 2 fails. Golden lines in which every value is known, and lines in
+    which each field in turn is `unknown`, `unsupported`, `partial` and
+    `timeout`. A formatter that prints a missing value as 0 fails. A name
+    and a state that hold `ESC ] 8 ;`, a newline and a bidirectional
+    override reach the master only as tokens; bypassing the line escape
+    fails.
+  * The job table: `info/1` gives the line's tag, both tags while the line
+    waits in `fg`, and `[]` with no line. Returning only the line's tag
+    fails the `fg` case.
+  * Erlang commands: `cp` of a large file from a test server that delays
+    each piece. `Ctrl-T` shows the line naming `cp`, then `cp`'s
+    `from -> to  N%`, in that order. A helper process that did not opt in
+    keeps an empty queue. A `cp` that does not call `catch_info`, and a
+    report that sends the requests before it writes the line, each fail.
+  * Programs: FreeBSD's `sleep`, built as a test program, shows the line
+    naming `sleep` and its process id, then its own report. A program that
+    does not catch `SIGINFO` runs on. With `NOKERNINFO` set, only `sleep`'s
+    report appears. Making `SIGINFO`'s default action end the program
+    fails the second case.
+  * The prompt and `erl`: `Ctrl-T` transposes two characters and prints no
+    line. A console that maps the key to `info` while the shell's own line
+    is being read fails.
+  * `kill -INFO %1` delivers the request and prints no line.
+  * FreeBSD as the oracle: the FreeBSD 15.1 oracle guest
+    ([design-network-stack.md](design-network-stack.md)) runs `sleep 30`,
+    `cp` of a large file and `cat | cat` on a pseudo-terminal driven by the
+    harness, sends `^T` mid-line and at column 0, and records each line.
+    The same commands on erXos give lines of the same shape, compared with
+    every number and every status token masked: the same fields, the
+    two spaces before `cmd:`, the leading newline, and the same no-job
+    texts. `cp`'s and `sleep`'s own reports match byte for byte once the
+    numbers are masked. A one-space separator fails the comparison.
 * **`rc` as a program:** `system` and `popen` from a C program, with
   `$status` mapped to wait statuses for an empty status, a number, a
   signal's name and an error's text, and for pipelines of one, two and
@@ -986,9 +1197,26 @@ pauses the space ([design-programs.md](design-programs.md#job-control)).
 | rc's oracle and the shell disagree where rc's behaviour is unspecified | medium | test noise | each difference is classified once and pinned by a test |
 | The relay's single path for terminal writes serialises a job's output through one process | low | a job of many chatty programs is bounded by the relay's throughput | the relay handles at most 4 KiB unanswered and the console is the bottleneck anyway; `tools/erx bench pipe` with a pipeline writing to the terminal |
 
-No open question remains for the shell: its language, its editing and its
-toolbox are the user's decisions, and a shell compatible with tcsh is a
-roadmap item ([plan.md](plan.md#beyond-the-plan)).
+Its language, its editing and its toolbox are the user's decisions, and a
+shell compatible with tcsh is a roadmap item
+([plan.md](plan.md#beyond-the-plan)). For `Ctrl-T`, these remain open:
+
+* **The load field.** No reporter keeps a load average a session may see,
+  so `load:` is `[unsupported]`. The kernel could keep a decayed average of
+  ready threads for each group and report the session's own group, within
+  scope. Recommendation: leave it `[unsupported]` until something else
+  needs a load average.
+* **Stacks, as `kern.tty_info_kstacks`.** The runtime knows an Erlang
+  process's stack, which FreeBSD's kernel must sample, so the line could add
+  `current_stacktrace` under a session setting. Recommendation: leave it
+  out; `erx:source/1` and the inspector already show where a process is.
+* **`cat`.** FreeBSD's `cat` does not catch `SIGINFO`, so erXos's does not
+  answer. Recommendation: follow FreeBSD, and have `cp` and `rm` answer.
+* **`SIGINFO`'s number in musl.** Linux has no `SIGINFO`, and musl's 31
+  standard numbers are all taken. Recommendation: give `SIGINFO` 30 and
+  make `SIGPWR` its alias, as Linux on Alpha shares one number between
+  them
+  ([design-programs.md](design-programs.md#the-terminal)).
 
 ## References
 
