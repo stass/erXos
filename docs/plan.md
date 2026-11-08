@@ -119,7 +119,7 @@ names; the table's order is the order.
 | **Phase 1** | | | | |
 | M0 The tree, the toolchain and the oracle | focused stock OTP 29.1.2 cases verify the offline Linux test runner; native Mac OTP supplies bootstrap tools; the frozen Fiasco set builds from the tree; every generated file regenerates unchanged | 4,000 lines of Ruby | | G0 |
 | M1 The system boots on Fiasco | the near-stock Fiasco prints erXos's banner and starts `liberx`'s root entry as the root task under HVF; the root allocates, maps and reuses memory, runs threads with TLS and timed waits, runs a second task through a read-execute alias and ends it, takes an interrupt through the readiness interface, and ends the machine with a crash record on a stopped pet; the production image boots to the point where ERTS starts | 3,000 to 4,500 lines of C17 | M0, G0 | |
-| Track H Hosted mode | the runtime runs as a Mac process under the sanitizers; from 1b-A, domains and their connections run as Mac processes too, over the same backend rows as the stopgap's | 3,000 lines of C17 | M0 | |
+| Track H Hosted mode | the runtime runs as a Mac process under the sanitizers; once the Fiasco backend's rows between tasks have settled, domains and their connections run as Mac processes too, over the same backend rows as the stopgap's | 3,000 lines of C17 | M0 | |
 | M3 The shell is the operating system | `1>` on the serial console, from ERTS in the system domain in user mode, started by the root task | 8,000 lines of C, 1,000 of Erlang | M1, track H | G3 |
 | M4 The machine is an object | save in the editor on the Mac, run in the machine; follow a process to its source; ERTS and backend events on one timeline, the kernel's row unsupported | 10,000 lines of Erlang, 3,000 of Ruby, 2,000 of C | M3 | |
 | M6 Immutable code, lasting data | the shell reads the release's files from an EROFS image on a QEMU disk; a file under `/data` survives a power cut | estimated in the subsystems' design documents | M4 | |
@@ -239,7 +239,6 @@ baseline conditions; unknown or unsupported results stay explicit.
 
 | Gate | When | Comparison and required evidence | Decision |
 | --- | --- | --- | --- |
-| E-D1 in hosted mode | hosted mode in 1b-A, before the connections land under QEMU | `tools/erx bench xdomain-pingpong` and `xdomain-throughput` between two hosted domains at lane sizes of 16 KiB and 64 KiB, and a `gen_server:call` round trip, against loopback distribution on the host; round-trip distribution, throughput by frame and lane size, CPU per frame in each runtime | the first values of `lane` and the system manifest's `system_lane`, the producer's wait rule, and whether ERTS encodes straight into the lane, each confirmed or revised at G5 under HVF ([design-domains.md](design-domains.md#performance)) |
 | GP, programs and pipes | track P, in hosted mode first and under HVF on the stopgap before the first part of track P is complete; the stopgap's numbers are provisional, since each object a program's start makes is one request to the backend's root service there | a program's start from the session's `spawn` to its `main` (`tools/erx bench spawn`) against the budget of [design-programs.md](design-programs.md#performance); a `make`-shaped workload of many short children over pipes with a paused pager, and `tools/erx bench pipe` with one writer and with 256 writers; latency, throughput, memory per program and per pipe, and the session's Erlang work per request | the channel's and the data area's defaults, completion batching in the handler, whether the pipe server keeps one ring per write end ([design-pipes.md](design-pipes.md#the-ring)); whether a program's start needs a cheaper path than one kernel call per object is decided at GK3, on erXos's kernel |
 
 GQ also measures the fill and the write-back cost of the session's shared
@@ -561,18 +560,15 @@ process: spaces are the process, threads are pthreads, memory objects are
 `mmap`ped regions, umtx waits are `os_sync_wait_on_address`, and groups and
 parking keep the epoch protocol
 ([design-runtime.md](design-runtime.md#liberx)). From M3 on, ERTS's port
-runs hosted first, under ASan, UBSan and TSan, and `lldb`; from 1b-A on,
-several domains run as Mac processes with their lanes in shared regions,
-the domain library driving the hosted interface, so connections, the
-funnel and the domain library's plans are measured and sanitized before
-they run under QEMU. The hosted backend grows in 1b-A the rows between
-tasks that 1b-A's consumers use, as two backends pass one test set, so
-the lane, connection and pipe models run under the sanitizers; it grows no
-device row, since a hosted runtime has no devices. Its multi-process form
-gets its design, reviewed as a design, before its code
-([design-stopgap.md](design-stopgap.md#the-hosted-backend)), and the
-Fiasco backend's rows do not wait for it. QEMU
-remains authoritative.
+runs hosted first, under ASan, UBSan and TSan, and `lldb`. 1b-A targets QEMU: through 1b-A the hosted backend stays one
+process, and gains the rows 1b-A needs only where they are cheap there.
+Its multi-process form, in which several domains run as Mac processes with
+their lanes in shared regions and the domain library drives the hosted
+interface, comes once the Fiasco backend's rows between tasks have settled;
+it carries those rows and no device row, since a hosted runtime has no
+devices, and gets its design, reviewed as a design, before its code
+([design-stopgap.md](design-stopgap.md#the-hosted-backend)). It is a
+planned feature in [TODO.md](../TODO.md). QEMU remains authoritative.
 
 ## M3: The shell is the operating system
 
@@ -716,10 +712,10 @@ medium, with flush of helper work, and
 `/proc` ([design-files.md](design-files.md)); the
 host link's files stream, stream 4, which `tools/erx files` relays to a
 UNIX socket on the Mac so that any 9P2000.L client there mounts the
-machine's `proc` tree, and the host-tree domain, which holds QEMU's
-virtio-9p device and serves the Mac's tree at `/host`, from M5, whose
-domain service creates it
-([design-live.md](design-live.md#files-between-the-host-and-the-machine));
+machine's `proc` tree
+([design-live.md](design-live.md#files-between-the-host-and-the-machine)),
+while the host-tree domain, which serves the Mac's tree at `/host`, is
+optional work of 1b-E ([M9](#m9-a-driver-is-an-erlang-process));
 the line escape with its table generated from OTP's Unicode data, at each
 display of labelled text, with a fuzz target
 ([design-live.md](design-live.md#attributed-text)); the `shell_default`
@@ -848,8 +844,9 @@ grants and the hostile runtime, which M5's kernel part adds.
 **On the stopgap (1b-A).** Every bullet of the scope lands on the stopgap
 Fiasco except the kernel interface sub-spaces and programs need, which
 lands on erXos's kernel as M5's kernel part, after M2. On the stopgap its
-consumers use rows that the Fiasco backend, and the hosted backend with
-it, add behind the unchanged interface: a memory object mapped into
+consumers use rows that the Fiasco backend adds behind the unchanged
+interface, and the hosted backend, one process through 1b-A, adds only
+where they are cheap ([track H](#track-h-hosted-mode)): a memory object mapped into
 another task, its destruction revoking it in every task that mapped it;
 sub-spaces created at a task's request, each with its parent recorded,
 ended when its parent ends, and an exit record with the exit status or a
@@ -908,10 +905,7 @@ the file servers' side, a grant derived
 on a subtree reaching nothing above it whatever its client sends; a
 domain's sub-spaces end with it; budgets, grants and every charge read
 `unsupported` in the inspector, never a fabricated value; if the vCPU row
-lands, the vCPU conformance tests below pass on it; a domain the system
-manifest names reads a file of the host's tree under `/host` through the
-host-tree domain, whose bridge fails a reply that fails the codec with
-`eio` and leaves `/host` mounted;
+lands, the vCPU conformance tests below pass on it;
 `file:read_file("/proc/processes/4.N.S/status")` in the system shell,
 where 4 is the system domain's id, returns every status the inspector can
 report.
@@ -1759,6 +1753,13 @@ Phase 1 manifest check allows these devices in development builds
 ([design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check)), and
 the device service's unconfined placement is
 [design-system.md](design-system.md#devices)'s on the stopgap.
+
+**Optional on the stopgap.** The host-tree domain of
+[design-live.md](design-live.md#files-between-the-host-and-the-machine),
+which holds QEMU's virtio-9p device with its own device role and driver and
+serves the Mac's tree at `/host` to the domains the system manifest names
+through the 9P bridge, is work 1b-E may pick up when a need for it appears.
+It is no exit criterion of 1b-E or of any other item until then.
 
 **Scope, on erXos's kernel (M9's kernel part).** The virtio console,
 block and network drivers over virtio-pci, the move from virtio-mmio

@@ -1618,9 +1618,10 @@ storage is a file server, mounted in the namespace through the domain's
 facet ([design-storage.md](design-storage.md)).
 
 **The release file system is a view of a sorted list of paths.** A release is
-the archive's entries whose paths start `system/`; the index is sorted, so they
-form one run, and a file's path in the namespace is its entry's path without
-that prefix. The packer and `erx_pack_open` both refuse a file that is a prefix
+the archive's entries whose paths start with its prefix, `system/` for the
+system release and `domains/<name>/` for a domain's; the index is sorted, so
+they form one run, and a file's path in the namespace is its entry's path
+without that prefix. The packer and `erx_pack_open` both refuse a file that is a prefix
 of another path, so a directory needs no record of its own: `d` is a directory
 exactly when some path starts `d/`, and `/` always is. The provider's core
 is pure and builds for the host: given the names an `erx_path` action holds, a
@@ -2186,11 +2187,12 @@ code, no JIT object, no writable view of code and no C++; the system
 domain does bounded control only, so the interpreter's speed suffices
 there ([design-system.md](design-system.md#the-root-task)). Command
 domains run the interpreter image, so they make no code, as no program
-does ([Native programs](#native-programs)), and every domain runs it in
-deterministic mode, because BeamAsm's output depends on addresses and
-hash order ([research](research-erts-internals.md#beamasm-on-aarch64)).
-Which image a domain runs follows from one field of its specification,
-and which image may make code follows from the image's manifest, so no
+does ([Native programs](#native-programs)), and under `erx.det=1`
+every domain runs the interpreter image, whatever its specification
+names, because BeamAsm's output depends on addresses and hash order
+([research](research-erts-internals.md#beamasm-on-aarch64)). Which image
+a domain runs follows from one field of its specification and the boot's
+mode, and which image may make code follows from the image's manifest, so no
 domain decides its flavour at run time.
 
 * **Executable memory.** asmjit's `VirtMem` gets an erXos backend: a block

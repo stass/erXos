@@ -2414,6 +2414,13 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Medium] hosted backend, `liberx/backend/hosted/` ([design-stopgap.md](docs/design-stopgap.md#the-hosted-backend),
+  [plan.md](docs/plan.md#track-h-hosted-mode)): the multi-process form, in which each space other than the
+  first is a macOS process, so domains, connections and sessions run under the sanitizers and E-D1 can be
+  measured between hosted domains. It waits until the Fiasco backend's rows between tasks have settled;
+  until then the hosted backend is one process with the rows 1b-A needs where they are cheap. Its design
+  is written and reviewed before its code.
+
 * [Medium] network, `docs/design-network-stack.md`: the network stack's
   design document, written before M14's code, pins the FreeBSD release
   whose `netinet` and `netinet6` logic the stack translates into Erlang,
