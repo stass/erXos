@@ -405,7 +405,7 @@ of behaviour, however many lines it touches:
 | `beam/bif.c` | 35. `display_string/2`'s standard-input branch, which feeds a terminal through `TIOCSTI`, is compiled out; its write loop adds to the offset only what a write wrote, retrying an interrupted or blocked write at the same offset, where stock adds the -1 too (`bif.c:4275-4279`), which only a hosted descriptor can answer, and whose reader is outside the runtime; `display/1` formats into a temporary buffer in place of `erts_printf` and goes on as `display_string/2` does; and while another process holds `erx_tty_owner`, both trap to `erx_output:write/2` with the bytes |
 | `beam/sys.h`, `beam/erl_drv_thread.c`, `beam/erl_driver.h`, `sys/common/erl_sys_common_misc.c`, `nifs/common/zlib_nif.c`, `include/internal/erl_misc_utils.h`, and the two event files above | 36. `__erxos__`, which every erXos build defines, turns off each block keyed on `__APPLE__` or `__DARWIN__`, so a hosted build compiles what a native build compiles |
 | `beam/bif.c`, `lib_src/common/erl_printf.c` | 37. each `write` is `erx_output_write`, under the same signature, and the retry loops around it stay, since natively it never answers blocked ([The console](#the-console-and-standard-io), [What ERTS imports](#what-erts-imports)) |
-| `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers `{error, enotsup}`, so terminal-less rendering reaches no NIF; `isatty/1` answers `false` and the terminfo calls answer that no capability exists, which is what `io_ansi` reads when a terminal has no terminfo ([The console](#the-console-and-standard-io)) |
+| `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers from `erx_width`, the system's one width table ([C library seam](#the-c-library-seam)), so terminal-less rendering reaches no NIF and counts the columns the terminal and musl count; `isatty/1` answers `false` and the terminfo calls answer that no capability exists, which is what `io_ansi` reads when a terminal has no terminfo ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/standard_error.erl` | 39. `server/0` calls no `prim_tty`: its encoding is `unicode`, and it writes with `erlang:display_string(stderr, Bytes)`, which waits as any process's write does |
 | `lib_src/common/ethr_aux.c` | 40. the page size is `getpagesize()`, in place of `sysconf` |
 | `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load; `kernel_safe_sup`'s `init/1` makes the domain's file version counter (`erx_fs_version:init/0`) and adds `erx_ramfs_sup`, the domain's `/tmp`, as its last child ([design-tmp.md](design-tmp.md#starting-and-mounting)); `start_distribution false` leaves out only `net_sup` and `dist_ac`, so `rex`, `global_name_server` and `global_group` start as on a stock node that is not distributed ([Configuration](#configuration)) |
@@ -1690,8 +1690,9 @@ UART ([design-system.md](design-system.md#drivers)), and the kernel keeps
 only its early console for its own log. A session's standard I/O goes
 through Erlang's I/O protocol to its group, in its own domain, and from
 there to its tty ([design-live.md](design-live.md#the-tty)), whose bytes
-reach the console line, the UART, the host link or a terminal window, at
-which that tty is connected, if any. `standard_error` writes
+reach its master: the console line, the UART or the host link, at which
+that tty is connected, if any, or a terminal on a display
+([design-display.md](design-display.md#the-terminal)). `standard_error` writes
 with `erlang:display_string/2` (edit 39).
 
 **The console service is a program with its own line editor on a raw terminal,
@@ -1742,9 +1743,10 @@ keys or history, which the first shell's demo needs. Its state comes from
 `init_ssh/3`, which needs neither a terminal descriptor nor terminfo. This path
 calls two helpers of the removed NIF, `isprint/1` for each ASCII character
 (`prim_tty.erl:1280`) and `wcwidth/1` for each column count, a prompt's included
-(`:1139`). Edit 38 makes both pure: `{error, enotsup}` is the answer
-`npwcwidth/2` already takes to `unicode_util:is_wide/1`, so a combining mark
-counts as one column.
+(`:1139`). Edit 38 makes both pure: `wcwidth/1` returns the width from
+`erx_width`, a generated module of the kernel application, so a combining
+mark counts as no column and a wide character as two, as the terminal
+emulator `erx_vt` and musl's `wcwidth` count them.
 
 **A runtime's own output is raw, and has two paths, by whether the caller can
 wait.** Nothing in ERTS or `sys/erxos` escapes or filters what a process writes.
@@ -2390,9 +2392,24 @@ standard output and error; programs get the POSIX-lite personality's
 descriptors, spawn, pipes, `poll` and signals, written for erXos over
 `liberx` in musl's tree. String, memory, character, conversion and
 formatting functions, mallocng and `libm` stay as upstream
-([research](research-c-library.md#musl-126)). Float conversion is not the
+([research](research-c-library.md#musl-126)), apart from the width
+tables. Float conversion is not the
 C library's: `sys/erxos` owns exact string-to-double and double-to-string
 conversion, so float text never depends on which C library is linked.
+
+**One width table.** musl's `wcwidth` reads two tables,
+`src/ctype/nonspacing.h` and `src/ctype/wide.h`, which the build
+generates instead of keeping musl's copies: the terminal generator
+writes them from the width rule of `abi/terminal.txt` and the Unicode
+data OTP 29.1.2 carries, Unicode 17.0.0, as it writes the terminal
+emulator's table and `erx_width`, which `prim_tty:wcwidth/1` answers from
+(edit 38). A character is 0 columns if its general category is `Mn`,
+`Me` or `Cf` other than U+00AD, 2 if its East Asian Width is `W` or `F`,
+and 1 otherwise ([design-display.md](design-display.md#cells-and-the-grid-state));
+a control keeps musl's answer, -1. So a program, the shell's line editor
+and the terminal agree on every column by construction. A `libc-test`
+case that expects the widths of musl's older Unicode data is a
+documented difference, with a test.
 
 **Thread cancellation.** `pthread_cancel` sets the target's cancel flag. On
 Linux musl then sends the target `SIGCANCEL`; on erXos the canceller instead

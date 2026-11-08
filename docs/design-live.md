@@ -202,8 +202,9 @@ design.
                              |         | ways, as frames       | the connection
                              |     +------------------------------------------+
                              |     | session domain: Erlang shell, command    |
-                             |     | shell, terminal relay, command server,   |
-                             |     | a handler per program, the export        |
+                             |     | shell, terminal relay, terminals on a    |
+                             |     | display (erx_term), command server, a    |
+                             |     | handler per program, the export          |
                              |     +------------------------------------------+
                              |         | channels, pipes, data areas
                              |         v
@@ -221,7 +222,11 @@ the shell of a session that runs in their own domain after a login, from
 which the inspector is reached through the session's inspect facet. The
 command shell runs in the session's domain beside its terminal relay and
 command server, and serves the session's programs their `/bin`
-and other local files through the session's export; `erx_procfs` and
+and other local files through the session's export. A person at a
+display types into a terminal, `erx_term`, a program of their session
+that is the master of one of the session's ttys
+([design-display.md](design-display.md#the-terminal)), so no byte of it
+passes through the system domain; `erx_procfs` and
 `erx_code`, with each principal's hot store, sit in the system domain
 beside the inspector. `erx:i([processes, Pid])` asks `erx_inspector`, which
 reads the pid's creation to find its domain, takes the domain's kernel
@@ -244,8 +249,8 @@ with it.
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
 | **V5.** Code enters the system domain only through the install facet | the system domain's runtime loads only installed storage: its release's files and the install arena, which only `erx_code:install_beam/2` writes and which refuses every caller but `erx_code`; `erx_code` takes modules only from install facets, which name them by hash, and checks each blob against its hash; a service that loads bytes it received gets `{error, not_installed}`; nothing reapplies installs after a reboot | a second writer of the install arena, `erx_code` accepting modules from something other than an install facet, or a path that reapplies stored installs | a test that `code:load_binary/3` with bytes from a request fails in the system domain; a test that a domain's code facet cannot load into the system domain; a test that `install_beam/2` refuses other callers; a test that a blob one bit off its hash is refused |
-| **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; no session ever holds the facet, so no route into a session reaches the system shell ([Window tokens](#window-tokens)); the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain; a release manifest that marks a terminal window secure fails the manifest check | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a principal holding the facet who logs in at a terminal window that is not secure gets no system shell; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read; the manifest check refuses a release manifest marking a window secure; a seeded console that grants the facet at a line that is not secure fails; the routes into a session are tested under [Window tokens](#window-tokens) |
-| **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login, or, at a window a window token opened, the principal of the session that asked for it; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again; a line gets a principal without a login only from a token the console minted for a session's own request, and every shell at it is then that principal's ([Window tokens](#window-tokens)). A terminal window thus carries its principal's authority, as a UNIX terminal does, and a compromised display domain has the authority of the shells in its windows and what any window system has, as an X11 or Wayland server does, and nothing beyond: no system shell, which a release build never connects at a window, no presence at the machine and nothing of a principal that neither uses the display nor types at it ([Window tokens](#window-tokens)) | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached; a shell without a login whose session the display chose | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails; the token tests are under [Window tokens](#window-tokens) |
+| **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; the console's lines are the UART and the host link's `console` line alone; no session ever holds the facet, so no route into a session reaches the system shell, a terminal on a display included, since a terminal is a program of its session; the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read, at a console line and at a terminal on a display alike; a seeded console that grants the facet at a line that is not secure fails |
+| **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
 | **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records, `ls`, which writes names at a terminal through it, and the host tool's printer; `ps` writes names through the field escape wherever its output goes, so they hold nothing the line escape would change; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
 
@@ -571,12 +576,14 @@ writer hands the tty against what the master gets, which V1 tests; and what
 request. A program that needs exact bytes uses `write` or stdio, and Erlang code
 uses `erlang:display_string/2`.
 
-**Where a tty lives.** A session's tty lives in the session's domain, in its
+**Where a tty lives.** A session's ttys live in the session's domain, in its
 terminal relay ([Job control](design-shell.md#job-control)), which answers
 every `{tty, Open, Request}` of its programs. A tty's master is `erx_console`
-while the tty is connected at a console line, the UART, the host link's
-`console` line or a terminal window ([The console](#the-console)), or in
-the second tier a program that holds a pseudo-terminal's master;
+while the tty is connected at a console line, the UART or the host link's
+`console` line ([The console](#the-console)); a terminal on a display,
+`erx_term`, a process of the session
+([design-display.md](design-display.md#the-terminal)); or in the second
+tier a program that holds a pseudo-terminal's master;
 so a session's `/dev/tty` and a `/dev/pts/N` are one thing with different
 masters ([design-programs.md](design-programs.md#the-terminal)).
 
@@ -612,8 +619,9 @@ are states, so a repeat of them is harmless and a lost one is sent again. A
 master that has not taken it, because the session is not connected, sends
 nothing, and that one output is all the console holds for a session. A lost
 `{tty_input, Bytes}` is typed input lost, as in a line's overrun, and the peer's
-count reports it. A master in the tty's own domain, a pseudo-terminal's, sends
-the same messages as plain Erlang messages, which are not dropped.
+count reports it. A master in the tty's own domain, `erx_term` or a
+pseudo-terminal's, sends the same messages as plain Erlang messages, which
+are not dropped.
 
 **Many writers.** Every open may write, in any job and at any time. The owner
 serves writes in arrival order, and each writer's bytes stay in order. A write
@@ -649,14 +657,15 @@ requests to it. Neither system filters output.
 
 ### The console
 
-`erx_console` is the system domain's console service. It serves
+`erx_console` is the system domain's console service. It serves two
 **console lines**, the terminals at which an operator logs in and works:
-the UART, which is erXos's `/dev/console` as on UNIX; the host link's
-`console` facet; and each terminal window that a display domain offers
-through `offer_line` ([design-display.md](design-display.md#terminal-windows)).
-Every line has its own menu, its own login and at most one connected
-terminal, and the console treats them alike except where this section
-names the UART.
+the UART, which is erXos's `/dev/console` as on UNIX, and the host link's
+`console` facet. Each has its own menu, its own login and at most one
+connected terminal, and the console treats them alike except where this
+section names the UART. A terminal on a display is no console line: it
+is a program of a session, the master of one of the session's ttys
+([design-display.md](design-display.md#the-terminal)), and the console
+has no part in it.
 
 **The UART.** The console's UART belongs to the system domain in every
 manifest, which names it by its device-tree path in its `console` field;
@@ -671,16 +680,10 @@ sent to the UART whole and in order.
 manifest ([design-system.md](design-system.md#the-manifest)), as UNIX's
 `/etc/ttys` marks the terminals where root may log in. A release
 manifest marks the UART and the host link secure by default and may
-clear either. The manifest check refuses a release manifest that marks a
-terminal window secure (property 9 of
-[design-system.md](design-system.md#the-manifest)), so a display domain, which sees and can inject
-every byte of its windows, never carries the system shell, which only a
-login at a secure line opens (**The system shell**, below;
-[design-display.md](design-display.md#security)). A development
-manifest may mark a display's windows secure, and each is then a secure
-line, where a `root` login gets the system shell: a development build
-runs trusted code only, and its display domain is then in that build's
-trusted base, which the manifest check reports. A development manifest marks the UART and
+clear either. A display domain, which sees and can inject every key typed
+at it, never carries the system shell, which only a login at a secure
+line opens (**The system shell**, below;
+[design-display.md](design-display.md#security)). A development manifest marks the UART and
 the host link secure by default, and the console logs `root` in at both:
 at the UART at boot, and at the host link's `console` line when the host
 opens it, so each shows the system shell; a development manifest that
@@ -691,7 +694,8 @@ the system shell's records only in the system shell at its `console`
 line. Being secure
 is a property of a login's line, and only a login there opens the system
 shell, so no route into a session carries it, whatever line it starts
-from ([Window tokens](#window-tokens)).
+from: `erx:attach` of a session, a terminal on a display, or a shell the
+session starts.
 
 **Writers.** A line has one reader at a time and several writers, whose
 writes can interleave, as on a UNIX terminal:
@@ -721,8 +725,8 @@ log service:
   system domain has stopped; so the kernel and the driver share the UART
   in time and never write it together.
 
-A terminal window or the host link shows its own session's output and
-the log lines the log service sends it, and nothing else.
+The host link shows its own session's output and the log lines the log
+service sends it, and nothing else.
 
 **Log lines and program output.** A log line is one write to the driver,
 whole, ending in CR-LF, between whatever else is written. It can land in
@@ -734,8 +738,8 @@ reads them with `erx_log_read` and writes each as a log line
 
 * **Size.** The connected tty is told its line's size as
   `{tty_size, Rows, Columns}`: on the UART 80 by 24 unless the operator
-  sets another with `erx:console_size/2`, on the host link what the host
-  tool reports, and on a terminal window what its `wctl` gives.
+  sets another with `erx:console_size/2`, and on the host link what the
+  host tool reports.
 * **Input.** Bytes go to the connected terminal's tty as
   `{tty_input, Bytes}`, whose line discipline decides what they mean
   ([The tty](#the-tty)). The one exception is `Ctrl-G`, which the console
@@ -749,26 +753,16 @@ reads them with `erx_log_read` and writes each as a log line
   console does not use, so `erx_console` implements it: `Ctrl-G` opens a
   menu that lists the sessions of the line's principal, in a development
   build `root` at the UART, and connects to, interrupts, starts or kills
-  one (V7). The menu also opens a terminal window, locks the line and
-  logs out:
-  * **New terminal window** opens a window whose line shows a shell in
-    the session connected at this line, as a new window in rio runs a
-    shell in its opener's namespace ([Window tokens](#window-tokens)).
+  one (V7). The menu also locks the line and logs out:
   * **Lock** detaches the current terminal and shows the login prompt with
     the principal's name; the principal's sessions run on, and only a login
     as that principal at that line reaches them again. Another principal
     may log in at a locked line, and its menu shows only its own sessions.
-    A lock acts on its own line alone: the windows opened from it keep
-    their shells, as locking one UNIX terminal leaves the user's other
-    terminals open, so an operator who leaves the UART locks or logs out
-    at those windows too. At a window opened without a login the name is
-    that of the principal whose session asked for the window, and
-    unlocking it is a login like any other.
-  * **Log out** ends every session the principal started at that line and
-    the shell of a window opened there without a login, as a hang-up
-    ends a UNIX login's jobs, and shows the login prompt. A session started at
-    another line runs on: logging out at a window opened from a UART
-    session ends the window's shell and tty, not the session.
+    A lock acts on its own line alone, as locking one UNIX terminal leaves
+    the user's other terminals open.
+  * **Log out** ends every session the principal started at that line, as
+    a hang-up ends a UNIX login's jobs, and shows the login prompt. A
+    session started at another line runs on.
 
   A session's programs stop and continue under the command shell's job
   control, which pauses and resumes their groups
@@ -789,27 +783,23 @@ reads them with `erx_log_read` and writes each as a log line
   one of the principal's credential slots with it and gives one of four
   answers: matched; did not match; limited, once a name, a principal's
   or not, has had 5 failures in 60 s from local terminals (the UART and
-  the host link), 5 from terminal windows or 5 from network connections,
-  each class counted apart so that a display domain typing wrong
-  passphrases cannot lock a name out at the UART, or a line has had 5;
+  the host link) or 5 from network connections, each class counted apart
+  so that a network peer typing wrong passphrases cannot lock a name out
+  at the UART, or a line has had 5;
   or unavailable, when the vault's partition or its sealing backend
   fails, or for an enrolment or a passphrase change on a trial boot,
   which the console reports as such
   ([design-system.md](design-system.md#the-vault)). On a match the
   domain service starts the principal's session domain
   ([design-domains.md](design-domains.md#principals-sessions-and-quotas)),
-  and the console connects that session's tty at the line. A login at a
-  terminal window is never presence at the machine: it cannot enrol a
-  principal or open a slot made under another sealing backend
-  ([design-system.md](design-system.md#the-vault)). In a development
+  and the console connects that session's tty at the line. In a development
   build the console logs `root` in at the UART at boot and at the host
   link's `console` line when the host opens it, each a login at a secure
   line (**Secure lines**, above), so their first prompt is the command
-  shell's and the system shell is one `erl` away from it; a display's
-  windows log no one in on their own, in any build.
-* **Windows without a login.** A terminal window opened from a session
-  shows that session's shell with no login, by a window token the console
-  minted for that session's own request ([Window tokens](#window-tokens)).
+  shell's and the system shell is one `erl` away from it. Logins at a
+  display are not designed: a display serves the session its manifest
+  entry names, started without a login
+  ([design-display.md](design-display.md#a-displays-session)).
 * **The system shell.** An Erlang shell whose group and evaluator run in
   the system domain (`group:start/3`, `lib/kernel/src/group.erl:120`)
   starts only under the **system-shell facet**, and the facet belongs to
@@ -826,7 +816,7 @@ reads them with `erx_log_read` and writes each as a log line
   shell end with the login: at a lock, a log out, or the line's drop; the
   next login at a secure line grants a new one (V6). No session holds the
   facet, so whatever route reaches a session reaches the session's own
-  domain and no system-shell authority ([Window tokens](#window-tokens)).
+  domain and no system-shell authority.
   Expressions typed in the system shell run with
   the system domain's authority, so the facet is as strong as the
   install facet, and the records shown only to the system shell, the
@@ -874,129 +864,6 @@ reads them with `erx_log_read` and writes each as a log line
   lines are its session's: the handler receives them on the channel and
   the session's proxy sends them under the session's id, with the
   program's name in the text.
-
-#### Window tokens
-
-A terminal window carries its principal's authority, as any UNIX
-terminal does. A window opened without a login has the authority of the
-session that asked for it, which is its principal's, so the window
-reaches that principal's sessions as a login there would, and
-`erx:attach` from it reaches them as `screen -r` and `tmux attach` do.
-Which routes lead into a principal's own sessions is therefore no
-security question, and nothing lists them. Three properties hold by
-construction instead:
-
-* **The system shell needs a login at a secure line.** The system-shell
-  facet is granted to a login, held by the console and lent only to the
-  system shell at that login's line (**The system shell**, above). A
-  window token is not a login, so the window it opens never carries the
-  system shell, whatever its line's `secure` attribute, and no session
-  holds the facet, so nothing a session reaches starts one.
-* **Physical presence means the UART.** Only a login at the UART is
-  presence at the machine; a token window is not a login at all, and a
-  login at a window enrols no principal and opens no slot made under
-  another sealing backend ([design-system.md](design-system.md#the-vault)).
-* **A line gets a principal without a login only from a token minted
-  for a session's own request**, and every shell at it is then that
-  principal's. Which session a window serves is the console's choice,
-  never the display's.
-
-**The one path to a token.** The console mints a window token only in
-`new_window`, for the session that calls it. `new_window` is offered on
-one facet alone, the console facet that the domain service gives a
-session domain when it creates it; the console takes the session from
-that facet and refuses the call from every other holder, itself among
-them. The line's menu item **New terminal window** asks the terminal
-relay of the session connected at the line to make that call on its
-session's facet, so the session is the one caller, and the overlapping policy's "new terminal
-window" item ([design-display.md](design-display.md#terminal-windows)) is
-that menu action at the line of the window that has the keyboard, as if
-`Ctrl-G` and the item had been typed there, which the display can already
-do. A line whose terminal is the system shell, or which shows the menu or
-a login, has no session connected, so a window asked for from it shows a
-login. The request names the display, one the session is introduced to,
-and from a window's menu that window's display.
-
-**The token.** A window token is 128 random bits bound to the session and
-to the display's `offer_line` facet. The console sends it to that display,
-whose `erx_term` makes the window and presents the token with its
-`offer_line` ([design-display.md](design-display.md#terminal-windows)). A
-session has at most 4 live tokens, and a further request is refused. The
-console consumes a token at its first presentation; it also dies unused
-when its session ends or 60 s after it was minted, and the console logs
-no token. The console keys every line by the `offer_line` facet that
-offered it, so a display names only its own lines.
-
-**What a token opens.** A valid token connects at the new line a tty that
-the session's terminal relay makes, with a new shell of the session on
-it, and records the session's principal as the line's principal (V7),
-with no system-shell facet. The line then works as any line of that principal:
-its menu reaches the principal's sessions, Lock shows the login with the
-principal's name, and Log out ends the sessions started at that line and
-the window's shell and tty, not the session that asked. One rule ends
-the line's principal: it lasts until a lock or a log out at that line,
-a log out at the line the window was opened from, which ends the
-window's shell, or the end of the session that asked, whichever comes
-first. The console knows the opener line only from its own record of
-the menu action it handed to the relay, never from the session; a
-window the session's own code asked for has no opener line. Then the
-line drops to a login with its record cleared, and a session the
-operator connected or started there from the menu is detached, not
-ended. Once a principal logs in again at that line, it is a login line
-like any other, and neither the asking session nor the opener line
-ends it any more. "Opened from" names one line only: a window opened from a
-window depends on its own opener's line and session, not on a chain. An
-offer with no token, or with one that is unknown, used, expired
-or bound to another display, gets a login and never a shell, so a window
-that the display offers on its own, its first one and the single policy's
-service terminal
-([design-display.md](design-display.md#windows-and-the-window-system))
-among them, shows a login.
-
-**The display's bound.** A compromised display domain has the authority
-of the shells in its windows, as an X11 or Wayland server does: it types
-into them, and through them reaches what their principals reach, their
-other sessions included. It has as well what every window system has:
-it routes the input of the windows of the sessions introduced to it,
-reads and writes its display's clipboard where `snarf` is on, and records the passphrase of every principal
-who logs in at its windows, which it can type at a login again. It has
-nothing beyond: no system shell, which a release build connects at no
-window and a token window never carries; no presence; and nothing of a
-principal that neither uses the display nor types at it, since it
-cannot choose a token's session. A lock at the UART leaves the windows
-opened from it running, as on UNIX, so their shells stay in that
-authority until they are locked or logged out too.
-
-**The line cap.** A display holds at most the number of lines its
-`console_line` parameter allows, 16 by default, and an offer beyond it is
-refused, so a display cannot make the console keep unbounded state.
-The cap does not bound failed logins: a display that closes a line and
-offers a fresh one escapes the per-line limit, and what bounds its
-guesses is the vault's per-name count in the terminal windows' class. The cap is
-shared by every principal whose sessions use the display, so one
-principal's windows can fill it and leave another's requests without a
-line; that is a recorded residual ([TODO.md](../TODO.md)).
-
-**Tests.** A display's offers with no token, a forged one, a used one, an
-expired one and another display's each get a login, where a seeded
-console that accepts any token fails; `new_window` on a domain's console
-facet that is not a session domain's, and from a holder other than that
-session domain, is refused; the menu of a window opened from a session
-lists that principal's sessions and no other principal's and no system
-shell; `erx:attach` from that window of the UART login's session gives
-that session's shell without the system-shell facet, so
-`erx:inspect([kernel, crash], #{})` there answers `{error, scope}`; a
-token window at a line a development manifest marks secure gets no
-system shell; the overlapping policy's item yields a window with the
-shell of the session connected at the keyboard's line, and a login where
-none is; a window whose session ends shows a login, and a session the
-operator connected there from the menu is detached and runs on; a lock at the UART
-leaves a window opened from it running its shell, and a log out at the
-UART ends the session and drops that window to a login; a window opened
-from a token window drops to a login at a log out there while its asking
-session runs on; a session's fifth
-live token request is refused, and a token dies unused after 60 s and at
-its session's end.
 
 ### Attributed text
 
@@ -1101,8 +968,9 @@ Each session can run a command shell with rc's language beside its
 Erlang shell, both listed in the same `Ctrl-G` menu; the console starts
 the command shell first, and the shell's `erl` runs the Erlang shell above
 it; its language, commands, pipelines of text, jobs and terminal relay
-are [design-shell.md](design-shell.md). It runs on the session's tty
-above, and its Erlang commands reach the inspector, `/proc` and the code
+are [design-shell.md](design-shell.md). Each command shell runs on
+one of the session's ttys above, the console line's or, at a display,
+its terminal window's ([design-display.md](design-display.md#the-terminal)), and its Erlang commands reach the inspector, `/proc` and the code
 store below with the session's facets. Its commands print text as
 FreeBSD's commands of the same names do, with a value erXos does not
 measure printed as `-` ([Pipelines](design-shell.md#pipelines)); a
@@ -1126,7 +994,7 @@ kinds of process:
 | Keyword (header) | An Erlang process | A program |
 | --- | --- | --- |
 | `pid` (`PID`) | its pid, `<D.N.S>` | its process id |
-| `tt` (`TT`) | the session's terminal when its group leader is a group of the session's tty, else `-` | the session's terminal when it holds an open of the session's tty, else `-` |
+| `tt` (`TT`) | the terminal of the session's tty whose group is its group leader, else `-` | its controlling terminal: the terminal of the session's tty its job was started on, while it holds an open of that tty, else `-` |
 | `state` (`STAT`) | `R` when running, runnable or collecting garbage; `S` when waiting in `receive`; `T` when its job is stopped; `RE` when exiting; then `+` when it belongs to the foreground job | `R` when a thread runs or is runnable, `S` when every thread waits, `T` when paused; then `+` when it belongs to the foreground job |
 | `time` (`TIME`) | `-`: the runtime keeps no CPU time per process | its group's CPU time as `getrusage` reports it, as `M:SS.hh` (`bin/ps/print.c:500-520`) |
 | `pcpu` (`%CPU`) | `-`, for the same reason | its CPU time over the time since it started, as a percentage to one decimal |
@@ -1953,7 +1821,7 @@ grant's rights and bounds (V3).
 | `erx:inspect(Path, Options) -> {ok, record()} \| {error, Reason}` | `Options` holds `offset`, `limit` and `timeout`; `Reason` includes `scope` and `no_facet` |
 | `erx:source(Pid \| {module(), atom(), arity()}) -> ok \| {error, Reason}` | prints the source lines around a process's current location or a function's first line; `{error, unsupported}` when the module's release carries no source |
 | `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events, `Spec` as in [Tracing](#tracing), that prints in the shell; `Reason` is `badarg`, `no_facet` or `scope` for a refusal, and `{failed, Why}` when the trace process ends before it has started the trace, `Why` its exit reason; `erx:trace_stop(Ref)` ends it |
-| `erx:attach(Domain) -> ok \| {error, Reason}` | a console session with a shell inside `Domain`, through its console facet, which the caller holds for its own principal's domains; the shell has that domain's authority, never the system shell's ([Window tokens](#window-tokens)) |
+| `erx:attach(Domain) -> ok \| {error, Reason}` | a console session with a shell inside `Domain`, through its console facet, which the caller holds for its own principal's domains; the shell has that domain's authority, never the system shell's ([The console](#the-console)) |
 | `erx:console_size(Width, Height) -> ok` | system domain only |
 | `erx_code:history(DomainId, Module) -> {ok, [{Hash, Time}]} \| {error, scope}` | the hashes loaded into a domain for a module, newest first, at most 16, through the caller's inspect facet ([The code store](#the-code-store)) |
 
@@ -2058,7 +1926,7 @@ any 9P2000.L peer does.
 | A load the domain refuses | the code server's reply | the candidate overlay discarded | the reply lists what loaded and what failed |
 | An overlay names another release | the release hash at the domain's start | the overlay dropped | a log line naming the specification; the domain runs its release as built |
 | No writable data partition is mounted | the code service | overlays and stores in memory only | a log line at boot; a reboot drops them |
-| `erx_console` crashes | its supervisor | each session's group survives in its own process | the console restarts with every line showing a login: a restart ends every login, the system shell and its facet, every window's binding to a session and every unused window token, and the sessions run on, reachable by a login |
+| `erx_console` crashes | its supervisor | each session's group survives in its own process | the console restarts with every line showing a login: a restart ends every login and the system shell and its facet, and the sessions run on, reachable by a login; terminals on displays are the sessions' own and do not notice |
 | The system domain faults, or halts outside an ordered shutdown | the kernel, through the fault gate or the watchdog ([design-kernel.md](design-kernel.md#the-root-task)) | nothing of the running system: every domain ends with the system domain's space; the kernel writes a crash record where the platform keeps one across a warm reset | the machine ends by `erx.panic`, which in a release build resets it and boots the committed slot; the console shows the boot banner, and `[kernel, crash]` and `/proc/kernel/crash` show the record to the system shell; the host tool's session ends and reconnects after the boot |
 | A `/proc` read meets a slow domain | the inspector's deadline | the snapshot, with `[timeout 500]` for the attributes that missed it | the file shows the status, never a guess |
 | A blob does not match its hash | the code server's check | nothing loaded; the bad copy discarded | `{error, hash_mismatch}` from the load, in every flavour of load |
@@ -2082,12 +1950,10 @@ names it, and no path from it to the system domain's code but the install
 facet); the console (a login in release builds, which the vault checks and
 limits, on every console line, a menu that reaches only the line's
 principal's sessions, V7, and the system shell
-only for a login at a secure line, V6; a display domain, which sees and
-can inject its windows' bytes, is an untrusted provider of lines, whose
-windows open without a login only by a window token minted for a
-session's own request, and which has the authority of the shells in its
-windows and nothing beyond ([Window tokens](#window-tokens)), and the console
-never logs a passphrase or a token); console
+only for a login at a secure line, V6, on the UART and the host link
+alone; a display domain provides no line, and a terminal on a display is
+a program of its session ([design-display.md](design-display.md#security));
+and the console never logs a passphrase); console
 sessions in other domains (only a tty's bytes, its size and a hang-up
 cross, and the console copies the bytes without reading them; the shell
 runs with the target domain's authority, never the system domain's); the command
@@ -2121,7 +1987,7 @@ principal what another loaded.
 program's name among them, are what its domain claims; the record marks
 them. In development builds the host link holds every facet but the
 system-shell facet, `install` among them, and `root`'s logins at the UART and at the host link's
-`console` line and at a window the manifest marks secure hold the
+`console` line hold the
 system-shell facet, which makes each as powerful as the system domain,
 and every `root` session inspects at scope `all`, wherever it logged in,
 the web included. Hot-loaded code in a
@@ -2145,8 +2011,9 @@ with OSC 52 where the terminal allows it; make the terminal answer with a
 report that arrives as input to whoever reads the tty; and leave the terminal
 in a state the next program inherits. How far that reaches is the terminal's
 own business, and `cat -v` shows output the operator does not trust. A
-program cannot read what is typed outside its own connected tty, and `Ctrl-G`
-always reaches the real menu, during which it can write nothing.
+program cannot read what is typed outside its own connected tty, and at a
+console line `Ctrl-G` always reaches the real menu, during which it can
+write nothing.
 
 ## Verification and testing
 
@@ -2338,16 +2205,14 @@ determinism test of the generated tree.
   session in the principal's domain; a principal the manifest does not
   name gets no system shell, and neither does one it names who logs in at
   a line that is not secure (V6); a release build's host-link `console`
-  and every terminal window offered without a token start a login; a
+  starts a login; a
   wrong passphrase is refused, and a sixth failure within 60 s is
   answered as limited, per name in each class of terminal and per line,
-  and five failures at terminal windows leave the same name's login at
+  and five failures from the network leave the same name's login at
   the UART unlimited; each line's menu shows and reaches only its
   principal's sessions, a locked line reaches none of them
-  until the same principal logs in there, a logout ends the sessions
-  started there and the terminals opened there without a login, and a
-  window opened from a session's menu shows that session's shell with no
-  login ([Window tokens](#window-tokens)).
+  until the same principal logs in there, and a logout ends the sessions
+  started there.
 * **Code:** a hot load into the system domain from the host in a
   development build; a refused load without the install
   facet; `code:load_binary/3` of a module from outside installed storage

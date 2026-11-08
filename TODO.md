@@ -617,12 +617,6 @@ it; git history is the record of completed work.
   `ProtocolEmitter` and reaches into its private renderers; extract a kind-check renderer parameterised by the
   alias's form if the grammar emitter's internals change.
 
-* [Medium] `docs/design-abi.md` [Inspection schema](docs/design-abi.md#inspection-schema): the grammar has no
-  member for presentation types, which [design-display.md](docs/design-display.md#presentations) says the schema
-  declares (each type's canonical text, the grammar that parses it back and the inspector path it names). Add the
-  member, with a closed set of text forms, before `erx_present` is generated. Settle its namespace: `domain`,
-  `program`, `budget`, `group`, `device` and `module` are kinds too, members share one namespace, and `pid` is a
-  built-in value type.
 * [Medium] `docs/design-abi.md` [Inspection schema](docs/design-abi.md#inspection-schema): `[kernel, crash]` and
   `[kernel, trace]` repeat the fields of the crash-record and trace-record layouts, and the grammar has no form
   that takes a kind's attributes from a root `layout`, so they would be copied by hand. Add one (`fields @layout`)
@@ -1079,6 +1073,8 @@ it; git history is the record of completed work.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: `Ctrl-G` rings the bell, where `docs/design-live.md` gives it a menu of sessions; the menu comes with the sessions. `erx:console_size/2` waits with it.
 * [Low] runtime, `otp/lib/kernel/src/prim_tty.erl`: `init_term/1`, the reader and the writer stay as stubs for `user_drv`'s stock paths, which `load/0` keeps unreachable; they go when `user_drv` itself leaves the release.
 * [Low] runtime, `otp/lib/stdlib/src/io_ansi.erl`: with no terminfo a shell's `io_ansi` is plain text where stock on an xterm has colour. A fixed table of the ANSI sequences would answer it.
+* [Medium] runtime, `otp/lib/stdlib/src/io_ansi.erl`: fix in erXos's OTP four upstream OTP 29.1.2 bugs in the ANSI fallback strings, which erXos always uses since it has no terminfo: `cursor_home` is `ESC H` (HTS, a tab stop) for `CSI H` (`:2614`); `scroll_forward` and `scroll_backward` are `ESC S` and `ESC T` for `CSI S` and `CSI T` (`:2646-2649`); `tab_backward` is `ESC I` for `CBT`, `CSI Z` (`:2684`); `hyperlink/2` writes the URI before the parameters, the reverse of OSC 8's `OSC 8 ; params ; URI ST` (`:2788-2790`). The fix lands with a test that each string is the standard form `erx_vt` implements ([design-display.md](docs/design-display.md#the-terminal-emulator)), and is a documented difference from stock OTP for `make check-oracle`.
+* [Medium] shell and programs, several ttys in one session: a display's session runs a shell on a tty per terminal ([design-display.md](docs/design-display.md#the-terminal)), but [design-shell.md](docs/design-shell.md#job-control) and [design-programs.md](docs/design-programs.md#the-terminal) speak of "the session's tty" in the first tier. State that the terminal relay serves each of the session's ttys, that each runs its own command shell and job table, and that a program's `/dev/tty`, standard streams and `ps` `TT` are those of the tty its shell started it from.
 * [Low] runtime, `shell:start_interactive/0` calls `user_drv`, which does not run: it exits with `noproc` where stock answers `{error, already_started}`.
 * [Medium] runtime, `otp/erts/emulator/sys/erxos/sys.c`: `kill -INT` runs the break menu while `erx_stdio`'s reader still reads standard input, so a key can go to either; on this port SIGINT should leave through the exit path. No test.
 * [Medium] runtime, `erx_console.erl`: `get_terminal_state` reports standard input's answer for all three streams and `tty_geometry` answers 80 by 24 with no terminal, where stock asks each descriptor and refuses. A start failure of the driver loses its step and reason in `user_sup`'s ten-second wait, and `erx_stdio_nif.c` reports every IRQ failure as `eagain`.
@@ -2712,8 +2708,7 @@ to the corpus and follow rc
   flipped bit reaches the parser.
 * [Medium] system domain, the reset count
   ([design-system.md](docs/design-system.md)): any successful login clears the
-  count, including a web login or a compromised display domain replaying a
-  recorded passphrase at a window, so a machine with a boot fault that lets
+  count, including a web login, so a machine with a boot fault that lets
   the network come up can be kept out of rescue. Clear it only on a login at
   a secure line, or only after a login has lasted a while. Related: in a
   default release build no principal may open the system shell, so the
@@ -2721,13 +2716,6 @@ to the corpus and follow rc
   (design-system.md, design-platforms.md) holds only when the manifest names
   a system-shell principal; state that there.
 
-* [Low] console and display, the line cap
-  ([Window tokens](docs/design-live.md#window-tokens)): a display holds at most
-  the lines its `console_line` parameter allows, 16 by default, and every
-  principal whose sessions use that display shares them, so one principal's
-  window requests, each with a valid token, can fill the display's lines and
-  leave another principal's requests refused. Give each principal's sessions a
-  share of the cap, or state that a shared display is one principal's.
 
 * [Low] `erlang/apps/erx_files/src/erx_fs.erl`: a grant takes an open file's answer `{erx_fs_file, Tag, Alias, Reply}` and an
   owner's `DOWN` by matching Erlang references, which a process that can guess one can forge (`list_to_ref/1` on the
@@ -3008,8 +2996,8 @@ document's "residual risks accepted" paragraph.
 * [High] logging: a central system log service that every source writes
   to, with routing to the UART and other readers and per-reader access,
   needs its design; it replaces the console's role as the kernel log's
-  reader and decides which log lines each console line shows, a terminal
-  window's and the host link's among them
+  reader and decides which log lines each console line shows, the UART's
+  and the host link's
   ([design-live.md](docs/design-live.md#the-console)).
 * [Medium] console, log lines at console lines: until the log design
   settles routing, state in
@@ -3029,8 +3017,7 @@ document's "residual risks accepted" paragraph.
   are system-domain processes and outlive its login; a development
   manifest does not have to mark the UART secure, though development
   builds assume it; host-link login failures count in the UART's class
-  and can lock a name out there; a refused connection names the line a
-  terminal is connected at, which a display can read
+  and can lock a name out there
   ([design-live.md](docs/design-live.md#security)).
 * [Low] console, moving a session: an explicit detach and attach, as
   screen and tmux offer, run by the session's own user, so a terminal

@@ -211,7 +211,7 @@ devices and serves windows; the web domain owns browser connections and
 serves the same widget service. Both serve `abi/services/display.txt`
 through the server dispatch the generator emits from it, behind the
 display facets the system domain mints; both run `erx_ui_server` with
-`erx_ui_schema`, `erx_ui_diff` and the state rule; they differ in the
+`erx_ui_schema`, `erx_ui_model` and the state rule; they differ in the
 renderer, as the panel and the desktop do. They are two domains because
 they hold different things: the display domain sees local pixels and
 keystrokes, passphrases typed at the machine included, and the web domain
@@ -272,6 +272,35 @@ declared maximum count; unions by tag. One WebSocket binary message is
 one protocol message, of at most 64 KiB in either direction; a text
 message is a protocol error.
 
+A union may name itself as the element of a `list` or `tuple` member
+when it declares `depth N`, N at most 8, as `datum()` does (below). The
+generator expands such a union into N levels before it validates the
+declarations, the innermost level without the members that name the
+union, so the type graph stays acyclic and every other rule of the
+grammar applies unchanged. Each codec carries the level as an argument,
+and a container's tag at the innermost level is an unknown tag there,
+refused as any other. The bytes of a value are the same at every level.
+
+Every bound of the protocol is a `limit` of `web.txt`, generated into
+both codecs and covered by the protocol hash, so a client and a machine
+that agree on the hash agree on every bound, and none travels on the
+wire:
+
+| Limit | Value | Bounds |
+| --- | --- | --- |
+| `web_message_max` | 65,536 | one message, either direction |
+| `web_ui_op_max` | 65,024 | one `ui.txt` message inside an update: the message less 512 bytes kept for the update's header and the list's count |
+| `web_views_max` | 16 | views open at once on a connection |
+| `web_path_segments_max`, `web_segment_max` | 16, 256 | a `path` target |
+| `web_trace_selection_max` | 16 | a `trace` target's presentations |
+| `web_entries_max` | 1,000 | an `entries` body |
+| `web_uis_max` | 256 | a `uis` body, and a session's open UIs on the web |
+| `web_name_max` | 255 | a principal's name, an `ended` or `bye` reason, a UI's label |
+| `web_build_id_max` | 64 | the build identifier |
+| `web_int_max`, `web_atom_max`, `web_printed_max` | 40, 255, 4,096 | a `datum()`'s integer digits, atom and printed term |
+| `web_list_max`, `web_tuple_max`, `web_datum_depth` | 1,000, 16, 8 | a `datum()`'s list, tuple and nesting |
+| `web_ping_ms`, `web_idle_ms` | 30,000, 60,000 | the front end's ping interval, and the silence after which a connection closes |
+
 From the browser:
 
 | Message | Fields | Meaning |
@@ -280,7 +309,7 @@ From the browser:
 | `open` | view (`u32`), target | opens a view and asks for its first update; the view number is the client's and is never reused on the connection |
 | `next` | view | asks for the view's next update; the client sends it once it has rendered the last |
 | `close` | view | ends a view |
-| `event` | view, node (`u32`), event and detail in `ui.txt`'s binary event form | a widget event on a UI view |
+| `event` | view, and one event in `ui.txt`'s binary event form, which names the node, the event and its detail | a widget event on a UI view |
 
 The **protocol hash** is the SHA-256 the generator computes over every
 source it generates into the client, `web.txt`, `ui.txt`,
@@ -301,7 +330,7 @@ From the machine:
 
 | Message | Fields | Meaning |
 | --- | --- | --- |
-| `welcome` | principal name, build identifier, the limits below | answers `hello` |
+| `welcome` | principal name, build identifier | answers `hello` |
 | `update` | view, body | the view's answer to one `open` or `next` |
 | `ended` | view, reason (an atom's name, at most 255 bytes) | the view is over; the reason is the `Reason` of the inspector's or the tracer's `{error, Reason}` (`scope`, `no_facet` and the rest [Interfaces](design-live.md#erlang-in-every-domain) lists), or one of the web's own: `closed`, the view or what it shows ended; `busy`, a bound refused it; `too_large`, one record does not fit an update |
 | `bye` | reason | the connection is about to close: `mismatch`, `protocol`, `limit`, `logout`, `expired`, `shutdown` |
@@ -310,7 +339,8 @@ An update's body is one of: `record`, a record (below); `entries`, a list
 of log or trace entries, each a value with its time, and `gap` entries
 counting what the view could not read, at most 1,000; `ui`, a list of
 `ui.txt`'s binary `diff_op()`s, the last of a change ending with
-`commit`; `uis`, a list of open UIs.
+`commit`; `uis`, a list of open UIs, at most `web_uis_max`, the most
+the web domain lets a session open on the web.
 
 ### Values
 
@@ -327,7 +357,8 @@ function:
                | {list, [datum()]}               % at most 1,000 elements
                | {tuple, [datum()]}              % at most 16 elements
                | {printed, binary()}.            % any other term, as erx_render prints it, at most 4 KiB
-%% Nesting is at most 8 deep; a deeper term is printed.
+%% Nesting is at most 8 deep (web.txt's depth 8): a list or tuple that would need a
+%% ninth level is printed.
 
 -type wire_attr() :: {Key :: binary(), reporter(), status(), datum()}.
 -type reporter() :: kernel | service | runtime
@@ -339,9 +370,10 @@ function:
 ```
 
 For `partial` the datum is the partial value, for `error` the reason, and
-for the other statuses that are not `ok` it is the empty list. A value of
-a presentation type becomes `present`, with the text the terminal's link
-carries; an integer travels as its decimal text and the client reads it
+for the other statuses that are not `ok` it is the empty list. A value that
+the schema shows as a presentation
+([Presentations](design-display.md#presentations)) becomes `present`,
+with the text the terminal's link carries; an integer travels as its decimal text and the client reads it
 as a `bigint`, so no value is rounded; a text keeps its bytes, invalid
 UTF-8 included, for the client's escape to show. A child is its entry
 name, which the client shows as a link to the child's path. A record whose
@@ -375,10 +407,11 @@ presentation's text is in the `erx:` URI encoding, which keeps `.` and `/`
 as well ([Presentations](design-display.md#presentations)), so the
 `erx:TYPE/TEXT` link a terminal shows and the `/TYPE/TEXT` link a browser
 shows are the same text after the scheme. The client resolves a
-presentation itself: the inspection schema's table from each type's
-canonical text to the inspector path it names is generated into the
-client as into `erx_present`, and the client opens a `path` view of that
-path while the address keeps the presentation's URL. A text that names
+presentation itself: the inspection schema's `present` marks are
+generated into the client as into `erx_present`, a presentation's text
+is the variable segments of its marked path, and the client opens a
+`path` view of that path with the text's segments in place while the
+address keeps the presentation's URL. A text that names
 nothing is a path that names nothing, answered `scope`, as `/proc`
 answers `enoent`. The client's only other HTTP paths are `/ws`, the
 WebSocket, and, on the network front end, `POST /login` and
@@ -495,15 +528,15 @@ and `erx_ui:close/1` exactly as for a window; with `display => web` in
 on the web ([Choosing a display](design-display.md#choosing-a-display)).
 On `open_ui` through the session's `web` facet the web domain starts
 `erx_ui_server`, the display's widget server, against the grant's
-`windows` quota, with `erx_ui_browser` as its renderer, and replies
-`{ok, Window}`. The UI's number, its `/ui/N`, counts the session's UIs on
+`windows` quota and at most `web_uis_max` open UIs of the session, with
+`erx_ui_browser` as its renderer, and replies `{ok, Window}`. The UI's number, its `/ui/N`, counts the session's UIs on
 the web and is never reused; its `label`, the same option that is a
 window's title on a display, names it in the `uis` list.
 
 `ui_tree` runs as in the display: validate the whole tree with
-`erx_ui_schema`, diff it with `erx_ui_diff`, keep the values the tree does
-not set under the node's identity, and hand the operations to the
-renderer. Validation and the diff run inside the request, on the
+`erx_ui_schema`, number it with `erx_ui_model:pair/3`, which keeps the
+values the tree does not set under the node's identity, and hand the
+renderer the operations of `erx_ui_model:delta/2`. Validation and the diff run inside the request, on the
 grantee's share; the tree is bounded by the grant's `ui_nodes` and
 `max_request` ([The widget server](design-display.md#the-widget-server)).
 
@@ -525,8 +558,9 @@ to pending and nothing else. A connection attaches with a `ui` view;
 attaching sets sent to the empty tree, and a second attachment replaces
 the first, whose view ends `closed`. On a request from the attached view,
 when sent and pending differ, it answers with the first operations of
-`erx_ui_model:delta(Sent, Pending)`, a pure function whose operations
-turn sent into pending, as many as fit one update, ending with `commit`
+`erx_ui_model:delta(Sent, Pending)`, the display's one difference, whose
+operations turn sent into pending
+([Widget trees](design-display.md#widget-trees)), as many as fit one update, ending with `commit`
 when they are the last, and applies what it sent to sent. A long change
 thus reaches the browser over several updates, which the client keeps
 and applies at `commit`; no operation of a valid tree exceeds one
@@ -546,11 +580,13 @@ like a web page, not like the window the same tree makes on a display,
 and two browsers may lay it out differently.
 
 The browser sends `event` messages in `ui.txt`'s binary event form; the
-renderer process decodes each with the generated Erlang reader, checks
-that the node is in pending, records the value the event reports (an
-`input`'s text, a `checkbox`'s state, a `slider`'s value, a `list`'s
-selection) into pending, so a tab that attaches later shows it, and sends
-the server `{ui_hit, Node, Event, Detail}` as the behaviour defines. The
+renderer process decodes each with the generated Erlang reader, passes it
+through `erx_ui_model:hit/4` against pending, which drops a report for a
+node that is gone or a value outside the node's bounds and records the
+state value (an `input`'s text, a `checkbox`'s state, a `slider`'s value,
+a `list`'s selection) into pending, so a tab that attaches later shows
+it, records it into sent as well, since the browser shows it already, and
+sends the server `{ui_hit, Node, Event, Value}` as the behaviour defines. The
 server fires only the events the tree declares and keeps the values as
 the display's does, so a browser makes an application receive only what
 it asked for (G4 of the display). An event for a node that is gone is
@@ -642,9 +678,11 @@ notices, and an inventory of the files with their SHA-256. Its parts:
   browser](#uis-the-browser-renderer) says, with styles set through
   React's style objects; `image` with the content type `ui.txt` declares,
   from a table that has no `image/svg+xml`, so an image is never a
-  document. It sends an `event` for each event a node declares,
-  coalescing an `input`'s or a `slider`'s changes to one per animation
-  frame, and sends nothing for scrolling, focus or text selection.
+  document. It sends an `event` for each event a node declares
+  and for each change of a node's state, declared or not, so the machine
+  keeps what the page shows, coalescing an `input`'s or a `slider`'s
+  changes to one per animation frame, and sends nothing for scrolling,
+  focus or text selection.
 * **Links**: `hrefOf/1` is the one function that writes an `href`, from a
   route value, through the generated encodings; a presentation is always a
   link to `/TYPE/TEXT`, and a plain click on one in a UI whose node
@@ -765,21 +803,21 @@ hash), and the header table for Erlang and Ruby.
 
 **`abi/formats/ui.txt`**: the display's kinds, properties, events and the
 binary form of `diff_op()` and events, and the content types an `image`
-may carry; the generator adds a TypeScript reader and writer beside the C
-reader and the Erlang reader of events.
+may carry; the generator emits a reader and a writer of both directions
+in TypeScript, as in Erlang and C.
 
 **`abi/services/display.txt`**: served by the web domain as by a display
 domain. **`abi/services/web.txt`**: `erx_web_login`'s `login` and
 `logout`, and the host link's `web` facet's `connect`, `data` and
 `close`.
 
-**`abi/inspection.txt`**: the presentation types' path table, the
+**`abi/inspection.txt`**: the `present` marks of its paths, the
 append-only mark and the stopgap reporters' labels and scopes, generated
 into TypeScript as into Erlang; the decoder refuses a stopgap reporter
 the table does not name.
 
 **Erlang**: `erx_web_conn:step/2` and `perform/2`;
-`erx_web_value:project/1`; `erx_ui_model:delta/2`; the
+`erx_web_value:project/1`; `erx_ui_model`'s `delta/2` and `hit/4`; the
 `erx_ui_renderer` behaviour, implemented by `erx_ui_browser`;
 `erx_ui:open/1`, `tree/2` and `close/1` of the display.
 
@@ -937,7 +975,9 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | Test | Passing case | Seeded failure |
 | --- | --- | --- |
 | protocol round trip, both languages | random messages of every kind encode in Erlang and decode in TypeScript, and the reverse, re-encoding to identical bytes; both codecs carry the same hash | a generator change that orders one union's tags differently in TypeScript fails; a hash computed over one source fewer fails |
-| `erx_web_proto` fuzz target (Erlang) | random and mutated messages; every accepted one is within the bounds | the decoder with the view-count bound of `welcome` removed fails |
+| `erx_web_proto` fuzz target (Erlang) | random and mutated messages; every accepted one is within the bounds | the decoder with the path-segment bound removed accepts a 17-segment `path` target and fails |
+| `datum()` depth | a term nested 9 deep projects with its ninth level printed and round-trips in both languages; hand-built bytes with a list at the eighth level are refused by both decoders | a generator that expands `datum` to nine levels makes both decoders accept those bytes and fails |
+| bounds bind both ends | each limit of `web.txt` at its bound is accepted by both codecs and one past it refused by both | a TypeScript codec generated with one limit raised accepts the message past it and fails |
 | TypeScript decoder fuzz target | a mutation fuzzer under Node over the generated corpus; no exception escapes but the decoder's typed refusal | the decoder without a list's count check fails on an `entries` list of 1,001 |
 | `ui.txt` readers: fuzz targets and parity | mutated event payloads into the generated Erlang event reader, which refuses or decodes within bounds; the C reader and the TypeScript reader accept the same inputs and decode the same operations | an Erlang reader without a detail length check fails; a reader with two property tags swapped fails parity |
 | escape differential and fuzz target | `escapeLine` agrees with `erx_text:escape_line/1` and the Ruby twin over the attributed-text corpus and random bytes; invalid bytes are tokens | a decoder using `TextDecoder` with replacement fails on `0xC0` |
@@ -955,7 +995,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | W7 | records with `unknown`, `timeout` and `partial` values show their tokens; a stopped guest marks every view stale; a ring overrun shows a gap with its count | a client printing a `partial` value bare fails |
 | W8 bounds | the 17th view, the 65th line view, the 5th connection of a line, the 17th login, each refused; a client that never sends `next` receives one update per view and the web domain's memory for it stays under 1 MiB; a second `next` before its answer is `bye protocol`; a reused view number is `bye protocol` | a core that answers a view twice for one `next` fails |
 | pull sampling | a record changing 100 times while the client is paused is sent once, as its last state; a log of 5,000 new entries arrives over several updates with none lost | a view that queues every change fails |
-| UI attach | a UI attached, detached, changed and re-attached shows the newest tree; `apply(delta(A, B), A) == B` over random trees; a tree whose delta exceeds one update arrives over several and is applied at `commit` | a renderer that resends the backlog fails on the bound |
+| UI attach | a UI attached, detached, changed and re-attached shows the newest tree; `apply_ops(delta(A, B), A) == {ok, B}` over random trees; a tree whose delta exceeds one update arrives over several and is applied at `commit` | a renderer that resends the backlog fails on the bound |
 | UI parity of meaning | the display's parity corpus of trees and input sequences, through the browser renderer in Playwright, delivers the same events and values to the application and holds the same set of nodes as the Erlang renderer; no pixel or layout is compared | a seeded swap of two event names in the client fails |
 | presentation state stays in the browser | scrolling a `scroll`, moving focus and selecting text in the browser sends no message to the machine and changes no server state | a client that reports scroll offsets fails |
 | choosing the web display | a session holding `web` opens a UI there with `display => web`; with no display facet `erx_ui:open/1` answers `{error, no_display}` at once; stopping the web domain sends each opener `{ui_down, Window, display_down}`; closing every browser ends no UI | an `erx_ui` that ignores the option opens on the wrong display; a facet without the down report leaves the test's opener waiting past its deadline |
@@ -1074,6 +1114,8 @@ table per platform.
 | cowboy's version does not fit erXos's OTP | low | the network front end waits | cowboy is plain Erlang; a patched copy enters as erXos's code |
 | `ui.txt`'s widget set lacks what a browser UI wants | medium | plainer UIs | the tree gains a kind for every display, never a browser-only one |
 | an attribute type of the schema projects outside `datum()`'s bounds (tuple width, depth 8) | low | such values arrive printed | the generator checks every attribute type of `abi/inspection.txt` against `datum()` and refuses one that does not fit |
+| the owner is rethinking login, and that covers the network front end's `erx_web_login` as well as the console's and the display's | certain | this document's login may change | the login question is open in [design-display.md](design-display.md#risks-and-open-questions); nothing here depends on the display's terminals or the console's lines beyond the vault's limits |
+| no browser view of a terminal exists: W1 gives the web domain no shell facet, and the views are records, logs and traces | certain | a terminal is reachable only at the serial console and over the host link, not in a browser | a browser terminal is a design of its own, with its own authority question, since it would put a shell facet behind the web domain; it waits for the login rethink, which decides how a person reaches a shell from anywhere |
 
 Decided by the owner: TLS on the network front end, with plain HTTP only
 where a development build's manifest lists it; the web domain as its own

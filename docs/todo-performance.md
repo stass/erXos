@@ -281,18 +281,35 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Medium] display, the Erlang renderer's frame on a 240x240 panel**
   (diff, layout and draw) against LVGL's. This is LVGL's retirement gate.
 * **[Low] display, the terminal emulator's redraw per changed cell line.**
-  Settled by scrolling throughput of a large output.
+  Settled by scrolling throughput of a large output, redrawing scrolled
+  rows against copying their pixels.
+* **[Medium] display, `erx_vt` parses a code point at a time in Erlang**
+  ([design-display.md](design-display.md#the-terminal-emulator)). Settled
+  by bytes per second over a large `cat` of plain text, of text with SGR
+  on every word and of wide characters, against libvterm on the same
+  corpus.
 * **[Low] display, virtio-gpu transfer and flush latency per rectangle**
   under TCG, and how `erx_screen` gathers waiting flushes into one push. Settled by flushes per
   second and latency per rectangle size.
+* **[Medium] display, a terminal's draws cross domains**
+  ([design-display.md](design-display.md#performance)): `erx_term` runs in
+  the session and sends every draw batch across the lane, the funnel and
+  the file server. Settled by the scrolling of a large `cat` at 80x24 and
+  at full screen on HVF; the fix on the table is the pixel object above.
 * **[Low] display, the display domain's own clients go through `erx_winfs`**
-  ([design-display.md](design-display.md#performance)): the terminal
-  emulator and the Erlang renderer send every draw batch through the file
-  server. Settled by terminal scroll and renderer frame times against a
-  direct hand-off.
+  ([design-display.md](design-display.md#performance)): the menu and the
+  Erlang renderer send every draw batch through the file server. Settled
+  by renderer frame times against a direct hand-off.
 * **[Low] display, composes run one at a time in `erx_screen`**, and a
   window waits in its flush call. Settled by several animating windows and
   a kiosk's flush latency.
+* **[Low] display, a kiosk under LVGL copies each dirty rectangle twice**
+  ([design-display.md](design-display.md#kiosks-and-glasses)): once through
+  the LVGL program's standard output into the display domain, once into
+  the framebuffer. Settled by a full-screen redraw's time on a 240 by 240
+  panel and at QEMU `virt`'s screen size under HVF; the fix on the table
+  is the scan-out buffer mapped into the program's sub-space, which
+  design-display rejects until a number asks for it.
 * **[Medium] web, a record view's round trip over the host tool's front end**
   ([design-web.md](design-web.md#performance)): each update crosses the host
   link, the system domain's relay, the web domain, the session's line and the
@@ -300,11 +317,17 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Settled by round-trip times and link bytes per second for the machine's
   record and a 1,000-child listing, under HVF and over a 115,200-baud
   UART; the fix on the table is a record difference message.
-* **[Low] web, `erx_ui_model:delta/2` and `erx_ui_schema` for a 1,000-node
-  tree,** and a tree's first attachment, which arrives over several 64 KiB
+* **[Low] web, `erx_ui_model:pair/3`, `delta/2` and `erx_ui_schema` for a
+  1,000-node tree,** and a tree's first attachment, which arrives over several 64 KiB
   updates. Settled by time per call on HVF and the attachment's time over the
   UART host link; the fix on the table is keeping the delta from the server's
   operations instead of comparing models.
+* **[Low] display, decoding a widget's PNG image in the Erlang renderer**
+  ([design-display.md](design-display.md#widget-trees)): an `image` node's
+  48 KiB of PNG is inflated and unfiltered before its pixels are loaded with
+  `y`. Settled by time per decode of a 48 KiB image on HVF and on the
+  Raspberry Pi 4; the fix on the table is unfiltering in C beside
+  `erx_memdraw`, as a per-byte primitive.
 * **[Low] web, the client's first load and the bundle's size,** over the host
   tool and over the network front end. Settled by bytes served and time to the
   first rendered view; the fix on the table is splitting the bundle by route.
