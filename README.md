@@ -280,10 +280,10 @@ Error in process <0.150.0> with exit value:
   unsupported or partial, never invented.
 * **Hosted mode** runs the runtime as a macOS process. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
-  case with stock OTP, and each known difference is classified by cause
-  (`test/oracle/hosted_known_differences/`). On QEMU the system domain
-  runs kernel's `file_SUITE` and the whole compiler and stdlib groups
-  against stock, with every difference classified.
+  case with stock OTP against tables of known differences, each with its
+  cause (`test/oracle/hosted_known_differences/`). On QEMU the system domain
+  runs all four groups whole against stock (`make check-oracle`), with
+  every difference classified or tracked in TODO.md.
 * **The release** carries kernel, stdlib, compiler and runtime_tools (the
   last two loaded, not started), and the erXos applications `erx`,
   `erx_files`, `erx_uart`, `erx_blk`, `erx_shell`, `erx_code` and
@@ -458,15 +458,13 @@ tools/erx status
 chooses. For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
 stock suites run inside an offline Linux container and keep their
 failures, skips and incomplete results. `make check-oracle` runs
-`tools/erx oracle qemu`: `file_SUITE` and every `*_SUITE` of OTP's `stdlib` and `compiler` groups (not
+`tools/erx oracle qemu`: every `*_SUITE` of OTP's `emulator`, `kernel`, `stdlib` and `compiler` groups (not
 the variants compiler's test Makefile generates from them) under Common
 Test in the system domain under QEMU with HVF, on one CPU, compared case by case with stock OTP on the host,
 run with as many schedulers, against the
 tables of known differences in `test/oracle/hosted_known_differences/`, then musl's libc-test in test tasks
-on four CPUs (`tools/erx check-libc-test hvf 4`). The stdlib group takes about 40 minutes on stock and 30 on
-the guest. It says it is partial: OTP's
-`emulator` and `kernel` groups do not
-run there whole yet. Native benchmarks carry their own label, apart from Linux suite
+on four CPUs (`tools/erx check-libc-test hvf 4`). It takes six to seven hours: the emulator group about 100
+minutes on stock and 60 on the guest, the kernel group about 110 and 30, the stdlib group about 40 and 30. Native benchmarks carry their own label, apart from Linux suite
 results. Interpreter benchmarks need a separate native bootstrap, built
 with `tools/erx oracle build --backend native --flavour emu`.
 

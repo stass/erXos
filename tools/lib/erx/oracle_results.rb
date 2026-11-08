@@ -19,6 +19,9 @@ module Erx
     MAX_DETAIL = 64 * 1024
     MAX_DURATION_SECONDS = 86_400
     CONFIG_CASES = %w[init_per_suite end_per_suite init_per_group end_per_group].freeze
+    # The configuration functions that run after their cases. Common Test
+    # and test_server may give one of them different statuses (configuration_counts).
+    END_CASES = %w[end_per_suite end_per_group].freeze
     STATES = %w[passed failed user_skip auto_skip].freeze
 
     module_function
@@ -618,13 +621,25 @@ module Erx
       # CT's default callbacks emit ct_framework as the event module, while
       # the controller's Mode resolves the suite. Compare phase/outcome counts
       # without inventing a suite identity absent from those default events.
+      # An end function's passed and failed count as one outcome, ran: CT's
+      # tc_done tags its {error, Reason} return as failed (ct_framework's
+      # tag/1), while test_server records that end function as passed and the
+      # controller says so; the two disagree there by design. The controller's
+      # status is the one the comparison reads. Every other return or crash
+      # gives both readings the same status (test_server_ctrl derives it from
+      # the same return value), so what this gives up is catching a controller
+      # that misreports an end function's passed or failed; a lost end
+      # function still changes the count of ran, so its run stays incomplete.
       cases.each_with_object(Hash.new(0)) do |record, counts|
         next unless record.fetch('configuration')
+        testcase = record.fetch('testcase')
         status = record.fetch('status')
         if %w[user_skip auto_skip].include?(status) || record['event_result'] == 'skipped'
           status = 'skipped'
+        elsif END_CASES.include?(testcase) && %w[passed failed].include?(status)
+          status = 'ran'
         end
-        counts[[record.fetch('testcase'), status]] += 1
+        counts[[testcase, status]] += 1
       end
     end
     private_class_method :configuration_counts

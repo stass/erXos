@@ -336,6 +336,58 @@ class OracleResultsTest < Minitest::Test
     assert JSON.generate(cases).valid_encoding?
   end
 
+  # Rewrites the fixture event stream through the block, one parsed record each.
+  def rewrite_events(&edit)
+    records = File.readlines(@events).map { |line| JSON.parse(line) }
+    records.each(&edit)
+    File.write(@events, records.map { |record| JSON.generate(record) + "\n" }.join)
+  end
+
+  # An end function that returns {error, Reason} (bs_construct_SUITE's
+  # end_per_suite returns application:stop(os_mon)'s error where os_mon is
+  # absent) is failed in Common Test's tc_done, whose tag/1 tags every
+  # {error, _}, but passed in test_server's own record and the suite log
+  # (=result ok). The controller's status stands, and the run is complete.
+  def test_end_function_error_return_keeps_the_controllers_passed_and_is_complete
+    File.write(@xml, xml(testcase('ok') + testcase('end_per_suite'), tests: 1))
+    evidence(case_names: %w[ok end_per_suite])
+    rewrite_events do |event|
+      event['result'] = 'failed' if event['testcase'] == 'end_per_suite' && event['event'] == 'tc_done'
+    end
+    result = report
+    assert result.fetch('complete')
+    assert_equal 'completed', result.fetch('state')
+    assert_equal %w[passed passed], result.fetch('cases').map { |record| record.fetch('status') }
+  end
+
+  # An end function whose Common Test events are lost still leaves the run
+  # incomplete: its count of ran no longer matches the controller's.
+  def test_lost_end_function_events_leave_the_run_incomplete
+    File.write(@xml, xml(testcase('ok') + testcase('end_per_suite'), tests: 1))
+    evidence(case_names: %w[ok end_per_suite])
+    assert report.fetch('complete'), 'the fixture is complete before the loss'
+    kept = File.readlines(@events).reject do |line|
+      record = JSON.parse(line)
+      record['testcase'] == 'end_per_suite' && %w[tc_start tc_done].include?(record['event'])
+    end
+    File.write(@events, kept.join)
+    refute report.fetch('complete')
+  end
+
+  # The same disagreement on a function whose return is a verdict
+  # (init_per_suite) still leaves the run incomplete.
+  def test_init_function_status_disagreement_stays_incomplete
+    File.write(@xml, xml(testcase('init_per_suite') + testcase('ok'), tests: 1))
+    evidence(failed: 0, case_names: %w[init_per_suite ok])
+    rewrite_events { |event| event['result'] = 'passed' if event['event'] == 'tc_done' }
+    rewrite_events { |event| event['status'] = 'passed' if event['event'] == 'case_finish' }
+    assert report.fetch('complete'), 'the fixture is complete while both readings agree'
+    rewrite_events do |event|
+      event['result'] = 'failed' if event['testcase'] == 'init_per_suite' && event['event'] == 'tc_done'
+    end
+    refute report.fetch('complete')
+  end
+
   def test_framework_supplied_configuration_callbacks_use_the_suite_projection
     body = testcase('init_per_suite') + testcase('ok') + testcase('end_per_suite')
     File.write(@xml, xml(body, tests: 1))

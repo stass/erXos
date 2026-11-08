@@ -192,9 +192,10 @@ it; git history is the record of completed work.
   `stdlib_SUITE_data` and two doctest guides. A code generation bug that shows only under `no_opt` or `r26` passes
   the oracle. Building each group's suite directory from its own `release_tests_spec` would run the group as stock
   defines it, and replace `RELEASED_HEADERS`.
-* [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
-  with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
-  case, trace why `dbg` is not found, and fix it or reword the row with its cause.
+* [Medium] `tools/lib/erx/oracle_hosted.rb`: map_SUITE `t_tracing` fails on the hosted runtime
+  with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. The system domain under QEMU
+  passes it, so `emulator.txt`, which the QEMU run holds to no stale row, has none for it. Trace why `dbg` is not
+  found on the hosted runtime and fix it.
 * [Medium] `test/oracle/hosted_known_differences/stdlib.txt`: stdlib differences not yet traced to a cause, each a row
   citing this item: edlin_expand_SUITE `filename_completion`, `function_parameter_completion`;
   escript_SUITE `archive_script`, `archive_script_file_access` (compilation
@@ -575,9 +576,6 @@ it; git history is the record of completed work.
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so
   nothing reaches the terminal raw, but the one-escaper-per-sink rule holds only by convention; route them through
   `Terminal.escape` and add a chokepoint check.
-* [Medium] `test/oracle/hosted_known_differences/emulator.txt`: the rows for the cases after `signal_SUITE` come from
-  the group run in three parts, and z_SUITE's `leaked_processes` and `used_thread_specific_events` fail only because
-  the split ends a_SUITE's holder process. Run the group whole on the hosted runtime and refresh those rows.
 * [Low] `otp/erts/emulator/beam/erl_proc_sig_queue.c` (`handle_cla`), reasoning only, not reproduced: if a process's
   message queue switches to off-heap between `handle_cla` answering `need_gc` and the literal collection, an on-heap
   message whose term refers to the literal area may be copied off heap with its literal pointers kept
@@ -586,8 +584,26 @@ it; git history is the record of completed work.
   where stock passes: under the case's full load one of 42 schedulers reports 0% wall time
   (`{badmatch, {true, [100,100,100,100,0,...]}}`), so one scheduler never ran the load or its wall-time counter
   missed it, perhaps a scheduler left parked in `erx_park`; `scheduler_SUITE` `few_low` and `equal_and_high_with_part_time_max` fail the same way (`low_min_ratio 0.0`).
+  The system domain on QEMU's one CPU passes all three, so `emulator.txt` has no row for them.
+* [Medium] `otp/erts/emulator/beam/erl_process.c` (scheduler wall time), system domain on QEMU HVF with one CPU:
+  `statistics_SUITE:msb_scheduler_wall_time` fails at `true = 0.9 < WSU andalso WSU < 1.1` (line 542) where stock
+  run with as many schedulers passes (WSU 0.99): with multi-scheduling blocked and ten low-priority hogs, the
+  schedulers' weighted wall-time utilization is not about one busy thread. The hosted runtime's run shows no
+  difference there. It was seen once, on a host running other QEMU guests and `make check-asan`
+  (erxos-history `oracle-qemu/emulator/2026-11-07`), so it may depend on host load; if a quiet run passes it, its
+  row in `emulator.txt` turns stale and fails `make check-oracle`, which then names it. The value is only in the
+  guest's HTML case log, which the run does not print; print the case's `SU` and `WSU` lines, then trace whether
+  the blocked schedulers' wall-time counters, the one CPU's other threads or host load cause it.
+* [Medium] `tools/lib/erx/oracle_hosted.rb`, `test/oracle/hosted_known_differences/emulator.txt`: both erXos sides
+  read one table (design-build.md), but the hosted runtime runs about 42 schedulers and the QEMU guest one, and
+  stock runs as many as each, so some cases differ on one side only for that reason. `make check-oracle` holds the
+  table to the guest; `tools/erx oracle hosted --suites emulator` then shows unlisted differences: the three bugs
+  above, map_SUITE `t_tracing`, and scheduler_SUITE `scheduler_threads` and `poll_threads` and z_SUITE
+  `node_container_refc_check`, which start a peer at many schedulers and skip or pass at one. Run the hosted side
+  at the guest's scheduler count (`+S 1:1`), so both sides are the same configuration, or give a row the side it
+  holds for.
 * [Low] `otp/erts/emulator/beam/erl_port_task.c`: `port_SUITE:mon_port_bad_remote_on_local` fails: `erlang:monitor(port, P)` of a fake remote port does not raise the exception stock raises. Unexplained.
-* [Low] `otp/erts/emulator/beam/erl_trace.c`, hosted runtime: `trace_call_count_SUITE:combo` fails in the
+* [Low] `otp/erts/emulator/beam/erl_trace.c`, hosted runtime and system domain: `trace_call_count_SUITE:combo` fails in the
   `dynamic_pre_post` group only, with a `badmatch` on trace messages that include `erlang:trace_info/2`'s own
   call, `return_from` and `return_to`; the `legacy_pre_post` run of the same case passes. Unexplained.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
@@ -688,6 +704,18 @@ it; git history is the record of completed work.
   socket suites, `standard_error_SUITE`, `wrap_log_reader_SUITE`, `zlib_SUITE`, `zzz_SUITE`) and the group functions of `gen_tcp_socket_SUITE`,
   `interactive_shell_SUITE`, `net_SUITE` and `prim_net_SUITE` that an incomplete run leaves unresolved, and refresh
   their rows.
+* [Medium] `tools/lib/erx/oracle_comparison.rb`: the tables of known differences cannot name a case whose stock
+  result is not stable, so such a case fails `make check-oracle` in some runs. file_SUITE's bench cases
+  `tiny_writes` and `tiny_reads` (524,288 one-byte calls each within a 60 s timetrap) failed on stock with
+  `{timetrap_timeout,60000}` in `prim_file:write_1` and `read_1` in a kernel-group run on a host with load
+  average 15 to 30, where erXos passed them (erxos-history `oracle-qemu/kernel/2026-11-07-whole`), and the sides
+  agreed in an earlier run whose host load was not recorded (`oracle-qemu/2026-11-07-kernel-no-sendfile`).
+  gen_tcp_misc_SUITE `bidirectional_traffic` below and statistics_SUITE `msb_scheduler_wall_time` above may be the
+  same kind. Give the table a row that accepts either stock result for a named cause, or run the stock side's
+  timing-bound cases on an idle host.
+* [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,
+  whose kernel and stdlib specifications are the bootstrap's (11.0.3, 8.0.4), not the release's. The transcript it
+  compares does not read them; boot it from `OracleHosted.write_boot_script` so no hosted tree carries them.
 * [Low] `/tmp` (`erx_file_remote`, `erx_ramfs_core`): a `list_dir` or a `[read, directory]` open of a directory that a
   rename of another directory replaces between the client's walk and its `lopen` answers `enoent`, where FreeBSD
   answers the old listing or the new one; the tree refuses to open a removed directory, and cannot tell that open from
@@ -711,16 +739,6 @@ it; git history is the record of completed work.
   `bidirectional_traffic` failed on stock in the group run and skips on both sides with fewer suites. A result that
   depends on which suites ran before it in the runtime may be an erXos bug. Rerun the whole group (the item on
   rerunning every group) and explain each. Reports: erxos-history `oracle-hosted/2026-11-06-kernel` and `2026-11-06-kernel-2`.
-* [Medium] `test/oracle/hosted_known_differences/compiler.txt`, `tools/lib/erx/oracle_qemu.rb`: OTP's compiler
-  group runs whole in the system domain under QEMU HVF (`tools/erx oracle qemu --suites compiler`): 1030 same and
-  the hosted table's 8 known rows, each with the same erXos status, but compile_SUITE `pre_load_check` differs:
-  stock fails with `{not_used,[beam_a,...,beam_ssa_dead]}` in two QEMU-path runs and in the hosted run, the hosted
-  erXos fails the same way, and erXos in the system domain passes. Stock's log prints a `do_warnings` worker's
-  `{badmatch,killed}` during the case, which points at the case's `code:purge/1` meeting workers the previous case
-  left running, so the result may depend on timing; that is not established. Trace it on stock, then classify it.
-  Both erXos sides read one table (design-build.md), so a row naming erXos's `passed` would be stale on hosted:
-  if the cause is timing, the table needs a way to name a case whose stock result is not stable. Until then
-  `make check-oracle` does not run the group. Reports: erxos-history `oracle-qemu/2026-11-06-compiler`.
 * [Low] `test/oracle/hosted_known_differences/kernel.txt`: stock's result of gen_tcp_misc_SUITE `bidirectional_traffic`
   varies between runs (failed, user_skip, passed; erxos-history `oracle-hosted/2026-11-06-kernel`, `2026-11-06-kernel-2`,
   `2026-11-06-kernel-boot`), while erXos skips it in every run that reaches it for want of a local address. Its row is stale whenever

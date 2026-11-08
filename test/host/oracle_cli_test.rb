@@ -41,38 +41,27 @@ class OracleCliTest < Minitest::Test
     end
   end
 
-  def test_check_oracle_runs_under_hvf_only_and_says_what_it_leaves_out
+  # The check runs OTP's four groups whole under HVF alone, then libc-test,
+  # and a run whose every part passed is passed.
+  def test_check_oracle_runs_every_group_under_hvf_only
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
       libc_calls = []
       libc = ->(arguments) { libc_calls << arguments && 0 }
       status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf tcg], libc_test: libc)
-      assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
+      assert_equal 0, status
       assert_includes output, 'oracle qemu hvf: passed'
       refute_includes output, 'oracle qemu tcg'
-      assert_includes output, "partial: the system domain runs kernel/file_SUITE, the stdlib group's suites and the " \
-                              "compiler group's suites; OTP's emulator and kernel groups are not classified there yet"
+      refute_includes output, 'partial'
       options = { accel: 'hvf', cpus: 1, jobs: 4 }
       root = File.expand_path('../..', __dir__)
-      groups = %w[stdlib compiler].map { |group| Erx::OracleSuites.suites(root: root, group: group) }
-      assert_equal [[%w[file_SUITE], options], *groups.map { |suites| [suites, options] }],
-                   qemu.calls.grep(Array)
-      assert_equal %w[kernel stdlib compiler], qemu.calls.grep(Hash).filter_map { |call| call[:group] }
+      groups = Erx::OracleSuites::GROUPS.keys
+      assert_equal(groups.map { |group| [Erx::OracleSuites.suites(root: root, group: group), options] },
+                   qemu.calls.grep(Array))
+      assert_equal groups, qemu.groups
       assert_equal [Erx::CLI::ORACLE_DEADLINE], qemu.calls.grep(Hash).map { |call| call[:deadline] }.uniq
       assert_equal [%w[hvf 4]], libc_calls
       assert_includes output, 'libc-test hvf 4 CPUs: passed'
-    end
-  end
-
-  # With every group checked, a run whose every part passed is passed.
-  def test_check_oracle_passes_once_every_group_is_checked
-    Dir.mktmpdir do |directory|
-      qemu = FakeQemu.new(directory, passing: true)
-      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf], libc_test: ->(_) { 0 },
-                                               checked_groups: Erx::OracleSuites::GROUPS.keys)
-      assert_equal 0, status
-      refute_includes output, 'partial:'
-      assert_equal Erx::OracleSuites::GROUPS.keys.sort, qemu.groups.sort
     end
   end
 
@@ -96,7 +85,7 @@ class OracleCliTest < Minitest::Test
       run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf], libc_test: ->(_) { 0 })
       run_cli('oracle', 'qemu', qemu_class: qemu)
       check, plain = qemu.calls.grep(Hash).map { |options| options.fetch(:out) }.values_at(0, -1)
-      assert_equal File.join(Erx::ROOT, 'build/check-oracle/hvf/kernel'), check
+      assert_equal File.join(Erx::ROOT, 'build/check-oracle/hvf/emulator'), check
       assert_equal File.join(Erx::ROOT, 'build/oracle-qemu/stdlib'), plain
       refute check.start_with?(File.join(Erx::ROOT, 'build/oracle-qemu/'))
     end

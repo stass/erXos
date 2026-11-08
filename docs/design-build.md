@@ -476,8 +476,8 @@ its report and its table of known differences
 repeat across groups; both erXos sides read the same tables, so a case
 that differs on one and not the other is a bug. `--suites` names groups,
 `group/SUITE`s or `fast`, the subset `make check-oracle-hosted` runs on
-every change; `make check-oracle` runs `fast` and each group whose
-differences in the system domain are all classified. A table row
+every change; `make check-oracle` runs the four groups whole, and
+fails on any difference its tables do not explain. A table row
 names a suite, a group path, `-` or `*`, a case or `*`, the status erXos
 shows and the reason; a row naming a case wins over one naming only its
 group path. Each reason is an explained difference, a "cannot run" cause
