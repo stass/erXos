@@ -125,7 +125,7 @@ names; the table's order is the order.
 | M6 Immutable code, lasting data | the shell reads the release's files from an EROFS image on a QEMU disk; a file under `/data` survives a power cut | estimated in the subsystems' design documents | M4 | |
 | Track S The command shell | `ps -m \| grep erx` in a shell with rc's language, printing FreeBSD's text | 6,000 lines of Erlang, 4,000 of C17 for the track, programs included | M4 | |
 | **Phase 1b** | | | | |
-| 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in both backends (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
+| 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in the Fiasco backend, and in the hosted backend where cheap (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
 | 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | 1b-C Track D, parts 1 and 2 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B | GP, provisionally; the G6 baseline |
@@ -842,37 +842,51 @@ grants and the hostile runtime, which M5's kernel part adds.
   [design-system.md](design-system.md#verification-and-testing).
 
 **On the stopgap (1b-A).** Every bullet of the scope lands on the stopgap
-Fiasco except the kernel interface sub-spaces and programs need, which
+Fiasco except two: tracing across domains, which lands in 1b-C, whose
+browser views are its first consumer
+([track D](#track-d-windows-widgets-and-the-web)), and the kernel
+interface sub-spaces and programs need, which
 lands on erXos's kernel as M5's kernel part, after M2. On the stopgap its
 consumers use rows that the Fiasco backend adds behind the unchanged
-interface, and the hosted backend, one process through 1b-A, adds only
+interface, the creations and passes among them called from the root,
+where the domain library runs, and
+the hosted backend, one process through 1b-A, adds only
 where they are cheap ([track H](#track-h-hosted-mode)): a memory object mapped into
 another task, its destruction revoking it in every task that mapped it;
-sub-spaces created at a task's request, each with its parent recorded,
-ended when its parent ends, and an exit record with the exit status or a
-crash; IRQ objects bound to a group, whose deliveries reach the
-dispatcher of the group's home task, triggered by any holder;
-`erx_cap_pass` from the caller's table into a space it created; tables
+spaces created by the root, each with its budget, fault gate and label
+recorded, and an exit record with the exit status or a crash; IRQ objects
+created by the root and bound once to a group, whose deliveries reach the
+dispatcher of the group's home task, triggered and acked by any holder;
+`erx_cap_pass` from the root's table into a space it created, item by
+item until the first refusal; tables
 that grow from the root's pool, with each task's handle table sized by
 the `cap_limit` its creator gives; groups and budgets as records with
-nothing enforced; and sealing and `erx_mem_copy` through the root service
-([design-stopgap.md](design-stopgap.md#the-call-table)). vCPU upcalls get
-a row only if a source check of Fiasco's vCPU interface in the
-kernel-mode build finds that it carries the ABI's `erx_vcpu` layout
-without leaking Fiasco's; otherwise they arrive at M7. Passing at a
+nothing enforced or counted, a budget's destroy deleting everything
+charged to it; and release slices, `erx_image_map` and `erx_mem_copy`
+through the root service
+([design-stopgap.md](design-stopgap.md#the-call-table)). Sub-spaces
+created at a task's request and ended with their parent, creation and
+passing from a task other than the root, and paged objects, sealing,
+supply and `ERX_MEM_CODE` come with 1b-B, whose sessions are their first
+consumer ([track S](#track-s-the-command-shell-and-toybox)); device
+objects given to a holder domain come with 1b-E
+([M9](#m9-a-driver-is-an-erlang-process)); whether vCPU upcalls get a
+row is settled before 1b-D ([track P](#track-p-the-posix-lite-personality)).
+Passing at a
 rendezvous, pauses, IPC gates above `liberx` and every budget and grant
 enforcement stay refused, each a recorded residual. The funnel's verdicts
 run unchanged in user mode; what the stopgap cannot promise is that a
 domain which bypasses `liberx` is stopped by anything
 ([design-domains.md](design-domains.md#on-the-stopgap)).
 BeamAsm lands beside 1b-A, off its critical path, since it needs nothing
-of the kernel. The hostile suites and the budget criteria are written in
-1b-A. On the stopgap the hostile cases whose verdict is user-mode code's
-answer to what it reads, a funnel's to a malformed or forged frame, run
-and count; the cases that check a bound on memory, CPU or a neighbour's
-latency, the budget criteria and every case against a domain that
-bypasses `liberx` report `unsupported` there and run green on erXos's
-kernel ([design-stopgap.md](design-stopgap.md#what-phase-1-code-must-not-assume)).
+of the kernel. The hostile suites' verdict cases are written in 1b-A;
+their bound and confinement cases and the budget criteria are written at
+M5's kernel part. On the stopgap the verdict cases, whose verdict is
+user-mode code's answer to what it reads, a funnel's to a malformed or
+forged frame, run and count; the cases that check a bound on memory, CPU
+or a neighbour's latency, the budget criteria and every case against a
+domain that bypasses `liberx` run on erXos's kernel alone
+([design-stopgap.md](design-stopgap.md#what-phase-1-code-must-not-assume)).
 
 **Exit criteria, on the stopgap (1b-A).** The two-node differential
 scenario suite passes, every difference in the compatibility table; the
@@ -883,9 +897,9 @@ BeamAsm never runs stale code; no mapping is writable and executable
 together, and a BeamAsm domain's JIT object faults on an execute through
 its RW alias and on a write through its RX alias; the interpreter image
 links no BeamAsm, asmjit or libc++ symbol; the invariants of
-[design-domains.md](design-domains.md#invariants) have their tests, each
-green here where the invariant holds in user mode and on erXos's kernel
-where it rests on the kernel; the exhaustive models of one lane, of one
+[design-domains.md](design-domains.md#invariants) that hold in user mode
+have their tests, green here, and those that rest on the kernel get
+theirs at M5's kernel part; the exhaustive models of one lane, of one
 connection whose peer ends and of cross-domain links among three domains
 pass, progress included; the soak of a million cross-domain calls from
 short-lived processes and from a long-lived one whose calls time out
@@ -897,15 +911,14 @@ the peer sees `noconnection` on everything across it, in order with what
 the target sent before (D9); the system domain killed under load, an ERTS
 fatal error in the system domain, `erlang:halt/1` from a system process
 and a stopped watchdog pet each leave a crash record on the console naming
-its cause, every domain stopped and the machine ended as `erx.panic` says;
+its cause and the machine ended as `erx.panic` says;
 a peer that ignores `connection_down` leaves its connection closing,
 counted against its own `connections` quota, with the inspector showing
 it as closing and nothing else changed; F1, F2 and F5 have their tests on
 the file servers' side, a grant derived
-on a subtree reaching nothing above it whatever its client sends; a
-domain's sub-spaces end with it; budgets, grants and every charge read
-`unsupported` in the inspector, never a fabricated value; if the vCPU row
-lands, the vCPU conformance tests below pass on it;
+on a subtree reaching nothing above it whatever its client sends;
+budgets, grants and every charge, but the root's budget's `used`, read
+`unsupported` in the inspector, never a fabricated value;
 `file:read_file("/proc/processes/4.N.S/status")` in the system shell,
 where 4 is the system domain's id, returns every status the inspector can
 report.
@@ -986,7 +999,13 @@ M7, on erXos's kernel. On the stopgap a program's budget and group are
 unenforced records, its doorbells are IRQ objects whose deliveries reach
 the dispatcher of the task that consumes them, the program's for its own,
 and the pipe server's and the session's creates and installs
-are requests to the backend's root service; the narrowing of `within` is
+are requests to the backend's root service. The backend gains here the
+rows a session is the first to call: sub-spaces created at a task's
+request, each with its parent recorded and ended when its parent ends;
+spaces, IRQ objects, passes and image maps asked for by a task other than
+the root; and paged objects, sealing, supply and `ERX_MEM_CODE` for the
+code objects the domain service makes
+([design-stopgap.md](design-stopgap.md#the-call-table)). The narrowing of `within` is
 the handler's table and the servers' grants, user mode, and holds there,
 while that a program cannot escape `liberx` does not
 ([design-programs.md](design-programs.md#a-program-is-a-port)):
@@ -1001,7 +1020,7 @@ while that a program cannot escape `liberx` does not
   the shell and its command server in it; the principals, quotas and
   logins of other principals follow in M10
   ([design-domains.md](design-domains.md#principals-sessions-and-quotas));
-* programs as ports of the session, over the sub-spaces 1b-A brings: the
+* programs as ports of the session, over the sub-spaces 1b-B brings: the
   port driver `erx_program`, which carves the program's budget from the
   session's, creates a child group of the session's programs group, the
   anchor space (its parent is the starter's anchor, or the session's own
@@ -1048,7 +1067,8 @@ by a test.
 applet built, or each failure is classified; a pipe's end of stream
 arrives only after its last writer goes and every byte written has been
 read, a writer that faults included, and a program's end reaches its
-port's owner as `{exit_status, N}` after its last bytes; a pipe with a
+port's owner as `{exit_status, N}` after its last bytes; a domain's
+sub-spaces, a session's programs among them, end with it; a pipe with a
 paused reader and sixty-four writers still spawns its sixty-fifth, which
 blocks on its write, never on its spawn; job control pauses, resumes and
 ends jobs of programs, checked at M7, which brings the pauses; all 256
@@ -1131,7 +1151,8 @@ with inherited descriptors and file actions, `wait` and `kill`, and
 `erx_exec` with `rx` grants, is 1b-D: it follows track S's programs, on
 the stopgap, and ends with the G6 baseline. The rest follows. Signals
 depend on a source check of Fiasco's vCPU interface in the kernel-mode
-build: if it carries the ABI's `erx_vcpu` layout without leaking
+build, made before 1b-D starts
+([design-stopgap.md](design-stopgap.md#open-decisions)): if it carries the ABI's `erx_vcpu` layout without leaking
 Fiasco's, the backend gains a vCPU row and `kill` and catchable signals
 run on the stopgap; otherwise the stopgap delivers only signals whose
 default action ends the program, and catchable signals arrive at M7.
@@ -1142,7 +1163,8 @@ and `kill` pass their cases of `libc-test` and the Open POSIX Test Suite,
 every other failure among them classified; without the stopgap's vCPU
 row, a case that needs a signal handler shows as "cannot run" with that
 reason and runs at M7, and `sigaction` with a handler fails with
-`EINVAL`; a pipe's bytes stay readable
+`EINVAL`; with the row, the vCPU conformance tests of M5's kernel part
+pass on the stopgap; a pipe's bytes stay readable
 after their writer ends; a crash of the session's pipe server makes reads
 fail with `EIO` and writes with `EPIPE`, never a false end of stream; an
 executable runs through an `rx` grant and is refused through `ro` and
@@ -1224,7 +1246,9 @@ land after M11 repeat M11's closure over what they add.
    domain of the development manifest,
    with the connection core `erx_web_conn`; the session's `erx_web_line`,
    whose views fetch records, the kernel log and traces through the
-   session's own inspect and trace facets; the host link's `web` facet,
+   session's own inspect and trace facets, with M5's tracing across
+   domains, the trace facet and the trace relay, which land here
+   ([M5](#m5-a-wall-around-some-processes)); the host link's `web` facet,
    bound to `root`'s session, with the manifest check's refusal of it in a
    release manifest; `tools/erx web` with its loopback server, token,
    cookie and `Origin` checks and its WebSocket relay; the client under

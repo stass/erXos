@@ -275,10 +275,11 @@ with it.
 A reporter is one of three categories, or a stopgap reporter: a stopgap
 component that does the kernel's, a service's or a runtime's work in its
 place and reports what it can see of that work under its own name.
-`liberx`'s Phase 1 backend counts the pages of a budget in the kernel's
-place, so a budget's `used` is `{{stopgap, liberx_pool}, {partial,
-Pages}}`, which a renderer prints as the value `[partial]` with the
-reporter `liberx pool`
+`liberx`'s Phase 1 backend counts the pages of its pool in the kernel's
+place, so the root's budget's `used` is `{{stopgap, liberx_pool},
+{partial, Pages}}`, which a renderer prints as the value `[partial]`
+with the reporter `liberx pool`, and a budget carved from it reports
+`used` as `unsupported`
 ([design-stopgap.md](design-stopgap.md#reporting-a-budget)). The schema
 declares each stopgap reporter with the category it stands in for, its
 label, the scope of what it sees and the attributes it may report; a

@@ -355,7 +355,7 @@ row of [the stopgap's call table](design-stopgap.md#the-call-table) each:
   record carries the exit status, or `crash`
   ([Spaces, parents and exit records](design-stopgap.md#spaces-parents-and-exit-records));
 * budgets and groups are records with nothing charged or enforced, and
-  every budget field but `used` reports `unsupported`
+  every field of a domain's budgets, `used` included, reports `unsupported`
   ([Budgets and groups as records](design-stopgap.md#budgets-and-groups-as-records)).
 
 D1 to D7, D9, D13 and D17 hold on the stopgap for every domain whose
