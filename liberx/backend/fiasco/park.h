@@ -13,9 +13,9 @@
 #include "liberx/backend/core/park_table.h"
 
 /*
- * The task's one group of executors, over the park core (docs/design-stopgap.md,
- * "The park protocol"). Every thread of the task belongs to this group; group.c
- * holds its dispatcher and its objects' labels.
+ * The task's park record, over the park core (docs/design-stopgap.md, "The park
+ * protocol"): the readiness of the task's one home group, whose executors are the
+ * task's, with its dispatcher and its entries' labels.
  */
 
 /* A slot for the thread of this index, or ERX_BACKEND_PARK_NO_SLOT when the group is full. */
@@ -38,6 +38,17 @@ void		erx_fiasco_group_trigger(void);
 void		erx_fiasco_group_signal(uint32_t object);
 /* Moves up to max listed objects into objects, oldest first, and returns how many. */
 uint32_t	erx_fiasco_group_take(uint32_t max, uint32_t *objects);
+
+/* Entry's label, which a bind writes before the object may fire and a take reads. The caller bounds entry. */
+_Atomic uint64_t *erx_fiasco_park_label(uint32_t entry);
+
+/*
+ * Starts the task's dispatcher, a worker created in group (ERX_CAP_NULL, which names no
+ * record, for a task's), and names it to the service: once per task, at its backend's
+ * start, or the root's with its first group. A second is ERX_EINVAL. Once the thread
+ * is made a later refusal leaves it, idle, and the call is not retried.
+ */
+int	erx_fiasco_dispatcher_start(uint64_t group, uint64_t *thread) ERX_WARN_UNUSED_RESULT;
 
 /* A worker is ERX_ETYPE. ERX_OK when woken or an epoch moved, ERX_ETIMEDOUT at the deadline. */
 int	erx_park(uint64_t group_epoch, uint64_t slot_epoch, uint64_t deadline) ERX_WARN_UNUSED_RESULT;

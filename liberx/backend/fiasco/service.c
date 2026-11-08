@@ -377,6 +377,11 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_task_vm_map_body(decoded->task, words));
 	case ERX_FIASCO_CALL_SPACE_CREATE:
 		return (erx_fiasco_task_create_body(decoded->task, words, &reply->first));
+	case ERX_FIASCO_CALL_GROUP_CREATE:
+		return (erx_fiasco_group_create_body(decoded->task, ((const erx_fiasco_group_create_request_t *)words)->budget,
+		    &reply->first));
+	case ERX_FIASCO_CALL_DISPATCHER_SET:
+		return (erx_fiasco_dispatcher_set_body(decoded->task, ((const erx_fiasco_dispatcher_request_t *)words)->thread));
 	case ERX_FIASCO_CALL_GATE_CREATE:
 		return (erx_fiasco_gate_create_body(decoded->task, ((const erx_fiasco_gate_create_request_t *)words)->budget,
 		    &reply->first));
@@ -567,7 +572,8 @@ erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, 
  * public UTCB. Everything goes through the window, so the record may be another task's.
  * A task holds its semaphore at the same slot the root's own threads use. A created
  * space takes one first thread from its creator, the root, ever: a second create there,
- * or any other caller's, is ERX_ENOTSUP.
+ * or any other caller's, is ERX_ENOTSUP. The thread joins the group the request names,
+ * whose home its task becomes (group.c).
  */
 static int
 service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t *request, erx_fiasco_reply_t *reply)
@@ -576,11 +582,10 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	const erx_fiasco_thread_record_t *from;
 	erx_fiasco_task_t *row;
 	uint64_t *start;
-	uint32_t index, task = caller;
+	uint32_t index, group, task = caller;
+	int status;
 
 	if (request->space != 0) {
-		int status;
-
 		if (caller != ERX_FIASCO_TASK_ROOT)
 			return (ERX_ENOTSUP);
 		status = erx_fiasco_task_space_target(caller, request->space, &task);
@@ -600,6 +605,9 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	from = erx_fiasco_task_record(caller, (uint32_t)request->caller);
 	if (record == NULL || from == NULL)
 		return (ERX_EINVAL);
+	status = erx_fiasco_group_admit(caller, task, request->group, &group);
+	if (status != ERX_OK)
+		return (status);
 	/* A task's thread may fault, and its fault takes an entry it has before it runs. */
 	if (task != ERX_FIASCO_TASK_ROOT && erx_fiasco_gate_thread_room(task, index) != ERX_OK)
 		return (ERX_ENOMEM);
@@ -620,6 +628,7 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	row->threads[index] = ERX_FIASCO_TASK_THREAD_CREATED;
 	if (task != caller)
 		row->first_made = true;
+	erx_fiasco_group_join(task, group);
 	reply->first = service_thread_handle(caller, task, index);
 	reply->second = erx_fiasco_thread_semaphore_cap(index);
 	return (ERX_OK);

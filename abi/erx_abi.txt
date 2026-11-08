@@ -376,6 +376,8 @@ enum fiasco_call u32
   value gate_cancel 38
   value budget_create 39
   value budget_resize 40
+  value group_create 41
+  value dispatcher_set 42
 
 # erx_object_info's topics and the report each writes (docs/design-abi.md,
 # "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
@@ -654,6 +656,18 @@ layout erx_fiasco_task_join_request wire_le 8 16
 layout erx_fiasco_cap_request wire_le 8 16
   field caller u64 0
   field cap u64 8
+
+# erx_group_create, from the root alone: the group's handle is the reply's
+# first word.
+layout erx_fiasco_group_create_request wire_le 8 16
+  field caller u64 0
+  field budget u64 8
+
+# A task's dispatcher, which one of the task's own threads names once it has
+# started it (docs/design-stopgap.md, "Interrupts and readiness").
+layout erx_fiasco_dispatcher_request wire_le 8 16
+  field caller u64 0
+  field thread u64 8
 
 # erx_gate_create: the gate's handle is the reply's first word.
 layout erx_fiasco_gate_create_request wire_le 8 16

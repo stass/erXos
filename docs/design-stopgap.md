@@ -131,7 +131,8 @@ Each is backend C with no thread-local storage, and calls no musl function.
 | dispatcher | each task, one | turns IRQ deliveries into triggers of the task's groups | drivers, lanes, channels, pipes, ERTS's wakes |
 
 A task's own threads create its reaper and its dispatcher, at backend initialisation, through the
-ordinary calls; the dispatcher's creation registers it with the service
+ordinary calls; the dispatcher's creation registers it with the service. The root's dispatcher starts with the
+root's first group instead, as that group's first thread ([Budgets and groups as records](#budgets-and-groups-as-records))
 ([Interrupts and readiness](#interrupts-and-readiness)). The watchdog, like the root service, holds no thread index and
 takes a free slot of the kernel-given UTCB page, with `sigma0` as its pager. `moe`, L4Re's root task, is likewise one server thread for
 memory and faults (upstream; `moe` is not in this tree), and `libpthread` serializes thread and UTCB
@@ -706,15 +707,18 @@ callers rely on to clean up: **an object goes with its budget.**
   says; then each further sweep frees the carved budgets nothing is charged to any more, leaves first, until
   a sweep frees none, and the budget's own record goes last. A deletion the root cannot perform ends the
   machine, as every deletion does.
-* **A group record** holds its budget, its parent, its CPU set and its home: the task its threads run in and the
+* **A group record** holds its budget and its home: the task its threads run in and the
   park record of that task ([Interrupts and readiness](#interrupts-and-readiness)).
-  `erx_group_create` makes one from any task under any budget the caller holds, with no home; the first
+  The record is an object record in the creator's handle table, and its home is the home task's row, so a task is
+  the home of one group at most. `erx_group_create` makes one from the root under any budget it holds, with no
+  home; the root's first also starts the root's dispatcher in it, which makes it the root's own group. The first
   `erx_thread_create` in the group fixes the home to the thread's task, and a thread of another task is
   `ERX_ENOTSUP` after that, the refusal of a call this backend does not carry, since erXos's kernel runs a
   group's threads in any space. In every caller the first thread created in a group belongs to the task the group was
-  made for: the domain library's first worker of a domain, a session's first thread of a program, the root's first
-  executor. A group goes with its budget, with
-  its home task, or by `erx_object_destroy` once it has no thread. **A group never goes before its threads:**
+  made for: the domain library's first worker of a domain, a session's first thread of a program, the root's
+  dispatcher. A thread that names `ERX_CAP_NULL` joins no record and parks in its task's park record, as the
+  root's executors and every task's own threads do. A group goes with its budget, with
+  its home task, or by `erx_object_destroy` once it has no thread; while its home has a thread, the close of its last handle leaves it to go with that home. **A group never goes before its threads:**
   a thread is deleted either by its own exit through the reaper, which also releases its stack and clears its
   lock word ([Thread exit](#thread-exit)), or with its whole task, so the service never deletes threads of a
   live task one by one. Hence the destroy of a group that still has a thread is `ERX_ENOTSUP`, and a budget's
@@ -1589,6 +1593,7 @@ since no consumer calls it before then.
 | pass plans: a pass checked whole before any item moves | items passed in order until the first refusal; the caller undoes the items before it by a budget's destroy | Track K (passing, with its host-explored core) |
 | IRQ unbind and rebind | an object bound once; a second bind, an unbind and a rebind `ERX_ENOTSUP`, a bind of an object a task's or a group's end left unbound included; its destroy detaches it | 1b-E, if a driver restarted within its domain must rebind its line; otherwise Track K |
 | more than one home group in a task | one home group per task; a second `ERX_ENOTSUP` | M2 (groups whose threads run in any space) |
+| a group's parent and CPU set in its record; `erx_group_create` from a task | the parent is ignored; `erx_group_configure` and `_info` take only the root's own group (`ERX_CAP_SELF` or its first handle) and keep its CPU set in the root; a task's create `ERX_ENOTSUP` | 1b-C, when a session makes a program's group; M2 (grants) |
 | creation and passing from a task other than the root: `erx_space_create`, `erx_irq_create`, `erx_cap_pass`, `erx_image_map` | from the root only, where the domain library runs; from another task `ERX_ENOTSUP` | 1b-B (a session's port driver and pipe server); Track K (by capability, without the root) |
 | paged objects, sealing, supply, `ERX_MEM_CODE` | `ERX_ENOTSUP` | 1b-B (a session's code and data objects); Track K (pages supplied on demand) |
 | device objects given to a holder domain (`erx_dom_device_give`) | none | 1b-E (M9 on the stopgap); M9's kernel part |

@@ -56,13 +56,6 @@ erx_group_info(uint64_t group)
 }
 
 int
-erx_group_take_ready(uint32_t max)
-{
-	(void)max;
-	return (ERX_ENOTSUP);
-}
-
-int
 erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
 {
 	(void)budget;

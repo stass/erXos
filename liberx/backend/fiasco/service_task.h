@@ -57,6 +57,8 @@ typedef struct erx_fiasco_task_tree {
 typedef struct erx_fiasco_task {
 	erx_fiasco_task_state_t	 state;
 	uint32_t		 flags;		/* ERX_SPACE_* */
+	uint32_t		 group;		/* its home group's record index plus one, 0 for none */
+	uint32_t		 dispatcher;	/* its dispatcher's thread index plus one, 0 until it is named */
 	erx_fiasco_task_tree_t	 tree;
 	uint64_t		 entry;		/* where its first thread starts */
 	bool			 first_made;	/* its creator made index 0, so another create there is ERX_ENOTSUP */
@@ -72,6 +74,11 @@ typedef struct erx_fiasco_task {
  * the row of an index the caller knows to have one, a live task's or a decoded space's.
  */
 erx_fiasco_task_t	*erx_fiasco_task(uint32_t task);
+/*
+ * The live task whose row names the group record as its home, by a scan of the rows:
+ * the row is the home's one record, so an ended task is no group's home.
+ */
+bool		erx_fiasco_task_group_home(uint32_t record, uint32_t *task);
 /* Whether the index names a live task: what the decoder asks about a gate's label. */
 bool		erx_fiasco_task_live(uint32_t task);
 /* Marks the root live, once its window is up; NULL, or why the boot cannot go on. */

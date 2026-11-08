@@ -100,6 +100,20 @@ erx_fiasco_task_live(uint32_t task)
 	return (row != NULL && row->state == ERX_FIASCO_TASK_LIVE);
 }
 
+bool
+erx_fiasco_task_group_home(uint32_t record, uint32_t *task)
+{
+	for (uint32_t index = 0; index < erx_backend_grow_table_capacity(&task_rows); index++) {
+		const erx_fiasco_task_t *const row = erx_fiasco_task(index);
+
+		if (row->state == ERX_FIASCO_TASK_LIVE && row->group == record + 1) {
+			*task = index;
+			return (true);
+		}
+	}
+	return (false);
+}
+
 const char *
 erx_fiasco_task_table_init(void)
 {
@@ -432,6 +446,9 @@ task_teardown(uint32_t task)
 	erx_fiasco_gate_task_gone(task);
 	erx_fiasco_vm_task_close(task);
 	erx_fiasco_object_task_close(task);
+	/* A group goes with its home, whose threads are gone. */
+	if (row->group != 0)
+		erx_fiasco_object_end(row->group - 1);
 }
 
 /*

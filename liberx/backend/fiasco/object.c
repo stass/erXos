@@ -20,12 +20,14 @@
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/budget.h"
 #include "liberx/backend/fiasco/fault_gate.h"
+#include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/vm.h"
 
 static erx_backend_handles_t *object_handles_of(uint32_t);
 static void	object_release(uint32_t);
+static void	object_unheld(uint32_t);
 
 /* Every object record, by index. */
 static erx_backend_grow_table_t object_records;
@@ -69,7 +71,7 @@ erx_fiasco_object_task_close(uint32_t task)
 
 	for (uint64_t handle = 1; handle < end; handle++)
 		if (erx_backend_handle_close(&object_records, handles, handle, &freed, &index) == ERX_OK && freed)
-			erx_fiasco_object_end(index);
+			object_unheld(index);
 	erx_backend_handles_clear(handles);
 	for (index = 0; index < erx_backend_grow_table_capacity(&object_records); index++) {
 		const erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
@@ -154,7 +156,7 @@ erx_fiasco_cap_close_body(uint32_t task, uint64_t handle)
 	const int status = erx_backend_handle_close(&object_records, object_handles_of(task), handle, &freed, &index);
 
 	if (status == ERX_OK && freed)
-		erx_fiasco_object_end(index);
+		object_unheld(index);
 	return (status);
 }
 
@@ -171,8 +173,25 @@ erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle)
 	record = erx_backend_object_at(&object_records, index);
 	if (record->creator != task)
 		return (ERX_ERIGHTS);
+	/* A group never goes before its threads, which end only by their own exit or with their task. */
+	if (record->kind == ERX_BACKEND_OBJECT_GROUP && erx_fiasco_group_home_has_threads(index))
+		return (ERX_ENOTSUP);
 	erx_fiasco_object_end(index);
 	return (ERX_OK);
+}
+
+/*
+ * A record whose last handle went and that has no mapping ends, but for a group whose
+ * home has threads: its home holds it, and it goes with that home (service_task.c), so a
+ * group never goes before its threads.
+ */
+static void
+object_unheld(uint32_t index)
+{
+	if (erx_backend_object_at(&object_records, index)->kind == ERX_BACKEND_OBJECT_GROUP &&
+	    erx_fiasco_group_home_has_threads(index))
+		return;
+	erx_fiasco_object_end(index);
 }
 
 static erx_backend_handles_t *
@@ -191,6 +210,9 @@ object_release(uint32_t index)
 		break;
 	case ERX_BACKEND_OBJECT_GATE:
 		erx_fiasco_gate_free(index);
+		break;
+	case ERX_BACKEND_OBJECT_GROUP:
+		erx_fiasco_group_free(index);
 		break;
 	case ERX_BACKEND_OBJECT_SPACE:
 		erx_fiasco_task_space_release(index);

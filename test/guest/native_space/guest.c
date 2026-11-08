@@ -20,11 +20,13 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
+#include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "test/guest/native_space/modes.h"
 
@@ -417,6 +419,50 @@ case_released(void)
 	say_case("released", passed);
 }
 
+/* Starts the first thread of a task the launcher made, in group, with the argument. */
+static bool
+group_start(uint64_t space, uint64_t group, uint64_t argument)
+{
+	erx_fiasco_start_t start = { 0 };
+	const uint64_t *const words = (const uint64_t *)(const void *)&start;
+	erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t thread;
+
+	start.regs.gpr[0] = argument;
+	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
+		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
+	return (erx_thread_create(0, space, group, ERX_THREAD_CLASS_WORKER, &thread) == ERX_OK &&
+	    erx_thread_start(thread) == ERX_OK);
+}
+
+/*
+ * Groups as records (docs/design-stopgap.md, "Budgets and groups as records"). The
+ * root's first group is its home, as the root's dispatcher is the first thread made in
+ * it, so a root thread in a second group is a second home group, refused, and the first
+ * cannot be destroyed while the root has threads. A domain's group takes its task as
+ * home with the task's first thread, and goes with the task, so the root's handle to it
+ * is stale once the task is joined. Last, as the root's dispatcher stays.
+ */
+static void
+case_groups(void)
+{
+	uint64_t own, second, domain, space, thread;
+	int64_t status = INT64_MIN;
+	bool passed = erx_group_create(0, 0, &own) == ERX_OK && erx_group_create(0, 0, &second) == ERX_OK &&
+	    erx_group_create(0, 0, &domain) == ERX_OK;
+
+	passed = passed && erx_thread_create(0, 0, second, ERX_THREAD_CLASS_WORKER, &thread) == ERX_ENOTSUP &&
+	    erx_object_destroy(own) == ERX_ENOTSUP && erx_object_destroy(second) == ERX_OK;
+	if (passed && erx_fiasco_launch_make(program_entry, 0, &space) == ERX_OK) {
+		if (!group_start(space, domain, MODE_GROUP))
+			task_drop(space);
+		else if (erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+			status = INT64_MIN;
+	}
+	say_count("groups_status", (uint64_t)status);
+	say_case("groups", passed && status == 0 && erx_object_destroy(domain) == ERX_ESTALE);
+}
+
 /*
  * The root makes a created space's first thread and starts it at the image's entry with
  * its argument (MODE_FIRST in program.c). A second create there is ERX_ENOTSUP and a
@@ -585,6 +631,7 @@ erx_fiasco_root_main(void)
 	case_first_thread();
 	case_budget_calls();
 	case_budget_destroy();
+	case_groups();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

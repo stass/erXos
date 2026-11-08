@@ -434,8 +434,10 @@ bind_objects(void)
 
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		fail("erx: irq: no group FAILED\n");
-	if (erx_group_create(0, 0, &unused) != ERX_ELIMIT)
-		fail("erx: irq: a second group was not refused FAILED\n");
+	/* A second group has no home, so a bind to it is not the root's; it goes at its destroy. */
+	if (erx_group_create(0, 0, &unused) != ERX_OK || erx_irq_bind(0, unused, 1) != ERX_EINVAL ||
+	    erx_object_destroy(unused) != ERX_OK)
+		fail("erx: irq: a second group was not a homeless record FAILED\n");
 	too_small.size = ERX_PAGE_SIZE / 2;
 	if (erx_device_open(&too_small, NULL, NULL, &device) != ERX_EINVAL)
 		fail("erx: irq: a window smaller than its registers was not refused FAILED\n");

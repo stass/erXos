@@ -31,7 +31,7 @@ class NativeSeedsTest < Minitest::Test
   TASK = 'liberx/backend/fiasco/service_task.c'
   PARK = 'liberx/backend/core/park_table.c'
   IRQ = 'liberx/backend/fiasco/irq.c'
-  GROUP = 'liberx/backend/fiasco/group.c'
+  DISPATCHER = 'liberx/backend/fiasco/park.c'
   IRQ_GUEST = 'test/guest/native_irq/guest.c'
   ACK_BODY = "\tif (irq_objects[irq].bound)\n\t\t(void)l4_irq_unmask(irq_cap((uint32_t)irq));\n"
   REAP_CALL = "\tif (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_REAP, &request, sizeof(request), &reply) != ERX_OK)\n" \
@@ -73,7 +73,7 @@ class NativeSeedsTest < Minitest::Test
                                           suite: :irq, cpus: 1, expected: /status page's ready disagrees/),
     'the interlock removed' => Seed.new(file: PARK, from: "if (park->group_epoch != event->group_seen || park->slot_epoch[slot] != event->slot_seen)\n\t\t\treturn ((erx_backend_park_result_t){ .action = ERX_BACKEND_PARK_RETURN });\n", to: '',
                                         suite: :irq, cpus: 1, expected: /a trigger before the park was lost/),
-    'the dispatcher triggers nothing' => Seed.new(file: GROUP, from: "\t\terx_fiasco_group_signal((uint32_t)record);\n", to: "\t\tcontinue;\n",
+    'the dispatcher triggers nothing' => Seed.new(file: DISPATCHER, from: "\t\terx_fiasco_group_signal((uint32_t)record);\n", to: "\t\tcontinue;\n",
                                                   suite: :irq, cpus: 1, expected: /a lost wake/),
     'the hook before the park removed' => Seed.new(file: IRQ_GUEST, from: "\ttrigger_and_see(irq_soft);\n\tif (erx_park(group, slot,", to: "\tif (erx_park(group, slot,",
                                                    suite: :irq, cpus: 1, expected: /a trigger before the park was lost/)

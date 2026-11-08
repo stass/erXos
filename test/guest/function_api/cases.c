@@ -556,7 +556,7 @@ case_bad_handle_refused(void)
 	    erx_thread_set_clear_word(UINT64_C(1) << 40, 0) == ERX_EINVAL &&
 	    erx_thread_set_affinity(UINT64_C(1) << 40, 1) == ERX_EINVAL &&
 	    erx_thread_create(0, 0, 0, 2, &thread) == ERX_EINVAL &&
-	    erx_thread_create(0, 1, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_EINVAL);
+	    erx_thread_create(0, UINT64_C(1) << 40, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_EINVAL);
 }
 
 /* The calls this table refuses, whatever they are handed. */

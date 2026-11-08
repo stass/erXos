@@ -8,27 +8,55 @@
 
 #include <stdint.h>
 
+#include <stdbool.h>
+
 #include "erx/abi.h"
 #include "erx/cdefs.h"
 
 /*
- * Interrupts and readiness (docs/design-stopgap.md, "Interrupts and readiness"):
- * the task's group, its dispatcher, and the IRQ objects bound to it. An object's
- * handle is its index in the service's table.
+ * Groups as records and interrupts (docs/design-stopgap.md, "Budgets and groups as
+ * records", "Interrupts and readiness"): the service's group records, and the root's
+ * stubs of the group and IRQ calls. An IRQ object's handle is its index in the
+ * service's table.
  */
 
+/* What erx_fiasco_group_admit gives for a thread that names no group. */
+#define ERX_FIASCO_GROUP_NONE	UINT32_MAX
+
 /*
- * Starts the dispatcher of the task's one group and returns the group's handle. A
- * second create is ERX_ELIMIT, and budget and parent are ignored: a recorded difference.
+ * Makes a group record with no home and returns its handle; only the root makes one,
+ * so a task is ERX_ENOTSUP. The root's first also starts the root's dispatcher in it,
+ * which makes it the root's own group. parent is ignored: a recorded difference.
  */
 int	erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group) ERX_WARN_UNUSED_RESULT;
 
 /*
  * Writes up to max listed objects' labels, at most ERX_MSG_WORDS, into the caller's
  * public UTCB and returns how many, each object once however often it fired. Never
- * blocks. A worker is ERX_ETYPE.
+ * blocks. A worker is ERX_ETYPE. Local to the home task (park.c).
  */
 int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
+
+/* The service's group bodies. erx_group_create's: a task is ERX_ENOTSUP. */
+int	erx_fiasco_group_create_body(uint32_t task, uint64_t budget, uint64_t *group);
+/*
+ * Before a thread's kernel objects: the record of the group a thread created in task by
+ * caller joins, or ERX_FIASCO_GROUP_NONE for ERX_CAP_NULL, which names none. A group
+ * homed in another task, or a homeless one while task is another group's home, is
+ * ERX_ENOTSUP; a handle that names no group of the caller's, the lookup's refusal.
+ */
+int	erx_fiasco_group_admit(uint32_t caller, uint32_t task, uint64_t group, uint32_t *record);
+/* Once the thread exists: makes task the home of what admit gave. */
+void	erx_fiasco_group_join(uint32_t task, uint32_t record);
+/*
+ * Whether the record's home task has any thread; always so for the root. Such a group
+ * outlives its handles and refuses its destroy, and goes with its home.
+ */
+bool	erx_fiasco_group_home_has_threads(uint32_t record);
+/* The release of a record that ends: its home, if any, is a home no more. */
+void	erx_fiasco_group_free(uint32_t record);
+/* Names the task's dispatcher, one of its own threads, once; a second is ERX_EINVAL. */
+int	erx_fiasco_dispatcher_set_body(uint32_t task, uint64_t thread);
 
 /*
  * kind is ERX_IRQ_SOFT, or ERX_IRQ_LINE with selector the line. budget and

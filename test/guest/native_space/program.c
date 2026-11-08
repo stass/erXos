@@ -112,6 +112,8 @@ erx_task_main(uint64_t argument)
 		return (mode_reader());
 	case MODE_REVOKED:
 		return (mode_revoked(argument >> SLOT_SHIFT));
+	case MODE_GROUP:
+		return (erx_group_take_ready(1) == ERX_ETYPE ? 0 : 51);
 	case MODE_CREATOR:
 		return (mode_creator());
 	case MODE_FIRST:
