@@ -400,7 +400,7 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		    ((const erx_fiasco_space_stop_request_t *)words)->status));
 	case ERX_FIASCO_CALL_TASK_JOIN:
 		return (erx_fiasco_task_join_body(decoded->task, ((const erx_fiasco_task_join_request_t *)words)->task,
-		    (int64_t *)(void *)&reply->first));
+		    (int64_t *)(void *)&reply->first, &reply->second));
 	case ERX_FIASCO_CALL_MACHINE_END: {
 		const uint64_t how = ((const erx_fiasco_machine_end_request_t *)words)->how;
 
@@ -465,8 +465,7 @@ service_object_info(uint32_t task, const erx_fiasco_object_info_request_t *reque
 		facts.budget_used = erx_fiasco_vm_used_pages();
 		break;
 	case ERX_INFO_THREAD:
-		if (request->object != ERX_CAP_SELF && !(erx_fiasco_task_space_decode(request->object, &space) &&
-		    erx_fiasco_task(space)->state == ERX_FIASCO_TASK_LIVE))
+		if (erx_fiasco_task_space_target(task, request->object, &space) != ERX_OK)
 			return (ERX_ENOTSUP);
 		erx_fiasco_task_thread_map(space, facts.threads);
 		break;
@@ -566,7 +565,8 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	uint32_t index, task = caller;
 
 	if (request->space != 0) {
-		if (caller != ERX_FIASCO_TASK_ROOT || !erx_fiasco_task_space_decode(request->space, &task) || request->index != 0)
+		if (caller != ERX_FIASCO_TASK_ROOT || erx_fiasco_task_space_target(caller, request->space, &task) != ERX_OK ||
+		    task == caller || request->index != 0)
 			return (ERX_EINVAL);
 	}
 	row = erx_fiasco_task(task);

@@ -16,10 +16,13 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "test/guest/native_space/modes.h"
 
 #define PAGE	((uint64_t)ERX_PAGE_SIZE)
+/* The handle table of each space the creator makes. */
+#define CREATED_CAP_LIMIT	16u
 
 int64_t	erx_task_main(uint64_t);
 
@@ -64,6 +67,30 @@ mode_revoked(uint64_t slot)
 	return (31);
 }
 
+/*
+ * Spaces below its own: a child, and a grandchild below the child, each reporting to a
+ * gate of its own, and the child given a page of its object; then a parent that names
+ * no space. Its end stops both, children first, and frees them.
+ */
+static int64_t
+mode_creator(void)
+{
+	uint64_t gate, mem, child, grandchild, refused;
+
+	if (erx_gate_create(0, &gate) != ERX_OK || erx_mem_create(0, PAGE, 0, &mem) != ERX_OK)
+		return (40);
+	if (erx_space_create(0, ERX_CAP_SELF, gate, 1, 0, CREATED_CAP_LIMIT, &child) != ERX_OK)
+		return (41);
+	if (erx_space_create(0, child, gate, 2, 0, CREATED_CAP_LIMIT, &grandchild) != ERX_OK)
+		return (42);
+	if (erx_vm_reserve(child, SHARED_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) != ERX_OK ||
+	    erx_vm_map(child, SHARED_ADDR, PAGE, mem, 0, ERX_PROT_RW) != ERX_OK)
+		return (43);
+	if (erx_space_create(0, mem, gate, 3, 0, CREATED_CAP_LIMIT, &refused) != ERX_ETYPE)
+		return (44);
+	return (0);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -74,6 +101,8 @@ erx_task_main(uint64_t argument)
 		return (mode_reader());
 	case MODE_REVOKED:
 		return (mode_revoked(argument >> SLOT_SHIFT));
+	case MODE_CREATOR:
+		return (mode_creator());
 	default:
 		return (90);
 	}

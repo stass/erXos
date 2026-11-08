@@ -80,7 +80,7 @@ erx_fiasco_gate_named(uint32_t caller, uint64_t fault, uint32_t *gate)
 	return (ERX_OK);
 }
 
-/* A row reused after a join is empty: the join withdrew its exit and the task's end freed its faults. */
+/* A row reused after a deletion is empty: the deletion withdrew its exit and the task's end freed its faults. */
 int
 erx_fiasco_gate_space_open(uint32_t task, uint32_t gate, uint64_t label)
 {

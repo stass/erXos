@@ -40,9 +40,24 @@ typedef enum erx_fiasco_task_state {
 	ERX_FIASCO_TASK_ENDED	/* its status waits for erx_fiasco_task_join */
 } erx_fiasco_task_state_t;
 
+/*
+ * A task's place in the tree of spaces (docs/design-stopgap.md, "Spaces, parents and
+ * exit records"), kept from its create until its deletion. The root is no task's child,
+ * so 0 ends a list; a child is on its parent's list from its create to its deletion,
+ * stopped or not. space is its space record's index plus one, the record every handle
+ * to it names, or 0 for the root, which has none.
+ */
+typedef struct erx_fiasco_task_tree {
+	uint32_t	parent;
+	uint32_t	child;		/* the first on its list of children */
+	uint32_t	sibling;	/* the next on its parent's list */
+	uint32_t	space;
+} erx_fiasco_task_tree_t;
+
 typedef struct erx_fiasco_task {
 	erx_fiasco_task_state_t	 state;
 	uint32_t		 flags;		/* ERX_SPACE_* */
+	erx_fiasco_task_tree_t	 tree;
 	uint64_t		 entry;		/* where its first thread starts */
 	int64_t			 status;
 	erx_fiasco_task_thread_t threads[ERX_FIASCO_THREADS_MAX];
@@ -93,12 +108,24 @@ void		erx_fiasco_task_set_archive(const erx_pack_view_t *view);
 int	erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_request_t *request, uint64_t *space);
 int	erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start);
 int	erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status);
-int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status);
-/* A space handle's two directions: decode is false for a handle that names no row of a child of the root. */
-uint64_t	erx_fiasco_task_space_encode(uint32_t task);
-bool	erx_fiasco_task_space_decode(uint64_t space, uint32_t *task);
-/* The task a call naming space acts on: the caller's for ERX_CAP_SELF, a live child of the root's, else ERX_EINVAL. */
+/*
+ * The root's join of a space it created: ERX_EBUSY with the task's index in *task while
+ * the space runs, for the stub to wait on its ended semaphore; once it has stopped, its
+ * status, its deletion with every space below it, and the handle's close.
+ */
+int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status, uint64_t *task);
+/*
+ * The task a call naming space acts on: the caller's for ERX_CAP_SELF, else the live
+ * task a space handle in the caller's table names; a handle's refusals as
+ * erx_fiasco_object_find gives them, and ERX_EINVAL for a space that has stopped.
+ */
 int	erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task) ERX_WARN_UNUSED_RESULT;
+/*
+ * A space record's end, from object.c: the last handle's close or its creator's
+ * destroy or end releases the space, which stops with ERX_EXIT_RELEASED if it runs and
+ * is deleted with every space below it. A record whose space was deleted first is no-op.
+ */
+void	erx_fiasco_task_space_release(uint32_t record);
 int	erx_fiasco_task_mem_create_body(uint32_t caller, const erx_fiasco_mem_create_request_t *request, uint64_t *mem);
 int	erx_fiasco_task_mem_dma_body(uint32_t caller, uint64_t mem, uint64_t offset, uint64_t *addr);
 int	erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem);

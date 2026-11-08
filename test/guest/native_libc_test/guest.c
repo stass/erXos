@@ -116,9 +116,10 @@ test_run(uint32_t entry, const uint8_t *name, size_t length)
 	if (launched) {
 		result = erx_fiasco_task_join_until(space, deadline, &status);
 		if (result == ERX_ETIMEDOUT) {
-			/* A stop refused here is a task that ended by itself just now: its own status stands. */
-			stopped = erx_space_stop(space, STATUS_STOPPED) == ERX_OK;
+			/* A task that ended by itself just now keeps its own status: a stop of a stopped space changes nothing. */
+			(void)erx_space_stop(space, STATUS_STOPPED);
 			result = erx_fiasco_task_join(space, &status);
+			stopped = result == ERX_OK && status == STATUS_STOPPED;
 		}
 	}
 	say("\n");

@@ -12,6 +12,7 @@
 #define MODE_WRITER	1	/* finds the root's pattern, writes its own, releases the range: ends with 0 */
 #define MODE_READER	2	/* finds the writer's pattern read-only, releases the range: ends with 0 */
 #define MODE_REVOKED	3	/* finds the root's pattern, raises its signal, reads until a fault ends it */
+#define MODE_CREATOR	4	/* creates spaces below its own and a refused one, ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 

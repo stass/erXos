@@ -7,8 +7,9 @@
  * The root of the mapping suite: memory objects mapped between the root and two tasks of
  * test/guest/native_space/program.c, a destroy that revokes them, and the bounds of a
  * map into a created space, and fault gates: a revoked task's fault reaches the root's
- * gate, and the gate calls' refusals and queue. Each case says one line, which
- * tools/lib/erx/native_space.rb holds the transcript to.
+ * gate, and the gate calls' refusals and queue; and spaces: a task that creates spaces
+ * below its own, the create's refusals, and a release at the last handle's close. Each
+ * case says one line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
 
 #include <stdatomic.h>
@@ -32,13 +33,13 @@
 #define SHORT_NS	UINT64_C(1000000)
 /* Long enough for a spinning task to reach its fault after a revoke. */
 #define SETTLE_NS	UINT64_C(200000000)
-/* The launcher's handle table, and the root's handle of another task's thread, as service.c reads it. */
+/* The handle table of each task the root makes. */
 #define TASK_CAP_LIMIT	64u
-#define THREAD_HANDLE_TASK_SHIFT	8u
 /* Each case's labels and statuses, so a record shows which space and which stop it came from. */
 #define REVOKE_LABEL	UINT64_C(0x5e0000000000a000)
 #define REVOKE_STATUS	77
 #define QUEUE_LABEL	UINT64_C(0x5e0000000000b000)
+#define RELEASE_LABEL	UINT64_C(0x5e0000000000c000)
 
 void erx_fiasco_root_main(void);
 
@@ -277,7 +278,7 @@ case_revoke(void)
 		passed = record_wait(erx_fiasco_clock_ns() + WAIT_NS, &record, &label);
 		slot = label - REVOKE_LABEL;
 		passed = passed && slot < 2 && (seen & (UINT64_C(1) << slot)) == 0 && record.kind == ERX_FAULT_MEMORY &&
-		    record.thread == UINT64_MAX && record.space == spaces[slot] && record.addr == SHARED_ADDR;
+		    record.thread == UINT64_MAX && record.space != ERX_FIASCO_TASK_ROOT && record.addr == SHARED_ADDR;
 		seen |= passed ? UINT64_C(1) << slot : 0;
 	}
 	say_count("revoke_faults", seen);
@@ -306,15 +307,16 @@ case_revoke(void)
 static void
 case_gate_refusals(void)
 {
-	uint64_t gate, mem, space = 0, refused, label;
+	uint64_t gate, mem, space = 0, thread = 0, refused, label;
 	bool passed = erx_gate_create(0, &gate) == ERX_OK && erx_mem_create(0, PAGE, 0, &mem) == ERX_OK &&
-	    task_make_gated(&space, gate, 1);
+	    task_make_gated(&space, gate, 1) &&
+	    erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_OK;
 
 	passed = passed && erx_ipc_call(gate, 0, 0, 0) == ERX_ENOTSUP && erx_ipc_send(gate, 0, 0) == ERX_ENOTSUP &&
 	    erx_ipc_reply(0) == ERX_ENOTSUP && erx_ipc_reply_wait(0, 0) == ERX_ENOTSUP &&
 	    erx_gate_bind(mem, ERX_CAP_SELF_THREAD, 0) == ERX_ETYPE &&
 	    erx_gate_bind(gate + 1000, ERX_CAP_SELF_THREAD, 0) == ERX_EINVAL &&
-	    erx_gate_bind(gate, space << THREAD_HANDLE_TASK_SHIFT, 0) == ERX_ENOTSUP &&
+	    erx_gate_bind(gate, thread, 0) == ERX_ENOTSUP &&
 	    erx_gate_bind(gate, ERX_FIASCO_THREADS_MAX - 1, 0) == ERX_EINVAL &&
 	    erx_space_create(0, ERX_CAP_SELF, mem, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE &&
 	    erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
@@ -367,6 +369,53 @@ case_gate_queue(void)
 }
 
 /*
+ * A task creates spaces below its own and one with a bad parent (MODE_CREATOR
+ * in program.c); its end stops and frees them with it, so the pool's pages come back.
+ */
+static void
+case_created(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t space;
+	const int64_t status = erx_fiasco_launch_make(program_entry, 0, &space) == ERX_OK ?
+	    task_finish(space, MODE_CREATOR) : INT64_MIN;
+
+	say_count("created_status", (uint64_t)status);
+	say_case("created", status == 0 && erx_fiasco_vm_free_pages() == before);
+}
+
+/* What the root's create refuses: a parent or a fault gate that names no space or gate it holds. */
+static void
+case_space_refusals(void)
+{
+	uint64_t mem, refused;
+	bool passed = erx_mem_create(0, PAGE, 0, &mem) == ERX_OK;
+
+	passed = passed && erx_space_create(0, mem, ERX_CAP_NULL, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE &&
+	    erx_space_create(0, ERX_CAP_SELF, mem, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE;
+	passed = erx_cap_close(mem) == ERX_OK && passed;
+	say_case("space_refusals", passed);
+}
+
+/*
+ * The last handle's close releases a space: it stops and is deleted in that call, so
+ * its exit record is withdrawn before the bound thread can take it, and its pages
+ * come back.
+ */
+static void
+case_released(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t gate, space, label;
+	bool passed = erx_gate_create(0, &gate) == ERX_OK && erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
+	    task_make_gated(&space, gate, RELEASE_LABEL) && erx_cap_close(space) == ERX_OK &&
+	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &label) == ERX_ETIMEDOUT;
+
+	passed = passed && erx_cap_close(gate) == ERX_OK && erx_fiasco_vm_free_pages() == before;
+	say_case("released", passed);
+}
+
+/*
  * The root's own tables, and the service's rows for the first two task indices, take
  * their pages here, so no case counts them against its pool.
  */
@@ -415,6 +464,9 @@ erx_fiasco_root_main(void)
 	case_revoke();
 	case_gate_refusals();
 	case_gate_queue();
+	case_created();
+	case_space_refusals();
+	case_released();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

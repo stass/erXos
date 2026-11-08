@@ -46,11 +46,25 @@
 #define TASK_SLOT_ENDED		(TASK_SLOT_GATE + 2)
 #define TASK_SLOTS		(TASK_SLOT_GATE + 3)
 
+/* What erx_space_create hands the fill of its space record. */
+typedef struct task_create {
+	const erx_fiasco_space_create_request_t *request;
+	uint32_t	parent;		/* the parent's task */
+	uint32_t	gate;		/* as erx_fiasco_gate_named gave it */
+} task_create_t;
+
 static uint64_t	task_slot(uint32_t, uint32_t);
+static uint32_t	*task_space_of(uint32_t);
+static int	task_space_named(uint32_t, uint64_t, uint32_t *);
 static bool	task_failed(l4_msgtag_t);
 static bool	task_objects_make(uint32_t);
+static int	task_fill_space(uint32_t, const void *);
 static void	task_teardown(uint32_t);
 static void	task_end(uint32_t, uint32_t, int64_t);
+static uint32_t	task_live_child(uint32_t);
+static void	task_stop_tree(uint32_t, uint32_t, int64_t);
+static void	task_remove(uint32_t);
+static void	task_delete_tree(uint32_t);
 static void	task_delete(uint64_t);
 static bool	task_segment_load(uint32_t, const uint8_t *, const erx_elf_load_t *, uint64_t);
 static int	task_fill_pages(uint32_t, const void *);
@@ -61,6 +75,12 @@ _Static_assert(sizeof(erx_fiasco_task_t) <= ERX_PAGE_SIZE, "a task's row fits a 
 
 /* erx_fiasco_task_t by index, the root's first. */
 static erx_backend_grow_table_t task_rows;
+/*
+ * A uint32_t by space record's index: its task's index plus one while the task's row
+ * lives, so a live record always names a row; 0 once the space is deleted, as its
+ * record is ended.
+ */
+static erx_backend_grow_table_t task_spaces;
 static const erx_pack_view_t *task_archive;
 /* One plan at a time, as the service runs one body: too large for its stack to spare. */
 static erx_elf_plan_t task_plan;
@@ -85,7 +105,9 @@ erx_fiasco_task_table_init(void)
 	const char *reason;
 
 	erx_backend_grow_table_init(&task_rows, sizeof(erx_fiasco_task_t), &erx_fiasco_vm_records);
-	if (erx_backend_grow_table_room(&task_rows, 1) != ERX_OK)
+	erx_backend_grow_table_init(&task_spaces, sizeof(uint32_t), &erx_fiasco_vm_records);
+	/* Both first pages now, so a task's first create takes no table page a page count would miss. */
+	if (erx_backend_grow_table_room(&task_rows, 1) != ERX_OK || erx_backend_grow_table_room(&task_spaces, 1) != ERX_OK)
 		return ("memory: the pool cannot hold the task table");
 	reason = erx_fiasco_object_init();
 	if (reason == NULL)
@@ -103,44 +125,42 @@ erx_fiasco_task_set_archive(const erx_pack_view_t *view)
 	task_archive = view;
 }
 
-/*
- * A space handle, as the root holds one, is the task's index: these two turn one into
- * the other for a child of the root. A handle that names the root, or no task, names
- * no child, and which state the child must be in is the caller's to say.
- * erx_fiasco_task_stop_body reads the handle itself, because a stop also takes the
- * root and ERX_CAP_SELF.
- */
-uint64_t
-erx_fiasco_task_space_encode(uint32_t task)
+static uint32_t *
+task_space_of(uint32_t record)
 {
-	return (task);
-}
-
-bool
-erx_fiasco_task_space_decode(uint64_t space, uint32_t *task)
-{
-	if (space == ERX_FIASCO_TASK_ROOT || space >= erx_backend_grow_table_capacity(&task_rows))
-		return (false);
-	*task = (uint32_t)space;
-	return (true);
+	return (erx_backend_grow_table_at(&task_spaces, record));
 }
 
 /*
- * The task a call naming a space acts on: the caller's own for ERX_CAP_SELF, or a live
- * child the root names. Only the root creates spaces, so a task holds no space handle
- * and any other value it names is no entry.
+ * The task a space handle of the caller's names, stopped or not: ERX_CAP_SELF is the
+ * caller's own, and any other value an entry of its handle table naming a space record,
+ * which only the space's creator holds, since no space handle passes. Else the entry's
+ * refusal.
  */
-int
-erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task)
+static int
+task_space_named(uint32_t caller, uint64_t space, uint32_t *task)
 {
+	uint32_t record;
+	int status;
+
 	if (space == ERX_CAP_SELF) {
 		*task = caller;
 		return (ERX_OK);
 	}
-	if (caller != ERX_FIASCO_TASK_ROOT || !erx_fiasco_task_space_decode(space, task) ||
-	    erx_fiasco_task(*task)->state != ERX_FIASCO_TASK_LIVE)
-		return (ERX_EINVAL);
-	return (ERX_OK);
+	status = erx_fiasco_object_find(caller, space, ERX_BACKEND_OBJECT_SPACE, &record);
+	if (status == ERX_OK)
+		*task = *task_space_of(record) - 1;
+	return (status);
+}
+
+int
+erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task)
+{
+	const int status = task_space_named(caller, space, task);
+
+	if (status != ERX_OK)
+		return (status);
+	return (erx_fiasco_task(*task)->state == ERX_FIASCO_TASK_LIVE ? ERX_OK : ERX_EINVAL);
 }
 
 static uint64_t
@@ -242,37 +262,64 @@ task_objects_make(uint32_t task)
 	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) == ERX_OK);
 }
 
+/*
+ * A space is an object record of kind space, which the caller's handle names, and a
+ * task row, which the record names by task_spaces: the record is made, then filled by
+ * task_fill_space, then the handle added, all through object.c's one create path.
+ */
 int
 erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_request_t *request, uint64_t *space)
 {
 	const uint64_t flags = request->flags, cap_limit = request->cap_limit;
-	uint32_t task = 1, gate;
+	task_create_t create = { .request = request };
 
-	if (caller != ERX_FIASCO_TASK_ROOT)
-		return (ERX_ENOTSUP);
 	if ((flags & ~(uint64_t)ERX_SPACE_JIT) != 0 || cap_limit < 2 || cap_limit > ERX_CAPS_MAX)
 		return (ERX_EINVAL);
-	if (erx_fiasco_gate_named(caller, request->fault, &gate) != ERX_OK)
+	if (task_space_named(caller, request->parent, &create.parent) != ERX_OK ||
+	    erx_fiasco_gate_named(caller, request->fault, &create.gate) != ERX_OK)
 		return (ERX_ETYPE);
+	/* A stopped space takes no child, so a stop's walk of the tree below it is final. */
+	if (erx_fiasco_task(create.parent)->state != ERX_FIASCO_TASK_LIVE)
+		return (ERX_EINVAL);
+	/* The right to make code follows from the image: only the root, or a JIT space, makes a JIT space. */
+	if ((flags & ERX_SPACE_JIT) != 0 && caller != ERX_FIASCO_TASK_ROOT &&
+	    (erx_fiasco_task(caller)->flags & ERX_SPACE_JIT) == 0)
+		return (ERX_ERIGHTS);
+	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_SPACE, request->budget, task_fill_space, &create,
+	    space));
+}
+
+/*
+ * The fill of a new space record: a free task row with everything a task has before
+ * its first thread, on its parent's list. On failure nothing of the task is left.
+ */
+static int
+task_fill_space(uint32_t record, const void *argument)
+{
+	const task_create_t *const create = argument;
+	erx_fiasco_task_t *parent;
+	uint32_t task = 1;
+
 	while (task < erx_backend_grow_table_capacity(&task_rows) && erx_fiasco_task(task)->state != ERX_FIASCO_TASK_ABSENT)
 		task++;
 	/* A row past the capacity takes a page that stays the table's if the range table cannot open. */
-	if (erx_backend_grow_table_room(&task_rows, task + 1) != ERX_OK)
+	if (erx_backend_grow_table_room(&task_rows, task + 1) != ERX_OK ||
+	    erx_backend_grow_table_room(&task_spaces, record + 1) != ERX_OK)
 		return (ERX_ENOMEM);
 	/* As on erXos's kernel, the limit counts slot 0, ERX_CAP_NULL, which no entry is. */
-	if (erx_fiasco_object_task_open(task, (uint32_t)cap_limit - 1) != ERX_OK)
+	if (erx_fiasco_object_task_open(task, (uint32_t)create->request->cap_limit - 1) != ERX_OK)
 		return (ERX_ENOMEM);
 	if (erx_fiasco_vm_task_open(task) != ERX_OK) {
 		erx_fiasco_object_task_close(task);
 		return (ERX_ENOMEM);
 	}
-	if (erx_fiasco_gate_space_open(task, gate, request->label) != ERX_OK) {
+	if (erx_fiasco_gate_space_open(task, create->gate, create->request->label) != ERX_OK) {
 		erx_fiasco_vm_task_close(task);
 		erx_fiasco_object_task_close(task);
 		return (ERX_ENOMEM);
 	}
 
-	*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_LIVE, .flags = (uint32_t)flags };
+	*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_LIVE, .flags = (uint32_t)create->request->flags };
 	if (!task_objects_make(task)) {
 		/* No thread ever ran, so nobody waits on the ended semaphore and no status is owed. */
 		task_teardown(task);
@@ -281,7 +328,11 @@ erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_reque
 		*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ABSENT };
 		return (ERX_ENOMEM);
 	}
-	*space = erx_fiasco_task_space_encode(task);
+	parent = erx_fiasco_task(create->parent);
+	erx_fiasco_task(task)->tree = (erx_fiasco_task_tree_t){ .parent = create->parent, .sibling = parent->tree.child,
+	    .space = record + 1 };
+	parent->tree.child = task;
+	*task_space_of(record) = task + 1;
 	erx_fiasco_trace_service(ERX_TRACE_EVENT_SPACE_START, (uint64_t)task + 1, 0, 0);
 	return (ERX_OK);
 }
@@ -330,9 +381,8 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
-	if (!erx_fiasco_task_space_decode(space, &task) || entry > UINT32_MAX ||
-	    erx_fiasco_task(task)->state != ERX_FIASCO_TASK_LIVE || task_archive == NULL ||
-	    !erx_pack_entry_at(task_archive, (uint32_t)entry, &file))
+	if (erx_fiasco_task_space_target(caller, space, &task) != ERX_OK || task == caller || entry > UINT32_MAX ||
+	    task_archive == NULL || !erx_pack_entry_at(task_archive, (uint32_t)entry, &file))
 		return (ERX_EINVAL);
 	image = task_archive->bytes + file.data_off;
 	if (!erx_elf_plan(image, (size_t)file.data_size, UINT64_MAX, &task_plan, &error) ||
@@ -382,51 +432,180 @@ task_teardown(uint32_t task)
 }
 
 /*
- * A task that ran ends here, stopped by the task stopper. The row keeps its status for
- * the join, which the ended semaphore's up lets go, and the exit record goes to the
- * space's fault gate once no thread of it can run.
+ * One live task's end, stopped by the task stopper: steps 1 to 3 of the design, then
+ * the status. The row keeps its status and its place in the tree until its deletion;
+ * the exit record goes to the space's fault gate once no thread of it can run, and the
+ * ended semaphore's up lets the root's join go.
  */
 static void
 task_end(uint32_t task, uint32_t stopper, int64_t status)
 {
+	erx_fiasco_task_t *const row = erx_fiasco_task(task);
+	erx_fiasco_task_tree_t tree;
+
 	task_teardown(task);
-	*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .status = status };
+	/* Read after the teardown, whose object close deletes the spaces this task created. */
+	tree = row->tree;
+	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .tree = tree, .status = status };
 	erx_fiasco_gate_exit(task, stopper, status);
 	erx_fiasco_trace_service(ERX_TRACE_EVENT_SPACE_END, (uint64_t)task + 1, (uint64_t)status, 0);
 	(void)l4_semaphore_up(erx_fiasco_task_ended_cap(task));
 }
 
-/* A task stops itself or the root stops it; the root's own stop is the machine's end. */
+/* The first live child on the task's list, or 0 when it has none. */
+static uint32_t
+task_live_child(uint32_t task)
+{
+	uint32_t child = erx_fiasco_task(task)->tree.child;
+
+	while (child != 0 && erx_fiasco_task(child)->state != ERX_FIASCO_TASK_LIVE)
+		child = erx_fiasco_task(child)->tree.sibling;
+	return (child);
+}
+
+/*
+ * A stop: the live task and every live space below it end, children first, each
+ * child with ERX_EXIT_PARENT and the same stopper (docs/design-stopgap.md, "Task
+ * exit"). The walk goes down to a live space with no live child, ends it, and goes
+ * back up to its parent; an ended space is never live again and a stopped one takes no
+ * child, so each step ends one space, the walk is iterative whatever the tree's depth,
+ * and a child's exit record is posted before its parent's.
+ *
+ * Each task_end's object close deletes the spaces that task created, and the walk
+ * survives it by two invariants: every space a task created lies below it, since a space
+ * handle never leaves its creator's table (no pass, and a dup stays in the table); and a
+ * stopped task has no live space below it, since a stopped parent takes no child. So the
+ * close deletes only stopped spaces below the task it ends, never the walk's path. A
+ * call that passed space handles would break both walks.
+ */
+static void
+task_stop_tree(uint32_t task, uint32_t stopper, int64_t status)
+{
+	uint32_t at = task;
+
+	for (;;) {
+		const uint32_t child = task_live_child(at);
+
+		if (child != 0) {
+			at = child;
+			continue;
+		}
+		task_end(at, stopper, at == task ? status : ERX_EXIT_PARENT);
+		if (at == task)
+			return;
+		at = erx_fiasco_task(at)->tree.parent;
+	}
+}
+
+/*
+ * One stopped task's deletion, once it has no child: its unread records withdrawn,
+ * its ended semaphore and its row gone, off its parent's list, and its space record
+ * ended, so every handle to it answers ERX_ESTALE.
+ */
+static void
+task_remove(uint32_t task)
+{
+	erx_fiasco_task_t *const row = erx_fiasco_task(task);
+	const uint32_t record = row->tree.space;
+	uint32_t *link = &erx_fiasco_task(row->tree.parent)->tree.child;
+
+	while (*link != task)
+		link = &erx_fiasco_task(*link)->tree.sibling;
+	*link = row->tree.sibling;
+	erx_fiasco_gate_space_close(task);
+	task_delete(erx_fiasco_task_ended_cap(task));
+	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ABSENT };
+	if (record != 0) {
+		/* Cleared first, so the record's end finds no space left to release. */
+		*task_space_of(record - 1) = 0;
+		erx_fiasco_object_end(record - 1);
+	}
+}
+
+/*
+ * A stopped task's deletion with every space below it, which a stop has ended too:
+ * children first, by the same walk as a stop's, each removal taking one off the tree.
+ */
+static void
+task_delete_tree(uint32_t task)
+{
+	uint32_t at = task;
+
+	for (;;) {
+		const uint32_t child = erx_fiasco_task(at)->tree.child;
+		const uint32_t parent = erx_fiasco_task(at)->tree.parent;
+
+		if (child != 0) {
+			at = child;
+			continue;
+		}
+		task_remove(at);
+		if (at == task)
+			return;
+		at = parent;
+	}
+}
+
+void
+erx_fiasco_task_space_release(uint32_t record)
+{
+	uint32_t *const space = task_space_of(record);
+	uint32_t task;
+
+	if (*space == 0)
+		return;
+	task = *space - 1;
+	*space = 0;
+	erx_fiasco_task(task)->tree.space = 0;
+	/* The exit record this posts is withdrawn at once by the deletion: nothing reads a released space's end. */
+	if (erx_fiasco_task(task)->state == ERX_FIASCO_TASK_LIVE)
+		task_stop_tree(task, task, ERX_EXIT_RELEASED);
+	task_delete_tree(task);
+}
+
+/*
+ * A task stops itself or a space it created; the root's own stop is the machine's end.
+ * A stopped space stays stopped with its first status. The kernel's own statuses are
+ * refused, so a record that carries one was written by the backend.
+ */
 int
 erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status)
 {
-	const uint64_t target = space == ERX_CAP_SELF ? caller : space;
+	uint32_t task;
+	const int named = task_space_named(caller, space, &task);
 
-	if (target > UINT32_MAX || !erx_fiasco_task_live((uint32_t)target))
+	if (named != ERX_OK)
+		return (named);
+	if (status == ERX_EXIT_PARENT || status == ERX_EXIT_RELEASED || status == ERX_EXIT_NOTHREAD)
 		return (ERX_EINVAL);
-	if (caller != ERX_FIASCO_TASK_ROOT && target != caller)
-		return (ERX_ERIGHTS);
-	if (target == ERX_FIASCO_TASK_ROOT)
+	if (task == ERX_FIASCO_TASK_ROOT)
 		erx_fiasco_end(NULL, ERX_END_OFF);
-	task_end((uint32_t)target, caller, status);
-	return (target == caller ? ERX_FIASCO_NO_REPLY : ERX_OK);
+	if (erx_fiasco_task(task)->state == ERX_FIASCO_TASK_LIVE)
+		task_stop_tree(task, caller, status);
+	return (task == caller ? ERX_FIASCO_NO_REPLY : ERX_OK);
 }
 
-/* The caller has seen the ended semaphore's up, so the row's status is there. */
 int
-erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status)
+erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status, uint64_t *task)
 {
-	uint32_t task;
+	uint32_t named;
+	int result;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
-	if (!erx_fiasco_task_space_decode(space, &task) || erx_fiasco_task(task)->state != ERX_FIASCO_TASK_ENDED)
+	result = task_space_named(caller, space, &named);
+	if (result != ERX_OK)
+		return (result);
+	if (named == caller)
 		return (ERX_EINVAL);
-	*status = erx_fiasco_task(task)->status;
-	erx_fiasco_gate_space_close(task);
-	task_delete(erx_fiasco_task_ended_cap(task));
-	erx_fiasco_task(task)->state = ERX_FIASCO_TASK_ABSENT;
-	return (ERX_OK);
+	if (erx_fiasco_task(named)->state == ERX_FIASCO_TASK_LIVE) {
+		*task = named;
+		return (ERX_EBUSY);
+	}
+	*status = erx_fiasco_task(named)->status;
+	task_delete_tree(named);
+	/* The deletion left the entry stale; the close frees it. */
+	return (erx_fiasco_cap_close_body(caller, space));
 }
 
 int
@@ -538,15 +717,29 @@ erx_fiasco_task_fault(uint32_t task, const erx_crash_fault_t *fault)
 	if (erx_fiasco_gate_fault(task, fault))
 		return;
 	erx_fiasco_task_crash_write(fault);
-	task_end(task, task, ERX_FIASCO_TASK_STATUS_FAULT);
+	task_stop_tree(task, task, ERX_FIASCO_TASK_STATUS_FAULT);
 }
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 #include <stdbool.h>
 
-/* Whether every capability the root held for this task's index reads as gone. */
+static bool	task_caps_gone(uint32_t);
+
+/*
+ * Whether every capability the root held for each task index not in use reads as gone.
+ * Call it only while no request runs: it reads the service's rows.
+ */
 bool
-erx_fiasco_test_task_caps_gone(uint32_t task)
+erx_fiasco_test_task_caps_gone(void)
+{
+	for (uint32_t task = 1; task < erx_backend_grow_table_capacity(&task_rows); task++)
+		if (erx_fiasco_task(task)->state == ERX_FIASCO_TASK_ABSENT && !task_caps_gone(task))
+			return (false);
+	return (true);
+}
+
+static bool
+task_caps_gone(uint32_t task)
 {
 	const uint64_t caps[] = { erx_fiasco_task_gate_cap(task), erx_fiasco_task_cap(task) };
 

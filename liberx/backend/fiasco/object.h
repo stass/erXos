@@ -14,9 +14,10 @@
 /*
  * The service's object records and each task's handle table (docs/design-stopgap.md,
  * "Capabilities in Fiasco's object space"), over the core in handles.c. Only the
- * service thread calls these. A memory object is the one kind they hold: its pages
- * are vm.c's, kept by the record's index. A record goes at its creator's destroy, at
- * its creator's end, or once it has neither a handle nor a mapping.
+ * service thread calls these. A memory object's pages are vm.c's, a gate's queue
+ * fault_gate.c's and a space's task service_task.c's, each kept by the record's
+ * index. A record goes at its creator's destroy, at its creator's end, or once it has
+ * neither a handle nor a mapping; a space's record goes at the space's deletion too.
  */
 
 /* The record table and the root's handle table, which only the pool bounds. NULL or why not. */
@@ -48,6 +49,12 @@ int	erx_fiasco_object_create(uint32_t task, uint32_t kind, uint64_t budget, erx_
 
 /* The record a task's handle names, of this kind: erx_backend_handle_find's refusals. */
 int	erx_fiasco_object_find(uint32_t task, uint64_t handle, uint32_t kind, uint32_t *index) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * An object's end: its mappings go from every space, what it holds goes, then its
+ * record, leaving every entry naming it stale.
+ */
+void	erx_fiasco_object_end(uint32_t index);
 
 /* Counts a map of the object at index, which keeps it while it has no handle. */
 void	erx_fiasco_object_mapped(uint32_t index);

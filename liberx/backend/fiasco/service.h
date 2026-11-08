@@ -111,10 +111,10 @@ void	erx_fiasco_task_crash_write(const erx_crash_fault_t *fault);
 #include <stdatomic.h>
 #include <stdbool.h>
 
-/* See service.c: the start step to fail, and whether a thread's capabilities are gone. */
+/* See service.c: the start step to fail, and whether a thread's, or every unused task index's, capabilities are gone. */
 extern _Atomic uint32_t erx_fiasco_test_start_fails;
 bool erx_fiasco_test_thread_caps_gone(uint32_t);
-bool erx_fiasco_test_task_caps_gone(uint32_t);
+bool erx_fiasco_test_task_caps_gone(void);
 uint64_t erx_fiasco_test_dropped(void);
 uint32_t erx_fiasco_test_cpu_count(void);
 int erx_fiasco_test_thread_priority(uint32_t, uint32_t, uint64_t);

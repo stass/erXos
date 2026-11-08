@@ -925,7 +925,9 @@ runs these steps for each task, a child with the status `ERX_EXIT_PARENT`:
 4. **The status.** The exit record, an `erx_fault` of kind `exit` with the first stop's status, goes to the space's
    fault gate ([Fault gates](#fault-gates)), after step 1, so it comes only once no thread of the space can run. A
    test task, which has no fault gate, gives its status as a test's transcript line: the end ups a semaphore of the
-   root's, on which the launcher's `erx_fiasco_task_join` waits, and that call takes the status and frees the label.
+   root's, and the launcher's `erx_fiasco_task_join` asks the service, which answers `ERX_EBUSY` with the task's index
+   while the space runs, so the stub waits on that semaphore and asks again; the second answer takes the status,
+   deletes the space with every space below it, freeing their labels, and closes the root's handle.
    A thread that stopped its own task gets no reply.
 
 **A request cannot race this.** The service runs each request or fault to completion before it receives the next, finds
@@ -1207,7 +1209,8 @@ the stopgap.
   down before it returns `ERX_ETIMEDOUT`. This is [the umtx table](#the-umtx-table)'s invariant: a thread taken off a list
   is owed exactly one up, and only such a thread is.
 * **Withdrawal.** A space's deletion withdraws its queued records, which on the stopgap happens at `erx_fiasco_task_join`,
-  or at a failed create, and not at the stop; a gate's destroy drops its queue and leaves its spaces
+  at the release of its space record (its last handle's close, or its creator's destroy or end), at the deletion of a
+  space above it, or at a failed create, and not at the stop; a gate's destroy drops its queue and leaves its spaces
   with no fault gate, as on erXos's kernel: their later records are dropped and counted in the space's `dropped` counter, which the inspector reads, a thread that
   faults then stays blocked, and the space's other threads run on until its creator stops it. No Phase 1b caller reaches
   that state while a space lives: the domain library's gates last as long as the system domain, and a session's gate goes
@@ -1605,7 +1608,10 @@ since no consumer calls it before then.
 * The root's image is mapped read, write and execute from `sigma0`, so a stray write to its code or read-only data does not fault.
 * A label naming no live task is counted, and nothing reads the count.
 * `ERX_SPACE_JIT` gates only `ERX_MEM_JIT`: a task without it still makes code, through an object with no flag or through `erx_space_protect`.
-* `erx_fiasco_task_join` trusts its caller: a task is joined once, and a second join, or a join of an index with no task, waits forever.
+* `erx_fiasco_task_join` trusts its caller: its stub waits on the ended semaphore of the task index the service named, so a space deleted by another root thread between the answer and the wait (a join or release of a space above it) leaves the stub spinning on the empty slot, and an index reused in that window takes another join's up. The launcher joins from one thread.
+* An exit or fault record's `space` is the task's index, which no handle a receiver holds names; the label tells a receiver which space a record is for.
+* A root's handle of another task's thread carries the task's index and no generation, so one kept past that space's deletion (by a join, a release or the deletion of a space above it) can name a thread of a space that reuses the index.
+* No IRQ object is bound to a task's thread, since only the root binds IRQs, so a stop's detach step has no site.
 * `erx_image_map` does not check the program's file hash, and every refusal of its segments reads `ERX_ENOMEM`; each space gets its own copy of an image's segments. A fault message's words are not counted, so a task's raw IPC can put stale numbers in its own crash record.
 * Without vCPU upcalls, a program takes each signal's default action only.
 * When the watchdog ends the machine, log lines the reader had not taken are lost.

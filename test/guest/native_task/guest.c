@@ -109,7 +109,7 @@ case_ends(const char *name, uint32_t flags, uint64_t mode, int64_t expected)
 	const int64_t status = task_run(flags, mode, &space);
 
 	say_status(status);
-	say_case(name, status == expected && erx_fiasco_test_task_caps_gone((uint32_t)space) &&
+	say_case(name, status == expected && erx_fiasco_test_task_caps_gone() &&
 	    erx_fiasco_vm_free_pages() == before);
 }
 

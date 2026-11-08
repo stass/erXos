@@ -25,7 +25,6 @@
 
 static erx_backend_handles_t *object_handles_of(uint32_t);
 static void	object_release(uint32_t);
-static void	object_end(uint32_t);
 
 /* Every object record, by index. */
 static erx_backend_grow_table_t object_records;
@@ -40,8 +39,12 @@ erx_fiasco_object_init(void)
 	/* The first page now, so a task's first create takes no table page a page count would miss. */
 	if (erx_backend_grow_table_room(&object_records, 1) != ERX_OK)
 		return ("objects: the pool cannot hold the object records");
-	/* The root's table is bounded by the pool alone, which its grow table's limit stands for. */
-	if (erx_fiasco_object_task_open(ERX_FIASCO_TASK_ROOT, UINT32_MAX) != ERX_OK)
+	/*
+	 * The root's table is bounded by the pool alone, which its grow table's limit stands
+	 * for; its first page now too, for the same reason as the records'.
+	 */
+	if (erx_fiasco_object_task_open(ERX_FIASCO_TASK_ROOT, UINT32_MAX) != ERX_OK ||
+	    erx_backend_grow_table_room(&object_handles_of(ERX_FIASCO_TASK_ROOT)->entries, 1) != ERX_OK)
 		return ("objects: the pool cannot hold the root's handle table");
 	return (NULL);
 }
@@ -65,13 +68,13 @@ erx_fiasco_object_task_close(uint32_t task)
 
 	for (uint64_t handle = 1; handle < end; handle++)
 		if (erx_backend_handle_close(&object_records, handles, handle, &freed, &index) == ERX_OK && freed)
-			object_end(index);
+			erx_fiasco_object_end(index);
 	erx_backend_handles_clear(handles);
 	for (index = 0; index < erx_backend_grow_table_capacity(&object_records); index++) {
 		const erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
 
 		if (erx_backend_object_live(record) && record->creator == task)
-			object_end(index);
+			erx_fiasco_object_end(index);
 	}
 }
 
@@ -117,7 +120,7 @@ erx_fiasco_object_unmapped(uint32_t index)
 
 	record->mappings--;
 	if (erx_backend_object_unreferenced(record))
-		object_end(index);
+		erx_fiasco_object_end(index);
 }
 
 int
@@ -134,7 +137,7 @@ erx_fiasco_cap_close_body(uint32_t task, uint64_t handle)
 	const int status = erx_backend_handle_close(&object_records, object_handles_of(task), handle, &freed, &index);
 
 	if (status == ERX_OK && freed)
-		object_end(index);
+		erx_fiasco_object_end(index);
 	return (status);
 }
 
@@ -151,7 +154,7 @@ erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle)
 	record = erx_backend_object_at(&object_records, index);
 	if (record->creator != task)
 		return (ERX_ERIGHTS);
-	object_end(index);
+	erx_fiasco_object_end(index);
 	return (ERX_OK);
 }
 
@@ -172,18 +175,17 @@ object_release(uint32_t index)
 	case ERX_BACKEND_OBJECT_GATE:
 		erx_fiasco_gate_free(index);
 		break;
+	case ERX_BACKEND_OBJECT_SPACE:
+		erx_fiasco_task_space_release(index);
+		break;
 	case ERX_BACKEND_OBJECT_FREE:
 	case ERX_BACKEND_OBJECT_RETIRED:
 		break;
 	}
 }
 
-/*
- * An object's end: its mappings go from every space, what it holds goes, then its
- * record, leaving every entry naming it stale.
- */
-static void
-object_end(uint32_t index)
+void
+erx_fiasco_object_end(uint32_t index)
 {
 	erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
 

@@ -30,7 +30,8 @@ int	erx_fiasco_launch_start(uint64_t task, uint64_t argument) ERX_WARN_UNUSED_RE
 
 /*
  * Waits for the task to end, by a stop or a fault, and takes its status. Its pages
- * are back in the pool, and its index is free, from the return.
+ * are back in the pool, its index is free and the handle task is closed, from the
+ * return, with every space below it deleted too.
  */
 int	erx_fiasco_task_join(uint64_t task, int64_t *status) ERX_WARN_UNUSED_RESULT;
 

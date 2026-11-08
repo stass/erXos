@@ -20,7 +20,8 @@ module Erx
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                     'liberx/backend/core/refused.c', 'test/guest/native_space/guest.c'].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_space/program.c'].freeze
-    CASES = %w[program_found writer_released between_tasks bounds revoke gate_refusals gate_queue].freeze
+    CASES = %w[program_found writer_released between_tasks bounds revoke gate_refusals gate_queue
+               created space_refusals released].freeze
     CASE_LINE = /\Aerx: space: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function

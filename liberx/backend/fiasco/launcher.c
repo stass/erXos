@@ -119,9 +119,13 @@ erx_fiasco_task_join_until(uint64_t task, uint64_t deadline, int64_t *status)
 	erx_fiasco_reply_t reply;
 	int result;
 
-	if (!erx_fiasco_semaphore_down(erx_fiasco_task_ended_cap(task), deadline))
-		return (ERX_ETIMEDOUT);
+	/* While the space runs the service answers with its task, whose ended semaphore the stub waits on. */
 	result = erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_JOIN, &request, sizeof(request), &reply);
+	if (result == ERX_EBUSY) {
+		if (!erx_fiasco_semaphore_down(erx_fiasco_task_ended_cap(reply.second), deadline))
+			return (ERX_ETIMEDOUT);
+		result = erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_JOIN, &request, sizeof(request), &reply);
+	}
 	if (result == ERX_OK)
 		*status = (int64_t)reply.first;
 	return (result);
