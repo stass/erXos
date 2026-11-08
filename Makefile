@@ -10,7 +10,7 @@ DOCKER_CONTEXT ?=
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build run check check-sources status setup fetch check-tla check-rc-oracle check-arch-terms
+.PHONY: all build run check check-sources status setup fetch check-tla check-cbmc check-rc-oracle check-arch-terms
 .PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: generate
 .PHONY: check-reproducible check-fuzz check-erofs-oracle check-sanitizers check-asan check-ubsan check-tsan
@@ -104,6 +104,9 @@ fetch:
 
 check-tla:
 	$(RUBY) tools/erx check-tla
+
+check-cbmc:
+	$(RUBY) tools/erx check-cbmc
 
 # The command shell's oracle: needs plan9port fetched (tools/erx fetch --source plan9port);
 # the evaluator's corpus against it needs stock OTP built (make oracle-bootstrap).

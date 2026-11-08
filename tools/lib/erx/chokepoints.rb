@@ -118,11 +118,13 @@ module Erx
       end
     end
 
-    IncludeForm = Data.define(:name, :rule, :design, :scope, :seed) do
+    # sites lists the files that may include something other than a plain
+    # header, each with a pattern its operand must match whole.
+    IncludeForm = Data.define(:name, :rule, :design, :scope, :sites, :seed) do
       include Seeded
 
-      def initialize(name:, rule:, design:, scope:, seed:)
-        super
+      def initialize(name:, rule:, design:, scope:, seed:, sites: [])
+        super(name: name, rule: rule, design: design, scope: scope, sites: sites.freeze, seed: seed.freeze)
         validate_seed!
       end
 
@@ -134,6 +136,7 @@ module Erx
           operand = match[:operand]
           next if PLAIN_INCLUDE.match?(operand) && !operand.include?('..')
           next if CPP.include?(Chokepoints.extension(path)) && STANDARD_CPP_INCLUDE.match?(operand)
+          next if sites.any? { |site| site.allows?(path, operand) }
 
           Violation.new(rule: name, path: path, line: line.number,
                         detail: "include names no plain header path: #{operand.strip}")

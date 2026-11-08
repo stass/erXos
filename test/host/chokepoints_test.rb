@@ -109,6 +109,10 @@ class ChokepointsTest < Minitest::Test
     refute_empty evaluate(form, { 'kernel/core/a.c' => "#include \"table.inc\"\n" })
     refute_empty evaluate(form, { 'kernel/core/a.c' => "#include \"../../fiasco/kernel/src/kern/x.h\"\n" })
     refute_empty evaluate(form, { 'kernel/core/a.c' => "#  include_next <x.h> extra\n" })
+    assert_empty evaluate(form, { 'test/cbmc/h.c' => "#include \"cap.c\"\n" })
+    refute_empty evaluate(form, { 'kernel/core/a.c' => "#include \"cap.c\"\n" })
+    refute_empty evaluate(form, { 'test/cbmc/h.c' => "#include \"table.inc\"\n" })
+    refute_empty evaluate(form, { 'test/cbmc/h.c' => "#include CORE\n" })
   end
 
   def test_scope_reads_only_c_family_and_own_or_glue_files

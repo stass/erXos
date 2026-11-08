@@ -326,7 +326,7 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_commands_refuse_unsupported_collaborators
-    %w[check generate check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
+    %w[check generate check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-cbmc check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
       assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
     end
   end

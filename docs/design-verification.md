@@ -169,6 +169,60 @@ property. It is adopted only if the relational rules make those checks
 clearer without a second source of policy. Unmodified tools stay outside
 the source tree at pinned versions and hashes and run only as subprocesses.
 
+## CBMC harnesses and runner
+
+Each harness is one C file in `test/cbmc/` with the entry point
+`harness()`. It includes the core's `.c` file, so it reaches the core's
+static helpers as well as its exported functions, and takes its inputs
+from functions it declares and never defines, which CBMC treats as
+nondeterministic. CBMC is the only compiler that builds a harness. A
+harness computes its expected answer from the contract the design and the
+core's header state, never from the core's own helpers.
+
+`test/cbmc/roster.json` declares everything a run depends on: the pinned
+cbmc version, the SAT solver, the checks every harness runs with, and for
+each harness its source, the core it checks, its deadline, unwind bound,
+per-loop unwind set, object bits and preprocessor bounds, with prose for
+its input bounds, its assumptions and the constructs it cannot check. It
+also lists the seeded defects: each is one edit of its harness's core,
+which must match exactly one place, the harness that must catch it, and
+a pattern the failing property must match. The roster may enable only
+listed checks, so no entry can weaken CBMC's defaults.
+
+`make check-cbmc` runs `tools/erx check-cbmc`
+(`tools/lib/erx/cbmc.rb`), a gate separate from `make check`. It
+validates the whole roster before any run, then finds cbmc (`CBMC` or
+the `PATH`), requires the roster's version and records the executable's
+path, version and SHA-256; a missing tool or another version fails the
+gate with a diagnostic. cbmc is a Homebrew installation, not a `deps.lock`
+source, since `deps.lock` pins what `make fetch` downloads; the roster
+holds its version pin, and every run names the executable whose identity
+was recorded. Every harness runs with unwinding assertions and must
+verify; a run that warns of a function CBMC has no code for is a tool
+error, since such a function returns any value and does nothing. Every seeded defect runs its harness against a copy of the
+core in a directory emptied for it under `build/cbmc/mutants/`, never
+the tree's: a failure matching
+its pattern catches it, while a pass or any other failure fails the gate.
+`make check` runs the runner's own tests with a stand-in cbmc and checks
+that each seeded defect's edit still applies to the tree.
+
+The host's `<stdatomic.h>` spells atomic operations as clang builtins
+CBMC does not know, so `test/cbmc/include/stdatomic.h` maps them onto
+GCC's `__atomic` builtins, which CBMC models. CBMC runs one thread and
+treats each access as indivisible and sequentially consistent, ignoring
+the memory order; every harness over atomic fields lists that as an
+unsupported construct. A sequence-count read loop is unbounded by design
+and CBMC's interleavings have no fairness, so a harness checks the read
+of a quiescent record and lists the concurrent retry as unchecked.
+
+The runner writes `build/cbmc/report.json` and a short
+`build/cbmc/report.txt`: the date, the tool's identity, the solver and
+checks, and per harness its state, property count, failures, wall time,
+bounds, unwind settings, assumptions, unsupported constructs, the tool's
+warnings and the path of its raw log under `build/logs`; per seeded
+defect its state and wall time. Raw output never enters the tree; a
+research record cites the reports it was written from.
+
 ## References
 
 * [TLA+ tools](https://lamport.org/tla/tools.html): TLC and the PlusCal translator.

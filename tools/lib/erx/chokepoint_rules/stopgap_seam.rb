@@ -133,10 +133,15 @@ module Erx
         Chokepoints::IncludeForm.new(
           name: 'include-form',
           rule: 'every include in erXos C names a header by a plain path, so no computed include or included ' \
-                'non-header carries text past the other rules',
+                'non-header carries text past the other rules; a CBMC harness alone also names its core',
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C,
-          seed: { 'kernel/core/seeded.c' => "#define HIDDEN <l4/sys/ipc.h>\n#include HIDDEN\n" }
+          # A CBMC harness includes the core it checks, to reach its static
+          # helpers; CBMC alone builds it, and the gate's include path finds
+          # the core in kernel/core (docs/design-verification.md).
+          sites: [Chokepoints::Site.new(glob: 'test/cbmc/*.c', permits: /\A\s*"[a-z][a-z0-9_]*\.c"\s*\z/)],
+          seed: { 'kernel/core/seeded.c' => "#define HIDDEN <l4/sys/ipc.h>\n#include HIDDEN\n",
+                  'test/cbmc/seeded.c' => "#include \"../../kernel/core/cap.c\"\n" }
         ),
         Chokepoints::Forbidden.new(
           name: 'fiasco-headers-in-backend',

@@ -65,6 +65,17 @@ it; git history is the record of completed work.
   go with the stopgap at M7, or earlier once the profiling feature under
   Planned features gives a confined way to count.
 
+* [Medium] verification, Track K, the CBMC gate (`tools/lib/erx/cbmc.rb`,
+  `test/cbmc/roster.json`): if the owner adopts CBMC from the pilot's
+  record, settle three things the pilot leaves open. Homebrew offers only
+  the latest cbmc, so the pinned version cannot be installed on a fresh
+  host once the formula moves on: fetch a pinned release or source by
+  hash, as the TLA+ jar is, or document an upgrade step. The report does
+  not record the host preprocessor CBMC runs (clang `-E`), which shapes
+  what is checked. The runner merges CBMC's standard error into the log
+  it parses, so a stray line that looks like a result makes the run a
+  tool error rather than a reported warning.
+
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
   and the exception vectors and the synchronous entry from user mode are

@@ -386,6 +386,7 @@ make check-reproducible
 make check-sanitizers
 make check-fuzz
 make check-tla
+make check-cbmc
 ```
 
 * **Reproducibility** keeps both full `ERXPACK` structural test fixtures
@@ -411,6 +412,10 @@ make check-tla
   proof, remain unsupported.
 * **TLA+** runs TLC offline and checks its jar against the pin.
   `TLA_TOOLS_JAR` points to another copy of the same bytes.
+* **CBMC** runs the bounded model checker over the C cores' harnesses in
+  `test/cbmc/` and checks that each seeded defect fails its harness. It
+  needs the cbmc version `test/cbmc/roster.json` pins, from Homebrew
+  (`CBMC` names another path), and writes its report to `build/cbmc/`.
 
 ## Boot erXos
 

@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "cbmc_version": "6.11.0",
+  "solver": "cadical",
+  "checks": [
+    "--bounds-check",
+    "--pointer-check",
+    "--pointer-overflow-check",
+    "--signed-overflow-check",
+    "--unsigned-overflow-check",
+    "--conversion-check",
+    "--undefined-shift-check",
+    "--div-by-zero-check"
+  ],
+  "harnesses": [
+    {
+      "id": "budget_arith",
+      "source": "budget_arith.c",
+      "core": "kernel/core/budget.c",
+      "deadline": 300,
+      "unwind": 1,
+      "bounds": "every 64-bit input; no loop",
+      "assumptions": [],
+      "unsupported": []
+    },
+    {
+      "id": "budget_step",
+      "source": "budget_step.c",
+      "core": "kernel/core/budget.c",
+      "deadline": 600,
+      "unwind": 1,
+      "bounds": "every budget record, change and dead rule at full width; no loop",
+      "assumptions": [
+        "the dead rule is one of its three values",
+        "the lock effects are empty stubs; budget_step takes no lock"
+      ],
+      "unsupported": []
+    },
+    {
+      "id": "budget_chain",
+      "source": "budget_chain.c",
+      "core": "kernel/core/budget.c",
+      "deadline": 1800,
+      "unwind": 5,
+      "defines": {
+        "CHAIN_DEPTH": 3,
+        "CHAIN_VALUE_MAX": 255
+      },
+      "bounds": "chains of CHAIN_DEPTH budgets starting at the leaf, counters at most CHAIN_VALUE_MAX, any 64-bit change; loops unwound 5 times",
+      "assumptions": [
+        "the chain has the shape erx_budget_carve and erx_budget_init_root make: parent links, depths, a cap at or above the guarantee and equal to it for a wall, a live wall root of at most INT64_MAX pages",
+        "counters at most CHAIN_VALUE_MAX: the full-width arithmetic of one level is budget_step's and budget_arith's harness",
+        "the ticket lock is a stub that checks its own use; one thread"
+      ],
+      "unsupported": [
+        "chains deeper than CHAIN_DEPTH, up to ERX_BUDGET_DEPTH_MAX = 16: the solver's cost grows with each level"
+      ]
+    },
+    {
+      "id": "cap_slot_close",
+      "source": "cap_slot_close.c",
+      "core": "kernel/core/cap.c",
+      "deadline": 300,
+      "unwind": 3,
+      "bounds": "every resting count and generation within the ABI bounds, zero to two opening writes, a clear or a release; the opening loop unwound 3 times",
+      "assumptions": [
+        "the slot rests at an even count of at most CAP_SEQ_FREE_MAX and a generation below CAP_GENERATION_LIMIT; the harness proves the closing write hands both on",
+        "one thread: each _Atomic access is indivisible and sequentially consistent, its memory order ignored (test/cbmc/include/stdatomic.h)"
+      ],
+      "unsupported": [
+        "_Atomic loads and stores with explicit memory orders: modelled as sequentially consistent, through __atomic builtins, since CBMC does not know clang's __c11_atomic builtins"
+      ]
+    },
+    {
+      "id": "cap_read",
+      "source": "cap_read.c",
+      "core": "kernel/core/cap.c",
+      "deadline": 900,
+      "unwind": 1,
+      "unwindset": {
+        "erx_cap_table_init.0": 3,
+        "erx_cap_table_add_page.0": 65,
+        "erx_cap_table_add_page.1": 65,
+        "cap_page_in_use.0": 3,
+        "cap_read_slot.0": 2
+      },
+      "object_bits": 12,
+      "bounds": "tables of 2 to 128 slots with one page of 64 added, one slot of the page in any quiescent state, every value, reader, type and rights; the sequence-count loop unwound twice",
+      "assumptions": [
+        "the slot read is quiescent, its count even or terminal: with one thread an odd count would spin the loop for ever",
+        "one thread: each _Atomic access is indivisible and sequentially consistent, its memory order ignored (test/cbmc/include/stdatomic.h)"
+      ],
+      "unsupported": [
+        "the sequence-count retry loop of cap_read_slot under a concurrent writer: unbounded by design, and CBMC's interleavings have no fairness, so only the quiescent read is checked",
+        "_Atomic loads and stores with explicit memory orders: modelled as sequentially consistent, through __atomic builtins, since CBMC does not know clang's __c11_atomic builtins"
+      ]
+    },
+    {
+      "id": "cap_rights",
+      "source": "cap_rights.c",
+      "core": "kernel/core/cap.c",
+      "deadline": 300,
+      "unwind": 6,
+      "object_bits": 12,
+      "bounds": "every request of up to ERX_MSG_CAPS = 4 items, every source view; loops unwound 6 times",
+      "assumptions": [
+        "the sources are free, a superset of what erx_cap_read returns under the locks"
+      ],
+      "unsupported": []
+    }
+  ],
+  "mutants": [
+    {
+      "id": "cap-read-bound-off-by-one",
+      "harness": "cap_read",
+      "defect": "off-by-one in a bound: the lookup reads the slot at the capacity",
+      "file": "kernel/core/cap.c",
+      "original": "\tif (index == 0 || index >= atomic_load_explicit(&table->capacity,\n\t    memory_order_acquire))\n\t\treturn (ERX_ESTALE);",
+      "replacement": "\tif (index == 0 || index > atomic_load_explicit(&table->capacity,\n\t    memory_order_acquire))\n\t\treturn (ERX_ESTALE);",
+      "fails": "a lookup succeeds only below the capacity"
+    },
+    {
+      "id": "difference-overflow-unchecked",
+      "harness": "budget_arith",
+      "defect": "missing overflow check: difference converts a gap above INT64_MAX",
+      "file": "kernel/core/budget.c",
+      "original": "\t\tif (to - from > (erx_npages_t)INT64_MAX)\n\t\t\treturn (false);\n",
+      "replacement": "",
+      "fails": "\\A(difference\\.overflow|check_difference\\.assertion)"
+    },
+    {
+      "id": "add-delta-goes-negative",
+      "harness": "budget_arith",
+      "defect": "a counter can go negative: add_delta subtracts more than the value",
+      "file": "kernel/core/budget.c",
+      "original": "\tif (magnitude > value)\n\t\treturn (false);\n",
+      "replacement": "",
+      "fails": "\\A(add_delta\\.overflow|check_add_delta\\.assertion)"
+    },
+    {
+      "id": "borrowing-from-zero",
+      "harness": "budget_step",
+      "defect": "borrowing measured from zero instead of the guarantee",
+      "file": "kernel/core/budget.c",
+      "original": "new_borrowing = borrowing(step->new_spending, budget->guarantee);",
+      "replacement": "new_borrowing = borrowing(step->new_spending, 0);",
+      "fails": "passes its borrowing's change as lent"
+    },
+    {
+      "id": "refused-charge-applied",
+      "harness": "budget_chain",
+      "defect": "a charge refused for want of room is applied anyway",
+      "file": "kernel/core/budget.c",
+      "original": "\tif (error == 0) {\n\t\teffects->refused = NULL;",
+      "replacement": "\tif (error == 0 || error == ERX_ENOMEM) {\n\t\teffects->refused = NULL;",
+      "fails": "a refused change leaves every level as it was"
+    },
+    {
+      "id": "generation-never-retires",
+      "harness": "cap_slot_close",
+      "defect": "a missing bound: a slot is freed whatever its generation",
+      "file": "kernel/core/cap.c",
+      "original": "bool retire = generation >= CAP_GENERATION_LIMIT ||\n\t    seq > CAP_SEQ_FREE_MAX - 2;",
+      "replacement": "bool retire = seq > CAP_SEQ_FREE_MAX - 2;",
+      "fails": "a freed slot's generation is one a value is issued at"
+    },
+    {
+      "id": "pass-ignores-mask",
+      "harness": "cap_rights",
+      "defect": "a pass keeps rights its mask drops",
+      "file": "kernel/core/cap.c",
+      "original": "rights = erx_rights_shrink(view->rights, item->mask);",
+      "replacement": "rights = view->rights;",
+      "fails": "K2: a pass keeps rights"
+    },
+    {
+      "id": "charge-becomes-refund",
+      "harness": "budget_chain",
+      "defect": "a charge is applied with its sign flipped",
+      "file": "kernel/core/budget.c",
+      "original": "\tbudget_delta_t delta = { .used = pages };",
+      "replacement": "\tbudget_delta_t delta = { .used = -pages };",
+      "fails": "the leaf's used changes by the charge"
+    },
+    {
+      "id": "chain-stops-at-leaf",
+      "harness": "budget_chain",
+      "defect": "a change never passes up to the parent",
+      "file": "kernel/core/budget.c",
+      "original": "\t\tif (delta_is_zero(&step.up))\n\t\t\tbreak;",
+      "replacement": "\t\tbreak;",
+      "fails": "passes up its (borrowing|spending)'s change|a pin reaches every level"
+    }
+  ]
+}

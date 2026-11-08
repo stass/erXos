@@ -8517,7 +8517,9 @@ there and the sites allowed to do it, and carries the seeded violation its
 host test requires it to catch; text rules read each source after line
 splicing and comment removal, with every include directive limited to a
 plain header path so that no computed include or included non-header
-carries text past them. A rule another check enforces names that check
+carries text past them; the one exception is a CBMC harness in
+`test/cbmc/`, which includes the core it checks and which only CBMC
+builds ([design-verification.md](design-verification.md#cbmc-harnesses-and-runner)). A rule another check enforces names that check
 and its test. A rule read from the cores' call graph, such as the one
 function that clears a capability slot, is declared in the same
 registry and evaluated by the stack proof on the graph of every
