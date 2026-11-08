@@ -226,12 +226,18 @@ class ProductionImageTest < Minitest::Test
 
     verify = points.last.fetch(:verify)
     group = '[{parked,{kernel,{ok,4}}},{ready,{kernel,{ok,0}}}]'
-    good = "{object_info,[{cpus_online,{kernel,{ok,4}}}],{ok,4,[]},#{group}," \
+    machine_summary = '[{cpus_online,{kernel,{ok,4}}},{memory_free,{{stopgap,liberx_pool},{partial,8192}}},' \
+                      '{memory_total,{{stopgap,liberx_pool},{partial,65536}}},{uptime,{kernel,{ok,1234}}}]'
+    good = "{object_info,#{machine_summary},{ok,4,[]},#{group}," \
            "[{used,{{stopgap,liberx_pool},{partial,812}}}],{ok,9,[]}}\r\n"
     verify.call(good)
     verify.call("3> #{good}")
-    { 'cpus_online unsupported' => good.sub('[{cpus_online,{kernel,{ok,4}}}]', '[]'),
-      'another CPU count' => good.sub('{ok,4}}}]', '{ok,1}}}]'),
+    { 'cpus_online unsupported' => good.sub('[{cpus_online,{kernel,{ok,4}}},', '['),
+      'uptime unsupported' => good.sub(',{uptime,{kernel,{ok,1234}}}', ''),
+      'memory reported as the kernel' => good.sub('{memory_total,{{stopgap,liberx_pool},{partial,65536}}}',
+                                                  '{memory_total,{kernel,{ok,65536}}}'),
+      'free memory of zero' => good.sub('{partial,8192}', '{partial,0}'),
+      'another CPU count' => good.sub('{cpus_online,{kernel,{ok,4}}}', '{cpus_online,{kernel,{ok,1}}}'),
       'another machine attribute reported' => good.sub('[{cpus_online,', '[{build,{kernel,{ok,1}}},{cpus_online,'),
       'a CPU listing cut short' => good.sub('{ok,4,[]}', '{partial,4,[]}'),
       'a CPU listing of another length' => good.sub('{ok,4,[]}', '{ok,3,[]}'),

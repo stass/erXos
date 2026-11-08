@@ -23,6 +23,8 @@ _Noreturn void	erx_hosted_fatal(const char *why);
 
 /* The committed pages of the area: the one budget's used, as the pool counts it. */
 uint64_t	erx_hosted_vm_used_pages(void);
+/* The pages of the area's pool, committed or free. */
+uint64_t	erx_hosted_vm_pool_pages(void);
 /* Sets bit n of map for each created or started thread n. */
 void	erx_hosted_thread_map(uint64_t map[2]);
 

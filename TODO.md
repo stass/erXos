@@ -3151,6 +3151,23 @@ document's "residual risks accepted" paragraph.
   [design-display.md](docs/design-display.md#compatibility-and-migration)
   assumes.
 
+* [Medium] erx, the Erlang shell's facets: `erx:i/0,1` reads the system
+  domain's session's facets (`erx_shell_script:session_facets/0`), the
+  one session Phase 1 has; when sessions run in their own domains with
+  scoped facets, the `erl` command must hand the Erlang shell its
+  session's facets and `erx:i` read those and fail without them, or a
+  scoped session's Erlang shell inspects with scope `all`
+  (`erlang/apps/erx/src/erx.erl`, `inspect_scope/0`).
+* [Low] POSIX-lite personality, `sysctl(3)` and `sysctl(8)`: build them
+  when a ported FreeBSD program first needs them, as a reader of
+  `/proc/status` through the program's own namespace that maps
+  `hw.ncpu`, `hw.physmem`, `hw.pagesize`, `kern.boottime` and the names
+  that program asks for onto the inspector's attributes and answers
+  `ENOENT` for a value that is not `ok`; read-only, with no `sysctl`
+  facility behind it
+  ([design-live.md](docs/design-live.md#system-values-one-tree-many-views)),
+  and listed in the C library seam's table of
+  [design-runtime.md](docs/design-runtime.md#the-c-library-seam).
 * [Low] POSIX-lite personality, FreeBSD programs: survey what FreeBSD
   programs ported at the source level need beyond the planned layer
   (BSD libc extensions, `sysctl`, `kqueue` and the like) and which of

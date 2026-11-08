@@ -22,6 +22,9 @@
 /* What the backend knows when it answers. Each topic reads only its own facts. */
 typedef struct erx_info_facts {
 	uint64_t		cpus_online;	/* machine, cpu: the kernel's map, 0 when it did not say */
+	uint64_t		uptime_ns;	/* machine: the kernel's clock since boot, 0 when it did not say */
+	uint64_t		pool_pages;	/* machine: the pages the root's pool was built with */
+	uint64_t		pool_free_pages; /* machine: those of them it holds now */
 	uint64_t		budget_used;	/* budget: the pages the pool handed out and has not taken back */
 	uint64_t		threads[2];	/* thread: bit n, thread n of the space is created or started */
 	erx_info_group_t	group;		/* group: the report erx_group_info wrote */

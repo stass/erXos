@@ -127,3 +127,21 @@ every_record_validates_test() ->
                  erx_kernel_records:record(group, [domains, 4, group], 0,
                                            {ok, <<5:64/little, 0:64, 0:32, 1:32/little, 2:32/little,
                                                   25:32/little>>}, 0)).
+
+%% The machine's memory figures are the root's pool's on the stopgap:
+%% liberx's partial mask names them, so each is the liberx pool's partial
+%% value, while uptime, which the kernel's clock gives whole, is ok.
+machine_memory_is_the_pools_partial_test() ->
+    Memory = ?ERX_INFO_MACHINE_REPORTED_MEMORY_TOTAL bor ?ERX_INFO_MACHINE_REPORTED_MEMORY_FREE,
+    Reported = ?ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE bor ?ERX_INFO_MACHINE_REPORTED_UPTIME,
+    Report = <<0:64, 0:32, 4:32/little, 8192:64/little, 4096:64/little, 77:64/little, 0:32,
+               Reported:32/little>>,
+    {ok, #{attrs := Attrs}} = erx_kernel_records:record(machine, [], 0, {ok, Report}, Memory),
+    ?assertEqual({{stopgap, liberx_pool}, {partial, 8192}}, maps:get(memory_total, Attrs)),
+    ?assertEqual({{stopgap, liberx_pool}, {partial, 4096}}, maps:get(memory_free, Attrs)),
+    ?assertEqual({kernel, {ok, 77}}, maps:get(uptime, Attrs)),
+    ?assertEqual({kernel, unsupported}, maps:get(memory_total, machine_attr_map({ok, Report}))).
+
+machine_attr_map(Answer) ->
+    {ok, #{attrs := Attrs}} = erx_kernel_records:record(machine, [], 0, Answer, 0),
+    Attrs.

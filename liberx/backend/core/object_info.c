@@ -4,10 +4,13 @@
  */
 
 /*
- * The reports of erx_object_info on liberx's Phase 1 backends, and the one field they
+ * The reports of erx_object_info on liberx's Phase 1 backends, and the fields they
  * count only partly (docs/design-stopgap.md, "Reporting kernel objects"). Per topic:
  *
- *   machine  cpus_online, the count of the kernel's map, reported when the map is known
+ *   machine  cpus_online, the count of the kernel's map, reported when the map is known;
+ *            uptime, the kernel's clock, reported when it is known; memory_total and
+ *            memory_free, the root's pool's pages in bytes, never reported:
+ *            erx_info_partial names them, since RAM outside the pool is not counted
  *   cpu      a CPU of that map, with nothing reported
  *   group    the report erx_group_info wrote, its own reported bits kept
  *   budget   used, the pool's count, never reported: erx_info_partial names it
@@ -29,7 +32,14 @@
 uint32_t
 erx_info_partial(uint32_t topic)
 {
-	return (topic == ERX_INFO_BUDGET ? ERX_INFO_BUDGET_REPORTED_USED : 0);
+	switch (topic) {
+	case ERX_INFO_MACHINE:
+		return (ERX_INFO_MACHINE_REPORTED_MEMORY_TOTAL | ERX_INFO_MACHINE_REPORTED_MEMORY_FREE);
+	case ERX_INFO_BUDGET:
+		return (ERX_INFO_BUDGET_REPORTED_USED);
+	default:
+		return (0);
+	}
 }
 
 uint64_t
@@ -89,7 +99,13 @@ erx_info_report(uint32_t topic, uint64_t index, const erx_info_facts_t *facts, v
 	switch (topic) {
 	case ERX_INFO_MACHINE:
 		report.machine.cpus_online = (uint32_t)__builtin_popcountll(facts->cpus_online);
-		report.machine.reported = facts->cpus_online != 0 ? ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE : 0;
+		report.machine.uptime = facts->uptime_ns;
+		/* A product that does not fit leaves the field 0, which a partial reader sees as such. */
+		if (__builtin_mul_overflow(facts->pool_pages, (uint64_t)ERX_PAGE_SIZE, &report.machine.memory_total) ||
+		    __builtin_mul_overflow(facts->pool_free_pages, (uint64_t)ERX_PAGE_SIZE, &report.machine.memory_free))
+			report.machine.memory_total = report.machine.memory_free = 0;
+		report.machine.reported = (facts->cpus_online != 0 ? ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE : 0) |
+		    (facts->uptime_ns != 0 ? ERX_INFO_MACHINE_REPORTED_UPTIME : 0);
 		break;
 	case ERX_INFO_CPU:
 		if (index >= 64 || (facts->cpus_online >> index & 1) == 0)

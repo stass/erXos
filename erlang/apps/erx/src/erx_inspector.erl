@@ -6,8 +6,9 @@
 The inspector (docs/design-live.md, "Inspection"): it answers a query for
 a path of abi/inspection.txt with the record of that path, each attribute
 from its reporter, and keeps from it only what the caller's scope may see.
-erx:i/0,1 asks it with the system shell's scope; `/proc` and the host
-link ask it with the scope of the inspect facet they serve.
+erx:i/0,1 and the shell's commands ask it with the scope of the session's
+inspect facet, whose value is that scope; `/proc` and the host link ask
+it with the scope of the inspect facet they serve.
 
 * inspect/2 answers the record of one path; entries/2 the records of a
   listing's entries, the listing's own status beside them.
@@ -25,8 +26,9 @@ link ask it with the scope of the inspect facet they serve.
   system-shell facet.
 
 In Phase 1 the inspector answers for the system domain only: its kernel
-objects through erx_kernel_records, on the root's own capabilities, and
-its processes through erx_process_records. A pid of another runtime, and
+objects through erx_kernel_records, on the root's own capabilities, its
+domain record through erx_runtime_records and its processes through
+erx_process_records. A pid of another runtime, and
 a domain other than the system domain, name nothing it can reach and are
 answered `{error, scope}`; a path the schema declares that has no
 collector here is `{error, unsupported}`.
@@ -45,7 +47,7 @@ collector here is `{error, unsupported}`.
 %% The most entries one listing gives: erx_schema's page.
 -define(PAGE, 1000).
 %% The machine's paths a scoped caller reaches: the machine's record, with
-%% only the attributes that reveal nothing of other domains, and the
+%% only the attributes the schema marks `visible any`, and the
 %% processes, listing only its own domains' (docs/design-live.md, "Scopes").
 -define(SCOPED_MACHINE_PATHS, [[], [processes]]).
 
@@ -176,6 +178,8 @@ collect([domains, Domain | Rest] = Path, Scope) ->
 collect(Path, Scope) ->
     listing(Path, enumerate(Path, Scope)).
 
+system_domain(_Path, [], _Scope) ->
+    erx_runtime_records:domain(erx_kernel_records:system_domain());
 system_domain(_Path, [group], _Scope) ->
     {ok, erx_kernel_records:group()};
 system_domain(_Path, [budget], _Scope) ->

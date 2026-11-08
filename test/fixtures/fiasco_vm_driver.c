@@ -246,6 +246,9 @@ world_check(const model_page_t *model, size_t npages, uint64_t pool_total)
 		fail("the pool's count does not add up", pool.free_pages);
 	if (pool.held_pages != committed)
 		fail("the pool's held count is not the committed pages", pool.held_pages);
+	/* The machine topic's memory_total: a page given back is not a page added. */
+	if (pool.pages != pool_total)
+		fail("the pool's page count moved", pool.pages);
 }
 
 static void

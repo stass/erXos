@@ -42,7 +42,7 @@ budget_on_the_stopgap_test() ->
      || Key <- [guarantee, cap, carved, lent, pinned]],
     ?assertEqual({ok, <<"liberx pool">>}, erx_schema:reporter_label({stopgap, liberx_pool})),
     {ok, #{category := kernel, scope := Scope}} = erx_schema:stopgap(liberx_pool),
-    ?assertEqual(<<"pages committed through liberx; not kernel objects, page tables or mapping records">>, Scope),
+    ?assertEqual(<<"pages of the root's pool: those handed out, carved budgets' included, and the pool's total and free; not the kernel's or sigma0's memory, page tables or mapping records">>, Scope),
     {ok, #{unit := Unit}} = erx_schema:attribute(budget, used),
     ?assertEqual(<<"pages">>, Unit).
 

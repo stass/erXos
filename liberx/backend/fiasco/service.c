@@ -36,6 +36,7 @@
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/group.h"
+#include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -473,6 +474,10 @@ service_object_info(uint32_t task, const erx_fiasco_object_info_request_t *reque
 		return (ERX_EINVAL);
 	switch (request->topic) {
 	case ERX_INFO_MACHINE:
+		facts.uptime_ns = erx_fiasco_clock_ns();
+		facts.pool_pages = erx_fiasco_vm_pool_pages();
+		facts.pool_free_pages = erx_fiasco_vm_free_pages();
+		/* FALLTHROUGH */
 	case ERX_INFO_CPU:
 		facts.cpus_online = service_cpus_online();
 		break;

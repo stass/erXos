@@ -6,9 +6,21 @@
 `top [-bn] [-d count] [-s time] [number]`: FreeBSD's top (usr.bin/top)
 over the table `ps` reads (docs/design-live.md, "The command shell").
 
-Each display is a header and a process table. The header is the time of
-day and a count of the processes by state, `57 processes:  2 running,
-55 sleeping`; the table has the columns of FreeBSD's that the table has
+Each display is a header and a process table. The header's lines are
+FreeBSD's where they map: the run queue, the uptime and the time of day,
+`run queue: 0;  up 0+00:05:12    10:15:37`, where FreeBSD's shows the last
+pid and the load averages; a count of the processes by state, `57
+processes:  2 running, 55 sleeping`; the machine's memory, `Mem: 1906M
+Total, 1500M Free`; and the budget of the domain top runs in, labelled as
+the domain's, `Domain 4 budget: 812K Used, 1024M Guarantee, 2048M Cap`.
+The run queue is the domain's runtime's count of processes and ports
+waiting for a scheduler, an instant's count, never a load average.
+Every figure is read
+through the inspector with the scope of the session's inspect facet
+(docs/design-live.md, "System values: one tree, many views"): one that
+is not `ok`, partial ones included, and every figure of a session
+without the facet, prints `-`, so the header never shows a number nobody
+reported whole. The table has the columns of FreeBSD's that the table has
 values for, `PID RES STATE TIME WCPU COMMAND`, ordered by `WCPU`,
 largest first, the rows without one after them in pid order.
 
@@ -30,7 +42,7 @@ draw on. `number` caps the processes a display shows.
 
 The decisions are pure: options/1 reads the arguments, plan/2 settles
 their defaults for a screen or not, shares/2 works out each row's `WCPU`
-and display/2 lays a display out. run/2 samples, writes and sleeps
+and display/3 lays a display out. run/2 samples, writes and sleeps
 around them.
 """.
 
@@ -39,9 +51,12 @@ around them.
 -erx_usage("top [-bn] [-d count] [-s time] [number]").
 
 -export([run/2]).
--export([options/1, plan/2, shares/2, cpu_times/1, display/2, count/1, format_time/1, format_k/1]).
+-export([options/1, plan/2, shares/2, cpu_times/1, display/3, count/1, format_time/1, format_k/1,
+         format_uptime/1]).
 
--export_type([options/0, plan/0, layout/0]).
+-export_type([options/0, plan/0, layout/0, system/0]).
+
+-include("generated/erx_abi.hrl").
 
 %% The options as given, `default` where the line gave none.
 -type options() :: #{batch := boolean(), displays := pos_integer() | infinity | default,
@@ -56,6 +71,15 @@ around them.
 %% each line is cut at, and the time of day its header shows.
 -type layout() :: #{max_rows := non_neg_integer() | infinity, width := pos_integer() | infinity,
                     clock := calendar:time()}.
+
+%% The figures of a display's header, each as the inspector answered it,
+%% `{Reporter, Value}`; a figure the session cannot read is absent. The
+%% budget's figures and the domain's run queue are of `domain`, the domain
+%% top runs in, also absent when the inspector did not say which.
+-type system() :: #{uptime => figure(), memory_total => figure(), memory_free => figure(),
+                    domain => non_neg_integer(), run_queue => figure(),
+                    used => figure(), guarantee => figure(), cap => figure()}.
+-type figure() :: erx_schema:attr().
 
 %% The CPU times of a sample, by pid, and when it was read, in
 %% microseconds of monotonic time.
@@ -72,8 +96,8 @@ around them.
 -define(MAX_DELAY_MS, 16#FFFFFFFF).
 %% Home and clear the screen, an ANSI terminal's termcap `cl`.
 -define(CLEAR, <<"\e[H\e[2J">>).
-%% The header's two lines, its blank line and the table's header line.
--define(HEADER_LINES, 4).
+%% The header's four lines, its blank line and the table's header line.
+-define(HEADER_LINES, 6).
 
 run(Args, Ctx) ->
     case options(Args) of
@@ -92,7 +116,7 @@ run(Args, Ctx) ->
 loop(Ctx, #{screen := Screen, delay_ms := Delay} = Plan, Left, Previous) ->
     Now = erlang:monotonic_time(microsecond),
     Rows = erx_cmd_ps:session_table(),
-    Display = display(shares(Previous, {Now, Rows}), layout(Ctx, Plan)),
+    Display = display(shares(Previous, {Now, Rows}), system(Ctx), layout(Ctx, Plan)),
     erx_cmd:write(Ctx, [lead(Screen, Previous), Display]),
     case remaining(Left) of
         0 ->
@@ -110,6 +134,35 @@ remaining(N) -> N - 1.
 lead(true, _Previous) -> ?CLEAR;
 lead(false, none) -> <<>>;
 lead(false, _Previous) -> <<"\n">>.
+
+%% The header's figures, read through the inspector with the session's
+%% inspect facet's scope: the machine's from its record, and the run queue
+%% and budget of the domain top runs in, which the record of top's own
+%% process names. Without the facet there are none.
+system(Ctx) ->
+    case erx_cmd:facet(Ctx, inspect) of
+        {ok, Scope} -> system_figures(Scope);
+        {error, no_facet} -> #{}
+    end.
+
+system_figures(Scope) ->
+    Machine = maps:with([uptime, memory_total, memory_free], attrs([], Scope)),
+    case attrs([processes, self()], Scope) of
+        #{domain := {_Reporter, {ok, Domain}}} ->
+            Budget = maps:with([used, guarantee, cap], attrs([domains, Domain, budget], Scope)),
+            Runtime = maps:with([run_queue], attrs([domains, Domain], Scope)),
+            maps:merge(Machine, maps:merge(Runtime, Budget#{domain => Domain}));
+        #{} ->
+            Machine
+    end.
+
+%% The attributes of a path's record as the scope sees them, none when the
+%% inspector answers no record.
+attrs(Path, Scope) ->
+    case erx_inspector:inspect(Path, Scope) of
+        {ok, #{attrs := Attrs}} -> Attrs;
+        {error, _Reason} -> #{}
+    end.
 
 layout(Ctx, #{screen := true, topn := TopN}) ->
     screen_layout(Ctx, TopN);
@@ -300,19 +353,52 @@ share(#{time := Time}, {ok, Before}, Interval) when Interval > 0, Time >= Before
 share(#{pcpu := Since}, _Before, _Interval) -> Since.
 
 -doc """
-A display of rows in their order: the header, whose counts are of every
-row, over the first `max_rows` of them, each line cut at `width`.
+A display of rows in their order: the header, of the system's figures
+and of counts of every row, over the first `max_rows` of them, each line
+cut at `width`.
 """.
--spec display([erx_cmd_ps:row()], layout()) -> iodata().
-display(Rows, #{max_rows := MaxRows, width := Width, clock := Clock}) ->
+-spec display([erx_cmd_ps:row()], system(), layout()) -> iodata().
+display(Rows, System, #{max_rows := MaxRows, width := Width, clock := Clock}) ->
     Shown = case MaxRows of infinity -> Rows; _ -> lists:sublist(Rows, MaxRows) end,
     PidWidth = lists:max([byte_size(<<"PID">>) | [byte_size(Pid) || #{pid := Pid} <- Shown]]),
-    Lines = [time_of_day(Clock), states(Rows), <<>>, header(PidWidth)
-             | [line(Row, PidWidth) || Row <- Shown]],
+    Lines = [first_line(System, Clock), states(Rows), memory(System), budget(System), <<>>,
+             header(PidWidth) | [line(Row, PidWidth) || Row <- Shown]],
     [[erx_cmd_ps:cut(Line, Width), $\n] || Line <- Lines].
 
-time_of_day({H, M, S}) ->
-    iolist_to_binary(io_lib:format("~2..0b:~2..0b:~2..0b", [H, M, S])).
+%% FreeBSD's first line (usr.bin/top/display.c) with the run queue where
+%% its last pid and load averages stand: `run queue: N;  up D+HH:MM:SS`,
+%% then the time of day after four blanks, as FreeBSD writes it where it
+%% cannot place it at the screen's right edge.
+first_line(System, {H, M, S}) ->
+    iolist_to_binary([<<"run queue: ">>, figure(run_queue, System, fun integer_to_binary/1),
+                      <<";  up ">>, figure(uptime, System, fun format_uptime/1),
+                      io_lib:format("    ~2..0b:~2..0b:~2..0b", [H, M, S])]).
+
+%% FreeBSD's `Mem:` line, of the two figures the machine record has.
+memory(System) ->
+    Bytes = fun(N) -> format_k(N div 1024) end,
+    iolist_to_binary([<<"Mem: ">>, figure(memory_total, System, Bytes), <<" Total, ">>,
+                      figure(memory_free, System, Bytes), <<" Free">>]).
+
+%% The budget of the domain top runs in, named as that domain's, as
+%% FreeBSD's `Swap:` line lays out its figures.
+budget(System) ->
+    Pages = fun(N) -> format_k(N * (?ERX_PAGE_SIZE div 1024)) end,
+    Label = case System of
+                #{domain := Domain} -> [<<"Domain ">>, integer_to_binary(Domain), <<" budget: ">>];
+                #{} -> <<"Domain budget: ">>
+            end,
+    iolist_to_binary([Label, figure(used, System, Pages), <<" Used, ">>,
+                      figure(guarantee, System, Pages), <<" Guarantee, ">>,
+                      figure(cap, System, Pages), <<" Cap">>]).
+
+%% A figure in its format when the inspector answered it `ok`, else `-`:
+%% a partial, unknown, unsupported or late value is never shown as exact.
+figure(Key, System, Format) ->
+    case System of
+        #{Key := {_Reporter, {ok, Value}}} -> Format(Value);
+        #{} -> <<"-">>
+    end.
 
 %% `N processes:`, padded as FreeBSD pads the count to four digits
 %% (usr.bin/top/display.c, i_procstates), then each state some process
@@ -374,6 +460,18 @@ format_time(Micros) ->
                          Seconds >= 1000 * 60 -> io_lib:format("~.1fH", [Seconds / 3600]);
                          true -> io_lib:format("~b:~2..0b", [Seconds div 60, Seconds rem 60])
                      end).
+
+-doc """
+An uptime in nanoseconds as FreeBSD's i_uptime() writes it
+(usr.bin/top/display.c): days, then hours, minutes and seconds,
+`D+HH:MM:SS`, the part of a second dropped.
+""".
+-spec format_uptime(non_neg_integer()) -> binary().
+format_uptime(Nanos) ->
+    Seconds = Nanos div 1000000000,
+    iolist_to_binary(io_lib:format("~b+~2..0b:~2..0b:~2..0b",
+                                   [Seconds div 86400, Seconds rem 86400 div 3600,
+                                    Seconds rem 3600 div 60, Seconds rem 60])).
 
 -doc """
 A size in KiB as FreeBSD's format_k() writes it through humanize_number(3)

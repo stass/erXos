@@ -570,10 +570,11 @@ module Erx
 
       # The kernel-object records at the Erlang shell, at the statuses design-stopgap.md's
       # "Reporting kernel objects" table gives. Of the attributes only the kernel could
-      # report, just these are ok: the machine's cpus_online and the system group's parked
-      # and ready. The group's cpuset would be ok once a set is configured, and nothing
-      # configures the system group's. The budget's used is partial, with reporter
-      # liberx_pool, and above zero. Every other attribute is unsupported with reporter
+      # report, just these are ok: the machine's cpus_online and uptime and the system
+      # group's parked and ready. The group's cpuset would be ok once a set is configured,
+      # and nothing configures the system group's. The machine's memory_total and
+      # memory_free and the budget's used are partial, with reporter liberx_pool, and above
+      # zero. Every other attribute is unsupported with reporter
       # kernel, and the CPUs and the system domain's threads are listed whole. Each answer
       # types the next collector, the last types the summary, and the summary's line must
       # be exactly that.
@@ -596,7 +597,9 @@ module Erx
         positive = '[1-9][0-9]*'
         text = ->(fixed) { Regexp.escape(fixed) }
         ok = ->(key, value) { "#{text.call("{#{key},{kernel,{ok,")}#{value}#{text.call('}}}')}" }
-        machine = text.call('[') + ok.call('cpus_online', cpus) + text.call(']')
+        pool = ->(key) { text.call("{#{key},{{stopgap,liberx_pool},{partial,") + positive + text.call('}}}') }
+        machine = text.call('[') + [ok.call('cpus_online', cpus), pool.call('memory_free'), pool.call('memory_total'),
+                                    ok.call('uptime', positive)].join(',') + text.call(']')
         cpu_listing = text.call("{ok,#{cpus},[]}")
         group = text.call('[') + ok.call('parked', any_number) + ',' + ok.call('ready', any_number) + text.call(']')
         budget = text.call('[{used,{{stopgap,liberx_pool},{partial,') + positive + text.call('}}}]')
@@ -649,10 +652,11 @@ module Erx
          console_point('rc-ending', /\A(?:[0-9]+> )?\{ok,<<>>\}\r*\n\z/n, type: "erx:i().\r"),
          # The echo of the line holds erx:i(), so only the machine record's title matches.
          console_point('inspect-machine', %r{\A/  machine\r*\n\z}n),
-         console_point('inspect-uptime', /\A  uptime +kernel +\[unsupported\]\r*\n\z/n),
+         console_point('inspect-memory', /\A  memory_total +liberx pool +\[partial\]\r*\n\z/n),
+         console_point('inspect-uptime', /\A  uptime +kernel +[1-9][0-9]*\r*\n\z/n),
          console_point('inspect-used', /\A  used +liberx pool +\[partial\]\r*\n\z/n),
          console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries\r*\n\z}n),
-         console_point('inspect-scope', /\Aliberx pool: pages committed through liberx;/n),
+         console_point('inspect-scope', /\Aliberx pool: pages of the root's pool:/n),
          console_point('inspect-answer', /\Aok\r*\n\z/n, type: PROC_EXPRESSION),
          # ls -1 /proc, sorted, then the console process's status, the machine's and the system
          # domain's budget's, each attribute a line of name, value and reporter. The console's
@@ -662,12 +666,21 @@ module Erx
          console_point('proc-ls-status', /\Astatus\r*\n\z/n),
          console_point('proc-process-domain', /\Adomain#{TAB}4#{TAB}service\r*\n\z/n),
          console_point('proc-process-name', /\Aregistered_name#{TAB}erx_console#{TAB}runtime\r*\n\z/n),
-         console_point('proc-machine-uptime', /\Auptime#{TAB}\[unsupported\]#{TAB}kernel\r*\n\z/n),
+         console_point('proc-machine-memory', /\Amemory_total#{TAB}\[partial\]#{TAB}liberx pool\r*\n\z/n),
+         console_point('proc-machine-uptime', /\Auptime#{TAB}[1-9][0-9]*#{TAB}kernel\r*\n\z/n),
          console_point('proc-budget-used', /\Aused#{TAB}\[partial\]#{TAB}liberx pool\r*\n\z/n),
          console_point('proc-ending', /\A\{ok,<<>>\}\r*\n\z/n, type: PROC_READ_EXPRESSION),
          # The echo of the line holds {proc_read, so only the answer matches.
          console_point('proc-read', /\A(?:[0-9]+> )?\{proc_read,/n,
-                       whole: /\A(?:[0-9]+> )?\{proc_read,true,true,true\}\r*\n\z/n)].freeze
+                       whole: /\A(?:[0-9]+> )?\{proc_read,true,true,true\}\r*\n\z/n, type: TOP_EXPRESSION),
+         # top's header through the inspector with the session's facet: the run queue and the
+         # uptime ok, the pool's memory and the root's used partial, so `-`, and the rest of the
+         # budget unsupported, so `-`. The echo holds top -b, so only the header matches.
+         console_point('top-first', /\A(?:[0-9]+> )?run queue: [0-9]+;  up /n,
+                       whole: /\A(?:[0-9]+> )?run queue: [0-9]+;  up 0\+00:[0-5][0-9]:[0-5][0-9]    [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\r*\n\z/n),
+         console_point('top-states', /\A[1-9][0-9]* processes: /n),
+         console_point('top-memory', /\AMem: - Total, - Free\r*\n\z/n),
+         console_point('top-budget', /\ADomain 4 budget: - Used, - Guarantee, - Cap\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the
@@ -882,6 +895,8 @@ module Erx
       PROC_EXPRESSION = 'P=tl(lists:droplast(pid_to_list(whereis(erx_console)))),' \
                         'erx_shell_script:run(["ls -1 /proc; cat /proc/processes/",P,' \
                         '"/status /proc/status /proc/domains/4/budget/status"]).' "\r"
+      # One display of top, its process table cut to one row.
+      TOP_EXPRESSION = 'erx_shell_script:run("top -b 1").' "\r"
       # The same status file through file:read_file/1: every line of it is a field escape's
       # name, value and reporter, and the console's line says so. B is LOAD_ONLY_EXPRESSION's.
       PROC_READ_EXPRESSION = '{ok,PB}=file:read_file(["/proc/processes/",P,"/status"]),' \

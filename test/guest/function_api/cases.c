@@ -601,7 +601,8 @@ case_group_info_and_configure(void)
 
 /*
  * Each topic's reported bits as docs/design-stopgap.md, "Reporting kernel objects", lists
- * them: the machine's CPU count, a budget's used moving with a commit and a decommit with
+ * them: the machine's CPU count and uptime, its memory figures the pool's with
+ * erx_info_partial naming both, a budget's used moving with a commit and a decommit with
  * its bit clear and erx_info_partial naming it alone, threads listed up to ERX_ERANGE, and
  * the refusals.
  */
@@ -620,8 +621,10 @@ case_object_info(void)
 
 	ok = erx_object_info(0, ERX_INFO_MACHINE, 0, window, sizeof(window)) == ERX_OK &&
 	    erx_info_machine_decode(window, sizeof(window), &machine) &&
-	    machine.reported == ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE && machine.cpus_online > 0 &&
-	    machine.cpus_online < 64;
+	    machine.reported == (ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE | ERX_INFO_MACHINE_REPORTED_UPTIME) &&
+	    machine.cpus_online > 0 && machine.cpus_online < 64 && machine.uptime > 0 && machine.memory_total > 0 &&
+	    machine.memory_free <= machine.memory_total && machine.memory_total % ERX_PAGE_SIZE == 0 &&
+	    machine.memory_free % ERX_PAGE_SIZE == 0;
 	/* Both backends' maps are dense: CPUs 0 to the count less one. */
 	ok = ok && erx_object_info(0, ERX_INFO_CPU, machine.cpus_online - 1, window, sizeof(window)) == ERX_OK &&
 	    erx_info_cpu_decode(window, sizeof(window), &cpu) && cpu.reported == 0 &&
@@ -632,7 +635,9 @@ case_object_info(void)
 	    ERX_INFO_GROUP_REPORTED_READY)) == 0 &&
 	    erx_object_info(ERX_CAP_NULL, ERX_INFO_GROUP, 0, window, sizeof(window)) == ERX_ENOTSUP;
 	ok = ok && erx_info_partial(ERX_INFO_BUDGET) == ERX_INFO_BUDGET_REPORTED_USED &&
-	    erx_info_partial(ERX_INFO_MACHINE) == 0 && erx_info_partial(ERX_INFO_THREAD) == 0;
+	    erx_info_partial(ERX_INFO_MACHINE) ==
+	    (ERX_INFO_MACHINE_REPORTED_MEMORY_TOTAL | ERX_INFO_MACHINE_REPORTED_MEMORY_FREE) &&
+	    erx_info_partial(ERX_INFO_THREAD) == 0;
 	ok = ok && erx_vm_reserve(ERX_CAP_SELF, 0, 4 * PAGE, 0, &addr) == ERX_OK &&
 	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
 	    erx_info_budget_decode(window, sizeof(window), &before) && erx_vm_commit(ERX_CAP_SELF, addr, 4 * PAGE) == ERX_OK &&

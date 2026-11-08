@@ -25,6 +25,7 @@ typedef struct erx_fiasco_pool {
 	uintptr_t	head;		/* first free page's address, or 0 */
 	uint64_t	free_pages;
 	uint64_t	held_pages;	/* taken and not put back */
+	uint64_t	pages;		/* the pages added as the pool was built: the machine topic's memory_total */
 } erx_fiasco_pool_t;
 
 /* Adds one page the pool has never handed out, as the pool is built. */

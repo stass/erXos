@@ -131,14 +131,31 @@ shares_interval_test() ->
 
 layout(MaxRows, Width) -> #{max_rows => MaxRows, width => Width, clock => {1, 2, 3}}.
 
-display(Rows, Layout) ->
-    iolist_to_binary(erx_cmd_top:display(erx_cmd_top:shares(none, {0, Rows}), Layout)).
+display(Rows, Layout) -> display(Rows, #{}, Layout).
 
+display(Rows, System, Layout) ->
+    iolist_to_binary(erx_cmd_top:display(erx_cmd_top:shares(none, {0, Rows}), System, Layout)).
+
+%% The system's figures as the inspector answers them, of every status.
+system() ->
+    #{uptime => {kernel, {ok, ((2 * 24 + 3) * 3600 + 4 * 60 + 5) * 1000000000 + 999}},
+      run_queue => {runtime, {ok, 3}},
+      memory_total => {kernel, {ok, 2048 * 1048576}},
+      memory_free => {{stopgap, liberx_pool}, {partial, 4096}},
+      domain => 4,
+      used => {{stopgap, liberx_pool}, {partial, 30}},
+      guarantee => {kernel, {ok, 256}},
+      cap => {kernel, unsupported}}.
+
+%% Without figures, as for a session with no inspect facet, every value of
+%% the header is `-`.
 display_test() ->
     Rows = [row(3, #{state => <<"R">>, time => 61000000, pcpu => 12.5}), row(12, #{rss => 20000}),
             row(5, #{state => missing, rss => missing, comm => missing}), row(7, #{state => <<"T">>})],
-    ?assertEqual(<<"01:02:03\n",
+    ?assertEqual(<<"run queue: -;  up -    01:02:03\n",
                    "4 processes:   1 running, 1 sleeping, 1 stopped\n",
+                   "Mem: - Total, - Free\n",
+                   "Domain budget: - Used, - Guarantee, - Cap\n",
                    "\n",
                    "    PID    RES STATE    TIME    WCPU COMMAND\n",
                    "<0.3.0>    12K RUN      1:01  12.50% p3\n",
@@ -146,6 +163,24 @@ display_test() ->
                    "<0.7.0>    28K STOP        -       - p7\n">>,
                  display(Rows, layout(3, infinity))),
     ?assertEqual(<<"1 processes:   1 sleeping">>, lists:nth(2, lines(display([row(1, #{})], layout(0, infinity))))).
+
+%% The header shows each figure the inspector answers ok, in FreeBSD's
+%% format, and `-` for every other status, so a partial count never reads
+%% as exact; the budget line names its domain.
+display_system_test() ->
+    [First, _States, Mem, Budget | _] = lines(display([row(1, #{})], system(), layout(0, infinity))),
+    ?assertEqual(<<"run queue: 3;  up 2+03:04:05    01:02:03">>, First),
+    ?assertEqual(<<"Mem: 2048M Total, - Free">>, Mem),
+    ?assertEqual(<<"Domain 4 budget: - Used, 1024K Guarantee, - Cap">>, Budget),
+    Other = (system())#{run_queue := {runtime, unknown}, uptime := {kernel, {timeout, 500}},
+                        memory_total := {kernel, {partial, 1}}},
+    [Unknown, _, Partial | _] = lines(display([], Other, layout(0, infinity))),
+    ?assertEqual(<<"run queue: -;  up -    01:02:03">>, Unknown),
+    ?assertEqual(<<"Mem: - Total, - Free">>, Partial).
+
+format_uptime_test() ->
+    ?assertEqual(<<"0+00:00:00">>, erx_cmd_top:format_uptime(999999999)),
+    ?assertEqual(<<"1+00:00:59">>, erx_cmd_top:format_uptime((86400 + 59) * 1000000000)).
 
 display_cuts_lines_test() ->
     Text = display([row(1, #{comm => <<"abcd", 16#C3, 16#A9, "f">>})], layout(1, 42)),
@@ -186,30 +221,31 @@ ps_cut_test() ->
 top_batch_test() ->
     {Status, Out, Err} = run_line(<<"top -b">>, #{}),
     ?assertEqual({<<>>, <<>>}, {Status, Err}),
-    [Clock, States, <<>>, Header | Rows] = lines(Out),
-    ?assertMatch({match, _}, re:run(Clock, <<"^\\d\\d:\\d\\d:\\d\\d$">>)),
+    [First, States, Mem, Budget, <<>>, Header | Rows] = lines(Out),
+    ?assertMatch({match, _}, re:run(First, <<"^run queue: -;  up -    \\d\\d:\\d\\d:\\d\\d$">>)),
+    ?assertEqual({<<"Mem: - Total, - Free">>, <<"Domain budget: - Used, - Guarantee, - Cap">>}, {Mem, Budget}),
     ?assertMatch({match, _}, re:run(States, <<"^\\d+ processes: +\\d+ ">>)),
     ?assertMatch({match, _}, re:run(Header, <<"^ +PID    RES STATE    TIME    WCPU COMMAND$">>)),
     ?assertEqual(18, length(Rows)),
     ?assertEqual(nomatch, binary:match(Out, <<27>>)),
     {<<>>, Two, <<>>} = run_line(<<"top -b -d 2 -s 0.01 1">>, #{}),
-    ?assertMatch([_, _, <<>>, _, _, <<>>, _, _, <<>>, _, _], lines(Two)).
+    ?assertMatch([_, _, _, _, <<>>, _, _, <<>>, _, _, _, _, <<>>, _, _], lines(Two)).
 
 %% At a terminal each display starts with home and clear and fills the
 %% terminal's height, less the cursor's line, each line within its width.
 top_terminal_test() ->
-    Vars = #{<<"LINES">> => [<<"8">>], <<"COLUMNS">> => [<<"30">>]},
+    Vars = #{<<"LINES">> => [<<"10">>], <<"COLUMNS">> => [<<"30">>]},
     {<<>>, Out, <<>>} = run_line(<<"top -d 2 -s 0.01">>, Vars),
     [<<>>, First, Second] = binary:split(Out, <<"\e[H\e[2J">>, [global]),
-    [?assertEqual(7, length(lines(Display))) || Display <- [First, Second]],
-    [?assert(byte_size(Line) =< 29) || Line <- lines(Out)].
+    [?assertEqual(9, length(lines(Display))) || Display <- [First, Second]],
+    [?assert(byte_size(Line) =< 29) || Display <- [First, Second], Line <- lines(Display)].
 
 %% Output that is not a terminal gets one display without -b, and the
 %% line ends: a top that kept drawing into a pipe would never let cat end.
 top_pipe_test() ->
     {Status, Out, <<>>} = run_line(<<"top -s 0.01 2 | cat">>, #{}),
     ?assertEqual(<<"|">>, Status),
-    ?assertEqual(6, length(lines(Out))),
+    ?assertEqual(8, length(lines(Out))),
     ?assertEqual(nomatch, binary:match(Out, <<27>>)).
 
 top_options_line_test() ->

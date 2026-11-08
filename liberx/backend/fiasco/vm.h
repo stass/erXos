@@ -34,6 +34,8 @@ const char	*erx_fiasco_vm_init(void);
 uint64_t	erx_fiasco_vm_free_pages(void);
 /* How many pages the pool has handed out and not taken back: the root budget's used. */
 uint64_t	erx_fiasco_vm_used_pages(void);
+/* How many pages the pool was built with, free or handed out. */
+uint64_t	erx_fiasco_vm_pool_pages(void);
 /* Pool pages for the service's own tables (docs/design-stopgap.md, "Table sizes"). */
 extern const erx_backend_grow_pages_t erx_fiasco_vm_records;
 

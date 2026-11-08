@@ -16,12 +16,16 @@ erx_fiasco_pool_add(erx_fiasco_pool_t *pool, uintptr_t page)
 	*(uintptr_t *)page = pool->head;
 	pool->head = page;
 	pool->free_pages++;
+	pool->pages++;
 }
 
 void
 erx_fiasco_pool_put(erx_fiasco_pool_t *pool, uintptr_t page)
 {
-	erx_fiasco_pool_add(pool, page);
+	/* Back on the free list, but not added: pages counts the pool as it was built. */
+	*(uintptr_t *)page = pool->head;
+	pool->head = page;
+	pool->free_pages++;
 	if (pool->held_pages > 0)
 		pool->held_pages--;
 }

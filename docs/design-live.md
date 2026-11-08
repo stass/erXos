@@ -360,7 +360,7 @@ adding attributes keeps it.
 | `[cpus]`, `[cpus, N]` | CPU: running thread, idle time, ready threads per urgency, interrupts taken, throttled groups | kernel |
 | `[groups]`, `[groups, Id]` | group: grant, capacity, usage, throttling, executors and their states, child groups; machine-wide, for scope `all` | kernel; the policy's intent, service |
 | `[domains, Id, group]`, `[domains, Id, budget]` | the domain's group and budget, as above, within the facet's scope | kernel |
-| `[domains]`, `[domains, Id]` | domain: name, principal, state and death record (service); budget guarantee, cap and spending, group usage, threads (kernel); atom count, ETS tables, modules, process count (runtime) | each attribute marked |
+| `[domains]`, `[domains, Id]` | domain: name, principal, state and death record (service); budget guarantee, cap and spending, group usage, threads (kernel); atom count, ETS tables, modules, process count, run queue (runtime) | each attribute marked |
 | `[domains, Id, threads]`, `[domains, Id, threads, T]` | the domain's threads by object id, from `ERX_INFO_THREAD` on its space; thread: state and wait kind | kernel |
 | `[domains, Id, capabilities]`, `[domains, Id, mappings]` | the domain's capability table and mapping records, paginated | kernel |
 | `[domains, Id, connections]`, `[domains, Id, connections, Peer]` | the domain's connections: the peer domain and each lane's size (service, from the domain service's records); each doorbell's trigger count (kernel, from the IRQ object); frames accepted and refused on each lane (runtime, from the domain's funnel) | each attribute marked |
@@ -1030,10 +1030,36 @@ orders by text, data and stack size, which erXos does not split, so its
 
 **`top [-bn] [-d count] [-s time] [number]`** shows the table `ps` reads
 as FreeBSD's `top` (`usr.bin/top`) shows a machine's, display after
-display. A display is a header and a process table. The header is the
-time of day, then a count of the processes and of those running, sleeping
-and stopped, `57 processes:  2 running, 55 sleeping`, from the `STAT`
-`ps` shows (`R`, `S`, `T`). The table has the columns of FreeBSD's that
+display. A display is a header and a process table. The header has
+FreeBSD's lines where they map, each figure read through the inspector
+with the scope of the session's inspect facet
+([System values](#system-values-one-tree-many-views)):
+
+* `run queue: 0;  up 0+00:05:12    10:15:37`: the run queue of the
+  domain `top` runs in (its domain record's `run_queue`, the processes
+  and ports its runtime has ready and waiting for a scheduler), where FreeBSD's first line
+  has the last pid and the load averages; then the machine's `uptime` as
+  FreeBSD's `i_uptime()` writes it, `D+HH:MM:SS`, and the time of day,
+  last, so a terminal narrower than the line cuts it, where FreeBSD's
+  screen keeps it at the right edge. The
+  run queue is an instant's count of one runtime and is labelled as
+  such, never as a load average, which erXos does not keep.
+* A count of the processes and of those running, sleeping and stopped,
+  `57 processes:  2 running, 55 sleeping`, from the `STAT` `ps` shows
+  (`R`, `S`, `T`).
+* `Mem: 1906M Total, 1500M Free`: the machine's `memory_total` and
+  `memory_free`, as FreeBSD's `format_k()` writes a size.
+* `Domain 4 budget: 812K Used, 1024M Guarantee, 2048M Cap`: the `used`,
+  `guarantee` and `cap` of the budget of the domain `top` runs in,
+  labelled as that domain's, so a figure of one domain never reads as
+  the machine's. The domain is the one the inspector names for `top`'s
+  own process.
+
+A figure the inspector does not answer `ok`, a partial one included,
+prints `-`, as does every figure in a session without an inspect facet,
+so the header never shows as exact a number nobody reported whole: on
+the stopgap kernel the memory figures and `used` are the `liberx` pool's
+partial counts and print `-`. The table has the columns of FreeBSD's that
 the table has values for: `PID`, `RES` (`rss`, as FreeBSD's
 `format_k()` writes a size, at most four digits and a unit), `STATE`
 (`RUN`, `SLEEP` or `STOP`), `TIME` (`time`, as FreeBSD's
@@ -1133,7 +1159,10 @@ its reporter:
   `unsupported`, a list cut at the page limit of 1,000 entries `partial`.
 
 **Scopes.** Queries arrive through an inspect facet whose scope is `all` or
-a list of domains. A session's inspect facet has scope over its
+a list of domains. A facet's value is what its holder hands the service
+behind it: an inspect facet's value is its scope, and `erx:i/1`, the
+shell's commands and `/proc` hand it to the inspector as it is, so no
+view translates or widens it. A session's inspect facet has scope over its
 principal's own domains, with one exception: in a development build
 `root`'s session holds one of scope `all`, as the host link does
 ([The host link](#the-host-link)). In a release build no session's facet
@@ -1142,13 +1171,19 @@ at a secure line. A path's owner is decided by construction: a process's
 domain is its pid's creation, a program's is the session under whose path
 it lies, and every other path names its domain or belongs to the machine.
 A scoped facet reaches only the paths its domains own: listings contain
-only those, `[]` shows only machine attributes that reveal nothing of
-other domains (build identifier, development flag, DMA profile), and every
-other machine-wide path (`[cpus, ...]`, `[groups, ...]`, `[budgets, ...]`,
+only those, `[]` shows only the machine attributes the schema marks
+`visible any`, and every other machine-wide path (`[cpus, ...]`, `[groups, ...]`, `[budgets, ...]`,
 `[devices, ...]`, `[kernel, ...]`) answers `{error, scope}`; a domain's own
 group and budget are under its path. A path outside the scope
 and a path that names nothing get the same answer, `{error, scope}`, so a
 scoped facet cannot learn whether a process outside its scope exists.
+The machine attributes `visible any` are those every UNIX user reads:
+the build identifier, the development flag and the DMA profile, which
+reveal nothing of other domains, and the uptime, the CPUs online and the
+memory total and free, which `uptime` and `top` show anyone. Free memory
+moves as other domains commit and release pages, so it tells a domain a
+little of the others' activity; erXos accepts that side channel for the
+figure every `top` shows.
 
 **From a process to its source.** A process record carries its current
 location, `{Module, Function, Arity, File, Line}`, and its module's
@@ -1167,6 +1202,57 @@ source there even when no release carries it.
 renders the same record on the host. Both escape every string and show
 every value's reporter, and below the table the scope of each stopgap
 reporter it names.
+
+#### System values: one tree, many views
+
+erXos has no `sysctl` facility. The machine's figures (its uptime, CPUs
+online, memory total and free), a domain's (its runtime's run queue,
+processes and atoms) and every other system-wide value are attributes of
+the inspector's tree, declared once in `abi/inspection.txt`, and `/proc`
+is that tree as files. Every way of reading a system value is a view of
+the one tree and decides nothing itself: `erx:i/1` and `erx:inspect` at
+an Erlang shell, the `/proc` files, the host tool's `erx inspect`, the
+text commands (`top`'s header reads `[]`, its own process's record, the
+record of the domain that names and that domain's budget), and a
+`sysctl(3)` reader in the POSIX-lite personality. A value has one name,
+one reporter and one status wherever it is read, so no view shows what
+another would refuse or mark partial. Plan 9 serves its system values as
+files the same way; FreeBSD's split between `sysctl` names and `procfs`
+files, with a permission model of its own for each, is what one tree
+avoids, and erXos's `/proc` carries statuses and reporters that FreeBSD's
+`sysctl` values lack.
+
+The tree is read-only. Configuration lives in the system manifest, whose
+security properties a build check proves
+([design-system.md](design-system.md)); a writable system value would be
+a second, unproven way to change the machine, so no view writes one, and
+changing a setting is changing the manifest.
+
+The `sysctl(3)` reader maps the FreeBSD names programs
+ask for onto attributes of `/proc/status`, read through the program's own
+namespace, so a program sees exactly what its `/proc` grant shows:
+`hw.ncpu` is `cpus_online`, `hw.physmem` `memory_total` and
+`kern.boottime` the wall clock less `uptime`; `hw.pagesize` is the ABI's
+page size, which the C library is generated with, as `getpagesize(3)`
+is. A name whose value is not `ok` (partial, unknown, unsupported, timed
+out), and a name no attribute holds, such as `vm.loadavg`, since erXos
+keeps no load average, is `ENOENT`: a reader of a bare number cannot
+tell a partial count from an exact one, so it gets none.
+
+**Who sees what: the facet's scope, then the grant's root.** The inspect
+facet's scope limits what any view of a tree served through that facet
+can answer: it is the security boundary, and the inspector applies it to
+every query before it looks anything up, by the rules of
+[Scopes](#inspection) alone: the schema's `visible` classes for
+attributes, a domain's paths for that domain, and the fixed set of
+machine paths a scoped facet reaches. The root of a `/proc` grant,
+`/proc/domains/7` say, narrows what one program sees within that scope:
+least privilege, by the namespace rules every file grant follows
+([design-files.md](design-files.md#narrowing-for-a-program)). These two
+are the only gates. No view and no reader gets an allow list of paths of
+its own: a value some readers must not see gets a `visible` class in
+`abi/inspection.txt`, and a program that should see less gets a narrower
+root.
 
 ### The /proc tree
 

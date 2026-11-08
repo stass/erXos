@@ -29,6 +29,7 @@
              erx_ns,
              erx_object_info,
              erx_process_records,
+             erx_runtime_records,
              erx_schema,
              erx_source,
              erx_stdio,

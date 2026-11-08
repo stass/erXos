@@ -37,6 +37,10 @@ erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *window, u
 
 	switch (topic) {
 	case ERX_INFO_MACHINE:
+		facts.uptime_ns = erx_clock_ns();
+		facts.pool_pages = erx_hosted_vm_pool_pages();
+		facts.pool_free_pages = erx_vm_free_pages();
+		/* FALLTHROUGH */
 	case ERX_INFO_CPU:
 		facts.cpus_online = host_cpus_online();
 		break;

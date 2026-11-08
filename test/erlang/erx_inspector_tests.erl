@@ -130,7 +130,8 @@ scoped_record_keeps_what_the_scope_sees_test() ->
     #{attrs := All} = erx_inspector:scoped(machine(), machine, all),
     #{attrs := Scoped} = erx_inspector:scoped(machine(), machine, [?SYSTEM]),
     ?assertEqual(9, map_size(All)),
-    ?assertEqual([build, development, dma_profile], lists:sort(maps:keys(Scoped))),
+    ?assertEqual([build, cpus_online, development, dma_profile, memory_free, memory_total, uptime],
+                 lists:sort(maps:keys(Scoped))),
     Process = maps:get(attrs, element(2, erx_process_records:record(self(), info(), ?SYSTEM))),
     Record = #{kind => process, attrs => Process},
     ?assertEqual(Process, maps:get(attrs, erx_inspector:scoped(Record, {domain, ?SYSTEM}, [?SYSTEM]))),
@@ -170,7 +171,7 @@ stopgap_reporter_is_named_with_its_scope_test() ->
     ?assertMatch({match, _}, re:run(Text, <<"\n  used +liberx pool  \\[partial\\]\n">>)),
     ?assertMatch({match, _}, re:run(Text, <<"\n  spending +liberx pool  \\[unknown\\]\n">>)),
     ?assertMatch({match, _}, re:run(Text, <<"\n  guarantee +kernel +100\n">>)),
-    ?assertMatch({match, _}, re:run(Text, <<"\nliberx pool: pages committed through liberx;">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\nliberx pool: pages of the root's pool:">>)),
     {ok, Exact} = erx_kernel_records:record(budget, [domains, ?SYSTEM, budget], 0, {ok, Report}, 0),
     ?assertEqual(nomatch, re:run(iolist_to_binary(erx_render:record(Exact, release)), <<"liberx">>)).
 
@@ -268,3 +269,35 @@ overview_fits_80_columns_test() ->
     ?assert(length(Lines) > 20),
     ?assertEqual([], [Line || Line <- Lines, string:length(Line) > 80]),
     ?assertMatch({match, _}, re:run(Text, <<"nnnnnnnnnnnnnnnnn\\.\\.\\.">>)).
+
+%%% The session's facet and the domain record
+
+%% The command shell's session holds the system domain's inspect facet, and
+%% its value is the inspector's scope: erx:i/0,1 and the commands hand it to
+%% the inspector as it is.
+session_facet_is_an_inspector_scope_test() ->
+    #{inspect := Scope} = erx_shell_script:session_facets(),
+    ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([domains, ?SYSTEM, budget], Scope)),
+    ?assertEqual(9, map_size(maps:get(attrs, erx_inspector:scoped(machine(), machine, Scope)))).
+
+%% The system domain's record carries this runtime's figures, its run queue
+%% among them, and the domain service's and the kernel's, which have no
+%% collector here, as unsupported; a scope without the domain gets nothing.
+domain_record_test() ->
+    {ok, #{kind := domain, attrs := Attrs, children := Children}} = erx_inspector:inspect([domains, ?SYSTEM], all),
+    ?assertMatch({runtime, {ok, N}} when is_integer(N), maps:get(run_queue, Attrs)),
+    ?assertMatch({runtime, {ok, P}} when P > 0, maps:get(processes, Attrs)),
+    ?assertEqual({service, unsupported}, maps:get(name, Attrs)),
+    ?assertEqual({kernel, unsupported}, maps:get(threads, Attrs)),
+    ?assert(lists:member(budget, Children)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([domains, ?SYSTEM], [5])),
+    ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9], all)).
+
+domain_record_core_test() ->
+    Figures = #{atoms => 10, ets_tables => 2, modules => 30, processes => 40, run_queue => 3},
+    {ok, #{attrs := Attrs}} = erx_runtime_records:domain(?SYSTEM, Figures),
+    ?assertEqual({runtime, {ok, 3}}, maps:get(run_queue, Attrs)),
+    ?assertEqual({runtime, {ok, 40}}, maps:get(processes, Attrs)),
+    ?assertEqual({service, unsupported}, maps:get(state, Attrs)),
+    {ok, Keys} = erx_schema:attributes(domain),
+    ?assertEqual(lists:sort(Keys), lists:sort(maps:keys(Attrs))).

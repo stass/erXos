@@ -47,7 +47,7 @@ inspection 1
   list pids pid 1000
   tuple location module_name name arity file_name line_number
 
-  stopgap liberx_pool kernel "liberx pool" "pages committed through liberx; not kernel objects, page tables or mapping records"
+  stopgap liberx_pool kernel "liberx pool" "pages of the root's pool: those handed out, carved budgets' included, and the pool's total and free; not the kernel's or sigma0's memory, page tables or mapping records"
   stopgap liberx_trace kernel "liberx trace" "the root's parks, wakes, IRQ deliveries and task starts and ends; not test tasks' parks or the kernel's events"
 
   trace erts runtime
@@ -59,10 +59,10 @@ inspection 1
     attr development boolean reporters kernel visible any build all projections shell,host,proc,web
     attr dma_profile dma_profile reporters kernel visible any build all projections shell,host,proc,web
     attr entropy_quality @entropy_quality reporters kernel visible all build all projections shell,host,proc,web
-    attr cpus_online cpus_online reporters kernel visible all build all projections shell,host,proc,web
-    attr memory_total byte_count reporters kernel visible all build all projections shell,host,proc,web
-    attr memory_free byte_count reporters kernel visible all build all projections shell,host,proc,web
-    attr uptime duration reporters kernel visible all build all projections shell,host,proc,web
+    attr cpus_online cpus_online reporters kernel visible any build all projections shell,host,proc,web
+    attr memory_total byte_count reporters kernel,liberx_pool visible any build all projections shell,host,proc,web
+    attr memory_free byte_count reporters kernel,liberx_pool visible any build all projections shell,host,proc,web
+    attr uptime duration reporters kernel visible any build all projections shell,host,proc,web
     attr boot_value @boot_value reporters kernel visible all build all projections shell,host,proc,web
 
   kind cpu
@@ -104,6 +104,7 @@ inspection 1
     attr ets_tables count reporters runtime visible owner build all projections shell,host,proc,web
     attr modules count reporters runtime visible owner build all projections shell,host,proc,web
     attr processes count reporters runtime visible owner build all projections shell,host,proc,web
+    attr run_queue count reporters runtime visible owner build all projections shell,host,proc,web
 
   kind thread
     attr state @thread_state reporters kernel visible owner build all projections shell,host,proc,web

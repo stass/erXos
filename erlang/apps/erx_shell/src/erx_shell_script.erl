@@ -28,12 +28,16 @@ each the system domain's own (docs/plan.md, Phase 1).
 %% `exit`, stopped on a fault of the language or did not parse.
 -type ending() :: {ok | exit | fault | syntax_error, Status :: binary()}.
 
-%% The facets of the session in the system domain: the domain's own.
 -define(MAX_HEAP_WORDS, 32 bsl 20).
 
--doc "The session's facets in the system domain: the domain's own.".
--spec session_facets() -> #{atom() => term()}.
-session_facets() -> #{inspect => local}.
+-doc """
+The session's facets in the system domain: the domain's own. A facet's
+value is what its holder hands the service behind it, so the inspect
+facet's is its erx_inspector:scope(), `all` for the system domain's
+session in Phase 1 (docs/design-live.md, "Scopes").
+""".
+-spec session_facets() -> #{inspect := erx_inspector:scope()}.
+session_facets() -> #{inspect => all}.
 
 -doc "Runs a source at the terminal, from `/`.".
 -spec run(iodata()) -> ending().

@@ -345,6 +345,12 @@ erx_hosted_vm_used_pages(void)
 	return (VM_POOL_PAGES - erx_vm_free_pages());
 }
 
+uint64_t
+erx_hosted_vm_pool_pages(void)
+{
+	return (VM_POOL_PAGES);
+}
+
 int
 erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot)
 {

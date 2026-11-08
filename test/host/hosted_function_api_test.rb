@@ -39,6 +39,8 @@ class HostedFunctionApiTest < Minitest::Test
     'used reported as exact' => ['liberx/backend/core/object_info.c', "\t\treport.budget.used = facts->budget_used;\n",
                                 "\t\treport.budget.used = facts->budget_used;\n\t\treport.budget.reported = ERX_INFO_BUDGET_REPORTED_USED;\n", 'object_info'],
     'no machine bit' => ['liberx/backend/core/object_info.c', 'facts->cpus_online != 0 ? ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE : 0', '0', 'object_info'],
+    'memory reported as exact' => ['liberx/backend/core/object_info.c', '(facts->uptime_ns != 0 ? ERX_INFO_MACHINE_REPORTED_UPTIME : 0);',
+                                   '(facts->uptime_ns != 0 ? ERX_INFO_MACHINE_REPORTED_UPTIME : 0) | ERX_INFO_MACHINE_REPORTED_MEMORY_FREE;', 'object_info'],
     'a listing never ends' => ['liberx/backend/core/object_info.c', "\t\tif (!nth_thread(facts->threads, index, &id))\n\t\t\treturn (ERX_ERANGE);\n", "\t\tid = 0;\n\t\t(void)nth_thread;\n", 'object_info'],
     'a decommitted page keeps its bytes' => ['liberx/backend/hosted/vm.c', "\tif ((*byte & PAGE_DIRTY) != 0)\n\t\tpage_clean(addr);\n", '', 'decommit_recommit_reads_zeros'],
     'a thread starts twice' => ['liberx/backend/hosted/thread.c', 'self->state == THREAD_CREATED', 'true', 'double_start_refused'],

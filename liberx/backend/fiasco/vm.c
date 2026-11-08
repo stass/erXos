@@ -257,6 +257,12 @@ erx_fiasco_vm_used_pages(void)
 	return (vm_pool.held_pages);
 }
 
+uint64_t
+erx_fiasco_vm_pool_pages(void)
+{
+	return (vm_pool.pages);
+}
+
 int
 erx_fiasco_vm_task_open(uint32_t task)
 {
