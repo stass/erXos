@@ -82,8 +82,8 @@ Decisions every reader of this document needs:
   decision each session can run a shell that speaks Plan 9's rc, with
   emacs-style line editing and job control added; a command is a builtin, an
   Erlang command or a program in one namespace, a command acts only through
-  the capabilities it was handed, and pipes between Erlang commands carry
-  records whose values keep their statuses.
+  the capabilities it was handed, and every pipe carries text, each
+  command behaving like FreeBSD's command of the same name.
 * **The machine is a file tree too.** `/proc` mirrors the inspector's
   paths as read-only files, through the reader's inspect facet, so `cat`,
   `ls` and `grep` read live state and gain nothing `erx:i/1` does not give.
@@ -240,14 +240,14 @@ with it.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **V1.** A tty changes a program's bytes only as its `termios` says | every write to a session's or a pseudo-terminal's tty goes through `erx_tty:output/3`, a pure function of the bytes, the room and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/3` | a test at the tty's byte boundary: it writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was handed to the tty; with an escaping step added on the path, the comparison fails. `io:put_chars/1` is text for the group's editor, not bytes ([The tty](#the-tty)), so its test compares `prim_tty`'s rendering with stock OTP's |
-| **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service`, `runtime` or a stopgap reporter the schema declares); renderers print the status and reporter of every value | a renderer that drops statuses, or an attribute filled with a default | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record |
+| **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service`, `runtime` or a stopgap reporter the schema declares); renderers of inspection records print the status and reporter of every value, and the command shell's text commands, which print as FreeBSD's do, print a value without the status `ok` as `-` or not at all, never as a number ([design-shell.md](design-shell.md#invariants) SH3) | a renderer that drops statuses, or an attribute filled with a default | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record |
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
 | **V5.** Code enters the system domain only through the install facet | the system domain's runtime loads only installed storage: its release's files and the install arena, which only `erx_code:install_beam/2` writes and which refuses every caller but `erx_code`; `erx_code` takes modules only from install facets, which name them by hash, and checks each blob against its hash; a service that loads bytes it received gets `{error, not_installed}`; nothing reapplies installs after a reboot | a second writer of the install arena, `erx_code` accepting modules from something other than an install facet, or a path that reapplies stored installs | a test that `code:load_binary/3` with bytes from a request fails in the system domain; a test that a domain's code facet cannot load into the system domain; a test that `install_beam/2` refuses other callers; a test that a blob one bit off its hash is refused |
 | **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; no session ever holds the facet, so no route into a session reaches the system shell ([Window tokens](#window-tokens)); the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain; a release manifest that marks a terminal window secure fails the manifest check | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a principal holding the facet who logs in at a terminal window that is not secure gets no system shell; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read; the manifest check refuses a release manifest marking a window secure; a seeded console that grants the facet at a line that is not secure fails; the routes into a session are tested under [Window tokens](#window-tokens) |
 | **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login, or, at a window a window token opened, the principal of the session that asked for it; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again; a line gets a principal without a login only from a token the console minted for a session's own request, and every shell at it is then that principal's ([Window tokens](#window-tokens)). A terminal window thus carries its principal's authority, as a UNIX terminal does, and a compromised display domain has the authority of the shells in its windows and what any window system has, as an X11 or Wayland server does, and nothing beyond: no system shell, which a release build never connects at a window, no presence at the machine and nothing of a principal that neither uses the display nor types at it ([Window tokens](#window-tokens)) | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached; a shell without a login whose session the display chose | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails; the token tests are under [Window tokens](#window-tokens) |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
-| **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records and the shell's records (a line a command read from a file or a program is that writer's output, not labelled text, and prints as its bytes), and the host tool's printer; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
+| **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records, `ls`, which writes names at a terminal through it, and the host tool's printer; `ps` writes names through the field escape wherever its output goes, so they hold nothing the line escape would change; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
 
 ## Data model
 
@@ -1013,14 +1013,16 @@ its reporters' text already escaped, by the field escape below.
   login prompt.
 * `logger_simple_h` escapes each record it prints before the sink exists
   ([The console](#the-console)).
-* `erx_render` escapes inspection records and the shell's records at a
-  terminal. The one record it writes as its bytes is a line of data, a
-  line a command read as bytes, which is its writer's output, not
-  labelled text, and reaches the terminal as through `cat`. Toward a
-  file or a pipe it writes its reversible framing instead
-  ([Pipelines](design-shell.md#pipelines)), and what it writes there is
-  data from then on, as FreeBSD's `ls > f` writes names unescaped: `cat f`
-  shows a name a domain chose as its bytes.
+* `erx_render` escapes inspection records, in the Erlang shell and in
+  the command shell's inspector commands.
+* The command shell's `ls` escapes the names it prints when its output
+  is a terminal and writes them as their bytes elsewhere, as FreeBSD's
+  `ls` does, so `cat f` after `ls > f` shows a name a domain chose as its
+  bytes; `ps` writes names and arguments through the field escape
+  wherever its output goes, as FreeBSD's writes them through `strvis(3)`
+  ([Pipelines](design-shell.md#pipelines)). A line a command reads and
+  passes on, as `grep` and `sort` do, is its writer's output, not
+  labelled text, and reaches the terminal as through `cat`.
 * The host tool's printer escapes everything it prints from the guest:
   `inspect`, `source`, `trace`, the events stream and any guest bytes it
   quotes in a diagnostic. The one thing it does not escape is the terminal
@@ -1057,22 +1059,19 @@ and `>`, such as `<0xC0>`. Every other character passes unchanged, the
 backslash and `<` among them. Tokens are for the eye only: the data they
 render keeps its bytes, and a token is not an injective encoding, since
 text holding the eight characters `<U+202E>` looks like text that held
-U+202E. The line escape is not the framing toward bytes, which writes
-only tab, newline and backslash as `\t`, `\n` and `\\` so that a record
-stays one line and changes nothing else
-([Pipelines](design-shell.md#pipelines)); a value written toward bytes is
-framed, and a value written to a terminal is escaped instead. The escape
-takes whole text, since a record is whole when it is displayed, and holds
-no state between calls. One record is one line under its source's name.
+U+202E. The line escape is for a display; text written into a file or a
+pipe is written by the field escape below, or not escaped at all. The
+escape takes whole text, since a record is whole when it is displayed,
+and holds no state between calls. One record is one line under its
+source's name.
 
 The **field escape**, `erx_text:escape_field/1`, is how `/proc` writes
-attributed text into a file. It is the framing toward bytes with the line
-escape's classes added: tab, newline and backslash become `\t`, `\n` and
-`\\`, every byte of a character the line escape renders and every byte the
-line escape writes as a byte token become `\x` and two upper-case
-hexadecimal digits, such as `\xE2\x80\xAE` for U+202E and `\xC0` for a
-stray `0xC0`, and everything else passes unchanged. Text without those
-classes is written as the framing writes it. Because the backslash is
+attributed text into a file, and `ps` into its output. Tab, newline and
+backslash become `\t`, `\n` and `\\`, every byte of a character the line
+escape renders and every byte the line escape writes as a byte token
+become `\x` and two upper-case hexadecimal digits, such as `\xE2\x80\xAE`
+for U+202E and `\xC0` for a stray `0xC0`, and everything else passes
+unchanged. Because the backslash is
 always doubled and `\x` never stands for a tab, a newline or a backslash,
 the field escape is injective: `erx_text:unescape_field/1` recovers the
 exact bytes and refuses text the field escape does not write, either a
@@ -1100,14 +1099,81 @@ is not escaped: a residual risk.
 Each session can run a command shell with rc's language beside its
 Erlang shell, both listed in the same `Ctrl-G` menu; the console starts
 the command shell first, and the shell's `erl` runs the Erlang shell above
-it; its language, commands, pipelines
-of records, jobs and terminal relay are
-[design-shell.md](design-shell.md). It runs on the session's tty above,
-and its Erlang commands reach the inspector, `/proc` and the code store
-below with the session's facets. Its `ps` lists the session's own process
-table: its Erlang processes and its programs, the latter from the
-session's port table, so a session sees its programs without an inspect
-facet, as a UNIX user sees their own processes.
+it; its language, commands, pipelines of text, jobs and terminal relay
+are [design-shell.md](design-shell.md). It runs on the session's tty
+above, and its Erlang commands reach the inspector, `/proc` and the code
+store below with the session's facets. Its commands print text as
+FreeBSD's commands of the same names do, with a value erXos does not
+measure printed as `-` ([Pipelines](design-shell.md#pipelines)); a
+process as a live value, with each value's status and reporter, is the
+Erlang shell's `erx:ps()` and `erx:i/1`.
+
+**`ps`** lists the session's own process table: its Erlang processes and
+its programs, the latter from the session's port table, so a session sees
+its programs without an inspect facet, as a UNIX user sees their own
+processes. It prints FreeBSD's default columns, `PID`, `TT`, `STAT`,
+`TIME` and `COMMAND` (`bin/ps/ps.c:156`), under FreeBSD's header line,
+and cuts the last column at the terminal's width when its output is a
+terminal, as FreeBSD's does (`bin/ps/ps.c:748-755`). `-o` takes a
+comma-separated list of FreeBSD's keywords in place of the default
+columns: `pid`, `tt`, `state` (or `stat`), `time`, `pcpu` (or `%cpu`),
+`rss`, `comm` and `command` (or `args`). An unknown keyword is reported
+as `ps: KEY: keyword not found` and left out, and `ps` ends with status 1,
+as FreeBSD's does (`bin/ps/keyword.c:440-444`). Each column, for the two
+kinds of process:
+
+| Keyword (header) | An Erlang process | A program |
+| --- | --- | --- |
+| `pid` (`PID`) | its pid, `<D.N.S>` | its process id |
+| `tt` (`TT`) | the session's terminal when its group leader is a group of the session's tty, else `-` | the session's terminal when it holds an open of the session's tty, else `-` |
+| `state` (`STAT`) | `R` when running, runnable or collecting garbage; `S` when waiting in `receive`; `T` when its job is stopped; `RE` when exiting; then `+` when it belongs to the foreground job | `R` when a thread runs or is runnable, `S` when every thread waits, `T` when paused; then `+` when it belongs to the foreground job |
+| `time` (`TIME`) | `-`: the runtime keeps no CPU time per process | its group's CPU time as `getrusage` reports it, as `M:SS.hh` (`bin/ps/print.c:500-520`) |
+| `pcpu` (`%CPU`) | `-`, for the same reason | its CPU time over the time since it started, as a percentage to one decimal |
+| `rss` (`RSS`) | its memory as `process_info/2` reports it, in KiB, rounded up | its sub-space's charges, in KiB |
+| `comm` (`COMMAND`) | its registered name, else its `proc_lib` label, else the function it started in, as the `Ctrl-T` line names it | its name |
+| `command` (`COMMAND`) | as `comm` | its arguments, joined by spaces |
+
+The terminal's name is abbreviated as FreeBSD abbreviates it
+(`bin/ps/print.c:345-364`). A value the session's table does not have,
+because the reporter could not answer, answered late or the process ended
+while it was read, prints `-` in its column, as FreeBSD's `ps` prints a
+column with no value (`bin/ps/ps.c:757-759`); so does a value erXos does
+not measure at all, such as an Erlang process's CPU time. No column ever
+shows a number for a value it does not have, and every row keeps its
+columns, so `ps -o pid,pcpu,comm | sort -rn -k2 | head` works as on
+FreeBSD: the header and the rows without a value sort among the zeros. A
+process's name and arguments are written through the field escape, as
+FreeBSD writes them through `strvis(3)`
+([Pipelines](design-shell.md#pipelines)).
+
+Rows come in FreeBSD's default order: processes without a terminal
+first, then by `PID`, programs by their process ids and then Erlang
+processes by the numbers of their pids. `-r` orders by `pcpu` and `-m` by
+`rss`, largest first, as FreeBSD's `-r` and `-m` do
+(`bin/ps/ps.c:1394-1419`); rows with equal values keep the default order.
+A row with no value for the key comes after every row that has one, still
+in the default order, which is where FreeBSD's `ps`, which counts a
+`%CPU` it cannot read as zero (`bin/ps/print.c:622-634`), puts it. So `ps -r` lists a session's
+busiest programs first and its Erlang processes after them; the busiest
+Erlang processes, by reductions, are `erx:ps()`'s to show. FreeBSD's `-m`
+orders by text, data and stack size, which erXos does not split, so its
+`-m` orders by the memory `rss` shows.
+
+**`ls [-1al] [file ...]`** lists a file by the name given and a directory
+by the names it holds, sorted byte by byte, without those that start with
+`.` unless `-a` is given, as FreeBSD's `ls` does. At a terminal it writes
+the names in columns across the terminal's width, sorted down the
+columns; elsewhere, or under `-1`, one name a line (`bin/ls/ls.c:247-256`).
+With more than one operand, files come first, and each directory's names
+follow an empty line and a line with its name and `:`. `-l`
+writes FreeBSD's long format: a `total` line for each directory, then for
+each name its mode, link count, owner, group, size, modification time
+and name, the time as FreeBSD formats it, with the hour and minute for
+a time within six months of now and the year otherwise. A value the file server does not report, such
+as an owner on a file system that keeps none, prints `-` in its column,
+so every line keeps its columns. A name is written through the line
+escape at a terminal and as its bytes elsewhere
+([Pipelines](design-shell.md#pipelines)).
 
 ### Inspection
 
@@ -1230,7 +1296,7 @@ until the facet ends.
 * **Content.** A `status` file has one line per attribute: its name, its
   value and its reporter, a stopgap reporter by its label, separated by
   tabs. A value prints through
-  `erx_render`, as in records ([Pipelines](design-shell.md#pipelines)): an
+  `erx_render`, as the inspector's printers print it: an
   `ok` value bare and every other value as its status, `[unknown]`,
   `[partial]`, `[unsupported]`, `[timeout 500]` or `[error]`, so a file
   never fabricates (V2). A file of `/proc` is inspector output, text its

@@ -36,7 +36,7 @@ registers and terminal character classes retain their existing sources.
 | ABI log and trace event declarations | typed emitters, bounded record readers, field-name/unit tables and decoders for the inspector and host tools | [kernel](design-kernel.md#trace-ring), [live machine](design-live.md#tracing) |
 | Protocol fields, bounds and operation declarations | codecs, per-operation reply checks, valid-input builders, boundary mutations, fuzz entry points and reference tables | [files](design-files.md#the-file-protocol), [programs](design-programs.md#the-program-protocol) |
 | Checked system manifest and platform placement records | packed boot-order and configured-domain/device/facet descriptors, watchdog liveness roster, and a host-readable configuration report | [system](design-system.md#the-manifest) |
-| Release command metadata and program list | command lookup/help/required-facet catalogs, declared record-field descriptors and callback checks | [shell](design-shell.md#interfaces) |
+| Release command metadata and program list | command lookup/help/required-facet catalogs and callback checks | [shell](design-shell.md#interfaces) |
 | SVD and system-register specifications | typed accessors, device descriptor helpers and register-field decoding tables | [hardware sources](design.md#one-source-for-the-abi-and-the-hardware) |
 | Escape rules and OTP's pinned Unicode data | C/Erlang/Ruby escaping tables | [escape rules](design-live.md#escape-rules) |
 
@@ -140,9 +140,8 @@ the domain library's whole-plan validation. The host report is a derived
 artifact and cannot configure a boot. Equal dependency choices use a
 stable name order so equivalent inputs produce identical images.
 
-The release build extracts command names, help, required facets and
-declared output fields from module metadata, and native commands from the
-image's program list. It generates the lookup catalog and validates
+The release build extracts command names, help and required facets from
+module metadata, and native commands from the image's program list. It generates the lookup catalog and validates
 callbacks against their declarations without executing target modules.
 Lookup retains the shell's precedence rules and reports conflicting
 Erlang names with both origins instead of silently choosing one.
@@ -190,8 +189,8 @@ Generator tests seed invalid declarations: duplicate identifiers, undefined
 types, missing mappings, unbounded messages, absent visibility rules and
 authority declarations that cannot reach a checked helper. Catalog tests
 race starts with module replacement and inject failure before and after
-code load and catalog publication, with changed facet requirements, fields
-and callbacks. No start may pair one version's metadata with another's
+code load and catalog publication, with changed facet requirements and
+callbacks. No start may pair one version's metadata with another's
 entry code. Independent
 hostile tests exercise unauthorized origins, stale handles, restricted
 inspection fields and mismatched replies. TLA+/TLC properties remain

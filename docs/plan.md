@@ -123,10 +123,10 @@ names; the table's order is the order.
 | M3 The shell is the operating system | `1>` on the serial console, from ERTS in the system domain in user mode, started by the root task | 8,000 lines of C, 1,000 of Erlang | M1, track H | G3 |
 | M4 The machine is an object | save in the editor on the Mac, run in the machine; follow a process to its source; ERTS and backend events on one timeline, the kernel's row unsupported | 10,000 lines of Erlang, 3,000 of Ruby, 2,000 of C | M3 | |
 | M6 Immutable code, lasting data | the shell reads the release's files from an EROFS image on a QEMU disk; a file under `/data` survives a power cut | estimated in the subsystems' design documents | M4 | |
-| Track S The command shell | `ps \| where 'memory > 10000000'` in a shell with rc's language | 6,000 lines of Erlang, 4,000 of C17 for the track, programs included | M4 | |
+| Track S The command shell | `ps -m \| grep erx` in a shell with rc's language, printing FreeBSD's text | 6,000 lines of Erlang, 4,000 of C17 for the track, programs included | M4 | |
 | **Phase 1b** | | | | |
 | 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in both backends (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
-| 1b-B Track S, programs | `grep -r error /tmp/logs \| wc -l` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
+| 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | 1b-C Track D, parts 1 and 2 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; its supervisor resets the device and restarts the driver, and the shell never notices; drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A; littlefs's sub-space port also 1b-B | G9's measurements, deciding nothing |
@@ -276,7 +276,7 @@ than building every later service before the usable slice.
 | Inspection and host-facing service bindings | M4 | `abi/inspection.txt` generates builders, C/Erlang/Ruby types/validators, path/field/status/unit tables and shell/host/`/proc` projections; host-exposed service operations generate Ruby clients; independent tests reject unknown keys and reply mismatches and preserve each status/reporter; generated docs and fuzz scaffolding land with the interfaces |
 | First generated service interface and the rest of the startup descriptors | 1b-A | console/service operations generate C/Erlang clients, admission/dispatch and bounded replies with scope policy in the handler; source checks refuse bypasses; the checked manifest's packed descriptors supply boot order, configured domains' devices, configured facets and watchdog liveness |
 | Cross-domain service and protocol consumers | 1b-A and each later service | generated serving paths authenticate lane origin, check the live facet scope and bound input/output before callbacks; hostile tests exercise forged origins, stale handles, denied targets and restricted inspection fields; the 9P profile keeps its independent standard oracle |
-| Command catalogs | track S | release metadata generates names, help, required facets and output-field descriptors, checked against callbacks without running target code; tests preserve name conflicts/precedence and bind metadata to loaded code across replacement and publication failures; a catalog grants no authority |
+| Command catalogs | track S | release metadata generates names, help and required facets, checked against callbacks without running target code; tests preserve name conflicts/precedence and bind metadata to loaded code across replacement and publication failures; a catalog grants no authority |
 | Contextual error mappings and program interfaces | track P | generated translations cover every exposed status/error in its operation context, and fault/signal mappings cover every fault; compare numbers and behaviour against the selected musl/OTP and protocol oracles; raw kernel-call stubs still return status without setting errno |
 | Typed diagnostics | events as they land from M1, full inspector/host consumers at M4; driver events with M9 | ABI log/trace declarations generate emitters/readers and typed field/unit tables; release/development projections and sink escaping have independent negative fixtures; device accessors and trace readers keep their original concurrency rules |
 
@@ -957,8 +957,8 @@ lightweight process.
 ## Track S: The command shell and toybox
 
 The release command catalog is generated from module metadata and the
-image's program list: names, help, required facets and declared output
-fields, with callback and live-load publication checks
+image's program list: names, help and required facets, with callback
+and live-load publication checks
 ([Generation work](#generation-work)).
 
 **Goal.** A command shell with rc's language in every session, and UNIX
@@ -966,12 +966,13 @@ commands from toybox as ports of the session, sharing one command
 namespace with Erlang commands ([design-shell.md](design-shell.md),
 [design-programs.md](design-programs.md)).
 
-**Demo.** In a console session, `ps | where 'memory > 10000000' | sort -k
-reductions` filters records, keeping each value's status;
-`grep -r error /tmp/logs | wc -l` runs two toybox applets in sub-spaces
-of the session over a pipe, and `ps` lists them under the session as its
-process table; `within /tmp/logs -- grep -r error /tmp/logs` reaches
-nothing else; `Ctrl-Z`, `bg`, `fg` and `kill %1` move and end a job of
+**Demo.** In a console session, `ps -o pid,rss,comm | sort -rn -k2 |
+grep erx` prints FreeBSD's text, `-` for each value erXos does not
+measure, as FreeBSD's `ps`, `sort` and `grep` would;
+`find /tmp/logs -type f | xargs tail -n 1` runs toybox applets in
+sub-spaces of the session over a pipe, and `ps` lists them under the
+session as its process table; `within /tmp/logs -- find /tmp/logs`
+reaches nothing else; `Ctrl-Z`, `bg`, `fg` and `kill %1` move and end a job of
 Erlang commands, and of programs once M7 has brought erXos's kernel's
 pauses.
 
@@ -1038,7 +1039,10 @@ while that a program cannot escape `liberx` does not
 **Exit criteria, the shell (Phase 1).** The shell's corpus agrees with
 plan9port's rc, every difference classified and pinned by a test; job
 control pauses, resumes and ends jobs of Erlang commands three generations
-deep; the parser and `where`'s predicates run their fuzz budgets clean.
+deep; the parser and `grep`'s pattern translator run their fuzz budgets
+clean; `ps`, `ls`, `grep`, `sort` and `wc` agree with FreeBSD 15.1's over
+their corpus in the oracle guest, every difference classified and pinned
+by a test.
 
 **Exit criteria, programs (1b-B).** Toybox's tests pass for every
 applet built, or each failure is classified; a pipe's end of stream

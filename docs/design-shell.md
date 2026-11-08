@@ -3,9 +3,9 @@
 Each session can run a **command shell** beside its Erlang shell: erXos's
 own, written in Erlang, speaking the language of rc, Plan 9's shell, by
 the user's decision. Builtins, Erlang commands and programs share one
-command namespace; pipes between Erlang commands carry records whose
-values keep their statuses, and pipes that meet programs carry bytes; and
-jobs of Erlang processes and programs stop, continue and end together.
+command namespace; every pipe carries bytes, as on UNIX, and every
+command reads and writes text as FreeBSD's command of the same name does;
+and jobs of Erlang processes and programs stop, continue and end together.
 The same interpreter runs as a program, `rc`, for programs' `system` and
 `popen`. The key idea is that the shell adds no authority and no new
 mechanism: authority is the capabilities a command is handed, grants and
@@ -26,8 +26,12 @@ Decisions every reader of this document needs:
 * **One command namespace.** A name is a function or builtin, an Erlang
   command, or a program command, in that order; programs see the Erlang
   and program commands that `/bin` lists, never a builtin or a function.
-* **Records between Erlang stages.** A record maps fields to values that
-  keep their statuses, so no stage turns `unknown` into a number.
+* **Text in every pipe.** A stage reads and writes bytes whatever is at
+  the other end, and a command named like a FreeBSD utility behaves like
+  it, with FreeBSD 15.1 as its test oracle. A value a command cannot
+  measure prints as FreeBSD prints a missing one, `-` or nothing, never as
+  a number. Live values with their statuses are the Erlang shell's and the
+  inspector's ([design-live.md](design-live.md#inspection)).
 * **Capabilities, not command kinds.** A command acts only through the
   capabilities it was handed: the session's by default, fewer under
   `within`, and a program's own when a program starts it. A command with
@@ -43,14 +47,15 @@ The vision puts the interactive environment first, and UNIX users bring
 UNIX habits: `ls | grep`, `ps`, job control. The command shell meets them
 without making POSIX the base: its language is rc's, whose single quoting
 rule and list values remove the Bourne shell's commonest traps; its
-commands are Erlang modules that pass records; and the UNIX commands it
-runs are toybox's applets, each a program in a sub-space of the session
+commands are Erlang modules that read and write text as FreeBSD's
+commands of the same names do; and the other UNIX commands it runs are
+toybox's applets, each a program in a sub-space of the session
 and a port of its runtime
 ([design-programs.md](design-programs.md#a-program-is-a-port)). It sits
 in each session's domain, beside the Erlang shell in the same `Ctrl-G`
 menu, and uses the session's tty
-([design-live.md](design-live.md#the-tty)), the inspector's records
-([design-live.md](design-live.md#inspection-records)), the session's
+([design-live.md](design-live.md#the-tty)), the inspector
+([design-live.md](design-live.md#inspection)), the session's
 namespace ([design-files.md](design-files.md)) and the spawn path
 ([design-programs.md](design-programs.md)).
 
@@ -73,14 +78,17 @@ shell above it, whose `exit` returns to the Erlang shell.
 
 * **S-R1.** A command shell per session with rc's language, line editing
   and job control, builtins, Erlang commands and programs in one command
-  namespace, and structured pipes; the same language as a program, `rc`,
-  for programs' `system` and `popen`.
+  namespace, and pipes of bytes between them; the same language as a
+  program, `rc`, for programs' `system` and `popen`.
 * **S-R2.** A line, a stage or a command can fail, overflow or crash
   without ending the session.
 * **S-R3.** The shell's behaviour agrees with Plan 9's rc wherever it
   claims rc's language, each difference documented with a test.
+* **S-R4.** An Erlang command named like a FreeBSD utility agrees with
+  FreeBSD 15.1's, in output, diagnostics and exit status, for every option
+  it offers, each difference documented with a test.
 
-Non-functional: parsing adds microseconds to a line, a record between
+Non-functional: parsing adds microseconds to a line, a write between two
 Erlang stages costs one message, and a program's start dominates any line
 that runs one ([Performance](#performance)).
 
@@ -97,9 +105,9 @@ command substitution and each background block is an Erlang process with
 a copy of the shell's variables. A stage that names an Erlang command
 calls it in that process; a stage that names a program has the command
 server start it ([design-programs.md](design-programs.md#starting-a-program)).
-Stages that are both Erlang pass records; a stage that meets a program or
-a file meets bytes, and the shell renders records into lines or reads
-lines into records at that edge. The terminal relay serves the foreground
+Every stage reads and writes bytes: two Erlang stages pass them as
+messages, and a stage that meets a program meets a pipe, but no stage can
+tell which by what it reads. The terminal relay serves the foreground
 job's terminal, and job control acts on the job's programs and Erlang
 processes.
 
@@ -109,7 +117,7 @@ processes.
  | console line  <-> terminal relay <-> /dev/tty    |  |              |
  |                       opens of the foreground job|  |              |
  | shell: parse -> evaluate -> stages               |  |              |
- |   Erlang stage --records--> Erlang stage --bytes-+--+-> program    |
+ |   Erlang stage --bytes---> Erlang stage --bytes--+--+-> program    |
  |                                          (pipe)  |  |  (a port,    |
  | command server (pid 1): process ids, jobs and    |  |   channel to |
  | handlers; the port driver                        |  |   handler)   |
@@ -121,8 +129,8 @@ processes.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **SH1.** A command acts only through the capabilities it was handed, and one handed fewer than the session's runs in a domain of its own | an Erlang command receives its grants and facets in its context and reaches services only through them; the shell's own lines run in the session's domain with the session's capabilities, since that is what the user typed them with; a command that `within` narrows, and every Erlang command a program starts, runs in a command domain built from exactly the capabilities its starter named, which its starter held, and named from its principal's pool of reusable names ([design-system.md](design-system.md#identifiers)), each facet among them made by the system domain for that domain alone and with no wider scope, and a program runs in a sub-space whose handler acts only on the program's own table ([design-programs.md](design-programs.md#what-a-program-can-start), [design-programs.md](design-programs.md#facets)); a handler never runs a builtin or a function for a program | a command that reaches a service by a registered name of the system domain; a narrowed or program-started command run in the session's domain; a domain given a capability its starter did not hold | a test that every command run in a session without an inspect facet gets `no_facet`; a test that a command domain's capabilities are exactly the grants and facets named before its startup message; `xargs ps` from a program with and without the `inspect` right, and a command domain that asks for the session's own facet instead of its own, which is refused; a narrowed program that asks its handler for every name of the command namespace in turn starts only what `/bin` lists and reaches nothing outside its grants |
-| **SH2.** A failing line, stage or command never ends the session | each stage, substitution and background block is an Erlang process of its own with `max_heap_size` set, counting the binaries it references; every input that reaches a stage is bounded in bytes, a line at 64 KiB, a record at 64 KiB and a pipe's records in flight at 256 and 1 MiB, so no input makes a stage grow without bound; every evaluator's Erlang stages are admitted whole within the session's stage allowance, an eighth of its budget, within the half the session keeps for its own services and from which no program's budget is carved ([design-system.md](design-system.md#resource-policy)), and only a foreground line waits for it, so stages together stay within memory the session keeps for them and no evaluator waits for an allowance its own parent holds; the parser, in a child process of the evaluator with a fixed heap, refuses a unit over its bounds before it runs; a program is a sub-space with a budget of its own, carved from the other half, so what it spends never counts against a stage | a stage evaluated in the shell's own process; an unbounded parse; an input path without a byte bound; stages admitted beyond the allowance; a nested evaluator that waits for the allowance; a program's budget carved from the services' half | the overflow, deep-nesting and runaway-recursion tests; a native program that writes a 1 GiB line without a newline into an Erlang stage, which fails that stage alone; a record over 64 KiB, which fails its stage; as many stages as the allowance admits, each near its limit, and one more pipeline, which waits; a substitution inside a fully admitted pipeline, and a background job beyond the allowance, each of which fails with `too many stages` at once; a loop of programs that spends the programs' half, during which the shell still parses, prompts and runs builtins; the parser's fuzz target |
-| **SH3.** No stage turns a status into a value | a record's values are `attr()` values with their statuses; `where` and `sort` treat a comparison with a value that is not `ok` as undecided; `erx_render` prints every status as such | a stage that unwraps a value without its status | the record tests over `unknown` and `timeout` values ([design-live.md](design-live.md#invariants) V2) |
+| **SH2.** A failing line, stage or command never ends the session | each stage, substitution and background block is an Erlang process of its own with `max_heap_size` set, counting the binaries it references; every input that reaches a stage is bounded in bytes, a line a command reads at 64 KiB and the bytes in flight between two Erlang stages at 64 KiB, so no input makes a stage grow without bound; every evaluator's Erlang stages are admitted whole within the session's stage allowance, an eighth of its budget, within the half the session keeps for its own services and from which no program's budget is carved ([design-system.md](design-system.md#resource-policy)), and only a foreground line waits for it, so stages together stay within memory the session keeps for them and no evaluator waits for an allowance its own parent holds; the parser, in a child process of the evaluator with a fixed heap, refuses a unit over its bounds before it runs; a program is a sub-space with a budget of its own, carved from the other half, so what it spends never counts against a stage | a stage evaluated in the shell's own process; an unbounded parse; an input path without a byte bound; stages admitted beyond the allowance; a nested evaluator that waits for the allowance; a program's budget carved from the services' half | the overflow, deep-nesting and runaway-recursion tests; a native program that writes a 1 GiB line without a newline into an Erlang stage, which fails that stage alone; as many stages as the allowance admits, each near its limit, and one more pipeline, which waits; a substitution inside a fully admitted pipeline, and a background job beyond the allowance, each of which fails with `too many stages` at once; a loop of programs that spends the programs' half, during which the shell still parses, prompts and runs builtins; the parser's fuzz target |
+| **SH3.** No command prints a value it does not have | a command formats a value only when its reader returned it with the status `ok`; any other value prints as FreeBSD prints a missing one, `-` in a column and nothing for a field labelled by its own letter ([Pipelines](#pipelines)) | a formatter that prints 0, an old value or a guess for a missing one | `ps`'s and the `Ctrl-T` line's tests with each value in turn `unknown`, `partial`, `timeout` and `unsupported`, where a formatter that prints 0 fails ([design-live.md](design-live.md#invariants) V2) |
 
 ## Data model
 
@@ -138,26 +146,21 @@ The shell's state is a few Erlang terms in the session's domain:
                  programs := [2..16#7fffffff],% process ids, at each spawn
                  group_leader := pid(),       % inherited by its Erlang processes
                  state := foreground | background | paused}.
--type record() :: #{atom() => erx_schema:attr() | data()}.  % fields its command declares
--type data() :: {data, {ok, binary()}}.            % a line of bytes, the shell's own
 ```
 
 The command namespace is a map from name to `command()`, built when the
 session starts from the generated command catalogs of its releases and
 the image's program list. A release's catalog derives from command module
 metadata and the native program list, without executing command bodies.
-It supplies lookup entries, help, required facets and declared record
-fields, retaining the precedence and unresolved-conflict rules below.
+It supplies lookup entries, help and required facets, retaining the
+precedence and unresolved-conflict rules below.
 A session sees only commands of releases it holds. Live-loaded command
 metadata passes the same checks before publication
 ([design-generation.md](design-generation.md#configuration-and-command-catalogs)).
 The command server keeps the jobs and the session's process table
-([design-programs.md](design-programs.md#the-parties)). A record's
-fields are atoms its command declares; its values are the inspector's
-`attr()` values, each with a status and a reporter
-([design-live.md](design-live.md#inspection-records)), or a line of a
-file or program as `data()`, a value of the shell's own that never
-reaches the inspector ("Pipelines").
+([design-programs.md](design-programs.md#the-parties)). What flows
+between stages is bytes, which the shell does not interpret
+([Pipelines](#pipelines)).
 
 ## Algorithms and behavior
 
@@ -215,8 +218,8 @@ what a terminal needs added:
   allowance, an eighth of the session's budget and 32 MiB at the default
   budget of 256 MiB
   ([design-domains.md](design-domains.md#principals-sessions-and-quotas)),
-  admits eight stages at once, which a pipeline of `ps`, `where`, `sort`
-  and `count` with a substitution leaves room in. So a runaway recursion
+  admits eight stages at once, which a pipeline of `ps`, `grep`, `sort`
+  and `wc` with a substitution leaves room in. So a runaway recursion
   ends its own stage, never the session. The limit acts at garbage
   collection, so what a stage takes in is bounded too
   ([Pipelines](#pipelines)).
@@ -319,11 +322,13 @@ shell and for `erx:` functions that run commands:
    session);
 2. an **Erlang command**, a module of the session's releases that
    implements the `erx_cmd` behaviour and declares its name
-   (`-erx_command(ps)`), such as `ps`, `i`, `domains`, `source`, `trace`,
-   `attach`, `bind`, `mount`, `unmount`, `where`, `select`, `sort` and
-   `count`, and the file utilities `echo`, `cat`, `ls`, `pwd`, `mkdir`,
-   `rm`, `mv`, `cp`, `true` and `false`, which follow FreeBSD's utilities
-   of the same names, so toybox's applets of those names are never built;
+   (`-erx_command(ps)`): the UNIX utilities `ps`, `echo`, `cat`, `ls`,
+   `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `true` and
+   `false`, which follow FreeBSD's utilities of the same names
+   ([Text commands](#text-commands)), so toybox's applets of those names
+   are never built; and erXos's own `i`, `domains`, `source`, `trace`,
+   `attach`, `bind`, `mount` and `unmount`, which have no FreeBSD
+   counterpart;
 3. a **program command**: one of toybox's applets or another program of
    the boot image, each of which the session's export also lists in
    `/bin` ([design-programs.md](design-programs.md#what-a-program-can-start)).
@@ -378,40 +383,74 @@ kernel and that domain's own runtime enforce what it holds
 
 ### Pipelines
 
-Between two Erlang commands, both processes of the session's domain, a
-stage passes the next its records as messages, at most 256 in flight, so
-`ps | where 'memory > 10000000' | sort -k reductions` filters and sorts
-records rather than text. A record is a map from field names, atoms its
-command declares in order, to `attr()` values, each with its status and
-reporter as in [Inspection records](design-live.md#inspection-records), so
-a value the inspector could not get stays `unknown` through every stage,
-or to a line of data, below.
-One renderer, `erx_render`, which `/proc` shares, prints an `ok` value
-bare and every other value as its status, `[unknown]`, `[partial]`,
-`[unsupported]`, `[timeout 500]` or `[error]`. `where` keeps a record when
-its predicate is true; a comparison with a value that is not `ok` is
-neither true nor false, so `where` drops such a record and `where -u`
-lists those it could not decide, and `sort` places them last: no stage
-turns a status into a value.
+Every stage of a pipeline reads bytes and writes bytes, as on UNIX. An
+Erlang command reads its standard input and writes its standard output as
+bytes whatever is at the other end, the terminal, a file, a program or
+another Erlang command, so `ps -m | head`, `cat f | grep error | wc -l`
+and `ls | xargs rm` mean on erXos what they mean on FreeBSD. The shell
+does not interpret what flows. Only the transport differs:
 
-The first record stages are `where [-u] predicate ...`, whose arguments
-join with spaces into one predicate, `sort [-r] [-k field] ...` and
-`count`. A stage that passes records on keeps the order of fields each
-came with. `sort` orders by the fields `-k` names, the first first, or by
-each record's own fields in order when it names none; integers sort as
-numbers before every other value, which sorts as its text as `erx_render`
-prints it, byte by byte, so the order is total; a record that lacks a key,
-or whose key's value is not `ok`, sorts after every record that has one,
-with `-r` too; and the sort is stable. `sort` holds its whole input, within
-its stage's `max_heap_size`. `count` emits one record, `count`, of how many
-records or lines it read.
+* between two Erlang commands, both processes of the session's domain,
+  each write is one message holding its bytes, with at most 64 KiB in
+  flight to the reader, the size of a pipe's first ring
+  ([design-pipes.md](design-pipes.md#the-objects-of-a-pipe)); the reader
+  sees the end of the stream once the writer's stage has ended and every
+  write has been read, and a writer whose reader has ended stops with the
+  status `sigpipe`, as a program would;
+* wherever a program takes part, the stages are joined by pipes
+  ([design-pipes.md](design-pipes.md)); the session's pipe server makes
+  each end for the stage that uses it, so every end has one holder and
+  the session knows them all
+  ([design-pipes.md](design-pipes.md#making-a-pipe));
+* a redirection hands a stage a file the shell opened, and a stream with
+  neither a pipe nor a redirection is the session's terminal.
 
-**Bounds.** A record is at most 64 KiB, as `erlang:external_size/1`
-measures it, and a stage that would send a larger one fails with
-`record too large`; a stage holds at most 256 records and 1 MiB of them in
-flight to the next; and a line of bytes arriving at an Erlang command is
+A command's output is bytes, as a program's is, and the tty passes it
+unchanged ([The tty](design-live.md#the-tty)). Where FreeBSD's command
+looks at whether its output is a terminal, as `ls` does to choose columns
+and to hide characters that do not print, the Erlang command asks
+`erx_cmd:isatty/2`; nothing else in a command depends on what is at the
+other end. So Erlang commands, programs, files and the terminal combine
+in any order with one meaning, and no stage renders, frames or reparses
+another's output.
+
+**Values erXos does not measure.** A command prints a value it could not
+get as FreeBSD's tools print a value they do not have (SH3). In a column
+it prints `-`, as FreeBSD's `ps` prints a column with no value
+(`bin/ps/ps.c:757-759`), so every row keeps its columns and `awk`, `cut`
+and `sort -k` find the same field in every row. Where each field carries
+its own label, as in the `Ctrl-T` line, the field is left out. A command
+never prints a number for a value it does not have, and never prints the
+inspector's status tokens: which values were unknown, partial or late,
+and who reported them, is what the Erlang shell's `erx:ps()` and
+`erx:i/1` and the inspector show
+([design-live.md](design-live.md#inspection-records)). erXos's own
+commands with no FreeBSD counterpart, `i`, `domains`, `source` and
+`trace`, are the inspector's front ends in the command shell and print
+what their `erx:` functions print, status tokens included.
+
+**Names a source chose.** A command that prints text a source chose, a
+file's name or a process's, escapes it where FreeBSD's command of the
+same name does, with erXos's escapes
+([Attributed text](design-live.md#attributed-text)). `ls` writes a name
+through the line escape when its output is a terminal, where FreeBSD's
+prints `?` for each character that does not print, and as its bytes
+otherwise, as FreeBSD's does (`bin/ls/ls.c:247-256`). `ps` writes a
+process's name and arguments through the field escape wherever its output
+goes, as FreeBSD's writes them through `strvis(3)`
+(`bin/ps/print.c:93-100`), so each row is one line and holds no control
+character. A line a command reads and passes on, as `grep`, `sort` and
+`cat` do, is its writer's bytes and reaches the terminal as through
+`cat`.
+
+**Bounds.** A line an Erlang command reads with `erx_cmd:read_line/1` is
 at most 64 KiB, beyond which its stage fails with `line too long` rather
-than gather it. So input of any size, from any producer, ends at most the
+than gather it; FreeBSD's tools take lines of any length, a documented
+difference. At most 64 KiB are in flight between two Erlang stages. A
+command that holds its input, as `sort` does, holds it within its stage's
+`max_heap_size`, and one whose input outgrows that fails alone, where
+FreeBSD's `sort` spills to temporary files, another documented
+difference. So input of any size, from any producer, ends at most the
 stage it reaches.
 
 **Admission.** The shell admits each evaluator's Erlang stages whole, each
@@ -431,102 +470,58 @@ jobs that waited would queue without bound. So the stages together stay
 within the memory the session keeps for them, and no line waits on its own
 admission.
 
-`where`'s predicate has its own small grammar, bounded at 4 KiB and a
-nesting depth of 64, with a fuzz target, and no evaluation of Erlang:
+### Text commands
 
-```text
-pred   := term { "or" term }
-term   := factor { "and" factor }
-factor := "not" factor | "(" pred ")" | FIELD op value
-op     := "=" | "!=" | "<" | "<=" | ">" | ">=" | "~"
-value  := INTEGER | 'QUOTED STRING' | WORD
-```
+The Erlang commands named like FreeBSD utilities offer a small core of
+each utility's options, enough for the common idioms, and behave as
+FreeBSD 15.1's do for those: the same bytes on standard output, FreeBSD's
+diagnostics on standard error, as `NAME: ...`, and FreeBSD's exit
+statuses (S-R4). An option a command does not offer is a usage error;
+more options are later additions, each with its oracle test. Text
+compares as bytes, as FreeBSD's tools compare it under `LC_ALL=C`, the
+locale the oracle runs in. `ps` and `ls` are specified with the live
+machine ([design-live.md](design-live.md#the-command-shell)); `cat`,
+`echo` and the file utilities copy, print or change files as FreeBSD's
+do. The text filters:
 
-A WORD is a run of bytes other than blanks, parentheses, quotes and the
-operators' characters `=!<>~`; a WORD of digits, with an optional leading
-`-`, is an INTEGER; `and`, `or` and `not` are keywords, and a quoted string
-is rc's, with `''` for a quote. Each `(` and each `not` is a level of
-nesting. A FIELD that names no existing atom names a field no record has,
-so parsing makes no atom; a predicate that does not parse fails with what
-is wrong and the byte where, never echoing the input.
-
-A predicate is true, false or **undecided**, by Kleene's three-valued
-logic: `not` exchanges true and false and keeps undecided; `and` is false
-when either side is false, true when both are true, and undecided
-otherwise; `or` is true when either side is true, false when both are
-false, and undecided otherwise. A comparison of a field the record lacks,
-or whose value is not `ok`, is undecided. Two integers compare as numbers;
-any other pair compares as text, the field's value as `erx_render` prints
-it against the literal's text, byte by byte, so for a field `n` holding
-10, `n < 9` is false and `n < '9'` is true. `~` matches the field's text
-against a glob, as rc's `~` does, a WORD's pattern characters live and a
-quoted string's literal, with an iterative matcher that keeps one
-point to backtrack to, so a match takes at most the text's length times
-the pattern's length in steps; one that would take more than 2^24 steps is
-undecided. So every predicate is decided, or reported undecided, in
-bounded time.
-
-Wherever a program takes part, the stages are joined by pipes
-([design-pipes.md](design-pipes.md)), which carry bytes; the session's
-pipe server makes each end for the stage that uses it, so every end has
-one holder and the session knows them all
-([design-pipes.md](design-pipes.md#making-a-pipe)). Text appears only
-where a stage meets something that reads bytes:
-
-* at the terminal, records render as aligned columns under a header line
-  of the field names, whose names and attributed values `erx_render` writes with the
-  line escape and measures as escaped. A table's shape is the fields its
-  first record holds, and a record of another shape starts a new table. A
-  table of one column has no header and nothing to align, so it prints
-  each value as it comes: lines read into `line` records, `ls` and
-  `count` print one value a line with no header. A record that is one
-  line of data, below, is written as its bytes and a newline, as `cat f`
-  writes the file and FreeBSD's `sort f` its lines: the line is the
-  output of the file's writer or of a program, not text a reporter
-  names, and a program's output reaches a tty unchanged
-  ([The tty](design-live.md#the-tty)); every other value, a
-  `ps` field or an `ls` name, is text attributed to its source and keeps
-  the line escape, so a tab of it shows as `<U+0009>`. A table
-  of more columns holds its first
-  256 records, and at most 1 MiB of their text, to measure its columns,
-  then prints every later record of its shape at those widths, a wider
-  value pushing the rest of its row right rather than being cut; a column
-  whose values include an integer and no other `ok` value is aligned
-  right. The command's process keeps the table, prints what it holds
-  before any other write of that command to the terminal, so the terminal
-  shows the command's writes in order, and prints the rest when `run/2`
-  returns;
-* toward a native program or a file, each record renders as one line of
-  its fields in declared order, separated by tabs, each value printed by
-  `erx_render` with its tabs, newlines and backslashes written as `\t`,
-  `\n` and `\\`, with no header and no other change, so `awk`, `cut` and
-  `wc -l` see one record per line and exactly the data; a record that is
-  one line of data is written as its bytes and a newline, so
-  `cat f | sort > g` changes no byte of a line;
-* bytes arriving at an Erlang command from a native program or a file
-  become one record per line with one field, `line`, whose value is the
-  line without its newline as **data**, `{data, {ok, Bytes}}`, rather
-  than text a reporter names, so `where 'line ~ *error*'` filters lines.
-  Only a record of one data value holding no newline, as every line read
-  is, is a line of data; any other record, data beside other fields
-  among them, renders as attributed text, so data never splits a row or
-  a field. A line is data because a command read it as bytes, from a
-  file, a program or another command's bytes, so what a record stage
-  shows of it at the terminal is what `cat` of the same bytes writes
-  there. A record written toward a file or a program is bytes from then
-  on: read back, its lines are data, so a `ps` name holding ESC, written
-  by `ps > f`, reaches the terminal through `cat f | sort` as through
-  `cat f`. The mark grants a command nothing: an Erlang command is
-  trusted session code and can write bytes to the terminal as any
-  program can.
+* **`grep [-EFcilnqrv] pattern [file ...]`** writes the lines that match
+  `pattern`, a POSIX basic regular expression, an extended one under
+  `-E` or a fixed string under `-F`, reading standard input when no file
+  is named. `-i` ignores ASCII case, `-v` selects the lines that do not
+  match, `-c` writes counts, `-l` the names of files with a match, `-n`
+  puts each line's number before it, `-q` writes nothing and stops at
+  the first match, and `-r` reads directories recursively. With more
+  than one file, each line starts with its file's name and `:`. The status is 0 when a line was selected, 1
+  when none was and 2 on an error. Every input is read as text, as
+  FreeBSD's `grep -a` reads it. A pure translator, `erx_grep_re`, turns
+  a pattern of at most 4 KiB into an `re` expression, or refuses it with
+  status 2 where FreeBSD's `regcomp(3)` would, so `re` never reads POSIX
+  syntax as its own. Each match runs under `re`'s match limit, and a line
+  that passes it ends `grep` with status 2 and `grep: pattern too
+  complex`, so no pattern spends unbounded time on a line. A program can
+  hand `grep` its pattern, so the translator has a fuzz target.
+* **`sort [-nru] [-k field[,field]] [file ...]`** writes its input's lines
+  in order, comparing whole lines byte by byte, or the keys `-k` names.
+  Fields split where a run of blanks begins, as FreeBSD's do, and a key
+  runs from its first field to the end of the line or to the end of its
+  second field. `-n` compares the number at the start of each key,
+  optional blanks, `-` and a decimal point included, and a key with no
+  number compares as zero, as on FreeBSD, so a column header and a `-`
+  sort among the zeros. `-r` reverses the order, and `-u` writes the first
+  of each set of lines with equal keys. Lines with equal keys are ordered
+  as FreeBSD orders them, by a last comparison of the whole lines, which
+  `-u` turns off. A last line without a newline gets one.
+* **`wc [-clmw] [file ...]`** counts lines, words and bytes, or characters
+  under `-m`, in FreeBSD's layout, with a total line when more than one
+  file is named.
 
 ### Starting programs
 
 The session's command server starts each program of a line
 ([design-programs.md](design-programs.md)). The shell derives each
 program's grants from the session's namespace, unless the line narrows it:
-`within /data/logs -- grep -r error /data/logs` starts `grep` with one
-grant, rooted at `/data/logs` and read-only, and no `/bin`, so `grep`
+`within /data/logs -- find /data/logs -name '*.err'` starts `find` with
+one grant, rooted at `/data/logs` and read-only, and no `/bin`, so `find`
 reaches nothing else and can start nothing
 ([design-files.md](design-files.md#narrowing-for-a-program)); its
 namespace has no `/`, so the paths above its grant read as an empty root
@@ -779,13 +774,15 @@ A pure module, `erx_tty_info`, named after FreeBSD's file, chooses the
 member and formats the line. Each value is an inspection attribute
 ([design-live.md](design-live.md#inspection-records)). A value that is `ok`
 is formatted as FreeBSD formats its field: seconds to hundredths,
-truncated; percent and KiB as integers. A field whose value is
-`unsupported` is left out, with its letter and the space before it, so
-the line shows only what erXos measures. Any other value prints as
-`erx_render`'s token for its status, `[unknown]`, `[partial]` or
-`[timeout N]`, followed by the field's letter, as in `[unknown]r`; an
-unknown `STATE` shows as its token alone, in place of the bracketed
-state. So an unknown value is never shown as a number. The
+truncated; percent and KiB as integers. Any other value, whatever its
+status, prints as the text rule of [Pipelines](#pipelines) prints a
+missing value (SH3). `R`, `U`, `S`, `P` and `K` each carry their own
+letter, so a field without a value is left out, with its letter and the
+space before it, and the line shows only what erXos measured. `NAME` and
+`STATE` have no letter and stand by position, so a missing one prints
+`-`, a missing state as `[-]`. A missing value is never shown as a
+number, and the line holds no status token: which reporter could not
+answer is the inspector's to show. The
 values come from the session's own process table, which is also the
 source of its `ps` ([design-live.md](design-live.md#the-command-shell)), so no
 inspect facet is needed:
@@ -795,9 +792,9 @@ inspect facet is needed:
 | `NAME` | its registered name, else its `proc_lib` label when that is an atom or a binary, else the function it started in. Each stage's first process is labelled with its command's name, and the line's process with `rc` | its name, as `ps` shows it |
 | `PID` | its pid as `ps` prints it, `<D.N.S>` | its process id |
 | `STATE` | `running` (status `running` or `garbage_collecting`), `runnable`, `suspended` or `exiting`; while it waits in `receive`, the function it waits in, `M:F/A`, which stands where FreeBSD shows the wait channel | the chosen thread's state as the kernel reports it: `running`, `runnable` or its wait kind; `suspended` when the program is paused |
-| `R` | time since the shell started it, for the line's process and a stage's first process; `[unknown]` for any other, since the runtime keeps no start time | time since it started, from the command server's table |
+| `R` | time since the shell started it, for the line's process and a stage's first process; left out for any other, since the runtime keeps no start time | time since it started, from the command server's table |
 | `U`, `S` | unsupported, so left out: the runtime keeps no CPU time per process | `U` is its group's CPU time, as `getrusage` reports it ([design-programs.md](design-programs.md#the-posix-lite-personality)); `S` is unsupported and left out, since the kernel does not split the two |
-| `P` | unsupported, so left out | unsupported and left out: no decayed average is kept |
+| `P` | unsupported, so left out: the runtime keeps no CPU time per process | its `pcpu` as `ps` prints it, its CPU time over the time since it started ([design-live.md](design-live.md#the-command-shell)) |
 | `K` | its memory as `process_info/2` reports it, in KiB, rounded up | its sub-space's charges, in KiB |
 
 `NAME` and `STATE` are text the member's domain or program reported. Each
@@ -805,8 +802,8 @@ is cut at a character boundary, `NAME` at 19 bytes (FreeBSD's
 `MAXCOMLEN`) and `STATE` at 32 bytes, since an Erlang function name is
 longer than a wait channel. Each then goes through the line escape, so a
 name that holds a control sequence shows as tokens. A member that ends
-while it is read gives `[unknown]` for each value it no longer has, as in
-`ps`.
+while it is read is missing each value it no longer has, which the line
+leaves out or prints as `-`, as `ps` does.
 
 **Choosing the member** follows FreeBSD's `proc_compare`
 (`tty_info.c:164-216`) with the measures erXos keeps:
@@ -862,8 +859,10 @@ load field.
 * **What answers.** The Erlang commands answer as FreeBSD's tools do. `cp`
   copies in pieces of 64 KiB, checks for a request between pieces, and
   writes `from -> to  N%` to its standard error, the percent three columns
-  wide. `rm` writes the path it removed last to its standard output. `cat`,
-  `mv`, `ls` and `sort` do not opt in.
+  wide. `rm` writes the path it removed last to its standard output. `wc`
+  writes its counts so far to its standard error, as FreeBSD's does
+  (`usr.bin/wc/wc.c:142`, `:176-186`). `cat`, `mv`, `ls`, `grep` and
+  `sort` do not opt in, as FreeBSD's do not catch `SIGINFO`.
 
 `kill -s INFO %N`, `kill -INFO %N` and `kill -29 %N` deliver the info
 request to a job and print no status line, as FreeBSD's `kill` does;
@@ -887,16 +886,13 @@ is unknown, so the line always starts with a newline there.
 ```erlang
 -callback run(Args :: [binary()], Ctx :: erx_cmd:ctx()) ->
               ok | {error, usage} | {error, term()}.
--callback fields() -> [atom()].        % the order of the fields it emits
--optional_callbacks([fields/0]).
 ```
 
-Command metadata declares the public names, help and output fields in
-the command module, beside its `-erx_needs` declaration. The generator
-emits the catalog and the optional `fields/0` wrapper from those fields
-and checks the `run/2` export against the behaviour. The command body is
-handwritten; no separate name, help or field list is maintained in the
-shell or host tool. Generated catalogs describe required facets and
+Command metadata declares the public names and help in the command
+module, beside its `-erx_needs` declaration. The generator emits the
+catalog from them and checks the `run/2` export against the behaviour.
+The command body is handwritten; no separate name or help list is
+maintained in the shell or host tool. Generated catalogs describe required facets and
 never grant them. Runtime entries pair the metadata with its verified
 module blob hash and a local entry fun of that version. Command starts
 check that binding before invoking the fun. The code server makes entries
@@ -910,11 +906,11 @@ streams and capabilities: its grants and its facets, each a pid with the
 facet's name, from which `erx_cmd:facet(Ctx, Name)` returns the facet or
 `{error, no_facet}`. A module declares the facets it needs with
 `-erx_needs(Names)`, which the shell checks before it runs the command.
-`erx_cmd:emit/2` writes a record or a line to standard output, waiting
-while 256 records are in flight to the next stage, `erx_cmd:emit/3`
-passes a record on with the order of fields it came with,
-`erx_cmd:read/1` takes the next record, line or `eof` from standard input,
-and `erx_cmd:read_record/1` takes a line as a `line` record
+`erx_cmd:write/2` writes bytes to standard output, waiting while 64 KiB
+are in flight to a neighbouring Erlang stage or while a pipe has no room;
+`erx_cmd:read/1` takes the next bytes or `eof` from standard input, and
+`erx_cmd:read_line/1` the next line, at most 64 KiB, or `eof`;
+`erx_cmd:isatty/2` says whether a standard stream is the terminal
 ([Pipelines](#pipelines)). `erx_cmd:catch_info/0` opts the calling process
 in to `Ctrl-T`'s info request, and `erx_cmd:info_requested/0` takes the
 requests pending for it
@@ -924,10 +920,10 @@ the context.
 
 A context's pids are names. A command domain holds its grants and facets
 before its startup message, each a process the system domain made for
-that domain and exported to it; neither that message nor a record flowing
-through an Erlang pipeline introduces authority. A command cannot turn a
-pid printed by `ps`, as `<D.N.S>` with `D` the id of the domain that owns
-the process, or received in a pipeline, into permission to signal,
+that domain and exported to it; neither that message nor the bytes of a
+pipeline introduce authority. A command cannot turn a pid printed by
+`ps`, as `<D.N.S>` with `D` the id of the domain that owns the process,
+or read from a pipe, into permission to signal,
 inspect or manage it: only a facet in its context, within the facet's
 declared scope, authorizes that action
 ([design-domains.md](design-domains.md#authority)). Starting a narrowed
@@ -979,7 +975,7 @@ the tree, never adapted ([design.md](design.md#compatibility)).
 | --- | --- | --- | --- | --- |
 | A shell unit, rc's line, is over 4 KiB, nests deeper than 256, or does not parse | the command shell's parser, in a child process of the evaluator | nothing: the unit is not run, nor anything after it in a script | no one: what ran before it stands | `syntax error` with the line and column, or `line too long`; `$status` says so |
 | An evaluator, stage or command passes its heap limit | `max_heap_size` | nothing of that process | the runtime, which kills the process | its stage's status is the kill's reason |
-| A stage meets a line or a record over 64 KiB | the stage's reader, or its send | nothing of that stage | the stage ends; its pipes' ends close with it | its stage's status is `line too long` or `record too large` |
+| A command reads a line over 64 KiB | `erx_cmd:read_line/1` | nothing of that stage | the stage ends; its pipes' ends close with it | its stage's status is `line too long` |
 | An evaluator's Erlang stages do not fit the stage allowance | the shell, before it starts them | nothing: no stage runs | none | a foreground line waits for running stages to end, and fails with `too many stages` when it could never fit; a background job, a substitution or a pipeline inside a stage fails with `too many stages` at once |
 | A program cannot start: no such command, a quota, a pipe's read ends, the session's budget | the command server, from the handler's answer | nothing: the ends made for the program are gone, so the line's other stages see the end of their pipes | the spawn path, which undoes each step it took ([design-programs.md](design-programs.md#starting-a-program)) | the reason as the stage's status, such as `not found`, `permission denied` or `quota` |
 | A stage crashes or faults | the command server's monitor on an Erlang stage; a program's exit or fault record, through its handler | nothing: a crashed stage's pipe ends close with it, and a program's with its image | the session's pipe server, and the port driver for a program ([design-programs.md](design-programs.md#a-programs-end)) | the neighbouring stages see the end of the stream or a broken pipe; `$status` lists the crash or the signal |
@@ -993,16 +989,17 @@ the session; a stage's crash reason, cut at 256 bytes, is its `$status`.
 The command shell runs with the session's authority, bounded at 4 KiB
 and depth 256 a unit of source, which the evaluator parses in a child
 process with a fixed heap, and by its processes' heap limit, with fuzz targets
-for its parser and for `where`'s predicates. Each program it starts holds
+for its parser and for `grep`'s pattern translator. Each program it starts holds
 only the descriptors, grants and rights its starter handed it, starts only
 what `/bin` lists and only with the right to start commands, and reaches
 the terminal only through the session's tty, which does not filter it, as
-on UNIX ([design-programs.md](design-programs.md#security)). A line an
-Erlang command reads as bytes, from a file, a program or another
-command's bytes, reaches the terminal the same way, through `sort` or
-`where` as through `cat`; only text a command attributes to a source,
-such as a `ps` or an `ls` name in a record, passes through the line
-escape (V9 of [design-live.md](design-live.md#invariants)). A command acts only
+on UNIX ([design-programs.md](design-programs.md#security)). An Erlang
+command's output reaches it the same way, and a line `grep` or `sort`
+passes on reaches it as through `cat`; a name a source chose is escaped
+by the command that prints it, `ls` at a terminal through the line escape
+and `ps` everywhere through the field escape, as FreeBSD's `ls` and `ps`
+escape theirs ([Pipelines](#pipelines), V9 of
+[design-live.md](design-live.md#invariants)). A command acts only
 through what it was handed, and one with less than the session's runs in
 a domain of its own (SH1). An Erlang command run in the session's domain is
 trusted session code: the context is its interface, not a boundary.
@@ -1015,8 +1012,7 @@ ask for, can end the session, as any trusted session code can (SH2).
 ## Verification and testing
 
 Catalog checks cover metadata/callback mismatches, duplicate names,
-the existing precedence, absent required facets, records whose
-fields disagree with the declaration, and live-loaded metadata refused
+the existing precedence, absent required facets, and live-loaded metadata refused
 before publication. Races between starts and code replacement, including
 lost acknowledgements and failure after load but before catalog publication,
 never mix metadata and entry-code versions. An independently written command fixture exercises
@@ -1036,8 +1032,7 @@ remain independent of catalog generation.
   saying it timed out or gave no status, never guessing one.
   Every script of the shell's test corpus runs under both, and their
   output and `$status` are compared; each difference is a bug, a
-  documented difference with a test (the interactive layer, records in
-  pipes, `within`), or an upstream bug recorded as such. A script that
+  documented difference with a test (the interactive layer, `within`), or an upstream bug recorded as such. A script that
   stops at a syntax error is compared by the diagnostic's message alone,
   since rc names the file and line (`rc: FILE:LINE: message`) and the
   shell the line and column; both set `$status` to the message. The
@@ -1083,10 +1078,10 @@ remain independent of catalog generation.
   * `erx_tty_info`: the choice of member, checked exhaustively over small
     sets of members against a model of the five rules; swapping rules 1
     and 2 fails. Golden lines in which every value is known, and lines in
-    which each field in turn is `unknown`, `partial` and `timeout`, and
-    lines in which each field in turn is `unsupported` and left out. A
-    formatter that prints a missing value as 0, or prints an unsupported
-    one at all, fails. A name
+    which each field in turn is `unknown`, `partial`, `timeout` and
+    `unsupported`: a lettered field is left out, and `NAME` and `STATE`
+    print `-` and `[-]`. A formatter that prints a missing value as 0,
+    or prints a status token, fails. A name
     and a state that hold `ESC ] 8 ;`, a newline and a bidirectional
     override reach the master only as tokens; bypassing the line escape
     fails.
@@ -1112,7 +1107,7 @@ remain independent of catalog generation.
     `cp` of a large file and `cat | cat` on a pseudo-terminal driven by the
     harness, sends `^T` mid-line and at column 0, and records each line.
     The same commands on erXos give lines of the same shape, compared with
-    every number and every status token masked: the same fields, the
+    every number masked: the same fields, the
     two spaces before `cmd:`, the leading newline, and the same no-job
     texts. `cp`'s and `sleep`'s own reports match byte for byte once the
     numbers are masked. A one-space separator fails the comparison.
@@ -1125,12 +1120,49 @@ remain independent of catalog generation.
   names `erl`, which finds none; `rc` narrowed without `/bin`, which
   starts nothing; each line of the porting table run under `rc` with the
   result its sh form gives under the host's `/bin/sh`.
-* **Records:** `ps | where ... | sort ...` over records whose values are
-  `unknown` or `timeout`, which `where` neither keeps nor coerces and
-  `where -u` lists; each truth table of `not`, `and` and `or` over true,
-  false and undecided; integers against integers, text and mixed pairs; a
-  glob made to backtrack over a 64 KiB field, which is undecided past its
-  step budget; the predicate parser's fuzz target with its bounds.
+* **Text commands against FreeBSD** ([Text commands](#text-commands),
+  S-R4). Each case is paired with a seeded fault that makes it fail:
+  * The oracle: the FreeBSD 15.1 oracle guest
+    ([design-network-stack.md](design-network-stack.md)) runs each case
+    of the commands' corpus with `LC_ALL=C` over the same input files,
+    and erXos's output, standard error and exit status must match it
+    byte for byte. The corpus covers each option each command offers,
+    alone and combined: `grep` with basic, extended and fixed patterns,
+    `-r` over a tree, a match and no match for the status, and a pattern
+    `regcomp(3)` refuses; `sort` with keys, `-n` over numbers, words, a
+    header line and `-`, `-r`, `-u` and a last line without a newline;
+    `wc` of one file and several; `ls` and `ls -l` of a file, a
+    directory and several of each. Seeded: a `sort -n` that orders a
+    non-number apart from zero, a `grep` that exits 0 on no match, and
+    an `ls` that heads a single directory, each fail.
+  * `ps` and `ls` at a terminal and in a pipe: `ps` and `ls` through
+    `cat` write the pipe's layout and `ls` at a terminal its columns,
+    checked against the guest on a pseudo-terminal and in a pipe; an
+    `ls` that ignores `erx_cmd:isatty/2` fails. `ps` lines compare with
+    every number masked, and `-r`, `-m` and `-o` with a fixed process
+    table of the host test build, so the order is exact.
+  * Missing values (SH3): `ps -o pid,state,time,pcpu,rss,comm` over a
+    process table in which each value in turn is `unknown`, `partial`,
+    `timeout` and `unsupported` prints `-` in that column and keeps every
+    row's column count; `ps -r` puts the rows without `pcpu` last, in the
+    default order. A formatter that prints 0, or that drops the column,
+    fails.
+  * Names: a file name and a process name holding `ESC ] 8 ;`, a tab, a
+    newline and a bidirectional override; `ls` at a terminal shows tokens
+    and through `cat` the bytes, `ps` shows the field escape both ways.
+    Bypassing either escape fails.
+  * Between Erlang stages: `cat` of a 1 GiB file into `grep -q .` ends
+    `cat` with `sigpipe` once `grep` has stopped; a
+    writer of 1 MiB to a reader that never reads holds at most 64 KiB in
+    flight; a 1 GiB line without a newline into `grep` fails that stage
+    with `line too long`. A writer that sends without waiting fails the
+    second case.
+  * `grep`'s translator: every construct of POSIX basic and extended
+    expressions against a table of `regcomp(3)` results taken from the
+    guest; a pattern built to backtrack ends with status 2 within the
+    match limit; the translator's fuzz target, with its 4 KiB bound
+    checked both ways. A translator that passes `\d` through to `re`
+    fails the table.
 * **Programs from the shell:** pipelines of toybox applets and Erlang
   commands in every order, redirections to and from files of the session's
   export and of `/data`, `within` with a path outside the narrowed
@@ -1152,7 +1184,7 @@ remain independent of catalog generation.
 ## Performance
 
 The command shell adds little to what it runs: parsing a line is
-microseconds, a record passed between Erlang stages is one message, and
+microseconds, a write between two Erlang stages is one message, and
 a program's start, budgeted at 1 ms under HVF, dominates a line that
 runs programs ([design-programs.md](design-programs.md#performance)).
 
@@ -1181,9 +1213,22 @@ its pending directory, and shells such as mksh or a port of tcsh need
 provides ([design-programs.md](design-programs.md#the-second-tier)).
 
 **A shell in C over the POSIX-lite personality.** It would be one more
-program; it loses because a shell in Erlang passes records between
-Erlang commands, runs them in the session's domain without a process per
-stage, and reaches the inspector, tracing and the code store directly.
+program; it loses because a shell in Erlang runs Erlang commands in the
+session's domain without a process per stage, and reaches the inspector,
+tracing and the code store directly.
+
+**Records between Erlang stages.** Erlang commands could pass the
+inspector's values to each other, each with its status, and filter them
+with a predicate language of their own. It loses. It makes two kinds of
+pipe, and at every edge where a record meets a file, a program or the
+terminal it needs a renderer, a framing that keeps a record one line, a
+reader that turns lines back into records, a mark that tells a line read
+as bytes from text a source chose, and a predicate grammar with its own
+bounds and fuzz target. The record commands then behave like no UNIX
+command and combine with programs only through that edge, against
+principle 5 of [design.md](design.md). Live values with their statuses
+are what the Erlang shell and the inspector already give, one `erl`
+away ([design-live.md](design-live.md#inspection)).
 
 **Terminal streams as pipes to the relay.** Each program's standard
 output and error to the terminal would be two pipes whose far ends the
@@ -1213,8 +1258,35 @@ shell compatible with tcsh is a roadmap item
 ([plan.md](plan.md#beyond-the-plan)). For `Ctrl-T`, the line adds no
 stacks, as FreeBSD's does only with `kern.tty_info_kstacks`: `erx:source/1`
 and the inspector already show where a process is. `cat` does not answer
-the info request, as FreeBSD's does not catch `SIGINFO`; `cp` and `rm`
-answer. No open question remains.
+the info request, as FreeBSD's does not catch `SIGINFO`; `cp`, `rm` and
+`wc` answer.
+
+Open decisions, each with a recommendation:
+
+* **`pcpu` for a program.** FreeBSD's `%CPU` is a decayed average of
+  recent use, which neither the kernel nor the command server keeps.
+  `ps` prints a program's CPU time over the time since it started,
+  which POSIX allows, since it leaves "recently" unspecified, and which
+  makes `ps -r` useful at once. Recommended: keep it, and add a decayed
+  average only if users find the lifetime figure misleading.
+* **Which processes plain `ps` lists.** FreeBSD's `ps` lists only the
+  user's processes that have a terminal unless `-x` is given. erXos's
+  lists the session's whole process table, its services included, and
+  offers no `-x`. Recommended: keep the whole table until the list
+  proves too long in use, then add FreeBSD's default and `-x` together.
+* **The terminal's name in `TT`.** The session's tty needs a device name
+  that `tty(1)` prints and `ps` abbreviates; no design names one yet.
+  The session's own tty is a pseudo-terminal whose master is the
+  console ([design-programs.md](design-programs.md#the-terminal)).
+  Recommended: name it `/dev/pts/0` in the session's export, as the
+  second tier names the pseudo-terminals a program makes, so `TT`
+  prints `0` as on FreeBSD.
+* **Presentations from text commands.** The inspector's values carry
+  presentation links at a terminal that declares them
+  ([design-display.md](design-display.md#presentations)); FreeBSD's
+  `ps` and `ls` print none. Recommended: text commands print none, so
+  their bytes match FreeBSD's at a terminal too; a clickable pid comes
+  from `erx:ps()` and the inspector.
 
 ## References
 

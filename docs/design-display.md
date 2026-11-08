@@ -90,8 +90,8 @@ Decisions every reader of this document needs:
   values and their events, not their appearance, and renderers are
   compared on those, never on pixels or layout.
 * **A presentation is a type and a canonical text, and grants nothing.**
-  Every value the shell and the inspector emit already carries its type
-  from the inspection schema. Its text is the form the shell parses back
+  Every value the inspector and the Erlang shell's printers emit already
+  carries its type from the inspection schema. Its text is the form the shell parses back
   to the same value, so a plain terminal loses the mouse and nothing
   else. At a terminal the renderer wraps the text in a hyperlink escape
   sequence naming the type and the value; in a widget tree a value is a
@@ -254,7 +254,7 @@ serial port. The emulator draws the tty's bytes as a terminal does and
 sends keystrokes back. It parses one escape sequence of its own, the
 presentation link, and binds the linked text to its type and value.
 
-**Presentations** are the values of records and inspection attributes,
+**Presentations** are the values of inspection attributes,
 typed by the inspection schema. `erx_render` writes each as its canonical
 text at a terminal, inside a link when the terminal declares it
 understands links; widgets take a value as a `present` property. A
@@ -1024,7 +1024,7 @@ handler binds a window's directory into a program's namespace
 ([Narrowing](design-files.md#narrowing-for-a-program)); the console
 service treats a terminal window as a line
 ([The console](design-live.md#the-console)); `erx_render` emits
-presentations ([Pipelines](design-shell.md#pipelines)); the inspector
+presentations ([Inspection](design-live.md#inspection)); the inspector
 schema supplies the types ([Inspection](design-live.md#inspection)).
 
 ## Compatibility and migration

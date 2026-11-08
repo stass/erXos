@@ -65,7 +65,10 @@ runtime can share the CPUs.
 What is new is how the pieces meet. The Erlang process becomes the
 system's process, across address spaces, with Erlang's semantics
 intact. Every value the inspector shows says who reported it and
-whether it is known. A shell pipe carries live records, not text. And a
+whether it is known. The command shell feels like FreeBSD's, `ps | grep`
+included, though its commands are Erlang; one `erl` away, the same
+processes are live values to link to, trace or open at their source
+line. And a
 browser is simply another display: it receives the same widget commands
 as a screen and renders them in its own medium, rather than mirroring
 pixels. The [overview](docs/overview.md) tells the longer story.

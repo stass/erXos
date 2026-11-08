@@ -110,9 +110,11 @@ documented.
 
 Files retain familiar paths, but each domain has its own view of the
 file tree, containing only the file services and rights it was given.
-The command shell combines Erlang commands and native programs;
-Erlang pipelines can carry structured records, preserving information
-that plain text would lose.
+The command shell combines Erlang commands and native programs in
+pipes of text, and its commands behave like FreeBSD's. Live,
+structured values belong to the Erlang shell beside it and to the
+inspector, which say for every value who reported it and whether it
+is known.
 
 ## Why this combination matters
 

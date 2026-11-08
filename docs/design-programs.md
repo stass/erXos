@@ -3533,8 +3533,8 @@ workload and baseline.
 
 **Experiment E-P2, file I/O through the handler.** Hypothesis: a read of
 4 KiB from a program costs at most 26 us under HVF, and a read of 64 KiB
-at most 60 us, as derived above, and `grep -r` of a fixed pattern over a
-tree of 10,000 small files and `cat` of a 1 GiB file from a program
+at most 60 us, as derived above, and toybox's `md5sum` of each file of
+a tree of 10,000 small files and `dd` of a 1 GiB file, from a program,
 finish within the time those bounds predict from their request counts.
 Method: `tools/erx bench fs` runs the reads from a program and from an
 Erlang process of the same session against the same server, and the two
@@ -3873,7 +3873,7 @@ proves hard to adapt.
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| The handler on every file path costs more than the estimate | medium | file-heavy programs, compilers and `grep -r` among them, run slower than on UNIX by the handler's hop on each request | E-P2; the data area's 64 KiB slots, and walk, open and first read in one round trip ([design-files.md](design-files.md#performance)); a lane from the program to a file server of the session's own domain, a change behind the handler that no program sees ([Alternatives considered](#alternatives-considered)) |
+| The handler on every file path costs more than the estimate | medium | file-heavy programs, compilers and `find` among them, run slower than on UNIX by the handler's hop on each request | E-P2; the data area's 64 KiB slots, and walk, open and first read in one round trip ([design-files.md](design-files.md#performance)); a lane from the program to a file server of the session's own domain, a change behind the handler that no program sees ([Alternatives considered](#alternatives-considered)) |
 | A reader's look at its pipe's writers is linear in their number | low | a pipe with hundreds of write ends, a `make`'s shared output among them, costs each read a scan of every writer's lane | the pipe server tells readers of writers that are gone, so the list shrinks as children end; E-P1's `make`-shaped job measures it; a wake mask that names the writer that rang is the fix if it shows ([design-pipes.md](design-pipes.md#risks-and-open-questions)) |
 | toybox's applets depend on Linux interfaces more than expected | medium | medium | applets built one by one against the seam, each with its tests; sbase as the fallback |
 | Recompiled programs expect `fork`, `exec`, or `sh` syntax in `system` | high | in the first tier a program fails to link, or its `system` command means something else in rc | the spawn helpers of toybox and similar programs are rewritten over `posix_spawn` in the tree; link failures are loud; the second tier provides `fork` and `exec`; rc's porting note lists the translations, and a command rc cannot parse fails with a diagnostic |
