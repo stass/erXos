@@ -389,7 +389,7 @@ class RuntimePrimFileTest < Minitest::Test
     { 'image mount' => 'ok', 'image read' => "{ok,#{Zlib.crc32(big)}}",
       'image info' => "{ok,regular,12388,read,#{0o100644}}", 'image dir info' => "{ok,directory,read,#{0o40755}}",
       'image list' => '{ok,["b"]}', 'image link' => '{ok,"small"}',
-      'image link info' => "{ok,symlink,read,#{0o120755}}", 'image via link' => small, 'image up link' => small,
+      'image link info' => "{ok,symlink,read,#{0o120777}}", 'image via link' => small, 'image up link' => small,
       'image absolute link' => '{error,enoent}', 'image missing' => '{error,enoent}',
       'image not dir' => '{error,enotdir}', 'image open read' => "{ok,#{Zlib.crc32(big[0, 5000])}}",
       'image open pread' => "{ok,#{Zlib.crc32(big[12_000, 388])}}", 'image open position' => '{ok,12388}',
