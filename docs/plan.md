@@ -1225,8 +1225,10 @@ targets, ahead of the part that integrates them
 * the draw protocol's state machine `erx_draw_core` and its generated
   decoder `erx_draw_codec`, with a C decoder of the same messages;
 * `erx_memdraw`, the pixel primitives of 9front's `libmemdraw`, with the
-  decoder of image(6)'s compressed pixels (the `Y` decoder) and
-  `erx_draw_ref`, a slow Erlang reference that is their oracle;
+  decoder of image(6)'s compressed pixels (the `Y` decoder), checked
+  against `erx_draw_ref`, a slow Erlang reference for compositing, and
+  against 9front's unmodified `libmemdraw` built for the host for every
+  operation, shapes included;
 * the screen's composition `erx_screen_core` and the two window policies
   `erx_wm_rio` and `erx_wm_single`;
 * the terminal's state machine `erx_vt`;
@@ -1358,7 +1360,9 @@ readers' fuzz targets run their budgets clean.
 **Exit criteria, the desktop.** `erx_draw_core` explored exhaustively,
 where a seeded skip of the quota check fails; the draw decoder's fuzz
 target and its differential test against the C decoder; `erx_memdraw`
-agrees with `erx_draw_ref` pixel for pixel over random operations, also
+agrees pixel for pixel with `erx_draw_ref` over random compositing
+operations and with the 9front build over every operation, shapes
+included, also
 under ASan and UBSan with rectangles far outside every image; the `Y`
 decoder's fuzz target; `erx_screen_core` explored exhaustively, and G2's
 hosted runs under TSan and ASan; a seventeenth dirty rectangle yields one
