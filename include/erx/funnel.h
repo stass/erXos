@@ -1,0 +1,230 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#ifndef ERX_FUNNEL_H
+#define ERX_FUNNEL_H
+
+/*
+ * erx_funnel's grammar: the pure checks that judge the shape and size of a
+ * frame from another domain before anything acts on it
+ * (docs/design-domains.md, "The funnel").  Three functions, in the order
+ * the funnel applies them to one lane record:
+ *
+ * erx_funnel_header checks the frame's 8-byte header against the record's
+ * length: the control term is 2 to ERX_CTL_MAX bytes and the two terms
+ * fill the frame exactly.
+ *
+ * erx_funnel_control judges the control term: erx_etf accepts it in the
+ * system grammar (no funs or exports) with the semantic stage, and it is
+ * the control tuple of one of
+ * the operations of design-domains.md's "Frames", with that operation's
+ * arity and the kind of every element.  It returns the operation and the
+ * pids, references and values the tuple names, pointing into the input, so
+ * the sender rule, the target rule and the export lookups judge them.
+ * Which pid belongs to whom is not decided here: every pid and reference
+ * is only required to be well formed with a node name at the machine's
+ * host.  A control term it refuses is malformed: its limits are the
+ * grammar's own, which every correct runtime keeps, erXos's peer
+ * checking a spawn request's options before it writes one.
+ *
+ * erx_funnel_payload is the payload's structural pass: erx_etf_check with
+ * accept off, in the grammar the receiving domain chooses, holding the
+ * decoded size in heap words, which erx_etf counts exactly as ERTS's size
+ * pass does, to the receiver's word limit and the nesting to its
+ * funnel_depth.  Its verdict is erx_etf's: malformed, over a limit, or
+ * accepted with the term's decoded words.  The semantic stage (map keys
+ * equal under =:=) is the receiving decoder's.
+ *
+ * All three are pure: they read only their arguments and write only their
+ * results and the caller's scratch.  None recurses.
+ */
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "erx/abi.h"
+#include "erx/etf.h"
+
+typedef struct erx_funnel_control erx_funnel_control_t;
+typedef struct erx_funnel_header erx_funnel_header_t;
+
+/* The operations of the grammar, by OTP's distribution operation number. */
+typedef enum erx_funnel_op {
+	ERX_FUNNEL_LINK = 1,
+	ERX_FUNNEL_GROUP_LEADER = 7,
+	ERX_FUNNEL_MONITOR_P = 19,
+	ERX_FUNNEL_DEMONITOR_P = 20,
+	ERX_FUNNEL_SEND_SENDER = 22,
+	ERX_FUNNEL_PAYLOAD_EXIT = 24,
+	ERX_FUNNEL_PAYLOAD_EXIT2 = 26,
+	ERX_FUNNEL_PAYLOAD_MONITOR_P_EXIT = 28,
+	ERX_FUNNEL_SPAWN_REQUEST = 29,
+	ERX_FUNNEL_SPAWN_REPLY = 31,
+	ERX_FUNNEL_ALIAS_SEND = 33,
+	ERX_FUNNEL_UNLINK_ID = 35,
+	ERX_FUNNEL_UNLINK_ID_ACK = 36,
+} erx_funnel_op_t;
+
+/* Why a frame's header or control term was refused. */
+typedef enum erx_funnel_reason {
+	ERX_FUNNEL_OK,
+	ERX_FUNNEL_ERR_HEADER,	/* a frame shorter than its header, or terms
+				   that do not fill it exactly */
+	ERX_FUNNEL_ERR_CTL_LEN,	/* a control term under 2 bytes or past
+				   ERX_CTL_MAX */
+	ERX_FUNNEL_ERR_TERM,	/* erx_etf refused the control term */
+	ERX_FUNNEL_ERR_OP,	/* not a tuple led by an operation of the
+				   grammar */
+	ERX_FUNNEL_ERR_ARITY,	/* the operation's tuple has another arity */
+	ERX_FUNNEL_ERR_FIELD,	/* an element of the wrong kind or range */
+	ERX_FUNNEL_ERR_OPTION,	/* a spawn option list that is not a proper
+				   list of options */
+	ERX_FUNNEL_ERR_PAYLOAD,	/* a payload for an operation without one,
+				   or none for an operation with one */
+} erx_funnel_reason_t;
+
+/* A frame's two terms: control first, then payload (absent when 0). */
+struct erx_funnel_header {
+	uint32_t		 ctl_len;
+	uint32_t		 payload_len;
+};
+
+/*
+ * The members of erx_funnel_control_t an operation sets, as
+ * ERX_FUNNEL_HAS_* bits in its fields; every other member is zero.  Each
+ * member has one owner whatever the operation: from and sender_ref are
+ * the sender's own, so the sender rule judges them; to and receiver_ref
+ * are the receiver's, so the target rule judges them; group_leader is
+ * data, as a pid in a payload is.
+ *
+ *   operation (number)        control tuple                 sets
+ *   LINK (1)                  {1, FromPid, ToPid}           from to
+ *   GROUP_LEADER (7)          {7, FromPid, ToPid}           from to
+ *   MONITOR_P (19)            {19, FromPid, ToProc, Ref}    from to sender_ref
+ *   DEMONITOR_P (20)          {20, FromPid, ToProc, Ref}    from to sender_ref
+ *   SEND_SENDER (22)          {22, FromPid, ToPid}          from to
+ *   PAYLOAD_EXIT (24)         {24, FromPid, ToPid}          from to
+ *   PAYLOAD_EXIT2 (26)        {26, FromPid, ToPid}          from to
+ *   PAYLOAD_MONITOR_P_EXIT    {28, FromProc, ToPid, Ref}    from to receiver_ref
+ *   SPAWN_REQUEST (29)        {29, ReqId, From,             sender_ref from
+ *                              GroupLeader, {Module,        group_leader spawn
+ *                              Function, Arity}, OptList}
+ *   SPAWN_REPLY (31)          {31, ReqId, To, Flags,        receiver_ref to spawn,
+ *                              Result}                      and from when Result
+ *                                                           is a pid
+ *   ALIAS_SEND (33)           {33, FromPid, Alias}          from receiver_ref
+ *   UNLINK_ID (35)            {35, Id, FromPid, ToPid}      from to id
+ *   UNLINK_ID_ACK (36)        {36, Id, FromPid, ToPid}      from to id
+ *
+ * ToProc and FromProc are pids: a monitor of a registered name is outside
+ * the grammar.  ReqId, Ref and Alias are references.  Id is an integer
+ * from 1 to 2^64 - 1, as ERTS reads an unlink's (it also takes 0 in an
+ * acknowledgement, which repeats a nonzero id).  Module and Function are
+ * atoms and Arity an integer of ERTS's small range, which is all ERTS
+ * checks before its spawn code judges them.  OptList is a proper list
+ * whose elements are atoms or pairs {Atom, Value}, Value an atom, an
+ * integer or a map from atoms to atoms and integers.  That is the shape
+ * of every option ERTS's spawn takes from the wire, where the sender has
+ * already removed link, monitor, reply and reply_tag; so an option list
+ * names no pid, reference or fun, and ERTS answers a well-shaped option
+ * it does not know with badopt.  Stock ERTS's sender passes other
+ * options through; erXos's peer answers them locally with badopt, and a
+ * control term past ERX_CTL_MAX with system_limit, so no correct runtime
+ * writes them (design-domains.md, "The funnel", step 4).  Flags is an
+ * integer below 2^27 and Result a pid (the child) or an atom (the error),
+ * as ERTS reads them.  An operation carries a payload exactly when its
+ * name says so (SEND_SENDER's message, ALIAS_SEND's message, the exits'
+ * reasons, SPAWN_REQUEST's argument list).
+ */
+#define ERX_FUNNEL_HAS_FROM		0x01u
+#define ERX_FUNNEL_HAS_TO		0x02u
+#define ERX_FUNNEL_HAS_SENDER_REF	0x04u
+#define ERX_FUNNEL_HAS_GROUP_LEADER	0x08u
+#define ERX_FUNNEL_HAS_ID		0x10u
+#define ERX_FUNNEL_HAS_SPAWN		0x20u
+#define ERX_FUNNEL_HAS_RECEIVER_REF	0x40u
+
+/*
+ * The depth of the deepest control term of the grammar, in erx_etf frames:
+ * an option's map inside SPAWN_REQUEST's option list, or its MFA tuple.
+ */
+#define ERX_FUNNEL_CTL_DEPTH	2
+
+struct erx_funnel_control {
+	erx_etf_pid_t		 from;
+	erx_etf_pid_t		 to;
+	erx_etf_pid_t		 group_leader;
+	erx_etf_ref_t		 sender_ref;
+	erx_etf_ref_t		 receiver_ref;
+	uint64_t		 id;
+	struct {
+		const uint8_t	*module;	/* SPAWN_REQUEST's MFA */
+		size_t		 module_len;
+		const uint8_t	*function;
+		size_t		 function_len;
+		int64_t		 arity;
+		const uint8_t	*error;		/* SPAWN_REPLY's error atom */
+		size_t		 error_len;
+		uint32_t	 flags;		/* SPAWN_REPLY's Flags */
+	} spawn;
+	erx_funnel_op_t		 op;
+	uint32_t		 fields;	/* ERX_FUNNEL_HAS_* */
+	bool			 payload;	/* the operation carries one */
+};
+
+/*
+ * Checks a frame of frame_len bytes (the record's len) whose first
+ * ERX_FRAME_HEADER_SIZE bytes are header, and returns its term lengths.
+ */
+erx_funnel_reason_t erx_funnel_header(const uint8_t *header,
+    uint32_t frame_len, erx_funnel_header_t *result);
+
+/*
+ * Judges len bytes of control term, of a frame whose payload is
+ * payload_len bytes.  host names the machine, as in erx_etf_rules_t.  The
+ * control term also gets erx_etf's semantic stage, which refuses two map
+ * keys equal under =:=, so an accepted one is a term ERTS's distribution
+ * input decodes to the same value, but for the receiver's own pids and
+ * references: ERTS refuses its own pid past its internal id or serial
+ * range and reads only three words of its own reference, which the
+ * target rule judges.  scratch holds erx_etf's stack and its
+ * map-key records: ERX_FUNNEL_CTL_SCRATCH bytes suffice for any control
+ * term, since a map keeps at most 32 bytes a pair, a pair takes at least
+ * 2 bytes, and a record 4 bytes a field of at least 2 bytes.  On
+ * ERX_FUNNEL_ERR_TERM, etf->reason says why erx_etf refused it; otherwise
+ * it is ERX_ETF_OK, and only etf->reason is meaningful.  *control is filled only when the term is
+ * accepted.
+ */
+#define ERX_FUNNEL_CTL_SCRATCH	(16u * ERX_CTL_MAX + 1024u)
+erx_funnel_reason_t erx_funnel_control(const uint8_t *term, size_t len,
+    uint32_t payload_len, const char *host, size_t host_len, void *scratch,
+    size_t scratch_len, erx_funnel_control_t *control,
+    erx_etf_result_t *etf);
+
+/*
+ * The receiver's limits on a payload: the machine's host, its word limit
+ * (max_message_heap, or a facet's lower request limit), its funnel_depth,
+ * and whether it is the system domain, whose payloads are in the system
+ * grammar; every other domain's are in the domain grammar.
+ */
+typedef struct erx_funnel_limits {
+	const char		*host;
+	size_t			 host_len;
+	uint64_t		 max_words;
+	uint32_t		 depth;
+	bool			 system;
+} erx_funnel_limits_t;
+
+/*
+ * The payload's structural pass.  scratch is the connection's funnel
+ * state: erx_funnel_payload_scratch_bytes(limits) bytes always suffice.
+ */
+erx_etf_verdict_t erx_funnel_payload(const uint8_t *term, size_t len,
+    const erx_funnel_limits_t *limits, void *scratch, size_t scratch_len,
+    erx_etf_result_t *result);
+size_t erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits);
+
+#endif /* !ERX_FUNNEL_H */

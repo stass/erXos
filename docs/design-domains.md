@@ -1125,8 +1125,26 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    [Frames](#frames), each with its exact arity and element types: pids are
    `NEW_PID_EXT` and references `NEWER_REFERENCE_EXT` of four words, each
    with a node name at the machine's host; unlink identifiers are
-   integers below 2^64; spawn options are a proper list of the atoms
-   and pairs ERTS's spawn accepts. **The target rule:** every target pid
+   integers from 1 to 2^64 - 1; a spawn request's arity is an integer
+   of ERTS's small range and a spawn reply's flags an integer below
+   2^27, as ERTS's distribution input reads them; spawn options are a
+   proper list of options in the shape of every option ERTS's spawn
+   takes, an atom or `{Atom, Value}` with `Value` an atom, an integer
+   or a map from atoms to atoms and integers, so no option names a pid,
+   a reference or a fun, and ERTS's spawn answers a well-shaped option
+   it does not know with `badopt`. Stock ERTS's sender passes any other
+   option through, so the sender's peer checks a spawn request's control
+   term with the funnel's own grammar before writing it, as it does for
+   `REG_SEND`: an option of another shape is answered at once with
+   `badopt`, and a control term past `ERX_CTL_MAX` with `system_limit`,
+   by the sender's runtime. The control term is read whole, within
+   `ERX_CTL_MAX`, so it also gets the semantic stage below: an accepted
+   control term is one ERTS's distribution input decodes to the same
+   term, except for the receiving domain's own pids and references,
+   which ERTS rebuilds as local ones, so the target rule also bounds a
+   target pid's number and serial to ERTS's internal range. Every
+   refusal of a control term is malformed, since its limits are the
+   grammar's own and the sender's peer keeps them. **The target rule:** every target pid
    or alias carries the receiving domain's node name, since a lane
    carries frames for its consumer and no one else; one whose creation is
    not the receiving domain's id names a process of an ended domain of
