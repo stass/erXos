@@ -303,6 +303,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Low] display, composes run one at a time in `erx_screen`**, and a
   window waits in its flush call. Settled by several animating windows and
   a kiosk's flush latency.
+* **[Low] display, a kiosk under LVGL copies each dirty rectangle twice**
+  ([design-display.md](design-display.md#kiosks-and-glasses)): once through
+  the LVGL program's standard output into the display domain, once into
+  the framebuffer. Settled by a full-screen redraw's time on a 240 by 240
+  panel and at QEMU `virt`'s screen size under HVF; the fix on the table
+  is the scan-out buffer mapped into the program's sub-space, which
+  design-display rejects until a number asks for it.
 * **[Medium] web, a record view's round trip over the host tool's front end**
   ([design-web.md](design-web.md#performance)): each update crosses the host
   link, the system domain's relay, the web domain, the session's line and the

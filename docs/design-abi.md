@@ -736,6 +736,23 @@ from the protocol's kinds. Integers are little-endian. Each message is a
 | `move`, tag 4 | node `u32`, index `u16` |
 | `commit`, tag 5 | none |
 | `event`, tag 6 | node `u32`, the event property's number `u8`, and a detail: a `u8` tag, none 0, boolean 1, integer 2 and text 3, and its value |
+| `screen`, tag 7 | width `u16`, height `u16`, and the target's channel as Plan 9's `u32` channel descriptor |
+| `input`, tag 8 | a `u8` form and its fields: pointer 1, with x `u16`, y `u16` and buttons `u8`; key 2, with down 1 or up 0 as a `u8`, code `u16` and rune `u32`, 0xffffffff for none; wheel 3, with steps as a signed `u8` |
+| `repaint`, tag 9 | none |
+| `pixels`, tag 10 | x `u16`, y `u16`, width `u16`, height `u16`, and the rectangle's pixels, its rows of `bytesperline` bytes in the channel of the last `screen` record |
+
+`insert` to `commit`, `screen`, `input` and `repaint` go from the server
+to a renderer; `event` and `pixels` from a renderer to the server. Only a
+native renderer's pipes carry `screen`, `input`, `repaint` and `pixels`
+([The widget server](design-display.md#the-widget-server)); the web
+protocol carries none of them, and its readers refuse their tags. A
+`pixels` message is the one longer than `web_ui_op_max`: its length is at
+most `ui_pixels_max`, a root limit of `ui.txt` of 65,536 bytes of pixels
+and the header, and a renderer whose flushed area is larger splits it
+into bands of rows. The reader frames the pixels by the message's length
+alone; that their count is the rectangle's at the channel's depth, and
+that the rectangle lies within the target, is checked by the process
+that consumes them, which knows the target.
 
 Properties are a `u8` count and, for each, its number and its value: a
 boolean as a `u8` of 0 or 1; an integer as a signed 32-bit value; an enum or an

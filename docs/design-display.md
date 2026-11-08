@@ -75,25 +75,36 @@ Decisions every reader of this document needs:
 * **A user interface is a term, and events are messages.** An application
   sends the display the whole widget tree of a window as an Erlang term
   whenever its state changes; the window's widget server keeps the
-  realised tree, computes the difference, lays it out, draws it through
-  the draw protocol, and sends the application `{ui, Window, Term,
+  realised tree, computes the difference, hands it to a renderer that
+  lays it out and draws it, and sends the application `{ui, Window, Term,
   Detail}` messages. The application holds no widget handles and issues
   no widget commands. It reaches the display through its **display
-  facet**, minted with its file grant when the system domain introduces
-  its domain to the display, so widget work is admitted within that
-  grant's share and limits.
+  facet**, minted with its file grant, where the display serves windows,
+  when the system domain introduces its domain to the display, so
+  widget work is admitted within that grant's share and limits.
 * **Two renderers behind one interface.** The widget server's rendering
   is a behaviour, `erx_ui_renderer`. The Erlang renderer lays out and
   draws through the draw protocol. LVGL, a C widget library, renders
   behind the same behaviour as a native program in a sub-space of the
-  display domain, for panels where its mature widgets and fonts pay; it
-  is a stopgap, replaced by the Erlang renderer once that renderer
+  display domain, for panels where its mature widgets and fonts pay: it
+  renders into its own buffer and reports the changed rectangles' pixels
+  on its standard output, and touches no file of the display. It is a
+  stopgap, replaced by the Erlang renderer once that renderer
   matches it on the kiosk's widget set and frame times. Every renderer,
   the web's browser renderer included
   ([design-web.md](design-web.md#uis-the-browser-renderer)), renders the
   tree as fits its medium: the tree states what the widgets are, their
   values and their events, not their appearance, and renderers are
   compared on those, never on pixels or layout.
+* **A kiosk under LVGL has one screen owner and one application.** A
+  kiosk whose manifest entry names the LVGL renderer runs no window
+  system: no windows, no draw protocol and no composition. Its screen
+  owner, `erx_ui_kiosk`, is the only path to the display driver, admits
+  one UI, from the application the manifest names, and answers every
+  other `erx_ui:open/1` with `{error, busy}`; the input drivers send
+  their events to it, and it hands them to that UI's renderer. So G1
+  holds on a kiosk because only one client exists, and the kiosk needs
+  nothing of the desktop's stack.
 * **A presentation is a type and a canonical text, and grants nothing.**
   Every value the inspector and the Erlang shell's printers emit already
   carries its type from the inspection schema. Its text is the form the shell parses back
@@ -115,7 +126,7 @@ Decisions every reader of this document needs:
   and a NIF's fault ends the whole runtime. The draw decoder and the
   decoder of compressed pixels are Erlang, and no program's terminal
   output reaches the display domain at all; native code that must parse
-  runs in a sub-space holding only its window.
+  runs in a sub-space holding only its window or its pipes.
 * **Nothing paints without a change.** Every byte that reaches a panel
   follows from a client's flush of a dirty rectangle or from a change of
   the windows' geometry. No timer redraws, so an idle display costs no
@@ -170,7 +181,7 @@ everywhere, and GPU acceleration is out of scope.
    events as messages, from any domain that holds a display grant, with
    no widget handles and no imperative widget commands.
 4. The same application term renders through the Erlang renderer on a
-   desktop, through LVGL on a panel and through the browser renderer on
+   desktop, through LVGL on a kiosk and through the browser renderer on
    the web, with the same values and the same events, each as fits its
    medium.
 5. A session's shell runs in a terminal window over a tty of its own
@@ -260,8 +271,15 @@ trees; the server diffs and hands the operations to a renderer
 behaviour, which lays out, draws and reads input, and the server sends
 events. The Erlang renderer draws through the draw protocol on the
 window's files; the LVGL renderer is a native program that receives the
-same difference operations on its standard input and draws into the same
-window through its own `/dev/draw`.
+same difference operations and the input on its standard input and
+reports pixel rectangles and events on its standard output, which
+`erx_ui_lvgl` loads into the window through the draw protocol.
+
+**A kiosk under LVGL** keeps only the drivers, the widget service, the
+screen owner `erx_ui_kiosk`, one widget server and the LVGL program: the
+renderer hands its pixel rectangles to `erx_ui_kiosk`, which pushes them
+through the driver, and `erx_ui_kiosk` hands the renderer every input
+event ([Kiosks and glasses](#kiosks-and-glasses)).
 
 **Terminals** are programs of a session. `erx_term`, in the session's
 runtime, makes a window as any client does, draws its tty's bytes as a
@@ -281,14 +299,14 @@ the shell and the application act with their own capabilities.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with a second window made, the second window's `kbd` receives nothing and the application's `r` of image 0 returns its own pixels, where a seeded delivery to the hidden window fails it; the decoder's fuzz target |
+| **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window; on a kiosk under LVGL there are no windows, and `erx_ui_kiosk` admits one UI, from the application the manifest names, answers every other open with `{error, busy}`, and is the only path to the driver and the only recipient of input | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window; a second UI admitted on a kiosk's screen | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with a second window made, the second window's `kbd` receives nothing and the application's `r` of image 0 returns its own pixels, where a seeded delivery to the hidden window fails it; on a kiosk, a second `erx_ui:open/1`, from the named application or from another domain, answered `{error, busy}`, where a seeded owner that admits it fails; the decoder's fuzz target |
 | **G2.** Each image is touched by one process at a time and lives while any process holds it, and every pixel loop runs over a clipped rectangle | a window's images are written only by its window process and the screen image only by `erx_screen`; `erx_screen` reads a window's image 0 only inside that window's flush call, which the window makes and waits on, and the driver reads an image only inside `erx_screen`'s call to it, which `erx_screen` waits on; calls run one way, window to `erx_screen` to driver, so no two wait on each other; an image is a NIF resource, freed by its destructor when no term refers to it, and `erx_memdraw` has no other free, so `f`, a resize and a window's end drop a reference and never free memory another process holds; the framebuffer is written only by the display driver's `erx_device:fill/3`; every function of `erx_memdraw` that touches pixel memory takes an `erx_clip_t`, which only `erx_draw_clip` produces, with checked arithmetic, from the operation's rectangles and both images' bounds | a read of an image outside its writer's call; a call from the driver or `erx_screen` back up the chain; an explicit free of an image; a loop over an unclipped rectangle | the build checks over `erx_memdraw`'s sources and the call direction (Chokepoints); the differential test against the reference renderer with rectangles far outside every image; the display suite in hosted mode under ThreadSanitizer, with windows drawing, resizing and ending while `erx_screen` composes and the driver copies, where a seeded compose outside the flush call makes it report; the same run under ASan, where a seeded explicit free makes it report |
 | **G3.** What a client makes the display domain spend is bounded by its grant | memory: a grant carries quotas of windows, pixel bytes and widget nodes; each image is charged its pixel bytes rounded up to 4 KiB, and a font cache its glyph records, so the pixel quota bounds the image count too; a window checks each allocation against the quota with checked arithmetic before it allocates; images die with their window; a write carries at most the file protocol's 64 KiB, a widget tree at most the display facet's `max_request`; a window's pending input and dirty list are bounded. CPU: a client's draw work runs only in its windows' processes, at most the `windows` quota of them, each of which has at most one flush in `erx_screen` at a time; its widget work is admitted by its display facet within the grant's share of reductions | an allocation outside the quota check; an image that outlives its window; an unbounded queue; a window with two flushes outstanding | an allocation loop refused at the quota with `ENOMEM` and the domain's memory unchanged; a window closed with images left, all freed; a widget tree of one node more than the quota, refused whole; a client that floods flushes from one window while another window's one flush waits at most one compose, where a seeded second outstanding flush fails it |
 | **G4.** A presentation grants nothing | a presentation is a type and a canonical text; the terminal emulator's only actions on one are to insert its text as keyboard input and to highlight the presentations of the types an input context names; a widget's only action is the `{select, Type, Value}` event to its application; neither carries a facet, a grant or a capability, and the command that then runs is checked by the shell's facets as any typed command is ([Authority](design.md#authority)) | a terminal that calls a service for a clicked link; a widget server that performs the action a presentation names | a session without an inspect facet clicks a pid presentation and the inserted `i` command fails with `no_facet`; the link parser's fuzz target; a source check that `erx_term` and `erx_ui_server` call no facet |
 | **G5.** Attributed text in a window is displayed only through the line escape, and a program's output reaches its terminal window unchanged | a window's label, a widget's `present` text and a widget's text drawn from a record value are escaped by the displayer with `erx_text:escape_line/1` ([Attributed text](design-live.md#attributed-text)); the terminal emulator takes its bytes from a tty, which changes nothing but what `termios` says (V1), and interprets them as a terminal does | a label drawn raw; a terminal emulator that filters a program's bytes | the attributed-text test corpus of design-live sent as a label, as a `present` text and as a record value in a widget; V1's byte test with a terminal window in place of the serial line |
-| **G6.** Nothing paints without a change | the only path to the device is `erx_screen`, which composes on a window's flush call and asks windows to flush only when the layout changes, the driver restarts, the panel wakes or `erx_screen` itself restarts; the driver pushes only the rectangles it is given; no process of the display domain has a redraw timer | a periodic repaint; a flush of the whole screen for a small change | an idle display for one minute makes no device request, counted at the driver; a one-pixel change makes exactly one flush of one rectangle; moving a window flushes exactly the area whose content changed |
-| **G8.** What a program writes to a terminal window costs bounded memory, and nothing of it comes back as input | `erx_vt`'s state is bounded by its size and the constants of [Bounds](#bounds): parameters, intermediates and strings are capped, the scrollback is capped in cells and the link table in entries, and an endless sequence costs no memory; its only replies are DA's and DSR's fixed forms, whose variable parts are numbers it computes; it is Erlang, so a fault in it ends one terminal process, not its session's runtime | a buffer that grows with a sequence; a report that echoes text, such as a title report; a native parser of program output | the fuzz target asserts the state's size against the bound computed from the size and the constants, where a seeded scrollback without its cap fails it; the reply test sends every query form, a title report among them, and checks every reply against the three forms, where a seeded title report fails it; the chokepoint check that only `erx_vt` interprets a terminal's output |
+| **G6.** Nothing paints without a change | the only path to the device is `erx_screen`, which composes on a window's flush call and asks windows to flush only when the layout changes, the driver restarts, the panel wakes or `erx_screen` itself restarts; the driver pushes only the rectangles it is given; no process of the display domain has a redraw timer; on a kiosk under LVGL the only path is `erx_ui_kiosk`, which pushes only the renderer's reports and asks for a repaint only when the driver restarts or the panel wakes, and the LVGL program, built with animations off, blocks on its standard input until a record arrives or its next LVGL timer is due, so it reports only what a change invalidated | a periodic repaint; a flush of the whole screen for a small change; an LVGL timer that fires without a change | an idle display for one minute makes no device request, counted at the driver, on the desktop and on a kiosk under LVGL, where a seeded animation in the LVGL build fails it; a one-pixel change makes exactly one flush of one rectangle; moving a window flushes exactly the area whose content changed |
 | **G7.** A widget never fabricates | a `present` property and a value drawn from a record keep their `attr()` status; the renderer shows every status other than `ok` as its token, as `erx_render` does (V2) | a widget that drops a status | the status tests of design-live run through a widget tree, for each status and reporter |
+| **G8.** What a program writes to a terminal window costs bounded memory, and nothing of it comes back as input | `erx_vt`'s state is bounded by its size and the constants of [Bounds](#bounds): parameters, intermediates and strings are capped, the scrollback is capped in cells and the link table in entries, and an endless sequence costs no memory; its only replies are DA's and DSR's fixed forms, whose variable parts are numbers it computes; it is Erlang, so a fault in it ends one terminal process, not its session's runtime | a buffer that grows with a sequence; a report that echoes text, such as a title report; a native parser of program output | the fuzz target asserts the state's size against the bound computed from the size and the constants, where a seeded scrollback without its cap fails it; the reply test sends every query form, a title report among them, and checks every reply against the three forms, where a seeded title report fails it; the chokepoint check that only `erx_vt` interprets a terminal's output |
 
 ## Data model
 
@@ -530,7 +548,9 @@ nothing (plan, then apply).
 ### Input events
 
 Inside the display domain an input event is one record, whatever device
-made it, and it travels only from the drivers to the window system:
+made it, and it travels only from the drivers to the display's one
+input router, the window system, or on a kiosk under LVGL the screen
+owner `erx_ui_kiosk`:
 
 ```erlang
 -type input() :: #{device := binary(),        % the device's name in the device table
@@ -803,31 +823,40 @@ A display driver is an Erlang process over the device NIF implementing
                            chan := chan(), stride := pos_integer(),
                            partial := boolean()}.      % whether flush takes rectangles
 -callback flush(Rects :: [rect()], Image :: reference(), State) -> {ok, State}.
+-callback flush(Pixels :: [{rect(), binary()}], State) -> {ok, State}.
 -callback power(on | dim | off, State) -> {ok, State}.
 ```
 
-`flush` takes the rectangles to push and the `erx_memdraw` image to read
-them from, copies each into the framebuffer with `erx_device:fill/3`, the
+`flush/3` takes the rectangles to push and the `erx_memdraw` image to
+read them from, for `erx_screen`; `flush/2` takes each rectangle with its
+pixels, Dy(r) rows of `bytesperline(r, depth)` bytes in the device's
+channel, for a kiosk's screen owner, which holds no image. Either form
+copies each rectangle into the framebuffer with `erx_device:fill/3`, the
 one per-byte copy of a transmit path, and tells the device: a virtio-gpu
 driver posts a transfer and a flush for each rectangle on its control
 queue and parses the device's responses in Erlang with binary matching;
 a firmware framebuffer driver has nothing to post, since the device
 scans the memory out; a panel driver on a serial bus sends a window-set
 command and the rectangle's bytes, converted to the panel's channel by
-`erx_memdraw` in the copy. The driver reads the image only while the
-callback runs. Every offset into the framebuffer, from the stride, the
-row and the column, is computed with checked arithmetic against the
-pool buffer's length, and every rectangle is clipped to both the image
-and the framebuffer before the copy. The framebuffer is a pool buffer of
-the device's record in the NIF, so it survives the driver's crash; the
-driver's restart resets the device and creates the scanout again, and
-`erx_screen`, which monitors the driver, repaints the screen.
+`erx_memdraw` in the copy, or rendered in the panel's channel already
+when the pixels come with the rectangle. The driver reads the image only
+while the callback runs. Every offset into the framebuffer, from the
+stride, the row and the column, is computed with checked arithmetic
+against the pool buffer's length, every rectangle is clipped to both the
+image and the framebuffer before the copy, and a binary whose length is
+not the rectangle's row count times its row bytes is refused whole. The
+framebuffer is a pool buffer of the device's record in the NIF, so it
+survives the driver's crash; the driver's restart resets the device and
+creates the scanout again, and the screen owner, which monitors the
+driver, repaints the screen: `erx_screen` from its windows, or
+`erx_ui_kiosk` by asking its renderer for a repaint.
 
 Input drivers are Erlang processes over the device NIF too: the
 virtio-input driver parses the device's event records in Erlang and
 emits `input()`; a touch controller's, an encoder's and a keypad's
 drivers do the same from their buses. Each is a row of the device table
-and sends its events to `erx_winfs`. A device in another domain, such as
+and sends its events to the input router: `erx_winfs`, or on a kiosk
+under LVGL `erx_ui_kiosk`. A device in another domain, such as
 a touch controller on a bus the devices domain holds, sends them through
 a display facet granted to that domain with the `events` operation,
 whose generated validator holds each event to the bounds of `input()`.
@@ -1704,10 +1733,11 @@ size by `max_request`.
 
 ```erlang
 -type target() :: {window, Dir :: binary()}     % the window's directory in the display domain's own grant
-                | {web, Ui :: pos_integer()}.   % the UI's entry in the web domain's table (design-web.md)
+                | {web, Ui :: pos_integer()}    % the UI's entry in the web domain's table (design-web.md)
+| {screen, Owner :: pid()}.     % a kiosk's screen, reached only through its owner erx_ui_kiosk
 -callback start(Target :: target(), Server :: pid(), Opts :: map()) -> {ok, State}.
 %% The renderer reads its target's input in a process of its own, linked to Server:
-%% a window's mouse and kbd, or a browser's events.  It sends Server
+%% a window's mouse and kbd, a browser's events, or the input a kiosk's owner hands it.  It sends Server
 %% {ui_hit, node_id(), Event :: atom(), Value :: term()} for each event on a node and
 %% each change of a state property; Value is the state value, or none.
 -callback apply(Ops :: [diff_op()], State) -> {ok, State} | {error, term()}.
@@ -1724,22 +1754,41 @@ rectangles. It reads `mouse` and `kbd`, and hit testing is the layout's
 rectangles.
 
 The **LVGL renderer**, `erx_ui_lvgl`, starts the native program
-`erx-lvgl` in a sub-space of the display domain, with the window's files
-bound in its `/dev` and nothing else of the tree, and writes
-the same `diff_op()`s to its standard input in the binary form declared
-in `abi/formats/ui.txt`, from which the generator produces the program's
-bounded C reader. That form carries an `on_*` property as the flag that
-the node takes the event, never the application's term, and a `present`
-property as its type, its canonical text from `erx_present:text/2` and
-its status, so the application's terms stay in the widget server and no
-renderer outside Erlang parses one. The program maps each kind to an LVGL object, sets its
-properties, renders into its own buffer, loads dirty rectangles into
-image 0 with `y` messages on `/dev/draw` and flushes, reads
-`/dev/mouse` and `/dev/kbd` for input, and writes events in the same
-format to its standard output, which `erx_ui_lvgl` reads with the same
-generated reader. Its fonts are LVGL's. The two renderers pass the same
-parity test (Verification), which compares meaning, and an application
-cannot tell them apart except by pixels.
+`erx-lvgl` in a sub-space of the display domain that holds its standard
+input and output and nothing else, and writes the same `diff_op()`s to
+its standard input in the binary form declared in `abi/formats/ui.txt`,
+from which the generator produces the program's bounded C reader. That
+form carries an `on_*` property as the flag that the node takes the
+event, never the application's term, and a `present` property as its
+type, its canonical text from `erx_present:text/2` and its status, so
+the application's terms stay in the widget server and no renderer
+outside Erlang parses one. The same input carries the program's view of
+its target: a `screen` record with the target's size and channel, at
+start and on every change, the target's `input` records, and a
+`repaint` record when the target has lost what it showed. The program
+maps each kind to an LVGL object, sets its properties, renders in LVGL's
+partial mode into its own buffer of at most `ui_pixels_max` bytes, in
+the target's channel, and writes each rectangle LVGL flushes as a
+`pixels` report on its standard output, beside its events in the same
+format, which `erx_ui_lvgl` reads with the generated Erlang reader.
+
+`erx_ui_lvgl` loads a window target's reports into image 0 with `y`
+messages through `erx_draw` and flushes, and turns the window's `mouse`
+and `kbd` records into `input` records; it hands a screen target's
+reports to its owner with `erx_ui_kiosk:flush/2`, and the owner's input
+goes to the program as it comes. A report whose rectangle leaves the
+target, or whose byte count is not the rectangle's, is a fault of the
+program: `erx_ui_lvgl` stops it, logs the report's position, and ends
+the UI with `{ui_down, Window, renderer_down}`. The program's fonts are
+LVGL's, and it is built with animations and blinking cursors off.
+Between records it blocks in `poll` on its standard input with the
+deadline `lv_timer_handler` returns, or with none when no LVGL timer is
+due; the POSIX-lite personality gives a native program `poll` with a
+deadline over its pipe ends
+([design-programs.md](design-programs.md#the-posix-lite-personality)).
+So an idle program runs nothing and reports nothing (G6). The two
+renderers pass the same parity test (Verification), which compares
+meaning, and an application cannot tell them apart except by pixels.
 
 **Presentations in widgets.** A node's `present` property is `{Type,
 Value}` or an `attr()` carrying one; the renderer shows
@@ -1822,14 +1871,56 @@ UIs ([design-web.md](design-web.md#uis-the-browser-renderer)).
 
 ### Kiosks and glasses
 
-A kiosk, a dashboard or a pair of glasses is a display domain under the
-single policy, configured in the manifest: the display device, the input
-devices, `policy single`, the application domain whose window takes the
-screen, the renderer (`erlang` or `lvgl`), the idle policy and,
-optionally, the reserved chord. The application
-is a configured domain with a display grant and facet, started in the
-boot order after the display domain; it opens its widget window at start
-and the policy shows it. Nothing else differs from the desktop:
+A kiosk, a dashboard or a pair of glasses is a display domain configured
+in the manifest: the display device, the input devices, the application
+domain that takes the screen, the renderer (`lvgl` or `erlang`), the
+idle policy and, optionally, the reserved chord. The application is a
+configured domain holding a display facet, with no session and no
+login, started in the boot order after the display domain; it opens its
+UI at start. The renderer decides what the display domain runs.
+
+**Under LVGL** the display domain runs no window system: no `erx_winfs`,
+no window processes, no draw protocol and no `erx_screen`. Its screen
+owner, `erx_ui_kiosk`, holds the one screen:
+
+* It is the only process that calls the display driver, with `flush/2`
+  and `power/2` (Chokepoints).
+* It admits one UI. The widget service hands it every `open_ui`; while
+  no UI holds the screen, it starts a widget server with the target
+  `{screen, self()}` for the application domain the manifest names, and
+  it answers every other open, that application's second included,
+  `{error, busy}`. When the UI ends, the screen is free again.
+* It receives every input event from the input drivers, keeps the idle
+  clock from them, and hands each event to the UI's renderer, a touch as
+  a pointer with button 1 as the window system does; with no UI open,
+  an event is dropped.
+* A flush is a call from the renderer, `erx_ui_kiosk:flush(Window,
+  [{rect(), binary()}])`. `erx_ui_kiosk` checks that every rectangle
+  lies within the screen and that every binary holds exactly that
+  rectangle's rows in the device's channel, refuses the whole call with
+  `einval` otherwise, and answers after the driver's `flush/2` has
+  returned. Calls run renderer to `erx_ui_kiosk` to driver, and
+  `erx_ui_kiosk` sends the renderer only asynchronous messages, so no
+  cycle of waits exists.
+* It monitors the driver, and after the driver's restart or a wake from
+  `off` it sends the renderer a repaint, which reaches the LVGL program
+  as a `repaint` record: LVGL invalidates the whole screen and reports
+  it. There is no other repaint (G6).
+
+The display domain holds no pixel memory here: the program's buffer is
+in its sub-space and the framebuffer in the driver's pool. Each dirty
+rectangle costs the pipe's copy out of the sub-space and the driver's
+copy into the framebuffer. The application's display facet comes with
+no file grant, since the display serves no window tree.
+
+**Under the Erlang renderer** the kiosk is the desktop's stack under the
+single policy: the one shown window covers the screen with no
+decoration, so `erx_screen` is in direct mode and pays one copy per
+dirty rectangle into the framebuffer. A panel of 240 by 240 pixels in
+`r5g6b5` holds 112 KiB; the screen image and the window image together
+are within the display domain's smallest budget.
+
+Both share the rest:
 
 * **Input.** A touch panel's events are pointer events with button 1;
   the renderer's hit testing turns them into `on_click`, drags into
@@ -1839,15 +1930,10 @@ and the policy shows it. Nothing else differs from the desktop:
   arrow keys, activates on enter or the encoder's press, and shows focus
   with a mark of its own, so a tree written for touch works from an
   encoder with no change, which is how LVGL's input groups behave.
-* **Drawing.** The one shown window covers the screen with no
-  decoration, so `erx_screen` is in direct mode and a kiosk pays one copy
-  per dirty rectangle, into the framebuffer, and no more. A panel of 240
-  by 240 pixels in `r5g6b5` holds 112 KiB; the screen image and the
-  window image together are within the display domain's smallest budget.
-* **Power.** The idle policy turns the panel `dim` and `off`; input turns
-  it on. Between events nothing runs (G6), so the display domain's cost
-  is its processes waiting on messages, and the panel driver's bus is
-  silent.
+* **Power.** The screen owner's idle policy turns the panel `dim` and
+  `off`; input turns it on. Between events nothing runs (G6), so the
+  display domain's cost is its processes waiting on messages, and the
+  panel driver's bus is silent.
 * **Panels.** A panel on a serial bus is a display driver whose `flush`
   sends each rectangle as the panel's window-set command followed by the
   rectangle's bytes in the panel's channel; partial updates are what
@@ -1856,9 +1942,9 @@ and the policy shows it. Nothing else differs from the desktop:
   partial update reports `partial` false and gets whole frames.
 * **Service.** A kiosk's screen shows no terminal: its operator works at
   the UART or over the host link. Its entry names no session, so the
-  application's window is the only one; the reserved chord, where the
-  entry names one, reaches no window here either. A service terminal on
-  the kiosk's own screen is part of the login design (Risks and open
+  application's UI is the only one; the reserved chord, where the entry
+  names one, reaches no window here either. A service terminal on the
+  kiosk's own screen is part of the login design (Risks and open
   questions).
 
 ### Erlang clients
@@ -1884,8 +1970,8 @@ operations, `open_ui`, `ui_tree` and `close_ui` for an application and
 `events` for a domain that holds input devices of the display, each
 grant naming the operations it allows, declared in
 `abi/services/display.txt` and served by every display domain and by the
-web domain. A display's manifest entry: its policy, under the single
-policy its application domain and renderer, its idle policy, the
+web domain. A display's manifest entry: its policy, or for a kiosk its
+application domain and renderer, its idle policy, the
 principal of its session, and the reserved chord.
 
 **Draw messages**, in `abi/formats/draw.txt`, with the bounds above; the
@@ -1897,11 +1983,11 @@ one line, at most 128 bytes.
 
 **Widgets**: `erx_ui:open/1` with the `display` and `label` options,
 `erx_ui:tree/2`, `erx_ui:close/1`, `{ui, Window, Term, Detail}`,
-`{ui_down, Window, Reason}` and `{error, no_display}`; the `display`
+`{ui_down, Window, Reason}`, `{error, no_display}` and `{error, busy}`; the `display`
 environment variable; the kinds, properties, events, image types and
 bounds of `abi/formats/ui.txt`, `secret` on `input` among them, and the
-binary form of `diff_op()` and of events derived from it for renderers
-outside Erlang; `ui_tree`'s `{error, {Reason, Where}}`; the
+binary form of `diff_op()`, events, `input`, `screen`, `repaint` and
+`pixels` records derived from it for renderers outside Erlang; `ui_tree`'s `{error, {Reason, Where}}`; the
 `erx_ui_renderer` behaviour and its `target()`; `erx_ui_model`'s
 `pair/3`, `delta/2`, `apply_ops/2` and `hit/4`.
 
@@ -1918,7 +2004,8 @@ generated `erx_termcap`; `erx_vt`'s `new/2`, `feed/2`, `resize/3`,
 sequence tables and bounds of [The terminal
 emulator](#the-terminal-emulator).
 
-**Drivers**: the `erx_display` behaviour; the `input()` record.
+**Drivers**: the `erx_display` behaviour with its two `flush` forms;
+the `input()` record; `erx_ui_kiosk:flush/2`.
 
 **Interaction with other subsystems.** The device service gives the
 display domain its devices and the system domain introduces sessions and
@@ -1962,7 +2049,8 @@ at a terminal that declares `links`.
 | a session's end | the grant ends and every window of it with it | as above |
 | a window process crashes | as the window's end, logged with the message that caused it | the client sees `EIO` on its fids and makes a new window |
 | `erx_screen` crashes | supervisor restart; it asks `erx_winfs` for the layout and repaints; a window waiting in a flush call sees the call fail and drops that flush, which the repaint covers | no client notices |
-| the display driver crashes | restart; device reset; scanout re-created; `erx_screen` repaints; the framebuffer pool stays in the NIF's record | no client notices |
+| `erx_ui_kiosk` crashes | supervisor restart; the widget server holding the screen ends with it, and the application receives `{ui_down, Window, server_down}` | the application reopens, and the new LVGL program reports the whole screen |
+| the display driver crashes | restart; device reset; scanout re-created; the screen owner repaints, `erx_screen` from its windows and `erx_ui_kiosk` through its renderer's `repaint`; the framebuffer pool stays in the NIF's record | no client notices |
 | `erx_winfs` crashes | it holds every grant and window of the display, so its crash ends the display domain, with the effect of the domain's end below | as for the domain's end |
 | a terminal, `erx_term`, crashes | a process of the session, not of the display; its window ends with it, its holder, and its tty hangs up, so its shell and jobs get the hang-up, as when an xterm dies; the session's other terminals go on | a sibling from another terminal, or from `erx_term_sup` when it was the session's last on that display |
 | a widget server crashes | its window ends with it, its holder; the facet sends the application `{ui_down, Window, server_down}` | the application opens a new window |
@@ -1970,6 +2058,8 @@ at a terminal that declares `links`.
 | a widget tree fails validation | `ui_tree` answers `{error, {Reason, Where}}`; the realised tree is unchanged | the application's |
 | a window's widget server would number a node past 2^32 - 1 | the window ends; the application receives `{ui_down, Window, limit}` | the application opens a new window |
 | the LVGL program exits | the widget server ends the window and the application receives `{ui_down, Window, renderer_down}` | the application reopens; the display domain logs the exit record |
+| the LVGL program reports a rectangle outside its target, or one of the wrong length | `erx_ui_kiosk` or the window refuses it with `einval`; `erx_ui_lvgl` stops the program, logs the report's position, and the application receives `{ui_down, Window, renderer_down}` | the application reopens |
+| a second UI opens on a kiosk under LVGL | `erx_ui:open/1` answers `{error, busy}`; the screen's UI is unchanged | the opener's |
 | an input device stops | its driver restarts and resets it | events resume |
 | a window's `mouse` or `kbd` queue is full | the oldest record is dropped and counted; a resize is never lost | the client reads |
 | the panel is off and a client flushes | the flush is answered without a compose | the next input turns the panel on and repaints |
@@ -2025,7 +2115,9 @@ position of the fault.
   development build, and the display domain is then in the trusted base,
   as the paragraph above says of any development build that holds such a
   device; a draw client that compromises it reaches all memory through the
-  gpu's DMA. The release manifest's refusal is unchanged, and the drivers
+  gpu's DMA. A kiosk under LVGL has no draw client: its LVGL program holds
+  only its pipes, and every report it writes is checked in Erlang before
+  the driver copies it. The release manifest's refusal is unchanged, and the drivers
   are the same code on both. Moving the devices to virtio-pci behind the
   IOMMU on erXos's kernel
   changes their device records and DMA profiles, not their drivers
@@ -2308,7 +2400,32 @@ Each passing case has a seeded failure that proves the code ran.
   images, under HVF; a seeded wrong channel conversion fails it.
   A panel driver is tested against a model of its command set on the
   host.
-* **Power.** G6's idle test at the driver.
+* **A kiosk under LVGL.** Each passing case beside the seeded failure
+  that proves it ran:
+  * a second `erx_ui:open/1`, from the named application and from
+    another domain, answers `{error, busy}` and the first UI keeps the
+    screen; an owner that admits a second fails;
+  * `erx_ui_kiosk:flush/2` refuses a rectangle outside the screen, and a
+    binary one byte short or one byte long, with `einval`, and the driver
+    is never called; an owner without the bound check fails, and the
+    driver's own refusal of the same binaries is tested beside it;
+  * a program whose report the owner refuses is stopped and the
+    application receives `{ui_down, Window, renderer_down}`; an
+    `erx_ui_lvgl` that ignores the refusal fails;
+  * the Erlang reader of the program's records and the C reader of the
+    server's have fuzz targets, the `pixels` record among them; a reader
+    without the `pixels` length check fails its fuzz target;
+  * a driver restart is followed by exactly one `repaint` record and a
+    report of the whole screen; an owner that does not monitor the
+    driver fails;
+  * `erx-lvgl` builds for the host and runs against a model screen, a
+    host process that plays `erx_ui_kiosk` over the two pipes, so the
+    parity corpus and the reader's fuzz target run without QEMU;
+  * under QEMU `virt` with the kiosk manifest, the screenshot through
+    QEMU's monitor equals the reference image under HVF; a seeded wrong
+    channel in the `screen` record fails it.
+* **Power.** G6's idle test at the driver, on the desktop and on a kiosk
+  under LVGL, where an LVGL build with animations on fails it.
 * **Failures.** One injected fault per row of the failure table above,
   each under QEMU `virt` with clients drawing: the fault is raised in the
   party the row names (a malformed write, a holder's end, a session's
@@ -2334,8 +2451,10 @@ Each passing case has a seeded failure that proves the code ran.
 | --- | --- |
 | Only `erx_memdraw`'s listed functions touch pixel memory, and each takes an `erx_clip_t` from `erx_draw_clip` | a build check over the NIF's sources lists the functions that dereference image data and fails on a new one or on one without the parameter |
 | Only an image resource's destructor frees pixel memory | the same build check, over the NIF's calls to the allocator's free |
-| Only `erx_screen` writes the screen image and calls the display driver's `flush` callback | an xref check over the display release |
+| Only `erx_screen` writes the screen image and calls the display driver's `flush/3`, only `erx_ui_kiosk` calls its `flush/2`, and only these two call its `power/2` | an xref check over the display release |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
+| Calls run renderer to `erx_ui_kiosk` to driver: `erx_ui_kiosk` makes no call to a renderer | the same xref check |
+| Only `erx_ui_kiosk` starts a widget server with a screen target | the same xref check |
 | Only the display driver's process calls `erx_device:fill/3` and `post/4` on the display device | the same xref check |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's operations and events | the generated tree's determinism test, and a source check that no other module reads those bytes |
@@ -2428,6 +2547,8 @@ A new device is a new driver behind `erx_display` or a new producer of
 | terminfo, as Linux distributions use | FreeBSD describes terminals in termcap, and erXos follows FreeBSD; its one consumer at run time reads a generated table |
 | xterm.js or tmux as the oracle | xterm.js brings Node into host tooling, which TypeScript's rule keeps out; tmux takes its widths from the host's C library and needs a server process; xterm itself has no headless dump |
 | grapheme clustering, so an emoji sequence takes one cell pair | terminals disagree on it and programs' `wcwidth` cannot express it, so the cursor would part from what programs compute |
+| a kiosk under LVGL through the window system: the single policy, a window, and `y` messages on `/dev/draw` | needs the draw protocol, `erx_memdraw`, `erx_screen` and `erx_winfs` for one full-screen window that never moves; a screen owner that admits one UI gives the same guarantee with none of them |
+| mapping the scan-out buffer into the LVGL program's sub-space | removes the pipe's copy, but shares pixel memory between two parties, against the rule that no pixel memory is shared across a boundary or between two processes at once, and puts memory the device reads by DMA in the address space of untrusted native code; it can return as a measured optimisation on the watch list |
 
 ## Risks and open questions
 
@@ -2445,24 +2566,7 @@ A new device is a new driver behind `erx_display` or a new producer of
 | `io_ansi`'s fallback strings on erXos include forms that are not the sequences they name: `cursor_home` is `ESC H` (HTS), `scroll_forward` and `scroll_backward` are `ESC S` and `ESC T`, `tab_backward` is `ESC I`, and `hyperlink_start` writes the URI before the parameters (`otp/lib/stdlib/src/io_ansi.erl:2614`, `:2646-2649`, `:2684`, `:2788-2790`) | high, on every erXos terminal, since erXos has no terminfo | `io_ansi` callers misdraw | upstream OTP bugs, which erXos's OTP fixes, since erXos owns its OTP (the work is in `TODO.md`); `erx_vt` implements the standard sequences and does not imitate them |
 | a program on a remote host, reached over `ssh`, counts widths from its own tables | medium | a cursor parts from the text after a wide or combining character in that program | every program on erXos, the line editor and `erx_vt` read the one width table; a remote host's tables are its own, as between any two UNIX systems |
 | a display's session needs no passphrase | certain, until the login design | whoever is at the display holds its principal's authority | the manifest names the principal deliberately; work that needs the principal's vault keys logs in at the UART or the host link; the login design below replaces it |
-
-Open decisions for the owner:
-
-1. **PNG is the one image type.** Every renderer must show every image
-   type, so the table is the intersection of what the browser, LVGL and
-   the Erlang renderer decode. PNG is native to the browser and to LVGL,
-   and costs the Erlang renderer a PNG reader, `erx_png`, a parser of
-   another domain's bytes with its fuzz target, over ERTS's `zlib`.
-   Plan 9's image(6) would cost the Erlang renderer nothing, since `y`
-   and `Y` load it, but would need a reader in the browser and in
-   `erx-lvgl`. Recommended: PNG alone, with JPEG added only when an
-   application shows photographs.
-2. **Presentations name inspector paths only.** A file's path, a hash, a
-   principal and a qid have no inspector path and print as text, so a
-   command such as `cat` declares no `-erx_args` type for its files. A
-   file path presentation would need a second text form, the path as rc
-   reads it, beside the path-segment form. Recommended: none until a
-   command or view needs one.
+| LVGL's periodic timers, its display refresh and input read, wake the program with nothing changed | medium | an idle kiosk spends CPU on a period, though it reports no pixels | the program reads input in LVGL 9's event mode, once per `input` record, and resumes the refresh timer only on an invalidation; the kiosk's idle test counts the program's wakes beside the driver's requests |
 
 Decisions taken with the owner:
 
@@ -2508,6 +2612,12 @@ Decisions taken with the owner:
 10. **The scrollback stays fixed** at 131,072 cells a terminal.
 11. **erXos's OTP fixes `io_ansi`'s four wrong fallback strings**, since
     erXos owns its OTP (Risks).
+12. **A kiosk renders through LVGL straight to its screen.** A kiosk
+    under LVGL runs no window system; its screen owner `erx_ui_kiosk`
+    serves the one application its manifest names, a configured domain
+    holding a display facet, with no login. The Erlang renderer, when it
+    replaces LVGL on kiosks, uses the desktop's stack under the single
+    policy.
 
 Open decisions for the owner:
 
@@ -2538,6 +2648,22 @@ Open decisions for the owner:
    system, keeping two properties the console has today: the system
    shell opens only at a line the manifest marks secure, and a display
    domain's view of what is typed is stated as an X server's is.
+
+2. **PNG is the one image type.** Every renderer must show every image
+   type, so the table is the intersection of what the browser, LVGL and
+   the Erlang renderer decode. PNG is native to the browser and to LVGL,
+   and costs the Erlang renderer a PNG reader, `erx_png`, a parser of
+   another domain's bytes with its fuzz target, over ERTS's `zlib`.
+   Plan 9's image(6) would cost the Erlang renderer nothing, since `y`
+   and `Y` load it, but would need a reader in the browser and in
+   `erx-lvgl`. Recommended: PNG alone, with JPEG added only when an
+   application shows photographs.
+3. **Presentations name inspector paths only.** A file's path, a hash, a
+   principal and a qid have no inspector path and print as text, so a
+   command such as `cat` declares no `-erx_args` type for its files. A
+   file path presentation would need a second text form, the path as rc
+   reads it, beside the path-segment form. Recommended: none until a
+   command or view needs one.
 
 ## References
 
