@@ -27,8 +27,8 @@
  * taking their locks descendant first through erx_effect_budget_lock, and
  * applies it whole or not at all; a refused change leaves every counter
  * as it was. What the caller must do after the locks are dropped, the
- * watches to trigger, the records to pin and the tombstones whose put is
- * due, is returned in erx_budget_effects_t.
+ * watches to trigger and the tombstones whose put is due, is returned in
+ * erx_budget_effects_t.
  *
  * The records are opaque outside the core: their definitions are in
  * kernel/core/budget_impl.h, which only kernel/core/budget.c includes, so
@@ -43,6 +43,7 @@ typedef struct erx_budget_effects erx_budget_effects_t;
 typedef struct erx_budget_walk erx_budget_walk_t;
 typedef struct erx_reserve erx_reserve_t;
 typedef struct erx_reserve_counts erx_reserve_counts_t;
+typedef struct erx_kcache_slot erx_kcache_slot_t;
 
 /* The IRQ object a watch triggers; the core only carries the pointer. */
 struct erx_irq;
@@ -60,12 +61,9 @@ struct erx_budget_effects {
 	erx_budget_t	*refused;
 	/* IRQ objects whose watch the adjustment crossed and disarmed. */
 	struct erx_irq	*fire[ERX_BUDGET_DEPTH_MAX];
-	/* Budgets whose pinned rose from zero: their records are kept. */
-	erx_budget_t	*first_pin[ERX_BUDGET_DEPTH_MAX];
 	/* Dead budgets whose spending reached zero: queue their puts. */
 	erx_budget_t	*tombstone[ERX_BUDGET_DEPTH_MAX];
 	uint32_t	 nfire;
-	uint32_t	 nfirst_pin;
 	uint32_t	 ntombstone;
 };
 
@@ -120,18 +118,97 @@ int	erx_budget_init_root(erx_budget_t *, erx_npages_t)
 	    ERX_WARN_UNUSED_RESULT;
 
 /*
- * Carves child from parent with the given kind, guarantee and cap, and
- * charges the guarantee to the parent's carved. Refuses with ERX_EINVAL a
- * kind other than a wall or elastic, a cap below the guarantee or, for a
- * wall, a cap other than the guarantee; with ERX_ELIMIT a parent at depth
- * ERX_BUDGET_DEPTH_MAX - 1; with ERX_ESTALE a dead parent; and with
- * ERX_ENOMEM a guarantee the parent's chain cannot cover. child is not
- * reachable by anyone until the call returns 0. The record's own cache
- * page is a separate charge, made by the cache.
+ * The record cache (docs/design-kernel.md, "The record cache" in
+ * Budgets): each budget carves the kernel records charged to it from
+ * cache pages of its own, one cache per record kind, under its lock. A
+ * cache page is charged whole to its budget, through the chain plan, from
+ * the take that adds it until the free that empties it; a record is freed
+ * only by the reaper's record free, after its object's grace period and
+ * last counted reference, so its page stays charged through that grace
+ * period. The pilot's one kind is the budget record.
+ *
+ * A taken record is named by its slot, the page and the record's index
+ * on it, which the record's owner keeps for the free.
  */
-int	erx_budget_carve(erx_budget_t *, erx_budget_t *, erx_budget_kind_t,
-	    erx_npages_t, erx_npages_t, erx_budget_effects_t *)
+typedef enum erx_kcache_kind {
+	ERX_KCACHE_BUDGET = 0,		/* a child budget's record */
+	ERX_KCACHE_NKINDS
+} erx_kcache_kind_t;
+
+struct erx_kcache_slot {
+	struct erx_kcache_page *page;	/* NULL: no slot */
+	uint32_t	 index;		/* the record's place on the page */
+};
+
+/*
+ * The bytes and alignment of the memory a cache page is made from: one
+ * page of the page allocator's, aligned to its size.
+ */
+#define ERX_KCACHE_PAGE_BYTES	4096u
+
+/* How many records of a kind one cache page holds; at most 64. */
+uint32_t erx_kcache_capacity(erx_kcache_kind_t);
+
+/*
+ * Takes a free record of the kind from the budget's cache into *slot.
+ * When no page has a free record, page, ERX_KCACHE_PAGE_BYTES of memory
+ * the caller took from the page allocator, becomes a new cache page,
+ * charged to the budget's used through the chain plan in the same hold,
+ * and *page_taken says so; the caller returns an untaken page to the
+ * allocator. Refuses with ERX_ESTALE a dead budget, which takes no new
+ * record; with ERX_ELIMIT when no page has a free record and page is
+ * NULL; with ERX_ENOMEM, naming the level, when the chain cannot cover
+ * the new page; and with ERX_EINVAL a kind outside the table. Nothing
+ * changes on a refusal.
+ */
+int	erx_kcache_take(erx_budget_t *, erx_kcache_kind_t, void *page,
+	    erx_kcache_slot_t *slot, bool *page_taken, erx_budget_effects_t *)
 	    ERX_WARN_UNUSED_RESULT;
+
+/* The record a slot names: aligned to 64 bytes, its kind's size. */
+void	*erx_kcache_record(const erx_kcache_slot_t *);
+
+/*
+ * Returns a record to the budget's cache that it was taken from, live or
+ * dead. When its page then holds no record, the page leaves the cache and
+ * is refunded through the chain plan in the same hold, a decrease that
+ * never fails, and *page_out names it for the caller to release through
+ * the page funnel; otherwise *page_out is NULL. A record kept for the
+ * boot is never freed: ERX_EBUSY. ERX_EINVAL for a slot with no page,
+ * a page of another budget's cache or kind, an index off its page or a
+ * record not taken.
+ */
+int	erx_kcache_free(erx_budget_t *, erx_kcache_kind_t,
+	    const erx_kcache_slot_t *, void **page_out,
+	    erx_budget_effects_t *) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * Carves a child from parent with the given kind, guarantee and cap, in
+ * the record slot names, which the caller took from the parent's cache of
+ * budget records, and charges the guarantee to the parent's carved.
+ * Refuses with ERX_EINVAL a kind other than a wall or elastic, a cap
+ * below the guarantee, for a wall a cap other than the guarantee, or a
+ * slot with no page, a page of another budget's cache or an index off
+ * its page; with ERX_ELIMIT
+ * a parent at depth ERX_BUDGET_DEPTH_MAX - 1; with ERX_ESTALE a dead
+ * parent; and with ERX_ENOMEM a guarantee the parent's chain cannot
+ * cover. On a refusal the record stays taken and the caller frees it
+ * back, as the design's carve returns it to the cache. The child is
+ * reachable by no one until the call returns 0; *child is its record.
+ */
+int	erx_budget_carve(erx_budget_t *, const erx_kcache_slot_t *,
+	    erx_budget_kind_t, erx_npages_t, erx_npages_t, erx_budget_t **child,
+	    erx_budget_effects_t *) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * The free of a dead child budget's own record, the tombstone's last
+ * step: erx_kcache_free on the parent's cache at the slot the carve
+ * recorded. ERX_EINVAL for the root or a live budget, ERX_EBUSY for a
+ * budget that still has something charged to it, or whose pinned is not
+ * zero, which is kept for the boot.
+ */
+int	erx_budget_free_record(erx_budget_t *, void **page_out,
+	    erx_budget_effects_t *) ERX_WARN_UNUSED_RESULT;
 
 /*
  * The one function that charges or refunds a budget: used changes by the
@@ -147,7 +224,13 @@ int	erx_budget_carve(erx_budget_t *, erx_budget_t *, erx_budget_kind_t,
 int	erx_budget_adjust(erx_budget_t *, int64_t, erx_budget_effects_t *)
 	    ERX_WARN_UNUSED_RESULT;
 
-/* Raises pinned at the budget and every ancestor, dead ones included. */
+/*
+ * Raises pinned at the budget and every ancestor, dead ones included. In
+ * the same plan, each level whose pinned rises from zero is kept for the
+ * boot, since its used will never reach zero, and so is its record: the
+ * first record kept on a cache page pins that page too, one more page at
+ * the page's budget, the level's parent, and at every ancestor above it.
+ */
 int	erx_budget_pin(erx_budget_t *, erx_npages_t, erx_budget_effects_t *)
 	    ERX_WARN_UNUSED_RESULT;
 

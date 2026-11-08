@@ -52,6 +52,10 @@ class BudgetTest < Minitest::Test
                                           '(*nlocked)++;'],
     'chain unlocked before it is applied' => ["\tif (error == 0) {\n\t\teffects->refused = NULL;",
                                               "\tchain_unlock(budget, nlocked);\n\tif (error == 0) {\n\t\teffects->refused = NULL;"],
+    # K32: every level a refusal reached below the refusing one keeps its
+    # change, as if the chain were applied one level at a time.
+    'chain applied one level at a time' => ["\tif (error == 0) {\n\t\teffects->refused = NULL;\n\t\tchain_apply(budget, *delta, dead_rule, nlocked, effects);\n\t}",
+                                            "\tif (error == 0)\n\t\teffects->refused = NULL;\n\tchain_apply(budget, *delta, dead_rule,\n\t    nlocked - (error != 0 ? 1 : 0), effects);"],
     'cancel refunds nothing' => ["\tdelta.used = -delta.used;\n\terror = chain_change(reserve->budget, &delta,\n\t    BUDGET_DEAD_TAKES_NO_RISE, effects);\n\tif (error == 0)\n\t\treserve->charged -= pages;",
                                "\tdelta.used = 0;\n\terror = chain_change(reserve->budget, &delta,\n\t    BUDGET_DEAD_TAKES_NO_RISE, effects);\n\tif (error == 0)\n\t\treserve->charged -= pages;"]
   }.freeze
@@ -119,7 +123,7 @@ class BudgetTest < Minitest::Test
   # guarantee the parent made to another child.
   def test_a_siblings_borrowing_never_takes_a_guarantee
     script = ['root 100', "carve 0 #{WALL} 40 40", "carve 1 #{ELASTIC} 10 40", "carve 1 #{ELASTIC} 10 40",
-              'reserve 2', 'reserve 3', 'charge 0 28', 'charge 0 1', 'charge 1 10']
+              'reserve 2', 'reserve 3', 'charge 0 29', 'charge 0 1', 'charge 1 10']
     results = assert_agrees([script]).grep(/\A= /)
     assert_equal [0, M::ENOMEM, 0], results.last(3).map { |line| status(line) }
     assert_match(/refused=1\z/, results[-2], 'the wall refuses, not an ancestor')
@@ -164,16 +168,39 @@ class BudgetTest < Minitest::Test
     assert_equal M::ESTALE, status(results.last)
   end
 
-  # Pinning raises pinned at every ancestor, dead ones included, reports
-  # each level that rose from zero, and keeps a dead budget's tombstone.
+  # Pinning raises pinned at every ancestor, dead ones included, and keeps
+  # a dead budget's tombstone. In the same plan each level whose pinned
+  # rose from zero keeps its record, and the first record kept on a cache
+  # page pins the page at the page's budget and above: the first pin of
+  # budget 2 pins 1 page at 2, 2 at 1 (2's record page) and 3 at the root
+  # (1's too); the second adds one page everywhere.
   def test_pins_count_through_the_tree_and_keep_the_tombstone
     script = ['root 100', "carve 0 #{ELASTIC} 10 60", "carve 1 #{ELASTIC} 5 60", 'reserve 2', 'charge 0 3',
               'pin 2 1', 'pin 2 1', 'pin 1 1', 'destroy 1', 'put', 'put']
     lines = assert_agrees([script])
     results = lines.grep(/\A= /)
-    assert_equal '= 0 pin=2 pin=1 pin=0', results[5]
-    assert_equal '= 0', results[6]
+    pinned = ->(state) { state.scan(/ b(\d+):(?:[^ ,]+,){8}(\d+)/).to_h { |id, pins| [Integer(id), Integer(pins)] } }
+    assert_equal({ 0 => 3, 1 => 2, 2 => 1 }, pinned.call(lines[11]))
+    assert_equal({ 0 => 4, 1 => 3, 2 => 2 }, pinned.call(lines[13]))
+    assert_equal '= 0', results[5]
     refute_match(/tomb=/, results.last(3).join)
+  end
+
+  # A record cache spills onto a second page when the first is full, keeps
+  # a page charged while any record on it lives, frees a page once its last
+  # record is freed, and two kept records on one page pin it once.
+  def test_record_cache_pages_are_charged_while_they_hold_a_record
+    children = per_page + 2
+    script = ['root 400']
+    children.times { script << "carve 0 #{WALL} 1 1" }
+    script += ['pin 1 1', 'pin 2 1']
+    (3..children).each { |id| script << "destroy #{id}" }
+    script += %w[put reap]
+    lines = assert_agrees([script])
+    cache_pages = ->(state) { Integer(state[/ b0:(?:[^ ,]+,){10}(\d+)/, 1]) }
+    assert_equal 2, cache_pages.call(lines[(2 * children) + 1])
+    assert_equal 1, cache_pages.call(lines.last), 'the second page goes once its records are freed'
+    assert_equal 2 + 1, Integer(lines.last[/ b0:(?:[^ ,]+,){8}(\d+)/, 1]), 'pins 1 and 2 and their one page'
   end
 
   # The checked arithmetic at the edges of a 64-bit count: each refusal is
@@ -251,8 +278,16 @@ class BudgetTest < Minitest::Test
     File.read(record.fetch('log')).lines.map(&:chomp).grep(/\A[=SW] /)
   end
 
+  # The records one cache page holds, as the core lays them out: the model
+  # places records on pages exactly as the core does.
+  def per_page
+    @per_page ||= Integer(run_script(driver, ['root 1']).first[/ per=(\d+)/, 1])
+  end
+
+  def new_model = BudgetModel.new(per_page: per_page)
+
   def predict(script)
-    model = BudgetModel.new
+    model = new_model
     script.flat_map { |line| model.call(line) }
   end
 
@@ -291,7 +326,7 @@ class BudgetTest < Minitest::Test
     results = lines.grep(/\A= /)
     statuses = results.map { |line| status(line) }.uniq
     [0, M::ENOMEM, M::ESTALE, M::EINVAL, M::EBUSY].each { |code| assert_includes statuses, code }
-    %w[fire= tomb= freed= pin= refused=0 detached=1].each do |mark|
+    %w[fire= tomb= freed= refused=0 detached=1].each do |mark|
       assert results.any? { |line| line.include?(" #{mark}") }, "the random corpus never shows #{mark}"
     end
     assert lines.any? { |line| line.start_with?("W ") }, "the random corpus never walks a destroy"
@@ -357,7 +392,7 @@ class BudgetTest < Minitest::Test
   # The script without the commands that name a budget or reserve an
   # earlier refusal never made.
   def steer(script)
-    model = BudgetModel.new
+    model = new_model
     script.select do |line|
       name, first = line.split
       kept = case name
@@ -373,7 +408,7 @@ class BudgetTest < Minitest::Test
   # Random scripts that the model steers: every id a command names exists.
   def random_scripts(count:, length:, rng:)
     Array.new(count) do
-      model = BudgetModel.new
+      model = new_model
       pages = 64 + rng.rand(257)
       script = ["root #{pages}"]
       model.call(script.first)

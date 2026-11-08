@@ -37,10 +37,14 @@ class BudgetModel
   PART_PAGES = 64
 
   # A budget's own facts; its counters are derived. cache is its record
-  # cache's reserve; entries its list of charged objects, as [:budget, id]
-  # or [:reserve, id].
+  # cache, as the core keeps it; entries its list of charged objects, as
+  # [:budget, id] or [:reserve, id].
   Budget = Struct.new(:kind, :parent, :depth, :guarantee, :cap, :dead, :threshold, :watch, :pins,
                       :cache, :entries, keyword_init: true)
+  # A record cache: its pages, each an array of per_page slots holding a
+  # child budget's id (or :taken for a record no carve has kept yet), and
+  # the order of the pages with a free slot, most recently listed first.
+  Cache = Struct.new(:pages, :partial, keyword_init: true)
   Reserve = Struct.new(:budget, :charged, :backed, :pooled, keyword_init: true)
   Counters = Data.define(:used, :carved, :lent, :pinned) do
     def spending = used + carved + lent
@@ -56,7 +60,11 @@ class BudgetModel
 
   attr_reader :pages
 
-  def initialize
+  attr_reader :per_page
+
+  def initialize(per_page:)
+    @per_page = per_page
+    @next_page = 0
     @budgets = {}
     @reserves = {}
     @pending = []
@@ -91,7 +99,7 @@ class BudgetModel
     budgets = @budgets.map do |id, b|
       c = all.fetch(id)
       " b#{id}:#{b.kind},#{b.depth},#{b.dead ? 1 : 0},#{b.guarantee},#{b.cap},#{c.used},#{c.carved}," \
-        "#{c.lent},#{c.pinned},#{b.threshold},#{b.cache.charged}"
+        "#{c.lent},#{c.pinned},#{b.threshold},#{b.cache.pages.size}"
     end
     reserves = @reserves.map { |id, r| " r#{id}:#{r.budget},#{r.charged},#{r.backed},#{r.pooled}" }
     "#{tag} free=#{@free} rel=#{@released}#{budgets.join}#{reserves.join}"
@@ -104,17 +112,25 @@ class BudgetModel
       b = @budgets.fetch(id)
       kids = children.fetch(id, [])
       live, dead = kids.partition { |kid| live?(kid) }
-      direct = b.cache.charged + @reserves.each_value.select { |r| r.budget == id }.sum(&:charged)
+      direct = b.cache.pages.size + @reserves.each_value.select { |r| r.budget == id }.sum(&:charged)
       all[id] = Counters.new(
         used: direct + dead.sum { |kid| all.fetch(kid).spending },
         carved: live.sum { |kid| @budgets.fetch(kid).guarantee },
         lent: live.sum { |kid| borrowing(all.fetch(kid), @budgets.fetch(kid)) },
-        pinned: b.pins + kids.sum { |kid| all.fetch(kid).pinned }
+        pinned: b.pins + kept_pages(b.cache, all) + kids.sum { |kid| all.fetch(kid).pinned }
       )
     end
   end
 
   private
+
+  # A cache page holding the record of a budget kept for the boot, one
+  # whose pinned is not zero, is pinned itself.
+  def kept_pages(cache, all)
+    cache.pages.count do |_page, slots|
+      slots.any? { |kid| kid.is_a?(Integer) && all.key?(kid) && all.fetch(kid).pinned.positive? }
+    end
+  end
 
   def borrowing(counters, budget) = [counters.spending - budget.guarantee, 0].max
 
@@ -170,7 +186,6 @@ class BudgetModel
       say(" fire=#{b.watch}")
       b.threshold = 0
     end
-    levels.each { |id| say(" pin=#{id}") if before.fetch(id).pinned.zero? && after.fetch(id).pinned.positive? }
     levels.each do |id|
       next unless !live?(id) && before.fetch(id).spending.positive? && after.fetch(id).spending.zero? &&
                   after.fetch(id).pinned.zero?
@@ -194,12 +209,13 @@ class BudgetModel
     @pages = pages
     @free = pages
     @budgets[0] = new_budget(kind: WALL, parent: nil, depth: 0, guarantee: pages, cap: pages)
+    say(" per=#{@per_page}")
     OK
   end
 
   def new_budget(**facts)
     Budget.new(dead: false, threshold: 0, watch: nil, pins: 0, entries: [],
-               cache: Reserve.new(budget: nil, charged: 0, backed: 0, pooled: 0), **facts)
+               cache: Cache.new(pages: {}, partial: []), **facts)
   end
 
   def op_state = OK
@@ -211,9 +227,7 @@ class BudgetModel
   end
 
   def op_carve(parent, kind, guarantee, cap)
-    cache = budget(parent).cache
-    charge(cache, parent, 1, nil)
-    cache.pooled -= 1
+    slot = cache_take(parent)
     id = @next_budget
     begin
       raise Refusal, EINVAL unless [WALL, ELASTIC].include?(kind)
@@ -223,10 +237,11 @@ class BudgetModel
       change(parent, dead_rule: :refused) do
         @budgets[id] = new_budget(kind: kind, parent: parent, depth: budget(parent).depth + 1,
                                   guarantee: guarantee, cap: cap)
+        page, index = slot
+        budget(parent).cache.pages.fetch(page)[index] = id
       end
     rescue Refusal
-      # A refused change restores the facts as copies: fetch the cache anew.
-      release(budget(parent).cache, parent, 1, 0)
+      cache_free(parent, slot)
       raise
     end
     @next_budget += 1
@@ -396,10 +411,52 @@ class BudgetModel
     @pending = []
     due.each do |id|
       parent = budget(id).parent
-      @budgets.delete(id)
       say(" freed=#{id}")
-      release(budget(parent).cache, parent, 1, 0)
+      slot = budget(parent).cache.pages.find { |_page, slots| slots.include?(id) }.then do |page, slots|
+        [page, slots.index(id)]
+      end
+      @budgets.delete(id)
+      cache_free(parent, slot)
     end
     OK
+  end
+
+  # The core's take: the lowest free slot of the first listed page, or a
+  # new page charged to the budget, listed first; a full page leaves the
+  # list. A dead budget takes no record.
+  def cache_take(id)
+    raise Refusal, ESTALE if budget(id).dead
+
+    cache = budget(id).cache
+    if cache.partial.empty?
+      page = @next_page
+      change(id) { budget(id).cache.pages[page] = Array.new(@per_page) }
+      take_pages(1)
+      @next_page += 1
+      cache = budget(id).cache
+      cache.partial.unshift(page)
+    end
+    page = cache.partial.first
+    slots = cache.pages.fetch(page)
+    index = slots.index(nil)
+    slots[index] = :taken
+    cache.partial.shift if slots.none?(&:nil?)
+    [page, index]
+  end
+
+  # The core's free: a page that empties leaves the cache and is refunded,
+  # its memory released; a full page that gains a free slot is listed first.
+  def cache_free(id, (page, index))
+    cache = budget(id).cache
+    slots = cache.pages.fetch(page)
+    was_full = slots.none?(&:nil?)
+    slots[index] = nil
+    if slots.all?(&:nil?)
+      cache.partial.delete(page)
+      change(id) { budget(id).cache.pages.delete(page) }
+      @released += 1
+    elsif was_full
+      cache.partial.unshift(page)
+    end
   end
 end

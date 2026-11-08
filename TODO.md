@@ -1234,13 +1234,13 @@ it; git history is the record of completed work.
   `erx_released_free` and the reaper's step. The members of `erx_plist_t`
   and `erx_backing_t` are public in the header with no rule keeping other
   files out of them; add one with P6's cross-cutting chokepoints.
-* [Medium] docs/design-kernel.md, lock order and **Backing a charge**:
-  the lock of a budget's record cache has no level. Item 6 says a budget's
-  lock covers its caches, `include/erx/budget.h` says the cache's lock is
-  its own, and `erx_kalloc`'s dead-budget path releases a page "under the
-  budget's lock", where `erx_page_release` takes the owner's lock and the
-  refund takes the budget's chain. Settle the cache's owner lock and its
-  level with the record cache.
+* [Low] docs/design-kernel.md, **Backing a charge**: `erx_kalloc`'s
+  dead-budget path releases a cache page "under the budget's lock", while
+  **The record cache** in [Budgets](docs/design-kernel.md#budgets) has the
+  free hand the page out and its caller release it through the page
+  funnel after dropping the budget's lock, since `erx_page_release`
+  takes the owner's lock and the refund the budget's chain. Reword the
+  `erx_kalloc` passage to match.
 * [Low] Page funnel tests, `test/host/page_test.rb` and
   `tools/fuzz/page_fuzz.c`: the drivers cannot see a reserve's pool chain,
   so they count pooled pages by exclusion and never walk the chain; and
@@ -1261,26 +1261,50 @@ it; git history is the record of completed work.
   header and the ticket lock land, embed them in the records, drop the
   lock effect, and give `erx_reserve_fill`, `erx_reserve_use` and
   `erx_reserve_refund` the chain itself, so the pooled count is the
-  chain's length by construction. The record cache, the lists
-  of charged objects and the destroy's walk over them are the stopgap
-  integration's (WP14), which `test/fixtures/budget_driver.c` stands in
-  for; the record cache also makes a carve's charge of the child's record
-  to the parent (design-kernel's **Carving** in
-  [Budgets](docs/design-kernel.md#budgets)), which `erx_budget_carve`
-  leaves to it. A pin returns the budgets whose `pinned` rose from zero for a
-  follow-up pin of their records' cache pages, where the design pins
-  them in the same adjustment; fold that in with the cache.
+  chain's length by construction. Embedding the header needs a decision
+  the design leaves open: how a core's private record holds the object
+  header that `kernel/core/object_impl.h` keeps private to `object.c`
+  (a header-then-body record with an accessor in `object.c` is the
+  candidate). `erx_budget_carve` checks that its slot's page is the
+  parent's but not, under the parent's lock, that the record is taken and
+  holds no live budget; folding the take into the carve's own chain plan
+  (one delta of the page and the guarantee) would make that hold by
+  construction and remove the caller's free-back on a refused carve.
+* [High] docs/design-kernel.md, [Budgets](docs/design-kernel.md#budgets)
+  and **Construction**: the budget's destroy walk over `att_charged`
+  has no settled iteration. The object header keeps `in_budget` "on its
+  budget's `att_charged` until freed", and the walk "destroys each object
+  on it", but an object closed by another destroy (a deletion of its
+  capability racing the budget's destroy) stays on the list until its
+  free after a grace period, so a walk that takes the list's head finds
+  it again and again, and one that keeps a position loses it when the
+  reaper unlinks a freed record. Settle where an object leaves
+  `att_charged` (at its close, under the budget's lock, is the candidate:
+  the walk then always takes the head, a racing destroy removes its own
+  object, and the budget's `used`, not the list, keeps its tombstone
+  until every record is freed) and how the walk's close of a child
+  budget that another destroy closed first waits for it. Until then
+  `att_charged`, its insert `erx_attach_budget_charged`, its teardown
+  reader in `kernel/core/delete.c`, the walk over real lists replacing
+  `test/fixtures/budget_driver.c`'s stand-ins, destroys started by a
+  budget's death and the deletion model's publication seed (above) wait.
 * [Medium] Budget core tests, `test/host/budget_test.rb`: the TSan race
   only charges and releases leaf reserves; K32 asks for resizes, carves
   and destroys racing too, with spending checked against every cap no
-  resize lowered. Two of K32's seeded failures are missing: a chain
-  applied one level at a time, and a dead or doomed budget's `used`
-  counted toward the machine. The counters' chokepoint is enforced by the
+  resize lowered. K32's seeded failure that counts a dead or doomed
+  budget's `used` toward the machine is missing: it needs a check of the
+  machine's total (what the live budgets with live ancestors hold
+  against the pages held) that the tests do not make yet. The counters'
+  chokepoint is enforced by the
   `budget-records-private` text rule of `tools/lib/erx/chokepoint_rules/budget.rb`
   (the header included and the records defined nowhere else), not by the
   syntax-tree check the design's row names, which stays the pending
   `budget-counters` rule; a layout-compatible record under another name,
-  cast from an `erx_budget_t` pointer, escapes the text rule.
+  cast from an `erx_budget_t` pointer, escapes the text rule. The budget
+  core has no fuzz target of its own (`tools/fuzz/budget_fuzz.c` over
+  scripts of carve, take, free, charge, resize, close and pin against
+  the checked arithmetic); the page and capability targets drive it only
+  through charges.
 * [Medium] Kernel mapping-record core, `kernel/core/map.c`: `erx_map_apply`
   takes no proof that the caller charged a part's `charge_pages`, and
   `erx_map_edges` no proof that it runs after the apply, though it reads the

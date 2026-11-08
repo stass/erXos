@@ -7,9 +7,10 @@
  * Host driver for the budget core (kernel/core/budget.c). It plays the
  * core's host: it provides the lock effects, checking that every chain is
  * locked descendant first and released whole, and it stands in for the
- * page core (a free count and a released count), the record cache (one
- * cache page per child budget's record, charged to the parent's cache
- * reserve) and the lists of charged objects that a destroy walks. It reads
+ * page core (a free count and a released count, and the memory of the
+ * cache pages the core's record cache asks for) and the lists of charged
+ * objects that a destroy walks. Every child budget's record comes from its
+ * parent's record cache, and its put frees it there. It reads
  * one command per line from the file named by its argument and prints,
  * for each, the status and effects and then the whole state, which
  * test/fixtures/budget_model.rb predicts independently:
@@ -36,6 +37,7 @@
  */
 
 #include <errno.h>
+#include <stdalign.h>
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -51,6 +53,7 @@
 #define IRQS_MAX	16
 #define PART_PAGES	64
 #define RACE_THREADS	4
+#define CACHE_PAGES_MAX	64
 
 struct erx_irq {
 	int	id;
@@ -62,8 +65,8 @@ typedef struct entry {
 } entry_t;
 
 typedef struct budget_slot {
-	erx_budget_t	 budget;
-	erx_reserve_t	 cache;		/* the budget's cache pages */
+	erx_budget_t	*budget;	/* in its parent's cache; the root's is
+					 * root_record */
 	pthread_mutex_t	 lock;
 	int		 exists;	/* carved and its record not yet put */
 	int		 nentries;	/* its list of charged objects */
@@ -84,6 +87,10 @@ typedef struct report {
 } report_t;
 
 static budget_slot_t budgets[BUDGETS_MAX];
+static erx_budget_t root_record;
+static alignas(ERX_KCACHE_PAGE_BYTES) unsigned char
+    cache_pages[CACHE_PAGES_MAX][ERX_KCACHE_PAGE_BYTES];
+static bool cache_page_used[CACHE_PAGES_MAX];
 static reserve_slot_t reserves[RESERVES_MAX];
 static struct erx_irq irqs[IRQS_MAX];
 static int nbudgets;
@@ -108,12 +115,36 @@ fail(const char *what)
 static int
 budget_id(const erx_budget_t *budget)
 {
-	const budget_slot_t *slot;
+	int i;
 
-	slot = (const budget_slot_t *)(const void *)budget;
-	if (slot < budgets || slot >= budgets + BUDGETS_MAX)
-		fail("a budget outside the driver's table");
-	return ((int)(slot - budgets));
+	for (i = 0; i < nbudgets; i++)
+		if (budgets[i].exists && budgets[i].budget == budget)
+			return (i);
+	fail("a budget outside the driver's table");
+	return (-1);
+}
+
+/* Memory for one cache page, as the page allocator would hand it out. */
+static void *
+cache_page_get(void)
+{
+	int i;
+
+	for (i = 0; i < CACHE_PAGES_MAX; i++) {
+		if (!cache_page_used[i]) {
+			cache_page_used[i] = true;
+			return (cache_pages[i]);
+		}
+	}
+	fail("out of cache page memory");
+	return (NULL);
+}
+
+static void
+cache_page_put(void *page)
+{
+	cache_page_used[((unsigned char *)page - cache_pages[0]) /
+	    ERX_KCACHE_PAGE_BYTES] = false;
 }
 
 void
@@ -176,8 +207,6 @@ collect(report_t *report, const erx_budget_effects_t *effects)
 
 	for (i = 0; i < effects->nfire; i++)
 		say(report, " fire=%d", effects->fire[i]->id);
-	for (i = 0; i < effects->nfirst_pin; i++)
-		say(report, " pin=%d", budget_id(effects->first_pin[i]));
 	for (i = 0; i < effects->ntombstone; i++) {
 		say(report, " tomb=%d", budget_id(effects->tombstone[i]));
 		if (npending == BUDGETS_MAX)
@@ -200,13 +229,12 @@ print_state(const char *tag)
 	for (i = 0; i < nbudgets; i++) {
 		if (!budgets[i].exists)
 			continue;
-		erx_budget_read(&budgets[i].budget, &c);
-		erx_reserve_read(&budgets[i].cache, &r);
+		erx_budget_read(budgets[i].budget, &c);
 		printf(" b%d:%u,%u,%d,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%"
 		    PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64,
 		    i, c.kind, c.depth, c.dead ? 1 : 0, c.guarantee, c.cap,
 		    c.used, c.carved, c.lent, c.pinned, c.threshold,
-		    r.charged);
+		    budgets[i].budget->caches[ERX_KCACHE_BUDGET].npages);
 	}
 	for (i = 0; i < nreserves; i++) {
 		if (!reserves[i].exists)
@@ -344,14 +372,47 @@ list_remove_budget(int budget, int id)
 }
 
 static void
-new_budget_slot(int id)
+new_budget_slot(int id, erx_budget_t *budget)
 {
 	budget_slot_t *slot;
 
 	slot = &budgets[id];
+	slot->budget = budget;
 	slot->exists = 1;
 	slot->nentries = 0;
-	erx_reserve_init(&slot->cache, &slot->budget);
+}
+
+/*
+ * A record from budget's cache: a free one, or one on a new page, which
+ * the take charges to the budget and the driver takes from the free pages.
+ */
+static int
+cache_take(erx_budget_t *budget, erx_kcache_slot_t *slot, report_t *report)
+{
+	erx_budget_effects_t effects;
+	void *page;
+	bool taken;
+	int error;
+
+	page = cache_page_get();
+	error = erx_kcache_take(budget, ERX_KCACHE_BUDGET, page, slot, &taken,
+	    &effects);
+	collect(report, &effects);
+	if (taken)
+		take_pages(1);
+	else
+		cache_page_put(page);
+	return (error);
+}
+
+/* A page the cache gave back goes to the released pages. */
+static void
+cache_page_released(void *page)
+{
+	if (page != NULL) {
+		cache_page_put(page);
+		release_pages(1);
+	}
 }
 
 /* The carve's composition: the record's cache page, then the guarantee. */
@@ -360,28 +421,31 @@ carve(long parent, long kind, erx_npages_t guarantee, erx_npages_t cap,
     report_t *report)
 {
 	erx_budget_effects_t effects;
-	erx_reserve_t *cache;
+	erx_kcache_slot_t slot;
+	erx_budget_t *child;
+	void *page;
 	int error, id;
 
 	if (nbudgets == BUDGETS_MAX)
 		fail("too many budgets");
-	cache = &budgets[parent].cache;
-	error = charge(cache, 1, -1, report);
+	error = cache_take(budgets[parent].budget, &slot, report);
 	if (error != 0)
 		return (error);
-	if (erx_reserve_use(cache) != 0)
-		fail("cache use refused");
 	id = nbudgets;
-	error = erx_budget_carve(&budgets[parent].budget, &budgets[id].budget,
-	    (erx_budget_kind_t)kind, guarantee, cap, &effects);
+	error = erx_budget_carve(budgets[parent].budget, &slot,
+	    (erx_budget_kind_t)kind, guarantee, cap, &child, &effects);
 	collect(report, &effects);
 	if (error != 0) {
-		if (release(cache, 1, 0, report) != 0)
-			fail("cache refund refused");
+		/* The record goes back to the cache, as any freed record does. */
+		if (erx_kcache_free(budgets[parent].budget, ERX_KCACHE_BUDGET,
+		    &slot, &page, &effects) != 0)
+			fail("cache free refused");
+		collect(report, &effects);
+		cache_page_released(page);
 		return (error);
 	}
 	nbudgets++;
-	new_budget_slot(id);
+	new_budget_slot(id, child);
 	list_append((int)parent, 1, id);
 	say(report, " id=%d", id);
 	return (0);
@@ -412,11 +476,11 @@ destroy(long top, report_t *report)
 	budget_slot_t *slot;
 	int cursor, error;
 
-	error = erx_budget_close(&budgets[top].budget, &effects);
+	error = erx_budget_close(budgets[top].budget, &effects);
 	collect(report, &effects);
 	if (error != 0)
 		return (error);
-	erx_budget_walk_begin(&walk, &budgets[top].budget);
+	erx_budget_walk_begin(&walk, budgets[top].budget);
 	for (;;) {
 		cursor = budget_id(walk.cursor);
 		slot = &budgets[cursor];
@@ -425,7 +489,7 @@ destroy(long top, report_t *report)
 		    ERX_BUDGET_HEAD_OBJECT;
 		switch (erx_budget_walk_next(&walk, head, head ==
 		    ERX_BUDGET_HEAD_BUDGET ?
-		    &budgets[slot->entries[0].id].budget : NULL)) {
+		    budgets[slot->entries[0].id].budget : NULL)) {
 		case ERX_BUDGET_WALK_DESTROY:
 			destroy_head_reserve(cursor, slot->entries[0].id,
 			    report);
@@ -457,18 +521,22 @@ destroy(long top, report_t *report)
 static void
 put_round(report_t *report)
 {
+	erx_budget_effects_t effects;
 	int due[BUDGETS_MAX];
-	int i, n, parent;
+	void *page;
+	int i, n;
 
 	n = npending;
 	memcpy(due, pending, sizeof(due[0]) * (size_t)n);
 	npending = 0;
 	for (i = 0; i < n; i++) {
-		parent = budget_id(erx_budget_parent(&budgets[due[i]].budget));
-		budgets[due[i]].exists = 0;
 		say(report, " freed=%d", due[i]);
-		if (release(&budgets[parent].cache, 1, 0, report) != 0)
-			fail("record cache refund refused");
+		if (erx_budget_free_record(budgets[due[i]].budget, &page,
+		    &effects) != 0)
+			fail("record free refused");
+		budgets[due[i]].exists = 0;
+		collect(report, &effects);
+		cache_page_released(page);
 	}
 }
 
@@ -545,26 +613,38 @@ arith(report_t *report)
 {
 	erx_budget_effects_t effects;
 	erx_budget_counters_t before, after;
+	erx_kcache_slot_t slot;
 	erx_budget_t *root, *child;
+	bool taken;
 
-	root = &budgets[0].budget;
-	child = &budgets[1].budget;
+	root = &root_record;
 	say(report, " root=%d", erx_budget_init_root(root,
 	    (erx_npages_t)INT64_MAX + 1));
 	if (erx_budget_init_root(root, INT64_MAX) != 0)
 		fail("the largest root refused");
-	say(report, " carve=%d", erx_budget_carve(root, child,
+	memset(cache_page_used, 0, sizeof(cache_page_used));
+	new_budget_slot(0, root);
+	nbudgets = 1;
+	/* The child's record takes one page: the root is full after it. */
+	if (erx_kcache_take(root, ERX_KCACHE_BUDGET, cache_pages[0], &slot,
+	    &taken, &effects) != 0 || !taken)
+		fail("the record's page refused");
+	say(report, " carve=%d", erx_budget_carve(root, &slot,
 	    ERX_BUDGET_ELASTIC, (erx_npages_t)INT64_MAX + 1, UINT64_MAX,
-	    &effects));
-	say(report, " carve=%d", erx_budget_carve(root, child,
-	    ERX_BUDGET_ELASTIC, INT64_MAX, UINT64_MAX, &effects));
+	    &child, &effects));
+	say(report, " carve=%d", erx_budget_carve(root, &slot,
+	    ERX_BUDGET_ELASTIC, INT64_MAX - 1, UINT64_MAX, &child, &effects));
+	if (child == NULL)
+		fail("the largest carve refused");
+	new_budget_slot(1, child);
+	nbudgets = 2;
 	erx_budget_read(root, &before);
 	say(report, " full=%d", erx_budget_adjust(root, 1, &effects));
 	say(report, " min=%d", erx_budget_adjust(child, INT64_MIN, &effects));
 	say(report, " below=%d", erx_budget_adjust(child, -1, &effects));
 	say(report, " pin=%d", erx_budget_pin(child,
 	    (erx_npages_t)INT64_MAX + 1, &effects));
-	say(report, " within=%d", erx_budget_adjust(child, INT64_MAX,
+	say(report, " within=%d", erx_budget_adjust(child, INT64_MAX - 1,
 	    &effects));
 	say(report, " borrow=%d", erx_budget_adjust(child, 1, &effects));
 	erx_budget_read(root, &after);
@@ -601,10 +681,11 @@ command(char *line, report_t *report)
 		nreserves = 0;
 		npending = 0;
 		released_pages = 0;
-		if (erx_budget_init_root(&budgets[0].budget,
-		    (erx_npages_t)a) != 0)
+		if (erx_budget_init_root(&root_record, (erx_npages_t)a) != 0)
 			fail("root refused");
-		new_budget_slot(0);
+		memset(cache_page_used, 0, sizeof(cache_page_used));
+		new_budget_slot(0, &root_record);
+		say(report, " per=%u", erx_kcache_capacity(ERX_KCACHE_BUDGET));
 		nbudgets = 1;
 		free_pages = (erx_npages_t)a;
 		return (0);
@@ -641,7 +722,7 @@ command(char *line, report_t *report)
 	if (strcmp(name, "carve") == 0)
 		return (carve(a, b, (erx_npages_t)c, (erx_npages_t)d, report));
 	if (strcmp(name, "resize") == 0) {
-		error = erx_budget_resize(&budgets[a].budget, (erx_npages_t)b,
+		error = erx_budget_resize(budgets[a].budget, (erx_npages_t)b,
 		    (erx_npages_t)c, &effects);
 		collect(report, &effects);
 		return (error);
@@ -652,7 +733,7 @@ command(char *line, report_t *report)
 		erx_budget_counters_t counters;
 
 		/* The list's insert function refuses a dead budget. */
-		erx_budget_read(&budgets[a].budget, &counters);
+		erx_budget_read(budgets[a].budget, &counters);
 		if (counters.dead)
 			return (ERX_ESTALE);
 		if (nreserves == RESERVES_MAX)
@@ -661,27 +742,27 @@ command(char *line, report_t *report)
 		reserves[nreserves].budget = (int)a;
 		pthread_mutex_init(&reserves[nreserves].lock, NULL);
 		erx_reserve_init(&reserves[nreserves].reserve,
-		    &budgets[a].budget);
+		    budgets[a].budget);
 		list_append((int)a, 0, nreserves);
 		say(report, " id=%d", nreserves);
 		nreserves++;
 		return (0);
 	}
 	if (strcmp(name, "pin") == 0) {
-		error = erx_budget_pin(&budgets[a].budget, (erx_npages_t)b,
+		error = erx_budget_pin(budgets[a].budget, (erx_npages_t)b,
 		    &effects);
 		collect(report, &effects);
 		return (error);
 	}
 	if (strcmp(name, "adjust") == 0) {
-		error = erx_budget_adjust(&budgets[a].budget, b, &effects);
+		error = erx_budget_adjust(budgets[a].budget, b, &effects);
 		collect(report, &effects);
 		return (error);
 	}
 	if (strcmp(name, "watch") == 0 || strcmp(name, "unwatch") == 0) {
 		if (b < 0 || b >= IRQS_MAX)
 			fail("no such IRQ object");
-		error = erx_budget_watch(&budgets[a].budget,
+		error = erx_budget_watch(budgets[a].budget,
 		    name[0] == 'w' ? &irqs[b] : NULL, (erx_npages_t)c, &fire);
 		if (fire)
 			say(report, " fire=%ld", b);
@@ -691,7 +772,7 @@ command(char *line, report_t *report)
 		if (b < 0 || b >= IRQS_MAX)
 			fail("no such IRQ object");
 		say(report, " detached=%d",
-		    erx_budget_watch_detach(&budgets[a].budget, &irqs[b]) ? 1 : 0);
+		    erx_budget_watch_detach(budgets[a].budget, &irqs[b]) ? 1 : 0);
 		return (0);
 	}
 	fail("unknown command");

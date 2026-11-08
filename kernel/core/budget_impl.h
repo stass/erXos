@@ -10,7 +10,8 @@
  * The budget core's records. Only kernel/core/budget.c includes this
  * file (and the core's host test driver), with kernel/core/page.c, which
  * moves a reserve's pool chain and nothing else; the budget-records-private
- * chokepoint enforces it, so every write of a counter is in budget.c.
+ * chokepoint enforces it, so every write of a counter is in budget.c, the
+ * record cache's pages among them: a page's charge and its pin are counters.
  */
 
 #include <stdatomic.h>
@@ -18,6 +19,29 @@
 
 #include "erx/budget.h"
 #include "erx/page.h"
+
+/*
+ * A cache page of kernel records: this header at the start of the page,
+ * then its records, each 64-byte aligned. A page with a free record is on
+ * its cache's list; a full page is on none.
+ */
+struct erx_kcache_page {
+	struct erx_kcache_page *prev;	/* on its cache's list of pages with a
+					 * free record; NULL at either end */
+	struct erx_kcache_page *next;
+	erx_budget_t	*owner;		/* the budget whose cache it is; fixed */
+	uint64_t	 taken;		/* bit i: record i is taken */
+	uint64_t	 kept;		/* bit i: record i is kept for the boot,
+					 * never freed; any bit pins the page */
+	erx_kcache_kind_t kind;		/* fixed when the page joins its cache */
+};
+
+/* One kind's cache: the pages a budget carves that kind's records from. */
+typedef struct erx_kcache {
+	struct erx_kcache_page *partial; /* the pages with a free record */
+	erx_npages_t	 npages;	/* every page of this cache: charged to
+					 * the budget's used */
+} erx_kcache_t;
 
 struct erx_budget {
 	erx_budget_t	*parent;	/* NULL for the root; fixed */
@@ -34,6 +58,10 @@ struct erx_budget {
 	erx_npages_t	 threshold;	/* spending at which the watch fires; 0 unarmed */
 	uint32_t	 depth;		/* 0 for the root; below ERX_BUDGET_DEPTH_MAX */
 	erx_budget_kind_t kind;		/* fixed at carving */
+	erx_kcache_slot_t home;		/* its own record in its parent's cache;
+					 * no slot for the root; fixed */
+	erx_kcache_t	 caches[ERX_KCACHE_NKINDS]; /* its records' pages, by
+					 * kind; under its lock */
 	_Atomic bool	 dead;		/* closed: takes no charge, and its spending
 					 * is counted in its parent's used; written
 					 * under the lock, read without it by

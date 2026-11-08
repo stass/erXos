@@ -48,6 +48,8 @@
 
 static erx_budget_t chain[CHAIN_DEPTH];
 static erx_budget_t before[CHAIN_DEPTH];
+/* The cache page a carve's record sits in: its header says its kind. */
+static _Alignas(64) unsigned char carve_page[ERX_KCACHE_PAGE_BYTES];
 static bool held[CHAIN_DEPTH];
 static bool locked_ever[CHAIN_DEPTH];
 static int last_locked = -1;
@@ -149,7 +151,8 @@ void
 harness(void)
 {
 	erx_budget_effects_t effects;
-	erx_budget_t child;
+	erx_budget_t *child;
+	erx_kcache_slot_t slot;
 	const int start = CHAIN_DEPTH - 1;
 	uint32_t op = nondet_u32();
 	int64_t pages = nondet_i64();
@@ -163,9 +166,16 @@ harness(void)
 		error = erx_budget_adjust(&chain[start], pages, &effects);
 	else if (op == 1)
 		error = erx_budget_pin(&chain[start], pin, &effects);
-	else
-		error = erx_budget_carve(&chain[start], &child,
-		    ERX_BUDGET_ELASTIC, guarantee, guarantee, &effects);
+	else {
+		((struct erx_kcache_page *)(void *)carve_page)->kind =
+		    ERX_KCACHE_BUDGET;
+		slot = (erx_kcache_slot_t){
+			.page = (struct erx_kcache_page *)(void *)carve_page,
+			.index = 0,
+		};
+		error = erx_budget_carve(&chain[start], &slot,
+		    ERX_BUDGET_ELASTIC, guarantee, guarantee, &child, &effects);
+	}
 
 	for (i = 0; i < CHAIN_DEPTH; i++)
 		__CPROVER_assert(!held[i], "every lock is released");
@@ -173,7 +183,6 @@ harness(void)
 		__CPROVER_assert(locked_ever[i] || same_counters(&chain[i],
 		    &before[i]), "no unlocked level changes");
 	__CPROVER_assert(effects.nfire <= ERX_BUDGET_DEPTH_MAX &&
-	    effects.nfirst_pin <= ERX_BUDGET_DEPTH_MAX &&
 	    effects.ntombstone <= ERX_BUDGET_DEPTH_MAX,
 	    "the effect lists stay within their arrays");
 

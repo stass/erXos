@@ -14,7 +14,13 @@
  * - At a dead budget the whole change in spending passes to the parent as
  *   a change of its used, since the parent counts a dead budget's spending
  *   in its own used.
- * - A pin passes up unchanged, to the root.
+ * - A pin passes up to the root, and grows by one page at the parent of
+ *   each level whose pinned rises from zero when that level's record is
+ *   the first kept on its cache page: the page is then pinned too.
+ *
+ * The record cache is here too, since a cache page's charge and its pin
+ * are counter changes: a page joins a cache in the hold that charges it
+ * and leaves in the hold that refunds it.
  *
  * The chain ends where nothing passes up. An operation plans the whole
  * chain under its locks before it writes anything, then applies the same
@@ -47,6 +53,13 @@ typedef struct budget_delta {
 	int64_t		carved;
 	int64_t		lent;
 	int64_t		pinned;
+	/*
+	 * The child, below the level this change reaches, whose pinned rose
+	 * from zero: its record, in this level's cache, is now kept, and the
+	 * level's apply sets its bit in the page's kept mask. NULL for none
+	 * and always at the level an operation starts from.
+	 */
+	erx_budget_t	*keep;
 } budget_delta_t;
 
 /* One level's share of a change: its counters after it, and what passes up. */
@@ -112,7 +125,18 @@ static bool
 delta_is_zero(const budget_delta_t *delta)
 {
 	return (delta->used == 0 && delta->carved == 0 && delta->lent == 0 &&
-	    delta->pinned == 0);
+	    delta->pinned == 0 && delta->keep == NULL);
+}
+
+/*
+ * Whether keeping child's record pins its cache page: the first record
+ * kept on a page pins it. Read under the lock of the page's budget, the
+ * child's parent, which the plan holds when the change reaches it.
+ */
+static bool
+keep_pins_page(const erx_budget_t *child)
+{
+	return (child != NULL && child->home.page->kept == 0);
 }
 
 /*
@@ -125,13 +149,19 @@ budget_step(const erx_budget_t *budget, const budget_delta_t *delta,
     budget_dead_rule_t dead_rule, budget_step_t *step)
 {
 	erx_npages_t new_borrowing, old_borrowing;
+	int64_t pinned = delta->pinned;
 
-	if (delta->pinned < 0)
+	if (pinned < 0)
 		return (ERX_EINVAL);
+	if (keep_pins_page(delta->keep)) {
+		if (pinned == INT64_MAX)
+			return (ERX_EINVAL);
+		pinned++;
+	}
 	if (!add_delta(budget->used, delta->used, &step->used) ||
 	    !add_delta(budget->carved, delta->carved, &step->carved) ||
 	    !add_delta(budget->lent, delta->lent, &step->lent) ||
-	    !add_delta(budget->pinned, delta->pinned, &step->pinned))
+	    !add_delta(budget->pinned, pinned, &step->pinned))
 		return (ERX_EINVAL);
 	if (!spending(budget->used, budget->carved, budget->lent,
 	    &step->old_spending) ||
@@ -139,7 +169,10 @@ budget_step(const erx_budget_t *budget, const budget_delta_t *delta,
 	    &step->new_spending))
 		return (ERX_EINVAL);
 
-	step->up = (budget_delta_t){ .pinned = delta->pinned };
+	step->up = (budget_delta_t){ .pinned = pinned };
+	if (budget->pinned == 0 && step->pinned != 0 &&
+	    budget->home.page != NULL)
+		step->up.keep = (erx_budget_t *)(uintptr_t)budget;
 	if (budget->dead) {
 		if (dead_rule == BUDGET_DEAD_REFUSED ||
 		    (dead_rule == BUDGET_DEAD_TAKES_NO_RISE &&
@@ -211,20 +244,41 @@ note_effects(erx_budget_t *level, const budget_step_t *step,
 {
 	if (watch_crossed(level, step) && level->watch != NULL)
 		effects->fire[effects->nfire++] = level->watch;
-	if (level->pinned == 0 && step->pinned != 0)
-		effects->first_pin[effects->nfirst_pin++] = level;
 	if (level->dead && step->old_spending != 0 &&
 	    step->new_spending == 0 && step->pinned == 0)
 		effects->tombstone[effects->ntombstone++] = level;
 }
 
 /*
+ * Writes one level's accepted step, under its lock: its counters, the
+ * kept record of the child the change came from, and its effects.
+ */
+static void
+level_apply(erx_budget_t *level, const budget_delta_t *delta,
+    const budget_step_t *step, erx_budget_effects_t *effects)
+{
+	note_effects(level, step, effects);
+	if (watch_crossed(level, step))
+		level->threshold = 0;	/* the watch fires once */
+	if (delta->keep != NULL)
+		delta->keep->home.page->kept |= UINT64_C(1) <<
+		    delta->keep->home.index;
+	level->used = step->used;
+	level->carved = step->carved;
+	level->lent = step->lent;
+	level->pinned = step->pinned;
+}
+
+/*
  * Applies the plan chain_plan accepted over the same nlocked levels. Each
  * step is recomputed rather than stored, since sixteen stored steps would
  * not fit the stack proof's frame cap, and the recomputation is the plan:
- * budget_step is a pure function of the level's counters and the change
- * from below, every level is still locked, and applying a level writes
- * nothing the level above reads.
+ * budget_step reads only the level's counters, the change from below and
+ * the kept mask of the page holding that change's keep, every level is
+ * still locked, and applying a level writes nothing a level above reads.
+ * The one write outside the level's record, the kept bit, lands on a page
+ * of this level's own cache after this level's step; every page has one
+ * owner, so the level above reads a page of its own cache, never this one.
  */
 static void
 chain_apply(erx_budget_t *budget, budget_delta_t delta,
@@ -239,13 +293,7 @@ chain_apply(erx_budget_t *budget, budget_delta_t delta,
 	for (i = 0; i < nlocked; i++) {
 		/* chain_plan accepted this very step under the same locks. */
 		(void)budget_step(level, &delta, dead_rule, &step);
-		note_effects(level, &step, effects);
-		if (watch_crossed(level, &step))
-			level->threshold = 0;	/* the watch fires once */
-		level->used = step.used;
-		level->carved = step.carved;
-		level->lent = step.lent;
-		level->pinned = step.pinned;
+		level_apply(level, &delta, &step, effects);
 		delta = step.up;
 		dead_rule = BUDGET_DEAD_PASSES;
 		level = level->parent;
@@ -288,7 +336,6 @@ effects_clear(erx_budget_effects_t *effects)
 {
 	effects->refused = NULL;
 	effects->nfire = 0;
-	effects->nfirst_pin = 0;
 	effects->ntombstone = 0;
 }
 
@@ -335,20 +382,222 @@ erx_budget_init_root(erx_budget_t *root, erx_npages_t pages)
 	return (0);
 }
 
-int
-erx_budget_carve(erx_budget_t *parent, erx_budget_t *child,
-    erx_budget_kind_t kind, erx_npages_t guarantee, erx_npages_t cap,
+/*
+ * The record cache. A page is its header, then its records at
+ * KCACHE_RECORDS_AT, each kcache_record_bytes[kind] long, 64-byte aligned.
+ */
+#define KCACHE_RECORDS_AT	64u
+#define KCACHE_BITS		64u
+
+_Static_assert(sizeof(struct erx_kcache_page) <= KCACHE_RECORDS_AT,
+    "a cache page's header fits before its first record");
+_Static_assert(sizeof(erx_budget_t) <= ERX_KCACHE_PAGE_BYTES - KCACHE_RECORDS_AT,
+    "a cache page holds at least one budget record");
+
+static const size_t kcache_record_bytes[ERX_KCACHE_NKINDS] = {
+	[ERX_KCACHE_BUDGET] = (sizeof(erx_budget_t) + 63u) & ~(size_t)63u,
+};
+
+uint32_t
+erx_kcache_capacity(erx_kcache_kind_t kind)
+{
+	size_t n;
+
+	if ((uint32_t)kind >= ERX_KCACHE_NKINDS)
+		return (0);
+	n = (ERX_KCACHE_PAGE_BYTES - KCACHE_RECORDS_AT) /
+	    kcache_record_bytes[kind];
+	return (n < KCACHE_BITS ? (uint32_t)n : KCACHE_BITS);
+}
+
+/* The taken mask of a full page of the kind. */
+static uint64_t
+kcache_full(erx_kcache_kind_t kind)
+{
+	uint32_t n = erx_kcache_capacity(kind);
+
+	return (n == KCACHE_BITS ? UINT64_MAX : (UINT64_C(1) << n) - 1);
+}
+
+void *
+erx_kcache_record(const erx_kcache_slot_t *slot)
+{
+	return ((unsigned char *)slot->page + KCACHE_RECORDS_AT +
+	    (size_t)slot->index * kcache_record_bytes[slot->page->kind]);
+}
+
+static void
+kcache_unlink(erx_kcache_t *cache, struct erx_kcache_page *page)
+{
+	if (page->prev != NULL)
+		page->prev->next = page->next;
+	else
+		cache->partial = page->next;
+	if (page->next != NULL)
+		page->next->prev = page->prev;
+	page->prev = page->next = NULL;
+}
+
+static void
+kcache_push(erx_kcache_t *cache, struct erx_kcache_page *page)
+{
+	page->prev = NULL;
+	page->next = cache->partial;
+	if (page->next != NULL)
+		page->next->prev = page;
+	cache->partial = page;
+}
+
+/*
+ * Takes the lowest free record of a page on the partial list, under the
+ * budget's lock; a page that fills leaves the list.
+ */
+static void
+kcache_take_from(erx_kcache_t *cache, struct erx_kcache_page *page,
+    erx_kcache_slot_t *slot)
+{
+	uint32_t index = (uint32_t)__builtin_ctzll(~page->taken);
+
+	page->taken |= UINT64_C(1) << index;
+	if (page->taken == kcache_full(page->kind))
+		kcache_unlink(cache, page);
+	*slot = (erx_kcache_slot_t){ .page = page, .index = index };
+}
+
+/*
+ * Charges or refunds one cache page at budget, whose lock the caller
+ * holds: the budget's own step, then its parent's chain for what passes
+ * up, as resize and close do. A refund never fails.
+ */
+static int
+kcache_charge(erx_budget_t *budget, int64_t one_page,
     erx_budget_effects_t *effects)
 {
-	budget_delta_t delta = { 0 };
+	budget_delta_t delta = { .used = one_page };
+	budget_step_t step;
+	int error;
+
+	error = budget_step(budget, &delta, BUDGET_DEAD_TAKES_NO_RISE, &step);
+	if (error == 0 && !delta_is_zero(&step.up))
+		error = chain_change(budget->parent, &step.up,
+		    BUDGET_DEAD_PASSES, effects);
+	else if (error != 0)
+		effects->refused = budget;
+	if (error == 0)
+		level_apply(budget, &delta, &step, effects);
+	return (error);
+}
+
+int
+erx_kcache_take(erx_budget_t *budget, erx_kcache_kind_t kind, void *page,
+    erx_kcache_slot_t *slot, bool *page_taken, erx_budget_effects_t *effects)
+{
+	erx_kcache_t *cache;
+	struct erx_kcache_page *fresh;
 	int error;
 
 	effects_clear(effects);
+	*page_taken = false;
+	*slot = (erx_kcache_slot_t){ .page = NULL, .index = 0 };
+	if ((uint32_t)kind >= ERX_KCACHE_NKINDS)
+		return (ERX_EINVAL);
+	cache = &budget->caches[kind];
+
+	erx_effect_budget_lock(budget);
+	if (budget->dead) {
+		error = ERX_ESTALE;
+	} else if (cache->partial != NULL) {
+		kcache_take_from(cache, cache->partial, slot);
+		error = 0;
+	} else if (page == NULL) {
+		error = ERX_ELIMIT;
+	} else if ((error = kcache_charge(budget, 1, effects)) == 0) {
+		fresh = page;
+		*fresh = (struct erx_kcache_page){ .owner = budget, .kind = kind };
+		kcache_push(cache, fresh);
+		cache->npages++;
+		kcache_take_from(cache, fresh, slot);
+		*page_taken = true;
+	}
+	erx_effect_budget_unlock(budget);
+	return (error);
+}
+
+/*
+ * Whether slot names a page of owner's cache of the kind and an index on
+ * it; the page's owner and kind are fixed when it joins the cache, so a
+ * slot of another budget's cache is refused before its lock matters.
+ */
+static bool
+kcache_slot_valid(const erx_kcache_slot_t *slot, const erx_budget_t *owner,
+    erx_kcache_kind_t kind)
+{
+	return (slot->page != NULL && slot->page->owner == owner &&
+	    slot->page->kind == kind &&
+	    slot->index < erx_kcache_capacity(kind));
+}
+
+int
+erx_kcache_free(erx_budget_t *budget, erx_kcache_kind_t kind,
+    const erx_kcache_slot_t *slot, void **page_out,
+    erx_budget_effects_t *effects)
+{
+	struct erx_kcache_page *page;
+	erx_kcache_t *cache;
+	uint64_t bit;
+	bool was_full;
+	int error = 0;
+
+	effects_clear(effects);
+	*page_out = NULL;
+	if ((uint32_t)kind >= ERX_KCACHE_NKINDS)
+		return (ERX_EINVAL);
+	cache = &budget->caches[kind];
+
+	erx_effect_budget_lock(budget);
+	page = slot->page;
+	bit = kcache_slot_valid(slot, budget, kind) ?
+	    UINT64_C(1) << slot->index : 0;
+	if (bit == 0 || (page->taken & bit) == 0 || cache->npages == 0) {
+		error = ERX_EINVAL;
+	} else if ((page->kept & bit) != 0) {
+		error = ERX_EBUSY;
+	} else {
+		was_full = page->taken == kcache_full(kind);
+		page->taken &= ~bit;
+		if (page->taken == 0) {
+			if (!was_full)
+				kcache_unlink(cache, page);
+			cache->npages--;
+			/* A decrease: it never fails. */
+			(void)kcache_charge(budget, -1, effects);
+			*page_out = page;
+		} else if (was_full) {
+			kcache_push(cache, page);
+		}
+	}
+	erx_effect_budget_unlock(budget);
+	return (error);
+}
+
+int
+erx_budget_carve(erx_budget_t *parent, const erx_kcache_slot_t *slot,
+    erx_budget_kind_t kind, erx_npages_t guarantee, erx_npages_t cap,
+    erx_budget_t **childp, erx_budget_effects_t *effects)
+{
+	budget_delta_t delta = { 0 };
+	erx_budget_t *child;
+	int error;
+
+	effects_clear(effects);
+	*childp = NULL;
 	if (kind != ERX_BUDGET_WALL && kind != ERX_BUDGET_ELASTIC)
 		return (ERX_EINVAL);
 	if (cap < guarantee || (kind == ERX_BUDGET_WALL && cap != guarantee))
 		return (ERX_EINVAL);
 	if (!npages_delta(guarantee, &delta.carved))
+		return (ERX_EINVAL);
+	if (!kcache_slot_valid(slot, parent, ERX_KCACHE_BUDGET))
 		return (ERX_EINVAL);
 	/* depth is fixed at carving, so it is read without the lock. */
 	if (parent->depth >= ERX_BUDGET_DEPTH_MAX - 1)
@@ -357,14 +606,44 @@ erx_budget_carve(erx_budget_t *parent, erx_budget_t *child,
 	error = chain_change(parent, &delta, BUDGET_DEAD_REFUSED, effects);
 	if (error != 0)
 		return (error);
+	child = erx_kcache_record(slot);
 	*child = (erx_budget_t){
 		.parent = parent,
 		.guarantee = guarantee,
 		.cap = cap,
 		.depth = parent->depth + 1,
 		.kind = kind,
+		.home = *slot,
 	};
+	*childp = child;
 	return (0);
+}
+
+int
+erx_budget_free_record(erx_budget_t *budget, void **page_out,
+    erx_budget_effects_t *effects)
+{
+	erx_kcache_slot_t home = budget->home;
+	erx_budget_t *parent = budget->parent;
+	bool empty;
+
+	*page_out = NULL;
+	effects_clear(effects);
+	if (parent == NULL || !erx_budget_dead(budget))
+		return (ERX_EINVAL);
+	/*
+	 * Only an empty tombstone is freed: nothing is charged to it, so no
+	 * cache page of its own holds a record. A dead budget takes no rise,
+	 * so the check stays true once its lock is dropped.
+	 */
+	erx_effect_budget_lock(budget);
+	empty = budget->used == 0 && budget->carved == 0 && budget->lent == 0;
+	erx_effect_budget_unlock(budget);
+	if (!empty)
+		return (ERX_EBUSY);
+	/* The record is gone once this returns: only the copies are read. */
+	return (erx_kcache_free(parent, ERX_KCACHE_BUDGET, &home, page_out,
+	    effects));
 }
 
 int

@@ -1340,7 +1340,7 @@ any budget to the root holds at most `ERX_BUDGET_DEPTH_MAX` budgets.
   record, as for every object charged to the parent, and the guarantee
   goes to the parent's `carved` through the core's carve, by the same
   chain plan. If the guarantee is refused, the record goes back to the
-  cache, where it waits for the next record as any freed record does. It installs the child
+  cache at once, as any freed record does, and a page it empties is refunded. It installs the child
   with the default rights
   intersected with the rights of the capability carved through and
   `DESTROY` ([Rights](#rights)).
@@ -1561,6 +1561,53 @@ any budget to the root holds at most `ERX_BUDGET_DEPTH_MAX` budgets.
   needs and a part, with one round more for each level of a chain of dead
   budgets and released spaces above the page's last record, and otherwise
   until the holders let go, which [Security](#security) bounds.
+* **The record cache.** A budget's kernel records come from its record
+  cache, `erx_kcache_t`, one per record kind, kept in the budget's record
+  under the budget's lock; the cache has no lock of its own and no level
+  in the kernel's order, so its owner lock is the budget's and every
+  change of a cache and of the counters it moves is made in one hold. A
+  **cache page** is one page of the page allocator's, aligned to its
+  size: a header at its start (its place on the cache's list of pages
+  with a free record, a mask of its taken records and a mask of those
+  kept for the boot) and then as many records of its kind as fit, each
+  64-byte aligned, at most 64. A taken record is named by its **slot**,
+  the page and the record's index on it, which the record's owner keeps
+  for the free; a child budget keeps its own as its home in the parent's
+  cache.
+
+  ```c
+  int  erx_kcache_take(erx_budget_t *, erx_kcache_kind_t, void *page,
+           erx_kcache_slot_t *slot, bool *page_taken, erx_budget_effects_t *);
+  int  erx_kcache_free(erx_budget_t *, erx_kcache_kind_t,
+           const erx_kcache_slot_t *, void **page_out, erx_budget_effects_t *);
+  ```
+
+  `erx_kcache_take` hands out the lowest free record of the first page on
+  the list. When no page has one it turns the page its caller took from
+  the page allocator into a new cache page, charging one page to the
+  budget's `used` through the chain plan in the same hold, so the page is
+  charged from the moment it joins the cache, or refuses with
+  `ERX_ENOMEM` and changes nothing; the caller gives an unused page back.
+  A dead budget's cache hands out nothing (`ERX_ESTALE`), as its list's
+  insert refuses everything. A page records its owner, so a slot of
+  another budget's cache is refused. `erx_kcache_free` frees a published
+  record only from the reaper's record free, after the record's grace
+  period and its last counted reference, so **a record's cache page stays charged through
+  the record's grace period**; when the free leaves the page with no
+  record, the page leaves the cache and is refunded through the chain
+  plan in the same hold, a decrease that never fails, and the free hands
+  the page to its caller, which releases it through the page funnel
+  after dropping the budget's lock. A record kept for the boot is never
+  freed, nor is a dead budget's own record while anything is charged to
+  it. A carve takes the child's record from the parent's cache first and
+  carves into it; a refused carve, whose record nobody else ever saw,
+  frees it back at once, and a page it empties is refunded then.
+  **Pinning** keeps records in the same adjustment: when a pin raises a
+  budget's `pinned` from zero, the budget's record is kept, and when it
+  is the first record kept on its cache page, the plan adds that page to
+  the pin at the page's budget, the parent, and every ancestor above, so
+  every page holding a record kept for the boot is counted in `pinned`
+  from the pin that kept it and a destroy pins nothing.
 * **Destroying a budget deletes everything charged to it.** A budget is
   destroyed by `erx_object_destroy` with `DESTROY`, by the destruction of
   its parent, or by its release when its last capability goes, as every

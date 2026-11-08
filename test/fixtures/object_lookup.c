@@ -26,7 +26,8 @@
 static alignas(64) unsigned char table_storage[256];
 static alignas(64) unsigned char directory[64];
 static alignas(64) unsigned char page[ERX_CAP_PAGE_SLOTS * ERX_CAP_SLOT_SIZE];
-static alignas(64) unsigned char budgets[2][512];
+static alignas(64) unsigned char budgets[1][512];
+static alignas(ERX_KCACHE_PAGE_BYTES) unsigned char cache_page[ERX_KCACHE_PAGE_BYTES];
 static int failures;
 
 static void
@@ -58,7 +59,9 @@ main(void)
 	erx_oid_key_t key = { { 9, 8, 7, 6 } };
 	erx_cap_table_t *table = (erx_cap_table_t *)table_storage;
 	erx_budget_t *root = (erx_budget_t *)budgets[0];
-	erx_budget_t *child = (erx_budget_t *)budgets[1];
+	erx_budget_t *child;
+	erx_kcache_slot_t slot;
+	bool taken;
 	erx_object_t *records[2];
 	erx_budget_effects_t effects;
 	erx_object_store_t *store;
@@ -80,7 +83,9 @@ main(void)
 	erx_object_store_init(store, &key);
 	erx_object_test_store(records, 2);
 	if (erx_budget_init_root(root, 1024) != 0 ||
-	    erx_budget_carve(root, child, ERX_BUDGET_WALL, 16, 16,
+	    erx_kcache_take(root, ERX_KCACHE_BUDGET, cache_page, &slot, &taken,
+	    &effects) != 0 ||
+	    erx_budget_carve(root, &slot, ERX_BUDGET_WALL, 16, 16, &child,
 	    &effects) != 0 ||
 	    erx_object_init(store, records[0], ERX_K_GATE, child) != ERX_OK ||
 	    erx_object_init(store, records[1], ERX_K_GATE, root) != ERX_OK ||
