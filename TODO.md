@@ -445,6 +445,42 @@ it; git history is the record of completed work.
   path with no fault; [design-system.md](docs/design-system.md) "The crash record" gives a halt the cause
   `halt`. musl's `abort()` meanwhile ends in a store to address 0, because `tkill` answers `ENOSYS`
   (`musl/src/internal/erxos/syscall.c:290`), so an abort reads as a fault rather than as an abort.
+* [Medium] domain library, `liberx/system/dom_core.c`: a specification
+  with `ERX_DOM_SECRET`, or a release file marked `ERX_ENTRY_SEAL`, is
+  refused with `ERX_EINVAL` until the vault exists (M11); the plan then
+  needs the sealing-page mapping and install of
+  [design-system.md](docs/design-system.md#creating-a-domain), step 5.
+* [Low] domain library, `dom_core.c`: `ERX_DOM_SPACES` is not gated by
+  the principal's policy, which design-system.md requires for an ordinary
+  domain; add the policy bit with the principal work after Phase 1b-A's
+  one built-in principal.
+* [Low] domain library, `include/erx/dom.h`: `ERX_DOM_CTL_RESERVE`
+  (`ERX_CTL_MAX` plus 64 per connection) and `ERX_DOM_BELL_BYTES` (a
+  page per bell) are hand-chosen bounds. The reserve should be the
+  longest connection-control record from its generated layout (about ten
+  times smaller, so a `connections` quota near 4,096 fits a lane), and
+  the bell's the kernel's IRQ object cost.
+* [Low] domain library, `dom_core.c`: `erx_dom_plan_check` checks a
+  plan's structure (order, charges, grants) but not the fields derivable
+  from its specification (slice index and count, carve and object sizes,
+  the parent); cross-check them so a wrong field fails before apply.
+* [Low] domain library, `dom_core.c` `dom_grant_rate`: rates round up,
+  the parent's too, so a child within a thousandth of a CPU of a tiny
+  parent fits it; compare quota over period exactly.
+* [Low] domain library, `dom_core.c`: the domain's own bell takes label 1,
+  which obliges the domain service's per-domain label counter to start at
+  2, and a connection's number is its row plus one, so a number is reused
+  after a disconnect; give the counter and a numbering that does not reuse
+  to the library when `erx_dom_connect` lands.
+* [Low] domain library, `dom_core.c` `dom_check_files`: a runtime image
+  flagged `ERX_ENTRY_SYSTEM` is refused; confirm against the boot image's
+  layout for domain releases (IM1) that service domains never run the
+  system release's ERTS entry.
+* [Low] domain library tests, `test/host/dom_core_test.rb`: a mutant is
+  caught by any difference in the driver's output rather than by the line
+  its seed must change, and the origin rule has no
+  `chokepoints_dom_test.rb` showing its allowed sites pass.
+
 * [Low] abi, `abi/erx_abi.txt`: the exit statuses `ERX_EXIT_PARENT`,
   `ERX_EXIT_RELEASED` and `ERX_EXIT_NOTHREAD` of
   [design-kernel.md](docs/design-kernel.md) and `ERX_EXIT_CRASH` of

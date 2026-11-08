@@ -1,0 +1,393 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#ifndef ERX_DOM_H
+#define ERX_DOM_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "erx/abi.h"
+#include "erx/cdefs.h"
+#include "erx/sched.h"
+
+/*
+ * The domain library's pure core (docs/design-system.md, "The domain
+ * library" and "Creating a domain"). The library is the one party that
+ * creates, installs into and ends domains; this core decides how. It
+ * reads no hardware or global state: every decision is a function of a
+ * copied specification and the caller's view of the machine, and the
+ * result is a plan, a list of steps that the apply phase performs in
+ * order. It builds for the host, where its tests and fuzz target run.
+ *
+ * Who may do what:
+ * - only the three planning entries below build an erx_dom_origin_t, each
+ *   from its own source, so no caller hands the planner an origin; a
+ *   source check keeps the origin kinds out of every other file, and
+ *   another the callers of the configured and partial-boot entries
+ *   (tools/lib/erx/chokepoint_rules/dom.rb);
+ * - every install a plan makes is drawn from erx_dom_grants, which has
+ *   no row for an IPC gate, so a plan that installs one fails
+ *   erx_dom_plan_check (the one installer, A7);
+ * - every object a plan creates is charged to a budget the same plan
+ *   carved, so undoing a creation is destroying those budgets (A4).
+ */
+
+#define ERX_DOM_SPEC_VERSION	1u
+/* The system domain's id; every other domain's id is above it. */
+#define ERX_DOM_SYSTEM_ID	4u
+/* The last id the domain service's counter hands out. */
+#define ERX_DOM_ID_MAX		UINT32_C(0xfffffffe)
+
+/* Origin kinds; zero is no origin, so a zeroed origin fails planning. */
+#define ERX_DOM_REQUEST		1u
+#define ERX_DOM_CONFIGURED	2u
+#define ERX_DOM_PARTIAL_BOOT	3u
+
+/* Specification and record flags. */
+#define ERX_DOM_SECRET		0x1u	/* the vault's; refused in Phase 1b-A */
+#define ERX_DOM_SPACES		0x2u	/* holds SPACES, with a sub-space group */
+#define ERX_DOM_FLAGS_KNOWN	(ERX_DOM_SECRET | ERX_DOM_SPACES)
+
+/*
+ * The room the lane a domain reads from the system domain keeps for one
+ * connection-control record, per connection its quota allows
+ * (docs/design-domains.md, "The reserve"): a control payload of at most
+ * ERX_CTL_MAX bytes with its frame and record headers.
+ */
+#define ERX_DOM_CTL_RESERVE	(ERX_CTL_MAX + 64u)
+/* What a plan reserves on a budget for one bell, an IRQ object. */
+#define ERX_DOM_BELL_BYTES	ERX_PAGE_SIZE
+/* The most steps a creation plan holds. */
+#define ERX_DOM_PLAN_STEPS_MAX	40u
+/* The fields of erx_runtime_limits_t a request may leave out; dom_core.c
+ * pins the layout, so a new field fails the build until it is handled. */
+#define ERX_DOM_LIMITS_FIELDS	11u
+#define ERX_DOM_LIMITS_ALL	((UINT32_C(1) << ERX_DOM_LIMITS_FIELDS) - 1)
+
+typedef struct erx_dom_origin {
+	uint32_t	kind;		/* ERX_DOM_REQUEST, ERX_DOM_CONFIGURED,
+					 * or ERX_DOM_PARTIAL_BOOT */
+	uint32_t	record;		/* REQUEST: ERX_MF_NONE; otherwise the
+					 * index in the origin's manifest table */
+} erx_dom_origin_t;
+
+typedef enum erx_dom_state {
+	ERX_DOM_FREE,		/* no domain; id is 0 */
+	ERX_DOM_BUILDING,	/* plan being applied */
+	ERX_DOM_BUILT,		/* built; first thread waiting for erx_dom_start */
+	ERX_DOM_RUNNING,
+	ERX_DOM_ENDED,		/* stopped; own budget destroyed; reported;
+				 * outer budget kept */
+	ERX_DOM_RETIRED		/* outer budget destroyed; record reusable */
+} erx_dom_state_t;
+
+typedef enum erx_dom_end_kind {
+	ERX_DOM_END_HALT,	/* the space stopped itself with a halt status */
+	ERX_DOM_END_CRASH,	/* the space stopped itself with ERX_EXIT_CRASH */
+	ERX_DOM_END_FAULT,	/* a thread faulted; the library stopped the space */
+	ERX_DOM_END_STOPPED	/* the library stopped it on request */
+} erx_dom_end_kind_t;
+
+typedef struct erx_dom_end {
+	erx_dom_end_kind_t	kind;
+	int64_t			status;	/* HALT: the status; FAULT: the fault kind */
+} erx_dom_end_t;
+
+/* One domain record (docs/design-system.md, "The domain library's records"). */
+typedef struct erx_dom {
+	uint32_t	id;		/* the domain id; 0 for a free record */
+	uint32_t	principal;
+	erx_dom_origin_t origin;	/* immutable creation source and manifest row */
+	erx_dom_state_t	state;
+	uint32_t	flags;		/* ERX_DOM_SECRET, ERX_DOM_SPACES */
+	erx_cap_t	budget;		/* its own budget, carved from its principal's */
+	erx_cap_t	outer;		/* its outer budget, carved beside it */
+	erx_cap_t	space, group;
+	erx_cap_t	spaces_group;	/* ERX_DOM_SPACES: its sub-space group */
+	erx_cap_t	crash;		/* its crash area, charged to its outer budget */
+	erx_cap_t	bootinfo;	/* its boot information page */
+	erx_cap_t	sealing;	/* the vault's mapping of the sealing page */
+	erx_cap_t	first_thread;
+	uint32_t	system_connection;	/* its connection to the system domain */
+	erx_dom_end_t	end;		/* classified end, once ERX_DOM_ENDED */
+	erx_fault_t	record;		/* the record that ended it */
+} erx_dom_t;
+
+/* One connection row; a is ERX_DOM_SYSTEM_ID for a system connection. */
+typedef struct erx_dom_connection {
+	uint32_t	number;		/* 0 for a free row */
+	uint32_t	a, b;		/* domain ids */
+	erx_cap_t	budget_a;	/* a's child budget; ERX_CAP_NULL when a is 4 */
+	erx_cap_t	budget_b;	/* b's; when a is 4 it holds both sides and bells */
+	erx_cap_t	side_a;		/* a's side, which b reads */
+	erx_cap_t	side_b;		/* b's side, which a reads */
+	erx_cap_t	bell_a;		/* bound to a's group */
+	erx_cap_t	bell_b;		/* bound to b's group */
+	bool		closing;
+} erx_dom_connection_t;
+
+/*
+ * A creation specification: the domain service's description of a domain,
+ * a fixed layout built only by an origin constructor
+ * (docs/design-system.md, "The domain library"). strings holds args_len
+ * bytes of NUL-separated arguments, then env_len bytes of NUL-separated
+ * environment.
+ */
+typedef struct erx_dom_spec {
+	uint32_t	version;	/* ERX_DOM_SPEC_VERSION */
+	uint32_t	id;		/* allocated by the domain service; nonzero, unused */
+	uint32_t	principal;
+	erx_dom_origin_t origin;	/* set by the library's origin constructor */
+	uint32_t	flags;		/* ERX_DOM_SECRET, ERX_DOM_SPACES */
+	uint32_t	release;	/* index of the release's first file in the boot image */
+	uint32_t	release_files;	/* number of files in its slice */
+	uint32_t	runtime;	/* index of the runtime image file */
+	uint64_t	memory;		/* its own budget's guarantee and cap, bytes */
+	uint64_t	outer;		/* its outer budget's guarantee and cap, bytes */
+	erx_grant_t	grant;		/* the domain group's grant */
+	erx_grant_t	spaces;		/* ERX_DOM_SPACES: the sub-space group's grant */
+	erx_runtime_limits_t runtime_limits;	/* complete startup values */
+	uint32_t	lane;		/* data area of the lane the domain reads */
+	uint32_t	connections;	/* its connections quota, sizing the reserve */
+	uint32_t	system_lane;	/* data area of the lane the system domain reads */
+	uint32_t	crash;		/* crash area size; zero for none */
+	uint32_t	args_len;
+	uint32_t	env_len;	/* args_len + env_len <= ERX_BOOT_STRINGS_MAX */
+	char		strings[ERX_BOOT_STRINGS_MAX];
+} erx_dom_spec_t;
+
+/*
+ * A principal's view: its budget, quotas and resolved profiles. Phase 1b-A
+ * has one, the built-in system principal (docs/plan.md, Phase 1b).
+ */
+typedef struct erx_dom_principal {
+	uint32_t	number;		/* 0 for none */
+	uint64_t	memory;		/* its budget, from which domain budgets carve */
+	uint64_t	carved;		/* what its domains' budgets hold now */
+	uint32_t	domains_max;	/* its domain quota */
+	uint32_t	domains;	/* its living domains */
+	erx_grant_t	share;		/* its group's grant under users */
+	erx_runtime_limits_t default_limits;
+	erx_runtime_limits_t ceiling_limits;
+} erx_dom_principal_t;
+
+/*
+ * One file of the boot image as the library sees it: its entry kind and
+ * flags, and for an image its manifest's flags and whether its manifest
+ * and ABI version passed the boot's checks.
+ */
+typedef struct erx_dom_file {
+	uint8_t		kind;		/* ERX_ENTRY_FILE or ERX_ENTRY_IMAGE */
+	uint8_t		flags;		/* ERX_ENTRY_SYSTEM, ERX_ENTRY_SEAL */
+	bool		image_ok;	/* image: manifest and ABI version accepted */
+	uint32_t	image_flags;	/* image: ERX_IMAGE_JIT */
+} erx_dom_file_t;
+
+/* A checked configured-domain row of the system manifest. */
+typedef struct erx_dom_configured {
+	uint32_t	principal;
+	uint32_t	flags;		/* ERX_DOM_SPACES */
+	uint32_t	release, release_files, runtime;
+	uint64_t	memory, outer;
+	erx_grant_t	grant, spaces;
+	erx_runtime_limits_t runtime_limits;
+	uint32_t	lane, connections;
+} erx_dom_configured_t;
+
+/* A checked native program row of a partial-boot manifest. */
+typedef struct erx_dom_partial {
+	uint32_t	runtime;	/* the program's image */
+	uint64_t	memory, outer;
+	erx_grant_t	grant;
+} erx_dom_partial_t;
+
+/*
+ * The library's view of the machine, which planning reads under the
+ * library lock. The tables are the library's own; the rest is fixed at
+ * boot from the checked system manifest and the boot image, except
+ * service_grants, the grants of the living configured domains under
+ * system, and ending.
+ */
+typedef struct erx_dom_view {
+	const erx_dom_t		*domains;	/* max_domains records */
+	uint32_t		 max_domains;
+	const erx_dom_connection_t *connections;	/* max_connections rows */
+	uint32_t		 max_connections;
+	const erx_dom_principal_t *principals;
+	uint32_t		 nprincipals;
+	const erx_dom_file_t	*files;		/* the boot image's files */
+	uint32_t		 nfiles;
+	const erx_dom_configured_t *configured;
+	uint32_t		 nconfigured;
+	const erx_dom_partial_t	*partial;
+	uint32_t		 npartial;
+	uint32_t		 partial_principal;	/* the partial boot's principal */
+	erx_runtime_limits_t	 native_limits;
+	erx_grant_t		 system_grant;	/* system's grant */
+	uint32_t		 system_reserve;	/* thousandths of system's rate */
+	const erx_grant_t	*service_grants;
+	uint32_t		 nservice_grants;
+	uint32_t		 system_lane;	/* the manifest's */
+	bool			 ending;	/* the ending record is installed */
+} erx_dom_view_t;
+
+/*
+ * The objects a plan names. The first group is what the plan makes; the
+ * second is what the library already holds, which a plan only refers to.
+ */
+typedef enum erx_dom_obj {
+	ERX_DOM_OBJ_NONE,
+	ERX_DOM_OBJ_BUDGET,		/* the domain's own budget */
+	ERX_DOM_OBJ_OUTER,		/* its outer budget */
+	ERX_DOM_OBJ_SPACE,
+	ERX_DOM_OBJ_GROUP,
+	ERX_DOM_OBJ_SPACES_GROUP,
+	ERX_DOM_OBJ_BOOTINFO,
+	ERX_DOM_OBJ_CRASH,
+	ERX_DOM_OBJ_SYS_BUDGET,		/* the system connection's child budget */
+	ERX_DOM_OBJ_SYS_SIDE,		/* the system domain's side: the domain reads it */
+	ERX_DOM_OBJ_DOM_SIDE,		/* the domain's side: the system domain reads it */
+	ERX_DOM_OBJ_SYS_BELL,		/* bound to the system domain's group */
+	ERX_DOM_OBJ_DOM_BELL,		/* bound to the domain's group */
+	ERX_DOM_OBJ_SLICE,		/* the release slice */
+	ERX_DOM_OBJ_THREAD,		/* the first thread */
+	ERX_DOM_OBJ_MADE_COUNT,
+	/* Held by the library. */
+	ERX_DOM_OBJ_PRINCIPAL_BUDGET = ERX_DOM_OBJ_MADE_COUNT,
+	ERX_DOM_OBJ_PARENT_GROUP,	/* the plan's resolved CPU parent */
+	ERX_DOM_OBJ_SYSTEM_SPACE,
+	ERX_DOM_OBJ_SYSTEM_GROUP,
+	ERX_DOM_OBJ_FAULT_GATE,		/* the library's fault gate */
+	ERX_DOM_OBJ_TIME_PAGE,
+	ERX_DOM_OBJ_COUNT
+} erx_dom_obj_t;
+
+typedef enum erx_dom_step_kind {
+	ERX_DOM_STEP_CARVE,		/* obj: a wall budget of size under budget */
+	ERX_DOM_STEP_SPACE,		/* obj under target (parent), aux, label, flags */
+	ERX_DOM_STEP_GROUP,		/* obj under target with grant */
+	ERX_DOM_STEP_MEM,		/* obj of size, charged to budget */
+	ERX_DOM_STEP_BELL,		/* obj, charged to budget, bound to target with label */
+	ERX_DOM_STEP_SLICE,		/* obj from files [index, index + count), charged to budget */
+	ERX_DOM_STEP_IMAGE_MAP,		/* the runtime image file index into target */
+	ERX_DOM_STEP_MAP,		/* obj into target, read-only */
+	ERX_DOM_STEP_INSTALL,		/* obj into target with rights */
+	ERX_DOM_STEP_BOOTINFO,		/* write obj from the installs' values */
+	ERX_DOM_STEP_THREAD		/* obj in space target and group aux, stopped */
+} erx_dom_step_kind_t;
+
+/* What undoes an applied step. */
+typedef enum erx_dom_undo_kind {
+	ERX_DOM_UNDO_DESTROY,		/* destroy the step's budget */
+	ERX_DOM_UNDO_BY_BUDGET		/* goes with a carved budget's destroy */
+} erx_dom_undo_kind_t;
+
+typedef struct erx_dom_step {
+	erx_dom_step_kind_t kind;
+	erx_dom_obj_t	obj;		/* what the step makes, maps or installs */
+	erx_dom_obj_t	budget;		/* the budget charged, or carved from */
+	erx_dom_obj_t	target;		/* the parent, space or group it goes into */
+	erx_dom_obj_t	aux;		/* SPACE: its fault gate; THREAD: its group */
+	uint64_t	size;		/* CARVE, MEM: bytes */
+	uint32_t	index, count;	/* SLICE, IMAGE_MAP: boot image files */
+	uint32_t	label;		/* SPACE: the domain id; BELL: its label */
+	uint32_t	rights;		/* INSTALL: ERX_HR_* */
+	uint32_t	flags;		/* SPACE: ERX_SPACE_JIT; GROUP: grant index */
+} erx_dom_step_t;
+
+/*
+ * Where a domain's group goes, derived from its origin. Zero is neither,
+ * so a zeroed plan names no parent.
+ */
+typedef enum erx_dom_parent {
+	ERX_DOM_PARENT_SYSTEM = 1,	/* a configured domain: under system */
+	ERX_DOM_PARENT_PRINCIPAL	/* requested, partial boot: its principal's group */
+} erx_dom_parent_t;
+
+/* GROUP step flags: which grant of the specification the group takes. */
+#define ERX_DOM_GROUP_GRANT	0u
+#define ERX_DOM_GROUP_SPACES	1u
+
+/* A plan's connection_row when the domain has no system connection. */
+#define ERX_DOM_NO_ROW		UINT32_MAX
+
+typedef struct erx_dom_plan {
+	erx_dom_spec_t	spec;		/* the validated specification */
+	erx_dom_parent_t parent;
+	uint32_t	slot;		/* the free record the domain takes */
+	uint32_t	connection;	/* its system connection's number; 0 for none */
+	uint32_t	connection_row;	/* that connection's row, or ERX_DOM_NO_ROW */
+	uint32_t	nsteps;
+	erx_dom_step_t	steps[ERX_DOM_PLAN_STEPS_MAX];
+} erx_dom_plan_t;
+
+/*
+ * One row of erx_dom_grants: what a domain may hold of an object. A row
+ * applies when the specification has its flags; spaces_rights are added
+ * to rights when the specification has ERX_DOM_SPACES.
+ */
+typedef struct erx_dom_grant_row {
+	erx_dom_obj_t	obj;
+	uint32_t	flags;		/* required specification flags, or 0 */
+	uint32_t	rights;
+	uint32_t	spaces_rights;
+} erx_dom_grant_row_t;
+
+/* Every install a plan may make into a domain's table (A7), one row per object. */
+#define ERX_DOM_GRANTS_ROWS	9u
+extern const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS];
+
+/*
+ * The planning entries, one per creation origin. Each builds the
+ * specification from its source itself, so the origin is set here and
+ * nowhere else and no caller hands the planner an origin; then validates
+ * it against the view and writes the creation plan. Each returns ERX_OK;
+ * ERX_EINVAL for a specification outside its ranges; ERX_ELIMIT for a full
+ * table or an exhausted quota; ERX_ENOMEM when the principal's budget
+ * cannot hold the domain's two budgets; ERX_EBUSY once the machine is
+ * ending. *plan is written only on ERX_OK.
+ *
+ * erx_dom_plan_request plans an admitted request: req supplies id,
+ * principal, flags, release, release_files, runtime, memory, outer, grant,
+ * spaces, lane, connections, args_len, env_len and strings, and every other
+ * field is ignored; given is a mask over the fields of erx_runtime_limits_t
+ * in layout order, each field given read from limits, which may be NULL
+ * when given is 0, and each other field the principal's default.
+ *
+ * erx_dom_plan_configured plans configured-domain row `row` of the checked
+ * manifest under domain id `id`; only manifest startup and restart call
+ * it. erx_dom_plan_partial plans partial-boot program row `row`; only the
+ * root's partial-boot entry calls it.
+ */
+erx_status_t	erx_dom_plan_request(const erx_dom_view_t *,
+		    const erx_dom_spec_t *req, const erx_runtime_limits_t *limits,
+		    uint32_t given, erx_dom_plan_t *plan);
+erx_status_t	erx_dom_plan_configured(const erx_dom_view_t *, uint32_t id,
+		    uint32_t row, erx_dom_plan_t *plan);
+erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
+		    uint32_t row, erx_dom_plan_t *plan);
+
+/*
+ * Checks a plan whole before it is applied: every step names objects
+ * already made or held, every made object is charged to a budget the plan
+ * carved, and every install has a row of erx_dom_grants whose rights
+ * cover it. ERX_EINVAL otherwise. The planning entries' plans pass it.
+ */
+erx_status_t	erx_dom_plan_check(const erx_dom_plan_t *plan);
+
+/* What undoes an applied step of this kind. */
+erx_dom_undo_kind_t erx_dom_step_undo(erx_dom_step_kind_t);
+
+/*
+ * The undo of a creation whose first `applied` steps were applied: the
+ * objects to destroy, in order, into undo, which holds
+ * ERX_DOM_PLAN_STEPS_MAX entries. Returns their number.
+ */
+uint32_t	erx_dom_plan_undo(const erx_dom_plan_t *plan, uint32_t applied,
+		    erx_dom_obj_t *undo);
+
+#endif /* ERX_DOM_H */

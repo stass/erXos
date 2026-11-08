@@ -22,6 +22,7 @@ class GateBaselineTest < Minitest::Test
   SANITIZER_TESTS = %w[
     test/host/abi_calls_test.rb test/host/blake3_test.rb test/host/boot_file_test.rb test/host/budget_test.rb
     test/host/cap_test.rb test/host/crypto_test.rb test/host/debug_log_probe_test.rb test/host/dispatch_test.rb
+    test/host/dom_core_test.rb
     test/host/elf_plan_test.rb test/host/fiasco_umtx_test.rb test/host/fiasco_vm_test.rb test/host/hosted_function_api_test.rb test/host/lane_test.rb
     test/host/log_test.rb test/host/manifest_reader_test.rb test/host/map_test.rb test/host/pack_test.rb
     test/host/rng_test.rb
@@ -41,6 +42,8 @@ class GateBaselineTest < Minitest::Test
                                           kernel/core/log.c build/gen/kernel/generated/abi_decode.c
                                           build/gen/kernel/generated/abi_run.c] },
     'device_queue' => { seeds: 8, sources: %w[otp/erts/emulator/nifs/erxos/erx_device_queue.c] },
+    'dom_core' => { seeds: 7, sources: %w[liberx/system/dom_core.c liberx/erx_lane.c
+                                          build/gen/liberx/generated/abi_reader.c] },
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
     'lfs_image' => { seeds: 6, sources: %w[littlefs/lfs.c littlefs/lfs_util.c] },

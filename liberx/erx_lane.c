@@ -211,6 +211,14 @@ erx_lane_reader_init(erx_lane_reader_t *reader, const void *peer_side,
 	return (true);
 }
 
+uint64_t
+erx_lane_side_bytes(uint64_t size)
+{
+	if (size < ERX_LANE_MIN || size > ERX_LANE_MAX || (size & (size - 1)) != 0)
+		return (0);
+	return (ERX_LANE_SIDE_DATA + size);
+}
+
 erx_lane_status_t
 erx_lane_take(erx_lane_reader_t *reader, void *buf, size_t max,
     erx_lane_part_t *part)

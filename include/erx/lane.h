@@ -111,6 +111,14 @@ bool erx_lane_reader_init(erx_lane_reader_t *, const void *, void *,
     uint64_t);
 
 /*
+ * The bytes of one side of a lane whose data area is size bytes: the
+ * header and reader pages, then the data area. 0 for a size that is not
+ * a power of two from ERX_LANE_MIN to ERX_LANE_MAX. The domain library
+ * sizes a connection's sides with it, so no other file names the layout.
+ */
+uint64_t erx_lane_side_bytes(uint64_t);
+
+/*
  * Takes the next part of the lane into buf, at most max bytes of body.
  * Returns ERX_LANE_TOOK with *part filled, ERX_LANE_EMPTY when nothing new
  * is published, or ERX_LANE_MALFORMED when the lane fails a check, now or
