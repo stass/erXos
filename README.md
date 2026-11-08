@@ -288,6 +288,11 @@ Error in process <0.150.0> with exit value:
   last two loaded, not started), and the erXos applications `erx`,
   `erx_files`, `erx_uart`, `erx_blk`, `erx_shell`, `erx_code` and
   `erx_hostlink`.
+* **A demo runs in the browser**, on an AArch64 emulator built from v86,
+  with a disk that keeps its files across a power cut and a menu of
+  hardware faults (dead, corrupt or hung disk, corrupt RAM, an interrupt
+  storm, a frozen CPU, a power cut) that shows how the system meets each.
+  When the machine goes down it prints a picture and its crash record.
 * **The build checks itself.** Generated ABI and hardware layers,
   reproducible boot images, fuzzing, ASan, UBSan, TSan and TLA+ models
   all run as build gates.
