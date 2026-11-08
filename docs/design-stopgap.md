@@ -718,6 +718,7 @@ since the service keeps no pointer across a receive. A table that cannot grow is
 | a task's home groups | 8, in a group table made with the task |
 | a group's bound IRQ objects | 64, the ready list's length |
 | tasks and memory objects together | 4,096, the page index's labels ([What Phase 1 defers](#what-phase-1-defers)) |
+| any one table | 512 pages, its one directory page; the task table's two rows a page make 1,024 tasks, and a task's runs 131,072 |
 | everything else | the pool |
 
 The page index stays sized at boot from the window ([The range table](#the-range-table)), which bounds it by
