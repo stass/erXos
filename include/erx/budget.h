@@ -198,7 +198,9 @@ int	erx_kcache_free(erx_budget_t *, erx_kcache_kind_t,
  * allocator, becomes a new cache page charged to the parent's used in
  * the same plan, and *page_taken says so; the caller returns an untaken
  * page. Refuses with ERX_EINVAL a kind other than a wall or elastic, a
- * cap below the guarantee, or for a wall a cap other than the guarantee;
+ * cap below the guarantee, for a wall a cap other than the guarantee, a
+ * guarantee above INT64_MAX, or a change of some level's spending by
+ * more than INT64_MAX, which no root can cover;
  * with ERX_ELIMIT a parent at depth ERX_BUDGET_DEPTH_MAX - 1, or a cache
  * with no free record and page NULL; with ERX_ESTALE a dead parent; and
  * with ERX_ENOMEM, naming the level, a record and guarantee the parent's
@@ -253,7 +255,8 @@ int	erx_budget_pin(erx_budget_t *, erx_npages_t, erx_budget_effects_t *)
 /*
  * Sets a budget's guarantee and cap in one step; the caller has checked
  * DESTROY on the capability. Refuses with ERX_EINVAL the root, a cap below
- * the guarantee, or a wall's cap other than its guarantee; with ERX_ESTALE
+ * the guarantee, a wall's cap other than its guarantee, or a change of
+ * some level's spending by more than INT64_MAX; with ERX_ESTALE
  * a dead budget; and with ERX_ENOMEM a growth the parent's chain cannot
  * cover. A shrink never fails, even below the spending: what the smaller
  * guarantee no longer covers becomes borrowing, and a cap below the

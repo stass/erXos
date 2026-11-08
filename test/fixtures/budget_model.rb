@@ -99,7 +99,7 @@ class BudgetModel
     budgets = @budgets.map do |id, b|
       c = all.fetch(id)
       " b#{id}:#{b.kind},#{b.depth},#{b.dead ? 1 : 0},#{b.guarantee},#{b.cap},#{c.used},#{c.carved}," \
-        "#{c.lent},#{c.pinned},#{b.threshold},#{b.cache.pages.size}"
+        "#{c.lent},#{c.pinned},#{b.threshold},#{b.cache.pages.size},#{b.parent || -1}"
     end
     reserves = @reserves.map { |id, r| " r#{id}:#{r.budget},#{r.charged},#{r.backed},#{r.pooled}" }
     "#{tag} free=#{@free} rel=#{@released}#{budgets.join}#{reserves.join}"

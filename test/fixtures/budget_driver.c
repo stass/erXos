@@ -35,7 +35,9 @@
 *   reap                    free every released page
 *   put                     one round of tombstone puts
 *   state                   print the state alone
-*   race SEED ITERATIONS    four threads charge and release at random
+*   race SEED ITERATIONS    four threads race: two charge and release at
+*                           random, one carves, charges, resizes and
+*                           destroys budgets, one resizes the others
 *   arith                   the edges of the checked arithmetic
  */
 
@@ -57,6 +59,8 @@
 #define IRQS_MAX	16
 #define PART_PAGES	64
 #define RACE_THREADS	4
+/* The slot the race's carves reuse, one budget at a time. */
+#define RACE_SLOT	(BUDGETS_MAX - 1)
 #define CACHE_PAGES_MAX	64
 
 struct erx_irq {
@@ -101,6 +105,17 @@ static int npending;
 static erx_npages_t free_pages;
 static erx_npages_t released_pages;
 static pthread_mutex_t pages_lock = PTHREAD_MUTEX_INITIALIZER;
+/* The budget table: a race's carve and free write a slot others look up. */
+static pthread_rwlock_t table_lock = PTHREAD_RWLOCK_INITIALIZER;
+/*
+ * What each budget may spend at the end of the race: its cap, or, after a
+ * resize that left its spending above the cap, that spending, since every
+ * rise is refused until the spending falls below the cap.
+ */
+static erx_npages_t race_bound[BUDGETS_MAX];
+/* What the race's carver and resizer did, each written by its one thread. */
+static long race_carves;
+static long race_resizes;
 
 /* The locks this thread holds, innermost last. */
 static _Thread_local erx_budget_t *held[ERX_BUDGET_DEPTH_MAX + 1];
@@ -116,13 +131,16 @@ fail(const char *what)
 static int
 budget_id(const erx_budget_t *budget)
 {
-	int i;
+	int i, id = -1;
 
-	for (i = 0; i < nbudgets; i++)
+	pthread_rwlock_rdlock(&table_lock);
+	for (i = 0; i < BUDGETS_MAX && id < 0; i++)
 		if (budgets[i].exists && budgets[i].budget == budget)
-			return (i);
-	fail("a budget outside the driver's table");
-	return (-1);
+			id = i;
+	pthread_rwlock_unlock(&table_lock);
+	if (id < 0)
+		fail("a budget outside the driver's table");
+	return (id);
 }
 
 /* Memory for one cache page, as the page allocator would hand it out. */
@@ -230,6 +248,7 @@ print_state(const char *tag)
 {
 	erx_budget_counters_t c;
 	erx_reserve_counts_t r;
+	erx_budget_t *parent;
 	int i;
 
 	printf("%s free=%" PRIu64 " rel=%" PRIu64, tag, free_pages,
@@ -238,11 +257,14 @@ print_state(const char *tag)
 		if (!budgets[i].exists)
 			continue;
 		erx_budget_read(budgets[i].budget, &c);
+		parent = erx_budget_parent(budgets[i].budget);
 		printf(" b%d:%u,%u,%d,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%"
-		    PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64,
+		    PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+		    ",%d",
 		    i, c.kind, c.depth, c.dead ? 1 : 0, c.guarantee, c.cap,
 		    c.used, c.carved, c.lent, c.pinned, c.threshold,
-		    budgets[i].budget->caches[ERX_KCACHE_BUDGET].npages);
+		    budgets[i].budget->caches[ERX_KCACHE_BUDGET].npages,
+		    parent == NULL ? -1 : budget_id(parent));
 	}
 	for (i = 0; i < nreserves; i++) {
 		if (!reserves[i].exists)
@@ -342,9 +364,11 @@ new_budget_slot(int id, erx_budget_t *budget)
 {
 	budget_slot_t *slot;
 
+	pthread_rwlock_wrlock(&table_lock);
 	slot = &budgets[id];
 	slot->budget = budget;
 	slot->exists = 1;
+	pthread_rwlock_unlock(&table_lock);
 }
 
 /* A page the cache gave back goes to the released pages. */
@@ -375,21 +399,19 @@ join_budget(erx_object_t *obj, erx_ktype_t type, erx_budget_t *budget)
 }
 
 /*
- * The carve: one plan of the record's page and the guarantee, then the
- * child's object header, on the parent's list.
+ * The carve into slot id: one plan of the record's page and the
+ * guarantee, then the child's object header, on the parent's list.
  */
 static int
 carve(long parent, long kind, erx_npages_t guarantee, erx_npages_t cap,
-    report_t *report)
+    int id, report_t *report)
 {
 	erx_budget_effects_t effects;
 	erx_budget_t *child;
 	void *page;
 	bool taken;
-	int error, id;
+	int error;
 
-	if (nbudgets == BUDGETS_MAX)
-		fail("too many budgets");
 	page = cache_page_get();
 	error = erx_budget_carve(budgets[parent].budget, page,
 	    (erx_budget_kind_t)kind, guarantee, cap, &child, &taken, &effects);
@@ -400,7 +422,6 @@ carve(long parent, long kind, erx_npages_t guarantee, erx_npages_t cap,
 		cache_page_put(page);
 	if (error != 0)
 		return (error);
-	id = nbudgets++;
 	new_budget_slot(id, child);
 	if (join_budget(erx_object_of(child), ERX_K_BUDGET,
 	    budgets[parent].budget) != ERX_OK)
@@ -443,7 +464,9 @@ put_object(erx_object_t *obj, report_t *report)
 	say(report, " freed=%d", id);
 	if (erx_budget_free_record(budgets[id].budget, &page, &effects) != 0)
 		fail("record free refused");
+	pthread_rwlock_wrlock(&table_lock);
 	budgets[id].exists = 0;
+	pthread_rwlock_unlock(&table_lock);
 	collect(report, &effects);
 	cache_page_released(page);
 }
@@ -562,10 +585,21 @@ put_round(report_t *report)
 		put_object(erx_object_of(budgets[due[i]].budget), report);
 }
 
+typedef enum race_role {
+	RACE_CHARGE,		/* charges and releases at random reserves */
+	RACE_CARVE,		/* carves, charges, resizes and destroys */
+	RACE_RESIZE		/* resizes the script's budgets */
+} race_role_t;
+
+static const race_role_t race_roles[RACE_THREADS] = {
+	RACE_CHARGE, RACE_CHARGE, RACE_CARVE, RACE_RESIZE
+};
+
 typedef struct race_thread {
 	pthread_t	 thread;
 	unsigned int	 seed;
 	long		 iterations;
+	race_role_t	 role;
 } race_thread_t;
 
 static unsigned int
@@ -575,33 +609,117 @@ next_random(unsigned int *state)
 	return (*state >> 8);
 }
 
-/* Charges and releases at random reserves, under each owner's lock. */
+/* Charges or releases at a random reserve, under its owner's lock. */
+static void
+race_charge(unsigned int *seed)
+{
+	erx_reserve_counts_t counts;
+	reserve_slot_t *slot;
+	report_t report = { .length = 0, .refused = -1 };
+
+	slot = &reserves[next_random(seed) % (unsigned)nreserves];
+	if (!slot->exists)
+		return;
+	pthread_mutex_lock(&slot->lock);
+	if (next_random(seed) % 2 == 0) {
+		(void)charge(&slot->reserve, 1 + next_random(seed) % 8, -1,
+		    &report);
+	} else {
+		erx_reserve_read(&slot->reserve, &counts);
+		if (counts.backed > 0)
+			(void)release(&slot->reserve, 0, counts.pooled,
+			    &report);
+	}
+	pthread_mutex_unlock(&slot->lock);
+}
+
+/*
+ * One budget's life in the race's slot: carved under a random budget,
+ * charged, resized, destroyed, refunded at its dead self, which passes the
+ * refund to its parent, and freed by its tombstone's put before the next
+ * round. Its chains cross the charging threads' and the resizer's.
+ */
+static void
+race_carve(unsigned int *seed)
+{
+	erx_budget_effects_t effects;
+	erx_budget_t *child;
+	erx_npages_t guarantee, pages;
+	report_t report = { .length = 0, .refused = -1 };
+	bool charged, outlived;
+
+	guarantee = next_random(seed) % 40;
+	if (carve(next_random(seed) % (unsigned)nbudgets, ERX_BUDGET_ELASTIC,
+	    guarantee, guarantee + next_random(seed) % 80, RACE_SLOT,
+	    &report) != 0)
+		return;
+	child = budgets[RACE_SLOT].budget;
+	pages = 1 + next_random(seed) % 16;
+	charged = erx_budget_adjust(child, (int64_t)pages, &effects) == 0;
+	collect(&report, &effects);
+	guarantee = next_random(seed) % 40;
+	(void)erx_budget_resize(child, guarantee,
+	    guarantee + next_random(seed) % 80, &effects);
+	collect(&report, &effects);
+	/* The child holds no object, so its walk prints no state. */
+	if (destroy(RACE_SLOT, &report) != 0)
+		fail("the race's destroy refused");
+	if (charged && erx_budget_adjust(child, -(int64_t)pages, &effects) != 0)
+		fail("the race's refund at a dead budget refused");
+	collect(&report, &effects);
+	put_round(&report);
+	pthread_rwlock_rdlock(&table_lock);
+	outlived = budgets[RACE_SLOT].exists;
+	pthread_rwlock_unlock(&table_lock);
+	if (outlived)
+		fail("a raced budget outlived its round");
+	race_carves++;
+}
+
+/* Resizes a random budget of the script's, keeping its bound. */
+static void
+race_resize(unsigned int *seed)
+{
+	erx_budget_counters_t before, after;
+	erx_budget_effects_t effects;
+	erx_npages_t guarantee, cap, spent;
+	int id;
+
+	if (nbudgets < 2)
+		return;
+	id = 1 + (int)(next_random(seed) % (unsigned)(nbudgets - 1));
+	erx_budget_read(budgets[id].budget, &before);
+	guarantee = next_random(seed) % 300;
+	cap = before.kind == ERX_BUDGET_WALL ? guarantee :
+	    guarantee + next_random(seed) % 800;
+	if (erx_budget_resize(budgets[id].budget, guarantee, cap,
+	    &effects) != 0)
+		return;
+	race_resizes++;
+	erx_budget_read(budgets[id].budget, &after);
+	spent = after.used + after.carved + after.lent;
+	race_bound[id] = spent > cap ? spent : cap;
+}
+
 static void *
 race_body(void *argument)
 {
-	erx_reserve_counts_t counts;
 	race_thread_t *self;
-	reserve_slot_t *slot;
-	report_t report;
 	long i;
 
 	self = argument;
 	for (i = 0; i < self->iterations; i++) {
-		slot = &reserves[next_random(&self->seed) % (unsigned)nreserves];
-		if (!slot->exists)
-			continue;
-		report.length = 0;
-		pthread_mutex_lock(&slot->lock);
-		if (next_random(&self->seed) % 2 == 0) {
-			(void)charge(&slot->reserve,
-			    1 + next_random(&self->seed) % 8, -1, &report);
-		} else {
-			erx_reserve_read(&slot->reserve, &counts);
-			if (counts.backed > 0)
-				(void)release(&slot->reserve, 0, counts.pooled,
-				    &report);
+		switch (self->role) {
+		case RACE_CHARGE:
+			race_charge(&self->seed);
+			break;
+		case RACE_CARVE:
+			race_carve(&self->seed);
+			break;
+		case RACE_RESIZE:
+			race_resize(&self->seed);
+			break;
 		}
-		pthread_mutex_unlock(&slot->lock);
 		if (nheld != 0)
 			fail("a lock held after an operation");
 	}
@@ -609,20 +727,42 @@ race_body(void *argument)
 }
 
 static void
-race(unsigned int seed, long iterations)
+race(unsigned int seed, long iterations, report_t *report)
 {
+	erx_budget_counters_t c;
 	race_thread_t threads[RACE_THREADS];
 	int i;
 
+	/* The race needs every script budget live and no put due. */
+	if (npending != 0)
+		fail("a race with a tombstone due");
+	for (i = 0; i < nbudgets; i++) {
+		if (!budgets[i].exists)
+			fail("a race over a freed budget");
+		erx_budget_read(budgets[i].budget, &c);
+		if (c.dead)
+			fail("a race over a dead budget");
+		race_bound[i] = c.cap;
+	}
+	race_carves = race_resizes = 0;
 	for (i = 0; i < RACE_THREADS; i++) {
 		threads[i] = (race_thread_t){ .seed = seed + (unsigned)i,
-		    .iterations = iterations };
+		    .iterations = iterations, .role = race_roles[i] };
 		if (pthread_create(&threads[i].thread, NULL, race_body,
 		    &threads[i]) != 0)
 			fail("pthread_create");
 	}
 	for (i = 0; i < RACE_THREADS; i++)
 		pthread_join(threads[i].thread, NULL);
+	/* Only a resize below the spending leaves a budget above its cap. */
+	for (i = 0; i < nbudgets; i++) {
+		erx_budget_read(budgets[i].budget, &c);
+		if (c.used + c.carved + c.lent > race_bound[i])
+			fail("spending above its cap or what a resize left");
+	}
+	if (npending != 0)
+		fail("a tombstone left unput after the race");
+	say(report, " carves=%ld resizes=%ld", race_carves, race_resizes);
 }
 
 /*
@@ -695,7 +835,7 @@ command(char *line, report_t *report)
 	}
 	if (strcmp(name, "root") == 0) {
 		/* A new root starts a new machine. */
-		for (n = 0; n < nbudgets; n++)
+		for (n = 0; n < BUDGETS_MAX; n++)
 			budgets[n].exists = 0;
 		nreserves = 0;
 		npending = 0;
@@ -721,7 +861,7 @@ command(char *line, report_t *report)
 	if (strcmp(name, "state") == 0)
 		return (0);
 	if (strcmp(name, "race") == 0) {
-		race((unsigned int)a, b);
+		race((unsigned int)a, b, report);
 		return (0);
 	}
 	if (strcmp(name, "take") == 0 || strcmp(name, "release") == 0 ||
@@ -738,8 +878,15 @@ command(char *line, report_t *report)
 	}
 	if (!valid_budget(a))
 		fail("no such budget");
-	if (strcmp(name, "carve") == 0)
-		return (carve(a, b, (erx_npages_t)c, (erx_npages_t)d, report));
+	if (strcmp(name, "carve") == 0) {
+		if (nbudgets == RACE_SLOT)
+			fail("too many budgets");
+		error = carve(a, b, (erx_npages_t)c, (erx_npages_t)d, nbudgets,
+		    report);
+		if (error == 0)
+			nbudgets++;
+		return (error);
+	}
 	if (strcmp(name, "resize") == 0) {
 		error = erx_budget_resize(budgets[a].budget, (erx_npages_t)b,
 		    (erx_npages_t)c, &effects);

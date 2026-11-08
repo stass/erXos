@@ -1316,17 +1316,6 @@ it; git history is the record of completed work.
   driver's `put` between walk steps. `erx_object_init` accepts a NULL
   budget, which `erx_delete_uncharge` dereferences; the design text names
   `erx_dlink_t`/`erx_dlist_t` where the code has `erx_charged_list_t`.
-* [Medium] Budget core tests, `test/host/budget_test.rb`: the TSan race
-  only charges and releases leaf reserves; K32 asks for resizes, carves
-  and destroys racing too, with spending checked against every cap no
-  resize lowered. K32's seeded failure that counts a dead or doomed
-  budget's `used` toward the machine is missing: it needs a check of the
-  machine's total (what the live budgets with live ancestors hold
-  against the pages held) that the tests do not make yet. The budget
-  core has no fuzz target of its own (`tools/fuzz/budget_fuzz.c` over
-  scripts of carve, take, free, charge, resize, close and pin against
-  the checked arithmetic); the page and capability targets drive it only
-  through charges.
 * [Medium] Kernel mapping-record core, `kernel/core/map.c`: `erx_map_apply`
   takes no proof that the caller charged a part's `charge_pages`, and
   `erx_map_edges` no proof that it runs after the apply, though it reads the
@@ -1501,16 +1490,17 @@ it; git history is the record of completed work.
   (`tools/lib/erx/syntax_tree.rb`): they read only the cores
   `CoreArchive` compiles, in the archive's configuration, so the glue's
   C++ (a `reinterpret_cast` of an `erx_budget_t *` there), liberx and
-  code under another configuration's `#ifdef` are not read; and a write
-  listed shapes do not cover passes: a pointer passed through `...` or a
-  union of pointers, a declaration that disagrees with its definition in
-  another file, an inline assembly operand, a member selected by
-  `_Generic` or `__builtin_choose_expr`, and an embedded record
-  zero-filled by its container's initializer. Closing the list means
-  inverting it: outside the sites, allow a guarded member or record
-  pointer only in a closed set of contexts (a read, an atomic load's
-  pointer, a `->` read, a parameter or variable of the same type, a
-  comparison) and count everything else as a write.
+  code under another configuration's `#ifdef` are not read. A guarded
+  member's uses are a closed set (a load, an atomic load's pointer,
+  sizeof, a cast to void; any other use is a write), but a record
+  pointer's are not: a pointer passed through `...` or a union of
+  pointers, a declaration that disagrees with its definition in another
+  file, and an embedded record zero-filled by its container's
+  initializer still pass. Closing them means inverting the pointer's
+  uses too: outside the sites, allow a record pointer only as the base of
+  `->`, a parameter, variable or return value of the same record pointer
+  type, and an operand of a comparison, and count everything else as a
+  write.
 * [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`: the
   text rules match whole names, so a name a macro pastes together
   (`erx_cap_slot_ ## clear`, `erx_ ## cap_slot`) gets past

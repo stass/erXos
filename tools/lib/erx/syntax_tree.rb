@@ -14,11 +14,17 @@ module Erx
   #
   # The tree is the source after preprocessing, so a member a macro reaches,
   # a name it pastes together or a typedef of the record are all seen as
-  # what they are. A write is any of:
-  # * an assignment, compound assignment, ++ or -- of a member;
-  # * taking a member's address, or letting an array member decay to a
-  #   pointer, which lets anything write it later, except as the pointer an
-  #   atomic load reads through or the base of a subscript;
+  # what they are. Every use of a guarded member is a write but those in a
+  # closed set of reads: a load of its value, an atomic load's pointer, the
+  # operand of sizeof or _Alignof, and a cast to void. The walk climbs from
+  # the member through what keeps naming the same object (parentheses,
+  # __extension__, a `.` member, a subscript's array, a qualifier
+  # conversion) to the use, and names the writes it knows (an assignment,
+  # a compound assignment, ++ or --, taking the address, an array member's
+  # decay); any other use, such as a member selected by _Generic or
+  # __builtin_choose_expr or an inline assembly operand, is an unknown
+  # write, so a shape the walk does not know fails a rule instead of
+  # passing it. The record as a whole is written by:
   # * an initializer list of the record's type (a definition with an
   #   initializer, or a compound literal), which writes every member;
   # * an assignment of the whole record (a copy), which writes every member;
@@ -32,11 +38,10 @@ module Erx
   # record holds belongs to the record that pointer names.
   #
   # What it does not see, a residual for trusted code (TODO.md, kernel
-  # chokepoints): a pointer passed through `...` or a union of pointers, a
-  # declaration that disagrees with its definition in another file, an
-  # inline assembly operand, a member selected by _Generic or
-  # __builtin_choose_expr, an embedded record zero-filled by its
-  # container's initializer, and code the dumped configuration compiles out.
+  # chokepoints): a record pointer passed through `...` or a union of
+  # pointers, a declaration that disagrees with its definition in another
+  # file, an embedded record zero-filled by its container's initializer,
+  # and code the dumped configuration compiles out.
   #
   # The dump is untrusted only in the sense that a bug in clang or a hostile
   # source could make it large, deep or oddly shaped: it is bounded in bytes
@@ -54,7 +59,7 @@ module Erx
     # -w: a warning would land in the dump's log beside the JSON; the
     # archive's own compile enforces the warnings.
     DUMP = %w[-w -fsyntax-only -Xclang -ast-dump=json].freeze
-    HOW = %i[assignment increment address construction copy cast union].freeze
+    HOW = %i[assignment increment address unknown construction copy cast union].freeze
 
     Location = Data.define(:file, :line)
 
@@ -109,7 +114,8 @@ module Erx
     # One pass over a tree in document order. clang writes a location's file
     # and line only when they differ from the location written before it, so
     # the walk carries the last ones it saw and descends every list of child
-    # nodes (an initializer's array_filler as well as inner) in order; and C
+    # nodes (an initializer's array_filler and a _Generic's associations as
+    # well as inner) in order; and C
     # declares a record before any use of it, so the members of the guarded
     # records and their containers are known by the time an expression names
     # one.
@@ -117,8 +123,6 @@ module Erx
       CASTS = %w[ImplicitCastExpr CStyleCastExpr].freeze
       # Casts after which the pointer no longer has the record's type.
       ESCAPING_CASTS = %w[BitCast PointerToIntegral].freeze
-      # Casts that keep naming the same object on the way to a member.
-      TRANSPARENT_CASTS = %w[ArrayToPointerDecay NoOp].freeze
       ATOMIC_LOADS = %w[__c11_atomic_load __atomic_load __atomic_load_n].freeze
       QUALIFIERS = /\b(?:const|volatile|restrict|_Atomic)\b/
       # A record, or an array of them, as a type spells it.
@@ -131,9 +135,8 @@ module Erx
         @containers = {}
         # Each guarded member's FieldDecl id => [tag, member name or nil].
         @fields = {}
-        # Nodes that read through a member's address: an atomic load's
-        # pointer, a subscript's base.
-        @reads = Set.new
+        # The nodes enclosing the one visited, outermost first.
+        @ancestors = []
         # Each typedef name => the type it names, as spelled.
         @typedefs = {}
         @file = nil
@@ -164,10 +167,23 @@ module Erx
         register_typedef(node) if kind == 'TypedefDecl'
         function = node['name'] if kind == 'FunctionDecl' && node['name'].is_a?(String)
         note_writes(node, kind, function: function, at: begin_at || named_at)
+        @ancestors.push(node)
+        each_child(node) { |child| visit(child, function: function, record: record) }
+        @ancestors.pop
+      end
+
+      # The child nodes in document order: those of every list, and those
+      # of an entry with no kind of its own (a _Generic association), which
+      # belong to the node that holds the entry.
+      def each_child(node, &block)
         node.each_value do |value|
           next unless value.is_a?(Array)
 
-          value.each { |child| visit(child, function: function, record: record) if child.is_a?(Hash) && child['kind'] }
+          value.each do |child|
+            next unless child.is_a?(Hash)
+
+            child['kind'] ? block.call(child) : each_child(child, &block)
+          end
         end
       end
 
@@ -222,30 +238,18 @@ module Erx
         when 'BinaryOperator'
           return unless node['opcode'] == '='
 
-          member_writes(first_child(node), how: :assignment, &write)
           copy = first_child(node) && guarded_tag(first_child(node)['type'], RECORD_TYPE)
           write.call(copy, nil, :copy) if copy
-        when 'CompoundAssignOperator'
-          member_writes(first_child(node), how: :assignment, &write)
-        when 'UnaryOperator'
-          case node['opcode']
-          when '++', '--' then member_writes(first_child(node), how: :increment, &write)
-          when '&' then member_writes(first_child(node), how: :address, &write) unless @reads.include?(node['id'])
-          end
-        when 'ArraySubscriptExpr'
-          base = subscript_base(node)
-          @reads << base['id'] if base
-        when 'AtomicExpr'
-          pointer = strip(first_child(node))
-          @reads << pointer['id'] if ATOMIC_LOADS.include?(node['name']) && pointer
+        when 'MemberExpr'
+          tag, member = @fields[node['referencedMemberDecl']]
+          how = tag && use_of(node)
+          write.call(tag, member, member ? how : :union) if how
         when 'InitListExpr'
           tag = own_tag(node['type'])
           write.call(tag, nil, :construction) if tag
         when *CASTS
           operand = first_child(node)
-          if node['castKind'] == 'ArrayToPointerDecay'
-            member_writes(operand, how: :address, &write) unless @reads.include?(node['id'])
-          elsif ESCAPING_CASTS.include?(node['castKind']) && operand
+          if ESCAPING_CASTS.include?(node['castKind']) && operand
             tag = guarded_tag(operand['type'], RECORD_POINTER)
             # A pointer to the same record under other qualifiers, as a
             # comparison converts it, still has the record's type.
@@ -254,32 +258,74 @@ module Erx
         end
       end
 
-      # Each guarded member along the path from an lvalue to the object it is
-      # in: through parentheses, __extension__, array elements and `.`
-      # members, up to the first `->`, which leaves the object.
-      def member_writes(expression, how:)
-        node = expression
-        while node
-          case node['kind']
-          when 'ParenExpr' then node = first_child(node)
-          when 'UnaryOperator'
-            break unless node['opcode'] == '__extension__'
-
-            node = first_child(node)
-          when 'ImplicitCastExpr'
-            break unless TRANSPARENT_CASTS.include?(node['castKind'])
-
-            node = first_child(node)
-          when 'ArraySubscriptExpr' then node = subscript_base(node)
-          when 'MemberExpr'
-            tag, member = @fields[node['referencedMemberDecl']]
-            yield tag, member, (member ? how : :union) if tag
-            break if node['isArrow']
-
-            node = first_child(node)
-          else break
-          end
+      # What the use of a guarded member does: nil for a read, otherwise how
+      # it writes. The climb passes what keeps naming the member's object
+      # and stops at the first use; a use outside the closed sets below is
+      # :unknown.
+      def use_of(member)
+        above = @ancestors.reverse
+        child = member
+        above.each_with_index do |parent, index|
+          use = use_in(parent, child, above.drop(index + 1))
+          return use unless use == :same
+          child = parent
         end
+        :unknown
+      end
+
+      # How parent uses child: :same when it still names child's object,
+      # nil when it reads it, otherwise how it writes it. outer holds the
+      # nodes above parent, nearest first.
+      def use_in(parent, child, outer)
+        left = first_child(parent).equal?(child)
+        case parent['kind']
+        when 'ParenExpr' then :same
+        when 'MemberExpr' then parent['isArrow'] ? :unknown : :same
+        when 'ArraySubscriptExpr' then subscript_base(parent).equal?(child) ? :same : :unknown
+        when 'UnaryOperator' then unary_use(parent, outer)
+        when 'ImplicitCastExpr' then implicit_cast_use(parent, outer.first)
+        when 'CStyleCastExpr' then parent['castKind'] == 'ToVoid' ? nil : :unknown
+        when 'UnaryExprOrTypeTraitExpr' then nil
+        when 'BinaryOperator' then parent['opcode'] == '=' && left ? :assignment : :unknown
+        when 'CompoundAssignOperator' then left ? :assignment : :unknown
+        else :unknown
+        end
+      end
+
+      def unary_use(parent, outer)
+        case parent['opcode']
+        when '__extension__' then :same
+        when '++', '--' then :increment
+        when '&' then atomic_load_pointer?(parent, outer) ? nil : :address
+        else :unknown
+        end
+      end
+
+      # A load reads the value; a qualifier conversion keeps the object; an
+      # array decays to a pointer that writes it unless a subscript takes
+      # the element.
+      def implicit_cast_use(cast, enclosing)
+        case cast['castKind']
+        when 'LValueToRValue' then nil
+        when 'NoOp' then :same
+        when 'ArrayToPointerDecay'
+          subscript = enclosing && enclosing['kind'] == 'ArraySubscriptExpr'
+          subscript && subscript_base(enclosing).equal?(cast) ? :same : :address
+        else :unknown
+        end
+      end
+
+      # Whether address is the pointer an atomic load reads through,
+      # through parentheses.
+      def atomic_load_pointer?(address, outer)
+        child = address
+        outer.each do |node|
+          return ATOMIC_LOADS.include?(node['name']) && first_child(node).equal?(child) if node['kind'] == 'AtomicExpr'
+          return false unless node['kind'] == 'ParenExpr'
+
+          child = node
+        end
+        false
       end
 
       # The array side of a subscript, whichever operand it is (1[a] is a[1]).
@@ -290,11 +336,6 @@ module Erx
       def children(node) = node['inner'].is_a?(Array) ? node['inner'].grep(Hash) : []
 
       def first_child(node) = children(node).first
-
-      def strip(node)
-        node = first_child(node) while node && node['kind'] == 'ParenExpr'
-        node
-      end
 
       def add(record:, member:, how:, function:, at:)
         @found << Write.new(record: record, member: member, how: how, function: function, file: at.file, line: at.line)

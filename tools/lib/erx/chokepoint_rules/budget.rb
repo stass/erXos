@@ -81,7 +81,10 @@ module Erx
                                            "void f(struct erx_budget *b) { b->FIELD(sed) = 0; }\n",
                   'kernel/core/space.c' => "void *memset(void *, int, unsigned long);\n" \
                                            "struct erx_budget { unsigned long used; };\n" \
-                                           "void f(struct erx_budget *b) { memset(b, 0, sizeof *b); }\n" }
+                                           "void f(struct erx_budget *b) { memset(b, 0, sizeof *b); }\n",
+                  # A use the walk names no write of is an unknown write.
+                  'kernel/core/map.c' => "struct erx_budget { unsigned long used; };\n" \
+                                         "void f(struct erx_budget *b) { _Generic(0, int: b->used) = 0; }\n" }
         )
       ]
     )

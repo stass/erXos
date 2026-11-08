@@ -130,6 +130,24 @@ class ChokepointsSyntaxTreeTest < Minitest::Test
                  writes.map { |write| [write.function, write.how] }
   end
 
+  # Outside a closed set of reads, every use of a guarded member is a
+  # write: a shape the walk names no write of is an unknown write, never a
+  # pass. A load, sizeof and a cast to void read.
+  def test_a_use_the_walk_does_not_know_is_a_write
+    record = "struct erx_budget { unsigned long used, lent; };\n"
+    {
+      'generic' => "void f(struct erx_budget *b) { _Generic(0, int: b->used) = 1; }\n",
+      'choose' => "void f(struct erx_budget *b) { __builtin_choose_expr(1, b->used, b->lent) = 1; }\n",
+      'asm' => "void f(struct erx_budget *b) { __asm__ volatile(\"\" : \"=r\"(b->used)); }\n"
+    }.each do |shape, body|
+      writes = writes_of('kernel/core/page.c', record + body, records: ['erx_budget'])
+      refute_empty writes, "missed the #{shape} shape"
+      assert_equal [:unknown], writes.map(&:how).uniq, "the #{shape} shape"
+    end
+    reads = "unsigned long g(const struct erx_budget *b) { (void)b->lent; return sizeof b->used + b->lent; }\n"
+    assert_empty writes_of('kernel/core/page.c', record + reads, records: ['erx_budget'])
+  end
+
   def test_a_site_allows_only_its_functions
     site = Chokepoints::WriterSite.new(glob: 'kernel/core/budget.c', functions: %w[level_apply])
     write = ->(file, function) { Erx::SyntaxTree::Write.new(record: 'erx_budget', member: 'used', how: :assignment,

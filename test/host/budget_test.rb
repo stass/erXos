@@ -62,6 +62,17 @@ class BudgetTest < Minitest::Test
     'cancel refunds nothing' => ["\tdelta.used = -delta.used;\n\terror = chain_change(reserve->budget, &delta,\n\t    BUDGET_DEAD_TAKES_NO_RISE, effects);\n\tif (error == 0)\n\t\treserve->charged -= pages;",
                                "\tdelta.used = 0;\n\terror = chain_change(reserve->budget, &delta,\n\t    BUDGET_DEAD_TAKES_NO_RISE, effects);\n\tif (error == 0)\n\t\treserve->charged -= pages;"]
   }.freeze
+  # K32: what is charged to the machine is the used of the budgets that
+  # are live and whose ancestors all live (:machine). The seeded failures
+  # also count a dead budget (:dead, one under the machine's budgets) or a
+  # doomed one (:doomed_top, a live budget under a dead one, and :doomed,
+  # what is below it), and some state of the corpus must refute each.
+  MACHINE = %i[machine].freeze
+  MACHINE_SEEDS = { 'a dead budget counted toward the machine' => %i[machine dead],
+                    'a doomed budget counted toward the machine' => %i[machine doomed_top doomed] }.freeze
+  # One budget of a printed state, with what its reserves and cache pages
+  # hold directly.
+  StateBudget = Data.define(:parent, :dead, :guarantee, :used, :spending, :direct)
 
   def setup
     @root = File.expand_path('../..', __dir__)
@@ -108,7 +119,7 @@ class BudgetTest < Minitest::Test
     assert_equal 0, status(results.fetch(DEPTH_MAX + 2)), 'the charge borrows through every level'
     freed = results.last(DEPTH_MAX).map { |line| line.scan(/freed=(\d+)/).flatten.map(&:to_i) }
     assert_equal (1...DEPTH_MAX).to_a.reverse.map { |id| [id] } + [[]], freed, 'one level per round'
-    assert_match(/\AS free=\d+ rel=\d+ b0:1,0,0,4096,4096,0,0,0,0,0,0\z/, lines.last, 'the root is whole again')
+    assert_match(/\AS free=\d+ rel=\d+ b0:1,0,0,4096,4096,0,0,0,0,0,0,-1\z/, lines.last, 'the root is whole again')
   end
 
   # K32: a cap set below the spending refuses every rise until the
@@ -214,6 +225,19 @@ class BudgetTest < Minitest::Test
                  line
   end
 
+  # K32's seeded failures of the machine's total: a sum that counts a dead
+  # or a doomed budget's used toward the machine disagrees, on some state
+  # of the corpus, with what the budgets hold. assert_agrees checks the
+  # true sum on every state and walk step.
+  def test_the_machine_counts_only_budgets_whose_tree_lives
+    scripts = random_scripts(count: 40, length: 90, rng: Random.new(SEED + 7)) + [deep_borrowing_script]
+    states = assert_agrees(scripts).grep(/\A[SW] /).map { |line| state_budgets(line) }
+    MACHINE_SEEDS.each do |name, counted|
+      assert states.any? { |budgets| machine_charge(budgets, counted) != machine_held(budgets) },
+             "seeded failure not caught: #{name}"
+    end
+  end
+
   def test_seeded_failures_are_caught
     scripts = random_scripts(count: 40, length: 90, rng: Random.new(SEED + 7)) +
               [deep_borrowing_script, shrink_script, wall_script, closed_backing_script]
@@ -230,17 +254,21 @@ class BudgetTest < Minitest::Test
     end
   end
 
-  # The chain's locks under ThreadSanitizer: four threads charge and
-  # release at random across a tree while each change takes its chain's
-  # locks descendant first; afterwards every counter agrees with the
-  # model's recomputation and every page is in exactly one place.
+  # The chain's locks under ThreadSanitizer (K32): two threads charge and
+  # release at random across a tree while a third carves, charges,
+  # resizes, destroys and frees budgets under random parents and a fourth
+  # resizes the tree's budgets, each change taking its chain's locks
+  # descendant first. The driver fails if a live budget ends above a cap no
+  # resize lowered; afterwards every counter agrees with the model's
+  # recomputation and every page is in exactly one place.
   def test_concurrent_changes_keep_the_accounting_whole
     tsan = build_driver(File.join(@root, 'kernel/core/budget.c'), name: 'budget-tsan',
                                                                  flags: %w[-fsanitize=thread -fno-omit-frame-pointer])
     script = ['root 2000', "carve 0 #{WALL} 600 600", "carve 1 #{ELASTIC} 100 500", "carve 1 #{ELASTIC} 100 500",
               "carve 0 #{ELASTIC} 200 1500", "carve 4 #{ELASTIC} 0 1500", 'reserve 2', 'reserve 3', 'reserve 4',
               'reserve 5', 'reserve 1', 'reserve 0']
-    final = run_script(tsan, script + ["race #{SEED} 4000"]).last
+    *, done, final = run_script(tsan, script + ["race #{SEED} 4000"])
+    assert_match(/ carves=[1-9]\d* resizes=[1-9]\d*\z/, done, 'the race carves, destroys and resizes')
     assert_whole(final, pages: 2000)
     recomputed = recompute(final)
     assert_equal recomputed.fetch(:expected), recomputed.fetch(:actual), 'counters after the race'
@@ -308,6 +336,7 @@ class BudgetTest < Minitest::Test
     actual.each do |line|
       root_pages = Integer(line[/ b0:1,0,0,(\d+),/, 1]) if line.start_with?('S ') && line.include?(' b0:')
       assert_whole(line, pages: root_pages) if line.start_with?('S ')
+      assert_machine(line) if line.start_with?('S ', 'W ')
     end
     actual
   end
@@ -325,6 +354,61 @@ class BudgetTest < Minitest::Test
     reserves.each { |charged, backed| assert_equal charged, backed, "charged equals backed: #{line}" }
   end
 
+  # K32: the machine's charge, summed over the budgets whose tree lives,
+  # against what is held: the direct charges of those budgets and of the
+  # dead ones below them, and for each doomed tree, which only a walk in
+  # progress leaves, what its top holds of its dead parent, its guarantee
+  # or, beyond it, its spending. Between commands no tree is doomed, and
+  # the charge is every page the reserves and caches hold.
+  def assert_machine(line)
+    budgets = state_budgets(line)
+    assert_equal machine_held(budgets), machine_charge(budgets, MACHINE), "machine total: #{line}"
+  end
+
+  def state_budgets(line)
+    direct = line.scan(/ r\d+:(\d+),(\d+),/).each_with_object(Hash.new(0)) do |(budget, charged), sums|
+      sums[Integer(budget)] += Integer(charged)
+    end
+    line.scan(/ b(\d+):((?:-?\d+,){11}-?\d+)/).to_h do |id, fields|
+      _kind, _depth, dead, guarantee, _cap, used, carved, lent, _pinned, _threshold, cache, parent =
+        fields.split(',').map { |field| Integer(field) }
+      [Integer(id), StateBudget.new(parent: parent.negative? ? nil : parent, dead: dead == 1, guarantee: guarantee,
+                                    used: used, spending: used + carved + lent,
+                                    direct: direct[Integer(id)] + cache)]
+    end
+  end
+
+  def machine_charge(budgets, counted)
+    regions = machine_regions(budgets)
+    budgets.sum { |id, budget| counted.include?(regions.fetch(id)) ? budget.used : 0 }
+  end
+
+  def machine_held(budgets)
+    machine_regions(budgets).sum do |id, region|
+      budget = budgets.fetch(id)
+      case region
+      when :machine, :dead then budget.direct
+      when :doomed_top then [budget.guarantee, budget.spending].max
+      else 0
+      end
+    end
+  end
+
+  # Where each budget stands for the machine, parents before children.
+  def machine_regions(budgets)
+    budgets.keys.sort_by { |id| depth_of(budgets, id) }.each_with_object({}) do |id, regions|
+      budget = budgets.fetch(id)
+      above = budget.parent ? regions.fetch(budget.parent) : :machine
+      regions[id] = if %i[doomed_top doomed].include?(above) then :doomed
+                    elsif budget.dead then :dead
+                    elsif above == :dead then :doomed_top
+                    else :machine
+                    end
+    end
+  end
+
+  def depth_of(budgets, id) = budgets.fetch(id).parent ? 1 + depth_of(budgets, budgets.fetch(id).parent) : 0
+
   # The random corpus must reach every status and effect it is meant to judge.
   def assert_reaches_every_case(lines)
     results = lines.grep(/\A= /)
@@ -341,11 +425,12 @@ class BudgetTest < Minitest::Test
   # The race's final state against the model's definitions, recomputed
   # from the printed facts alone.
   def recompute(line)
-    budgets = line.scan(/ b(\d+):(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)/).to_h do |fields|
-      id, _kind, _depth, _dead, guarantee, _cap, used, carved, lent, _pinned, _threshold, cache = fields.map(&:to_i)
-      [id, { guarantee: guarantee, used: used, carved: carved, lent: lent, cache: cache }]
+    budgets = line.scan(/ b(\d+):((?:-?\d+,){11}-?\d+)/).to_h do |id, fields|
+      _kind, _depth, _dead, guarantee, _cap, used, carved, lent, _pinned, _threshold, cache, parent =
+        fields.split(',').map { |field| Integer(field) }
+      [Integer(id), { guarantee: guarantee, used: used, carved: carved, lent: lent, cache: cache, parent: parent }]
     end
-    parents = { 1 => 0, 2 => 1, 3 => 1, 4 => 0, 5 => 4 }
+    parents = budgets.to_h { |id, budget| [id, budget.fetch(:parent)] }
     direct = line.scan(/ r\d+:(\d+),(\d+),/).each_with_object(Hash.new(0)) do |(budget, charged), sums|
       sums[Integer(budget)] += Integer(charged)
     end
