@@ -253,8 +253,8 @@ fuzz_write(const uint8_t *bytes, size_t length)
 	static const uint8_t regs[ERX_CRASH_REGS_BYTES] = { 1 };
 	static uint64_t frames[64] = { 0x1000, 0x1001 };
 	static _Alignas(8) uint8_t back[ERX_CRASH_SIZE];
-	static const erx_crash_end_t ends[] = { ERX_CRASH_END_MACHINE,
-	    ERX_CRASH_END_TASK };
+	static const erx_crash_end_t ends[] = { ERX_CRASH_END_FAULT,
+	    ERX_CRASH_END_WATCHDOG, ERX_CRASH_END_TASK };
 	erx_crash_input_t input;
 	erx_crash_read_t result;
 	size_t used;

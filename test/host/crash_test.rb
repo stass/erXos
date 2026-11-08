@@ -39,7 +39,11 @@ class CrashTest < Minitest::Test
   # The art fits a phone's web console.
   ART_LINES_MAX = 12
   ART_COLUMNS_MAX = 36
-  ART_CAPTION = "The ship was destroyed:\n"
+  # Each machine end's art, by the end that prints it, ends in its caption.
+  ART_CAPTIONS = {
+    fault: "The ship was destroyed:\n",
+    watchdog: "  I cannae hold her together!\n"
+  }.freeze
   # The empty lines the art may hold, each with no blanks.
   ART_EMPTY_LINES_MAX = 4
 
@@ -92,10 +96,11 @@ class CrashTest < Minitest::Test
   def unhex(text) = text == '-' ? ''.b : [text].pack('H*')
 
   # Everything the driver's write command takes, each with a usable default.
-  # ends is :machine for a frame written as the machine goes down, :task for a
-  # task's fault the machine survives.
+  # ends is :fault for a frame written as the machine goes down on a fault,
+  # :watchdog for one the watchdog's end writes, :task for a task's fault the
+  # machine survives.
   def write(form: FULL, cause: CAUSE.fetch(:panic), cpu: 1, value: NORMAL, slot: SLOT_A, nframes: 3, frames: 1, regs: 1,
-            kind: 0, message: 'boom', lines: 2, ends: :machine)
+            kind: 0, message: 'boom', lines: 2, ends: :fault)
     message_hex = message.nil? ? '-' : message.b.unpack1('H*')
     answer = drive(["write #{form} #{cause} #{cpu} #{value} #{slot} #{nframes} #{frames} #{regs} #{kind} " \
                     "#{message_hex.empty? ? '-' : message_hex} #{lines} #{ends}"])
@@ -182,43 +187,65 @@ class CrashTest < Minitest::Test
     end
   end
 
-  # The flatline ahead of the header is for the person at the console. It is
+  # Each art ahead of the header is for the person at the console. It is
   # short printable ASCII with at most four empty lines, no line of it can be
   # taken for a marker or names what a harness pattern looks for, and both
   # readers pass over it to the same record as from the frame alone.
-  def test_the_art_ahead_of_the_frame_is_plain_short_and_passed_over
-    [BRIEF, FULL].each do |form|
-      written = write(form: form)
-      lines = written.art.lines
-      assert_operator lines.size, :>, 1, 'the writer prints its art'
-      assert_operator lines.size, :<=, ART_LINES_MAX
-      assert_equal ART_CAPTION, lines.reject { |line| line == "\n" }.last,
-                   'the caption, the last line that is not empty, is printed'
-      assert_operator lines.count("\n"), :<=, ART_EMPTY_LINES_MAX
-      lines.each do |line|
-        assert_match(/\A[\x20-\x7e]{0,#{ART_COLUMNS_MAX}}\n\z/n, line)
-        refute line.start_with?('--'), "#{line.inspect} could begin a marker"
-        refute line.include?('erx'), "#{line.inspect} could meet a harness pattern"
-        refute line.include?('crash'), "#{line.inspect} could meet a harness pattern"
-        refute line.end_with?(" \n"), "#{line.inspect} has trailing blanks"
-      end
-      result = read_both(written.art + written.frame)
-      assert_equal :valid, result.status
-      assert_equal written.record, read_c(written.art + written.frame).record
-      assert_equal written.art, write(form: form).art, 'the art is the same every time'
+  def test_each_art_ahead_of_the_frame_is_plain_short_and_passed_over
+    ART_CAPTIONS.each_pair do |ends, caption|
+      [BRIEF, FULL].each { |form| assert_plain_art(form: form, ends: ends, caption: caption) }
     end
   end
 
-  # The art marks the machine going down. A task's fault, which the machine
-  # survives, gets the frame alone, the same record as a machine end's.
-  def test_only_a_machine_end_prints_the_art
+  def assert_plain_art(form:, ends:, caption:)
+    written = write(form: form, ends: ends)
+    lines = written.art.lines
+    assert_operator lines.size, :>, 1, 'the writer prints its art'
+    assert_operator lines.size, :<=, ART_LINES_MAX
+    assert_equal caption, lines.reject { |line| line == "\n" }.last,
+                 'the caption, the last line that is not empty, is printed'
+    assert_operator lines.count("\n"), :<=, ART_EMPTY_LINES_MAX
+    lines.each do |line|
+      assert_match(/\A[\x20-\x7e]{0,#{ART_COLUMNS_MAX}}\n\z/n, line)
+      refute line.start_with?('--'), "#{line.inspect} could begin a marker"
+      refute line.include?('erx'), "#{line.inspect} could meet a harness pattern"
+      refute line.include?('crash'), "#{line.inspect} could meet a harness pattern"
+      refute line.end_with?(" \n"), "#{line.inspect} has trailing blanks"
+    end
+    result = read_both(written.art + written.frame)
+    assert_equal :valid, result.status
+    assert_equal written.record, read_c(written.art + written.frame).record
+    assert_equal written.art, write(form: form, ends: ends).art, 'the art is the same every time'
+  end
+
+  # A fault ending the machine prints the flatline, the watchdog's end the
+  # damaged ship, and a task's fault, which the machine survives, the frame
+  # alone. All three write the same frame for the same record, and both
+  # readers decode it after either art.
+  def test_each_end_prints_its_own_art
     [BRIEF, FULL].each do |form|
-      machine = write(form: form, cause: CAUSE.fetch(:fault), kind: MEMORY, ends: :machine)
-      task = write(form: form, cause: CAUSE.fetch(:fault), kind: MEMORY, ends: :task)
-      assert_includes machine.art, ART_CAPTION, 'a machine end prints the art'
-      assert_equal '', task.art, "a task's fault prints no art"
-      assert_equal machine.frame, task.frame
-      assert_equal machine.record, read_c(task.frame).record
+      written = %i[fault watchdog task].to_h do |ends|
+        [ends, write(form: form, cause: CAUSE.fetch(:fault), kind: MEMORY, ends: ends)]
+      end
+      ART_CAPTIONS.each_pair do |ends, caption|
+        assert_equal caption, written.fetch(ends).art.lines.last, "the #{ends} end prints its own art"
+      end
+      refute_equal written.fetch(:fault).art, written.fetch(:watchdog).art
+      assert_equal '', written.fetch(:task).art, "a task's fault prints no art"
+      written.each_value do |end_written|
+        assert_equal written.fetch(:fault).frame, end_written.frame
+        printed = end_written.art + end_written.frame
+        assert_equal :valid, read_both(printed).status
+        assert_equal end_written.record, read_c(printed).record
+      end
+    end
+  end
+
+  # The driver's END word names one of the three ends; any other is refused.
+  def test_the_driver_refuses_an_end_it_does_not_name
+    %i[machine Fault].each do |word|
+      refusal = assert_raises(Minitest::Assertion) { write(ends: word) }
+      assert_includes refusal.message, 'END is fault, watchdog or task'
     end
   end
 
@@ -599,7 +626,7 @@ class CrashTest < Minitest::Test
   end
 
   def write_with(driver, form:, lines: 1, regs: 1, nframes: 1)
-    answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines} machine"],
+    answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines} fault"],
                    driver: driver)
     unhex(answer.fetch(0).split.fetch(3))
   end

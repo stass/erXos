@@ -20,9 +20,10 @@
  * FRAMES and REGS are 0 for a NULL pointer and 1 for a filled array. The fault
  * record is zero when KIND is 0 and otherwise filled. MESSAGE-HEX "-" is NULL.
  * LOG-LINES is how many lines the log holds, -1 for a NULL log and -2 for a log
- * whose counters a wild store has corrupted. END is "machine" for a frame
- * written as the machine goes down and "task" for one written for a task's
- * fault while the machine runs on.
+ * whose counters a wild store has corrupted. END is "fault" for a frame written
+ * as the machine goes down on a fault, "watchdog" for one the watchdog's end
+ * writes, and "task" for one written for a task's fault while the machine runs
+ * on; any other word is refused.
  */
 
 #include <stdbool.h>
@@ -48,7 +49,8 @@ static size_t driver_frame_used;
 static erx_log_t driver_log;
 
 static void driver_command(char *);
-static void driver_fail(const char *);
+static erx_crash_end_t driver_end(const char *);
+static _Noreturn void driver_fail(const char *);
 static void driver_print_hex(const uint8_t *, size_t);
 static size_t driver_unhex(const char *);
 static void driver_write(char *);
@@ -75,7 +77,7 @@ erx_effect_console_write(const char *line, size_t length)
 	driver_frame_used += length;
 }
 
-static void
+static _Noreturn void
 driver_fail(const char *reason)
 {
 	fprintf(stderr, "crash_driver: %s\n", reason);
@@ -110,6 +112,26 @@ driver_print_hex(const uint8_t *bytes, size_t length)
 		printf("%02x", bytes[index]);
 }
 
+/* The end END names, refusing any word that is not one of the three. */
+static erx_crash_end_t
+driver_end(const char *word)
+{
+	static const struct {
+		const char	*name;
+		erx_crash_end_t	 end;
+	} ends[] = {
+		{ "fault", ERX_CRASH_END_FAULT },
+		{ "watchdog", ERX_CRASH_END_WATCHDOG },
+		{ "task", ERX_CRASH_END_TASK },
+	};
+
+	for (size_t index = 0; index < sizeof(ends) / sizeof(ends[0]); index++) {
+		if (strcmp(word, ends[index].name) == 0)
+			return (ends[index].end);
+	}
+	driver_fail("bad write: END is fault, watchdog or task");
+}
+
 static void
 driver_write(char *arguments)
 {
@@ -117,17 +139,17 @@ driver_write(char *arguments)
 	static uint8_t regs[ERX_CRASH_REGS_BYTES];
 	static char message[DRIVER_HEX_MAX];
 	erx_crash_input_t input;
-	char message_hex[DRIVER_LINE_MAX], end[16];
+	char message_hex[DRIVER_LINE_MAX], end_word[16];
+	erx_crash_end_t end;
 	unsigned int form, cause, cpu, value, slot, nframes, has_frames, has_regs, kind;
 	size_t length, message_length;
 	int lines;
 
 	if (sscanf(arguments, "%u %u %u %u %u %u %u %u %u %s %d %15s", &form, &cause,
 	    &cpu, &value, &slot, &nframes, &has_frames, &has_regs, &kind, message_hex,
-	    &lines, end) != 12)
+	    &lines, end_word) != 12)
 		driver_fail("bad write");
-	if (strcmp(end, "machine") != 0 && strcmp(end, "task") != 0)
-		driver_fail("bad write: END is machine or task");
+	end = driver_end(end_word);
 	for (size_t index = 0; index < 128; index++)
 		frames[index] = 0x1000 + index;
 	memset(regs, 0x5a, sizeof(regs));
@@ -176,8 +198,7 @@ driver_write(char *arguments)
 	}
 
 	driver_frame_used = 0;
-	erx_crash_frame_write(driver_record, strcmp(end, "task") == 0 ?
-	    ERX_CRASH_END_TASK : ERX_CRASH_END_MACHINE);
+	erx_crash_frame_write(driver_record, end);
 	fputs("frame ", stdout);
 	driver_print_hex(driver_frame, driver_frame_used);
 	fputc('\n', stdout);

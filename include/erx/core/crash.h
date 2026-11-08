@@ -70,10 +70,12 @@ typedef struct erx_crash_input {
 
 /*
  * What a crash frame is written for, which every writer of one states: the
- * machine going down, or a task's fault that the machine survives.
+ * machine going down on a fault, the machine going down because the watchdog
+ * fired, or a task's fault that the machine survives.
  */
 typedef enum erx_crash_end {
-	ERX_CRASH_END_MACHINE = 1,
+	ERX_CRASH_END_FAULT = 1,
+	ERX_CRASH_END_WATCHDOG,
 	ERX_CRASH_END_TASK
 } erx_crash_end_t;
 
@@ -92,10 +94,11 @@ size_t erx_crash_record_write(const erx_crash_input_t *input, void *buffer,
 
 /*
  * Prints the record in buffer as the crash frame through the console effect,
- * after a newline that ends whatever line the report left open. When end is
- * ERX_CRASH_END_MACHINE a flatline for the person at the console goes
- * between the two; a task's fault gets the frame alone. A buffer whose form
- * and length break the frame's rules prints nothing; the writer's never do.
+ * after a newline that ends whatever line the report left open. A machine end
+ * puts a picture for the person at the console between the two: a flatline for
+ * ERX_CRASH_END_FAULT, a damaged starship for ERX_CRASH_END_WATCHDOG; a task's
+ * fault gets the frame alone. A buffer whose form and length break the frame's
+ * rules prints nothing; the writer's never do.
  */
 void erx_crash_frame_write(const void *buffer, erx_crash_end_t end);
 

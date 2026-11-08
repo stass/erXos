@@ -27,15 +27,18 @@ _Static_assert((ERX_CRASH_SIZE + ERX_CRASH_FRAME_RAW - 1) / ERX_CRASH_FRAME_RAW 
     ERX_CRASH_FRAME_LINES_MAX, "the longest record fills the frame's lines");
 
 /*
- * A heart monitor's flatline, and the captain's log that introduces the
- * record below it. Printable ASCII, at most 36 columns, so it fits a phone's
- * web console, and at most 12 lines, up to four of them empty, with no blank
- * at a line's end. No line starts with "--", so neither marker can begin one
- * and a reader looking for the header line passes over it; no line names
- * "erx" or "crash", so no harness pattern meets it (test/host/crash_test.rb
- * holds it to these rules).
+ * The two pictures a machine end prints ahead of the record. Each is
+ * printable ASCII, at most 36 columns, so it fits a phone's web console, and
+ * at most 12 lines, up to four of them empty, with no blank at a line's end.
+ * No line starts with "--", so neither marker can begin one and a reader
+ * looking for the header line passes over it; no line names "erx" or
+ * "crash", so no harness pattern meets it (test/host/crash_test.rb holds both
+ * to these rules).
+ *
+ * A fault's end: a heart monitor's flatline, and the captain's log that
+ * introduces the record below it.
  */
-static const char erx_crash_frame_art[] =
+static const char erx_crash_frame_art_fault[] =
     "   _      _\n"
     "__/ \\  /\\/ \\______________________\n"
     "     \\/\n"
@@ -47,7 +50,22 @@ static const char erx_crash_frame_art[] =
     "\n"
     "The ship was destroyed:\n";
 
-static void erx_crash_frame_art_write(void);
+/* The watchdog's end: a starship coming apart, and its engineer. */
+static const char erx_crash_frame_art_watchdog[] =
+    " _______  _______\n"
+    "(_______\\/______=)  *\n"
+    "   ' .  ,           _.-------._\n"
+    "     *    .     ___(____/ _____)__\n"
+    "       \\ \\  `      '--._   _.--'\n"
+    "        \\ \\  '         //\n"
+    "     ____\\_\\___.------//\n"
+    "    (_______#____________)\n"
+    "          '--.______.--'\n"
+    "       *    ~    .\n"
+    "\n"
+    "  I cannae hold her together!\n";
+
+static void erx_crash_frame_art_write(const char *, size_t);
 static size_t erx_crash_frame_encode(const uint8_t *, size_t, char *);
 static size_t erx_crash_frame_header(uint32_t, uint32_t, char *);
 static bool erx_crash_frame_legal(uint32_t, uint32_t);
@@ -161,19 +179,19 @@ erx_crash_frame_line(const uint8_t *record, uint32_t form, uint32_t length,
 /*
  * One line a write, as the frame's own lines go: the console sends each short
  * write whole, so this writer never leaves a line half written and a second
- * writer's header line still begins a line. Every line ends in a newline.
+ * writer's header line still begins a line. Every line of art, size bytes
+ * without its terminating NUL, ends in a newline.
  */
 static void
-erx_crash_frame_art_write(void)
+erx_crash_frame_art_write(const char *art, size_t size)
 {
 	size_t start;
 
 	start = 0;
-	for (size_t last = 0; last < sizeof(erx_crash_frame_art) - 1; last++) {
-		if (erx_crash_frame_art[last] != '\n')
+	for (size_t last = 0; last < size; last++) {
+		if (art[last] != '\n')
 			continue;
-		erx_effect_console_write(erx_crash_frame_art + start,
-		    last + 1 - start);
+		erx_effect_console_write(art + start, last + 1 - start);
 		start = last + 1;
 	}
 }
@@ -192,8 +210,13 @@ erx_crash_frame_write(const void *buffer, erx_crash_end_t end)
 	erx_effect_console_write("\n", 1);
 	/* No default: a new kind of end that states no case fails to build. */
 	switch (end) {
-	case ERX_CRASH_END_MACHINE:
-		erx_crash_frame_art_write();
+	case ERX_CRASH_END_FAULT:
+		erx_crash_frame_art_write(erx_crash_frame_art_fault,
+		    sizeof(erx_crash_frame_art_fault) - 1);
+		break;
+	case ERX_CRASH_END_WATCHDOG:
+		erx_crash_frame_art_write(erx_crash_frame_art_watchdog,
+		    sizeof(erx_crash_frame_art_watchdog) - 1);
 		break;
 	case ERX_CRASH_END_TASK:
 		break;

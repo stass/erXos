@@ -2841,17 +2841,20 @@ record itself in the **crash frame**, so that a reader validates the
 record rather than parses the report's prose. A newline before the header
 line ends whatever line the report left open. When the machine goes
 down, the writer prints between that newline and the header line, for
-the person at the console, a small ASCII heart monitor's flatline
-captioned "He's dead, Jim.", three empty lines, and a captain's log
-whose last line, "The ship was destroyed:", the header line then
-follows; the art is at most 36 columns and 12 lines, so that it fits a
-phone's web console. A frame
+the person at the console, one of two small ASCII pictures. When a fault
+ends the machine it is a heart monitor's flatline captioned "He's dead,
+Jim.", three empty lines, and a captain's log whose last line, "The ship
+was destroyed:", the header line then follows. When the watchdog ends
+the machine it is a starship coming apart, captioned "I cannae hold her
+together!". Each picture is at most 36 columns and 12 lines, so that it
+fits a phone's web console. A frame
 written for a task's fault that the machine survives, which the stopgap
 writes ([design-stopgap.md](design-stopgap.md)), has none. Each caller
-names which of the two it writes, from a closed set the writer switches
-over, so a new kind of end that states neither fails to build.
-No line of the art begins with `--`, so every reader, which takes a marker
-only as a whole line, passes over it:
+names which of the three ends it writes, a fault's, the watchdog's or a
+task's, from a closed set the writer switches over, so a new kind of end
+that states none of them fails to build.
+No line of either picture begins with `--`, so every reader, which takes a
+marker only as a whole line, passes over it:
 
 ```text
 --erx-crash-begin <form> <length>

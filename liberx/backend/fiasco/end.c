@@ -47,7 +47,7 @@ erx_fiasco_end_watchdog(const erx_watchdog_end_t *end)
 	    .message_length = sizeof(message) - 1 };
 
 	(void)erx_crash_record_write(&input, end_record, end_scratch);
-	erx_crash_frame_write(end_record, ERX_CRASH_END_MACHINE);
+	erx_crash_frame_write(end_record, ERX_CRASH_END_WATCHDOG);
 	erx_fiasco_machine_end(false);
 }
 
@@ -65,7 +65,7 @@ erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how)
 		    .message_length = sizeof(message) - 1 };
 
 		(void)erx_crash_record_write(&input, end_record, end_scratch);
-		erx_crash_frame_write(end_record, ERX_CRASH_END_MACHINE);
+		erx_crash_frame_write(end_record, ERX_CRASH_END_FAULT);
 	}
 	erx_fiasco_machine_end(how != ERX_END_OFF);
 }
