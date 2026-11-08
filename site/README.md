@@ -89,7 +89,7 @@ gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source
 
 * `index.html` is the page. Its sections, in order: the hero (logo, the
   question and a short lede beside the console window), the idea and
-  goals, the five principles, the architecture with a layer sketch, the
+  goals, the four principles, the architecture with a layer sketch, the
   current status, and "Try it" (what the console runs and what to type,
   beside the status-light panel and a short spec list). The logo is
   inlined as an SVG path taken from `erxos-logo.svg` at the top of the
