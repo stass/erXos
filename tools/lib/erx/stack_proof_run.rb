@@ -10,6 +10,7 @@ require_relative 'core_archive'
 require_relative 'output_directory'
 require_relative 'stack_graph'
 require_relative 'stack_proof'
+require_relative 'syntax_tree'
 
 module Erx
   # The stack proof as the build runs it on the stopgap
@@ -19,6 +20,9 @@ module Erx
   # (CoreArchive), and a build that has compiled the archive hands its
   # objects in, so the -O2 proof reads the very objects the kernel links;
   # without them the proof compiles that level itself.
+  #
+  # Before either level, it reads every core's syntax tree and checks the
+  # syntax-tree chokepoint rules, whose writes no level changes.
   #
   # The entries are the archive's exported functions, a superset of those
   # the kernel image references, and so a stricter proof. The cores
@@ -50,6 +54,7 @@ module Erx
         raise StackProofError, 'stack proof: the archive objects are not the cores of this tree'
       end
 
+      check_syntax_trees(root: root, compiler: compiler, runner: runner)
       lines = Dir.mktmpdir('erx-stack-proof-') do |scratch|
         LEVELS.flat_map do |level|
           objects = level_objects(level, archive: archive, root: root, cores: cores, compiler: compiler,
@@ -65,6 +70,16 @@ module Erx
       report = [*lines, *bootstrap]
       write(report, path: report_path)
       report
+    end
+
+    # The syntax-tree rules over every core, bootstrap's included, compiled
+    # with the archive's flags.
+    def check_syntax_trees(root:, compiler:, runner:)
+      rules = ChokepointRules::SYNTAX_TREE
+      sources = [*CoreArchive.sources(root), *CoreArchive::BOOTSTRAP_SOURCES]
+      writes = SyntaxTree.writes_in(sources, records: rules.map(&:record).uniq, root: root, compiler: compiler,
+                                             flags: CoreArchive::FLAGS, runner: runner, env: CoreArchive.environment)
+      Chokepoints.enforce_syntax_trees(rules, writes)
     end
 
     # The archive's own objects at its level; otherwise a fresh compile.
@@ -102,6 +117,6 @@ module Erx
       end
     end
 
-    private_class_method :level_objects, :entries, :read, :write
+    private_class_method :check_syntax_trees, :level_objects, :entries, :read, :write
   end
 end

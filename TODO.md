@@ -1310,13 +1310,7 @@ it; git history is the record of completed work.
   resize lowered. K32's seeded failure that counts a dead or doomed
   budget's `used` toward the machine is missing: it needs a check of the
   machine's total (what the live budgets with live ancestors hold
-  against the pages held) that the tests do not make yet. The counters'
-  chokepoint is enforced by the
-  `budget-records-private` text rule of `tools/lib/erx/chokepoint_rules/budget.rb`
-  (the header included and the records defined nowhere else), not by the
-  syntax-tree check the design's row names, which stays the pending
-  `budget-counters` rule; a layout-compatible record under another name,
-  cast from an `erx_budget_t` pointer, escapes the text rule. The budget
+  against the pages held) that the tests do not make yet. The budget
   core has no fuzz target of its own (`tools/fuzz/budget_fuzz.c` over
   scripts of carve, take, free, charge, resize, close and pin against
   the checked arithmetic); the page and capability targets drive it only
@@ -1487,28 +1481,54 @@ it; git history is the record of completed work.
   it in the range call's plan storage rather than on the stack, or shrink
   `erx_tlb_inval_t` to 16 bytes (page number, log2 page count, reach).
 * [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`: the
-  syntax-tree checks of K2 (`erx_rights_t` built only in
-  `kernel/core/cap.c`) and the sequence-counted accessor rule do not
-  exist yet, and neither is in the registry.
+  sequence-counted accessor rule does not exist yet and is not in the
+  registry. It reads the syntax trees as the `Chokepoints::Writers`
+  rules do (`tools/lib/erx/syntax_tree.rb`), counting reads as well as
+  writes, for every record the ABI file declares sequence-counted.
+* [Medium] Kernel chokepoints, the syntax-tree rules
+  (`tools/lib/erx/syntax_tree.rb`): they read only the cores
+  `CoreArchive` compiles, in the archive's configuration, so the glue's
+  C++ (a `reinterpret_cast` of an `erx_budget_t *` there), liberx and
+  code under another configuration's `#ifdef` are not read; and a write
+  listed shapes do not cover passes: a pointer passed through `...` or a
+  union of pointers, a declaration that disagrees with its definition in
+  another file, an inline assembly operand, a member selected by
+  `_Generic` or `__builtin_choose_expr`, and an embedded record
+  zero-filled by its container's initializer. Closing the list means
+  inverting it: outside the sites, allow a guarded member or record
+  pointer only in a closed set of contexts (a read, an atomic load's
+  pointer, a `->` read, a parameter or variable of the same type, a
+  comparison) and count everything else as a write.
 * [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`: the
   text rules match whole names, so a name a macro pastes together
   (`erx_cap_slot_ ## clear`, `erx_ ## cap_slot`) gets past
   `cap-slot-clear-named`, `budget-records-private`, `cap-table-private`
-  and the rule generated for each private ABI layout (`cap-slot-private`).
-  Localize every symbol of `erx_cores.a` not on its API list, so code
-  outside the cores cannot reach `erx_cap_slot_clear` however it spells
-  it, and have the object leg read the objects' debug information, so no
-  object but its core's defines a private record. The same text rules
-  miss a slot reached by a cast at an offset copied by hand
-  (`*(uint32_t *)((char *)s + 24)`), an include through a macro in
-  inherited Fiasco, which `include-form` does not read, and a
-  `-include` flag in a build file; the syntax-tree leg should refuse a
-  cast from `erx_cap_slot_t *` or `erx_cap_table_t *` outside
-  `kernel/core/cap.c`. Nor does any rule stop a caller that keeps its own
-  untyped pointer to a table, its directory or a page it handed to the
-  core from writing their bytes; the space core should allocate them from
-  memory nothing else maps, and the syntax-tree leg refuse a write
-  through such a pointer.
+  and `cap-slot-private`. The syntax-tree rules (`budget-counters`,
+  `cap-table-writers`, `cap-slot-writers`, `object-state-writers`,
+  `rights-built-in-cap`) see through macros and refuse a cast of a
+  pointer to a guarded record outside its writers, so no pasted name or
+  hand-copied offset writes one; a pasted call of `erx_cap_slot_clear`
+  from outside the cores, or a pasted definition of a private record,
+  still passes. Localize every symbol of `erx_cores.a` not on its API
+  list. The design: the API list is what the seam headers
+  (`include/erx/core/*.h` and their generated twins) declare, read from
+  the syntax tree of a source that includes them all, so a new seam
+  declaration needs no entry; `CoreArchive.build` links the members
+  into one object with `ld.lld -r`, keeps only that list global with
+  `llvm-objcopy --keep-global-symbols`, and archives the one object,
+  while the stack proof keeps reading the members. It needs `ld.lld`
+  passed to the core build (it is not beside clang), and the Fiasco
+  build audit (`FiascoProvenance#audit_executable`) to accept a member
+  whose construction record is the members' compiles, so it lands with
+  a Fiasco build that proves the link. Have the object leg also read the
+  cores' debug information (a `-g` compile with `-fdebug-prefix-map`,
+  so the archive stays reproducible), so no object but its core's
+  defines a private record. The text rules also miss an include through
+  a macro in inherited Fiasco, which `include-form` does not read, and a
+  `-include` flag in a build file. Nor does any rule stop a caller that
+  keeps its own untyped pointer to a table, its directory or a page it
+  handed to the core from writing their bytes; the space core should
+  allocate them from memory nothing else maps.
 * [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`:
   `cap-slot-clear-callers` reads only the cores' call graph, so
   `cap-slot-clear-named` keeps `erx_cap_slot_clear` out of the Fiasco glue
@@ -3052,11 +3072,8 @@ document's "residual risks accepted" paragraph.
   reaching l4sys's headers); the linked-kernel call-site reader the raw
   allocator and pmem converter rules need; the glue-imports allowlist over
   the glue's GCC objects (`erx_handoff.cpp` already exists, and its imports
-  are unchecked until then); the vector route; and the syntax-tree rule of
-  the budgets' counters. Each fails the check as soon as a file
-  it awaits lands, except the files it lists as existing: the budgets' rule
-  exempts `kernel/core/budget.c` and `kernel/core/budget_impl.h`, which the
-  active `budget-records-private` text rule covers until then
+  are unchecked until then); and the vector route. Each fails the check as
+  soon as a file it awaits lands, except the files it lists as existing
   ([design-kernel.md](docs/design-kernel.md#chokepoint-checks)).
 * [Medium] chokepoints, gaps of the text rules until the object leg
   closes them (`tools/lib/erx/chokepoints.rb`): rules match names, so they

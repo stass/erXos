@@ -30,6 +30,9 @@ module Erx
   # * Callers: only listed functions call a function, read from the cores'
   #   call graph rather than from text; the stack proof evaluates it on the
   #   graph of every level it proves.
+  # * Writers: only listed functions write a record's guarded members,
+  #   read from clang's syntax trees of the cores (SyntaxTree); the stack
+  #   proof evaluates it on the trees of the cores it proves.
   #
   # Every active and call-graph rule carries a seeded violation, and the
   # host test feeds each seed to its rule and requires a failure
@@ -212,6 +215,55 @@ module Erx
       end
     end
 
+    # A site of a Writers rule: a file glob, as clang names the file; when
+    # given, the functions in it that may write, nil allowing the whole
+    # file; and when given, the kinds of write (SyntaxTree::HOW) they may
+    # make, so that a function that only casts the record's pointer (to a
+    # handle, or to the body that follows an object's header) is no writer.
+    # A function is named as the tree names it, static ones included.
+    WriterSite = Data.define(:glob, :functions, :hows) do
+      def initialize(glob:, functions: nil, hows: nil) = super(glob: glob, functions: functions&.freeze, hows: hows&.freeze)
+
+      def allows?(write)
+        File.fnmatch?(glob, write.file.to_s, GLOB_FLAGS) && (functions.nil? || functions.include?(write.function)) &&
+          (hows.nil? || hows.include?(write.how))
+      end
+    end
+
+    # Writers: only the sites write the members of struct record (or union)
+    # that members lists, every member when nil. A write that reaches the
+    # whole record (an initializer list, or a cast of a pointer to it that
+    # lets a store at an offset reach any member) writes the listed ones too;
+    # so does a copy of the whole record, unless copies is false, for a
+    # value type whose copy builds nothing new. Its seed maps a file to a
+    # self-contained C source that declares the record and must fail.
+    Writers = Data.define(:name, :rule, :design, :record, :members, :copies, :sites, :seed) do
+      include Seeded
+
+      def initialize(name:, rule:, design:, record:, sites:, seed:, members: nil, copies: true)
+        super(name: name, rule: rule, design: design, record: record, members: members&.freeze, copies: copies,
+              sites: sites.freeze, seed: seed.freeze)
+        validate_seed!
+      end
+
+      def violations_in_writes(writes)
+        writes.filter_map do |write|
+          next unless write.record == record && guards?(write)
+          next if sites.any? { |site| site.allows?(write) }
+
+          Violation.new(rule: name, path: write.file.to_s, line: write.line, detail: "#{write} is not one of its writers")
+        end
+      end
+
+      private
+
+      def guards?(write)
+        return members.nil? || members.include?(write.member) if write.member
+
+        copies || write.how != :copy
+      end
+    end
+
     # One logical source line: its text after splicing and comment removal,
     # and the physical line it starts on.
     Line = Data.define(:number, :text)
@@ -357,8 +409,8 @@ module Erx
           end
         in Pending | Elsewhere
           rule.violations_in(names)
-        in Callers
-          # Read from the call graph by the stack proof, not from text.
+        in Callers | Writers
+          # Read from the call graph or the syntax trees by the stack proof, not from text.
           []
         end
       end.uniq
@@ -373,6 +425,21 @@ module Erx
     # it on each level's graph before proving it.
     def enforce_call_graph(rules, graph)
       found = call_graph_violations(rules, graph)
+      return true if found.empty?
+
+      raise Error, (["#{found.size} chokepoint violation(s):"] + found.first(50).map(&:to_s)).join("\n")
+    end
+
+    # The violations of the syntax-tree rules over the writes found in the
+    # cores' trees.
+    def syntax_tree_violations(rules, writes)
+      rules.flat_map { |rule| rule.violations_in_writes(writes) }.uniq
+    end
+
+    # Raises Error listing every syntax-tree violation; the stack proof
+    # calls it with the writes of every core.
+    def enforce_syntax_trees(rules, writes)
+      found = syntax_tree_violations(rules, writes)
       return true if found.empty?
 
       raise Error, (["#{found.size} chokepoint violation(s):"] + found.first(50).map(&:to_s)).join("\n")

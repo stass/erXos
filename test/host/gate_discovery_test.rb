@@ -116,9 +116,9 @@ class GateDiscoveryTest < Minitest::Test
   end
 
   def test_the_kinds_are_read_from_the_rules
-    assert_equal Rules::ALL.size, [Rules::ACTIVE, Rules::CALL_GRAPH, Rules::ELSEWHERE, Rules::PENDING].sum(&:size)
+    assert_equal Rules::ALL.size, [Rules::ACTIVE, Rules::CALL_GRAPH, Rules::SYNTAX_TREE, Rules::ELSEWHERE, Rules::PENDING].sum(&:size)
     assert_includes Rules::CALL_GRAPH.map(&:name), 'cap-slot-clear-callers'
-    assert_includes Rules::PENDING.map(&:name), 'budget-counters'
+    assert_includes Rules::SYNTAX_TREE.map(&:name), 'budget-counters'
     assert_includes Rules::ACTIVE.map(&:name), 'include-form'
   end
 

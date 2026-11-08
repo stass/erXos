@@ -10,6 +10,11 @@ module Erx
     BUDGET_DRIVER = 'test/fixtures/budget_driver.c'
     BUDGET_IMPL_INCLUDE = include_of(BUDGET_IMPL)
     BUDGET_RECORD_USE = record_use('erx_budget', 'erx_reserve')
+    # A budget's counters (docs/design-kernel.md, "Chokepoint checks", K3)
+    # and the core's functions that write them.
+    BUDGET_COUNTERS = %w[guarantee cap used carved lent pinned dead threshold].freeze
+    BUDGET_COUNTER_WRITERS = %w[level_apply erx_budget_init_root erx_budget_carve erx_budget_resize
+                                erx_budget_close erx_budget_watch erx_budget_watch_detach].freeze
 
     declare_group(
       private_headers: [BUDGET_IMPL],
@@ -18,10 +23,9 @@ module Erx
         # The budget core's counters are written only in kernel/core/budget.c
         # (K3, K32): its records are defined only in its private header, which
         # only the core and its host driver include, and every other file
-        # names a record's tag only to refer to it. This text rule stands in
-        # for the syntax-tree check of the counters' writes, budget-counters
-        # below. It reads the stopgap kernel's tree, glue and inherited
-        # sources alike.
+        # names a record's tag only to refer to it; budget-counters below
+        # reads which functions of the core write them. It reads the stopgap
+        # kernel's tree, glue and inherited sources alike.
         Chokepoints::Forbidden.new(
           name: 'budget-records-private',
           rule: "only kernel/core/budget.c, its host driver and kernel/core/page.c, which moves a reserve's " \
@@ -48,15 +52,36 @@ module Erx
                   'fiasco/kernel/src/erx/qualified.cpp' => "struct alignas(8) ::erx_reserve { long charged; };\n",
                   'fiasco/kernel/src/erx/final.cpp' => "struct erx_reserve final { long charged; };\n" }
         ),
-        # The core's own files are exempt: budget-records-private keeps their
-        # records out of every other file until the syntax trees are read.
-        Chokepoints::Pending.new(
-          name: 'budget-counters', rule: "only erx_budget_adjust changes a budget's counters, and kernel memory " \
-                                         'is allocated only through the budget-charging funnel (K3, K32)',
+        # A budget's counters are written only by the budget core's own steps
+        # (K3, K32), read from the cores' syntax trees: the chain plan's
+        # apply behind erx_budget_adjust (the charges, releases, reserve
+        # steps and pins), the root's set-up, the carve, the resize, the
+        # close and the watch. No other function of the core, and no other
+        # core, assigns a counter, takes its address but to load it
+        # atomically, rebuilds or copies a whole record, or casts a record's
+        # pointer, whatever macros spell it.
+        Chokepoints::Writers.new(
+          name: 'budget-counters',
+          rule: "only the budget core's chain plan, root set-up, carve, resize, close and watch, in " \
+                "kernel/core/budget.c, write a budget's counters",
           design: "#{KERNEL}#chokepoint-checks",
-          awaits: ['kernel/core/budget*', 'include/erx/core/budget*'],
-          existing: ['kernel/core/budget.c', BUDGET_IMPL],
-          reason: "reads clang's syntax trees and the cores' relocations"
+          record: 'erx_budget',
+          members: BUDGET_COUNTERS,
+          sites: [Chokepoints::WriterSite.new(glob: 'kernel/core/budget.c', functions: BUDGET_COUNTER_WRITERS),
+                  # The step drops const through an integer for the apply
+                  # that writes; the walk hands a budget to erx_object_of.
+                  Chokepoints::WriterSite.new(glob: 'kernel/core/budget.c', functions: %w[budget_step], hows: %i[cast]),
+                  Chokepoints::WriterSite.new(glob: 'kernel/core/delete.c', functions: %w[erx_delete_budget_walk_next],
+                                              hows: %i[cast])],
+          seed: { 'kernel/core/budget.c' => "struct erx_budget { unsigned long used; };\n" \
+                                            "void erx_reserve_charge(struct erx_budget *b, unsigned long n) { b->used += n; }\n",
+                  'kernel/core/page.c' => "typedef struct erx_budget { unsigned long used; } erx_budget_t;\n" \
+                                          "void f(erx_budget_t *b) { b->used++; }\n",
+                  'kernel/core/sched.c' => "struct erx_budget { unsigned long used; };\n#define FIELD(x) u ## x\n" \
+                                           "void f(struct erx_budget *b) { b->FIELD(sed) = 0; }\n",
+                  'kernel/core/space.c' => "void *memset(void *, int, unsigned long);\n" \
+                                           "struct erx_budget { unsigned long used; };\n" \
+                                           "void f(struct erx_budget *b) { memset(b, 0, sizeof *b); }\n" }
         )
       ]
     )

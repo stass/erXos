@@ -187,8 +187,10 @@ class StackProofRunTest < Minitest::Test
     File.write(File.join(root, 'kernel/stack_fiasco.txt'),
                "block 8192\nallowance call 2048\nallowance tick 1024\ntick erx_rogue_clear\n")
     File.write(File.join(root, 'kernel/stack_targets.txt'), '')
-    File.write(File.join(root, 'kernel/core/pack.c'), '')
-    File.write(File.join(root, 'kernel/core/boot_place.c'), '')
+    # The bootstrap cores are read as syntax trees too, so each holds a
+    # declaration, as ISO C asks of a translation unit.
+    File.write(File.join(root, 'kernel/core/pack.c'), "typedef int erx_pack_stub;\n")
+    File.write(File.join(root, 'kernel/core/boot_place.c'), "typedef int erx_boot_place_stub;\n")
     File.write(File.join(root, 'kernel/core/clear.c'), <<~C)
       void erx_cap_slot_clear(int *slot);
 

@@ -18,6 +18,38 @@ module Erx
       private_headers: [CAP_IMPL],
       private_header_tests: host_tests(CAP_CORE),
       rules: [
+        # Rights only shrink (K2): an erx_rights_t is built, or its bits
+        # written, only in kernel/core/cap.c, by erx_rights_create and
+        # erx_rights_shrink and the table's own copies, read from the cores'
+        # syntax trees. Elsewhere a rights value is only copied, so it holds
+        # what the core built.
+        Chokepoints::Writers.new(
+          name: 'rights-built-in-cap',
+          rule: "only #{CAP_CORE} builds an erx_rights_t or writes its bits; other code only copies one",
+          design: "#{KERNEL}#chokepoint-checks",
+          record: 'erx_rights',
+          copies: false,
+          sites: [Chokepoints::WriterSite.new(glob: CAP_CORE)],
+          seed: { 'kernel/core/attach.c' => "typedef struct erx_rights { unsigned bits; } erx_rights_t;\n" \
+                                            "erx_rights_t f(void) { erx_rights_t r = { .bits = ~0u }; return r; }\n",
+                  'kernel/core/delete.c' => "struct erx_rights { unsigned bits; };\n" \
+                                            "void f(struct erx_rights *r) { r->bits |= 1u; }\n",
+                  'kernel/core/space.c' => "struct erx_rights { unsigned bits; };\n" \
+                                           "struct erx_rights f(void) { return (struct erx_rights){ 7 }; }\n" }
+        ),
+        # A table is written only in kernel/core/cap.c (K1, B4), read from
+        # the cores' syntax trees: beside cap-table-private, which keeps its
+        # record out of every other file, no other code casts a pointer to
+        # one, so no store at an offset copied by hand reaches a member.
+        Chokepoints::Writers.new(
+          name: 'cap-table-writers',
+          rule: "only #{CAP_CORE} writes an erx_cap_table_t or casts a pointer to one",
+          design: "#{KERNEL}#chokepoint-checks",
+          record: 'erx_cap_table',
+          sites: [Chokepoints::WriterSite.new(glob: CAP_CORE)],
+          seed: { 'kernel/core/delete.c' => "struct erx_cap_table;\n" \
+                                            "void f(struct erx_cap_table *t) { ((unsigned long *)t)[3] = 0; }\n" }
+        ),
         # A capability table's directory, counts, free list and emptied flag
         # are written only in kernel/core/cap.c (B4), by construction: its
         # record is defined only in the core's private header, and everywhere

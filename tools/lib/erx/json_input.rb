@@ -40,6 +40,9 @@ module Erx
     # (allow_duplicate_key) and ignore what object_class would see, while
     # json 2.9 ignores that option and refuses through DistinctKeys. No
     # mechanism is selected by version.
+    # The deepest nesting a caller may ask for: plain_checked recurses once
+    # per level, well within Ruby's stack at this depth.
+    MAX_NESTING = 1024
     PARSE_OPTIONS = { max_nesting: 64, allow_duplicate_key: false, object_class: DistinctKeys }.freeze
 
     # json reports its own refused duplicate as a ParserError whose message
@@ -70,17 +73,23 @@ module Erx
     private_constant :PARSE_OPTIONS, :DUPLICATE_KEYS_REFUSED
     private_class_method :duplicate_key_error?, :refuses_only_duplicate_keys?, :parses?
 
-    def self.parse(bytes, max_bytes: 16 * 1024 * 1024, label: 'JSON metadata')
+    # max_nesting is raised only for a tool whose output nests deeply by
+    # nature, as a syntax tree does.
+    def self.parse(bytes, max_bytes: 16 * 1024 * 1024, max_nesting: PARSE_OPTIONS.fetch(:max_nesting),
+                   label: 'JSON metadata')
       unless DUPLICATE_KEYS_REFUSED
         raise Unsupported, "cannot read #{label}: json #{JSON::VERSION} does not refuse " \
                            'duplicate object keys (allow_duplicate_key)'
+      end
+      unless max_nesting.is_a?(Integer) && max_nesting.between?(1, MAX_NESTING)
+        raise Error, "#{label}: nesting bound must be an integer from 1 to #{MAX_NESTING}"
       end
       unless bytes.is_a?(String) && bytes.bytesize <= max_bytes
         raise Error, "#{label} exceeds its byte bound"
       end
       text = bytes.dup.force_encoding(Encoding::UTF_8)
       raise Error, "#{label} is not valid UTF-8" unless text.valid_encoding?
-      plain_checked(JSON.parse(text, **PARSE_OPTIONS), label: label)
+      plain_checked(JSON.parse(text, **PARSE_OPTIONS, max_nesting: max_nesting), label: label)
     rescue JSON::ParserError => error
       # Only the kind of failure is kept, so input never reaches a diagnostic.
       kind = duplicate_key_error?(error) ? 'duplicate JSON object key' : 'malformed JSON'

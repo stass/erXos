@@ -15,10 +15,11 @@ module Erx
   # host test feeds it. A rule whose sites are not in the tree yet is
   # Pending, and fails the check as soon as a file it awaits appears.
   #
-  # These are text checks over the C view of each source. The design's
-  # stronger evidence for the same rules, read from objects, the linked
-  # kernel and syntax trees, is the object leg, pending until the target
-  # objects it reads are built.
+  # Most are text checks over the C view of each source. The rules read
+  # from the cores' call graph and from their syntax trees run in the stack
+  # proof, which compiles the cores. The design's evidence read from
+  # liberx's objects and the linked kernel is the object leg, pending until
+  # the target objects it reads are built.
   #
   # The rules live in one file per group, chokepoint_rules/NAME.rb, loaded in
   # sorted order: each core's own, named after its source, and those of no
@@ -73,7 +74,7 @@ module Erx
     # not read yet. none is the stated reason a core has no rule of its own.
     Group = Data.define(:rules, :private_headers, :private_header_tests, :unchecked_objects, :none)
     RULE_KINDS = [Chokepoints::Forbidden, Chokepoints::IncludeForm, Chokepoints::Callers,
-                  Chokepoints::Elsewhere, Chokepoints::Pending].freeze
+                  Chokepoints::Elsewhere, Chokepoints::Pending, Chokepoints::Writers].freeze
     GROUP_FILES = DeclarationFiles.new('chokepoint rules')
     private_constant :GROUP_FILES
 
@@ -189,6 +190,26 @@ module Erx
       )
     end
 
+    # A private layout's writers, built from the ABI file: only its owner and
+    # the generated accessors in its header write any of its members, and no
+    # other code casts a pointer to it, so not even a store at an offset
+    # copied by hand from the header reaches a field. The header is read
+    # where the build generates it.
+    def self.private_layout_writers(layout)
+      owner = layout.private_owner
+      tag = layout.name
+      header = "build/gen/#{layout.private_header}"
+      Chokepoints::Writers.new(
+        name: "#{File.basename(header, '_impl.h').tr('_', '-')}-writers",
+        rule: "only #{owner} and the accessors of #{header} write struct #{tag} or cast a pointer to it",
+        design: "#{KERNEL}#chokepoint-checks",
+        record: tag,
+        sites: [Chokepoints::WriterSite.new(glob: owner), Chokepoints::WriterSite.new(glob: header)],
+        seed: { 'kernel/core/attach.c' => "struct #{tag} { unsigned word; };\n" \
+                                          "void f(struct #{tag} *s) { *(unsigned *)((char *)s + 0) = 0; }\n" }
+      )
+    end
+
     # The rules derived across the groups, so that no group's file or list
     # names another's. Each private header is kept to the cores and the host
     # tests its own group declares, a site that permits that group's headers
@@ -230,12 +251,16 @@ module Erx
     # Every rule, whichever file declared it. The kinds are read from the
     # rules, so a rule can land in no wrong list.
     ALL = [*GROUPS.values.flat_map(&:rules), CORE_RECORDS_PRIVATE, OBJECT_LEG,
-           *PRIVATE_LAYOUTS.map { |layout| private_layout_rule(layout) }].freeze
+           *PRIVATE_LAYOUTS.map { |layout| private_layout_rule(layout) },
+           *PRIVATE_LAYOUTS.map { |layout| private_layout_writers(layout) }].freeze
     # Rules read from each file's text.
     ACTIVE = ALL.grep(Chokepoints::Forbidden).concat(ALL.grep(Chokepoints::IncludeForm)).freeze
     # Rules read from the cores' call graph, which the stack proof builds at
     # every level it proves and checks against these before proving it.
     CALL_GRAPH = ALL.grep(Chokepoints::Callers).freeze
+    # Rules read from the cores' syntax trees, which the stack proof dumps
+    # and checks against these before proving the first level.
+    SYNTAX_TREE = ALL.grep(Chokepoints::Writers).freeze
     # Rules other checks enforce, each with the test that seeds its violation.
     ELSEWHERE = ALL.grep(Chokepoints::Elsewhere).freeze
     # M1's rules whose sites are not in the tree. Each awaits the scope it

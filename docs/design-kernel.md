@@ -8636,7 +8636,17 @@ builds ([design-verification.md](design-verification.md#cbmc-harnesses-and-runne
 and its test. A rule read from the cores' call graph, such as the one
 function that clears a capability slot, is declared in the same
 registry and evaluated by the stack proof on the graph of every
-optimisation level it proves, before it proves it. A rule whose sites
+optimisation level it proves, before it proves it. A rule read from
+the syntax trees, such as the functions that write a budget's counters,
+names a record, the members it guards and the functions allowed to
+write them; the stack proof dumps every core's tree with the archive's
+flags and evaluates it before either level. A write is an assignment,
+an increment, an address taken other than for an atomic load, an
+initializer or a copy of the whole record, or a cast of a pointer to
+it into another type; a copy of a record holding a guarded one, or a
+cast of a pointer to it, counts too, and a union holding one is refused.
+Neither a macro nor an offset copied by hand reaches a guarded member
+unseen in the cores. A rule whose sites
 are not yet in the tree is declared
 pending with the files that would be its first sites, and the check fails
 when one of them appears, so no code lands before the check that polices

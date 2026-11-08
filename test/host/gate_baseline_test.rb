@@ -70,15 +70,15 @@ class GateBaselineTest < Minitest::Test
   # Each chokepoint rule's least seed count; a pending or elsewhere rule has
   # no seed, and 0 here.
   RULES = {
-    'arch-terms' => 0, 'budget-counters' => 0, 'budget-records-private' => 13, 'cap-slot-clear-callers' => 3,
-    'cap-slot-clear-named' => 5, 'cap-slot-private' => 8, 'cap-table-private' => 10, 'core-archive-imports' => 0,
+    'arch-terms' => 0, 'budget-counters' => 4, 'budget-records-private' => 13, 'cap-slot-clear-callers' => 3,
+    'cap-slot-clear-named' => 5, 'cap-slot-private' => 8, 'cap-slot-writers' => 1, 'cap-table-writers' => 1, 'cap-table-private' => 10, 'core-archive-imports' => 0,
     'core-records-private' => 2, 'dispatch-console-write' => 1, 'dispatch-one-caller' => 1, 'dispatch-one-run' => 2,
     'glue-reads-no-utcb' => 1, 'fiasco-backend-headers-private' => 1, 'fiasco-headers-in-backend' => 2,
     'fiasco-symbols-in-backend' => 2, 'fiasco-vm-body-callers' => 1, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
     'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4,
     'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'map-core-opaque' => 3, 'map-records-private' => 6,
     'cwd-writer' => 0, 'erts-reads-no-index' => 1, 'ns-table-writer' => 0, 'object-leg' => 0,
-    'one-erx-trap' => 5, 'pmem-converter-sites' => 0, 'raw-allocator-sites' => 0,
+    'object-state-writers' => 4, 'one-erx-trap' => 5, 'pmem-converter-sites' => 0, 'raw-allocator-sites' => 0, 'rights-built-in-cap' => 3,
     'sched-records-private' => 5, 'seam-only-from-glue' => 1, 'space-holds-callers' => 2, 'space-parent-callers' => 2,
     'space-records-private' => 6, 'vector-route' => 0
   }.freeze

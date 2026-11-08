@@ -66,6 +66,34 @@ module Erx
                   'test/fixtures/cap_driver.c' => "(void)erx_object_cap_remove(o);\n",
                   'fiasco/kernel/src/erx/object.cpp' => "void f() { erx_object_close(o); }\n" }
         ),
+        # Inside the store, the state word is written only by the object's
+        # creation and its two writers (K21, K26), read from the cores'
+        # syntax trees: no other function of the store assigns it, takes its
+        # address but to load it atomically, rebuilds or copies a whole
+        # record, or casts a record's pointer, whatever macros spell it.
+        Chokepoints::Writers.new(
+          name: 'object-state-writers',
+          rule: "only erx_object_init, erx_object_cap_remove and erx_object_close, in #{OBJECT_CORE}, " \
+                "write an object's state word",
+          design: "#{KERNEL}#chokepoint-checks",
+          record: 'erx_object',
+          members: %w[state],
+          sites: [Chokepoints::WriterSite.new(glob: OBJECT_CORE,
+                                              functions: %w[erx_object_init erx_object_cap_remove erx_object_close]),
+                  # A handle is the record's address; the body follows the header.
+                  Chokepoints::WriterSite.new(glob: OBJECT_CORE, functions: %w[erx_object_handle], hows: %i[cast]),
+                  Chokepoints::WriterSite.new(glob: 'include/erx/object.h', functions: %w[erx_object_body],
+                                              hows: %i[cast])],
+          seed: { OBJECT_CORE => "struct erx_object { _Atomic unsigned state; };\n" \
+                                 "void erx_object_revive(struct erx_object *o) { o->state = 0; }\n",
+                  'kernel/core/delete.c' => "#include <stdatomic.h>\nstruct erx_object { _Atomic unsigned state; };\n" \
+                                            "#define WORD(o) (o)->st ## ate\n" \
+                                            "void f(struct erx_object *o) { atomic_store(&WORD(o), 2u); }\n",
+                  'kernel/core/cap.c' => "struct erx_object { unsigned type; unsigned state; };\n" \
+                                         "void f(struct erx_object *o) { *(unsigned *)((char *)o + 4) = 2; }\n",
+                  'kernel/core/attach.c' => "struct erx_object { unsigned state; };\n" \
+                                            "void f(struct erx_object *o) { *o = (struct erx_object){ 0 }; }\n" }
+        ),
         # The state word becomes RELEASED only when a capability's count is
         # taken out (K21): by erx_cap_slot_clear, the one function that
         # clears a slot, or by erx_pass_install when it drops what a taken

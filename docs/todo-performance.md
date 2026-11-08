@@ -384,3 +384,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Each hand-over costs an `atomics:add_get/3` and each socket step two
   `process_info/2` reads and an `atomics:add/3`. Settled by the time per
   frame of a bulk transfer with both and with a build that leaves them out.
+
+* The syntax-tree chokepoint pass (`tools/lib/erx/syntax_tree.rb`, run by
+  `StackProofRun`): it dumps every core's tree, 20-27 MB of JSON each,
+  in sequence, which a review measured at about 28 s on an Apple Silicon
+  host, once in `make check` and again in every Fiasco kernel build.
+  Settle it by timing `make check-stack-proof` with and without the
+  pass; if it matters, run the dumps in parallel or cache them by the
+  tree's hash.
