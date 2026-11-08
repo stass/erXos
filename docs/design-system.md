@@ -1146,21 +1146,25 @@ destroyed the domain, so in every error case nothing of it remains (A4,
 **On the stopgap.** The plan, its checks and its undo are the same code.
 Each step's kernel call is a request to the stopgap's root service, the
 one owner of every Fiasco object, served on its one thread
-([design-stopgap.md](design-stopgap.md#the-root-service)): step 1's
-budgets and step 3's groups are records with nothing charged or enforced
-(R6), so K32's walls do not hold; step 2's space is a Fiasco task with its
-parent recorded, so the domain's end ends its sub-spaces (R2), and its
+([design-stopgap.md](design-stopgap.md#the-root-service)), each a row of
+[its call table](design-stopgap.md#the-call-table): step 1's budgets and
+step 3's group are records with nothing charged or enforced, so K32's
+walls do not hold; step 2's space is a Fiasco task with its parent and
+fault gate recorded, so the domain's end ends its sub-spaces, and its
 faults reach the root service as Fiasco's fault messages, which become
-the domain's crash record; step 4's sides and bells are R1 and R3; and
-step 6's installs are R4, their rights recorded in the root service's
-handle table and checked at each request
-([the call table](design-stopgap.md#the-call-table)). That a domain which
-bypasses `liberx` is held to those rights, that its charges stay within
-its walls and that its exit record follows its last runnable thread are
-erXos's kernel's
+fault records at the library's gate; step 4's sides and bells are memory
+objects and IRQ objects of the root, the bells bound by the library to
+each party's group; and step 6's installs are `erx_cap_pass` from the
+library's table into the space it created. A handle on the stopgap
+carries no rights, so the rights step 6 names are the library's own
+discipline, recorded nowhere: the domain gets no delete right on its
+connection's objects because only an object's creator may destroy it,
+and it maps the system domain's side read-only because its own `liberx`
+asks for that. That a domain which bypasses `liberx` is held to step 6's
+rights and that its charges stay within its walls are erXos's kernel's
 ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)); what the
-stopgap means for connections and for the domains' invariants is in
-[design-domains.md](design-domains.md#on-the-stopgap).
+stopgap means for connections and for the domains' invariants, D7 and D17
+included, is in [design-domains.md](design-domains.md#on-the-stopgap).
 
 Domain ids come from a counter in the domain service that only grows and
 starts at 4, since stock `erlang:setnode/2` raises a creation below 4 to
@@ -2024,13 +2028,19 @@ a panic or the machine's end, and the driver owns it otherwise
 
 **On the stopgap.** The device service, the manifest's placement, the
 drivers and their supervisors are the same code. Behind
-`erx_dom_device_give`, the stopgap's root service maps a device's register
-windows and contiguous memory into the holding domain's task and binds
-each of its interrupt lines to that task's readiness dispatcher (R7,
-[design-stopgap.md](design-stopgap.md#the-call-table)). QEMU `virt`, as
-the harness starts it, has no IOMMU and attaches its devices over
-virtio-mmio, so every DMA device on the stopgap is unconfined. The
-development manifest still gives each device to its own domain: the block
+`erx_dom_device_give`, the domain library creates a device's register
+window, its line's IRQ object and, at the first give, its contiguous
+memory, all in the root, and passes them to the holding domain, whose
+driver maps the window and binds the line to its own group, so the line's
+deliveries reach that task's readiness dispatcher; no device object is
+created from a task other than the root
+([Device records](design-stopgap.md#device-records)). At the holder's end
+the library deletes the window's and the line's objects and keeps the
+contiguous memory for the restarted holder, as this section says of any
+unconfined device. QEMU `virt`, as the harness starts it, has no IOMMU
+and attaches its devices over virtio-mmio, so every DMA device on the
+stopgap is unconfined. The development manifest still gives each device
+to its own domain once drivers move out of the system domain: the block
 device to the storage domain, which runs the block driver and the file
 systems, littlefs as its sub-space port; the network device to the network
 domain; virtio-gpu and virtio-input to the display domain. The Phase 1

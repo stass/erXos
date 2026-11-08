@@ -1033,20 +1033,23 @@ grammar of the protocol.
 stopgap Fiasco's backend carries the port driver's plan as rows of its call
 table ([design-stopgap.md](design-stopgap.md#the-call-table)): the anchor
 and each image are Fiasco tasks that the root service creates at the
-session's request, recording the parent and ending a space's sub-spaces
-when it ends (R2); the program's budget and group are records whose fields
-report `unsupported`, so the floor, the cap and the programs group's nine
-tenths are not enforced and their tests report `unsupported` there (R6);
-the channel's lanes and the pipe ends are
-memory objects the root service maps into both tasks (R1), their doorbells
-IRQ objects bound to the program task's readiness dispatcher (R3), and
-every install is `erx_cap_pass` in its creator's case (R4); code objects
-are sealed by a flag the root service checks at every map (R8), and
-`erx_mem_copy` goes through the root's windows (R9). Each object is one
-request to the root service, so what a start costs there does not decide
-whether erXos's kernel needs a cheaper start path. A program's reach is
-its table and the servers' grants, user-mode code, so P1 and the
-narrowed-program tests hold on the stopgap; the parts of P2, P9, P10 and
+session's request, recording the parent and ending a space's sub-spaces,
+children first, when it ends; the program's budget and group are records,
+so the floor, the cap and the programs group's nine tenths are not
+enforced and their tests report `unsupported` there; the channel's lanes
+and the pipe ends are memory objects of the root's pool, each mapped by
+the `liberx` of the task that uses it, and their doorbells IRQ objects
+bound to the group of the side that consumes them, so a program's
+doorbells reach the program task's readiness dispatcher; every install is
+`erx_cap_pass` from the session's table into the program's space; the
+session creates and starts only the image's first thread, as the backend
+allows in a space its caller created; code objects are sealed by a flag
+the root service checks at every map, and `erx_mem_copy` goes through the
+root's windows. Each object is one request to the root service, so what a
+start costs there does not decide whether erXos's kernel needs a cheaper
+start path. A program's reach is its table and the servers' grants,
+user-mode code, so P1 and the narrowed-program tests hold on the stopgap
+for a program that goes through `liberx`; the parts of P2, P9, P10 and
 P11 that rest on the kernel, and any hold on a program that bypasses
 `liberx`, are erXos's kernel's
 ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)). Pauses and
@@ -1587,9 +1590,10 @@ The executors of runtimes never take this path: the kernel refuses to arm an
 executor for vCPU upcalls, so preemption still never runs runtime code
 ([design-scheduler.md](design-scheduler.md#the-runtime-contract)).
 
-**On the stopgap.** Upcalls on the stopgap Fiasco are the backend's row
-R10, `erx_vcpu_control` and `erx_vcpu_resume` over Fiasco's own vCPU
-interface, which waits on a source check: whether Fiasco's kernel-mode
+**On the stopgap.** Upcalls on the stopgap Fiasco are the backend's
+`erx_vcpu_control` and `erx_vcpu_resume` over Fiasco's own vCPU
+interface ([vCPU upcalls on Fiasco](design-stopgap.md#vcpu-upcalls-on-fiasco)),
+which waits on a source check: whether Fiasco's kernel-mode
 build offers that interface to a plain task, and whether its state area
 can carry the ABI's `erx_vcpu` layout without exposing any of Fiasco's
 ([design-stopgap.md](design-stopgap.md#open-decisions)). If the check
@@ -1598,8 +1602,13 @@ fails, the backend refuses both calls with `ERX_ENOTSUP`, the first thread
 arms nothing, and programs on the stopgap get default actions only: the
 event executor carries out a signal's default action, ending the program
 or ignoring the signal, a stop stops nothing, as under
-[Job control](#job-control), and handlers run only on erXos's kernel. The
-vCPU conformance tests then run only there.
+[Job control](#job-control), and handlers run only on erXos's kernel.
+`sigaction` with a handler then fails with `EINVAL`, the error POSIX gives
+for a signal that cannot be caught, so no program mistakes the gap for
+working signals, while `SIG_IGN` and `SIG_DFL` work. The vCPU conformance
+tests, and the cases of `libc-test` and the Open POSIX Test Suite that need
+a handler, then run only on erXos's kernel, and show as "cannot run" on the
+stopgap with that reason.
 
 ### toybox
 

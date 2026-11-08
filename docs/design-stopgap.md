@@ -17,9 +17,12 @@ Four constructions carry the document:
 * **Handles flow down.** A handle reaches another task only by `erx_cap_pass` from the caller's
   own table into a space the caller created, and nothing passes at a rendezvous. So every holder
   of an object is its creator's task or a task below it, a task's sub-spaces end before it does,
-  and what ends with a task has no holder left in a live task. Mapping an object into another
-  task, ending a task's objects with it and destroying a budget's objects need no protocol with
-  the holders.
+  and what ends with a task has no holder left in a live task. So ending a task's objects with
+  it and destroying an object or a budget are safe at any moment: every use of a handle goes
+  through the service's one lookup, and every mapping is revoked with its object. Safe is not
+  the same as timely: when to delete stays the caller's decision, and the domain library still
+  deletes a connection's objects only once each party has unmapped them or ended
+  ([design-domains.md](design-domains.md#connections)).
 * **One page, one address.** Each page of RAM has one permanent address in the root's pool window.
   Every mapping derives from it, so a mapping can come and go while the page and its contents stay,
   and the root reaches any task's memory without mapping anything.
@@ -96,10 +99,16 @@ the [root service](#the-root-service), which runs the call's body.
 The root holds a capability to every object it creates, with Fiasco's delete right, so
 `l4_task_delete_obj` always reaches it. Callers hold **handles**: indices in a per-task handle
 table the service keeps, never Fiasco capability values. An entry names an object record of the
-service's and the generation that record had when the entry was made; a record's generation
-grows each time the record is freed, so a handle to an object that has gone answers
-`ERX_ESTALE` and never names its successor. A handle carries no rights: the service answers the
-few rights it checks from the object's record, its creator and its kind. Each task has a run of slots in the root, past the root's own: its
+service's and the generation that record had when the entry was made; a record's generation, 32
+bits, grows each time the record is freed, and a record whose generation would wrap is retired and
+never reused, so a handle to an object that has gone answers `ERX_ESTALE` and never names its
+successor, however often records are reused. The entry itself carries no generation: an entry a
+close freed is reused, so a handle used after its own close names whatever its entry names then,
+where erXos's kernel answers `ERX_ESTALE`, a recorded difference. A handle carries no rights: the
+service answers the few rights it checks from the object's record, its creator and its kind, and
+records no rights for a handle, since rights are a capability mechanism only erXos's kernel
+enforces ([What Phase 1 defers](#what-phase-1-defers)). Thread handles are the exception
+[Thread creation](#thread-creation) describes. Each task has a run of slots in the root, past the root's own: its
 threads, its semaphores, its gate, its space and the semaphore its end ups. Another task holds only these, mapped by
 the root with `l4_task_map` and rights `L4_CAP_FPAGE_RWS`:
 
@@ -463,24 +472,24 @@ backend gives the same rows and refusals ([The hosted backend](#the-hosted-backe
 
 | erXos call | Phase 1 consumer | Body | Result and refusals | erXos's kernel instead |
 | --- | --- | --- | --- | --- |
-| `erx_vm_reserve`, `_commit`, `_decommit`, `_release`, `erx_space_protect` | musl `malloc`, ERTS allocators, stacks; the domain library and a session's port driver reserving in a space they created | service: [Budgets](#budgets-and-the-ownership-of-pages), over the caller's space or one it created; a task's commits count under the budget its space was created from | correct contents; `ERX_ENOMEM` from the pool, or with no free range; write and execute together `ERX_EINVAL`; a touch of a decommitted page is a fault; a release over a whole mapping removes it, and a commit, decommit or protect that meets a mapping, or a release that cuts one, `ERX_EINVAL` | lazy population with committed memory reserved (K6); protection beneath a ceiling (K4), so `_RX` over private memory is `ERX_ERIGHTS`; a refused call keeps the parts before it (K6); `erx_vm_reserve` without `ERX_VM_FIXED` searches below the placement base, where this one takes the lowest free range of its area |
-| `erx_mem_create`, `erx_vm_map` | a connection's two sides, a domain's boot information page and crash area (the domain library); a channel's rings, a data area and a pipe's rings and lock page (a session); a driver's buffers; BeamAsm's JIT objects; the time page, a group's areas | service: pool pages recorded as an object, all committed and zeroed at creation, charged to the budget named; each map is `l4_task_map` from the window into the space named, at addresses reserved there and neither committed nor mapped, with a mapping record ([Shared objects](#shared-objects-and-the-jit-alias)). Any object a task holds a handle to maps, whoever created it. `ERX_MEM_JIT` only from a task made with `ERX_SPACE_JIT`, else `ERX_ERIGHTS` | any number of mappings, into any task the caller may name; addresses already committed or mapped `ERX_EINVAL`; a write right over a sealed or code object `ERX_ERIGHTS`; no pages `ERX_ENOMEM`; `erx_mem_grow` `ERX_ENOTSUP`. An object goes at the first of: its destroy, its budget's destroy, the end of the task that created it, or the moment its last handle and its last mapping are both gone | grow works; an object lives only by its budget and its references, and its creator's end does not delete it |
+| `erx_vm_reserve`, `_commit`, `_decommit`, `_release`, `erx_space_protect` | musl `malloc`, ERTS allocators, stacks; the domain library and a session's port driver reserving in a space they created | service: [Budgets](#budgets-and-the-ownership-of-pages), over the caller's space or one it created; a task's commits count under the budget its space was created from | correct contents; `ERX_ENOMEM` from the pool, or with no free range; write and execute together `ERX_EINVAL`; a touch of a decommitted page is a fault; a release over a whole mapping removes it, and a commit or decommit that meets a mapping, or a release that cuts one, `ERX_EINVAL`; a protect that meets a mapping `ERX_ENOTSUP` | lazy population with committed memory reserved (K6); protection beneath a ceiling (K4), so `_RX` over private memory is `ERX_ERIGHTS`; a refused call keeps the parts before it (K6); `erx_vm_reserve` without `ERX_VM_FIXED` searches below the placement base, where this one takes the lowest free range of its area |
+| `erx_mem_create`, `erx_vm_map` | a connection's two sides, a domain's boot information page and crash area (the domain library); a channel's rings, a data area and a pipe's rings and lock page (a session); a driver's buffers; BeamAsm's JIT objects; the time page, a group's areas | service: pool pages recorded as an object, all committed and zeroed at creation, charged to the budget named; each map is `l4_task_map` from the window into the space named, at addresses reserved there and neither committed nor mapped, with a mapping record ([Shared objects](#shared-objects-and-the-jit-alias)). Any object a task holds a handle to maps, whoever created it. `ERX_MEM_JIT` only from a task made with `ERX_SPACE_JIT`, else `ERX_ERIGHTS` | any number of mappings, into any task the caller may name; an address, size or offset off a page boundary, or a size of 0, `ERX_EINVAL`; offset plus size past the object's end, computed with checked arithmetic so an overflow is past it too, `ERX_ERANGE`, refused before any page is mapped; addresses already committed or mapped, or outside a reservation of the target, `ERX_EINVAL`; a write right over a sealed or code object `ERX_ERIGHTS`; no pages `ERX_ENOMEM`; `erx_mem_grow` `ERX_ENOTSUP`. An object goes at the first of: its destroy, its budget's destroy, the end of the task that created it, or the moment its last handle and its last mapping are both gone | grow works; an object lives only by its budget and its references, and its creator's end does not delete it |
 | `erx_image_slice`, `erx_image_map` | the domain library: a domain's release slice and runtime image; a session's port driver: a program command's slices, the loader `erx_exec`; the test-task launcher | service: a slice is a record of whole entries of the archive, charged to the budget named; `erx_image_map` copies an entry's segments through the window into pool pages of the target space, cleaned and invalidated, code read-execute and data read-write, and returns the entry point; `erx_vm_map` of a slice maps the archive's own pages read-only with `l4_task_map` from the root, where `sigma0` mapped them one to one | a range off entry boundaries, or a file of the system release asked by a task other than the root, `ERX_ERANGE`; a write right on a slice `ERX_ERIGHTS`; destroying a slice drops the record and leaves its mappings until their tasks end, since the archive's pages are immutable and never reused | a slice's deletion removes its mappings; slicing is checked against `SYSTEM` |
-| `erx_mem_create_paged`, `erx_mem_supply`, `erx_mem_seal` | code objects, which the domain service makes for a session's command server (`erx_dom_code_object`); data objects, which a session's filler makes | service: a paged object is a shared object with a sealed flag, its pages zero at creation; a supply copies from the source object's window pages into the target's, as `erx_mem_copy` does; a seal sets the flag, and every map and supply reads it, since the service performs every one | a map of an unsealed paged object `ERX_EBUSY`; a supply into a sealed one, and a write right in a map of one, `ERX_ERIGHTS`; `ERX_MEM_CODE` from a task other than the root `ERX_ERIGHTS`, since the code right is the system domain's; a seal always succeeds, since an unsealed object has no mapping and so no writer; `erx_mem_dirty`, `erx_mem_child`, `erx_mem_own` `ERX_ENOTSUP` | pages supplied on demand; copy-on-write children (Track Q) |
-| `erx_mem_copy` | the domain service reading a crash area; a server reading a client's memory | service: copies between the two objects' window pages, at most 64 pages a request, so the stub loops | either object gone `ERX_ESTALE`, never a fault; past an object `ERX_ERANGE`; physical memory or a JIT object `ERX_ETYPE`; a sealed destination `ERX_ERIGHTS` | in the kernel, through its own mappings |
+| `erx_mem_create_paged`, `erx_mem_supply`, `erx_mem_seal` | code objects, which the domain service makes for a session's command server (`erx_dom_code_object`); data objects, which a session's filler makes | service: a paged object is a shared object with a sealed flag, its pages zero at creation; a supply copies from the source object's window pages into the target's, as `erx_mem_copy` does; a seal sets the flag, and every map and supply reads it, since the service performs every one | a map of an unsealed paged object `ERX_EBUSY`; a supply into a sealed one, and a write right in a map of one, `ERX_ERIGHTS`; a supply whose offset plus length passes the target's end, or whose source offset plus length passes the source's, each computed with checked arithmetic, `ERX_ERANGE`, before any byte moves; a source that is physical memory or a JIT object `ERX_ETYPE`; a supply writes every page of its range, supplied before or not; `ERX_MEM_CODE` from a task other than the root `ERX_ERIGHTS`, since the code right is the system domain's; a seal always succeeds, since an unsealed object has no mapping and so no writer; `erx_mem_dirty`, `erx_mem_child`, `erx_mem_own` `ERX_ENOTSUP` | pages supplied on demand; a supply fills only pages not yet supplied; copy-on-write children (Track Q) |
+| `erx_mem_copy` | the domain service reading a crash area; a server reading a client's memory | service: copies between the two objects' window pages, at most 64 pages a request, so the stub loops | either object gone `ERX_ESTALE`, never a fault; an offset plus length past either object, computed with checked arithmetic, `ERX_ERANGE`, before any byte moves; physical memory or a JIT object `ERX_ETYPE`; a sealed destination, or a slice, whose pages are the archive's, `ERX_ERIGHTS` | in the kernel, through its own mappings |
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
 | `erx_mem_create_physical` | `erx_device`: the console UART (M3) and the host link's; through `erx_dom_device_give`, each device's register window for its holder ([Device records](#device-records)) | service, from the root only: `l4sigma0_map_iomem` into the root's device window, over the base and size its caller reads from the manifest's device entry; each map is then `l4_task_map` from there into the space named, as for a shared object; for the console UART also [the handoff](#the-console) | RAM, which `sigma0` keeps, `ERX_ERANGE`; execute `ERX_ERIGHTS`; a full window `ERX_ENOMEM`; a create from a task other than the root `ERX_ENOTSUP`, since the domain library makes every device's objects and passes them | within rights, from a carved resource |
 | `erx_mem_create_contiguous`, `erx_mem_dma_addr` | the device NIF's buffers and rings, in whichever domain holds the device | service: a create from the root only, first fit from a [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, wholly below the caller's limit, cached, zeroed, and never given back; the domain library passes it to the device's holder. `dma_addr`, from any task holding the object, is physical address plus offset, since QEMU `virt` as the harness starts it has no IOMMU | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
 | `erx_irq_create`, `erx_irq_bind`, `erx_irq_ack`, `erx_irq_trigger` | device lines, in whichever domain holds the device; a connection's bells; a channel's and a pipe end's doorbells; ERTS's wakes | service: `l4_factory_create_irq` from any task, and for a line, from the root only, `l4_icu_bind`; a bind to a group records the group and label and runs `l4_rcv_ep_bind_thread(irq, dispatcher, record)` on the group's home task's dispatcher once both exist ([Interrupts and readiness](#interrupts-and-readiness)); `l4_irq_detach` for `ERX_CAP_NULL`; `l4_irq_unmask`; `l4_irq_trigger`. Every call is a request: no IRQ capability is mapped into a task, and a delivery goes from Fiasco to the dispatcher directly | each label once, the line masked until acked; `erx_irq_route` `ERX_ENOTSUP`; a target that is not a group the caller holds `ERX_ETYPE`, or a thread, `ERX_ENOTSUP` unless [vCPU upcalls](#vcpu-upcalls-on-fiasco) are carried; a group's 65th bound object `ERX_ELIMIT`; a line's second object `ERX_EBUSY`; a line created from a task other than the root `ERX_ENOTSUP`; the resource ignored | by capability, without the root; `BIND` and `TRIGGER` split; route applied |
-| `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3); the domain library's group and sub-space group for each domain; a session's group for each program | service for `create`, `configure` and `info`, local for `take_ready` in the group's home task: [Budgets and groups as records](#budgets-and-groups-as-records), [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set of the grant in the caller's UTCB, and `info` writes an `erx_info_group` there, with that set as `cpuset` and the home task's status page's `parked` and `ready`, and only their bits of `reported` set, `cpuset`'s only once a set was configured ([Reporting kernel objects](#reporting-kernel-objects)) | correct readiness; everything else `unsupported`; no guarantee, quota or throttling; budget and parent recorded, and a group goes with its budget; every thread of a group runs in one task, its home, so a thread created in another task `ERX_EINVAL`; a task's ninth home group `ERX_ELIMIT` | grants enforced, usage reported; a group's threads in any space |
+| `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3); the domain library's group and sub-space group for each domain; a session's group for each program | service for `create`, `configure` and `info`, local for `take_ready` in the group's home task: [Budgets and groups as records](#budgets-and-groups-as-records), [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set of the grant in the caller's UTCB, and `info` writes an `erx_info_group` there, with that set as `cpuset` and the home task's status page's `parked` and `ready`, and only their bits of `reported` set, `cpuset`'s only once a set was configured ([Reporting kernel objects](#reporting-kernel-objects)) | correct readiness; everything else `unsupported`; no guarantee, quota or throttling; budget and parent recorded, and a group goes with its budget; every thread of a group runs in one task, its home, so a thread created in another task `ERX_ENOTSUP`; a task's ninth home group `ERX_ELIMIT` | grants enforced, usage reported; a group's threads in any space |
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
 | `erx_umtx_wait`, `erx_umtx_wake` | musl's futexes | local: [The umtx table](#the-umtx-table) | correct within a task | across spaces; `ERX_EFAULT`, `ERX_ESTALE`, `ERX_EINTR` |
-| `erx_thread_create`, `_start`, `_exit`, `_set_affinity` | `pthread_create`, ERTS's threads, `libc-test` | [Thread creation](#thread-creation), [Deletion](#deletion); affinity is `l4_scheduler_run_thread` | no free index `ERX_ENOMEM`; an empty mask, or one naming no CPU, `ERX_EINVAL`; affinity runs the thread on one CPU of the mask, its own if the mask holds it; `erx_thread_stop`, `_read`, `_write`, `_set_urgency` `ERX_ENOTSUP` | backed and charged at create; those calls work; the thread may run on any CPU of its mask |
+| `erx_thread_create`, `_start`, `_exit`, `_set_affinity` | `pthread_create`, ERTS's threads, `libc-test` | [Thread creation](#thread-creation), [Deletion](#deletion); affinity is `l4_scheduler_run_thread` | no free index `ERX_ENOMEM`; an empty mask, or one naming no CPU, `ERX_EINVAL`; affinity runs the thread on one CPU of the mask, its own if the mask holds it; in a space the caller created, only that space's first thread, so a second `ERX_ENOTSUP`; a start of a thread that faulted `ERX_ENOTSUP`; a thread's own-task handle names no thread once it is reaped, and the index's next thread after that; `erx_thread_stop`, `_read`, `_write`, `_set_urgency` `ERX_ENOTSUP` | backed and charged at create; any number of threads in a space the caller holds; a start resumes a repaired thread; a reaped thread's handle `ERX_ESTALE`; those calls work; the thread may run on any CPU of its mask |
 | `erx_pthread_create_executor` | ERTS's normal and dirty CPU schedulers, through `ethr_thr_create` | natively musl's `pthread_create` with the executor class, in the row above; hosted a start wrapper ([Making an executor](design-runtime.md#threads-and-synchronisation)) | `pthread_create`'s; no free index or slot `EAGAIN` | the same call |
 | `erx_release_entry` | `erx_prim_file.c` | local, on both backends: `erx_pack_entry_at` and `erx_pack_path_at` over the archive `erx_pack_open` accepted, counting from the first path under `system/` | path, size and offset from `release_addr`; an index past the run `ERX_ERANGE` | `erx_object_info(release, ERX_INFO_IMAGE_ENTRY, ...)` |
 | `erx_space_create`, `erx_space_stop` | the domain library, for every domain; a session's port driver, for each program's anchor and image; the test-task launcher in the root (`libc-test` M3) | service, from any task: `l4_factory_create_task`, with a handle table of `cap_limit` entries; `parent`, `fault`, `label` and the budget recorded ([Spaces, parents and exit records](#spaces-parents-and-exit-records)); a stop is [task exit](#task-exit) of the space and of every space below it, children first | the exit record at the fault gate once every thread of the space is deleted; a parent other than the caller's space or one it created `ERX_ETYPE`; a `fault` that is not a gate the caller holds `ERX_ETYPE`; `cap_limit` past `ERX_CAPS_MAX` `ERX_EINVAL`; `ERX_SPACE_JIT` from a task other than the root whose own space is not a JIT space `ERX_ERIGHTS`; `erx_space_pause`, `_resume`, `_clear_caps`, `_quiesce`, `_copy` `ERX_ENOTSUP` | pauses, quiesce, copies; a stop's bounded finishing path (K18) |
-| `erx_gate_create`, `erx_gate_bind`, `erx_ipc_wait` | the domain library's fault thread and each domain's gate worker, serving fault gates | service: a gate is a record with a queue of fault and exit records and the one thread bound to it; a wait takes the oldest record, or sleeps on the thread's semaphore until the service queues one ([Fault gates](#fault-gates)) | the record's words in the message registers of the caller's public UTCB, its space's label as the label; the deadline as for every wait; a bind to a thread of another task `ERX_EINVAL`; a wait by a thread no gate is bound to waits until its deadline; `erx_ipc_call`, `_send`, `_reply`, `_reply_wait` `ERX_ENOTSUP`, so no gate carries a message | gates carry messages and capabilities, with `ERX_EDEAD`, labels and deadlines |
-| `erx_cap_dup`, `erx_cap_close`, `erx_cap_pass`, `erx_object_destroy`, `erx_object_info` | Erlang NIF handles, the launcher, the inspector; the domain library installing a domain's capabilities (`erx_dom_install`); a session installing a program's budget, group, channel, data area, code objects and pipe ends | service: the handle tables; a pass copies or moves handle entries from the caller's own table into a space it created ([Passing a handle](#passing-a-handle)); destroy deletes the Fiasco objects, for memory revokes every mapping first, and for a budget deletes everything charged to it; `erx_object_info` as [Reporting kernel objects](#reporting-kernel-objects) says | a stale handle `ERX_ESTALE`; destroying a started thread `ERX_ENOTSUP`; destroying an object from a task other than its creator's `ERX_ERIGHTS`, since no pass conveys the delete right; a pass from a space other than the caller's own, into its own, or of a space, thread or gate handle `ERX_ENOTSUP`; a pass into a full table `ERX_ELIMIT`, before any item moves; the topics and fields that section names `ERX_ENOTSUP` or clear | rights, pass sets and the creator's rule; transfer at rendezvous; a thread ends at once; every topic, with object ids |
+| `erx_gate_create`, `erx_gate_bind`, `erx_ipc_wait` | the domain library's fault thread and each domain's gate worker, serving fault gates | service: a gate is a record with a queue of fault and exit records and the one thread bound to it; a wait takes the oldest record, or sleeps on the thread's semaphore until the service queues one ([Fault gates](#fault-gates)) | the record's words in the message registers of the caller's public UTCB, its space's label as the label; the deadline as for every wait; a bind replaces the gate's thread, and `ERX_CAP_NULL` unbinds it, as on erXos's kernel; a bind to a thread of another task `ERX_ENOTSUP`; a wait by a thread no gate is bound to waits until its deadline; `erx_ipc_call`, `_send`, `_reply`, `_reply_wait` `ERX_ENOTSUP`, so no gate carries a message | gates carry messages and capabilities, with `ERX_EDEAD`, labels and deadlines |
+| `erx_cap_dup`, `erx_cap_close`, `erx_cap_pass`, `erx_object_destroy`, `erx_object_info` | Erlang NIF handles, the launcher, the inspector; the domain library installing a domain's capabilities (`erx_dom_install`); a session installing a program's budget, group, channel, data area, code objects and pipe ends | service: the handle tables; a pass copies or moves handle entries from the caller's own table into a space it created ([Passing a handle](#passing-a-handle)); destroy deletes the Fiasco objects, for memory revokes every mapping first, and for a budget deletes everything charged to it; `erx_object_info` as [Reporting kernel objects](#reporting-kernel-objects) says | a stale handle `ERX_ESTALE`; a handle used after its own close names what its entry names then; destroying a started thread, or a group that still has a thread, `ERX_ENOTSUP`; destroying an object from a task other than its creator's `ERX_ERIGHTS`, since no pass conveys the delete right; a pass from a space other than the caller's own, into its own, or of a space, thread or gate handle `ERX_ENOTSUP`; a pass into a full table `ERX_ELIMIT`, and one naming a handle twice where either item moves it `ERX_EINVAL`, each before any item moves; the topics and fields that section names `ERX_ENOTSUP` or clear | rights, pass sets and the creator's rule; transfer at rendezvous; a closed handle `ERX_ESTALE`; a thread ends at once, and a group's destroy ends its threads; every topic, with object ids |
 | `erx_budget_create`, `_resize`, `_watch`; `erx_object_destroy` of a budget | the domain library: each domain's own and outer budgets and each connection's child budget; a session: each program's budget; the inspector | service: a budget is a record of its parent, kind, guarantee and cap, with nothing enforced ([Budgets and groups as records](#budgets-and-groups-as-records)); its destroy deletes the budgets carved from it and everything charged to them | a handle per create; resize records the two values; `used` partial, the rest `unsupported`; watch `ERX_ENOTSUP`; no create, commit or carve is refused for a budget's guarantee or cap | exact, all fields, enforced (K3) |
 | the time page, `erx_time_set_wall` | ERTS's time, deadlines | service fills a page mapped read-only into every task: the scale of the architecture's user-readable counter, the wall offset; reading is local | correct layout | none |
 | `erx_entropy_read`, `erx_entropy_add` | ERTS's `crypto` seed, the host link | service: `rng.c`, from the counter and the manifest's seed; each reply holds 16 bytes and each request 32, so the stubs loop | `erx: entropy: quality: low, from the counter alone` in the banner; at most 256 bytes a call; `ERX_ENTROPY_CREDIT` `ERX_ENOTSUP`, since no source is trusted | in the kernel |
@@ -648,7 +657,8 @@ callers rely on to clean up: **an object goes with its budget.**
   them against the parent, and no create, commit or carve is refused for them. Every object record, space and
   group names the budget it was created from.
 * **Destroying a budget** is one service body: it walks the budgets carved from it, deepest first, and for each
-  stops every space charged to it ([task exit](#task-exit), children first), then deletes every other object
+  stops every space charged to it and the home task of every group charged to it that still has a thread
+  ([task exit](#task-exit), children first), then deletes every other object
   charged to it, groups, IRQ objects, gates and memory alike, as the [object table](#shared-objects-and-the-jit-alias)'s
   second row says, and frees the budget's record. A deletion the root cannot perform ends the machine, as every
   deletion does.
@@ -659,8 +669,18 @@ callers rely on to clean up: **an object goes with its budget.**
   `ERX_EINVAL` after that. In every caller the first thread created in a group belongs to the task the group was
   made for: the domain library's first worker of a domain, a session's first thread of a program, the root's first
   executor. A group goes with its budget, with
-  its home task, or by `erx_object_destroy`, which kills its threads first, since a thread whose group is gone has
-  nothing to run on, as on erXos's kernel.
+  its home task, or by `erx_object_destroy` once it has no thread. **A group never goes before its threads:**
+  a thread is deleted either by its own exit through the reaper, which also releases its stack and clears its
+  lock word ([Thread exit](#thread-exit)), or with its whole task, so the service never deletes threads of a
+  live task one by one. Hence the destroy of a group that still has a thread is `ERX_ENOTSUP`, and a budget's
+  destroy stops such a group's home task. Each caller ends a group's home first anyway: the domain library and
+  a session destroy a domain's or a program's budget, which stops its spaces. Where erXos's kernel ends a
+  group's threads at its destroy, this backend refuses; no consumer needs it.
+* **Deleting a group** detaches every IRQ object bound to it with `l4_irq_detach` and drops its bind records,
+  pending ones included ([Interrupts and readiness](#interrupts-and-readiness)), so a holder's later trigger
+  waits at the object, as for any unbound object, until something binds it again. The home is the backend's
+  own: no call reports it, and threads are listed by space, as on erXos's kernel
+  ([Reporting kernel objects](#reporting-kernel-objects)).
 
 Nothing here is a guarantee: a budget's guarantee and cap, a group's grant and the sums the manifest check proves
 ([The Phase 1 manifest check](#the-phase-1-manifest-check)) bind nothing at run time, and the inspector shows every
@@ -728,11 +748,20 @@ Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears 
 at the index's slot, copies the starting registers from the caller's public UTCB into the record, and replies
 with the handle and the slot, which in the root is the root's own capability. The starting registers are
 `erx_fiasco_start_t`: the ABI's `erx_regs` and, beside them, the thread pointer, which `erx_regs` does not hold.
-In the root, a thread's handle is its index, so it carries no generation. Once the thread is reaped the handle names no
-thread and is refused, until the index's next create, from which on it names that thread; nothing keeps a handle past a
-join, since `pthread_t` is musl's own. On failure the stub frees the
-record and returns the service's status. A task names itself or a space it created as the space; the first thread of a
-space takes index 0, and its creator's stub claims nothing, since the service makes the table with the task.
+**Thread handles.** A handle to a thread of the caller's own task, in the root and in every other task alike, is the
+thread's index, since the stubs of `erx_thread_start` and the exit path work on the record it names locally; it
+carries no generation and is no entry of the handle table. Once the thread is reaped the handle names no thread and is
+refused, until the index's next create, from which on it names that thread, a recorded difference; nothing keeps such a
+handle past a join, since `pthread_t` is musl's own. On failure the stub frees the record and returns the service's
+status.
+
+A task names itself or a space it created as the space. In a space it created, a caller makes only the first thread,
+the one the domain library or a session starts a domain or a program with, and a second create there is `ERX_ENOTSUP`;
+the space's own threads make the rest. That first thread takes index 0, and its creator's stub claims nothing, since the
+service makes the table with the task. Its handle is an ordinary entry of the creator's handle table, naming the
+thread's entry in the service's task table with that entry's generation, so once the thread is reaped the handle is
+`ERX_ESTALE`. Its start is a request whose body also moves the record from created to started, through the window, and
+the trampoline below writes its marker.
 
 **`erx_thread_start`.** The stub moves the record from created to started, and only then writes the marker 1: a start of any other handle
 is refused untouched, since a 1 written over the kernel's 0 would lose the index for good. The service, in order:
@@ -836,11 +865,15 @@ the destroy of the budget its space was created from, or its parent's exit. In t
 The body walks the tree below the task, iteratively and children first, so a space never outlives its parent, and
 runs these steps for each task, a child with the status `ERX_EXIT_PARENT`:
 
-1. **The threads.** `l4_task_delete_obj` on each thread of the task, newest first, reaper and dispatcher included. Each
-   return means that thread never reaches user mode again (`thread_object.cpp:157-166`).
+1. **The threads.** First `l4_irq_detach` on every IRQ object bound to the task's dispatcher or to one of its
+   threads, whoever created the object, so no delivery is ever bound to a deleted thread; then `l4_task_delete_obj` on
+   each thread of the task, newest first, reaper and dispatcher included. Each return means that thread never reaches
+   user mode again (`thread_object.cpp:157-166`).
 2. **The objects.** Every object the task created goes, as the [object table](#shared-objects-and-the-jit-alias)'s third
-   row says, its mappings in other tasks revoked first; then its semaphores, gate and home groups, then the task object,
-   which unmaps everything before the call returns (`task.cpp:686-699`).
+   row says, its mappings in other tasks revoked first; then its semaphores, gate and home groups, each group as
+   [Budgets and groups as records](#budgets-and-groups-as-records) deletes one, its bind records with it, so an IRQ
+   object that outlives the task, a connection's bell that the domain library created, is left unbound and waits for a
+   new bind; then the task object, which unmaps everything before the call returns (`task.cpp:686-699`).
 3. **The memory.** Its pages return to the pool; each of its mapping records is dropped from its object's list, which
    frees an object whose last reference that was; its handle table is emptied, each entry dropping its object's count,
    and freed with its runs.
@@ -946,7 +979,9 @@ root.
   entry)`, so a delivery never reaches an entry before its label. When the group has no home yet, or its home task has
   no dispatcher yet, as when the domain library binds a domain's bell before the domain's first thread runs, the
   service records the bind and makes it when the first thread fixes the home or the dispatcher registers, whichever
-  is later; a software fire before then arrives at the bind, which is Fiasco's behaviour for a detached object. An
+  is later; a software fire before then arrives at the bind, which is Fiasco's behaviour for a detached object. A
+  bind record, pending or made, lives in the group's record and goes with the group, whether its home task ends, its
+  budget is destroyed or it never gets a thread, and the object's own destroy detaches it and frees its entry. An
   unbind, `ERX_CAP_NULL`, runs `l4_irq_detach` and frees the entry; a rebind under another label detaches, writes
   the new label and binds again. A delivery already listed under an entry that is then reused reaches its new sink
   as one look, which every sink treats as a hint ([design-domains.md](design-domains.md#connections)).
@@ -1071,7 +1106,9 @@ and erXos's kernel has none of it, so [Transport](#transport) records it as a di
 **Payloads never cross the native UTCB.** What the ABI puts in the caller's UTCB (the bytes of `erx_debug_log` and of a task's `task_write`, up to
 `utcb_bytes_max`; starting registers; results larger than the registers) stays in the caller's public UTCB, which the service reads
 and writes through the window, by the index in `mr[0]`. So 63 message words are always enough. The ABI's memory windows are reached
-through the object's window addresses.
+through the object's window addresses. The caller's task can write its public UTCB while the service reads it, so the decoder
+copies what a request takes from it, the length first and then at most that many bytes, into the service's own buffer once, and
+every check and the body read only that copy; nothing is read from the public UTCB a second time for the same request.
 
 **The loop.** `l4_ipc_wait`; decode; run the body; `l4_ipc_reply_and_wait` with `L4_IPC_SEND_TIMEOUT_0`. A body never calls a stub.
 
@@ -1092,7 +1129,8 @@ creates its first thread in a group it holds and starts it ([design-system.md](d
 A space ends by [task exit](#task-exit), which ends every space below it first, so no program outlives its session and no
 sub-space its domain. Its exit record goes to its fault gate once every thread of it is deleted, carrying the first stop's
 status: the status of `erx_space_stop`, `ERX_EXIT_PARENT` for a space its parent's end stopped, `ERX_EXIT_CRASH` for one
-whose fault gate's server stopped it after a fault and named that status. The label is the one its creator gave. The domain
+whose fault gate's server stopped it after a fault and named that status. The label is the one its creator gave, all 64
+bits, recorded as given and neither checked nor required to be unique, as on erXos's kernel. The domain
 library turns a domain's record into `{domain_down, D, Info}` and a session's port driver turns a program's into its exit
 status, as on erXos's kernel ([design-system.md](design-system.md#ending-a-domain),
 [design-programs.md](design-programs.md#a-programs-end)).
@@ -1105,6 +1143,11 @@ creator sees every end below it. Every queue entry lives in the record it names,
 exit in its space's, and the queue links them by index, so posting allocates nothing and a gate holds at most one record
 per thread and one per space it serves.
 
+* **The receiver.** Every record goes to the one thread bound to the gate, the domain library's fault thread for every
+  domain's gate and a session's gate worker for its programs'. A gate with no thread bound keeps its queue, and the thread
+  a later bind names takes the records in order; a bind replaces the thread, and the deletion of the bound thread leaves
+  the gate unbound with its queue kept. A fault record names the space and not the thread, whose field is `unknown`
+  ([Faults](#faults-and-the-fault-of-the-root-task)).
 * **Posting.** The service appends the record to the gate's queue and, if the bound thread is listed as waiting, takes it off
   the list and runs `l4_semaphore_up` on its semaphore.
 * **`erx_ipc_wait(deadline)`.** The stub asks the service for the oldest record of any gate bound to the calling thread. If
@@ -1114,7 +1157,11 @@ per thread and one per space it serves.
   down before it returns `ERX_ETIMEDOUT`. This is [the umtx table](#the-umtx-table)'s invariant: a thread taken off a list
   is owed exactly one up, and only such a thread is.
 * **Withdrawal.** A space's deletion withdraws its queued records, and a gate's destroy drops its queue and leaves its spaces
-  with no fault gate, whose later records are dropped and counted.
+  with no fault gate, as on erXos's kernel: their later records are dropped and counted in the space's record, a thread that
+  faults then stays blocked, and the space's other threads run on until its creator stops it. No Phase 1b caller reaches
+  that state while a space lives: the domain library's gates last as long as the system domain, and a session's gate goes
+  only with the session's task, whose end stops its programs first. A child stopped by its parent's end posts its exit
+  record to the parent's gate, which the same walk then deletes; the record goes with the gate, since its reader is gone.
 
 A space created with `ERX_CAP_NULL` as its fault gate, as the test-task launcher creates them, has its fault end it at once
 with a crash record through `l4_vcon_write`, and its status reaches the launcher's join, as below.
@@ -1124,16 +1171,19 @@ with a crash record through `l4_vcon_write`, and its status reaches the launcher
 `erx_cap_pass(from, to, n)` is carried in its creator's case only: `from` is the caller's own space and `to` a space the
 caller created. The domain library so gives a domain its budget, groups, connection sides and bells, time page, release slice
 and devices (`erx_dom_install`), and a session gives a program its budget, group, channel, data area, code objects and pipe
-ends. The body checks all `n` items first, the handle's type when the item names one and room for every item in `to`'s
-table, and then copies or moves each entry, rewriting each item in the caller's UTCB with its value in `to`, so a refused
+ends. The body checks all `n` items first, the handle's type when the item names one, that no handle is named twice
+where either item moves it, and room for every item in `to`'s table, and then copies or moves each entry, rewriting each item in the caller's UTCB with its value in `to`, so a refused
 pass moves nothing. A copy adds an entry naming the same object record, which raises the object's count of handles; a move
 clears the caller's entry. No Fiasco capability moves, since every Fiasco capability stays the root's.
 
 What it leaves out, each refused with `ERX_ENOTSUP`, has no consumer: a pass from a space other than the caller's own, a
 pass into the caller's own space, and a pass of a space, thread or gate handle. These are the passes through which a handle
 could reach a task that is not below the object's creator, so leaving them out is what keeps
-[handles flowing down](#the-phase-1-backend). The rights mask of each item is recorded nowhere, since a handle carries no
-rights: the domain library's and a session's masks are their own discipline on this backend.
+[handles flowing down](#the-phase-1-backend), and with it the safety of deleting an object at any moment; a row that
+passes at a rendezvous would let a handle reach a task outside the creator's tree, and that argument would have to be made
+again. The rights mask of each item is recorded nowhere, since a handle carries no rights: the domain library's and a
+session's masks are their own discipline on this backend, so a holder that maps a side writable it should only read, or
+binds a bell it should only trigger, is stopped by nothing here.
 
 ### Sharing memory between tasks
 
@@ -1142,6 +1192,15 @@ the bells bound by the library to each party's group, and passed to each party, 
 ([design-domains.md](design-domains.md#connections)); on this backend each of those steps is a row above, and the lane
 layout and wake handshake are the runtimes' own. A channel and a pipe are the same pattern inside a session's tree, and a
 device's register window and contiguous memory the same pattern for its holder.
+
+**Who maps.** The party that uses a mapping asks for it: each runtime's `liberx` maps the sides of each connection it is
+introduced to, a program's
+`liberx` its channel and pipe ends, a driver its device's window, each into its own space with `erx_vm_map`; a creator maps
+into a space it created only while building it, as the domain library maps a domain's boot information page and a session a
+program's image and data area. The service performs every map at the rights the caller asks, beneath the object's own
+limits (no write over a sealed object, a code object or a slice, no execute over device memory), and records no right for
+the handle. So a connection's side has one writer because the reader's `liberx` maps it read-only, which holds for every
+runtime that goes through `liberx` and binds nothing that bypasses it.
 
 The memory every one of them shares is mapped by the service from its window, so a page has one window address whoever maps
 it ([One page, one address](#the-phase-1-backend)), and nothing copies. The data path makes no service request while the
@@ -1176,7 +1235,7 @@ Phase 1 acts on no finer kind.
 * **A domain's or a program's fault:** the fault record goes to the space's [fault gate](#fault-gates), and the faulting thread
   stays blocked in its fault message, which nothing answers, until its space stops; the space's other threads run on, as on
   erXos's kernel. The gate's server stops the space, which posts the exit record. `erx_thread_start` of the faulted thread,
-  which on erXos's kernel resumes it after a repair, is `ERX_EINVAL`, since nothing here repairs a fault.
+  which on erXos's kernel resumes it after a repair, is `ERX_ENOTSUP`, since nothing here repairs a fault.
 * **A test task's fault**, in a space with no fault gate: the record goes out through `l4_vcon_write`, then [task exit](#task-exit), with a status of -1. The machine continues.
 * **The root's fault:** [the end path](#the-end-path).
 * **The service's own fault** goes to `sigma0`, which repairs nothing: a recorded gap.
@@ -1249,6 +1308,15 @@ No device call is made from a task other than the root, except a map, a bind, an
 reaches any physical address through its DMA, which the manifest check allows in a development
 build alone.
 
+**A holder's end and its restart.** A device's objects are the root's, so the holder's end deletes none of them: its
+mappings go with its task, and its line's bind goes with its group ([Task exit](#task-exit)). At the holder's exit record
+the domain library deletes the register window's object and the line's IRQ object, and keeps the contiguous memory, the
+device's for the boot, as [design-system.md](design-system.md#devices) says; the restarted holder's give creates the
+window and the line's object again and passes the same contiguous memory. A register range stays in the root's device
+window for the boot once `sigma0` gave it, so a create over it maps from the window again and asks `sigma0` for nothing;
+two devices whose ranges overlap are refused above this backend, by `erx_dom_device_give`. The new driver resets the
+device before it posts anything, so what the old holder left in the device or its memory is not trusted.
+
 Which of QEMU's 32 virtio-mmio transports is which device is configuration: the platform
 record names a transport for each role by the order the harness gives QEMU its virtio
 devices, `/virtio_mmio@a003e00` for the first, the disk, and each next device the transport
@@ -1311,7 +1379,8 @@ its window for the Erlang log reader, `erx_console`, which polls it and writes e
 **A program's standard output and standard error** deliver its bytes unchanged, whoever holds the program. The root writes them
 to the console itself. A task holds no log capability, so `libc_task.c` hands them to `erx_fiasco_task_write`, one `task_write` call
 per `utcb_bytes_max`, and the service copies each piece from the caller's public UTCB to `erx_fiasco_console_write`: no record, no
-escape and no rate limit, because every task in Phase 1 is a trusted test program. The pieces of a long write are separate calls, so
+escape and no rate limit, because a program's own output is not text attributed to a source: as on UNIX and QNX,
+`write` delivers its bytes unchanged to the console, which does only a terminal's processing. The pieces of a long write are separate calls, so
 another thread's output can fall between them. A shell or session may filter what it displays; `write` does not. Program output
 goes to `l4_vcon_write` whatever the sink is, as the ring's records have no form for unchanged bytes, so it can interleave with
 the driver's writes at any byte ([design-runtime.md](design-runtime.md#the-console-and-standard-io)).
@@ -1386,8 +1455,11 @@ root's first line if Fiasco's own boot proves not deterministic, recorded as a s
   doorbell's latency, and no number measured here decides batching or a native fast path.
 * **A program's start costs one service request per object.** Whether a start needs a cheaper path than one kernel call per
   object is decided on erXos's kernel, never from this backend's numbers.
-* **No isolation between tasks is promised.** A task that bypasses `liberx` is stopped by nothing here; hostile-runtime
-  and confinement tests are written against the interface and claimed only on erXos's kernel.
+* **No isolation between tasks is promised.** A task that bypasses `liberx` is stopped by nothing here. The hostile
+  suites are written against the interface. Here their cases whose verdict is user-mode code's answer to what it reads
+  run and count: a funnel's verdict on a malformed or forged frame, a server's on a malformed request, a driver's on a
+  malformed descriptor. Their cases that check a bound on memory, CPU or a neighbour's latency, or that a task which
+  bypasses `liberx` is held, report `unsupported` here and are claimed only on erXos's kernel.
 * **An object can go with the task that created it**, which erXos's kernel does not do. No consumer is affected, since
   [handles flow down](#the-phase-1-backend), but code must not keep an object alive by holding a handle to it in a task
   that is not below its creator.
@@ -1414,7 +1486,7 @@ follow M7 in [plan.md](plan.md).
 | Family | On this backend | Guarantee lands |
 | --- | --- | --- |
 | K1, K2, K17, K21, K24, K25 | handle tables with generations, so a stale handle is `ERX_ESTALE`; handles made only by creation, `erx_cap_dup` and the creator's pass; release at the last handle and mapping; no rights, and no pass sets | Track K's pilot (the capability table), its conformance tests; the hostile tests at M5's kernel part |
-| K3, K32 | budgets as records; an object goes with its budget; nothing charged against a guarantee or cap, and no walls | Track K's pilot (budgets); M5's kernel part (walls, "every charge returns"); M10 (users) |
+| K3, K32 | budgets as records; an object goes with its budget; nothing charged against a guarantee or cap, and no walls, so no domain, the browser-facing web domain included, is held to its own budget | Track K's pilot (budgets); M5's kernel part (walls, "every charge returns"); M10 (users) |
 | K4, K5, K6, K9 | the range table; mappings with records, at the rights they were made with, and no protection change over one | Track K (memory, the TLB planner), conformance tests |
 | K7, K12, K13 | none | Track K; the hostile suites of M2, M5's kernel part and M11 |
 | K8 | no task's mapping writable and executable; code objects only from the root, mapped only once sealed | Track K; M7 (the page-table walk); M11 |
@@ -1429,17 +1501,17 @@ follow M7 in [plan.md](plan.md).
 | groups: C0 to C2, quotas, cohorts, charging, park in the kernel, `erx_group_configure` enforced | groups as records with readiness in their home task | M2; M8 (cooperation) |
 | umtx in the kernel, across spaces | umtx within a task; nothing shares a umtx word between tasks | Track K |
 | IPC gates with messages, `ERX_EDEAD`, labels and deadlines; rendezvous passing | fault gates carrying records only | Track K |
-| D1 to D6, D9, D12, D13 | held by the runtimes' and the system domain's own code (the funnel, exports, the sender rule, flow control), and their tests run here against well-behaved peers; D12's memory bound counts against budgets that are records | M5's kernel part: the hostile-runtime suite, which needs isolation between domains, and D12's budgets |
-| D7, D17 | a stop deletes every thread without the runtime, and the exit record follows the last deletion, so a dead domain's write position is final | Track K (the bounded stop); M5's kernel part (the tests under hostile load) |
+| D1 to D6, D9, D12, D13 | held by the runtimes' and the system domain's own code (the funnel, exports, the sender rule, flow control), and their tests run here, the hostile runtimes' verdicts on frames included; D12's limits are the runtime's own and hold, but the memory they bound is charged to budgets that are records, so its budget assertions report `unsupported` | M5's kernel part: the hostile cases that need isolation between domains, and D12's budgets |
+| D7, D17 | a stop deletes every thread without the runtime, and the exit record follows the last deletion, so both hold here for every domain, a dead domain's write position final when its end is reported; what is missing is a bound on how long the stop takes | Track K (the bounded stop, K18); M5's kernel part (the tests under hostile load) |
 | D16 | one writer per page and deletion by the system domain alone, by the domain library's code and the creator-only destroy; charging to child budgets recorded, not enforced | M5's kernel part (charging) |
 | F1 to F5, F9 | held by the file servers' and handlers' own code: grants by introduction, roots, narrowing, admission, `ro` | M5's kernel part (what a domain that bypasses `liberx` can reach); M11 |
 | F6, F7, F8 | F6 by the file servers and the command server; F7, F8 none | Track S's programs (F6's kernel side at M7); Track Q (F7, F8) |
 | SH1, P2, command authority, pipe-end ownership, end of stream by holders | held by the handlers', the pipe server's and the session's code; the backend records no rights, so a program's table is a discipline of its session | M7 (the kernel side: rights and pass sets) |
-| devices: confined DMA, IOMMU windows, MSI, device-buffer lifetime, the device secret | drivers in their own domains over unconfined virtio-mmio, every device's objects made by the root and passed to its holder | M9's kernel part; M11 (refused unless configured); M12 (the secret) |
+| devices: confined DMA, IOMMU windows, MSI, device-buffer lifetime, the device secret | drivers in their own domains over unconfined virtio-mmio, every device's objects made by the root and passed to its holder; so a domain that parses hostile bytes beside a device, the network domain's packets or the display domain's draw clients, can reach all memory through it | M9's kernel part; M11 (refused unless configured); M12 (the secret) |
 | service CPU admission (facets, lanes, grants), inspection and crash-data authority | facets and lanes run; grants are records | M5's kernel part, M8 (admission); M10 and M11 (authority) |
 | the host link holding every facet but the system-shell facet | none | M10, M11 |
 | entropy in the kernel; the kernel trace ring; deterministic mode at the kernel's level; one route from user mode; every kernel chokepoint; the kernel stack proof | none | Track K |
-| the hostile suites and the security closure | written against the interface, run only to check their own harness | Track K's first part (the call-level hostile domains); M2, M5's and M9's kernel parts, M11 |
+| the hostile suites and the security closure | written against the interface; their verdict cases run as tests of user-mode code, and their bound and confinement cases run only to check their own harness ([What Phase 1 code must not assume](#what-phase-1-code-must-not-assume)) | Track K's first part (the call-level hostile domains); M2, M5's and M9's kernel parts, M11 |
 | the startup proof: `erx_root_plan` run by the packer and the kernel, and its charge evidence ([the root startup rule](#the-phase-1-manifest-check) until then) | the root startup rule | Track K's first part, before GK3 |
 | the manifest's properties outside Phase 1's scope ([refused records](#the-phase-1-manifest-check)) | the check's other rows | M9, M11 |
 | job control of programs: `erx_space_pause`, `_resume` | refused; programs run on under `Ctrl-Z` | Track K's after-the-switch increment |
@@ -1456,7 +1528,9 @@ follow M7 in [plan.md](plan.md).
 * A group's threads all run in one task; a task holds at most eight home groups, and a group at most 64 bound IRQ objects.
 * A faulting thread waits until its space stops, and `erx_thread_start` cannot resume it, so no fault is repaired.
 * A group's `parked` and `ready` outside the root are what that task's `liberx` wrote to its status page.
-* `ERX_EXIT_CRASH` and `ERX_EXIT_PARENT` are not in `abi/kernel.txt`, so the package that carries exit records adds them; a test task's fault status is -1.
+* A test task's fault status is -1.
+* A handle to a thread of the caller's own task is its index, so once the thread is reaped it names the index's next thread; a handle used after its own close names whatever its entry names then.
+* A group's destroy while it has a thread, a second thread created in a space the caller created, a thread created in a group whose home is another task, and a gate bound to a thread of another task are refused.
 * A task has at most 128 live threads, and `erx_thread_create` is also `ERX_ENOMEM` while every free record waits for Fiasco's marker write.
 * A failed start that did not reach Fiasco's kill path loses that index until the task ends, and so does a start the service refused for a handle whose create is still in flight, since the stub writes the marker first.
 * The root's image is mapped read, write and execute from `sigma0`, so a stray write to its code or read-only data does not fault.
@@ -1527,13 +1601,18 @@ the tests.
 | **Revoke**, `native_space`: an object mapped into both tasks is destroyed by its creator; each task's next read gives a fault record at its gate, and the pool's count returns; a destroy from a task that did not create it is `ERX_ERIGHTS` | the revoke step removed: the reader's read succeeds after the destroy |
 | **A stale handle**, `function_api`: a handle to a destroyed object is `ERX_ESTALE`, also after its record is reused by a new object | the generation comparison removed: the stale handle reads the new object's size |
 | **The tree**, `native_space`: a task creates a sub-space, maps its own object into it and starts a thread there; the parent stops; the child's exit record, status `ERX_EXIT_PARENT`, comes before the parent's, each after its threads' deletions, and the pool's count returns | children walked after their parent: the child's object is freed while the child still maps it, and the child's spinning counter in that page moves after the parent's record |
-| **Passing**, `function_api` and `native_space`: the root passes four handles into a task, which maps and uses each; a pass into a table with room for three moves none and is `ERX_ELIMIT`; a pass from a space not the caller's, into the caller's own, and of a space, thread or gate handle are `ERX_ENOTSUP`; a copy keeps the object alive after the root closes its own handle | the plan applied item by item: the refused pass leaves three handles in the task. The count not raised on a copy: the object is freed when the root closes |
+| **Passing**, `function_api` and `native_space`: the root passes four handles into a task, which maps and uses each; a pass into a table with room for three moves none and is `ERX_ELIMIT`; a pass that copies and moves one handle is `ERX_EINVAL` and moves none; a pass from a space not the caller's, into the caller's own, and of a space, thread or gate handle are `ERX_ENOTSUP`; a copy keeps the object alive after the root closes its own handle | the plan applied item by item: the refused pass leaves three handles in the task. The count not raised on a copy: the object is freed when the root closes |
 | **Fault gates**, `native_space`: a task with a gate as fault gate faults; the gate's server receives a fault record of kind `memory` with the space's label, stops the space and receives the exit record with the stop's status; a wait with nothing posted ends at its deadline with `ERX_ETIMEDOUT`. Host: `fiasco_gate_test.rb`, a model of post, wait and timeout over every order, under TSan with real threads | the owed down removed: the model's next wait returns at once with nothing. The record posted before the deletions: the faulting task's other thread's counter moves after the exit record |
-| **Doorbells between tasks**, `native_space`: the root binds a software IRQ object into a task's group before the task's first thread runs and triggers it twice; the task's executor takes the label once after it starts; the task triggers an object bound to the root's group and the root's executor wakes; a thread created in a group whose home is another task is `ERX_EINVAL` | the bind deferred until the home exists dropped: the task's park reaches its deadline. The home check removed: the cross-task thread is created |
+| **Doorbells between tasks**, `native_space`: the root binds a software IRQ object into a task's group before the task's first thread runs and triggers it twice; the task's executor takes the label once after it starts; the task triggers an object bound to the root's group and the root's executor wakes; a thread created in a group whose home is another task is `ERX_ENOTSUP`; the task then exits while the root still holds the object, the object is left unbound, and a later bind to a new task's group receives the root's next trigger | the bind deferred until the home exists dropped: the task's park reaches its deadline. The home check removed: the cross-task thread is created. The detach at task exit removed: the service's test hook that lists bound objects still shows the object bound to the dead task's group |
 | **A budget's destroy**, `function_api` and `native_space`: a budget, a budget carved from it, a space, a group, an IRQ object and two memory objects charged to them; one destroy posts the space's exit record, makes every handle `ERX_ESTALE` and returns the pool's count | the walk skips carved budgets: the pool stays short by the second object's pages |
 | **Code objects**, `function_api`: a paged object maps nowhere unsealed (`ERX_EBUSY`), takes a supply, is sealed, refuses a further supply and a writable map (`ERX_ERIGHTS`), and runs the supplied code through an executable map in a task; `ERX_MEM_CODE` from a task is `ERX_ERIGHTS` | the sealed flag not read at the map: the unsealed map succeeds |
 | **Copy and slices**, `function_api`: `erx_mem_copy` between two objects, and `ERX_ESTALE` once the source is destroyed; a slice mapped read-only into a task reads the archive's bytes and its write faults | the destroyed check removed: the copy reads freed pages. A slice mapped with write: the write lands in the archive |
 | **Devices in domains**, the production image suite with the harness's net, gpu and input devices: each platform record path, base and line against QEMU's device tree; the display domain's and the network domain's drivers read each transport's magic and device id through objects the domain library gave them, and an interrupt reaches each driver's group | a platform record naming the transport of another device: that driver reads the wrong device id |
+| **Bounds of maps, supplies and copies**, `function_api`: `erx_vm_map`, `erx_mem_supply` and `erx_mem_copy` each with an offset plus length one page past the object, and with an offset near 2^64 whose sum wraps, are `ERX_ERANGE` and change nothing; a map off a page boundary or of size 0 is `ERX_EINVAL`; a copy into a slice is `ERX_ERIGHTS` | the end check written without checked arithmetic: the wrapping offset maps a page of the pool past the object, which the test finds by reading a pattern another object holds |
+| **Generations**, `function_api` with a host hook that sets a record's generation to its last value: the record's next free retires it, the next create takes another record, and the stale handle is `ERX_ESTALE`; a thread made in a created space is `ERX_ESTALE` through its creator's handle once reaped, and a second create there is `ERX_ENOTSUP` | the retire step removed: the generation wraps to an earlier value and the stale handle names the new object |
+| **A group and its threads**, `native_space`: destroying a group whose home task still has a thread in it is `ERX_ENOTSUP` and the thread runs on; destroying the budget the group is charged to stops its home task, whose exit record arrives, and its stacks and pool pages return | the refusal removed: the service deletes the thread alone, and the pool count stays short by its stack |
+| **A payload read once**, a host test of the service's decoder over a public UTCB a second thread rewrites in a loop: `erx_debug_log` and `task_write` with their length changing between reads never copy more than `utcb_bytes_max` and never more than the length the decoder checked | the body reading the length again from the public UTCB: AddressSanitizer reports the overread |
+| **A device's holder restarted**, the production image suite: the network domain is killed and restarted; the new driver gets a new window and line object and the same contiguous memory, resets the device and passes its traffic test | the line's object not deleted at the exit record: the restarted holder's give is refused with `ERX_EBUSY`, since the line already has an object |
 | **vCPU upcalls**, if carried, `native_signal`: an upcall interrupts a computing worker, ends a umtx wait with `ERX_EINTR` and a reply wait not at all, and the frame is restored register by register; a delivery between a handler's last check and its resume enters the handler again | the resume ignoring a queued delivery: the second signal is lost |
 
 ## Differences from erXos's kernel
@@ -1568,9 +1647,11 @@ These differ from the native backend, and a caller must not depend on either sid
 * **Spaces other than the first are host processes**, so the rows between tasks run under the sanitizers: the first
   process holds the tables the root service holds natively and serves the others over a UNIX socket; a memory object is
   a shared memory region each process maps; an IRQ object fires by a message to the target process's dispatcher thread;
-  a space's end is its process's, observed by the first process. The same function-API set runs against it, and the
-  refusals are the native ones. Its own design comes with Track H's package for domains, and nothing above `liberx`
-  sees which form ran.
+  a space's end is its process's, observed by the first process. It carries the rows between tasks that 1b-A's
+  consumers use and no device row, since a hosted runtime has no devices. The same function-API set runs against it, and
+  the refusals are the native ones. Its design is written, and reviewed as a design, before its code: who walks a tree
+  of exits children first, how a pass crosses processes and how a crashed process's objects are released are its to
+  settle. Nothing above `liberx` sees which form ran.
 
 ### Transport
 
@@ -1624,6 +1705,8 @@ The same suite boots the image twice in deterministic mode to the shell and comp
 * `l4_task_map` into a task of the archive's pages, which `sigma0` mapped into the root read-only, at read-only rights.
 * `L4_FP_OTHER_SPACES` over a page of the device window, removing every task's mapping of a register window.
 * `l4_semaphore_up` by the service on a semaphore of a thread of another task, which the root holds at its own slot.
+* `l4_irq_detach` by the root of an object bound to a thread of another task, and `l4_icu_bind` of a line whose earlier
+  IRQ object was deleted, so a restarted device holder gets its line again.
 * The size estimate: the rows between tasks, 2,000 to 4,000 lines of C17 across both backends, a guess until the first rows land.
 
 ## Open decisions

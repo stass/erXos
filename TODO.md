@@ -54,14 +54,6 @@ it; git history is the record of completed work.
   and an update whose storage formats differ from the running system's is
   refused ([design-storage.md](docs/design-storage.md#system-updates),
   [plan.md](docs/plan.md)).
-* [Medium] network: replace lwIP, which runs as a NIF in the network
-  domain, with erXos's own TCP/IP stack, written in Erlang, by gate G14.
-  The network service gets its own design document before its code, which
-  also settles an exposed domain's node name and registration, the error
-  a domain without a network grant gets (provisionally `eacces`), and
-  sockets with several holders; an early prototype of its packet path,
-  measured on QEMU and on a Pi, decides whether TCP's fast path needs
-  native code ([plan.md](docs/plan.md)).
 * [Medium] kernel, performance counters on the stopgap: the modified
   Fiasco builds with `CONFIG_PERF_CNT_USER=y`
   (`config/fiasco/kernel.defconfig`), so user mode reads the CPU's
@@ -111,11 +103,6 @@ it; git history is the record of completed work.
   above RAM's start, with no upper bound and nothing tying it to the crash root's image,
   whose range the guest could print beside its address; and `test/guest/native_threads`'s `QUEUE_SETTLE_NS` trusts a 50 ms sleep to order
   waiters, which a starved vCPU can break.
-* [Medium] stopgap, `liberx/backend/fiasco/service.c`: a root thread's handle is
-  its index, with no generation, so a stale handle names the index's next
-  thread. The handle table of
-  [design-stopgap.md](docs/design-stopgap.md#capabilities-in-fiascos-object-space)
-  replaces it.
 * [Low] stopgap, Fiasco's `Ipc_gate_obj::unblock_all`, `fiasco/kernel/src/kern/ipc_gate.cpp:142-166`: the gate dequeues
   a blocked sender and activates it afterwards, the race `Semaphore` closes with `Thread_sem_woken`, so a timed send can
   return first and the activation land in what the thread blocks in next. The root's one gate is created bound
@@ -383,6 +370,13 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] abi, `abi/erx_abi.txt`: the exit statuses `ERX_EXIT_PARENT`,
+  `ERX_EXIT_RELEASED` and `ERX_EXIT_NOTHREAD` of
+  [design-kernel.md](docs/design-kernel.md) and `ERX_EXIT_CRASH` of
+  [design-runtime.md](docs/design-runtime.md) are not in the ABI file,
+  which design-runtime.md says defines `ERX_EXIT_CRASH`. Add them before
+  the backend package that carries exit records, which uses
+  `ERX_EXIT_PARENT` and `ERX_EXIT_CRASH`.
 * [Medium] live, `erx_source` (`erlang/apps/erx/src/erx_source.erl`): nothing ties a module's `src` file to
   its beam, so an edited, unrecompiled source shows lines the module was not compiled from, and a location in
   an included file is looked up by base name in the module's own `src` and `include`, so a header of another
@@ -2245,6 +2239,17 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] stopgap, Phase 1b's deferred guarantees: every guarantee the
+  user-facing system on the stopgap rests on but does not get is a row of
+  [What Phase 1 defers](docs/design-stopgap.md#what-phase-1-defers),
+  with the milestone that closes it; that table is the one list. Those that
+  untrusted input reaches once 1b's code lands: unconfined DMA beside the
+  network domain's packet parsers and the display domain's draw clients
+  (M9's kernel part, M11); no wall around any domain, the browser-facing
+  web domain included (M5's kernel part); and nothing stopping a domain or
+  program that bypasses `liberx` (M5's kernel part, M7). Development
+  builds run trusted code only until M11.
+
 * [Medium] code service, atoms from loads (`erlang/apps/erx_code/src/erx_code.erl`):
   `activate/1` makes each manifest name an atom before ERTS's loader checks it
   against the module's bytes, so a load the loader refuses still leaves up to
@@ -2408,6 +2413,14 @@ Every other risk the design accepts is stated in its
 document's "residual risks accepted" paragraph.
 
 ## Planned features
+
+* [Medium] network, `docs/design-network-stack.md`: the network stack's
+  design document, written before M14's code, pins the FreeBSD release
+  whose `netinet` and `netinet6` logic the stack translates into Erlang,
+  gives the translation's rules, and settles what [design.md](docs/design.md#networking)
+  leaves to it: an exposed domain's node name and its registration, the
+  error a domain without a network grant gets (provisionally `eacces`),
+  and sockets with several holders.
 
 * [Medium] tracer, `erx:trace` ([design-live.md](docs/design-live.md#tracing),
   [design-stopgap.md](docs/design-stopgap.md#the-trace-ring)), in four packages. P1's remainder:

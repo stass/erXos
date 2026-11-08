@@ -24,9 +24,10 @@ Ground rules:
   interface, with every guarantee still deferred: domains and their
   connections, programs and pipes, the POSIX-lite first part, the
   browser and the desktop, drivers in their domains, storage and
-  networking on QEMU. Each guarantee a Phase 1b item defers, once
-  user-facing code reaches it, has a line in `TODO.md`'s security
-  residuals naming the milestone that closes it. Phase 2 builds erXos's
+  networking on QEMU. Each guarantee a Phase 1b item defers is a row of
+  one list, [What Phase 1 defers](design-stopgap.md#what-phase-1-defers),
+  naming the milestone that closes it, and `TODO.md`'s security residuals
+  point to that list rather than copy it. Phase 2 builds erXos's
   kernel with every guarantee, boots the same boot image, and replaces
   the stopgap at parity over Phase 1 and 1b's system; everything that
   needs a guarantee lands on erXos's kernel alone
@@ -128,10 +129,10 @@ names; the table's order is the order.
 | 1b-B Track S, programs | `grep -r error /tmp/logs \| wc -l` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | 1b-C Track D, parts 1 and 2 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B | GP, provisionally; the G6 baseline |
-| 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; its supervisor resets the device and restarts the driver, and the shell never notices; drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
+| 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; its supervisor resets the device and restarts the driver, and the shell never notices; drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A; littlefs's sub-space port also 1b-B | G9's measurements, deciding nothing |
 | 1b-F Track D, parts 3 to 5 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-E and 1b-C; part 5 also 1b-D | |
-| 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | 1b-E | GN-QEMU |
-| M14 erXos's network stack | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang, on QEMU in 1b-G; on both boards with M12 | estimated in its design document, within GN-QEMU's decision | GN-QEMU | G14 |
+| 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | 1b-E | GN-QEMU's baseline, deciding nothing |
+| M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
 | 1b-H M13 erXos's F2FS on QEMU | erXos's F2FS, written in Erlang, keeps a QEMU disk's files through power cuts and its images mount in the Linux guest; on the Pi 4 with M12 | estimated in its design document | M6 | G13 |
 | **Phase 2** | | | | |
 | Track K erXos's kernel | the pilot, then the kernel, booting Phase 1 and 1b's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the shared core exists; the pilot calibrates the figure | the pilot: M0, starting before Phase 1 is complete; the kernel in full: 1b-A | GK1, GK2, GK3 |
@@ -185,11 +186,13 @@ The order reaches a usable system first:
   their storage and networking.
 * Storage on the boards stands on littlefs first; erXos's F2FS, written in
   Erlang, replaces it at parity, decided on QEMU in 1b-H. Networking has
-  no stopgap stack: a prototype of the packet path is measured on QEMU
-  before the network stack is built, so its design knows what Erlang
-  carries (gate GN-QEMU), and erXos's network stack, written in Erlang,
-  is the network service from its first release, accepted against
-  Linux's stack in the oracle guest; the Pi 4 confirms both at M12.
+  no stopgap stack: erXos's network stack, written in Erlang by
+  translating the logic of FreeBSD's `netinet` and `netinet6`, is the
+  network service from its first release, accepted against FreeBSD's
+  packetdrill tests and a FreeBSD guest; a prototype of its packet path is
+  measured on QEMU as a baseline (gate GN-QEMU), and whether TCP's fast
+  path needs native code is decided on erXos's kernel (GK3), which the
+  Pi 4 confirms at M12.
 
 **Effort.** The estimates are sizes of new code, derived from the design
 documents and from comparable components; they order and scope the work
@@ -562,9 +565,13 @@ runs hosted first, under ASan, UBSan and TSan, and `lldb`; from 1b-A on,
 several domains run as Mac processes with their lanes in shared regions,
 the domain library driving the hosted interface, so connections, the
 funnel and the domain library's plans are measured and sanitized before
-they run under QEMU. The hosted backend grows in 1b-A the same rows the
-Fiasco backend grows for Phase 1b, as two backends pass one test set, so
-the lane, connection and pipe models run under the sanitizers. QEMU
+they run under QEMU. The hosted backend grows in 1b-A the rows between
+tasks that 1b-A's consumers use, as two backends pass one test set, so
+the lane, connection and pipe models run under the sanitizers; it grows no
+device row, since a hosted runtime has no devices. Its multi-process form
+gets its design, reviewed as a design, before its code
+([design-stopgap.md](design-stopgap.md#the-hosted-backend)), and the
+Fiasco backend's rows do not wait for it. QEMU
 remains authoritative.
 
 ## M3: The shell is the operating system
@@ -846,11 +853,12 @@ it, add behind the unchanged interface: a memory object mapped into
 another task, its destruction revoking it in every task that mapped it;
 sub-spaces created at a task's request, each with its parent recorded,
 ended when its parent ends, and an exit record with the exit status or a
-crash; IRQ objects bound to the requesting task's own readiness
-dispatcher, triggered by any holder; `erx_cap_pass` in its creator's case;
-table limits sized from the manifest; groups and budgets as records with
-every field `unsupported` and nothing enforced; and sealing and
-`erx_mem_copy` through the root service
+crash; IRQ objects bound to a group, whose deliveries reach the
+dispatcher of the group's home task, triggered by any holder;
+`erx_cap_pass` from the caller's table into a space it created; tables
+that grow from the root's pool, with each task's handle table sized by
+the `cap_limit` its creator gives; groups and budgets as records with
+nothing enforced; and sealing and `erx_mem_copy` through the root service
 ([design-stopgap.md](design-stopgap.md#the-call-table)). vCPU upcalls get
 a row only if a source check of Fiasco's vCPU interface in the
 kernel-mode build finds that it carries the ABI's `erx_vcpu` layout
@@ -859,10 +867,15 @@ rendezvous, pauses, IPC gates above `liberx` and every budget and grant
 enforcement stay refused, each a recorded residual. The funnel's verdicts
 run unchanged in user mode; what the stopgap cannot promise is that a
 domain which bypasses `liberx` is stopped by anything
-([design-domains.md](design-domains.md), section "On the stopgap").
+([design-domains.md](design-domains.md#on-the-stopgap)).
 BeamAsm lands beside 1b-A, off its critical path, since it needs nothing
 of the kernel. The hostile suites and the budget criteria are written in
-1b-A and run green on erXos's kernel.
+1b-A. On the stopgap the hostile cases whose verdict is user-mode code's
+answer to what it reads, a funnel's to a malformed or forged frame, run
+and count; the cases that check a bound on memory, CPU or a neighbour's
+latency, the budget criteria and every case against a domain that
+bypasses `liberx` report `unsupported` there and run green on erXos's
+kernel ([design-stopgap.md](design-stopgap.md#what-phase-1-code-must-not-assume)).
 
 **Exit criteria, on the stopgap (1b-A).** The two-node differential
 scenario suite passes, every difference in the compatibility table; the
@@ -929,7 +942,9 @@ with `tools/erx bench xdomain-pingpong` and `xdomain-throughput`, and, in
 an ordinary domain, BeamAsm's speedup over the interpreter on OTP's
 benchmarks and on the oracle's suites, the footprint of a domain in each
 flavour and the time to translate a release when the domain starts. It
-decides provisionally: the default table sizes; the defaults of `lane` and
+decides provisionally: the default table sizes of the runtimes and the
+domain service, a domain's `cap_limit` among them, and not the
+stopgap's own fixed limits; the defaults of `lane` and
 the manifest's `system_lane`, the producer's wait rule and whether ERTS
 encodes straight into the lane; the funnel's allowance per step; the busy
 limit and the facets' `max_request` and heap limits
@@ -968,12 +983,14 @@ pauses.
 
 **Scope.** The shell is Phase 1's, after M4, and runs there in the system
 domain with its authority, as the system shell does; the session domain,
-programs, the sub-space port of littlefs and executables from EROFS
-through sealed file objects follow 1b-A, on the stopgap, as 1b-B, whose
-first slice is the session domain; the job control of programs follows
+programs and executables from EROFS through sealed file objects follow
+1b-A, on the stopgap, as 1b-B, whose first slice is the session domain;
+the sub-space port of littlefs follows in 1b-E, where the storage domain
+first holds the block device; the job control of programs follows
 M7, on erXos's kernel. On the stopgap a program's budget and group are
-unenforced records, its doorbells are IRQ objects bound to the session's
-dispatcher, and the pipe server's and the session's creates and installs
+unenforced records, its doorbells are IRQ objects whose deliveries reach
+the dispatcher of the task that consumes them, the program's for its own,
+and the pipe server's and the session's creates and installs
 are requests to the backend's root service; the narrowing of `within` is
 the handler's table and the servers' grants, user mode, and holds there,
 while that a program cannot escape `liberx` does not
@@ -1014,8 +1031,8 @@ while that a program cannot escape `liberx` does not
   ([design-runtime.md](design-runtime.md#the-console-and-standard-io));
   the session's pipe server, `erx_pipe_srv`, which makes every ring
   and every doorbell and installs every end, with the exploration of its
-  pipe core, and the pipe NIF ([design-pipes.md](design-pipes.md)); the
-  sub-space port form of littlefs, and executables run from the EROFS
+  pipe core, and the pipe NIF ([design-pipes.md](design-pipes.md));
+  executables run from the EROFS
   images through the sealed file objects a program's session maps
   ([design-programs.md](design-programs.md#what-a-program-can-start));
 * the job control of programs through `erx_space_pause` and
@@ -1045,9 +1062,7 @@ and reaches nothing but its channel and the memory its session mapped
 [design-programs.md](design-programs.md#invariants)), checked through
 `liberx` on the stopgap and, against a program that bypasses `liberx`,
 with its budget and grant enforced, at M7; passed files share their
-offsets; a crash injected into littlefs mid-write ends its sub-space
-port, whose owner restarts it and remounts, with no acknowledged write
-lost; the startup message and the channel protocol run their fuzz budgets
+offsets; the startup message and the channel protocol run their fuzz budgets
 clean.
 
 **Gate G6 baseline, at the end of 1b-D.** Records, on the stopgap, under
@@ -1126,7 +1141,10 @@ default action ends the program, and catchable signals arrive at M7.
 **Exit criteria, the first part (1b-D).** Descriptors, `dup`, `fcntl`,
 `pipe`, `posix_spawn` with inherited descriptors and file actions, `wait`
 and `kill` pass their cases of `libc-test` and the Open POSIX Test Suite,
-every other failure among them classified; a pipe's bytes stay readable
+every other failure among them classified; without the stopgap's vCPU
+row, a case that needs a signal handler shows as "cannot run" with that
+reason and runs at M7, and `sigaction` with a handler fails with
+`EINVAL`; a pipe's bytes stay readable
 after their writer ends; a crash of the session's pipe server makes reads
 fail with `EIO` and writes with `EPIPE`, never a false end of stream; an
 executable runs through an `rx` grant and is refused through `ro` and
@@ -1445,8 +1463,8 @@ the guest's power cut and the next boot.
   process serves its block requests through the block driver, with a fuzz
   target for its images, on the data partition
   ([design-storage.md](design-storage.md#read-write-storage)); its
-  sub-space port form lands with track S's programs behind the same
-  callback module.
+  sub-space port form lands in 1b-E, with the storage domain, behind the
+  same callback module.
 * **Booting from the disk image.** The QEMU harness's normal boot, without
   trials: it plays the firmware, reads the record from the disk image with
   its slot parser, which has its fuzz target, boots the slot the record
@@ -1708,8 +1726,10 @@ name. On the stopgap the drivers run over virtio-mmio, unconfined, and the
 ping joins the demo once 1b-G's network service answers it.
 
 **Scope, on the stopgap (1b-E).** The storage domain, which holds the
-block driver and the file systems from here, and the part of the device
-service that gives it its device; the device service in full, with the
+block driver and the file systems from here, with littlefs as its
+sub-space port over track S's port driver (1b-B)
+([design-stopgap.md](design-stopgap.md#littlefs-in-the-system-domain)),
+and the part of the device service that gives it its device; the device service in full, with the
 system manifest's placement of devices and its `/dev` tree
 ([design-system.md](design-system.md#devices)); the device NIF in full:
 the device NIF's address rule, under which an unconfined device's memory
@@ -1727,10 +1747,13 @@ the oracle and nothing imported, and M6's block driver among them; the
 restart demo. Drivers run in their own domains rather than the system
 domain, since that is the structure a person sees and the device
 service's first real exercise; the unconfined DMA residual is the same
-either way. The backend gains device calls from a task other than the
-root: physical and contiguous memory objects mapped into the requesting
-task, and a line's IRQ object bound to that task's dispatcher
-([design-stopgap.md](design-stopgap.md#the-call-table)); DMA stays
+either way. The backend gains no device call from a task other than the
+root: the domain library creates each device's register window, line
+object and contiguous memory in the root and passes them to the holder,
+which maps the window and binds the line to its own group, and at the
+holder's end deletes the window's and the line's objects and keeps the
+memory for the restarted holder
+([design-stopgap.md](design-stopgap.md#device-records)); DMA stays
 unconfined, since QEMU `virt` as the harness starts it has no IOMMU. The
 Phase 1 manifest check allows these devices in development builds
 ([design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check)), and
@@ -1764,7 +1787,9 @@ placement and `/dev`, the supervisors and the tests. The PCIe enumerator
 and the MSI frame's driver are the kernel part's.
 
 **Exit criteria, on the stopgap (1b-E).** A storage domain killed under
-load restarts with no acknowledged write lost; driver restarts under load
+load restarts with no acknowledged write lost; a crash injected into
+littlefs mid-write ends its sub-space port, whose owner restarts it and
+remounts, with no acknowledged write lost; driver restarts under load
 lose no acknowledged data, and a device reset after a driver's crash
 returns every posted buffer to its pool; the drivers' descriptor parsers,
 the GPU's responses and the input events among them, survive their fuzz
@@ -1821,9 +1846,10 @@ QEMU, grown from the prototype; TCP distribution to other machines, each
 exposed domain a distribution node of its own, whose node name is
 registered and resolved as the network service's design document defines
 ([design.md](design.md#networking)); and `crypto`, TLS and SSH on OpenSSL
-3.5. No stopgap stack is ported: lwIP enters only if GN-QEMU decides that
-TCP's fast path must be native, and then as that fast path, behind the
-same process interface. Sockets are the oracle's last family that cannot
+3.5. No stopgap stack is ported: the stack is erXos's own from the first,
+written in Erlang by translating the logic of FreeBSD's `netinet` and
+`netinet6` at one pinned release, as the network stack's design document
+specifies. Sockets are the oracle's last family that cannot
 run, so 1b-G closes the full oracle on QEMU. The network domain's own
 grant and its per-interface ingress budget are guarantees of erXos's
 kernel, recorded as residuals here and checked on the boards with M12.
@@ -1844,12 +1870,15 @@ duplex and overload recovery. These are arithmetic offered-load targets,
 not measured throughput. Unowned traffic has a finite per-interface CPU
 and memory budget before a client can be identified; reserve control
 progress while dropping excess traffic. Report p50, p99 and p99.9 and
-peer progress under load on matched setups. The relative comparison of
-paths is fair on the stopgap, where every path shares its interrupt path;
-the comparison with line rate is not, and is marked so. Decides whether
-TCP's fast path in erXos's stack is Erlang or native code
-([design.md](design.md#networking)), so that M14 can start; GN-board at
-M12 confirms it on the Pi 4.
+peer progress under load on matched setups. On the stopgap every
+interrupt, acknowledgement and doorbell passes the backend's one service
+thread, so these numbers are a baseline, recorded with the stopgap named,
+and decide nothing: a native fast path admitted on them would work around
+the stopgap rather than the stack. M14 is written in Erlang throughout
+meanwhile. GK3 repeats the measurements on erXos's kernel and decides
+there whether TCP's fast path in erXos's stack needs native code
+([design.md](design.md#networking)); GN-board at M12 confirms or reopens
+that decision on the Pi 4.
 
 ## M10: Users without a container runtime
 
@@ -2212,7 +2241,7 @@ These are arithmetic offered-load targets, not measured throughput. Unowned
 traffic has a finite per-interface CPU and memory budget before a client
 can be identified; reserve control progress while dropping excess traffic.
 Report p50, p99 and p99.9 and peer progress under load on matched setups.
-Confirms GN-QEMU's decision whether TCP's fast path in erXos's stack is
+Confirms GK3's decision whether TCP's fast path in erXos's stack is
 Erlang or native code ([design.md](design.md#networking)), or reopens it
 with the board's numbers.
 
@@ -2262,8 +2291,12 @@ over what M12 adds, as the ground rules require.
 **Gate G13.** Measures erXos's F2FS against littlefs over the
 file-semantics corpus and against Linux's F2FS in the oracle guest, the
 power-cut harness's results, and throughput, commit latency and the
-cleaner's overhead, on QEMU in 1b-H, where it decides the replacement of
-littlefs; the Pi 4's SD card numbers are added at M12 and may reopen the
+cleaner's overhead, on QEMU in 1b-H. It decides the replacement of
+littlefs there on the corpus, the oracle guest and the power cuts alone.
+Its throughput, commit latency and cleaner numbers on the stopgap, whose
+block path pays a service round trip per interrupt and acknowledgement,
+are a baseline recorded with the stopgap named; the Pi 4's SD card
+numbers on erXos's kernel at M12 are the first that can reopen the
 decision.
 
 ## M14: erXos's network stack
@@ -2271,39 +2304,43 @@ decision.
 **Goal.** erXos's own TCP/IP stack, written in Erlang, in the network
 domain, as the network service's stack from its first release
 ([design.md](design.md#networking)). It lands on QEMU in
-[1b-G](#1b-g-networking-on-qemu), after gate GN-QEMU, and on the boards
-with M12. No stopgap stack precedes it, so it is accepted against Linux's
-stack in the oracle guest rather than replacing one.
+[1b-G](#1b-g-networking-on-qemu), after the packet-path prototype, and on
+the boards with M12. No stopgap stack precedes it, so it is accepted
+against FreeBSD's stack, whose logic it translates, rather than replacing
+one.
 
 **Demo.** TLS and SSH sessions and distribution sessions run over erXos's
 stack, on QEMU and then on both boards, every connection a process the
 inspector shows, and a network domain killed under load comes back.
 
-**Scope.** The network stack's design, in the network service's design
-document, before its code; Ethernet, ARP and IPv6 neighbour discovery,
-IPv4 and IPv6, ICMP, UDP and TCP in Erlang, grown from the packet-path
-prototype, each connection a process; TCP's fast path in native code
-behind the same process interface, only if gate GN-QEMU decided so, and
-then possibly lwIP's, ported as that fast path alone; the packet
+**Scope.** The network stack's design, in its own design document,
+`design-network-stack.md`, before its code: the pinned FreeBSD release
+and the rules for translating the logic of its `netinet` and `netinet6`
+into Erlang; Ethernet, ARP and IPv6 neighbour discovery, IPv4 and IPv6,
+ICMP, UDP and TCP in Erlang, grown from the packet-path prototype, each
+connection a process; TCP's fast path in native code behind the same
+process interface, only if GK3 decides so on erXos's kernel; the packet
 decoders' fuzz targets, run on the host's stock OTP; the scripted packet
-harness in the style of packetdrill, its scripts run against erXos's stack
-and against Linux's in the oracle guest; the network test corpus run on
-erXos's stack and on Linux's.
+harness in the style of packetdrill, FreeBSD's packetdrill tests among its
+scripts, run against erXos's stack and against FreeBSD's in a FreeBSD
+guest; the network test corpus run on erXos's stack and on FreeBSD's.
 
-**Exit criteria.** Every difference between erXos's stack and Linux's over
-the network test corpus is a bug fixed or a documented difference with a
-test; every packet script passes against erXos's stack as it does against
-Linux's, or its difference is documented with a test; the packet
+**Exit criteria.** Every difference between erXos's stack and FreeBSD's
+over the network test corpus is a bug fixed or a documented difference
+with a test; every packet script passes against erXos's stack as it does
+against FreeBSD's, or its difference is documented with a test; the packet
 decoders run their fuzz budgets clean; a network domain killed under load
 restarts ending only its connections, on QEMU as a behaviour and on the
 boards with the domain's grant enforced; and, on the boards, M11's
 closure holds over what M12 adds to the stack, as the ground rules
 require.
 
-**Gate G14.** Measures throughput, latency and memory of erXos's stack
-against Linux's, and the corpus's differences, on QEMU in 1b-G, where it
-accepts the stack, and on both boards at M12, which confirm the
-acceptance.
+**Gate G14.** Measures the corpus's differences from FreeBSD's stack,
+and throughput, latency and memory of erXos's stack against FreeBSD's and
+Linux's, on QEMU in 1b-G, where the corpus and the packet scripts accept
+the stack and the numbers, taken on the stopgap, are a baseline; and on
+both boards at M12, on erXos's kernel, which confirm the acceptance with
+their numbers.
 
 ## Decision gates
 
@@ -2313,9 +2350,9 @@ acceptance.
 | G3 | M3 | W1 against stock OTP; footprint; boot time to the shell | the baseline |
 | GK1 | before Phase 1 is complete, beside Phase 1b | the pilot's time and defect rate | the pace of the rest of track K and of the plan |
 | GK2 | after the pilot and 1b-A | Phase 1's and 1b-A's tests and benchmarks baselined on the stopgap, the conformance roster written from the design | the start of erXos's kernel in full |
-| GK3 | M7 | the conformance suite, Phase 1 and 1b's transcript tests, the oracle and the benchmarks on both kernels; G5's E-D3, E-D4 and full E-S2; G9's latency and throughput repeated on erXos's kernel | the replacement of the stopgap; G5's provisional decisions confirmed or revised, the death path's batching and `system_queue`, and no kernel object per lightweight process; whether a program's start needs a cheaper path |
+| GK3 | M7 | the conformance suite, Phase 1 and 1b's transcript tests, the oracle and the benchmarks on both kernels; G5's E-D3, E-D4 and full E-S2; G9's latency and throughput and GN-QEMU's packet-path measurements repeated on erXos's kernel | the replacement of the stopgap; G5's provisional decisions confirmed or revised, the death path's batching and `system_queue`, and no kernel object per lightweight process; whether a program's start needs a cheaper path; whether TCP's fast path in erXos's stack needs native code |
 | G2 | M2 | early E-S2 (kernel thread switch, IPC round trip through a gate, park and wake); E-S4 FIFO wake latency; E-S10 | whether the two-level model stands on erXos's kernel; NIFs that move to dirty schedulers |
-| G5 | 1b-A, provisionally; confirmed at GK3 | on the stopgap: E-D1 and E-D2 (`tools/erx bench xdomain-pingpong`, `xdomain-throughput`); BeamAsm's speedup and footprint in an ordinary domain; translation time at a domain's start. At GK3: E-D3 and E-D4 (`xdomain-stall`, `domain-lifecycle`) and full E-S2 | provisionally: default table sizes; `lane` and the manifest's `system_lane`, the producer's wait rule, encoding straight into the lane; the funnel's allowance per step; the busy limit and the facets' limits; the ahead-of-time roster's triggers. At GK3: the manifest's `system_queue` and the death path's batching; no kernel object per lightweight process; the rest confirmed or revised |
+| G5 | 1b-A, provisionally; confirmed at GK3 | on the stopgap: E-D1 and E-D2 (`tools/erx bench xdomain-pingpong`, `xdomain-throughput`); BeamAsm's speedup and footprint in an ordinary domain; translation time at a domain's start. At GK3: E-D3 and E-D4 (`xdomain-stall`, `domain-lifecycle`) and full E-S2 | provisionally: the runtimes' and the domain service's default table sizes, `cap_limit` among them; `lane` and the manifest's `system_lane`, the producer's wait rule, encoding straight into the lane; the funnel's allowance per step; the busy limit and the facets' limits; the ahead-of-time roster's triggers. At GK3: the manifest's `system_queue` and the death path's batching; no kernel object per lightweight process; the rest confirmed or revised |
 | GP | track P | a program's start (`tools/erx bench spawn`) against its budget and `posix_spawn` on Linux; the `make`-shaped workload and `tools/erx bench pipe`, hosted and under HVF, the stopgap's numbers provisional | the channel's and data area's defaults; the handler's batching; one ring per write end (whether a program's start needs a cheaper path is GK3's) |
 | G6 baseline | the end of 1b-D, on the stopgap | an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; `tools/erx bench fs` and `blk` against M6's baseline | nothing; it records the baseline G6 compares against |
 | G6 | after M5's and M9's kernel parts | the system on erXos's kernel: an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; a program's start; isolation beside hostile domains; the EROFS reader's, littlefs's and the block driver's throughput and commit latency on QEMU (`tools/erx bench fs`, `blk`) against M6's baseline and the G6 baseline | whether the system meets the design's budgets before M8 and M10 build on it; G5's lane defaults and the facets' limits confirmed or revised |
@@ -2325,10 +2362,10 @@ acceptance.
 | G9 | M9: recorded in 1b-E, decided at its kernel part | interrupt-to-handler latency per device class (`tools/erx bench irq`), ring throughput against sDDF's figures, `tools/erx bench blk`, the network driver's packet rate, MSIs under HVF; the stopgap's numbers recorded with the stopgap named | at the kernel part only: completion batching per device class; virtio-pci over virtio-mmio; each row of the driver table, which alone admits a native shim; no row from the stopgap's numbers |
 | GQ | track Q | `fork` of 10, 100 and 1,000 MiB against Linux in a guest; a dynamically linked program's start against a static one's; the fill and the write-back cost of the session's shared mappings, files of 64 KiB to 1 GiB, with `tools/erx bench mmap`, against descriptor reads and writes; on CPUs with hardware dirty-bit management, the fold of dirty bits into the object's stored marks at `munmap` and `exec` over large shared mappings, with `tools/erx bench mmap` | whether `fork` grows a copy-on-write path; whether the shared mappings' fill and write-back points meet the corpus |
 | G12 | M12 | throughput and commit latency on the Pi 4's SD card, against G6's on QEMU; boot time to the shell and to the first pet on both boards; the trial path's timings; slot images' sizes | the default trial deadline; the watchdog's boot deadline per board; whether images need compression |
-| GN-QEMU | 1b-G | the packet-path prototype's UDP echo and TCP bulk transfer on QEMU under HVF on the stopgap, against a Linux peer and line rate, the line-rate comparison marked as the stopgap's | whether TCP's fast path in erXos's stack is Erlang or native code, before M14 starts |
-| GN-board | M12 | the same on the Pi 4, against Linux's stack on the board and line rate | GN-QEMU's decision confirmed or reopened |
-| G13 | M13: 1b-H on QEMU, the Pi 4 at M12 | erXos's F2FS against littlefs over the file-semantics corpus and against Linux's F2FS and `fsck.f2fs`; the power-cut harness; throughput, commit latency and the cleaner's overhead; the Pi 4's SD card at M12 | the replacement of littlefs, on QEMU; the Pi 4's numbers may reopen it |
-| G14 | M14: 1b-G on QEMU, the boards at M12 | erXos's stack against Linux's over the network test corpus; throughput, latency and memory on QEMU and both boards | the acceptance of erXos's stack, on QEMU; the boards confirm it |
+| GN-QEMU | 1b-G, on the stopgap | the packet-path prototype's UDP echo and TCP bulk transfer on QEMU under HVF, against a Linux peer and line rate, recorded with the stopgap named | nothing; it records the baseline GK3 repeats on erXos's kernel |
+| GN-board | M12 | the same on the Pi 4, against Linux's stack on the board and line rate | GK3's decision on TCP's fast path confirmed or reopened |
+| G13 | M13: 1b-H on QEMU, the Pi 4 at M12 | erXos's F2FS against littlefs over the file-semantics corpus and against Linux's F2FS and `fsck.f2fs`; the power-cut harness; throughput, commit latency and the cleaner's overhead, on the stopgap a baseline; the Pi 4's SD card at M12 | the replacement of littlefs, on QEMU, from the corpus, the oracle guest and the power cuts; the Pi 4's numbers may reopen it |
+| G14 | M14: 1b-G on QEMU, the boards at M12 | erXos's stack against FreeBSD's over the network test corpus and the packet scripts; throughput, latency and memory on QEMU, a baseline on the stopgap, and on both boards | the acceptance of erXos's stack, on QEMU; the boards confirm it |
 
 A numbered gate takes its milestone's number: M7's gate is GK3, G6's
 baseline ends track P's first part and G6 follows the kernel parts of M5
@@ -2353,14 +2390,13 @@ interpreter, within a frame's cost across a connection).
 | The Phase 1 manifest check and root startup rule | the packer's `Admitted` value and the manifest's properties | track K (`erx_root_plan`); M5, M9 and M11 (the properties, as [design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check) lists them) |
 | Virtio-mmio devices with ordinary interrupts and unconfined DMA, driven by the same Erlang drivers | DMA profiles; IRQ objects; the device NIF | M9's kernel part (virtio-pci with MSIs and the IOMMU), M11 (refused unless configured) |
 | A host link holding every facet but the system-shell facet | session facet tables | M10, M11 |
-| littlefs, the read-write file system of the data partition and the vault's partition, a NIF of the system domain in Phase 1 and a sub-space port of its storage domain from track S's programs (1b-B) | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, decided on QEMU in 1b-H, through an installation that creates both partitions afresh, which comes to the boards with M12 |
+| littlefs, the read-write file system of the data partition and the vault's partition, a NIF of the system domain in Phase 1 and a sub-space port of its storage domain from 1b-E | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, decided on QEMU in 1b-H, through an installation that creates both partitions afresh, which comes to the boards with M12 |
 | LVGL, the widget renderer on panels, a native program in a sub-space of the display domain | the renderer behaviour `erx_ui_renderer` and the generated reader of `ui.txt`'s operations | by the Erlang renderer, when GD admits it; GD is first measured with track D's part 6 |
 
 The stopgap carries the rows of the backend's table in
 [design-stopgap.md](design-stopgap.md#the-call-table), each in full, with
 a documented weaker result, or as a refusal. No network stack is a
-stopgap: erXos's own stack is the network service from 1b-G, and lwIP
-enters only as TCP's native fast path, if GN-QEMU asks for one. A native
+stopgap: erXos's own stack is the network service from 1b-G. A native
 driver shim admitted by a row of the driver table
 ([design-system.md](design-system.md#the-driver-table)) is a stopgap
 of the same kind as littlefs, a sub-space port behind the driver's
