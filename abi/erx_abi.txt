@@ -182,6 +182,11 @@ bytes crash_frame_begin 17 value 2d2d6572782d63726173682d626567696e
 bytes crash_frame_end 15 value 2d2d6572782d63726173682d656e64
 bytes abi_note_owner 6 value 6572586f7300
 bytes abi_note_section 13 value 2e6e6f74652e6572782e616269
+# The system's name and release, as uname(1) and uname(3) report them:
+# "erXos" and "0.1.0". ERTS's os:type/0 is the name in lower case and
+# os:version/0 the release's numbers.
+bytes uname_sysname 5 value 6572586f73
+bytes uname_release 5 value 302e312e30
 layout erx_abi_note wire_le 4 24
   field header erx_elf64_nhdr 0
   field owner abi_note_owner 12

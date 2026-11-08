@@ -21,6 +21,8 @@ class ErxShellCommandsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
+  # The generated headers erx_shell includes, such as erx_abi.hrl.
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   CORPUS = File.join(ROOT, 'test/shell/rc/commands')
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
@@ -46,7 +48,7 @@ class ErxShellCommandsTest < Minitest::Test
   # application file beside it, from which the command namespace is read.
   def self.compiled
     @compiled ||= Dir.mktmpdir('erx-shell-commands-').tap do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-o', work, *SOURCES,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-pa', work, '-o', work, *SOURCES,
                                        stdin_data: '')
       raise "compiling the shell failed: #{output}" unless status.success?
 

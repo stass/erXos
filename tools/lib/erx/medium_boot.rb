@@ -103,7 +103,8 @@ module Erx
     # commands: a file in /tmp written by a redirection and read back, a pipeline that
     # lists the release's applications, of which stdlib's line is matched, a directory
     # made beside the file and both listed in order, a name no command has, and `cd`
-    # with `pwd`; and exit, after which the Erlang shell answers again. Lines between
+    # with `pwd`; `uname -a`, whose host is the manifest's and whose build identifier the
+    # root passed; and exit, after which the Erlang shell answers again. Lines between
     # the matched ones, such as the other applications, are passed over. The line editor
     # echoes each line as typed and then redraws it after cursor movements, which no
     # pattern here matches; it rings the bell at a `}` with no `{` on its line.
@@ -124,7 +125,8 @@ module Erx
       ['rc-mkdir', /\Ad\r*\n\z/n, nil],
       ['rc-ls-file', /\Ax\r*\n\z/n, "nosuch\r"],
       ['rc-not-found', /\Anosuch: not found\r*\n\z/n, "cd /tmp; pwd\r"],
-      ['rc-pwd', %r{\A/tmp\r*\n\z}n, "exit\r"],
+      ['rc-pwd', %r{\A/tmp\r*\n\z}n, "uname -a\r"],
+      ['rc-uname', /\AerXos erxos [0-9][0-9.]* erXos [0-9][0-9.]* build [0-9a-f]{16} arm64\r*\n\z/n, "exit\r"],
       ['rc-exit', /\A% exit\r*\n\z/n, nil],
       ['rc-returned', /\Aok\r*\n\z/n, "rc_ended.\r"],
       ['erlang-shell-again', /\Arc_ended\r*\n\z/n, nil]

@@ -4,6 +4,10 @@ arch aarch64
 limit arch_user_limit u64 0x1000000000000
 limit arch_elf_machine u16 183
 limit arch_asid_bits u32 16
+# The machine type and the processor architecture uname(1) and uname(3)
+# report, FreeBSD's MACHINE and MACHINE_ARCH: "arm64" and "aarch64".
+bytes arch_machine 5 value 61726d3634
+bytes arch_machine_arch 7 value 61617263683634
 trap svc 0x4552
 reg number x8
 reg args x0,x1,x2,x3,x4,x5

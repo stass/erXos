@@ -2,8 +2,8 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% EUnit cases of erx_hostlink's pure parts (docs/design-live.md, "The host link"): the
-%% build identifier read from the root's `-erx build` word, which a hello reports and the
-%% host checks, and what the root answers. The effects themselves run end to end in the
+%% build identifier erx_build reads from the root's `-erx build` word, which a hello reports
+%% and the host checks, and what the root answers. The effects themselves run end to end in the
 %% production image's host link boot (tools/lib/erx/hostlink_guest.rb).
 -module(erx_hostlink_tests).
 
@@ -15,19 +15,19 @@
 build_test_() ->
     Id = integer_to_list(16#2255e43fb7866bb3),
     Max = integer_to_list((1 bsl 64) - 1),
-    [?_assertEqual({ok, <<"2255e43fb7866bb3">>}, erx_hostlink:build([["build", Id]])),
-     ?_assertEqual({ok, <<"00000000000000ff">>}, erx_hostlink:build([["build", "255"]])),
-     ?_assertEqual({ok, <<"ffffffffffffffff">>}, erx_hostlink:build([["build", Max]])),
+    [?_assertEqual({ok, <<"2255e43fb7866bb3">>}, erx_build:id([["build", Id]])),
+     ?_assertEqual({ok, <<"00000000000000ff">>}, erx_build:id([["build", "255"]])),
+     ?_assertEqual({ok, <<"ffffffffffffffff">>}, erx_build:id([["build", Max]])),
      %% A plain word of the kernel command line may follow; it is not the build's.
-     ?_assertEqual({ok, <<"2255e43fb7866bb3">>}, erx_hostlink:build([["console_uart", "1", "2", "3"],
+     ?_assertEqual({ok, <<"2255e43fb7866bb3">>}, erx_build:id([["console_uart", "1", "2", "3"],
                                                                      ["build", Id, "plainword"]])),
-     ?_assertMatch({error, {no_build, _}}, erx_hostlink:build([])),
-     ?_assertMatch({error, {no_build, _}}, erx_hostlink:build([["build"]])),
-     ?_assertMatch({error, {bad_build, _}}, erx_hostlink:build([["build", Id], ["build", Id]])),
-     ?_assertMatch({error, {bad_build, _}}, erx_hostlink:build([["build", "2255e43fb7866bb3"]])),
-     ?_assertMatch({error, {bad_build, _}}, erx_hostlink:build([["build", "18446744073709551616"]])),
-     ?_assertMatch({error, {bad_build, _}}, erx_hostlink:build([["build", "000000000000000000001"]])),
-     ?_assertMatch({error, {bad_build, _}}, erx_hostlink:build([["build", "-1"]]))].
+     ?_assertMatch({error, {no_build, _}}, erx_build:id([])),
+     ?_assertMatch({error, {no_build, _}}, erx_build:id([["build"]])),
+     ?_assertMatch({error, {bad_build, _}}, erx_build:id([["build", Id], ["build", Id]])),
+     ?_assertMatch({error, {bad_build, _}}, erx_build:id([["build", "2255e43fb7866bb3"]])),
+     ?_assertMatch({error, {bad_build, _}}, erx_build:id([["build", "18446744073709551616"]])),
+     ?_assertMatch({error, {bad_build, _}}, erx_build:id([["build", "000000000000000000001"]])),
+     ?_assertMatch({error, {bad_build, _}}, erx_build:id([["build", "-1"]]))].
 
 %% Every name the design lists but this machine does not serve is unsupported; anything
 %% else, other names and other requests, is badarg, and opens nothing.

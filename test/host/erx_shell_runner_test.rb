@@ -17,6 +17,8 @@ class ErxShellRunnerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
+  # The generated headers erx_shell includes, such as erx_abi.hrl.
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
   SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
@@ -26,7 +28,7 @@ class ErxShellRunnerTest < Minitest::Test
 
   def test_runner_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-runner-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-o', work, *SOURCES,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-pa', work, '-o', work, *SOURCES,
                                        stdin_data: '')
       assert status.success?, output
 

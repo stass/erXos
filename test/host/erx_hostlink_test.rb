@@ -16,7 +16,8 @@ class ErxHostlinkTest < Minitest::Test
   # The generated header erx_abi.hrl named here is in build/gen.
   Erx::Generated.ensure(root: ROOT)
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  SOURCES = %w[erlang/apps/erx_hostlink/src/erx_hostlink.erl erlang/apps/erx_hostlink/src/erx_hostlink_install.erl
+  SOURCES = %w[erlang/apps/erx/src/erx_build.erl
+               erlang/apps/erx_hostlink/src/erx_hostlink.erl erlang/apps/erx_hostlink/src/erx_hostlink_install.erl
                erlang/apps/erx_hostlink/src/erx_hostlink_frame.erl erlang/apps/erx_hostlink/src/erx_hostlink_stream.erl
                erlang/apps/erx_hostlink/src/erx_hostlink_payload.erl erlang/apps/erx_hostlink/src/erx_hostlink_session.erl
                test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_hostlink_tests.erl].freeze

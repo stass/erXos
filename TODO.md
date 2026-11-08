@@ -314,6 +314,9 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/root.c`: a refused `erx.` word ends the boot with a fixed
   reason that names no word, though `erx_boot_args_parse` gives it in `refused`. Printing it needs
   the console's escaping function, as it is text from the boot loader.
+* [Low] tests, `test/host/erx_hostlink_session_test.rb`: the EUnit run takes 295 s alone on an Apple Silicon host
+  and once passed its own 600 s deadline under `make check`'s parallel load, failing the check with every case
+  shown passing. Find the slow case and bound it, or give the run a deadline that fits the load.
 * [Low] tooling, `make check-reproducible`: both builds of OTP and musl run at one path, so a path
   of theirs that reached the image would not show.
 * [Low] stopgap, `tools/lib/erx/native_root.rb`: musl's headers are system headers to the root's compile, so a compile record leaves them out and nothing audits them for the root's objects.
@@ -389,6 +392,10 @@ it; git history is the record of completed work.
 * [Low] musl, `musl/arch/erxos`: `docs/design-runtime.md` deletes `__syscallN` and the `SYS_` numbers; the seam
   keeps them as the tokens of one switch, so all of musl still compiles and refuses at run time. Delete them when
   the personality has replaced what they name.
+* [Low] musl, `musl/src/misc/uname.c`: `uname(3)` reaches the seam as `SYS_uname`, which answers `ENOSYS`.
+  It should fill `struct utsname` from `erx/abi.h`'s `ERX_UNAME_SYSNAME_STRING`, `ERX_UNAME_RELEASE_STRING` and
+  `ERX_ARCH_MACHINE_STRING`, and the node name from the host part of the boot information's node name, which the shell's `uname`
+  (`erlang/apps/erx_shell/src/erx_cmd_uname.erl`) reads as init's `-sname` or `-name`, with no value of its own; `docs/design-shell.md`, "Text commands".
 * [Low] musl, `tools/lib/erx/native_musl.rb`: binary128 arithmetic comes from Fiasco's `libgcc.a`, built by GCC.
   Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
 * [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
@@ -2669,6 +2676,10 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Low] liberx, `liberx/backend/core/boot_info.c` (`node_valid`): a boot page's node name is checked only for
+  no NUL and one `@` inside it. Every name today comes from the manifest's checked identifiers, so `uname -n` and
+  anything else that shows a node's host write it unescaped; require both parts to be system identifiers here, so
+  that holds whichever path builds the page.
 * [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
   `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
   `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can

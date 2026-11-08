@@ -37,6 +37,7 @@
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <ctype.h>
+#include <limits.h>
 #include <sys/select.h>
 
 #include "liberx/backend/api.h"
@@ -456,16 +457,43 @@ int sys_max_files(void)
 
 char os_type[] = "unix";
 
+/*
+ * erXos's name and release, never the host's: abi/erx_abi.txt's uname_sysname
+ * and uname_release, which uname(1) and uname(3) report too. As stock ERTS
+ * derives both from uname(2), the flavor is the name in lower case and the
+ * version the release's numbers.
+ */
 void os_flavor(char* namebuf, unsigned size) {
-    (void) size;
-    strcpy(namebuf, "erxos");
+    static const char name[] = ERX_UNAME_SYSNAME_STRING;
+    unsigned i;
+
+    if (size == 0)
+        return;
+    for (i = 0; i + 1 < size && name[i] != '\0'; i++)
+        namebuf[i] = (char)tolower((unsigned char)name[i]);
+    namebuf[i] = '\0';
 }
 
-/* erXos's version, never the host's. This is the one place that names it. */
+/*
+ * The number at *cursor, 0 where none is, and INT_MAX where it would not fit;
+ * *cursor then moves past all its digits and one '.' after them.
+ */
+static int release_number(const char **cursor) {
+    int value = 0;
+
+    for (; isdigit((unsigned char)**cursor); (*cursor)++)
+        value = value > (INT_MAX - 9) / 10 ? INT_MAX : value * 10 + (**cursor - '0');
+    if (**cursor == '.')
+        (*cursor)++;
+    return value;
+}
+
 void os_version(int *pMajor, int *pMinor, int *pBuild) {
-    *pMajor = 0;
-    *pMinor = 1;
-    *pBuild = 0;
+    const char *release = ERX_UNAME_RELEASE_STRING;
+
+    *pMajor = release_number(&release);
+    *pMinor = release_number(&release);
+    *pBuild = release_number(&release);
 }
 
 void erts_do_break_handling(void)

@@ -51,7 +51,7 @@ install facet exists (erx_hostlink_install, over erx_code); the others answer
 the root `{error, badarg}`. Casts reach no facet: none takes them.
 """.
 
--export([start_link/0, root/2, build/1, bounded_measure/1]).
+-export([start_link/0, root/2, bounded_measure/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 
 -include("generated/erx_abi.hrl").
@@ -72,9 +72,6 @@ the root `{error, badarg}`. Casts reach no facet: none takes them.
 %% The facets docs/design-live.md lists for a development build's host whose
 %% services this package does not serve yet.
 -define(NOT_SERVED, [inspect, trace, update, code, domain, console, web]).
-%% The build identifier's bits: the pack header's build_id, the bytes from its
-%% offset to the next field's.
--define(BUILD_BITS, (8 * (?ERX_PACK_HEADER_OFF_INDEX_HASH - ?ERX_PACK_HEADER_OFF_BUILD_ID))).
 
 -record(state, {
     driver :: pid(),
@@ -111,7 +108,7 @@ init([]) ->
     end.
 
 start(Spec) ->
-    case build(arguments()) of
+    case erx_build:id() of
         {ok, Build} ->
             {ok, Driver} = erx_pl011:start_link(Spec, self()),
             Core = erx_hostlink_session:new(#{build => Build, versions => versions(),
@@ -278,49 +275,6 @@ root({open, Name}, _Link) when is_atom(Name) ->
     end;
 root(_Request, _Link) ->
     {{error, badarg}, []}.
-
-arguments() ->
-    case init:get_argument(erx) of
-        {ok, Found} -> Found;
-        error -> []
-    end.
-
--doc """
-The boot image's build identifier among init's `-erx` arguments, as the hello
-reports it: in lower-case hexadecimal, two digits per byte of the pack
-header's `build_id`, as the root's identity line and the host tool print it.
-The root adds `-erx build ID`, the bytes read big-endian as one number in
-decimal, since init parses each `-erx` value as a term and hexadecimal digits
-need not scan as one. Pure, for its tests.
-""".
--spec build([[string()]]) -> {ok, binary()} | {error, {atom(), string()}}.
-build(Arguments) ->
-    case [Word || ["build", Word | _] <- Arguments] of
-        [Word] ->
-            case decimal(Word, ?BUILD_BITS) of
-                {ok, Id} -> {ok, iolist_to_binary(io_lib:format("~*.16.0b", [?BUILD_BITS div 4, Id]))};
-                error -> {error, {bad_build, "-erx build is not the build identifier in decimal"}}
-            end;
-        [] ->
-            {error, {no_build, "the root gave no -erx build"}};
-        [_, _ | _] ->
-            {error, {bad_build, "more than one -erx build"}}
-    end.
-
-%% Digits only, at most as many as the field's largest value has, so no word
-%% builds a large integer before the range check.
-decimal(Word, Bits) ->
-    Max = (1 bsl Bits) - 1,
-    case Word =/= [] andalso length(Word) =< length(integer_to_list(Max))
-        andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Word) of
-        true ->
-            case list_to_integer(Word) of
-                Value when Value =< Max -> {ok, Value};
-                _ -> error
-            end;
-        false ->
-            error
-    end.
 
 %% The formats a host must speak: the host link's frame version.
 versions() ->

@@ -323,8 +323,8 @@ shell and for `erx:` functions that run commands:
 2. an **Erlang command**, a module of the session's releases that
    implements the `erx_cmd` behaviour and declares its name
    (`-erx_command(ps)`): the UNIX utilities `ps`, `echo`, `cat`, `ls`,
-   `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `true` and
-   `false`, which follow FreeBSD's utilities of the same names
+   `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `uname`,
+   `true` and `false`, which follow FreeBSD's utilities of the same names
    ([Text commands](#text-commands)), so toybox's applets of those names
    are never built; and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `bind`, `mount` and `unmount`, which have no FreeBSD
@@ -514,6 +514,43 @@ do. The text filters:
 * **`wc [-clmw] [file ...]`** counts lines, words and bytes, or characters
   under `-m`, in FreeBSD's layout, with a total line when more than one
   file is named.
+
+**`uname [-abmnoprsv]`** writes what system this is, as FreeBSD's
+`uname` does: the fields its flags select on one line, one space apart,
+in FreeBSD's order whatever the order of the flags: the system's name
+(`-s`, or `-o`), the host name (`-n`), the release (`-r`), the version
+(`-v`), the machine type (`-m`), the processor architecture (`-p`) and
+the build identifier (`-b`). `-a` is `-mnrsv`, as on FreeBSD and
+macOS, no flag is `-s`, and an argument is a usage error. Each value has
+one source, which the C library's `uname(3)` reads too:
+
+* the name, `erXos`, and the release are `uname_sysname` and
+  `uname_release` of `abi/erx_abi.txt`, and the machine type and
+  processor are the architecture's `arch_machine` and
+  `arch_machine_arch` in `abi/arch/<arch>.txt`, FreeBSD's `MACHINE` and
+  `MACHINE_ARCH` (on AArch64 `arm64` and `aarch64`, as FreeBSD names
+  them; macOS's `-p` says `arm`); the runtime's `os:type/0` and
+  `os:version/0` derive from the same name and release, as stock ERTS
+  derives them from `uname(2)`;
+* the host name is the host part of the node name liberx gives the
+  runtime, whether or not it runs distribution, which is the system
+  manifest's `host` ([design-system.md](design-system.md#identifiers)),
+  a system identifier and so ASCII, which needs no escaping;
+* the build identifier is the boot image's, the pack header's
+  `build_id` in hexadecimal, as the boot banner and the host link's
+  hello show it; it plays the part of FreeBSD's `kern.build_id`;
+* the version is the name, the release, and `build` with the build
+  identifier: `erXos 0.1.0 build 2255e43fb7866bb3`. The build records no
+  source revision and no date, so the boot image stays reproducible.
+
+A value the command's domain cannot know, the host name of a runtime
+that is not a node or the build identifier where init was given none,
+is written `unknown`, as GNU's `uname` writes a field it cannot tell.
+FreeBSD's `-i` (the kernel configuration's name), `-K` and `-U` (the
+kernel's and the userland's `__FreeBSD_version`) have no erXos value and
+are not offered, nor are the `UNAME_x` environment variables that
+override a field. The values are erXos's own, so the FreeBSD oracle has
+no `uname` case; its tests pin the order, the layout and the values.
 
 ### Starting programs
 
@@ -1158,6 +1195,14 @@ remain independent of catalog generation.
     flight; a 1 GiB line without a newline into `grep` fails that stage
     with `line too long`. A writer that sends without waiting fails the
     second case.
+  * `uname`: each flag alone, and the seven field flags in every order,
+    write their fields in FreeBSD's order, `-a` writes five, a field the
+    running system cannot tell writes `unknown`, a runtime given a node
+    name but no distribution finds its host, and `-K`, an unknown flag and
+    an argument are usage errors; the production image's boot runs
+    `uname -a` at the command shell and matches the name, the manifest's
+    host, a build identifier and the machine type. A selection in the
+    order of the flags fails.
   * `grep`'s translator: every construct of POSIX basic and extended
     expressions against a table of `regcomp(3)` results taken from the
     guest; a pattern built to backtrack ends with status 2 within the

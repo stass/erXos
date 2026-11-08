@@ -270,9 +270,10 @@ Error in process <0.150.0> with exit value:
   The language has variables, lists, `for`, `if`, functions, pipelines,
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
   Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
-  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `mount`, `erl`, `true` and
+  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `mount`, `uname`, `erl`, `true` and
   `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
-  `wc` print what FreeBSD's do for the options they offer. Its language is checked against
+  `wc` print what FreeBSD's do for the options they offer; `uname` takes
+  FreeBSD's flags and layout. Its language is checked against
   plan9port's rc, built on the host as the oracle. Job control works for
   Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
   programs is not on master yet.
