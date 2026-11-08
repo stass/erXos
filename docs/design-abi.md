@@ -1419,7 +1419,7 @@ The checker evaluates all thirteen system-manifest properties, with
 their property numbers in diagnostics. Resource sums include exact
 principal budgets, device reservations, table sizes and the system's
 baseline and worst admitted-domain reservation. The domain planner is
-the production `erx_dom_plan_create` pure core built for the host; a
+the production `erx_dom_plan_configured` pure core built for the host; a
 different implementation or a placeholder success is not its oracle.
 Property 12 invokes it for each configured-domain or partial-boot child
 specification. With no child specifications it makes zero calls; that

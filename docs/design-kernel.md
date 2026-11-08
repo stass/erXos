@@ -2512,7 +2512,7 @@ of the plan pins.
   the same inputs, agree exactly.
 
 **On the host.** The packer runs `erx_root_plan`, built for the host and
-called through a small host helper as `erx_dom_plan_create` is for
+called through a small host helper as `erx_dom_plan_configured` is for
 property 12 ([design-abi.md](design-abi.md#canonical-source-packing-and-checking)),
 over the root entry's manifest and the charge model, and `erx_pool_plan`
 over the platform's memory table, with the kernel's placed extent from
@@ -2556,7 +2556,7 @@ charged and with a ceiling and a reverse map like any other mapping, and
 the root task needs no pager.
 
 Production images run the root plan for every image, and
-`erx_dom_plan_create` for each child domain the manifest names.
+`erx_dom_plan_configured` for each child domain the manifest names.
 
 ### The root task
 

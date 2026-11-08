@@ -362,7 +362,7 @@ seeded violation and each refusal with a seeded record:
 | 7 the sealing secret | `sealing` is `none`, no entry carries `ERX_ENTRY_SEAL`, no TPM | M11 |
 | 8 partitions and devices reach holders | kept: the UARTs are the system domain's; the slot and data windows are the system domain's or a storage domain's, as the manifest places them; only the network domain holds the network device; the display domain holds the gpu and input devices; no vault partition | M11 (vault) |
 | 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the network domain's net device among them, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
-| 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_create`, as on erXos's kernel; 13 is a configuration check and nothing enforces grants at run time | |
+| 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_configured`, as on erXos's kernel; 13 is a configuration check and nothing enforces grants at run time | |
 
 **The root startup rule** is a sanity check, not a proof: the root entry's
 loadable segments plus `system_baseline` fit `root_memory`, and `root_memory`

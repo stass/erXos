@@ -412,7 +412,7 @@ Independent populated binary fixtures exercise every manifest record and
 the C, Erlang and Ruby structural readers without claiming policy
 admission. Track K's first part supplies the production initial-root
 bootstrap/charge plan
-and `erx_dom_plan_create` for both host admission checks and runtime
+and `erx_dom_plan_configured` for both host admission checks and runtime
 creation. Any unavailable required sizing, planning or service consumer
 fails as unsupported. There is no temporary planner, weakened admission
 path or reduced target manifest format.
@@ -1559,7 +1559,7 @@ stopgap implements and then the rest of the interface, from
   * above the kernel: `liberx`'s `erx` backend; `erx_root_main` building the
     programs a development manifest's partial boot names as domains through
     the domain library ([design-system.md](design-system.md#boot)); the
-    domain library's production `erx_dom_plan_create` core for native
+    domain library's production `erx_dom_plan_configured` core for native
     domains, built for the host as the packer's property-12 checker as well
     as for the runtime, validated whole and undone step by step
     ([design-system.md](design-system.md#the-domain-library)); the
