@@ -133,7 +133,9 @@ class GateDiscoveryTest < Minitest::Test
       'seed bytes that are not bytes' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 1 })\n",
       'an absolute source' => "Erx::PackFuzz.declare_target(sources: ['/a.c'], seeds: { 'a' => 'b' })\n",
       'a climbing source' => "Erx::PackFuzz.declare_target(sources: ['../a.c'], seeds: { 'a' => 'b' })\n",
-      'no include paths' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, includes: [])\n"
+      'no include paths' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, includes: [])\n",
+      'a define that is a flag' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['X -O0'])\n",
+      'a define with a value' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['X=1'])\n"
     }.each do |label, text|
       with_files('x_fuzz.c' => '', 'x_target.rb' => text) do |directory|
         assert_raises(Erx::Error, label) { Fuzz.load_targets(directory) }
@@ -160,7 +162,16 @@ class GateDiscoveryTest < Minitest::Test
       assert_equal 'x', target.kind
       assert_equal ['a.c'], target.sources
       assert_equal Fuzz::INCLUDES, target.includes
+      assert_empty target.defines
       assert_equal({ 'seed-0' => 'x' }, target.seeds)
+    end
+  end
+
+  def test_a_fuzz_targets_defines_reach_its_compile
+    text = "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['ERX_HOST'])\n"
+    with_files('x_fuzz.c' => '', 'x_target.rb' => text) do |directory|
+      target = Fuzz.load_targets(directory).first
+      assert_includes Fuzz.compile_command(target, root: '/r', compiler: 'cc', program: 'p'), '-DERX_HOST'
     end
   end
 

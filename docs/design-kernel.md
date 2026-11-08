@@ -580,8 +580,8 @@ typedef struct erx_object {
 	erx_ktype_t	 type;
 	_Atomic uint32_t state;		/* ERX_OBJ_LIVE; ERX_OBJ_RELEASED when its
 					 * last capability goes while it is live;
-					 * never back; a closed object reads as
-					 * ERX_OBJ_DELETED */
+					 * ERX_OBJ_DELETED once a destroy closes
+					 * it; never back */
 	_Atomic uint32_t refs;		/* its own until its put; threads that
 					 * keep it across a preemption point,
 					 * never across a wait (K33) */
@@ -696,7 +696,7 @@ An object's life, and the verbs this document uses for each step:
 | close | one capability leaves a table | `erx_cap_close`, a move's source slot, emptying a table |
 | release | the object's last capability goes, whatever removed it: a live object becomes `RELEASED` and is destroyed, memory and groups once their mappings, children and members are gone; a deleted object stays `DELETED`, its deletion's teardown under way | the slot clear that takes `ncaps` to zero |
 | delete | the object is destroyed at once, whoever else holds it | `erx_object_destroy`, with `DESTROY`, the destruction of the budget that pays for it, or for a space the deletion of its parent |
-| destroy | the object is closed, by invalidating its existence lock, and drained, by waiting for the operation that holds that lock; then its type's teardown runs in bounded parts, and its put is queued | a deletion, or the release, or for a released memory object or group the last mapping, child or member going; the first to close the object goes on, and a second destroys nothing; a deletion walk that unlinks a space runs that space's teardown and put, whoever closed it, and the destroy that closed it stops at its begin (**Who owns a deletion** in [Creating spaces](#creating-spaces)) |
+| destroy | the object is closed, by `erx_object_close` writing `ERX_OBJ_DELETED` under its capability lock, then invalidating its existence lock, and drained, by waiting for the operation that holds that lock; then its type's teardown runs in bounded parts, and its put is queued | a deletion, or the release, or for a released memory object or group the last mapping, child or member going; the first to close the object goes on, and a second destroys nothing; a deletion walk that unlinks a space runs that space's teardown and put, whoever closed it, and the destroy that closed it stops at its begin (**Who owns a deletion** in [Creating spaces](#creating-spaces)) |
 | put | the object's own counted reference is dropped, after an RCU grace period | the grace period's callback |
 | free | the record's slot returns to its budget's cache, and the cache page is released, its charge ending, once it holds no record; the object's pages were released by its teardown | the reaper's record free, run by the put or by the drop of the last counted reference, whichever comes last, and for a space with a child's record not yet freed, by the free of the last such record ([Creating spaces](#creating-spaces)) |
 
@@ -735,9 +735,11 @@ typedef struct erx_uref {
 	uint32_t	 epoch;		/* the thread's count at the lookup */
 } erx_uref_t;
 
+erx_uref_t	 erx_uref_make(erx_object_t *object);	/* stamps the epoch */
 erx_object_t	*erx_uref_get(erx_uref_t ref);		/* checks the epoch */
 erx_object_t	*erx_object_ref(erx_uref_t ref);	/* counted; checks it */
-void		 erx_object_put(erx_object_t *object);
+bool		 erx_object_put(erx_object_t *object);	/* true for the last;
+							 * the free is then due */
 
 /*
  * Take the object's capability lock as Fiasco's lock_obj does: with
@@ -801,8 +803,8 @@ void		erx_object_lock_fresh_existence(erx_object_t *object);
 void		erx_object_unlock_fresh_existence(erx_object_t *object);
 
 /*
- * The object's state: ERX_OBJ_DELETED once a destroy has closed it, by
- * invalidating its existence lock, and otherwise its state word.  Every
+ * The object's state word, which only advances: ERX_OBJ_DELETED once a
+ * destroy has closed it, and otherwise LIVE or RELEASED.  Every
  * insert function in kernel/core/attach.c reads it under the lock that
  * guards its field and links nothing, returning ERX_ESTALE, when the
  * slot list's insert finds anything but LIVE, so no capability is made to
@@ -811,6 +813,23 @@ void		erx_object_unlock_fresh_existence(erx_object_t *object);
  * and only the deletion core closes an object.
  */
 uint32_t	erx_object_state(const erx_object_t *object);
+
+/*
+ * The slot count and the state word's two writers, under the object's
+ * capability lock.  erx_object_cap_add counts a slot the slot list's
+ * insert links, ERX_ESTALE unless the object is LIVE.
+ * erx_object_cap_remove, which only erx_cap_slot_clear calls, counts one
+ * out and returns true when it was the last, writing RELEASED over LIVE.
+ * erx_object_close, which only erx_delete_step calls, writes DELETED in
+ * one atomic step and returns true for the one destroy that goes on,
+ * which then invalidates the existence lock.  The close is made under
+ * the capability lock, so no insert counts a slot on a closed object;
+ * the existence lock's one acquire refuses a DELETED object itself, so
+ * no taker has to check.
+ */
+erx_status_t	erx_object_cap_add(erx_object_t *object);
+bool		erx_object_cap_remove(erx_object_t *object);
+bool		erx_object_close(erx_object_t *object);
 ```
 
 A **capability table** belongs to a space. It is a directory of pages of 64
@@ -8498,8 +8517,8 @@ advances, so nothing it checked changes unseen before it is applied.
 | only one function clears a capability slot (K21, K25) | `erx_cap_slot_clear`, which decrements the object's capability count and reports its release, or hands the count to a pass, referenced only from `erx_cap_close`, `erx_pass_take`, `erx_space_clear_caps` and the deletion walk | relocations |
 | objects hold no counted reference to each other: every pointer from one object's record to another's is an attachment field of the target, named `att_` or `in_`, and only threads count references | every member of an object record that points to another object record is an `att_` list or `in_` link, or is listed with the attachment that protects it, such as a space's parent pointer, which its parent's count of holds protects, a count of records and not a reference; `erx_object_ref` referenced only from the dispatch, the wait paths and the handlers that pass a preemption point | syntax trees, with a seeded object pointer outside an attachment |
 | only the insert functions of `kernel/core/attach.c` link anything onto an object, each after checking its state, every type's teardown walks every attachment field of its record, only `erx_object_lock_cap` and `erx_object_lock` take an object's capability lock, and only `erx_object_lock_existence` and `erx_object_lock_existence2`, which take counted references first, take its existence lock (K21, K26) | every member of an object record whose name begins with `att_` written by an insert only in `kernel/core/attach.c`, every exported function there calling `erx_object_state` before its insert, and every such member referenced by its type's teardown; the helping-lock acquire on an object's `lock` referenced only from the two capability-lock functions, and on its `existence` only from `erx_object_lock_existence`, `erx_object_lock_existence2`, `erx_object_lock_counted_existence` and `erx_object_lock_fresh_existence`, the first two after their calls of `erx_object_ref`, the third on an object its caller holds counted and the fourth on a record only its caller can reach, whose try of the lock must succeed | syntax trees, with a seeded fresh take of a published object's lock, which the debug assertion catches |
-| no object pointer from a lookup is used after a preemption point (K1) | in debug and host builds, `erx_uref_get` and `erx_object_ref` compare the reference's epoch with the thread's count of preemption points, which every explicit point and every helping-lock acquire advances, and stop the build's tests on a mismatch; `erx_uref_t`'s members read only in `kernel/core/cap.c`; the generated decoder looks up every plain capability argument after every other argument and existence lock of the call | syntax trees; the generator's test, which feeds it a call declared with a capability first; the hostile and fuzz suites in debug builds |
-| an object's state only advances, from live to released or deleted and from released to deleted, one destroy alone tears an object down, and only the reaper frees an object, after its grace period (K21, K26) | an object's `state` word written only by `erx_cap_slot_clear` in `kernel/core/cap.c`, which writes `ERX_OBJ_RELEASED` and only over `ERX_OBJ_LIVE`; the invalidation of an existence lock, one atomic operation whose result decides which destroy goes on, and for a space goes on to its walks, the walk that unlinks it running its teardown whatever that result was, referenced only from the deletion core in `kernel/core/delete.c`; the object free entry point referenced only from the reaper's put and free steps in `kernel/core/reaper.c` | syntax trees, relocations |
+| no object pointer from a lookup is used after a preemption point (K1) | in debug and host builds, `erx_uref_get` and `erx_object_ref` compare the reference's epoch with the thread's count of preemption points, which every explicit point and every helping-lock acquire advances, and stop the build's tests on a mismatch; `erx_uref_t`'s members read and written only in `kernel/core/object.c`; the generated decoder looks up every plain capability argument after every other argument and existence lock of the call | syntax trees; the generator's test, which feeds it a call declared with a capability first; the hostile and fuzz suites in debug builds |
+| an object's state only advances, from live to released or deleted and from released to deleted, one destroy alone tears an object down, and only the reaper frees an object, after its grace period (K21, K26) | an object's `state` word written, after its creation, only through `erx_object_cap_remove`, which only `erx_cap_slot_clear` in `kernel/core/cap.c` calls and which writes `ERX_OBJ_RELEASED` and only over `ERX_OBJ_LIVE`, and `erx_object_close`, one atomic operation whose result decides which destroy goes on, which only `erx_delete_step` calls; the invalidation of an existence lock, which follows that close, and for a space goes on to its walks, the walk that unlinks it running its teardown whatever that result was, referenced only from the deletion core in `kernel/core/delete.c`; the object free entry point referenced only from the reaper's put and free steps in `kernel/core/reaper.c` | syntax trees, relocations |
 | a sealed object is never written (K23) | a memory object's writer count changed only by `erx_mem_writer_enter` and `erx_mem_writer_leave`, which the writable-mapping insert, `erx_dma_map`, `erx_window_write` and `erx_mem_supply` call around every write path, and read by `erx_mem_seal`; the copy into an object's pages referenced only from those paths | syntax trees, relocations |
 | only the crash core builds a crash record (K31) | `erx_crash_record_write` and `ERX_CRASH_MAGIC` named only in `kernel/core/crash.c`, its seam, the binding's end funnel and the core's tests, by the `crash-record-writer` rule | a test seeds a second writer in a core and in the glue |
 | only the root task pets the watchdog, and every end of the machine passes one funnel (K19, K31) | `erx_watchdog_pet`'s handler requires `POWER` on the root resource, which no carved resource carries, by its generated decoder; the watchdog's deadline written only in the watchdog core, `kernel/core/watchdog.c`; the firmware's end calls referenced only from `erx_machine_end_effect`, which `erx_panic`, `erx_machine_end`, the lease's deadline and the watchdog's reach, and the crash record's writer referenced only from `erx_panic` | relocations, syntax trees |

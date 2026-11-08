@@ -40,6 +40,11 @@ leaf memset 64
 leaf erx_effect_budget_lock 128
 leaf erx_effect_budget_unlock 128
 
+# The object store's epoch effect (include/erx/object.h), the calling
+# thread's count of preemption points: one load from the thread. An
+# unmeasured budget the glue's function must meet.
+leaf erx_effect_thread_epoch 64
+
 # The debug log's effects (include/erx/core/effects.h), which the glue
 # provides over a Spin_lock, Timer::system_clock and Fiasco's console. The
 # costs declared are unmeasured budgets those functions must meet, the

@@ -1285,9 +1285,32 @@ it; git history is the record of completed work.
   altogether. When the glue (WP12) gives the close and the space's
   emptying their callers, extend the caller check to the glue's objects
   and add the deletion walk's slot-clearing effect by name.
-* [Low] Capability core, `kernel/core/cap.c`: the slot-count decrement and
-  the release report move into `erx_cap_slot_clear` once the object store
-  exists (WP12).
+* [Low] Capability core, `kernel/core/cap.c`: `erx_cap_slot_clear` does not
+  yet count its slot out with `erx_object_cap_remove` or report the
+  release it returns, and the install paths do not count with
+  `erx_object_cap_add` (`kernel/core/object.c`).
+* [Medium] Object store, `kernel/core/object.c`: `erx_object_init` writes
+  the state word and the counts of any record it is given, so a call on a
+  published record would move it back to LIVE; add a `Callers` rule that
+  only the allocation funnel calls it once that funnel exists, and a
+  syntax-tree rule that within `object.c` only `erx_object_init`,
+  `erx_object_cap_remove` and `erx_object_close` write `state`.
+* [Medium] Object store, `kernel/core/object.c`: no test runs two threads,
+  so the memory orders of `erx_object_put`, `erx_object_close` and the id
+  counter are unchecked. Add a pthread host test under TSan and ASan:
+  refs and puts racing a final put that frees the record, a close racing
+  the last `erx_object_cap_remove` (one close returns true, the state ends
+  DELETED), and concurrent creations on one store (distinct ids).
+* [Medium] Security residual, object ids (`kernel/core/object.c`,
+  `oid_round`): the Feistel round function is murmur3's finalizer keyed
+  by one XOR, not a keyed PRF, so the claim that ids say nothing about how
+  many objects anyone created rests on obscurity; the design names no
+  round function or threat model. Choose a keyed PRF round (SipHash-1-3
+  or HalfSipHash) and state the threat model in design-kernel.md.
+* [Low] Object store, `kernel/core/object.c`: the reserved object id
+  (zero) is hand-written in `oid_reserved`; declare the reserved encodings
+  in `abi/erx_abi.txt` and generate the set. `ERX_KERNEL_DEBUG`, which
+  turns on the epoch check in a target build, is defined by no build yet.
 * [Medium] Capability core, `kernel/core/cap.c` (design-kernel's
   [Objects and capabilities](docs/design-kernel.md#objects-and-capabilities)):
   the slot's `table`, `obj_prev` and `obj_next` fields exist in the
@@ -1295,8 +1318,9 @@ it; git history is the record of completed work.
   `erx_cap_table_add_page`, which leaves the page storage's old bytes
   there instead of the table's address and two zero links, so no object
   has a slot list yet; and `erx_cap_read` checks the slot but not the object's state or
-  its budget's, which it reads through the object store from the handle.
-  Both need the object store.
+  its budget's, which it reads through the object store from the handle
+  (`erx_object_from_handle` and `erx_object_state` in
+  `kernel/core/object.c`).
 * [Medium] Capability core, `kernel/core/cap.c`: the table's owner hands
   `erx_cap_table_add_page` each page's storage, so the core can refuse a
   page that overlaps its own table, directory or pages, but not one that

@@ -87,13 +87,16 @@ module Erx
     RUN_DEADLINE = 120
     # A seed's name becomes a file name in the target's corpus.
     SEED_NAME = /\A[a-z0-9-]+\z/
-    Target = Data.define(:kind, :sources, :includes, :seeds)
+    # A macro a target defines for its sources, such as ERX_HOST.
+    DEFINE_NAME = /\A[A-Z][A-Z0-9_]{0,63}\z/
+    Target = Data.define(:kind, :sources, :includes, :defines, :seeds)
     TARGET_FILES = DeclarationFiles.new('native fuzz targets')
     private_constant :TARGET_FILES
 
     # Each tools/fuzz/KIND_target.rb calls this exactly once. seeds maps a
-    # name to the bytes of one corpus file.
-    def declare_target(sources:, seeds:, includes: INCLUDES)
+    # name to the bytes of one corpus file; defines names the macros its
+    # sources are compiled with.
+    def declare_target(sources:, seeds:, includes: INCLUDES, defines: [])
       unless relative_paths?(sources) && relative_paths?(includes)
         raise Error, 'native fuzz targets: sources and includes are non-empty lists of relative paths'
       end
@@ -102,7 +105,11 @@ module Erx
         raise Error, 'native fuzz targets: seeds are a non-empty map of plain names to bytes'
       end
 
-      TARGET_FILES.declare({ sources: sources, includes: includes, seeds: seeds })
+      unless defines.is_a?(Array) && defines.all? { |name| name.is_a?(String) && DEFINE_NAME.match?(name) }
+        raise Error, 'native fuzz targets: defines are a list of plain macro names'
+      end
+
+      TARGET_FILES.declare({ sources: sources, includes: includes, defines: defines, seeds: seeds })
     end
 
     # The targets declared in directory, sorted by kind. Public so the tests
@@ -127,7 +134,7 @@ module Erx
     # target declares, the generated ones first.
     def compile_command(target, root:, compiler:, program:)
       [compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
+       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer', *target.defines.map { |name| "-D#{name}" },
        *['build/gen', 'build/gen/include', *target.includes, 'include'].uniq.flat_map { |path| ['-I', File.join(root, path)] },
        *[*target.sources, 'build/gen/liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
        File.join(root, "tools/fuzz/#{target.kind}_fuzz.c"), '-o', program]
