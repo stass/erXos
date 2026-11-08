@@ -765,31 +765,36 @@ delays only that report, never `Ctrl-C` or the prompt.
 `:388-394`), with two spaces before `cmd:`:
 
 ```
-load: L  cmd: NAME PID [STATE] R.RRr U.UUu S.SSs P% Kk
+cmd: NAME PID [STATE] R.RRr U.UUu S.SSs P% Kk
 ```
+
+FreeBSD's line starts with `load: L` and two spaces; erXos leaves that
+field out, since no reporter keeps a load average within a session's
+scope and a machine-wide one would cross it.
 
 A pure module, `erx_tty_info`, named after FreeBSD's file, chooses the
 member and formats the line. Each value is an inspection attribute
 ([design-live.md](design-live.md#inspection-records)). A value that is `ok`
 is formatted as FreeBSD formats its field: seconds to hundredths,
-truncated; percent and KiB as integers. Any other value prints as
-`erx_render`'s token for its status, `[unknown]`, `[unsupported]`,
-`[partial]` or `[timeout N]`, followed by the field's letter, as in
-`[unsupported]u`; an unknown `STATE` shows as its token alone, in place of
-the bracketed state. So an unknown value is never shown as a number. The
+truncated; percent and KiB as integers. A field whose value is
+`unsupported` is left out, with its letter and the space before it, so
+the line shows only what erXos measures. Any other value prints as
+`erx_render`'s token for its status, `[unknown]`, `[partial]` or
+`[timeout N]`, followed by the field's letter, as in `[unknown]r`; an
+unknown `STATE` shows as its token alone, in place of the bracketed
+state. So an unknown value is never shown as a number. The
 values come from the session's own process table, which is also the
 source of its `ps` ([design-live.md](design-live.md#the-command-shell)), so no
 inspect facet is needed:
 
 | Field | An Erlang process | A program |
 | --- | --- | --- |
-| `L` | `[unsupported]`: no reporter keeps a load average within a session's scope, and a machine-wide one would cross it | the same |
 | `NAME` | its registered name, else its `proc_lib` label when that is an atom or a binary, else the function it started in. Each stage's first process is labelled with its command's name, and the line's process with `rc` | its name, as `ps` shows it |
 | `PID` | its pid as `ps` prints it, `<D.N.S>` | its process id |
 | `STATE` | `running` (status `running` or `garbage_collecting`), `runnable`, `suspended` or `exiting`; while it waits in `receive`, the function it waits in, `M:F/A`, which stands where FreeBSD shows the wait channel | the chosen thread's state as the kernel reports it: `running`, `runnable` or its wait kind; `suspended` when the program is paused |
 | `R` | time since the shell started it, for the line's process and a stage's first process; `[unknown]` for any other, since the runtime keeps no start time | time since it started, from the command server's table |
-| `U`, `S` | `[unsupported]`: the runtime keeps no CPU time per process | `U` is its group's CPU time, as `getrusage` reports it ([design-programs.md](design-programs.md#the-posix-lite-personality)); `S` is `[unsupported]`, since the kernel does not split the two |
-| `P` | `[unsupported]` | `[unsupported]`: no decayed average is kept |
+| `U`, `S` | unsupported, so left out: the runtime keeps no CPU time per process | `U` is its group's CPU time, as `getrusage` reports it ([design-programs.md](design-programs.md#the-posix-lite-personality)); `S` is unsupported and left out, since the kernel does not split the two |
+| `P` | unsupported, so left out | unsupported and left out: no decayed average is kept |
 | `K` | its memory as `process_info/2` reports it, in KiB, rounded up | its sub-space's charges, in KiB |
 
 `NAME` and `STATE` are text the member's domain or program reported. Each
@@ -826,9 +831,10 @@ room. These are FreeBSD's rules (`tty.c:1542-1543`, `tty_info.c:300-309`,
 whole line, so a line is never cut. A dropped line is not an error, and
 the requests still go out.
 
-With no foreground job, the line is `load: L  no foreground process
-group`. When the foreground jobs have no member left, it is `load: L  empty
-foreground process group`. These are FreeBSD's texts (`tty_info.c:311-324`).
+With no foreground job, the line is `no foreground process group`. When
+the foreground jobs have no member left, it is `empty foreground process
+group`. These are FreeBSD's texts (`tty_info.c:311-324`), without the
+load field.
 
 **The info request.**
 
@@ -1074,8 +1080,10 @@ remain independent of catalog generation.
   * `erx_tty_info`: the choice of member, checked exhaustively over small
     sets of members against a model of the five rules; swapping rules 1
     and 2 fails. Golden lines in which every value is known, and lines in
-    which each field in turn is `unknown`, `unsupported`, `partial` and
-    `timeout`. A formatter that prints a missing value as 0 fails. A name
+    which each field in turn is `unknown`, `partial` and `timeout`, and
+    lines in which each field in turn is `unsupported` and left out. A
+    formatter that prints a missing value as 0, or prints an unsupported
+    one at all, fails. A name
     and a state that hold `ESC ] 8 ;`, a newline and a bidirectional
     override reach the master only as tokens; bypassing the line escape
     fails.
@@ -1199,24 +1207,11 @@ pauses the space ([design-programs.md](design-programs.md#job-control)).
 
 Its language, its editing and its toolbox are the user's decisions, and a
 shell compatible with tcsh is a roadmap item
-([plan.md](plan.md#beyond-the-plan)). For `Ctrl-T`, these remain open:
-
-* **The load field.** No reporter keeps a load average a session may see,
-  so `load:` is `[unsupported]`. The kernel could keep a decayed average of
-  ready threads for each group and report the session's own group, within
-  scope. Recommendation: leave it `[unsupported]` until something else
-  needs a load average.
-* **Stacks, as `kern.tty_info_kstacks`.** The runtime knows an Erlang
-  process's stack, which FreeBSD's kernel must sample, so the line could add
-  `current_stacktrace` under a session setting. Recommendation: leave it
-  out; `erx:source/1` and the inspector already show where a process is.
-* **`cat`.** FreeBSD's `cat` does not catch `SIGINFO`, so erXos's does not
-  answer. Recommendation: follow FreeBSD, and have `cp` and `rm` answer.
-* **`SIGINFO`'s number in musl.** Linux has no `SIGINFO`, and musl's 31
-  standard numbers are all taken. Recommendation: give `SIGINFO` 30 and
-  make `SIGPWR` its alias, as Linux on Alpha shares one number between
-  them
-  ([design-programs.md](design-programs.md#the-terminal)).
+([plan.md](plan.md#beyond-the-plan)). For `Ctrl-T`, the line adds no
+stacks, as FreeBSD's does only with `kern.tty_info_kstacks`: `erx:source/1`
+and the inspector already show where a process is. `cat` does not answer
+the info request, as FreeBSD's does not catch `SIGINFO`; `cp` and `rm`
+answer. No open question remains.
 
 ## References
 
