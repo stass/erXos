@@ -211,7 +211,7 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 0.2) }
   end
 
-  def fake_guest(output:, version_delay: 0, guest_delay: 0, linger: 0)
+  def fake_guest(output:, version_delay: 0, guest_delay: 0, linger: 0, stderr: '')
     path = File.join(@directory, 'fake-qemu')
     source = <<~RUBY
       #!/usr/bin/env ruby
@@ -224,6 +224,7 @@ class QemuTest < Minitest::Test
       serial = ARGV.fetch(ARGV.index('-serial') + 1).delete_prefix('file:')
       sleep #{guest_delay}
       File.binwrite(serial, #{output.dump})
+      $stderr.write(#{stderr.dump})
       sleep #{linger}
     RUBY
     File.write(path, source)
@@ -321,6 +322,19 @@ class QemuTest < Minitest::Test
                          program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: '')))
     error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image, machine_end: true) }
     assert_match(/before completing its transcript/, error.message)
+  end
+
+  # QEMU exits 0 on SIGTERM and gtimeout passes that status on, so only QEMU's own line
+  # tells a run stopped from outside from a guest that ended the machine.
+  def test_qemu_stopped_by_a_signal_says_so
+    { "qemu-system-aarch64: terminating on signal 15 from pid 4242 (<unknown process>)\n" => ' from pid 4242',
+      "qemu-system-aarch64: terminating on signal 2\n" => '' }.each do |line, sender|
+      qemu = Erx::Qemu.new(root: @directory,
+                           program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: ''), stderr: line))
+      error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+      signal = line[/signal (\d+)/, 1]
+      assert_equal "QEMU was stopped by signal #{signal}#{sender} before completing its transcript", error.message
+    end
   end
 
   # What a root task that never calls shutdown looks like: the transcript is

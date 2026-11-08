@@ -278,6 +278,15 @@ module Erx
     # carries ERX_PACK_TEST_CODE (ProductionImage's test entry point).
     TEST_IMAGE_BANNER = { name: 'test-image', pattern: /test image: carries test code\r?\n/n, seconds: 30 }.freeze
 
+    # QEMU's last line on its log when a signal stops it, after its program name:
+    # "terminating on signal 15", with "from pid 25655 (<unknown process>)" when the sender is known.
+    # QEMU then exits 0. A gtimeout that was itself signalled from outside forwards the signal and
+    # passes that 0 on (its own deadline exits 124, which the runner reports as timed out), so the
+    # run reads as an exit: only this line says the guest did not end it.
+    SIGNAL_STOP_LINE = /^[^:\n]{1,64}: terminating on signal (\d+)(?: from pid (\d+))?/n
+    # How much of the end of QEMU's log is searched for that line.
+    SIGNAL_STOP_SEARCH_BYTES = 65_536
+
     # The default guest transcript: bootstrap's memory summary, checked
     # against the RAM QEMU is given, then the kernel banner lines, with a test
     # image's mark when the image is one.
@@ -343,10 +352,10 @@ module Erx
           session ||= start_link(link, socket) if transcript_whole
           !session.nil? && !session.alive?
         end
-        @runner.run(argv, name: "qemu-#{accel}", deadline: deadline, success: stop_guest)
+        record = @runner.run(argv, name: "qemu-#{accel}", deadline: deadline, success: stop_guest)
         report['link'] = session.value if session
         matcher.drain(serial, elapsed: elapsed(guest_started))
-        raise Error, 'QEMU exited before completing its transcript' unless matcher.done?
+        raise Error, early_end_message(record.fetch('log')) unless matcher.done?
         report['state'] = 'passed'
       rescue CommandError => error
         report['state'] = error.result.fetch('state') == 'timed_out' ? 'timed_out' : 'failed'
@@ -368,6 +377,27 @@ module Erx
     end
 
     private
+
+    # Why QEMU ended before the transcript was whole: a signal its log names, or an exit.
+    # Only the signal's and the sender's numbers reach the message. An unreadable log
+    # leaves the exit message, so the transcript failure is still the one reported.
+    def early_end_message(log)
+      stopped = log_tail(log).scan(SIGNAL_STOP_LINE).last
+      return 'QEMU exited before completing its transcript' unless stopped
+
+      signal, pid = stopped
+      sender = pid ? " from pid #{pid}" : ''
+      "QEMU was stopped by signal #{signal}#{sender} before completing its transcript"
+    end
+
+    def log_tail(log)
+      File.open(log, 'rb') do |file|
+        file.seek([file.size - SIGNAL_STOP_SEARCH_BYTES, 0].max)
+        file.read.to_s
+      end
+    rescue SystemCallError
+      ''
+    end
 
     # The host link session in a thread of its own, its socket's failures as Erx::Error.
     def start_link(link, socket)

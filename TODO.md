@@ -408,6 +408,10 @@ it; git history is the record of completed work.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.
+* [Medium] tooling, `tools/lib/erx/qemu.rb`, `Qemu#run`: QEMU stopped by a signal from outside the run exits 0, so it is
+  checked for only when the transcript is incomplete. With `machine_end:` a signal after the transcript is whole reads as a
+  pass, and a stopped run raises a plain `Erx::Error`, which `OracleQemu.state_of` counts as an erXos crash instead of an
+  unknown result. Check `SIGNAL_STOP_LINE` whenever QEMU exited by itself, and raise a subclass that reports read `cancelled`.
 * [Low] stopgap, `ERX_ROOT_KIP_WINDOW` in `liberx/backend/fiasco/root_open.c`
   fits QEMU `virt` only; it moves to the platform layer with the Raspberry Pi 4.
   The root's load address already comes from the machine an image is built for
