@@ -9,18 +9,24 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../fixtures/generated_tree'
 
-# Judges the lane reader (liberx/erx_lane.c) through its host driver,
-# test/fixtures/lane_driver.c, which plays the producer and compares every
-# result with an independent model of the consumer's position. Bounds: the
-# exploration's 207 scenarios (records of 0 to 100 bytes, one to three of
-# them, three start positions, buffers of 0, 5, 16 and unbounded bytes, a
-# 64-byte area) under every interleaving of takes, armed takes,
-# publications and the producer's two-step wait; the cuts at every 16-byte
-# boundary of a record longer than the lane; the limits at every bound;
-# and a three-thread race under ThreadSanitizer.
+# Judges the lane's reader and writer (liberx/erx_lane.c) through their host
+# driver, test/fixtures/lane_driver.c, which plays the other party and
+# compares every result with an independent model of the party's position.
+# Bounds for the reader: the exploration's 207 scenarios (records of 0 to
+# 100 bytes, one to three of them, three start positions, buffers of 0, 5,
+# 16 and unbounded bytes, a 64-byte area) under every interleaving of takes,
+# armed takes, publications and the producer's two-step wait; the cuts at
+# every 16-byte boundary of a record longer than the lane; the limits at
+# every bound. For the writer: 1,728 scenarios (records of 0 to 12,000
+# bytes in three pieces, three start positions, reserves of 0, 1,000 and
+# 3,072 bytes, four buffer sizes, four schedules) with the real reader and
+# both wake handshakes; its limits at every bound. Both race under
+# ThreadSanitizer, the reader with the writer and a mutator, the writer with
+# a hostile consumer. The handshakes' fences are the litmus tests'
+# (test/litmus/).
 class LaneTest < Minitest::Test
   SEED = Integer(ENV.fetch('ERX_LANE_SEED', '20261103'))
-  READER = 'liberx/erx_lane.c'
+  LANE_SOURCE = 'liberx/erx_lane.c'
   # Every counter the exploration prints must be reached, or the model is
   # not exploring what it claims to.
   EXPLORE_COUNTERS = %w[scenarios states takes empty wraps partial header_only prod_waits prod_parks cons_parks
@@ -42,7 +48,27 @@ class LaneTest < Minitest::Test
                                     "\t*part = (erx_lane_part_t){ 0 };\n\tif (0)\n"],
     'a record of ERX_FRAME_MAX refused' => ['if (len > ERX_FRAME_MAX)', 'if (len >= ERX_FRAME_MAX)'],
     'a record past the last position accepted' => ["\t\treturn (ERX_LANE_RECORD_PAST_END);", "\t\treturn (ERX_LANE_SOUND);"],
-    'padding left unread' => ['reader->pos = lane_grain_down(reader->pos + LANE_GRAIN - 1);', '(void)0;']
+    'padding left unread' => ['reader->pos = lane_grain_down(reader->pos + LANE_GRAIN - 1);', '(void)0;'],
+    'rpos may run ahead of wpos' => ['if (rpos > pos)', 'if (rpos > pos + LANE_GRAIN)'],
+    'rpos may move back' => ['if (rpos < last)', 'if (rpos < last && 0)'],
+    'an unaligned rpos accepted' => ['if ((rpos & (LANE_GRAIN - 1)) != 0)', 'if (0 && (rpos & (LANE_GRAIN - 1)) != 0)'],
+    'the reserve ignored' => ['return (room > reserve ? room - reserve : 0);', 'return (room > reserve ? room : 0);'],
+    'need ignores the quarter' => ['wanted = lane_min(reserve + lane_min(rest, size / 4), size);',
+                                   'wanted = lane_min(reserve + rest, size);'],
+    'need from a stale wpos' => ['lane_need(writer->pos, writer->size,', 'lane_need(writer->pos + LANE_GRAIN, writer->size,'],
+    'an armed put waits after progress' => ['if (st != ERX_LANE_PUT_SHORT || (part.written == 0 && !part.opened))',
+                                            'if (1)'],
+    'the gather ignores the offset' => ['(const unsigned char *)piece->base + offset, chunk);',
+                                        '(const unsigned char *)piece->base, chunk);'],
+    'padding left unwritten' => ['lane_write(writer, writer->pos + copied, zeros, n - copied);', '(void)zeros;'],
+    'a refused writer writes again' => ["\t*put = (erx_lane_put_t){ 0 };\n\tif (writer->phase == ERX_LANE_REFUSED)\n",
+                                        "\t*put = (erx_lane_put_t){ 0 };\n\tif (0)\n"],
+    'another body continues a record' => ['if (total != writer->len || item->kind != writer->kind ||', 'if (0 ||'],
+    'a body of ERX_FRAME_MAX refused' => ['if (item->iov[i].len > ERX_FRAME_MAX - total ||',
+                                          'if (item->iov[i].len >= ERX_FRAME_MAX - total ||'],
+    'a put past the last position accepted' => ['} else if (__builtin_add_overflow(writer->pos,',
+                                                '} else if (0 && __builtin_add_overflow(writer->pos,'],
+    'a crossed wake not rung' => ['return (lane_crossed(published, writer->pos, wake));', 'return (false);']
   }.freeze
 
   def setup
@@ -60,7 +86,7 @@ class LaneTest < Minitest::Test
   end
 
   def driver
-    @driver ||= build_driver(File.join(@root, READER), name: 'lane', flags: @sanitizer_flags)
+    @driver ||= build_driver(File.join(@root, LANE_SOURCE), name: 'lane', flags: @sanitizer_flags)
   end
 
   def test_every_interleaving_agrees_with_the_model
@@ -81,7 +107,7 @@ class LaneTest < Minitest::Test
   def test_seeded_failures_are_caught
     MUTANTS.each do |name, (original, replacement)|
       mutant = build_driver(mutant_source(name, original, replacement), name: "mutant-#{slug(name)}", flags: [])
-      caught = %w[limits explore cuts].any? do |mode|
+      caught = %w[limits wlimits explore cuts writer].any? do |mode|
         run_mode(mutant, mode)
         false
       rescue Erx::Error
@@ -91,15 +117,39 @@ class LaneTest < Minitest::Test
     end
   end
 
-  # A producer and the reader race over one lane, then a third thread
-  # rewrites the producer's side while they run. Before the rewriting
+  WRITER_COUNTERS = %w[scenarios puts armed short empty header_only closes prod_parks rings_prod rings_cons
+                       cons_parks wraps reserve_held rearms].freeze
+
+  def test_the_writer_agrees_with_the_model
+    counts = counters(run_mode(driver, 'writer').fetch('writer'))
+    assert_equal WRITER_COUNTERS.sort, counts.keys.sort
+    WRITER_COUNTERS.each { |name| assert_operator counts.fetch(name), :>, 0, "writer never reached #{name}" }
+    assert_equal 1728, counts.fetch('scenarios')
+  end
+
+  def test_the_writer_at_its_limits
+    assert_equal({ 'cases' => 30 }, counters(run_mode(driver, 'wlimits').fetch('wlimits')))
+  end
+
+  # The writer puts while a hostile consumer publishes plausible positions,
+  # then garbage: every put writes or waits until the garbage, which the
+  # writer refuses once. ThreadSanitizer checks that no load of the writer
+  # from the consumer's page races a store.
+  def test_the_writer_against_a_hostile_consumer_under_thread_sanitizer
+    race = counters(run_mode(tsan_driver, 'wrace', SEED.to_s, '100000').fetch('wrace'))
+    assert_operator race.fetch('records'), :>, 0
+    assert_operator race.fetch('puts'), :>=, 100_000
+    assert_equal 1, race.fetch('malformed')
+  end
+
+  # The writer and the reader race over one lane, then, the writer stopped,
+  # a third thread rewrites the producer's side. Before the rewriting
   # every byte read is the byte written; after it every part still adds up
   # to the header it was read under, rpos only grows by whole grains, and
   # a refusal is the reader's last word. ThreadSanitizer checks that no
   # load of the reader races a store.
   def test_concurrent_producer_and_mutator_under_thread_sanitizer
-    tsan = build_driver(File.join(@root, READER), name: 'lane-tsan', flags: %w[-fsanitize=thread -fno-omit-frame-pointer])
-    race = counters(run_mode(tsan, 'race', SEED.to_s, '100000').fetch('race'))
+    race = counters(run_mode(tsan_driver, 'race', SEED.to_s, '100000').fetch('race'))
     assert_operator race.fetch('records'), :>, 0
     assert_operator race.fetch('takes'), :>=, 100_000
     # The mutation phase ran: the rewritten side was refused.
@@ -107,6 +157,11 @@ class LaneTest < Minitest::Test
   end
 
   private
+
+  def tsan_driver
+    @tsan_driver ||= build_driver(File.join(@root, LANE_SOURCE), name: 'lane-tsan',
+                                                           flags: %w[-fsanitize=thread -fno-omit-frame-pointer])
+  end
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 
@@ -122,8 +177,8 @@ class LaneTest < Minitest::Test
   end
 
   def mutant_source(name, original, replacement)
-    source = File.read(File.join(@root, READER))
-    assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place of the reader"
+    source = File.read(File.join(@root, LANE_SOURCE))
+    assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place of the lane"
     path = File.join(@directory, "mutant-#{slug(name)}.c")
     File.write(path, source.sub(original, replacement))
     path

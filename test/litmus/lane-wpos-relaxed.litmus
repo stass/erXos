@@ -1,0 +1,12 @@
+AArch64 lane-wpos-relaxed
+"the producer writes a record word (a) then stores wpos (b) with release; the consumer loads wpos with acquire, then the word; without its acquire, which must fail"
+{
+0:X1=a; 0:X3=b;
+1:X1=a; 1:X3=b;
+}
+ P0           | P1 ;
+ MOV W0,#1    | LDR W0,[X3] ;
+ STR W0,[X1]  | LDR W2,[X1] ;
+ MOV W2,#16   | ;
+ STLR W2,[X3] | ;
+exists (1:X0=16 /\ 1:X2=0)

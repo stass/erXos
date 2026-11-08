@@ -7,10 +7,10 @@ require_relative 'chokepoints_helper'
 class ChokepointsLaneTest < Minitest::Test
   include ChokepointsHelper
 
-  # The reader and the ABI's own outputs name the lane's layouts; a second
-  # reader anywhere else in erXos C, the stopgap kernel or ERTS's erXos
-  # layer is refused, while code that only drives the reader through its
-  # interface is not.
+  # The reader and writer and the ABI's own outputs name the lane's
+  # layouts; a second reader or writer anywhere else in erXos C, the
+  # stopgap kernel or ERTS's erXos layer is refused, while code that only
+  # drives the reader or the writer through its interface is not.
   def test_only_the_lane_reader_reaches_a_lanes_pages
     lane = [rule('lane-pages-reader')]
     allowed = {
@@ -19,9 +19,14 @@ class ChokepointsLaneTest < Minitest::Test
       'test/fixtures/lane_driver.c' => "erx_lane_rpage_rpos_load(rpage(), &rpos);\n",
       'liberx/erx_funnel.c' => "erx_lane_reader_t r;\nst = erx_lane_take(&r, buf, ERX_LANE_MAX, &part);\n" \
                                "if (part.kind != ERX_REC_FRAME || size < ERX_LANE_MIN) return;\n",
-      'otp/erts/emulator/beam/dist.c' => "erx_lane_take(&r, buf, max, &part);\n"
+      'otp/erts/emulator/beam/dist.c' => "erx_lane_take(&r, buf, max, &part);\n",
+      'otp/erts/emulator/sys/erxos/erl_lane_drv.c' => "erx_lane_writer_t w;\nerx_lane_item_t item;\n" \
+                                                     "erx_lane_iov_t iov;\nst = erx_lane_put_armed(&w, &item, &put);\n"
     }
-    assert_empty evaluate(lane, allowed, imported: ['otp/erts/emulator/beam/dist.c'])
+    assert_empty evaluate(lane, allowed, imported: ['otp/erts/emulator/beam/dist.c',
+                                                    'otp/erts/emulator/sys/erxos/erl_lane_drv.c'])
+    refute_empty evaluate(lane, { 'otp/erts/emulator/sys/erxos/erl_lane_drv.c' => "erx_lane_hdr_wpos_store(h, pos);\n" },
+                          imported: ['otp/erts/emulator/sys/erxos/erl_lane_drv.c'])
     refute_empty evaluate(lane, { 'otp/erts/emulator/beam/dist.c' => "struct erx_lane_hdr *h;\n" },
                           imported: ['otp/erts/emulator/beam/dist.c'])
     refute_empty evaluate(lane, { 'musl/src/thread/x.c' => "x = ERX_LANE_REC_SIZE;\n" }, imported: ['musl/src/thread/x.c'])

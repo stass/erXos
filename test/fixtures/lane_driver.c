@@ -4,10 +4,11 @@
  */
 
 /*
- * Host driver for the lane reader (liberx/erx_lane.c).  It plays the
- * producer and judges every result of the reader against an independent
- * model of the consumer's position, then prints what it reached; any
- * disagreement prints FAIL and exits 1.  Modes:
+ * Host driver for the lane's reader and writer (liberx/erx_lane.c).  It
+ * plays the producer for the reader and the consumer for the writer, and
+ * judges every result against an independent model of the party's
+ * position, then prints what it reached; any disagreement prints FAIL and
+ * exits 1.  Modes:
  *
  *   explore  every interleaving of a producer and the reader over a 64-byte
  *            area, records of 0 to 100 bytes, three start positions and four
@@ -20,9 +21,17 @@
  *            with a cut at every 16-byte boundary, read with three buffer
  *            sizes, against the record written whole;
  *   limits   every refusal and the positions and lengths at their bounds;
- *   race     a producer, the reader and (second phase, until the reader
- *            refuses) a mutator that rewrites the producer's side, on
- *            three threads, for TSan.
+ *   writer   the writer and the reader over one lane, records of 0 to
+ *            12000 bytes in three pieces, three start positions, three
+ *            reserves, four buffer sizes and four schedules, with both
+ *            wake handshakes; every put against the model of what it
+ *            writes, every byte, every need and every ring;
+ *   wlimits  every refusal of the writer and its bounds, and need's sums;
+ *   race     the writer, the reader and (second phase, the writer stopped,
+ *            until the reader refuses) a mutator that rewrites the
+ *            producer's side, on three threads, for TSan;
+ *   wrace    the writer against a consumer that publishes plausible
+ *            positions, then garbage until the writer refuses, for TSan.
  *
  * The explore mode shrinks the reader's area to 64 bytes after a normal
  * init, which init itself refuses: the reader's arithmetic depends on the
@@ -802,12 +811,518 @@ limits(void)
 	return (0);
 }
 
+/* ----------------------------------------------------------------- writer */
+
+/*
+ * The writer against an independent model.  A scenario puts records with
+ * the real writer and takes them with the real reader, one party's steps
+ * at a time in a fixed schedule, on one thread.  After every put the model
+ * says what it must have written from the rpos it read and the reserve:
+ * the header when it fits, then whole grains of body or the padded rest;
+ * the driver checks the window it wrote byte for byte, that nothing
+ * outside it changed, the need an armed put published, and every ring.  A
+ * party that is waiting steps only once the other rang it; a schedule in
+ * which both wait with records left is a lost wake.
+ */
+
+#define WRITER_MAX_BODY	12000
+
+static unsigned char writer_body[WRITER_MAX_BODY];
+
+typedef struct wcounts wcounts_t;
+struct wcounts {
+	unsigned long	 scenarios, puts, armed, short_puts, empty_puts;
+	unsigned long	 header_only, closes, prod_parks, rings_prod;
+	unsigned long	 rings_cons, cons_parks, wraps, reserve_held;
+	unsigned long	 rearms;
+};
+
+static wcounts_t wcounts;
+
+/* The body of record i, cut into three pieces at cut and twice cut. */
+static void
+writer_item(erx_lane_item_t *item, erx_lane_iov_t iov[3], uint64_t record,
+    uint32_t len, uint32_t cut, uint64_t reserve)
+{
+	uint32_t a = cut < len ? cut : len;
+	uint32_t b = 2 * cut < len ? 2 * cut : len;
+
+	for (uint32_t o = 0; o < len; o++)
+		writer_body[o] = body_byte(record, o);
+	iov[0] = (erx_lane_iov_t){ writer_body, a };
+	iov[1] = (erx_lane_iov_t){ writer_body + a, b - a };
+	iov[2] = (erx_lane_iov_t){ writer_body + b, len - b };
+	*item = (erx_lane_item_t){
+		.iov = iov,
+		.iovcnt = 3,
+		.zero = 0x4000 + record,
+		.reserve = reserve,
+		.kind = (uint32_t)record + 1
+	};
+}
+
+/* The byte the model expects at body offset o of record r's window. */
+static unsigned char
+writer_expect(uint64_t record, uint32_t len, uint64_t window)
+{
+	uint64_t zero = 0x4000 + record, kind = record + 1;
+
+	if (window < 4)
+		return ((unsigned char)(len >> (8 * window)));
+	if (window < 8)
+		return ((unsigned char)(kind >> (8 * (window - 4))));
+	if (window < 16)
+		return ((unsigned char)(zero >> (8 * (window - 8))));
+	if (window - 16 < len)
+		return (body_byte(record, window - 16));
+	return (0);
+}
+
+static unsigned char
+area_byte(uint64_t pos)
+{
+	return (peer_mem[ERX_LANE_SIDE_DATA + (pos & (LANE_SIZE - 1))]);
+}
+
+/*
+ * One put, judged.  rec_at is where the record's header sits; the window
+ * the put wrote must hold the model's bytes and nothing else may change.
+ */
+static erx_lane_put_status_t
+writer_step(erx_lane_writer_t *w, const erx_lane_item_t *item,
+    uint64_t record, uint64_t *rec_at, bool armed, bool *ring)
+{
+	static unsigned char before[LANE_SIZE];
+	erx_lane_put_status_t st;
+	erx_lane_put_t put;
+	uint64_t free, need, pos0, rpos, unread, want_n, wake, wpos;
+	uint64_t reserve = item->reserve, res = grain_up(reserve);
+	uint64_t left0 = w->body_left;
+	uint32_t len = 0;
+	bool open0 = w->phase == ERX_LANE_IN_BODY;
+
+	for (size_t i = 0; i < item->iovcnt; i++)
+		len += (uint32_t)item->iov[i].len;
+	memcpy(before, peer_mem + ERX_LANE_SIDE_DATA, LANE_SIZE);
+	erx_lane_rpage_rpos_load(rpage(), &rpos);
+	erx_lane_rpage_wake_load(rpage(), &wake);
+	pos0 = w->pos;
+	st = armed ? erx_lane_put_armed(w, item, &put) :
+	    erx_lane_put(w, item, &put);
+	wcounts.puts++;
+	CHECK(st == ERX_LANE_PUT_DONE || st == ERX_LANE_PUT_SHORT, "put status",
+	    st, w->fault);
+	erx_lane_hdr_wpos_load(header(), &wpos);
+	CHECK(wpos == w->pos && w->pos % 16 == 0 && w->pos >= pos0, "wpos",
+	    wpos, w->pos);
+	CHECK(w->pos - rpos <= LANE_SIZE, "unread past the area", w->pos, rpos);
+	if (w->pos > pos0 && reserve > 0) {
+		CHECK(w->pos - rpos <= LANE_SIZE - res, "reserve taken", w->pos,
+		    rpos);
+		wcounts.reserve_held++;
+	}
+
+	/* The model, for a plain put; an armed one only adds rounds of it. */
+	unread = pos0 - rpos;
+	free = LANE_SIZE - unread > res ? LANE_SIZE - unread - res : 0;
+	if (!armed) {
+		want_n = 0;
+		if (open0) {
+			want_n = grain_up(left0) < free ? grain_up(left0) : free;
+		} else if (free >= 16) {
+			want_n = 16 + (grain_up(len) < free - 16 ?
+			    grain_up(len) : free - 16);
+		}
+		CHECK(w->pos - pos0 == want_n, "put length", w->pos - pos0,
+		    want_n);
+	} else if (put.written > 0 || put.opened) {
+		wcounts.armed++;
+	}
+	CHECK(put.opened == (!open0 && w->pos > pos0), "opened", put.opened,
+	    open0);
+	CHECK((w->pos > pos0) == (put.opened || put.written > 0), "progress",
+	    w->pos - pos0, put.written);
+	CHECK(put.offset == (open0 ? len - left0 : 0), "offset", put.offset,
+	    len - left0);
+	CHECK(put.closed == (st == ERX_LANE_PUT_DONE), "closed", put.closed, st);
+	CHECK((w->phase == ERX_LANE_IN_BODY) == (!put.closed && (open0 ||
+	    put.opened)), "phase", w->phase, put.closed);
+	CHECK(put.offset + put.written <= len, "written", put.written, len);
+
+	/* The window holds the model's bytes; the rest of the area is as it was. */
+	for (uint64_t p = pos0; p < w->pos; p++)
+		before[p & (LANE_SIZE - 1)] = writer_expect(record, len,
+		    p - *rec_at);
+	if (memcmp(before, peer_mem + ERX_LANE_SIDE_DATA, LANE_SIZE) != 0)
+		for (uint64_t p = pos0; p < pos0 + LANE_SIZE; p++)
+			CHECK(area_byte(p) == before[p & (LANE_SIZE - 1)],
+			    "area byte", p, pos0);
+	if ((pos0 & (LANE_SIZE - 1)) > (w->pos & (LANE_SIZE - 1)) &&
+	    w->pos > pos0)
+		wcounts.wraps++;
+
+	/* Ring when the store crossed wake: wake was not moved meanwhile. */
+	CHECK(put.ring == (pos0 < wake && wake <= w->pos), "put ring", wake,
+	    w->pos);
+	if (put.opened && put.written == 0 && !put.closed)
+		wcounts.header_only++;
+	if (put.closed)
+		wcounts.closes++;
+	if (st == ERX_LANE_PUT_SHORT) {
+		wcounts.short_puts++;
+		if (w->pos == pos0)
+			wcounts.empty_puts++;
+	}
+	if (armed && st == ERX_LANE_PUT_SHORT) {
+		uint64_t rest, wanted;
+
+		erx_lane_hdr_need_load(header(), &need);
+		rest = w->phase == ERX_LANE_IN_BODY ? grain_up(w->body_left) :
+		    16 + grain_up(len);
+		/*
+		 * At need the room past the reserve first holds what the put
+		 * waits for: the rest, a quarter, or all past the reserve.
+		 */
+		wanted = rest < LANE_SIZE / 4 ? rest : LANE_SIZE / 4;
+		if (wanted > LANE_SIZE - res)
+			wanted = LANE_SIZE - res;
+		CHECK(need <= w->pos && LANE_SIZE - (w->pos - need) >= res +
+		    wanted, "need gives too little room", need, w->pos);
+		CHECK(need < 16 || LANE_SIZE - (w->pos - need) - 16 < res +
+		    wanted, "need waits for too much room", need, w->pos);
+		/* A short armed put is waiting: the room is not there yet. */
+		CHECK(w->rpos < need, "armed put not waiting", w->rpos, need);
+		if (w->pos > pos0 && (put.written > 0 || put.opened))
+			wcounts.rearms++;
+	}
+	if (put.closed)
+		*rec_at = w->pos;
+	*ring = put.ring;
+	return (st);
+}
+
+static void
+writer_scenario(const uint32_t *lens, unsigned n, uint64_t base,
+    uint64_t reserve, size_t max, uint32_t cut, unsigned sched)
+{
+	static unsigned char buf[WRITER_MAX_BODY];
+	erx_lane_reader_t reader;
+	erx_lane_writer_t w;
+	erx_lane_iov_t iov[3];
+	erx_lane_item_t item;
+	erx_lane_part_t part;
+	erx_lane_status_t st;
+	erx_lane_put_status_t pst;
+	uint64_t rec_at = base, seen = 0;
+	unsigned put_rec = 0, take_rec = 0;
+	bool cons_parked = false, prod_parked = false, armed_next = false;
+	unsigned prod_steps = 1 + sched % 2, cons_steps = 1 + sched / 2;
+
+	place(&reader, LANE_SIZE, base);
+	CHECK(erx_lane_writer_init(&w, peer_mem, own_mem, LANE_SIZE), "winit",
+	    0, 0);
+	w.pos = w.rpos = base;
+	wcounts.scenarios++;
+	while (take_rec < n) {
+		bool moved = false, ring;
+
+		for (unsigned k = 0; k < prod_steps && put_rec < n &&
+		    !prod_parked; k++) {
+			writer_item(&item, iov, put_rec, lens[put_rec], cut,
+			    reserve);
+			pst = writer_step(&w, &item, put_rec, &rec_at, armed_next,
+			    &ring);
+			moved = true;
+			if (ring) {
+				CHECK(cons_parked, "rang an awake consumer",
+				    w.pos, reader.pos);
+				cons_parked = false;
+				wcounts.rings_cons++;
+			}
+			if (armed_next && pst == ERX_LANE_PUT_SHORT) {
+				prod_parked = true;
+				wcounts.prod_parks++;
+			}
+			/* A plain put that falls short is followed by an armed one;
+			 * an armed put that falls short parks the producer. */
+			armed_next = pst == ERX_LANE_PUT_SHORT && !armed_next;
+			if (pst == ERX_LANE_PUT_DONE) {
+				put_rec++;
+				armed_next = false;
+			}
+		}
+		for (unsigned k = 0; k < cons_steps && take_rec < n &&
+		    !cons_parked; k++) {
+			bool armed = k + 1 == cons_steps;
+
+			st = armed ? erx_lane_take_armed(&reader, buf, max, &part) :
+			    erx_lane_take(&reader, buf, max, &part);
+			moved = true;
+			CHECK(st == ERX_LANE_TOOK || st == ERX_LANE_EMPTY,
+			    "take status", st, reader.fault);
+			/* An empty plain take goes on to the armed one, which parks. */
+			if (st == ERX_LANE_EMPTY && !armed)
+				continue;
+			if (st == ERX_LANE_EMPTY) {
+				cons_parked = true;
+				wcounts.cons_parks++;
+				break;
+			}
+			if (part.ring) {
+				wcounts.rings_prod++;
+				prod_parked = false;
+			}
+			if (part.opened)
+				CHECK(part.len == lens[take_rec] &&
+				    part.kind == take_rec + 1 &&
+				    part.zero == 0x4000 + take_rec, "header",
+				    part.len, take_rec);
+			for (size_t b = 0; b < part.copied; b++)
+				CHECK(buf[b] == body_byte(take_rec,
+				    part.offset + b), "trip byte", take_rec,
+				    part.offset + b);
+			CHECK(part.offset == seen, "trip offset", part.offset,
+			    seen);
+			seen += part.copied;
+			if (part.closed) {
+				CHECK(seen == lens[take_rec], "trip len", seen,
+				    take_rec);
+				seen = 0;
+				take_rec++;
+			}
+		}
+		CHECK(moved || take_rec == n, "lost wake", put_rec, take_rec);
+	}
+	CHECK(w.phase == ERX_LANE_BETWEEN && reader.phase == ERX_LANE_BETWEEN,
+	    "ends between records", w.phase, reader.phase);
+}
+
+static int
+writer_trips(void)
+{
+	static const uint32_t set0[] = { 0 }, set1[] = { 1, 15, 16, 17 };
+	static const uint32_t set2[] = { 100, 0, 33 }, set3[] = { 4096 };
+	static const uint32_t set4[] = { 5000, 7 }, set5[] = { 12000 };
+	static const struct { const uint32_t *lens; unsigned n; } sets[] = {
+		{ set0, 1 }, { set1, 4 }, { set2, 3 }, { set3, 1 }, { set4, 2 },
+		{ set5, 1 }
+	};
+	static const uint64_t reserves[] = { 0, 1000, 3072 };
+	static const size_t wmaxes[] = { 1, 5, 16, BIG };
+	static const uint32_t cuts_at[] = { 0, 7 };
+	const uint64_t bases[] = { 0, 3 * LANE_SIZE + 2032,
+	    (UINT64_MAX - (UINT64_C(1) << 20)) & ~UINT64_C(15) };
+
+	for (size_t s = 0; s < sizeof(sets) / sizeof(sets[0]); s++)
+	for (size_t b = 0; b < sizeof(bases) / sizeof(bases[0]); b++)
+	for (size_t r = 0; r < sizeof(reserves) / sizeof(reserves[0]); r++)
+	for (size_t m = 0; m < sizeof(wmaxes) / sizeof(wmaxes[0]); m++)
+	for (size_t c = 0; c < sizeof(cuts_at) / sizeof(cuts_at[0]); c++)
+	for (unsigned sched = 0; sched < 4; sched++)
+		writer_scenario(sets[s].lens, sets[s].n, bases[b], reserves[r],
+		    wmaxes[m], cuts_at[c], sched);
+	printf("writer: scenarios=%lu puts=%lu armed=%lu short=%lu empty=%lu "
+	    "header_only=%lu closes=%lu prod_parks=%lu rings_prod=%lu "
+	    "rings_cons=%lu cons_parks=%lu wraps=%lu reserve_held=%lu "
+	    "rearms=%lu\n", wcounts.scenarios, wcounts.puts, wcounts.armed,
+	    wcounts.short_puts, wcounts.empty_puts, wcounts.header_only,
+	    wcounts.closes, wcounts.prod_parks, wcounts.rings_prod,
+	    wcounts.rings_cons, wcounts.cons_parks, wcounts.wraps,
+	    wcounts.reserve_held, wcounts.rearms);
+	return (0);
+}
+
+/* ---------------------------------------------------------------- wlimits */
+
+static unsigned char wl_body[2 * LANE_SIZE];
+
+/* A writer over an empty lane at base, with rpos published as base. */
+static void
+wplace(erx_lane_writer_t *w, uint64_t base)
+{
+	memset(peer_mem, 0, sizeof(peer_mem));
+	memset(own_mem, 0, sizeof(own_mem));
+	CHECK(erx_lane_writer_init(w, peer_mem, own_mem, LANE_SIZE), "winit",
+	    0, 0);
+	w->pos = w->rpos = base;
+	erx_lane_hdr_wpos_store(header(), base);
+	erx_lane_rpage_rpos_store(rpage(), base);
+}
+
+static erx_lane_put_status_t
+wput(erx_lane_writer_t *w, size_t len, uint64_t reserve, bool armed,
+    erx_lane_put_t *put)
+{
+	erx_lane_iov_t iov = { wl_body, len };
+	erx_lane_item_t item = { .iov = &iov, .iovcnt = 1, .reserve = reserve };
+
+	return (armed ? erx_lane_put_armed(w, &item, put) :
+	    erx_lane_put(w, &item, put));
+}
+
+/* An rpos that fails a check refuses the lane, writing nothing, for good. */
+static void
+expect_wfault(erx_lane_writer_t *w, uint64_t rpos, erx_lane_fault_t fault)
+{
+	erx_lane_put_t put;
+	uint64_t pos = w->pos, wpos;
+
+	erx_lane_rpage_rpos_store(rpage(), rpos);
+	CHECK(wput(w, 16, 0, false, &put) == ERX_LANE_PUT_MALFORMED &&
+	    w->fault == fault && w->phase == ERX_LANE_REFUSED, "wfault",
+	    w->fault, fault);
+	erx_lane_rpage_rpos_store(rpage(), pos);
+	CHECK(wput(w, 16, 0, false, &put) == ERX_LANE_PUT_MALFORMED &&
+	    wput(w, 16, 0, true, &put) == ERX_LANE_PUT_MALFORMED,
+	    "refusal is final", w->fault, 0);
+	erx_lane_hdr_wpos_load(header(), &wpos);
+	CHECK(wpos == pos && w->pos == pos && put.written == 0, "refused wrote",
+	    wpos, pos);
+}
+
+static int
+wlimits(void)
+{
+	static _Alignas(PAGE) unsigned char spare[PAGE];
+	erx_lane_writer_t w;
+	erx_lane_put_t put;
+	erx_lane_iov_t iov[2];
+	erx_lane_item_t item = { .iov = iov, .iovcnt = 2 };
+	uint64_t need, top, wpos;
+	unsigned long cases = 0;
+
+	/* init refuses what erx_lane_reader_init refuses. */
+	CHECK(!erx_lane_writer_init(NULL, peer_mem, own_mem, LANE_SIZE) &&
+	    !erx_lane_writer_init(&w, NULL, own_mem, LANE_SIZE) &&
+	    !erx_lane_writer_init(&w, peer_mem, NULL, LANE_SIZE) &&
+	    !erx_lane_writer_init(&w, peer_mem + 8, own_mem, LANE_SIZE) &&
+	    !erx_lane_writer_init(&w, peer_mem, spare + 16, LANE_SIZE) &&
+	    !erx_lane_writer_init(&w, peer_mem, own_mem, LANE_SIZE + 16) &&
+	    !erx_lane_writer_init(&w, peer_mem, own_mem, ERX_LANE_MIN / 2) &&
+	    !erx_lane_writer_init(&w, peer_mem, own_mem, 2 * ERX_LANE_MAX),
+	    "winit refusals", 0, 0);
+	cases += 8;
+
+	/* Each rpos check, at its bound. */
+	wplace(&w, 4096);
+	CHECK(wput(&w, 48, 0, false, &put) == ERX_LANE_PUT_DONE, "w64", 0, 0);
+	erx_lane_rpage_rpos_store(rpage(), 4096 + 64);
+	CHECK(wput(&w, 0, 0, false, &put) == ERX_LANE_PUT_DONE &&
+	    w.rpos == 4096 + 64, "rpos == wpos", w.rpos, 0);
+	cases++;
+	expect_wfault(&w, 4096 + 81, ERX_LANE_RPOS_UNALIGNED);
+	wplace(&w, 4096);
+	CHECK(wput(&w, 48, 0, false, &put) == ERX_LANE_PUT_DONE, "w64", 0, 0);
+	expect_wfault(&w, 4096 + 80, ERX_LANE_RPOS_AHEAD);
+	wplace(&w, 4096);
+	erx_lane_rpage_rpos_store(rpage(), 4096 + 16);
+	expect_wfault(&w, 4096 + 16, ERX_LANE_RPOS_AHEAD);
+	wplace(&w, 4096);
+	CHECK(wput(&w, 48, 0, false, &put) == ERX_LANE_PUT_DONE, "w64", 0, 0);
+	erx_lane_rpage_rpos_store(rpage(), 4096 + 32);
+	CHECK(wput(&w, 0, 0, false, &put) == ERX_LANE_PUT_DONE, "w32", 0, 0);
+	expect_wfault(&w, 4096 + 16, ERX_LANE_RPOS_BEHIND);
+	cases += 4;
+
+	/* Items the writer refuses, leaving everything as it was. */
+	wplace(&w, 0);
+	iov[0] = (erx_lane_iov_t){ wl_body, ERX_FRAME_MAX };
+	iov[1] = (erx_lane_iov_t){ wl_body, 1 };
+	CHECK(erx_lane_put(&w, &item, &put) == ERX_LANE_PUT_REFUSED &&
+	    w.pos == 0 && w.phase == ERX_LANE_BETWEEN, "past FRAME_MAX", 0, 0);
+	iov[0] = (erx_lane_iov_t){ wl_body, SIZE_MAX };
+	CHECK(erx_lane_put(&w, &item, &put) == ERX_LANE_PUT_REFUSED,
+	    "pieces that overflow", 0, 0);
+	iov[0] = (erx_lane_iov_t){ NULL, 1 };
+	CHECK(erx_lane_put(&w, &item, &put) == ERX_LANE_PUT_REFUSED,
+	    "a piece without a base", 0, 0);
+	item.iov = NULL;
+	CHECK(erx_lane_put(&w, &item, &put) == ERX_LANE_PUT_REFUSED,
+	    "pieces without an array", 0, 0);
+	CHECK(wput(&w, 0, LANE_SIZE - 15, false, &put) == ERX_LANE_PUT_REFUSED &&
+	    wput(&w, 0, LANE_SIZE - 15, true, &put) == ERX_LANE_PUT_REFUSED,
+	    "a reserve that leaves no header", 0, 0);
+	erx_lane_hdr_wpos_load(header(), &wpos);
+	erx_lane_hdr_need_load(header(), &need);
+	CHECK(wpos == 0 && need == 0 && w.pos == 0, "refusals wrote", wpos,
+	    need);
+	cases += 5;
+
+	/* A piece of length 0 needs no base; a reserve of size - 16 holds a header. */
+	item.iov = iov;
+	iov[0] = (erx_lane_iov_t){ NULL, 0 };
+	iov[1] = (erx_lane_iov_t){ wl_body, 0 };
+	CHECK(erx_lane_put(&w, &item, &put) == ERX_LANE_PUT_DONE &&
+	    w.pos == 16, "empty pieces", w.pos, 0);
+	CHECK(wput(&w, 0, LANE_SIZE - 32, false, &put) == ERX_LANE_PUT_DONE &&
+	    w.pos == 32, "reserve of size - 32", w.pos, 0);
+	CHECK(wput(&w, 0, LANE_SIZE - 16, false, &put) == ERX_LANE_PUT_SHORT &&
+	    w.pos == 32, "reserve of size - 16, 32 unread", w.pos, 0);
+	erx_lane_rpage_rpos_store(rpage(), 32);
+	CHECK(wput(&w, 5, LANE_SIZE - 16, false, &put) ==
+	    ERX_LANE_PUT_SHORT && put.opened && put.written == 0 &&
+	    w.pos == 48, "reserve of size - 16 holds a header", w.pos, 0);
+	cases += 4;
+
+	/* An open record takes only its own body, up to ERX_FRAME_MAX. */
+	wplace(&w, 0);
+	iov[0] = (erx_lane_iov_t){ wl_body, ERX_FRAME_MAX - 1 };
+	iov[1] = (erx_lane_iov_t){ wl_body, 1 };
+	CHECK(erx_lane_put(&w, &item, &put) == ERX_LANE_PUT_SHORT &&
+	    put.opened && put.written == LANE_SIZE - 16, "ERX_FRAME_MAX opens",
+	    put.written, 0);
+	CHECK(wput(&w, 100, 0, false, &put) == ERX_LANE_PUT_REFUSED &&
+	    w.phase == ERX_LANE_IN_BODY, "another body", w.phase, 0);
+	cases += 2;
+
+	/* No record ends past the last position; a header alone may. */
+	top = UINT64_MAX - 31;
+	wplace(&w, top);
+	CHECK(wput(&w, 1, 0, false, &put) == ERX_LANE_PUT_REFUSED &&
+	    wput(&w, 0, 0, false, &put) == ERX_LANE_PUT_DONE &&
+	    w.pos == top + 16, "the last position", w.pos, top);
+	cases++;
+
+	/* need: the rest when less than a quarter, else a quarter; capped. */
+	wplace(&w, 8192);
+	CHECK(wput(&w, LANE_SIZE - 16, 0, false, &put) == ERX_LANE_PUT_DONE,
+	    "fill", 0, 0);
+	CHECK(wput(&w, 100, 0, true, &put) == ERX_LANE_PUT_SHORT &&
+	    put.written == 0 && !put.opened, "armed full", 0, 0);
+	erx_lane_hdr_need_load(header(), &need);
+	CHECK(need == 8192 + 16 + 112, "need of a short record", need, 0);
+	CHECK(wput(&w, 3000, 0, true, &put) == ERX_LANE_PUT_SHORT, "armed", 0, 0);
+	erx_lane_hdr_need_load(header(), &need);
+	CHECK(need == 8192 + LANE_SIZE / 4, "need of a quarter", need, 0);
+	CHECK(wput(&w, 3000, LANE_SIZE - 16, true, &put) == ERX_LANE_PUT_SHORT,
+	    "armed", 0, 0);
+	erx_lane_hdr_need_load(header(), &need);
+	CHECK(need == 8192 + LANE_SIZE, "need capped at the area", need, 0);
+	CHECK(wput(&w, 100, 1000, true, &put) == ERX_LANE_PUT_SHORT, "armed",
+	    0, 0);
+	erx_lane_hdr_need_load(header(), &need);
+	CHECK(need == 8192 + 1008 + 128, "need past the reserve", need, 0);
+	cases += 4;
+
+	/* An armed put with room for part re-arms from where it stopped. */
+	erx_lane_rpage_rpos_store(rpage(), 8192 + 64);
+	CHECK(wput(&w, 200, 0, true, &put) == ERX_LANE_PUT_SHORT &&
+	    put.opened && put.written == 48, "armed part", put.written, 0);
+	erx_lane_hdr_need_load(header(), &need);
+	CHECK(need == 8192 + 64 + 160, "need re-armed", need, 0);
+	cases++;
+
+	printf("wlimits: cases=%lu\n", cases);
+	return (0);
+}
+
 /* ------------------------------------------------------------------- race */
 
 /* The second phase's bound, in multiples of the first phase's takes. */
 #define RACE_MUTATION_FACTOR	64UL
 
 static atomic_bool race_stop;
+static atomic_bool race_writer_stop;
 static atomic_bool race_mutate;
 static uint64_t race_seed;
 
@@ -823,39 +1338,33 @@ xorshift(uint64_t *state)
 static void *
 race_producer(void *arg ERX_UNUSED)
 {
-	uint64_t len, rpos, state = race_seed, wpos = 0, word;
-	unsigned char grain[16];
-	uint64_t record = 0;
+	static unsigned char body[300];
+	erx_lane_writer_t w;
+	erx_lane_iov_t iov[2];
+	erx_lane_item_t item = { .iov = iov, .iovcnt = 2, .kind = 1 };
+	erx_lane_put_t put;
+	erx_lane_put_status_t st;
+	uint64_t len, record = 0, state = race_seed;
 
-	while (!atomic_load(&race_stop)) {
+	CHECK(erx_lane_writer_init(&w, peer_mem, own_mem, LANE_SIZE),
+	    "race winit", 0, 0);
+	while (!atomic_load(&race_writer_stop)) {
 		len = xorshift(&state) % 300;
-		for (uint64_t at = 0; at < 16 + grain_up(len); at += 16) {
-			memset(grain, 0, sizeof(grain));
-			if (at == 0) {
-				memcpy(grain, &(uint32_t){ (uint32_t)len }, 4);
-				grain[4] = 1;
-			} else {
-				for (int i = 0; i < 16; i++)
-					if (at - 16 + i < len)
-						grain[i] = body_byte(record,
-						    at - 16 + i);
-			}
-			for (;;) {
-				erx_lane_rpage_rpos_load(rpage(), &rpos);
-				if (wpos + 16 - rpos <= LANE_SIZE)
-					break;
-				if (atomic_load(&race_stop))
-					return (NULL);
+		for (uint64_t o = 0; o < len; o++)
+			body[o] = body_byte(record, o);
+		iov[0] = (erx_lane_iov_t){ body, len / 3 };
+		iov[1] = (erx_lane_iov_t){ body + len / 3, len - len / 3 };
+		do {
+			/* No bell here: a waiting writer yields and looks again. */
+			st = erx_lane_put(&w, &item, &put);
+			if (st == ERX_LANE_PUT_SHORT)
+				st = erx_lane_put_armed(&w, &item, &put);
+			if (st == ERX_LANE_PUT_SHORT)
 				sched_yield();
-			}
-			memcpy(&word, grain, 8);
-			store_u64(&words()[(wpos & (LANE_SIZE - 1)) / 8], word);
-			memcpy(&word, grain + 8, 8);
-			store_u64(&words()[((wpos + 8) & (LANE_SIZE - 1)) / 8],
-			    word);
-			wpos += 16;
-			erx_lane_hdr_wpos_store(header(), wpos);
-		}
+			if (atomic_load(&race_writer_stop))
+				return (NULL);
+		} while (st == ERX_LANE_PUT_SHORT);
+		CHECK(st == ERX_LANE_PUT_DONE, "race put", st, w.fault);
 		record++;
 	}
 	return (NULL);
@@ -908,8 +1417,12 @@ race(uint64_t seed, unsigned long takes)
 	for (unsigned long i = 0; i < takes * (RACE_MUTATION_FACTOR + 1); i++) {
 		size_t max = 1 + xorshift(&state) % sizeof(buf);
 
-		if (i == takes)
+		if (i == takes) {
+			/* The mutator stands for a hostile producer: the writer stops. */
+			atomic_store(&race_writer_stop, true);
+			pthread_join(producer, NULL);
 			atomic_store(&race_mutate, true);
+		}
 		st = erx_lane_take(&reader, buf, max, &part);
 		phase_takes++;
 		CHECK(st == ERX_LANE_TOOK || st == ERX_LANE_EMPTY ||
@@ -944,11 +1457,97 @@ race(uint64_t seed, unsigned long takes)
 		}
 	}
 	atomic_store(&race_stop, true);
-	pthread_join(producer, NULL);
+	atomic_store(&race_writer_stop, true);
+	if (!atomic_load(&race_mutate))
+		pthread_join(producer, NULL);
 	pthread_join(mutator, NULL);
 	CHECK(records > 0, "no record crossed the race", records, 0);
 	printf("race: takes=%lu records=%lu malformed=%lu\n", phase_takes,
 	    records, malformed);
+	return (0);
+}
+
+/* ------------------------------------------------------------------ wrace */
+
+static atomic_bool wrace_garbage;
+
+/*
+ * A hostile consumer: it publishes plausible positions, rpos forward
+ * within what was published and any wake, then garbage once told to.
+ */
+static void *
+wrace_consumer(void *arg ERX_UNUSED)
+{
+	uint64_t rpos = 0, state = race_seed * 3 + 1, wpos;
+
+	while (!atomic_load(&race_stop)) {
+		if (atomic_load(&wrace_garbage)) {
+			rpos = xorshift(&state);
+		} else {
+			erx_lane_hdr_wpos_load(header(), &wpos);
+			if (wpos > rpos)
+				rpos += xorshift(&state) %
+				    ((wpos - rpos) / 16 + 1) * 16;
+		}
+		erx_lane_rpage_rpos_store(rpage(), rpos);
+		erx_lane_rpage_wake_store(rpage(), xorshift(&state));
+	}
+	return (NULL);
+}
+
+/*
+ * The writer against the hostile consumer, on two threads, for TSan:
+ * while the consumer is plausible every put writes or waits, and once it
+ * publishes garbage the writer refuses the lane, with wpos never past the
+ * room a sound rpos gave.
+ */
+static int
+wrace(uint64_t seed, unsigned long puts)
+{
+	erx_lane_reader_t reader;
+	erx_lane_writer_t w;
+	erx_lane_iov_t iov;
+	erx_lane_item_t item = { .iov = &iov, .iovcnt = 1, .kind = 1 };
+	erx_lane_put_t put;
+	erx_lane_put_status_t st = ERX_LANE_PUT_DONE;
+	pthread_t consumer;
+	uint64_t state = seed | 1, wpos;
+	unsigned long malformed = 0, records = 0, done = 0;
+
+	CHECK(puts <= ULONG_MAX / (RACE_MUTATION_FACTOR + 1), "puts", puts, 0);
+	race_seed = seed | 1;
+	place(&reader, LANE_SIZE, 0);
+	CHECK(erx_lane_writer_init(&w, peer_mem, own_mem, LANE_SIZE),
+	    "wrace winit", 0, 0);
+	CHECK(pthread_create(&consumer, NULL, wrace_consumer, NULL) == 0,
+	    "thread", 0, 0);
+	for (unsigned long i = 0; i < puts * (RACE_MUTATION_FACTOR + 1); i++) {
+		if (i == puts)
+			atomic_store(&wrace_garbage, true);
+		if (st != ERX_LANE_PUT_SHORT)
+			iov = (erx_lane_iov_t){ wl_body,
+			    xorshift(&state) % sizeof(wl_body) };
+		st = (i & 1) != 0 ? erx_lane_put_armed(&w, &item, &put) :
+		    erx_lane_put(&w, &item, &put);
+		done++;
+		erx_lane_hdr_wpos_load(header(), &wpos);
+		CHECK(wpos == w.pos && w.pos - w.rpos <= LANE_SIZE, "wrace wpos",
+		    wpos, w.rpos);
+		if (st == ERX_LANE_PUT_MALFORMED) {
+			CHECK(i >= puts, "refused a plausible rpos", w.fault, i);
+			malformed++;
+			break;
+		}
+		CHECK(st == ERX_LANE_PUT_DONE || st == ERX_LANE_PUT_SHORT,
+		    "wrace status", st, i);
+		if (st == ERX_LANE_PUT_DONE)
+			records++;
+	}
+	atomic_store(&race_stop, true);
+	pthread_join(consumer, NULL);
+	CHECK(records > 0, "no record crossed the race", records, 0);
+	printf("wrace: puts=%lu records=%lu malformed=%lu\n", done, records,
+	    malformed);
 	return (0);
 }
 
@@ -961,9 +1560,17 @@ main(int argc, char **argv)
 		return (cuts());
 	if (argc == 2 && strcmp(argv[1], "limits") == 0)
 		return (limits());
+	if (argc == 2 && strcmp(argv[1], "writer") == 0)
+		return (writer_trips());
+	if (argc == 2 && strcmp(argv[1], "wlimits") == 0)
+		return (wlimits());
 	if (argc == 4 && strcmp(argv[1], "race") == 0)
 		return (race(strtoull(argv[2], NULL, 10),
 		    strtoul(argv[3], NULL, 10)));
-	fprintf(stderr, "usage: lane_driver explore|cuts|limits|race SEED N\n");
+	if (argc == 4 && strcmp(argv[1], "wrace") == 0)
+		return (wrace(strtoull(argv[2], NULL, 10),
+		    strtoul(argv[3], NULL, 10)));
+	fprintf(stderr, "usage: lane_driver explore|cuts|limits|writer|wlimits|"
+	    "race SEED N|wrace SEED N\n");
 	return (2);
 }

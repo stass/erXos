@@ -1272,13 +1272,30 @@ it; git history is the record of completed work.
 * [Low] runtime, `otp/lib/tools`, `otp/erts/etc`, `otp/erts/start_scripts`: not buildable from the imported
   tree (`public_key.hrl`, `ei.h`, `lib/os_mon/vsn.mk`). The runtime does not need them; `lib/tools` is to ship
   or leave the import when the release's application list is settled.
-* [Low] Lane reader, `liberx/erx_lane.c`: the record state machine
-  (open, copy, close) is inline in `erx_lane_take` rather than a pure
-  step the effect layer applies; `phase` and `fault` are a pair that must
-  agree; `erx_lane_reader_init` fixes the connection side layout, so a
-  pipe's or channel's reader and a read end that resumes at a position
+* [Low] Lane reader and writer, `liberx/erx_lane.c`: each record state
+  machine (open, copy, close) is inline in `erx_lane_take` or
+  `erx_lane_put` rather than a pure step the effect layer applies;
+  `phase` and `fault` are a pair that must agree; `erx_lane_reader_init`
+  and `erx_lane_writer_init` fix the connection side layout, so a pipe's
+  or channel's reader or writer and an end that resumes at a position
   need separate pointers and a start position. Settle with the pipe
   server and the channel client.
+* [Medium] Weak-memory litmus tests, `test/litmus/`, `tools/lib/erx/litmus.rb`:
+  herd7 is not installed on the development host, so `make check-litmus`
+  has never run against herd7 itself. The ten tests, the `-model` names
+  (`aarch64.cat`, `rc11.cat`), the parse of `herd7 -version` and the pin
+  `HERD_VERSION` (7.58) are unverified until it is: install herdtools7
+  with opam, confirm or correct the pin, and run the gate once.
+* [Medium] Lane writer, `liberx/erx_lane.c` `lane_write_header`: the record
+  header is packed by hand from the generated offsets, because the ABI
+  generator emits only `_decode` for `wire_le` layouts; a field whose width
+  changed in `abi/erx_abi.txt` would be written at its old width. Emit an
+  `_encode` for `wire_le` layouts and call `erx_lane_rec_encode`.
+* [Low] Lane layouts, `abi/erx_abi.txt` `erx_lane_hdr.need` and
+  `erx_lane_rpage.wake`: the ABI loads them with acquire order, where
+  design-domains.md "Publishing is a release" says relaxed; the litmus tests
+  model the design's relaxed loads. Make the ABI relaxed, or the design
+  acquire with the litmus twins' comments saying so.
 * [Low] Lane tests, `test/fixtures/lane_driver.c`: the armed take and the
   producer's publication are each one step of the exploration, and the TSan
   race polls instead of parking, so the handshakes' orderings rest on the
@@ -2764,10 +2781,12 @@ to the corpus and follow rc
 * [Medium] Lane reader chokepoint, `lane-pages-reader` in
   `tools/lib/erx/chokepoint_rules/`: a text rule over the names of a
   lane's layouts, so untyped pointer arithmetic on a side's address (the
-  public `peer_side` and `own_side` of `erx_lane_reader_t`, or the mapping
-  a runtime made) escapes it, as does a name a macro pastes together
-  (`erx_lane_ ## hdr`), and inside `liberx/erx_lane.c` that only
-  `erx_lane_take`'s path loads from the producer's side is held by review.
+  public `peer_side` and `own_side` of `erx_lane_reader_t` and
+  `erx_lane_writer_t`, or the mapping a runtime made) escapes it, as does a
+  name a macro pastes together (`erx_lane_ ## hdr`), and inside
+  `liberx/erx_lane.c` that only `erx_lane_take`'s path loads from the
+  producer's side and only `erx_lane_put`'s from the consumer's is held by
+  review.
   It reads a listed set of inherited trees (OTP, musl, the stopgap
   kernel), so a new in-tree import that runs in a domain, such as toybox,
   is outside it until listed; read every listed file less named

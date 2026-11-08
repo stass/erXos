@@ -2893,9 +2893,12 @@ for the same reason.
   of `wpos` against the consumer's acquire load of `wpos` then its loads of
   the record, and the consumer's loads of a record then its release store
   of `rpos` against the producer's acquire load of `rpos` then its writes
-  over that room, checked under the C11 model as well, each together with
-  the same protocol with its acquire load made relaxed, which must fail
-  under the C11 model by showing a byte that is stale or overwritten. A
+  over that room, each together with the same protocol with its acquire
+  load made relaxed, which must fail by showing a byte that is stale or
+  overwritten. The first is checked under the C11 model (RC11) as well;
+  the second's relaxed form is load buffering, which RC11 forbids for
+  every access order, so it is checked under each architecture's model
+  alone. `make check-litmus` runs them (`test/litmus/`). A
   host test under
   ThreadSanitizer runs a producer and a consumer over one lane while a third
   thread rewrites the producer's pages, and checks that the consumer's

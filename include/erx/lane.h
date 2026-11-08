@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 /*
- * The consumer's side of a lane: the one reader of a lane's ring.
+ * Both sides of a lane: its one reader and its one writer.
  *
  * A lane carries records from a producer to a consumer through two memory
  * objects.  The producer's side holds the ring header (its published write
@@ -21,17 +21,26 @@
  * waits for, wake); the producer maps it read-only.  Every record is a
  * 16-byte header (len, kind, zero) followed by len body bytes padded to 16.
  *
- * The producer is untrusted and writes its side concurrently.  The reader
- * therefore loads every field of the producer's side once per decision,
- * into private memory, with atomic loads, and validates the copy before
- * using it.  It never reads back the reader page: its own position lives
- * in the reader record below, and the reader page only receives stores.
- * The first check a lane fails refuses the lane for good.
+ * Each party is untrusted by the other and writes its own side
+ * concurrently.  So each loads every field of the other's side once per
+ * decision, into private memory, with atomic loads, and validates the copy
+ * before using it.  Neither reads back its own side: its own position
+ * lives in its private record below, and its own side only receives
+ * stores.  The first check a lane fails refuses the lane for good.
  *
- * A record is read as it is published: erx_lane_take returns the header
- * and as much of the body as is published and fits the caller's buffer,
- * and releases the room behind what it copied at once, so a record may be
- * longer than the lane itself.
+ * A record is read as it is published, and written as room returns:
+ * erx_lane_put writes the header and as much of the body as fits, and the
+ * rest on later calls; erx_lane_take returns the header and as much of the
+ * body as is published and fits the caller's buffer, and releases the room
+ * behind what it copied at once.  So a record may be longer than the lane.
+ *
+ * The wake handshake: a party with nothing to do publishes the position it
+ * waits for in its own side (the consumer wake, in erx_lane_take_armed;
+ * the producer need, in erx_lane_put_armed), executes a full fence and
+ * looks once more; the other, after each store of its own position,
+ * executes a full fence, loads the waited-for position and reports in
+ * part->ring or put->ring that its store crossed it, so the caller rings
+ * the waiter's bell.  A store that crosses nothing rings nothing.
  */
 
 typedef struct erx_lane_part erx_lane_part_t;
@@ -43,17 +52,23 @@ typedef enum erx_lane_status {
 	ERX_LANE_MALFORMED	/* the lane failed a check; see the reader's fault */
 } erx_lane_status_t;
 
-/* The check a refused lane failed; ERX_LANE_SOUND while it has failed none. */
+/*
+ * The check a refused lane failed; ERX_LANE_SOUND while it has failed none.
+ * The reader fails the wpos and record checks, the writer the rpos ones.
+ */
 typedef enum erx_lane_fault {
 	ERX_LANE_SOUND = 0,
 	ERX_LANE_WPOS_UNALIGNED,	/* wpos is not a multiple of 16 */
 	ERX_LANE_WPOS_BEHIND,		/* wpos is below what was already read */
 	ERX_LANE_WPOS_AHEAD,		/* wpos is more than the area past rpos */
 	ERX_LANE_RECORD_TOO_LONG,		/* a record's len is past ERX_FRAME_MAX */
-	ERX_LANE_RECORD_PAST_END		/* a record would end past the last position */
+	ERX_LANE_RECORD_PAST_END,		/* a record would end past the last position */
+	ERX_LANE_RPOS_UNALIGNED,	/* rpos is not a multiple of 16 */
+	ERX_LANE_RPOS_BEHIND,		/* rpos is below an rpos already read */
+	ERX_LANE_RPOS_AHEAD		/* rpos is past what was published */
 } erx_lane_fault_t;
 
-/* Where the reader is: between records, inside one, or refused. */
+/* Where a reader or a writer is: between records, inside one, or refused. */
 typedef enum erx_lane_phase {
 	ERX_LANE_BETWEEN = 0,	/* the next published byte starts a header */
 	ERX_LANE_IN_BODY,	/* body_left bytes of the open record remain */
@@ -142,5 +157,117 @@ erx_lane_status_t erx_lane_take(erx_lane_reader_t *, void *, size_t,
  */
 erx_lane_status_t erx_lane_take_armed(erx_lane_reader_t *, void *, size_t,
     erx_lane_part_t *);
+
+/* ----------------------------------------------------------------- writer */
+
+typedef struct erx_lane_iov erx_lane_iov_t;
+typedef struct erx_lane_item erx_lane_item_t;
+typedef struct erx_lane_put erx_lane_put_t;
+typedef struct erx_lane_writer erx_lane_writer_t;
+
+typedef enum erx_lane_put_status {
+	ERX_LANE_PUT_DONE = 1,	/* the record's last byte is written */
+	ERX_LANE_PUT_SHORT,	/* room ran out first; put again for the rest */
+	ERX_LANE_PUT_REFUSED,	/* the item cannot be written; nothing was */
+	ERX_LANE_PUT_MALFORMED	/* the lane failed a check; see the writer's fault */
+} erx_lane_put_status_t;
+
+/* One piece of a record's body. */
+struct erx_lane_iov {
+	const void	*base;
+	size_t		 len;
+};
+
+/*
+ * One record to put: its header's kind and zero word, its body as the
+ * concatenation of iovcnt pieces, and the room it must leave free behind
+ * it.  reserve is 0 but for an ordinary record in a lane that holds a
+ * reserve for control records (the system domain's lane to a domain),
+ * which never takes that room; a control record there puts with 0.  The
+ * caller passes the same item to every call that writes one record, and
+ * keeps the pieces and their array private while a call runs.
+ */
+struct erx_lane_item {
+	const erx_lane_iov_t	*iov;
+	size_t			 iovcnt;
+	uint64_t		 zero;
+	uint64_t		 reserve;
+	uint32_t		 kind;
+};
+
+/*
+ * What one call wrote of a record: written body bytes from body offset
+ * offset; opened says it wrote the header, closed that it wrote the body's
+ * last byte.  ring says that a store of wpos this call made crossed the
+ * consumer's published wake: the caller rings the consumer's bell.
+ */
+struct erx_lane_put {
+	uint64_t	 offset;
+	size_t		 written;
+	bool		 opened;
+	bool		 closed;
+	bool		 ring;
+};
+
+/*
+ * A producer's private state for one lane.  The caller owns the storage;
+ * only erx_lane.c changes the fields, which the caller may read.  pos is
+ * the wpos last published, a multiple of 16; rpos is the consumer's last
+ * rpos that passed the checks, below which the producer never writes again
+ * and above which it never writes what is unread.
+ */
+struct erx_lane_writer {
+	unsigned char		*own_side;	/* producer's side: header, area */
+	const unsigned char	*peer_side;	/* consumer's side, read-only */
+	uint64_t		 size;		/* data area bytes, a power of two */
+	uint64_t		 pos;		/* bytes published since creation */
+	uint64_t		 rpos;		/* the consumer's rpos, validated */
+	uint64_t		 body_left;	/* body bytes of the open record */
+	uint64_t		 zero;		/* the open record's header ... */
+	uint32_t		 len;
+	uint32_t		 kind;		/* ... as written */
+	erx_lane_phase_t	 phase;
+	erx_lane_fault_t	 fault;
+};
+
+/*
+ * Prepares a writer for a lane that starts empty.  own_side and peer_side
+ * are the page-aligned mappings of the producer's side and the consumer's
+ * side; size is the data area's size, from the system domain's word and
+ * never from a page the consumer writes.  Fails, touching nothing, as
+ * erx_lane_reader_init does.
+ */
+bool erx_lane_writer_init(erx_lane_writer_t *, void *, const void *,
+    uint64_t);
+
+/*
+ * Writes what fits of the item's record: the header, when the record is
+ * not open yet and the room past the reserve holds it, then as much of the
+ * body as that room holds, then publishes it all with one store of wpos.
+ * Returns ERX_LANE_PUT_DONE when the record's last byte is written,
+ * ERX_LANE_PUT_SHORT when room ran out first (put->written may be 0),
+ * ERX_LANE_PUT_REFUSED, writing nothing, for a missing piece, a body past
+ * ERX_FRAME_MAX, an item other than the open record's (another length,
+ * kind or zero word), a reserve that leaves no
+ * room for a header, or a record that would end past the last position,
+ * and ERX_LANE_PUT_MALFORMED when the consumer's rpos fails a check, now or
+ * before.  When put->ring is set the caller must ring the consumer's bell,
+ * or a consumer waiting for the record may wait for good.
+ */
+erx_lane_put_status_t erx_lane_put(erx_lane_writer_t *,
+    const erx_lane_item_t *, erx_lane_put_t *);
+
+/*
+ * As erx_lane_put, after publishing in the ring header the rpos at which
+ * the room past the reserve holds the rest of the record or a quarter of
+ * the lane, whichever is less.  It puts again, re-publishing need, until
+ * a put writes nothing or the record is done, and *put sums what it
+ * wrote.  ERX_LANE_PUT_SHORT from it means the consumer will ring the
+ * producer's bell when that room returns, so the caller may pause.  A
+ * caller that is not about to pause uses erx_lane_put, so a lane with
+ * room costs the consumer no ring.
+ */
+erx_lane_put_status_t erx_lane_put_armed(erx_lane_writer_t *,
+    const erx_lane_item_t *, erx_lane_put_t *);
 
 #endif /* ERX_LANE_H */

@@ -1,0 +1,12 @@
+C lane-wpos-relaxed-c11
+"the producer writes a record word then stores wpos with release; the consumer loads wpos, then the word; with a relaxed load of wpos, which must fail"
+{}
+P0 (atomic_int* word, atomic_int* wpos) {
+  atomic_store_explicit(word, 1, memory_order_relaxed);
+  atomic_store_explicit(wpos, 16, memory_order_release);
+}
+P1 (atomic_int* word, atomic_int* wpos) {
+  int r0 = atomic_load_explicit(wpos, memory_order_relaxed);
+  int r1 = atomic_load_explicit(word, memory_order_relaxed);
+}
+exists (1:r0=16 /\ 1:r1=0)

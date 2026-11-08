@@ -2833,13 +2833,18 @@ runs on erXos. Its interface:
   `erx_shared_load_u64` and their store counterparts for the group's
   shared areas and the UTCB, the same accessors the kernel uses on memory
   user mode can write, and `erx_shm_copy` for a lane's or pipe's pages.
-* **Lanes**: `erx_lane_put(lane, iov, n)`, which writes one record or
-  reports no room; `erx_lane_take(lane, buf, max)`, which copies the next
-  record out or reports none; `erx_lane_room_wanted` and
-  `erx_lane_sleeping`, which read once the position the peer published,
-  `need` in its ring header or `wake` in its reader page, and tell whether
-  the caller's store crossed it; and the publication of the position the
-  caller waits for, in its own page alone
+* **Lanes**: `erx_lane_put(writer, item, &put)`, which writes what fits
+  of one record, its header and as much of its body as the room past the
+  item's reserve holds, and the rest on later calls, and reports it done
+  or short; `erx_lane_take(reader, buf, max, &part)`, which copies the
+  next part of a record out or reports none. Each, after its store of its
+  own position, executes a full fence, reads once the position the peer
+  published, `wake` in its reader page or `need` in its ring header, and
+  reports in `ring` that its store crossed it, so the caller rings the
+  peer's bell. `erx_lane_put_armed` and `erx_lane_take_armed` first
+  publish the position the caller waits for, in its own page alone, then
+  fence and look once more, so a short or empty answer from them means
+  the peer will ring
   ([design-domains.md](design-domains.md#connections)).
 * **The funnel**: `erx_funnel_check(frame, len, peer, mode, lookup, ctx,
   &verdict)`, pure over the copied frame and the lookups it makes; the

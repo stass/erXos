@@ -20,6 +20,7 @@ begin
   require_relative 'lib/erx/setup'
   require_relative 'lib/erx/tla'
   require_relative 'lib/erx/cbmc'
+  require_relative 'lib/erx/litmus'
   require_relative 'lib/erx/fiasco'
   require_relative 'lib/erx/runtime'
   require_relative 'lib/erx/runtime_seam'
@@ -83,6 +84,10 @@ module Erx
         check_tla(command_arguments, **collaborators)
       when 'check-cbmc'
         check_cbmc(command_arguments, **collaborators)
+      when 'check-litmus'
+        no_arguments(command_arguments)
+        Terminal.puts("litmus: #{Litmus.new(root: ROOT).run} tests passed")
+        0
       when 'check-sources'
         check_sources(command_arguments, **collaborators)
       when 'check-stack-proof'
@@ -563,7 +568,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
       0
     end
 

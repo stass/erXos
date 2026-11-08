@@ -1,0 +1,11 @@
+AArch64 lane-need-unfenced
+"the consumer stores rpos (a), fences, loads need (b); the producer stores need, fences, loads rpos: one load sees the other store; without its fences, which must fail"
+{
+0:X1=a; 0:X3=b;
+1:X1=a; 1:X3=b;
+}
+ P0           | P1 ;
+ MOV W0,#16   | MOV W0,#16 ;
+ STLR W0,[X1] | STLR W0,[X3] ;
+ LDR W2,[X3]  | LDAR W2,[X1] ;
+exists (0:X2=0 /\ 1:X2=0)
