@@ -86,13 +86,12 @@ it; git history is the record of completed work.
   not record the host preprocessor CBMC runs (clang `-E`), which shapes
   what is checked. The runner merges CBMC's standard error into the log
   it parses, so a stray line that looks like a result makes the run a
-  tool error rather than a reported warning. The pilot's harnesses cover
-  the budget arithmetic and chain, the slot's closing write, the read and
-  the pass plan; the capability table's slot lists (every slot naming an
-  object is on its list through `obj_prev` and `obj_next`, and the
-  object's count matches, across `erx_cap_install_kind`,
-  `erx_cap_install_copy` and the closes), `erx_cap_lookup`'s reference,
-  the grace tracker and the page funnel have none yet.
+  tool error rather than a reported warning. The record
+  ([research-cbmc-pilot.md](docs/research-cbmc-pilot.md)) recommends
+  keeping the seven single-decision harnesses in the gate and moving
+  `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
+  of the gate's 2 h 33 min and check what the fuzz targets already check.
+  Until the owner decides, the gate runs all nine.
 
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
@@ -644,15 +643,15 @@ it; git history is the record of completed work.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).
+* [Low] test, `test/host/sanitizer_environment_test.rb`: TSan reports nothing for the racing program in about one run
+  in five hundred with 16 runs at once, even with the two increments ordered in time and both threads alive; the
+  test retries up to three times. Why TSan misses a plain unordered write pair is not known; find out before
+  relying on a single TSan run to show a race.
 * [Medium] sanitizer environment of host tests, `test/fixtures/sanitizer_environment.rb`: a test run directly with
   `ruby` gets the sanitizer policy and llvm-symbolizer only if it requires that fixture (through `generated_tree.rb`
   or directly) or passes `Erx::SanitizerEnvironment.call` itself. A new test that runs a failing sanitized program
   without either falls back to macOS's `atos`, which can hang until the test's deadline. Load the fixture from one
   place every test loads, or add a check that fails on a test with `-fsanitize` that reaches neither.
-* [Low] test, `test/host/sanitizer_environment_test.rb` `test_a_thread_report_finishes_symbolized`: flaky under load. One
-  run printed nothing and still passed `assert_reported`, because the racing program returns `shared` (2), so an exit
-  without a TSan report looks like a failure. Return 0 from the program so a missed report fails plainly, then find why
-  TSan sometimes reports nothing for the two unordered increments (seen in the P4b gate run, passed on rerun).
 * [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: `tools/erx`'s entry `ensure` releases
   `build/gen.lock` before any compiler runs, so the long readers that follow do not hold it: the hosted liberx
   compiles and OTP's make with `-I$(ERX_GEN)` in `runtime.rb`, the fuzz compiles, the test pool's compilers, the

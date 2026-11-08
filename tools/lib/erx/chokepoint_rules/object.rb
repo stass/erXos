@@ -14,6 +14,9 @@ module Erx
     # names; a name a macro pastes together gets past them.
     OBJECT_CAP_REMOVE = /\berx_object_cap_remove\b/
     OBJECT_CLOSE = /\berx_object_close\b/
+    # The capability table's CBMC harness, which stubs the store by its
+    # header's contract, since the runner checks one core per harness.
+    CAP_HARNESS = 'test/cbmc/cap_slot_list.c'
 
     declare_group(
       private_headers: [OBJECT_IMPL],
@@ -21,9 +24,10 @@ module Erx
       rules: [
         # An object's header is written only in kernel/core/object.c (K21,
         # K26): its record is defined only in the store's private header,
-        # which only the store and its host tests include, and every other
-        # file names the tag only to refer to it, so no other code writes a
-        # header's state, counts or slot list. It reads the stopgap kernel's
+        # which only the store and its host tests include, and in the
+        # capability table's CBMC harness, which stubs the store and which
+        # only cbmc builds; every other file names the tag only to refer to
+        # it, so no other code writes a header's state, counts or slot list. It reads the stopgap kernel's
         # tree, glue and inherited sources alike.
         Chokepoints::Forbidden.new(
           name: 'object-records-private',
@@ -33,7 +37,8 @@ module Erx
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
           pattern: Regexp.union(OBJECT_IMPL_INCLUDE, OBJECT_RECORD_USE),
           sites: [OBJECT_CORE, *host_tests(OBJECT_CORE)].map { |glob| Chokepoints::Site.new(glob: glob, permits: OBJECT_IMPL_INCLUDE) } +
-                 [Chokepoints::Site.new(glob: OBJECT_IMPL, permits: OBJECT_RECORD_USE)],
+                 [Chokepoints::Site.new(glob: OBJECT_IMPL, permits: OBJECT_RECORD_USE),
+                  Chokepoints::Site.new(glob: CAP_HARNESS, permits: OBJECT_RECORD_USE)],
           seed: { 'kernel/core/cap.c' => "#include \"erx/cap.h\"\n#include \"object_impl.h\"\n",
                   'kernel/core/attach.c' => "#include <core/Object_Impl.h>\n",
                   'test/fixtures/cap_driver.c' => "#include \"object_impl.h\"\n",
@@ -50,14 +55,15 @@ module Erx
         # the stopgap kernel's tree, glue and inherited sources alike.
         Chokepoints::Forbidden.new(
           name: 'object-state-writers-named',
-          rule: "only #{OBJECT_CORE}, include/erx/object.h and the store's host tests name " \
+          rule: "only #{OBJECT_CORE}, include/erx/object.h, the store's host tests and #{CAP_HARNESS} name " \
                 'erx_object_cap_remove and erx_object_close, kernel/core/cap.c names the first and ' \
                 'kernel/core/delete.c the second',
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
           pattern: Regexp.union(OBJECT_CAP_REMOVE, OBJECT_CLOSE),
           sites: [OBJECT_CORE, 'include/erx/object.h', *host_tests(OBJECT_CORE)].map { |glob| Chokepoints::Site.new(glob: glob) } +
-                 [Chokepoints::Site.new(glob: 'kernel/core/cap.c', permits: OBJECT_CAP_REMOVE),
+                 [Chokepoints::Site.new(glob: CAP_HARNESS),
+                  Chokepoints::Site.new(glob: 'kernel/core/cap.c', permits: OBJECT_CAP_REMOVE),
                   Chokepoints::Site.new(glob: 'kernel/core/delete.c', permits: OBJECT_CLOSE)],
           seed: { 'kernel/core/attach.c' => "(void)erx_object_cap_remove(object);\n",
                   'kernel/core/cap.c' => "(void)erx_object_close(object);\n",

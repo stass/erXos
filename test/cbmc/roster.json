@@ -107,6 +107,74 @@
         "the sources are free, a superset of what erx_cap_read returns under the locks"
       ],
       "unsupported": []
+    },
+    {
+      "id": "grace_tracker",
+      "source": "grace_tracker.c",
+      "core": "kernel/core/grace.c",
+      "deadline": 600,
+      "unwind": 3,
+      "unwindset": {
+        "harness.0": 5
+      },
+      "bounds": "any tracker state the record invariant allows, at full width over all 64 CPU bits; one retirement then GRACE_STEPS = 4 joins, leaves, reports or retirements of any CPU; settle unwound 3 times",
+      "assumptions": [
+        "the callers keep the tracker's contract: a CPU below ERX_CPUSET_BITS, and a retirement with a CPU online and room for the next count",
+        "the lock effect is a stub that checks its own pairing; one thread"
+      ],
+      "unsupported": [
+        "more than GRACE_STEPS calls after the retirement: the start from any invariant state covers every reachable state, but a stamp's whole life is checked only over GRACE_STEPS calls",
+        "progress: that a stamp does mature once every owed CPU has reported is a liveness property, which the host tests check and this harness does not"
+      ]
+    },
+    {
+      "id": "page_funnel",
+      "source": "page_funnel.c",
+      "core": "kernel/core/page.c",
+      "deadline": 1800,
+      "unwind": 6,
+      "unwindset": {
+        "harness.1": 6
+      },
+      "defines": {
+        "ERX_KERNEL_DEBUG": 1
+      },
+      "bounds": "FUNNEL_PAGES = 4 page records; FUNNEL_STEPS = 5 calls among charge, backing step, take, release, reaper's free and the end of grace periods; loops unwound 6 times",
+      "assumptions": [
+        "the grace tracker is a stub of erx/grace.h's contract: a retirement stamps the next count and a stamp matures once the completed count reaches it; the grace_tracker harness checks the tracker itself",
+        "the budget core's reserve steps are stubs that keep erx/budget.h's contract for one reserve, admitting at most the pages that exist: the identity the budget core keeps for the machine",
+        "the page allocator is a stub over the harness's free list that hands out the request, or every free page when fewer are free",
+        "one backing at a time; the lock effects are stubs that check their pairing and the owner-before-list order; one thread"
+      ],
+      "unsupported": [
+        "a second CPU running the funnel at once: the order that keeps a refund after its pages' append (the identity's inequality under concurrency) is not a single-thread property",
+        "the budget core's own reserve steps: budget_step and budget_chain check those"
+      ]
+    },
+    {
+      "id": "cap_slot_list",
+      "source": "cap_slot_list.c",
+      "core": "kernel/core/cap.c",
+      "deadline": 3600,
+      "unwind": 6,
+      "unwindset": {
+        "erx_cap_table_init.0": 3,
+        "erx_cap_table_add_page.0": 65,
+        "erx_cap_table_add_page.1": 65,
+        "cap_page_in_use.0": 3,
+        "cap_read_slot.0": 2
+      },
+      "object_bits": 12,
+      "bounds": "one table of one page and two objects; SLOT_STEPS = 2 installs of a kind, copies, clears or closes with every mask and object, and values naming slots 0 to SLOT_STEPS + 1 at generation 0 or 1; then one lookup; loops unwound 6 times, the page's set-up 65",
+      "assumptions": [
+        "one thread holding the locks the writers name: each _Atomic access is indivisible and sequentially consistent, its memory order ignored (test/cbmc/include/stdatomic.h)",
+        "the object store and the attach insert are stubs that keep erx/object.h's and erx/attach.h's contracts; the budget's death is a stub returning a value chosen at random and fixed for the run"
+      ],
+      "unsupported": [
+        "a lookup racing a writer: the sequence-count retry is cap_read's quiescent check and the host race tests",
+        "a clear of a slot with a neighbour on its list: the one clear two calls allow follows one install, so the neighbour branches of erx_cap_slot_clear never run; the host model and cap_fuzz.c cover them",
+        "more than SLOT_STEPS calls, other values or a second table: each object's list is checked over the slots SLOT_STEPS installs can reach, and every other value is cap_read's harness"
+      ]
     }
   ],
   "mutants": [
@@ -190,6 +258,96 @@
       "original": "\t\tif (delta_is_zero(&step.up))\n\t\t\tbreak;",
       "replacement": "\t\tbreak;",
       "fails": "passes up its (borrowing|spending)'s change|a pin reaches every level"
+    },
+    {
+      "id": "stamp-is-current",
+      "harness": "grace_tracker",
+      "defect": "off by one: a retirement stamps the period in progress, which may already have heard from a CPU",
+      "file": "kernel/core/grace.c",
+      "original": "\tstamp = tracker->current + 1;",
+      "replacement": "\tstamp = tracker->current;",
+      "fails": "a stamp (names the period after|is not mature|matures only after)"
+    },
+    {
+      "id": "next-period-awaits-none",
+      "harness": "grace_tracker",
+      "defect": "a requested period starts awaiting no CPU",
+      "file": "kernel/core/grace.c",
+      "original": "\t\ttracker->current++;\n\t\ttracker->awaited = tracker->online;",
+      "replacement": "\t\ttracker->current++;\n\t\ttracker->awaited = 0;",
+      "fails": "a stamp matures only after|a period in progress awaits some CPU"
+    },
+    {
+      "id": "retire-restarts-period",
+      "harness": "grace_tracker",
+      "defect": "a retirement starts a new period over the one in progress",
+      "file": "kernel/core/grace.c",
+      "original": "\tif (in_progress(tracker)) {\n\t\ttracker->pending = true;",
+      "replacement": "\tif (false) {\n\t\ttracker->pending = true;",
+      "fails": "the current count is the completed one or one ahead"
+    },
+    {
+      "id": "free-takes-immature",
+      "harness": "page_funnel",
+      "defect": "the reaper's free takes released pages whatever their stamp",
+      "file": "kernel/core/page.c",
+      "original": "ERX_RELEASED_MATURE, &mature,",
+      "replacement": "ERX_RELEASED_ANY, &mature,",
+      "fails": "a page is freed only after its grace period"
+    },
+    {
+      "id": "hand-skips-grace",
+      "harness": "page_funnel",
+      "defect": "a backing pools its hand without waiting for the hand's grace period",
+      "file": "kernel/core/page.c",
+      "original": "\t\tif (!erx_grace_mature(released->tracker, backing->newest))\n\t\t\treturn (ERX_BACKING_WAIT);\n",
+      "replacement": "",
+      "fails": "a page joins a pool only after its grace period"
+    },
+    {
+      "id": "newest-not-raised",
+      "harness": "page_funnel",
+      "defect": "taking released pages forgets their stamp, so the hand waits for nothing",
+      "file": "kernel/core/page.c",
+      "original": "\t\tif (page->stamp > *newest)\n\t\t\t*newest = page->stamp;\n",
+      "replacement": "",
+      "fails": "a page joins a pool only after its grace period"
+    },
+    {
+      "id": "splice-loses-count",
+      "harness": "page_funnel",
+      "defect": "a splice moves the pages but not their count",
+      "file": "kernel/core/page.c",
+      "original": "\tto->count += from->count;",
+      "replacement": "",
+      "fails": "each chain's count is its length|the pooled count is the pool's length|no kernel trap is reached"
+    },
+    {
+      "id": "insert-leaves-head-prev",
+      "harness": "cap_slot_list",
+      "defect": "an install puts a slot at the head of the list but leaves the old head without a way back",
+      "file": "kernel/core/cap.c",
+      "original": "\tif (head != NULL)\n\t\tcap_set_obj_prev(head, slot);\n",
+      "replacement": "",
+      "fails": "each slot's obj_prev is the slot before it"
+    },
+    {
+      "id": "clear-keeps-head",
+      "harness": "cap_slot_list",
+      "defect": "a clear of the list's head leaves the object's head on the cleared slot",
+      "file": "kernel/core/cap.c",
+      "original": "\tif (prev == NULL)\n\t\terx_object_set_slots(object, next);\n\telse\n\t\tcap_set_obj_next(prev, next);",
+      "replacement": "\tif (prev != NULL)\n\t\tcap_set_obj_next(prev, next);",
+      "fails": "every slot on an object's list is live|an object's list ends at its count"
+    },
+    {
+      "id": "lookup-ignores-state",
+      "harness": "cap_slot_list",
+      "defect": "a lookup hands out a reference to a closed or unpaid object",
+      "file": "kernel/core/cap.c",
+      "original": "\tif (object == NULL || !cap_object_reachable(object))",
+      "replacement": "\tif (object == NULL)",
+      "fails": "a lookup refers only to a live object whose budget lives"
     }
   ]
 }

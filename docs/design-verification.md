@@ -199,7 +199,10 @@ source, since `deps.lock` pins what `make fetch` downloads; the roster
 holds its version pin, and every run names the executable whose identity
 was recorded. Every harness runs with unwinding assertions and must
 verify; a run that warns of a function CBMC has no code for is a tool
-error, since such a function returns any value and does nothing. Every seeded defect runs its harness against a copy of the
+error, since such a function returns any value and does nothing. A
+core's trap is a kernel bug, so `test/cbmc/cbmc_harness.h` turns every
+`__builtin_trap` the harness reaches into a failing property and ends the
+path there. Every seeded defect runs its harness against a copy of the
 core in a directory emptied for it under `build/cbmc/mutants/`, never
 the tree's: a failure matching
 its pattern catches it, while a pass or any other failure fails the gate.

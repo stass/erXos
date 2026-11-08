@@ -40,5 +40,17 @@ typedef enum memory_order {
 	atomic_load_explicit((object), memory_order_seq_cst)
 #define atomic_store(object, value) \
 	atomic_store_explicit((object), (value), memory_order_seq_cst)
+#define atomic_init(object, value) \
+	atomic_store_explicit((object), (value), memory_order_relaxed)
+#define atomic_exchange_explicit(object, value, order) \
+	__atomic_exchange_n((object), (value), (order))
+#define atomic_compare_exchange_strong_explicit(object, expected, desired, \
+	    success, failure) \
+	__atomic_compare_exchange_n((object), (expected), (desired), 0, \
+	    (success), (failure))
+#define atomic_fetch_add_explicit(object, operand, order) \
+	__atomic_fetch_add((object), (operand), (order))
+#define atomic_fetch_sub_explicit(object, operand, order) \
+	__atomic_fetch_sub((object), (operand), (order))
 
 #endif /* ERX_CBMC_STDATOMIC_H */

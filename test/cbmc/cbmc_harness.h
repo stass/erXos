@@ -26,4 +26,16 @@ int32_t		nondet_i32(void);
 uint32_t	nondet_u32(void);
 bool		nondet_bool(void);
 
+/*
+ * A trap is a kernel bug, so every trap a harness reaches fails a
+ * property. CBMC has no body for __builtin_trap, which the runner reports
+ * as a tool error; the macro replaces each call in the core the harness
+ * includes, and the assumption ends the path as the trap would.
+ */
+#define __builtin_trap()						\
+	do {							\
+		__CPROVER_assert(0, "no kernel trap is reached");	\
+		__CPROVER_assume(0);					\
+	} while (0)
+
 #endif /* ERX_CBMC_HARNESS_H */

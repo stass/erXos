@@ -23,16 +23,33 @@ class SanitizerEnvironmentTest < Minitest::Test
     int overflowing_store(char *bytes) { bytes[16] = 1; return bytes[0]; }
     int main(void) { char *bytes = malloc(16); return overflowing_store(bytes); }
   C
+  # Two unordered increments of shared, one after the other in time: the
+  # threads take turns through a relaxed atomic, which orders nothing for
+  # TSan, so the second increment meets the first in TSan's shadow memory
+  # while both threads are alive. The program exits 0, so a run without a
+  # report is a plain success.
+  #
+  # TSan misses this race now and then all the same, about one run in five
+  # hundred with many runs at once. This test is about a report finishing
+  # symbolized, not about how often TSan reports, so it runs the program up
+  # to RACE_ATTEMPTS times, until one run reports.
+  RACE_ATTEMPTS = 3
   RACE = <<~C
     #include <pthread.h>
+    #include <stdatomic.h>
     static int shared;
-    static void *racing_store(void *unused) { (void)unused; shared++; return NULL; }
+    static atomic_int turn;
+    static void wait_turn(int n) { while (atomic_load_explicit(&turn, memory_order_relaxed) < n) ; }
+    static void end_turn(int n) { atomic_store_explicit(&turn, n, memory_order_relaxed); }
+    static void *racing_store(void *unused) { (void)unused; shared++; end_turn(1); wait_turn(2); return NULL; }
     int main(void) {
         pthread_t thread;
         pthread_create(&thread, NULL, racing_store, NULL);
+        wait_turn(1);
         shared++;
+        end_turn(2);
         pthread_join(thread, NULL);
-        return shared;
+        return 0;
     }
   C
 
@@ -148,9 +165,13 @@ class SanitizerEnvironmentTest < Minitest::Test
   end
 
   def test_a_thread_report_finishes_symbolized
-    output, status = run_failing(RACE, sanitizer: 'thread', options: {})
+    output = status = nil
+    RACE_ATTEMPTS.times do
+      output, status = run_failing(RACE, sanitizer: 'thread', options: {})
+      break unless status.success?
+    end
     assert_reported(output, status)
     assert_includes output, 'ThreadSanitizer: data race'
-    assert_match(/racing_store .*thread\.c:3/, output)
+    assert_match(/racing_store .*thread\.c:7/, output)
   end
 end

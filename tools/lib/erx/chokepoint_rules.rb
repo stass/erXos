@@ -59,12 +59,13 @@ module Erx
     end
 
     # The host tests of a core's source, which alone besides the core see
-    # its private records: the drivers named after it in test/fixtures and
-    # its fuzzer. Neither tree is built into the kernel or any image, and a
-    # test of the core is named after it, so a new one needs no new entry.
+    # its private records: the drivers named after it in test/fixtures, its
+    # CBMC harnesses in test/cbmc and its fuzzer. None of these trees is
+    # built into the kernel or any image, and a test of the core is named
+    # after it, so a new one needs no new entry.
     def self.host_tests(source)
       stem = File.basename(source, '.c')
-      ["test/fixtures/#{stem}_*.c", "tools/fuzz/#{stem}_fuzz.c"].freeze
+      ["test/fixtures/#{stem}_*.c", "test/cbmc/#{stem}_*.c", "tools/fuzz/#{stem}_fuzz.c"].freeze
     end
 
     # What one group file declares. private_headers are its core's
