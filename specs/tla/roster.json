@@ -404,9 +404,7 @@
       "deadlock": "check",
       "scope": "finite",
       "expect": {
-        "kind": "counterexample",
-        "property": "AnswersArrive",
-        "exit_status": 13
+        "kind": "deadlock"
       }
     },
     {
@@ -430,9 +428,7 @@
       "deadlock": "check",
       "scope": "finite",
       "expect": {
-        "kind": "counterexample",
-        "property": "AnswersArrive",
-        "exit_status": 13
+        "kind": "deadlock"
       }
     },
     {

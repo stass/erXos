@@ -267,6 +267,21 @@ class TlaTest < Minitest::Test
     end
   end
 
+  def test_deadlock_checking_is_set_only_by_the_roster
+    with_roster do |root, roster|
+      write_roster(root, roster)
+      ["SPECIFICATION Spec\n\\* CHECK_DEADLOCK FALSE\n", "SPECIFICATION Spec\n(* CHECK_DEADLOCK FALSE *)\n",
+       "SPECIFICATION Spec\nCONSTANT Name = \"CHECK_DEADLOCK\"\n"].each do |config|
+        File.write(File.join(root, 'Good.cfg'), config)
+        assert_equal 1, Erx::TlaRoster.read(root).size, config
+      end
+      ["SPECIFICATION Spec\nCHECK_DEADLOCK FALSE\n", "SPECIFICATION Spec\nCHECK_DEADLOCK TRUE\n"].each do |config|
+        File.write(File.join(root, 'Good.cfg'), config)
+        assert_raises(Erx::Error, config) { Erx::TlaRoster.read(root) }
+      end
+    end
+  end
+
   def test_constraints_must_be_reported_as_constrained
     with_roster do |root, roster|
       File.write(File.join(root, 'Good.cfg'), "SPECIFICATION Spec\nCONSTRAINT Bound\n")

@@ -275,11 +275,23 @@ Choice ==
 Quiet == \A x \in Pairs : up[x[2]] => /\ lane[x] = <<>>
                                       /\ view[<<x[2], x[1]>>] # "draining"
 
-\* The one acceptable terminal state: no initiating step remains and
-\* nothing owed is left.
+\* p holds a link or monitor on q.
+Held(p, q) == q \in links[p] \cup mons[p]
+
+\* No answer is owed: every relation a live process holds is with a live
+\* process over a connection that is up.  Quiet says the runtimes have no
+\* step left; Settled says they did what was owed, so a runtime that stops
+\* short leaves a terminal state the deadlock check reports.
+Settled ==
+    \A p, q \in Doms : p # q /\ alive[p] /\ Held(p, q) =>
+        alive[q] /\ view[<<p, q>>] = "up"
+
+\* The one acceptable terminal state: no initiating step remains, nothing
+\* owed is left and every relation is settled.
 Finished ==
     /\ budget = 0 \/ \A d \in Doms : ~up[d]
     /\ Quiet
+    /\ Settled
     /\ UNCHANGED vars
 
 Next == Owed \/ Choice \/ Finished
@@ -311,7 +323,6 @@ AnswersAfterSends ==
 \* it, not merely relieved of the relation.  Each answer needs a
 \* relation, and each relation an initiating step, so a holder gets at
 \* most Budget answers about one process.
-Held(p, q) == q \in links[p] \cup mons[p]
 Answers(p, q) == Len(SelectSeq(got[p], LAMBDA g : g[1] = "answer" /\ g[2] = q))
 AnswersArrive ==
     \A p, q \in Doms, n \in 0..Budget : p # q =>

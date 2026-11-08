@@ -95,11 +95,31 @@ and a hard `gtimeout -k 10` deadline, and ends every process it started on
 failure or cancellation. Logs are checked for progress after 30 to 60
 seconds; live status reports each command's age and deadline.
 
-Deadlock checking is enabled unless a safety-only configuration explicitly
-declares terminal states acceptable. TLC's `-deadlock` option disables
-that check; it is not a suite-wide default. Liveness configurations name
-their temporal properties and fairness assumptions. Reports distinguish
-a completed finite-state search from a depth-limited or constrained one.
+Deadlock checking is enabled unless the roster entry of a safety-only
+configuration declares terminal states acceptable (`deadlock: terminal`).
+TLC's `-deadlock` option disables that check; it is not a suite-wide
+default. The roster entry is the one place that choice is made: a
+configuration that sets `CHECK_DEADLOCK` itself is refused. A configuration that declares a temporal property runs
+with deadlock checking, and its model has an explicit terminal step that
+accepts only the state where everything owed is done, so a stall
+elsewhere fails the deadlock check. Liveness configurations name their
+temporal properties and fairness assumptions. Reports distinguish a
+completed finite-state search from a depth-limited or constrained one.
+
+The roster's expectations are:
+
+* `pass`: the tool exits successfully with its completed-check result.
+* `counterexample` of a safety property: TLC reports that exact invariant
+  violated, in the initial state or by a behaviour, and exits with status
+  12.
+* `counterexample` of a temporal property: TLC reports that temporal
+  properties were violated, with a trace, and exits with status 13. TLC
+  does not name the violated property, so the configuration must declare
+  exactly the one property the entry names.
+* `deadlock`: TLC reports a deadlock (message 2114), with a trace, and
+  exits with status 11. The entry names no property; it needs deadlock
+  checking and a configuration with no temporal property, so no liveness
+  check can report the same stall first.
 
 Caching reuses only results that met their expectations. A key covers the
 model's complete module closure, configurations, expectations, runner,

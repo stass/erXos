@@ -96,12 +96,14 @@ connection's objects once each party has let go or ended. A connection
 ends when the peer ends, when either runtime ends it, or by the service's
 policy while the peer may still be writing; A drains, fires, unmaps and
 answers. Each peer step reads only the peer's own state and the records
-sent to it. Scope: two frames each way on each connection. It checks that
-A acts on an ended peer only after every frame it published, delivers
-nothing after the down and in order, that no party maps a deleted object,
-at most one control record is outstanding, A never has two connections up
-for the name, the types of every variable, and, under weak fairness of
-the service and of A alone, that A and the service settle. Seeds fire
+sent to it. Only the peer's lane to A is modelled, since nothing checked
+depends on what A writes. Scope: two frames on that lane for each
+connection. It checks that A acts on an ended peer only after every frame
+it published, delivers nothing after the down and in order, that no
+party maps a deleted object, at most one control record is outstanding, A
+never has two connections up for the name, the types of every variable,
+and, under weak fairness of the service and of A alone, that A and the
+service settle. Seeds fire
 before draining, delete without A's answer, send without waiting for the
 answer, answer before unmapping, let a later `connection_up` overtake the
 earlier `connection_down`, drain to a frame an ended peer may never write,
@@ -117,13 +119,17 @@ alone (`links-half-link`). Frames carry stamps, so the check that every
 answer about a process arrives after everything that process sent the
 holder before the answer was made is a state invariant; under weak
 fairness of every runtime's receive and drain, every live holder of a link
-or monitor of a dead process is eventually answered. `Receive`'s comment
-lists what a runtime does with each kind of frame. A runtime answers a
+or monitor of a dead process is eventually answered. The terminal step
+needs every relation a live process holds to be with a live process over
+a connection that is up, so a relation left held fails the deadlock
+check, and one dropped unanswered fails `AnswersArrive`. `Receive`'s
+comment lists what a runtime does with each kind of frame. A runtime answers a
 `LINK` with `noproc` only when its process holds no link with the sender,
 so a link two processes make towards each other is never left with one
 half; the lane's order puts a refusal ahead of any `LINK` the target
 writes afterwards, so the holder drops its half and then makes it again.
 Seeds fire before draining, accept an answer from another domain's lane,
 put `noproc` ahead of queued frames, drop a link or monitor of a dead or
-unexported process, and answer `noproc` to a `LINK` from a process the
-target already holds a link with.
+unexported process, answer `noproc` to a `LINK` from a process the
+target already holds a link with (these two fail the deadlock check),
+and drop a connection's relations unanswered when it ends.

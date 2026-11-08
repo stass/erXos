@@ -850,7 +850,10 @@ link with its sender changes nothing and needs no right either: `link`
 guards making a link, and a runtime answers a `LINK` with `noproc` only
 when its process holds no link with the sender, so a `noproc` never ends a
 link whose other half exists, as in stock OTP, where only a process that
-does not exist, and so holds no links, answers one.
+does not exist, and so holds no links, answers one. Creating nothing, such
+a `LINK` takes no room within `peer_held` and is never answered with a
+`system_limit` exit ([The peer](#the-peer)); that limit applies only to a
+`LINK` that creates a link.
 
 A `SPAWN_REQUEST` is OTP's own, `{29, ReqId, From, GroupLeader, {Module,
 Function, Arity}, OptList}`; the lane names the domain it is for, so the
@@ -1176,7 +1179,10 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    receiving runtime accepts it when its process already holds a link with
    the sender, which reveals nothing the sender's domain was not told when
    that link was asked for (Signals that need no right, in
-   [Frames](#frames)). An
+   [Frames](#frames)). Nor is the answer's timing new information: the
+   sender's own runtime holds the half that the target's earlier `LINK`
+   created, which the lane delivers ahead of any answer, so the answer
+   reveals only a relation the sender's side already knows of. An
    unauthorised operation is handled in step 7 exactly as one on a
    process that does not exist, whatever its size: authority is decided before limits, and only an
    authorised frame is measured against them, so an `exit/2` without the
@@ -1425,9 +1431,12 @@ and drivers](#native-processes-and-drivers)).
   counts each link or monitor as 256 bytes and each queued signal as its
   bytes, and keeps the sum within `peer_held` (4 MiB) per connection and
   `peer_held_total` (64 MiB) in all. Past `peer_held`, it answers a new
-  `LINK` or `MONITOR_P` from that domain at once with an exit or a `DOWN` of
-  reason `system_limit`, and ends the connection when a signal does not fit;
-  past `peer_held_total`, it ends the connection that holds the most. The
+  `MONITOR_P`, or a `LINK` that would create a link, from that domain at once
+  with a `DOWN` or an exit of reason `system_limit`, and ends the connection
+  when a signal does not fit. A `LINK` to a process that already holds a
+  link with its sender creates nothing, takes no room and is never refused
+  for the limit, so the limit never ends a link whose other half exists.
+  Past `peer_held_total`, it ends the connection that holds the most. The
   bound counts what the other domain caused and the end never waits, so no
   domain, and no set of domains, can make a runtime hold more, and the
   domains that hold little are the last an end reaches.

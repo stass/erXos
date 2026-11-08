@@ -198,6 +198,11 @@ module Erx
       words = config_words(inputs.fetch(entry.fetch('config')))
       constrained = words.any? { |word| CONSTRAINT_WORDS.include?(word) }
       temporal = temporal_properties(words)
+      # The roster's deadlock field is the one switch for deadlock checking,
+      # so the checks below cannot be bypassed from the configuration.
+      if words.include?('CHECK_DEADLOCK')
+        raise Error, 'deadlock checking is set by the roster, not by CHECK_DEADLOCK'
+      end
       # design-verification.md: only a safety-only configuration may accept
       # terminal states, and a deadlock is expected only where no liveness
       # check could report the same stall first.
