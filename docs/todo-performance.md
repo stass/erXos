@@ -281,7 +281,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Medium] display, the Erlang renderer's frame on a 240x240 panel**
   (diff, layout and draw) against LVGL's. This is LVGL's retirement gate.
 * **[Low] display, the terminal emulator's redraw per changed cell line.**
-  Settled by scrolling throughput of a large output.
+  Settled by scrolling throughput of a large output, redrawing scrolled
+  rows against copying their pixels.
+* **[Medium] display, `erx_vt` parses a code point at a time in Erlang**
+  ([design-display.md](design-display.md#the-terminal-emulator)). Settled
+  by bytes per second over a large `cat` of plain text, of text with SGR
+  on every word and of wide characters, against libvterm on the same
+  corpus.
 * **[Low] display, virtio-gpu transfer and flush latency per rectangle**
   under TCG, and how `erx_screen` gathers waiting flushes into one push. Settled by flushes per
   second and latency per rectangle size.

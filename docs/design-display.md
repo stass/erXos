@@ -105,6 +105,11 @@ Decisions every reader of this document needs:
   it serves, and no unconfined DMA device in a release build, so it
   isolates nothing between other domains and is trusted only for the
   confidentiality of what is shown and typed at that display.
+* **No NIF in the display domain parses untrusted bytes.** A memory
+  error in a native parser would reach every window's pixels and keys,
+  and a NIF's fault ends the whole runtime. The terminal emulator's core
+  `erx_vt` is Erlang, so its bug ends one terminal process; native code
+  that must parse runs in a sub-space holding only its window.
 * **Nothing paints without a change.** Every byte that reaches a panel
   follows from a client's flush of a dirty rectangle or from a change of
   the windows' geometry. No timer redraws, so an idle display costs no
@@ -271,6 +276,7 @@ the shell and the application act with their own capabilities.
 | **G4.** A presentation grants nothing | a presentation is a type and a canonical text; the terminal emulator's only actions on one are to insert its text as keyboard input and to highlight the presentations of the types an input context names; a widget's only action is the `{select, Type, Value}` event to its application; neither carries a facet, a grant or a capability, and the command that then runs is checked by the shell's facets as any typed command is ([Authority](design.md#authority)) | a terminal that calls a service for a clicked link; a widget server that performs the action a presentation names | a session without an inspect facet clicks a pid presentation and the inserted `i` command fails with `no_facet`; the link parser's fuzz target; a source check that `erx_term` and `erx_ui_server` call no facet |
 | **G5.** Attributed text in a window is displayed only through the line escape, and a program's output reaches its terminal window unchanged | a window's label, a widget's `present` text and a widget's text drawn from a record value are escaped by the displayer with `erx_text:escape_line/1` ([Attributed text](design-live.md#attributed-text)); the terminal emulator takes its bytes from a tty, which changes nothing but what `termios` says (V1), and interprets them as a terminal does | a label drawn raw; a terminal emulator that filters a program's bytes | the attributed-text test corpus of design-live sent as a label, as a `present` text and as a record value in a widget; V1's byte test with a terminal window in place of the serial line |
 | **G6.** Nothing paints without a change | the only path to the device is `erx_screen`, which composes on a window's flush call and asks windows to flush only when the layout changes, the driver restarts, the panel wakes or `erx_screen` itself restarts; the driver pushes only the rectangles it is given; no process of the display domain has a redraw timer | a periodic repaint; a flush of the whole screen for a small change | an idle display for one minute makes no device request, counted at the driver; a one-pixel change makes exactly one flush of one rectangle; moving a window flushes exactly the area whose content changed |
+| **G8.** What a program writes to a terminal window costs bounded memory, and nothing of it comes back as input | `erx_vt`'s state is bounded by its size and the constants of [Bounds](#bounds): parameters, intermediates and strings are capped, the scrollback is capped in cells and the link table in entries, and an endless sequence costs no memory; its only replies are DA's and DSR's fixed forms, whose variable parts are numbers it computes; it is Erlang, and no NIF of the display domain parses a program's bytes, so a fault in it ends one terminal process | a buffer that grows with a sequence; a report that echoes text, such as a title report; a native parser of program output | the fuzz target asserts the state's size against the bound computed from the size and the constants, where a seeded scrollback without its cap fails it; the reply test sends every query form, a title report among them, and checks every reply against the three forms, where a seeded title report fails it; the chokepoint check on the display release's NIFs |
 | **G7.** A widget never fabricates | a `present` property and a value drawn from a record keep their `attr()` status; the renderer shows every status other than `ok` as its token, as `erx_render` does (V2) | a widget that drops a status | the status tests of design-live run through a widget tree, for each status and reporter |
 
 ## Data model
@@ -476,8 +482,10 @@ names with `.` and `/` kept, so the sequence is ASCII and holds no
 control character. The
 renderer emits links only when the tty's terminal declares them: the
 terminal emulator and the host tool's `console` set the session's
-`TERM` to a value whose terminfo-style capability table lists `links`,
-which `erx_render` consults; the serial console's default does not.
+`TERM` to `xterm`, whose entry in erXos's termcap lists the boolean
+capability `links`, which `erx_render` consults through `erx_termcap`;
+the serial console's `vt100` entry does not
+([TERM and termcap](#term-and-termcap)).
 
 ## Algorithms and behavior
 
@@ -700,12 +708,12 @@ selection is shared by a display's clients (Security says with whom).
 
 `erx_term` is a terminal emulator in the display domain: a client of a
 window in the display domain's own directory, a font cache it filled
-from a subfont file of its release, and `erx_vt`, a pure state machine
-from bytes to a grid of cells and a cursor, exhaustively tested on the
-host for its control sequences and fuzzed. It implements the sequences
-OTP's `prim_tty`, toybox's programs and `vttest`'s core expect of a
-VT-style terminal; rio's mouse-driven text editing is a program's choice
-on top, not the terminal's. Its copy and paste use the display domain's
+from a subfont file of its release, and `erx_vt`, a pure function from
+the terminal's state and the bytes it receives to the next state and a
+list of effects ([The terminal emulator](#the-terminal-emulator)). The
+terminal is an xterm-compatible subset, named `xterm` as FreeBSD's
+console is; rio's mouse-driven text editing is a program's choice on
+top, not the terminal's. Its copy and paste use the display domain's
 own `/snarf` when its grant carries `snarf`, and stay inside the
 terminal window otherwise.
 
@@ -759,26 +767,28 @@ by the system domain to that display, so programs it starts get
 windows beside their terminal.
 
 **Presentations in a terminal.** `erx_vt` parses the OSC 8 sequence
-above as one of its control sequences, with a bound of 4 KiB on the
-sequence and the URI grammar `erx:TYPE/TEXT` with `TYPE` an identifier of
-the schema's type table and `TEXT` the encoded canonical text; a
-sequence outside the grammar is dropped as any unknown OSC is. A cell
-written while a link is open carries the link's id, so the text stays
-bound to its type and value as the screen scrolls, until the cells are
-overwritten. The emulator's actions on a presentation are two, and
-neither reaches a service (G4):
+above as one of its control sequences, within 4 KiB and the grammar of
+[Links and the input context](#links-and-the-input-context); a sequence
+outside the grammar ends the open link and opens none. A cell written
+while a link is open carries the link's id, so the text stays bound to
+its type and value as the screen scrolls, until the cells are
+overwritten or the link is evicted. The emulator's actions on a
+presentation are two, and neither reaches a service (G4):
 
 * a click sends the presentation's text to the tty as keyboard input,
   as a paste does, so it lands in the shell's command line or in whatever
-  program is reading;
+  program is reading; the grammar admits no control character in the
+  text, so a click can fill a line but never submit it;
 * while the shell is editing a command whose argument types it knows,
   the shell writes through `erx_render` an **input context**, `ESC ] 8 ;
-  ; erx:accept/TYPES ESC \` with `TYPES` a comma-separated list, and the
-  emulator highlights the presentations of those types; a click on one
-  inserts its text and the shell clears the context when the line is
-  submitted. The context comes from the catalog's `-erx_args` for the
-  command typed so far. A shell without the catalog writes none, and the
-  terminal shows links without highlights.
+  ; erx:accept/TYPES ESC \` with `TYPES` a comma-separated list, followed
+  at once by the closing sequence `ESC ] 8 ; ; ESC \`, so a host terminal
+  that does not know the context sees an empty link. The emulator
+  highlights the presentations of those types; a click on one inserts
+  its text, and the shell clears the context, with an empty `TYPES`,
+  when the line is submitted. The context comes from the catalog's
+  `-erx_args` for the command typed so far. A shell without the catalog
+  writes none, and the terminal shows links without highlights.
 
 The shell parses what the click inserted exactly as it parses what the
 user types, so a presentation cannot carry more than the keyboard
@@ -787,6 +797,510 @@ unchanged through `erx console`, which copies the tty raw, and a host
 terminal that understands OSC 8 shows the link; `tools/erx` registers an
 `erx:` URL handler only if the operator installs it, and that handler
 runs `erx inspect` with the host session's own facets.
+
+### The terminal emulator
+
+`erx_vt` is the model of one terminal: a grid of cells, a cursor, the
+modes programs set, a scrollback and the presentations on screen.
+`erx_term` owns one `erx_vt` state per window, feeds it the bytes the
+console writes to its line, draws the rows that changed and sends the
+line what `erx_vt` says to send. Everything a program can do to a
+terminal window is decided by `erx_vt`, and `erx_vt` decides nothing
+else.
+
+**What it matches.** The terminal is the subset of xterm that the
+programs erXos runs at a terminal use, and it calls itself `xterm`, as
+FreeBSD's console vt(4) does in FreeBSD's `/etc/ttys`. The subset is the
+union of five needs, each recorded against every row of the tables
+below:
+
+* **P, `prim_tty`**, in the mode erXos runs it: `init_ssh/3`, with `xn`
+  set and no terminfo (`otp/lib/kernel/src/prim_tty.erl:306-330`,
+  `:1395-1420`). With no terminfo, `io_ansi` falls back to the ANSI
+  strings of its own table (`otp/lib/stdlib/src/io_ansi.erl:2611-2786`),
+  so the line editor writes BS for one column left, LF for one row down,
+  CSI A and CSI C for up and right (`prim_tty.erl:1008-1015`), CSI J to
+  erase below (`:673`, `:741`), CSI H CSI 2 J to clear (`:904`), CSI I for
+  a typed tab (`:1207`), SGR for the expansion's status line (`:630`) and
+  BEL (`:902`), and it relies on the deferred wrap at the last column that
+  termcap calls `xn` (`xnfix`, `:1164-1166`).
+* **I, `io_ansi`'s functions** on erXos, which are the same fallback
+  strings: cursor hiding, saving, the alternate screen, insert and delete
+  of characters and lines, scrolling regions and SGR colours. An `io_ansi`
+  string that is not a standard sequence is not supported for that reason
+  (Risks).
+* **T, toybox 0.8.15's applets**: cursor addressing, erase in line and in
+  display, SGR, cursor hiding, save and restore, the cursor position
+  report with which toybox measures the screen, and RIS for `reset`. The
+  coverage test of [Verification](#verification-and-testing) checks this
+  list against what the applets write.
+* **V, `vttest`'s core**: its menus 1 (cursor movements), 2 (screen
+  features), 3 (character sets: US ASCII, DEC Special Graphics and the UK
+  set), 6 (terminal reports: DA, DSR and the cursor position report, not
+  the answerback), 8 (VT102 insert and delete) and the RIS test of menu
+  10. Menus 4 (double-size characters), 5 (keyboard), 7 (VT52 mode), 9
+  (known bugs), 11 (VT220 and xterm extensions) and the rest of 10 are
+  outside the core.
+* **C, erXos's termcap `xterm` entry**, which is FreeBSD 15.1's `xterm`
+  entry without the capabilities `erx_vt` does not implement
+  ([TERM and termcap](#term-and-termcap)).
+
+**No native parser of program output.** No NIF in the display domain
+parses untrusted bytes. The display domain holds every window's pixels
+and every key typed at the display, so a memory error in a native parser
+of one program's output would reach every window; and a NIF's fault ends
+the whole runtime, not one process. `erx_vt` is Erlang, translated from
+the DEC parser model below, so a bug in it is the exit of one terminal
+process: its window and line end and the terminal connected there
+detaches, as the failure table says, and the rest of the display goes
+on. A native emulator, if one were ever wanted, would run in a sub-space
+of its own holding only its window, as LVGL does. The `Y` decoder inside
+`erx_memdraw` is a native decoder of a client's bytes, which this rule
+forbids as written; Risks and open questions carries the decision.
+
+#### One pipeline over one state
+
+```erlang
+-spec erx_vt:new(Cols, Rows) -> state().
+-spec erx_vt:feed(state(), binary()) -> {state(), [effect()]}.
+-type effect() :: {reply, binary()}     % bytes for the line's input
+                | bell
+                | {title, binary()}.    % OSC 0 or 2 text, UTF-8
+```
+
+`feed/2` runs each byte through three stages:
+
+1. **UTF-8 decoding** into code points. The decoder holds at most three
+   pending bytes, and replaces each maximal ill-formed subsequence (an
+   invalid byte, an overlong form, a surrogate, a value past U+10FFFF, a
+   sequence cut short) by one U+FFFD, the practice Unicode recommends in
+   its chapter 3. The terminal is UTF-8 only: `ESC % G` changes nothing
+   and `ESC % @` is ignored.
+2. **The DEC parser** of Paul Williams's model of DEC's ANSI-compatible
+   terminals (vt100.net), translated to Erlang as a function from a parser
+   state and a code point to the next state and at most one action. Its
+   states are Williams's: ground, escape, escape intermediate, CSI entry,
+   parameter, intermediate and ignore, DCS entry, parameter, intermediate,
+   passthrough and ignore, OSC string, and SOS/PM/APC string. Its actions
+   are print, execute, collect, param, ESC dispatch, CSI dispatch and the
+   string actions. Two extensions are xterm's: BEL ends an OSC string as
+   ST does, and the parser runs on code points, so a code point from
+   U+0080 to U+009F is a C1 control whether it arrived as ESC and a byte
+   from `@` to `_` or encoded in UTF-8, and any code point from U+00A0 up
+   is printed in ground and collected in a string.
+3. **Grid operations**, which each dispatch names from the tables below:
+   a pure function of the grid state and the operation.
+
+Williams's model gives the recovery rules without special cases: CAN and
+SUB return to ground from any state, and ESC begins a new sequence from
+any state, so an ESC inside a string ends the string. An OSC a program
+forgets to terminate swallows output only until the next ESC or BEL, and
+`reset`, whose RIS begins with ESC, always reaches the parser.
+
+Every stage keeps constant-size state between calls, so where the bytes
+are split does not matter: feeding `A` and then `B` gives the state and
+the effects, concatenated, of feeding `A` followed by `B` at once. The
+core reads no clock and no global state, so the same bytes give the same
+screen on every host.
+
+**What changed is derived, not tracked.** An operation rebuilds only the
+rows it changes and keeps every other row the same term, so `erx_term`
+finds the rows to redraw by comparing each row of the new grid with the
+same row of the old one, which costs a pointer comparison for an
+untouched row, and compares the cursor and the reverse-screen mode the
+same way. The core keeps no
+dirty list. After a scroll every row is new at its position; copying the
+moved pixels instead of redrawing is an optimisation of `erx_term` on
+the watch list, not a rule of the core.
+
+#### Cells and the grid state
+
+```erlang
+-type cell()   :: {Chars :: [char(), ...], Width :: 1 | 2, attrs(), link_id()}
+                | wide_tail.                 % right half of a width-2 cell
+-type attrs()  :: {[flag()], Fg :: colour(), Bg :: colour()}.
+-type flag()   :: bold | dim | italic | underline | blink | inverse
+                | invisible | strike.
+-type colour() :: default | 0..255 | {0..255, 0..255, 0..255}.
+-type link_id() :: none | pos_integer().
+-type row()    :: {Wrapped :: boolean(), Cells :: tuple()}.
+```
+
+`Chars` is a base code point and the zero-width code points joined to
+it, at most six in all. `Wrapped` says the row continued into the next by
+autowrap, so a copy joins the two rows without a newline. A blank cell is
+a space of width 1 with no flags, the default foreground and the
+background of the pen at the time it was erased (xterm's background
+colour erase, termcap's `ut`). The representation in memory may pack a
+cell; these are the values it holds.
+
+The state holds:
+
+* the size, from 2 to 640 columns and 1 to 256 rows;
+* two grids, the main and the alternate, and which is shown;
+* the scrollback, a queue of rows with its cell count;
+* the cursor: row, column, a pending-wrap flag and visibility;
+* the pen (current `attrs()`) and the open link;
+* the modes, a closed set: cursor keys (DECCKM), keypad (DECKPAM), insert
+  (IRM), new line (LNM), origin (DECOM), autowrap (DECAWM), reverse screen
+  (DECSCNM), cursor visible (DECTCEM) and bracketed paste;
+* the scrolling region's top and bottom margins and the tab stops;
+* G0 and G1, each US ASCII, DEC Special Graphics or UK, and which of the
+  two is invoked;
+* a saved cursor per grid (DECSC): position, pen, pending wrap, origin
+  mode and the character set state;
+* the link table and the input context's types;
+* the decoder and parser states, and the position of the last cell
+  written, for joining zero-width code points;
+* counters of the sequences it ignored, by kind.
+
+Its invariants, checked after every step of the exhaustive test: the
+cursor lies in the grid; every row of a grid has exactly the grid's
+width; every width-2 cell is followed by `wide_tail` and every
+`wide_tail` follows a width-2 cell; 1 <= top < bottom <= rows; the
+scrollback is within its bound; and the link table holds at most its
+bound.
+
+**Width.** A code point's width is 0 if its general category is `Mn`,
+`Me` or `Cf` other than U+00AD; 2 if its East Asian Width is `W` or `F`;
+and 1 otherwise. Controls never reach it. The table is generated by the
+terminal generator from rules in `abi/terminal.txt` and the Unicode data
+OTP 29.1.2 carries, `UnicodeData.txt` and `EastAsianWidth.txt` under
+`otp/lib/stdlib/uc_spec/`, Unicode 17.0.0, the same version and the same
+generator as the line escape's tables ([Escape
+rules](design-live.md#escape-rules)). Writing follows from the widths:
+
+* a width-2 character at the last column wraps first when autowrap is
+  on, leaving the last column as it was, and is written ending at the last
+  column when autowrap is off, as a narrow character is rewritten there;
+* writing over either half of a width-2 cell blanks both halves, and so
+  does an insert, delete or erase that splits one;
+* a width-0 code point joins the last cell written if nothing has moved
+  the cursor since, up to six code points a cell, and is dropped
+  otherwise;
+* there is no grapheme clustering: an emoji joined by U+200D takes the
+  columns of its parts, and a variation selector does not change a width,
+  as libvterm and most terminals behave.
+
+**Character sets.** A printed ASCII code point is mapped through the
+invoked set: DEC Special Graphics maps `_` to `~` to the line-drawing and
+symbol characters of the VT100, the UK set maps `#` to `£`, and US ASCII
+maps nothing. Code points outside ASCII are never mapped.
+
+#### The sequences
+
+Each table is closed: a sequence not in it is ignored and counted.
+Parameters are written `Ps` with their default in parentheses; a missing
+or zero parameter takes the default where the default is 1. "Needed by"
+uses the letters above.
+
+C0 and C1 controls:
+
+| Control | Effect | Needed by |
+| --- | --- | --- |
+| BEL | the `bell` effect; ends an OSC string | P, C |
+| BS | one column left, stopping at column 1 | P, V, C |
+| HT | to the next tab stop, or the last column | V, C |
+| LF, VT, FF | index: down one row, scrolling at the bottom margin; with LNM also to column 1 | P, V, C |
+| CR | to column 1 | P, V |
+| SO, SI | invoke G1, invoke G0 | V |
+| CAN, SUB | end any sequence, back to ground | V |
+| ESC | begin a sequence, ending any string | all |
+| NUL, DEL, other C0 | nothing, not counted | |
+| IND, NEL, HTS, RI, DCS, CSI, ST, OSC, SOS, PM, APC (C1) | as their ESC forms | P (`prim_tty.erl:144` treats U+009B as CSI) |
+| other C1 | ignored, counted | |
+
+Which operations clear the pending wrap follows the last column flag of
+DEC STD 070; the corpus runs every row of the tables with the flag set.
+
+Escape sequences:
+
+| Sequence | Name | Effect | Needed by |
+| --- | --- | --- | --- |
+| `ESC 7`, `ESC 8` | DECSC, DECRC | save and restore the cursor | I, T, V, C |
+| `ESC D` | IND | index | V |
+| `ESC E` | NEL | index and column 1 | V |
+| `ESC M` | RI | up one row, scrolling down at the top margin | I, V, C |
+| `ESC H` | HTS | a tab stop at the cursor's column | V, C |
+| `ESC c` | RIS | the state of `new/2` at the current size, keeping the scrollback, whose links become plain text | T, V |
+| `ESC =`, `ESC >` | DECKPAM, DECKPNM | keypad mode on, off | I, C |
+| `ESC ( F`, `ESC ) F` | SCS | designate G0, G1: `F` is `B` US ASCII, `0` DEC Special Graphics, `A` UK | V, C |
+| `ESC # 8` | DECALN | fill the screen with `E`, margins reset, cursor home | V |
+| `ESC \` | ST | end a string | all |
+| `ESC % G` | | UTF-8, which it already is: nothing | |
+
+CSI sequences, `ESC [` followed by parameters and a final byte:
+
+| Final | Name | Effect | Needed by |
+| --- | --- | --- | --- |
+| `@` | ICH Ps (1) | insert blanks at the cursor, shifting right | I, C |
+| `A`, `B` | CUU, CUD Ps (1) | up, down, stopping at the margins | P, I, V, C |
+| `C`, `D` | CUF, CUB Ps (1) | right, left, stopping at the edges | P, I, V, C |
+| `E`, `F` | CNL, CPL Ps (1) | down, up, and column 1 | I |
+| `G`, `` ` `` | CHA, HPA Ps (1) | to the column | I, C |
+| `H`, `f` | CUP, HVP Pr;Pc (1;1) | to the row and column, relative to the top margin in origin mode | P, I, T, V, C |
+| `I`, `Z` | CHT, CBT Ps (1) | forward, back by tab stops | P, I, C |
+| `J` | ED Ps (0) | erase below (0), above (1) or all (2); 3 empties the scrollback and leaves the screen | P, I, T, V, C |
+| `K` | EL Ps (0) | erase right, left, the whole line | I, T, V, C |
+| `L`, `M` | IL, DL Ps (1) | insert, delete lines at the cursor within the region; nothing outside it | I, V, C |
+| `P` | DCH Ps (1) | delete characters, shifting left | I, V, C |
+| `S`, `T` | SU, SD Ps (1) | scroll the region up, down; only the one-parameter form | I, C |
+| `X` | ECH Ps (1) | erase characters without shifting | I, C |
+| `a`, `e` | HPR, VPR Ps (1) | right, down by | |
+| `c` | DA Ps (0) | reply `ESC [ ? 1 ; 2 c`, a VT100 with the advanced video option | V |
+| `d` | VPA Ps (1) | to the row | I, C |
+| `g` | TBC Ps (0) | clear the tab stop at the cursor (0) or all (3) | I, V, C |
+| `h`, `l` | SM, RM | set, reset mode 4 IRM or 20 LNM | V, C |
+| `? h`, `? l` | DECSET, DECRST | set, reset 1 DECCKM, 5 DECSCNM, 6 DECOM, 7 DECAWM, 25 DECTCEM, 1049 (alternate screen, with the cursor saved and the alternate grid cleared on entry) and 2004 (bracketed paste) | I, T, V, C |
+| `m` | SGR | the pen, below | P, I, T, V, C |
+| `n` | DSR Ps | 5: reply `ESC [ 0 n`; 6: reply `ESC [ Pr ; Pc R` with the cursor's position, relative to the top margin in origin mode | T, V |
+| `r` | DECSTBM Pt;Pb (1;rows) | set the region and move the cursor home; ignored unless top < bottom | I, V, C |
+| `s`, `u` | | save and restore the cursor, as `ESC 7` and `ESC 8` | |
+| `! p` | DECSTR | soft reset: modes, pen, margins, character sets and saved cursor to their initial values, the grids kept | T |
+
+Each list of modes in SM, RM, DECSET and DECRST is applied mode by mode;
+an unknown mode is ignored and counted, and the rest still apply. Modes
+12 (cursor blink) and 8 (auto-repeat) change nothing: nothing in a
+terminal window blinks, since nothing paints without a change (G6).
+
+SGR parameters, applied left to right, an empty list being 0:
+
+| Parameter | Effect |
+| --- | --- |
+| 0 | the default pen |
+| 1, 2, 3, 4, 5, 7, 8, 9 | bold, dim, italic, underline, blink, inverse, invisible, strike on |
+| 22, 23, 24, 25, 27, 28, 29 | bold and dim, italic, underline, blink, inverse, invisible, strike off |
+| 30-37, 90-97; 39 | foreground 0-7, 8-15; the default |
+| 40-47, 100-107; 49 | background 0-7, 8-15; the default |
+| 38;5;N, 48;5;N | foreground, background colour N of 256 |
+| 38;2;R;G;B, 48;2;R;G;B | foreground, background RGB |
+| 58;5;N, 58;2;R;G;B, 59 | underline colour: read and ignored |
+
+Any other parameter is skipped and counted, and the rest still apply;
+38 or 48 with a malformed tail ends the list. `blink` is kept in the
+cell and drawn as it is, without blinking.
+
+Strings:
+
+| String | Effect |
+| --- | --- |
+| `OSC 0 ; text`, `OSC 2 ; text` | the `{title, Text}` effect; `erx_term` sets the window's label through the line escape (G5) |
+| `OSC 8 ; params ; uri` | a link, an input context or a closing, by the grammar below |
+| any other OSC | dropped and counted |
+| DCS, SOS, PM, APC | consumed to their end and counted |
+
+**Reports carry nothing from the stream.** The three replies are fixed
+forms whose only variable parts are numbers `erx_vt` computes, so no
+byte a program wrote comes back as input, whatever it wrote. A terminal
+that echoes text back, as xterm's title report does, lets output type
+commands; `erx_vt` has no such report.
+
+**What it ignores.** Every sequence outside the tables is parsed to its
+end, its effect dropped and its kind counted: among them double-size
+lines (`ESC # 3` to `ESC # 6`), the VT52 mode, G2 and G3 with SS2, SS3,
+LS2 and LS3, national character sets other than the UK's, 132-column
+mode (DECCOLM, which xterm also ignores unless told otherwise), left and
+right margins (DECSLRM), selective erase, rectangular operations, REP,
+cursor styles (DECSCUSR), mouse reporting, focus events, window
+operations (`CSI t`), DA2 and every other query, colour palette changes
+and queries (`OSC 4`, `10`, `11`, `104`), the clipboard (`OSC 52`), and
+DCS strings, sixel graphics among them. A program asking a question gets
+no answer, as from a terminal that lacks the feature. The counters are
+inspectable on the terminal's window and are never logged, since
+programs write unsupported sequences routinely.
+
+#### Bounds
+
+| What | Bound | Past it |
+| --- | --- | --- |
+| a UTF-8 sequence pending between calls | 3 bytes | U+FFFD for the ill-formed part |
+| CSI parameters | 16 | the rest ignored and the sequence dispatched with the first 16, as in Williams's model |
+| a parameter's value | 65,535 | clamped; further digits are consumed |
+| intermediate bytes | 2 | the sequence is ignored to its final byte |
+| a private marker (`<`, `=`, `>`, `?`) | first position only | elsewhere, or a `:` anywhere, the sequence is ignored to its final byte (Williams's CSI ignore) |
+| an OSC string, from after `ESC ]` to before its end | 4 KiB | consumed to its end and dropped |
+| DCS, SOS, PM, APC strings | never stored | consumed to their end |
+| the grid | 640 columns, 256 rows | `erx_term` asks for no more; the window's surplus is margin |
+| code points in a cell | 6 | further zero-width code points dropped |
+| the scrollback | 131,072 cells, each row stored without its trailing blank default cells | the oldest rows dropped |
+| live links | 256 | the oldest evicted, its cells shown as plain text |
+| a presentation's `TYPE` | 32 bytes | the sequence dropped |
+
+So a terminal's state is bounded by its size and these constants
+whatever a program writes, and a display's terminals by its
+`console_line` count, 16 by default. A parser's state between calls is
+constant-size: an endless CSI or an unterminated string costs no memory.
+A burst of report requests yields one reply each, and the tty's input
+bound drops what does not fit, as the line discipline drops typed input
+past it.
+
+#### Links and the input context
+
+The whole OSC 8 string, within the 4 KiB above, follows this grammar
+(RFC 5234, with every quoted string matched case-sensitively):
+
+```text
+osc8       = "8;" params ";" uri
+params     = *( %x20-3A / %x3C-7E )        ; key=value pairs; ignored
+uri        = close / link / context
+close      = ""
+link       = "erx:" type "/" text
+context    = "erx:accept/" [ type *( "," type ) ]
+type       = LOWER *31( LOWER / DIGIT / "_" )
+text       = 1*( ALPHA / DIGIT / "_" / "+" / "," / ":" / "=" / "@"
+                 / "-" / "." / "/" / pct )
+pct        = "%" HEXDIG HEXDIG
+LOWER      = %x61-7A
+```
+
+A `type` must be a type of the inspection schema's table, which never
+names a type `accept`; the decoded `text` must be valid UTF-8 holding no
+C0 control, DEL or C1 control. Every OSC 8 string ends the open link
+first, as the OSC 8 convention has each one replace the one before, and
+links do not nest. Then:
+
+* a **link** allocates the next link id, records its type and decoded
+  text in the link table, and makes it the pen's open link; every cell
+  written from then on carries the id;
+* a **closing** does nothing more;
+* a **context** replaces the input context's types, and an empty list
+  clears it; it opens no link, and `erx_render`'s closing sequence after
+  it leaves the context in place;
+* a string outside the grammar, a link to an `https:` or `file:` URI
+  among them, or past the 4 KiB bound, does nothing more and is counted,
+  so the text after it is plain.
+
+Link ids increase and are never reused. The table holds at most 256
+links; a new link past that evicts the oldest, and a cell whose id is no
+longer in the table is plain text, so eviction needs no scan of the grid
+and a stale id never names another link. RIS clears the table, the open
+link and the context. `erx_vt:link_at(State, Row, Column)` answers the
+type and text under a click, and a cell is highlighted when its link's
+type is in the context.
+
+#### Scrollback, the alternate screen and resizing
+
+A row enters the scrollback when it scrolls off the top of the main grid
+with the region's top margin at the first row, the rule of xterm and
+libvterm; scrolling a region that starts lower saves nothing, and the
+alternate grid has no scrollback. `ED 3` empties it. `erx_term` keeps
+its own view offset into the scrollback and returns to the bottom when
+output arrives; the offset is not terminal state.
+
+`erx_vt:resize/3` keeps the rows' contents without reflowing them. When
+the grid gets shorter, the rows above the cursor go to the scrollback as
+far as needed to keep the cursor's row on screen, and the rows below it
+are dropped after that; when it gets taller, blank rows are added at the
+bottom. A narrower grid crops each row, blanking a width-2 cell it
+splits; a wider one pads with blanks and default tab stops. The region
+resets to the whole grid and the cursor and saved cursors are clamped
+into it. `erx_term` takes the new size from `wctl` and hands it to the
+line's tty, which applies it as design-live's `size/3` says.
+
+#### Keys and paste
+
+`erx_vt:key(State, Key)` returns the bytes a key sends, from the modes
+in the state: printable keys as UTF-8, Return as CR, Backspace as DEL
+(FreeBSD's default `VERASE`), Tab as HT, control and a letter as its C0
+control, and Alt with a key as ESC before it; the arrows as `CSI A` to
+`CSI D`, or `ESC O A` to `ESC O D` with DECCKM set, Home and End as
+`CSI H` and `CSI F`, or their `ESC O` forms with DECCKM, Insert, Delete,
+Page Up and Page Down as `CSI 2 ~`, `CSI 3 ~`, `CSI 5 ~` and `CSI 6 ~`,
+F1 to F4 as `ESC O P` to `ESC O S`, F5 to F12 as `CSI 15 ~` to
+`CSI 24 ~` with xterm's gaps, and a modifier on any of these in xterm's
+form, `CSI 1 ; M X` or `CSI N ; M ~` with `M` one more than the sum of
+Shift 1, Alt 2 and Control 4. The keypad sends its `ESC O` forms with
+DECKPAM set.
+
+`erx_vt:paste(State, Bytes)` returns the bytes of a paste or a
+presentation click: the bytes unchanged, or with bracketed paste set,
+between `CSI 200 ~` and `CSI 201 ~` with every `CSI 201 ~` inside them
+removed, so pasted text cannot end its own bracket.
+
+#### TERM and termcap
+
+A terminal window's line and the host tool's `console` give the session
+`TERM=xterm`; the serial line gives `vt100`, as FreeBSD's `/etc/ttys`
+gives its serial ports. Naming the terminal `xterm`, as FreeBSD's vt(4)
+does, lets every program that knows xterm drive it, and lets the name
+travel to other systems; a program that uses more of xterm than the
+subset gets the ignored-sequence behaviour above, as on FreeBSD's
+console.
+
+FreeBSD describes terminals in termcap(5), and so does erXos. Its
+termcap source, `abi/termcap`, holds two entries in termcap(5)'s text
+form, and the release carries it as `/usr/share/misc/termcap`, FreeBSD's
+path:
+
+* **`xterm`** is FreeBSD 15.1's `xterm` entry with its `tc=` references
+  resolved, without each capability whose sequence is outside the tables
+  above, each removal named in a comment, and with one capability added:
+  the boolean `links`, which says the terminal shows OSC 8 links. A
+  termcap reader finds a capability by name, so one that does not know
+  `links` never sees it.
+* **`vt100`** is FreeBSD's `vt100` entry restricted the same way, without
+  `links`.
+
+The terminal generator also reads `abi/termcap` and writes
+`erx_termcap`, a table of the entries, from which `erx_render` reads
+`links` for the session's `TERM`; an unknown or unset `TERM` has no
+capabilities. Nothing parses termcap at run time on erXos, so the file
+is no input to fuzz.
+
+#### The oracle
+
+`erx_vt` is compared with **libvterm** 0.3.3, Paul Evans's terminal
+emulator library in C under the MIT licence, the emulator inside Vim and
+Neovim. It is a test oracle only, not a dependency: fetched at its pinned
+release and SHA-256 and built out of tree for the host, with a harness of
+erXos's own, `test/vt/vterm_dump.c`, that feeds it a corpus and writes
+the screen after each checkpoint in the dump format `erx_vt:dump/1` also
+writes: each row's cells with their code points, width, flags and
+colours, the cursor and its visibility, and the replies since the last
+checkpoint. libvterm is built with its `WCWIDTH_FUNCTION` hook set to a
+C function generated from `erx_vt`'s width table, so the comparison
+covers everything but the widths, which a separate test re-derives from
+the Unicode data. libvterm is chosen because it is a library with no
+process, clock or host locale in the way: a corpus gives the same dump on
+every host. xterm itself, the reference, has no headless screen dump;
+tmux takes its widths from the host's C library and needs a server
+process; xterm.js would bring Node into host tooling.
+
+Neither side is the standard. Where they disagree, xterm's "XTerm
+Control Sequences" and DEC's VT100 and VT220 manuals, as vt100.net keeps
+them, decide. Every difference over the corpus is one of:
+
+* a **bug** in `erx_vt`, fixed, with its corpus case as the regression
+  test;
+* a **documented difference**: the case is listed in
+  `test/vt/differences.txt` with the sequence, the reason and `erx_vt`'s
+  expected dump, which the test then checks, so the difference is pinned
+  as well as explained. The sequences `erx_vt` ignores and libvterm
+  implements, the `:` sub-parameters of SGR and the DA2 reply are the
+  first entries;
+* a **libvterm bug**, where the references agree with `erx_vt`: listed
+  in the same file as upstream, with the reference's section.
+
+A difference that matches no entry fails the test.
+
+The corpus:
+
+* a case for every row of the tables, with each parameter omitted, 0, 1,
+  at the grid's edge and past it;
+* the exhaustive enumeration of [Verification](#verification-and-testing),
+  fed to both;
+* streams generated from the tables' grammar, with text of narrow, wide
+  and zero-width code points between the sequences, from a recorded seed;
+* `prim_tty`'s output for a scripted editing session: lines longer than
+  the screen, wide characters, tabs, the expansion's status line;
+* the output of toybox's applets that drive a terminal (`top`, `vi`,
+  `hexedit`, `watch`, `more`, `ls --color`, `grep --color`), recorded on
+  erXos;
+* `vttest`'s core, recorded live: a Ruby driver runs `vttest` on a host
+  pseudo-terminal with the libvterm harness as its terminal, answers each
+  pause with Return, and records `vttest`'s bytes, the pauses and
+  libvterm's replies; `erx_vt` replays the bytes and must give the same
+  replies and the same screen at every pause.
 
 ### The widget server
 
@@ -1015,6 +1529,13 @@ Erlang; the `erx_ui_renderer` behaviour and its `target()`.
 `erx_present:text/2` and `parse/2`, the `-erx_args` declaration, the link
 and input-context sequences, the `links` capability of a terminal.
 
+**The terminal**: `TERM=xterm` at a terminal window and the host tool's
+console; `abi/termcap`, installed as `/usr/share/misc/termcap`, and the
+generated `erx_termcap`; `erx_vt`'s `new/2`, `feed/2`, `resize/3`,
+`key/2`, `paste/2`, `link_at/3`, `dump/1` and its `effect()`; the
+sequence tables and bounds of [The terminal
+emulator](#the-terminal-emulator).
+
 **Drivers**: the `erx_display` behaviour; the `input()` record.
 
 **Interaction with other subsystems.** The device service gives the
@@ -1237,13 +1758,50 @@ Each passing case has a seeded failure that proves the code ran.
   test that the single policy shows at most one window and delivers every
   event to it, never the chord, and that every rectangle lies within the
   screen under both; a seeded unchecked move fails it.
-* **The terminal.** `erx_vt` explored over its control sequences and
-  fuzzed; differentially against a host terminal emulator's screen dump
-  over a corpus of program output, `vttest`'s core among it; V1's byte
-  test with a terminal window in place of the serial line, where a
-  seeded filter fails it; the link parser's fuzz target; G4's `no_facet`
-  test; a seeded action in the emulator that calls a facet is caught by
-  the source check.
+* **The terminal.** Each test below names the seeded fault that fails
+  it.
+  * Exhaustive: on a 4-column, 3-row grid, every row of the sequence
+    tables with each parameter omitted, 0, 1, 2, 3 and 65,535, from every
+    cursor position, with pending wrap set and clear, autowrap and origin
+    mode on and off, every region, and a width-2 cell at every position;
+    the invariants of [Cells and the grid
+    state](#cells-and-the-grid-state) hold after each step, and the same
+    enumeration goes to the oracle. An insert that shifts half of a
+    width-2 cell without blanking it breaks the pairing invariant.
+  * Splitting: every corpus case fed whole, one byte at a time and split
+    at every offset gives the same state and effects. A decoder that
+    drops a UTF-8 sequence cut at a call's end fails it.
+  * The oracle comparison of [The oracle](#the-oracle) over the whole
+    corpus, with `test/vt/differences.txt`. A `CUP` that leaves its
+    default at 0 fails the per-row cases.
+  * Coverage: the test fails if a row of the tables has no corpus case,
+    or if the ignored-sequence counters are not zero over the
+    `prim_tty`, toybox and `vttest` recordings. With `CHT` removed from
+    the table, the `prim_tty` recording's counter fails it.
+  * Bounds: a CSI with 17 parameters dispatches the first 16; an OSC of
+    4 KiB applies and one of 4 KiB and one byte is dropped; an
+    unterminated OSC followed by `ESC c` resets the terminal; a stream
+    of 300 links leaves 256 in the table and the oldest cells plain. A
+    bound raised to 8 KiB, a 17th parameter accepted or a string that
+    ignores ESC fails its case.
+  * Replies: G8's reply test.
+  * Widths: a test re-derives every code point's width from
+    `UnicodeData.txt` and `EastAsianWidth.txt` and compares it with the
+    generated table. A table that leaves out `F` fails it.
+  * Links: the link parser's fuzz target; cases at every rule of the
+    grammar, a `%0A` in a link's text among them, which must drop the
+    sequence, and a context followed by its closing, which must keep the
+    context. A decoder that admits a decoded control fails the first.
+  * termcap: every string capability of `abi/termcap`, with its `%d`
+    and `%i` arguments expanded, is fed to `erx_vt` and must leave the
+    ignored counters at zero, and every capability removed from FreeBSD
+    15.1's entry must be named in the file's comments. An entry that
+    keeps a capability outside the tables fails the first.
+  * `erx_vt`'s fuzz target over arbitrary bytes, with G8's size check
+    and the invariants after every call.
+  * V1's byte test with a terminal window in place of the serial line,
+    where a seeded filter fails it; G4's `no_facet` test; a seeded action
+    in the emulator that calls a facet is caught by the source check.
 * **Widgets.** `erx_ui_schema`'s fuzz target over trees from another
   domain; a tree whose `on_*` terms carry more fresh atoms than
   `foreign_atoms` is dropped and counted; `erx_ui_diff` tested by the
@@ -1312,6 +1870,8 @@ Each passing case has a seeded failure that proves the code ran.
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |
 | `erx_term` and `erx_ui_server` call no facet | an xref check that neither module nor its callees reach `erx_facet` clients |
 | Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu`, `erx_ui_erlang` and `erx_term` |
+| No NIF of the display release parses bytes from another domain | a build check over the release's NIF libraries and their exported functions, a closed list with each function's use of the binaries it takes; a new NIF or function fails it |
+| Only `erx_vt` interprets a terminal's output in the display release | a source check that no other module of the release matches on ESC, CSI or OSC bytes |
 
 ## Performance
 
@@ -1335,7 +1895,11 @@ Numbers to measure, for [todo-performance.md](todo-performance.md):
 * the dirty-scheduler threshold for draw operations;
 * the Erlang renderer's diff, layout and draw time per frame on a 240 by
   240 panel against LVGL's, which is the gate that retires LVGL;
-* the terminal emulator's redraw per changed line of cells;
+* the terminal emulator's redraw per changed line of cells, and the
+  pixel copy of scrolled rows against redrawing them;
+* `erx_vt`'s throughput in bytes per second, a code point at a time in
+  Erlang, over a large `cat` of text, of text with SGR on every word and
+  of wide characters, against libvterm's on the same corpus;
 * virtio-gpu's transfer and flush latency per rectangle under TCG, and
   how `erx_screen` gathers waiting flushes into one push.
 
@@ -1356,6 +1920,9 @@ A new device is a new driver behind `erx_display` or a new producer of
 | plan9port's `libdraw`, acme, sam, 9term | draw clients, and oracles of the draw protocol's compatibility | MIT (to be confirmed at import) | permanent; ported as erXos's code with the connection code replaced |
 | LVGL 9 | the native widget renderer for panels | MIT | stopgap, replaced by the Erlang renderer when the parity test and the panel's frame times admit it; fetched at a pinned version and built out of tree as a native program, its display and input glue erXos's own |
 | a bitmap font as Plan 9 subfonts | the terminal emulator's, the menu's and the Erlang renderer's glyphs | plan9port's `fixed` fonts (public domain); anti-aliased fonts, such as the Go fonts (BSD-3-Clause) rasterised by a host step, chosen with the first application that needs them | permanent |
+| libvterm 0.3.3 | the differential oracle of `erx_vt` | MIT | test tool, never in an image and never linked into erXos; fetched at its pinned release and SHA-256 and built out of tree for the host with the harness `test/vt/vterm_dump.c` |
+| `vttest`, Thomas Dickey's | the source of the corpus's `vttest` recordings | MIT-style (X11), confirmed at the pin | test tool, never in an image; fetched at a pinned release and SHA-256, built out of tree for the host and run on a host pseudo-terminal |
+| FreeBSD 15.1's `share/termcap/termcap`, from the pinned FreeBSD source | the `xterm` and `vt100` entries `abi/termcap` restricts | BSD-3-Clause, confirmed at the pin | reference; the restricted entries are erXos's text in `abi/termcap` |
 
 ## Alternatives considered
 
@@ -1374,6 +1941,11 @@ A new device is a new driver behind `erx_display` or a new producer of
 | shortcuts for the display domain's own clients (handing batches to a window process, an in-domain widget path) | gives a window two ways to be made and driven and leaves open which quotas the domain's own windows spend; one client path costs one file-server hop per batch, on the watch list |
 | text rendering in the display domain for clients | would need a font engine and font files parsed from untrusted input on the server side; Plan 9's client-side glyph cache keeps the server free of both |
 | a rio-style text window as the window system's own | duplicates the tty, the line discipline and the console's menu in the display domain; a terminal emulator as a console line reuses all three |
+| libvterm or another C emulator as a NIF of the display domain | a native parser of every program's output in the domain that holds every window's pixels and keys, whose fault ends the whole runtime; a C emulator in a sub-space of its own would be safe and is not needed |
+| a terminal type of erXos's own, `TERM=erxos` | an honest entry, but unknown to every other system a session reaches and to every program with built-in knowledge of xterm; FreeBSD named vt(4) `xterm` for the same reason |
+| terminfo, as Linux distributions use | FreeBSD describes terminals in termcap, and erXos follows FreeBSD; its one consumer at run time reads a generated table |
+| xterm.js or tmux as the oracle | xterm.js brings Node into host tooling, which TypeScript's rule keeps out; tmux takes its widths from the host's C library and needs a server process; xterm itself has no headless dump |
+| grapheme clustering, so an emoji sequence takes one cell pair | terminals disagree on it and programs' `wcwidth` cannot express it, so the cursor would part from what programs compute |
 
 ## Risks and open questions
 
@@ -1386,6 +1958,9 @@ A new device is a new driver behind `erx_display` or a new producer of
 | a board's panel bus controller does DMA it cannot confine | medium | the panel cannot be driven from the display domain in a release build | the board's DMA contract says so; such a panel is driven without DMA, which a few hundred pixels afford, or its driver runs in a domain of its own |
 | the Erlang renderer never reaches LVGL's frame times on panels | medium | LVGL stays | acceptable; it is a bounded native program behind the seam |
 | OSC 8 links confuse a terminal that declares `links` wrongly | low | stray characters | links follow the capability table; the serial console's default is off |
+| a program, or a session reached remotely, uses more of xterm than the subset, since the terminal is called `xterm` | medium | a misdrawn screen in that program | local programs read the restricted termcap entry; the ignored counters name the sequences, which become rows of the tables when a program needs them; FreeBSD's console has the same gap |
+| `io_ansi`'s fallback strings on erXos include forms that are not the sequences they name: `cursor_home` is `ESC H` (HTS), `scroll_forward` and `scroll_backward` are `ESC S` and `ESC T`, `tab_backward` is `ESC I`, and `hyperlink_start` writes the URI before the parameters (`otp/lib/stdlib/src/io_ansi.erl:2614`, `:2646-2649`, `:2684`, `:2788-2790`) | high, on every erXos terminal, since erXos has no terminfo | `io_ansi` callers misdraw | these are upstream OTP bugs, in `TODO.md`; `erx_vt` implements the standard sequences and does not imitate them |
+| widths differ between `erx_vt` and what a program computes | medium | a cursor parts from the text after a wide or combining character | the width decision below |
 | the display domain's view of the login's passphrase is unacceptable for some deployments | medium | no login at the display | the manifest's `console_line` parameter; a serial login, whose programs' windows open on the display, and no terminal windows |
 
 Decisions taken with the owner:
@@ -1427,6 +2002,32 @@ Decisions taken with the owner:
    command accepts with `-erx_args`, so the terminal highlights the
    presentations a command can take.
 
+Open decisions for the owner:
+
+1. **The `Y` decoder and the rule against native parsers.** `erx_memdraw`
+   runs the image(6) decoder of `Y` messages in C over a client's bytes,
+   which the rule of [The terminal emulator](#the-terminal-emulator)
+   forbids as written. Either the rule names per-byte decompression as
+   its one exception, as CLAUDE.md's list of per-byte C primitives does,
+   or `Y` is decoded in Erlang into the rectangle's pixels and loaded as
+   a `y` would be. Recommendation: decode `Y` in Erlang. Compressed loads
+   are fonts and images loaded once, not a hot path; the rule then has no
+   exception, and `erx_memdraw` parses nothing.
+2. **One width table for the whole system.** `erx_vt`'s widths come from
+   OTP's Unicode 17.0.0 data, musl 1.2.6's `wcwidth` from its own tables
+   (`musl/src/ctype/nonspacing.h` and `wide.h`), and `prim_tty`'s
+   `wcwidth/1` on erXos answers `{error, enotsup}`, so the line editor
+   counts a combining mark as one column where the terminal counts none
+   ([design-runtime.md](design-runtime.md), edit 38). Recommendation:
+   generate musl's two tables and the answer of `prim_tty:wcwidth/1` from
+   the same rule and data as `erx_vt`'s, so programs, the line editor and
+   the terminal agree by construction; the decision touches the runtime
+   and musl as well as this document, so it belongs in
+   [design.md](design.md) once taken.
+3. **The scrollback's size.** It is fixed at 131,072 cells a terminal,
+   about 1,600 rows of 80 columns. Recommendation: keep it fixed until a
+   user asks for more, rather than add a manifest parameter now.
+
 ## References
 
 * Plan 9 manual: draw(3), draw(2), image(6), font(6), mouse(3), rio(4),
@@ -1449,3 +2050,16 @@ Decisions taken with the owner:
   input groups, flex layout.
 * E. Moy, S. Gildea, T. Dickey, "XTerm Control Sequences", OSC 8
   hyperlinks, https://invisible-island.net/xterm/ctlseqs/ctlseqs.html.
+* P. Williams, "A parser for DEC's ANSI-compatible video terminals",
+  https://vt100.net/emu/dec_ansi_parser; DEC, "VT100 User Guide"
+  (EK-VT100-UG) and "VT220 Programmer Reference Manual" (EK-VT220-RM),
+  https://vt100.net/docs/; DEC STD 070, "Video Systems Reference Manual".
+* ECMA-48, "Control Functions for Coded Character Sets", 5th edition,
+  1991.
+* E. Koblinger, "Hyperlinks (a.k.a. HTML-like anchors) in terminal
+  emulators", the OSC 8 convention xterm's document cites.
+* Unicode Standard Annex #11, "East Asian Width", and the Unicode
+  Standard, chapter 3, "U+FFFD Substitution of Maximal Subparts".
+* FreeBSD 15.1 manual: termcap(5), vt(4), ttys(5).
+* libvterm, https://www.leonerd.org.uk/code/libvterm/; T. Dickey,
+  `vttest`, https://invisible-island.net/vttest/.
