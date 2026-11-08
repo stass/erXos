@@ -76,8 +76,8 @@ root
 <span class="p">%</span> cat /tmp/hi
 hello from erXos
 <span class="p">%</span> <span class="c"># How many processes run? Each is an Erlang process.</span>
-<span class="p">%</span> ps | count
-62
+<span class="p">%</span> ps | wc -l
+      62
 <span class="p">%</span> erl
 Eshell V17.1.1 (type help(). for help)
 
@@ -132,7 +132,7 @@ Error in process &lt;0.150.0&gt; with exit value:
       </div>
       <div class="terminal-grille" aria-hidden="true"></div>
     </div>
-    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>ps | count</code>, or <code>erl</code> for the Erlang shell.</p>
+    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>ps | wc -l</code>, or <code>erl</code> for the Erlang shell.</p>
     <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
   </div>
 </section>

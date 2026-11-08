@@ -40,7 +40,7 @@ terminal unchanged as on UNIX, so its bytes are written as they are.
 A table's shape is the fields its first record holds, and a record of
 another shape starts a new table. A table of one column has no header
 and nothing to align, so it prints each value as it comes: lines read
-into `line` records print as their data, `ls` and `count` as their
+into `line` records print as their data, `ls` as its
 escaped text, with no header. A table
 of more columns holds its first 256 records, and at most 1 MiB of their
 text, to measure its columns, then prints them, and every later record of

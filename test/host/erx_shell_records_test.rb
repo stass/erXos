@@ -8,7 +8,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_shell_records_tests.erl, the EUnit cases of the command
-# shell's record pipelines: `where`'s predicates, `sort`, `count` and the
+# shell's record pipelines: `where`'s predicates, `sort`, `wc` counting records and the
 # terminal's table (docs/design-shell.md, "Pipelines"), against the erx_shell
 # application compiled from source with warnings as errors on stock's emulator
 # (ERX_ERL and ERX_ERLC, which make check supplies).

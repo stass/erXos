@@ -34,8 +34,8 @@ variables), its working directory, its three standard streams and its
 facets. Every path a command takes from its arguments goes through
 path/2, against the context's working directory, since the shell's
 working directory is the session's and not the runtime's. A command
-writes with emit/2, emit/3 and say/2 and reads with read/1 or
-read_record/1; a write that cannot be done, such as one to
+writes with emit/2, emit/3 and say/2 and reads with read/1, read_chunk/1
+or read_record/1; a write that cannot be done, such as one to
 a pipe whose reader has ended, ends the command at once with that error
 as its status, as `SIGPIPE` ends a program. Facets are reached only
 through facet/2.
@@ -57,7 +57,7 @@ the stream it meets: a line of data as its bytes, any other record
 escaped toward the terminal.
 """.
 
--export([emit/2, emit/3, say/2, report/3, read/1, read_record/1, finish/0,
+-export([emit/2, emit/3, say/2, report/3, read/1, read_chunk/1, read_record/1, finish/0,
          facet/2, path/2, cwd/1, env/2, getopt/2, format_error/1]).
 
 -export_type([ctx/0, stream/0, rec/0]).
@@ -131,7 +131,20 @@ with `line too long`.
 """.
 -spec read(ctx()) -> binary() | {[atom()], rec()} | eof.
 read(Ctx) ->
-    case next(Ctx) of
+    case next(Ctx, line) of
+        {record, Fields, Record} -> {Fields, Record};
+        Other -> Other
+    end.
+
+-doc """
+The next bytes of standard input, however many are in flight, with no
+bound on a line; a record from a neighbouring Erlang stage with the order
+of its fields; or `eof`. It is read/1 for a command that counts bytes
+rather than lines, as `wc` does.
+""".
+-spec read_chunk(ctx()) -> binary() | {[atom()], rec()} | eof.
+read_chunk(Ctx) ->
+    case next(Ctx, chunk) of
         {record, Fields, Record} -> {Fields, Record};
         Other -> Other
     end.
@@ -145,7 +158,7 @@ record of one field, `line`, its text without the newline as data,
 """.
 -spec read_record(ctx()) -> {[atom()], rec()} | eof.
 read_record(Ctx) ->
-    case next(Ctx) of
+    case next(Ctx, line) of
         {record, Fields, Record} -> {Fields, Record};
         eof -> eof;
         Line -> {[line], #{line => {data, {ok, chomp(Line)}}}}
@@ -170,16 +183,22 @@ finish() ->
         {Write, _Table} -> tabulate(Write, fun erx_render:table_flush/1)
     end.
 
-next(#{stdin := {pipe, Pipe}}) ->
+next(#{stdin := {pipe, Pipe}}, line) ->
     case erx_shell_pipe:get(Pipe) of
         {line, Line} -> Line;
         {record, _, _} = Record -> Record;
         eof -> eof;
         {error, line_too_long} -> stop(line_too_long)
     end;
-next(#{stdin := null}) -> eof;
-next(#{stdin := closed}) -> stop(ebadf);
-next(#{stdin := _}) -> stop(enotsup).
+next(#{stdin := {pipe, Pipe}}, chunk) ->
+    case erx_shell_pipe:get_chunk(Pipe) of
+        {bytes, Bytes} -> Bytes;
+        {record, _, _} = Record -> Record;
+        eof -> eof
+    end;
+next(#{stdin := null}, _Unit) -> eof;
+next(#{stdin := closed}, _Unit) -> stop(ebadf);
+next(#{stdin := _}, _Unit) -> stop(enotsup).
 
 -doc "The facet of that name in the context, or `{error, no_facet}`.".
 -spec facet(ctx(), atom()) -> {ok, term()} | {error, no_facet}.
@@ -238,6 +257,7 @@ getopt(Rest, _Allowed, Flags) ->
 -spec format_error(term()) -> binary().
 format_error(line_too_long) -> <<"line too long">>;
 format_error(record_too_large) -> <<"record too large">>;
+format_error(eilseq) -> <<"illegal byte sequence">>;
 format_error(no_facet) -> <<"no_facet">>;
 format_error(Reason) when is_binary(Reason) -> Reason;
 format_error(Reason) when is_atom(Reason) ->

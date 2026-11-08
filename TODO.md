@@ -2081,6 +2081,9 @@ to the corpus and follow rc
   `pwd`, `mkdir`, `rm`, `mv` and `cp` are erXos's own and replace toybox's applets of those names, but each takes
   only a few of FreeBSD's flags (`ls -l`, `mkdir -p`, `rm -rf`; no `ls -a`, `cp -R`, `mv -i` and the like). Grow each toward
   FreeBSD's utility, flag by flag, with FreeBSD's manual page as the reference and a test per flag.
+* [Medium] shell, the stage heap limit (`erlang/apps/erx_shell/src/erx_shell_runner.erl`, `MAX_HEAP_WORDS`):
+  the runner sets `8 bsl 20` words, 64 MiB on a 64-bit runtime, where design-shell.md's "One evaluator per
+  stage" gives 4 MiB and an allowance of eight stages in 32 MiB; settle one figure in both.
 * [Medium] shell, the runner's review findings left open (`erlang/apps/erx_shell/src/erx_shell_runner.erl`):
   a stream has no direction, so `` x=`{cat >[0=1]} `` reads the write end of its own pipe and hangs the
   session; give `{pipe, Pid}` a direction and answer `ebadf` to a read of a write end. Stage, command and

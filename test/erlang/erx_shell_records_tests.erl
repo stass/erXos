@@ -5,7 +5,7 @@
 -moduledoc """
 EUnit cases of the command shell's record pipelines (docs/design-shell.md,
 "Pipelines" and "Verification and testing"): `where`'s predicates, their
-three-valued logic and bounds, `sort` and `count`, the terminal's table,
+three-valued logic and bounds, `sort`, `wc` counting records, the terminal's table,
 and whole pipelines of Erlang commands run by the runner to a terminal.
 The module is also a command of its own, `recs`, which emits fixed
 records, among them ones whose values are `unknown` and `timeout`.
@@ -236,7 +236,7 @@ run_line(Source) -> run_line(Source, #{inspect => local}).
 run_line(Source, Facets) ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)}
-                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_where, erx_cmd_sort, erx_cmd_count,
+                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_where, erx_cmd_sort, erx_cmd_wc,
                                    erx_cmd_echo, erx_cmd_cat]]),
     Terminal = terminal(),
     State = erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => Terminal, 2 => Terminal},
@@ -261,9 +261,10 @@ pipeline_statuses_test() ->
     ?assertEqual({<<"|">>, lines([Header] ++ lists:reverse(Sorted) ++ Undecided)},
                  run_line(<<"recs | sort -r -k n">>)).
 
+%% `wc -l` counts the records a record stage passes on, one line each.
 pipeline_count_test() ->
-    ?assertEqual({<<"||">>, <<"2\n">>}, run_line(<<"recs | where 'n < 100' | count">>)),
-    ?assertEqual({<<>>, <<"0\n">>}, run_line(<<"count">>)).
+    ?assertEqual({<<"||">>, <<"       2\n">>}, run_line(<<"recs | where 'n < 100' | wc -l">>)),
+    ?assertEqual({<<>>, <<"       0\n">>}, run_line(<<"wc -l">>)).
 
 %% Lines from bytes become `line` records, so `where` filters text.
 pipeline_lines_test() ->
@@ -271,9 +272,9 @@ pipeline_lines_test() ->
                  run_line(<<"echo 'alpha\nbeta\ngamma' | where 'line ~ *a' and 'line != gamma' "
                             "| sort -r | cat">>)).
 
-%% `ps` emits records that `where` and `count` take.
+%% `ps` emits records that `where` and `wc` take.
 pipeline_ps_test() ->
-    {Status, Shown} = run_line(<<"ps | where 'memory > 0' and 'reductions >= 0' | count">>),
+    {Status, Shown} = run_line(<<"ps | where 'memory > 0' and 'reductions >= 0' | wc -l">>),
     ?assertEqual(<<"||">>, Status),
     ?assert(binary_to_integer(string:trim(Shown)) > 0),
     {_, Table} = run_line(<<"ps | sort -r -k memory">>),

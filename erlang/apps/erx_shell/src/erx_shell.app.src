@@ -6,7 +6,7 @@
 %% evaluator, which runs a tree through a runner it is handed; the runner of
 %% the session's domain with its pipes and command namespace; the erx_cmd
 %% behaviour and the first Erlang commands (erx_cmd_*), among them the record
-%% stages where, sort and count; and its interactive
+%% stages where and sort and the file utilities such as cat and wc; and its interactive
 %% layer, which runs the shell on the console. It starts nothing of its own:
 %% erx_shell_script:run/2 runs a source in a process of the caller's.
 {application, erx_shell,
@@ -14,7 +14,6 @@
   {vsn, "1"},
   {modules, [erx_cmd,
              erx_cmd_cat,
-             erx_cmd_count,
              erx_cmd_cp,
              erx_cmd_echo,
              erx_cmd_erl,
@@ -28,6 +27,7 @@
              erx_cmd_rm,
              erx_cmd_sort,
              erx_cmd_true,
+             erx_cmd_wc,
              erx_cmd_where,
              erx_render,
              erx_shell,

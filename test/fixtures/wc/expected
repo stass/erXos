@@ -1,0 +1,60 @@
+$ wc words
+       4      12      72 words
+$ wc -l words
+       4 words
+$ wc -w words
+      12 words
+$ wc -c words
+      72 words
+$ wc -m words
+      72 words
+$ wc -L words
+      24 words
+$ wc -Llwc words
+       4      12      72      24 words
+$ wc utf8
+       4      11      77 utf8
+$ wc -m utf8
+      48 utf8
+$ wc -cm utf8
+      48 utf8
+$ wc -mc utf8
+      77 utf8
+$ wc -w utf8
+      11 utf8
+$ wc -mw utf8
+      14      48 utf8
+$ wc -L utf8
+      27 utf8
+$ wc -mL utf8
+      48      19 utf8
+$ wc bad
+       3      12      53 bad
+$ wc -m bad
+      51 bad
+$ wc -mw bad
+      11      51 bad
+$ wc -mL bad
+      51      25 bad
+$ wc -L noeol
+      21 noeol
+$ wc -lL noeol
+       2      21 noeol
+$ wc empty
+       0       0       0 empty
+$ wc words utf8 bad noeol empty
+       4      12      72 words
+       4      11      77 utf8
+       3      12      53 bad
+       2      14      74 noeol
+       0       0       0 empty
+      13      49     276 total
+$ wc -mL words utf8 bad
+      72      24 words
+      48      19 utf8
+      51      25 bad
+     171      25 total
+$ wc -w -l utf8 words
+       4      11 utf8
+       4      12 words
+       8      23 total

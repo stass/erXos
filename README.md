@@ -209,8 +209,8 @@ root
 % cat /tmp/hi
 hello from erXos
 % # How many processes run? Each is an Erlang process.
-% ps | count
-62
+% ps | wc -l
+      62
 % erl
 Eshell V17.1.1 (type help(). for help)
 
@@ -269,9 +269,9 @@ Error in process <0.150.0> with exit value:
   starts the Erlang shell; `q()` there returns to the command shell.
   The language has variables, lists, `for`, `if`, functions, pipelines,
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
-  Its commands are Erlang commands (`echo`, `cat`, `ls`, `mkdir`, `rm`,
-  `mv`, `cp`, `ps`, `mount`, `erl`, `true`, `false`, and the record stages
-  `where`, `sort` and `count`). Its language is checked against
+  Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `mkdir`,
+  `rm`, `mv`, `cp`, `ps`, `mount`, `erl`, `true`, `false`, and the record
+  stages `where` and `sort`). Its language is checked against
   plan9port's rc, built on the host as the oracle. Job control works for
   Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
   programs is not on master yet.
