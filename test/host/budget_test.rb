@@ -20,6 +20,9 @@ require_relative '../fixtures/generated_tree'
 class BudgetTest < Minitest::Test
   SEED = Integer(ENV.fetch('ERX_BUDGET_SEED', '20261103'))
   M = BudgetModel
+  # The cores the driver links beside budget.c: the object store and the
+  # list insert and budget-death walk of the attach and deletion cores.
+  DRIVER_CORES = %w[kernel/core/object.c kernel/core/attach.c kernel/core/delete.c kernel/core/cap.c].freeze
   WALL = M::WALL
   ELASTIC = M::ELASTIC
   DEPTH_MAX = M::DEPTH_MAX
@@ -254,7 +257,8 @@ class BudgetTest < Minitest::Test
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread',
                  *flags, *Erx::Generated.include_flags(root: @root),
-                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'), core,
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'), '-I', Erx::Generated.path('kernel/generated', root: @root), '-DERX_HOST',
+                 core, *DRIVER_CORES.map { |path| File.join(@root, path) },
                  File.join(@root, 'test/fixtures/budget_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output

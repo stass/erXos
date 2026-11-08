@@ -60,7 +60,6 @@ main(void)
 	erx_cap_table_t *table = (erx_cap_table_t *)table_storage;
 	erx_budget_t *root = (erx_budget_t *)budgets[0];
 	erx_budget_t *child;
-	erx_kcache_slot_t slot;
 	bool taken;
 	erx_object_t *records[2];
 	erx_budget_effects_t effects;
@@ -83,10 +82,8 @@ main(void)
 	erx_object_store_init(store, &key);
 	erx_object_test_store(records, 2);
 	if (erx_budget_init_root(root, 1024) != 0 ||
-	    erx_kcache_take(root, ERX_KCACHE_BUDGET, cache_page, &slot, &taken,
-	    &effects) != 0 ||
-	    erx_budget_carve(root, &slot, ERX_BUDGET_WALL, 16, 16, &child,
-	    &effects) != 0 ||
+	    erx_budget_carve(root, cache_page, ERX_BUDGET_WALL, 16, 16, &child,
+	    &taken, &effects) != 0 ||
 	    erx_object_init(store, records[0], ERX_K_GATE, child) != ERX_OK ||
 	    erx_object_init(store, records[1], ERX_K_GATE, root) != ERX_OK ||
 	    erx_cap_table_init(table, directory, sizeof(directory),

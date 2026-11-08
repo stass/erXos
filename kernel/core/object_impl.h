@@ -12,8 +12,9 @@
  * enforces, so every write of a header's field is in object.c.
  *
  * The header holds what the object store owns. The capability lock and
- * the existence lock, the grace period's queue item and the link on the
- * budget's list of charged objects join it with the cores that use them.
+ * the existence lock and the grace period's queue item join it with the
+ * cores that use them. It fits the record's fixed header area of
+ * ERX_OBJECT_HEADER_BYTES, which object.c asserts.
  */
 
 #include <stdatomic.h>
@@ -31,6 +32,11 @@ struct erx_object {
 	erx_cap_slot_t	*att_slots;	/* the slots that name it, in no order;
 					 * under its capability lock */
 	struct erx_budget *budget;	/* pays for this object; fixed */
+	struct {
+		erx_object_t *prev;	/* NULL at the head */
+		erx_object_t *next;	/* NULL at the tail */
+	} in_budget;			/* on its budget's att_charged until
+					 * closed; under the budget's lock */
 	uint64_t	 oid;		/* unique for the boot; correlation,
 					 * never authority */
 	char		 name[16];	/* ASCII; may be empty */

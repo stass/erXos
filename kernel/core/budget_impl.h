@@ -62,6 +62,9 @@ struct erx_budget {
 					 * no slot for the root; fixed */
 	erx_kcache_t	 caches[ERX_KCACHE_NKINDS]; /* its records' pages, by
 					 * kind; under its lock */
+	erx_charged_list_t att_charged;	/* the objects charged here, child
+					 * budgets included, not yet closed;
+					 * under its lock */
 	_Atomic bool	 dead;		/* closed: takes no charge, and its spending
 					 * is counted in its parent's used; written
 					 * under the lock, read without it by

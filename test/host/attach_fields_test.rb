@@ -26,6 +26,8 @@ class AttachFieldsTest < Minitest::Test
     files = tree
     assert_empty F.violations(files).map(&:to_s)
     assert_includes F.fields_of(RECORD, files.fetch(RECORD)).map(&:name), 'slots'
+    budget = 'kernel/core/budget_impl.h'
+    assert_includes F.fields_of(budget, files.fetch(budget)).map(&:name), 'charged'
   end
 
   # The seed: a field added to a record with neither insert nor walk.
@@ -37,10 +39,10 @@ class AttachFieldsTest < Minitest::Test
   end
 
   def test_a_field_of_another_record_needs_its_own_reader
-    files = tree.merge('kernel/core/budget_impl.h' => "struct erx_budget {\n\terx_dlink_t att_charged;\n};\n")
+    files = tree.merge('kernel/core/irq_impl.h' => "struct erx_irq {\n\tvoid *att_watched;\n};\n")
     files[F::ATTACH] = files.fetch(F::ATTACH) +
-                       "\nerx_status_t\nerx_attach_budget_charged(erx_object_t *o)\n{\n\tif (erx_object_state(o) != 1)\n\t\treturn (1);\n\treturn (0);\n}\n"
-    assert_equal ["att_charged has no walk (erx_budget_charged) in #{F::DELETE}"], found(files)
+                       "\nerx_status_t\nerx_attach_irq_watched(erx_object_t *o)\n{\n\tif (erx_object_state(o) != 1)\n\t\treturn (1);\n\treturn (0);\n}\n"
+    assert_equal ["att_watched has no walk (erx_irq_watched) in #{F::DELETE}"], found(files)
   end
 
   # A field name two records share needs an insert for each record.

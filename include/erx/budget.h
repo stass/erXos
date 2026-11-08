@@ -12,6 +12,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
+#include "erx/object.h"
 
 /*
  * The budget core: the accounting of kernel memory as a tree of budgets
@@ -40,7 +41,6 @@ typedef uint64_t erx_npages_t;
 typedef struct erx_budget erx_budget_t;
 typedef struct erx_budget_counters erx_budget_counters_t;
 typedef struct erx_budget_effects erx_budget_effects_t;
-typedef struct erx_budget_walk erx_budget_walk_t;
 typedef struct erx_reserve erx_reserve_t;
 typedef struct erx_reserve_counts erx_reserve_counts_t;
 typedef struct erx_kcache_slot erx_kcache_slot_t;
@@ -61,7 +61,10 @@ struct erx_budget_effects {
 	erx_budget_t	*refused;
 	/* IRQ objects whose watch the adjustment crossed and disarmed. */
 	struct erx_irq	*fire[ERX_BUDGET_DEPTH_MAX];
-	/* Dead budgets whose spending reached zero: queue their puts. */
+	/*
+	 * Dead budgets whose spending reached zero: queue the put of the
+	 * counted reference each one's object holds for its counters.
+	 */
 	erx_budget_t	*tombstone[ERX_BUDGET_DEPTH_MAX];
 	uint32_t	 nfire;
 	uint32_t	 ntombstone;
@@ -125,7 +128,8 @@ int	erx_budget_init_root(erx_budget_t *, erx_npages_t)
  * the take that adds it until the free that empties it; a record is freed
  * only by the reaper's record free, after its object's grace period and
  * last counted reference, so its page stays charged through that grace
- * period. The pilot's one kind is the budget record.
+ * period. Each record is its object's header area, then the type's body
+ * (erx_object_body). The pilot's one kind is the budget record.
  *
  * A taken record is named by its slot, the page and the record's index
  * on it, which the record's owner keeps for the free.
@@ -165,7 +169,10 @@ int	erx_kcache_take(erx_budget_t *, erx_kcache_kind_t, void *page,
 	    erx_kcache_slot_t *slot, bool *page_taken, erx_budget_effects_t *)
 	    ERX_WARN_UNUSED_RESULT;
 
-/* The record a slot names: aligned to 64 bytes, its kind's size. */
+/*
+ * The record a slot names, its object's header first: aligned to 64
+ * bytes, its kind's size.
+ */
 void	*erx_kcache_record(const erx_kcache_slot_t *);
 
 /*
@@ -184,26 +191,35 @@ int	erx_kcache_free(erx_budget_t *, erx_kcache_kind_t,
 
 /*
  * Carves a child from parent with the given kind, guarantee and cap, in
- * the record slot names, which the caller took from the parent's cache of
- * budget records, and charges the guarantee to the parent's carved.
- * Refuses with ERX_EINVAL a kind other than a wall or elastic, a cap
- * below the guarantee, for a wall a cap other than the guarantee, or a
- * slot with no page, a page of another budget's cache or an index off
- * its page; with ERX_ELIMIT
- * a parent at depth ERX_BUDGET_DEPTH_MAX - 1; with ERX_ESTALE a dead
- * parent; and with ERX_ENOMEM a guarantee the parent's chain cannot
- * cover. On a refusal the record stays taken and the caller frees it
- * back, as the design's carve returns it to the cache. The child is
- * reachable by no one until the call returns 0; *child is its record.
+ * one chain plan under one hold of the parent's lock: the child's record
+ * from the parent's cache of budget records and the guarantee to the
+ * parent's carved, taken together or not at all. When the cache has no
+ * free record, page, ERX_KCACHE_PAGE_BYTES the caller took from the page
+ * allocator, becomes a new cache page charged to the parent's used in
+ * the same plan, and *page_taken says so; the caller returns an untaken
+ * page. Refuses with ERX_EINVAL a kind other than a wall or elastic, a
+ * cap below the guarantee, or for a wall a cap other than the guarantee;
+ * with ERX_ELIMIT a parent at depth ERX_BUDGET_DEPTH_MAX - 1, or a cache
+ * with no free record and page NULL; with ERX_ESTALE a dead parent; and
+ * with ERX_ENOMEM, naming the level, a record and guarantee the parent's
+ * chain cannot cover. Nothing changes on a refusal.
+ *
+ * *child is the record's body; its object header, at erx_object_of,
+ * is the caller's to make (erx_object_init, ERX_K_BUDGET, paid for by
+ * parent), to put on the parent's att_charged through
+ * erx_attach_budget_charged, and to give one more counted reference, the
+ * one its counters hold until its tombstone's put. The child is reachable
+ * by no one until then.
  */
-int	erx_budget_carve(erx_budget_t *, const erx_kcache_slot_t *,
-	    erx_budget_kind_t, erx_npages_t, erx_npages_t, erx_budget_t **child,
+int	erx_budget_carve(erx_budget_t *, void *page, erx_budget_kind_t,
+	    erx_npages_t, erx_npages_t, erx_budget_t **child, bool *page_taken,
 	    erx_budget_effects_t *) ERX_WARN_UNUSED_RESULT;
 
 /*
- * The free of a dead child budget's own record, the tombstone's last
- * step: erx_kcache_free on the parent's cache at the slot the carve
- * recorded. ERX_EINVAL for the root or a live budget, ERX_EBUSY for a
+ * The free of a dead child budget's own record, at its object's last
+ * put, the record's one release event, which comes after its tombstone's
+ * put and every walk's and destroy's: erx_kcache_free on the parent's
+ * cache at the slot the carve recorded. ERX_EINVAL for the root or a live budget, ERX_EBUSY for a
  * budget that still has something charged to it, or whose pinned is not
  * zero, which is kept for the boot.
  */
@@ -281,58 +297,23 @@ bool	erx_budget_dead(const erx_budget_t *);
 erx_budget_t *erx_budget_parent(const erx_budget_t *);
 
 /*
- * The destroy's walk over a closed budget's tree, iterative and without a
- * stack: the cursor descends into each child budget it meets on a list of
- * charged objects and climbs back through the child's parent when the
- * child's list is empty, so its state is two pointers whatever the depth.
- * The caller reports what heads the cursor's list; the walk names the
- * next step:
- *
- *   ERX_BUDGET_WALK_DESTROY  destroy the head object, as a deletion would;
- *   ERX_BUDGET_WALK_ENTER    the head is the child budget in walk->subject:
- *                            close it, then walk its list (the cursor);
- *   ERX_BUDGET_WALK_LEAVE    walk->subject's list is empty: take it off
- *                            its parent's list, now the cursor's;
- *   ERX_BUDGET_WALK_DONE     the top budget's list is empty.
+ * The budget's list of charged objects, att_charged: the objects charged
+ * to it, child budgets included, that no destroy has closed yet. Its
+ * one insert is erx_attach_budget_charged; it loses an object at the
+ * object's close, by the destroy's drain or the budget-death walk of the
+ * deletion core, whichever takes the budget's lock first. Read and
+ * written under the budget's lock, the caller's. Membership means the
+ * walk still has to close the object, never that it lives: a dead
+ * budget's tombstone waits for its records through used, not the list.
  */
-typedef enum erx_budget_head {
-	ERX_BUDGET_HEAD_EMPTY = 1,
-	ERX_BUDGET_HEAD_OBJECT = 2,
-	ERX_BUDGET_HEAD_BUDGET = 3
-} erx_budget_head_t;
-
-/*
- * ERX_BUDGET_WALK_INVALID: the reported head is not a budget whose parent
- * is the cursor, or not a head at all; the list is corrupt and the walk
- * moves nothing.
- */
-typedef enum erx_budget_walk_action {
-	ERX_BUDGET_WALK_DESTROY = 1,
-	ERX_BUDGET_WALK_ENTER = 2,
-	ERX_BUDGET_WALK_LEAVE = 3,
-	ERX_BUDGET_WALK_DONE = 4,
-	ERX_BUDGET_WALK_INVALID = 5
-} erx_budget_walk_action_t;
-
-struct erx_budget_walk {
-	erx_budget_t	*top;		/* the destroyed budget, closed */
-	erx_budget_t	*cursor;	/* the budget whose list is walked */
-	erx_budget_t	*subject;	/* the budget an ENTER or LEAVE names */
-};
-
-void	erx_budget_walk_begin(erx_budget_walk_t *, erx_budget_t *);
-/* head_budget is the head when it is a budget and is ignored otherwise. */
-erx_budget_walk_action_t erx_budget_walk_next(erx_budget_walk_t *,
-	    erx_budget_head_t, erx_budget_t *);
+erx_charged_list_t *erx_budget_charged(erx_budget_t *);
 
 /*
  * A reserve's accounting. Every step is made under the reserve's owner's
  * lock, which serialises the step's read and write of the counts; the
  * owner of a budget's cache reserve is the cache, whose lock is its own
- * and never the budget's, since each step takes the budget's chain. An
- * ENTER whose close finds the child already dead (its own destroy got
- * there first) waits for that destroy, as the drain of any existence lock
- * does, before it walks on. erx_reserve_charge,
+ * and never the budget's, since each step takes the budget's chain.
+ * erx_reserve_charge,
  * erx_reserve_take and erx_page_release of the page core are made of
  * these steps:
  *

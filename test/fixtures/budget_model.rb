@@ -226,24 +226,25 @@ class BudgetModel
     OK
   end
 
+  # The carve: one plan of the record's new cache page, when the parent's
+  # cache has no free record, and the guarantee, applied together or not at
+  # all, so a refused carve takes no record and charges nothing.
   def op_carve(parent, kind, guarantee, cap)
-    slot = cache_take(parent)
-    id = @next_budget
-    begin
-      raise Refusal, EINVAL unless [WALL, ELASTIC].include?(kind)
-      raise Refusal, EINVAL if cap < guarantee || (kind == WALL && cap != guarantee)
-      raise Refusal, ELIMIT if budget(parent).depth >= DEPTH_MAX - 1
+    raise Refusal, EINVAL unless [WALL, ELASTIC].include?(kind)
+    raise Refusal, EINVAL if cap < guarantee || (kind == WALL && cap != guarantee)
+    raise Refusal, ELIMIT if budget(parent).depth >= DEPTH_MAX - 1
+    raise Refusal, ESTALE if budget(parent).dead
 
-      change(parent, dead_rule: :refused) do
-        @budgets[id] = new_budget(kind: kind, parent: parent, depth: budget(parent).depth + 1,
-                                  guarantee: guarantee, cap: cap)
-        page, index = slot
-        budget(parent).cache.pages.fetch(page)[index] = id
-      end
-    rescue Refusal
-      cache_free(parent, slot)
-      raise
+    id = @next_budget
+    fresh = budget(parent).cache.partial.empty?
+    change(parent, dead_rule: :refused) do
+      cache_add_page(parent) if fresh
+      page, index = cache_place(parent)
+      @budgets[id] = new_budget(kind: kind, parent: parent, depth: budget(parent).depth + 1,
+                                guarantee: guarantee, cap: cap)
+      budget(parent).cache.pages.fetch(page)[index] = id
     end
+    take_pages(1) if fresh
     @next_budget += 1
     budget(parent).entries << [:budget, id]
     say(" id=#{id}")
@@ -421,21 +422,17 @@ class BudgetModel
     OK
   end
 
-  # The core's take: the lowest free slot of the first listed page, or a
-  # new page charged to the budget, listed first; a full page leaves the
-  # list. A dead budget takes no record.
-  def cache_take(id)
-    raise Refusal, ESTALE if budget(id).dead
+  # A new cache page of the budget's, inside the change that charges it.
+  def cache_add_page(id)
+    page = @next_page
+    @next_page += 1
+    budget(id).cache.pages[page] = Array.new(@per_page)
+    budget(id).cache.partial.unshift(page)
+  end
 
+  # Takes the lowest free record of the first page with one.
+  def cache_place(id)
     cache = budget(id).cache
-    if cache.partial.empty?
-      page = @next_page
-      change(id) { budget(id).cache.pages[page] = Array.new(@per_page) }
-      take_pages(1)
-      @next_page += 1
-      cache = budget(id).cache
-      cache.partial.unshift(page)
-    end
     page = cache.partial.first
     slots = cache.pages.fetch(page)
     index = slots.index(nil)

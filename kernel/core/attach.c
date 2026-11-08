@@ -13,6 +13,7 @@
 
 #include "erx/abi.h"
 #include "erx/attach.h"
+#include "erx/budget.h"
 #include "erx/object.h"
 
 erx_status_t
@@ -23,5 +24,16 @@ erx_attach_object_slots(erx_object_t *object, erx_cap_slot_t *slot,
 		return (ERX_ESTALE);
 	*nextp = erx_object_slots(object);
 	erx_object_set_slots(object, slot);
+	return (ERX_OK);
+}
+
+erx_status_t
+erx_attach_budget_charged(erx_object_t *object)
+{
+	if (erx_object_state(object) != ERX_OBJ_LIVE ||
+	    erx_budget_dead(erx_object_budget(object)))
+		return (ERX_ESTALE);
+	erx_object_charged_append(erx_budget_charged(erx_object_budget(object)),
+	    object);
 	return (ERX_OK);
 }

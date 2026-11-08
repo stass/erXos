@@ -8,9 +8,12 @@
  * core's host: it provides the lock effects, checking that every chain is
  * locked descendant first and released whole, and it stands in for the
  * page core (a free count and a released count, and the memory of the
- * cache pages the core's record cache asks for) and the lists of charged
- * objects that a destroy walks. Every child budget's record comes from its
- * parent's record cache, and its put frees it there. It reads
+ * cache pages the core's record cache asks for). Each reserve stands in
+ * for an object that holds it: a record of an object header and the
+ * reserve, on its budget's real list of charged objects, which a destroy
+ * walks through the deletion core's budget-death walk. Every child
+ * budget's record comes from its parent's record cache, and its put frees
+ * it there. It reads
  * one command per line from the file named by its argument and prints,
  * for each, the status and effects and then the whole state, which
  * test/fixtures/budget_model.rb predicts independently:
@@ -46,10 +49,11 @@
 #include <string.h>
 
 #include "budget_impl.h"
+#include "erx/attach.h"
+#include "erx/delete.h"
 
 #define BUDGETS_MAX	64
 #define RESERVES_MAX	256
-#define ENTRIES_MAX	64
 #define IRQS_MAX	16
 #define PART_PAGES	64
 #define RACE_THREADS	4
@@ -59,21 +63,16 @@ struct erx_irq {
 	int	id;
 };
 
-typedef struct entry {
-	int	is_budget;
-	int	id;
-} entry_t;
-
 typedef struct budget_slot {
 	erx_budget_t	*budget;	/* in its parent's cache; the root's is
 					 * root_record */
 	pthread_mutex_t	 lock;
 	int		 exists;	/* carved and its record not yet put */
-	int		 nentries;	/* its list of charged objects */
-	entry_t		 entries[ENTRIES_MAX];
 } budget_slot_t;
 
+/* An object holding a reserve: its header area, then the reserve. */
 typedef struct reserve_slot {
+	alignas(64) unsigned char header[ERX_OBJECT_HEADER_BYTES];
 	erx_reserve_t	 reserve;
 	pthread_mutex_t	 lock;		/* the owner's lock */
 	int		 exists;
@@ -88,6 +87,8 @@ typedef struct report {
 
 static budget_slot_t budgets[BUDGETS_MAX];
 static erx_budget_t root_record;
+static alignas(64) unsigned char store_record[64];
+#define store	(*(erx_object_store_t *)(void *)store_record)
 static alignas(ERX_KCACHE_PAGE_BYTES) unsigned char
     cache_pages[CACHE_PAGES_MAX][ERX_KCACHE_PAGE_BYTES];
 static bool cache_page_used[CACHE_PAGES_MAX];
@@ -145,6 +146,13 @@ cache_page_put(void *page)
 {
 	cache_page_used[((unsigned char *)page - cache_pages[0]) /
 	    ERX_KCACHE_PAGE_BYTES] = false;
+}
+
+/* The driver passes no preemption point: every borrowed reference holds. */
+uint32_t
+erx_effect_thread_epoch(void)
+{
+	return (0);
 }
 
 void
@@ -330,48 +338,6 @@ valid_reserve(long id)
 }
 
 static void
-list_append(int budget, int is_budget, int id)
-{
-	budget_slot_t *slot;
-
-	slot = &budgets[budget];
-	if (slot->nentries == ENTRIES_MAX)
-		fail("list full");
-	slot->entries[slot->nentries++] = (entry_t){ is_budget, id };
-}
-
-static void
-list_remove_head(int budget)
-{
-	budget_slot_t *slot;
-
-	slot = &budgets[budget];
-	memmove(&slot->entries[0], &slot->entries[1],
-	    (size_t)(slot->nentries - 1) * sizeof(slot->entries[0]));
-	slot->nentries--;
-}
-
-/* A destroyed budget leaves its parent's list as its deletion ends. */
-static void
-list_remove_budget(int budget, int id)
-{
-	budget_slot_t *slot;
-	int i;
-
-	slot = &budgets[budget];
-	for (i = 0; i < slot->nentries; i++) {
-		if (slot->entries[i].is_budget && slot->entries[i].id == id) {
-			memmove(&slot->entries[i], &slot->entries[i + 1],
-			    (size_t)(slot->nentries - i - 1) *
-			    sizeof(slot->entries[0]));
-			slot->nentries--;
-			return;
-		}
-	}
-	fail("a destroyed budget on no list");
-}
-
-static void
 new_budget_slot(int id, erx_budget_t *budget)
 {
 	budget_slot_t *slot;
@@ -379,30 +345,6 @@ new_budget_slot(int id, erx_budget_t *budget)
 	slot = &budgets[id];
 	slot->budget = budget;
 	slot->exists = 1;
-	slot->nentries = 0;
-}
-
-/*
- * A record from budget's cache: a free one, or one on a new page, which
- * the take charges to the budget and the driver takes from the free pages.
- */
-static int
-cache_take(erx_budget_t *budget, erx_kcache_slot_t *slot, report_t *report)
-{
-	erx_budget_effects_t effects;
-	void *page;
-	bool taken;
-	int error;
-
-	page = cache_page_get();
-	error = erx_kcache_take(budget, ERX_KCACHE_BUDGET, page, slot, &taken,
-	    &effects);
-	collect(report, &effects);
-	if (taken)
-		take_pages(1);
-	else
-		cache_page_put(page);
-	return (error);
 }
 
 /* A page the cache gave back goes to the released pages. */
@@ -415,129 +357,209 @@ cache_page_released(void *page)
 	}
 }
 
-/* The carve's composition: the record's cache page, then the guarantee. */
+/*
+ * Puts obj on its budget's list through the list's insert, under the
+ * budget's lock, as a creation does once it has charged the record.
+ */
+static int
+join_budget(erx_object_t *obj, erx_ktype_t type, erx_budget_t *budget)
+{
+	int error;
+
+	if (erx_object_init(&store, obj, type, budget) != ERX_OK)
+		fail("object init refused");
+	erx_effect_budget_lock(budget);
+	error = erx_attach_budget_charged(obj);
+	erx_effect_budget_unlock(budget);
+	return (error);
+}
+
+/*
+ * The carve: one plan of the record's page and the guarantee, then the
+ * child's object header, on the parent's list.
+ */
 static int
 carve(long parent, long kind, erx_npages_t guarantee, erx_npages_t cap,
     report_t *report)
 {
 	erx_budget_effects_t effects;
-	erx_kcache_slot_t slot;
 	erx_budget_t *child;
 	void *page;
+	bool taken;
 	int error, id;
 
 	if (nbudgets == BUDGETS_MAX)
 		fail("too many budgets");
-	error = cache_take(budgets[parent].budget, &slot, report);
+	page = cache_page_get();
+	error = erx_budget_carve(budgets[parent].budget, page,
+	    (erx_budget_kind_t)kind, guarantee, cap, &child, &taken, &effects);
+	collect(report, &effects);
+	if (taken)
+		take_pages(1);
+	else
+		cache_page_put(page);
 	if (error != 0)
 		return (error);
-	id = nbudgets;
-	error = erx_budget_carve(budgets[parent].budget, &slot,
-	    (erx_budget_kind_t)kind, guarantee, cap, &child, &effects);
-	collect(report, &effects);
-	if (error != 0) {
-		/* The record goes back to the cache, as any freed record does. */
-		if (erx_kcache_free(budgets[parent].budget, ERX_KCACHE_BUDGET,
-		    &slot, &page, &effects) != 0)
-			fail("cache free refused");
-		collect(report, &effects);
-		cache_page_released(page);
-		return (error);
-	}
-	nbudgets++;
+	id = nbudgets++;
 	new_budget_slot(id, child);
-	list_append((int)parent, 1, id);
+	if (join_budget(erx_object_of(child), ERX_K_BUDGET,
+	    budgets[parent].budget) != ERX_OK)
+		fail("a live parent refused its child");
+	/* The reference the child's counters hold, which its tombstone puts. */
+	(void)erx_object_ref(erx_uref_make(erx_object_of(child)));
 	say(report, " id=%d", id);
 	return (0);
 }
 
+static int
+reserve_id(const erx_object_t *obj)
+{
+	int i;
+
+	for (i = 0; i < nreserves; i++)
+		if (reserves[i].exists &&
+		    (const void *)reserves[i].header == (const void *)obj)
+			return (i);
+	fail("an object outside the driver's table");
+	return (-1);
+}
+
+/*
+ * A dead child budget's record is freed at its object's last put, which
+ * is the one release event: the object's own reference, the references
+ * the walk and the destroyer hold, and the one its counters hold until
+ * the tombstone's put each end in it.
+ */
 static void
-destroy_head_reserve(int budget, int id, report_t *report)
+put_object(erx_object_t *obj, report_t *report)
+{
+	erx_budget_effects_t effects;
+	void *page;
+	int id;
+
+	if (!erx_object_put(obj) || erx_object_type(obj) != ERX_K_BUDGET)
+		return;
+	id = budget_id(erx_object_body(obj));
+	say(report, " freed=%d", id);
+	if (erx_budget_free_record(budgets[id].budget, &page, &effects) != 0)
+		fail("record free refused");
+	budgets[id].exists = 0;
+	collect(report, &effects);
+	cache_page_released(page);
+}
+
+/*
+ * One destroy, as a deletion runs it, with nothing else racing: the close,
+ * the drain (the object leaves its budget's list), and the teardown. An
+ * object holding a reserve releases its pages at its dead budget; a
+ * budget's object holds no capability, so its teardown is empty. The
+ * driver frees no record, so the put of the object's own reference is
+ * made at once. Returns whether this destroy went on past the close.
+ */
+static bool
+destroy_object(erx_delete_t *destroy, report_t *report)
 {
 	erx_reserve_counts_t counts;
 	erx_reserve_t *reserve;
+	erx_object_t *obj = destroy->object;
+	int id;
 
-	reserve = &reserves[id].reserve;
-	erx_reserve_read(reserve, &counts);
-	if (release(reserve, counts.backed - counts.pooled, counts.pooled,
-	    report) != 0)
-		fail("teardown refund refused");
-	reserves[id].exists = 0;
-	list_remove_head(budget);
+	for (;;) {
+		switch (erx_delete_step(destroy).action) {
+		case ERX_DELETE_STOP:
+			return (false);
+		case ERX_DELETE_DRAIN:
+			erx_delete_uncharge(obj);
+			break;
+		case ERX_DELETE_CLEAR:
+			fail("a driver object named by a slot");
+			break;
+		case ERX_DELETE_PUT:
+			if (erx_object_type(obj) != ERX_K_BUDGET) {
+				id = reserve_id(obj);
+				reserve = &reserves[id].reserve;
+				erx_reserve_read(reserve, &counts);
+				if (release(reserve, counts.backed -
+				    counts.pooled, counts.pooled, report) != 0)
+					fail("teardown refund refused");
+				reserves[id].exists = 0;
+			}
+			put_object(obj, report);
+			return (true);
+		}
+	}
 }
 
-/* The destroy: close, then the iterative walk, printing each step. */
+/*
+ * The destroy of a budget: its own object's destroy, its close, then the
+ * budget-death walk over its tree, printing the state after each object
+ * destroyed, each child closed, and each climb from a child.
+ */
 static int
 destroy(long top, report_t *report)
 {
 	erx_budget_effects_t effects;
-	erx_budget_walk_t walk;
-	erx_budget_head_t head;
-	budget_slot_t *slot;
-	int cursor, error;
+	erx_delete_budget_walk_t walk;
+	erx_delete_t own;
+	erx_object_t *obj;
+	bool budget;
+	int error;
 
+	if (top == 0)
+		return (erx_budget_close(budgets[0].budget, &effects));
+	/* The lookup that names the budget refuses a closed object. */
+	obj = erx_object_of(budgets[top].budget);
+	if (erx_object_state(obj) != ERX_OBJ_LIVE)
+		return (ERX_ESTALE);
+	obj = erx_object_ref(erx_uref_make(obj));
+	erx_delete_begin(&own, obj);
+	if (!destroy_object(&own, report)) {
+		put_object(obj, report);
+		return (ERX_ESTALE);
+	}
 	error = erx_budget_close(budgets[top].budget, &effects);
 	collect(report, &effects);
 	if (error != 0)
-		return (error);
-	erx_budget_walk_begin(&walk, budgets[top].budget);
+		fail("the close of a budget whose destroy went on refused");
+	erx_delete_budget_walk_begin(&walk, budgets[top].budget);
 	for (;;) {
-		cursor = budget_id(walk.cursor);
-		slot = &budgets[cursor];
-		head = slot->nentries == 0 ? ERX_BUDGET_HEAD_EMPTY :
-		    slot->entries[0].is_budget ? ERX_BUDGET_HEAD_BUDGET :
-		    ERX_BUDGET_HEAD_OBJECT;
-		switch (erx_budget_walk_next(&walk, head, head ==
-		    ERX_BUDGET_HEAD_BUDGET ?
-		    budgets[slot->entries[0].id].budget : NULL)) {
-		case ERX_BUDGET_WALK_DESTROY:
-			destroy_head_reserve(cursor, slot->entries[0].id,
-			    report);
+		switch (erx_delete_budget_walk_next(&walk, &effects)) {
+		case ERX_DELETE_BUDGET_WALK_DESTROY:
+			budget = erx_object_type(walk.destroy.object) ==
+			    ERX_K_BUDGET;
+			(void)destroy_object(&walk.destroy, report);
+			if (budget)
+				continue;
 			break;
-		case ERX_BUDGET_WALK_ENTER:
-			if (erx_budget_close(walk.subject, &effects) != 0)
-				fail("close of a doomed budget refused");
+		case ERX_DELETE_BUDGET_WALK_CLOSED:
 			collect(report, &effects);
 			break;
-		case ERX_BUDGET_WALK_LEAVE:
-			if (budget_id(walk.cursor) !=
-			    budget_id(erx_budget_parent(walk.subject)))
-				fail("walk left to a budget other than the parent");
-			list_remove_head(budget_id(walk.cursor));
+		case ERX_DELETE_BUDGET_WALK_PUT:
+			budget = erx_object_type(walk.put) == ERX_K_BUDGET;
+			put_object(walk.put, report);
+			if (!budget)
+				continue;
 			break;
-		case ERX_BUDGET_WALK_INVALID:
-			fail("the walk refused its list");
-			break;
-		case ERX_BUDGET_WALK_DONE:
-			list_remove_budget(budget_id(erx_budget_parent(
-			    walk.top)), (int)top);
+		case ERX_DELETE_BUDGET_WALK_DONE:
+			put_object(obj, report);
 			return (0);
 		}
 		print_state("W");
 	}
 }
 
-/* One round of puts: each due record frees its page in its parent's cache. */
+/* One round of tombstone puts: each drops the reference of its counters. */
 static void
 put_round(report_t *report)
 {
-	erx_budget_effects_t effects;
 	int due[BUDGETS_MAX];
-	void *page;
 	int i, n;
 
 	n = npending;
 	memcpy(due, pending, sizeof(due[0]) * (size_t)n);
 	npending = 0;
-	for (i = 0; i < n; i++) {
-		say(report, " freed=%d", due[i]);
-		if (erx_budget_free_record(budgets[due[i]].budget, &page,
-		    &effects) != 0)
-			fail("record free refused");
-		budgets[due[i]].exists = 0;
-		collect(report, &effects);
-		cache_page_released(page);
-	}
+	for (i = 0; i < n; i++)
+		put_object(erx_object_of(budgets[due[i]].budget), report);
 }
 
 typedef struct race_thread {
@@ -613,7 +635,6 @@ arith(report_t *report)
 {
 	erx_budget_effects_t effects;
 	erx_budget_counters_t before, after;
-	erx_kcache_slot_t slot;
 	erx_budget_t *root, *child;
 	bool taken;
 
@@ -626,15 +647,13 @@ arith(report_t *report)
 	new_budget_slot(0, root);
 	nbudgets = 1;
 	/* The child's record takes one page: the root is full after it. */
-	if (erx_kcache_take(root, ERX_KCACHE_BUDGET, cache_pages[0], &slot,
-	    &taken, &effects) != 0 || !taken)
-		fail("the record's page refused");
-	say(report, " carve=%d", erx_budget_carve(root, &slot,
+	say(report, " carve=%d", erx_budget_carve(root, cache_pages[0],
 	    ERX_BUDGET_ELASTIC, (erx_npages_t)INT64_MAX + 1, UINT64_MAX,
-	    &child, &effects));
-	say(report, " carve=%d", erx_budget_carve(root, &slot,
-	    ERX_BUDGET_ELASTIC, INT64_MAX - 1, UINT64_MAX, &child, &effects));
-	if (child == NULL)
+	    &child, &taken, &effects));
+	say(report, " carve=%d", erx_budget_carve(root, cache_pages[0],
+	    ERX_BUDGET_ELASTIC, INT64_MAX - 1, UINT64_MAX, &child, &taken,
+	    &effects));
+	if (child == NULL || !taken)
 		fail("the largest carve refused");
 	new_budget_slot(1, child);
 	nbudgets = 2;
@@ -730,12 +749,6 @@ command(char *line, report_t *report)
 	if (strcmp(name, "destroy") == 0)
 		return (destroy(a, report));
 	if (strcmp(name, "reserve") == 0) {
-		erx_budget_counters_t counters;
-
-		/* The list's insert function refuses a dead budget. */
-		erx_budget_read(budgets[a].budget, &counters);
-		if (counters.dead)
-			return (ERX_ESTALE);
 		if (nreserves == RESERVES_MAX)
 			fail("too many reserves");
 		reserves[nreserves].exists = 1;
@@ -743,7 +756,13 @@ command(char *line, report_t *report)
 		pthread_mutex_init(&reserves[nreserves].lock, NULL);
 		erx_reserve_init(&reserves[nreserves].reserve,
 		    budgets[a].budget);
-		list_append((int)a, 0, nreserves);
+		/* The list's insert refuses a dead budget. */
+		error = join_budget((erx_object_t *)(void *)
+		    reserves[nreserves].header, ERX_K_MEMORY, budgets[a].budget);
+		if (error != ERX_OK) {
+			reserves[nreserves].exists = 0;
+			return (error);
+		}
 		say(report, " id=%d", nreserves);
 		nreserves++;
 		return (0);
@@ -794,6 +813,11 @@ main(int argc, char **argv)
 		fail(strerror(errno));
 	for (i = 0; i < BUDGETS_MAX; i++)
 		pthread_mutex_init(&budgets[i].lock, NULL);
+	if (erx_object_store_size() > sizeof(store_record) ||
+	    erx_object_body((erx_object_t *)(void *)reserves[0].header) !=
+	    (void *)&reserves[0].reserve)
+		fail("a record does not fit the driver's layout");
+	erx_object_store_init(&store, &(erx_oid_key_t){ { 1, 2, 3, 4 } });
 	for (i = 0; i < IRQS_MAX; i++)
 		irqs[i].id = i;
 	while (fgets(line, sizeof(line), input) != NULL) {

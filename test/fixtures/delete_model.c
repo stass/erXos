@@ -10,14 +10,24 @@
  * the grace tracker.
  *
  * One object X, a gate, starts named by three slots: S1 in table T1, S2
- * and S3 in table T2. The scenario, the program's argument, names up to
- * four actors by letter; each is a program of atomic steps, every step
- * one critical section under the locks the cores name:
+ * and S3 in table T2, and charged to a budget B carved from the root, on
+ * B's list of charged objects. The scenario, the program's argument,
+ * names up to four actors by letter; each is a program of atomic steps,
+ * every step one critical section under the locks the cores name:
  *
- *   D  a deletion: erx_delete_step's close, the drain (enabled only while
- *      no one holds X's existence lock), one slot clear per step with a
- *      preemption point after it, the put retired to the grace tracker,
- *      and the free once the put's stamp is mature;
+ *   D  a deletion: erx_delete_step's close, the drain's first action
+ *      (X leaves B's list, erx_delete_uncharge), the drain itself
+ *      (enabled only while no one holds X's existence lock), one slot
+ *      clear per step with a preemption point after it, the put retired
+ *      to the grace tracker, and the free once the put's stamp is mature;
+ *   K  the destruction of B: B's close, then the budget-death walk of
+ *      the deletion core, one take per step, running each destroy it
+ *      hands out as D does and dropping the walk's reference after it;
+ *   P  a publication of X onto a parent Y, which stays live: takes X's
+ *      existence lock (refused once X is closed), then links X on Y's
+ *      list of children and drops the lock, as a creator publishes a
+ *      construction under its lock; X's teardown takes it off Y's list;
+ *   U  the seeded publication: links X on Y's list without the lock;
  *   C  a close of S1, whose release, by the release rule, starts a destroy
  *      that this actor then runs as D does;
  *   E  the emptying of T2: marks it emptied, then closes each slot of T2
@@ -39,6 +49,8 @@
  *
  *   no lookup, attachment or taking of the existence lock succeeds after
  *   the close; no one holds the existence lock once the drain has ended;
+ *   X is off B's list once the drain has ended, and off Y's once its
+ *   teardown has handed out the put;
  *   one destroy alone goes on past its close; the object is released at
  *   most once, and only when no slot names it; a release of a closed
  *   object asks for no destroy; once the teardown hands out the put, no
@@ -66,6 +78,7 @@
 #include <string.h>
 
 #include "erx/abi.h"
+#include "erx/attach.h"
 #include "erx/budget.h"
 #include "erx/cap.h"
 #include "erx/delete.h"
@@ -79,6 +92,7 @@
 
 enum model_pc {
 	PC_START = 0,
+	PC_UNCHARGE,		/* D: the drain's unlink from B's list is due */
 	PC_DRAIN,		/* D: the drain is due */
 	PC_TEAR,		/* D: the teardown's parts are due */
 	PC_FREE,		/* D: the put is queued; the free is due */
@@ -87,6 +101,9 @@ enum model_pc {
 	PC_WORK,		/* O: holds the existence lock */
 	PC_USE,			/* R: holds a borrowed pointer */
 	PC_POINT,		/* R: the preemption point is due */
+	PC_WALK,		/* K: the walk's next part is due */
+	PC_KDESTROY,		/* K: the destroy the walk handed out begins */
+	PC_PUBLISH,		/* P: holds the existence lock; links next */
 	PC_DONE
 };
 
@@ -99,10 +116,14 @@ typedef struct model_actor {
 	uint64_t	 stamp;		/* D: the put's stamp */
 	bool		 goes_on;	/* D: its destroy went on past the close */
 	erx_delete_t	 destroy;
+	erx_delete_budget_walk_t walk;		/* K: the budget-death walk */
 	erx_uref_t	 ref;
 } model_actor_t;
 
 typedef struct model_world {
+	alignas(ERX_KCACHE_PAGE_BYTES) unsigned char cache_page[
+	    ERX_KCACHE_PAGE_BYTES];	/* the root's cache page, holding B */
+	alignas(64) unsigned char root[512];
 	alignas(64) unsigned char tables[2][256];
 	alignas(64) unsigned char directories[2][64];
 	alignas(64) unsigned char pages[3][ERX_CAP_PAGE_SLOTS *
@@ -123,6 +144,8 @@ typedef struct model_world {
 	uint32_t	 releases;
 	bool		 drained;
 	bool		 torn;		/* a teardown handed out the put */
+	bool		 on_parent;	/* X is on Y's list of children */
+	erx_budget_t	*budget;	/* B, which pays for X */
 	bool		 freed;
 } model_world_t;
 
@@ -198,7 +221,8 @@ model_setup(const char *scenario)
 {
 	erx_oid_key_t key = { { 1, 2, 3, 4 } };
 	erx_cap_t fill[ERX_CAP_PAGE_SLOTS];
-	bool released;
+	erx_budget_effects_t effects;
+	bool released, taken;
 	uint32_t i;
 	int t;
 
@@ -208,6 +232,7 @@ model_setup(const char *scenario)
 	    erx_object_record_size() > sizeof(world.record) ||
 	    erx_object_store_size() > sizeof(world.store) ||
 	    erx_grace_record_size() > sizeof(world.grace) ||
+	    erx_budget_record_size() > sizeof(world.root) ||
 	    strlen(scenario) == 0 || strlen(scenario) > MODEL_ACTORS) {
 		fprintf(stderr, "delete_model: bad setup\n");
 		exit(2);
@@ -215,6 +240,10 @@ model_setup(const char *scenario)
 	world.records[0] = (erx_object_t *)world.record;
 	erx_object_test_store(world.records, 1);
 	erx_object_store_init((erx_object_store_t *)world.store, &key);
+	if (erx_budget_init_root((erx_budget_t *)world.root, 1024) != 0 ||
+	    erx_budget_carve((erx_budget_t *)world.root, world.cache_page,
+	    ERX_BUDGET_WALL, 64, 64, &world.budget, &taken, &effects) != 0)
+		exit(2);
 	for (t = 0; t < 2; t++)
 		if (erx_cap_table_init(model_table(t), world.directories[t],
 		    sizeof(world.directories[t]), MODEL_LIMIT) != ERX_OK ||
@@ -224,7 +253,8 @@ model_setup(const char *scenario)
 	if (erx_cap_table_add_page(model_table(1), world.pages[2],
 	    sizeof(world.pages[2])) != ERX_OK ||
 	    erx_object_init((erx_object_store_t *)world.store, model_x(),
-	    ERX_K_GATE, NULL) != ERX_OK ||
+	    ERX_K_GATE, world.budget) != ERX_OK ||
+	    erx_attach_budget_charged(model_x()) != ERX_OK ||
 	    erx_cap_install_kind(model_table(0), model_x(), ERX_KIND_NEW_GATE,
 	    UINT32_MAX, &world.s1) != ERX_OK)
 		exit(2);
@@ -319,6 +349,28 @@ model_release(uint32_t depth)
 	return (action);
 }
 
+/* Whether X is on B's list of charged objects. */
+static bool
+model_on_list(void)
+{
+	return (erx_object_charged_head(erx_budget_charged(world.budget)) ==
+	    model_x());
+}
+
+/* The destroy an actor runs: a K actor's is the one its walk handed out. */
+static erx_delete_t *
+model_destroy_of(model_actor_t *a)
+{
+	return (a->kind == 'K' ? &a->walk.destroy : &a->destroy);
+}
+
+/* Where an actor goes when its destroy is over: a K actor walks on. */
+static void
+model_destroy_over(model_actor_t *a)
+{
+	a->pc = a->kind == 'K' ? PC_WALK : PC_DONE;
+}
+
 /* One part of a destroy: the close, a slot, or the put. */
 static void
 model_destroy_part(model_actor_t *a, uint32_t depth)
@@ -326,7 +378,7 @@ model_destroy_part(model_actor_t *a, uint32_t depth)
 	erx_delete_part_t part;
 	bool released;
 
-	part = erx_delete_step(&a->destroy);
+	part = erx_delete_step(model_destroy_of(a));
 	if (part.action != ERX_DELETE_STOP && !a->goes_on) {
 		a->goes_on = true;
 		if (++world.closes > 1)
@@ -339,10 +391,10 @@ model_destroy_part(model_actor_t *a, uint32_t depth)
 		    "held", depth);
 	switch (part.action) {
 	case ERX_DELETE_STOP:
-		a->pc = PC_DONE;
+		model_destroy_over(a);
 		break;
 	case ERX_DELETE_DRAIN:
-		a->pc = PC_DRAIN;
+		a->pc = PC_UNCHARGE;
 		break;
 	case ERX_DELETE_CLEAR:
 		if (erx_cap_slot_clear(part.table, part.cap, model_x(),
@@ -358,6 +410,8 @@ model_destroy_part(model_actor_t *a, uint32_t depth)
 		    erx_object_slots(model_x()) != NULL)
 			model_violation("the teardown ended with a slot "
 			    "naming the object", depth);
+		/* The teardown of X's place on its parent. */
+		world.on_parent = false;
 		world.torn = true;
 		a->stamp = erx_grace_retire(model_grace());
 		a->pc = PC_FREE;
@@ -442,6 +496,7 @@ static void
 model_start(model_actor_t *a, bool closed, uint32_t depth)
 {
 	uint32_t before = erx_object_ncaps(model_x());
+	erx_budget_effects_t effects;
 	erx_status_t status;
 	bool released;
 	erx_cap_t copy;
@@ -464,6 +519,28 @@ model_start(model_actor_t *a, bool closed, uint32_t depth)
 	case 'E':
 		erx_cap_table_set_emptied(model_table(1));
 		a->pc = PC_CLEAR;
+		return;
+	case 'K':
+		if (erx_budget_close(world.budget, &effects) != 0)
+			model_violation("the close of B refused", depth);
+		erx_delete_budget_walk_begin(&a->walk, world.budget);
+		a->pc = PC_WALK;
+		return;
+	case 'P':
+		/* The lock's one acquire refuses a closed object. */
+		if (closed) {
+			a->pc = PC_DONE;
+			return;
+		}
+		if (world.drained)
+			model_violation("the existence lock taken after the "
+			    "drain", depth);
+		world.holders++;
+		a->pc = PC_PUBLISH;
+		return;
+	case 'U':
+		world.on_parent = true;
+		a->pc = PC_DONE;
 		return;
 	case 'M':
 		a->pc = PC_DONE;
@@ -499,6 +576,35 @@ model_start(model_actor_t *a, bool closed, uint32_t depth)
 	}
 }
 
+/*
+ * One part of the budget-death walk: a take, whose destroy runs from the
+ * next step; the drop of the walk's reference; or the walk's end. X is
+ * the only object charged to B, so the walk meets no child budget.
+ */
+static void
+model_walk(model_actor_t *a, uint32_t depth)
+{
+	erx_budget_effects_t effects;
+
+	switch (erx_delete_budget_walk_next(&a->walk, &effects)) {
+	case ERX_DELETE_BUDGET_WALK_DESTROY:
+		world.refs++;
+		a->pc = PC_KDESTROY;
+		return;
+	case ERX_DELETE_BUDGET_WALK_PUT:
+		world.refs--;
+		if (erx_object_put(a->walk.put))
+			world.freed = true;
+		return;
+	case ERX_DELETE_BUDGET_WALK_DONE:
+		a->pc = PC_DONE;
+		return;
+	case ERX_DELETE_BUDGET_WALK_CLOSED:
+		break;
+	}
+	model_violation("the walk closed a budget B does not hold", depth);
+}
+
 /* Runs the next step of actor i, which is enabled. */
 static void
 model_step(uint32_t i, uint32_t depth)
@@ -516,6 +622,21 @@ model_step(uint32_t i, uint32_t depth)
 	case PC_START:
 		model_start(a, closed, depth);
 		return;
+	case PC_UNCHARGE:
+		erx_delete_uncharge(model_x());
+		a->pc = PC_DRAIN;
+		return;
+	case PC_WALK:
+		model_walk(a, depth);
+		return;
+	case PC_KDESTROY:
+		model_destroy_part(a, depth);
+		return;
+	case PC_PUBLISH:
+		world.on_parent = true;
+		world.holders--;
+		a->pc = PC_DONE;
+		return;
 	case PC_DRAIN:
 		world.drained = true;
 		a->pc = PC_TEAR;
@@ -529,7 +650,7 @@ model_step(uint32_t i, uint32_t depth)
 		if (!erx_grace_mature(model_grace(), a->stamp))
 			model_violation("a free step before its stamp is mature",
 			    depth);
-		a->pc = PC_DONE;
+		model_destroy_over(a);
 		if (erx_object_put(model_x()))
 			world.freed = true;
 		return;
@@ -598,6 +719,12 @@ model_check(uint32_t depth)
 	    erx_object_slots(model_x()) != NULL))
 		model_violation("a slot names the object after its teardown",
 		    depth);
+	if (world.drained && model_on_list())
+		model_violation("a closed object on its budget's list after its "
+		    "drain", depth);
+	if (world.torn && world.on_parent)
+		model_violation("a child attached to its parent after the "
+		    "parent's budget tore it down", depth);
 	if (world.freed && (!world.torn || world.refs != 0))
 		model_violation("the record freed before its teardown and its "
 		    "references", depth);
@@ -616,6 +743,9 @@ model_check_end(uint32_t depth)
 		model_violation("a released object never destroyed", depth);
 	if (world.closes > 0 && !world.freed)
 		model_violation("a destroyed object never freed", depth);
+	if (world.closes > 0 && model_on_list())
+		model_violation("a destroyed object left on its budget's list",
+		    depth);
 }
 
 static void
@@ -683,8 +813,9 @@ main(int argc, char **argv)
 		model_rules();
 		return (0);
 	}
-	if (argc != 2 || strspn(argv[1], "DCEMAOR") != strlen(argv[1])) {
-		fprintf(stderr, "usage: delete_model rules | ACTORS (of DCEMAOR)\n");
+	if (argc != 2 || strspn(argv[1], "DCEMAORKPU") != strlen(argv[1])) {
+		fprintf(stderr,
+		    "usage: delete_model rules | ACTORS (of DCEMAORKPU)\n");
 		return (2);
 	}
 	model_setup(argv[1]);

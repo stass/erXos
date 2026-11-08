@@ -29,6 +29,10 @@
 #define OBJECT_CHECK_EPOCHS	0
 #endif
 
+_Static_assert(sizeof(erx_object_t) <= ERX_OBJECT_HEADER_BYTES &&
+    ERX_OBJECT_HEADER_BYTES % 64 == 0,
+    "the header fits its fixed area, which keeps a body 64-byte aligned");
+
 _Static_assert(ERX_OBJ_LIVE < ERX_OBJ_RELEASED &&
     ERX_OBJ_RELEASED < ERX_OBJ_DELETED,
     "the states are numbered in the order of an object's life");
@@ -161,6 +165,8 @@ erx_object_init(erx_object_store_t *store, erx_object_t *object,
 	object->ncaps = 0;
 	object->att_slots = NULL;
 	object->budget = budget;
+	object->in_budget.prev = NULL;
+	object->in_budget.next = NULL;
 	object->oid = oid;
 	__builtin_memset(object->name, 0, sizeof(object->name));
 	return (ERX_OK);
@@ -248,6 +254,47 @@ void
 erx_object_set_slots(erx_object_t *object, erx_cap_slot_t *head)
 {
 	object->att_slots = head;
+}
+
+void
+erx_object_charged_append(erx_charged_list_t *list, erx_object_t *object)
+{
+	object->in_budget.prev = list->tail;
+	object->in_budget.next = NULL;
+	if (list->tail != NULL)
+		list->tail->in_budget.next = object;
+	else
+		list->head = object;
+	list->tail = object;
+}
+
+/*
+ * An object is on its budget's list exactly when it heads it or has a
+ * predecessor: the unlink clears both links, so a second unlink finds
+ * neither and changes nothing.
+ */
+bool
+erx_object_charged_unlink(erx_charged_list_t *list, erx_object_t *object)
+{
+	if (list->head != object && object->in_budget.prev == NULL)
+		return (false);
+	if (object->in_budget.prev != NULL)
+		object->in_budget.prev->in_budget.next = object->in_budget.next;
+	else
+		list->head = object->in_budget.next;
+	if (object->in_budget.next != NULL)
+		object->in_budget.next->in_budget.prev = object->in_budget.prev;
+	else
+		list->tail = object->in_budget.prev;
+	object->in_budget.prev = NULL;
+	object->in_budget.next = NULL;
+	return (true);
+}
+
+erx_object_t *
+erx_object_charged_head(const erx_charged_list_t *list)
+{
+	return (list->head);
 }
 
 erx_uref_t

@@ -48,7 +48,10 @@
 
 static erx_budget_t chain[CHAIN_DEPTH];
 static erx_budget_t before[CHAIN_DEPTH];
-/* The cache page a carve's record sits in: its header says its kind. */
+/*
+ * The memory a carve makes a new cache page of: no level's cache has a
+ * free record, so every carve takes it and charges one page.
+ */
 static _Alignas(64) unsigned char carve_page[ERX_KCACHE_PAGE_BYTES];
 static bool held[CHAIN_DEPTH];
 static bool locked_ever[CHAIN_DEPTH];
@@ -152,7 +155,7 @@ harness(void)
 {
 	erx_budget_effects_t effects;
 	erx_budget_t *child;
-	erx_kcache_slot_t slot;
+	bool taken;
 	const int start = CHAIN_DEPTH - 1;
 	uint32_t op = nondet_u32();
 	int64_t pages = nondet_i64();
@@ -167,14 +170,9 @@ harness(void)
 	else if (op == 1)
 		error = erx_budget_pin(&chain[start], pin, &effects);
 	else {
-		((struct erx_kcache_page *)(void *)carve_page)->kind =
-		    ERX_KCACHE_BUDGET;
-		slot = (erx_kcache_slot_t){
-			.page = (struct erx_kcache_page *)(void *)carve_page,
-			.index = 0,
-		};
-		error = erx_budget_carve(&chain[start], &slot,
-		    ERX_BUDGET_ELASTIC, guarantee, guarantee, &child, &effects);
+		error = erx_budget_carve(&chain[start], carve_page,
+		    ERX_BUDGET_ELASTIC, guarantee, guarantee, &child, &taken,
+		    &effects);
 	}
 
 	for (i = 0; i < CHAIN_DEPTH; i++)
@@ -204,9 +202,12 @@ harness(void)
 	__CPROVER_assert(effects.refused == NULL,
 	    "an applied change names no refusal");
 
-	/* The leaf takes exactly what the operation asked for. */
+	/*
+	 * The leaf takes exactly what the operation asked for: a carve, its
+	 * record's new cache page and the guarantee.
+	 */
 	__CPROVER_assert((__int128)chain[start].used - before[start].used ==
-	    (op == 0 ? (__int128)pages : 0),
+	    (op == 0 ? (__int128)pages : op == 2 ? 1 : 0),
 	    "the leaf's used changes by the charge");
 	__CPROVER_assert((__int128)chain[start].carved - before[start].carved ==
 	    (op == 2 ? (__int128)guarantee : 0),

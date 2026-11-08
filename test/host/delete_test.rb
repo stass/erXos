@@ -21,8 +21,14 @@ class DeleteTest < Minitest::Test
              kernel/core/budget.c kernel/core/grace.c].freeze
   # Each scenario names its actors by the model's letters (see the model's
   # header comment): deletions racing operations and readers, releases
-  # racing deletions, moves, copies and the emptying of a table.
-  SCENARIOS = %w[DOR DDOR DCM DEC DACO DEMA DCEM CEMR CEOR].freeze
+  # racing deletions, moves, copies and the emptying of a table, and the
+  # destruction of X's budget racing deletions, releases, operations and
+  # a publication under X's existence lock.
+  SCENARIOS = %w[DOR DDOR DCM DEC DACO DEMA DCEM CEMR CEOR KD KC KO KP KDP KDC].freeze
+  # The seeded publication, which links X on its parent without X's
+  # existence lock (the model's actor U), and the diagnosis the design names.
+  SEEDED_PUBLICATION = 'KU'
+  SEEDED_PUBLICATION_CAUGHT = "a child attached to its parent after the parent's budget tore it down"
   # The release rule's actions, as erx/delete.h numbers them.
   RELEASE_DESTROY = 2
   RELEASE_LIVES_ON = 3
@@ -52,6 +58,10 @@ class DeleteTest < Minitest::Test
       edits: [['kernel/core/delete.c', "\tif (slot != NULL) {\n", "\tif (slot != NULL && false) {\n"]],
       caught: 'the teardown ended with a slot naming the object'
     },
+    'the drain leaves its object on the list' => {
+      edits: [['kernel/core/delete.c', "\t(void)erx_object_charged_unlink(erx_budget_charged(budget), object);\n", "\t(void)budget;\n"]],
+      caught: "a closed object on its budget's list after its drain"
+    },
     'a release of a closed object destroys it' => {
       edits: [['kernel/core/delete.c', "\tif (erx_object_state(object) == ERX_OBJ_DELETED)\n\t\treturn (ERX_RELEASE_NONE);\n", '']],
       caught: 'a release of a closed object destroys it'
@@ -79,6 +89,11 @@ class DeleteTest < Minitest::Test
       assert_match(/\Aexplored #{scenario}: \d+ steps, \d+ interleavings\n\z/, output, scenario)
       assert_operator Integer(output[/(\d+) interleavings/, 1]), :>=, 10, "#{scenario} explores too few interleavings"
     end
+  end
+
+  def test_the_model_catches_a_publication_without_the_existence_lock
+    model = build_model(CORES.map { |core| File.join(@root, core) }, name: 'model')
+    assert_equal SEEDED_PUBLICATION_CAUGHT, violation(model, SEEDED_PUBLICATION)
   end
 
   # Memory objects and groups live on after their release while attached;

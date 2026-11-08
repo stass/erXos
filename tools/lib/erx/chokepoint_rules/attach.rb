@@ -22,6 +22,22 @@ module Erx
         # Every attachment field of an object record has its one insert in
         # kernel/core/attach.c, which reads the object's state first, and its
         # walk in the deletion core's teardown, field by field (K26).
+        Chokepoints::Callers.new(
+          name: 'attach-charged-list-writers',
+          rule: 'only erx_attach_budget_charged calls erx_object_charged_append',
+          design: "#{KERNEL}#chokepoint-checks",
+          callee: 'erx_object_charged_append',
+          callers: %w[erx_attach_budget_charged],
+          seed: { 'erx_budget_carve' => 'call', 'erx_delete_budget_walk_next' => 'tail_jump' }
+        ),
+        Chokepoints::Callers.new(
+          name: 'attach-charged-list-unlinks',
+          rule: 'only erx_delete_uncharge and the budget-death walk\'s step call erx_object_charged_unlink',
+          design: "#{KERNEL}#chokepoint-checks",
+          callee: 'erx_object_charged_unlink',
+          callers: %w[erx_delete_uncharge erx_delete_budget_walk_next],
+          seed: { 'erx_budget_free_record' => 'call', 'erx_delete_step' => 'tail_jump' }
+        ),
         Chokepoints::Elsewhere.new(
           name: 'attachment-fields',
           rule: 'every att_ member of an object record has an insert erx_attach_STEM_NAME in kernel/core/attach.c ' \

@@ -115,6 +115,60 @@ erx_status_t	erx_object_init(erx_object_store_t *store,
  */
 erx_obj_state_t	erx_object_state(const erx_object_t *object);
 
+/*
+ * Every kernel object's record begins with its header, in a fixed area
+ * of ERX_OBJECT_HEADER_BYTES at the front, a multiple of the record
+ * cache's 64-byte alignment, and the type's own body follows it. These
+ * two are the only code that knows the offset, so finding the header of
+ * a body, or the body of a header, is arithmetic with no table by type;
+ * they are inline so that a core needing only the offset links without
+ * the object store. kernel/core/object.c asserts that the header fits.
+ */
+#define ERX_OBJECT_HEADER_BYTES	128u
+
+static inline void *
+erx_object_body(erx_object_t *object)
+{
+	return ((unsigned char *)object + ERX_OBJECT_HEADER_BYTES);
+}
+
+static inline erx_object_t *
+erx_object_of(void *body)
+{
+	return ((erx_object_t *)(void *)((unsigned char *)body -
+	    ERX_OBJECT_HEADER_BYTES));
+}
+
+/*
+ * A budget's list of charged objects (its att_charged, docs/design-kernel.md,
+ * "Budgets"): the objects charged to it, child budgets included, that no
+ * destroy has closed yet, in the order they joined, linked through each
+ * object's header. Every function on it runs under the budget's lock,
+ * the caller's. Only kernel/core/object.c reads or writes the members.
+ */
+typedef struct erx_charged_list {
+	erx_object_t	*head;
+	erx_object_t	*tail;
+} erx_charged_list_t;
+
+/*
+ * Appends object, which is on no list, to the list of its own budget.
+ * Only the list's insert, erx_attach_budget_charged, calls it.
+ */
+void		erx_object_charged_append(erx_charged_list_t *list,
+		    erx_object_t *object);
+
+/*
+ * Takes object off the list of its own budget if it is still on it, and
+ * returns whether it was: the one unlink, idempotent, which a closed
+ * object's destroy and the budget's walk each make, the first doing it.
+ */
+bool		erx_object_charged_unlink(erx_charged_list_t *list,
+		    erx_object_t *object);
+
+/* The list's first object; NULL when it is empty. */
+erx_object_t	*erx_object_charged_head(const erx_charged_list_t *list);
+
 /* The fields fixed at creation. */
 erx_ktype_t	erx_object_type(const erx_object_t *object);
 uint64_t	erx_object_oid(const erx_object_t *object);

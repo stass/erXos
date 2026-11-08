@@ -77,17 +77,6 @@ it; git history is the record of completed work.
   caller rule on the insert (the Callers kind accepts only exported
   callers, and `cap_list_insert` is static).
 
-* [Medium] kernel, Track K, the deletion core's model
-  (`test/fixtures/delete_model.c`): the design's seeded publication that
-  inserts without the published object's existence lock, caught as a
-  child attached to its parent after its budget tore it down, needs an
-  attachment field on a parent other than the slot list. The slot list
-  cannot show it, since its insert checks the published object's own
-  state under the same lock as the close. Add the publication actor and
-  its seed when `att_charged` gets its insert in `kernel/core/attach.c`
-  and the budget's destroy walk calls `erx_delete_step`. The model's other
-  open edges: a destroy started by a budget's death, and spaces' walks.
-
 * [Medium] verification, Track K, the CBMC gate (`tools/lib/erx/cbmc.rb`,
   `test/cbmc/roster.json`): if the owner adopts CBMC from the pilot's
   record, settle three things the pilot leaves open. Homebrew offers only
@@ -1266,33 +1255,43 @@ it; git history is the record of completed work.
   header and the ticket lock land, embed them in the records, drop the
   lock effect, and give `erx_reserve_fill`, `erx_reserve_use` and
   `erx_reserve_refund` the chain itself, so the pooled count is the
-  chain's length by construction. Embedding the header needs a decision
-  the design leaves open: how a core's private record holds the object
-  header that `kernel/core/object_impl.h` keeps private to `object.c`
-  (a header-then-body record with an accessor in `object.c` is the
-  candidate). `erx_budget_carve` checks that its slot's page is the
-  parent's but not, under the parent's lock, that the record is taken and
-  holds no live budget; folding the take into the carve's own chain plan
-  (one delta of the page and the guarantee) would make that hold by
-  construction and remove the caller's free-back on a refused carve.
-* [High] docs/design-kernel.md, [Budgets](docs/design-kernel.md#budgets)
-  and **Construction**: the budget's destroy walk over `att_charged`
-  has no settled iteration. The object header keeps `in_budget` "on its
-  budget's `att_charged` until freed", and the walk "destroys each object
-  on it", but an object closed by another destroy (a deletion of its
-  capability racing the budget's destroy) stays on the list until its
-  free after a grace period, so a walk that takes the list's head finds
-  it again and again, and one that keeps a position loses it when the
-  reaper unlinks a freed record. Settle where an object leaves
-  `att_charged` (at its close, under the budget's lock, is the candidate:
-  the walk then always takes the head, a racing destroy removes its own
-  object, and the budget's `used`, not the list, keeps its tombstone
-  until every record is freed) and how the walk's close of a child
-  budget that another destroy closed first waits for it. Until then
-  `att_charged`, its insert `erx_attach_budget_charged`, its teardown
-  reader in `kernel/core/delete.c`, the walk over real lists replacing
-  `test/fixtures/budget_driver.c`'s stand-ins, destroys started by a
-  budget's death and the deletion model's publication seed (above) wait.
+  chain's length by construction. A record embeds the header in its
+  header area (`ERX_OBJECT_HEADER_BYTES`, `erx_object_body`), as the
+  child budget's record in its parent's cache already does; the budget's
+  own `parent` then becomes its header's `budget`.
+* [Medium] Kernel deletion core, `kernel/core/delete.c`: a budget's own
+  object finishes its destroy (its put handed out) before the
+  budget-death walk empties its `att_charged`, so for a budget the put
+  does not wait for every attachment field as the teardown contract
+  says; the record is freed only at its object's last put, after the
+  walk's reference and the one its counters hold until the tombstone's
+  put, so nothing is freed early. Making the walk the teardown's last part for `ERX_K_BUDGET`, a
+  part `erx_delete_step` hands out, would make the order hold by
+  construction. The carve's caller puts the child's header on the
+  parent's list in a second hold of the parent's lock, so a parent
+  destroyed in between leaves the caller to close the child; passing the
+  object store to `erx_budget_carve` would put both in one hold. The
+  deletion model (`test/fixtures/delete_model.c`) does not yet walk a
+  child budget or a space's tables.
+* [Medium] Kernel cores, `att_charged` (`kernel/core/delete.c`,
+  `kernel/core/attach.c`, `kernel/core/budget.c`): three caller duties
+  have no check yet. A destroy's runner must call `erx_delete_uncharge`
+  at the drain (recording it in the `erx_delete_t` and trapping in
+  `erx_delete_step` when the destroy leaves CLOSED without it would make
+  a forgotten unlink loud); a record on a list must never be freed
+  outside a destroy (the record-free funnel should trap on a member); and
+  the carve's caller must take the reference the child's counters hold.
+  `erx_kcache_take` has no caller now that the carve takes its own
+  record: delete it, or refuse `ERX_KCACHE_BUDGET`, until a second record
+  kind exists. Tests: the deletion model's publication actors P and U
+  move only model state (no core runs, and `DU` shows the same
+  violation as the seed `KU`); a second object charged to B, attached by
+  an actor racing K through `erx_attach_budget_charged`, would make the
+  seed exercise the insert's dead check. No test pins the walk's take
+  (its unlink or its counted reference) by a named diagnosis, nor the
+  driver's `put` between walk steps. `erx_object_init` accepts a NULL
+  budget, which `erx_delete_uncharge` dereferences; the design text names
+  `erx_dlink_t`/`erx_dlist_t` where the code has `erx_charged_list_t`.
 * [Medium] Budget core tests, `test/host/budget_test.rb`: the TSan race
   only charges and releases leaf reserves; K32 asks for resizes, carves
   and destroys racing too, with spending checked against every cap no

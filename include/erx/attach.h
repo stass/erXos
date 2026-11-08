@@ -43,4 +43,16 @@
 erx_status_t	erx_attach_object_slots(erx_object_t *object, erx_cap_slot_t *slot,
 		    erx_cap_slot_t **nextp) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * The insert of att_charged, the list of charged objects of the object's
+ * own budget: under that budget's lock, append object. ERX_ESTALE,
+ * changing nothing, unless the object is LIVE, so a closed object never
+ * rejoins the list, or when the budget is dead, which takes no new object
+ * (K3). A creation calls it once it has charged the object's record, and
+ * a carve's caller once it has made the child budget's header; on
+ * ERX_ESTALE the caller tears down what it made and refunds it.
+ */
+erx_status_t	erx_attach_budget_charged(erx_object_t *object)
+		    ERX_WARN_UNUSED_RESULT;
+
 #endif /* ERX_ATTACH_H */
