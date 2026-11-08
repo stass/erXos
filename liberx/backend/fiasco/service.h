@@ -86,6 +86,18 @@ int	erx_budget_resize(uint64_t budget, uint64_t guarantee, uint64_t cap) ERX_WAR
 int	erx_budget_watch(uint64_t budget, uint64_t irq, uint64_t threshold) ERX_WARN_UNUSED_RESULT;
 
 /*
+ * erx_cap_pass (docs/design-stopgap.md, "Passing a handle"), the creator's case from
+ * the root only: from is ERX_CAP_SELF and to a live space the root created. Its n
+ * items, at most ERX_MSG_CAPS, are erx_msg_item_t in the calling thread's public UTCB,
+ * each a copy or a move of one of the root's handles with a rights mask. They pass in
+ * order, each rewritten there with its value, type and rights in to's table; the first
+ * refused stops the pass with its status, and the items before it stay passed for the
+ * caller to undo. A call from a task, from another space, into the root's own, or of a
+ * space or gate handle is ERX_ENOTSUP.
+ */
+int	erx_cap_pass(uint64_t from, uint64_t to, uint32_t n) ERX_WARN_UNUSED_RESULT;
+
+/*
  * Fault gates (docs/design-stopgap.md, "Fault gates"): a gate carries the fault and
  * exit records of the spaces made naming it, and nothing else. budget charges it as for every create. A
  * bind's thread is ERX_CAP_SELF_THREAD or a handle of one of the caller's own

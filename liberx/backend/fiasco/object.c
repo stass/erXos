@@ -15,6 +15,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -23,9 +24,12 @@
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
+#include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
 
 static erx_backend_handles_t *object_handles_of(uint32_t);
+static int	object_pass_item(uint32_t, uint32_t, erx_msg_item_t *);
+static int	object_pass_type(uint32_t, erx_ktype_t *);
 static void	object_release(uint32_t);
 static void	object_unheld(uint32_t);
 
@@ -192,6 +196,111 @@ object_unheld(uint32_t index)
 	    erx_fiasco_group_home_has_threads(index))
 		return;
 	erx_fiasco_object_end(index);
+}
+
+/*
+ * The items are copied out of the caller's public UTCB once, since its task can write
+ * them while the service reads, and each is checked and passed from that copy before
+ * its result is written back.
+ */
+int
+erx_fiasco_cap_pass_body(uint32_t task, uint32_t caller, const erx_fiasco_cap_pass_request_t *request)
+{
+	erx_fiasco_thread_record_t *const thread = erx_fiasco_task_record(task, caller);
+	erx_msg_item_t items[ERX_MSG_CAPS];
+	uint32_t target;
+	int status;
+
+	if (task != ERX_FIASCO_TASK_ROOT || request->from != ERX_CAP_SELF || request->to == ERX_CAP_SELF)
+		return (ERX_ENOTSUP);
+	if (thread == NULL || request->count > ERX_MSG_CAPS)
+		return (ERX_EINVAL);
+	status = erx_fiasco_task_space_target(task, request->to, &target);
+	if (status != ERX_OK)
+		return (status);
+	for (size_t at = 0; at < request->count; at++) {
+		(void)erx_utcb_mr_load(&thread->utcb, 2 * at, &items[at].desc);
+		(void)erx_utcb_mr_load(&thread->utcb, 2 * at + 1, &items[at].cap.raw);
+	}
+	for (size_t at = 0; at < request->count; at++) {
+		status = object_pass_item(task, target, &items[at]);
+		if (status != ERX_OK)
+			return (status);
+		(void)erx_utcb_mr_store(&thread->utcb, 2 * at, items[at].desc);
+		(void)erx_utcb_mr_store(&thread->utcb, 2 * at + 1, items[at].cap.raw);
+	}
+	return (ERX_OK);
+}
+
+/*
+ * One item, one of from's handles with its descriptor, passed into to's table and
+ * rewritten as its result: a copy adds an entry naming the same record, and a move
+ * then closes from's entry. The rights reported are the mask's within the type's, less
+ * DESTROY, since only an object's creator destroys it; no entry records them. A sent
+ * item that names the type its handle must have is a checked pass, which nothing here
+ * offers.
+ */
+static int
+object_pass_item(uint32_t from, uint32_t to, erx_msg_item_t *item)
+{
+	const uint32_t mask = (uint32_t)erx_msg_item_desc_rights_get(item->desc);
+	const uint64_t move = erx_msg_item_desc_move_get(item->desc);
+	uint64_t sent = 0, value = ERX_CAP_NULL;
+	uint32_t index, closed;
+	erx_ktype_t type = 0;
+	bool freed;
+	int status;
+
+	(void)erx_msg_item_desc_rights_set(&sent, mask);
+	(void)erx_msg_item_desc_move_set(&sent, move);
+	(void)erx_msg_item_desc_type_set(&sent, erx_msg_item_desc_type_get(item->desc));
+	if (sent != item->desc)
+		return (ERX_EINVAL);
+	if (erx_msg_item_desc_type_get(item->desc) != 0)
+		return (ERX_ENOTSUP);
+	status = erx_fiasco_object_find(from, item->cap.raw, ERX_BACKEND_OBJECT_ANY, &index);
+	if (status == ERX_OK)
+		status = object_pass_type(erx_backend_object_at(&object_records, index)->kind, &type);
+	if (status == ERX_OK)
+		status = erx_backend_handle_add(&object_records, object_handles_of(to), index, &value);
+	if (status != ERX_OK)
+		return (status);
+	/*
+	 * A move's close cannot fail and never frees the record: the find above took this
+	 * entry, one service thread runs every request, and to's new entry names the record.
+	 */
+	if (move != 0)
+		(void)erx_backend_handle_close(&object_records, object_handles_of(from), item->cap.raw, &freed, &closed);
+	item->desc = 0;
+	(void)erx_msg_item_desc_type_set(&item->desc, type);
+	(void)erx_msg_item_desc_rights_set(&item->desc, mask & erx_ktype_rights_mask(type) & ~ERX_HR_DESTROY);
+	item->cap.raw = value;
+	return (ERX_OK);
+}
+
+/*
+ * The type a passed handle of a record's kind reports. A space's or a gate's handle
+ * never passes, so that handles flow down from an object's creator. A budget's or a
+ * group's waits for the domain library's install: a task that held the last handle of
+ * a budget would end it inside its own teardown (TODO.md). Every kind has its case, so
+ * a new one is a build warning here.
+ */
+static int
+object_pass_type(uint32_t kind, erx_ktype_t *type)
+{
+	switch ((erx_backend_object_kind_t)kind) {
+	case ERX_BACKEND_OBJECT_MEMORY:
+		*type = ERX_K_MEMORY;
+		return (ERX_OK);
+	case ERX_BACKEND_OBJECT_BUDGET:
+	case ERX_BACKEND_OBJECT_GROUP:
+	case ERX_BACKEND_OBJECT_GATE:
+	case ERX_BACKEND_OBJECT_SPACE:
+	case ERX_BACKEND_OBJECT_FREE:
+	case ERX_BACKEND_OBJECT_RETIRED:
+		break;
+	}
+	return (ERX_ENOTSUP);
 }
 
 static erx_backend_handles_t *

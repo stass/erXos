@@ -72,6 +72,9 @@ void	erx_fiasco_object_unmapped(uint32_t index);
 int	erx_fiasco_cap_dup_body(uint32_t task, uint64_t handle, uint64_t *copy) ERX_WARN_UNUSED_RESULT;
 int	erx_fiasco_cap_close_body(uint32_t task, uint64_t handle) ERX_WARN_UNUSED_RESULT;
 int	erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle) ERX_WARN_UNUSED_RESULT;
+/* The body of erx_cap_pass for the calling thread, caller, of task: service.h says what it does. */
+int	erx_fiasco_cap_pass_body(uint32_t task, uint32_t caller, const erx_fiasco_cap_pass_request_t *request)
+	    ERX_WARN_UNUSED_RESULT;
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 /*

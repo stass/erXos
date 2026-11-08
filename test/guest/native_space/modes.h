@@ -15,6 +15,7 @@
 #define MODE_CREATOR	4	/* creates spaces below its own and a refused one, ends with 0 */
 #define MODE_FIRST	5	/* finds FIRST_TAG above its mode, ends with FIRST_STATUS */
 #define MODE_GROUP	6	/* in its domain group: its take is its own, which a worker may not make: ends with 0 */
+#define MODE_HOLDER	7	/* maps the object whose handle the root passed it, the next bytes, read-only: ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 

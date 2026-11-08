@@ -113,6 +113,7 @@ it; git history is the record of completed work.
   The test that a call keeps the caller's registers left with the trap route
   and returns with the `erx` backend's kernel.
 * [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`. Move handles onto the base. Likewise the root's handle to a created space's first thread is the task above the index (`service_thread_handle` in `service.c`), not the handle-table entry "Thread creation" names, so it can equal one of the root's entries once the root holds 256 of them, and `erx_cap_close` or `erx_cap_dup` of it reaches that entry; give it a value no entry can bear, as the base does.
+* [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`, and an `erx_cap_pass` item holding an own thread's handle is read as the handle table's entry of that number, so it may pass a memory object instead of being refused. Move handles onto the base.
 * [Low] stopgap, `fiasco/kernel/src/erx/erx_probe.cpp` and `erx_syscall.cpp`
   are reference text for erXos's kernel, out of the build: `erx_syscall.cpp`
   names `Space::erx_log`, which is gone, so it no longer compiles.
@@ -166,7 +167,8 @@ it; git history is the record of completed work.
   record (`group.c`, `erx_irq_bind`), and a space handle is still the task's index, which the launcher turns
   into the ended semaphore's slot without the service (`launcher.c`). Both move onto records with BK8a's
   groups and BK5's space tree (the 1b-A package plan). Until then their values overlap memory handles, so
-  `erx_cap_close` or `erx_object_destroy` given a space or IRQ handle acts on whatever memory entry has that number.
+  `erx_cap_close` or `erx_object_destroy` given a space or IRQ handle acts on whatever memory entry has that number,
+  and `erx_cap_pass` given an IRQ handle passes that memory entry instead of refusing it.
 * [Medium] security residual, `liberx/backend/fiasco/vm.c`: nothing records `ERX_MEM_JIT` on an object, so any
   object maps read-write at one address and read-execute at another, a protect moves RW to RX freely, and the
   root maps RX into a child made without `ERX_SPACE_JIT`. No single mapping is ever writable and executable,
@@ -477,6 +479,29 @@ it; git history is the record of completed work.
   `task-service` timed out; the rerun on the same tree passed on one and four CPUs. The task that
   `erx_fiasco_launch` starts with `ERX_SPACE_JIT` and `MODE_SERVICE` never ended, so the root's
   join waited for good. Find the wait it stuck in.
+* [High] liberx Fiasco backend, `object.c` `object_pass_type` and `budget.c`: `erx_cap_pass` refuses
+  budget and group handles, which the domain library's install (`erx_dom_install`, DL2) passes to a
+  domain. Before it offers them, take a budget's end out of a task's teardown: a task holding a
+  budget's last handle (by a move, or after the root closed its copy) ends that budget inside
+  `task_end`'s handle close, and the budget's sweeps then reach the task's own space while its row is
+  still live, tearing it down a second time (a lost exit status, an index never reused, a stray exit
+  record), and leave a carved budget whose space is mid-release live with a dangling parent index.
+  Queue the records a task's close frees and end them after the row is reset, so no budget ends
+  inside a task's end; a guard that skips records already ending was tried and is not enough.
+* [Low] liberx Fiasco backend, `budget.c` `budget_sweep`: a budget's object sweep ends a group
+  charged to it whose home task, charged to another budget, still has threads, which `erx_object_destroy`
+  and a last close refuse ("a group never goes before its threads"). Skip such a group in the sweep, or
+  stop its home first.
+* [Medium] Image build, `tools/lib/erx/source_revision.rb` (`QUERIES` branch shape): a branch name
+  git accepts but the shape refuses (`fix#123`, `stas@wip`, `_tmp`, over 100 bytes) fails the whole
+  image build. Either leave such a branch out of the revision, as newvers.sh leaves out a detached
+  head, or widen the shape in both `BuildFacts::SHAPES` and `erx_build`, since `uname` writes the
+  revision through the field escape anyway.
+* [Medium] Image build, `tools/lib/erx/source_revision.rb` (`changes`): `-dirty` counts tracked files
+  only, as newvers.sh does, but `ErlangApps.modules` globs `src/**/*.erl`, so an untracked module is
+  packed while `uname -v` names a clean commit. Count untracked, non-ignored files as dirty, or derive
+  dirty from the pack's own input catalog.
+
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
   hand-declared `erx_ipc_wait(deadline, *label)` returns no tag, while design-kernel.md's "Receiving"
   returns the tag and the label. Settle the target signature before the domain library's fault thread

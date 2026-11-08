@@ -5,10 +5,10 @@
 
 /*
  * The tasks of the mapping suite, loaded from the boot image by
- * test/guest/native_space/guest.c, which maps their pages before their first thread
- * runs. The status is the report: 0 is success, any other names the first step that
- * went wrong, and a revoked reader's fault goes to its fault gate, where it stays
- * blocked until the root stops it.
+ * test/guest/native_space/guest.c, which maps their pages, or passes them a handle to
+ * map, before their first thread runs. The status is the report: 0 is success, any
+ * other names the first step that went wrong, and a revoked reader's fault goes to
+ * its fault gate, where it stays blocked until the root stops it.
  */
 
 #include <stdatomic.h>
@@ -102,6 +102,18 @@ mode_first(uint64_t argument)
 	return (argument >> SLOT_SHIFT == FIRST_TAG ? FIRST_STATUS : 50);
 }
 
+/* Maps the object whose handle the root passed into this task, finds the root's pattern read-only, and releases the range. */
+static int64_t
+mode_holder(uint64_t mem)
+{
+	if (erx_vm_map(ERX_CAP_SELF, SHARED_ADDR, SHARED_PAGES * PAGE, mem, 0, ERX_PROT_R) != ERX_OK)
+		return (50);
+	for (uint64_t page = 0; page < SHARED_PAGES; page++)
+		if (shared_word(page) != ROOT_PATTERN + page)
+			return (51);
+	return (erx_vm_release(ERX_CAP_SELF, SHARED_ADDR, SHARED_PAGES * PAGE) == ERX_OK ? 0 : 52);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -118,6 +130,8 @@ erx_task_main(uint64_t argument)
 		return (mode_creator());
 	case MODE_FIRST:
 		return (mode_first(argument));
+	case MODE_HOLDER:
+		return (mode_holder(argument >> SLOT_SHIFT));
 	default:
 		return (90);
 	}

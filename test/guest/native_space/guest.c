@@ -8,9 +8,10 @@
  * test/guest/native_space/program.c, a destroy that revokes them, and the bounds of a
  * map into a created space, and fault gates: a revoked task's fault reaches the root's
  * gate, and the gate calls' refusals and queue; and spaces: a task that creates spaces
- * below its own, the create's refusals, and a release at the last handle's close; and a
- * created space's first thread, which the root makes and starts. Each case says one
- * line, which tools/lib/erx/native_space.rb holds the transcript to.
+ * below its own, the create's refusals, and a release at the last handle's close; a
+ * created space's first thread, which the root makes and starts; budgets and groups as
+ * records; and handles the root passes into a task with erx_cap_pass. Each case says
+ * one line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
 
 #include <stdatomic.h>
@@ -576,6 +577,115 @@ case_budget_destroy(void)
 	say_case("budget_destroy", passed && erx_fiasco_vm_free_pages() == before);
 }
 
+/* Writes a pass's item into the calling thread's public UTCB: the handle, its rights mask, and whether it moves. */
+static void
+item_put(size_t item, uint64_t cap, uint32_t mask, bool move)
+{
+	uint64_t desc = 0;
+
+	(void)erx_msg_item_desc_rights_set(&desc, mask);
+	(void)erx_msg_item_desc_move_set(&desc, move);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 2 * item, desc);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 2 * item + 1, cap);
+}
+
+/* One of the item's two words as the UTCB holds them now. */
+static uint64_t
+item_word(size_t item, size_t word)
+{
+	uint64_t value = 0;
+
+	(void)erx_utcb_mr_load(erx_utcb_self(), 2 * item + word, &value);
+	return (value);
+}
+
+/* Whether a pass rewrote the item as a memory object's handle with exactly these rights. */
+static bool
+item_passed(size_t item, uint32_t rights)
+{
+	const uint64_t desc = item_word(item, 0);
+
+	return (erx_msg_item_desc_type_get(desc) == ERX_K_MEMORY && erx_msg_item_desc_rights_get(desc) == rights &&
+	    erx_msg_item_desc_move_get(desc) == 0 && item_word(item, 1) != ERX_CAP_NULL);
+}
+
+/*
+ * Whether a pass into task of one item naming handle, its descriptor naming the type
+ * the handle must have (a checked pass) or else setting a bit no descriptor defines, is
+ * refused with status and leaves the item as written.
+ */
+static bool
+item_refused(uint64_t task, uint64_t handle, bool typed, int status)
+{
+	uint64_t desc = ERX_HR_READ;
+
+	if (typed)
+		(void)erx_msg_item_desc_type_set(&desc, ERX_K_MEMORY);
+	else
+		desc |= UINT64_C(1) << 40;
+	(void)erx_utcb_mr_store(erx_utcb_self(), 0, desc);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 1, handle);
+	return (erx_cap_pass(ERX_CAP_SELF, task, 1) == status && item_word(0, 0) == desc && item_word(0, 1) == handle);
+}
+
+/*
+ * The root passes a copy and a move of handles to one object into a created task. Each
+ * item comes back with its value in the task's table, the memory type, and its mask
+ * intersected with the type's rights less DESTROY; the moved handle is gone from the
+ * root's table. A pass of four into a table with room for three passes three and is
+ * ERX_ELIMIT at the fourth. A pass stops at its first refused item, a gate, leaving the
+ * one before it passed and the one after it as written; a checked pass, a descriptor
+ * with an undefined bit, a space's handle, a pass from another space or into the
+ * root's own, and more than four items are refused. Then the root closes its own
+ * handle, and the task maps the copy and finds the root's pattern, which it can only
+ * if a copy counts in the object. The task's end closes what it was passed, so the
+ * pages come back.
+ */
+static void
+case_passing(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	const uint32_t write = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP;
+	uint64_t mem = ERX_CAP_NULL, moved = ERX_CAP_NULL, gate = ERX_CAP_NULL, held, task = 0, small = 0;
+	int64_t status = INT64_MIN;
+	bool passed = erx_mem_create(0, SHARED_PAGES * PAGE, 0, &mem) == ERX_OK &&
+	    object_fill(mem, SHARED_PAGES, ROOT_PATTERN) && erx_cap_dup(mem, &moved) == ERX_OK &&
+	    erx_gate_create(0, &gate) == ERX_OK && task_make(&task, SHARED_ADDR, SHARED_PAGES) &&
+	    erx_space_create(0, ERX_CAP_SELF, ERX_CAP_NULL, 0, 0, 4, &small) == ERX_OK;
+
+	item_put(0, mem, ERX_HR_READ | ERX_HR_MAP, false);
+	item_put(1, moved, write | ERX_HR_DESTROY, true);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 2) == ERX_OK && item_passed(0, ERX_HR_READ | ERX_HR_MAP) &&
+	    item_passed(1, write) && item_word(0, 1) != item_word(1, 1) && erx_cap_close(moved) == ERX_EINVAL;
+	held = item_word(0, 1);
+
+	for (size_t item = 0; item < ERX_MSG_CAPS; item++)
+		item_put(item, mem, ERX_HR_READ, false);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, small, ERX_MSG_CAPS) == ERX_ELIMIT && item_passed(0, ERX_HR_READ) &&
+	    item_passed(1, ERX_HR_READ) && item_passed(2, ERX_HR_READ) && item_word(3, 1) == mem;
+
+	item_put(0, mem, ERX_HR_READ, false);
+	item_put(1, gate, ERX_HR_SERVE, false);
+	item_put(2, mem, ERX_HR_READ, true);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 3) == ERX_ENOTSUP && item_passed(0, ERX_HR_READ) &&
+	    item_word(1, 1) == gate && item_word(2, 1) == mem && erx_msg_item_desc_move_get(item_word(2, 0)) == 1;
+	passed = passed && item_refused(task, mem, true, ERX_ENOTSUP) && item_refused(task, mem, false, ERX_EINVAL);
+	item_put(0, task, ERX_HR_INSPECT, false);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 1) == ERX_ENOTSUP &&
+	    erx_cap_pass(task, task, 1) == ERX_ENOTSUP && erx_cap_pass(ERX_CAP_SELF, ERX_CAP_SELF, 1) == ERX_ENOTSUP &&
+	    erx_cap_pass(ERX_CAP_SELF, task, ERX_MSG_CAPS + 1) == ERX_EINVAL;
+
+	passed = erx_cap_close(mem) == ERX_OK && passed;
+	if (task != 0)
+		status = task_finish(task, MODE_HOLDER | held << SLOT_SHIFT);
+	if (small != 0)
+		task_drop(small);
+	say_count("holder_status", (uint64_t)status);
+	passed = passed && status == 0;
+	passed = erx_cap_close(gate) == ERX_OK && passed && erx_fiasco_vm_free_pages() == before;
+	say_case("passing", passed);
+}
+
 /*
  * The root's own tables, and the service's rows for the first two task indices, take
  * their pages here, so no case counts them against its pool.
@@ -632,6 +742,7 @@ erx_fiasco_root_main(void)
 	case_budget_calls();
 	case_budget_destroy();
 	case_groups();
+	case_passing();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

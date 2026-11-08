@@ -107,8 +107,15 @@ layout erx_msgtag wire_le 8 8
     bits items 6 11
     bits protocol 16 63
   zero raw 0xf000
+# A typed item of a message or of erx_cap_pass: a sent item's descriptor holds
+# its rights mask, whether it moves and, for a checked pass, the type its
+# capability must have (0 for any); a received or passed one, its type and the
+# rights it has where it went.
 layout erx_msg_item wire_le 8 16
   field desc u64 0
+    bits rights 0 31
+    bits type 32 39
+    bits move 63 63
   field cap cap 8
 
 # What an IRQ object fires from (docs/design-kernel.md, "IRQ objects").
