@@ -6,15 +6,19 @@
 -moduledoc """
 The per-byte primitives (docs/design-runtime.md, "Per-byte primitives"): the work done once
 per byte is C, statically linked NIFs behind these calls. A NIF call takes at most 64 KiB, so
-it stays within a reduction slice. `crc32c/2` leaves longer inputs to its caller, who passes
-each result as the next call's first argument; the SHA-256 calls take a binary of any size and
-stream it to their NIF 64 KiB at a time themselves.
+it stays within a reduction slice. `crc32c/2` and `inet_csum/2` leave longer inputs to their
+caller, who passes each result as the next call's first argument; the SHA-256 calls take a
+binary of any size and stream it to their NIF 64 KiB at a time themselves. `inet_csum/2` and
+`siphash24/2` take iodata, so a header and a payload are summed or hashed without being
+joined first.
 """.
 
--export([crc32c/2, sha256/1, sha256_init/0, sha256_update/2, sha256_final/1]).
+-export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2]).
+-export([sha256/1, sha256_init/0, sha256_update/2, sha256_final/1]).
 -export_type([sha256_state/0]).
 
--nifs([crc32c_nif/2, sha256_nif/1, sha256_init_nif/0, sha256_update_nif/2, sha256_final_nif/1]).
+-nifs([crc32c_nif/2, inet_csum_nif/2, inet_csum_update_nif/3, siphash24_nif/2]).
+-nifs([sha256_nif/1, sha256_init_nif/0, sha256_update_nif/2, sha256_final_nif/1]).
 -on_load(on_load/0).
 
 %% The most bytes one NIF call takes (ERX_BYTES_CALL_MAX in erx_bytes_nif.c).
@@ -45,6 +49,68 @@ crc32c(Crc, Data)
     crc32c_nif(Crc, Data);
 crc32c(_Crc, _Data) ->
     erlang:error(badarg).
+
+-doc """
+The Internet checksum sum (RFC 1071) of `Data`'s bytes, continuing from `Sum`, the sum of the
+bytes before them (0 for none), which must be of even length, as every header is. The sum is
+the one's-complement sum of the bytes as 16-bit big-endian words, a last odd byte padded with
+a zero byte, folded to 16 bits. A checksum field holds its complement,
+`bnot Sum band 16#FFFF`, so the sum of bytes that include a right field is `16#FFFF`.
+`inet_csum(inet_csum(0, A), B)` is `inet_csum(0, [A, B])` when `A` is of even length. Fails
+with `badarg` unless `Sum` is in `0..16#FFFF` and `Data` is iodata of at most 65536 bytes.
+""".
+-spec inet_csum(Sum :: 0..16#FFFF, Data :: iodata()) -> 0..16#FFFF.
+inet_csum(Sum, Data)
+  when is_integer(Sum), Sum >= 0, Sum =< 16#FFFF, is_binary(Data), byte_size(Data) =< ?CALL_MAX ->
+    inet_csum_nif(Sum, Data);
+inet_csum(Sum, Data) when is_integer(Sum), Sum >= 0, Sum =< 16#FFFF, is_list(Data) ->
+    inet_csum_nif(Sum, call_iovec(Data));
+inet_csum(_Sum, _Data) ->
+    erlang:error(badarg).
+
+-doc """
+RFC 1624's incremental update, its equation 3: the checksum field that replaces `Checksum`
+when the bytes `Before`, at an even offset of what the checksum covers, become the bytes
+`After`. When `Checksum` was right, the result is the field a full recomputation gives,
+except that for a non-empty `Before` it is `0` where that is `16#FFFF`, the other zero of
+one's-complement arithmetic, which a full recomputation gives only when every covered byte is
+zero; a wrong `Checksum` stays wrong by the same amount. UDP sends a computed `0` as `16#FFFF`
+(RFC 768), since there `0` means no checksum; that is the caller's rule, for this result as
+for a full recomputation. Fails with `badarg` unless `Checksum` is in
+`0..16#FFFF` and `Before` and `After` are binaries of one even size of at most 65536 bytes.
+""".
+-spec inet_csum_update(Checksum :: 0..16#FFFF, Before :: binary(), After :: binary()) -> 0..16#FFFF.
+inet_csum_update(Checksum, Before, After)
+  when is_integer(Checksum), Checksum >= 0, Checksum =< 16#FFFF, is_binary(Before), is_binary(After),
+       byte_size(Before) =:= byte_size(After), byte_size(Before) rem 2 =:= 0,
+       byte_size(Before) =< ?CALL_MAX ->
+    inet_csum_update_nif(Checksum, Before, After);
+inet_csum_update(_Checksum, _Before, _After) ->
+    erlang:error(badarg).
+
+-doc """
+SipHash-2-4 (Aumasson and Bernstein, 2012) of `Data`'s bytes under the 16-byte `Key`, as the
+64-bit integer whose little-endian bytes are the paper's output. Fails with `badarg` unless
+`Key` is a 16-byte binary and `Data` is iodata of at most 65536 bytes.
+""".
+-spec siphash24(Key :: <<_:128>>, Data :: iodata()) -> 0..16#FFFFFFFFFFFFFFFF.
+siphash24(Key, Data)
+  when is_binary(Key), byte_size(Key) =:= 16, is_binary(Data), byte_size(Data) =< ?CALL_MAX ->
+    siphash24_nif(Key, Data);
+siphash24(Key, Data) when is_binary(Key), byte_size(Key) =:= 16, is_list(Data) ->
+    siphash24_nif(Key, call_iovec(Data));
+siphash24(_Key, _Data) ->
+    erlang:error(badarg).
+
+%% The iolist Data as a list of binaries for a NIF call: badarg unless it is an iolist of at
+%% most ?CALL_MAX bytes. The size is checked before erlang:iolist_to_iovec/1 joins anything.
+%% That call keeps large binaries as they are, joins small ones and drops empty ones, so the
+%% NIF sees few pieces, each byte-aligned.
+call_iovec(Data) ->
+    case iolist_size(Data) of
+        Size when Size =< ?CALL_MAX -> erlang:iolist_to_iovec(Data);
+        _ -> erlang:error(badarg)
+    end.
 
 -doc """
 The SHA-256 digest (FIPS 180-4) of `Data`, 32 bytes, the same as
@@ -85,6 +151,15 @@ sha256_final(State) ->
     sha256_final_nif(State).
 
 crc32c_nif(_Crc, _Data) ->
+    erlang:nif_error(undef).
+
+inet_csum_nif(_Sum, _Data) ->
+    erlang:nif_error(undef).
+
+inet_csum_update_nif(_Checksum, _Before, _After) ->
+    erlang:nif_error(undef).
+
+siphash24_nif(_Key, _Data) ->
     erlang:nif_error(undef).
 
 sha256_nif(_Data) ->

@@ -1278,6 +1278,8 @@ OS_OBJS = \
 	$(OBJDIR)/erx_device_core.o \
 	$(OBJDIR)/erx_device_queue.o \
 	$(OBJDIR)/erx_crc32c.o \
+	$(OBJDIR)/erx_inet_csum.o \
+	$(OBJDIR)/erx_siphash.o \
 	$(OBJDIR)/sha256c.o \
 	$(OBJDIR)/erx_device_bif.o \
 	$(OBJDIR)/erx_trace_ring_bif.o \

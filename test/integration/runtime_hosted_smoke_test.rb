@@ -349,6 +349,24 @@ class RuntimeHostedSmokeTest < Minitest::Test
     end
   end
 
+# The network stack's per-byte primitives run in the release and agree with the host
+# stand-in's models: the probe (test/fixtures/erx_net_bytes_probe.erl) answers its calls on
+# stock OTP with test/erlang/host_bytes/erx_bytes.erl, then checks the NIF's answers to the
+# same calls against those, over iolists whose binaries over 512 bytes reach the NIF as pieces
+# of their own at odd and even offsets, and every refusal and acceptance of the contract
+# against its literal answer; the answer is empty lists only if each check passed.
+def test_the_network_primitives_run_in_the_release_and_agree_with_the_models
+  Dir.mktmpdir('erx-hosted-net-bytes-') do |directory|
+    probe = compiled_fixture('erx_net_bytes_probe', directory)
+    answers = stand_in_net_bytes_answers(directory)
+    assert_answers(
+      "{module, erx_net_bytes_probe} = code:load_binary(erx_net_bytes_probe, \"probe\", base64:decode(\"#{probe}\")), " \
+      'loaded.' => /^loaded$/,
+      "erx_net_bytes_probe:check(#{answers})." => /^\{net_bytes,\[\],\[\]\}$/
+    )
+  end
+end
+
   # M4's exit criterion "a module reloaded in a loop on four CPUs never runs stale code",
   # through the release's code service: the probe (test/fixtures/erx_code_reload_probe.erl)
   # loads 1,000 versions of a module through erx_code, one after another, while a caller on
@@ -572,6 +590,22 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert status.success?, output
     output.chomp.split(',')
   end
+
+# The probe's answers from the host stand-in on stock OTP, as an Erlang list's text: the
+# stand-in is compiled into a directory of its own, so the release loads only the probe.
+def stand_in_net_bytes_answers(directory)
+  stand_in = File.join(directory, 'stand-in')
+  FileUtils.mkdir_p(stand_in)
+  log, status = Open3.capture2e(File.join(ROOT, 'build/oracle/emu/install/bin/erlc'), '+no_docs', '-o', stand_in,
+                                File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl'), stdin_data: '')
+  assert status.success?, log
+  output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
+                                   File.join(ROOT, 'build/oracle/emu/install/bin/erl'), '-noshell',
+                                   '-pa', directory, '-pa', stand_in, '-eval',
+                                   'io:format("~w~n", [erx_net_bytes_probe:answers()]), halt().', stdin_data: '')
+  assert status.success?, output
+  output.chomp
+end
 
   # The release's manifest holds every argument, and nothing of the host's environment reaches the page.
   # Waits for the console's command shell, which the runtime starts at boot (the boot's log

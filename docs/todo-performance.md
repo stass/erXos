@@ -379,6 +379,21 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   architecture layer, with the portable code as their oracle in the same test. The
   same run should time one 64 KiB call on each target board, since `erx_bytes_nif.c`
   charges it a quarter of a reduction slice from the host's number.
+* **[Low] per-byte primitives, `erx_bytes:inet_csum/2` and `siphash24/2` run portable C
+  only.** The checksum adds one 16-bit word at a time into 64 bits and does not use the
+  CPU's checksum-friendly instructions that
+  [the network design](design-network-stack.md#where-c-is-used-and-what-is-measured)
+  puts behind the architecture layer. In a one-off loop on the development host (Apple
+  M3 Max, macOS, native, clang 23.1.3 -O2, 2026-11-08), not a benchmark, a 64 KiB call
+  took about 16 microseconds for the checksum and 110 for SipHash-2-4, and a 36-byte
+  SipHash (a SYN cookie's input) about 60 nanoseconds; `erx_bytes_nif.c` charges 2 and
+  11 percent of a reduction slice from these. A small call also pays the wrappers'
+  `iolist_size/1` and `erlang:iolist_to_iovec/1` when given a list. Measure: the time
+  per frame of the bulk-transfer load the network design names, on HVF, against the
+  same load with the checksum stubbed; and one 64 KiB call of each on each target
+  board. If the checksum is a visible share, add a wider portable loop (32-bit loads,
+  deferred carries) and then the AArch64 instructions chosen by feature detection, the
+  portable code staying as their oracle.
 * [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.
 * [Low] `tools/lib/erx/generated.rb`, `Erx::Generated.require_ruby`: every Ruby process that loads a generated Ruby file (each `tools/erx` call, each host test process using the ABI or terminal tables) loads the generator libraries and hashes every `tools/lib` file and every input and output to check the stamp, about 80 ms over loading the file alone when the tree is fresh (a reviewer's rough number on Apple Silicon macOS, not a recorded measurement). Settled by the wall time of `make check` and of `ruby tools/erx status` with and without the freshness check; if it shows, check a cheap digest of the stamp's inputs before loading the generators.
 * **[Medium] network, a round trip per `gen_tcp:send/2` across a lane**

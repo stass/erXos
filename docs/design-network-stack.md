@@ -164,10 +164,6 @@ each row names what in this design removes the fault.
 
 * No part of the stack is in the tree: `erlang/apps` holds no network
   application, and no client of a network service exists in any domain.
-* The per-byte primitive `erx_bytes:inet_csum/2` is specified
-  ([design-runtime.md](design-runtime.md#per-byte-primitives)) but not
-  written: `erlang/apps/erx/src/erx_bytes.erl` exports `crc32c/2` and
-  the SHA-256 calls only.
 * No Erlang code can read the kernel's entropy generator: the
   runtimes call `erx_entropy_read` for musl and for ERTS's reference key
   ([design-runtime.md](design-runtime.md#unguessable-references)), and
@@ -175,6 +171,10 @@ each row names what in this design removes the fault.
   ([design-runtime.md](design-runtime.md#per-byte-primitives),
   [design.md](design.md#decisions)) but not written. The host link's
   session identifiers wait on the same entry (`TODO.md`).
+* The per-byte primitives the stack uses, `erx_bytes:inet_csum/2`,
+  `inet_csum_update/3` and `siphash24/2`, are written
+  ([design-runtime.md](design-runtime.md#per-byte-primitives)), as
+  statically linked NIFs in portable C.
 * The device NIF is specified: `erx_device:post/4` takes one to four
   binary segments of one request and copies them into a pool buffer, and
   `erx_device:complete/2` returns up to 64 KiB of completed buffers as
