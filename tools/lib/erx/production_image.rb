@@ -7,6 +7,7 @@ require 'fileutils'
 require 'json'
 require_relative 'abi'
 require_relative 'boot_file'
+require_relative 'build_facts'
 require_relative 'build_inputs'
 require_relative 'crash_frame'
 require_relative 'deterministic_transcript'
@@ -41,6 +42,13 @@ module Erx
   class ProductionImage
     PLATFORM = 'config/platforms/qemu-virt.json'
     MANIFEST = 'config/manifest/qemu-virt-development.txt'
+    # The kind of build every image is, which the archive header's development bit
+    # records and uname -i names (BuildFacts.configuration).
+    BUILD_KIND = 'development'
+    # The code that gathers and writes the build-facts file (BuildFacts, SourceRevision,
+    # build_facts_entry and Fiasco#kernel_name), which its receipt names as its sources.
+    BUILD_FACTS_SOURCES = %w[tools/lib/erx/build_facts.rb tools/lib/erx/source_revision.rb tools/lib/erx/production_image.rb
+                             tools/lib/erx/fiasco.rb].freeze
     ROOT_ENTRY_PATH = 'system/root'
     NOTICES_PATH = 'system/NOTICES'
     MEMORY_MIB = 160
@@ -222,7 +230,8 @@ module Erx
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')
       File.write(self.class.sources_path(archive), sources)
-      release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
+      release = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries,
+                 build_facts_entry(directory: directory)]
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
       # Only domains run the BeamAsm image, so an image without them does not build it.
       jit = domains.empty? ? nil : @jit_runtime.build(interpreter: erts)
@@ -230,7 +239,8 @@ module Erx
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *domain.entries, *added.entries], root_task: root_task,
                     images: images, manifest_source: manifest_source, erts: erts, jit: jit, output: archive,
                     imports: IMPORTS.merge(added.imports),
-                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *domain.inputs, *added.inputs].uniq,
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *build_facts_sources, *domain.inputs,
+                             *added.inputs].uniq,
                     test_code: test_code, machine: machine)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
@@ -238,6 +248,8 @@ module Erx
       flags = header.fetch('flags')
       marked = flags.anybits?(@codec.member('pack_flags', 'test_code'))
       raise Error, 'the archive header disagrees with the test-code mark asked for' unless marked == test_code
+      raise Error, "the archive header disagrees with the build kind #{BUILD_KIND} the build facts name" unless
+        flags.anybits?(@codec.member('pack_flags', 'development')) == (BUILD_KIND == 'development')
 
       Built.new(single: single, archive: archive, first_stage: @fiasco.image_path,
                 index_hash: header.fetch('index_hash').unpack1('H*'), build_id: header.fetch('build_id').unpack1('H*'),
@@ -1125,11 +1137,11 @@ module Erx
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts, jit), runner: @runner,
                                       imports: imports, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
-      platform = machine.platform(JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record'))
+      platform = machine.platform(platform_record)
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance,
                domain_planner: DomainPlanner.new(helper: tools.fetch('domains'), runner: @runner))
-          .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,
+          .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: BUILD_KIND, platform: platform,
                  artifacts: self.class.artifacts(paths, images: images),
                  manifest_source: manifest_source, output: output, test_code: test_code)
     end
@@ -1138,6 +1150,27 @@ module Erx
       fiasco = [@fiasco.kernel_path, @fiasco.sigma0_path, @fiasco.image_path, File.join(@root, 'build/fiasco/receipt.json'),
                 File.join(@root, 'build/fiasco/provenance.json'), File.join(@root, 'tools/lib/erx/fiasco.rb')]
       BuildInputs.pack(root: @root, paths: [*root_task.fetch(:inputs), *inputs, *fiasco])
+    end
+
+    def build_facts_sources = BUILD_FACTS_SOURCES.map { |source| File.join(@root, source) }
+
+    def platform_record = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
+
+    # The system release's build-facts file (BuildFacts), from the facts this build
+    # packs: the platform record's name and the build kind, the kernel it packs
+    # (Fiasco#kernel_name, beside kernel_path), and the source revision. Its receipt
+    # attributes it to the code that writes it.
+    def build_facts_entry(directory:)
+      configuration = BuildFacts.configuration(platform: platform_record.fetch('name'), build_kind: BUILD_KIND)
+      facts = BuildFacts.gather(root: @root, runner: @runner, configuration: configuration, kernel: @fiasco.kernel_name)
+      path = File.join(directory, 'build-facts')
+      File.write(path, BuildFacts.render(facts))
+      receipt = File.join(directory, 'build-facts.receipt.json')
+      File.write(receipt, JSON.pretty_generate('version' => 1, 'kind' => 'compiled', 'artifact' => reference(path),
+                                               'sources' => BUILD_FACTS_SOURCES.map { |source| reference(File.join(@root, source)) }) + "\n")
+      entry_path = @codec.fixed_bytes('build_facts_path')
+      { 'path' => entry_path, 'kind' => @codec.member('entry_kind', 'file'), 'flags' => @codec.member('entry_flags', 'system'),
+        'id' => entry_path, 'artifact' => path, 'receipt' => receipt }
     end
 
     # A receipt that says the kernel or sigma0 comes from Fiasco's audited build.

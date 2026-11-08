@@ -92,7 +92,8 @@ class RuntimeReleaseTest < Minitest::Test
     assert_empty Erx::Release.differences(@table, Erx::Release.file_table(archive: self.class.second, codec: @codec))
   end
 
-  # The root, the manifest and the notices are left out; a file of the release never is.
+  # The root, the manifest, the notices and the build facts are left out; a file of the
+  # release never is.
   def test_the_comparison_names_a_changed_a_missing_and_an_added_file
     assert_equal %w[system/root system/manifest system/NOTICES], Erx::Release::NOT_RELEASE_FILES
     path, hash = @table.first

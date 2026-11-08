@@ -240,8 +240,9 @@ module Erx
       when 'fiasco'
         resolve_fiasco(receipt, records: records, build_kind: build_kind)
       when 'compiled'
-        # A file with no link to read, Erlang's. This attributes licences to the sources it
-      # names and proves nothing about what the file was made from.
+        # A file with no link to read: Erlang's, or one the build generates, such as the
+        # build facts, whose sources are the code that writes it. This attributes licences
+        # to the sources it names and proves nothing about what the file was made from.
         exact_keys(receipt, %w[version kind artifact sources])
         sources = receipt.fetch('sources')
         raise Error, 'compiled receipt has no sources' unless sources.is_a?(Array) && sources.size.between?(1, 64)

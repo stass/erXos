@@ -34,13 +34,16 @@ module Erx
     PLATFORM = 'config/platforms/qemu-virt.json'
     TOOLCHAIN_PROFILE = 'config/provenance/llvm-23.1.3.json'
     # What an archive names by itself rather than by the release: the root and these
-    # two say what each build links, so a comparison of two archives leaves them out.
+    # two say what each build links, so a comparison of two archives leaves them out,
+    # as it leaves out the build facts at the ABI's build_facts_path, which say which
+    # build an image is and which only the production image carries.
     NOT_RELEASE_FILES = %w[system/root system/manifest system/NOTICES].freeze
 
     # The archive's release files as [path, content hash], sorted, from its index alone.
     def self.file_table(archive:, codec:)
       rows = entries_of(File.binread(archive), codec).map { |path, entry| [path, entry.fetch('file_hash').unpack1('H*')] }
-      rows.select { |path, _hash| path.start_with?('system/') && !NOT_RELEASE_FILES.include?(path) }.sort.freeze
+      excluded = [*NOT_RELEASE_FILES, codec.fixed_bytes('build_facts_path')]
+      rows.select { |path, _hash| path.start_with?('system/') && !excluded.include?(path) }.sort.freeze
     end
 
     # The bytes of one file of an archive, found through its index.

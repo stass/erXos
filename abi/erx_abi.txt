@@ -197,6 +197,11 @@ bytes abi_note_section 13 value 2e6e6f74652e6572782e616269
 # os:version/0 the release's numbers.
 bytes uname_sysname 5 value 6572586f73
 bytes uname_release 5 value 302e312e30
+# Where the system release keeps the facts of its build that uname -v
+# shows, "system/releases/build-facts": the source revision, its commit
+# date, the system manifest's name and the packed kernel's name and
+# revision (docs/design-shell.md, "Text commands").
+bytes build_facts_path 27 value 73797374656d2f72656c65617365732f6275696c642d6661637473
 layout erx_abi_note wire_le 4 24
   field header erx_elf64_nhdr 0
   field owner abi_note_owner 12

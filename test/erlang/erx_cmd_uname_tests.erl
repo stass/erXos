@@ -6,14 +6,17 @@
 EUnit cases of the command shell's `uname` (erx_cmd_uname,
 docs/design-shell.md, "Text commands"): the fields each flag selects, `-a`
 and no flag, FreeBSD's order whatever the order of the flags, the layout,
-the values abi/erx_abi.txt and the architecture's file give, `unknown` for
-what the running system cannot tell, and the usage errors. The emulator
+the values abi/erx_abi.txt and the architecture's file give, the version's
+four words and the date's layout, `unknown` for what the running system
+cannot tell, the build facts' reader (erx_build:parse_facts/1), and the
+usage errors. The emulator
 that runs them is started as the system release is, with
 `-sname uname@erxtest -kernel start_distribution false`
 (test/host/erx_cmd_uname_test.rb), so it runs no distribution and a line
 run through the shell finds the host `erxtest` among init's arguments;
-its init has no `-erx build`, so the build identifier is `unknown`, the
-never-fabricate case end to end.
+its init has no `-erx build` and its root no build facts, so the build
+configurationifier and every build fact are `unknown`, the never-fabricate case
+end to end.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -45,8 +48,14 @@ shown(Stream, Acc) ->
 
 line(Fields, Facts) -> iolist_to_binary(erx_cmd_uname:line(Fields, Facts)).
 
--define(KNOWN, #{nodename => <<"erxos">>, build => <<"2255e43fb7866bb3">>}).
--define(UNKNOWN, #{nodename => unknown, build => unknown}).
+%% 2026-11-08 18:02:11 UTC, a Sunday.
+-define(COMMITTED, 1794160931).
+-define(KNOWN, #{nodename => <<"erxos">>, build => <<"2255e43fb7866bb3">>,
+                 revision => <<"master-n1234-5e45e725588e">>, date => ?COMMITTED,
+                 configuration => <<"qemu-virt/development">>, kernel => <<"fiasco-50bbe8a98119">>}).
+-define(UNKNOWN, #{nodename => unknown, build => unknown, revision => unknown, date => unknown,
+                   configuration => unknown, kernel => unknown}).
+-define(VERSION, "master-n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119").
 
 %%% Selection
 
@@ -61,18 +70,22 @@ fields_test_() ->
      ?_assertEqual([machine], F("m")),
      ?_assertEqual([processor], F("p")),
      ?_assertEqual([build], F("b")),
-     %% -a is -mnrsv: no processor and no build identifier, as on FreeBSD.
+     ?_assertEqual([configuration], F("i")),
+     ?_assertEqual([kernel], F("K")),
+     %% -a is -mnrsv: no processor and no build configurationifier, as on FreeBSD.
      ?_assertEqual([sysname, nodename, release, version, machine], F("a")),
      ?_assertEqual([sysname, nodename, release, version, machine, processor, build], F("abp")),
+     ?_assertEqual([sysname, nodename, release, version, machine, processor, configuration, kernel, build], F("abpiK")),
      %% FreeBSD's order, whatever the order of the flags; a repeated flag counts once.
      ?_assertEqual([sysname, release, machine], F("mrs")),
      ?_assertEqual([sysname], F("oso")),
-          ?_assertEqual([nodename, processor, build], F("bpn"))].
+     ?_assertEqual([nodename, processor, build], F("bpn")),
+     ?_assertEqual([configuration, kernel], F("Ki"))].
 
-%% Every order of the seven field flags gives FreeBSD's order.
+%% Every order of the nine field flags gives FreeBSD's order.
 fields_in_any_order_test() ->
-    All = [sysname, nodename, release, version, machine, processor, build],
-    [?assertEqual(All, erx_cmd_uname:fields(Order)) || Order <- permutations("snrvmpb")].
+    All = [sysname, nodename, release, version, machine, processor, configuration, kernel, build],
+    [?assertEqual(All, erx_cmd_uname:fields(Order)) || Order <- permutations("snrvmpiKb")].
 
 permutations([]) -> [[]];
 permutations(List) -> [[H | T] || H <- List, T <- permutations(List -- [H])].
@@ -100,27 +113,80 @@ line_test_() ->
      ?_assertEqual(<<"aarch64\n">>, line([processor], ?KNOWN)),
      ?_assertEqual(<<"erxos\n">>, line([nodename], ?KNOWN)),
      ?_assertEqual(<<"2255e43fb7866bb3\n">>, line([build], ?KNOWN)),
-     ?_assertEqual(<<"erXos 0.1.0 build 2255e43fb7866bb3\n">>, line([version], ?KNOWN)),
-     ?_assertEqual(<<"erXos erxos 0.1.0 erXos 0.1.0 build 2255e43fb7866bb3 arm64\n">>,
-                   line(erx_cmd_uname:fields("a"), ?KNOWN)),
+     ?_assertEqual(<<?VERSION "\n">>, line([version], ?KNOWN)),
+     ?_assertEqual(<<"qemu-virt/development\n">>, line([configuration], ?KNOWN)),
+     ?_assertEqual(<<"fiasco-50bbe8a98119\n">>, line([kernel], ?KNOWN)),
+     ?_assertEqual(<<"erXos erxos 0.1.0 " ?VERSION " arm64\n">>, line(erx_cmd_uname:fields("a"), ?KNOWN)),
+     %% A build fact passes the field escape, whatever erx_build admitted.
+     ?_assertEqual(<<"a\\x1B]8\n">>, line([kernel], maps:put(kernel, <<"a\e]8">>, ?KNOWN))),
      %% What the running system cannot tell is written unknown, never guessed.
      ?_assertEqual(<<"unknown\n">>, line([nodename], ?UNKNOWN)),
      ?_assertEqual(<<"unknown\n">>, line([build], ?UNKNOWN)),
-     ?_assertEqual(<<"erXos 0.1.0 build unknown\n">>, line([version], ?UNKNOWN))].
+     ?_assertEqual(<<"unknown unknown unknown unknown\n">>, line([version], ?UNKNOWN)),
+     ?_assertEqual(<<"unknown\n">>, line([configuration], ?UNKNOWN)),
+     ?_assertEqual(<<"unknown\n">>, line([kernel], ?UNKNOWN))].
+
+%%% The date
+
+%% macOS's date layout in UTC: a space-padded day, zero-padded time.
+date_test_() ->
+    D = fun erx_cmd_uname:date/1,
+    [?_assertEqual(<<"Sun Nov  8 18:02:11 UTC 2026">>, D(?COMMITTED)),
+     ?_assertEqual(<<"Thu Jan  1 00:00:00 UTC 1970">>, D(0)),
+     ?_assertEqual(<<"Tue Aug 11 21:05:48 UTC 2026">>, D(1786482348)),
+     ?_assertEqual(<<"Sat Feb 29 23:59:59 UTC 2020">>, D(1583020799))].
+
+%%% The build facts
+
+-define(FACTS, <<"revision master-n1234-5e45e725588e\ndate 1794160931\n"
+                 "configuration qemu-virt/development\nkernel fiasco-50bbe8a98119\n">>).
+
+parse_facts_test_() ->
+    P = fun erx_build:parse_facts/1,
+    Replace = fun(Old, New) -> binary:replace(?FACTS, Old, New) end,
+    [?_assertEqual({ok, maps:without([nodename, build], ?KNOWN)}, P(?FACTS)),
+     %% unknown stands for what the build could not determine, in any field.
+     ?_assertEqual({ok, maps:without([nodename, build], ?UNKNOWN)},
+                   P(<<"revision unknown\ndate unknown\nconfiguration unknown\nkernel unknown\n">>)),
+     ?_assertEqual({ok, (maps:without([nodename, build], ?KNOWN))#{revision => <<"n7-0123456789ab-dirty">>}},
+                   P(Replace(<<"master-n1234-5e45e725588e">>, <<"n7-0123456789ab-dirty">>))),
+     %% Anything else is refused whole.
+     [?_assertMatch({error, {bad_facts, _}}, P(Bytes))
+      || Bytes <- [<<>>,
+                   binary:part(?FACTS, 0, byte_size(?FACTS) - 1),
+                   <<?FACTS/binary, "extra x\n">>,
+                   Replace(<<"date">>, <<"time">>),
+                   Replace(<<"revision master">>, <<"revision  master">>),
+                   Replace(<<"master">>, <<"mas ter">>),
+                   Replace(<<"master">>, <<"mas\e]8;;ter">>),
+                   Replace(<<"master">>, <<"-master">>),
+                   Replace(<<"1794160931">>, <<"17941609x1">>),
+                   Replace(<<"1794160931">>, <<"1794160931000">>),
+                   Replace(<<"1794160931">>, <<>>),
+                   Replace(<<"qemu-virt/development">>, <<"QEMU-VIRT/DEVELOPMENT">>),
+                   Replace(<<"qemu-virt/development">>, <<"qemu-virt">>),
+                   Replace(<<"qemu-virt/development">>, <<"qemu/virt/development">>),
+                   Replace(<<"fiasco">>, <<"Fiasco">>),
+                   Replace(<<"\nkernel">>, <<"\r\nkernel">>),
+                   <<"date 1794160931\nrevision master-n1234-5e45e725588e\n"
+                     "configuration qemu-virt/development\nkernel fiasco-50bbe8a98119\n">>,
+                   Replace(<<"master-n1234-5e45e725588e">>, binary:copy(<<"a">>, 161)),
+                   <<?FACTS/binary, (binary:copy(<<"x">>, 512))/binary>>]]].
 
 %%% Through the shell
 
 shell_test_() ->
     [?_assertEqual({<<>>, <<"erXos\n">>, <<>>}, run_line(<<"uname">>)),
-     ?_assertEqual({<<>>, <<"erXos erxtest 0.1.0 erXos 0.1.0 build unknown arm64\n">>, <<>>},
+     ?_assertEqual({<<>>, <<"erXos erxtest 0.1.0 unknown unknown unknown unknown arm64\n">>, <<>>},
                    run_line(<<"uname -a">>)),
      ?_assertEqual({<<>>, <<"erXos 0.1.0 arm64 aarch64\n">>, <<>>}, run_line(<<"uname -p -mrs">>)),
      ?_assertEqual({<<>>, <<"erXos\n">>, <<>>}, run_line(<<"uname -o --">>)),
+     ?_assertEqual({<<>>, <<"unknown unknown\n">>, <<>>}, run_line(<<"uname -K -i">>)),
      %% An option FreeBSD's uname has and this one does not offer, an unknown
      %% option and an argument, `-` and a word after `--` included, are each
      %% a usage error.
-     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abmnoprsv]\n">>}, run_line(<<"uname -K">>)),
-     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abmnoprsv]\n">>}, run_line(<<"uname -z">>)),
-     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abmnoprsv]\n">>}, run_line(<<"uname -s extra">>)),
-     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abmnoprsv]\n">>}, run_line(<<"uname -">>)),
-     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abmnoprsv]\n">>}, run_line(<<"uname -- -s">>))].
+     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abiKmnoprsv]\n">>}, run_line(<<"uname -U">>)),
+     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abiKmnoprsv]\n">>}, run_line(<<"uname -z">>)),
+     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abiKmnoprsv]\n">>}, run_line(<<"uname -s extra">>)),
+     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abiKmnoprsv]\n">>}, run_line(<<"uname -">>)),
+     ?_assertEqual({<<"usage">>, <<>>, <<"usage: uname [-abiKmnoprsv]\n">>}, run_line(<<"uname -- -s">>))].

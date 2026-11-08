@@ -17,6 +17,7 @@ require_relative 'core_archive'
 require_relative 'stack_proof_run'
 require_relative 'glue_imports'
 require_relative 'output_directory'
+require_relative 'origin'
 
 module Erx
   class Fiasco
@@ -158,6 +159,16 @@ module Erx
     # The kernel and sigma0 the recipe packs, once built.
     def kernel_path = File.join(@build, 'kernel/fiasco')
     def sigma0_path = File.join(@build, 'users/bin/arm64_armv8a/std/l4f/sigma0')
+
+    # The kernel's name as uname -K shows it (BuildFacts): fiasco- and the first 12
+    # hex digits of the upstream revision fiasco/kernel/ORIGIN.md records.
+    def kernel_name
+      revision = Origin.new(root: File.join(@source, 'kernel')).inventory.fetch('revision')
+      raise Error, "fiasco/kernel/ORIGIN.md's revision is not a commit: #{revision.inspect}" unless
+        revision.is_a?(String) && revision.match?(/\A[0-9a-f]{40}\z/)
+
+      "fiasco-#{revision[0, 12]}"
+    end
 
     # What a native root task compiles and links against, once built.
     def user_include_directories
