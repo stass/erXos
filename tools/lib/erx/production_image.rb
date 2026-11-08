@@ -618,7 +618,7 @@ module Erx
       # erlang:processes() lists, and a module compiled and a tracer started with compiler
       # and runtime_tools loaded and neither started, and an rc line the command shell's
       # evaluator runs with its Erlang commands, and erx:i(), whose machine rows the kernel
-      # interface reports unsupported under Fiasco and whose budget's used the liberx pool
+      # interface reports unsupported under Fiasco and whose budget's used the root pool
       # reports partial, with the pool's scope below the tables, and the same statuses in
       # /proc: ls and cat through the command shell's evaluator, then file:read_file/1 of a
       # process's status file, which is size 0 and read to its end as stock reads one.
@@ -652,11 +652,11 @@ module Erx
          console_point('rc-ending', /\A(?:[0-9]+> )?\{ok,<<>>\}\r*\n\z/n, type: "erx:i().\r"),
          # The echo of the line holds erx:i(), so only the machine record's title matches.
          console_point('inspect-machine', %r{\A/  machine\r*\n\z}n),
-         console_point('inspect-memory', /\A  memory_total +liberx pool +\[partial\]\r*\n\z/n),
+         console_point('inspect-memory', /\A  memory_total +root pool +\[partial\]\r*\n\z/n),
          console_point('inspect-uptime', /\A  uptime +kernel +[1-9][0-9]*\r*\n\z/n),
-         console_point('inspect-used', /\A  used +liberx pool +\[partial\]\r*\n\z/n),
+         console_point('inspect-used', /\A  used +root pool +\[partial\]\r*\n\z/n),
          console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries\r*\n\z}n),
-         console_point('inspect-scope', /\Aliberx pool: pages of the root's pool:/n),
+         console_point('inspect-scope', /\Aroot pool: pages of the root's pool:/n),
          console_point('inspect-answer', /\Aok\r*\n\z/n, type: PROC_EXPRESSION),
          # ls -1 /proc, sorted, then the console process's status, the machine's and the system
          # domain's budget's, each attribute a line of name, value and reporter. The console's
@@ -666,21 +666,23 @@ module Erx
          console_point('proc-ls-status', /\Astatus\r*\n\z/n),
          console_point('proc-process-domain', /\Adomain#{TAB}4#{TAB}service\r*\n\z/n),
          console_point('proc-process-name', /\Aregistered_name#{TAB}erx_console#{TAB}runtime\r*\n\z/n),
-         console_point('proc-machine-memory', /\Amemory_total#{TAB}\[partial\]#{TAB}liberx pool\r*\n\z/n),
+         console_point('proc-machine-memory', /\Amemory_total#{TAB}\[partial\]#{TAB}root pool\r*\n\z/n),
          console_point('proc-machine-uptime', /\Auptime#{TAB}[1-9][0-9]*#{TAB}kernel\r*\n\z/n),
-         console_point('proc-budget-used', /\Aused#{TAB}\[partial\]#{TAB}liberx pool\r*\n\z/n),
+         console_point('proc-budget-used', /\Aused#{TAB}\[partial\]#{TAB}root pool\r*\n\z/n),
          console_point('proc-ending', /\A\{ok,<<>>\}\r*\n\z/n, type: PROC_READ_EXPRESSION),
          # The echo of the line holds {proc_read, so only the answer matches.
          console_point('proc-read', /\A(?:[0-9]+> )?\{proc_read,/n,
                        whole: /\A(?:[0-9]+> )?\{proc_read,true,true,true\}\r*\n\z/n, type: TOP_EXPRESSION),
          # top's header through the inspector with the session's facet: the run queue and the
-         # uptime ok, the pool's memory and the root's used partial, so `-`, and the rest of the
-         # budget unsupported, so `-`. The echo holds top -b, so only the header matches.
+         # uptime ok; the pool's memory and the root's used partial, each line's numbers all
+         # the pool's, so its label names the pool; the rest of the budget unsupported, so `-`.
+         # The echo holds top -b, so only the header matches.
          console_point('top-first', /\A(?:[0-9]+> )?run queue: [0-9]+;  up /n,
                        whole: /\A(?:[0-9]+> )?run queue: [0-9]+;  up 0\+00:[0-5][0-9]:[0-5][0-9]    [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\r*\n\z/n),
          console_point('top-states', /\A[1-9][0-9]* processes: /n),
-         console_point('top-memory', /\AMem: - Total, - Free\r*\n\z/n),
-         console_point('top-budget', /\ADomain 4 budget: - Used, - Guarantee, - Cap\r*\n\z/n)].freeze
+         console_point('top-memory', /\AMem \(root pool\): [1-9][0-9]{0,3}[KMG] Total, [0-9]{1,4}[KMG] Free\r*\n\z/n),
+         console_point('top-budget',
+                       /\ADomain 4 budget \(root pool\): [1-9][0-9]{0,3}[KMG] Used, - Guarantee, - Cap\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the

@@ -164,19 +164,70 @@ display_test() ->
                  display(Rows, layout(3, infinity))),
     ?assertEqual(<<"1 processes:   1 sleeping">>, lists:nth(2, lines(display([row(1, #{})], layout(0, infinity))))).
 
-%% The header shows each figure the inspector answers ok, in FreeBSD's
-%% format, and `-` for every other status, so a partial count never reads
-%% as exact; the budget line names its domain.
+%% The header shows each figure the inspector answers ok in FreeBSD's
+%% format, a partial one with its reporter named after it where the line
+%% has numbers of other reporters or statuses, and `-` for every other
+%% status, so a partial count never reads as exact; the budget line names
+%% its domain.
 display_system_test() ->
-    [First, _States, Mem, Budget | _] = lines(display([row(1, #{})], system(), layout(0, infinity))),
+    [First, _States, Mem, Budget, <<>> | _] = lines(display([row(1, #{})], system(), layout(0, infinity))),
     ?assertEqual(<<"run queue: 3;  up 2+03:04:05    01:02:03">>, First),
-    ?assertEqual(<<"Mem: 2048M Total, - Free">>, Mem),
-    ?assertEqual(<<"Domain 4 budget: - Used, 1024K Guarantee, - Cap">>, Budget),
+    ?assertEqual(<<"Mem: 2048M Total, 4K Free (root pool)">>, Mem),
+    ?assertEqual(<<"Domain 4 budget: 120K Used (root pool), 1024K Guarantee, - Cap">>, Budget),
     Other = (system())#{run_queue := {runtime, unknown}, uptime := {kernel, {timeout, 500}},
-                        memory_total := {kernel, {partial, 1}}},
-    [Unknown, _, Partial | _] = lines(display([], Other, layout(0, infinity))),
-    ?assertEqual(<<"run queue: -;  up -    01:02:03">>, Unknown),
-    ?assertEqual(<<"Mem: - Total, - Free">>, Partial).
+                        memory_free := {kernel, unsupported}, used := {{stopgap, liberx_pool}, {error, gone}}},
+    [Missing, _, NoMem, NoBudget | _] = lines(display([], Other, layout(0, infinity))),
+    ?assertEqual(<<"run queue: -;  up -    01:02:03">>, Missing),
+    ?assertEqual(<<"Mem: 2048M Total, - Free">>, NoMem),
+    ?assertEqual(<<"Domain 4 budget: - Used, 1024K Guarantee, - Cap">>, NoBudget).
+
+%% A line whose every number is partial under one reporter names it once,
+%% in its label, and marks no figure; `-` figures do not count.
+display_line_reporter_test() ->
+    Pool = (system())#{memory_total := {{stopgap, liberx_pool}, {partial, 118 * 1048576}},
+                       memory_free := {{stopgap, liberx_pool}, {partial, 74 * 1048576}},
+                       guarantee := {kernel, unsupported}},
+    [_, _, Mem, Budget | _] = lines(display([], Pool, layout(0, infinity))),
+    ?assertEqual(<<"Mem (root pool): 118M Total, 74M Free">>, Mem),
+    ?assertEqual(<<"Domain 4 budget (root pool): 120K Used, - Guarantee, - Cap">>, Budget).
+
+%% Each header figure in turn under each status: unknown, unsupported,
+%% timed out and failed print as an absent figure does, and partial names
+%% its reporter exactly once, beside an `ok` number of the same reporter.
+display_every_status_test() ->
+    Exact = #{uptime => {kernel, {ok, 0}}, run_queue => {kernel, {ok, 3}}, memory_total => {kernel, {ok, 1024}},
+              memory_free => {kernel, {ok, 1024}}, domain => 4, used => {kernel, {ok, 1}},
+              guarantee => {kernel, {ok, 1}}, cap => {kernel, {ok, 1}}},
+    Header = fun(System) -> lists:sublist(lines(display([], System, layout(0, infinity))), 4) end,
+    [?assertEqual(Header(maps:remove(Key, Exact)), Header(Exact#{Key := {kernel, Status}}))
+     || Key <- maps:keys(Exact), Key =/= domain, Status <- [unknown, unsupported, {timeout, 500}, {error, gone}]],
+    [?assertEqual(1, length(binary:matches(iolist_to_binary(Header(Exact#{Key := {kernel, {partial, 2}}})),
+                                           <<"(kernel)">>)))
+     || Key <- maps:keys(Exact), Key =/= domain].
+
+%% A partial figure beside an `ok` one of the same reporter names its
+%% reporter itself, so the line's label never makes the `ok` one partial.
+display_same_reporter_test() ->
+    Mixed = (system())#{memory_total := {{stopgap, liberx_pool}, {ok, 2048 * 1048576}}},
+    ?assertEqual(<<"Mem: 2048M Total, 4K Free (root pool)">>,
+                 lists:nth(3, lines(display([], Mixed, layout(0, infinity))))).
+
+%% A line of ok figures is FreeBSD's, with no reporter named.
+display_ok_test() ->
+    Exact = (system())#{memory_free := {kernel, {ok, 74 * 1048576}}, used := {kernel, {ok, 30}},
+                        cap := {kernel, {ok, 512}}},
+    [_, _, Mem, Budget | _] = lines(display([], Exact, layout(0, infinity))),
+    ?assertEqual(<<"Mem: 2048M Total, 74M Free">>, Mem),
+    ?assertEqual(<<"Domain 4 budget: 120K Used, 1024K Guarantee, 2048K Cap">>, Budget).
+
+%% Partial figures of two reporters on one line each name their own; a
+%% figure alone in its label names its reporter there.
+display_reporters_test() ->
+    Two = (system())#{memory_total := {kernel, {partial, 1048576}}, run_queue := {runtime, {partial, 3}},
+                      uptime := {kernel, {partial, 61000000000}}},
+    [First, _, Mem | _] = lines(display([], Two, layout(0, infinity))),
+    ?assertEqual(<<"Mem: 1024K Total (kernel), 4K Free (root pool)">>, Mem),
+    ?assertEqual(<<"run queue (runtime): 3;  up (kernel) 0+00:01:01    01:02:03">>, First).
 
 format_uptime_test() ->
     ?assertEqual(<<"0+00:00:00">>, erx_cmd_top:format_uptime(999999999)),

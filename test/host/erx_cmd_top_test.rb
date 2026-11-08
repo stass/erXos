@@ -21,6 +21,7 @@ class ErxCmdTopTest < Minitest::Test
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   # erx_cmd first, so that the commands find their behaviour.
   SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
+             Erx::Generated.path('erlang/apps/erx/src/generated/erx_schema.erl', root: ROOT),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_cmd_top_tests.erl')].uniq.freeze

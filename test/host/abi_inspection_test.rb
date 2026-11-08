@@ -345,7 +345,7 @@ class AbiInspectionTest < Minitest::Test
     used = inspection.kinds.fetch('budget').find { |attr| attr.key == 'used' }
     assert_equal %w[kernel liberx_pool], used.reporters
     stopgap = inspection.stopgaps.fetch('liberx_pool')
-    assert_equal %w[kernel liberx\ pool], [stopgap.category, stopgap.label]
+    assert_equal %w[kernel root\ pool], [stopgap.category, stopgap.label]
     assert_equal %w[machine cpu group budget domain thread process module], inspection.kinds.keys
     derived = inspection.kinds.fetch('budget').reject { |attr| attr.derived.empty? }.map(&:key)
     assert_equal %w[spending borrowing room deficit give_back], derived
@@ -362,7 +362,7 @@ class AbiInspectionTest < Minitest::Test
     assert_equal inspection.version, generated::SCHEMA
     assert_equal inspection.kinds.transform_values { |attrs| attrs.map(&:key) }.merge('listing' => []),
                  generated::KINDS.transform_values { |attrs| attrs.map { |attr| attr.fetch(:key) } }
-    assert_equal 'liberx pool', generated::STOPGAPS.fetch('liberx_pool').fetch(:label)
+    assert_equal 'root pool', generated::STOPGAPS.fetch('liberx_pool').fetch(:label)
     assert_equal inspection.trace_rows.transform_values(&:reporter), generated::TRACE_ROWS
     assert_equal ['processes', { type: 'pid' }], generated::PATHS.last.fetch(:segments)
     assert generated::PATHS.frozen? && generated::PATHS.last.fetch(:segments).last.frozen?

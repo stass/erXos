@@ -245,7 +245,7 @@ with it.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **V1.** A tty changes a program's bytes only as its `termios` says | every write to a session's or a pseudo-terminal's tty goes through `erx_tty:output/3`, a pure function of the bytes, the room and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/3` | a test at the tty's byte boundary: it writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was handed to the tty; with an escaping step added on the path, the comparison fails. `io:put_chars/1` is text for the group's editor, not bytes ([The tty](#the-tty)), so its test compares `prim_tty`'s rendering with stock OTP's |
-| **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service`, `runtime` or a stopgap reporter the schema declares); renderers of inspection records print the status and reporter of every value, and the command shell's text commands, which print as FreeBSD's do, print a value without the status `ok` as `-` or not at all, never as a number ([design-shell.md](design-shell.md#invariants) SH3) | a renderer that drops statuses, or an attribute filled with a default | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record |
+| **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service`, `runtime` or a stopgap reporter the schema declares); renderers of inspection records print the status and reporter of every value, and the command shell's text commands, which print as FreeBSD's do, print a value without the status `ok` as `-` or not at all, never as a bare number; `top`'s header alone prints a partial figure's number with its reporter named, in the line's label or after the figure ([design-shell.md](design-shell.md#invariants) SH3) | a renderer that drops statuses, or an attribute filled with a default; a partial figure of `top`'s header printed without its reporter named | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record; `top`'s header tests with each figure in turn of every status ([design-shell.md](design-shell.md#invariants) SH3) |
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
 | **V5.** Code enters the system domain only through the install facet | the system domain's runtime loads only installed storage: its release's files and the install arena, which only `erx_code:install_beam/2` writes and which refuses every caller but `erx_code`; `erx_code` takes modules only from install facets, which name them by hash, and checks each blob against its hash; a service that loads bytes it received gets `{error, not_installed}`; nothing reapplies installs after a reboot | a second writer of the install arena, `erx_code` accepting modules from something other than an install facet, or a path that reapplies stored installs | a test that `code:load_binary/3` with bytes from a request fails in the system domain; a test that a domain's code facet cannot load into the system domain; a test that `install_beam/2` refuses other callers; a test that a blob one bit off its hash is refused |
@@ -283,7 +283,7 @@ place and reports what it can see of that work under its own name.
 `liberx`'s Phase 1 backend counts the pages of its pool in the kernel's
 place, so the root's budget's `used` is `{{stopgap, liberx_pool},
 {partial, Pages}}`, which a renderer prints as the value `[partial]`
-with the reporter `liberx pool`, and a budget carved from it reports
+with the reporter `root pool`, and a budget carved from it reports
 `used` as `unsupported`
 ([design-stopgap.md](design-stopgap.md#reporting-a-budget)). The schema
 declares each stopgap reporter with the category it stands in for, its
@@ -1055,11 +1055,28 @@ with the scope of the session's inspect facet
   the machine's. The domain is the one the inspector names for `top`'s
   own process.
 
-A figure the inspector does not answer `ok`, a partial one included,
-prints `-`, as does every figure in a session without an inspect facet,
-so the header never shows as exact a number nobody reported whole: on
-the stopgap kernel the memory figures and `used` are the `liberx` pool's
-partial counts and print `-`. The table has the columns of FreeBSD's that
+A figure the inspector answers `ok` prints its number. A partial
+figure prints its number with its reporter named by the inspection
+schema's label, through the line escape: when every number of a line
+is partial under one reporter, the line's label names it once, and
+otherwise each partial figure names its own after it, so an `ok`
+number beside it never reads as partial. On the stopgap kernel the
+memory figures and `used` are the `liberx` pool's partial counts, so
+the header reads `Mem (root pool): 118M Total, 74M Free` and `Domain
+4 budget (root pool): 44M Used, - Guarantee, - Cap`; on erXos's
+kernel, which reports them whole, it reads `Mem: 118M Total, 74M
+Free`. A line with partial figures of two reporters reads `Mem: 118M
+Total (kernel), 74M Free (root pool)`. Any other status (unknown,
+unsupported, timed out, error), and every figure in a session
+without an inspect facet, prints `-`, so the header never shows as
+exact a number nobody reported whole. Naming a reporter is the
+header's alone, the one exception to the command shell's rule for
+values it does not have
+([design-shell.md](design-shell.md#invariants) SH3): the header's
+figures are rounded for a person to read, while a column of the
+table, like `ps`'s, keeps `-`, since a stage of a pipeline reads a
+column's number with nothing to say it is partial. The table has the
+columns of FreeBSD's that
 the table has values for: `PID`, `RES` (`rss`, as FreeBSD's
 `format_k()` writes a size, at most four digits and a unit), `STATE`
 (`RUN`, `SLEEP` or `STOP`), `TIME` (`time`, as FreeBSD's

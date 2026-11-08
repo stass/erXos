@@ -672,7 +672,7 @@ never given back ([The pool](#the-pool)); a slice's pages are the archive's, whi
 The pool keeps one count, of the pages it handed out and has not taken back, and no count per budget. The budget
 topic asked on the root's budget writes that count as `used` with every bit of `reported` clear, and
 `erx_info_partial` names `used`, so the
-inspector shows it as **partial**, reporter `liberx pool`, scope "pages of the root's pool: those handed out, carved
+inspector shows it as **partial**, reporter `root pool`, scope "pages of the root's pool: those handed out, carved
 budgets' included, and the pool's total and free; not the kernel's or sigma0's memory, page tables or mapping
 records", and a reader of the report alone sees `used` as not reported. `kind`,
 `guarantee`, `cap`, `carved`, `lent`, `pinned` and `threshold` are `unsupported`, reported as `kernel`'s, since
@@ -688,7 +688,7 @@ The machine topic takes its memory from the same pool: `memory_total` is the pag
 `memory_free` those it holds now, each in bytes, with their `reported` bits clear and `erx_info_partial` naming
 both, so the inspector shows them as **partial** under the same reporter. They count the RAM the root's pool took
 from sigma0, not the memory Fiasco keeps for itself or sigma0 holds back, which only a kernel can count; a reader
-that wants the exact figure gets none, and `top` prints `-`. `uptime` is `liberx`'s clock, reported whole: the
+that wants the exact figure gets none, and `top` prints the numbers under the label `Mem (root pool)`. `uptime` is `liberx`'s clock, reported whole: the
 time since the counter started, which on a board includes the firmware's time before Fiasco. The hosted backend
 reports the host's `CLOCK_UPTIME_RAW`, and its pool's pages, the same way.
 

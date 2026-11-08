@@ -168,10 +168,10 @@ stopgap_reporter_is_named_with_its_scope_test() ->
     {ok, Budget} = erx_kernel_records:record(budget, [domains, ?SYSTEM, budget], 0, {ok, Report},
                                              ?ERX_INFO_BUDGET_REPORTED_USED),
     Text = iolist_to_binary(erx_render:record(Budget, release)),
-    ?assertMatch({match, _}, re:run(Text, <<"\n  used +liberx pool  \\[partial\\]\n">>)),
-    ?assertMatch({match, _}, re:run(Text, <<"\n  spending +liberx pool  \\[unknown\\]\n">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\n  used +root pool  \\[partial\\]\n">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\n  spending +root pool  \\[unknown\\]\n">>)),
     ?assertMatch({match, _}, re:run(Text, <<"\n  guarantee +kernel +100\n">>)),
-    ?assertMatch({match, _}, re:run(Text, <<"\nliberx pool: pages of the root's pool:">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\nroot pool: pages of the root's pool:">>)),
     {ok, Exact} = erx_kernel_records:record(budget, [domains, ?SYSTEM, budget], 0, {ok, Report}, 0),
     ?assertEqual(nomatch, re:run(iolist_to_binary(erx_render:record(Exact, release)), <<"liberx">>)).
 

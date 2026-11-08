@@ -101,7 +101,7 @@ every_status_kind_is_written_as_itself_test() ->
                                                 pinned => {kernel, {error, einval}}})}, development),
     ?assertEqual([[<<"guarantee">>, <<"12">>, <<"kernel">>],
                   [<<"cap">>, <<"[unsupported]">>, <<"kernel">>],
-                  [<<"used">>, <<"[partial]">>, <<"liberx pool">>],
+                  [<<"used">>, <<"[partial]">>, <<"root pool">>],
                   [<<"carved">>, <<"[unknown]">>, <<"kernel">>],
                   [<<"lent">>, <<"[timeout 500]">>, <<"kernel">>],
                   [<<"pinned">>, <<"[error]">>, <<"kernel">>]], rows(Text)).

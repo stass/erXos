@@ -319,6 +319,14 @@ it; git history is the record of completed work.
 * [Low] tests, `test/host/erx_hostlink_session_test.rb`: the EUnit run takes 295 s alone on an Apple Silicon host
   and once passed its own 600 s deadline under `make check`'s parallel load, failing the check with every case
   shown passing. Find the slow case and bound it, or give the run a deadline that fits the load.
+* [Low] tests, `test/integration/runtime_prim_file_test.rb`, `test_a_changed_byte_is_refused_at_open`: it
+  compares the damaged image's lines with the intact run's and drops only a supervisor report's header
+  line, so the report's `supervisor:` and `offender: [{pid,...}` lines fail it whenever the two runs
+  number their processes differently (seen as `<0.77.0>` and `<0.78.0>` on two runs of one tree). Drop
+  or normalize the whole report.
+* [Low] tests, `test/integration/runtime_hosted_smoke_test.rb`,
+  `test_a_module_reloaded_in_a_loop_on_four_schedulers_never_runs_stale_code`: its 60 s wait for the
+  next prompt fails at a host load average near 80. Give the wait a deadline that fits the load.
 * [Low] tooling, `make check-reproducible`: both builds of OTP and musl run at one path, so a path
   of theirs that reached the image would not show.
 * [Low] stopgap, `tools/lib/erx/native_root.rb`: musl's headers are system headers to the root's compile, so a compile record leaves them out and nothing audits them for the root's objects.

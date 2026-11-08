@@ -17,12 +17,17 @@ The run queue is the domain's runtime's count of processes and ports
 waiting for a scheduler, an instant's count, never a load average.
 Every figure is read
 through the inspector with the scope of the session's inspect facet
-(docs/design-live.md, "System values: one tree, many views"): one that
-is not `ok`, partial ones included, and every figure of a session
-without the facet, prints `-`, so the header never shows a number nobody
-reported whole. The table has the columns of FreeBSD's that the table has
-values for, `PID RES STATE TIME WCPU COMMAND`, ordered by `WCPU`,
-largest first, the rows without one after them in pid order.
+(docs/design-live.md, "System values: one tree, many views"). An `ok`
+figure prints its number. A partial one prints its number with its
+reporter named by the inspection schema's label: in the line's label
+when every number of the line is partial under that one reporter, `Mem
+(root pool): 118M Total, 74M Free`, and otherwise after the figure,
+`118M Total (root pool)`. Any other status, and every figure of a
+session without the facet, prints `-`, so the header never shows as
+exact a number nobody reported whole. The table has the columns of
+FreeBSD's that the table has values for, `PID RES STATE TIME WCPU
+COMMAND`, ordered by `WCPU`, largest first, the rows without one after
+them in pid order.
 
 A row's `WCPU` is its share of a CPU since the previous display: the
 growth of its CPU time over the time between the two samples. For a
@@ -370,34 +375,70 @@ display(Rows, System, #{max_rows := MaxRows, width := Width, clock := Clock}) ->
 %% then the time of day after four blanks, as FreeBSD writes it where it
 %% cannot place it at the screen's right edge.
 first_line(System, {H, M, S}) ->
-    iolist_to_binary([<<"run queue: ">>, figure(run_queue, System, fun integer_to_binary/1),
-                      <<";  up ">>, figure(uptime, System, fun format_uptime/1),
+    iolist_to_binary([group(<<"run queue">>, <<": ">>, [{run_queue, fun integer_to_binary/1, <<>>}], System),
+                      <<";  ">>, group(<<"up">>, <<" ">>, [{uptime, fun format_uptime/1, <<>>}], System),
                       io_lib:format("    ~2..0b:~2..0b:~2..0b", [H, M, S])]).
 
 %% FreeBSD's `Mem:` line, of the two figures the machine record has.
 memory(System) ->
     Bytes = fun(N) -> format_k(N div 1024) end,
-    iolist_to_binary([<<"Mem: ">>, figure(memory_total, System, Bytes), <<" Total, ">>,
-                      figure(memory_free, System, Bytes), <<" Free">>]).
+    group(<<"Mem">>, <<": ">>, [{memory_total, Bytes, <<" Total">>}, {memory_free, Bytes, <<" Free">>}], System).
 
 %% The budget of the domain top runs in, named as that domain's, as
 %% FreeBSD's `Swap:` line lays out its figures.
 budget(System) ->
     Pages = fun(N) -> format_k(N * (?ERX_PAGE_SIZE div 1024)) end,
     Label = case System of
-                #{domain := Domain} -> [<<"Domain ">>, integer_to_binary(Domain), <<" budget: ">>];
-                #{} -> <<"Domain budget: ">>
+                #{domain := Domain} -> <<"Domain ", (integer_to_binary(Domain))/binary, " budget">>;
+                #{} -> <<"Domain budget">>
             end,
-    iolist_to_binary([Label, figure(used, System, Pages), <<" Used, ">>,
-                      figure(guarantee, System, Pages), <<" Guarantee, ">>,
-                      figure(cap, System, Pages), <<" Cap">>]).
+    group(Label, <<": ">>, [{used, Pages, <<" Used">>}, {guarantee, Pages, <<" Guarantee">>},
+                            {cap, Pages, <<" Cap">>}], System).
 
-%% A figure in its format when the inspector answered it `ok`, else `-`:
-%% a partial, unknown, unsupported or late value is never shown as exact.
-figure(Key, System, Format) ->
+%% A label and its figures, `Label: N Word, N Word`, each figure given as
+%% `{Key, Format, Word}`. A figure the inspector answered `ok` prints its
+%% number in its format, a partial one its number with its reporter named,
+%% and any other `-`, so no partial, unknown, unsupported or late value is
+%% shown as exact. When every number of the group is partial under one
+%% reporter, the label names it once, `Mem (root pool): 118M Total, 74M
+%% Free`; otherwise each partial figure names its own after it, `118M Total
+%% (root pool)`, so an `ok` number beside it never reads as partial.
+group(Label, Separator, Figures, System) ->
+    Values = [{Format, Word, answer(Key, System)} || {Key, Format, Word} <- Figures],
+    Naming = case lists:usort([{Status, Reporter} || {_, _, {Status, Reporter, _}} <- Values]) of
+                 [{partial, Reporter}] -> {label, Reporter};
+                 _Mixed -> each
+             end,
+    Head = case Naming of
+               {label, Named} -> [Label, <<" (">>, reporter_label(Named), <<")">>];
+               each -> Label
+           end,
+    iolist_to_binary([Head, Separator,
+                      lists:join(<<", ">>, [figure(Value, Naming) || Value <- Values])]).
+
+%% A figure's status, reporter and value as the inspector answered it,
+%% `missing` for any status but `ok` and `partial`.
+answer(Key, System) ->
     case System of
-        #{Key := {_Reporter, {ok, Value}}} -> Format(Value);
-        #{} -> <<"-">>
+        #{Key := {Reporter, {ok, Value}}} -> {ok, Reporter, Value};
+        #{Key := {Reporter, {partial, Value}}} -> {partial, Reporter, Value};
+        #{} -> missing
+    end.
+
+%% A figure's text under its group's naming: under `{label, _}` every
+%% partial figure is of the reporter the label names, so none repeats it.
+figure({_Format, Word, missing}, _Naming) -> [<<"-">>, Word];
+figure({Format, Word, {ok, _Reporter, Value}}, _Naming) -> [Format(Value), Word];
+figure({Format, Word, {partial, _Reporter, Value}}, {label, _Named}) -> [Format(Value), Word];
+figure({Format, Word, {partial, Reporter, Value}}, each) ->
+    [Format(Value), Word, <<" (">>, reporter_label(Reporter), <<")">>].
+
+%% A reporter's label from the inspection schema, through the line escape
+%% as erx_render writes one.
+reporter_label(Reporter) ->
+    case erx_schema:reporter_label(Reporter) of
+        {ok, Label} -> erx_text:escape_line(Label);
+        error -> <<"[invalid]">>
     end.
 
 %% `N processes:`, padded as FreeBSD pads the count to four digits

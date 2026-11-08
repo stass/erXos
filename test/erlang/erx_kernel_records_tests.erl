@@ -129,7 +129,7 @@ every_record_validates_test() ->
                                                   25:32/little>>}, 0)).
 
 %% The machine's memory figures are the root's pool's on the stopgap:
-%% liberx's partial mask names them, so each is the liberx pool's partial
+%% liberx's partial mask names them, so each is the root pool's partial
 %% value, while uptime, which the kernel's clock gives whole, is ok.
 machine_memory_is_the_pools_partial_test() ->
     Memory = ?ERX_INFO_MACHINE_REPORTED_MEMORY_TOTAL bor ?ERX_INFO_MACHINE_REPORTED_MEMORY_FREE,

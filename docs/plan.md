@@ -735,7 +735,7 @@ display; `file:read_file("/proc/processes/0.N.S/status")` in the
 system shell, `0.N.S` being a pid as `pid_to_list` writes it less its
 brackets, returns every status the inspector can report; every value only
 the kernel could report shows `unsupported` with its reporter, and budget
-`used` shows `partial` with reporter `liberx pool`, each with a test; a
+`used` shows `partial` with reporter `root pool`, each with a test; a
 file read through `tools/erx files` equals its
 source on the machine; the fuzz targets of the deframer, `erx_path`,
 the 9P2000.L codec and each escaper run their budgets clean; the oracle's

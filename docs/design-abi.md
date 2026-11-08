@@ -633,7 +633,7 @@ inspection 1
   unit pages "pages"
   integer page_count 0 0xffffffffffffffff unit pages
   integer budget_id 1 0xffffffff
-  stopgap liberx_pool kernel "liberx pool" "pages of the root's pool: those handed out, carved budgets' included, and the pool's total and free; not the kernel's or sigma0's memory, page tables or mapping records"
+  stopgap liberx_pool kernel "root pool" "pages of the root's pool: those handed out, carved budgets' included, and the pool's total and free; not the kernel's or sigma0's memory, page tables or mapping records"
   stopgap liberx_trace kernel "liberx trace" "the root's parks, wakes, IRQ deliveries and task starts and ends; not test tasks' parks or the kernel's events"
   trace backend liberx_trace
   trace kernel kernel
