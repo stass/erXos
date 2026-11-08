@@ -46,6 +46,14 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
 * `--image` is the erXos boot image, by default
   `build/production-image/interactive/image.boot`. It is stored
   gzip-compressed as `image-<digest>.boot.gz`.
+* The machine's disk is made by the build, not taken: a boot medium laid
+  out by `abi/medium.txt` with the data partition at its minimum length
+  and every window blank (`Erx::Site.blank_medium`), attached where the
+  QEMU harness attaches its guest's disk. At the first boot `/data`'s
+  littlefs volume formats itself over the blank data window. The medium is 1.2 GiB, since the layout fixes where the data
+  partition starts, but only its partition table's three records hold
+  bytes, so it is published as `disk-<digest>.bin`, those 1.5 KiB, and
+  `boot.json` lists the extents they fill.
 * `--source REF` is the erXos release tag or full commit the image was
   built from, by default this tree's `HEAD`. The image carries the
   stopgap kernel's GPL-2.0 files, so the page links that source on
@@ -53,7 +61,7 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
 * `terminal.js`, `libv86.mjs` and `v86-arm64.wasm` are published under
   names that carry their digests. `index.html` names the script and
   `boot.json`, which the page fetches past the browser's cache, names
-  the image and v64's two files, so after a redeploy a browser never
+  the image, the disk and v64's two files, so after a redeploy a browser never
   pairs one deployment's module with another's core. A browser holding
   a stale `index.html` (GitHub Pages lets it be cached for ten minutes)
   asks for a `terminal.js` the new deployment no longer has, so its Boot
@@ -130,17 +138,39 @@ booting. The hint and the source line are page text below the case.
 With JavaScript, `terminal.js` shows a "Boot erXos" key, the download
 size and the simulated machine, `ARMv8-A · 1 core · 160 MiB RAM`. On a
 click it loads xterm.js (from jsDelivr, pinned to an exact version and
-checked by Subresource Integrity), v64 and the image, showing a progress
-bar on the case; checks the image against `boot.json`; and boots it with
-160 MiB of guest memory and one core (`RAM_MIB` and `CPU_CORES`, the one
-place to change each, from which the readout is built too), v64's
-page-tier JIT on and the kernel command line `erx.watchdog=1,30,600`.
+checked by Subresource Integrity), v64, the image and the disk, showing a
+progress bar on the case; checks the image and the disk against
+`boot.json`; and boots the image with 160 MiB of guest memory and one
+core (`RAM_MIB` and `CPU_CORES`, the one place to change each, from which
+the readout is built too), v64's page-tier JIT on, the kernel command
+line `erx.watchdog=1,30,600` and the disk as its virtio block device.
 The machine's serial console is attached to the terminal, and the status
 line follows boot milestones in the serial output. The case's
 `data-erx-phase` (booting, live or stopped) colours the lamp and the
 status. Reset destroys the machine and boots the same image again without
 downloading it. Under reduced motion the cursor and the lamp do not
 blink.
+
+The disk lives in the page's memory for the visit. `SparseDisk` holds
+only the 64 KiB chunks something wrote and reads every other byte as
+zero, so the 1.2 GiB medium costs a few kilobytes until the guest writes
+to it; a visitor who fills `/data` makes the page hold up to its 128 MiB
+more. v64 takes it as a disk object of its own (`load`, `get`, `set`)
+and writes the guest's writes straight into it; Reset starts the new
+machine on the same object, so files written under `/data` survive a
+reset or a power cut until the page is closed or reloaded. Nothing
+persists across page loads. The disk is the guest's untrusted input, as
+any disk is; the page does not parse it, it only places the published
+bytes at the extents `boot.json` lists, after checking that they are
+whole sectors, in order, apart, within the disk and use the bytes
+exactly.
+
+Every file `boot.json` names (the image, the disk, v64's module and
+core) must be an http or https URL on the page's own origin, or the boot
+fails. The image's and the disk's downloads are bounded by the sizes
+`boot.json` gives, which must fit in the guest's memory, and so is the
+image's decompression; the disk's capacity is at most 2 GiB. A failure
+of any part of the boot stops the downloads still running.
 
 Browsers without WebAssembly or `DecompressionStream` keep the recorded
 session and say so.

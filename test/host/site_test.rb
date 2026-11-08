@@ -58,6 +58,58 @@ class SiteTest < Minitest::Test
     end
   end
 
+  # The disk is the blank medium's partition table, published as its bytes
+  # and the extents they fill, and boot.json names it with its digest.
+  def test_publish_writes_the_blank_medium_as_its_extents
+    with_inputs do |root, image|
+      out = File.join(root, 'build/site')
+      disk = Erx::Site.publish(inventory(root, image), out:).fetch(:disk)
+      content = File.binread(File.join(out, disk.fetch(:file)))
+
+      assert_match(/\Adisk-[0-9a-f]{16}\.bin\z/, disk.fetch(:file))
+      assert_equal Digest::SHA256.hexdigest(content), disk.fetch(:sha256)
+      assert_equal content.bytesize, disk.fetch(:bytes)
+      data_sectors = Erx::MediumImage.constant('data_sectors_min')
+      assert_equal Erx::MediumImage.sectors(data_sectors:) * 512, disk.fetch(:capacity)
+      # The medium writer's own image holds the published bytes at each extent.
+      Dir.mktmpdir('erx-medium-') do |directory|
+        medium = Erx::MediumImage.create(directory:, name: 'medium.img', pieces: {}, data_sectors:)
+        assert_equal disk.fetch(:capacity), File.size(medium)
+        at = 0
+        File.open(medium, 'rb') do |input|
+          disk.fetch(:extents).each do |offset, length|
+            assert_equal content.byteslice(at, length), input.pread(length, offset), "the extent at #{offset}"
+            at += length
+          end
+        end
+        assert_equal content.bytesize, at
+      end
+      assert_equal [0, Erx::MediumImage.constant('extended_start'), Erx::MediumImage.constant('data_ebr')]
+                     .map { |sector| [sector * 512, 512] }, disk.fetch(:extents)
+    end
+  end
+
+  def test_a_disk_joins_adjacent_pieces_and_refuses_bad_ones
+    sector = ->(byte) { byte.chr * 512 }
+    disk = Erx::Site.disk(pieces: { 4 => sector.(0x62), 0 => sector.(0x61), 5 => sector.(0x63) * 2 }, capacity: 512 * 8)
+    assert_equal [[0, 512], [2048, 1536]], disk.extents
+    assert_equal "#{sector.(0x61)}#{sector.(0x62)}#{sector.(0x63) * 2}", disk.content
+    assert_equal [[3584, 512]], Erx::Site.disk(pieces: { 7 => sector.(0) }, capacity: 4096).extents, 'a piece may end the disk'
+
+    [{ pieces: { 0 => 'short' }, capacity: 4096 },
+     { pieces: { 0 => sector.(0), 1 => sector.(0) * 2, 2 => sector.(0) }, capacity: 4096 },
+     { pieces: { nil => sector.(0) }, capacity: 4096 },
+     { pieces: { 0 => 1 }, capacity: 4096 },
+     { pieces: { 0 => '' }, capacity: 4096 },
+     { pieces: { 7 => sector.(0) * 2 }, capacity: 4096 },
+     { pieces: { -1 => sector.(0) }, capacity: 4096 },
+     { pieces: { 0 => sector.(0) * 2, 1 => sector.(0) }, capacity: 4096 },
+     { pieces: {}, capacity: 1000 },
+     { pieces: {}, capacity: 0 }].each do |bad|
+      assert_raises(Erx::Error, bad.inspect) { Erx::Site.disk(**bad) }
+    end
+  end
+
   def test_index_names_the_digest_named_script_and_links_the_image_source
     with_inputs do |root, image|
       out = File.join(root, 'build/site')

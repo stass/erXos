@@ -52,7 +52,8 @@ begin
   plan = Erx::Site.inventory(root:, v64:, image: options.fetch(:image), source:)
   manifest = Erx::Site.publish(plan, out: options.fetch(:out))
   puts "Site: #{options.fetch(:out)} (image #{manifest.fetch(:bytes)} bytes, " \
-       "#{manifest.fetch(:compressed_bytes)} compressed, source #{source.ref})"
+       "#{manifest.fetch(:compressed_bytes)} compressed; disk #{manifest.dig(:disk, :capacity)} bytes, " \
+       "#{manifest.dig(:disk, :bytes)} published; source #{source.ref})"
   if options[:serve]
     options[:serving] = true
     Erx::Site.serve(dir: options.fetch(:out), port: options.fetch(:serve))

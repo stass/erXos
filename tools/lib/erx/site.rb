@@ -10,6 +10,7 @@ require 'socket'
 require 'tmpdir'
 require 'zlib'
 require_relative 'error'
+require_relative 'medium_image'
 require_relative 'site_v64'
 
 module Erx
@@ -18,10 +19,17 @@ module Erx
   # erXos on, with its licence notices), an erXos boot image, and the
   # source the image was built from. None of the built files is checked in.
   #
-  # The image, terminal.js and v64's two files are stored under names that
-  # carry their digests, and boot.json (fetched without the cache's copy)
-  # and index.html name them, so a cache never serves a stale file and
-  # files of two deployments never mix. The image is gzip-compressed; the
+  # It also makes the disk the page attaches to the machine as its virtio
+  # block device, on the virtio-mmio slot where the QEMU harness attaches
+  # its guest's: a boot medium laid out by abi/medium.txt with every window
+  # blank (blank_medium). The medium is 1.2 GiB, but only its partition
+  # table holds bytes, so it is published as those bytes and the extents
+  # they fill, and the page keeps it sparse.
+  #
+  # The image, the disk, terminal.js and v64's two files are stored under
+  # names that carry their digests, and boot.json (fetched without the
+  # cache's copy) and index.html name them, so a cache never serves a stale
+  # file and files of two deployments never mix. The image is gzip-compressed; the
   # page decompresses it with DecompressionStream, so the static host needs
   # no Content-Encoding setup.
   #
@@ -36,19 +44,24 @@ module Erx
     REPOSITORY = 'https://github.com/stass/erXos'
     TAG = /\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/
     COMMIT = /\A[0-9a-f]{40}\z/
+    SECTOR_BYTES = MediumImage::SECTOR_BYTES
 
     # One output file: where it goes under the site directory, where it comes
     # from, and whether it is stored gzip-compressed.
     Entry = Data.define(:path, :source, :gzip)
+    # A disk of capacity bytes that holds content at extents, [offset, length]
+    # pairs in bytes, sorted, apart and whole sectors, whose lengths sum to
+    # content's; every other byte is zero.
+    Disk = Data.define(:capacity, :extents, :content)
     # The erXos source an image was built from: a release tag or a commit.
     Source = Data.define(:ref) do
       def url = "#{REPOSITORY}/tree/#{ref}"
       def label = COMMIT.match?(ref) ? ref[0, 12] : ref
     end
     # entries: the files copied as they are; index: index.html's template;
-    # names: the digest names; manifest: boot.json without compressed_bytes,
-    # which only the written image gives.
-    Plan = Data.define(:entries, :index, :names, :manifest)
+    # names: the digest names; disk: the Disk; manifest: boot.json without
+    # compressed_bytes, which only the written image gives.
+    Plan = Data.define(:entries, :index, :names, :disk, :manifest)
 
     module_function
 
@@ -70,9 +83,50 @@ module Erx
       "#{File.basename(name, extension)}-#{digest[0, 16]}#{extension}"
     end
 
+    # The disk of capacity bytes that pieces, a map from a sector to the
+    # bytes written from it (whole sectors), fill: each run of adjacent
+    # pieces is one extent. Raises Erx::Error for a piece that is not whole
+    # sectors within the disk or that overlaps another.
+    def disk(pieces:, capacity:)
+      unless capacity.is_a?(Integer) && capacity.positive? && (capacity % SECTOR_BYTES).zero?
+        raise Error, 'a disk is a positive whole number of sectors'
+      end
+
+      spans = pieces.map { |sector, bytes| disk_span(sector, bytes, capacity:) }.sort_by(&:first)
+      spans.each_cons(2) do |(offset, length), (next_offset, _)|
+        raise Error, "the disk's piece at byte #{next_offset} overlaps the one before it" if offset + length > next_offset
+      end
+      runs = spans.slice_when { |(offset, length), (next_offset, _)| offset + length != next_offset }
+      Disk.new(capacity:, extents: runs.map { |run| [run.first.first, run.sum(&:last)].freeze }.freeze,
+               content: pieces.sort_by(&:first).map(&:last).join.b.freeze)
+    end
+
+    # A piece's [offset, length] in bytes, once it is found to be whole
+    # sectors within a disk of capacity bytes.
+    def disk_span(sector, bytes, capacity:)
+      unless sector.is_a?(Integer) && !sector.negative? && bytes.is_a?(String) && !bytes.empty? &&
+             (bytes.bytesize % SECTOR_BYTES).zero? && (sector * SECTOR_BYTES) + bytes.bytesize <= capacity
+        raise Error, "the disk's piece at sector #{sector.inspect} is not whole sectors within the disk"
+      end
+
+      [sector * SECTOR_BYTES, bytes.bytesize]
+    end
+    private_class_method :disk_span
+
+    # The disk the page attaches: a boot medium whose data partition has the
+    # layout's minimum length (128 MiB) and whose windows are all blank.
+    # erx_blk_table admits it, and /data's littlefs volume formats itself
+    # over the blank data window at the first boot (erx_lfs formats blocks
+    # that hold no volume). Only the partition table's three records hold
+    # bytes.
+    def blank_medium
+      data_sectors = MediumImage.constant('data_sectors_min')
+      disk(pieces: MediumImage.records(data_sectors:), capacity: MediumImage.sectors(data_sectors:) * SECTOR_BYTES)
+    end
+
     # Reads the inputs' sizes and digests and decides which file goes where.
     # Raises Erx::Error naming the first missing input.
-    def inventory(root:, v64:, image:, source:)
+    def inventory(root:, v64:, image:, source:, disk: blank_medium)
       page = PAGE_FILES.to_h { |name| [name, File.join(root, 'site', name)] }
       emulator = SiteV64::TARGETS.transform_values { |path| File.join(v64, path) }
       notices = SiteV64::NOTICES.transform_values { |path| File.join(v64, path) }
@@ -81,8 +135,9 @@ module Erx
 
       digest = ->(path) { Digest::SHA256.file(path).hexdigest }
       image_sha256 = digest.(image)
+      disk_sha256 = Digest::SHA256.hexdigest(disk.content)
       names = { 'terminal.js' => digest_name('terminal.js', digest.(page.fetch('terminal.js'))),
-                'image' => "image-#{image_sha256[0, 16]}.boot.gz" }
+                'image' => "image-#{image_sha256[0, 16]}.boot.gz", 'disk' => "disk-#{disk_sha256[0, 16]}.bin" }
               .merge(emulator.to_h { |name, path| [name, "v64/#{digest_name(name, digest.(path))}"] })
       entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), gzip: false),
                  Entry.new(path: 'favicon.svg', source: page.fetch('favicon.svg'), gzip: false),
@@ -93,8 +148,10 @@ module Erx
       manifest = { image: names.fetch('image'), bytes: File.size(image), sha256: image_sha256,
                    emulator: { module: names.fetch('libv86.mjs'), wasm: names.fetch('v86-arm64.wasm'),
                                bytes: emulator.values.sum { |path| File.size(path) } },
+                   disk: { file: names.fetch('disk'), bytes: disk.content.bytesize, sha256: disk_sha256,
+                           capacity: disk.capacity, extents: disk.extents },
                    source: { ref: source.ref, url: source.url } }
-      Plan.new(entries:, index: page.fetch('index.html'), names:, manifest:)
+      Plan.new(entries:, index: page.fetch('index.html'), names:, disk:, manifest:)
     end
 
     # index.html with its {{name}} placeholders filled in. Every value is
@@ -130,6 +187,7 @@ module Erx
 
     def assemble(plan, out:)
       plan.entries.each { |entry| write(entry, out:) }
+      File.binwrite(File.join(out, plan.names.fetch('disk')), plan.disk.content)
       index = render_index(File.read(plan.index), terminal: plan.names.fetch('terminal.js'),
                                                   source: Source.new(ref: plan.manifest.dig(:source, :ref)))
       File.write(File.join(out, 'index.html'), index)
@@ -156,7 +214,7 @@ module Erx
       '.html' => 'text/html; charset=utf-8', '.css' => 'text/css', '.svg' => 'image/svg+xml',
       '.js' => 'text/javascript',
       '.mjs' => 'text/javascript', '.wasm' => 'application/wasm', '.json' => 'application/json',
-      '.gz' => 'application/gzip'
+      '.gz' => 'application/gzip', '.bin' => 'application/octet-stream'
     }.freeze
 
     # Maps each URL path to a file of the site directory, listed once at

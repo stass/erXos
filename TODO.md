@@ -1300,6 +1300,15 @@ it; git history is the record of completed work.
   refusals, `erx_space_attach` with object 0, and the ancestry check
   ahead of the depth limit (no case has a parent outside the tree at the
   deepest level).
+* [Medium] Space core tests, `test/host/space_test.rb`
+  (`test_the_drops_of_a_hold_race_under_thread_sanitizer`): the mutant
+  with the drop's `memory_order_acq_rel` relaxed, built from
+  `test/fixtures/space_holds_race.c` under ThreadSanitizer, printed
+  nothing and hit its 300 s deadline in two runs on an Apple Silicon host
+  under a load average of 13 to 20, while the unmutated program finished
+  in about 2 s; the test then fails with an empty log and fails
+  `make check`. Find why the relaxed program hangs instead of reporting
+  the race, and make it end with the report.
 * [Medium] Kernel invalidation planner, `kernel/core/tlb_plan.c`: a
   cleared table entry carries its span in bytes, and the planner accepts
   any aligned power of two of at least two pages, so a range call that
@@ -2578,6 +2587,17 @@ document's "residual risks accepted" paragraph.
   machine with a crash record; once drivers run in their own domains (M9, 1b-E), the same fault ends only that
   driver's domain and its supervisor's restart is what the visitor sees. The CRASH key's detached disk is the
   first entry.
+
+* [Medium] website, `site/terminal.js` ([site/README.md](site/README.md)): the page's pure helpers
+  (`site_url`, `read_bounded`, `fetch_checked`, `SparseDisk`, `make_disk`) have no test in the tree, since the
+  script runs `init()` against `document` when it loads and the tree has no JavaScript test runner for the
+  site. Moving them into a module that Node can import, with a test beside `test/host/site_test.rb`, needs the
+  language question settled first (CLAUDE.md lists TypeScript for the web client only).
+
+* [Low] website, `site/index.html`: a `Content-Security-Policy` meta tag (`connect-src 'self'`, `script-src
+  'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'`, styles and fonts likewise) would make "the machine's
+  files come only from the page's origin" hold for v64's own fetches too, not only for the names `site_url`
+  checks. GitHub Pages sets no headers, so it has to be the meta tag.
 
 * [Medium] hosted backend, `liberx/backend/hosted/` ([design-stopgap.md](docs/design-stopgap.md#the-hosted-backend),
   [plan.md](docs/plan.md#track-h-hosted-mode)): the multi-process form, in which each space other than the

@@ -4,15 +4,19 @@
 // The live console in the hero. Without JavaScript the window shows a
 // recorded session. With it, a "Boot erXos" button downloads v64 (an
 // AArch64 machine in WebAssembly) and the gzip-compressed erXos boot image,
-// boots the image, and attaches the machine's serial console (the PL011,
-// v64's serial0) to an xterm.js terminal.
+// boots the image with a disk attached, and attaches the machine's serial
+// console (the PL011, v64's serial0) to an xterm.js terminal.
 //
 // Flow: boot.json (written by tools/build_site.rb, fetched past the cache)
-// names the image, its sizes and its SHA-256, and v64's module and core,
+// names the image, its sizes and its SHA-256, the disk, and v64's module and core,
 // all under names that carry their digests. The image is downloaded with a progress bar,
 // decompressed with DecompressionStream, checked against the SHA-256 and
-// kept in memory, so Reset reboots without downloading again. Boot progress
-// comes from milestones in the serial output.
+// kept in memory, so Reset reboots without downloading again. The disk is
+// published as the bytes it holds and where they go; it is checked the same
+// way and kept in memory, sparse, with the guest's writes, so files written
+// to /data survive Reset until the page is closed. Every file boot.json
+// names is fetched from the page's own origin. Boot progress comes from
+// milestones in the serial output.
 
 // Guest memory and cores. One constant each, so either changes in one
 // place; the readout on the case is built from the same two.
@@ -22,6 +26,14 @@ const CPU_CORES = 1;
 // no host link UART to drive (docs/design-stopgap.md, "The command line").
 const CMDLINE = "erx.watchdog=1,30,600";
 const MANIFEST = "boot.json";
+// The bounds on what boot.json may ask the page to hold: the image and the
+// disk's published bytes must each fit in the guest's memory, and the
+// disk, which keeps every sector the guest writes, in 2 GiB.
+const MAX_DOWNLOAD_BYTES = RAM_MIB * 2 ** 20;
+const MAX_DISK_BYTES = 2 ** 31;
+const SECTOR_BYTES = 512;
+// The disk holds what was written in chunks of this size.
+const DISK_CHUNK_BYTES = 1 << 16;
 
 // xterm.js from a CDN, pinned to exact versions and checked by Subresource
 // Integrity.
@@ -111,32 +123,134 @@ async function fetch_manifest() {
 
 const hex = buffer => Array.from(new Uint8Array(buffer), b => b.toString(16).padStart(2, "0")).join("");
 
-// Downloads the image, reporting the bytes received so far, and returns the
-// decompressed image after checking its length and SHA-256. A host that
-// adds Content-Encoding hands over bytes the browser already decompressed;
-// the gzip magic number tells the two cases apart.
-async function fetch_image(manifest, on_progress) {
-    const response = await fetch(manifest.image);
-    if(!response.ok) throw new Error(`image download: HTTP ${response.status}`);
+// A file boot.json names, as an http or https URL on the page's own
+// origin. A name that leads anywhere else is refused (another host, or a
+// data: or blob: URL), and so is every name on a page whose origin is
+// opaque, so the page fetches nothing for the machine but its own files.
+function site_url(name) {
+    const url = new URL(String(name), document.baseURI);
+    if(location.origin === "null" || url.origin !== location.origin || !["http:", "https:"].includes(url.protocol))
+        throw new Error("boot manifest: a file is not on this site");
+    return url.href;
+}
+
+// Reads a stream to its end, calling on_progress with the bytes read so
+// far, and returns them as a Blob. A stream longer than limit bytes is
+// cancelled and fails, so a wrong file never fills the page's memory.
+async function read_bounded(stream, limit, what, on_progress = () => undefined) {
     const chunks = [];
     let received = 0;
-    for(const reader = response.body.getReader();;) {
+    for(const reader = stream.getReader();;) {
         const { done, value } = await reader.read();
-        if(done) break;
-        chunks.push(value);
+        if(done) return new Blob(chunks);
         received += value.byteLength;
+        if(received > limit) {
+            reader.cancel().catch(() => undefined);
+            throw new Error(`${what} download: too long`);
+        }
+        chunks.push(value);
         on_progress(received);
     }
-    const body = new Blob(chunks);
+}
+
+// Downloads a file boot.json names, reporting the bytes received so far,
+// and returns its content after checking its length and SHA-256. A file
+// published gzip-compressed, which boot.json gives a compressed_bytes, is
+// decompressed here; a host that adds Content-Encoding hands over bytes the
+// browser already decompressed, and the gzip magic number tells the two
+// cases apart. Aborting signal stops the download.
+async function fetch_checked(what, { file, bytes, sha256, compressed_bytes }, { on_progress, signal } = {}) {
+    const size = n => Number.isSafeInteger(n) && n >= 0 && n <= MAX_DOWNLOAD_BYTES;
+    if(!size(bytes) || !(compressed_bytes === undefined || size(compressed_bytes)))
+        throw new Error(`boot manifest: the ${what}'s size is not one the page holds`);
+    const response = await fetch(site_url(file), { signal });
+    if(!response.ok) throw new Error(`${what} download: HTTP ${response.status}`);
+    const body = await read_bounded(response.body, Math.max(bytes, compressed_bytes ?? 0), what, on_progress);
     const head = new Uint8Array(await body.slice(0, 2).arrayBuffer());
-    const gzipped = head[0] === 0x1f && head[1] === 0x8b;
-    const image = gzipped
-        ? await new Response(body.stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer()
+    const gzipped = compressed_bytes !== undefined && head[0] === 0x1f && head[1] === 0x8b;
+    const content = gzipped
+        ? await (await read_bounded(body.stream().pipeThrough(new DecompressionStream("gzip")), bytes, what)).arrayBuffer()
         : await body.arrayBuffer();
-    if(image.byteLength !== manifest.bytes) throw new Error("image download: wrong length");
-    if(hex(await crypto.subtle.digest("SHA-256", image)) !== manifest.sha256)
-        throw new Error("image download: checksum mismatch");
-    return image;
+    if(content.byteLength !== bytes) throw new Error(`${what} download: wrong length`);
+    if(hex(await crypto.subtle.digest("SHA-256", content)) !== sha256)
+        throw new Error(`${what} download: checksum mismatch`);
+    return content;
+}
+
+// The machine's disk: byteLength bytes, of which only the chunks something
+// wrote are held, every other byte reading as zero, so a 1.2 GiB medium
+// costs the page only what has been written to it. v64 takes it as a disk
+// of its own (an object with load, get and set, as src/buffer.js in v64
+// describes) and writes the guest's writes into it, so a machine that
+// Reset starts on the same disk finds them.
+class SparseDisk {
+    constructor(byteLength) {
+        this.byteLength = byteLength;
+        this.chunks = new Map();
+        this.onload = undefined;
+    }
+
+    load() { this.onload?.({}); }
+
+    get(start, length, done) {
+        if(!this.holds(start, length)) return done(undefined, new Error("a read past the end of the disk"));
+        const data = new Uint8Array(length);
+        this.each(start, length, ({ chunk, in_chunk, in_request, count }) => {
+            const held = this.chunks.get(chunk);
+            if(held) data.set(held.subarray(in_chunk, in_chunk + count), in_request);
+        });
+        done(data);
+    }
+
+    set(start, data, done) {
+        if(!this.holds(start, data.byteLength)) return done(new Error("a write past the end of the disk"));
+        this.each(start, data.byteLength, ({ chunk, in_chunk, in_request, count }) => {
+            if(!this.chunks.has(chunk)) this.chunks.set(chunk, new Uint8Array(DISK_CHUNK_BYTES));
+            this.chunks.get(chunk).set(data.subarray(in_request, in_request + count), in_chunk);
+        });
+        done();
+    }
+
+    holds(start, length) {
+        return Number.isSafeInteger(start) && Number.isSafeInteger(length) && start >= 0 && length >= 0 &&
+            start + length <= this.byteLength;
+    }
+
+    // Calls visit once for each chunk the request's bytes fall in, in order,
+    // with the chunk's index, where its part of the request starts in the
+    // chunk and in the request, and that part's length.
+    each(start, length, visit) {
+        for(let in_request = 0; in_request < length;) {
+            const in_chunk = (start + in_request) % DISK_CHUNK_BYTES;
+            const count = Math.min(DISK_CHUNK_BYTES - in_chunk, length - in_request);
+            visit({ chunk: Math.floor((start + in_request) / DISK_CHUNK_BYTES), in_chunk, in_request, count });
+            in_request += count;
+        }
+    }
+}
+
+// The disk boot.json describes, from its downloaded content: each extent,
+// an [offset, length] pair, takes the next length bytes of the content, and
+// every other byte is zero. The extents must be whole sectors, in order,
+// apart (the build joins touching ones), within the capacity, and use the
+// content exactly.
+function make_disk({ capacity, extents }, content) {
+    const sectors = n => Number.isSafeInteger(n) && n >= 0 && n % SECTOR_BYTES === 0;
+    if(!sectors(capacity) || capacity === 0 || capacity > MAX_DISK_BYTES || !Array.isArray(extents))
+        throw new Error("boot manifest: the disk is not one the page holds");
+    const disk = new SparseDisk(capacity);
+    let end = -1, used = 0;
+    for(const extent of extents) {
+        const [offset, length] = Array.isArray(extent) ? extent : [];
+        if(!sectors(offset) || !sectors(length) || length === 0 || offset <= end || offset + length > capacity ||
+           used + length > content.byteLength)
+            throw new Error("boot manifest: a disk extent is out of place");
+        disk.set(offset, new Uint8Array(content, used, length), error => { if(error) throw error; });
+        end = offset + length;
+        used += length;
+    }
+    if(used !== content.byteLength) throw new Error("boot manifest: the disk's extents do not match its content");
+    return disk;
 }
 
 function terminal_theme() {
@@ -185,6 +299,7 @@ const machine = {
     V86: null,
     manifest: null,
     image: null,
+    disk: null,
     term: null,
     current: null,
 
@@ -202,8 +317,8 @@ const machine = {
         show_status("Starting the machine", DOWNLOAD_SHARE);
         session.emulator = new this.V86({
             cpu_type: "arm64", graphics_adapter: "none", cpu_cores: CPU_CORES,
-            memory_size: RAM_MIB << 20, log_level: 0, wasm_path: this.manifest.emulator.wasm,
-            kernel: { buffer: this.image.slice(0) }, cmdline: CMDLINE,
+            memory_size: RAM_MIB << 20, log_level: 0, wasm_path: site_url(this.manifest.emulator.wasm),
+            kernel: { buffer: this.image.slice(0) }, cmdline: CMDLINE, virtio_disks: [{ buffer: this.disk }],
             jit_switches: { a64_page: 1 }, autostart: true,
         });
         session.emulator.add_listener("emulator-error", error => {
@@ -233,20 +348,29 @@ const machine = {
         ui.boot.disabled = true;
         window.erx_boot_clicked_at = performance.now();
         show_state("booting");
+        // A failure of any one part stops the downloads still running, so
+        // their progress never covers the error and Try again starts afresh.
+        const downloads = new AbortController();
+        const { signal } = downloads;
         try {
             show_status("Loading", 0);
             const xterm = load_xterm();
             const manifest = this.manifest = await fetch_manifest();
-            const v64 = import(new URL(manifest.emulator.module, document.baseURI).href);
-            this.image = await fetch_image(manifest, received =>
+            const v64 = import(site_url(manifest.emulator.module));
+            const on_progress = received => signal.aborted ||
                 show_status(`Downloading ${mib(Math.min(received, manifest.compressed_bytes))} of ` +
-                            `${mib(manifest.compressed_bytes)} MB`, received / manifest.compressed_bytes * DOWNLOAD_SHARE));
-            [{ V86: this.V86 }] = await Promise.all([v64, xterm]);
+                            `${mib(manifest.compressed_bytes)} MB`, received / manifest.compressed_bytes * DOWNLOAD_SHARE);
+            const image = fetch_checked("image", { file: manifest.image, bytes: manifest.bytes, sha256: manifest.sha256,
+                                                   compressed_bytes: manifest.compressed_bytes }, { on_progress, signal });
+            const disk = fetch_checked("disk", manifest.disk ?? {}, { signal })
+                .then(content => make_disk(manifest.disk, content));
+            [this.image, { V86: this.V86 }, this.disk] = await Promise.all([image, v64, disk, xterm]);
             this.term ??= open_terminal();
             ui.boot.hidden = true;
             ui.reset.hidden = false;
             this.start();
         } catch(error) {
+            downloads.abort();
             this.fail(error);
         }
     },
