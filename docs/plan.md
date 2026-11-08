@@ -131,7 +131,7 @@ names; the table's order is the order.
 | 1b-C Track D, parts 1 to 3 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser, and the same interface on a QEMU `virt` kiosk drawn by LVGL, with no login | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and 1b-B's sub-space ports | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; its supervisor resets the device and restarts the driver, and the shell never notices; drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A; littlefs's sub-space port also 1b-B | G9's measurements, deciding nothing |
-| 1b-F Track D, parts 5 to 7 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-E and 1b-C; part 7 also 1b-D | GD, once part 4's panel exists |
+| 1b-F Track D, parts 5 to 7 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-E and 1b-C; part 7 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | 1b-E | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
 | 1b-H M13 erXos's F2FS on QEMU | erXos's F2FS, written in Erlang, keeps a QEMU disk's files through power cuts and its images mount in the Linux guest; on the Pi 4 with M12 | estimated in its design document | M6 | G13 |
@@ -147,7 +147,7 @@ names; the table's order is the order.
 | Track Q The second tier | toybox's `sh` runs a script with subshells, `vi` edits a file and `less` pages a log in a terminal session, and a dynamically linked program loads a library with `dlopen` | the programs' estimate in [design-programs.md](design-programs.md#performance), and the session's shared mappings, an estimated 3,000 lines of Erlang; the kernel's part is track K's | track P, M7 | GQ |
 | M11 Security closure | a release build without the development banner, on erXos's kernel, with an Erlang driver behind an IOMMU window; one flipped byte of an EROFS image fails only the reads of its block | hardening | M10 | |
 | M12 Storage, networking, boards | a Raspberry Pi 4 boots erXos from its SD card, keeps its files through power cuts, and takes a system update whose trial survives a power cut | estimated in the subsystems' design documents | M11 | G12, GN-board |
-| Track D, parts 4 and 8 | a Raspberry Pi 4 kiosk; the web front end on the network | estimated per part before it starts | part 4: part 3 and M12; part 8: part 2, M10, M11 and 1b-G | |
+| Track D, parts 4 and 8 | a Raspberry Pi 4 kiosk; the web front end on the network | estimated per part before it starts | part 4: part 3 and M12; part 8: part 2, M10, M11 and 1b-G | GD, with part 4 |
 
 The order reaches a usable system first:
 
@@ -1311,7 +1311,8 @@ land after M11 repeat M11's closure over what they add.
    touch, encoder and keypad drivers, and the `events` operation for an
    input device in another domain, such as the devices domain; the screen
    owner's idle policy, with the panel off when idle; the reserved chord,
-   which reaches no renderer
+   which reaches no renderer; Gate GD on the panel, once part 6's
+   Erlang renderer runs
    ([design-display.md](design-display.md#kiosks-and-glasses)).
 5. **A desktop on QEMU `virt`**, as 1b-F, after 1b-E and part 2. On the
    stopgap a hostile draw client that corrupts the display domain reaches
@@ -1337,7 +1338,8 @@ land after M11 repeat M11's closure over what they add.
    for a kiosk under the Erlang renderer; presentations at a terminal:
    `erx_render`'s links at a tty that declares `links`, the link parser in
    `erx_vt`, and the input context from the command catalog's
-   `-erx_args`; Gate GD
+   `-erx_args`; the Erlang renderer's QEMU frame time as Gate GD's
+   preview, deciding nothing
    ([design-display.md](design-display.md#presentations)).
 7. **Plan 9's programs**, in 1b-F, after part 5 and track P's first part
    (1b-D); 9term
@@ -1479,8 +1481,8 @@ under HVF and over a 115,200-baud UART host link. Decides whether
 whole records stay on the wire or the protocol gains a record difference
 ([design-web.md](design-web.md#risks-and-open-questions)).
 
-**Gate GD, first with part 6, once part 4's panel exists.** Measures the
-Erlang renderer's difference, layout and drawing time per frame on a 240
+**Gate GD, on part 4's panel, once part 6's Erlang renderer runs.**
+Measures the Erlang renderer's difference, layout and drawing time per frame on a 240
 by 240 panel
 against LVGL's, on the same panel, with the parity test passing through
 both. Decides whether LVGL leaves the panels; while it does not, LVGL
@@ -2475,7 +2477,7 @@ their numbers.
 | G6 baseline | the end of 1b-D, on the stopgap | an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; `tools/erx bench fs` and `blk` against M6's baseline | nothing; it records the baseline G6 compares against |
 | G6 | after M5's and M9's kernel parts | the system on erXos's kernel: an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; a program's start; isolation beside hostile domains; the EROFS reader's, littlefs's and the block driver's throughput and commit latency on QEMU (`tools/erx bench fs`, `blk`) against M6's baseline and the G6 baseline | whether the system meets the design's budgets before M8 and M10 build on it; G5's lane defaults and the facets' limits confirmed or revised |
 | GW | track D's part 1, in 1b-C | a record view's round trip over the host tool's front end for the machine's record and a 1,000-child listing, under HVF and over a 115,200-baud UART host link | whether whole records stay on the wire or the web protocol gains a record difference |
-| GD | track D's part 6, once part 4's panel exists | the Erlang renderer's frame time on a 240 by 240 panel against LVGL's on the same panel; the parity test through both; part 6's Erlang renderer may record a QEMU frame time as a preview before the panel exists, deciding nothing | whether LVGL leaves the panels |
+| GD | track D's part 4, on its panel, once part 6 has run the Erlang renderer | the Erlang renderer's frame time on a 240 by 240 panel against LVGL's on the same panel; the parity test through both; part 6's Erlang renderer may record a QEMU frame time as a preview before the panel exists, deciding nothing | whether LVGL leaves the panels |
 | G8 | M8 | E-S1 (the ladder C0 to C2), E-S3 to E-S9 | default cooperation features; time slice, grace and period; capacity rules; the shared services' sizing rule and whether a service needs a child group per client class |
 | G9 | M9: recorded in 1b-E, decided at its kernel part | interrupt-to-handler latency per device class (`tools/erx bench irq`), ring throughput against sDDF's figures, `tools/erx bench blk`, the network driver's packet rate, MSIs under HVF; the stopgap's numbers recorded with the stopgap named | at the kernel part only: completion batching per device class; virtio-pci over virtio-mmio; each row of the driver table, which alone admits a native shim; no row from the stopgap's numbers |
 | GQ | track Q | `fork` of 10, 100 and 1,000 MiB against Linux in a guest; a dynamically linked program's start against a static one's; the fill and the write-back cost of the session's shared mappings, files of 64 KiB to 1 GiB, with `tools/erx bench mmap`, against descriptor reads and writes; on CPUs with hardware dirty-bit management, the fold of dirty bits into the object's stored marks at `munmap` and `exec` over large shared mappings, with `tools/erx bench mmap` | whether `fork` grows a copy-on-write path; whether the shared mappings' fill and write-back points meet the corpus |
@@ -2509,7 +2511,7 @@ interpreter, within a frame's cost across a connection).
 | Virtio-mmio devices with ordinary interrupts and unconfined DMA, driven by the same Erlang drivers | DMA profiles; IRQ objects; the device NIF | M9's kernel part (virtio-pci with MSIs and the IOMMU), M11 (refused unless configured) |
 | A host link holding every facet but the system-shell facet | session facet tables | M10, M11 |
 | littlefs, the read-write file system of the data partition and the vault's partition, a NIF of the system domain in Phase 1 and a sub-space port of its storage domain from 1b-E | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, decided on QEMU in 1b-H, through an installation that creates both partitions afresh, which comes to the boards with M12 |
-| LVGL, the widget renderer on panels, a native program in a sub-space of the display domain | the renderer behaviour `erx_ui_renderer` and the generated reader of `ui.txt`'s operations | by the Erlang renderer, when GD admits it; GD is first measured with track D's part 6 |
+| LVGL, the widget renderer on panels, a native program in a sub-space of the display domain | the renderer behaviour `erx_ui_renderer` and the generated reader of `ui.txt`'s operations | by the Erlang renderer, when GD admits it; GD is first measured on track D's part 4 panel |
 
 The stopgap carries the rows of the backend's table in
 [design-stopgap.md](design-stopgap.md#the-call-table), each in full, with

@@ -123,9 +123,11 @@ Decisions every reader of this document needs:
   confidentiality of what is shown and typed at that display.
 * **No NIF in the display domain parses untrusted bytes.** A memory
   error in a native parser would reach every window's pixels and keys,
-  and a NIF's fault ends the whole runtime. The draw decoder and the
-  decoder of compressed pixels are Erlang, and no program's terminal
-  output reaches the display domain at all; native code that must parse
+  and a NIF's fault ends the whole runtime. The draw decoder, the `Y`
+  decoder and the PNG reader with its inflate are Erlang. The rule
+  covers every native function, ERTS's own NIFs and BIFs, `zlib`'s and
+  `binary_to_term`'s among them, as well as the release's NIFs. No
+  program's terminal output reaches the display domain at all; native code that must parse
   runs in a sub-space holding only its window or its pipes.
 * **Nothing paints without a change.** Every byte that reaches a panel
   follows from a client's flush of a dirty rectangle or from a change of
@@ -299,7 +301,7 @@ the shell and the application act with their own capabilities.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window; on a kiosk under LVGL there are no windows, and `erx_ui_kiosk` admits one UI, from the application the manifest names, answers every other open with `{error, busy}`, and is the only path to the driver and the only recipient of input | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window; a second UI admitted on a kiosk's screen | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with a second window made, the second window's `kbd` receives nothing and the application's `r` of image 0 returns its own pixels, where a seeded delivery to the hidden window fails it; on a kiosk, a second `erx_ui:open/1`, from the named application or from another domain, answered `{error, busy}`, where a seeded owner that admits it fails; the decoder's fuzz target |
+| **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window; on a kiosk under LVGL there are no windows, and `erx_ui_kiosk` admits one UI, from the application the manifest names, answers every other open with `{error, busy}`, and is the only path to the driver and the only recipient of input | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window; a second UI admitted on a kiosk's screen | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with a second window of the named application and a window of another domain made, each of the two is hidden, its `kbd` receives nothing and its `wctl` write of `show` fails with `EINVAL`, and the application's `r` of image 0 returns its own pixels, where a seeded delivery to a hidden window fails it; when the shown window ends, the application's second window is shown and the other domain's stays hidden, and when that ends too the screen holds only the background until the application makes another, where a seeded policy that shows the most recent window or any domain's window fails it; on a kiosk, a second `erx_ui:open/1`, from the named application or from another domain, answered `{error, busy}`, where a seeded owner that admits it fails; the decoder's fuzz target |
 | **G2.** Each image is touched by one process at a time and lives while any process holds it, and every pixel loop runs over a clipped rectangle | a window's images are written only by its window process and the screen image only by `erx_screen`; `erx_screen` reads a window's image 0 only inside that window's flush call, which the window makes and waits on, and the driver reads an image only inside `erx_screen`'s call to it, which `erx_screen` waits on; calls run one way, window to `erx_screen` to driver, so no two wait on each other; an image is a NIF resource, freed by its destructor when no term refers to it, and `erx_memdraw` has no other free, so `f`, a resize and a window's end drop a reference and never free memory another process holds; the framebuffer is written only by the display driver's `erx_device:fill/3`; every function of `erx_memdraw` that touches pixel memory takes an `erx_clip_t`, which only `erx_draw_clip` produces, with checked arithmetic, from the operation's rectangles and both images' bounds | a read of an image outside its writer's call; a call from the driver or `erx_screen` back up the chain; an explicit free of an image; a loop over an unclipped rectangle | the build checks over `erx_memdraw`'s sources and the call direction (Chokepoints); the differential test against the reference renderer with rectangles far outside every image; the display suite in hosted mode under ThreadSanitizer, with windows drawing, resizing and ending while `erx_screen` composes and the driver copies, where a seeded compose outside the flush call makes it report; the same run under ASan, where a seeded explicit free makes it report |
 | **G3.** What a client makes the display domain spend is bounded by its grant | memory: a grant carries quotas of windows, pixel bytes and widget nodes; each image is charged its pixel bytes rounded up to 4 KiB, and a font cache its glyph records, so the pixel quota bounds the image count too; a window checks each allocation against the quota with checked arithmetic before it allocates; images die with their window; a write carries at most the file protocol's 64 KiB, a widget tree at most the display facet's `max_request`; a window's pending input and dirty list are bounded. CPU: a client's draw work runs only in its windows' processes, at most the `windows` quota of them, each of which has at most one flush in `erx_screen` at a time; its widget work is admitted by its display facet within the grant's share of reductions | an allocation outside the quota check; an image that outlives its window; an unbounded queue; a window with two flushes outstanding | an allocation loop refused at the quota with `ENOMEM` and the domain's memory unchanged; a window closed with images left, all freed; a widget tree of one node more than the quota, refused whole; a client that floods flushes from one window while another window's one flush waits at most one compose, where a seeded second outstanding flush fails it |
 | **G4.** A presentation grants nothing | a presentation is a type and a canonical text; the terminal emulator's only actions on one are to insert its text as keyboard input and to highlight the presentations of the types an input context names; a widget's only action is the `{select, Type, Value}` event to its application; neither carries a facet, a grant or a capability, and the command that then runs is checked by the shell's facets as any typed command is ([Authority](design.md#authority)) | a terminal that calls a service for a clicked link; a widget server that performs the action a presentation names | a session without an inspect facet clicks a pid presentation and the inserted `i` command fails with `no_facet`; the link parser's fuzz target; a source check that `erx_term` and `erx_ui_server` call no facet |
@@ -383,7 +385,10 @@ the session's directory, so the session sees:
 
 A window is made by `mkdir` of a name of the client's choosing in its
 directory; the window takes the next `window_id()` within the display,
-and the name is the client's, as any directory's is. The `mkdir`'s
+and the name is the client's, as any directory's is. Ids are never
+reused and never wrap: once a display has issued id 2^31 - 1, every
+later `mkdir` fails with `ENOSPC`, and the display logs once that its
+window ids are spent. The `mkdir`'s
 `Owner` ([Fid owners](design-files.md#fid-owners)) is the window's
 holder: a window ends when its holder ends, when its directory is
 removed, or when its grant ends, whichever comes first, as a fid ends at
@@ -544,6 +549,21 @@ offset of the message that failed. The window process performs the
 operations only after the fold returns, so a write is decoded and checked
 whole before any of it is applied, and a write that fails applies
 nothing (plan, then apply).
+
+**A message never spans writes.** Each write holds whole messages, as
+Plan 9's `devdraw` requires: a message whose fields or payload run
+past the end of the write fails with `EINVAL` at its offset, as
+`devdraw` fails it with "short draw message", and the connection keeps
+no bytes of it for the next write. A client loads an image larger than
+one write as several `y` or `Y` messages over bands of rows, each
+within one write, as `libdraw`'s `loadimage` does. `libdraw` keeps its
+messages whole within its buffer, which it sizes from `iounit` of the
+`draw` file; a window's `draw` reports an `iounit` of 64 KiB, the file
+protocol's payload, and a `write(2)` on `draw` larger than that is
+refused whole with `EINVAL`, never split into requests, so a port of
+`libdraw` needs no change. Unlike `devdraw`, which applies a write's
+earlier messages before it fails a short one, a window applies none of
+a write that fails.
 
 ### Input events
 
@@ -860,6 +880,8 @@ under LVGL `erx_ui_kiosk`. A device in another domain, such as
 a touch controller on a bus the devices domain holds, sends them through
 a display facet granted to that domain with the `events` operation,
 whose generated validator holds each event to the bounds of `input()`.
+Such a domain has the reach of a person at the display, and the trust
+table of [design.md](design.md) gives it a row of its own.
 
 ### Windows and the window system
 
@@ -898,10 +920,25 @@ draws, with each label through the line escape. It has no item that
 starts a program, a terminal included: the display domain has no
 authority to start one in a session, and a terminal opens its sibling
 windows itself ([The terminal](#the-terminal)). The **single** policy,
-`erx_wm_single`, shows exactly one window, the one the manifest names,
-gives it the screen's rectangle, keeps every other hidden, delivers
-every event but the reserved chord to the shown window, and draws
-nothing. A
+`erx_wm_single`, shows one window at a time, gives it the screen's
+rectangle and draws no decoration. It is configured with the session
+directory of the application domain the manifest names, and which
+window it shows is derived, never stored: from every window table
+`erx_winfs` hands it, the shown window is the live window of that
+directory with the lowest id. So the first window the domain makes is
+shown, and when it ends, the domain's next oldest live window is shown
+in its place, with no event of a window's end for the policy to miss.
+
+Every other window, a later window of that domain or a window of any
+other domain, is made and kept hidden: its `mkdir` succeeds, its draws
+and flushes succeed and reach no pixel of the screen, its `wctl` reads
+report it hidden, and its `mouse` and `kbd` receive nothing until it
+is shown. While the named domain has no live window, the screen shows
+only the background `erx_screen` fills.
+
+The policy refuses every `wctl` request with `EINVAL`, so no window
+takes the screen by asking, and it delivers every event but the
+reserved chord to the shown window. A
 `wctl` write is a `place` request, so a program can resize or hide its
 window under a policy that allows it and gets `EINVAL` under one that
 does not.
@@ -1047,7 +1084,10 @@ runtime drops them when it ends, however it ends (G3).
 **Reading pixels.** An `r` message queues the rectangle's bytes for the
 next read of `draw`, at most 64 KiB at a time, as Plan 9 does.
 
-**The clipboard.** `/snarf` holds at most 1 MiB and is one display's,
+**The clipboard.** `/snarf` holds at most 1 MiB, and a write that would
+take it past that is refused whole with `EFBIG`, leaving it as it was
+before that write,
+so nothing is ever truncated. It is one display's,
 shared by every grant on that display that carries `snarf`, as X's
 selection is shared by a display's clients (Security says with whom).
 
@@ -1751,7 +1791,18 @@ grid, a scroll viewport, a stack) and draws the nodes whose rectangle or
 properties changed through the draw protocol on the window's files, with
 glyphs from a subfont it loaded, then flushes the union of their
 rectangles. It reads `mouse` and `kbd`, and hit testing is the layout's
-rectangles.
+rectangles. It decodes an `image` node's PNG with `erx_png`, in
+Erlang. Before anything is inflated, the reader checks the header's
+width, height, bit depth, colour type and interlace method, refuses
+an interlaced image, and computes with checked arithmetic two sizes:
+the filtered rows the header declares, one filter byte and the packed
+samples per row, and the decoded image's pixel bytes in the window's
+channel, rounded up as every image is, which must fit what remains of
+the window's pixel quota. `erx_inflate`, an Erlang inflate written for
+it, must then yield exactly the filtered size: it stops with an error
+the moment its output would pass it, and a stream that ends short of
+it, or input that ends before the stream does, is refused. A refused image is shown as
+its `alt` text, as a renderer that cannot show it does.
 
 The **LVGL renderer**, `erx_ui_lvgl`, starts the native program
 `erx-lvgl` in a sub-space of the display domain that holds its standard
@@ -2156,13 +2207,24 @@ position of the fault.
   most its windows' share and starves no other window. Widget work is
   admitted within the display facet's share.
 * **Untrusted bytes in C.** Every byte a client writes is parsed in
-  Erlang: the draw decoder `erx_draw_codec` and the decoder of
-  compressed pixels `erx_draw_image`. `erx_memdraw`'s primitives act in
+  Erlang: the draw decoder `erx_draw_codec`, the decoder of compressed
+  pixels `erx_draw_image`, and an `image` node's PNG, which `erx_png`
+  reads and `erx_inflate` inflates; ERTS's `zlib`, `binary_to_term`,
+  `re` and `erlang:decode_packet` parse in C, and no module of the
+  display release calls them. A term from another domain
+  reaches the display domain only through the funnel, which refuses
+  ETF's compressed form before ERTS decodes anything
+  ([The funnel](design-domains.md#the-funnel)), so ERTS's own C inflate
+  never runs on another domain's bytes either. `erx_memdraw`'s primitives act in
   C on what they have checked, rectangles, counts and pixel rows, and
   the native renderer's reader parses the renderer's operations in its
   sub-space; each has a fuzz target, and every size, offset and count
   they compute uses checked arithmetic (Verification).
-* **Residuals.** Implicit bidirectional reordering of displayed text is
+* **Residuals.** Window ids are issued per display and never reused, so
+  one client looping `mkdir` and `rmdir` can spend them all, after which
+  every `mkdir` on that display fails with `ENOSPC` until the display
+  domain restarts; the `windows` quota bounds live windows, not ids
+  issued. Implicit bidirectional reordering of displayed text is
   not escaped, as in design-live. A window can draw a convincing copy of
   another window's content, a terminal's included; under the overlapping
   policy the border marks the window that takes the keyboard and the menu
@@ -2185,7 +2247,12 @@ Each passing case has a seeded failure that proves the code ran.
   connection as it stood before the write fails the first case with
   `ENOENT`, and a seeded plan that performs an operation before the fold
   ends fails a write whose last message is malformed, which must leave
-  every image unchanged. The codec's C twin has a generated fuzz target
+  every image unchanged. A `y` cut across two writes fails the first
+  write with `EINVAL` at the `y`'s offset, applies none of it and leaves
+  the connection holding no bytes, while the same rows loaded as two
+  `y`s over bands, one per write, yield the image a single `y` does,
+  where a seeded connection that keeps the first write's tail fails
+  it. The codec's C twin has a generated fuzz target
   that takes the depths of ids 0 to 7 from the input's first bytes and
   decodes the rest message by message, to its end or its first error;
   the Erlang codec is tested differentially against the twin over the
@@ -2229,6 +2296,16 @@ Each passing case has a seeded failure that proves the code ran.
   * The same runs under ASan and UBSan, with rectangles far outside every
     image, are the test of G2's clipping; a seeded bypass of
     `erx_draw_clip` is caught by the chokepoint check and by ASan.
+* **The PNG reader.** `erx_png` and `erx_inflate` have a fuzz target
+  over arbitrary bytes and over mutated PNGs, which asserts that every
+  call ends with pixels or an error, that the inflated bytes never pass
+  the filtered size the header declares, and that an interlaced image,
+  or one whose decoded pixel bytes pass the window's remaining pixel
+  quota, is refused before anything is inflated, where a seeded removal of the output bound fails it.
+  `erx_inflate` is tested differentially against stock OTP's `zlib` on
+  the host over the corpus, accepting the same streams and yielding the
+  same bytes, where a seeded off-by-one in a back-reference's distance
+  fails the agreement.
 * **The `Y` decoder.** `erx_draw_image` has a fuzz target over
   compressed payloads into rectangles of every channel and size, under
   ASan and UBSan in `make check-fuzz`, which asserts that every decoded
@@ -2254,7 +2331,8 @@ Each passing case has a seeded failure that proves the code ran.
   its oldest record and counts it while a pending resize still answers
   `r`, where a seeded unbounded queue fails the heap check.
 * **Windows.** G1's tests: cross-connection ids, two sessions' grants, a
-  narrowed program, the single policy with a second window made;
+  narrowed program, the single policy's choice of the shown window as
+  windows are made and end;
   the `wctl` grammar's fuzz target; a window's end freeing its images,
   measured by the domain's budget before and after, and a window ending
   with its holder; a seeded leak of one image fails it.
@@ -2385,7 +2463,8 @@ Each passing case has a seeded failure that proves the code ran.
   marked path with the value in place, where a generator that writes a
   module's segments in the wrong order fails; the generator refuses a
   seeded schema with two presentations of one segment over one type, a
-  presentation named `accept` or `proc`, and two marks on one path; the
+  presentation named by each refused name in turn (`accept`, `proc`,
+  `ui`, `trace`, `login` and `ws`), and two marks on one path; the
   renderer emits links only with `links` declared, checked at the tty's
   byte boundary; the input context highlights exactly the types the
   catalog declares for a command.
@@ -2461,7 +2540,8 @@ Each passing case has a seeded failure that proves the code ran.
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |
 | `erx_term` and `erx_ui_server` call no facet | an xref check that neither module nor its callees reach `erx_facet` clients |
 | Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu`, `erx_ui_erlang` and `erx_ui_lvgl` |
-| No NIF of the display release parses bytes from another domain | a build check over the release's NIF libraries and their exported functions, a closed list with each function's use of the binaries it takes; a new NIF or function, `cloadmemimage` linked in among them, fails it |
+| No NIF of the display release parses bytes from another domain | a build check over the release's NIF libraries and ERTS's own NIFs in the display release, `zlib_nif` among them, and their exported functions, a closed list with each function's use of the binaries it takes; a new NIF or function, `cloadmemimage` linked in among them, fails it |
+| No module of the display release calls a native parser of ERTS | an xref check that no module of the display release calls `zlib`, `binary_to_term/1,2`, `re` or `erlang:decode_packet/3`; a seeded call to each fails it |
 | Only `erx_vt` interprets a terminal's output | a source check that no other module of `erx_term`'s application matches on ESC, CSI or OSC bytes |
 
 ## Performance
@@ -2603,8 +2683,9 @@ Decisions taken with the owner:
    presentations a command can take.
 8. **The `Y` decoder is Erlang.** Compressed pixels are decoded by
    `erx_draw_image` into the rectangle's pixels and loaded as a `y`
-   would be, so no NIF of the display domain parses a client's bytes,
-   without exception.
+   would be, and a PNG is inflated by `erx_inflate`, so no NIF of the
+   display domain, ERTS's included, parses a client's bytes, without
+   exception.
 9. **One width table for the whole system.** The terminal generator
    writes `erx_vt`'s widths, musl's `wcwidth` tables and `erx_width`,
    which `prim_tty:wcwidth/1` answers from, from one rule and OTP's
@@ -2653,7 +2734,8 @@ Open decisions for the owner:
    type, so the table is the intersection of what the browser, LVGL and
    the Erlang renderer decode. PNG is native to the browser and to LVGL,
    and costs the Erlang renderer a PNG reader, `erx_png`, a parser of
-   another domain's bytes with its fuzz target, over ERTS's `zlib`.
+   another domain's bytes with its fuzz target, over `erx_inflate`, an
+   inflate written in Erlang for it, since ERTS's `zlib` is a NIF.
    Plan 9's image(6) would cost the Erlang renderer nothing, since `y`
    and `Y` load it, but would need a reader in the browser and in
    `erx-lvgl`. Recommended: PNG alone, with JPEG added only when an

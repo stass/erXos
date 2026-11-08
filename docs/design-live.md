@@ -968,8 +968,9 @@ Each session can run a command shell with rc's language beside its
 Erlang shell, both listed in the same `Ctrl-G` menu; the console starts
 the command shell first, and the shell's `erl` runs the Erlang shell above
 it; its language, commands, pipelines of text, jobs and terminal relay
-are [design-shell.md](design-shell.md). It runs on the session's tty
-above, and its Erlang commands reach the inspector, `/proc` and the code
+are [design-shell.md](design-shell.md). Each command shell runs on
+one of the session's ttys above, the console line's or, at a display,
+its terminal window's ([design-display.md](design-display.md#the-terminal)), and its Erlang commands reach the inspector, `/proc` and the code
 store below with the session's facets. Its commands print text as
 FreeBSD's commands of the same names do, with a value erXos does not
 measure printed as `-` ([Pipelines](design-shell.md#pipelines)); a
@@ -993,7 +994,7 @@ kinds of process:
 | Keyword (header) | An Erlang process | A program |
 | --- | --- | --- |
 | `pid` (`PID`) | its pid, `<D.N.S>` | its process id |
-| `tt` (`TT`) | the session's terminal when its group leader is a group of the session's tty, else `-` | the session's terminal when it holds an open of the session's tty, else `-` |
+| `tt` (`TT`) | the terminal of the session's tty whose group is its group leader, else `-` | its controlling terminal: the terminal of the session's tty its job was started on, while it holds an open of that tty, else `-` |
 | `state` (`STAT`) | `R` when running, runnable or collecting garbage; `S` when waiting in `receive`; `T` when its job is stopped; `RE` when exiting; then `+` when it belongs to the foreground job | `R` when a thread runs or is runnable, `S` when every thread waits, `T` when paused; then `+` when it belongs to the foreground job |
 | `time` (`TIME`) | `-`: the runtime keeps no CPU time per process | its group's CPU time as `getrusage` reports it, as `M:SS.hh` (`bin/ps/print.c:500-520`) |
 | `pcpu` (`%CPU`) | `-`, for the same reason | its CPU time over the time since it started, as a percentage to one decimal |

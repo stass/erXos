@@ -575,8 +575,8 @@ A path's marks, at four spaces:
 Presentation names are a namespace of their own, as trace rows are, so
 `domain` may name a kind and a presentation, and they become atoms of
 `erx_schema`. The generator refuses a presentation named `accept`, the
-input context's URI ([Presentations in a
-terminal](design-display.md#terminal-windows)), or `proc`, `ui`,
+input context's URI ([Links and the input
+context](design-display.md#links-and-the-input-context)), or `proc`, `ui`,
 `trace`, `login` or `ws`, the web's fixed routes
 ([URLs](design-web.md#urls)); a presentation declared twice; and two
 presentations of one variable segment over the same type, since an
