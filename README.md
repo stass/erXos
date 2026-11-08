@@ -269,8 +269,9 @@ Error in process <0.150.0> with exit value:
   Its commands are Erlang commands (`echo`, `cat`, `ls`, `mkdir`, `rm`,
   `mv`, `cp`, `ps`, `mount`, `erl`, `true`, `false`, and the record stages
   `where`, `sort` and `count`). Its language is checked against
-  plan9port's rc, built on the host as the oracle. Job control and
-  running programs are not on master yet.
+  plan9port's rc, built on the host as the oracle. Job control works for
+  Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
+  programs is not on master yet.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L. At
