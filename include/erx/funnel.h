@@ -37,7 +37,15 @@
  * accepted with the term's decoded words.  The semantic stage (map keys
  * equal under =:=) is the receiving decoder's.
  *
- * All three are pure: they read only their arguments and write only their
+ * erx_funnel_check is the funnel's whole judgment of one copied frame, and
+ * the one function a runtime's drain calls: it applies the three checks
+ * above, the sender rule and the target rule, asks the receiver's export
+ * table for the one right the operation needs, and returns the verdict
+ * table's action for the frame (design-domains.md, "The funnel", steps 2
+ * to 7).
+ *
+ * All four are pure: they read only their arguments, and the export
+ * table only through the lookup the caller passes, and write only their
  * results and the caller's scratch.  None recurses.
  */
 
@@ -84,6 +92,22 @@ typedef enum erx_funnel_reason {
 				   list of options */
 	ERX_FUNNEL_ERR_PAYLOAD,	/* a payload for an operation without one,
 				   or none for an operation with one */
+	ERX_FUNNEL_ERR_SENDER,	/* a pid or reference of the sender's own
+				   without the lane's node name and domain
+				   id */
+	ERX_FUNNEL_ERR_TARGET,	/* a target without the receiver's node
+				   name, or one of the receiver's own past
+				   ERTS's internal range */
+	ERX_FUNNEL_ERR_VERSION,	/* a payload whose first byte is not the
+				   version byte 131 */
+	ERX_FUNNEL_ERR_PAYLOAD_TERM, /* erx_etf refused an authorised
+				   payload as malformed */
+	ERX_FUNNEL_ERR_HELD,	/* the caller held less of a discarded frame
+				   than its header, control term and the
+				   payload's first byte */
+	ERX_FUNNEL_ERR_VERDICT,	/* the verdict table has no action for the
+				   operation and cause, which no frame
+				   reaches */
 } erx_funnel_reason_t;
 
 /* A frame's two terms: control first, then payload (absent when 0). */
@@ -188,9 +212,9 @@ erx_funnel_reason_t erx_funnel_header(const uint8_t *header,
  * control term also gets erx_etf's semantic stage, which refuses two map
  * keys equal under =:=, so an accepted one is a term ERTS's distribution
  * input decodes to the same value, but for the receiver's own pids and
- * references: ERTS refuses its own pid past its internal id or serial
- * range and reads only three words of its own reference, which the
- * target rule judges.  scratch holds erx_etf's stack and its
+ * references: ERTS refuses its own pid past its internal id range,
+ * which the target rule judges, and takes its own references by edit 17
+ * of design-runtime.md.  scratch holds erx_etf's stack and its
  * map-key records: ERX_FUNNEL_CTL_SCRATCH bytes suffice for any control
  * term, since a map keeps at most 32 bytes a pair, a pair takes at least
  * 2 bytes, and a record 4 bytes a field of at least 2 bytes.  On
@@ -226,5 +250,148 @@ erx_etf_verdict_t erx_funnel_payload(const uint8_t *term, size_t len,
     const erx_funnel_limits_t *limits, void *scratch, size_t scratch_len,
     erx_etf_result_t *result);
 size_t erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits);
+
+/*
+ * A name of the receiving domain the export table is asked about: the
+ * target pid of an operation on a process, the alias of an alias send, or
+ * the domain's own name for a spawn request.
+ */
+typedef enum erx_funnel_name_kind {
+	ERX_FUNNEL_NAME_PID,
+	ERX_FUNNEL_NAME_ALIAS,
+	ERX_FUNNEL_NAME_DOMAIN,
+} erx_funnel_name_kind_t;
+
+typedef struct erx_funnel_name {
+	erx_funnel_name_kind_t	 kind;
+	const erx_etf_pid_t	*pid;		/* ERX_FUNNEL_NAME_PID */
+	const erx_etf_ref_t	*alias;		/* ERX_FUNNEL_NAME_ALIAS */
+} erx_funnel_name_t;
+
+/*
+ * What the lane's peer holds on a name: its ERX_RIGHT_* bits, none when
+ * it was never given the name or the name has no live record, and the
+ * named process's request limit in heap words when a facet gave it one
+ * (0 when it has none), which lowers a message's word limit.
+ */
+typedef struct erx_funnel_hold {
+	uint64_t		 request_words;
+	uint8_t			 rights;
+} erx_funnel_hold_t;
+
+/*
+ * The receiver's export table, asked one question for the lane's peer.
+ * The runtime answers it from the record it already looks up to deliver
+ * to the name (design-domains.md, "Exports"), reading only its own
+ * memory; it must not change anything the funnel can see.
+ */
+typedef erx_funnel_hold_t erx_funnel_lookup_fn(const void *exports,
+    const erx_funnel_name_t *name);
+
+/*
+ * The lane a frame arrived on: the sender's node name and domain id, which
+ * the sender rule holds the frame to, the receiver's, which the target
+ * rule holds it to, and the receiver's export table toward the sender.
+ * The peer's identity is the lane's, never a field of the frame.
+ */
+typedef struct erx_funnel_lane {
+	const char		*sender_node;
+	size_t			 sender_node_len;
+	const char		*receiver_node;
+	size_t			 receiver_node_len;
+	erx_funnel_lookup_fn	*lookup;
+	const void		*exports;
+	uint32_t		 sender_id;
+	uint32_t		 receiver_id;
+} erx_funnel_lane_t;
+
+/* What the runtime does with a frame. */
+typedef enum erx_funnel_action {
+	ERX_FUNNEL_MALFORMED,		/* end the connection; zero, so a
+					   missing table entry fails
+					   closed */
+	ERX_FUNNEL_DELIVER,		/* hand the control term and the
+					   payload to the runtime's
+					   distribution input */
+	ERX_FUNNEL_DELIVER_IF_LINKED,	/* a LINK without the link right:
+					   the target process keeps it when
+					   it already holds a link with the
+					   sender, in any state, and creates
+					   nothing; otherwise it answers it
+					   as ERX_FUNNEL_ANSWER_NOPROC.  The
+					   target decides when it handles the
+					   signal, in order with the sender's
+					   earlier ones */
+	ERX_FUNNEL_DROP,		/* drop and count it */
+	ERX_FUNNEL_ANSWER_NOPROC,	/* answer a LINK with an exit, a
+					   MONITOR_P with a DOWN, of reason
+					   noproc, on the lane's reverse */
+	ERX_FUNNEL_ANSWER_SPAWN,	/* answer the SPAWN_REQUEST with a
+					   SPAWN_REPLY of noconnection when
+					   unauthorised, system_limit when
+					   over a limit */
+	ERX_FUNNEL_TOO_LARGE,		/* deliver the exit with reason
+					   {erx_reason_too_large, Bytes},
+					   Bytes the payload's length */
+} erx_funnel_action_t;
+
+/* Which column of the verdict table chose the action. */
+typedef enum erx_funnel_cause {
+	ERX_FUNNEL_CAUSE_ACCEPTED,	/* authorised and within the limits */
+	ERX_FUNNEL_CAUSE_UNAUTHORISED,	/* the peer lacks the right */
+	ERX_FUNNEL_CAUSE_DEAD,		/* the target names a process, alias
+					   or reference of an ended domain of
+					   the receiver's name */
+	ERX_FUNNEL_CAUSE_OVER_LIMIT,	/* authorised, and its payload is
+					   past a limit or was discarded */
+	ERX_FUNNEL_CAUSE_MALFORMED,
+} erx_funnel_cause_t;
+
+typedef struct erx_funnel_verdict {
+	erx_funnel_action_t	 action;
+	erx_funnel_cause_t	 cause;
+	erx_funnel_reason_t	 reason;	/* ERX_FUNNEL_OK unless
+						   malformed */
+	erx_etf_result_t	 etf;		/* erx_etf's result on the
+						   control term when it refused
+						   it, else on the payload once
+						   measured: an accepted
+						   payload's words */
+	erx_funnel_header_t	 header;	/* once the header passed */
+	erx_funnel_control_t	 control;	/* once the control term
+						   passed */
+} erx_funnel_verdict_t;
+
+/*
+ * Judges one frame of frame_len bytes (the record's len), of which the
+ * caller copied the first held bytes into frame.  held is frame_len for a
+ * whole frame.  The caller puts a frame in discard mode when its payload
+ * is past max_frame or the caller could not grow its buffer.  Such a frame
+ * holds less: its header, its control term and at least the payload's
+ * first byte, and it is over a limit once authorised.  The steps, numbered
+ * as design-domains.md's, each able to end the judgment:
+ *
+ *   2. the header and the payload's version byte: malformed on refusal;
+ *   4. the control term (erx_funnel_control), malformed on refusal; the
+ *      sender rule: from and sender_ref carry the lane's sender node and
+ *      id, else malformed; the target rule: to and receiver_ref carry the
+ *      receiver's node, else malformed, and one of another creation names
+ *      an ended domain's process, so the frame is dead; a pid of the
+ *      receiver's creation has a number below 2^28, ERTS's internal
+ *      range, else malformed, since ERTS refuses its own pid past it;
+ *   5. authority: the operation's right, looked up once, on its target;
+ *      an operation that needs none is always authorised;
+ *   3 and 6. the payload, of an authorised frame only: discarded, or past
+ *      the limits (a message's word limit lowered to its target's request
+ *      limit), is over a limit; one erx_etf refuses is malformed.
+ *
+ * The action is the verdict table's for the operation and the cause, in
+ * erx_funnel.c.  scratch holds erx_funnel_check_scratch_bytes(limits)
+ * bytes.  Pointers in verdict->control point into frame.
+ */
+void erx_funnel_check(const uint8_t *frame, uint32_t frame_len, size_t held,
+    const erx_funnel_lane_t *lane, const erx_funnel_limits_t *limits,
+    void *scratch, size_t scratch_len, erx_funnel_verdict_t *verdict);
+size_t erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits);
 
 #endif /* !ERX_FUNNEL_H */

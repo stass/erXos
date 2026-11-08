@@ -1365,6 +1365,29 @@ it; git history is the record of completed work.
   generator emits only `_decode` for `wire_le` layouts; a field whose width
   changed in `abi/erx_abi.txt` would be written at its old width. Emit an
   `_encode` for `wire_le` layouts and call `erx_lane_rec_encode`.
+* [Medium] ERTS distribution input, `beam/io.c` (`driver_output`,
+  `driver_output_binary`, `driver_output2` on a distribution port) and
+  `beam/dist.c` (`dist_ctrl_put_data`): stock ERTS's two carriers still
+  call `erts_net_message`, where R6 of design-runtime.md makes the lane
+  driver's drain its only caller. The `funnel-net-message` chokepoint
+  permits exactly those stock lines; delete them, or refuse them for every
+  entry, when the lane driver lands, and drop their sites from the rule.
+* [Medium] Funnel authority, design-domains.md "The funnel" step 5: a
+  `LINK` without `link` to a live process that holds no link with the
+  sender is answered `noproc` by the target process when it handles the
+  signal, while one to a process that does not exist is answered at once
+  by the distribution input, so the answer's delay can tell a sender which
+  guessed pids are alive. The step's timing argument covers only the case
+  where a link exists. Such a `LINK` is also never held to the queue
+  quota, so a sender can queue them on any live process it can guess. One
+  change closes both: the drain answers `noproc` at once unless the target
+  holds a link with the sender (a bit of `erx_funnel_hold_t` from the same
+  lookup), and only then queues the conditional `LINK` for the target to
+  re-judge. The ERTS side has no edit yet either: stock
+  `ERTS_SIG_Q_OP_LINK` always inserts, so design-runtime.md's edit table
+  needs a LINK signal that creates nothing unless a link (in any state)
+  exists and otherwise sends the `noproc` exit, which the lane driver
+  (RT6a) uses for `ERX_FUNNEL_DELIVER_IF_LINKED`.
 * [Low] Lane layouts, `abi/erx_abi.txt` `erx_lane_hdr.need` and
   `erx_lane_rpage.wake`: the ABI loads them with acquire order, where
   design-domains.md "Publishing is a release" says relaxed; the litmus tests

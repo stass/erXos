@@ -16,7 +16,9 @@
  * funnel.h lists and no others, and agrees with the payload length; a
  * refused one is all zero; every proper prefix of an accepted control
  * term is refused; and the payload's verdict and reason agree and an
- * accepted payload's words stay within the limit.
+ * accepted payload's words stay within the limit.  The harness also runs
+ * erx_funnel_check on the frame, whole and in discard mode, with the
+ * export table's rights chosen by the cut byte.
  */
 
 #include <stdbool.h>
@@ -174,24 +176,134 @@ payload(const uint8_t *term, size_t len, uint8_t mode)
 		abort();
 }
 
+/*
+ * erx_funnel_check's export table: one hold on every name, chosen by the
+ * cut byte, and a count of the questions, written through a pointer.
+ */
+typedef struct exports {
+	erx_funnel_hold_t	 hold;
+	unsigned		*asked;
+} exports_t;
+
+static erx_funnel_hold_t
+lookup(const void *table, const erx_funnel_name_t *name)
+{
+	const exports_t *exports = table;
+
+	if ((name->kind == ERX_FUNNEL_NAME_PID) != (name->pid != NULL) ||
+	    (name->kind == ERX_FUNNEL_NAME_ALIAS) != (name->alias != NULL))
+		abort();
+	(*exports->asked)++;
+	return (exports->hold);
+}
+
+/*
+ * erx_funnel_check of a frame of len bytes of which held were copied, on a
+ * lane from web@erxos (domain 3) to system@erxos (domain 1): the action
+ * is malformed exactly for a malformed cause, which has a reason and no
+ * other does; no cause reaches the table's unreachable entries; the
+ * table is asked at most once, always for an unauthorised frame and never
+ * for a dead one; an
+ * accepted frame's payload stays within the limit, and its sender and
+ * target agree with the lane.
+ */
 static void
-frame(const uint8_t *body, size_t len, uint8_t mode)
+check(const uint8_t *body, size_t len, size_t held, uint8_t mode,
+    uint8_t cut)
+{
+	static const char sender[] = "web@erxos", receiver[] = "system@erxos";
+	const erx_funnel_limits_t limits = {
+		.host = host,
+		.host_len = sizeof(host) - 1,
+		.max_words = words[(mode >> 2) & 3],
+		.depth = depths[(mode >> 4) & 3],
+		.system = (mode & 0x40) != 0,
+	};
+	unsigned asked = 0;
+	const exports_t exports = {
+		.hold = { .rights = cut & 0x1f,
+		    .request_words = (cut & 0x20) ? 2 : 0 },
+		.asked = &asked,
+	};
+	const erx_funnel_lane_t lane = {
+		.sender_node = sender,
+		.sender_node_len = sizeof(sender) - 1,
+		.sender_id = 3,
+		.receiver_node = receiver,
+		.receiver_node_len = sizeof(receiver) - 1,
+		.receiver_id = 1,
+		.lookup = lookup,
+		.exports = &exports,
+	};
+	erx_funnel_verdict_t v;
+	size_t scratch_len;
+	uint8_t *frame;
+	void *scratch;
+
+	scratch_len = erx_funnel_check_scratch_bytes(&limits);
+	if ((frame = malloc(held == 0 ? 1 : held)) == NULL ||
+	    (scratch = malloc(scratch_len)) == NULL)
+		abort();
+	memcpy(frame, body, held);
+	erx_funnel_check(frame, (uint32_t)len, held, &lane, &limits, scratch,
+	    scratch_len, &v);
+	free(scratch);
+	if ((v.action == ERX_FUNNEL_MALFORMED) !=
+	    (v.cause == ERX_FUNNEL_CAUSE_MALFORMED) ||
+	    (v.cause == ERX_FUNNEL_CAUSE_MALFORMED) !=
+	    (v.reason != ERX_FUNNEL_OK) || asked > 1 ||
+	    (v.cause == ERX_FUNNEL_CAUSE_UNAUTHORISED && asked != 1) ||
+	    (v.cause == ERX_FUNNEL_CAUSE_DEAD && asked != 0) ||
+	    v.reason == ERX_FUNNEL_ERR_VERDICT)
+		abort();
+	if (v.cause == ERX_FUNNEL_CAUSE_MALFORMED) {
+		free(frame);
+		return;
+	}
+	/* v.control points into frame, freed only after these checks. */
+	if ((v.control.fields & ERX_FUNNEL_HAS_FROM) != 0 &&
+	    (v.control.from.creation != 3 || v.control.from.node_len !=
+	    sizeof(sender) - 1 || memcmp(v.control.from.node, sender,
+	    sizeof(sender) - 1) != 0))
+		abort();
+	if ((v.control.fields & ERX_FUNNEL_HAS_TO) != 0 &&
+	    v.control.to.node_len != sizeof(receiver) - 1)
+		abort();
+	if (v.cause == ERX_FUNNEL_CAUSE_ACCEPTED &&
+	    v.header.payload_len > 0 && (held != len ||
+	    v.etf.verdict != ERX_ETF_ACCEPTED ||
+	    v.etf.words > limits.max_words))
+		abort();
+	if (v.cause == ERX_FUNNEL_CAUSE_OVER_LIMIT && held == len &&
+	    v.etf.verdict != ERX_ETF_OVER_LIMIT)
+		abort();
+	free(frame);
+}
+
+static void
+frame(const uint8_t *body, size_t len, uint8_t mode, uint8_t cut)
 {
 	erx_funnel_control_t c;
 	erx_funnel_header_t h;
-	size_t cut;
+	size_t at;
 
-	if (len > ERX_FRAME_MAX || erx_funnel_header(body, (uint32_t)len,
-	    &h) != ERX_FUNNEL_OK)
+	if (len > ERX_FRAME_MAX)
 		return;
+	check(body, len, len, mode, cut);
+	if (erx_funnel_header(body, (uint32_t)len, &h) != ERX_FUNNEL_OK)
+		return;
+	/* The same frame in discard mode, holding part of its payload. */
+	if (h.payload_len > 1)
+		check(body, len, ERX_FRAME_HEADER_SIZE + h.ctl_len + 1 +
+		    cut % (h.payload_len - 1), mode, cut);
 	if ((uint64_t)ERX_FRAME_HEADER_SIZE + h.ctl_len + h.payload_len != len ||
 	    h.ctl_len < 2 || h.ctl_len > ERX_CTL_MAX)
 		abort();
 	body += ERX_FRAME_HEADER_SIZE;
 	if (control(body, h.ctl_len, h.payload_len, &c) != ERX_FUNNEL_OK)
 		return;
-	for (cut = 0; cut < h.ctl_len; cut++)
-		if (control(body, cut, h.payload_len, &c) == ERX_FUNNEL_OK)
+	for (at = 0; at < h.ctl_len; at++)
+		if (control(body, at, h.payload_len, &c) == ERX_FUNNEL_OK)
 			abort();
 	if (h.payload_len > 0)
 		payload(body + h.ctl_len, h.payload_len, mode);
@@ -211,10 +323,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	size -= 2;
 	switch (mode & 3) {
 	case 0:
-		frame(data, size, mode);
+		frame(data, size, mode, cut);
 		/* The same frame with its record cut short. */
 		if (size > 0)
-			frame(data, cut % size, mode);
+			frame(data, cut % size, mode, cut);
 		break;
 	case 1:
 		(void)control(data, size, (mode & 4) ? 9 : 0, &c);

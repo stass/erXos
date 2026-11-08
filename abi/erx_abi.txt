@@ -152,6 +152,16 @@ enum mem_attr u32
   value device 0
 flags entropy_flags u32
   bit credit 0
+# What an export gives a peer on one of a domain's names
+# (docs/design-domains.md, "Exports"): send covers messages, alias sends
+# and monitors; exit covers exit/2 and group_leader/2; spawn is held on
+# the domain's name, introduce on a domain pid.
+flags right u8
+  bit send 0
+  bit link 1
+  bit exit 2
+  bit spawn 3
+  bit introduce 4
 # The first three are the kernel's own, which erx_space_stop refuses as a
 # status; crash is a runtime's, which stops its space with it after its
 # crash dump.

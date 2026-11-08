@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <strings.h>
 
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
@@ -431,4 +432,293 @@ take_ref(erx_etf_reader_t *r, erx_etf_ref_t *ref)
 		return (false);
 	*ref = item.u.ref;
 	return (true);
+}
+
+/*
+ * ERTS's internal range of its own pids on a 64-bit build (erl_term.h:
+ * _PID_NUM_SIZE), which its decoder holds a pid of its own node and
+ * creation to (external.c: dec_pid).  A pid's serial has 32 bits, the wire
+ * field's whole range.  Its own references need no bound: edit 17 of
+ * design-runtime.md makes all four words a reference's identity.
+ */
+#define OWN_PID_NUMBER_LIMIT	((uint32_t)1 << 28)
+
+/*
+ * The verdict table (design-domains.md, "Frames" and "The funnel", step
+ * 7): for each operation, the right the peer must hold and on which of
+ * the receiver's names, and the action for each cause short of
+ * malformed.  UNREACHABLE marks a cause the operation cannot have: an
+ * unauthorised operation that needs no right, a dead spawn request, whose
+ * target is the receiving domain itself, and a payload over a limit for an
+ * operation without one.  It fails closed, as does an operation with no
+ * row, whose actions are all zero, ERX_FUNNEL_MALFORMED.
+ */
+#define UNREACHABLE	ERX_FUNNEL_MALFORMED
+
+typedef struct verdict_row {
+	uint8_t			 right;		/* ERX_RIGHT_*, 0 for none */
+	erx_funnel_name_kind_t	 target;	/* where the right is held */
+	erx_funnel_action_t	 action[ERX_FUNNEL_CAUSE_MALFORMED];
+} verdict_row_t;
+
+#define ROW(right, target, unauthorised, dead, over)			\
+	{ (right), ERX_FUNNEL_NAME_##target, {				\
+	    [ERX_FUNNEL_CAUSE_ACCEPTED] = ERX_FUNNEL_DELIVER,		\
+	    [ERX_FUNNEL_CAUSE_UNAUTHORISED] = (unauthorised),		\
+	    [ERX_FUNNEL_CAUSE_DEAD] = (dead),				\
+	    [ERX_FUNNEL_CAUSE_OVER_LIMIT] = (over) } }
+
+static const verdict_row_t verdict_rows[] = {
+	/* ROW(right, target, unauthorised, dead, over a limit) */
+	[ERX_FUNNEL_SEND_SENDER] = ROW(ERX_RIGHT_SEND, PID,
+	    ERX_FUNNEL_DROP, ERX_FUNNEL_DROP, ERX_FUNNEL_DROP),
+	[ERX_FUNNEL_ALIAS_SEND] = ROW(ERX_RIGHT_SEND, ALIAS,
+	    ERX_FUNNEL_DROP, ERX_FUNNEL_DROP, ERX_FUNNEL_DROP),
+	[ERX_FUNNEL_LINK] = ROW(ERX_RIGHT_LINK, PID,
+	    ERX_FUNNEL_DELIVER_IF_LINKED, ERX_FUNNEL_ANSWER_NOPROC,
+	    UNREACHABLE),
+	[ERX_FUNNEL_UNLINK_ID] = ROW(0, PID,
+	    UNREACHABLE, ERX_FUNNEL_DROP, UNREACHABLE),
+	[ERX_FUNNEL_UNLINK_ID_ACK] = ROW(0, PID,
+	    UNREACHABLE, ERX_FUNNEL_DROP, UNREACHABLE),
+	[ERX_FUNNEL_MONITOR_P] = ROW(ERX_RIGHT_SEND, PID,
+	    ERX_FUNNEL_ANSWER_NOPROC, ERX_FUNNEL_ANSWER_NOPROC, UNREACHABLE),
+	[ERX_FUNNEL_DEMONITOR_P] = ROW(0, PID,
+	    UNREACHABLE, ERX_FUNNEL_DROP, UNREACHABLE),
+	[ERX_FUNNEL_PAYLOAD_MONITOR_P_EXIT] = ROW(0, PID,
+	    UNREACHABLE, ERX_FUNNEL_DROP, ERX_FUNNEL_TOO_LARGE),
+	[ERX_FUNNEL_PAYLOAD_EXIT] = ROW(0, PID,
+	    UNREACHABLE, ERX_FUNNEL_DROP, ERX_FUNNEL_TOO_LARGE),
+	[ERX_FUNNEL_PAYLOAD_EXIT2] = ROW(ERX_RIGHT_EXIT, PID,
+	    ERX_FUNNEL_DROP, ERX_FUNNEL_DROP, ERX_FUNNEL_TOO_LARGE),
+	[ERX_FUNNEL_GROUP_LEADER] = ROW(ERX_RIGHT_EXIT, PID,
+	    ERX_FUNNEL_DROP, ERX_FUNNEL_DROP, UNREACHABLE),
+	[ERX_FUNNEL_SPAWN_REQUEST] = ROW(ERX_RIGHT_SPAWN, DOMAIN,
+	    ERX_FUNNEL_ANSWER_SPAWN, UNREACHABLE, ERX_FUNNEL_ANSWER_SPAWN),
+	[ERX_FUNNEL_SPAWN_REPLY] = ROW(0, PID,
+	    UNREACHABLE, ERX_FUNNEL_DROP, UNREACHABLE),
+};
+_Static_assert(sizeof(verdict_rows) / sizeof(verdict_rows[0]) ==
+    ERX_FUNNEL_UNLINK_ID_ACK + 1, "a verdict row for every operation");
+
+static erx_funnel_reason_t check_frame(const uint8_t *, uint32_t, size_t,
+    const erx_funnel_lane_t *, const erx_funnel_limits_t *, void *, size_t,
+    erx_funnel_verdict_t *);
+static bool names_sender(const uint8_t *, size_t, uint32_t,
+    const erx_funnel_lane_t *);
+static erx_funnel_reason_t sender_rule(const erx_funnel_control_t *,
+    const erx_funnel_lane_t *);
+static erx_funnel_reason_t target_rule(const erx_funnel_control_t *,
+    const erx_funnel_lane_t *, bool *);
+static erx_funnel_reason_t target_name(const uint8_t *, size_t, uint32_t,
+    bool, const erx_funnel_lane_t *, bool *);
+
+void
+erx_funnel_check(const uint8_t *frame, uint32_t frame_len, size_t held,
+    const erx_funnel_lane_t *lane, const erx_funnel_limits_t *limits,
+    void *scratch, size_t scratch_len, erx_funnel_verdict_t *verdict)
+{
+	erx_funnel_reason_t reason;
+
+	*verdict = (erx_funnel_verdict_t){ 0 };
+	reason = check_frame(frame, frame_len, held, lane, limits, scratch,
+	    scratch_len, verdict);
+	if (reason != ERX_FUNNEL_OK) {
+		verdict->action = ERX_FUNNEL_MALFORMED;
+		verdict->cause = ERX_FUNNEL_CAUSE_MALFORMED;
+		verdict->reason = reason;
+		return;
+	}
+	verdict->action =
+	    verdict_rows[verdict->control.op].action[verdict->cause];
+	if (verdict->action == ERX_FUNNEL_MALFORMED) {
+		/* An UNREACHABLE cell: fail closed, and say so. */
+		verdict->cause = ERX_FUNNEL_CAUSE_MALFORMED;
+		verdict->reason = ERX_FUNNEL_ERR_VERDICT;
+	}
+}
+
+size_t
+erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits)
+{
+	size_t payload = erx_funnel_payload_scratch_bytes(limits);
+
+	return (payload > ERX_FUNNEL_CTL_SCRATCH ? payload :
+	    ERX_FUNNEL_CTL_SCRATCH);
+}
+
+/*
+ * The steps of erx_funnel_check, numbered as design-domains.md's.  Sets the verdict's
+ * header, control record, cause and payload result, and returns why the
+ * frame is malformed, or ERX_FUNNEL_OK.
+ */
+static erx_funnel_reason_t
+check_frame(const uint8_t *frame, uint32_t frame_len, size_t held,
+    const erx_funnel_lane_t *lane, const erx_funnel_limits_t *limits,
+    void *scratch, size_t scratch_len, erx_funnel_verdict_t *v)
+{
+	const verdict_row_t *row;
+	erx_funnel_limits_t payload_limits;
+	erx_funnel_name_t name;
+	erx_funnel_hold_t hold = { 0 };
+	erx_funnel_reason_t reason;
+	const uint8_t *payload;
+	uint32_t ctl_len, payload_len;
+	bool dead;
+
+	/* Steps 2 and 4: the header, the control term, the version byte. */
+	if (held > frame_len)
+		return (ERX_FUNNEL_ERR_HELD);
+	if (held < ERX_FRAME_HEADER_SIZE)
+		return (held == frame_len ? ERX_FUNNEL_ERR_HEADER :
+		    ERX_FUNNEL_ERR_HELD);
+	reason = erx_funnel_header(frame, frame_len, &v->header);
+	if (reason != ERX_FUNNEL_OK)
+		return (reason);
+	ctl_len = v->header.ctl_len;
+	payload_len = v->header.payload_len;
+	/* The header passed, so these sums are at most frame_len. */
+	if (held < frame_len &&
+	    held < (size_t)ERX_FRAME_HEADER_SIZE + ctl_len + 1)
+		return (ERX_FUNNEL_ERR_HELD);
+	reason = erx_funnel_control(frame + ERX_FRAME_HEADER_SIZE, ctl_len,
+	    payload_len, limits->host, limits->host_len, scratch, scratch_len,
+	    &v->control, &v->etf);
+	if (reason != ERX_FUNNEL_OK)
+		return (reason);
+	v->etf = (erx_etf_result_t){ 0 };
+	payload = frame + ERX_FRAME_HEADER_SIZE + ctl_len;
+	if (payload_len > 0 && payload[0] != ERX_ETF_VERSION)
+		return (ERX_FUNNEL_ERR_VERSION);
+
+	/* Step 4: the sender rule and the target rule. */
+	reason = sender_rule(&v->control, lane);
+	if (reason != ERX_FUNNEL_OK)
+		return (reason);
+	reason = target_rule(&v->control, lane, &dead);
+	if (reason != ERX_FUNNEL_OK)
+		return (reason);
+	if (dead) {
+		v->cause = ERX_FUNNEL_CAUSE_DEAD;
+		return (ERX_FUNNEL_OK);
+	}
+
+	/* Step 5: authority, decided before any limit. */
+	row = &verdict_rows[v->control.op];
+	if (row->right != 0) {
+		name = (erx_funnel_name_t){
+			.kind = row->target,
+			.pid = row->target == ERX_FUNNEL_NAME_PID ?
+			    &v->control.to : NULL,
+			.alias = row->target == ERX_FUNNEL_NAME_ALIAS ?
+			    &v->control.receiver_ref : NULL,
+		};
+		hold = lane->lookup(lane->exports, &name);
+		if ((hold.rights & row->right) == 0) {
+			v->cause = ERX_FUNNEL_CAUSE_UNAUTHORISED;
+			return (ERX_FUNNEL_OK);
+		}
+	}
+
+	/* Steps 3 and 6: the payload of an authorised frame. */
+	if (held < frame_len) {
+		v->cause = ERX_FUNNEL_CAUSE_OVER_LIMIT;
+		return (ERX_FUNNEL_OK);
+	}
+	v->cause = ERX_FUNNEL_CAUSE_ACCEPTED;
+	if (payload_len == 0)
+		return (ERX_FUNNEL_OK);
+	payload_limits = *limits;
+	/* A request limit is on messages, the payloads that need send. */
+	if (row->right == ERX_RIGHT_SEND && hold.request_words != 0 &&
+	    hold.request_words < payload_limits.max_words)
+		payload_limits.max_words = hold.request_words;
+	switch (erx_funnel_payload(payload, payload_len, &payload_limits,
+	    scratch, scratch_len, &v->etf)) {
+	case ERX_ETF_ACCEPTED:
+		return (ERX_FUNNEL_OK);
+	case ERX_ETF_OVER_LIMIT:
+		v->cause = ERX_FUNNEL_CAUSE_OVER_LIMIT;
+		return (ERX_FUNNEL_OK);
+	case ERX_ETF_MALFORMED:
+		break;
+	}
+	return (ERX_FUNNEL_ERR_PAYLOAD_TERM);
+}
+
+/* Whether a pid's or reference's node and creation are the lane's sender's. */
+static bool
+names_sender(const uint8_t *node, size_t node_len, uint32_t creation,
+    const erx_funnel_lane_t *lane)
+{
+	return (node_len == lane->sender_node_len &&
+	    bcmp(node, lane->sender_node, node_len) == 0 &&
+	    creation == lane->sender_id);
+}
+
+/*
+ * The sender rule: every pid and reference of the sender's own in the
+ * control term (funnel.h's from and sender_ref) carries the lane's node
+ * name and domain id.
+ */
+static erx_funnel_reason_t
+sender_rule(const erx_funnel_control_t *c, const erx_funnel_lane_t *lane)
+{
+	if ((c->fields & ERX_FUNNEL_HAS_FROM) != 0 &&
+	    !names_sender(c->from.node, c->from.node_len, c->from.creation,
+	    lane))
+		return (ERX_FUNNEL_ERR_SENDER);
+	if ((c->fields & ERX_FUNNEL_HAS_SENDER_REF) != 0 &&
+	    !names_sender(c->sender_ref.node, c->sender_ref.node_len,
+	    c->sender_ref.creation, lane))
+		return (ERX_FUNNEL_ERR_SENDER);
+	return (ERX_FUNNEL_OK);
+}
+
+/*
+ * The target rule over funnel.h's to and receiver_ref: each carries the
+ * receiver's node name, and *dead is set when either names an ended
+ * domain of that name; the receiver's own pid lies in ERTS's internal
+ * range.  A malformed name outweighs a dead one.
+ */
+static erx_funnel_reason_t
+target_rule(const erx_funnel_control_t *c, const erx_funnel_lane_t *lane,
+    bool *dead)
+{
+	erx_funnel_reason_t reason;
+
+	*dead = false;
+	if ((c->fields & ERX_FUNNEL_HAS_TO) != 0) {
+		reason = target_name(c->to.node, c->to.node_len, c->to.creation,
+		    c->to.id < OWN_PID_NUMBER_LIMIT, lane, dead);
+		if (reason != ERX_FUNNEL_OK)
+			return (reason);
+	}
+	if ((c->fields & ERX_FUNNEL_HAS_RECEIVER_REF) != 0) {
+		reason = target_name(c->receiver_ref.node,
+		    c->receiver_ref.node_len, c->receiver_ref.creation, true,
+		    lane, dead);
+		if (reason != ERX_FUNNEL_OK)
+			return (reason);
+	}
+	return (ERX_FUNNEL_OK);
+}
+
+/*
+ * One target name: the receiver's node name, else malformed; of another
+ * creation, dead; of the receiver's, within ERTS's internal range
+ * (in_range), else malformed.
+ */
+static erx_funnel_reason_t
+target_name(const uint8_t *node, size_t node_len, uint32_t creation,
+    bool in_range, const erx_funnel_lane_t *lane, bool *dead)
+{
+	if (node_len != lane->receiver_node_len ||
+	    bcmp(node, lane->receiver_node, node_len) != 0)
+		return (ERX_FUNNEL_ERR_TARGET);
+	if (creation != lane->receiver_id)
+		*dead = true;
+	else if (!in_range)
+		return (ERX_FUNNEL_ERR_TARGET);
+	return (ERX_FUNNEL_OK);
 }
