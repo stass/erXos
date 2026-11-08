@@ -114,8 +114,8 @@ processes.
 ```text
   session domain                                      programs: sub-spaces
  +--------------------------------------------------+  +--------------+
- | console line  <-> terminal relay <-> /dev/tty    |  |              |
- |                       opens of the foreground job|  |              |
+ | console line, <-> terminal relay <-> /dev/tty    |  |              |
+ | or erx_term           opens of the foreground job|  |              |
  | shell: parse -> evaluate -> stages               |  |              |
  |   Erlang stage --bytes---> Erlang stage --bytes--+--+-> program    |
  |                                          (pipe)  |  |  (a port,    |

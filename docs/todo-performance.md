@@ -281,15 +281,25 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Medium] display, the Erlang renderer's frame on a 240x240 panel**
   (diff, layout and draw) against LVGL's. This is LVGL's retirement gate.
 * **[Low] display, the terminal emulator's redraw per changed cell line.**
-  Settled by scrolling throughput of a large output.
+  Settled by scrolling throughput of a large output, redrawing scrolled
+  rows against copying their pixels.
+* **[Medium] display, `erx_vt` parses a code point at a time in Erlang**
+  ([design-display.md](design-display.md#the-terminal-emulator)). Settled
+  by bytes per second over a large `cat` of plain text, of text with SGR
+  on every word and of wide characters, against libvterm on the same
+  corpus.
 * **[Low] display, virtio-gpu transfer and flush latency per rectangle**
   under TCG, and how `erx_screen` gathers waiting flushes into one push. Settled by flushes per
   second and latency per rectangle size.
+* **[Medium] display, a terminal's draws cross domains**
+  ([design-display.md](design-display.md#performance)): `erx_term` runs in
+  the session and sends every draw batch across the lane, the funnel and
+  the file server. Settled by the scrolling of a large `cat` at 80x24 and
+  at full screen on HVF; the fix on the table is the pixel object above.
 * **[Low] display, the display domain's own clients go through `erx_winfs`**
-  ([design-display.md](design-display.md#performance)): the terminal
-  emulator and the Erlang renderer send every draw batch through the file
-  server. Settled by terminal scroll and renderer frame times against a
-  direct hand-off.
+  ([design-display.md](design-display.md#performance)): the menu and the
+  Erlang renderer send every draw batch through the file server. Settled
+  by renderer frame times against a direct hand-off.
 * **[Low] display, composes run one at a time in `erx_screen`**, and a
   window waits in its flush call. Settled by several animating windows and
   a kiosk's flush latency.

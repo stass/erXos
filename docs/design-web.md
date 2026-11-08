@@ -1074,6 +1074,7 @@ table per platform.
 | cowboy's version does not fit erXos's OTP | low | the network front end waits | cowboy is plain Erlang; a patched copy enters as erXos's code |
 | `ui.txt`'s widget set lacks what a browser UI wants | medium | plainer UIs | the tree gains a kind for every display, never a browser-only one |
 | an attribute type of the schema projects outside `datum()`'s bounds (tuple width, depth 8) | low | such values arrive printed | the generator checks every attribute type of `abi/inspection.txt` against `datum()` and refuses one that does not fit |
+| the owner is rethinking login, and that covers the network front end's `erx_web_login` as well as the console's and the display's | certain | this document's login may change | the login question is open in [design-display.md](design-display.md#risks-and-open-questions); nothing here depends on the display's terminals or the console's lines beyond the vault's limits |
 
 Decided by the owner: TLS on the network front end, with plain HTTP only
 where a development build's manifest lists it; the web domain as its own
