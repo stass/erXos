@@ -1230,9 +1230,10 @@ targets, ahead of the part that integrates them
 * the screen's composition `erx_screen_core` and the two window policies
   `erx_wm_rio` and `erx_wm_single`;
 * the terminal's state machine `erx_vt`;
-* the widget tree's validator `erx_ui_schema` and its difference
-  `erx_ui_diff`, over `abi/formats/ui.txt`;
-* `erx_present`'s canonical texts over the inspection schema;
+* the widget tree's validator `erx_ui_schema`, over `abi/formats/ui.txt`,
+  and `erx_ui_model`'s numbering, difference and event check;
+* `erx_present`'s canonical texts over the inspection schema's `present`
+  marks;
 * `abi/protocols/web.txt` with its generated Erlang and TypeScript codecs.
 
 In this track W1 to W8 name design-web's invariants and G1 to G7

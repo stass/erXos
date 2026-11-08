@@ -1,7 +1,8 @@
 # Generated interfaces and representations
 
 Ruby generators turn erXos's interface declarations into readable C17,
-Erlang, Ruby and reference tables. A fact shared across languages or
+Erlang, Ruby, TypeScript for the web client
+([design-web.md](design-web.md#the-client)), and reference tables. A fact shared across languages or
 consumers is declared once: its names, types, bounds, identifiers and
 representations are derived together. Policy, resource admission,
 ownership transitions and recovery decisions remain handwritten pure
@@ -31,14 +32,15 @@ registers and terminal character classes retain their existing sources.
 | --- | --- | --- |
 | ABI calls, layouts, rights, limits and architecture binding | C headers and accessors, call stubs for every backend, decoders, Erlang/Ruby representations, field offsets and sizes, compile-time layout assertions | [kernel](design-kernel.md#the-abi-file) |
 | Service operation fragments | client stubs, server behaviour declarations and dispatch, bounded request and reply validation, operation identifiers, scoped-handle helpers, error types and reference tables | [domains](design-domains.md#authority) |
-| Inspection fragment | C record builders, Erlang types and `erx_schema`, Ruby types and validators, path/field descriptors, shell/host renderers and `/proc` projections | [live machine](design-live.md#inspection-records) |
+| Inspection fragment | C record builders, Erlang types and `erx_schema`, Ruby types and validators, path/field descriptors, shell/host renderers and `/proc` projections; from the `present` marks, `erx_present`'s `text/2`, `parse/2` and `path/2`; for the web client, the kinds, attribute names, units, stopgap reporters and `present` marks in TypeScript | [live machine](design-live.md#inspection-records), [presentations](design-display.md#presentations) |
 | ABI status, errno, signal and fault declarations | context-specific status/error translations, diagnostic names and descriptions, signal defaults and fault-to-exit mappings, musl's signal-number header and set of valid signals, and the signal names and numbers of the shell's `kill` | [programs](design-programs.md#the-posix-lite-personality) |
 | ABI log and trace event declarations | typed emitters, bounded record readers, field-name/unit tables and decoders for the inspector and host tools | [kernel](design-kernel.md#trace-ring), [live machine](design-live.md#tracing) |
-| Protocol fields, bounds and operation declarations | codecs, per-operation reply checks, valid-input builders, boundary mutations, fuzz entry points and reference tables | [files](design-files.md#the-file-protocol), [programs](design-programs.md#the-program-protocol) |
+| Protocol fields, bounds and operation declarations | codecs, per-operation reply checks, valid-input builders, boundary mutations, fuzz entry points and reference tables; for `web.txt`, the Erlang codec `erx_web_proto` and the TypeScript codec, with the protocol's limits and hash | [files](design-files.md#the-file-protocol), [programs](design-programs.md#the-program-protocol), [web](design-web.md#the-protocol) |
+| Widget format (`abi/formats/ui.txt`) | the whole-tree validator `erx_ui_schema`; a reader and a writer of the binary operations and events in Erlang, C and TypeScript; the kind, property and image-type tables; fuzz entry points for the validator and every reader | [display](design-display.md#widget-trees), grammar in [ABI](design-abi.md#widget-format) |
 | Checked system manifest and platform placement records | packed boot-order and configured-domain/device/facet descriptors, watchdog liveness roster, and a host-readable configuration report | [system](design-system.md#the-manifest) |
 | Release command metadata and program list | command lookup/help/required-facet catalogs and callback checks | [shell](design-shell.md#interfaces) |
 | SVD and system-register specifications | typed accessors, device descriptor helpers and register-field decoding tables | [hardware sources](design.md#one-source-for-the-abi-and-the-hardware) |
-| Escape rules and OTP's pinned Unicode data | C/Erlang/Ruby escaping tables | [escape rules](design-live.md#escape-rules) |
+| Escape rules and OTP's pinned Unicode data | C/Erlang/Ruby/TypeScript escaping tables | [escape rules](design-live.md#escape-rules) |
 
 Existing declarations are extended for these outputs; a generator never
 keeps another copy of a layout or operation list. Protocol-specific

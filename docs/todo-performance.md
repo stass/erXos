@@ -300,11 +300,17 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Settled by round-trip times and link bytes per second for the machine's
   record and a 1,000-child listing, under HVF and over a 115,200-baud
   UART; the fix on the table is a record difference message.
-* **[Low] web, `erx_ui_model:delta/2` and `erx_ui_schema` for a 1,000-node
-  tree,** and a tree's first attachment, which arrives over several 64 KiB
+* **[Low] web, `erx_ui_model:pair/3`, `delta/2` and `erx_ui_schema` for a
+  1,000-node tree,** and a tree's first attachment, which arrives over several 64 KiB
   updates. Settled by time per call on HVF and the attachment's time over the
   UART host link; the fix on the table is keeping the delta from the server's
   operations instead of comparing models.
+* **[Low] display, decoding a widget's PNG image in the Erlang renderer**
+  ([design-display.md](design-display.md#widget-trees)): an `image` node's
+  48 KiB of PNG is inflated and unfiltered before its pixels are loaded with
+  `y`. Settled by time per decode of a 48 KiB image on HVF and on the
+  Raspberry Pi 4; the fix on the table is unfiltering in C beside
+  `erx_memdraw`, as a per-byte primitive.
 * **[Low] web, the client's first load and the bundle's size,** over the host
   tool and over the network front end. Settled by bytes served and time to the
   first rendered view; the fix on the table is splitting the bundle by route.

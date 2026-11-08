@@ -316,9 +316,9 @@ when it would pass the quota, so the default quota holds at most 16,384
 images. A `draw` write and a read of `r`'s pixels each carry at most the
 file protocol's 64 KiB payload
 ([Bytes](design-files.md#how-a-request-names-its-bytes)), so the display
-needs no write quota of its own. A widget tree's depth needs no bound of
-its own either: it is at most its node count, and the funnel bounds a
-term's nesting ([The funnel](design-domains.md#the-funnel)).
+needs no write quota of its own. A widget tree is at most 64 deep, a
+bound of `ui.txt` ([Widget trees](#widget-trees)), since its renderers
+lay it out recursively.
 
 A window holds at most 16 dirty rectangles; a seventeenth replaces the
 list by its bounding box, as Plan 9's `flushimage` does with one. Its
@@ -413,52 +413,221 @@ devices.
 
 ```erlang
 -type tree() :: {Kind :: atom(), Props :: #{atom() => term()}, Children :: [tree()]}.
-%% Kinds, their properties and their events are declared in abi/formats/ui.txt:
-%%   containers: column, row, grid, scroll, stack
-%%   widgets:    label, button, checkbox, slider, input, list, image, spacer
-%% Common properties: key, width, height, weight, pad, align, visible, enabled, present.
-%% An image's encoded bytes are at most 48 KiB, so every operation fits one update on
-%% every display (design-web.md); a larger picture goes in a draw window.
-%% An on_* property holds a term the application chooses; the server sends it back
-%% as {ui, Window, Term, Detail} when the event fires.
--type ui_event() :: {ui, Window :: reference(), Term :: term(), Detail :: term()}.
--type diff_op() :: {insert, Parent :: key(), Index :: non_neg_integer(), Kind :: atom(), Props :: map()}
-                 | {remove, key()}
-                 | {set, key(), Props :: map()}
-                 | {move, key(), Parent :: key(), Index :: non_neg_integer()}
+-type node_id() :: 1..16#ffffffff.  % the server's number for a node, never reused in a window
+-type diff_op() :: {insert, node_id(), Parent :: node_id() | 0, Index :: 0..65535,
+                    Kind :: atom(), Props :: map()}            % Parent 0 for the root
+                 | {remove, node_id()}                          % the node and its subtree
+                 | {set, node_id(), Changed :: map(), Removed :: [atom()]}
+                 | {move, node_id(), Index :: 0..65535}         % among its own siblings
                  | commit.
--type key() :: 1..16#ffffffff.   % the server's number for a node; the application's key is a term
+-type ui_event() :: {ui, Window :: reference(), Term :: term(),
+                     Detail :: click | {change, term()} | {submit, term()}
+                             | {select, Type :: atom(), Value :: term()}}.
 ```
 
-A node's identity across trees is its `key` property when present and
-its position among its siblings otherwise, React's rule. A tree states
-meaning, not appearance: what each node is, its values and the events it
-takes; layout properties are hints each renderer reads for its medium.
-Values the application does not set live in the server under the node's
-identity: an `input`'s text, a `checkbox`'s state, a `slider`'s value, a
-`list`'s selection. A property the tree sets is authoritative; one it
-omits keeps the server's value. That one rule is the whole protocol for
-controlled and uncontrolled widgets. Presentation state, a `scroll`'s
-offset, an `input`'s cursor and the focus, is each renderer's own, kept
-for its medium and never part of the tree or the server's state. An
-`input` with `secret => true` shows its text as marks; its text is never
-kept, by the server or by a renderer, and reaches the application only as
-`{erx_secret, Text}` in the event's detail, which every printer shows as
-`[secret]` ([Attributed text](design-live.md#attributed-text)). Content
-an application draws itself, acme-like, is a window of its own beside the
-widget window.
+`abi/formats/ui.txt` declares three closed tables, and every other fact
+about a tree follows from them: the **properties**, each with one name,
+one wire number and one type wherever it appears; the **kinds**, each the
+set of properties it takes, with marks, and whether it takes children;
+and the **image types**. Its grammar and the binary form derived from it
+are in [Widget format](design-abi.md#widget-format). The properties:
+
+| Property | Type | Kinds | Meaning |
+| --- | --- | --- | --- |
+| `key` | an integer, an atom or a binary of at most 255 bytes | every kind | the node's identity among its siblings (below); it never leaves the widget server |
+| `width`, `height` | integer 0 to 16,384 | every kind | a size hint in the renderer's unit: a pixel on a display, a CSS pixel in the browser |
+| `weight` | integer 0 to 255 | every kind | the node's share of the room its row or column has left over |
+| `pad` | integer 0 to 255 | every kind | space around the node, in the same unit |
+| `align` | `start`, `center`, `end` or `fill`; `fill` when absent | every kind | placement within the room the node gets |
+| `visible`, `enabled` | boolean; `true` when absent | every kind | whether the node is shown, and whether it takes input |
+| `present` | a presentation, `{Type, Value}`, or an `attr()` carrying one | every kind | a typed value ([Presentations](#presentations)) |
+| `on_select` | event | every kind | a click on the node's presentation |
+| `text` | at most 4,096 bytes of UTF-8, or an `attr()` carrying them | `label`, `button`, `checkbox`, `input` | the caption; an `input`'s edited text, its state |
+| `placeholder` | at most 255 bytes of UTF-8 | `input` | shown while the text is empty |
+| `secret` | boolean, fixed | `input` | the text is shown as marks and never kept |
+| `checked` | boolean, state | `checkbox` | |
+| `min`, `max` | integer -2^31 to 2^31 - 1; 0 and 100 when absent | `slider` | the range, `min` below `max` |
+| `value` | integer within `min` and `max`, state | `slider` | |
+| `items` | at most 256 texts of at most 128 bytes of UTF-8 | `list` | the entries |
+| `selected` | an index into `items`, state | `list` | absent when nothing is selected |
+| `columns` | integer 1 to 64; 1 when absent | `grid` | children fill the grid row by row |
+| `image`, `image_type` | at most 48 KiB of encoded bytes; one of the image types | `image` | the picture and its encoding |
+| `alt` | at most 255 bytes of UTF-8 | `image` | the picture's text, for a renderer that cannot show it |
+| `on_click` | event | `button` | |
+| `on_change` | event | `checkbox`, `slider`, `input`, `list` | the user changed the node's state |
+| `on_submit` | event | `input` | the user pressed enter |
+
+The containers are `column` and `row`, which lay their children out in
+order; `grid`; `scroll`, a viewport over its children laid out as a
+column; and `stack`, which lays its children over one another, the last
+on top. The widgets are `label`, `button`, `checkbox`, `slider`, `input`,
+`list`, `image` and `spacer`, which takes only the properties every kind
+takes. The one image type is PNG, `image/png`, which every renderer
+decodes; the table holds no `image/svg+xml`, which the generator refuses,
+so an image is never a document in the browser.
+
+A **state** property holds what the user changes: each kind that takes
+`on_change` has exactly one, so an event's value has one meaning. A
+**fixed** property is part of the node's identity, as its kind is. An
+event property holds a term the application chooses; the server sends it
+back as `{ui, Window, Term, Detail}` when the event fires. Every renderer
+shows a text property through the line escape (G5); `erx_ui_lvgl` writes
+each text escaped, so `erx-lvgl` needs no escape of its own.
+
+A tree is **valid** when every node is a three-tuple of a declared kind,
+a map of properties that kind takes with values of their types, and
+children only if the kind takes them; when no two children of one node
+carry the same `key`; when an `input` whose `secret` is `true` carries no
+`text`; when it has at most the grant's `ui_nodes` nodes and is at most
+64 deep, since the renderers lay a tree out recursively in languages whose
+stacks are fixed; and when `min` is below `max`, `value` within them and
+`selected` an index of `items`. `erx_ui_schema`, generated from
+`ui.txt`, decides validity for the whole tree before anything is applied
+and answers the first fault in depth-first order as `{error, {Reason,
+Where}}`, `Reason` one of `not_a_node`, `unknown_kind`,
+`unknown_property`, `bad_value`, `children`, `duplicate_key`,
+`too_many_nodes` and `too_deep`, and `Where` the list of child indexes
+from the root to the node, with the property's name beside it for the
+property reasons. No operation of a valid tree exceeds one 64 KiB update
+of the web, since the generator checks every kind's largest `insert`
+against it ([design-web.md](design-web.md#uis-the-browser-renderer)); a
+larger picture goes in a draw window.
+
+A node's **identity** across trees is its parent's identity, its kind,
+its fixed properties, and its `key` when present or its index among its
+siblings otherwise, React's rule. Keys are unique among one node's
+children, not across the tree: the same key under two parents names two
+nodes. A node therefore keeps its parent, its kind and its fixed
+properties for its whole life. A tree that moves a subtree to another
+parent, or changes a node's kind or `secret`, removes the old node and
+inserts a new one, as React remounts, and the new node starts with no
+kept state; so `move` names no parent, and no operation can make a node
+its own ancestor.
+
+A tree states meaning, not appearance: what each node is, its values and
+the events it takes; layout properties are hints each renderer reads for
+its medium. A property the tree sets is authoritative; a state property
+it omits keeps the value the server holds for the node, which is the last
+value the tree set or the user made through the renderer, whichever came
+later. That one rule is the whole protocol for controlled and
+uncontrolled widgets. A kept value that no longer fits the node's new
+properties, a `value` outside a new range or a `selected` past the end of
+new `items`, is dropped. Presentation state, a `scroll`'s offset, an
+`input`'s cursor and the focus, is each renderer's own, kept for its
+medium and never part of the tree or the server's state.
+
+An event fires only when the node carries its event property. Its detail
+is `click` for `on_click`; `{change, V}` and `{submit, V}`, `V` the
+node's new state value, for `on_change` and `on_submit`; and `{select,
+Type, Value}` for `on_select`, taken from the node's `present` property
+by the server, and only while its status is `ok` or `partial`, so a
+renderer reports which node was clicked and never a value. A renderer
+reports every change of a state property, whether or not the node takes
+`on_change`, so the server keeps what the renderer shows.
+
+An `input` with `secret => true` shows its text as marks. It has no
+state: the tree cannot set its text, its text is never kept, by the
+server or by a renderer, and it reaches the application only as
+`{erx_secret, Text}` in place of `V`, which every printer shows as
+`[secret]` ([Attributed text](design-live.md#attributed-text)). To clear
+one, the application gives it a new `key`. Content an application draws
+itself, acme-like, is a window of its own beside the widget window.
+
+**The realised tree and its one difference.** `erx_ui_model` holds the
+realised tree, a tree whose nodes carry their `node_id()` and the
+properties a renderer shows, and four pure functions do all the tree
+work:
+
+```erlang
+-spec pair(Realised, tree(), Next :: node_id()) -> {Realised, Next :: node_id()} | {error, limit}.
+-spec delta(Realised, Realised) -> [diff_op()].
+-spec apply_ops([diff_op()], Realised) -> {ok, Realised} | {error, term()}.
+-spec hit(Realised, node_id(), Event :: atom(), Value :: term()) ->
+          {fire, Term :: term(), Detail :: term(), Realised} | {keep, Realised} | drop.
+```
+
+`pair/3` gives each node of a valid tree its number: a node whose
+identity matches a realised node keeps that node's number and kept state;
+any other node takes the next number. `delta/2` turns one realised tree
+into another numbered from it: a `remove` for each topmost node of the
+first missing from the second; then, in the second's depth-first order,
+an `insert` for each new node, a `set` for each node whose properties
+differ, and a `move` for each child outside the longest run of its
+parent's children that kept their order; then `commit`. Since identity
+fixes a node's parent and kind, `delta/2` compares nodes by number and
+never searches for a subtree. `hit/4` checks a renderer's report against
+the realised node, records a state value except on a secret `input`, and
+returns the application's term and detail when the node takes the event.
+The widget server sends a renderer `delta(R, R1)`, `R1` the tree that
+`pair/3` numbered from the realised tree `R`, and the web's browser
+renderer sends the browser `delta(Sent, Pending)`
+([design-web.md](design-web.md#uis-the-browser-renderer)), so the display
+and the web share one difference, and its one property, `apply_ops(delta(A,
+B), A) == {ok, B}`, covers both. Node numbers are never reused in a
+window, so a late report from a renderer names the node it was made for
+or none; a server that would number past 2^32 - 1 ends the window with
+`{ui_down, Window, limit}`.
+
+**The binary form.** A renderer outside Erlang receives the operations
+and sends its reports in the binary form `ui.txt` declares
+([Widget format](design-abi.md#widget-format)), from which the generator
+produces a reader and a writer of both directions in Erlang, C and
+TypeScript. That form never carries a `key` or an application's term:
+an event property travels as the flag that the node takes the event, and
+a `present` property as its status, its type and its canonical text from
+`erx_present:text/2`. Its readers keep no state: no field's meaning
+depends on an earlier message or on the node's kind, so each is fuzzed
+alone.
 
 ### Presentations
 
-A presentation type is a type of the inspection schema
-(`abi/inspection.txt`): `pid`, `domain`, `program`, `path`, `module`,
-`hash`, `principal`, `device`, `budget`, `group`, `qid` and the scalar
-types. The schema declares for each its canonical text, the grammar that
-parses the text back, and the inspector path it names, and the generator
-emits `erx_present:text/2`, `erx_present:parse/2` and the table of
-inspector paths. A command declares the types of its arguments with
-`-erx_args([pid, ...])` beside `-erx_needs`, from the same vocabulary,
-and the catalog carries them
+A presentation type is an inspector path that the inspection schema
+(`abi/inspection.txt`) marks `present`
+([Inspection schema](design-abi.md#inspection-schema)). Everything about
+the type follows from that path:
+
+* its **value** is the path's variable segments: the one segment's value,
+  or the tuple of them in order when there are several;
+* its **canonical text** is those segments written as a path's text
+  writes them, a pid as `D.N.S`, an integer in canonical decimal and a
+  text in `/proc`'s name encoding, joined by `/`;
+* its **grammar** is the path reader of `erx_schema` over those segments,
+  so `parse(Type, text(Type, Value)) == {ok, Value}` holds because the
+  path's writer and reader are inverses, which the reader's fuzz target
+  and round trip already check;
+* the **inspector path** it names is the marked path with the value in
+  its variable positions.
+
+| Presentation | Marked path | Value | Text |
+| --- | --- | --- | --- |
+| `pid` | `processes *pid` | a pid | `3.45.0` |
+| `domain` | `domains *domain_id` | `3` | `3` |
+| `module` | `domains *domain_id modules *module_name` | `{3, <<"lists">>}` | `3/lists` |
+| `budget` | `budgets *budget_id` | `7` | `7` |
+| `group` | `groups *group_id` | `2` | `2` |
+| `program` | `domains *domain_id programs *program_number` | `{3, 1}` | `3/1` |
+| `device` | `devices *device_name` | `<<"uart0">>` | `uart0` |
+
+A mark sits only on a declared path, so `program` and `device` arrive
+with the declarations of their paths. A value that names no inspector
+path, a file's path, a hash, a principal or a qid, is not a presentation
+and prints as text. A pid's text is the path's `D.N.S`, not `ps`'s
+`<D.N.S>`, whose `<` and `>` are rc's redirections and would not survive
+a click into the command line.
+
+An attribute's value is shown as a presentation when its type is the
+variable segment type of a presentation of one segment, and the generator
+refuses two such presentations over one type, so which values are
+presentations is a fact derived from the schema: a process's
+`group_leader`, of type `pid`, shows as a pid presentation, and a
+budget's `domain`, of type `domain_id`, as a domain presentation. A value
+of a presentation of several segments, a module or a program, is made by
+the code that knows the parts, as `erx:ps()` names a program.
+
+The generator emits `erx_present:text/2`, `erx_present:parse/2` and
+`erx_present:path/2`, and the same marks into the web client. A command
+declares the types of its arguments with `-erx_args([pid, ...])` beside
+`-erx_needs`, from the presentation names, and the catalog carries them
 ([Interfaces](design-shell.md#interfaces)).
 
 At a terminal a presentation is the text, wrapped by `erx_render` in the
@@ -760,8 +929,8 @@ windows beside their terminal.
 
 **Presentations in a terminal.** `erx_vt` parses the OSC 8 sequence
 above as one of its control sequences, with a bound of 4 KiB on the
-sequence and the URI grammar `erx:TYPE/TEXT` with `TYPE` an identifier of
-the schema's type table and `TEXT` the encoded canonical text; a
+sequence and the URI grammar `erx:TYPE/TEXT` with `TYPE` a presentation
+name of the schema and `TEXT` the encoded canonical text; a
 sequence outside the grammar is dropped as any unknown OSC is. A cell
 written while a link is open carries the link's id, so the text stays
 bound to its type and value as the screen scrolls, until the cells are
@@ -823,16 +992,18 @@ other than by `close_ui`. On `ui_tree` the server:
 
 1. **validates** the tree whole against the kinds, properties and bounds
    of `abi/formats/ui.txt` with the generated `erx_ui_schema`, answering
-   `{error, Reason}` and changing nothing when any node fails (plan,
-   then apply);
-2. **diffs** it against the realised tree with `erx_ui_diff`, a pure
-   function that pairs nodes by key or position and emits the fewest
-   `diff_op()`s that turn one into the other, ending with `commit`;
+   `{error, {Reason, Where}}` and changing nothing when any node fails
+   (plan, then apply);
+2. **numbers** it against the realised tree with `erx_ui_model:pair/3`
+   and **diffs** the two with `erx_ui_model:delta/2`, which emits the
+   `diff_op()`s that turn one into the other, ending with `commit`
+   ([Widget trees](#widget-trees));
 3. **applies** the operations through the renderer behaviour;
-4. **routes** events: the renderer reads the window's input, reports
-   which node an event hits, and the server sends the owner `{ui, Window,
-   Term, Detail}` for each `on_*` property that fires, and updates the
-   state it keeps for the node.
+4. **routes** events: the renderer reads the window's input and reports
+   which node an event hits, and the server passes each report through
+   `erx_ui_model:hit/4`, which records the state value and, when the
+   node takes the event, gives the term and detail the server sends the
+   owner as `{ui, Window, Term, Detail}`.
 
 Validation, the diff and the renderer's layout run inside the request,
 so the generated serving path returns their reductions with the reply
@@ -850,7 +1021,8 @@ size by `max_request`.
 -callback start(Target :: target(), Server :: pid(), Opts :: map()) -> {ok, State}.
 %% The renderer reads its target's input in a process of its own, linked to Server:
 %% a window's mouse and kbd, or a browser's events.  It sends Server
-%% {ui_hit, key(), Event :: atom(), Detail :: term()} for each event a node takes.
+%% {ui_hit, node_id(), Event :: atom(), Value :: term()} for each event on a node and
+%% each change of a state property; Value is the state value, or none.
 -callback apply(Ops :: [diff_op()], State) -> {ok, State} | {error, term()}.
 -callback stop(State) -> ok.
 ```
@@ -941,7 +1113,7 @@ and the policy shows it. Nothing else differs from the desktop:
   key, and a keypad's keys as keys; the renderer keeps a **focus ring**
   over the focusable nodes in tree order, moves it on wheel steps and
   arrow keys, activates on enter or the encoder's press, and shows focus
-  by the node's `focus` style, so a tree written for touch works from an
+  with a mark of its own, so a tree written for touch works from an
   encoder with no change, which is how LVGL's input groups behave.
 * **Drawing.** The one shown window covers the screen with no
   decoration, so `erx_screen` is in direct mode and a kiosk pays one copy
@@ -1006,13 +1178,15 @@ one line, at most 128 bytes.
 **Widgets**: `erx_ui:open/1` with the `display` and `label` options,
 `erx_ui:tree/2`, `erx_ui:close/1`, `{ui, Window, Term, Detail}`,
 `{ui_down, Window, Reason}` and `{error, no_display}`; the `display`
-environment variable; the kinds, properties, events and bounds of
-`abi/formats/ui.txt`, `secret` on `input` among them, which also declares
-the binary form of `diff_op()` and of events for renderers outside
-Erlang; the `erx_ui_renderer` behaviour and its `target()`.
+environment variable; the kinds, properties, events, image types and
+bounds of `abi/formats/ui.txt`, `secret` on `input` among them, and the
+binary form of `diff_op()` and of events derived from it for renderers
+outside Erlang; `ui_tree`'s `{error, {Reason, Where}}`; the
+`erx_ui_renderer` behaviour and its `target()`; `erx_ui_model`'s
+`pair/3`, `delta/2`, `apply_ops/2` and `hit/4`.
 
-**Presentations**: the type table of `abi/inspection.txt`,
-`erx_present:text/2` and `parse/2`, the `-erx_args` declaration, the link
+**Presentations**: the `present` marks of `abi/inspection.txt`,
+`erx_present:text/2`, `parse/2` and `path/2`, the `-erx_args` declaration, the link
 and input-context sequences, the `links` capability of a terminal.
 
 **Drivers**: the `erx_display` behaviour; the `input()` record.
@@ -1062,7 +1236,8 @@ at a terminal that declares `links`.
 | a terminal emulator crashes | its window ends with it, its holder; its line drops, and the terminal connected at it detaches, as a serial console's does when the line drops, its session reachable from another line | a new terminal window from the menu |
 | a widget server crashes | its window ends with it, its holder; the facet sends the application `{ui_down, Window, server_down}` | the application opens a new window |
 | the display domain ends | every window ends; sessions' fids fail with the connection down; the terminals connected at its windows detach, as above; each opener of a UI on it receives `{ui_down, Window, display_down}` from its display facet, which ends | the domain service restarts the domain within its intensity and the system domain introduces its clients again; applications reopen |
-| a widget tree fails validation | `ui_tree` answers `{error, Reason}`; the realised tree is unchanged | the application's |
+| a widget tree fails validation | `ui_tree` answers `{error, {Reason, Where}}`; the realised tree is unchanged | the application's |
+| a window's widget server would number a node past 2^32 - 1 | the window ends; the application receives `{ui_down, Window, limit}` | the application opens a new window |
 | the LVGL program exits | the widget server ends the window and the application receives `{ui_down, Window, renderer_down}` | the application reopens; the display domain logs the exit record |
 | an input device stops | its driver restarts and resets it | events resume |
 | a window's `mouse` or `kbd` queue is full | the oldest record is dropped and counted; a resize is never lost | the client reads |
@@ -1244,29 +1419,65 @@ Each passing case has a seeded failure that proves the code ran.
   seeded filter fails it; the link parser's fuzz target; G4's `no_facet`
   test; a seeded action in the emulator that calls a facet is caught by
   the source check.
-* **Widgets.** `erx_ui_schema`'s fuzz target over trees from another
-  domain; a tree whose `on_*` terms carry more fresh atoms than
-  `foreign_atoms` is dropped and counted; `erx_ui_diff` tested by the
-  property that applying its operations to the old tree yields the new
-  one, over random trees, and that an unchanged subtree emits no
-  operation; the **parity test**, one corpus of trees and input
-  sequences run through every renderer, the web's browser renderer
-  included, comparing meaning alone: the events and values the
-  application receives and the set of nodes present, never pixels or
-  layout, where a seeded swap of two event names in the LVGL mapping
-  fails it; the generated C reader's fuzz target; G7's status tests
-  through a widget tree; `erx_ui:open/1` with no display facet answering
-  `{error, no_display}` at once, a UI opened by name landing on that
-  display, and a stopped display domain sending each opener `{ui_down,
-  Window, display_down}`, where an `erx_ui` that ignores the `display`
-  option fails; a `secret` input's text absent from the server's state
-  and from every printed form.
+* **Widgets.** Each passing case beside the seeded failure that proves it
+  ran:
+  * `erx_ui_schema`'s fuzz target over trees from another domain: every
+    accepted tree is valid by an independent checker written from the
+    property table; a validator without the depth check fails on a tree
+    65 deep;
+  * keys: duplicate keys under one node refuse the tree whole with
+    `duplicate_key` and its index path, and one key under two parents is
+    accepted as two nodes; a validator that checks keys across the tree
+    fails the second;
+  * `pair/3` and `delta/2` over random trees and edits: `apply_ops(delta(A,
+    B), A) == {ok, B}`; an unchanged subtree emits no operation; a child
+    moved among its siblings keeps its number and its kept state, and a
+    subtree moved to another parent gets new numbers and none; a
+    `delta/2` that drops the `move`s fails the first property, and a
+    `pair/3` that pairs keys across parents fails the last;
+  * the state rule: an `input`'s text typed by the user survives a tree
+    that omits `text` and yields to one that sets it, and a `slider`'s
+    kept value outside a new range is dropped; a `pair/3` that keeps
+    every omitted property fails;
+  * `hit/4`: a report for a removed node, for an event the node does not
+    take, or with a value outside the node's bounds fires nothing; a
+    `select` carries the tree's own `{Type, Value}` whatever the renderer
+    reported; a `hit/4` that takes the value from the report fails;
+  * a tree whose `on_*` terms carry more fresh atoms than `foreign_atoms`
+    is dropped and counted;
+  * the binary form: each generated reader, in Erlang, C and TypeScript,
+    has a fuzz target, and the three accept the same inputs and decode
+    the same operations and events; a reader with two property numbers
+    swapped fails the parity, and an event reader without the detail's
+    length check fails its fuzz target; the generator refuses a seeded
+    `ui.txt` with a property number used twice, a kind that takes
+    `on_change` with no state property, a kind whose largest `insert`
+    exceeds one update, and an `image/svg+xml` image type;
+  * the **parity test**, one corpus of trees and input sequences run
+    through every renderer, the web's browser renderer included,
+    comparing meaning alone: the events and values the application
+    receives and the set of nodes present, never pixels or layout, where
+    a seeded swap of two event names in the LVGL mapping fails it;
+  * G7's status tests through a widget tree, for `present` and for a
+    label's `text`;
+  * `erx_ui:open/1` with no display facet answering `{error, no_display}`
+    at once, a UI opened by name landing on that display, and a stopped
+    display domain sending each opener `{ui_down, Window, display_down}`,
+    where an `erx_ui` that ignores the `display` option fails;
+  * a `secret` input's text absent from the server's state, from every
+    renderer's model and from every printed form, and a tree that sets
+    its `text` refused; a `hit/4` that records a secret input's text
+    fails.
 * **Presentations.** The round trip `parse(Type, text(Type, Value)) ==
-  Value` for every type and a generated corpus of values; the renderer
-  emits links only with `links` declared, checked at the tty's byte
-  boundary; the input context highlights exactly the types the catalog
-  declares for a command; a seeded change to the URI encoding fails the
-  round trip.
+  {ok, Value}` for every marked path and a generated corpus of values,
+  where a seeded change to the URI encoding fails it; `path/2` names the
+  marked path with the value in place, where a generator that writes a
+  module's segments in the wrong order fails; the generator refuses a
+  seeded schema with two presentations of one segment over one type, a
+  presentation named `accept` or `proc`, and two marks on one path; the
+  renderer emits links only with `links` declared, checked at the tty's
+  byte boundary; the input context highlights exactly the types the
+  catalog declares for a command.
 * **Drivers.** The virtio-gpu driver's response parser, the
   virtio-input event parser, and the touch controller's, the keypad's and
   the encoder's bus parsers have fuzz targets, as does the `events`
@@ -1311,7 +1522,7 @@ Each passing case has a seeded failure that proves the code ran.
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's operations and events | the generated tree's determinism test, and a source check that no other module reads those bytes |
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |
 | `erx_term` and `erx_ui_server` call no facet | an xref check that neither module nor its callees reach `erx_facet` clients |
-| Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu`, `erx_ui_erlang` and `erx_term` |
+| Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu`, `erx_ui_erlang`, `erx_ui_lvgl` and `erx_term` |
 
 ## Performance
 
@@ -1365,6 +1576,9 @@ A new device is a new driver behind `erx_display` or a new producer of
 | X11 (a server, or a rootless server over draw) | the server is a large C program with its own authority model; a rootless X server over the draw protocol stays a possible compatibility layer for FreeBSD programs much later and changes nothing here |
 | wxWidgets, GTK, Qt | whole native toolkit stacks in C++ with their own event loops and renderers; against the C17-and-Erlang rule and against principle 3 |
 | Scenic (Erlang/Elixir scene graph) | a scene graph owned by the application in its own process, drawn by a native driver; its model is close to this document's widget trees, which take its idea of a declarative tree and drop its native driver protocol for the draw protocol |
+| keys unique across the whole tree, with `move` naming a new parent | a subtree could change parent and keep its state, but validation, pairing and `apply_ops` would each have to refuse a node moved under its own descendant, and the pairing would search the whole tree for each key; with keys among siblings a node never changes parent, `move` names none and the cycle cannot be written |
+| a difference that pairs the application's tree with the realised one, beside a second difference between two realised trees for the web | two functions with two property tests that must agree; numbering first and one difference over numbered trees serves the window and the browser alike |
+| a per-kind property namespace | the binary form's `set` would need the node's kind to read its properties, so every reader would keep state; one property table keeps the readers stateless |
 | Arcan | a display server with a scripting engine and its own client library; too large a trusted component, and its model of frameservers duplicates erXos's programs |
 | LVGL everywhere, as the one renderer | puts every desktop widget's layout and logic in C in a sub-space and makes the widget tree a C data structure; the Erlang renderer keeps layout and state in Erlang where they are small, and LVGL stays where its fonts and widgets pay |
 | Inferno's Tk, widget commands as strings | strings parsed at run time, with the quoting and injection problems Tk has; terms are checked by a generated schema and need no parser |
@@ -1387,6 +1601,24 @@ A new device is a new driver behind `erx_display` or a new producer of
 | the Erlang renderer never reaches LVGL's frame times on panels | medium | LVGL stays | acceptable; it is a bounded native program behind the seam |
 | OSC 8 links confuse a terminal that declares `links` wrongly | low | stray characters | links follow the capability table; the serial console's default is off |
 | the display domain's view of the login's passphrase is unacceptable for some deployments | medium | no login at the display | the manifest's `console_line` parameter; a serial login, whose programs' windows open on the display, and no terminal windows |
+
+Open decisions for the owner:
+
+1. **PNG is the one image type.** Every renderer must show every image
+   type, so the table is the intersection of what the browser, LVGL and
+   the Erlang renderer decode. PNG is native to the browser and to LVGL,
+   and costs the Erlang renderer a PNG reader, `erx_png`, a parser of
+   another domain's bytes with its fuzz target, over ERTS's `zlib`.
+   Plan 9's image(6) would cost the Erlang renderer nothing, since `y`
+   and `Y` load it, but would need a reader in the browser and in
+   `erx-lvgl`. Recommended: PNG alone, with JPEG added only when an
+   application shows photographs.
+2. **Presentations name inspector paths only.** A file's path, a hash, a
+   principal and a qid have no inspector path and print as text, so a
+   command such as `cat` declares no `-erx_args` type for its files. A
+   file path presentation would need a second text form, the path as rc
+   reads it, beside the path-segment form. Recommended: none until a
+   command or view needs one.
 
 Decisions taken with the owner:
 
