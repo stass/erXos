@@ -2414,6 +2414,14 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Low] website, `site/terminal.js` ([site/README.md](site/README.md)): a menu of hardware faults on the
+  simulator, so a visitor sees how erXos handles each: detach the disk, detach the network card, a failing
+  RAM range, a corrupted instruction, and re-attaching a device. Each fault is made in the emulator, never by a
+  command typed into the guest. On the stopgap with the drivers in the system domain, a dead device ends the
+  machine with a crash record; once drivers run in their own domains (M9, 1b-E), the same fault ends only that
+  driver's domain and its supervisor's restart is what the visitor sees. The CRASH key's detached disk is the
+  first entry.
+
 * [Medium] hosted backend, `liberx/backend/hosted/` ([design-stopgap.md](docs/design-stopgap.md#the-hosted-backend),
   [plan.md](docs/plan.md#track-h-hosted-mode)): the multi-process form, in which each space other than the
   first is a macOS process, so domains, connections and sessions run under the sanitizers and E-D1 can be
