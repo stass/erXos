@@ -51,10 +51,13 @@ Decisions every reader needs:
 * **Loss detection and congestion control are behaviours from the
   start,** `erx_tcp_loss` and `erx_tcp_cc`, mirroring FreeBSD's function
   block and its `struct cc_algo`, over one record of sent data that
-  serves both FreeBSD's RFC 6675 recovery and a later RACK-TLP.
+  serves both FreeBSD's RFC 6675 recovery and RACK-TLP. The default
+  stack is the reference, by the owner's decision; RACK-TLP and BBR are
+  left for later, each a module behind these seams.
 * **C does only per-byte work:** the Internet checksum and the SipHash
   keyed hash, both per-byte primitives of the runtime. Whether TCP's
-  established path needs native code is measured on this stack.
+  established path needs native code is measured on this stack, on
+  erXos's kernel.
 
 ## Contents
 
@@ -73,11 +76,10 @@ Decisions every reader needs:
 13. [Refusals and error results](#refusals-and-error-results)
 14. [Where C is used, and what is measured](#where-c-is-used-and-what-is-measured)
 15. [Verification](#verification)
-16. [Staging](#staging)
-17. [Alternatives considered](#alternatives-considered)
-18. [Open decisions](#open-decisions)
-19. [Changes needed elsewhere](#changes-needed-elsewhere)
-20. [References](#references)
+16. [Scope](#scope)
+17. [Decisions](#decisions)
+18. [Alternatives considered](#alternatives-considered)
+19. [References](#references)
 
 ## Context
 
@@ -122,7 +124,7 @@ Raw line counts at the pinned commit, by `wc -l`:
 | --- | --- | --- |
 | default stack, core | `tcp_input.c` 4,191, `tcp_output.c` 2,179, `tcp_subr.c` 5,056, `tcp_usrreq.c` 3,015, `tcp_syncache.c` 2,587, `tcp_sack.c` 1,200, `tcp_reass.c` 1,115, `tcp_timer.c` 973, `tcp_timewait.c` 354, `tcp_seq.h` 100 | 20,770 |
 | congestion control | `cc/cc.c` 753, `cc/cc_newreno.c` 602, `cc/cc_cubic.c` 726 | 2,081 |
-| RACK and BBR | `tcp_stacks/rack.c` 24,673, `tcp_stacks/bbr.c` 14,824, `tcp_hpts.c` 2,137 | 41,634 |
+| RACK and BBR | `tcp_stacks/rack.c` 24,673, `tcp_stacks/bbr.c` 14,824, and the timer system they share, `tcp_hpts.c` 2,137 (in `sys/netinet`, not `tcp_stacks`) | 41,634 |
 
 The default stack is the reference: it is the stack FreeBSD runs and
 FreeBSD's TCP test suite checks, its congestion-control seam is small,
@@ -130,9 +132,13 @@ and RACK and BBR are each a second TCP implementation that needs the
 high-precision timer system and its own input path before it sends a
 byte. Most of the default stack's volume is locking, mbuf handling,
 sysctls, logging and kernel plumbing; what is translated is its
-decisions. Its seams are kept so that RACK-TLP (RFC 8985) can be added
-later as a loss-detection module, read from `rack.c` for its logic, and
-BBR stays for later, as the owner agreed.
+decisions. The owner decided to defer RACK: the default stack is the
+reference, and RACK-TLP and BBR come later behind its seams. RACK-TLP
+(RFC 8985) is then a loss-detection module over the send log, read from
+`rack.c` for its logic and needing nothing outside its module; BBR is a
+congestion-control module, which also needs pacing in output. Neither is
+part of the stack this document designs
+([Loss detection and congestion control](#loss-detection-and-congestion-control)).
 
 ### What a naive Erlang stack gets wrong
 
@@ -194,7 +200,8 @@ each row names what in this design removes the fault.
 * **N5. Bounded per client.** What one domain can make the network domain
   hold or spend is bounded by its grant; traffic that names no client
   spends a finite per-interface budget, and control traffic keeps making
-  progress while excess is dropped.
+  progress while excess is dropped, up to the frame rate one interface
+  process can decode ([Residuals](#residuals)).
 * **N6. Failure is local.** A malformed frame never kills an interface; a
   failed connection ends alone; a failed interface ends no connection; a
   network domain killed under load restarts, ending only its connections.
@@ -258,8 +265,9 @@ FreeBSD 15 keeps an array of deadlines in each control block and one
 callout set at the earliest of them (`tcp_timer_next`, `tcp_timer_enter`
 and `tcp_timer_activate`, `tcp_timer.c:854-935`). The stack keeps the same
 shape. A connection's state holds its deadlines (retransmission or
-persist, keepalive, delayed ACK, 2MSL, and whatever the loss-detection
-module asks for); `erx_tcp:next_deadline/1` returns the earliest. After
+persist, keepalive, delayed ACK, 2MSL, which also ends FIN-WAIT-2, and
+whatever the loss-detection module asks for);
+`erx_tcp:next_deadline/1` returns the earliest. After
 every step the process makes sure one `erlang:start_timer/3` is
 outstanding no later than that deadline: it starts one when none is
 outstanding or the deadline is earlier than the outstanding one, and
@@ -291,10 +299,19 @@ except through `erx_net_credit`:
   bytes, as the receiver chose) with `atomics:add_get/3`. If the result
   exceeds the receiver's limit, it subtracts them again and does not send.
 * The receiver subtracts the units of each message it takes.
+* A sender that reserved units it does not send, for a frame it then
+  drops or a hand-over it abandons, subtracts them again.
 
 Every queue between driver, interface and socket is therefore bounded by
 construction, and a full queue drops at the sender, which counts the drop
-by reason. For TCP the transmit credit is an input of the step: when the
+by reason. Only a sender killed between its reservation and its send
+leaves units it never sent: an interface process on a socket's counter, a
+connection on the driver's. Each such death strands at most one
+hand-over, a counter is made anew when its receiver restarts, and nothing
+in the network domain kills a connection or an interface process except a
+fault or a test ([Residuals](#residuals)).
+
+For TCP the transmit credit is an input of the step: when the
 driver's credit runs out mid-output, the step does what `tcp_output` does
 on `ENOBUFS` (`tcp_output.c:1690-1693`): it sets the congestion window to
 one segment and leaves the retransmission timer to recover.
@@ -332,12 +349,16 @@ The lifted segment is a different record from the decoded one, so the
 step cannot confuse a wire number with a lifted one. After lifting, the
 protocol code uses ordinary comparisons. FreeBSD's `SEQ_LT` family of
 macros (`tcp_seq.h`) and the flags that guard against their wrap become
-unnecessary: for example `TF2_NO_ISS_CHECK`, which turns off the
-ghost-ACK check once `snd_una` is far enough past the initial sequence
-number that a modular comparison with it means nothing
-(`tcp_input.c:2416-2441`), disappears, because the acceptable
-acknowledgement's lower bound is simply
-`max(iss + 1, snd_una - max_sndwnd)`.
+unnecessary: for example `TF2_NO_ISS_CHECK`, which FreeBSD sets once
+`snd_una` is far enough past the initial sequence number that a modular
+comparison with it means nothing (`tcp_input.c:2416-2441`), stops being
+a stored flag. Since `snd_una` never decreases, the condition FreeBSD
+latches is a comparison of the state, and the acceptable
+acknowledgement's lower bound is FreeBSD's, without a wrap guard:
+`snd_una - max_sndwnd` once `snd_una >= iss + (65535 bsl snd_scale)`,
+and `max(iss + 1, snd_una - max_sndwnd)` before. So an acknowledgement
+of exactly `iss`, possible only once `snd_una - max_sndwnd` has reached
+it, is an old acknowledgement here as in FreeBSD, not a challenged one.
 
 Modular comparison is not an order: at a distance of 2^31 two numbers are
 each "greater" than the other. Lifting makes the order total, so a
@@ -407,15 +428,24 @@ domain D:
    process in one message, against the interface's credit. The driver
    parses nothing else, as sDDF's split of driver and protocol prescribes
    ([design.md](design.md#drivers-and-dma)).
-2. **Interface: decode, check, classify.** For each frame the interface
-   process runs `erx_net_input:classify/2`, a pure function of the frame
-   and the interface's published view, which decodes Ethernet, IP and
-   TCP, verifies the checksum with `erx_bytes:inet_csum/2` (a read pass,
-   no copy), and looks up the demultiplexing table. It returns one of
-   `{owned, Pid, Credit, Item}` for a segment, datagram or ICMP report that
-   belongs to a socket, `{local, Event}` for what the interface itself
-   handles (ARP, neighbour discovery, ICMP echo, fragments, segments for a
-   listener) and `{drop, Reason}`.
+2. **Interface: decode, classify, reserve, verify.** For each frame the
+   interface process runs `erx_net_input:classify/2`, a pure function of
+   the frame and the interface's published view, which decodes the
+   Ethernet, IP and TCP headers and looks up the demultiplexing table. It
+   returns one of `{owned, Pid, Credit, Item}` for a segment, datagram or
+   ICMP report that belongs to a socket, `{local, Event}` for what the
+   interface itself handles (ARP, neighbour discovery, ICMP echo,
+   fragments, segments for a listener) and `{drop, Reason}`. An owned
+   item then takes one unit of its destination's credit, and a local
+   event one token of the interface's ingress bucket
+   ([Untrusted input](#untrusted-input)); a frame that finds neither is
+   dropped and counted. Only a frame that holds its unit or token has its
+   checksum verified, with `erx_bytes:inet_csum/2` (a read pass, no
+   copy), and one that fails gives the unit or token back and is dropped.
+   So the checksum, the one cost that grows with a frame's length, is
+   spent only on a frame something has room for, and a dropped frame
+   costs a header decode and one lookup, whoever it names. Nothing acts
+   on an unverified field except the lookup and the drop.
 3. **Interface to connection.** The owned items of one batch are grouped
    by destination, and each destination gets one message holding its
    items in arrival order, against its credit. The items are records whose
@@ -497,7 +527,7 @@ hold the legal ones:
 | `TF_REQ_SCALE`, `TF_RCVD_SCALE`, `snd_scale`, `rcv_scale` | `wscale`: `off` or `{SndShift, RcvShift}` |
 | `TF_FASTRECOVERY`, `TF_CONGRECOVERY`, `snd_recover` | the loss module's state: `none`, `{fast, Recover}` or `{congestion, Recover}` |
 | `t_timers[]` | `send_timer` and `#deadlines{}` |
-| `snd_una`, `snd_nxt`, `snd_max`, `snd_wl1`, `snd_wl2`, `iss`, `rcv_nxt`, `rcv_adv`, `irs` | the same names, unwrapped integers |
+| `snd_una`, `snd_nxt`, `snd_max`, `snd_wl1`, `snd_wl2`, `iss`, `rcv_nxt`, `rcv_adv`, `last_ack_sent`, `irs` | the same names, unwrapped integers |
 | `snd_cwnd`, `snd_ssthresh` | the congestion module's `#ccv{}`, as FreeBSD's `struct cc_var` |
 
 Options negotiated in the handshake (MSS, window scaling, timestamps,
@@ -536,32 +566,48 @@ A segment's step is a pipeline of named stages, each returning
 RST, for example, is judged before the timestamp check):
 
 1. `lift` the segment into the connection's sequence space.
-2. `syn_sent`: the SYN-SENT case of `tcp_do_segment`
+2. `timestamps`: RFC 7323 section 3.2's presence rules, as
+   `tcp_do_segment` applies them before header prediction
+   (`tcp_input.c:1692-1729`). On a connection that negotiated timestamps,
+   a segment without one is processed normally when it is a RST or, by
+   FreeBSD's default `tcp_tolerate_missing_ts` of 1 (`tcp_subr.c:219`),
+   always, and is silently dropped only with that setting off; on a
+   connection that did not negotiate them, a timestamp on a segment is
+   ignored and the segment processed. The stack keeps the default, so the
+   stage drops nothing, and it is a stage so that the branch is FreeBSD's
+   and the packet scripts can pin it.
+3. `syn_sent`: the SYN-SENT case of `tcp_do_segment`
    (`tcp_input.c:2017`), which validates a SYN-ACK's acknowledgement,
    handles RST, negotiates options and moves to ESTABLISHED or
    SYN-RECEIVED.
-3. `check_rst`: RFC 5961 section 3: a RST whose sequence number is
-   exactly `rcv_nxt` resets; one elsewhere in the window gets a challenge
-   ACK (`tcp_input.c:2167`).
-4. `check_syn`: RFC 5961 section 4: a SYN in a synchronized state gets a
-   challenge ACK (`tcp_input.c:2204`).
-5. `paws`: RFC 7323's check against the last timestamp
+4. `check_rst`: RFC 5961 section 3, measured from `last_ack_sent`, the
+   last acknowledgement number the connection sent, not from `rcv_nxt`,
+   as FreeBSD measures it so that a delayed ACK does not move the
+   target (`tcp_input.c:2148-2194`): a RST whose sequence number is
+   exactly `last_ack_sent` resets; one elsewhere in the window of
+   `rcv_wnd` bytes from `last_ack_sent` gets a challenge ACK; with the
+   window closed only the exact match counts.
+5. `check_syn`: RFC 5961 section 4: a SYN in a synchronized state gets a
+   challenge ACK (`tcp_input.c:2196-2215`).
+6. `paws`: RFC 7323's check against the last timestamp
    (`tcp_input.c:2218`).
-6. `trim`: trims the segment to the receive window, as the `todrop`
+7. `trim`: trims the segment to the receive window, as the `todrop`
    blocks do (`tcp_input.c:2259`).
-7. `check_ack`: RFC 5961 section 5 and the ghost-ACK check
+8. `check_ack`: RFC 5961 section 5 and the ghost-ACK check, with the
+   lower bound of
+   [Packets become checked records once](#packets-become-checked-records-once-sequence-numbers-are-integers)
    (`tcp_input.c:2416-2450`).
-8. `ack`: SYN-RECEIVED to ESTABLISHED, duplicate-ACK detection, the loss
+9. `ack`: SYN-RECEIVED to ESTABLISHED, duplicate-ACK detection, the loss
    module's `ack` callback, `snd_una` advance, the RTT sample, the
    window update under the SND.WL1/SND.WL2 rule, and the transitions when
    our FIN is acknowledged.
-9. `urgent`: the urgent pointer, processed as FreeBSD does
-   (`tcp_input.c:3104`); the urgent byte is held out of band, and
-   `gen_tcp`, like stock, has no way to read it.
-10. `data`: in-order data to the receive buffer, with the delayed-ACK
+10. `urgent`: the urgent pointer, processed as FreeBSD does
+    (`tcp_input.c:3104`); the urgent byte is held out of band, and
+    `gen_tcp`, like stock, has no way to read it.
+11. `data`: in-order data to the receive buffer, with the delayed-ACK
     decision; out-of-order data to the reassembly queue; the receiver's
     SACK blocks, D-SACK included (`tcp_input.c:3165`).
-11. `fin`: the FIN transitions to CLOSE-WAIT, CLOSING or TIME-WAIT
+12. `fin`: the FIN transitions to CLOSE-WAIT, CLOSING or TIME-WAIT
     (`tcp_input.c:3319`).
 
 FreeBSD's `drop`, `dropafterack` and `dropwithreset` exits become the
@@ -575,7 +621,7 @@ connection is limited by the interface's band limiter, FreeBSD's
 
 FreeBSD's header prediction, the two common cases of an established
 connection (a pure ACK for new data and pure in-order data,
-`tcp_input.c:1731`), is a stage of its own between `lift` and
+`tcp_input.c:1731`), is a stage of its own between `timestamps` and
 `syn_sent`, where FreeBSD has it, with FreeBSD's preconditions (an
 established connection, the segment at `rcv_nxt` with only ACK set, the
 window unchanged, no retransmission in progress, an empty reassembly
@@ -583,6 +629,15 @@ queue, the timestamp no older than the last), so it takes the branch
 FreeBSD takes. It is also where a native fast path would
 go, if one is ever measured to be needed
 ([Where C is used, and what is measured](#where-c-is-used-and-what-is-measured)).
+Two translations of one decision must not drift apart, so a property
+test runs every segment and state that header prediction accepts through
+the general stages too and requires the same state and actions
+([The TCP core: exhaustive exploration](#the-tcp-core-exhaustive-exploration)).
+A difference it finds is either a translation bug or a branch FreeBSD
+really takes differently, which a packet script then pins. If the
+property finds none and the measurements of plan.md's network gates show
+the stage saves no time, the stage is deleted, since the general path
+then produces the same wire behaviour.
 
 ### Output
 
@@ -593,8 +648,7 @@ probes, options on each segment (`tcp_addoptions`, `tcp_output.c:1794`),
 and, from the loss module, what to retransmit first. It takes the
 transmit credit from the context and never emits more frames than the
 credit allows. It produces abstract segments; `erx_net_frame` encodes
-them with the path's headers. Segmentation offload is not used in the
-first version.
+them with the path's headers. The stack uses no segmentation offload.
 
 ### Timers
 
@@ -607,6 +661,18 @@ FreeBSD's defaults of 2 hours idle and 75 s between probes
 (`tcp_timer_delack`, `:309`). Path MTU black-hole detection is
 translated and, as in FreeBSD, off by default
 (`tcp_pmtud_blackhole_detect`, `tcp_timer.c:170`).
+
+The 2MSL deadline also ends FIN-WAIT-2, as in FreeBSD. When our FIN is
+acknowledged and the receive side is already closed, the deadline is set
+to the keepalive's maximum idle time, 8 probes 75 s apart, 10 minutes
+(`TP_MAXIDLE`, `tcp_timer.h:143`; `tcp_input.c:3040-3046`;
+`tcp_usrreq.c:2724-2731`); when it falls due the connection closes if it
+has been idle that long and otherwise waits another 75 s
+(`tcp_timer.c:361-366`). So a peer that never sends its FIN holds a
+connection for 10 minutes, not for keepalive's 2 hours. FreeBSD's faster
+recycling at 60 s (`tcp_fast_finwait2_recycle`, `tcp_timer.c:143`;
+`tcp_finwait2_timeout`, `tcp_subr.c:1495`) is off by default, and so it
+is here.
 
 The time base is `erlang:monotonic_time/1`, read by the process and
 passed in the context. The timestamp option's clock is that time in
@@ -672,8 +738,10 @@ ACKs when SACK is off (`tcp_newreno_partial_ack`, `tcp_input.c:4114`;
 (`tcp_do_prr_ack`, `tcp_input.c:4026`; on by default, `tcp_do_prr`,
 `tcp_input.c:162`), limited transmit (`tcp_do_rfc3042`, `:172`) and the
 lost-retransmission check (`tcp_sack_lost_retransmission`,
-`tcp_sack.c:1156`). A later `erx_tcp_loss_rack` implements RFC 8985 over
-the same log.
+`tcp_sack.c:1156`). It is the only loss module. RACK-TLP, deferred by
+the owner's decision, would be a second one, `erx_tcp_loss_rack`,
+implementing RFC 8985 over the same log; BBR would be a congestion
+module beside CUBIC, with pacing added to output.
 
 `erx_tcp_cc` is `struct cc_algo` (`cc/cc.h:145-195`): `init/1`,
 `conn_init/1`, `ack_received/3` with FreeBSD's `CC_ACK` and `CC_DUPACK`,
@@ -726,14 +794,22 @@ no other process and creates no process:
   interface's deadlines.
 * SYN cookies are on, as FreeBSD's default (`tcp_syncookies`,
   `tcp_syncache.c:105`): every SYN-ACK's initial sequence number is a
-  cookie (`tcp_syncache.c:1726-1729`), a SipHash-2-4 MAC of the
-  connection under a secret rotated every 15 s (`syncookie_mac`,
-  `tcp_syncache.c:2190-2223`; `SYNCOOKIE_LIFETIME`,
-  `tcp_syncache.h:110`). When the table is full, a SYN gets a cookie and
-  no entry. An ACK that matches no entry is checked as a cookie only if
-  the table overflowed in the last 15 s, as FreeBSD checks only after an
-  overflow (`tcp_syncache.c:1095-1110`). The cookie secrets are
-  stack-wide, in `erx_net_tables`, so an ACK that arrives on another
+  cookie (`tcp_syncache.c:1726-1729`): 24 bits of a SipHash-2-4 MAC of
+  the connection, the window-scale and MSS indexes, the SACK flag and a
+  bit naming which of two secrets made it (`syncookie_mac`,
+  `tcp_syncache.c:2194`; the layout at `:2154-2163`). The secrets
+  alternate, one replaced every 15 s (`SYNCOOKIE_LIFETIME`,
+  `tcp_syncache.h:110`; `syncookie_reseed`, `tcp_syncache.c:2419`), so a
+  cookie validates for 15 to 30 s. When the table is full, a SYN gets a
+  cookie and no entry. An ACK that matches no entry is checked as a
+  cookie only if the table overflowed in the last 15 s, as FreeBSD
+  checks only after an overflow (`tcp_syncache.c:1095-1110`). FreeBSD
+  records the last overflow per bucket (`sch_last_overflow`); the stack
+  has one table per interface and records it for the table, a departure
+  under which, shortly after an overflow, a valid cookie can complete a
+  handshake that FreeBSD, whose bucket for it had not overflowed, would
+  refuse. The cookie's MAC is required either way. The cookie secrets
+  are stack-wide, in `erx_net_tables`, so an ACK that arrives on another
   interface still validates.
 * When the handshake completes, the interface process takes one unit of
   the listener's accept credit, the free places of its backlog, spawns the
@@ -791,7 +867,9 @@ connection, as `tcp_drop_syn_sent` (`tcp_subr.c:3559`) does.
 | window scaling and timestamps | on (`tcp_do_rfc1323`, `tcp_subr.c:207`) | on |
 | SACK with RFC 6675 recovery, lost-retransmission detection | on (`tcp_do_sack`, `tcp_do_newsack`, `tcp_sack.c:125-130`; `tcp_do_lrd`, `tcp_sack.c:152`) | on |
 | PRR, limited transmit, IW10 | on (`tcp_input.c:162-178`) | on |
-| ECN | 2: accept when the peer asks, never initiate (`tcp_do_ecn`, `tcp_ecn.c:106`) | 2, RFC 3168 first; AccECN later |
+| ECN | 2: accept when the peer asks, never initiate (`tcp_do_ecn`, `tcp_ecn.c:106`) | 2, so a peer that asks for AccECN gets RFC 3168 ECN, as `tcp_ecn_syncache_add` answers it (`tcp_ecn.c:509-537`) |
+| missing timestamps on a connection that negotiated them | tolerated (`tcp_tolerate_missing_ts`, `tcp_subr.c:219`) | tolerated |
+| FIN-WAIT-2 recycling at 60 s | off (`tcp_fast_finwait2_recycle`, `tcp_timer.c:143`) | off |
 | delayed ACK | on (`tcp_delack_enabled`, `tcp_input.c:152`) | on |
 | buffer autosizing | on (`tcp_do_autosndbuf`, `tcp_output.c:116`; `tcp_do_autorcvbuf`, `tcp_input.c:217`) | on, within the grant's buffer budget |
 | CUBIC | default (`cc/cc.c:83`) | default |
@@ -817,11 +895,26 @@ FreeBSD's caps on the datagrams in reassembly, the fragments per datagram
 and the lifetime of a queue, all charged to the interface. `erx_icmp4`
 translates `ip_icmp.c`: echo replies, but never to a broadcast or
 multicast destination, and errors generated within FreeBSD's limit of
-200 a second (`icmplim`, `ip_icmp.c:84`). Redirects are ignored, a
-departure from FreeBSD's default of accepting them (`drop_redirect`,
-`ip_icmp.c:128`; `icmp6_rediraccept`, `icmp6.c:125`): a host behind one
-router never receives one, and accepting them belongs to the second
-stage.
+200 a second (`icmplim`, `ip_icmp.c:84`). Redirects are accepted by
+FreeBSD's rules, as its defaults accept them (`drop_redirect`,
+`ip_icmp.c:128`; `icmp6_rediraccept`, `icmp6.c:125`): each becomes a
+host route of the interface with FreeBSD's expiry (`icmp_input`'s
+redirect case, `ip_icmp.c:664`; `rib_add_redirect`, `net/route.c:190`;
+`icmp6_redirect_input` for IPv6), and the interface holds at most 64
+such routes, dropping new redirects past that, a bound FreeBSD does not
+have, for the reason the router and prefix lists have theirs
+([IPv6, neighbour discovery and autoconfiguration](#ipv6-neighbour-discovery-and-autoconfiguration)).
+
+The identification field follows `ip_fillid` (`ip_id.c:241`): zero on a
+datagram with DF set, which RFC 6864 allows and FreeBSD's default
+`ip_rfc6864` of 1 does (`ip_id.c:99`), so a TCP connection, which sets
+DF for path MTU discovery, sends no identification at all; and a random
+value on any other datagram. That is a departure from FreeBSD's default,
+a counter shared by every flow (`ip_random_id` 0, `ip_id.c:102`): a
+shared counter is state with many writers, and it tells an observer how
+much the machine sends to anyone, which an idle scan exploits. IPv6
+fragment headers carry a random identification, as `ip6_randomid`
+gives them (`ip6_output.c:1247`).
 
 `erx_arp` translates `if_ether.c`: the entry states, requests retried 5
 times (`arp_maxtries`, `if_ether.c:102`), entries kept 20 minutes once
@@ -853,9 +946,42 @@ router solicitations, router advertisements, the default-router and
 prefix lists with their lifetimes, and stateless address
 autoconfiguration (RFC 4862). The interface joins the all-nodes and
 solicited-node groups and sends the MLDv2 reports those groups need, so
-switches that snoop MLD forward neighbour solicitations; nothing else of
-multicast is in the first version. Redirects are ignored. Interface
-identifiers follow [Open decisions](#open-decisions), item 2.
+switches that snoop MLD forward neighbour solicitations; the rest of
+multicast is `erx_mcast` ([Scope](#scope)). Redirects are accepted as
+for IPv4, by RFC 4861's rules, which `icmp6_redirect_input` checks.
+
+The default-router list holds at most 16 routers and the prefix list at
+most 16 prefixes per interface, and each autoconfigured address belongs
+to one listed prefix. A router advertisement that would add a router or
+a prefix past its bound is ignored for that entry and counted, while
+listed entries keep refreshing their lifetimes, so an on-link sender
+that fills the lists first can keep later routers out but cannot evict a
+router already listed. FreeBSD has no such bound, and RFC 4861 lets a
+router's entry live up to 9,000 s, so without one any on-link sender
+that passes the hop-limit rule grows the lists at the ingress bucket's
+rate; this is a departure for requirement N4, as the TIME-WAIT limit is.
+
+Interface identifiers are RFC 7217's stable, opaque identifiers
+(`in6_get_stableifid`, `in6_ifattach.c:342`), by default, where FreeBSD's
+default derives them from the MAC address (EUI-64; `ip6_use_stableaddr`
+0, `nd6_rtr.c:97`). The identifier is FreeBSD's HMAC-SHA-256 of the
+prefix, the interface's name and its duplicate-address-detection
+failures, keyed with a secret of the machine where FreeBSD keys it with
+the host's UUID, so it is the same on every boot for one network and
+unrelated across networks, and no IPv6 address names the hardware
+([Decisions](#decisions), 2). The secret is a machine key of 32 random
+bytes, which the vault makes at installation and keeps with the
+machine's other keys across boots and updates
+([design-system.md](design-system.md#the-vault)). As with every key the
+vault holds, the key never enters the domain that uses it: the system
+domain grants the network domain a key facet whose one purpose is this
+identifier, and `erx_nd6_rtr` asks it for the HMAC of each prefix,
+interface and failure count, once per address it forms. While the vault
+answers `unavailable`, as it does without its partition, the interface
+forms its addresses from random identifiers for that boot, as RFC
+8981's temporary addresses are formed, and logs that it did, so an
+address is never derived from the MAC address and is stable whenever the
+vault serves.
 
 `erx_in6_src` translates `in6_src.c`, RFC 6724's source address
 selection. IPv6 sockets are IPv6-only by default, as FreeBSD's
@@ -877,10 +1003,32 @@ generation, and checks the generation on every output pass.
 The network domain's configuration names each interface's mode:
 `static` with addresses, routes and name servers; `dhcp`, for which the
 link supervisor starts `erx_dhcp4`; and whether IPv6 autoconfiguration
-runs, which it does by default. `erx_dhcp4` is a pure RFC 2131 state
-machine with RFC 2132's options, in a process that sends and receives
-through its interface process directly, as FreeBSD's `dhclient` uses
-BPF before the interface has an address.
+runs, which it does by default. `erx_dhcp4_core` is a pure RFC 2131
+state machine with RFC 2132's options, written from the RFCs with
+FreeBSD's `dhclient` as the behavioural reference, and `erx_dhcp4` is its
+process, a child of the link supervisor ([Decisions](#decisions), 3).
+
+DHCP needs to send and receive before the interface has an address,
+which FreeBSD's `dhclient` does through BPF. Here it is one fixed path
+of the interface process, not a socket, so it needs no exception in
+`erx_net_bind`:
+
+* **Sending.** `erx_dhcp4` hands the interface process a DHCP message;
+  the interface alone frames it, from `0.0.0.0` or, once bound, from the
+  leased address, port 68, to the broadcast address or, when renewing,
+  the server's address, port 67. No other process can send from
+  `0.0.0.0`.
+* **Receiving.** `classify/2` returns a UDP datagram to port 68 on an
+  interface configured for DHCP as `{local, {dhcp, Message}}`, before
+  any address check, and the interface gives it to its `erx_dhcp4` only
+  when its transaction id is the client's outstanding one and its client
+  hardware address is the interface's; every other datagram to port 68
+  is dropped and counted. These datagrams are unowned traffic and spend
+  the interface's ingress bucket.
+* **Applying.** A lease is untrusted input: `erx_dhcp4_core` checks every
+  option's length and value, and what it applies, an address, a netmask,
+  routers and name servers, goes to its own interface only, through the
+  interface's own step, as a static configuration would.
 
 ### UDP
 
@@ -890,8 +1038,8 @@ the socket bound most specifically, ICMP errors delivered to a connected
 socket, and port unreachable errors within the ICMP limit. A datagram
 socket holds received datagrams up to its receive buffer, counted in
 bytes as its credit, and drops beyond it, as a UDP socket's receive
-buffer does. UDP-Lite, encapsulation and multicast are not in the first
-version.
+buffer does. UDP-Lite and encapsulation are not part of the stack, and
+multicast delivery is `erx_mcast`'s ([Scope](#scope)).
 
 ## Modules and provenance
 
@@ -933,6 +1081,8 @@ modules are marked P; process modules E.
 | `erx_tcp_isn` | `tcp_new_isn`, `tcp_new_ts_offset`, `tcp_keyed_hash` (`tcp_subr.c`) | initial sequence numbers, timestamp offsets | P |
 | `erx_tcp_syncache` | `tcp_syncache.c` | half-open table, cookies | P |
 | `erx_tcp_icmp` | `tcp_ctlinput_with_port`, `tcp_mtudisc`, `tcp_drop_syn_sent` | ICMP reports for TCP | P |
+| `erx_tcp_hostcache` | `tcp_hostcache.c` | per-destination path values (an extension, [Scope](#scope)) | P |
+| `erx_mcast` | `in_mcast.c`, `igmp.c`, `in6_mcast.c`, `mld6.c` | group membership, IGMPv3 and MLDv2 (an extension) | P |
 | `erx_net_bind` | `in_pcb.c` (`in_pcbbind`, `:716`; `in_pcb_lport_dest`, `:756`; `in_pcbbind_avail`, `:912`; `in_pcbbind_setup`, `:1011`), `in6_pcb.c` | port choice, reuse rules, the claim funnel | P and the funnel |
 | `erx_net_input` | `ether_input`, `ip_input`, `ip6_input`, the pcb lookup of `tcp_input_with_port` and `udp_input` | classify one frame | P |
 | `erx_net_frame` | the header-building parts of `ip_output`, `ip6_output`, `ether_output` | encode a frame | P |
@@ -1047,19 +1197,49 @@ sockets at `accept`, and `accept` answers `{error, emfile}` while the
 grant has no socket left, leaving the connection queued, as UNIX's
 `accept` does.
 
-Every reduction a socket spends, on its owner's requests and on the
-packets that arrive for it, is charged to its grant's account, an
-`atomics` counter of the period the grant keeps. A socket adds the
-reductions of each step, read from `process_info(self(), reductions)`
-before and after, and before it takes its next message it compares the
-account with the grant's share. While the share is spent, the socket
-takes no message until the next period begins: its packet credit fills,
-its interface drops further segments for it, and the peer's congestion
-control slows. So every reduction the network domain spends is charged
-to exactly one account: a grant's for work in its sockets, an
-interface's for work in the interface process, and the driver's own. This
-extends the facet's account to processes the facet starts; it is
-[Open decisions](#open-decisions), item 1.
+**The grant's account.** Every reduction a socket spends, on its
+owner's requests and on the packets that arrive for it, is charged to
+its grant's account, the facet's account of
+[design-domains.md](design-domains.md#facets) extended to the processes
+the facet starts ([Decisions](#decisions), 1). The grant's own work, on
+`connect`, `listen` and the rest, is charged to the same account as any
+facet's is. The account is an `atomics` array that the grant creates and
+hands each socket at its start: the reductions spent in the current
+period, and the period's number. The period and the share are the
+facet's.
+
+* **Charging.** A socket reads `process_info(self(), reductions)` before
+  and after each step and adds the difference to the account at once, so
+  work that has no reply, as packet work has none, is charged as it is
+  done.
+* **Pausing.** Before it takes its next message, a socket compares the
+  account with the share. While the share is spent, the socket sends its
+  grant `{paused, self()}` and then takes only the grant's
+  `{resume, Period}` and the `'EXIT'` messages of its links, by a
+  selective receive that names only those, so everything else stays in
+  its mailbox unread. Meanwhile its packet credit fills, its interface
+  drops further segments for it, and the peer's congestion control
+  slows; its deadlines wait too, so a retransmission or keepalive runs at
+  most one period late.
+* **The period's turn.** The grant arms the period's one timer. At each
+  turn it subtracts the share from the spent count, never below zero, so
+  an overrun is carried into the next period as a debt and an unspent
+  share is not carried; it increments the period's number and sends
+  `{resume, Period}` to every socket that reported itself paused. A
+  `{paused, Pid}` that arrives when the account is no longer spent, after
+  a turn the socket did not see, is answered with `resume` at once, so no
+  socket waits a period for a turn it missed.
+* **The overrun.** A socket checks before each step and charges after
+  it, so a grant's account exceeds the share by at most one step per
+  socket, the grant's `sockets` limit times the costliest step. A step is
+  finite: a batch of segments is bounded by the socket's credit, and a
+  request by the operation schema's bounds. The debt repays the overrun
+  in the next period, as a facet's debt repays its requests in flight.
+
+So every reduction the network domain spends is charged to exactly one
+place: a grant's account for work in its sockets, and the network
+domain's own grant for the interface processes and the drivers
+([Untrusted input](#untrusted-input)).
 
 Buffer space is reserved at the grant: a socket asks its grant, with a
 local call, before it grows a buffer by autosizing or by a `sndbuf` or
@@ -1147,8 +1327,10 @@ The packet modes (`{packet, 1|2|4}`, `line`, `http`, `http_bin` and the
 rest) frame the stream in the connection with `erlang:decode_packet/3`,
 where stock frames it in its inet driver, so an owner receives whole
 packets. That is ERTS's C parser running on peer data in the network
-domain, as stock runs it in every node; [Open decisions](#open-decisions),
-item 6, asks whether to accept that.
+domain, as stock runs it in every node, which the owner accepted
+([Decisions](#decisions), 6): `decode_packet` gets a fuzz target over
+every mode the options offer, and its reach is a security residual
+([Residuals](#residuals)).
 
 Where stock OTP's result depends on the kernel beneath it, and the oracle
 runs stock on Linux, the stack gives FreeBSD's result, and each such case
@@ -1161,17 +1343,19 @@ one: Linux's default admits IPv4-mapped addresses, FreeBSD's does not.
 | --- | --- |
 | `nodelay`, `keepalive`, `linger`, `sndbuf`, `recbuf`, `buffer`, `tos`, `tclass`, `priority`, `reuseaddr`, `reuseport`, `ipv6_v6only`, `send_timeout`, `send_timeout_close`, `high_watermark`, `low_watermark`, `{congestion, Name}`, `{loss, Name}`, the `raw` options FreeBSD's `TCP_KEEPIDLE`, `TCP_KEEPINTVL`, `TCP_KEEPCNT` and `TCP_MAXSEG` map to | the socket's state, read by its step |
 | `active`, `mode`, `binary`, `list`, `header`, `packet`, `packet_size`, `deliver`, `exit_on_close`, `show_econnreset` | how the socket presents data to its owner |
-| `broadcast`, `multicast_*`, `add_membership`, `drop_membership` | `broadcast` acts; the multicast options answer `{error, enotsup}` until multicast is in the stack |
+| `broadcast`, `multicast_*`, `add_membership`, `drop_membership` | `broadcast` acts; the multicast options act through `erx_mcast` ([Scope](#scope)) |
 | `fd`, `netns`, `bind_to_device`, other `raw` options | `{error, enotsup}` |
 
 ### The `socket` and `net` modules
 
-OTP's `socket` module calls the `prim_socket` NIF, which erXos drops. In
-the second stage an Erlang `prim_socket` speaks the same socket protocol
+OTP's `socket` module calls the `prim_socket` NIF, which erXos drops. An
+Erlang `prim_socket` takes its place and speaks the same socket protocol
 to the network service, so `socket` and its `gen_tcp_socket` backend
-work over the same connections. Until then `socket:open` returns
-`{error, enotsup}`, a documented difference with a test. `net`'s
-interface and host calls are answered by the grant in the same stage.
+work over the same connection, listener and datagram processes as
+`gen_tcp` and `gen_udp`; `net`'s interface and host calls are answered
+by the grant. `gen_tcp`, `gen_udp`, `ssl`, `ssh` and distribution do not
+use `socket`, so it comes after them, by the owner's decision
+([Decisions](#decisions), 5), and plan.md schedules it.
 
 ### Name resolution
 
@@ -1203,20 +1387,25 @@ network domain runs one, `erx_epmd`, speaking epmd's protocol on port
   only through grants.
 
 The carrier's handshake refuses a remote node that claims a name at this
-machine's host name ([design.md](design.md#networking)). Which carrier,
-plain or TLS, a release build allows is [Open decisions](#open-decisions),
-item 4.
+machine's host name ([design.md](design.md#networking)). A release build
+allows only OTP's TLS carrier, `inet_tls_dist`, which authenticates both
+nodes by certificate and encrypts; the domain's keys stay in the vault
+and are used through a key facet. A development build allows the plain
+TCP carrier as well, whose MD5 challenge over a shared cookie
+authenticates weakly and encrypts nothing ([Decisions](#decisions), 4).
 
 ## The interface towards POSIX programs
 
-A program's socket descriptor is an open held by its session's handler
-([design-programs.md](design-programs.md#descriptors-and-files)), and
-the handler is the socket's owner at the network service. The protocol
-offers the handler what POSIX needs:
+A program's socket descriptor names an open of its handler's table, as a
+file descriptor does, and the open names the socket's **open-file
+description**, a process of the session, as a file's description is
+([design-programs.md](design-programs.md#descriptors-and-files)). The
+description is the socket's owner at the network service, and the
+protocol offers it what POSIX needs:
 
 * `{watch, Events}`: the socket sends one `{ready, S, Events}` when it is
-  readable, writable, acceptable or has an error, which the handler turns
-  into the program's `{ready, Open, Events}`;
+  readable, writable, acceptable or has an error, which the description
+  passes on as `{ready, Open, Events}` to the program that asked;
 * `{recv_nb, Max}` and `{send_nb, Data}`: they never wait, and answer
   `{error, eagain}` when POSIX's nonblocking call would; a program's
   blocking read is a watch followed by a nonblocking read, so no request
@@ -1224,13 +1413,14 @@ offers the handler what POSIX needs:
 * `accept_nb`, `getsockopt` and `setsockopt` in FreeBSD's names, mapped to
   the same options.
 
-A socket belongs to its grant's domain, not to one program, and lives
-until its owner closes it or exits. Programs of one session share a
-socket as the handler's open table shares any open: a spawn, a `fork`,
-`SCM_RIGHTS` between programs of the session, and an `exec` change only
-the handler's holders of the open, and the network service sees nothing
-of them. The handler closes the socket when its last holder closes it.
-Moving a socket to another domain is not offered.
+A socket belongs to its grant's domain, the session's, not to one
+program, and lives until its description closes it or exits. Programs of
+one session share a socket as they share any open-file description: a
+spawn, a `fork`, `SCM_RIGHTS` between programs of the session and an
+`exec` give or keep opens that name the same description, and the
+network service sees nothing of them. The description closes the socket
+when the last open naming it closes. Moving a socket to another domain
+is not offered, since a socket acts for its grant's domain alone.
 
 ## Untrusted input
 
@@ -1243,27 +1433,72 @@ Every packet is hostile. The rules, and where each is enforced:
 | No atom is made from packet data; unknown protocol values stay integers | the codecs; a build check fails on `binary_to_atom`, `list_to_atom` and `binary_to_term` in `erx_net` |
 | Sequence-space conversion happens only in `erx_tcp_seq` | a chokepoint check fails on `16#ffffffff` or `bsl 32` arithmetic in any other TCP module |
 | Half-open connections live only in the bounded syncache; overflow is answered statelessly with cookies | `erx_tcp_syncache` |
-| A RST resets only at exactly `rcv_nxt`; a SYN in a synchronized state and an out-of-range ACK get rate-limited challenge ACKs | RFC 5961 stages |
+| A RST resets only at exactly `last_ack_sent`; a SYN in a synchronized state and an out-of-range ACK get rate-limited challenge ACKs | RFC 5961 stages |
+| IP identification values reveal nothing: zero on atomic IPv4 datagrams, random otherwise and on IPv6 fragments | `erx_ip4`, `erx_ip6` |
 | Initial sequence numbers are unpredictable (RFC 6528); timestamp clocks are offset per connection | `erx_tcp_isn` |
 | ICMP reports act only when their quoted sequence number is in flight | `erx_tcp_icmp` (RFC 5927) |
 | Reassembly queues, both IP and TCP, have caps on count, bytes and lifetime; held payloads count at the size they keep alive | reassembly modules |
 | Neighbour messages are accepted only by RFC 4861's rules (hop limit 255) and FreeBSD's ARP rules; tables and held packets have bounds | `erx_arp`, `erx_nd6` |
+| Router, prefix and redirect entries have per-interface bounds; new entries past them are ignored, listed ones are never evicted | `erx_nd6_rtr`, `erx_icmp4`, `erx_icmp6` |
+| DHCP replies reach only the interface's DHCP client, and only for its outstanding transaction | the interface's DHCP path |
 | ICMP errors, RSTs to closed ports and echo replies are rate-limited; no reply to a broadcast or multicast | the interface's limiters |
 | Traffic that names no socket spends the interface's budget | the ingress limiter, below |
 | Packets queued for any process are bounded | credits |
 | Text from packets reaches logs and the inspector only through the sink's escaping function | `erx_log` |
 
 **The ingress limiter.** Owned traffic, a frame that demultiplexes to a
-socket, is bounded by that socket's credit and charged to its grant.
-Unowned traffic, everything the interface process itself must answer or
-hold (SYNs, ARP and neighbour requests, echo requests, fragments, RSTs to
-send), spends a token bucket of the interface, in frames per second with
-a burst. Past it, unowned frames are dropped and counted while owned
-frames and the replies the interface awaits (ARP and neighbour
-advertisements for entries it is resolving) still pass. Established
-connections and address resolution therefore keep making progress under a
-flood of new-connection traffic. The bucket's rate and burst are settled
-by gate GN's flood tests.
+socket, is bounded by that socket's credit, and what the socket spends on
+it is charged to its grant. Unowned traffic, everything the interface
+process itself must answer or hold (SYNs, ARP and neighbour requests,
+echo requests, fragments, DHCP replies, RSTs to send), spends a token
+bucket of the interface, in frames per second with a burst. Past it,
+unowned frames are dropped and counted while owned frames and the
+replies the interface awaits (ARP and neighbour advertisements for
+entries it is resolving) still pass. Established connections and address
+resolution therefore keep making progress under a flood of
+new-connection traffic. The bucket's rate and burst are settled by the
+flood measurements of plan.md's network gates.
+
+**What a flood costs the interface.** Every frame, owned or unowned,
+costs the interface process a header decode and one lookup before it is
+kept or dropped, and only a kept frame costs a checksum and more
+([Receiving](#receiving)). A flood of frames with valid checksums aimed
+at one client's established connection therefore costs the interface
+process no more per frame than any flood of minimum-size frames: once
+the connection's credit is full, each further frame is decoded, looked
+up and dropped, and what the connection takes, at the rate its grant's
+share lets it take it, is charged to that grant. The interface's own
+cost per frame is spent on the network domain's grant, the same whoever
+the frame names. Whether one interface process keeps up with
+minimum-size frames at line rate is what the network gates measure;
+where it cannot, the driver's credit fills and the driver drops frames
+for every client alike ([Residuals](#residuals)).
+
+### Residuals
+
+Each of these is a known gap, with the reason it stays:
+
+* **One interface process is a ceiling for all clients.** A line-rate
+  flood that the interface process cannot decode as fast as it arrives
+  makes the driver drop frames for every client, whatever they are. The
+  cost per dropped frame is a header decode and a lookup, kept small by
+  [Receiving](#receiving)'s order; one interface process per receive
+  queue, on devices that hash flows to several queues ([Scope](#scope)),
+  divides the work. A bound per client here would need a classifier ahead
+  of the interface process, which is what the interface process is.
+* **`erlang:decode_packet/3` runs on peer data** in the network domain
+  for the packet modes, as stock runs it in every node. A memory-safety
+  bug in that C parser that a peer can reach would end the network domain
+  and every client's connections, where on stock it ends one node. It has
+  a fuzz target over every mode offered; framing in the client's domain
+  would need a client-side process per socket in packet modes
+  ([Decisions](#decisions), 6).
+* **Stranded credit.** A sender killed between reserving credit and
+  sending strands at most one hand-over's units on the receiver's
+  counter until the receiver restarts
+  ([Credited queues](#credited-queues)). Only a fault or a test kills a
+  connection or an interface process; a counter that never drains would
+  need the receiver to reconcile against senders it cannot see.
 
 ## Concurrency and failure
 
@@ -1328,7 +1563,7 @@ client domain is affected beyond its sockets.
 | `{error, timeout}` | an Erlang call's own timeout, as on stock |
 | `{error, emsgsize}` | a datagram larger than IP allows, or a packet over `packet_size` |
 | `{error, einval}` | an option value out of range |
-| `{error, enotsup}` | `fd`, `netns`, `bind_to_device`, unknown `raw` options, multicast, SCTP, and `socket` until the second stage |
+| `{error, enotsup}` | `fd`, `netns`, `bind_to_device`, unknown `raw` options, SCTP |
 | `{error, badarg}` | a request the admission path refuses: wrong origin, schema or size |
 
 ## Where C is used, and what is measured
@@ -1340,31 +1575,38 @@ C does per-byte work only, as the design requires
   per-byte primitives, over an iolist so headers and payload are summed
   without being joined. It uses the CPU's checksum-friendly instructions
   where the architecture layer has them, with portable C as their oracle.
-  Checksum offload, which virtio-net offers, comes in the second stage:
-  it saves this pass but adds per-frame flag handling to the driver.
+  Where the device offers checksum offload, as virtio-net does, the
+  driver uses it ([Scope](#scope)): it saves this pass but adds
+  per-frame flag handling to the driver, and the C checksum stays for
+  devices without it and as the offload's oracle.
 * **SipHash-2-4,** a primitive this design adds,
   `erx_bytes:siphash24/2`, taking a 16-byte key and an iolist, for
   initial sequence numbers, timestamp offsets and SYN cookies, the hash
   FreeBSD uses for all three. A hash is per-byte work by the design's own
   list, and a SYN flood makes this one per-packet: in Erlang its 64-bit
   arithmetic would leave small integers on every round. It also keeps
-  OpenSSL out of the domain that parses hostile packets.
+  OpenSSL out of the domain that parses hostile packets. RFC 7217's
+  HMAC-SHA-256 is computed by the vault, which holds its key
+  ([IPv6, neighbour discovery and autoconfiguration](#ipv6-neighbour-discovery-and-autoconfiguration)).
 
 Everything else is Erlang. Whether TCP's established path also needs
-native code is measured on this stack, not on any stopgap: a bulk
-transfer and a request-response load on QEMU under HVF and natively on
-the Raspberry Pi 4, against line rate at 1 Gb/s (81,274 full-size frames
-a second each way, 12.3 us a frame), with the time per frame broken down
-by stage: completion, classification, checksum, step, encoding, posting
-and the lane crossing. If the established path misses line rate and the
-breakdown names a pure function of the core as the cost, that one
-function gets a NIF with the same signature, and the Erlang function
-stays as its oracle in a differential test over the same inputs. The
-process structure does not change.
+native code is measured on this stack: a bulk transfer and a
+request-response load against line rate at 1 Gb/s (81,274 full-size
+frames a second each way, 12.3 us a frame), with the time per frame
+broken down by stage: completion, classification, checksum, step,
+encoding, posting and the lane crossing. The measurements on erXos's
+kernel decide and those on the Raspberry Pi 4 confirm or reopen the
+decision; the same measurements on QEMU on the stopgap are a baseline
+that decides nothing, since every interrupt and doorbell there passes the
+stopgap's one service thread (plan.md's gates GN-QEMU, GK3 and GN-board).
+If the established path misses line rate and the breakdown names a pure
+function of the core as the cost, that one function gets a NIF with the
+same signature, and the Erlang function stays as its oracle in a
+differential test over the same inputs. The process structure does not
+change.
 
-Costs this design leaves unmeasured are listed in
-[Changes needed elsewhere](#changes-needed-elsewhere) for the
-performance watch list.
+Costs this design leaves unmeasured are on the performance watch list,
+[todo-performance.md](todo-performance.md).
 
 ## Verification
 
@@ -1377,8 +1619,9 @@ One fuzz target per decoder, in `test/erlang/*_fuzz.erl`, run by `make
 check-fuzz`: Ethernet, ARP, IPv4 with options, IPv6 with extension
 headers, ICMP, ICMPv6 with neighbour-discovery options, UDP, TCP with
 options, DHCP, epmd's requests, `erx_net_input:classify/2` over whole
-frames, the packet-mode framing over random streams, and the socket
-protocol's requests through the generated validators. Each target checks
+frames, the packet-mode framing over random streams (`decode_packet`
+over every mode the options offer), and the socket protocol's requests
+through the generated validators. Each target checks
 that the decoder never raises; that encode then decode returns the
 record; that it accepts or refuses as a reference judge does, a short
 function written from the RFC's validity rules alone; and that on frames
@@ -1426,15 +1669,70 @@ boundary. On every transition it checks:
   peer sent;
 * no segment is sent beyond the peer's window, except a window probe of
   one byte;
-* a RST resets only at exactly `rcv_nxt`; challenge ACKs never exceed
-  their limit;
+* a RST resets only at exactly `last_ack_sent`; challenge ACKs never
+  exceed their limit;
 * an old acknowledgement never changes the send window (SND.WL1/WL2);
 * every state change is one RFC 9293's state diagram allows;
+* where header prediction accepts the segment, the general stages give
+  the same state and actions;
 * the step never raises.
 
+The base alphabet leaves out dimensions the core also decides on, each of
+which would multiply its size. Each runs as an exploration of its own,
+the base alphabet plus that one dimension, with the abstraction widened
+by the state the dimension reads:
+
+* **timestamps:** a segment without the option, and with a value older
+  than, equal to and newer than `ts_recent`, on connections that
+  negotiated timestamps and that did not, so the `timestamps` stage and
+  PAWS are reached in every state;
+* **ECN:** ECE and CWR on segments and the CE mark in the IP header, on
+  connections with ECN negotiated and without;
+* **urgent data:** URG with the pointer inside the segment, beyond it and
+  beyond the window;
+* **SACK:** duplicate acknowledgements carrying no block, a block inside
+  the flight, a block beyond `snd_max` and a block below `snd_una`
+  (D-SACK);
+* **the peer's window:** zero, below one MSS and full, so persist,
+  window probes and silly-window avoidance are reached;
+* **ICMP reports:** fragmentation-needed or packet-too-big, and
+  unreachable, each quoting a sequence number in flight and one outside
+  it, in every state.
+
+Their added properties: a report quoting a sequence number outside
+`snd_una` to `snd_max` changes nothing; a window probe is sent only while
+the peer's window is zero; CWR is sent only after ECE was received; and
+the step's results in the presence of an unnegotiated option equal its
+results without it.
+
 *Seeded failures:* the window update without the WL1/WL2 rule; RST
-accepted anywhere in the window; `rcv_nxt` advanced without lifting.
-Each must be caught with a named property and the shortest trace.
+accepted anywhere in the window; RST judged against `rcv_nxt` with an
+acknowledgement delayed; `rcv_nxt` advanced without lifting; an ICMP
+report acted on without its sequence check; header prediction that skips
+the window-unchanged precondition. Each must be caught with a named
+property and the shortest trace.
+
+### The syncache: properties at its boundaries
+
+`erx_tcp_syncache` is pure, so its decisions are checked with virtual
+time against properties written from FreeBSD's rules:
+
+* a cookie made under the current secret validates now and after one
+  rotation, and not after two (15 to 30 s);
+* the fields recovered from a valid cookie (the MSS and window-scale
+  indexes, rounded down as `tcp_sc_msstab` and `tcp_sc_wstab` round, and
+  SACK permitted) equal those of the SYN that made it;
+* a cookie with any bit of its MAC changed, or for another four-tuple,
+  does not validate;
+* an ACK matching no entry is checked as a cookie exactly when the table
+  overflowed in the last 15 s, and at 15 s exactly as FreeBSD's
+  comparison decides;
+* the table never exceeds its bound, and a SYN past it gets a cookie and
+  no entry.
+
+*Seeded failures:* a rotation that drops the previous secret at once,
+which the second property's one-rotation case must catch; an overflow
+window measured with `=<` where FreeBSD uses `<`.
 
 ### The send log, loss and congestion: properties and a FreeBSD oracle
 
@@ -1473,8 +1771,15 @@ runners execute it:
 
 Every script's verdict on erXos must equal its verdict on FreeBSD 15.1.
 A difference is a bug, a documented departure with a test, or a recorded
-FreeBSD bug. Scripts at the 2^31 sequence distance pin the departure that
-lifting makes.
+FreeBSD bug. erXos's own scripts, run by both runners in the same way,
+add the decisions this document names that the suite does not cover: a
+RST at `rcv_nxt` while an acknowledgement is delayed, which FreeBSD
+answers with a challenge ACK because it judges against `last_ack_sent`;
+a segment without a timestamp on a connection that negotiated them, and
+one with a timestamp on a connection that did not; an acknowledgement of
+exactly `iss` on either side of the old-acknowledgement bound; FIN-WAIT-2
+ending at its idle limit; and segments at the 2^31 sequence distance,
+which pin the departure that lifting makes.
 
 *Seeded failures:* the RFC 5961 RST check removed must fail the suite's
 RST scripts on erXos; a script edited to expect a wrong window must fail
@@ -1498,8 +1803,7 @@ past the bound under a loss schedule where FreeBSD recovers with SACK.
 `make check-oracle` runs OTP 29.1.2's `gen_tcp_api_SUITE`,
 `gen_tcp_misc_SUITE`, `gen_tcp_echo_SUITE`, `gen_udp_SUITE` and
 `inet_SUITE` on erXos and on stock on the host and compares them case by
-case, and in the second stage the `socket` suites, then `ssl` and `ssh`
-over the stack.
+case, and the `socket` suites, and `ssl` and `ssh` over the stack.
 
 *Seeded failure:* a build whose `inet_backend` default is left at `inet`
 must fail the suites on erXos, since no inet driver exists, which shows
@@ -1508,18 +1812,28 @@ the suites reach `erx_gen_tcp`; and a backend that drops
 
 ### Floods and failure
 
-On QEMU, against the targets of gate GN: SYN floods, minimum-size frame
-floods, fragment floods, connection floods and invalid frames at line
-rate, while an established connection and neighbour resolution keep
-running. The tests check bounded memory in the network domain, the
-established connection's progress, and drop counters by reason. Failure
+On QEMU, against the targets of plan.md's network gates: SYN floods,
+minimum-size frame floods, fragment floods, connection floods, router
+advertisements from many sources, invalid frames, and frames with valid
+checksums aimed at one client's established connection, at line rate,
+while an established connection of another client and neighbour
+resolution keep running. The tests check bounded memory in the network
+domain, the other connection's progress, the reductions the flooded
+client's sockets spend per period, measured by the test from outside the
+account, staying within its share plus the overrun bound, and drop
+counters by reason. Failure
 tests kill the driver, an interface process, a connection, a grant and
 the whole network domain under load, and check the survivors of
 [Concurrency and failure](#concurrency-and-failure).
 
 *Seeded failures:* the syncache bound removed must exceed the memory
 bound under the SYN flood; credits disabled must let a connection's
-mailbox exceed its bound under a junk flood to its four-tuple.
+mailbox exceed its bound under a junk flood to its four-tuple; the
+router-list bound removed must grow the interface's memory under the
+advertisement flood; the checksum verified before the credit check must
+show in the interface's time per dropped frame under the flood to one
+connection; and a socket that charges no reductions must let the flooded
+client's sockets spend past that bound.
 
 ### Build checks
 
@@ -1532,35 +1846,115 @@ Each with a test proving it catches a violation:
 * every module whose header carries a FreeBSD notice is listed with the
   same files in `NOTICE-freebsd`, and the reverse.
 
-## Staging
+## Scope
 
-**First version.** Ethernet II; ARP; IPv4 with reassembly, fragmentation
-on output and ICMP; IPv6 with extension headers, reassembly, ICMPv6,
-neighbour discovery, duplicate address detection, autoconfiguration and
-the narrow MLDv2 listener; static configuration and DHCPv4; loopback;
-UDP; TCP with the defaults of the table above: syncache and cookies,
-RFC 5961, RFC 6528, SACK with RFC 6675 recovery and PRR, limited
-transmit, IW10, window scaling, timestamps and PAWS, ECN in FreeBSD's
-default mode, path MTU discovery, keepalive and persist, buffer
-autosizing, TIME-WAIT with RFC 1337 and RFC 6191, reassembly caps,
-NewReno and CUBIC; the grant, its limits and its account; `gen_tcp`,
-`gen_udp` and `inet`; the POSIX socket protocol; the resolver operation;
-the port mapper; every fuzz target, the explorer, both script runners and
-the FreeBSD guest.
+The stack this document designs has three parts. plan.md orders their
+work; this document states what each is.
 
-**Second stage.** The `socket` and `net` modules over an Erlang
-`prim_socket`; raw ICMP sockets for `ping`; checksum offload; one
-interface process per receive queue where the device has several; the
-host cache (`tcp_hostcache.c`); AccECN; ICMP and ICMPv6 redirects
-accepted as FreeBSD accepts them; 802.1Q VLANs; RFC 8981 temporary
-addresses; multicast with IGMP and full MLD.
+**The core,** which the sections above describe in full: Ethernet II;
+ARP; IPv4 with reassembly, fragmentation on output and ICMP; IPv6 with
+extension headers, reassembly, ICMPv6, neighbour discovery, duplicate
+address detection, autoconfiguration with RFC 7217 identifiers and the
+narrow MLDv2 listener; static configuration and DHCPv4; loopback; UDP;
+TCP with the defaults of [Defaults kept](#defaults-kept); the grant, its
+limits and its account; `gen_tcp`, `gen_udp` and `inet`; the POSIX socket
+protocol; the resolver operation; the port mapper; and every test of
+[Verification](#verification).
 
-**Later.** RACK-TLP as `erx_tcp_loss_rack`; pacing; TCP Fast Open
-(`tcp_fastopen.c`); BBR, as the owner decided; DCTCP.
+**Extensions,** each a FreeBSD decision translated by the same rules and
+behind the same processes, with no change to the core's structure:
 
-The packet-path prototype that gate GN measures is the first version's
-codecs, credits, interface process and the established-connection part of
-the TCP core, so the prototype is not thrown away.
+* `socket` and `net` over an Erlang `prim_socket`
+  ([The `socket` and `net` modules](#the-socket-and-net-modules));
+* raw ICMP and ICMPv6 sockets for `ping`, translating the parts of
+  `raw_ip.c` and `raw_ip6.c` that `ping` uses, each a datagram socket of
+  the grant that receives the ICMP echo replies its identifier names;
+* checksum offload where the device offers it
+  ([Where C is used, and what is measured](#where-c-is-used-and-what-is-measured));
+* one interface process per receive queue on a device that hashes flows
+  to several, so each flow still passes through one interface process
+  and [Ordering](#ordering) holds;
+* the TCP host cache, `erx_tcp_hostcache`, translating
+  `tcp_hostcache.c`: a bounded table of path MTU, RTT and congestion
+  values per destination, which one process owns and publishes, read by
+  connections at their start and updated by a message from each at its
+  end, as FreeBSD reads and updates its own;
+* AccECN, FreeBSD's `tcp_do_ecn` modes 3 and 4 in `tcp_ecn.c`, translated
+  and, as in FreeBSD, not the default;
+* ICMP and ICMPv6 redirects, accepted as
+  [IPv4 and ARP](#ipv4-and-arp) states;
+* 802.1Q VLANs, translating `if_vlan.c`'s tag handling: a VLAN is an
+  interface of its own whose driver is its parent's interface process;
+* RFC 8981 temporary addresses, beside the stable ones, for outgoing
+  connections where a program asks for them;
+* multicast, `erx_mcast`, translating `in_mcast.c`, `igmp.c`,
+  `in6_mcast.c` and `mld6.c`: group membership per socket, IGMPv3 and
+  full MLDv2, and delivery to every member socket, each copy against that
+  socket's credit.
+
+**Outside the stack,** later, behind its seams: RACK-TLP as a loss
+module, deferred by the owner's decision; BBR as a congestion module,
+with pacing in output; DCTCP as a congestion module over the ECN signal;
+and TCP Fast Open (`tcp_fastopen.c`). None of them is designed here, and
+none needs a change outside the seams it plugs into, except pacing,
+which BBR brings.
+
+## Decisions
+
+The owner settled these, each as the design recommended.
+
+1. **The grant's account covers its sockets.** Every reduction a grant's
+   sockets spend, on requests and on packets, is charged to the grant's
+   account, and client requests go straight to the socket processes,
+   which run the facet's generated admission path
+   ([The grant's account](#sockets-act-for-one-domain)). This extends the
+   facet mechanism, whose account otherwise covers the facet's own work
+   and the work of the requests it forwards. The alternative, routing
+   every socket request through the grant, costs two more local hops per
+   call and still leaves packet-driven work, which has no request,
+   unaccounted.
+2. **RFC 7217 stable interface identifiers,** with a secret the system
+   keeps across boots, one of the vault's machine keys, used through a
+   key facet so that it never enters the network domain
+   ([IPv6, neighbour discovery and autoconfiguration](#ipv6-neighbour-discovery-and-autoconfiguration)).
+   FreeBSD's default derives SLAAC addresses from the MAC address
+   (EUI-64), which lets anyone who sees an IPv6 address track the
+   machine across networks; RFC 8064 recommends RFC 7217, and FreeBSD 15
+   implements it with the setting off. The departure from FreeBSD's
+   default is made for privacy; the identifier is stable only if the
+   secret is, so the secret is kept with the machine's other keys, and a
+   fresh installation makes it afresh, as it does the SSH host key.
+3. **DHCPv4 is part of the core,**
+   ([Addresses and routes](#addresses-and-routes)), written from RFC
+   2131 and RFC 2132 with FreeBSD's `dhclient` as the behavioural
+   reference. QEMU's user network and most home networks hand out IPv4
+   addresses by DHCP, so a Raspberry Pi on a LAN needs it.
+4. **Remote distribution in release builds runs only over the TLS
+   carrier**
+   ([Distribution to other machines](#distribution-to-other-machines)).
+   OTP's plain TCP carrier authenticates by an MD5 challenge over a
+   shared cookie and sends everything unencrypted; its TLS carrier
+   authenticates both nodes by certificate and encrypts. Development
+   builds allow both, since they run trusted code only.
+5. **`socket` comes after `gen_tcp`.** The `socket` module answers
+   `enotsup` until its extension lands, a documented difference with a
+   test, and OTP's socket suites are expected failures meanwhile; plan.md
+   schedules the extension. `gen_tcp`, `gen_udp`, `ssl`, `ssh` and
+   distribution do not use `socket`, so nothing the system needs waits on
+   it.
+6. **Packet modes are framed in the network domain** with ERTS's C
+   `decode_packet`, as stock frames them in its inet driver
+   ([The backend](#the-backend)). The parser gets a fuzz target over
+   every mode offered, and its reach is a security residual
+   ([Residuals](#residuals)). Framing in the client's domain instead
+   would need a client-side process per socket in packet modes, a hop
+   that `gen_tcp`'s other modes do without.
+7. **RACK is deferred.** The default stack is the reference, and
+   RACK-TLP and BBR come later behind the seams
+   ([Why FreeBSD's default stack](#why-freebsds-default-stack)).
+   RACK-TLP is a second TCP implementation in FreeBSD, with its own input
+   path and the high-precision timer system; the send log keeps it cheap
+   to add as a loss module when its value is measured.
 
 ## Alternatives considered
 
@@ -1576,7 +1970,8 @@ of it ([What a naive Erlang stack gets wrong](#what-a-naive-erlang-stack-gets-wr
 
 **RACK first.** RACK is a second TCP implementation of 24,673 lines that
 needs the high-precision timer system and its own input path before the
-system sends a byte. The send log keeps RACK cheap to add later.
+system sends a byte. The owner deferred it ([Decisions](#decisions), 7);
+the send log keeps it cheap to add later as a loss module.
 
 **A process per layer.** Each layer would add a mailbox trip per packet
 and serialise all connections through each layer's process; the
@@ -1623,138 +2018,6 @@ systems differ, and FreeBSD's code can be translated under its licence.
 packets, whose numbers would decide nothing about an Erlang stack. The
 stack has no stopgap.
 
-## Open decisions
-
-1. **The grant's account covers its sockets.** The design charges every
-   reduction a grant's sockets spend, on requests and packets, to the
-   grant's account, and lets client requests go straight to the socket
-   processes, which run the facet's generated admission path. This
-   extends the facet mechanism, whose account covers the facet's own work
-   and the work of the requests it forwards. The alternative routes every
-   socket request through the grant, two more local hops per call, and
-   leaves packet-driven work unaccounted. *Recommendation:* extend the
-   account, as designed.
-2. **Interface identifiers.** FreeBSD's default derives SLAAC addresses
-   from the MAC address (EUI-64); RFC 7217's stable, opaque identifiers
-   are in FreeBSD 15 but off by default (`ip6_use_stableaddr`,
-   `nd6_rtr.c:97`; `in6_get_stableifid`, `in6_ifattach.c:342`).
-   RFC 8064 recommends RFC 7217, and a MAC address in every IPv6 address
-   lets anyone track the machine. RFC 7217 needs a secret that stays the
-   same across boots. *Recommendation:* RFC 7217 by default, a departure
-   from FreeBSD's default, with the secret provided by the system domain
-   from the machine's persistent configuration when it starts the network
-   domain.
-3. **DHCPv4 in the first version.** QEMU's user network and most home
-   networks hand out IPv4 addresses by DHCP, so a Raspberry Pi on a LAN
-   needs it. *Recommendation:* include `erx_dhcp4`, written from RFC 2131
-   with FreeBSD's `dhclient` as the behavioural reference.
-4. **Distribution to other machines in release builds.** OTP's plain TCP
-   carrier authenticates by an MD5 challenge over a shared cookie and
-   sends everything unencrypted; its TLS carrier authenticates by
-   certificates and encrypts. *Recommendation:* release builds allow
-   only the TLS carrier, with keys held by the vault through a key facet;
-   development builds allow both.
-5. **The `socket` module in the second stage.** Until then `socket`
-   answers `enotsup`, a documented difference, and OTP's socket suites are
-   expected failures. *Recommendation:* accept; `gen_tcp`, `gen_udp`,
-   `ssl`, `ssh` and distribution do not use it.
-6. **Packet modes framed in the network domain.** `erlang:decode_packet/3`
-   is ERTS's C parser; a memory-safety bug in it that a peer can reach
-   would end the network domain and every client's connections, where on
-   stock it ends one node. Framing in the client domain would need a
-   client-side process per socket in packet modes. *Recommendation:* frame
-   in the network domain as stock does, with a fuzz target over the modes
-   offered, and record the reach of that parser as a security residual.
-
-## Changes needed elsewhere
-
-For the coordinator to apply; this document edits nothing else.
-
-1. **design.md, Document map:** a row for this document: "erXos's TCP/IP
-   stack: FreeBSD 15.1's default stack translated into Erlang, the
-   process structure and packet path, grants and sockets, verification
-   against FreeBSD and stock OTP".
-2. **design.md, Networking:** link this document; replace "The stack's
-   oracle is Linux's ..." with FreeBSD 15.1 as the reference oracle
-   (FreeBSD's TCP test suite run against a FreeBSD guest and against
-   erXos, traffic tests against both) and Linux's stack as an
-   interoperability peer; per-client admission is the grant in the
-   network domain and its account; the ingress budget is the interface's
-   token bucket and credits.
-3. **design.md, Decisions:** the row "The network stack is erXos's own,
-   in Erlang, with lwIP as its stopgap" becomes "The network stack is
-   erXos's own, in Erlang, translated from FreeBSD 15.1's default stack",
-   with the owner's words as rationale; and the loss and congestion seams
-   from day one, BBR later, per the owner's agreement.
-4. **design.md, Dependencies:** rows for the FreeBSD source at
-   `95719d8a` (translation reference, BSD-2-Clause and BSD-3-Clause,
-   permanent, fetched by hash for review, code translated into
-   `erlang/apps/erx_net` with notices per module and in
-   `NOTICE-freebsd`); FreeBSD's tcp-testsuite (test data, BSD-3-Clause,
-   fetched); nplab packetdrill (GPL-2.0, test tool built and run only in
-   the FreeBSD guest); the FreeBSD 15.1 QEMU image (oracle guest);
-   `msantos/pkt` (BSD-3-Clause, fuzz oracle, fetched).
-5. **design.md, Licences and notices:** a sentence parallel to Fiasco's:
-   code translated from FreeBSD keeps its notices per module and in
-   `erlang/apps/erx_net/NOTICE-freebsd`, and is never translated from
-   `in_cksum.c` (BSD-4-Clause) or the unlicensed `tailq_hash.*`.
-6. **design-runtime.md, Per-byte primitives:** a row for
-   `erx_bytes:siphash24/2` (SipHash-2-4, 16-byte key, iolist; used by
-   the network stack; reference: the SipHash paper's test vectors and an
-   Erlang model).
-7. **design-runtime.md, Erlang-visible behaviour:** the `gen_tcp`,
-   `gen_udp`, `socket`, `net` row: `gen_tcp`, `gen_udp` and `inet` reach
-   the network service through the `erx` socket backend, `erx_gen_tcp`
-   and `erx_gen_udp`, the default `inet_backend`; `socket` and `net`
-   answer `enotsup` until the second stage; the `inet_db` row: DNS
-   lookups through `inet_res` with name servers from the grant's
-   `resolver` operation. The OTP edit adding `erx` to `inet_backend`
-   joins the list of edits outside `sys/erxos`.
-8. **design-domains.md, Facets, and design-scheduler.md, Service work:**
-   if open decision 1 is accepted, processes a facet starts to act for
-   its grantee alone (a network grant's sockets) run its generated
-   admission path and charge its account, pausing while it is spent.
-9. **design-programs.md, Descriptors and files and Compatibility:** a
-   socket belongs to the session's domain and its handler is the owner,
-   so a spawn, `fork`, `exec` and `SCM_RIGHTS` within a session keep
-   socket descriptors as they keep other opens; the documented
-   differences for those cases go, and only moving a socket to another
-   domain stays unsupported. The `{watch}` row names the socket protocol
-   of this document.
-10. **design-system.md:** the network domain's configuration (interfaces,
-    `static` or `dhcp`, IPv6 autoconfiguration, name servers); the `net`
-    grant's limits in the principal policy, and the `netadmin` facet;
-    after the network domain restarts, the domain service introduces it
-    again to every domain whose specification names a `net` grant, so
-    the grants are made anew; the stable-address secret if open decision
-    2 is accepted.
-11. **plan.md, M12 and M14:** the packet-path prototype is built from
-    this document's modules; M14's scope is [Staging](#staging)'s first
-    version; its harness is the two script runners and the FreeBSD
-    guest; its exit criteria compare against FreeBSD 15.1's verdicts and
-    stock OTP's suites rather than against lwIP; gate G14 measures this
-    stack against line rate and against FreeBSD's or Linux's stack on the
-    same board.
-12. **TODO.md:** the network item ("replace lwIP ...") becomes the
-    implementation of this design; the item on sockets across spawn,
-    fork, `exec` and `SCM_RIGHTS` narrows to moving a socket between
-    domains; the `prim_inet` item closes when `erx_gen_tcp` answers
-    `eacces` without a grant.
-13. **todo-performance.md:** watch items for a round trip per
-    `gen_tcp:send/2` across a lane (settle with bulk throughput at 1 KiB
-    and 64 KiB sends); coalescing in-order payloads into one binary per
-    delivery against one message per segment; the ETS lookups of the
-    neighbour entry and route generation on every output pass; one
-    interface process per interface as a ceiling on packet rate; the
-    memory of a hibernated TIME-WAIT process against FreeBSD's control
-    block; the cost of credits and of per-step reduction accounting.
-14. **Research records:** the FreeBSD mapping pass and the aloha
-    assessment this design rests on become `docs/research-*.md` records,
-    with the corrections listed in the hand-off report, so the design's
-    evidence is in the tree.
-15. **abi/services/net.txt:** the network service's operation schema,
-    written with the first code.
-
 ## References
 
 * FreeBSD src, `release/15.1.0-p6`, commit
@@ -1773,11 +2036,14 @@ For the coordinator to apply; this document edits nothing else.
   attacks), RFC 8985 (RACK-TLP).
 * RFC 791, RFC 826, RFC 792, RFC 1191, RFC 1071 and RFC 1624 (checksum);
   RFC 8200, RFC 5095, RFC 5722, RFC 7112, RFC 4443, RFC 4861, RFC 4862,
-  RFC 3810, RFC 6724, RFC 7217, RFC 8064, RFC 8106, RFC 8201; RFC 768;
-  RFC 2131 and RFC 2132.
+  RFC 3810, RFC 6724, RFC 7217, RFC 8064, RFC 8106, RFC 8201, RFC 8981;
+  RFC 6864 (IPv4 identification); RFC 768; RFC 2131 and RFC 2132.
 * J.-P. Aumasson and D. J. Bernstein, "SipHash: a fast short-input PRF",
   INDOCRYPT 2012.
 * aloha, https://github.com/yamt/aloha, commit `0aa96f14`.
+* The research records this design rests on:
+  [the mapping of FreeBSD's stack to Erlang](research-freebsd-net-mapping.md)
+  and [the assessment of aloha](research-aloha.md).
 * pkt, https://github.com/msantos/pkt.
 * Erlang/OTP 29.1.2: `lib/kernel/src/gen_tcp.erl`, `inet.erl`,
   `gen_tcp_socket.erl`, `erl_epmd.erl`.
