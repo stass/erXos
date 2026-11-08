@@ -1641,7 +1641,8 @@ it; git history is the record of completed work.
   such handle, its handles being 9P's fids
   ([design-live.md](docs/design-live.md#the-host-link)).
 * [Medium] live, host-link payload check (`erlang/apps/erx_hostlink/src/erx_hostlink_payload.erl`):
-  until `liberx`'s `erx_etf` exists (M5), a control payload from the host
+  until `liberx`'s `erx_etf` (`liberx/erx_etf.c`) is reachable from the
+  system domain's Erlang, a control payload from the host
   is checked by a size bound, `binary_to_term/2` in safe mode and a walk
   that refuses pids, references, ports and funs, not by the host grammar,
   and it is decoded onto the heap before the resident limit sees its

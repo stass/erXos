@@ -1170,7 +1170,9 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    connection's funnel state of at most `funnel_depth` entries. A term that
    ends a tuple, list, map or record (its last element, or a list's tail)
    takes no stack entry, so long lists and right-nested tuples cost nothing;
-   only nesting in other positions does. Every pid and reference remains
+   only nesting in other positions does, and inside a map key every
+   container takes an entry until it ends, since the receiver's semantic
+   stage computes a key's identity from all of it. Every pid and reference remains
    byte-for-byte unchanged and grants nothing. The pass computes the term's
    decoded heap size exactly as ERTS's decoder does
    ([research](research-erts-internals.md#external-term-format)). A term
@@ -1273,7 +1275,14 @@ funnel before exposing a term to application code: it checks every remaining
 semantic constraint, including map-key uniqueness under Erlang exact
 equality and complete consumption of the payload bytes. Equal keys with
 different permitted encodings are duplicates too; comparing wire bytes is
-insufficient, and nested maps and compound keys use the same rule. Every
+insufficient, and nested maps and compound keys use the same rule. The
+native decoder finds equal keys by a digest of each key's canonical form,
+built as the key is read, so equal keys always share a digest and two
+different keys share one only by a collision of the hash, which can make
+it refuse a term but never accept a repeated key. It judges pids and
+references as a node other than theirs does; ERTS reads its own node's
+references by three of their four words, so ERTS's decoder alone refuses
+a map whose keys are two such references differing in the fourth. Every
 accepted term equals the term `binary_to_term/1` decodes from the same bytes
 on the pinned stock OTP. Decoding is lazy, at the receive that first
 examines the message (`erts_proc_sig_decode_dist`,

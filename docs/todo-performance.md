@@ -25,6 +25,13 @@ block a milestone's numbers.
   packing, since the manifest records its extent; the hosted pack uses only its length. Measure the
   added wall time of a production and a hosted build; if it matters, size the image without writing it
   twice, or cache it by the release's digest.
+* **[Low] liberx, `erx_etf_check` with accept on maps with many or large keys.** `liberx/erx_etf.c`
+  hashes every leaf inside a map key with BLAKE3 and every container element with one more BLAKE3
+  call, then heapsorts each map's key digests; a string key of n bytes costs 2n + 3 hashes. Measure
+  bytes per second of the check with and without accept over maps of 10, 1,000 and 100,000 small
+  keys and over keys that are long strings and deep tuples; if it matters, take a byte's digest from a
+  table of 256, hash a key's bytes in one pass where its canonical form equals its encoding, or use a
+  cheaper keyed hash.
 * **[Medium] shell, the evaluator's heap per word of a list.** Under the 4 MiB heap limit the design
   gives every evaluator, `k=(); while(! ~ $#k 5000) k=($k x)` is killed while a thousand iterations
   fit (Homebrew's OTP 28 on macOS, `erx_shell_eval_tests`): each `k=($k x)` builds the whole list

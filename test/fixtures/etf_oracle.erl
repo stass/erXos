@@ -17,6 +17,16 @@ the same line:
                       refused
   refuse Bytes        refused when binary_to_term(Bytes) refuses it, in
                       unsafe mode, so an unknown atom is no reason
+  term Bytes          ok Used Words: binary_to_term(Bytes, [used]) in
+                      unsafe mode, the bytes it used and the term's
+                      erts_debug:flat_size/1; or refused
+  same Bytes1 Bytes2  same | different | refused: the two decoded in
+                      unsafe mode and compared by exact equality
+
+The term and same requests serve test/integration/erx_etf_oracle_test.rb,
+which compares liberx's erx_etf with binary_to_term/1; they decode in
+unsafe mode because that test's terms hold atoms, pids, references and
+funs this node has never seen.
 """.
 
 -export([main/1]).
@@ -50,6 +60,24 @@ answer([<<"check">>, Source, Bytes]) ->
 answer([<<"refuse">>, Bytes]) ->
     try binary_to_term(binary:decode_hex(Bytes)) of
         _ -> <<"accepted">>
+    catch
+        error:badarg -> <<"refused">>
+    end;
+answer([<<"term">>, Bytes]) ->
+    try binary_to_term(binary:decode_hex(Bytes), [used]) of
+        {Term, Used} ->
+            iolist_to_binary(io_lib:format("ok ~B ~B",
+                                           [Used, erts_debug:flat_size(Term)]))
+    catch
+        error:badarg -> <<"refused">>
+    end;
+answer([<<"same">>, Bytes1, Bytes2]) ->
+    try
+        binary_to_term(binary:decode_hex(Bytes1)) =:=
+            binary_to_term(binary:decode_hex(Bytes2))
+    of
+        true -> <<"same">>;
+        false -> <<"different">>
     catch
         error:badarg -> <<"refused">>
     end;
