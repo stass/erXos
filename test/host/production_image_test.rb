@@ -268,8 +268,37 @@ class ProductionImageTest < Minitest::Test
   def test_the_production_build_takes_no_additions
     production = Erx::ProductionImage.instance_method(:build).parameters
     refute_includes production.map(&:last), :added
-    assert_equal [%i[keyreq directory], %i[keyreq added], %i[key machine]],
+    assert_equal [%i[keyreq directory], %i[keyreq added], %i[key machine], %i[key domains]],
                  Erx::ProductionImage.instance_method(:build_test_image).parameters
+  end
+
+  # The production image carries the domain releases its manifest names, and the Phase 1
+  # manifest check admits no domain row yet, so it carries none and no runtime image.
+  def test_the_production_image_carries_no_domain_release
+    assert_empty Erx::ProductionImage::DOMAIN_RELEASES
+  end
+
+  # A domain row's runtime names the domain runtime image and its release the run of
+  # its release's entries, beside the root and the release medium's EROFS image.
+  def test_the_artifacts_name_the_root_the_domain_runtime_and_each_domain_release
+    paths = ['boot/kernel', 'domains/base/bin/start.boot', 'domains/base/lib/x', 'runtimes/emu', 'system/manifest', 'system/root']
+    images = { 'release' => { 'kind' => 'erofs_image' } }
+    assert_equal({ 'root' => { 'kind' => 'executable', 'entry' => 5 }, 'release' => { 'kind' => 'erofs_image' },
+                   'base' => { 'kind' => 'release', 'entry' => 1, 'files' => 2 },
+                   'emu' => { 'kind' => 'executable', 'entry' => 3 } },
+                 Erx::ProductionImage.artifacts(paths, images: images))
+    assert_equal({ 'root' => { 'kind' => 'executable', 'entry' => 1 } },
+                 Erx::ProductionImage.artifacts(['system/manifest', 'system/root'], images: {}))
+  end
+
+  def test_a_domain_release_named_as_another_artifact_is_refused
+    %w[root emu release].each do |name|
+      paths = ["domains/#{name}/bin/start.boot", 'runtimes/emu', 'system/root']
+      error = assert_raises(Erx::Error) do
+        Erx::ProductionImage.artifacts(paths, images: { 'release' => { 'kind' => 'erofs_image' } })
+      end
+      assert_includes error.message, name
+    end
   end
 
   # A larger machine grows root_memory and system_baseline by the same amount and /tmp's

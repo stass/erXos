@@ -93,6 +93,7 @@ module Erx
         liberx/backend/fiasco/service_wire.c
         liberx/backend/fiasco/service_wire.h
         liberx/backend/fiasco/task.ld
+        liberx/backend/fiasco/task_refused.c
         liberx/backend/fiasco/task_start.c
         liberx/backend/fiasco/task_start.h
         liberx/backend/fiasco/thread.c

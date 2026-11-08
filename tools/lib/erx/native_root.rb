@@ -68,6 +68,16 @@ module Erx
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
               "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
               "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c'].freeze
+    # A domain's runtime image: the interpreter ERTS as a task's program, at task.ld's
+    # fixed addresses, since erx_image_map loads only an ERX_IMAGE_FIXED image. musl's
+    # start enters ERTS's main through libc_task.c, as it enters a task's test program,
+    # and the release and boot information readers come as they come to the root, with
+    # task_refused.c for the calls the service does not answer a task. One
+    # image serves every domain (docs/design-runtime.md, "The build").
+    DOMAIN_RUNTIME = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_task.c",
+                      "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
+                      'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
+                      "#{BACKEND}/task_refused.c", 'liberx/release.c', 'liberx/release_fs.c'].freeze
     # The sources of SYSTEM that read musl's headers, which NativeRuntime's sysroot holds.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
@@ -111,18 +121,17 @@ module Erx
     # Fiasco's; TODO.md holds musl's. Returns the program, its receipt, and every file those name.
     def build_system_receipted(directory:, archives:, place:)
       program = build_system(directory: directory, archives: archives, place: place)
-      compiles = SYSTEM.map { |source| compile_record(source, directory: directory) }
-      linked = {
-        'version' => 1, 'kind' => 'linked', 'artifact' => reference(program),
-        'linker_map' => reference(map_path(program)).merge('format' => 'lld', 'directory' => '.'),
-        'compiles' => compiles, 'archives' => [], 'inputs' => [reference(File.join(@root, LINK_SCRIPT))]
-      }
-      receipt = File.join(directory, 'stopgap-root.receipt.json')
-      File.write(receipt, JSON.pretty_generate(linked) + "\n")
-      named = compiles.flat_map { |record| [record.fetch('object'), record.fetch('dependency'), *record.fetch('sources')] }
-      inputs = [program, map_path(program), receipt, File.join(@root, LINK_SCRIPT),
-                *named.map { |file| File.expand_path(file.fetch('path'), @root) }].uniq
-      { program: program, receipt: receipt, inputs: inputs.freeze }.freeze
+      receipted(program, sources: SYSTEM, script: LINK_SCRIPT, directory: directory)
+    end
+
+    # A domain's runtime image (DOMAIN_RUNTIME) over the archives that hold ERTS and musl,
+    # with its receipt, as build_system_receipted gives the root's. It is the interpreter
+    # image too, which InterpreterImage checks for JIT and C++ before anything packs it.
+    def build_domain_runtime_receipted(directory:, archives:)
+      program = build(name: 'erts-emu', sources: DOMAIN_RUNTIME, directory: directory, archives: archives, strip_debug: true,
+                      script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS, place: nil)
+      InterpreterImage.check(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
+      receipted(program, sources: DOMAIN_RUNTIME, script: TASK_LINK_SCRIPT, directory: directory)
     end
 
     # The linker flag that gives root.ld its place: an address in RAM on a page boundary.
@@ -179,6 +188,23 @@ module Erx
     def object_path(source, directory) = File.join(directory, "#{source.tr('/', '_').tr('.', '_')}.o")
 
     def map_path(program) = "#{program}.map"
+
+    # A linked receipt over program: its objects, compiled from sources into directory,
+    # their dependency files, the link map and the link script; and every file it names.
+    def receipted(program, sources:, script:, directory:)
+      compiles = sources.map { |source| compile_record(source, directory: directory) }
+      linked = {
+        'version' => 1, 'kind' => 'linked', 'artifact' => reference(program),
+        'linker_map' => reference(map_path(program)).merge('format' => 'lld', 'directory' => '.'),
+        'compiles' => compiles, 'archives' => [], 'inputs' => [reference(File.join(@root, script))]
+      }
+      receipt = File.join(directory, "#{File.basename(program)}.receipt.json")
+      File.write(receipt, JSON.pretty_generate(linked) + "\n")
+      named = compiles.flat_map { |record| [record.fetch('object'), record.fetch('dependency'), *record.fetch('sources')] }
+      inputs = [program, map_path(program), receipt, File.join(@root, script),
+                *named.map { |file| File.expand_path(file.fetch('path'), @root) }].uniq
+      { program: program, receipt: receipt, inputs: inputs.freeze }.freeze
+    end
 
     def compile_record(source, directory:)
       object = object_path(source, directory)

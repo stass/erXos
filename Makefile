@@ -89,6 +89,7 @@ check-debug-log:
 
 check-boot-image:
 	$(RUBY) tools/erx check-boot-image
+	$(RUBY) test/integration/domain_image_test.rb
 
 status:
 	$(RUBY) tools/erx status

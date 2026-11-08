@@ -9,7 +9,8 @@
  * musl sizes each thread's TLS from the tls segment, so that holds .tdata and .tbss and
  * nothing else. A section this script does not name would take the segments of the one before
  * it, so .got has its place ahead of them, and a task's link refuses an unnamed section
- * (NativeRoot::TASK_LINK_FLAGS).
+ * (NativeRoot::TASK_LINK_FLAGS). ERTS keeps data it seldom writes in ERTS_LOW_WRITE
+ * (ERTS_WRITE_UNLIKELY in sys.h), which is data like any other here.
  */
 ENTRY(_start)
 PHDRS {
@@ -31,7 +32,7 @@ SECTIONS {
 	.got : { *(.got .got.*) } :data
 	.tdata : { *(.tdata .tdata.*) } :data :tls
 	.tbss : { *(.tbss .tbss.*) } :data :tls
-	.data : { *(.data .data.*) } :data
+	.data : { *(.data .data.*) *(ERTS_LOW_WRITE) } :data
 	.bss : { *(.bss .bss.* COMMON) } :data
 	.symtab 0 : { *(.symtab) }
 	.strtab 0 : { *(.strtab) }

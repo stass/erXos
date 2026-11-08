@@ -1,0 +1,116 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/*
+ * The calls of ERTS's link that a task's program has no service answer for, so a
+ * domain's runtime image (NativeRoot::DOMAIN_RUNTIME) links: each refuses or reports
+ * its value unavailable, as the call table answers a call it does not offer
+ * (docs/design-stopgap.md, "The call table"). The root's own bodies in group.c,
+ * irq.c, time.c, vm.c, watchdog_thread.c and runtime_entry.c read the root's
+ * tables, which a task does not hold. A call the service comes to serve a task
+ * moves from here to its stub in service_stubs.c.
+ */
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "erx/abi.h"
+#include "liberx/backend/api.h"
+#include "liberx/backend/fiasco/group.h"
+#include "liberx/backend/fiasco/time.h"
+#include "liberx/backend/fiasco/vm.h"
+#include "liberx/backend/runtime_entry.h"
+
+/*
+ * A task holds no boot information page the service wrote. It gets a page of zeros,
+ * which erx_boot_info_read refuses with its diagnostic, so a runtime started here ends
+ * with the reader's reason rather than a fault on a missing page.
+ */
+static _Alignas(ERX_PAGE_SIZE) const unsigned char no_boot_page[ERX_PAGE_SIZE];
+
+const erx_boot_info_t *
+erx_boot_info(void)
+{
+	return ((const erx_boot_info_t *)(const void *)no_boot_page);
+}
+
+int
+erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *window, uint64_t size)
+{
+	(void)object;
+	(void)topic;
+	(void)index;
+	(void)window;
+	(void)size;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_group_info(uint64_t group)
+{
+	(void)group;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_group_take_ready(uint32_t max)
+{
+	(void)max;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
+{
+	(void)budget;
+	(void)resource;
+	(void)kind;
+	(void)selector;
+	(void)irq;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label)
+{
+	(void)irq;
+	(void)group;
+	(void)label;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_irq_ack(uint64_t irq)
+{
+	(void)irq;
+	return (ERX_ENOTSUP);
+}
+
+/* The machine's watchdog is the system domain's to pet, and no other's. */
+int
+erx_watchdog_pet(void)
+{
+	return (ERX_ENOTSUP);
+}
+
+/* The root's time page is the root's memory, so a task has no wall time to read. */
+bool
+erx_time_wall_ns(uint64_t *wall_ns)
+{
+	(void)wall_ns;
+	return (false);
+}
+
+/*
+ * A task counts no pool, so it can promise no page beyond those it has committed:
+ * erx_vm_free_pages reports none, the one answer that is never more than it can
+ * commit.
+ */
+uint64_t
+erx_fiasco_vm_free_pages(void)
+{
+	return (0);
+}

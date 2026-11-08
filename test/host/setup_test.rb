@@ -19,7 +19,8 @@ class SetupTest < Minitest::Test
   def test_fresh_tree_runs_every_step_in_order
     assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK)).map(&:name)
     assert_equal NAMES.length - 5, NAMES.take_while { |name| name.start_with?('source-') }.length
-    assert_equal %w[oracle-jit oracle-emu runtime rc-oracle fsimg], NAMES.last(5)
+    # The runtime build packs the hosted release, whose EROFS image fsimg writes.
+    assert_equal %w[oracle-jit oracle-emu fsimg runtime rc-oracle], NAMES.last(5)
   end
 
   def test_complete_tree_runs_nothing
@@ -172,7 +173,8 @@ class SetupDecisionsTest < Minitest::Test
   def test_leftovers_cleans_only_an_oracle_directory_without_a_build_record
     with_tree do |root, runner, _sample, _sha|
       setup = setup_for(root, runner)
-      jit, emu, runtime = Erx::Setup::COMMAND_STEPS
+      jit, emu = Erx::Setup::COMMAND_STEPS
+      runtime = Erx::Setup::COMMAND_STEPS.find { |step| step.name == 'runtime' }
       assert_empty setup.send(:leftovers, jit), 'no directory'
       FileUtils.mkdir_p(File.join(root, 'build/oracle/jit'))
       assert_equal ['--clean'], setup.send(:leftovers, jit)

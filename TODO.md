@@ -429,6 +429,19 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] liberx Fiasco backend, `liberx/backend/fiasco/task_refused.c`: in a task,
+  `erx_vm_free_pages` reports 0 while commits through the service still succeed, an
+  invented count that `api.h`'s exact contract does not allow; it should answer
+  `ERX_ENOTSUP` (the call needs a status return) or the domain budget's room. The same
+  file refuses `erx_boot_info` with a zero page and `erx_time_wall_ns` as unavailable,
+  so the domain runtime image (`runtimes/emu`) ends at its boot page until a task's
+  start (BK11) and ERTS in a domain (RT1) serve them.
+* [Medium] packer, `tools/lib/erx/production_image.rb` (`DOMAIN_RELEASES`): the
+  domain releases an image carries are a constant, and a test image's `domains:` is
+  checked against no manifest row. Once the manifest check admits domain rows, derive
+  the list from them (each row's `release @artifact.NAME` and its applications), so an
+  image carries exactly the releases its manifest names.
+
 * [Low] liberx Fiasco backend, `liberx/backend/fiasco/service_task.c` (around line 354): `erlang:halt/1`
   with a slogan in the system domain writes no crash record, since the root task's own stop takes the end
   path with no fault; [design-system.md](docs/design-system.md) "The crash record" gives a halt the cause

@@ -78,6 +78,19 @@ module Erx
     NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
     private_constant :NOTHING_ADDED
 
+    # The domain releases an image carries are those its manifest's domain rows name,
+    # and with any of them the one runtime image every domain runs. The Phase 1 manifest
+    # check refuses domain rows until it admits configured domains, so the production
+    # image names none and carries neither; a test image may carry some
+    # (build_test_image's domains).
+    DOMAIN_RELEASES = [].freeze
+    # A domain's runtime image in the archive: the interpreter's, under the flavour
+    # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
+    # artifact name a domain row's runtime takes. It sorts after domains/ and before
+    # system/, and carries no system mark, since the root task does not run it.
+    DOMAIN_RUNTIME_PATH = 'runtimes/emu'
+    DOMAIN_RUNTIME_ARTIFACT = 'emu'
+
     # The QEMU virt machine an image boots on: its RAM, the part of it Fiasco keeps
     # (fiasco_reserve, which grows with RAM, since Fiasco sizes its kernel memory as
     # 6% of it), system_growth_mib, which is added to both root_memory and
@@ -154,7 +167,7 @@ module Erx
     # and nothing else.
     def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
       assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
-               machine: DEVELOPMENT_MACHINE)
+               machine: DEVELOPMENT_MACHINE, domains: DOMAIN_RELEASES)
     end
 
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
@@ -168,17 +181,18 @@ module Erx
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
     # test code, OracleQemu and BlockDevice, call it, which the source check holds
-    # (Checks::TEST_IMAGE_BUILDERS).
-    def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE)
+    # (Checks::TEST_IMAGE_BUILDERS). domains are the domain releases it carries
+    # (ReleaseFiles.domain), each under domains/<name>/, with the domain runtime image.
+    def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE, domains: [])
       raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
 
       assemble(directory: directory, manifest_source: machine.manifest(File.binread(File.join(@root, MANIFEST))), added: added,
-               test_code: true, machine: machine)
+               test_code: true, machine: machine, domains: domains)
     end
 
-    # Both entry points' one build: the system release, any additions, and the mark that
-    # says whether there are some.
-    def assemble(directory:, manifest_source:, added:, test_code:, machine:)
+    # Both entry points' one build: the system release, the domain releases with their
+    # runtime image, any additions, and the mark that says whether there are some.
+    def assemble(directory:, manifest_source:, added:, test_code:, machine:, domains:)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
@@ -194,10 +208,11 @@ module Erx
       File.write(self.class.sources_path(archive), sources)
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
-      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *added.entries], root_task: root_task, images: images,
-                    manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
-                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs], test_code: test_code,
-                    machine: machine)
+      domain = domain_parts(domains, erts: erts, archives: archives, directory: directory)
+      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *domain.entries, *added.entries], root_task: root_task,
+                    images: images, manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *domain.inputs, *added.inputs].uniq,
+                    test_code: test_code, machine: machine)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
@@ -1028,6 +1043,45 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
+    # The domain releases' entries, each file under its release's prefix without the
+    # system mark, and the domain runtime image's, with the files their receipts name;
+    # nothing when there are no domain releases.
+    def domain_parts(domains, erts:, archives:, directory:)
+      return NOTHING_ADDED if domains.empty?
+      # Only ReleaseFiles.domain checks a name, so a release built any other way, whose
+      # name could leave the work directory or disagree with its prefix, is refused.
+      raise Error, 'a domain release is one ReleaseFiles.domain made' unless
+        domains.all? { |release| release.is_a?(ReleaseFiles::Release) && release == ReleaseFiles.domain(release.name, applications: release.applications) }
+      raise Error, 'two domain releases share a name' unless domains.map(&:name).uniq.size == domains.size
+
+      runtime = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
+                          .build_domain_runtime_receipted(directory: File.join(directory, 'domain-runtime'), archives: archives)
+      releases = domains.flat_map do |release|
+        ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains', release.name), runner: @runner,
+                         codec: @codec, release: release).entries
+      end
+      image = { 'path' => DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
+                'id' => 'domain-runtime', 'artifact' => runtime.fetch(:program), 'receipt' => runtime.fetch(:receipt) }
+      Added.new(entries: [image, *releases].freeze, inputs: [*runtime.fetch(:inputs), *ReleaseFiles.inputs_of(releases, root: @root)].freeze,
+                imports: {}.freeze)
+    end
+
+    # What a manifest's references name in an archive of these sorted paths: the root
+    # and the domain runtime image as executables, images as built EROFS artifacts, and
+    # each domain release as its run of entries (ReleaseFiles.domain_runs). Two of them
+    # under one name would leave a reference ambiguous, so that is refused.
+    def self.artifacts(paths, images:)
+      named = [{ 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } }, images,
+               ReleaseFiles.domain_runs(paths)]
+      runtime = paths.index(DOMAIN_RUNTIME_PATH)
+      named << { DOMAIN_RUNTIME_ARTIFACT => { 'kind' => 'executable', 'entry' => runtime } } if runtime
+      names = named.flat_map(&:keys)
+      raise Error, "two artifacts of the archive share a name: #{names.tally.select { |_, count| count > 1 }.keys.join(', ')}" unless
+        names.uniq.size == names.size
+
+      named.reduce(:merge)
+    end
+
     def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, output:, imports:, test_code:, machine:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
@@ -1038,7 +1092,7 @@ module Erx
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance)
           .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,
-                 artifacts: { 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } }.merge(images),
+                 artifacts: self.class.artifacts(paths, images: images),
                  manifest_source: manifest_source, output: output, test_code: test_code)
     end
 

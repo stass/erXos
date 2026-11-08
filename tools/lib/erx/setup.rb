@@ -39,12 +39,13 @@ module Erx
                argv: %w[oracle build --backend native --flavour jit]),
       Step.new(name: 'oracle-emu', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[oracle build --backend native --flavour emu]),
+      # fsimg writes the EROFS image the runtime build packs the hosted release with.
+      Step.new(name: 'fsimg', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
+               argv: %w[build fsimg]),
       Step.new(name: 'runtime', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[build runtime]),
       Step.new(name: 'rc-oracle', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
-               argv: %w[build rc-oracle]),
-      Step.new(name: 'fsimg', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
-               argv: %w[build fsimg])
+               argv: %w[build rc-oracle])
     ].freeze
 
     # Every step for deps.lock's sources: each source setup fetches, in

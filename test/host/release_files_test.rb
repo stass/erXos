@@ -134,6 +134,63 @@ class ReleaseFilesTest < Minitest::Test
     assert_includes error.message, 'linked.hrl is not a plain file'
   end
 
+  def domain_entries(release)
+    Erx::ReleaseFiles.new(root: ROOT, otp: @otp, directory: File.join(@scratch, 'domain'), runner: BootRunner.new,
+                          codec: Codec.new, oracle: FakeOracle.new, release: release).entries
+  end
+
+  # A domain release is laid out as the system release is, under domains/<name>/, and
+  # no file of it carries the system mark, which only the system release's files carry.
+  def test_a_domain_release_lies_under_its_prefix_without_the_system_mark
+    files = domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[stdlib kernel]))
+    paths = files.map { |entry| entry.fetch('path') }
+    assert_includes paths, "domains/base/lib/kernel-#{VERSION}/ebin/kernel.app"
+    assert_includes paths, "domains/base/lib/stdlib-#{VERSION}/include/qlc.hrl"
+    assert_includes paths, 'domains/base/bin/start.boot'
+    assert(paths.all? { |path| path.start_with?('domains/base/') }, paths.join(', '))
+    assert_equal [0], files.map { |entry| entry.fetch('flags') }.uniq
+    assert_equal ['system'], entries.map { |entry| entry.fetch('flags') }.uniq
+  end
+
+  # Its release file carries the domain's name and its applications alone, in the
+  # system release's order whatever order they were asked in.
+  def test_a_domain_release_file_names_the_domain_and_only_its_applications
+    domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[stdlib kernel]))
+    release = File.read(File.join(@scratch, 'domain/start.rel'))
+    assert_equal "{release,{\"base\",\"1\"},{erts,\"#{VERSION}\"},[{kernel,\"#{VERSION}\"},{stdlib,\"#{VERSION}\"}]}.\n", release
+  end
+
+  def test_a_domain_release_name_is_one_manifest_identifier
+    ['', 'Base', '../x', 'a/b', '.hidden', 'x' * 64, :base].each do |name|
+      assert_raises(Erx::Error, name.inspect) { Erx::ReleaseFiles.domain(name, applications: %w[kernel stdlib]) }
+    end
+    assert_equal 'domains/a.b-c_1/', Erx::ReleaseFiles.domain('a.b-c_1', applications: %w[kernel stdlib]).prefix
+  end
+
+  def test_a_domain_release_boots_through_kernel_and_stdlib_and_ships_only_what_is_built
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: %w[kernel]) }
+    assert_includes error.message, 'stdlib'
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: %w[kernel stdlib mnesia]) }
+    assert_includes error.message, 'mnesia'
+  end
+
+  # In an archive's sorted index each domain release is one run of whole entries,
+  # between boot/'s files and the system release, which it does not split.
+  def test_each_domain_release_is_one_run_of_the_sorted_index
+    paths = ['boot/kernel', 'boot/sigma0', 'domains/a/bin/start.boot', 'domains/a/lib/x', 'domains/b/bin/start.boot',
+             'runtimes/emu', 'system/bin/start.boot', 'system/root']
+    assert_equal({ 'a' => { 'kind' => 'release', 'entry' => 2, 'files' => 2 },
+                   'b' => { 'kind' => 'release', 'entry' => 4, 'files' => 1 } }, Erx::ReleaseFiles.domain_runs(paths))
+    assert_empty Erx::ReleaseFiles.domain_runs(['boot/kernel', 'system/root'])
+  end
+
+  def test_a_domain_run_out_of_order_or_without_a_directory_is_refused
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a/y', 'domains/a/x']) }
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a/x', 'domains/a/x']) }
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a', 'system/root']) }
+    assert_includes error.message, 'not a release directory'
+  end
+
   def test_the_hosted_tree_ships_headers_from_the_tree_and_no_appup
     files = Erx::OracleHosted.application_files(root: ROOT, otp: @otp)
     assert_equal File.join(ROOT, 'otp/lib/stdlib/include/qlc.hrl'), files['lib/stdlib/include/qlc.hrl']

@@ -403,7 +403,7 @@ nothing from `test/fixtures`, and `production_image_test.rb` checks the loaded f
 No production image carries test code, by construction rather than by a caller's
 convention. `ProductionImage#build` takes no additions: its image holds the system
 release, the domain releases and runtime images its manifest names, and nothing else. The one way to add files to that release is the test entry
-point, `ProductionImage#build_test_image(directory:, added:, machine:)`, which packs them with
+point, `ProductionImage#build_test_image(directory:, added:, machine:, domains:)`, which packs them with
 `ERX_PACK_TEST_CODE` set in the archive's flags. The packer sets the bit only in a
 development build, the archive check and the kernel refuse it in any other, the
 kernel's banner prints `test image: carries test code` after the development warning,
@@ -443,7 +443,8 @@ OTP's suites ask for more than the development baseline holds (compiler's
 | `boot_stand_in_root_path` | file | the root as an ELF file, which `bootstrap` loads |
 | `system/root` | image | the same program as an image, the header's root entry, which the root startup rule sizes |
 | `system_manifest_path`, `system/NOTICES` | file | what `Pack#build` generates |
-| `domains/<name>/...` | file | a domain release's files, `<name>` the release's name; the index is sorted, so each release is one run of whole entries, which the domain library slices, and none carries the system mark. The release provider strips the prefix, as it strips `system/` |
+| `domains/<name>/...` | file | a domain release's files, `<name>` the release's name; the index is sorted, so each release is one run of whole entries, which the domain library slices, and none carries the system mark. The release provider strips the prefix, as it strips `system/`. `<name>` is a manifest identifier, and a domain row's `release @artifact.<name>` names the run: its first entry and its count of files |
+| `runtimes/emu` | image | the domain runtime image: the interpreter ERTS linked as a task's program at `task.ld`'s fixed addresses, since `erx_image_map` loads only an `ERX_IMAGE_FIXED` image; one image for every domain, named as `erx_domain`'s spec names its flavour, with BeamAsm's beside it as `runtimes/jit`. It carries no system mark, since the root does not run it, and a domain row's `runtime @artifact.emu` names it |
 
 The root is stored twice because `bootstrap` reads an ELF file while the archive's
 root entry is an image by the validator's rule. Track K's planner loads the image
