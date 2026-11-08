@@ -370,6 +370,11 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] liberx Fiasco backend, `liberx/backend/fiasco/service_task.c` (around line 354): `erlang:halt/1`
+  with a slogan in the system domain writes no crash record, since the root task's own stop takes the end
+  path with no fault; [design-system.md](docs/design-system.md) "The crash record" gives a halt the cause
+  `halt`. musl's `abort()` meanwhile ends in a store to address 0, because `tkill` answers `ENOSYS`
+  (`musl/src/internal/erxos/syscall.c:290`), so an abort reads as a fault rather than as an abort.
 * [Low] abi, `abi/erx_abi.txt`: the exit statuses `ERX_EXIT_PARENT`,
   `ERX_EXIT_RELEASED` and `ERX_EXIT_NOTHREAD` of
   [design-kernel.md](docs/design-kernel.md) and `ERX_EXIT_CRASH` of
