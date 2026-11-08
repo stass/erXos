@@ -2059,31 +2059,25 @@ to the corpus and follow rc
   build every body through one constructor that does it
   (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
 * [Medium] shell, the command catalog is read at run time: `erx_shell_namespace:from_applications/1`
-  loads the shell application's modules and reads their `-erx_command`, `-erx_usage`, `-erx_needs`
-  and `-erx_fields` attributes each time `erx_shell:run/2` starts, where the design has a generated,
+  loads the shell application's modules and reads their `-erx_command`, `-erx_usage` and
+  `-erx_needs` attributes each time `erx_shell:run/2` starts, where the design has a generated,
   checked catalog bound to each module's blob hash and republished around code replacement
   ([design-generation.md](docs/design-generation.md#configuration-and-command-catalogs)). A module
   with malformed metadata is left out with a problem that `run/2` drops unshown; the generator
   should refuse it at build time (`erlang/apps/erx_shell/src/erx_shell_namespace.erl`).
-* [Low] shell, `where`'s glob budget is per comparison and its work is repeated per record: each
-  `~` gets its own 2^24 steps, so a 4 KiB predicate of many `~` comparisons spends many times that
-  on one record, and each comparison re-tokenizes its pattern and rebuilds the field's character
-  list; thread one budget through `erx_shell_where:eval/2` and compile each pattern at parse/1
-  (`erlang/apps/erx_shell/src/erx_shell_where.erl`, `erx_shell_glob.erl`).
-* [Low] shell, `where` cannot write rc's negated class: `~` is an operator character, so
-  `a ~ [~x]` does not parse and a quoted pattern is literal; let a WORD in a value hold `~`
-  (`erlang/apps/erx_shell/src/erx_shell_where.erl`).
-* [Low] shell, every write of an Erlang command to the terminal must go through `erx_cmd` from the
-  process run/2 runs in, or its records' table flushes out of order; a build check that only
-  `erx_cmd` and the runner unpack a `{tty, Write}` stream would make that hold by construction
-  (`erlang/apps/erx_shell/src/erx_cmd.erl`).
 * [Low] shell, the terminal's table measures a value by its characters (`string:length/1`), so an
   East Asian wide character, which takes two columns, misaligns the rest of its row; measure display
   width from the terminal tables (`erlang/apps/erx_shell/src/erx_render.erl`).
+* [Low] shell, the text commands' gaps against docs/design-live.md and docs/design-shell.md
+  (`erlang/apps/erx_shell/src/erx_cmd_ps.erl`, `erx_cmd_grep.erl`, `erx_cmd_wc.erl`): `ps` prints `-`
+  for `TT` because the session's tty has no name a command can read, leaves out the `+` of a
+  foreground job's `STAT`, and lists no programs until programs run in sessions; `grep -r` is not
+  offered; `wc`'s status is its first error's text where FreeBSD's is 1; and a usage error's
+  status is `usage` where FreeBSD's `sort` and `grep` exit 2 (`erx_shell_runner:outcome/3`).
 * [Low] shell, the runner's pieces not done yet: `<{...}` and `>{...}` are refused, since the
   namespace has no path that names a pipe; a background block's redirected files close when the
   redirection's request ends, so `{cmd &} > f` loses what `cmd` writes after that; a substitution's
-  output is bounded by the evaluator's heap alone; the first Erlang commands lack `i`, `select`,
+  output is bounded by the evaluator's heap alone; the first Erlang commands lack `i`,
   `bind`, `unmount` and `mount` with arguments, which change the namespace through `erx_ns`
   (`erlang/apps/erx_shell/src/erx_shell_runner.erl`).
 * [Medium] shell, the Erlang file utilities (`erlang/apps/erx_shell/src/erx_cmd_*.erl`): `echo`, `cat`, `ls`,
@@ -2103,10 +2097,9 @@ to the corpus and follow rc
   `cd`, `can't open`, `erx_cmd:report/3`, crash text) carry file names raw to the terminal; decide in
   design-shell.md whether they pass the line escape. Glob keeps a non-directory before `/` (`echo */`
   lists files) and resolves `f/..` by name. Stages and background blocks are admitted with no stage
-  allowance at all (see pipeline admission below). `cat` reads lines bounded at 64 KiB where a byte
-  command wants `erx_shell_pipe:get_chunk/1`; the design's `line` records from bytes are binary lines
-  in `erx_cmd:read/1`. A pump treats a read error as end of input; `ls` and glob skip names that are
-  not UTF-8 (`list_dir_all`); the pipe's merge scans up to 64 KiB per one-byte write.
+  allowance at all (see pipeline admission below). A pump treats a read error as end of input, so `grep` of a
+  directory finds nothing where FreeBSD's warns; `ls` and glob skip names that are not UTF-8
+  (`list_dir_all`).
 * [Medium] shell, pipeline admission: each pipeline stage is admitted at
   its full `max_heap_size`, 16 MiB, against an eighth of the session's
   budget, so a 128 MiB session admits one stage and `ps | where | sort`

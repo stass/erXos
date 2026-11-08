@@ -33,10 +33,8 @@ not complete it. With `-m` the longest line is measured in characters,
 otherwise in bytes.
 
 Input. A file is read in pieces, so it has no bound on its size or its
-lines. Standard input is read in whatever pieces are in flight; a record
-from a neighbouring Erlang stage counts as one line, the text it renders
-toward a file or a program (erx_render:line/2), so `ps | wc -l` counts
-the records.
+lines. Standard input is read in whatever pieces are in flight
+(erx_cmd:read/1).
 
 Errors. A file that cannot be opened or read is reported in FreeBSD's
 form, `wc: name: open: reason` or `wc: name: read: reason`, with the
@@ -93,13 +91,13 @@ run(Args, Ctx) ->
 count_all(Options, [], Ctx) ->
     Count = count_input(Options, new(), Ctx),
     warn_illegal(Count, <<"stdin">>, Ctx),
-    erx_cmd:emit(Ctx, line(Options, Count, stdin));
+    erx_cmd:write(Ctx, line(Options, Count, stdin));
 count_all(Options, Files, Ctx) ->
     Results = [count_named(Options, File, Ctx) || File <- Files],
     case Files of
         [_, _ | _] ->
             Total = lists:foldl(fun sum/2, new(), [Count || {ok, Count} <- Results]),
-            erx_cmd:emit(Ctx, line(Options, Total, <<"total">>));
+            erx_cmd:write(Ctx, line(Options, Total, <<"total">>));
         [_] ->
             ok
     end,
@@ -115,7 +113,7 @@ count_named(Options, File, Ctx) ->
             try count_file(Options, Fd, new()) of
                 {ok, Count} ->
                     warn_illegal(Count, File, Ctx),
-                    erx_cmd:emit(Ctx, line(Options, Count, File)),
+                    erx_cmd:write(Ctx, line(Options, Count, File)),
                     {ok, Count};
                 {error, Reason} ->
                     erx_cmd:report(Ctx, [File, <<": read">>], Reason),
@@ -136,14 +134,10 @@ count_file(Options, Fd, Count) ->
     end.
 
 count_input(Options, Count, Ctx) ->
-    case erx_cmd:read_chunk(Ctx) of
+    case erx_cmd:read(Ctx) of
         eof -> close(Count);
-        Item -> count_input(Options, add(mode(Options), input_bytes(Item), Count), Ctx)
+        Bytes -> count_input(Options, add(mode(Options), Bytes, Count), Ctx)
     end.
-
-%% A record counts as the line it renders toward a file.
-input_bytes({Fields, Record}) -> erx_render:line(Fields, Record);
-input_bytes(Bytes) when is_binary(Bytes) -> Bytes.
 
 %% FreeBSD's warning for an input with an illegal sequence, given once.
 warn_illegal(#count{illegal = true}, Name, Ctx) -> erx_cmd:report(Ctx, Name, eilseq);

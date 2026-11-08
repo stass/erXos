@@ -7,12 +7,12 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
 
-# Runs test/erlang/erx_shell_records_tests.erl, the EUnit cases of the command
-# shell's record pipelines: `where`'s predicates, `sort`, `wc` counting records and the
-# terminal's table (docs/design-shell.md, "Pipelines"), against the erx_shell
+# Runs test/erlang/erx_shell_text_tests.erl, the EUnit cases of the command
+# shell's text commands, `sort`, `grep`, `ps` and `ls`, and their pipelines
+# (docs/design-shell.md, "Text commands"), against the erx_shell
 # application compiled from source with warnings as errors on stock's emulator
 # (ERX_ERL and ERX_ERLC, which make check supplies).
-class ErxShellRecordsTest < Minitest::Test
+class ErxShellTextTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
@@ -21,16 +21,16 @@ class ErxShellRecordsTest < Minitest::Test
   SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
-             File.join(ROOT, 'test/erlang/erx_shell_records_tests.erl')].uniq.freeze
+             File.join(ROOT, 'test/erlang/erx_shell_text_tests.erl')].uniq.freeze
 
-  def test_record_cases_pass_under_eunit
-    Dir.mktmpdir('erx-shell-records-test') do |work|
+  def test_text_cases_pass_under_eunit
+    Dir.mktmpdir('erx-shell-text-test') do |work|
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-o', work, *SOURCES,
                                        stdin_data: '')
       assert status.success?, output
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
-                                       '-eval', 'halt(case eunit:test(erx_shell_records_tests) of ok -> 0; _ -> 1 end).',
+                                       '-eval', 'halt(case eunit:test(erx_shell_text_tests) of ok -> 0; _ -> 1 end).',
                                        chdir: work, stdin_data: '')
       assert status.success?, output
       assert_match(/All \d+ tests passed/, output)

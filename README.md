@@ -144,7 +144,7 @@ pixels. The [overview](docs/overview.md) tells the longer story.
   ([web](docs/design-web.md))
 * **UNIX on the surface.** As on *QNX* and *Plan 9*, UNIX is how the system
   looks, not what it is built on. The command shell speaks rc's language
-  and pipes live Erlang records between commands. Toybox supplies the
+  and pipes text between commands, as UNIX does. Toybox supplies the
   familiar tools. Native programs run on a POSIX-lite layer over musl,
   each holding only what its starter handed it.
   ([shell](docs/design-shell.md), [programs](docs/design-programs.md),
@@ -269,9 +269,10 @@ Error in process <0.150.0> with exit value:
   starts the Erlang shell; `q()` there returns to the command shell.
   The language has variables, lists, `for`, `if`, functions, pipelines,
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
-  Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `mkdir`,
-  `rm`, `mv`, `cp`, `ps`, `mount`, `erl`, `true`, `false`, and the record
-  stages `where` and `sort`). Its language is checked against
+  Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
+  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `mount`, `erl`, `true` and
+  `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
+  `wc` print what FreeBSD's do for the options they offer. Its language is checked against
   plan9port's rc, built on the host as the oracle. Job control works for
   Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
   programs is not on master yet.

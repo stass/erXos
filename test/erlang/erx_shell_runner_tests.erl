@@ -25,55 +25,58 @@ run([<<"marker">>], _Ctx) -> runner_tests_marker ! {marker, self()}, ok;
 run([<<"hog">>], _Ctx) -> {error, length(lists:seq(1, 1 bsl 26))};
 run(_Args, _Ctx) -> {error, usage}.
 
-yes(Ctx) -> erx_cmd:emit(Ctx, <<"y\n">>), yes(Ctx).
+yes(Ctx) -> erx_cmd:write(Ctx, <<"y\n">>), yes(Ctx).
 
 %%% The pipe
 
 pipe_lines_test() ->
     Pipe = erx_shell_pipe:new(),
-    writer(Pipe, [{bytes, <<"one\ntw">>}, {bytes, <<"o\nlast">>}]),
+    writer(Pipe, [<<"one\ntw">>, <<"o\nlast">>]),
     ?assertEqual({line, <<"one\n">>}, erx_shell_pipe:get(Pipe)),
     ?assertEqual({line, <<"two\n">>}, erx_shell_pipe:get(Pipe)),
     ?assertEqual({line, <<"last">>}, erx_shell_pipe:get(Pipe)),
     ?assertEqual(eof, erx_shell_pipe:get(Pipe)).
 
-pipe_record_ends_a_partial_line_test() ->
-    Pipe = erx_shell_pipe:new(),
-    writer(Pipe, [{bytes, <<"part">>}, {record, [a], #{a => 1}}]),
-    ?assertEqual({line, <<"part">>}, erx_shell_pipe:get(Pipe)),
-    ?assertEqual({record, [a], #{a => 1}}, erx_shell_pipe:get(Pipe)),
-    ?assertEqual(eof, erx_shell_pipe:get(Pipe)).
-
-%% Bytes written one at a time merge, so 300 of them never fill the count.
+%% Bytes written one at a time make one line.
 pipe_merges_bytes_test() ->
     Pipe = erx_shell_pipe:new(),
-    writer(Pipe, lists:duplicate(300, {bytes, <<"x">>}) ++ [{bytes, <<"\n">>}]),
+    writer(Pipe, lists:duplicate(300, <<"x">>) ++ [<<"\n">>]),
     ?assertEqual({line, binary:copy(<<"x">>, 300)}, strip(erx_shell_pipe:get(Pipe))),
     ?assertEqual(eof, erx_shell_pipe:get(Pipe)).
 
 pipe_line_too_long_test() ->
     Pipe = erx_shell_pipe:new(),
-    writer(Pipe, [{bytes, binary:copy(<<"x">>, 70000)}]),
+    writer(Pipe, [binary:copy(<<"x">>, 70000)]),
     ?assertEqual({error, line_too_long}, erx_shell_pipe:get(Pipe)).
 
-%% The 257th record waits until the reader takes one.
-pipe_bounds_records_in_flight_test() ->
+%% A writer of 1 MiB to a reader that takes nothing holds at most 64 KiB
+%% in flight, and each read takes at most that.
+pipe_bounds_bytes_in_flight_test() ->
     Pipe = erx_shell_pipe:new(),
     Self = self(),
-    writer(Pipe, [{record, [n], #{n => N}} || N <- lists:seq(1, 257)], fun() -> Self ! all_put end),
+    writer(Pipe, [binary:copy(<<"x">>, 1 bsl 20)], fun() -> Self ! all_put end),
     ?assertEqual(nothing, receive all_put -> put_all after 200 -> nothing end),
-    ?assertEqual({record, [n], #{n => 1}}, erx_shell_pipe:get(Pipe)),
-    ?assertEqual(put_all, receive all_put -> put_all after 5000 -> nothing end).
+    {bytes, First} = erx_shell_pipe:get_bytes(Pipe),
+    ?assertEqual(65536, byte_size(First)),
+    Rest = drain_bytes(Pipe, 0),
+    ?assertEqual(put_all, receive all_put -> put_all after 5000 -> nothing end),
+    ?assertEqual(1 bsl 20, byte_size(First) + Rest).
+
+drain_bytes(Pipe, Total) ->
+    case erx_shell_pipe:get_bytes(Pipe) of
+        {bytes, Bytes} when byte_size(Bytes) =< 65536 -> drain_bytes(Pipe, Total + byte_size(Bytes));
+        eof -> Total
+    end.
 
 pipe_epipe_when_reader_ends_test() ->
     Pipe = erx_shell_pipe:new(),
     Reader = spawn(fun() -> receive stop -> ok end end),
     erx_shell_pipe:attach(Pipe, read, Reader),
-    ?assertEqual(ok, erx_shell_pipe:put(Pipe, {bytes, <<"a\n">>})),
+    ?assertEqual(ok, erx_shell_pipe:put(Pipe, <<"a\n">>)),
     Ref = monitor(process, Reader),
     Reader ! stop,
     receive {'DOWN', Ref, _, _, _} -> ok end,
-    ?assertEqual({error, epipe}, erx_shell_pipe:put(Pipe, {bytes, <<"b\n">>})).
+    ?assertEqual({error, epipe}, erx_shell_pipe:put(Pipe, <<"b\n">>)).
 
 pipe_here_document_test() ->
     Pipe = erx_shell_pipe:from_binary(<<"a\nb\n">>),
@@ -135,10 +138,6 @@ render_statuses_test() ->
                  [erx_render:value({runtime, V})
                   || V <- [{ok, 7}, {partial, 1}, unknown, unsupported, {timeout, 500}, {error, x}]]).
 
-render_line_test() ->
-    Record = #{b => {runtime, {ok, <<"x\ty\\">>}}, a => {runtime, unknown}},
-    ?assertEqual(<<"[unknown]\tx\\ty\\\\\n">>, erx_render:line([a, b, c], Record)).
-
 cmd_path_test() ->
     ?assertEqual(<<"/a/c">>, erx_cmd:path(<<"/a/b">>, <<"../c">>)),
     ?assertEqual(<<"/">>, erx_cmd:path(<<"/a">>, <<"../../..">>)),
@@ -147,14 +146,18 @@ cmd_path_test() ->
 cmd_getopt_test() ->
     ?assertEqual({ok, "rf", [<<"a">>]}, erx_cmd:getopt([<<"-r">>, <<"-f">>, <<"a">>], "rf")),
     ?assertEqual({ok, "", [<<"-x">>]}, erx_cmd:getopt([<<"--">>, <<"-x">>], "rf")),
-    ?assertEqual({error, usage}, erx_cmd:getopt([<<"-x">>], "rf")).
+    ?assertEqual({error, usage}, erx_cmd:getopt([<<"-x">>], "rf")),
+    ?assertEqual({ok, [$n, {$k, <<"2">>}, {$k, <<"3,3">>}], [<<"f">>]},
+                 erx_cmd:getopt([<<"-nk2">>, <<"-k">>, <<"3,3">>, <<"f">>], "nk:")),
+    ?assertEqual({error, usage}, erx_cmd:getopt([<<"-k">>], "nk:")).
 
 %%% The runner
 
 runner_state(Facets, Err) ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)}
-                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_echo, erx_cmd_true, erx_cmd_cp, erx_cmd_mv, erx_cmd_rm]]),
+                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_echo, erx_cmd_true, erx_cmd_cp, erx_cmd_mv, erx_cmd_rm]]
+                    ++ [{needy, attributes(needy, "needy") ++ [{erx_needs, [inspect]}], [{run, 2}]}]),
     erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => null, 2 => Err},
                            table => Table, facets => Facets}).
 
@@ -166,11 +169,11 @@ runner_statuses_test() ->
     Pipe = erx_shell_pipe:new(),
     erx_shell_pipe:attach(Pipe, read, self()),
     State = runner_state(#{}, {pipe, Pipe}),
-    ?assertEqual(<<"no_facet">>, run_status([<<"ps">>], State)),
+    ?assertEqual(<<"no_facet">>, run_status([<<"needy">>], State)),
     ?assertEqual(<<"not found">>, run_status([<<"nosuch">>], State)),
     ?assertEqual(<<"usage">>, run_status([<<"testcmd">>], State)),
     ?assertMatch(<<"{error,on_purpose}">>, run_status([<<"testcmd">>, <<"crash">>], State)),
-    ?assertEqual([{line, <<"ps: no_facet\n">>}, {line, <<"nosuch: not found\n">>},
+    ?assertEqual([{line, <<"needy: no_facet\n">>}, {line, <<"nosuch: not found\n">>},
                   {line, <<"usage: testcmd crash | yes | hog\n">>},
                   {line, <<"testcmd: crashed: {error,on_purpose}\n">>}],
                  [erx_shell_pipe:get(Pipe) || _ <- [1, 2, 3, 4]]).

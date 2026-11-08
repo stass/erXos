@@ -186,9 +186,9 @@ apart(S) -> S.
 
 %%% Erlang commands
 
-command(#{name := Name, module := Module, usage := Usage, needs := Needs, fields := Fields},
+command(#{name := Name, module := Module, usage := Usage, needs := Needs},
         Args, Vars, #{cwd := Cwd, facets := Facets} = S) ->
-    Ctx = #{name => Name, fields => Fields, cwd => Cwd, env => Vars,
+    Ctx = #{name => Name, cwd => Cwd, env => Vars,
             stdin => stream(0, S), stdout => stream(1, S), stderr => stream(2, S),
             facets => Facets},
     case [Need || Need <- Needs, not is_map_key(Need, Facets)] of
@@ -200,25 +200,14 @@ command(#{name := Name, module := Module, usage := Usage, needs := Needs, fields
     end.
 
 %% What run/2 gave, or how it stopped: a write it could not do, or a crash.
-%% However it ended, the records its terminal table holds are printed then.
 invoke(Module, Args, Ctx) ->
-    Result = try Module:run(Args, Ctx) of
-                 ok -> ok;
-                 {error, _} = Error -> Error;
-                 Other -> {crashed, {bad_return, Other}}
-             catch
-                 throw:{erx_cmd_stop, Reason} -> {stopped, Reason};
-                 Class:Reason -> {crashed, {Class, Reason}}
-             end,
-    %% The first failure is the status: printing the held records can fail
-    %% only a command that had not failed already.
-    try erx_cmd:finish() of
-        ok -> Result
+    try Module:run(Args, Ctx) of
+        ok -> ok;
+        {error, _} = Error -> Error;
+        Other -> {crashed, {bad_return, Other}}
     catch
-        throw:{erx_cmd_stop, Reason2} when Result =:= ok -> {stopped, Reason2};
-        throw:{erx_cmd_stop, _} -> Result;
-        Class2:Reason2 when Result =:= ok -> {crashed, {Class2, Reason2}};
-        _:_ -> Result
+        throw:{erx_cmd_stop, Reason} -> {stopped, Reason};
+        Class:Reason -> {crashed, {Class, Reason}}
     end.
 
 %% A command's status and the diagnostic it did not write itself. A write
@@ -294,9 +283,8 @@ capture(Body, S) ->
     {Output, Status}.
 
 drain(Pipe, Acc) ->
-    case erx_shell_pipe:get_chunk(Pipe) of
+    case erx_shell_pipe:get_bytes(Pipe) of
         {bytes, Bytes} -> drain(Pipe, [Acc, Bytes]);
-        {record, Fields, Record} -> drain(Pipe, [Acc, erx_render:line(Fields, Record)]);
         eof -> iolist_to_binary(Acc)
     end.
 
@@ -334,7 +322,7 @@ diagnose(S, Bytes) -> write_fd(2, Bytes, S).
 
 write_fd(Fd, Bytes, S) ->
     _ = case stream(Fd, S) of
-            {pipe, Pipe} -> erx_shell_pipe:put(Pipe, {bytes, iolist_to_binary(Bytes)});
+            {pipe, Pipe} -> erx_shell_pipe:put(Pipe, iolist_to_binary(Bytes));
             {dev, Device} -> file:write(Device, Bytes);
             {tty, Write} -> Write(Bytes);
             _NullOrClosed -> ok

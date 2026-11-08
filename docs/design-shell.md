@@ -911,7 +911,8 @@ are in flight to a neighbouring Erlang stage or while a pipe has no room;
 `erx_cmd:read/1` takes the next bytes or `eof` from standard input, and
 `erx_cmd:read_line/1` the next line, at most 64 KiB, or `eof`;
 `erx_cmd:isatty/2` says whether a standard stream is the terminal
-([Pipelines](#pipelines)). `erx_cmd:catch_info/0` opts the calling process
+([Pipelines](#pipelines)), and `erx_cmd:columns/1` gives the terminal's width,
+`COLUMNS` first, as FreeBSD's `ls` and `ps` read it. `erx_cmd:catch_info/0` opts the calling process
 in to `Ctrl-T`'s info request, and `erx_cmd:info_requested/0` takes the
 requests pending for it
 ([`Ctrl-T`](#ctrl-t-status-and-the-info-request)). No other source of authority exists for a

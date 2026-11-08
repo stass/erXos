@@ -623,7 +623,7 @@ module Erx
          console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries\r*\n\z}n),
          console_point('inspect-scope', /\Aliberx pool: pages committed through liberx;/n),
          console_point('inspect-answer', /\Aok\r*\n\z/n, type: PROC_EXPRESSION),
-         # ls /proc, sorted, then the console process's status, the machine's and the system
+         # ls -1 /proc, sorted, then the console process's status, the machine's and the system
          # domain's budget's, each attribute a line of name, value and reporter. The console's
          # terminal-less rendering writes each tab of the file as CHT, ESC [ I.
          console_point('proc-ls-domains', /\A(?:[0-9]+> )?domains\r*\n\z/n),
@@ -849,7 +849,7 @@ module Erx
       # /proc through the command shell's evaluator: the console process's directory is its
       # pid's text without brackets.
       PROC_EXPRESSION = 'P=tl(lists:droplast(pid_to_list(whereis(erx_console)))),' \
-                        'erx_shell_script:run(["ls /proc; cat /proc/processes/",P,' \
+                        'erx_shell_script:run(["ls -1 /proc; cat /proc/processes/",P,' \
                         '"/status /proc/status /proc/domains/4/budget/status"]).' "\r"
       # The same status file through file:read_file/1: every line of it is a field escape's
       # name, value and reporter, and the console's line says so. B is LOAD_ONLY_EXPRESSION's.

@@ -11,6 +11,6 @@
 -export([run/2]).
 
 run([<<"-n">> | Args], Ctx) ->
-    erx_cmd:emit(Ctx, lists:join($\s, Args));
+    erx_cmd:write(Ctx, lists:join($\s, Args));
 run(Args, Ctx) ->
-    erx_cmd:emit(Ctx, [lists:join($\s, Args), $\n]).
+    erx_cmd:write(Ctx, [lists:join($\s, Args), $\n]).

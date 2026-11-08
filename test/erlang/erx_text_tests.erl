@@ -1,8 +1,7 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The EUnit cases of erx_text's line escape and field escape, and of
-%% erx_render's terminal table as a display of them: every character class
+%% The EUnit cases of erx_text's line escape and field escape: every character class
 %% of test/fixtures/line_escape_vectors.json (whose path ERX_TEXT_VECTORS
 %% names), which the host tool's Erx::LineEscape answers too
 %% (test/host/line_escape_test.rb), and the properties of each escape.
@@ -78,28 +77,6 @@ field_refuses_what_it_does_not_write_test() ->
                 <<"\x{202e}"/utf8>>, <<"\\xC3\\xA9">>]],
     %% Invalid UTF-8 is written byte by byte, so its tokens are canonical.
     ?assertEqual({ok, <<16#E2, 16#80>>}, erx_text:unescape_field(<<"\\xE2\\x80">>)).
-
-%%% erx_render's terminal table as a display
-
-%% Each class in a value of a two-column table and in a one-column one
-%% shows as the line escape writes it.
-render_table_escapes_every_class_test() ->
-    [begin
-         Record = #{a => {runtime, {ok, Input}}, b => {{stopgap, liberx_pool}, {ok, <<"x">>}}},
-         {Two, _} = erx_render:table_flush(element(2, erx_render:table_record([a, b], Record, erx_render:table()))),
-         [_Header, Row, <<>>] = binary:split(iolist_to_binary(Two), <<"\n">>, [global]),
-         ?assertEqual({Class, Line}, {Class, hd(binary:split(Row, <<"  ">>))}),
-         {One, _} = erx_render:table_record([a], #{a => {service, {ok, Input}}}, erx_render:table()),
-         ?assertEqual({Class, <<Line/binary, "\n">>}, {Class, iolist_to_binary(One)})
-     end || {Class, Input, Line, _} <- vectors(), Input =/= <<>>].
-
-%% A line of data is a program's output and reaches the terminal as its
-%% bytes, whatever they hold.
-render_data_line_stays_raw_test() ->
-    [begin
-         {Bytes, _} = erx_render:table_record([line], #{line => {data, {ok, Input}}}, erx_render:table()),
-         ?assertEqual({Class, <<Input/binary, "\n">>}, {Class, iolist_to_binary(Bytes)})
-     end || {Class, Input, _, _} <- vectors(), binary:match(Input, <<"\n">>) =:= nomatch].
 
 %%% Helpers
 

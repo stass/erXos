@@ -120,7 +120,7 @@ module Erx
       ['rc-syntax-error', /\Arc: syntax error at line 1, column 7: unexpected '\)'\r*\n\z/n,
        "echo hello >/tmp/x; cat /tmp/x\r"],
       ['rc-file', /\Ahello\r*\n\z/n, "ls /images/release/system/lib | cat\r"],
-      ['rc-pipeline', /\Astdlib-[0-9][0-9.]*\r*\n\z/n, "mkdir /tmp/d; ls /tmp\r"],
+      ['rc-pipeline', /\Astdlib-[0-9][0-9.]*\r*\n\z/n, "mkdir /tmp/d; ls -1 /tmp\r"],
       ['rc-mkdir', /\Ad\r*\n\z/n, nil],
       ['rc-ls-file', /\Ax\r*\n\z/n, "nosuch\r"],
       ['rc-not-found', /\Anosuch: not found\r*\n\z/n, "cd /tmp; pwd\r"],

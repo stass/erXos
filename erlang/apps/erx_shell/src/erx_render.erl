@@ -10,77 +10,25 @@ bare, and every other status prints as itself, `[partial]`, `[unknown]`,
 `[unsupported]`, `[timeout N]` or `[error]`, so no status reads as a
 value.
 
-A value is attributed text, which a reporter names (a process's name, a
-file's name, a count), or **data**, `data()`: a line of a file or a
-program without its newline, as erx_cmd:read_record/1 makes it. Data is
-the shell's own value, not the inspector's: `data` stands where a
-reporter would, so `where`, `sort` and value/1 take it as any `ok` value,
-and it never reaches the inspector. A record that is a line of data, one
-data value holding no newline, data_line/1, is written as its bytes and a
-newline, toward a file and toward the terminal alike, as `cat f` writes
-it and as FreeBSD's `sort f` does; anything else, a data value beside
-other fields or holding a newline, renders as attributed text, so data
-never splits a field or a row.
-
-Toward bytes, a file or a pipe, a record becomes one line, line/2, of the
-fields it holds, in the order given, separated by tabs, each value with
-its tab, newline and backslash written as `\t`, `\n` and `\\` and nothing
-else changed, so a reader of lines sees one record per line and exactly
-the data. A line of data is its bytes and a newline, so `cat f | sort > g`
-changes no byte of a line. A command that emits records of more than one
-shape, such as `ls` with and without `-l`, declares the fields of all of
-them.
-
-Toward the terminal, records render as a table: aligned columns under a
-header line of the field names, every value and name passed through the
-line escape, erx_text:escape_line/1, since a record's text is attributed to
-its source.
-A line of data is not: it is a program's own output, which reaches the
-terminal unchanged as on UNIX, so its bytes are written as they are.
-A table's shape is the fields its first record holds, and a record of
-another shape starts a new table. A table of one column has no header
-and nothing to align, so it prints each value as it comes: lines read
-into `line` records print as their data, `ls` as its
-escaped text, with no header. A table
-of more columns holds its first 256 records, and at most 1 MiB of their
-text, to measure its columns, then prints them, and every later record of
-its shape at those widths: a later value wider than its column pushes the
-rest of its row right, never cut. A column whose held values include an
-integer and no other `ok` value is aligned right.
-
-The table is a pure state machine: table/0 starts one, table_record/3
-adds a record and table_flush/1 prints what it holds, each answering the
-bytes to write; erx_cmd keeps one for a command that writes to the
-terminal and flushes it before any other write there.
+Values are attributed text, which a reporter names (a process's name, a
+file's name, a count), so every value and name passes through the line
+escape, erx_text:escape_line/1, on its way to the terminal. The command
+shell's commands print text as FreeBSD's do and never come here; this is
+the Erlang shell's view of the inspector, erx:i/1 and erx:ps/0, and the
+value text `/proc` writes (erx_procfs_core).
 """.
 
--export([value/1, line/2, table/0, table_record/3, table_flush/1]).
+-export([value/1]).
 -export([record/2, overview/2]).
 
--export_type([attr/0, data/0, table/0]).
+-export_type([attr/0]).
 
 %% An inspector value with its reporter, a stopgap reporter by the name the
-%% inspection schema declares, or a line of data.
+%% inspection schema declares.
 -type attr() :: {kernel | service | runtime | {stopgap, atom()},
                  {ok, term()} | {partial, term()} | unknown | unsupported
-                 | {timeout, pos_integer()} | {error, term()}}
-              | data().
--type data() :: {data, {ok, binary()}}.
+                 | {timeout, pos_integer()} | {error, term()}}.
 
-%% A table prints nothing yet (`idle`), holds its first rows to measure
-%% them, newest first, or prints each row as it comes at fixed columns.
--opaque table() :: idle
-                 | {holding, Shape :: [atom()], Rows :: [[cell()]],
-                    Count :: pos_integer(), Bytes :: non_neg_integer()}
-                 | {printing, Shape :: [atom()], [column()]}.
-%% A cell's text and kind: a value escaped as attributed text (`integer`,
-%% `text`, `status`), a field's escaped name (`name`), or a line of data's
-%% bytes unchanged (`data`).
--type cell() :: {binary(), integer | text | status | name | data}.
--type column() :: {Width :: non_neg_integer(), left | right}.
-
--define(HELD_ROWS, 256).
--define(HELD_BYTES, (1 bsl 20)).
 -define(GAP, <<"  ">>).
 
 -doc "An attribute's text: the value when it is `ok`, its status otherwise.".
@@ -91,85 +39,6 @@ value({_Reporter, unknown}) -> <<"[unknown]">>;
 value({_Reporter, unsupported}) -> <<"[unsupported]">>;
 value({_Reporter, {timeout, Ms}}) -> <<"[timeout ", (integer_to_binary(Ms))/binary, "]">>;
 value({_Reporter, {error, _}}) -> <<"[error]">>.
-
--doc "A record as one line toward bytes, a file or a pipe.".
--spec line([atom()], #{atom() => attr()}) -> binary().
-line(Fields, Record) ->
-    Values = [Value || Field <- Fields, {ok, Value} <- [maps:find(Field, Record)]],
-    Body = case data_line(Values) of
-               {data, Bytes} -> Bytes;
-               values -> lists:join($\t, [separators(value(Value)) || Value <- Values])
-           end,
-    iolist_to_binary([Body, $\n]).
-
-%% The one decision of whether a record's values are a line of data, which
-%% both line/2 and the table show as the data: one data value, holding no
-%% newline, as every line read is. Anything else, a data value among other
-%% fields or one holding a newline, is values, rendered as attributed text,
-%% so data never splits a field or a row.
-data_line([{data, {ok, Bytes}}]) when is_binary(Bytes) ->
-    case binary:match(Bytes, <<"\n">>) of
-        nomatch -> {data, Bytes};
-        _ -> values
-    end;
-data_line(_Values) ->
-    values.
-
-separators(Text) ->
-    << <<(separator(C))/binary>> || <<C>> <= Text >>.
-
-separator($\t) -> <<"\\t">>;
-separator($\n) -> <<"\\n">>;
-separator($\\) -> <<"\\\\">>;
-separator(C) -> <<C>>.
-
-%%% The terminal's table
-
--doc "A table that has printed nothing.".
--spec table() -> table().
-table() -> idle.
-
--doc "Adds a record of the given field order, answering what to print now.".
--spec table_record([atom()], #{atom() => attr()}, table()) -> {iodata(), table()}.
-table_record(Fields, Record, Table) ->
-    Shape = [Field || Field <- Fields, is_map_key(Field, Record)],
-    add(Shape, cells([maps:get(Field, Record) || Field <- Shape]), Table).
-
--doc """
-Prints the rows the table holds, fixing its columns for later rows of its
-shape; a table that holds none is left as it is.
-""".
--spec table_flush(table()) -> {iodata(), table()}.
-table_flush({holding, Shape, Rows, _Count, _Bytes}) -> print(Shape, lists:reverse(Rows));
-table_flush(Table) -> {[], Table}.
-
-add(Shape, Row, {printing, Shape, Columns} = Table) ->
-    {row(Row, Columns), Table};
-add(Shape, Row, {holding, Shape, Rows, Count, Bytes}) ->
-    hold(Shape, [Row | Rows], Count + 1, Bytes + row_bytes(Row));
-add(Shape, Row, Table) ->
-    {Printed, _Done} = table_flush(Table),
-    {Held, New} = hold(Shape, [Row], 1, row_bytes(Row)),
-    {[Printed, Held], New}.
-
-%% A table of one column has nothing to align, so it holds nothing.
-hold(Shape, Rows, _Count, _Bytes) when length(Shape) < 2 ->
-    print(Shape, lists:reverse(Rows));
-%% A table that holds as much as it may fixes its columns and prints.
-hold(Shape, Rows, Count, Bytes) when Count >= ?HELD_ROWS; Bytes >= ?HELD_BYTES ->
-    print(Shape, lists:reverse(Rows));
-hold(Shape, Rows, Count, Bytes) ->
-    {[], {holding, Shape, Rows, Count, Bytes}}.
-
-%% Measures the header and the held rows, oldest first, and prints them.
-%% A table of one column has no header and prints each value bare.
-print([_, _ | _] = Shape, Rows) ->
-    Lines = [[{erx_text:escape_line(atom_to_binary(Field)), name} || Field <- Shape] | Rows],
-    Columns = [column(Cells) || Cells <- transpose(Lines)],
-    {[row(Cells, Columns) || Cells <- Lines], {printing, Shape, Columns}};
-print(Shape, Rows) ->
-    Columns = [{0, left} || _ <- Shape],
-    {[row(Cells, Columns) || Cells <- Rows], {printing, Shape, Columns}}.
 
 transpose([[] | _]) -> [];
 transpose(Rows) -> [[Cell || [Cell | _] <- Rows] | transpose([Rest || [_ | Rest] <- Rows])].
@@ -207,16 +76,6 @@ pad(Text, {Width, Align}, Last) ->
 
 %% The columns an escaped text takes: one for each character it shows.
 width(Text) -> string:length(Text).
-
-row_bytes(Row) -> lists:sum([byte_size(Text) || {Text, _} <- Row]).
-
-%% A line of data is the one cell of its row and is shown as its bytes,
-%% as `cat f` writes them; every other value is escaped as attributed text.
-cells(Attrs) ->
-    case data_line(Attrs) of
-        {data, Bytes} -> [{Bytes, data}];
-        values -> [cell(Attr) || Attr <- Attrs]
-    end.
 
 cell(Attr) -> {erx_text:escape_line(value(Attr)), kind(Attr)}.
 

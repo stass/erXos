@@ -3,25 +3,26 @@
 
 -module(erx_cmd_mount).
 -moduledoc """
-`mount`: one record for each entry of the domain's namespace table
-(docs/design-files.md, "Building, binding and mounting"): the point it
-is mounted at, what provides it, the root within the provider and its
-rights. The table is erXos's, so a runtime without one, such as stock
-OTP on the host, answers `enotsup`. Changing the table (`mount` with
-arguments, `bind`, `unmount`) is erx_ns's and has no command yet.
+`mount`: one line for each entry of the domain's namespace table
+(docs/design-files.md, "Building, binding and mounting"), in the shape of
+FreeBSD's: what provides it, `on`, the point it is mounted at, and in
+parentheses its rights and the root within the provider. Each name goes
+through the field escape, so a line holds no control character. The
+table is erXos's, so a runtime without one, such as stock OTP on the
+host, answers `enotsup`. Changing the table (`mount` with arguments,
+`bind`, `unmount`) is erx_ns's and has no command yet.
 """.
 
 -behaviour(erx_cmd).
 -erx_command(mount).
 -erx_usage("mount").
--erx_fields([point, provider, root, rights]).
 
 -export([run/2]).
 
 run([], Ctx) ->
     case erlang:function_exported(prim_file, erx_table, 0) of
         true ->
-            lists:foreach(fun(Entry) -> erx_cmd:emit(Ctx, record(Entry)) end,
+            lists:foreach(fun(Entry) -> erx_cmd:write(Ctx, line(Entry)) end,
                           prim_file:erx_table());
         false ->
             {error, enotsup}
@@ -29,11 +30,14 @@ run([], Ctx) ->
 run(_Args, _Ctx) ->
     {error, usage}.
 
-record(#{point := Point, provider := Provider, root := Root, rights := Rights}) ->
-    #{point => ok(path(Point)), provider => ok(provider(Provider)),
-      root => ok(path(Root)), rights => ok(Rights)}.
+line(#{point := Point, provider := Provider, root := Root, rights := Rights}) ->
+    [escape(provider(Provider)), <<" on ">>, escape(path(Point)), <<" (">>,
+     escape(rights(Rights)), <<", root ">>, escape(path(Root)), <<")\n">>].
 
-ok(Value) -> {runtime, {ok, Value}}.
+escape(Text) -> erx_text:escape_field(Text).
+
+rights(Rights) when is_atom(Rights) -> atom_to_binary(Rights);
+rights(Rights) -> unicode:characters_to_binary(io_lib:format("~0tp", [Rights])).
 
 path([]) -> <<"/">>;
 path(Names) -> iolist_to_binary([[$/, Name] || Name <- Names]).

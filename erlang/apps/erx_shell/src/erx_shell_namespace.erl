@@ -28,7 +28,7 @@ modules, loading them but running no command body.
 -export_type([table/0, entry/0, command/0, problem/0]).
 
 -type entry() :: #{name := binary(), module := module(), usage := binary(),
-                   needs := [atom()], fields := [atom()]}.
+                   needs := [atom()]}.
 -type command() :: {builtin, cd | jobs | fg | bg | kill} | {erlang, entry()} | {conflict, [module()]}.
 -type table() :: #{binary() => command()}.
 -type problem() :: {module(), malformed_metadata | no_run}.
@@ -68,27 +68,25 @@ entry(Module, Attributes, Exports) ->
 checked_entry(Module, Names, Attributes, Exports) ->
     Usage = proplists:get_all_values(erx_usage, Attributes),
     Needs = lists:append(proplists:get_all_values(erx_needs, Attributes)),
-    Fields = lists:append(proplists:get_all_values(erx_fields, Attributes)),
     %% The compiler keeps `-erx_command(ps).` as {erx_command, [ps]}, and a
     %% string or a list attribute as written.
     case {Names, Usage} of
         {[[Name]], [Line]} when is_atom(Name), is_list(Line) ->
-            checked_entry(Module, Name, Line, Needs, Fields, Exports);
+            checked_entry(Module, Name, Line, Needs, Exports);
         _ ->
             {error, malformed_metadata}
     end.
 
-checked_entry(Module, Name, Line, Needs, Fields, Exports) ->
+checked_entry(Module, Name, Line, Needs, Exports) ->
     Atoms = fun(List) -> lists:all(fun is_atom/1, List) end,
-    case io_lib:printable_latin1_list(Line) andalso Atoms(Needs) andalso Atoms(Fields) of
+    case io_lib:printable_latin1_list(Line) andalso Atoms(Needs) of
         false ->
             {error, malformed_metadata};
         true ->
             case lists:member({run, 2}, Exports) of
                 false -> {error, no_run};
                 true -> {ok, #{name => atom_to_binary(Name), module => Module,
-                               usage => list_to_binary(Line), needs => Needs,
-                               fields => Fields}}
+                               usage => list_to_binary(Line), needs => Needs}}
             end
     end.
 

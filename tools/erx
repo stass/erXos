@@ -343,8 +343,8 @@ module Erx
                    name: 'fuzz-erx-path', deadline: 900, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_shell_parse.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-shell-parse', deadline: 1000, chdir: ROOT, env: environment)
-        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_shell_where.rb'), '--seed', options.fetch(:seed).to_s],
-                   name: 'fuzz-erx-shell-where', deadline: 1000, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_grep_re.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-grep-re', deadline: 600, chdir: ROOT, env: environment)
         %w[line field].each do |target|
           runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_text.rb'), '--target', target,
                       '--seed', options.fetch(:seed).to_s],

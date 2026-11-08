@@ -5,31 +5,26 @@
 -moduledoc """
 EUnit cases of the command shell's `wc` (erx_cmd_wc, docs/design-shell.md,
 "Commands"): each flag, several files and their total, standard input,
-records from a record stage, the error paths, UTF-8 under `-m`, and a
+a producer's lines through a pipe, the error paths, UTF-8 under `-m`, and a
 golden comparison with FreeBSD's wc over the inputs of test/fixtures/wc,
 whose `expected` file is the standard output of macOS's /usr/bin/wc
 (FreeBSD's wc, text_cmds-199) in a UTF-8 locale, as
 test/fixtures/wc/generate.rb writes it. The fixture directory is named by
 ERX_WC_FIXTURES. The module is also a command of its own,
-`wcrecs`, which emits fixed records.
+`wcrecs`, which writes fixed lines.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 
 -erx_command(wcrecs).
 -erx_usage("wcrecs").
--erx_fields([name, n]).
 
 -export([run/2]).
 
 %%% The test command
 
 run([], Ctx) ->
-    erx_cmd:emit(Ctx, #{name => ok(<<"init">>), n => ok(10)}),
-    erx_cmd:emit(Ctx, #{name => ok(<<"a b\tc">>), n => {runtime, unknown}}),
-    erx_cmd:emit(Ctx, [line], #{line => {data, {ok, <<"caf", 16#C3, 16#A9>>}}}).
-
-ok(Value) -> {runtime, {ok, Value}}.
+    erx_cmd:write(Ctx, [<<"init\t10\n">>, <<"a b\tc\t-\n">>, <<"caf", 16#C3, 16#A9, "\n">>]).
 
 %%% Running a line
 
@@ -126,7 +121,7 @@ usage_test() ->
     ?assertEqual(<<>>, Out),
     ?assertEqual(<<"usage: wc [-c | -m] [-Llw] [file ...]\n">>, Err).
 
-%%% Several files, standard input and records
+%%% Several files, standard input and pipes
 
 total_test() ->
     with_files(
@@ -148,13 +143,12 @@ standard_input_test() ->
               ?assertEqual({<<>>, <<"       0       0       0\n">>, <<>>}, run_line(<<"wc">>, Dir))
       end).
 
-%% Each record counts as one line, the text it renders toward a file:
-%% "init\t10", "a b\\tc\t[unknown]" and a line of data, "caf\xc3\xa9": 31 bytes,
-%% 30 characters, and 16 in the longest line.
-records_test() ->
+%% A producer's lines through a pipe: "init\t10", "a b\tc\t-" and
+%% "caf\xc3\xa9", 22 bytes, 21 characters, and 7 in the longest line.
+piped_lines_test() ->
     ?assertEqual({<<"|">>, <<"       3\n">>, <<>>}, run_line(<<"wcrecs | wc -l">>, <<"/">>)),
-    ?assertEqual({<<"|">>, <<"       3       6      31\n">>, <<>>}, run_line(<<"wcrecs | wc">>, <<"/">>)),
-    ?assertEqual({<<"|">>, <<"      30      16\n">>, <<>>}, run_line(<<"wcrecs | wc -mL">>, <<"/">>)),
+    ?assertEqual({<<"|">>, <<"       3       7      22\n">>, <<>>}, run_line(<<"wcrecs | wc">>, <<"/">>)),
+    ?assertEqual({<<"|">>, <<"      21       7\n">>, <<>>}, run_line(<<"wcrecs | wc -mL">>, <<"/">>)),
     ?assertEqual({<<"||">>, <<"       3\n">>, <<>>}, run_line(<<"wcrecs | cat | wc -l">>, <<"/">>)).
 
 %% A line longer than a pipe's line bound is still counted: wc reads

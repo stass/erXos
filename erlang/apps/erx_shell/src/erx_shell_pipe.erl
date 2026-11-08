@@ -4,15 +4,17 @@
 -module(erx_shell_pipe).
 -moduledoc """
 A pipe between Erlang stages of the command shell (docs/design-shell.md,
-"Pipelines"): one process holding what a stage wrote and its reader has
-not yet taken, bytes and records in the order they were written.
+"Pipelines"): one process holding the bytes a stage wrote and its reader
+has not yet taken, in the order they were written.
 
-Bounds. At most 256 items and 1 MiB are in flight: a writer whose item
-does not fit waits until the reader takes enough. Adjacent bytes merge
-into one item, so a line written a byte at a time never fills the item
-count. A reader takes a line, at most 64 KiB, or a record; bytes that
-reach 64 KiB without a newline answer `line_too_long`, so no input makes
-a reader gather without bound.
+Bounds. At most 64 KiB are in flight, the size of a pipe's first ring
+(docs/design-pipes.md). A writer's bytes enter as room opens, and its
+put/2 returns once the last of them has entered, so a writer never runs
+more than 64 KiB ahead of its reader. A reader takes whatever bytes are in
+flight, get_bytes/1, or a line, get/1, of at most 64 KiB with its newline:
+bytes that fill the pipe without a newline answer `line_too_long`, so no
+input makes a reader gather without bound, and a reader waiting for a
+line always finds the newline or a full pipe.
 
 Ends. The runner that makes a pipe attaches each stage to the end it
 holds, and the pipe monitors every holder. When every writer has ended,
@@ -28,23 +30,15 @@ a here document and for `<`, so every input an Erlang command reads is a
 pipe and has the same bounds.
 """.
 
--export([new/0, attach/3, put/2, get/1, get_chunk/1, stop/1,
+-export([new/0, attach/3, put/2, get/1, get_bytes/1, stop/1,
          from_binary/1, from_file/1]).
-
--export_type([item/0]).
 
 -compile({no_auto_import, [put/2, get/1]}).
 
--define(MAX_ITEMS, 256).
--define(MAX_BYTES, 1 bsl 20).
--define(MAX_LINE, 1 bsl 16).
-%% A writer's bytes go in pieces of at most this size, so one fits an
-%% empty pipe whatever its length.
--define(PIECE, 65536).
+%% The bytes in flight, and so the longest line a reader takes, newline
+%% included.
+-define(CAPACITY, 1 bsl 16).
 
-%% A record carries the order of its fields, the emitting command's, so a
-%% stage that renders it into a line keeps that order.
--type item() :: {bytes, binary()} | {record, [atom()], map()}.
 -type end_() :: read | write.
 
 -doc "A new, empty pipe, which ends when its maker does.".
@@ -53,8 +47,7 @@ new() ->
     Maker = self(),
     spawn(fun() ->
                   monitor(process, Maker),
-                  loop(#{maker => Maker, items => queue:new(), count => 0,
-                         bytes => 0, putters => queue:new(),
+                  loop(#{maker => Maker, buffer => <<>>, putters => queue:new(),
                          getters => queue:new(), holders => #{},
                          held => #{read => 0, write => 0},
                          seen => #{read => false, write => false}})
@@ -67,33 +60,24 @@ attach(Pipe, End, Pid) when End =:= read; End =:= write ->
     ok.
 
 -doc """
-Writes an item, waiting while the pipe is full: `ok`, or `{error, epipe}`
-when no reader is left or the pipe is gone.
+Writes bytes, waiting until the last of them has entered the pipe: `ok`,
+or `{error, epipe}` when no reader is left or the pipe is gone.
 """.
--spec put(pid(), item()) -> ok | {error, epipe}.
-put(Pipe, {bytes, Bytes}) when byte_size(Bytes) > ?PIECE ->
-    <<Piece:?PIECE/binary, Rest/binary>> = Bytes,
-    case call(Pipe, {put, {bytes, Piece}}, {error, epipe}) of
-        ok -> put(Pipe, {bytes, Rest});
-        Error -> Error
-    end;
-put(_Pipe, {bytes, <<>>}) ->
-    ok;
-put(Pipe, Item) ->
-    call(Pipe, {put, Item}, {error, epipe}).
+-spec put(pid(), binary()) -> ok | {error, epipe}.
+put(_Pipe, <<>>) -> ok;
+put(Pipe, Bytes) when is_binary(Bytes) -> call(Pipe, {put, Bytes}, {error, epipe}).
 
 -doc """
-The next line, with its newline unless it is the last and has none, or
-the next record; `eof` once every writer has ended and the pipe is
-drained, or the pipe is gone.
+The next line, with its newline unless it is the last and has none;
+`eof` once every writer has ended and the pipe is drained, or the pipe is
+gone; `{error, line_too_long}` when 64 KiB hold no newline.
 """.
--spec get(pid()) -> {line, binary()} | {record, [atom()], map()} | eof
-                        | {error, line_too_long}.
+-spec get(pid()) -> {line, binary()} | eof | {error, line_too_long}.
 get(Pipe) -> call(Pipe, {get, line}, eof).
 
--doc "The next bytes, however many are in flight, or the next record.".
--spec get_chunk(pid()) -> {bytes, binary()} | {record, [atom()], map()} | eof.
-get_chunk(Pipe) -> call(Pipe, {get, chunk}, eof).
+-doc "The bytes in flight, at most 64 KiB, or `eof`.".
+-spec get_bytes(pid()) -> {bytes, binary()} | eof.
+get_bytes(Pipe) -> call(Pipe, {get, bytes}, eof).
 
 -doc "Ends the pipe and whatever pumps it.".
 -spec stop(pid()) -> ok.
@@ -105,7 +89,7 @@ stop(Pipe) ->
 -spec from_binary(binary()) -> pid().
 from_binary(Bytes) ->
     Pipe = new(),
-    spawn(fun() -> pump_start(Pipe, fun() -> pump_binary(Pipe, Bytes) end) end),
+    spawn(fun() -> pump_start(Pipe, fun() -> _ = put(Pipe, Bytes), ok end) end),
     Pipe.
 
 -doc """
@@ -148,14 +132,10 @@ pump_start(Pipe, Fill) ->
     attach(Pipe, write, self()),
     Fill().
 
-pump_binary(Pipe, Bytes) ->
-    _ = put(Pipe, {bytes, Bytes}),
-    ok.
-
 pump_file(Pipe, Fd) ->
-    case file:read(Fd, ?PIECE) of
+    case file:read(Fd, ?CAPACITY) of
         {ok, Bytes} ->
-            case put(Pipe, {bytes, Bytes}) of
+            case put(Pipe, Bytes) of
                 ok -> pump_file(Pipe, Fd);
                 {error, epipe} -> ok
             end;
@@ -180,8 +160,8 @@ call(Pipe, Request, Gone) ->
 
 loop(State) ->
     receive
-        {{put, Item}, From, Ref} ->
-            loop(serve(offer({From, Ref, Item}, State)));
+        {{put, Bytes}, From, Ref} ->
+            loop(serve(offer({From, Ref, Bytes}, State)));
         {{get, Mode}, From, Ref} ->
             #{getters := Getters} = State,
             loop(serve(State#{getters := queue:in({From, Ref, Mode}, Getters)}));
@@ -220,11 +200,9 @@ closed(End, #{held := Held, seen := Seen}) ->
 %% No reader is left: what was in flight is dropped and every writer told.
 refuse_writers(#{putters := Putters} = State) ->
     [From ! {Ref, {error, epipe}} || {From, Ref, _} <- queue:to_list(Putters)],
-    State#{items := queue:new(), count := 0, bytes := 0, putters := queue:new()}.
+    State#{buffer := <<>>, putters := queue:new()}.
 
-%% A writer's item is taken when it fits, or when the pipe is empty, and
-%% the writer waits otherwise.
-offer({From, Ref, _Item} = Put, #{putters := Putters} = State) ->
+offer({From, Ref, _Bytes} = Put, #{putters := Putters} = State) ->
     case closed(read, State) of
         true ->
             From ! {Ref, {error, epipe}},
@@ -233,50 +211,30 @@ offer({From, Ref, _Item} = Put, #{putters := Putters} = State) ->
             State#{putters := queue:in(Put, Putters)}
     end.
 
-%% Takes every waiting item that fits, then answers every reader it can.
+%% Moves waiting writers' bytes in as room allows, then answers every
+%% reader it can, until neither can move.
 serve(State) ->
-    answer(admit(State)).
+    State1 = answer(admit(State)),
+    case State1 =:= State of
+        true -> State;
+        false -> serve(State1)
+    end.
 
-admit(#{putters := Putters} = State) ->
+%% The first waiting writer's bytes enter as far as there is room; it is
+%% answered once the last of them has entered, and the next one may start.
+admit(#{putters := Putters, buffer := Buffer} = State) ->
+    Room = ?CAPACITY - byte_size(Buffer),
     case queue:out(Putters) of
-        {{value, {From, Ref, Item}}, Rest} ->
-            case fits(Item, State) of
-                true ->
-                    From ! {Ref, ok},
-                    admit(enqueue(Item, State#{putters := Rest}));
-                false ->
-                    State
-            end;
-        {empty, _} ->
+        {{value, {From, Ref, Bytes}}, Rest} when byte_size(Bytes) =< Room ->
+            From ! {Ref, ok},
+            admit(State#{putters := Rest, buffer := <<Buffer/binary, Bytes/binary>>});
+        {{value, {From, Ref, Bytes}}, Rest} when Room > 0 ->
+            <<Now:Room/binary, Later/binary>> = Bytes,
+            State#{putters := queue:in_r({From, Ref, Later}, Rest),
+                   buffer := <<Buffer/binary, Now/binary>>};
+        _FullOrNone ->
             State
     end.
-
-fits(_Item, #{count := 0}) -> true;
-fits(Item, #{count := Count, bytes := Bytes, items := Items}) ->
-    Merges = element(1, Item) =:= bytes andalso tail_is_bytes(Items),
-    (Merges orelse Count < ?MAX_ITEMS) andalso Bytes + size_of(Item) =< ?MAX_BYTES.
-
-tail_is_bytes(Items) ->
-    case queue:peek_r(Items) of
-        {value, {bytes, _}} -> true;
-        _ -> false
-    end.
-
-size_of({bytes, Bytes}) -> byte_size(Bytes);
-size_of({record, _, _} = Record) -> erlang:external_size(Record).
-
-enqueue({bytes, New} = Item, #{items := Items, count := Count, bytes := Bytes} = State) ->
-    case queue:out_r(Items) of
-        {{value, {bytes, Old}}, Front} ->
-            State#{items := queue:in({bytes, <<Old/binary, New/binary>>}, Front),
-                   bytes := Bytes + byte_size(New)};
-        _ ->
-            State#{items := queue:in(Item, Items), count := Count + 1,
-                   bytes := Bytes + byte_size(New)}
-    end;
-enqueue(Item, #{items := Items, count := Count, bytes := Bytes} = State) ->
-    State#{items := queue:in(Item, Items), count := Count + 1,
-           bytes := Bytes + size_of(Item)}.
 
 answer(#{getters := Getters} = State) ->
     case queue:out(Getters) of
@@ -284,7 +242,7 @@ answer(#{getters := Getters} = State) ->
             case take(Mode, State) of
                 {Reply, State1} ->
                     From ! {Ref, Reply},
-                    answer(admit(State1#{getters := Rest}));
+                    answer(State1#{getters := Rest});
                 wait ->
                     State
             end;
@@ -292,44 +250,32 @@ answer(#{getters := Getters} = State) ->
             State
     end.
 
-%% What a reader in Mode gets from the head of the pipe, or wait.
-take(Mode, #{items := Items} = State) ->
-    case queue:out(Items) of
-        {empty, _} ->
-            case closed(write, State) of
-                true -> {eof, State};
-                false -> wait
-            end;
-        {{value, {record, _, _} = Record}, Rest} ->
-            {Record, dropped(Record, Rest, State)};
-        {{value, {bytes, _} = Head}, Rest} when Mode =:= chunk ->
-            {Head, dropped(Head, Rest, State)};
-        {{value, {bytes, Bytes}}, Rest} ->
-            take_line(Bytes, Rest, State)
-    end.
-
-%% A line ends at a newline; bytes before a record or the end of input are
-%% a line of their own.
-take_line(Bytes, Rest, State) ->
-    case binary:match(Bytes, <<"\n">>) of
-        {At, 1} when At < ?MAX_LINE ->
-            <<Line:(At + 1)/binary, After/binary>> = Bytes,
-            {{line, Line}, remaining(After, byte_size(Line), Rest, State)};
-        {_, 1} ->
-            {{error, line_too_long}, State};
-        nomatch when byte_size(Bytes) >= ?MAX_LINE ->
-            {{error, line_too_long}, State};
+%% What a reader in Mode gets from the pipe, or wait. A line is copied out
+%% of the buffer, so a reader that keeps its lines, as `sort` does, holds
+%% only their bytes and never a reference to the whole buffer, which the
+%% stage's heap limit would charge in full.
+take(_Mode, #{buffer := <<>>} = State) ->
+    case drained(State) of
+        true -> {eof, State};
+        false -> wait
+    end;
+take(bytes, #{buffer := Buffer} = State) ->
+    {{bytes, Buffer}, State#{buffer := <<>>}};
+take(line, #{buffer := Buffer} = State) ->
+    case binary:match(Buffer, <<"\n">>) of
+        {At, 1} ->
+            <<Line:(At + 1)/binary, After/binary>> = Buffer,
+            {{line, binary:copy(Line)}, State#{buffer := After}};
         nomatch ->
-            case closed(write, State) orelse not queue:is_empty(Rest) of
-                true -> {{line, Bytes}, dropped({bytes, Bytes}, Rest, State)};
+            %% The last line may have no newline; it is whole once no
+            %% writer is left and no writer's bytes wait to enter.
+            case drained(State) of
+                true -> {{line, Buffer}, State#{buffer := <<>>}};
+                false when byte_size(Buffer) >= ?CAPACITY -> {{error, line_too_long}, State};
                 false -> wait
             end
     end.
 
-remaining(<<>>, Taken, Rest, #{count := Count, bytes := Bytes} = State) ->
-    State#{items := Rest, count := Count - 1, bytes := Bytes - Taken};
-remaining(After, Taken, Rest, #{bytes := Bytes} = State) ->
-    State#{items := queue:in_r({bytes, After}, Rest), bytes := Bytes - Taken}.
-
-dropped(Item, Rest, #{count := Count, bytes := Bytes} = State) ->
-    State#{items := Rest, count := Count - 1, bytes := Bytes - size_of(Item)}.
+%% No writer is left and none of their bytes wait to enter.
+drained(#{putters := Putters} = State) ->
+    closed(write, State) andalso queue:is_empty(Putters).

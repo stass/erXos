@@ -10,5 +10,5 @@
 
 -export([run/2]).
 
-run([], Ctx) -> erx_cmd:emit(Ctx, [erx_cmd:cwd(Ctx), $\n]);
+run([], Ctx) -> erx_cmd:write(Ctx, [erx_cmd:cwd(Ctx), $\n]);
 run(_Args, _Ctx) -> {error, usage}.
