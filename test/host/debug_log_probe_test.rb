@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/debug_log_probe'
+require_relative '../fixtures/sanitizer_environment'
 
 # The hosted half of the agreement `tools/erx check-debug-log` checks on QEMU:
 # the probe of test/guest/debug_log_probe on liberx/backend/hosted/log.c must

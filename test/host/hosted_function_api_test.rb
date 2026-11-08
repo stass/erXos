@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/function_api'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
@@ -24,12 +25,13 @@ class HostedFunctionApiTest < Minitest::Test
   SOURCES = Erx::FunctionApi::HOSTED_SOURCES
   FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g -pthread
              -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
-  STRICT_ASAN = 'detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1:' \
-                'allocator_may_return_null=1:halt_on_error=1'
+  # The policy's options plus the initialization-order checks, which the
+  # policy runs only off macOS.
+  STRICT_ASAN = %w[check_initialization_order=1 strict_init_order=1].freeze
   SANITIZERS = {
-    'address' => { flags: %w[-fsanitize=address -fno-omit-frame-pointer], env: { 'ASAN_OPTIONS' => STRICT_ASAN } },
-    'undefined' => { flags: %w[-fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer], env: {} },
-    'thread' => { flags: %w[-fsanitize=thread -fno-omit-frame-pointer], env: { 'TSAN_OPTIONS' => 'halt_on_error=1' } }
+    'address' => { flags: %w[-fsanitize=address -fno-omit-frame-pointer], options: { asan: STRICT_ASAN } },
+    'undefined' => { flags: %w[-fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer], options: {} },
+    'thread' => { flags: %w[-fsanitize=thread -fno-omit-frame-pointer], options: {} }
   }.freeze
 
   # name => [file, original, replacement, the case that must notice].
@@ -80,7 +82,8 @@ class HostedFunctionApiTest < Minitest::Test
 
   SANITIZERS.each do |name, sanitizer|
     define_method("test_the_set_passes_under_#{name}") do
-      log, status = run_set(build(name, flags: sanitizer.fetch(:flags)), env: sanitizer.fetch(:env))
+      env = Erx::SanitizerEnvironment.call(**sanitizer.fetch(:options), compiler: compiler)
+      log, status = run_set(build(name, flags: sanitizer.fetch(:flags)), env: env)
       assert_clean(log, status)
     end
   end

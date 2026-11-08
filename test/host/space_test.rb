@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/space_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # Judges the space core (kernel/core/space.c) against SpaceModel, which
@@ -110,7 +111,6 @@ class SpaceTest < Minitest::Test
   LIFECYCLE_DEPTH = 4
   # The most transitions an interleaving test may explore.
   EXPLORE_BOUND = 60_000
-  TSAN_ENV = { 'TSAN_OPTIONS' => 'halt_on_error=1 exitcode=66' }.freeze
 
   # One-line edits of the core, each a failure the design says the tests
   # must catch.
@@ -481,14 +481,14 @@ class SpaceTest < Minitest::Test
   # weak to pass them on is a reported race.
   def test_the_drops_of_a_hold_race_under_thread_sanitizer
     @runner.run([holds_race(File.join(@root, 'kernel/core/space.c'), name: 'space-holds-race')], name: 'space-holds-race',
-                                                                                                 deadline: 300, env: TSAN_ENV)
+                                                                                                 deadline: 300, env: tsan_env)
     source = File.read(File.join(@root, 'kernel/core/space.c'))
     assert_equal 1, source.scan('memory_order_acq_rel').size, 'the one ordering a drop relies on'
     weak = File.join(@directory, 'space-holds-weak.c')
     File.write(weak, source.sub('memory_order_acq_rel', 'memory_order_relaxed'))
     program = holds_race(weak, name: 'space-holds-weak')
     error = assert_raises(Erx::CommandError, 'a relaxed drop is a race') do
-      @runner.run([program], name: 'space-holds-weak', deadline: 300, env: TSAN_ENV)
+      @runner.run([program], name: 'space-holds-weak', deadline: 300, env: tsan_env)
     end
     assert_includes File.read(error.message[/log: (.+)\z/, 1]), 'ThreadSanitizer: data race'
   end
@@ -543,6 +543,7 @@ class SpaceTest < Minitest::Test
   private
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
+  def tsan_env = Erx::SanitizerEnvironment.call(compiler: compiler)
 
   def build_driver(core, name:, flags:)
     output = File.join(@directory, name)

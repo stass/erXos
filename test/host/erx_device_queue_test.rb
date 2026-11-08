@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # The pure core of a device's queue (test/fixtures/erx_device_queue_harness.c), and the
@@ -43,7 +44,7 @@ class ErxDeviceQueueTest < Minitest::Test
                                        '-I', File.join(ROOT, 'include'), '-I', NIFS,
                                        *sources, '-o', binary, stdin_data: '')
       assert status.success?, output
-      output, status = Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, binary, stdin_data: '')
+      output, status = Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), binary, stdin_data: '')
       assert status.success?, output
       output
     end

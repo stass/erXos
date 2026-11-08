@@ -6,6 +6,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
@@ -68,7 +69,7 @@ class FiascoUmtxTest < Minitest::Test
 
   def test_wait_and_wake_race_under_thread_sanitizer
     driver = build(real_cores, name: 'driver-tsan', flags: %w[-fsanitize=thread -fno-omit-frame-pointer])
-    log, status = Open3.capture2e({ 'TSAN_OPTIONS' => 'halt_on_error=1' }, driver, 'race', stdin_data: '')
+    log, status = Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: compiler), driver, 'race', stdin_data: '')
     assert status.success?, log
     assert_match(/\Arace: [1-9]/, log)
   end

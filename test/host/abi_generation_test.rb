@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../fixtures/sanitizer_environment'
 
 class AbiGenerationTest < Minitest::Test
   def setup

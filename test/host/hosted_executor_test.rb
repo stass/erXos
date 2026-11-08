@@ -8,6 +8,7 @@ require 'open3'
 require 'timeout'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/function_api'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # erx_pthread_create_executor on the hosted backend (docs/design-runtime.md, "Making an
@@ -85,7 +86,7 @@ class HostedExecutorTest < Minitest::Test
 
   def test_every_case_passes_under_the_thread_sanitizer
     log = run_driver(build('tsan', flags: %w[-fsanitize=thread -fno-omit-frame-pointer]),
-                     env: { 'TSAN_OPTIONS' => 'halt_on_error=1' })
+                     env: Erx::SanitizerEnvironment.call(compiler: ENV.fetch('ERX_CLANG', 'clang')))
     assert_equal CASES.to_h { |name| [name, 'ok'] }, results(log)
   end
 end

@@ -6,6 +6,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
@@ -85,7 +86,7 @@ class FiascoParkTest < Minitest::Test
 
   def test_park_race_under_thread_sanitizer
     driver = build(File.join(ROOT, PARK), PARK_DRIVER, name: 'park-tsan', flags: %w[-fsanitize=thread -fno-omit-frame-pointer])
-    log, status = run_driver(driver, 'race', env: { 'TSAN_OPTIONS' => 'halt_on_error=1' })
+    log, status = run_driver(driver, 'race', env: Erx::SanitizerEnvironment.call(compiler: compiler))
     assert status.success?, log
     assert_match(/\Arace: [1-9]/, log)
   end

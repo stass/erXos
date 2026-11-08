@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative '../../tools/lib/erx/generated'
+require_relative 'sanitizer_environment'
 
 # Tests that compile C read the generated headers and sources from the
 # build tree (build/gen), so requiring this brings that tree up to date with

@@ -4,6 +4,7 @@
 
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/hardware'
+require_relative '../fixtures/sanitizer_environment'
 
 class HardwareTest < Minitest::Test
   def setup

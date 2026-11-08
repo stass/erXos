@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/fuzz/run_pack'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # erx_bytes:crc32c's core (otp/erts/emulator/nifs/erxos/erx_crc32c.c): RFC 3720's values,
@@ -85,7 +86,7 @@ class ErxCrc32cTest < Minitest::Test
   def build_and_run(directory, command)
     output, status = Open3.capture2e(*command, stdin_data: '')
     assert status.success?, output
-    Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, File.join(directory, 'harness'), stdin_data: '')
+    Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), File.join(directory, 'harness'), stdin_data: '')
   end
 
   def run_harness(directory, core)
@@ -106,7 +107,7 @@ class ErxCrc32cTest < Minitest::Test
     command = command.map { |argument| argument == CORE ? core : argument }
     output, status = Open3.capture2e(*command, stdin_data: '')
     assert status.success?, output
-    Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0', 'UBSAN_OPTIONS' => 'halt_on_error=1' }, program, '-runs=0', corpus,
+    Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), program, '-runs=0', corpus,
                     stdin_data: '', chdir: directory)
   end
 end

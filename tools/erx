@@ -35,6 +35,7 @@ begin
   require_relative 'lib/erx/oracle_container'
   require_relative 'lib/erx/oracle_hosted'
   require_relative 'lib/erx/oracle_qemu'
+  require_relative 'lib/erx/sanitizer_environment'
   require_relative 'lib/erx/sanitizer_tests'
   require_relative 'lib/erx/test_pool'
   require_relative 'lib/erx/bench'
@@ -207,15 +208,8 @@ module Erx
       installation = File.expand_path('../../..', BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
       ToolchainProvenance.registry(profile: File.join(ROOT, 'config/provenance/llvm-23.1.3.json'),
                                   installation: installation)
-      macos = RbConfig::CONFIG.fetch('host_os').include?('darwin')
-      asan = %w[halt_on_error=1 abort_on_error=1 detect_stack_use_after_return=1 allocator_may_return_null=1]
-      asan.concat(macos ? %w[detect_leaks=0] : %w[detect_leaks=1 check_initialization_order=1 strict_init_order=1])
-      { 'ERX_CLANG' => compiler, 'CC' => compiler,
-        'ERX_LLD' => linker,
-        'ASAN_OPTIONS' => asan.join(':'),
-        'UBSAN_OPTIONS' => 'halt_on_error=1:print_stacktrace=1:report_error_type=1',
-        'TSAN_OPTIONS' => 'halt_on_error=1:abort_on_error=1:exitcode=66',
-        'PATH' => path }.freeze
+      { 'ERX_CLANG' => compiler, 'CC' => compiler, 'ERX_LLD' => linker, 'PATH' => path }
+        .merge(SanitizerEnvironment.call(compiler: compiler)).freeze
     end
 
     def self.with_test_runtime(runner:, oracle_class: Oracle, host_environment: method(:host_environment))

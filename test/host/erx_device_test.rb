@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/hardware'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # erx_device's core and effects (test/fixtures/erx_device_harness.c), over the PL011's table
@@ -49,7 +50,7 @@ class ErxDeviceTest < Minitest::Test
                                        '-I', File.join(ROOT, 'include'), '-I', NIFS,
                                        *SOURCES, '-o', binary, stdin_data: '')
       assert status.success?, output
-      output, status = Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, binary, stdin_data: '')
+      output, status = Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), binary, stdin_data: '')
       assert status.success?, output
       output
     end

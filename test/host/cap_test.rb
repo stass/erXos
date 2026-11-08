@@ -9,6 +9,7 @@ require 'set'
 require 'tmpdir'
 require_relative '../fixtures/cap_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # Judges kernel/core/cap.c against CapModel, an independent model written
@@ -274,7 +275,7 @@ class CapTest < Minitest::Test
                  File.join(@root, 'kernel/core/cap.c'), File.join(@root, 'test/fixtures/cap_churn.c'),
                  '-o', program], name: 'compile-cap-churn', deadline: 60)
     @runner.run([program], name: 'cap-churn', deadline: 120,
-                env: { 'TSAN_OPTIONS' => 'halt_on_error=1 exitcode=66' })
+                env: Erx::SanitizerEnvironment.call(compiler: compiler))
   end
 
   # Only the capability core touches a slot's members (K1), by

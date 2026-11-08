@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # The event table's core and its sleep step (test/fixtures/runtime_event_harness.c), under
@@ -19,6 +20,7 @@ class RuntimeEventTest < Minitest::Test
            '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'otp/erts/emulator/sys/erxos'),
            '-DERX_EVENT_TEST_GAP(n)=erx_event_test_gap(n)'].freeze
   BUDGET_SECONDS = '120'
+  COMPILER = ENV.fetch('ERX_CLANG', 'clang')
 
   def test_no_fire_is_lost_under_thread_sanitizer
     output, status = run_harness('-fsanitize=thread')
@@ -77,9 +79,9 @@ class RuntimeEventTest < Minitest::Test
   def run_harness(*extra)
     Dir.mktmpdir('erx-event-') do |directory|
       binary = File.join(directory, 'harness')
-      log, built = Open3.capture2e('clang', *FLAGS, *extra, HARNESS, CORE, '-o', binary, stdin_data: '')
+      log, built = Open3.capture2e(COMPILER, *FLAGS, *extra, HARNESS, CORE, '-o', binary, stdin_data: '')
       assert built.success?, log
-      Open3.capture2e({ 'TSAN_OPTIONS' => 'halt_on_error=1' }, 'gtimeout', '-k', '5', BUDGET_SECONDS, binary, stdin_data: '')
+      Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), 'gtimeout', '-k', '5', BUDGET_SECONDS, binary, stdin_data: '')
     end
   end
 end
