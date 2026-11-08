@@ -54,6 +54,16 @@
       "status": "permanent"
     },
     {
+      "id": "herdtools7",
+      "kind": "tar",
+      "version": "7.58",
+      "url": "https://github.com/herd/herdtools7/archive/refs/tags/7.58.tar.gz",
+      "sha256": "1b72798457e678dec781ce914c4bd84dc6bae3c3c044cf4257d0974bf7f066ad",
+      "directory": "herdtools7-7.58",
+      "license": "CECILL-B AND BSD-3-Clause",
+      "status": "permanent"
+    },
+    {
       "id": "arm-registers",
       "kind": "tar",
       "version": "2026-09-schema-2.9.6",

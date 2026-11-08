@@ -3,6 +3,8 @@
 # frozen_string_literal: true
 
 require_relative 'error'
+require_relative 'bounded_file'
+require_relative 'herd'
 require_relative 'runner'
 
 module Erx
@@ -12,13 +14,12 @@ module Erx
   # expected answer. A protocol with its fences or acquire loads must never
   # reach the outcome its `exists` clause names; the same protocol without
   # them must reach it, or the test would pass whatever the fences did.
-  # herd7 is a development tool outside the tree (herdtools7, installed with
-  # opam at the pinned version); a missing or other version fails with a
-  # diagnostic, never a skip.
+  # herd7 is built for the host from deps.lock's herdtools7 pin (Erx::Herd),
+  # whose build record ties it to that pin; asking it for its version first
+  # checks that the built program still runs (a host library it links may
+  # have changed) and still reports the pin, and fails with a diagnostic,
+  # never a skip.
   class Litmus
-    HERD_VERSION = '7.58'
-    INSTALL = "install herdtools7 #{HERD_VERSION} with opam (`opam install herdtools7.#{HERD_VERSION}`) " \
-              'and put herd7 on PATH, or set HERD7'
     # Each architecture's model, as herd7 names it in its library.
     MODELS = { 'AArch64' => 'aarch64.cat', 'C' => 'rc11.cat' }.freeze
     Case = Data.define(:name, :expect)
@@ -32,18 +33,20 @@ module Erx
     ].freeze
     OBSERVATION = /^Observation (?<name>\S+) (?<answer>Always|Sometimes|Never)\b/
     MAX_TEST_BYTES = 64 * 1024
+    MAX_OUTPUT_BYTES = 1024 * 1024
 
-    def initialize(root:, program: ENV.fetch('HERD7', 'herd7'), runner: nil)
+    # herd is the Herd::Tool to run, which Herd.locate finds by default.
+    def initialize(root:, herd: nil, runner: nil)
       @root = root
-      @program = program
+      @herd = herd || Herd.locate(root: root)
       @runner = runner || Runner.new(owner_root: root, log_dir: File.join(root, 'build/litmus/logs'))
     end
 
     # Runs every case and raises on the first wrong answer, naming it.
     def run
-      check_tool
+      check_version
       CASES.each do |test|
-        answer = self.class.answer(herd(test), name: test.name)
+        answer = self.class.answer(observe(test), name: test.name)
         next if answer == test.expect
 
         raise Error, "litmus #{test.name}: herd7 answered #{answer}, expected #{test.expect}"
@@ -60,8 +63,9 @@ module Erx
       found.first[:answer]
     end
 
-    # The release `herd7 -version` printed: its first MAJOR.MINOR, or nil.
-    def self.version(output) = output[/\b\d+\.\d+\b/]
+    # The release `herd7 -version` printed, the field before ", Rev:"
+    # ("7.58, Rev: exported"), or nil.
+    def self.version(output) = output[/\A(\d+(?:\.\d+)+), Rev: /, 1]
 
     # The architecture a litmus test's first line names, from those MODELS knows.
     def self.architecture(text, name:)
@@ -74,25 +78,36 @@ module Erx
 
     private
 
-    def check_tool
-      version = self.class.version(tool_output)
-      raise Error, "herd7 is version #{version.inspect}, not #{HERD_VERSION}: #{INSTALL}" unless version == HERD_VERSION
+    def check_version
+      pinned = Herd.source_record(root: @root).fetch('version')
+      output = begin
+        herd_run(['-version'], name: 'herd7-version', deadline: 60)
+      rescue Error => e
+        raise Error, "herd7 does not run (#{e.message}); run tools/erx build herd7"
+      end
+      version = self.class.version(output)
+      return if version == pinned
+
+      raise Error, "herd7 is version #{version.inspect}, not deps.lock's #{pinned}; run tools/erx build herd7"
     end
 
-    def tool_output
-      File.read(@runner.run([@program, '-version'], name: 'herd7-version', deadline: 60).fetch('log'))
-    rescue Error => error
-      raise Error, "herd7 cannot run (#{error.message}): #{INSTALL}"
-    end
-
-    def herd(test)
+    # What herd7 printed for test under its architecture's model.
+    def observe(test)
       path = File.join(@root, 'test/litmus', "#{test.name}.litmus")
       text = File.file?(path) ? File.read(path, MAX_TEST_BYTES + 1).to_s : ''
       raise Error, "litmus #{test.name}: missing, empty or past #{MAX_TEST_BYTES} bytes" unless (1..MAX_TEST_BYTES).cover?(text.size)
 
       model = MODELS.fetch(self.class.architecture(text, name: test.name))
-      record = @runner.run([@program, '-model', model, path], name: 'herd7', deadline: 600)
-      File.read(record.fetch('log'))
+      herd_run(['-model', model, File.expand_path(path)], name: 'herd7', deadline: 600)
+    end
+
+    # herd7 searches the working directory, then $HERDLIB, then its built-in
+    # library for a model and the files it includes, so it runs in its own
+    # library with HERDLIB naming it: no file elsewhere can stand in for a model.
+    def herd_run(arguments, name:, deadline:)
+      record = @runner.run([@herd.program, *arguments], name: name, deadline: deadline, chdir: @herd.libdir,
+                                                        env: { 'HERDLIB' => @herd.libdir })
+      BoundedFile.read(record.fetch('log'), maximum: MAX_OUTPUT_BYTES)
     end
   end
 end

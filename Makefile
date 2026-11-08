@@ -106,6 +106,8 @@ check-tla:
 check-cbmc:
 	$(RUBY) tools/erx check-cbmc
 
+# Builds herd7 from the fetched herdtools7 pin first when it is missing or stale
+# (tools/erx build herd7); needs OCaml, dune, menhir and zarith from Homebrew.
 check-litmus:
 	$(RUBY) tools/erx check-litmus
 

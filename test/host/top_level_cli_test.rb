@@ -212,6 +212,50 @@ class TopLevelCliTest < Minitest::Test
     end
   end
 
+  # check-litmus builds herd7 when Herd.locate refuses what is there: missing, built
+  # from another pin, or with a record cut short; a current build is kept untouched.
+  def test_ensure_herd7_builds_only_what_locate_refuses
+    builds = []
+    test = self
+    directory = @directory
+    build_class = Class.new do
+      define_method(:initialize) { |root:, runner:| builds << [root, runner] }
+      define_method(:call) do
+        test.write_herd7(version: nil)
+        Erx::Herd.locate(root: directory)
+      end
+    end
+    FileUtils.cp(File.expand_path('../../deps.lock', __dir__), @directory)
+    [-> {}, -> { write_herd7(version: '7.57') }, -> { File.write(write_herd7(version: nil), '{"source": ') }].each do |prepare|
+      FileUtils.rm_rf(File.join(@directory, Erx::Herd::OUTPUT))
+      prepare.call
+      builds.clear
+      herd = Erx::CLI.ensure_herd7(runner: :runner, root: @directory, build_class: build_class)
+      assert_equal [[@directory, :runner]], builds
+      assert_equal File.join(@directory, Erx::Herd::OUTPUT, Erx::Herd::PROGRAM), herd.program
+    end
+
+    stamp = write_herd7(version: nil)
+    before = File.binread(stamp)
+    keeper = Class.new { define_method(:initialize) { |**| raise 'a current herd7 was rebuilt' } }
+    herd = Erx::CLI.ensure_herd7(runner: :runner, root: @directory, build_class: keeper)
+    assert_equal File.join(@directory, Erx::Herd::OUTPUT, Erx::Herd::LIBRARY), herd.libdir
+    assert_equal before, File.binread(stamp)
+  end
+
+  # A herd7 build in the test's tree: its build record names the tree's herdtools7 pin,
+  # or that pin with another version when version is given. Returns the record's path.
+  def write_herd7(version:)
+    output = File.join(@directory, Erx::Herd::OUTPUT)
+    FileUtils.mkdir_p([File.join(output, 'bin'), File.join(output, Erx::Herd::LIBRARY)])
+    File.write(File.join(output, Erx::Herd::PROGRAM), '', perm: 0o755)
+    source = Erx::Herd.source_record(root: @directory)
+    source = source.merge('version' => version) if version
+    File.join(output, Erx::Herd::STAMP).tap do |path|
+      File.write(path, JSON.generate('source' => source, 'recipe' => Erx::Herd::Build::RECIPE))
+    end
+  end
+
   # Arm's archive is read only by `tools/erx sysreg refresh` and by
   # test/integration/sysreg_refresh_test.rb, which `make check` excuses, so
   # `make check` works in a tree that never fetched arm-registers. Host tests

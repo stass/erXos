@@ -296,6 +296,14 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/root.ld`: nothing checks whether an orphan section
   lands past `erx_fiasco_image_end`, which `sigma0`'s map of the root's image would then
   miss.
+* [Medium] tooling, the pinned host builds `tools/lib/erx/fsimg.rb`,
+  `tools/lib/erx/rc_oracle.rb` and `tools/lib/erx/herd.rb` each repeat the
+  same protocol: the lock record, the build record of pin and recipe,
+  `locate` with its MissingBuild and StaleBuild, and `publish`. fsimg's and
+  rc_oracle's `publish` lose the previous build when the final rename fails
+  (two builds racing), which herd.rb's moves back. Extract one owner of the
+  protocol, parameterised by source id, required files and recipe file, so a
+  fix lands once. No test of the race.
 * [Medium] tooling, `tools/lib/erx/oracle_guest.rb`: nothing automatic runs
   `test/host/json_input_test.rb` inside the oracle's pinned image, which hid a two-day
   break under its older `json`. The oracle's `probe` operation should exercise a
@@ -1280,12 +1288,6 @@ it; git history is the record of completed work.
   or channel's reader or writer and an end that resumes at a position
   need separate pointers and a start position. Settle with the pipe
   server and the channel client.
-* [Medium] Weak-memory litmus tests, `test/litmus/`, `tools/lib/erx/litmus.rb`:
-  herd7 is not installed on the development host, so `make check-litmus`
-  has never run against herd7 itself. The ten tests, the `-model` names
-  (`aarch64.cat`, `rc11.cat`), the parse of `herd7 -version` and the pin
-  `HERD_VERSION` (7.58) are unverified until it is: install herdtools7
-  with opam, confirm or correct the pin, and run the gate once.
 * [Medium] Lane writer, `liberx/erx_lane.c` `lane_write_header`: the record
   header is packed by hand from the generated offsets, because the ABI
   generator emits only `_decode` for `wire_le` layouts; a field whose width

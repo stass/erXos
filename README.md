@@ -364,10 +364,11 @@ It never downloads. `ERX_SOURCE_CACHE` names another checkout's
 `build/third_party`; the archives in the `downloads` directory beside it
 are copied only after their SHA-256 matches `deps.lock`. Without it, the
 sources must already be there from `make fetch`. It does not fetch
-`arm-registers`, `tla-tools` or the oracle image
+`arm-registers`, `tla-tools`, `herdtools7` or the oracle image
 (`Erx::Setup::SKIPPED_SOURCES`): only `tools/erx sysreg refresh` reads
-the first, only `make check-tla` uses the second, and the native oracle
-does not use the third. If `ERX_CLANG` or `ERX_LLD`
+the first, only `make check-tla` uses the second, only
+`make check-litmus` builds from the third, and the native oracle does
+not use the fourth. If `ERX_CLANG` or `ERX_LLD`
 is unset, the builds use `/opt/homebrew/opt/llvm/bin/clang` and
 `/opt/homebrew/bin/ld.lld`; export them yourself for later commands.
 
@@ -404,6 +405,7 @@ make check-sanitizers
 make check-fuzz
 make check-tla
 make check-cbmc
+make check-litmus
 ```
 
 * **Reproducibility** keeps both full `ERXPACK` structural test fixtures
@@ -433,6 +435,12 @@ make check-cbmc
   `test/cbmc/` and checks that each seeded defect fails its harness. It
   needs the cbmc version `test/cbmc/roster.json` pins, from Homebrew
   (`CBMC` names another path), and writes its report to `build/cbmc/`.
+* **Litmus** runs the weak-memory litmus tests of `test/litmus/` under
+  herd7 and checks each protocol's answer and its broken twin's. herd7
+  is built offline into `build/herdtools7/` from the herdtools7 release
+  `make fetch` verified, the first time and whenever its pin or recipe
+  changes (`tools/erx build herd7` builds it on its own). The build needs
+  `brew install ocaml dune menhir ocaml-zarith`.
 
 ## Boot erXos
 

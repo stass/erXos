@@ -25,6 +25,7 @@ module Erx
     SKIPPED_SOURCES = {
       'arm-registers' => 'only `tools/erx sysreg refresh` reads it',
       'tla-tools' => 'only `make check-tla` runs TLC',
+      'herdtools7' => 'only `make check-litmus` builds herd7 from it',
       'oracle-toolchain' => 'the OCI oracle image, which the native oracle does not use'
     }.freeze
 
