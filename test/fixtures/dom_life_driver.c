@@ -29,13 +29,21 @@
 
 static erx_dom_t domains[NDOMAINS];
 static erx_dom_connection_t connections[NCONNECTIONS];
-static const uint64_t library_threads[] = { 900, 901 };
+/* The system domain's space, as records name it; 77 is a domain's own. */
+#define SYSTEM_SPACE	UINT64_C(4000)
 static erx_dom_view_t view;
+/* The catalogue: 0 an unconfined virtio-mmio transport, 1 a confined device. */
+#define NDEVICES	3
+static erx_dom_device_entry_t devices[NDEVICES];
+static erx_dom_device_t device_records[NDEVICES];
 static unsigned long failures;
+
+static void	device_explore(void);
 
 static const char *const step_names[] = {
 	"CARVE", "SPACE", "GROUP", "MEM", "BELL", "SLICE", "IMAGE_MAP", "MAP",
-	"INSTALL", "BOOTINFO", "THREAD"
+	"INSTALL", "BOOTINFO", "THREAD", "RESOURCE", "WINDOW", "IRQ", "DMA",
+	"CONTIGUOUS"
 };
 
 /*
@@ -63,8 +71,18 @@ reset_view(void)
 	    .a = ERX_DOM_SYSTEM_ID, .b = 6, .budget_b = { 611 } };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
 	    .connections = connections, .max_connections = NCONNECTIONS,
-	    .next_connection = 20, .library_threads = library_threads,
-	    .nlibrary_threads = 2 };
+    .next_connection = 20, .system_space = SYSTEM_SPACE,
+    .devices = devices, .device_records = device_records,
+    .ndevices = 2 };
+memset(devices, 0, sizeof(devices));
+memset(device_records, 0, sizeof(device_records));
+devices[0] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
+    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
+devices[1] = (erx_dom_device_entry_t){ .nranges = 2, .nlines = 2,
+    .ranges = { { 0x10000000, 0x4000 }, { 0x10010000, 0x1000 } },
+    .confined = true };
+for (uint32_t index = 0; index < NDEVICES; index++)
+	device_records[index].index = index;
 }
 
 /*
@@ -75,6 +93,7 @@ reset_view(void)
  */
 typedef struct model {
 	bool		alive[ERX_DOM_OBJ_COUNT];
+	bool		installed[ERX_DOM_OBJ_COUNT];
 	erx_dom_obj_t	parent[ERX_DOM_OBJ_COUNT];
 } model_t;
 
@@ -106,6 +125,7 @@ model_apply(model_t *m, const erx_dom_step_t *step, unsigned at)
 	if (step->kind == ERX_DOM_STEP_INSTALL) {
 		if (!m->alive[step->obj])
 			fail("install of an object not made", at);
+		m->installed[step->obj] = true;
 		return;
 	}
 	if (reader_budget(step->obj) != step->budget)
@@ -129,6 +149,21 @@ model_destroy(model_t *m, erx_dom_obj_t budget)
 				changed = true;
 			}
 	}
+}
+
+/*
+ * The capabilities left in the parties' tables: a deletion clears every
+ * capability to its object from every table (docs/design-kernel.md, K25),
+ * so an install stays only while its object lives.
+ */
+static unsigned
+model_in_tables(const model_t *m)
+{
+	unsigned left = 0;
+
+	for (int obj = 0; obj < ERX_DOM_OBJ_MADE_COUNT; obj++)
+		left += m->installed[obj] && m->alive[obj];
+	return (left);
 }
 
 static unsigned
@@ -168,6 +203,8 @@ explore(void)
 			model_destroy(&m, undo[index]);
 		if (model_left(&m) != 0)
 			fail("undo left an object", at);
+		if (model_in_tables(&m) != 0)
+			fail("undo left a capability in a party's table", at);
 	}
 
 	/* Applied whole, the connection's row then goes at its disconnect. */
@@ -182,8 +219,10 @@ explore(void)
 		fail("the connection's disconnect was refused", plan.nsteps);
 	for (uint32_t index = 0; index < teardown.ndestroy; index++)
 		model_destroy(&m, (erx_dom_obj_t)teardown.destroy[index].raw);
-	if (model_left(&m) != 0 || teardown.index != plan.row)
+	if (model_left(&m) != 0 || model_in_tables(&m) != 0 ||
+	    teardown.index != plan.row)
 		fail("disconnect left an object or freed another row", plan.nsteps);
+	device_explore();
 	printf("explore steps=%u failures=%lu\n", plan.nsteps, failures);
 	return (failures == 0 ? 0 : 1);
 }
@@ -244,10 +283,11 @@ action_case(const char *name, erx_status_t status,
 }
 
 static void
-record_case(const char *name, uint64_t label, uint32_t kind, uint64_t thread,
+record_case(const char *name, uint64_t label, uint32_t kind, uint64_t space,
     int64_t status)
 {
-	erx_fault_t record = { .kind = kind, .thread = thread,
+	/* The stopper's thread is 0, as the stopgap reports it. */
+	erx_fault_t record = { .kind = kind, .space = space,
 	    .status = status };
 	erx_dom_action_t action;
 
@@ -349,7 +389,7 @@ end_cases(void)
 	record_case("exit_halt_status", 6, ERX_FAULT_EXIT, 77, 42);
 	record_case("exit_nothread", 5, ERX_FAULT_EXIT, 77, ERX_EXIT_NOTHREAD);
 	record_case("exit_crash", 5, ERX_FAULT_EXIT, 77, ERX_EXIT_CRASH);
-	record_case("exit_library_unnoted", 5, ERX_FAULT_EXIT, 900, 0);
+	record_case("exit_library_unnoted", 5, ERX_FAULT_EXIT, SYSTEM_SPACE, 0);
 	record_case("exit_ended", 7, ERX_FAULT_EXIT, 77, 0);
 	record_case("fault_ended", 7, ERX_FAULT_MEMORY, 77, 0);
 	record_case("exit_building", 8, ERX_FAULT_EXIT, 77, 0);
@@ -359,16 +399,143 @@ end_cases(void)
 	    77, 0);
 
 	/* With 5 stopping for a fault and 6 stopping on request. */
-	domains[0].stopping = true;
 	domains[0].stop = (erx_dom_end_t){ ERX_DOM_END_FAULT, ERX_FAULT_UNDEFINED };
-	domains[1].stopping = true;
 	domains[1].stop = (erx_dom_end_t){ ERX_DOM_END_STOPPED, 0 };
 	stop_case("stop_again", 5, 0);
 	record_case("fault_stopping", 5, ERX_FAULT_ALIGNMENT, 77, 0);
-	record_case("exit_fault_noted", 5, ERX_FAULT_EXIT, 900, ERX_EXIT_CRASH);
-	record_case("exit_stopped", 6, ERX_FAULT_EXIT, 901, 3);
+	record_case("exit_fault_noted", 5, ERX_FAULT_EXIT, SYSTEM_SPACE,
+	    ERX_EXIT_CRASH);
+	record_case("exit_stopped", 6, ERX_FAULT_EXIT, SYSTEM_SPACE, 3);
+	record_case("exit_fault_unknown_stopper", 5, ERX_FAULT_EXIT,
+	    SYSTEM_SPACE, ERX_EXIT_CRASH);
 	record_case("exit_halt_first", 5, ERX_FAULT_EXIT, 77, 2);
 	record_case("exit_crash_first", 6, ERX_FAULT_EXIT, 77, ERX_EXIT_CRASH);
+}
+
+/* A device's give: its status, then its steps' kinds and its undo's size. */
+static void
+device_case(const char *name, uint32_t id, uint32_t index)
+{
+	erx_dom_device_plan_t plan;
+	erx_dom_obj_t undo[ERX_DOM_DEVICE_STEPS];
+	erx_status_t status = erx_dom_plan_device_give(&view, id, index, &plan);
+
+	if (status != ERX_OK) {
+		printf("dev %s %d\n", name, status);
+		return;
+	}
+	printf("dev %s 0 slot=%u steps=", name, plan.slot);
+	for (uint32_t step = 0; step < plan.nsteps; step++)
+		printf("%s%s", step == 0 ? "" : ",",
+		    step_names[plan.steps[step].kind]);
+	printf(" undo=%u\n", erx_dom_device_undo(&plan, plan.nsteps, undo));
+}
+
+static void
+device_cases(void)
+{
+	reset_view();
+	device_case("dev_unconfined_first", 5, 0);
+	device_case("dev_confined", 6, 1);
+	device_case("dev_unknown_domain", 9, 0);
+	device_case("dev_ended_domain", 7, 0);
+	device_case("dev_building_domain", 8, 0);
+	device_case("dev_index_past", 5, 2);
+	device_records[0].memory = (erx_cap_t){ 77 };
+	device_case("dev_unconfined_kept", 5, 0);
+	device_records[0].holder = 6;
+	device_case("dev_busy", 5, 0);
+	device_records[0].holder = 5;
+	device_case("dev_busy_self", 5, 0);
+	device_records[0].holder = 7;
+	device_case("dev_holder_ended", 5, 0);
+	device_records[0].holder = 9;
+	device_case("dev_holder_retired", 5, 0);
+
+	reset_view();
+	view.ndevices = 3;
+	devices[2] = (erx_dom_device_entry_t){ .nranges = 1,
+	    .ranges = { { 0x0a002000, 0x2000 } } };
+	device_case("dev_overlap", 5, 0);
+	devices[2].ranges[0] = (erx_dom_range_t){ 0x0a004000, 0x1000 };
+	device_case("dev_adjacent", 5, 0);
+	devices[2] = (erx_dom_device_entry_t){ .nranges = 1,
+	    .ranges = { { 0x0a000000, UINT64_MAX - 0x0a000000 + 1 } } };
+	device_case("dev_overlap_wrapping", 5, 0);
+
+	reset_view();
+	devices[0].nranges = ERX_DEVICE_RANGES_MAX + 1;
+	device_case("dev_ranges_over", 5, 0);
+	reset_view();
+	devices[0].nlines = ERX_DEVICE_IRQS_MAX + 1;
+	device_case("dev_lines_over", 5, 0);
+	reset_view();
+	devices[0].ranges[0].base += 1;
+	device_case("dev_range_unaligned", 5, 0);
+	reset_view();
+	devices[0].ranges[0].size = 0;
+	device_case("dev_range_empty", 5, 0);
+	reset_view();
+	devices[0].ranges[0] = (erx_dom_range_t){ UINT64_MAX - 0xfff, 0x2000 };
+	device_case("dev_range_wraps", 5, 0);
+	reset_view();
+	devices[1].memory = 0x1000;
+	device_case("dev_confined_memory", 6, 1);
+	reset_view();
+	devices[0].memory = 0x1001;
+	device_case("dev_memory_unaligned", 5, 0);
+	reset_view();
+	devices[0].memory = 0;
+	device_case("dev_no_memory", 5, 0);
+	reset_view();
+	devices[1].nranges = ERX_DEVICE_RANGES_MAX;
+	devices[1].nlines = ERX_DEVICE_IRQS_MAX;
+	for (uint32_t range = 0; range < ERX_DEVICE_RANGES_MAX; range++)
+		devices[1].ranges[range] = (erx_dom_range_t){
+		    0x20000000 + range * 0x10000, 0x1000 };
+	device_case("dev_full", 6, 1);
+}
+
+/*
+ * A device's give failed at every step of the fullest plan and of an
+ * unconfined first give: undo destroys each made object, so none lives
+ * and the holder's table keeps nothing of it (K25).
+ */
+static void
+device_explore(void)
+{
+	erx_dom_device_plan_t plan;
+	erx_dom_obj_t undo[ERX_DOM_DEVICE_STEPS];
+	bool alive[ERX_DOM_OBJ_COUNT];
+	uint32_t count, left;
+
+	for (uint32_t index = 0; index < 2; index++) {
+		reset_view();
+		devices[1].nranges = ERX_DEVICE_RANGES_MAX;
+		devices[1].nlines = ERX_DEVICE_IRQS_MAX;
+		for (uint32_t range = 0; range < ERX_DEVICE_RANGES_MAX; range++)
+			devices[1].ranges[range] = (erx_dom_range_t){
+			    0x20000000 + range * 0x10000, 0x1000 };
+		if (erx_dom_plan_device_give(&view, 5, index, &plan) != ERX_OK) {
+			fail("a valid give was refused", index);
+			continue;
+		}
+		for (uint32_t at = 0; at <= plan.nsteps; at++) {
+			memset(alive, 0, sizeof(alive));
+			for (uint32_t step = 0; step < at; step++)
+				if (plan.steps[step].kind != ERX_DOM_STEP_INSTALL)
+					alive[plan.steps[step].obj] = true;
+			count = erx_dom_device_undo(&plan, at, undo);
+			for (uint32_t step = 0; step < count; step++)
+				alive[undo[step]] = false;
+			left = 0;
+			for (int obj = 0; obj < ERX_DOM_OBJ_COUNT; obj++)
+				left += alive[obj];
+			if (left != 0)
+				fail("a give's undo left an object", at);
+		}
+		printf("dev-explore %u steps=%u\n", index, plan.nsteps);
+	}
 }
 
 /* Seeded plans: each breaks one rule erx_dom_link_check enforces. */
@@ -419,6 +586,62 @@ seeded(void)
 #undef SEED
 }
 
+/* Seeded gives: each breaks one rule erx_dom_device_check enforces. */
+static void
+device_seeded(void)
+{
+	erx_dom_device_plan_t valid, plan;
+	const erx_dom_step_t dma = { .kind = ERX_DOM_STEP_DMA,
+	    .obj = ERX_DOM_OBJ_DEV_DMA, .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+	    .target = ERX_DOM_OBJ_DEV_RESOURCE };
+	uint32_t last;
+
+	reset_view();
+	if (erx_dom_plan_device_give(&view, 5, 0, &valid) != ERX_OK)
+		failures++;
+	last = valid.nsteps - 1;
+	printf("seeded dev_valid %d\n", erx_dom_device_check(&valid));
+#define	SEED(name, edit) do {						\
+	plan = valid;							\
+	edit;								\
+	printf("seeded %s %d\n", name, erx_dom_device_check(&plan));	\
+} while (0)
+	SEED("dev_gate", plan.steps[last].obj = ERX_DOM_OBJ_FAULT_GATE);
+	SEED("dev_install_resource",
+	    plan.steps[last].obj = ERX_DOM_OBJ_DEV_RESOURCE);
+	SEED("dev_install_unmade", plan.steps[last].obj = ERX_DOM_OBJ_DEV_DMA);
+	SEED("dev_window_phys", plan.steps[4].rights |= ERX_HR_PHYS);
+	SEED("dev_foreign_space",
+	    plan.steps[last].target = ERX_DOM_OBJ_SPACE_A);
+	SEED("dev_resource_not_root",
+	    plan.steps[0].target = ERX_DOM_OBJ_PRINCIPAL_BUDGET);
+	SEED("dev_window_system_pays",
+	    plan.steps[1].budget = ERX_DOM_OBJ_SYSTEM_BUDGET);
+	SEED("dev_memory_holder_pays",
+	    plan.steps[3].budget = ERX_DOM_OBJ_HOLDER_BUDGET);
+	SEED("dev_window_index", plan.steps[1].index = 1);
+	SEED("dev_out_of_order", {
+		erx_dom_step_t first = plan.steps[0];
+		plan.steps[0] = plan.steps[1];
+		plan.steps[1] = first;
+	});
+	SEED("dev_dma_and_memory", plan.steps[plan.nsteps++] = dma);
+	SEED("dev_system_holder", plan.holder = ERX_DOM_SYSTEM_ID);
+	SEED("dev_too_many", plan.nsteps = ERX_DOM_DEVICE_STEPS + 1);
+	device_records[0].memory = (erx_cap_t){ 77 };
+	if (erx_dom_plan_device_give(&view, 5, 0, &valid) != ERX_OK)
+		failures++;
+	SEED("dev_kept_not_last", {
+		erx_dom_step_t kept = plan.steps[plan.nsteps - 1];
+		plan.steps[plan.nsteps - 1] = plan.steps[plan.nsteps - 2];
+		plan.steps[plan.nsteps - 2] = kept;
+	});
+	reset_view();
+	device_records[0].index = 1;
+	printf("seeded dev_record_index %d\n", erx_dom_plan_device_give(&view, 5, 0, &plan));
+#undef SEED
+}
+
 int
 main(int argc, char **argv)
 {
@@ -428,10 +651,12 @@ main(int argc, char **argv)
 		connect_cases();
 		teardown_cases();
 		end_cases();
+		device_cases();
 		return (0);
 	}
 	if (argc == 2 && strcmp(argv[1], "seeded") == 0) {
 		seeded();
+		device_seeded();
 		return (failures == 0 ? 0 : 1);
 	}
 	fprintf(stderr, "usage: dom_life_driver explore|cases|seeded\n");

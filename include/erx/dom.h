@@ -86,6 +86,8 @@ typedef enum erx_dom_state {
 } erx_dom_state_t;
 
 typedef enum erx_dom_end_kind {
+	ERX_DOM_END_NONE,	/* no end yet: a record's stop until the library
+				 * stops its space, so a zeroed stop is none */
 	ERX_DOM_END_HALT,	/* the space stopped itself with a halt status */
 	ERX_DOM_END_CRASH,	/* the space stopped itself with ERX_EXIT_CRASH */
 	ERX_DOM_END_FAULT,	/* a thread faulted; the library stopped the space */
@@ -117,8 +119,9 @@ typedef struct erx_dom {
 	uint32_t	labels;		/* bell labels its event table has taken: the
 					 * system connection's is 1, and each
 					 * connection's bell takes the next */
-	bool		stopping;	/* the library stopped its space, for stop */
-	erx_dom_end_t	stop;		/* FAULT with the kind, or STOPPED */
+	erx_dom_end_t	stop;		/* the stop the library made: FAULT with
+					 * the kind, or STOPPED; NONE until it
+					 * stops the space */
 	erx_dom_end_t	end;		/* classified end, once ERX_DOM_ENDED */
 	erx_fault_t	record;		/* the record that ended it */
 } erx_dom_t;
@@ -135,6 +138,44 @@ typedef struct erx_dom_connection {
 	erx_cap_t	bell_b;		/* bound to b's group */
 	bool		closing;
 } erx_dom_connection_t;
+
+/*
+ * One device record, one per entry of the root resource's device list
+ * (docs/design-system.md, "Devices"). Everything but memory is charged to
+ * the holder's own budget, so it dies at the holder's end, and a holder
+ * that names no living domain holds nothing.
+ */
+typedef struct erx_dom_device {
+	uint32_t	index;		/* in the root resource's device list */
+	uint32_t	holder;		/* the living domain it is given to; 0 for none */
+	erx_cap_t	resource;	/* the carved resource */
+	erx_cap_t	windows[ERX_DEVICE_RANGES_MAX];	/* its register windows */
+	erx_cap_t	irqs[ERX_DEVICE_IRQS_MAX];	/* its lines' IRQ objects */
+	erx_cap_t	dma;		/* confined: its DMA window; else ERX_CAP_NULL */
+	erx_cap_t	memory;		/* unconfined: its contiguous memory, made at
+					 * its first give, charged to the system
+					 * domain and kept for the boot; else
+					 * ERX_CAP_NULL */
+} erx_dom_device_t;
+
+/* A page-aligned range of device addresses. */
+typedef struct erx_dom_range {
+	uint64_t	base, size;
+} erx_dom_range_t;
+
+/*
+ * One entry of the device service's catalogue, from the root resource's
+ * device list: what erx_dom_device_give creates for the device.
+ */
+typedef struct erx_dom_device_entry {
+	uint32_t	nranges;	/* at most ERX_DEVICE_RANGES_MAX */
+	uint32_t	nlines;		/* at most ERX_DEVICE_IRQS_MAX */
+	erx_dom_range_t	ranges[ERX_DEVICE_RANGES_MAX];	/* its register ranges */
+	bool		confined;	/* it has an IOMMU stream, so a DMA window */
+	uint64_t	memory;		/* unconfined: the contiguous memory the
+					 * platform reserves for it, bytes; 0
+					 * for none */
+} erx_dom_device_entry_t;
 
 /*
  * A creation specification: the domain service's description of a domain,
@@ -225,6 +266,9 @@ typedef struct erx_dom_view {
 	uint32_t		 max_connections;
 	const erx_dom_principal_t *principals;
 	uint32_t		 nprincipals;
+	const erx_dom_device_entry_t *devices;	/* the catalogue: ndevices entries */
+	const erx_dom_device_t	*device_records; /* ndevices records, entry for entry */
+	uint32_t		 ndevices;
 	const erx_dom_file_t	*files;		/* the boot image's files */
 	uint32_t		 nfiles;
 	const erx_dom_configured_t *configured;
@@ -242,10 +286,8 @@ typedef struct erx_dom_view {
 						  * numbers start at 1 and only grow,
 						  * so none is reused in a boot; 0
 						  * once they are spent */
-	const uint64_t		*library_threads; /* object ids of the threads that
-						  * stop spaces for the library: its
-						  * fault thread and its NIFs' */
-	uint32_t		 nlibrary_threads;
+	uint64_t		 system_space;	/* object id of the system domain's
+						 * space, as records name it */
 	bool			 ending;	/* the ending record is installed */
 } erx_dom_view_t;
 
@@ -276,6 +318,15 @@ typedef enum erx_dom_obj {
 	ERX_DOM_OBJ_SIDE_B,		/* b's side: b writes it, a reads it */
 	ERX_DOM_OBJ_BELL_A,		/* bound to a's group: a waits on it */
 	ERX_DOM_OBJ_BELL_B,		/* bound to b's group */
+	/* A device given to a domain (erx_dom_plan_device_give). */
+	ERX_DOM_OBJ_DEV_RESOURCE,	/* the device's resource, carved from the root's */
+	ERX_DOM_OBJ_DEV_WINDOW,		/* register window i is DEV_WINDOW + i */
+	ERX_DOM_OBJ_DEV_IRQ = ERX_DOM_OBJ_DEV_WINDOW + ERX_DEVICE_RANGES_MAX,
+					/* line i's IRQ object is DEV_IRQ + i */
+	ERX_DOM_OBJ_DEV_DMA = ERX_DOM_OBJ_DEV_IRQ + ERX_DEVICE_IRQS_MAX,
+					/* a confined device's DMA window */
+	ERX_DOM_OBJ_DEV_MEMORY,		/* an unconfined device's contiguous
+					 * memory, made at its first give */
 	ERX_DOM_OBJ_MADE_COUNT,
 	/* Held by the library. */
 	ERX_DOM_OBJ_PRINCIPAL_BUDGET = ERX_DOM_OBJ_MADE_COUNT,
@@ -290,6 +341,12 @@ typedef enum erx_dom_obj {
 	ERX_DOM_OBJ_GROUP_B,
 	ERX_DOM_OBJ_SPACE_A,
 	ERX_DOM_OBJ_SPACE_B,
+	ERX_DOM_OBJ_ROOT_RESOURCE,	/* the root resource, listing every device */
+	ERX_DOM_OBJ_SYSTEM_BUDGET,	/* the system domain's own budget */
+	ERX_DOM_OBJ_HOLDER_BUDGET,	/* a device's holder's own budget */
+	ERX_DOM_OBJ_HOLDER_SPACE,
+	ERX_DOM_OBJ_DEV_KEPT,		/* the device record's contiguous memory,
+					 * made at an earlier give */
 	ERX_DOM_OBJ_COUNT
 } erx_dom_obj_t;
 
@@ -304,12 +361,26 @@ typedef enum erx_dom_step_kind {
 	ERX_DOM_STEP_MAP,		/* obj into target, read-only */
 	ERX_DOM_STEP_INSTALL,		/* obj into target with rights */
 	ERX_DOM_STEP_BOOTINFO,		/* write obj from the installs' values */
-	ERX_DOM_STEP_THREAD		/* obj in space target and group aux, stopped */
+	ERX_DOM_STEP_THREAD,		/* obj in space target and group aux, stopped */
+	ERX_DOM_STEP_RESOURCE,		/* obj: device index carved from resource
+					 * target, charged to budget */
+	ERX_DOM_STEP_WINDOW,		/* obj: physical memory with device
+					 * attributes over register range index of
+					 * resource target, size bytes, charged to
+					 * budget */
+	ERX_DOM_STEP_IRQ,		/* obj: an IRQ object of line index of
+					 * resource target, charged to budget */
+	ERX_DOM_STEP_DMA,		/* obj: a DMA window on resource target's
+					 * stream, charged to budget */
+	ERX_DOM_STEP_CONTIGUOUS		/* obj: contiguous memory of size, charged
+					 * to budget */
 } erx_dom_step_kind_t;
 
 /* What undoes an applied step. */
 typedef enum erx_dom_undo_kind {
-	ERX_DOM_UNDO_DESTROY,		/* destroy the step's budget */
+	ERX_DOM_UNDO_DESTROY,		/* destroy the step's object: a carved
+					 * budget, with all charged to it, or a
+					 * device's object */
 	ERX_DOM_UNDO_BY_BUDGET		/* goes with a carved budget's destroy */
 } erx_dom_undo_kind_t;
 
@@ -370,10 +441,12 @@ typedef struct erx_dom_grant_row {
 
 /*
  * Every install a plan may make into a domain's table (A7), one row per
- * object and the space it goes into: nine for a creation, into SPACE, and
- * three into each party of a connection.
+ * object and the space it goes into: nine for a creation, into SPACE;
+ * three into each party of a connection; and five into a device's holder,
+ * where the row of DEV_WINDOW covers every register window and the row of
+ * DEV_IRQ every line.
  */
-#define ERX_DOM_GRANTS_ROWS	15u
+#define ERX_DOM_GRANTS_ROWS	20u
 extern const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS];
 
 /*
@@ -407,6 +480,20 @@ erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_plan_t *plan);
 
 /*
+ * erx_dom_principal's validation of a principal's configuration, from the
+ * manifest's principal row: a nonzero number no principal of the view
+ * holds (ERX_EEXIST otherwise); a nonzero, page-aligned budget; a share
+ * with a rate; a nonzero domain quota; and a ceiling profile no runtime
+ * could exceed (a frame within ERX_FRAME_MAX), with the default profile
+ * within it. ERX_EINVAL for anything else. On ERX_OK, *record is the
+ * principal as the library keeps it, its counts carved and domains zero.
+ * Whether the root budget holds its budget, and the users group its share,
+ * is the kernel's to say when the library carves and creates them.
+ */
+erx_status_t	erx_dom_principal_check(const erx_dom_view_t *,
+		    const erx_dom_principal_t *config, erx_dom_principal_t *record);
+
+/*
  * Checks a plan whole before it is applied: every step names objects
  * already made or held, every made object is charged to a budget the plan
  * carved, and every install has a row of erx_dom_grants whose rights
@@ -435,6 +522,11 @@ uint32_t	erx_dom_steps_undo(const erx_dom_step_t *steps, uint32_t nsteps,
  * waits on it, and each party's share installed from erx_dom_grants. The
  * held objects it names are the parties' records' (OUTER_A, GROUP_A,
  * SPACE_A and b's), which the apply phase resolves from a_slot and b_slot.
+ * Every object a party is given is charged to one of the two children, so
+ * destroying the children deletes each, and a deletion clears every
+ * capability to the object from every table (docs/design-kernel.md, K25):
+ * neither a failed connect's undo nor a disconnect leaves anything in a
+ * living party's table, and no install needs a slot of its own.
  */
 #define ERX_DOM_LINK_STEPS	12u
 
@@ -518,8 +610,8 @@ erx_status_t	erx_dom_plan_retire(const erx_dom_view_t *, uint32_t id,
 typedef enum erx_dom_act {
 	ERX_DOM_ACT_DROP,	/* nothing: no living domain has the label, or
 				 * the library is already stopping its space */
-	ERX_DOM_ACT_STOP,	/* set the record's stopping and stop to end,
-				 * then erx_space_stop(space, status) */
+	ERX_DOM_ACT_STOP,	/* set the record's stop to end, then
+				 * erx_space_stop(space, status) */
 	ERX_DOM_ACT_END		/* apply teardown, report {domain_ended, Id,
 				 * end, record}, set the record's end and
 				 * record, and its state to ERX_DOM_ENDED */
@@ -535,14 +627,16 @@ typedef struct erx_dom_action {
 
 /*
  * The classified end of a domain from its exit record
- * (docs/design-system.md, "Ending a domain"): a stop the library made
- * (by_library: the record's stopper is one of the library's threads) is
- * the FAULT it noted, or STOPPED; a stop the domain made is CRASH for
- * ERX_EXIT_CRASH and HALT with the status otherwise, ERX_EXIT_NOTHREAD
- * among them. noted is the record's stop, or NULL when it has none.
+ * (docs/design-system.md, "Ending a domain"). An exit record names its
+ * stopper's space, and only the library, in the system domain's space
+ * system_space, holds a capability that stops another domain's space, so
+ * a record whose stopper is in system_space is a stop the library made:
+ * the FAULT it noted, or STOPPED. Any other stop is the domain's own:
+ * CRASH for ERX_EXIT_CRASH and HALT with the status otherwise,
+ * ERX_EXIT_NOTHREAD among them. noted is the domain record's stop.
  */
-erx_dom_end_t	erx_dom_classify(const erx_fault_t *exit, bool by_library,
-		    const erx_dom_end_t *noted);
+erx_dom_end_t	erx_dom_classify(const erx_fault_t *exit,
+		    uint64_t system_space, erx_dom_end_t noted);
 
 /*
  * The fault thread's step for a record at the library's gate whose label
@@ -563,5 +657,56 @@ void		erx_dom_record_step(const erx_dom_view_t *, uint64_t label,
  */
 erx_status_t	erx_dom_plan_stop(const erx_dom_view_t *, uint32_t id,
 		    int64_t status, erx_dom_action_t *action);
+
+/*
+ * A device's give (docs/design-system.md, "Devices"): its resource carved
+ * from the root's, a register window per range and an IRQ object per
+ * line, each charged to the holder's own budget; a DMA window for a
+ * confined device, on the same budget, or for an unconfined one its
+ * contiguous memory, made at its first give on the system domain's budget
+ * and kept in the device record after; and the holder's share installed
+ * from erx_dom_grants. The holder is alive, so nothing here is undone by
+ * a budget: undo destroys each object the plan made, last first, and the
+ * deletion clears every capability to it from the holder's table. The
+ * kept memory outlives an undo, so its install is the plan's last step:
+ * the apply phase writes the device record, which cannot fail, after it.
+ */
+#define ERX_DOM_DEVICE_STEPS	(2u * (ERX_DEVICE_RANGES_MAX + ERX_DEVICE_IRQS_MAX) + 3u)
+	/* the resource, a window per range, an IRQ object per line and the
+	 * DMA window or memory, then an install of each but the resource */
+
+typedef struct erx_dom_device_plan {
+	uint32_t	index;		/* the device's entry and record */
+	uint32_t	holder;		/* the domain id it goes to */
+	uint32_t	slot;		/* the holder's record */
+	uint32_t	nsteps;
+	erx_dom_step_t	steps[ERX_DOM_DEVICE_STEPS];
+} erx_dom_device_plan_t;
+
+/*
+ * Plans erx_dom_device_give(id, index). ERX_OK; ERX_EINVAL for a domain
+ * with no record or outside built and running, an index past the
+ * catalogue or a record whose index is not its own, an entry with more
+ * ranges or lines than the ABI allows or a
+ * range that is empty, unaligned, wraps, or overlaps another entry's;
+ * ERX_EBUSY for a device whose record names a living holder, this domain
+ * included. *plan is written only on ERX_OK.
+ */
+erx_status_t	erx_dom_plan_device_give(const erx_dom_view_t *, uint32_t id,
+		    uint32_t index, erx_dom_device_plan_t *plan);
+
+/*
+ * Checks a device's plan whole: the resource is carved from the root's
+ * before anything is made from it, each window, line and DMA window comes
+ * from that resource and is charged to the holder's budget, contiguous
+ * memory to the system domain's, and each install has its row of
+ * erx_dom_grants. ERX_EINVAL otherwise.
+ */
+erx_status_t	erx_dom_device_check(const erx_dom_device_plan_t *plan);
+
+/* The undo of a give whose first `applied` steps were applied: every
+ * object they made, last first, into undo, which holds ERX_DOM_DEVICE_STEPS. */
+uint32_t	erx_dom_device_undo(const erx_dom_device_plan_t *plan,
+		    uint32_t applied, erx_dom_obj_t *undo);
 
 #endif /* ERX_DOM_H */

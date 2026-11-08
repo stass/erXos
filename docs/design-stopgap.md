@@ -1532,8 +1532,8 @@ follow M7 in [plan.md](plan.md).
 | K10, K11, K15, K16 | none | Track K |
 | K14, K20, K33 | none | Track K; M2 (the executor rule, `ERX_EWOULDBLOCK`) |
 | K18, K27 | a stop ends the tree below a space, children first, and posts each exit record after every thread's deletion has returned | Track K (the bounded finishing path, stops under hostile load) |
-| K26 | a deleted object's mappings revoked in every task, its handles `ERX_ESTALE` | Track K (queued threads woken with `ERX_ESTALE` and `ERX_EDEAD`) |
-| K28 | fault and exit records at the gate fixed at creation, with thread `unknown` | Track K (the thread's identity, resume after repair) |
+| K26 | a deleted object's mappings revoked in every task, its handles `ERX_ESTALE` and their entries taken until their holder closes them, so a domain keeps those of a connect or a give that failed, whose values it never learned, for its life | Track K (queued threads woken with `ERX_ESTALE` and `ERX_EDEAD`) |
+| K28 | fault and exit records at the gate fixed at creation, with thread `unknown` and an exit record's `space` the space of the task that asked for the stop | Track K (the thread's identity, resume after repair) |
 | K29, K30 | vCPU upcalls over Fiasco's interface if [the source check](#open-decisions) passes; otherwise none | Track K; Track P's catchable signals at M7 if the check fails |
 | K19, K31 | none | Track K; M12 (the lease, the board watchdog) |
 | K22, K23 | none | Track Q |

@@ -555,6 +555,9 @@ typedef struct erx_dom {
 					 * ERX_ENTRY_SEAL */
 	erx_cap_t	first_thread;
 	uint32_t	system_connection;	/* the number of its connection to the system domain */
+	erx_dom_end_t	stop;		/* the stop the library made: FAULT with the
+					 * kind, or STOPPED; NONE until it stops
+					 * the space */
 	erx_dom_end_t	end;		/* classified end, once ERX_DOM_ENDED */
 	erx_fault_t	record;		/* the record that ended it */
 } erx_dom_t;
@@ -605,12 +608,17 @@ no record here: it belongs to the domain that created it
 ([Sub-spaces](#sub-spaces)).
 
 **A classified end** is one of four, computed by a pure function from the
-records alone: an exit record names the object id of the thread that
-stopped the space, so a stop the library made tells itself from one the
-domain made, whichever came first:
+records alone: an exit record names the thread that stopped the space
+and that thread's space, and only the library, in the system domain's
+space, holds a capability that stops a domain's space, so a stop the
+library made tells itself from one the domain made by the stopper's space,
+whichever came first. A record's noted stop is `NONE` until the library
+stops its space, so a zeroed record notes none:
 
 ```c
 typedef enum erx_dom_end_kind {
+	ERX_DOM_END_NONE,	/* no end yet: a record's stop until the library
+				 * stops its space */
 	ERX_DOM_END_HALT,	/* the space stopped itself with a halt status */
 	ERX_DOM_END_CRASH,	/* the space stopped itself with ERX_EXIT_CRASH */
 	ERX_DOM_END_FAULT,	/* a thread faulted; the library stopped the space */
@@ -1331,7 +1339,8 @@ with the domain's id:
    the fault's kind.
 2. **An exit record** arrives once no thread of the space runs or can run
    again ([design-kernel.md](design-kernel.md#threads-and-faults)). If its
-   stopper is the fault thread or a NIF of the system domain, the end is
+   stopper's space is the system domain's, whose fault thread and NIFs alone
+   hold a capability that stops a domain, the end is
    the `FAULT` the library noted or `STOPPED` on request. Otherwise the
    space stopped itself, or its last thread ended, and its status tells
    the end: `ERX_EXIT_CRASH` is `CRASH`, and any other status is `HALT`

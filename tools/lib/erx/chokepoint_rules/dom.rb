@@ -38,6 +38,21 @@ module Erx
           seed: { 'liberx/system/dom_apply.c' => "spec.origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, row };\n",
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "origin.kind = ERX_DOM_REQUEST;\n" }
         ),
+        # Nothing calls the manifest entries but their definition, their
+        # declaration, the driver and the fuzz target. Their first caller
+        # replaces this rule with dom-manifest-entries' check.
+        Chokepoints::Forbidden.new(
+          name: 'dom-manifest-entries-uncalled',
+          rule: 'no file calls erx_dom_plan_configured or erx_dom_plan_partial until the check of their callers ' \
+                '(dom-manifest-entries) lands with them',
+          design: 'docs/design-system.md#the-domain-library',
+          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
+          pattern: /\berx_dom_plan_(?:configured|partial)\b/,
+          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ].map { |path| Chokepoints::Site.new(glob: path) },
+          seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
+                  'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
+                    "status = erx_dom_plan_partial(&view, id, row, &plan);\n" }
+        ),
         # A numeric index a requester supplies never selects manifest
         # authority: only manifest startup and restart call the configured
         # entry and only the root's partial-boot entry the partial one

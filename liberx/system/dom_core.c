@@ -5,7 +5,8 @@
 
 /*
  * The domain library's pure core: the planning entries with their origin
- * constructors, the creation planner, the whole-plan check and the undo of a failed creation
+ * constructors, the creation planner, the whole-plan check and the undo of a failed creation,
+ * and the validation of a principal's configuration
  * (docs/design-system.md, "The domain library" and "Creating a domain").
  * Nothing here performs a kernel call; the apply phase performs a plan's
  * steps in order and, when one fails, destroys what erx_dom_plan_undo
@@ -29,7 +30,9 @@
 /*
  * A party of a connection gets its own side to write, the peer's to read
  * and the peer's bell to ring; its own bell stays the library's, bound to
- * its group, and it learns only the bell's label.
+ * its group, and it learns only the bell's label. A device's holder gets
+ * its windows, lines and DMA window to drive it, and PHYS on its contiguous
+ * memory alone.
  */
 const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS] = {
 	{ ERX_DOM_OBJ_BUDGET, ERX_DOM_OBJ_SPACE, 0, ERX_HR_ALLOC,
@@ -51,6 +54,15 @@ const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS] = {
 	{ ERX_DOM_OBJ_SIDE_B, ERX_DOM_OBJ_SPACE_B, 0, DOM_WRITER, 0 },
 	{ ERX_DOM_OBJ_SIDE_A, ERX_DOM_OBJ_SPACE_B, 0, DOM_READER, 0 },
 	{ ERX_DOM_OBJ_BELL_A, ERX_DOM_OBJ_SPACE_B, 0, ERX_HR_TRIGGER, 0 },
+	{ ERX_DOM_OBJ_DEV_WINDOW, ERX_DOM_OBJ_HOLDER_SPACE, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_DEV_IRQ, ERX_DOM_OBJ_HOLDER_SPACE, 0,
+	    ERX_HR_BIND | ERX_HR_ACK, 0 },
+	{ ERX_DOM_OBJ_DEV_DMA, ERX_DOM_OBJ_HOLDER_SPACE, 0,
+	    ERX_HR_MAP | ERX_HR_BIND, 0 },
+	{ ERX_DOM_OBJ_DEV_MEMORY, ERX_DOM_OBJ_HOLDER_SPACE, 0,
+	    DOM_WRITER | ERX_HR_PHYS, 0 },
+	{ ERX_DOM_OBJ_DEV_KEPT, ERX_DOM_OBJ_HOLDER_SPACE, 0,
+	    DOM_WRITER | ERX_HR_PHYS, 0 },
 };
 
 /*
@@ -545,6 +557,11 @@ dom_step_makes(erx_dom_step_kind_t kind)
 	case ERX_DOM_STEP_BELL:
 	case ERX_DOM_STEP_SLICE:
 	case ERX_DOM_STEP_THREAD:
+	case ERX_DOM_STEP_RESOURCE:
+	case ERX_DOM_STEP_WINDOW:
+	case ERX_DOM_STEP_IRQ:
+	case ERX_DOM_STEP_DMA:
+	case ERX_DOM_STEP_CONTIGUOUS:
 		return (true);
 	case ERX_DOM_STEP_IMAGE_MAP:
 	case ERX_DOM_STEP_MAP:
@@ -855,9 +872,40 @@ dom_step_ok(const erx_dom_plan_t *plan, const erx_dom_step_t *step,
 		    step->target == ERX_DOM_OBJ_SPACE &&
 		    made[ERX_DOM_OBJ_SPACE] && step->aux == ERX_DOM_OBJ_GROUP &&
 		    made[ERX_DOM_OBJ_GROUP]);
-	default:
+	/* A device's objects are erx_dom_plan_device_give's alone. */
+	case ERX_DOM_STEP_RESOURCE:
+	case ERX_DOM_STEP_WINDOW:
+	case ERX_DOM_STEP_IRQ:
+	case ERX_DOM_STEP_DMA:
+	case ERX_DOM_STEP_CONTIGUOUS:
 		return (false);
 	}
+	return (false);
+}
+
+erx_status_t
+erx_dom_principal_check(const erx_dom_view_t *view,
+    const erx_dom_principal_t *config, erx_dom_principal_t *record)
+{
+	uint64_t rate;
+
+	if (config->number == 0)
+		return (ERX_EINVAL);
+	if (dom_principal(view, config->number) != NULL)
+		return (ERX_EEXIST);
+	/* A ceiling within itself is a profile a runtime can start with. */
+	if (config->memory == 0 || !dom_page_aligned(config->memory) ||
+	    !dom_grant_rate(&config->share, &rate) ||
+	    config->domains_max == 0 ||
+	    !dom_limits_within(&config->ceiling_limits,
+	    &config->ceiling_limits) ||
+	    !dom_limits_within(&config->default_limits,
+	    &config->ceiling_limits))
+		return (ERX_EINVAL);
+	*record = *config;
+	record->carved = 0;
+	record->domains = 0;
+	return (ERX_OK);
 }
 
 erx_status_t
@@ -886,6 +934,11 @@ erx_dom_step_undo(erx_dom_step_kind_t kind)
 {
 	switch (kind) {
 	case ERX_DOM_STEP_CARVE:
+	case ERX_DOM_STEP_RESOURCE:
+	case ERX_DOM_STEP_WINDOW:
+	case ERX_DOM_STEP_IRQ:
+	case ERX_DOM_STEP_DMA:
+	case ERX_DOM_STEP_CONTIGUOUS:
 		return (ERX_DOM_UNDO_DESTROY);
 	case ERX_DOM_STEP_SPACE:
 	case ERX_DOM_STEP_GROUP:

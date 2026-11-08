@@ -51,6 +51,9 @@ class DomCoreTest < Minitest::Test
 
   # One-line edits of the core, each a failure the driver must catch.
   MUTANTS = {
+    'principal ceiling not checked on its own' =>
+      ["!dom_limits_within(&config->ceiling_limits,\n\t    &config->ceiling_limits) ||\n", ""],
+    'principal counts kept from the configuration' => ["\trecord->carved = 0;\n", ""],
     'crash area charged to the principal' =>
       [".obj = ERX_DOM_OBJ_CRASH, .budget = ERX_DOM_OBJ_OUTER,\n",
        ".obj = ERX_DOM_OBJ_CRASH, .budget = ERX_DOM_OBJ_PRINCIPAL_BUDGET,\n"],
@@ -100,6 +103,20 @@ class DomCoreTest < Minitest::Test
     assert_equal %w[OUTER CRASH], after.fetch('partial')
   end
 
+  # erx_dom_principal's validation: the record keeps the configuration with
+  # its counts zeroed, and each broken field has its status.
+  PRINCIPAL_CASES = {
+    'ok' => '0 number=2 carved=0 domains=0 same=1', 'number_taken' => '-11',
+    'number_zero' => '-1', 'memory_zero' => '-1', 'memory_unaligned' => '-1', 'share_empty' => '-1',
+    'share_padding' => '-1', 'domains_zero' => '-1', 'default_over' => '-1', 'default_frame_zero' => '-1',
+    'ceiling_frame_zero' => '-1', 'ceiling_frame_over' => '-1', 'ceiling_reserved' => '-1'
+  }.freeze
+
+  def test_every_principal_refusal_has_its_status
+    results = run_driver(driver, 'principal').to_h { |line| line.split(' ', 3).then { |_, name, rest| [name, rest] } }
+    assert_equal PRINCIPAL_CASES, results
+  end
+
   def test_every_refusal_has_its_status
     results = run_driver(driver, 'cases').to_h { |line| line.split.then { |_, name, status| [name, Integer(status)] } }
     expected = OK_CASES.to_h { |name| [name, 0] }.merge(OTHER_CASES)
@@ -141,14 +158,14 @@ class DomCoreTest < Minitest::Test
       mutated = File.join(@directory, "mutant-#{name.tr(' ', '-')}.c")
       File.write(mutated, text.sub(from) { to })
       mutant = build_driver(mutated, name: "mutant-#{name.tr(' ', '-')}")
-      lines = %w[explore cases seeded].flat_map { |mode| run_driver(mutant, mode, check: false) }
+      lines = %w[explore cases seeded principal].flat_map { |mode| run_driver(mutant, mode, check: false) }
       refute_equal clean_lines, lines, "mutant survived: #{name}"
     end
   end
 
   private
 
-  def clean_lines = @clean_lines ||= %w[explore cases seeded].flat_map { |mode| run_driver(driver, mode) }
+  def clean_lines = @clean_lines ||= %w[explore cases seeded principal].flat_map { |mode| run_driver(driver, mode) }
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 

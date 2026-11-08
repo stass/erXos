@@ -5,8 +5,10 @@
 # The domain library's planning entries, fed requests, manifest rows, ids
 # and row indexes a requester's admission or a corrupted row could choose.
 # The first byte picks the entry (0 a request, 1 a configured domain, 2 a
-# partial-boot program, 3 a connection, 4 a disconnect, a retire, a stop and
-# a record at the fault gate, over records and rows the input patches); the rest are patches over valid starting values:
+# partial-boot program, 3 a connection, 4 a disconnect, a retire, a stop, a
+# record at the fault gate, a device's give and a principal's check, over
+# records, rows and a device catalogue the input patches); the rest are
+# patches over valid starting values:
 # a little-endian u16 offset, a length byte, and that many bytes.
 patch = ->(offset, bytes) { [offset, bytes.bytesize].pack('S<C') + bytes }
 Erx::PackFuzz.declare_target(

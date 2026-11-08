@@ -4306,7 +4306,7 @@ typedef struct erx_fault {
 	uint64_t	addr;		/* the faulting address, where meaningful */
 	uint64_t	pc;		/* the faulting instruction's address */
 	uint64_t	thread;		/* object id of the thread, or of the stopper */
-	uint64_t	space;		/* object id of its space */
+	uint64_t	space;		/* object id of that thread's space */
 	int64_t		status;		/* for exit: the status of the first stop */
 } erx_fault_t;
 ```
@@ -4434,8 +4434,9 @@ teardown, which makes that decision, so a space never lingers with no
 thread and no record, whatever ended its threads. `ERX_CAP_SELF` always
 carries `STOP`, so a runtime ends its own domain the same way, which is
 how a domain exits. The exit record carries the status and the stopper's
-object id in the fault record's `thread` field, or `ERX_EXIT_PARENT` and
-the parent's stopper for a space stopped because its parent stopped.
+object id in the fault record's `thread` field and its space's in `space`,
+or `ERX_EXIT_PARENT` and the parent's stopper for a space stopped because
+its parent stopped.
 `ERX_EXIT_PARENT`, `ERX_EXIT_RELEASED` and `ERX_EXIT_NOTHREAD` are the
 kernel's own: `erx_space_stop` refuses each as a status with `ERX_EINVAL`,
 so a record that carries one was written by the kernel and a creator can

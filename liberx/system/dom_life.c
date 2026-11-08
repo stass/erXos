@@ -9,7 +9,8 @@
  * with its check and undo; the teardowns of disconnect, the destroy at an
  * exit record and retire; the end classifier; and the steps that turn a
  * record at the library's fault gate, or a stop request, into what the
- * library does next. Nothing here performs a kernel call.
+ * library does next; and a device's give with its check and undo
+ * ("Devices"). Nothing here performs a kernel call.
  *
  * A domain's end runs through its record's states: built or running; then,
  * once the library stops it, stopping with the reason noted; then, at its
@@ -31,7 +32,13 @@ static uint32_t	life_connections(const erx_dom_view_t *, uint32_t);
 static bool	life_room(const erx_dom_view_t *, const erx_dom_t *);
 static bool	life_granted(const erx_dom_step_t *);
 static bool	life_step_ok(const erx_dom_step_t *, const bool *);
-static bool	life_by_library(const erx_dom_view_t *, uint64_t);
+static bool	life_range_ok(const erx_dom_range_t *);
+static bool	life_entry_ok(const erx_dom_device_entry_t *);
+static uint64_t	life_range_end(const erx_dom_range_t *);
+static bool	life_overlaps(const erx_dom_view_t *, uint32_t);
+static erx_dom_obj_t life_grant_key(erx_dom_obj_t);
+static void	life_device_install(erx_dom_device_plan_t *, erx_dom_obj_t);
+static bool	life_device_step_ok(const erx_dom_step_t *, const bool *);
 
 static bool
 life_add(uint64_t a, uint64_t b, uint64_t *sum)
@@ -173,7 +180,8 @@ life_granted(const erx_dom_step_t *step)
 
 	for (size_t index = 0; index < ERX_DOM_GRANTS_ROWS; index++) {
 		row = &erx_dom_grants[index];
-		if (row->obj == step->obj && row->target == step->target &&
+		if (row->obj == life_grant_key(step->obj) &&
+		    row->target == step->target &&
 		    row->flags == 0 && (step->rights & ~row->rights) == 0)
 			return (true);
 	}
@@ -228,6 +236,11 @@ life_step_ok(const erx_dom_step_t *step, const bool *made)
 	case ERX_DOM_STEP_MAP:
 	case ERX_DOM_STEP_BOOTINFO:
 	case ERX_DOM_STEP_THREAD:
+	case ERX_DOM_STEP_RESOURCE:
+	case ERX_DOM_STEP_WINDOW:
+	case ERX_DOM_STEP_IRQ:
+	case ERX_DOM_STEP_DMA:
+	case ERX_DOM_STEP_CONTIGUOUS:
 		return (false);
 	}
 	return (false);
@@ -308,25 +321,15 @@ erx_dom_plan_retire(const erx_dom_view_t *view, uint32_t id,
 }
 
 erx_dom_end_t
-erx_dom_classify(const erx_fault_t *exit, bool by_library,
-    const erx_dom_end_t *noted)
+erx_dom_classify(const erx_fault_t *exit, uint64_t system_space,
+    erx_dom_end_t noted)
 {
-	if (by_library)
-		return (noted != NULL && noted->kind == ERX_DOM_END_FAULT ?
-		    *noted : (erx_dom_end_t){ ERX_DOM_END_STOPPED, 0 });
+	if (exit->space == system_space)
+		return (noted.kind == ERX_DOM_END_FAULT ? noted :
+		    (erx_dom_end_t){ ERX_DOM_END_STOPPED, 0 });
 	if (exit->status == ERX_EXIT_CRASH)
 		return ((erx_dom_end_t){ ERX_DOM_END_CRASH, 0 });
 	return ((erx_dom_end_t){ ERX_DOM_END_HALT, exit->status });
-}
-
-/* The stopper an exit record names is one of the library's threads. */
-static bool
-life_by_library(const erx_dom_view_t *view, uint64_t thread)
-{
-	for (uint32_t index = 0; index < view->nlibrary_threads; index++)
-		if (view->library_threads[index] == thread)
-			return (true);
-	return (false);
 }
 
 void
@@ -343,16 +346,15 @@ erx_dom_record_step(const erx_dom_view_t *view, uint64_t label,
 	dom = &view->domains[slot];
 	if (record->kind == ERX_FAULT_EXIT) {
 		action->kind = ERX_DOM_ACT_END;
-		action->end = erx_dom_classify(record,
-		    life_by_library(view, record->thread),
-		    dom->stopping ? &dom->stop : NULL);
+		action->end = erx_dom_classify(record, view->system_space,
+		    dom->stop);
 		action->teardown = (erx_dom_teardown_t){
 		    .kind = ERX_DOM_DESTROY, .index = slot, .ndestroy = 1,
 		    .destroy = { dom->budget } };
 		return;
 	}
 	/* The first stop the library makes is the one its exit record names. */
-	if (dom->stopping)
+	if (dom->stop.kind != ERX_DOM_END_NONE)
 		return;
 	action->kind = ERX_DOM_ACT_STOP;
 	action->status = ERX_EXIT_CRASH;
@@ -371,10 +373,264 @@ erx_dom_plan_stop(const erx_dom_view_t *view, uint32_t id, int64_t status,
 	    status == ERX_EXIT_NOTHREAD)
 		return (ERX_EINVAL);
 	*action = (erx_dom_action_t){ .kind = ERX_DOM_ACT_DROP, .slot = slot };
-	if (!view->domains[slot].stopping) {
+	if (view->domains[slot].stop.kind == ERX_DOM_END_NONE) {
 		action->kind = ERX_DOM_ACT_STOP;
 		action->status = status;
 		action->end = (erx_dom_end_t){ ERX_DOM_END_STOPPED, 0 };
 	}
 	return (ERX_OK);
+}
+
+/* A range a register window can cover: page-aligned, nonempty, unwrapped. */
+static bool
+life_range_ok(const erx_dom_range_t *range)
+{
+	uint64_t end;
+
+	return (range->size != 0 && range->base % ERX_PAGE_SIZE == 0 &&
+	    range->size % ERX_PAGE_SIZE == 0 &&
+	    life_add(range->base, range->size, &end));
+}
+
+/* An entry the ABI's limits can hold, with well-formed ranges. */
+static bool
+life_entry_ok(const erx_dom_device_entry_t *entry)
+{
+	if (entry->nranges > ERX_DEVICE_RANGES_MAX ||
+	    entry->nlines > ERX_DEVICE_IRQS_MAX ||
+	    (entry->confined && entry->memory != 0) ||
+	    entry->memory % ERX_PAGE_SIZE != 0)
+		return (false);
+	for (uint32_t index = 0; index < entry->nranges; index++)
+		if (!life_range_ok(&entry->ranges[index]))
+			return (false);
+	return (true);
+}
+
+/* The end of a range, or UINT64_MAX for one that wraps. */
+static uint64_t
+life_range_end(const erx_dom_range_t *range)
+{
+	uint64_t end;
+
+	return (life_add(range->base, range->size, &end) ? end : UINT64_MAX);
+}
+
+/*
+ * Some range of entry index meets a range of another entry, so its windows
+ * would reach another device's registers. Entry index's ranges are well
+ * formed; another entry's are read within the ABI's limit whatever their
+ * count says.
+ */
+static bool
+life_overlaps(const erx_dom_view_t *view, uint32_t index)
+{
+	const erx_dom_device_entry_t *mine = &view->devices[index], *other;
+	const erx_dom_range_t *a, *b;
+	uint32_t count;
+
+	for (uint32_t each = 0; each < view->ndevices; each++) {
+		if (each == index)
+			continue;
+		other = &view->devices[each];
+		count = other->nranges < ERX_DEVICE_RANGES_MAX ?
+		    other->nranges : ERX_DEVICE_RANGES_MAX;
+		for (uint32_t i = 0; i < mine->nranges; i++) {
+			a = &mine->ranges[i];
+			for (uint32_t j = 0; j < count; j++) {
+				b = &other->ranges[j];
+				if (a->base < life_range_end(b) &&
+				    b->base < life_range_end(a))
+					return (true);
+			}
+		}
+	}
+	return (false);
+}
+
+/* The grants row of a device object: every window shares one, every line one. */
+static erx_dom_obj_t
+life_grant_key(erx_dom_obj_t obj)
+{
+	if (obj >= ERX_DOM_OBJ_DEV_WINDOW && obj < ERX_DOM_OBJ_DEV_IRQ)
+		return (ERX_DOM_OBJ_DEV_WINDOW);
+	if (obj >= ERX_DOM_OBJ_DEV_IRQ && obj < ERX_DOM_OBJ_DEV_DMA)
+		return (ERX_DOM_OBJ_DEV_IRQ);
+	return (obj);
+}
+
+/* An install into the holder of obj, with its row's rights. */
+static void
+life_device_install(erx_dom_device_plan_t *plan, erx_dom_obj_t obj)
+{
+	const erx_dom_grant_row_t *row;
+
+	for (size_t index = 0; index < ERX_DOM_GRANTS_ROWS; index++) {
+		row = &erx_dom_grants[index];
+		if (row->obj == life_grant_key(obj) &&
+		    row->target == ERX_DOM_OBJ_HOLDER_SPACE) {
+			plan->steps[plan->nsteps++] = (erx_dom_step_t){
+			    .kind = ERX_DOM_STEP_INSTALL, .obj = obj,
+			    .target = ERX_DOM_OBJ_HOLDER_SPACE,
+			    .rights = row->rights };
+			return;
+		}
+	}
+}
+
+erx_status_t
+erx_dom_plan_device_give(const erx_dom_view_t *view, uint32_t id,
+    uint32_t index, erx_dom_device_plan_t *plan)
+{
+	erx_dom_device_plan_t draft = { .index = index, .holder = id };
+	const erx_dom_device_entry_t *entry;
+	const erx_dom_device_t *record;
+	uint32_t held, made;
+	bool kept;
+
+	draft.slot = life_slot(view, id);
+	if (draft.slot == view->max_domains ||
+	    !life_alive(&view->domains[draft.slot]) || index >= view->ndevices)
+		return (ERX_EINVAL);
+	entry = &view->devices[index];
+	record = &view->device_records[index];
+	if (record->index != index || !life_entry_ok(entry) ||
+	    life_overlaps(view, index))
+		return (ERX_EINVAL);
+	/* A holder that has ended held objects its own budget took with it. */
+	held = life_slot(view, record->holder);
+	if (held != view->max_domains && life_alive(&view->domains[held]))
+		return (ERX_EBUSY);
+
+	draft.steps[draft.nsteps++] = (erx_dom_step_t){
+	    .kind = ERX_DOM_STEP_RESOURCE, .obj = ERX_DOM_OBJ_DEV_RESOURCE,
+	    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+	    .target = ERX_DOM_OBJ_ROOT_RESOURCE, .index = index };
+	for (uint32_t range = 0; range < entry->nranges; range++)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_WINDOW,
+		    .obj = ERX_DOM_OBJ_DEV_WINDOW + range,
+		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+		    .target = ERX_DOM_OBJ_DEV_RESOURCE, .index = range,
+		    .size = entry->ranges[range].size };
+	for (uint32_t line = 0; line < entry->nlines; line++)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_IRQ, .obj = ERX_DOM_OBJ_DEV_IRQ + line,
+		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+		    .target = ERX_DOM_OBJ_DEV_RESOURCE, .index = line };
+	kept = !entry->confined && entry->memory != 0 &&
+	    record->memory.raw != ERX_CAP_NULL;
+	if (entry->confined)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_DMA, .obj = ERX_DOM_OBJ_DEV_DMA,
+		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+		    .target = ERX_DOM_OBJ_DEV_RESOURCE };
+	else if (entry->memory != 0 && !kept)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_CONTIGUOUS,
+		    .obj = ERX_DOM_OBJ_DEV_MEMORY,
+		    .budget = ERX_DOM_OBJ_SYSTEM_BUDGET, .size = entry->memory };
+	/* The holder gets everything made but the resource (A7). */
+	made = draft.nsteps;
+	for (uint32_t step = 0; step < made; step++)
+		if (draft.steps[step].kind != ERX_DOM_STEP_RESOURCE)
+			life_device_install(&draft, draft.steps[step].obj);
+	/* Last, so no failing step follows an install undo cannot clear. */
+	if (kept)
+		life_device_install(&draft, ERX_DOM_OBJ_DEV_KEPT);
+	if (erx_dom_device_check(&draft) != ERX_OK)
+		return (ERX_EINVAL);
+	*plan = draft;
+	return (ERX_OK);
+}
+
+/*
+ * One step of a device's give against what the steps before it made: the
+ * resource from the root's, each window, line and DMA window from the
+ * resource on the holder's budget, the contiguous memory on the system
+ * domain's, and installs into the holder by their rows.
+ */
+static bool
+life_device_step_ok(const erx_dom_step_t *step, const bool *made)
+{
+	erx_dom_obj_t obj = step->obj;
+	bool fresh = obj < ERX_DOM_OBJ_MADE_COUNT && obj != ERX_DOM_OBJ_NONE &&
+	    !made[obj];
+	bool from_resource = step->target == ERX_DOM_OBJ_DEV_RESOURCE &&
+	    made[ERX_DOM_OBJ_DEV_RESOURCE] &&
+	    step->budget == ERX_DOM_OBJ_HOLDER_BUDGET;
+
+	switch (step->kind) {
+	case ERX_DOM_STEP_RESOURCE:
+		return (fresh && obj == ERX_DOM_OBJ_DEV_RESOURCE &&
+		    step->budget == ERX_DOM_OBJ_HOLDER_BUDGET &&
+		    step->target == ERX_DOM_OBJ_ROOT_RESOURCE);
+	case ERX_DOM_STEP_WINDOW:
+		return (fresh && from_resource && step->size != 0 &&
+		    life_grant_key(obj) == ERX_DOM_OBJ_DEV_WINDOW &&
+		    step->index == obj - ERX_DOM_OBJ_DEV_WINDOW);
+	case ERX_DOM_STEP_IRQ:
+		return (fresh && from_resource &&
+		    life_grant_key(obj) == ERX_DOM_OBJ_DEV_IRQ &&
+		    step->index == obj - ERX_DOM_OBJ_DEV_IRQ);
+	case ERX_DOM_STEP_DMA:
+		return (fresh && from_resource && obj == ERX_DOM_OBJ_DEV_DMA &&
+		    !made[ERX_DOM_OBJ_DEV_MEMORY]);
+	case ERX_DOM_STEP_CONTIGUOUS:
+		return (fresh && obj == ERX_DOM_OBJ_DEV_MEMORY &&
+		    step->budget == ERX_DOM_OBJ_SYSTEM_BUDGET &&
+		    step->size != 0 && !made[ERX_DOM_OBJ_DEV_DMA]);
+	case ERX_DOM_STEP_INSTALL:
+		return (step->target == ERX_DOM_OBJ_HOLDER_SPACE &&
+		    (obj == ERX_DOM_OBJ_DEV_KEPT ||
+		    (obj < ERX_DOM_OBJ_MADE_COUNT &&
+		    obj != ERX_DOM_OBJ_DEV_RESOURCE && made[obj])) &&
+		    life_granted(step));
+	case ERX_DOM_STEP_CARVE:
+	case ERX_DOM_STEP_SPACE:
+	case ERX_DOM_STEP_GROUP:
+	case ERX_DOM_STEP_MEM:
+	case ERX_DOM_STEP_BELL:
+	case ERX_DOM_STEP_SLICE:
+	case ERX_DOM_STEP_IMAGE_MAP:
+	case ERX_DOM_STEP_MAP:
+	case ERX_DOM_STEP_BOOTINFO:
+	case ERX_DOM_STEP_THREAD:
+		return (false);
+	}
+	return (false);
+}
+
+erx_status_t
+erx_dom_device_check(const erx_dom_device_plan_t *plan)
+{
+	bool made[ERX_DOM_OBJ_MADE_COUNT] = { false };
+	const erx_dom_step_t *step;
+
+	if (plan->nsteps > ERX_DOM_DEVICE_STEPS ||
+	    plan->holder <= ERX_DOM_SYSTEM_ID)
+		return (ERX_EINVAL);
+	for (uint32_t index = 0; index < plan->nsteps; index++) {
+		step = &plan->steps[index];
+		/* The kept memory outlives an undo, so its install is last. */
+		if (step->kind == ERX_DOM_STEP_INSTALL &&
+		    step->obj == ERX_DOM_OBJ_DEV_KEPT &&
+		    index + 1 != plan->nsteps)
+			return (ERX_EINVAL);
+		if (step->budget >= ERX_DOM_OBJ_COUNT ||
+		    step->target >= ERX_DOM_OBJ_COUNT ||
+		    step->aux != ERX_DOM_OBJ_NONE ||
+		    !life_device_step_ok(step, made))
+			return (ERX_EINVAL);
+		if (step->kind != ERX_DOM_STEP_INSTALL)
+			made[step->obj] = true;
+	}
+	return (ERX_OK);
+}
+
+uint32_t
+erx_dom_device_undo(const erx_dom_device_plan_t *plan, uint32_t applied,
+    erx_dom_obj_t *undo)
+{
+	return (erx_dom_steps_undo(plan->steps, plan->nsteps, applied, undo));
 }

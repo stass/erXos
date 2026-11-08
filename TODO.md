@@ -460,31 +460,24 @@ it; git history is the record of completed work.
   flagged `ERX_ENTRY_SYSTEM` is refused; confirm against the boot image's
   layout for domain releases (IM1) that service domains never run the
   system release's ERTS entry.
-* [Medium] domain library, `liberx/system/dom_life.c`: a connection's
-  installs go into two living domains' tables, but an install step's undo
-  is "goes with the budget", so a connect that fails after some installs
-  leaves stale capabilities in those tables; the step names no slot, and
-  nothing clears a party's slots after a disconnect. Give link installs
-  a slot and an undo that clears it, and track installs in the driver's
-  model, before DL2 applies connections.
-* [Medium] domain library, `dom_life.c` `erx_dom_record_step`: the
-  library's fault stop uses `ERX_EXIT_CRASH`, and its own stops are told
-  apart only by `view->library_threads`, so a library thread missing from
-  that list turns a fault into `CRASH` and the domain service reads a dump
-  that was never written. Decide by the stopper's space, or stop faults
-  with a status that never classifies as `CRASH`.
-* [Medium] domain library, `include/erx/dom.h`: the record's `bool
-  stopping` beside `erx_dom_end_t stop` is a flag pair, and a zeroed
-  `stop` reads as a valid `HALT`; make "no stop noted" a value of one
-  field.
+* [Low] domain library, `liberx/system/dom_life.c`
+  `erx_dom_plan_device_give`: it plans a device-tree entry (its resource,
+  a window per range, an IRQ object per line, a DMA window or contiguous
+  memory); a PCIe function's give, with its BARs carved inside the
+  bridge's windows, its MSIs and its requester id's stream
+  ([design-system.md](docs/design-system.md#devices)), lands with the PCIe
+  enumerator.
 * [Medium] domain library, `dom.h`: the apply phase's rules are not
   written down: who sets a connection's `closing`; that `labels` and
   `next_connection` advance only after a successful apply, and
-  `next_connection` becomes 0 past `UINT32_MAX`. Return the counters'
-  next values in the plans, or state them in the plan comments.
+  `next_connection` becomes 0 past `UINT32_MAX`; that plan and apply
+  run under the one library lock, so two gives of a device never both see
+  it free; and that a device record's `holder` and `memory` are written
+  only after the give's last step. Return the counters' next values in
+  the plans, or state them in the plan comments.
 * [Medium] docs, `docs/design-system.md` "The domain library's records"
   and the entry table: the record and view lack `connections`, `labels`,
-  `stopping`, `stop`, `next_connection` and `library_threads`, and
+  `next_connection`, `system_space` and the device catalogue, and
   `erx_dom_connect`'s `ERX_ELIMIT` lists only a full table, not the
   quota, spent numbers or spent labels.
 * [Low] domain library, `dom_life.c`: connect allows a second connection

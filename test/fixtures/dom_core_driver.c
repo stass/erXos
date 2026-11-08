@@ -51,18 +51,27 @@ static const erx_dom_file_t files[] = {
 	{ ERX_ENTRY_IMAGE, 0, false, 0 },
 };
 
-static const char *const obj_names[ERX_DOM_OBJ_COUNT] = {
+static const char *const obj_names[] = {
 	"NONE", "BUDGET", "OUTER", "SPACE", "GROUP", "SPACES_GROUP", "BOOTINFO",
 	"CRASH", "SYS_BUDGET", "SYS_SIDE", "DOM_SIDE", "SYS_BELL", "DOM_BELL",
 	"SLICE", "THREAD", "LINK_BUDGET_A", "LINK_BUDGET_B", "SIDE_A", "SIDE_B",
-	"BELL_A", "BELL_B", "PRINCIPAL_BUDGET", "PARENT_GROUP", "SYSTEM_SPACE",
+	"BELL_A", "BELL_B", "DEV_RESOURCE",
+	"DEV_WINDOW0", "DEV_WINDOW1", "DEV_WINDOW2", "DEV_WINDOW3",
+	"DEV_WINDOW4", "DEV_WINDOW5", "DEV_WINDOW6", "DEV_WINDOW7",
+	"DEV_IRQ0", "DEV_IRQ1", "DEV_IRQ2", "DEV_IRQ3",
+	"DEV_IRQ4", "DEV_IRQ5", "DEV_IRQ6", "DEV_IRQ7",
+	"DEV_DMA", "DEV_MEMORY", "PRINCIPAL_BUDGET", "PARENT_GROUP", "SYSTEM_SPACE",
 	"SYSTEM_GROUP", "FAULT_GATE", "TIME_PAGE", "OUTER_A", "OUTER_B",
-	"GROUP_A", "GROUP_B", "SPACE_A", "SPACE_B"
+	"GROUP_A", "GROUP_B", "SPACE_A", "SPACE_B", "ROOT_RESOURCE",
+	"SYSTEM_BUDGET", "HOLDER_BUDGET", "HOLDER_SPACE", "DEV_KEPT"
 };
+_Static_assert(sizeof(obj_names) / sizeof(obj_names[0]) == ERX_DOM_OBJ_COUNT,
+    "obj_names names every object");
 
 static const char *const step_names[] = {
 	"CARVE", "SPACE", "GROUP", "MEM", "BELL", "SLICE", "IMAGE_MAP", "MAP",
-	"INSTALL", "BOOTINFO", "THREAD"
+	"INSTALL", "BOOTINFO", "THREAD", "RESOURCE", "WINDOW", "IRQ", "DMA",
+	"CONTIGUOUS"
 };
 
 static erx_grant_t
@@ -189,6 +198,12 @@ model_apply(model_t *m, const erx_dom_step_t *step)
 		return (true);
 	case ERX_DOM_STEP_BOOTINFO:
 		return (m->alive[step->obj]);
+	case ERX_DOM_STEP_RESOURCE:
+	case ERX_DOM_STEP_WINDOW:
+	case ERX_DOM_STEP_IRQ:
+	case ERX_DOM_STEP_DMA:
+	case ERX_DOM_STEP_CONTIGUOUS:
+		return (false);
 	}
 	return (false);
 }
@@ -593,6 +608,72 @@ seeded(void)
 	return (0);
 }
 
+/*
+ * erx_dom_principal_check over a configuration with one field broken per
+ * case, against a view that holds principal 1.
+ */
+static void
+principal_case(const char *name, void (*breaks)(erx_dom_principal_t *))
+{
+	erx_dom_principal_t config = { .number = 2, .memory = 16 * MIB,
+	    .carved = 7, .domains_max = 4, .domains = 3,
+	    .share = grant(UINT64_C(5000000), 0x3, 40),
+	    .default_limits = limits(1), .ceiling_limits = limits(2) };
+	erx_dom_principal_t record;
+	erx_status_t status;
+
+	reset_view();
+	breaks(&config);
+	memset(&record, 0xa5, sizeof(record));
+	status = erx_dom_principal_check(&view, &config, &record);
+	if (status != ERX_OK) {
+		printf("principal %s %d\n", name, (int)status);
+		return;
+	}
+	printf("principal %s 0 number=%u carved=%llu domains=%u same=%d\n",
+	    name, record.number, (unsigned long long)record.carved,
+	    record.domains, record.memory == config.memory &&
+	    record.domains_max == config.domains_max &&
+	    memcmp(&record.share, &config.share, sizeof(config.share)) == 0 &&
+	    memcmp(&record.ceiling_limits, &config.ceiling_limits,
+	    sizeof(config.ceiling_limits)) == 0);
+}
+
+#define PRINCIPAL(fn, body)	static void fn(erx_dom_principal_t *p) { body; }
+PRINCIPAL(p_ok, (void)p)
+PRINCIPAL(p_number_zero, p->number = 0)
+PRINCIPAL(p_number_taken, p->number = 1)
+PRINCIPAL(p_memory_zero, p->memory = 0)
+PRINCIPAL(p_memory_unaligned, p->memory = 16 * MIB + 1)
+PRINCIPAL(p_share_empty, p->share.cpuset = 0)
+PRINCIPAL(p_share_padding, p->share.padding_0[0] = 1)
+PRINCIPAL(p_domains_zero, p->domains_max = 0)
+PRINCIPAL(p_default_over, p->default_limits.atoms = p->ceiling_limits.atoms + 1)
+PRINCIPAL(p_default_frame_zero, p->default_limits.max_frame = 0)
+PRINCIPAL(p_ceiling_frame_zero, p->ceiling_limits.max_frame = 0)
+PRINCIPAL(p_ceiling_frame_over, p->ceiling_limits.max_frame = ERX_FRAME_MAX + 1)
+PRINCIPAL(p_ceiling_reserved, p->ceiling_limits.reserved = 1)
+#undef PRINCIPAL
+
+static int
+principals(void)
+{
+	principal_case("ok", p_ok);
+	principal_case("number_zero", p_number_zero);
+	principal_case("number_taken", p_number_taken);
+	principal_case("memory_zero", p_memory_zero);
+	principal_case("memory_unaligned", p_memory_unaligned);
+	principal_case("share_empty", p_share_empty);
+	principal_case("share_padding", p_share_padding);
+	principal_case("domains_zero", p_domains_zero);
+	principal_case("default_over", p_default_over);
+	principal_case("default_frame_zero", p_default_frame_zero);
+	principal_case("ceiling_frame_zero", p_ceiling_frame_zero);
+	principal_case("ceiling_frame_over", p_ceiling_frame_over);
+	principal_case("ceiling_reserved", p_ceiling_reserved);
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -602,6 +683,8 @@ main(int argc, char **argv)
 		return (cases());
 	if (argc == 2 && strcmp(argv[1], "seeded") == 0)
 		return (seeded());
-	fprintf(stderr, "usage: dom_core_driver explore|cases|seeded\n");
+	if (argc == 2 && strcmp(argv[1], "principal") == 0)
+		return (principals());
+	fprintf(stderr, "usage: dom_core_driver explore|cases|seeded|principal\n");
 	return (2);
 }

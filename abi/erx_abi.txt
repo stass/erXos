@@ -76,6 +76,10 @@ limit crash_frame_lines_max u32 288
 # The CPUs one kernel runs: a cpuset is one u64.
 limit cpu_limit u32 64
 limit budget_depth_max u32 16
+# What one entry of the root resource's device list holds: register ranges and
+# interrupt lines (docs/design-kernel.md, "Resources, DMA windows and consoles").
+limit device_ranges_max u32 8
+limit device_irqs_max u32 8
 limit log_ring_bytes u32 65536
 # Holds the longest erx_debug_log line, each UTCB byte escaped, with its prefix.
 limit log_text_max u32 2112

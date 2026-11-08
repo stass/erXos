@@ -117,6 +117,11 @@ typedef struct fuzz_input {
 	uint32_t		a, b, a_reads, b_reads, number, next;
 	uint64_t		label;
 	erx_fault_t		record;
+	/* A device's give over the input's catalogue, and a principal's check. */
+	erx_dom_device_entry_t	devs[2];
+	erx_dom_device_t	dev_records[2];
+	uint32_t		dev_index;
+	erx_dom_principal_t	principal;
 } fuzz_input_t;
 
 /*
@@ -124,19 +129,28 @@ typedef struct fuzz_input {
  * (connect true), or disconnect, retire, stop and the record step. Each
  * result names only records and rows the view holds, a connection's plan
  * passes its check with each object on its reader's child, and its undo
- * is its two carves, last first.
+ * is its two carves, last first. A device's give names a living holder
+ * and a device no living domain holds, passes its check, sizes each window
+ * by its range, and undoes every object it made; a principal's record
+ * starts with no counts.
  */
 static void
 fuzz_life(const fuzz_input_t *in, bool connect)
 {
-	static const uint64_t threads[] = { 900 };
+	static const erx_dom_principal_t held = { .number = 1 };
 	erx_dom_t doms[3];
 	erx_dom_connection_t conns[3];
+	erx_dom_device_entry_t devs[2];
 	erx_dom_view_t view = { .domains = doms, .max_domains = 3,
 	    .connections = conns, .max_connections = 3,
-	    .next_connection = in->next, .library_threads = threads,
-	    .nlibrary_threads = 1 };
+	    .next_connection = in->next, .system_space = 4000,
+	    .devices = devs, .device_records = in->dev_records,
+	    .ndevices = 2, .principals = &held, .nprincipals = 1 };
 	erx_dom_link_plan_t link;
+	erx_dom_device_plan_t give;
+	erx_dom_obj_t made[ERX_DOM_DEVICE_STEPS];
+	erx_dom_principal_t principal;
+	uint32_t nmade;
 	erx_dom_teardown_t teardown;
 	erx_dom_action_t action;
 	erx_dom_obj_t undo[ERX_DOM_LINK_STEPS];
@@ -146,10 +160,13 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	memcpy(doms, in->doms, sizeof(doms));
 	memcpy(conns, in->conns, sizeof(conns));
 	for (uint32_t index = 0; index < 3; index++) {
-		memcpy(&raw, &doms[index].stopping, 1);
-		doms[index].stopping = (raw & 1) != 0;
 		memcpy(&raw, &conns[index].closing, 1);
 		conns[index].closing = (raw & 1) != 0;
+	}
+	memcpy(devs, in->devs, sizeof(devs));
+	for (uint32_t index = 0; index < 2; index++) {
+		memcpy(&raw, &devs[index].confined, 1);
+		devs[index].confined = (raw & 1) != 0;
 	}
 
 	if (connect) {
@@ -198,6 +215,36 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	    doms[action.slot].id != in->label ||
 	    (doms[action.slot].state != ERX_DOM_BUILT &&
 	    doms[action.slot].state != ERX_DOM_RUNNING)))
+		abort();
+	if (erx_dom_plan_device_give(&view, in->a, in->dev_index, &give) ==
+	    ERX_OK) {
+		nmade = 0;
+		for (uint32_t index = 0; index < give.nsteps; index++)
+			nmade += give.steps[index].kind != ERX_DOM_STEP_INSTALL;
+		if (erx_dom_device_check(&give) != ERX_OK || give.index >= 2 ||
+		    give.slot >= 3 || doms[give.slot].id != in->a ||
+		    (doms[give.slot].state != ERX_DOM_BUILT &&
+		    doms[give.slot].state != ERX_DOM_RUNNING) ||
+		    erx_dom_device_undo(&give, give.nsteps, made) != nmade)
+			abort();
+		for (uint32_t index = 0; index < 3; index++)
+			if (doms[index].id != 0 &&
+			    doms[index].id == in->dev_records[give.index].holder &&
+			    (doms[index].state == ERX_DOM_BUILT ||
+			    doms[index].state == ERX_DOM_RUNNING))
+				abort();
+		for (uint32_t index = 0; index < give.nsteps; index++)
+			if (give.steps[index].kind == ERX_DOM_STEP_WINDOW &&
+			    (give.steps[index].index >= ERX_DEVICE_RANGES_MAX ||
+			    give.steps[index].size !=
+			    devs[give.index].ranges[give.steps[index].index].size))
+				abort();
+	}
+	if (erx_dom_principal_check(&view, &in->principal, &principal) ==
+	    ERX_OK && (principal.carved != 0 || principal.domains != 0 ||
+	    principal.number == held.number ||
+	    principal.number != in->principal.number ||
+	    principal.memory == 0 || principal.memory % ERX_PAGE_SIZE != 0))
 		abort();
 }
 
@@ -285,6 +332,14 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .budget_a = { 54 }, .budget_b = { 63 }, .closing = true } },
 		.a = 5, .b = 7, .a_reads = 65536, .b_reads = 16384, .number = 2,
 		.next = 3, .label = 5, .record = { .kind = ERX_FAULT_EXIT },
+		.devs = { { .nranges = 1, .nlines = 1,
+		    .ranges = { { 0x0a003000, 0x1000 } }, .memory = FUZZ_MIB },
+		    { .nranges = 2, .nlines = 2, .ranges = { { 0x10000000, 0x4000 },
+		    { 0x10010000, 0x1000 } }, .confined = true } },
+		.dev_records = { { .index = 0 }, { .index = 1, .holder = 6 } },
+		.principal = { .number = 2, .memory = 16 * FUZZ_MIB, .domains_max = 2,
+		    .share = fuzz_grant(UINT64_C(5000000), 0x3),
+		    .default_limits = fuzz_limits(1), .ceiling_limits = fuzz_limits(2) },
 	};
 	erx_dom_view_t view = { .domains = fuzz_domains, .max_domains = 2,
 	    .connections = fuzz_connections, .max_connections = 2,
