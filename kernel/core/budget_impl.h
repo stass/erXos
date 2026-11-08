@@ -12,6 +12,9 @@
  * chokepoint enforces, so every write of a counter is in budget.c.
  */
 
+#include <stdatomic.h>
+#include <stdbool.h>
+
 #include "erx/budget.h"
 
 struct erx_budget {
@@ -29,8 +32,10 @@ struct erx_budget {
 	erx_npages_t	 threshold;	/* spending at which the watch fires; 0 unarmed */
 	uint32_t	 depth;		/* 0 for the root; below ERX_BUDGET_DEPTH_MAX */
 	erx_budget_kind_t kind;		/* fixed at carving */
-	bool		 dead;		/* closed: takes no charge, and its spending
-					 * is counted in its parent's used */
+	_Atomic bool	 dead;		/* closed: takes no charge, and its spending
+					 * is counted in its parent's used; written
+					 * under the lock, read without it by
+					 * erx_budget_dead */
 };
 
 struct erx_reserve {

@@ -474,7 +474,7 @@ erx_budget_close(erx_budget_t *budget, erx_budget_effects_t *effects)
 		    BUDGET_DEAD_PASSES, effects);
 	}
 	if (error == 0) {
-		budget->dead = true;
+		atomic_store_explicit(&budget->dead, true, memory_order_release);
 		if (spent == 0 && budget->pinned == 0)
 			effects->tombstone[effects->ntombstone++] = budget;
 	}
@@ -536,7 +536,7 @@ erx_budget_read(erx_budget_t *budget, erx_budget_counters_t *counters)
 	*counters = (erx_budget_counters_t){
 		.kind = budget->kind,
 		.depth = budget->depth,
-		.dead = budget->dead,
+		.dead = atomic_load_explicit(&budget->dead, memory_order_relaxed),
 		.guarantee = budget->guarantee,
 		.cap = budget->cap,
 		.used = budget->used,
@@ -546,6 +546,12 @@ erx_budget_read(erx_budget_t *budget, erx_budget_counters_t *counters)
 		.threshold = budget->threshold,
 	};
 	erx_effect_budget_unlock(budget);
+}
+
+bool
+erx_budget_dead(const erx_budget_t *budget)
+{
+	return (atomic_load_explicit(&budget->dead, memory_order_acquire));
 }
 
 erx_budget_t *

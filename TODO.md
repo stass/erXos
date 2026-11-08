@@ -1285,10 +1285,6 @@ it; git history is the record of completed work.
   altogether. When the glue (WP12) gives the close and the space's
   emptying their callers, extend the caller check to the glue's objects
   and add the deletion walk's slot-clearing effect by name.
-* [Low] Capability core, `kernel/core/cap.c`: `erx_cap_slot_clear` does not
-  yet count its slot out with `erx_object_cap_remove` or report the
-  release it returns, and the install paths do not count with
-  `erx_object_cap_add` (`kernel/core/object.c`).
 * [Medium] Object store, `kernel/core/object.c`: `erx_object_init` writes
   the state word and the counts of any record it is given, so a call on a
   published record would move it back to LIVE; add a `Callers` rule that
@@ -1311,16 +1307,6 @@ it; git history is the record of completed work.
   (zero) is hand-written in `oid_reserved`; declare the reserved encodings
   in `abi/erx_abi.txt` and generate the set. `ERX_KERNEL_DEBUG`, which
   turns on the epoch check in a target build, is defined by no build yet.
-* [Medium] Capability core, `kernel/core/cap.c` (design-kernel's
-  [Objects and capabilities](docs/design-kernel.md#objects-and-capabilities)):
-  the slot's `table`, `obj_prev` and `obj_next` fields exist in the
-  generated layout but nothing writes them, not even
-  `erx_cap_table_add_page`, which leaves the page storage's old bytes
-  there instead of the table's address and two zero links, so no object
-  has a slot list yet; and `erx_cap_read` checks the slot but not the object's state or
-  its budget's, which it reads through the object store from the handle
-  (`erx_object_from_handle` and `erx_object_state` in
-  `kernel/core/object.c`).
 * [Medium] Capability core, `kernel/core/cap.c`: the table's owner hands
   `erx_cap_table_add_page` each page's storage, so the core can refuse a
   page that overlaps its own table, directory or pages, but not one that
@@ -1352,21 +1338,41 @@ it; git history is the record of completed work.
   `kernel/core/cap.c` and its host tests, and a cast from either
   pointer type there
   ([design-kernel.md](docs/design-kernel.md#chokepoint-checks)).
-* [Medium] Capability core, `include/erx/cap.h`: a pass's route is two
-
-  flags the caller asserts (`from_own`, `to_created`), and nothing ties
-  them to the tables `erx_pass_take` and `erx_pass_install` are given, so
-  a rendezvous that sets `to_created` by mistake passes under the
-  creator's rule. Make the route a closed enum derived from the tables
-  (rendezvous, own to created, created to own, created to created), record
-  both tables in the plan, and have the steps refuse a mismatch.
-* [Medium] Capability core, `kernel/core/cap.c`: `erx_cap_install` takes a
-  type and a rights value from its caller, checked only against the
-  type's carryable set, whereas the design's install takes the creation
-  kind (K2). Replace it with an install by kind (type and rights from
-  `erx_kind_ktype` and `erx_rights_create`, plus a carve variant) and an
-  install by copy from an existing view, so no caller supplies a type and
-  rights pair.
+* [Medium] Capability core, `include/erx/cap.h`: a pass's route is a closed
+  enum the plan records with both tables, but the caller still states it,
+  so a rendezvous that passes `ERX_PASS_OWN_TO_CREATED` by mistake plans
+  under the creator's rule. Derive it by construction: a rendezvous entry
+  point that takes no route, and `erx_cap_pass` deriving the route from the
+  tables' owning spaces, which needs an owner word in the table.
+* [Medium] Capability core, `kernel/core/cap.c`: `erx_cap_install_copy`
+  shrinks a fork's copy by a mask its caller passes, so K24 for
+  `erx_space_copy` rests on that caller passing the type's pass set; and
+  `erx_cap_install_kind` accepts any creation kind of the object's type,
+  so a budget installs as a root or a carved budget at the caller's
+  choice. Record the creation kind in the object's header at
+  `erx_object_init` and install from it, and give the copy a purpose (dup
+  or fork) that applies the pass set inside the core; decide whether a
+  fork skips a type with no pass set.
+* [Medium] Capability core, `kernel/core/cap.c` and design-kernel.md's
+  chokepoint rows: the design says only `kernel/core/attach.c`'s insert
+  functions link onto an object, but the slot list's insert is cap.c's
+  `cap_list_insert`, and a pass counts at its take and links at its
+  install, correct only while its caller holds every object's capability
+  lock from planning to install, which nothing checks. Reconcile the row
+  with P3's attach core and assert the lock in debug builds.
+* [Low] Capability core, `kernel/core/cap.c`: a taken plan that is never
+  installed keeps its counts, so its objects are never released; nothing
+  but the caller's sequence enforces the install. Assert it in host and
+  debug builds with the other pass preconditions. No concurrent test
+  races `erx_cap_install_copy`'s lockless source read against a writer of
+  the source table.
+* [Medium] Capability core, `kernel/core/cap.c`, for the deletion core: a
+  teardown walks its object's slot list and must clear each slot through
+  `erx_cap_slot_clear`, which takes the slot's table and value; a listed
+  slot holds its table and generation but not its index, and its 64 bytes
+  have no room for one, so the index is found by scanning the table's
+  directory. Decide between that scan, a clear by slot address that stays
+  the one clearing function, and pages that record their first index.
 * [Medium] Capability core, `kernel/core/cap.c`: a pass is read sources,
   plan, take, install and release the reservation, and growth is
   `erx_cap_table_pages_needed`, allocate and `erx_cap_table_add_page`,
@@ -1374,12 +1380,6 @@ it; git history is the record of completed work.
   makes take and install run once each, in order). When the Fiasco glue
   (WP12) gives them their callers, give each operation one effect-edge
   function around the pure plan so no caller can reorder or skip a step.
-* [Medium] Capability core tests, `test/fixtures/cap_churn.c` and
-  `tools/fuzz/cap_fuzz.c`: the ThreadSanitizer churn adds no page while
-  readers run, never retires a slot under concurrent lookups and never
-  races a reserve and fill; the fuzzer has no seed operation, so a slot's
-  generation and count never near exhaustion. Add a growth thread and a
-  writer that drives one slot to the terminal count, and a seed operation.
 * [Medium] Kernel chokepoints, `tools/lib/erx/chokepoints.rb`: a `Callers`
   rule counts only direct calls and tail jumps, not every relocation that
   names its callee, so a core that takes the address of

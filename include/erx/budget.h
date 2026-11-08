@@ -188,6 +188,13 @@ int	erx_budget_watch(erx_budget_t *, struct erx_irq *, erx_npages_t,
 bool	erx_budget_watch_detach(erx_budget_t *, struct erx_irq *);
 
 void	erx_budget_read(erx_budget_t *, erx_budget_counters_t *);
+
+/*
+ * Whether the budget's destroy has closed it, read without its lock, as
+ * the capability lookup reads it for the object a budget pays for. A dead
+ * budget never lives again.
+ */
+bool	erx_budget_dead(const erx_budget_t *);
 erx_budget_t *erx_budget_parent(const erx_budget_t *);
 
 /*

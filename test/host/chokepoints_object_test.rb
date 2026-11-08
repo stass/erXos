@@ -50,12 +50,14 @@ class ChokepointsObjectTest < Minitest::Test
                  found.map { |v| "#{v.path}:#{v.line}" }.sort
   end
 
-  # The call-graph rules let only the slot clear count a slot out and only
-  # the deletion step close an object.
+  # The call-graph rules let only the slot clear and a pass's install count
+  # a slot out and only the deletion step close an object.
   def test_only_the_named_callers_write_the_state_word
     release = rule('object-release-callers')
     close = rule('object-close-callers')
     allowed = Chokepoints.seeded_graph({ 'erx_cap_slot_clear' => 'call' }, callee: 'erx_object_cap_remove')
+    assert_empty release.violations_in_graph(allowed)
+    allowed = Chokepoints.seeded_graph({ 'erx_pass_install' => 'tail_jump' }, callee: 'erx_object_cap_remove')
     assert_empty release.violations_in_graph(allowed)
     allowed = Chokepoints.seeded_graph({ 'erx_delete_step' => 'tail_jump' }, callee: 'erx_object_close')
     assert_empty close.violations_in_graph(allowed)

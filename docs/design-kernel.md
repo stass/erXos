@@ -809,8 +809,9 @@ void		erx_object_unlock_fresh_existence(erx_object_t *object);
  * guards its field and links nothing, returning ERX_ESTALE, when the
  * slot list's insert finds anything but LIVE, so no capability is made to
  * a released or closed object, or another insert finds DELETED.
- * erx_cap_slot_clear writes the state word, from LIVE to RELEASED only,
- * and only the deletion core closes an object.
+ * erx_cap_slot_clear, and a pass's install that drops what it carried,
+ * write the state word, from LIVE to RELEASED only, and only the deletion
+ * core closes an object.
  */
 uint32_t	erx_object_state(const erx_object_t *object);
 
@@ -818,8 +819,9 @@ uint32_t	erx_object_state(const erx_object_t *object);
  * The slot count and the state word's two writers, under the object's
  * capability lock.  erx_object_cap_add counts a slot the slot list's
  * insert links, ERX_ESTALE unless the object is LIVE.
- * erx_object_cap_remove, which only erx_cap_slot_clear calls, counts one
- * out and returns true when it was the last, writing RELEASED over LIVE.
+ * erx_object_cap_remove, which only erx_cap_slot_clear and a pass's
+ * install that drops what it carried call, counts one out and returns true
+ * when it was the last, writing RELEASED over LIVE.
  * erx_object_close, which only erx_delete_step calls, writes DELETED in
  * one atomic step and returns true for the one destroy that goes on,
  * which then invalidates the existence lock.  The close is made under
@@ -885,27 +887,29 @@ typedef struct erx_cap_view {
 
 /*
  * The one lookup's check of a value, in the capability core: bounds, the
- * slot's retirement and liveness, generation, type, rights, then the
- * object's state and its budget's, in that order, reading the slot under
- * its sequence count; takes no lock and no reference.  self is the calling
- * thread's space and thread when table is its own space's, and NULL for
- * another space's table.  A view is written only on ERX_OK.
+ * slot's retirement and liveness, generation, type, rights, in that order,
+ * reading the slot under its sequence count; takes no lock and no
+ * reference, and reads no object.  self is the calling thread's space and
+ * thread when table is its own space's, and NULL for another space's
+ * table.  A view is written only on ERX_OK.
  */
 erx_status_t	erx_cap_read(const erx_cap_table_t *table,
 		    const erx_cap_self_t *self, erx_cap_t cap, erx_ktype_t type,
 		    uint32_t required, erx_cap_view_t *viewp);
 
 /*
- * The kernel's one lookup: erx_cap_read with the calling thread's self,
- * then the view's handle turned into a reference stamped with the
- * thread's count of preemption points.  The object returned is valid until
- * the caller's next preemption point or wait, helping included, since
- * freeing waits for a grace period; its epoch says so.  Every call that
- * names an object comes through here.
+ * The kernel's one lookup: erx_cap_read, then the view's handle turned
+ * into its record, which must be LIVE and paid for by a budget that is
+ * not dead, or ERX_ESTALE, then into a reference stamped with the
+ * thread's count of preemption points.  Its caller passes the calling
+ * thread's self.  The object returned is valid until the caller's next
+ * preemption point or wait, helping included, since freeing waits for a
+ * grace period; its epoch says so.  Every call that names an object comes
+ * through here.
  */
-erx_status_t	erx_cap_lookup(erx_cap_table_t *table,
-		    erx_cap_t cap, erx_ktype_t type,
-		    erx_rights_t required, erx_uref_t *refp);
+erx_status_t	erx_cap_lookup(const erx_cap_table_t *table,
+		    const erx_cap_self_t *self, erx_cap_t cap, erx_ktype_t type,
+		    uint32_t required, erx_uref_t *refp);
 ```
 
 **The table's lock and memory.** The capability core takes no lock and
@@ -919,9 +923,13 @@ itself. A slot holds the object store's **handle** of the object, a nonzero 64-b
 integer: on the target the address of the object's record, and in host
 builds an index into the test store that stands in for the records, so
 the core and its tests run on the host unchanged. Only the object store
-turns a handle into a record: `erx_cap_read` reads the object's state and
-its budget's through it, and `erx_cap_lookup` turns the view's handle
-into the `erx_uref_t`'s pointer.
+turns a handle into a record: `erx_cap_lookup` turns the view's handle
+into the record, checks the object's state and its budget's through it,
+and makes the `erx_uref_t`'s pointer. `erx_cap_read` stays a pure check
+of the slot, so the pass's plan reads its sources with it, and the pass's
+take checks each object's state again under the objects' capability
+locks. The budget's deadness is the one field the lookup reads from a
+budget without its lock: an atomic flag that only goes from live to dead.
 
 A slot is free, **reserved** for a pass that a receive of the space's own
 awaits, or live; a reserved slot is off the free list and named by no
@@ -933,9 +941,9 @@ Capability value 0 is never valid: slot 0 is never issued.
 is `0xfffffe`: generation 0, with slot bits above `ERX_CAPS_MAX`, the most
 slots any table has, so no slot can ever bear either and neither can collide
 with a capability a table issued. The one lookup resolves them, so no second
-lookup path exists. `erx_cap_lookup` reads the calling thread's space and
-thread, and passes them to the capability core's `erx_cap_read` as a pure
-argument, `erx_cap_self_t`, which is null for a read of another space's table,
+lookup path exists. `erx_cap_lookup` takes the calling thread's space and
+thread from its caller, which reads them from the thread, and passes them
+to `erx_cap_read` as a pure argument, `erx_cap_self_t`, which is null for a read of another space's table,
 where both values are stale. With it, `erx_cap_read` reads the value as a live
 slot that holds that object with the rights of the kinds `reserved_space`
 and `reserved_thread` (`MAP`, `THREADS`, `CAPS` and `STOP`; `CONFIGURE`), and the
@@ -944,7 +952,7 @@ kind carries `INSPECT`, `DUP`, `GIVE` or `DESTROY`, so no call copies, passes,
 inspects or deletes through them, and since they name no slot, their view's
 slot is 0, a pass plan refuses one, and a close of either is `ERX_ESTALE`. Any other value with slot
 bits above a table's limit is stale. Whether the object is
-closing is `erx_cap_read`'s own check, as for every other capability.
+closing is `erx_cap_lookup`'s own check, as for every other capability.
 
 **Reading a slot without a lock.** A lookup reads a slot under its
 sequence count, and every access to any of the slot's fields is atomic,
@@ -1235,9 +1243,11 @@ typedef struct erx_budget {
 	uint64_t	 carved;	/* its children's guarantees */
 	uint64_t	 lent;		/* what its children spend beyond their
 					 * guarantees */
-	bool		 dead;		/* closed by its destroy; takes no charge,
+	_Atomic bool	 dead;		/* closed by its destroy; takes no charge,
 					 * and its spending is counted in its
-					 * nearest live ancestor's used */
+					 * nearest live ancestor's used; written
+					 * under lock, read without it by the
+					 * lookup */
 	uint64_t	 threshold;	/* spending at which the watch fires; 0 unarmed */
 	erx_irq_t	*watch;		/* the IRQ object the watch triggers, whose
 					 * att_watched names this budget; NULL
@@ -5397,8 +5407,8 @@ capabilities from workers.
    or an object deleted while it waited fails the plan with
    `ERX_ESTALE`. `erx_pass_plan`, a pure function, decides the
    whole pass from what it read: the count is at most the receiver's room
-   (`ERX_ELIMIT`); each value names a live slot of an object not closed
-   (`ERX_ESTALE`) and no slot is named twice (`ERX_EINVAL`); each
+   (`ERX_ELIMIT`); each value names a live slot (`ERX_ESTALE`; the take
+   refuses an object that is no longer LIVE the same way) and no slot is named twice (`ERX_EINVAL`); each
    capability carries `GIVE`, and a copy also `DUP` (`ERX_ERIGHTS`); its
    type's pass set is not empty (`ERX_ETYPE`). Each passed capability
    keeps its rights intersected with the sender's mask and with its
@@ -5407,21 +5417,26 @@ capabilities from workers.
 3. **Taking.** If the plan accepts, `erx_pass_take` performs it under
    the sender's table lock: it checks every source slot and the size of
    the receiver's reservation again and changes nothing if either has
-   moved, and nothing after this step fails. A copy adds a slot to its
-   object's list, as a Fiasco map of a capability does. A move puts the
-   receiver's slot
-   in the place of the sender's in the list and clears the sender's slot
-   through `erx_cap_slot_clear`, which hands the object's capability count
-   to the receiver's slot instead of dropping it (K21). What the sender
+   moved, and nothing after this step fails. Each item counts one more
+   capability on its object, the count the receiver's slot will hold, as
+   a Fiasco map of a capability does; a move then clears the sender's slot
+   through `erx_cap_slot_clear`, whose count-out the item's count
+   outweighs, so a move hands the count from slot to slot without passing
+   through zero (K21). The objects' capability locks, held from the
+   planning to the install, keep every object's state and count as take
+   left them. What the sender
    mapped through the moved capability stays mapped, since a mapping keeps
    its object, not the capability it was made through.
 4. **Installing.** Under the receiver's table lock alone, after the
    sender's is released, `erx_pass_install` fills the reserved slots in
    the sender's order, and writes each item's
    value in the receiver's table, its type and its rights back into the
-   receiver's message registers. If the receiver's space has ended and its
-   table has been emptied, it fills nothing and drops what it carried, as
-   a close would.
+   receiver's message registers, and links each filled slot on its
+   object's list with the count take made for it. If the receiver's space
+   has ended and its table has been emptied, it fills nothing and drops
+   what it carried as a close would: each item's count is taken out of
+   its object, and an item that took the last is the release its caller
+   performs.
 
 **A pass that fails changes nothing**: the sender gets the status and
 keeps every capability it named, and the receiver goes on waiting.
@@ -8514,11 +8529,11 @@ advances, so nothing it checked changes unseen before it is applied.
 | rights only shrink (K2) | an `erx_rights_t` constructed, or its `bits` written, only in `kernel/core/cap.c` | syntax trees |
 | only the budget core's chain plan changes a budget's counters (K3, K32) | the `guarantee`, `cap`, `used`, `carved`, `lent`, `pinned`, `dead` and `threshold` members of `erx_budget_t` written only in `kernel/core/budget.c`, by the chain plan behind `erx_budget_adjust`, the reserve's steps, the carve, the resize, the pin and the close, and by the watch | syntax trees, with a seeded write of `used` from a charging call |
 | only creation calls, `erx_cap_dup`, the pass and `erx_space_copy` install capabilities (K17) | the table's fill referenced only from the generated dispatch's installation step, which the generator emits for the creation calls alone, from `erx_cap_dup`, `erx_pass_install` and `erx_space_copy`, and `erx_pass_install` only from the IPC calls and `erx_cap_pass` | relocations |
-| only one function clears a capability slot (K21, K25) | `erx_cap_slot_clear`, which decrements the object's capability count and reports its release, or hands the count to a pass, referenced only from `erx_cap_close`, `erx_pass_take`, `erx_space_clear_caps` and the deletion walk | relocations |
+| only one function clears a capability slot (K21, K25) | `erx_cap_slot_clear`, which decrements the object's capability count and reports its release (a move's take counts the receiver's slot first, so its clear never releases), referenced only from `erx_cap_close`, `erx_pass_take`, `erx_space_clear_caps` and the deletion walk | relocations |
 | objects hold no counted reference to each other: every pointer from one object's record to another's is an attachment field of the target, named `att_` or `in_`, and only threads count references | every member of an object record that points to another object record is an `att_` list or `in_` link, or is listed with the attachment that protects it, such as a space's parent pointer, which its parent's count of holds protects, a count of records and not a reference; `erx_object_ref` referenced only from the dispatch, the wait paths and the handlers that pass a preemption point | syntax trees, with a seeded object pointer outside an attachment |
 | only the insert functions of `kernel/core/attach.c` link anything onto an object, each after checking its state, every type's teardown walks every attachment field of its record, only `erx_object_lock_cap` and `erx_object_lock` take an object's capability lock, and only `erx_object_lock_existence` and `erx_object_lock_existence2`, which take counted references first, take its existence lock (K21, K26) | every member of an object record whose name begins with `att_` written by an insert only in `kernel/core/attach.c`, every exported function there calling `erx_object_state` before its insert, and every such member referenced by its type's teardown; the helping-lock acquire on an object's `lock` referenced only from the two capability-lock functions, and on its `existence` only from `erx_object_lock_existence`, `erx_object_lock_existence2`, `erx_object_lock_counted_existence` and `erx_object_lock_fresh_existence`, the first two after their calls of `erx_object_ref`, the third on an object its caller holds counted and the fourth on a record only its caller can reach, whose try of the lock must succeed | syntax trees, with a seeded fresh take of a published object's lock, which the debug assertion catches |
 | no object pointer from a lookup is used after a preemption point (K1) | in debug and host builds, `erx_uref_get` and `erx_object_ref` compare the reference's epoch with the thread's count of preemption points, which every explicit point and every helping-lock acquire advances, and stop the build's tests on a mismatch; `erx_uref_t`'s members read and written only in `kernel/core/object.c`; the generated decoder looks up every plain capability argument after every other argument and existence lock of the call | syntax trees; the generator's test, which feeds it a call declared with a capability first; the hostile and fuzz suites in debug builds |
-| an object's state only advances, from live to released or deleted and from released to deleted, one destroy alone tears an object down, and only the reaper frees an object, after its grace period (K21, K26) | an object's `state` word written, after its creation, only through `erx_object_cap_remove`, which only `erx_cap_slot_clear` in `kernel/core/cap.c` calls and which writes `ERX_OBJ_RELEASED` and only over `ERX_OBJ_LIVE`, and `erx_object_close`, one atomic operation whose result decides which destroy goes on, which only `erx_delete_step` calls; the invalidation of an existence lock, which follows that close, and for a space goes on to its walks, the walk that unlinks it running its teardown whatever that result was, referenced only from the deletion core in `kernel/core/delete.c`; the object free entry point referenced only from the reaper's put and free steps in `kernel/core/reaper.c` | syntax trees, relocations |
+| an object's state only advances, from live to released or deleted and from released to deleted, one destroy alone tears an object down, and only the reaper frees an object, after its grace period (K21, K26) | an object's `state` word written, after its creation, only through `erx_object_cap_remove`, which only `erx_cap_slot_clear` and the drop in `erx_pass_install`, both in `kernel/core/cap.c`, call and which writes `ERX_OBJ_RELEASED` and only over `ERX_OBJ_LIVE`, and `erx_object_close`, one atomic operation whose result decides which destroy goes on, which only `erx_delete_step` calls; the invalidation of an existence lock, which follows that close, and for a space goes on to its walks, the walk that unlinks it running its teardown whatever that result was, referenced only from the deletion core in `kernel/core/delete.c`; the object free entry point referenced only from the reaper's put and free steps in `kernel/core/reaper.c` | syntax trees, relocations |
 | a sealed object is never written (K23) | a memory object's writer count changed only by `erx_mem_writer_enter` and `erx_mem_writer_leave`, which the writable-mapping insert, `erx_dma_map`, `erx_window_write` and `erx_mem_supply` call around every write path, and read by `erx_mem_seal`; the copy into an object's pages referenced only from those paths | syntax trees, relocations |
 | only the crash core builds a crash record (K31) | `erx_crash_record_write` and `ERX_CRASH_MAGIC` named only in `kernel/core/crash.c`, its seam, the binding's end funnel and the core's tests, by the `crash-record-writer` rule | a test seeds a second writer in a core and in the glue |
 | only the root task pets the watchdog, and every end of the machine passes one funnel (K19, K31) | `erx_watchdog_pet`'s handler requires `POWER` on the root resource, which no carved resource carries, by its generated decoder; the watchdog's deadline written only in the watchdog core, `kernel/core/watchdog.c`; the firmware's end calls referenced only from `erx_machine_end_effect`, which `erx_panic`, `erx_machine_end`, the lease's deadline and the watchdog's reach, and the crash record's writer referenced only from `erx_panic` | relocations, syntax trees |

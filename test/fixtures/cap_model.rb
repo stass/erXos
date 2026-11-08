@@ -34,6 +34,10 @@ module CapModel
   DRIVER_PAGES = 4
   COPY = 1
   MOVE = 2
+  RENDEZVOUS = 1
+  OWN_TO_CREATED = 2
+  CREATED_TO_OWN = 3
+  CREATED_TO_CREATED = 4
 
   RIGHT_NAMES = %w[dup give destroy inspect read map write exec jit phys supply child code alloc spaces carve
                    system threads caps stop control configure attach signal call serve trigger bind ack power
@@ -95,6 +99,36 @@ module CapModel
     'reserved_space' => mask(:map, :threads, :caps, :stop),
     'reserved_thread' => mask(:configure)
   }.freeze
+
+  # The type of the object each creation kind makes, from the design's
+  # table of kinds.
+  KIND_TYPE = {
+    'root_budget' => :budget, 'carved_budget' => :budget, 'new_space' => :space, 'new_thread' => :thread,
+    'new_group' => :group, 'new_gate' => :gate, 'software_irq' => :irq, 'line_irq' => :irq, 'msi_irq' => :irq,
+    'root_resource' => :resource, 'carved_resource' => :resource, 'dma_window' => :dma,
+    'reserved_space' => :space, 'reserved_thread' => :thread
+  }.tap { |known| KINDS.each_key { |name| known[name] ||= :memory } }.freeze
+
+  # An object: its type, its state, its count of slots and its slot list,
+  # head first, each entry a table id and a slot index.
+  OBJECT_STATES = { live: 1, released: 2, deleted: 3 }.freeze
+  Obj = Data.define(:type, :state, :ncaps, :list) do
+    def live? = state == :live
+    def dump(id) = ([format('object %x %x %x', id, OBJECT_STATES.fetch(state), ncaps)] +
+                    list.map { |table, index| format('%x:%x', table, index) }).join(' ')
+    def linked(entry) = with(ncaps: ncaps + 1, list: [entry, *list].freeze)
+    def counted = with(ncaps: ncaps + 1)
+    def attached(entry) = with(list: [entry, *list].freeze)
+    def unlinked(entry) = with(list: (list - [entry]).freeze)
+
+    # One count out; the last one releases a live object.
+    def counted_out
+      left = ncaps - 1
+      [with(ncaps: left, state: left.zero? && live? ? :released : state), left.zero?]
+    end
+  end
+
+  def self.object(type) = Obj.new(type: type, state: :live, ncaps: 0, list: [].freeze)
 
   Slot = Data.define(:state, :generation, :seq, :object, :type, :rights) do
     def live? = state == :live
@@ -167,16 +201,43 @@ module CapModel
     table.with_slot(index, closed).with(free: retire ? table.free : (table.free + [index]).freeze)
   end
 
-  def install(table, object, type, rights)
-    return [table, EDEAD, 0] if table.emptied
-    return [table, EINVAL, 0] if object.zero? || CARRY.fetch(type, 0).zero? || (rights & ~CARRY.fetch(type)) != 0
-    return [table, ELIMIT, 0] if table.free.empty?
+  def fill(table, index, **fields)
+    table.with_slot(index, written(table.slots.fetch(index), state: :live, **fields))
+  end
+
+  # A creation's install: the kind's rights shrunk by mask, counted and
+  # linked on the object. Returns the table, the object, the status and the
+  # value.
+  def install(table, obj, id:, object:, kind:, mask:)
+    name = KINDS.keys.find { |key| constant("kind_#{key}") == kind }
+    return [table, obj, EDEAD, 0] if table.emptied
+    return [table, obj, EINVAL, 0] if name.nil? || name.start_with?('reserved_') ||
+                                      TYPE_NUMBER.fetch(KIND_TYPE.fetch(name)) != obj.type
+    return [table, obj, ELIMIT, 0] if table.free.empty?
+    return [table, obj, ESTALE, 0] unless obj.live?
 
     index = table.free.first
-    slot = table.slots.fetch(index)
+    generation = table.slots.fetch(index).generation
     taken = table.with(free: table.free.drop(1).freeze)
-    [taken.with_slot(index, written(slot, state: :live, object: object, type: type, rights: rights)), OK,
-     value(index, slot.generation)]
+    [fill(taken, index, object: object, type: obj.type, rights: KINDS.fetch(name) & mask), obj.linked([id, index]), OK,
+     value(index, generation)]
+  end
+
+  # A copy of a live value of from that names object into to.
+  def copy(to, from, obj, to_id:, cap:, object:, mask:)
+    index, generation = decode(cap)
+    return [to, obj, EDEAD, 0] if to.emptied
+    return [to, obj, ESTALE, 0] unless names?(from, index, generation, object)
+
+    source = from.slots.fetch(index)
+    return [to, obj, ERIGHTS, 0] if (source.rights & RIGHTS.fetch(:dup)).zero?
+    return [to, obj, ELIMIT, 0] if to.free.empty?
+    return [to, obj, ESTALE, 0] unless obj.live?
+
+    target = to.free.first
+    taken = to.with(free: to.free.drop(1).freeze)
+    [fill(taken, target, object: object, type: source.type, rights: source.rights & mask), obj.linked([to_id, target]),
+     OK, value(target, taken.slots.fetch(target).generation)]
   end
 
   def names?(table, index, generation, object)
@@ -186,11 +247,13 @@ module CapModel
     slot.live? && slot.generation == generation && object != 0 && slot.object == object
   end
 
-  def clear(table, cap, object)
+  # Returns the table, the object, the status and whether it was released.
+  def clear(table, obj, id:, cap:, object:)
     index, generation = decode(cap)
-    return [table, ESTALE] unless names?(table, index, generation, object)
+    return [table, obj, ESTALE, false] unless names?(table, index, generation, object)
 
-    [close(table, index, generation + 1), OK]
+    obj, released = obj.unlinked([id, index]).counted_out
+    [close(table, index, generation + 1), obj, OK, released]
   end
 
   View = Data.define(:object, :type, :rights, :slot, :generation)
@@ -206,6 +269,15 @@ module CapModel
     return [ERIGHTS, NO_VIEW] if (slot.rights & required) != required
 
     [OK, View.new(object: slot.object, type: slot.type, rights: slot.rights, slot: index, generation: generation)]
+  end
+
+  # The one lookup: the read, then the object's state.
+  def lookup(table, objects, cap, type, required)
+    status, view = read(table, cap, type, required)
+    return [status, 0] unless status == OK
+    return [ESTALE, 0] unless objects.fetch(view.object).live?
+
+    [OK, view.object]
   end
 
   def reserve(table, count)
@@ -235,9 +307,12 @@ module CapModel
   Plan = Data.define(:status, :failed, :steps)
 
   # The plan: the count, then each item in order (design, "Planning").
-  def plan(items:, sources:, room:, from_own:, to_created:)
+  def plan(items:, sources:, room:, route:)
     count = items.size
-    return Plan.new(status: EINVAL, failed: count, steps: []) if count > MSG_CAPS
+    return Plan.new(status: EINVAL, failed: count, steps: []) if count > MSG_CAPS || !route.between?(RENDEZVOUS, CREATED_TO_CREATED)
+
+    from_own = [RENDEZVOUS, OWN_TO_CREATED].include?(route)
+    to_created = [OWN_TO_CREATED, CREATED_TO_CREATED].include?(route)
     return Plan.new(status: ELIMIT, failed: count, steps: []) if count > room
 
     steps = []
@@ -272,33 +347,47 @@ module CapModel
 
   # The take step of an accepted plan whose sources are unchanged: a
   # reservation shorter than the plan is refused, changing nothing;
-  # otherwise each move clears its source. Returns the source table and
-  # the status.
-  def pass_take(table, plan:, held:)
-    return [table, ELIMIT] if held.size < plan.steps.size
+  # otherwise each step counts one more on its object and each move clears
+  # its source, so no move takes a count through zero. Returns the source
+  # table, the objects and the status.
+  def pass_take(table, objects, from_id:, plan:, held:)
+    return [table, objects, ESTALE] unless plan.steps.all? { |step| objects.fetch(step.object).live? }
+    return [table, objects, ELIMIT] if held.size < plan.steps.size
 
-    [plan.steps.select { |step| step.op == MOVE }
-         .reduce(table) { |current, step| close(current, step.slot, step.generation + 1) }, OK]
+    objects = plan.steps.reduce(objects) { |current, step| current.merge(step.object => current.fetch(step.object).counted) }
+    plan.steps.select { |step| step.op == MOVE }.reduce([table, objects, OK]) do |(current, objs, status), step|
+      obj, = objs.fetch(step.object).unlinked([from_id, step.slot]).counted_out
+      [close(current, step.slot, step.generation + 1), objs.merge(step.object => obj), status]
+    end
   end
 
   # The install step of a taken plan: an emptied destination receives
-  # nothing; a reservation that no longer holds the plan is refused
-  # before any fill;
-  # otherwise the passed capabilities fill the reservation in order.
-  # Returns the destination table, the status and the results.
-  def pass_install(table, plan:)
-    return [table, EDEAD, []] if table.emptied
-
+  # nothing, and a reservation that no longer holds the plan is refused
+  # before any fill; both drop what the pass carried, each step's count
+  # taken out. Otherwise the passed capabilities fill the reservation in
+  # order, each linked on its object. Returns the destination table, the
+  # objects, the status, the results and the indices of released steps.
+  def pass_install(table, objects, to_id:, plan:)
     held = table.held.first(plan.steps.size)
-    unless held.size == plan.steps.size && held.all? { |index| table.slots.fetch(index).state == :reserved }
-      return [table, EINVAL, []]
-    end
+    status = if table.emptied then EDEAD
+             elsif held.size == plan.steps.size && held.all? { |index| table.slots.fetch(index).state == :reserved } then OK
+             else EINVAL
+             end
+    return pass_drop(table, objects, plan, status) unless status == OK
 
-    filled = plan.steps.zip(held).reduce(table) do |current, (step, index)|
-      current.with_slot(index, written(current.slots.fetch(index), state: :live, object: step.object,
-                                                                    type: step.type, rights: step.rights))
+    filled = plan.steps.zip(held).reduce([table, objects]) do |(current, objs), (step, index)|
+      [fill(current, index, object: step.object, type: step.type, rights: step.rights),
+       objs.merge(step.object => objs.fetch(step.object).attached([to_id, index]))]
     end
     results = plan.steps.zip(held).map { |step, index| [value(index, table.slots.fetch(index).generation), step.type, step.rights] }
-    [filled.with(held: table.held.drop(plan.steps.size).freeze), OK, results]
+    [filled[0].with(held: table.held.drop(plan.steps.size).freeze), filled[1], OK, results, []]
+  end
+
+  def pass_drop(table, objects, plan, status)
+    outs = plan.steps.each_with_index.reduce([objects, []]) do |(current, lasts), (step, index)|
+      obj, last = current.fetch(step.object).counted_out
+      [current.merge(step.object => obj), lasts + [last]]
+    end
+    [table, outs[0], status, [], outs[1].each_with_index.filter_map { |last, index| index if last }]
   end
 end

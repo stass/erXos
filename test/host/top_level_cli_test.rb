@@ -276,7 +276,7 @@ class TopLevelCliTest < Minitest::Test
     status, output = run_cli('gates')
     assert_equal 0, status, output
     assert_includes output, 'sanitizer test: test/host/cap_test.rb'
-    assert_includes output, 'native fuzz target: cap: 4 seeds; sources kernel/core/cap.c;'
+    assert_includes output, 'native fuzz target: cap: 5 seeds; sources kernel/core/cap.c kernel/core/object.c kernel/core/budget.c;'
     assert_includes output, 'chokepoint rule: cap-table-private: Forbidden, 10 seeds'
     assert_includes output, 'chokepoint rule: object-leg: Pending, 0 seeds'
   end

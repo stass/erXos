@@ -75,6 +75,27 @@ module Erx
           callee: 'erx_cap_slot_clear',
           callers: %w[erx_cap_close erx_pass_take erx_space_clear_caps],
           seed: { 'erx_cap_install' => 'call', 'erx_cap_reserve' => 'tail_jump', 'cap.o:erx_pass_take' => 'call' }
+        ),
+        # A table receives capabilities in four ways only (K17): a copy is
+        # installed only by erx_cap_dup and a fork's erx_space_copy, and a
+        # creation's install only by the creation calls of the generated
+        # dispatch, which the full kernel brings; until then no core installs
+        # by kind, and a pass fills only through erx_pass_install.
+        Chokepoints::Callers.new(
+          name: 'cap-install-copy-callers',
+          rule: 'only erx_cap_dup and erx_space_copy call erx_cap_install_copy',
+          design: "#{KERNEL}#chokepoint-checks",
+          callee: 'erx_cap_install_copy',
+          callers: %w[erx_cap_dup erx_space_copy],
+          seed: { 'erx_cap_pass' => 'call', 'erx_pass_install' => 'tail_jump', 'space.o:erx_space_create' => 'call' }
+        ),
+        Chokepoints::Callers.new(
+          name: 'cap-install-kind-callers',
+          rule: "no core calls erx_cap_install_kind until the generated dispatch's creation calls do",
+          design: "#{KERNEL}#chokepoint-checks",
+          callee: 'erx_cap_install_kind',
+          callers: %w[],
+          seed: { 'erx_cap_dup' => 'call', 'erx_space_copy' => 'tail_jump', 'cap.o:erx_pass_install' => 'call' }
         )
       ]
     )

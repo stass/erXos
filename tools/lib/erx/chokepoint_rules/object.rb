@@ -66,15 +66,16 @@ module Erx
                   'test/fixtures/cap_driver.c' => "(void)erx_object_cap_remove(o);\n",
                   'fiasco/kernel/src/erx/object.cpp' => "void f() { erx_object_close(o); }\n" }
         ),
-        # The state word becomes RELEASED only when erx_cap_slot_clear takes
-        # the slot count to zero (K21): the one function that clears a slot
-        # is the one that counts it out.
+        # The state word becomes RELEASED only when a capability's count is
+        # taken out (K21): by erx_cap_slot_clear, the one function that
+        # clears a slot, or by erx_pass_install when it drops what a taken
+        # pass carried into an emptied table, as a close would drop it.
         Chokepoints::Callers.new(
           name: 'object-release-callers',
-          rule: 'only erx_cap_slot_clear calls erx_object_cap_remove',
+          rule: 'only erx_cap_slot_clear and erx_pass_install call erx_object_cap_remove',
           design: "#{KERNEL}#chokepoint-checks",
           callee: 'erx_object_cap_remove',
-          callers: %w[erx_cap_slot_clear],
+          callers: %w[erx_cap_slot_clear erx_pass_install],
           seed: { 'erx_cap_close' => 'call', 'erx_pass_take' => 'tail_jump', 'object.o:release_now' => 'call' }
         ),
         # An object is closed, its state word made DELETED, only by the

@@ -7,6 +7,7 @@
 #define ERX_OBJECT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -20,15 +21,15 @@
  *
  * An object's life:
  *
- *   LIVE -----------------------> RELEASED   its last capability went
- *     |                              |
- *     +--------> DELETED <-----------+       a destroy closed it
+ * LIVE -----------------------> RELEASED its last capability went | |
+ * +--------> DELETED <-----------+ a destroy closed it
  *
  * After erx_object_init makes a header, its state word is written in two
  * places only, which the object chokepoints enforce:
- * erx_object_cap_remove, which erx_cap_slot_clear
- * alone calls, writes RELEASED over LIVE; erx_object_close, which only the
- * deletion core calls, writes DELETED. Nothing moves an object back.
+ * erx_object_cap_remove, which only erx_cap_slot_clear and a pass's
+ * install that drops what it carried call, writes RELEASED over LIVE;
+ * erx_object_close, which only the deletion core calls, writes DELETED.
+ * Nothing moves an object back.
  *
  * The records are opaque outside the core: their definitions are in
  * kernel/core/object_impl.h, which only kernel/core/object.c and its host
@@ -88,6 +89,15 @@ void		erx_object_store_init(erx_object_store_t *store,
 		    const erx_oid_key_t *key);
 
 /*
+ * Size and alignment of a bare header, and the size of a store, for host
+ * tests that hold records without seeing the private header; a kernel
+ * object's record embeds a header.
+ */
+size_t		erx_object_record_size(void);
+size_t		erx_object_record_align(void);
+size_t		erx_object_store_size(void);
+
+/*
  * Makes object's header: LIVE, no capability, its own counted reference,
  * paid for by budget, its type fixed, and the next object id. Fails with
  * ERX_ELIMIT, writing nothing, once the creation counter is spent, so no
@@ -124,10 +134,10 @@ erx_status_t	erx_object_cap_add(erx_object_t *object)
 
 /*
  * Counts one slot fewer, under the object's capability lock; only
- * erx_cap_slot_clear calls it. Returns true when that was the last
- * capability, the release the caller reports, and then writes RELEASED if
- * the object is LIVE; a closed object stays DELETED. A removal with no slot
- * counted is a kernel bug and traps.
+ * erx_cap_slot_clear and erx_pass_install's drop call it. Returns true
+ * when that was the last capability, the release the caller reports, and
+ * then writes RELEASED if the object is LIVE; a closed object stays
+ * DELETED. A removal with no slot counted is a kernel bug and traps.
  */
 bool		erx_object_cap_remove(erx_object_t *object)
 		    ERX_WARN_UNUSED_RESULT;

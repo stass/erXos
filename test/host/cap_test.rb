@@ -30,21 +30,27 @@ require_relative '../fixtures/generated_tree'
 # * Seeded one-line mutants of the core must each fail.
 class CapTest < Minitest::Test
   M = CapModel
-  OBJECTS = { 1 => [M::TYPE_NUMBER.fetch(:memory), M::SHARED],
-              2 => [M::TYPE_NUMBER.fetch(:gate), M.mask(:call, :dup)],
-              3 => [M::TYPE_NUMBER.fetch(:space), M::TYPES.fetch(:space)[1]] }.freeze
+  # The driver's objects, by handle: each one's type, and the creation
+  # kind and mask the tests install it with.
+  OBJECT_TYPES = { 1 => M::TYPE_NUMBER.fetch(:memory), 2 => M::TYPE_NUMBER.fetch(:gate),
+                   3 => M::TYPE_NUMBER.fetch(:space) }.freeze
+  OBJECTS = { 1 => [M.constant('kind_shared_memory'), 0xffff_ffff],
+              2 => [M.constant('kind_new_gate'), M.mask(:call, :dup)],
+              3 => [M.constant('kind_new_space'), 0xffff_ffff] }.freeze
   MASKS = [0xffff_ffff, M.mask(:read, :call, :inspect, :give)].freeze
-  ROUTES = [[1, 0], [1, 1], [0, 0], [0, 1]].freeze
+  ROUTES = [M::RENDEZVOUS, M::OWN_TO_CREATED, M::CREATED_TO_OWN, M::CREATED_TO_CREATED].freeze
   DEPTH_MAX = 24
 
   # A script and the transcript the model predicts for it.
   class Script
     attr_reader :commands, :expected, :tables
+    attr_accessor :objects
 
     def initialize
       @commands = []
       @expected = []
       @tables = {}
+      @objects = OBJECT_TYPES.transform_values { |type| M.object(type) }.freeze
     end
 
     def emit(command, *lines)
@@ -69,20 +75,49 @@ class CapTest < Minitest::Test
       emit(format('seed %x %x %x %x', id, slot, generation, seq), 'seed')
     end
 
-    def install(id, object, type, rights)
-      @tables[id], status, value = M.install(@tables.fetch(id), object, type, rights)
-      emit(format('install %x %x %x %x', id, object, type, rights), format('install %d %x', status, value))
+    def install(id, object, kind, mask)
+      @tables[id], obj, status, value = M.install(@tables.fetch(id), @objects.fetch(object), id: id, object: object,
+                                                  kind: kind, mask: mask)
+      with_object(object, obj)
+      emit(format('install %x %x %x %x', id, object, kind, mask), format('install %d %x', status, value))
     end
 
+    def copy(to, from, value, object, mask)
+      @tables[to], obj, status, copied = M.copy(@tables.fetch(to), @tables.fetch(from), @objects.fetch(object),
+                                                to_id: to, cap: value, object: object, mask: mask)
+      with_object(object, obj)
+      emit(format('copy %x %x %x %x %x', to, from, value, object, mask), format('copy %d %x', status, copied))
+    end
+
+    def fresh_objects
+      @objects = OBJECT_TYPES.transform_values { |type| M.object(type) }.freeze
+      emit('objects', 'objects')
+    end
+
+    # The objects are a value that states share, so a change makes a new one.
+    def with_object(object, obj) = (@objects = @objects.merge(object => obj).freeze)
+
+    def revive(object)
+      with_object(object, M.object(OBJECT_TYPES.fetch(object)))
+      emit(format('revive %x', object), "revive #{M::OK}")
+    end
+
+    # A handle outside the store names no slot, so its clear is stale.
     def clear(id, value, object)
-      @tables[id], status = M.clear(@tables.fetch(id), value, object)
-      emit(format('clear %x %x %x', id, value, object), "clear #{status}")
+      @tables[id], obj, status, released = M.clear(@tables.fetch(id), @objects[object], id: id, cap: value, object: object)
+      with_object(object, obj) if @objects.key?(object)
+      emit(format('clear %x %x %x', id, value, object), format('clear %d %d', status, released ? 1 : 0))
     end
 
     def read(id, value, type, required)
       status, view = M.read(@tables.fetch(id), value, type, required)
       emit(format('read %x %x %x %x', id, value, type, required),
            format('read %d %x %x %x %x %x', status, view.object, view.type, view.rights, view.slot, view.generation))
+    end
+
+    def lookup(id, value, type, required)
+      status, object = M.lookup(@tables.fetch(id), @objects, value, type, required)
+      emit(format('lookup %x %x %x %x', id, value, type, required), format('lookup %d %x', status, object))
     end
 
     def reserve(id, count)
@@ -100,7 +135,7 @@ class CapTest < Minitest::Test
       emit(format('empty %x', id), 'empty')
     end
 
-    def dump(id) = emit(format('dump %x', id), *@tables.fetch(id).dump)
+    def dump(id) = emit(format('dump %x', id), *@tables.fetch(id).dump, *@objects.map { |object, obj| obj.dump(object) })
 
     def rights(kind, mask) = emit(format('rights %x', kind), format('rights %x', mask))
 
@@ -108,18 +143,15 @@ class CapTest < Minitest::Test
     # acceptance, take and install it. Race 1 clears the first source
     # and race 2 releases the reservation after the plan, which take must
     # each refuse, changing nothing.
-    def pass(from, to, own:, created:, items:, race: 0)
+    def pass(from, to, route:, items:, race: 0)
       sources = items.map do |item|
         status, view = M.read(@tables.fetch(from), item.cap, 0, 0)
         M::Source.new(status: status, view: view)
       end
-      plan = M.plan(items: items, sources: sources, room: @tables.fetch(to).held.size,
-                    from_own: own == 1, to_created: created == 1)
+      plan = M.plan(items: items, sources: sources, room: @tables.fetch(to).held.size, route: route)
       lines = plan_lines(plan)
-      if plan.status == M::OK
-        lines.concat(step_lines(from, to, plan, race))
-      end
-      emit([format('pass %x %x %x %x %x %x', from, to, own, created, items.size, race),
+      lines.concat(step_lines(from, to, plan, race)) if plan.status == M::OK
+      emit([format('pass %x %x %x %x %x', from, to, route, items.size, race),
             *items.map { |item| format('item %x %x %x %x %x', item.cap, item.op, item.mask, item.type, item.required) }]
              .join("\n"), *lines)
     end
@@ -134,16 +166,19 @@ class CapTest < Minitest::Test
     def step_lines(from, to, plan, race)
       if race == 1
         first = plan.steps.first
-        @tables[from] = M.close(@tables.fetch(from), first.slot, first.generation + 1)
+        @tables[from], obj, = M.clear(@tables.fetch(from), @objects.fetch(first.object), id: from,
+                                      cap: M.value(first.slot, first.generation), object: first.object)
+        with_object(first.object, obj)
         return ["take #{M::ESTALE}"]
       end
 
       @tables[to] = M.release(@tables.fetch(to)) if race == 2
-      @tables[from], taken = M.pass_take(@tables.fetch(from), plan: plan, held: @tables.fetch(to).held)
+      @tables[from], @objects, taken = M.pass_take(@tables.fetch(from), @objects, from_id: from, plan: plan,
+                                                                               held: @tables.fetch(to).held)
       return ["take #{taken}"] unless taken == M::OK
 
-      @tables[to], status, results = M.pass_install(@tables.fetch(to), plan: plan)
-      ["take #{M::OK}", "install #{status}",
+      @tables[to], @objects, status, results, released = M.pass_install(@tables.fetch(to), @objects, to_id: to, plan: plan)
+      ["take #{M::OK}", "install #{status}", *released.map { |index| format('released %x', index) },
        *results.map { |value, type, rights| format('result %x %x %x', value, type, rights) }]
     end
   end
@@ -194,24 +229,47 @@ class CapTest < Minitest::Test
 
   def test_install_refuses_bad_arguments_and_full_and_emptied_tables
     script = Script.new.table(0, 3).grow(0, 2)
-    memory = M::TYPE_NUMBER.fetch(:memory)
-    script.install(0, 0, memory, 0).install(0, 1, 0, 0).install(0, 1, 10, 0)
-    script.install(0, 1, memory, M.mask(:alloc)).install(0, 1, memory, M::SHARED)
-    script.install(0, 2, memory, 0).install(0, 3, memory, 0).dump(0)
-    script.empty(0).install(0, 4, memory, 0).reserve(0, 1).dump(0)
+    shared, = OBJECTS.fetch(1)
+    gate, = OBJECTS.fetch(2)
+    # A kind of another type, no kind, an unknown kind; then a mask that
+    # leaves nothing, and the kind's whole row.
+    script.install(0, 1, gate, 0xffff_ffff).install(0, 1, 0, 0xffff_ffff).install(0, 1, 0xff, 0xffff_ffff)
+    script.install(0, 1, shared, M.mask(:alloc)).install(0, 1, shared, 0xffff_ffff)
+    script.install(0, 2, gate, 0xffff_ffff).dump(0)
+    script.empty(0).install(0, 2, gate, 0xffff_ffff).reserve(0, 1).dump(0)
+    assert_transcript(script)
+  end
+
+  # Copies: only of a live value that names the object, only with DUP,
+  # within the mask; every copy is counted and listed, and the release comes
+  # with the last clear, after which the object takes no capability until
+  # a fresh header replaces it.
+  def test_copies_count_and_the_last_clear_releases
+    shared, = OBJECTS.fetch(1)
+    gate, call_dup = OBJECTS.fetch(2)
+    script = Script.new.table(0, 6).grow(0, 5).table(1, 3).grow(1, 2)
+    script.install(0, 1, shared, 0xffff_ffff).install(0, 2, gate, M.mask(:call))
+    one = M.value(1, 0)
+    script.copy(0, 0, one, 1, M.mask(:read, :dup)).copy(1, 0, one, 1, 0xffff_ffff).copy(1, 0, one, 2, 0xffff_ffff)
+    script.copy(1, 0, M.value(2, 0), 2, 0xffff_ffff).copy(1, 0, M.value(1, 1), 1, 0xffff_ffff)
+    script.copy(1, 0, one, 1, 0xffff_ffff).dump(0).dump(1)
+    script.lookup(0, one, 0, 0).lookup(0, one, M::TYPE_NUMBER.fetch(:gate), 0).lookup(1, M.value(1, 0), 0, M.mask(:read))
+    script.clear(0, one, 1).clear(1, M.value(1, 0), 1).clear(0, M.value(3, 0), 1).dump(0)
+    script.install(0, 1, shared, 0xffff_ffff).revive(1).install(0, 1, shared, 0xffff_ffff)
+    script.install(0, 2, gate, call_dup).empty(1).copy(1, 0, script_value(script, 0, 2), 2, 0xffff_ffff).dump(1)
     assert_transcript(script)
   end
 
   # Generation 2^40 - 2 is the last issued; a count that leaves no room
   # for a whole further life retires at the closing write.
   def test_retirement_at_the_exact_bounds
-    memory, rights = OBJECTS.fetch(1)
+    kind, mask = OBJECTS.fetch(1)
     script = Script.new.table(0, 5).grow(0, 4)
     script.seed(0, 1, M::GENERATION_LIMIT - 1, 0)
     script.seed(0, 2, 0, M::FREE_MAX)
     script.seed(0, 3, 0, M::FREE_MAX - 4)
     script.seed(0, 4, M::GENERATION_LIMIT - 2, 0)
-    4.times { script.install(0, 1, memory, rights) }
+    4.times { script.install(0, 1, kind, mask) }
     script.dump(0)
     (1..4).each { |slot| script.clear(0, M.value(slot, script.tables.fetch(0).slots[slot].generation), 1) }
     script.dump(0)
@@ -248,14 +306,15 @@ class CapTest < Minitest::Test
   def test_pass_plan_over_a_bounded_domain
     script = Script.new
     singles = plan_items
-    ROUTES.each do |own, created|
-      [0, 1, 4].each { |room| plan_case(script, own, created, room, singles.first(1) * 5) }
-      plan_case(script, own, created, 0, [])
-      singles.each { |single| plan_case(script, own, created, 1, [single]) }
+    ROUTES.each do |route|
+      [0, 1, 4].each { |room| plan_case(script, route, room, singles.first(1) * 5) }
+      plan_case(script, route, 0, [])
+      singles.each { |single| plan_case(script, route, 1, [single]) }
       singles.each_slice(64).map(&:first).product(singles).each do |first, second|
-        plan_case(script, own, created, 4, [first, second])
+        plan_case(script, route, 4, [first, second])
       end
     end
+    [0, M::CREATED_TO_CREATED + 1, 0xffff_ffff].each { |route| plan_case(script, route, 4, singles.first(1)) }
     assert_transcript(script)
   end
 
@@ -271,8 +330,8 @@ class CapTest < Minitest::Test
   def test_lookups_race_a_writer_under_thread_sanitizer
     program = File.join(@directory, 'cap-churn')
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 '-fsanitize=thread', '-fno-omit-frame-pointer', '-pthread', *include_flags,
-                 File.join(@root, 'kernel/core/cap.c'), File.join(@root, 'test/fixtures/cap_churn.c'),
+                 '-fsanitize=thread', '-fno-omit-frame-pointer', '-pthread', '-DERX_HOST', *include_flags,
+                 *core_sources(File.join(@root, 'kernel/core/cap.c')), File.join(@root, 'test/fixtures/cap_churn.c'),
                  '-o', program], name: 'compile-cap-churn', deadline: 60)
     @runner.run([program], name: 'cap-churn', deadline: 120,
                 env: Erx::SanitizerEnvironment.call(compiler: compiler))
@@ -309,9 +368,9 @@ class CapTest < Minitest::Test
   def test_a_table_refuses_storage_it_cannot_own
     program = File.join(@directory, 'cap-storage')
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 *@sanitizer_flags, '-DERX_HOST', *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', Erx::Generated.path('kernel/generated', root: @root),
-                 File.join(@root, 'kernel/core/cap.c'), File.join(@root, 'test/fixtures/cap_storage.c'),
+                 *core_sources(File.join(@root, 'kernel/core/cap.c')), File.join(@root, 'test/fixtures/cap_storage.c'),
                  '-o', program], name: 'compile-cap-storage', deadline: 60)
     @runner.run([program], name: 'cap-storage', deadline: 60)
   end
@@ -371,8 +430,8 @@ class CapTest < Minitest::Test
                 format('clear 0 %x %x', self_space, 0x5a),
                 format('clear 0 %x %x', self_thread, 0x7b),
                 'table 1 2', 'grow 1 1', 'reserve 1 1',
-                'pass 0 1 1 0 1', item,
-                'pass 0 1 0 1 1', item]
+                format('pass 0 1 %x 1', M::RENDEZVOUS), item,
+                format('pass 0 1 %x 1', M::CREATED_TO_CREATED), item]
     lines = run_driver(commands).grep(/\A(?:self|read|clear|plan) /)
     assert_equal [format('self 0 5a %x %x 0 0', space, space_rights),
                   format('self 0 5a %x %x 0 0', space, space_rights),
@@ -383,7 +442,7 @@ class CapTest < Minitest::Test
                   "self #{estale} 0 0 0 0 0", "self #{estale} 0 0 0 0 0",
                   "self #{estale} 0 0 0 0 0",
                   "read #{estale} 0 0 0 0 0", "read #{estale} 0 0 0 0 0",
-                  "clear #{estale}", "clear #{estale}",
+                  "clear #{estale} 0", "clear #{estale} 0",
                   "plan #{estale} 0 0", "plan #{estale} 0 0"], lines
   end
 
@@ -397,7 +456,12 @@ class CapTest < Minitest::Test
     ['pass sets ignored', "\t\trights = erx_rights_shrink(rights, pass);\n", "\t\t(void)pass;\n"],
     ['GIVE unchecked', "\t    ERX_HR_GIVE))", "\t    0))"],
     ['LIFO free list', "\tif (table->free_tail == 0)\n\t\ttable->free_head = index;\n\telse\n",
-     "\tif (table->free_tail == 0)\n\t\ttable->free_head = index;\n\telse if (0)\n"]
+     "\tif (table->free_tail == 0)\n\t\ttable->free_head = index;\n\telse if (0)\n"],
+    ['install leaves the count', "\tstatus = erx_object_cap_add(object);\n", "\tstatus = ERX_OK;\n"],
+    ['clear leaves the list', "\tcap_list_remove(object, slot);\n", "\tif (0)\n\t\tcap_list_remove(object, slot);\n"],
+    ['move drops its count', "\t\tif (erx_object_cap_add(objects[i]) != ERX_OK)\n", "\t\tif (0)\n"],
+    ['install links nothing', "\t\tcap_list_insert(erx_object_from_handle(step->object), slot);\n", ""],
+    ['route ignored', "\tif (!cap_route_to_created(route) && pass == 0)\n", "\tif (pass == 0)\n"]
   ].freeze
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
@@ -415,10 +479,15 @@ class CapTest < Minitest::Test
                     *include_flags, source)
   end
 
+  # The capability core with the cores it calls, the object store and,
+  # for the lookup, the budget core, and their host's effects.
+  def core_sources(core) = [core, *%w[kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c]
+                                                     .map { |path| File.join(@root, path) }]
+
   def build_driver(core, name:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *@sanitizer_flags, *include_flags, core,
+                 *@sanitizer_flags, '-DERX_HOST', *include_flags, *core_sources(core),
                  File.join(@root, 'test/fixtures/cap_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output
@@ -461,30 +530,32 @@ class CapTest < Minitest::Test
   end
 
   def stale_reuse_script
-    memory, shared = OBJECTS.fetch(1)
+    shared, all = OBJECTS.fetch(1)
     gate, call = OBJECTS.fetch(2)
-    script = Script.new.table(0, 2).grow(0, 1).install(0, 1, memory, shared)
+    memory = M::TYPE_NUMBER.fetch(:memory)
+    script = Script.new.table(0, 2).grow(0, 1).install(0, 1, shared, all)
     old = M.value(1, 0)
     script.clear(0, old, 1).install(0, 2, gate, call).table(1, 2).grow(1, 1).reserve(1, 1)
     script.read(0, old, 0, 0).read(0, old, memory, 0).read(0, M.value(1, 1), 0, 0)
     script.clear(0, old, 1).clear(0, old, 2)
     item = M::Item.new(cap: old, op: M::MOVE, mask: MASKS.first, type: 0, required: 0)
-    script.pass(0, 1, own: 0, created: 1, items: [item]).dump(0).dump(1)
+    script.pass(0, 1, route: M::CREATED_TO_CREATED, items: [item]).dump(0).dump(1)
   end
 
   def retirement_script
-    memory, rights = OBJECTS.fetch(1)
+    kind, mask = OBJECTS.fetch(1)
     script = Script.new.table(0, 3).grow(0, 2).seed(0, 1, M::GENERATION_LIMIT - 2, 0).seed(0, 2, 0, M::FREE_MAX - 2)
     3.times do
-      script.install(0, 1, memory, rights).install(0, 1, memory, rights).dump(0)
+      script.install(0, 1, kind, mask).install(0, 1, kind, mask).dump(0)
       (1..2).each { |slot| script.clear(0, M.value(slot, script.tables.fetch(0).slots[slot].generation), 1) }
+      script.revive(1)
     end
     script.dump(0)
   end
 
   def plan_script
     script = Script.new
-    plan_items.each { |item| plan_case(script, 1, 0, 1, [item]) }
+    plan_items.each { |item| plan_case(script, M::RENDEZVOUS, 1, [item]) }
     script
   end
 
@@ -500,19 +571,19 @@ class CapTest < Minitest::Test
     live + [[M::ESTALE, 1, 0, 0, M::COPY, MASKS.first, 0, 0]]
   end
 
-  def plan_case(script, own, created, room, items)
+  def plan_case(script, route, room, items)
     sources = items.map do |status, slot, type, rights, *|
       view = status == M::OK ? M::View.new(object: slot, type: type, rights: rights, slot: slot, generation: 3) : M::NO_VIEW
       M::Source.new(status: status, view: view)
     end
     plan_items = items.map { |_s, _slot, _t, _r, op, mask, checked, required| M::Item.new(cap: 0, op: op, mask: mask, type: checked, required: required) }
-    plan = M.plan(items: plan_items, sources: sources, room: room, from_own: own == 1, to_created: created == 1)
+    plan = M.plan(items: plan_items, sources: sources, room: room, route: route)
     lines = items.first(M::MSG_CAPS).zip(sources).map do |(_status, _slot, _type, _rights, op, mask, checked, required), source|
       view = source.view
       format('source %d %x %x %x %x %x %x %x %x %x', source.status, view.object, view.type, view.rights, view.slot,
              view.generation, op, mask, checked, required)
     end
-    script.emit([format('plan %x %x %x %x', own, created, room, items.size), *lines].join("\n"), *script.plan_lines(plan))
+    script.emit([format('plan %x %x %x', route, room, items.size), *lines].join("\n"), *script.plan_lines(plan))
   end
 
   # A seeded walk over two tables of two pages each, the second table's
@@ -525,16 +596,22 @@ class CapTest < Minitest::Test
       id = random.rand(2)
       table = script.tables.fetch(id)
       case random.rand(100)
-      when 0...25
+      when 0...20
         object = random.rand(1..3)
-        type, rights = OBJECTS.fetch(object)
-        script.install(id, object, type, random.rand(4).zero? ? rights & MASKS.last : rights)
+        kind, mask = OBJECTS.fetch(object)
+        script.revive(object) if script.objects.fetch(object).state == :released
+        script.install(id, object, kind, random.rand(4).zero? ? mask & MASKS.last : mask)
+      when 20...25
+        value, object = some_value(random, script.tables.fetch(1 - id))
+        script.copy(id, 1 - id, value, object.clamp(1, 3), MASKS.sample(random: random))
       when 25...45
         value, object = some_value(random, table)
         script.clear(id, value, random.rand(8).zero? ? object + 1 : object)
       when 45...60
         value, = some_value(random, table)
-        script.read(id, value, [0, *OBJECTS.values.map(&:first)].sample(random: random), [0, M.mask(:give)].sample(random: random))
+        type = [0, *OBJECT_TYPES.values].sample(random: random)
+        required = [0, M.mask(:give)].sample(random: random)
+        random.rand(2).zero? ? script.read(id, value, type, required) : script.lookup(id, value, type, required)
       when 60...68 then script.reserve(id, random.rand(0..5))
       when 68...74 then script.release(id)
       when 74...76 then script.grow(id, random.rand(1..80))
@@ -550,7 +627,7 @@ class CapTest < Minitest::Test
   def walk_pass(script, random)
     from = random.rand(2)
     to = random.rand(2)
-    own, created = ROUTES.sample(random: random)
+    route = ROUTES.sample(random: random)
     items = Array.new(random.rand(0..4)) do
       value, = some_value(random, script.tables.fetch(from))
       M::Item.new(cap: value, op: [M::COPY, M::MOVE, M::MOVE, 9].sample(random: random), mask: MASKS.sample(random: random),
@@ -558,7 +635,7 @@ class CapTest < Minitest::Test
     end
     script.reserve(to, random.rand(0..4)) if script.tables.fetch(to).held.empty? && random.rand(2).zero?
     race = random.rand(10).zero? && !items.empty? ? random.rand(1..2) : 0
-    script.pass(from, to, own: own, created: created, items: items, race: race)
+    script.pass(from, to, route: route, items: items, race: race)
   end
 
   # A live value of the table, now and then stale or never issued.
@@ -577,8 +654,8 @@ class CapTest < Minitest::Test
   # from it after a restore, and the driver's transcript is compared with
   # the model's.
   def explore
-    base = Script.new.table(0, 3).grow(0, 2).seed(0, 1, M::GENERATION_LIMIT - 3, M::FREE_MAX - 10).seed(0, 2, 0, M::FREE_MAX - 6)
-    root = base.tables.fetch(0)
+    base = Script.new.fresh_objects.table(0, 3).grow(0, 2).seed(0, 1, M::GENERATION_LIMIT - 3, M::FREE_MAX - 10).seed(0, 2, 0, M::FREE_MAX - 6)
+    root = [base.tables.fetch(0), base.objects]
     seen = Set[root]
     frontier = [[root, []]]
     failures = []
@@ -589,17 +666,17 @@ class CapTest < Minitest::Test
       script = Script.new
       next_frontier = []
       frontier.each do |state, path|
-        script.table(0, 3).grow(0, 2).seed(0, 1, M::GENERATION_LIMIT - 3, M::FREE_MAX - 10).seed(0, 2, 0, M::FREE_MAX - 6)
+        script.fresh_objects.table(0, 3).grow(0, 2).seed(0, 1, M::GENERATION_LIMIT - 3, M::FREE_MAX - 10).seed(0, 2, 0, M::FREE_MAX - 6)
         path.each { |operation| operation.call(script) }
         script.emit('save')
         operations(state).each do |operation|
           script.emit('restore')
-          script.tables[0] = state
+          script.tables[0], script.objects = state
           operation.call(script)
           script.dump(0)
-          after = script.tables.fetch(0)
+          after = [script.tables.fetch(0), script.objects]
           edges += 1
-          after.slots.each_with_index { |slot, index| retired << index if slot.state == :retired && index.positive? }
+          after[0].slots.each_with_index { |slot, index| retired << index if slot.state == :retired && index.positive? }
           next if seen.include?(after)
 
           seen << after
@@ -615,27 +692,33 @@ class CapTest < Minitest::Test
   end
 
   # Every operation of the exploration's alphabet in a state: installs of
-  # two objects, clears of each live value and of its stale and
-  # wrong-object forms, reservations, releases, the emptying, a rendezvous
-  # copy and move of each live value within the table, and lookups.
-  def operations(state)
-    memory, shared = OBJECTS.fetch(1)
+  # two objects and a fresh header for each released one, clears of each
+  # live value and of its stale and wrong-object forms, a copy of each,
+  # reservations, releases, the emptying, a rendezvous copy and move of
+  # each live value within the table, and lookups.
+  def operations((table, objects))
+    shared, all = OBJECTS.fetch(1)
     gate, call = OBJECTS.fetch(2)
-    live = state.slots.each_with_index.select { |slot, _index| slot.live? }
-    ops = [->(s) { s.install(0, 1, memory, shared) }, ->(s) { s.install(0, 2, gate, call) },
+    live = table.slots.each_with_index.select { |slot, _index| slot.live? }
+    ops = [->(s) { s.install(0, 1, shared, all) }, ->(s) { s.install(0, 2, gate, call) },
            ->(s) { s.reserve(0, 1) }, ->(s) { s.reserve(0, 2) }, ->(s) { s.release(0) }]
-    ops << ->(s) { s.empty(0) } unless state.emptied
+    ops << ->(s) { s.empty(0) } unless table.emptied
+    objects.each { |object, obj| ops << ->(s) { s.revive(object) } if obj.state == :released }
     live.each do |slot, index|
       value = M.value(index, slot.generation)
       ops << ->(s) { s.clear(0, value, slot.object) }
-      ops << ->(s) { s.clear(0, value, slot.object + 1) }
+      ops << ->(s) { s.clear(0, value, slot.object % 2 + 1) }
       ops << ->(s) { s.clear(0, M.value(index, slot.generation - 1), slot.object) } if slot.generation.positive?
-      ops << ->(s) { s.read(0, value, gate, M.mask(:call)) }
+      ops << ->(s) { s.copy(0, 0, value, slot.object, MASKS.last) }
+      ops << ->(s) { s.lookup(0, value, OBJECT_TYPES.fetch(2), M.mask(:call)) }
       [M::COPY, M::MOVE].each do |op|
         item = M::Item.new(cap: value, op: op, mask: MASKS.last, type: 0, required: 0)
-        ops << ->(s) { s.pass(0, 0, own: 1, created: 0, items: [item]) }
+        ops << ->(s) { s.pass(0, 0, route: M::RENDEZVOUS, items: [item]) }
       end
     end
     ops
   end
+
+  # The value of the live slot index of a script's table id.
+  def script_value(script, id, index) = M.value(index, script.tables.fetch(id).slots.fetch(index).generation)
 end

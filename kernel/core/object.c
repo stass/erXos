@@ -120,6 +120,24 @@ oid_next(erx_object_store_t *store, uint64_t *oidp)
 	return (ERX_OK);
 }
 
+size_t
+erx_object_record_size(void)
+{
+	return (sizeof(erx_object_t));
+}
+
+size_t
+erx_object_record_align(void)
+{
+	return (_Alignof(erx_object_t));
+}
+
+size_t
+erx_object_store_size(void)
+{
+	return (sizeof(erx_object_store_t));
+}
+
 void
 erx_object_store_init(erx_object_store_t *store, const erx_oid_key_t *key)
 {

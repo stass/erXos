@@ -545,12 +545,18 @@ class SpaceTest < Minitest::Test
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
   def tsan_env = Erx::SanitizerEnvironment.call(compiler: compiler)
 
+  # The capability core, which the space core links for its rights, with
+  # the cores it calls and their host's effects; host handles index the
+  # object store's test store.
+  def cap_core_sources = %w[kernel/core/cap.c kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c]
+                         .map { |path| File.join(@root, path) }
+
   def build_driver(core, name:, flags:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, *Erx::Generated.include_flags(root: @root),
+                 *flags, '-DERX_HOST', *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
-                 '-I', Erx::Generated.path('kernel/generated', root: @root), core, File.join(@root, 'kernel/core/cap.c'),
+                 '-I', Erx::Generated.path('kernel/generated', root: @root), core, *cap_core_sources,
                  File.join(@root, 'test/fixtures/space_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output
@@ -559,10 +565,10 @@ class SpaceTest < Minitest::Test
   def holds_race(core, name:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 '-fsanitize=thread', '-fno-omit-frame-pointer', '-pthread',
+                 '-fsanitize=thread', '-fno-omit-frame-pointer', '-pthread', '-DERX_HOST',
                  *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
-                 '-I', Erx::Generated.path('kernel/generated', root: @root), core, File.join(@root, 'kernel/core/cap.c'),
+                 '-I', Erx::Generated.path('kernel/generated', root: @root), core, *cap_core_sources,
                  File.join(@root, 'test/fixtures/space_holds_race.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output

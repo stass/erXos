@@ -49,6 +49,8 @@
 #define ASAN_UNPOISON_MEMORY_REGION(address, size)	((void)(address), (void)(size))
 #endif
 
+#include "erx/budget.h"
+#include "erx/object.h"
 #include "erx/space.h"
 
 #define FUZZ_SPACES	32
@@ -76,6 +78,28 @@ static fuzz_space_t spaces[FUZZ_SPACES];
 /* Allocated once, so each record's storage takes the core's type. */
 static erx_space_t *records[FUZZ_SPACES];
 static int nspaces;
+
+/*
+ * The effects of the cores the capability core calls, which the space core
+ * links for its rights: one thread, never at a preemption point.
+ */
+uint32_t
+erx_effect_thread_epoch(void)
+{
+	return (0);
+}
+
+void
+erx_effect_budget_lock(erx_budget_t *budget)
+{
+	(void)budget;
+}
+
+void
+erx_effect_budget_unlock(erx_budget_t *budget)
+{
+	(void)budget;
+}
 static erx_stop_walk_t walks[FUZZ_WALKS];
 static erx_delete_walk_t deletes[FUZZ_WALKS];
 static int due[FUZZ_SPACES];	/* the reaper's queue of records to free */

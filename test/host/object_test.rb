@@ -168,6 +168,24 @@ class ObjectTest < Minitest::Test
 
   private
 
+  # The one lookup reads the object through the store (K1, K3): a closed
+  # object and an object whose budget is dead are stale to erx_cap_lookup,
+  # though erx_cap_read, the pure slot check, accepts their slots; each
+  # check, removed from the capability core, fails the program.
+  def test_the_lookup_refuses_closed_objects_and_dead_budgets
+    @runner.run([build_lookup(File.join(@root, 'kernel/core/cap.c'), name: 'object-lookup')],
+                name: 'object-lookup', deadline: 60)
+    cap = File.read(File.join(@root, 'kernel/core/cap.c'))
+    { 'state' => ["erx_object_state(object) == ERX_OBJ_LIVE &&\n", "\n"],
+      'budget' => ['(budget == NULL || !erx_budget_dead(budget))', '(budget == budget)'] }.each do |name, (original, replacement)|
+      assert_equal 1, cap.scan(original).size, name
+      mutant = File.join(@directory, "cap-#{name}.c")
+      File.write(mutant, cap.sub(original, replacement))
+      program = build_lookup(mutant, name: "object-lookup-#{name}")
+      refute system(program, out: File::NULL, err: File::NULL), "the lookup without its #{name} check passed"
+    end
+  end
+
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 
   # The driver includes the core's private header by its plain name, as
@@ -179,6 +197,19 @@ class ObjectTest < Minitest::Test
                  *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'), core,
                  File.join(@root, 'test/fixtures/object_driver.c'), '-o', output],
+                name: "compile-#{name}", deadline: 120)
+    output
+  end
+
+  # The lookup's program: the capability core with the cores it calls.
+  def build_lookup(cap, name:)
+    output = File.join(@directory, name)
+    @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-DERX_HOST',
+                 *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
+                 '-I', Erx::Generated.path('kernel/generated', root: @root), cap,
+                 *%w[kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c
+                     test/fixtures/object_lookup.c].map { |path| File.join(@root, path) }, '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output
   end
