@@ -113,6 +113,7 @@ it; git history is the record of completed work.
   the console path, the clock and the cross-compiled core, not a kernel entry.
   The test that a call keeps the caller's registers left with the trap route
   and returns with the `erx` backend's kernel.
+* [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`. Move handles onto the base.
 * [Low] stopgap, `fiasco/kernel/src/erx/erx_probe.cpp` and `erx_syscall.cpp`
   are reference text for erXos's kernel, out of the build: `erx_syscall.cpp`
   names `Space::erx_log`, which is gone, so it no longer compiles.
@@ -148,6 +149,8 @@ it; git history is the record of completed work.
   each budget follows `erx_budget_create`'s body.
 * [Low] stopgap, `test/guest/native_task/guest.c`, `request_against_exit`: no seed shows the dropped-request
   count can move, as the thread deletion seed stops the suite at its earlier `service` case.
+* [Low] stopgap, `liberx/backend/fiasco`, fault gates: each space's `dropped` counter of records lost after its gate was
+  destroyed has no reader until the inspector reads it at SV4.
 * [Low] stopgap, `tools/lib/erx/native_semaphore_race.rb`: the race runs under TCG at 4 CPUs only, as every
   seed under `make check-native-seeds` does, and no gate runs it under HVF.
 * [Medium] stopgap, `test/fixtures/fiasco_park_driver.c`: the exhaustive model reads the core rather than

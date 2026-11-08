@@ -526,7 +526,7 @@ backend gives the same rows and refusals ([The hosted backend](#the-hosted-backe
 | `erx_debug_log`, `erx_log_read` | `liberx`, ERTS's crash path, test tasks; the Erlang log reader | service: [The console](#the-console) | correct | in the kernel |
 | `erx_backend_trace_read`, `erx_trace_read` | `erx_trace_ring:read/3`, for `erx:trace` | local, in the root: [The trace ring](#the-trace-ring) | the root's parks, wakes, IRQ deliveries and task starts and ends, reported by `liberx trace`; a cursor past the head, or `max` of 0 or over 512, `ERX_EINVAL`; an exhausted ring `ERX_ELIMIT`; `erx_backend_trace_read` in a task `ERX_ENOTSUP`; `erx_trace_read` `ERX_ENOTSUP` everywhere, so the kernel's row is `unsupported` | `erx_trace_read` over each CPU's kernel ring; `erx_backend_trace_read` `ERX_ENOTSUP` |
 | `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M3's criteria | pet: a local atomic store in the root, which alone links it (a task's ERTS fails to link, so no task can call it), and hosted `ERX_OK` with no effect. End: [The end path](#the-end-path) | correct, except a kernel hang or a stalled watchdog | in the kernel (K19, K31) |
-| a thread's fault | a domain's or a program's fault; a test task's fault | [Faults](#faults-and-the-fault-of-the-root-task) | a fault record at the space's fault gate, thread `unknown`, the faulting thread left waiting; with no fault gate, a crash record and the task's end; the machine's end for the root | with the thread's identity |
+| a thread's fault | a domain's or a program's fault; a test task's fault | [Faults](#faults-and-the-fault-of-the-root-task) | a fault record at the space's fault gate, thread `unknown`, the faulting thread left waiting; with no fault gate, a crash record and the task's end; the machine's end for the root | with the thread's identity; a fault's queue entry comes from a pool of its space, so a task that reaps faulted threads and faults again can run its own pool out and lose its own records, harming only itself (a residual) |
 | `erx_vcpu_control`, `erx_vcpu_resume`; `erx_irq_bind` to a thread | `liberx`'s signals in programs (Track P) | carried only if [the source check](#open-decisions) passes: [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco) | otherwise `ERX_ENOTSUP`, and programs take default signal actions only | the subset of [vCPU upcalls](design-kernel.md#vcpu-upcalls) |
 | messages through gates, rendezvous passing, `erx_mem_child`, `erx_mem_own`, `erx_mem_dirty`, `erx_dma_*`, `erx_resource_carve`, `erx_space_pause`, `_resume`, `_quiesce`, `_clear_caps`, `_copy` | none | none | `ERX_ENOTSUP` | supported |
 
@@ -1178,7 +1178,10 @@ A gate is a record with the thread bound to it, a queue of records, and the list
 and nothing else: the faults of its spaces' threads and their spaces' exit records, each an `erx_fault`, which is how a
 creator sees every end below it. Every queue entry lives in the record it names, a fault in its thread's record and an
 exit in its space's, and the queue links them by index, so posting allocates nothing and a gate holds at most one record
-per thread and one per space it serves.
+per thread and one per space it serves. On the stopgap, Fiasco's fault message names only the task, so a fault's entry
+comes from a pool belonging to the space and its record's thread is `unknown`; a task that reaps a faulted thread and
+faults again can run its own pool out and lose its own records, and only that task is harmed, a residual that goes with
+the stopgap.
 
 * **The receiver.** Every record goes to the one thread bound to the gate, the domain library's fault thread for every
   domain's gate and a session's gate worker for its programs'. A gate with no thread bound keeps its queue, and the thread
@@ -1193,8 +1196,9 @@ per thread and one per space it serves.
   it off the list; a thread already taken off is owed the up that posting sent, and the stub absorbs it with an unbounded
   down before it returns `ERX_ETIMEDOUT`. This is [the umtx table](#the-umtx-table)'s invariant: a thread taken off a list
   is owed exactly one up, and only such a thread is.
-* **Withdrawal.** A space's deletion withdraws its queued records, and a gate's destroy drops its queue and leaves its spaces
-  with no fault gate, as on erXos's kernel: their later records are dropped and counted in the space's record, a thread that
+* **Withdrawal.** A space's deletion withdraws its queued records, which on the stopgap happens at `erx_fiasco_task_join`,
+  or at a failed create, and not at the stop; a gate's destroy drops its queue and leaves its spaces
+  with no fault gate, as on erXos's kernel: their later records are dropped and counted in the space's `dropped` counter, which the inspector reads, a thread that
   faults then stays blocked, and the space's other threads run on until its creator stops it. No Phase 1b caller reaches
   that state while a space lives: the domain library's gates last as long as the system domain, and a session's gate goes
   only with the session's task, whose end stops its programs first. A child stopped by its parent's end posts its exit
@@ -1272,7 +1276,8 @@ Phase 1 acts on no finer kind.
 * **A domain's or a program's fault:** the fault record goes to the space's [fault gate](#fault-gates), and the faulting thread
   stays blocked in its fault message, which nothing answers, until its space stops; the space's other threads run on, as on
   erXos's kernel. The gate's server stops the space, which posts the exit record. `erx_thread_start` of the faulted thread,
-  which on erXos's kernel resumes it after a repair, is `ERX_ENOTSUP`, since nothing here repairs a fault.
+  which on erXos's kernel resumes it after a repair, is `ERX_EINVAL` on the stopgap, since the service cannot tell which
+  thread faulted and only created threads start; nothing here repairs a fault.
 * **A test task's fault**, in a space with no fault gate: the record goes out through `l4_vcon_write`, then [task exit](#task-exit), with a status of -1. The machine continues.
 * **The root's fault:** [the end path](#the-end-path).
 * **The service's own fault** goes to `sigma0`, which repairs nothing: a recorded gap.
