@@ -7,7 +7,6 @@ require 'json'
 require 'fileutils'
 require_relative '../../tools/lib/erx/pack_provenance'
 require_relative '../../tools/lib/erx/output_directory'
-require_relative '../../tools/lib/erx/llvm_version'
 require_relative 'generated_tree'
 
 # A real freestanding AArch64 ELF, with compiler dependency and linker map
@@ -57,9 +56,7 @@ module PackRootFixture
                 'compiles' => [{ 'object' => reference(object, root),
                                  'dependency' => reference(dependency, root), 'directory' => '.',
                                  'sources' => inputs }],
-                'archives' => [], 'inputs' => [script_input, template_input],
-                'toolchain' => Erx::LlvmVersion.toolchain(compiler: compiler, linker: linker, runner: runner,
-                                                          name: 'pack-root') }
+                'archives' => [], 'inputs' => [script_input, template_input] }
     receipt_path = File.join(directory, 'root.receipt.json')
     File.write(receipt_path, JSON.pretty_generate(receipt) + "\n")
     paths = [artifact, object, dependency, map, receipt_path, script, template, *sources.map { |path| File.expand_path(path, root) }]

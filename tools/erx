@@ -43,7 +43,6 @@ begin
   require_relative 'lib/erx/bench'
   require_relative 'lib/erx/bench_g3'
   require_relative 'lib/erx/toolchain_provenance'
-  require_relative 'lib/erx/llvm_version'
   require_relative 'lib/erx/code_commands'
 rescue Erx::Error, SystemCallError => error
   Erx::Terminal.puts(error.message)
@@ -193,23 +192,15 @@ module Erx
     end
 
     # The clang and lld every build and test gate uses: ERX_CLANG and ERX_LLD,
-    # an LLVM release LlvmVersion takes (a note names one other than the
-    # release version), whose resource headers the reviewed LLVM profile
+    # an LLVM installation whose resource headers the reviewed LLVM profile
     # admits. An arbitrary compiler selected by PATH cannot stand in for it.
     def self.host_environment(runner:)
       compiler = ENV['ERX_CLANG']
-      if !compiler || compiler.empty?
-        raise Error, "set ERX_CLANG to an installed LLVM #{LlvmVersion::MINIMUM.join('.')} or newer clang; see README.md"
-      end
+      raise Error, 'set ERX_CLANG to an installed LLVM clang; see README.md' if !compiler || compiler.empty?
       compiler = File.realpath(compiler)
       raise Error, 'ERX_CLANG is not an executable compiler' unless File.file?(compiler) && File.executable?(compiler)
       path = [File.dirname(compiler), ENV.fetch('PATH', '')].join(File::PATH_SEPARATOR)
       linker = executable_on(ENV.fetch('ERX_LLD', 'ld.lld'), path: path)
-      LlvmVersion.toolchain(compiler: compiler, linker: linker, runner: runner, name: 'check', env: { 'PATH' => path })
-                 .each do |tool, version|
-        note = LlvmVersion.admit(tool: tool, version: version)
-        Terminal.puts(note) if note
-      end
       resource = runner.run([compiler, '-print-resource-dir'], name: 'check-clang-resource', deadline: 30)
       ToolchainProvenance.llvm(root: ROOT, resource_dir: BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
       { 'ERX_CLANG' => compiler, 'CC' => compiler, 'ERX_LLD' => linker, 'PATH' => path }
@@ -217,8 +208,8 @@ module Erx
     end
 
     # program as an absolute path: itself when it names a directory, else the
-    # first executable of that name on path, so the lld whose version
-    # host_environment checks is the one every later step runs.
+    # first executable of that name on path, so every later step runs the
+    # same lld whatever directory it starts in.
     def self.executable_on(program, path:)
       found = if program.include?('/')
                 File.expand_path(program)

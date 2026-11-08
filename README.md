@@ -317,7 +317,7 @@ Apple Silicon macOS is the primary host. You need:
 
 * Ruby, any version, with minitest and REXML;
 * GNU make, GNU timeout (`gtimeout`) and Perl;
-* LLVM clang and lld 23.1.0 or newer, and the LLVM binary tools;
+* LLVM clang and lld, and the LLVM binary tools;
 * AArch64 ELF GCC and binutils;
 * Autoconf, Automake and Libtool, and a C and C++ compiler, which build
   fsimg, the tool that writes and verifies the EROFS images (`make setup`
@@ -330,14 +330,10 @@ Apple Silicon macOS is the primary host. You need:
 
 Install missing tools through Homebrew.
 
-Point the build at your compiler. Every build, of an image or of a host
-test, takes LLVM 23.1.0 or newer, refuses an older release, and prints a
-note naming any version other than 23.1.3, saying when it is newer than
-the 23.1 series the tree is tested with. The record of what built an image
-(the root's `linked` receipt) names the clang and lld versions that ran,
-and two builds on one host are byte-identical (`make check-reproducible`).
-Release images are built with exactly LLVM 23.1.3, and their hashes are
-published so a rebuild can be compared.
+Point the build at your compiler. The tree is tested with LLVM 23.1;
+the build does not check the version, so a compiler that is too old fails
+with its own errors. Release images are built with exactly LLVM 23.1.3,
+and their hashes are published so a rebuild can be compared.
 
 Only LLVM will do, and not Apple's SDK clang or GCC: the build uses clang
 as a cross compiler (`--target`) and its sanitizers with

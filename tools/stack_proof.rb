@@ -28,7 +28,7 @@ rescue OptionParser::ParseError => error
 end
 begin
   compiler = ENV.fetch('ERX_CLANG', '')
-  raise Erx::Error, 'set ERX_CLANG to an installed LLVM 23.1.0 or newer clang; see README.md' if compiler.empty?
+  raise Erx::Error, 'set ERX_CLANG to an installed LLVM clang; see README.md' if compiler.empty?
 
   Erx::Generated.ensure(root: root)
   runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs'))

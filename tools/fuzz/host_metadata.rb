@@ -42,8 +42,7 @@ module Erx
                  'filename' => 'tool.jar', 'license' => 'MIT', 'status' => 'permanent' }
       toolchain = { 'version' => 1, 'label' => 'fixture', 'license' => 'MIT', 'status' => 'permanent',
                     'evidence' => 'reviewed fuzz fixture',
-                    'files' => { 'header.h' => Digest::SHA256.hexdigest('fixture') },
-                    'notices' => { 'LICENSE' => Digest::SHA256.hexdigest('fixture') } }
+                    'files' => ['header.h'], 'notices' => ['LICENSE'] }
       { 'tlc' => "@!@!@STARTMSG 2110:1 @!@!@\nInvariant Bounded is violated.\n@!@!@ENDMSG 2110 @!@!@\n",
         'roster' => JSON.generate('version' => 1, 'entries' => [entry]),
         'origin' => JSON.generate(origin), 'attribution' => "/* SPDX-License-Identifier: MIT OR BSD-2-Clause */\n",
@@ -114,7 +113,8 @@ module Erx
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
       Dir.mktmpdir('erx-metadata-fuzz-') do |root|
         if target == 'toolchain'
-          %w[header.h LICENSE].each { |name| File.binwrite(File.join(root, name), 'fixture') }
+          File.binwrite(File.join(root, 'header.h'), "/* SPDX-License-Identifier: MIT */\n")
+          File.binwrite(File.join(root, 'LICENSE'), 'fixture')
         end
         until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
           bytes = mutate(initial, random: random)

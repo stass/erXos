@@ -30,7 +30,7 @@ class ImportNoticesTest < Minitest::Test
                   'linker_map' => reference.call(map).merge('format' => 'lld', 'directory' => '.'),
                   'compiles' => [{ 'object' => reference.call(object), 'dependency' => reference.call(dependency),
                                    'directory' => '.', 'sources' => [reference.call(source)] }],
-                  'archives' => [], 'inputs' => [], 'toolchain' => { 'clang' => '23.1.3', 'lld' => '23.1.3' } }
+                  'archives' => [], 'inputs' => [] }
       path = File.join(directory, 'record.json')
       File.write(path, JSON.generate(receipt))
       catalog = Erx::BuildInputs.pack(root: ROOT, paths: [artifact, object, map, dependency, path])

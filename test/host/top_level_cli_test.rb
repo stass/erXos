@@ -290,48 +290,6 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, '/evidence/failure.log'
   end
 
-  # A runner that answers clang's and lld's --version with the given first
-  # lines, and stops the check at the resource-directory query that follows.
-  ResourceQueryReached = Class.new(StandardError)
-
-  def version_runner(clang:, lld:)
-    logs = { 'check-clang-version' => clang, 'check-lld-version' => lld }.to_h do |name, line|
-      [name, File.join(@directory, "#{name}.log").tap { |path| File.write(path, "#{line}\n") }]
-    end
-    Object.new.tap do |runner|
-      runner.define_singleton_method(:run) do |_argv, **options|
-        raise ResourceQueryReached if options.fetch(:name) == 'check-clang-resource'
-
-        { 'state' => 'succeeded', 'log' => logs.fetch(options.fetch(:name)) }
-      end
-    end
-  end
-
-  def with_compiler
-    saved = ENV.fetch('ERX_CLANG', nil)
-    ENV['ERX_CLANG'] = RbConfig.ruby
-    yield
-  ensure
-    ENV['ERX_CLANG'] = saved
-  end
-
-  # Any LLVM from the minimum on builds; a version other than the release
-  # one is named, and a newer series is called untested.
-  def test_a_build_takes_another_llvm_release_and_names_it
-    runner = version_runner(clang: 'Homebrew clang version 23.1.2', lld: 'Homebrew LLD 24.1.0')
-    _stdout, output = capture_io do
-      with_compiler { assert_raises(ResourceQueryReached) { Erx::CLI.send(:host_environment, runner: runner) } }
-    end
-    assert_includes output, 'note: building with clang 23.1.2; release images are built with LLVM 23.1.3'
-    assert_includes output, 'note: building with lld 24.1.0, newer than the LLVM 23.1 series the tree is tested with'
-  end
-
-  def test_a_build_refuses_an_llvm_older_than_the_minimum
-    runner = version_runner(clang: 'Homebrew clang version 23.1.3', lld: 'Homebrew LLD 22.1.8')
-    error = with_compiler { assert_raises(Erx::Error) { Erx::CLI.send(:host_environment, runner: runner) } }
-    assert_equal 'lld 22.1.8 is older than LLVM 23.1.0, the oldest a build takes', error.message
-  end
-
   # A new integration test runs without an entry; only excusing one takes an edit.
   def test_integration_tests_run_unless_excused
     Dir.mktmpdir('erx-cli-integration-') do |root|

@@ -114,7 +114,7 @@ module Erx
     def build(jobs: 4)
       @input_catalog = nil
       raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
-      raise Error, 'set ERX_CLANG to an installed LLVM 23.1.0 or newer clang; see README.md' if @compiler.to_s.empty?
+      raise Error, 'set ERX_CLANG to an installed LLVM clang; see README.md' if @compiler.to_s.empty?
       required = %w[kernel mk l4re-core bootstrap libfdt drivers-frst]
       raise Error, 'imported Fiasco source root must not be a symlink' if File.symlink?(@source)
       required.each do |name|

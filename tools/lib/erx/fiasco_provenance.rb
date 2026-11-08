@@ -139,22 +139,33 @@ module Erx
       ToolchainProvenance.llvm(root: root, resource_dir: BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
     end
 
+    # GCC's stdbool.h, the one GCC header Fiasco's build includes, from
+    # whatever aarch64-elf-gcc release is first on PATH, recorded with its
+    # release and the hash of its bytes. Its notices are the tree's copies
+    # of GCC's license texts, which do not vary between GCC releases.
+    GCC_LICENSE = 'GPL-3.0-or-later WITH GCC-exception-3.1'
+    GCC_NOTICES = %w[COPYING3 COPYING.RUNTIME].map { |name| "fiasco/l4re-core/libgcc/contrib/gcc-16/#{name}" }.freeze
+
     def self.gcc_registry(root:)
       compiler = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, 'aarch64-elf-gcc') }
                     .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
       raise Error, 'missing aarch64-elf-gcc' unless compiler
       installation = File.expand_path('..', File.dirname(File.realpath(compiler)))
-      registry = ToolchainProvenance.registry(profile: File.join(root, 'config/provenance/gcc-16.2.0.json'), installation: installation)
-      relative = 'fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3'
-      profile = JsonInput.parse(BoundedFile.read(File.join(root, 'config/provenance/fiasco-generation.json'), maximum: 1024 * 1024),
-                                max_bytes: 1024 * 1024, label: 'Fiasco generation profile')
-      expected = profile.fetch('recipes').fetch(relative)
-      path = File.join(root, relative)
-      unless Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: 1024 * 1024)) == expected
-        raise Error, 'changed GCC GPL version 3 notice'
+      # GCC installs its headers in lib/gcc/<target>/<release>/include.
+      headers = Dir.glob('lib/gcc/aarch64-elf/*/include/stdbool.h', base: installation)
+      raise Error, "cannot find one stdbool.h of aarch64-elf-gcc under #{installation}" unless headers.size == 1
+      release = headers.first.split('/').fetch(3)
+      raise Error, "unexpected aarch64-elf-gcc release directory: #{release}" unless /\A[0-9][0-9.]{0,31}\z/.match?(release)
+      header = File.realpath(File.join(installation, headers.first))
+      raise Error, "aarch64-elf-gcc's stdbool.h leaves its installation" unless header.start_with?(File.realpath(installation) + '/')
+      notices = GCC_NOTICES.map do |relative|
+        path = File.join(root, relative)
+        { 'path' => path, 'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: 1024 * 1024)) }.freeze
       end
-      notice = { 'path' => path, 'sha256' => expected }.freeze
-      registry.map { |entry| entry.merge('notices' => entry.fetch('notices') + [notice]).freeze }.freeze
+      [{ 'path' => header, 'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(header, maximum: 1024 * 1024)),
+         'label' => "toolchain/gcc-#{release}/stdbool.h", 'license' => GCC_LICENSE, 'status' => 'stopgap',
+         'evidence' => "stdbool.h's own GPL version 3 or later grant with GCC Runtime Library Exception 3.1",
+         'notices' => notices.freeze }.freeze].freeze
     end
 
     def self.canonical_report(report)

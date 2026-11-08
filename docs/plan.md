@@ -2150,10 +2150,8 @@ either fixed or recorded in `TODO.md` as accepted, with its reason. Every
 EROFS image the packer writes passes `erx_verity`'s check on the host; one byte flipped in an
 image fails the reads of its block with `eio` while every other file reads
 on; the hash-checking reader runs its fuzz budget clean. Release images are
-built with exactly the pinned LLVM release (`Erx::LlvmVersion::RELEASE`,
-23.1.3), and their SHA-256 hashes are published, so anyone can rebuild an
-image with that release and compare the bytes; development builds take any
-LLVM from 23.1.0 on and name the version they ran in their build record.
+built with exactly LLVM 23.1.3, and their SHA-256 hashes are published, so
+anyone can rebuild an image with that release and compare the bytes.
 
 Closure includes the receiving funnel and the services behind it: the
 hostile-runtime suite at the funnel of every runtime, ERTS and native,

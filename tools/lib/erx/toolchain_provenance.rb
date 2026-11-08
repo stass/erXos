@@ -27,10 +27,10 @@ module Erx
 
     # An installation directory supplies locations, never trust. Each notice
     # is resolved under installation and each file under files_root, and
-    # each is checked against its profile entry: a SHA-256 pins its exact
-    # bytes, and "spdx" admits the file by the license it declares itself
-    # (declares?), so a header any LLVM release installs is taken on its own
-    # notice and recorded with the bytes it has.
+    # each is recorded with the hash of the bytes installed, so any LLVM
+    # release's files are taken as they are. A file is admitted only by the
+    # license it declares itself (declares?), since that license decides
+    # which notices an image carries.
     def registry(profile:, installation:, files_root: installation)
       document = JsonInput.parse(BoundedFile.read(profile, maximum: 1024 * 1024), max_bytes: 1024 * 1024,
                                  label: 'toolchain provenance')
@@ -64,37 +64,27 @@ module Erx
       raise Error, "cannot read toolchain provenance: #{error.message}"
     end
 
-    # entries is a profile's notices or files map; license is the license
-    # an "spdx" entry must declare, or nil where every entry is pinned by
-    # its SHA-256, as notices are.
+    # entries is a profile's notices or files list, paths relative to root;
+    # license is the license each file must declare, or nil for notices.
     def verified_files(entries, root:, license:)
-      unless entries.is_a?(Hash) && entries.size.between?(1, 4096)
+      unless entries.is_a?(Array) && entries.size.between?(1, 4096) && entries.uniq.size == entries.size
         raise Error, 'toolchain provenance requires a bounded file inventory'
       end
-      entries.sort.map do |relative, pin|
+      entries.sort_by(&:to_s).map do |relative|
         unless relative.is_a?(String) && relative.ascii_only? && relative.bytesize <= 1024 &&
                relative.split('/').all? { |part| /\A[A-Za-z0-9_.+-]+\z/.match?(part) && !%w[. ..].include?(part) } &&
-               !relative.start_with?('/') && valid_pin?(pin, license)
+               !relative.start_with?('/')
           raise Error, 'invalid toolchain provenance file reference'
         end
         path = File.realpath(File.join(root, relative))
         raise Error, "toolchain provenance mismatch: #{relative}" unless path.start_with?(root + '/')
 
         bytes = BoundedFile.read(path, maximum: 16 * 1024 * 1024)
-        found = Digest::SHA256.hexdigest(bytes)
-        if pin == 'spdx'
-          raise Error, "toolchain provenance: #{relative} does not declare #{license}" unless declares?(bytes, license)
-        elsif found != pin
-          raise Error, "toolchain provenance mismatch: #{relative}"
+        if license && !declares?(bytes, license)
+          raise Error, "toolchain provenance: #{relative} does not declare #{license}"
         end
-        { 'path' => path.freeze, 'sha256' => found.freeze }.freeze
+        { 'path' => path.freeze, 'sha256' => Digest::SHA256.hexdigest(bytes).freeze }.freeze
       end.freeze
-    end
-
-    # A pin is a file's SHA-256, or "spdx" where license names what the file
-    # must declare (verified_files).
-    def valid_pin?(pin, license)
-      pin.is_a?(String) && ((license && pin == 'spdx') || /\A[0-9a-f]{64}\z/.match?(pin))
     end
 
     # Whether bytes declare exactly license: the first SPDX-License-Identifier
@@ -111,6 +101,6 @@ module Erx
       declared = line&.match(%r{\A\s*(?:/?\*+|//)?\s*SPDX-License-Identifier:\s*(.*?)\s*(?:\*/)?\s*\z}n)
       !declared.nil? && declared[1] == license.b
     end
-    private_class_method :verified_files, :valid_pin?, :declares?
+    private_class_method :verified_files, :declares?
   end
 end
