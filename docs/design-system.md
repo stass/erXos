@@ -2348,6 +2348,41 @@ domain, in a domain the manifest lists: the vault.
 | web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |
 
+### The network domain
+
+The network domain is a configured `service` domain of the manifest, the
+only one that holds a network device (rule 8), and runs erXos's TCP/IP
+stack ([design-network-stack.md](design-network-stack.md)). What the
+system domain gives it and keeps for it:
+
+* **Its configuration,** in its manifest entry's arguments: for each
+  interface, by the device-tree path or PCIe place of its device, the
+  mode, `static` with its addresses, routes and name servers or `dhcp`,
+  and whether IPv6 autoconfiguration runs, which it does by default.
+* **The stable-address key facet,** among its manifest facets: a key
+  facet of the vault whose one purpose is RFC 7217's interface
+  identifiers, over a machine key the vault keeps
+  ([The vault](#the-vault)), so the network domain computes no
+  identifier from a secret it holds.
+* **The `net` grant of each client.** A domain's specification names a
+  `net` facet with its limits (`sockets`, `buffers`, `time_wait`,
+  `ports`, `listen`, `addresses` and its `share`), each within its
+  principal's policy and defaulting to the values the network stack's
+  design gives ([design-network-stack.md](design-network-stack.md#the-grant)).
+  The facet is a process of the network domain, which the network
+  service makes when the domain service introduces the client to it, as
+  a storage service makes its grants; the domain service keeps its grant
+  record as for any facet. The `netadmin` facet, which configures
+  interfaces and reads every client's statistics, is granted to
+  administrators only.
+* **A restart makes the grants anew.** A network domain that ends is
+  restarted within its intensity as any configured domain is; every
+  socket ended with it, and the grants with it. Once it reports ready,
+  the domain service introduces it again to every live domain whose
+  specification names a `net` facet, and the network service makes each
+  grant afresh, which the client's registry installs under `net` in place
+  of the dead one ([Granting a running domain](#granting-a-running-domain)).
+
 ### Identifiers
 
 A **system identifier** names something the system keeps: a principal, a
@@ -2813,7 +2848,9 @@ as for any service ([design-domains.md](design-domains.md#facets)).
     names count alike, the limit tells nothing about who is a principal.
   * While a session of that principal lives, the vault keeps its master
     key and the opened keys, and destroys them when the last one ends.
-* **Machine keys**, such as an SSH host key, have no passphrase anyone
+* **Machine keys**, such as an SSH host key and the secret behind the
+  network domain's stable IPv6 addresses
+  ([The network domain](#the-network-domain)), have no passphrase anyone
   types at boot. They live in the machine's file, under a master key of
   its own whose one slot, the **machine slot**, takes its key from the
   sealing backend alone. Under `device` or `tpm`, a medium read away from

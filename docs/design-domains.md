@@ -242,8 +242,9 @@ Non-goals:
 * Distribution to other machines, which builds on the network service: a
   domain that other machines reach keeps its node name on the network,
   under the rules of [An exposed domain](#domain-ids-pids-and-references),
-  and the network service's design defines the carrier that serves those
-  connections ([design.md](design.md#networking)).
+  and [design-network-stack.md](design-network-stack.md#distribution-to-other-machines)
+  defines the carrier that serves those connections, OTP's TLS carrier
+  in release builds ([design.md](design.md#networking)).
 * Moving a live process between domains.
 * Sharing ETS tables, persistent terms or reference-counted binaries across
   domains. Cross-domain data, bulk data included, is copied through
@@ -474,9 +475,11 @@ ERTS uses it:
   domain it is only a number, even when it comes back.
 
 **An exposed domain.** A domain that other machines reach keeps its node
-name and creation on the network ([design.md](design.md#networking)); the
-network service's design defines the carrier that serves those
-connections and how the host name resolves there. Two rules hold whatever
+name and creation on the network ([design.md](design.md#networking));
+[design-network-stack.md](design-network-stack.md#distribution-to-other-machines)
+defines the carrier that serves those connections, OTP's TLS carrier in
+release builds, and the port mapper that resolves the domain's name
+there. Two rules hold whatever
 it chooses:
 
 * a node name at the machine's host name is reached only through a lane:
@@ -1977,7 +1980,8 @@ queue quota.
   the reductions spent on its grantee's requests, read from the runtime:
   its own, and those the service's processes spend serving each request it
   forwarded, which the service's generated serving path reads around the
-  request and returns with the reply. While the share lasts, the facet
+  request and returns with the reply, and those of the processes it
+  starts to act for the grantee (below). While the share lasts, the facet
   takes the grantee's requests; once it is spent, the facet takes none
   until the next period, and the rest wait in the facet's queue and then
   in the grantee's lane. A request's cost reaches the account only with
@@ -2009,7 +2013,29 @@ queue quota.
   service process: it decodes and validates in its own heap and hands the
   service a bounded, validated result.
 
-**Who asks.** A facet acts only for its grantee, and never on a pid only
+**Processes a facet starts.** A facet may start processes of its own
+domain that act for its grantee alone, as the network service's grant
+starts a socket process for each of its grantee's sockets
+([design-network-stack.md](design-network-stack.md#sockets-act-for-one-domain)).
+Such a process runs the facet's generated admission path on every
+request, exported toward the grantee with `send` alone, and charges the
+facet's account, for work that has no reply as well as for requests:
+the account is an `atomics` array the facet hands each such process,
+holding the reductions spent in the period and the period's number. The
+process adds the reductions of each of its steps as soon as the step
+ends, and before it takes its next message compares the account with
+the share. While the share is spent it tells the facet it has paused and
+takes only the facet's resume message and the exits of its links, by a
+selective receive, until the period turns. At each turn the facet
+subtracts the share from the spent count, never below zero, so an
+overrun is a debt carried into the next period, and resumes every
+process that paused; a pause reported after a turn it missed is resumed
+at once. Each process checks before a step and charges after it, so the
+account exceeds the share by at most one step per such process, which
+the grant's limit on them bounds, and the debt repays it.
+
+**Who asks.**
+ A facet acts only for its grantee, and never on a pid only
 because a request names it. The behaviour exports the facet's pid toward its
 grantee with `send` alone when the facet starts, before the domain service
 hands the pid out, so the grantee can message and monitor its facet and

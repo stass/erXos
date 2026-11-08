@@ -1842,7 +1842,10 @@ an Erlang release that holds the virtio-net device and its driver
 process; the packet client and the Internet checksum among the per-byte
 primitives; the **packet-path prototype**: Ethernet, IPv4, UDP and a TCP
 data path in Erlang over the packet client, enough for UDP echo and a TCP
-bulk transfer to a Linux peer, for gate GN-QEMU; then M14's stack on
+bulk transfer to a Linux peer, for gate GN-QEMU, built from the network
+stack design's own modules (its codecs, credits, interface process and
+the established-connection part of its TCP core), so the prototype is
+the first piece of M14 and is not thrown away; then M14's first stage on
 QEMU, grown from the prototype; TCP distribution to other machines, each
 exposed domain a distribution node of its own, whose node name is
 registered and resolved as the network service's design document defines
@@ -1857,7 +1860,8 @@ kernel, recorded as residuals here and checked on the boards with M12.
 
 **Exit criteria.** The packet path and the Internet checksum run their
 fuzz budgets clean; the oracle's socket cases run on erXos and compare
-with stock OTP 29.1.2 case by case; M14's criteria on QEMU hold.
+with stock OTP 29.1.2 case by case; M14's criteria for its first stage
+hold on QEMU.
 
 **Gate GN-QEMU.** Measures the packet-path prototype: UDP echo rate and
 latency, and a TCP bulk transfer's throughput and CPU time, against a
@@ -2314,22 +2318,56 @@ one.
 stack, on QEMU and then on both boards, every connection a process the
 inspector shows, and a network domain killed under load comes back.
 
-**Scope.** The network stack's design, in its own design document,
-`design-network-stack.md`, before its code: the pinned FreeBSD release
-and the rules for translating the logic of its `netinet` and `netinet6`
-into Erlang; Ethernet, ARP and IPv6 neighbour discovery, IPv4 and IPv6,
-ICMP, UDP and TCP in Erlang, grown from the packet-path prototype, each
-connection a process; TCP's fast path in native code behind the same
-process interface, only if GK3 decides so on erXos's kernel; the packet
-decoders' fuzz targets, run on the host's stock OTP; the scripted packet
-harness in the style of packetdrill, FreeBSD's packetdrill tests among its
-scripts, run against erXos's stack and against FreeBSD's in a FreeBSD
-guest; the network test corpus run on erXos's stack and on FreeBSD's.
+**Scope.** The network stack's design is
+[design-network-stack.md](design-network-stack.md): FreeBSD 15.1's
+default TCP stack (`release/15.1.0-p6`, `95719d8a`) translated into
+Erlang, its processes and packet path, grants and sockets, and its
+verification. TCP's fast path in native code, behind the same process
+interface, only if GK3 decides so on erXos's kernel. The work comes in
+two stages, the design's core and then its extensions
+([Scope](design-network-stack.md#scope)):
 
-**Exit criteria.** Every difference between erXos's stack and FreeBSD's
-over the network test corpus is a bug fixed or a documented difference
-with a test; every packet script passes against erXos's stack as it does
-against FreeBSD's, or its difference is documented with a test; the packet
+* **First stage, the core.** Ethernet II; ARP; IPv4 with reassembly,
+  fragmentation on output and ICMP; IPv6 with extension headers,
+  reassembly, ICMPv6, neighbour discovery, duplicate address detection,
+  autoconfiguration with RFC 7217 identifiers and the narrow MLDv2
+  listener; static configuration and DHCPv4; loopback; UDP; TCP with the
+  design's defaults (syncache and cookies, RFC 5961, RFC 6528, SACK with
+  RFC 6675 recovery and PRR, limited transmit, IW10, window scaling,
+  timestamps and PAWS, ECN in FreeBSD's default mode, path MTU discovery,
+  keepalive and persist, buffer autosizing, TIME-WAIT with RFC 1337 and
+  RFC 6191, reassembly caps, NewReno and CUBIC); the grant, its limits and
+  its account; `gen_tcp`, `gen_udp` and `inet` through the `erx` socket
+  backend; the POSIX socket protocol; the resolver operation; the port
+  mapper; distribution to other machines, over TLS alone in release
+  builds; the decoders' fuzz targets and `decode_packet`'s, run on the
+  host's stock OTP; the explorer and the syncache properties; the two
+  packet-script runners, FreeBSD's TCP test suite with nplab's packetdrill
+  in a FreeBSD 15.1 guest and erXos's own runner, with erXos's own scripts
+  run on both; and the traffic tests against the FreeBSD guest and
+  Linux's stack. In this stage redirects are ignored, the multicast
+  options answer `{error, enotsup}`, and `socket:open` answers
+  `{error, enotsup}`, a documented difference with a test, with OTP's
+  socket suites expected failures, by the owner's decision that `socket`
+  comes after `gen_tcp`, which `ssl`, `ssh` and distribution use instead.
+* **Second stage, the extensions.** The `socket` and `net` modules over an
+  Erlang `prim_socket`, and OTP's socket suites; raw ICMP sockets for
+  `ping`; checksum offload; one interface process per receive queue
+  where the device has several; the host cache; AccECN; ICMP and ICMPv6
+  redirects accepted as FreeBSD accepts them; 802.1Q VLANs; RFC 8981
+  temporary addresses; multicast with IGMP and full MLD.
+
+Outside M14, later, behind the stack's seams: RACK-TLP as a loss module,
+deferred by the owner's decision, with the default stack as the
+reference; BBR with pacing; DCTCP; TCP Fast Open.
+
+**Exit criteria.** For each stage: every difference between erXos's
+stack and FreeBSD 15.1's over the network test corpus is a bug fixed or a
+documented difference with a test; every packet script's verdict on
+erXos's stack equals its verdict on FreeBSD 15.1 in the guest, or its
+difference is documented with a test; OTP's `gen_tcp`, `gen_udp` and
+`inet` suites, and in the second stage the `socket` suites, compare with
+stock OTP 29.1.2 case by case; the packet
 decoders run their fuzz budgets clean; a network domain killed under load
 restarts ending only its connections, on QEMU as a behaviour and on the
 boards with the domain's grant enforced; and, on the boards, M11's

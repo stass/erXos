@@ -338,3 +338,35 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   charges it a quarter of a reduction slice from the host's number.
 * [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.
 * [Low] `tools/lib/erx/generated.rb`, `Erx::Generated.require_ruby`: every Ruby process that loads a generated Ruby file (each `tools/erx` call, each host test process using the ABI or terminal tables) loads the generator libraries and hashes every `tools/lib` file and every input and output to check the stamp, about 80 ms over loading the file alone when the tree is fresh (a reviewer's rough number on Apple Silicon macOS, not a recorded measurement). Settled by the wall time of `make check` and of `ruby tools/erx status` with and without the freshness check; if it shows, check a cheap digest of the stamp's inputs before loading the generators.
+* **[Medium] network, a round trip per `gen_tcp:send/2` across a lane**
+  ([design-network-stack.md](design-network-stack.md#the-backend)). Each
+  send waits for the connection's reply that the data is in its send
+  buffer. Settled by bulk throughput with 1 KiB and 64 KiB sends against
+  line rate; the fix on the table is asynchronous sends against a byte
+  credit, which needs a client-side process per sender.
+* **[Low] network, one message per in-order segment against coalescing**
+  ([design-network-stack.md](design-network-stack.md#hops-and-copies)).
+  A connection delivers each step's in-order data in one message; joining
+  several segments' payloads into one binary saves messages and lane
+  frames at the cost of a copy. Settled by a bulk receive's CPU time per
+  byte both ways.
+* **[Low] network, ETS reads on every output pass**
+  ([design-network-stack.md](design-network-stack.md#transmitting)). A
+  connection reads its neighbour entry and the route table's generation
+  from ETS each time it outputs. Settled by the time per frame of a bulk
+  send with and without caching them across a step's frames.
+* **[Medium] network, one interface process per interface as a ceiling**
+  ([design-network-stack.md](design-network-stack.md#residuals)). Every
+  frame of an interface is decoded in one process, the bound on its frame
+  rate for every client. Settled by the minimum-size frame rate one
+  interface process keeps up with, on erXos's kernel and on the Pi 4; the
+  fix on the table is one interface process per receive queue.
+* **[Low] network, a hibernated TIME-WAIT process**
+  ([design-network-stack.md](design-network-stack.md#time-wait)). Each
+  connection in TIME-WAIT is a process for 60 s. Settled by the memory of
+  4,096 of them against FreeBSD's control blocks in the same state.
+* **[Low] network, credits and per-step reduction accounting**
+  ([design-network-stack.md](design-network-stack.md#credited-queues)).
+  Each hand-over costs an `atomics:add_get/3` and each socket step two
+  `process_info/2` reads and an `atomics:add/3`. Settled by the time per
+  frame of a bulk transfer with both and with a build that leaves them out.

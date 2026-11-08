@@ -446,8 +446,8 @@ names an **open** of the handler's open table, an open-file description at
 its server reached through a grant the handler holds, with that
 description's access mode ([Descriptors and files](#descriptors-and-files));
 a `tty` descriptor is the same for a terminal, a `dir` an open directory,
-through which `openat` resolves, and a `socket` an open at the network
-service; a `dup` makes its number name the same object as another
+through which `openat` resolves, and a `socket` an open of a socket's
+open-file description; a `dup` makes its number name the same object as another
 descriptor of the message, which is not itself a `dup`. `sigmask` and
 `sigignore` follow POSIX's rule for `posix_spawn`: the program starts with
 its parent's mask and ignores what its parent ignores, unless the spawn's
@@ -629,7 +629,7 @@ holds one ends the program (Credit, below).
 | `{file, Op}` | an operation of 9P2000.L for the program ([design-files.md](design-files.md#the-file-protocol)), with a path to resolve through the program's namespace, or the program's `Open`, in place of a fid: `walk`, `lopen`, `lcreate`, `read`, `write`, `clunk`, `close`, the program's own operation for a descriptor close that leaves its open other references, which releases the program's locks on the file and keeps the open ([Descriptors and files](#descriptors-and-files)), `remove`, `getattr`, `setattr`, `readdir`, `fsync`, `lock`, `getlock`, `link`, `symlink`, `mknod`, `renameat`, `unlinkat`, `readlink`, `mkdir`, `statfs` and the xattr operations; a read or a write names a count and a slot of the data area, and for `pread` and `pwrite` an offset, and its open's description supplies the offset otherwise; for `lock` and `getlock` the handler sets `ProcId` to the program's own, one per program, so its programs' locks conflict as UNIX processes' do ([Descriptors and files](#descriptors-and-files), [design-files.md](design-files.md#locks)) | the operation's reply, `{ok, Open}` for an `lopen` or an `lcreate`, `{ok, Count}` for a read or a write, mapped to `Errno` on failure |
 | `{local, Op}` | an operation the session answers from its own tables, which reaches no server but by a `walk` or a `getattr`: `{seek, Open, Offset, Whence}` on the open's description, `{setfl, Open, Flags}` of the description's status flags, `{chdir, Path}`, and `{access, Path, Mode}`, answered from the rights of the grant the path resolves through ([Descriptors and files](#descriptors-and-files)) | `{ok, Value}`; `{error, Errno}` |
 | `{tty, Open, Request}` | a terminal's `ioctl` for a `tty` open: `tcgetattr`, `tcsetattr`, `tcgetpgrp`, `tcsetpgrp` and the window size, which the handler takes to the session's terminal relay, the owner of every terminal of the session, never through the file protocol ([The terminal](#the-terminal)) | the relay's answer; `{error, enotty}` for any other open |
-| `{watch, Open, Events}` | ask for one `{ready, Open, Events}` report once a terminal or a socket is ready for `Events`: the session's terminal relay answers for a terminal, and the network service, over its own protocol, for a socket; a file is always ready, and the file protocol carries no watch ([The terminal](#the-terminal)) | `ok` at once, the report later |
+| `{watch, Open, Events}` | ask for one `{ready, Open, Events}` report once a terminal or a socket is ready for `Events`: the session's terminal relay answers for a terminal, and the socket's open-file description, over the socket protocol of [design-network-stack.md](design-network-stack.md#the-interface-towards-posix-programs), for a socket; a file is always ready, and the file protocol carries no watch ([The terminal](#the-terminal)) | `ok` at once, the report later |
 | `{map, What, Use}` | give the requester an object of a file: for `Use` of `code` or `data`, the file's sealed file object, `What` a path the handler opens with `lopen` for reading, and for code only through a grant of the program's that carries `rx` ([File objects](#file-objects)); for `{shared, End}`, the session's object for the file, covering at least `End` bytes, `What` the program's `Open` of a file ([Shared libraries and mappings of files](#shared-libraries-and-mappings-of-files)) | `{ok, Cap}`, the object's capability value in the requester's table, and for a shared mapping `{ok, Cap, Open}`, with the mapping open that holds the requester's share; `{error, Errno}` |
 | `{fork, Start}` | the second tier's `fork`: `Start` names what the child receives, planned as for a spawn: every descriptor without a `dup`, each as `{pipe, End}`, `{socketpair, End, End}` or `{open, Open}`, and the flags of `cloexec` ([Fork](#fork)) | `{ok, Pid}`; `{error, Errno}` |
 | `{exec, Image, Start}` | the second tier's `exec`, first step, sent once the program's other threads are parked: build the requester's next image from `Image`, `{object, Cap}` for a file object of code that `liberx` obtained with `{map, Path, code}` and checked, or `{command, Path}` for a command of `/bin`; `Start` holds what the next image keeps that the parking froze ([Exec](#exec)) | `ok` once the next image is built, past which `exec` never returns; `{error, e2big}` past the message's bound; `{error, Errno}`; each error with the old image whole |
@@ -727,8 +727,8 @@ file's open-file description in the session; a directory, an open;
 `null`; a terminal, an open on the session's `/dev/tty`
 or, in the second tier, on a pseudo-terminal; in the second tier, a
 socketpair end, the read end of one pipe and the write end of another
-([Passing descriptors](#passing-descriptors)); and a socket, an open at
-the network service. Each operation is a `switch` on the kind with no
+([Passing descriptors](#passing-descriptors)); and a socket, an open of
+a socket's open-file description. Each operation is a `switch` on the kind with no
 default arm, so adding a kind makes the compiler name every operation
 that must handle it. The table has one lock, which guards its slots and is
 never held across a wait: a call takes a counted reference to its object
@@ -761,7 +761,12 @@ the file and an **opened fid**, in the access mode and with the
 `O_APPEND` that 9P2000.L's `lopen` carries, together with the file's
 offset and its status flags. A description's unopened fid, while it has
 one, names the file its opened fid opened
-([design-files.md](design-files.md#open-files-and-offsets)).
+([design-files.md](design-files.md#open-files-and-offsets)). A `socket`
+or an `accept` makes a socket's open-file description, a process of the
+session too, which holds no fid and is the socket's owner at the network
+service instead, and which the rules below for sharing, passing and
+closing a description cover as they cover a file's
+([design-network-stack.md](design-network-stack.md#the-interface-towards-posix-programs)).
 
 The two fids arise at the `open`. `lopen` opens a fid in place, so
 without `O_CREAT` the handler walks the path to the unopened fid, clones
@@ -852,16 +857,12 @@ program a `null` descriptor. A pipe end's `O_NONBLOCK` stays in the
 program that set it, since a child receives an end of its own. A
 directory passes the same way, its description's unopened fid being the
 one `openat` walks from, with the rights of the grant it was opened
-through, and a terminal as a file does. A socket descriptor is not
-passed by a spawn, a
-fork or `SCM_RIGHTS`, and an `exec` closes it: the planner treats it as
-close-on-exec, and `sendmsg` fails with `EOPNOTSUPP` for one named in
-`SCM_RIGHTS`, a documented difference with a test
-([Compatibility and migration](#compatibility-and-migration)). It is not a
-limit of the design: passing a socket needs a socket with several holders,
-and keeping one across an `exec` a handover of its state, both of which
-belong to the network service's protocol
-([design.md](design.md#networking)), and `TODO.md` tracks them.
+through, and a terminal and a socket as a file does: the child gets an
+open of its own on the same description, and an `exec` keeps a socket
+descriptor without `FD_CLOEXEC`, so the network service sees none of it.
+Moving a socket to another domain is not offered, since a socket acts
+for its grant's domain alone
+([design-network-stack.md](design-network-stack.md#the-interface-towards-posix-programs)).
 
 **Devices.** The session's export serves `/dev/null`, `/dev/zero`,
 `/dev/urandom`, the last from the kernel's entropy generator, and
@@ -2125,7 +2126,7 @@ with status 127, the same as a malformed startup message. A handover that
 names a position the program never had harms only the program, since each
 pipe's other holders still check what they read, and the startup message
 names every child the record holds, so `wait` reaps every child. A socket
-is closed at `exec`, as at a spawn or a `fork`
+descriptor is kept or closed at `exec` by its `FD_CLOEXEC`, as a file's is
 ([Descriptors and files](#descriptors-and-files)).
 
 `exec` never narrows what the program may reach: its namespace, its
@@ -2384,10 +2385,7 @@ request `{withdraw, Stream, Ticket}`, waiting for each reply; so does a
 co-reader's rewrite of `rpos` can cause, before it starts again from its
 first step. A deposit whose sender ended before publishing it closes once
 the sender's lane is drained, so no deposit outlives a message that was
-never sent ([design-pipes.md](design-pipes.md#deposits)). A socket is not
-passed: a `sendmsg` that names one fails with `EOPNOTSUPP`, since passing
-one needs a socket with several holders ([Descriptors and
-files](#descriptors-and-files)).
+never sent ([design-pipes.md](design-pipes.md#deposits)).
 
 Whichever program's `recvmsg` meets the control record **redeems** the
 tickets, and the session installs what each stands for into that program,
@@ -2402,9 +2400,9 @@ the session closes what the ticket stood for, as Linux closes the
 descriptors a reader gives no room for (`MSG_CTRUNC`). A pipe end is
 deposited as an end the pipe server makes at once, so the end stays open
 while it is in flight, as on UNIX, and the sender keeps its own
-([design-pipes.md](design-pipes.md#the-second-tier)). A `file` or `tty`
-descriptor is deposited as an open the sender's handler makes at once on
-the same open-file description, and the redeemer's handler moves that
+([design-pipes.md](design-pipes.md#the-second-tier)). A `file`, `tty` or
+`socket` descriptor is deposited as an open the sender's handler makes at
+once on the same open-file description, and the redeemer's handler moves that
 open into the redeemer's table at redemption, as `posix_spawn` hands a
 file to a child; a directory passes the same way.
 
@@ -2706,8 +2704,7 @@ test:
 | a program's children end with it: `daemon`, a double `fork` and `nohup` leave a child that ends with the program that started it, and a process that outlives its parent is a service under a supervisor, never a detached program | a program's anchor lies below its starter's, and the kernel ends a space's children with it (P9); the user's decision that nothing is orphaned |
 | paths resolve as FreeBSD's do, `..` physically and symbolic links followed by the client at most 32 times, a renamed working directory is not followed, and a rename between grants, trees or rights fails with `EXDEV` | one resolver serves Erlang and native clients ([design-files.md](design-files.md#compatibility-and-migration)) |
 | arguments, environment strings and file names are valid UTF-8 | they cross the channel and the session's connections as binaries that the frame grammars require to be valid UTF-8 |
-| `O_NONBLOCK` of a pipe end is not inherited by a child, though an `exec` keeps it; socket descriptors are not passed by a spawn or a fork, and an `exec` closes them | a child receives ends and grants of its own, not the parent's objects, while an `exec` keeps the ends themselves; passing a socket, and keeping one across an `exec`, needs a socket with several holders, or a handover of its state, which belongs to the network service's protocol, a planned feature that `TODO.md` tracks ([Descriptors and files](#descriptors-and-files)) |
-| a socket cannot be passed with `SCM_RIGHTS`, and `sendmsg` naming one fails with `EOPNOTSUPP` | passing a socket needs a socket with several holders, which belongs to the network service's protocol ([Passing descriptors](#passing-descriptors)) |
+| `O_NONBLOCK` of a pipe end is not inherited by a child, though an `exec` keeps it | a child receives ends and grants of its own, not the parent's objects, while an `exec` keeps the ends themselves ([Descriptors and files](#descriptors-and-files)) |
 | one `sendmsg` passes at most 16 descriptors, more failing with `EINVAL`; a write end holds at most 16 passed descriptors not yet received, more failing with `ETOOMANYREFS` | a control record holds 16 tickets, and each write end's share of its pipe's deposits bounds what one sender makes the session hold ([Passing descriptors](#passing-descriptors)) |
 | a pipe has at most 64 read ends at once, and a spawn or a `fork` that would make a 65th fails with `EMFILE` | a pipe's wake mask has one bit per read end ([design-pipes.md](design-pipes.md#the-ring)) |
 | programs nest at most about 60 deep, and a spawn or a `fork` deeper fails with `EAGAIN` | each program's anchor lies below its starter's, and the kernel bounds a tree of spaces at 64 levels ([design-kernel.md](design-kernel.md#creating-spaces)) |
@@ -3176,9 +3173,11 @@ terminal cases.
   `siglongjmp`, during a `sendmsg`'s deposits, whose message then arrives
   whole with its descriptors; a sender that passes 1,000 files one after
   another, each of which its receiver closes, which never runs out of
-  fids; a socket named in `SCM_RIGHTS`, which fails with `EOPNOTSUPP`; a
-  socket descriptor without `FD_CLOEXEC` held across an `exec`, which the
-  new image finds closed; a file passed by a sender that then ends, which
+  fids; a socket passed with `SCM_RIGHTS` whose sender then closes its
+  descriptor, which the receiver goes on reading and writing; a socket
+  descriptor without `FD_CLOEXEC` held across an `exec`, which the new
+  image goes on reading, and one with it, which the new image finds
+  closed; a file passed by a sender that then ends, which
   the receiver reads on, as on UNIX; a received file that the
   receiver passes on to a child and to a third program by `SCM_RIGHTS` and
   then closes, which both read on until each lets it go; a sender that

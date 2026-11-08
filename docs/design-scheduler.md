@@ -1448,6 +1448,19 @@ beyond its share. Nothing else takes part: the facet's
 account, its queue quota and heap limit, and the lane are the whole of
 admission, and the kernel knows nothing of them.
 
+**Work without a request is admitted the same way.** A facet may start
+processes that act for its client alone, as the network service's grant
+starts a socket process for each of the client's sockets, whose packet
+work has no request and no reply. Each such process charges its
+reductions to the facet's account as it spends them and pauses while the
+share is spent, until the facet resumes it at the period's turn; the
+overrun is at most one step per process, carried as the same debt
+([design-domains.md](design-domains.md#facets)). A client that floods
+such a process, through a peer on the network for a socket, slows only
+itself: the process stops taking work, its queue's credit fills, and
+what arrives beyond it is dropped where it arrives
+([design-network-stack.md](design-network-stack.md#sockets-act-for-one-domain)).
+
 **No service work arises from another domain's faults.** A fault is
 never a request: the kernel resolves every fault from the faulting
 mapping's object or ends the thread, and calls no one

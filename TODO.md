@@ -159,6 +159,8 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/preloaded/src/prim_inet.erl`: `gen_tcp:listen` answers `{error, eprotonosupport}`, stock's answer for a
   missing inet driver, where `docs/design-runtime.md` says `{error, eacces}` without a grant. The design is the target and
   stays; the answer changes with the network service's grant check.
+  stays; the answer changes when `erx_gen_tcp`, the default `inet_backend` of `docs/design-network-stack.md`, answers
+  `eacces` without a grant, or with a preloaded rebuild.
 * [Low] `otp/erts/emulator/test/binary_SUITE.erl`: `make_port/0` is `hd(erlang:ports())`, and `ports()` is empty by design,
   so its term-ordering cases fail with `hd([])`. Opening `{spawn_driver, "ram_file_drv"}` there gives a real port (checked on
   hosted), and is the route when the suite is next run for its results.
@@ -2286,6 +2288,14 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
+  `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
+  `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can
+  reach ends the network domain and every client's connections, where on
+  stock it ends one node. Its fuzz target over every mode offered lands
+  with the stack; the owner accepted the reach over a client-side process
+  per socket.
+
 * [Medium] stopgap, Phase 1b's deferred guarantees: every guarantee the
   user-facing system on the stopgap rests on but does not get is a row of
   [What Phase 1 defers](docs/design-stopgap.md#what-phase-1-defers),
@@ -2819,18 +2829,6 @@ document's "residual risks accepted" paragraph.
   root ([design-files.md](docs/design-files.md)). Give each derived
   grant a pool carved from its parent's, so one program cannot exhaust a
   sibling's opens.
-* [Medium] network and programs, sockets across spawn, fork, `exec` and
-  `SCM_RIGHTS`: a socket is owned by one program at the network service,
-  whose protocol has no way to share it, so a child inherits no socket
-  descriptor and an `exec` closes every socket
-  ([design-programs.md](docs/design-programs.md)). UNIX software relies on
-  keeping them: pre-fork servers, PostgreSQL's backend per connection,
-  services started with a socket as their standard input and output, and
-  programs that `exec` with a connection open. Design sockets with several
-  holders, and a socket's handover across `exec`, into the network
-  service's protocol when that service gets its design document
-  ([plan.md](docs/plan.md), M12), and implement them when a ported program
-  needs them.
 * [Medium] storage, FAT: a FAT file server in Erlang, in a storage domain
   that holds only its own partition's window, for removable media and for
   exchanging files with other machines. Booting and updates need none: the

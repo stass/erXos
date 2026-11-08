@@ -162,7 +162,7 @@ evidence, not additional design contracts.
 | [design-files.md](design-files.md) | namespaces, the file protocol (9P2000.L), file servers, and shared mappings served by the session |
 | [design-tmp.md](design-tmp.md) | the RAM file system at `/tmp`: an `erx_fs` server in each domain over one tree process, its charges against the `tmp` cap, and its POSIX semantics |
 | [design-storage.md](design-storage.md) | partitions, the boot image, EROFS images and their Erlang reader, the data partition and the vault's partition, read-write storage in Erlang, FAT for removable media and exchange, system updates with A/B slots and trials |
-| this document, [Networking](#networking) | the network service: erXos's own TCP/IP stack, in Erlang, translated from FreeBSD's |
+| [design-network-stack.md](design-network-stack.md) | erXos's TCP/IP stack: FreeBSD 15.1's default stack translated into Erlang, the process structure and packet path, grants and sockets, the interfaces to Erlang and POSIX programs, verification against FreeBSD and stock OTP; this document's [Networking](#networking) holds the choices that bound it |
 | [design-live.md](design-live.md) | the live machine: console and ttys, attributed text, inspector and `/proc`, tracing, code from the host and the code store, the host link |
 | [design-shell.md](design-shell.md) | the command shell: rc's language, the command namespace, pipelines of records, starting programs, `rc` as a program, job control |
 | [design-display.md](design-display.md) | the display: a display domain serving windows as files, Plan 9's draw protocol with one connection per window, the window system's overlapping and single policies, terminal windows as console lines, widget trees as terms with events as messages behind one renderer behaviour (Erlang, and LVGL as a stopgap), presentations of typed values, and kiosks, dashboards and glasses |
@@ -174,7 +174,7 @@ evidence, not additional design contracts.
 | [style.md](style.md) | code style |
 | [todo-simplification.md](todo-simplification.md) | unadopted alternatives, their costs and decision evidence |
 | [TODO.md](../TODO.md) | open work outside the roadmap |
-| research records | point-in-time evidence: [hierarchical scheduling](research-hierarchical-scheduling.md), [ERTS internals](research-erts-internals.md), [ERTS's host requirements](research-erts-host.md), [prior art](research-prior-art.md), [kernel bases](research-kernel-bases.md), [C libraries](research-c-library.md), [QEMU and runtime baselines](research-baselines.md), [boards, network stacks and file systems](research-boards-storage.md), [architecture evidence](research-architecture.md), [AArch64 features and DMA contracts](research-hardware-contracts.md), [stock OTP 29.1.2 reference runs](research-otp-reference-runs.md) |
+| research records | point-in-time evidence: [hierarchical scheduling](research-hierarchical-scheduling.md), [ERTS internals](research-erts-internals.md), [ERTS's host requirements](research-erts-host.md), [prior art](research-prior-art.md), [kernel bases](research-kernel-bases.md), [C libraries](research-c-library.md), [QEMU and runtime baselines](research-baselines.md), [boards, network stacks and file systems](research-boards-storage.md), [architecture evidence](research-architecture.md), [AArch64 features and DMA contracts](research-hardware-contracts.md), [stock OTP 29.1.2 reference runs](research-otp-reference-runs.md), [FreeBSD's network stack mapped to Erlang](research-freebsd-net-mapping.md), [the aloha stack](research-aloha.md) |
 
 ## Context
 
@@ -528,11 +528,11 @@ Decisions that constrain more than one subsystem:
 | **System code is Erlang, drivers included; C is for per-byte primitives and device shims.** What erXos writes for the running system, the system services, the network stack, the file systems, the slot writer and the drivers included, is Erlang unless that would cost too much performance; stopgaps may be native. The kernel, `liberx`, the per-byte primitives (hashes, checksums, compression, bulk copies) and the device shim, the device NIF's thin C under every driver, which parses nothing, are C. A driver is an Erlang process under a supervisor over the device NIF; every other piece of native driver code is a native shim, a row in the driver table, a stopgap's included, and a native driver exists only where gate G9's measurement shows that an Erlang driver misses the device's timing or costs more than a stated fraction of its throughput, its row carrying the measurement. | The user's decision: "I definitely want most drivers in erlang with exceptions only when needed or perhaps with a small C shim for perf-critical parts." Every connection, open file and device is a process that can be inspected, traced, supervised and upgraded live, and a parsing bug in the network stack, a file system or a driver's view of its device crashes a supervised process instead of corrupting memory. Erlang does the work done once per packet, block, file or descriptor, and C the work done once per byte; a prototype of the packet path is measured on QEMU as a baseline and again on erXos's kernel, where TCP's fast path is decided ([plan.md](plan.md#decision-gates), gates GN-QEMU and GK3), and G9 measures the drivers. | [Drivers and DMA](#drivers-and-dma), [Storage and networking](#storage-and-networking), [design-system.md](design-system.md#the-driver-table), [design-runtime.md](design-runtime.md#per-byte-primitives) |
 | **The system configuration is one manifest, proved at build time.** The build packs every configured domain, principal, image, budget, grant, device, facet and introduction into one checked manifest. Its thirteen properties enforce unique device ownership, platform confinement and hostile-input separation, the dedicated PCIe holder, console ownership, valid service targets, budgets, grants, rescue closure and domain creation feasibility. `system_reserve` leaves normalized configuration headroom unassigned to service children, by default one quarter; the system runtime runs directly in the aggregate `system` group without a separate cap. This headroom is not a CPU-supply or deadline guarantee, and shipped configurations undergo independent watchdog and control-latency tests. The device service checks the machine's actual placement and console path at boot. Every consumer reads the same packed configuration. | Security configuration has one checked source. Ordinary group quotas express its CPU hierarchy without an additional runtime group or replenishment mechanism; temporal liveness remains a separate verification obligation. | [design-system.md](design-system.md#the-manifest), [Chokepoint checks](#chokepoint-checks) |
 | **A device goes where its capabilities are installed, and that is configuration.** The device service gives each device to exactly one domain, named by the system manifest: the default puts the block device in the storage domain, the network device in the network domain, the TPM in the vault's domain, and the UARTs of the console and the host link in the system domain, beside the console and host link services, and the remaining slow devices (GPIO, I2C, SPI, the mailbox, the RTC) in one devices domain, outside the trusted base; on every PCIe platform, PCIe configuration space alone goes to the PCIe domain, which runs the PCIe enumerator and is in the trusted base whole. On a board where a DMA device is unconfined, the release configuration gives each such device a domain of its own; a development build may merge them. | The user's decision that drivers are Erlang makes a driver a process in whichever domain holds its device, so placement is one rule of configuration policy and no new mechanism. One ERTS per domain is why devices are grouped; a domain that parses hostile media or packets must never hold a device whose DMA is the whole machine. | [design-system.md](design-system.md#devices), [design-system.md](design-system.md#drivers) |
-| **Storage and networking are services in Erlang domains of their own.** Partitions are windows the device service grants; media and packets are parsed only inside the domain that owns them, each parser in a supervised process; the block and network drivers are processes of the same domains. | The user's decision that system code is Erlang makes the file systems and the network stack erXos's own; a crafted medium or packet then crashes one process inside one domain instead of corrupting memory. | [design-storage.md](design-storage.md), [Networking](#networking) |
+| **Storage and networking are services in Erlang domains of their own.** Partitions are windows the device service grants; media and packets are parsed only inside the domain that owns them, each parser in a supervised process; the block and network drivers are processes of the same domains. | The user's decision that system code is Erlang makes the file systems and the network stack erXos's own; a crafted medium or packet then fails within one process inside one domain instead of corrupting memory. | [design-storage.md](design-storage.md), [Networking](#networking) |
 | **Storage keeps proven formats.** Read-only images use the EROFS format under a hash tree checked where they are consumed, read by an Erlang reader in every runtime and written on the host by upstream's `mkfs.erofs`; read-write storage is erXos's own F2FS, in Erlang, with littlefs as its stopgap; FAT partitions serve removable media and exchange. | The user chose littlefs, then F2FS; EROFS, F2FS and FAT are formats Linux implements, an independent oracle. | [design-storage.md](design-storage.md#data-model) |
 | **The system updates through two slots and a supervised trial boot, and the boot-selection record is its whole state.** The record names the committed slot C, and with the firmware's one-shot trial request it has two states: `normal(C)`, which boots C and lets the spare be written, and `trial(S)`, which boots the spare S once, after which the machine returns to C unless S is committed by rewriting the record to name it. Whether a spare is complete is decided by verifying it at boot against its update manifest, which the slot writer writes last, into the spare's manifest window, so a partial spare is not bootable; a commit is the record naming S, and a failed trial the record still naming C after one. | The user chose A/B updates; a power cut at any point leaves a machine that boots a complete system. With the spare's completeness checked where it is booted, no progress needs recording, and the update's states are the two the firmware already keeps. | [design-storage.md](design-storage.md#system-updates) |
-| **The network stack is erXos's own, in Erlang, translated from FreeBSD's `netinet` and `netinet6` at one pinned release, with no stopgap stack before it.** | The user's decision. System code is Erlang; FreeBSD's logic carries its interoperability and is BSD-licensed, and FreeBSD's packetdrill tests and a FreeBSD guest are ready oracles; a stopgap stack would be a new stopgap, where nothing ships before the user says so. Whether TCP's fast path needs native code is measured on erXos's kernel, never on the stopgap. | [Networking](#networking) |
-| **A domain that other machines reach is a distribution node there too.** Each exposed domain carries its own distribution connections over the network service, under its own node name; a domain that is not exposed looks unreachable from other machines. | The user's decision. Every domain is a node inside the machine already, so stock distribution semantics hold per domain, links, monitors and `noconnection` at a domain's end included; no pid is rewritten inside a term; and no term decoder or re-encoder runs in the network domain. It costs one connection per exposed domain per remote node, and remote nodes see the machine's domain structure. | [Networking](#networking) |
+| **The network stack is erXos's own, in Erlang, translated from FreeBSD 15.1's default TCP stack and its `netinet` and `netinet6`, with no stopgap stack before it; loss detection and congestion control are seams from the start, and RACK-TLP and BBR come later behind them.** | The user's decision: "take freebsd stack as a reference and translate logic to erlang ... so we don't discover problems from scratch", translating FreeBSD's decisions, not its structure, against one pinned release. System code is Erlang; FreeBSD's logic carries its interoperability and is BSD-licensed, and FreeBSD's TCP test suite and a FreeBSD guest are ready oracles; a stopgap stack would be a new stopgap, where nothing ships before the user says so. The default stack is the one FreeBSD runs and its test suite checks, where RACK and BBR are each a second TCP implementation, so the user deferred RACK. Whether TCP's fast path needs native code is measured on erXos's kernel, never on the stopgap. | [Networking](#networking), [design-network-stack.md](design-network-stack.md) |
+| **A domain that other machines reach is a distribution node there too.** Each exposed domain carries its own distribution connections over the network service, under its own node name; a domain that is not exposed looks unreachable from other machines. A release build carries these connections only over OTP's TLS carrier. | The user's decision. Every domain is a node inside the machine already, so stock distribution semantics hold per domain, links, monitors and `noconnection` at a domain's end included; no pid is rewritten inside a term; and no term decoder or re-encoder runs in the network domain. It costs one connection per exposed domain per remote node, and remote nodes see the machine's domain structure. The TLS carrier is the user's decision too: the plain carrier authenticates by an MD5 challenge over a shared cookie and encrypts nothing; development builds, which run trusted code only, allow both. | [Networking](#networking), [design-network-stack.md](design-network-stack.md#distribution-to-other-machines) |
 | **Cryptography is OpenSSL 3.5, and a small verifier checks update signatures.** OTP's `crypto`, `ssl` and `ssh` use OpenSSL 3.5. The update service checks every update's Ed25519 signature with a small verifier, a development build's against the development key the build embeds, with which the host tool signs what it sends over the host link; Monocypher is the candidate. | The user's decision. OpenSSL 3.5 is a long-term-support series, supported until 2030-04-08, under Apache-2.0, and OTP's `crypto` is written against OpenSSL. A small verifier keeps the full library out of the system domain ([research](research-boards-storage.md#cryptography-libraries)). | [Dependencies](#dependencies), [design-storage.md](design-storage.md#system-updates) |
 | **erXos's own code is BSD-2-Clause, copyright Stanislav Sedov <stas@deglitch.com>; every image carries its third-party notices, and every changed third-party file says so.** | The user's decision; the dependencies' licences require their notices with every copy, and Apache-2.0 and the Zlib licence require changed files to be marked. | [Licences and notices](#licences-and-notices) |
 | **A path is the face of a capability.** Every domain resolves paths through its own namespace, a table from mount points to local providers and to grants at file servers, named by pid, with no machine-wide root; binding and mounting never add authority. | The user adopted Plan 9's per-process namespaces. Holding a path is holding a pid, so the server's exports to the domain decide what a path reaches, with no second check. | [design-files.md](design-files.md) |
@@ -1115,7 +1115,20 @@ another domain.
   runs on one capped grant and schedules its clients fairly within it;
   policy sizes the grant for the domains the service serves, and a client
   whose work grows with its input runs that work in its own domain
-  ([design-system.md](design-system.md#resource-policy)).
+  ([design-system.md](design-system.md#resource-policy)). The network
+  domain is such a service at the packet level too: one interface process
+  decodes every frame of its interface before any client's credit or
+  grant applies, so a flood faster than it decodes makes the driver drop
+  frames for every client alike
+  ([design-network-stack.md](design-network-stack.md#residuals)).
+* **ERTS's packet parser runs on peer data in the network domain.**
+  `gen_tcp`'s packet modes are framed there with `erlang:decode_packet/3`,
+  as stock frames them in every node, so a memory-safety bug in that C
+  parser that a peer can reach would end the network domain and every
+  client's connections. It has a fuzz target over every mode offered; by
+  the user's decision it is not moved into the clients' domains, which
+  would cost a client-side process per socket
+  ([design-network-stack.md](design-network-stack.md#residuals)).
 * **The system domain's size.** A defect in its ERTS or services acts with
   its authority over policy, though not over other domains' memory, and a
   fault of its runtime resets the machine. Facets confine what clients
@@ -1476,24 +1489,31 @@ The network service runs erXos's own TCP/IP stack, written in Erlang, in
 the network domain: Ethernet, ARP and IPv6 neighbour discovery, IPv4 and
 IPv6, ICMP, UDP and TCP. Every connection is a process of the network
 domain, so a connection can be inspected, traced, supervised and upgraded
-live like any other process, and a malformed packet crashes the process
-that decoded it instead of corrupting memory. Erlang does the work done
+live like any other process. A malformed packet corrupts no memory and
+crashes nothing: every decoder is total and refuses what it cannot parse,
+the interface process drops the frame and keeps its state, and only a
+socket whose own step fails ends, alone. Erlang does the work done
 once per packet: decoding headers by binary matching, the protocols'
 state machines and timers, and the demultiplexing to connections. The
 work done once per byte stays in C primitives of the runtime: the
-Internet checksum, unless the network driver offloads it, and the moves
+Internet checksum, unless the network driver offloads it, the SipHash
+that keys initial sequence numbers and SYN cookies, and the moves
 between the driver's rings and binaries, a received frame copied once out
 of its buffer into a binary of the network domain's own
 ([design-runtime.md](design-runtime.md#per-byte-primitives)).
 
 The stack is written by translating the logic, not the structure, of
-FreeBSD's `netinet` and `netinet6`, at one pinned FreeBSD release, into
-Erlang: their protocol state machines, timers and handling of the cases
+FreeBSD's `netinet` and `netinet6` into Erlang, from FreeBSD 15.1's
+default TCP stack (`release/15.1.0-p6`, commit `95719d8a`) with CUBIC:
+their protocol state machines, timers and handling of the cases
 that interoperability taught them become processes and binary matches,
-and nothing of their C layout is kept. FreeBSD's packetdrill tests and a
-FreeBSD guest are the stack's oracles. The network stack's own design
-document, `design-network-stack.md`, written before its code, names the
-release and gives the translation's rules and the stack's design.
+and nothing of their C layout is kept. Loss detection and congestion
+control are behaviours from the start, mirroring FreeBSD's function block
+and `struct cc_algo`, so RACK-TLP and BBR, which the owner deferred, come
+later as modules behind them.
+[design-network-stack.md](design-network-stack.md) is the stack's design:
+the translation's rules, the processes that own its state, the packet
+path, grants and sockets, and its verification.
 
 Whether TCP's fast path, the in-order data and acknowledgement path of an
 established connection, also needs native code is decided by measurement
@@ -1506,47 +1526,54 @@ GN-QEMU, GK3 and GN-board of [plan.md](plan.md#decision-gates)). At 1 Gb/s
 a full-size Ethernet frame takes 1,538 bytes of wire time with its
 preamble and inter-frame gap, so line rate is 81,274 frames a second each
 way, 12.3 us a frame (computed from IEEE 802.3's framing). If the stack
-cannot keep up, only TCP's fast path moves to native code, behind the same
-process interface, as a measured exception, and everything else stays
-Erlang.
+cannot keep up, only the pure function of TCP's core that the
+measurement names moves to native code, behind the same signature and
+the same process interface, as a measured exception, and everything else
+stays Erlang.
 
 The gates also offer minimum-size frames, about 1.49 million per second at
 1 Gb/s including framing, and invalid traffic, connection and reassembly
-floods. The network domain runs on its own grant: traffic that names no
-admitted client spends a finite per-interface ingress budget for CPU and
-memory, excess is dropped while control progress is reserved, and work
-for a client is bounded by that client's facet and lane, so a small packet
-or request never stands in for a bound on the computation it causes.
+floods. The network domain runs on its own grant. Traffic that names no
+admitted client spends a token bucket of its interface; every hand-over
+of packets between the stack's processes is against a credit its
+receiver published, so every queue is bounded and excess is dropped
+where it arrives while control progress is reserved; and work for a
+client is bounded by that client's grant, so a small packet or request
+never stands in for a bound on the computation it causes.
 
-No stopgap stack precedes erXos's: the network service runs it from its
-first release. Its acceptance is FreeBSD's behaviour: erXos's stack
-interoperates with FreeBSD's in the FreeBSD guest, and scripted packet
-tests in the style of
-packetdrill (N. Cardwell et al., "packetdrill: Scriptable Network Stack
-Testing, from Sockets to Packets", USENIX ATC 2013), timed packets in and
-expected packets out, FreeBSD's own among them, run against both. The network service admits per
-client as the storage services do: it caps the sockets and buffers each
-domain holds, so no domain can exhaust the stack's pools for others, and
-it reports its CPU per client as an inspector statistic. TCP
-distribution to other machines, TLS and SSH build on the network service.
-Every domain is an Erlang node already, and a domain that other machines
-may reach carries its own distribution connections over the network
-service under the same node name ([Decisions](#decisions)), its pids
-encoded as stock encodes them, with its domain id as the creation. The
-network service's design document defines how that name is registered
-and resolved, which is the role epmd plays for a stock node. An exposed
+FreeBSD 15.1 is the stack's reference oracle, and no stopgap stack
+precedes erXos's: the network service runs it from its first release.
+FreeBSD's TCP test suite, packetdrill scripts of timed packets in and
+expected packets out (N. Cardwell et al., "packetdrill: Scriptable
+Network Stack Testing, from Sockets to Packets", USENIX ATC 2013), runs
+against a FreeBSD 15.1 guest and against erXos's stack, and every
+script's verdict must agree; traffic tests run against the FreeBSD guest
+and against Linux's stack, which is an interoperability peer, not the
+reference. A domain's use of the network is one grant, a facet process
+in the network domain that holds the domain's limits on sockets, buffers
+and ports and an account of the reductions its sockets spend, on
+requests and on packets alike, against the domain's share, so no domain
+can exhaust the stack's pools or time for others; the inspector shows
+each grant's use. TCP distribution to other machines, TLS and SSH build
+on the network service. Every domain is an Erlang node already, and a
+domain that other machines may reach carries its own distribution
+connections over the network service under the same node name
+([Decisions](#decisions)), its pids encoded as stock encodes them, with
+its domain id as the creation. The network domain's port mapper answers
+epmd's protocol for the names that exposed domains register through
+their grants, each its own name only. A release build carries
+distribution to other machines only over OTP's TLS carrier. An exposed
 domain keeps its node name on the network; the network carrier refuses a
 remote node that claims a name at the machine's host name, and pids of
 other machines never cross a lane. A file
 server that other machines mount speaks 9P2000.L's messages through the
 same codec as the host link
-([design-files.md](design-files.md#the-file-protocol)). A socket may
-have several holders, as a pipe end may after a `fork`, and its state may
-pass to a program's next image, so that a program can hand a socket on with a
-spawn, a fork or `SCM_RIGHTS` and keep it across an `exec`. Both belong to
-the network service's protocol, and
-[design-programs.md](design-programs.md#descriptors-and-files) lists their
-absence as a known difference.
+([design-files.md](design-files.md#the-file-protocol)). A program's
+socket is an open-file description of its session, as a file's is, so a
+spawn, a fork, `SCM_RIGHTS` and an `exec` within the session share or
+keep it as they do any open; only moving a socket to another domain is
+not offered, since a socket acts for its grant's domain alone
+([design-programs.md](design-programs.md#descriptors-and-files)).
 
 ## Formats
 
@@ -1623,7 +1650,7 @@ erlang/apps/      erx and the system services, the drivers (one
                   shim the driver table lists lives in its application's
                   c_src/ and runs as a sub-space port), the storage
                   services (erXos's F2FS, the FAT server, the slot writer)
-                  and the network stack
+                  and the network stack (erx_net, with NOTICE-freebsd)
 toybox/           toybox 0.8.15 and wak as erXos's code (toybox/ORIGIN.md)
 storage/          littlefs's NIF glue, C17, a stopgap
 tools/            Ruby: erx (build, pack, qemu, bench, console, inspect,
@@ -1877,7 +1904,11 @@ trial request, is in
 | Arm's machine-readable architecture specification (BSD package) | the source of the facts in the AArch64 port's `hw/sysreg/aarch64.json` | BSD-3-Clause | permanent, as a pinned refresh input | fetched with a pinned SHA-256 and read only by `tools/erx sysreg refresh`; only the extracted file is checked in, with its `ORIGIN.md` and Arm's `LICENSE.md` |
 | LLVM libc++, libc++abi, compiler-rt builtins 23.1.x | BeamAsm's C++ runtime, in the BeamAsm image alone, never in the system domain's; compiler support routines | Apache-2.0 WITH LLVM-exception | permanent | fetched and built out of tree |
 | sDDF (0.7.0) | the model for the split between a driver, which touches registers and rings and parses nothing from clients, and the policy beside it; the oracle for the virtio drivers' behaviour and throughput | BSD-2-Clause | reference: model and oracle, nothing imported. If a board's driver proves hard, one of its drivers may run as a stopgap native shim in a sub-space port, imported as erXos's code with an origin file, a row of the driver table and a `TODO.md` item, and replaced by the Erlang driver behind the same interface; erXos keeps its own lane layout, a producer ring and a consumer reader page, which is stricter than sDDF's shared queue region | read, never fetched into a build |
-| FreeBSD's `netinet` and `netinet6`, at the one release `design-network-stack.md` pins, with FreeBSD's packetdrill tests and a FreeBSD guest at that release | the logic erXos's TCP/IP stack translates into Erlang, and the stack's oracles | BSD-2-Clause and BSD-3-Clause, confirmed per file at the pin | permanent: the translation is erXos's code and keeps FreeBSD's notices; the sources, tests and guest are reference and test tools, never in an image | fetched at the pinned release and verified against a pinned SHA-256, out of the tree; the Erlang translation lives in `erlang/apps/` |
+| FreeBSD's source at `release/15.1.0-p6` (`95719d8a`): `sys/netinet`, `sys/netinet6`, `sys/net` and `sys/netinet/cc` | the decisions erXos's TCP/IP stack translates into Erlang, and the inline CUBIC arithmetic of `cc_cubic.h` compiled on the host as the CUBIC test's oracle ([design-network-stack.md](design-network-stack.md)) | BSD-2-Clause and BSD-3-Clause, confirmed per file at the pin; `in_cksum.c` (BSD-4-Clause) and the unlicensed `tcp_stacks/tailq_hash.*` are never translated | permanent: the Erlang translation is erXos's code in `erlang/apps/erx_net/` and keeps FreeBSD's notices per module and in `NOTICE-freebsd`; the source is a reference, never in an image | fetched at the pinned release and verified against a pinned SHA-256, out of the tree |
+| FreeBSD's TCP test suite, `freebsd-net/tcp-testsuite` | packetdrill scripts run against the FreeBSD guest and against erXos's stack, whose verdicts must agree | BSD-3-Clause | test data, never in an image | fetched at a pinned commit and SHA-256, out of the tree |
+| packetdrill, nplab's version, which the test suite names | runs the test suite's scripts inside the FreeBSD guest; erXos's own runner reads the scripts on erXos and holds no code of packetdrill's | GPL-2.0 | test tool, built and run only inside the FreeBSD guest, never linked to anything of erXos's and never in the tree or an image | fetched at a pinned commit and SHA-256 by the fetch step, built inside the guest |
+| FreeBSD 15.1 QEMU image | the oracle guest: FreeBSD's own stack, for the packet scripts' expected verdicts and the traffic tests | BSD-2-Clause for FreeBSD's base, with the licences of the third-party code it contains | test tool, never in an image erXos ships | fetched at a pinned release and SHA-256, run under QEMU on the development host |
+| `msantos/pkt` | an independent packet decoder, the fuzz targets' differential oracle for the stack's codecs | BSD-3-Clause | test tool, never in an image | fetched at a pinned commit and SHA-256, compiled out of the tree on the host's stock OTP |
 | littlefs 2.11.3 | the read-write file system of the data partition and of the vault's partition until erXos's F2FS replaces it, as a NIF of the storage domains' Erlang release | BSD-3-Clause | **stopgap**, replaced by erXos's F2FS, in Erlang, at an installation that creates both partitions afresh | imported into `littlefs/` as erXos's code, its four source files and licence only, with an origin file |
 | OpenSSL 3.5 | OTP's `crypto`, `ssl` and `ssh`, in application domains and the vault's, never in the system domain; the vault's Argon2id (`ARGON2ID`, in OpenSSL since 3.2), HKDF and AES-256-GCM | Apache-2.0 | permanent; a long-term-support series, supported until 2030-04-08 ([research](research-boards-storage.md#cryptography-libraries)) | fetched at a pinned release and hash and built out of tree against erXos's C library, or imported as erXos's code if changed |
 | toybox 0.8.15, with Ray Gardner's `wak` as its awk | the UNIX commands of the command shell and of programs | 0BSD | permanent | imported into `toybox/` as erXos's code, with an origin file; built as one multicall program over the POSIX-lite personality, its Linux-specific applets left out ([research](research-boards-storage.md#the-toolbox)) |
@@ -1911,7 +1942,13 @@ sources and headers under `src/kern` at `50bbe8a9` (counted 2026-10-31),
 while a file's own notice can say otherwise, as `kobject_rpc.h`'s does.
 GPL-2.0 counts a translation as a modification, so nothing is translated
 from a file under the GPL, or from one whose history shows code taken
-from such a file. Every imported tree keeps its licence files. Two
+from such a file. Code translated from FreeBSD's network stack keeps the
+BSD notices of every file it derives from, per Erlang module and in
+`erlang/apps/erx_net/NOTICE-freebsd`, and nothing is translated from
+`netinet/in_cksum.c`, whose four-clause licence keeps the advertising
+clause, or from `tcp_stacks/tailq_hash.c` and `.h`, which carry no
+licence ([design-network-stack.md](design-network-stack.md#provenance-and-notices)).
+Every imported tree keeps its licence files. Two
 mechanisms carry the conditions of the third-party licences, and both
 hold by construction:
 
@@ -2483,9 +2520,11 @@ Decided by the user, and recorded where each applies:
   F2FS stays the read-write file system, and erXos's
   F2FS refuses an image with the encryption, compression or atomic-write
   feature flags ([design-storage.md](design-storage.md#system-updates)).
-* Sockets that cross `posix_spawn`, `fork` and `exec` are a planned
-  feature
-  ([design-programs.md](design-programs.md#compatibility-and-migration)).
+* A program's socket is an open-file description of its session, so
+  `posix_spawn`, `fork`, `exec` and `SCM_RIGHTS` within the session share
+  or keep it as they do any open, and moving a socket to another domain
+  is not offered
+  ([design-network-stack.md](design-network-stack.md#the-interface-towards-posix-programs)).
 * The vault, after Plan 9's factotum, stretches passphrases with
   Argon2id, keeps each principal's keys under a master key that the
   principal's credential slots wrap, and takes each slot's secret from a
