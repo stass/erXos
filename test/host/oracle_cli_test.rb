@@ -161,9 +161,11 @@ class OracleCliTest < Minitest::Test
   def test_qemu_command_line_fits_what_the_kernel_takes_or_is_refused
     limit = Erx::ABI::Generated::CODEC.constant('boot_strings_max')
     line = Erx::OracleQemu.command_line(accel: 'tcg', limit: limit)
-    assert_operator line.bytesize, :<=, limit
-    assert_equal line, Erx::OracleQemu.command_line(accel: 'tcg', limit: line.bytesize)
-    assert_raises(Erx::Error) { Erx::OracleQemu.command_line(accel: 'tcg', limit: line.bytesize - 1) }
+    # The guest gets the line after the word the plan adds for the host link.
+    guest = "#{Erx::QemuPlan::HOSTLINK_WORD} #{line}".bytesize
+    assert_operator guest, :<=, limit
+    assert_equal line, Erx::OracleQemu.command_line(accel: 'tcg', limit: guest)
+    assert_raises(Erx::Error) { Erx::OracleQemu.command_line(accel: 'tcg', limit: guest - 1) }
   end
 
   # The system shell redraws its prompt before the reporter's io:format line.

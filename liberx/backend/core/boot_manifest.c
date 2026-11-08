@@ -20,7 +20,9 @@
  * compatible string, and machine.console names which one (console_read). The host link's
  * UART is the other of the two, named by machine.hostlink, and becomes the record
  * hostlink_kind describes, which the host link's driver alone asks for
- * (docs/design-live.md, "The host link").
+ * (docs/design-live.md, "The host link"), when the boot asks for the host link: a machine
+ * may have no UART at that path, and a driver's first read of an absent device faults the
+ * system domain (docs/design-stopgap.md, "Device records").
  */
 typedef struct device_kind {
 	uint32_t	 role;		/* ERX_MF_DEVICE_ROLE_* */
@@ -87,11 +89,11 @@ string_is(const erx_manifest_view_t *view, const erx_mf_str_t *string, const cha
 }
 
 static const device_kind_t *
-device_kind(const erx_manifest_view_t *view, const erx_mf_device_t *device)
+device_kind(const erx_manifest_view_t *view, const erx_mf_device_t *device, bool hostlink)
 {
 	if (device->selector != ERX_MF_SELECTOR_DT)
 		return (NULL);
-	if (device->role == hostlink_kind.role && string_is(view, &device->compatible, hostlink_kind.compatible) &&
+	if (hostlink && device->role == hostlink_kind.role && string_is(view, &device->compatible, hostlink_kind.compatible) &&
 	    view->header.hostlink.length != 0 && string_equal(view, &device->path, &view->header.hostlink))
 		return (&hostlink_kind);
 	for (size_t at = 0; at < sizeof(device_kinds) / sizeof(device_kinds[0]); at++) {
@@ -131,7 +133,7 @@ unit_first_device(const erx_manifest_view_t *view, const erx_mf_unit_t *unit, ui
  * reader cannot read, or more records than ERX_BOOT_DEVICES_MAX.
  */
 static const char *
-devices_read(const erx_manifest_view_t *view, erx_boot_manifest_t *result)
+devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t *result)
 {
 	erx_mf_device_t device;
 	erx_mf_unit_t unit;
@@ -148,7 +150,7 @@ devices_read(const erx_manifest_view_t *view, erx_boot_manifest_t *result)
 
 			if (!erx_manifest_devices_at(view, index, &device))
 				return ("devices");
-			if ((kind = device_kind(view, &device)) == NULL)
+			if ((kind = device_kind(view, &device, hostlink)) == NULL)
 				continue;
 			if (result->device_count == ERX_BOOT_DEVICES_MAX)
 				return ("device_records");
@@ -175,7 +177,7 @@ console_read(const erx_manifest_view_t *view)
 }
 
 bool
-erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t *result,
+erx_boot_manifest_read(const uint8_t *bytes, size_t length, bool hostlink, erx_boot_manifest_t *result,
     const char **reason)
 {
 	erx_manifest_view_t view;
@@ -219,7 +221,7 @@ erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t 
 		.foreign_atoms = limits.foreign_atoms,
 		.processes = limits.processes,
 	};
-	if ((*reason = devices_read(&view, result)) != NULL)
+	if ((*reason = devices_read(&view, hostlink, result)) != NULL)
 		return (false);
 	result->console = console_read(&view);
 	result->console_path = (erx_boot_words_t){

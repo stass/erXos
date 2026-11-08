@@ -52,10 +52,11 @@ class BootManifestTest < Minitest::Test
     Erx::Manifest.admit(source: source, codec: @codec, context: context).bytes
   end
 
-  def read(bytes, stdout_path: '/pl011@9000000')
+  # hostlink: whether the boot carries erx.hostlink=1, which the driver passes on as its third argument.
+  def read(bytes, stdout_path: '/pl011@9000000', hostlink: true)
     path = File.join(@directory, 'manifest.bin')
     File.binwrite(path, bytes)
-    Open3.capture2e(@driver, path, stdout_path, stdin_data: '')
+    Open3.capture2e(@driver, path, stdout_path, *(hostlink ? ['hostlink'] : []), stdin_data: '')
   end
 
   def console_line(stdout_path)
@@ -106,6 +107,19 @@ class BootManifestTest < Minitest::Test
                             "words-erx device block virtio_mmio 167788032 512 79 2097152 exact 1 short 0\n"
   end
 
+  # The host link is the boot's to ask for (docs/design-stopgap.md, "Device records"): without
+  # erx.hostlink=1 its UART gives no record, so a machine with one UART, the website's, boots
+  # with no host link, and the block device's record is the same either way.
+  def test_the_hostlink_record_is_there_only_when_the_boot_asks_for_it
+    asked, status = read(admitted, hostlink: true)
+    assert status.success?, asked
+    assert_match(/^device hostlink pl011 151257088 /, asked)
+    plain, status = read(admitted, hostlink: false)
+    assert status.success?, plain
+    assert_includes plain, "devices 1\n"
+    refute_match(/^device hostlink /, plain)
+    assert_equal asked.lines.grep(/^device block /), plain.lines.grep(/^device block /)
+  end
 
   # A missing disk is a normal state: a manifest with no block unit reads, and has no record.
   def test_a_manifest_without_the_block_unit_has_no_device_record

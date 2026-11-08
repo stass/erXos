@@ -175,8 +175,10 @@ module Erx
         handoff = { name: 'handoff', pattern: /\Aerx: boot image build /n, seconds: 30,
                     verify: ->(text) { raise Error, "the kernel reports #{text.inspect}, not this image" unless line.match?(text) } }.freeze
         ordered = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), handoff]
+        # No host link, so the kernel command line is empty and the handoff line says bootargs 0.
         report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: image, initrd: initrd,
-                                                            memory_mib: MEMORY_MIB, checkpoints: ordered)
+                                                            memory_mib: MEMORY_MIB, checkpoints: ordered,
+                                                            hostlink: QemuPlan::NO_HOSTLINK)
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),
           checkpoints: report.fetch('checkpoints') }.freeze
       end

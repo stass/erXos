@@ -138,7 +138,10 @@ release_map(const char *path)
 		refuse_archive(reason);
 }
 
-/* The release's manifest, checked against its hash, then by its reader. */
+/*
+ * The release's manifest, checked against its hash, then by its reader. The hosted entry hands
+ * ERTS no device record, so it asks for no host link.
+ */
 static void
 manifest_read(erx_boot_manifest_t *manifest)
 {
@@ -147,7 +150,7 @@ manifest_read(erx_boot_manifest_t *manifest)
 	size_t length;
 
 	if (erx_release_manifest(&bytes, &length, &reason) != 0 ||
-	    !erx_boot_manifest_read(bytes, length, manifest, &reason))
+	    !erx_boot_manifest_read(bytes, length, false, manifest, &reason))
 		refuse_archive(reason);
 }
 int

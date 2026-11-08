@@ -54,11 +54,13 @@ class InteractiveBootTest < Minitest::Test
     refute(argv.any? { |word| word.start_with?('file:') })
   end
 
+  # The harness's line, after the word that asks for the host link the plan gives the guest.
   def test_each_accelerator_gets_the_harness_kernel_command_line
     tcg = Erx::InteractiveBoot.argv(accel: 'tcg', cpus: 1, image: 'image.boot')
     hvf = Erx::InteractiveBoot.argv(accel: 'hvf', cpus: 1, image: 'image.boot')
-    assert_equal ['-append', Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')], tcg.last(2)
-    refute_includes hvf, '-append'
+    word = Erx::QemuPlan::HOSTLINK_WORD
+    assert_equal ['-append', "#{word} #{Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')}"], tcg.last(2)
+    assert_equal ['-append', word], hvf.last(2)
   end
 
   def test_run_returns_the_childs_exit_status

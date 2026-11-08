@@ -79,6 +79,25 @@ class QemuTest < Minitest::Test
     end
   end
 
+  # The host link is the boot's to ask for (docs/design-stopgap.md, "The command line"): a plan
+  # with the host link's serial line puts erx.hostlink=1 first on the kernel command line, and one
+  # of NO_HOSTLINK has one serial line and no word, as the website's machine has.
+  def test_the_hostlink_word_comes_with_the_hostlink_serial_line
+    plan = { accel: 'tcg', image: 'image', serial: 'serial' }
+    append = ->(argv) { argv.include?('-append') ? argv.fetch(argv.index('-append') + 1) : nil }
+    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(**plan))
+    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(**plan, command_line: ''))
+    assert_equal 'erx.hostlink=1 erx.det=1', append.call(Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1'))
+    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(**plan, hostlink: '/run/x/hostlink.sock'))
+    none = Erx::QemuPlan.argv(**plan, hostlink: Erx::QemuPlan::NO_HOSTLINK)
+    assert_equal ['file:serial'], none.each_index.select { |at| none[at] == '-serial' }.map { |at| none[at + 1] }
+    assert_nil append.call(none)
+    assert_equal 'erx.det=1', append.call(Erx::QemuPlan.argv(**plan, hostlink: Erx::QemuPlan::NO_HOSTLINK, command_line: 'erx.det=1'))
+    [nil, Erx::QemuPlan::NO_HOSTLINK].each do |hostlink|
+      assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, hostlink: hostlink, command_line: 'erx.det=1 erx.hostlink=1') }
+    end
+  end
+
   def test_a_console_serial_line_is_this_terminal_with_the_monitor_muxed
     console = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE)
     assert_equal 'mon:stdio', console.fetch(console.index('-serial') + 1)
@@ -105,7 +124,7 @@ class QemuTest < Minitest::Test
     plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
     assert_equal plain, Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [])
     assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m 512 -display none
-                    -monitor none -nic none -no-reboot -serial file:serial -serial null -kernel image], plain
+                    -monitor none -nic none -no-reboot -serial file:serial -serial null -kernel image -append erx.hostlink=1], plain
   end
 
   def test_a_disk_is_a_raw_drive_with_a_virtio_blk_device_on_a_non_legacy_transport

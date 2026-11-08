@@ -199,7 +199,9 @@ module Erx
         'passed'
       end
 
-      # QEMU's own tree for this boot's machine with the firmware's /chosen properties.
+      # QEMU's own tree for this boot's machine with the firmware's /chosen properties. The
+      # dump's plan has the host link, as the boot's does, so the tree has the host link's UART
+      # and its /chosen/bootargs carry erx.hostlink=1.
       def firmware_tree(count, image, disks, choice, directory)
         stock = File.join(directory, 'virt.dtb')
         tree = File.join(directory, 'firmware.dtb')

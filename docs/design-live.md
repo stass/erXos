@@ -1617,7 +1617,10 @@ by a driver like the console's, beside `erx_hostlink`; the system
 manifest names the UART by its device-tree path; under QEMU it is a UNIX
 socket
 (`-serial unix:build/qemu/RUN/hostlink.sock,server=on,wait=off` after the
-console's `-serial`, in the run's owner-only directory).
+console's `-serial`, in the run's owner-only directory). On the stopgap the
+root hands the host link's device record only under `erx.hostlink=1`
+([design-stopgap.md](design-stopgap.md#the-command-line)), which the harness
+adds with the second `-serial`.
 
 The transport has one trusted physical or local peer. The harness creates
 its UNIX socket in an owner-only directory with access restricted to that

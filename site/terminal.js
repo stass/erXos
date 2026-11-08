@@ -18,6 +18,8 @@
 // place; the readout on the case is built from the same two.
 const RAM_MIB = 160;
 const CPU_CORES = 1;
+// No erx.hostlink=1: v64's machine has one UART, the console, so there is
+// no host link UART to drive (docs/design-stopgap.md, "The command line").
 const CMDLINE = "erx.watchdog=1,30,600";
 const MANIFEST = "boot.json";
 

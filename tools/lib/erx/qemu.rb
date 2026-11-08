@@ -41,6 +41,14 @@ module Erx
     # at 0x0a003e00, which the development manifest names as the block device
     # (config/manifest/qemu-virt-development.txt), and each next disk to the bus below.
     LAST_TRANSPORT = 31
+    # As hostlink, no host link at all: one serial line, the console's, as on a machine
+    # with one UART, such as the website's emulator (docs/design-stopgap.md, "Device paths").
+    NO_HOSTLINK = :none
+    # The kernel command line's word that asks the root for the host link's device record
+    # (docs/design-stopgap.md, "The command line"). A plan puts it first on the line exactly
+    # when it gives the guest the host link's serial line, so the record never names a UART
+    # the machine lacks; a caller's line that carries it is refused.
+    HOSTLINK_WORD = 'erx.hostlink=1'
     # The longest path a UNIX socket takes on macOS, the primary host: sun_path's 104
     # bytes less the NUL.
     SOCKET_PATH_MAX = 103
@@ -74,7 +82,11 @@ module Erx
       unless disks.is_a?(Array) && disks.size <= MAX_DISKS && disks.all?(Disk)
         raise Error, "disks are up to #{MAX_DISKS} QemuPlan::Disk values"
       end
-      deterministic = command_line.to_s.split(/ /).include?(DETERMINISTIC_WORD)
+      words = command_line.to_s.split(/ /)
+      raise Error, "the plan adds #{HOSTLINK_WORD} with the host link's serial line" if words.include?(HOSTLINK_WORD)
+
+      deterministic = words.include?(DETERMINISTIC_WORD)
+      line = hostlink == NO_HOSTLINK ? command_line : [HOSTLINK_WORD, command_line].reject { |part| part.to_s.empty? }.join(' ')
       if deterministic && (accel != 'tcg' || cpus != 1)
         raise Error, 'deterministic mode runs one CPU under TCG'
       end
@@ -93,7 +105,7 @@ module Erx
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
        *disk_arguments(disks), '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
        '-kernel', image,
-       *(initrd ? ['-initrd', initrd] : []), *(command_line ? ['-append', command_line] : []),
+       *(initrd ? ['-initrd', initrd] : []), *(line ? ['-append', line] : []),
        *(dtb ? ['-dtb', dtb] : [])].freeze
     end
 
@@ -112,11 +124,12 @@ module Erx
 
     # The second serial line, after the console's, which QEMU virt places at
     # /pl011@9040000, the UART the development manifest names as machine.hostlink
-    # (docs/design-live.md, "The host link"). Every plan has it, so the system domain's
-    # host link always finds its UART: on a UNIX socket QEMU listens on, at the path
-    # given, without waiting for a client, or on QEMU's null device. The socket's
-    # directory must be the caller's own and owner-only (OutputDirectory, mode 0700).
+    # (docs/design-live.md, "The host link"). Every plan but one of NO_HOSTLINK has it: on
+    # a UNIX socket QEMU listens on, at the path given, without waiting for a client, or on
+    # QEMU's null device. The socket's directory must be the caller's own and owner-only
+    # (OutputDirectory, mode 0700).
     def hostlink_arguments(path)
+      return [] if path == NO_HOSTLINK
       return ['-serial', 'null'] if path.nil?
       raise Error, 'invalid host link socket path' unless path.is_a?(String) && path.start_with?('/') &&
                                                         path.bytesize <= SOCKET_PATH_MAX && !path.match?(/[\0,]/)
@@ -292,9 +305,12 @@ module Erx
     # also bounds link. The guest ends when link returns, and an error link raises is the
     # run's, a failure of the socket as an Erx::Error. The report holds link's result under
     # 'link'. The guest, not link, ends a run with machine_end, so the two do not combine.
+    # Without link, hostlink is QemuPlan.argv's: nil for QEMU's null device, or
+    # QemuPlan::NO_HOSTLINK for a machine with no host link UART.
     def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil, disks: [], link: nil, link_seconds: 0)
+            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
+      raise Error, 'a run with a host link session takes no other host link plan' if link && hostlink
 
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
@@ -308,7 +324,7 @@ module Erx
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
                            cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd, command_line: command_line,
-                           dtb: dtb, disks: disks, hostlink: socket)
+                           dtb: dtb, disks: disks, hostlink: socket || hostlink)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)

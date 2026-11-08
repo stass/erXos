@@ -35,7 +35,9 @@ typedef struct erx_boot_console {
  * so that erx_device can open it (docs/design-stopgap.md, "Device records"). The kinds
  * are the rows of device_kinds in boot_manifest.c; role and peripheral point at a row's
  * names, and the numbers are the manifest's device entry. A manifest whose units hold no
- * such device has no record: a missing disk is a normal state.
+ * such device has no record: a missing disk is a normal state. The host link's UART gives a
+ * record only when the boot asks for the host link, with erx.hostlink=1 on the kernel
+ * command line.
  */
 #define ERX_BOOT_DEVICES_MAX	8
 /* -erx device, two names of at most 15 bytes, four numbers of at most 20 digits, each word with its NUL. */
@@ -61,8 +63,12 @@ typedef struct erx_boot_manifest {
 	size_t			device_count;
 } erx_boot_manifest_t;
 
-/* Fills *result, or returns false and names the check that refused the bytes in *reason. */
-bool	erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t *result,
+/*
+ * Fills *result, or returns false and names the check that refused the bytes in *reason.
+ * hostlink is whether the boot asks for the host link; without it the host link's UART gives
+ * no device record.
+ */
+bool	erx_boot_manifest_read(const uint8_t *bytes, size_t length, bool hostlink, erx_boot_manifest_t *result,
 	    const char **reason);
 
 /*

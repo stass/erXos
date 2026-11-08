@@ -303,8 +303,8 @@ whatever a file holds. erXos's kernel checks each file at its first slice.
 
 `/chosen/bootargs` reaches the root through `erx_boot_handoff_view_t`'s `bootargs` and `bootargs_len`.
 `erx_boot_args_parse(bytes, length, out)` in `liberx/backend/fiasco/boot_args.c`, a pure function with a
-fuzz target, splits it on spaces and reads four kinds of word: `erx.watchdog=P,D,B`, through the
-existing `erx_watchdog_parse`; `erx.det=1`; `erx.group_report=1`; and `erx.arg=WORD`, at most as many as fit the page's
+fuzz target, splits it on spaces and reads five kinds of word: `erx.watchdog=P,D,B`, through the
+existing `erx_watchdog_parse`; `erx.det=1`; `erx.group_report=1`; `erx.hostlink=1`; and `erx.arg=WORD`, at most as many as fit the page's
 strings. Other words are ignored, as a boot loader's may be there. A malformed `erx.` word, and an `erx.` word of no known kind, refuses the
 boot with a fixed reason. Bootstrap cuts the record at the last whole word, so a parser never sees half
 a word.
@@ -320,6 +320,15 @@ between the bytes of the console driver's writes. The production image suite boo
 system's schedulers and dirty CPU schedulers, after the shell's banner and a line typed at the prompt
 that keeps one scheduler busy for half a second, so the report must show it wake and park again: M3's
 idle machine.
+
+`erx.hostlink=1` asks for the host link: only with it does the root hand the system domain's ERTS the
+host link's device record ([Device records](#device-records)). The manifest names the host link's UART
+by its device-tree path, and the root does not look in the device tree for it, so on a machine without
+that UART the record would point `erx_pl011` at empty address space, whose first read faults the
+system domain and with it the machine. Without the record `erx_hostlink` starts nothing and the boot
+is the same otherwise. `Erx::QemuPlan` adds the word exactly when it gives the guest the second
+`-serial` ([The production image](#the-production-image), "Device paths"); the website's emulator, whose machine has one UART, never
+sends it. erXos's kernel needs no such word: it lists a UART only when the device tree has it.
 
 ## The Phase 1 manifest check
 
@@ -473,8 +482,12 @@ The same flag makes `erts_start_schedulers` wait for every normal and dirty CPU 
 **Device paths.** Each suite run dumps QEMU's own device tree (`-machine virt,dumpdtb`) and
 checks each device path and `compatible` of [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json)
 against it. `/pl011@9040000` exists only when QEMU is given a second `-serial`, which the
-harness gives every guest: QEMU's null device, or the host link's UNIX socket
-([design-live.md](design-live.md#the-host-link)).
+harness gives every guest but one, with `erx.hostlink=1` on its command line
+([The command line](#the-command-line)): QEMU's null device, or the host link's UNIX socket
+([design-live.md](design-live.md#the-host-link)). The one is the production image suite's TCG smoke
+boot, of a machine with one UART as the website's is: one `-serial`, no word, and the boot reaches
+the command shell with no host link. Under TCG a host link record for the absent UART faults the
+root task at the driver's first read, as on the website; under HVF that read does not fault.
 
 ## The call table
 
@@ -1319,7 +1332,8 @@ the manifest check reasons about a display domain's devices by role
 ([design-system.md](design-system.md#the-manifest), property 9). A further kind of device is one more row.
 
 **A device the system domain holds**, the console's UART, the host link's and a block device
-with no storage domain, its driver opens from its record as below. **A device another domain
+with no storage domain, its driver opens from its record as below. The host link's UART has a
+record only under `erx.hostlink=1` ([The command line](#the-command-line)). **A device another domain
 holds** reaches it as on erXos's kernel: the device service calls `erx_dom_device_give`, whose
 body on this backend creates the register window with `erx_mem_create_physical` over the
 record's base and size, the line's IRQ object with `erx_irq_create`, and the device's contiguous
@@ -1619,7 +1633,7 @@ the tests.
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |
 | **Service decoder**: fuzz target, and a task sending an unknown number, wrong count, bad index and long payload | word-count check removed: the fuzz target reports it |
 | **Chokepoint**: a Fiasco header outside the backend | the seeded violation is the case |
-| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths, and each recorded window's base, size and line, against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line with the watchdog's numbers and the exact argument count, a boot with `erx.det=1 erx.arg=WORD` shows the watchdog off and one more argument, a boot with an unknown `erx.` word and a 256 MiB machine each end at the root's refusal, and a boot with a plain `erx.arg` word is answered at the serial console through `erx_pl011`: a sum, a line with a mistake rubbed out, and an output longer than the transmit FIFO, and a boot with `erx.group_report=1` reports every executor parked at the shell; `production_image_test.rb` | a wrong device path, compatible or window, in that test, and a recorded base that is not its path's unit address on the host; a console driver that drops input or output: the console transcript stops; a misread `root_memory` or a lost `-append`: the manifest, watchdog and argument lines fail its transcript |
+| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths, and each recorded window's base, size and line, against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line with the watchdog's numbers and the exact argument count, a boot with `erx.det=1 erx.arg=WORD` shows the watchdog off and one more argument, a boot with an unknown `erx.` word and a 256 MiB machine each end at the root's refusal, and a boot with a plain `erx.arg` word is answered at the serial console through `erx_pl011`: a sum, a line with a mistake rubbed out, and an output longer than the transmit FIFO, a boot with `erx.group_report=1` reports every executor parked at the shell, and the TCG smoke boot, with one `-serial` and no `erx.hostlink=1`, reaches the command shell with no host link record; `production_image_test.rb` | a wrong device path, compatible or window, in that test, and a recorded base that is not its path's unit address on the host; a console driver that drops input or output: the console transcript stops; a misread `root_memory` or a lost `-append`: the manifest, watchdog and argument lines fail its transcript; a host link record handed without the word: the TCG smoke boot counts eight more arguments, and faults the root task |
 | **The manifest's C reader**: `tools/fuzz/manifest_fuzz.c`, each table of an accepted manifest read back to its count and no further | a row out of a table's range would abort it |
 | `make check-reproducible`: two builds of the production image, each clearing `build/runtime/native` first and packing into a directory of its own name, byte-identical in archive and bootable file. OTP and musl build at one path both times, so a path of theirs reaching an output does not show | a time, or a path under the two directories, reaching an output fails it |
 | **Function-API set** on both backends, refusals included | a refusal changed in one backend |

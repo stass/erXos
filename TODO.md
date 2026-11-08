@@ -385,6 +385,14 @@ it; git history is the record of completed work.
   renderer once the parity test passes and the Erlang renderer's frame
   times match LVGL's on a 240x240 panel
   ([design-display.md](docs/design-display.md#dependencies)).
+* [Low] stopgap, the host link's boot word: the host link is opt-in through
+  `erx.hostlink=1` (`liberx/backend/fiasco/boot_args.c`,
+  `liberx/backend/core/boot_manifest.c`), because the root takes the host
+  link's UART from the manifest's device-tree path without looking for it in
+  the device tree, and a record for a UART the machine lacks faults the system
+  domain at the driver's first read. The word goes once erXos's kernel finds
+  the UART in the device tree and the root hands the record only for a UART
+  that is there ([design-stopgap.md](docs/design-stopgap.md#the-command-line)).
 
 ## Bugs by subsystem
 

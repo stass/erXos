@@ -10,6 +10,7 @@
 #define ARGS_WATCHDOG		"erx.watchdog="
 #define ARGS_DET		"erx.det="
 #define ARGS_GROUP_REPORT	"erx.group_report="
+#define ARGS_HOSTLINK		"erx.hostlink="
 #define ARGS_ARG		"erx.arg="
 #define ARGS_LEN(prefix)	(sizeof(prefix) - 1)
 
@@ -110,6 +111,10 @@ erx_boot_args_parse(const char *bytes, size_t length, erx_boot_args_t *out)
 			if (!is_switch_on(word, word_len, ARGS_LEN(ARGS_GROUP_REPORT)))
 				return (refuse(out, word, word_len));
 			out->group_report = true;
+		} else if (has_prefix(word, word_len, ARGS_HOSTLINK)) {
+			if (!is_switch_on(word, word_len, ARGS_LEN(ARGS_HOSTLINK)))
+				return (refuse(out, word, word_len));
+			out->hostlink = true;
 		} else if (has_prefix(word, word_len, ARGS_ARG)) {
 			const size_t head = ARGS_LEN(ARGS_ARG);
 

@@ -39,7 +39,7 @@
 
 int	main(int, char **, char **);
 
-static const char	*release_read(const erx_boot_handoff_view_t *, erx_boot_manifest_t *);
+static const char	*release_read(const erx_boot_handoff_view_t *, bool, erx_boot_manifest_t *);
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
 static size_t		 console_uart_build(const erx_boot_console_t *);
 static size_t		 boot_build(erx_boot_pair_t);
@@ -93,7 +93,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	uint64_t cpuset;
 	size_t nargs = 0;
 
-	reason = release_read(handoff, &manifest);
+	reason = release_read(handoff, boot_args->hostlink, &manifest);
 	if (reason != NULL)
 		return (reason);
 	if (!erx_boot_console_matches(&manifest, handoff->stdout_path, handoff->stdout_path_len))
@@ -173,11 +173,12 @@ line_append(char *line, size_t used, erx_boot_words_t words)
 
 /*
  * Binds the boot archive as the release, then reads its manifest into *manifest. The
- * archive is the one sigma0 mapped one to one for the root's life. Returns NULL, or the
- * reason the archive or its manifest was refused.
+ * archive is the one sigma0 mapped one to one for the root's life. The host link's record is
+ * there only under erx.hostlink=1 (hostlink). Returns NULL, or the reason the archive or its
+ * manifest was refused.
  */
 static const char *
-release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manifest)
+release_read(const erx_boot_handoff_view_t *handoff, bool hostlink, erx_boot_manifest_t *manifest)
 {
 	const uint8_t *bytes;
 	const char *reason;
@@ -185,7 +186,7 @@ release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manife
 
 	if (erx_release_bind((const uint8_t *)(uintptr_t)handoff->image.start, (size_t)handoff->image.size, &reason) != 0 ||
 	    erx_release_manifest(&bytes, &length, &reason) != 0 ||
-	    !erx_boot_manifest_read(bytes, length, manifest, &reason))
+	    !erx_boot_manifest_read(bytes, length, hostlink, manifest, &reason))
 		return (reason);
 	return (NULL);
 }

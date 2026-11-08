@@ -15,12 +15,13 @@
 /*
  * The kernel command line (docs/design-stopgap.md, "The command line"), split on spaces.
  * A word that does not start with erx. is a boot loader's, and ignored. Words of erx. are
- * erx.watchdog=P,D,B, erx.det=1, erx.group_report=1 and erx.arg=WORD; anything else starting with erx. is a
- * mistake that would otherwise go unseen, so it refuses the boot like a malformed one.
+ * erx.watchdog=P,D,B, erx.det=1, erx.group_report=1, erx.hostlink=1 and erx.arg=WORD; anything else starting
+ * with erx. is a mistake that would otherwise go unseen, so it refuses the boot like a malformed one.
  */
 typedef struct erx_boot_args {
 	bool			 det;
 	bool			 group_report;	/* the group's report on the console (park_report.c) */
+	bool			 hostlink;	/* the host link's device record (boot_manifest.c) */
 	bool			 have_watchdog;
 	erx_watchdog_config_t	 watchdog;	/* the last one, with have_watchdog */
 	uint32_t		 arg_count;	/* erx.arg words */

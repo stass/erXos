@@ -125,12 +125,14 @@ module Erx
     # holds, which is the selection, so the line is the same whatever is
     # selected. Bootstrap cuts a line longer than `limit` at its last whole
     # word and the guest would run without the words cut, so a longer line is
-    # refused here.
+    # refused here, measured as the guest gets it: after the word QemuPlan puts
+    # first for the host link (QemuPlan::HOSTLINK_WORD).
     def self.command_line(accel:, limit:)
       paths = [*OracleSuites::STOCK_APPLICATIONS.map { |application| "/lib/#{application}/ebin" }, '/test/ct/reporter']
       arguments = [*paths.flat_map { |path| ['-pa', path] }, '-run', 'erx_ct_oracle', 'main', *OracleSuites.erxos_arguments(WORK)]
       line = [ProductionImage::Run::COMMAND_LINES[accel], *arguments.map { |argument| "erx.arg=#{argument}" }].compact.join(' ')
-      raise Error, "the oracle's kernel command line is #{line.bytesize} bytes, over the #{limit} the kernel takes" if line.bytesize > limit
+      guest = "#{QemuPlan::HOSTLINK_WORD} #{line}".bytesize
+      raise Error, "the oracle's kernel command line is #{guest} bytes, over the #{limit} the kernel takes" if guest > limit
 
       line
     end

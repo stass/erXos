@@ -351,6 +351,10 @@ class ProductionImageTest < Minitest::Test
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }
+    # Without erx.hostlink=1 the host link's UART gives no record, so the boot has one fewer.
+    plain = always - Erx::ProductionImage::Run::DEVICE_RECORD_WORDS + system_args
+    checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{plain} arguments\n")
+    assert_raises(Erx::Error) { checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{always + system_args} arguments\n") }
   end
 
   # A scheduler short of a CPU, or started as a worker, leaves the count wrong or the line unsaid.
@@ -390,7 +394,7 @@ class ProductionImageTest < Minitest::Test
   end
 
   def test_a_command_line_reaches_qemu_only_when_asked
-    plan = { accel: 'tcg', image: '/image', serial: '/serial' }
+    plan = { accel: 'tcg', image: '/image', serial: '/serial', hostlink: Erx::QemuPlan::NO_HOSTLINK }
     refute_includes Erx::QemuPlan.argv(**plan), '-append'
     assert_equal %w[-append erx.det=1], Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1').last(2)
   end

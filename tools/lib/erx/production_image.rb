@@ -466,16 +466,20 @@ module Erx
       # The transcript of a boot as far as ERTS gets, each line in order. The image is one
       # without test code, and the kernel's line names its archive's identity and flags,
       # so a test image's mark shows. The manifest line
-      # carries the numbers the source says, so a root that misread it fails. Schedulers are
+      # carries the numbers the source says, so a root that misread it fails. ERTS's
+      # arguments count each device record. hostlink is the boot's QemuPlan host link: a
+      # plan of QemuPlan::NO_HOSTLINK sends no erx.hostlink=1, so the host link's UART gives
+      # no record. Schedulers are
       # one per CPU of the system's share on this machine. Erlang's init then boots the
       # release, `kernel` starts, and erx_console's slogan and its command shell's banner,
       # written through erx_pl011, prove the release ran that far. The command shell's
       # prompt ends no line, so no point names it.
-      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)))
+      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)),
+                           hostlink: nil)
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
-        records = source.scan(/^unit (?:block|hostlink)$/).size * DEVICE_RECORD_WORDS
+        records = source.scan(hostlink == QemuPlan::NO_HOSTLINK ? /^unit block$/ : /^unit (?:block|hostlink)$/).size * DEVICE_RECORD_WORDS
         arguments = ARGUMENTS_ALWAYS + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code
@@ -742,6 +746,11 @@ module Erx
       private
 
       # SMOKE_CELLS under TCG: the plain boot to the command shell at one CPU, then the transcript.
+      # The plain boot is of the website's machine, one UART, the console's: one serial line and
+      # no erx.hostlink=1, so the root hands no host link record and erx_hostlink starts nothing
+      # (docs/design-stopgap.md, "The command line"). A record for the absent UART faults the
+      # root task under TCG at erx_pl011's first read, as on the website; under HVF the same read
+      # does not fault, so only this boot shows it. HVF's boots keep the host link.
       # Each name sits beside the boot that earns it, so dropping a boot drops its cell, and
       # the gate then marks the declared cell not_run.
       def smoke_cells(built)
@@ -749,8 +758,10 @@ module Erx
       end
 
       def smoke_boot(built)
-        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern('tcg'), cpus: 1)
-        full = boot('tcg', 1, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES['tcg'])
+        hostlink = QemuPlan::NO_HOSTLINK
+        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern('tcg'), cpus: 1, hostlink: hostlink)
+        full = boot('tcg', 1, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES['tcg'],
+                                       hostlink: hostlink)
         { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze
       end
 
@@ -935,10 +946,10 @@ module Erx
         raise Error, "a stopped pet ended the machine with cause #{cause}" unless cause == CrashFrame::CODEC.member('crash_cause', 'watchdog')
       end
 
-      def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil, dtb: nil)
+      def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil, dtb: nil, hostlink: nil)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end,
-                 command_line: command_line, dtb: dtb)
+                 command_line: command_line, dtb: dtb, hostlink: hostlink)
       end
 
       # The seeded tree's name for the console's PL011, which its stdout-path names through
@@ -948,6 +959,8 @@ module Erx
 
       # QEMU's own tree for the machine a boot gets, with the console's node renamed
       # (seed_stdout_path). -dtb hands a boot this tree in place of the one QEMU would write.
+      # The dump's plan has the host link, as the boot that takes the tree does, so the tree has
+      # the host link's UART and its /chosen/bootargs carry erx.hostlink=1.
       def seeded_stdout_tree(accel, count, built)
         directory = File.join(@root, 'build/production-image/device-tree')
         FileUtils.mkdir_p(directory)

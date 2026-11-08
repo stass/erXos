@@ -345,9 +345,20 @@ test_command_line(void)
 	check_args("erx.group_report=0", false, "erx.group_report", false, false, 0);
 	check_args("erx.group_report=", false, "erx.group_report", false, false, 0);
 	check_args("erx.group_report=11", false, "erx.group_report", false, false, 0);
+	check_args("erx.hostlink=1", true, NULL, false, false, 0);
+	check_args("erx.hostlink=0", false, "erx.hostlink", false, false, 0);
+	check_args("erx.hostlink=", false, "erx.hostlink", false, false, 0);
+	check_args("erx.hostlink", false, "erx.hostlink", false, false, 0);
+	check_args("erx.hostlink=11", false, "erx.hostlink", false, false, 0);
+	check_args("erx.hostlink=yes", false, "erx.hostlink", false, false, 0);
+	check_args("erx.hostlinks=1", false, "erx.hostlinks", false, false, 0);
 	CHECK(erx_boot_args_parse("erx.group_report=1", 18, &out) && out.group_report && !out.det,
 	    "erx.group_report=1 does not turn the report on alone");
 	CHECK(erx_boot_args_parse("erx.det=1", 9, &out) && !out.group_report, "erx.det=1 turns the group report on");
+	CHECK(erx_boot_args_parse("erx.hostlink=1", 14, &out) && out.hostlink && !out.det && !out.group_report,
+	    "erx.hostlink=1 does not ask for the host link alone");
+	CHECK(erx_boot_args_parse("erx.det=1 erx.group_report=1", 28, &out) && !out.hostlink,
+	    "a line without erx.hostlink=1 asks for the host link");
 
 	memcpy(line, "erx.arg=", head);
 	memset(line + head, 'x', ERX_BOOT_STRINGS_MAX - 1);
@@ -361,7 +372,7 @@ test_command_line(void)
 	CHECK(erx_boot_args_parse("quiet", 5, &out), "a boot loader's word is refused");
 
 	/* Every prefix of a line, at its exact length, so a reader past the end shows under ASan. */
-	const char *const whole = "a erx.arg=-S erx.watchdog=1,5,60 erx.det=1 erx.group_report=1 b";
+	const char *const whole = "a erx.arg=-S erx.watchdog=1,5,60 erx.det=1 erx.group_report=1 erx.hostlink=1 b";
 	for (size_t length = 0; length <= strlen(whole); length++) {
 		char *copy = malloc(length == 0 ? 1 : length);
 

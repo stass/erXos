@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,8 +11,10 @@
 #include "liberx/backend/core/boot_manifest.h"
 
 /*
- * Reads a manifest from the file named by its one argument and prints what the boot
- * page takes from it, or the check that refused it. boot_manifest_test.rb compares this
+ * Reads a manifest from the file named by its first argument and prints what the boot
+ * page takes from it, or the check that refused it. A second argument is a stdout-path to
+ * match the console against, and a third, the word hostlink, asks for the host link as
+ * erx.hostlink=1 does. boot_manifest_test.rb compares this
  * with the manifest's source. Each device record is printed with its words, NULs as spaces,
  * and what erx_boot_device_words returns given exactly their room and one byte less.
  */
@@ -21,14 +24,16 @@ main(int argc, char **argv)
 	static uint8_t bytes[1024 * 1024];
 	erx_boot_manifest_t manifest;
 	const char *reason;
+	bool hostlink;
 	FILE *file;
 	size_t length;
 
-	if ((argc != 2 && argc != 3) || (file = fopen(argv[1], "rb")) == NULL)
+	if (argc < 2 || argc > 4 || (argc == 4 && strcmp(argv[3], "hostlink") != 0) || (file = fopen(argv[1], "rb")) == NULL)
 		return (2);
+	hostlink = argc == 4;
 	length = fread(bytes, 1, sizeof(bytes), file);
 	fclose(file);
-	if (!erx_boot_manifest_read(bytes, length, &manifest, &reason)) {
+	if (!erx_boot_manifest_read(bytes, length, hostlink, &manifest, &reason)) {
 		printf("refused %s\n", reason);
 		return (1);
 	}
@@ -54,7 +59,7 @@ main(int argc, char **argv)
 		printf("exact %d short %zu\n", length != 0 && erx_boot_device_words(device, words, length) == length,
 		    length == 0 ? 0 : erx_boot_device_words(device, words, length - 1));
 	}
-	if (argc == 3)
+	if (argc >= 3)
 		printf("console %.*s matches %d\n", (int)manifest.console_path.length,
 		    manifest.console_path.bytes,
 		    erx_boot_console_matches(&manifest, argv[2], strlen(argv[2])));
