@@ -321,6 +321,16 @@ erx_status_t	erx_cap_slot_clear(erx_cap_table_t *table, erx_cap_t cap,
 		    erx_object_t *object, bool *releasedp);
 
 /*
+ * The table and the value of a slot on an object's slot list, which a
+ * destroy's teardown hands to erx_cap_slot_clear; under the object's
+ * capability lock, which keeps the slot listed. The search is over the
+ * table's directory, bounded by its page count. A slot that is on no
+ * table's page is a kernel bug and traps.
+ */
+void		erx_cap_slot_name(const erx_cap_slot_t *slot,
+		    erx_cap_table_t **tablep, erx_cap_t *capp);
+
+/*
  * Take count free slots for a receive. ERX_EINVAL for a count above
  * ERX_MSG_CAPS; ERX_EBUSY when the reservation still holds slots, which
  * must be released first; ERX_EDEAD once the table is emptied; ERX_ELIMIT

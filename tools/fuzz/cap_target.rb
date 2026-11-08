@@ -11,7 +11,7 @@
 # so the slot retires and the object is released.
 install = "\x00\x00\x09\xff\xff\xff\xff\x05"
 Erx::PackFuzz.declare_target(
-  sources: ['kernel/core/cap.c', 'kernel/core/object.c', 'kernel/core/budget.c'],
+  sources: ['kernel/core/cap.c', 'kernel/core/attach.c', 'kernel/core/object.c', 'kernel/core/budget.c'],
   defines: ['ERX_HOST'],
   seeds: Erx::PackFuzz.indexed_seeds(
     ["\x00\x00\x07\xff\xff\xff\xff\x01\x00",

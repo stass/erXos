@@ -548,7 +548,7 @@ class SpaceTest < Minitest::Test
   # The capability core, which the space core links for its rights, with
   # the cores it calls and their host's effects; host handles index the
   # object store's test store.
-  def cap_core_sources = %w[kernel/core/cap.c kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c]
+  def cap_core_sources = %w[kernel/core/cap.c kernel/core/attach.c kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c]
                          .map { |path| File.join(@root, path) }
 
   def build_driver(core, name:, flags:)

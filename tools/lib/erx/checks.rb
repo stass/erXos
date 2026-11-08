@@ -10,6 +10,7 @@ require_relative 'device_posters'
 require_relative 'erofs_reads'
 require_relative 'generated'
 require_relative 'ns_writers'
+require_relative 'attach_fields'
 require_relative 'origin'
 require_relative 'runner'
 require_relative 'source_text'
@@ -133,6 +134,7 @@ module Erx
       check_device_posters(listed)
       check_erofs_reads(listed)
       check_ns_writers(listed)
+      check_attach_fields(listed)
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
       # below kernel/ they read as erXos's own C (chokepoint_upstream?).
@@ -265,6 +267,14 @@ module Erx
     def check_ns_writers(listed)
       sources = listed.select { |relative| NsWriters.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = NsWriters.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # Every attachment field of an object record has its insert and its walk
+    # in the teardown (AttachFields).
+    def check_attach_fields(listed)
+      sources = listed.select { |relative| AttachFields.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = AttachFields.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

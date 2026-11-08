@@ -458,7 +458,9 @@ class CapTest < Minitest::Test
     ['LIFO free list', "\tif (table->free_tail == 0)\n\t\ttable->free_head = index;\n\telse\n",
      "\tif (table->free_tail == 0)\n\t\ttable->free_head = index;\n\telse if (0)\n"],
     ['install leaves the count', "\tstatus = erx_object_cap_add(object);\n", "\tstatus = ERX_OK;\n"],
-    ['clear leaves the list', "\tcap_list_remove(object, slot);\n", "\tif (0)\n\t\tcap_list_remove(object, slot);\n"],
+    ['clear leaves the list', "\tif (prev == NULL)\n\t\terx_object_set_slots(object, next);\n\telse\n\t\tcap_set_obj_next(prev, next);\n" \
+                                "\tif (next != NULL)\n\t\tcap_set_obj_prev(next, prev);\n\tcap_set_obj_prev(slot, NULL);\n" \
+                                "\tcap_set_obj_next(slot, NULL);\n", "\t(void)prev;\n\t(void)next;\n"],
     ['move drops its count', "\t\tif (erx_object_cap_add(objects[i]) != ERX_OK)\n", "\t\tif (0)\n"],
     ['install links nothing', "\t\tcap_list_insert(erx_object_from_handle(step->object), slot);\n", ""],
     ['route ignored', "\tif (!cap_route_to_created(route) && pass == 0)\n", "\tif (pass == 0)\n"]
@@ -481,7 +483,7 @@ class CapTest < Minitest::Test
 
   # The capability core with the cores it calls, the object store and,
   # for the lookup, the budget core, and their host's effects.
-  def core_sources(core) = [core, *%w[kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c]
+  def core_sources(core) = [core, *%w[kernel/core/attach.c kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c]
                                                      .map { |path| File.join(@root, path) }]
 
   def build_driver(core, name:)

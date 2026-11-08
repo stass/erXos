@@ -65,6 +65,29 @@ it; git history is the record of completed work.
   go with the stopgap at M7, or earlier once the profiling feature under
   Planned features gives a confined way to count.
 
+* [Medium] kernel, Track K, the slot list's insert
+  (`kernel/core/attach.c`, `kernel/core/cap.c`): `erx_attach_object_slots`
+  writes only the list's head and leaves the slot's links to
+  `cap_list_insert`, and its state check stands behind
+  `erx_object_cap_add`'s under the same lock, so removing it alone changes
+  nothing a test sees. No rule limits who calls it, and a caller that drops
+  the old head loses the rest of the list. Either move the whole link into
+  attach.c behind a capability-core helper only it calls, or call the count
+  the field's gate and keep attach.c's check as an assertion; then add a
+  caller rule on the insert (the Callers kind accepts only exported
+  callers, and `cap_list_insert` is static).
+
+* [Medium] kernel, Track K, the deletion core's model
+  (`test/fixtures/delete_model.c`): the design's seeded publication that
+  inserts without the published object's existence lock, caught as a
+  child attached to its parent after its budget tore it down, needs an
+  attachment field on a parent other than the slot list. The slot list
+  cannot show it, since its insert checks the published object's own
+  state under the same lock as the close. Add the publication actor and
+  its seed when `att_charged` gets its insert in `kernel/core/attach.c`
+  and the budget's destroy walk calls `erx_delete_step`. The model's other
+  open edges: a destroy started by a budget's death, and spaces' walks.
+
 * [Medium] verification, Track K, the CBMC gate (`tools/lib/erx/cbmc.rb`,
   `test/cbmc/roster.json`): if the owner adopts CBMC from the pilot's
   record, settle three things the pilot leaves open. Homebrew offers only

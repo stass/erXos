@@ -39,6 +39,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "erx/attach.h"
 #include "erx/budget.h"
 #include "erx/cap.h"
 #include "erx/object.h"
@@ -116,7 +117,6 @@ static erx_cap_slot_t	*cap_obj_next(const erx_cap_slot_t *);
 static void		 cap_set_obj_prev(erx_cap_slot_t *, const erx_cap_slot_t *);
 static void		 cap_set_obj_next(erx_cap_slot_t *, const erx_cap_slot_t *);
 static void		 cap_list_insert(erx_object_t *, erx_cap_slot_t *);
-static void		 cap_list_remove(erx_object_t *, erx_cap_slot_t *);
 static bool		 cap_object_reachable(const erx_object_t *);
 static erx_status_t	 cap_install(erx_cap_table_t *, erx_object_t *,
 			    erx_ktype_t, erx_rights_t, erx_cap_t *);
@@ -394,34 +394,23 @@ cap_set_obj_next(erx_cap_slot_t *slot, const erx_cap_slot_t *next)
 	(void)erx_cap_slot_obj_next_store(slot, (uint64_t)(uintptr_t)next);
 }
 
-/* Put slot at the head of object's list; under its capability lock. */
+/*
+ * Put slot at the head of object's list through the list's insert in
+ * kernel/core/attach.c; under its capability lock. Its callers counted
+ * the slot on the object under the same lock, which needs the object
+ * LIVE, so a refusal here is a kernel bug.
+ */
 static void
 cap_list_insert(erx_object_t *object, erx_cap_slot_t *slot)
 {
-	erx_cap_slot_t *head = erx_object_slots(object);
+	erx_cap_slot_t *head;
 
+	if (erx_attach_object_slots(object, slot, &head) != ERX_OK)
+		__builtin_trap();
 	cap_set_obj_prev(slot, NULL);
 	cap_set_obj_next(slot, head);
 	if (head != NULL)
 		cap_set_obj_prev(head, slot);
-	erx_object_set_slots(object, slot);
-}
-
-/* Take slot off object's list; under its capability lock. */
-static void
-cap_list_remove(erx_object_t *object, erx_cap_slot_t *slot)
-{
-	erx_cap_slot_t *prev = cap_obj_prev(slot);
-	erx_cap_slot_t *next = cap_obj_next(slot);
-
-	if (prev == NULL)
-		erx_object_set_slots(object, next);
-	else
-		cap_set_obj_next(prev, next);
-	if (next != NULL)
-		cap_set_obj_prev(next, prev);
-	cap_set_obj_prev(slot, NULL);
-	cap_set_obj_next(slot, NULL);
 }
 
 /*
@@ -771,18 +760,65 @@ erx_cap_slot_clear(erx_cap_table_t *table, erx_cap_t cap,
 {
 	uint32_t index = (uint32_t)(cap.raw & CAP_SLOT_MASK);
 	uint64_t generation = cap.raw >> ERX_CAP_SLOT_BITS;
-	erx_cap_slot_t *slot;
+	erx_cap_slot_t *slot, *prev, *next;
 
 	*releasedp = false;
 	if (!cap_slot_names(table, index, generation,
 	    erx_object_handle(object)))
 		return (ERX_ESTALE);
 	slot = cap_slot_at(table, index);
-	cap_list_remove(object, slot);
+	/*
+	 * Unlink the slot here, not in a helper, so that the attachment
+	 * chokepoint sees erx_cap_slot_clear itself as the one remover from
+	 * the slot list, as erx_attach_object_slots is its one insert.
+	 */
+	prev = cap_obj_prev(slot);
+	next = cap_obj_next(slot);
+	if (prev == NULL)
+		erx_object_set_slots(object, next);
+	else
+		cap_set_obj_next(prev, next);
+	if (next != NULL)
+		cap_set_obj_prev(next, prev);
+	cap_set_obj_prev(slot, NULL);
+	cap_set_obj_next(slot, NULL);
 	if (cap_slot_close(slot, generation + 1))
 		cap_free_append(table, index);
 	*releasedp = erx_object_cap_remove(object);
 	return (ERX_OK);
+}
+
+void
+erx_cap_slot_name(const erx_cap_slot_t *slot, erx_cap_table_t **tablep,
+    erx_cap_t *capp)
+{
+	uintptr_t at = (uintptr_t)slot, base;
+	erx_cap_table_t *table;
+	uint64_t address = 0;
+	uint32_t i;
+
+	(void)erx_cap_slot_table_load(slot, &address);
+	if (address == 0)
+		__builtin_trap();
+	table = (erx_cap_table_t *)(uintptr_t)address;
+	/*
+	 * A listed slot's page is in its table's directory, which never
+	 * moves; the bound is the directory's, fixed for the table's life.
+	 */
+	for (i = 0; i < table->npages_max; i++) {
+		base = (uintptr_t)atomic_load_explicit(&table->pages[i],
+		    memory_order_relaxed);
+		if (base == 0)
+			break;
+		if (at >= base && at - base < CAP_PAGE_BYTES) {
+			*tablep = table;
+			*capp = cap_value(i * ERX_CAP_PAGE_SLOTS +
+			    (uint32_t)((at - base) / ERX_CAP_SLOT_SIZE),
+			    cap_generation(slot));
+			return;
+		}
+	}
+	__builtin_trap();
 }
 
 erx_status_t

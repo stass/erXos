@@ -208,7 +208,7 @@ class ObjectTest < Minitest::Test
                  *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
                  '-I', Erx::Generated.path('kernel/generated', root: @root), cap,
-                 *%w[kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c
+                 *%w[kernel/core/attach.c kernel/core/object.c kernel/core/budget.c test/fixtures/host_effects.c
                      test/fixtures/object_lookup.c].map { |path| File.join(@root, path) }, '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output

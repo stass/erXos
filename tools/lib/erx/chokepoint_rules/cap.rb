@@ -57,7 +57,7 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
           pattern: CAP_SLOT_CLEAR,
-          sites: ['kernel/core/*.c', 'include/erx/cap.h', *host_tests(CAP_CORE)].map { |glob| Chokepoints::Site.new(glob: glob) },
+          sites: ['kernel/core/*.c', 'include/erx/cap.h', *host_tests(CAP_CORE), *host_tests('kernel/core/delete.c')].map { |glob| Chokepoints::Site.new(glob: glob) },
           seed: { 'include/erx/space.h' => "erx_status_t erx_cap_slot_clear(erx_cap_table_t *, erx_cap_t, uint64_t);\n",
                   CAP_SLOT_IMPL => "static inline void f(void) { erx_cap_slot_clear(0, 0, 0); }\n",
                   'test/fixtures/budget_driver.c' => "void f(void) { erx_cap_slot_clear(0, 0, 0); }\n",

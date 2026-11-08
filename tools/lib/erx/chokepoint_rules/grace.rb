@@ -43,12 +43,13 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'grace-tracker-lock',
           rule: "only the grace tracker takes the tracker's lock (K13): only #{GRACE_CORE}, " \
-                'include/erx/grace.h and the tracker\'s and the page funnel\'s host tests name ' \
+                'include/erx/grace.h and the host tests of the tracker, the page funnel and the deletion core name ' \
                 'erx_effect_grace_lock and its unlock',
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
           pattern: GRACE_LOCK,
-          sites: [GRACE_CORE, 'include/erx/grace.h', *host_tests(GRACE_CORE), *host_tests('kernel/core/page.c')]
+          sites: [GRACE_CORE, 'include/erx/grace.h', *host_tests(GRACE_CORE), *host_tests('kernel/core/page.c'),
+                  *host_tests('kernel/core/delete.c')]
             .map { |glob| Chokepoints::Site.new(glob: glob) },
           seed: { 'kernel/core/page.c' => "erx_effect_grace_lock(released->tracker);\n",
                   'kernel/core/reaper.c' => "erx_effect_grace_unlock(t);\n",

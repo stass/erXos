@@ -14,6 +14,12 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Low] kernel, a destroy's slot names.** `erx_cap_slot_name` (`kernel/core/cap.c`) finds a
+  listed slot's index by scanning its table's directory, up to `ERX_CAPS_MAX / ERX_CAP_PAGE_SLOTS`
+  page pointers per slot a teardown clears. Measure a destroy of an object named by many slots in
+  a full table; if the scan shows, store each page's first index in its slots or align pages so
+  the index follows from the address.
+
 * **[Low] packer, `mkfs.erofs` on every build.** `ProductionImage#assemble`, every test image
   and the hosted `Release#build` write the system release's EROFS image (`ReleaseMedium.image`) before
   packing, since the manifest records its extent; the hosted pack uses only its length. Measure the
