@@ -15,12 +15,15 @@
  *               deadline passes, whose up the wait must absorb.
  *   race        Real threads under a real lock: a poster against a waiter whose
  *               deadlines race the posts. A semaphore holding an up when its thread
- *               enters a wait is a stale count, and a record never taken is lost.
+ *               enters a wait is a stale count. Lost means no record taken for
+ *               RACE_PATIENCE_NS, judged from the last take rather than over the whole
+ *               run, whose length a loaded host stretches.
  *
  * Prints what it covered and exits 0, or names the first disagreement and exits 1.
  */
 
 #include <pthread.h>
+#include <sched.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -429,12 +432,23 @@ static real_semaphore_t real_semaphore = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_CO
 static _Atomic uint64_t real_posted, real_taken, real_timeouts;
 static _Atomic uint32_t real_stop;
 
+/* For the waits' deadlines: pthread_cond_timedwait on macOS reads the wall clock. */
 static uint64_t
 now_ns(void)
 {
 	struct timespec now;
 
 	clock_gettime(CLOCK_REALTIME, &now);
+	return ((uint64_t)now.tv_sec * 1000000000 + (uint64_t)now.tv_nsec);
+}
+
+/* For the watch's patience, which a step of the wall clock must not cut short. */
+static uint64_t
+monotonic_ns(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	return ((uint64_t)now.tv_sec * 1000000000 + (uint64_t)now.tv_nsec);
 }
 
@@ -527,12 +541,15 @@ real_waiter(void *argument)
 	return (NULL);
 }
 
-/* Posts the one entry each time the waiter has taken it. */
+/*
+ * Posts the one entry each time the waiter has taken it. While the entry is still
+ * queued it yields: on a loaded host, a poster spinning on the service lock takes
+ * the CPU the waiter needs to take the entry.
+ */
 static void *
 real_poster(void *argument)
 {
 	const erx_fault_t record = { .kind = ERX_FAULT_MEMORY };
-	const uint64_t give_up = now_ns() + RACE_PATIENCE_NS;
 
 	(void)argument;
 	while (real_posted < RACE_ROUNDS) {
@@ -549,17 +566,45 @@ real_poster(void *argument)
 			real_posted++;
 		if (woken != 0)
 			real_up();
-		if (now_ns() > give_up)
-			fail("lost: a record never taken");
+		if (!posted)
+			(void)sched_yield();
 	}
 	return (NULL);
+}
+
+/*
+ * Waits for the last record to be taken, checking every millisecond. Progress is the
+ * judge: the run fails only when no record has been taken for RACE_PATIENCE_NS.
+ */
+static void
+real_watch(void)
+{
+	const struct timespec tick = { .tv_sec = 0, .tv_nsec = 1000000 };
+	uint64_t seen = 0, since = monotonic_ns();
+
+	while (real_taken < RACE_ROUNDS) {
+		const uint64_t taken = real_taken, now = monotonic_ns();
+
+		if (taken != seen) {
+			seen = taken;
+			since = now;
+		} else if (now - since > RACE_PATIENCE_NS) {
+			char what[128];
+
+			/* A lost record leaves one more posted than taken; equal counts mean the poster stalled. */
+			(void)snprintf(what, sizeof(what), "lost: no record taken in %llu s (%llu posted, %llu taken)",
+			    (unsigned long long)(RACE_PATIENCE_NS / 1000000000), (unsigned long long)real_posted,
+			    (unsigned long long)taken);
+			fail(what);
+		}
+		(void)nanosleep(&tick, NULL);
+	}
 }
 
 static void
 run_race(void)
 {
 	pthread_t waiter, poster;
-	const uint64_t give_up = now_ns() + RACE_PATIENCE_NS;
 
 	erx_backend_gates_init(&real_gates, &pages);
 	if (erx_backend_gate_open(&real_gates, 0) != ERX_OK)
@@ -567,10 +612,8 @@ run_race(void)
 	(void)erx_backend_gate_bind(&real_gates, erx_backend_gate_at(&real_gates, 0), 1);
 	pthread_create(&waiter, NULL, real_waiter, NULL);
 	pthread_create(&poster, NULL, real_poster, NULL);
+	real_watch();
 	pthread_join(poster, NULL);
-	while (real_taken < RACE_ROUNDS)
-		if (now_ns() > give_up)
-			fail("lost: a record never taken");
 	real_stop = 1;
 	pthread_join(waiter, NULL);
 	erx_backend_gates_clear(&real_gates);

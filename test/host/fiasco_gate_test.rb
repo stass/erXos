@@ -73,7 +73,7 @@ class FiascoGateTest < Minitest::Test
   MUTANTS.each do |name, (original, replacement, mode, diagnostic)|
     define_method("test_seed_#{name.tr(' ', '_')}") do
       source = File.read(File.join(ROOT, CORES.first))
-      assert_includes source, original, 'the seed no longer applies'
+      assert_equal 1, source.scan(original).size, 'the seed no longer applies to exactly one place'
       seeded = File.join(@directory, File.basename(CORES.first))
       File.write(seeded, source.sub(original) { replacement })
       driver = build([seeded, File.join(ROOT, CORES.last)], name: "seed-#{name}", flags: [])

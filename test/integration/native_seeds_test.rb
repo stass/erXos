@@ -61,7 +61,9 @@ class NativeSeedsTest < Minitest::Test
                                                            suite: :task, cpus: 1, expected: /service FAILED/),
     'the thread deletion skipped' => Seed.new(file: TASK, from: "\t\t\ttask_delete(erx_fiasco_task_thread_cap(task, index));\n", to: "\t\t\tcontinue;\n",
                                               suite: :task, cpus: 1, expected: /service FAILED/),
-    'the memory step skipped' => Seed.new(file: TASK, from: "\terx_fiasco_vm_task_close(task);\n", to: '',
+    # The create path's error exit closes the range table too, so the seed anchors on the teardown's pair.
+    'the memory step skipped' => Seed.new(file: TASK, from: "\terx_fiasco_gate_task_gone(task);\n\terx_fiasco_vm_task_close(task);\n",
+                                          to: "\terx_fiasco_gate_task_gone(task);\n",
                                           suite: :task, cpus: 1, expected: /service FAILED/),
     'the pets ignored' => Seed.new(file: WATCHDOG, from: "\t\tif (pet != last_pet) {", to: "\t\tif (false && pet != last_pet) {",
                                    suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/),
@@ -105,7 +107,7 @@ class NativeSeedsTest < Minitest::Test
         end
         path = File.join(directory, seed.file)
         text = File.read(path)
-        assert_includes text, seed.from, 'the seed no longer applies'
+        assert_equal 1, text.scan(seed.from).size, 'the seed no longer applies to exactly one place'
         File.write(path, text.sub(seed.from) { seed.to })
         error = assert_raises(Erx::Error) { run_suite(directory, seed) }
         assert_match seed.expected, error.message
