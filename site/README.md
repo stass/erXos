@@ -97,6 +97,8 @@ gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source
 * `style.css` holds every style. Colours are tokens on `:root`, redefined
   for dark mode. The status lights are CSS only; their blinking and the
   progress bar's easing stop under `prefers-reduced-motion`.
+* `favicon.svg` is the tab icon: the orange square of the header bar's
+  mark on the page's ink.
 * `terminal.js` runs the console window (below).
 
 The text follows the README's "Current status". When that section

@@ -29,7 +29,7 @@ module Erx
   # the erXos source it was built from, a release tag or a commit, beside
   # the console (docs/design.md, "Licences and notices").
   module Site
-    PAGE_FILES = %w[index.html style.css terminal.js].freeze
+    PAGE_FILES = %w[index.html style.css favicon.svg terminal.js].freeze
     MANIFEST = 'boot.json'
     # Marks a directory this step built; the server's route table skips it.
     MARKER = '.erx-site'
@@ -85,6 +85,7 @@ module Erx
                 'image' => "image-#{image_sha256[0, 16]}.boot.gz" }
               .merge(emulator.to_h { |name, path| [name, "v64/#{digest_name(name, digest.(path))}"] })
       entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), gzip: false),
+                 Entry.new(path: 'favicon.svg', source: page.fetch('favicon.svg'), gzip: false),
                  Entry.new(path: names.fetch('terminal.js'), source: page.fetch('terminal.js'), gzip: false),
                  *emulator.map { |name, path| Entry.new(path: names.fetch(name), source: path, gzip: false) },
                  *notices.map { |name, path| Entry.new(path: "v64/#{name}", source: path, gzip: false) },
@@ -152,7 +153,8 @@ module Erx
     private_class_method :write
 
     CONTENT_TYPES = {
-      '.html' => 'text/html; charset=utf-8', '.css' => 'text/css', '.js' => 'text/javascript',
+      '.html' => 'text/html; charset=utf-8', '.css' => 'text/css', '.svg' => 'image/svg+xml',
+      '.js' => 'text/javascript',
       '.mjs' => 'text/javascript', '.wasm' => 'application/wasm', '.json' => 'application/json',
       '.gz' => 'application/gzip'
     }.freeze
