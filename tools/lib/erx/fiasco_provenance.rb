@@ -124,20 +124,19 @@ module Erx
     end
 
     # The toolchain files a build may compile from: GCC's, and, when the
-    # C17 cores were built with clang (compiler), LLVM's resource headers.
-    # Each must match its reviewed profile byte for byte.
-    def self.external_registry(root:, compiler: nil)
-      gcc_registry(root: root) + llvm_registry(root: root, compiler: compiler)
+    # C17 cores were built with clang (compiler), LLVM's resource headers,
+    # which runner asks that clang to locate. Each must be one its reviewed
+    # profile admits.
+    def self.external_registry(root:, compiler: nil, runner: nil)
+      gcc_registry(root: root) + llvm_registry(root: root, compiler: compiler, runner: runner)
     end
 
-    def self.llvm_registry(root:, compiler:)
+    def self.llvm_registry(root:, compiler:, runner:)
       return [] unless compiler
+      raise Error, "locating the C17 cores' clang resource headers needs a runner" unless runner
 
-      installation = File.expand_path('..', File.dirname(File.realpath(compiler)))
-      ToolchainProvenance.registry(profile: File.join(root, 'config/provenance/llvm-23.1.3.json'),
-                                   installation: installation)
-    rescue SystemCallError => error
-      raise Error, "cannot find the C17 cores' clang installation: #{error.message}"
+      resource = runner.run([compiler, '-print-resource-dir'], name: 'fiasco-clang-resource', deadline: 30)
+      ToolchainProvenance.llvm(root: root, resource_dir: BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
     end
 
     def self.gcc_registry(root:)

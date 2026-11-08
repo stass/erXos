@@ -200,7 +200,7 @@ class PackProvenanceTest < Minitest::Test
                  'linker_map' => reference(@map).merge('format' => 'lld', 'directory' => '.'),
                  'compiles' => [{ 'object' => reference(@object), 'dependency' => reference(@dependency),
                                   'directory' => '.', 'sources' => [reference(@source)] }],
-                 'archives' => [], 'inputs' => [] }
+                 'archives' => [], 'inputs' => [], 'toolchain' => { 'clang' => '23.1.2', 'lld' => '23.1.2' } }
     @resolver = Erx::PackProvenance.new(root: @root, catalog: build_catalog)
   end
 
@@ -243,6 +243,19 @@ class PackProvenanceTest < Minitest::Test
     receipt = write('compiled.json', JSON.generate({ 'version' => 1, 'kind' => 'compiled', 'artifact' => reference(@artifact) }.merge(receipt_fields)))
     @resolver.instance_variable_set(:@catalog, build_catalog)
     @resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'development')
+  end
+
+  # A linked receipt names the clang and lld versions that made it, as digits
+  # and dots: a build record says what built the artifact.
+  def test_a_linked_receipt_names_its_toolchain
+    resolve
+    [nil, {}, { 'clang' => '23.1.2' }, { 'clang' => '23.1.2', 'lld' => '23.1' },
+     { 'clang' => '23.1.2', 'lld' => "23.1.2\n" }, { 'clang' => 23, 'lld' => '23.1.2' },
+     { 'clang' => '23.1.2', 'lld' => '23.1.2', 'gcc' => '16.2.0' }].each do |toolchain|
+      @receipt['toolchain'] = toolchain
+      @receipt.delete('toolchain') if toolchain.nil?
+      assert_raises(Erx::Error) { resolve }
+    end
   end
 
   def test_a_compiled_receipt_attributes_its_sources

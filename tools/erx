@@ -43,7 +43,7 @@ begin
   require_relative 'lib/erx/bench'
   require_relative 'lib/erx/bench_g3'
   require_relative 'lib/erx/toolchain_provenance'
-  require_relative 'lib/erx/llvm_pin'
+  require_relative 'lib/erx/llvm_version'
   require_relative 'lib/erx/code_commands'
 rescue Erx::Error, SystemCallError => error
   Erx::Terminal.puts(error.message)
@@ -147,7 +147,7 @@ module Erx
       checks_class.new(root: ROOT, runner: runner).run
       arch_terms.check(root: ROOT)
       rc_oracle.call(runner: runner)
-      runtime.call(runner: runner, purpose: :image) do |environment|
+      runtime.call(runner: runner) do |environment|
         stack_proof(runner: runner, environment: environment)
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
         raise Error, 'no host tests found' if tests.empty?
@@ -192,39 +192,47 @@ module Erx
       0
     end
 
-    # The checked LLVM resource-header inventory is the fixture's provenance
-    # input. An arbitrary compiler selected by PATH cannot stand in for it.
-    # purpose is :image for a command whose output enters an image or its
-    # reproducibility check, and :host_tests for a host-only test gate
-    # (LlvmPin says which LLVM releases each admits).
-    def self.host_environment(runner:, purpose:)
+    # The clang and lld every build and test gate uses: ERX_CLANG and ERX_LLD,
+    # an LLVM release LlvmVersion takes (a note names one other than the
+    # release version), whose resource headers the reviewed LLVM profile
+    # admits. An arbitrary compiler selected by PATH cannot stand in for it.
+    def self.host_environment(runner:)
       compiler = ENV['ERX_CLANG']
       if !compiler || compiler.empty?
-        raise Error, 'set ERX_CLANG to the installed LLVM 23.1.3 clang; see README.md'
+        raise Error, "set ERX_CLANG to an installed LLVM #{LlvmVersion::MINIMUM.join('.')} or newer clang; see README.md"
       end
       compiler = File.realpath(compiler)
       raise Error, 'ERX_CLANG is not an executable compiler' unless File.file?(compiler) && File.executable?(compiler)
-      linker = ENV.fetch('ERX_LLD', 'ld.lld')
       path = [File.dirname(compiler), ENV.fetch('PATH', '')].join(File::PATH_SEPARATOR)
-      { 'clang' => compiler, 'lld' => linker }.each do |name, program|
-        identity = runner.run([program, '--version'], name: "check-#{name}-version", deadline: 30,
-                              env: { 'PATH' => path })
-        first_line = BoundedFile.read(identity.fetch('log'), maximum: 65_536).lines.first.to_s
-        found = LlvmPin.admit(tool: name, first_line: first_line, purpose: purpose)
-        next if purpose == :image || found == LlvmPin::VERSION
-
-        Terminal.puts("note: host tests use #{name} #{found}, not the pinned LLVM #{LlvmPin::VERSION}")
+      linker = executable_on(ENV.fetch('ERX_LLD', 'ld.lld'), path: path)
+      LlvmVersion.toolchain(compiler: compiler, linker: linker, runner: runner, name: 'check', env: { 'PATH' => path })
+                 .each do |tool, version|
+        note = LlvmVersion.admit(tool: tool, version: version)
+        Terminal.puts(note) if note
       end
       resource = runner.run([compiler, '-print-resource-dir'], name: 'check-clang-resource', deadline: 30)
-      installation = File.expand_path('../../..', BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
-      ToolchainProvenance.registry(profile: File.join(ROOT, 'config/provenance/llvm-23.1.3.json'),
-                                  installation: installation)
+      ToolchainProvenance.llvm(root: ROOT, resource_dir: BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
       { 'ERX_CLANG' => compiler, 'CC' => compiler, 'ERX_LLD' => linker, 'PATH' => path }
         .merge(SanitizerEnvironment.call(compiler: compiler)).freeze
     end
 
-    def self.with_test_runtime(runner:, purpose:, oracle_class: Oracle, host_environment: method(:host_environment))
-      environment = host_environment.call(runner: runner, purpose: purpose)
+    # program as an absolute path: itself when it names a directory, else the
+    # first executable of that name on path, so the lld whose version
+    # host_environment checks is the one every later step runs.
+    def self.executable_on(program, path:)
+      found = if program.include?('/')
+                File.expand_path(program)
+              else
+                path.split(File::PATH_SEPARATOR).map { |directory| File.join(directory, program) }
+                    .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
+              end
+      raise Error, "ERX_LLD names no executable linker" unless found && File.file?(found) && File.executable?(found)
+
+      found
+    end
+
+    def self.with_test_runtime(runner:, oracle_class: Oracle, host_environment: method(:host_environment))
+      environment = host_environment.call(runner: runner)
       oracle_class.new(root: ROOT, runner: runner).with_runtime('jit') do |runtime|
         yield Oracle::CLEAN_ERLANG_ENV.merge(environment)
                   .merge('ERX_ERL' => runtime.fetch('erl'), 'ERX_ERLC' => runtime.fetch('erlc')).freeze
@@ -245,7 +253,7 @@ module Erx
       no_arguments(arguments)
       require_relative 'lib/erx/production_image'
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      environment = host_environment(runner: runner, purpose: :image)
+      environment = host_environment(runner: runner)
       compiler = environment.fetch('ERX_CLANG')
       fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
       fiasco.build(jobs: 4)
@@ -264,7 +272,7 @@ module Erx
       no_arguments(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       tests = SanitizerTests.discover(root: ROOT)
-      runtime.call(runner: runner, purpose: :host_tests) do |environment|
+      runtime.call(runner: runner) do |environment|
         run_tests(tests.map { |test| File.join(ROOT, test) }, runner: runner, name: 'sanitizer-tests',
                   environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
       end
@@ -312,7 +320,7 @@ module Erx
         raise OptionParser::InvalidArgument, 'fuzz budget, seed or trailing arguments outside bounds'
       end
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      runtime.call(runner: runner, purpose: :host_tests) do |environment|
+      runtime.call(runner: runner) do |environment|
         c_fuzzer.call(runner: runner, environment: environment, runs: options.fetch(:runs), seed: options.fetch(:seed))
         ruby_fuzzer.call(runner: runner, environment: environment, seconds: options.fetch(:seconds), seed: options.fetch(:seed))
         runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/abi_erlang_test.rb'),
@@ -432,7 +440,7 @@ module Erx
       no_arguments(arguments)
       require_relative 'lib/erx/production_image'
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      environment = host_environment(runner: runner, purpose: :image)
+      environment = host_environment(runner: runner)
       compiler = environment.fetch('ERX_CLANG')
       fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
       fiasco.build(jobs: 4)
@@ -459,7 +467,7 @@ module Erx
     def self.check_stack_proof(arguments, runner_class: Runner, host_environment: method(:host_environment))
       no_arguments(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      stack_proof(runner: runner, environment: host_environment.call(runner: runner, purpose: :image))
+      stack_proof(runner: runner, environment: host_environment.call(runner: runner))
       Terminal.puts('stack proof passed; report: build/stack-proof/report.txt')
       0
     end

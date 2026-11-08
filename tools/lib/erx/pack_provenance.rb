@@ -39,6 +39,10 @@ module Erx
       end
     end
 
+    # A version a linked receipt's toolchain names, as LlvmVersion.parse
+    # writes it.
+    TOOLCHAIN_VERSION = /\A\d{1,4}\.\d{1,4}\.\d{1,4}\z/
+
     # Returns only stable, public names. The caller may include these facts in
     # manifest admission and render NOTICES from the same checked closure.
     def resolve(receipt:, artifact:, build_kind:, notice_budget: MAX_METADATA)
@@ -235,7 +239,12 @@ module Erx
                 build_kind: build_kind, depth: depth + 1, expected: file.fetch('sha256'))
         end
       when 'linked'
-        exact_keys(receipt, %w[version kind artifact linker_map compiles archives inputs])
+        exact_keys(receipt, %w[version kind artifact linker_map compiles archives inputs toolchain])
+        toolchain = receipt.fetch('toolchain')
+        unless toolchain.is_a?(Hash) && toolchain.keys.sort == %w[clang lld] &&
+               toolchain.values.all? { |version| version.is_a?(String) && TOOLCHAIN_VERSION.match?(version) }
+          raise Error, 'a linked receipt names its clang and lld versions as digits'
+        end
         resolve_link(receipt, records: records, build_kind: build_kind)
       when 'fiasco'
         resolve_fiasco(receipt, records: records, build_kind: build_kind)
@@ -305,7 +314,7 @@ module Erx
       # One audit answers every receipt of this resolver: it reads the whole of Fiasco's
       # build, and an image names that build once per entry and again at its snapshot.
       @fiasco_audit ||= begin
-        external = FiascoProvenance.external_registry(root: @root, compiler: @compiler)
+        external = FiascoProvenance.external_registry(root: @root, compiler: @compiler, runner: @runner)
         auditor = FiascoProvenance.new(root: @root, runner: @runner, external: external, compiler: @compiler)
         fresh = auditor.audit
         [external, fresh, auditor.input_catalog].freeze

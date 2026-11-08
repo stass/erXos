@@ -78,9 +78,7 @@ module Erx
 
     def external
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
-      installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
-      ToolchainProvenance.registry(profile: File.join(@root, 'config/provenance/llvm-23.1.3.json'),
-                                   installation: installation)
+      ToolchainProvenance.llvm(root: @root, resource_dir: File.read(resource.fetch('log')).strip)
     end
   end
 end

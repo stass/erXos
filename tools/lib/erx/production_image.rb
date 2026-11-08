@@ -1204,8 +1204,7 @@ module Erx
     # jit is the BeamAsm build when the image carries its runtime image, or nil.
     def external(erts, jit)
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
-      installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
-      ToolchainProvenance.registry(profile: File.join(@root, 'config/provenance/llvm-23.1.3.json'), installation: installation) +
+      ToolchainProvenance.llvm(root: @root, resource_dir: File.read(resource.fetch('log')).strip) +
         [*archives(erts), *jit_archives(jit)].map { |archive| external_archive(archive) }
     end
 

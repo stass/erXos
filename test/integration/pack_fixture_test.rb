@@ -52,9 +52,7 @@ class PackFixtureTest < Minitest::Test
     assert_equal Digest::SHA256.file(first.fetch('artifact')).hexdigest,
                  receipt.fetch('artifact').fetch('sha256')
     resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
-    installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
-    external = Erx::ToolchainProvenance.registry(profile: File.join(@root, 'config/provenance/llvm-23.1.3.json'),
-                                                installation: installation)
+    external = Erx::ToolchainProvenance.llvm(root: @root, resource_dir: File.read(resource.fetch('log')).strip)
     resolver = Erx::PackProvenance.new(root: @root, catalog: first.fetch('catalog').merge(second.fetch('catalog')), external: external, runner: @runner)
     first_closure = resolver.resolve(receipt: first.fetch('receipt'), artifact: first.fetch('artifact'),
                                      build_kind: 'development')

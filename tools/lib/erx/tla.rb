@@ -278,7 +278,6 @@ module Erx
     CLEAN_JAVA_ENV = { 'JAVA_TOOL_OPTIONS' => nil, '_JAVA_OPTIONS' => nil,
                        'JDK_JAVA_OPTIONS' => nil, 'CLASSPATH' => nil,
                        'TLA_LIBRARY' => nil }.freeze
-    DEFAULT_JAR = '/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar'
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                    java: ENV.fetch('JAVA', 'java'), jar: ENV['TLA_TOOLS_JAR'])
@@ -290,7 +289,7 @@ module Erx
                              .find { |source| source.fetch('id') == 'tla-tools' }
       raise Error, 'TLA tool has no pinned dependency' unless @pin
       fetched = File.join(@root, 'build/third_party/tla-tools/tla2tools.jar')
-      @jar = File.expand_path(jar || (File.file?(DEFAULT_JAR) ? DEFAULT_JAR : fetched))
+      @jar = File.expand_path(jar || fetched)
     end
 
     def run(filter: nil, no_cache: ENV['TLA_NO_CACHE'] == '1')

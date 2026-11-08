@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "label": "llvm",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "status": "permanent",
+  "evidence": "each resource header's own SPDX-License-Identifier line and LLVM LICENSE.TXT",
+  "notices": {
+    "LICENSE.TXT": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+  },
+  "files": {
+    "include/__stdarg___gnuc_va_list.h": "spdx",
+    "include/__stdarg___va_copy.h": "spdx",
+    "include/__stdarg_header_macro.h": "spdx",
+    "include/__stdarg_va_arg.h": "spdx",
+    "include/__stdarg_va_copy.h": "spdx",
+    "include/__stdarg_va_list.h": "spdx",
+    "include/__stddef_header_macro.h": "spdx",
+    "include/__stddef_max_align_t.h": "spdx",
+    "include/__stddef_null.h": "spdx",
+    "include/__stddef_offsetof.h": "spdx",
+    "include/__stddef_ptrdiff_t.h": "spdx",
+    "include/__stddef_size_t.h": "spdx",
+    "include/__stddef_wchar_t.h": "spdx",
+    "include/stdalign.h": "spdx",
+    "include/stdarg.h": "spdx",
+    "include/stdatomic.h": "spdx",
+    "include/stdbool.h": "spdx",
+    "include/stddef.h": "spdx",
+    "include/stdint.h": "spdx"
+  }
+}

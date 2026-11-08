@@ -317,7 +317,7 @@ Apple Silicon macOS is the primary host. You need:
 
 * Ruby, any version, with minitest and REXML;
 * GNU make, GNU timeout (`gtimeout`) and Perl;
-* LLVM clang 23.1.3, lld and the LLVM binary tools;
+* LLVM clang and lld 23.1.0 or newer, and the LLVM binary tools;
 * AArch64 ELF GCC and binutils;
 * Autoconf, Automake and Libtool, and a C and C++ compiler, which build
   fsimg, the tool that writes and verifies the EROFS images (`make setup`
@@ -330,12 +330,21 @@ Apple Silicon macOS is the primary host. You need:
 
 Install missing tools through Homebrew.
 
-Point the build at your compiler. Apple's SDK clang will not do: the
-checks compare clang's and lld's versions, and the compiler's resource
-headers, with `config/provenance/llvm-23.1.3.json`. Everything that
-builds an image or checks its reproducibility needs exactly 23.1.3; the
-host-only test gates (`check-fuzz`, `check-sanitizers`) also take another
-23.1.x patch release and print a note naming it. For Homebrew at
+Point the build at your compiler. Every build, of an image or of a host
+test, takes LLVM 23.1.0 or newer, refuses an older release, and prints a
+note naming any version other than 23.1.3, saying when it is newer than
+the 23.1 series the tree is tested with. The record of what built an image
+(the root's `linked` receipt) names the clang and lld versions that ran,
+and two builds on one host are byte-identical (`make check-reproducible`).
+Release images are built with exactly LLVM 23.1.3, and their hashes are
+published so a rebuild can be compared.
+
+Only LLVM will do, and not Apple's SDK clang or GCC: the build uses clang
+as a cross compiler (`--target`) and its sanitizers with
+`llvm-symbolizer`, links with lld and reads lld's link maps for the
+image's source record, and admits into an image only the LLVM resource
+headers that `config/provenance/llvm.json` lists, each by its own LLVM
+license line. For Homebrew at
 `/opt/homebrew` (Apple Silicon; Intel Macs use `/usr/local`, which
 `brew --prefix` prints):
 

@@ -74,8 +74,8 @@ module Erx
     BUILD_RECORD_BYTES = 65_536
 
     # compiler is the LLVM clang that builds the C17 cores' archive; the
-    # resource headers it compiles with must match
-    # config/provenance/llvm-23.1.3.json.
+    # resource headers it compiles with must be those the reviewed LLVM
+    # profile admits (ToolchainProvenance.llvm).
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                    compiler: ENV.fetch('ERX_CLANG', ''))
       @root = File.expand_path(root)
@@ -114,7 +114,7 @@ module Erx
     def build(jobs: 4)
       @input_catalog = nil
       raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
-      raise Error, 'set ERX_CLANG to the installed LLVM 23.1.3 clang; see README.md' if @compiler.to_s.empty?
+      raise Error, 'set ERX_CLANG to an installed LLVM 23.1.0 or newer clang; see README.md' if @compiler.to_s.empty?
       required = %w[kernel mk l4re-core bootstrap libfdt drivers-frst]
       raise Error, 'imported Fiasco source root must not be a symlink' if File.symlink?(@source)
       required.each do |name|
@@ -187,7 +187,8 @@ module Erx
     def record_provenance
       require_relative 'fiasco_provenance'
       auditor = FiascoProvenance.new(root: @root, runner: @runner,
-                                     external: FiascoProvenance.external_registry(root: @root, compiler: @compiler),
+                                     external: FiascoProvenance.external_registry(root: @root, compiler: @compiler,
+                                                                                  runner: @runner),
                                      compiler: @compiler)
       auditor.capture_construction
       report = auditor.audit

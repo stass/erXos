@@ -32,7 +32,6 @@ module Erx
   class Release
     MANIFEST = 'config/manifest/qemu-virt-development.txt'
     PLATFORM = 'config/platforms/qemu-virt.json'
-    TOOLCHAIN_PROFILE = 'config/provenance/llvm-23.1.3.json'
     # What an archive names by itself rather than by the release: the root and these
     # two say what each build links, so a comparison of two archives leaves them out,
     # as it leaves out the build facts at the ABI's build_facts_path, which say which
@@ -129,8 +128,7 @@ module Erx
 
     def toolchain
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
-      installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
-      ToolchainProvenance.registry(profile: File.join(@root, TOOLCHAIN_PROFILE), installation: installation)
+      ToolchainProvenance.llvm(root: @root, resource_dir: File.read(resource.fetch('log')).strip)
     end
   end
 end

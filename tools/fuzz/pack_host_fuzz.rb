@@ -79,7 +79,7 @@ module Erx
                   'compiles' => [{ 'object' => references.fetch('root.o'),
                                    'dependency' => references.fetch('root.d'), 'directory' => '.',
                                    'sources' => [references.fetch('root.c')] }],
-                  'archives' => [], 'inputs' => [] }
+                  'archives' => [], 'inputs' => [], 'toolchain' => { 'clang' => '23.1.3', 'lld' => '23.1.3' } }
       [receipt, File.join(directory, 'root.elf')]
     end
     private_class_method :receipt_seed

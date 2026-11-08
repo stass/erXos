@@ -2655,13 +2655,28 @@ to the corpus and follow rc
   every file under a directory with an `ORIGIN.md` through that origin's
   inventory, as the fork parts are, never through the header rule, and
   test it with a captured-inputs fixture.
-* [Medium] build, cores' compiler: `tools/erx build fiasco` takes
-  `ERX_CLANG` as given, without `host_environment`'s LLVM 23.1.3 version
-  check; the audit derives the LLVM installation from the driver's path
-  (`FiascoProvenance.llvm_registry`) while `tools/erx` derives it from
-  `-print-resource-dir`; and the recorded clang hash is the driver's, not
-  `libclang-cpp` and `libLLVM`, which hold the code generator. Share one
-  verified compiler identity and hash the linked libraries.
+* [Medium] build, compiler identity: several paths that build Fiasco, an
+  image or a QEMU guest read `ERX_CLANG` (and `ERX_LLD`) themselves and
+  never check the LLVM version `host_environment` admits (the minimum of
+  `Erx::LlvmVersion`): `tools/erx build fiasco` and `BootImageCheck` in
+  `tools/erx`, `Fiasco`'s default compiler (`tools/lib/erx/fiasco.rb`),
+  `interactive_boot.rb`, `medium_boot.rb` and the `native_*.rb` harnesses.
+  `NativeRoot` reads and checks the versions of what it runs itself, so
+  their linked receipts name those. Have those paths take one verified
+  toolchain value from `host_environment` (absolute clang and lld, their
+  admitted versions and the LLVM header registry) in place of raw
+  `compiler:` and `linker:` strings, so the seven `-print-resource-dir`
+  lookups become one. A release build (`build_kind: 'release'`) should
+  also refuse a receipt whose versions are not `LlvmVersion::RELEASE`,
+  which docs/plan.md's M11 requires. Separately, the recorded clang hash is the driver's, not
+  `libclang-cpp` and `libLLVM`, which hold the code generator; hash the
+  linked libraries.
+* [Low] build, stopgap GCC profile: `config/provenance/gcc-16.2.0.json`
+  pins the files of `aarch64-elf-gcc` 16.2.0 that Fiasco's link takes by
+  SHA-256, so a host with another GCC release cannot build the stopgap
+  kernel. Admit them by their own license notices, as the LLVM profile's
+  `spdx` entries admit LLVM's headers, if a second host needs it before
+  the stopgap leaves.
 * [Medium] build, glue seam: the glue's include path is a copy of
   `include/erx/core/` under `build/fiasco/cores/seam/`, and the audit
   (`FiascoProvenance#erxos_source`) maps any path below `seam/` back to

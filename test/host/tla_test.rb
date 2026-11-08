@@ -402,6 +402,17 @@ class TlaExecutionTest < Minitest::Test
     type.new(root: @directory, runner: @runner, java: @java, jar: @jar, **options)
   end
 
+  # The fetch step's jar is the one deps.lock pins, so with no TLA_TOOLS_JAR it
+  # is the jar TLC runs, and nothing else installed on the host stands in for it.
+  def test_the_fetched_jar_is_the_default
+    fetched = File.join(@directory, 'build/third_party/tla-tools/tla2tools.jar')
+    FileUtils.mkdir_p(File.dirname(fetched))
+    FileUtils.copy_file(@jar, fetched)
+    executor = TlaFixture.new(root: @directory, runner: @runner, java: @java, jar: nil)
+    assert_equal fetched, executor.instance_variable_get(:@jar)
+    executor.send(:validate_jar)
+  end
+
   def test_changed_config_is_validated_from_the_same_snapshot_as_execution
     roster([entry])
     assert_raises(Erx::Error) { executor(EditingTlaFixture).run(no_cache: true) }

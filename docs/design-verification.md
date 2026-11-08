@@ -61,15 +61,15 @@ A mechanism change updates its model and mapping in the same change, or
 explains in the commit why the abstraction and checked properties hold
 unchanged. Changes outside modeled mechanisms do not require a TLC run.
 
-`TLA_TOOLS_JAR` selects `tla2tools.jar`; the macOS default is
-`/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar`, as in
-OpenBDB. A JVM is a host prerequisite installed through Homebrew. The
-jar's accepted version and SHA-256 are pinned before use; an override
-selects a location, not permission to use different bytes. The runner
-checks the jar hash and records the Java version. Missing or mismatched
-tools fail a requested check with a diagnostic; no tool is downloaded
-during a check. The explicit fetch step can supply the pinned jar on
-hosts without the Toolbox installation.
+The explicit fetch step supplies `tla2tools.jar` into
+`build/third_party/tla-tools/`, and that is the jar a check runs;
+`TLA_TOOLS_JAR` selects another location. A JVM is a host prerequisite
+installed through Homebrew. The jar's accepted version and SHA-256 are
+pinned before use; an override selects a location, not permission to use
+different bytes, so a TLA+ Toolbox installation's copy serves only when it
+is the pinned release. The runner checks the jar hash and records the Java
+version. Missing or mismatched tools fail a requested check with a
+diagnostic; no tool is downloaded during a check.
 
 Each roster entry names a module, configuration, translation kind and
 expectation. Every configuration belongs to exactly one entry; duplicate,

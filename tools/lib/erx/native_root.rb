@@ -8,6 +8,7 @@ require 'json'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'interpreter_image'
+require_relative 'llvm_version'
 require_relative 'pack_provenance'
 
 module Erx
@@ -203,13 +204,17 @@ module Erx
     def map_path(program) = "#{program}.map"
 
     # A linked receipt over program: its objects, compiled from sources into directory,
-    # their dependency files, the link map and the link script; and every file it names.
+    # their dependency files, the link map and the link script, and the versions of the
+    # clang that compiled those objects and the lld that linked them (archives built by
+    # other steps carry no compile record here, so the versions cover only this step);
+    # and every file it names.
     def receipted(program, sources:, script:, directory:)
       compiles = sources.map { |source| compile_record(source, directory: directory) }
       linked = {
         'version' => 1, 'kind' => 'linked', 'artifact' => reference(program),
         'linker_map' => reference(map_path(program)).merge('format' => 'lld', 'directory' => '.'),
-        'compiles' => compiles, 'archives' => [], 'inputs' => [reference(File.join(@root, script))]
+        'compiles' => compiles, 'archives' => [], 'inputs' => [reference(File.join(@root, script))],
+        'toolchain' => toolchain
       }
       receipt = File.join(directory, "#{File.basename(program)}.receipt.json")
       File.write(receipt, JSON.pretty_generate(linked) + "\n")
@@ -217,6 +222,11 @@ module Erx
       inputs = [program, map_path(program), receipt, File.join(@root, script),
                 *named.map { |file| File.expand_path(file.fetch('path'), @root) }].uniq
       { program: program, receipt: receipt, inputs: inputs.freeze }.freeze
+    end
+
+    # What --version of the compiler and linker this root runs reports, read once.
+    def toolchain
+      @toolchain ||= LlvmVersion.toolchain(compiler: @compiler, linker: @linker, runner: @runner, name: 'native-root')
     end
 
     def compile_record(source, directory:)
