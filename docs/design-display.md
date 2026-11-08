@@ -3,12 +3,15 @@
 A display is a domain that holds a display device and the input devices
 that go with it, and serves **windows** to the rest of the system as
 files. A window is a rectangle of pixels with an input stream, and the
-same window serves three kinds of client: a program that draws, with
-Plan 9's draw protocol; an Erlang application that describes a user
-interface as a term and receives events as messages; and a terminal,
-which shows a session's tty and keeps the typed output of the shell and
-the inspector bound to the values it came from, as Genera's dynamic
-windows do. One display serves a desktop with overlapping windows under
+same window serves two kinds of client: a program that draws, with
+Plan 9's draw protocol, and an Erlang application that describes a user
+interface as a term and receives events as messages. A user's terminal
+is such a program of the user's own session, as xterm is a client of X:
+it shows its tty and keeps the typed output of the shell and the
+inspector bound to the values it came from, as Genera's dynamic windows
+do. The display domain composites windows and routes input, as rio or an
+X server does; it parses no program's output and holds no console line.
+One display serves a desktop with overlapping windows under
 QEMU `virt`, and one serves a kiosk, a dashboard or a pair of smart
 glasses with a single full-screen window, a touch panel, an encoder or a
 keypad, and a small panel on a serial bus: the same domain, the same
@@ -33,7 +36,7 @@ Decisions every reader of this document needs:
   program finds its window at `/dev/draw` and `/dev/mouse` exactly as a
   Plan 9 program does, and reaches no other window by construction.
 * **One client path.** Every client of a window, the display domain's
-  own terminal emulators, menu and widget renderers included, makes it
+  own menu and widget renderers included, makes it
   with `mkdir`, draws by writing `draw` and reads `mouse` and `kbd`
   through a file grant. The display domain holds a grant to its own tree
   as a domain holds its own `/tmp`, so no window is made or driven any
@@ -59,14 +62,16 @@ Decisions every reader of this document needs:
   every other hidden, for a kiosk or a pair of glasses. A policy decides
   geometry and which window takes each input event, and nothing else;
   drawing, input formats and clients are the same under both.
-* **A terminal window is a console line.** A terminal emulator in the
-  display domain owns a window and offers the console service a line, as
-  the serial port is one. The console service shows its menu and login on
-  it and connects a session's tty to it, so the login, the principal and
-  the session's authority are those of any console line; a window is not
-  a secure line in a release build, so it never carries the system shell,
-  and only the console decides which session a window opened without a
-  login serves.
+* **A terminal is a program of its session.** A user's terminal,
+  `erx_term`, is a supervised Erlang process in the user's session
+  domain: it makes its window through the session's grant, draws with a
+  glyph cache of its own, and is the master of a tty that the session's
+  terminal relay serves, as xterm is a client of X and the master of a
+  pseudo-terminal. The display serves it as it serves any client and
+  has no authority to start a program in a session, so the display's
+  menu has no item that opens a terminal; a terminal opens its sibling
+  windows itself. The system shell is reached only at the UART and the
+  host link.
 * **A user interface is a term, and events are messages.** An application
   sends the display the whole widget tree of a window as an Erlang term
   whenever its state changes; the window's widget server keeps the
@@ -107,9 +112,10 @@ Decisions every reader of this document needs:
   confidentiality of what is shown and typed at that display.
 * **No NIF in the display domain parses untrusted bytes.** A memory
   error in a native parser would reach every window's pixels and keys,
-  and a NIF's fault ends the whole runtime. The terminal emulator's core
-  `erx_vt` is Erlang, so its bug ends one terminal process; native code
-  that must parse runs in a sub-space holding only its window.
+  and a NIF's fault ends the whole runtime. The draw decoder and the
+  decoder of compressed pixels are Erlang, and no program's terminal
+  output reaches the display domain at all; native code that must parse
+  runs in a sub-space holding only its window.
 * **Nothing paints without a change.** Every byte that reaches a panel
   follows from a client's flush of a dirty rectangle or from a change of
   the windows' geometry. No timer redraws, so an idle display costs no
@@ -167,9 +173,10 @@ everywhere, and GPU acceleration is out of scope.
    desktop, through LVGL on a panel and through the browser renderer on
    the web, with the same values and the same events, each as fits its
    medium.
-5. A session's shell runs in a terminal window with its tty unchanged:
-   the login, `Ctrl-G` menu, job control and `termios` behave as on the
-   serial console.
+5. A session's shell runs in a terminal window over a tty of its own
+   session, unchanged: job control, the line editor and `termios` behave
+   as on the serial console, and the window shows that tty and nothing
+   else, as xterm does.
 6. Typed output of the shell and the inspector stays bound to its value
    in a terminal window and in widgets, degrades to re-parseable text on
    a plain terminal and over the host link, and grants nothing when
@@ -194,44 +201,47 @@ everywhere, and GPU acceleration is out of scope.
     with a default its session sets; with no display it gets a stated
     error at once, and when a display goes away each UI on it reports its
     end to its opener.
+14. The display domain composites windows and routes input, and does no
+    more for a terminal: it parses no program's output, holds no console
+    line and starts no program in a session.
 
 ## Overview
 
 ```text
  session domain                        display domain
-+-----------------------------+     +----------------------------------------+
++-----------------------------+     +-----------------------------------------+
 | program --draw bytes--> fid |     | erx_winfs (erx_fs): /S/N/{draw,ctl,     |
 |          <--mouse/kbd--     |---->|   mouse,kbd,wctl,label}, /S/snarf;      |
-|                             |     |   the window table, erx_wm's policy,    |
-|                             |     |   input routing                         |
-| Erlang app --ui ops-->      |     | erx_window: one process per window,     |
-|   display facet             |---->|   images in erx_memdraw (C)             |
-|            <--{ui,...}--    |     | erx_screen: the screen image, compose,  |
-| shell <-> tty <-----------> |     |   power, the only path to the driver    |
-|   (console service)         |     | erx_ui_server: one per widget window;   |
+| erx_term --draw, mouse, kbd |---->|   the window table, erx_wm's policy,    |
+|   erx_vt, its glyph cache;  |     |   input routing, the reserved chord     |
+|   master of a tty of the    |     | erx_window: one process per window,     |
+|   terminal relay <-> shell  |     |   images in erx_memdraw (C)             |
+| Erlang app --ui ops-->      |     | erx_screen: the screen image, compose,  |
+|   display facet             |---->|   power, the only path to the driver    |
+|            <--{ui,...}--    |     | erx_ui_server: one per widget window;   |
 +-----------------------------+     |   renderers: Erlang, LVGL (sub-space)   |
-                                    | erx_term: terminal emulator, a console  |
-                                    |   line, presentations                   |
+                                    | erx_wm_menu: the overlapping menu       |
                                     | drivers: display, pointer, keyboard,    |
                                     |   touch, encoder, keypad                |
-                                    +----------------------------------------+
+                                    +-----------------------------------------+
 ```
 
 A **display domain** is a configured domain of the manifest holding one
 display device and its input devices. Its release runs the display
 driver, the input drivers, the window file server `erx_winfs`, one window
 process `erx_window` per window, the screen owner `erx_screen`, the
-widget service behind the display facets, widget servers, terminal emulators, the overlapping
-policy's menu and, where the manifest asks for it, the LVGL renderer as
-a native program.
+widget service behind the display facets, widget servers, the
+overlapping policy's menu and, where the manifest asks for it, the LVGL
+renderer as a native program. It runs no terminal and no program of a
+session.
 
 A **window** is a directory a client makes with `mkdir` in a directory
 of a grant it holds. It is one process, `erx_window`, which holds the
 draw connection, whose image 0 is the window's pixels, and the window's
 pending input. Its files are the connection's `draw` and `ctl`, the
 input files `mouse` and `kbd`, the geometry file `wctl` and the title
-`label`. The display domain's own windows, terminal windows among them,
-are made the same way in its own directory of the tree.
+`label`. The display domain's own window, the overlapping policy's menu,
+is made the same way in its own directory of the tree.
 
 **Drawing** is Plan 9's: a client allocates images, draws between them
 with Porter-Duff compositing, loads and reads pixels, draws lines,
@@ -253,11 +263,12 @@ window's files; the LVGL renderer is a native program that receives the
 same difference operations on its standard input and draws into the same
 window through its own `/dev/draw`.
 
-**Terminal windows** are console lines: the console service connects a
-session's tty to a terminal emulator's line as it connects one to the
-serial port. The emulator draws the tty's bytes as a terminal does and
-sends keystrokes back. It parses one escape sequence of its own, the
-presentation link, and binds the linked text to its type and value.
+**Terminals** are programs of a session. `erx_term`, in the session's
+runtime, makes a window as any client does, draws its tty's bytes as a
+terminal does and sends the tty the keys typed in its window. It parses
+one escape sequence of its own, the presentation link, and binds the
+linked text to its type and value. The display domain sees the terminal
+as pixels and routes it keys, and nothing more.
 
 **Presentations** are the values of inspection attributes,
 typed by the inspection schema. `erx_render` writes each as its canonical
@@ -270,13 +281,13 @@ the shell and the application act with their own capabilities.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with the service terminal shown, the application's `kbd` receives nothing and its `r` of image 0 returns its own pixels, where a seeded delivery to the application fails it; the decoder's fuzz target |
+| **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with a second window made, the second window's `kbd` receives nothing and the application's `r` of image 0 returns its own pixels, where a seeded delivery to the hidden window fails it; the decoder's fuzz target |
 | **G2.** Each image is touched by one process at a time and lives while any process holds it, and every pixel loop runs over a clipped rectangle | a window's images are written only by its window process and the screen image only by `erx_screen`; `erx_screen` reads a window's image 0 only inside that window's flush call, which the window makes and waits on, and the driver reads an image only inside `erx_screen`'s call to it, which `erx_screen` waits on; calls run one way, window to `erx_screen` to driver, so no two wait on each other; an image is a NIF resource, freed by its destructor when no term refers to it, and `erx_memdraw` has no other free, so `f`, a resize and a window's end drop a reference and never free memory another process holds; the framebuffer is written only by the display driver's `erx_device:fill/3`; every function of `erx_memdraw` that touches pixel memory takes an `erx_clip_t`, which only `erx_draw_clip` produces, with checked arithmetic, from the operation's rectangles and both images' bounds | a read of an image outside its writer's call; a call from the driver or `erx_screen` back up the chain; an explicit free of an image; a loop over an unclipped rectangle | the build checks over `erx_memdraw`'s sources and the call direction (Chokepoints); the differential test against the reference renderer with rectangles far outside every image; the display suite in hosted mode under ThreadSanitizer, with windows drawing, resizing and ending while `erx_screen` composes and the driver copies, where a seeded compose outside the flush call makes it report; the same run under ASan, where a seeded explicit free makes it report |
 | **G3.** What a client makes the display domain spend is bounded by its grant | memory: a grant carries quotas of windows, pixel bytes and widget nodes; each image is charged its pixel bytes rounded up to 4 KiB, so the pixel quota bounds the image count too; a window checks each allocation against the quota with checked arithmetic before it allocates; images die with their window; a write carries at most the file protocol's 64 KiB, a widget tree at most the display facet's `max_request`; a window's pending input and dirty list are bounded. CPU: a client's draw work runs only in its windows' processes, at most the `windows` quota of them, each of which has at most one flush in `erx_screen` at a time; its widget work is admitted by its display facet within the grant's share of reductions | an allocation outside the quota check; an image that outlives its window; an unbounded queue; a window with two flushes outstanding | an allocation loop refused at the quota with `ENOMEM` and the domain's memory unchanged; a window closed with images left, all freed; a widget tree of one node more than the quota, refused whole; a client that floods flushes from one window while another window's one flush waits at most one compose, where a seeded second outstanding flush fails it |
 | **G4.** A presentation grants nothing | a presentation is a type and a canonical text; the terminal emulator's only actions on one are to insert its text as keyboard input and to highlight the presentations of the types an input context names; a widget's only action is the `{select, Type, Value}` event to its application; neither carries a facet, a grant or a capability, and the command that then runs is checked by the shell's facets as any typed command is ([Authority](design.md#authority)) | a terminal that calls a service for a clicked link; a widget server that performs the action a presentation names | a session without an inspect facet clicks a pid presentation and the inserted `i` command fails with `no_facet`; the link parser's fuzz target; a source check that `erx_term` and `erx_ui_server` call no facet |
 | **G5.** Attributed text in a window is displayed only through the line escape, and a program's output reaches its terminal window unchanged | a window's label, a widget's `present` text and a widget's text drawn from a record value are escaped by the displayer with `erx_text:escape_line/1` ([Attributed text](design-live.md#attributed-text)); the terminal emulator takes its bytes from a tty, which changes nothing but what `termios` says (V1), and interprets them as a terminal does | a label drawn raw; a terminal emulator that filters a program's bytes | the attributed-text test corpus of design-live sent as a label, as a `present` text and as a record value in a widget; V1's byte test with a terminal window in place of the serial line |
 | **G6.** Nothing paints without a change | the only path to the device is `erx_screen`, which composes on a window's flush call and asks windows to flush only when the layout changes, the driver restarts, the panel wakes or `erx_screen` itself restarts; the driver pushes only the rectangles it is given; no process of the display domain has a redraw timer | a periodic repaint; a flush of the whole screen for a small change | an idle display for one minute makes no device request, counted at the driver; a one-pixel change makes exactly one flush of one rectangle; moving a window flushes exactly the area whose content changed |
-| **G8.** What a program writes to a terminal window costs bounded memory, and nothing of it comes back as input | `erx_vt`'s state is bounded by its size and the constants of [Bounds](#bounds): parameters, intermediates and strings are capped, the scrollback is capped in cells and the link table in entries, and an endless sequence costs no memory; its only replies are DA's and DSR's fixed forms, whose variable parts are numbers it computes; it is Erlang, and no NIF of the display domain parses a program's bytes, so a fault in it ends one terminal process | a buffer that grows with a sequence; a report that echoes text, such as a title report; a native parser of program output | the fuzz target asserts the state's size against the bound computed from the size and the constants, where a seeded scrollback without its cap fails it; the reply test sends every query form, a title report among them, and checks every reply against the three forms, where a seeded title report fails it; the chokepoint check on the display release's NIFs |
+| **G8.** What a program writes to a terminal window costs bounded memory, and nothing of it comes back as input | `erx_vt`'s state is bounded by its size and the constants of [Bounds](#bounds): parameters, intermediates and strings are capped, the scrollback is capped in cells and the link table in entries, and an endless sequence costs no memory; its only replies are DA's and DSR's fixed forms, whose variable parts are numbers it computes; it is Erlang, so a fault in it ends one terminal process, not its session's runtime | a buffer that grows with a sequence; a report that echoes text, such as a title report; a native parser of program output | the fuzz target asserts the state's size against the bound computed from the size and the constants, where a seeded scrollback without its cap fails it; the reply test sends every query form, a title report among them, and checks every reply against the three forms, where a seeded title report fails it; the chokepoint check that only `erx_vt` interprets a terminal's output |
 | **G7.** A widget never fabricates | a `present` property and a value drawn from a record keep their `attr()` status; the renderer shows every status other than `ok` as its token, as `erx_render` does (V2) | a widget that drops a status | the status tests of design-live run through a widget tree, for each status and reporter |
 
 ## Data model
@@ -369,8 +380,8 @@ program finds both where it expects them.
 
 The display domain holds a grant of its own tree, rooted at the top, as
 a domain's runtime mounts its own `/tmp`
-([design-tmp.md](design-tmp.md#starting-and-mounting)). Its own windows,
-the terminal windows and the menu, live in its own directory beside the
+([design-tmp.md](design-tmp.md#starting-and-mounting)). Its own window,
+the menu, lives in its own directory beside the
 sessions', under that grant's quotas from the display's manifest entry;
 its widget servers make and draw an application's windows in the
 application's directory, so they are charged to the application's grant.
@@ -480,9 +491,9 @@ is the same text with every byte outside `A-Z a-z 0-9 _ + , : = @ - . /`
 written as `%` and two hexadecimal digits, the encoding of `/proc`'s
 names with `.` and `/` kept, so the sequence is ASCII and holds no
 control character. The
-renderer emits links only when the tty's terminal declares them: the
-terminal emulator and the host tool's `console` set the session's
-`TERM` to `xterm`, whose entry in erXos's termcap lists the boolean
+renderer emits links only when the tty's terminal declares them:
+`erx_term` sets the `TERM` of the shell it starts, and the host tool's
+`console` the session's, to `xterm`, whose entry in erXos's termcap lists the boolean
 capability `links`, which `erx_render` consults through `erx_termcap`;
 the serial console's `vt100` entry does not
 ([TERM and termcap](#term-and-termcap)).
@@ -558,17 +569,28 @@ order, places a new window where the user drags a rectangle or at a
 default, frames each shown window with a border whose colour marks the
 window that takes the keyboard, sends pointer events to the window under
 the pointer and key events to the current window, and reserves the right
-button outside any window for its menu: new terminal window, resize,
-move, delete, hide, and the hidden windows by label. The menu is a
+button outside any window for its menu: resize, move, delete, hide, and
+the hidden windows by label. The menu is a
 window of the display domain's own, drawn by `erx_wm_menu` as any client
-draws, with each label through the line escape. The **single** policy,
-`erx_wm_single`, shows exactly one window, the one the manifest names or,
-while the service chord has called it, the service terminal, gives it
-the screen's rectangle, keeps every other hidden, delivers every event to
-the shown window, keeps the chord for itself, and draws nothing. A
+draws, with each label through the line escape. It has no item that
+starts a program, a terminal included: the display domain has no
+authority to start one in a session, and a terminal opens its sibling
+windows itself ([The terminal](#the-terminal)). The **single** policy,
+`erx_wm_single`, shows exactly one window, the one the manifest names,
+gives it the screen's rectangle, keeps every other hidden, delivers
+every event but the reserved chord to the shown window, and draws
+nothing. A
 `wctl` write is a `place` request, so a program can resize or hide its
 window under a policy that allows it and gets `EINVAL` under one that
 does not.
+
+**The reserved chord.** A display's manifest entry may name a key chord,
+the **secure attention chord**. Every policy keeps it, answering
+`input/2` for it with `{wm, chord}`, and delivers it to no window, so no
+client can read it or wait for it, and no client comes to depend on
+receiving it. It opens nothing: which trusted screen it brings up, a
+login or a lock, is the login design's ([Risks and open
+questions](#risks-and-open-questions)).
 
 After every change of the table, `erx_winfs` hands `erx_screen` the
 **layout**: the shown windows in stacking order, each with its window
@@ -676,10 +698,14 @@ rectangle with `erx_draw_clip` from the destination's clip rectangle,
 the source's and the mask's bounds and the operation's rectangle, and
 runs `libmemdraw`'s primitive over it: `memimagedraw` for `d`, `y` and
 `x`; `memline`, `mempoly`, `memfillpoly`, `memellipse` and `memarc` for
-the shapes; `memimagedraw` with the glyph as mask for each character of
-`s`; the image(6) decoder for `Y`, which writes only into the clipped
-rectangle of the destination already allocated and fails the write on
-any input that would decode past it or end short. Every size, offset,
+the shapes; and `memimagedraw` with the glyph as mask for each character
+of `s`. A `Y` message never reaches `erx_memdraw` as compressed bytes:
+`erx_draw_image`, an Erlang decoder of image(6)'s compressed form
+written from the manual, expands it during the check of the write into
+the clipped rectangle's pixels, failing the write on any input that would
+decode past the rectangle or end short, and the operation it plans is
+the `y` load of those pixels. So `erx_memdraw` parses nothing a client
+wrote: it takes decoded messages, rectangles and pixel rows. Every size, offset,
 stride and count `erx_memdraw` computes from a message, and the union of
 dirty rectangles, uses checked arithmetic. The primitives read no global
 state after their initialisation at load, which is checked when
@@ -704,67 +730,82 @@ next read of `draw`, at most 64 KiB at a time, as Plan 9 does.
 shared by every grant on that display that carries `snarf`, as X's
 selection is shared by a display's clients (Security says with whom).
 
-### Terminal windows
+### The terminal
 
-`erx_term` is a terminal emulator in the display domain: a client of a
-window in the display domain's own directory, a font cache it filled
-from a subfont file of its release, and `erx_vt`, a pure function from
-the terminal's state and the bytes it receives to the next state and a
-list of effects ([The terminal emulator](#the-terminal-emulator)). The
-terminal is an xterm-compatible subset, named `xterm` as FreeBSD's
-console is; rio's mouse-driven text editing is a program's choice on
-top, not the terminal's. Its copy and paste use the display domain's
-own `/snarf` when its grant carries `snarf`, and stay inside the
-terminal window otherwise.
+`erx_term` is a user's terminal. It is a program of the user's session,
+as xterm is a client of an X server and the master of a pseudo-terminal,
+written as a supervised Erlang process in the session domain's runtime.
+The display serves it a window as it serves any client and knows nothing
+else of it. A terminal owns four things:
 
-A terminal window is a **console line**. `erx_console` connects one
-session's tty to a line at a time and shows its menu and login on it
-([The console](design-live.md#the-console)); a serial port is a line, and
-so is a terminal emulator, which offers itself through the console
-service's `offer_line` operation, with its size from `wctl`, once its
-window exists. The system domain grants the display domain that
-operation only when the display's manifest entry sets `console_line`,
-which also carries the most lines the display may offer, 16 by default,
-and the windows' `secure` attribute: never set in a
-release manifest, and allowed in a development one. The console service
-writes to a window's line what it writes to any line and receives from
-it what any line receives, so the login, the principal, `Ctrl-G`, lock
-and log out are those of design-live, unchanged; the kernel's early
-console and the system runtime's emergency output reach the UART alone,
-and a window shows its session's own output and the log lines the log
-service sends it. The display domain sees the bytes, the login's
-passphrase among them; that is the trust Security states, and a window
-that is not secure never carries the system shell, which only a login at
-a secure line opens. A release manifest that does not accept that trust
-leaves `console_line` unset. That removes the display's terminal windows
-altogether, not only their login: a window's line shows a login whenever
-it is locked or offered without a valid token, so a display that may
-show no login can offer no line. Sessions of such a display log in at
-the UART or the host link, and their programs' windows still open on
-it.
+* **Its window**, a directory it makes with `mkdir` through the
+  session's grant on the display ([A display's
+  session](#a-displays-session)), with itself as the holder. So the
+  window counts against the session's `windows` and `pixel_bytes`
+  quotas, ends when the terminal ends, and ends the terminal when the
+  session's grant ends. The terminal draws by writing `draw` and reads
+  `mouse` and `kbd` with `erx_draw`, as any Erlang client does ([Erlang
+  clients](#erlang-clients)).
+* **Its glyphs**, from a subfont file of the session's release, which
+  `erx_font` loads into a font cache image of the window's connection,
+  so the display renders none of a terminal's text, as it renders no
+  client's.
+* **`erx_vt`**, the terminal's state: a pure function from that state
+  and the bytes the tty sends to the next state and a list of effects
+  ([The terminal emulator](#the-terminal-emulator)). The terminal is an
+  xterm-compatible subset, named `xterm` as FreeBSD's console is; rio's
+  mouse-driven text editing is a program's choice on top, not the
+  terminal's.
+* **Its tty**, which the session's terminal relay serves
+  ([The tty](design-live.md#the-tty)). The terminal asks the relay for a
+  new tty, as a program's `posix_openpt` makes a pseudo-terminal
+  ([design-programs.md](design-programs.md#the-terminal)), becomes its
+  master, and starts the session's command shell on it with
+  `TERM=xterm`. A master in the tty's own domain exchanges the tty's
+  five messages as plain Erlang messages, which are never dropped.
 
-**New windows and their tokens.** Which session a window serves is the
-console's choice, never the display's
-([Window tokens](design-live.md#window-tokens)). When a session asks
-for a new terminal window, the console mints a single-use **window
-token** bound to that session and to this display and sends it to the
-display domain, whose new `erx_term` makes its window and presents the
-token with `offer_line`. A valid token connects at the new line a tty
-with a shell of the session that asked, with no login, as rio's new
-window runs a shell in its opener's namespace, and the line then has
-that session's principal, as any UNIX terminal carries its user's
-authority. An offer without a valid token gets a login and never a
-shell. So the display's first window, which it offers alone before any
-session is introduced to it, shows a login, and so does the single
-policy's service terminal, in every build. The overlapping policy's
-menu item "new terminal window" is the line's own menu action at the
-line of the window that has the keyboard, so there is one path to a
-token: it gives the session connected there a new window, or a window
-that shows a login when no session is connected there, and it does
-nothing the display could not do by typing `Ctrl-G` and that item into
-the window. A session that logs in at a terminal window is introduced
-by the system domain to that display, so programs it starts get
-windows beside their terminal.
+The terminal's work is the master's side of those messages:
+
+* **Output.** On `{tty_output, N, Bytes}` it feeds the bytes to
+  `erx_vt`, draws the rows that changed, flushes, and answers
+  `{tty_taken, N}`, so a terminal that draws slowly holds its tty
+  stopped and its writers wait, as at a serial line. A `{reply, Bytes}`
+  effect goes back as `{tty_input, Bytes}`, and a `{title, Text}`
+  effect is written to the window's `label`, which whoever draws it
+  escapes (G5).
+* **Keys.** Each `kbd` record goes through `erx_vt:key/2` and the bytes
+  to the tty as `{tty_input, Bytes}`. `Ctrl-G` is a key like any other:
+  a terminal is no console line and has no console menu. The terminal
+  keeps two bindings of its own: Shift with Page Up and Page Down moves
+  its view through the scrollback, and Ctrl-Shift-N, which it would
+  otherwise send as Ctrl-N, opens a sibling window (below).
+* **Size.** The window's size, from `ctl` at the start and after each
+  `r` record on `mouse`, divided by the font's cell and held within
+  [Bounds](#bounds), goes to `erx_vt:resize/3` and to the tty as
+  `{tty_size, Rows, Columns}`.
+* **The pointer.** A drag selects cells, and a selection is copied to
+  `/snarf` when the session's grant carries `snarf` and kept inside the
+  window otherwise; the middle button pastes through `erx_vt:paste/2`;
+  the wheel moves the view through the scrollback; a click on a
+  presentation is the action below.
+* **Ending.** The terminal monitors the shell it started and ends when
+  it ends, closing its window, as xterm does when its shell exits. When
+  the window ends first, removed from the menu, by the end of the grant
+  or with the display, the terminal sends `tty_hangup`, and the shell
+  and its jobs get the hang-up, as when an xterm is closed.
+
+A terminal shows its tty and nothing else, as xterm does: no log lines,
+no console menu and no login. Log lines reach the console lines, the UART
+and the host link, and the inspector
+([The console](design-live.md#the-console)).
+
+**Sibling windows.** On Ctrl-Shift-N a terminal asks its supervisor,
+`erx_term_sup`, for another terminal on the same display: a new window,
+tty and shell of the same session, beside the first, as rio's new window
+runs a shell in its opener's namespace. Nothing outside the session can
+start one. The display's menu has no such item, since the display has no
+authority to start a program in a session, and a terminal's sibling is
+charged to the session's quotas like any of its windows.
 
 **Presentations in a terminal.** `erx_vt` parses the OSC 8 sequence
 above as one of its control sequences, within 4 KiB and the grammar of
@@ -802,9 +843,9 @@ runs `erx inspect` with the host session's own facets.
 
 `erx_vt` is the model of one terminal: a grid of cells, a cursor, the
 modes programs set, a scrollback and the presentations on screen.
-`erx_term` owns one `erx_vt` state per window, feeds it the bytes the
-console writes to its line, draws the rows that changed and sends the
-line what `erx_vt` says to send. Everything a program can do to a
+`erx_term` owns one `erx_vt` state, feeds it the bytes its tty sends,
+draws the rows that changed and sends the tty what `erx_vt` says to
+send ([The terminal](#the-terminal)). Everything a program can do to a
 terminal window is decided by `erx_vt`, and `erx_vt` decides nothing
 else.
 
@@ -826,9 +867,10 @@ below:
   termcap calls `xn` (`xnfix`, `:1164-1166`).
 * **I, `io_ansi`'s functions** on erXos, which are the same fallback
   strings: cursor hiding, saving, the alternate screen, insert and delete
-  of characters and lines, scrolling regions and SGR colours. An `io_ansi`
-  string that is not a standard sequence is not supported for that reason
-  (Risks).
+  of characters and lines, scrolling regions and SGR colours. Four of
+  upstream's fallback strings are not the sequences they name, and
+  erXos's OTP fixes them (Risks), so the tables hold only the standard
+  forms.
 * **T, toybox 0.8.15's applets**: cursor addressing, erase in line and in
   display, SGR, cursor hiding, save and restore, the cursor position
   report with which toybox measures the screen, and RIS for `reset`. The
@@ -845,25 +887,24 @@ below:
   entry without the capabilities `erx_vt` does not implement
   ([TERM and termcap](#term-and-termcap)).
 
-**No native parser of program output.** No NIF in the display domain
-parses untrusted bytes. The display domain holds every window's pixels
-and every key typed at the display, so a memory error in a native parser
-of one program's output would reach every window; and a NIF's fault ends
-the whole runtime, not one process. `erx_vt` is Erlang, translated from
-the DEC parser model below, so a bug in it is the exit of one terminal
-process: its window and line end and the terminal connected there
-detaches, as the failure table says, and the rest of the display goes
-on. A native emulator, if one were ever wanted, would run in a sub-space
-of its own holding only its window, as LVGL does. The `Y` decoder inside
-`erx_memdraw` is a native decoder of a client's bytes, which this rule
-forbids as written; Risks and open questions carries the decision.
+**No native parser of program output.** `erx_vt` runs in the session's
+runtime and parses what the session's programs write, and whatever they
+relay from elsewhere, such as an `ssh` session's remote output. It is
+Erlang, translated from the DEC parser model below, so a bug in it is
+the exit of one terminal process: its window ends and its tty hangs up,
+as the failure table says, and the session's other terminals and
+processes go on. A NIF's fault would end the session's whole runtime
+instead. A native emulator, if one were ever wanted, would run in a
+sub-space of the session holding only its window and its tty's master.
+No program's output reaches the display domain, which sees a terminal
+only as the pixels its window draws.
 
 #### One pipeline over one state
 
 ```erlang
 -spec erx_vt:new(Cols, Rows) -> state().
 -spec erx_vt:feed(state(), binary()) -> {state(), [effect()]}.
--type effect() :: {reply, binary()}     % bytes for the line's input
+-type effect() :: {reply, binary()}     % bytes for the tty's input
                 | bell
                 | {title, binary()}.    % OSC 0 or 2 text, UTF-8
 ```
@@ -968,7 +1009,14 @@ terminal generator from rules in `abi/terminal.txt` and the Unicode data
 OTP 29.1.2 carries, `UnicodeData.txt` and `EastAsianWidth.txt` under
 `otp/lib/stdlib/uc_spec/`, Unicode 17.0.0, the same version and the same
 generator as the line escape's tables ([Escape
-rules](design-live.md#escape-rules)). Writing follows from the widths:
+rules](design-live.md#escape-rules)). It is the system's one width
+table: the same generator writes from the same rule and data musl's
+`wcwidth` tables and `erx_width`, which `prim_tty:wcwidth/1` answers
+from, so a program, the shell's line editor and the terminal count the
+same columns for every character
+([design.md](design.md#decisions),
+[design-runtime.md](design-runtime.md#the-c-library-seam)). Writing
+follows from the widths:
 
 * a width-2 character at the last column wraps first when autowrap is
   on, leaving the last column as it was, and is written ending at the last
@@ -1084,7 +1132,7 @@ Strings:
 
 | String | Effect |
 | --- | --- |
-| `OSC 0 ; text`, `OSC 2 ; text` | the `{title, Text}` effect; `erx_term` sets the window's label through the line escape (G5) |
+| `OSC 0 ; text`, `OSC 2 ; text` | the `{title, Text}` effect; `erx_term` writes the text to the window's `label`, which its displayer escapes (G5) |
 | `OSC 8 ; params ; uri` | a link, an input context or a closing, by the grammar below |
 | any other OSC | dropped and counted |
 | DCS, SOS, PM, APC | consumed to their end and counted |
@@ -1127,8 +1175,9 @@ programs write unsupported sequences routinely.
 | a presentation's `TYPE` | 32 bytes | the sequence dropped |
 
 So a terminal's state is bounded by its size and these constants
-whatever a program writes, and a display's terminals by its
-`console_line` count, 16 by default. A parser's state between calls is
+whatever a program writes, and a session's terminals on a display by its
+grant's `windows` quota, since each holds a window; all of it is the
+session's own memory. A parser's state between calls is
 constant-size: an endless CSI or an unterminated string costs no memory.
 A burst of report requests yields one reply each, and the tty's input
 bound drops what does not fit, as the line discipline drops typed input
@@ -1194,8 +1243,9 @@ are dropped after that; when it gets taller, blank rows are added at the
 bottom. A narrower grid crops each row, blanking a width-2 cell it
 splits; a wider one pads with blanks and default tab stops. The region
 resets to the whole grid and the cursor and saved cursors are clamped
-into it. `erx_term` takes the new size from `wctl` and hands it to the
-line's tty, which applies it as design-live's `size/3` says.
+into it. `erx_term` takes the new size from its window and hands it to
+its tty as `{tty_size, Rows, Columns}`, which the tty applies as
+design-live's `size/3` says.
 
 #### Keys and paste
 
@@ -1219,8 +1269,8 @@ removed, so pasted text cannot end its own bracket.
 
 #### TERM and termcap
 
-A terminal window's line and the host tool's `console` give the session
-`TERM=xterm`; the serial line gives `vt100`, as FreeBSD's `/etc/ttys`
+`erx_term` gives the shell it starts `TERM=xterm`, and so does the host
+tool's `console`; the serial line gives `vt100`, as FreeBSD's `/etc/ttys`
 gives its serial ports. Naming the terminal `xterm`, as FreeBSD's vt(4)
 does, lets every program that knows xterm drive it, and lets the name
 travel to other systems; a program that uses more of xterm than the
@@ -1405,6 +1455,42 @@ token when the status is not `ok` (G7), and a click sends the owner
 a record as a tree of labels with `present` properties and, on a select,
 queries the inspector through its own inspect facet (G4).
 
+### A display's session
+
+How a person logs in at a display, locks it and leaves it is not
+designed: the login design is the owner's ([Risks and open
+questions](#risks-and-open-questions)). Until it exists, a display
+serves at most one session, named by the manifest and started without a
+login:
+
+* **The manifest names it.** A display's manifest entry may name a
+  principal, `session`. At boot, once the display domain runs, the
+  domain service starts that principal's session domain as a console
+  login would start it, with its `display` variable set to the
+  display's name, and the system domain introduces the session to the
+  display: `erx_winfs` makes the session's directory and grant, with the
+  entry's quotas, and the session receives its display facet
+  ([Windows and the window system](#windows-and-the-window-system)).
+* **It keeps a terminal there.** A session's `erx_term_sup` starts a
+  terminal on a display when the session receives its grant there, and
+  again whenever its last terminal on that display ends while it holds
+  the grant. So the first window appears at boot, a last window closed
+  from the menu comes back, and after the display domain restarts the
+  new introduction opens a terminal on the new grant; between the
+  display's end and that introduction the session holds no grant and
+  starts nothing.
+* **No other session reaches the display.** A session started by a login
+  at the UART or the host link is introduced to no display, so
+  `erx_ui:open/1` there answers `{error, no_display}`, and an entry that
+  names no session, a kiosk's, serves only the configured domains the
+  manifest introduces to it.
+* **Whoever is at the display holds the principal's authority**, as at
+  a UNIX console that logs a user in automatically: the session has
+  every facet a login of that principal would have. Started without a
+  passphrase, it opens none of the principal's keys at the vault
+  ([design-system.md](design-system.md#the-vault)); work that needs them
+  logs in at the UART or the host link.
+
 ### Choosing a display
 
 A domain holds a display facet for each display it was introduced to, in
@@ -1414,10 +1500,11 @@ under the name of the domain that serves it: `display` for a display
 domain of that name, another name for a second display domain, `web` for
 the web domain. A session may hold none, one or several. The **default
 display** is the domain's environment variable `display`, which whoever
-starts the domain sets to the display it was started from: a login at a
-terminal window sets that window's display, a web login sets `web`, a
-configured domain takes it from its manifest entry, and a login at the
-serial console or over the host link sets none. A user changes it as any
+starts the domain sets to the display it was started from: a display's
+session gets that display ([A display's session](#a-displays-session)),
+a web login sets `web`, a configured domain takes it from its manifest
+entry, and a login at the serial console or over the host link sets
+none. A user changes it as any
 environment variable, for the domain or for one program it starts, as on
 UNIX.
 
@@ -1444,7 +1531,7 @@ A kiosk, a dashboard or a pair of glasses is a display domain under the
 single policy, configured in the manifest: the display device, the input
 devices, `policy single`, the application domain whose window takes the
 screen, the renderer (`erlang` or `lvgl`), the idle policy and,
-optionally, a key chord that shows the service terminal. The application
+optionally, the reserved chord. The application
 is a configured domain with a display grant and facet, started in the
 boot order after the display domain; it opens its widget window at start
 and the policy shows it. Nothing else differs from the desktop:
@@ -1472,14 +1559,12 @@ and the policy shows it. Nothing else differs from the desktop:
   such panels do best. A panel on a display serial interface with a
   framebuffer in the controller behaves the same way; one without
   partial update reports `partial` false and gets whole frames.
-* **Service.** The optional chord, which `erx_wm_single` keeps and never
-  delivers, shows the service terminal, a terminal window of the display
-  domain with the release's login on its console line, in place of the
-  application's window: the application's window is hidden, receives no
-  input and shows nothing while the terminal is shown, and returns on the
-  chord or at log out. The terminal is composed from its own image, so
-  nothing of it reaches the application's. A manifest without the chord
-  has no service terminal and no console line.
+* **Service.** A kiosk's screen shows no terminal: its operator works at
+  the UART or over the host link. Its entry names no session, so the
+  application's window is the only one; the reserved chord, where the
+  entry names one, reaches no window here either. A service terminal on
+  the kiosk's own screen is part of the login design (Risks and open
+  questions).
 
 ### Erlang clients
 
@@ -1504,11 +1589,9 @@ operations, `open_ui`, `ui_tree` and `close_ui` for an application and
 `events` for a domain that holds input devices of the display, each
 grant naming the operations it allows, declared in
 `abi/services/display.txt` and served by every display domain and by the
-web domain. The console service's `offer_line`, in
-`abi/services/console.txt`, with the window token it presents or none,
-granted to a display domain whose manifest entry sets `console_line`,
-and the console's request to that display for a new terminal window,
-which carries the token.
+web domain. A display's manifest entry: its policy, under the single
+policy its application domain and renderer, its idle policy, the
+principal of its session, and the reserved chord.
 
 **Draw messages**, in `abi/formats/draw.txt`, with the bounds above; the
 `ctl` text, twelve 11-character fields followed by a space, as draw(3);
@@ -1529,7 +1612,9 @@ Erlang; the `erx_ui_renderer` behaviour and its `target()`.
 `erx_present:text/2` and `parse/2`, the `-erx_args` declaration, the link
 and input-context sequences, the `links` capability of a terminal.
 
-**The terminal**: `TERM=xterm` at a terminal window and the host tool's
+**The terminal**: `erx_term` and its supervisor `erx_term_sup` in a
+session's release, its two key bindings, Ctrl-Shift-N and Shift with
+Page Up and Page Down; `TERM=xterm` at `erx_term` and the host tool's
 console; `abi/termcap`, installed as `/usr/share/misc/termcap`, and the
 generated `erx_termcap`; `erx_vt`'s `new/2`, `feed/2`, `resize/3`,
 `key/2`, `paste/2`, `link_at/3`, `dump/1` and its `effect()`; the
@@ -1542,9 +1627,11 @@ emulator](#the-terminal-emulator).
 display domain its devices and the system domain introduces sessions and
 applications to it ([Devices](design-system.md#devices)); a session's
 handler binds a window's directory into a program's namespace
-([Narrowing](design-files.md#narrowing-for-a-program)); the console
-service treats a terminal window as a line
-([The console](design-live.md#the-console)); `erx_render` emits
+([Narrowing](design-files.md#narrowing-for-a-program)); a session's
+terminal relay serves the tty whose master `erx_term` is
+([The tty](design-live.md#the-tty)), and the domain service starts a
+display's session ([A display's session](#a-displays-session));
+`erx_render` emits
 presentations ([Inspection](design-live.md#inspection)); the inspector
 schema supplies the types ([Inspection](design-live.md#inspection)).
 
@@ -1580,9 +1667,9 @@ at a terminal that declares `links`.
 | `erx_screen` crashes | supervisor restart; it asks `erx_winfs` for the layout and repaints; a window waiting in a flush call sees the call fail and drops that flush, which the repaint covers | no client notices |
 | the display driver crashes | restart; device reset; scanout re-created; `erx_screen` repaints; the framebuffer pool stays in the NIF's record | no client notices |
 | `erx_winfs` crashes | it holds every grant and window of the display, so its crash ends the display domain, with the effect of the domain's end below | as for the domain's end |
-| a terminal emulator crashes | its window ends with it, its holder; its line drops, and the terminal connected at it detaches, as a serial console's does when the line drops, its session reachable from another line | a new terminal window from the menu |
+| a terminal, `erx_term`, crashes | a process of the session, not of the display; its window ends with it, its holder, and its tty hangs up, so its shell and jobs get the hang-up, as when an xterm dies; the session's other terminals go on | a sibling from another terminal, or from `erx_term_sup` when it was the session's last on that display |
 | a widget server crashes | its window ends with it, its holder; the facet sends the application `{ui_down, Window, server_down}` | the application opens a new window |
-| the display domain ends | every window ends; sessions' fids fail with the connection down; the terminals connected at its windows detach, as above; each opener of a UI on it receives `{ui_down, Window, display_down}` from its display facet, which ends | the domain service restarts the domain within its intensity and the system domain introduces its clients again; applications reopen |
+| the display domain ends | every window ends; sessions' fids fail with the connection down; each terminal on it ends with its window and hangs up its tty, as above; each opener of a UI on it receives `{ui_down, Window, display_down}` from its display facet, which ends | the domain service restarts the domain within its intensity and the system domain introduces its clients again; applications reopen, and the display's session opens a terminal on its new grant |
 | a widget tree fails validation | `ui_tree` answers `{error, Reason}`; the realised tree is unchanged | the application's |
 | the LVGL program exits | the widget server ends the window and the application receives `{ui_down, Window, renderer_down}` | the application reopens; the display domain logs the exit record |
 | an input device stops | its driver restarts and resets it | events resume |
@@ -1591,8 +1678,7 @@ at a terminal that declares `links`.
 
 The inspector shows a display under `[domains, Id]` with its windows,
 each with owner, rectangle, state, image count, pixel bytes, flush count
-and dropped input records, and a terminal window with its line and
-connected session, all marked `service`;
+and dropped input records, all marked `service`;
 `/proc/domains/Id/windows/N/status` shows the same. The display domain's
 log carries each refused write with the window, the reason and the
 position of the fault.
@@ -1604,8 +1690,9 @@ position of the fault.
   image or another's, grants are rooted per session and the handler
   narrows per program. A program given a window learns only its own size
   and input.
-* **The display domain's trust.** It sees what it shows and what is typed
-  at it, and holds nothing else: device capabilities, its own budget and
+* **The display domain's trust.** It sees every pixel it shows and every
+  keystroke it routes, as an X server does, and holds nothing else:
+  device capabilities, its own budget and
   grants, the grants it serves. Its display and input devices are
   confined or do no DMA: on QEMU `virt` virtio-gpu and virtio-input
   attach as virtio-pci behind the IOMMU, and a confined virtio-gpu
@@ -1620,32 +1707,19 @@ position of the fault.
   ([Trust placement](design.md#trust-placement)); in a development build
   that holds one, the display domain is in the trusted base. With that,
   a compromised display domain can show a false screen, record
-  keystrokes and inject input into the windows it serves, with the
-  authority of the shells in its windows, as an X11 or Wayland server
-  has: through them it reaches what their principals reach, their
-  other sessions included, and a lock at the UART leaves the windows
-  opened from it running, as on UNIX. It also routes the input of the
-  sessions introduced to it, reads and writes its display's clipboard
-  where `snarf` is on, and records the
-  passphrase of whoever logs in at its windows. It has nothing beyond:
-  it cannot read a domain's memory, message a process it was not
-  introduced to, or reach anything of a principal that neither uses the
-  display nor types at it
-  ([Window tokens](design-live.md#window-tokens)). It
-  cannot reach the system shell in a release build, nor at a window
-  opened without a login in any build: the system-shell facet belongs to
-  a login at a secure line and never to a session, and no window is a
-  secure line in a release build, since the manifest check refuses a release
-  manifest that marks a display's windows `secure`. It cannot choose the
-  session a window without a login serves: only a window token the
-  console minted for a session's own request opens one, and an offer without
-  a valid token gets a login. Its windows' logins are never presence at
-  the machine, cannot enrol a principal, and count against a name in
-  their own class, so its wrong passphrases cannot lock that name out at
-  the UART ([The console](design-live.md#the-console)). A release
-  manifest that keeps logins off the display leaves `console_line` unset,
-  which removes its terminal windows. This is the trust an X server or a
-  Wayland compositor has, stated.
+  keystrokes and inject input into the windows it serves, as an X11 or
+  Wayland server can. Input injected into a terminal's window is typing
+  at that terminal's shell, so it has the authority of the shells in the
+  terminals of the session introduced to it, and through them what that
+  session's principal reaches. It also reads and writes its display's
+  clipboard where `snarf` is on. It has nothing beyond: it cannot read a
+  domain's memory, message a process it was not introduced to, start a
+  program in a session, or reach a session that was not introduced to
+  it. No program's terminal output reaches it, so nothing a program
+  writes to a terminal can attack it, and it never carries the system
+  shell, which opens only at a login at the UART or the host link
+  ([The console](design-live.md#the-console)). This is the trust an X
+  server or a Wayland compositor has, stated.
 * **On the stopgap.** QEMU `virt` under the stopgap Fiasco, as the harness
   starts it, has no IOMMU, so virtio-gpu and virtio-input attach over
   virtio-mmio and are unconfined. The development manifest gives them to
@@ -1653,28 +1727,23 @@ position of the fault.
   development build, and the display domain is then in the trusted base,
   as the paragraph above says of any development build that holds such a
   device; a draw client that compromises it reaches all memory through the
-  gpu's DMA. The release manifest's refusal is unchanged, and the drivers,
-  window tokens, secure terminal windows and logins are the same code on
-  both. Moving the devices to virtio-pci behind the IOMMU on erXos's kernel
+  gpu's DMA. The release manifest's refusal is unchanged, and the drivers
+  are the same code on both. Moving the devices to virtio-pci behind the
+  IOMMU on erXos's kernel
   changes their device records and DMA profiles, not their drivers
   ([design-system.md](design-system.md#devices)).
 * **Input** is routed by the policy to one window per event, and nothing
-  lets a client write another window's input. Under the single policy
-  the service chord never reaches the application, and while the service
-  terminal is shown the application receives no input, so the operator's
-  keys at the login go to the console line alone.
+  lets a client write another window's input. The reserved chord reaches
+  no window under any policy.
 * **The clipboard** is shared, per display, by every grant on it that
-  carries `snarf`, whatever its principal: the sessions of every
-  principal introduced to that display, whether logged in at one of its
-  terminal windows or at another console line, in turn or side by side,
-  every program those sessions give `/dev/snarf`, and the
-  display domain's own terminal emulators. What one of them copies, any
-  other can read. The `snarf` parameter withholds it from a grant, whose
-  tree then has no `/snarf`; a release manifest that serves more than one
-  principal at a display and must keep their clipboards apart sets
-  `snarf` off for every grant of that display, the display domain's own
-  included, and copy and paste then stay within a program or a terminal
-  window.
+  carries `snarf`, whatever its principal: the display's session, its
+  terminals and every program it gives `/dev/snarf`, the configured
+  domains introduced to the display, and the display domain's own
+  clients. What one of them copies, any other can read. The `snarf`
+  parameter withholds it from a grant, whose tree then has no `/snarf`;
+  a display that must keep its grants' clipboards apart sets `snarf` off
+  for every grant, the display domain's own included, and copy and
+  paste then stay within a program or a terminal window.
 * **Presentations grant nothing** (G4). The link carries a type and a
   text; the terminal inserts text; the shell checks facets. A hostile
   program cannot make the terminal emit a presentation that does more
@@ -1696,16 +1765,18 @@ position of the fault.
   in `erx_screen`, so a client flooding draws slows the display by at
   most its windows' share and starves no other window. Widget work is
   admitted within the display facet's share.
-* **Untrusted bytes in C.** The draw decoder's C twin, the `Y` decoder,
-  `erx_memdraw`'s primitives and the native renderer's reader parse or
-  act on client bytes; each has a fuzz target, and every size, offset and
-  count they compute uses checked arithmetic (Verification).
+* **Untrusted bytes in C.** Every byte a client writes is parsed in
+  Erlang: the draw decoder `erx_draw_codec` and the decoder of
+  compressed pixels `erx_draw_image`. `erx_memdraw`'s primitives act in
+  C on what they have checked, rectangles, counts and pixel rows, and
+  the native renderer's reader parses the renderer's operations in its
+  sub-space; each has a fuzz target, and every size, offset and count
+  they compute uses checked arithmetic (Verification).
 * **Residuals.** Implicit bidirectional reordering of displayed text is
   not escaped, as in design-live. A window can draw a convincing copy of
-  another window's content or of the login prompt; under the overlapping
+  another window's content, a terminal's included; under the overlapping
   policy the border marks the window that takes the keyboard and the menu
-  names windows by label, and the login's reserved chord shows the real
-  console menu, as `Ctrl-G` does on the serial line. Any program writing
+  names windows by label. Any program writing
   to a terminal can write an input context, as the shell does, and so
   highlight presentations the shell did not ask for; a click on one
   still inserts only the presentation's text, shown in the command line
@@ -1722,8 +1793,8 @@ Each passing case has a seeded failure that proves the code ran.
   against its C twin over the corpus; a seeded off-by-one in a length
   field fails it.
 * **The pixel primitives.** `erx_draw_ref`, a slow reference
-  implementation of draw(2)'s semantics in Erlang, pixel by pixel and
-  with its own decoder of image(6)'s compressed form, is the oracle:
+  implementation of draw(2)'s semantics in Erlang, pixel by pixel, is
+  the oracle:
   random operations over random images and channels through
   `erx_memdraw` and through the reference must agree pixel for pixel, and
   Plan 9's own `draw` test images are a fixed corpus. A seeded change to
@@ -1731,13 +1802,15 @@ Each passing case has a seeded failure that proves the code ran.
   with rectangles far outside every image, is the test of G2's clipping;
   a seeded bypass of `erx_draw_clip` is caught by the chokepoint check
   and by ASan.
-* **The `Y` decoder.** A fuzz target over compressed payloads into
-  destinations of every channel and size, under ASan and UBSan in `make
-  check-fuzz`, landing with the import; the differential test against
-  `erx_draw_ref`'s decoder over the corpus, where a seeded off-by-one in
-  a run's length fails it; payloads that would decode past the
-  destination or end short fail the write, where a seeded removal of the
-  bound makes ASan report.
+* **The `Y` decoder.** `erx_draw_image` has a fuzz target over
+  compressed payloads into rectangles of every channel and size, which
+  asserts that every decoded result holds exactly the rectangle's bytes,
+  where a seeded removal of the bound fails it; the differential test
+  against `libmemdraw`'s own image(6) loader, `cloadmemimage`, built for
+  the host from the imported source and linked into no release, over
+  Plan 9's compressed images and the fuzz corpus, where a seeded
+  off-by-one in a run's length fails it; payloads that would decode past
+  the rectangle or end short fail the write and apply nothing.
 * **Who touches pixels.** `erx_screen_core` explored exhaustively over
   small screens and layouts: every pixel of the screen comes from exactly
   one shown window, decoration or the background, and a layout change
@@ -1749,15 +1822,17 @@ Each passing case has a seeded failure that proves the code ran.
   its oldest record and counts it while a pending resize still answers
   `r`, where a seeded unbounded queue fails the heap check.
 * **Windows.** G1's tests: cross-connection ids, two sessions' grants, a
-  narrowed program, the single policy with the service terminal shown;
+  narrowed program, the single policy with a second window made;
   the `wctl` grammar's fuzz target; a window's end freeing its images,
   measured by the domain's budget before and after, and a window ending
   with its holder; a seeded leak of one image fails it.
 * **The window system.** `erx_wm_rio` and `erx_wm_single` are pure and
   tested over sequences of place requests and input events; a property
   test that the single policy shows at most one window and delivers every
-  event to it, never the chord, and that every rectangle lies within the
-  screen under both; a seeded unchecked move fails it.
+  event to it, and that every rectangle lies within the screen under
+  both; a seeded unchecked move fails it. The reserved chord, typed while
+  each window of either policy has the keyboard, reaches no window's
+  `kbd`; a seeded policy that delivers it fails it.
 * **The terminal.** Each test below names the seeded fault that fails
   it.
   * Exhaustive: on a 4-column, 3-row grid, every row of the sequence
@@ -1799,9 +1874,30 @@ Each passing case has a seeded failure that proves the code ran.
     keeps a capability outside the tables fails the first.
   * `erx_vt`'s fuzz target over arbitrary bytes, with G8's size check
     and the invariants after every call.
-  * V1's byte test with a terminal window in place of the serial line,
-    where a seeded filter fails it; G4's `no_facet` test; a seeded action
-    in the emulator that calls a facet is caught by the source check.
+  * V1's byte test with `erx_term` in place of the serial line: the
+    bytes handed to its tty reach `erx_vt:feed/2` unchanged, where a
+    seeded filter fails it; G4's `no_facet` test; a seeded action in the
+    emulator that calls a facet is caught by the source check.
+  * The terminal's loop, in hosted mode with a session and a display:
+    removing its window from the menu sends `tty_hangup` and the shell
+    ends, where a terminal seeded to keep its tty open fails it; the
+    shell's `exit` ends the terminal and its window; a resize reaches the
+    shell as `{tty_size, Rows, Columns}` within the bounds; Ctrl-Shift-N
+    opens a sibling in the session's directory, charged to its `windows`
+    quota and refused with `ENOMEM` past it, while Ctrl-N reaches the tty
+    as byte 0x0e, where a terminal seeded to keep Ctrl-N fails it.
+* **The display's session.** A boot whose display entry names a
+  principal starts that principal's session with `display` set, gives it
+  a grant and a display facet, and shows its terminal's window, whose
+  shell runs in the session's domain; closing that last window brings a
+  new one; a restart of the display domain brings one on the new grant.
+  A seeded domain service that skips the introduction fails the first,
+  and a seeded `erx_term_sup` that starts nothing on a new grant fails
+  the last. With the display and its session running, the console's
+  lines are the UART and the host link alone and the display domain
+  holds no facet of the console service, where a seeded manifest that
+  grants it one fails it. A session that logs in at the UART answers
+  `{error, no_display}` to `erx_ui:open/1`.
 * **Widgets.** `erx_ui_schema`'s fuzz target over trees from another
   domain; a tree whose `on_*` terms carry more fresh atoms than
   `foreign_atoms` is dropped and counted; `erx_ui_diff` tested by the
@@ -1844,9 +1940,9 @@ Each passing case has a seeded failure that proves the code ran.
   invalid tree, the LVGL program's exit, an input device stopping, a full
   queue, a flush with the panel off), and the test checks the row's
   effect and recovery and that nothing outside what that party owned is
-  lost: other windows keep their images and input, other sessions keep
-  their terminals, and the terminal whose window crashed detaches with
-  its session reachable from another line. A seeded supervisor that
+  lost: other windows keep their images and input, and a session whose
+  terminal crashed keeps its other terminals and its jobs, the crashed
+  terminal's shell getting the hang-up. A seeded supervisor that
   restarts the whole display domain for a child's crash fails it.
 * **Confinement.** The manifest check refuses a release manifest that
   gives the display domain an unconfined DMA device, a virtio-mmio one
@@ -1869,9 +1965,9 @@ Each passing case has a seeded failure that proves the code ran.
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's operations and events | the generated tree's determinism test, and a source check that no other module reads those bytes |
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |
 | `erx_term` and `erx_ui_server` call no facet | an xref check that neither module nor its callees reach `erx_facet` clients |
-| Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu`, `erx_ui_erlang` and `erx_term` |
-| No NIF of the display release parses bytes from another domain | a build check over the release's NIF libraries and their exported functions, a closed list with each function's use of the binaries it takes; a new NIF or function fails it |
-| Only `erx_vt` interprets a terminal's output in the display release | a source check that no other module of the release matches on ESC, CSI or OSC bytes |
+| Attributed text in the display release passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu` and `erx_ui_erlang` |
+| No NIF of the display release parses bytes from another domain | a build check over the release's NIF libraries and their exported functions, a closed list with each function's use of the binaries it takes; a new NIF or function, `cloadmemimage` linked in among them, fails it |
+| Only `erx_vt` interprets a terminal's output | a source check that no other module of `erx_term`'s application matches on ESC, CSI or OSC bytes |
 
 ## Performance
 
@@ -1882,10 +1978,14 @@ Numbers to measure, for [todo-performance.md](todo-performance.md):
   on HVF at 1920 by 1080; the fix on the table is a pixel object made by
   the system domain and installed in both domains, as the session's
   shared mappings are;
-* the display domain's own clients, the terminal emulator and the Erlang
-  renderer, pass every draw batch through `erx_winfs`'s grant; measure
-  the terminal's scrolling and the renderer's frame time against the
-  same batches handed to the window process directly;
+* a terminal's draw batches cross the lane, the funnel and the file
+  server from the session, as every program's do; measure its scrolling
+  of a large `cat` at 80 by 24 and at full screen on HVF, which settles
+  whether a terminal needs the pixel object above;
+* the display domain's own clients, the menu and the Erlang renderer,
+  pass every draw batch through `erx_winfs`'s grant; measure the
+  renderer's frame time against the same batches handed to the window
+  process directly;
 * composes serialise through `erx_screen`, and a window waits in its
   flush call for its compose, or in direct mode for the driver's copy;
   measure frame times of several windows animating at once, and a
@@ -1916,10 +2016,10 @@ A new device is a new driver behind `erx_display` or a new producer of
 
 | Component | Purpose | Licence | Status |
 | --- | --- | --- | --- |
-| Plan 9's `libmemdraw` and the image(6) codec, from 9front | the per-byte pixel primitives of `erx_memdraw` and the `Y` decoder | MIT (to be confirmed at import against 9front's licence file) | permanent; imported as erXos's code with an origin file |
+| Plan 9's `libmemdraw`, from 9front | the per-byte pixel primitives of `erx_memdraw`; its image(6) loader `cloadmemimage` is the host oracle of the Erlang `Y` decoder and is linked into no release | MIT (to be confirmed at import against 9front's licence file) | permanent; imported as erXos's code with an origin file |
 | plan9port's `libdraw`, acme, sam, 9term | draw clients, and oracles of the draw protocol's compatibility | MIT (to be confirmed at import) | permanent; ported as erXos's code with the connection code replaced |
 | LVGL 9 | the native widget renderer for panels | MIT | stopgap, replaced by the Erlang renderer when the parity test and the panel's frame times admit it; fetched at a pinned version and built out of tree as a native program, its display and input glue erXos's own |
-| a bitmap font as Plan 9 subfonts | the terminal emulator's, the menu's and the Erlang renderer's glyphs | plan9port's `fixed` fonts (public domain); anti-aliased fonts, such as the Go fonts (BSD-3-Clause) rasterised by a host step, chosen with the first application that needs them | permanent |
+| a bitmap font as Plan 9 subfonts | the glyphs of `erx_term`, in a session's release, and of the menu and the Erlang renderer, in the display's | plan9port's `fixed` fonts (public domain); anti-aliased fonts, such as the Go fonts (BSD-3-Clause) rasterised by a host step, chosen with the first application that needs them | permanent |
 | libvterm 0.3.3 | the differential oracle of `erx_vt` | MIT | test tool, never in an image and never linked into erXos; fetched at its pinned release and SHA-256 and built out of tree for the host with the harness `test/vt/vterm_dump.c` |
 | `vttest`, Thomas Dickey's | the source of the corpus's `vttest` recordings | MIT-style (X11), confirmed at the pin | test tool, never in an image; fetched at a pinned release and SHA-256, built out of tree for the host and run on a host pseudo-terminal |
 | FreeBSD 15.1's `share/termcap/termcap`, from the pinned FreeBSD source | the `xterm` and `vt100` entries `abi/termcap` restricts | BSD-3-Clause, confirmed at the pin | reference; the restricted entries are erXos's text in `abi/termcap` |
@@ -1940,8 +2040,10 @@ A new device is a new driver behind `erx_display` or a new producer of
 | each window composing into the screen image under a lock | spreads writes of the screen image over every window process and `erx_screen`, and needs a lock in the NIF, rules for who takes it, and race tests; one writer of the screen image costs only that composes queue in one process |
 | shortcuts for the display domain's own clients (handing batches to a window process, an in-domain widget path) | gives a window two ways to be made and driven and leaves open which quotas the domain's own windows spend; one client path costs one file-server hop per batch, on the watch list |
 | text rendering in the display domain for clients | would need a font engine and font files parsed from untrusted input on the server side; Plan 9's client-side glyph cache keeps the server free of both |
-| a rio-style text window as the window system's own | duplicates the tty, the line discipline and the console's menu in the display domain; a terminal emulator as a console line reuses all three |
-| libvterm or another C emulator as a NIF of the display domain | a native parser of every program's output in the domain that holds every window's pixels and keys, whose fault ends the whole runtime; a C emulator in a sub-space of its own would be safe and is not needed |
+| a terminal in the display domain, as a console line or as rio's own text window | the display would parse every session's program output beside every window's pixels and keys, and would need the console's lines, logins and single-use tokens to decide which session a window serves; a terminal in the session, as xterm is a client of X, needs none of them and is charged to the session that uses it |
+| libvterm or another C emulator as a NIF | a native parser of program output whose fault ends the session's whole runtime, its shells and other terminals with it; a C emulator in a sub-space of its own would be safe and is not needed |
+| the `Y` decoder in C inside `erx_memdraw` | the one native parser of client bytes in the display domain; compressed loads are fonts and images loaded once, not a hot path, so an Erlang decoder costs nothing that matters and leaves `erx_memdraw` parsing nothing |
+| a scrollback size set per terminal or in the manifest | a parameter nobody has asked for; 131,072 cells, about 1,600 rows of 80 columns, stays fixed until a user asks for more |
 | a terminal type of erXos's own, `TERM=erxos` | an honest entry, but unknown to every other system a session reaches and to every program with built-in knowledge of xterm; FreeBSD named vt(4) `xterm` for the same reason |
 | terminfo, as Linux distributions use | FreeBSD describes terminals in termcap, and erXos follows FreeBSD; its one consumer at run time reads a generated table |
 | xterm.js or tmux as the oracle | xterm.js brings Node into host tooling, which TypeScript's rule keeps out; tmux takes its widths from the host's C library and needs a server process; xterm itself has no headless dump |
@@ -1959,9 +2061,9 @@ A new device is a new driver behind `erx_display` or a new producer of
 | the Erlang renderer never reaches LVGL's frame times on panels | medium | LVGL stays | acceptable; it is a bounded native program behind the seam |
 | OSC 8 links confuse a terminal that declares `links` wrongly | low | stray characters | links follow the capability table; the serial console's default is off |
 | a program, or a session reached remotely, uses more of xterm than the subset, since the terminal is called `xterm` | medium | a misdrawn screen in that program | local programs read the restricted termcap entry; the ignored counters name the sequences, which become rows of the tables when a program needs them; FreeBSD's console has the same gap |
-| `io_ansi`'s fallback strings on erXos include forms that are not the sequences they name: `cursor_home` is `ESC H` (HTS), `scroll_forward` and `scroll_backward` are `ESC S` and `ESC T`, `tab_backward` is `ESC I`, and `hyperlink_start` writes the URI before the parameters (`otp/lib/stdlib/src/io_ansi.erl:2614`, `:2646-2649`, `:2684`, `:2788-2790`) | high, on every erXos terminal, since erXos has no terminfo | `io_ansi` callers misdraw | these are upstream OTP bugs, in `TODO.md`; `erx_vt` implements the standard sequences and does not imitate them |
-| widths differ between `erx_vt` and what a program computes | medium | a cursor parts from the text after a wide or combining character | the width decision below |
-| the display domain's view of the login's passphrase is unacceptable for some deployments | medium | no login at the display | the manifest's `console_line` parameter; a serial login, whose programs' windows open on the display, and no terminal windows |
+| `io_ansi`'s fallback strings on erXos include forms that are not the sequences they name: `cursor_home` is `ESC H` (HTS), `scroll_forward` and `scroll_backward` are `ESC S` and `ESC T`, `tab_backward` is `ESC I`, and `hyperlink_start` writes the URI before the parameters (`otp/lib/stdlib/src/io_ansi.erl:2614`, `:2646-2649`, `:2684`, `:2788-2790`) | high, on every erXos terminal, since erXos has no terminfo | `io_ansi` callers misdraw | upstream OTP bugs, which erXos's OTP fixes, since erXos owns its OTP (the work is in `TODO.md`); `erx_vt` implements the standard sequences and does not imitate them |
+| a program on a remote host, reached over `ssh`, counts widths from its own tables | medium | a cursor parts from the text after a wide or combining character in that program | every program on erXos, the line editor and `erx_vt` read the one width table; a remote host's tables are its own, as between any two UNIX systems |
+| a display's session needs no passphrase | certain, until the login design | whoever is at the display holds its principal's authority | the manifest names the principal deliberately; work that needs the principal's vault keys logs in at the UART or the host link; the login design below replaces it |
 
 Decisions taken with the owner:
 
@@ -1984,49 +2086,59 @@ Decisions taken with the owner:
 4. **Fonts.** plan9port's `fixed` fonts serve the terminal and the first
    widgets; anti-aliased fonts (the Go fonts, rasterised by a host step)
    are chosen with the first application that needs them.
-5. **The login on a terminal window.** A release build may show its
-   login on a terminal window, so the display domain sees the passphrase,
-   with the trust stated in Security; the `console_line` parameter of
-   the display's manifest entry turns it off, and with it the display's
-   terminal windows. A window is never a secure line in a release build,
-   so the system shell, which only a login at a secure line opens, is
-   never connected there; a development manifest may mark windows
-   secure, its display domain being in that build's trusted base, and a
-   `root` login at such a window gets the system shell. A window
-   without a login shows the shell of the session whose window token it
-   presents, with that session's principal's authority.
+5. **A terminal is a program of its session.** `erx_term` runs in the
+   session domain, makes its window through the session's grant and is
+   the master of a tty of the session's terminal relay; the display
+   domain composites windows and routes input, parses no program's
+   output, holds no console line and starts no program in a session.
+   The system shell is reached only at the UART and the host link.
 6. **The clipboard** is shared per display, as X does; the `snarf`
    parameter withholds it from a grant, and Security states who shares
    it.
 7. **The input context.** The shell announces the argument types each
    command accepts with `-erx_args`, so the terminal highlights the
    presentations a command can take.
+8. **The `Y` decoder is Erlang.** Compressed pixels are decoded by
+   `erx_draw_image` into the rectangle's pixels and loaded as a `y`
+   would be, so no NIF of the display domain parses a client's bytes,
+   without exception.
+9. **One width table for the whole system.** The terminal generator
+   writes `erx_vt`'s widths, musl's `wcwidth` tables and `erx_width`,
+   which `prim_tty:wcwidth/1` answers from, from one rule and OTP's
+   Unicode data ([design.md](design.md#decisions)).
+10. **The scrollback stays fixed** at 131,072 cells a terminal.
+11. **erXos's OTP fixes `io_ansi`'s four wrong fallback strings**, since
+    erXos owns its OTP (Risks).
 
 Open decisions for the owner:
 
-1. **The `Y` decoder and the rule against native parsers.** `erx_memdraw`
-   runs the image(6) decoder of `Y` messages in C over a client's bytes,
-   which the rule of [The terminal emulator](#the-terminal-emulator)
-   forbids as written. Either the rule names per-byte decompression as
-   its one exception, as CLAUDE.md's list of per-byte C primitives does,
-   or `Y` is decoded in Erlang into the rectangle's pixels and loaded as
-   a `y` would be. Recommendation: decode `Y` in Erlang. Compressed loads
-   are fonts and images loaded once, not a hot path; the rule then has no
-   exception, and `erx_memdraw` parses nothing.
-2. **One width table for the whole system.** `erx_vt`'s widths come from
-   OTP's Unicode 17.0.0 data, musl 1.2.6's `wcwidth` from its own tables
-   (`musl/src/ctype/nonspacing.h` and `wide.h`), and `prim_tty`'s
-   `wcwidth/1` on erXos answers `{error, enotsup}`, so the line editor
-   counts a combining mark as one column where the terminal counts none
-   ([design-runtime.md](design-runtime.md), edit 38). Recommendation:
-   generate musl's two tables and the answer of `prim_tty:wcwidth/1` from
-   the same rule and data as `erx_vt`'s, so programs, the line editor and
-   the terminal agree by construction; the decision touches the runtime
-   and musl as well as this document, so it belongs in
-   [design.md](design.md) once taken.
-3. **The scrollback's size.** It is fixed at 131,072 cells a terminal,
-   about 1,600 rows of 80 columns. Recommendation: keep it fixed until a
-   user asks for more, rather than add a manifest parameter now.
+1. **Login at a display.** The owner is rethinking login, and until that
+   design exists a display serves the one session its manifest entry
+   names, started without a login ([A display's
+   session](#a-displays-session)). The design must settle:
+   * **login**: how a person proves who they are at a display, what
+     shows the prompt, and which domain sees the passphrase, given that
+     the display domain sees every keystroke it routes;
+   * **lock**: what the reserved chord brings up, and what of a locked
+     session stays on the screen;
+   * **log out**: which of a principal's sessions and windows end, and
+     what the display shows afterwards;
+   * **several principals on one display**, in turn or side by side, and
+     who shares the clipboard then;
+   * **kiosk service terminals**: how an operator reaches a shell on a
+     kiosk's own screen, and whether the kiosk's application keeps the
+     screen meanwhile;
+   * whether a display's session opens the principal's vault keys, and
+     whether one manifest-named session stays as an option, as an
+     automatic login does on UNIX.
+
+   The same rethink covers the console's logins at the UART and the host
+   link ([design-live.md](design-live.md#the-console)) and the web
+   front end's ([design-web.md](design-web.md#logging-in-and-the-line)).
+   Recommendation: design login once for every place a person meets the
+   system, keeping two properties the console has today: the system
+   shell opens only at a line the manifest marks secure, and a display
+   domain's view of what is typed is stated as an X server's is.
 
 ## References
 

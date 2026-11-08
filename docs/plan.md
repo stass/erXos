@@ -1203,7 +1203,7 @@ object is one request to the backend's root service.
 
 **Goal.** A browser, a desktop on QEMU `virt` and a panel on a board as
 displays of the running system: one widget interface on all three,
-terminal windows as console lines, and typed values as presentations
+terminals as programs of the user's session, and typed values as presentations
 ([design-display.md](design-display.md), [design-web.md](design-web.md)).
 
 **Demo.** On the Mac, `tools/erx web` shows in a browser the inspector's
@@ -1224,9 +1224,10 @@ targets, ahead of the part that integrates them
 
 * the draw protocol's state machine `erx_draw_core` and its generated
   decoder `erx_draw_codec`, with a C decoder of the same messages;
-* `erx_memdraw`, the pixel primitives of 9front's `libmemdraw`, with the
-  decoder of image(6)'s compressed pixels (the `Y` decoder) and
-  `erx_draw_ref`, a slow Erlang reference that is their oracle;
+* `erx_memdraw`, the pixel primitives of 9front's `libmemdraw`, with
+  `erx_draw_ref`, a slow Erlang reference that is their oracle, and the
+  Erlang decoder of image(6)'s compressed pixels (the `Y` decoder),
+  whose oracle is `libmemdraw`'s own loader built for the host;
 * the screen's composition `erx_screen_core` and the two window policies
   `erx_wm_rio` and `erx_wm_single`;
 * the terminal's state machine `erx_vt`;
@@ -1235,7 +1236,7 @@ targets, ahead of the part that integrates them
 * `erx_present`'s canonical texts over the inspection schema;
 * `abi/protocols/web.txt` with its generated Erlang and TypeScript codecs.
 
-In this track W1 to W8 name design-web's invariants and G1 to G7
+In this track W1 to W8 name design-web's invariants and G1 to G8
 design-display's, not the plan's gates or E-S1's workloads. Parts that
 land after M11 repeat M11's closure over what they add.
 
@@ -1281,15 +1282,15 @@ land after M11 repeat M11's closure over what they add.
    one in a development build; the session's grant on the window tree and
    the handler's
    binding of one window's directory into a program's namespace;
-   `/snarf`; the terminal emulator `erx_term` as a console line, through
-   the console service's `offer_line` and the manifest's `console_line`
-   parameter with its `secure` attribute, the window tokens through which
-   a session opens a window without a login, and the console's lines
-   ([design-live.md](design-live.md#the-console)); the inspector's
-   windows under `[domains, Id]` and
+   `/snarf`; the terminal `erx_term` in the session's release, the master
+   of a tty of the session's terminal relay, with its sibling windows;
+   the display's session, which the manifest's display entry names and
+   the domain service starts at boot with no login; the reserved chord;
+   the inspector's windows under `[domains, Id]` and
    `/proc`
    ([design-display.md](design-display.md#windows-and-the-window-system),
-   [design-display.md](design-display.md#terminal-windows)).
+   [design-display.md](design-display.md#the-terminal),
+   [design-display.md](design-display.md#a-displays-session)).
 4. **Widgets and presentations on the desktop**, in 1b-F, after parts 2
    and 3. A
    widget server per window in the display domain with the Erlang
@@ -1304,7 +1305,7 @@ land after M11 repeat M11's closure over what they add.
    and acme, sam and 9term, imported as erXos's code with an origin file
    ([design-display.md](design-display.md#compatibility-and-migration)).
 6. **Kiosks and panels**, after part 4 and M12's boards. The single
-   policy with its service chord and service terminal; LVGL as a native
+   policy; LVGL as a native
    program in a sub-space of the display domain behind `erx_ui_renderer`,
    with the generated C reader of its operations; the firmware framebuffer
    driver of the Raspberry Pi; a panel on a serial bus; touch, encoder and
@@ -1367,8 +1368,8 @@ tests across connections, sessions and a narrowed program; a window's end
 frees its images, measured by the domain's budget; the `wctl` grammar's
 fuzz target; the policies' property tests; `erx_vt` explored, fuzzed and
 compared with a host terminal emulator's screen over a corpus that
-includes `vttest`'s core; V1's byte test of design-live with a terminal
-window in place of the serial line; the virtio-gpu response and
+includes `vttest`'s core; V1's byte test of design-live with `erx_term`
+in place of the serial line; the virtio-gpu response and
 virtio-input event parsers' fuzz targets; the framebuffer copy under UBSan
 at its bounds; screenshots through QEMU's monitor equal the reference
 images under HVF; a fault injected for each row of
@@ -1379,16 +1380,14 @@ failures test of
 release manifest that gives the display domain an unconfined DMA device
 fails the manifest check (design-display's confinement test), while a
 development build's manifest with the stopgap's virtio-mmio devices
-passes the Phase 1 manifest check, and a
-release manifest that marks a display's terminal windows `secure` fails
-it too; a principal named for the system shell who logs in at a terminal
-window that is not secure gets no system shell, and `erx:attach` of the
-UART login's session from a window opened from it gives the principal's
-session without the system-shell facet
-([Window tokens](design-live.md#window-tokens)); a display's offers with no
-window token, a forged, used, expired or another display's one each get
-a login (V7), and, once M11's vault checks passphrases, a login at a
-window cannot enrol a principal;
+passes the Phase 1 manifest check; a display's configured session gets
+its terminal's window at boot, and a new one when its last window
+closes, where a seeded domain service that skips the introduction fails;
+with the display running, the console's lines are the UART and the host
+link alone and the display domain holds no facet of the console service;
+the reserved chord, typed while each window has the keyboard, reaches no
+window; `erx:attach` of `root`'s UART session from a terminal on the
+display gives that session without the system-shell facet;
 each chokepoint check catches its seeded
 violation.
 
@@ -1410,7 +1409,7 @@ over a pseudo-terminal; the display domain refuses no draw message they
 send.
 
 **Exit criteria, kiosks and panels.** The single policy shows at most one
-window and never delivers the service chord to the application; the parity
+window and delivers the reserved chord to no window; the parity
 test passes through LVGL; the fuzz targets of the C reader, the touch,
 keypad and encoder parsers and the `events` validator run their budgets
 clean; a panel driver passes against a model of its command set on the
