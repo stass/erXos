@@ -252,7 +252,7 @@ with it.
 | **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; the console's lines are the UART and the host link's `console` line alone; no session ever holds the facet, so no route into a session reaches the system shell, a terminal on a display included, since a terminal is a program of its session; the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read, at a console line and at a terminal on a display alike; a seeded console that grants the facet at a line that is not secure fails |
 | **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
-| **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records, `ls`, which writes names at a terminal through it, and the host tool's printer; `ps` writes names through the field escape wherever its output goes, so they hold nothing the line escape would change; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
+| **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records, `ls`, which writes names at a terminal through it, and the host tool's printer; `ps` and `top` write names through the field escape wherever their output goes, so they hold nothing the line escape would change; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
 
 ## Data model
 
@@ -1027,6 +1027,60 @@ busiest programs first and its Erlang processes after them; the busiest
 Erlang processes, by reductions, are `erx:ps()`'s to show. FreeBSD's `-m`
 orders by text, data and stack size, which erXos does not split, so its
 `-m` orders by the memory `rss` shows.
+
+**`top [-bn] [-d count] [-s time] [number]`** shows the table `ps` reads
+as FreeBSD's `top` (`usr.bin/top`) shows a machine's, display after
+display. A display is a header and a process table. The header is the
+time of day, then a count of the processes and of those running, sleeping
+and stopped, `57 processes:  2 running, 55 sleeping`, from the `STAT`
+`ps` shows (`R`, `S`, `T`). The table has the columns of FreeBSD's that
+the table has values for: `PID`, `RES` (`rss`, as FreeBSD's
+`format_k()` writes a size, at most four digits and a unit), `STATE`
+(`RUN`, `SLEEP` or `STOP`), `TIME` (`time`, as FreeBSD's
+`format_time()` writes it, `M:SS`), `WCPU` and `COMMAND` (`comm`,
+through the field escape as `ps` writes it). FreeBSD's
+`USERNAME`, `THR`, `PRI`, `NICE`, `SIZE` and `C` are left out: every row
+is the session's own, and the rest have no value for an Erlang process.
+A row's `WCPU` is its share of a CPU over the last interval: the growth
+of its CPU time from the previous display's sample to this one, over the
+time between them, as a percentage to two decimals. For a process the
+previous display did not have, and on the first display, it is `pcpu`,
+its share since it started. FreeBSD's kernel keeps a decaying average
+for `WCPU`; erXos keeps none, and two samples give a recent share without
+one. A value the table lacks prints `-`, so an Erlang process's `TIME`
+and `WCPU` do. Rows are ordered by `WCPU`, largest first, and the rows
+without one follow in `ps`'s order, as under `ps -r`.
+
+At a terminal, without `-b` or `-n`, `top` starts each display with the
+terminal's home and clear sequences, written as its own output, and
+shows one every `time` seconds (`-s`, 2 by default) until it has shown
+`count` (`-d`, no limit by default) or `Ctrl-C` ends it, as it ends any
+command. `time` is a decimal number with an optional fraction, as
+`strtod(3)` reads one without an exponent, taken to the whole
+millisecond and at least 1 ms. It changes no terminal state, no mode,
+scrolling region or alternate screen, so an interrupt at any point
+leaves nothing to restore. The table has as many rows as fit the
+terminal's height under the header, with the last line left for the
+cursor so that nothing scrolls on a terminal of five lines or more:
+`LINES` when it is a positive number, as FreeBSD's termcap takes it,
+else the height the terminal reports, else 24. Each line is cut one column short of the terminal's width, as
+FreeBSD's screen is (`usr.bin/top/screen.c`), and never inside a UTF-8
+sequence. `top` takes no keys: FreeBSD's interactive commands, `q` among
+them, read the keyboard in the line discipline's non-canonical mode,
+which an Erlang command does not set, so `Ctrl-C` is how it ends.
+
+With `-b` or `-n`, or when its output is not a terminal, `top` writes
+`count` displays, one by default, each after the first following a blank
+line, with no control sequence and nothing cut, and each shows at most
+18 processes, FreeBSD's `Nominal_TOPN` for output it cannot draw on.
+`number` caps the processes a display shows; `all`, `infinity`,
+`maximum` or a prefix of one shows them all, as FreeBSD's `atoiwi()`
+reads it. A `count` of 0 or none, a `time` that is not a positive number
+and a negative `number` are each reported with FreeBSD's warning, such as
+`top: warning: display count should be positive -- option ignored`, and
+ignored, and `top` runs on; any other option is a usage error. A display
+costs one read of the table, as `ps` does, and `top` sleeps between
+displays, so it loads the session as one `ps` per `time` does.
 
 **`ls [-1al] [file ...]`** lists a file by the name given and a directory
 by the names it holds, sorted byte by byte, without those that start with

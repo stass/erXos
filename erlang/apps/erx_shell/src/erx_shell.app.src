@@ -27,6 +27,7 @@
              erx_cmd_pwd,
              erx_cmd_rm,
              erx_cmd_sort,
+             erx_cmd_top,
              erx_cmd_true,
              erx_cmd_uname,
              erx_cmd_wc,

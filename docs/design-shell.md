@@ -479,7 +479,7 @@ diagnostics on standard error, as `NAME: ...`, and FreeBSD's exit
 statuses (S-R4). An option a command does not offer is a usage error;
 more options are later additions, each with its oracle test. Text
 compares as bytes, as FreeBSD's tools compare it under `LC_ALL=C`, the
-locale the oracle runs in. `ps` and `ls` are specified with the live
+locale the oracle runs in. `ps`, `top` and `ls` are specified with the live
 machine ([design-live.md](design-live.md#the-command-shell)); `cat`,
 `echo` and the file utilities copy, print or change files as FreeBSD's
 do. The text filters:

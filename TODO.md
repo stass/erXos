@@ -2199,7 +2199,8 @@ to the corpus and follow rc
   for `TT` because the session's tty has no name a command can read, leaves out the `+` of a
   foreground job's `STAT`, and lists no programs until programs run in sessions; `grep -r` is not
   offered; `wc`'s status is its first error's text where FreeBSD's is 1; and a usage error's
-  status is `usage` where FreeBSD's `sort` and `grep` exit 2 (`erx_shell_runner:outcome/3`).
+  status is `usage` where FreeBSD's `sort` and `grep` exit 2 and `top` 1
+  (`erx_shell_runner:outcome/3`).
 * [Low] shell, the runner's pieces not done yet: `<{...}` and `>{...}` are refused, since the
   namespace has no path that names a pipe; a background block's redirected files close when the
   redirection's request ends, so `{cmd &} > f` loses what `cmd` writes after that; a substitution's

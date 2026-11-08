@@ -39,14 +39,18 @@ column (bin/ps/ps.c).
 -erx_usage("ps [-mr] [-o keyword[,keyword...]]").
 
 -export([run/2]).
--export([table/3, order/2, keywords/1]).
+-export([table/3, order/2, keywords/1, cut/2]).
+-export([session_table/0]).
 
 -export_type([row/0]).
 
-%% A process's values, each `missing` when the table does not have it.
+%% A process's values, each `missing` when the table does not have it:
+%% `time` is its CPU time in microseconds, and `wcpu` the share of a CPU
+%% top works out for it (erx_cmd_top:shares/2).
 -type row() :: #{id := [integer()], pid := binary(),
                  tt := binary() | missing, state := binary() | missing,
-                 time := binary() | missing, pcpu := number() | missing,
+                 time := non_neg_integer() | missing, pcpu := number() | missing,
+                 wcpu => number() | missing,
                  rss := non_neg_integer() | missing,
                  comm := binary() | missing, command := binary() | missing}.
 
@@ -77,6 +81,8 @@ run(Args, Ctx) ->
 
 %%% The table
 
+-doc "The session's process table, a row for each process, by no order.".
+-spec session_table() -> [row()].
 session_table() ->
     [row(Pid) || Pid <- erlang:processes()].
 
@@ -151,10 +157,10 @@ keyword(<<"args">>) -> command;
 keyword(_Other) -> unknown.
 
 -doc """
-Rows by pid, or under `pcpu` or `rss` largest first, each set of equal
-values, and the rows with none after them, in pid order.
+Rows by pid, or under `pcpu`, `rss` or top's `wcpu` largest first, each
+set of equal values, and the rows with none after them, in pid order.
 """.
--spec order([row()], none | pcpu | rss) -> [row()].
+-spec order([row()], none | pcpu | rss | wcpu) -> [row()].
 order(Rows, none) ->
     lists:sort(fun(#{id := A}, #{id := B}) -> A =< B end, Rows);
 order(Rows, Key) ->
@@ -189,9 +195,20 @@ pad(right, Cell, Width, _Last) -> [binary:copy(<<" ">>, Width - byte_size(Cell))
 pad(left, Cell, _Width, true) -> Cell;
 pad(left, Cell, Width, false) -> [Cell, binary:copy(<<" ">>, Width - byte_size(Cell))].
 
+-doc """
+A line cut to at most Width bytes, short of a UTF-8 sequence the cut
+would split, so a cut line of valid UTF-8, as every escaped line is,
+stays valid.
+""".
+-spec cut(binary(), pos_integer() | infinity) -> binary().
 cut(Line, infinity) -> Line;
 cut(Line, Width) when byte_size(Line) =< Width -> Line;
-cut(Line, Width) -> binary:part(Line, 0, Width).
+cut(Line, Width) ->
+    Part = binary:part(Line, 0, Width),
+    case unicode:characters_to_binary(Part) of
+        {incomplete, Whole, _Split} -> Whole;
+        _ -> Part
+    end.
 
 header(pid) -> <<"PID">>;
 header(tt) -> <<"TT">>;
@@ -205,6 +222,8 @@ header(command) -> <<"COMMAND">>.
 align(Column) when Column =:= pid; Column =:= time; Column =:= pcpu; Column =:= rss -> right;
 align(_Column) -> left.
 
+cell(time, #{time := Micros}) when is_integer(Micros) ->
+    cputime(Micros);
 cell(Column, Row) ->
     case maps:get(Column, Row) of
         missing -> <<"-">>;
@@ -212,3 +231,10 @@ cell(Column, Row) ->
         Value when is_float(Value) -> float_to_binary(Value, [{decimals, 1}]);
         Value -> Value
     end.
+
+%% CPU time, in microseconds, as FreeBSD's ps writes it (bin/ps/print.c,
+%% cputime): `M:SS.hh`, rounded to the hundredth.
+cputime(Micros) ->
+    Hundredths = (Micros + 5000) div 10000,
+    Seconds = Hundredths div 100,
+    iolist_to_binary(io_lib:format("~b:~2..0b.~2..0b", [Seconds div 60, Seconds rem 60, Hundredths rem 100])).

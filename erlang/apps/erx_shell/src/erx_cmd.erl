@@ -39,13 +39,13 @@ writes with write/2 and say/2 and reads with read/1, the bytes in
 flight, or read_line/1, one line of at most 64 KiB; nothing it writes is
 framed or rendered on the way. Where FreeBSD's command of the same name
 looks at whether its output is a terminal, as `ls` does, it asks
-isatty/2, and the terminal's width, columns/1. A write that cannot be
-done, such as one to a pipe whose reader has ended, and a line over
-64 KiB, end the command at once with that error as its status, as
-`SIGPIPE` ends a program.
+isatty/2, and the terminal's width and height, columns/1 and rows/1. A
+write that cannot be done, such as one to a pipe whose reader has ended,
+and a line over 64 KiB, end the command at once with that error as its
+status, as `SIGPIPE` ends a program.
 """.
 
--export([write/2, say/2, report/3, read/1, read_line/1, isatty/2, columns/1,
+-export([write/2, say/2, report/3, read/1, read_line/1, isatty/2, columns/1, rows/1,
          facet/2, path/2, cwd/1, env/2, getopt/2, format_error/1]).
 
 -export_type([ctx/0, stream/0]).
@@ -131,19 +131,31 @@ reports, else `unknown`, for which each command keeps FreeBSD's default.
 """.
 -spec columns(ctx()) -> pos_integer() | unknown.
 columns(Ctx) ->
-    case env(Ctx, <<"COLUMNS">>) of
+    terminal_size(Ctx, <<"COLUMNS">>, fun io:columns/0).
+
+-doc """
+The terminal's height in lines: `LINES` when it is a positive number, as
+FreeBSD's termcap takes it first, else the height the terminal reports,
+else `unknown`.
+""".
+-spec rows(ctx()) -> pos_integer() | unknown.
+rows(Ctx) ->
+    terminal_size(Ctx, <<"LINES">>, fun io:rows/0).
+
+terminal_size(Ctx, Variable, Reported) ->
+    case env(Ctx, Variable) of
         [Text] when byte_size(Text) =< 9 ->
             case string:to_integer(Text) of
-                {Columns, <<>>} when Columns > 0 -> Columns;
-                _ -> terminal_columns()
+                {Size, <<>>} when Size > 0 -> Size;
+                _ -> reported(Reported)
             end;
         _ ->
-            terminal_columns()
+            reported(Reported)
     end.
 
-terminal_columns() ->
-    case io:columns() of
-        {ok, Columns} when is_integer(Columns), Columns > 0 -> Columns;
+reported(Reported) ->
+    case Reported() of
+        {ok, Size} when is_integer(Size), Size > 0 -> Size;
         _ -> unknown
     end.
 
