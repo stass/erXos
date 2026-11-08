@@ -467,27 +467,49 @@ it; git history is the record of completed work.
 * [Low] domain library, `dom_core.c` `dom_grant_rate`: rates round up,
   the parent's too, so a child within a thousandth of a CPU of a tiny
   parent fits it; compare quota over period exactly.
-* [Low] domain library, `dom_core.c`: the domain's own bell takes label 1,
-  which obliges the domain service's per-domain label counter to start at
-  2, and a connection's number is its row plus one, so a number is reused
-  after a disconnect; give the counter and a numbering that does not reuse
-  to the library when `erx_dom_connect` lands.
 * [Low] domain library, `dom_core.c` `dom_check_files`: a runtime image
   flagged `ERX_ENTRY_SYSTEM` is refused; confirm against the boot image's
   layout for domain releases (IM1) that service domains never run the
   system release's ERTS entry.
+* [Medium] domain library, `liberx/system/dom_life.c`: a connection's
+  installs go into two living domains' tables, but an install step's undo
+  is "goes with the budget", so a connect that fails after some installs
+  leaves stale capabilities in those tables; the step names no slot, and
+  nothing clears a party's slots after a disconnect. Give link installs
+  a slot and an undo that clears it, and track installs in the driver's
+  model, before DL2 applies connections.
+* [Medium] domain library, `dom_life.c` `erx_dom_record_step`: the
+  library's fault stop uses `ERX_EXIT_CRASH`, and its own stops are told
+  apart only by `view->library_threads`, so a library thread missing from
+  that list turns a fault into `CRASH` and the domain service reads a dump
+  that was never written. Decide by the stopper's space, or stop faults
+  with a status that never classifies as `CRASH`.
+* [Medium] domain library, `include/erx/dom.h`: the record's `bool
+  stopping` beside `erx_dom_end_t stop` is a flag pair, and a zeroed
+  `stop` reads as a valid `HALT`; make "no stop noted" a value of one
+  field.
+* [Medium] domain library, `dom.h`: the apply phase's rules are not
+  written down: who sets a connection's `closing`; that `labels` and
+  `next_connection` advance only after a successful apply, and
+  `next_connection` becomes 0 past `UINT32_MAX`. Return the counters'
+  next values in the plans, or state them in the plan comments.
+* [Medium] docs, `docs/design-system.md` "The domain library's records"
+  and the entry table: the record and view lack `connections`, `labels`,
+  `stopping`, `stop`, `next_connection` and `library_threads`, and
+  `erx_dom_connect`'s `ERX_ELIMIT` lists only a full table, not the
+  quota, spent numbers or spent labels.
+* [Low] domain library, `dom_life.c`: connect allows a second connection
+  between the same pair, which the domain service's "the connection that
+  joins D and that peer" assumes away (refuse with `ERX_EEXIST`);
+  disconnect frees a living domain's system connection; `erx_dom_plan_stop`
+  lists the kernel's exit statuses one by one; and the charging rule is
+  stated twice, in the planner's steps and in `life_step_ok`.
 * [Low] domain library tests, `test/host/dom_core_test.rb`: a mutant is
   caught by any difference in the driver's output rather than by the line
-  its seed must change, and the origin rule has no
-  `chokepoints_dom_test.rb` showing its allowed sites pass.
+  its seed must change (`dom_life_test.rb` judges by the line), and the
+  origin rule has no `chokepoints_dom_test.rb` showing its allowed sites
+  pass.
 
-* [Low] abi, `abi/erx_abi.txt`: the exit statuses `ERX_EXIT_PARENT`,
-  `ERX_EXIT_RELEASED` and `ERX_EXIT_NOTHREAD` of
-  [design-kernel.md](docs/design-kernel.md) and `ERX_EXIT_CRASH` of
-  [design-runtime.md](docs/design-runtime.md) are not in the ABI file,
-  which design-runtime.md says defines `ERX_EXIT_CRASH`. Add them before
-  the backend package that carries exit records, which uses
-  `ERX_EXIT_PARENT` and `ERX_EXIT_CRASH`.
 * [Medium] live, `erx_source` (`erlang/apps/erx/src/erx_source.erl`): nothing ties a module's `src` file to
   its beam, so an edited, unrecompiled source shows lines the module was not compiled from, and a location in
   an included file is looked up by base name in the module's own `src` and `include`, so a header of another

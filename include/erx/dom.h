@@ -113,6 +113,12 @@ typedef struct erx_dom {
 	erx_cap_t	sealing;	/* the vault's mapping of the sealing page */
 	erx_cap_t	first_thread;
 	uint32_t	system_connection;	/* its connection to the system domain */
+	uint32_t	connections;	/* its connections quota, the spec's */
+	uint32_t	labels;		/* bell labels its event table has taken: the
+					 * system connection's is 1, and each
+					 * connection's bell takes the next */
+	bool		stopping;	/* the library stopped its space, for stop */
+	erx_dom_end_t	stop;		/* FAULT with the kind, or STOPPED */
 	erx_dom_end_t	end;		/* classified end, once ERX_DOM_ENDED */
 	erx_fault_t	record;		/* the record that ended it */
 } erx_dom_t;
@@ -232,6 +238,14 @@ typedef struct erx_dom_view {
 	const erx_grant_t	*service_grants;
 	uint32_t		 nservice_grants;
 	uint32_t		 system_lane;	/* the manifest's */
+	uint32_t		 next_connection; /* the next connection's number:
+						  * numbers start at 1 and only grow,
+						  * so none is reused in a boot; 0
+						  * once they are spent */
+	const uint64_t		*library_threads; /* object ids of the threads that
+						  * stop spaces for the library: its
+						  * fault thread and its NIFs' */
+	uint32_t		 nlibrary_threads;
 	bool			 ending;	/* the ending record is installed */
 } erx_dom_view_t;
 
@@ -255,6 +269,13 @@ typedef enum erx_dom_obj {
 	ERX_DOM_OBJ_DOM_BELL,		/* bound to the domain's group */
 	ERX_DOM_OBJ_SLICE,		/* the release slice */
 	ERX_DOM_OBJ_THREAD,		/* the first thread */
+	/* A connection between domains a and b (erx_dom_plan_connect). */
+	ERX_DOM_OBJ_LINK_BUDGET_A,	/* a's child budget, carved from a's outer */
+	ERX_DOM_OBJ_LINK_BUDGET_B,	/* b's, carved from b's outer */
+	ERX_DOM_OBJ_SIDE_A,		/* a's side: a writes it, b reads it */
+	ERX_DOM_OBJ_SIDE_B,		/* b's side: b writes it, a reads it */
+	ERX_DOM_OBJ_BELL_A,		/* bound to a's group: a waits on it */
+	ERX_DOM_OBJ_BELL_B,		/* bound to b's group */
 	ERX_DOM_OBJ_MADE_COUNT,
 	/* Held by the library. */
 	ERX_DOM_OBJ_PRINCIPAL_BUDGET = ERX_DOM_OBJ_MADE_COUNT,
@@ -263,6 +284,12 @@ typedef enum erx_dom_obj {
 	ERX_DOM_OBJ_SYSTEM_GROUP,
 	ERX_DOM_OBJ_FAULT_GATE,		/* the library's fault gate */
 	ERX_DOM_OBJ_TIME_PAGE,
+	ERX_DOM_OBJ_OUTER_A,		/* a connection's parties' records' objects */
+	ERX_DOM_OBJ_OUTER_B,
+	ERX_DOM_OBJ_GROUP_A,
+	ERX_DOM_OBJ_GROUP_B,
+	ERX_DOM_OBJ_SPACE_A,
+	ERX_DOM_OBJ_SPACE_B,
 	ERX_DOM_OBJ_COUNT
 } erx_dom_obj_t;
 
@@ -312,6 +339,9 @@ typedef enum erx_dom_parent {
 #define ERX_DOM_GROUP_GRANT	0u
 #define ERX_DOM_GROUP_SPACES	1u
 
+/* The label of a domain's bell on its system connection. */
+#define ERX_DOM_SYSTEM_LABEL	1u
+
 /* A plan's connection_row when the domain has no system connection. */
 #define ERX_DOM_NO_ROW		UINT32_MAX
 
@@ -332,13 +362,18 @@ typedef struct erx_dom_plan {
  */
 typedef struct erx_dom_grant_row {
 	erx_dom_obj_t	obj;
+	erx_dom_obj_t	target;		/* the space it goes into */
 	uint32_t	flags;		/* required specification flags, or 0 */
 	uint32_t	rights;
 	uint32_t	spaces_rights;
 } erx_dom_grant_row_t;
 
-/* Every install a plan may make into a domain's table (A7), one row per object. */
-#define ERX_DOM_GRANTS_ROWS	9u
+/*
+ * Every install a plan may make into a domain's table (A7), one row per
+ * object and the space it goes into: nine for a creation, into SPACE, and
+ * three into each party of a connection.
+ */
+#define ERX_DOM_GRANTS_ROWS	15u
 extern const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS];
 
 /*
@@ -389,5 +424,144 @@ erx_dom_undo_kind_t erx_dom_step_undo(erx_dom_step_kind_t);
  */
 uint32_t	erx_dom_plan_undo(const erx_dom_plan_t *plan, uint32_t applied,
 		    erx_dom_obj_t *undo);
+/* The same over any step list: the carves among its first `applied`, last first. */
+uint32_t	erx_dom_steps_undo(const erx_dom_step_t *steps, uint32_t nsteps,
+		    uint32_t applied, erx_dom_obj_t *undo);
+
+/*
+ * A connection's plan (docs/design-system.md, "Introducing two domains"):
+ * a child budget carved from each party's outer budget, the two sides and
+ * the two bells, each charged to the child of the party that reads it or
+ * waits on it, and each party's share installed from erx_dom_grants. The
+ * held objects it names are the parties' records' (OUTER_A, GROUP_A,
+ * SPACE_A and b's), which the apply phase resolves from a_slot and b_slot.
+ */
+#define ERX_DOM_LINK_STEPS	12u
+
+typedef struct erx_dom_link_plan {
+	uint32_t	a, b;		/* the parties' domain ids */
+	uint32_t	a_slot, b_slot;	/* their records */
+	uint32_t	row;		/* the free connection row it takes */
+	uint32_t	number;		/* its number, view->next_connection */
+	uint32_t	nsteps;
+	erx_dom_step_t	steps[ERX_DOM_LINK_STEPS];
+} erx_dom_link_plan_t;
+
+/*
+ * Plans erx_dom_connect(a, b, a_reads, b_reads): a_reads sizes the data
+ * area of the side a reads, b's, and b_reads the one b reads. ERX_OK;
+ * ERX_EINVAL for a == b, a domain with no record or outside built and
+ * running, or a size that is not a lane's; ERX_ELIMIT for a full table,
+ * spent connection numbers, a party at its connections quota or out of
+ * bell labels. *plan is written only on ERX_OK. Whether a reader's outer
+ * budget covers its child is the kernel's to say, at the carve.
+ */
+erx_status_t	erx_dom_plan_connect(const erx_dom_view_t *, uint32_t a,
+		    uint32_t b, uint32_t a_reads, uint32_t b_reads,
+		    erx_dom_link_plan_t *plan);
+
+/*
+ * Checks a connection's plan whole: each object is charged to the child of
+ * the party that reads it or waits on it, each child is carved from its
+ * own party's outer budget, and each install has its row of
+ * erx_dom_grants. ERX_EINVAL otherwise.
+ */
+erx_status_t	erx_dom_link_check(const erx_dom_link_plan_t *plan);
+
+/* The undo of a connection whose first `applied` steps were applied. */
+uint32_t	erx_dom_link_undo(const erx_dom_link_plan_t *plan,
+		    uint32_t applied, erx_dom_obj_t *undo);
+
+/*
+ * What a disconnect, the destroy at an exit record or a retire does: it
+ * destroys the capabilities in order, then frees the row or record, or
+ * for a destroy leaves the record for the report to mark ended. A destroy
+ * cannot be undone, and none of these can fail on a capability the
+ * library holds.
+ */
+typedef enum erx_dom_teardown_kind {
+	ERX_DOM_DISCONNECT = 1,	/* index: the connection row it frees */
+	ERX_DOM_DESTROY,	/* index: the record of the domain whose own
+				 * budget it destroys */
+	ERX_DOM_RETIRE		/* index: the record it frees */
+} erx_dom_teardown_kind_t;
+
+typedef struct erx_dom_teardown {
+	erx_dom_teardown_kind_t kind;
+	uint32_t	index;
+	uint32_t	ndestroy;
+	erx_cap_t	destroy[2];
+} erx_dom_teardown_t;
+
+/*
+ * erx_dom_disconnect(number): destroys the connection's child budgets,
+ * one when a is the system domain. ERX_OK, or ERX_EINVAL for an unknown
+ * number. The domain service asks only once each party has unmapped the
+ * connection's objects or ended.
+ */
+erx_status_t	erx_dom_plan_disconnect(const erx_dom_view_t *,
+		    uint32_t number, erx_dom_teardown_t *);
+
+/*
+ * erx_dom_retire(id): destroys the ended domain's outer budget, with its
+ * crash area, and frees its record. ERX_OK; ERX_EINVAL unless the domain
+ * has ended; ERX_EBUSY while a connection row names it, since each such
+ * row holds a child of its outer budget.
+ */
+erx_status_t	erx_dom_plan_retire(const erx_dom_view_t *, uint32_t id,
+		    erx_dom_teardown_t *);
+
+/*
+ * What the library does next for a domain: the fault thread's answer to a
+ * record at its gate (erx_dom_record_step), or erx_dom_stop's.
+ */
+typedef enum erx_dom_act {
+	ERX_DOM_ACT_DROP,	/* nothing: no living domain has the label, or
+				 * the library is already stopping its space */
+	ERX_DOM_ACT_STOP,	/* set the record's stopping and stop to end,
+				 * then erx_space_stop(space, status) */
+	ERX_DOM_ACT_END		/* apply teardown, report {domain_ended, Id,
+				 * end, record}, set the record's end and
+				 * record, and its state to ERX_DOM_ENDED */
+} erx_dom_act_t;
+
+typedef struct erx_dom_action {
+	erx_dom_act_t	kind;
+	uint32_t	slot;		/* STOP, END: the domain's record */
+	int64_t		status;		/* STOP: the stop's status */
+	erx_dom_end_t	end;		/* STOP: the noted stop; END: the end */
+	erx_dom_teardown_t teardown;	/* END: the destroy of its own budget */
+} erx_dom_action_t;
+
+/*
+ * The classified end of a domain from its exit record
+ * (docs/design-system.md, "Ending a domain"): a stop the library made
+ * (by_library: the record's stopper is one of the library's threads) is
+ * the FAULT it noted, or STOPPED; a stop the domain made is CRASH for
+ * ERX_EXIT_CRASH and HALT with the status otherwise, ERX_EXIT_NOTHREAD
+ * among them. noted is the record's stop, or NULL when it has none.
+ */
+erx_dom_end_t	erx_dom_classify(const erx_fault_t *exit, bool by_library,
+		    const erx_dom_end_t *noted);
+
+/*
+ * The fault thread's step for a record at the library's gate whose label
+ * is label. An exit record of a built or running domain ends it: its own
+ * budget is destroyed and the end classified. Any other record of one the
+ * library is not already stopping stops it as a FAULT of the record's
+ * kind, with status ERX_EXIT_CRASH. Every other record is dropped: one
+ * whose label names no record, or a domain building, ended or retired.
+ */
+void		erx_dom_record_step(const erx_dom_view_t *, uint64_t label,
+		    const erx_fault_t *record, erx_dom_action_t *action);
+
+/*
+ * erx_dom_stop(id, status): stops a built or running domain's space, with
+ * its sub-spaces, noting the end as STOPPED; a second stop, or a stop of
+ * a domain the library is already stopping for a fault, is a DROP. ERX_OK,
+ * or ERX_EINVAL for an unknown id or one outside built and running.
+ */
+erx_status_t	erx_dom_plan_stop(const erx_dom_view_t *, uint32_t id,
+		    int64_t status, erx_dom_action_t *action);
 
 #endif /* ERX_DOM_H */

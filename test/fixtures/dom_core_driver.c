@@ -54,8 +54,10 @@ static const erx_dom_file_t files[] = {
 static const char *const obj_names[ERX_DOM_OBJ_COUNT] = {
 	"NONE", "BUDGET", "OUTER", "SPACE", "GROUP", "SPACES_GROUP", "BOOTINFO",
 	"CRASH", "SYS_BUDGET", "SYS_SIDE", "DOM_SIDE", "SYS_BELL", "DOM_BELL",
-	"SLICE", "THREAD", "PRINCIPAL_BUDGET", "PARENT_GROUP", "SYSTEM_SPACE",
-	"SYSTEM_GROUP", "FAULT_GATE", "TIME_PAGE"
+	"SLICE", "THREAD", "LINK_BUDGET_A", "LINK_BUDGET_B", "SIDE_A", "SIDE_B",
+	"BELL_A", "BELL_B", "PRINCIPAL_BUDGET", "PARENT_GROUP", "SYSTEM_SPACE",
+	"SYSTEM_GROUP", "FAULT_GATE", "TIME_PAGE", "OUTER_A", "OUTER_B",
+	"GROUP_A", "GROUP_B", "SPACE_A", "SPACE_B"
 };
 
 static const char *const step_names[] = {
@@ -112,7 +114,7 @@ reset_view(void)
 	    .npartial = 1, .partial_principal = 1, .native_limits = limits(1),
 	    .system_grant = grant(ERX_QUOTA_NONE, 0xf, 63),
 	    .system_reserve = 250, .service_grants = services,
-	    .nservice_grants = 0, .system_lane = 16384 };
+	    .nservice_grants = 0, .system_lane = 16384, .next_connection = 1 };
 }
 
 static erx_dom_spec_t

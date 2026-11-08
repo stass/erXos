@@ -42,7 +42,7 @@ class GateBaselineTest < Minitest::Test
                                           kernel/core/log.c build/gen/kernel/generated/abi_decode.c
                                           build/gen/kernel/generated/abi_run.c] },
     'device_queue' => { seeds: 8, sources: %w[otp/erts/emulator/nifs/erxos/erx_device_queue.c] },
-    'dom_core' => { seeds: 7, sources: %w[liberx/system/dom_core.c liberx/erx_lane.c
+    'dom_core' => { seeds: 9, sources: %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/erx_lane.c
                                           build/gen/liberx/generated/abi_reader.c] },
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },

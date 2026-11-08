@@ -23,19 +23,34 @@
 /* The parts of an erx_grant_t rate: thousandths of one CPU. */
 #define DOM_MILLI	UINT64_C(1000)
 
+#define DOM_WRITER	(ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP)
+#define DOM_READER	(ERX_HR_READ | ERX_HR_MAP)
+
+/*
+ * A party of a connection gets its own side to write, the peer's to read
+ * and the peer's bell to ring; its own bell stays the library's, bound to
+ * its group, and it learns only the bell's label.
+ */
 const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS] = {
-	{ ERX_DOM_OBJ_BUDGET, 0, ERX_HR_ALLOC,
+	{ ERX_DOM_OBJ_BUDGET, ERX_DOM_OBJ_SPACE, 0, ERX_HR_ALLOC,
 	    ERX_HR_SPACES | ERX_HR_CARVE | ERX_HR_DUP | ERX_HR_GIVE },
-	{ ERX_DOM_OBJ_GROUP, 0, ERX_HR_ATTACH | ERX_HR_SIGNAL, 0 },
-	{ ERX_DOM_OBJ_SPACES_GROUP, ERX_DOM_SPACES,
+	{ ERX_DOM_OBJ_GROUP, ERX_DOM_OBJ_SPACE, 0,
+	    ERX_HR_ATTACH | ERX_HR_SIGNAL, 0 },
+	{ ERX_DOM_OBJ_SPACES_GROUP, ERX_DOM_OBJ_SPACE, ERX_DOM_SPACES,
 	    ERX_HR_CONFIGURE | ERX_HR_ATTACH | ERX_HR_SIGNAL | ERX_HR_DUP |
 	    ERX_HR_GIVE, 0 },
-	{ ERX_DOM_OBJ_DOM_SIDE, 0, ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP, 0 },
-	{ ERX_DOM_OBJ_SYS_SIDE, 0, ERX_HR_READ | ERX_HR_MAP, 0 },
-	{ ERX_DOM_OBJ_SYS_BELL, 0, ERX_HR_TRIGGER, 0 },
-	{ ERX_DOM_OBJ_TIME_PAGE, 0, ERX_HR_READ | ERX_HR_MAP, 0 },
-	{ ERX_DOM_OBJ_SLICE, 0, ERX_HR_READ | ERX_HR_MAP, 0 },
-	{ ERX_DOM_OBJ_CRASH, 0, ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP, 0 },
+	{ ERX_DOM_OBJ_DOM_SIDE, ERX_DOM_OBJ_SPACE, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_SYS_SIDE, ERX_DOM_OBJ_SPACE, 0, DOM_READER, 0 },
+	{ ERX_DOM_OBJ_SYS_BELL, ERX_DOM_OBJ_SPACE, 0, ERX_HR_TRIGGER, 0 },
+	{ ERX_DOM_OBJ_TIME_PAGE, ERX_DOM_OBJ_SPACE, 0, DOM_READER, 0 },
+	{ ERX_DOM_OBJ_SLICE, ERX_DOM_OBJ_SPACE, 0, DOM_READER, 0 },
+	{ ERX_DOM_OBJ_CRASH, ERX_DOM_OBJ_SPACE, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_SIDE_A, ERX_DOM_OBJ_SPACE_A, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_SIDE_B, ERX_DOM_OBJ_SPACE_A, 0, DOM_READER, 0 },
+	{ ERX_DOM_OBJ_BELL_B, ERX_DOM_OBJ_SPACE_A, 0, ERX_HR_TRIGGER, 0 },
+	{ ERX_DOM_OBJ_SIDE_B, ERX_DOM_OBJ_SPACE_B, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_SIDE_A, ERX_DOM_OBJ_SPACE_B, 0, DOM_READER, 0 },
+	{ ERX_DOM_OBJ_BELL_A, ERX_DOM_OBJ_SPACE_B, 0, ERX_HR_TRIGGER, 0 },
 };
 
 /*
@@ -180,19 +195,18 @@ dom_grant_fits(const erx_grant_t *child, const erx_grant_t *parent)
 }
 
 /*
- * The system-reserve predicate (docs/design-system.md, "Resource policy",
- * item 13), over the living service grants with grant added: their rates
- * sum to at most system's rate less system_reserve of it, and on system's
- * CPUs the grants that meet them, each counted at most its rate and at
- * most the CPUs it shares, take no more than those CPUs less the reserve.
+ * The system-reserve predicate (docs/design-system.md, "The manifest",
+ * property 13), over the living service grants with grant added: their
+ * rates sum to at most system's rate less system_reserve of it. A grant
+ * on system's CPUs takes at most its rate there, and system's rate is at
+ * most its CPUs, so no separate per-CPU clause is needed.
  */
 static bool
 dom_system_reserve(const erx_dom_view_t *view, const erx_grant_t *grant)
 {
 	const erx_grant_t *each;
-	uint64_t system_rate, rate, shared, rates = 0, on_system = 0;
+	uint64_t system_rate, rate, rates = 0;
 	uint64_t keep = DOM_MILLI - view->system_reserve;
-	uint64_t system_cpus = view->system_grant.cpuset;
 
 	if (view->system_reserve > DOM_MILLI ||
 	    !dom_grant_rate(&view->system_grant, &system_rate))
@@ -200,17 +214,11 @@ dom_system_reserve(const erx_dom_view_t *view, const erx_grant_t *grant)
 	for (uint64_t index = 0; index <= view->nservice_grants; index++) {
 		each = index < view->nservice_grants ?
 		    &view->service_grants[index] : grant;
-		if (!dom_grant_rate(each, &rate))
-			return (false);
-		shared = dom_popcount(each->cpuset & system_cpus) * DOM_MILLI;
-		if (!dom_add(rates, rate, &rates) ||
-		    !dom_add(on_system, rate < shared ? rate : shared,
-		    &on_system))
+		if (!dom_grant_rate(each, &rate) || !dom_add(rates, rate, &rates))
 			return (false);
 	}
 	/* Rates are at most 64,000 each over at most 2^32 grants: no overflow. */
-	return (rates * DOM_MILLI <= system_rate * keep &&
-	    on_system <= dom_popcount(system_cpus) * keep);
+	return (rates * DOM_MILLI <= system_rate * keep);
 }
 
 static bool
@@ -420,10 +428,12 @@ dom_check_room(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	plan->connection_row = ERX_DOM_NO_ROW;
 	if (spec->origin.kind == ERX_DOM_PARTIAL_BOOT)
 		return (ERX_OK);
+	if (view->next_connection == 0)
+		return (ERX_ELIMIT);
 	for (uint32_t index = 0; index < view->max_connections; index++) {
 		if (view->connections[index].number == 0) {
 			plan->connection_row = index;
-			plan->connection = index + 1;
+			plan->connection = view->next_connection;
 			return (ERX_OK);
 		}
 	}
@@ -573,7 +583,8 @@ dom_row_rights(const erx_dom_spec_t *spec, const erx_dom_grant_row_t *row)
 static bool
 dom_row_applies(const erx_dom_plan_t *plan, const erx_dom_grant_row_t *row)
 {
-	return ((row->flags & ~plan->spec.flags) == 0 &&
+	return (row->target == ERX_DOM_OBJ_SPACE &&
+	    (row->flags & ~plan->spec.flags) == 0 &&
 	    (row->obj >= ERX_DOM_OBJ_MADE_COUNT || dom_plan_makes(plan, row->obj)));
 }
 
@@ -638,7 +649,7 @@ dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t reader,
 		 */
 		dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_BELL,
 		    .obj = ERX_DOM_OBJ_DOM_BELL, .budget = ERX_DOM_OBJ_SYS_BUDGET,
-		    .target = ERX_DOM_OBJ_GROUP, .label = 1 });
+		    .target = ERX_DOM_OBJ_GROUP, .label = ERX_DOM_SYSTEM_LABEL });
 	}
 	if (release)
 		dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_SLICE,
@@ -658,7 +669,7 @@ dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t reader,
 		if (dom_row_applies(plan, row))
 			dom_step(plan, (erx_dom_step_t){
 			    .kind = ERX_DOM_STEP_INSTALL, .obj = row->obj,
-			    .target = ERX_DOM_OBJ_SPACE,
+			    .target = row->target,
 			    .rights = dom_row_rights(spec, row) });
 	}
 	dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_BOOTINFO,
@@ -773,7 +784,8 @@ dom_granted(const erx_dom_spec_t *spec, const erx_dom_step_t *step)
 
 	for (size_t index = 0; index < ERX_DOM_GRANTS_ROWS; index++) {
 		row = &erx_dom_grants[index];
-		if (row->obj == step->obj && (row->flags & ~spec->flags) == 0 &&
+		if (row->obj == step->obj && row->target == step->target &&
+		    (row->flags & ~spec->flags) == 0 &&
 		    (step->rights & ~dom_row_rights(spec, row)) == 0)
 			return (true);
 	}
@@ -891,16 +903,23 @@ erx_dom_step_undo(erx_dom_step_kind_t kind)
 }
 
 uint32_t
-erx_dom_plan_undo(const erx_dom_plan_t *plan, uint32_t applied,
-    erx_dom_obj_t *undo)
+erx_dom_steps_undo(const erx_dom_step_t *steps, uint32_t nsteps,
+    uint32_t applied, erx_dom_obj_t *undo)
 {
 	uint32_t count = 0;
 
-	if (applied > plan->nsteps)
-		applied = plan->nsteps;
+	if (applied > nsteps)
+		applied = nsteps;
 	for (uint32_t index = applied; index > 0; index--)
-		if (erx_dom_step_undo(plan->steps[index - 1].kind) ==
+		if (erx_dom_step_undo(steps[index - 1].kind) ==
 		    ERX_DOM_UNDO_DESTROY)
-			undo[count++] = plan->steps[index - 1].obj;
+			undo[count++] = steps[index - 1].obj;
 	return (count);
+}
+
+uint32_t
+erx_dom_plan_undo(const erx_dom_plan_t *plan, uint32_t applied,
+    erx_dom_obj_t *undo)
+{
+	return (erx_dom_steps_undo(plan->steps, plan->nsteps, applied, undo));
 }

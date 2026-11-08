@@ -448,8 +448,8 @@ violation fails the build with the property, the record and the field:
     the rescue configuration starts names the system release or another
     domain it starts, and it starts no domain that holds a network device.
 12. **Every child domain can be built:** the check runs the host build of
-    `erx_dom_plan_create` over each configured-domain or partial-boot
-    child's specification against the view of a machine just booted with
+    `erx_dom_plan_configured` and `erx_dom_plan_partial` over each
+    configured-domain or partial-boot child's row against the view of a machine just booted with
     `root_memory`, so a domain the library would refuse fails the build,
     not the boot. An empty set of children needs no planner invocation;
     a nonempty set requires the production planner and fails closed
@@ -458,10 +458,8 @@ violation fails the build with the property, the record and the field:
     taken as a rate, its quota over its period (an uncapped grant's rate
     being the size of its cpuset), the configured service domains' grants
     inside `system` sum to at most `system`'s rate less `system_reserve`
-    of it; on the CPUs allowed to the system domain's runtime,
-    the service grants whose cpusets meet it take, each at most its rate
-    and at most the number of CPUs it shares with that cpuset, no more
-    than the number of those CPUs less that headroom. This is a
+    of it. Since each grant fits `system`, and `system`'s rate is at most
+    the number of its CPUs, the same headroom holds on those CPUs. This is a
     normalized configuration check, not a lower bound on CPU supplied
     within a period or deadline. The system runtime's threads belong
     directly to `system` and have no separate quota that could expire
@@ -980,32 +978,53 @@ typedef struct erx_dom_spec {
 } erx_dom_spec_t;
 ```
 
-The library has one constructor per source. The request constructor
-takes the principal handle produced by the caller's admitted domain
-facet and the request fields; it sets `ERX_DOM_REQUEST` and no manifest
-index. The configured constructor takes a row handle from the checked
-manifest's boot order or restart record; it resolves the principal,
-images, complete limits and flags from that row and sets
-`ERX_DOM_CONFIGURED`. The partial-boot constructor takes a checked native
-program row, its system principal and the manifest's native limits, and
-sets `ERX_DOM_PARTIAL_BOOT`. Each returns a complete copied specification
-or an error. Missing request limits are resolved from the principal's
-`default_limits`; every resolved value is checked against the independent
-`ceiling_limits`. The result contains the complete runtime-limit projection
-defined by the ABI, not references into the system manifest. These are
-constructors of one internal type, not additional
-domain-creation protocols.
+The library has one planning entry per source, each of which constructs
+the specification from that source itself and then plans it, so no
+caller ever hands the planner a specification or an origin:
+
+* `erx_dom_plan_request(view, request, limits, given)` takes the request
+  fields of a caller whose domain facet admitted it, with its principal,
+  and a mask of the runtime limits the request gave; it sets
+  `ERX_DOM_REQUEST` and no manifest index, resolves every limit the
+  request left out from the principal's `default_limits`, and zeroes the
+  strings past the arguments and environment;
+* `erx_dom_plan_configured(view, id, row)` takes a row of the checked
+  manifest's configured domains, from its boot order or a restart record,
+  and resolves the principal, images, complete limits and flags from that
+  row alone; it sets `ERX_DOM_CONFIGURED`;
+* `erx_dom_plan_partial(view, id, row)` takes a checked native program
+  row of a partial-boot manifest, with the partial boot's system
+  principal and the manifest's native limits; it sets
+  `ERX_DOM_PARTIAL_BOOT`.
+
+Every resolved limit is checked against the independent
+`ceiling_limits`, and the specification holds the complete runtime-limit
+projection defined by the ABI, not references into the system manifest.
+The specification is never copied in from outside: a copied one would
+carry an origin its sender chose, and comparing it with its manifest row
+field by field would be a second copy of the row's layout. These are
+entries over one internal type, not additional domain-creation
+protocols.
 
 The public request schema has no origin, manifest-row or CPU-parent
-field; supplying one is an unknown-field error. Only these library
-constructors build `erx_dom_origin_t`, enforced by a source check with a
-seeded violation. The configured and partial constructors are called
-only from manifest startup/restart and root partial-boot entry points,
+field; supplying one is an unknown-field error. Only the three entries
+build `erx_dom_origin_t`, enforced by a source check with a seeded
+violation. The configured and partial entries are called only from
+manifest startup/restart and root partial-boot entry points,
 respectively, also checked; neither is an operation exposed through a
 domain facet. A numeric index supplied by a requester never selects
-manifest authority. The pure planner checks the origin's range and the
-specification's static fields against the referenced immutable row;
-origin metadata does not bypass the ordinary whole-plan checks.
+manifest authority. The planner checks the origin's range; the
+specification's static fields are the row's by construction, and origin
+metadata does not bypass the ordinary whole-plan checks.
+
+**A grant fits its parent** when it asks for nothing the parent lacks:
+its cpuset is within the parent's, its flags within the parent's, its
+urgency ceiling at most the parent's, and its rate at most the parent's.
+A grant's rate is in thousandths of a CPU: an uncapped grant's is the
+size of its cpuset times 1,000, and a capped one's its quota times 1,000
+over its period, rounded up. A grant whose rate cannot be stated (an
+empty cpuset, a period outside the ABI's range, a quota past what its
+cpuset could spend in a period, or nonzero padding) fits nothing.
 
 CPU placement is derived from that origin: a configured domain's parent
 is `system`, while a requested or partial-boot domain's parent is its
@@ -1029,9 +1048,10 @@ baseline remains the manifest's; runtime changes do not edit it.
 
 `erx_dom_create` builds a domain from an `erx_dom_spec_t`:
 
-1. **Copy and validate.** The NIF copies the specification into the
-   library's memory once. `erx_dom_plan_create(spec, view)` is a pure
-   function of that copy and of the library's view of the machine (free
+1. **Construct and validate.** The NIF calls the planning entry of the
+   domain's source ([The domain library](#the-domain-library)), which
+   constructs the specification in the library's memory and plans it: a
+   pure function of its source and of the library's view of the machine (free
    records, the principal's budget, group and count of domains, the
    checked manifest, principal defaults and ceilings, `system`'s group
    and admitted service grants, the number
@@ -2937,7 +2957,7 @@ partition, as a fresh installation does.
 
 | Failure | Detection | What remains | Who cleans up | What the user sees |
 | --- | --- | --- | --- | --- |
-| A malformed creation specification | `erx_dom_plan_create` | nothing | none needed | the status code in the domain service; a counter |
+| A malformed creation specification | the planning entries | nothing | none needed | the status code in the domain service; a counter |
 | A creation step fails | the step's status | nothing: the applied steps undone by destroying the domain's two budgets (A4) | the domain library | `erx_domain:create/1` returns the mapped error |
 | A domain's runtime never reports ready | the spec's boot timeout | the built domain | the domain service stops it, and it ends as any domain does | `{error, timeout}`; a log line |
 | A domain ends | the fault gate | nothing of its own budget, which the fault thread destroyed at once, its devices' objects with it; each connection's child budget of its outer budget until both parties have let go of that connection; its outer budget, with its crash area, until no child remains and the crash area is read | the library, the domain service | `{domain_down, D, Info}` in linked processes; `noconnection` across every connection of the domain; the death record in the inspector |
@@ -3131,7 +3151,7 @@ transition, a QEMU test once against a test-build hook that breaks the
 property, and each must fail, so that a passing suite proves the code
 under test ran.
 
-* **Pure functions on the host:** `erx_dom_plan_create` and the other
+* **Pure functions on the host:** the planning entries and the other
   plans over valid and invalid specifications, with every field at and
   beyond its bounds, and with a seeded plan that names another parent or
   another fault gate, which the A6 and A2 checks must catch;

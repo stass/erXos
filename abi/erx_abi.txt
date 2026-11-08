@@ -148,10 +148,14 @@ enum mem_attr u32
   value device 0
 flags entropy_flags u32
   bit credit 0
+# The first three are the kernel's own, which erx_space_stop refuses as a
+# status; crash is a runtime's, which stops its space with it after its
+# crash dump.
 enum exit_kind i64
   value parent -9223372036854775807
   value released -9223372036854775806
   value nothread -9223372036854775805
+  value crash -9223372036854775804
 enum budget_kind u32
   value wall 1
   value elastic 2

@@ -111,7 +111,95 @@ typedef struct fuzz_input {
 	uint32_t		given, id, row;
 	erx_dom_configured_t	configured;
 	erx_dom_partial_t	partial;
+	/* The entries after creation: their records, rows and arguments. */
+	erx_dom_t		doms[3];
+	erx_dom_connection_t	conns[3];
+	uint32_t		a, b, a_reads, b_reads, number, next;
+	uint64_t		label;
+	erx_fault_t		record;
 } fuzz_input_t;
+
+/*
+ * The entries after creation over the input's records and rows: connect
+ * (connect true), or disconnect, retire, stop and the record step. Each
+ * result names only records and rows the view holds, a connection's plan
+ * passes its check with each object on its reader's child, and its undo
+ * is its two carves, last first.
+ */
+static void
+fuzz_life(const fuzz_input_t *in, bool connect)
+{
+	static const uint64_t threads[] = { 900 };
+	erx_dom_t doms[3];
+	erx_dom_connection_t conns[3];
+	erx_dom_view_t view = { .domains = doms, .max_domains = 3,
+	    .connections = conns, .max_connections = 3,
+	    .next_connection = in->next, .library_threads = threads,
+	    .nlibrary_threads = 1 };
+	erx_dom_link_plan_t link;
+	erx_dom_teardown_t teardown;
+	erx_dom_action_t action;
+	erx_dom_obj_t undo[ERX_DOM_LINK_STEPS];
+	uint8_t raw;
+
+	/* The library writes its own records, so a flag is always a bool. */
+	memcpy(doms, in->doms, sizeof(doms));
+	memcpy(conns, in->conns, sizeof(conns));
+	for (uint32_t index = 0; index < 3; index++) {
+		memcpy(&raw, &doms[index].stopping, 1);
+		doms[index].stopping = (raw & 1) != 0;
+		memcpy(&raw, &conns[index].closing, 1);
+		conns[index].closing = (raw & 1) != 0;
+	}
+
+	if (connect) {
+		if (erx_dom_plan_connect(&view, in->a, in->b, in->a_reads,
+		    in->b_reads, &link) != ERX_OK)
+			return;
+		if (erx_dom_link_check(&link) != ERX_OK || link.a == link.b ||
+		    link.a_slot >= 3 || link.b_slot >= 3 || link.row >= 3 ||
+		    doms[link.a_slot].id != in->a ||
+		    doms[link.b_slot].id != in->b ||
+		    conns[link.row].number != 0 || link.number != in->next ||
+		    erx_dom_link_undo(&link, link.nsteps, undo) != 2 ||
+		    undo[0] != ERX_DOM_OBJ_LINK_BUDGET_B ||
+		    undo[1] != ERX_DOM_OBJ_LINK_BUDGET_A)
+			abort();
+		for (uint32_t index = 0; index < link.nsteps; index++)
+			if ((link.steps[index].obj == ERX_DOM_OBJ_SIDE_A &&
+			    link.steps[index].kind == ERX_DOM_STEP_MEM &&
+			    link.steps[index].budget != ERX_DOM_OBJ_LINK_BUDGET_B) ||
+			    (link.steps[index].obj == ERX_DOM_OBJ_SIDE_B &&
+			    link.steps[index].kind == ERX_DOM_STEP_MEM &&
+			    link.steps[index].budget != ERX_DOM_OBJ_LINK_BUDGET_A))
+				abort();
+		return;
+	}
+	if (erx_dom_plan_disconnect(&view, in->number, &teardown) == ERX_OK &&
+	    (teardown.index >= 3 || in->number == 0 ||
+	    conns[teardown.index].number != in->number ||
+	    teardown.ndestroy == 0 || teardown.ndestroy > 2))
+		abort();
+	if (erx_dom_plan_retire(&view, in->a, &teardown) == ERX_OK) {
+		if (teardown.index >= 3 ||
+		    doms[teardown.index].state != ERX_DOM_ENDED)
+			abort();
+		for (uint32_t index = 0; index < 3; index++)
+			if (conns[index].number != 0 &&
+			    (conns[index].a == in->a ||
+			    conns[index].b == in->a))
+				abort();
+	}
+	if (erx_dom_plan_stop(&view, in->b, in->record.status, &action) ==
+	    ERX_OK && (action.slot >= 3 || doms[action.slot].id != in->b))
+		abort();
+	erx_dom_record_step(&view, in->label, &in->record, &action);
+	if (action.kind != ERX_DOM_ACT_DROP && (action.slot >= 3 ||
+	    doms[action.slot].id != in->label ||
+	    (doms[action.slot].state != ERX_DOM_BUILT &&
+	    doms[action.slot].state != ERX_DOM_RUNNING)))
+		abort();
+}
 
 static void
 fuzz_check(const fuzz_input_t *in, uint32_t origin, const erx_dom_view_t *view,
@@ -160,7 +248,8 @@ fuzz_check(const fuzz_input_t *in, uint32_t origin, const erx_dom_view_t *view,
 
 /*
  * The input: one byte picking the entry (0 request, 1 configured, 2
- * partial boot), then patches, each a little-endian u16 offset into the
+ * partial boot, 3 connect, 4 disconnect, retire, stop and the record
+ * step), then patches, each a little-endian u16 offset into the
  * fuzz_input_t (modulo its size), a length byte and that many bytes,
  * clipped at its end.
  */
@@ -185,6 +274,17 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .connections = 2 },
 		.partial = { .runtime = 0, .memory = FUZZ_MIB, .outer = 64 * 1024,
 		    .grant = fuzz_grant(UINT64_C(1000000), 0x1) },
+		.doms = { { .id = 5, .state = ERX_DOM_RUNNING, .budget = { 51 },
+		    .outer = { 52 }, .connections = 2, .labels = 1 },
+		    { .id = 6, .state = ERX_DOM_ENDED, .budget = { 61 },
+		    .outer = { 62 }, .connections = 2, .labels = 1 },
+		    { .id = 7, .state = ERX_DOM_BUILT, .budget = { 71 },
+		    .outer = { 72 }, .connections = 1, .labels = 1 } },
+		.conns = { { .number = 1, .a = ERX_DOM_SYSTEM_ID, .b = 5,
+		    .budget_b = { 53 } }, { .number = 2, .a = 5, .b = 6,
+		    .budget_a = { 54 }, .budget_b = { 63 }, .closing = true } },
+		.a = 5, .b = 7, .a_reads = 65536, .b_reads = 16384, .number = 2,
+		.next = 3, .label = 5, .record = { .kind = ERX_FAULT_EXIT },
 	};
 	erx_dom_view_t view = { .domains = fuzz_domains, .max_domains = 2,
 	    .connections = fuzz_connections, .max_connections = 2,
@@ -194,7 +294,8 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	    .partial = &in.partial, .npartial = 1, .partial_principal = 1,
 	    .native_limits = fuzz_limits(1),
 	    .system_grant = fuzz_grant(ERX_QUOTA_NONE, 0xf),
-	    .system_reserve = 250, .system_lane = 16384 };
+	    .system_reserve = 250, .system_lane = 16384,
+	    .next_connection = 1 };
 	uint8_t *target = (uint8_t *)&in;
 	erx_dom_plan_t plan;
 	erx_status_t status;
@@ -216,6 +317,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		at += count;
 	}
 
+	if (bytes[0] % 5 >= 3) {
+		fuzz_life(&in, bytes[0] % 5 == 3);
+		return (0);
+	}
 	switch (bytes[0] % 3) {
 	case 0:
 		origin = ERX_DOM_REQUEST;

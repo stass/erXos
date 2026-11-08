@@ -54,7 +54,8 @@ class DomCoreTest < Minitest::Test
     'crash area charged to the principal' =>
       [".obj = ERX_DOM_OBJ_CRASH, .budget = ERX_DOM_OBJ_OUTER,\n",
        ".obj = ERX_DOM_OBJ_CRASH, .budget = ERX_DOM_OBJ_PRINCIPAL_BUDGET,\n"],
-    'install without a grants row' => ['if (row->obj == step->obj && (row->flags & ~spec->flags) == 0 &&', 'if ((row->flags & ~spec->flags) == 0 &&'],
+    'install without a grants row' => ['if (row->obj == step->obj && row->target == step->target &&',
+                                     'if (row->target == step->target &&'],
     'undo forgets the first carve' => ['for (uint32_t index = applied; index > 0; index--)',
                                        'for (uint32_t index = applied; index > 1; index--)'],
     'charge check accepts the principal' => ['bool charged = dom_carved_budget(made, step->budget);',
