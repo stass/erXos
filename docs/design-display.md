@@ -267,7 +267,7 @@ the shell and the application act with their own capabilities.
 | --- | --- | --- | --- |
 | **G1.** A client reaches only its own windows' pixels and input | a draw connection names images by ids it allocated and by image 0, its window; the protocol has no message that names or attaches to another connection's image and no screens; a window's image 0 is never the screen image and never holds another window's pixels, so an `r` reads only what the window drew; a window's files are a grant rooted at the session's directory of `erx_winfs`, and a program's handler walks only the one window's directory for it ([Narrowing](design-files.md#narrowing-for-a-program)); the policy delivers each input event to one window, and under the single policy only to the one shown window | a name or attach message; an image shared between windows or with the screen; a grant rooted above the session's directory; a handler that binds the session's whole tree for a program; an event delivered to a hidden window | a connection that sends every message type with every id from another connection, each refused with `ENOENT`; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing; under the single policy with the service terminal shown, the application's `kbd` receives nothing and its `r` of image 0 returns its own pixels, where a seeded delivery to the application fails it; the decoder's fuzz target |
 | **G2.** Each image is touched by one process at a time and lives while any process holds it, and every pixel loop runs over a clipped rectangle | a window's images are written only by its window process and the screen image only by `erx_screen`; `erx_screen` reads a window's image 0 only inside that window's flush call, which the window makes and waits on, and the driver reads an image only inside `erx_screen`'s call to it, which `erx_screen` waits on; calls run one way, window to `erx_screen` to driver, so no two wait on each other; an image is a NIF resource, freed by its destructor when no term refers to it, and `erx_memdraw` has no other free, so `f`, a resize and a window's end drop a reference and never free memory another process holds; the framebuffer is written only by the display driver's `erx_device:fill/3`; every function of `erx_memdraw` that touches pixel memory takes an `erx_clip_t`, which only `erx_draw_clip` produces, with checked arithmetic, from the operation's rectangles and both images' bounds | a read of an image outside its writer's call; a call from the driver or `erx_screen` back up the chain; an explicit free of an image; a loop over an unclipped rectangle | the build checks over `erx_memdraw`'s sources and the call direction (Chokepoints); the differential test against the reference renderer with rectangles far outside every image; the display suite in hosted mode under ThreadSanitizer, with windows drawing, resizing and ending while `erx_screen` composes and the driver copies, where a seeded compose outside the flush call makes it report; the same run under ASan, where a seeded explicit free makes it report |
-| **G3.** What a client makes the display domain spend is bounded by its grant | memory: a grant carries quotas of windows, pixel bytes and widget nodes; each image is charged its pixel bytes rounded up to 4 KiB, so the pixel quota bounds the image count too; a window checks each allocation against the quota with checked arithmetic before it allocates; images die with their window; a write carries at most the file protocol's 64 KiB, a widget tree at most the display facet's `max_request`; a window's pending input and dirty list are bounded. CPU: a client's draw work runs only in its windows' processes, at most the `windows` quota of them, each of which has at most one flush in `erx_screen` at a time; its widget work is admitted by its display facet within the grant's share of reductions | an allocation outside the quota check; an image that outlives its window; an unbounded queue; a window with two flushes outstanding | an allocation loop refused at the quota with `ENOMEM` and the domain's memory unchanged; a window closed with images left, all freed; a widget tree of one node more than the quota, refused whole; a client that floods flushes from one window while another window's one flush waits at most one compose, where a seeded second outstanding flush fails it |
+| **G3.** What a client makes the display domain spend is bounded by its grant | memory: a grant carries quotas of windows, pixel bytes and widget nodes; each image is charged its pixel bytes rounded up to 4 KiB, and a font cache its glyph records, so the pixel quota bounds the image count too; a window checks each allocation against the quota with checked arithmetic before it allocates; images die with their window; a write carries at most the file protocol's 64 KiB, a widget tree at most the display facet's `max_request`; a window's pending input and dirty list are bounded. CPU: a client's draw work runs only in its windows' processes, at most the `windows` quota of them, each of which has at most one flush in `erx_screen` at a time; its widget work is admitted by its display facet within the grant's share of reductions | an allocation outside the quota check; an image that outlives its window; an unbounded queue; a window with two flushes outstanding | an allocation loop refused at the quota with `ENOMEM` and the domain's memory unchanged; a window closed with images left, all freed; a widget tree of one node more than the quota, refused whole; a client that floods flushes from one window while another window's one flush waits at most one compose, where a seeded second outstanding flush fails it |
 | **G4.** A presentation grants nothing | a presentation is a type and a canonical text; the terminal emulator's only actions on one are to insert its text as keyboard input and to highlight the presentations of the types an input context names; a widget's only action is the `{select, Type, Value}` event to its application; neither carries a facet, a grant or a capability, and the command that then runs is checked by the shell's facets as any typed command is ([Authority](design.md#authority)) | a terminal that calls a service for a clicked link; a widget server that performs the action a presentation names | a session without an inspect facet clicks a pid presentation and the inserted `i` command fails with `no_facet`; the link parser's fuzz target; a source check that `erx_term` and `erx_ui_server` call no facet |
 | **G5.** Attributed text in a window is displayed only through the line escape, and a program's output reaches its terminal window unchanged | a window's label, a widget's `present` text and a widget's text drawn from a record value are escaped by the displayer with `erx_text:escape_line/1` ([Attributed text](design-live.md#attributed-text)); the terminal emulator takes its bytes from a tty, which changes nothing but what `termios` says (V1), and interprets them as a terminal does | a label drawn raw; a terminal emulator that filters a program's bytes | the attributed-text test corpus of design-live sent as a label, as a `present` text and as a record value in a widget; V1's byte test with a terminal window in place of the serial line |
 | **G6.** Nothing paints without a change | the only path to the device is `erx_screen`, which composes on a window's flush call and asks windows to flush only when the layout changes, the driver restarts, the panel wakes or `erx_screen` itself restarts; the driver pushes only the rectangles it is given; no process of the display domain has a redraw timer | a periodic repaint; a flush of the whole screen for a small change | an idle display for one minute makes no device request, counted at the driver; a one-pixel change makes exactly one flush of one rectangle; moving a window flushes exactly the area whose content changed |
@@ -294,11 +294,12 @@ the shell and the application act with their own capabilities.
 -type image_id() :: 0..16#ffffffff.             % 0 is the window
 -type image() :: #{id := image_id(),
                    r := rect(), clipr := rect(), chan := chan(), repl := boolean(),
+                   glyphs := none | {Ascent :: 0..255, tuple()}, % after 'i': the font cache's glyph records
                    mem := reference()}.        % the erx_memdraw resource
 -type conn() :: #{window := window_id(),
                   images := #{image_id() => image()},
                   bytes := non_neg_integer(),  % pixel bytes charged, against the quota
-                  op := 0..11,                 % the compose operation, SoverD by default
+                  op := 0..11,                 % for the next drawing message only; SoverD otherwise
                   dirty := [rect()],           % since the last flush, at most 16
                   mouse := queue:queue(binary()), % pending records, at most 4 KiB
                   resized := boolean(),        % the next mouse read answers 'r'
@@ -313,7 +314,9 @@ the display facet's `max_request` at 1 MiB so that a tree within the node
 quota fits. An image's byte size is computed with checked arithmetic
 from its rectangle and channel depth, rounded up to 4 KiB, and refused
 when it would pass the quota, so the default quota holds at most 16,384
-images. A `draw` write and a read of `r`'s pixels each carry at most the
+images. An `i` charges the same quota for its glyph records, 16 bytes
+each rounded up to 4 KiB, so a font cache's table is bounded with the
+pixels. A `draw` write and a read of `r`'s pixels each carry at most the
 file protocol's 64 KiB payload
 ([Bytes](design-files.md#how-a-request-names-its-bytes)), so the display
 needs no write quota of its own. A widget tree's depth needs no bound of
@@ -373,17 +376,135 @@ application's directory, so they are charged to the application's grant.
 
 The byte encoding of the draw protocol is declared in
 `abi/formats/draw.txt`, from which the generator produces the Erlang
-decoder `erx_draw_codec`, its bounded C twin for the fuzz target and the
-message table of this document's interface section. The messages are
-those of draw(3): `b` allocate an image, `f` free one, `d` draw, `L`
-line, `p` poly, `P` fill poly, `e` ellipse, `E` arc, `s` string, `x`
-string with background, `i` allocate a font cache image, `l` load a
-glyph into one, `y` load pixels, `Y` load compressed pixels, `r` read
-pixels, `O` set the compose operation, `o` set the origin, `c` set the
-cursor and `v` flush. `A`, `F` and `t` (screens and layers), `N` and `n`
-(names) and `D` (debugging) are not in the format and decode as unknown
-messages, which fail the write. A write to `draw` is a sequence of
-messages, decoded whole before any is applied; a write that fails applies
+decoder `erx_draw_codec`, its bounded C twin for the fuzz target, the
+encoder `erx_draw` uses and the message table of this document's
+interface section. The messages are those of draw(3), as 9front's manual
+and the `devdraw` of 9front and plan9port implement them (References).
+Integers are little-endian, a point is two 32-bit coordinates and a
+rectangle four; every drawing message composes with the operation `O`
+set, which then returns to `SoverD`.
+
+| Message | Fields after the letter | Effect |
+| --- | --- | --- |
+| `b` | id, screenid, refresh[1], chan, repl[1], r, clipr, color | allocate image id with rectangle r, channel chan and the replicate bit, filled with color; its clip rectangle is clipr, intersected with r unless repl is set |
+| `c` | dstid, repl[1], clipr | set the image's replicate bit when repl is nonzero, and replace its clip rectangle |
+| `d` | dstid, srcid, maskid, r, sp, mp | draw: compose src through mask onto r of dst, sp and mp aligned with r's corner |
+| `e` | dstid, srcid, c, a, b, thick, sp, alpha, phi | outline the ellipse at c with semi-axes a and b, thickness 1+2·thick; when alpha's high bit is set, only the arc that starts at alpha degrees and extends through phi |
+| `E` | as `e` | fill the ellipse, or the sector when alpha's high bit is set |
+| `f` | id | free the image |
+| `i` | id, n, ascent[1] | make image id a font cache of n glyph records, 1 to 4096, each with that ascent |
+| `l` | cacheid, srcid, index[2], r, sp, left[1], width[1] | copy rectangle r of the cache image from src at sp, with operation `S`, and record glyph index's rectangle, left and width |
+| `L` | dstid, p0, p1, end0, end1, thick, srcid, sp | draw a line of thickness 1+2·thick with the given ends |
+| `o` | id, rmin, scr | position a layer on its screen and set its logical origin |
+| `O` | op[1] | set the compose operation, 0 to 11, for the next drawing message |
+| `p` | dstid, n[2], end0, end1, thick, srcid, sp, n+1 coded points | draw an open polygon of thickness 1+2·thick |
+| `P` | dstid, n[2], wind, ignore[8], srcid, sp, n+1 coded points | fill a polygon under the winding rule wind |
+| `r` | id, r | make the next read of `draw` return r's pixels |
+| `s` | dstid, srcid, fontid, p, clipr, sp, n[2], n indices[2] | draw n glyphs of the font cache, the first at p on the baseline, clipped to clipr in place of dst's clip rectangle |
+| `x` | as `s`, with bgid and bp before the indices | as `s`, first filling the rectangle under the whole string from bgid, bp aligned with its upper left corner, p raised by the cache's ascent |
+| `v` | none | flush the dirty rectangles to the screen |
+| `y` | id, r, pixels | replace r's pixels with raw pixels in the image's channel |
+| `Y` | id, r, compressed pixels | replace r's pixels with pixels in image(6)'s compressed form |
+
+Fields are 4 bytes unless their size is given in brackets. Where erXos's
+connection differs from a Plan 9 connection, the difference follows from
+its having no screens, no layers and no names, and from image 0 being
+the window:
+
+* `b` with a screenid other than 0 is refused with `ENOENT`, as an
+  unknown screen is; refresh then means nothing and is ignored, as
+  devdraw ignores it for an image on no screen.
+* `o` is accepted and changes nothing, as devdraw does for an image that
+  is not a layer, which every image of a connection is; a window's place
+  is `wctl`'s.
+* `f 0` and `i 0` are refused with `EINVAL`: image 0 is the window,
+  which lives as long as the window does and is never a font cache.
+
+The rest is draw(3) as written, except where the manual and the
+implementations differ; there erXos follows the devdraw of 9front and
+plan9port, which agree with each other and which every client is written
+against. `c` sets the replicate bit and never clears it, though the
+manual says it changes the bit. `s` and `x` take p on the baseline,
+where the manual says the upper left corner, because `libdraw` adds the
+font's ascent before it sends the message; `x`'s bp aligns with the
+corner the manual names, p raised by the ascent. `O` with an operation
+above 11 is refused with `EINVAL`, which devdraw does not check: 0 to 11
+are the twelve Porter-Duff operations of draw(2).
+Every other refusal is devdraw's own check, mapped to an errno: an id the
+connection does not hold `ENOENT`; an id it holds, in `b`, `EEXIST`; past
+the quota `ENOMEM`; and `EINVAL` for an unknown channel, a negative
+semi-axis or thickness, a glyph index outside the font cache, an `s`,
+`x` or `l` naming an image that is not one, an `r`, `y` or `Y` rectangle
+not inside its image, and an image rectangle that 9front's `badrect`
+refuses or wider or taller than the quota's side.
+
+`A`, `F`, `S` and `t` (screens and layers), `N` and `n` (names), `D`
+(debugging), `a` and `w` (9front's affine warp, which plan9port's
+`libdraw` never sends) and plan9port's `J`, `I` and `q` (requests of its
+own connection, which the port's connection code replaces with reads of
+`ctl`) are not in the format and decode as unknown messages, which fail
+the write.
+
+**Lengths that draw(3) does not state.** Two fields have no length of
+their own. The points of `p` and `P` are coded: each coordinate is one
+byte holding a 7-bit signed difference from the previous coordinate, the
+first counting from 0, or, when that byte's top bit is set, three bytes
+holding a 23-bit signed value, as plan9port's `libdraw` writes them and
+devdraw reads them; the manual's `dp[2*2*(n+1)]` is their uncoded size.
+And the pixels of `y` and `Y` are exactly the bytes that fill the
+rectangle: Dy(r) rows of `bytesperline(r, depth)` bytes each, where
+depth is that of the image's channel. `y` carries them raw, so its
+payload is their count. `Y` carries image(6)'s compressed form, a
+sequence of codes each of which is a literal run (a byte c of 128 or
+more, then c-127 bytes as they are) or a back-reference (a byte c below
+128 and one more, standing for `(c>>2)+3` bytes found earlier in a
+1024-byte window), and its payload ends at the code that completes the last row.
+So a `y` or `Y` cannot be framed without the depth of the image it
+names, which is the connection's state, and the image may have been
+allocated by a `b` earlier in the same write.
+
+**Decoding and planning are one fold.** The codec decodes one message at
+a time:
+
+```erlang
+-spec erx_draw_codec:decode(binary(), Depth) ->
+          {ok, erx_draw:msg(), Rest :: binary()} |
+          {error, einval | enoent, Offset :: non_neg_integer()}
+          when Depth :: fun((image_id()) -> 1..32 | none).
+```
+
+`Depth` is the codec's only view of the connection, and only `y` and `Y`
+consult it. `draw.txt` declares their payloads as fields of two kinds,
+`pixels` and `compressed`, each naming the id and rectangle fields it
+depends on, and the generator emits their framing in both languages:
+
+* `pixels`: `bytesperline(r, depth)` times Dy(r), computed with checked
+  arithmetic, which must lie within the bytes left in the write.
+* `compressed`: a walk over the codes that counts the bytes each one
+  produces and writes none: a code that would cross the end of a row, or
+  input that ends before the last row is complete, is malformed. A
+  back-reference always lands inside the decoder's window, which starts
+  filled with zeros, so whether a payload decodes depends only on these
+  counts: the walk accepts exactly the payloads `libmemdraw`'s decoder
+  accepts, and ends where it ends.
+
+Both refuse an empty or inverted rectangle, as 9front's `loadmemimage`
+and `cloadmemimage` do, so every row holds at least one byte; each code
+reads at least one byte, so the walk never takes more steps than the
+write has bytes. An id for which `Depth` answers `none` fails with
+`ENOENT`.
+
+`erx_draw_core:plan(Conn, Bytes)` is a left fold over the write: decode
+one message with the depth function of the connection as planned so far,
+step the core with it, and continue from the next byte, until the write
+is consumed or a message fails. Because the depth function reads the
+planned connection, an image a `b` allocated earlier in the same write
+has its depth and one an `f` freed has none, and there is no second table
+of depths to keep in step with the images. The fold returns the planned
+connection and the list of `erx_memdraw` operations, or the errno and the
+offset of the message that failed. The window process performs the
+operations only after the fold returns, so a write is decoded and checked
+whole before any of it is applied, and a write that fails applies
 nothing (plan, then apply).
 
 ### Input events
@@ -650,35 +771,38 @@ drawing.
 
 Each window is one process, `erx_window`, which serves its `draw`,
 `ctl`, `mouse` and `kbd` files and holds its pending input. A write to
-`draw` reaches it as a binary, which `erx_draw_codec` decodes into a list
-of messages or fails with the position of the first malformed byte; the
-write then fails with `EINVAL` and the display domain's log records the
-window and the position. A decoded list is applied in order by a pure
-core, `erx_draw_core`, which takes the connection's state and a message
-and returns the next state and the `erx_memdraw` operation to perform, or
-an error: `ENOENT` for an id the connection does not hold, `EEXIST` for
-an id it does, `ENOMEM` for an allocation past the quota, `EINVAL` for a
-rectangle, channel or count outside the bounds. The process performs the
-operations only after every message of the write has been checked, so a
-failed write applies none of them. The core is tested exhaustively on the
-host over small ids and rectangles.
+`draw` reaches it as a binary, which `erx_draw_core:plan/2` decodes and
+checks whole, message by message against the connection as planned so
+far ([Draw messages](#draw-messages)). Its step takes the planned
+connection and one decoded message and returns the next state and the
+`erx_memdraw` operation to perform, or an errno from the refusals that
+section lists. A failure fails the write with that errno, and the display
+domain's log records the window, the errno and the offset of the
+message. The process performs the operations only after the fold has
+consumed the whole write, so a failed write applies none of them. The
+core is tested exhaustively on the host over small ids and rectangles.
 
 Each operation goes to `erx_memdraw`, which computes the clipped
 rectangle with `erx_draw_clip` from the destination's clip rectangle,
 the source's and the mask's bounds and the operation's rectangle, and
-runs `libmemdraw`'s primitive over it: `memimagedraw` for `d`, `y` and
-`x`; `memline`, `mempoly`, `memfillpoly`, `memellipse` and `memarc` for
-the shapes; `memimagedraw` with the glyph as mask for each character of
-`s`; the image(6) decoder for `Y`, which writes only into the clipped
-rectangle of the destination already allocated and fails the write on
-any input that would decode past it or end short. Every size, offset,
+runs `libmemdraw`'s primitive over it: `memimagedraw` for `d`, for `l`
+with operation `S`, for each glyph of `s` and `x` with the glyph as
+mask, and for `x`'s background; `memline`, `mempoly`, `memfillpoly`,
+`memellipse` and `memarc` for the shapes; `loadmemimage` for `y`,
+`cloadmemimage`, the image(6) decoder, for `Y`, and `unloadmemimage` for
+`r`. A load is given exactly the bytes the codec framed for it, so the
+decoder never meets a payload the walk refused and never writes outside
+the rectangle the walk counted; should it ever consume a different count,
+`erx_memdraw` returns an internal error and the window process ends with
+a log record, as for a crash in the failure table. Every size, offset,
 stride and count `erx_memdraw` computes from a message, and the union of
 dirty rectangles, uses checked arithmetic. The primitives read no global
 state after their initialisation at load, which is checked when
 `libmemdraw` is imported. An operation over more than 64 KiB of
 destination pixels runs on a dirty scheduler, so a full-screen compose
-never holds a normal scheduler. Fonts are the client's: `i` allocates a
-font cache image and `l` loads a glyph's pixels into it, so the display
+never holds a normal scheduler. Fonts are the client's: `i` makes an
+image it allocated a font cache and `l` copies a glyph's pixels into it
+from another of its images, so the display
 domain renders no client's text and parses no client's font.
 
 A flush `v` calls `erx_screen:flush/2` with image 0 and the dirty
@@ -1194,29 +1318,71 @@ position of the fault.
 
 Each passing case has a seeded failure that proves the code ran.
 
-* **The draw core.** `erx_draw_core` explored exhaustively over small
-  ids, every message type and rectangles at and across the bounds; a
-  seeded skip of the quota check fails the `ENOMEM` cases. The decoder
-  `erx_draw_codec` has a generated fuzz target and a differential test
-  against its C twin over the corpus; a seeded off-by-one in a length
-  field fails it.
-* **The pixel primitives.** `erx_draw_ref`, a slow reference
-  implementation of draw(2)'s semantics in Erlang, pixel by pixel and
-  with its own decoder of image(6)'s compressed form, is the oracle:
-  random operations over random images and channels through
-  `erx_memdraw` and through the reference must agree pixel for pixel, and
-  Plan 9's own `draw` test images are a fixed corpus. A seeded change to
-  one Porter-Duff operator fails it. The same run under ASan and UBSan,
-  with rectangles far outside every image, is the test of G2's clipping;
-  a seeded bypass of `erx_draw_clip` is caught by the chokepoint check
-  and by ASan.
-* **The `Y` decoder.** A fuzz target over compressed payloads into
-  destinations of every channel and size, under ASan and UBSan in `make
-  check-fuzz`, landing with the import; the differential test against
-  `erx_draw_ref`'s decoder over the corpus, where a seeded off-by-one in
-  a run's length fails it; payloads that would decode past the
-  destination or end short fail the write, where a seeded removal of the
-  bound makes ASan report.
+* **The draw core and the codec.** `erx_draw_core` explored exhaustively
+  over small ids, every message type and rectangles at and across the
+  bounds; a seeded skip of the quota check fails the `ENOMEM` cases.
+  `plan/2` over writes that allocate an image and load it in the same
+  write, free an image and then load it, and load image 0, at every
+  channel depth: a seeded plan that frames with the depths of the
+  connection as it stood before the write fails the first case with
+  `ENOENT`, and a seeded plan that performs an operation before the fold
+  ends fails a write whose last message is malformed, which must leave
+  every image unchanged. The codec's C twin has a generated fuzz target
+  that takes the depths of ids 0 to 7 from the input's first bytes and
+  decodes the rest message by message, to its end or its first error;
+  the Erlang codec is tested differentially against the twin over the
+  corpus with the same depths, message by message (the same message, the
+  same next offset, or the same errno at the same offset), where a seeded
+  off-by-one in a length field fails it. The `y` lengths are checked
+  against `bytesperline` of the 9front build below, over rectangles with
+  negative and unaligned coordinates at every depth, where a seeded
+  `bytesperline` that ignores the sign of `r.min.x` fails it; coded
+  polygon points decode as fixed vectors at the edges of the one-byte
+  and three-byte forms say, where a seeded one-byte form read without
+  its sign bit fails; messages from `erx_draw`'s generated encoder decode
+  to themselves.
+* **The pixel primitives.** Two oracles, each the ground truth for a
+  stated part.
+  * `erx_draw_ref`, a slow Erlang reference, pixel by pixel, of what
+    draw(2) and draw(3) define as compositing: the twelve operations,
+    masks, channels and their conversion, replication, clipping, `y`,
+    `Y` through its own decoder of image(6)'s compressed form, `r`, and
+    `l`, `s` and `x` as the masked draws they consist of. Its arithmetic
+    is the per-pixel arithmetic of 9front's `libmemdraw` test
+    `drawtest.c` (its `drawonepixel` and channel unpacking), widened from
+    `SoverD` to all twelve operations. Random operations of those kinds
+    over random images and channels through `erx_memdraw` and through the
+    reference agree pixel for pixel; a seeded change to one Porter-Duff
+    operation fails it. `erx_draw_ref` draws no shapes.
+  * Lines, polygons, ellipses and arcs (`L`, `p`, `P`, `e`, `E`) have no
+    definition finer than `libmemdraw`'s algorithms: draw(2) says what
+    they draw, not which pixels. Their oracle is **the 9front build**:
+    9front's `libmemdraw` and the parts of its `libdraw` it links,
+    unmodified, at the commit the import's origin file records, compiled
+    for the host as a test tool (Dependencies) and driven by a small C
+    program of erXos's that performs a list of operations and returns the
+    images. Random operations of every kind through `erx_memdraw` and
+    through the 9front build agree pixel for pixel, so each edit the
+    import makes (the clip rectangle, checked arithmetic) is checked
+    against the code it came from, shapes and compositing alike; a
+    seeded change to one step of `memline`'s algorithm fails it. A
+    difference is a bug in the import, or an upstream bug the import
+    fixes, documented with a test. Both sides run in the test, so no
+    reference images are stored.
+  * The same runs under ASan and UBSan, with rectangles far outside every
+    image, are the test of G2's clipping; a seeded bypass of
+    `erx_draw_clip` is caught by the chokepoint check and by ASan.
+* **The `Y` decoder and the walk.** A fuzz target over compressed
+  payloads into destinations of every channel and size, under ASan and
+  UBSan in `make check-fuzz`, landing with the import: for every payload
+  the codec's walk and `cloadmemimage` agree, the walk accepting exactly
+  when the decoder succeeds and at the same count, and every pixel outside
+  the rectangle is unchanged; a seeded off-by-one in the walk's end-of-row
+  check fails the agreement. With the destination exactly the
+  rectangle's size, a seeded removal of the decoder's own end-of-row
+  check makes ASan report. The differential test against `erx_draw_ref`'s
+  decoder over the corpus, where a seeded off-by-one in a run's length
+  fails it.
 * **Who touches pixels.** `erx_screen_core` explored exhaustively over
   small screens and layouts: every pixel of the screen comes from exactly
   one shown window, decoration or the background, and a layout change
@@ -1352,7 +1518,8 @@ A new device is a new driver behind `erx_display` or a new producer of
 
 | Component | Purpose | Licence | Status |
 | --- | --- | --- | --- |
-| Plan 9's `libmemdraw` and the image(6) codec, from 9front | the per-byte pixel primitives of `erx_memdraw` and the `Y` decoder | MIT (to be confirmed at import against 9front's licence file) | permanent; imported as erXos's code with an origin file |
+| Plan 9's `libmemdraw` and the image(6) codec, from 9front | the per-byte pixel primitives of `erx_memdraw` and the `Y` decoder | MIT (9front's `lib/legal/NOTICE`, whose exceptions cover only fonts) | permanent; imported as erXos's code with an origin file |
+| the 9front build: 9front's `libmemdraw` and the parts of its `libdraw` it links, unmodified | test tool: the oracle of the shapes' pixels, and of every `erx_memdraw` operation against the code it was imported from (Verification) | MIT | tool, never part of a shipped image; fetched at the commit the import's origin file records, verified against a pinned SHA-256, and built for the host out of tree by erXos's own compiler invocations against plan9port's `lib9`, which is already fetched for rc; 9front's mkfiles never run |
 | plan9port's `libdraw`, acme, sam, 9term | draw clients, and oracles of the draw protocol's compatibility | MIT (to be confirmed at import) | permanent; ported as erXos's code with the connection code replaced |
 | LVGL 9 | the native widget renderer for panels | MIT | stopgap, replaced by the Erlang renderer when the parity test and the panel's frame times admit it; fetched at a pinned version and built out of tree as a native program, its display and input glue erXos's own |
 | a bitmap font as Plan 9 subfonts | the terminal emulator's, the menu's and the Erlang renderer's glyphs | plan9port's `fixed` fonts (public domain); anti-aliased fonts, such as the Go fonts (BSD-3-Clause) rasterised by a host step, chosen with the first application that needs them | permanent |
@@ -1381,6 +1548,7 @@ A new device is a new driver behind `erx_display` or a new producer of
 | --- | --- | --- | --- |
 | plan9port's `libdraw` is harder to rebase on the file connection than expected | medium | acme and sam arrive later | the window files match Plan 9's native names and formats, so 9front's `libdraw` is the fallback source of the connection code |
 | `libmemdraw` keeps state that is not safe across schedulers | low | races in the NIF | checked at import; the primitives' tables are read-only after `memimageinit`, and no image is touched by two processes at once (G2) |
+| 9front's `libmemdraw` needs more of a Plan 9 environment than plan9port's `lib9` gives, so the 9front build does not compile on the host unmodified | medium | the shapes lose their oracle until it does | a header of erXos's own beside the build's recipe supplies what is missing; 9front's `.c` files are never edited, since an edited oracle checks nothing |
 | composes serialised through `erx_screen` limit a desktop with several animating windows | low | dropped frames under load | the watch-list measurement; `erx_screen` gathers waiting flushes into one push |
 | the `fill` copy per dirty rectangle dominates on large screens under TCG | medium | slow desktop under TCG | the watch-list measurement; an image over the pool buffer |
 | a board's panel bus controller does DMA it cannot confine | medium | the panel cannot be driven from the display domain in a release build | the board's DMA contract says so; such a panel is driven without DMA, which a few hundred pixels afford, or its driver runs in a domain of its own |
@@ -1431,6 +1599,12 @@ Decisions taken with the owner:
 
 * Plan 9 manual: draw(3), draw(2), image(6), font(6), mouse(3), rio(4),
   wctl; 9front's kbd(3) for the `kbd` record format.
+* The draw messages were checked against 9front's `sys/man/3/draw`,
+  `sys/src/9/port/devdraw.c`, `sys/src/libmemdraw/load.c` and
+  `cload.c` and `sys/src/libdraw/badrect.c` at commit `2859ae04`, and
+  against plan9port's `src/cmd/devdraw/devdraw.c`, `src/libdraw/poly.c`
+  and `src/libdraw/bytesperline.c` at the pinned commit `1f13969`.
+  9front's `libmemdraw` tests are in `sys/src/libmemdraw/test`.
 * R. Pike, "Plan 9 from Bell Labs" and "Rio: Design of a Concurrent
   Window System", Bell Labs.
 * plan9port, `src/libdraw` and `src/cmd/devdraw`, for the connection
