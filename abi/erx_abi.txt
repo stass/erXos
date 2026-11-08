@@ -374,6 +374,8 @@ enum fiasco_call u32
   value time_set_wall 36
   value irq_unbind 37
   value gate_cancel 38
+  value budget_create 39
+  value budget_resize 40
 
 # erx_object_info's topics and the report each writes (docs/design-abi.md,
 # "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
@@ -657,6 +659,22 @@ layout erx_fiasco_cap_request wire_le 8 16
 layout erx_fiasco_gate_create_request wire_le 8 16
   field caller u64 0
   field budget u64 8
+
+# erx_budget_create: kind is a budget_kind, guarantee and cap are pages; the
+# budget's handle is the reply's first word.
+layout erx_fiasco_budget_create_request wire_le 8 40
+  field caller u64 0
+  field parent u64 8
+  field kind u64 16
+  field guarantee u64 24
+  field cap u64 32
+
+# erx_budget_resize: guarantee and cap are pages.
+layout erx_fiasco_budget_resize_request wire_le 8 32
+  field caller u64 0
+  field budget u64 8
+  field guarantee u64 16
+  field cap u64 24
 
 # erx_gate_bind: thread is ERX_CAP_NULL, ERX_CAP_SELF_THREAD or a handle of
 # one of the caller's own threads.

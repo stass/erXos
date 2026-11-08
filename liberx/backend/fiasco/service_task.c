@@ -33,6 +33,7 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/core/device_check.h"
 #include "liberx/backend/core/grow_table.h"
+#include "liberx/backend/fiasco/budget.h"
 #include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -112,6 +113,8 @@ erx_fiasco_task_table_init(void)
 	reason = erx_fiasco_object_init();
 	if (reason == NULL)
 		reason = erx_fiasco_gate_init();
+	if (reason == NULL)
+		reason = erx_fiasco_budget_init();
 	if (reason != NULL)
 		return (reason);
 	erx_fiasco_task(ERX_FIASCO_TASK_ROOT)->state = ERX_FIASCO_TASK_LIVE;

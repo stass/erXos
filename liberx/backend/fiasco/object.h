@@ -15,9 +15,10 @@
  * The service's object records and each task's handle table (docs/design-stopgap.md,
  * "Capabilities in Fiasco's object space"), over the core in handles.c. Only the
  * service thread calls these. A memory object's pages are vm.c's, a gate's queue
- * fault_gate.c's and a space's task service_task.c's, each kept by the record's
- * index. A record goes at its creator's destroy, at its creator's end, or once it has
- * neither a handle nor a mapping; a space's record goes at the space's deletion too.
+ * fault_gate.c's, a space's task service_task.c's and a budget's values budget.c's,
+ * each kept by the record's index. A record goes at its creator's destroy, at its
+ * creator's end, once it has neither a handle nor a mapping, or with its budget; a
+ * space's record goes at the space's deletion too.
  */
 
 /* The record table and the root's handle table, which only the pool bounds. NULL or why not. */
@@ -39,13 +40,19 @@ void	erx_fiasco_object_task_close(uint32_t task);
 typedef int	(*erx_fiasco_object_fill_t)(uint32_t index, const void *request);
 
 /*
- * Every create's one path: takes a record, fills it, and gives task a handle to it.
+ * Every create's one path: charges the record to the budget a budget argument of
+ * task's names (erx_fiasco_budget_named, whose refusal it returns), takes a record,
+ * fills it, and gives task a handle to it.
  * A full record table, or a full handle table (ERX_ELIMIT) or one that cannot grow
  * (ERX_ENOMEM), or the fill's own refusal leaves nothing of the object and the record
  * at the generation it had.
  */
 int	erx_fiasco_object_create(uint32_t task, uint32_t kind, uint64_t budget, erx_fiasco_object_fill_t fill,
 	    const void *request, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
+
+/* The record at index, or NULL past the table; and one past the last index, for budget.c's sweeps. */
+const erx_backend_object_t	*erx_fiasco_object_at(uint32_t index);
+uint32_t	erx_fiasco_object_capacity(void);
 
 /* The record a task's handle names, of this kind: erx_backend_handle_find's refusals. */
 int	erx_fiasco_object_find(uint32_t task, uint64_t handle, uint32_t kind, uint32_t *index) ERX_WARN_UNUSED_RESULT;

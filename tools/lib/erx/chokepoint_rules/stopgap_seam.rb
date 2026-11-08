@@ -125,6 +125,8 @@ module Erx
         liberx/backend/core/gate.h
         liberx/backend/fiasco/fault_gate.c
         liberx/backend/fiasco/fault_gate.h
+        liberx/backend/fiasco/budget.c
+        liberx/backend/fiasco/budget.h
         liberx/backend/core/boot_info.c
         liberx/backend/core/boot_info.h
         liberx/backend/core/boot_manifest.c

@@ -45,7 +45,8 @@ uint64_t	erx_fiasco_service_thread(void);
 /*
  * Task calls of the call table. fault is ERX_CAP_NULL or a gate the caller holds,
  * else ERX_ETYPE, and the space's records go to it with label as their label;
- * parent and budget are accepted and ignored; cap_limit bounds the task's handle table, counting ERX_CAP_NULL as erXos's
+ * parent is accepted and ignored, and budget charges the space as for every create
+ * (erx_budget_create below); cap_limit bounds the task's handle table, counting ERX_CAP_NULL as erXos's
  * kernel does, and outside 2 to ERX_CAPS_MAX is ERX_EINVAL; only the root makes a task. image is ignored and entry is the boot
  * archive's; *start is where the task's first thread will start. A task stops itself
  * with ERX_CAP_SELF, and on success that call does not return; the root may stop a task.
@@ -68,8 +69,25 @@ int	erx_cap_close(uint64_t cap) ERX_WARN_UNUSED_RESULT;
 int	erx_object_destroy(uint64_t object) ERX_WARN_UNUSED_RESULT;
 
 /*
+ * Budgets as records (docs/design-stopgap.md, "Budgets and groups as records"). Only
+ * the root carves and resizes; a task's call is ERX_ENOTSUP. A create makes a budget
+ * under parent, ERX_CAP_SELF for the root's own or a budget the root holds, with kind
+ * ERX_BUDGET_WALL or ERX_BUDGET_ELASTIC, else ERX_EINVAL, and guarantee and cap in pages,
+ * recorded and never checked. A resize records the two values; the root's own budget
+ * is resized by no one, ERX_ENOTSUP. A watch is ERX_ENOTSUP. A budget goes, at its
+ * destroy or its last handle's close, with everything charged to it or to a budget
+ * carved from it: its spaces stop and go, and every handle to any of it answers
+ * ERX_ESTALE. Every create's budget is ERX_CAP_SELF or ERX_CAP_NULL for the budget
+ * the caller's own space is charged to, or a budget handle the caller holds.
+ */
+int	erx_budget_create(uint64_t parent, uint32_t kind, uint64_t guarantee, uint64_t cap, uint64_t *budget)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_budget_resize(uint64_t budget, uint64_t guarantee, uint64_t cap) ERX_WARN_UNUSED_RESULT;
+int	erx_budget_watch(uint64_t budget, uint64_t irq, uint64_t threshold) ERX_WARN_UNUSED_RESULT;
+
+/*
  * Fault gates (docs/design-stopgap.md, "Fault gates"): a gate carries the fault and
- * exit records of the spaces made naming it, and nothing else. budget is ignored. A
+ * exit records of the spaces made naming it, and nothing else. budget charges it as for every create. A
  * bind's thread is ERX_CAP_SELF_THREAD or a handle of one of the caller's own
  * threads, another task's ERX_ENOTSUP; ERX_CAP_NULL unbinds, and a bind replaces the
  * thread bound before. label is ignored: a record's label is its space's. A destroy

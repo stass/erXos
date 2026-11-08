@@ -492,6 +492,11 @@ it; git history is the record of completed work.
 * [Low] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`gate_space.dropped`): records a
   gone gate drops are counted but nothing reports the count; the inspector's space report (SV4) should
   show it.
+* [Low] liberx Fiasco backend, `liberx/backend/fiasco/budget.c` (`erx_fiasco_budget_named`): a
+  create whose budget is `ERX_CAP_NULL` charges the caller's own budget, as `ERX_CAP_SELF` does, because
+  about fifty callers (the launcher, `erx_device.c`, the function_api and native_space guests) still pass 0.
+  `erx_budget_create`'s parent is read the same way. Move them to `ERX_CAP_SELF` and refuse `ERX_CAP_NULL`
+  with `ERX_ETYPE`, on the hosted backend too.
 
 * [Medium] design-domains.md, The peer, the `peer_held` bound: past
   `peer_held` a runtime answers "a new `LINK`" with a `system_limit` exit. A `LINK` to a

@@ -690,16 +690,22 @@ destroying a budget ([design-system.md](design-system.md#creating-a-domain)). A 
 program. So the stopgap keeps budgets as **records** that nothing enforces, and keeps the one property those
 callers rely on to clean up: **an object goes with its budget.**
 
-* **A budget record** holds its parent, kind, guarantee and cap as given. `erx_budget_create`
-  makes one under any budget the caller holds; `erx_budget_resize` records the two new values; neither checks
-  them against the parent, and no create, commit or carve is refused for them. Every object record, space and
-  group names the budget it was created from.
-* **Destroying a budget** is one service body: it walks the budgets carved from it, deepest first, and for each
-  stops every space charged to it and the home task of every group charged to it that still has a thread
-  ([task exit](#task-exit), children first), then deletes every other object
-  charged to it, groups, IRQ objects, gates and memory alike, as the [object table](#shared-objects-and-the-jit-alias)'s
-  second row says, and frees the budget's record. A deletion the root cannot perform ends the machine, as every
-  deletion does.
+* **A budget record** is an object record of kind budget, and holds its parent, kind, guarantee and cap as
+  given. `erx_budget_create` makes one under any budget the root holds; `erx_budget_resize` records the two new
+  values; neither checks them against the parent, and no create, commit or carve is refused for them. Every
+  consumer carves and resizes in the root, so a task's budget call is `ERX_ENOTSUP`, every budget record is the
+  root's, and no task's end ends one. The root's own budget, `ERX_CAP_SELF`'s in the root, has no record, since
+  only the machine's end ends it and nothing resizes it. Every object record, space and group names the budget it
+  was created from; a create that names `ERX_CAP_SELF` charges the budget its caller's own space is charged to.
+* **Destroying a budget** is one service body, run at its destroy and at its last handle's close alike, as
+  for every object. It sweeps the object table flat, never by a walk that recurses: a record is below the
+  budget when the chain of parents from the budget it is charged to reaches it. The first sweep stops and
+  deletes every space below it, and the home task of every group below it that still has a thread
+  ([task exit](#task-exit), children first); the second deletes every other object below it, groups, IRQ
+  objects, gates and memory alike, as the [object table](#shared-objects-and-the-jit-alias)'s second row
+  says; then each further sweep frees the carved budgets nothing is charged to any more, leaves first, until
+  a sweep frees none, and the budget's own record goes last. A deletion the root cannot perform ends the
+  machine, as every deletion does.
 * **A group record** holds its budget, its parent, its CPU set and its home: the task its threads run in and the
   park record of that task ([Interrupts and readiness](#interrupts-and-readiness)).
   `erx_group_create` makes one from any task under any budget the caller holds, with no home; the first
@@ -1608,8 +1614,9 @@ since no consumer calls it before then.
 * A failed start that did not reach Fiasco's kill path loses that index until the task ends, and so does a start the service refused for a handle whose create is still in flight, since the stub writes the marker first.
 * The root's image is mapped read, write and execute from `sigma0`, so a stray write to its code or read-only data does not fault.
 * A label naming no live task is counted, and nothing reads the count.
+* A budget's destroy sweeps the whole object table once for its spaces, once for its other objects and once per layer of carved budgets, and in each of those layer sweeps scans the table again for every budget below it, so its cost grows with the square of the table and the depth of the budget tree, and the one service thread, which also serves every task's faults, serves nothing else meanwhile.
 * `ERX_SPACE_JIT` gates only `ERX_MEM_JIT`: a task without it still makes code, through an object with no flag or through `erx_space_protect`.
-* `erx_fiasco_task_join` trusts its caller: its stub waits on the ended semaphore of the task index the service named, so a space deleted by another root thread between the answer and the wait (a join or release of a space above it) leaves the stub spinning on the empty slot, and an index reused in that window takes another join's up. The launcher joins from one thread.
+* `erx_fiasco_task_join` trusts its caller: its stub waits on the ended semaphore of the task index the service named, so a space deleted by another root thread between the answer and the wait (a join or release of a space above it, or a budget's end) leaves the stub spinning on the empty slot, and an index reused in that window takes another join's up. The launcher joins from one thread.
 * An exit or fault record's `space` is the task's index, which no handle a receiver holds names; the label tells a receiver which space a record is for.
 * A root's handle of another task's thread carries the task's index and no generation, so one kept past that space's deletion (by a join, a release or the deletion of a space above it) can name a thread of a space that reuses the index.
 * No IRQ object is bound to a task's thread, since only the root binds IRQs, so a stop's detach step has no site.

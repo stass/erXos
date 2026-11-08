@@ -92,6 +92,10 @@ erx_fiasco_wire_words(int64_t number)
 	case ERX_FIASCO_CALL_CAP_CLOSE:
 	case ERX_FIASCO_CALL_OBJECT_DESTROY:
 		return (sizeof(erx_fiasco_cap_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_BUDGET_CREATE:
+		return (sizeof(erx_fiasco_budget_create_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_BUDGET_RESIZE:
+		return (sizeof(erx_fiasco_budget_resize_request_t) / sizeof(uint64_t));
 	default:
 		return (0);
 	}

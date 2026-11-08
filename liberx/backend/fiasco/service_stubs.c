@@ -320,6 +320,39 @@ erx_object_destroy(uint64_t object)
 }
 
 int
+erx_budget_create(uint64_t parent, uint32_t kind, uint64_t guarantee, uint64_t cap, uint64_t *budget)
+{
+	const erx_fiasco_budget_create_request_t request = { .caller = erx_fiasco_thread_self()->index, .parent = parent,
+	    .kind = kind, .guarantee = guarantee, .cap = cap };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_BUDGET_CREATE, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*budget = reply.first;
+	return (status);
+}
+
+int
+erx_budget_resize(uint64_t budget, uint64_t guarantee, uint64_t cap)
+{
+	const erx_fiasco_budget_resize_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget,
+	    .guarantee = guarantee, .cap = cap };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_BUDGET_RESIZE, &request, sizeof(request), &reply));
+}
+
+/* No notice is ever sent: nothing counts a budget's spending (docs/design-stopgap.md, "Reporting a budget"). */
+int
+erx_budget_watch(uint64_t budget, uint64_t irq, uint64_t threshold)
+{
+	(void)budget;
+	(void)irq;
+	(void)threshold;
+	return (ERX_ENOTSUP);
+}
+
+int
 erx_gate_create(uint64_t budget, uint64_t *gate)
 {
 	const erx_fiasco_gate_create_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget };

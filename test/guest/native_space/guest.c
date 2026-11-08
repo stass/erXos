@@ -41,6 +41,7 @@
 #define REVOKE_STATUS	77
 #define QUEUE_LABEL	UINT64_C(0x5e0000000000b000)
 #define RELEASE_LABEL	UINT64_C(0x5e0000000000c000)
+#define BUDGET_LABEL	UINT64_C(0x5e0000000000d000)
 
 void erx_fiasco_root_main(void);
 
@@ -453,6 +454,83 @@ case_first_thread(void)
 }
 
 /*
+ * What the budget calls answer: a create under the root's budget or a carved one; a
+ * kind that is neither wall nor elastic, or a parent that names no budget, refused; a
+ * resize recorded unchecked, the root's own budget refused; a watch refused; a carved
+ * budget's report refused and the root's answering, its used partial. A budget's last
+ * close ends what is charged to it, as a destroy does.
+ */
+static void
+case_budget_calls(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	erx_info_budget_t report;
+	uint64_t budget, carved, mem, refused;
+	bool passed = erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, 4, 4, &budget) == ERX_OK &&
+	    erx_budget_create(budget, ERX_BUDGET_ELASTIC, 1, 2, &carved) == ERX_OK &&
+	    erx_mem_create(carved, PAGE, 0, &mem) == ERX_OK;
+
+	passed = passed && erx_budget_create(ERX_CAP_SELF, 0, 4, 4, &refused) == ERX_EINVAL &&
+	    erx_budget_create(mem, ERX_BUDGET_WALL, 4, 4, &refused) == ERX_ETYPE &&
+	    erx_budget_resize(budget, 1, UINT64_C(1) << 40) == ERX_OK && erx_budget_resize(ERX_CAP_SELF, 1, 1) == ERX_ENOTSUP &&
+	    erx_budget_watch(budget, ERX_CAP_NULL, 1) == ERX_ENOTSUP &&
+	    erx_object_info(budget, ERX_INFO_BUDGET, 0, &report, sizeof(report)) == ERX_ENOTSUP &&
+	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, &report, sizeof(report)) == ERX_OK && report.reported == 0 &&
+	    report.used != 0;
+	passed = passed && erx_cap_close(budget) == ERX_OK && erx_object_destroy(carved) == ERX_ESTALE &&
+	    erx_object_destroy(mem) == ERX_ESTALE && erx_cap_close(carved) == ERX_OK && erx_cap_close(mem) == ERX_OK;
+	say_case("budget_calls", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/*
+ * The domain library's undo and end (include/erx/dom.h, ERX_DOM_UNDO_BY_BUDGET): a
+ * domain's own budget and its outer budget, a connection's budget carved from the outer
+ * one with a budget carved from that, and the domain's objects charged to them: its
+ * fault gate, its space, running, an object mapped into it, and a connection's two
+ * sides, one on each carved budget. Destroying the two budgets ends it
+ * all: the space stops and goes, every handle answers ERX_ESTALE, and the pages come
+ * back.
+ */
+static void
+case_budget_destroy(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t own, outer, link, deep, gate, space, shared, side, deep_side, signal, signal_addr, pc, deadline;
+	bool passed = erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, 64, 64, &own) == ERX_OK &&
+	    erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_ELASTIC, 8, 16, &outer) == ERX_OK &&
+	    erx_budget_create(outer, ERX_BUDGET_WALL, 2, 2, &link) == ERX_OK && erx_gate_create(own, &gate) == ERX_OK &&
+	    erx_space_create(own, ERX_CAP_SELF, gate, BUDGET_LABEL, 0, TASK_CAP_LIMIT, &space) == ERX_OK &&
+	    erx_image_map(space, 0, program_entry, &pc) == ERX_OK && erx_mem_create(own, PAGE, 0, &shared) == ERX_OK &&
+	    object_fill(shared, 1, ROOT_PATTERN) && erx_mem_create(link, PAGE, 0, &side) == ERX_OK &&
+	    erx_budget_create(link, ERX_BUDGET_WALL, 1, 1, &deep) == ERX_OK &&
+	    erx_mem_create(deep, PAGE, 0, &deep_side) == ERX_OK &&
+	    erx_mem_create(0, PAGE, 0, &signal) == ERX_OK && erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &signal_addr) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, signal_addr, PAGE, signal, 0, ERX_PROT_RW) == ERX_OK &&
+	    erx_vm_reserve(space, SHARED_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
+	    erx_vm_reserve(space, SIGNAL_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
+	    erx_vm_map(space, SHARED_ADDR, PAGE, shared, 0, ERX_PROT_R) == ERX_OK &&
+	    erx_vm_map(space, SIGNAL_ADDR, PAGE, signal, 0, ERX_PROT_RW) == ERX_OK &&
+	    erx_fiasco_launch_start(space, MODE_REVOKED) == ERX_OK;
+
+	/* The task has read the object, so it runs when its budget goes. */
+	deadline = erx_fiasco_clock_ns() + WAIT_NS;
+	while (passed && atomic_load_explicit((_Atomic uint64_t *)(uintptr_t)signal_addr, memory_order_acquire) == 0)
+		passed = erx_fiasco_clock_ns() < deadline;
+	passed = passed && erx_object_destroy(own) == ERX_OK && erx_object_destroy(outer) == ERX_OK;
+	passed = passed && erx_object_destroy(space) == ERX_ESTALE && erx_object_destroy(gate) == ERX_ESTALE &&
+	    erx_object_destroy(shared) == ERX_ESTALE && erx_object_destroy(side) == ERX_ESTALE &&
+	    erx_object_destroy(link) == ERX_ESTALE && erx_object_destroy(deep) == ERX_ESTALE &&
+	    erx_object_destroy(deep_side) == ERX_ESTALE && erx_object_destroy(own) == ERX_ESTALE;
+	passed = passed && erx_cap_close(space) == ERX_OK && erx_cap_close(gate) == ERX_OK && erx_cap_close(shared) == ERX_OK &&
+	    erx_cap_close(side) == ERX_OK && erx_cap_close(link) == ERX_OK &&
+	    erx_cap_close(deep) == ERX_OK && erx_cap_close(deep_side) == ERX_OK && erx_cap_close(own) == ERX_OK &&
+	    erx_cap_close(outer) == ERX_OK && erx_vm_release(ERX_CAP_SELF, signal_addr, PAGE) == ERX_OK &&
+	    erx_cap_close(signal) == ERX_OK;
+	say_count("budget_free_pages", erx_fiasco_vm_free_pages());
+	say_case("budget_destroy", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/*
  * The root's own tables, and the service's rows for the first two task indices, take
  * their pages here, so no case counts them against its pool.
  */
@@ -505,6 +583,8 @@ erx_fiasco_root_main(void)
 	case_space_refusals();
 	case_released();
 	case_first_thread();
+	case_budget_calls();
+	case_budget_destroy();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

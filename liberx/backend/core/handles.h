@@ -36,16 +36,20 @@ typedef enum erx_backend_object_kind {
 	ERX_BACKEND_OBJECT_RETIRED,
 	ERX_BACKEND_OBJECT_MEMORY,
 	ERX_BACKEND_OBJECT_GATE,
-	ERX_BACKEND_OBJECT_SPACE
+	ERX_BACKEND_OBJECT_SPACE,
+	ERX_BACKEND_OBJECT_BUDGET
 } erx_backend_object_kind_t;
 
 /* For erx_backend_handle_find: any live kind will do. */
 #define ERX_BACKEND_OBJECT_ANY	UINT32_MAX
 
+/* A record's budget when it is charged to the root's own budget, which has no record. */
+#define ERX_BACKEND_BUDGET_ROOT	UINT64_MAX
+
 typedef struct erx_backend_object {
 	uint32_t	kind;		/* erx_backend_object_kind_t */
 	uint32_t	creator;	/* the task that made it, the one whose destroy is honoured */
-	uint64_t	budget;		/* the budget its create named, recorded only */
+	uint64_t	budget;		/* the index of the budget record it is charged to, or ERX_BACKEND_BUDGET_ROOT */
 	uint32_t	generation;
 	uint32_t	handles;	/* entries in any table naming this record at this generation */
 	uint32_t	mappings;	/* maps made of it, which keep it while it has no handle */

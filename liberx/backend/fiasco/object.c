@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/fiasco/budget.h"
 #include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -82,9 +83,13 @@ int
 erx_fiasco_object_create(uint32_t task, uint32_t kind, uint64_t budget, erx_fiasco_object_fill_t fill, const void *request,
     uint64_t *handle)
 {
+	uint64_t charged;
 	uint32_t index;
-	int status = erx_backend_object_take(&object_records, kind, task, budget, &index);
+	int status = erx_fiasco_budget_named(task, budget, &charged);
 
+	if (status != ERX_OK)
+		return (status);
+	status = erx_backend_object_take(&object_records, kind, task, charged, &index);
 	if (status != ERX_OK)
 		return (status);
 	status = fill(index, request);
@@ -97,6 +102,18 @@ erx_fiasco_object_create(uint32_t task, uint32_t kind, uint64_t budget, erx_fias
 	if (status != ERX_OK)
 		erx_backend_object_unmake(&object_records, index);
 	return (status);
+}
+
+const erx_backend_object_t *
+erx_fiasco_object_at(uint32_t index)
+{
+	return (erx_backend_object_at(&object_records, index));
+}
+
+uint32_t
+erx_fiasco_object_capacity(void)
+{
+	return (erx_backend_grow_table_capacity(&object_records));
 }
 
 int
@@ -177,6 +194,9 @@ object_release(uint32_t index)
 		break;
 	case ERX_BACKEND_OBJECT_SPACE:
 		erx_fiasco_task_space_release(index);
+		break;
+	case ERX_BACKEND_OBJECT_BUDGET:
+		erx_fiasco_budget_end(index);
 		break;
 	case ERX_BACKEND_OBJECT_FREE:
 	case ERX_BACKEND_OBJECT_RETIRED:

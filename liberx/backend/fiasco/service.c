@@ -31,6 +31,7 @@
 #include "erx/core/dispatch.h"
 #include "liberx/backend/core/object_info.h"
 #include "liberx/backend/core/trace_ring.h"
+#include "liberx/backend/fiasco/budget.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/fault_gate.h"
@@ -392,6 +393,17 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_cap_close_body(decoded->task, ((const erx_fiasco_cap_request_t *)words)->cap));
 	case ERX_FIASCO_CALL_OBJECT_DESTROY:
 		return (erx_fiasco_object_destroy_body(decoded->task, ((const erx_fiasco_cap_request_t *)words)->cap));
+	case ERX_FIASCO_CALL_BUDGET_CREATE: {
+		const erx_fiasco_budget_create_request_t *const create = (const void *)words;
+
+		return (erx_fiasco_budget_create_body(decoded->task, create->parent, create->kind, create->guarantee, create->cap,
+		    &reply->first));
+	}
+	case ERX_FIASCO_CALL_BUDGET_RESIZE: {
+		const erx_fiasco_budget_resize_request_t *const resize = (const void *)words;
+
+		return (erx_fiasco_budget_resize_body(decoded->task, resize->budget, resize->guarantee, resize->cap));
+	}
 	case ERX_FIASCO_CALL_IMAGE_MAP:
 		return (erx_fiasco_task_image_map_body(decoded->task, ((const erx_fiasco_image_map_request_t *)words)->space,
 		    ((const erx_fiasco_image_map_request_t *)words)->entry, &reply->first));
