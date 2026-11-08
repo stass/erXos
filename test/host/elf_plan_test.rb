@@ -51,7 +51,9 @@ class ElfPlanTest < Minitest::Test
     path = File.join(@directory, "input.pipe")
     @runner.run(["mkfifo", path], name: "make-pipe", deadline: 5)
     error = assert_raises(Erx::CommandError) do
-      @runner.run([@planner, path, "8192"], name: "plan-pipe", deadline: 1)
+      # A planner that waited for a writer would wait forever, so any deadline tells; this one
+      # leaves room for the first run of a freshly built sanitized binary on a loaded host.
+      @runner.run([@planner, path, "8192"], name: "plan-pipe", deadline: 10)
     end
     assert_equal "failed", error.result.fetch("state")
     assert_equal 1, error.result.fetch("exit_status")

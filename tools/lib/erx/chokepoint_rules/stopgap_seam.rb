@@ -27,6 +27,7 @@ module Erx
         liberx/backend/api.h
         liberx/backend/fiasco/api_names.c
         liberx/backend/hosted/arch/aarch64/switch_stack.S
+        liberx/backend/hosted/arch/x86_64/switch_stack.S
         liberx/backend/hosted/group.c
         liberx/backend/hosted/internal.h
         liberx/backend/hosted/object_info.c

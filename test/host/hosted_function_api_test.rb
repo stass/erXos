@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'etc'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
@@ -90,8 +91,15 @@ class HostedFunctionApiTest < Minitest::Test
     end
   end
 
+  # Seeds whose path runs only when a host page holds several erXos pages (16 KiB on Apple
+  # Silicon): there a decommitted page beside a committed one stays mapped and is cleaned.
+  HOST_PAGE_SEEDS = ['a decommitted page keeps its bytes'].freeze
+
   SEEDS.each do |name, (file, original, replacement, broken)|
     define_method("test_seed_#{name.tr(' ', '_')}") do
+      if HOST_PAGE_SEEDS.include?(name) && Etc.sysconf(Etc::SC_PAGESIZE) <= 4096
+        skip "a host page of erXos's own size has no committed sibling, so the seeded path never runs"
+      end
       source = File.read(File.join(ROOT, file))
       assert_includes source, original, 'the seed no longer applies'
       seeded = File.join(@directory, File.basename(file))

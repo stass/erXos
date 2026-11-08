@@ -7,6 +7,10 @@ module Erx
   # which loads the test images' recipe, so that the hosted build's class loads none of it.
   module HostedSources
     GUEST = 'test/guest/function_api'
+
+    # Lists every host architecture's stack switch: each assembles to nothing
+    # unless the compiler targets its architecture, so the compiler, not the
+    # host Ruby, picks the one that is linked.
     ALL = %W[
       kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c kernel/core/pack.c
       kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
@@ -15,7 +19,8 @@ module Erx
       liberx/backend/core/object_info.c liberx/backend/core/park_table.c liberx/backend/core/refused.c
       liberx/backend/core/trace_ring.c liberx/backend/core/vm_table.c liberx/backend/core/grow_table.c
       liberx/backend/hosted/object_info.c
-      liberx/backend/hosted/arch/aarch64/switch_stack.S build/gen/liberx/backend/hosted/generated/calls.c
+      liberx/backend/hosted/arch/aarch64/switch_stack.S liberx/backend/hosted/arch/x86_64/switch_stack.S
+      build/gen/liberx/backend/hosted/generated/calls.c
       liberx/backend/hosted/group.c liberx/backend/hosted/log.c liberx/backend/hosted/thread.c
       liberx/backend/hosted/trace.c liberx/backend/hosted/vm.c liberx/backend/hosted/wait.c
       #{GUEST}/cases.c #{GUEST}/hosted.c #{GUEST}/irq_cases.c

@@ -40,8 +40,9 @@ uint32_t erx_hosted_executor_claim(void);
 void	erx_hosted_executor_release(uint32_t slot);
 
 /*
- * Runs fn(arg) on the stack whose top is sp, storing the caller's stack pointer in
- * *saved_sp. fn never returns, and it goes back only by another switch to *saved_sp.
+ * Runs fn(arg) on the stack whose top is sp, 16-byte aligned, storing the caller's
+ * stack pointer in *saved_sp. fn never returns, and it goes back only by another
+ * switch to *saved_sp.
  */
 _Noreturn void	erx_hosted_switch_stack(uint64_t sp, void (*fn)(void *), void *arg, uint64_t *saved_sp);
 
