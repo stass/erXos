@@ -2775,6 +2775,12 @@ to the corpus and follow rc
   downloads the image again even when the image arrived and checked out
   and only xterm.js or v64 failed to load; keep a checked image across
   retries.
+* [Medium] build gates, `test/integration/fiasco_reproducible_test.rb`: it is the
+  test that builds the stopgap kernel twice and compares the results, and
+  `make check` skips it as a standalone test, but no make target runs it,
+  and `make check-reproducible` builds the kernel once and packs that one
+  build twice. Give it a gate, or make `check-reproducible` rebuild the
+  kernel.
 
 ## Security residuals
 

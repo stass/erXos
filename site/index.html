@@ -25,6 +25,7 @@
     <a href="#principles">Principles</a>
     <a href="#architecture">Architecture</a>
     <a href="#status">Status</a>
+    <a href="#correctness">Correctness</a>
     <a href="#try">Try it</a>
   </nav>
 </header>
@@ -345,9 +346,76 @@ Error in process &lt;0.150.0&gt; with exit value:
   </div>
 </section>
 
+<section class="section" id="correctness" aria-labelledby="correctness-title">
+  <header>
+    <span class="label"><b>05</b> / Correctness</span>
+    <h2 id="correctness-title">Checked against answers the code did not write.</h2>
+  </header>
+  <div>
+    <div class="prose">
+      <p class="big">A test only proves what it checks. So erXos compares its
+      code with stock OTP, a bounded model checker and a weak-memory
+      simulator, and each check says what it covered.</p>
+      <p>Most checks come with a deliberately broken twin or a seeded defect
+      that they must catch, so a check that cannot fail gets noticed. These
+      checks have limits. A model checker checks a model, not machine code.
+      A litmus test checks a small program, not the compiled lane. A race
+      detector finds data races but cannot show that a protocol is
+      right.</p>
+    </div>
+    <div class="cells">
+      <div>
+        <span class="label"><b>C1</b></span>
+        <h3>Stock OTP as the oracle</h3>
+        <p>OTP 29.1.2's emulator, kernel, stdlib and compiler test suites run
+        on erXos and on stock OTP, and the results are compared case by case.
+        erXos's C library also runs musl's own tests.</p>
+      </div>
+      <div>
+        <span class="label"><b>C2</b></span>
+        <h3>Weak memory, under herd7</h3>
+        <p>Litmus tests of the lane's wake handshake and ring positions run
+        under Arm's AArch64 model and RC11. With its fences the protocol must
+        never reach the bad outcome. Without them it must.</p>
+      </div>
+      <div>
+        <span class="label"><b>C3</b></span>
+        <h3>TLA+ models</h3>
+        <p>TLC will check the protocol models. Today its runner is built and
+        tested on a small model with a broken twin. The models for
+        connections, the host link, updates and the scheduler are planned
+        and not written.</p>
+      </div>
+      <div>
+        <span class="label"><b>C4</b></span>
+        <h3>CBMC</h3>
+        <p>Bounded model checking of the budget arithmetic and the
+        capability table's lookup, rights and slot closing, for every input
+        within stated bounds.</p>
+      </div>
+      <div>
+        <span class="label"><b>C5</b></span>
+        <h3>Fuzzing and sanitizers</h3>
+        <p>The rule is a fuzz target for every parser of untrusted input, and
+        the known gaps are tracked. Host tests of the C code run under
+        AddressSanitizer and UndefinedBehaviorSanitizer, and concurrency
+        tests under ThreadSanitizer.</p>
+      </div>
+      <div>
+        <span class="label"><b>C6</b></span>
+        <h3>Rules the build enforces</h3>
+        <p>Rules of the form &ldquo;only X may do Y&rdquo; fail the build on a
+        new site. The stack depth of the C17 cores is computed from their call
+        graph, and two clean builds of the production boot image must match
+        byte for byte.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="section" id="try" aria-labelledby="try-title">
   <header>
-    <span class="label"><b>05</b> / Try it</span>
+    <span class="label"><b>06</b> / Try it</span>
     <h2 id="try-title">The real thing, in your browser.</h2>
   </header>
   <div>

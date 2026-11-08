@@ -311,6 +311,82 @@ Error in process <0.150.0> with exit value:
   and web UI, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
+## Correctness and testing
+
+erXos checks its code against answers that do not come from the code
+itself: stock OTP, musl's own tests, a model checker, a weak-memory
+simulator and seeded defects. A check says what it covered and nothing
+beyond that. Most of the commands are described under
+[Fetch, bootstrap and check](#fetch-bootstrap-and-check), and
+[docs/design-verification.md](docs/design-verification.md) holds the rules
+for what counts as evidence.
+
+* **Stock OTP is the oracle** (`make check-oracle`). OTP 29.1.2's emulator,
+  kernel, stdlib and compiler test suites run on erXos and on stock OTP on
+  the development host, and the results are compared case by case. Every
+  difference must be listed with its cause in a table of known differences:
+  a difference the design states, a case that cannot run yet, a bug
+  `TODO.md` names, or an upstream bug. Any other difference, or a listed
+  one that no longer occurs, fails the gate. The same gate runs musl's
+  `libc-test` against erXos's C library.
+* **Weak memory under herd7** (`make check-litmus`). herd7 simulates how a
+  processor may reorder memory accesses. The ten litmus tests (small
+  programs with a stated bad outcome) in `test/litmus/` cover the lane's
+  wake handshake and ring positions, under Arm's AArch64 memory model and,
+  for the C11 form, RC11 (the repaired C11 model). Each protocol with its
+  fences or acquire loads must never reach the bad outcome. Its twin
+  without them must reach it, or the test would pass whatever the fences
+  did.
+* **TLA+ models under TLC** (`make check-tla`). TLC explores every state of
+  a model. Today the runner is built and tested on a small model, with a
+  deliberately broken twin that must fail on the property it names. The
+  protocol models (connections, the host link's sessions, the update
+  protocol, the scheduler's cross-CPU protocol) are planned and not
+  written.
+* **CBMC, a bounded model checker for C** (`make check-cbmc`). Six
+  harnesses check the budget arithmetic and the capability table's lookup,
+  rights and slot-closing code for every input within stated bounds. Nine
+  seeded defects must each make a harness fail.
+* **Fuzzing** (`make check-fuzz`). The rule is that every parser of
+  untrusted input gets a fuzz target when it lands; the known gaps are in
+  `TODO.md`. The host fuzz targets include the boot image and its
+  manifests, executable headers, the funnel's term decoder, the 9P codec
+  and the shell's parser.
+* **Sanitizers** (`make check-sanitizers`). Host tests of the C code run
+  under AddressSanitizer and UndefinedBehaviorSanitizer, and the
+  concurrency tests of the budget, capability, lane and log cores build
+  under ThreadSanitizer.
+* **Chokepoint build checks** (part of `make check`). Rules of the form
+  "only X may do Y" fail `make check` on a new site, and the host test of
+  each active rule seeds a violation to prove the check reports it. A rule
+  whose sites are not written yet is marked pending and fails the moment a
+  file it awaits appears.
+* **Seeds** (`make check-native-seeds`, `make check-qemu-mutant`). Each
+  seeded failure of the native threads, watchdog and interrupt suites must
+  make its suite fail. A failure seeded into a copy of the Fiasco backend
+  must make the QEMU gate fail, while an unmutated copy passes.
+* **Stack proof** (`make check-stack-proof`, part of `make check`). The
+  worst-case stack depth of the C17 cores is computed from their call
+  graph. A frame over the cap, an unlisted indirect call or a cycle that
+  is not a tail jump fails the build.
+* **Reproducible images** (`make check-reproducible`). Two clean builds of
+  the production boot image, both packing one build of the kernel, must be
+  byte-identical. In deterministic mode (`make check-qemu`, under TCG), two
+  boots of the same image must write the same transcript.
+* **Target suites** (`make check-qemu`). QEMU suites boot guests and check
+  the running system: threads, memory, interrupts, crash records and the
+  watchdog. `make check-conformance` is the harness for the kernel
+  interface's conformance cases; each case lands with the call it tests,
+  and the roster holds one pending case, so it boots no guest yet.
+* **Review.** The project's rule is an internal review before every code
+  commit, and an external review by a model from another vendor for
+  designs and large changes.
+
+These checks have limits. TLC checks a model, not the machine code. herd7
+checks litmus tests, not the compiled lane. TSan finds data races but does
+not show that an acquire and release protocol is right. The CBMC and TLC
+reports state their bounds and assumptions.
+
 ## Host setup
 
 Apple Silicon macOS is the primary host. You need:
@@ -425,7 +501,8 @@ make check-litmus
   executable and provenance.
 * **Sanitizers** run the host C readers, the `ERXPACK` validator and the
   ELF planner under ASan and UBSan, and the generated atomic accessor
-  test under TSan. A sanitizer report ends its command. ASan checks stack
+  test and the concurrency tests of the budget, capability, lane and log
+  cores under TSan. A sanitizer report ends its command. ASan checks stack
   use after return and lets allocations fail. Leak and
   initialization-order checks need Linux, so macOS reports them
   unsupported. `check-asan` and `check-tsan` both select this combined
