@@ -2703,6 +2703,20 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Medium] musl, `musl/arch/aarch64/bits/signal.h`, `abi/erx_abi.txt`,
+  `erlang/apps/erx_shell/src/erx_shell_jobs.erl`: give erXos's musl FreeBSD's signal numbers from one signal
+  table in the ABI file ([design-programs.md](docs/design-programs.md#signal-numbers)). Today musl keeps Linux's
+  numbers (`bits/signal.h`, `SIGSTOP` 19, `SIGCONT` 18, `SIGPWR` 30, `_NSIG` 65), its real-time range starts at
+  35 (`musl/src/signal/sigrtmin.c`), the ABI file has no signal table, and the shell's `?SIGNALS` writes
+  FreeBSD's numbers by hand. The work: the table and its Ruby generator (musl's number header, the set of valid
+  signals, names and descriptions, the Erlang table for `erx_prog`, the protocol's grammar and the shell); in musl, the
+  generated header in place of the Linux block, `SIGRTMIN` 65 and `SIGRTMAX` 126 as constants, `_NSIG` 128,
+  the generated predicate in `sigaddset`, `sigdelset`, `sigismember`, `sigaction` and `pthread_kill`,
+  `sigfillset`'s generated set, `strsignal` on FreeBSD's text, `sysconf(_SC_RTSIG_MAX)` 62, and new
+  `sig2str`, `str2sig`, `sys_signame`, `sys_siglist` and `sys_nsig`; the shell's table read from the generated
+  one; the `difference` kind in `test/conformance/libc-test-verdicts.txt` and `tools/lib/erx/libc_test.rb`;
+  the tests of design-programs.md's "Signal numbers" bullet.
+
 * [Low] website, `site/terminal.js` (`FAULTS`, [site/README.md](site/README.md)): what the fault menu still lacks.
   It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser once the
   site's image boots there (it ends in the root task's crash record under QEMU's `virt` at 160 MiB) and the

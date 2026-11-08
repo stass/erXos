@@ -1611,6 +1611,186 @@ tests, and the cases of `libc-test` and the Open POSIX Test Suite that need
 a handler, then run only on erXos's kernel, and show as "cannot run" on the
 stopgap with that reason.
 
+### Signal numbers
+
+erXos numbers its signals as FreeBSD 15.1 does, by the user's decision.
+The command shell's `kill` takes FreeBSD's numbers and names
+([design-shell.md](design-shell.md#job-control)), and programs built on
+musl see the same ones, so a user meets one numbering: `kill -17` stops a
+job whether the shell sends it or a program does, and the `WTERMSIG` a
+parent reads is the number the shell takes. FreeBSD and Linux agree on the
+numbers POSIX fixes for `kill -N`, 1 `HUP`, 2 `INT`, 3 `QUIT`, 6 `ABRT`, 9
+`KILL`, 14 `ALRM` and 15 `TERM`, and differ on most of the rest: `STOP` is
+17 on FreeBSD and 19 on Linux, `TSTP` 18 and 20, `CONT` 19 and 18, `CHLD`
+20 and 17, `USR1` 30 and 10. macOS, the primary development host, uses
+FreeBSD's numbers from 1 to 31. Programs are ported at the source level, so
+no binary carries Linux's numbers, and code that names its signals, as
+POSIX expects of every signal beyond those seven, needs only a rebuild.
+
+**One table.** The signal table of `abi/erx_abi.txt` holds every signal:
+its name, its number, its default action and its description. Every
+consumer is generated from it
+([design-generation.md](design-generation.md#sources-and-outputs)): musl's
+signal numbers, the set of valid signals and `sigfillset`'s set, the names
+and descriptions behind `strsignal`, `psignal`, `sig2str` and `str2sig`,
+`liberx`'s maps between names and numbers, the program protocol's grammar
+of signal names, `erx_prog:status/1`, the fault table's signal column, and
+the names and numbers of the shell's `kill` builtin and of the Erlang
+`kill` command. The numbers are external values: the table states each
+literally, and the generator's mapping test compares it with FreeBSD
+15.1's `sys/sys/signal.h` and the names in its `lib/libc/gen/siglist.c`,
+fetched at a pinned URL and SHA-256 as a test input
+([design-abi.md](design-abi.md#numeric-assignment-and-versions)).
+
+| Number | Name | Default action | Notes |
+| --- | --- | --- | --- |
+| 1 | `SIGHUP` | terminate | |
+| 2 | `SIGINT` | terminate | |
+| 3 | `SIGQUIT` | terminate | |
+| 4 | `SIGILL` | terminate | the fault table's undefined instruction |
+| 5 | `SIGTRAP` | terminate | the fault table's breakpoint |
+| 6 | `SIGABRT` | terminate | `SIGIOT` is its alias, as on FreeBSD |
+| 7 | `SIGEMT` | terminate | FreeBSD's emulator trap; no fault kind maps to it, so only `kill` and `raise` send it |
+| 8 | `SIGFPE` | terminate | |
+| 9 | `SIGKILL` | terminate | cannot be caught, blocked or ignored |
+| 10 | `SIGBUS` | terminate | |
+| 11 | `SIGSEGV` | terminate | |
+| 12 | `SIGSYS` | terminate | |
+| 13 | `SIGPIPE` | terminate | |
+| 14 | `SIGALRM` | terminate | |
+| 15 | `SIGTERM` | terminate | |
+| 16 | `SIGURG` | ignore | |
+| 17 | `SIGSTOP` | stop | cannot be caught, blocked or ignored |
+| 18 | `SIGTSTP` | stop | |
+| 19 | `SIGCONT` | continue | |
+| 20 | `SIGCHLD` | ignore | |
+| 21 | `SIGTTIN` | stop | |
+| 22 | `SIGTTOU` | stop | |
+| 23 | `SIGIO` | ignore | `SIGPOLL` is its alias, as on Linux; Linux's default action for it is to terminate, FreeBSD's to ignore |
+| 24 | `SIGXCPU` | terminate | |
+| 25 | `SIGXFSZ` | terminate | |
+| 26 | `SIGVTALRM` | terminate | |
+| 27 | `SIGPROF` | terminate | |
+| 28 | `SIGWINCH` | ignore | |
+| 29 | `SIGINFO` | ignore | the status request of `Ctrl-T` ([The terminal](#the-terminal)) |
+| 30 | `SIGUSR1` | terminate | |
+| 31 | `SIGUSR2` | terminate | |
+| 32 | `SIGTHR` | reserved | `SIGLWP` is its alias; musl's `SIGTIMER` |
+| 33 | `SIGLIBRT` | reserved | musl's `SIGCANCEL` |
+| 34 | none | reserved | musl's `SIGSYNCCALL` |
+| 35 to 64 | none | not a signal | |
+| 65 to 126 | `SIGRTMIN` to `SIGRTMAX` | terminate | real-time signals, named as `sig2str` names them: `RTMIN`, `RTMIN+1` to `RTMIN+30`, `RTMAX-30` to `RTMAX-1`, `RTMAX` |
+| 127, 128 | none | not a signal | |
+
+The default actions are FreeBSD's (`sys/kern/kern_sig.c`, `sigproptbl`),
+and a real-time signal ends the program, as on FreeBSD. erXos writes no
+core file, so the table has no core column and `WCOREDUMP` is never set.
+The descriptions are FreeBSD's `sys_siglist` text. The protocol's name for
+a signal is its name in lower case, `sigint` or `'sigrtmin+1'`, and its
+name for `kill -l` and `str2sig` drops the `SIG`, `INT` or `RTMIN+1`.
+
+**A number is a signal only if the table lists it.** One generated
+predicate, `erx_sig_valid`, decides whether a number is a signal a program
+may name, and it holds for 1 to 31 and 65 to 126 only. musl's set
+functions, `sigaction`, `pthread_kill`, `kill`, `killpg` and `sigqueue`
+test it in place of their own range tests, and `sigfillset` copies the
+generated set of valid signals. A number it refuses fails with `EINVAL`,
+and `sigismember` reports it absent; `kill`'s 0 keeps the meaning POSIX
+gives it. So three kinds of number that would each need a rule of their
+own are one case: musl's reserved numbers, the numbers 35 to 64 that
+FreeBSD leaves unused, and 127 and 128, which FreeBSD's set can hold but
+no wait status can report. `liberx` refuses such a number before it
+writes a frame, so no frame carries one.
+
+**Reserved numbers.** musl keeps its three internal signals where it has
+them, `SIGTIMER` at 32, `SIGCANCEL` at 33 and `SIGSYNCCALL` at 34
+(`musl/src/internal/pthread_impl.h`), and FreeBSD reserves the first two of
+those numbers for the same purpose: `SIGTHR` for its thread library, which
+cancels with it, and `SIGLIBRT` for its real-time library. musl's own
+tests that a number is none of its internal ones, `sig-32U < 3` at each
+site, stay true as written. Whatever musl does with them stays inside the
+program, through the C library seam
+([design-runtime.md](design-runtime.md#the-c-library-seam)), which on
+erXos cancels by stopping the target thread rather than by signalling it;
+none is a name of the program protocol. `<signal.h>` defines `SIGTHR`,
+`SIGLWP` and `SIGLIBRT` under `_BSD_SOURCE`, as FreeBSD defines them under
+`__BSD_VISIBLE`, so code that names them builds; `sigaction` of one fails
+with `EINVAL`, as FreeBSD's thread library refuses `SIGTHR`.
+
+**Linux's own names.** `SIGPOLL` stays, as an alias of `SIGIO`, which adds
+no number and no line to `kill -l`. `SIGPWR`, `SIGSTKFLT` and `SIGUNUSED`
+go. FreeBSD has none of them and erXos sends none. An alias would run a
+power-failure handler on another signal, as `SIGPWR` sharing a number with
+`SIGINFO` would run it at every `Ctrl-T`, and a number of its own would be
+a signal nothing sends. Code that names them under `#ifdef`, as code that
+builds on the BSDs and macOS does, builds without them; code that names
+them unconditionally fails to compile, which shows the gap at build time
+rather than at run time.
+
+**Real-time signals and the set's size.** `SIGRTMIN` is 65 and `SIGRTMAX`
+126, constants generated from the table, as FreeBSD's are; musl's
+`__libc_current_sigrtmin` and `__libc_current_sigrtmax` go. `_NSIG` is
+128, as in musl's MIPS port, so a set passed through the seam is 16 bytes,
+whose 128 bits hold every number up to 128. `sigset_t` keeps musl's
+128-byte storage, of which those 16 bytes are used. `NSIG` stays `_NSIG`,
+128, where FreeBSD's is 32: code written for Linux sizes per-signal arrays
+by `NSIG` and indexes them with real-time numbers, which an `NSIG` of 32
+would overrun, while code written for FreeBSD indexes them with 1 to 31,
+which 128 holds. `sysconf(_SC_RTSIG_MAX)` is 62. musl gains POSIX's
+`sig2str` and `str2sig` and FreeBSD's `sys_signame`, `sys_siglist` and
+`sys_nsig`, 32, all generated from the table, so FreeBSD's `kill(1)`
+source builds unchanged. `strsignal` and `psignal` give the description
+for 1 to 31 and `Unknown signal: N` for any other number, as FreeBSD's do.
+
+**Where a number crosses a boundary.** Inside a program, `liberx` and
+musl handle signal numbers. Outside it, a number appears only in a
+space's exit status, which the port driver and `erx_prog:status/1` read
+and write through the generated table; every message carries names.
+
+* **The program protocol** carries names: `kill` and `killpg` turn the
+  number into its name through the table before they write a frame, and the event executor turns the name of a `{signal}`,
+  `{exit}` or `{stopped}` report back into its number. The session, its
+  handlers and the shell never see a C number.
+* **Wait statuses** keep musl's layout, which `liberx` builds from a
+  child's report and `<sys/wait.h>`'s macros read: an exit as its status
+  in bits 8 to 15 with bits 0 to 7 clear, an end by a signal as the
+  signal's number in bits 0 to 6, a stop as `0x7f` with the stop signal's
+  number in bits 8 to 15, and a continue as `0xffff`. FreeBSD lays out exits, terminations and stops the same way and
+  marks a continue with `0x13`; a program reads a status only through the
+  macros, which come from the same musl, so the layout stays musl's.
+  Because a terminating signal fits in seven bits below the stop mark
+  `0x7f`, no signal above 126 could be reported, and the table ends at 126
+  as FreeBSD's `SIGRTMAX` does. A ported shell that shows a signal's end
+  as 128 plus its number shows FreeBSD's number.
+* **A space's exit status.** A default action that ends a program halts it
+  with `ERX_EXIT_SIGNAL + N`, `N` the table's number; `erx_prog:status/1`
+  turns it into `{signaled, Signal}` through the table, and a status whose
+  `N` the table lacks reads as a halt with any other status, exited 255
+  ([A program's end](#a-programs-end)). The kernel keeps that status as a
+  number it never interprets, and its fault records carry a fault's kind,
+  never a signal, while the fault table names the signal for each kind; so
+  the kernel knows no signal number.
+* **The shell.** The builtin `kill` reads `-N`, `-NAME` and `-s NAME`
+  through the generated table, and `kill -l` lists the names of 1 to 31 in
+  FreeBSD's order, as FreeBSD's `kill -l` does. The signals that act on a
+  job of Erlang commands take their numbers from the same table
+  ([design-shell.md](design-shell.md#job-control)).
+* **Erlang.** `os:set_signal/2` takes names, and ERTS, built against
+  erXos's musl, gets FreeBSD's numbers without a change to its source.
+
+**The oracles.** musl's `libc-test` and the Open POSIX Test Suite run
+against these numbers. A case that fails only because it assumes Linux's
+is a documented difference, recorded with the kind `difference` in
+`test/conformance/libc-test-verdicts.txt` and pinned by the tests of this
+section. The kinds expected are a case that hard-codes a Linux number or
+names `SIGPWR` or `SIGSTKFLT`; a case that assumes the real-time signals
+begin below 65 or that `_NSIG` is 65, such as one that walks a set as 64
+bits; and a case that compares `strsignal`'s text with musl's. libc-test's
+`regression/sigprocmask-internal`, which checks that no number from 32 to
+`SIGRTMIN - 1` can be added to a set or blocked, passes as written, since
+the predicate refuses all 33 of them. OTP's suites compare with stock OTP
+on macOS, whose numbers from 1 to 31 are the same.
+
 ### toybox
 
 toybox enters the tree as erXos's code, with an `ORIGIN.md`, and builds as
@@ -1748,10 +1928,9 @@ program that catches it notices: a ported `cp`, `dd`, `sleep` or `fetch`
 prints its own progress, as on FreeBSD. A `SIGINFO` from the terminal
 carries the origin that a `SIGINT` from `Ctrl-C` carries. Linux has no
 `SIGINFO`, `VSTATUS` or `NOKERNINFO`, so erXos's musl defines all three,
-and the ABI file's signal and `termios` tables list them. `SIGINFO` takes
-number 30, with `SIGPWR` as its alias, since all 31 of musl's standard
-numbers are taken and erXos sends no power-failure signal; that shared
-number keeps `SIGINFO`'s default, to ignore. musl defines no `TIOCSTAT`,
+and the ABI file's signal and `termios` tables list them. `SIGINFO` is
+29, its FreeBSD number, as every signal number is
+([Signal numbers](#signal-numbers)). musl defines no `TIOCSTAT`,
 so a ported program that uses it under `#ifdef` builds without it. `stty
 status` and `stty kerninfo` set the character and the flag, as FreeBSD's
 `stty` does.
@@ -2882,6 +3061,41 @@ terminal cases.
   from musl's `malloc` and stdio, with a seeded call; and the generator's
   check that every fault kind has a signal and every status an `errno`,
   with a seeded kind without one.
+* **Signal numbers** ([Signal numbers](#signal-numbers)). Each test has a
+  seeded run that must fail:
+  * the generator's mapping test compares the signal table with FreeBSD
+    15.1's `sys/sys/signal.h`, every name from 1 to 33, the aliases,
+    `SIGRTMIN` and `SIGRTMAX`, and with the names of its `sys_signame`;
+    seeded with a copy of the table that gives `SIGINFO` 30;
+  * a build check that no file of musl's tree but the generated header
+    defines a signal number, seeded with a literal `#define SIGPWR 30` in
+    `musl/arch/aarch64/bits/signal.h`;
+  * on the host, over every integer from -1 to 200, `sigaddset`,
+    `sigdelset`, `sigismember`, `sigaction` and `pthread_kill` accept
+    exactly 1 to 31 and 65 to 126, `kill` those and 0, and `sigfillset`
+    holds exactly them; seeded with the predicate generated from a table
+    that lists 64, which fails at 64;
+  * on the host, `erx_prog:status/1` over every status `ERX_EXIT_SIGNAL +
+    N` for `N` from 0 to 255: a number of the table gives `{signaled,
+    Signal}` with its name, any other exited 255; seeded with a table
+    without `SIGINFO`'s row, which turns 29 into exited 255;
+  * the protocol's grammar accepts every name of the table and refuses
+    `sigpwr`, `sigstkflt` and `sigthr`; seeded with a grammar that admits
+    `sigpwr`;
+  * in QEMU, FreeBSD 15.1's `bin/kill/kill.c`, built against erXos's musl
+    as a test program: its `kill -l` prints what the shell's builtin
+    prints, byte for byte, and for each `N` from 1 to 31 its `kill -l N`
+    names the signal the builtin's `kill -N` sends; seeded with a builtin
+    table that swaps `STOP` and `CONT`;
+  * in QEMU, a C program with a handler for every catchable signal records
+    the number each arrives with: the shell's `kill -29 %1`, `kill -30 %1`
+    and `kill -66 %1` reach it as 29, 30 and 66; `kill -17 %1` pauses it
+    and `kill -19 %1` continues it, and its `SIGCONT` handler records 19;
+    its child ended by `kill(child, 15)` and by `kill(child, 126)` gives
+    `waitpid` a `WTERMSIG` of 15 and 126, and the program itself ended by
+    the shell's `kill -15 %1` and `kill -126 %1` leaves rc's `$status`
+    `sigterm` and `sigrtmax`; seeded with the program built against a header whose
+    `SIGUSR1` is 10, whose handler then records nothing for `kill -30 %1`.
 * **toybox's tests.** toybox's test scripts are shell scripts, and erXos has
   no POSIX shell in the first tier, so the harness runs them under the
   development host's shell with each applet replaced by a forwarding
@@ -3669,6 +3883,7 @@ proves hard to adapt.
 | A session's code objects hold much of its budget | low | the session runs out of memory sooner | `file_objects` and an eighth of the budget bound the table; eviction keeps live objects alive in their programs only; data objects are the program's own and end with it |
 | Write-back of shared mappings costs more than programs expect | medium | a program that maps a large file and stores widely pays a write for each run of stored pages at every `msync` and every letting-go, and an `mmap` pays up front the filling of the object from the file's start to the mapping's end, a high offset included | only stored pages are written, from the kernel's report; gate GQ measures fill and write-back with `tools/erx bench mmap` ([plan.md](plan.md#decision-gates)); filling on first touch would need a pager, which the design rejects ([Alternatives considered](#alternatives-considered)) |
 | Ported programs rely on writes from outside their session showing in a shared mapping at once, as Linux's page cache gives | low | such a program reads stale bytes through its mapping until every program of its session has let go of the file | the documented difference and its test; programs that share a mapped file run in one session, where descriptors and mappings agree at once ([Alternatives considered](#alternatives-considered)) |
+| Ported programs hard-code Linux's signal numbers or name Linux's own signals | low | a program that sends `kill(pid, 19)` meaning a stop continues its target instead, and one that names `SIGPWR` unconditionally fails to compile | code that builds on FreeBSD and macOS names its signals and guards Linux's own names already; the oracles' documented differences ([Signal numbers](#signal-numbers)) |
 
 Decided by the user: a program is a port of its session, not a domain,
 and its whole world is its session; security comes from capabilities,
@@ -3688,9 +3903,10 @@ of a file from one object of its own, filled and written back with
 ordinary reads and writes; and a program ends with
 the program or session that started it, like a job tree, while a
 long-running service starts under a supervisor, never by detaching, so
-nothing is orphaned.
+nothing is orphaned; and erXos's musl uses FreeBSD's signal numbers, the
+numbers the command shell's `kill` takes.
 
-One engineering question, with the answer the design follows:
+Two engineering questions, with the answers the design follows:
 
 * **Does forwarding carry enough of toybox's tests?** The forwarding command
   mirrors a working directory's names and contents, not every UNIX
@@ -3698,6 +3914,12 @@ One engineering question, with the answer the design follows:
   tests recorded as unsupported; if they leave an applet's behaviour
   unchecked, write rc tests for that applet in the shell's corpus. The count
   from the first applets settles it.
+* **Does musl keep `SIGPOLL`?** FreeBSD defines no `SIGPOLL`; Linux makes
+  it an alias of `SIGIO`, and POSIX's XSI option names it. Recommended:
+  keep it as an alias of `SIGIO` ([Signal numbers](#signal-numbers)): it
+  adds no number and no line to `kill -l`, and code written for Linux that
+  names it builds. Dropping it instead matches FreeBSD's headers exactly
+  and costs only such code a build failure. The user decides.
 
 ## References
 

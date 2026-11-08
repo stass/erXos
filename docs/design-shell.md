@@ -703,7 +703,10 @@ report of a background job that is done before the next prompt; a job's
 command and status reach the terminal through the line escape. `fg`
 returns when its job ends, with the job's status, or stops, with the
 stopping signal's name as rc names one (`sigtstp`). `kill` takes FreeBSD
-kill's `-s NAME`, `-NAME`, `-NUMBER` and `-l`; on a job of Erlang commands
+kill's `-s NAME`, `-NAME`, `-NUMBER` and `-l`, with FreeBSD's names and
+numbers, which the ABI file's signal table gives the builtin and every
+program alike, so `kill -17` means `STOP` whoever sends it
+([design-programs.md](design-programs.md#signal-numbers)); on a job of Erlang commands
 `HUP`, `INT`, `QUIT`, `KILL` and `TERM` end it, `STOP` and `TSTP` stop it
 and `CONT` continues it in the background. When the shell ends, for any
 reason, its jobs end with it, so no job outlives its session.
