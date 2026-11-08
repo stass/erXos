@@ -1580,7 +1580,7 @@ follow M7 in [plan.md](plan.md).
 * `erx_image_map` does not check the program's file hash, and every refusal of its segments reads `ERX_ENOMEM`; each space gets its own copy of an image's segments. A fault message's words are not counted, so a task's raw IPC can put stale numbers in its own crash record.
 * Without vCPU upcalls, a program takes each signal's default action only.
 * When the watchdog ends the machine, log lines the reader had not taken are lost.
-* The crash frame may interleave with a console driver that is writing, and a kernel `WARN` or panic line may interleave at any time.
+* The crash frame may interleave with a console driver that is writing, a task's frame with the watchdog end's art and frame, and a kernel `WARN` or panic line may interleave at any time.
 * Any littlefs block error, deadline or driver restart in the system domain's form makes the volume unavailable until reboot.
 * Only the root's parks and wakes are in `erx:trace`, and the trace ring's `thread`, `space` and `target` are reused indices, not object ids.
 * All of `erx_group_configure` but the CPU set is accepted and ignored.

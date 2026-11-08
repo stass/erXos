@@ -47,7 +47,7 @@ erx_fiasco_end_watchdog(const erx_watchdog_end_t *end)
 	    .message_length = sizeof(message) - 1 };
 
 	(void)erx_crash_record_write(&input, end_record, end_scratch);
-	erx_crash_frame_write(end_record);
+	erx_crash_frame_write(end_record, ERX_CRASH_END_MACHINE);
 	erx_fiasco_machine_end(false);
 }
 
@@ -65,7 +65,7 @@ erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how)
 		    .message_length = sizeof(message) - 1 };
 
 		(void)erx_crash_record_write(&input, end_record, end_scratch);
-		erx_crash_frame_write(end_record);
+		erx_crash_frame_write(end_record, ERX_CRASH_END_MACHINE);
 	}
 	erx_fiasco_machine_end(how != ERX_END_OFF);
 }
@@ -83,7 +83,7 @@ erx_fiasco_task_crash_write(const erx_crash_fault_t *fault)
 	    .message_length = sizeof(message) - 1 };
 
 	(void)erx_crash_record_write(&input, record, scratch);
-	erx_crash_frame_write(record);
+	erx_crash_frame_write(record, ERX_CRASH_END_TASK);
 }
 
 /* The service is one thread and the only caller of erx_dispatch in this program, so the debug log's lock is empty. */

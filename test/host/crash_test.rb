@@ -34,7 +34,14 @@ class CrashTest < Minitest::Test
   DRIVER_SECONDS = 30
 
   ReadAnswer = Data.define(:status, :reason, :check, :length, :frame_start, :frame_end, :record)
-  Written = Data.define(:length, :check, :record, :frame)
+  # art is what the writer prints between its opening newline and the header line.
+  Written = Data.define(:length, :check, :record, :art, :frame)
+  # The art fits a phone's web console.
+  ART_LINES_MAX = 12
+  ART_COLUMNS_MAX = 36
+  ART_CAPTION = "The ship was destroyed:\n"
+  # The empty lines the art may hold, each with no blanks.
+  ART_EMPTY_LINES_MAX = 4
 
   def setup
     @root = File.expand_path('../..', __dir__)
@@ -85,14 +92,19 @@ class CrashTest < Minitest::Test
   def unhex(text) = text == '-' ? ''.b : [text].pack('H*')
 
   # Everything the driver's write command takes, each with a usable default.
+  # ends is :machine for a frame written as the machine goes down, :task for a
+  # task's fault the machine survives.
   def write(form: FULL, cause: CAUSE.fetch(:panic), cpu: 1, value: NORMAL, slot: SLOT_A, nframes: 3, frames: 1, regs: 1,
-            kind: 0, message: 'boom', lines: 2)
+            kind: 0, message: 'boom', lines: 2, ends: :machine)
     message_hex = message.nil? ? '-' : message.b.unpack1('H*')
     answer = drive(["write #{form} #{cause} #{cpu} #{value} #{slot} #{nframes} #{frames} #{regs} #{kind} " \
-                    "#{message_hex.empty? ? '-' : message_hex} #{lines}"])
+                    "#{message_hex.empty? ? '-' : message_hex} #{lines} #{ends}"])
     _, length, check, record = answer.fetch(0).split
+    printed = unhex(answer.fetch(1).split.fetch(1))
+    assert printed.start_with?("\n"), 'the writer opens with a newline'
+    header = printed.index("\n#{FRAME::BEGIN_MARKER} ") || flunk('the writer printed no header line')
     Written.new(length: length.to_i, check: check, record: unhex(record),
-                frame: unhex(answer.fetch(1).split.fetch(1)).delete_prefix("\n"))
+                art: printed.byteslice(1, header), frame: printed.byteslice(header + 1..))
   end
 
   def read_c(log)
@@ -167,6 +179,46 @@ class CrashTest < Minitest::Test
       assert_equal 0x1122334455667788, result.record.fetch('uptime_ns')
       assert_equal 5_000_000_000, result.record.fetch('since_pet_ns')
       assert_equal written.record, read_c(written.frame).record
+    end
+  end
+
+  # The flatline ahead of the header is for the person at the console. It is
+  # short printable ASCII with at most four empty lines, no line of it can be
+  # taken for a marker or names what a harness pattern looks for, and both
+  # readers pass over it to the same record as from the frame alone.
+  def test_the_art_ahead_of_the_frame_is_plain_short_and_passed_over
+    [BRIEF, FULL].each do |form|
+      written = write(form: form)
+      lines = written.art.lines
+      assert_operator lines.size, :>, 1, 'the writer prints its art'
+      assert_operator lines.size, :<=, ART_LINES_MAX
+      assert_equal ART_CAPTION, lines.reject { |line| line == "\n" }.last,
+                   'the caption, the last line that is not empty, is printed'
+      assert_operator lines.count("\n"), :<=, ART_EMPTY_LINES_MAX
+      lines.each do |line|
+        assert_match(/\A[\x20-\x7e]{0,#{ART_COLUMNS_MAX}}\n\z/n, line)
+        refute line.start_with?('--'), "#{line.inspect} could begin a marker"
+        refute line.include?('erx'), "#{line.inspect} could meet a harness pattern"
+        refute line.include?('crash'), "#{line.inspect} could meet a harness pattern"
+        refute line.end_with?(" \n"), "#{line.inspect} has trailing blanks"
+      end
+      result = read_both(written.art + written.frame)
+      assert_equal :valid, result.status
+      assert_equal written.record, read_c(written.art + written.frame).record
+      assert_equal written.art, write(form: form).art, 'the art is the same every time'
+    end
+  end
+
+  # The art marks the machine going down. A task's fault, which the machine
+  # survives, gets the frame alone, the same record as a machine end's.
+  def test_only_a_machine_end_prints_the_art
+    [BRIEF, FULL].each do |form|
+      machine = write(form: form, cause: CAUSE.fetch(:fault), kind: MEMORY, ends: :machine)
+      task = write(form: form, cause: CAUSE.fetch(:fault), kind: MEMORY, ends: :task)
+      assert_includes machine.art, ART_CAPTION, 'a machine end prints the art'
+      assert_equal '', task.art, "a task's fault prints no art"
+      assert_equal machine.frame, task.frame
+      assert_equal machine.record, read_c(task.frame).record
     end
   end
 
@@ -547,7 +599,7 @@ class CrashTest < Minitest::Test
   end
 
   def write_with(driver, form:, lines: 1, regs: 1, nframes: 1)
-    answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines}"],
+    answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines} machine"],
                    driver: driver)
     unhex(answer.fetch(0).split.fetch(3))
   end

@@ -9,6 +9,8 @@
  * pure; erx_crash_frame_write only hands its lines to the console effect, whose
  * bounded poll drops what a hung UART cannot take. A UART that stays hung leaves
  * a truncated frame; one that loses bytes mid-line leaves a corrupt one.
+ * A flatline goes ahead of the frame, for the person at the console, when
+ * the machine goes down; a task's fault the machine survives gets none.
  */
 
 #include <stdbool.h>
@@ -24,6 +26,28 @@ _Static_assert(ERX_CRASH_FRAME_RAW % 3 == 0, "only the last line pads");
 _Static_assert((ERX_CRASH_SIZE + ERX_CRASH_FRAME_RAW - 1) / ERX_CRASH_FRAME_RAW ==
     ERX_CRASH_FRAME_LINES_MAX, "the longest record fills the frame's lines");
 
+/*
+ * A heart monitor's flatline, and the captain's log that introduces the
+ * record below it. Printable ASCII, at most 36 columns, so it fits a phone's
+ * web console, and at most 12 lines, up to four of them empty, with no blank
+ * at a line's end. No line starts with "--", so neither marker can begin one
+ * and a reader looking for the header line passes over it; no line names
+ * "erx" or "crash", so no harness pattern meets it (test/host/crash_test.rb
+ * holds it to these rules).
+ */
+static const char erx_crash_frame_art[] =
+    "   _      _\n"
+    "__/ \\  /\\/ \\______________________\n"
+    "     \\/\n"
+    "            He's dead, Jim.\n"
+    "\n"
+    "\n"
+    "\n"
+    "CAPTAIN'S LOG, SUPPLEMENTAL.\n"
+    "\n"
+    "The ship was destroyed:\n";
+
+static void erx_crash_frame_art_write(void);
 static size_t erx_crash_frame_encode(const uint8_t *, size_t, char *);
 static size_t erx_crash_frame_header(uint32_t, uint32_t, char *);
 static bool erx_crash_frame_legal(uint32_t, uint32_t);
@@ -134,8 +158,28 @@ erx_crash_frame_line(const uint8_t *record, uint32_t form, uint32_t length,
 	return (used);
 }
 
+/*
+ * One line a write, as the frame's own lines go: the console sends each short
+ * write whole, so this writer never leaves a line half written and a second
+ * writer's header line still begins a line. Every line ends in a newline.
+ */
+static void
+erx_crash_frame_art_write(void)
+{
+	size_t start;
+
+	start = 0;
+	for (size_t last = 0; last < sizeof(erx_crash_frame_art) - 1; last++) {
+		if (erx_crash_frame_art[last] != '\n')
+			continue;
+		erx_effect_console_write(erx_crash_frame_art + start,
+		    last + 1 - start);
+		start = last + 1;
+	}
+}
+
 void
-erx_crash_frame_write(const void *buffer)
+erx_crash_frame_write(const void *buffer, erx_crash_end_t end)
 {
 	erx_crash_brief_t header;
 	char line[ERX_CRASH_FRAME_LINE_BYTES];
@@ -146,6 +190,14 @@ erx_crash_frame_write(const void *buffer)
 	if (!erx_crash_frame_legal(header.form, header.length))
 		return;
 	erx_effect_console_write("\n", 1);
+	/* No default: a new kind of end that states no case fails to build. */
+	switch (end) {
+	case ERX_CRASH_END_MACHINE:
+		erx_crash_frame_art_write();
+		break;
+	case ERX_CRASH_END_TASK:
+		break;
+	}
 	count = erx_crash_frame_line_count(header.length);
 	for (uint32_t index = 0; index < count; index++) {
 		used = erx_crash_frame_line(buffer, header.form, header.length, index,
