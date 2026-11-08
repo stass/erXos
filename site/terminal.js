@@ -59,21 +59,29 @@ const DOWNLOAD_SHARE = 0.6;
 // What the readout on the case says the machine is.
 const MACHINE = `ARMv8-A \u00b7 ${CPU_CORES} ${CPU_CORES === 1 ? "core" : "cores"} \u00b7 ${RAM_MIB} MiB RAM`;
 
-const reduced_motion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// The site test (test/site/terminal_test.mjs) imports this module under
+// Node for its pure parts, the boot-log parse and the fault table; there is
+// no page there, so nothing below touches one unless `document` exists.
+const page = globalThis.document;
+
+const reduced_motion = page ? matchMedia("(prefers-reduced-motion: reduce)").matches : false;
 const mib = bytes => (bytes / (1 << 20)).toFixed(1);
 
-const ui = {
-    console: document.getElementById("console"),
-    screen: document.getElementById("erx-terminal"),
-    state: document.querySelector("[data-erx-state]"),
-    controls: document.querySelector("[data-erx-controls]"),
-    boot: document.querySelector("[data-erx-boot]"),
-    reset: document.querySelector("[data-erx-reset]"),
-    status: document.querySelector("[data-erx-status]"),
-    machine: document.querySelector("[data-erx-machine]"),
-    progress: document.querySelector("[data-erx-progress]"),
-    hint: document.querySelector("[data-erx-hint]"),
-};
+const ui = page ? {
+    console: page.getElementById("console"),
+    screen: page.getElementById("erx-terminal"),
+    state: page.querySelector("[data-erx-state]"),
+    controls: page.querySelector("[data-erx-controls]"),
+    boot: page.querySelector("[data-erx-boot]"),
+    reset: page.querySelector("[data-erx-reset]"),
+    faults: page.querySelector("[data-erx-faults]"),
+    fault_select: page.querySelector("[data-erx-fault-select]"),
+    fault_inject: page.querySelector("[data-erx-fault-inject]"),
+    status: page.querySelector("[data-erx-status]"),
+    machine: page.querySelector("[data-erx-machine]"),
+    progress: page.querySelector("[data-erx-progress]"),
+    hint: page.querySelector("[data-erx-hint]"),
+} : {};
 
 // The phases of the console and the label each shows beside the lamp. The
 // phase colours the lamp and the readout; see .terminal[data-erx-phase] in
@@ -90,6 +98,344 @@ function show_status(text, fraction) {
     ui.progress.hidden = fraction === undefined;
     if(fraction !== undefined)
         ui.progress.firstElementChild.style.width = `${Math.round(Math.min(fraction, 1) * 100)}%`;
+}
+
+// The keys the chin shows: Boot before the first boot and once the machine
+// has ended; the fault menu and Reset while a machine exists.
+function show_keys(machine_exists) {
+    ui.boot.hidden = machine_exists;
+    ui.reset.hidden = !machine_exists;
+    ui.faults.hidden = !machine_exists;
+}
+
+// ---- Hardware faults
+//
+// The visitor injects a fault into the running machine from a menu on the
+// chin. Every fault is made in v64, never by a command typed into the guest,
+// and reaches only the visitor's own emulator. An action takes the session
+// (`emulator`, a V86, and the facts below) and returns, or resolves to, the
+// one-line note the status line shows: what was done, with addresses, the
+// interrupt and the seed. What v64 offers is reached through its CPU object,
+// `emulator.v86.cpu`: the MMIO windows (`io`), the virtio devices and their
+// transports, the GIC's lines (`set_irq`) and the devices by name.
+//
+// A fault that changes a v64 object pushes its undo onto `session.repairs`;
+// a power cut runs them before the machine powers on again, so the new boot
+// gets the hardware back whole, with the disk's contents as they were.
+
+// The boot log the page keeps, from the first byte, to read the memory map
+// from; the map is in its first few KiB.
+const BOOT_LOG_LIMIT = 32768;
+// The line that ends what the parse reads: the root task's first report
+// comes after the bootstrapper's regions and sigma0's map.
+const ROOT_TASK_MARK = "erx: root task: manifest";
+// sigma0 names a resource's owner by task number; the root task, which is
+// the system domain, is task 4.
+const ROOT_TASK_OWNER = 4;
+// v64's physical addresses are 40 bits wide.
+const PHYS_LIMIT = 2n ** 40n;
+// The largest range the parse accepts as the system domain's program.
+const SYSTEM_RANGE_MAX = 64 << 20;
+const PAGE = 4096;
+// Where v64's virt machine puts RAM.
+const GUEST_RAM_BASE = 0x40000000;
+
+const RAM_LINE = /^\s*RAM: ([0-9a-f]{1,16}) - ([0-9a-f]{1,16}):/;
+const ROOT_IP_LINE = /^\s*Roottask config\s+node: \d+\s+ip:([0-9a-f]{1,16})$/;
+const REGION_LINE = /^\s*\[\s*([0-9a-f]{1,16}),\s*([0-9a-f]{1,16})\]\s*\{[^}]*\}\s*(\S+)\s+\S+$/;
+const MAP_LINE = /^\[(\d{1,3}):([R-])([W-])([X-]):([0-9a-f]{1,16});([0-9a-f]{1,16})\]$/;
+
+// A hex number from the log as a Number, or NaN when it is not a physical
+// address v64 can have.
+function physical(digits) {
+    const value = BigInt(`0x${digits}`);
+    return value < PHYS_LIMIT ? Number(value) : NaN;
+}
+
+const overlaps = (a, b) => a.start <= b.end && b.start <= a.end;
+
+// The system domain's program in guest memory, read from the boot log: the
+// range sigma0's RAM map gives the root task (owner 4) that is writable and
+// holds the root task's entry point. It must lie in RAM, be whole pages, be
+// at most SYSTEM_RANGE_MAX long and overlap none of the bootstrapper's
+// regions that are not the root task's (the kernel's, sigma0's). Returns
+// { range: { start, end }, entry } or { reason }. Only the first
+// BOOT_LOG_LIMIT characters are read.
+function parse_system_memory(log) {
+    const lines = log.slice(0, BOOT_LOG_LIMIT).split("\n").map(line => line.replace(/\r$/, ""));
+    let ram = null, entry = NaN, in_map = false;
+    const others = [], owned = [];
+    for(const line of lines) {
+        let m;
+        if(line.startsWith("RAM:---")) in_map = true;
+        else if(line.startsWith("IOMEM:")) in_map = false;
+        else if(in_map && (m = MAP_LINE.exec(line))) {
+            if(Number(m[1]) === ROOT_TASK_OWNER && m[3] === "W")
+                owned.push({ start: physical(m[5]), end: physical(m[6]) });
+        }
+        else if((m = RAM_LINE.exec(line))) ram ??= { start: physical(m[1]), end: physical(m[2]) };
+        else if((m = ROOT_IP_LINE.exec(line))) entry = physical(m[1]);
+        else if((m = REGION_LINE.exec(line)) && m[3] !== "Root")
+            others.push({ start: physical(m[1]), end: physical(m[2]) });
+    }
+    if(!ram || !(ram.start <= ram.end)) return { reason: "the boot log names no RAM" };
+    if(Number.isNaN(entry)) return { reason: "the boot log names no root task" };
+    const range = owned.find(r => r.start <= entry && entry <= r.end);
+    if(!range) return { reason: "no root-task memory holds the root task's entry" };
+    if(range.start < ram.start || range.end > ram.end) return { reason: "the root task's memory lies outside RAM" };
+    if(range.start % PAGE !== 0 || (range.end + 1) % PAGE !== 0) return { reason: "the root task's memory is not whole pages" };
+    if(range.end - range.start + 1 > SYSTEM_RANGE_MAX) return { reason: "the root task's memory is too large" };
+    if(others.some(other => Number.isNaN(other.start) || Number.isNaN(other.end) || overlaps(other, range)))
+        return { reason: "the root task's memory overlaps the kernel's or sigma0's" };
+    return { range, entry };
+}
+
+// `count` pseudo-random numbers below `limit` from `seed` (xorshift32), so
+// the same seed picks the same places on every run.
+function seeded_numbers(seed, count, limit) {
+    let state = (seed >>> 0) || 1;
+    return Array.from({ length: count }, () => {
+        state ^= state << 13; state >>>= 0;
+        state ^= state >>> 17;
+        state ^= state << 5; state >>>= 0;
+        return state % limit;
+    });
+}
+
+// The machine's disk, the first virtio-blk device (v64's disk_devices()
+// lists the same ones), on its virtio-mmio slot: its window, transport and
+// interrupt. Null when the machine has no disk, or v64 has not built the
+// machine yet (it creates emulator.v86 once its core is instantiated).
+function disk_of(emulator) {
+    const cpu = emulator.v86?.cpu;
+    if(!cpu?.virtio_devices || cpu.virtio_transport !== "mmio") return null;
+    const entry = cpu.virtio_devices.find(({ name }) => name === "virtio-blk");
+    if(!entry) return null;
+    const transport = cpu.virtio_mmio[entry.slot];
+    return { cpu, slot: entry.slot, device: entry.device, transport, intid: transport.intid };
+}
+
+const hex_address = n => `0x${n.toString(16)}`;
+
+// The disk's line stops following the device: an instance property shadows
+// VirtioMmio.prototype.update_irq, which every raise and lower goes through.
+function freeze_disk_line(session, disk) {
+    disk.transport.update_irq = () => undefined;
+    session.repairs.push(() => {
+        delete disk.transport.update_irq;
+        disk.transport.level = false;
+        disk.cpu.set_irq(disk.intid, false);
+    });
+}
+
+const DISK_BLOCK = 4096;
+// Blocks below this are the partition table's; corruption starts past it.
+const DISK_SKIP = 64 << 10;
+const DISK_CORRUPT_BLOCKS = 8;
+const RAM_FLIPS = 64;
+const CPU_FREEZE_MS = 15000;
+const CLOCK_JUMP_HOURS = 3;
+
+const buffer_get = (buffer, start, length) => new Promise(resolve => buffer.get(start, length, resolve));
+const buffer_set = (buffer, start, bytes) => new Promise(resolve => buffer.set(start, bytes, resolve));
+
+// The disk's blocks that hold data: past the partition table, and not one
+// byte value throughout, as erased or never-written blocks are.
+async function used_blocks(buffer) {
+    const used = [];
+    const chunk = 1 << 20;
+    for(let start = DISK_SKIP; start + DISK_BLOCK <= buffer.byteLength; start += chunk) {
+        const span = Math.min(chunk, buffer.byteLength - start);
+        const length = span - span % DISK_BLOCK;
+        await new Promise(resolve => setTimeout(resolve));
+        const bytes = new Uint8Array(await buffer_get(buffer, start, length));
+        for(let at = 0; at < length; at += DISK_BLOCK) {
+            const block = bytes.subarray(at, at + DISK_BLOCK);
+            if(block.some(b => b !== block[0])) used.push(start + at);
+        }
+    }
+    return used;
+}
+
+// Each injection that picks places takes the next seed, shown in its note.
+let next_seed = 1;
+
+// The menu's entries by name. `needs` names what an entry waits for ("disk",
+// "system_memory"); `unsupported` is the reason an entry cannot be offered.
+const FAULTS = {
+    dead_disk: {
+        label: "Dead disk", needs: "disk",
+        action({ emulator, session }) {
+            const disk = disk_of(emulator);
+            const owner = disk.cpu.virtio_mmio_slots[disk.slot];
+            const { base, size, handler } = disk.cpu.io.ranges[owner];
+            disk.cpu.io.unregister_mmio(owner);
+            session.repairs.push(() => {
+                disk.cpu.virtio_mmio_slots[disk.slot] = disk.cpu.io.register_mmio(base, size, handler);
+            });
+            freeze_disk_line(session, disk);
+            disk.cpu.set_irq(disk.intid, true);
+            return `the disk's registers at ${hex_address(base)} are gone and its interrupt, INTID ${disk.intid}, is raised`;
+        },
+    },
+    hung_disk: {
+        label: "Hung disk", needs: "disk",
+        action({ emulator, session }) {
+            const disk = disk_of(emulator);
+            freeze_disk_line(session, disk);
+            disk.cpu.set_irq(disk.intid, false);
+            return `the disk works on, but its interrupt, INTID ${disk.intid}, no longer reaches the processor`;
+        },
+    },
+    irq_storm: {
+        label: "Interrupt storm", needs: "disk",
+        action({ emulator, session }) {
+            const disk = disk_of(emulator);
+            freeze_disk_line(session, disk);
+            disk.cpu.set_irq(disk.intid, true);
+            return `the disk's interrupt, INTID ${disk.intid}, is held asserted`;
+        },
+    },
+    corrupt_disk: {
+        label: "Corrupt disk", needs: "disk",
+        async action({ emulator, still_current }) {
+            const buffer = disk_of(emulator).device.backend.buffer;
+            const used = await used_blocks(buffer);
+            if(!still_current()) return "";
+            if(used.length === 0) throw new Error("the disk holds no data to corrupt");
+            const seed = next_seed++;
+            const blocks = seeded_numbers(seed, DISK_CORRUPT_BLOCKS, used.length);
+            const within = seeded_numbers(seed + 1, DISK_CORRUPT_BLOCKS, DISK_BLOCK);
+            const offsets = [];
+            for(let i = 0; i < DISK_CORRUPT_BLOCKS; i++) {
+                const offset = used[blocks[i]] + within[i];
+                const [byte] = new Uint8Array(await buffer_get(buffer, offset, 1));
+                await buffer_set(buffer, offset, Uint8Array.of(byte ^ 0xff));
+                offsets.push(hex_address(offset));
+            }
+            return `inverted ${DISK_CORRUPT_BLOCKS} bytes in data blocks (seed ${seed}) at ` +
+                `${offsets.join(", ")}; read some files to see what erXos does`;
+        },
+    },
+    corrupt_ram: {
+        label: "Corrupt RAM", needs: "system_memory",
+        action({ emulator, session }) {
+            const { start, end } = session.memory.range;
+            if(start < GUEST_RAM_BASE || end >= GUEST_RAM_BASE + (RAM_MIB << 20))
+                throw new Error("the boot log's range lies outside this machine's RAM");
+            const seed = next_seed++;
+            const picks = seeded_numbers(seed, RAM_FLIPS, (end - start + 1) * 8);
+            for(const pick of picks) {
+                const address = start + Math.floor(pick / 8);
+                const [byte] = emulator.read_memory(address, 1);
+                emulator.write_memory(Uint8Array.of(byte ^ (1 << (pick % 8))), address);
+            }
+            return `flipped ${RAM_FLIPS} bit positions (seed ${seed}) in the system domain's program, ` +
+                `${hex_address(start)}-${hex_address(end)}; nothing shows until it runs or reads them`;
+        },
+    },
+    ram_fail: {
+        label: "RAM fail", unsupported: "needs a change inside v64",
+    },
+    power_cut: {
+        label: "Power cut",
+        async action({ emulator, session, still_current }) {
+            session.pausing = true;
+            try {
+                await emulator.stop();
+                if(!still_current()) return "";
+                for(const repair of session.repairs.splice(0)) repair();
+                session.applied.clear();
+                await emulator.restart("power-on");
+                if(!still_current()) return "";
+            } finally {
+                session.pausing = false;
+            }
+            session.rewatch();
+            show_state("booting");
+            await emulator.run();
+            return "the power went off and on; the machine boots again with the disk as it was at the cut";
+        },
+    },
+    clock_jump: {
+        label: "Clock jump", unsupported: "erXos has no wall clock yet",
+        action({ emulator }) {
+            emulator.v86.cpu.devices["pl031"].tick_offset += CLOCK_JUMP_HOURS * 3600;
+            return `the real-time clock (PL031) moved ${CLOCK_JUMP_HOURS} hours ahead`;
+        },
+    },
+    cpu_freeze: {
+        label: "CPU freeze",
+        async action({ emulator, session, still_current }) {
+            session.pausing = true;
+            try {
+                await emulator.stop();
+            } finally {
+                session.pausing = false;
+            }
+            if(!still_current()) return "";
+            show_status(`CPU freeze: the processor is stopped for ${CPU_FREEZE_MS / 1000} s`);
+            await new Promise(resolve => setTimeout(resolve, CPU_FREEZE_MS));
+            if(!still_current()) return "";
+            await emulator.run();
+            return `the processor stood still for ${CPU_FREEZE_MS / 1000} s and runs again; v64 stops the machine's ` +
+                "clock with it, so erXos's own time did not move";
+        },
+    },
+};
+
+// The menu's groups, in order.
+const FAULT_GROUPS = [
+    { label: "Devices", faults: ["dead_disk", "hung_disk", "irq_storm", "corrupt_disk"] },
+    { label: "Memory", faults: ["corrupt_ram", "ram_fail"] },
+    { label: "Machine", faults: ["power_cut", "clock_jump", "cpu_freeze"] },
+];
+
+// Whether an entry can be injected, from facts about the running machine:
+// { disk, disk_dead, memory } where `memory` is parse_system_memory's
+// answer or null before the log reached it. Returns { enabled, reason }.
+function fault_availability(fault, facts) {
+    if(fault.unsupported) return { enabled: false, reason: fault.unsupported };
+    if(fault.needs === "disk" && !facts.disk) return { enabled: false, reason: "this machine has no disk" };
+    if(fault.needs === "disk" && facts.disk_dead) return { enabled: false, reason: "the disk is dead already" };
+    if(fault.needs === "system_memory" && !facts.memory?.range)
+        return { enabled: false, reason: facts.memory?.reason ?? "waiting for the boot log's memory map" };
+    return { enabled: true, reason: "" };
+}
+
+function fault_facts(session) {
+    return { disk: disk_of(session.emulator) !== null, disk_dead: session.applied.has("dead_disk"),
+             memory: session.memory };
+}
+
+// The menu shows each entry's availability; it and Inject are usable only
+// while a machine runs, is ready and no fault is in progress.
+function render_faults(session) {
+    const usable = Boolean(session?.ready && !session.ended && !session.busy);
+    const facts = session ? fault_facts(session) : { disk: false, disk_dead: false, memory: null };
+    for(const option of ui.fault_select.options) {
+        const fault = FAULTS[option.value];
+        const { enabled, reason } = fault_availability(fault, facts);
+        option.disabled = !enabled;
+        option.textContent = enabled ? fault.label : `${fault.label} (${reason})`;
+    }
+    const selected = ui.fault_select.selectedOptions[0];
+    if(selected?.disabled) {
+        const first = Array.from(ui.fault_select.options).find(option => !option.disabled);
+        if(first) first.selected = true;
+    }
+    ui.fault_select.disabled = !usable;
+    ui.fault_inject.disabled = !usable || ui.fault_select.selectedOptions[0]?.disabled !== false;
+}
+
+function build_fault_menu() {
+    for(const group of FAULT_GROUPS) {
+        const element = Object.assign(page.createElement("optgroup"), { label: group.label });
+        for(const name of group.faults)
+            element.append(Object.assign(page.createElement("option"), { value: name, textContent: FAULTS[name].label }));
+        ui.fault_select.append(element);
+    }
+    render_faults(null);
 }
 
 function load_script({ src, integrity }) {
@@ -291,10 +637,12 @@ function open_terminal() {
 }
 
 // The machine's whole lifecycle lives here: boot (download once, then
-// start), reset (destroy, start again from the cached image) and failure
-// (say what failed, offer the action that can recover). Each start makes a
-// new session; listeners check it against `current`, so output from a
-// machine Reset destroyed never reaches the terminal.
+// start), reset (destroy, start again from the cached image), a fault the
+// visitor injects, the machine's own end (it powers off, and Boot starts it
+// again from the cached image) and failure (say what failed, offer the
+// action that can recover). Each start makes a new session; listeners
+// check it against `current`, so output from a machine Reset destroyed
+// never reaches the terminal.
 const machine = {
     V86: null,
     manifest: null,
@@ -346,6 +694,10 @@ const machine = {
 
     async boot() {
         ui.boot.disabled = true;
+        if(this.image && this.V86 && this.term) {
+            show_keys(true);
+            return this.reset();
+        }
         window.erx_boot_clicked_at = performance.now();
         show_state("booting");
         // A failure of any one part stops the downloads still running, so
@@ -366,9 +718,9 @@ const machine = {
                 .then(content => make_disk(manifest.disk, content));
             [this.image, { V86: this.V86 }, this.disk] = await Promise.all([image, v64, disk, xterm]);
             this.term ??= open_terminal();
-            ui.boot.hidden = true;
-            ui.reset.hidden = false;
+            show_keys(true);
             this.start();
+            this.watch(this.current);
         } catch(error) {
             downloads.abort();
             this.fail(error);
@@ -383,6 +735,7 @@ const machine = {
             await old?.emulator.destroy();
             this.term.reset();
             this.start();
+            this.watch(this.current);
         } catch(error) {
             this.fail(error);
         } finally {
@@ -390,11 +743,103 @@ const machine = {
         }
     },
 
+    // The page's own listeners on a session, beside the terminal's in
+    // start(): the machine's end, readiness for faults (the shell's prompt
+    // marker), and the boot log, kept up to BOOT_LOG_LIMIT characters until
+    // the root task's first report, for parse_system_memory. A power cut
+    // calls session.rewatch() to read the next boot the same way.
+    watch(session) {
+        const ready_marker = MILESTONES[MILESTONES.length - 1];
+        let log = "", line = "", tail = "", reading = true;
+        Object.assign(session, { applied: new Set(), repairs: [], memory: null, ready: false, rebooted: false });
+        session.rewatch = () => {
+            log = ""; line = ""; tail = ""; reading = true;
+            Object.assign(session, { memory: null, ready: false, rebooted: true });
+            render_faults(session);
+        };
+        session.emulator.add_listener("emulator-stopped", () => {
+            if(this.current === session && !session.pausing) this.ended(session);
+        });
+        session.emulator.add_listener("serial0-output-byte", byte => {
+            if(this.current !== session) return;
+            const char = String.fromCharCode(byte);
+            if(reading) {
+                log += char;
+                line = char === "\n" ? "" : line + char;
+                if(line.startsWith(ROOT_TASK_MARK) || log.length >= BOOT_LOG_LIMIT) {
+                    reading = false;
+                    session.memory = parse_system_memory(log);
+                    log = "";
+                    render_faults(session);
+                }
+            }
+            if(session.ready) return;
+            tail = (tail + char).slice(-128);
+            if(!tail.includes(ready_marker.marker)) return;
+            session.ready = true;
+            show_state("live");
+            if(session.rebooted) show_status(ready_marker.label);
+            render_faults(session);
+        });
+        render_faults(session);
+    },
+
+    // Injects one of FAULTS into the running machine. The menu is unusable
+    // while a fault is in progress; the status line then says what was done,
+    // or why it could not be. A fault that ends the machine reaches ended().
+    async inject(name) {
+        const session = this.current, fault = FAULTS[name];
+        if(!fault || !session?.ready || session.ended || session.busy) return;
+        if(!fault_availability(fault, fault_facts(session)).enabled) return;
+        session.busy = true;
+        session.fault = fault;
+        session.menu_focused = ui.faults.contains(document.activeElement);
+        render_faults(session);
+        show_status(`${fault.label}: injecting the fault`);
+        const still_current = () => this.current === session && !session.ended;
+        try {
+            const note = await fault.action({ emulator: session.emulator, session, still_current });
+            if(!still_current()) return;
+            session.applied.add(name);
+            show_status(`${fault.label}: ${note}`);
+        } catch(error) {
+            if(!still_current()) return;
+            show_status(`${fault.label}: could not inject it: ${error?.message ?? error}`);
+        } finally {
+            session.busy = false;
+            if(still_current()) {
+                session.fault = null;
+                render_faults(session);
+                if(session.menu_focused) ui.fault_select.focus();
+            }
+        }
+    },
+
+    // The machine stopped by itself: it powered off after a crash, or after
+    // a halt typed at the console. Boot starts it again; focus on a key
+    // that goes away moves to Boot.
+    ended(session) {
+        session.ended = true;
+        const refocus = ui.faults.contains(document.activeElement) || document.activeElement === ui.reset ||
+            (session.busy && session.menu_focused);
+        render_faults(session);
+        show_state("stopped");
+        show_status(session.fault ? `${session.fault.label}: the machine is off` : "The machine is off");
+        ui.boot.textContent = "Boot erXos";
+        ui.boot.disabled = false;
+        show_keys(false);
+        if(refocus) ui.boot.focus();
+    },
+
     // Before the machine exists the visitor can try the boot again; after,
     // Reset is the way back.
     fail(error) {
         show_status(`Could not start: ${error?.message ?? error}`);
         show_state("stopped");
+        if(this.current) {
+            this.current.ended = true;
+            render_faults(this.current);
+        }
         if(this.image && this.V86 && this.term) return;
         ui.boot.textContent = "Try again";
         ui.boot.disabled = false;
@@ -415,8 +860,13 @@ function init() {
     ui.hint.hidden = false;
     ui.boot.addEventListener("click", () => machine.boot());
     ui.reset.addEventListener("click", () => machine.reset());
+    build_fault_menu();
+    ui.fault_select.addEventListener("change", () => render_faults(machine.current));
+    ui.fault_inject.addEventListener("click", () => machine.inject(ui.fault_select.value));
     fetch_manifest().then(manifest =>
         show_status(`${mib(manifest.compressed_bytes + manifest.emulator.bytes)} MB download`)).catch(() => undefined);
 }
 
-init();
+if(page) init();
+
+export { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT };

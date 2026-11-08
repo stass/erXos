@@ -41,6 +41,7 @@
   --key-edge: #9d9784;
   --key-go-ink: #121211;
   --key-go-edge: #9e3010;
+  --key-crash-ink: #9a2d0b;
   --grille: #c7c1b0;
   --grille-slot: #b3ad9b;
 
@@ -86,7 +87,8 @@
     --key-ink: #ece9e1;
     --key-edge: #23221f;
     --key-go-ink: #121211;
-  --key-go-edge: #9e3010;
+    --key-go-edge: #9e3010;
+    --key-crash-ink: #ffc2ad;
     --grille: #34332f;
     --grille-slot: #262522;
   }
@@ -123,6 +125,7 @@
   --key-edge: #23221f;
   --key-go-ink: #121211;
   --key-go-edge: #9e3010;
+  --key-crash-ink: #ffc2ad;
   --grille: #34332f;
   --grille-slot: #262522;
 }
@@ -680,6 +683,7 @@ p:last-child {
   flex: 1 1 18em;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px 14px;
   min-width: 0;
 }
@@ -742,9 +746,12 @@ p:last-child {
 }
 
 .terminal-keys {
-  flex: none;
+  flex: 0 1 auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
 }
 
 .key {
@@ -764,6 +771,33 @@ p:last-child {
   background: var(--signal);
   color: var(--key-go-ink);
   box-shadow: 0 3px 0 var(--key-go-edge), 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Inject is a plain key with alert ink: a fault may end the machine, so it reads apart from Boot's go. */
+.key.crash {
+  color: var(--key-crash-ink);
+}
+
+/* The fault menu: a native select drawn as a key, beside Inject. Its
+   closed width is fixed; the open list shows each entry's whole label,
+   with the reason an entry is unavailable. */
+.faults {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fault-select {
+  width: 12em;
+  max-width: 100%;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.fault-select optgroup,
+.fault-select option {
+  background: var(--key);
+  color: var(--key-ink);
 }
 
 .key:active:not(:disabled) {

@@ -172,6 +172,57 @@ fails. The image's and the disk's downloads are bounded by the sizes
 image's decompression; the disk's capacity is at most 2 GiB. A failure
 of any part of the boot stops the downloads still running.
 
+Beside Reset, the fault menu injects a hardware fault into the running
+machine, so the visitor sees how erXos handles it. It is a native
+`<select>` drawn as a key, grouped Devices, Memory and Machine, and an
+Inject key with alert ink. Both are shown with Reset once a machine
+exists and are usable only while it runs, once the shell is ready, and
+while no fault is in progress. An entry the machine cannot take is
+disabled, its reason in its label. Nothing asks for confirmation; after
+each fault the status line, a polite live region, says what was done,
+with the addresses, the interrupt and the seed. Every fault is made in
+v64, through its CPU object (`emulator.v86.cpu`), never by a command typed
+into the guest, and reaches only the visitor's own emulator.
+
+| Entry | What v64 is made to do |
+| --- | --- |
+| Dead disk | The disk's virtio-mmio window is unmapped, so the driver's next register access is a synchronous external abort, and its interrupt is raised and held. |
+| Hung disk | The disk still does its work, but its interrupt never rises: the transport's `update_irq` is shadowed on the instance. |
+| Interrupt storm | The disk's interrupt is held asserted whatever the device says. |
+| Corrupt disk | 8 bytes, chosen from a seed, are inverted in blocks that hold data (past the first 64 KiB, and not one byte value throughout); the visitor is told to read files. |
+| Corrupt RAM | 64 bit positions, chosen from a seed, are flipped in the system domain's program, never in the kernel's memory (below). |
+| RAM fail | Disabled: needs a change inside v64, whose bus maps RAM as one region and refuses an MMIO range over it. |
+| Power cut | The machine stops at once and powers on again (`restart("power-on")`: RAM cleared, devices reset, the image loaded again). The disk keeps what reached it before the cut, and the faults above are undone first. |
+| Clock jump | Disabled: erXos has no wall clock yet, so moving the PL031's offset changes nothing it reads. The action is written. |
+| CPU freeze | The machine stops for 15 s and runs again. v64 stops the machine's clock with the processor, so erXos's own time does not move, and the note says so. |
+
+The disk entries take the machine's first virtio-blk disk on a virtio-mmio
+slot (`cpu.virtio_devices`, the list v64's `disk_devices()` reads) and say
+"this machine has no disk" when there is none. A fault that changes a v64
+object records its undo, which a power cut runs.
+
+Corrupt RAM aims at the range the page reads from the boot console's
+output it already shows: the first 32 KiB of the log, up to the root
+task's `manifest` line. The range is the one sigma0's RAM map gives the
+root task (owner 4) that is writable and holds the root task's entry
+point (`Roottask config ... ip:`), and it must lie in the bootstrapper's
+RAM, be whole pages, be at most 64 MiB and overlap none of the
+bootstrapper's regions that are not the root task's (the kernel's,
+sigma0's). Otherwise the entry is disabled with the parse's reason. The
+action also refuses a range outside the RAM the page gave the machine.
+
+A fault that ends the machine reaches the end below. When the machine
+powers off by itself, after a crash or a halt typed at the console, the
+lamp shows Stopped, the menu and Reset go away, and Boot starts the
+machine again from the image in memory, taking the focus if a control that
+went away held it.
+
+`terminal.js` runs under Node too, without a page, for its pure parts:
+`ruby test/host/site_faults_test.rb` runs `test/site/terminal_test.mjs`,
+which checks the boot-log parse against `test/site/fixtures/boot-160m.log`,
+the site's machine (one core, 160 MiB) booted under QEMU's `virt`, and the
+disk faults against a stand-in for v64's objects.
+
 Browsers without WebAssembly or `DecompressionStream` keep the recorded
 session and say so.
 
@@ -179,3 +230,6 @@ session and say so.
 
 * The footer links (Source, Architecture, Roadmap) point at `#` until the
   source repository has a public address; a TODO comment marks them.
+* The fault menu is checked under Node against a stand-in for v64, not
+  yet in a browser, and its disk entries wait for the machine's disk
+  (`TODO.md`, "Planned features").

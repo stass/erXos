@@ -2580,13 +2580,19 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
-* [Low] website, `site/terminal.js` ([site/README.md](site/README.md)): a menu of hardware faults on the
-  simulator, so a visitor sees how erXos handles each: detach the disk, detach the network card, a failing
-  RAM range, a corrupted instruction, and re-attaching a device. Each fault is made in the emulator, never by a
-  command typed into the guest. On the stopgap with the drivers in the system domain, a dead device ends the
-  machine with a crash record; once drivers run in their own domains (M9, 1b-E), the same fault ends only that
-  driver's domain and its supervisor's restart is what the visitor sees. The CRASH key's detached disk is the
-  first entry.
+* [Low] website, `site/terminal.js` (`FAULTS`, [site/README.md](site/README.md)): what the fault menu still lacks.
+  It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser once the
+  site's image boots there (it ends in the root task's crash record under QEMU's `virt` at 160 MiB) and the
+  machine has a disk; until then the four disk entries say "this machine has no disk". RAM fail is disabled:
+  v64's bus maps RAM as one region and `register_mmio` refuses a range over it, so it needs a change inside v64
+  (a list of failed RAM ranges that `AddressSpace::lookup` in `src/rust/aarch64/bus.rs` checks before its RAM
+  case, set by a new export that also bumps the bus generation and drops the range's compiled code, as
+  `a64_bus_written` does). Clock jump is disabled until erXos reads a wall clock; CPU freeze stops v64's machine
+  clock too, so erXos's time does not jump (advancing it would need v64's `MachineClock.set_time`, unchecked
+  against its clamp). Once the machine has a disk, make the power cut a new machine on the same disk buffer, and
+  take the machine's end from v64's `cpu.powered_off()`: `session.repairs`, `pausing` and `rewatch` then go
+  away, and the fault table no longer does lifecycle work. Once drivers run in their own domains (M9, 1b-E), the
+  disk faults end only the driver's domain, and the menu's notes should say so.
 
 * [Medium] website, `site/terminal.js` ([site/README.md](site/README.md)): the page's pure helpers
   (`site_url`, `read_bounded`, `fetch_checked`, `SparseDisk`, `make_disk`) have no test in the tree, since the

@@ -1,0 +1,75 @@
+
+L4 Bootstrapper
+  Compiled with: GCC (16.2.0)
+  Bootstrap cmdline: ''
+  RAM: 0000000040000000 - 0000000049ffffff: 160.0 MiB
+  Total RAM: 160.0 MiB; available for Bootstrap/Sigma0/Kernel: 160.0 MiB
+erXos image: index c24de8cb774b0886772e47055ce8c9a0b9d4417b653cde9f476f05a94a4ecc6a at 0x4022c000+0x17fc000
+  Sigma0 config    node: 0   ip:0000000041cb0804
+  Roottask config  node: 0   ip:00000000440bf000
+Regions of list 'regions':
+    [ 40000000,  40000fff] {   4.0 KiB} Root   erxhandoff
+    [ 4022c000,  41a27fff] {  23.9 MiB} Root   erxpack
+    [ 41c01000,  41caafff] { 680.0 KiB} Kern   kernel
+    [ 41cb0000,  41ccbfff] { 112.0 KiB} Sigma0 sigma0
+    [ 44000000,  44500fff] {   5.0 MiB} Root   root
+    [ 45000000,  450fffff] {1024.0 KiB} Root   dtb
+Regions of list 'sysalloc':
+    [        0, ffffffffffffffff] {  16.0 EiB}        
+  Starting kernel at 41c010c8
+
+             __  __
+   ___  _ __ \ \/ /  ___   ___
+  / _ \| '__| \  /  / _ \ / __|
+ |  __/| |    /  \ | (_) |\__ \
+  \___||_|   /_/\_\ \___/ |___/
+
+[1;32merXos
+[0;32mL4Re Microkernel on arm-64
+Rev: Unknown version compiled with gcc 16.2.0 for Generic Platform
+Build: #1 No date[0m
+
+development build: trusted code only
+erx: boot image build 377e520a5fd1e1dc index c24de8cb774b0886772e47055ce8c9a0b9d4417b653cde9f476f05a94a4ecc6a flags 0x1 archive 0x4022c000+0x17fc000 bootargs 21
+erx: boot value unknown slot none
+Hello from Startup::stage2
+Reserved 10 MiB as kernel memory.
+DT Platform: linux,dummy-virt
+GIC: Number of IRQs available at this GIC: 288
+GIC: Supports up to 57344 LPIs, using 512.
+ITS: 0xffff000001271000 rev=3 num_lpis=512 num_cols=8 num_devs=64 dev_bits=16
+Detecting PSCI ...
+Detected PSCI v1.1
+PSCI: CPU_SUSPEND format original v0.2, does not support OS-initiated mode
+PSCI: TOS: Not present or not required.
+FPU: Initialize
+ARM generic timer: 62500000 Hz (62.5 MHz) interval=62500 cnt=12090625 periodic mode
+CPU0: ID_PFR[01]:  1100000011110012 00000010 ID_[DA]FR0: 10305408 00000000
+      ID_MMFR[04]: 00101122 10212122 00001011 00000000
+Calibrating timer loop...
+Timer calibration done.
+MDB: use page size: 30
+MDB: use page size: 21
+MDB: use page size: 12
+SIGMA0: Hello!
+  KIP @ 41c04000
+  allocated 8 KiB for maintenance structures
+SIGMA0: Dump of all resource maps
+RAM:------------------------
+[4:R--:40000000;40000fff]
+[0:RWX:40001000;4022bfff]
+[4:R--:4022c000;41a27fff]
+[0:RWX:41a28000;41c00fff]
+[0:RWX:41cab000;41caffff]
+[0:RWX:41ccc000;43ffffff]
+[4:RWX:44000000;44500fff]
+[0:RWX:44501000;44ffffff]
+[4:---:45000000;450fffff]
+[0:RWX:45100000;495fffff]
+IOMEM:----------------------
+[0:RW-:0;3fffffff]
+[0:RW-:4a000000;ffffffffffffffff]
+erx: entropy: quality: low, from the counter alone
+erx: root task: build 377e520a5fd1e1dc index c24de8cb774b0886772e47055ce8c9a0b9d4417b653cde9f476f05a94a4ecc6a entries 395
+erx: root task: manifest root_memory 100663296 baseline 81788928 units 3 pool pages 29436
+erx: root task: watchdog 1,30,600
