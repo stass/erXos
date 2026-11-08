@@ -585,7 +585,7 @@ may still write. A physical or contiguous object is the table a shared object is
 
 A pure core that builds for the host and returns plans (`liberx/backend/core/vm_table.c`). It holds three
 facts: runs and mappings per task, and one index for the machine. The **runs** are the task's reserved addresses, sorted and disjoint, in pool pages the task's record takes as they fill ([Table sizes](#table-sizes)); adjacent runs merge, so a range is
-wholly reserved exactly when one run covers it. The **mappings** are the task's mapping records, sorted and disjoint, each an address range inside one run, the object, the offset and the rights it was mapped with; a mapped page is never in the page index. The **page index** is a hash from a committed page's address and its task to its
+wholly reserved exactly when one run covers it. The **mappings** are the task's mapping records, sorted and disjoint, each an address range inside one run, the object, the offset and the rights it was mapped with; a mapped page is never in the page index. The **page index** is a hash from a committed page's address and its table's label (a task's or an object's) to its
 window address and protection. A page absent from it is uncommitted, and has no protection to remember, since giving it access
 commits it. Each entry owns a distinct window page and the index has two slots for each page the window holds, so committing
 never finds the index full and needs no pages for it, and every probe ends at an empty slot.
@@ -632,7 +632,7 @@ destination and source (`lock_guard.cpp:255`), which Fiasco accepts.
 
 ### Shared objects and the JIT alias
 
-A shared object is a range table of its own over offsets, under a label above every task's, so its pages are ordinary entries of the
+A shared object is a range table of its own over offsets, under a label of its own, so its pages are ordinary entries of the
 page index: each owns its window page, the pool hands them out, and they come back by the release every table has. They are all
 committed when it is created. `erx_vm_map` maps each page with the requested rights, so a
 read-write alias and a read-execute alias are two mappings of one window page. The index holds no entry for a mapping, since an entry owns

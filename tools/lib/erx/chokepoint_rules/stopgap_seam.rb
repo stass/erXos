@@ -114,6 +114,8 @@ module Erx
         liberx/backend/fiasco/vm.h
         liberx/backend/core/vm_table.c
         liberx/backend/core/vm_table.h
+        liberx/backend/core/grow_table.c
+        liberx/backend/core/grow_table.h
         liberx/backend/core/boot_info.c
         liberx/backend/core/boot_info.h
         liberx/backend/core/boot_manifest.c

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/core/grow_table.h"
 #include "liberx/backend/core/mem.h"
 #include "liberx/backend/core/vm_table.h"
 
@@ -37,9 +38,11 @@ static int	range_decode(const erx_backend_vm_table_t *, uint64_t, uint64_t, uint
 static bool	range_overlaps(const erx_backend_vm_table_t *, uint64_t, uint64_t);
 static bool	range_reserved(const erx_backend_vm_table_t *, uint64_t, uint64_t);
 static void	ranges_add(erx_backend_vm_table_t *, uint64_t, uint64_t);
-static size_t	ranges_first_after(const erx_backend_vm_table_t *, uint64_t);
+static uint32_t	ranges_first_after(const erx_backend_vm_table_t *, uint64_t);
 static void	ranges_remove(erx_backend_vm_table_t *, uint64_t, uint64_t);
 static bool	ranges_split(const erx_backend_vm_table_t *, uint64_t, uint64_t);
+static erx_backend_vm_range_t *run_at(const erx_backend_vm_table_t *, uint32_t);
+static int	plan_one_more_run(const erx_backend_vm_table_t *, erx_backend_vm_plan_t *);
 static uint64_t	page_key(const erx_backend_vm_table_t *, uint64_t);
 static void	apply_plan(erx_backend_vm_table_t *,
 		    const erx_backend_vm_effects_t *, const erx_backend_vm_plan_t *);
@@ -106,12 +109,12 @@ erx_backend_vm_index_init(erx_backend_vm_page_t *pages, size_t slots)
 }
 
 void
-erx_backend_vm_table_init(erx_backend_vm_table_t *table, uint32_t label, erx_backend_vm_range_t *ranges,
-    size_t ranges_max, erx_backend_vm_page_t *pages, size_t slots, uint64_t area_start, uint64_t area_end)
+erx_backend_vm_table_init(erx_backend_vm_table_t *table, uint32_t label, erx_backend_vm_page_t *pages, size_t slots,
+    uint64_t area_start, uint64_t area_end, const erx_backend_grow_pages_t *records)
 {
-	*table = (erx_backend_vm_table_t){ .label = label, .ranges = ranges, .ranges_max = ranges_max,
-	    .pages = pages, .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end,
-	    .placement = ERX_PAGE_SIZE };
+	*table = (erx_backend_vm_table_t){ .label = label, .pages = pages,
+	    .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end, .placement = ERX_PAGE_SIZE };
+	erx_backend_grow_table_init(&table->runs, sizeof(erx_backend_vm_range_t), records);
 }
 
 erx_backend_vm_steps_t
@@ -165,9 +168,11 @@ erx_backend_vm_plan(const erx_backend_vm_table_t *table, const erx_backend_vm_re
 
 	if (request->op == ERX_BACKEND_VM_PROTECT && !range_reserved(table, plan->start, end))
 		return (ERX_ERANGE);
-	if (request->op == ERX_BACKEND_VM_RELEASE && table->nranges == table->ranges_max &&
-	    ranges_split(table, plan->start, end))
-		return (ERX_ENOMEM);
+	if (request->op == ERX_BACKEND_VM_RELEASE && ranges_split(table, plan->start, end)) {
+		error = plan_one_more_run(table, plan);
+		if (error != 0)
+			return (error);
+	}
 	plan->pages_needed = count_takes(table, plan->start, end, plan->target);
 	return (0);
 }
@@ -181,6 +186,10 @@ erx_backend_vm_call(erx_backend_vm_table_t *table,
 	int error;
 
 	error = erx_backend_vm_plan(table, request, &plan);
+	if (error != 0)
+		return (error);
+	/* Room for a run first: only calls that take no page add one, so the pool check still holds after. */
+	error = erx_backend_grow_table_room(&table->runs, plan.runs_room);
 	if (error != 0)
 		return (error);
 	if (plan.pages_needed > effects->free_pages())
@@ -223,10 +232,21 @@ plan_reserve(const erx_backend_vm_table_t *table, const erx_backend_vm_request_t
 		end = start + request->size;
 	}
 	/* Removing what a fixed range replaces may split a run before adding one. */
-	if (table->nranges + 1 > table->ranges_max)
-		return (ERX_ENOMEM);
 	*plan = (erx_backend_vm_plan_t){ .op = ERX_BACKEND_VM_RESERVE,
 	    .target = ERX_BACKEND_PAGE_UNCOMMITTED, .start = start, .end = end };
+	return (plan_one_more_run(table, plan));
+}
+
+/*
+ * A plan that may add a run: the call finds room for it before anything changes, and
+ * a table already at its limit refuses it here.
+ */
+static int
+plan_one_more_run(const erx_backend_vm_table_t *table, erx_backend_vm_plan_t *plan)
+{
+	if (table->nranges >= erx_backend_grow_table_limit(&table->runs))
+		return (ERX_ENOMEM);
+	plan->runs_room = table->nranges + 1;
 	return (0);
 }
 
@@ -249,12 +269,14 @@ pages_move(erx_backend_vm_table_t *table,
 {
 	uint64_t cursor = start;
 
-	for (size_t run = ranges_first_after(table, start);
-	    run < table->nranges && table->ranges[run].start < end; run++) {
-		const uint64_t run_end = table->ranges[run].end < end ? table->ranges[run].end : end;
+	for (uint32_t run = ranges_first_after(table, start); run < table->nranges; run++) {
+		const erx_backend_vm_range_t *const range = run_at(table, run);
+		const uint64_t run_end = range->end < end ? range->end : end;
 
-		if (cursor < table->ranges[run].start)
-			cursor = table->ranges[run].start;
+		if (range->start >= end)
+			break;
+		if (cursor < range->start)
+			cursor = range->start;
 		for (; cursor < run_end; cursor += ERX_PAGE_SIZE)
 			page_move(table, effects, cursor, target);
 	}
@@ -351,12 +373,14 @@ count_takes(const erx_backend_vm_table_t *table, uint64_t start, uint64_t end,
 	uint64_t cursor = start;
 	uint64_t count = 0;
 
-	for (size_t run = ranges_first_after(table, start);
-	    run < table->nranges && table->ranges[run].start < end; run++) {
-		const uint64_t run_end = table->ranges[run].end < end ? table->ranges[run].end : end;
+	for (uint32_t run = ranges_first_after(table, start); run < table->nranges; run++) {
+		const erx_backend_vm_range_t *const range = run_at(table, run);
+		const uint64_t run_end = range->end < end ? range->end : end;
 
-		if (cursor < table->ranges[run].start)
-			cursor = table->ranges[run].start;
+		if (range->start >= end)
+			break;
+		if (cursor < range->start)
+			cursor = range->start;
 		for (; cursor < run_end; cursor += ERX_PAGE_SIZE)
 			if (erx_backend_vm_steps(page_state(&table->pages[page_find(table, cursor)]), target).take)
 				count++;
@@ -408,12 +432,15 @@ erx_backend_vm_map_object(const erx_backend_vm_table_t *table, const erx_backend
 void
 erx_backend_vm_table_clear(erx_backend_vm_table_t *table, const erx_backend_vm_effects_t *effects)
 {
+	/* The last run first, so removing it moves no other. */
 	while (table->nranges > 0) {
+		const erx_backend_vm_range_t *const last = run_at(table, table->nranges - 1);
 		const erx_backend_vm_plan_t plan = { .op = ERX_BACKEND_VM_RELEASE, .target = ERX_BACKEND_PAGE_UNCOMMITTED,
-		    .start = table->ranges[0].start, .end = table->ranges[0].end };
+		    .start = last->start, .end = last->end };
 
 		apply_plan(table, effects, &plan);
 	}
+	erx_backend_grow_table_clear(&table->runs);
 }
 
 /* The area's lowest free range of this size. */
@@ -423,12 +450,14 @@ find_free_range(const erx_backend_vm_table_t *table, uint64_t size, uint64_t *st
 	const uint64_t mask = table->placement - 1;
 	uint64_t gap = table->area_start;
 
-	for (size_t run = 0; run < table->nranges; run++) {
-		if (gap <= table->ranges[run].start && table->ranges[run].start - gap >= size) {
+	for (uint32_t run = 0; run < table->nranges; run++) {
+		const erx_backend_vm_range_t *const range = run_at(table, run);
+
+		if (gap <= range->start && range->start - gap >= size) {
 			*start = gap;
 			return (0);
 		}
-		gap = (table->ranges[run].end + mask) & ~mask;
+		gap = (range->end + mask) & ~mask;
 	}
 	if (gap > table->area_end || table->area_end - gap < size)
 		return (ERX_ENOMEM);
@@ -449,16 +478,16 @@ range_decode(const erx_backend_vm_table_t *table, uint64_t addr, uint64_t size, 
 }
 
 /* The first run that ends after addr, or nranges. */
-static size_t
+static uint32_t
 ranges_first_after(const erx_backend_vm_table_t *table, uint64_t addr)
 {
-	size_t low = 0;
-	size_t high = table->nranges;
+	uint32_t low = 0;
+	uint32_t high = table->nranges;
 
 	while (low < high) {
-		const size_t middle = low + (high - low) / 2;
+		const uint32_t middle = low + (high - low) / 2;
 
-		if (table->ranges[middle].end > addr)
+		if (run_at(table, middle)->end > addr)
 			high = middle;
 		else
 			low = middle + 1;
@@ -469,82 +498,84 @@ ranges_first_after(const erx_backend_vm_table_t *table, uint64_t addr)
 static bool
 range_overlaps(const erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
 {
-	const size_t run = ranges_first_after(table, start);
+	const uint32_t run = ranges_first_after(table, start);
 
-	return (run < table->nranges && table->ranges[run].start < end);
+	return (run < table->nranges && run_at(table, run)->start < end);
 }
 
 /* Adjacent runs merge, so a wholly reserved range lies within one run. */
 static bool
 range_reserved(const erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
 {
-	const size_t run = ranges_first_after(table, start);
+	const uint32_t run = ranges_first_after(table, start);
 
-	return (run < table->nranges && table->ranges[run].start <= start &&
-	    table->ranges[run].end >= end);
+	return (run < table->nranges && run_at(table, run)->start <= start &&
+	    run_at(table, run)->end >= end);
 }
 
 /* Whether removing [start, end) would leave a run on both its sides. */
 static bool
 ranges_split(const erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
 {
-	const size_t run = ranges_first_after(table, start);
+	const uint32_t run = ranges_first_after(table, start);
 
-	return (run < table->nranges && table->ranges[run].start < start &&
-	    table->ranges[run].end > end);
+	return (run < table->nranges && run_at(table, run)->start < start &&
+	    run_at(table, run)->end > end);
 }
 
-/* Adds a run that overlaps none, merging it with those it touches. */
+/* Adds a run that overlaps none, merging it with those it touches. The table has room for one more run. */
 static void
 ranges_add(erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
 {
-	const size_t after = ranges_first_after(table, start);
-	const bool joins_before = after > 0 && table->ranges[after - 1].end == start;
-	const bool joins_after = after < table->nranges && table->ranges[after].start == end;
-	erx_backend_vm_range_t *ranges = table->ranges;
+	const uint32_t after = ranges_first_after(table, start);
+	const bool joins_before = after > 0 && run_at(table, after - 1)->end == start;
+	const bool joins_after = after < table->nranges && run_at(table, after)->start == end;
 
 	if (joins_before && joins_after) {
-		ranges[after - 1].end = ranges[after].end;
-		bcopy(&ranges[after + 1], &ranges[after],
-		    (table->nranges - after - 1) * sizeof(*ranges));
+		run_at(table, after - 1)->end = run_at(table, after)->end;
+		erx_backend_grow_table_move(&table->runs, after, after + 1, table->nranges - after - 1);
 		table->nranges--;
 	} else if (joins_before) {
-		ranges[after - 1].end = end;
+		run_at(table, after - 1)->end = end;
 	} else if (joins_after) {
-		ranges[after].start = start;
+		run_at(table, after)->start = start;
 	} else {
-		bcopy(&ranges[after], &ranges[after + 1],
-		    (table->nranges - after) * sizeof(*ranges));
-		ranges[after] = (erx_backend_vm_range_t){ .start = start, .end = end };
+		erx_backend_grow_table_move(&table->runs, after + 1, after, table->nranges - after);
+		*run_at(table, after) = (erx_backend_vm_range_t){ .start = start, .end = end };
 		table->nranges++;
 	}
 }
 
-/* Removes every reserved address in [start, end). */
+/* Removes every reserved address in [start, end). A split needs room for one more run. */
 static void
 ranges_remove(erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
 {
-	erx_backend_vm_range_t *ranges = table->ranges;
-	size_t first = ranges_first_after(table, start);
-	size_t past;
+	uint32_t first = ranges_first_after(table, start);
+	uint32_t past;
 
 	if (ranges_split(table, start, end)) {
-		bcopy(&ranges[first], &ranges[first + 1],
-		    (table->nranges - first) * sizeof(*ranges));
-		ranges[first].end = start;
-		ranges[first + 1].start = end;
+		erx_backend_grow_table_move(&table->runs, first + 1, first, table->nranges - first);
+		run_at(table, first)->end = start;
+		run_at(table, first + 1)->start = end;
 		table->nranges++;
 		return;
 	}
-	if (first < table->nranges && ranges[first].start < start) {
-		ranges[first].end = start;
+	if (first < table->nranges && run_at(table, first)->start < start) {
+		run_at(table, first)->end = start;
 		first++;
 	}
 	past = first;
-	while (past < table->nranges && ranges[past].end <= end)
+	while (past < table->nranges && run_at(table, past)->end <= end)
 		past++;
-	if (past < table->nranges && ranges[past].start < end)
-		ranges[past].start = end;
-	bcopy(&ranges[past], &ranges[first], (table->nranges - past) * sizeof(*ranges));
+	if (past < table->nranges && run_at(table, past)->start < end)
+		run_at(table, past)->start = end;
+	erx_backend_grow_table_move(&table->runs, first, past, table->nranges - past);
 	table->nranges -= past - first;
+}
+
+/* The run at index, which the table has room for. */
+static erx_backend_vm_range_t *
+run_at(const erx_backend_vm_table_t *table, uint32_t index)
+{
+	return (erx_backend_grow_table_at(&table->runs, index));
 }

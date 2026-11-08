@@ -172,6 +172,14 @@ it; git history is the record of completed work.
   does not block on the semaphore, or a zero-deadline down right after the race, would catch both.
 * [Medium] stopgap, `liberx/backend/fiasco/time.c`: the time page is the root's own page, not yet mapped read-only into a
   test task, whose reads need it; the second task's `erx_vm_map` is the mapping's way in.
+* [Medium] stopgap, `liberx/backend/fiasco/vm.c`: the page index's label map (`vm_label_take`, `vm_label_put`, and
+  their use in `erx_fiasco_vm_task_open`, `_close` and `object_fill`) has no test, as `vm.c` builds only for the target and
+  no suite makes more than a few tasks. A leaked or doubled label gives two tables one key. A host test should exhaust the
+  4,096 labels and see the refusal, check a failed fill and a task's close return every label, and reopen a task index
+  after its join; BK2's object records, which take over object labels, are the natural place for it.
+* [Low] stopgap, `liberx/backend/fiasco/vm.c`, `erx_fiasco_vm_contiguous_create`: a run taken by `erx_fiasco_contig_take`
+  is not given back when `object_fill` then refuses (no label left, or no pool page for the object's runs), so a
+  refused create leaves the run held.
 * [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: `erx_group_configure` and `_info` have no body until the adapter
   (M3) calls them; an IRQ object is never unbound or destroyed, which a restarted block driver would want.
 * [Low] stopgap, `liberx/backend/fiasco/entropy.c`, `vm.c`: what needs the root to read the manifest. The generator starts from the

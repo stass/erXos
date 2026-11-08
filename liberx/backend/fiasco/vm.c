@@ -13,10 +13,12 @@
  * the window's child, so unmapping that child leaves the page and its contents
  * alone. The root is always the sender, and for its own memory the receiver too.
  *
- * Every table shares one page index, keyed by address and label: a task's label
- * is its index, and an object's label lies above every task's. A shared object is a
- * table of its own over offsets, so it owns its pages as a task does, comes from
- * the pool and goes back with no second way to hold a page.
+ * Every table shares one page index, keyed by address and label. A label names one
+ * table, a task's or an object's, and is below ERX_PAGE_SIZE, so live tasks and
+ * objects together hold at most that many; the label map says which task's space a
+ * task table's label is. A shared object is a table of its own over offsets, so it
+ * owns its pages as a task does, comes from the pool and goes back with no second way
+ * to hold a page.
  *
  * A physical or contiguous object is the same table over pages that lie outside
  * the pool: a device's registers in the device window, or a run of the contiguous
@@ -58,9 +60,11 @@
 /* An object's offsets, as addresses of its own table: page zero stays an empty key. */
 #define VM_OBJECT_AREA_START	((uint64_t)ERX_PAGE_SIZE)
 #define VM_OBJECT_AREA_END	(VM_AREA_END - ERX_FIASCO_AREA_START)
-#define VM_OBJECT_LABEL(task, handle)	(ERX_FIASCO_TASKS_MAX + (task) * VM_OBJECTS_MAX + (handle))
-
-_Static_assert(VM_OBJECT_LABEL(ERX_FIASCO_TASKS_MAX, 0) <= ERX_PAGE_SIZE, "every label fits a page address's low bits");
+/* The page index's labels, which a page address's low bits hold. */
+#define VM_LABELS	((uint32_t)ERX_PAGE_SIZE)
+/* What the label map holds for a free label, and for an object's; a task's is its index plus one. */
+#define VM_LABEL_FREE	0u
+#define VM_LABEL_OBJECT	UINT32_MAX
 
 _Static_assert(VM_WINDOW_BASE % (UINT64_C(1) << VM_SUPERPAGE_ORDER) == 0,
     "the window starts on a superpage");
@@ -77,14 +81,14 @@ typedef struct vm_object {
 	uint64_t		device_base;	/* VM_OBJECT_CONTIGUOUS: offset 0's device address */
 	uint64_t		size;
 	erx_backend_vm_table_t	table;
-	erx_backend_vm_range_t	ranges[2];
 } vm_object_t;
 
 typedef struct vm_task {
 	erx_backend_vm_table_t	table;
-	erx_backend_vm_range_t	ranges[ERX_BACKEND_VM_RANGES_MAX];
 	vm_object_t		objects[VM_OBJECTS_MAX];
 } vm_task_t;
+
+_Static_assert(sizeof(vm_task_t) <= ERX_PAGE_SIZE, "a task's record fits a page of its table");
 
 static unsigned	fpage_rights(uint32_t);
 static void	vm_map(uint32_t, uintptr_t, uint64_t, uint32_t);
@@ -96,7 +100,15 @@ static void	vm_give(uintptr_t, uint64_t);
 static uintptr_t vm_run_take(uint64_t);
 static uint64_t	vm_run_free_pages(void);
 static uint64_t	window_grow(uint64_t, unsigned);
+static uintptr_t vm_record_take(void);
+static void	vm_record_give(uintptr_t);
+static uint32_t	vm_label_take(uint32_t);
+static void	vm_label_put(uint32_t);
+static vm_task_t *vm_task(uint32_t);
+static uint32_t	vm_label_task(uint32_t);
 static _Noreturn void vm_refused(const char *);
+
+const erx_backend_grow_pages_t erx_fiasco_vm_records = { .take = vm_record_take, .give = vm_record_give };
 
 static const erx_backend_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap, .take = vm_take,
     .give = vm_give, .free_pages = erx_fiasco_vm_free_pages };
@@ -110,7 +122,10 @@ static uintptr_t vm_run_window;
 static erx_fiasco_contig_t vm_contig;
 static uint64_t vm_contig_physical;
 static uint32_t vm_device_pages_used;
-static vm_task_t vm_tasks[ERX_FIASCO_TASKS_MAX];
+/* Each task's record, by its index. */
+static erx_backend_grow_table_t vm_tasks;
+/* By label: VM_LABEL_FREE, VM_LABEL_OBJECT, or the task index plus one of the task whose range table it is. */
+static uint32_t vm_label_map[VM_LABELS];
 static erx_backend_vm_page_t *vm_index;
 static size_t vm_index_slots;
 static erx_fiasco_pool_t vm_pool;
@@ -129,6 +144,50 @@ vm_give(uintptr_t window, uint64_t addr)
 	/* Below the window: a run of an object, which never joins the pool. */
 	if (window >= VM_WINDOW_BASE)
 		erx_fiasco_pool_put(&vm_pool, window);
+}
+
+static uintptr_t
+vm_record_take(void)
+{
+	return (erx_fiasco_pool_take(&vm_pool));
+}
+
+static void
+vm_record_give(uintptr_t page)
+{
+	erx_fiasco_pool_put(&vm_pool, page);
+}
+
+/* The lowest free label, now owner's, or VM_LABELS when every one is held. */
+static uint32_t
+vm_label_take(uint32_t owner)
+{
+	for (uint32_t label = 0; label < VM_LABELS; label++)
+		if (vm_label_map[label] == VM_LABEL_FREE) {
+			vm_label_map[label] = owner;
+			return (label);
+		}
+	return (VM_LABELS);
+}
+
+static void
+vm_label_put(uint32_t label)
+{
+	vm_label_map[label] = VM_LABEL_FREE;
+}
+
+/* The task whose range table holds this label: only a task's table maps, so its label's owner is a task. */
+static uint32_t
+vm_label_task(uint32_t label)
+{
+	return (vm_label_map[label] - 1);
+}
+
+/* An open task's record. */
+static vm_task_t *
+vm_task(uint32_t task)
+{
+	return (erx_backend_grow_table_at(&vm_tasks, task));
 }
 
 const char *
@@ -154,9 +213,11 @@ erx_fiasco_vm_init(void)
 	vm_index = (erx_backend_vm_page_t *)(uintptr_t)VM_WINDOW_BASE;
 	vm_index_slots = (size_t)layout.index_slots;
 	erx_backend_vm_index_init(vm_index, vm_index_slots);
-	erx_fiasco_vm_task_open(0);
 	for (uint64_t page = layout.index_pages; page < window_pages; page++)
 		erx_fiasco_pool_add(&vm_pool, (uintptr_t)(VM_WINDOW_BASE + (page << L4_PAGESHIFT)));
+	erx_backend_grow_table_init(&vm_tasks, sizeof(vm_task_t), &erx_fiasco_vm_records);
+	if (erx_fiasco_vm_task_open(0) != ERX_OK)
+		return ("memory: the pool cannot hold the root's range table");
 	return (NULL);
 }
 
@@ -172,22 +233,37 @@ erx_fiasco_vm_used_pages(void)
 	return (vm_pool.held_pages);
 }
 
-void
+int
 erx_fiasco_vm_task_open(uint32_t task)
 {
-	erx_backend_vm_table_init(&vm_tasks[task].table, task, vm_tasks[task].ranges, ERX_BACKEND_VM_RANGES_MAX, vm_index,
-	    vm_index_slots, ERX_FIASCO_AREA_START, VM_AREA_END);
+	uint32_t label;
+
+	/* A label map entry holds the task plus one, so the last two indices have none. */
+	if (task >= VM_LABEL_OBJECT - 1)
+		return (ERX_ENOMEM);
+	if (erx_backend_grow_table_room(&vm_tasks, task + 1) != ERX_OK)
+		return (ERX_ENOMEM);
+	label = vm_label_take(task + 1);
+	if (label == VM_LABELS)
+		return (ERX_ENOMEM);
+	*vm_task(task) = (vm_task_t){ 0 };
+	erx_backend_vm_table_init(&vm_task(task)->table, label, vm_index, vm_index_slots, ERX_FIASCO_AREA_START, VM_AREA_END,
+	    &erx_fiasco_vm_records);
+	return (ERX_OK);
 }
 
 void
 erx_fiasco_vm_task_close(uint32_t task)
 {
-	vm_task_t *const row = &vm_tasks[task];
+	vm_task_t *const row = vm_task(task);
 
 	erx_backend_vm_table_clear(&row->table, &vm_no_effects);
+	vm_label_put(row->table.label);
 	for (uint32_t handle = 0; handle < VM_OBJECTS_MAX; handle++) {
-		if (row->objects[handle].used)
+		if (row->objects[handle].used) {
 			erx_backend_vm_table_clear(&row->objects[handle].table, &vm_no_effects);
+			vm_label_put(row->objects[handle].table.label);
+		}
 		row->objects[handle].used = false;
 	}
 }
@@ -195,13 +271,13 @@ erx_fiasco_vm_task_close(uint32_t task)
 uintptr_t
 erx_fiasco_vm_task_window(uint32_t task, uint64_t addr)
 {
-	return (erx_backend_vm_window(&vm_tasks[task].table, addr));
+	return (erx_backend_vm_window(&vm_task(task)->table, addr));
 }
 
 /*
  * Fills a free slot's table with size bytes through these effects. An object over a
  * run names the run's first page, which vm_run_take reads; a pool object names 0. A
- * refused fill leaves the slot free.
+ * refused fill leaves the slot free and holds no label or page.
  */
 static int
 object_fill(uint32_t task, uint32_t slot, uint64_t size, const erx_backend_vm_effects_t *effects, vm_object_kind_t kind,
@@ -210,21 +286,22 @@ object_fill(uint32_t task, uint32_t slot, uint64_t size, const erx_backend_vm_ef
 	const erx_backend_vm_request_t reserve = { .op = ERX_BACKEND_VM_RESERVE, .addr = VM_OBJECT_AREA_START,
 	    .size = size, .flags = ERX_VM_FIXED };
 	const erx_backend_vm_request_t commit = { .op = ERX_BACKEND_VM_COMMIT, .addr = VM_OBJECT_AREA_START, .size = size };
-	vm_object_t *const object = &vm_tasks[task].objects[slot];
+	vm_object_t *const object = &vm_task(task)->objects[slot];
+	const uint32_t label = vm_label_take(VM_LABEL_OBJECT);
 	int status;
 
+	if (label == VM_LABELS)
+		return (ERX_ENOMEM);
 	vm_run_window = run;
-	erx_backend_vm_table_init(&object->table, VM_OBJECT_LABEL(task, slot), object->ranges,
-	    sizeof(object->ranges) / sizeof(object->ranges[0]), vm_index, vm_index_slots, VM_OBJECT_AREA_START,
-	    VM_OBJECT_AREA_END);
-
+	erx_backend_vm_table_init(&object->table, label, vm_index, vm_index_slots, VM_OBJECT_AREA_START, VM_OBJECT_AREA_END,
+	    &erx_fiasco_vm_records);
 	status = erx_backend_vm_call(&object->table, effects, &reserve, NULL);
-	if (status != ERX_OK)
-		return (status == ERX_ERANGE ? ERX_ENOMEM : status);
-	status = erx_backend_vm_call(&object->table, effects, &commit, NULL);
+	if (status == ERX_OK)
+		status = erx_backend_vm_call(&object->table, effects, &commit, NULL);
 	if (status != ERX_OK) {
 		erx_backend_vm_table_clear(&object->table, &vm_no_effects);
-		return (status);
+		vm_label_put(label);
+		return (status == ERX_ERANGE ? ERX_ENOMEM : status);
 	}
 	object->used = true;
 	object->kind = kind;
@@ -238,7 +315,7 @@ object_slot(uint32_t task)
 {
 	uint32_t slot = 0;
 
-	while (slot < VM_OBJECTS_MAX && vm_tasks[task].objects[slot].used)
+	while (slot < VM_OBJECTS_MAX && vm_task(task)->objects[slot].used)
 		slot++;
 	return (slot);
 }
@@ -301,7 +378,7 @@ erx_fiasco_vm_contiguous_create(uint32_t task, uint64_t size, uint64_t limit, ui
 	status = object_fill(task, slot, size, &vm_run_effects, VM_OBJECT_CONTIGUOUS, window);
 	if (status != ERX_OK)
 		return (status);
-	vm_tasks[task].objects[slot].device_base = vm_contig_physical + ((uint64_t)first << L4_PAGESHIFT);
+	vm_task(task)->objects[slot].device_base = vm_contig_physical + ((uint64_t)first << L4_PAGESHIFT);
 	*handle = slot;
 	return (ERX_OK);
 }
@@ -311,9 +388,9 @@ erx_fiasco_vm_object_dma_addr(uint32_t task, uint64_t handle, uint64_t offset, u
 {
 	const vm_object_t *object;
 
-	if (handle >= VM_OBJECTS_MAX || !vm_tasks[task].objects[handle].used)
+	if (handle >= VM_OBJECTS_MAX || !vm_task(task)->objects[handle].used)
 		return (ERX_EINVAL);
-	object = &vm_tasks[task].objects[handle];
+	object = &vm_task(task)->objects[handle];
 	if (object->kind != VM_OBJECT_CONTIGUOUS)
 		return (ERX_ETYPE);
 	if (offset >= object->size)
@@ -325,7 +402,7 @@ erx_fiasco_vm_object_dma_addr(uint32_t task, uint64_t handle, uint64_t offset, u
 int
 erx_fiasco_vm_object_map(uint32_t task, uint64_t handle, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
 {
-	vm_task_t *const row = &vm_tasks[task];
+	vm_task_t *const row = vm_task(task);
 
 	if (handle >= VM_OBJECTS_MAX || !row->objects[handle].used)
 		return (ERX_EINVAL);
@@ -342,7 +419,7 @@ erx_fiasco_vm_body(uint32_t task, erx_backend_vm_op_t op, uint64_t addr, uint64_
 	    .flags = op == ERX_BACKEND_VM_RESERVE ? word : 0,
 	    .prot = op == ERX_BACKEND_VM_PROTECT ? word : ERX_PROT_NONE };
 
-	return (erx_backend_vm_call(&vm_tasks[task].table, &vm_effects, &request, reserved));
+	return (erx_backend_vm_call(&vm_task(task)->table, &vm_effects, &request, reserved));
 }
 
 /*
@@ -391,9 +468,9 @@ vm_no_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 }
 
 static void
-vm_map(uint32_t task, uintptr_t window, uint64_t addr, uint32_t prot)
+vm_map(uint32_t label, uintptr_t window, uint64_t addr, uint32_t prot)
 {
-	const l4_msgtag_t tag = l4_task_map(erx_fiasco_task_cap(task), L4_BASE_TASK_CAP,
+	const l4_msgtag_t tag = l4_task_map(erx_fiasco_task_cap(vm_label_task(label)), L4_BASE_TASK_CAP,
 	    l4_fpage(window, L4_PAGESHIFT, fpage_rights(prot)), l4_map_control(addr, 0, 0));
 
 	if (l4_error(tag) < 0)
@@ -401,9 +478,9 @@ vm_map(uint32_t task, uintptr_t window, uint64_t addr, uint32_t prot)
 }
 
 static void
-vm_unmap(uint32_t task, uint64_t addr, uint32_t rights)
+vm_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 {
-	const l4_msgtag_t tag = l4_task_unmap(erx_fiasco_task_cap(task),
+	const l4_msgtag_t tag = l4_task_unmap(erx_fiasco_task_cap(vm_label_task(label)),
 	    l4_fpage(addr, L4_PAGESHIFT, fpage_rights(rights)), L4_FP_ALL_SPACES);
 
 	if (l4_error(tag) < 0)

@@ -135,7 +135,9 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes)
 		return (reason);
 	erx_fiasco_time_init();
 	erx_fiasco_entropy_init();
-	erx_fiasco_task_table_init();
+	reason = erx_fiasco_task_table_init();
+	if (reason != NULL)
+		return (reason);
 	reason = service_start();
 	if (reason != NULL)
 		return (reason);
@@ -224,7 +226,7 @@ service_main(void)
 			continue;
 		}
 		const erx_fiasco_wire_input_t input = { .label = label, .tag_label = l4_msgtag_label(tag),
-		    .words = (uint32_t)l4_msgtag_words(tag), .live_mask = erx_fiasco_task_live_mask(),
+		    .words = (uint32_t)l4_msgtag_words(tag), .task_live = erx_fiasco_task_live,
 		    .mr = (const uint64_t *)mr->mr };
 
 		decoded = erx_fiasco_wire_decode(&input);
@@ -505,12 +507,12 @@ service_thread_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *
 {
 	const uint64_t named = handle >> SERVICE_HANDLE_TASK_SHIFT;
 
-	if ((named != 0 && caller != ERX_FIASCO_TASK_ROOT) || named >= ERX_FIASCO_TASKS_MAX ||
+	if ((named != 0 && caller != ERX_FIASCO_TASK_ROOT) || named > UINT32_MAX ||
 	    (handle & SERVICE_HANDLE_INDEX_MASK) >= ERX_FIASCO_THREADS_MAX)
 		return (false);
 	*task = named != 0 ? (uint32_t)named : caller;
 	*index = (uint32_t)(handle & SERVICE_HANDLE_INDEX_MASK);
-	return (erx_fiasco_task(*task)->state == ERX_FIASCO_TASK_LIVE);
+	return (erx_fiasco_task_live(*task));
 }
 
 /*

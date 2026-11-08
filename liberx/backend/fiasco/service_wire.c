@@ -93,7 +93,7 @@ erx_fiasco_wire_decode(const erx_fiasco_wire_input_t *input)
 	const uint64_t task = input->label >> ERX_FIASCO_WIRE_LABEL_SHIFT;
 	uint32_t expected;
 
-	if (task >= 64 || ((input->live_mask >> task) & 1) == 0) {
+	if (task > UINT32_MAX || !input->task_live((uint32_t)task)) {
 		decoded.kind = ERX_FIASCO_WIRE_DROP;
 		return (decoded);
 	}

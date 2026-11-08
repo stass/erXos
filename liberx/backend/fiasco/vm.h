@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "erx/cdefs.h"
+#include "liberx/backend/core/grow_table.h"
 #include "liberx/backend/core/vm_table.h"
 #include "liberx/backend/fiasco/service_wire.h"
 
@@ -33,9 +34,14 @@ const char	*erx_fiasco_vm_init(void);
 uint64_t	erx_fiasco_vm_free_pages(void);
 /* How many pages the pool has handed out and not taken back: the root budget's used. */
 uint64_t	erx_fiasco_vm_used_pages(void);
+/* Pool pages for the service's own tables (docs/design-stopgap.md, "Table sizes"). */
+extern const erx_backend_grow_pages_t erx_fiasco_vm_records;
 
-/* Readies a task's empty range table, before the task's first page. */
-void	erx_fiasco_vm_task_open(uint32_t task);
+/*
+ * Readies a task's empty range table, before the task's first page. ERX_ENOMEM when
+ * the pool cannot hold its record or every label of the page index is held.
+ */
+int	erx_fiasco_vm_task_open(uint32_t task) ERX_WARN_UNUSED_RESULT;
 /* Gives back every page of a task and of its objects: the task's space must be gone. */
 void	erx_fiasco_vm_task_close(uint32_t task);
 /* The window page behind a task's committed address, or 0. */

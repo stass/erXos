@@ -18,7 +18,7 @@ require_relative '../fixtures/generated_tree'
 # liberx/backend/core/vm_table.c are the cores under test.
 class FiascoVmTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  CORES = %w[liberx/backend/fiasco/page_pool.c liberx/backend/core/vm_table.c].freeze
+  CORES = %w[liberx/backend/fiasco/page_pool.c liberx/backend/core/vm_table.c liberx/backend/core/grow_table.c].freeze
   DRIVER = 'test/fixtures/fiasco_vm_driver.c'
 
   # Each edits exactly one place in its core, and the driver must name what is
@@ -41,18 +41,20 @@ class FiascoVmTest < Minitest::Test
     'a raise without its map' => ['vm_table.c', '[ERX_BACKEND_PAGE_R] = { .map = ERX_PROT_R, .after = ERX_BACKEND_PAGE_R }', '[ERX_BACKEND_PAGE_R] = { .after = ERX_BACKEND_PAGE_R }', 'a page has the wrong rights'],
     'page given back still mapped' => ['vm_table.c', "[ERX_BACKEND_PAGE_RX] = {\n\t\t[ERX_BACKEND_PAGE_UNCOMMITTED] = { .drop = VM_RIGHTS_ALL, .give_back = true,", "[ERX_BACKEND_PAGE_RX] = {\n\t\t[ERX_BACKEND_PAGE_UNCOMMITTED] = { .give_back = true,", 'a page has the wrong rights'],
     'probe run left with a hole' => ['vm_table.c', "\t\t\ttable->pages[hole] = table->pages[next];\n\t\t\thole = next;\n", '', 'a page has the wrong rights'],
-    'adjacent runs do not merge' => ['vm_table.c', 'const bool joins_before = after > 0 && table->ranges[after - 1].end == start;', 'const bool joins_before = false;', 'a fixed reserve inside a run changed the count'],
+    'adjacent runs do not merge' => ['vm_table.c', 'const bool joins_before = after > 0 && run_at(table, after - 1)->end == start;', 'const bool joins_before = false;', 'a fixed reserve inside a run changed the count'],
     'reserve keeps the runs it replaces' => ['vm_table.c', 'if (plan->op == ERX_BACKEND_VM_RESERVE || plan->op == ERX_BACKEND_VM_RELEASE)', 'if (plan->op == ERX_BACKEND_VM_RELEASE)', 'a fixed reserve inside a run changed the count'],
     'reserve keeps the pages it replaces' => ['vm_table.c', "\tpages_move(table, effects, plan->start, plan->end, plan->target);\n", "\tif (plan->op != ERX_BACKEND_VM_RESERVE)\n\t\tpages_move(table, effects, plan->start, plan->end, plan->target);\n", "the pool's count does not add up"],
-    'a splitting release at capacity admitted' => ['vm_table.c', "\tif (request->op == ERX_BACKEND_VM_RELEASE && table->nranges == table->ranges_max &&\n\t    ranges_split(table, plan->start, end))\n\t\treturn (ERX_ENOMEM);\n", '', 'a splitting release passed with the table full'],
-    'a reserve at capacity admitted' => ['vm_table.c', "\tif (table->nranges + 1 > table->ranges_max)\n\t\treturn (ERX_ENOMEM);\n", '', 'a reserve passed with the table full'],
+    'a splitting release takes no room' => ['vm_table.c', "\tif (request->op == ERX_BACKEND_VM_RELEASE && ranges_split(table, plan->start, end)) {\n", "\tif (false) {\n", "a run written outside the table's room"],
+    'a reserve takes no room' => ['vm_table.c', "\treturn (plan_one_more_run(table, plan));\n", "\treturn (0);\n", "a run written outside the table's room"],
+    'a refused room ignored' => ['vm_table.c', "\terror = erx_backend_grow_table_room(&table->runs, plan.runs_room);\n\tif (error != 0)\n\t\treturn (error);\n", "\t(void)erx_backend_grow_table_room(&table->runs, plan.runs_room);\n", 'a reserve passed with the table full'],
     'an alias keeps the rights before it' => ['vm_table.c', "\t\teffects->unmap(table->label, addr + done, VM_RIGHTS_ALL);\n", '', 'an alias writable and executable at once'],
     'the index ignores the label' => ['vm_table.c', "\treturn (addr | table->label);\n", "\t(void)table;\n\treturn (addr);\n", 'two tables share a page'],
     'an alias over a committed page admitted' => ['vm_table.c', "\tif (count_takes(table, addr, end, ERX_BACKEND_PAGE_RW) != size / ERX_PAGE_SIZE)\n\t\treturn (ERX_EEXIST);\n", '', 'an alias over a committed page passed'],
     'an alias of addresses not reserved admitted' => ['vm_table.c', "\tif (!range_reserved(table, addr, end) || __builtin_add_overflow(object->area_start, offset, &first))\n", "\tif (__builtin_add_overflow(object->area_start, offset, &first))\n", 'a bad alias passed'],
-    'clearing leaves the pages' => ['vm_table.c', "\t\tapply_plan(table, effects, &plan);\n\t}\n}\n\n/* The area's lowest", "\t\t(void)plan;\n\t\t(void)effects;\n\t\ttable->nranges--;\n\t}\n}\n\n/* The area's lowest", 'clearing one table reached'],
-    'a free range too small accepted' => ['vm_table.c', 'if (gap <= table->ranges[run].start && table->ranges[run].start - gap >= size) {', 'if (gap <= table->ranges[run].start && table->ranges[run].start - gap > 0) {', 'a non-fixed reserve landed wrong']
+    'clearing leaves the pages' => ['vm_table.c', "\t\tapply_plan(table, effects, &plan);\n\t}\n\terx_backend_grow_table_clear", "\t\t(void)plan;\n\t\t(void)effects;\n\t\ttable->nranges--;\n\t}\n\terx_backend_grow_table_clear", 'clearing one table reached'],
+    'a free range too small accepted' => ['vm_table.c', 'if (gap <= range->start && range->start - gap >= size) {', 'if (gap <= range->start && range->start - gap > 0) {', 'a non-fixed reserve landed wrong'],
   }.freeze
+  MEMORY_ERRORS = ['a splitting release takes no room', 'a reserve takes no room'].freeze
 
   def setup
     @directory = Dir.mktmpdir('erx-fiasco-vm-')
@@ -76,7 +78,7 @@ class FiascoVmTest < Minitest::Test
 
   MUTANTS.each do |name, (core, original, replacement, diagnostic)|
     define_method("test_the_driver_catches_#{name.tr(' ', '_')}") do
-      assert_includes driver_failure(mutant(name, core, original, replacement)), diagnostic
+      assert_named driver_failure(mutant(name, core, original, replacement)), name, diagnostic
     end
   end
 
@@ -102,6 +104,16 @@ class FiascoVmTest < Minitest::Test
   end
 
   private
+
+  # Under a sanitizer, a mutant whose bug is a memory error is named first by the
+  # sanitizer's report, which counts as the driver naming it.
+  SANITIZER_REPORT = /AddressSanitizer|runtime error:/
+
+  def assert_named(output, name, diagnostic)
+    return if !@sanitizer_flags.empty? && MEMORY_ERRORS.include?(name) && output.match?(SANITIZER_REPORT)
+
+    assert_includes output, diagnostic
+  end
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 

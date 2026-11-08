@@ -50,11 +50,16 @@ typedef struct erx_fiasco_task {
 	erx_log_rate_t		 log_rate;	/* what its erx_debug_log lines have cost, zero at its start */
 } erx_fiasco_task_t;
 
+/*
+ * The table is pool pages that it takes as it fills (docs/design-stopgap.md, "Table
+ * sizes"), so a row exists for every index below its capacity; erx_fiasco_task gives
+ * the row of an index the caller knows to have one, a live task's or a decoded space's.
+ */
 erx_fiasco_task_t	*erx_fiasco_task(uint32_t task);
-/* The bit of each live task: what the decoder asks about a gate's label. */
-uint64_t	erx_fiasco_task_live_mask(void);
-/* Marks the root live, once its window is up. */
-void		erx_fiasco_task_table_init(void);
+/* Whether the index names a live task: what the decoder asks about a gate's label. */
+bool		erx_fiasco_task_live(uint32_t task);
+/* Marks the root live, once its window is up; NULL, or why the boot cannot go on. */
+const char	*erx_fiasco_task_table_init(void);
 
 /* A task's capabilities in the root. */
 uint64_t	erx_fiasco_task_thread_cap(uint32_t task, uint32_t index);
@@ -81,7 +86,7 @@ int	erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space
 int	erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start);
 int	erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status);
 int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status);
-/* A space handle's two directions: decode is false for a handle that names no child of the root. */
+/* A space handle's two directions: decode is false for a handle that names no row of a child of the root. */
 uint64_t	erx_fiasco_task_space_encode(uint32_t task);
 bool	erx_fiasco_task_space_decode(uint64_t space, uint32_t *task);
 int	erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, uint64_t *mem);

@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/page_pool.h"
@@ -33,9 +35,10 @@
 #define FEW_PAGES	4u
 #define RANDOM_AREA_PAGES 256u
 #define POOL_PAGES	96u
-#define RANGES_MAX	64u
 #define SLOTS		256u
-#define FULL_RANGES	8u
+/* A full table of runs: one page of them, with gaps too wide for a page to touch either side. */
+#define FULL_RANGES	((unsigned)(PAGE / sizeof(erx_backend_vm_range_t)))
+#define FULL_AREA_PAGES	(6u * FULL_RANGES)
 /* Rights by themselves: read is ERX_PROT_R. */
 #define RIGHT_W		2u
 #define RIGHT_X		4u
@@ -60,7 +63,9 @@ static mmu_page_t	mmu[RANDOM_AREA_PAGES];
 static uint8_t		*window_memory;
 static erx_fiasco_pool_t pool;
 static erx_backend_vm_table_t table;
-static erx_backend_vm_range_t ranges[RANGES_MAX];
+/* The record pages the runs may still take, and those they hold. */
+static uint32_t		records_left = UINT32_MAX;
+static uint32_t		records_held;
 static erx_backend_vm_page_t index_slots[SLOTS];
 static const char	*current_case = "setup";
 static unsigned long	 checks;
@@ -111,6 +116,29 @@ fake_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 		*page = (mmu_page_t){ 0 };
 }
 
+/* A record page from the host, full of garbage so a page the core does not zero shows. */
+static uintptr_t
+fake_record_take(void)
+{
+	void *page = NULL;
+
+	if (records_left == 0 || posix_memalign(&page, (size_t)PAGE, (size_t)PAGE) != 0)
+		return (0);
+	records_left--;
+	records_held++;
+	memset(page, 0xa5, (size_t)PAGE);
+	return ((uintptr_t)page);
+}
+
+static void
+fake_record_give(uintptr_t page)
+{
+	if (records_held == 0)
+		fail("a record page given back twice", page);
+	records_held--;
+	free((void *)page);
+}
+
 static uintptr_t
 fake_take(uint64_t addr)
 {
@@ -133,16 +161,18 @@ fake_free_pages(void)
 
 static const erx_backend_vm_effects_t effects = { .map = fake_map, .unmap = fake_unmap, .take = fake_take,
     .give = fake_give, .free_pages = fake_free_pages };
+static const erx_backend_grow_pages_t records = { .take = fake_record_take, .give = fake_record_give };
 
 static void
 world_reset(unsigned pool_pages)
 {
 	memset(mmu, 0, sizeof(mmu));
 	memset(&pool, 0, sizeof(pool));
-	memset(ranges, 0xa5, sizeof(ranges));
+	records_left = UINT32_MAX;
+	erx_backend_grow_table_clear(&table.runs);
 	erx_backend_vm_index_init(index_slots, SLOTS);
-	erx_backend_vm_table_init(&table, 0, ranges, RANGES_MAX, index_slots, SLOTS, AREA_START,
-	    AREA_START + RANDOM_AREA_PAGES * PAGE);
+	erx_backend_vm_table_init(&table, 0, index_slots, SLOTS, AREA_START,
+	    AREA_START + RANDOM_AREA_PAGES * PAGE, &records);
 	for (unsigned page = 0; page < pool_pages; page++)
 		erx_fiasco_pool_add(&pool, (uintptr_t)(window_memory + page * PAGE));
 }
@@ -268,12 +298,29 @@ model_pages_needed(const model_page_t *model, size_t first, size_t count, int ta
 	return (needed);
 }
 
+/* The table's runs, read through the table as the core keeps them. */
+static void
+runs_copy(erx_backend_vm_range_t *out)
+{
+	for (uint32_t run = 0; run < table.nranges; run++)
+		out[run] = *(const erx_backend_vm_range_t *)erx_backend_grow_table_at(&table.runs, run);
+}
+
+static bool
+runs_same(const erx_backend_vm_range_t *before)
+{
+	for (uint32_t run = 0; run < table.nranges; run++)
+		if (memcmp(&before[run], erx_backend_grow_table_at(&table.runs, run), sizeof(*before)) != 0)
+			return (false);
+	return (true);
+}
+
 /* One call, its model and the bytes of a refusal, then the whole world's check. */
 static void
 call_and_check(model_page_t *model, size_t npages, erx_backend_vm_op_t op, size_t first, size_t count,
     uint32_t flags, int target, uint64_t pool_total)
 {
-	static erx_backend_vm_range_t ranges_before[RANGES_MAX];
+	static erx_backend_vm_range_t ranges_before[RANDOM_AREA_PAGES];
 	static erx_backend_vm_page_t index_before[SLOTS];
 	static mmu_page_t mmu_before[RANDOM_AREA_PAGES];
 	const uint64_t addr = AREA_START + first * PAGE;
@@ -295,7 +342,7 @@ call_and_check(model_page_t *model, size_t npages, erx_backend_vm_op_t op, size_
 	else if (model_pages_needed(model, first, count, target) > pool.free_pages)
 		expected = ERX_ENOMEM;
 
-	memcpy(ranges_before, ranges, sizeof(ranges));
+	runs_copy(ranges_before);
 	memcpy(index_before, index_slots, sizeof(index_slots));
 	memcpy(mmu_before, mmu, sizeof(mmu));
 	error = call(op, addr, size, flags, prot_of(target), NULL);
@@ -303,7 +350,7 @@ call_and_check(model_page_t *model, size_t npages, erx_backend_vm_op_t op, size_
 		fail("the call's result differs", (uint64_t)(int64_t)error);
 	if (error != 0) {
 		/* A refused call changes nothing at all. */
-		if (memcmp(ranges_before, ranges, sizeof(ranges)) != 0 ||
+		if (!runs_same(ranges_before) ||
 		    memcmp(index_before, index_slots, sizeof(index_slots)) != 0 ||
 		    memcmp(mmu_before, mmu, sizeof(mmu)) != 0 || nranges_before != table.nranges ||
 		    pool_before.head != pool.head || pool_before.free_pages != pool.free_pages)
@@ -441,7 +488,8 @@ check_refusals(void)
 
 	/* A full table, of runs with gaps too wide for a page to touch either side. */
 	world_reset(POOL_PAGES);
-	table.ranges_max = FULL_RANGES;
+	erx_backend_vm_table_init(&table, 0, index_slots, SLOTS, AREA_START, AREA_START + FULL_AREA_PAGES * PAGE, &records);
+	records_left = 2;
 	for (unsigned run = 0; run < FULL_RANGES; run++)
 		if (call(ERX_BACKEND_VM_RESERVE, AREA_START + 6 * run * PAGE, 3 * PAGE, ERX_VM_FIXED, 0, NULL) != 0)
 			fail("filling the table failed", run);
@@ -507,13 +555,10 @@ check_random_calls(unsigned seed, unsigned calls)
 
 		switch (rand() % 6) {
 		case 5:
-			if (table.nranges + 2 < RANGES_MAX)
-				call_lowest_fit(model, count);
+			call_lowest_fit(model, count);
 			break;
 		case 0:
-			/* Too many separate runs refuses for its own reason: keep clear of it. */
-			if (table.nranges + 2 < RANGES_MAX)
-				call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_RESERVE, first, count, ERX_VM_FIXED, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
+			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_RESERVE, first, count, ERX_VM_FIXED, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
 			break;
 		case 1:
 			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_COMMIT, first, count, 0, ERX_BACKEND_PAGE_RW, POOL_PAGES);
@@ -522,8 +567,7 @@ check_random_calls(unsigned seed, unsigned calls)
 			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_DECOMMIT, first, count, 0, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
 			break;
 		case 3:
-			if (table.nranges + 2 < RANGES_MAX)
-				call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_RELEASE, first, count, 0, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
+			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_RELEASE, first, count, 0, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
 			break;
 		default:
 			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_PROTECT, first, count, 0, target, POOL_PAGES);
@@ -623,7 +667,6 @@ table_call(erx_backend_vm_table_t *which, erx_backend_vm_op_t op, uint64_t addr,
 static void
 check_labels(void)
 {
-	static erx_backend_vm_range_t ranges_a[4], ranges_b[4], ranges_object[2];
 	erx_backend_vm_table_t a, b, object;
 	uintptr_t window_a, window_b, window_object;
 	uint64_t full;
@@ -632,9 +675,9 @@ check_labels(void)
 	world_reset(POOL_PAGES);
 	memset(label_rights, 0, sizeof(label_rights));
 	full = pool.free_pages;
-	erx_backend_vm_table_init(&a, 1, ranges_a, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
-	erx_backend_vm_table_init(&b, 2, ranges_b, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
-	erx_backend_vm_table_init(&object, 3, ranges_object, 2, index_slots, SLOTS, PAGE, PAGE + 16 * PAGE);
+	erx_backend_vm_table_init(&a, 1, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE, &records);
+	erx_backend_vm_table_init(&b, 2, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE, &records);
+	erx_backend_vm_table_init(&object, 3, index_slots, SLOTS, PAGE, PAGE + 16 * PAGE, &records);
 	if (table_call(&a, ERX_BACKEND_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
 	    table_call(&b, ERX_BACKEND_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
 	    table_call(&a, ERX_BACKEND_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
@@ -767,11 +810,27 @@ check_contig(unsigned seed)
 	}
 }
 
+/*
+ * A run written past the room the table took lands on no page: the core's record
+ * lookup gives NULL there. Name it, since a fault prints nothing of its own.
+ */
+static void
+roomless_write(int signal_number)
+{
+	static const char line[] = "a run written outside the table's room\n";
+
+	(void)signal_number;
+	(void)write(2, line, sizeof(line) - 1);
+	_exit(1);
+}
+
 int
 main(int argc, char **argv)
 {
 	const unsigned seed = argc > 1 ? (unsigned)strtoul(argv[1], NULL, 10) : 20261104u;
 
+	signal(SIGSEGV, roomless_write);
+	signal(SIGBUS, roomless_write);
 	if (posix_memalign((void **)&window_memory, ERX_PAGE_SIZE, (size_t)(POOL_PAGES * PAGE)) != 0)
 		return (1);
 	check_pool();
@@ -783,6 +842,9 @@ main(int argc, char **argv)
 	check_random_calls(seed + 1, 20000);
 	check_steps_table();
 	check_labels();
+	erx_backend_grow_table_clear(&table.runs);
+	if (records_held != 0)
+		fail("record pages left after every table was cleared", records_held);
 	printf("ok: %lu checks\n", checks);
 	free(window_memory);
 	return (0);

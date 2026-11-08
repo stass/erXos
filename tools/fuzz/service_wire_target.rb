@@ -3,8 +3,9 @@
 # frozen_string_literal: true
 
 # The root service's decoder. An input is the gate label (eight bytes), the tag's
-# label (eight), the tag's word count, the count of live tasks, then message words,
-# in the order tools/fuzz/service_wire_fuzz.c reads them.
+# label (eight), the tag's word count, the live tasks' pattern of eight bits (bit n: every
+# task index that is n modulo 8, below 4,096, is live), then message words, in the order
+# tools/fuzz/service_wire_fuzz.c reads them.
 message = ->(label, tag, words, tasks, *mr) { [label, tag, words, tasks, *mr].pack('Qq<CCQ*') }
 Erx::PackFuzz.declare_target(
   sources: ['liberx/backend/fiasco/service_wire.c'],
@@ -19,6 +20,9 @@ Erx::PackFuzz.declare_target(
      message.call(0, 2, 6, 1, 0, 0, 0, 0, 0, 5),
      message.call(0, 3, 2, 1, 128, 0),
      message.call(0, 200, 2, 1),
-     message.call(0, 1, 1, 1, 0)]
+     message.call(0, 1, 1, 1, 0),
+     message.call(100 << 2, 3, 2, 0x10, 0, 1),
+     message.call(5000 << 2, 3, 2, 0xff, 0, 1),
+     message.call((1 << 34) << 2, 3, 2, 0xff, 0, 1)]
   )
 )

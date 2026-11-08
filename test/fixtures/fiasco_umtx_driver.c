@@ -450,12 +450,19 @@ run_race(void)
 
 /* wire */
 
+/* Only the root is live. */
+static bool
+wire_root_live(uint32_t task)
+{
+	return (task == 0);
+}
+
 static erx_fiasco_wire_decoded_t
 decode(uint64_t label, int64_t tag_label, uint32_t words, uint64_t caller)
 {
 	uint64_t mr[63] = { caller, 7, 8, 9, 10, 11 };
 	const erx_fiasco_wire_input_t input = { .label = label, .tag_label = tag_label, .words = words,
-	    .live_mask = 1, .mr = mr };
+	    .task_live = wire_root_live, .mr = mr };
 
 	return (erx_fiasco_wire_decode(&input));
 }

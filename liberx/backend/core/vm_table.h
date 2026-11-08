@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "erx/cdefs.h"
+#include "liberx/backend/core/grow_table.h"
 
 /*
  * The range table of a task (docs/design-stopgap.md, "The range table" and
@@ -41,9 +42,6 @@
  * for the host; its caller runs one call at a time.
  */
 
-/* How many separate reserved runs a task may hold; more is ERX_ENOMEM. */
-#define ERX_BACKEND_VM_RANGES_MAX	4096u
-
 /* A reserved run of addresses, page-aligned; end is exclusive. */
 typedef struct erx_backend_vm_range {
 	uint64_t	start;
@@ -64,9 +62,8 @@ typedef struct erx_backend_vm_page {
 } erx_backend_vm_page_t;
 
 typedef struct erx_backend_vm_table {
-	erx_backend_vm_range_t	*ranges;
-	size_t			 nranges;
-	size_t			 ranges_max;
+	erx_backend_grow_table_t runs;		/* erx_backend_vm_range_t, sorted and disjoint */
+	uint32_t		 nranges;	/* runs in use, from the first */
 	erx_backend_vm_page_t	*pages;
 	size_t			 pages_mask;	/* slots - 1; slots are a power of two */
 	uint32_t		 label;		/* below ERX_PAGE_SIZE, and no other table's */
@@ -117,6 +114,7 @@ typedef struct erx_backend_vm_plan {
 	uint64_t		start;
 	uint64_t		end;
 	uint64_t		pages_needed;
+	uint32_t		runs_room;	/* runs the table must have room for first, or 0 */
 } erx_backend_vm_plan_t;
 
 /*
@@ -153,13 +151,14 @@ void	erx_backend_vm_index_init(erx_backend_vm_page_t *, size_t);
 
 /*
  * An empty table of this label over [area_start, area_end), in an index whose pages
- * hold none of the label's. The caller keeps both arrays for the table's life. A
+ * hold none of the label's. The caller keeps the index and records for the table's
+ * life: the runs take pages from records as they fill, until the table is cleared. A
  * reserve's search starts on ERX_PAGE_SIZE boundaries; a caller whose own pages are
  * larger sets the table's placement to that size, a power of two, before its first
  * reserve.
  */
-void	erx_backend_vm_table_init(erx_backend_vm_table_t *, uint32_t, erx_backend_vm_range_t *,
-	    size_t, erx_backend_vm_page_t *, size_t, uint64_t, uint64_t);
+void	erx_backend_vm_table_init(erx_backend_vm_table_t *, uint32_t, erx_backend_vm_page_t *, size_t, uint64_t,
+	    uint64_t, const erx_backend_grow_pages_t *records);
 
 erx_backend_vm_steps_t	erx_backend_vm_steps(erx_backend_vm_state_t, erx_backend_vm_state_t);
 
@@ -172,8 +171,8 @@ erx_backend_vm_steps_t	erx_backend_vm_steps(erx_backend_vm_state_t, erx_backend_
  *   ERX_ERANGE  a range outside the area, wrapping included, or a protect that
  *               meets a hole;
  *   ERX_EEXIST  a reserve with ERX_VM_NOREPLACE that overlaps a run;
- *   ERX_ENOMEM  no room for a reserve's run or for a release's split, or no free
- *               range of the size.
+ *   ERX_ENOMEM  a reserve, or a release that splits a run, with the runs at their
+ *               table's limit, or no free range of the size.
  *
  * Commit and decommit act on the reserved pages in the range and pass over holes.
  */
@@ -182,7 +181,8 @@ int	erx_backend_vm_plan(const erx_backend_vm_table_t *, const erx_backend_vm_req
 
 /*
  * Carries out a request whole, or refuses it with nothing changed: the plan's
- * refusals, and ERX_ENOMEM when the pool holds fewer pages than the plan needs.
+ * refusals, and ERX_ENOMEM when the records cannot give a page for a run the call
+ * adds or the pool holds fewer pages than the plan needs.
  * A reserve reports its address in the last argument, which it may leave NULL.
  */
 int	erx_backend_vm_call(erx_backend_vm_table_t *,
@@ -207,7 +207,7 @@ uintptr_t	erx_backend_vm_window(const erx_backend_vm_table_t *, uint64_t);
 int	erx_backend_vm_map_object(const erx_backend_vm_table_t *, const erx_backend_vm_table_t *,
 	    const erx_backend_vm_effects_t *, uint64_t, uint64_t, uint64_t, uint32_t) ERX_WARN_UNUSED_RESULT;
 
-/* Releases every run, so the table's pages go back to the pool and its label is free. */
+/* Releases every run, so the table's pages and its runs' pages go back and its label is free. */
 void	erx_backend_vm_table_clear(erx_backend_vm_table_t *, const erx_backend_vm_effects_t *);
 
 #endif /* ERX_BACKEND_VM_TABLE_H */

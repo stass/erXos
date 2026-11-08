@@ -6,6 +6,7 @@
 #ifndef ERX_FIASCO_SERVICE_WIRE_H
 #define ERX_FIASCO_SERVICE_WIRE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -15,8 +16,6 @@
  */
 
 #define ERX_FIASCO_THREADS_MAX		128u
-/* How many tasks live at once, the root the first. */
-#define ERX_FIASCO_TASKS_MAX		8u
 /* Fiasco's fault protocols; service.c pins these to Fiasco's own. */
 #define ERX_FIASCO_WIRE_PAGE_FAULT	(-2)
 #define ERX_FIASCO_WIRE_EXCEPTION	(-5)
@@ -41,7 +40,7 @@ typedef struct erx_fiasco_wire_input {
 	uint64_t	 label;
 	int64_t		 tag_label;
 	uint32_t	 words;		/* the tag's count; mr holds at least this many */
-	uint64_t	 live_mask;	/* bit n: task n is live */
+	bool		(*task_live)(uint32_t task);	/* whether a gate's label names a live task */
 	const uint64_t	*mr;
 } erx_fiasco_wire_input_t;
 

@@ -57,13 +57,15 @@ static void	vm_unmap(uint32_t, uint64_t, uint32_t);
 static uintptr_t vm_take(uint64_t);
 static void	vm_give(uintptr_t, uint64_t);
 static uint64_t	vm_free_count(void);
+static uintptr_t vm_record_take(void);
+static void	vm_record_give(uintptr_t);
 
 static const erx_backend_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap, .take = vm_take,
     .give = vm_give, .free_pages = vm_free_count };
+static const erx_backend_grow_pages_t vm_records = { .take = vm_record_take, .give = vm_record_give };
 
 static pthread_once_t vm_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t vm_lock = PTHREAD_MUTEX_INITIALIZER;
-static erx_backend_vm_range_t vm_ranges[ERX_BACKEND_VM_RANGES_MAX];
 static erx_backend_vm_table_t vm_table;
 static uint64_t vm_free;
 static uint64_t vm_area;
@@ -87,6 +89,21 @@ vm_map_host(uint64_t bytes, int prot)
 	return (memory);
 }
 
+/* The range table's own pages come from the host, outside the pool's count. */
+static uintptr_t
+vm_record_take(void)
+{
+	void *page = NULL;
+
+	return (posix_memalign(&page, (size_t)PAGE, (size_t)PAGE) == 0 ? (uintptr_t)page : 0);
+}
+
+static void
+vm_record_give(uintptr_t page)
+{
+	free((void *)page);
+}
+
 static void
 vm_init(void)
 {
@@ -98,8 +115,8 @@ vm_init(void)
 	vm_page_bytes = vm_map_host(VM_AREA_BYTES / PAGE, PROT_READ | PROT_WRITE);
 	vm_host_rights = vm_map_host(VM_AREA_BYTES / vm_host_page, PROT_READ | PROT_WRITE);
 	erx_backend_vm_index_init(index, (size_t)layout.index_slots);
-	erx_backend_vm_table_init(&vm_table, 0, vm_ranges, ERX_BACKEND_VM_RANGES_MAX, index, (size_t)layout.index_slots, vm_area,
-	    vm_area + VM_AREA_BYTES);
+	erx_backend_vm_table_init(&vm_table, 0, index, (size_t)layout.index_slots, vm_area,
+	    vm_area + VM_AREA_BYTES, &vm_records);
 	vm_table.placement = vm_host_page;
 	vm_free = VM_POOL_PAGES;
 }
@@ -123,7 +140,7 @@ vm_runs_note(void)
 	if (vm_runs_last > vm_runs_high)
 		vm_runs_high = vm_runs_last;
 	(void)snprintf(line, sizeof(line), "erx: hosted: range table: runs %zu high %zu of %u committed_pages %llu\n",
-	    vm_runs_last, vm_runs_high, ERX_BACKEND_VM_RANGES_MAX, (unsigned long long)committed);
+	    vm_runs_last, vm_runs_high, erx_backend_grow_table_limit(&vm_table.runs), (unsigned long long)committed);
 	erx_hosted_note(line);
 }
 
