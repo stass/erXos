@@ -720,8 +720,10 @@ designed. It maps the format onto the file protocol as follows:
   `efbig`; a directory holds at most 65,536 entries, as the specification
   bounds it, and an `lcreate` or `mkdir` beyond fails with `enospc`.
   There are no symbolic links, hard links, device nodes or extended
-  attributes: `symlink`, `link` and `mknod` fail with `eperm`, as Linux's
-  `vfat` answers them, and `xattrcreate` with `enotsup`.
+  attributes: `symlink` and `link` fail with `enotsup` (FreeBSD's `EOPNOTSUPP`,
+  the same number) and `mknod` with `einval`, as FreeBSD's `msdosfs`
+  answers them, and `xattrcreate`
+  with `enotsup`.
 * **Durability.** FAT keeps no journal, so the server orders its writes
   with flushes, which the block driver passes to the medium, and relies on
   a sector being written whole, which a medium that tears a write breaks
@@ -1118,7 +1120,7 @@ domain service restarts the domain, and the clients' windows return.
 
 The littlefs port: a crash injected into littlefs mid-write, after which
 the port restarts, the block driver and every other window live on, the
-volume mounts, and `fsck` in the oracle guest finds a consistent volume
+volume mounts, and littlefs's own mount check finds a consistent volume
 whose last acknowledged `fsync` is present; a port that stops answering,
 ended at the owner's deadline with the same outcome.
 
