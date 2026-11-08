@@ -50,4 +50,45 @@ module ManifestContextFixture
                      'license' => 'BSD-2-Clause', 'evidence' => 'fixture',
                      'status' => 'permanent', 'notice' => "original\xffnotice".b }] }
   end
+
+  # A development manifest's text with two configured domains of the domain
+  # release app and the runtime emu (domain_arguments), alpha and beta, beta started
+  # by the rescue configuration; a service alpha serves, their introduction and the
+  # data window held by alpha. The system principal's quota covers them.
+  def domain_source(plain)
+    domain = lambda do |name, flags|
+      "domain #{name}\n  principal @principal.system\n  limits @limits.app\n  kind service\n  flags #{flags}\n" \
+        "  runtime @artifact.emu\n  release @artifact.app\n  restarts 3\n  restart_period_s 5\n  args \"-x y\"\n"
+    end
+    plain.sub("  domains 0\n", "  domains 2\n").sub('max_domains 0', 'max_domains 4')
+         .sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
+      "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
+      "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
+      "  peer_held 4096\n  peer_held_total 4096\n" + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
+      "service log\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
+  end
+
+  # A planner that plans every configured domain, for checks that test the rest.
+  def accepting_planner = ->(view) { view.fetch('domains').map { 0 } }
+
+  # The same pack with a domain release, app, of two files under domains/app/ and the
+  # domain runtime image, runtimes/emu, as ProductionImage.artifacts names them: the
+  # archive's paths sort domains/ first, then runtimes/, then system/.
+  def domain_arguments(codec)
+    base = arguments(codec)
+    file = codec.member('entry_kind', 'file')
+    added = [
+      { 'path' => 'domains/app/bin/start.boot', 'kind' => file, 'flags' => 0,
+        'source' => { 'kind' => 'artifact', 'id' => 'app-boot', 'sha256' => 'b' * 64 } },
+      { 'path' => 'domains/app/lib/kernel.beam', 'kind' => file, 'flags' => 0,
+        'source' => { 'kind' => 'artifact', 'id' => 'app-kernel', 'sha256' => 'c' * 64 } },
+      { 'path' => 'runtimes/emu', 'kind' => codec.member('entry_kind', 'image'), 'flags' => 0,
+        'source' => { 'kind' => 'artifact', 'id' => 'domain-runtime', 'sha256' => 'd' * 64 }, 'image' => image(codec) }
+    ]
+    root = added.size + base.fetch(:root_entry)
+    base.merge(catalog: added + base.fetch(:catalog), root_entry: root,
+               artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root },
+                            'emu' => { 'kind' => 'executable', 'entry' => 2 },
+                            'app' => { 'kind' => 'release', 'entry' => 0, 'files' => 2 } }.merge(images))
+  end
 end

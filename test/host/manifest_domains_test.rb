@@ -1,0 +1,331 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'json'
+require 'minitest/autorun'
+require_relative '../../tools/lib/erx/manifest'
+require_relative '../fixtures/manifest_context'
+
+# Phase 1's manifest check over configured domains (docs/design-stopgap.md, "The
+# Phase 1 manifest check"): the kept properties a domain row brings, each with a
+# seeded violation, and the refusals it adds, each with a seeded record. Every seed
+# edits the real development manifest with two configured domains, alpha and beta,
+# added, so a seed fails for its own reason. A recording planner stands in for the
+# domain library's host build, which test/host/dom_planner_test.rb runs.
+class ManifestDomainsTest < Minitest::Test
+  APP_LIMITS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
+               "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
+               "  peer_held 4096\n  peer_held_total 4096\n"
+  UNCAPPED = "share wide\n  quota_ns uncapped\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 1000\n" \
+             "  capacity_first 0\n  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n"
+
+  # Each domain's status, in row order; [] plans every domain.
+  class RecordingPlanner
+    attr_reader :views
+
+    def initialize(statuses = [])
+      @statuses = statuses
+      @views = []
+    end
+
+    def call(view)
+      @views << view
+      view.fetch('domains').each_index.map { |index| @statuses.fetch(index, 0) }
+    end
+  end
+
+  def self.domain(name, flags: 'none', kind: 'service', runtime: '@artifact.emu', release: '@artifact.app')
+    "domain #{name}\n  principal @principal.system\n  limits @limits.app\n  kind #{kind}\n  flags #{flags}\n" \
+      "  runtime #{runtime}\n  release #{release}\n  restarts 3\n  restart_period_s 5\n"
+  end
+
+  def setup
+    root = File.expand_path('../..', __dir__)
+    @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)))
+    @plain = File.binread(File.join(root, 'config/manifest/qemu-virt-development.txt'))
+    @platform = JSON.parse(File.read(File.join(root, 'config/platforms/qemu-virt.json')))
+    @source = with_domains(self.class.domain('alpha'), self.class.domain('beta', flags: 'rescue'))
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: @platform))
+    @planner = RecordingPlanner.new
+  end
+
+  # The rows, with the system principal's domain quota covering them, and max_domains
+  # covering that quota and the rows, as properties 12 and 4 ask.
+  def with_domains(*rows)
+    @plain.sub("  domains 0\n", "  domains #{rows.size}\n").sub('max_domains 0', "max_domains #{2 * rows.size}") +
+      APP_LIMITS + rows.join
+  end
+
+  def admit(source = @source, planner: @planner)
+    Erx::Manifest.admit(source: source, codec: @codec, context: @context, planner: planner)
+  end
+
+  def refused(klass, property, field, source = @source, planner: @planner, message: nil)
+    error = assert_raises(klass) { admit(source, planner: planner) }
+    assert_equal property, error.property, error.message
+    assert_equal field, error.field, error.message
+    assert_match message, error.message if message
+    error
+  end
+
+  def service(name, server)
+    "service #{name}\n  server #{server}\n  interface 1\n"
+  end
+
+  def facet(name, grantee, service)
+    "facet #{name}\n  grantee #{grantee}\n  service #{service}\n  operations none\n  max_request 1\n" \
+      "  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
+  end
+
+  def rows(view, table) = view.count(table).times.map { |index| view.fetch(table, index) }
+
+  def test_configured_domains_reach_the_encoded_manifest_in_name_order
+    view = @codec.open('manifest', admit(@source.sub('domain alpha', 'domain gamma')).bytes)
+    domains = rows(view, 'domains')
+    assert_equal %w[beta gamma], domains.map { |row| view.string(row.fetch('name')) }
+    assert_equal [[2, 0, 2]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
+    assert_equal [@codec.member('mf_domain_flags', 'rescue'), 0], domains.map { |row| row.fetch('flags') }
+    assert_equal [[3, 5]] * 2, domains.map { |row| row.values_at('restarts', 'restart_period_s') }
+    assert_equal [0, 1], rows(view, 'boot_order').map { |row| row.fetch('domain') }
+    assert_equal 4, view.header.fetch('max_domains')
+  end
+
+  def test_the_report_counts_the_planned_domains
+    report = admit.report
+    assert_equal 'stopgap', report.fetch('mode')
+    assert_equal 2, report.fetch('child_plan_instances')
+  end
+
+  # Property 12's view: the machine just booted, its principals numbered from 1, the
+  # pack's files and each row with its profile resolved.
+  def test_the_planner_sees_every_row_against_the_booted_machine
+    admit
+    view = @planner.views.fetch(0)
+    assert_equal({ 'max_domains' => 4, 'max_connections' => 4, 'system_lane' => 4096, 'system_reserve' => 250 },
+                 view.fetch('machine').except('system_grant'))
+    assert_equal [1, 1], view.fetch('domains').map { |row| row.fetch('principal') }
+    assert_equal [[4_194_304, 1_048_576, 0, 2]] * 2,
+                 view.fetch('domains').map { |row| row.values_at('memory', 'outer', 'spaces', 'connections') }
+    assert_equal 4096, view.fetch('domains').first.fetch('runtime_limits').fetch('peer_held_total')
+    assert_equal @context.catalog.size, view.fetch('files').size
+    assert_equal [1, 0], view.fetch('files').values_at(2, 3).map { |file| file.fetch('image_ok') }
+  end
+
+  def test_a_manifest_without_domains_needs_no_planner
+    plain = Erx::Manifest.admit(source: @plain, codec: @codec, context: @context, planner: nil)
+    assert_equal 0, plain.report.fetch('child_plan_instances')
+  end
+
+  # Property 1: a unit's holder is the system domain or a configured domain.
+  def test_a_unit_held_by_a_configured_domain_is_admitted
+    source = @source.sub("placement \"block\"\n  holder system", "placement \"block\"\n  holder @domain.beta")
+    view = @codec.open('manifest', admit(source).bytes)
+    assert_includes rows(view, 'units').map { |row| row.fetch('holder') }, 1
+  end
+
+  def test_a_unit_held_by_no_configured_domain_is_refused
+    source = @source.sub("placement \"block\"\n  holder system", "placement \"block\"\n  holder @domain.absent")
+    refused(Erx::Manifest::Invalid, 1, 'unit.holder', source)
+  end
+
+  # Property 2: services, facets and introductions name what the manifest contains.
+  def test_a_service_of_a_configured_domain_is_admitted
+    view = @codec.open('manifest', admit(@source + service('log', '@domain.alpha')).bytes)
+    assert_equal [0], rows(view, 'services').map { |row| row.fetch('server') }
+  end
+
+  def test_a_service_of_no_configured_domain_is_refused
+    refused(Erx::Manifest::Invalid, 2, 'service.server', @source + service('log', '@domain.absent'))
+  end
+
+  def test_a_facet_naming_no_service_is_refused
+    refused(Erx::Manifest::Invalid, 2, 'facet.service', @source + facet('f', '@domain.alpha', '@service.absent'))
+  end
+
+  def test_a_facet_granted_to_no_configured_domain_is_refused
+    source = @source + service('log', 'system') + facet('f', 'system', '@service.log')
+    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', source)
+  end
+
+  # A facet's operations and parameters resolve against its service's generated
+  # declarations, which the packer does not read in Phase 1.
+  def test_a_facet_on_a_known_service_is_refused_naming_its_milestone
+    source = @source + service('log', 'system') + facet('f', '@domain.alpha', '@service.log')
+    refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', source, message: /M5/)
+  end
+
+  def test_introductions_are_written_once_lower_index_first
+    view = @codec.open('manifest', admit("#{@source}introduce @domain.beta @domain.alpha\n").bytes)
+    assert_equal [[0, 1]], rows(view, 'introductions').map { |row| row.values_at('from', 'to') }
+  end
+
+  def test_an_introduction_of_no_configured_domain_is_refused
+    refused(Erx::Manifest::Invalid, 2, 'introduce', "#{@source}introduce @domain.alpha @domain.absent\n")
+  end
+
+  def test_an_introduction_of_a_domain_to_itself_is_refused
+    refused(Erx::Manifest::Invalid, 2, 'introduce', "#{@source}introduce @domain.alpha @domain.alpha\n")
+  end
+
+  def test_one_pair_introduced_twice_is_refused
+    source = "#{@source}introduce @domain.alpha @domain.beta\nintroduce @domain.beta @domain.alpha\n"
+    refused(Erx::Manifest::Invalid, 2, 'introduce', source)
+  end
+
+  # Property 4 over the configured domains.
+  def test_domain_budgets_over_their_principal_are_refused
+    refused(Erx::Manifest::Invalid, 4, 'domain.limits', @source.sub("limits app\n  memory 4194304", "limits app\n  memory 8388608"))
+  end
+
+  def test_a_domain_grant_over_system_is_refused
+    source = UNCAPPED + @source.sub("limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users",
+                                    "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.wide")
+    refused(Erx::Manifest::Invalid, 4, 'domain.grant', source)
+  end
+
+  def test_a_sub_space_grant_over_its_domain_is_refused
+    source = UNCAPPED + @source.sub("  spaces none\n  lane 4096\n  connections 2\n  crash 0\n  flags none\n",
+                                    "  spaces @share.wide\n  lane 4096\n  connections 2\n  crash 0\n  flags spaces\n")
+    refused(Erx::Manifest::Invalid, 4, 'limits.spaces', source)
+  end
+
+  def test_configured_domains_count_against_max_domains
+    refused(Erx::Manifest::Invalid, 4, 'principals.domains', @source.sub('max_domains 4', 'max_domains 3'))
+  end
+
+  # Property 5 over the configured domains and the services they serve.
+  def test_a_domain_with_a_pooled_name_is_refused
+    refused(Erx::Manifest::Invalid, 5, 'domain.name', @source.sub('domain alpha', 'domain alice.1'))
+  end
+
+  def test_a_domain_named_as_a_principal_is_refused
+    refused(Erx::Manifest::Invalid, 5, 'domain.name', @source.sub('domain alpha', 'domain system'))
+  end
+
+  def test_one_name_on_two_servers_is_admitted
+    source = @source + service('log_a', '@domain.alpha').sub('service log_a', "service log_a\n  name \"log\"") +
+             service('log_b', '@domain.beta').sub('service log_b', "service log_b\n  name \"log\"")
+    view = @codec.open('manifest', admit(source).bytes)
+    assert_equal [0, 1], rows(view, 'services').map { |row| row.fetch('server') }
+  end
+
+  def test_one_name_twice_on_one_server_is_refused
+    source = @source + service('log_a', '@domain.alpha').sub('service log_a', "service log_a\n  name \"log\"") +
+             service('log_b', '@domain.alpha').sub('service log_b', "service log_b\n  name \"log\"")
+    refused(Erx::Manifest::Invalid, 5, 'service.name', source)
+  end
+
+  # Property 8: the console lines and the slot writer's windows stay the system domain's.
+  def test_a_console_uart_held_by_a_configured_domain_is_refused
+    %w[console hostlink].each do |unit|
+      source = @source.sub(/(unit #{unit}\n  placement "[^"]*"\n)  holder system/, "\\1  holder @domain.alpha")
+      refused(Erx::Manifest::Invalid, 8, "machine.#{unit}", source)
+    end
+  end
+
+  def test_a_slot_window_held_by_a_configured_domain_is_refused
+    refused(Erx::Manifest::Invalid, 8, 'window.holder', @source.sub("window slot_a\n  holder system", "window slot_a\n  holder @domain.alpha"))
+  end
+
+  def test_a_domain_named_system_is_refused
+    source = @source.sub('principal system', 'principal root').gsub('@principal.system', '@principal.root').sub('domain alpha', 'domain system')
+    refused(Erx::Manifest::Invalid, 5, 'domain.name', source)
+  end
+
+  def test_arguments_and_environment_over_the_boot_page_are_refused
+    long = "  args \"#{'a' * 1500}\"\n  env \"X=#{'b' * 1500}\"\n"
+    refused(Erx::Manifest::Invalid, 12, 'domain.args', with_domains(self.class.domain('alpha') + long))
+  end
+
+  def test_introductions_take_connection_rows
+    source = "#{@source.sub('max_connections 4', 'max_connections 2')}introduce @domain.alpha @domain.beta\n"
+    refused(Erx::Manifest::Invalid, 12, 'machine.max_connections', source)
+  end
+
+  # Property 7: no secret domain, since no entry carries the sealing secret.
+  def test_a_secret_domain_is_refused_naming_its_milestone
+    refused(Erx::Manifest::Invalid, 7, 'domain.kind', with_domains(self.class.domain('vault', kind: 'secret')), message: /M11/)
+  end
+
+  # A window's holder is the system domain or a configured domain.
+  def test_a_window_held_by_a_configured_domain_is_admitted
+    source = @source.sub("window data\n  holder system", "window data\n  holder @domain.alpha")
+    view = @codec.open('manifest', admit(source).bytes)
+    assert_includes rows(view, 'windows').map { |row| row.fetch('holder') }, 0
+  end
+
+  # Property 10: the facets of the configured domains lead back to none of them.
+  def test_facets_that_lead_back_are_refused
+    source = @source + service('a', '@domain.alpha') + service('b', '@domain.beta') +
+             facet('ab', '@domain.alpha', '@service.b') + facet('ba', '@domain.beta', '@service.a')
+    refused(Erx::Manifest::Invalid, 10, 'facet.service', source)
+  end
+
+  def test_a_domain_holding_a_facet_of_its_own_service_is_refused
+    source = @source + service('a', '@domain.alpha') + facet('aa', '@domain.alpha', '@service.a')
+    refused(Erx::Manifest::Invalid, 10, 'facet.service', source)
+  end
+
+  # The order places every server before its clients and breaks ties by name order.
+  def test_the_boot_order_puts_servers_first_and_names_break_ties
+    parsed = Erx::Manifest::Frontend.parse(@source, version: @codec.constant('manifest_version'))
+    check = Erx::Manifest::Stopgap.new(parsed, codec: @codec, context: @context, planner: nil, consumers: {})
+    none = @codec.constant('mf_none')
+    order = check.send(:boot_order, [{}, {}, {}, {}], [[0, 2], [2, 1], [3, none]])
+    assert_equal [1, 2, 0, 3], order.map { |row| row.fetch('domain') }
+  end
+
+  # Property 11: a rescue domain takes facets only of the system domain and of other
+  # rescue domains.
+  def test_a_rescue_domain_on_a_domain_rescue_does_not_start_is_refused
+    source = @source + service('a', '@domain.alpha') + facet('ba', '@domain.beta', '@service.a')
+    refused(Erx::Manifest::Invalid, 11, 'facet.service', source)
+  end
+
+  def test_a_rescue_domain_on_the_system_domain_passes_property_eleven
+    source = @source + service('s', 'system') + facet('bs', '@domain.beta', '@service.s')
+    refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', source)
+  end
+
+  # Property 12: what the domain library refuses fails the build, and without the
+  # planner a manifest with domains fails closed.
+  def test_a_domain_the_library_refuses_fails_the_build
+    error = refused(Erx::Manifest::Invalid, 12, 'domain', planner: RecordingPlanner.new([0, -6]))
+    assert_match(/beta with nomem/, error.message)
+  end
+
+  def test_configured_domains_without_a_planner_fail_closed
+    refused(Erx::Manifest::Unsupported, 12, 'planner', planner: nil)
+  end
+
+  def test_a_runtime_that_names_no_executable_is_refused
+    refused(Erx::Manifest::Invalid, 12, 'domain.runtime', with_domains(self.class.domain('alpha', runtime: '@artifact.app')))
+  end
+
+  def test_a_release_that_names_no_domain_release_is_refused
+    %w[@artifact.emu @artifact.absent "app"].each do |release|
+      refused(Erx::Manifest::Invalid, 12, 'domain.release', with_domains(self.class.domain('alpha', release: release)))
+    end
+  end
+
+  # The boot builds every row, so together they fit what the library counts across
+  # domains, though each row is planned alone.
+  def test_configured_domains_over_their_principal_quota_are_refused
+    refused(Erx::Manifest::Invalid, 12, 'domain.principal', @source.sub("  domains 2\n", "  domains 1\n"))
+  end
+
+  def test_configured_domains_over_the_connection_table_are_refused
+    refused(Erx::Manifest::Invalid, 12, 'machine.max_connections', @source.sub('max_connections 4', 'max_connections 1'))
+  end
+
+  def test_a_partial_boot_configures_no_domains
+    refused(Erx::Manifest::Invalid, 12, 'domain', @source.sub('flags development', 'flags development,partial_boot'))
+  end
+
+  # Property 13: the service domains' grants leave system_reserve of system.
+  def test_grants_over_the_headroom_are_refused
+    source = with_domains(*%w[alpha beta gamma].map { |name| self.class.domain(name) })
+    refused(Erx::Manifest::Invalid, 13, 'domain.grant', source)
+  end
+end

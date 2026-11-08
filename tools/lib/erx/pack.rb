@@ -13,14 +13,17 @@ module Erx
   # Owns the full build transaction. Input snapshots, source attribution and
   # whole-manifest admission precede publication; an invalid result never
   # replaces a previously published image. ELF parsing stays in erx_elf_plan.
+  # domain_planner is the manifest check's DomainPlanner, which a manifest with
+  # configured domains needs; without one such a manifest fails closed.
   class Pack
     DEFAULT_BUDGET = 256 * 1024 * 1024
 
-    def initialize(root:, output_root:, codec:, planner:, checker:, hasher:, runner:, provenance:)
+    def initialize(root:, output_root:, codec:, planner:, checker:, hasher:, runner:, provenance:, domain_planner: nil)
       @root = File.realpath(root)
       @output_root = File.realpath(output_root)
       @codec = codec
       @planner = planner
+      @domain_planner = domain_planner
       unless checker.is_a?(PackTools::Helper) && checker.tool == 'checker'
         raise Error, 'pack checking requires a helper owned by PackTools.build'
       end
@@ -68,7 +71,7 @@ module Erx
         context = Manifest::Context.new(build_kind: build_kind, platform: platform,
                                         catalog: catalog, root_entry: root_entry,
                                         artifacts: artifacts, provenance: records)
-        admitted = Manifest.admit(source: manifest_source, codec: @codec, context: context)
+        admitted = Manifest.admit(source: manifest_source, codec: @codec, context: context, planner: @domain_planner)
         unless admitted.is_a?(Manifest::Admitted) && admitted.matches?(context)
           raise Error, 'system manifest is not admitted for this pack'
         end

@@ -10,7 +10,8 @@ require_relative '../lib/erx/manifest'
 module Erx
   # The seeds of the targets that read a system manifest: the bytes the packer writes.
   # QEMU virt's development manifest, as Phase 1's check admits it for a production image,
-  # and the empty native manifest of the structural test images, with prefixes of the first.
+  # the same with configured domains (ManifestContextFixture.domain_source), and the empty
+  # native manifest of the structural test images, with prefixes of the first.
   module ManifestSeeds
     module_function
 
@@ -28,7 +29,11 @@ module Erx
                               codec: codec, context: context)
       empty = Manifest.structural_fixture(source: File.binread(File.join(repository, 'test/fixtures/manifest_empty.txt')),
                                           codec: codec, context: Manifest::Context.new(**fixture))
-      PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes, 'system-args-escape' => escape.bytes)
+      domains = Manifest.admit(source: ManifestContextFixture.domain_source(source), codec: codec,
+                               context: Manifest::Context.new(**ManifestContextFixture.domain_arguments(codec), platform: platform),
+                               planner: ManifestContextFixture.accepting_planner)
+      PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes, 'system-args-escape' => escape.bytes,
+                                                     'domains' => domains.bytes)
     end
   end
 end

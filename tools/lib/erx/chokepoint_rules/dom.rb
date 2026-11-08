@@ -14,6 +14,10 @@ module Erx
     DOM_HEADER = 'include/erx/dom.h'
     DOM_DRIVER = 'test/fixtures/dom_core_driver.c'
     DOM_FUZZ = 'tools/fuzz/dom_core_fuzz.c'
+    # The manifest check's host run of the configured entry over each configured
+    # domain's row (docs/design-system.md, "The manifest", property 12). It builds
+    # only for the host, so it is no caller on the target.
+    DOM_HOST_PLANNER = 'tools/host/dom_plan.c'
     # The erXos NIFs inside OTP's tree, where the domain library's NIF lives.
     ERXOS_NIFS = 'otp/erts/emulator/nifs/erxos/**/*'
 
@@ -39,7 +43,8 @@ module Erx
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "origin.kind = ERX_DOM_REQUEST;\n" }
         ),
         # Nothing calls the manifest entries but their definition, their
-        # declaration, the driver and the fuzz target. Their first caller
+        # declaration, the driver, the fuzz target and the manifest check's host
+        # planner. Their first caller on the target
         # replaces this rule with dom-manifest-entries' check.
         Chokepoints::Forbidden.new(
           name: 'dom-manifest-entries-uncalled',
@@ -48,7 +53,7 @@ module Erx
           design: 'docs/design-system.md#the-domain-library',
           scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
           pattern: /\berx_dom_plan_(?:configured|partial)\b/,
-          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ].map { |path| Chokepoints::Site.new(glob: path) },
+          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
                     "status = erx_dom_plan_partial(&view, id, row, &plan);\n" }
@@ -56,7 +61,8 @@ module Erx
         # A numeric index a requester supplies never selects manifest
         # authority: only manifest startup and restart call the configured
         # entry and only the root's partial-boot entry the partial one
-        # (docs/design-system.md, "The domain library"). Its check lands
+        # (docs/design-system.md, "The domain library"); on the host, the
+        # manifest check plans each configured row too. Its check lands
         # with the first caller, the library's apply and NIF.
         Chokepoints::Pending.new(
           name: 'dom-manifest-entries',

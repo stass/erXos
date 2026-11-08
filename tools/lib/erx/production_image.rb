@@ -10,6 +10,7 @@ require_relative 'boot_file'
 require_relative 'build_inputs'
 require_relative 'crash_frame'
 require_relative 'deterministic_transcript'
+require_relative 'dom_planner'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'fiasco_provenance'
@@ -78,12 +79,13 @@ module Erx
     NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
     private_constant :NOTHING_ADDED
 
-    # The domain releases an image carries are those its manifest's domain rows name,
-    # and with any of them the one runtime image every domain runs. The Phase 1 manifest
-    # check refuses domain rows until it admits configured domains, so the production
-    # image names none and carries neither; a test image may carry some
-    # (build_test_image's domains).
-    DOMAIN_RELEASES = [].freeze
+    # The domain releases an image carries are those its manifest's domain rows name
+    # (domain_releases), and with any of them the one runtime image every domain runs.
+    # Each holds the applications every domain boots through, kernel and stdlib
+    # (ReleaseFiles.domain); the manifest names a release, not its applications. The
+    # development manifest configures no domains, so the production image carries
+    # neither; a test image may carry some (build_test_image's domains).
+    DOMAIN_APPLICATIONS = %w[kernel stdlib].freeze
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
     # artifact name a domain row's runtime takes. It sorts after domains/ and before
@@ -167,7 +169,7 @@ module Erx
     # and nothing else.
     def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
       assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
-               machine: DEVELOPMENT_MACHINE, domains: DOMAIN_RELEASES)
+               machine: DEVELOPMENT_MACHINE, domains: domain_releases(manifest_source))
     end
 
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
@@ -1043,6 +1045,15 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
+    # The domain releases a manifest's domain rows name. Only their release references
+    # are read here, so the image can carry what they name; the manifest check proves
+    # the rows, each reference included, when Pack#build admits the manifest.
+    def domain_releases(manifest_source)
+      Manifest.release_names(source: manifest_source, codec: @codec).map do |name|
+        ReleaseFiles.domain(name, applications: DOMAIN_APPLICATIONS)
+      end
+    end
+
     # The domain releases' entries, each file under its release's prefix without the
     # system mark, and the domain runtime image's, with the files their receipts name;
     # nothing when there are no domain releases.
@@ -1090,7 +1101,8 @@ module Erx
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       platform = machine.platform(JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record'))
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
-               checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance)
+               checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance,
+               domain_planner: DomainPlanner.new(helper: tools.fetch('domains'), runner: @runner))
           .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,
                  artifacts: self.class.artifacts(paths, images: images),
                  manifest_source: manifest_source, output: output, test_code: test_code)

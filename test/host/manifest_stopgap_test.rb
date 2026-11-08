@@ -11,10 +11,8 @@ require_relative '../fixtures/manifest_context'
 # design-system.md has a seeded violation here and each refusal a seeded record.
 # Every seed edits the real development manifest or the real platform record,
 # so a seed fails for its own reason and not for an unrelated difference.
-class ManifestSystemOnlyTest < Minitest::Test
+class ManifestStopgapTest < Minitest::Test
   BLOCK = '/virtio_mmio@a003e00'
-  DOMAIN = "domain d\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
-           "  runtime \"r\"\n  release \"r\"\n  restarts 0\n  restart_period_s 0\n"
   SERVICE = "service log\n  server system\n  interface 1\n"
 
   def setup
@@ -95,7 +93,7 @@ class ManifestSystemOnlyTest < Minitest::Test
 
   def test_the_report_claims_only_what_was_checked
     report = admit.report
-    assert_equal 'system_only', report.fetch('mode')
+    assert_equal 'stopgap', report.fetch('mode')
     assert_equal 'declared', report.fetch('root_startup')
     assert_equal 'supplied_catalog', report.fetch('executable')
     assert_equal 'supplied_context', report.fetch('provenance')
@@ -109,7 +107,7 @@ class ManifestSystemOnlyTest < Minitest::Test
 
   def test_a_partial_boot_flag_without_partial_boot_records_is_admitted
     source = @source.sub('flags development', 'flags development,partial_boot')
-    assert_equal 'system_only', admit(source).report.fetch('mode')
+    assert_equal 'stopgap', admit(source).report.fetch('mode')
   end
 
   def test_a_partial_boot_runs_no_services
@@ -155,22 +153,6 @@ class ManifestSystemOnlyTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'service.server', @source + SERVICE.sub('server system', 'server storage'))
   end
 
-  def test_a_facet_naming_no_service_is_refused
-    facet = "facet f\n  grantee system\n  service @service.absent\n  operations none\n  max_request 1\n" \
-            "  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
-    refused(Erx::Manifest::Invalid, 2, 'facet.service', @source + SERVICE + facet)
-  end
-
-  def test_a_facet_with_a_service_is_refused_because_no_domain_can_hold_it
-    facet = "facet f\n  grantee system\n  service @service.log\n  operations none\n  max_request 1\n" \
-            "  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', @source + SERVICE + facet, message: /M5/)
-  end
-
-  def test_an_introduction_is_refused_naming_its_milestone
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'introduce', @source + "introduce a b\n", message: /M5/)
-  end
-
   # Property 3: no holder of PCIe configuration space.
   def test_a_configuration_space_holder_is_refused
     source, against = with_extra_device(role: 'configuration')
@@ -186,10 +168,6 @@ class ManifestSystemOnlyTest < Minitest::Test
     # Principal and baseline alone fit by exactly the device's reservation less one page.
     source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - 81_788_928 - 2_097_152 + 4096}")
     refused(Erx::Manifest::Invalid, 4, 'principals.memory', source)
-  end
-
-  def test_a_nonzero_max_domains_is_refused
-    refused(Erx::Manifest::Invalid, 4, 'machine.max_domains', @source.sub('max_domains 0', 'max_domains 4'), message: /M5/)
   end
 
   def test_a_principal_domain_quota_is_refused
@@ -278,8 +256,8 @@ class ManifestSystemOnlyTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 8, 'window.role', @source + window(role: 'vault'), message: /M11/)
   end
 
-  def test_a_window_held_by_another_domain_is_refused
-    refused(Erx::Manifest::Invalid, 8, 'window.holder', @source + window(role: 'fat', holder: 'storage'), message: /M9/)
+  def test_a_window_held_by_no_configured_domain_is_refused
+    refused(Erx::Manifest::Invalid, 8, 'window.holder', @source + window(role: 'fat', holder: '@domain.storage'))
   end
 
   def test_a_window_on_no_placed_device_is_refused
@@ -371,11 +349,6 @@ class ManifestSystemOnlyTest < Minitest::Test
   def test_a_device_with_no_dma_cannot_declare_dma_memory
     source, against = with_extra_device(role: 'ordinary', dma: 'none', dma_memory: 4096)
     refused(Erx::Manifest::Invalid, 4, 'devices.dma_memory', source, against)
-  end
-
-  # Records of later milestones, 10 to 13 among them.
-  def test_a_domain_record_is_refused_naming_its_milestone
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'domain', @source + DOMAIN, message: /M5/)
   end
 
   def test_a_partial_boot_record_is_refused_naming_its_milestone

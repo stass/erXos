@@ -50,9 +50,11 @@ module AbiFuzz
     system_seed = File.binread(File.join(top, 'config/manifest/qemu-virt-development.txt'))
     system_platform = JSON.parse(File.read(File.join(top, 'config/platforms/qemu-virt.json')))
     system_context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(codec).merge(platform: system_platform))
+    domain_seed = ManifestContextFixture.domain_source(system_seed)
+    domain_context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(codec).merge(platform: system_platform))
     until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
       begin
-        case count % 4
+        case count % 5
         when 0
           declarations = Erx::ABI::Syntax.parse(mutate(declaration_seed, random))
           parsed = Erx::ABI::SourceSet.new(declarations: declarations, inputs: {}).freeze
@@ -66,6 +68,9 @@ module AbiFuzz
           end
         when 3
           Erx::Manifest.admit(source: mutate(system_seed, random), codec: codec, context: system_context)
+        when 4
+          Erx::Manifest.admit(source: mutate(domain_seed, random), codec: codec, context: domain_context,
+                              planner: ManifestContextFixture.accepting_planner)
         end
       rescue Erx::Error
         # A bounded, typed diagnostic is a valid parser result.

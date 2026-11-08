@@ -457,11 +457,50 @@ it; git history is the record of completed work.
   file refuses `erx_boot_info` with a zero page and `erx_time_wall_ns` as unavailable,
   so the domain runtime image (`runtimes/emu`) ends at its boot page until a task's
   start (BK11) and ERTS in a domain (RT1) serve them.
-* [Medium] packer, `tools/lib/erx/production_image.rb` (`DOMAIN_RELEASES`): the
-  domain releases an image carries are a constant, and a test image's `domains:` is
-  checked against no manifest row. Once the manifest check admits domain rows, derive
-  the list from them (each row's `release @artifact.NAME` and its applications), so an
-  image carries exactly the releases its manifest names.
+* [Medium] packer, `tools/lib/erx/production_image.rb` (`DOMAIN_APPLICATIONS`): every
+  domain release the manifest's rows name holds kernel and stdlib alone, since a domain
+  row names a release and nothing declares its applications; and a test image's
+  `domains:` is checked against no manifest row, since the test manifest is the
+  development one grown. Decide where a domain release's applications are declared, and
+  build test images' releases from their manifest's rows too.
+* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_and_place`):
+  facet records are refused (`unsupported`, naming M5) after properties 2, 10 and 11
+  are proved over them, because a facet's operations and parameters resolve against its
+  service's generated declarations and grant checker (design-abi.md, "Services, facets
+  and their parameter schemas"), which the packer does not read; so no admitted
+  manifest has a facet and the boot order is name order. A service's `interface` is a
+  number, not the qualified ABI service name, and the server's release is not checked to
+  supply it. design-stopgap.md lists `facet` among the records the check accepts.
+* [Low] manifest check, `tools/lib/erx/manifest.rb`: `system_reservation` is 0, so the
+  system domain's reservation for `max_domains` admitted domains (property 4) is not
+  counted against `root_memory`; design-abi.md has the production admission planner
+  derive it, and nothing on the stopgap enforces it.
+* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap`): property 12 plans
+  each configured row alone against a just-booted view, and what the library counts
+  across domains is re-derived in Ruby: the principal quota tally, the connection count
+  (domains plus introductions) and property 13's exact rational sum, which the library
+  computes in rounded thousandths (`dom_grant_rate`), so four grants of 0.1871 CPU under a
+  1-CPU system with reserve 250 pass here and fail at boot; a domain's own `connections`
+  quota against its introductions is not checked. By construction: have
+  `tools/host/dom_plan.c` plan the rows in boot order, apply each plan to its view, plan
+  the introductions too, and delete the Ruby sums.
+* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#normalize_domains`): a
+  configured domain's limits record (memory, outer, lane, connections, crash, flags,
+  peer-held bounds) is not held to its principal's `ceiling_limits`, which design-abi.md
+  ("Domain identity and placement") asks; only the runtime limits are, by the planner.
+  Data and FAT windows may be held by any configured domain, since nothing identifies a
+  storage domain (property 8); the slot writer's windows are the system domain's.
+* [Medium] manifest check, `tools/lib/erx/dom_planner.rb`, `tools/host/dom_plan.c`: the
+  planner's text view lists `erx_share` and `erx_runtime_limits_t` fields by hand, and
+  `Stopgap#startup_limits` builds the runtime-limit projection by hand; a field added to
+  either ABI layout would reach the planner as zero. Write the view's records with
+  `codec.encode_layout` and decode them through the generated reader. Values outside the
+  ABI's ranges (`max_connections` over 65536, a `system_lane` of 2^32) fail as a helper
+  error, not as a manifest diagnostic; `limits.crash` never reaches the planner, which
+  sizes every crash area `ERX_CRASH_SIZE`.
+* [Low] manifest check, `tools/lib/erx/manifest.rb` (`Manifest.release_names`): the image
+  builds the releases its rows name before the manifest is checked, so a release named
+  like another artifact fails as an artifact clash, not a manifest diagnostic.
 
 * [Low] liberx Fiasco backend, `liberx/backend/fiasco/service_task.c` (around line 354): `erlang:halt/1`
   with a slogan in the system domain writes no crash record, since the root task's own stop takes the end

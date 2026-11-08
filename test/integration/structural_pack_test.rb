@@ -104,7 +104,7 @@ class StructuralPackTest < Minitest::Test
                               artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(ManifestContextFixture.images),
                               manifest_source: File.binread(File.join(@root, 'config/manifest/qemu-virt-development.txt')),
                               output: output)
-    assert_equal 'system_only', result.fetch('manifest').fetch('mode')
+    assert_equal 'stopgap', result.fetch('manifest').fetch('mode')
     assert_equal 'declared', result.fetch('manifest').fetch('root_startup')
     bytes = File.binread(output)
     assert_equal "ERXPACK\0".b, bytes.byteslice(0, 8)

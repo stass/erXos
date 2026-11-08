@@ -272,10 +272,21 @@ class ProductionImageTest < Minitest::Test
                  Erx::ProductionImage.instance_method(:build_test_image).parameters
   end
 
-  # The production image carries the domain releases its manifest names, and the Phase 1
-  # manifest check admits no domain row yet, so it carries none and no runtime image.
-  def test_the_production_image_carries_no_domain_release
-    assert_empty Erx::ProductionImage::DOMAIN_RELEASES
+  # The production image carries the domain releases its manifest's domain rows name.
+  # The development manifest configures no domains, so it carries none and no runtime
+  # image; a manifest with domain rows names each release once, and a reference of
+  # another form names nothing, for the manifest check to refuse.
+  def test_the_production_image_carries_the_releases_its_domain_rows_name
+    codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
+    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    assert_empty Erx::Manifest.release_names(source: source, codec: codec)
+    rows = %w[zeta beta zeta].each_with_index.map do |release, index|
+      "domain d#{index}\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
+        "  runtime @artifact.emu\n  release @artifact.#{release}\n  restarts 0\n  restart_period_s 0\n"
+    end
+    quoted = "domain q\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
+             "  runtime @artifact.emu\n  release \"other\"\n  restarts 0\n  restart_period_s 0\n"
+    assert_equal %w[beta zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
   end
 
   # A domain row's runtime names the domain runtime image and its release the run of

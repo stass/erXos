@@ -293,8 +293,8 @@ module Erx
       end
     end
 
-    # Phase 1's admission: SystemOnly over a manifest with the system domain
-    # alone, and the declared root startup rule. This factory alone mints the
+    # Phase 1's admission: Stopgap over a manifest with the system domain and
+    # its configured domains, and the declared root startup rule. This factory alone mints the
     # private publication token, so a structural fixture cannot pass for it.
     class Admitted
       attr_reader :bytes, :report
@@ -303,8 +303,8 @@ module Erx
         raise Invalid.new('checked context required', property: 'context', field: 'input') unless context.is_a?(Context)
         RootStartup.declared(context.platform)
         parsed = Frontend.parse(source, version: codec.constant('manifest_version'))
-        checker = SystemOnly.new(parsed, codec: codec, context: context,
-                                 planner: planner, consumers: consumers)
+        checker = Stopgap.new(parsed, codec: codec, context: context,
+                              planner: planner, consumers: consumers)
         normalized, report = checker.check
         bytes = Encoder.new(codec).encode(normalized)
         codec.open('manifest', bytes)
@@ -329,19 +329,30 @@ module Erx
                     planner: planner, consumers: consumers)
     end
 
+    # The artifact names the source's domain rows give as releases, sorted and once
+    # each, read before any check so a build can make what they name. A reference of
+    # another form names nothing here; admission refuses it (Stopgap#artifact).
+    def self.release_names(source:, codec:)
+      Frontend.parse(source, version: codec.constant('manifest_version')).records.fetch('domain', []).filter_map do |record|
+        tokens = record.properties.fetch('release')
+        token = tokens.first if tokens.size == 1
+        token.value.delete_prefix('@artifact.') if token && !token.quoted && token.value.start_with?('@artifact.')
+      end.uniq.sort
+    end
+
     def self.structural_fixture(source:, codec:, context:)
       StructuralFixture.prepare(source: source, codec: codec, context: context)
     end
 
-    # The readers and the normalization of a manifest with no child domains:
-    # every holder is the system domain and nothing is reserved for a child. A subclass
+    # The readers and the normalization every check shares. A unit's holder is the
+    # system domain or a configured domain, and nothing is reserved for a child. A subclass
     # states which modes and records it takes (check_mode), what it allows of a
     # platform device (check_device), what else it places (check_and_place)
     # and what its report claims (claims).
     class SystemDomainCheck
       TABLES = { 'principal' => 'principals', 'limits' => 'limits',
                  'runtime_limits' => 'runtime_limits', 'lane_class' => 'lane_classes',
-                 'image' => 'images' }.freeze
+                 'image' => 'images', 'domain' => 'domains' }.freeze
 
       def initialize(source, codec:, context:, planner:, consumers:)
         @source = source
@@ -391,7 +402,9 @@ module Erx
         normalize_profiles(rows)
         principals = normalize_principals(rows, users_cpus, users_rate)
         max_domains = number(machine, 'max_domains')
-        invalid('principal domain quotas exceed max_domains', 4, 'principals.domains') if principals.sum { |row| row.fetch('domains') } > max_domains
+        if principals.sum { |row| row.fetch('domains') } + records('domain').size > max_domains
+          invalid('principal domain quotas and configured domains exceed max_domains', 4, 'principals.domains')
+        end
         normalize_units(rows)
         device_memory = rows.fetch('devices').sum { |device| device.fetch('dma_memory') }
         if principals.sum { |row| row.fetch('memory') } + baseline + device_memory > root_memory
@@ -512,6 +525,21 @@ module Erx
         line.fail!('reference has the wrong kind') if token.quoted || !token.value.start_with?(prefix)
         name = token.value.delete_prefix(prefix)
         @indices.fetch(kind).fetch(name) { line.fail!('undefined source reference') }
+      end
+
+      # A holder or server: literal system, the system domain, or @domain.NAME, a
+      # configured domain's index.
+      def holder_index(token, property:, field:)
+        return @codec.constant('mf_none') if !token.quoted && token.value == 'system'
+
+        domain_index(token) || invalid('names neither the system domain nor a configured domain', property, field)
+      end
+
+      # A configured domain's index, or nil when the token names none.
+      def domain_index(token)
+        return nil if token.quoted || !token.value.start_with?('@domain.')
+
+        @indices.fetch('domain')[token.value.delete_prefix('@domain.')]
       end
 
       def share(record, key)
@@ -648,8 +676,7 @@ module Erx
           unit = by_key[key] || invalid('unit is absent from checked placement', 1, 'unit.placement')
           invalid('unit is assigned more than once', 1, 'unit.placement') if placed.include?(key)
           placed << key
-          holder = one(record, 'holder')
-          invalid('units belong to the system domain', 1, 'unit.holder') unless !holder.quoted && holder.value == 'system'
+          holder = holder_index(one(record, 'holder'), property: 1, field: 'unit.holder')
           first = rows.fetch('devices').size
           invalid('platform unit has no devices', 'context', 'platform.units') if unit.fetch('devices').empty?
           unit.fetch('devices').sort_by { |device| device.fetch('placement_key').b }.each do |device|
@@ -667,7 +694,7 @@ module Erx
             check_device(normalized)
             rows.fetch('devices') << normalized
           end
-          rows.fetch('units') << { 'name' => record.name, 'holder' => @codec.constant('mf_none'),
+          rows.fetch('units') << { 'name' => record.name, 'holder' => holder,
                                    'devices' => { 'table' => 'devices', 'first' => first, 'count' => rows.fetch('devices').size - first } }
         end
       end
@@ -694,11 +721,22 @@ module Erx
           device.fetch('selector') == @codec.member('mf_selector', 'dt') && device.fetch('role') == @codec.member('mf_device_role', 'uart')
         end.map { |device| device.fetch('path') }
         [console, hostlink].reject(&:empty?).each do |path|
-          invalid('UART is not assigned to the system domain', 8, path == console ? 'machine.console' : 'machine.hostlink') unless paths.include?(path)
+          field = path == console ? 'machine.console' : 'machine.hostlink'
+          invalid('UART is not placed', 8, field) unless paths.include?(path)
+          invalid('UART is not assigned to the system domain', 8, field) unless unit_holder(rows, path) == @codec.constant('mf_none')
         end
         unless @context.platform['console'] == console && (@context.platform.fetch('hostlink', '') == hostlink)
           invalid('UART paths disagree with checked platform', 8, 'machine.console')
         end
+      end
+
+      # The holder of the unit whose devices include the device at path.
+      def unit_holder(rows, path)
+        index = rows.fetch('devices').index { |device| device['path'] == path }
+        rows.fetch('units').find do |unit|
+          span = unit.fetch('devices')
+          index.between?(span.fetch('first'), span.fetch('first') + span.fetch('count') - 1)
+        end.fetch('holder')
       end
 
       def check_lane(value, field)
@@ -767,14 +805,15 @@ module Erx
     end
 
     # Phase 1's check (docs/design-stopgap.md, "The Phase 1 manifest check"): a
-    # development manifest, full or partial boot, with the system domain alone.
-    # Every holder and server is the system domain, so properties 10 to 13 have
-    # nothing to check and what would bring them is refused here.
-    class SystemOnly < SystemDomainCheck
+    # development manifest, full or partial boot, with the system domain and its
+    # configured domains. A holder, server or grantee is the system domain or a
+    # configured domain; a domain row's runtime and release name artifacts of this
+    # pack; the configured domains are ordered (10), checked against the rescue
+    # configuration (11), planned by the domain library's host build (12) and held to
+    # the headroom in system (13). What Phase 1 does not bring is refused here.
+    class Stopgap < SystemDomainCheck
       REFUSED = {
-        'domain' => 'configured domains arrive at M5',
         'partial_boot' => 'child domains of a partial boot arrive at M5',
-        'introduce' => 'introductions connect configured domains, which arrive at M5',
         'liveness' => 'the system domain\'s watchdog pets without reading liveness records, which a later milestone brings'
       }.freeze
 
@@ -786,7 +825,9 @@ module Erx
         end
         REFUSED.each { |kind, reason| unsupported(reason, kind) unless records(kind).empty? }
         return unless partial
-        %w[service facet liveness].each do |kind|
+
+        invalid('a partial boot configures no domains', 12, 'domain') unless records('domain').empty?
+        %w[service facet introduce liveness].each do |kind|
           invalid('a partial boot runs no services', 2, kind) unless records(kind).empty?
         end
       end
@@ -808,24 +849,32 @@ module Erx
       end
 
       def check_and_place(rows, root_memory:, baseline:, max_domains:)
-        check_system_domain_alone(rows.fetch('devices'), max_domains)
-        services = records('service').sort_by { |record| service_name(record).b }
-        rows['services'] = normalize_services(services)
-        check_facets(services)
-        rows['liveness'] = normalize_liveness(services)
+        check_identity(rows.fetch('devices'))
+        rows['domains'] = normalize_domains(rows)
+        check_domain_resources(rows)
+        services = records('service').map { |record| [record, normalize_service(record)] }
+                                     .sort_by { |_record, row| [row.fetch('name'), row.fetch('server')] }
+        rows['services'] = services.map(&:last)
+        invalid('two services of one server share a name', 5, 'service.name') unless
+          rows['services'].map { |row| row.values_at('server', 'name') }.uniq.size == services.size
+        rows['introductions'] = normalize_introductions
+        edges = facet_edges(services.map(&:first), rows['services'])
+        rows['boot_order'] = boot_order(rows['domains'], edges)
+        check_rescue(rows['domains'], edges)
+        unsupported('a facet resolves its operations and parameters against its service\'s generated declarations and grant checker, which M5 brings', 'facet') unless edges.empty?
         rows['images'], rows['extents'] = normalize_images(rows.fetch('devices'))
         rows['windows'] = normalize_windows(rows.fetch('devices'), rows.fetch('images'))
+        check_plans(rows, max_domains: max_domains)
         RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
                           root_memory: root_memory, platform: @context.platform)
       end
 
       def claims
-        { 'mode' => 'system_only', 'root_startup' => 'declared',
+        { 'mode' => 'stopgap', 'root_startup' => 'declared', 'child_plan_instances' => records('domain').size,
           'root_image_loadable_bytes' => root_loadable_bytes }.merge(RootStartup.declared(@context.platform))
       end
 
-      def check_system_domain_alone(devices, max_domains)
-        invalid('no domains are configured until M5, so max_domains is 0', 4, 'machine.max_domains') unless max_domains.zero?
+      def check_identity(devices)
         invalid('host name is not a system identifier', 5, 'machine.host') unless text(@source.machine, 'host').match?(Frontend::IDENTIFIER)
         check_one_holder(devices)
         check_no_sealed_entry
@@ -853,49 +902,218 @@ module Erx
         invalid('no entry carries the sealing secret until the vault at M11', 7, 'catalog.flags')
       end
 
-      def normalize_services(services)
-        rows = services.map do |record|
-          server = one(record, 'server')
-          invalid('every service runs in the system domain until M5', 2, 'service.server') unless !server.quoted && server.value == 'system'
-          name = service_name(record)
-          invalid('service name is not a system identifier', 5, 'service.name') unless name.match?(Frontend::IDENTIFIER)
-          { 'name' => name, 'server' => @codec.constant('mf_none'), 'interface' => number(record, 'interface') }
+      # A pooled name: an identifier, a dot and decimal digits (docs/design-system.md,
+      # "Identifiers").
+      POOLED = /\A(?<stem>.+)\.[0-9]+\z/.freeze
+
+      # The configured domains in name order, which their references' indices follow.
+      # A domain's runtime and release are artifacts of this pack: the runtime an
+      # executable entry, the release a domain release's run of entries.
+      def normalize_domains(rows)
+        principals = rows.fetch('principals').map { |row| row.fetch('name') }
+        records('domain').sort_by(&:name).map do |record|
+          pooled = record.name.match(POOLED)
+          invalid('a configured domain\'s name has a pooled name\'s form', 5, 'domain.name') if pooled&.[](:stem)&.match?(Frontend::IDENTIFIER)
+          invalid('a configured domain shares a principal\'s name', 5, 'domain.name') if principals.include?(record.name)
+          invalid('the system domain\'s name is not a configured domain\'s', 5, 'domain.name') if record.name == 'system'
+          strings = words(record, 'args').bytesize + words(record, 'env').bytesize
+          invalid('arguments and environment exceed the boot page\'s strings', 12, 'domain.args') if
+            strings > @codec.constant('boot_strings_max')
+          kind = enum(record, 'kind', 'mf_kind')
+          invalid('no secret domain until the vault at M11', 7, 'domain.kind') unless kind == @codec.member('mf_kind', 'service')
+          runtime = artifact(record, 'runtime', 'executable', property: 12, field: 'domain.runtime')
+          release = artifact(record, 'release', 'release', property: 12, field: 'domain.release')
+          { 'name' => record.name, 'principal' => reference(record, 'principal', 'principal'), 'kind' => kind,
+            'flags' => flags(record, 'flags', 'mf_domain_flags'), 'runtime' => runtime.fetch('entry'),
+            'release' => release.fetch('entry'), 'release_files' => release.fetch('files'),
+            'limits' => reference(record, 'limits', 'limits'), 'restarts' => number(record, 'restarts'),
+            'restart_period_s' => number(record, 'restart_period_s'), 'args' => words(record, 'args'),
+            'env' => words(record, 'env') }
         end
-        invalid('two services share a name', 5, 'service.name') unless rows.map { |row| row.fetch('name') }.uniq.size == rows.size
-        rows
       end
 
-      # The reader's facet grantee is a domain and the system domain has no
-      # row, so a facet that names its service has still no holder before M5.
-      def check_facets(services)
-        records('facet').each do |record|
+      # The artifact a record's key names, of the kind the packer recorded for it.
+      def artifact(record, key, kind, property:, field:)
+        token = one(record, key)
+        named = !token.quoted && token.value.start_with?('@artifact.')
+        artifact = named ? @context.artifacts[token.value.delete_prefix('@artifact.')] : nil
+        invalid("#{key} names no #{kind} artifact of this pack", property, field) unless artifact.is_a?(Hash) && artifact['kind'] == kind
+        artifact
+      end
+
+      # Property 4 for the configured domains: their two budgets within their
+      # principal's, each grant and sub-space grant within its parent's; and 13: the
+      # service domains' grants within system's rate less system_reserve of it.
+      def check_domain_resources(rows)
+        limits = rows.fetch('limits')
+        domains = rows.fetch('domains')
+        rows.fetch('principals').each_with_index do |principal, index|
+          carved = domains.select { |domain| domain.fetch('principal') == index }
+                          .sum { |domain| limits.fetch(domain.fetch('limits')).values_at('memory', 'outer').sum }
+          invalid('configured domains\' budgets exceed their principal\'s', 4, 'domain.limits') if carved > principal.fetch('memory')
+        end
+        system_cpus, system_rate = system_share
+        rates = domains.map do |domain|
+          profile = limits.fetch(domain.fetch('limits'))
+          cpus, rate = effective_share(profile.fetch('grant'), system_cpus)
+          invalid('a configured domain\'s grant exceeds system', 4, 'domain.grant') if rate > system_rate
+          if (profile.fetch('flags') & @codec.member('mf_limits_flags', 'spaces')) != 0 &&
+             effective_share(profile.fetch('spaces'), cpus).last > rate
+            invalid('sub-space grant exceeds domain', 4, 'limits.spaces')
+          end
+          rate
+        end
+        reserve = number(@source.machine, 'system_reserve')
+        return if rates.sum <= system_rate * Rational(1000 - reserve, 1000)
+
+        invalid('configured domains\' grants leave less than system_reserve of system', 13, 'domain.grant')
+      end
+
+      def system_share = effective_share(share(@source.machine, 'system_share'), @context.platform.fetch('cpuset'))
+
+      def normalize_service(record)
+        name = service_name(record)
+        invalid('service name is not a system identifier', 5, 'service.name') unless name.match?(Frontend::IDENTIFIER)
+        { 'name' => name, 'server' => holder_index(one(record, 'server'), property: 2, field: 'service.server'),
+          'interface' => number(record, 'interface') }
+      end
+
+      # design-abi.md: an introduction joins two different configured domains and is
+      # unique as an unordered pair, so each is written with the lower index first.
+      def normalize_introductions
+        rows = records('introduce').map do |record|
+          pair = record.properties.fetch('targets').map do |token|
+            domain_index(token) || invalid('introduction names no configured domain', 2, 'introduce')
+          end
+          invalid('an introduction joins two different domains', 2, 'introduce') unless pair.uniq.size == 2
+          { 'from' => pair.min, 'to' => pair.max }
+        end
+        invalid('two introductions join one pair', 2, 'introduce') unless rows.uniq.size == rows.size
+        rows.sort_by { |row| row.values_at('from', 'to') }
+      end
+
+      # Each facet's edge from its grantee to its service's server, both configured
+      # domain indices, or the system domain's mf_none for a service it serves.
+      def facet_edges(services, rows)
+        records('facet').map do |record|
+          grantee = domain_index(one(record, 'grantee')) || invalid('a facet is granted to no configured domain', 2, 'facet.grantee')
           token = one(record, 'service')
-          known = !token.quoted && services.any? { |service| "@service.#{service.name}" == token.value }
-          invalid('facet names a service the manifest does not contain', 2, 'facet.service') unless known
-          unsupported('a facet is granted to a configured domain, and those arrive at M5', 'facet')
+          index = services.index { |service| !token.quoted && "@service.#{service.name}" == token.value }
+          invalid('facet names a service the manifest does not contain', 2, 'facet.service') unless index
+          [grantee, rows.fetch(index).fetch('server')]
         end
       end
 
-      def normalize_liveness(services)
-        rows = records('liveness').map do |record|
-          token = record.properties.fetch('targets').first
-          index = services.index { |service| !token.quoted && "@service.#{service.name}" == token.value }
-          invalid('liveness names a service the manifest does not contain', 2, 'liveness') unless index
-          { 'service' => index }
-        end
-        invalid('a service is watched twice', 2, 'liveness') unless rows.uniq.size == rows.size
-        rows.sort_by { |row| row.fetch('service') }
+      # Property 10: every server before its clients, ties broken by name order, which
+      # the domains' indices follow. A domain is ready once every configured domain
+      # its facets name is placed; none ready means the facets lead back to one.
+      def boot_order(domains, edges)
+        servers = edges.group_by(&:first).transform_values { |pairs| pairs.map(&:last) - [@codec.constant('mf_none')] }
+        domains.each_index.each_with_object([]) do |_step, placed|
+          ready = (domains.each_index.to_a - placed).find { |domain| (servers.fetch(domain, []) - placed).empty? }
+          invalid('a configured domain\'s facets lead back to it', 10, 'facet.service') unless ready
+          placed << ready
+        end.map { |domain| { 'domain' => domain } }
       end
+
+      # Property 11: a domain the rescue configuration starts takes facets only of
+      # the system domain and of other domains it starts.
+      def check_rescue(domains, edges)
+        rescue_flag = @codec.member('mf_domain_flags', 'rescue')
+        rescued = ->(index) { (domains.fetch(index).fetch('flags') & rescue_flag) != 0 }
+        edges.each do |client, server|
+          next unless rescued.call(client) && server != @codec.constant('mf_none') && !rescued.call(server)
+
+          invalid('a rescue domain names a service of a domain the rescue configuration does not start', 11, 'facet.service')
+        end
+      end
+
+      # Property 12: the domain library's host build plans every configured domain
+      # against the view of a machine just booted. With no domains there is nothing to
+      # plan; with some, a missing planner fails closed. Each row is planned alone, and
+      # the boot builds them all, so together they must also fit what the library
+      # counts across domains: each principal's domain quota, which the library charges
+      # a configured domain to as to any other, and the connection table, where each
+      # takes its system connection and each introduction one more. Their budgets and grants are summed under
+      # properties 4 and 13.
+      def check_plans(rows, max_domains:)
+        domains = rows.fetch('domains')
+        return if domains.empty?
+        raise Unsupported.new('configured domains need the domain library\'s host planner', property: 12, field: 'planner') unless @planner
+
+        domains.map { |domain| domain.fetch('principal') }.tally.each do |principal, count|
+          invalid('a principal\'s configured domains exceed its domain quota', 12, 'domain.principal') if
+            count > rows.fetch('principals').fetch(principal).fetch('domains')
+        end
+        invalid('configured domains\' system connections exceed max_connections', 12, 'machine.max_connections') if
+          domains.size + rows.fetch('introductions').size > number(@source.machine, 'max_connections')
+        statuses = @planner.call(plan_view(rows, max_domains: max_domains))
+        domains.zip(statuses).each do |domain, status|
+          next if status.zero?
+
+          name = (@codec.schema.statuses || {}).key(status) || status
+          invalid("the domain library refuses configured domain #{domain.fetch('name')} with #{name}", 12, 'domain')
+        end
+      end
+
+      # The planner's view (DomainPlanner#call) from the normalized rows and the catalog.
+      def plan_view(rows, max_domains:)
+        machine = @source.machine
+        spaces = @codec.member('mf_limits_flags', 'spaces')
+        limits = rows.fetch('limits')
+        principals = rows.fetch('principals').map do |row|
+          { 'memory' => row.fetch('memory'), 'domains' => row.fetch('domains'), 'grant' => row.fetch('grant'),
+            'default_limits' => startup_limits(rows, row.fetch('default_limits')),
+            'ceiling_limits' => startup_limits(rows, row.fetch('ceiling_limits')) }
+        end
+        domains = rows.fetch('domains').map do |domain|
+          profile = limits.fetch(domain.fetch('limits'))
+          { 'principal' => domain.fetch('principal') + 1, 'spaces' => (profile.fetch('flags') & spaces).zero? ? 0 : 1,
+            'release' => domain.fetch('release'), 'release_files' => domain.fetch('release_files'),
+            'runtime' => domain.fetch('runtime'), 'memory' => profile.fetch('memory'), 'outer' => profile.fetch('outer'),
+            'grant' => profile.fetch('grant'), 'spaces_grant' => profile.fetch('spaces'),
+            'runtime_limits' => startup_limits(rows, domain.fetch('limits')),
+            'lane' => profile.fetch('lane'), 'connections' => profile.fetch('connections') }
+        end
+        { 'machine' => { 'max_domains' => max_domains, 'max_connections' => number(machine, 'max_connections'),
+                         'system_lane' => number(machine, 'system_lane'),
+                         'system_reserve' => number(machine, 'system_reserve'),
+                         'system_grant' => share(machine, 'system_share') },
+          'principals' => principals, 'files' => @context.catalog.map { |row| plan_file(row) }, 'domains' => domains }
+      end
+
+      # erx_runtime_limits_t from a limits record: its runtime-limits profile and its
+      # peer-held bounds.
+      def startup_limits(rows, index)
+        profile = rows.fetch('limits').fetch(index)
+        rows.fetch('runtime_limits').fetch(profile.fetch('runtime_limits')).except('name')
+            .merge(profile.slice('peer_held', 'peer_held_total'))
+      end
+
+      # A boot-image file as the library sees it; an image's manifest passes when its
+      # magic, version and ABI version are this build's.
+      def plan_file(row)
+        image = row['image']
+        accepted = image.is_a?(Hash) && image['magic'] == @codec.constant('image_magic') &&
+                   image['version'] == @codec.constant('image_version') && image['abi_version'] == @codec.abi_version &&
+                   image['flags'].is_a?(Integer)
+        { 'kind' => row.fetch('kind'), 'flags' => row.fetch('flags'), 'image_ok' => accepted ? 1 : 0,
+          'image_flags' => accepted ? image.fetch('flags') : 0 }
+      end
+
+      # The slot writer's roles: in Phase 1 the system domain writes the slots.
+      SLOT_WRITER_ROLES = %w[slot_a slot_b boot_selection reset_count].freeze
 
       def normalize_windows(devices, images)
         rows = records('window').map do |record|
-          holder = one(record, 'holder')
-          invalid('the system domain holds every window until the storage domain at M9', 8, 'window.holder') unless !holder.quoted && holder.value == 'system'
           role = window_role(record)
-          { 'holder' => @codec.constant('mf_none'), 'device' => window_device(record, devices),
-            'role' => role, 'partition' => window_partition(record, role),
+          slot_writer = SLOT_WRITER_ROLES.any? { |name| role == @codec.member('mf_window_role', name) }
+          invalid('only the system domain, the slot writer, holds the slot windows', 8, 'window.holder') if
+            slot_writer && !(one(record, 'holder').value == 'system' && !one(record, 'holder').quoted)
+          { 'holder' => holder_index(one(record, 'holder'), property: 8, field: 'window.holder'),
+            'device' => window_device(record, devices), 'role' => role, 'partition' => window_partition(record, role),
             'rights' => window_rights(record, role), 'image' => window_image(record, role) }
-                 .tap { |row| check_image_device(row, images) }
+            .tap { |row| check_image_device(row, images) }
         end
         placed = rows.map { |row| row.values_at('device', 'role', 'partition', 'image') }
         invalid('two windows name one role and partition', 8, 'window.partition') unless placed.uniq.size == placed.size
@@ -920,10 +1138,10 @@ module Erx
       end
 
       def window_device(record, devices)
-        path = text(record, 'device')
-        index = devices.index { |device| device['path'] == path && device.fetch('role') == device_role('block') }
-        index || invalid('window names no block device the system domain holds', 8, 'window.device')
+        block_device(text(record, 'device'), devices) || invalid('window names no block device the manifest places', 8, 'window.device')
       end
+
+      def block_device(path, devices) = devices.index { |device| device['path'] == path && device.fetch('role') == device_role('block') }
 
       def window_role(record)
         role = enum(record, 'role', 'mf_window_role')
@@ -968,11 +1186,10 @@ module Erx
         records('image').sort_by { |record| record.name.b }.each_with_object([[], []]) do |record, (images, extents)|
           invalid('image name is not a system identifier', 5, 'image.name') unless record.name.match?(Frontend::IDENTIFIER)
           invalid('an image without a hash tree takes no salt', 8, 'image.salt') if record.properties.key?('salt')
-          placed = checked_extents(image_artifact(record))
+          placed = checked_extents(artifact(record, 'input', 'erofs_image', property: 8, field: 'image.input'))
           bytes = placed.sum { |extent| extent.fetch('length') }
           invalid('an image is whole blocks', 8, 'image.input') unless (bytes % block_size).zero?
-          device = devices.index { |row| row['path'] == text(record, 'device') && row.fetch('role') == device_role('block') }
-          invalid('image names no block device the system domain holds', 8, 'image.device') unless device
+          device = block_device(text(record, 'device'), devices) || invalid('image names no block device the manifest places', 8, 'image.device')
           images << { 'name' => record.name.b, 'device' => device,
                       'format' => @codec.member('mf_image_format', 'erofs_unchecked'),
                       'extents' => { 'table' => 'extents', 'first' => extents.size, 'count' => placed.size },
@@ -980,15 +1197,6 @@ module Erx
                     .merge(NO_TREE)
           extents.concat(placed)
         end
-      end
-
-      # The artifact an image's input names, which the packer derived from the built image.
-      def image_artifact(record)
-        token = one(record, 'input')
-        named = !token.quoted && token.value.start_with?('@artifact.')
-        artifact = named ? @context.artifacts[token.value.delete_prefix('@artifact.')] : nil
-        invalid('image input names no image artifact of this pack', 8, 'image.input') unless artifact.is_a?(Hash) && artifact['kind'] == 'erofs_image'
-        artifact
       end
 
       # design-abi.md: nonempty, sorted and disjoint whole sectors, relative to the slot's
