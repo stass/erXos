@@ -648,6 +648,10 @@ it; git history is the record of completed work.
   or directly) or passes `Erx::SanitizerEnvironment.call` itself. A new test that runs a failing sanitized program
   without either falls back to macOS's `atos`, which can hang until the test's deadline. Load the fixture from one
   place every test loads, or add a check that fails on a test with `-fsanitize` that reaches neither.
+* [Low] test, `test/host/sanitizer_environment_test.rb` `test_a_thread_report_finishes_symbolized`: flaky under load. One
+  run printed nothing and still passed `assert_reported`, because the racing program returns `shared` (2), so an exit
+  without a TSan report looks like a failure. Return 0 from the program so a missed report fails plainly, then find why
+  TSan sometimes reports nothing for the two unordered increments (seen in the P4b gate run, passed on rerun).
 * [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: `tools/erx`'s entry `ensure` releases
   `build/gen.lock` before any compiler runs, so the long readers that follow do not hold it: the hosted liberx
   compiles and OTP's make with `-I$(ERX_GEN)` in `runtime.rb`, the fuzz compiles, the test pool's compilers, the
