@@ -112,10 +112,14 @@ module Erx
         liberx/backend/fiasco/watchdog_thread.h
         liberx/backend/fiasco/vm.c
         liberx/backend/fiasco/vm.h
+        liberx/backend/fiasco/object.c
+        liberx/backend/fiasco/object.h
         liberx/backend/core/vm_table.c
         liberx/backend/core/vm_table.h
         liberx/backend/core/grow_table.c
         liberx/backend/core/grow_table.h
+        liberx/backend/core/handles.c
+        liberx/backend/core/handles.h
         liberx/backend/core/boot_info.c
         liberx/backend/core/boot_info.h
         liberx/backend/core/boot_manifest.c
@@ -170,6 +174,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/function_api/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/function_api/device_cases.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/function_api/handle_cases.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),

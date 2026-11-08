@@ -20,6 +20,9 @@
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/umtx.h"
 
+/* A test task's handles: room enough for any test, and pages are taken only as they fill. */
+#define LAUNCHER_CAP_LIMIT	4096u
+
 static bool	launcher_path_equal(const uint8_t *, size_t, const char *);
 
 static bool
@@ -57,7 +60,7 @@ erx_fiasco_launch(uint32_t entry, uint32_t flags, uint64_t argument, uint64_t *t
 	int64_t ignored;
 	int status;
 
-	status = erx_space_create(0, ERX_CAP_SELF, 0, 0, flags, 0, &space);
+	status = erx_space_create(0, ERX_CAP_SELF, 0, 0, flags, LAUNCHER_CAP_LIMIT, &space);
 	if (status != ERX_OK)
 		return (status);
 	status = erx_image_map(space, 0, entry, &pc);

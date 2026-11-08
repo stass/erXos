@@ -170,6 +170,18 @@ it; git history is the record of completed work.
   a umtx wait on the semaphore the park shares, so an up the race left over returns that wait early and is
   gone before the quiet park looks. The quiet park catches only an up arriving after `settle`; a wait that
   does not block on the semaphore, or a zero-deadline down right after the race, would catch both.
+* [Medium] stopgap, `liberx/backend/fiasco/object.c`: only memory objects are on the object records and handle
+  tables. IRQ objects keep the root's table in `irq.c`, whose index the group's stub also uses as the ready
+  record (`group.c`, `erx_irq_bind`), and a space handle is still the task's index, which the launcher turns
+  into the ended semaphore's slot without the service (`launcher.c`). Both move onto records with BK8a's
+  groups and BK5's space tree (the 1b-A package plan). Until then their values overlap memory handles, so
+  `erx_cap_close` or `erx_object_destroy` given a space or IRQ handle acts on whatever memory entry has that number.
+* [Medium] stopgap, `liberx/backend/fiasco/object.c`: nothing records a memory object's mappings, so a map only
+  counts in the record, the count never falls, and a creator's destroy of a mapped object is `ERX_ENOTSUP`
+  instead of a revoke. BK3's mapping records replace the count, and the destroy revokes.
+* [Low] stopgap, `liberx/backend/fiasco/vm.c`: a physical object's device window pages and a contiguous object's
+  run are never given back, so a driver that makes and closes such objects in a loop uses the window or the
+  contiguous pool up for good; each object, not each task, now holds them.
 * [Medium] stopgap, `liberx/backend/fiasco/time.c`: the time page is the root's own page, not yet mapped read-only into a
   test task, whose reads need it; the second task's `erx_vm_map` is the mapping's way in.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`: the page index's label map (`vm_label_take`, `vm_label_put`, and

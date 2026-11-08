@@ -289,6 +289,36 @@ erx_image_map(uint64_t space, uint64_t image, uint64_t entry, uint64_t *start)
 }
 
 int
+erx_cap_dup(uint64_t cap, uint64_t *copy)
+{
+	const erx_fiasco_cap_request_t request = { .caller = erx_fiasco_thread_self()->index, .cap = cap };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_CAP_DUP, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*copy = reply.first;
+	return (status);
+}
+
+int
+erx_cap_close(uint64_t cap)
+{
+	const erx_fiasco_cap_request_t request = { .caller = erx_fiasco_thread_self()->index, .cap = cap };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_CAP_CLOSE, &request, sizeof(request), &reply));
+}
+
+int
+erx_object_destroy(uint64_t object)
+{
+	const erx_fiasco_cap_request_t request = { .caller = erx_fiasco_thread_self()->index, .cap = object };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_OBJECT_DESTROY, &request, sizeof(request), &reply));
+}
+
+int
 erx_space_stop(uint64_t space, int64_t status)
 {
 	const erx_fiasco_space_stop_request_t request = { .caller = erx_fiasco_thread_self()->index, .space = space,

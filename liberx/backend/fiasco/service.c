@@ -33,6 +33,7 @@
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/group.h"
+#include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/service_wire.h"
@@ -345,14 +346,13 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	case ERX_FIASCO_CALL_TIME_SET_WALL:
 		return (erx_fiasco_time_set_wall_body(((const erx_fiasco_time_set_wall_request_t *)words)->wall_ns));
 	case ERX_FIASCO_CALL_MEM_CREATE:
-		return (erx_fiasco_task_mem_create_body(decoded->task, ((const erx_fiasco_mem_create_request_t *)words)->size,
-		    ((const erx_fiasco_mem_create_request_t *)words)->flags, &reply->first));
+		return (erx_fiasco_task_mem_create_body(decoded->task, words, &reply->first));
 	case ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL:
 		return (erx_fiasco_task_mem_physical_body(decoded->task, words, &reply->first));
 	case ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS:
 		return (erx_fiasco_task_mem_contiguous_body(decoded->task, words, &reply->first));
 	case ERX_FIASCO_CALL_MEM_DMA_ADDR:
-		return (erx_fiasco_vm_object_dma_addr(decoded->task, ((const erx_fiasco_mem_dma_request_t *)words)->mem,
+		return (erx_fiasco_task_mem_dma_body(decoded->task, ((const erx_fiasco_mem_dma_request_t *)words)->mem,
 		    ((const erx_fiasco_mem_dma_request_t *)words)->offset, &reply->first));
 	case ERX_FIASCO_CALL_ENTROPY_READ:
 		return (erx_fiasco_entropy_read_body(&reply->first, &reply->second));
@@ -362,7 +362,13 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_task_vm_map_body(decoded->task, words));
 	case ERX_FIASCO_CALL_SPACE_CREATE:
 		return (erx_fiasco_task_create_body(decoded->task, ((const erx_fiasco_space_create_request_t *)words)->flags,
-		    &reply->first));
+		    ((const erx_fiasco_space_create_request_t *)words)->cap_limit, &reply->first));
+	case ERX_FIASCO_CALL_CAP_DUP:
+		return (erx_fiasco_cap_dup_body(decoded->task, ((const erx_fiasco_cap_request_t *)words)->cap, &reply->first));
+	case ERX_FIASCO_CALL_CAP_CLOSE:
+		return (erx_fiasco_cap_close_body(decoded->task, ((const erx_fiasco_cap_request_t *)words)->cap));
+	case ERX_FIASCO_CALL_OBJECT_DESTROY:
+		return (erx_fiasco_object_destroy_body(decoded->task, ((const erx_fiasco_cap_request_t *)words)->cap));
 	case ERX_FIASCO_CALL_IMAGE_MAP:
 		return (erx_fiasco_task_image_map_body(decoded->task, ((const erx_fiasco_image_map_request_t *)words)->space,
 		    ((const erx_fiasco_image_map_request_t *)words)->entry, &reply->first));

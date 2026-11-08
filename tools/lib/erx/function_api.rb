@@ -30,14 +30,17 @@ module Erx
     # The IRQ row: what both backends pass, and what holds only hosted (irq_cases.c).
     IRQ_CASES = %w[irq_refusals irq_ack_unbound irq_wakes_parked irq_objects_run_out].freeze
     HOSTED_IRQ_CASES = %w[irq_refusals irq_ack_unbound irq_line_refused irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
-    # The devices' row: what takes a device natively, and hosted, that there is none.
-    DEVICE_CASES = %w[physical_reads_registers physical_refusals contiguous_runs contiguous_device_writes].freeze
+    # The devices' row: what takes a device natively, then the handle cases, whose calls only
+    # native has; and hosted, that there is no device.
+    DEVICE_CASES = %w[physical_reads_registers physical_refusals contiguous_runs contiguous_device_writes
+                      generations stale_handle dup_and_close].freeze
     HOSTED_DEVICE_CASES = %w[mem_device_refused].freeze
     LAST_CASE = 'indices_run_out'
     GUEST = HostedSources::GUEST
     HOSTED_SOURCES = HostedSources::ALL
     NATIVE_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'liberx/backend/core/refused.c',
-                      'liberx/backend/fiasco/api_names.c', 'build/gen/liberx/generated/abi_reader.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c", "#{GUEST}/device_cases.c"].freeze
+                      'liberx/backend/fiasco/api_names.c', 'build/gen/liberx/generated/abi_reader.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c", "#{GUEST}/device_cases.c",
+                      "#{GUEST}/handle_cases.c"].freeze
     # Each case's patience in the guest is 60 seconds: a stall fails its own line.
     CASE_SECONDS = 90
     # The join loop's deletions each wait for a grace period, which across CPUs under TCG takes far longer.
@@ -88,7 +91,8 @@ module Erx
 
       def image(fiasco)
         root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                              .build(name: 'function-api-root', sources: NATIVE_SOURCES, directory: File.join(@build, 'root'))
+                              .build(name: 'function-api-root', sources: NATIVE_SOURCES, directory: File.join(@build, 'root'),
+                                     flags: ['-DERX_FIASCO_TEST_HOOKS'])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
       end

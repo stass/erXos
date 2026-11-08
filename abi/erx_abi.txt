@@ -348,6 +348,9 @@ enum fiasco_call u32
   value task_write 23
   value log_read 24
   value object_info 25
+  value cap_dup 26
+  value cap_close 27
+  value object_destroy 28
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
@@ -624,6 +627,12 @@ layout erx_fiasco_space_stop_request wire_le 8 24
 layout erx_fiasco_task_join_request wire_le 8 16
   field caller u64 0
   field task u64 8
+
+# erx_cap_dup, erx_cap_close and erx_object_destroy, each naming one handle of
+# the caller's own table; a dup's copy is the reply's first word.
+layout erx_fiasco_cap_request wire_le 8 16
+  field caller u64 0
+  field cap u64 8
 
 layout erx_fiasco_reply wire_le 8 32
   field status i64 0

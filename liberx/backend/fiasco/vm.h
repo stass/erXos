@@ -42,7 +42,7 @@ extern const erx_backend_grow_pages_t erx_fiasco_vm_records;
  * the pool cannot hold its record or every label of the page index is held.
  */
 int	erx_fiasco_vm_task_open(uint32_t task) ERX_WARN_UNUSED_RESULT;
-/* Gives back every page of a task and of its objects: the task's space must be gone. */
+/* Gives back every page of a task's range table: the task's space must be gone. */
 void	erx_fiasco_vm_task_close(uint32_t task);
 /* The window page behind a task's committed address, or 0. */
 uintptr_t	erx_fiasco_vm_task_window(uint32_t task, uint64_t addr);
@@ -55,27 +55,29 @@ int	erx_fiasco_vm_body(uint32_t task, erx_backend_vm_op_t op, uint64_t addr, uin
 	    uint32_t word, uint64_t *reserved) ERX_WARN_UNUSED_RESULT;
 
 /*
- * A shared object of the task's, every page taken at once (docs/design-stopgap.md,
- * "Shared objects and the JIT alias"). No room for it or no pages is ERX_ENOMEM. It
- * lives as long as the task.
+ * The pages of the memory object whose record object.c took at this index, every page
+ * taken at once (docs/design-stopgap.md, "Shared objects and the JIT alias"). No room
+ * for it or no pages is ERX_ENOMEM, and then it holds nothing. object.c frees it.
  */
-int	erx_fiasco_vm_object_create(uint32_t task, uint64_t size, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_vm_object_create(uint32_t object, uint64_t size) ERX_WARN_UNUSED_RESULT;
+/* Gives back a memory object's pages and label; nothing may map it any more. */
+void	erx_fiasco_vm_object_free(uint32_t object);
 /*
  * An object over a device's registers, mapped at a device window address and from
- * there anywhere its task reserves. A full window, or no slot, is ERX_ENOMEM;
+ * there anywhere its task reserves. A full window is ERX_ENOMEM;
  * sigma0's refusal, which RAM gets, is ERX_ERANGE. Its arguments are checked already.
  */
-int	erx_fiasco_vm_physical_create(uint32_t task, uint64_t base, uint64_t size, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_vm_physical_create(uint32_t object, uint64_t base, uint64_t size) ERX_WARN_UNUSED_RESULT;
 /*
  * An object over a zeroed run of the contiguous pool, wholly below device address
- * limit (0 for none). No such run, or no slot, is ERX_ENOMEM. Its size is checked
+ * limit (0 for none). No such run is ERX_ENOMEM. Its size is checked
  * already. The run stays held when the object goes: a device may still write it.
  */
-int	erx_fiasco_vm_contiguous_create(uint32_t task, uint64_t size, uint64_t limit, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit) ERX_WARN_UNUSED_RESULT;
 /* A contiguous object's device address at an offset in it; another kind of object is ERX_ETYPE, an offset past it ERX_ERANGE. */
-int	erx_fiasco_vm_object_dma_addr(uint32_t task, uint64_t handle, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_vm_object_dma_addr(uint32_t object, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
 /* Maps an object's pages into its own task: vm_table.h lists each refusal. A device's object mapped to run is ERX_ERIGHTS. */
-int	erx_fiasco_vm_object_map(uint32_t task, uint64_t handle, uint64_t addr, uint64_t size,
+int	erx_fiasco_vm_object_map(uint32_t task, uint32_t object, uint64_t addr, uint64_t size,
 	    uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 
 /* Without ERX_VM_FIXED the address is ignored; *reserved says where it landed. */

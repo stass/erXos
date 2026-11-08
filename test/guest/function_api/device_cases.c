@@ -9,6 +9,9 @@
  * and which needs no driver to prove the two things a driver depends on: its registers
  * answer through a physical object, and it writes memory at the address
  * erx_mem_dma_addr gives, which only holds if that address is really the device's.
+ *
+ * The list ends with handle_cases.c's cases, which take no device but have calls only
+ * native offers, so hosted holds them with its own handle rows.
  */
 
 #include <stdbool.h>
@@ -22,6 +25,9 @@
 
 extern const function_api_case_t function_api_device_cases[];
 extern const size_t function_api_device_case_count;
+bool	function_api_case_generations(void);
+bool	function_api_case_stale_handle(void);
+bool	function_api_case_dup_and_close(void);
 
 /* QEMU's docs/specs/fw_cfg.rst and hw/arm/virt.c. Each register and field is big-endian. */
 #define FW_CFG_PHYS		UINT64_C(0x9020000)
@@ -140,5 +146,9 @@ const function_api_case_t function_api_device_cases[] = {
 	{ "physical_refusals", case_physical_refusals },
 	{ "contiguous_runs", case_contiguous_runs },
 	{ "contiguous_device_writes", case_contiguous_device_writes },
+	/* generations first: handle_cases.c says why. */
+	{ "generations", function_api_case_generations },
+	{ "stale_handle", function_api_case_stale_handle },
+	{ "dup_and_close", function_api_case_dup_and_close },
 };
 const size_t function_api_device_case_count = sizeof(function_api_device_cases) / sizeof(function_api_device_cases[0]);

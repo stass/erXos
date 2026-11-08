@@ -43,8 +43,9 @@ uint64_t	erx_fiasco_task_ended_cap(uint64_t task);
 uint64_t	erx_fiasco_service_thread(void);
 
 /*
- * Task calls of the call table. parent, fault, label, budget and cap_limit are accepted
- * and ignored; only the root makes a task. image is ignored and entry is the boot
+ * Task calls of the call table. parent, fault, label and budget are accepted and
+ * ignored; cap_limit bounds the task's handle table, counting ERX_CAP_NULL as erXos's
+ * kernel does, and outside 2 to ERX_CAPS_MAX is ERX_EINVAL; only the root makes a task. image is ignored and entry is the boot
  * archive's; *start is where the task's first thread will start. A task stops itself
  * with ERX_CAP_SELF, and on success that call does not return; the root may stop a task.
  */
@@ -52,6 +53,18 @@ int	erx_space_create(uint64_t budget, uint64_t parent, uint64_t fault, uint64_t 
 	    uint32_t cap_limit, uint64_t *space) ERX_WARN_UNUSED_RESULT;
 int	erx_image_map(uint64_t space, uint64_t image, uint64_t entry, uint64_t *start) ERX_WARN_UNUSED_RESULT;
 int	erx_space_stop(uint64_t space, int64_t status);
+
+/*
+ * Handle calls (docs/design-stopgap.md, "Capabilities in Fiasco's object space"): a
+ * handle that is no entry in use is ERX_EINVAL, one whose object has gone ERX_ESTALE.
+ * A dup into a full table is ERX_ELIMIT. A close frees the entry, a stale one too,
+ * and the object goes with its last handle unless it is mapped. A destroy from a task
+ * other than the object's creator's is ERX_ERIGHTS, and of a mapped object
+ * ERX_ENOTSUP; the handles to a destroyed object stay, answering ERX_ESTALE.
+ */
+int	erx_cap_dup(uint64_t cap, uint64_t *copy) ERX_WARN_UNUSED_RESULT;
+int	erx_cap_close(uint64_t cap) ERX_WARN_UNUSED_RESULT;
+int	erx_object_destroy(uint64_t object) ERX_WARN_UNUSED_RESULT;
 int	erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes,
 	    erx_fiasco_reply_t *reply);
 

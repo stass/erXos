@@ -33,6 +33,7 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/core/device_check.h"
 #include "liberx/backend/core/grow_table.h"
+#include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/trace.h"
@@ -51,6 +52,9 @@ static void	task_teardown(uint32_t);
 static void	task_end(uint32_t, int64_t);
 static void	task_delete(uint64_t);
 static bool	task_segment_load(uint32_t, const uint8_t *, const erx_elf_load_t *, uint64_t);
+static int	task_fill_pages(uint32_t, const void *);
+static int	task_fill_physical(uint32_t, const void *);
+static int	task_fill_contiguous(uint32_t, const void *);
 
 _Static_assert(sizeof(erx_fiasco_task_t) <= ERX_PAGE_SIZE, "a task's row fits a page of its table");
 
@@ -77,9 +81,14 @@ erx_fiasco_task_live(uint32_t task)
 const char *
 erx_fiasco_task_table_init(void)
 {
+	const char *reason;
+
 	erx_backend_grow_table_init(&task_rows, sizeof(erx_fiasco_task_t), &erx_fiasco_vm_records);
 	if (erx_backend_grow_table_room(&task_rows, 1) != ERX_OK)
 		return ("memory: the pool cannot hold the task table");
+	reason = erx_fiasco_object_init();
+	if (reason != NULL)
+		return (reason);
 	erx_fiasco_task(ERX_FIASCO_TASK_ROOT)->state = ERX_FIASCO_TASK_LIVE;
 	erx_fiasco_task(ERX_FIASCO_TASK_ROOT)->threads[0] = ERX_FIASCO_TASK_THREAD_STARTED;
 	return (NULL);
@@ -213,21 +222,26 @@ task_objects_make(uint32_t task)
 }
 
 int
-erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space)
+erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t cap_limit, uint64_t *space)
 {
 	uint32_t task = 1;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
-	if ((flags & ~(uint64_t)ERX_SPACE_JIT) != 0)
+	if ((flags & ~(uint64_t)ERX_SPACE_JIT) != 0 || cap_limit < 2 || cap_limit > ERX_CAPS_MAX)
 		return (ERX_EINVAL);
 	while (task < erx_backend_grow_table_capacity(&task_rows) && erx_fiasco_task(task)->state != ERX_FIASCO_TASK_ABSENT)
 		task++;
 	/* A row past the capacity takes a page that stays the table's if the range table cannot open. */
 	if (erx_backend_grow_table_room(&task_rows, task + 1) != ERX_OK)
 		return (ERX_ENOMEM);
-	if (erx_fiasco_vm_task_open(task) != ERX_OK)
+	/* As on erXos's kernel, the limit counts slot 0, ERX_CAP_NULL, which no entry is. */
+	if (erx_fiasco_object_task_open(task, (uint32_t)cap_limit - 1) != ERX_OK)
 		return (ERX_ENOMEM);
+	if (erx_fiasco_vm_task_open(task) != ERX_OK) {
+		erx_fiasco_object_task_close(task);
+		return (ERX_ENOMEM);
+	}
 
 	*erx_fiasco_task(task) = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_LIVE, .flags = (uint32_t)flags };
 	if (!task_objects_make(task)) {
@@ -333,6 +347,7 @@ task_teardown(uint32_t task)
 	task_delete(erx_fiasco_task_gate_cap(task));
 	task_delete(erx_fiasco_task_cap(task));
 	erx_fiasco_vm_task_close(task);
+	erx_fiasco_object_task_close(task);
 }
 
 /* A task that ran ends here. The row keeps its status for the join, which the ended semaphore's up lets go. */
@@ -378,13 +393,36 @@ erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status)
 }
 
 int
-erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, uint64_t *mem)
+erx_fiasco_task_mem_create_body(uint32_t caller, const erx_fiasco_mem_create_request_t *request, uint64_t *mem)
 {
-	if ((flags & ~(uint64_t)ERX_MEM_JIT) != 0 || size == 0 || (size & ERX_BACKEND_VM_PAGE_MASK) != 0)
+	if ((request->flags & ~(uint64_t)ERX_MEM_JIT) != 0 || request->size == 0 ||
+	    (request->size & ERX_BACKEND_VM_PAGE_MASK) != 0)
 		return (ERX_EINVAL);
-	if ((flags & ERX_MEM_JIT) != 0 && (erx_fiasco_task(caller)->flags & ERX_SPACE_JIT) == 0)
+	if ((request->flags & ERX_MEM_JIT) != 0 && (erx_fiasco_task(caller)->flags & ERX_SPACE_JIT) == 0)
 		return (ERX_ERIGHTS);
-	return (erx_fiasco_vm_object_create(caller, size, mem));
+	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_pages, request, mem));
+}
+
+static int
+task_fill_pages(uint32_t object, const void *request)
+{
+	return (erx_fiasco_vm_object_create(object, ((const erx_fiasco_mem_create_request_t *)request)->size));
+}
+
+static int
+task_fill_physical(uint32_t object, const void *request)
+{
+	const erx_fiasco_mem_physical_request_t *const physical = request;
+
+	return (erx_fiasco_vm_physical_create(object, physical->base, physical->size));
+}
+
+static int
+task_fill_contiguous(uint32_t object, const void *request)
+{
+	const erx_fiasco_mem_contiguous_request_t *const contiguous = request;
+
+	return (erx_fiasco_vm_contiguous_create(object, contiguous->size, contiguous->limit));
 }
 
 /*
@@ -413,7 +451,7 @@ erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical
 
 	if (status != ERX_OK)
 		return (status);
-	status = erx_fiasco_vm_physical_create(caller, request->base, request->size, mem);
+	status = erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_physical, request, mem);
 	if (status == ERX_OK && console_base != 0 && request->base == console_base)
 		erx_debug_log_hand_to_reader();
 	return (status);
@@ -426,19 +464,37 @@ erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contig
 
 	if (status != ERX_OK)
 		return (status);
-	return (erx_fiasco_vm_contiguous_create(caller, request->size, request->limit, mem));
+	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_contiguous, request,
+	    mem));
 }
 
 /* A task's objects map into the task alone: nothing yet maps one across tasks. */
 int
 erx_fiasco_task_vm_map_body(uint32_t caller, const erx_fiasco_vm_map_request_t *request)
 {
+	uint32_t object;
+	int status;
+
 	if (request->space != ERX_CAP_SELF)
 		return (ERX_ENOTSUP);
 	if (request->prot > UINT32_MAX)
 		return (ERX_EINVAL);
-	return (erx_fiasco_vm_object_map(caller, request->mem, request->addr, request->size, request->offset,
-	    (uint32_t)request->prot));
+	status = erx_fiasco_object_find(caller, request->mem, ERX_BACKEND_OBJECT_MEMORY, &object);
+	if (status == ERX_OK)
+		status = erx_fiasco_vm_object_map(caller, object, request->addr, request->size, request->offset,
+		    (uint32_t)request->prot);
+	if (status == ERX_OK)
+		erx_fiasco_object_mapped(object);
+	return (status);
+}
+
+int
+erx_fiasco_task_mem_dma_body(uint32_t caller, uint64_t mem, uint64_t offset, uint64_t *addr)
+{
+	uint32_t object;
+	const int status = erx_fiasco_object_find(caller, mem, ERX_BACKEND_OBJECT_MEMORY, &object);
+
+	return (status != ERX_OK ? status : erx_fiasco_vm_object_dma_addr(object, offset, addr));
 }
 
 void

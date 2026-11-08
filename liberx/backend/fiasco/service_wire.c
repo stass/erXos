@@ -81,6 +81,10 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_space_stop_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_TASK_JOIN:
 		return (sizeof(erx_fiasco_task_join_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_CAP_DUP:
+	case ERX_FIASCO_CALL_CAP_CLOSE:
+	case ERX_FIASCO_CALL_OBJECT_DESTROY:
+		return (sizeof(erx_fiasco_cap_request_t) / sizeof(uint64_t));
 	default:
 		return (0);
 	}
