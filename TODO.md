@@ -1024,6 +1024,10 @@ it; git history is the record of completed work.
   `enametoolong`, and every entry lies over one tree.
 * [Low] runtime, `erx_ns`: `which/1` and `list/0` of
   [design-files.md](docs/design-files.md#interfaces) are not written.
+* [Low] test, `test/host/space_test.rb`: `test_the_drops_of_a_hold_race_under_thread_sanitizer` fails on this host:
+  the seeded relaxed drop exits with an error, but its log holds no `ThreadSanitizer: data race` line (the
+  assertion reads an empty log). Seen twice in a row on Apple Silicon macOS with Homebrew LLVM 23.1.3, under
+  `make check` and alone. Find whether the log path or TSan's report is missing before trusting the seeded race.
 * [Low] /tmp, `test/host/erx_ramfs_test.rb`: `test_seeded_fault_2_is_caught` expects the mutant to fail
   `a_dead_owners_open_file_gives_back_what_it_held_test`, but under load (a full `make check`) the mutant runs into
   EUnit's timeout in `wait_free/3` first and the case reads `*timed out*`, so the seeded-fault test fails though the
