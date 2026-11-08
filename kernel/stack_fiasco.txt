@@ -45,6 +45,21 @@ leaf erx_effect_budget_unlock 128
 # unmeasured budget the glue's function must meet.
 leaf erx_effect_thread_epoch 64
 
+# The grace tracker's and the page funnel's effects (include/erx/grace.h,
+# include/erx/page.h): the tracker's, the released list's and a reserve
+# owner's locks, the allocator's take and put under its own lock, and
+# zeroing a page. Unmeasured budgets the glue's
+# functions must meet.
+leaf erx_effect_grace_lock 128
+leaf erx_effect_grace_unlock 128
+leaf erx_effect_released_lock 128
+leaf erx_effect_released_unlock 128
+leaf erx_effect_reserve_lock 128
+leaf erx_effect_reserve_unlock 128
+leaf erx_effect_page_alloc 256
+leaf erx_effect_page_zero 64
+leaf erx_effect_page_free 256
+
 # The debug log's effects (include/erx/core/effects.h), which the glue
 # provides over a Spin_lock, Timer::system_clock and Fiasco's console. The
 # costs declared are unmeasured budgets those functions must meet, the

@@ -79,7 +79,10 @@ class StackProofInputTest < Minitest::Test
     assert_equal 8192, budget.block_bytes
     assert_includes budget.tick_entries, 'erx_watchdog_step'
     assert_equal %w[erx_effect_budget_lock erx_effect_budget_unlock erx_effect_clock_ns erx_effect_console_write
-                    erx_effect_log_lock erx_effect_log_unlock erx_effect_thread_epoch memcpy memset], budget.leaves.keys.sort
+                    erx_effect_grace_lock erx_effect_grace_unlock erx_effect_log_lock
+                    erx_effect_log_unlock erx_effect_page_alloc erx_effect_page_free erx_effect_page_zero erx_effect_released_lock
+                    erx_effect_released_unlock erx_effect_reserve_lock erx_effect_reserve_unlock
+                    erx_effect_thread_epoch memcpy memset], budget.leaves.keys.sort
     targets = Input.targets(File.read(File.join(ROOT, 'kernel/stack_targets.txt')), path: 'kernel/stack_targets.txt')
     assert_empty targets.callers
   end

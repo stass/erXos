@@ -24,12 +24,14 @@ module Erx
         # sources alike.
         Chokepoints::Forbidden.new(
           name: 'budget-records-private',
-          rule: "only kernel/core/budget.c and its host driver include #{BUDGET_IMPL}, and no other file " \
+          rule: "only kernel/core/budget.c, its host driver and kernel/core/page.c, which moves a reserve's " \
+                "pool chain, include #{BUDGET_IMPL}, and no other file " \
                 'names struct erx_budget or struct erx_reserve but to refer to it',
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
           pattern: Regexp.union(BUDGET_IMPL_INCLUDE, BUDGET_RECORD_USE),
           sites: [Chokepoints::Site.new(glob: 'kernel/core/budget.c', permits: BUDGET_IMPL_INCLUDE),
+                  Chokepoints::Site.new(glob: 'kernel/core/page.c', permits: BUDGET_IMPL_INCLUDE),
                   Chokepoints::Site.new(glob: BUDGET_DRIVER, permits: BUDGET_IMPL_INCLUDE),
                   Chokepoints::Site.new(glob: BUDGET_IMPL, permits: BUDGET_RECORD_USE)],
           seed: { 'kernel/core/kalloc.c' => "#include \"erx/x.h\"\n  #  include \"budget_impl.h\"\nb->used++;\n",

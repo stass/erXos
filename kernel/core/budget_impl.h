@@ -8,14 +8,16 @@
 
 /*
  * The budget core's records. Only kernel/core/budget.c includes this
- * file (and the core's host test driver), which the budget-records-private
- * chokepoint enforces, so every write of a counter is in budget.c.
+ * file (and the core's host test driver), with kernel/core/page.c, which
+ * moves a reserve's pool chain and nothing else; the budget-records-private
+ * chokepoint enforces it, so every write of a counter is in budget.c.
  */
 
 #include <stdatomic.h>
 #include <stdbool.h>
 
 #include "erx/budget.h"
+#include "erx/page.h"
 
 struct erx_budget {
 	erx_budget_t	*parent;	/* NULL for the root; fixed */
@@ -43,6 +45,10 @@ struct erx_reserve {
 	erx_npages_t	 charged;	/* promises admitted at the budget */
 	erx_npages_t	 backed;	/* pages held, in use or pooled */
 	erx_npages_t	 pooled;	/* backed pages not yet in use */
+	erx_plist_t	 pool;		/* those pages, chained through their
+					 * page records; only kernel/core/page.c
+					 * moves them, under the owner's lock of
+					 * the step that counts them */
 };
 
 #endif /* ERX_BUDGET_IMPL_H */

@@ -3887,7 +3887,9 @@ total and written in one place, `kernel/core/lock_order.h`:
    lock also covers its record caches, and arming or clearing a budget's
    watch takes the IRQ object's capability lock, at 2, before the
    budget's, holding no other capability lock ([Budgets](#budgets));
-7. the released list, which a release takes alone and which a reaper
+7. the released list, which a release takes inside its reserve owner's
+   lock (a space's or a memory object's) and
+   which a reaper
    step or the backing of a charge takes before the allocator's, so
    that what it finds on the list and on the free lists is one
    observation ([The reaper](#the-reaper));
@@ -7092,7 +7094,9 @@ It appends the pages a part releases to the machine-wide **released
 list** as one **batch**, chained through their page records, stamped by
 the tracker's retire (**Stamps** below), under the list's lock; then it
 takes them out of the reserve's `backed` and `charged` and refunds their
-charge through the chain plan, in the same bounded part. The append
+charge through the chain plan, in the same bounded part, all under the
+owner's lock, so that the pooled pages it moves off the pool's chain and
+the pool's count change in one hold. The append
 comes first, so a charge admitted on the refund finds the pages on the
 list already. The list is in append order and stamps never decrease
 along it, so the head's period ends first. A released page belongs to
@@ -7110,11 +7114,17 @@ is in progress exactly while it is. A release, a put or a record free is
 **retired** through one function, `erx_grace_retire`, which, under the
 tracker's lock, a ticket lock at level 9 of the order (K13), returns the
 item's stamp, the current count plus one, and requests that period: if
-none is in progress it starts it there, taking the set of active CPUs it
+none is in progress it starts it there, taking the set of online CPUs it
 must hear from, as Fiasco's `start_batch` does, and otherwise marks it
 pending, so that the completion of the period in progress starts it at
 once, which is what Fiasco's `process_callbacks` does for a callback
-(`rcupdate.cpp`). A stamped item is mature once the completed count has
+(`rcupdate.cpp`). The tracker keeps that set itself: a CPU joins it when
+it comes online, and leaves it at a quiescent point through
+`erx_grace_cpu_leave`, which counts as its report for the period in
+progress and keeps it out of every later one, as Fiasco's Rcu does for
+a CPU going offline; so a period that a requested one starts on
+completion awaits only CPUs that will report, and no period waits for
+a CPU that has gone. A stamped item is mature once the completed count has
 reached its stamp, compared as plain integers. The stamp must name a
 period that **begins after the retirement**: a period already in
 progress may have heard from a CPU before the release, and that CPU may
@@ -7458,17 +7468,25 @@ is the one cost the budgets do not wall off, stated with its bound in
 
 **The interface every implementation's page funnel meets.** Six
 entries, and no other path to a page: `erx_reserve_charge(reserve, n)`
-admits and then backs, under the owner's existence lock, and takes
-nothing when the charge is refused; `erx_reserve_cancel(reserve, k)`
+admits, under the owner's existence lock, and takes nothing when the
+charge is refused, and `erx_backing_step` then backs it, one part a
+call, returning to its caller between parts to pass a preemption
+point, to wait for the hand's grace period, or to report a closed
+existence lock, so the backing is a step over its own state that
+takes its locks and pages through effects, and its caller owns the
+preemption points; `erx_reserve_cancel(reserve, k)`
 gives back promises a backing did not take, and is called only by the
 backing that made them, when it finds its owner closed;
 `erx_reserve_take(reserve)` moves a page from a reserve's pool into use,
 under the owner's lock, zeroing it, and is the only way a page comes
-into use; `erx_page_release(reserve, pages)` retires, appends and then
-refunds, in one part, and is the only way a held page's hold and promise
-end; `erx_released_take(n)`, the only way pages leave the released list,
-serves the free step, which puts mature pages on the free lists through
-`erx_page_free`, the sink, and the backing, which keeps what it takes;
+into use; `erx_page_release(reserve, in_use, from_pool)` retires,
+appends and then refunds, in one part, the pages in use it is handed
+and that many pages of the pool, and is the only way a held page's
+hold and promise end; `erx_released_free(n)`, the free step, moves
+mature pages from the head of the released list to the free lists
+through `erx_page_free`, the sink, in one hold of the list's lock, so no
+page is ever between the two, and it and the backing, which keeps what
+it takes, are the only unlinks from the list;
 and the boot allocator exists only before the root budget does. Beneath
 them the tracker's one retire, `erx_grace_retire`, stamps every release,
 put and record free at its retirement, and the list's, the allocator's
@@ -8540,7 +8558,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | every return to user mode passes the one decision of deaths, stops, holds and upcalls (K18, K29, K30) | the exit path, which alone holds exception-return instructions besides the boot entry's drop, calls `erx_return_check` before it restores the user registers; a space's hold count and its `quiesced` mark are read only there and in the space core's pause, resume, quiesce and copy functions, and changed only by them: the `holds` word, the pause count and the slots' tickets in `erx_space_pause` and `erx_space_resume`, `quiesced` set where the active count falls to zero under a hold, in the call boundary's decrement and in `erx_space_pause`, and cleared in `erx_space_resume`; `att_quiescers` woken only by the space core's one quiesce completion, called where the mark is set, in `erx_space_resume` for every quiescer waiting under the ticket it resumes, whatever other holds remain, in `erx_space_stop` and in the space's teardown | disassembly, syntax trees |
 | only `erx_vcpu_control` arms a thread for upcalls (K20) | the thread's armed flag written only in `erx_vcpu_control`, which checks the class, and in the thread's teardown | syntax trees |
 | kernel memory is allocated only through the budget-charging funnel (K3) | the page allocator's take and put referenced only from the backing of `erx_reserve_charge` and the free step, in `kernel/core/page.c`, and the boot allocator only from boot code | relocations |
-| a page enters a reserve only by the backing of a charge, comes into use only through `erx_reserve_take`, is released only through `erx_page_release`, which retires it and appends it to the released list before it refunds its charge, and leaves the list only through `erx_released_take`, after its grace period unless a backing takes it and waits that period itself; an admission not backed is cancelled only by its own backing, and every stamp comes from the tracker's retire (K6, K9, K32) | a reserve's `charged` and `backed` and its pool's insert written only in `erx_reserve_charge`, `erx_reserve_cancel`, `erx_page_release` and the backing's install in `kernel/core/page.c`, `erx_reserve_cancel` referenced only from the backing, the pool's remove only in `erx_reserve_take`, the released list's append only in `erx_page_release`, a page's refund only there, the list's unlink only in `erx_released_take`, which the free step in `kernel/core/reaper.c` and the backing alone call, and the tracker's current and completed counts written only in `kernel/core/grace.c` and read for a stamp only by `erx_grace_retire`, with a seeded release that refunds first, a seeded fault that takes a page from the allocator, a seeded backing that releases its own hand and a seeded append that stamps the current count | relocations, syntax trees |
+| a page enters a reserve only by the backing of a charge, comes into use only through `erx_reserve_take`, is released only through `erx_page_release`, which retires it and appends it to the released list before it refunds its charge, and leaves the list only through the backing or `erx_released_free`, after its grace period unless a backing takes it and waits that period itself; an admission not backed is cancelled only by its own backing, and every stamp comes from the tracker's retire (K6, K9, K32) | a reserve's counts changed only by the budget core's reserve steps, each called only by its one entry of `kernel/core/page.c` (`erx_reserve_admit` by `erx_reserve_charge`, `erx_reserve_fill` and `erx_reserve_cancel` by `erx_backing_step`, `erx_reserve_use` by `erx_reserve_take`, `erx_reserve_refund` by `erx_page_release`), the pool's chain moved only in `kernel/core/page.c`, under the owner's lock of the step that counts it, the released list's append only in `erx_page_release`, a page's refund only there, the list's unlink only in `kernel/core/page.c`, by the backing and by `erx_released_free`, the free step that the reaper's steps in `kernel/core/reaper.c` call, and the allocator's take and put named only there, and the tracker's current and completed counts written only in `kernel/core/grace.c` and read for a stamp only by `erx_grace_retire`, with a seeded release that refunds first, a seeded fault that takes a page from the allocator, a seeded backing that releases its own hand and a seeded append that stamps the current count | relocations, syntax trees |
 | only `erx_pte_make` builds a user translation entry, and only `erx_cow_install` makes a child's page its own (K22) | the entry encoder and the child's page-tree insert referenced only from those functions | relocations |
 | the kernel never accesses memory through a user address (K7) | the architecture's unprivileged access forms appear nowhere in the kernel image; an integer becomes a pointer only in the converters of [Typed values](#typed-values) and the generated accessors; `erx_uword_t` read only by `erx_uword_load`, which reads descriptors and the word only through the direct map, and loads the word only after checking its page against the direct map's ranges | disassembly, syntax trees, with a seeded walk that skips the check |
 | no store is lost when a translation goes | the freeing of a plan's cleared entries and detached tables referenced only from the plan's last step, which calls `erx_vm_fold` on every cleared entry of a shared object's page before it frees anything | relocations, syntax trees |

@@ -1068,19 +1068,52 @@ it; git history is the record of completed work.
   overlaps allowed (`efi-support.cc`, `ram->add(..., true)`), so QEMU
   `virt` booted from a device tree is unaffected. Found by reading, not
   reproduced; fix with a regression test before any EFI boot path is used.
+* [Medium] Kernel page funnel, `kernel/core/page.c` and
+  `kernel/core/page_impl.h`: a page record holds only its link and stamp,
+  so nothing says where a page is. `erx_page_release` checks counts, not
+  which pages its in-use chain holds, and `erx_plist_push` cannot see a
+  page already on a chain, so a kernel path that releases a page twice or
+  another reserve's page corrupts the released list silently. Add the
+  design's owner and a place tag to the record, set by every push, pop and
+  splice, and refuse a release or push whose pages are not where it says
+  with `ERX_EINVAL` before anything changes.
+* [Medium] Kernel page funnel, `include/erx/page.h`: `erx_backing_step`
+  leaves to each caller the duties of stepping to `ERX_BACKING_DONE` or
+  `ERX_BACKING_CANCELLED` (a caller that stops early leaks its hand and an
+  admission stays counted) and of reading its existence locks for
+  `closed`. Give the stepper one caller, the backing loop that owns the
+  preemption points, with a call-graph chokepoint, and the same for
+  `erx_released_free` and the reaper's step. The members of `erx_plist_t`
+  and `erx_backing_t` are public in the header with no rule keeping other
+  files out of them; add one with P6's cross-cutting chokepoints.
+* [Medium] docs/design-kernel.md, lock order and **Backing a charge**:
+  the lock of a budget's record cache has no level. Item 6 says a budget's
+  lock covers its caches, `include/erx/budget.h` says the cache's lock is
+  its own, and `erx_kalloc`'s dead-budget path releases a page "under the
+  budget's lock", where `erx_page_release` takes the owner's lock and the
+  refund takes the budget's chain. Settle the cache's owner lock and its
+  level with the record cache.
+* [Low] Page funnel tests, `test/host/page_test.rb` and
+  `tools/fuzz/page_fuzz.c`: the drivers cannot see a reserve's pool chain,
+  so they count pooled pages by exclusion and never walk the chain; and
+  neither drives a take or release of a reserve while its own backing is
+  under way, or a release the reserve cannot cover (refused before the
+  core in the fuzz target). `erx_page_release` repeats
+  `erx_reserve_refund`'s count checks so that the refund cannot fail after
+  the append; one predicate exported by the budget core would keep them
+  one.
 * [Medium] Kernel budget core, `kernel/core/budget.c` and
   `kernel/core/budget_impl.h`: the record carries its own `parent`
   pointer and takes its lock through `erx_effect_budget_lock`, standing
   in for the object header's budget field and the core's ticket lock
-  (`erx_spinlock_t`), and the reserve record holds the pool's count but
-  not its chain of page records. When the object header, the ticket lock
-  and the page core (`kernel/core/page.c`) land, embed them in the
-  records, drop the lock effect, give `page.c` the pool chain (adding it
-  to the `budget-records-private` chokepoint of
-  `tools/lib/erx/chokepoint_rules/budget.rb`), and compose
-  `erx_reserve_charge`, `erx_reserve_take` and `erx_page_release` there
-  from `erx_reserve_admit`, `erx_reserve_fill`, `erx_reserve_cancel`,
-  `erx_reserve_use` and `erx_reserve_refund`. The record cache, the lists
+  (`erx_spinlock_t`), and the reserve record holds the pool's count
+  beside the chain that `kernel/core/page.c` moves, so
+  the two agree because only `page.c` calls the steps (its call-graph
+  chokepoints) and checks them in host and debug builds. When the object
+  header and the ticket lock land, embed them in the records, drop the
+  lock effect, and give `erx_reserve_fill`, `erx_reserve_use` and
+  `erx_reserve_refund` the chain itself, so the pooled count is the
+  chain's length by construction. The record cache, the lists
   of charged objects and the destroy's walk over them are the stopgap
   integration's (WP14), which `test/fixtures/budget_driver.c` stands in
   for; the record cache also makes a carve's charge of the child's record
