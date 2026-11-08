@@ -74,7 +74,13 @@ it; git history is the record of completed work.
   not record the host preprocessor CBMC runs (clang `-E`), which shapes
   what is checked. The runner merges CBMC's standard error into the log
   it parses, so a stray line that looks like a result makes the run a
-  tool error rather than a reported warning.
+  tool error rather than a reported warning. The pilot's harnesses cover
+  the budget arithmetic and chain, the slot's closing write, the read and
+  the pass plan; the capability table's slot lists (every slot naming an
+  object is on its list through `obj_prev` and `obj_next`, and the
+  object's count matches, across `erx_cap_install_kind`,
+  `erx_cap_install_copy` and the closes), `erx_cap_lookup`'s reference,
+  the grace tracker and the page funnel have none yet.
 
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,

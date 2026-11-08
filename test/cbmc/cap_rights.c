@@ -21,8 +21,9 @@
  * and, for a space, with INSPECT at most; each step names the source's
  * own slot, generation, object and type with the item's operation; a copy
  * needs DUP and a pass from the caller's own table GIVE; no slot is named
- * twice and no reserved value (slot 0) passes. A refused plan carries no
- * steps.
+ * twice and no reserved value (slot 0) passes; only a route of
+ * erx_pass_route_t is accepted, and the plan keeps the request's route and
+ * tables. A refused plan carries no steps.
  */
 
 #include "cbmc_harness.h"
@@ -38,12 +39,12 @@ harness(void)
 		.items = items,
 		.count = nondet_u32(),
 		.room = nondet_u32(),
-		.from_own = nondet_bool(),
-		.to_created = nondet_bool(),
+		.route = nondet_u32(),
 	};
 	erx_pass_plan_t plan;
 	erx_status_t status;
 	uint32_t i, j, kept;
+	bool from_own, to_created;
 
 	for (i = 0; i < ERX_MSG_CAPS; i++) {
 		items[i] = (erx_pass_item_t){
@@ -71,6 +72,17 @@ harness(void)
 		    "a refused plan carries no steps");
 		return;
 	}
+	__CPROVER_assert(request.route >= ERX_PASS_RENDEZVOUS &&
+	    request.route <= ERX_PASS_CREATED_TO_CREATED,
+	    "only a named route passes");
+	__CPROVER_assert((uint32_t)plan.route == request.route &&
+	    plan.from == request.from && plan.to == request.to,
+	    "a plan keeps its request's route and tables");
+	/* The route's two questions, stated here apart from cap.c's. */
+	from_own = request.route == ERX_PASS_RENDEZVOUS ||
+	    request.route == ERX_PASS_OWN_TO_CREATED;
+	to_created = request.route == ERX_PASS_OWN_TO_CREATED ||
+	    request.route == ERX_PASS_CREATED_TO_CREATED;
 	__CPROVER_assert(plan.stage == ERX_PASS_PLANNED &&
 	    plan.count == request.count && request.count <= ERX_MSG_CAPS &&
 	    request.count <= request.room, "an accepted plan fits the room");
@@ -89,7 +101,7 @@ harness(void)
 		    "a step passes the source's own capability, as asked");
 		__CPROVER_assert((rights & ~kept) == 0,
 		    "K2: a pass keeps rights within the source's and the mask");
-		if (!request.to_created)
+		if (!to_created)
 			__CPROVER_assert((rights & ~erx_ktype_pass_mask(view->type)) == 0,
 			    "K24: a pass between peers keeps its type's pass set");
 		else {
@@ -101,7 +113,7 @@ harness(void)
 		}
 		__CPROVER_assert(items[i].op != ERX_PASS_COPY ||
 		    (view->rights.bits & ERX_HR_DUP) != 0, "a copy needs DUP");
-		__CPROVER_assert(!request.from_own ||
+		__CPROVER_assert(!from_own ||
 		    (view->rights.bits & ERX_HR_GIVE) != 0,
 		    "a pass from the caller's own table needs GIVE");
 		for (j = 0; j < i; j++)

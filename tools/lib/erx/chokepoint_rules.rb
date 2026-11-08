@@ -22,7 +22,7 @@ module Erx
   #
   # The rules live in one file per group, chokepoint_rules/NAME.rb, loaded in
   # sorted order: each core's own, named after its source, and those of no
-  # one core (stopgap_seam, grace_tracker, other_checks). This file holds
+  # one core (stopgap_seam, other_checks). This file holds
   # what they share and the rules derived across them; the groups load at
   # GROUPS below, so a group file may use what stands above that line and
   # nothing below it. A core's group needs no entry here, and every core must
