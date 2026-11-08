@@ -38,10 +38,10 @@ map_two_pages(uint64_t mem)
 	uint64_t addr;
 	int status;
 
-	if (erx_vm_reserve(0, 2 * PAGE, 0, &addr) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, 2 * PAGE, 0, &addr) != ERX_OK)
 		return (ERX_ENOMEM);
 	status = erx_vm_map(ERX_CAP_SELF, addr, 2 * PAGE, mem, 0, ERX_PROT_RW);
-	if (erx_vm_release(addr, 2 * PAGE) != ERX_OK)
+	if (erx_vm_release(ERX_CAP_SELF, addr, 2 * PAGE) != ERX_OK)
 		return (ERX_EFAULT);
 	return (status);
 }
@@ -83,14 +83,15 @@ function_api_case_stale_handle(void)
 
 /*
  * A dup names the same object; the object outlives its first handle and goes with its
- * last, giving its pages back; a mapped object outlives every handle. A dup of a dup is
- * how this case sees a handle is good, since a map would keep the object.
+ * last, giving its pages back; a mapped object outlives every handle and goes with its
+ * last mapping; and its creator destroys a mapped object, which revokes the mapping. A dup
+ * of a dup is how this case sees a handle is good, since a map would keep the object.
  */
 bool
 function_api_case_dup_and_close(void)
 {
 	const uint64_t before = erx_vm_free_pages();
-	uint64_t mem, copy, probe, mapped, addr;
+	uint64_t mem, copy, probe, mapped, addr, held, cost;
 
 	if (erx_mem_create(0, 2 * PAGE, 0, &mem) != ERX_OK || erx_cap_dup(mem, &copy) != ERX_OK || copy == mem ||
 	    erx_vm_free_pages() >= before)
@@ -101,10 +102,25 @@ function_api_case_dup_and_close(void)
 		return (false);
 	if (erx_cap_close(copy) != ERX_OK || erx_vm_free_pages() != before)
 		return (false);
-	if (erx_mem_create(0, PAGE, 0, &mapped) != ERX_OK || erx_vm_reserve(0, PAGE, 0, &addr) != ERX_OK ||
+	/* An object holds its range table's record pages as well as its data page: cost counts both. */
+	cost = erx_vm_free_pages();
+	if (erx_mem_create(0, PAGE, 0, &mapped) != ERX_OK)
+		return (false);
+	cost -= erx_vm_free_pages();
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &addr) != ERX_OK ||
 	    erx_vm_map(ERX_CAP_SELF, addr, PAGE, mapped, 0, ERX_PROT_RW) != ERX_OK)
 		return (false);
 	*(volatile uint64_t *)(uintptr_t)addr = 0x5eed;
-	return (erx_object_destroy(mapped) == ERX_ENOTSUP && erx_cap_close(mapped) == ERX_OK &&
-	    *(volatile uint64_t *)(uintptr_t)addr == 0x5eed);
+	held = erx_vm_free_pages();
+	if (erx_cap_close(mapped) != ERX_OK || *(volatile uint64_t *)(uintptr_t)addr != 0x5eed || erx_vm_free_pages() != held ||
+	    erx_vm_release(ERX_CAP_SELF, addr, PAGE) != ERX_OK || erx_vm_free_pages() != held + cost)
+		return (false);
+	/* The destroy revokes the mapping, so nothing reads the page after it; the release then finds no mapping. */
+	if (erx_mem_create(0, PAGE, 0, &mapped) != ERX_OK || erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &addr) != ERX_OK ||
+	    erx_vm_map(ERX_CAP_SELF, addr, PAGE, mapped, 0, ERX_PROT_RW) != ERX_OK)
+		return (false);
+	held = erx_vm_free_pages();
+	return (erx_object_destroy(mapped) == ERX_OK && erx_vm_free_pages() == held + cost &&
+	    erx_vm_map(ERX_CAP_SELF, addr, PAGE, mapped, 0, ERX_PROT_RW) == ERX_ESTALE &&
+	    erx_vm_release(ERX_CAP_SELF, addr, PAGE) == ERX_OK && erx_cap_close(mapped) == ERX_OK);
 }

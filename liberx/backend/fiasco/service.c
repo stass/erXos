@@ -74,6 +74,7 @@ extern char erx_fiasco_image_end[];
 
 static void	service_main(void);
 static int	service_run(const erx_fiasco_wire_decoded_t *, erx_fiasco_reply_t *);
+static int	service_vm(uint32_t, uint64_t, erx_backend_vm_op_t, uint64_t, uint64_t, uint32_t, uint64_t *);
 static bool	service_thread_name(uint32_t, uint64_t, uint32_t *, uint32_t *);
 static int	service_thread_create(uint32_t, const erx_fiasco_thread_create_request_t *, erx_fiasco_reply_t *);
 static int	service_thread_start(uint32_t, const erx_fiasco_thread_start_request_t *);
@@ -296,6 +297,17 @@ service_irq(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	}
 }
 
+/* A range call in the caller's space or one it created. */
+static int
+service_vm(uint32_t caller, uint64_t space, erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t word,
+    uint64_t *reserved)
+{
+	uint32_t task;
+	const int status = erx_fiasco_task_space_target(caller, space, &task);
+
+	return (status != ERX_OK ? status : erx_fiasco_vm_body(task, op, addr, size, word, reserved));
+}
+
 static int
 service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 {
@@ -324,18 +336,18 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	case ERX_FIASCO_CALL_VM_RESERVE:
 		if (flagged->flags > UINT32_MAX)
 			return (ERX_EINVAL);
-		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_RESERVE, flagged->addr, flagged->size,
+		return (service_vm(decoded->task, flagged->space, ERX_BACKEND_VM_RESERVE, flagged->addr, flagged->size,
 		    (uint32_t)flagged->flags, &reply->first));
 	case ERX_FIASCO_CALL_VM_COMMIT:
-		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_COMMIT, range->addr, range->size, 0, NULL));
+		return (service_vm(decoded->task, range->space, ERX_BACKEND_VM_COMMIT, range->addr, range->size, 0, NULL));
 	case ERX_FIASCO_CALL_VM_DECOMMIT:
-		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_DECOMMIT, range->addr, range->size, 0, NULL));
+		return (service_vm(decoded->task, range->space, ERX_BACKEND_VM_DECOMMIT, range->addr, range->size, 0, NULL));
 	case ERX_FIASCO_CALL_VM_RELEASE:
-		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_RELEASE, range->addr, range->size, 0, NULL));
+		return (service_vm(decoded->task, range->space, ERX_BACKEND_VM_RELEASE, range->addr, range->size, 0, NULL));
 	case ERX_FIASCO_CALL_SPACE_PROTECT:
 		if (flagged->flags > UINT32_MAX)
 			return (ERX_EINVAL);
-		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_PROTECT, flagged->addr, flagged->size,
+		return (service_vm(decoded->task, flagged->space, ERX_BACKEND_VM_PROTECT, flagged->addr, flagged->size,
 		    (uint32_t)flagged->flags, NULL));
 	case ERX_FIASCO_CALL_IRQ_CREATE:
 	case ERX_FIASCO_CALL_IRQ_BIND:

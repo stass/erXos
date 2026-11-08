@@ -72,14 +72,14 @@ case_decommit_recommit_reads_zeros(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, 3 * PAGE, 0, &base) != 0 || erx_vm_commit(base, 3 * PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, 3 * PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, 3 * PAGE) != 0)
 		return (false);
 	for (uint64_t index = 0; index < 3; index++)
 		page_fill(base + index * PAGE, 0xa0 + index);
-	if (erx_vm_decommit(base + PAGE, PAGE) != 0 || erx_vm_commit(base + PAGE, PAGE) != 0)
+	if (erx_vm_decommit(ERX_CAP_SELF, base + PAGE, PAGE) != 0 || erx_vm_commit(ERX_CAP_SELF, base + PAGE, PAGE) != 0)
 		return (false);
 	ok = page_holds(base, 0xa0) && page_is_zero(base + PAGE) && page_holds(base + 2 * PAGE, 0xa2);
-	return (ok && erx_vm_release(base, 3 * PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, 3 * PAGE) == 0);
 }
 
 /* No access and back keeps both the page and its contents. */
@@ -90,15 +90,15 @@ case_no_access_and_back_keeps_contents(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	page_fill(base, 0xb0);
-	if (erx_space_protect(base, PAGE, ERX_PROT_NONE) != 0 ||
+	if (erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_NONE) != 0 ||
 	    erx_fiasco_vm_free_pages() != free_before - 1 ||
-	    erx_space_protect(base, PAGE, ERX_PROT_RW) != 0)
+	    erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_RW) != 0)
 		return (false);
 	ok = page_holds(base, 0xb0);
-	return (ok && erx_vm_release(base, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /* Read-only, then raised to read-write by mapping the same page again. */
@@ -108,15 +108,15 @@ case_read_only_raises_to_read_write(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	page_fill(base, 0xc0);
-	if (erx_space_protect(base, PAGE, ERX_PROT_R) != 0 || !page_holds(base, 0xc0) ||
-	    erx_space_protect(base, PAGE, ERX_PROT_RW) != 0)
+	if (erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_R) != 0 || !page_holds(base, 0xc0) ||
+	    erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_RW) != 0)
 		return (false);
 	page_fill(base, 0xc1);
 	ok = page_holds(base, 0xc1);
-	return (ok && erx_vm_release(base, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /*
@@ -132,10 +132,10 @@ case_stack_through_no_access(void)
 	uint64_t base;
 	bool ok = true;
 
-	if (erx_vm_reserve(0, guard + stack, 0, &base) != 0 ||
-	    erx_space_protect(base, guard + stack, ERX_PROT_NONE) != 0 ||
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, guard + stack, 0, &base) != 0 ||
+	    erx_space_protect(ERX_CAP_SELF, base, guard + stack, ERX_PROT_NONE) != 0 ||
 	    erx_fiasco_vm_free_pages() != free_before ||
-	    erx_space_protect(base + guard, stack, ERX_PROT_RW) != 0 ||
+	    erx_space_protect(ERX_CAP_SELF, base + guard, stack, ERX_PROT_RW) != 0 ||
 	    erx_fiasco_vm_free_pages() != free_before - stack / PAGE)
 		return (false);
 	for (uint64_t offset = guard + stack; offset > guard; offset -= PAGE) {
@@ -144,7 +144,7 @@ case_stack_through_no_access(void)
 	}
 	for (uint64_t offset = guard + stack; offset > guard; offset -= PAGE)
 		ok = ok && page_holds(base + offset - PAGE, offset);
-	return (ok && erx_vm_release(base, guard + stack) == 0 &&
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, guard + stack) == 0 &&
 	    erx_fiasco_vm_free_pages() == free_before);
 }
 
@@ -159,13 +159,13 @@ case_refused_protect_changes_nothing(void)
 	const uint64_t size = (free_before + 1) * PAGE;
 	uint64_t base;
 
-	if (erx_vm_reserve(0, size, 0, &base) != 0 ||
-	    erx_space_protect(base, size, ERX_PROT_RW) != ERX_ENOMEM ||
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, &base) != 0 ||
+	    erx_space_protect(ERX_CAP_SELF, base, size, ERX_PROT_RW) != ERX_ENOMEM ||
 	    erx_fiasco_vm_free_pages() != free_before ||
-	    erx_vm_commit(base, PAGE) != 0 ||
+	    erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0 ||
 	    erx_fiasco_vm_free_pages() != free_before - 1)
 		return (false);
-	return (erx_vm_release(base, size) == 0);
+	return (erx_vm_release(ERX_CAP_SELF, base, size) == 0);
 }
 
 /* Write with execute is refused, as is every value that is not a protection. */
@@ -175,13 +175,13 @@ case_write_and_execute_refused(void)
 	static const uint32_t refused[] = { 2, 4, 6, 7, 8, UINT32_MAX };
 	uint64_t base;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	for (size_t index = 0; index < sizeof(refused) / sizeof(refused[0]); index++)
-		if (erx_space_protect(base, PAGE, refused[index]) != ERX_EINVAL)
+		if (erx_space_protect(ERX_CAP_SELF, base, PAGE, refused[index]) != ERX_EINVAL)
 			return (false);
 	page_fill(base, 0xd0);
-	return (page_holds(base, 0xd0) && erx_vm_release(base, PAGE) == 0);
+	return (page_holds(base, 0xd0) && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /* The call table's other refusals, and holes where each call treats them its own way. */
@@ -191,16 +191,16 @@ case_refusals(void)
 	uint64_t base;
 	const uint64_t free_before = erx_fiasco_vm_free_pages();
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0)
 		return (false);
-	return (erx_vm_commit(base + 1, PAGE) == ERX_EINVAL &&
-	    erx_vm_commit(base, 0) == ERX_EINVAL &&
-	    erx_vm_commit(PAGE, PAGE) == ERX_ERANGE &&
-	    erx_vm_commit(UINT64_MAX - PAGE + 1, PAGE) == ERX_ERANGE &&
-	    erx_space_protect(base, 2 * PAGE, ERX_PROT_RW) == ERX_ERANGE &&
-	    erx_vm_reserve(base, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_EEXIST &&
-	    erx_vm_reserve(base, PAGE, ERX_VM_NOREPLACE, NULL) == ERX_EINVAL &&
-	    erx_vm_release(base, PAGE) == 0 && erx_fiasco_vm_free_pages() == free_before);
+	return (erx_vm_commit(ERX_CAP_SELF, base + 1, PAGE) == ERX_EINVAL &&
+	    erx_vm_commit(ERX_CAP_SELF, base, 0) == ERX_EINVAL &&
+	    erx_vm_commit(ERX_CAP_SELF, PAGE, PAGE) == ERX_ERANGE &&
+	    erx_vm_commit(ERX_CAP_SELF, UINT64_MAX - PAGE + 1, PAGE) == ERX_ERANGE &&
+	    erx_space_protect(ERX_CAP_SELF, base, 2 * PAGE, ERX_PROT_RW) == ERX_ERANGE &&
+	    erx_vm_reserve(ERX_CAP_SELF, base, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_EEXIST &&
+	    erx_vm_reserve(ERX_CAP_SELF, base, PAGE, ERX_VM_NOREPLACE, NULL) == ERX_EINVAL &&
+	    erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0 && erx_fiasco_vm_free_pages() == free_before);
 }
 
 /* A fixed reserve replaces what the range held: its pages return, and it reads zeros. */
@@ -210,16 +210,16 @@ case_fixed_reserve_replaces(void)
 	const uint64_t free_before = erx_fiasco_vm_free_pages();
 	bool ok;
 
-	if (erx_vm_reserve(AREA_MIDDLE, PAGE, ERX_VM_FIXED, NULL) != 0 ||
-	    erx_vm_commit(AREA_MIDDLE, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, AREA_MIDDLE, PAGE, ERX_VM_FIXED, NULL) != 0 ||
+	    erx_vm_commit(ERX_CAP_SELF, AREA_MIDDLE, PAGE) != 0)
 		return (false);
 	page_fill(AREA_MIDDLE, 0xe0);
-	if (erx_vm_reserve(AREA_MIDDLE, PAGE, ERX_VM_FIXED, NULL) != 0 ||
+	if (erx_vm_reserve(ERX_CAP_SELF, AREA_MIDDLE, PAGE, ERX_VM_FIXED, NULL) != 0 ||
 	    erx_fiasco_vm_free_pages() != free_before ||
-	    erx_vm_commit(AREA_MIDDLE, PAGE) != 0)
+	    erx_vm_commit(ERX_CAP_SELF, AREA_MIDDLE, PAGE) != 0)
 		return (false);
 	ok = page_is_zero(AREA_MIDDLE);
-	return (ok && erx_vm_release(AREA_MIDDLE, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, AREA_MIDDLE, PAGE) == 0);
 }
 
 /* The area's last page is real memory: the layout's limit agrees with the kernel's. */
@@ -228,12 +228,12 @@ case_area_top_page_works(void)
 {
 	bool ok;
 
-	if (erx_vm_reserve(AREA_TOP_PAGE, PAGE, ERX_VM_FIXED, NULL) != 0 ||
-	    erx_vm_commit(AREA_TOP_PAGE, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, AREA_TOP_PAGE, PAGE, ERX_VM_FIXED, NULL) != 0 ||
+	    erx_vm_commit(ERX_CAP_SELF, AREA_TOP_PAGE, PAGE) != 0)
 		return (false);
 	page_fill(AREA_TOP_PAGE, 0xf0);
 	ok = page_holds(AREA_TOP_PAGE, 0xf0);
-	return (ok && erx_vm_release(AREA_TOP_PAGE, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, AREA_TOP_PAGE, PAGE) == 0);
 }
 
 /*
@@ -249,34 +249,34 @@ case_every_protection_change(void)
 	const uint64_t free_before = erx_fiasco_vm_free_pages();
 	uint64_t base;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0)
 		return (false);
 	for (size_t to = 1; to < nprots; to++) {
-		if (erx_space_protect(base, PAGE, prots[to]) != 0 || !page_is_zero(base) ||
+		if (erx_space_protect(ERX_CAP_SELF, base, PAGE, prots[to]) != 0 || !page_is_zero(base) ||
 		    erx_fiasco_vm_free_pages() != free_before - 1 ||
-		    erx_vm_decommit(base, PAGE) != 0 || erx_fiasco_vm_free_pages() != free_before)
+		    erx_vm_decommit(ERX_CAP_SELF, base, PAGE) != 0 || erx_fiasco_vm_free_pages() != free_before)
 			return (false);
 	}
-	if (erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	for (size_t from = 0; from < nprots; from++) {
 		for (size_t to = 0; to < nprots; to++) {
 			const uint64_t seed = 0x100 + from * 16 + to;
 
-			if (erx_space_protect(base, PAGE, ERX_PROT_RW) != 0)
+			if (erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_RW) != 0)
 				return (false);
 			page_fill(base, seed);
-			if (erx_space_protect(base, PAGE, prots[from]) != 0 ||
-			    erx_space_protect(base, PAGE, prots[to]) != 0 ||
+			if (erx_space_protect(ERX_CAP_SELF, base, PAGE, prots[from]) != 0 ||
+			    erx_space_protect(ERX_CAP_SELF, base, PAGE, prots[to]) != 0 ||
 			    erx_fiasco_vm_free_pages() != free_before - 1)
 				return (false);
-			if (prots[to] == ERX_PROT_NONE && erx_space_protect(base, PAGE, ERX_PROT_R) != 0)
+			if (prots[to] == ERX_PROT_NONE && erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_R) != 0)
 				return (false);
 			if (!page_holds(base, seed))
 				return (false);
 		}
 	}
-	return (erx_vm_release(base, PAGE) == 0 && erx_fiasco_vm_free_pages() == free_before);
+	return (erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0 && erx_fiasco_vm_free_pages() == free_before);
 }
 
 /* The whole pool at once: the index at its fullest, and Fiasco's own memory. */
@@ -288,13 +288,13 @@ case_whole_pool_commits(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, size, 0, &base) != 0 || erx_vm_commit(base, size) != 0 ||
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, size) != 0 ||
 	    erx_fiasco_vm_free_pages() != 0)
 		return (false);
 	page_fill(base, 0x51);
 	page_fill(base + size - PAGE, 0x52);
 	ok = page_holds(base, 0x51) && page_holds(base + size - PAGE, 0x52);
-	return (ok && erx_vm_release(base, size) == 0 && erx_fiasco_vm_free_pages() == free_before);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, size) == 0 && erx_fiasco_vm_free_pages() == free_before);
 }
 
 static void

@@ -51,8 +51,8 @@ main_stack_alloc_or_machine_off(void)
 	static const char refused[] = "erx: root task: no memory for main's stack\n";
 	uint64_t base;
 
-	if (erx_vm_reserve(0, MAIN_STACK_GUARD_BYTES + MAIN_STACK_BYTES, 0, &base) != ERX_OK ||
-	    erx_vm_commit(base + MAIN_STACK_GUARD_BYTES, MAIN_STACK_BYTES) != ERX_OK) {
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, MAIN_STACK_GUARD_BYTES + MAIN_STACK_BYTES, 0, &base) != ERX_OK ||
+	    erx_vm_commit(ERX_CAP_SELF, base + MAIN_STACK_GUARD_BYTES, MAIN_STACK_BYTES) != ERX_OK) {
 		erx_fiasco_console_write(refused, sizeof(refused) - 1);
 		erx_fiasco_machine_off();
 	}

@@ -419,13 +419,13 @@ memory_helper(uint64_t arg)
 
 	(void)arg;
 	for (uint32_t round = 0; round < 100; round++) {
-		if (erx_vm_reserve(0, ERX_PAGE_SIZE, 0, &base) != ERX_OK ||
-		    erx_vm_commit(base, ERX_PAGE_SIZE) != ERX_OK) {
+		if (erx_vm_reserve(ERX_CAP_SELF, 0, ERX_PAGE_SIZE, 0, &base) != ERX_OK ||
+		    erx_vm_commit(ERX_CAP_SELF, base, ERX_PAGE_SIZE) != ERX_OK) {
 			atomic_store(&memory_failed, 1);
 			break;
 		}
 		*(volatile uint64_t *)(uintptr_t)base = base;
-		if (*(volatile uint64_t *)(uintptr_t)base != base || erx_vm_release(base, ERX_PAGE_SIZE) != ERX_OK) {
+		if (*(volatile uint64_t *)(uintptr_t)base != base || erx_vm_release(ERX_CAP_SELF, base, ERX_PAGE_SIZE) != ERX_OK) {
 			atomic_store(&memory_failed, 1);
 			break;
 		}
@@ -685,7 +685,7 @@ case_detached_loop(void)
 		uint64_t base, thread;
 		int status;
 
-		if (erx_vm_reserve(0, bytes, 0, &base) != ERX_OK || erx_vm_commit(base, bytes) != ERX_OK)
+		if (erx_vm_reserve(ERX_CAP_SELF, 0, bytes, 0, &base) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, base, bytes) != ERX_OK)
 			return (false);
 		while ((status = create_on(base + bytes, detached_helper, base, 0, ERX_THREAD_CLASS_WORKER, &thread)) == ERX_ENOMEM &&
 		    erx_fiasco_clock_ns() < deadline)

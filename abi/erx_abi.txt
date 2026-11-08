@@ -533,16 +533,18 @@ layout erx_fiasco_thread_reap_request wire_le 8 16
   field caller u64 0
   field thread u64 8
 
-layout erx_fiasco_vm_range_request wire_le 8 24
+layout erx_fiasco_vm_range_request wire_le 8 32
   field caller u64 0
-  field addr u64 8
-  field size u64 16
+  field space u64 8
+  field addr u64 16
+  field size u64 24
 
-layout erx_fiasco_vm_flagged_request wire_le 8 32
+layout erx_fiasco_vm_flagged_request wire_le 8 40
   field caller u64 0
-  field addr u64 8
-  field size u64 16
-  field flags u64 24
+  field space u64 8
+  field addr u64 16
+  field size u64 24
+  field flags u64 32
 
 layout erx_fiasco_machine_end_request wire_le 8 24
   field caller u64 0

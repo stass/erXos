@@ -102,14 +102,14 @@ case_decommit_recommit_reads_zeros(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, 3 * PAGE, 0, &base) != 0 || erx_vm_commit(base, 3 * PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, 3 * PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, 3 * PAGE) != 0)
 		return (false);
 	for (uint64_t index = 0; index < 3; index++)
 		page_fill(base + index * PAGE, 0xa0 + index);
-	if (erx_vm_decommit(base + PAGE, PAGE) != 0 || erx_vm_commit(base + PAGE, PAGE) != 0)
+	if (erx_vm_decommit(ERX_CAP_SELF, base + PAGE, PAGE) != 0 || erx_vm_commit(ERX_CAP_SELF, base + PAGE, PAGE) != 0)
 		return (false);
 	ok = page_holds(base, 0xa0) && page_is_zero(base + PAGE) && page_holds(base + 2 * PAGE, 0xa2);
-	return (ok && erx_vm_release(base, 3 * PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, 3 * PAGE) == 0);
 }
 
 /* A release and a fresh reserve of the same pages: nothing the last holder wrote shows. */
@@ -118,17 +118,17 @@ case_released_pages_read_zeros(void)
 {
 	uint64_t base, again;
 
-	if (erx_vm_reserve(0, 8 * PAGE, 0, &base) != 0 || erx_vm_commit(base, 8 * PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, 8 * PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, 8 * PAGE) != 0)
 		return (false);
 	for (uint64_t index = 0; index < 8; index++)
 		page_fill(base + index * PAGE, 0x30 + index);
-	if (erx_vm_release(base, 8 * PAGE) != 0 || erx_vm_reserve(base, 8 * PAGE, ERX_VM_FIXED, &again) != 0 ||
-	    erx_vm_commit(base, 8 * PAGE) != 0)
+	if (erx_vm_release(ERX_CAP_SELF, base, 8 * PAGE) != 0 || erx_vm_reserve(ERX_CAP_SELF, base, 8 * PAGE, ERX_VM_FIXED, &again) != 0 ||
+	    erx_vm_commit(ERX_CAP_SELF, base, 8 * PAGE) != 0)
 		return (false);
 	for (uint64_t index = 0; index < 8; index++)
 		if (!page_is_zero(base + index * PAGE))
 			return (false);
-	return (erx_vm_release(base, 8 * PAGE) == 0);
+	return (erx_vm_release(ERX_CAP_SELF, base, 8 * PAGE) == 0);
 }
 
 /* No access and back keeps both the page and its contents. */
@@ -139,14 +139,14 @@ case_no_access_and_back_keeps_contents(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	page_fill(base, 0xb0);
-	if (erx_space_protect(base, PAGE, ERX_PROT_NONE) != 0 || erx_vm_free_pages() != free_before - 1 ||
-	    erx_space_protect(base, PAGE, ERX_PROT_RW) != 0)
+	if (erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_NONE) != 0 || erx_vm_free_pages() != free_before - 1 ||
+	    erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_RW) != 0)
 		return (false);
 	ok = page_holds(base, 0xb0);
-	return (ok && erx_vm_release(base, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /* Read-only, then raised to read-write. */
@@ -156,15 +156,15 @@ case_read_only_raises_to_read_write(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	page_fill(base, 0xc0);
-	if (erx_space_protect(base, PAGE, ERX_PROT_R) != 0 || !page_holds(base, 0xc0) ||
-	    erx_space_protect(base, PAGE, ERX_PROT_RW) != 0)
+	if (erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_R) != 0 || !page_holds(base, 0xc0) ||
+	    erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_RW) != 0)
 		return (false);
 	page_fill(base, 0xc1);
 	ok = page_holds(base, 0xc1);
-	return (ok && erx_vm_release(base, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /*
@@ -180,10 +180,10 @@ case_stack_through_no_access(void)
 	uint64_t base;
 	bool ok = true;
 
-	if (erx_vm_reserve(0, guard + stack, 0, &base) != 0 ||
-	    erx_space_protect(base, guard + stack, ERX_PROT_NONE) != 0 ||
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, guard + stack, 0, &base) != 0 ||
+	    erx_space_protect(ERX_CAP_SELF, base, guard + stack, ERX_PROT_NONE) != 0 ||
 	    erx_vm_free_pages() != free_before ||
-	    erx_space_protect(base + guard, stack, ERX_PROT_RW) != 0 ||
+	    erx_space_protect(ERX_CAP_SELF, base + guard, stack, ERX_PROT_RW) != 0 ||
 	    erx_vm_free_pages() != free_before - stack / PAGE)
 		return (false);
 	for (uint64_t offset = guard + stack; offset > guard; offset -= PAGE) {
@@ -192,7 +192,7 @@ case_stack_through_no_access(void)
 	}
 	for (uint64_t offset = guard + stack; offset > guard; offset -= PAGE)
 		ok = ok && page_holds(base + offset - PAGE, offset);
-	return (ok && erx_vm_release(base, guard + stack) == 0 && erx_vm_free_pages() == free_before);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, guard + stack) == 0 && erx_vm_free_pages() == free_before);
 }
 
 /* A protect the pool cannot cover changes nothing: committing its first page alone costs exactly one. */
@@ -202,14 +202,14 @@ case_refused_protect_changes_nothing(void)
 	const uint64_t free_before = erx_vm_free_pages();
 	uint64_t base;
 
-	if (erx_vm_reserve(0, BEYOND_POOL, 0, &base) != 0 ||
-	    erx_space_protect(base, BEYOND_POOL, ERX_PROT_RW) != ERX_ENOMEM ||
-	    erx_vm_commit(base, BEYOND_POOL) != ERX_ENOMEM ||
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, BEYOND_POOL, 0, &base) != 0 ||
+	    erx_space_protect(ERX_CAP_SELF, base, BEYOND_POOL, ERX_PROT_RW) != ERX_ENOMEM ||
+	    erx_vm_commit(ERX_CAP_SELF, base, BEYOND_POOL) != ERX_ENOMEM ||
 	    erx_vm_free_pages() != free_before ||
-	    erx_vm_commit(base, PAGE) != 0 ||
+	    erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0 ||
 	    erx_vm_free_pages() != free_before - 1)
 		return (false);
-	return (erx_vm_release(base, BEYOND_POOL) == 0 && erx_vm_free_pages() == free_before);
+	return (erx_vm_release(ERX_CAP_SELF, base, BEYOND_POOL) == 0 && erx_vm_free_pages() == free_before);
 }
 
 /* Write with execute is refused, as is every value that is not a protection. */
@@ -219,13 +219,13 @@ case_write_and_execute_refused(void)
 	static const uint32_t refused[] = { 2, 4, 6, 7, 8, UINT32_MAX };
 	uint64_t base;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	for (size_t index = 0; index < sizeof(refused) / sizeof(refused[0]); index++)
-		if (erx_space_protect(base, PAGE, refused[index]) != ERX_EINVAL)
+		if (erx_space_protect(ERX_CAP_SELF, base, PAGE, refused[index]) != ERX_EINVAL)
 			return (false);
 	page_fill(base, 0xd0);
-	return (page_holds(base, 0xd0) && erx_vm_release(base, PAGE) == 0);
+	return (page_holds(base, 0xd0) && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /* The call table's other refusals, and holes where each call treats them its own way. */
@@ -235,16 +235,16 @@ case_refusals(void)
 	uint64_t base;
 	const uint64_t free_before = erx_vm_free_pages();
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0)
 		return (false);
-	return (erx_vm_commit(base + 1, PAGE) == ERX_EINVAL &&
-	    erx_vm_commit(base, 0) == ERX_EINVAL &&
-	    erx_vm_commit(PAGE, PAGE) == ERX_ERANGE &&
-	    erx_vm_commit(UINT64_MAX - PAGE + 1, PAGE) == ERX_ERANGE &&
-	    erx_space_protect(base, 2 * PAGE, ERX_PROT_RW) == ERX_ERANGE &&
-	    erx_vm_reserve(base, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_EEXIST &&
-	    erx_vm_reserve(base, PAGE, ERX_VM_NOREPLACE, NULL) == ERX_EINVAL &&
-	    erx_vm_release(base, PAGE) == 0 && erx_vm_free_pages() == free_before);
+	return (erx_vm_commit(ERX_CAP_SELF, base + 1, PAGE) == ERX_EINVAL &&
+	    erx_vm_commit(ERX_CAP_SELF, base, 0) == ERX_EINVAL &&
+	    erx_vm_commit(ERX_CAP_SELF, PAGE, PAGE) == ERX_ERANGE &&
+	    erx_vm_commit(ERX_CAP_SELF, UINT64_MAX - PAGE + 1, PAGE) == ERX_ERANGE &&
+	    erx_space_protect(ERX_CAP_SELF, base, 2 * PAGE, ERX_PROT_RW) == ERX_ERANGE &&
+	    erx_vm_reserve(ERX_CAP_SELF, base, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_EEXIST &&
+	    erx_vm_reserve(ERX_CAP_SELF, base, PAGE, ERX_VM_NOREPLACE, NULL) == ERX_EINVAL &&
+	    erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0 && erx_vm_free_pages() == free_before);
 }
 
 /* A fixed reserve replaces what the range held: its pages return, and it reads zeros. */
@@ -255,14 +255,14 @@ case_fixed_reserve_replaces(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0 || erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	page_fill(base, 0xe0);
-	if (erx_vm_reserve(base, PAGE, ERX_VM_FIXED, NULL) != 0 || erx_vm_free_pages() != free_before ||
-	    erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, base, PAGE, ERX_VM_FIXED, NULL) != 0 || erx_vm_free_pages() != free_before ||
+	    erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	ok = page_is_zero(base);
-	return (ok && erx_vm_release(base, PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0);
 }
 
 /*
@@ -278,34 +278,34 @@ case_every_protection_change(void)
 	const uint64_t free_before = erx_vm_free_pages();
 	uint64_t base;
 
-	if (erx_vm_reserve(0, PAGE, 0, &base) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != 0)
 		return (false);
 	for (size_t to = 1; to < nprots; to++) {
-		if (erx_space_protect(base, PAGE, prots[to]) != 0 || !page_is_zero(base) ||
+		if (erx_space_protect(ERX_CAP_SELF, base, PAGE, prots[to]) != 0 || !page_is_zero(base) ||
 		    erx_vm_free_pages() != free_before - 1 ||
-		    erx_vm_decommit(base, PAGE) != 0 || erx_vm_free_pages() != free_before)
+		    erx_vm_decommit(ERX_CAP_SELF, base, PAGE) != 0 || erx_vm_free_pages() != free_before)
 			return (false);
 	}
-	if (erx_vm_commit(base, PAGE) != 0)
+	if (erx_vm_commit(ERX_CAP_SELF, base, PAGE) != 0)
 		return (false);
 	for (size_t from = 0; from < nprots; from++) {
 		for (size_t to = 0; to < nprots; to++) {
 			const uint64_t seed = 0x100 + from * 16 + to;
 
-			if (erx_space_protect(base, PAGE, ERX_PROT_RW) != 0)
+			if (erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_RW) != 0)
 				return (false);
 			page_fill(base, seed);
-			if (erx_space_protect(base, PAGE, prots[from]) != 0 ||
-			    erx_space_protect(base, PAGE, prots[to]) != 0 ||
+			if (erx_space_protect(ERX_CAP_SELF, base, PAGE, prots[from]) != 0 ||
+			    erx_space_protect(ERX_CAP_SELF, base, PAGE, prots[to]) != 0 ||
 			    erx_vm_free_pages() != free_before - 1)
 				return (false);
-			if (prots[to] == ERX_PROT_NONE && erx_space_protect(base, PAGE, ERX_PROT_R) != 0)
+			if (prots[to] == ERX_PROT_NONE && erx_space_protect(ERX_CAP_SELF, base, PAGE, ERX_PROT_R) != 0)
 				return (false);
 			if (!page_holds(base, seed))
 				return (false);
 		}
 	}
-	return (erx_vm_release(base, PAGE) == 0 && erx_vm_free_pages() == free_before);
+	return (erx_vm_release(ERX_CAP_SELF, base, PAGE) == 0 && erx_vm_free_pages() == free_before);
 }
 
 /*
@@ -320,24 +320,24 @@ case_many_pages_between_write_and_execute(void)
 	uint64_t base, neighbour;
 	bool ok = true;
 
-	if (erx_vm_reserve(0, pages * PAGE, 0, &base) != 0 || erx_vm_commit(base, pages * PAGE) != 0 ||
-	    erx_vm_reserve(0, PAGE, 0, &neighbour) != 0 || erx_vm_commit(neighbour, PAGE) != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, pages * PAGE, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, pages * PAGE) != 0 ||
+	    erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &neighbour) != 0 || erx_vm_commit(ERX_CAP_SELF, neighbour, PAGE) != 0)
 		return (false);
 	page_fill(neighbour, 0x71);
 	for (uint64_t index = 0; index < pages; index++)
 		page_fill(base + index * PAGE, 0x70 + index);
-	if (erx_space_protect(base, pages * PAGE, ERX_PROT_RX) != 0)
+	if (erx_space_protect(ERX_CAP_SELF, base, pages * PAGE, ERX_PROT_RX) != 0)
 		return (false);
 	page_fill(neighbour, 0x72);
 	for (uint64_t index = 0; index < pages; index++)
 		ok = ok && page_holds(base + index * PAGE, 0x70 + index);
-	if (erx_space_protect(base, pages * PAGE, ERX_PROT_RW) != 0)
+	if (erx_space_protect(ERX_CAP_SELF, base, pages * PAGE, ERX_PROT_RW) != 0)
 		return (false);
 	for (uint64_t index = 0; index < pages; index++)
 		ok = ok && page_holds(base + index * PAGE, 0x70 + index);
 	page_fill(base, 0x7f);
 	ok = ok && page_holds(neighbour, 0x72);
-	return (ok && erx_vm_release(neighbour, PAGE) == 0 && erx_vm_release(base, pages * PAGE) == 0);
+	return (ok && erx_vm_release(ERX_CAP_SELF, neighbour, PAGE) == 0 && erx_vm_release(ERX_CAP_SELF, base, pages * PAGE) == 0);
 }
 
 /* The whole pool at once: the index at its fullest. */
@@ -349,12 +349,12 @@ case_whole_pool_commits(void)
 	uint64_t base;
 	bool ok;
 
-	if (erx_vm_reserve(0, size, 0, &base) != 0 || erx_vm_commit(base, size) != 0 || erx_vm_free_pages() != 0)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, &base) != 0 || erx_vm_commit(ERX_CAP_SELF, base, size) != 0 || erx_vm_free_pages() != 0)
 		return (false);
 	page_fill(base, 0x51);
 	page_fill(base + size - PAGE, 0x52);
 	ok = page_holds(base, 0x51) && page_holds(base + size - PAGE, 0x52);
-	return (ok && erx_vm_release(base, size) == 0 && erx_vm_free_pages() == free_before);
+	return (ok && erx_vm_release(ERX_CAP_SELF, base, size) == 0 && erx_vm_free_pages() == free_before);
 }
 
 static uint64_t pool_at_start;
@@ -448,9 +448,9 @@ create_class(void (*entry)(uint64_t), uint64_t arg, uint64_t tls, uint64_t threa
 	uint64_t base;
 	int status;
 
-	status = erx_vm_reserve(0, STACK_BYTES, 0, &base);
+	status = erx_vm_reserve(ERX_CAP_SELF, 0, STACK_BYTES, 0, &base);
 	if (status == ERX_OK)
-		status = erx_vm_commit(base, STACK_BYTES);
+		status = erx_vm_commit(ERX_CAP_SELF, base, STACK_BYTES);
 	if (status != ERX_OK)
 		return (status);
 	last_stack = base;
@@ -632,13 +632,13 @@ case_object_info(void)
 	    erx_object_info(ERX_CAP_NULL, ERX_INFO_GROUP, 0, window, sizeof(window)) == ERX_ENOTSUP;
 	ok = ok && erx_info_partial(ERX_INFO_BUDGET) == ERX_INFO_BUDGET_REPORTED_USED &&
 	    erx_info_partial(ERX_INFO_MACHINE) == 0 && erx_info_partial(ERX_INFO_THREAD) == 0;
-	ok = ok && erx_vm_reserve(0, 4 * PAGE, 0, &addr) == ERX_OK &&
+	ok = ok && erx_vm_reserve(ERX_CAP_SELF, 0, 4 * PAGE, 0, &addr) == ERX_OK &&
 	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
-	    erx_info_budget_decode(window, sizeof(window), &before) && erx_vm_commit(addr, 4 * PAGE) == ERX_OK &&
+	    erx_info_budget_decode(window, sizeof(window), &before) && erx_vm_commit(ERX_CAP_SELF, addr, 4 * PAGE) == ERX_OK &&
 	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
-	    erx_info_budget_decode(window, sizeof(window), &after) && erx_vm_decommit(addr, 4 * PAGE) == ERX_OK &&
+	    erx_info_budget_decode(window, sizeof(window), &after) && erx_vm_decommit(ERX_CAP_SELF, addr, 4 * PAGE) == ERX_OK &&
 	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
-	    erx_info_budget_decode(window, sizeof(window), &freed) && erx_vm_release(addr, 4 * PAGE) == ERX_OK;
+	    erx_info_budget_decode(window, sizeof(window), &freed) && erx_vm_release(ERX_CAP_SELF, addr, 4 * PAGE) == ERX_OK;
 	ok = ok && before.reported == 0 && after.used == before.used + 4 && freed.used == before.used &&
 	    erx_object_info(ERX_CAP_NULL, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_ENOTSUP;
 	while (ok && listed <= 128 &&
@@ -784,12 +784,12 @@ memory_helper(uint64_t arg)
 
 	(void)arg;
 	for (uint32_t round = 0; round < 100; round++) {
-		if (erx_vm_reserve(0, PAGE, 0, &base) != ERX_OK || erx_vm_commit(base, PAGE) != ERX_OK) {
+		if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &base) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, base, PAGE) != ERX_OK) {
 			atomic_store(&memory_failed, 1);
 			break;
 		}
 		word_put(base, base);
-		if (word_at(base) != base || erx_vm_release(base, PAGE) != ERX_OK) {
+		if (word_at(base) != base || erx_vm_release(ERX_CAP_SELF, base, PAGE) != ERX_OK) {
 			atomic_store(&memory_failed, 1);
 			break;
 		}
@@ -855,7 +855,7 @@ case_join_loop(void)
 {
 	uint64_t base;
 
-	if (erx_vm_reserve(0, STACK_BYTES, 0, &base) != ERX_OK || erx_vm_commit(base, STACK_BYTES) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, STACK_BYTES, 0, &base) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, base, STACK_BYTES) != ERX_OK)
 		return (false);
 	for (uint32_t round = 0; round < JOIN_ROUNDS; round++) {
 		const uint64_t patience = erx_clock_ns() + PATIENCE_NS;
@@ -873,7 +873,7 @@ case_join_loop(void)
 		    erx_thread_start(thread) != ERX_EINVAL)
 			return (false);
 	}
-	return (erx_vm_release(base, STACK_BYTES) == ERX_OK);
+	return (erx_vm_release(ERX_CAP_SELF, base, STACK_BYTES) == ERX_OK);
 }
 
 static _Atomic uint32_t detached_ran;
@@ -899,7 +899,7 @@ case_detached_loop(void)
 		uint64_t base, thread;
 		int status;
 
-		if (erx_vm_reserve(0, bytes, 0, &base) != ERX_OK || erx_vm_commit(base, bytes) != ERX_OK)
+		if (erx_vm_reserve(ERX_CAP_SELF, 0, bytes, 0, &base) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, base, bytes) != ERX_OK)
 			return (false);
 		while ((status = create_on(base + bytes, detached_helper, base, 0, ERX_THREAD_CLASS_WORKER, &thread)) ==
 		    ERX_ENOMEM && erx_clock_ns() < deadline)

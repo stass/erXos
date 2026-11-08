@@ -56,12 +56,13 @@ static void	vm_map(uint32_t, uintptr_t, uint64_t, uint32_t);
 static void	vm_unmap(uint32_t, uint64_t, uint32_t);
 static uintptr_t vm_take(uint64_t);
 static void	vm_give(uintptr_t, uint64_t);
+static void	vm_unmapped(uint32_t);
 static uint64_t	vm_free_count(void);
 static uintptr_t vm_record_take(void);
 static void	vm_record_give(uintptr_t);
 
 static const erx_backend_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap, .take = vm_take,
-    .give = vm_give, .free_pages = vm_free_count };
+    .give = vm_give, .free_pages = vm_free_count, .unmapped = vm_unmapped };
 static const erx_backend_grow_pages_t vm_records = { .take = vm_record_take, .give = vm_record_give };
 
 static pthread_once_t vm_once = PTHREAD_ONCE_INIT;
@@ -267,12 +268,22 @@ vm_give(uintptr_t window, uint64_t addr)
 		*page_byte(page) = 0;
 }
 
+/* Hosted maps no object, so its table holds no mapping record to drop. */
+static void
+vm_unmapped(uint32_t object)
+{
+	(void)object;
+}
+
+/* Hosted makes no spaces, so ERX_CAP_SELF is the one space a call can name. */
 static int
-vm_call(erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot, uint64_t *reserved)
+vm_call(uint64_t space, erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot, uint64_t *reserved)
 {
 	const erx_backend_vm_request_t request = { .op = op, .addr = addr, .size = size, .flags = flags, .prot = prot };
 	int status;
 
+	if (space != ERX_CAP_SELF)
+		return (ERX_EINVAL);
 	(void)pthread_once(&vm_once, vm_init);
 	(void)pthread_mutex_lock(&vm_lock);
 	status = erx_backend_vm_call(&vm_table, &vm_effects, &request, reserved);
@@ -287,33 +298,33 @@ vm_call(erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, ui
 }
 
 int
-erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
+erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 {
-	return (vm_call(ERX_BACKEND_VM_RESERVE, addr, size, flags, 0, reserved));
+	return (vm_call(space, ERX_BACKEND_VM_RESERVE, addr, size, flags, 0, reserved));
 }
 
 int
-erx_vm_commit(uint64_t addr, uint64_t size)
+erx_vm_commit(uint64_t space, uint64_t addr, uint64_t size)
 {
-	return (vm_call(ERX_BACKEND_VM_COMMIT, addr, size, 0, 0, NULL));
+	return (vm_call(space, ERX_BACKEND_VM_COMMIT, addr, size, 0, 0, NULL));
 }
 
 int
-erx_vm_decommit(uint64_t addr, uint64_t size)
+erx_vm_decommit(uint64_t space, uint64_t addr, uint64_t size)
 {
-	return (vm_call(ERX_BACKEND_VM_DECOMMIT, addr, size, 0, 0, NULL));
+	return (vm_call(space, ERX_BACKEND_VM_DECOMMIT, addr, size, 0, 0, NULL));
 }
 
 int
-erx_vm_release(uint64_t addr, uint64_t size)
+erx_vm_release(uint64_t space, uint64_t addr, uint64_t size)
 {
-	return (vm_call(ERX_BACKEND_VM_RELEASE, addr, size, 0, 0, NULL));
+	return (vm_call(space, ERX_BACKEND_VM_RELEASE, addr, size, 0, 0, NULL));
 }
 
 int
-erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot)
+erx_space_protect(uint64_t space, uint64_t addr, uint64_t size, uint32_t prot)
 {
-	return (vm_call(ERX_BACKEND_VM_PROTECT, addr, size, 0, prot, NULL));
+	return (vm_call(space, ERX_BACKEND_VM_PROTECT, addr, size, 0, prot, NULL));
 }
 
 uint64_t

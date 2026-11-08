@@ -50,11 +50,11 @@ erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint6
 }
 
 int
-erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
+erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 {
 	(void)addr;
 	(void)flags;
-	CHECK(size <= WINDOW_BYTES && size % ERX_PAGE_SIZE == 0);
+	CHECK(space == ERX_CAP_SELF && size <= WINDOW_BYTES && size % ERX_PAGE_SIZE == 0);
 	*reserved = (uint64_t)(uintptr_t)window_memory[next_window];
 	return (fail_reserve);
 }

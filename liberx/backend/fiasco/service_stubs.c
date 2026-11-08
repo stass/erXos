@@ -24,8 +24,8 @@
 #include "liberx/backend/fiasco/vm.h"
 #include "liberx/generated/calls.h"
 
-static int stub_range(uint32_t, uint64_t, uint64_t);
-static int stub_flagged(uint32_t, uint64_t, uint64_t, uint64_t, uint64_t *);
+static int stub_range(uint32_t, uint64_t, uint64_t, uint64_t);
+static int stub_flagged(uint32_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t *);
 
 int
 erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes, erx_fiasco_reply_t *reply)
@@ -50,9 +50,9 @@ erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes, erx_
 }
 
 static int
-stub_range(uint32_t number, uint64_t addr, uint64_t size)
+stub_range(uint32_t number, uint64_t space, uint64_t addr, uint64_t size)
 {
-	const erx_fiasco_vm_range_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	const erx_fiasco_vm_range_request_t request = { .caller = erx_fiasco_thread_self()->index, .space = space,
 	    .addr = addr, .size = size };
 	erx_fiasco_reply_t reply;
 
@@ -60,9 +60,9 @@ stub_range(uint32_t number, uint64_t addr, uint64_t size)
 }
 
 static int
-stub_flagged(uint32_t number, uint64_t addr, uint64_t size, uint64_t flags, uint64_t *first)
+stub_flagged(uint32_t number, uint64_t space, uint64_t addr, uint64_t size, uint64_t flags, uint64_t *first)
 {
-	const erx_fiasco_vm_flagged_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	const erx_fiasco_vm_flagged_request_t request = { .caller = erx_fiasco_thread_self()->index, .space = space,
 	    .addr = addr, .size = size, .flags = flags };
 	erx_fiasco_reply_t reply;
 	const int status = erx_fiasco_service_call(number, &request, sizeof(request), &reply);
@@ -121,33 +121,33 @@ erx_fiasco_task_write(const void *bytes, size_t length)
 }
 
 int
-erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
+erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 {
-	return (stub_flagged(ERX_FIASCO_CALL_VM_RESERVE, addr, size, flags, reserved));
+	return (stub_flagged(ERX_FIASCO_CALL_VM_RESERVE, space, addr, size, flags, reserved));
 }
 
 int
-erx_vm_commit(uint64_t addr, uint64_t size)
+erx_vm_commit(uint64_t space, uint64_t addr, uint64_t size)
 {
-	return (stub_range(ERX_FIASCO_CALL_VM_COMMIT, addr, size));
+	return (stub_range(ERX_FIASCO_CALL_VM_COMMIT, space, addr, size));
 }
 
 int
-erx_vm_decommit(uint64_t addr, uint64_t size)
+erx_vm_decommit(uint64_t space, uint64_t addr, uint64_t size)
 {
-	return (stub_range(ERX_FIASCO_CALL_VM_DECOMMIT, addr, size));
+	return (stub_range(ERX_FIASCO_CALL_VM_DECOMMIT, space, addr, size));
 }
 
 int
-erx_vm_release(uint64_t addr, uint64_t size)
+erx_vm_release(uint64_t space, uint64_t addr, uint64_t size)
 {
-	return (stub_range(ERX_FIASCO_CALL_VM_RELEASE, addr, size));
+	return (stub_range(ERX_FIASCO_CALL_VM_RELEASE, space, addr, size));
 }
 
 int
-erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot)
+erx_space_protect(uint64_t space, uint64_t addr, uint64_t size, uint32_t prot)
 {
-	return (stub_flagged(ERX_FIASCO_CALL_SPACE_PROTECT, addr, size, prot, NULL));
+	return (stub_flagged(ERX_FIASCO_CALL_SPACE_PROTECT, space, addr, size, prot, NULL));
 }
 
 int

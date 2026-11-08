@@ -21,6 +21,9 @@
  * to hold a page. An object's table is kept by its object record's index (object.c),
  * which alone says whether the object lives.
  *
+ * A mapping is a record in the task's table (vm_table.c) naming the object's record
+ * index; object.c counts them, so an object without a handle lives while one remains.
+ *
  * A physical or contiguous object is the same table over pages that lie outside
  * the pool: a device's registers in the device window, or a run of the contiguous
  * pool. vm_give tells them apart by address and keeps them, so no way of ending an
@@ -39,6 +42,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/core/mem.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/page_pool.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -95,6 +99,7 @@ static void	vm_no_map(uint32_t, uintptr_t, uint64_t, uint32_t);
 static void	vm_no_unmap(uint32_t, uint64_t, uint32_t);
 static uintptr_t vm_take(uint64_t);
 static void	vm_give(uintptr_t, uint64_t);
+static void	vm_unmapped(uint32_t);
 static uintptr_t vm_run_take(uint64_t);
 static uint64_t	vm_run_free_pages(void);
 static uint64_t	window_grow(uint64_t, unsigned);
@@ -110,13 +115,13 @@ static _Noreturn void vm_refused(const char *);
 const erx_backend_grow_pages_t erx_fiasco_vm_records = { .take = vm_record_take, .give = vm_record_give };
 
 static const erx_backend_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap, .take = vm_take,
-    .give = vm_give, .free_pages = erx_fiasco_vm_free_pages };
+    .give = vm_give, .free_pages = erx_fiasco_vm_free_pages, .unmapped = vm_unmapped };
 /* For a table no space sees: an object's, or a task's whose mappings went with it. */
 static const erx_backend_vm_effects_t vm_no_effects = { .map = vm_no_map, .unmap = vm_no_unmap, .take = vm_take,
-    .give = vm_give, .free_pages = erx_fiasco_vm_free_pages };
+    .give = vm_give, .free_pages = erx_fiasco_vm_free_pages, .unmapped = vm_unmapped };
 /* For an object over a run: its pages are the run's, in order, from vm_run_window. */
 static const erx_backend_vm_effects_t vm_run_effects = { .map = vm_no_map, .unmap = vm_no_unmap, .take = vm_run_take,
-    .give = vm_give, .free_pages = vm_run_free_pages };
+    .give = vm_give, .free_pages = vm_run_free_pages, .unmapped = vm_unmapped };
 static uintptr_t vm_run_window;
 static erx_fiasco_contig_t vm_contig;
 static uint64_t vm_contig_physical;
@@ -145,6 +150,13 @@ vm_give(uintptr_t window, uint64_t addr)
 	/* Below the window: a run of an object, which never joins the pool. */
 	if (window >= VM_WINDOW_BASE)
 		erx_fiasco_pool_put(&vm_pool, window);
+}
+
+/* A mapping's record went by a release or its task's end: the object counts one fewer. */
+static void
+vm_unmapped(uint32_t object)
+{
+	erx_fiasco_object_unmapped(object);
 }
 
 static uintptr_t
@@ -389,12 +401,41 @@ erx_fiasco_vm_object_dma_addr(uint32_t index, uint64_t offset, uint64_t *addr)
 int
 erx_fiasco_vm_object_map(uint32_t task, uint32_t index, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
 {
-	vm_object_t *const object = vm_object(index);
+	const vm_object_t *const object = vm_object(index);
 
 	/* A device's memory is never code: registers fault, and a device could write a run. */
 	if (object->kind != VM_OBJECT_PAGES && prot == ERX_PROT_RX)
 		return (ERX_ERIGHTS);
-	return (erx_backend_vm_map_object(&vm_task(task)->table, &object->table, &vm_effects, addr, size, offset, prot));
+	const int status = erx_backend_vm_map_object(&vm_task(task)->table, &object->table, index, &vm_effects, addr, size,
+	    offset, prot);
+
+	/* Each record counts once, here, and goes once, by vm_unmapped or a revoke: the count is the records' number. */
+	if (status == ERX_OK)
+		erx_fiasco_object_mapped(index);
+	return (status);
+}
+
+/*
+ * Every mapping of the object goes at once: unmapping each of its window pages from
+ * the other spaces removes every mapping derived from it, in every task and the
+ * root's own aliases too, and keeps the window's. Then each task's table drops its
+ * records of it. A row of a task that never opened, or has closed, holds none.
+ */
+void
+erx_fiasco_vm_object_revoke(uint32_t index)
+{
+	const vm_object_t *const object = vm_object(index);
+
+	for (uint64_t offset = 0; offset < object->size; offset += ERX_PAGE_SIZE) {
+		const uintptr_t window = erx_backend_vm_window(&object->table, VM_OBJECT_AREA_START + offset);
+		const l4_msgtag_t tag = l4_task_unmap(L4_BASE_TASK_CAP, l4_fpage(window, L4_PAGESHIFT, L4_FPAGE_RWX),
+		    L4_FP_OTHER_SPACES);
+
+		if (l4_error(tag) < 0)
+			vm_refused("erx: memory: the kernel refused a revoke\n");
+	}
+	for (uint32_t task = 0; task < erx_backend_grow_table_capacity(&vm_tasks); task++)
+		erx_backend_vm_forget_object(&vm_task(task)->table, index);
 }
 
 int

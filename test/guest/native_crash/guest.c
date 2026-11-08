@@ -62,7 +62,7 @@ reserved_page(void)
 {
 	uint64_t page;
 
-	if (erx_vm_reserve(0, PAGE, 0, &page) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &page) != ERX_OK)
 		say("erx: crash: reserve FAILED\n");
 	return (page);
 }
@@ -88,17 +88,17 @@ erx_fiasco_root_main(void)
 		erx_fiasco_machine_off();
 	}
 	page = reserved_page();
-	if (erx_vm_commit(page, PAGE) != ERX_OK)
+	if (erx_vm_commit(ERX_CAP_SELF, page, PAGE) != ERX_OK)
 		say("erx: crash: commit FAILED\n");
 	*(volatile uint64_t *)(uintptr_t)page = 1;
 
 #if ERX_CRASH_CASE == CASE_DECOMMITTED
-	if (erx_vm_decommit(page, PAGE) != ERX_OK)
+	if (erx_vm_decommit(ERX_CAP_SELF, page, PAGE) != ERX_OK)
 		say("erx: crash: decommit FAILED\n");
 	say_address(page);
 	(void)*(volatile uint64_t *)(uintptr_t)page;
 #elif ERX_CRASH_CASE == CASE_READ_ONLY_WRITE
-	if (erx_space_protect(page, PAGE, ERX_PROT_R) != ERX_OK)
+	if (erx_space_protect(ERX_CAP_SELF, page, PAGE, ERX_PROT_R) != ERX_OK)
 		say("erx: crash: protect FAILED\n");
 	if (*(volatile uint64_t *)(uintptr_t)page != 1)
 		say("erx: crash: read-only contents FAILED\n");
@@ -111,7 +111,7 @@ erx_fiasco_root_main(void)
 		erx_utcb_t *const utcb = erx_utcb_self();
 		uint64_t thread;
 
-		if (erx_vm_decommit(page, PAGE) != ERX_OK)
+		if (erx_vm_decommit(ERX_CAP_SELF, page, PAGE) != ERX_OK)
 			say("erx: crash: decommit FAILED\n");
 		start.regs.gpr[0] = page;
 		start.regs.sp = (uint64_t)(uintptr_t)(helper_stack + sizeof(helper_stack));

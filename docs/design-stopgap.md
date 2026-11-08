@@ -596,7 +596,7 @@ cannot cover it, and only then applies it, so a refused call changes nothing. Ap
 address order and gives each its steps from one table of state against target ([Protection](#protection)): take and zero a page, unmap,
 map, give the page back. A map or an unmap the kernel refuses after that leaves no state worth continuing from, and ends the machine with
 the reason. Commit and decommit pass over holes, as the kernel's do; a protect that meets a hole is `ERX_ERANGE`. A commit,
-decommit or protect whose range meets a mapping, and a release that covers part of one, is refused whole with `ERX_EINVAL`.
+decommit whose range meets a mapping, and a release or a fixed reserve that covers part of one, is refused whole with `ERX_EINVAL`, and a protect that meets one with `ERX_ENOTSUP`.
 
 * **Commit:** an uncommitted page takes a page, zeroes it, and `l4_task_map(task, L4_BASE_TASK_CAP, l4_fpage(window,
   L4_PAGESHIFT, prot), l4_map_control(addr, 0, 0))`. A committed page is present, and one already committed becomes read-write as [Protection](#protection) says.
@@ -643,8 +643,9 @@ writable and executable at once. No task's mapping has write and execute at once
 checks the range table and tests each JIT alias by a fault, and the page-table walk belongs to M7.
 
 **An object's record** holds its kind, its creator's task, its budget, its pages or its physical range, its sealed flag, the
-count of handles that name it in any table and the list of its mapping records, each record linked by index, so the service
-finds every mapping of an object without searching. An object goes at the first of four events, each a step of one service
+count of handles that name it in any table and the count of its mapping records. A revoke needs no list of them: one unmap of
+each window page removes every mapping in every space, and the records go by a walk over the tasks' tables, whose cost Phase 1
+asks no bound of. An object goes at the first of four events, each a step of one service
 body:
 
 | Event | What the body does |
@@ -652,7 +653,7 @@ body:
 | `erx_object_destroy`, by its creator's task | revoke, drop the record, free the pages |
 | its budget's destroy | the same, as one step of the budget's walk ([Budgets and groups as records](#budgets-and-groups-as-records)) |
 | its creator's task ends | the same, as one step of [task exit](#task-exit) |
-| its count of handles and its list of mappings both become empty, by a close, a release or a task's end | free the pages; nothing is mapped, so nothing is revoked |
+| its count of handles and its count of mappings both reach zero, by a close, a release or a task's end | free the pages; nothing is mapped, so nothing is revoked |
 
 The last row is erXos's release by the last reference, which a pipe's memory relies on
 ([design-pipes.md](design-pipes.md)); the first three can find an object still mapped, and the revoke makes every task's

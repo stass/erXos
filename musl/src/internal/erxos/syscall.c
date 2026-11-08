@@ -120,7 +120,7 @@ mprotect_call(uint64_t addr, uint64_t size, int prot)
 		return (-EACCES);
 	if (size == 0)
 		return (0);
-	return (errno_of(erx_space_protect(addr, size, prot_of(prot))));
+	return (errno_of(erx_space_protect(ERX_CAP_SELF, addr, size, prot_of(prot))));
 }
 
 /*
@@ -148,13 +148,13 @@ mmap_call(uint64_t addr, uint64_t size, int prot, int flags)
 	if (size == 0 || size > UINT64_MAX - PAGE_MASK)
 		return (-EINVAL);
 	size = (size + PAGE_MASK) & ~PAGE_MASK;
-	error = errno_of(erx_vm_reserve(addr, size, flags & MAP_FIXED ? ERX_VM_FIXED : 0, &base));
+	error = errno_of(erx_vm_reserve(ERX_CAP_SELF, addr, size, flags & MAP_FIXED ? ERX_VM_FIXED : 0, &base));
 	if (error != 0)
 		return (error);
 	if (prot != PROT_NONE) {
 		error = mprotect_call(base, size, prot);
 		if (error != 0) {
-			(void)erx_vm_release(base, size);
+			(void)erx_vm_release(ERX_CAP_SELF, base, size);
 			return (error);
 		}
 	}
@@ -166,7 +166,7 @@ munmap_call(uint64_t addr, uint64_t size)
 {
 	if (size == 0 || size > UINT64_MAX - PAGE_MASK)
 		return (-EINVAL);
-	return (errno_of(erx_vm_release(addr, (size + PAGE_MASK) & ~PAGE_MASK)));
+	return (errno_of(erx_vm_release(ERX_CAP_SELF, addr, (size + PAGE_MASK) & ~PAGE_MASK)));
 }
 
 static long

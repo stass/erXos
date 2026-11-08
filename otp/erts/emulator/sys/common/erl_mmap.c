@@ -47,7 +47,7 @@ int erts_mem_guard(void *p, UWord size, int readable, int writable) {
     }
     /* As mprotect does, up to a whole page: the call takes page multiples alone. */
     size = (size + sys_page_size - 1) & ~(sys_page_size - 1);
-    return erx_space_protect((uint64_t) (UWord) p, size, prot) == ERX_OK ? 0 : -1;
+    return erx_space_protect(ERX_CAP_SELF, (uint64_t) (UWord) p, size, prot) == ERX_OK ? 0 : -1;
 }
 
 #if HAVE_ERTS_MMAP
@@ -1261,7 +1261,7 @@ os_mmap_virtual(UWord size)
 {
     uint64_t addr;
 
-    if (erx_vm_reserve(0, size, 0, &addr) != ERX_OK)
+    if (erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, &addr) != ERX_OK)
 	return NULL;
     return (char *) (UWord) addr;
 }
@@ -1269,13 +1269,13 @@ os_mmap_virtual(UWord size)
 static int
 os_reserve_physical(char *ptr, UWord size)
 {
-    return erx_vm_commit((uint64_t) (UWord) ptr, size) == ERX_OK;
+    return erx_vm_commit(ERX_CAP_SELF, (uint64_t) (UWord) ptr, size) == ERX_OK;
 }
 
 static void
 os_unreserve_physical(char *ptr, UWord size)
 {
-    if (erx_vm_decommit((uint64_t) (UWord) ptr, size) != ERX_OK)
+    if (erx_vm_decommit(ERX_CAP_SELF, (uint64_t) (UWord) ptr, size) != ERX_OK)
 	erts_exit(ERTS_ABORT_EXIT, "Failed to unreserve memory");
 }
 
@@ -1287,7 +1287,7 @@ os_unreserve_physical(char *ptr, UWord size)
 static void
 os_munmap(void *ptr, UWord size)
 {
-    const int status = erx_vm_release((uint64_t) (UWord) ptr, size);
+    const int status = erx_vm_release(ERX_CAP_SELF, (uint64_t) (UWord) ptr, size);
 
     if (status == ERX_ENOMEM)
 	os_unreserve_physical((char *) ptr, size);

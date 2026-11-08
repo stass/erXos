@@ -168,9 +168,12 @@ it; git history is the record of completed work.
   into the ended semaphore's slot without the service (`launcher.c`). Both move onto records with BK8a's
   groups and BK5's space tree (the 1b-A package plan). Until then their values overlap memory handles, so
   `erx_cap_close` or `erx_object_destroy` given a space or IRQ handle acts on whatever memory entry has that number.
-* [Medium] stopgap, `liberx/backend/fiasco/object.c`: nothing records a memory object's mappings, so a map only
-  counts in the record, the count never falls, and a creator's destroy of a mapped object is `ERX_ENOTSUP`
-  instead of a revoke. BK3's mapping records replace the count, and the destroy revokes.
+* [Medium] security residual, `liberx/backend/fiasco/vm.c`: nothing records `ERX_MEM_JIT` on an object, so any
+  object maps read-write at one address and read-execute at another, a protect moves RW to RX freely, and the
+  root maps RX into a child made without `ERX_SPACE_JIT`. No single mapping is ever writable and executable,
+  but code-making does not yet follow from the image.
+* [Low] stopgap, `musl/src/internal/erxos/syscall.c`: `munmap` of part of an object's mapping is `EINVAL` and
+  `mprotect` over one `ENOTSUP`, where FreeBSD does both; nothing reaches it until musl maps objects.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`: a physical object's device window pages and a contiguous object's
   run are never given back, so a driver that makes and closes such objects in a loop uses the window or the
   contiguous pool up for good; each object, not each task, now holds them.

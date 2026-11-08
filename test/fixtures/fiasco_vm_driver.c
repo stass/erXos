@@ -159,8 +159,19 @@ fake_free_pages(void)
 	return (pool.free_pages);
 }
 
+/* Mapping records dropped, by object record index, as the unmapped effect reports them. */
+static uint32_t		unmapped_count[4];
+
+static void
+fake_unmapped(uint32_t object)
+{
+	if (object >= sizeof(unmapped_count) / sizeof(unmapped_count[0]))
+		fail("an unmapped object no table mapped", object);
+	unmapped_count[object]++;
+}
+
 static const erx_backend_vm_effects_t effects = { .map = fake_map, .unmap = fake_unmap, .take = fake_take,
-    .give = fake_give, .free_pages = fake_free_pages };
+    .give = fake_give, .free_pages = fake_free_pages, .unmapped = fake_unmapped };
 static const erx_backend_grow_pages_t records = { .take = fake_record_take, .give = fake_record_give };
 
 static void
@@ -653,7 +664,7 @@ label_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 }
 
 static const erx_backend_vm_effects_t label_effects = { .map = label_map, .unmap = label_unmap, .take = fake_take,
-    .give = fake_give, .free_pages = fake_free_pages };
+    .give = fake_give, .free_pages = fake_free_pages, .unmapped = fake_unmapped };
 
 static int
 table_call(erx_backend_vm_table_t *which, erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot)
@@ -698,25 +709,25 @@ check_labels(void)
 		fail("the object's pages were refused", 0);
 	window_object = erx_backend_vm_window(&object, 2 * PAGE);
 	label_nmaps = 0;
-	if (erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RW) != 0 ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 3 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
+	if (erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RW) != 0 ||
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 3 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
 		fail("two aliases of one page were refused", 0);
 	if (label_nmaps != 2 || label_maps[0].window != window_object || label_maps[1].window != window_object ||
 	    label_maps[0].label != 1 || label_maps[0].addr != AREA_START + 2 * PAGE || label_maps[0].prot != ERX_PROT_RW ||
 	    label_maps[1].addr != AREA_START + 3 * PAGE || label_maps[1].prot != ERX_PROT_RX)
 		fail("an alias landed wrong", label_nmaps);
-	if (erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
-		fail("a second map of an alias was refused", 0);
+	if (erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RX) != ERX_EINVAL)
+		fail("a map over a mapping passed", 0);
 	label_nmaps = 0;
-	if (erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_NONE) != ERX_EINVAL ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_RW | ERX_PROT_RX) != ERX_EINVAL ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 1, ERX_PROT_RW) != ERX_EINVAL ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 8 * PAGE, PAGE, 0, ERX_PROT_RW) != ERX_ERANGE ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 2 * PAGE, ERX_PROT_RW) != ERX_ERANGE ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START, 2 * PAGE, PAGE, ERX_PROT_RW) != ERX_ERANGE)
+	if (erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_NONE) != ERX_EINVAL ||
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_RW | ERX_PROT_RX) != ERX_EINVAL ||
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 2 * PAGE, PAGE, 1, ERX_PROT_RW) != ERX_EINVAL ||
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START + 8 * PAGE, PAGE, 0, ERX_PROT_RW) != ERX_ERANGE ||
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START, PAGE, 2 * PAGE, ERX_PROT_RW) != ERX_ERANGE ||
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START, 2 * PAGE, PAGE, ERX_PROT_RW) != ERX_ERANGE)
 		fail("a bad alias passed", label_nmaps);
 	if (table_call(&a, ERX_BACKEND_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
-	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 0, ERX_PROT_RW) != ERX_EEXIST)
+	    erx_backend_vm_map_object(&a, &object, 3, &label_effects, AREA_START, PAGE, 0, ERX_PROT_RW) != ERX_EINVAL)
 		fail("an alias over a committed page passed", label_nmaps);
 	if (label_nmaps != 1)
 		fail("a refused alias mapped", label_nmaps);
@@ -732,6 +743,147 @@ check_labels(void)
 	for (size_t slot = 0; slot < SLOTS; slot++)
 		if (index_slots[slot].key != 0)
 			fail("the index kept a cleared page", slot);
+}
+
+static int
+map_into(erx_backend_vm_table_t *which, const erx_backend_vm_table_t *object, uint64_t page, uint64_t pages,
+    uint64_t object_page, uint32_t prot)
+{
+	return (erx_backend_vm_map_object(which, object, 3, &label_effects, AREA_START + page * PAGE, pages * PAGE,
+	    object_page * PAGE, prot));
+}
+
+/* A fresh table 1 of MAPPING_AREA pages, all reserved, beside an object of 4 committed pages, labelled 3. */
+#define MAPPING_AREA	12u
+
+static void
+mappings_world(erx_backend_vm_table_t *a, erx_backend_vm_table_t *object)
+{
+	world_reset(POOL_PAGES);
+	memset(label_rights, 0, sizeof(label_rights));
+	memset(unmapped_count, 0, sizeof(unmapped_count));
+	label_nmaps = 0;
+	erx_backend_vm_table_init(a, 1, index_slots, SLOTS, AREA_START, AREA_START + MAPPING_AREA * PAGE, &records);
+	erx_backend_vm_table_init(object, 3, index_slots, SLOTS, PAGE, PAGE + 16 * PAGE, &records);
+	if (table_call(object, ERX_BACKEND_VM_RESERVE, PAGE, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(object, ERX_BACKEND_VM_COMMIT, PAGE, 4 * PAGE, 0, 0) != 0 ||
+	    table_call(a, ERX_BACKEND_VM_RESERVE, AREA_START, MAPPING_AREA * PAGE, ERX_VM_FIXED, 0) != 0)
+		fail("a mapping world was refused", 0);
+}
+
+static void
+mappings_world_clear(erx_backend_vm_table_t *a, erx_backend_vm_table_t *object, uint64_t full)
+{
+	erx_backend_vm_table_clear(a, &label_effects);
+	erx_backend_vm_table_clear(object, &label_effects);
+	if (pool.free_pages != full)
+		fail("the pool's count did not return", pool.free_pages);
+	for (size_t slot = 0; slot < SLOTS; slot++)
+		if (index_slots[slot].key != 0)
+			fail("the index kept a cleared page", slot);
+}
+
+/*
+ * Every range of a small table against one mapping at pages [2, 4), for each call
+ * that can meet it: a commit or decommit that meets it is ERX_EINVAL, a protect
+ * ERX_ENOTSUP, a release that cuts it ERX_EINVAL, each changing nothing, and a
+ * release over all of it unmaps both pages and tells its object once.
+ */
+static void
+check_mappings_every_range(void)
+{
+	static const erx_backend_vm_op_t ops[] = { ERX_BACKEND_VM_COMMIT, ERX_BACKEND_VM_DECOMMIT, ERX_BACKEND_VM_PROTECT,
+	    ERX_BACKEND_VM_RELEASE };
+	erx_backend_vm_table_t a, object;
+
+	current_case = "mappings: every range against one mapping";
+	world_reset(POOL_PAGES);
+	const uint64_t full = pool.free_pages;
+	for (size_t op = 0; op < sizeof(ops) / sizeof(ops[0]); op++)
+		for (uint64_t first = 0; first < 6; first++)
+			for (uint64_t past = first + 1; past <= 6; past++) {
+				const bool meets = first < 4 && past > 2;
+				const bool covers = first <= 2 && past >= 4;
+				int expected = 0;
+				int status;
+
+				mappings_world(&a, &object);
+				if (map_into(&a, &object, 2, 2, 0, ERX_PROT_RW) != 0)
+					fail("the mapping was refused", 0);
+				if (meets && ops[op] != ERX_BACKEND_VM_RELEASE)
+					expected = ops[op] == ERX_BACKEND_VM_PROTECT ? ERX_ENOTSUP : ERX_EINVAL;
+				else if (meets && !covers)
+					expected = ERX_EINVAL;
+				status = table_call(&a, ops[op], AREA_START + first * PAGE, (past - first) * PAGE, 0, ERX_PROT_R);
+				checks++;
+				if (status != expected)
+					fail("a call against a mapping answered wrong", (uint64_t)status);
+				if (meets && expected == 0) {
+					if (a.nmappings != 0 || unmapped_count[3] != 1 || label_rights[2] != 0 || label_rights[3] != 0)
+						fail("a release over a mapping left it", a.nmappings);
+				} else if (a.nmappings != 1 || unmapped_count[3] != 0 || label_rights[2] != ERX_PROT_RW ||
+				    label_rights[3] != ERX_PROT_RW) {
+					fail("a call changed a mapping it did not cover", a.nmappings);
+				}
+				mappings_world_clear(&a, &object, full);
+			}
+}
+
+/*
+ * A map lands only on reserved addresses that hold neither a committed page nor a
+ * mapping, within the object, and is recorded; refusals change nothing; a fixed
+ * reserve over a whole mapping drops it as a release does; forgetting an object drops
+ * its records with no effect, as after a revoke; and clearing the table drops the rest.
+ */
+static void
+check_mappings(void)
+{
+	erx_backend_vm_table_t a, object;
+	uint64_t full, before;
+
+	current_case = "mappings";
+	world_reset(POOL_PAGES);
+	full = pool.free_pages;
+	mappings_world(&a, &object);
+	if (map_into(&a, &object, 2, 2, 0, ERX_PROT_RW) != 0 || map_into(&a, &object, 6, 1, 3, ERX_PROT_R) != 0)
+		fail("two mappings were refused", 0);
+	if (label_rights[2] != ERX_PROT_RW || label_rights[3] != ERX_PROT_RW || label_rights[6] != ERX_PROT_R ||
+	    a.nmappings != 2 || erx_backend_vm_mappings_of(&a, 3) != 2)
+		fail("two mappings landed wrong", a.nmappings);
+
+	before = pool.free_pages;
+	label_nmaps = 0;
+	if (table_call(&a, ERX_BACKEND_VM_COMMIT, AREA_START + 8 * PAGE, PAGE, 0, 0) != 0)
+		fail("a commit beside the mappings was refused", 0);
+	label_nmaps = 0;
+	if (map_into(&a, &object, 3, 2, 0, ERX_PROT_R) != ERX_EINVAL || map_into(&a, &object, 1, 2, 0, ERX_PROT_R) != ERX_EINVAL ||
+	    map_into(&a, &object, 8, 1, 0, ERX_PROT_R) != ERX_EINVAL || map_into(&a, &object, 7, 2, 0, ERX_PROT_R) != ERX_EINVAL)
+		fail("a map over a mapping or a committed page passed", label_nmaps);
+	if (map_into(&a, &object, 9, 2, 3, ERX_PROT_R) != ERX_ERANGE ||
+	    map_into(&a, &object, 9, 1, (UINT64_MAX & ~(PAGE - 1)) / PAGE, ERX_PROT_R) != ERX_ERANGE ||
+	    map_into(&a, &object, MAPPING_AREA, 1, 0, ERX_PROT_R) != ERX_ERANGE ||
+	    map_into(&a, &object, MAPPING_AREA - 1, 2, 0, ERX_PROT_R) != ERX_ERANGE)
+		fail("a map past the object or the reserved addresses passed", label_nmaps);
+	if (table_call(&a, ERX_BACKEND_VM_RESERVE, AREA_START + 3 * PAGE, PAGE, ERX_VM_FIXED, 0) != ERX_EINVAL)
+		fail("a fixed reserve that cuts a mapping passed", 0);
+	if (label_nmaps != 0 || a.nmappings != 2 || unmapped_count[3] != 0 || pool.free_pages != before - 1)
+		fail("a refused call changed something", label_nmaps);
+
+	if (table_call(&a, ERX_BACKEND_VM_RESERVE, AREA_START + 5 * PAGE, 3 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    a.nmappings != 1 || unmapped_count[3] != 1 || label_rights[6] != 0 || label_rights[2] != ERX_PROT_RW)
+		fail("a fixed reserve over a whole mapping kept it", a.nmappings);
+	erx_backend_vm_forget_object(&a, 3);
+	if (a.nmappings != 0 || unmapped_count[3] != 1 || label_rights[2] != ERX_PROT_RW)
+		fail("forgetting an object kept a record or had an effect", a.nmappings);
+	label_rights[2] = label_rights[3] = 0;
+	if (map_into(&a, &object, 2, 1, 0, ERX_PROT_RX) != 0 || map_into(&a, &object, 3, 1, 0, ERX_PROT_RW) != 0)
+		fail("a map where a forgotten mapping was was refused", 0);
+	erx_backend_vm_table_clear(&a, &label_effects);
+	if (unmapped_count[3] != 3 || label_rights[2] != 0 || label_rights[3] != 0)
+		fail("clearing a table did not drop its mappings", unmapped_count[3]);
+	erx_backend_vm_table_clear(&object, &label_effects);
+	if (pool.free_pages != full)
+		fail("the pool's count did not return", pool.free_pages);
 }
 
 /* An index always has twice the slots of the pages it might hold, and fills whole pages. */
@@ -842,6 +994,8 @@ main(int argc, char **argv)
 	check_random_calls(seed + 1, 20000);
 	check_steps_table();
 	check_labels();
+	check_mappings_every_range();
+	check_mappings();
 	erx_backend_grow_table_clear(&table.runs);
 	if (records_held != 0)
 		fail("record pages left after every table was cleared", records_held);

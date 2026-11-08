@@ -389,7 +389,7 @@ reaper_reap(erx_fiasco_thread_record_t *record)
 
 	if (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_REAP, &request, sizeof(request), &reply) != ERX_OK)
 		reaper_refused("erx: reaper: the service refused a deletion\n");
-	if (record->release_size != 0 && erx_vm_release(record->release_base, record->release_size) != ERX_OK)
+	if (record->release_size != 0 && erx_vm_release(ERX_CAP_SELF, record->release_base, record->release_size) != ERX_OK)
 		reaper_refused("erx: reaper: the service refused a detached thread's range\n");
 	if (record->clear_word != 0) {
 		atomic_store_explicit((_Atomic uint32_t *)(uintptr_t)record->clear_word, 0, memory_order_release);

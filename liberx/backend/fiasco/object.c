@@ -8,10 +8,10 @@
  * of each kind gives back. Every decision about records, generations and entries is
  * the core's.
  *
- * Nothing records an object's mappings yet, so a map only counts in its record, and
- * its creator's destroy of a mapped object is ERX_ENOTSUP rather than a revoke. Only
- * a task's own objects reach its handles, and they map only into the task itself, so
- * a task's end, which deletes its space first, leaves no mapping of what it ends.
+ * Each task's range table keeps its mapping records (vm.c); a record here counts them,
+ * so an object with no handle lives while a mapping does. An object that goes while
+ * mapped, by its creator's destroy or its creator's end, is revoked first: every
+ * mapping of it, in every task, goes at once.
  */
 
 #include <stdbool.h>
@@ -106,8 +106,17 @@ erx_fiasco_object_mapped(uint32_t index)
 {
 	erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
 
-	if (record->mappings < UINT32_MAX)
-		record->mappings++;
+	record->mappings++;
+}
+
+void
+erx_fiasco_object_unmapped(uint32_t index)
+{
+	erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
+
+	record->mappings--;
+	if (erx_backend_object_unreferenced(record))
+		object_end(index);
 }
 
 int
@@ -141,8 +150,6 @@ erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle)
 	record = erx_backend_object_at(&object_records, index);
 	if (record->creator != task)
 		return (ERX_ERIGHTS);
-	if (record->mappings != 0)
-		return (ERX_ENOTSUP);
 	object_end(index);
 	return (ERX_OK);
 }
@@ -167,10 +174,19 @@ object_release(uint32_t index)
 	}
 }
 
-/* An object's end: what it holds goes, then its record, leaving every entry naming it stale. */
+/*
+ * An object's end: its mappings go from every space, what it holds goes, then its
+ * record, leaving every entry naming it stale.
+ */
 static void
 object_end(uint32_t index)
 {
+	erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
+
+	if (record->mappings != 0) {
+		erx_fiasco_vm_object_revoke(index);
+		record->mappings = 0;
+	}
 	object_release(index);
 	erx_backend_object_free(&object_records, index);
 }

@@ -64,8 +64,8 @@ aliases_map(void)
 
 	if (erx_mem_create(0, PAGE, ERX_MEM_JIT, &mem) != ERX_OK)
 		return (20);
-	if (erx_vm_reserve(ALIAS_RW, PAGE, ERX_VM_FIXED, &reserved) != ERX_OK ||
-	    erx_vm_reserve(ALIAS_RX, PAGE, ERX_VM_FIXED, &reserved) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, ALIAS_RW, PAGE, ERX_VM_FIXED, &reserved) != ERX_OK ||
+	    erx_vm_reserve(ERX_CAP_SELF, ALIAS_RX, PAGE, ERX_VM_FIXED, &reserved) != ERX_OK)
 		return (21);
 	if (erx_vm_map(ERX_CAP_SELF, ALIAS_RW, PAGE, mem, 0, ERX_PROT_RW) != ERX_OK ||
 	    erx_vm_map(ERX_CAP_SELF, ALIAS_RX, PAGE, mem, 0, ERX_PROT_RX) != ERX_OK)
@@ -87,7 +87,7 @@ thread_spawn(void (*entry)(uint64_t), uint64_t argument, uint64_t mask, _Atomic 
 	erx_utcb_t *const utcb = erx_utcb_self();
 	uint64_t stack;
 
-	if (erx_vm_reserve(0, STACK_BYTES, 0, &stack) != ERX_OK || erx_vm_commit(stack, STACK_BYTES) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, STACK_BYTES, 0, &stack) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, stack, STACK_BYTES) != ERX_OK)
 		return (30);
 	start.regs.gpr[0] = argument;
 	start.regs.sp = stack + STACK_BYTES;
@@ -167,13 +167,13 @@ mode_service(void)
 	uint64_t addr, thread;
 	int64_t step;
 
-	if (erx_vm_reserve(0, PAGE, 0, &addr) != ERX_OK || erx_vm_commit(addr, PAGE) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &addr) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, addr, PAGE) != ERX_OK)
 		return (1);
 	page = (volatile uint64_t *)(uintptr_t)addr;
 	if (*page != 0)
 		return (2);
 	*page = 0x5a;
-	if (erx_vm_decommit(addr, PAGE) != ERX_OK || erx_vm_commit(addr, PAGE) != ERX_OK || *page != 0)
+	if (erx_vm_decommit(ERX_CAP_SELF, addr, PAGE) != ERX_OK || erx_vm_commit(ERX_CAP_SELF, addr, PAGE) != ERX_OK || *page != 0)
 		return (3);
 
 	atomic_store_explicit(&clear_word, 1, memory_order_relaxed);
@@ -233,7 +233,7 @@ commit_helper(uint64_t addr)
 {
 	atomic_store_explicit(&posted, 1, memory_order_release);
 	for (;;)
-		(void)erx_vm_commit(addr, PAGE);
+		(void)erx_vm_commit(ERX_CAP_SELF, addr, PAGE);
 }
 
 static int64_t
@@ -242,7 +242,7 @@ mode_race(void)
 	uint64_t addr, thread;
 	int64_t step;
 
-	if (erx_vm_reserve(0, PAGE, 0, &addr) != ERX_OK)
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &addr) != ERX_OK)
 		return (50);
 	step = thread_spawn(commit_helper, addr, 0, NULL, &thread);
 	if (step != 0)

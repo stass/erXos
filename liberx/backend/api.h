@@ -31,15 +31,19 @@ typedef struct erx_thread_start {
 } erx_thread_start_t;
 
 /*
- * Memory. ERX_ENOMEM from the pool, with no free range, or with the space's runs
- * full; a refused call changes nothing. Commit and decommit pass over holes, and
- * a protect that meets one is ERX_ERANGE. Write with execute is ERX_EINVAL.
+ * Memory, in space: ERX_CAP_SELF, or a space the caller created, and any other value
+ * is ERX_EINVAL; hosted, which makes no spaces, takes ERX_CAP_SELF alone. ERX_ENOMEM
+ * from the pool, with no free range, or with the space's runs full; a refused call
+ * changes nothing. Commit and decommit pass over holes, and a protect that meets one
+ * is ERX_ERANGE. Write with execute is ERX_EINVAL. A commit or decommit that meets a
+ * mapping, or a release that cuts one, is ERX_EINVAL, a protect that meets one
+ * ERX_ENOTSUP; a release over a whole mapping removes it.
  */
-int	erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved) ERX_WARN_UNUSED_RESULT;
-int	erx_vm_commit(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
-int	erx_vm_decommit(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
-int	erx_vm_release(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
-int	erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_commit(uint64_t space, uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_decommit(uint64_t space, uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_release(uint64_t space, uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
+int	erx_space_protect(uint64_t space, uint64_t addr, uint64_t size, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 /* How many more pages can be committed, each exactly one page's worth. */
 uint64_t erx_vm_free_pages(void);
 
@@ -145,9 +149,11 @@ int	erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size,
 	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
 int	erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
 /*
- * Maps part of a memory object at addresses the caller reserved in its own task; space
- * is ERX_CAP_SELF, and any other is ERX_ENOTSUP. Hosted, where no handle names an object
- * a caller can map, every call is ERX_EINVAL.
+ * Maps part of a memory object at reserved addresses of space, which hold neither a
+ * committed page nor a mapping (else ERX_EINVAL), in ERX_CAP_SELF or a space the
+ * caller created. The mapping keeps the object until a release removes it or the
+ * object goes, which removes every mapping of it at once. Hosted, where no handle
+ * names an object a caller can map, every call is ERX_EINVAL.
  */
 int	erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 

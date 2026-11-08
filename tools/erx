@@ -563,7 +563,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
       0
     end
 
@@ -875,14 +875,24 @@ module Erx
     # and under TCG the two things only TCG can do (QemuGate::SMOKE_ACCELERATOR).
     # Exits 0 only when no suite failed or went incomplete. A host whose QEMU
     # lacks either accelerator fails before anything is built: the gate never
-    # falls back to the other one.
+    # falls back to the other one. `--suite NAME`, given once or more, runs only
+    # those suites, for a change that touches them; the gate's verdict needs all.
     def self.check_qemu(input_arguments, runner_class: Runner, fiasco_class: Fiasco)
       arguments = input_arguments.dup
-      options = { jobs: 8 }
+      options = { jobs: 8, suites: [] }
       OptionParser.new do |flags|
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
+        flags.on('--suite NAME', 'Run only this suite; repeatable') { |value| options[:suites] << value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+      suites = QemuGate.suites
+      unless options[:suites].empty?
+        unknown = options[:suites] - suites.map(&:name)
+        raise OptionParser::InvalidArgument, "unknown suites: #{unknown.join(' ')}" unless unknown.empty?
+
+        suites = suites.select { |suite| options[:suites].include?(suite.name) }
+      end
 
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       available = QemuGate.available_accelerators(runner: runner)
@@ -893,7 +903,7 @@ module Erx
         return 1
       end
       fiasco_class.new(root: ROOT, runner: runner).build(jobs: options.fetch(:jobs))
-      results = QemuGate.run(suites: QemuGate.suites, context: QemuGate::Context.new(root: ROOT, jobs: options.fetch(:jobs)))
+      results = QemuGate.run(suites: suites, context: QemuGate::Context.new(root: ROOT, jobs: options.fetch(:jobs)))
       QemuGate.table(results).each { |line| Terminal.puts(line) }
       QemuGate.overall(results.values.map { |entry| QemuGate.status(entry) }) == 'passed' ? 0 : 1
     end

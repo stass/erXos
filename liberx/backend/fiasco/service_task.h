@@ -89,6 +89,8 @@ int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status);
 /* A space handle's two directions: decode is false for a handle that names no row of a child of the root. */
 uint64_t	erx_fiasco_task_space_encode(uint32_t task);
 bool	erx_fiasco_task_space_decode(uint64_t space, uint32_t *task);
+/* The task a call naming space acts on: the caller's for ERX_CAP_SELF, a live child of the root's, else ERX_EINVAL. */
+int	erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task) ERX_WARN_UNUSED_RESULT;
 int	erx_fiasco_task_mem_create_body(uint32_t caller, const erx_fiasco_mem_create_request_t *request, uint64_t *mem);
 int	erx_fiasco_task_mem_dma_body(uint32_t caller, uint64_t mem, uint64_t offset, uint64_t *addr);
 int	erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem);

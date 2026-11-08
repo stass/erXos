@@ -55,7 +55,7 @@ static uint64_t fw_cfg_registers;
 static bool
 map_object(uint64_t mem, uint64_t size, uint32_t prot, uint64_t *addr)
 {
-	return (erx_vm_reserve(0, size, 0, addr) == ERX_OK && erx_vm_map(ERX_CAP_SELF, *addr, size, mem, 0, prot) == ERX_OK);
+	return (erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, addr) == ERX_OK && erx_vm_map(ERX_CAP_SELF, *addr, size, mem, 0, prot) == ERX_OK);
 }
 
 static bool
@@ -78,7 +78,7 @@ case_physical_refusals(void)
 
 	if (erx_mem_create_physical(0, 0, RAM_PHYS, ERX_PAGE_SIZE, ERX_MEM_ATTR_DEVICE, &mem) != ERX_ERANGE ||
 	    erx_mem_create_physical(0, 0, FW_CFG_PHYS, ERX_PAGE_SIZE, ERX_MEM_ATTR_DEVICE, &mem) != ERX_OK ||
-	    erx_vm_reserve(0, ERX_PAGE_SIZE, 0, &addr) != ERX_OK)
+	    erx_vm_reserve(ERX_CAP_SELF, 0, ERX_PAGE_SIZE, 0, &addr) != ERX_OK)
 		return (false);
 	return (erx_vm_map(ERX_CAP_SELF, addr, ERX_PAGE_SIZE, mem, 0, ERX_PROT_RX) == ERX_ERIGHTS &&
 	    erx_vm_map(ERX_CAP_SELF, addr, ERX_PAGE_SIZE, mem, 0, ERX_PROT_RW) == ERX_OK &&

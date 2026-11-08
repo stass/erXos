@@ -95,9 +95,9 @@ erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
 
 /* Each reservation is for the memory made just before it, at that memory's own address. */
 int
-erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
+erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 {
-	CHECK(addr == 0 && flags == 0 && memory_count > 0 && size <= memories[memory_count - 1].size);
+	CHECK(space == ERX_CAP_SELF && addr == 0 && flags == 0 && memory_count > 0 && size <= memories[memory_count - 1].size);
 	*reserved = (uint64_t)(uintptr_t)memories[memory_count - 1].bytes;
 	return (ERX_OK);
 }

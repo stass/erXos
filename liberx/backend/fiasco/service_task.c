@@ -122,6 +122,24 @@ erx_fiasco_task_space_decode(uint64_t space, uint32_t *task)
 	return (true);
 }
 
+/*
+ * The task a call naming a space acts on: the caller's own for ERX_CAP_SELF, or a live
+ * child the root names. Only the root creates spaces, so a task holds no space handle
+ * and any other value it names is no entry.
+ */
+int
+erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task)
+{
+	if (space == ERX_CAP_SELF) {
+		*task = caller;
+		return (ERX_OK);
+	}
+	if (caller != ERX_FIASCO_TASK_ROOT || !erx_fiasco_task_space_decode(space, task) ||
+	    erx_fiasco_task(*task)->state != ERX_FIASCO_TASK_LIVE)
+		return (ERX_EINVAL);
+	return (ERX_OK);
+}
+
 static uint64_t
 task_slot(uint32_t task, uint32_t slot)
 {
@@ -468,23 +486,21 @@ erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contig
 	    mem));
 }
 
-/* A task's objects map into the task alone: nothing yet maps one across tasks. */
+/* An object the caller holds, into its own space or one it created. */
 int
 erx_fiasco_task_vm_map_body(uint32_t caller, const erx_fiasco_vm_map_request_t *request)
 {
-	uint32_t object;
+	uint32_t object, target;
 	int status;
 
-	if (request->space != ERX_CAP_SELF)
-		return (ERX_ENOTSUP);
 	if (request->prot > UINT32_MAX)
 		return (ERX_EINVAL);
-	status = erx_fiasco_object_find(caller, request->mem, ERX_BACKEND_OBJECT_MEMORY, &object);
+	status = erx_fiasco_task_space_target(caller, request->space, &target);
 	if (status == ERX_OK)
-		status = erx_fiasco_vm_object_map(caller, object, request->addr, request->size, request->offset,
+		status = erx_fiasco_object_find(caller, request->mem, ERX_BACKEND_OBJECT_MEMORY, &object);
+	if (status == ERX_OK)
+		status = erx_fiasco_vm_object_map(target, object, request->addr, request->size, request->offset,
 		    (uint32_t)request->prot);
-	if (status == ERX_OK)
-		erx_fiasco_object_mapped(object);
 	return (status);
 }
 

@@ -96,6 +96,12 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, '--accel'
   end
 
+  def test_check_qemu_refuses_an_unknown_suite_before_running_anything
+    status, output = run_cli('check-qemu', '--suite', 'native_task', '--suite', 'no_such_suite', runner_class: UnexpectedRunner)
+    assert_equal 2, status
+    assert_includes output, 'unknown suites: no_such_suite'
+  end
+
   # Each command a gate suite stands for runs what its suite runs, under HVF.
   def test_the_suite_commands_take_no_accelerator_choice
     %w[check-boot-image check-debug-log conformance].each do |command|

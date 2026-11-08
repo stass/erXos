@@ -21,6 +21,14 @@ int	erx_fiasco_launcher_find(const erx_pack_view_t *view, const char *path, uint
 int	erx_fiasco_launch(uint32_t entry, uint32_t flags, uint64_t argument, uint64_t *task) ERX_WARN_UNUSED_RESULT;
 
 /*
+ * erx_fiasco_launch in two steps, so the root can build in the task between them: make
+ * the task with its image, then start its first thread at the image's entry. A refusal of either
+ * leaves nothing of the task.
+ */
+int	erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_launch_start(uint64_t task, uint64_t argument) ERX_WARN_UNUSED_RESULT;
+
+/*
  * Waits for the task to end, by a stop or a fault, and takes its status. Its pages
  * are back in the pool, and its index is free, from the return.
  */

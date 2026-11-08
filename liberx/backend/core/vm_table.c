@@ -42,6 +42,11 @@ static uint32_t	ranges_first_after(const erx_backend_vm_table_t *, uint64_t);
 static void	ranges_remove(erx_backend_vm_table_t *, uint64_t, uint64_t);
 static bool	ranges_split(const erx_backend_vm_table_t *, uint64_t, uint64_t);
 static erx_backend_vm_range_t *run_at(const erx_backend_vm_table_t *, uint32_t);
+static erx_backend_vm_mapping_t *mapping_at(const erx_backend_vm_table_t *, uint32_t);
+static uint32_t	mappings_first_after(const erx_backend_vm_table_t *, uint64_t);
+static bool	mappings_meet(const erx_backend_vm_table_t *, uint64_t, uint64_t);
+static bool	mappings_cut(const erx_backend_vm_table_t *, uint64_t, uint64_t);
+static void	mappings_drop(erx_backend_vm_table_t *, const erx_backend_vm_effects_t *, uint64_t, uint64_t);
 static int	plan_one_more_run(const erx_backend_vm_table_t *, erx_backend_vm_plan_t *);
 static uint64_t	page_key(const erx_backend_vm_table_t *, uint64_t);
 static void	apply_plan(erx_backend_vm_table_t *,
@@ -115,6 +120,7 @@ erx_backend_vm_table_init(erx_backend_vm_table_t *table, uint32_t label, erx_bac
 	*table = (erx_backend_vm_table_t){ .label = label, .pages = pages,
 	    .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end, .placement = ERX_PAGE_SIZE };
 	erx_backend_grow_table_init(&table->runs, sizeof(erx_backend_vm_range_t), records);
+	erx_backend_grow_table_init(&table->mappings, sizeof(erx_backend_vm_mapping_t), records);
 }
 
 erx_backend_vm_steps_t
@@ -168,6 +174,14 @@ erx_backend_vm_plan(const erx_backend_vm_table_t *table, const erx_backend_vm_re
 
 	if (request->op == ERX_BACKEND_VM_PROTECT && !range_reserved(table, plan->start, end))
 		return (ERX_ERANGE);
+	/* A mapped page's state is its mapping's: only a release over the whole mapping changes it. */
+	if (request->op == ERX_BACKEND_VM_PROTECT && mappings_meet(table, plan->start, end))
+		return (ERX_ENOTSUP);
+	if ((request->op == ERX_BACKEND_VM_COMMIT || request->op == ERX_BACKEND_VM_DECOMMIT) &&
+	    mappings_meet(table, plan->start, end))
+		return (ERX_EINVAL);
+	if (request->op == ERX_BACKEND_VM_RELEASE && mappings_cut(table, plan->start, end))
+		return (ERX_EINVAL);
 	if (request->op == ERX_BACKEND_VM_RELEASE && ranges_split(table, plan->start, end)) {
 		error = plan_one_more_run(table, plan);
 		if (error != 0)
@@ -219,6 +233,9 @@ plan_reserve(const erx_backend_vm_table_t *table, const erx_backend_vm_request_t
 			return (error);
 		if ((request->flags & ERX_VM_NOREPLACE) != 0 && range_overlaps(table, start, end))
 			return (ERX_EEXIST);
+		/* What it replaces is released first, with a release's refusal. */
+		if (mappings_cut(table, start, end))
+			return (ERX_EINVAL);
 	} else {
 		/* The address plays no part, so only the size has to decode. */
 		error = range_decode(table, table->area_start, request->size, &end);
@@ -254,8 +271,13 @@ static void
 apply_plan(erx_backend_vm_table_t *table,
     const erx_backend_vm_effects_t *effects, const erx_backend_vm_plan_t *plan)
 {
+	/* A reserve replaces what it covers as a release does. */
+	const bool releases = plan->op == ERX_BACKEND_VM_RESERVE || plan->op == ERX_BACKEND_VM_RELEASE;
+
+	if (releases)
+		mappings_drop(table, effects, plan->start, plan->end);
 	pages_move(table, effects, plan->start, plan->end, plan->target);
-	if (plan->op == ERX_BACKEND_VM_RESERVE || plan->op == ERX_BACKEND_VM_RELEASE)
+	if (releases)
 		ranges_remove(table, plan->start, plan->end);
 	if (plan->op == ERX_BACKEND_VM_RESERVE)
 		ranges_add(table, plan->start, plan->end);
@@ -399,10 +421,11 @@ erx_backend_vm_window(const erx_backend_vm_table_t *table, uint64_t addr)
 }
 
 int
-erx_backend_vm_map_object(const erx_backend_vm_table_t *table, const erx_backend_vm_table_t *object,
+erx_backend_vm_map_object(erx_backend_vm_table_t *table, const erx_backend_vm_table_t *object, uint32_t object_index,
     const erx_backend_vm_effects_t *effects, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
 {
 	uint64_t end, first, object_end;
+	uint32_t at;
 	int error;
 
 	if ((prot != ERX_PROT_R && prot != ERX_PROT_RW && prot != ERX_PROT_RX) || (offset & ERX_BACKEND_VM_PAGE_MASK) != 0)
@@ -413,25 +436,59 @@ erx_backend_vm_map_object(const erx_backend_vm_table_t *table, const erx_backend
 	if (!range_reserved(table, addr, end) || __builtin_add_overflow(object->area_start, offset, &first))
 		return (ERX_ERANGE);
 	/* Every page here would take a page to become read-write only if none is committed. */
-	if (count_takes(table, addr, end, ERX_BACKEND_PAGE_RW) != size / ERX_PAGE_SIZE)
-		return (ERX_EEXIST);
+	if (count_takes(table, addr, end, ERX_BACKEND_PAGE_RW) != size / ERX_PAGE_SIZE || mappings_meet(table, addr, end))
+		return (ERX_EINVAL);
 	error = range_decode(object, first, size, &object_end);
 	if (error != 0)
 		return (error);
 	for (uint64_t done = 0; done < size; done += ERX_PAGE_SIZE)
 		if (erx_backend_vm_window(object, first + done) == 0)
 			return (ERX_ERANGE);
-	/* A map only adds rights, and no record says what is mapped here: so it drops all first. */
-	for (uint64_t done = 0; done < size; done += ERX_PAGE_SIZE) {
-		effects->unmap(table->label, addr + done, VM_RIGHTS_ALL);
+	if (table->nmappings >= erx_backend_grow_table_limit(&table->mappings) ||
+	    erx_backend_grow_table_room(&table->mappings, table->nmappings + 1) != 0)
+		return (ERX_ENOMEM);
+
+	at = mappings_first_after(table, addr);
+	erx_backend_grow_table_move(&table->mappings, at + 1, at, table->nmappings - at);
+	*mapping_at(table, at) = (erx_backend_vm_mapping_t){ .start = addr, .end = end, .offset = offset,
+	    .object = object_index, .prot = prot };
+	table->nmappings++;
+	/* Nothing is mapped at these addresses, so each map gives exactly prot. */
+	for (uint64_t done = 0; done < size; done += ERX_PAGE_SIZE)
 		effects->map(table->label, erx_backend_vm_window(object, first + done), addr + done, prot);
-	}
 	return (0);
+}
+
+void
+erx_backend_vm_forget_object(erx_backend_vm_table_t *table, uint32_t object)
+{
+	uint32_t kept = 0;
+
+	for (uint32_t index = 0; index < table->nmappings; index++) {
+		if (mapping_at(table, index)->object == object)
+			continue;
+		if (kept != index)
+			*mapping_at(table, kept) = *mapping_at(table, index);
+		kept++;
+	}
+	table->nmappings = kept;
+}
+
+uint32_t
+erx_backend_vm_mappings_of(const erx_backend_vm_table_t *table, uint32_t object)
+{
+	uint32_t count = 0;
+
+	for (uint32_t index = 0; index < table->nmappings; index++)
+		if (mapping_at(table, index)->object == object)
+			count++;
+	return (count);
 }
 
 void
 erx_backend_vm_table_clear(erx_backend_vm_table_t *table, const erx_backend_vm_effects_t *effects)
 {
+	mappings_drop(table, effects, table->area_start, table->area_end);
 	/* The last run first, so removing it moves no other. */
 	while (table->nranges > 0) {
 		const erx_backend_vm_range_t *const last = run_at(table, table->nranges - 1);
@@ -441,6 +498,7 @@ erx_backend_vm_table_clear(erx_backend_vm_table_t *table, const erx_backend_vm_e
 		apply_plan(table, effects, &plan);
 	}
 	erx_backend_grow_table_clear(&table->runs);
+	erx_backend_grow_table_clear(&table->mappings);
 }
 
 /* The area's lowest free range of this size. */
@@ -578,4 +636,69 @@ static erx_backend_vm_range_t *
 run_at(const erx_backend_vm_table_t *table, uint32_t index)
 {
 	return (erx_backend_grow_table_at(&table->runs, index));
+}
+
+/* The first mapping record that ends after addr, or nmappings. */
+static uint32_t
+mappings_first_after(const erx_backend_vm_table_t *table, uint64_t addr)
+{
+	uint32_t low = 0;
+	uint32_t high = table->nmappings;
+
+	while (low < high) {
+		const uint32_t middle = low + (high - low) / 2;
+
+		if (mapping_at(table, middle)->end > addr)
+			high = middle;
+		else
+			low = middle + 1;
+	}
+	return (low);
+}
+
+static bool
+mappings_meet(const erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
+{
+	const uint32_t first = mappings_first_after(table, start);
+
+	return (first < table->nmappings && mapping_at(table, first)->start < end);
+}
+
+/* Whether [start, end) covers part of a mapping and not all of it: one reaches across start or across end. */
+static bool
+mappings_cut(const erx_backend_vm_table_t *table, uint64_t start, uint64_t end)
+{
+	const uint32_t first = mappings_first_after(table, start);
+	const uint32_t last = mappings_first_after(table, end);
+
+	return ((first < table->nmappings && mapping_at(table, first)->start < start) ||
+	    (last < table->nmappings && mapping_at(table, last)->start < end));
+}
+
+/*
+ * Unmaps and drops each mapping [start, end) meets, which the plan has made sure it
+ * covers whole. The record goes before its object hears, so the object's end, if the
+ * effect brings it, finds no record of it here.
+ */
+static void
+mappings_drop(erx_backend_vm_table_t *table, const erx_backend_vm_effects_t *effects, uint64_t start, uint64_t end)
+{
+	const uint32_t first = mappings_first_after(table, start);
+
+	while (first < table->nmappings && mapping_at(table, first)->start < end) {
+		const erx_backend_vm_mapping_t gone = *mapping_at(table, first);
+
+		erx_backend_grow_table_move(&table->mappings, first, first + 1, table->nmappings - first - 1);
+		table->nmappings--;
+		for (uint64_t addr = gone.start; addr < gone.end; addr += ERX_PAGE_SIZE)
+			effects->unmap(table->label, addr, VM_RIGHTS_ALL);
+		effects->unmapped(gone.object);
+	}
+}
+
+/* The mapping record at index, which the table has room for. */
+static erx_backend_vm_mapping_t *
+mapping_at(const erx_backend_vm_table_t *table, uint32_t index)
+{
+	return (erx_backend_grow_table_at(&table->mappings, index));
 }

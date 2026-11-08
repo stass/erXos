@@ -111,7 +111,7 @@ thread_finish(void *arg)
 	uint64_t word;
 
 	sanitizer_after_switch(self->asan_fake_stack);
-	if (self->release_size != 0 && erx_vm_release(self->release_base, self->release_size) != ERX_OK)
+	if (self->release_size != 0 && erx_vm_release(ERX_CAP_SELF, self->release_base, self->release_size) != ERX_OK)
 		erx_hosted_fatal("erx: hosted: a thread's stack would not release\n");
 	(void)pthread_mutex_lock(&thread_lock);
 	word = self->clear_word;
@@ -137,7 +137,7 @@ thread_leave(uint64_t base, uint64_t size)
 	if (self == NULL)
 		pthread_exit(NULL);
 	if (self->pthread_start != NULL) {
-		if (size != 0 && erx_vm_release(base, size) != ERX_OK)
+		if (size != 0 && erx_vm_release(ERX_CAP_SELF, base, size) != ERX_OK)
 			erx_hosted_fatal("erx: hosted: a thread's stack would not release\n");
 		pthread_exit(NULL);
 	}

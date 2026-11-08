@@ -20,11 +20,18 @@
  * erx_vm_reserve, _commit, _decommit, _release and erx_space_protect do, and
  * tells its caller's effects which rights to map and unmap, in order.
  *
- * Two facts make up the table, and neither knows the other's shape:
+ * Three facts make up the table, and none knows another's shape:
  *
- *   ranges  The reserved addresses, as sorted, disjoint runs. Adjacent runs
- *           merge, so a range is wholly reserved exactly when one run covers it.
- *   pages   One hash for the machine, from a committed page's address and its
+ *   ranges    The reserved addresses, as sorted, disjoint runs. Adjacent runs
+ *             merge, so a range is wholly reserved exactly when one run covers it.
+ *   mappings  The table's mapping records, sorted and disjoint, each an address
+ *             range inside one run that shows pages of an object: the object's
+ *             record index, the offset and the rights. A mapped page is never in
+ *             the page index, and a call that would change one is refused whole:
+ *             a commit, decommit or protect that meets a mapping, and a release
+ *             (or a fixed reserve) that cuts one. A release over a whole mapping
+ *             unmaps it and drops its record.
+ *   pages     One hash for the machine, from a committed page's address and its
  *           table's label to its window page and protection. A page absent here is uncommitted, and has no protection
  *           to remember: access to it means committing it. Each entry owns a
  *           distinct window page, and the index has two slots for every page the
@@ -61,9 +68,20 @@ typedef struct erx_backend_vm_page {
 	uint64_t	window_and_state;	/* a window page's address, low bits the state */
 } erx_backend_vm_page_t;
 
+/* A mapping record: [start, end) of the table shows the object's pages from offset on, with prot. */
+typedef struct erx_backend_vm_mapping {
+	uint64_t	start;
+	uint64_t	end;
+	uint64_t	offset;		/* from the object's area_start */
+	uint32_t	object;		/* the object's record index, which the caller's effects name */
+	uint32_t	prot;		/* ERX_PROT_R, _RW or _RX */
+} erx_backend_vm_mapping_t;
+
 typedef struct erx_backend_vm_table {
 	erx_backend_grow_table_t runs;		/* erx_backend_vm_range_t, sorted and disjoint */
 	uint32_t		 nranges;	/* runs in use, from the first */
+	erx_backend_grow_table_t mappings;	/* erx_backend_vm_mapping_t, sorted and disjoint */
+	uint32_t		 nmappings;	/* records in use, from the first */
 	erx_backend_vm_page_t	*pages;
 	size_t			 pages_mask;	/* slots - 1; slots are a power of two */
 	uint32_t		 label;		/* below ERX_PAGE_SIZE, and no other table's */
@@ -141,6 +159,12 @@ typedef struct erx_backend_vm_effects {
 	/* Gives back the page addr held; nothing maps it any more. */
 	void	(*give)(uintptr_t window, uint64_t addr);
 	uint64_t (*free_pages)(void);
+	/*
+	 * A mapping of the object at this record index is gone: its pages are unmapped and its
+	 * record dropped. It may change other tables and the shared index, ending the object
+	 * included, but never this table, which is mid-call.
+	 */
+	void	(*unmapped)(uint32_t object);
 } erx_backend_vm_effects_t;
 
 /* The index a window of this many pages needs; never empty. */
@@ -168,6 +192,9 @@ erx_backend_vm_steps_t	erx_backend_vm_steps(erx_backend_vm_state_t, erx_backend_
  *   ERX_EINVAL  an address or size not page-aligned, a size of zero, unknown
  *               flags, ERX_VM_NOREPLACE without ERX_VM_FIXED, or a protection
  *               other than none, R, RW and RX, write with execute among them;
+ *               a commit or decommit that meets a mapping, or a release or a
+ *               fixed reserve that covers part of one;
+ *   ERX_ENOTSUP a protect that meets a mapping;
  *   ERX_ERANGE  a range outside the area, wrapping included, or a protect that
  *               meets a hole;
  *   ERX_EEXIST  a reserve with ERX_VM_NOREPLACE that overlaps a run;
@@ -194,20 +221,34 @@ uintptr_t	erx_backend_vm_window(const erx_backend_vm_table_t *, uint64_t);
 
 /*
  * Maps pages of an object, itself a table whose committed pages it owns, at reserved
- * and uncommitted addresses of another table, whole or not at all. The page index does
- * not hold such a page, as a slot there owns its page; so the object keeps it, and a
- * call of the table over the addresses sees them as uncommitted. The offset counts from
- * the object's area_start. Refuses:
+ * addresses of another table that hold neither a committed page nor a mapping, and
+ * records the mapping under the object's record index, whole or not at all. The page
+ * index does not hold such a page, as a slot there owns its page; the object keeps it.
+ * The offset counts from the object's area_start. Refuses:
  *
- *   ERX_EINVAL  a size of zero, an address, size or offset not page-aligned, or a
- *               protection other than R, RW and RX;
- *   ERX_ERANGE  addresses not wholly reserved, or pages the object does not hold;
- *   ERX_EEXIST  a committed page among the addresses.
+ *   ERX_EINVAL  a size of zero, an address, size or offset not page-aligned, a
+ *               protection other than R, RW and RX, or a committed page or a
+ *               mapping among the addresses;
+ *   ERX_ERANGE  addresses not wholly reserved, or pages the object does not hold,
+ *               an offset that wraps included;
+ *   ERX_ENOMEM  no room for one more mapping record.
  */
-int	erx_backend_vm_map_object(const erx_backend_vm_table_t *, const erx_backend_vm_table_t *,
+int	erx_backend_vm_map_object(erx_backend_vm_table_t *, const erx_backend_vm_table_t *, uint32_t,
 	    const erx_backend_vm_effects_t *, uint64_t, uint64_t, uint64_t, uint32_t) ERX_WARN_UNUSED_RESULT;
 
-/* Releases every run, so the table's pages and its runs' pages go back and its label is free. */
+/*
+ * Drops every mapping record of the object at this record index, with no effect: the
+ * caller has already removed the pages from every space at once, as a revoke does.
+ */
+void	erx_backend_vm_forget_object(erx_backend_vm_table_t *, uint32_t);
+
+/* How many mapping records of the object at this record index the table holds. */
+uint32_t	erx_backend_vm_mappings_of(const erx_backend_vm_table_t *, uint32_t);
+
+/*
+ * Releases every run, mappings included, so the table's pages and its records' pages go
+ * back and its label is free.
+ */
 void	erx_backend_vm_table_clear(erx_backend_vm_table_t *, const erx_backend_vm_effects_t *);
 
 #endif /* ERX_BACKEND_VM_TABLE_H */

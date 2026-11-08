@@ -64,7 +64,7 @@ map_window(const erx_device_spec_t *spec, const erx_device_pages_t *pages, uint6
 #endif
 	status = erx_mem_create_physical(0, 0, pages->base, pages->size, ERX_MEM_ATTR_DEVICE, &mem);
 	if (status == ERX_OK)
-		status = erx_vm_reserve(0, pages->size, 0, &addr);
+		status = erx_vm_reserve(ERX_CAP_SELF, 0, pages->size, 0, &addr);
 	if (status == ERX_OK)
 		status = erx_vm_map(ERX_CAP_SELF, addr, pages->size, mem, 0, ERX_PROT_RW);
 	if (status == ERX_OK)
@@ -420,7 +420,7 @@ map_dma(uint64_t size, uint64_t *mem, uint8_t **mapping)
 
 	status = erx_mem_create_contiguous(0, 0, rounded, 0, mem);
 	if (status == ERX_OK)
-		status = erx_vm_reserve(0, rounded, 0, &addr);
+		status = erx_vm_reserve(ERX_CAP_SELF, 0, rounded, 0, &addr);
 	if (status == ERX_OK)
 		status = erx_vm_map(ERX_CAP_SELF, addr, rounded, *mem, 0, ERX_PROT_RW);
 	if (status == ERX_OK)

@@ -51,6 +51,8 @@ int	erx_fiasco_object_find(uint32_t task, uint64_t handle, uint32_t kind, uint32
 
 /* Counts a map of the object at index, which keeps it while it has no handle. */
 void	erx_fiasco_object_mapped(uint32_t index);
+/* Counts a mapping of it gone; the object goes once it has neither a handle nor a mapping. */
+void	erx_fiasco_object_unmapped(uint32_t index);
 
 /* The bodies of erx_cap_dup, erx_cap_close and erx_object_destroy for the calling task. */
 int	erx_fiasco_cap_dup_body(uint32_t task, uint64_t handle, uint64_t *copy) ERX_WARN_UNUSED_RESULT;

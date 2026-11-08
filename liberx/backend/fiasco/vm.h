@@ -76,17 +76,22 @@ int	erx_fiasco_vm_physical_create(uint32_t object, uint64_t base, uint64_t size)
 int	erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit) ERX_WARN_UNUSED_RESULT;
 /* A contiguous object's device address at an offset in it; another kind of object is ERX_ETYPE, an offset past it ERX_ERANGE. */
 int	erx_fiasco_vm_object_dma_addr(uint32_t object, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
-/* Maps an object's pages into its own task: vm_table.h lists each refusal. A device's object mapped to run is ERX_ERIGHTS. */
+/* Removes every mapping of the object at index from every space, and their records. */
+void	erx_fiasco_vm_object_revoke(uint32_t index);
+/*
+ * Maps an object's pages into task and counts the mapping in its record: vm_table.h lists
+ * each refusal. A device's object mapped to run is ERX_ERIGHTS.
+ */
 int	erx_fiasco_vm_object_map(uint32_t task, uint32_t object, uint64_t addr, uint64_t size,
 	    uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 
 /* Without ERX_VM_FIXED the address is ignored; *reserved says where it landed. */
-int	erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
+int	erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 	    ERX_WARN_UNUSED_RESULT;
-int	erx_vm_commit(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
-int	erx_vm_decommit(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
-int	erx_vm_release(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
-int	erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_commit(uint64_t space, uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_decommit(uint64_t space, uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
+int	erx_vm_release(uint64_t space, uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
+int	erx_space_protect(uint64_t space, uint64_t addr, uint64_t size, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 /*
  * flags is ERX_MEM_JIT or 0; a JIT object is ERX_ERIGHTS from a task made without
  * ERX_SPACE_JIT.
