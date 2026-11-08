@@ -291,7 +291,11 @@ Error in process <0.150.0> with exit value:
 * **The build checks itself.** Generated ABI and hardware layers,
   reproducible boot images, fuzzing, ASan, UBSan, TSan and TLA+ models
   all run as build gates.
-* **Designed but not built yet:** erXos's own kernel, domains beyond the
+* **erXos's own kernel has begun** as host-built C17 cores: the object
+  store, the capability table, budgets, the grace tracker and the page
+  funnel, with host tests, fuzzing and a CBMC model-checking gate. None
+  of it boots yet; the modified Fiasco is still the running kernel.
+* **Designed but not built yet:** the rest of erXos's own kernel, domains beyond the
   system domain, the rest of the command shell, networking, the display
   and web UI, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
