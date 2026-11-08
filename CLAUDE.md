@@ -591,8 +591,21 @@ within about 20 percent of the length, write plain code.
 
 ## Tests and sanitizers
 
-* Write a detailed test suite as you add features. It must be re-executed at
-  every major change.
+* Write the tests that would catch a real break in what you build: its
+  behaviour and its main failure paths. Do not write tests of the test
+  tooling, mutant seeds, or exhaustive matrices, except for a protocol
+  state machine, which is tested exhaustively.
+* **Two tiers of gates. Iteration speed comes first.**
+  * **Landing gate**, for every commit and batch: `make check`, and the
+    QEMU suites the change touches.
+  * **Milestone gate**, before a milestone is declared reached or a large
+    branch merges, and in the background on a spare host:
+    `check-oracle`, `check-asan`, `check-ubsan`, `check-tsan`, the
+    `check-fuzz` budgets, `check-reproducible`, `check-cbmc`,
+    `check-tla`, `check-litmus` and the full QEMU suite.
+  * A milestone-gate failure is fixed forward with a regression test. It
+    holds nothing that already landed unless it also breaks the landing
+    gate.
 * When fixing a non-trivial bug, write a regression test FIRST.
   * It must exercise the broken path, and you must confirm it actually fails
     against the unfixed tree. Only then apply the fix and re-run the test to
@@ -631,7 +644,7 @@ within about 20 percent of the length, write plain code.
     partial, unsupported and timed-out results as such, and each status has
     a test.
   * **Determinism.** The same inputs produce byte-identical boot images
-    (`make check-reproducible`), and a boot in deterministic mode
+    (`make check-reproducible`, at the milestone gate), and a boot in deterministic mode
     (`erx.det=1`, single-threaded TCG with instruction counting) produces a
     byte-identical transcript.
 * **Every parser of untrusted input has a fuzz target, landing with the
@@ -655,11 +668,13 @@ within about 20 percent of the length, write plain code.
   TypeScript), the host tool's HTTP and WebSocket reader, and the HTTP and
   WebSocket parsing of the web front end's server (cowboy, cowlib, ranch)
   as the front end uses it. Fuzz targets build the same sources for the host;
-  `make check-fuzz` runs each for its configured budget.
+  `make check-fuzz` runs each for its configured budget, at the milestone
+  gate.
 * **`make check-oracle`** runs OTP's suites on erXos and on stock OTP
   29.1.2 on the development host and compares them case by case, and runs
-  musl's `libc-test` in a test domain. Run it when touching ERTS,
-  musl, or the build of either.
+  musl's `libc-test` in a test domain. It runs at the milestone gate,
+  and on demand before landing a change to ERTS or musl risky enough to
+  want it.
 * **Latency is UX.** Changes to the boot path, kernel entry, scheduler, IPC,
   domain creation or cross-domain messaging come with before/after numbers
   from `tools/erx bench <name>`. Any performance number written into docs
@@ -687,15 +702,17 @@ within about 20 percent of the length, write plain code.
   * Treat any ASan report as a HIGH finding and fix the root cause. A report
     inside a stopgap is recorded in `TODO.md` and, if reachable from a
     malformed input, added to the test corpus.
-  * It is mandatory before any commit touching allocators, page tables,
-    capabilities, IPC, parsers of untrusted input, or the C library seam.
+  * It runs at the milestone gate. Run it before landing a change to an
+    allocator or to a C parser of untrusted input.
 * **`make check-ubsan`** runs the host test builds under
   UndefinedBehaviorSanitizer and boots a kernel built with UBSan in trap
-  mode through the QEMU suite. Run it alongside `check-asan` when touching
-  arithmetic, bit-level code, or address and offset computation.
+  mode through the QEMU suite. It runs at the milestone gate, and on
+  demand when a change to bit-level or offset arithmetic wants it before
+  landing.
 * **`make check-tsan`** runs the host concurrency tests under
-  ThreadSanitizer. Run it when touching SMP code, locks and atomics, or
-  anything shared between CPUs or threads.
+  ThreadSanitizer. It runs at the milestone gate, and on demand when a
+  change to locks, atomics or state shared between CPUs wants it before
+  landing.
 * **`make check-lsan`** (standalone LeakSanitizer) and **`make check-msan`**
   (MemorySanitizer) run on Linux where available, and are no-ops elsewhere.
 
