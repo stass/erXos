@@ -276,6 +276,11 @@ it; git history is the record of completed work.
   the device NIF does not have: requests go through `post/4`, which owns its buffers. A framebuffer or a virtio-gpu
   resource's backing is a long-lived region the device reads again and again, not a request's buffer; the device NIF
   needs a region call of its own (made once, filled by rectangle, never posted) before the display driver.
+* [Medium] `docs/design-display.md`, "Windows and connections": the design does not say how a window's image 0 is
+  placed on the screen. A window reallocates image 0 only when its size changes, so after a move without a resize the
+  image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
+  the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
+  window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
 * [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "no loop over device-written bytes in the NIF" and "within `erx_device.c` only `write_address` writes a ring's address register" have no check: the first holds as `erx_device_complete` copies with `bcopy` alone, the second by reading the file; a check needs a function-level site.
@@ -2843,6 +2848,21 @@ to the corpus and follow rc
   (design-system.md, design-platforms.md) holds only when the manifest names
   a system-shell principal; state that there.
 
+
+* [Medium] display, layout work in `erx_screen`
+  ([G3](docs/design-display.md#the-screen-and-its-one-path-to-the-device)):
+  `erx_screen_core:layout/2` costs O(L^2 log L) for L window and decoration
+  rectangles across every grant on the display, and runs in `erx_screen`, not
+  in the client's window processes, so a client that moves its windows with
+  `wctl` spends shared time that its grant does not bound. A weave of 64
+  windows with four border rectangles each (about 4,300 tiles) costs about
+  90 ms per move, 128 windows about 430 ms, 256 about 2 s (Homebrew OTP 28
+  JIT on the Apple Silicon development host, 4096x4096 screen; an
+  unrecorded spot measurement). Have `erx_screen` keep only the newest
+  pending layout, so layouts cost at most one per compose, and cap the
+  rectangles of a layout or charge them to the grant that placed them.
+  `flush/4` also costs a window's visible tiles times its 16 dirty
+  rectangles.
 
 * [Low] `erlang/apps/erx_files/src/erx_fs.erl`: a grant takes an open file's answer `{erx_fs_file, Tag, Alias, Reply}` and an
   owner's `DOWN` by matching Erlang references, which a process that can guess one can forge (`list_to_ref/1` on the

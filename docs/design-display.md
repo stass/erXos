@@ -969,11 +969,24 @@ which keeps the idle clock (Low power, below).
 `erx_screen` owns the screen image, an `erx_memdraw` image of the
 display's size and channel, which no other process writes, and the only
 path to the driver. Its decisions are a pure core, `erx_screen_core`,
-which from a layout computes each window's visible region, and from a
-flush returns the plan: the rectangles to copy from the window's image,
-the decorations and background to fill, and the rectangles to push; and
-from an old and a new layout, the area of each window to expose. The
-core is tested exhaustively on the host over small screens and layouts.
+which from a layout tiles the screen, giving each pixel one source: a
+window's image, a decoration or the background. A window's decorations
+lie over its own image, later ones over earlier, and a window with its
+decorations lies over every window below it; a window's visible region
+is its share of the tiles. From an old and a new layout the core returns
+the decorations and background to fill and push, and the area of each
+window to expose, which the window's answering flush pushes; each covers
+exactly the pixels whose content changed. Fills of one colour show the
+same content, and a window shows the same content only from the same
+window process at the same origin of its rectangle, so neither a moved
+window nor a window id shown again passes for what the screen holds.
+From a flush it returns the rectangles to copy from the window's image
+and push, and it keeps a window's dirty list. The core works in screen
+coordinates; `erx_screen` places a window's image on the screen. It cuts
+the screen into horizontal bands at the edges of every rectangle and
+sweeps each band, so a layout of L rectangles costs O(L^2 log L) to tile
+and two tilings compare in time linear in their size. It is tested
+exhaustively on the host over small screens and layouts.
 
 **A flush** is a call from a window process: `erx_screen:flush(Image,
 Rects)`, where `Image` is the window's image 0 resource and `Rects` its
@@ -989,14 +1002,17 @@ rectangles, or the whole screen for a driver whose `info/1` reported
 outstanding, so a window that floods flushes waits behind one compose of
 every other window, not in front of them.
 
-**Direct mode.** When the layout shows one window, covering the screen
-with no decoration, the core plans no compose: `erx_screen` hands the
+**Direct mode.** When the layout shows one window, whose rectangle is
+the screen's and which has no decoration, the core plans no compose:
+`erx_screen` hands the
 driver the window's image itself and answers the window's flush only
 after the driver's callback has returned, so the window still writes
 nothing that is being read. This is the kiosk's path, one copy per dirty
 rectangle into the framebuffer. When the layout leaves direct mode, the
 screen image holds none of the window's pixels, so `erx_screen` exposes
-the whole of every shown window.
+the whole of every shown window. Entering direct mode exposes only what
+the screen image did not already show from the window, once
+`erx_screen` has pushed every rectangle it still owed the driver.
 
 **Geometry.** When the layout changes, `erx_screen` fills the
 decorations and background the plan names, and sends each shown window

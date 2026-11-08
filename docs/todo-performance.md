@@ -14,6 +14,12 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Medium] display, a layout change in `erx_screen`.** `erx_screen_core:layout/2`
+  (`erlang/apps/erx_display/src/erx_screen_core.erl`) tiles and compares in O(L^2 log L) for L
+  window and decoration rectangles, and every flush waits behind it. Measure a layout change of
+  a 64-window rio layout and of a weave on QEMU `virt` under HVF and TCG once `erx_screen` exists;
+  the fixes (newest layout only, a rectangle cap) are in `TODO.md`'s security residual for G3.
+
 * **[Low] kernel, a destroy's slot names.** `erx_cap_slot_name` (`kernel/core/cap.c`) finds a
   listed slot's index by scanning its table's directory, up to `ERX_CAPS_MAX / ERX_CAP_PAGE_SLOTS`
   page pointers per slot a teardown clears. Measure a destroy of an object named by many slots in
