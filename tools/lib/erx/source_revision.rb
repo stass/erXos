@@ -6,11 +6,13 @@ require_relative 'error'
 
 module Erx
   # Which source a build is of, as git records it, for what `uname -v` shows
-  # (docs/design-shell.md, "Text commands"): the branch, the commit count and
-  # the 12-digit commit hash, FreeBSD's sys/conf/newvers.sh form, whether
-  # tracked files differ from that commit, and the commit's date. Each fact is
-  # the same for every build of one tree in one state, so it keeps the boot
-  # image reproducible; no build counter and no build time enter it.
+  # (docs/design-shell.md, "Text commands"): the commit count and the 12-digit
+  # commit hash, FreeBSD's sys/conf/newvers.sh form without its branch,
+  # whether tracked files differ from that commit, and the commit's date.
+  # Each is a fact of the source alone, the same for every build of one tree
+  # in one state on any branch, so it keeps the boot image reproducible and
+  # one commit gives one image wherever it is checked out; no branch, no
+  # build counter and no build time enter it.
   #
   # The facts are read once per build, with git started through an argument
   # vector (Runner), never a shell. A tree that is not a git checkout, such as
@@ -19,12 +21,11 @@ module Erx
   # answers something this module cannot read, is a failure with a
   # diagnostic, never a made-up revision.
   module SourceRevision
-    # branch is nil on a detached HEAD, which newvers.sh then leaves out, and
     # count is nil in a shallow clone, whose count would be short; committed_at
     # is the commit's committer time, a UTC Time.
-    Revision = Data.define(:branch, :count, :hash, :dirty, :committed_at) do
-      # newvers.sh's words: [<branch>-][n<count>-]<hash>[-dirty].
-      def to_s = [branch, count && "n#{count}", hash, ('dirty' if dirty)].compact.join('-')
+    Revision = Data.define(:count, :hash, :dirty, :committed_at) do
+      # newvers.sh's words without the branch: [n<count>-]<hash>[-dirty].
+      def to_s = [count && "n#{count}", hash, ('dirty' if dirty)].compact.join('-')
     end
 
     # git's fsmonitor setting, which would run a hook program, is turned off,
@@ -43,7 +44,6 @@ module Erx
       commit: [%w[rev-parse --verify HEAD^{commit}], /\A[0-9a-f]{40}(?:[0-9a-f]{24})?\z/],
       shallow: [%w[rev-parse --is-shallow-repository], /\A(?:true|false)\z/],
       count: [[*%w[rev-list --first-parent --count], COMMIT], /\A[1-9][0-9]{0,9}\z/],
-      branch: [%w[rev-parse --abbrev-ref HEAD], %r{\A[A-Za-z0-9][A-Za-z0-9._+/-]{0,99}\z}],
       committed: [[*%w[show -s --no-show-signature --format=%ct], COMMIT], /\A[0-9]{1,12}\z/],
       # Porcelain lines alone, `XY path`, so a warning git writes to the same log
       # is refused rather than read as a change.
@@ -78,15 +78,14 @@ module Erx
     # final newline. Pure, for the tests.
     def parse(answers)
       given = QUERIES.keys.to_h { |name| [name, answer(name, answers.fetch(name))] }
-      Revision.new(branch: (given.fetch(:branch) unless given.fetch(:branch) == 'HEAD'),
-                   count: (Integer(given.fetch(:count), 10) if given.fetch(:shallow) == 'false'),
+      Revision.new(count: (Integer(given.fetch(:count), 10) if given.fetch(:shallow) == 'false'),
                    hash: given.fetch(:commit)[0, HASH_DIGITS], dirty: !given.fetch(:changes).empty?,
                    committed_at: Time.at(Integer(given.fetch(:committed), 10)).utc)
     end
 
     # One answer without its final newline (all of it for changes), which
-    # raises when it is not of its query's shape, such as a branch name
-    # holding a byte uname could not write unescaped.
+    # raises when it is not of its query's shape, such as a warning git
+    # wrote in place of a hash.
     def answer(name, text)
       text = text.chomp unless name == :changes
       raise Error, "git's answer to #{name} is not what a source revision needs: #{text.dump}" unless

@@ -127,7 +127,7 @@ module Erx
       ['rc-ls-file', /\Ax\r*\n\z/n, "nosuch\r"],
       ['rc-not-found', /\Anosuch: not found\r*\n\z/n, "cd /tmp; pwd\r"],
       ['rc-pwd', %r{\A/tmp\r*\n\z}n, "uname -a\r"],
-      ['rc-uname', %r{\AerXos erxos [0-9][0-9.]* (?:[A-Za-z0-9._+/-]+-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n, "uname -i\r"],
+      ['rc-uname', %r{\AerXos erxos [0-9][0-9.]* (?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n, "uname -i\r"],
       ['rc-uname-i', %r{\Aqemu-virt/development\r*\n\z}n, "uname -K\r"],
       ['rc-uname-k', /\Afiasco-[0-9a-f]{12}\r*\n\z/n, "exit\r"],
       ['rc-exit', /\A% exit\r*\n\z/n, nil],

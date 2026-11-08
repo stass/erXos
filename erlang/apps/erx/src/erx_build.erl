@@ -158,8 +158,23 @@ lines([{Name, Line} | Rest], Facts) ->
 %% SHAPES: printable ASCII with no space, of bounded length.
 fact(_Name, <<"unknown">>) ->
     {ok, unknown};
+fact(revision, <<"n", Counted/binary>> = Value) ->
+    %% [n<count>-]<hash>[-dirty]: a count of one to ten digits with no
+    %% leading zero, then the commit's twelve lowercase hex digits.
+    case binary:split(Counted, <<"-">>) of
+        [Count, Commit] ->
+            case {shaped(Count, 10, fun nonzero/1, fun digit/1), commit(Commit)} of
+                {{ok, _}, ok} -> {ok, Value};
+                _ -> error
+            end;
+        [_] ->
+            error
+    end;
 fact(revision, Value) ->
-    shaped(Value, 160, fun alnum/1, fun(C) -> alnum(C) orelse lists:member(C, "._+/-") end);
+    case commit(Value) of
+        ok -> {ok, Value};
+        error -> error
+    end;
 fact(date, Value) ->
     case shaped(Value, 12, fun digit/1, fun digit/1) of
         {ok, Digits} -> {ok, binary_to_integer(Digits)};
@@ -191,7 +206,17 @@ shaped(<<C, Tail/binary>> = Value, Max, First, Rest) when byte_size(Value) =< Ma
 shaped(_Value, _Max, _First, _Rest) ->
     error.
 
-alnum(C) -> upper(C) orelse lower(C) orelse digit(C).
-upper(C) -> C >= $A andalso C =< $Z.
+%% ok for a revision's <hash>[-dirty] part, a shallow clone's whole revision.
+commit(<<Hash:12/binary>>) -> hex(Hash);
+commit(<<Hash:12/binary, "-dirty">>) -> hex(Hash);
+commit(_) -> error.
+
+hex(Hash) ->
+    case lists:all(fun(C) -> digit(C) orelse (C >= $a andalso C =< $f) end, binary_to_list(Hash)) of
+        true -> ok;
+        false -> error
+    end.
+
 lower(C) -> C >= $a andalso C =< $z.
 digit(C) -> C >= $0 andalso C =< $9.
+nonzero(C) -> C >= $1 andalso C =< $9.

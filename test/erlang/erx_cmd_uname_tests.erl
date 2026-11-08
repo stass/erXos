@@ -51,11 +51,11 @@ line(Fields, Facts) -> iolist_to_binary(erx_cmd_uname:line(Fields, Facts)).
 %% 2026-11-08 18:02:11 UTC, a Sunday.
 -define(COMMITTED, 1794160931).
 -define(KNOWN, #{nodename => <<"erxos">>, build => <<"2255e43fb7866bb3">>,
-                 revision => <<"master-n1234-5e45e725588e">>, date => ?COMMITTED,
+                 revision => <<"n1234-5e45e725588e">>, date => ?COMMITTED,
                  configuration => <<"qemu-virt/development">>, kernel => <<"fiasco-50bbe8a98119">>}).
 -define(UNKNOWN, #{nodename => unknown, build => unknown, revision => unknown, date => unknown,
                    configuration => unknown, kernel => unknown}).
--define(VERSION, "master-n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119").
+-define(VERSION, "n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119").
 
 %%% Selection
 
@@ -138,7 +138,7 @@ date_test_() ->
 
 %%% The build facts
 
--define(FACTS, <<"revision master-n1234-5e45e725588e\ndate 1794160931\n"
+-define(FACTS, <<"revision n1234-5e45e725588e\ndate 1794160931\n"
                  "configuration qemu-virt/development\nkernel fiasco-50bbe8a98119\n">>).
 
 parse_facts_test_() ->
@@ -149,17 +149,28 @@ parse_facts_test_() ->
      ?_assertEqual({ok, maps:without([nodename, build], ?UNKNOWN)},
                    P(<<"revision unknown\ndate unknown\nconfiguration unknown\nkernel unknown\n">>)),
      ?_assertEqual({ok, (maps:without([nodename, build], ?KNOWN))#{revision => <<"n7-0123456789ab-dirty">>}},
-                   P(Replace(<<"master-n1234-5e45e725588e">>, <<"n7-0123456789ab-dirty">>))),
+                                 P(Replace(<<"n1234-5e45e725588e">>, <<"n7-0123456789ab-dirty">>))),
+%% A shallow clone's revision has no count.
+?_assertEqual({ok, (maps:without([nodename, build], ?KNOWN))#{revision => <<"0123456789ab-dirty">>}},
+              P(Replace(<<"n1234-5e45e725588e">>, <<"0123456789ab-dirty">>))),
      %% Anything else is refused whole.
      [?_assertMatch({error, {bad_facts, _}}, P(Bytes))
       || Bytes <- [<<>>,
                    binary:part(?FACTS, 0, byte_size(?FACTS) - 1),
                    <<?FACTS/binary, "extra x\n">>,
                    Replace(<<"date">>, <<"time">>),
-                   Replace(<<"revision master">>, <<"revision  master">>),
-                   Replace(<<"master">>, <<"mas ter">>),
-                   Replace(<<"master">>, <<"mas\e]8;;ter">>),
-                   Replace(<<"master">>, <<"-master">>),
+                   Replace(<<"revision n1234">>, <<"revision  n1234">>),
+                   Replace(<<"n1234">>, <<"n12 34">>),
+                   Replace(<<"n1234">>, <<"n12\e]8;;34">>),
+                   Replace(<<"n1234">>, <<"-n1234">>),
+                   %% A branch is not part of the revision.
+                   Replace(<<"n1234">>, <<"master-n1234">>),
+                   Replace(<<"n1234">>, <<"n01234">>),
+                   Replace(<<"n1234">>, <<"n12345678901">>),
+                   Replace(<<"n1234-">>, <<"n-">>),
+                   Replace(<<"5e45e725588e">>, <<"5E45E725588E">>),
+                   Replace(<<"5e45e725588e">>, <<"5e45e725588">>),
+                   Replace(<<"5e45e725588e">>, <<"5e45e725588e-clean">>),
                    Replace(<<"1794160931">>, <<"17941609x1">>),
                    Replace(<<"1794160931">>, <<"1794160931000">>),
                    Replace(<<"1794160931">>, <<>>),
@@ -168,9 +179,9 @@ parse_facts_test_() ->
                    Replace(<<"qemu-virt/development">>, <<"qemu/virt/development">>),
                    Replace(<<"fiasco">>, <<"Fiasco">>),
                    Replace(<<"\nkernel">>, <<"\r\nkernel">>),
-                   <<"date 1794160931\nrevision master-n1234-5e45e725588e\n"
+                   <<"date 1794160931\nrevision n1234-5e45e725588e\n"
                      "configuration qemu-virt/development\nkernel fiasco-50bbe8a98119\n">>,
-                   Replace(<<"master-n1234-5e45e725588e">>, binary:copy(<<"a">>, 161)),
+                   Replace(<<"n1234-5e45e725588e">>, binary:copy(<<"a">>, 161)),
                    <<?FACTS/binary, (binary:copy(<<"x">>, 512))/binary>>]]].
 
 %%% Through the shell

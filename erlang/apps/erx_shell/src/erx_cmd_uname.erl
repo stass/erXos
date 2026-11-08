@@ -22,7 +22,7 @@ release, version, machine type, processor, configuration, kernel, build
 identifier. The version is four words, the source revision, its commit's
 date, the configuration and the kernel:
 
-    master-n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119
+    n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119
 
 Where each value comes from (docs/design-shell.md, "Text commands"):
 

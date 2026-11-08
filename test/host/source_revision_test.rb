@@ -53,13 +53,13 @@ class SourceRevisionTest < Minitest::Test
 
   def read = SourceRevision.read(root: @tree, runner: @runner)
 
-  def test_a_clean_branch_gives_the_branch_the_count_and_the_hash
+  def test_a_clean_checkout_gives_the_count_and_the_hash
     checkout_of_two_commits
     revision = read
     hash = git('rev-parse', '--short=12', 'HEAD')
-    assert_equal ['main', 2, hash, false, Time.at(COMMITTED).utc],
-                 [revision.branch, revision.count, revision.hash, revision.dirty, revision.committed_at]
-    assert_equal "main-n2-#{hash}", revision.to_s
+    assert_equal [2, hash, false, Time.at(COMMITTED).utc],
+                 [revision.count, revision.hash, revision.dirty, revision.committed_at]
+    assert_equal "n2-#{hash}", revision.to_s
     assert_equal 12, revision.hash.size
   end
 
@@ -78,12 +78,14 @@ class SourceRevisionTest < Minitest::Test
     refute read.dirty
   end
 
-  def test_a_detached_head_leaves_the_branch_out_as_newvers_sh_does
+  def test_one_commit_reads_the_same_revision_on_any_branch_or_none
     checkout_of_two_commits
-    git('checkout', '--quiet', '--detach', 'HEAD~1')
-    revision = read
-    assert_nil revision.branch
-    assert_equal "n1-#{git('rev-parse', '--short=12', 'HEAD')}", revision.to_s
+    on_main = read
+    git('checkout', '--quiet', '-b', 'fix#123')
+    assert_equal on_main, read, 'another branch, of a name no revision shape admits'
+    git('checkout', '--quiet', '--detach')
+    assert_equal on_main, read, 'a detached head'
+    assert_equal "n2-#{git('rev-parse', '--short=12', 'HEAD')}", read.to_s
   end
 
   def test_the_same_tree_reads_the_same_revision_twice
@@ -97,17 +99,17 @@ class SourceRevisionTest < Minitest::Test
   end
 
   def answers(**changed)
-    { commit: "0123456789abcdef0123456789abcdef01234567\n", shallow: "false\n", count: "7\n", branch: "main\n",
+    { commit: "0123456789abcdef0123456789abcdef01234567\n", shallow: "false\n", count: "7\n",
       committed: "#{COMMITTED}\n", changes: '' }.merge(changed)
   end
 
   def test_parse_reads_a_shallow_clone_without_its_count
-    assert_equal 'main-0123456789ab', SourceRevision.parse(answers(shallow: "true\n")).to_s
+    assert_equal '0123456789ab', SourceRevision.parse(answers(shallow: "true\n")).to_s
   end
 
   def test_parse_refuses_an_answer_of_the_wrong_shape
-    [{ commit: "main\n" }, { commit: "0123456789ab\n" }, { count: "-1\n" }, { branch: "evil\e]8;;\n" }, { branch: "caf\u00e9\n" },
-     { branch: "a b\n" }, { committed: "soon\n" }, { shallow: "maybe\n" },
+    [{ commit: "main\n" }, { commit: "0123456789ab\n" }, { count: "-1\n" }, { count: "7a\n" },
+     { committed: "soon\n" }, { shallow: "maybe\n" },
      { changes: "warning: could not open directory 'x/'\n" }].each do |changed|
       error = assert_raises(Erx::Error, changed.inspect) { SourceRevision.parse(answers(**changed)) }
       assert_includes error.message, changed.keys.first.to_s

@@ -526,14 +526,17 @@ an argument is a usage error:
 
 ```
 % uname -a
-erXos erxos 0.1.0 master-n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119 arm64
+erXos erxos 0.1.0 n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119 arm64
 ```
 
 The version takes the best of FreeBSD's and macOS's: FreeBSD's source
 revision and kernel configuration, macOS's full date and kernel
 version, and neither's repetition of the name and the release. It is
 four words, the source revision, its date, the configuration and the
-kernel. Each value has one source:
+kernel. It holds only facts of the source and its configuration, never
+the branch the source is checked out on, the build host or the time of
+the build, so it is the same on every branch and one commit built for
+one configuration gives one image. Each value has one source:
 
 * the name, `erXos`, and the release are `uname_sysname` and
   `uname_release` of `abi/erx_abi.txt`, and the machine type and
@@ -551,10 +554,10 @@ kernel. Each value has one source:
   `build_id` in hexadecimal, as the boot banner and the host link's
   hello show it; it plays the part of FreeBSD's `kern.build_id`;
 * the source revision is the one the image was built from, in
-  FreeBSD's `newvers.sh` form, `[<branch>-][n<count>-]<hash>[-dirty]`:
-  the branch, left out on a detached head, the count of first-parent
-  commits, left out in a shallow clone, the commit's first 12 hex
-  digits, and `-dirty` when tracked files differ from the commit;
+  FreeBSD's `newvers.sh` form without its branch,
+  `[n<count>-]<hash>[-dirty]`: the count of first-parent commits,
+  left out in a shallow clone, the commit's first 12 hex digits, and
+  `-dirty` when tracked files differ from the commit;
 * the date is that commit's committer date, in UTC and in the layout of
   macOS's `date` (`%a %b %e %H:%M:%S %Z %Y`), never the time of the
   build, so the same tree in the same state packs the same image;

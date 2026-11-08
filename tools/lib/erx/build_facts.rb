@@ -12,13 +12,14 @@ module Erx
   # erx_build reads back. The file is one `name value` line per fact, in
   # Facts' order:
   #
-  #   revision master-n1234-5e45e725588e
+  #   revision n1234-5e45e725588e
   #   date 1794163353
   #   configuration qemu-virt/development
   #   kernel fiasco-50bbe8a98119
   #
   # revision is the source revision (SourceRevision#to_s) and date its
-  # commit's time in seconds since the epoch, UTC; both are unknown in a
+  # commit's time in seconds since the epoch, UTC, facts of the source
+  # alone, so they are the same on every branch; both are unknown in a
   # tree that is not a git checkout, and they are the only facts of the
   # build host that enter the image. configuration is the platform and the
   # build kind, as FreeBSD's uname -i names a kernel configuration
@@ -33,7 +34,7 @@ module Erx
     # reads the file: printable ASCII with no space, so a line splits in two
     # at its first space and the fact needs no escaping to be shown.
     SHAPES = {
-      revision: %r{\A[A-Za-z0-9][A-Za-z0-9._+/-]{0,159}\z},
+      revision: /\A(?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)?\z/,
       date: /\A[0-9]{1,12}\z/,
       configuration: %r{\A[a-z0-9][a-z0-9-]{0,63}/[a-z][a-z0-9-]{0,31}\z},
       kernel: /\A[a-z0-9][a-z0-9.-]{0,63}\z/

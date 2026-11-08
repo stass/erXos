@@ -13,10 +13,10 @@ require_relative '../../tools/lib/erx/fiasco'
 class BuildFactsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   BuildFacts = Erx::BuildFacts
-  KNOWN = BuildFacts::Facts.new(revision: 'master-n1234-5e45e725588e', date: 1_794_160_931,
+  KNOWN = BuildFacts::Facts.new(revision: 'n1234-5e45e725588e', date: 1_794_160_931,
                                 configuration: 'qemu-virt/development', kernel: 'fiasco-50bbe8a98119')
   # The bytes erx_cmd_uname_tests.erl's FACTS holds.
-  TEXT = "revision master-n1234-5e45e725588e\ndate 1794160931\n" \
+  TEXT = "revision n1234-5e45e725588e\ndate 1794160931\n" \
          "configuration qemu-virt/development\nkernel fiasco-50bbe8a98119\n"
 
   def test_the_file_is_one_line_per_fact_in_order
@@ -25,7 +25,7 @@ class BuildFactsTest < Minitest::Test
 
   def test_a_fact_the_build_could_not_determine_is_written_unknown
     facts = KNOWN.with(revision: nil, date: nil)
-    assert_equal TEXT.sub('master-n1234-5e45e725588e', 'unknown').sub('1794160931', 'unknown'), BuildFacts.render(facts)
+    assert_equal TEXT.sub('n1234-5e45e725588e', 'unknown').sub('1794160931', 'unknown'), BuildFacts.render(facts)
   end
 
   def test_the_configuration_is_the_platform_and_the_build_kind
@@ -42,6 +42,7 @@ class BuildFactsTest < Minitest::Test
 
   def test_a_fact_of_the_wrong_shape_is_refused
     [{ revision: 'a b' }, { revision: "evil\e]8;;" }, { revision: '-dash' }, { revision: 'a' * 161 },
+     { revision: 'master-n1234-5e45e725588e' }, { revision: 'n0-0123456789ab' }, { revision: '0123456789AB' },
      { date: -1 }, { date: 10**12 }, { configuration: 'QEMU-VIRT/DEVELOPMENT' },
      { configuration: 'qemu-virt' }, { kernel: 'Fiasco-1' }, { kernel: "fiasco\n" }].each do |changed|
       error = assert_raises(Erx::Error, changed.inspect) { BuildFacts.render(KNOWN.with(**changed)) }

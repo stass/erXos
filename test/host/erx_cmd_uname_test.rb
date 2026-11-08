@@ -29,7 +29,7 @@ class ErxCmdUnameTest < Minitest::Test
              File.join(ROOT, 'test/erlang/erx_cmd_uname_tests.erl')].uniq.freeze
 
   # Facts at each field's longest, which the writer's shapes admit, and every fact unknown.
-  LONGEST = [Erx::BuildFacts::Facts.new(revision: "a#{'-' * 159}", date: 999_999_999_999,
+  LONGEST = [Erx::BuildFacts::Facts.new(revision: "n9999999999-#{'f' * 12}-dirty", date: 999_999_999_999,
                                         configuration: "#{'a' * 64}/#{'b' * 32}", kernel: "k#{'.' * 63}"),
              Erx::BuildFacts::Facts.new(revision: nil, date: nil, configuration: nil, kernel: nil)].freeze
 
