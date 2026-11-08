@@ -6,6 +6,7 @@ require 'rbconfig'
 require_relative 'error'
 require_relative 'runner'
 require_relative 'dependencies'
+require_relative 'fsimg'
 require_relative 'rc_oracle'
 
 module Erx
@@ -24,9 +25,7 @@ module Erx
     SKIPPED_SOURCES = {
       'arm-registers' => 'only `tools/erx sysreg refresh` reads it',
       'tla-tools' => 'only `make check-tla` runs TLC',
-      'oracle-toolchain' => 'the OCI oracle image, which the native oracle does not use',
-      'linux-guest-kernel' => 'only `make check-erofs-oracle` boots the Linux guest',
-      'linux-guest-busybox' => 'only `make check-erofs-oracle` boots the Linux guest'
+      'oracle-toolchain' => 'the OCI oracle image, which the native oracle does not use'
     }.freeze
 
     Step = Data.define(:name, :kind, :argv, :deadline)
@@ -43,7 +42,9 @@ module Erx
       Step.new(name: 'runtime', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[build runtime]),
       Step.new(name: 'rc-oracle', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
-               argv: %w[build rc-oracle])
+               argv: %w[build rc-oracle]),
+      Step.new(name: 'fsimg', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
+               argv: %w[build fsimg])
     ].freeze
 
     # Every step for deps.lock's sources: each source setup fetches, in
@@ -99,6 +100,7 @@ module Erx
       when 'oracle-emu' then File.file?(File.join(@root, 'build/oracle/emu/build.json'))
       when 'runtime' then File.file?(File.join(@root, 'build/runtime/hosted/release/system.pack'))
       when 'rc-oracle' then rc_oracle_valid?
+      when 'fsimg' then fsimg_valid?
       end
     end
 
@@ -107,6 +109,15 @@ module Erx
     # with the same RcOracle.locate, so an error that persists fails the step.
     def rc_oracle_valid?
       RcOracle.locate(root: @root)
+      true
+    rescue Error
+      false
+    end
+
+    # Built from the pinned fsimg by the current recipe, which every EROFS image
+    # needs; a refusal only means the step runs, as for rc_oracle_valid?.
+    def fsimg_valid?
+      Fsimg.locate(root: @root)
       true
     rescue Error
       false

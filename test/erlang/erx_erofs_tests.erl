@@ -2,12 +2,12 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% EUnit cases of the EROFS reader, erx_erofs, and its funnel, erx_verity, over the
-%% fixture images tools/erofs_fixtures.rb writes with mkfs.erofs from the tree
+%% fixture images tools/erofs_fixtures.rb writes with fsimg from the tree
 %% test/fixtures/erofs/tree.terms declares (ERX_EROFS_FIXTURES names the directory).
 -module(erx_erofs_tests).
 -include_lib("eunit/include/eunit.hrl").
 
--export([fixture/1, window/1, window/2, open/1, open/2, expected/0, contents/2, agrees/1]).
+-export([fixture/1, window/1, window/2, open/1, open/2, expected/0, contents/2, owner/1, agrees/2]).
 
 -include_lib("kernel/include/file.hrl").
 
@@ -61,31 +61,37 @@ mount(Name) ->
 logged() ->
     receive {log, Line} -> Line after 0 -> none end.
 
-%% The tree, through every operation, on each image the reader implements.
+%% The tree, through every operation, on each image the reader implements:
+%% compact inodes owned by root, and extended inodes whose owner is beyond
+%% the 16 bits a compact inode holds.
 
 tree_test_() ->
-    [{Name, fun() -> agrees(mount(Name)) end} || Name <- ["compact", "extended", "plain"]].
+    [{Name, fun() -> agrees(mount(Name), owner(Name)) end} || Name <- ["compact", "extended"]].
 
-agrees(Fs) ->
-    lists:foreach(fun(Entry) -> entry(Fs, Entry) end, expected()),
+%% The owner of every entry of a fixture image.
+owner("extended") -> 70000;
+owner(_) -> 0.
+
+agrees(Fs, Owner) ->
+    lists:foreach(fun(Entry) -> entry(Fs, Owner, Entry) end, expected()),
     none = logged().
 
-entry(Fs, {regular, Names, Size, Seed}) ->
+entry(Fs, Owner, {regular, Names, Size, Seed}) ->
     Bytes = contents(Size, Seed),
     ?assertEqual({ok, Bytes}, erx_erofs:read_file(Fs, Names)),
-    {ok, #{type := regular, size := Size, mode := 8#644, uid := 0, gid := 0, mtime := {0, 0}}} =
+    {ok, #{type := regular, size := Size, mode := 8#644, uid := Owner, gid := Owner, mtime := {0, 0}}} =
         erx_erofs:read_file_info(Fs, Names),
     [?assertEqual(slice(Bytes, Offset, Length), erx_erofs:pread(Fs, Names, Offset, Length))
      || Offset <- [0, 1, 4095, 4096, 3 * 4096 - 1, 3 * 4096, Size - 1, Size, Size + 1],
         Offset >= 0, Length <- [0, 1, 50, 5000, 1 bsl 40]],
     ?assertEqual({lists:duplicate(length(Names) - 1, directory) ++ [other], ok}, erx_erofs:walk(Fs, Names));
-entry(Fs, {symlink, Names, Target}) ->
+entry(Fs, _Owner, {symlink, Names, Target}) ->
     ?assertEqual({ok, Target}, erx_erofs:read_link(Fs, Names)),
     {ok, #{type := symlink}} = erx_erofs:read_file_info(Fs, Names),
     ?assertEqual({error, einval}, erx_erofs:read_file(Fs, Names)),
     ?assertEqual({lists:duplicate(length(Names) - 1, directory) ++ [link], ok},
                  erx_erofs:walk(Fs, Names ++ [<<"after">>]));
-entry(Fs, {directory, Names, Children}) ->
+entry(Fs, _Owner, {directory, Names, Children}) ->
     ?assertEqual({ok, Children}, erx_erofs:list_dir(Fs, Names)),
     {ok, #{type := directory}} = erx_erofs:read_file_info(Fs, Names),
     ?assertEqual({error, eisdir}, erx_erofs:read_file(Fs, Names)),
@@ -109,21 +115,14 @@ walks_end_as_the_resolver_reads_them_test() ->
     ?assertEqual({error, enotdir}, erx_erofs:list_dir(Fs, [<<"small">>])),
     ?assertEqual({error, einval}, erx_erofs:pread(Fs, [<<"small">>], -1, 1)).
 
-hard_links_share_an_inode_test() ->
-    Fs = mount("compact"),
-    {ok, #{inode := Inode, nlink := 2}} = erx_erofs:read_file_info(Fs, [<<"small">>]),
-    {ok, #{inode := Inode, nlink := 2}} = erx_erofs:read_file_info(Fs, [<<"small-again">>]).
-
 %% Refusals at mount, each with its diagnostic.
 
 refused(Bytes) ->
     erx_erofs:mount(window(Bytes), unchecked, fun(_) -> ok end).
 
-compression_and_chunks_are_refused_naming_their_bits_test() ->
+compression_is_refused_naming_its_bits_test() ->
     ?assertEqual({error, enotsup, <<"erofs: block 0: incompatible feature bits 0x1 are not implemented">>},
-                 refused(fixture("lz4"))),
-    ?assertEqual({error, enotsup, <<"erofs: block 0: incompatible feature bits 0x4 are not implemented">>},
-                 refused(fixture("chunked"))).
+                 refused(fixture("lz4"))).
 
 superblock_test_() ->
     Image = fixture("compact"),

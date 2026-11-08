@@ -18,8 +18,8 @@ class SetupTest < Minitest::Test
 
   def test_fresh_tree_runs_every_step_in_order
     assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK)).map(&:name)
-    assert_equal NAMES.length - 4, NAMES.take_while { |name| name.start_with?('source-') }.length
-    assert_equal %w[oracle-jit oracle-emu runtime rc-oracle], NAMES.last(4)
+    assert_equal NAMES.length - 5, NAMES.take_while { |name| name.start_with?('source-') }.length
+    assert_equal %w[oracle-jit oracle-emu runtime rc-oracle fsimg], NAMES.last(5)
   end
 
   def test_complete_tree_runs_nothing

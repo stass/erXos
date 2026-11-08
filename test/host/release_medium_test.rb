@@ -11,11 +11,11 @@ require_relative '../../tools/lib/erx/release_medium'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/generated'
 
-# The packer's disk image for QEMU: the EROFS image mkfs.erofs writes, slot A's plan, and
+# The packer's disk image for QEMU: the EROFS image fsimg writes, slot A's plan, and
 # the medium MediumImage.release writes, read back three independent ways: the table by
 # the block driver's own parser, erx_blk_table, compiled from source on stock's emulator
 # (ERX_ERL and ERX_ERLC, which make check supplies); the EROFS image inside slot A by
-# upstream's fsck.erofs, which extracts it; and every other byte by reading the file.
+# fsimg, which verifies and extracts it; and every other byte by reading the file.
 class ReleaseMediumTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
@@ -100,21 +100,20 @@ class ReleaseMediumTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::ReleaseMedium.files([{ 'path' => 'a', 'artifact' => 'x' }, { 'path' => 'a', 'artifact' => 'y' }]) }
   end
 
-  def test_only_the_pinned_erofs_utils_release_is_accepted
+  def test_only_the_pinned_fsimg_is_accepted
     Dir.mktmpdir('erx-release-medium-') do |directory|
-      good = { 'mkfs.erofs' => 'mkfs.erofs (erofs-utils) 1.9.4', 'fsck.erofs' => 'fsck.erofs (erofs-utils) 1.9.4' }
-      assert Erofs.new(runner: FakeRunner.new(good, directory)).check_tools
-      [good.merge('mkfs.erofs' => 'mkfs.erofs (erofs-utils) 1.9.3'), good.merge('fsck.erofs' => 'fsck.erofs (erofs-utils) 1.9.40'),
-       good.merge('mkfs.erofs' => 'mkfs.erofs 1.9.4')].each do |lines|
-        error = assert_raises(Erx::Error) { Erofs.new(runner: FakeRunner.new(lines, directory)).check_tools }
-        assert_match(/must be erofs-utils 1\.9\.4/, error.message)
+      fsimg = Erx::Fsimg.locate(root: ROOT)
+      assert_equal fsimg, Erofs.new(runner: FakeRunner.new({ fsimg => 'fsimg 0.1.0' }, directory)).check_tools
+      ['fsimg 0.1.1', 'fsimg 0.1.0 (patched)', 'mkfs.erofs (erofs-utils) 1.9.4'].each do |line|
+        error = assert_raises(Erx::Error) { Erofs.new(runner: FakeRunner.new({ fsimg => line }, directory)).check_tools }
+        assert_match(/must report "fsimg 0\.1\.0"/, error.message)
       end
     end
   end
 
   # The release medium as the packer writes it, from a stand-in bootable file and a small
   # tree, then read back: the table by erx_blk_table, slot A's bootable file byte for
-  # byte, the EROFS image by fsck.erofs, and zeros everywhere else that was not written.
+  # byte, the EROFS image by fsimg, and zeros everywhere else that was not written.
   def test_the_release_medium_reads_back_as_written
     Dir.mktmpdir('erx-release-medium-') do |directory|
       files = tree(File.join(directory, 'input'))
@@ -144,9 +143,8 @@ class ReleaseMediumTest < Minitest::Test
         assert_equal "\0".b * SECTOR, medium.pread(SECTOR, count), 'the reset count is zero'
       end
 
-      extracted = File.join(directory, 'extracted')
-      Erofs.new(runner: runner(directory)).check(path: first.path, offset: slot + image.slot_offset, extract: extracted)
-      assert_equal files.transform_values { |source| File.binread(source) }, contents(extracted)
+      assert_equal files.transform_values { |source| File.binread(source) },
+                   extract(first.path, offset: slot + image.slot_offset, directory: directory)
     end
   end
 
@@ -184,8 +182,9 @@ class ReleaseMediumTest < Minitest::Test
       end
       assert_equal File.binread(first), File.binread(second)
       other = files.merge('lib/extra' => files.values.first)
-      refute_equal Erofs.uuid(files), Erofs.uuid(other)
-      assert_match(/\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/, Erofs.uuid(files))
+      digests = ->(listing) { Erofs.sources(listing).transform_values(&:digest) }
+      refute_equal Erofs.uuid(digests.call(files)), Erofs.uuid(digests.call(other))
+      assert_match(/\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/, Erofs.uuid(digests.call(files)))
     end
   end
 
@@ -195,7 +194,7 @@ class ReleaseMediumTest < Minitest::Test
   def tree(directory)
     sizes = { 'lib/kernel-10.4/ebin/kernel.beam' => 9000, 'lib/kernel-10.4/ebin/kernel.app' => 300,
               'lib/stdlib-7.0/ebin/lists.beam' => 70_000, 'lib/stdlib-7.0/include/empty.hrl' => 0,
-              'releases/erxos/start.boot' => 4096 }
+              'releases/erxos/start.boot' => 4096, 'lib/odd#name=a\\b' => 10 }
     sizes.each_with_index.to_h do |(path, size), index|
       source = File.join(directory, index.to_s)
       FileUtils.mkdir_p(directory)
@@ -244,9 +243,15 @@ class ReleaseMediumTest < Minitest::Test
      slot_a + image.slot_offset + image.file.length, slot_a + slot_bytes - SECTOR]
   end
 
-  # What fsck.erofs extracted: each regular file's path below directory and its bytes.
-  def contents(directory)
-    Find.find(directory).select { |path| File.file?(path) }
-        .to_h { |path| [path.delete_prefix("#{directory}/"), File.binread(path)] }
+  # The image that starts offset bytes into path, verified by fsimg and extracted by it
+  # below directory: each regular file's path inside the image and its bytes.
+  def extract(path, offset:, directory:)
+    fsimg = Erx::Fsimg.locate(root: ROOT)
+    extracted = File.join(directory, 'extracted')
+    Dir.mkdir(extracted)
+    runner(directory).run([fsimg, 'W', '-f', path, "--offset=#{offset}"], name: 'fsimg-verify', deadline: 300)
+    runner(directory).run([fsimg, 'xf', path, "--offset=#{offset}", '-C', extracted], name: 'fsimg-extract', deadline: 300)
+    root = File.join(extracted, Dir.children(extracted).fetch(0))
+    Find.find(root).select { |file| File.file?(file) }.to_h { |file| [file.delete_prefix("#{root}/"), File.binread(file)] }
   end
 end

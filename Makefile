@@ -13,7 +13,7 @@ DOCKER_CONTEXT ?=
 .PHONY: all build run check check-sources status setup fetch check-tla check-cbmc check-rc-oracle check-arch-terms
 .PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: generate
-.PHONY: check-reproducible check-fuzz check-erofs-oracle check-sanitizers check-asan check-ubsan check-tsan
+.PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
 .PHONY: check-runtime-seam check-runtime-hosted
 .PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
 
@@ -36,9 +36,6 @@ check-reproducible:
 
 check-fuzz:
 	$(RUBY) tools/erx check-fuzz
-
-check-erofs-oracle:
-	$(RUBY) tools/erx check-erofs-oracle $(if $(strip $(RELEASE)),--release "$(RELEASE)",)
 
 check-sanitizers:
 	$(RUBY) tools/erx check-sanitizers

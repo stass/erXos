@@ -4,45 +4,49 @@
 # frozen_string_literal: true
 
 require 'fileutils'
-require 'open3'
 require 'tmpdir'
 require_relative 'lib/erx/erofs_image'
+require_relative 'lib/erx/fsimg'
+require_relative 'lib/erx/runner'
 
-# Writes the EROFS reader's fixture images (test/fixtures/erofs) with the host's
-# mkfs.erofs, the packer's tool, from one tree this script declares, and the tree's
+# Writes the EROFS reader's fixture images (test/fixtures/erofs) with the built fsimg
+# (Erx::Fsimg), the packer's tool, from one tree this script declares, and the tree's
 # expected view, test/fixtures/erofs/tree.terms, which the reader's EUnit cases and its
-# fuzz target compare with what the reader answers. The tree is the input mkfs.erofs
-# packs, so the comparison does not rest on the writer's reading of its own format.
+# fuzz target compare with what the reader answers. The tree is the input fsimg packs,
+# so the comparison does not rest on the writer's reading of its own format.
 #
-# Each image is written with the packer's options (docs/design-storage.md, Data
-# model): a fixed time for every file, a fixed UUID, every file owned by root, no
-# extended attributes and 4 KiB blocks, and then with the options that vary what
-# the reader meets: extended inodes and an inline xattr area on the root, the plain
-# data layout only, and, for the refusals, LZ4 compression and chunked files.
+# The tree reaches fsimg as an mtree manifest: each file's bytes from a host tree of
+# regular files, each directory and symbolic link described in the manifest alone. A
+# second name of a file is a second file with the same bytes, since fsimg writes no
+# hard links. Each image is written with the packer's options (Erx::ErofsImage::PACKER)
+# and a fixed UUID, and then with what varies what the reader meets: every entry but
+# the root owned by an id beyond 16 bits, which a compact inode cannot hold, so every
+# inode but the root's is extended (fsimg makes the root itself, owned by root); and,
+# for the refusal, LZ4 compression.
 #
-# Usage: ruby tools/erofs_fixtures.rb [MKFS]   (default: mkfs.erofs on PATH)
+# Usage: ruby tools/erofs_fixtures.rb   (after `tools/erx build fsimg`)
 module ErofsFixtures
   ROOT = File.expand_path('..', __dir__)
   OUT = File.join(ROOT, 'test/fixtures/erofs')
-  # The packer's own options (Erx::ErofsImage::PACKER) and the fixtures' fixed UUID.
-  PACKER = [*Erx::ErofsImage::PACKER, '-U', '6572786f-732d-6572-6f66-732d74657374'].freeze
+  UUID = '6572786f-732d-6572-6f66-732d74657374'
+  # Each image: the owner of every entry and the packer options it differs in.
+  Image = Data.define(:owner, :compression)
   IMAGES = {
-    'compact' => [],
-    'extended' => %w[-E force-inode-extended --root-xattr-isize=64],
-    'plain' => %w[-E noinline_data],
-    'lz4' => %w[-zlz4],
-    'chunked' => %w[--chunksize=4096]
+    'compact' => Image.new(owner: 0, compression: 'none'),
+    'extended' => Image.new(owner: 70_000, compression: 'none'),
+    'lz4' => Image.new(owner: 0, compression: 'lz4')
   }.freeze
   # The images whose features the reader does not implement, and the error its mount
-  # answers for each; the EROFS oracle (Erx::ErofsOracle) expects exactly these refusals.
-  REFUSED = { 'lz4' => 'enotsup', 'chunked' => 'enotsup' }.freeze
+  # answers for each.
+  REFUSED = { 'lz4' => 'enotsup' }.freeze
 
   # A regular file's bytes are a function of its size and seed, which the Erlang side
   # recomputes: byte i is (i * 7 + seed) mod 256.
   File_ = Data.define(:names, :size, :seed)
   Dir_ = Data.define(:names)
   Link = Data.define(:names, :target)
-  # A second name for a file already declared.
+  # A second name for a file already declared, which reaches the image as a second
+  # file with the same bytes.
   Hard = Data.define(:names, :of)
 
   MANY = (0...200).map { |index| format('entry-%04d-with-a-name-long-enough-to-fill-blocks', index) }.freeze
@@ -65,16 +69,36 @@ module ErofsFixtures
 
   def bytes(size, seed) = (0...size).map { |index| ((index * 7) + seed) % 256 }.pack('C*')
 
+  # The host tree: one regular file for each File_ and Hard entry, named by its path.
   def build(tree_root)
-    FileUtils.mkdir_p(tree_root)
     TREE.each do |entry|
-      path = File.join(tree_root, *entry.names)
       case entry
-      in Dir_ then FileUtils.mkdir_p(path)
-      in File_ then File.binwrite(path, bytes(entry.size, entry.seed))
-      in Link then File.symlink(entry.target, path)
-      in Hard then File.link(File.join(tree_root, *entry.of), path)
+      in File_ then write(tree_root, entry.names, bytes(entry.size, entry.seed))
+      in Hard
+        original = TREE.find { |other| other.is_a?(File_) && other.names == entry.of }
+        write(tree_root, entry.names, bytes(original.size, original.seed))
+      in Dir_ | Link then nil
       end
+    end
+  end
+
+  def write(tree_root, names, contents)
+    path = File.join(tree_root, *names)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.binwrite(path, contents)
+  end
+
+  # The manifest of the tree, every entry owned by owner.
+  def manifest(owner)
+    ids = { 'uid' => owner, 'gid' => owner }
+    TREE.map do |entry|
+      path = entry.names.join('/')
+      keywords = case entry
+                 in Dir_ then { 'type' => 'dir', 'mode' => '0755' }
+                 in File_ | Hard then { 'type' => 'file', 'mode' => '0644', 'contents' => path }
+                 in Link then { 'type' => 'link', 'mode' => '0777', 'link' => entry.target }
+                 end
+      Erx::Fsimg::Entry.new(path: path, keywords: keywords.merge(ids))
     end
   end
 
@@ -102,20 +126,25 @@ module ErofsFixtures
     "%% Written by tools/erofs_fixtures.rb: the tree every fixture image holds.\n#{lines.join("\n")}\n"
   end
 
-  def run(mkfs)
+  def run
+    runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+    fsimg = Erx::ErofsImage.new(runner: runner, root: ROOT).check_tools
     FileUtils.mkdir_p(OUT)
     Dir.mktmpdir('erofs-fixtures') do |work|
       tree_root = File.join(work, 'tree')
       build(tree_root)
-      IMAGES.each do |name, options|
-        image = File.join(OUT, "#{name}.img")
-        FileUtils.rm_f(image)
-        output, status = Open3.capture2e(mkfs, *PACKER, *options, image, tree_root, stdin_data: '')
-        raise "#{mkfs} #{name}: #{output}" unless status.success?
+      IMAGES.each do |name, image|
+        manifest = File.join(work, "#{name}.mtree")
+        File.write(manifest, Erx::Fsimg.mtree(manifest(image.owner)))
+        output = File.join(OUT, "#{name}.img")
+        FileUtils.rm_f(output)
+        runner.run([fsimg, 'cW', '-f', output, *Erx::ErofsImage::LAYOUT, '-o', "compression=#{image.compression}",
+                    '-o', "uuid=#{UUID}", '-C', tree_root, "@#{manifest}"],
+                   name: "fsimg-fixture-#{name}", deadline: Erx::ErofsImage::DEADLINE)
       end
     end
     File.write(File.join(OUT, 'tree.terms'), terms)
   end
 end
 
-ErofsFixtures.run(ARGV.fetch(0, 'mkfs.erofs')) if $PROGRAM_NAME == __FILE__
+ErofsFixtures.run if $PROGRAM_NAME == __FILE__

@@ -7,7 +7,7 @@ The EROFS reader (docs/design-storage.md, Reading EROFS images): reads a
 read-only image in the calling process, written from the format's header,
 `erofs_fs.h`, whose layouts `abi/formats/erofs.txt` declares.
 
-It implements what the packer's `mkfs.erofs` options write: 4 KiB blocks,
+It implements what the packer's fsimg options write, and more: 4 KiB blocks,
 compact and extended inodes, the plain and inline data layouts, regular
 files, directories and symbolic links, no compression. It steps over an
 inode's inline extended attributes and serves none. `mount/2` refuses an

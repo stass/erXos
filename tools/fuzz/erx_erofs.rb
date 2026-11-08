@@ -8,7 +8,7 @@ require 'tmpdir'
 require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_erofs, the EROFS reader, and erx_verity, its funnel
-# (test/erlang/erx_erofs_fuzz.erl): the fixture images mkfs.erofs wrote read as the
+# (test/erlang/erx_erofs_fuzz.erl): the fixture images fsimg wrote read as the
 # tree they were made from, and mutations of them, the superblock's checksum mostly
 # fixed up, fail each operation with an error and a diagnostic, never a crash or an
 # unbounded read. Compiled from source and run on stock's emulator (ERX_ERL and

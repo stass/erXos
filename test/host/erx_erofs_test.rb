@@ -11,7 +11,7 @@ require_relative '../../tools/lib/erx/generated'
 # funnel, and of its open files, erx_erofs_file, against erx_erofs, erx_erofs_file and
 # erx_verity compiled from source with warnings as errors
 # on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies), over the fixture
-# images tools/erofs_fixtures.rb wrote with mkfs.erofs. The fuzz target,
+# images tools/erofs_fixtures.rb wrote with fsimg. The fuzz target,
 # tools/fuzz/erx_erofs.rb, seeds the reader's faults.
 class ErxErofsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)

@@ -5,8 +5,8 @@
 %% (docs/design-storage.md, Reading EROFS images and Verification). It runs from
 %% tools/fuzz/erx_erofs.rb, which also runs it against seeded faults.
 %%
-%% First the fixture images that mkfs.erofs wrote must read as the tree that
-%% tools/erofs_fixtures.rb gave mkfs.erofs (failure `mismatch`). Then each case
+%% First the fixture images that fsimg wrote must read as the tree that
+%% tools/erofs_fixtures.rb gave fsimg (failure `mismatch`). Then each case
 %% mutates one of them, byte writes and little-endian field values biased to the
 %% superblock, the root inode and its inline directory, and the rest of block 0, mostly with the
 %% superblock's CRC-32C fixed up by this module's own table-driven CRC so that the
@@ -23,9 +23,9 @@
 -define(CASES, 1500).
 -define(BLOCK, 4096).
 -define(READS_MAX, 2000).
--define(IMAGES, ["compact", "extended", "plain"]).
+-define(IMAGES, ["compact", "extended"]).
 %% Every fixture has its root, inode 36, at this byte, with its inline
-%% directory entries after it but in the plain image.
+%% directory entries after it.
 -define(ROOT_INODE, (36 * 32)).
 
 run([Seed]) ->
@@ -47,10 +47,13 @@ bogus() ->
      [<<".">>], [<<"..">>], [<<0>>], [<<"a/b">>], [binary:copy(<<"x">>, 255)]].
 
 clean(Name, Bytes) ->
+    %% Every fixture asks for its superblock checksum, so the fixer must leave
+    %% each one as it is, whatever cases the seed draws.
+    fix_crc(Bytes) =:= Bytes orelse fail(crc_fixer, Name),
     Window = erx_erofs_tests:window(Bytes),
     try
         {ok, Fs} = erx_erofs:mount(Window, unchecked, fun(Line) -> self() ! {log, Line} end),
-        erx_erofs_tests:agrees(Fs)
+        erx_erofs_tests:agrees(Fs, erx_erofs_tests:owner(Name))
     catch
         Class:Reason -> fail(mismatch, {Name, Class, Reason})
     end.
@@ -179,11 +182,13 @@ apply_mutation({At, Value}, Bytes) when At + byte_size(Value) =< byte_size(Bytes
 apply_mutation(_, Bytes) ->
     Bytes.
 
-%% The superblock checksum written as mkfs.erofs writes it, by a table-driven
-%% CRC-32C independent of the reader's.
+%% The superblock checksum as the format defines it, by a table-driven
+%% CRC-32C independent of the reader's: over block 0 from the superblock
+%% (byte 1024) to the block's end, with the checksum field (bytes 1028 to
+%% 1031) taken as zero.
 fix_crc(Bytes) when byte_size(Bytes) >= ?BLOCK ->
     <<Head:1028/binary, _:32, Rest/binary>> = Bytes,
-    <<Covered:(?BLOCK - 1028)/binary, Tail/binary>> = Rest,
+    <<Covered:(?BLOCK - 1032)/binary, Tail/binary>> = Rest,
     Crc = crc(<<(binary:part(Head, 1024, 4))/binary, 0:32, Covered/binary>>),
     <<Head/binary, Crc:32/little, Covered/binary, Tail/binary>>;
 fix_crc(Bytes) ->

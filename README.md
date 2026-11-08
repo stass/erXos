@@ -317,6 +317,9 @@ Apple Silicon macOS is the primary host. You need:
 * GNU make, GNU timeout (`gtimeout`) and Perl;
 * LLVM clang 23.1.3, lld and the LLVM binary tools;
 * AArch64 ELF GCC and binutils;
+* Autoconf, Automake and Libtool, and a C and C++ compiler, which build
+  fsimg, the tool that writes and verifies the EROFS images (`make setup`
+  builds it);
 * QEMU 11.1, with its `virt-11.1` machine;
 * a Homebrew JVM;
 * Docker, a local engine or context, for the full stock OTP suites only.
@@ -351,7 +354,8 @@ ERX_SOURCE_CACHE=/path/to/other/checkout/build/third_party make setup
 `make setup` (`tools/erx setup --jobs N`) runs, in order: every source
 `deps.lock` pins, in its order, except those named below, the
 JIT oracle (`make oracle-bootstrap`), the `emu` oracle,
-`tools/erx build runtime` and `tools/erx build rc-oracle`. A step whose output is already valid is
+`tools/erx build runtime`, `tools/erx build rc-oracle` and
+`tools/erx build fsimg`. A step whose output is already valid is
 skipped, so a second run does nothing. Each build runs under a deadline
 with its own log in `build/logs/`.
 
@@ -359,11 +363,10 @@ It never downloads. `ERX_SOURCE_CACHE` names another checkout's
 `build/third_party`; the archives in the `downloads` directory beside it
 are copied only after their SHA-256 matches `deps.lock`. Without it, the
 sources must already be there from `make fetch`. It does not fetch
-`arm-registers`, `tla-tools`, the oracle image or the Linux guest's
-kernel and busybox (`Erx::Setup::SKIPPED_SOURCES`): only
-`tools/erx sysreg refresh` reads the first, only `make check-tla` uses
-the second, the native oracle does not use the third, and only
-`make check-erofs-oracle` boots the Linux guest. If `ERX_CLANG` or `ERX_LLD`
+`arm-registers`, `tla-tools` or the oracle image
+(`Erx::Setup::SKIPPED_SOURCES`): only `tools/erx sysreg refresh` reads
+the first, only `make check-tla` uses the second, and the native oracle
+does not use the third. If `ERX_CLANG` or `ERX_LLD`
 is unset, the builds use `/opt/homebrew/opt/llvm/bin/clang` and
 `/opt/homebrew/bin/ld.lld`; export them yourself for later commands.
 

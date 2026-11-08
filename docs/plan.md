@@ -1452,9 +1452,9 @@ the guest's power cut and the next boot.
   ([design-runtime.md](design-runtime.md#per-byte-primitives));
   read-only images in the EROFS format, one per release: the EROFS reader
   in Erlang, preloaded in both runtime images, with its fuzz target;
-  upstream's `mkfs.erofs` as the packer's host tool and the packer's disk
-  image for QEMU, laid out by the ABI file's medium layout; and Linux's
-  EROFS driver and `fsck.erofs` as the oracle in a Linux guest.
+  fsimg as the packer's host tool, which writes and verifies each image, and
+  the packer's disk image for QEMU, laid out by the ABI file's medium
+  layout.
 * **One practical data store.** littlefs as the stopgap read-write file
   system behind `erx_fs`'s callback module, a NIF of the system domain that
   a worker process calls on a dirty scheduler while the volume's owner
@@ -1472,9 +1472,9 @@ the guest's power cut and the next boot.
   ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record));
   the harness's trials follow with M12.
 
-**Exit criteria.** Every EROFS image the packer writes mounts in the
-Linux guest with the files the reader sees, and passes upstream's
-`fsck.erofs`; every read of the EROFS reader goes through
+**Exit criteria.** Every EROFS image the packer writes passes fsimg's
+verification, and the reader's tests over fsimg's fixture images
+pass; every read of the EROFS reader goes through
 `erx_verity:read/3`, which a build check enforces with its seeded
 violation; a file synced under `/data` survives
 a power cut after the sync and the next boot, under HVF; the
@@ -2071,7 +2071,7 @@ signature's small verifier pinned and built
 
 **Exit criteria.** No open CRITICAL or HIGH finding; every residual risk
 either fixed or recorded in `TODO.md` as accepted, with its reason. Every
-EROFS image the packer writes passes `veritysetup`; one byte flipped in an
+EROFS image the packer writes passes `erx_verity`'s check on the host; one byte flipped in an
 image fails the reads of its block with `eio` while every other file reads
 on; the hash-checking reader runs its fuzz budget clean.
 

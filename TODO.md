@@ -1028,9 +1028,12 @@ it; git history is the record of completed work.
   of 256 metadata blocks per image ([design-storage.md](docs/design-storage.md#reading-erofs-images)
   step 4), so every lookup reads its inode and directory blocks again; a log of a failed read goes only
   to the reader's mount log function.
-* [Low] test, `tools/fuzz/erx_erofs.rb`: whether a seeded fault is caught depends on the seed: with
-  `--seed 11` the reader that does not bound a directory entry's name by its block passes, so that run
-  does not show the target catching it; the mutations need one that always cuts a name across its block.
+* [Low] test, `erx_erofs`: the fixtures fsimg writes hold no hard link (fsimg writes none), no chunk-based
+  file (incompatible bit 0x4, which the reader refuses) and no regular file in the plain layout with a
+  partial last block, so no case reads a shared inode (nlink 2) or checks the chunked refusal or that
+  tail; each can be made by patching `compact.img` in the EUnit cases and fixing its superblock checksum.
+* [Low] test, dm-verity: the hash tree the packer writes is checked only by `erx_verity`, erXos's own
+  code; no outside implementation such as `veritysetup` checks the tree format.
 * [Low] runtime, `erx_erofs`: the superblock's CRC-32C is computed bit by bit in Erlang, not by the
   per-byte primitive `erx_bytes:crc32c/2`: the reader's EUnit cases and fuzz target run it on stock
   OTP, which has no `erx_bytes` NIF, so moving it needs an Erlang stand-in for those runs (at boot
@@ -1041,14 +1044,12 @@ it; git history is the record of completed work.
 * [Low] runtime, `erx_erofs`: a walk that fails inside an operation (`eio`, `enotsup`, `enametoolong`) answers
   `{[], Error}`, dropping the kinds it passed, so `erx_path` places the error at the first name; a superblock
   claiming more blocks than the window holds fails later as a read failure, not at mount as malformed; the
-  fixtures pack every file with one owner, mode and time (`--all-root`, `-T 0`), so no case checks the
-  owner, mode-bit and mtime offsets against `mkfs.erofs` with other values.
-* [Medium] test, EROFS oracle (`tools/lib/erx/linux_guest.rb`, `tools/erx check-erofs-oracle`): the Linux
-  guest holds Debian's cloud kernel and static busybox only. It has no `veritysetup`, so no image's hash
-  tree is checked by Linux's dm-verity, and the cloud kernel has no F2FS, so the F2FS oracle needs another
-  pinned kernel (Debian's generic arm64 one is the candidate to check) with f2fs-tools, and the FAT oracle
-  dosfstools. The comparison takes mtime in whole seconds (busybox `stat`), and the release's image is
-  checked only when `--release` names it, so `make check-erofs-oracle` alone covers the fixtures.
+  fixtures give every entry one mode and one time (the manifest's modes 0644 and 0755 and time 0), and only
+  `extended.img` varies the owner (uid and gid 70000), so no case checks the mode-bit and mtime offsets
+  with other values; fsimg's manifests can write them.
+* [Medium] test, F2FS oracle: erXos's F2FS is checked against Linux's, which needs a Linux guest under QEMU
+  with a pinned kernel that has F2FS (Debian's generic arm64 kernel is the candidate to check) and
+  f2fs-tools. Neither the guest nor its pins exist.
 * [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `file:ipread_s32bu_p32bu/3` on an open
   file of a grant has no implementation, so it raises `undef`.
 * [Medium] runtime, `otp/lib/kernel/src/file.erl`: `file`'s name calls (`copy`, `delete`,

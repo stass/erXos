@@ -10,7 +10,7 @@ require_relative 'medium_image'
 module Erx
   # The packer's disk image for QEMU (docs/plan.md, M6): a medium laid out by the ABI
   # file's medium layout (MediumImage) whose slot A holds a production image's bootable
-  # file and, after it, the release's EROFS image, which mkfs.erofs writes from the system
+  # file and, after it, the release's EROFS image, which fsimg writes from the system
   # release's files at the paths the boot image's archive gives them
   # (ProductionImage::Built#release). The boot-selection record commits slot A
   # (BootRecord.sector), and the rest of its partition, slot B, the vault's partition

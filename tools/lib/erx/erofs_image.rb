@@ -3,41 +3,48 @@
 # frozen_string_literal: true
 
 require 'digest'
-require 'fileutils'
+require 'pathname'
 require 'tmpdir'
 require_relative 'bounded_file'
 require_relative 'error'
+require_relative 'fsimg'
 
 module Erx
-  # An EROFS image of a set of files, written by upstream's mkfs.erofs with the packer's
-  # options (docs/design-storage.md, "What each format holds"): a fixed time for every
-  # file, a UUID fixed by the image's contents, every file owned by root, no extended
+  # An EROFS image of a set of files, written by fsimg (Erx::Fsimg) with the packer's
+  # options (docs/design-storage.md, "What each format holds"): every time fixed at 0,
+  # a UUID fixed by the image's contents, every file owned by root, no extended
   # attributes, 4 KiB blocks and no compression, so the same files give the same bytes.
   #
-  # mkfs.erofs packs a directory, so the files are first copied into a private staging
-  # tree whose modes this module sets itself (0755 for a directory, 0644 for a file),
-  # and nothing of the host's umask, owners, times or attributes reaches the image.
-  # mkfs.erofs and fsck.erofs are host tools at the pinned erofs-utils release (TOOLS),
-  # run as subprocesses by argument vector; a tool reporting another version is refused.
+  # The image is described to fsimg by an mtree manifest that names each directory
+  # below the root (mode 0755; fsimg makes the root itself, 0755 and owned by root)
+  # and each file (mode 0644) with root as its owner and each file's host
+  # contents, size and SHA-256, so nothing of the host's umask, owners, times or
+  # attributes reaches the image and no staging copy is made. fsimg verifies the
+  # staged image before it publishes it (`cW`), and refuses a source whose size or
+  # digest no longer matches the manifest, so the UUID names the bytes the image holds.
+  # The image carries fsimg's default volume label, FSIMG, which nothing reads.
   class ErofsImage
-    VERSION = '1.9.4'
-    TOOLS = %w[mkfs.erofs fsck.erofs].freeze
-    PACKER = %w[-b 4096 -T 0 --all-time --all-root -x -1].freeze
+    # The layout every erXos EROFS image shares: reproducible bytes with every time at 0
+    # and 4 KiB blocks. The packer adds no compression; a test fixture may vary it.
+    LAYOUT = %w[-F erofs -R -e 0 -o cluster=4096].freeze
+    PACKER = [*LAYOUT, '-o', 'compression=none'].freeze
     # One name of a path inside the image: printable ASCII but '/'; paths join names by
     # '/'. Names are compared case-folded and kept within NAME_MAX, so a host whose file
-    # system folds case or limits names stages exactly what another host would.
+    # system folds case or limits names would hold exactly what another host would.
     NAME = %r{\A[\x21-\x2e\x30-\x7e]+\z}
     NAME_MAX = 255
     DEADLINE = 300
+    ROOT = File.expand_path('../../..', __dir__)
 
-    # The version line each tool prints first: "mkfs.erofs (erofs-utils) 1.9.4".
-    def self.version_line(tool) = /\A#{Regexp.escape(tool)} \(erofs-utils\) #{Regexp.escape(VERSION)}\s*\z/
+    # One file of the image as read once: its host path with every link resolved, its
+    # size and its hex SHA-256.
+    Source = Data.define(:path, :size, :digest)
 
     # A version 4 (random-form) UUID drawn from the SHA-256 of the image's sorted paths
-    # and their files' digests, so two builds of one image share it and images that hold
-    # different files do not.
-    def self.uuid(files)
-      listing = files.sort.map { |path, source| "#{path} #{Digest::SHA256.file(source).hexdigest}\n" }.join
+    # and their files' digests (digests maps each path to its file's hex SHA-256), so two
+    # builds of one image share it and images that hold different files do not.
+    def self.uuid(digests)
+      listing = digests.sort.map { |path, digest| "#{path} #{digest}\n" }.join
       bytes = Digest::SHA256.digest(listing).bytes.first(16)
       bytes[6] = (bytes[6] & 0x0f) | 0x40
       bytes[8] = (bytes[8] & 0x3f) | 0x80
@@ -47,7 +54,7 @@ module Erx
 
     # files maps each path inside the image to the host file it holds. A path is
     # refused unless it is relative and made of plain names, and a path that is also
-    # another's directory is refused, so the staging tree is exactly files.
+    # another's directory is refused, so the manifest describes exactly files.
     def self.check_files(files)
       raise Error, 'an EROFS image needs a map of its files' unless files.is_a?(Hash) && !files.empty?
 
@@ -70,75 +77,90 @@ module Erx
       (1...names.size).map { |count| names.first(count).join('/') }
     end
 
-    def initialize(runner:)
-      @runner = runner
-    end
+    # Each path's Source. A host file that is a link, or not a regular file, is refused
+    # before anything reads it.
+    def self.sources(files)
+      files.to_h do |path, source|
+        File.open(source, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |input|
+          raise Error, "an EROFS image's file is not a regular file: #{source}" unless input.stat.file?
 
-    # Refuses a mkfs.erofs or fsck.erofs that is missing or not the pinned release.
-    def check_tools
-      TOOLS.each do |tool|
-        identity = @runner.run([tool, '--version'], name: "check-#{tool.tr('.', '-')}-version", deadline: 30)
-        first_line = BoundedFile.read(identity.fetch('log'), maximum: 65_536).lines.first.to_s
-        unless self.class.version_line(tool).match?(first_line)
-          raise Error, "#{tool} must be erofs-utils #{VERSION}, as docs/design.md's dependency table pins it; " \
-                       "it reports #{first_line.strip.inspect}"
+          digest = Digest::SHA256.new
+          size = 0
+          while (chunk = input.read(1 << 20))
+            digest << chunk
+            size += chunk.bytesize
+          end
+          [path, Source.new(path: File.realpath(source), size: size, digest: digest.hexdigest)]
         end
       end
-      self
+    rescue SystemCallError, IOError => error
+      raise Error, "cannot read the EROFS image's files: #{error.message}"
+    end
+
+    # The deepest directory that holds every source, which fsimg is given as the
+    # manifest's content directory: each contents= path is relative to it. Each
+    # source's directory is taken as its chain of ancestors, outermost ('/') first,
+    # and the answer is the last ancestor every chain shares.
+    def self.content_directory(sources)
+      chains = sources.each_value.map { |source| Pathname.new(File.dirname(source.path)).descend.map(&:to_s) }
+      chains.reduce { |shared, chain| shared.take_while.with_index { |directory, index| chain[index] == directory } }.last
+    end
+
+    # The manifest's entries: each directory below the root and each file, sorted by path.
+    def self.entries(sources, base:)
+      owner = { 'uid' => 0, 'gid' => 0 }
+      directories = sources.keys.flat_map { |path| parents(path) }.uniq.sort.map do |path|
+        Fsimg::Entry.new(path: path, keywords: { 'type' => 'dir', 'mode' => '0755', **owner })
+      end
+      prefix = base == '/' ? '/' : "#{base}/"
+      files = sources.sort.map do |path, source|
+        Fsimg::Entry.new(path: path, keywords: { 'type' => 'file', 'mode' => '0644', **owner, 'size' => source.size,
+                                                 'sha256digest' => source.digest,
+                                                 'contents' => source.path.delete_prefix(prefix) })
+      end
+      directories + files
+    end
+
+    def initialize(runner:, root: ROOT)
+      @runner = runner
+      @root = root
+    end
+
+    # The built fsimg's path, refused unless it is the pinned build (Fsimg.locate) and
+    # reports the pinned version.
+    def check_tools
+      fsimg = Fsimg.locate(root: @root)
+      identity = @runner.run([fsimg, '-V'], name: 'check-fsimg-version', deadline: 30)
+      first_line = BoundedFile.read(identity.fetch('log'), maximum: 65_536).lines.first.to_s.strip
+      unless first_line == Fsimg::VERSION_LINE
+        raise Error, "fsimg must report #{Fsimg::VERSION_LINE.inspect}, as deps.lock pins it; it reports #{first_line.inspect}"
+      end
+
+      fsimg
     end
 
     # Writes the image of files as output, which must not exist, and returns its path.
-    # The staging tree and the image are written in a private directory beside output and
+    # The manifest and the image are written in a private directory beside output and
     # the image is linked to output whole, so a failed write leaves nothing at output and
     # an existing output, a link included, is refused. name labels the run's log.
     def write(files:, name:, output:)
+      output = File.expand_path(output)
       self.class.check_files(files)
-      check_tools
+      fsimg = check_tools
+      sources = self.class.sources(files)
+      base = self.class.content_directory(sources)
+      uuid = self.class.uuid(sources.transform_values(&:digest))
       Dir.mktmpdir('.erx-erofs-', File.dirname(output)) do |workspace|
-        tree = File.join(workspace, 'tree')
+        manifest = File.join(workspace, 'image.mtree')
         image = File.join(workspace, 'image')
-        stage(files, tree)
-        @runner.run(['mkfs.erofs', *PACKER, '-U', self.class.uuid(files), image, tree],
-                    name: "mkfs-erofs-#{name}", deadline: DEADLINE)
+        File.write(manifest, Fsimg.mtree(self.class.entries(sources, base: base)))
+        @runner.run([fsimg, 'cW', '-f', image, *PACKER, '-o', "uuid=#{uuid}", '-C', base, "@#{manifest}"],
+                    name: "fsimg-erofs-#{name}", deadline: DEADLINE)
         File.link(image, output)
       end
       output
     rescue SystemCallError => error
       raise Error, "cannot write the EROFS image #{output}: #{error.message}"
-    end
-
-    # Runs fsck.erofs over the image that starts offset bytes into path, extracting its
-    # files into directory, which must not exist.
-    def check(path:, offset: 0, extract:)
-      check_tools
-      @runner.run(['fsck.erofs', "--offset=#{offset}", "--extract=#{extract}", '--no-preserve', path],
-                  name: 'fsck-erofs', deadline: DEADLINE)
-      extract
-    end
-
-    private
-
-    def stage(files, tree)
-      Dir.mkdir(tree)
-      File.chmod(0o755, tree)
-      files.keys.flat_map { |path| self.class.parents(path) }.uniq.sort.each do |directory|
-        path = File.join(tree, directory)
-        Dir.mkdir(path)
-        File.chmod(0o755, path)
-      end
-      files.sort.each do |path, source|
-        destination = File.join(tree, path)
-        File.open(source, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |input|
-          raise Error, "an EROFS image's file is not a regular file: #{source}" unless input.stat.file?
-
-          File.open(destination, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o644) do |output|
-            IO.copy_stream(input, output)
-          end
-        end
-        File.chmod(0o644, destination)
-      end
-    rescue SystemCallError, IOError => error
-      raise Error, "cannot stage the EROFS image's files: #{error.message}"
     end
   end
 end

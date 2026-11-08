@@ -2154,7 +2154,7 @@ done once per packet, per block and per file around them.
 | `erx_bytes:inet_csum/2` | the Internet checksum of RFC 1071 over an iolist, continuing from a partial sum, and RFC 1624's incremental update | the network stack | a straightforward Erlang model |
 | `erx_bytes:siphash24/2` | SipHash-2-4 with a 16-byte key over an iolist | the network stack: initial sequence numbers, timestamp offsets and SYN cookies ([design-network-stack.md](design-network-stack.md#where-c-is-used-and-what-is-measured)) | the SipHash paper's test vectors; an Erlang model |
 | `erlang:crc32/2`, ERTS's own | CRC-32, through ERTS's bundled zlib | F2FS's checksums | the host's stock OTP |
-| `erx_verity:check/3` | checks blocks of an EROFS image, given as binaries with their block numbers, against the image's dm-verity tree, keeping the tree's checked blocks in a bounded cache, and returns `{ok, Blocks}` with only blocks that matched, or `{error, eio}` naming the first that did not; the tree's layout, root and salt come from the image's record in the system configuration, in the layout `erx_verity_t` of the ABI file ([design-storage.md](design-storage.md#data-model)) | the EROFS reader | `veritysetup` over the packer's images |
+| `erx_verity:check/3` | checks blocks of an EROFS image, given as binaries with their block numbers, against the image's dm-verity tree, keeping the tree's checked blocks in a bounded cache, and returns `{ok, Blocks}` with only blocks that matched, or `{error, eio}` naming the first that did not; the tree's layout, root and salt come from the image's record in the system configuration, in the layout `erx_verity_t` of the ABI file ([design-storage.md](design-storage.md#data-model)) | the EROFS reader | the tests over trees the packer writes, and the reader's fuzz target |
 | `erx_device:post/4`'s copy | copies a request's `out` bytes into its pool buffer ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | `erx_device:complete/2`'s copy | copies a completed buffer's returned bytes into a fresh binary ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | the pipe NIF's record copy | copies a record between a pipe's ring and a binary | the session's pipe ends | the pipe tests |
@@ -3060,8 +3060,8 @@ own domain, so a runtime that lies harms only itself.
   test against its reference on the host, the CPU-instruction path
   against the portable one included
   ([Per-byte primitives](#per-byte-primitives)); the EROFS reader runs
-  over images that `mkfs.erofs` writes, on the host's stock OTP and in a
-  domain, against Linux's EROFS driver in the oracle guest.
+  over images that fsimg writes, on the host's stock OTP and in a
+  domain, and fsimg verifies each image the packer writes.
 * **The adapter's core.** `erx_rt_decide` is tested exhaustively on the
   host over small ranges of every field, with properties: `online` is in
   `1 .. min(limit, total)`; a plan acts on the latest sequence; the ready

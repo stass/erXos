@@ -111,8 +111,7 @@ choices rest on the research into file systems and boot selection
 Non-goals: converting a data partition or the vault's partition, in
 place or by an update, since an installation creates them afresh;
 compressed EROFS images
-unless the media lack room; Linux's file-system code or erofs-utils' code
-in the tree; exFAT; booting or updating from anything a domain parses as
+unless the media lack room; Linux's file-system code in the tree; exFAT; booting or updating from anything a domain parses as
 FAT.
 
 ## Overview
@@ -295,28 +294,37 @@ exchange:
   boot image. The system domain never loads code from an EROFS image
   ([design-live.md](design-live.md#invariants) V5).
 
-  The packer writes each image with upstream's `mkfs.erofs`, a host tool
-  at the pinned release erofs-utils 1.9.4, installed on the host (through
-  Homebrew on macOS), refused at any other version and run as a
-  subprocess, from a staging tree whose modes the packer sets, with a fixed
-  timestamp (`-T` with `--all-time`), a UUID fixed by the image's name
-  (`-U`), every file owned by root (`--all-root`), 4 KiB blocks
-  (`-b 4096`, since `mkfs.erofs` otherwise takes the host's page size, 16 KiB
-  on Apple Silicon), no extended attributes (`-x -1`, so a host's own
-  attributes never reach an image or make two builds differ) and no compression,
-  and then computes the image's hash tree itself and writes it after the
+  The packer writes each image with fsimg, the project's own tool
+  ([references](#references)), a host tool at a pinned commit that
+  `tools/erx build fsimg` builds for the host out of tree, refused at any
+  other version and run as a subprocess by argument vector. The packer
+  describes the image to fsimg as an mtree manifest, with no staging
+  tree: each file with `uid=0 gid=0`, mode 0644 (0755 for a directory),
+  its size, its SHA-256 digest and the path of its contents. It runs
+  `fsimg cW -F erofs -R -e 0 -o cluster=4096 -o compression=none
+  -o uuid=UUID`, which gives 4096-byte blocks (the same on every host,
+  whatever its page size), every time fixed at 0, every file owned by
+  root, no extended attributes (so a host's own attributes never reach an
+  image or make two builds differ), no compression, a UUID that is a
+  version 4 UUID derived from the SHA-256 of the image's sorted paths and
+  file digests, and the same bytes for the same inputs (`-R`). The `W`
+  of `cW` makes fsimg verify the staged image in a second worker before it
+  publishes it, so a failed verification publishes nothing: that
+  verification is the check every build makes of every image. The packer
+  then computes the image's hash tree itself and writes it after the
   image; `make check-reproducible` compares the images' bytes across two
-  builds. `mkfs.erofs` is never linked and never part of an image, so the
-  GPL-2.0 files of erofs-utils' library bind nothing erXos ships
-  ([research](research-boards-storage.md#file-systems)). The reader is
-  erXos's own Erlang, written from the format's documentation and its
-  MIT-licensed on-disk header, `erofs_fs.h`, never from Linux's GPL driver.
-  The writer and the reader therefore share no code, and both meet an
-  independent oracle in the Linux guest that is F2FS's oracle:
-  `veritysetup` checks each image's tree, Linux's EROFS driver mounts it,
-  and its view of the files is compared with the reader's; upstream's
-  `fsck.erofs`, the host's, also checks each image. Images are uncompressed: the
-  boards' media have room for uncompressed slots, an estimate that a
+  builds. fsimg is BSD-2-Clause, never linked and never part of an image.
+  The reader is erXos's own Erlang, written from the format's
+  documentation and its MIT-licensed on-disk header, `erofs_fs.h`, never
+  from Linux's GPL driver. The writer and the reader therefore share no
+  code, so a misreading of the format on either side shows as a
+  disagreement between them: fsimg's verification checks every image
+  the packer writes against fsimg's own reading of the format, and the
+  reader is checked against fsimg's images through its tests over
+  fixture images and its fuzz target. No third implementation checks
+  either. erXos's EROFS images need not be readable by Linux, and
+  no Linux tool checks them. Images are uncompressed: the boards' media
+  have room for uncompressed slots, an estimate that a
   decision gate of [plan.md](plan.md#decision-gates) checks against the
   slot images' sizes, and LZ4's decompressor, whose library is
   BSD-2-Clause, would join the per-byte primitives if they do not.
@@ -763,9 +771,9 @@ A FAT image is untrusted input like any other: the boot sector, the FATs,
 the directories and the long-name chains are decoded with checked bounds,
 a cluster chain is followed at most as many steps as the volume has
 clusters, so a loop ends with `{error, eio}`, and the decoders have a fuzz
-target on the host's stock OTP. Linux's `vfat` driver and `fsck.fat` in the
-oracle guest check every image the server writes and agree with it on
-names, sizes and contents.
+target on the host's stock OTP. fsimg, the FAT server's oracle, creates
+FAT images for the server to read and checks every image the server
+writes with its verify (`fsimg W`).
 
 ### System updates
 
@@ -1164,7 +1172,7 @@ attributes the work.
 The FAT server has a power-cut harness of its own, which cuts after every
 write and every flush, and around both changes of the dirty flag, reorders
 the writes between flushes, as F2FS's harness does, and checks each image
-with `fsck.fat`: a clean flag never comes with a change half made, no name
+with fsimg's verify (`fsimg W`): a clean flag never comes with a change half made, no name
 and no chain reaches a cluster the FAT does not allocate, no cluster lies
 in two chains or under two names, and no file that an earlier batch
 committed changes, but for the files of the batch being committed, whose
@@ -1180,21 +1188,21 @@ cases.
 
 erXos's F2FS is checked by Linux's F2FS driver and `fsck.f2fs` in a Linux
 guest and by the power-cut harness ([Read-write
-storage](#read-write-storage)); the EROFS reader, on images that
-`mkfs.erofs` writes, by `veritysetup` and Linux's EROFS driver in the same
-guest and by the host's `fsck.erofs`, the reader running on the host's stock
-OTP over the image's file and in a domain under QEMU; the FAT server by
-Linux's `vfat` driver and `fsck.fat` there, on images each side writes for
-the other. `tools/erx check-erofs-oracle` runs the EROFS comparison over the
-reader's fixtures and, with `--release`, the release's image: QEMU boots the
-guest with each image as a read-only virtio disk and no network device, the
-guest's init script walks each mount and prints every file's path, `stat`
-fields and SHA-256 or link text, paths and link texts in hex, on its serial
-console, the reader prints the same lines for the same images, and the two
-are compared file by file. The guest's console is untrusted input to the
-host: its parser bounds every line and field, refuses a malformed or
-truncated transcript whole, and has its fuzz target, and a difference names
-a file only through the terminal's escaping. Fuzz targets cover the partition table with its two extended
+storage](#read-write-storage)). The EROFS images are written and checked
+by fsimg: its verification runs on every image the packer writes, and
+`test/host/release_medium_test.rb` reads the release image back out of
+the medium with fsimg (`fsimg xf --offset=`). The EROFS reader is checked
+by its EUnit tests over fixture images that `tools/erofs_fixtures.rb`
+writes with fsimg, from a tree it declares: `compact.img` (fsimg's
+default, compact inodes), `extended.img` (every entry but the root owned
+by uid and gid 70000, which makes fsimg write their inodes extended) and `lz4.img`
+(`-o compression=lz4`, which the reader refuses with `enotsup`); by its
+fuzz target, `tools/fuzz/erx_erofs.rb`; and by running on the host's
+stock OTP over an image's file and in a domain under QEMU. The FAT server
+is checked by fsimg, which creates the images it reads and verifies the
+images it writes. Nothing of EROFS or FAT is checked against Linux.
+
+Fuzz targets cover the partition table with its two extended
 boot records, EROFS, F2FS, FAT and littlefs images, the hash-checking
 reader, the driver's completion decoder, update manifests, the
 boot-selection record and the QEMU harness's slot parser, each built for
@@ -1258,10 +1266,9 @@ C beside it ([design-runtime.md](design-runtime.md#per-byte-primitives)).
 No dependency beyond those in the dependency table of
 [design.md](design.md#dependencies): littlefs as the stopgap for
 read-write storage, the Raspberry Pi firmware, and the small verifier of
-update signatures; upstream's erofs-utils, whose `mkfs.erofs` writes the
-images and whose `fsck.erofs` checks them, and the Linux oracle guest's
-file-system tools, as host tools invoked as subprocesses and never part of
-an image; LZ4's decompressor is the option if the media lack room for
+update signatures; fsimg, which writes and verifies the EROFS images and is
+the FAT server's oracle, and the Linux oracle guest's F2FS tools, as host
+tools invoked as subprocesses and never part of an image; LZ4's decompressor is the option if the media lack room for
 uncompressed images. The block driver, the EROFS reader, erXos's F2FS,
 the FAT server and the slot writer are erXos's own Erlang.
 
@@ -1308,10 +1315,11 @@ memory. The cost is per block, where the medium and the hash dominate
 ([Performance](#performance)), and the per-byte work stays in C.
 
 **An EROFS writer in the Ruby packer.** The packer would write EROFS images
-itself. It loses: `mkfs.erofs` writes reproducible, uncompressed images,
-and as a host tool it costs nothing on the target and shares no code with
-erXos's reader, which strengthens the differential test. The packer takes
-the job over only if `mkfs.erofs` stops being reproducible.
+itself. It loses: fsimg writes reproducible, uncompressed images and
+verifies them, and as a host tool it costs nothing on the target and
+shares no code with erXos's reader, which strengthens the check of the
+reader. The packer takes the job over only if fsimg stops being
+reproducible.
 
 **The hash tree checked in the driver.** The block driver would check
 each EROFS block against the tree before handing it out, once for every
@@ -1355,7 +1363,7 @@ fields of the `image` record
 | The Erlang block driver misses the controller's timing or costs too much of its throughput | medium | slow storage on the boards | `tools/erx bench blk` at gate G9 per controller; completion batching; a per-byte C primitive for the ring work as a measured exception row in the driver table ([design-system.md](design-system.md#the-driver-table)) |
 | The default configuration puts the block device and the data partition's file system in one domain | low | a logic bug in the Erlang file system that reaches the device NIF, or a storage-domain restart that drops every window on the medium | the build check that only the driver's modules reference the NIF; Erlang's memory safety; the native stopgap in a sub-space port; the configuration that gives the device a domain of its own, required where the controller is unconfined and available elsewhere |
 | Erlang file systems are slower than the boards need, on the Raspberry Pi 4 above all, which has no SHA-256 instructions | medium | medium | `tools/erx bench fs` on both boards; metadata caching in the reader; the per-byte work already in C; G12 and G13 measure before littlefs is replaced |
-| A parser bug in the EROFS reader | low | low | it parses only blocks that passed the hash tree, whose root comes from the boot image; a malformed structure fails the operation with `eio`; its fuzz target; Linux's EROFS driver as the oracle |
+| A parser bug in the EROFS reader | low | low | it parses only blocks that passed the hash tree, whose root comes from the boot image; a malformed structure fails the operation with `eio`; its fuzz target; fsimg's images as its oracle |
 | A FAT volume removed or cut off while written loses files or clusters | high, for removable media | low | the dirty flag set and flushed before the first change; batches of five flushed steps, new chains allocated before they are linked and chains cut before they are freed; clusters freed in a batch allocated only in a following one; FAT12 read-only; a harness that reorders writes between flushes; a dirty volume mounts read-only; repair on another machine |
 
 No open question remains for storage: the clean room's legal review, the
@@ -1372,12 +1380,11 @@ outside this design are the user's decisions
   cryptography libraries, each dated, with its sources.
 * Linux's dm-verity on-disk format (version 1, SHA-256), as the research
   record checks it.
-* erofs-utils 1.9.4, `man/mkfs.erofs.1`: `-T` ("Specify a UNIX timestamp
-  for image creation time for reproducible builds"), `--all-time`, `-U`,
-  `--all-root`, https://github.com/erofs/erofs-utils (tag `v1.9.4`, read
-  2026-10-31); `-b` and `-x` as `mkfs.erofs --help` of Homebrew's
-  erofs-utils 1.9.4 describes them, and 16 KiB blocks by default on an
-  Apple Silicon host, checked with `dump.erofs -s` on 2026-11-06.
+* fsimg, https://github.com/stass/fsimg (BSD-2-Clause), at commit
+  `a87ab69f4a15432951816a569b7d15571ac95097`, which `deps.lock` pins; its
+  manual, `docs/fsimg.1`, defines the options the packer passes (`c`, `W`,
+  `-F`, `-R`, `-e`, `-o cluster=`, `-o compression=`, `-o uuid=`, `-C`)
+  and the mtree keywords of the manifest.
 * Microsoft, "FAT32 File System Specification, FAT: General Overview of
   On-Disk Format", version 1.03, 6 December 2000: FAT type determination,
   long directory entries, name limits and character sets, name matching,

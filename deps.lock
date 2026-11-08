@@ -75,23 +75,14 @@
       "status": "permanent"
     },
     {
-      "id": "linux-guest-kernel",
-      "kind": "file",
-      "version": "6.12.107-1 (Debian 13 linux-image-6.12.107+deb13-cloud-arm64-unsigned)",
-      "url": "https://snapshot.debian.org/archive/debian/20260907T023910Z/pool/main/l/linux/linux-image-6.12.107%2Bdeb13-cloud-arm64-unsigned_6.12.107-1_arm64.deb",
-      "sha256": "26e8cba299e701c5e7d0d35ffabf83cf8e315e594a834a3b8832e03a0f9787cf",
-      "filename": "linux-image-cloud-arm64.deb",
-      "license": "GPL-2.0-only; the EROFS oracle guest only, never part of an image",
-      "status": "permanent"
-    },
-    {
-      "id": "linux-guest-busybox",
-      "kind": "file",
-      "version": "1:1.37.0-6+b9 (Debian 13 busybox-static)",
-      "url": "https://snapshot.debian.org/archive/debian/20260712T202631Z/pool/main/b/busybox/busybox-static_1.37.0-6%2Bb9_arm64.deb",
-      "sha256": "c833be48abfa16bc19c4966ec93e289ff1ce5d2f1476cad3a57bd105378cd15c",
-      "filename": "busybox-static-arm64.deb",
-      "license": "GPL-2.0-only; the EROFS oracle guest only, never part of an image",
+      "id": "fsimg",
+      "kind": "git",
+      "version": "a87ab69f4a15432951816a569b7d15571ac95097",
+      "url": "https://github.com/stass/fsimg.git",
+      "commit": "a87ab69f4a15432951816a569b7d15571ac95097",
+      "sha256": "a707527124b1b311c83f2c60e46809476da4199414e736cbf4236d18156f6323",
+      "directory": "fsimg-a87ab69",
+      "license": "BSD-2-Clause",
       "status": "permanent"
     },
     {

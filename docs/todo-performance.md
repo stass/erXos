@@ -20,8 +20,8 @@ block a milestone's numbers.
   a full table; if the scan shows, store each page's first index in its slots or align pages so
   the index follows from the address.
 
-* **[Low] packer, `mkfs.erofs` on every build.** `ProductionImage#assemble`, every test image
-  and the hosted `Release#build` write the system release's EROFS image (`ReleaseMedium.image`) before
+* **[Low] packer, fsimg on every build.** `ProductionImage#assemble`, every test image
+  and the hosted `Release#build` write the system release's EROFS image (`ReleaseMedium.image`) with `fsimg cW`, which also verifies it, before
   packing, since the manifest records its extent; the hosted pack uses only its length. Measure the
   added wall time of a production and a hosted build; if it matters, size the image without writing it
   twice, or cache it by the release's digest.
@@ -112,7 +112,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   checks EROFS blocks with SHA-256 in dm-verity's tree format, and the Pi 4's
   Cortex-A72 lacks the Arm SHA-2 extension, so each block hashes in plain C.
   Settled by `tools/erx bench fs` on the Pi 4, which decides whether BLAKE3,
-  already in the tree, is worth giving up `veritysetup` as the oracle.
+  already in the tree, is worth giving up dm-verity's tree format.
 * **[Low] host tools, the packer hashes with BLAKE3's portable code.**
   `tools/host/pack_hash.c` builds the only BLAKE3 in the tree, its portable
   C ([origin](../kernel/crypto/blake3/ORIGIN.md)), though
