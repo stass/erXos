@@ -17,7 +17,13 @@ module Erx
     INITIAL_VIOLATION = 2107
     BEHAVIOR_VIOLATION = 2110
     TRACE_INTRODUCTION = 2121
+    TEMPORAL_VIOLATION = 2116
+    TEMPORAL_TRACE_INTRODUCTION = 2264
     TRACE_STATE = 2217
+    DEADLOCK = 2114
+    DEADLOCK_EXIT = 11
+    SAFETY_EXIT = 12
+    LIVENESS_EXIT = 13
     Message = Struct.new(:code, :level, :body, keyword_init: true)
     module_function
 
@@ -71,6 +77,22 @@ module Erx
         end
         accepted = command.fetch('state') == 'succeeded' && command.fetch('exit_status') == 0 &&
                    completed && statistics && errors.empty?
+      elsif expectation.fetch('kind') == 'deadlock'
+        deadlocks = errors.select { |message| message.code == DEADLOCK }
+        witness = deadlocks.size == 1 && deadlocks.first.body == 'Deadlock reached.' &&
+                  codes.include?(TRACE_STATE)
+        accepted = command.fetch('state') == 'failed' &&
+                   command.fetch('exit_status') == DEADLOCK_EXIT && witness &&
+                   errors.all? { |message| [DEADLOCK, TRACE_INTRODUCTION].include?(message.code) }
+      elsif expectation.fetch('exit_status') == LIVENESS_EXIT
+        # TLC does not name the violated temporal property; the roster ties
+        # this expectation to a configuration declaring exactly that one.
+        violations = errors.select { |message| message.code == TEMPORAL_VIOLATION }
+        witness = violations.size == 1 && codes.include?(TRACE_STATE) &&
+                  violations.first.body == 'Temporal properties were violated.'
+        accepted = command.fetch('state') == 'failed' &&
+                   command.fetch('exit_status') == LIVENESS_EXIT && witness &&
+                   errors.all? { |message| [TEMPORAL_VIOLATION, TEMPORAL_TRACE_INTRODUCTION].include?(message.code) }
       else
         property = expectation.fetch('property')
         violations = errors.select { |message| [INITIAL_VIOLATION, BEHAVIOR_VIOLATION].include?(message.code) }
@@ -161,17 +183,35 @@ module Erx
       case expectation['kind']
       when 'pass'
         raise Error, 'unexpected pass expectation fields' unless expectation.keys == ['kind']
+      when 'deadlock'
+        raise Error, 'unexpected deadlock expectation fields' unless expectation.keys == ['kind']
       when 'counterexample'
         unless expectation.keys.sort == %w[exit_status kind property] &&
                expectation.fetch('property').is_a?(String) &&
                /\A[A-Za-z][A-Za-z0-9_]*\z/.match?(expectation.fetch('property')) &&
-               expectation.fetch('exit_status') == 12
-          raise Error, 'expected counterexample needs an exact invariant and safety exit status'
+               [TlcOutput::SAFETY_EXIT, TlcOutput::LIVENESS_EXIT].include?(expectation.fetch('exit_status'))
+          raise Error, 'expected counterexample needs an exact property and a violation exit status'
         end
       else
         raise Error, 'unknown TLA expectation kind'
       end
-      constrained = constraint_keyword?(inputs.fetch(entry.fetch('config')))
+      words = config_words(inputs.fetch(entry.fetch('config')))
+      constrained = words.any? { |word| CONSTRAINT_WORDS.include?(word) }
+      temporal = temporal_properties(words)
+      # design-verification.md: only a safety-only configuration may accept
+      # terminal states, and a deadlock is expected only where no liveness
+      # check could report the same stall first.
+      if temporal.any? && entry.fetch('deadlock') != 'check'
+        raise Error, 'a configuration with temporal properties needs deadlock checking'
+      end
+      if expectation['kind'] == 'deadlock' && (entry.fetch('deadlock') != 'check' || temporal.any?)
+        raise Error, 'an expected deadlock needs deadlock checking and no temporal property'
+      end
+      if expectation['kind'] == 'counterexample' &&
+         expectation.fetch('exit_status') == TlcOutput::LIVENESS_EXIT &&
+         temporal != [expectation.fetch('property')]
+        raise Error, 'expected temporal counterexample needs its configuration to declare exactly that property'
+      end
       if constrained && entry.fetch('scope') != 'constrained'
         raise Error, 'TLA state constraints require an explicitly constrained scope'
       end
@@ -179,12 +219,25 @@ module Erx
     end
     private_class_method :validate
 
-    # Identify only reserved configuration directives, ignoring strings and
+    CONSTRAINT_WORDS = %w[CONSTRAINT CONSTRAINTS ACTION_CONSTRAINT ACTION_CONSTRAINTS].freeze
+    DIRECTIVES = (CONSTRAINT_WORDS + %w[CONSTANT CONSTANTS INIT NEXT SPECIFICATION INVARIANT INVARIANTS
+                                        PROPERTY PROPERTIES SYMMETRY VIEW CHECK_DEADLOCK
+                                        POSTCONDITION ALIAS]).freeze
+
+    # The names a configuration's PROPERTY and PROPERTIES directives list.
+    def temporal_properties(words)
+      words.slice_before { |word| DIRECTIVES.include?(word) }
+           .select { |run| %w[PROPERTY PROPERTIES].include?(run.first) }
+           .flat_map { |run| run.drop(1) }
+    end
+    private_class_method :temporal_properties
+
+    # The configuration's identifier words, in order, ignoring strings and
     # comments. TLC remains responsible for the complete configuration syntax.
-    def constraint_keyword?(bytes)
+    def config_words(bytes)
       scanner = StringScanner.new(bytes)
       depth = 0
-      constrained = false
+      words = []
       until scanner.eos?
         if scanner.scan(/\(\*/)
           depth += 1
@@ -202,15 +255,15 @@ module Erx
         elsif scanner.peek(1) == '"'
           raise Error, 'unterminated TLA configuration string'
         elsif (word = scanner.scan(/[A-Za-z_][A-Za-z0-9_]*/))
-          constrained = true if %w[CONSTRAINT CONSTRAINTS ACTION_CONSTRAINT ACTION_CONSTRAINTS].include?(word)
+          words << word
         else
           scanner.getch
         end
       end
       raise Error, 'unterminated TLA configuration comment' unless depth.zero?
-      constrained
+      words.freeze
     end
-    private_class_method :constraint_keyword?
+    private_class_method :config_words
   end
 
   class Tla

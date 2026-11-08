@@ -9,7 +9,9 @@
       "deadline": 30,
       "deadlock": "check",
       "scope": "finite",
-      "expect": { "kind": "pass" }
+      "expect": {
+        "kind": "pass"
+      }
     },
     {
       "id": "runner-broken",
@@ -19,7 +21,11 @@
       "deadline": 30,
       "deadlock": "check",
       "scope": "finite",
-      "expect": { "kind": "counterexample", "property": "Bounded", "exit_status": 12 }
+      "expect": {
+        "kind": "counterexample",
+        "property": "Bounded",
+        "exit_status": 12
+      }
     },
     {
       "id": "runner-initial",
@@ -29,7 +35,11 @@
       "deadline": 30,
       "deadlock": "check",
       "scope": "finite",
-      "expect": { "kind": "counterexample", "property": "Bounded", "exit_status": 12 }
+      "expect": {
+        "kind": "counterexample",
+        "property": "Bounded",
+        "exit_status": 12
+      }
     },
     {
       "id": "runner-reached",
@@ -39,7 +49,419 @@
       "deadline": 30,
       "deadlock": "check",
       "scope": "finite",
-      "expect": { "kind": "counterexample", "property": "NotReached", "exit_status": 12 }
+      "expect": {
+        "kind": "counterexample",
+        "property": "NotReached",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-good",
+      "module": "Lane",
+      "config": "LaneGood.cfg",
+      "translation": "tla",
+      "deadline": 900,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "pass"
+      }
+    },
+    {
+      "id": "lane-wpos-fence",
+      "module": "Lane",
+      "config": "LaneWposFence.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "NoLostWait",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-wake-fence",
+      "module": "Lane",
+      "config": "LaneWakeFence.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "NoLostWait",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-rpos-fence",
+      "module": "Lane",
+      "config": "LaneRposFence.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "NoLostWait",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-need-fence",
+      "module": "Lane",
+      "config": "LaneNeedFence.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "NoLostWait",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-strict-crossing",
+      "module": "Lane",
+      "config": "LaneStrictCrossing.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "NoLostWait",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-room",
+      "module": "Lane",
+      "config": "LaneRoom.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "WholeRecords",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-stall",
+      "module": "Lane",
+      "config": "LaneStall.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "deadlock"
+      }
+    },
+    {
+      "id": "lane-producer-rung",
+      "module": "Lane",
+      "config": "LaneProducerRung.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "ProducerNeverRung",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "lane-ring-always",
+      "module": "Lane",
+      "config": "LaneRingAlways.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "RingOnlyOnCrossing",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-good",
+      "module": "Connection",
+      "config": "ConnectionGood.cfg",
+      "translation": "tla",
+      "deadline": 900,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "pass"
+      }
+    },
+    {
+      "id": "connection-no-drain",
+      "module": "Connection",
+      "config": "ConnectionNoDrain.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "EndedPeerDrained",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-early-delete",
+      "module": "Connection",
+      "config": "ConnectionEarlyDelete.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "NoUseAfterDelete",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-no-gate",
+      "module": "Connection",
+      "config": "ConnectionNoGate.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "OneControlRecord",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-early-answer",
+      "module": "Connection",
+      "config": "ConnectionEarlyAnswer.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "OneEntry",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-early-name",
+      "module": "Connection",
+      "config": "ConnectionEarlyName.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "OneEntry",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-wait-for-peer",
+      "module": "Connection",
+      "config": "ConnectionWaitForPeer.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "deadlock"
+      }
+    },
+    {
+      "id": "connection-wait-for-unmap",
+      "module": "Connection",
+      "config": "ConnectionWaitForUnmap.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "Settles",
+        "exit_status": 13
+      }
+    },
+    {
+      "id": "connection-later-up",
+      "module": "Connection",
+      "config": "ConnectionLaterUp.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "LaterNeverUp",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-stray-answer",
+      "module": "Connection",
+      "config": "ConnectionStrayAnswer.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "TypeOK",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "connection-read-after-down",
+      "module": "Connection",
+      "config": "ConnectionReadAfterDown.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "OrderedThenDown",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "links-good",
+      "module": "Links",
+      "config": "LinksGood.cfg",
+      "translation": "tla",
+      "deadline": 900,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "pass"
+      }
+    },
+    {
+      "id": "links-fire-before-drain",
+      "module": "Links",
+      "config": "LinksFireBeforeDrain.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "AnswersAfterSends",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "links-any-lane",
+      "module": "Links",
+      "config": "LinksAnyLane.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "AnswersAfterSends",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "links-answer-first",
+      "module": "Links",
+      "config": "LinksAnswerFirst.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "AnswersAfterSends",
+        "exit_status": 12
+      }
+    },
+    {
+      "id": "links-no-noproc",
+      "module": "Links",
+      "config": "LinksNoNoproc.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "AnswersArrive",
+        "exit_status": 13
+      }
+    },
+    {
+      "id": "links-half-link",
+      "module": "Links",
+      "config": "LinksHalfLink.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "pass"
+      }
+    },
+    {
+      "id": "links-noproc-on-link",
+      "module": "Links",
+      "config": "LinksNoprocOnLink.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "AnswersArrive",
+        "exit_status": 13
+      }
+    },
+    {
+      "id": "links-silent-fire",
+      "module": "Links",
+      "config": "LinksSilentFire.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "AnswersArrive",
+        "exit_status": 13
+      }
+    },
+    {
+      "id": "links-reached",
+      "module": "Links",
+      "config": "LinksReached.cfg",
+      "translation": "tla",
+      "deadline": 300,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": {
+        "kind": "counterexample",
+        "property": "DrainNeverMatters",
+        "exit_status": 12
+      }
     }
   ]
 }

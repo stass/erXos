@@ -62,6 +62,36 @@ class TlaTest < Minitest::Test
     assert_equal 'failed', wrong_exit.fetch('state')
   end
 
+  def temporal_output
+    beginning + tlc_frame(2116, 'Temporal properties were violated.', level: 1) +
+      tlc_frame(2264, 'The following behavior constitutes a counter-example:', level: 1) +
+      tlc_frame(2217, "1: <Initial predicate>\ncount = 0", level: 4) +
+      tlc_frame(2218, '2: Stuttering', level: 4) + ending
+  end
+
+  def expected_temporal
+    { 'kind' => 'counterexample', 'property' => 'Reached', 'exit_status' => 13 }
+  end
+
+  def test_temporal_counterexample_requires_its_diagnostic_and_exit
+    accepted = Erx::TlcOutput.classify(temporal_output,
+                                      command: command(state: 'failed', exit_status: 13),
+                                      expectation: expected_temporal)
+    assert_equal 'checked', accepted.fetch('state')
+    wrong_exit = Erx::TlcOutput.classify(temporal_output,
+                                        command: command(state: 'failed', exit_status: 12),
+                                        expectation: expected_temporal)
+    assert_equal 'failed', wrong_exit.fetch('state')
+    invariant = Erx::TlcOutput.classify(negative_output,
+                                       command: command(state: 'failed', exit_status: 13),
+                                       expectation: expected_temporal)
+    assert_equal 'failed', invariant.fetch('state')
+    as_invariant = Erx::TlcOutput.classify(temporal_output,
+                                          command: command(state: 'failed', exit_status: 12),
+                                          expectation: expected_negative)
+    assert_equal 'failed', as_invariant.fetch('state')
+  end
+
   def test_parser_error_is_never_an_expected_counterexample
     output = beginning + tlc_frame(3002, 'Parsing or semantic analysis failed.', level: 1) + ending
     result = Erx::TlcOutput.classify(output, command: command(state: 'failed', exit_status: 150),
@@ -138,6 +168,100 @@ class TlaTest < Minitest::Test
     end
     with_roster do |root, roster|
       roster.fetch('entries').first['expect'] = { 'kind' => 'anything' }
+      write_roster(root, roster)
+      assert_raises(Erx::Error) { Erx::TlaRoster.read(root) }
+    end
+  end
+
+  def test_temporal_expectation_names_the_one_configured_property
+    with_roster do |root, roster|
+      roster.fetch('entries').first['expect'] = expected_temporal
+      [["SPECIFICATION Spec\nPROPERTY Reached\n", true],
+       ["SPECIFICATION Spec\n\\* PROPERTY Other\nPROPERTIES Reached\nINVARIANT TypeOK\n", true],
+       ["SPECIFICATION Spec\nPROPERTY Other\n", false],
+       ["SPECIFICATION Spec\nPROPERTIES Reached Other\n", false],
+       ["SPECIFICATION Spec\nINVARIANT Reached\n", false]].each do |config, valid|
+        File.write(File.join(root, 'Good.cfg'), config)
+        write_roster(root, roster)
+        if valid
+          assert_equal 13, Erx::TlaRoster.read(root).first.fetch('expect').fetch('exit_status'), config
+        else
+          assert_raises(Erx::Error, config) { Erx::TlaRoster.read(root) }
+        end
+      end
+      roster.fetch('entries').first['expect'] = expected_temporal.merge('exit_status' => 11)
+      File.write(File.join(root, 'Good.cfg'), "SPECIFICATION Spec\nPROPERTY Reached\n")
+      write_roster(root, roster)
+      assert_raises(Erx::Error) { Erx::TlaRoster.read(root) }
+    end
+  end
+
+  def test_temporal_counterexample_refuses_other_evidence
+    failed = command(state: 'failed', exit_status: 13)
+    no_trace = beginning + tlc_frame(2116, 'Temporal properties were violated.', level: 1) + ending
+    twice = beginning + tlc_frame(2116, 'Temporal properties were violated.', level: 1) +
+            tlc_frame(2116, 'Temporal properties were violated.', level: 1) +
+            tlc_frame(2217, "1: <Initial predicate>\ncount = 0", level: 4) + ending
+    with_invariant = beginning + tlc_frame(2110, 'Invariant Bounded is violated.', level: 1) +
+                     tlc_frame(2116, 'Temporal properties were violated.', level: 1) +
+                     tlc_frame(2217, "1: <Initial predicate>\ncount = 0", level: 4) + ending
+    [[no_trace, failed], [twice, failed], [with_invariant, failed], [deadlock_output, failed],
+     [temporal_output, command(state: 'succeeded', exit_status: 13)],
+     [good_output, command]].each do |bytes, outcome|
+      result = Erx::TlcOutput.classify(bytes, command: outcome, expectation: expected_temporal)
+      assert_equal 'failed', result.fetch('state')
+    end
+  end
+
+  def deadlock_output
+    beginning + tlc_frame(2114, 'Deadlock reached.', level: 1) +
+      tlc_frame(2121, 'The behavior up to this point is:', level: 1) +
+      tlc_frame(2217, "1: <Initial predicate>\ncount = 0", level: 4) + ending
+  end
+
+  def test_deadlock_expectation_requires_its_diagnostic_and_exit
+    expected = { 'kind' => 'deadlock' }
+    failed = command(state: 'failed', exit_status: 11)
+    assert_equal 'checked',
+                 Erx::TlcOutput.classify(deadlock_output, command: failed, expectation: expected).fetch('state')
+    [[deadlock_output, command(state: 'failed', exit_status: 12), expected],
+     [negative_output, failed, expected], [temporal_output, failed, expected],
+     [good_output, command, expected],
+     [beginning + tlc_frame(2114, 'Deadlock reached.', level: 1) + ending, failed, expected],
+     [deadlock_output, failed, expected_negative],
+     [deadlock_output, failed, expected_temporal]].each do |bytes, outcome, expectation|
+      result = Erx::TlcOutput.classify(bytes, command: outcome, expectation: expectation)
+      assert_equal 'failed', result.fetch('state')
+    end
+  end
+
+  def test_temporal_properties_need_deadlock_checking
+    with_roster do |root, roster|
+      roster.fetch('entries').first['deadlock'] = 'terminal'
+      write_roster(root, roster)
+      assert_equal 1, Erx::TlaRoster.read(root).size
+      File.write(File.join(root, 'Good.cfg'), "SPECIFICATION Spec\n\\* PROPERTY Reached\n")
+      assert_equal 1, Erx::TlaRoster.read(root).size
+      ["SPECIFICATION Spec\nPROPERTY Reached\n", "SPECIFICATION Spec\nPROPERTIES Reached\n"].each do |config|
+        File.write(File.join(root, 'Good.cfg'), config)
+        assert_raises(Erx::Error, config) { Erx::TlaRoster.read(root) }
+      end
+    end
+  end
+
+  def test_deadlock_expectation_needs_deadlock_checking_and_no_temporal_property
+    with_roster do |root, roster|
+      roster.fetch('entries').first['expect'] = { 'kind' => 'deadlock' }
+      write_roster(root, roster)
+      assert_equal 'deadlock', Erx::TlaRoster.read(root).first.fetch('expect').fetch('kind')
+      File.write(File.join(root, 'Good.cfg'), "SPECIFICATION Spec\nPROPERTY Reached\n")
+      assert_raises(Erx::Error) { Erx::TlaRoster.read(root) }
+      File.write(File.join(root, 'Good.cfg'), "SPECIFICATION Spec\n")
+      roster.fetch('entries').first['deadlock'] = 'terminal'
+      write_roster(root, roster)
+      assert_raises(Erx::Error) { Erx::TlaRoster.read(root) }
+      roster.fetch('entries').first['deadlock'] = 'check'
+      roster.fetch('entries').first['expect'] = { 'kind' => 'deadlock', 'exit_status' => 11 }
       write_roster(root, roster)
       assert_raises(Erx::Error) { Erx::TlaRoster.read(root) }
     end

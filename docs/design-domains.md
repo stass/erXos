@@ -810,7 +810,7 @@ must give the sender on the target:
 | --- | --- | --- |
 | `SEND_SENDER` (22), payload message | `ToPid` | send |
 | `ALIAS_SEND` (33), payload message | `Alias` | send on the alias |
-| `LINK` (1) | `ToPid` | link |
+| `LINK` (1) | `ToPid` | link, or none when `ToPid` already holds a link with `FromPid`, which the frame then creates nothing |
 | `UNLINK_ID` (35), `UNLINK_ID_ACK` (36) | `ToPid` | none |
 | `MONITOR_P` (19) | `ToProc`, a pid | send |
 | `DEMONITOR_P` (20) | `ToProc`, a pid | none |
@@ -845,7 +845,12 @@ acknowledges an unlink whether or not its target lives or holds the
 connection (`beam/erl_proc_sig_queue.c:2707-2729`, `:6663-6694`). Asking a
 right for them would let a full export table leave a link or a monitor that
 can never be answered; needing none, they convey nothing either. Names in
-their reasons remain inert data.
+their reasons remain inert data. A `LINK` to a process that already holds a
+link with its sender changes nothing and needs no right either: `link`
+guards making a link, and a runtime answers a `LINK` with `noproc` only
+when its process holds no link with the sender, so a `noproc` never ends a
+link whose other half exists, as in stock OTP, where only a process that
+does not exist, and so holds no links, answers one.
 
 A `SPAWN_REQUEST` is OTP's own, `{29, ReqId, From, GroupLeader, {Module,
 Function, Arity}, OptList}`; the lane names the domain it is for, so the
@@ -1163,10 +1168,15 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    (D6).
 5. **Authority.** An operation that needs a right is **authorised** when the
    export table holds the target's name toward the lane's domain with
-   that right; an operation that needs none always is. Nothing else is
-   consulted: neither whether the target process lives nor anything the
+   that right; an operation that needs none always is. Apart from the
+   one case below, nothing else is consulted: neither whether the target process lives nor anything the
    frame says about who asks, so neither the outcome nor its timing
-   reveals whether a process the sender was never given exists. An
+   reveals whether a process the sender was never given exists. A
+   `LINK` without `link` is the one case decided past the table: the
+   receiving runtime accepts it when its process already holds a link with
+   the sender, which reveals nothing the sender's domain was not told when
+   that link was asked for (Signals that need no right, in
+   [Frames](#frames)). An
    unauthorised operation is handled in step 7 exactly as one on a
    process that does not exist, whatever its size: authority is decided before limits, and only an
    authorised frame is measured against them, so an `exit/2` without the
@@ -2174,7 +2184,7 @@ domain's runtime has exported to the caller's domain:
 | `Pid ! Msg`, a send to an alias | delivered (send) | dropped, as for a dead process |
 | `monitor(process, Pid)` | `DOWN` on death (send) | `DOWN` with `noproc` at once |
 | `{Name, Node} ! Msg`, `monitor(process, {Name, Node})` | never leaves the sender's runtime: no right covers a registered name | dropped, as for a name not registered; `DOWN` with `noproc` at once |
-| `link(Pid)` | linked (link) | exit `noproc` to the caller |
+| `link(Pid)` | linked (link) | exit `noproc` to the caller, unless `Pid` already holds a link with it |
 | `unlink(Pid)`, `demonitor(Ref)` | delivered: they need no right | delivered |
 | `exit(Pid, Reason)` | delivered (exit) | no effect |
 | `group_leader(GL, Pid)` | set (exit), `GL` a process of the caller's domain | no effect; `badarg` when `GL` is of a third domain |
@@ -2610,7 +2620,7 @@ domain](#domain-ids-pids-and-references)):
 | `net_ticktime` and tick supervision | no tick supervises a connection between domains: a peer silent past `net_ticktime`, or starved of CPU that long, stays connected, and no connection ends with `net_tick_timeout` |
 | A link or monitor to a process of a domain that dies | fires with `{domain_down, D, Info}` instead of `noconnection` |
 | A link or monitor to a process of a domain the holder has no connection with, or that has died | fires with `noconnection`, as toward a node that cannot be reached |
-| A link or monitor of a process of another domain that was never exported to the holder, or a link to one exported without `link` | an exit or `DOWN` with reason `noproc` from the target's runtime, as for a process that does not exist |
+| A link or monitor of a process of another domain that was never exported to the holder, or a link to one exported without `link` that holds no link with the holder | an exit or `DOWN` with reason `noproc` from the target's runtime, as for a process that does not exist |
 | `exit/2` or `group_leader/2` on a process of another domain exported to the caller without `exit` | no effect, as on a process that does not exist |
 | An exit reason longer than the receiver's `max_frame` or past its `max_message_heap` | `{erx_reason_too_large, Bytes}` |
 | An exit reason the system domain cannot decode without creating an atom | system-domain processes see `{erx_foreign_reason, Bin}` |
@@ -3348,7 +3358,8 @@ answering a call and monitoring a server need, a spawn gives the spawner
 what ERTS gives a parent, and every other `link` or `exit` is the owner's
 explicit export. The cost is a documented difference: a process that links
 to a pid of another domain it was only handed gets `noproc`, so code that
-links to its clients across domains monitors them instead.
+links to its clients across domains monitors them instead, unless that
+process has already linked it, in which case the link exists.
 
 **Revocable pid exports.** A domain would withdraw a right it handed out. A
 withdrawn pid would behave dead to one peer and alive to another, which no
