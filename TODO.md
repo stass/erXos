@@ -1861,11 +1861,13 @@ it; git history is the record of completed work.
     exist yet with `{error, unsupported}`, and any other request, an
     unlisted name included, with `{error, badarg}`.
 * [Medium] security, host-link session identifiers
-  (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `entropy/0`): the system
-  domain has no entropy source, so a session identifier is `rand:bytes/1`
+  (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `entropy/0`): no Erlang
+  entry reaches `erx_entropy_read`, so a session identifier is `rand:bytes/1`
   under the seed `rand` takes from the time and the node, which the design
-  accepts only in trusted development modes. Draw it from the machine's
-  random source once the system domain has one.
+  accepts only in trusted development modes. Draw it from
+  `erx_bytes:entropy/1`
+  ([design-runtime.md](docs/design-runtime.md#per-byte-primitives)) once
+  that call is written.
 * [Medium] live, host-link sink check: "only the host link's own sink
   writes its UART" holds because erx_hostlink alone asks for the `hostlink`
   device record and owns its erx_pl011, but no build check refuses another

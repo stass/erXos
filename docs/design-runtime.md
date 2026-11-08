@@ -2152,7 +2152,7 @@ done once per packet, per block and per file around them.
 | `erx_bytes:sha256/1`, with `sha256_init/0`, `sha256_update/2` and `sha256_final/1` for streams | SHA-256 (FIPS 180-4) | the code server's blob checks, the hash-checking primitive, the update service | the specification's test vectors; OTP's `crypto:hash/2` on the host |
 | `erx_bytes:crc32c/2` | CRC-32C, continuing from a given value | the EROFS reader's superblock check | RFC 3720's test values; a table-driven model in Erlang |
 | `erx_bytes:inet_csum/2` | the Internet checksum of RFC 1071 over an iolist, continuing from a partial sum, and RFC 1624's incremental update | the network stack | a straightforward Erlang model |
-| `erx_bytes:siphash24/2` | SipHash-2-4 with a 16-byte key over an iolist | the network stack: initial sequence numbers, timestamp offsets and SYN cookies ([design-network-stack.md](design-network-stack.md#where-c-is-used-and-what-is-measured)) | the SipHash paper's test vectors; an Erlang model |
+| `erx_bytes:siphash24/2` | SipHash-2-4 with a 16-byte key over an iolist | the network stack: initial sequence numbers, timestamp offsets, SYN cookies and the stream of its random generator, `erx_net_rand` ([design-network-stack.md](design-network-stack.md#where-c-is-used-and-what-is-measured)) | the SipHash paper's test vectors; an Erlang model |
 | `erlang:crc32/2`, ERTS's own | CRC-32, through ERTS's bundled zlib | F2FS's checksums | the host's stock OTP |
 | `erx_verity:check/3` | checks blocks of an EROFS image, given as binaries with their block numbers, against the image's dm-verity tree, keeping the tree's checked blocks in a bounded cache, and returns `{ok, Blocks}` with only blocks that matched, or `{error, eio}` naming the first that did not; the tree's layout, root and salt come from the image's record in the system configuration, in the layout `erx_verity_t` of the ABI file ([design-storage.md](design-storage.md#data-model)) | the EROFS reader | the tests over trees the packer writes, and the reader's fuzz target |
 | `erx_device:post/4`'s copy | copies a request's `out` bytes into its pool buffer ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
@@ -2170,6 +2170,34 @@ done once per packet, per block and per file around them.
   runtime that made it.
 * **Never blocking.** No primitive waits; every event a driver or a pipe
   end waits for is a message through the event table.
+* **The entropy entry.** `erx_bytes:entropy(N)` is not per-byte work,
+  but it lives beside the primitives as Erlang's entry to the kernel's
+  generator ([design.md](design.md#decisions)). It is a synchronous
+  kernel call, on the stopgap a request to the root's generator service,
+  so the never-blocking rule above does not cover it. For an
+  integer `N` from 1 to 256 (`entropy_bytes_max` of the ABI file) it
+  returns exactly `N` bytes from one `erx_entropy_read`; any other `N`
+  raises `badarg`. A read the kernel or the backend does not complete
+  raises `erlang:error({entropy, Status})`, `Status` being the returned
+  status's name in the ABI file as an atom, and the call
+  never returns fewer bytes, zeros, or bytes from `rand`, the clock or
+  any other source. On erXos's kernel the read fails only on a length
+  that `badarg` already refuses, since the generator is seeded before any
+  domain runs; on the stopgap it also fails when the backend cannot
+  reach its generator service
+  ([design-stopgap.md](design-stopgap.md#the-call-table)). How good the
+  seed is belongs to the machine, not to a call: `entropy_quality` in the
+  machine information and the boot banner report it, a release build
+  refuses a weak seed at boot, and the stopgap's banner says its seed
+  comes from the counter alone
+  ([design-kernel.md](design-kernel.md#interrupts-time-and-entropy)). Any
+  process in any domain may call it, as any thread may call
+  `erx_entropy_read`. Its users are the network stack's generator keys
+  and stack-wide secrets
+  ([design-network-stack.md](design-network-stack.md#one-owner-one-step))
+  and the host link's session identifiers. A host test over a stand-in
+  backend checks every length, the `badarg` cases and that a failed read
+  raises.
 * **Only checked blocks reach the reader.** The EROFS reader takes blocks
   from `erx_verity:check/3` alone, and the check runs over a private copy
   the reader fetched, so no Erlang code parses an unchecked block of an

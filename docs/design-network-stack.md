@@ -168,13 +168,13 @@ each row names what in this design removes the fault.
   ([design-runtime.md](design-runtime.md#per-byte-primitives)) but not
   written: `erlang/apps/erx/src/erx_bytes.erl` exports `crc32c/2` and
   the SHA-256 calls only.
-* No Erlang code can read the kernel's entropy generator: the runtimes
-  call `erx_entropy_read` for musl and for ERTS's reference key
+* No Erlang code can read the kernel's entropy generator: the
+  runtimes call `erx_entropy_read` for musl and for ERTS's reference key
   ([design-runtime.md](design-runtime.md#unguessable-references)), and
-  no design gives Erlang an entry to it. The host link's session
-  identifiers wait on the same entry (`TODO.md`). `erx_bytes:entropy/1`,
-  which this design adds beside `erx_bytes:siphash24/2`, is that entry
-  ([One owner, one step](#one-owner-one-step)).
+  `erx_bytes:entropy/1`, Erlang's entry to it, is specified
+  ([design-runtime.md](design-runtime.md#per-byte-primitives),
+  [design.md](design.md#decisions)) but not written. The host link's
+  session identifiers wait on the same entry (`TODO.md`).
 * The device NIF is specified: `erx_device:post/4` takes one to four
   binary segments of one request and copies them into a pool buffer, and
   `erx_device:complete/2` returns up to 64 KiB of completed buffers as
@@ -282,8 +282,11 @@ split(gen()) -> {Child :: gen(), gen()}.
 Block `I` of a generator's stream is `erx_bytes:siphash24(Key,
 <<(Counter + I):64>>)`, eight bytes, and every draw advances the counter
 past the blocks it used, so no block is given twice. `uniform/2` reduces
-one block modulo `Range`, a bias below `Range / 2^64`. `split/1` makes a
-child whose key is the parent's next 16 bytes. The stream is SipHash-2-4
+one block modulo `Range`, a bias below `Range / 2^64`. `split/1` takes
+the parent's next two blocks, 16 bytes, as the child's key and advances
+the parent's counter past them: the child is `new/1` of those bytes, its
+counter starting at zero, and no block of the parent's stream is both
+drawn and used as a key, so no two children share a key. The stream is SipHash-2-4
 used as a keyed pseudorandom function over a counter: its outputs reveal
 neither the key nor later outputs, and it rests on the same assumption as
 the initial sequence numbers and SYN cookies, which already depend on
@@ -311,11 +314,14 @@ from its spawner's generator, so a connection costs no kernel call for
 its randomness, and a key seen in one owner's state predicts nothing of
 its parent's or another owner's. `erx_net_tables` draws the stack-wide
 secrets, for initial sequence numbers, timestamp offsets and SYN
-cookies, from the same call. A process that cannot draw its key does not
-start, as ERTS refuses to start without its reference key
-([design-runtime.md](design-runtime.md#unguessable-references)); the
-kernel's generator is ready before any domain runs, so this happens only
-on a fault. In
+cookies, from the same call. A failed read raises in the owner's
+initialisation, so a process that cannot draw its key does not start,
+as ERTS refuses to start without its reference key
+([design-runtime.md](design-runtime.md#unguessable-references)), and no
+owner falls back to another source; its supervisor restarts it. On
+erXos's kernel the generator is ready before any domain runs, so a read
+fails only on the stopgap, when its backend cannot reach its generator
+service. In
 deterministic mode the kernel's generator is fixed, so the whole stack's
 random values repeat from boot to boot.
 
@@ -401,18 +407,28 @@ returns are its own error reasons, a closed set.
 A decoder whose layer carries a checksum checks the checksum first and
 then decodes; there is no decoder that skips it. The Ethernet, ARP and
 IPv6 decoders have no checksum to check. The IPv4 decoder checks the
-header checksum, whose cost does not grow with the frame, as
-`ip_input` checks it before reading any other field but the version and
-header length (`ip_input.c:524-544`). The TCP, UDP, ICMP and ICMPv6
-decoders take the pseudo-header's partial sum and check the sum over
-the whole segment, datagram or message, a cost that grows with its
-length. These four, and with them ARP's, so that every frame takes one
+header checksum, whose cost does not grow with the frame, before it
+reads any other field but the version and header length. FreeBSD's
+`ip_input` reads the source and destination first, for its RFC 1122
+check that no loopback address arrives on the wire
+(`ip_input.c:516-524`), and checks the header checksum next
+(`:526-544`), so a frame with a loopback address and a bad header
+checksum is counted as a bad address there and as a bad checksum here: a
+departure in a counter, with nothing on the wire changed. The TCP, UDP
+and ICMPv6 decoders take the pseudo-header's partial sum and check the
+sum over the whole segment, datagram or message; the ICMPv4 decoder
+checks the sum over the message alone, as RFC 792 defines it and
+`icmp_input` computes it (`ip_icmp.c:500`), since only ICMPv6 has a
+pseudo-header (RFC 4443, section 2.3; `icmp6_input`, `icmp6.c:505`).
+Each checks a sum whose cost grows with the message's length. These four
+decoders, and ARP's, so that every frame takes one
 path, run later than the Ethernet and IP decoders, after the frame has
 reserved room at its destination ([Receiving](#receiving)): the layer
 above IP is still decoded once, but not until something has room for
 it. Until then the frame is a `pending()` value of `erx_net_input`: the
-decoded link and IP records, the bytes of the layer above, and the
-fields that choose its destination. A
+decoded link record, the decoded IP record when the frame has one (an
+ARP frame has none), the bytes of the layer above, and the fields that
+choose its destination. A
 segment, datagram or ICMP record exists only as the result of its
 checksumming decoder, so no step can be handed one whose checksum was
 not checked.
@@ -522,7 +538,7 @@ domain D:
    classify(Frame, View) -> {owned, Pid, Credit, pending()}
                           | {local, pending()}
                           | {drop, Reason}.
-   complete(pending()) -> {ok, Item} | {drop, Reason}.
+   verify(pending()) -> {ok, Item} | {drop, Reason}.
    ```
    `classify/2` decodes the Ethernet and IP layers, reads the fields that
    choose a destination (the addresses, the protocol, the ports, and an
@@ -537,19 +553,24 @@ domain D:
    token of the interface's ingress bucket
    ([Untrusted input](#untrusted-input)); a frame that finds neither is
    dropped and counted. Only a frame that holds its unit or token reaches
-   `complete/1`, which runs the decoder of the layer above IP, or ARP's:
+   `verify/1`, which runs the decoder of the layer above IP, or ARP's:
    for TCP, UDP, ICMP and ICMPv6 the checksum first, with
    `erx_bytes:inet_csum/2` (a read pass, no copy), then the header and
    options. A frame that fails gives its unit or token back and is
    dropped. So the checksum, the one cost that grows with a frame's
    length, is spent only on a frame something has room for, and a
-   dropped frame costs a header decode and one lookup, whoever it names.
+   frame dropped for want of room costs a header decode and one lookup,
+   whoever it names. A frame that holds room and then fails its checksum
+   costs the checksum as well, and because it gives its unit or token
+   back, neither credit nor the ingress bucket bounds that work: frames
+   with bad checksums are checksummed at the rate the link delivers
+   them, as FreeBSD checksums every frame it receives.
    The fields `classify/2` reads are the only ones read before their
    checksum is checked, and they are used for the lookup alone: a local
-   frame is answered only from its completed item, so a segment with a
+   frame is answered only from its verified item, so a segment with a
    bad checksum to a closed port draws no RST, as in FreeBSD. A
    reassembled IP datagram passes `classify/2`, the reservation and
-   `complete/1` as a frame does.
+   `verify/1` as a frame does.
 
    FreeBSD checks every checksum before its lookup (`tcp_input.c:744-748`
    before `in_pcblookup_mbuf` at `:881`; `udp_input`'s check at
@@ -559,8 +580,8 @@ domain D:
    corrupted frame that also found no room is counted as dropped for want
    of room, where FreeBSD counts it as a bad checksum. The order is
    chosen so that one interface process, the classifier for every
-   client, spends a constant cost on each frame it drops
-   ([Residuals](#residuals)).
+   client, spends a constant cost on each frame it drops for want of
+   room ([Residuals](#residuals)).
 3. **Interface to connection.** The owned items of one batch are grouped
    by destination, and each destination gets one message holding its
    items in arrival order, against its credit. The items are records whose
@@ -607,7 +628,7 @@ interface probes it as FreeBSD's `arpresolve` and `nd6_resolve` do.
 
 | Path | Local messages | Lane crossings | Copies in the network domain |
 | --- | --- | --- | --- |
-| receive, TCP segment | driver to interface (per batch), interface to connection (per batch) | one per delivery | one, `complete/2` |
+| receive, TCP segment | driver to interface (per batch), interface to connection (per batch) | one per delivery | one, `erx_device:complete/2` |
 | transmit, TCP segment | connection to driver (per step) | one per `send` call | one, `post/4` |
 | receive, UDP datagram | driver to interface, interface to socket | one per datagram | one |
 | ARP, neighbour discovery, ICMP echo, SYN | driver to interface; replies interface to driver | none | one each way |
@@ -1081,8 +1102,12 @@ multicast is `erx_mcast` ([Scope](#scope)). Redirects are accepted as
 for IPv4, by RFC 4861's rules, which `icmp6_redirect_input` checks.
 
 The random values of neighbour discovery are FreeBSD's, drawn from the
-interface's generator: the reachable time, uniform between half and one
-and a half times its base (`ND_COMPUTE_RTIME`, `nd6.h:196`); the delay
+interface's generator. The reachable time lies between half and one and
+a half times its base, as `ND_COMPUTE_RTIME` bounds it (`nd6.h:196`), and
+the stack draws it uniformly over that interval with `uniform/2`.
+FreeBSD ANDs a random word with a mask that is not a power of two, which
+is not uniform and gives whole seconds: a departure in timing alone,
+within FreeBSD's interval. The other values are the delay
 of up to one second before a new address's MLD report and duplicate
 address detection (`in6_update_ifa_join_mc`, `in6.c:696`;
 `in6_broadcast_ifa`, `in6.c:1164`; `MAX_RTR_SOLICITATION_DELAY`,
@@ -1167,7 +1192,7 @@ of the interface process, not a socket, so it needs no exception in
   `0.0.0.0`.
 * **Receiving.** `classify/2` returns a UDP datagram to port 68 on an
   interface configured for DHCP as `local`, before any address check;
-  once `complete/1` has checked the datagram, the interface gives it to
+  once `verify/1` has checked the datagram, the interface gives it to
   its `erx_dhcp4` only
   when its transaction id is the client's outstanding one and its client
   hardware address is the interface's; every other datagram to port 68
@@ -1232,7 +1257,7 @@ modules are marked P; process modules E.
 | `erx_tcp_hostcache` | `tcp_hostcache.c` | per-destination path values (an extension, [Scope](#scope)) | P |
 | `erx_mcast` | `in_mcast.c`, `igmp.c`, `in6_mcast.c`, `mld6.c` | group membership, IGMPv3 and MLDv2 (an extension) | P |
 | `erx_net_bind` | `in_pcb.c` (`in_pcbbind`, `:716`; `in_pcb_lport_dest`, `:756`; `in_pcbbind_avail`, `:912`; `in_pcbbind_setup`, `:1011`), `in6_pcb.c` | port choice, reuse rules, the claim funnel | P and the funnel |
-| `erx_net_input` | `ether_input`, `ip_input`, `ip6_input`, the pcb lookup of `tcp_input_with_port` and `udp_input` | classify one frame; complete it once it holds room | P |
+| `erx_net_input` | `ether_input`, `ip_input`, `ip6_input`, the pcb lookup of `tcp_input_with_port` and `udp_input` | classify one frame; verify it once it holds room | P |
 | `erx_net_frame` | the header-building parts of `ip_output`, `ip6_output`, `ether_output` | encode a frame | P |
 | `erx_net_rand` | none; the role of `arc4random` | the keyed random generator each owner holds | P |
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
@@ -1584,7 +1609,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | --- | --- |
 | Every length read from a header is checked against the enclosing layer before use; trailing bytes are cut at the length the header states | each `*_wire` decoder; fuzz targets |
 | Decoders are total: `{ok, ...}` or `{error, Reason}`, never an exception | fuzz targets fail on any exception |
-| No field a checksum covers is read before the checksum is checked, except the fields that choose a frame's destination, which only the lookup reads; a segment, datagram or ICMP record is made only by its decoder, which checks the checksum first | `erx_net_input`, the `*_wire` decoders; a build check |
+| No field a checksum covers is read before the checksum is checked, except the fields that choose a frame's destination, which only the lookup reads; a segment, datagram or ICMP record is made only by its decoder, which checks the checksum first | `erx_net_input`, the `*_wire` decoders; a build check that only the decoders make those records; tests that the decoders check the sum first: the fuzz targets' wrong-sum inputs and the interface's gate |
 | No atom is made from packet data; unknown protocol values stay integers | the codecs; a build check fails on `binary_to_atom`, `list_to_atom` and `binary_to_term` in `erx_net` |
 | Sequence-space conversion happens only in `erx_tcp_seq` | a chokepoint check fails on `16#ffffffff` or `bsl 32` arithmetic in any other TCP module |
 | Half-open connections live only in the bounded syncache; overflow is answered statelessly with cookies | `erx_tcp_syncache` |
@@ -1617,15 +1642,17 @@ flood measurements of plan.md's network gates.
 
 **What a flood costs the interface.** Every frame, owned or unowned,
 costs the interface process a header decode and one lookup before it is
-kept or dropped, and only a kept frame costs a checksum and more
-([Receiving](#receiving)). A flood of frames with valid checksums aimed
+kept or dropped, and only a frame that holds room costs a checksum and
+more ([Receiving](#receiving)). A flood of frames with valid checksums aimed
 at one client's established connection therefore costs the interface
 process no more per frame than any flood of minimum-size frames: once
 the connection's credit is full, each further frame is decoded, looked
 up and dropped, and what the connection takes, at the rate its grant's
 share lets it take it, is charged to that grant. The interface's own
 cost per frame is spent on the network domain's grant, the same whoever
-the frame names. Whether one interface process keeps up with
+the frame names. A frame that holds room and fails its checksum returns
+its room, so the checksums of such frames are bounded by link capacity
+alone, not by credit or the bucket. Whether one interface process keeps up with
 minimum-size frames at line rate is what the network gates measure;
 where it cannot, the driver's credit fills and the driver drops frames
 for every client alike ([Residuals](#residuals)).
@@ -1637,8 +1664,10 @@ Each of these is a known gap, with the reason it stays:
 * **One interface process is a ceiling for all clients.** A line-rate
   flood that the interface process cannot decode as fast as it arrives
   makes the driver drop frames for every client, whatever they are. The
-  cost per dropped frame is a header decode and a lookup, kept small by
-  [Receiving](#receiving)'s order; one interface process per receive
+  cost per frame dropped for want of room is a header decode and a
+  lookup, kept small by [Receiving](#receiving)'s order, but a frame that
+  holds room and fails its checksum costs a checksum as well, at the rate
+  the link delivers such frames; one interface process per receive
   queue, on devices that hash flows to several queues ([Scope](#scope)),
   divides the work. A bound per client here would need a classifier ahead
   of the interface process, which is what the interface process is.
@@ -1745,11 +1774,14 @@ C does per-byte work only, as the design requires
   OpenSSL out of the domain that parses hostile packets. RFC 7217's
   HMAC-SHA-256 is computed by the vault, which holds its key
   ([IPv6, neighbour discovery and autoconfiguration](#ipv6-neighbour-discovery-and-autoconfiguration)).
-* **The entropy source,** `erx_bytes:entropy/1`, a call this design adds:
-  it returns up to 256 bytes from `erx_entropy_read`, or
-  `{error, unavailable}` when the kernel refuses the read. It is not
-  per-byte work but the one way Erlang reaches the kernel's generator,
-  and the stack calls it only when an owner starts and when
+* **The entropy source,** `erx_bytes:entropy/1`: it returns up to 256
+  bytes from `erx_entropy_read` and raises when the read fails, never
+  substituting other bytes
+  ([design-runtime.md](design-runtime.md#per-byte-primitives)). It is
+  not per-byte work but Erlang's entry to the kernel's generator in a
+  domain without OpenSSL, as the network domain is
+  ([design.md](design.md#decisions)), and the stack calls it
+  only when an owner starts and when
   `erx_net_tables` draws or rotates a secret
   ([One owner, one step](#one-owner-one-step)).
 
@@ -1783,7 +1815,7 @@ One fuzz target per decoder, in `test/erlang/*_fuzz.erl`, run by `make
 check-fuzz`: Ethernet, ARP, IPv4 with options, IPv6 with extension
 headers, ICMP, ICMPv6 with neighbour-discovery options, UDP, TCP with
 options, DHCP, epmd's requests, `erx_net_input:classify/2` and
-`complete/1` over whole frames, the packet-mode framing over random
+`verify/1` over whole frames, the packet-mode framing over random
 streams (`decode_packet` over every mode the options offer), and the
 socket protocol's requests through the generated validators. Each
 target checks that the decoder never raises; that encode then decode
@@ -1814,10 +1846,10 @@ and that corrupted segment sent to a closed port draws no RST, sent to a
 listener draws no SYN-ACK and makes no syncache entry, and leaves the
 ingress bucket's tokens where they were, as FreeBSD drops it silently.
 
-*Seeded failures:* a `complete/1` that skips the checksum, which must
+*Seeded failures:* a `verify/1` that skips the checksum, which must
 deliver the corrupted segment and fail the second case; and an interface
 that answers a frame naming no socket from its pending value, before
-`complete/1` runs, which must send the RST and fail the third.
+`verify/1` runs, which must send the RST and fail the third.
 
 The random values are checked over the interface core, a datagram
 socket's step, a connection's step through an active open and
@@ -1834,7 +1866,10 @@ module makes:
 * the identifications of one socket's successive non-atomic datagrams,
   and the nonces of one address's successive detection probes, are the
   successive draws that key's generator gives, computed by the test with
-  `erx_net_rand` alone.
+  `erx_net_rand` alone;
+* a spawned owner's generator is `new/1` of the two blocks its spawner's
+  generator gave at the split, and the spawner's next draw is the block
+  after them, both computed by the test with `erx_net_rand` alone.
 
 *Seeded failures:* an `ip_fillid` that counts instead of drawing, which
 the second property must catch, since its values do not change with the
@@ -1842,7 +1877,8 @@ key; a sub-core of the interface that returns the generator it was given
 instead of the one it advanced, which the third must catch as a repeated
 nonce; and a step that takes a random value from `rand:uniform/1`
 instead of its generator, which the first property must catch and the
-build check below must refuse.
+build check below must refuse; and a `split/1` that gives the child the
+parent's key and counter, which the fourth must catch.
 
 ### Reassembly and buffers: properties against a byte map
 
@@ -2052,7 +2088,10 @@ Each with a test proving it catches a violation:
 * only `erx_net_bind` inserts into the demultiplexing table;
 * only `erx_net_credit` sends packet batches between stack processes;
 * a received segment, datagram or ICMP record is constructed only by its
-  `*_wire` decoder, which checks the checksum first;
+  `*_wire` decoder; that the decoder checks the checksum before it
+  decodes is not something a build check can see, and the decoders' fuzz
+  targets with wrong sums and the interface's gate prove it
+  ([Codecs: fuzz targets](#codecs-fuzz-targets));
 * no module of `erx_net` calls `rand` or `crypto`, and only its process
   modules call `erx_bytes:entropy/1`;
 * no `binary_to_atom`, `list_to_atom` or `binary_to_term` in `erx_net`;
@@ -2223,7 +2262,7 @@ has none of these: it never runs out and costs nothing until a step
 draws.
 
 **An unverified segment type.** `classify/2` could decode the whole
-transport header into a record marked unverified, which `complete/1`
+transport header into a record marked unverified, which `verify/1`
 would turn into a verified one. Every field of the unverified record
 would then be readable before its checksum, and the rule that only the
 lookup reads them would rest on every reader remembering it. With the
