@@ -337,12 +337,19 @@ for what counts as evidence.
   fences or acquire loads must never reach the bad outcome. Its twin
   without them must reach it, or the test would pass whatever the fences
   did.
-* **TLA+ models under TLC** (`make check-tla`). TLC explores every state of
-  a model. Today the runner is built and tested on a small model, with a
-  deliberately broken twin that must fail on the property it names. The
-  protocol models (connections, the host link's sessions, the update
-  protocol, the scheduler's cross-CPU protocol) are planned and not
-  written.
+* **TLA+ models under TLC** (`make check-tla`). TLC explores every state
+  of a bounded model. Three protocol models check the lane (no record
+  overwritten before it is read, records read whole, no lost wake),
+  connections (a connection's end handled after every frame it
+  published, a name reused only after the earlier connection went down)
+  and links (an answer about a process arrives after everything the
+  process sent, and a link two processes make towards each other is
+  never left with one half). Each model has seeded defects, such as a
+  dropped fence or an answer sent early, that must fail on the property
+  or the deadlock check they name. The roster has 34 configurations,
+  four of them fixtures that test the runner itself. The models for the
+  host link's sessions, the update protocol and the scheduler's
+  cross-CPU protocol are planned and not written.
 * **CBMC, a bounded model checker for C** (`make check-cbmc`). Six
   harnesses check the budget arithmetic and the capability table's lookup,
   rights and slot-closing code for every input within stated bounds. Nine
