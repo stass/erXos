@@ -819,6 +819,18 @@ it; git history is the record of completed work.
   gen_tcp_misc_SUITE `bidirectional_traffic` below and statistics_SUITE `msb_scheduler_wall_time` above may be the
   same kind. Give the table a row that accepts either stock result for a named cause, or run the stock side's
   timing-bound cases on an idle host.
+* [Medium] ERTS, process signals (`erl_bif_info.c` `ERTS_PI_IX_STATUS`): process_SUITE
+  `process_info_status_handled_signal` failed once on erXos in a whole emulator-group QEMU run (HVF, one CPU,
+  `+S 1:1`) with `{badmatch,[{status,running},{messages,[]}]}` at line 1332, where stock passed: the idle target
+  answered `running` to a `[status, messages]` request, which ERTS reports only when the target, while it handles
+  the request, is also active or has another signal or a non-priority system task pending. The branch carried no
+  ERTS change near signals or scheduling. The earlier whole-group run passed it (erxos-history
+  `oracle-qemu/emulator/2026-11-07`); process_SUITE alone passed it three times out of three, and a copy of the case
+  that repeats its body 2,000 times in one run failed none on either side, so the pending work comes from what the
+  earlier suites of the group leave running, not from the case. Not a known-differences row: the cause is
+  unexplained. Rerun the whole emulator group with a diagnostic in the status branch that prints the target's
+  `ACTIVE`, `SIG_Q`, `NMSG_SIG_IN_Q` and `SYS_TASKS` flags and the kind of the next pending signal or task, and
+  find who sent it.
 * [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,
   whose kernel and stdlib specifications are the bootstrap's (11.0.3, 8.0.4), not the release's. The transcript it
   compares does not read them; boot it from `OracleHosted.write_boot_script` so no hosted tree carries them.
