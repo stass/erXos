@@ -170,6 +170,96 @@ class SetupDecisionsTest < Minitest::Test
     end
   end
 
+  # Answers `brew --prefix` with prefix, and records each command it is asked to run.
+  class BrewRunner
+    attr_reader :commands
+
+    def initialize(directory, prefix)
+      @log = File.join(directory, 'brew-prefix.log')
+      @prefix = prefix
+      @commands = []
+    end
+
+    def run(argv, **_options)
+      @commands << argv
+      raise Erx::CommandError, { 'state' => 'failed', 'log' => @log } unless @prefix
+
+      File.write(@log, "#{@prefix}\n")
+      { 'log' => @log }
+    end
+  end
+
+  def toolchain_env(env, runner)
+    Erx::Setup.new(root: File.expand_path('../..', __dir__), runner: runner, env: env).send(:toolchain_env)
+  end
+
+  def homebrew_tree(directory)
+    %w[opt/llvm/bin/clang bin/ld.lld].each do |tool|
+      path = File.join(directory, tool)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "#!/bin/sh\n")
+      File.chmod(0o755, path)
+    end
+    directory
+  end
+
+  def test_toolchain_defaults_follow_the_homebrew_prefix
+    assert_equal({ 'ERX_CLANG' => '/opt/homebrew/opt/llvm/bin/clang', 'ERX_LLD' => '/opt/homebrew/bin/ld.lld' },
+                 Erx::Setup.toolchain_defaults('/opt/homebrew'))
+    assert_equal({ 'ERX_CLANG' => '/usr/local/opt/llvm/bin/clang', 'ERX_LLD' => '/usr/local/bin/ld.lld' },
+                 Erx::Setup.toolchain_defaults('/usr/local'))
+  end
+
+  def test_toolchain_comes_from_homebrew_prefix_without_asking_brew
+    Dir.mktmpdir('erx-brew-') do |directory|
+      prefix = homebrew_tree(File.join(directory, 'prefix'))
+      runner = BrewRunner.new(directory, '/elsewhere')
+      assert_equal Erx::Setup.toolchain_defaults(prefix), toolchain_env({ 'HOMEBREW_PREFIX' => prefix }, runner)
+      assert_empty runner.commands
+    end
+  end
+
+  def test_toolchain_asks_brew_for_its_prefix_when_the_environment_does_not_say
+    Dir.mktmpdir('erx-brew-') do |directory|
+      prefix = homebrew_tree(File.join(directory, 'prefix'))
+      runner = BrewRunner.new(directory, prefix)
+      assert_equal Erx::Setup.toolchain_defaults(prefix), toolchain_env({}, runner)
+      assert_equal [%w[brew --prefix]], runner.commands
+    end
+  end
+
+  def test_chosen_tools_are_kept_and_only_the_unset_one_is_filled_in
+    Dir.mktmpdir('erx-brew-') do |directory|
+      prefix = homebrew_tree(File.join(directory, 'prefix'))
+      runner = BrewRunner.new(directory, prefix)
+      assert_empty toolchain_env({ 'ERX_CLANG' => '/my/clang', 'ERX_LLD' => '/my/ld.lld' }, runner)
+      assert_empty runner.commands
+      assert_equal({ 'ERX_LLD' => File.join(prefix, 'bin/ld.lld') },
+                   toolchain_env({ 'ERX_CLANG' => '/my/clang', 'HOMEBREW_PREFIX' => prefix }, runner))
+    end
+  end
+
+  def test_a_missing_toolchain_is_reported_not_passed_over
+    Dir.mktmpdir('erx-brew-') do |directory|
+      error = assert_raises(Erx::Error) { toolchain_env({ 'HOMEBREW_PREFIX' => directory }, BrewRunner.new(directory, nil)) }
+      assert_match(%r{set ERX_CLANG and ERX_LLD.*#{Regexp.escape(directory)}/opt/llvm/bin/clang}, error.message)
+      error = assert_raises(Erx::Error) { toolchain_env({}, BrewRunner.new(directory, nil)) }
+      assert_match(/set ERX_CLANG and ERX_LLD.*no Homebrew/, error.message)
+    end
+  end
+
+  def test_a_prefix_that_is_not_one_absolute_directory_is_refused
+    Dir.mktmpdir('erx-brew-') do |directory|
+      ['relative/prefix', File.join(directory, 'absent')].each do |prefix|
+        error = assert_raises(Erx::Error) { toolchain_env({ 'HOMEBREW_PREFIX' => prefix }, BrewRunner.new(directory, nil)) }
+        assert_match(/HOMEBREW_PREFIX does not name/, error.message)
+      end
+      runner = BrewRunner.new(directory, "#{directory}\nWarning: something")
+      error = assert_raises(Erx::Error) { toolchain_env({}, runner) }
+      assert_match(/brew --prefix. does not name/, error.message)
+    end
+  end
+
   def test_leftovers_cleans_only_an_oracle_directory_without_a_build_record
     with_tree do |root, runner, _sample, _sha|
       setup = setup_for(root, runner)

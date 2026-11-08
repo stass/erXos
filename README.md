@@ -333,7 +333,8 @@ Install missing tools through Homebrew.
 Point the build at your compiler. Apple's SDK clang will not do: the
 checks compare clang's and lld's versions, and the compiler's resource
 headers, with `config/provenance/llvm-23.1.3.json`. For Homebrew at
-`/opt/homebrew`:
+`/opt/homebrew` (Apple Silicon; Intel Macs use `/usr/local`, which
+`brew --prefix` prints):
 
 ```sh
 export ERX_CLANG=/opt/homebrew/opt/llvm/bin/clang
@@ -370,8 +371,10 @@ sources must already be there from `make fetch`. It does not fetch
 the first, only `make check-tla` uses the second, only
 `make check-litmus` builds from the third, and the native oracle does
 not use the fourth. If `ERX_CLANG` or `ERX_LLD`
-is unset, the builds use `/opt/homebrew/opt/llvm/bin/clang` and
-`/opt/homebrew/bin/ld.lld`; export them yourself for later commands.
+is unset, the builds use Homebrew's `opt/llvm/bin/clang` and
+`bin/ld.lld` under `HOMEBREW_PREFIX`, or under `brew --prefix` when that
+is unset, and setup stops with a diagnostic when they are not there;
+export them yourself for later commands.
 
 ## Fetch, bootstrap and check
 

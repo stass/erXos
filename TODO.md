@@ -1,6 +1,6 @@
 # TODO
 
-* [Low] liberx hosted backend (`liberx/backend/hosted/`): macOS and AArch64 only (`os_sync_wait_on_address`, `switch_stack.S`); a Linux host skips `test/host/hosted_function_api_test.rb`.
+* [Low] liberx hosted backend (`liberx/backend/hosted/`): macOS only (`os_sync_wait_on_address`, and the stack switches in `arch/*/switch_stack.S` use Darwin's symbol names); a Linux host skips `test/host/hosted_function_api_test.rb`.
 
 Open work outside the roadmap in [docs/plan.md](docs/plan.md). Each item has
 a `[Severity]` tag and a component pointer. When an item is closed, delete
@@ -928,9 +928,7 @@ it; git history is the record of completed work.
   depend on sources only, and `forget_programs` deletes only `.elf`, so objects built under old
   `FLAGS` are reused; hash the flags into the rule or delete the objects when they change.
   (3) `setup.rb`: the source steps' `deadline: 300` is never used. (4)
-  `setup.rb:141-143`: `toolchain_env` hard-codes `/opt/homebrew/...` where Homebrew lives in
-  `~/homebrew` and Linux is a host, and passes nothing silently when neither path exists;
-  report when no toolchain is found. (5) `leftovers` reads the flavour out of `step.argv`;
+  `leftovers` reads the flavour out of `step.argv`;
   store it on `Step`. `ERX_SOURCE_CACHE` names `build/third_party` but setup reads the sibling
   `build/downloads` (`archive_directory`); name the directory actually read.
 * [Low] `test/oracle/common_test/test_server_ctrl.erl` (`file:set_cwd` in `run_test_case` and three other sites),

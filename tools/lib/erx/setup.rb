@@ -62,6 +62,15 @@ module Erx
       steps.reject { |step| present.fetch(step.name, false) }
     end
 
+    # Where Homebrew installs the LLVM tools under prefix: /opt/homebrew on
+    # Apple Silicon, /usr/local on Intel macOS. clang comes from the
+    # keg-only llvm formula, ld.lld from lld, which Homebrew links.
+    def self.toolchain_defaults(prefix)
+      { 'ERX_CLANG' => File.join(prefix, 'opt/llvm/bin/clang'), 'ERX_LLD' => File.join(prefix, 'bin/ld.lld') }
+    end
+
+    TOOLCHAIN_VARIABLES = toolchain_defaults('').keys.freeze
+
     # Where another checkout keeps verified archives, derived from a cache
     # directory such as <checkout>/build/third_party.
     def self.archive_directory(cache)
@@ -82,7 +91,10 @@ module Erx
       steps = plan
       return [] if steps.empty?
 
-      toolchain = toolchain_env
+      # Only the builds need a compiler, so a plan of sources alone runs
+      # without one; a plan with a build stops here, before anything runs,
+      # when the compiler cannot be found.
+      toolchain = steps.any? { |step| step.kind == :command } ? toolchain_env : {}
       steps.each { |step| perform(step, toolchain) }
       steps.map(&:name)
     end
@@ -169,10 +181,44 @@ module Erx
       raise Error, "source #{id} is not downloaded" unless File.file?(archive)
     end
 
-    # The LLVM tools the native builds need, when the caller has not chosen.
+    # The LLVM tools the native builds need, for each of ERX_CLANG and ERX_LLD
+    # the caller left unset: Homebrew's, under the prefix HOMEBREW_PREFIX or
+    # `brew --prefix` names. A tool that cannot be found this way is an error
+    # here, before any step runs.
     def toolchain_env
-      { 'ERX_CLANG' => '/opt/homebrew/opt/llvm/bin/clang', 'ERX_LLD' => '/opt/homebrew/bin/ld.lld' }
-        .reject { |name, path| @env.fetch(name, '') != '' || !File.executable?(path) }
+      unset = TOOLCHAIN_VARIABLES.select { |name| @env.fetch(name, '').empty? }
+      return {} if unset.empty?
+
+      prefix = homebrew_prefix
+      advice = "set #{unset.join(' and ')} to the installed LLVM clang and ld.lld (see README.md)"
+      raise Error, "#{advice}: no Homebrew prefix in HOMEBREW_PREFIX or from `brew --prefix`" unless prefix
+
+      defaults = self.class.toolchain_defaults(prefix).slice(*unset)
+      missing = defaults.values.reject { |path| File.executable?(path) }
+      raise Error, "#{advice}: not installed at #{missing.join(', ')}" unless missing.empty?
+
+      defaults
+    end
+
+    # HOMEBREW_PREFIX when set, else what `brew --prefix` prints; nil when
+    # brew is not installed or fails. Either answer must be one existing
+    # directory's absolute path, or it is an error naming where it came from.
+    def homebrew_prefix
+      named = @env.fetch('HOMEBREW_PREFIX', '')
+      return checked_prefix(named, source: 'HOMEBREW_PREFIX') unless named.empty?
+
+      begin
+        result = @runner.run(%w[brew --prefix], name: 'setup-brew-prefix', deadline: 60)
+      rescue CommandError
+        return nil
+      end
+      checked_prefix(File.read(result.fetch('log'), 4096).to_s.chomp, source: '`brew --prefix`')
+    end
+
+    def checked_prefix(prefix, source:)
+      return prefix if prefix.match?(%r{\A/[^[:cntrl:]]*\z}) && File.directory?(prefix)
+
+      raise Error, "#{source} does not name a Homebrew prefix directory; see #{File.join(@root, 'build/logs')}"
     end
   end
 end
