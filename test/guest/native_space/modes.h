@@ -13,6 +13,7 @@
 #define MODE_READER	2	/* finds the writer's pattern read-only, releases the range: ends with 0 */
 #define MODE_REVOKED	3	/* finds the root's pattern, raises its signal, reads until a fault ends it */
 #define MODE_CREATOR	4	/* creates spaces below its own and a refused one, ends with 0 */
+#define MODE_FIRST	5	/* finds FIRST_TAG above its mode, ends with FIRST_STATUS */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -23,5 +24,8 @@
 
 #define ROOT_PATTERN	UINT64_C(0x5ea5ea5ea5ea5ea5)
 #define WRITER_PATTERN	UINT64_C(0x0ddba11c0ffee000)
+/* What the root passes a first thread it starts above MODE_FIRST, and what that thread ends with. */
+#define FIRST_TAG	UINT64_C(0x5eed)
+#define FIRST_STATUS	55
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

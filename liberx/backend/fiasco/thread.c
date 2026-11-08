@@ -188,6 +188,7 @@ erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thre
 
 	if (thread_class != ERX_THREAD_CLASS_WORKER && thread_class != ERX_THREAD_CLASS_EXECUTOR)
 		return (ERX_EINVAL);
+	/* Another space takes only its first thread, at index 0 of the table its task was made with. */
 	if (space != 0) {
 		const erx_fiasco_thread_create_request_t first = { .caller = erx_fiasco_thread_self()->index,
 		    .budget = budget, .space = space, .group = group, .thread_class = thread_class };

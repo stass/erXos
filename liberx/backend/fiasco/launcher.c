@@ -83,19 +83,26 @@ erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task)
 	return (ERX_OK);
 }
 
-int
-erx_fiasco_launch_start(uint64_t task, uint64_t argument)
+void
+erx_fiasco_launch_set_registers(uint64_t argument)
 {
 	erx_fiasco_start_t start = { 0 };
 	const uint64_t *const words = (const uint64_t *)(const void *)&start;
 	erx_utcb_t *const utcb = erx_utcb_self();
-	uint64_t thread;
-	int64_t ignored;
-	int status;
 
 	start.regs.gpr[0] = argument;
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
 		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
+}
+
+int
+erx_fiasco_launch_start(uint64_t task, uint64_t argument)
+{
+	uint64_t thread;
+	int64_t ignored;
+	int status;
+
+	erx_fiasco_launch_set_registers(argument);
 	status = erx_thread_create(0, task, 0, ERX_THREAD_CLASS_WORKER, &thread);
 	if (status == ERX_OK)
 		status = erx_thread_start(thread);

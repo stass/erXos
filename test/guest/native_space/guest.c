@@ -8,8 +8,9 @@
  * test/guest/native_space/program.c, a destroy that revokes them, and the bounds of a
  * map into a created space, and fault gates: a revoked task's fault reaches the root's
  * gate, and the gate calls' refusals and queue; and spaces: a task that creates spaces
- * below its own, the create's refusals, and a release at the last handle's close. Each
- * case says one line, which tools/lib/erx/native_space.rb holds the transcript to.
+ * below its own, the create's refusals, and a release at the last handle's close; and a
+ * created space's first thread, which the root makes and starts. Each case says one
+ * line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
 
 #include <stdatomic.h>
@@ -416,6 +417,42 @@ case_released(void)
 }
 
 /*
+ * The root makes a created space's first thread and starts it at the image's entry with
+ * its argument (MODE_FIRST in program.c). A second create there is ERX_ENOTSUP and a
+ * second start ERX_EINVAL. The task ends with the thread's status, and its pages come
+ * back. No create follows the start: the thread may have ended its task by then, and a
+ * create in an ended space is refused for that instead.
+ */
+static void
+case_first_thread(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t space, thread, refused;
+	int64_t status;
+	bool passed;
+
+	if (erx_fiasco_launch_make(program_entry, 0, &space) != ERX_OK) {
+		say_case("first_thread", false);
+		return;
+	}
+	erx_fiasco_launch_set_registers(FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
+	if (erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK ||
+	    erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &refused) != ERX_ENOTSUP ||
+	    erx_thread_start(thread) != ERX_OK) {
+		task_drop(space);
+		say_case("first_thread", false);
+		return;
+	}
+	passed = erx_thread_start(thread) == ERX_EINVAL;
+	if (erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK) {
+		say_case("first_thread", false);
+		return;
+	}
+	say_count("first_thread_status", (uint64_t)status);
+	say_case("first_thread", passed && status == FIRST_STATUS && erx_fiasco_vm_free_pages() == before);
+}
+
+/*
  * The root's own tables, and the service's rows for the first two task indices, take
  * their pages here, so no case counts them against its pool.
  */
@@ -467,6 +504,7 @@ erx_fiasco_root_main(void)
 	case_created();
 	case_space_refusals();
 	case_released();
+	case_first_thread();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

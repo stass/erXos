@@ -553,7 +553,9 @@ erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, 
  * Makes the kernel's objects for an index the stub claimed, or for the first thread
  * of a task the root names, and takes the starting registers from the caller's
  * public UTCB. Everything goes through the window, so the record may be another task's.
- * A task holds its semaphore at the same slot the root's own threads use.
+ * A task holds its semaphore at the same slot the root's own threads use. A created
+ * space takes one first thread from its creator, the root, ever: a second create there,
+ * or any other caller's, is ERX_ENOTSUP.
  */
 static int
 service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t *request, erx_fiasco_reply_t *reply)
@@ -565,9 +567,17 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	uint32_t index, task = caller;
 
 	if (request->space != 0) {
-		if (caller != ERX_FIASCO_TASK_ROOT || erx_fiasco_task_space_target(caller, request->space, &task) != ERX_OK ||
-		    task == caller || request->index != 0)
+		int status;
+
+		if (caller != ERX_FIASCO_TASK_ROOT)
+			return (ERX_ENOTSUP);
+		status = erx_fiasco_task_space_target(caller, request->space, &task);
+		if (status != ERX_OK)
+			return (status);
+		if (task == caller || request->index != 0)
 			return (ERX_EINVAL);
+		if (erx_fiasco_task(task)->first_made)
+			return (ERX_ENOTSUP);
 	}
 	row = erx_fiasco_task(task);
 	if (request->index >= ERX_FIASCO_THREADS_MAX || row->state != ERX_FIASCO_TASK_LIVE ||
@@ -596,6 +606,8 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	for (size_t word = 0; word < sizeof(record->start) / sizeof(uint64_t); word++)
 		start[word] = atomic_load_explicit(&from->utcb.mr[word], memory_order_relaxed);
 	row->threads[index] = ERX_FIASCO_TASK_THREAD_CREATED;
+	if (task != caller)
+		row->first_made = true;
 	reply->first = service_thread_handle(caller, task, index);
 	reply->second = erx_fiasco_thread_semaphore_cap(index);
 	return (ERX_OK);

@@ -59,6 +59,7 @@ typedef struct erx_fiasco_task {
 	uint32_t		 flags;		/* ERX_SPACE_* */
 	erx_fiasco_task_tree_t	 tree;
 	uint64_t		 entry;		/* where its first thread starts */
+	bool			 first_made;	/* its creator made index 0, so another create there is ERX_ENOTSUP */
 	int64_t			 status;
 	erx_fiasco_task_thread_t threads[ERX_FIASCO_THREADS_MAX];
 	uint64_t		 affinity[ERX_FIASCO_THREADS_MAX];	/* as last set, 0 for wherever it was created */

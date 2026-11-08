@@ -70,7 +70,8 @@ mode_revoked(uint64_t slot)
 /*
  * Spaces below its own: a child, and a grandchild below the child, each reporting to a
  * gate of its own, and the child given a page of its object; then a parent that names
- * no space. Its end stops both, children first, and frees them.
+ * no space, and the child's first thread, which only the root makes. Its end stops
+ * both, children first, and frees them.
  */
 static int64_t
 mode_creator(void)
@@ -88,7 +89,17 @@ mode_creator(void)
 		return (43);
 	if (erx_space_create(0, mem, gate, 3, 0, CREATED_CAP_LIMIT, &refused) != ERX_ETYPE)
 		return (44);
+	/* Only the root makes a created space's first thread. */
+	if (erx_thread_create(0, child, 0, ERX_THREAD_CLASS_WORKER, &refused) != ERX_ENOTSUP)
+		return (45);
 	return (0);
+}
+
+/* The first thread of a task the root started: its argument arrives whole. */
+static int64_t
+mode_first(uint64_t argument)
+{
+	return (argument >> SLOT_SHIFT == FIRST_TAG ? FIRST_STATUS : 50);
 }
 
 int64_t
@@ -103,6 +114,8 @@ erx_task_main(uint64_t argument)
 		return (mode_revoked(argument >> SLOT_SHIFT));
 	case MODE_CREATOR:
 		return (mode_creator());
+	case MODE_FIRST:
+		return (mode_first(argument));
 	default:
 		return (90);
 	}

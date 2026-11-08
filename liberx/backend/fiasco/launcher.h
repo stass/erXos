@@ -29,6 +29,13 @@ int	erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task) ERX_W
 int	erx_fiasco_launch_start(uint64_t task, uint64_t argument) ERX_WARN_UNUSED_RESULT;
 
 /*
+ * Writes the starting registers erx_thread_create reads into the calling thread's
+ * public UTCB: argument in the first register, everything else 0.
+ * erx_fiasco_launch_start does this before its create.
+ */
+void	erx_fiasco_launch_set_registers(uint64_t argument);
+
+/*
  * Waits for the task to end, by a stop or a fault, and takes its status. Its pages
  * are back in the pool, its index is free and the handle task is closed, from the
  * return, with every space below it deleted too.

@@ -805,14 +805,15 @@ the one the domain library or a session starts a domain or a program with, and a
 the space's own threads make the rest. That first thread takes index 0, and its creator's stub claims nothing, since the
 service makes the table with the task. Its handle is an ordinary entry of the creator's handle table naming index 0 of
 that task, with no generation of the thread's own, so once the thread is reaped the handle names no thread until the
-index is reused, and then names the new thread, a recorded gap ([What Phase 1 defers](#what-phase-1-defers)). Its start is a request whose body also moves the record from created to started, through the window, and
-the trampoline below writes its marker.
+index is reused, and then names the new thread, a recorded gap ([What Phase 1 defers](#what-phase-1-defers)). In 1b-A only the root makes a first thread, and another
+caller's create in a space it created is `ERX_ENOTSUP`. Its start is a request, and the task's own entry marks record 0
+started when the thread first runs, as the root's does, and the trampoline below writes its marker.
 
 **`erx_thread_start`.** The stub moves the record from created to started, and only then writes the marker 1: a start of any other handle
 is refused untouched, since a 1 written over the kernel's 0 would lose the index for good. The service, in order:
 
 1. `l4_thread_control_start`, `_pager` and `_exc_handler` naming the task's gate, `_bind(slot, task)`, `_commit`.
-2. `l4_thread_ex_regs(thread, trampoline, record, 0)`. The trampoline's address comes in the start request, as each task's image has its own. A task's first thread starts at the image's entry instead, which `erx_image_map` returned to the creator and the creator puts in the starting registers, with its argument (a domain's boot information page, a program's channel values): the image's first instructions put the task's first stack and its C entry in the record and go to the trampoline.
+2. `l4_thread_ex_regs(thread, trampoline, record, 0)`. The trampoline's address comes in the start request, as each task's image has its own. A task's first thread starts at the image's entry instead, which `erx_image_map` returned to the creator and the service keeps, and the creator puts its argument in the starting registers (a domain's boot information page, a program's channel values); the service does not read the starting registers' `pc` there, a recorded difference. The image's first instructions put the task's first stack and its C entry in the record and go to the trampoline.
 3. `l4_scheduler_run_thread`.
 
 Starting a thread twice is `ERX_EINVAL`.
