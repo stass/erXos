@@ -275,7 +275,7 @@ class TopLevelCliTest < Minitest::Test
 
   def test_check_stack_proof_runs_the_proof_with_the_verified_toolchain
     commands = []
-    verified = ->(runner:) { runner && { 'ERX_CLANG' => '/verified/clang' } }
+    verified = ->(runner:, purpose:) { runner && purpose == :image && { 'ERX_CLANG' => '/verified/clang' } }
     status, output = run_cli('check-stack-proof', runner_class: Factory.new(recording_runner(commands)),
                                                   host_environment: verified)
     assert_equal 0, status, output
@@ -288,6 +288,83 @@ class TopLevelCliTest < Minitest::Test
                                                   host_environment: verified)
     assert_equal 1, status
     assert_includes output, '/evidence/failure.log'
+  end
+
+  # A runner that answers clang's and lld's --version with the given first
+  # lines, and stops the check at the resource-directory query that follows.
+  ResourceQueryReached = Class.new(StandardError)
+
+  def version_runner(clang:, lld:)
+    logs = { 'check-clang-version' => clang, 'check-lld-version' => lld }.to_h do |name, line|
+      [name, File.join(@directory, "#{name}.log").tap { |path| File.write(path, "#{line}\n") }]
+    end
+    Object.new.tap do |runner|
+      runner.define_singleton_method(:run) do |_argv, **options|
+        raise ResourceQueryReached if options.fetch(:name) == 'check-clang-resource'
+
+        { 'state' => 'succeeded', 'log' => logs.fetch(options.fetch(:name)) }
+      end
+    end
+  end
+
+  def with_compiler
+    saved = ENV.fetch('ERX_CLANG', nil)
+    ENV['ERX_CLANG'] = RbConfig.ruby
+    yield
+  ensure
+    ENV['ERX_CLANG'] = saved
+  end
+
+  def test_an_image_refuses_a_host_patch_release_of_llvm
+    runner = version_runner(clang: 'Homebrew clang version 23.1.2', lld: 'Homebrew LLD 23.1.3')
+    error = with_compiler do
+      assert_raises(Erx::Error) { Erx::CLI.send(:host_environment, runner: runner, purpose: :image) }
+    end
+    assert_equal 'clang does not report the required LLVM 23.1.3 version', error.message
+  end
+
+  def test_host_tests_take_a_patch_release_of_llvm_and_name_it
+    runner = version_runner(clang: 'Homebrew clang version 23.1.2', lld: 'Homebrew LLD 23.1.4')
+    _stdout, output = capture_io do
+      with_compiler do
+        assert_raises(ResourceQueryReached) { Erx::CLI.send(:host_environment, runner: runner, purpose: :host_tests) }
+      end
+    end
+    assert_includes output, 'note: host tests use clang 23.1.2, not the pinned LLVM 23.1.3'
+    assert_includes output, 'note: host tests use lld 23.1.4, not the pinned LLVM 23.1.3'
+
+    %w[22.1.3 23.2.0].each do |version|
+      runner = version_runner(clang: "Homebrew clang version #{version}", lld: 'Homebrew LLD 23.1.3')
+      error = with_compiler do
+        assert_raises(Erx::Error) { Erx::CLI.send(:host_environment, runner: runner, purpose: :host_tests) }
+      end
+      assert_equal 'clang does not report an LLVM 23.1.x version', error.message
+    end
+  end
+
+  # check builds the kernel and packs images in its integration tests, so it
+  # takes only the pinned LLVM; the sanitizer and fuzz gates build host
+  # programs only.
+  def test_each_gate_names_its_llvm_purpose
+    purposes = {}
+    %w[check check-sanitizers check-fuzz].each do |command|
+      runtime = proc do |purpose:, **, &_block|
+        purposes[command] = purpose
+        raise Erx::Error, 'stop'
+      end
+      if command == 'check'
+        with_checks([]) { |collaborators| run_cli(command, **collaborators.merge(runtime: runtime)) }
+      else
+        run_cli(command, runner_class: Factory.new(recording_runner([])), runtime: runtime)
+      end
+    end
+    stack_proof = lambda do |runner:, purpose:|
+      purposes['check-stack-proof'] = purpose if runner
+      raise Erx::Error, 'stop'
+    end
+    run_cli('check-stack-proof', runner_class: Factory.new(recording_runner([])), host_environment: stack_proof)
+    assert_equal({ 'check' => :image, 'check-sanitizers' => :host_tests, 'check-fuzz' => :host_tests,
+                   'check-stack-proof' => :image }, purposes)
   end
 
   # A new integration test runs without an entry; only excusing one takes an edit.
@@ -343,8 +420,8 @@ class TopLevelCliTest < Minitest::Test
 
   def test_unbuilt_native_jit_does_not_start_host_tests
     commands = []
-    runtime = lambda do |runner:, &block|
-      Erx::CLI.send(:with_test_runtime, runner: runner, oracle_class: Factory.new(UnbuiltOracle.new),
+    runtime = lambda do |runner:, purpose:, &block|
+      Erx::CLI.send(:with_test_runtime, runner: runner, purpose: purpose, oracle_class: Factory.new(UnbuiltOracle.new),
                     host_environment: ->(**) { {} }, &block)
     end
     with_checks(commands) do |collaborators|

@@ -21,7 +21,7 @@ class SanitizerGateTest < Minitest::Test
 
   def test_recoverable_undefined_behavior_fails_the_command
     runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
-    environment = Erx::CLI.send(:host_environment, runner: runner)
+    environment = Erx::CLI.send(:host_environment, runner: runner, purpose: :host_tests)
     source = File.join(@directory, 'overflow.c')
     program = File.join(@directory, 'overflow')
     File.write(source, "#include <limits.h>\nint main(void) { volatile int value = INT_MAX; value += 1; return 0; }\n")

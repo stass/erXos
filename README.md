@@ -332,7 +332,10 @@ Install missing tools through Homebrew.
 
 Point the build at your compiler. Apple's SDK clang will not do: the
 checks compare clang's and lld's versions, and the compiler's resource
-headers, with `config/provenance/llvm-23.1.3.json`. For Homebrew at
+headers, with `config/provenance/llvm-23.1.3.json`. Everything that
+builds an image or checks its reproducibility needs exactly 23.1.3; the
+host-only test gates (`check-fuzz`, `check-sanitizers`) also take another
+23.1.x patch release and print a note naming it. For Homebrew at
 `/opt/homebrew` (Apple Silicon; Intel Macs use `/usr/local`, which
 `brew --prefix` prints):
 
