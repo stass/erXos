@@ -563,7 +563,24 @@ A path's marks, at four spaces:
   it, of the attribute classes; any other caller gets `{error, scope}`,
   so the schema, not a list in the collector, refuses the machine-wide
   paths and the crash record. A path's visibility is its own mark and
-  every mark on its prefixes, each of which a caller must meet.
+  every mark on its prefixes, each of which a caller must meet;
+* `present NAME`: the path is the presentation type NAME
+  ([Presentations](design-display.md#presentations)). Its value is the
+  path's variable segments, one segment's value or the tuple of several
+  in order; its canonical text is those segments in the path's text,
+  joined by `/`; its grammar is that of the path's text; and it names
+  this path. A path carries at least one variable segment and at most
+  one `present` mark.
+
+Presentation names are a namespace of their own, as trace rows are, so
+`domain` may name a kind and a presentation, and they become atoms of
+`erx_schema`. The generator refuses a presentation named `accept`, the
+input context's URI ([Presentations in a
+terminal](design-display.md#terminal-windows)), or `proc`, `ui`,
+`trace`, `login` or `ws`, the web's fixed routes
+([URLs](design-web.md#urls)); a presentation declared twice; and two
+presentations of one variable segment over the same type, since an
+attribute of that type is shown as that presentation.
 
 A stopgap reporter appears in a record as `{stopgap, NAME}`. Its label
 and scope come from the schema, so a record carries no free text about
@@ -626,7 +643,121 @@ inspection 1
   path listing budgets
     visible all
   path budget budgets *budget_id
+    present budget
 ```
+
+### Widget format
+
+`formats/ui.txt` holds the one `ui VERSION` declaration of the display's
+widget trees ([Widget trees](design-display.md#widget-trees)). Its
+members, at two-space indentation, declare value types, image types,
+properties and kinds; the properties a kind takes are at four spaces
+beneath it. Members have one namespace of their own; a member refers to
+another by its bare name and to a root `limit` or `enum` by `@name`.
+Every wire number is literal in the source.
+
+| Member | Meaning |
+| --- | --- |
+| `integer NAME MIN MAX` | an integer within the inclusive bounds, which lie within a signed 32-bit integer |
+| `text NAME MAX utf8` | at most MAX bytes of valid UTF-8, MAX at most 65,536 |
+| `bytes NAME MAX` | at most MAX bytes, MAX at most 65,536 |
+| `list NAME TEXT MAX` | at most MAX values of the text type TEXT, MAX at most 1,000 |
+| `image NAME NUMBER CONTENT_TYPE` | an image type: its atom, its number from 1 to 255, and the quoted media type the browser is given |
+| `prop NAME NUMBER TYPE [common] [status] [default VALUE] [detail state]` | a property, NUMBER from 1 to 255 |
+| `kind NAME NUMBER [children]` | a kind, NUMBER from 1 to 255, which takes children when marked |
+| `prop NAME [state] [fixed] [within LOW HIGH] [index LIST] [hides PROP]` | at four spaces: the kind takes the property, with these marks |
+
+A property's TYPE is a member type, a root `@enum` of type `u8` whose
+member names are the atoms, `boolean`, `image` (one of the image
+types), `key`, `event` or `presentation`. `key` is an integer, an atom
+or a binary of at most 255 bytes, and only the property `key` has it;
+`event` is any term the application chooses; `presentation` is a
+presentation name of the inspection schema and a value of it. `common`
+makes every kind take the property. `status` lets the value also be an
+`attr()` carrying one ([design-live.md](design-live.md#inspection-records)).
+`default` states what the property's absence means. `detail state`
+marks an event whose detail is the kind's state value; any other event
+has none. On a property's line beneath a kind, `state` marks the value the user changes,
+`fixed` a property that is part of the node's identity, `within LOW
+HIGH` an integer that lies between two integer properties of the kind,
+`index LIST` an integer that indexes a list property of the kind, and
+`hides PROP` a fixed boolean under which PROP is refused in a tree,
+never kept, and handed to the application as `{erx_secret, V}`.
+
+The generator refuses a number or a name used twice in its namespace; a
+kind that takes an event marked `detail state` without exactly one
+`state` property; a `within`, `index` or `hides` naming a property the
+kind does not take or of the wrong type; a content type other than an
+`image/` type, and `image/svg+xml`; and a kind whose largest `insert`,
+every property it takes at its bound, exceeds `web_ui_op_max`, the room
+one web update leaves for an operation
+([design-web.md](design-web.md#the-protocol)).
+
+```text
+ui 1
+  integer size 0 16384
+  integer bound -2147483648 2147483647
+  text caption 4096 utf8
+  image png 1 "image/png"
+  prop key 1 key common
+  prop width 2 size common
+  prop visible 7 boolean common default true
+  prop present 9 presentation common status
+  prop on_select 10 event common
+  prop text 11 caption status
+  prop secret 13 boolean default false
+  prop min 15 bound default 0
+  prop max 16 bound default 100
+  prop value 17 bound
+  prop on_change 26 event detail state
+  prop on_submit 27 event detail state
+  kind column 1 children
+  kind slider 9
+    prop min
+    prop max
+    prop value state within min max
+    prop on_change
+  kind input 10
+    prop text state
+    prop secret fixed hides text
+    prop on_change
+    prop on_submit
+```
+
+The binary form follows from the declaration, as 9P2000.L's bytes follow
+from the protocol's kinds. Integers are little-endian. Each message is a
+`u32` length, at most `web_ui_op_max`, and then:
+
+| Message | Fields |
+| --- | --- |
+| `insert`, tag 1 | node `u32`, parent `u32` (0 for the root), index `u16`, kind `u8`, properties |
+| `remove`, tag 2 | node `u32` |
+| `set`, tag 3 | node `u32`, properties, then a `u8` count and that many property numbers removed |
+| `move`, tag 4 | node `u32`, index `u16` |
+| `commit`, tag 5 | none |
+| `event`, tag 6 | node `u32`, the event property's number `u8`, and a detail: a `u8` tag, none 0, boolean 1, integer 2 and text 3, and its value |
+
+Properties are a `u8` count and, for each, its number and its value: a
+boolean as a `u8` of 0 or 1; an integer as a signed 32-bit value; an enum or an
+image type as its `u8` number; a text or bytes as a `u32` length and the
+bytes; a list as a `u16` count and its texts; an event as nothing, the
+number alone saying that the node takes it; a presentation as its name,
+a `u8` length and at most 63 bytes, and its canonical text, a text of at
+most 4,096 bytes. A `status` property begins with its status block: the
+status as a `u8` (`ok` 0, `partial` 1, `unknown` 2, `unsupported` 3,
+`timeout` 4, `error` 5), the reporter as a `u8` (the application's own
+value 0, `kernel` 1, `service` 2, `runtime` 3, a stopgap 4), the
+stopgap's name as a `u8` length and at most 63 bytes, empty unless the
+reporter is a stopgap, and the timeout in milliseconds as a `u32`, 0
+unless the status is `timeout`; the value follows only for `ok` and
+`partial`. A `key` property is never written. A reader refuses an
+unknown tag, kind, property, image type or enum value; a value outside
+its type; a property twice in one list; a stopgap name the inspection
+schema does not declare; and bytes left over in a message. It keeps no
+state between messages, and nothing it decodes depends on a node's kind,
+so whether a node exists, takes a property or an event, or fits its
+parent is decided by the renderer's `apply_ops` and by `hit/4`, never by
+the reader.
 
 ## Numeric assignment and versions
 
@@ -1467,6 +1598,7 @@ The output families have explicit locations, shown relative to `build/gen/`:
 | `erlang/apps/erx/include/generated/erx_abi.hrl`, `erlang/apps/erx/src/generated/erx_manifest.erl` | constants and the generated manifest reader |
 | `tools/generated/abi.rb` | immutable values, source-driven packer encodings and host readers |
 | `fuzz/generated/` | entry points invoking production readers |
+| `web/src/generated/` | the web client's TypeScript: `web.txt`'s types, codec, limits and hash; `ui.txt`'s tables and the reader and writer of its binary form; the inspection schema's kinds, attribute names, units, stopgap reporters and `present` marks ([design-web.md](design-web.md#the-client)) |
 | `docs/generated/abi-reference.md` | signatures, assignments, fields, bounds and mapping tables |
 
 Independent raw-byte fixtures live in `test/fixtures/` and do not derive

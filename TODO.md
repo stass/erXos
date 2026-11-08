@@ -617,12 +617,6 @@ it; git history is the record of completed work.
   `ProtocolEmitter` and reaches into its private renderers; extract a kind-check renderer parameterised by the
   alias's form if the grammar emitter's internals change.
 
-* [Medium] `docs/design-abi.md` [Inspection schema](docs/design-abi.md#inspection-schema): the grammar has no
-  member for presentation types, which [design-display.md](docs/design-display.md#presentations) says the schema
-  declares (each type's canonical text, the grammar that parses it back and the inspector path it names). Add the
-  member, with a closed set of text forms, before `erx_present` is generated. Settle its namespace: `domain`,
-  `program`, `budget`, `group`, `device` and `module` are kinds too, members share one namespace, and `pid` is a
-  built-in value type.
 * [Medium] `docs/design-abi.md` [Inspection schema](docs/design-abi.md#inspection-schema): `[kernel, crash]` and
   `[kernel, trace]` repeat the fields of the crash-record and trace-record layouts, and the grammar has no form
   that takes a kind's attributes from a root `layout`, so they would be copied by hand. Add one (`fields @layout`)
