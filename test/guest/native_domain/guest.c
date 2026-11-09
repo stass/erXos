@@ -385,43 +385,49 @@ page_spoil(uint32_t id)
 }
 
 /*
- * The connection case's domain: ERTS made alive as d<id>@erxos with its domain id as
- * creation, the system connection's lane port opened toward SYSTEM_NODE and made the
- * controller of that node's entry with the frames' flag set and the system domain's id as
- * creation, then BURST messages of a KiB each to a pid of the system node, more than the
- * lane holds. It waits until the port's counts show the burst and one answer sent, says
- * them, then waits for the port to end with erx_lane_answers_unread under the party's
- * flood of LINKs, and halts with 0 only when output paused for room and resumed on the
- * bell, the drain answered, and the port ended so. Each '~' is the domain's id.
+ * The connection case's domain: ERTS distributed over erx_dist, so net_kernel makes it
+ * alive as guest@erxos with its domain id as creation and erx_connections opens the system
+ * connection from the boot page. Once the system node is up, it checks net_adm:ping of it
+ * (pong) and of a domain it has no connection with (pang), that a monitor of a process
+ * there is DOWN with noconnection, and that its creation is its id, halting with 1 on any
+ * failure. Then it sends BURST messages of a KiB each to a pid of the system node, more
+ * than the lane holds, waits until the port's counts show the burst and one answer sent,
+ * says them, and halts with 1 unless output paused for room and resumed on the bell and the
+ * drain answered. It then waits: the party's flood of LINKs whose answers it never reads
+ * ends the port with erx_lane_answers_unread, and erx_dist halts the domain with
+ * DIST_LOST_STATUS. Each '~' is the domain's id.
  */
-#define SYSTEM_NODE	"sys@erxos"
+#define SYSTEM_NODE	"system@erxos"
+#define DOMAIN_NODE	"guest@erxos"
 #define BURST		16
 #define TEXT_OF_(x)	#x
 #define TEXT_OF(x)	TEXT_OF_(x)
 #define BURST_TEXT	TEXT_OF(BURST)	/* BURST, as the expression writes it */
+/* erx_dist's status when the system connection ends: EX_UNAVAILABLE of sysexits(3). */
+#define DIST_LOST_STATUS	69
+#define ERTS_DIST_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
+    "-boot\0/bin/start\0-nouser\0-nocookie\0-no_epmd\0-proto_dist\0erx\0-eval\0"
 static const char connection_eval[] =
-    "register(net_kernel,self()),"
-    "process_flag(trap_exit,true),"
-    "true=erlang:setnode('d~@erxos',~),"
-    "P=open_port({spawn_driver,\"erx_lane system " SYSTEM_NODE "\"},[binary]),"
-    /* PUBLISHED, DIST_MONITOR(_NAME), UNICODE_IO, SEND_SENDER, EXIT_PAYLOAD; SPAWN, ALIAS, NATIVE_RECORDS */
-    "F=element(3,erts_internal:get_dflags()) bor 16#481029 bor (16#49 bsl 32),"
-    /* net_kernel makes the entry pending before setnode/3, as erx_dist does */
-    "_=erts_internal:new_connection('" SYSTEM_NODE "'),"
-    "_=erlang:setnode('" SYSTEM_NODE "',P,{F,4}),"
-    /* erx_dist's run of the input task, for frames that came before the port controlled the entry */
-    "<<>>=iolist_to_binary(erlang:port_control(P,1,[])),"
-    "S=binary_to_term(<<131,88,119,9,\"" SYSTEM_NODE "\",1:32,0:32,4:32>>),"
+    "S='" SYSTEM_NODE "',"
+    "Up=fun U(0)->false;U(T)->lists:member(S,nodes()) orelse receive after 50->U(T-1) end end,"
+    "Ok0=Up(600),"
+    "Ok1=Ok0 andalso net_adm:ping(S)==pong andalso net_adm:ping('absent@erxos')==pang,"
+    "M=erlang:monitor(process,{x,'absent@erxos'}),"
+    "Ok2=Ok1 andalso receive {'DOWN',M,_,_,noconnection}->true after 10000->false end,"
+    "Ok3=Ok2 andalso erlang:system_info(creation)==~ andalso node()=='" DOMAIN_NODE "',"
+    "Ok3 orelse erlang:halt(1),"
+    "P=proplists:get_value(S,erlang:system_info(dist_ctrl)),"
+    "Pid=binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\",1:32,0:32,4:32>>),"
     "B=binary:copy(<<7>>,1024),"
-    "[S!{burst,I,B}||I<-lists:seq(1," BURST_TEXT ")],"
+    "[Pid!{burst,I,B}||I<-lists:seq(1," BURST_TEXT ")],"
     "W=fun W(T)->case iolist_to_binary(erlang:port_control(P,0,[])) of "
     "<<N:64,Pa:64,R:64,_:64,A:64,_/binary>> when (N>" BURST_TEXT " andalso A>0) orelse T==0->{N,Pa,R,A};"
     "_->receive after 50->W(T-1) end end end,"
     "{N,Pa,R,A}=W(600),"
     "erlang:display({lane,N,Pa,R,A}),"
-    /* the party's flood of LINKs it never reads the answers to ends the port */
-    "U=receive {'EXIT',P,erx_lane_answers_unread}->1 after 60000->0 end,"
-    "erlang:halt(if N>" BURST_TEXT ",Pa>0,R>0,A>0,U==1->0;true->1 end)";
+    /* output paused for room and resumed on the bell, and the drain answered */
+    "(N>" BURST_TEXT " andalso Pa>0 andalso R>0 andalso A>0) orelse erlang:halt(1),"
+    "receive after infinity->ok end";
 
 /* How long the party waits for the domain's first frame, and for each later one. */
 #define FIRST_NS	UINT64_C(60000000000)
@@ -433,11 +439,14 @@ static const char connection_eval[] =
 #define FLOOD_MAX	200000u
 #define RECORD_MAX	2048u
 /* The most REG_SENDs of the domain's own services the party skips before each frame it waits for. */
-#define SKIP_MAX	8u
+#define SKIP_MAX	16u
 #define DOP_LINK		1
 #define DOP_REG_SEND		6
 #define DOP_SEND_SENDER		22
 #define DOP_MONITOR_P		19
+#define DOP_DEMONITOR_P		20
+#define DOP_SPAWN_REQUEST	29
+#define DOP_SPAWN_REPLY		31
 #define DOP_PAYLOAD_MONITOR_P_EXIT	28
 /* A pid of the domain no process has: a number in ERTS's internal range. */
 #define ABSENT_PID	4095u
@@ -479,20 +488,16 @@ args_put(char *buf, size_t cap, size_t *at, const char *text, uint32_t id)
 	return (true);
 }
 
-/* A request for an ERTS domain whose -eval is connection_eval with its own id. */
+/* A request for an ERTS domain distributed over erx_dist whose -eval is connection_eval with its own id. */
 static const erx_dom_spec_t *
 connection_request(uint32_t runtime)
 {
-	static const char eval_word[] = "-eval";
-	size_t at;
+	/* The boot words without the literal's own NUL, which ends the last word twice. */
+	size_t at = sizeof(ERTS_DIST_BOOT) - 1;
 
 	(void)erts_request(runtime);
-	/* erts_args ends with "-eval\0" and its expression; keep the word, swap the expression. */
-	at = 0;
-	for (size_t i = 0; i + sizeof(eval_word) <= sizeof(erts_args); i++)
-		if (memcmp(&erts_args[i], eval_word, sizeof(eval_word)) == 0)
-			at = i + sizeof(eval_word);
-	if (at == 0 || !args_put(request.strings, sizeof(request.strings) - 1, &at, connection_eval, request.id))
+	memcpy(request.strings, ERTS_DIST_BOOT, at);
+	if (!args_put(request.strings, sizeof(request.strings) - 1, &at, connection_eval, request.id))
 		return (NULL);
 	request.strings[at++] = '\0';
 	request.args_len = (uint32_t)at;
@@ -565,18 +570,21 @@ party_pid(erx_etf_writer_t *writer, const char *node, uint32_t id, uint32_t crea
 }
 
 /*
- * Writes a frame of control term ctl and no payload, waiting up to wait_ns for room, and
+ * Writes a frame of control term ctl and payload (none when payload_len is 0), waiting up
+ * to wait_ns for room, and
  * rings the domain's bell when a write crosses its wake. False when the lane refused it,
  * or when no room came by then: the domain stopped taking frames.
  */
 static bool
-party_put(lane_party_t *party, const uint8_t *ctl, size_t ctl_len, uint64_t wait_ns)
+party_put(lane_party_t *party, const uint8_t *ctl, size_t ctl_len, const uint8_t *payload, size_t payload_len,
+    uint64_t wait_ns)
 {
 	const uint64_t deadline = erx_fiasco_clock_ns() + wait_ns;
 	/* The frame header is little-endian on the wire, as this machine is. */
-	const erx_frame_header_t header = { .ctl_len = (uint32_t)ctl_len };
-	const erx_lane_iov_t iov[2] = { { .base = &header, .len = sizeof(header) }, { .base = ctl, .len = ctl_len } };
-	const erx_lane_item_t item = { .iov = iov, .iovcnt = 2, .kind = ERX_REC_FRAME };
+	const erx_frame_header_t header = { .ctl_len = (uint32_t)ctl_len, .payload_len = (uint32_t)payload_len };
+	const erx_lane_iov_t iov[3] = { { .base = &header, .len = sizeof(header) }, { .base = ctl, .len = ctl_len },
+	    { .base = payload, .len = payload_len } };
+	const erx_lane_item_t item = { .iov = iov, .iovcnt = payload_len != 0 ? 3 : 2, .kind = ERX_REC_FRAME };
 
 	for (;;) {
 		erx_lane_put_t put;
@@ -603,7 +611,7 @@ party_monitor(lane_party_t *party)
 	    .creation = party->peer, .words = { 1, 2, 3, 0 } };
 	erx_etf_writer_t writer;
 
-	if (!args_put(node, sizeof(node) - 1, &node_len, "d~@erxos", party->id))
+	if (!args_put(node, sizeof(node) - 1, &node_len, DOMAIN_NODE, party->id))
 		return (false);
 	node[node_len] = '\0';
 	erx_etf_writer_init(&writer, ctl, sizeof(ctl));
@@ -612,7 +620,7 @@ party_monitor(lane_party_t *party)
 	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
 	party_pid(&writer, node, ABSENT_PID, party->id);
 	erx_etf_put_ref(&writer, &ref);
-	return (erx_etf_writer_done(&writer, &ctl_len) && party_put(party, ctl, ctl_len, NEXT_NS));
+	return (erx_etf_writer_done(&writer, &ctl_len) && party_put(party, ctl, ctl_len, NULL, 0, NEXT_NS));
 }
 
 /*
@@ -629,7 +637,7 @@ party_flood(lane_party_t *party)
 	uint8_t ctl[160];
 	erx_etf_writer_t writer;
 
-	if (!args_put(node, sizeof(node) - 1, &node_len, "d~@erxos", party->id))
+	if (!args_put(node, sizeof(node) - 1, &node_len, DOMAIN_NODE, party->id))
 		return (false);
 	node[node_len] = '\0';
 	erx_etf_writer_init(&writer, ctl, sizeof(ctl));
@@ -640,7 +648,7 @@ party_flood(lane_party_t *party)
 	if (!erx_etf_writer_done(&writer, &ctl_len))
 		return (false);
 	for (uint32_t sent = 0; sent < FLOOD_MAX && !party_ended; sent++) {
-		if (!party_put(party, ctl, ctl_len, STALL_NS))
+		if (!party_put(party, ctl, ctl_len, NULL, 0, STALL_NS))
 			return (true);
 	}
 	return (party_ended);
@@ -727,32 +735,118 @@ party_burst_index(const uint8_t *record, size_t len)
 }
 
 /*
- * Takes the domain's next frame that is not a REG_SEND. The domain's own kernel services
- * send REG_SENDs when the connection comes up (rex's features_request, global's
- * init_connect), in no fixed order with the eval's frames, which go to pids; the party
- * skips at most SKIP_MAX of them. False also for a record its header does not describe.
+ * Takes the domain's next frame that is not about a registered name. The domain's own
+ * kernel services send REG_SENDs, and monitor and demonitor names, when the connection
+ * comes up (rex's features_request, global's init_connect), in no fixed order with the
+ * eval's frames, which go to pids; the party skips at most SKIP_MAX of them. False also
+ * for a record its header does not describe.
  */
 static bool
 party_take_eval(lane_party_t *party, uint8_t *record, uint64_t wait_ns, size_t *len)
 {
 	/* SMALL_TUPLE_EXT of 4, SMALL_INTEGER_EXT DOP_REG_SEND */
 	static const uint8_t reg_send[] = { 104, 4, 97, DOP_REG_SEND };
+	/* SMALL_TUPLE_EXT of 4, SMALL_INTEGER_EXT DOP_MONITOR_P or DOP_DEMONITOR_P */
+	static const uint8_t monitor[] = { 104, 4, 97, DOP_MONITOR_P }, demonitor[] = { 104, 4, 97, DOP_DEMONITOR_P };
 	party_frame_t frame;
 
 	for (uint32_t skipped = 0; skipped <= SKIP_MAX; skipped++) {
 		if (!party_take(party, record, wait_ns, len) || !party_frame_split(record, *len, &frame))
 			return (false);
-		if (!party_ctl_starts(&frame, reg_send, sizeof(reg_send)))
+		if (!party_ctl_starts(&frame, reg_send, sizeof(reg_send)) && !party_ctl_starts(&frame, monitor, sizeof(monitor)) &&
+		    !party_ctl_starts(&frame, demonitor, sizeof(demonitor)))
 			return (true);
 	}
 	return (false);
 }
 
 /*
+ * Whether a frame record is the SPAWN_REPLY {31, ReqId, To, Flags, Result} of a spawn that
+ * made a process: Result, the control term's last element, is a pid of the domain.
+ */
+static bool
+party_spawned(const lane_party_t *party, const uint8_t *record, size_t len)
+{
+	/* SMALL_TUPLE_EXT of 5, SMALL_INTEGER_EXT DOP_SPAWN_REPLY */
+	static const uint8_t head[] = { 104, 5, 97, DOP_SPAWN_REPLY };
+	/* NEW_PID_EXT, SMALL_ATOM_UTF8_EXT of the node; ID, Serial and Creation follow */
+	static const uint8_t pid[] = { 88, 119, sizeof(DOMAIN_NODE) - 1 };
+	const size_t pid_len = sizeof(pid) + sizeof(DOMAIN_NODE) - 1 + 12;
+	party_frame_t frame;
+	const uint8_t *at;
+
+	if (!party_frame_split(record, len, &frame) || !party_ctl_starts(&frame, head, sizeof(head)) ||
+	    frame.ctl_len < sizeof(head) + pid_len)
+		return (false);
+	at = frame.ctl + frame.ctl_len - pid_len;
+	return (memcmp(at, pid, sizeof(pid)) == 0 && memcmp(at + sizeof(pid), DOMAIN_NODE, sizeof(DOMAIN_NODE) - 1) == 0 &&
+	    ((uint32_t)at[pid_len - 4] << 24 | (uint32_t)at[pid_len - 3] << 16 | (uint32_t)at[pid_len - 2] << 8 |
+	    at[pid_len - 1]) == party->id);
+}
+
+/* Whether a frame record is the spawned process's SEND_SENDER of spawned to its parent. */
+static bool
+party_child_sent(const uint8_t *record, size_t len)
+{
+	/* SMALL_TUPLE_EXT of 3, SMALL_INTEGER_EXT DOP_SEND_SENDER */
+	static const uint8_t head[] = { 104, 3, 97, DOP_SEND_SENDER };
+	static const uint8_t message[] = { 119, 7, 's', 'p', 'a', 'w', 'n', 'e', 'd' };
+	party_frame_t frame;
+
+	return (party_frame_split(record, len, &frame) && party_ctl_starts(&frame, head, sizeof(head)) &&
+	    frame.payload_len == sizeof(message) && memcmp(frame.payload, message, sizeof(message)) == 0);
+}
+
+/*
+ * Spawns erlang:send(Parent, spawned) into the domain from a system process, which the
+ * system domain may do on every domain (exports_system, erx_lane_drv.c), and takes the
+ * SPAWN_REPLY naming the new process and the child's message, in either order.
+ */
+static bool
+party_spawn(lane_party_t *party, uint8_t *record)
+{
+	const erx_etf_ref_t ref = { .node = (const uint8_t *)SYSTEM_NODE, .node_len = sizeof(SYSTEM_NODE) - 1,
+	    .creation = party->peer, .words = { 4, 5, 6, 0 } };
+	uint8_t ctl[256], payload[96];
+	size_t ctl_len, payload_len, len;
+	bool replied = false, sent = false;
+	erx_etf_writer_t writer;
+
+	erx_etf_writer_init(&writer, ctl, sizeof(ctl));
+	erx_etf_put_tuple(&writer, 6);
+	erx_etf_put_integer(&writer, DOP_SPAWN_REQUEST);
+	erx_etf_put_ref(&writer, &ref);
+	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
+	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
+	erx_etf_put_tuple(&writer, 3);
+	erx_etf_put_atom(&writer, "erlang", 6);
+	erx_etf_put_atom(&writer, "send", 4);
+	erx_etf_put_integer(&writer, 2);
+	erx_etf_put_nil(&writer);
+	if (!erx_etf_writer_done(&writer, &ctl_len))
+		return (false);
+	erx_etf_writer_init(&writer, payload, sizeof(payload));
+	erx_etf_put_list(&writer, 2);
+	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
+	erx_etf_put_atom(&writer, "spawned", 7);
+	erx_etf_put_nil(&writer);
+	if (!erx_etf_writer_done(&writer, &payload_len) || !party_put(party, ctl, ctl_len, payload, payload_len, NEXT_NS))
+		return (false);
+	for (int taken = 0; taken < 2; taken++) {
+		if (!party_take_eval(party, record, NEXT_NS, &len))
+			return (false);
+		replied = replied || party_spawned(party, record, len);
+		sent = sent || party_child_sent(record, len);
+	}
+	return (replied && sent);
+}
+
+/*
  * The system party on domain id's system connection: takes the burst's first frame,
  * leaves the lane unread for STALL_NS so the rest waits for room, takes the rest in
  * order, then monitors an absent pid of the domain and takes the DOWN noproc the
- * domain's drain answers, then floods LINKs without reading their answers
+ * domain's drain answers, spawns a process into the domain (party_spawn), then floods
+ * LINKs without reading their answers
  * (party_flood). Skips the domain's REG_SENDs throughout (party_take_eval). Serves the
  * domain's records as it waits, noting its end. Maps both sides as the system domain's
  * runtime would, and releases them.
@@ -791,7 +885,9 @@ lane_party(uint32_t id)
 		passed = party_take_eval(&party, record, NEXT_NS, &len) && party_burst_index(record, len) == i;
 	say_count("burst_taken", passed ? BURST : 0);
 	passed = passed && party_monitor(&party) && party_take_eval(&party, record, NEXT_NS, &len) &&
-	    party_down_noproc(record, len) && party_flood(&party);
+	    party_down_noproc(record, len) && party_spawn(&party, record);
+	say_count("spawned", passed);
+	passed = passed && party_flood(&party);
 	if (own != 0)
 		passed = erx_vm_release(ERX_CAP_SELF, own, own_bytes) == ERX_OK && passed;
 	if (peer != 0)
@@ -1099,7 +1195,7 @@ erx_fiasco_root_main(void)
 	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
 	case_end("jit_run_rw", jit_request(jit, jit_run_rw_args, sizeof(jit_run_rw_args)), RUN_PLAIN,
 	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
-	case_end("connection", connection_request(erts), RUN_LANE, ERX_DOM_END_HALT, 0);
+	case_end("connection", connection_request(erts), RUN_LANE, ERX_DOM_END_HALT, DIST_LOST_STATUS);
 	case_link(program);
 	case_undo(program);
 	say("erx: domain: done\n");

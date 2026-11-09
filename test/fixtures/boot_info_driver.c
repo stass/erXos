@@ -66,6 +66,22 @@ test_round_trip(void)
 	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "a child page is refused");
 	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK && view.info.node_off == ERX_BOOT_INFO_SIZE,
 	    "a child's strings follow the fixed part");
+
+	/* A domain's page names its system connection's peer, between its node and its args. */
+	inputs.node = "web@host";
+	inputs.node_len = 8;
+	inputs.system_node = "system@host";
+	inputs.system_node_len = 11;
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "a domain's page is refused");
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "a domain's page does not read back");
+	CHECK(view.info.system_connection.peer_node_len == 11 &&
+	    memcmp(page + view.info.system_connection.peer_node_off, "system@host", 11) == 0, "system node");
+	CHECK(view.info.node_len == 8 && memcmp(view.node, "web@host", 8) == 0, "system node: the node moved");
+	CHECK(view.info.args_len == 27 && memcmp(view.args, "-S\0" "2:2\0" "--\0" "-boot\0" "/bin/start\0", 27) == 0,
+	    "system node: the args moved");
+	inputs.system_node = "system";
+	inputs.system_node_len = 6;
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_NODE, "system node: a name without a host is accepted");
 }
 
 static void

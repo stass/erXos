@@ -26,6 +26,8 @@
 
 /* A domain's node name: its name, '@', and the host. */
 #define APPLY_NODE_MAX	(ERX_DOM_NAME_MAX + 1u + ERX_DOM_HOST_MAX)
+/* The system domain's identifier, its node's name before '@'. */
+#define SYSTEM_NAME	"system"
 /* A handle no table holds: what a step gets for an object no creation names. */
 #define APPLY_NO_HANDLE	UINT64_MAX
 
@@ -69,7 +71,7 @@ static uint64_t	apply_object(const apply_t *, erx_dom_obj_t);
 static int	apply_step(apply_t *, const erx_dom_step_t *);
 static int	apply_map(apply_t *, const erx_dom_step_t *);
 static int	apply_install(apply_t *, const erx_dom_step_t *);
-static bool	apply_node(const erx_dom_lib_t *, const erx_dom_spec_t *, char *, size_t *);
+static bool	apply_node(const erx_dom_lib_t *, const char *, size_t, char *, size_t *);
 static int	apply_bootinfo(apply_t *);
 static int	apply_thread(apply_t *, const erx_dom_step_t *);
 static int	apply_group(apply_t *, const erx_dom_step_t *);
@@ -323,20 +325,20 @@ apply_install(apply_t *apply, const erx_dom_step_t *step)
 }
 
 /*
- * The domain's node name into node (APPLY_NODE_MAX bytes): its name,
- * which planning checked is an identifier, '@', and the library's host.
- * False for a name longer than ERX_DOM_NAME_MAX or a host longer than
+ * A node name into node (APPLY_NODE_MAX bytes): name, an identifier
+ * (planning checked a domain's), '@', and the library's host. False for
+ * a name longer than ERX_DOM_NAME_MAX or a host longer than
  * ERX_DOM_HOST_MAX, which the caller set.
  */
 static bool
-apply_node(const erx_dom_lib_t *lib, const erx_dom_spec_t *spec, char *node, size_t *len)
+apply_node(const erx_dom_lib_t *lib, const char *name, size_t name_len, char *node, size_t *len)
 {
-	if (spec->name_len > ERX_DOM_NAME_MAX || lib->host_len > ERX_DOM_HOST_MAX)
+	if (name_len > ERX_DOM_NAME_MAX || lib->host_len > ERX_DOM_HOST_MAX)
 		return (false);
-	memcpy(node, spec->name, spec->name_len);
-	node[spec->name_len] = '@';
-	memcpy(node + spec->name_len + 1, lib->host, lib->host_len);
-	*len = spec->name_len + 1 + lib->host_len;
+	memcpy(node, name, name_len);
+	node[name_len] = '@';
+	memcpy(node + name_len + 1, lib->host, lib->host_len);
+	*len = name_len + 1 + lib->host_len;
 	return (true);
 }
 
@@ -349,12 +351,12 @@ apply_bootinfo(apply_t *apply)
 	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
 	const erx_boot_words_t args = { spec->strings, spec->args_len };
 	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
-	char node[APPLY_NODE_MAX];
+	char node[APPLY_NODE_MAX], system_node[APPLY_NODE_MAX];
 	erx_boot_inputs_t inputs = { 0 };
 	uint64_t addr;
 	int status;
 
-	if (!apply_node(apply->lib, spec, node, &inputs.node_len))
+	if (!apply_node(apply->lib, spec->name, spec->name_len, node, &inputs.node_len))
 		return (ERX_EINVAL);
 	inputs.node = node;
 	inputs.domain_id = spec->id;
@@ -380,13 +382,18 @@ apply_bootinfo(apply_t *apply)
 	 * The domain writes its own side, sized to the system domain's lane, and
 	 * reads the system domain's, whose data area is the plan's reader.
 	 */
-	if (plan->connection != 0)
+	if (plan->connection != 0) {
+		/* The peer is system@<host>, the node the root's boot page names. */
+		if (!apply_node(apply->lib, SYSTEM_NAME, sizeof(SYSTEM_NAME) - 1, system_node, &inputs.system_node_len))
+			return (ERX_EINVAL);
+		inputs.system_node = system_node;
 		inputs.system_connection = (erx_boot_connection_t){
 		    .side = { .raw = apply->installed[ERX_DOM_OBJ_DOM_SIDE] },
 		    .peer_side = { .raw = apply->installed[ERX_DOM_OBJ_SYS_SIDE] },
 		    .peer_bell = { .raw = apply->installed[ERX_DOM_OBJ_SYS_BELL] },
 		    .label = ERX_DOM_SYSTEM_LABEL, .peer = ERX_DOM_SYSTEM_ID,
 		    .out_size = spec->system_lane, .in_size = plan->reader };
+	}
 	inputs.args = &args;
 	inputs.nargs = spec->args_len != 0;
 	inputs.env = &env;

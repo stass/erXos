@@ -848,9 +848,6 @@ it; git history is the record of completed work.
   `erx_vm_free_pages` reports 0 while commits through the service still succeed, an
   invented count that `api.h`'s exact contract does not allow; it should answer
   `ERX_ENOTSUP` (the call needs a status return) or the domain budget's room.
-* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page's
-  system connection names no peer node (`peer_node_off`, `peer_node_len` stay 0), so a
-  domain cannot tell the system domain's node name from its boot page.
 * [Medium] domain library, `liberx/system/dom_boot.c` (`erx_dom_boot_up`): each principal's
   group is a plain `erx_group_create(0, 0)`: no `users` group with the manifest's
   `users_share`, no principal group under it, and the principal's share never applied
@@ -1867,14 +1864,31 @@ it; git history is the record of completed work.
   connection, with the root as the system party. Two domains connected by
   `erx_dom_lib_connect` cannot open their ports until `connection_up`
   (RT6b) tells a runtime the connection's values; that cell lands with RT6b.
-* [Medium] Lane driver, `erx_lane_drv.c` `exports_none`: the funnel's
-  export lookup answers that the peer holds nothing, so every message,
-  link and spawn from another domain is unheld until the export table
-  (RT7) exists. `ERX_FUNNEL_DELIVER_IF_LINKED` is answered `noproc`, which
+* [Medium] Lane driver, `erx_lane_drv.c` `exports_none` and `exports_system`: the
+  funnel's export lookup answers that a peer holds nothing, and the system domain
+  only `spawn` on the domain, so every other message, link and spawn from another
+  domain is unheld, `init`'s `send` to the system domain and the spawner's boot
+  exports included, until the export table (RT7) exists. `ERX_FUNNEL_DELIVER_IF_LINKED` is answered `noproc`, which
   is wrong when the target already holds a link with the sender (one a
   process of this domain made toward the peer's process): the peer's
   process then gets an exit of `noproc` for a live link. RT7 replaces the
   lookup and adds the hold's link bit and the conditional `LINK` signal.
+* [High] Runtime, edit 27 of docs/design-runtime.md (`dist.c`): operations on a peer's
+  registered names are not dropped by the sender. Over `erx_dist` a domain's own kernel
+  services send REG_SENDs and name MONITOR_P/DEMONITOR_P to `system@<host>` at nodeup
+  (`global`, `rex`), which the receiving funnel refuses as malformed, so the system
+  domain's side of a system connection (SV2) would end every connection at nodeup.
+  native_domain's party skips these frames (`party_take_eval`). Land edit 27 before SV2.
+* [Low] Runtime, `erx_connections.erl`: the connection agent opens the system
+  connection only; `connection_up`, `connection_mapped`, `connection_down`,
+  `connection_unmapped` and `connection_lost` are RT6b's second part, and until then
+  `erx_dist`'s owner of an introduced connection (`system := false`) is never started.
+* [Low] Runtime, `net_adm:ping/1` (edit 28) decides by `erx_dist:select/1` whether
+  the carrier is in use; a node of this kernel under another `-proto_dist` answers
+  `pang` for an unconnected node at its own host without trying.
+* [Low] Runtime, `erx_connections.erl`: if the acceptor ends before it hands the system
+  connection over, net_kernel restarts it and the port is opened again mid-stream;
+  the acceptor should halt the domain instead of being restarted.
 * [Low] Lane driver, `-erx lane_batch`: the allowance is
   `ERX_LANE_BATCH_DEFAULT` (64); `erl_init.c` does not parse the flag yet.
 * [Medium] Lane driver review residuals, `otp/erts/emulator/sys/erxos/erx_lane_drv.c`

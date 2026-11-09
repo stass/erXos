@@ -36,6 +36,7 @@
 #include "erl_port.h"
 #include "erl_port_task.h"
 #include "erl_driver.h"
+#include "bif.h"
 
 #include "erx/abi.h"
 #include "erx/etf.h"
@@ -398,6 +399,18 @@ exports_none(const void *exports, const erx_funnel_name_t *name)
 	return ((erx_funnel_hold_t){ 0 });
 }
 
+/*
+ * The system domain holds what every runtime exports to it before its first frame
+ * (docs/design-runtime.md, "Connections in ERTS"): spawn on the domain. init's send, and
+ * the same exports to the spawner, wait for the export table (RT7, TODO.md).
+ */
+static erx_funnel_hold_t
+exports_system(const void *exports, const erx_funnel_name_t *name)
+{
+	(void)exports;
+	return ((erx_funnel_hold_t){ .rights = name->kind == ERX_FUNNEL_NAME_DOMAIN ? ERX_RIGHT_SPAWN : 0 });
+}
+
 typedef enum {
 	STEP_TOOK,		/* a whole record was taken and acted on */
 	STEP_EMPTY,		/* nothing more is published, and the wait is */
@@ -596,6 +609,7 @@ typedef struct lane_open {
 	uint32_t	 label, out_size, in_size, peer_id;
 	const char	*peer_node;
 	size_t		 peer_node_len;
+	bool		 system;	/* the system connection, from the boot page */
 } lane_open_t;
 
 /* One decimal word of at most max, then a space or the end. */
@@ -620,24 +634,26 @@ open_word(const char **at, uint64_t max, uint64_t *value)
 }
 
 /*
- * "erx_lane system PeerNode", with the boot page's system connection, or "erx_lane Side
- * PeerSide PeerBell Label OutSize InSize PeerId PeerNode". The node name is checked by
- * copy_name's length and by every frame's sender rule, which compares it whole.
+ * "erx_lane system", the boot page's system connection and its peer's node name, or
+ * "erx_lane Side PeerSide PeerBell Label OutSize InSize PeerId PeerNode". The node name is
+ * checked by copy_name's length and by every frame's sender rule, which compares it whole.
  */
 static bool
 lane_open_parse(const char *command, lane_open_t *open)
 {
-	static const char system_word[] = "erx_lane system ";
+	static const char system_word[] = "erx_lane system";
 	static const char driver_word[] = "erx_lane ";
 	const char *at = command;
 	uint64_t words[7];
 
-	if (strncmp(at, system_word, sizeof(system_word) - 1) == 0) {
-		const erx_boot_connection_t *const sys = &erx_runtime_boot()->system_connection;
+	if (strcmp(at, system_word) == 0) {
+		const erx_boot_info_t *const boot = erx_runtime_boot();
+		const erx_boot_connection_t *const sys = &boot->system_connection;
 
 		*open = (lane_open_t){ .side = sys->side.raw, .peer_side = sys->peer_side.raw, .peer_bell = sys->peer_bell.raw,
-			.label = sys->label, .out_size = sys->out_size, .in_size = sys->in_size, .peer_id = sys->peer };
-		at += sizeof(system_word) - 1;
+			.label = sys->label, .out_size = sys->out_size, .in_size = sys->in_size, .peer_id = sys->peer,
+			.system = true };
+		open->peer_node = erx_runtime_system_node(&open->peer_node_len);
 	} else {
 		if (strncmp(at, driver_word, sizeof(driver_word) - 1) != 0)
 			return (false);
@@ -647,10 +663,8 @@ lane_open_parse(const char *command, lane_open_t *open)
 				return (false);
 		*open = (lane_open_t){ .side = words[0], .peer_side = words[1], .peer_bell = words[2],
 			.label = (uint32_t)words[3], .out_size = (uint32_t)words[4], .in_size = (uint32_t)words[5],
-			.peer_id = (uint32_t)words[6] };
+			.peer_id = (uint32_t)words[6], .peer_node = at, .peer_node_len = strlen(at) };
 	}
-	open->peer_node = at;
-	open->peer_node_len = strlen(at);
 	return (open->label != 0 && open->label < ERX_LABEL_SPLIT);
 }
 
@@ -665,8 +679,8 @@ copy_name(char *into, const char *from, size_t len)
 }
 
 /*
- * Opens a connection's port: "erx_lane system PeerNode" for the system connection, whose
- * values are the boot page's, or "erx_lane Side PeerSide PeerBell Label OutSize InSize
+ * Opens a connection's port: "erx_lane system" for the system connection, whose values
+ * are the boot page's, or "erx_lane Side PeerSide PeerBell Label OutSize InSize
  * PeerId PeerNode" for one connection_up introduced. Maps both sides, prepares the lane's
  * writer and reader, and registers the bell's label as the connection's sink.
  */
@@ -710,7 +724,7 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 	erx_funnel_asm_init(&conn->assembly, erx_runtime_limits()->max_frame);
 	conn->lane = (erx_funnel_lane_t){ .sender_node = conn->peer_node, .sender_node_len = strlen(conn->peer_node),
 		.receiver_node = conn->own_node, .receiver_node_len = strlen(conn->own_node),
-		.lookup = exports_none, .exports = NULL, .sender_id = open.peer_id,
+		.lookup = open.system ? exports_system : exports_none, .exports = NULL, .sender_id = open.peer_id,
 		.receiver_id = (uint32_t)erts_this_node->creation };
 	conn->scratch_len = erx_funnel_check_scratch_bytes(&conn->limits);
 	conn->scratch = driver_alloc(conn->scratch_len);
@@ -786,3 +800,31 @@ ErlDrvEntry erx_lane_driver_entry = {
 	/* ERTS makes only a soft-busy port a distribution controller (dist.c); its output stops while busy. */
 	.driver_flags = ERL_DRV_FLAG_USE_PORT_LOCKING | ERL_DRV_FLAG_SOFT_BUSY,
 };
+
+/*
+ * erx_dist:boot/0, the boot page's identity for erx_dist's listen/2 and acceptor:
+ * {DomainId, {PeerId, PeerNode}} for a domain with a system connection, and {DomainId, none}
+ * for the system domain, which has none. Its one atom is the system domain's node name,
+ * which the domain library wrote and the boot page's reader checked is <name>@<host>.
+ */
+BIF_RETTYPE
+erx_dist_boot_0(BIF_ALIST_0)
+{
+	const erx_boot_info_t *const boot = erx_runtime_boot();
+	const erx_boot_connection_t *const sys = &boot->system_connection;
+	size_t node_len;
+	const char *const node_name = erx_runtime_system_node(&node_len);
+	Eterm system = am_none, *hp;
+
+	if (node_len != 0) {
+		const Eterm node = erts_atom_put((const byte *)node_name, (Sint)node_len, ERTS_ATOM_ENC_UTF8, 0);
+
+		if (is_non_value(node))
+			BIF_ERROR(BIF_P, SYSTEM_LIMIT);
+		hp = HAlloc(BIF_P, 3);
+		/* A u32 is a small integer on the 64-bit builds erXos makes. */
+		system = TUPLE2(hp, make_small((Uint)sys->peer), node);
+	}
+	hp = HAlloc(BIF_P, 3);
+	BIF_RET(TUPLE2(hp, make_small((Uint)boot->domain_id), system));
+}

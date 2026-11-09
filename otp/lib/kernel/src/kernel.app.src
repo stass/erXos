@@ -1,3 +1,4 @@
+%% Modified by erXos: lists erx_dist and erx_connections, the carrier between domains.
 %%
 %% %CopyrightBegin%
 %%
@@ -64,6 +65,8 @@
 	     inet_hosts,
 	     inet_gethost_native,
 	     inet_tcp_dist,
+	     erx_connections,
+	     erx_dist,
 	     kernel,
 	     kernel_config,
 	     kernel_refc,

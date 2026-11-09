@@ -206,6 +206,7 @@ uint64_t erx_runtime_tmp_limit(void);
 struct erx_boot_info;
 struct erx_runtime_limits;
 const struct erx_boot_info *erx_runtime_boot(void);
+const char *erx_runtime_system_node(size_t *length);
 const struct erx_runtime_limits *erx_runtime_limits(void);
 int erx_runtime_is_system(void);
 

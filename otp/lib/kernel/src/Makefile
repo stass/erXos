@@ -1,3 +1,4 @@
+# Modified by erXos: builds erx_dist and erx_connections, the carrier between domains.
 #
 # %CopyrightBegin%
 #
@@ -78,6 +79,8 @@ MODULES = \
 	erl_kernel_errors \
 	erl_reply \
 	erl_signal_handler \
+	erx_connections \
+	erx_dist \
 	erpc \
 	erts_debug \
 	error_handler \

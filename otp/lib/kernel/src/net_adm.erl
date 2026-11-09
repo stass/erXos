@@ -19,6 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: ping/1 of a node at this machine's host answers from node() and
+%% nodes() alone, since a connection between domains exists only by introduction.
 -module(net_adm).
 -moduledoc """
 Various Erlang net administration routines.
@@ -99,6 +101,20 @@ Sets up a connection to `Node`. Returns `pong` if it is successful, otherwise
       Node :: atom().
 
 ping(Node) when is_atom(Node) ->
+    case erlang:is_alive() andalso erx_dist:select(Node) of
+        true -> ping_domain(Node);
+        false -> ping_remote(Node)
+    end.
+
+%% A domain of this machine: one this domain is connected to answers, and any other has
+%% nothing to try (docs/design-runtime.md, edit 28).
+ping_domain(Node) ->
+    case Node =:= node() orelse lists:member(Node, nodes()) of
+        true -> pong;
+        false -> pang
+    end.
+
+ping_remote(Node) ->
     case catch gen:call({net_kernel, Node},
 			'$gen_call',
 			{is_auth, node()},

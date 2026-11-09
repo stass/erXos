@@ -55,6 +55,14 @@ erx_runtime_boot(void)
     return &boot_view.info;
 }
 
+/* The system connection's peer node name, in the page, and its length: 0 in the system domain. */
+const char *
+erx_runtime_system_node(size_t *length)
+{
+    *length = boot_view.info.system_connection.peer_node_len;
+    return boot_view.system_node;
+}
+
 const struct erx_runtime_limits *
 erx_runtime_limits(void)
 {

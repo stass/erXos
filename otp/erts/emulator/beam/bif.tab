@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds erx_device's and erx_trace_ring's BIFs.
+# Modified by erXos: adds erx_device's, erx_trace_ring's and erx_dist's BIFs.
 #
 
 #
@@ -881,3 +881,10 @@ bif erx_device:irq_ack/2
 
 bif erx_trace_ring:read/3
 bif erx_trace_ring:clocks/0
+
+#
+# erXos: the boot page's identity for the distribution carrier between domains
+# (docs/design-runtime.md, "Connections in ERTS").
+#
+
+bif erx_dist:boot/0

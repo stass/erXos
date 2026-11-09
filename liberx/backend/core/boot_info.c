@@ -121,7 +121,11 @@ build_plan(const erx_boot_inputs_t *inputs, size_t *args_len, size_t *env_len, s
 		return (ERX_BOOT_INFO_STRINGS);
 	if (!node_valid(inputs->node, inputs->node_len))
 		return (ERX_BOOT_INFO_NODE);
-	*total = inputs->node_len;
+	if (inputs->system_node_len > ERX_BOOT_STRINGS_MAX - inputs->node_len)
+		return (ERX_BOOT_INFO_STRINGS);
+	if (inputs->system_node_len != 0 && !node_valid(inputs->system_node, inputs->system_node_len))
+		return (ERX_BOOT_INFO_NODE);
+	*total = inputs->node_len + inputs->system_node_len;
 	status = parts_plan(inputs->args, inputs->nargs, false, total, args_len);
 	if (status != ERX_BOOT_INFO_OK)
 		return (status);
@@ -141,7 +145,13 @@ erx_boot_info_build(const erx_boot_inputs_t *inputs, void *page, size_t size)
 	if (size < fixed || total > size - fixed)
 		return (ERX_BOOT_INFO_TOO_SMALL);
 
-	const erx_boot_info_t info = {
+	const size_t args_off = fixed + inputs->node_len + inputs->system_node_len;
+	erx_boot_connection_t system = inputs->system_connection;
+	erx_boot_info_t info;
+
+	system.peer_node_off = inputs->system_node_len != 0 ? (uint32_t)(fixed + inputs->node_len) : 0;
+	system.peer_node_len = (uint32_t)inputs->system_node_len;
+	info = (erx_boot_info_t){
 		.version = ERX_BOOT_VERSION,
 		.abi_version = ERX_ABI_VERSION,
 		.domain_id = inputs->domain_id,
@@ -154,15 +164,15 @@ erx_boot_info_build(const erx_boot_inputs_t *inputs, void *page, size_t size)
 		.time_page = inputs->time_page,
 		.release = inputs->release,
 		.crash_area = inputs->crash_area,
-		.system_connection = inputs->system_connection,
+		.system_connection = system,
 		.release_addr = inputs->release_addr,
 		.cpuset = inputs->cpuset,
 		.capacity_mcpu = inputs->capacity_mcpu,
 		.node_off = (uint32_t)fixed,
 		.node_len = (uint32_t)inputs->node_len,
-		.args_off = (uint32_t)(fixed + inputs->node_len),
+		.args_off = (uint32_t)args_off,
 		.args_len = (uint32_t)args_len,
-		.env_off = (uint32_t)(fixed + inputs->node_len + args_len),
+		.env_off = (uint32_t)(args_off + args_len),
 		.env_len = (uint32_t)env_len,
 		.limits = inputs->limits,
 	};
@@ -171,7 +181,10 @@ erx_boot_info_build(const erx_boot_inputs_t *inputs, void *page, size_t size)
 	memcpy(page, &info, sizeof(info));
 	out = (char *)page + fixed;
 	memcpy(out, inputs->node, inputs->node_len);
-	out = parts_copy(inputs->args, inputs->nargs, out + inputs->node_len);
+	out += inputs->node_len;
+	if (inputs->system_node_len != 0)
+		memcpy(out, inputs->system_node, inputs->system_node_len);
+	out = parts_copy(inputs->args, inputs->nargs, out + inputs->system_node_len);
 	(void)parts_copy(inputs->env, inputs->nenv, out);
 	return (ERX_BOOT_INFO_OK);
 }
@@ -235,12 +248,13 @@ erx_boot_info_read(const void *page, size_t size, erx_boot_view_t *view)
 		return (ERX_BOOT_INFO_BOUNDS);
 
 	view->node = bytes + (info->node_len != 0 ? info->node_off : 0);
+	view->system_node = bytes + (info->system_connection.peer_node_len != 0 ? info->system_connection.peer_node_off : 0);
 	view->args = bytes + (info->args_len != 0 ? info->args_off : 0);
 	view->env = bytes + (info->env_len != 0 ? info->env_off : 0);
 	if (!node_valid(view->node, info->node_len))
 		return (ERX_BOOT_INFO_NODE);
 	if (info->system_connection.peer_node_len != 0 &&
-	    !node_valid(bytes + info->system_connection.peer_node_off, info->system_connection.peer_node_len))
+	    !node_valid(view->system_node, info->system_connection.peer_node_len))
 		return (ERX_BOOT_INFO_NODE);
 	status = list_check(view->args, info->args_len, false);
 	if (status != ERX_BOOT_INFO_OK)

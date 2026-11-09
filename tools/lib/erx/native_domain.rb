@@ -51,8 +51,9 @@ module Erx
     CASES = %w[library warm halt fault stop lanes erts erts_refused crash jit_reload jit_write_rx jit_run_rw connection
                  link_warm link link_undo link_end undo].freeze
     # What a case's domain prints before its case line: init ran the ERTS domain's release,
+    # the connection's system connection ended with the party's flood unread,
     # and the spoiled page's runtime ended with the reader's reason.
-    CONSOLE = { 'erts' => /\Ainit_started/n, 'connection' => /\A\{lane,/n,
+    CONSOLE = { 'erts' => /\Ainit_started/n, 'connection' => /\A\{erx_dist,system_connection,erx_lane_answers_unread\}/n,
                 'erts_refused' => /\Aerx: the boot information page: the page is of another version/n,
                 'jit_reload' => /\A\{jit_reload_passed,jit,[1-9]\d*\}/n,
                 'jit_write_rx' => /\Ajit_alias_runs/n, 'jit_run_rw' => /\Ajit_alias_runs/n }.freeze

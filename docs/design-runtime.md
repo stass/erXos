@@ -919,8 +919,9 @@ domain ([Risks and open questions](#risks-and-open-questions)).
 **Opening.** `net_kernel` runs in every domain, started by `kernel`
 under the domain's node name with `erx_dist` as its distribution
 protocol, OTP's documented interface for an alternative carrier.
-`erx_dist:listen/1` returns the domain id as the node's creation and
-registers with no port mapper, and `erx_dist:select/1` claims every node
+`erx_dist:listen/2` returns the domain id as the node's creation, read
+from the boot information page through `erx_dist:boot/0`, a BIF of the
+lane driver's file, and registers with no port mapper, and `erx_dist:select/1` claims every node
 name at this machine's host name; names of other machines belong to the
 network service's carrier. `erx_connections`, the connection agent, is
 the carrier's acceptor. When the system domain introduces this domain to
@@ -952,7 +953,10 @@ monitor, its removal and its `DOWN` across an entry only when both
 on the peer's registered names never cross: the sender drops them
 (edit 27), and the receiving funnel refuses such a frame as malformed.
 The system connection is opened the same
-way at start, from the boot information page. A send, link, monitor or
+way at start, from the boot information page, which names the system
+domain's node, `system@<host>`: the agent opens the port as `erx_lane
+system`, whose open reads every value from the page, and the system domain
+holds `spawn` on the domain from its first frame. A send, link, monitor or
 spawn toward a domain this domain has no connection with is one toward a
 node that is not connected: ERTS asks `net_kernel` to connect,
 `erx_dist:setup/5` fails at once, since only the system domain makes
@@ -1136,7 +1140,9 @@ domain deletes the connection's objects only once both parties have
 unmapped them or ended, never on a timer while a party lives
 ([design-domains.md](design-domains.md#introduction-and-connection-down)).
 The system connection is never closed from this side while the domain
-runs: a malformed frame or a failed check on it halts the domain instead,
+runs: a malformed frame or a failed check on it, or any other end of its
+port or its owner, halts the domain instead, with status 69
+(`EX_UNAVAILABLE`),
 since the domain has no services without that connection and could tell
 no one; when the system domain ends it, the domain service stops the
 domain ([design-system.md](design-system.md#ending-a-domain)).

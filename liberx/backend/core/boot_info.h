@@ -60,11 +60,13 @@ typedef struct erx_boot_inputs {
 	erx_cap_t		 time_page;
 	erx_cap_t		 release;
 	erx_cap_t		 crash_area;
-	erx_boot_connection_t	 system_connection;	/* its peer node fields left 0 (TODO.md) */
+	erx_boot_connection_t	 system_connection;	/* its peer node fields from system_node */
 	uint64_t		 release_addr;
 	uint64_t		 cpuset;
 	const char		*node;
 	size_t			 node_len;
+	const char		*system_node;	/* the system connection's peer, or none: length 0 */
+	size_t			 system_node_len;
 	const erx_boot_words_t	*args;
 	size_t			 nargs;
 	const erx_boot_words_t	*env;
@@ -76,6 +78,7 @@ typedef struct erx_boot_inputs {
 typedef struct erx_boot_view {
 	erx_boot_info_t	 info;
 	const char	*node;
+	const char	*system_node;	/* the system connection's peer */
 	const char	*args;
 	const char	*env;
 } erx_boot_view_t;
