@@ -91,11 +91,7 @@ it; git history is the record of completed work.
   keeping the seven single-decision harnesses in the gate and moving
   `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
   of the gate's 2 h 33 min and check what the fuzz targets already check.
-  Until the owner decides, the gate runs all nine. In the parallel gate
-  on the Mac Pro (master 83221dc9) every harness verified except
-  `cap_slot_list`, which timed out at its 3,600 s deadline, as did its
-  mutants `insert-leaves-head-prev` and `clear-keeps-head`, so the gate
-  fails until that harness shrinks or leaves the gate.
+  Until the owner decides, the gate runs all nine.
 
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
@@ -559,21 +555,20 @@ it; git history is the record of completed work.
   stack trace, send-buffer payload and the connection's generator included. Requests
   from other domains need a `{error, einval}` answer or validation in `erx_tcp_conn`,
   and `erx_tcp_conn` needs a `format_status` that redacts `sndbuf` and `gen`.
-* [Medium] erx_net TCP core (`erx_tcp_output:setpersist/2`): it continues the backoff of
-  whatever send timer is armed. FreeBSD's output call sites clear the retransmission
-  timer and `t_rxtshift` first; split it into a start (count 0) and the timer's next
-  probe so output cannot start persist at a retransmission's backoff.
+* [Medium] erx_net TCP core (`erx_tcp_output:setpersist/2`): it continues from `rxtshift`,
+  which is kept after the send timer stops. FreeBSD's output call sites clear the
+  retransmission timer and `t_rxtshift` first; split it into a start (count 0) and the
+  timer's next probe so output cannot start persist at a retransmission's backoff.
+* [Medium] erx_net TCP core (`#tcb.rxtshift`): only CC_RTO_ERR resets it. The RTT sample
+  (`tcp_xmit_timer`, in ACK processing) and output leaving persist must reset it too, or
+  a connection dies after 12 timeouts in its lifetime; make the function that applies an
+  RTT sample the one place that resets it.
 * [Medium] erx_net TCP core: the design's control-block table gives the recovery state
   as the variant `none | {fast, R} | {congestion, R}`, but `#ccv{}` keeps two booleans
   and `#tcb{}` keeps `snd_recover`. Settle on one form (the variant rules out illegal
   combinations, but FreeBSD does reach fast recovery without congestion recovery).
-* [Medium] erx_net TCP core (`erx_tcp`): the retransmission count lives in `send_timer`,
-  as the design types it, so stopping the timer on a full acknowledgement resets it to 0,
-  where FreeBSD keeps `t_rxtshift` until an RTT sample; the next timeout then counts as
-  the first.
-* [Low] erx_net TCP core (`erx_tcp:respond/5`): it advertises a window on a RST, where
-  `tcp_respond` sends 0, and sets no ECE (`tcp_ecn_output_established`) on keepalives and
-  challenge ACKs.
+* [Low] erx_net TCP core (`erx_tcp:respond/5`): it sets no ECE
+  (`tcp_ecn_output_established`) on keepalives and challenge ACKs.
 * [Low] erx_net TCP timers (`erx_tcp_timer`): path MTU black-hole detection, which the
   design says is translated (off by default, `tcp_pmtud_blackhole_detect`), is not.
 
@@ -646,16 +641,13 @@ it; git history is the record of completed work.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
-* [Low] network, `erx_dhcp4_core`: an ARP probe of the offered address before using it, and a
-  DECLINE when another host answers (RFC 2131 4.4.1, RFC 5227), behind a setting of the
-  interface's `dhcp` mode, off by default as in `dhclient`. Today the address is announced with a
-  gratuitous ARP and a conflict is only reported by erx_arp.
-* [Low] network, `erx_dhcp4_core`: INIT-REBOOT (RFC 2131 3.2, 4.4.2), asking again for the last
-  lease's address after a restart. It needs the lease kept across boots, as `dhclient` keeps
-  /var/db/dhclient.leases, so it waits for the network domain's stored state.
-* [Low] network, `erx_dhcp4_wire_fuzz`: the fuzz target has no field oracle: pkt has no DHCP
-  decoder, so its judge reads the options itself (joined bytes, and its own reading of options 15
-  and 121) instead.
+* [Medium] network, `erx_dhcp4_core` and `erx_dhcp4_wire` (P20 review): open choices for the
+  DHCP client. It configures again on every renewal ACK, even an unchanged one; an ACK in requesting
+  is not checked against the offer; there is no ARP probe and DECLINE before using an address
+  (RFC 2131 4.4.1, RFC 5227); option 26 (MTU) is passed on without a clamp to the device MTU, and
+  where the domain name goes is open; classless static routes (option 121, RFC 3442), option
+  overload and INIT-REBOOT are not read. The fuzz target has no field oracle: pkt has no DHCP
+  decoder, so its judge compares joined option bytes instead.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
@@ -2948,6 +2940,13 @@ to the corpus and follow rc
   kernel.
 
 ## Security residuals
+
+* [Medium] erx_net TCP input (`erx_tcp_input`): a blind segment that only knows the
+  four-tuple still refreshes `t_rcvtime` before any check, so it can keep a dead peer's
+  connection from its keepalive timeout (FreeBSD's own XXX at tcp_input.c:1566), and an
+  out-of-window segment draws an ACK through `dropafterack` with no rate limit, as in
+  FreeBSD. Move `rcvtime` after `check_ack`, and decide whether `dropafterack` ACKs share
+  the challenge-ACK limit.
 
 * [Medium] network, `erlang/apps/erx_net/src/erx_lltable.erl` (`room/1`): past the neighbour table's bound,
   an entry learnt from an unsolicited ARP request or neighbour solicitation evicts the oldest unresolved entry

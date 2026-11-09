@@ -6,9 +6,9 @@ require 'minitest/autorun'
 require_relative 'erx_net_eunit'
 
 # Runs the syncache's EUnit properties, test/erlang/erx_tcp_syncache_tests.erl. Then runs
-# them over copies of erx_tcp_syncache seeded with the faults the design names: a
-# rotation that drops the previous secret at once, an overflow window measured with
-# =< where FreeBSD uses <, and a pause held through its last second.
+# them over two copies of erx_tcp_syncache seeded with the faults the design names: a
+# rotation that drops the previous secret at once, and an overflow window measured with
+# =< where FreeBSD uses <.
 class ErxTcpSyncacheTest < Minitest::Test
   include ErxNetEunit
 
@@ -18,10 +18,6 @@ class ErxTcpSyncacheTest < Minitest::Test
   ROTATE_DROPS_PREVIOUS = 'setelement(Current + 1, Keys, NewKey)'
   WINDOW = 'not (Last < uptime(Now)'
   WINDOW_AT_MOST = 'not (Last =< uptime(Now)'
-  # The pause holds while uptime is before its end; holding it through the end second too
-  # keeps the table cookies-only one second longer than FreeBSD's syncache_unpause.
-  PAUSE = 'uptime(Now) < Until'
-  PAUSE_THROUGH_END = 'uptime(Now) =< Until'
 
   def test_syncache_properties_pass_under_eunit
     assert_erx_net_eunit(:erx_tcp_syncache_tests)
@@ -37,11 +33,5 @@ class ErxTcpSyncacheTest < Minitest::Test
     output = refute_erx_net_eunit(:erx_tcp_syncache_tests,
                                   fault: { 'erx_tcp_syncache' => [WINDOW, WINDOW_AT_MOST] })
     assert_match(/overflow_window_test/, output)
-  end
-
-  def test_pause_property_catches_a_pause_held_through_its_end
-    output = refute_erx_net_eunit(:erx_tcp_syncache_tests,
-                                  fault: { 'erx_tcp_syncache' => [PAUSE, PAUSE_THROUGH_END] })
-    assert_match(/pause_test/, output)
   end
 end

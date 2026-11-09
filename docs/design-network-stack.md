@@ -355,7 +355,11 @@ cancel and no stale message to recognise: restarting the retransmission
 timer on an ACK is a field update, and a timer that fires early is a
 look at the clock that finds nothing due. FreeBSD's rule that the
 retransmission and persist timers are never both armed becomes a type:
-`send_timer :: none | {rexmt, Deadline, Shift} | {persist, Deadline, Shift}`.
+`send_timer :: none | {rexmt, Deadline} | {persist, Deadline}`. The
+count of timeouts in a row, `t_rxtshift`, is a field of its own,
+`rxtshift`, since FreeBSD keeps it when the timer stops on an ACK and
+resets it only on an RTT sample, an undone spurious timeout or the end
+of persist.
 The interface process keeps its deadlines (neighbour retries, reassembly
 lifetimes, syncache retransmissions, router and prefix lifetimes) the
 same way.
@@ -922,6 +926,7 @@ hold the legal ones:
 | `TF_SACK_PERMIT` | `sack`: `off`, `requested` or `on` |
 | `TF_FASTRECOVERY`, `TF_CONGRECOVERY`, `snd_recover` | the loss module's state: `none`, `{fast, Recover}` or `{congestion, Recover}` |
 | `t_timers[]` | `send_timer` and `#deadlines{}` |
+| `t_rxtshift` | `rxtshift`, kept when the send timer stops |
 | `snd_una`, `snd_nxt`, `snd_max`, `snd_wl1`, `snd_wl2`, `iss`, `rcv_nxt`, `rcv_adv`, `last_ack_sent`, `irs` | the same names, unwrapped integers |
 | `snd_cwnd`, `snd_ssthresh` | the congestion module's `#ccv{}`, as FreeBSD's `struct cc_var` |
 
@@ -945,6 +950,8 @@ change afterwards.
     | {notify, closed | {error, atom()} | {ready, [readiness()]}}
     | {reply, gen_server:reply_tag(), term()}
     | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
+    | {reset, outgoing()}                    % within the interface's RST limit
+    | charge_rst                             % count one RST against that limit
     | {reinject, segment()}
     | finish.
 
@@ -959,6 +966,16 @@ ECT(0) on new data, and don't-fragment, set while path MTU discovery
 runs and the maximum segment is above `tcp_minmss`
 (`tcp_output.c:1487-1500`); `erx_net_frame` builds the rest of the IP
 header from the path.
+
+A RST that answers a segment (`tcp_dropwithreset`) is
+a `reset` action, which the interface sends only within its RST rate
+limit (`badport_bandlim`). A challenge ACK to a SYN or an ACK, sent or
+not, is preceded by `charge_rst`, as `tcp_challenge_ack_check` charges
+that limit: the segment would have drawn a RST had it named no
+connection, so the limit does not tell a blind sender whether it did.
+A challenge ACK to a RST charges nothing, a departure: a RST that names
+no connection draws nothing, so FreeBSD's charge tells the sender its
+RST landed in a window, the side channel of CVE-2016-5696.
 
 `erx_tcp:step/3` is the only entry. It dispatches the event to the module
 that translates the FreeBSD code for it, then runs output, as
@@ -985,11 +1002,21 @@ state.
 `tcp_do_segment` is about 2,000 lines that mix state handling, ACK
 processing and data delivery. It is split by stage, not ported in order.
 A segment's step is a pipeline of named stages, each returning
-`{continue, Tcb, Seg}` or `{done, Tcb, Actions}`, in the order
+`{continue, Tcb, Seg}` (with any actions), `{goto, Stage, Tcb, Seg,
+Actions}` or `{done, Tcb, Actions}`, in the order
 `tcp_do_segment` takes them, since the order is visible on the wire (a
 RST, for example, is judged before the timestamp check):
 
-1. `lift` the segment into the connection's sequence space.
+1. `lift` the segment into the connection's sequence space
+   (`tcp_input.c:1511-1629`): a SYN-ACK in SYN-SENT that acknowledges
+   what was never sent is answered with a RST, `t_rcvtime` is taken,
+   the window scaled and the timestamp echo brought back to our clock.
+   FreeBSD also reads the segment's ECN here, before any check; the
+   stack reads it in `check_ack`, once the segment has passed them all,
+   so a blind segment can neither cut the congestion window with ECE
+   nor make the connection echo CE or stop echoing it. TIME-WAIT's
+   segments are `tcp_twcheck`'s
+   ([TIME-WAIT](#time-wait)), not the pipeline's.
 2. `timestamps`: RFC 7323 section 3.2's presence rules, as
    `tcp_do_segment` applies them before header prediction
    (`tcp_input.c:1692-1729`). On a connection that negotiated timestamps,
@@ -997,13 +1024,21 @@ RST, for example, is judged before the timestamp check):
    FreeBSD's default `tcp_tolerate_missing_ts` of 1 (`tcp_subr.c:219`),
    always, and is silently dropped only with that setting off; on a
    connection that did not negotiate them, a timestamp on a segment is
-   ignored and the segment processed. The stack keeps the default, so the
+   ignored and the segment processed; FreeBSD still records such a
+   timestamp as `ts_recent` and checks PAWS against it, the stack's
+   later stages do not see it. The stack keeps the default, so the
    stage drops nothing, and it is a stage so that the branch is FreeBSD's
    and the packet scripts can pin it.
-3. `syn_sent`: the SYN-SENT case of `tcp_do_segment`
-   (`tcp_input.c:2017`), which validates a SYN-ACK's acknowledgement,
+3. `syn_sent`: the receive window, then the handshake cases of
+   `tcp_do_segment`'s switch (`tcp_input.c:1958-2140`): SYN-RECEIVED
+   answers an ACK of something other than its SYN with a RST; SYN-SENT
    handles RST, negotiates options and moves to ESTABLISHED or
-   SYN-RECEIVED.
+   SYN-RECEIVED, then jumps to `process_ack` or `step6`, FreeBSD's
+   `process_ACK` and `step6`. FreeBSD takes a SYN's options in SYN-SENT
+   before it judges the segment (`tcp_input.c:1636-1690`); the stage
+   takes them once it has accepted the SYN, so a RST or SYN that
+   SYN-SENT drops cannot change what the connection asks for, and on a
+   simultaneous open both window shifts apply at once.
 4. `check_rst`: RFC 5961 section 3, measured from `last_ack_sent`, the
    last acknowledgement number the connection sent, not from `rcv_nxt`,
    as FreeBSD measures it so that a delayed ACK does not move the
@@ -1012,20 +1047,27 @@ RST, for example, is judged before the timestamp check):
    `rcv_wnd` bytes from `last_ack_sent` gets a challenge ACK; with the
    window closed only the exact match counts.
 5. `check_syn`: RFC 5961 section 4: a SYN in a synchronized state gets a
-   challenge ACK (`tcp_input.c:2196-2215`).
+   challenge ACK (`tcp_input.c:2196-2215`). FreeBSD also lets that SYN's
+   ECE turn ECN on (`tcp_ecn_input_syn_sent`); here a SYN that passed no
+   sequence check changes nothing.
 6. `paws`: RFC 7323's check against the last timestamp
    (`tcp_input.c:2218`).
 7. `trim`: trims the segment to the receive window, as the `todrop`
-   blocks do (`tcp_input.c:2259`).
+   blocks do, resets a connection whose owner closed when data arrives,
+   and takes `ts_recent` (`tcp_input.c:2247-2389`).
 8. `check_ack`: RFC 5961 section 5 and the ghost-ACK check, with the
    lower bound of
    [Packets become checked records once](#packets-become-checked-records-once-sequence-numbers-are-integers)
-   (`tcp_input.c:2416-2450`).
-9. `ack`: SYN-RECEIVED to ESTABLISHED, duplicate-ACK detection, the loss
-   module's `ack` callback, `snd_una` advance, the RTT sample, the
-   window update under the SND.WL1/SND.WL2 rule, and the transitions when
-   our FIN is acknowledged.
-10. `urgent`: the urgent pointer, processed as FreeBSD does
+   (`tcp_input.c:2397-2450`); a segment without ACK goes to `step6` in
+   SYN-RECEIVED and is dropped otherwise. A segment that goes on has its
+   ECN read here.
+9. `ack`: SYN-RECEIVED to ESTABLISHED and duplicate-ACK detection;
+   `process_ack`, from FreeBSD's `process_ACK` label: the loss
+   module's `ack` callback, `snd_una` advance, the RTT sample and the
+   transitions when our FIN is acknowledged; with nothing acknowledged
+   it jumps to `step6`, as FreeBSD does.
+10. `step6`, FreeBSD's label: the window update under the SND.WL1/SND.WL2
+    rule, then the urgent pointer, processed as FreeBSD does
     (`tcp_input.c:3104`); the urgent byte is held out of band, and
     `gen_tcp`, like stock, has no way to read it.
 11. `data`: in-order data to the receive buffer, with the delayed-ACK
@@ -1288,47 +1330,28 @@ no other process and creates no process:
   `tcp_syncache.c:2194`; the layout at `:2154-2163`). The secrets
   alternate, one replaced every 15 s (`SYNCOOKIE_LIFETIME`,
   `tcp_syncache.h:110`; `syncookie_reseed`, `tcp_syncache.c:2419`), so a
-  cookie validates for 15 to 30 s. An ACK that matches no entry is
-  checked as a cookie only while the table is paused or if it overflowed
-  in the last 15 s, as FreeBSD checks only then
-  (`tcp_syncache.c:1053-1056`, `:1095-1110`). FreeBSD records the last
-  overflow per bucket (`sch_last_overflow`); the stack has one table per
-  interface and records it for the table. Since an overflow pauses the
-  table, and FreeBSD's pause covers every bucket, the two differ only in
-  the second a first 15 s pause ends: there a valid cookie can complete a
+  cookie validates for 15 to 30 s. When the table is full, a SYN gets a
+  cookie and no entry. An ACK that matches no entry is checked as a
+  cookie only if the table overflowed in the last 15 s, as FreeBSD
+  checks only after an overflow (`tcp_syncache.c:1095-1110`). FreeBSD
+  records the last overflow per bucket (`sch_last_overflow`); the stack
+  has one table per interface and records it for the table, a departure
+  under which, shortly after an overflow, a valid cookie can complete a
   handshake that FreeBSD, whose bucket for it had not overflowed, would
-  refuse. The
-  cookie's MAC is required either way. The cookie secrets are
-  stack-wide, in `erx_net_tables`, so an ACK that arrives on another
+  refuse. The cookie's MAC is required either way. The cookie secrets
+  are stack-wide, in `erx_net_tables`, so an ACK that arrives on another
   interface still validates; FreeBSD's MAC also covers the bucket's
   address, which one table has no use for.
-* A SYN that finds the table full pauses it, as a full bucket pauses
-  FreeBSD's cache (`syncache_insert`, `tcp_syncache.c:367`;
-  `syncache_pause`, `:2446`). The table drops every entry, and until the
-  pause ends it makes no entry, answers each SYN with a SYN-ACK alone and
-  checks every ACK that matches no entry as a cookie. FreeBSD drops the
-  full bucket's oldest entry for the new one, but once paused it looks no
-  entry up and its timer drops every entry without answering
-  (`syncache_timer`, `:485-497`), so dropping them all when the pause
-  starts is the same rule with one table for the bucket; the table
-  overflows when it holds 15,360 entries, where FreeBSD's first bucket
-  fills at 30. A pause lasts 15 s (`TCP_SYNCACHE_PAUSE_TIME`). One that
-  starts less than the last pause's own length after that pause ended
-  doubles it, up to six times, to 16 minutes
-  (`TCP_SYNCACHE_MAX_BACKOFF`); any other lasts 15 s again. The table
-  keeps the end of the last pause and its doublings, in whole seconds of
-  uptime, and is paused while the uptime is before the end, the test
-  `syncache_unpause` makes (`pause_until - time_uptime` no longer
-  positive): the pause is a value derived from the step's time and needs
-  no timer. FreeBSD makes that test when its callout fires, the pause's
-  length after it began, so its pause can end up to a second later. Its
-  pause is the stack's; the stack's is the interface's, with its table,
-  so a flood on one interface leaves the others' handshakes their
-  entries. Until a flood fills the table, each of its entries draws up to
-  three SYN-ACK retransmissions to a spoofed source; they stop when the
-  pause starts, and while it lasts each SYN is answered once. An entry is
-  lost to a flood only as FreeBSD loses it: all at once, when the pause
-  starts, after which its handshake completes by its cookie.
+* When the table is full, FreeBSD drops the bucket's oldest entry for the
+  new SYN and answers every SYN with a cookie alone for 15 s, longer on a
+  renewed attack, dropping its entries meanwhile (`syncache_insert`,
+  `syncache_pause`, `tcp_syncache.c:2446`). The stack's full table answers
+  the SYN with a cookie and keeps its entries: a flood neither evicts nor
+  stops the handshakes in progress, and needs no pause state or timer.
+  The cost: a flood refills each freed place at once, and each of its
+  entries draws three SYN-ACK retransmissions to a spoofed source, at
+  most 15,360 x 3 in 15.6 s, about 3,000 a second per interface,
+  where FreeBSD's pause answers each SYN once.
 * The secrets are context, not state. `erx_net_tables` draws the two
   cookie keys and rotates them every 15 s; the interface process reads
   them, with the timestamp secret, at each SYN or ACK for a listener and
@@ -1666,20 +1689,12 @@ The network domain's configuration names each interface's mode:
 `static` with addresses, routes and name servers; `dhcp`, for which the
 link supervisor starts `erx_dhcp4`; and whether IPv6 autoconfiguration
 runs, which it does by default. `erx_dhcp4_core` is a pure RFC 2131
-state machine with RFC 2132's options and RFC 3442's classless static
-routes, written from the RFCs with FreeBSD's `dhclient` as the
-behavioural reference, over the message codec `erx_dhcp4_wire`, the only
-maker of a received DHCP message, which reads the option overload and
-translates `dhclient`'s checks of routes and domain names; `erx_dhcp4` is
-its process, a child of the link supervisor
-([Decisions](#decisions), 3). Its transaction ids and the randomised
-delays and retransmission times of RFC 2131 section 4.1 come from the
-generator in its state. As `dhclient` does, the client takes the first
-acceptable offer, makes no random wait before its first DISCOVER, counts
-a lease shorter than a minute as a minute, and does not probe the
-offered address with ARP before using it: the interface announces the
-address with a gratuitous ARP when it configures it, and `erx_arp`
-reports another host answering for it as a conflict.
+state machine with RFC 2132's options, written from the RFCs with
+FreeBSD's `dhclient` as the behavioural reference, over the message codec
+`erx_dhcp4_wire`, the only maker of a received DHCP message; `erx_dhcp4` is its
+process, a child of the link supervisor ([Decisions](#decisions), 3).
+Its transaction ids and the randomised delays and retransmission times
+of RFC 2131 section 4.1 come from the generator in its state.
 
 DHCP needs to send and receive before the interface has an address,
 which FreeBSD's `dhclient` does through BPF. Here it is one fixed path
@@ -1700,21 +1715,9 @@ of the interface process, not a socket, so it needs no exception in
   is dropped and counted. These datagrams are unowned traffic and spend
   the interface's ingress bucket.
 * **Applying.** A lease is untrusted input: `erx_dhcp4_core` checks every
-  option's length and value, and what it applies goes to its own
-  interface only, through the interface's own step, as a static
-  configuration would: an address and netmask; routes, the classless
-  static routes when the server sends them, in which case the router
-  option is ignored (RFC 3442), and otherwise a default route to the
-  first router; an MTU from option 26, at least 68 and at most the
-  device's; and name servers and a search list, from options 6 and 15,
-  which the grant's `resolver` operation hands each domain's `inet_db`
-  ([Name resolution](#name-resolution)), as `dhclient-script` writes
-  resolv.conf's `nameserver` and `search` lines. A route's gateway must
-  be reachable on the link, and no route may take the subnet's own
-  prefix or a destination inside 0.0.0.0/8, 127.0.0.0/8 or 224.0.0.0/3,
-  so a server steers only the traffic RFC 3442 gives it. An ACK counts
-  only for the address and server it answers, and a renewal that
-  changes nothing configures nothing again.
+  option's length and value, and what it applies, an address, a netmask,
+  routers and name servers, goes to its own interface only, through the
+  interface's own step, as a static configuration would.
 
 ### UDP
 
@@ -1777,7 +1780,7 @@ modules are marked P; process modules E.
 | `erx_net_frame` | `in_pcbladdr`, the header-building and next-hop parts of `ip_output`, `ip6_output`, `ether_output`, `arpresolve_addr` | a destination's path from the configuration; packets; frames or a hand-over to the interface | P |
 | `erx_net_rand` | none; the role of `arc4random` | the keyed random generator each owner holds | P |
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
-| `erx_dhcp4_wire`, `erx_dhcp4_core` | `parse_options`, `parse_option_buffer`, `check_classless_option`, `res_hnok`, `check_search`, `option_as_string` of `sbin/dhclient`; RFC 2131, RFC 2132, RFC 3396, RFC 3442 | DHCP message codec; DHCP client state machine | P |
+| `erx_dhcp4_wire`, `erx_dhcp4_core` | none; RFC 2131, RFC 2132, RFC 3396 | DHCP message codec; DHCP client state machine | P |
 | `erx_net_credit` | none | credited hand-over | funnel |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd`, `erx_net_loop` | none | processes | E |
 
@@ -2557,18 +2560,14 @@ time against properties written from FreeBSD's rules:
 * a cookie with any bit of its MAC changed, or for another four-tuple,
   does not validate;
 * an ACK matching no entry is checked as a cookie exactly when the table
-  is paused or overflowed in the last 15 s, and at 15 s exactly as
-  FreeBSD's comparison decides;
-* the table never exceeds its bound, and a SYN that finds it full gets a
-  cookie and no entry, drops every entry and pauses the table;
-* a pause ends when the uptime reaches its end, makes no entry until
-  then, and lasts 15 s, doubled for each pause that starts within the
-  last one's length after it ended, to at most 960 s.
+  overflowed in the last 15 s, and at 15 s exactly as FreeBSD's
+  comparison decides;
+* the table never exceeds its bound, and a SYN past it gets a cookie and
+  no entry.
 
 *Seeded failures:* a rotation that drops the previous secret at once,
 which the first property's one-rotation case must catch; an overflow
-window measured with `=<` where FreeBSD uses `<`; a pause held through
-the second it ends.
+window measured with `=<` where FreeBSD uses `<`.
 
 ### The send log, loss and congestion: properties and a FreeBSD oracle
 

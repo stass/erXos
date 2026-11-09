@@ -95,8 +95,11 @@
     rcv_sack :: erx_tcp_sack:sack(),
 
     %% Timers.
-    send_timer = none :: none | {rexmt, integer(), non_neg_integer()}
-                       | {persist, integer(), non_neg_integer()},
+    send_timer = none :: none | {rexmt, integer()} | {persist, integer()},
+    %% t_rxtshift: the timeouts in a row of the retransmission or persist timer. Stopping
+    %% the timer keeps it; FreeBSD resets it on an RTT sample (tcp_xmit_timer), on an undone
+    %% spurious timeout (CC_RTO_ERR) and when output leaves persist.
+    rxtshift = 0 :: 0..12,
     deadlines = #deadlines{} :: #deadlines{},
     rcvtime :: integer(),                       % t_rcvtime, the last segment received
     keep_init :: pos_integer(),                 % TP_KEEPINIT, milliseconds
@@ -125,10 +128,35 @@
     connect_waiter = none :: none | gen_server:from(),
     send_waiter = none :: none | {gen_server:from(), Rest :: binary()},
 
-    %% The per-connection challenge-ACK limit (tcp_send_challenge_ack): the start of the
-    %% current one-second window and the challenge ACKs sent in it.
-    challenge = {0, 0} :: {integer(), non_neg_integer()},
+    %% The per-connection challenge-ACK limit (tcp_challenge_ack_check): the end of the
+    %% current one-second window (t_challenge_ack_end) and the challenge ACKs sent in it,
+    %% `none` before the first.
+    challenge = none :: none | {End :: integer(), Sent :: non_neg_integer()},
     gen :: erx_net_rand:gen()      % the connection's random generator, split from its spawner's
+}).
+
+%% A received segment lifted into the connection's sequence space by erx_tcp_input's `lift`
+%% stage, as the later stages read and trim it: tcp_do_segment's th, thflags, tlen and tiwin
+%% and the options of its struct tcpopt that the stages act on. It is a different record
+%% from the decoded #tcp{}, so a wire number cannot be mistaken for a lifted one.
+-record(seg, {
+    seq :: integer(),                   % th_seq against rcv_nxt; past the SYN once it is taken
+    ack :: integer(),                   % th_ack against snd_una
+    flags :: 0..16#fff,                 % thflags, whose bits the stages clear
+    hdr_flags :: 0..16#fff,             % tcp_get_flags(th), what tcp_dropwithreset answers
+    win :: non_neg_integer(),           % tiwin: th_win << snd_scale
+    urp :: 0..16#ffff,                  % th_urp, which trimming moves
+    data :: binary(),                   % the payload as trimmed so far; tlen is its size
+    %% The data's range as it arrived, before any trimming, for erx_tcp_sack:arrived/4.
+    arrived :: {integer(), integer()},
+    %% TOF_TS: TSval against ts_recent, and TSecr less ts_offset on our millisecond clock,
+    %% `none` when it is 0 or later than now, as tcp_do_segment zeroes it.
+    ts = none :: none | {Val :: integer(), Ecr :: none | integer()},
+    mss = none :: none | 0..16#ffff,    % the options of a SYN
+    wscale = none :: none | 0..14,
+    sack_permitted = false :: boolean(),
+    sacks = [] :: [{integer(), integer()}], % SACK blocks against snd_una
+    ip_ecn :: 0..3                      % the IP header's ECN field, iptos
 }).
 
 %% The step's context (docs/design-network-stack.md, "One owner, one step"): the monotonic

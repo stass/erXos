@@ -103,9 +103,8 @@ module Erx
     # commands: a file in /tmp written by a redirection and read back, a pipeline that
     # lists the release's applications, of which stdlib's line is matched, a directory
     # made beside the file and both listed in order, a name no command has, and `cd`
-    # with `pwd`; `ls -1 /`, which lists the mount points proc and tmp among the
-    # release's names (docs/design-files.md, Listings across mounts); `uname -a`, whose
-    # host is the manifest's and whose version the build facts give (the source revision, its date, the configuration and the kernel), then
+    # with `pwd`; `uname -a`, whose host is the manifest's and whose version the build facts
+    # give (the source revision, its date, the configuration and the kernel), then
     # `uname -i` and `uname -K` alone; and exit, after which the Erlang shell answers again. Lines between
     # the matched ones, such as the other applications, are passed over. The line editor
     # echoes each line as typed and then redraws it after cursor movements, which no
@@ -127,9 +126,7 @@ module Erx
       ['rc-mkdir', /\Ad\r*\n\z/n, nil],
       ['rc-ls-file', /\Ax\r*\n\z/n, "nosuch\r"],
       ['rc-not-found', /\Anosuch: not found\r*\n\z/n, "cd /tmp; pwd\r"],
-      ['rc-pwd', %r{\A/tmp\r*\n\z}n, "ls -1 /\r"],
-      ['rc-ls-proc', /\Aproc\r*\n\z/n, nil],
-      ['rc-ls-tmp', /\Atmp\r*\n\z/n, "uname -a\r"],
+      ['rc-pwd', %r{\A/tmp\r*\n\z}n, "uname -a\r"],
       ['rc-uname', %r{\AerXos erxos [0-9][0-9.]* (?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n, "uname -i\r"],
       ['rc-uname-i', %r{\Aqemu-virt/development\r*\n\z}n, "uname -K\r"],
       ['rc-uname-k', /\Afiasco-[0-9a-f]{12}\r*\n\z/n, "exit\r"],

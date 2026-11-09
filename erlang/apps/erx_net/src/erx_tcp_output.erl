@@ -66,4 +66,5 @@ first timeout's snapshot (TF_PREVVALID).
 setpersist(#tcb{rtt = Rtt} = Tcb, #tcp_ctx{now = Now}) ->
     Shift = erx_tcp:rxtshift(Tcb),
     Timeout = erx_tcp_rtt:persist(Rtt, Shift),
-    Tcb#tcb{send_timer = {persist, Now + Timeout * 1000, min(Shift + 1, 12)}, rexmt_prev = none}.
+    Tcb#tcb{send_timer = {persist, Now + Timeout * 1000}, rxtshift = min(Shift + 1, 12),
+            rexmt_prev = none}.

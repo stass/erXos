@@ -152,7 +152,7 @@ rcvd_opens_the_window_test() ->
 %% --- tcp_timer.c ---
 
 next_deadline_is_the_earliest_test() ->
-    T = (in(established))#tcb{send_timer = {rexmt, ?T0 + 50, 0},
+    T = (in(established))#tcb{send_timer = {rexmt, ?T0 + 50},
                                deadlines = #deadlines{delack = ?T0 + 40, keep = ?T0 + 10}},
     ?assertEqual(?T0 + 10, erx_tcp:next_deadline(T)).
 
@@ -205,16 +205,16 @@ msl2_test() ->
 
 rexmt_in_syn_sent_test() ->
     {T0, []} = step({user, {connect, ?FROM}}, new(), ?T0),
-    T = T0#tcb{snd_nxt = 1001, snd_max = 1001, send_timer = {rexmt, ?T0 + ?S(1000), 0}},
+    T = T0#tcb{snd_nxt = 1001, snd_max = 1001, send_timer = {rexmt, ?T0 + ?S(1000)}},
     Now = ?T0 + ?S(1000),
     {T1, []} = step({expired, Now}, T, Now),
     %% tcp_rexmit_initial * tcp_backoff[1] + 200 ms.
-    ?assertEqual({rexmt, Now + ?S(2200), 1}, T1#tcb.send_timer),
+    ?assertEqual({{rexmt, Now + ?S(2200)}, 1}, {T1#tcb.send_timer, T1#tcb.rxtshift}),
     ?assertEqual({1000, 1001, 1, true}, {T1#tcb.snd_nxt, T1#tcb.snd_recover,
                                          T1#tcb.ccv#ccv.cwnd, T1#tcb.ack_now}).
 
 rexmt_gives_up_after_tcp_retries_test() ->
-    T = (in(established))#tcb{send_timer = {rexmt, ?T0, 12}, soft_error = ehostunreach,
+    T = (in(established))#tcb{send_timer = {rexmt, ?T0}, rxtshift = 12, soft_error = ehostunreach,
                                connect_waiter = none},
     {T1, Actions} = step({expired, ?T0}, T, ?T0),
     ?assert(T1#tcb.reset_peer),
@@ -223,7 +223,7 @@ rexmt_gives_up_after_tcp_retries_test() ->
 rexmt_first_timeout_keeps_a_snapshot_test() ->
     Ccv = (in(established))#tcb.ccv,
     T = (in(established))#tcb{snd_max = 3001, snd_recover = 900,
-                               send_timer = {rexmt, ?T0, 0},
+                               send_timer = {rexmt, ?T0},
                                ccv = Ccv#ccv{cwnd = 10000, ssthresh = 8000, fast_recovery = true,
                                              cong_recovery = true}},
     {T1, []} = step({expired, ?T0}, T, ?T0),
@@ -233,7 +233,7 @@ rexmt_first_timeout_keeps_a_snapshot_test() ->
     ?assertMatch(#ccv{fast_recovery = false, cong_recovery = false, cwnd = 536}, T1#tcb.ccv),
     ?assertEqual({1001, 3001}, {T1#tcb.snd_nxt, T1#tcb.snd_recover}),
     %% The second timeout forgets the snapshot.
-    {rexmt, At, 1} = T1#tcb.send_timer,
+    {{rexmt, At}, 1} = {T1#tcb.send_timer, T1#tcb.rxtshift},
     {T2, []} = step({expired, At}, T1, At),
     ?assertEqual({none, 2}, {T2#tcb.rexmt_prev, erx_tcp:rxtshift(T2)}),
     %% CC_RTO_ERR from the first restores it.
@@ -242,21 +242,21 @@ rexmt_first_timeout_keeps_a_snapshot_test() ->
     ?assertEqual({0, 3001, none}, {erx_tcp:rxtshift(T3), T3#tcb.snd_nxt, T3#tcb.rexmt_prev}).
 
 persist_backs_off_test() ->
-    T = (in(established))#tcb{send_timer = {persist, ?T0, 0}},
+    T = (in(established))#tcb{send_timer = {persist, ?T0}},
     {T1, []} = step({expired, ?T0}, T, ?T0),
     %% No RTT sample yet: the base is under tcp_persmin, so 5 s.
-    ?assertEqual({persist, ?T0 + ?S(5000), 1}, T1#tcb.send_timer),
+    ?assertEqual({{persist, ?T0 + ?S(5000)}, 1}, {T1#tcb.send_timer, T1#tcb.rxtshift}),
     ?assert(T1#tcb.force_data).
 
 persist_gives_up_test() ->
     Now = ?T0 + ?S(7200000),
-    T = (in(established))#tcb{rcvtime = ?T0, send_timer = {persist, Now, 12}},
+    T = (in(established))#tcb{rcvtime = ?T0, send_timer = {persist, Now}, rxtshift = 12},
     {_, Actions} = step({expired, Now}, T, Now),
     ?assert(ended(Actions)),
     %% Past CLOSE-WAIT, idle for TCPTV_PERSMAX.
     Late = ?T0 + ?S(60000),
-    {_, Closing} = step({expired, Late}, (in(fin_wait_1))#tcb{rcvtime = ?T0,
-                                                              send_timer = {persist, Late, 1}}, Late),
+    Closing0 = (in(fin_wait_1))#tcb{rcvtime = ?T0, send_timer = {persist, Late}, rxtshift = 1},
+    {_, Closing} = step({expired, Late}, Closing0, Late),
     ?assert(ended(Closing)).
 
 timers_run_earliest_first_and_stop_at_the_end_test() ->
@@ -307,7 +307,7 @@ keepalive_options_of_zero_are_the_defaults_test() ->
 
 rexmt_in_syn_sent_takes_no_snapshot_test() ->
     {T0, []} = step({user, {connect, ?FROM}}, new(), ?T0),
-    {T1, []} = step({expired, ?T0}, T0#tcb{send_timer = {rexmt, ?T0, 0}}, ?T0),
+    {T1, []} = step({expired, ?T0}, T0#tcb{send_timer = {rexmt, ?T0}}, ?T0),
     ?assertEqual(none, T1#tcb.rexmt_prev).
 
 shutdown_after_fin_wait_2_is_enotconn_test() ->

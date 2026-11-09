@@ -100,14 +100,15 @@ A request: `connect` (`tcp_connect`), `send` (`tcp_usr_send`), `rcvd` (the owner
 
 -doc """
 What a new control block is made from: the four-tuple and its family, the initial sequence
-number and timestamp offset erx_net_bind computed for it, the congestion and loss modules
+number and timestamp offset erx_tcp_isn computed for it (`isn/3`, `ts_offset/2`), which the
+connection receives from its claim through erx_net_bind, the congestion and loss modules
 the socket chose with their parameters, the buffer sizes the grant reserved, the
 generator split for the connection, the time, and the socket options the step reads.
 """.
 -type init() :: #{family := inet | inet6,
                   local := {binary(), 0..16#ffff},
                   remote := {binary(), 0..16#ffff},
-                  iss := integer(),
+                  iss := erx_tcp_seq:wire(),
                   ts_offset := erx_tcp_seq:wire(),
                   cc := module(),
                   cc_params => erx_tcp_cc:params(),

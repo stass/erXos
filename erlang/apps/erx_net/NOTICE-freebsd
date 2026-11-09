@@ -168,7 +168,7 @@ module erx_net_bind
 
 module erx_tcp
   sys/netinet/tcp_input.c tcp_input_with_port cc_cong_signal cc_ack_received
-  sys/netinet/tcp_subr.c tcp_respond
+  sys/netinet/tcp_subr.c tcp_respond tcp_send_challenge_ack tcp_challenge_ack_check
 
 module erx_tcp_user
   sys/netinet/tcp_usrreq.c tcp_connect tcp_usr_send tcp_usr_rcvd tcp_usr_shutdown tcp_usr_close tcp_usr_abort tcp_disconnect tcp_usrclosed
@@ -179,11 +179,7 @@ module erx_tcp_timer
   sys/netinet/tcp_timer.h TCPTV_KEEP_IDLE TCPTV_PERSMAX TP_MAXIDLE
 
 module erx_tcp_input
-  sys/netinet/tcp_input.c tcp_do_segment
+  sys/netinet/tcp_input.c tcp_do_segment tcp_dropwithreset cc_conn_init
 
 module erx_tcp_output
   sys/netinet/tcp_output.c tcp_output tcp_setpersist
-
-module erx_dhcp4_wire
-  sbin/dhclient/dhclient.c check_classless_option res_hnok check_search option_as_string
-  sbin/dhclient/options.c parse_options parse_option_buffer

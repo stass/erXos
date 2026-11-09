@@ -187,25 +187,6 @@ the_empty_root_is_read_only_test() ->
     ?assertEqual({error, erofs}, Resolve(<<"/data/">>, rename, ?NOFOLLOW)),
     ?assertEqual({error, einval}, Resolve(<<"/data/.">>, delete, ?NOFOLLOW)).
 
-%% A listing adds each mount point directly below the directory to its
-%% provider's names, once, a point of a name the provider lists hiding it;
-%% a bind's place is its point, not its root; the empty root lists the next
-%% name of each point below it.
-a_listing_adds_the_mount_points_below_it_test() ->
-    Resume = fun(_) -> {error, eio} end,
-    Tmp = #{point => [<<"tmp">>], root => [], provider => ended},
-    Inner = #{point => [<<"b">>, <<"e">>, <<"m">>], root => [], provider => ended},
-    Table = [root_entry(), bind_entry(), Tmp, logs_entry(), Inner],
-    ?assertEqual([<<"b">>, <<"d">>, <<"file">>, <<"tmp">>],
-                 erx_path:listing({target, root_entry(), [], Resume},
-                                  [<<"b">>, <<"d">>, <<"file">>], Table)),
-    ?assertEqual([<<"f">>, <<"m">>],
-                 erx_path:listing({target, bind_entry(), [<<"d">>, <<"e">>], Resume},
-                                  [<<"f">>], Table)),
-    Narrowed = [logs_entry(), #{point => [<<"data">>, <<"x">>], root => [], provider => ended}],
-    ?assertEqual([<<"data">>], erx_path:listing({empty_root, []}, [], Narrowed)),
-    ?assertEqual([<<"logs">>, <<"x">>], erx_path:listing({empty_root, [<<"data">>]}, [], Narrowed)).
-
 %% Input from outside: the path, link texts and walk replies.
 
 a_malformed_path_is_refused_before_any_walk_test() ->

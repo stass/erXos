@@ -117,7 +117,7 @@ due(#tcb{send_timer = Send, deadlines = #deadlines{delack = D, keep = K, msl2 = 
          loss = Loss, loss_state = LossState}, Now) ->
     {SendKind, SendAt} = case Send of
                              none -> {rexmt, infinity};
-                             {Kind, At, _} -> {Kind, At}
+                             {Kind, At} -> {Kind, At}
                          end,
     Timers = [{delack, D}, {SendKind, SendAt}, {keep, K}, {msl2, M},
               {loss, Loss:deadline(LossState)}],
@@ -125,9 +125,8 @@ due(#tcb{send_timer = Send, deadlines = #deadlines{delack = D, keep = K, msl2 = 
                                            || {Order, {Timer, At}} <- lists:enumerate(Timers),
                                               is_integer(At), At =< Now])].
 
-%% tcp_timer_enter clears the timer it runs. The send timer is left armed with its backoff
-%% count, which its handler reads: each of its handlers re-arms it later or ends the
-%% connection.
+%% tcp_timer_enter clears the timer it runs. The send timer is left armed: each of its
+%% handlers re-arms it later or ends the connection.
 disarm(delack, #tcb{deadlines = D} = Tcb) -> Tcb#tcb{deadlines = D#deadlines{delack = infinity}};
 disarm(keep, #tcb{deadlines = D} = Tcb) -> Tcb#tcb{deadlines = D#deadlines{keep = infinity}};
 disarm(msl2, #tcb{deadlines = D} = Tcb) -> Tcb#tcb{deadlines = D#deadlines{msl2 = infinity}};
@@ -144,9 +143,9 @@ fire_quiet(delack, Tcb, _) ->
     Tcb#tcb{ack_now = true};
 fire_quiet(msl2, Tcb, Ctx) ->
     msl2(Tcb, Ctx);
-fire_quiet(persist, #tcb{send_timer = {persist, _, Shift}} = Tcb, Ctx) ->
+fire_quiet(persist, #tcb{send_timer = {persist, _}, rxtshift = Shift} = Tcb, Ctx) ->
     persist(Shift, Tcb, Ctx);
-fire_quiet(rexmt, #tcb{send_timer = {rexmt, _, Shift}} = Tcb, Ctx) ->
+fire_quiet(rexmt, #tcb{send_timer = {rexmt, _}, rxtshift = Shift} = Tcb, Ctx) ->
     rexmt(Shift + 1, Tcb, Ctx);
 fire_quiet(loss, #tcb{loss = Loss, loss_state = State0, sendlog = Log0} = Tcb, #tcp_ctx{now = Now} = Ctx) ->
     {Log, State, Events} = Loss:expired(Log0, State0, Now),
@@ -215,7 +214,7 @@ persist(Shift, #tcb{state = State, rcvtime = Rcvtime, rtt = Rtt} = Tcb,
 %% CC_RTO_ERR restores and keeps the SACK scoreboard, later ones forget both (the loss
 %% module's rto/4); the RTO backs off; and sending restarts from snd_una with snd_recover
 %% at snd_max, an immediate ACK and no RTT measurement, after CC_RTO outside SYN-SENT. The
-%% timer is re-armed at the new RTO with its count, where FreeBSD's output re-arms it.
+%% timer is re-armed at the new RTO, where FreeBSD's output re-arms it.
 rexmt(Shift, Tcb, _) when Shift > ?TCP_RETRIES ->
     erx_tcp_user:drop(Tcb, etimedout);
 rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_una = Una, snd_max = SndMax,
@@ -238,7 +237,7 @@ rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_una = Una, snd_max 
             end,
     Rtt = erx_tcp_rtt:backoff(Rtt0, Phase, Shift),
     Tcb1 = Tcb0#tcb{ccv = Ccv1, rexmt_prev = Prev, rtt = Rtt,
-                    send_timer = {rexmt, Now + ms(erx_tcp_rtt:rto(Rtt)), Shift}},
+                    send_timer = {rexmt, Now + ms(erx_tcp_rtt:rto(Rtt))}, rxtshift = Shift},
     {Log, LossState} = Loss:rto(Log0, LossState0, erx_tcp:ccv(Tcb1, Ctx), Now),
     Tcb2 = Tcb1#tcb{sendlog = Log, loss_state = LossState, snd_nxt = Una, snd_recover = SndMax,
                     ack_now = true, rtt_probe = none},

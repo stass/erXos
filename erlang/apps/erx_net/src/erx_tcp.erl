@@ -105,9 +105,10 @@ receive window it advertises.
 
 -export([step/3, next_deadline/1]).
 -export([have_rcvd_syn/1, have_established/1, have_rcvd_fin/1, rank/1]).
--export([cong_signal/4, loss_events/4, ccv/2, rxtshift/1, respond/5, rcv_space/1, ts_now/2]).
+-export([cong_signal/4, loss_events/4, ccv/2, rxtshift/1, respond/5, challenge_ack/3,
+         rcv_space/1, ts_now/2]).
 
--export_type([state/0, event/0, action/0, request/0, outgoing/0]).
+-export_type([state/0, event/0, action/0, request/0, segment/0, outgoing/0]).
 
 -doc "`t_state`, in the order of `tcp_fsm.h`.".
 -type state() :: closed | syn_sent | syn_received | established | close_wait | fin_wait_1
@@ -121,10 +122,17 @@ What the step is handed: segments from the interface, in order, as erx_tcp_wire 
 them; a request; a timer message, whose time is only a hint, since the context's time is
 the one the step uses; or the buffer size the grant reserved.
 """.
--type event() :: {segments, [{#tcp{}, binary()}]}
+-type event() :: {segments, [segment()]}
                | {user, request()}
                | {expired, Hint :: integer()}
                | {buffer, snd | rcv, Bytes :: non_neg_integer()}.
+
+-doc """
+A received segment as the interface hands it on: the header and payload erx_tcp_wire
+decoded, and the ECN field of its IP header (the low two bits of the IPv4 TOS or IPv6
+traffic class byte, tcp_do_segment's `iptos`).
+""".
+-type segment() :: {#tcp{}, Payload :: binary(), IpEcn :: 0..3}.
 
 -doc """
 A segment to send: its TCP header with the values on the wire, and its payload, which
@@ -132,17 +140,27 @@ erx_net_frame encodes with the path's headers.
 """.
 -type outgoing() :: {#tcp{}, Payload :: [binary()]}.
 
--doc "What the step asks its process to do, in order.".
+-doc """
+What the step asks its process to do, in order. `{reset, Segment}` is a RST answering a
+segment (`tcp_dropwithreset`), which the interface sends only within its RST rate limit
+(`badport_bandlim`); `charge_rst` counts one RST against that limit without sending one
+(see challenge_ack/3).
+""".
 -type action() :: {transmit, [outgoing()]}
                 | {deliver, iodata()}
                 | {notify, closed | {error, atom()} | {ready, [atom()]}}
                 | {reply, gen_server:from(), term()}
                 | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
-                | {reinject, {#tcp{}, binary()}}
+                | {reset, outgoing()}
+                | charge_rst
+                | {reinject, segment()}
                 | finish.
 
 %% TCP_MAXWIN, the largest unscaled window.
 -define(TCP_MAXWIN, 16#ffff).
+%% tcp_subr.c: tcp_ack_war_time_window (ms) and tcp_ack_war_cnt, FreeBSD's defaults.
+-define(ACK_WAR_TIME_WINDOW, 1000).
+-define(ACK_WAR_CNT, 5).
 
 -doc """
 One event: dispatch, output, and the answers that follow from the state (see the module
@@ -216,7 +234,7 @@ next_deadline(#tcb{send_timer = Send, deadlines = #deadlines{delack = D, keep = 
                    loss = Loss, loss_state = LossState}) ->
     SendAt = case Send of
                  none -> infinity;
-                 {_, At, _} -> At
+                 {_, At} -> At
              end,
     %% Numbers order before atoms, so `infinity` loses every comparison.
     lists:min([SendAt, D, K, M, Loss:deadline(LossState)]).
@@ -249,12 +267,11 @@ have_rcvd_fin(State) ->
         orelse State =:= time_wait.
 
 -doc """
-`t_rxtshift`: the timeouts in a row of the retransmission or persist timer, 0 when neither
-is armed.
+`t_rxtshift`: the timeouts in a row of the retransmission or persist timer, kept when the
+timer stops, until an RTT sample, an undone spurious timeout or the end of persist resets it.
 """.
 -spec rxtshift(#tcb{}) -> non_neg_integer().
-rxtshift(#tcb{send_timer = none}) -> 0;
-rxtshift(#tcb{send_timer = {_, _, Shift}}) -> Shift.
+rxtshift(#tcb{rxtshift = Shift}) -> Shift.
 
 -doc """
 The congestion module's view refreshed from the control block, as FreeBSD's `CCV()` reads
@@ -306,14 +323,10 @@ signal_state(rto_err, #tcb{rexmt_prev = none} = Tcb, _) ->
 signal_state(rto_err, #tcb{ccv = Ccv, rexmt_prev = Prev, snd_max = SndMax} = Tcb, _) ->
     #rexmt_prev{cwnd = Cwnd, ssthresh = Ssthresh, recover = Recover, fast = Fast,
                 cong = Cong} = Prev,
-    Send = case Tcb#tcb.send_timer of
-               {Kind, At, _} -> {Kind, At, 0};
-               none -> none
-           end,
     Tcb#tcb{ccv = Ccv#ccv{cwnd = Cwnd, ssthresh = Ssthresh,
                           fast_recovery = Ccv#ccv.fast_recovery orelse Fast,
                           cong_recovery = Ccv#ccv.cong_recovery orelse Cong},
-            snd_recover = Recover, snd_nxt = SndMax, rexmt_prev = none, send_timer = Send}.
+            snd_recover = Recover, snd_nxt = SndMax, rexmt_prev = none, rxtshift = 0}.
 
 -doc """
 Makes the calls a loss module returned (erx_tcp_loss), in order: congestion signals, a
@@ -332,7 +345,7 @@ loss_event({ack_received, dupack}, #tcb{cc = Cc, snd_una = Una} = Tcb, CurAck, C
     Ack = #cc_ack{bytes = 0, nsegs = 1, cwnd_limited = Cwnd =< SndWnd,
                   curack = case CurAck of none -> Una; _ -> CurAck end},
     Tcb#tcb{ccv = Cc:ack_received(Ccv, dupack, Ack)};
-loss_event(stop_rexmt, #tcb{send_timer = {rexmt, _, _}} = Tcb, _, _) ->
+loss_event(stop_rexmt, #tcb{send_timer = {rexmt, _}} = Tcb, _, _) ->
     Tcb#tcb{send_timer = none, rtt_probe = none};
 loss_event(stop_rexmt, Tcb, _, _) ->
     Tcb#tcb{rtt_probe = none};
@@ -355,11 +368,42 @@ plus the connection's offset, as the option carries it.
 ts_now(Offset, #tcp_ctx{now = Now}) -> erx_tcp_seq:wire(Now div 1000 + Offset).
 
 -doc """
+`tcp_send_challenge_ack` with `tcp_challenge_ack_check` (sys/netinet/tcp_subr.c): an ACK of
+`rcv_nxt` at `snd_nxt`, after which `last_ack_sent` is `rcv_nxt`, at most
+`tcp_ack_war_cnt` (5) in each `tcp_ack_war_time_window` (1,000 ms) of the connection, so
+blind segments cannot turn the connection into an ACK flood. A challenge ACK sent is the
+ACK the segment owed, so none is left owed for output.
+
+`Cause` is the segment's kind. For a SYN or an ACK every attempt, sent or not, counts one
+RST against the interface's rate limit (`charge_rst`), as FreeBSD charges `badport_bandlim`:
+had the segment named no connection it would have drawn a RST, so the limit does not tell a
+blind sender whether it did. For a RST nothing is charged: a RST that names no connection
+draws nothing, so charging one that does would tell the sender it hit a window, where
+FreeBSD charges it too.
+""".
+-spec challenge_ack(rst | syn | ack, #tcb{}, #tcp_ctx{}) -> {#tcb{}, [action()]}.
+challenge_ack(Cause, #tcb{challenge = War, rcv_nxt = RcvNxt, snd_nxt = SndNxt} = Tcb,
+              #tcp_ctx{now = Now} = Ctx) when Cause =:= rst; Cause =:= syn; Cause =:= ack ->
+    Charge = [charge_rst || Cause =/= rst],
+    {End, Sent} = case War of
+                      {End0, Sent0} when End0 >= Now -> {End0, Sent0};
+                      _ -> {Now + ?ACK_WAR_TIME_WINDOW * 1000, 0}
+                  end,
+    case Sent < ?ACK_WAR_CNT of
+        true ->
+            {Tcb#tcb{challenge = {End, Sent + 1}, last_ack_sent = RcvNxt, ack_now = false},
+             Charge ++ [{transmit, [respond(Tcb, Ctx, SndNxt, RcvNxt, ?TH_ACK)]}]};
+        false ->
+            {Tcb#tcb{challenge = {End, Sent}}, Charge}
+    end.
+
+-doc """
 `tcp_respond` for a connection (sys/netinet/tcp_subr.c): a bare segment with `Seq`, `Ack`
 and `Flags`, the window `sbspace(&so->so_rcv) >> rcv_scale` and, on a connection that
 negotiated timestamps, the timestamp option echoing `ts_recent`. The keepalive probe, the
 challenge ACK and the ACK of a segment the connection drops are such segments. A window
-past 16 bits is sent as the largest one, where FreeBSD's cast would truncate it.
+past 16 bits is sent as the largest one, where FreeBSD's cast would truncate it. A RST
+carries a window of 0 and no options, as `tcp_respond` sends it.
 """.
 -spec respond(#tcb{}, #tcp_ctx{}, integer(), integer(), 0..16#fff) -> outgoing().
 respond(#tcb{local = {_, LPort}, remote = {_, RPort}, wscale = Wscale, ts = Ts} = Tcb, Ctx,
@@ -368,11 +412,17 @@ respond(#tcb{local = {_, LPort}, remote = {_, RPort}, wscale = Wscale, ts = Ts} 
                    {_, Rcv} -> Rcv;
                    _ -> 0
                end,
+    Reset = Flags band ?TH_RST =/= 0,
     Opts = case Ts of
-               #ts{recent = Recent, offset = Offset} -> #tcp_opts{ts = {ts_now(Offset, Ctx), Recent}};
+               #ts{recent = Recent, offset = Offset} when not Reset ->
+                   #tcp_opts{ts = {ts_now(Offset, Ctx), Recent}};
                _ -> #tcp_opts{}
            end,
+    Win = case Reset of
+              true -> 0;
+              false -> min(rcv_space(Tcb) bsr RcvShift, ?TCP_MAXWIN)
+          end,
     {#tcp{sport = LPort, dport = RPort, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
-          flags = Flags, win = min(rcv_space(Tcb) bsr RcvShift, ?TCP_MAXWIN), urp = 0,
+          flags = Flags, win = Win, urp = 0,
           opts = Opts},
      []}.
