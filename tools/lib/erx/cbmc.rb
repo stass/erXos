@@ -24,7 +24,7 @@ module Erx
     # The SAT solvers the pinned cbmc builds in.
     SOLVERS = %w[cadical minisat2].freeze
     HARNESS_FIELDS = %w[id source core deadline unwind bounds assumptions unsupported].freeze
-    HARNESS_OPTIONAL = %w[unwindset object_bits defines].freeze
+    HARNESS_OPTIONAL = %w[unwindset object_bits defines serial].freeze
     MUTANT_FIELDS = %w[id harness defect file original replacement fails].freeze
     ID = /\A[a-z][a-z0-9_-]{0,63}\z/
     # The checks a roster may enable. Nothing else reaches the command line
@@ -82,6 +82,10 @@ module Erx
       unless File.dirname(entry.fetch('core')) == 'kernel/core' &&
              File.binread(source).scan(/^\s*#\s*include\s+"[^"]*\.c"/) == ["#include \"#{File.basename(core)}\""]
         raise Error, "harness #{id} must include its core, kernel/core/#{File.basename(core)}, and no other"
+      end
+      # A serial harness and its mutants run alone, for the memory they need.
+      unless [true, false].include?(entry.fetch('serial', false))
+        raise Error, "harness #{id} serial must be true or false"
       end
       bounded(entry.fetch('deadline'), 1, MAX_DEADLINE, "harness #{id} deadline")
       bounded(entry.fetch('unwind'), 1, 1 << 16, "harness #{id} unwind")
@@ -284,12 +288,13 @@ module Erx
       settings = roster.slice('solver', 'checks')
       by_id = harnesses.to_h { |entry| [entry.fetch('id'), entry] }
       selected = roster.fetch('mutants').select { |mutant| by_id.key?(mutant.fetch('harness')) }
-      checks = harnesses.map { |entry| -> { check_harness(entry, tool: tool, settings: settings) } } +
-               selected.map do |mutant|
-                 harness = by_id.fetch(mutant.fetch('harness'))
-                 -> { check_mutant(mutant, harness: harness, tool: tool, settings: settings) }
-               end
-      values = Cbmc.concurrently(checks, jobs: jobs)
+      checks = harnesses.map do |entry|
+        [entry.fetch('serial', false), -> { check_harness(entry, tool: tool, settings: settings) }]
+      end + selected.map do |mutant|
+        harness = by_id.fetch(mutant.fetch('harness'))
+        [harness.fetch('serial', false), -> { check_mutant(mutant, harness: harness, tool: tool, settings: settings) }]
+      end
+      values = Cbmc.scheduled(checks, jobs: jobs)
       results = values.first(harnesses.size)
       mutants = values.drop(harnesses.size)
       report = Cbmc.report(tool: tool, settings: settings, jobs: jobs, filter: filter, harnesses: results, mutants: mutants,
@@ -316,6 +321,18 @@ module Erx
       end
 
       requested.to_i
+    end
+
+    # Calls every [serial, check] pair and returns the values in the order of
+    # checks: first the checks that are not serial, jobs at a time, then the
+    # serial ones one at a time with nothing else running.
+    def self.scheduled(checks, jobs:)
+      values = Array.new(checks.size)
+      checks.each_index.partition { |index| !checks[index].first }.zip([jobs, 1]).each do |indexes, width|
+        concurrently(indexes.map { |index| checks[index].last }, jobs: width)
+          .each_with_index { |value, position| values[indexes[position]] = value }
+      end
+      values
     end
 
     # Calls every check, at most jobs at a time, and returns their values in

@@ -225,4 +225,27 @@ class CbmcTest < Minitest::Test
       assert_raises(Erx::Error) { Erx::Cbmc.jobs(environment: { 'CBMC_JOBS' => bad }, cpus: 6) }
     end
   end
+def test_serial_checks_run_alone_after_the_others_and_results_keep_their_order
+  running = Queue.new
+  overlap = false
+  probe = lambda do |value|
+    lambda do
+      running << value
+      sleep 0.05
+      overlap ||= running.size > 1 && value.start_with?('s')
+      running.pop
+      value
+    end
+  end
+  checks = [[true, probe.call('s1')], [false, probe.call('p1')], [false, probe.call('p2')], [true, probe.call('s2')]]
+  assert_equal %w[s1 p1 p2 s2], Erx::Cbmc.scheduled(checks, jobs: 4)
+  refute overlap
+end
+
+def test_a_roster_refuses_a_serial_that_is_not_a_boolean
+  with_tree(roster(harnesses: [harness_entry(serial: 'yes')])) do |root|
+    error = assert_raises(Erx::Error) { parse(roster(harnesses: [harness_entry(serial: 'yes')]), root) }
+    assert_includes error.message, 'serial must be true or false'
+  end
+end
 end

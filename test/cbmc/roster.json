@@ -129,6 +129,7 @@
     },
     {
       "id": "page_funnel",
+      "serial": true,
       "source": "page_funnel.c",
       "core": "kernel/core/page.c",
       "deadline": 1800,
@@ -153,6 +154,7 @@
     },
     {
       "id": "cap_slot_list",
+      "serial": true,
       "source": "cap_slot_list.c",
       "core": "kernel/core/cap.c",
       "deadline": 3600,
