@@ -77,6 +77,7 @@ six for Ethernet.
          count/1]).
 %% erx_lltable's callbacks. Not declared with -behaviour, which needs erx_lltable compiled
 %% first, and erlc compiles erx_net's modules in name order.
+-export([awaiting/2]).
 -export([deadline/1, published/1, reclaimable/1]).
 
 -export_type([table/0, iface/0, action/0]).
@@ -225,6 +226,14 @@ announce(<<0:32>>, _Iface) ->
 announce(Ip, #{lladdr := Lladdr}) ->
     [{send_arp, ?BROADCAST, #arp{hrd = ?ARPHRD_ETHER, op = ?ARPOP_REQUEST, sha = Lladdr,
                                  spa = Ip, tha = <<0:48>>, tpa = Ip}}].
+
+-doc "Whether the table is resolving `Ip`: its entry is incomplete, a reply is awaited.".
+-spec awaiting(<<_:32>>, table()) -> boolean().
+awaiting(Ip, T) ->
+    case erx_lltable:find(Ip, T) of
+        #entry{state = incomplete} -> true;
+        _ -> false
+    end.
 
 -doc "Runs every entry's deadline at or before `Now` (`arptimer`).".
 -spec expired(integer(), iface(), table()) -> {table(), [action()]}.

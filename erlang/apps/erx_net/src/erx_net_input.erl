@@ -242,7 +242,7 @@ against the view's `groups`, which hold no IPv4 group until sockets join one.
 -include("erx_udp_wire.hrl").
 -include("erx_tcp_wire.hrl").
 
--export([classify/2, verify/1]).
+-export([classify/2, verify/1, arp_reply/1]).
 
 -export_type([input/0, view/0, key/0, entry/0, verdict/0, pending/0, item/0, head/0,
               link_cast/0, reason/0]).
@@ -357,7 +357,8 @@ What `verify/1` hands on. For the holders of an owned frame: a connection's
 `erx_tcp:segment()`; a datagram socket's `{datagram, {Src, SrcPort}, Dst, Payload}`; or an
 ICMP or ICMPv6 error with the datagram it quotes, for the socket that sent it. For the
 interface: a TCP segment with the listener it is for, or `none` for a closed port; a UDP
-datagram to a closed port; a datagram for the DHCP path; an ICMP or ICMPv6 message; an ARP
+datagram to a closed port, whole, for the port unreachable error that quotes it; a datagram
+for the DHCP path; an ICMP or ICMPv6 message; an ARP
 message; a datagram of another protocol; a fragment for reassembly; or a parameter problem
 with the packet it is about, for erx_icmp4 or erx_icmp6 to answer.
 """.
@@ -365,7 +366,8 @@ with the packet it is about, for erx_icmp4 or erx_icmp6 to answer.
               | {datagram, {addr(), port_number()}, addr(), binary()}
               | {report, #icmp4{} | #icmp6{}, erx_icmp4:quoted() | erx_icmp6:quoted()}
               | {tcp, head(), #tcp{}, binary(), entry() | none}
-              | {udp | dhcp, head() | #ip4{}, #udp{}, binary()}
+              | {udp, head(), #udp{}, Datagram :: binary()}
+              | {dhcp, #ip4{}, #udp{}, Payload :: binary()}
               | {icmp, head(), #icmp4{} | #icmp6{}, binary()}
               | {arp, #arp{}}
               | {other, head(), binary()}
@@ -622,7 +624,7 @@ verify({tcp, Head, Upper, Listener}) ->
 verify({datagram, #{src := Src, dst := Dst} = Head, Upper}) ->
     then(udp_wire(Head, Upper), fun(#udp{sport = Sport}, Payload) -> {datagram, {Src, Sport}, Dst, Payload} end);
 verify({udp, Head, Upper}) ->
-    then(udp_wire(Head, Upper), fun(Udp, Payload) -> {udp, Head, Udp, Payload} end);
+    then(udp_wire(Head, Upper), fun(Udp, _Payload) -> {udp, Head, Udp, Upper} end);
 verify({dhcp, #ip4{src = Src, dst = Dst} = Ip, Upper}) ->
     Sum = erx_ip4_wire:pseudo_sum(Src, Dst, byte_size(Upper), ?PROTO_UDP),
     then(erx_udp_wire:decode(inet, Sum, Upper), fun(Udp, Payload) -> {dhcp, Ip, Udp, Payload} end);
@@ -671,3 +673,13 @@ pseudo_sum(#{ip := #ip6{src = Src, dst = Dst}}, Upper, Proto) ->
 %% class (RFC 3168).
 ecn(#{ip := #ip4{tos = Tos}}) -> Tos band 3;
 ecn(#{ip := #ip6{tclass = Class}}) -> Class band 3.
+
+-doc """
+The sender of a pending ARP reply, for the interface to tell whether it answers a
+resolution it awaits (docs/design-network-stack.md, "The ingress limiter"); `none` for
+anything else. Like `classify/2` it reads the fields before they are verified, for that
+decision alone.
+""".
+-spec arp_reply(pending()) -> {ok, <<_:32>>} | none.
+arp_reply({arp, <<_:6/binary, 2:16, _:6/binary, Spa:4/binary, _/binary>>}) -> {ok, Spa};
+arp_reply(_) -> none.

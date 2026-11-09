@@ -68,8 +68,10 @@ class NetChecksTest < Minitest::Test
     end
   end
 
-  def test_entropy_passes_in_process_modules_and_rand_in_comments_strings_and_names
-    assert_empty source_rules("#{SRC}/erx_net_if.erl", 'erx_bytes:entropy(16)')
+  def test_entropy_passes_in_the_clock_and_rand_in_comments_strings_and_names
+    assert_empty source_rules("#{SRC}/erx_net_clock.erl", 'erx_bytes:entropy(16)')
+    # The design's seeded failure: an interface that draws its key directly.
+    assert_equal [['random', 2]], source_rules("#{SRC}/erx_net_if.erl", 'erx_bytes:entropy(16)')
     body = "%% rand is not used\n-doc \"\"\"\nNot `rand`.\n\"\"\".\nerx_net_rand:new(K), \"crypto\""
     assert_empty source_rules("#{SRC}/erx_net_x.erl", body)
   end

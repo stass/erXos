@@ -2218,12 +2218,16 @@ only its medium.
                        tx_limit := pos_integer()}.     % frames waiting at the driver
 -type event() :: {frames, [binary() | {Zone :: term(), binary()}]}
                | {link, up | down}
-               | writable.                           % room to transmit again
+               | writable                            % room to transmit again
+               | {dropped, Reason :: atom()}.        % too_long, stranger, malformed
 ```
 
 `event/2` turns a message the transport's medium sent the process, an
 interrupt, a datagram or a far end's frame, into events, and any other
-message into none.
+message into none; a frame the transport refuses is a `dropped` event,
+which the driver counts by its reason. The driver registers its pid
+with `erx_net_tables` under its interface's name, where the interface,
+started after it by their link supervisor, finds it.
 
 **Attaching.** The interface process calls
 `erx_net_driver:attach(Driver, RxCredit)` in its initialisation, with
@@ -2373,7 +2377,8 @@ view(core()) -> erx_net_input:view().        % without demux, which the loop add
 next_deadline(core()) -> integer() | infinity.
 
 -type event() ::
-      {local, erx_net_input:pending()}               % classify/2 answered local
+      start                                           % the first step: its rows, its announcements
+    | {local, erx_net_input:pending()}               % classify/2 answered local
     | {reinject, erx_net_input:key(), [erx_tcp:segment()]}
     | {resolve | reset, NextHop :: term(), Src :: term(), [erx_net_frame:packet()]}
     | charge_rst
@@ -2384,6 +2389,7 @@ next_deadline(core()) -> integer() | infinity.
     | {ifid, Ref :: reference(), {ok, binary()} | unavailable}
     | {accept_refused, Conn :: term(), erx_tcp:segment()}
     | {admin, Request :: term(), From :: term()}     % netadmin's requests
+    | {drop, Reason :: atom()}                       % the loop dropped a frame: counted
     | {expired, Now :: integer()}.
 
 -type action() ::

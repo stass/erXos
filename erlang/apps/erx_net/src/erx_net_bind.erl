@@ -48,7 +48,8 @@ with FreeBSD's defaults: the range 10000 to 65535 (`ipport_firstauto`,
 The binding socket's step draws the search's first port with `ephemeral_start/1` from the
 generator in its state and returns it in its bind action; the funnel tries that port with
 `ets:insert_new/2`, then each port `next_ephemeral/2` gives, until one is free or it
-returns `exhausted`. The ports come in FreeBSD's order: `in_pcb_lport_dest` sets its
+returns `exhausted`. `insert/3` is that funnel for one key, and `insert_ephemeral/4` the
+search; `delete/1` removes a key its holder no longer wants. The ports come in FreeBSD's order: `in_pcb_lport_dest` sets its
 cursor to `first + arc4random() % (last - first)` and tries the port after it, wrapping
 from `last` to `first`, until it has tried all `last - first + 1` of them. So the first
 port tried is uniform over 10001 to 65535, and every port of the range is tried exactly
@@ -56,6 +57,7 @@ once.
 """.
 
 -export([ephemeral_start/1, next_ephemeral/2]).
+-export([insert/3, insert_ephemeral/4, delete/1]).
 
 -export_type([port_number/0]).
 
@@ -82,3 +84,40 @@ next_ephemeral(Port, Start) when ?FIRST_AUTO =< Port, Port =< ?LAST_AUTO,
 
 after_port(?LAST_AUTO) -> ?FIRST_AUTO;
 after_port(Port) -> Port + 1.
+
+-doc """
+Inserts `Key` for `Pid` with its entry, unless another socket holds it: `ets:insert_new/2`
+decides a race between two binders, so a key has exactly one holder by construction.
+""".
+-spec insert(erx_net_input:key(), pid(), erx_net_input:entry()) -> ok | {error, eaddrinuse}.
+insert(Key, Pid, Entry) ->
+    case ets:insert_new(erx_net_demux, {Key, Pid, Entry}) of
+        true -> ok;
+        false -> {error, eaddrinuse}
+    end.
+
+-doc """
+Inserts the key `KeyOf(Port)` for the first free port of the search that begins at
+`Start`, and answers that port.
+""".
+-spec insert_ephemeral(fun((port_number()) -> erx_net_input:key()), port_number(), pid(),
+                       erx_net_input:entry()) -> {ok, port_number()} | {error, eaddrinuse}.
+insert_ephemeral(KeyOf, Start, Pid, Entry) ->
+    search(KeyOf, Start, Start, Pid, Entry).
+
+search(KeyOf, Port, Start, Pid, Entry) ->
+    case insert(KeyOf(Port), Pid, Entry) of
+        ok ->
+            {ok, Port};
+        {error, eaddrinuse} = Error ->
+            case next_ephemeral(Port, Start) of
+                exhausted -> Error;
+                Next -> search(KeyOf, Next, Start, Pid, Entry)
+            end
+    end.
+
+-doc "Removes `Key` from the demultiplexing table.".
+-spec delete(erx_net_input:key()) -> ok.
+delete(Key) ->
+    true = ets:delete(erx_net_demux, Key),
+    ok.

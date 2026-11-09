@@ -261,7 +261,7 @@ udp_to_the_holders_is_owned_test() ->
         owned(classify(ip4_frame(udp_packet(?ME4)), view(#{demux => demux(Demux)}))).
 
 udp_to_a_closed_port_may_draw_port_unreachable_test() ->
-    ?assertMatch({ok, {udp, _, #udp{dport = 53}, <<"q">>}}, local(classify(ip4_frame(udp_packet(?ME4)), view()))).
+    ?assertMatch({ok, {udp, _, #udp{dport = 53}, <<1000:16, 53:16, 9:16, _:16, "q">>}}, local(classify(ip4_frame(udp_packet(?ME4)), view()))).
 
 udp_broadcast_to_a_closed_port_is_dropped_test() ->
     ?assertEqual({drop, no_port},

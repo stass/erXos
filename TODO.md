@@ -780,13 +780,33 @@ it; git history is the record of completed work.
   runs past its header is dropped silently, where FreeBSD's `ip6_process_hopopts` checks only
   that 4 bytes remain and answers with a parameter problem; a second departure in which ICMPv6
   error a packet draws, missing from the module's documentation, and the fuzz judge shares it.
-* [Low] network, `erx_udp_wire:decode/3`: over IPv4 a datagram whose UDP length is short of its IP
-  payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
-  64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a
-  payload smaller than a quarter of its frame is copied out) to datagrams too.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
+* [Medium] network, effect layer (E1, `erx_net_if`, `erx_udp_sock`, `erx_net_tables`): the first
+  package runs ARP, ICMP echo, DHCP and UDP only. Not yet: the `port` (tap) end of `erx_net_pipe`
+  and `erx_net_tap`; `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
+  start); `erx_net_loop`; grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a
+  provisional `gen_udp`-shaped interface, and `erx_net_tables:watch_holder/1` deletes a dead
+  socket's entries in its grant's place); the TCP, IPv6, reassembly and redirect paths of
+  `erx_net_if_core` (counted `unsupported`); an `erx_net` application module and its `env` keys
+  (the stack starts with `erx_net_sup:start_link/1`); the credit limits are fixed defines, not
+  application keys; a datagram socket's credit counts datagrams, not bytes of its receive
+  buffer. Build checks still to add: the clock chokepoint (`erlang:send_after`, `monotonic_time`
+  and the rest only in `erx_net_clock`), `erx_net_bind` as the only demultiplexing inserter,
+  `erx_net_if` as the only configuration writer and `erx_net_credit` as the only batch sender.
+* [Medium] network, `erx_net_if` (`owned/4`): an interface that dies between reserving a holder's
+  unit and the batch's end (a raise outside a frame's step, or its link supervisor's shutdown)
+  leaves those units counted on credits that outlive it; trap exits and release the batch, or
+  send each item at its reservation. A sender killed between `reserve` and `!` in
+  `erx_net_credit:hand/4` leaks its units the same way.
+* [Low] network, `erx_net_pipe` (`udp` end): any local user can send from the peer's loopback
+  address and port, and strangers spend the `{active, 64}` window; a development host's
+  residual.
+* [Low] network, `erx_dhcp4`: a link that comes back up restarts the client from INIT with a
+  fresh core, not INIT-REBOOT as the design's "The driver" says; the interface keeps the old
+  lease until the new `configure` replaces it. INIT-REBOOT within one run needs only the core's
+  last lease, not the stored state the item below waits for.
 * [Low] network, `erx_dhcp4_core`: an ARP probe of the offered address before using it, and a
   DECLINE when another host answers (RFC 2131 4.4.1, RFC 5227), behind a setting of the
   interface's `dhcp` mode, off by default as in `dhclient`. Today the address is announced with a

@@ -19,8 +19,8 @@ module Erx
   #   marker with more after the path, or one below the header) is refused,
   #   so a malformed claim never reads as no claim;
   # * random: no module of erx_net names rand or crypto, since its random
-  #   values come from erx_net_rand, and only its process modules (the
-  #   "processes" row of the design's module table) call erx_bytes:entropy,
+  #   values come from erx_net_rand, and only erx_net_clock calls
+  #   erx_bytes:entropy, so every key passes the clock's seam,
   #   to key a generator or draw a stack-wide secret in their initialisation.
   #
   # Like DeviceCallers these read the source text with comments removed, and
@@ -38,9 +38,8 @@ module Erx
     ATOM_MAKERS = /(?<![A-Za-z0-9_@])(binary_to_atom|list_to_atom|binary_to_term)(?![A-Za-z0-9_@])/
     RANDOM_MODULES = /(?<![A-Za-z0-9_@])(rand|crypto)(?![A-Za-z0-9_@])/
     ENTROPY_CALL = /(?<![A-Za-z0-9_@])erx_bytes\s*:\s*entropy(?![A-Za-z0-9_@])/
-    # The "processes" row of design-network-stack.md's module table; change both together.
-    ENTROPY_CALLERS = %w[erx_net_if erx_tcp_conn erx_tcp_listen erx_udp_sock erx_net_grant erx_net_tables
-                         erx_dhcp4 erx_epmd erx_net_loop].freeze
+    # The one module that draws entropy (design-network-stack.md, "The clock").
+    ENTROPY_CALLERS = %w[erx_net_clock].freeze
     # The TCP modules the seq-wrap rule covers, and the one module it lets do
     # the arithmetic.
     TCP_SOURCE = /\Aerx_tcp(?:_[a-z0-9_]+)?\.(?:erl|hrl)\z/
@@ -120,7 +119,7 @@ module Erx
       return [] if ENTROPY_CALLERS.include?(File.basename(path, '.erl'))
 
       matches(code, ENTROPY_CALL).map do |line, _|
-        [line, "erx_bytes:entropy outside erx_net's process modules (#{ENTROPY_CALLERS.join(', ')})"]
+        [line, "erx_bytes:entropy outside erx_net_clock (#{ENTROPY_CALLERS.join(', ')})"]
       end
     end
 
