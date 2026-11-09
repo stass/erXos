@@ -20,6 +20,13 @@ block a milestone's numbers.
   a 64-window rio layout and of a weave on QEMU `virt` under HVF and TCG once `erx_screen` exists;
   the fixes (newest layout only, a rectangle cap) are in `TODO.md`'s security residual for G3.
 
+* **[Medium] display, the widget tree's difference.** `erx_ui_model:delta/2` and `apply_ops/2`
+  (`erlang/apps/erx_display/src/erx_ui_model.erl`) are quadratic in one node's children, and the
+  browser renderer recomputes `delta(Sent, Pending)` for every update of a long change. Measure
+  the design's `delta/2` workload for a 1,000-node tree, flat and nested, once the children
+  limit of `TODO.md` is set; the fixes are a patience-sorting longest run and an indexed
+  children sequence.
+
 * **[Low] kernel, a destroy's slot names.** `erx_cap_slot_name` (`kernel/core/cap.c`) finds a
   listed slot's index by scanning its table's directory, up to `ERX_CAPS_MAX / ERX_CAP_PAGE_SLOTS`
   page pointers per slot a teardown clears. Measure a destroy of an object named by many slots in

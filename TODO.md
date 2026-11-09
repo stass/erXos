@@ -288,6 +288,12 @@ it; git history is the record of completed work.
     lost up of the chord's completing key leaves it withheld, so its next downs are dropped as repeats and the chord
     does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key
     means its up was lost, and keep held keys per device, cleared when the device goes away.
+* [Medium] `abi/formats/ui.txt` validity and `erlang/apps/erx_display/src/erx_ui_model.erl`, [Widget
+  trees](docs/design-display.md#widget-trees): no rule bounds one node's children below the grant's `ui_nodes`, which
+  has no value yet. `delta/2`'s longest kept run and its index bookkeeping, and `apply_ops/2`'s insert and move, are
+  quadratic in a node's children (a reversed flat node of 16,000 children: 10 s for `delta/2`, 20 s to apply, on
+  Homebrew erl), and an index above 65,535 does not fit `diff_op()` or the binary form. Add a per-node children
+  limit to the validity rules (at most 65,536; 1,024 suggested), which bounds both by construction.
 * [High] `erx_wm_rio` (desktop, not built; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the

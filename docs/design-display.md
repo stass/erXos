@@ -732,9 +732,14 @@ identity matches a realised node keeps that node's number and kept state;
 any other node takes the next number. `delta/2` turns one realised tree
 into another numbered from it: a `remove` for each topmost node of the
 first missing from the second; then, in the second's depth-first order,
-an `insert` for each new node, a `set` for each node whose properties
-differ, and a `move` for each child outside the longest run of its
-parent's children that kept their order; then `commit`. Since identity
+an `insert` for each new node, a `move` for each child outside the
+longest run of its parent's children that kept their order, and a `set`
+for each node whose properties differ; then `commit`. An `insert` or
+`move` places its node directly after its previous sibling in the second
+tree, or first when it has none, and its index is a position among the parent's children as they
+stand when the operation applies, the moved node taken out first, so a
+renderer applies each operation as it reads it and every prefix of a
+delta applies on its own. Since identity
 fixes a node's parent and kind, `delta/2` compares nodes by number and
 never searches for a subtree. `hit/4` checks a renderer's report against
 the realised node, records a state value except on a secret `input`, and

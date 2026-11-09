@@ -4,11 +4,12 @@
 %% The display domain's services (docs/design-display.md): the screen's pure
 %% core, erx_screen_core, which decides what erx_screen composes, fills,
 %% exposes and pushes; the window policy behaviour erx_wm with
-%% erx_wm_single; and erx_wctl, the text of a window's wctl file.
+%% erx_wm_single; erx_wctl, the text of a window's wctl file; and erx_ui_model,
+%% the realised widget tree and its one difference.
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_screen_core, erx_wctl, erx_wm, erx_wm_single]},
+  {modules, [erx_screen_core, erx_ui_model, erx_wctl, erx_wm, erx_wm_single]},
   {registered, []},
   {applications, [kernel, stdlib]},
   {env, []}]}.
