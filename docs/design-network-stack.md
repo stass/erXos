@@ -1025,28 +1025,47 @@ no other process and creates no process:
   `tcp_syncache.c:2194`; the layout at `:2154-2163`). The secrets
   alternate, one replaced every 15 s (`SYNCOOKIE_LIFETIME`,
   `tcp_syncache.h:110`; `syncookie_reseed`, `tcp_syncache.c:2419`), so a
-  cookie validates for 15 to 30 s. When the table is full, a SYN gets a
-  cookie and no entry. An ACK that matches no entry is checked as a
-  cookie only if the table overflowed in the last 15 s, as FreeBSD
-  checks only after an overflow (`tcp_syncache.c:1095-1110`). FreeBSD
-  records the last overflow per bucket (`sch_last_overflow`); the stack
-  has one table per interface and records it for the table, a departure
-  under which, shortly after an overflow, a valid cookie can complete a
+  cookie validates for 15 to 30 s. An ACK that matches no entry is
+  checked as a cookie only while the table is paused or if it overflowed
+  in the last 15 s, as FreeBSD checks only then
+  (`tcp_syncache.c:1053-1056`, `:1095-1110`). FreeBSD records the last
+  overflow per bucket (`sch_last_overflow`); the stack has one table per
+  interface and records it for the table. Since an overflow pauses the
+  table, and FreeBSD's pause covers every bucket, the two differ only in
+  the second a first 15 s pause ends: there a valid cookie can complete a
   handshake that FreeBSD, whose bucket for it had not overflowed, would
-  refuse. The cookie's MAC is required either way. The cookie secrets
-  are stack-wide, in `erx_net_tables`, so an ACK that arrives on another
+  refuse. The
+  cookie's MAC is required either way. The cookie secrets are
+  stack-wide, in `erx_net_tables`, so an ACK that arrives on another
   interface still validates; FreeBSD's MAC also covers the bucket's
   address, which one table has no use for.
-* When the table is full, FreeBSD drops the bucket's oldest entry for the
-  new SYN and answers every SYN with a cookie alone for 15 s, longer on a
-  renewed attack, dropping its entries meanwhile (`syncache_insert`,
-  `syncache_pause`, `tcp_syncache.c:2446`). The stack's full table answers
-  the SYN with a cookie and keeps its entries: a flood neither evicts nor
-  stops the handshakes in progress, and needs no pause state or timer.
-  The cost: a flood refills each freed place at once, and each of its
-  entries draws three SYN-ACK retransmissions to a spoofed source, at
-  most 15,360 x 3 in 15.6 s, about 3,000 a second per interface,
-  where FreeBSD's pause answers each SYN once.
+* A SYN that finds the table full pauses it, as a full bucket pauses
+  FreeBSD's cache (`syncache_insert`, `tcp_syncache.c:367`;
+  `syncache_pause`, `:2446`). The table drops every entry, and until the
+  pause ends it makes no entry, answers each SYN with a SYN-ACK alone and
+  checks every ACK that matches no entry as a cookie. FreeBSD drops the
+  full bucket's oldest entry for the new one, but once paused it looks no
+  entry up and its timer drops every entry without answering
+  (`syncache_timer`, `:485-497`), so dropping them all when the pause
+  starts is the same rule with one table for the bucket; the table
+  overflows when it holds 15,360 entries, where FreeBSD's first bucket
+  fills at 30. A pause lasts 15 s (`TCP_SYNCACHE_PAUSE_TIME`). One that
+  starts less than the last pause's own length after that pause ended
+  doubles it, up to six times, to 16 minutes
+  (`TCP_SYNCACHE_MAX_BACKOFF`); any other lasts 15 s again. The table
+  keeps the end of the last pause and its doublings, in whole seconds of
+  uptime, and is paused while the uptime is before the end, the test
+  `syncache_unpause` makes (`pause_until - time_uptime` no longer
+  positive): the pause is a value derived from the step's time and needs
+  no timer. FreeBSD makes that test when its callout fires, the pause's
+  length after it began, so its pause can end up to a second later. Its
+  pause is the stack's; the stack's is the interface's, with its table,
+  so a flood on one interface leaves the others' handshakes their
+  entries. Until a flood fills the table, each of its entries draws up to
+  three SYN-ACK retransmissions to a spoofed source; they stop when the
+  pause starts, and while it lasts each SYN is answered once. An entry is
+  lost to a flood only as FreeBSD loses it: all at once, when the pause
+  starts, after which its handshake completes by its cookie.
 * The secrets are context, not state. `erx_net_tables` draws the two
   cookie keys and rotates them every 15 s; the interface process reads
   them, with the timestamp secret, at each SYN or ACK for a listener and
@@ -2192,14 +2211,18 @@ time against properties written from FreeBSD's rules:
 * a cookie with any bit of its MAC changed, or for another four-tuple,
   does not validate;
 * an ACK matching no entry is checked as a cookie exactly when the table
-  overflowed in the last 15 s, and at 15 s exactly as FreeBSD's
-  comparison decides;
-* the table never exceeds its bound, and a SYN past it gets a cookie and
-  no entry.
+  is paused or overflowed in the last 15 s, and at 15 s exactly as
+  FreeBSD's comparison decides;
+* the table never exceeds its bound, and a SYN that finds it full gets a
+  cookie and no entry, drops every entry and pauses the table;
+* a pause ends when the uptime reaches its end, makes no entry until
+  then, and lasts 15 s, doubled for each pause that starts within the
+  last one's length after it ended, to at most 960 s.
 
 *Seeded failures:* a rotation that drops the previous secret at once,
 which the first property's one-rotation case must catch; an overflow
-window measured with `=<` where FreeBSD uses `<`.
+window measured with `=<` where FreeBSD uses `<`; a pause held through
+the second it ends.
 
 ### The send log, loss and congestion: properties and a FreeBSD oracle
 

@@ -72,8 +72,11 @@ Each interface process holds one table, bounded at 15,360 entries by default (Fr
 buckets of 30). A SYN for a listener makes an entry and draws a SYN-ACK; the ACK that
 completes the handshake removes the entry and returns the handshake's result, from which
 the interface spawns the connection. Every SYN-ACK's initial sequence number is a SYN
-cookie, FreeBSD's default, so when the table is full a SYN still gets a SYN-ACK, and no
-entry, and the completing ACK is recognised by its cookie alone. The SYN-ACK of an entry is
+cookie, FreeBSD's default, so the completing ACK can be recognised by its cookie alone. A
+SYN that finds the table full pauses it, as `syncache_insert` and `syncache_pause` do: the
+table drops every entry and for 15 s answers each SYN with a SYN-ACK alone and checks every
+ACK as a cookie, the pause doubling up to 960 s while overflows recur. The pause ends by
+time alone, read from each step's `now`, so it needs no timer. The SYN-ACK of an entry is
 retransmitted after 1, 3.2 and 7.4 s and the entry dropped at 15.6 s, FreeBSD's limit of
 three retransmissions with its backoff, driven by `expired/2` and `next_deadline/1`.
 
@@ -84,9 +87,9 @@ them, the cookie and the timestamp offset, which reach the connection in the han
 result. A `secrets()` value keeps its keys in a closure, whose environment a crash report or
 `io_lib:format/2` does not print.
 
-Departures from FreeBSD, each recorded in the design: one table per interface, so no
-per-bucket eviction and one overflow time for the table; a full table answers with a cookie
-and keeps its entries, where FreeBSD drops the bucket's oldest entry and pauses the cache;
+Departures from FreeBSD, each recorded in the design: one table per interface, so the
+overflow that pauses is the table's rather than a bucket's, the overflow time is the table's
+and the pause the interface's rather than the stack's, ending at a whole second of uptime;
 the cookie's MAC covers no bucket address; a signed (TCP-MD5) SYN, or a signed ACK under a
 cookie, is dropped as a FreeBSD kernel without TCP-MD5 support drops it, and a signed ACK
 for an entry is dropped too, where FreeBSD would complete it; and an entry's ICMP errors
@@ -97,7 +100,7 @@ Every function is pure.
 -include("erx_tcp_wire.hrl").
 
 -export([new/0, new/1, secrets/3, rotate/2, add/5, expand/5, chkrst/4, unreach/3, expired/2,
-         next_deadline/1, size/1]).
+         next_deadline/1, size/1, cookies_only/2]).
 
 -export_type([syncache/0, secrets/0, conn/0, listener/0, context/0, action/0, handshake/0,
               outcome/0]).
@@ -105,6 +108,8 @@ Every function is pure.
 -define(TCP_SYNCACHE_LIMIT, 15360).   % TCP_SYNCACHE_HASHSIZE * TCP_SYNCACHE_BUCKETLIMIT
 -define(SYNCACHE_MAXREXMTS, 3).
 -define(SYNCOOKIE_LIFETIME, 15).      % seconds, tcp_syncache.h
+-define(TCP_SYNCACHE_PAUSE_TIME, ?SYNCOOKIE_LIFETIME).
+-define(TCP_SYNCACHE_MAX_BACKOFF, 6). % the longest pause is 15 s << 6, 16 minutes
 -define(TCPTV_RTOBASE, 1000).         % tcp_rexmit_initial, ms
 -define(TCPTV_MIN, 30).               % tcp_rexmit_min
 -define(TCPTV_REXMTMAX, 64000).       % tcp_rexmit_max
@@ -196,10 +201,16 @@ four-tuple either.
                 unreach = false :: boolean(),
                 ack_war = none :: none | {EpochEnd :: integer(), Count :: non_neg_integer()}}).
 
+%% last_overflow is sch_last_overflow; pause is the end of the last pause and its backoff,
+%% FreeBSD's pause_until and pause_backoff. Both are whole seconds of uptime. FreeBSD's
+%% paused flag is derived from them: the table is paused while uptime is before the end
+%% (cookies_only/2).
 -record(syncache, {limit :: non_neg_integer(),
                    entries = #{} :: #{conn() => #entry{}},
                    timers = gb_sets:empty() :: gb_sets:set({integer(), conn()}),
-                   last_overflow = none :: none | integer()}).
+                   last_overflow = none :: none | integer(),
+                   pause = none :: none | {Until :: integer(),
+                                           Backoff :: 0..?TCP_SYNCACHE_MAX_BACKOFF}}).
 
 -opaque syncache() :: #syncache{}.
 
@@ -237,18 +248,19 @@ size(#syncache{entries = Entries}) -> map_size(Entries).
 -doc """
 A SYN for a listener (`syncache_add`). A signed SYN is dropped. A SYN for a four-tuple
 already in the table updates its timestamp and may withdraw ECN, but never grant it, and
-draws the same SYN-ACK again with the retransmission count reset. Otherwise the SYN makes
-an entry if the table has room and draws a SYN-ACK whose sequence number is a cookie; with
-no room it draws the SYN-ACK alone and records the overflow.
+draws the same SYN-ACK again with the retransmission count reset. Otherwise the SYN draws a
+SYN-ACK whose sequence number is a cookie, and makes an entry if the table is not paused and
+has room. A SYN that finds the table full pauses it (`pause/2`) and makes no entry.
 """.
 -spec add(conn(), #tcp{}, listener(), context(), syncache()) -> {syncache(), [action()]}.
 add(_Conn, #tcp{opts = #tcp_opts{signature = true}}, _Listener, _Context, Cache) ->
     {Cache, []};
 add(Conn, #tcp{} = Syn, Listener, #{now := Now, secrets := Secrets}, #syncache{} = Cache)
   when ?IS_CONN(Conn) ->
-    case Cache#syncache.entries of
+    %% A paused table looks no entry up, as FreeBSD's cookiesonly path does (:1510).
+    case cookies_only(Now, Cache) orelse Cache#syncache.entries of
         #{Conn := Entry} -> repeat_syn(Conn, Entry, Syn, Now, Cache);
-        #{} -> first_syn(Conn, Syn, Listener, Now, Secrets, Cache)
+        _ -> first_syn(Conn, Syn, Listener, Now, Secrets, Cache)
     end.
 
 %% The ECN of an entry may be withdrawn by a SYN without it, never granted.
@@ -277,18 +289,49 @@ first_syn(Conn, #tcp{seq = Irs, flags = Flags, opts = Opts}, Listener, Now, Secr
                     ecn = erx_tcp_ecn:syncache_add(Flags)},
     Entry = Entry0#entry{iss = cookie(Secrets, Conn, Entry0)},
     #syncache{limit = Limit, entries = Entries} = Cache,
-    case map_size(Entries) < Limit of
-        true -> {arm(Conn, Entry, Now, Cache), [synack(Conn, Entry, Now)]};
-        false -> {Cache#syncache{last_overflow = uptime(Now)}, [synack(Conn, Entry, Now)]}
+    Synack = synack(Conn, Entry, Now),
+    case cookies_only(Now, Cache) of
+        true -> {Cache, [Synack]};
+        false when map_size(Entries) < Limit -> {arm(Conn, Entry, Now, Cache), [Synack]};
+        false -> {pause(uptime(Now), Cache), [Synack]}
     end.
+
+%% syncache_insert on a full bucket, with syncache_pause. FreeBSD drops the bucket's oldest
+%% entry, inserts the new one and pauses; while paused it looks no entry up and its timer
+%% drops every entry without answering. Every entry's next deadline is at most 8.2 s away
+%% and a pause lasts at least 15 s, so all are dropped within the pause, and here the pause
+%% drops them all at once and makes no entry. Only first_syn/6 makes a new entry and it
+%% makes none while paused, so the table stays empty until the pause ends. A pause that
+%% starts within the last pause's own length after that one ended doubles it, at most
+%% TCP_SYNCACHE_MAX_BACKOFF times; any other lasts 15 s.
+pause(Uptime, #syncache{pause = Last} = Cache) ->
+    Backoff = case Last of
+                  {Until, B} when Until + (?TCP_SYNCACHE_PAUSE_TIME bsl B) - Uptime > 0 ->
+                      min(B + 1, ?TCP_SYNCACHE_MAX_BACKOFF);
+                  _ ->
+                      0
+              end,
+    Cache#syncache{entries = #{}, timers = gb_sets:empty(), last_overflow = Uptime,
+                   pause = {Uptime + (?TCP_SYNCACHE_PAUSE_TIME bsl Backoff), Backoff}}.
+
+-doc """
+Whether the table is paused at `Now` (`syncache_cookiesonly`), so it makes no entries and
+checks as a cookie every ACK that matches none. The pause lasts while the uptime in whole
+seconds is before its end, the test `syncache_unpause` makes (`pause_until - time_uptime`
+no longer positive). FreeBSD makes it when its callout fires, the pause's length after the
+pause began, so its pause can end up to a second later than this one.
+""".
+-spec cookies_only(integer(), syncache()) -> boolean().
+cookies_only(Now, #syncache{pause = {Until, _}}) when is_integer(Now) -> uptime(Now) < Until;
+cookies_only(Now, #syncache{pause = none}) when is_integer(Now) -> false.
 
 -doc """
 An ACK, without SYN or RST, for a listener (`syncache_expand`). With an entry: a signed ACK
 or one failing PAWS is dropped and the entry kept; a sequence number outside the window
 draws a challenge ACK, limited to five a second; an acknowledgement other than the cookie
 plus one is answered with a RST; otherwise the entry becomes the handshake. Without an
-entry the ACK is checked as a cookie only if the table overflowed in the last 15 s, and a
-valid cookie becomes the handshake unless the ACK is signed.
+entry the ACK is checked as a cookie only if the table is paused or overflowed in the last
+15 s, and a valid cookie becomes the handshake unless the ACK is signed.
 """.
 -spec expand(conn(), #tcp{}, listener(), context(), syncache()) ->
           {outcome(), syncache(), [action()]}.
@@ -329,10 +372,14 @@ expand_entry(Conn, #entry{irs = Irs, iss = Iss, rcv_wnd = Wnd} = Entry,
 paws_fails({TsReflect, _}, {TsVal, _}) -> erx_tcp_seq:lift(TsVal, TsReflect) < TsReflect;
 paws_fails(_, _) -> false.
 
-%% Whether an ACK matching no entry is checked as a cookie: only within SYNCOOKIE_LIFETIME
-%% whole seconds of the last overflow, as FreeBSD compares time_uptime.
-checks_cookies(#syncache{last_overflow = none}, _Now) -> false;
-checks_cookies(#syncache{last_overflow = Last}, Now) -> not (Last < uptime(Now) - ?SYNCOOKIE_LIFETIME).
+%% Whether an ACK matching no entry is checked as a cookie: always while paused, as FreeBSD
+%% skips the table then, and otherwise only within SYNCOOKIE_LIFETIME whole seconds of the
+%% last overflow, as FreeBSD compares time_uptime.
+checks_cookies(Cache, Now) -> cookies_only(Now, Cache) orelse overflowed_recently(Cache, Now).
+
+overflowed_recently(#syncache{last_overflow = none}, _Now) -> false;
+overflowed_recently(#syncache{last_overflow = Last}, Now) ->
+    not (Last < uptime(Now) - ?SYNCOOKIE_LIFETIME).
 
 %% syncookie_expand: undo the handshake's sequence advance, recover the flags byte, and
 %% accept the cookie if the MAC of the four-tuple, IRS and flags under the key the flags
@@ -494,8 +541,9 @@ arm(Conn, #entry{rxmits = Rxmits} = Entry, Now, Cache) ->
             end,
     store(Conn, Entry#entry{rxttime = Now + Rexmt, rxmits = Rxmits + 1}, Cache).
 
-%% store/3 and remove/2 are the only writers of entries and timers: the timer set holds
-%% exactly {rxttime, Conn} of each stored entry, so expired/3 finds every timer's entry.
+%% store/3 and remove/2 are the only writers of entries and timers, with pause/2, which
+%% empties both: the timer set holds exactly {rxttime, Conn} of each stored entry, so
+%% expired/3 finds every timer's entry.
 store(Conn, #entry{rxttime = Deadline} = Entry, #syncache{entries = Entries} = Cache) ->
     #syncache{timers = Timers} = Removed = remove(Conn, Cache),
     Removed#syncache{entries = Entries#{Conn => Entry},
