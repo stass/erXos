@@ -28,6 +28,25 @@ module ErxNetEunit
   # Requires every EUnit case of modules, each test/erlang/MODULE.erl, to pass.
   # extra: further test/erlang module names to compile, such as an oracle.
   def assert_erx_net_eunit(*modules, extra: [], pkt: false)
+    output, status = run_erx_net_eunit(modules, extra: extra, pkt: pkt, fault: {})
+    assert status.success?, output
+    # EUnit words a run of exactly two tests "2 tests passed.", without "All".
+    assert_match(/All \d+ tests passed|^\s*2 tests passed|Test passed/, output)
+  end
+
+  # Requires the EUnit cases of modules to fail once each erx_net module named in
+  # fault is compiled with its seeded fault, given as [exact text, faulty text],
+  # and returns EUnit's output for the caller to check which case failed.
+  def refute_erx_net_eunit(*modules, fault:, extra: [])
+    output, status = run_erx_net_eunit(modules, extra: extra, pkt: false, fault: fault)
+    refute status.success?, "the seeded fault #{fault.keys.join(', ')} passed:\n#{output}"
+    assert_match(/Failed: [1-9]/, output)
+    output
+  end
+
+  private
+
+  def run_erx_net_eunit(modules, extra:, pkt:, fault:)
     Dir.mktmpdir('erx-net-eunit') do |work|
       includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT), '-I', INCLUDE]
       if pkt
@@ -35,21 +54,28 @@ module ErxNetEunit
         includes += ['-I', File.join(tree, 'include')]
         erlc(work, Dir[File.join(tree, 'src', '*.erl')].sort, includes: includes)
       end
-      sources = [HOST_BYTES, *Dir[File.join(APPLICATION, '**', '*.erl')].sort,
-                 *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
+      application = Dir[File.join(APPLICATION, '**', '*.erl')].sort.map { |source| faulty_copy(work, source, fault) }
+      sources = [HOST_BYTES, *application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
       erlc(work, sources, includes: includes, flags: Erx::ErlangApps::FLAGS)
 
       list = "[#{modules.join(', ')}]"
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
-                                       '-eval', "halt(case eunit:test(#{list}, []) of ok -> 0; _ -> 1 end).",
-                                       chdir: work, stdin_data: '')
-      assert status.success?, output
-      # EUnit words a run of exactly two tests "2 tests passed.", without "All".
-      assert_match(/All \d+ tests passed|^\s*2 tests passed|Test passed/, output)
+      Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
+                      '-eval', "halt(case eunit:test(#{list}, []) of ok -> 0; _ -> 1 end).",
+                      chdir: work, stdin_data: '')
     end
   end
 
-  private
+  # Source itself, or for a module named in fault a copy in work with its exact
+  # text replaced by the faulty text.
+  def faulty_copy(work, source, fault)
+    exact, faulty = fault[File.basename(source, '.erl')]
+    return source unless exact
+
+    text = File.read(source)
+    raise "#{source} lacks the text its seeded fault replaces" unless text.include?(exact)
+
+    File.join(work, File.basename(source)).tap { |copy| File.write(copy, text.sub(exact, faulty)) }
+  end
 
   def erlc(work, sources, includes:, flags: [])
     output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *flags, *includes, '-pa', work, '-o', work, *sources,

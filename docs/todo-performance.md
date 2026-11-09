@@ -415,6 +415,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   several segments' payloads into one binary saves messages and lane
   frames at the cost of a copy. Settled by a bulk receive's CPU time per
   byte both ways.
+* **[Low] network, a reassembled datagram copied and decoded again**
+  ([design-network-stack.md](design-network-stack.md#ipv4-and-arp)).
+  `erx_ip4_reass` and `erx_ip6_reass` return a completed datagram as a
+  packet, one copy of up to 64 KiB, which the codec decodes again (the
+  IPv4 header checksum, the IPv6 header walk). Settled by the CPU time
+  per byte of a fragmented UDP receive against one that handed over the
+  fragments without the copy.
 * **[Low] network, ETS reads on every output pass**
   ([design-network-stack.md](design-network-stack.md#transmitting)). A
   connection reads its neighbour entry and the route table's generation

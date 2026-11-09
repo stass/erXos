@@ -1043,7 +1043,27 @@ pointer of the parameter problem it answers with (`ip_options.c:132-138`),
 so `erx_ip4` can send the same answer after its loopback check.
 `erx_ip4_reass` translates `ip_reass.c`, with
 FreeBSD's caps on the datagrams in reassembly, the fragments per datagram
-and the lifetime of a queue, all charged to the interface. `erx_icmp4`
+and the lifetime of a queue, all charged to the interface. It and
+`erx_ip6_reass` share one table, `erx_ip_reass`, a pure value the
+interface process keeps per family, with its deadline among the
+interface's others. Its caps are FreeBSD's where FreeBSD fixes them: 16
+fragments per IPv4 datagram and 64 per IPv6 one (`maxfragsperpacket`,
+`ip6_maxfragsperpacket`), and lifetimes of 30 and 60 seconds
+(`ipfragttl`, `IPV6_DEFFRAGTTL`). Where FreeBSD derives them from the
+machine's mbuf clusters, an interface holds at most 1,024 datagrams,
+1,024 fragments and 2 MiB, FreeBSD's values at 32,768 clusters of
+2 KiB. A held fragment counts at the size of the binary it keeps alive,
+and one under a quarter of that is copied out first, as for
+`erx_tcp_reass`; the header kept from a datagram's offset-0 fragment
+counts at its length and keeps no frame alive. A fragment that starts a
+new datagram past the datagram cap pushes out the
+oldest IPv4 datagram (`ipq_reuse`) and is dropped for IPv6
+(`frag6_input`). A completed datagram leaves the table as a packet, the
+first fragment's headers without fragmentation in front of the whole
+data, and passes the codec and the input decisions again, as FreeBSD
+requeues it, so the decoder stays the only maker of a received record
+and the IPv6 headers after the fragment header are walked as any
+others. `erx_icmp4`
 translates `ip_icmp.c`: echo replies, but never to a broadcast or
 multicast destination, and errors generated within FreeBSD's limit of
 200 a second (`icmplim`, `ip_icmp.c:84`), moved by a jitter of up to 16
@@ -1245,6 +1265,7 @@ modules are marked P; process modules E.
 | `erx_net_eth` | `if_ethersubr.c` (`ether_input` checks) | Ethernet II codec | P |
 | `erx_arp_wire`, `erx_arp` | `if_ether.c` | ARP codec; neighbour state machine | P |
 | `erx_ip4_wire`, `erx_ip4` | `ip.h`, `ip_input.c`, `ip_output.c`, `ip_options.c`, `ip_id.c` | IPv4 codec; input and output decisions | P |
+| `erx_ip_reass` | `ip_reass.c`, `frag6.c` | the reassembly table both families share: caps, lifetimes, placing and completing fragments | P |
 | `erx_ip4_reass` | `ip_reass.c` | IPv4 reassembly | P |
 | `erx_icmp4_wire`, `erx_icmp4` | `ip_icmp.c` | ICMP codec and decisions | P |
 | `erx_ip6_wire`, `erx_ip6` | `ip6_input.c`, `ip6_output.c`, `dest6.c`, `route6.c`, `scope6.c`, `ip6_id.c`, the fragment-header checks of `frag6.c` | IPv6 codec with the extension-header walk; decisions | P |
