@@ -147,6 +147,17 @@
       "filename": "cc_cubic.h",
       "license": "BSD-2-Clause",
       "status": "permanent"
+    },
+    {
+      "id": "lvgl",
+      "kind": "tar",
+      "version": "9.6.0",
+      "url": "https://github.com/lvgl/lvgl/archive/refs/tags/v9.6.0.tar.gz",
+      "sha256": "b20ee3acc1bba13c62d854f9ebd62e4c51e0b443b1e0225892e86442defa84df",
+      "directory": "lvgl-9.6.0",
+      "members": "include src lvgl.h lvgl_private.h lv_version.h LICENCE.txt COPYRIGHTS.md",
+      "license": "MIT",
+      "status": "stopgap"
     }
   ]
 }

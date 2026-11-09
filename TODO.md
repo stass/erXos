@@ -317,6 +317,26 @@ it; git history is the record of completed work.
   quadratic in a node's children (a reversed flat node of 16,000 children: 10 s for `delta/2`, 20 s to apply, on
   Homebrew erl), and an index above 65,535 does not fit `diff_op()` or the binary form. Add a per-node children
   limit to the validity rules (at most 65,536; 1,024 suggested), which bounds both by construction.
+* [Medium] `display/lvgl/erx_lvgl.c`, [The widget server](docs/design-display.md#the-widget-server) and design-abi.md
+  "Widget format": gaps the LVGL program had to fill. (1) An `input` key's `code` has no stated meaning; the program
+  uses the rune alone, with keyboard(6)'s private-use runes for the cursor keys. (2) `align` `start`, `center` and
+  `end` have no LVGL flex equivalent per child; the program gives such a node its own size at the start of the cross
+  axis, so the parity test will differ there. (3) No source declares Plan 9 channel descriptors (`draw.txt` is not
+  written); the program computes the four it renders in (`r5g6b5`, `r8g8b8`, `x8r8g8b8`, `a8r8g8b8`) with draw(2)'s
+  `CHAN` packing, and should take them from the generated table once it exists. (4) A screen row must fit one
+  `pixels` report (at most 16,381 pixels at 32 bits); design-abi.md should say a `screen` wider than that is refused.
+  (5) A `present` property is shown as LVGL glyphs without the line escape the design asks for, since no C twin of
+  `erx_text:escape_line/1` is generated. Glyph rendering cannot inject terminal controls, but bidirectional overrides
+  and invisible format characters still mislead, and LVGL's font draws U+F000-U+F8FF as its built-in icons; the
+  simplest fix is for the widget server to escape the canonical text before encoding it.
+* [Medium] `display/lvgl/erx_lvgl.c`, review findings left open. (1) A slider whose `max - min` exceeds a signed 32-bit
+  integer overflows inside LVGL (`lv_bar.c`), which the sanitized build aborts on; scale such a range. (2) `set_slider`
+  re-applies the last `value` the server sent on any set of the slider, undoing the user's drag, and `items` alone
+  resets a list's selection to 0; which state value a set keeps is a question for `erx_ui_model:hit/4`'s design.
+  (3) The focus ring follows LVGL's group, which orders nodes by creation, not tree order as design-display.md
+  "Kiosks and glasses" asks; rebuild the group at commit. (4) A status shows as `[timeout]` with no milliseconds and
+  no reporter, unlike `erx_render`'s tokens (G7). (5) A text holding U+0000 is cut there by LVGL. (6) The Makefile
+  rebuilds LVGL's objects only when `lv_conf.h` changes, not when the compiler or the fetched pin does.
 * [High] `erx_wm_rio` (desktop, not built; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the

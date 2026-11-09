@@ -52,6 +52,39 @@ module Erx
       end
 
       # The properties a record may carry: every one but the key, never written.
+      # erx_ui_takes(): whether a kind takes a property, the rule a renderer
+      # applies to every record, since the reader decides nothing by kind.
+      def kind_takes(ui)
+        common = wire_properties(ui).select(&:common).map { |property| "\tcase #{macro('ui_prop', property.name)}:" }
+        listed = wire_properties(ui).reject(&:common)
+        own = ui.kinds.filter_map do |kind|
+          properties = kind.takes.map(&:property).select { |property| listed.include?(property) }
+          next if properties.empty?
+
+          tests = properties.map { |property| "prop == #{macro('ui_prop', property.name)}" }
+          "\tcase #{macro('ui_kind', kind.name)}:\n\t\treturn (#{tests.join(" ||\n\t\t    ")});"
+        end
+        <<~C
+          bool
+          erx_ui_takes(uint8_t kind, uint8_t prop)
+          {
+          	if (!erx_ui_kinds[kind])
+          		return (false);
+          	switch (prop) {
+          #{common.join("\n")}
+          		return (true);
+          	default:
+          		break;
+          	}
+          	switch (kind) {
+          #{own.join("\n")}
+          	default:
+          		return (false);
+          	}
+          }
+        C
+      end
+
       def wire_properties(ui) = ui.properties.reject { |property| property.type.form == 'key' }
 
       # The root enums the properties name, each once, by name.
@@ -500,6 +533,14 @@ module Erx
               erx_ui_bytes_t *text);
 
           /*
+           * Whether a node of kind takes property prop: every property marked
+           * common and those listed beneath the kind. The reader decides nothing
+           * by kind, so a renderer refuses with this a property its node does not
+           * take.
+           */
+          bool erx_ui_takes(uint8_t kind, uint8_t prop);
+
+          /*
            * An event's detail: tag is an ERX_UI_DETAIL_* value; a boolean's 0 or 1,
            * or an integer, is in integer; a text, valid UTF-8 of at most
            * ERX_UI_EVENT_TEXT_MAX bytes, in text.
@@ -608,6 +649,7 @@ module Erx
           };
 
           #{C_READER}
+          #{kind_takes(ui)}
           #{C_WRITER}
         C
       end

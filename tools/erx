@@ -583,7 +583,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
       0
     end
 
@@ -653,6 +653,13 @@ module Erx
       Fsimg::Build.new(root: ROOT, runner: runner, jobs: jobs).call
     end
 
+    # erx-lvgl for the host under ASan and UBSan, from LVGL's fetched pin (Lvgl::Build).
+    def self.build_lvgl(jobs)
+      require_relative 'lib/erx/lvgl'
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      Lvgl::Build.new(root: ROOT, runner: runner, jobs: jobs).call
+    end
+
     # The hosted runtime and the release it boots, both of which `make check-runtime-hosted` reads.
     def self.build_runtime(jobs)
       built = Runtime.new(root: ROOT).build(jobs: jobs)
@@ -681,8 +688,8 @@ module Erx
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7].include?(component)
-        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg or herd7'
+      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7 lvgl].include?(component)
+        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg, herd7 or lvgl'
       end
       jobs = 4
       parser = OptionParser.new do |options|
@@ -696,6 +703,7 @@ module Erx
              when 'rc-oracle' then build_rc_oracle
              when 'fsimg' then build_fsimg(jobs)
              when 'herd7' then build_herd7(jobs)
+             when 'lvgl' then build_lvgl(jobs)
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")
