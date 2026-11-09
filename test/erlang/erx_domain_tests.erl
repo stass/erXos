@@ -16,6 +16,49 @@ ident_test() ->
     ?assertEqual(<<"a">>, erx_ident:to_binary(ident(binary:copy(<<"a">>, 1)))),
     ?assertMatch({erx_ident, _}, ident(binary:copy(<<"a">>, 63))).
 
+%% erx_ident:new/1 agrees with the reference regex of the rule over random
+%% byte strings drawn mostly from the alphabet and its edges (fixed seed).
+ident_matches_reference_regex_test() ->
+    {ok, Re} = re:compile("^[a-z0-9][a-z0-9_-]{0,62}\\z"),
+    State0 = rand:seed_s(exsss, {1, 2, 3}),
+    {Cases, _} = lists:mapfoldl(fun(_, S) -> ident_case(S) end, State0, lists:seq(1, 4000)),
+    [begin
+         Expected = re:run(Bin, Re, [{capture, none}]) =:= match,
+         Actual = case erx_ident:new(Bin) of {erx_ident, Bin} -> true; {error, bad_identifier} -> false end,
+         ?assertEqual({Bin, Expected}, {Bin, Actual})
+     end || Bin <- Cases].
+
+ident_case(S0) ->
+    {Len, S1} = ident_length(S0),
+    {Bytes, S2} = lists:mapfoldl(fun(_, S) -> ident_byte(S) end, S1, lists:seq(1, Len)),
+    {list_to_binary(Bytes), S2}.
+
+ident_length(S0) ->
+    {Pick, S1} = rand:uniform_s(8, S0),
+    case Pick of
+        1 -> {63, S1};
+        2 -> {64, S1};
+        _ -> {Len, S2} = rand:uniform_s(71, S1), {Len - 1, S2}
+    end.
+
+%% Mostly valid bytes, with the characters at the rule's edges mixed in.
+ident_byte(S0) ->
+    {Pick, S1} = rand:uniform_s(20, S0),
+    case Pick of
+        P when P =< 10 -> pick($a, $z, S1);
+        P when P =< 13 -> pick($0, $9, S1);
+        14 -> {$_, S1};
+        15 -> {$-, S1};
+        16 -> {$., S1};
+        17 -> pick($A, $Z, S1);
+        18 -> {hd("\n"), S1};
+        _ -> {B, S2} = rand:uniform_s(256, S1), {B - 1, S2}
+    end.
+
+pick(Lo, Hi, S0) ->
+    {N, S1} = rand:uniform_s(Hi - Lo + 1, S0),
+    {Lo + N - 1, S1}.
+
 admit(Name, Principal, Origin, Core) ->
     {ok, Domain, Next} = erx_domain_core:admit(ident(Name), Principal, Origin, Core),
     {Domain, Next}.
