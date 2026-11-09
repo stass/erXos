@@ -11,6 +11,9 @@ module Erx
     # ends domains and calls neither erx_dom_plan_configured nor
     # erx_dom_plan_partial.
     DOM_LIFE = 'liberx/system/dom_life.c'
+    # The domain library's apply phase, which runs request plans alone and
+    # calls neither entry until manifest startup lands with the NIF.
+    DOM_APPLY = 'liberx/system/dom_apply.c'
     DOM_HEADER = 'include/erx/dom.h'
     DOM_DRIVER = 'test/fixtures/dom_core_driver.c'
     DOM_FUZZ = 'tools/fuzz/dom_core_fuzz.c'
@@ -22,7 +25,7 @@ module Erx
     ERXOS_NIFS = 'otp/erts/emulator/nifs/erxos/**/*'
 
     declare_group(
-      unchecked_objects: [DOM_CORE, DOM_LIFE],
+      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY],
       rules: [
         # A creation origin is authority provenance: the planning entries
         # build every specification, origin included, inside the core, so
@@ -70,7 +73,7 @@ module Erx
                 'entry calls erx_dom_plan_partial; no domain facet reaches either',
           design: 'docs/design-system.md#the-domain-library',
           awaits: ['liberx/system/**/*', 'otp/erts/emulator/nifs/erxos/erx_domain_lib*'],
-          existing: [DOM_CORE, DOM_LIFE],
+          existing: [DOM_CORE, DOM_LIFE, DOM_APPLY],
           reason: "the entries' callers land with the domain library's apply and NIF"
         )
       ]

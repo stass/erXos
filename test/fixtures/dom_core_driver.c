@@ -41,14 +41,14 @@ static unsigned long failures;
 
 /* Files: 0 runtime, 1 JIT runtime, 2-4 release, 5 system, 6 sealed, 7 bad image. */
 static const erx_dom_file_t files[] = {
-	{ ERX_ENTRY_IMAGE, 0, true, 0 },
-	{ ERX_ENTRY_IMAGE, 0, true, ERX_IMAGE_JIT },
-	{ ERX_ENTRY_FILE, 0, false, 0 },
-	{ ERX_ENTRY_FILE, 0, false, 0 },
-	{ ERX_ENTRY_FILE, 0, false, 0 },
-	{ ERX_ENTRY_FILE, ERX_ENTRY_SYSTEM, false, 0 },
-	{ ERX_ENTRY_FILE, ERX_ENTRY_SEAL, false, 0 },
-	{ ERX_ENTRY_IMAGE, 0, false, 0 },
+	{ ERX_ENTRY_IMAGE, 0, true, 0, 1 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_IMAGE, 0, true, ERX_IMAGE_JIT, 2 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, 0, false, 0, 3 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, 0, false, 0, 4 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, 0, false, 0, 5 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, ERX_ENTRY_SYSTEM, false, 0, 6 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, ERX_ENTRY_SEAL, false, 0, 7 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_IMAGE, 0, false, 0, 8 * ERX_PAGE_SIZE, 100 },
 };
 
 static const char *const obj_names[] = {
@@ -523,6 +523,17 @@ constructors(void)
 	status = erx_dom_plan_request(&view, &req, &given, UINT32_C(1) << 6, &plan);
 	printf("ctor given_atoms %d %u %u\n", (int)status,
 	    plan.spec.runtime_limits.atoms, plan.spec.runtime_limits.processes);
+	/*
+	 * Files 2-4 start at page 3 and the last ends 100 bytes into page 5, so
+	 * the slice's map covers three pages; the lane the domain reads holds
+	 * its 64 KiB lane and two connections' reserve, so it is 128 KiB.
+	 */
+	for (uint32_t index = 0; index < plan.nsteps; index++)
+		if (plan.steps[index].kind == ERX_DOM_STEP_MAP &&
+		    plan.steps[index].obj == ERX_DOM_OBJ_SLICE)
+			printf("ctor spans %llu %llu\n",
+			    (unsigned long long)(plan.steps[index].size / ERX_PAGE_SIZE),
+			    (unsigned long long)plan.reader);
 	printf("ctor unknown_mask %d\n",
 	    (int)erx_dom_plan_request(&view, &req, &given, UINT32_C(1) << 11, &plan));
 	printf("ctor null_limits %d\n",

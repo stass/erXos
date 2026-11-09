@@ -29,6 +29,8 @@
 
 static erx_dom_t domains[NDOMAINS];
 static erx_dom_connection_t connections[NCONNECTIONS];
+/* The one principal, which counts domain 7, the one a retire may take. */
+static erx_dom_principal_t principals[1];
 /* The system domain's space, as records name it; 77 is a domain's own. */
 #define SYSTEM_SPACE	UINT64_C(4000)
 static erx_dom_view_t view;
@@ -62,7 +64,8 @@ reset_view(void)
 	    .labels = ERX_DOM_SYSTEM_LABEL };
 	domains[1] = (erx_dom_t){ .id = 6, .state = ERX_DOM_BUILT,
 	    .budget = { 601 }, .outer = { 602 }, .connections = 1, .labels = 3 };
-	domains[2] = (erx_dom_t){ .id = 7, .state = ERX_DOM_ENDED,
+	principals[0] = (erx_dom_principal_t){ .number = 1, .domains = 1 };
+	domains[2] = (erx_dom_t){ .id = 7, .principal = 1, .state = ERX_DOM_ENDED,
 	    .budget = { 701 }, .outer = { 702 }, .connections = 1, .labels = 1 };
 	domains[3] = (erx_dom_t){ .id = 8, .state = ERX_DOM_BUILDING,
 	    .budget = { 801 }, .outer = { 802 }, .connections = 1, .labels = 1 };
@@ -72,7 +75,7 @@ reset_view(void)
 	    .a = ERX_DOM_SYSTEM_ID, .b = 6, .budget_b = { 611 } };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
 	    .connections = connections, .max_connections = NCONNECTIONS,
-	    .next_connection = 20, .system_space = SYSTEM_SPACE,
+	    .principals = principals, .nprincipals = 1, .next_connection = 20, .system_space = SYSTEM_SPACE,
 	    .devices = devices, .device_records = device_records,
 	    .ndevices = 2 };
 	memset(devices, 0, sizeof(devices));

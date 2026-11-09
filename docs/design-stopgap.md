@@ -1620,7 +1620,7 @@ since no consumer calls it before then.
 | pass plans: a pass checked whole before any item moves | items passed in order until the first refusal; the caller undoes the items before it by a budget's destroy | Track K (passing, with its host-explored core) |
 | an IRQ object moved to another group; more IRQ objects than the root's `ERX_FIASCO_IRQS_MAX` slots (256) | a bind of a bound object to another group `ERX_ENOTSUP`; a create past the slots `ERX_ENOMEM` | Track K |
 | more than one home group in a task | one home group per task; a second `ERX_ENOTSUP` | M2 (groups whose threads run in any space) |
-| a group's parent and CPU set in its record; `erx_group_create` from a task | the parent is ignored; `erx_group_configure` and `_info` take only the root's own group (`ERX_CAP_SELF` or its first handle) and keep its CPU set in the root; a task's create `ERX_ENOTSUP` | 1b-C, when a session makes a program's group; M2 (grants) |
+| a group's parent and CPU set in its record; `erx_group_create` from a task | the parent is ignored; `erx_group_configure` takes any group the caller holds and keeps only the root's own group's CPU set, in the root; `_info` takes only the root's own group (`ERX_CAP_SELF` or its first handle); a task's create `ERX_ENOTSUP` | 1b-C, when a session makes a program's group; M2 (grants) |
 | creation and passing from a task other than the root: `erx_space_create`, `erx_irq_create`, `erx_cap_pass`, `erx_image_map` | from the root only, where the domain library runs; from another task `ERX_ENOTSUP` | 1b-B (a session's port driver and pipe server); Track K (by capability, without the root) |
 | paged objects, sealing, supply, `ERX_MEM_CODE` | `ERX_ENOTSUP` | 1b-B (a session's code and data objects); Track K (pages supplied on demand) |
 | device objects given to a holder domain (`erx_dom_device_give`) | none | 1b-E (M9 on the stopgap); M9's kernel part |
@@ -1659,7 +1659,7 @@ since no consumer calls it before then.
 * The crash frame may interleave with a console driver that is writing, a task's frame with the watchdog end's art and frame, and a kernel `WARN` or panic line may interleave at any time.
 * Any littlefs block error, deadline or driver restart in the system domain's form makes the volume unavailable until reboot.
 * Only the root's parks and wakes are in `erx:trace`, and the trace ring's `thread`, `space` and `target` are reused indices, not object ids.
-* All of `erx_group_configure` but the CPU set is accepted and ignored.
+* `erx_group_configure` keeps the CPU set of the root's own group alone. On any other group its caller holds it checks the handle and that the set is not empty, and keeps nothing of the grant; no group's rate, ceiling or flags is enforced.
 * A kernel hang or a stalled watchdog thread is caught only by the harness's deadline.
 
 ## Verification

@@ -1,0 +1,682 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/*
+ * The domain library's apply phase and end handling (include/erx/dom_lib.h):
+ * the effects around the pure core of dom_core.c and dom_life.c. Each entry
+ * asks the core for a plan or an action, then performs it over the function
+ * API; nothing here decides what a domain gets.
+ */
+
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "erx/abi.h"
+#include "erx/dom.h"
+#include "erx/dom_lib.h"
+#include "liberx/backend/api.h"
+#include "liberx/backend/core/boot_info.h"
+
+/* A domain id's decimal digits: at most ten for 32 bits. */
+#define APPLY_ID_DIGITS	10u
+/* A domain's node name: its id in decimal, '@', and the host. */
+#define APPLY_NODE_MAX	(APPLY_ID_DIGITS + 1u + ERX_DOM_HOST_MAX)
+/* A handle no table holds: what a step gets for an object no creation names. */
+#define APPLY_NO_HANDLE	UINT64_MAX
+
+/* One creation in progress: the plan, the handles made so far, and what the steps learnt. */
+typedef struct apply {
+	erx_dom_lib_t		*lib;
+	const erx_dom_plan_t	*plan;
+	erx_dom_handles_t	 handles;
+	uint64_t		 installed[ERX_DOM_OBJ_COUNT];	/* each install's value in
+								 * the domain's table */
+	uint64_t		 pc;		/* the runtime image's entry */
+	uint64_t		 bootinfo_addr;	/* where the domain sees its boot page */
+	uint64_t		 release_addr;	/* where it sees its release slice */
+} apply_t;
+
+static uint64_t	apply_object(const apply_t *, erx_dom_obj_t);
+static int	apply_step(apply_t *, const erx_dom_step_t *);
+static int	apply_map(apply_t *, const erx_dom_step_t *);
+static int	apply_install(apply_t *, const erx_dom_step_t *);
+static bool	apply_node(const erx_dom_lib_t *, uint32_t, char *, size_t *);
+static int	apply_bootinfo(apply_t *);
+static int	apply_thread(apply_t *, const erx_dom_step_t *);
+static int	apply_group(apply_t *, const erx_dom_step_t *);
+static erx_status_t apply_plan(apply_t *, erx_dom_created_t *);
+static void	apply_undo(apply_t *, uint32_t);
+static void	apply_keep(apply_t *, erx_dom_created_t *);
+static void	handles_close_under(erx_dom_handles_t *, erx_dom_obj_t);
+static erx_dom_obj_t handles_find(const erx_dom_handles_t *, uint64_t);
+static uint32_t	teardown_owner(const erx_dom_lib_t *, const erx_dom_teardown_t *, uint32_t);
+static erx_status_t teardown_apply(erx_dom_lib_t *, const erx_dom_teardown_t *);
+static void	lib_view_caps(erx_dom_lib_t *, uint32_t);
+static uint32_t	lib_slot(const erx_dom_lib_t *, uint32_t);
+
+/* Pages to hold bytes, rounded up; the plan bounds every size, so this never wraps. */
+static uint64_t
+pages_of(uint64_t bytes)
+{
+	return (bytes / ERX_PAGE_SIZE + (bytes % ERX_PAGE_SIZE != 0));
+}
+
+/* The handle a step names: one the creation made, or one the library holds. */
+static uint64_t
+apply_object(const apply_t *apply, erx_dom_obj_t obj)
+{
+	const erx_dom_held_t *held = &apply->lib->held;
+
+	if (obj < ERX_DOM_OBJ_MADE_COUNT)
+		return (apply->handles.made[obj]);
+	switch (obj) {
+	case ERX_DOM_OBJ_PRINCIPAL_BUDGET:
+		return (held->principal_budget);
+	case ERX_DOM_OBJ_PARENT_GROUP:
+		/* The plan's resolved CPU parent; apply does not choose again. */
+		return (apply->plan->parent == ERX_DOM_PARENT_SYSTEM ?
+		    held->system_group : held->principal_group);
+	case ERX_DOM_OBJ_SYSTEM_SPACE:
+		return (ERX_CAP_SELF);
+	case ERX_DOM_OBJ_SYSTEM_GROUP:
+		return (held->system_group);
+	case ERX_DOM_OBJ_FAULT_GATE:
+		return (held->gate);
+	case ERX_DOM_OBJ_TIME_PAGE:
+		return (held->time_page);
+	default:
+		/*
+		 * A connection's or a device's: no creation names them. Not
+		 * ERX_CAP_NULL, which a budget argument reads as the caller's own.
+		 */
+		return (APPLY_NO_HANDLE);
+	}
+}
+
+/* Notes a handle the step made, with its budget, before anything else can fail. */
+static void
+apply_made(apply_t *apply, const erx_dom_step_t *step, uint64_t handle)
+{
+	apply->handles.made[step->obj] = handle;
+	apply->handles.charge[step->obj] = step->budget;
+}
+
+/*
+ * One step's call. A step that makes its object in one call breaks to the
+ * common apply_made; a step that makes its object and then configures it
+ * (GROUP, BELL, THREAD) notes the handle itself between the two calls and
+ * returns, so a failed second call still leaves the object to the undo.
+ */
+static int
+apply_step(apply_t *apply, const erx_dom_step_t *step)
+{
+	uint64_t budget = apply_object(apply, step->budget);
+	uint64_t handle = ERX_CAP_NULL;
+	uint64_t pages;
+	int status;
+
+	switch (step->kind) {
+	case ERX_DOM_STEP_CARVE:
+		/* A wall: guarantee and cap together (K32). */
+		pages = pages_of(step->size);
+		status = erx_budget_create(budget, ERX_BUDGET_WALL, pages, pages, &handle);
+		break;
+	case ERX_DOM_STEP_SPACE:
+		status = erx_space_create(budget, apply_object(apply, step->target),
+		    apply_object(apply, step->aux), step->label, step->flags,
+		    apply->lib->cap_limit, &handle);
+		break;
+	case ERX_DOM_STEP_GROUP:
+		return (apply_group(apply, step));
+	case ERX_DOM_STEP_MEM:
+		status = erx_mem_create(budget, pages_of(step->size) * ERX_PAGE_SIZE, 0, &handle);
+		break;
+	case ERX_DOM_STEP_BELL:
+		status = erx_irq_create(budget, ERX_CAP_NULL, ERX_IRQ_SOFT, 0, &handle);
+		if (status != ERX_OK)
+			return (status);
+		/* The library binds each bell itself: BIND says where deliveries go. */
+		apply_made(apply, step, handle);
+		return (erx_irq_bind(handle, apply_object(apply, step->target), step->label));
+	case ERX_DOM_STEP_SLICE:
+		status = erx_image_slice(budget, 0, step->index, step->count, &handle);
+		break;
+	case ERX_DOM_STEP_IMAGE_MAP:
+		return (erx_image_map(apply_object(apply, step->target), 0, step->index, &apply->pc));
+	case ERX_DOM_STEP_MAP:
+		return (apply_map(apply, step));
+	case ERX_DOM_STEP_INSTALL:
+		return (apply_install(apply, step));
+	case ERX_DOM_STEP_BOOTINFO:
+		return (apply_bootinfo(apply));
+	case ERX_DOM_STEP_THREAD:
+		return (apply_thread(apply, step));
+	default:
+		/* A device's steps belong to erx_dom_device_give, not to a creation. */
+		return (ERX_EINVAL);
+	}
+	if (status == ERX_OK)
+		apply_made(apply, step, handle);
+	return (status);
+}
+
+/* A group with the specification's grant, which the stopgap checks and does not keep. */
+static int
+apply_group(apply_t *apply, const erx_dom_step_t *step)
+{
+	const erx_grant_t *grant = step->flags == ERX_DOM_GROUP_SPACES ?
+	    &apply->plan->spec.spaces : &apply->plan->spec.grant;
+	uint64_t words[sizeof(*grant) / sizeof(uint64_t)];
+	uint64_t handle;
+	int status;
+
+	status = erx_group_create(apply_object(apply, step->budget),
+	    apply_object(apply, step->target), &handle);
+	if (status != ERX_OK)
+		return (status);
+	apply_made(apply, step, handle);
+	memcpy(words, grant, sizeof(words));
+	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
+		(void)erx_utcb_mr_store(erx_utcb_self(), word, words[word]);
+	return (erx_group_configure(handle));
+}
+
+/*
+ * A read-only mapping of the boot page or the release slice, of the size
+ * the plan gives, at an address the domain's space chooses, which the boot
+ * page then names.
+ */
+static int
+apply_map(apply_t *apply, const erx_dom_step_t *step)
+{
+	const uint64_t space = apply_object(apply, step->target);
+	uint64_t addr;
+	int status;
+
+	status = erx_vm_reserve(space, 0, step->size, 0, &addr);
+	if (status != ERX_OK)
+		return (status);
+	status = erx_vm_map(space, addr, step->size, apply_object(apply, step->obj), 0, ERX_PROT_R);
+	if (status != ERX_OK)
+		return (status);
+	if (step->obj == ERX_DOM_OBJ_SLICE)
+		apply->release_addr = addr;
+	else
+		apply->bootinfo_addr = addr;
+	return (ERX_OK);
+}
+
+/*
+ * One install (A7): a copy of the library's handle, its rights shrunk to the
+ * step's, passed into the domain's table. The value it takes there is what
+ * the boot page names.
+ */
+static int
+apply_install(apply_t *apply, const erx_dom_step_t *step)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t desc = 0, value = ERX_CAP_NULL;
+	int status;
+
+	(void)erx_msg_item_desc_rights_set(&desc, step->rights);
+	(void)erx_msg_item_desc_move_set(&desc, false);
+	(void)erx_utcb_mr_store(utcb, 0, desc);
+	(void)erx_utcb_mr_store(utcb, 1, apply_object(apply, step->obj));
+	status = erx_cap_pass(ERX_CAP_SELF, apply_object(apply, step->target), 1);
+	if (status != ERX_OK)
+		return (status);
+	(void)erx_utcb_mr_load(utcb, 1, &value);
+	apply->installed[step->obj] = value;
+	return (ERX_OK);
+}
+
+/*
+ * The domain's node name into node (APPLY_NODE_MAX bytes): its id in
+ * decimal, '@', and the library's host. False for a host longer than
+ * ERX_DOM_HOST_MAX, which the caller set.
+ */
+static bool
+apply_node(const erx_dom_lib_t *lib, uint32_t id, char *node, size_t *len)
+{
+	char digits[APPLY_ID_DIGITS];
+	size_t count = 0, used = 0;
+
+	if (lib->host_len > ERX_DOM_HOST_MAX)
+		return (false);
+	do {
+		digits[count++] = (char)('0' + id % 10);
+		id /= 10;
+	} while (id != 0);
+	while (count > 0)
+		node[used++] = digits[--count];
+	node[used++] = '@';
+	memcpy(node + used, lib->host, lib->host_len);
+	*len = used + lib->host_len;
+	return (true);
+}
+
+/* Writes the boot page through a mapping of the root's own, released after. */
+static int
+apply_bootinfo(apply_t *apply)
+{
+	const erx_dom_plan_t *plan = apply->plan;
+	const erx_dom_spec_t *spec = &plan->spec;
+	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
+	const erx_boot_words_t args = { spec->strings, spec->args_len };
+	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
+	char node[APPLY_NODE_MAX];
+	erx_boot_inputs_t inputs = { 0 };
+	uint64_t addr;
+	int status;
+
+	if (!apply_node(apply->lib, spec->id, node, &inputs.node_len))
+		return (ERX_EINVAL);
+	inputs.node = node;
+	inputs.domain_id = spec->id;
+	inputs.pack_flags = apply->lib->pack_flags;
+	inputs.capacity_mcpu = spec->grant.capacity_mcpu;
+	inputs.cpuset = spec->grant.cpuset;
+	inputs.budget = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_BUDGET] };
+	inputs.group = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_GROUP] };
+	inputs.time_page = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_TIME_PAGE] };
+	inputs.release = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_SLICE] };
+	inputs.release_addr = apply->release_addr;
+	inputs.crash_area = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_CRASH] };
+	/*
+	 * The domain writes its own side, sized to the system domain's lane, and
+	 * reads the system domain's, whose data area is the plan's reader.
+	 */
+	if (plan->connection != 0)
+		inputs.system_connection = (erx_boot_connection_t){
+		    .side = { .raw = apply->installed[ERX_DOM_OBJ_DOM_SIDE] },
+		    .peer_side = { .raw = apply->installed[ERX_DOM_OBJ_SYS_SIDE] },
+		    .peer_bell = { .raw = apply->installed[ERX_DOM_OBJ_SYS_BELL] },
+		    .label = ERX_DOM_SYSTEM_LABEL, .peer = ERX_DOM_SYSTEM_ID,
+		    .out_size = spec->system_lane, .in_size = plan->reader };
+	inputs.args = &args;
+	inputs.nargs = spec->args_len != 0;
+	inputs.env = &env;
+	inputs.nenv = spec->env_len != 0;
+	inputs.limits = spec->runtime_limits;
+
+	status = erx_vm_reserve(ERX_CAP_SELF, 0, ERX_PAGE_SIZE, 0, &addr);
+	if (status != ERX_OK)
+		return (status);
+	status = erx_vm_map(ERX_CAP_SELF, addr, ERX_PAGE_SIZE, page, 0, ERX_PROT_RW);
+	if (status == ERX_OK) {
+		const erx_boot_info_status_t built = erx_boot_info_build(&inputs,
+		    (void *)(uintptr_t)addr, ERX_PAGE_SIZE);
+
+		if (built != ERX_BOOT_INFO_OK)
+			status = ERX_EINVAL;
+	}
+	if (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) != ERX_OK && status == ERX_OK)
+		status = ERX_EINVAL;
+	return (status);
+}
+
+/* The first thread, stopped, at the image's entry with the boot page's address as its argument. */
+static int
+apply_thread(apply_t *apply, const erx_dom_step_t *step)
+{
+	erx_thread_start_t start = { 0 };
+	uint64_t words[sizeof(start) / sizeof(uint64_t)];
+	uint64_t handle;
+	int status;
+
+	start.regs.pc = apply->pc;
+	start.regs.gpr[0] = apply->bootinfo_addr;
+	memcpy(words, &start, sizeof(words));
+	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
+		(void)erx_utcb_mr_store(erx_utcb_self(), word, words[word]);
+	status = erx_thread_create(apply_object(apply, step->budget),
+	    apply_object(apply, step->target), apply_object(apply, step->aux),
+	    ERX_THREAD_CLASS_WORKER, &handle);
+	if (status == ERX_OK)
+		apply_made(apply, step, handle);
+	return (status);
+}
+
+/*
+ * Whether obj's charge leads to budget: obj is budget, or is charged to it or
+ * to a budget carved from it. A chain passes each made object once at most.
+ */
+static bool
+handles_under(const erx_dom_handles_t *handles, erx_dom_obj_t obj, erx_dom_obj_t budget)
+{
+	for (uint32_t hops = 0; hops < ERX_DOM_OBJ_MADE_COUNT && obj < ERX_DOM_OBJ_MADE_COUNT; hops++) {
+		if (obj == budget)
+			return (true);
+		obj = handles->charge[obj];
+	}
+	return (false);
+}
+
+/* Closes every handle whose object went with budget's destroy. */
+static void
+handles_close_under(erx_dom_handles_t *handles, erx_dom_obj_t budget)
+{
+	for (uint32_t obj = 0; obj < ERX_DOM_OBJ_MADE_COUNT; obj++) {
+		if (handles->made[obj] == ERX_CAP_NULL || !handles_under(handles, (erx_dom_obj_t)obj, budget))
+			continue;
+		(void)erx_cap_close(handles->made[obj]);
+		handles->made[obj] = ERX_CAP_NULL;
+	}
+}
+
+/*
+ * The undo of the first applied steps (A4): destroy the budgets they carved,
+ * last first, which deletes every object charged to them, then close the
+ * handles to what went. A destroy of a budget the library made cannot fail.
+ */
+static void
+apply_undo(apply_t *apply, uint32_t applied)
+{
+	erx_dom_obj_t undo[ERX_DOM_PLAN_STEPS_MAX];
+	const uint32_t count = erx_dom_plan_undo(apply->plan, applied, undo);
+
+	for (uint32_t index = 0; index < count; index++) {
+		if (apply->handles.made[undo[index]] == ERX_CAP_NULL)
+			continue;
+		(void)erx_object_destroy(apply->handles.made[undo[index]]);
+		handles_close_under(&apply->handles, undo[index]);
+	}
+}
+
+/* Copies the record's capabilities in the view from the handles the library keeps for it. */
+static void
+lib_view_caps(erx_dom_lib_t *lib, uint32_t slot)
+{
+	const uint64_t *made = lib->handles[slot].made;
+	erx_dom_t *dom = &lib->view.domains[slot];
+
+#define CAP(obj)	((erx_cap_t){ .raw = made[obj] })
+	dom->budget = CAP(ERX_DOM_OBJ_BUDGET);
+	dom->outer = CAP(ERX_DOM_OBJ_OUTER);
+	dom->space = CAP(ERX_DOM_OBJ_SPACE);
+	dom->group = CAP(ERX_DOM_OBJ_GROUP);
+	dom->spaces_group = CAP(ERX_DOM_OBJ_SPACES_GROUP);
+	dom->crash = CAP(ERX_DOM_OBJ_CRASH);
+	dom->bootinfo = CAP(ERX_DOM_OBJ_BOOTINFO);
+	dom->first_thread = CAP(ERX_DOM_OBJ_THREAD);
+#undef CAP
+}
+
+/* Keeps the creation's handles for its record, and fills its connection's row from them. */
+static void
+apply_keep(apply_t *apply, erx_dom_created_t *created)
+{
+	const erx_dom_plan_t *plan = apply->plan;
+	const uint64_t *made = apply->handles.made;
+	erx_dom_connection_t *row;
+
+	apply->lib->handles[plan->slot] = apply->handles;
+	lib_view_caps(apply->lib, plan->slot);
+	*created = (erx_dom_created_t){ .id = plan->spec.id, .connection = plan->connection };
+	if (plan->connection_row == ERX_DOM_NO_ROW)
+		return;
+	row = &apply->lib->view.connections[plan->connection_row];
+	row->budget_a = (erx_cap_t){ .raw = ERX_CAP_NULL };
+	row->budget_b = (erx_cap_t){ .raw = made[ERX_DOM_OBJ_SYS_BUDGET] };
+	row->side_a = (erx_cap_t){ .raw = made[ERX_DOM_OBJ_SYS_SIDE] };
+	row->side_b = (erx_cap_t){ .raw = made[ERX_DOM_OBJ_DOM_SIDE] };
+	row->bell_a = (erx_cap_t){ .raw = made[ERX_DOM_OBJ_SYS_BELL] };
+	row->bell_b = (erx_cap_t){ .raw = made[ERX_DOM_OBJ_DOM_BELL] };
+	created->side = made[ERX_DOM_OBJ_DOM_SIDE];
+	created->peer_side = made[ERX_DOM_OBJ_SYS_SIDE];
+	created->bell = made[ERX_DOM_OBJ_DOM_BELL];
+}
+
+/*
+ * Applies the plan's steps in order and records it. On a refusal, the steps
+ * applied so far are undone, the refused one included, since it may have
+ * made its object before it failed; undo reaches that object by its budget.
+ */
+static erx_status_t
+apply_plan(apply_t *apply, erx_dom_created_t *created)
+{
+	const erx_dom_plan_t *plan = apply->plan;
+	erx_status_t status = ERX_OK;
+	uint32_t applied;
+
+	for (applied = 0; applied < plan->nsteps; applied++) {
+#ifdef ERX_DOM_TEST_HOOKS
+		if (applied == apply->lib->fail_step) {
+			status = ERX_ENOMEM;
+			break;
+		}
+#endif
+		status = apply_step(apply, &plan->steps[applied]);
+		if (status != ERX_OK)
+			break;
+	}
+	if (status == ERX_OK)
+		status = erx_dom_plan_record(&apply->lib->view, plan);
+#ifdef ERX_DOM_TEST_HOOKS
+	apply->lib->failed_at = applied;
+#endif
+	if (status != ERX_OK) {
+		apply_undo(apply, applied < plan->nsteps ? applied + 1 : plan->nsteps);
+		return (status);
+	}
+	apply_keep(apply, created);
+	return (ERX_OK);
+}
+
+erx_status_t
+erx_dom_lib_create(erx_dom_lib_t *lib, const erx_dom_spec_t *req,
+    const erx_runtime_limits_t *limits, uint32_t given, erx_dom_created_t *created)
+{
+	/* A plan holds a specification with its strings: too large for a stack. */
+	static erx_dom_plan_t plan;
+	static apply_t apply;
+	erx_status_t status;
+
+	status = erx_dom_plan_request(&lib->view, req, limits, given, &plan);
+	if (status == ERX_OK) {
+		apply = (apply_t){ .lib = lib, .plan = &plan };
+		status = apply_plan(&apply, created);
+	}
+	/* No copy of the plan or its strings stays in these static buffers past the call. */
+	memset(&plan, 0, sizeof(plan));
+	memset(&apply, 0, sizeof(apply));
+	return (status);
+}
+
+/* The record holding id, or view.max_domains for none. */
+static uint32_t
+lib_slot(const erx_dom_lib_t *lib, uint32_t id)
+{
+	for (uint32_t slot = 0; id != 0 && slot < lib->view.max_domains; slot++)
+		if (lib->view.domains[slot].id == id)
+			return (slot);
+	return (lib->view.max_domains);
+}
+
+erx_status_t
+erx_dom_lib_start(erx_dom_lib_t *lib, uint32_t id)
+{
+	const uint32_t slot = lib_slot(lib, id);
+	erx_dom_t *dom;
+	erx_status_t status;
+
+	if (slot == lib->view.max_domains || lib->view.domains[slot].state != ERX_DOM_BUILT)
+		return (ERX_EINVAL);
+	dom = &lib->view.domains[slot];
+	status = erx_thread_start(dom->first_thread.raw);
+	if (status == ERX_OK)
+		dom->state = ERX_DOM_RUNNING;
+	return (status);
+}
+
+/* Performs a STOP action: the stop is noted before the space is told, so its exit record finds it. */
+static erx_status_t
+lib_stop(erx_dom_lib_t *lib, const erx_dom_action_t *action)
+{
+	erx_dom_t *dom = &lib->view.domains[action->slot];
+	erx_status_t status;
+
+	dom->stop = action->end;
+	status = erx_space_stop(dom->space.raw, action->status);
+	if (status != ERX_OK)
+		dom->stop = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
+	return (status);
+}
+
+erx_status_t
+erx_dom_lib_stop(erx_dom_lib_t *lib, uint32_t id, int64_t status)
+{
+	erx_dom_action_t action;
+	erx_status_t planned;
+
+	planned = erx_dom_plan_stop(&lib->view, id, status, &action);
+	if (planned != ERX_OK || action.kind != ERX_DOM_ACT_STOP)
+		return (planned);
+	return (lib_stop(lib, &action));
+}
+
+/* The made object whose handle is cap, or ERX_DOM_OBJ_MADE_COUNT for none. */
+static erx_dom_obj_t
+handles_find(const erx_dom_handles_t *handles, uint64_t cap)
+{
+	for (uint32_t obj = 0; cap != ERX_CAP_NULL && obj < ERX_DOM_OBJ_MADE_COUNT; obj++)
+		if (handles->made[obj] == cap)
+			return ((erx_dom_obj_t)obj);
+	return (ERX_DOM_OBJ_MADE_COUNT);
+}
+
+/*
+ * The record of the domain whose handles hold the teardown's capability
+ * number index: the destroyed or retired domain itself, or for a
+ * disconnect the party whose child budget it is (b alone for a system
+ * connection, whose child holds both sides). view.max_domains for none.
+ */
+static uint32_t
+teardown_owner(const erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown, uint32_t index)
+{
+	const erx_dom_connection_t *row;
+	bool between_domains;
+
+	if (teardown->kind != ERX_DOM_DISCONNECT)
+		return (teardown->index);
+	row = &lib->view.connections[teardown->index];
+	/* Two budgets are a connection between two domains, a's first; one is a system connection's, b's. */
+	between_domains = teardown->ndestroy == 2;
+	return (lib_slot(lib, between_domains && index == 0 ? row->a : row->b));
+}
+
+/*
+ * Destroys the budgets the teardown names, each found among the handles of
+ * the domain it belongs to before any is destroyed, then closes the handles
+ * to what went and copies the records' capabilities again. ERX_EINVAL,
+ * destroying nothing, when a capability is not among its owner's handles: a
+ * value that matched elsewhere could name another domain's object.
+ */
+static erx_status_t
+teardown_apply(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
+{
+	uint32_t owner[2];
+	erx_dom_obj_t obj[2];
+	const uint32_t count = teardown->ndestroy;
+
+	if (count > 2)
+		return (ERX_EINVAL);
+	for (uint32_t index = 0; index < count; index++) {
+		owner[index] = teardown_owner(lib, teardown, index);
+		if (owner[index] >= lib->view.max_domains)
+			return (ERX_EINVAL);
+		obj[index] = handles_find(&lib->handles[owner[index]], teardown->destroy[index].raw);
+		if (obj[index] == ERX_DOM_OBJ_MADE_COUNT)
+			return (ERX_EINVAL);
+	}
+	for (uint32_t index = 0; index < count; index++) {
+		(void)erx_object_destroy(teardown->destroy[index].raw);
+		handles_close_under(&lib->handles[owner[index]], obj[index]);
+		lib_view_caps(lib, owner[index]);
+	}
+	return (ERX_OK);
+}
+
+erx_status_t
+erx_dom_lib_disconnect(erx_dom_lib_t *lib, uint32_t number)
+{
+	erx_dom_teardown_t teardown;
+	erx_status_t status;
+
+	status = erx_dom_plan_disconnect(&lib->view, number, &teardown);
+	if (status == ERX_OK)
+		status = teardown_apply(lib, &teardown);
+	if (status != ERX_OK)
+		return (status);
+	memset(&lib->view.connections[teardown.index], 0, sizeof(lib->view.connections[0]));
+	return (ERX_OK);
+}
+
+erx_status_t
+erx_dom_lib_retire(erx_dom_lib_t *lib, uint32_t id)
+{
+	erx_dom_teardown_t teardown;
+	erx_status_t status;
+
+	status = erx_dom_plan_retire(&lib->view, id, &teardown);
+	if (status == ERX_OK)
+		status = teardown_apply(lib, &teardown);
+	if (status != ERX_OK)
+		return (status);
+	erx_dom_retire_record(&lib->view, &teardown);
+	memset(&lib->handles[teardown.index], 0, sizeof(lib->handles[0]));
+	return (ERX_OK);
+}
+
+erx_status_t
+erx_dom_lib_take(uint64_t deadline, uint64_t *label, erx_fault_t *record)
+{
+	const erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t words[sizeof(*record) / sizeof(uint64_t)];
+	erx_status_t status;
+
+	status = erx_ipc_wait(deadline, label);
+	if (status != ERX_OK)
+		return (status);
+	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
+		words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
+	memcpy(record, words, sizeof(words));
+	return (ERX_OK);
+}
+
+bool
+erx_dom_lib_record(erx_dom_lib_t *lib, uint64_t label, const erx_fault_t *record,
+    erx_dom_report_t *report)
+{
+	erx_dom_action_t action;
+	erx_dom_t *dom;
+
+	erx_dom_record_step(&lib->view, label, record, &action);
+	switch (action.kind) {
+	case ERX_DOM_ACT_STOP:
+		/* A space the backend will not stop keeps its fault; nothing else can end it. */
+		(void)lib_stop(lib, &action);
+		return (false);
+	case ERX_DOM_ACT_END:
+		dom = &lib->view.domains[action.slot];
+		/*
+		 * The space has ended whatever the teardown does. A refusal can come
+		 * only from a library whose handles lost the budget, and leaves its
+		 * objects in place rather than destroy what another value names.
+		 */
+		(void)teardown_apply(lib, &action.teardown);
+		dom->end = action.end;
+		dom->record = *record;
+		dom->state = ERX_DOM_ENDED;
+		*report = (erx_dom_report_t){ .id = dom->id, .end = action.end, .record = *record };
+		return (true);
+	case ERX_DOM_ACT_DROP:
+	default:
+		return (false);
+	}
+}

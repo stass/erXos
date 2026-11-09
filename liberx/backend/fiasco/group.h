@@ -40,6 +40,12 @@ int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
 /* The service's group bodies. erx_group_create's: a task is ERX_ENOTSUP. */
 int	erx_fiasco_group_create_body(uint32_t task, uint64_t budget, uint64_t *group);
 /*
+ * erx_group_configure on a group the root did not take as its own: a handle that names
+ * no group of task's is the lookup's refusal, an empty CPU set ERX_EINVAL; the grant is
+ * otherwise accepted and not kept, since nothing in the stopgap reads it.
+ */
+int	erx_fiasco_group_configure_body(uint32_t task, const erx_fiasco_group_configure_request_t *request);
+/*
  * Before a thread's kernel objects: the record of the group a thread created in task by
  * caller joins, or ERX_FIASCO_GROUP_NONE for ERX_CAP_NULL, which names none. A group
  * homed in another task, or a homeless one while task is another group's home, is

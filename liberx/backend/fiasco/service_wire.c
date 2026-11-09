@@ -108,6 +108,8 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_mem_copy_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_RELEASE_ENTRY:
 		return (sizeof(erx_fiasco_release_entry_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_GROUP_CONFIGURE:
+		return (sizeof(erx_fiasco_group_configure_request_t) / sizeof(uint64_t));
 	default:
 		return (0);
 	}

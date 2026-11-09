@@ -53,8 +53,12 @@ typedef struct erx_boot_inputs {
 	uint32_t		 flags;
 	uint32_t		 pack_flags;
 	uint32_t		 capacity_mcpu;
+	erx_cap_t		 budget;	/* a domain's: the values its installs gave */
 	erx_cap_t		 group;
 	erx_cap_t		 time_page;
+	erx_cap_t		 release;
+	erx_cap_t		 crash_area;
+	erx_boot_connection_t	 system_connection;	/* its peer node fields left 0 (TODO.md) */
 	uint64_t		 release_addr;
 	uint64_t		 cpuset;
 	const char		*node;

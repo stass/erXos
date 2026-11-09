@@ -51,6 +51,17 @@ erx_group_grant_store(erx_utcb_t *utcb, const erx_share_t *grant)
 		atomic_store_explicit(&utcb->mr[word], copy.words[word], memory_order_relaxed);
 }
 
+/* The grant a caller of erx_group_configure put in its UTCB. */
+static inline erx_share_t
+erx_group_grant_load(const erx_utcb_t *utcb)
+{
+	erx_group_grant_words_t copy;
+
+	for (size_t word = 0; word < ERX_GROUP_GRANT_WORDS; word++)
+		copy.words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
+	return (copy.grant);
+}
+
 /* What a caller of erx_group_info takes from its UTCB. */
 static inline erx_info_group_t
 erx_info_group_load(const erx_utcb_t *utcb)
@@ -66,13 +77,11 @@ erx_info_group_load(const erx_utcb_t *utcb)
 static inline int
 erx_backend_group_configure(const erx_utcb_t *utcb, _Atomic uint64_t *cpuset)
 {
-	erx_group_grant_words_t copy;
+	const erx_share_t grant = erx_group_grant_load(utcb);
 
-	for (size_t word = 0; word < ERX_GROUP_GRANT_WORDS; word++)
-		copy.words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
-	if (copy.grant.cpuset == 0)
+	if (grant.cpuset == 0)
 		return (ERX_EINVAL);
-	atomic_store_explicit(cpuset, copy.grant.cpuset, memory_order_relaxed);
+	atomic_store_explicit(cpuset, grant.cpuset, memory_order_relaxed);
 	return (ERX_OK);
 }
 

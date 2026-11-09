@@ -98,7 +98,7 @@ static bool	dom_strings(const erx_dom_spec_t *);
 static bool	dom_reader_lane(const erx_dom_spec_t *, uint64_t *);
 static erx_status_t dom_check_origin(const erx_dom_spec_t *,
 		    const erx_dom_view_t *);
-static void	dom_spec_request(const erx_dom_view_t *,
+static erx_status_t	dom_spec_request(const erx_dom_view_t *,
 		    const erx_dom_principal_t *, const erx_dom_spec_t *,
 		    const erx_runtime_limits_t *, uint32_t, erx_dom_spec_t *);
 static void	dom_spec_configured(const erx_dom_view_t *, uint32_t,
@@ -108,7 +108,7 @@ static void	dom_spec_partial(const erx_dom_view_t *, uint32_t, uint32_t,
 static erx_status_t dom_plan(const erx_dom_spec_t *, const erx_dom_view_t *,
 		    erx_dom_plan_t *);
 static erx_status_t dom_check_files(const erx_dom_spec_t *,
-		    const erx_dom_view_t *, bool *);
+		    const erx_dom_view_t *, bool *, uint64_t *);
 static erx_status_t dom_check_sizes(const erx_dom_spec_t *,
 		    const erx_dom_view_t *, uint64_t *, uint64_t *);
 static erx_status_t dom_check_grants(const erx_dom_spec_t *,
@@ -310,14 +310,18 @@ dom_check_origin(const erx_dom_spec_t *spec, const erx_dom_view_t *view)
  * The runtime is an accepted image and the release a slice of ordinary
  * files. A partial-boot domain runs a native program with no release. A
  * file the boot marks ERX_ENTRY_SEAL is the vault's, whose domain is
- * refused until the vault exists.
+ * refused until the vault exists. *span is the bytes the release's slice
+ * covers, the backend's own sum: from its first file's offset to its last
+ * file's end rounded up to a page; 0 for no release.
  */
 static erx_status_t
 dom_check_files(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
-    bool *jit)
+    bool *jit, uint64_t *span)
 {
 	const erx_dom_file_t *file;
-	uint64_t end;
+	uint64_t last, end;
+
+	*span = 0;
 
 	if (spec->runtime >= view->nfiles)
 		return (ERX_EINVAL);
@@ -331,15 +335,25 @@ dom_check_files(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	if (spec->origin.kind == ERX_DOM_PARTIAL_BOOT)
 		return (spec->release == 0 && spec->release_files == 0 ?
 		    ERX_OK : ERX_EINVAL);
-	end = (uint64_t)spec->release + spec->release_files;
-	if (spec->release_files == 0 || end > view->nfiles)
+	last = (uint64_t)spec->release + spec->release_files;
+	if (spec->release_files == 0 || last > view->nfiles)
 		return (ERX_EINVAL);
-	for (uint32_t index = spec->release; index < end; index++) {
+	for (uint32_t index = spec->release; index < last; index++) {
 		file = &view->files[index];
 		if (file->kind != ERX_ENTRY_FILE ||
 		    (file->flags & (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) != 0)
 			return (ERX_EINVAL);
 	}
+	/* The span: from the first file's offset to the last file's end, in whole pages. */
+	file = &view->files[last - 1];
+	if (!dom_add(file->offset, file->size, &end) ||
+	    !dom_add(end, ERX_PAGE_SIZE - 1, &end))
+		return (ERX_EINVAL);
+	end -= end % ERX_PAGE_SIZE;
+	/* A span of 0 is the host manifest check's, whose files have no bytes; the slice refuses it. */
+	if (end < view->files[spec->release].offset)
+		return (ERX_EINVAL);
+	*span = end - view->files[spec->release].offset;
 	return (ERX_OK);
 }
 
@@ -458,16 +472,20 @@ dom_check_room(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
  * owns set here, and the runtime limits not given taken from the
  * principal's defaults. The strings past the arguments and environment
  * are zeroed, so nothing the caller left there reaches the boot page.
+ * ERX_EINVAL when the copy's strings overrun their buffer.
  */
-static void
+static erx_status_t
 dom_spec_request(const erx_dom_view_t *view,
     const erx_dom_principal_t *principal, const erx_dom_spec_t *req,
     const erx_runtime_limits_t *limits, uint32_t given, erx_dom_spec_t *spec)
 {
 	const erx_runtime_limits_t *fallback = &principal->default_limits;
-	size_t used = (size_t)req->args_len + req->env_len;
+	size_t used;
 
 	*spec = *req;
+	if ((uint64_t)spec->args_len + spec->env_len > sizeof(spec->strings))
+		return (ERX_EINVAL);
+	used = (size_t)spec->args_len + spec->env_len;
 	spec->version = ERX_DOM_SPEC_VERSION;
 	spec->origin = (erx_dom_origin_t){ ERX_DOM_REQUEST, ERX_MF_NONE };
 	spec->system_lane = view->system_lane;
@@ -490,6 +508,7 @@ dom_spec_request(const erx_dom_view_t *view,
 	DOM_PICK(10, peer_held_total);
 #undef DOM_PICK
 	spec->runtime_limits.reserved = 0;
+	return (ERX_OK);
 }
 
 /* The configured constructor: everything from the checked manifest row. */
@@ -614,9 +633,10 @@ dom_row_applies(const erx_dom_plan_t *plan, const erx_dom_grant_row_t *row)
  * budget, or the system connection's child carved from the outer budget.
  */
 static void
-dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t reader,
+dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t span,
     uint64_t child)
 {
+	const uint64_t reader = plan->reader;
 	const erx_dom_spec_t *spec = &plan->spec;
 	bool spaces = (spec->flags & ERX_DOM_SPACES) != 0;
 	bool connected = plan->connection != 0;
@@ -677,9 +697,11 @@ dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t reader,
 	    .target = ERX_DOM_OBJ_SPACE, .index = spec->runtime, .count = 1 });
 	if (release)
 		dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_MAP,
-		    .obj = ERX_DOM_OBJ_SLICE, .target = ERX_DOM_OBJ_SPACE });
+		    .obj = ERX_DOM_OBJ_SLICE, .target = ERX_DOM_OBJ_SPACE,
+		    .size = span });
 	dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_MAP,
-	    .obj = ERX_DOM_OBJ_BOOTINFO, .target = ERX_DOM_OBJ_SPACE });
+	    .obj = ERX_DOM_OBJ_BOOTINFO, .target = ERX_DOM_OBJ_SPACE,
+	    .size = ERX_PAGE_SIZE });
 
 	/* Installs come only from erx_dom_grants, one per row that applies. */
 	for (size_t index = 0; index < ERX_DOM_GRANTS_ROWS; index++) {
@@ -703,14 +725,18 @@ erx_dom_plan_request(const erx_dom_view_t *view, const erx_dom_spec_t *req,
 {
 	const erx_dom_principal_t *principal;
 	erx_dom_spec_t spec;
+	erx_status_t status;
 
 	principal = dom_principal(view, req->principal);
 	if (principal == NULL || (given & ~ERX_DOM_LIMITS_ALL) != 0 ||
-	    (given != 0 && limits == NULL) ||
-	    (uint64_t)req->args_len + req->env_len > ERX_BOOT_STRINGS_MAX)
+	    (given != 0 && limits == NULL))
 		return (ERX_EINVAL);
-	dom_spec_request(view, principal, req, limits, given, &spec);
-	return (dom_plan(&spec, view, plan));
+	status = dom_spec_request(view, principal, req, limits, given, &spec);
+	if (status == ERX_OK)
+		status = dom_plan(&spec, view, plan);
+	/* The request's strings stay in no stack copy past the call. */
+	memset(&spec, 0, sizeof(spec));
+	return (status);
 }
 
 erx_status_t
@@ -747,7 +773,7 @@ dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 {
 	const erx_dom_principal_t *principal;
 	erx_dom_plan_t draft;
-	uint64_t reader, child;
+	uint64_t reader, child, span;
 	erx_status_t status;
 	bool jit;
 
@@ -764,7 +790,7 @@ dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	if (principal == NULL)
 		return (ERX_EINVAL);
 	if ((status = dom_check_origin(spec, view)) != ERX_OK ||
-	    (status = dom_check_files(spec, view, &jit)) != ERX_OK ||
+	    (status = dom_check_files(spec, view, &jit, &span)) != ERX_OK ||
 	    (status = dom_check_sizes(spec, view, &reader, &child)) != ERX_OK)
 		return (status);
 	if (spec->origin.kind != ERX_DOM_PARTIAL_BOOT &&
@@ -780,7 +806,8 @@ dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	    ERX_DOM_PARENT_SYSTEM : ERX_DOM_PARENT_PRINCIPAL;
 	if ((status = dom_check_room(spec, view, principal, &draft)) != ERX_OK)
 		return (status);
-	dom_plan_steps(&draft, jit, reader, child);
+	draft.reader = reader;
+	dom_plan_steps(&draft, jit, span, child);
 	if ((status = erx_dom_plan_check(&draft)) != ERX_OK)
 		return (status);
 	*plan = draft;
@@ -841,6 +868,8 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	dom->stop = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
 	dom->end = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
 	memset(&dom->record, 0, sizeof(dom->record));
+	/* The sum above was checked, so its two terms cannot wrap. */
+	dom->carved = spec->memory + spec->outer;
 	principal->domains++;
 	principal->carved = carved;
 	if (service)
@@ -927,7 +956,9 @@ dom_step_ok(const erx_dom_plan_t *plan, const erx_dom_step_t *step,
 		return (step->target == ERX_DOM_OBJ_SPACE &&
 		    made[ERX_DOM_OBJ_SPACE]);
 	case ERX_DOM_STEP_MAP:
-		return ((obj == ERX_DOM_OBJ_SLICE || obj == ERX_DOM_OBJ_BOOTINFO) &&
+		return ((obj == ERX_DOM_OBJ_SLICE ||
+		    (obj == ERX_DOM_OBJ_BOOTINFO && step->size == ERX_PAGE_SIZE)) &&
+		    step->size % ERX_PAGE_SIZE == 0 &&
 		    made[obj] && step->target == ERX_DOM_OBJ_SPACE &&
 		    made[ERX_DOM_OBJ_SPACE]);
 	case ERX_DOM_STEP_INSTALL:

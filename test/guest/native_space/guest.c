@@ -22,6 +22,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/group_report.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/launcher.h"
@@ -447,17 +448,24 @@ group_start(uint64_t space, uint64_t group, uint64_t argument)
  * cannot be destroyed while the root has threads. A domain's group takes its task as
  * home with the task's first thread, and goes with the task, so the root's handle to it
  * is stale once the task is joined. The root's dispatcher stays, so only cases that
- * may find the root with a group of its own follow.
+ * may find the root with a group of its own follow. The second group takes a grant.
  */
 static void
 case_groups(void)
 {
+	const erx_share_t grant = { .cpuset = UINT64_C(0x1) };
+	const erx_share_t empty = { .cpuset = 0 };
 	uint64_t own, second, domain, space, thread;
 	int64_t status = INT64_MIN;
 	bool passed = erx_group_create(0, 0, &own) == ERX_OK && erx_group_create(0, 0, &second) == ERX_OK &&
 	    erx_group_create(0, 0, &domain) == ERX_OK;
 
-	passed = passed && erx_thread_create(0, 0, second, ERX_THREAD_CLASS_WORKER, &thread) == ERX_ENOTSUP &&
+	/* A group the root holds that is not its own takes a grant the service checks and keeps none of. */
+	erx_group_grant_store(erx_utcb_self(), &grant);
+	passed = passed && erx_group_configure(second) == ERX_OK;
+	erx_group_grant_store(erx_utcb_self(), &empty);
+	passed = passed && erx_group_configure(second) == ERX_EINVAL &&
+	    erx_thread_create(0, 0, second, ERX_THREAD_CLASS_WORKER, &thread) == ERX_ENOTSUP &&
 	    erx_object_destroy(own) == ERX_ENOTSUP && erx_object_destroy(second) == ERX_OK;
 	if (passed && erx_fiasco_launch_make(program_entry, 0, &space, &program_pc) == ERX_OK) {
 		if (!group_start(space, domain, MODE_GROUP))

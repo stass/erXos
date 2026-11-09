@@ -1124,7 +1124,9 @@ baseline remains the manifest's; runtime changes do not edit it.
    5. slice the boot image for the release's files with
       `erx_image_slice`, charged to the domain's own budget; map the runtime
       image's executable with `erx_image_map`, the release slice read-only
-      with `erx_vm_map`, the boot information page read-only, and for the
+      with `erx_vm_map` over the span the plan computes from the boot image's
+      index (its first file's offset to its last file's end, rounded up to a
+      page, the slice's own extent), the boot information page read-only, and for the
       release marked `ERX_ENTRY_SEAL` the sealing page read-only;
    6. give the domain its capabilities through `erx_dom_install` (A7): its
       own budget with `ALLOC`, and nothing of its outer budget or of its

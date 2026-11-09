@@ -420,6 +420,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_mem_copy_body(decoded->task, words, &reply->first));
 	case ERX_FIASCO_CALL_RELEASE_ENTRY:
 		return (erx_fiasco_release_entry_body(decoded->task, words, reply));
+	case ERX_FIASCO_CALL_GROUP_CONFIGURE:
+		return (erx_fiasco_group_configure_body(decoded->task, words));
 	case ERX_FIASCO_CALL_IMAGE_MAP:
 		return (erx_fiasco_task_image_map_body(decoded->task, ((const erx_fiasco_image_map_request_t *)words)->space,
 		    ((const erx_fiasco_image_map_request_t *)words)->entry, &reply->first));

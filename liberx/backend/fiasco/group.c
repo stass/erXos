@@ -56,6 +56,18 @@ erx_fiasco_group_create_body(uint32_t task, uint64_t budget, uint64_t *group)
 }
 
 int
+erx_fiasco_group_configure_body(uint32_t task, const erx_fiasco_group_configure_request_t *request)
+{
+	uint32_t index;
+	int status;
+
+	status = erx_fiasco_object_find(task, request->group, ERX_BACKEND_OBJECT_GROUP, &index);
+	if (status != ERX_OK)
+		return (status);
+	return (request->cpuset == 0 ? ERX_EINVAL : ERX_OK);
+}
+
+int
 erx_fiasco_group_admit(uint32_t caller, uint32_t task, uint64_t group, uint32_t *record)
 {
 	uint32_t index, home;
@@ -167,12 +179,24 @@ group_is_root(uint64_t group)
 	return (atomic_load_explicit(&group_up, memory_order_acquire) && (group == group_root || group == ERX_CAP_SELF));
 }
 
+/*
+ * The root keeps its own group's CPU set, which erx_group_info reports. Any other group
+ * its caller holds the service checks and accepts, keeping nothing of the grant
+ * (docs/design-stopgap.md, "What Phase 1 defers").
+ */
 int
 erx_group_configure(uint64_t group)
 {
-	if (!group_is_root(group))
+	if (group == ERX_CAP_NULL)
 		return (ERX_EINVAL);
-	return (erx_backend_group_configure(erx_utcb_self(), &group_cpuset));
+	if (group_is_root(group))
+		return (erx_backend_group_configure(erx_utcb_self(), &group_cpuset));
+
+	const erx_fiasco_group_configure_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	    .group = group, .cpuset = erx_group_grant_load(erx_utcb_self()).cpuset };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_GROUP_CONFIGURE, &request, sizeof(request), &reply));
 }
 
 int

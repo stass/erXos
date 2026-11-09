@@ -44,12 +44,12 @@ static const erx_dom_connection_t fuzz_connections[2] = {
 };
 
 static const erx_dom_file_t fuzz_files[] = {
-	{ ERX_ENTRY_IMAGE, 0, true, 0 },
-	{ ERX_ENTRY_IMAGE, 0, true, ERX_IMAGE_JIT },
-	{ ERX_ENTRY_FILE, 0, false, 0 },
-	{ ERX_ENTRY_FILE, 0, false, 0 },
-	{ ERX_ENTRY_FILE, ERX_ENTRY_SYSTEM, false, 0 },
-	{ ERX_ENTRY_FILE, ERX_ENTRY_SEAL, false, 0 },
+	{ ERX_ENTRY_IMAGE, 0, true, 0, 1 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_IMAGE, 0, true, ERX_IMAGE_JIT, 2 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, 0, false, 0, 3 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, 0, false, 0, 4 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, ERX_ENTRY_SYSTEM, false, 0, 5 * ERX_PAGE_SIZE, 100 },
+	{ ERX_ENTRY_FILE, ERX_ENTRY_SEAL, false, 0, 6 * ERX_PAGE_SIZE, 100 },
 };
 
 static erx_grant_t

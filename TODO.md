@@ -148,8 +148,7 @@ it; git history is the record of completed work.
   the native suites inspect only data after protection changes. The `native_memory` suite needs
   that case once BeamAsm's JIT alias exists.
 * [Medium] stopgap, `liberx/backend/fiasco`, call table of `docs/design-stopgap.md`: `erx_cap_dup`, `erx_cap_close`,
-  `erx_object_destroy`, `erx_budget_create`, `erx_log_read`, `erx_group_configure` and
-  `erx_group_info` have no body. Their consumers are the Erlang NIF handles, the launcher, the domain library's root
+  `erx_object_destroy`, `erx_budget_create` and `erx_log_read` have no body. Their consumers are the Erlang NIF handles, the launcher, the domain library's root
   entry and the Erlang log reader, which arrive with M3; each gets its body and a `test/guest/function_api` row then.
   The pool counts pages for the root's one budget only, which the budget topic names `ERX_CAP_SELF`; a count for
   each budget follows `erx_budget_create`'s body.
@@ -192,8 +191,7 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`, `erx_fiasco_vm_contiguous_create`: a run taken by `erx_fiasco_contig_take`
   is not given back when `object_fill` then refuses (no label left, or no pool page for the object's runs), so a
   refused create leaves the run held.
-* [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: `erx_group_configure` and `_info` have no body until the adapter
-  (M3) calls them; an IRQ object is never unbound or destroyed, which a restarted block driver would want.
+* [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never unbound or destroyed, which a restarted block driver would want.
 * [Low] stopgap, `liberx/backend/fiasco/entropy.c`, `vm.c`: what needs the root to read the manifest. The generator starts from the
   counter alone, not yet the manifest's seed; one contiguous pool exists whatever the device entries ask for, and it serves any device.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/core/vm_table.c`: the range table sees an object's mapping as uncommitted, so
@@ -814,14 +812,33 @@ it; git history is the record of completed work.
   file refuses `erx_boot_info` with a zero page and `erx_time_wall_ns` as unavailable,
   so the domain runtime image (`runtimes/emu`) ends at its boot page until a task's
   start (BK11) and ERTS in a domain (RT1) serve them.
-* [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`), before
-  DL2's apply phase calls it: the counts it keeps (a principal's `domains` and
-  `carved`, the flat `service_grants` list) have no inverse, since `erx_dom_t` keeps
-  neither `memory`, `outer` nor the grant, so a destroy, retire or restart cannot take
-  them back, and a restarted configured domain would count its grant twice. Derive
-  them from the records instead, as a party's connections are derived from the rows
-  (store `memory`, `outer` and the grant in the record), which deletes `service_grants`
-  and its capacity check. Also: the record fills only the plan-made fields and leaves
+* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page's
+  system connection names no peer node (`peer_node_off`, `peer_node_len` stay 0), so a
+  domain cannot tell the system domain's node name from its boot page.
+* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page is
+  incomplete: the `ERX_DOM_SPACES` sub-space group's install has no field in
+  `erx_boot_info`, `ERX_BOOT_DET` is never passed on, and `space`, `group_ctl` and
+  `group_stat` stay 0. Settle the fields with the runtime's reader (RT1).
+* [Medium] domain library, `liberx/system/dom_apply.c`: two stopgap details reach permanent
+  code: the fault thread's `erx_dom_lib_take` uses the stopgap's `erx_ipc_wait(deadline,
+  *label)` before the target receive signature is settled (the `erx_ipc_wait` item above),
+  and the boot image's handle is passed as 0 to `erx_image_slice` and `erx_image_map`;
+  `erx_dom_held_t` should hold the image's handle.
+* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_install`): design-system.md A7
+  asks that every `erx_cap_pass` of the library go through one function, `erx_dom_install`,
+  with a chokepoint rule in `tools/lib/erx/chokepoint_rules/` and its seeded violation;
+  `apply_install` takes its rights from an `erx_dom_grants` row but is neither so named nor
+  checked by a rule.
+* [Medium] domain library, `test/guest/native_domain`: no case fails a step after it made its
+  object (a bell's bind, a group's configure), and none checks that the root's handle table
+  returns to its starting occupancy after a retire or an undo, which would catch a handle the
+  library forgot to close.
+* [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the flat
+  `service_grants` list has no inverse, since `erx_dom_t` keeps no grant, so a retire or
+  restart of a configured domain cannot take its grant back, and a restarted configured
+  domain would count its grant twice. A principal's `domains` and `carved` are given back
+  by `erx_dom_retire_record` from the record's `carved`; derive the grants from the records
+  too (store the grant in the record), which deletes `service_grants` and its capacity check. Also: the record fills only the plan-made fields and leaves
   the capability fields of a reused slot for the applier, so one function should write
   the whole record from the plan and the apply's made objects; dropping `const` on the
   view's tables lets every planner write them, so give the record functions their own

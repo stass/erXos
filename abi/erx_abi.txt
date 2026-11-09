@@ -399,6 +399,7 @@ enum fiasco_call u32
   value image_slice 44
   value mem_copy 45
   value release_entry 46
+  value group_configure 47
 
 # erx_object_info's topics and the report each writes (docs/design-abi.md,
 # "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
@@ -687,6 +688,13 @@ layout erx_fiasco_cap_request wire_le 8 16
 layout erx_fiasco_group_create_request wire_le 8 16
   field caller u64 0
   field budget u64 8
+
+# erx_group_configure on a group other than the root's own, from a holder
+# of its handle: the grant's CPU set, which the service checks and ignores.
+layout erx_fiasco_group_configure_request wire_le 8 24
+  field caller u64 0
+  field group u64 8
+  field cpuset u64 16
 
 # A task's dispatcher, which one of the task's own threads names once it has
 # started it (docs/design-stopgap.md, "Interrupts and readiness").

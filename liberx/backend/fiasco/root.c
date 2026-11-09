@@ -31,6 +31,7 @@
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/runtime_entry.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "liberx/backend/fiasco/watchdog_thread.h"
 
@@ -79,12 +80,18 @@ erx_fiasco_root_main(void)
 static const char *
 root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_boot_args_t *boot_args)
 {
-	erx_pack_view_t pack;
+	/*
+	 * The archive's view outlives the boot: the service slices and maps the image's
+	 * entries through it for every domain the domain library builds (slice.c). Its
+	 * bytes are the handoff's image, mapped for the root's life.
+	 */
+	static erx_pack_view_t pack;
 	const char *reason;
 
 	reason = erx_fiasco_root_open(handoff, &pack);
 	if (reason != NULL)
 		return (reason);
+	erx_fiasco_task_set_archive(&pack);
 	reason = erx_fiasco_root_read_manifest(&pack, manifest);
 	if (reason != NULL)
 		return (reason);

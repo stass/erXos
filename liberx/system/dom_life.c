@@ -27,6 +27,8 @@
 
 static bool	life_add(uint64_t, uint64_t, uint64_t *);
 static bool	life_alive(const erx_dom_t *);
+static erx_dom_principal_t *life_principal(const erx_dom_view_t *, uint32_t);
+static bool	life_gives_back(const erx_dom_view_t *, const erx_dom_t *);
 static uint32_t	life_slot(const erx_dom_view_t *, uint64_t);
 static uint32_t	life_connections(const erx_dom_view_t *, uint32_t);
 static bool	life_room(const erx_dom_view_t *, const erx_dom_t *);
@@ -51,6 +53,29 @@ static bool
 life_alive(const erx_dom_t *dom)
 {
 	return (dom->state == ERX_DOM_BUILT || dom->state == ERX_DOM_RUNNING);
+}
+
+/* The principal numbered number, or NULL. */
+static erx_dom_principal_t *
+life_principal(const erx_dom_view_t *view, uint32_t number)
+{
+	for (uint32_t index = 0; number != 0 && index < view->nprincipals; index++)
+		if (view->principals[index].number == number)
+			return (&view->principals[index]);
+	return (NULL);
+}
+
+/*
+ * Whether dom's principal counts it, so its retire can give the domain
+ * and its carved bytes back without wrapping either count.
+ */
+static bool
+life_gives_back(const erx_dom_view_t *view, const erx_dom_t *dom)
+{
+	const erx_dom_principal_t *principal = life_principal(view, dom->principal);
+
+	return (principal != NULL && principal->domains != 0 &&
+	    principal->carved >= dom->carved);
 }
 
 /*
@@ -347,7 +372,8 @@ erx_dom_plan_retire(const erx_dom_view_t *view, uint32_t id,
 	const erx_dom_connection_t *row;
 
 	if (slot == view->max_domains ||
-	    view->domains[slot].state != ERX_DOM_ENDED)
+	    view->domains[slot].state != ERX_DOM_ENDED ||
+	    !life_gives_back(view, &view->domains[slot]))
 		return (ERX_EINVAL);
 	/* Every child of an outer budget is a connection's (A5). */
 	for (uint32_t index = 0; index < view->max_connections; index++) {
@@ -359,6 +385,19 @@ erx_dom_plan_retire(const erx_dom_view_t *view, uint32_t id,
 	    .index = slot, .ndestroy = 1,
 	    .destroy = { view->domains[slot].outer } };
 	return (ERX_OK);
+}
+
+void
+erx_dom_retire_record(erx_dom_view_t *view,
+    const erx_dom_teardown_t *teardown)
+{
+	erx_dom_t *dom = &view->domains[teardown->index];
+	erx_dom_principal_t *principal = life_principal(view, dom->principal);
+
+	/* erx_dom_plan_retire checked that the counts hold the domain. */
+	principal->domains--;
+	principal->carved -= dom->carved;
+	*dom = (erx_dom_t){ .id = 0 };
 }
 
 erx_dom_end_t

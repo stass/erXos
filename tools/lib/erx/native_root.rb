@@ -80,8 +80,11 @@ module Erx
                       "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
                       "#{BACKEND}/task_refused.c", "#{BACKEND}/release_task.c", 'liberx/release_fs.c'].freeze
-    # The sources of SYSTEM that read musl's headers, which NativeRuntime's sysroot holds.
-    LIBC_SOURCES = %w[liberx/backend/core/boot_info.c].freeze
+    # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
+    # the domain library, and the native_domain root and string functions that link it.
+    LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
+                      liberx/system/dom_apply.c liberx/erx_lane.c test/guest/native_domain/guest.c
+                      test/guest/native_domain/string.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
                -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I build/gen -I build/gen/include -I include -I kernel/crypto -I build/gen/kernel/generated -I kernel/core -I .].freeze

@@ -116,6 +116,8 @@ typedef struct erx_dom {
 	erx_cap_t	first_thread;
 	uint32_t	system_connection;	/* its connection to the system domain */
 	uint32_t	connections;	/* its connections quota, the spec's */
+	uint64_t	carved;		/* bytes its two budgets took of its principal's,
+					 * which its retire gives back */
 	uint32_t	labels;		/* bell labels its event table has taken: the
 					 * system connection's is 1, and each
 					 * connection's bell takes the next */
@@ -232,6 +234,8 @@ typedef struct erx_dom_file {
 	uint8_t		flags;		/* ERX_ENTRY_SYSTEM, ERX_ENTRY_SEAL */
 	bool		image_ok;	/* image: manifest and ABI version accepted */
 	uint32_t	image_flags;	/* image: ERX_IMAGE_JIT */
+	uint64_t	offset;		/* its bytes' offset in the archive, and */
+	uint64_t	size;		/* their count: a release slice's span */
 } erx_dom_file_t;
 
 /* A checked configured-domain row of the system manifest. */
@@ -393,7 +397,7 @@ typedef struct erx_dom_step {
 	erx_dom_obj_t	budget;		/* the budget charged, or carved from */
 	erx_dom_obj_t	target;		/* the parent, space or group it goes into */
 	erx_dom_obj_t	aux;		/* SPACE: its fault gate; THREAD: its group */
-	uint64_t	size;		/* CARVE, MEM: bytes */
+	uint64_t	size;		/* CARVE, MEM, MAP: bytes */
 	uint32_t	index, count;	/* SLICE, IMAGE_MAP: boot image files */
 	uint32_t	label;		/* SPACE: the domain id; BELL: its label */
 	uint32_t	rights;		/* INSTALL: ERX_HR_* */
@@ -425,6 +429,8 @@ typedef struct erx_dom_plan {
 	uint32_t	slot;		/* the free record the domain takes */
 	uint32_t	connection;	/* its system connection's number; 0 for none */
 	uint32_t	connection_row;	/* that connection's row, or ERX_DOM_NO_ROW */
+	uint64_t	reader;		/* the data area of the lane the domain reads
+					 * from the system domain; 0 for none */
 	uint32_t	nsteps;
 	erx_dom_step_t	steps[ERX_DOM_PLAN_STEPS_MAX];
 } erx_dom_plan_t;
@@ -635,11 +641,17 @@ erx_status_t	erx_dom_plan_disconnect(const erx_dom_view_t *,
 /*
  * erx_dom_retire(id): destroys the ended domain's outer budget, with its
  * crash area, and frees its record. ERX_OK; ERX_EINVAL unless the domain
- * has ended; ERX_EBUSY while a connection row names it, since each such
- * row holds a child of its outer budget.
+ * has ended, or when its principal's counts do not hold it; ERX_EBUSY
+ * while a connection row names it, since each such row holds a child of
+ * its outer budget. Once the teardown is applied, erx_dom_retire_record
+ * gives the principal back the domain and the bytes its two budgets took,
+ * and frees the record; it cannot fail on the teardown erx_dom_plan_retire
+ * wrote for the same view.
  */
 erx_status_t	erx_dom_plan_retire(const erx_dom_view_t *, uint32_t id,
 		    erx_dom_teardown_t *);
+void		erx_dom_retire_record(erx_dom_view_t *,
+		    const erx_dom_teardown_t *);
 
 /*
  * What the library does next for a domain: the fault thread's answer to a

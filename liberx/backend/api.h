@@ -251,4 +251,28 @@ int	erx_machine_end(uint64_t res, uint32_t how);
 /* Tells the machine's watchdog that the caller's schedulers run. A store, and takes no lock. */
 int	erx_watchdog_pet(void) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * The calls the domain library (liberx/system) builds domains with, declared here so
+ * code outside a backend names no backend header. Each backend documents its own
+ * answers beside its definitions (liberx/backend/fiasco/service.h, group.h, vm.h,
+ * whose declarations these repeat); hosted, which makes no spaces, defines none of
+ * them, so only a native build links the library's apply phase.
+ */
+int	erx_mem_create(uint64_t budget, uint64_t size, uint32_t flags, uint64_t *mem) ERX_WARN_UNUSED_RESULT;
+int	erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group) ERX_WARN_UNUSED_RESULT;
+int	erx_space_create(uint64_t budget, uint64_t parent, uint64_t fault, uint64_t label, uint32_t flags,
+	    uint32_t cap_limit, uint64_t *space) ERX_WARN_UNUSED_RESULT;
+int	erx_image_map(uint64_t space, uint64_t image, uint64_t entry, uint64_t *start) ERX_WARN_UNUSED_RESULT;
+int	erx_space_stop(uint64_t space, int64_t status);
+int	erx_image_slice(uint64_t budget, uint64_t image, uint64_t first, uint64_t count, uint64_t *slice)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_cap_close(uint64_t cap) ERX_WARN_UNUSED_RESULT;
+int	erx_object_destroy(uint64_t object) ERX_WARN_UNUSED_RESULT;
+int	erx_budget_create(uint64_t parent, uint32_t kind, uint64_t guarantee, uint64_t cap, uint64_t *budget)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_cap_pass(uint64_t from, uint64_t to, uint32_t n) ERX_WARN_UNUSED_RESULT;
+int	erx_gate_create(uint64_t budget, uint64_t *gate) ERX_WARN_UNUSED_RESULT;
+int	erx_gate_bind(uint64_t gate, uint64_t thread, uint64_t label) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_wait(uint64_t deadline, uint64_t *label) ERX_WARN_UNUSED_RESULT;
+
 #endif /* ERX_BACKEND_API_H */
