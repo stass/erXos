@@ -25,6 +25,7 @@
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/log.h"
+#include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -442,7 +443,8 @@ group_start(uint64_t space, uint64_t group, uint64_t argument)
  * it, so a root thread in a second group is a second home group, refused, and the first
  * cannot be destroyed while the root has threads. A domain's group takes its task as
  * home with the task's first thread, and goes with the task, so the root's handle to it
- * is stale once the task is joined. Last, as the root's dispatcher stays.
+ * is stale once the task is joined. The root's dispatcher stays, so only cases that
+ * may find the root with a group of its own follow.
  */
 static void
 case_groups(void)
@@ -693,6 +695,60 @@ case_passing(void)
 	say_case("passing", passed);
 }
 
+/* Whether the root group's epoch moves past epoch before the deadline: some object of the group fired. */
+static bool
+epoch_moves(uint64_t epoch)
+{
+	const uint64_t deadline = erx_fiasco_clock_ns() + WAIT_NS;
+
+	while (atomic_load_explicit(&erx_fiasco_group_status()->epoch, memory_order_acquire) == epoch)
+		if (erx_fiasco_clock_ns() >= deadline)
+			return (false);
+	return (true);
+}
+
+/*
+ * Doorbells between tasks (docs/design-stopgap.md, "Interrupts and readiness"). The
+ * root binds a bell to a domain group that has no home yet, so the bind waits, and
+ * rings it before the task has a thread: the bind, made once the task's first thread
+ * fixes the home and its dispatcher registers, delivers that ring. The root passes the
+ * task its handles to the bell and to an object bound to the root's own group; the
+ * task's executor takes the bell's label, acks the bell and rings the root's object,
+ * which moves the root group's epoch. The task's end takes its group and the bell's
+ * bind with it, so the bell's destroy finds it unbound; the other is destroyed bound.
+ * A bound object's bind to another group is refused. After case_groups, whose first
+ * group is the root's own, which ERX_CAP_SELF names.
+ */
+static void
+case_doorbells(void)
+{
+	const uint64_t epoch = atomic_load_explicit(&erx_fiasco_group_status()->epoch, memory_order_acquire);
+	uint64_t domain = ERX_CAP_NULL, bell = ERX_CAP_NULL, back = ERX_CAP_NULL, task = 0, argument;
+	int64_t status = INT64_MIN;
+	bool passed = erx_group_create(0, 0, &domain) == ERX_OK && erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &bell) == ERX_OK &&
+	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &back) == ERX_OK && erx_irq_bind(bell, domain, BELL_LABEL) == ERX_OK &&
+	    erx_irq_bind(bell, ERX_CAP_SELF, BELL_LABEL) == ERX_ENOTSUP &&
+	    erx_irq_bind(back, ERX_CAP_SELF, BACK_LABEL) == ERX_OK && erx_irq_trigger(bell) == ERX_OK &&
+	    erx_fiasco_launch_make(program_entry, 0, &task, &program_pc) == ERX_OK;
+
+	item_put(0, bell, ERX_HR_TRIGGER | ERX_HR_ACK, false);
+	item_put(1, back, ERX_HR_TRIGGER, false);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 2) == ERX_OK &&
+	    erx_msg_item_desc_type_get(item_word(0, 0)) == ERX_K_IRQ && erx_msg_item_desc_type_get(item_word(1, 0)) == ERX_K_IRQ;
+	argument = MODE_BELL | (item_word(0, 1) & HANDLE_MASK) << BELL_SHIFT | (item_word(1, 1) & HANDLE_MASK) << BACK_SHIFT;
+	if (passed && group_start(task, domain, argument)) {
+		if (erx_fiasco_task_join_until(task, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+			status = INT64_MIN;
+	} else if (task != 0) {
+		task_drop(task);
+	}
+	say_count("bell_status", (uint64_t)status);
+	passed = passed && status == 0 && epoch_moves(epoch);
+	passed = passed && erx_object_destroy(domain) == ERX_ESTALE && erx_object_destroy(bell) == ERX_OK &&
+	    erx_object_destroy(back) == ERX_OK && erx_irq_trigger(bell) == ERX_ESTALE;
+	say_case("doorbells", passed);
+}
+
 /*
  * A task that holds the last handle of the budget its own space is charged to ends that
  * budget with its own end. The root moves the budget and a group charged to it into
@@ -826,6 +882,7 @@ erx_fiasco_root_main(void)
 	case_passing();
 	case_time();
 	case_budget_held();
+	case_doorbells();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

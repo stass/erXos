@@ -581,16 +581,20 @@ layout erx_fiasco_machine_end_request wire_le 8 24
   field res u64 8
   field how u64 16
 
-layout erx_fiasco_irq_create_request wire_le 8 24
+# erx_irq_create: the record is charged to budget, as every create's.
+layout erx_fiasco_irq_create_request wire_le 8 32
   field caller u64 0
   field kind u64 8
   field selector u64 16
+  field budget u64 24
 
+# erx_irq_bind to a group, ERX_CAP_SELF for the caller's home group; the
+# unbind is irq_unbind's erx_fiasco_irq_request.
 layout erx_fiasco_irq_bind_request wire_le 8 32
   field caller u64 0
   field irq u64 8
-  field thread u64 16
-  field record u64 24
+  field group u64 16
+  field label u64 24
 
 layout erx_fiasco_irq_request wire_le 8 16
   field caller u64 0

@@ -162,13 +162,10 @@ it; git history is the record of completed work.
   a umtx wait on the semaphore the park shares, so an up the race left over returns that wait early and is
   gone before the quiet park looks. The quiet park catches only an up arriving after `settle`; a wait that
   does not block on the semaphore, or a zero-deadline down right after the race, would catch both.
-* [Medium] stopgap, `liberx/backend/fiasco/object.c`: only memory objects are on the object records and handle
-  tables. IRQ objects keep the root's table in `irq.c`, whose index the group's stub also uses as the ready
-  record (`group.c`, `erx_irq_bind`), and a space handle is still the task's index, which the launcher turns
-  into the ended semaphore's slot without the service (`launcher.c`). Both move onto records with BK8a's
-  groups and BK5's space tree (the 1b-A package plan). Until then their values overlap memory handles, so
-  `erx_cap_close` or `erx_object_destroy` given a space or IRQ handle acts on whatever memory entry has that number,
-  and `erx_cap_pass` given an IRQ handle passes that memory entry instead of refusing it.
+* [Medium] stopgap, `liberx/backend/fiasco/object.c`: a space handle is still the task's index, which the
+  launcher turns into the ended semaphore's slot without the service (`launcher.c`). It moves onto records with
+  BK5's space tree (the 1b-A package plan). Until then its value overlaps object handles, so `erx_cap_close` or
+  `erx_object_destroy` given a space handle acts on whatever entry has that number.
 * [Medium] security residual, `liberx/backend/fiasco/vm.c`: nothing records `ERX_MEM_JIT` on an object, so any
   object maps read-write at one address and read-execute at another, a protect moves RW to RX freely, and the
   root maps RX into a child made without `ERX_SPACE_JIT`. No single mapping is ever writable and executable,
@@ -204,9 +201,6 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/beam/erl_crash_dump.c`, `beam/bif.c`, `sys/erxos/sys.c`: what `imports.txt` lists as `[stock_descriptors]`
   and the rest of `[stock_process]`: the crash dump's file, which `open` refuses with `ENOSYS` until the crash area replaces it (edit 34),
   `erlang:display` and `halt`'s output, the terminal's `sys_get_key` and `ethread`'s signal masks. Each is answered as `ENOSYS` tracing shows it.
-* [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
-  group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
-  The first native consumer needs the unbind defined in the interface, with its status checked.
 * [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
   `[stock_process]` and `[stock_descriptors]`, the UNIX process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
   Darwin's main thread, `nice`, `alarm`, `uname` and the crash dump's descriptors (edit 34). The first native boot answers each,
@@ -257,7 +251,6 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
-* [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never destroyed: a restarted driver keeps the one its device's record holds.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
@@ -475,9 +468,11 @@ it; git history is the record of completed work.
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
   the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
   and handles with generations; the next part of the port settles it with `libc-test` in a task.
-* [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
-  ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
-  and the task's objects released at its end.
+* [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: a task's dispatcher index is never cleared, so a task
+  that named an ordinary thread its dispatcher and let it exit would have later binds made to whatever thread takes
+  the index. The backend's own dispatcher never exits. A waiting bind is made only because `erx_fiasco_group_join`
+  and `erx_fiasco_dispatcher_set_body`, the two writers of a row's group and dispatcher, both call
+  `erx_fiasco_irq_group_ready`; one setter for both would make that hold by construction.
 * [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does.
 * [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
 * [Medium] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses. `libbeam.a`'s littlefs objects (and, in the BeamAsm flavour, asmjit's) are the one exception, by a hand-written case in `emulator_license` (`EMULATOR_ARCHIVE`) that nothing checks against the build: moving `lfs.o` out of `OS_OBJS` drops or misplaces littlefs's notice silently, and the archive is recorded `permanent` though littlefs is a stopgap. Replace the case with one table of the imports each archive holds, take each import's grant and notice from `config/provenance/import-notices.json`, and check the archive's members at pack time, as `CoreArchive::Built.objects` does for the boot cores.

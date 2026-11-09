@@ -430,13 +430,13 @@ bind_objects(void)
 	    .size = ERX_PAGE_SIZE, .line_count = 1, .lines = { UART_LINE } };
 	erx_device_spec_t too_small = spec;
 	uint32_t device, again;
-	uint64_t group, unused;
+	uint64_t group, unused, gone;
 
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		fail("erx: irq: no group FAILED\n");
-	/* A second group has no home, so a bind to it is not the root's; it goes at its destroy. */
-	if (erx_group_create(0, 0, &unused) != ERX_OK || erx_irq_bind(0, unused, 1) != ERX_EINVAL ||
-	    erx_object_destroy(unused) != ERX_OK)
+	/* A second group has no home, so nothing holds it but its handle, which its destroy leaves stale. */
+	if (erx_group_create(0, 0, &gone) != ERX_OK || erx_irq_bind(0, gone, 1) != ERX_EINVAL ||
+	    erx_object_destroy(gone) != ERX_OK)
 		fail("erx: irq: a second group was not a homeless record FAILED\n");
 	too_small.size = ERX_PAGE_SIZE / 2;
 	if (erx_device_open(&too_small, NULL, NULL, &device) != ERX_EINVAL)
@@ -459,7 +459,7 @@ bind_objects(void)
 	    erx_irq_bind(irq_other, group, LABEL_OTHER) != ERX_OK)
 		fail("erx: irq: the service refused a bind FAILED\n");
 	if (erx_irq_bind(77, group, 0) != ERX_EINVAL ||
-	    erx_irq_bind(irq_soft, group + 1, 0) != ERX_EINVAL || erx_irq_ack(77) != ERX_EINVAL ||
+	    erx_irq_bind(irq_soft, gone, 0) != ERX_ESTALE || erx_irq_ack(77) != ERX_EINVAL ||
 	    erx_irq_trigger(77) != ERX_EINVAL)
 		fail("erx: irq: a malformed call was not refused FAILED\n");
 	if (erx_group_take_ready(1) != ERX_ETYPE)

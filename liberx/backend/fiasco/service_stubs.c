@@ -362,6 +362,25 @@ erx_budget_watch(uint64_t budget, uint64_t irq, uint64_t threshold)
 	return (ERX_ENOTSUP);
 }
 
+/* A doorbell from any task holding the object: one service round trip (irq.c). */
+int
+erx_irq_trigger(uint64_t irq)
+{
+	const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_TRIGGER, &request, sizeof(request), &reply));
+}
+
+int
+erx_irq_ack(uint64_t irq)
+{
+	const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_ACK, &request, sizeof(request), &reply));
+}
+
 int
 erx_gate_create(uint64_t budget, uint64_t *gate)
 {

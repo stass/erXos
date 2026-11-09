@@ -17,6 +17,7 @@
 #define MODE_GROUP	6	/* in its domain group: its take is its own, which a worker may not make: ends with 0 */
 #define MODE_HOLDER	7	/* maps the object whose handle the root passed it, the next bytes, read-only: ends with 0 */
 #define MODE_TIME	8	/* finds TIME_FIRST_NS, raises its signal, sees TIME_SECOND_NS: ends with 0 */
+#define MODE_BELL	9	/* in its domain group: waits for its bell, then acks it and rings the root's: ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -35,5 +36,12 @@
 #define TIME_SECOND_NS	UINT64_C(0x2000000000000000)
 /* How far past either setting a read may land: the case's whole wait. */
 #define TIME_SLACK_NS	UINT64_C(10000000000)
+
+/* The doorbells case: where MODE_BELL finds its two handles, and the labels their binds give. */
+#define BELL_SHIFT	8u
+#define BACK_SHIFT	32u
+#define HANDLE_MASK	UINT64_C(0xffffff)
+#define BELL_LABEL	UINT64_C(0xbe11000000000001)
+#define BACK_LABEL	UINT64_C(0xbe11000000000002)
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

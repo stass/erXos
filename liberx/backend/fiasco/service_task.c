@@ -275,9 +275,9 @@ task_objects_make(uint32_t task)
 	    l4_obj_fpage(erx_fiasco_task_gate_cap(task), 0, L4_CAP_FPAGE_RWS),
 	    l4_map_obj_control(L4_BASE_PAGER_CAP, L4_MAP_ITEM_MAP))))
 		return (false);
-	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREAD_TABLE_BYTES, ERX_VM_FIXED,
+	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_TASK_AREA_BYTES, ERX_VM_FIXED,
 	    &reserved) == ERX_OK &&
-	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) == ERX_OK &&
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_TASK_AREA_BYTES, 0, NULL) == ERX_OK &&
 	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, ERX_FIASCO_TIME_PAGE_ADDR, ERX_PAGE_SIZE, ERX_VM_FIXED,
 	    &reserved) == ERX_OK && erx_fiasco_time_page_map(task) == ERX_OK);
 }
