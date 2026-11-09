@@ -62,13 +62,15 @@ pthread_setspecific sched_yield
 [page_size]
 getpagesize
 
-# The names libSystem's headers and the compiler make of the calls above.
+# The names libSystem's headers and the compiler make of the calls above, and of
+# C17's _Thread_local: a Mach-O thread-local variable is set up through
+# _tlv_bootstrap, where musl's static link needs no name.
 [libsystem]
 _DefaultRuneLocale __assert_rtn __chkstk_darwin
 __error __memcpy_chk __memmove_chk __stack_chk_fail __stack_chk_guard
 __stderrp __stdoutp __strcat_chk __strcpy_chk __tolower __toupper
 __swbuf __udivti3 bzero memset_pattern16 __darwin_check_fd_set_overflow
-pthread_equal
+pthread_equal _tlv_bootstrap
 
 # The names musl's headers and the compiler make of the calls above, and what the
 # native build's own libraries ask of it. zstd's trace hooks are weak and undefined.
