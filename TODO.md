@@ -182,8 +182,9 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`: a physical object's device window pages and a contiguous object's
   run are never given back, so a driver that makes and closes such objects in a loop uses the window or the
   contiguous pool up for good; each object, not each task, now holds them.
-* [Medium] stopgap, `liberx/backend/fiasco/time.c`: the time page is the root's own page, not yet mapped read-only into a
-  test task, whose reads need it; the second task's `erx_vm_map` is the mapping's way in.
+* [Medium] stopgap, `liberx/backend/fiasco/libc_task.c`: no suite yet starts a musl-linked task with a boot
+  information page as its first thread's argument; RT1's `native_domain` cell is the first that does, and should
+  also show a refused page ending the task with the reader's reason.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`: the page index's label map (`vm_label_take`, `vm_label_put`, and
   their use in `erx_fiasco_vm_task_open`, `_close` and `object_fill`) has no test, as `vm.c` builds only for the target and
   no suite makes more than a few tasks. A leaked or doubled label gives two tables one key. A host test should exhaust the

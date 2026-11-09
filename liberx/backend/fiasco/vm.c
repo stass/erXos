@@ -304,6 +304,12 @@ erx_fiasco_vm_task_window(uint32_t task, uint64_t addr)
 	return (erx_backend_vm_window(&vm_task(task)->table, addr));
 }
 
+uintptr_t
+erx_fiasco_vm_object_window(uint32_t object, uint64_t offset)
+{
+	return (erx_backend_vm_window(&vm_object(object)->table, VM_OBJECT_AREA_START + offset));
+}
+
 /*
  * Fills a new object's table with size bytes through these effects. An object over a
  * run names the run's first page, which vm_run_take reads; a pool object names 0. A

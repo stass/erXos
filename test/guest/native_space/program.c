@@ -17,6 +17,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "test/guest/native_space/modes.h"
 
@@ -114,6 +115,25 @@ mode_holder(uint64_t mem)
 	return (erx_vm_release(ERX_CAP_SELF, SHARED_ADDR, SHARED_PAGES * PAGE) == ERX_OK ? 0 : 52);
 }
 
+/* Reads the wall clock from the time page the service mapped: the root's first setting, then its second. */
+static int64_t
+mode_time(void)
+{
+	const uint64_t deadline = erx_time_monotonic_ns() + TIME_SLACK_NS;
+	uint64_t wall;
+
+	if (!erx_time_wall_ns(&wall) || wall < TIME_FIRST_NS || wall - TIME_FIRST_NS > TIME_SLACK_NS)
+		return (60);
+	atomic_store_explicit((_Atomic uint64_t *)(uintptr_t)SIGNAL_ADDR, 1, memory_order_release);
+	do {
+		if (!erx_time_wall_ns(&wall))
+			return (61);
+		if (erx_time_monotonic_ns() > deadline)
+			return (62);
+	} while (wall < TIME_SECOND_NS);
+	return (wall - TIME_SECOND_NS > TIME_SLACK_NS ? 63 : 0);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -132,6 +152,8 @@ erx_task_main(uint64_t argument)
 		return (mode_first(argument));
 	case MODE_HOLDER:
 		return (mode_holder(argument >> SLOT_SHIFT));
+	case MODE_TIME:
+		return (mode_time());
 	default:
 		return (90);
 	}

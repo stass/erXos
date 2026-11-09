@@ -8,34 +8,18 @@
  * domain's runtime image (NativeRoot::DOMAIN_RUNTIME) links: each refuses or reports
  * its value unavailable, as the call table answers a call it does not offer
  * (docs/design-stopgap.md, "The call table"). The root's own bodies in group.c,
- * irq.c, time.c, vm.c, watchdog_thread.c and runtime_entry.c read the root's
+ * irq.c, time_page.c, vm.c, watchdog_thread.c and runtime_entry.c read the root's
  * tables, which a task does not hold. A call the service comes to serve a task
  * moves from here to its stub in service_stubs.c.
  */
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/group.h"
-#include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
-#include "liberx/backend/runtime_entry.h"
-
-/*
- * A task holds no boot information page the service wrote. It gets a page of zeros,
- * which erx_boot_info_read refuses with its diagnostic, so a runtime started here ends
- * with the reader's reason rather than a fault on a missing page.
- */
-static _Alignas(ERX_PAGE_SIZE) const unsigned char no_boot_page[ERX_PAGE_SIZE];
-
-const erx_boot_info_t *
-erx_boot_info(void)
-{
-	return ((const erx_boot_info_t *)(const void *)no_boot_page);
-}
 
 int
 erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *window, uint64_t size)
@@ -87,14 +71,6 @@ int
 erx_watchdog_pet(void)
 {
 	return (ERX_ENOTSUP);
-}
-
-/* The root's time page is the root's memory, so a task has no wall time to read. */
-bool
-erx_time_wall_ns(uint64_t *wall_ns)
-{
-	(void)wall_ns;
-	return (false);
 }
 
 /*

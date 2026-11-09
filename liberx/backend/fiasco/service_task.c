@@ -38,6 +38,7 @@
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
+#include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/trace.h"
 #include "liberx/backend/fiasco/vm.h"
 
@@ -256,8 +257,8 @@ task_failed(l4_msgtag_t tag)
 
 /*
  * Everything a task has before its first thread: its space, with the thread table's
- * UTCB area, its ended semaphore, its gate mapped where its threads call, and its
- * committed thread table. False at the first step that fails, with what ran still there.
+ * UTCB area, its ended semaphore, its gate mapped where its threads call, its
+ * committed thread table and the time page. False at the first step that fails, with what ran still there.
  */
 static bool
 task_objects_make(uint32_t task)
@@ -276,7 +277,9 @@ task_objects_make(uint32_t task)
 		return (false);
 	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREAD_TABLE_BYTES, ERX_VM_FIXED,
 	    &reserved) == ERX_OK &&
-	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) == ERX_OK);
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) == ERX_OK &&
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, ERX_FIASCO_TIME_PAGE_ADDR, ERX_PAGE_SIZE, ERX_VM_FIXED,
+	    &reserved) == ERX_OK && erx_fiasco_time_page_map(task) == ERX_OK);
 }
 
 /*

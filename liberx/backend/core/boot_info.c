@@ -148,6 +148,7 @@ erx_boot_info_build(const erx_boot_inputs_t *inputs, void *page, size_t size)
 		.flags = inputs->flags,
 		.pack_flags = inputs->pack_flags,
 		.group = inputs->group,
+		.time_page = inputs->time_page,
 		.release_addr = inputs->release_addr,
 		.cpuset = inputs->cpuset,
 		.capacity_mcpu = inputs->capacity_mcpu,

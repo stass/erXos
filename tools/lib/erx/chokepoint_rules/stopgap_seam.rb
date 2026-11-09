@@ -101,6 +101,7 @@ module Erx
         liberx/backend/fiasco/thread.h
         liberx/backend/fiasco/time.c
         liberx/backend/fiasco/time.h
+        liberx/backend/fiasco/time_page.c
         liberx/backend/fiasco/time_table.c
         liberx/backend/fiasco/time_table.h
         liberx/backend/fiasco/thread_claim.c

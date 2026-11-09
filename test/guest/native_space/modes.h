@@ -16,6 +16,7 @@
 #define MODE_FIRST	5	/* finds FIRST_TAG above its mode, ends with FIRST_STATUS */
 #define MODE_GROUP	6	/* in its domain group: its take is its own, which a worker may not make: ends with 0 */
 #define MODE_HOLDER	7	/* maps the object whose handle the root passed it, the next bytes, read-only: ends with 0 */
+#define MODE_TIME	8	/* finds TIME_FIRST_NS, raises its signal, sees TIME_SECOND_NS: ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -29,5 +30,10 @@
 /* What the root passes a first thread it starts above MODE_FIRST, and what that thread ends with. */
 #define FIRST_TAG	UINT64_C(0x5eed)
 #define FIRST_STATUS	55
+/* The wall clock the root sets before it makes a MODE_TIME task, and once the task has read it. */
+#define TIME_FIRST_NS	UINT64_C(0x1000000000000000)
+#define TIME_SECOND_NS	UINT64_C(0x2000000000000000)
+/* How far past either setting a read may land: the case's whole wait. */
+#define TIME_SLACK_NS	UINT64_C(10000000000)
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

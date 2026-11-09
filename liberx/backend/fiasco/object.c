@@ -35,6 +35,8 @@ static void	object_unheld(uint32_t);
 
 /* Every object record, by index. */
 static erx_backend_grow_table_t object_records;
+/* The record erx_fiasco_object_keep keeps, or UINT32_MAX before it runs. */
+static uint32_t object_kept = UINT32_MAX;
 /* Each task's handle table, by the task's index. */
 static erx_backend_grow_table_t object_tables;
 
@@ -137,6 +139,13 @@ erx_fiasco_object_mapped(uint32_t index)
 }
 
 void
+erx_fiasco_object_keep(uint32_t index)
+{
+	erx_fiasco_object_mapped(index);
+	object_kept = index;
+}
+
+void
 erx_fiasco_object_unmapped(uint32_t index)
 {
 	erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
@@ -175,7 +184,7 @@ erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle)
 	if (status != ERX_OK)
 		return (status);
 	record = erx_backend_object_at(&object_records, index);
-	if (record->creator != task)
+	if (record->creator != task || index == object_kept)
 		return (ERX_ERIGHTS);
 	/* A group never goes before its threads, which end only by their own exit or with their task. */
 	if (record->kind == ERX_BACKEND_OBJECT_GROUP && erx_fiasco_group_home_has_threads(index))

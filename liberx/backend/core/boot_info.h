@@ -54,6 +54,7 @@ typedef struct erx_boot_inputs {
 	uint32_t		 pack_flags;
 	uint32_t		 capacity_mcpu;
 	erx_cap_t		 group;
+	erx_cap_t		 time_page;
 	uint64_t		 release_addr;
 	uint64_t		 cpuset;
 	const char		*node;

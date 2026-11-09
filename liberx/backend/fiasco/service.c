@@ -139,9 +139,11 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes)
 	reason = service_thread_table_init();
 	if (reason != NULL)
 		return (reason);
-	erx_fiasco_time_init();
 	erx_fiasco_entropy_init();
 	reason = erx_fiasco_task_table_init();
+	if (reason != NULL)
+		return (reason);
+	reason = erx_fiasco_time_init();
 	if (reason != NULL)
 		return (reason);
 	reason = service_start();

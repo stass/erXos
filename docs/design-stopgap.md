@@ -224,9 +224,9 @@ service's bodies directly.
    numbers and deterministic mode from the second.
 5. Builds the pool window and contiguous pools ([The pool](#the-pool)). If the pool and the root's
    image together hold less than the manifest's `root_memory`, it refuses the boot.
-6. Makes its own thread table ([Thread creation](#thread-creation)); fills the time page, a pool page
-   ([the call table](#the-call-table)); seeds
-   `rng.c`; creates its gate, the service
+6. Makes its own thread table ([Thread creation](#thread-creation)); seeds `rng.c`; makes its object
+   tables, then fills the time page, a pool page recorded as a memory object and kept until the
+   machine ends ([the call table](#the-call-table)); creates its gate, the service
    thread, stopped, with the `sigma0` gate as pager, and the watchdog with its configuration and start
    event (`watchdog.c:127`).
 7. Points its own `_pager` and `_exc_handler` at its gate and runs the service and the watchdog.

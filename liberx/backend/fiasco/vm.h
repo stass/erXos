@@ -48,6 +48,8 @@ int	erx_fiasco_vm_task_open(uint32_t task) ERX_WARN_UNUSED_RESULT;
 void	erx_fiasco_vm_task_close(uint32_t task);
 /* The window page behind a task's committed address, or 0. */
 uintptr_t	erx_fiasco_vm_task_window(uint32_t task, uint64_t addr);
+/* The window page behind a committed offset of the memory object at index, or 0. */
+uintptr_t	erx_fiasco_vm_object_window(uint32_t object, uint64_t offset);
 
 /*
  * One call's body, for this task. word is the flags of a reserve or the protection

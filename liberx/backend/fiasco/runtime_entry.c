@@ -26,6 +26,7 @@
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/runtime_entry.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/runtime_entry.h"
 
 /*
@@ -117,6 +118,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	inputs.pack_flags = handoff->flags;
 	inputs.capacity_mcpu = MCPU_PER_CPU * (uint32_t)__builtin_popcountll(cpuset);
 	inputs.group = (erx_cap_t){ .raw = group };
+	inputs.time_page = (erx_cap_t){ .raw = erx_fiasco_time_object() };
 	inputs.release_addr = (uint64_t)(uintptr_t)erx_release_addr();
 	inputs.cpuset = cpuset;
 	inputs.node = manifest.node;

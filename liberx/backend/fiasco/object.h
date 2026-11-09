@@ -65,6 +65,12 @@ void	erx_fiasco_object_end(uint32_t index);
 
 /* Counts a map of the object at index, which keeps it while it has no handle. */
 void	erx_fiasco_object_mapped(uint32_t index);
+/*
+ * Keeps the record at index until the machine ends, as the time page is kept: it counts
+ * one mapping that nothing removes, so no close ends it, and every destroy of it is
+ * ERX_ERIGHTS. One record is kept; the root's first thread keeps it before the service runs.
+ */
+void	erx_fiasco_object_keep(uint32_t index);
 /* Counts a mapping of it gone; the object goes once it has neither a handle nor a mapping. */
 void	erx_fiasco_object_unmapped(uint32_t index);
 

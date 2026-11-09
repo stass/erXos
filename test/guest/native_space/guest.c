@@ -28,6 +28,7 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
+#include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "test/guest/native_space/modes.h"
 
@@ -711,6 +712,36 @@ warm_up(void)
 		say("erx: space: warm-up refused\n");
 }
 
+/*
+ * A task reads the wall clock the root set before the task was made, raises its signal,
+ * and then sees the root move it: the task reads the root's one page, not a copy.
+ */
+static void
+case_time(void)
+{
+	uint64_t signal, signal_addr, space, deadline;
+	int64_t status = INT64_MIN;
+	bool passed = erx_time_set_wall(TIME_FIRST_NS) == ERX_OK && erx_mem_create(0, PAGE, 0, &signal) == ERX_OK &&
+	    erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &signal_addr) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, signal_addr, PAGE, signal, 0, ERX_PROT_RW) == ERX_OK && task_make(&space, SIGNAL_ADDR, 1) &&
+	    erx_vm_map(space, SIGNAL_ADDR, PAGE, signal, 0, ERX_PROT_RW) == ERX_OK &&
+	    erx_fiasco_launch_start(space, program_pc, MODE_TIME) == ERX_OK;
+	const bool started = passed;
+
+	/* A task that fails its first read never signals, and its join still shows why. */
+	deadline = erx_fiasco_clock_ns() + WAIT_NS;
+	while (passed && atomic_load_explicit((_Atomic uint64_t *)(uintptr_t)signal_addr, memory_order_acquire) == 0 &&
+	    erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + SHORT_NS, &status) == ERX_ETIMEDOUT)
+		passed = erx_fiasco_clock_ns() < deadline;
+	passed = passed && status == INT64_MIN && erx_time_set_wall(TIME_SECOND_NS) == ERX_OK;
+	if (started && status == INT64_MIN)
+		(void)erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status);
+	say_count("time_status", (uint64_t)status);
+	passed = passed && status == 0 && erx_vm_release(ERX_CAP_SELF, signal_addr, PAGE) == ERX_OK &&
+	    erx_cap_close(signal) == ERX_OK;
+	say_case("time", passed);
+}
+
 void
 erx_fiasco_root_main(void)
 {
@@ -740,6 +771,7 @@ erx_fiasco_root_main(void)
 	case_budget_destroy();
 	case_groups();
 	case_passing();
+	case_time();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

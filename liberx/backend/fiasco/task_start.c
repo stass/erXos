@@ -20,6 +20,7 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/task_start.h"
 #include "liberx/backend/fiasco/thread.h"
+#include "liberx/backend/fiasco/time.h"
 
 ERX_DECLARE_ABI_NOTE(erx_task_abi_note);
 
@@ -29,6 +30,13 @@ uint64_t
 erx_fiasco_service_gate(void)
 {
 	return (L4_BASE_PAGER_CAP);
+}
+
+/* The service mapped it at the task's creation (time_page.c). */
+const erx_time_page_t *
+erx_time_page(void)
+{
+	return ((const erx_time_page_t *)(uintptr_t)ERX_FIASCO_TIME_PAGE_ADDR);
 }
 
 void
