@@ -1240,9 +1240,9 @@ modules are marked P; process modules E.
 | `erx_ip4_wire`, `erx_ip4` | `ip.h`, `ip_input.c`, `ip_output.c`, `ip_options.c`, `ip_id.c` | IPv4 codec; input and output decisions | P |
 | `erx_ip4_reass` | `ip_reass.c` | IPv4 reassembly | P |
 | `erx_icmp4_wire`, `erx_icmp4` | `ip_icmp.c` | ICMP codec and decisions | P |
-| `erx_ip6_wire`, `erx_ip6` | `ip6_input.c`, `ip6_output.c`, `dest6.c`, `route6.c`, `scope6.c`, `ip6_id.c` | IPv6 codec with the extension-header walk; decisions | P |
+| `erx_ip6_wire`, `erx_ip6` | `ip6_input.c`, `ip6_output.c`, `dest6.c`, `route6.c`, `scope6.c`, `ip6_id.c`, the fragment-header checks of `frag6.c` | IPv6 codec with the extension-header walk; decisions | P |
 | `erx_ip6_reass` | `frag6.c` | IPv6 reassembly | P |
-| `erx_icmp6_wire`, `erx_icmp6` | `icmp6.c`, the option parsers of `nd6.c` | ICMPv6 and neighbour-discovery codec; decisions | P |
+| `erx_icmp6_wire`, `erx_icmp6` | `icmp6.c`, the option parsers of `nd6.c` and the option lengths `nd6_rtr.c` checks | ICMPv6 and neighbour-discovery codec; decisions | P |
 | `erx_nd6`, `erx_nd6_rtr` | `nd6.c`, `nd6_nbr.c`, `nd6_rtr.c`, `in6_ifattach.c` | neighbour cache, DAD; routers, prefixes, autoconfiguration | P |
 | `erx_in6_src` | `in6_src.c` | source address selection | P |
 | `erx_net_addr` | `in.c`, `in6.c` | address checks | P |

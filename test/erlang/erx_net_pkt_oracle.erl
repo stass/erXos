@@ -22,6 +22,8 @@ pkt is a judge with known gaps, which the fuzz targets compare around:
 * it does not verify checksums; `sum` is the field as received;
 * it refuses an IPv4 header whose reserved flag is set, as RFC 791 bids a sender
   leave it clear, where FreeBSD's `ip_input` reads past it;
+* it reads the second byte of an MLDv2 report (ICMPv6 type 143) as reserved,
+  so `code` is 0 there whatever the byte holds;
 * it decodes only the TCP options it knows, and raises on any other or on a
   malformed one, which comes back as `options => rejected`; but it accepts a
   SACK option whose length is not 2 + 8n, dropping the bytes left over;

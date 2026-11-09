@@ -484,6 +484,17 @@ it; git history is the record of completed work.
   (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
+* [Medium] network, `erlang/apps/erx_net/src/erx_ip6_wire.erl`: an ICMPv6 error quotes a cut-off packet,
+  which `decode/1` refuses as `truncated`, yet erx_icmp6 needs the addresses, next header and ports it
+  quotes (the header walk of `icmp6_notify_error`). Add a `decode_quoted/1` that shares `ext_header/1`
+  with the decoder, with a fuzz target, when erx_icmp6 is written.
+* [Medium] network tests, `test/erlang/erx_ip6_wire_fuzz.erl` and `erx_icmp6_wire_fuzz.erl`: the reference
+  judges walk the chain as the decoders do and only accept or refuse, and pkt compares only the fixed
+  header, so extension-header contents, parameter-problem pointers and neighbour-discovery option values
+  are checked only by the EUnit cases. Give the judges an independent reading of those fields.
+* [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
+  (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
+  erx_ip6 to send; decide with erx_icmp6 whether to accept it.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.

@@ -8,9 +8,9 @@ require 'tmpdir'
 require_relative '../lib/erx/dependencies'
 require_relative '../lib/erx/generated'
 
-# The fuzz targets of the network stack's link and IPv4 decoders
-# (docs/design-network-stack.md, "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire and
-# erx_ip4_wire, each driven by test/erlang/MODULE_fuzz.erl, compiled from source with the
+# The fuzz targets of the network stack's codecs (docs/design-network-stack.md,
+# "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire, erx_ip4_wire, erx_ip6_wire and
+# erx_icmp6_wire, each driven by test/erlang/MODULE_fuzz.erl, compiled from source with the
 # host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
 # oracle's). Each target runs its decoder as it is, then a copy with one seeded fault that
@@ -40,7 +40,15 @@ module ErxNetCodecFuzz
     'ip4' => Target.new(module_name: 'erx_ip4_wire',
                         exact: 'payload(Rest, Length) when Length =< byte_size(Rest) -> {ok, binary:part(Rest, 0, Length)};',
                         faulty: 'payload(Rest, Length) -> {ok, binary:part(Rest, 0, min(Length, byte_size(Rest)))};',
-                        fault: 'trusting the total length without checking it against the packet')
+                        fault: 'trusting the total length without checking it against the packet'),
+    'ip6' => Target.new(module_name: 'erx_ip6_wire',
+                        exact: '_Short -> {error, truncated}',
+                        faulty: 'Short -> fixed(Header, Short)',
+                        fault: 'trusting the payload length without checking it against the packet'),
+    'icmp6' => Target.new(module_name: 'erx_icmp6_wire',
+                          exact: '_Overrun -> {error, bad_option}',
+                          faulty: 'Overrun -> nd_options(<<>>, Seen + 1, nd_option(Type, Len, Overrun, Opts))',
+                          fault: 'accepting a neighbour-discovery option past the end of the message')
   }.freeze
 
   module_function
@@ -55,7 +63,7 @@ module ErxNetCodecFuzz
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted$/)
     output, status = fuzz(spec.module_name, source.sub(spec.exact, spec.faulty), seed: seed)
     abort("#{spec.fault} passed:\n#{output}") if status.success? || CAUGHT.none? { |tag| output.include?(tag) }
-    puts "#{spec.module_name}:decode/1 agrees with its reference and pkt, and #{spec.fault} does not"
+    puts "#{spec.module_name}:decode agrees with its reference and pkt, and #{spec.fault} does not"
   end
 
   # In a directory of its own, which also takes the crash dump of a failed round.
@@ -66,7 +74,8 @@ module ErxNetCodecFuzz
       pkt = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
       pkt_include = File.join(pkt, 'include')
       compile(work, Dir[File.join(pkt, 'src', '*.erl')].sort, includes: ['-I', pkt_include])
-      compile(work, [module_path, HOST_BYTES, ORACLE, File.join(ROOT, "test/erlang/#{module_name}_fuzz.erl")],
+      others = Dir[File.join(APPLICATION, 'src', '*.erl')].sort.reject { |path| File.basename(path, '.erl') == module_name }
+      compile(work, [module_path, *others, HOST_BYTES, ORACLE, File.join(ROOT, "test/erlang/#{module_name}_fuzz.erl")],
               includes: ['-I', File.join(APPLICATION, 'include'), '-I', pkt_include])
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', "#{module_name}_fuzz", 'run', seed.to_s, '-s', 'init', 'stop',
