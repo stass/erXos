@@ -15,6 +15,12 @@
  * checks on the way that each record fits a buffer of exactly its size and is
  * refused by one byte less, and that the writer refuses what the form cannot
  * hold; it exits 1 at the first that does not.
+ *
+ * With the argument "each", reads on past a refused record instead,
+ * printing "refused: REASON" for it and skipping the bytes its length word
+ * counts, and stops, exiting 0, at "refused: bad length" or at "more" for a
+ * stream that ends inside a record: the differential corpus of mutated
+ * records, whose lines the TypeScript harness must print the same.
  */
 
 #include <stdio.h>
@@ -379,7 +385,9 @@ main(int argc, char **argv)
 	static uint8_t stream[64 << 20];
 	erx_ui_record_t record;
 	size_t length, offset, used;
+	bool each;
 
+	each = argc == 2 && strcmp(argv[1], "each") == 0;
 	if (argc == 4 && strcmp(argv[1], "write") == 0)
 		return (write_corpus(argv[2], strtoull(argv[3], NULL, 10)));
 	length = fread(stream, 1, sizeof(stream), stdin);
@@ -394,10 +402,25 @@ main(int argc, char **argv)
 			print_record(&record);
 			break;
 		case ERX_UI_READ_MORE:
+			if (each) {
+				printf("more\n");
+				return (0);
+			}
 			fprintf(stderr, "stream ends inside a record at %zu\n",
 			    offset);
 			return (1);
 		case ERX_UI_READ_BAD:
+			if (each) {
+				printf("refused: %s\n", record.reason);
+				if (strcmp(record.reason, "bad length") == 0)
+					return (0);
+				/* A length word the reader accepted: whole, at most ERX_UI_OP_MAX. */
+				used = 4 + ((size_t)stream[offset] |
+				    (size_t)stream[offset + 1] << 8 |
+				    (size_t)stream[offset + 2] << 16 |
+				    (size_t)stream[offset + 3] << 24);
+				break;
+			}
 			fprintf(stderr, "refused at %zu: %s\n", offset,
 			    record.reason);
 			return (1);

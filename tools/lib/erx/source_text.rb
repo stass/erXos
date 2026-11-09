@@ -5,7 +5,7 @@
 module Erx
   module SourceText
     SUFFIXES = %w[.c .h .cc .cpp .hpp .s .S .erl .hrl .rb .ld .lds .mk .sh
-                  .lua .pl .pm .ac .am .m4 .tla .cfg .svd].freeze
+                  .lua .pl .pm .ac .am .m4 .tla .cfg .svd .ts .tsx].freeze
     SCRIPT_NAMES = %w[configure otp_build otp_patch_apply].freeze
     module_function
 

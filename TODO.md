@@ -289,12 +289,20 @@ it; git history is the record of completed work.
   `present`. The reporter-first rule (a two-tuple led by `kernel`, `service` or `runtime` is an `attr()`) also
   reserves those three names from presentations, which design-display.md should say.
 * [Medium] `tools/lib/erx/abi_emit_ui_wire.rb`, [Widget format](docs/design-abi.md#widget-format): the generator
-  emits the Erlang encoder of every message with the reader of `event` and `pixels`, and the C reader of the
-  server's messages with the writer of `event` and `pixels`. Still missing from "a reader and a writer of both
-  directions in Erlang, C and TypeScript" (design-display.md, "Widget trees"): the TypeScript reader and writer,
-  which need a TypeScript emitter (shared with `web.txt`'s `proto.ts`) and a `node --test` runner wired into
-  `make check`, neither of which the tree has; and the Erlang reader of the server's messages, so the parity
-  test feeds one corpus to three readers instead of checking the Erlang encoder against the C reader by meaning.
+  emits the Erlang encoder of every message with the reader of `event` and `pixels`, and the C and TypeScript
+  readers of the server's messages with the writers of `event` and `pixels`. Still missing from "a reader and a
+  writer of both directions in Erlang, C and TypeScript" (design-display.md, "Widget trees"): the Erlang reader
+  of the server's messages, so the parity test feeds one corpus to three readers instead of checking the Erlang
+  encoder against the C and TypeScript readers by meaning; and TypeScript's encoder of the server's messages
+  and reader of `event` and `pixels` (design-web.md, "Interfaces").
+* [Medium] `tools/lib/erx/abi_emit_ui_wire_ts.rb`, [The client](docs/design-web.md#the-client): `ui_wire.ts`
+  hands texts out as bare `Uint8Array`s and `Prop.value` as one union not tied to `form`, where rule W2 types
+  every machine text as `MachineText`. When `web/src/text.tsx` lands, wrap texts in it and emit `Prop` as a
+  union discriminated by form (the parity harness's casts in `web/test/ui_wire_harness.ts` then go).
+* [Low] `test/host/web_node_test.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
+  no gate runs `tsc --noEmit` over the client's generated and handwritten TypeScript (Node only strips types),
+  and no `web/package.json` records the Node version, whose type stripping and `import.meta.main` the tests
+  need (Node 26 here). Both arrive with `make web`'s pnpm setup.
 * [Medium] `test/host/erx_ui_wire_test.rb`, [Widget format](docs/design-abi.md#widget-format): no test encodes
   each kind's largest `insert`, every property at its bound, and compares its size with the generator's
   `insert_max` (`tools/lib/erx/abi_ui.rb`'s sizes and the encoder's layout are two descriptions of one form).

@@ -7,6 +7,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../../tools/lib/erx/web_stage'
 
 # ui.txt's binary form (docs/design-abi.md, "Widget format"), generated into
 # build/gen: the EUnit cases of erx_ui_wire on stock's emulator (ERX_ERL and
@@ -15,10 +16,13 @@ require_relative '../../tools/lib/erx/generated'
 # property and writes what each means by name; the C reader, under ASan and
 # UBSan, reads the stream and prints what it read by number; the names are
 # mapped to numbers here through the ABI model, the generators' common
-# source, and the two must agree line for line. The other way, the harness's
-# writer writes random event and pixels records and says what each means by
-# number, erx_ui_wire_tests:read_corpus/2 reads them and says what it read by
-# name, and the two must agree the same way.
+# source, and the two must agree line for line. The TypeScript reader of
+# web/test/ui_wire_harness.ts reads the same stream and prints names, as the
+# Erlang lines do, so its lines and Erlang's must agree once both are mapped
+# to numbers. The other way, the C and TypeScript harnesses' writers write
+# random event and pixels records and say what each means, by number from C
+# and by name from TypeScript; erx_ui_wire_tests:read_corpus/2 reads them and
+# says what it read by name, and the two must agree the same way.
 class ErxUIWireTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
@@ -36,18 +40,18 @@ class ErxUIWireTest < Minitest::Test
     end
   end
 
-  def test_c_reader_reads_what_the_erlang_encoder_writes
+  def test_c_and_typescript_readers_read_what_the_erlang_encoder_writes
     in_erlang do |work|
       stream = File.join(work, 'stream')
       expected = File.join(work, 'expected')
       run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
            "erx_ui_wire_tests:corpus(\"#{stream}\", \"#{expected}\", 7), halt(0)", chdir: work)
-      read, status = Open3.capture2(harness(work), stdin_data: File.binread(stream), binmode: true)
-      assert status.success?, 'the C reader refused a record the Erlang encoder wrote'
-      lines = File.readlines(expected, chomp: true)
-      assert_operator lines.size, :>, 600
-      lines.zip(read.lines(chomp: true)).each { |want, got| assert_equal numeric(want), got }
-      assert_equal lines.size, read.lines.size
+      want = File.readlines(expected, chomp: true).map { |line| numeric(line) }
+      assert_operator want.size, :>, 600
+      assert_equal want, read_stream([harness(work)], stream), 'the C reader'
+      typescript_harness do |reader|
+        assert_equal want, read_stream(reader, stream).map { |line| numeric(line) }, 'the TypeScript reader'
+      end
     end
   end
 
@@ -67,10 +71,50 @@ class ErxUIWireTest < Minitest::Test
     end
   end
 
-  # A valid record with one field broken, for each reason the C reader gives.
-  def test_c_reader_refuses_each_broken_record_for_its_reason
+  # Each record of the Erlang corpus with a byte changed, its body cut short or
+  # a byte added, framed again, read record by record by both readers, which
+  # must refuse the same records for the same reasons and read the same
+  # meaning from the rest: the readers' checks of bounds, members, statuses and
+  # lengths compared on what no valid corpus reaches.
+  def test_c_and_typescript_readers_agree_on_mutated_records
+    in_erlang do |work|
+      stream = File.join(work, 'stream')
+      mutated = File.join(work, 'mutated')
+      run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+           "erx_ui_wire_tests:corpus(\"#{stream}\", \"#{File.join(work, 'expected')}\", 11), halt(0)", chdir: work)
+      File.binwrite(mutated, mutations(File.binread(stream), random: Random.new(11)))
+      native = read_stream([harness(work), 'each'], mutated)
+      assert_operator native.count { |line| line.start_with?('refused: ') }, :>, 500
+      assert_operator native.count { |line| !line.start_with?('refused: ') }, :>, 500
+      typescript_harness do |reader|
+        lines = read_stream([*reader, 'each'], mutated)
+        assert_equal native, lines.map { |line| line.start_with?('refused: ', 'more') ? line : numeric(line) }
+      end
+    end
+  end
+
+  def test_erlang_reader_reads_what_the_typescript_writer_writes
+    in_erlang do |work|
+      typescript_harness do |writer|
+        stream = File.join(work, 'stream')
+        read = File.join(work, 'read')
+        written = run!(*writer, 'write', stream, '7', chdir: work).lines(chomp: true)
+        run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+             "erx_ui_wire_tests:read_corpus(\"#{stream}\", \"#{read}\"), halt(0)", chdir: work)
+        assert_equal 600, written.size
+        assert_equal written, File.readlines(read, chomp: true)
+        seen = written.filter_map { |line| line.split(' ')[2] if line.start_with?('event ') }.uniq.sort
+        assert_equal UI.properties.select { |prop| prop.type.form == 'event' }.map(&:name).sort, seen
+      end
+    end
+  end
+
+  # A valid record with one field broken, for each reason the C reader gives;
+  # the TypeScript reader refuses each for the same reason.
+  def test_c_and_typescript_readers_refuse_each_broken_record_for_its_reason
     visible, placeholder, text = %w[visible placeholder text].map { |name| property(name).number }
-    Dir.mktmpdir('erx-ui-wire-refusal') { |work| refusals(harness(work), visible:, placeholder:, text:) }
+    Dir.mktmpdir('erx-ui-wire-refusal') { |work| refusals([harness(work)], visible:, placeholder:, text:) }
+    typescript_harness { |reader| refusals(reader, visible:, placeholder:, text:) }
   end
 
   private
@@ -95,10 +139,42 @@ class ErxUIWireTest < Minitest::Test
       record('CC', 5, 0) => 'bytes left over',
       record('Cv', 7, 1) => 'short record'
     }.each do |bytes, reason|
-      _out, error, status = Open3.capture3(reader, stdin_data: bytes, binmode: true)
+      _out, error, status = Open3.capture3(*timed(reader), stdin_data: bytes, binmode: true)
       refute status.success?, "accepted a record refused for #{reason}"
       assert_equal "refused at 0: #{reason}", error.chomp
     end
+  end
+
+  # Four mutants of each record of stream: one byte replaced, the body cut
+  # short, a byte inserted and one byte set to 0xff, each framed with its
+  # body's length.
+  def mutations(stream, random:)
+    bodies = []
+    offset = 0
+    while offset < stream.bytesize
+      size = stream.byteslice(offset, 4).unpack1('V')
+      bodies << stream.byteslice(offset + 4, size)
+      offset += 4 + size
+    end
+    bodies.flat_map do |body|
+      at = random.rand(body.bytesize)
+      [body.dup.tap { |copy| copy.setbyte(at, random.rand(256)) }, body.byteslice(0, [at, 1].max),
+       body.dup.insert(at, random.rand(256).chr), body.dup.tap { |copy| copy.setbyte(at, 0xff) }]
+    end.map { |body| [body.bytesize].pack('V') + body }.join
+  end
+
+  def timed(command) = ['gtimeout', '-k', '10', '300', *command]
+
+  # The lines a reader's command prints for the stream at path, which it must read whole.
+  def read_stream(reader, path)
+    read, error, status = Open3.capture3(*timed(reader), stdin_data: File.binread(path), binmode: true)
+    assert status.success?, "#{reader.last} refused a record the Erlang encoder wrote: #{error}"
+    read.lines(chomp: true)
+  end
+
+  # The command of web/test/ui_wire_harness.ts, from the staged web tree.
+  def typescript_harness
+    Erx::WebStage.with(root: ROOT) { |stage| yield [*Erx::WebStage::NODE, File.join(stage, 'test/ui_wire_harness.ts')] }
   end
 
   def record(format, *fields) = fields.pack(format).then { |body| [body.bytesize].pack('V') + body }

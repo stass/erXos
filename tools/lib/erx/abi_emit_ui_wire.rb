@@ -28,6 +28,8 @@ module Erx
       NAME_MAX = 63
       PRESENT_MAX = 4096
       DETAILS = %w[none boolean integer text].freeze
+      # An input record's forms, numbered from 1.
+      INPUT_FORMS = %w[pointer key wheel].freeze
       # A pixels report's tag and rectangle, and an event's tag, node, number,
       # detail tag and text length: what a record holds besides its pixels or
       # its text.
@@ -413,7 +415,7 @@ module Erx
           ['A status block: the status and the reporter.',
            STATUSES.each_with_index.map { |name, index| [macro('ui_status', name), index] } +
              REPORTERS.each_with_index.map { |name, index| [macro('ui_reporter', name), index] }],
-          ["An input record's forms.", %w[pointer key wheel].each_with_index.map { |name, index| [macro('ui_input', name), index + 1] }],
+          ["An input record's forms.", INPUT_FORMS.each_with_index.map { |name, index| [macro('ui_input', name), index + 1] }],
           ["An event's detail.", DETAILS.each_with_index.map { |name, index| [macro('ui_detail', name), index] }]
         ]
         <<~C
