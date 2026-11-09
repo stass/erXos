@@ -76,3 +76,6 @@ module erx_tcp_cc_newreno
 module erx_tcp_cc_cubic
   sys/netinet/cc/cc_cubic.c cubic_does_slow_start cubic_ack_received cubic_after_idle cubic_cb_init cubic_cong_signal cubic_conn_init cubic_post_recovery cubic_record_rtt cubic_get_ssthresh cubic_rttsample cubic_newround
   sys/netinet/cc/cc_cubic.h cubic_k cubic_cwnd
+
+module erx_tcp_reass
+  sys/netinet/tcp_reass.c tcp_reass tcp_reass_append tcp_reass_prepend tcp_reass_replace tcp_reass_merge_forward

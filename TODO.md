@@ -554,6 +554,15 @@ it; git history is the record of completed work.
   length, yet erx_icmp4 needs the quoted addresses, protocol and ports (`icmp_input` hands the quote to
   `ip_ctlprotox`). Add a `decode_quoted/1` sharing the header checks, with a fuzz target, when erx_icmp4 is
   written.
+* [High] network, `erx_tcp_sack` ([design-network-stack.md](docs/design-network-stack.md#the-send-log-sack-and-reassembly),
+  module table): the design has it translate the receiver side of `netinet/tcp_sack.c`
+  (`tcp_update_sack_list`, `tcp_update_dsack_list`, `tcp_clean_dsack_blocks`), but that file carries,
+  besides the Regents' notice, NRL's notice with an advertising clause (`tcp_sack.c:33-70`), the reason
+  the design never translates `netinet/in_cksum.c`. It and `in_cksum.c` are the only such files under
+  `netinet`, `netinet6`, `tcp_stacks` and `cc`. Decide whether to translate it and carry the clause, or
+  write the receiver's SACK and D-SACK blocks from RFC 2018 section 4 and RFC 2883 section 4 and change
+  the design to say so; the module waits on that decision. The sender side has the same question for
+  any module that would translate `tcp_sack_doack` or its neighbours.
 * [Low] network, `erx_udp_wire:decode/3`: over IPv4 a datagram whose UDP length is short of its IP
   payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
   64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a
