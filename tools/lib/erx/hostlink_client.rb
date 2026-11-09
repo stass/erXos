@@ -50,6 +50,7 @@ module Erx
       @session = nil
       @replies = {}
       @files = []
+      @casts = []
       @bytes_sent = 0
     end
 
@@ -61,6 +62,7 @@ module Erx
       @receiver.session = nil
       @replies.clear
       @files.clear
+      @casts.clear
       reply = wait_until(@deadline) do
         transmit(wire)
         wait_hello(nonce, @hello_wait)
@@ -107,8 +109,15 @@ module Erx
       @files.shift(@files.size)
     end
 
+    # The casts the target sent on the control stream, in order, as [target, term], waiting
+    # at most seconds for the first when none is held. Each term is the target's, untrusted.
+    def take_casts(seconds)
+      pump(seconds) if @casts.empty?
+      @casts.shift(@casts.size)
+    end
+
     # The link, for a caller that waits on it beside other IO; it must read only through
-    # take_files or await.
+    # take_files, take_casts or await.
     def io = @io
 
     # The next call identifier of the session; identifiers grow within a session.
@@ -205,6 +214,8 @@ module Erx
         @hello_reply = decode(message.payload)
       in HostlinkFrame::Message => message if message.kind == :reply
         @replies[message.id] = decode(message.payload)
+      in HostlinkFrame::Message => message if message.kind == :cast
+        @casts << [message.target, decode(message.payload)]
       in HostlinkFrame::Taken[frame] if frame.stream == :credit
         @credit.grant(frame)
       in HostlinkFrame::Taken[frame] if frame.stream == :files

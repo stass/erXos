@@ -667,7 +667,13 @@ it. Closing the facet closes its connections and leaves the line, the
 The client is TypeScript with React, under `web/` at the tree's root,
 built by esbuild into `build/web/`: one `index.html`, one script and one
 stylesheet with content hashes in their names, the third-party licence
-notices, and an inventory of the files with their SHA-256. Its parts:
+notices, and an inventory of the files with their SHA-256,
+`inventory.txt`, one line per file in `sha256sum`'s format (the hash in
+hexadecimal, two spaces, the path). Every file but `index.html` is named
+by its content hash, so the front ends serve it as immutable; the kinds
+are `.html`, `.js`, `.css` and `.txt`, and a front end refuses to start
+on a file of another kind, a path with a segment that is empty, hidden,
+`.` or `..`, or a file whose hash is not the inventory's. Its parts:
 
 * **`generated/`**: the protocol's types, decoder, encoder and hash from
   `web.txt`; the reader and writer of `ui.txt`'s binary form and its
@@ -726,11 +732,14 @@ is what the last update said, and closing a tab discards it.
 
 ### The host tool's front end
 
-`tools/erx web [--port N] [--open]` starts an HTTP server on the
-loopback address, opens the host link's `web` facet with `{open, web}` on
-the root, and prints the one URL a browser may use,
+`tools/erx web --socket PATH [--build HEX] [--port N] [--open]`, on the
+host link at `PATH` as `files` and `load` are, starts an HTTP server on the
+loopback address, on any free port unless `--port` names one, opens the
+host link's `web` facet with `{open, web}` on the root, and prints the one
+URL a browser may use,
 `http://127.0.0.1:PORT/?token=HEX`, with `HEX` 16 bytes from the host's
-random source; `--open` hands the URL to the host's opener. A client of
+random source; `--open` hands the URL to the host's opener. A machine that
+offers no `web` facet stops the start with its answer. A client of
 another build is refused by the machine at `hello`. The server is
 `Erx::Web`, the Ruby standard library alone (`socket`, `digest`,
 `securerandom`), with a reader of its own:
@@ -746,8 +755,9 @@ another build is refused by the machine at `hello`. The server is
 * **Authentication** (W4). The `Host` header must equal the tool's own
   address and port, or the request is 400 before anything else is read.
   A request whose query carries the printed token answers 303 to the same
-  path without the query and sets `erx_web=COOKIE; HttpOnly;
-  SameSite=Strict; Path=/`, with `COOKIE` another 16 random bytes made
+  path without the query and sets `erx_web_PORT=COOKIE; HttpOnly;
+  SameSite=Strict; Path=/`, named after the port so that two front ends on
+  one host keep their own, with `COOKIE` another 16 random bytes made
   at the start, so the token itself is in no response. The files need no
   cookie, since they are the same for everyone; the upgrade at `/ws`
   needs the cookie and an `Origin` equal to `http://127.0.0.1:PORT`, or is
@@ -770,9 +780,16 @@ another build is refused by the machine at `hello`. The server is
   reassembles a message of up to 64 KiB from its frames within the
   session's resident limit ([Host link frames](design-live.md#host-link-frames)),
   and the tool writes each `Bytes` as one binary frame. The tool reads
-  none of the protocol's messages. While the host link is retrying or
-  reset, the tool closes every WebSocket with status 1011, and the client
-  marks its views stale and reconnects.
+  none of the protocol's messages. `{connect, C}` comes before the
+  upgrade's answer, so a browser that gets 101 has a connection on the
+  machine; a connect the machine refuses, a fifth WebSocket and a host
+  link that is down are 503. A call answered other than `ok` closes its
+  WebSocket with 1011, as do `Bytes` over 64 KiB and more than 2 MiB
+  waiting for one browser, twice what the connection core can have in
+  flight for it; `web_closed` closes it with 1000. While the host link is
+  retrying or reset, the tool closes every WebSocket with status 1011, and
+  the client marks its views stale and reconnects; the next upgrade opens
+  a session and the facet again.
 * **The `web` facet** is a facet of the system domain, offered by the
   host link's root in development builds alone, like `inspect` and
   `trace`; a release manifest that lists it for the host fails the
@@ -857,7 +874,8 @@ the table does not name.
 **The client**: the files of `build/web/` and their inventory; the routes
 above.
 
-**The host tool**: `tools/erx web [--port N] [--open]`, exit codes as
+**The host tool**: `tools/erx web --socket PATH [--build HEX] [--port N]
+[--open]`, exit codes as
 every command's ([The host tool](design-live.md#the-host-tool)).
 
 **Interaction with other subsystems.** `erx_web_login` checks logins
@@ -950,8 +968,12 @@ own view; no counter or log line carries a message's contents.
   developer's browser visits and by every user of the host. Loopback
   binding keeps it off the network; the `Host` check defeats DNS
   rebinding; the `Origin` check and `SameSite=Strict` refuse a
-  cross-site WebSocket; the cookie keeps out other local users and pages
-  without the token; the files it serves without the cookie are public.
+  cross-site WebSocket; the cookie keeps out pages without the token; the files it serves without the cookie are public.
+  A cookie names a host and not a port, so the browser also sends it to
+  every other server on `127.0.0.1`: another user of the host who runs a
+  server on another loopback port, and gets the developer's browser to
+  request it, reads the cookie and has the developer's authority on the
+  machine until the tool stops.
   A page that learns the token, by reading the developer's terminal, has
   the developer's authority on the machine: the same as reading the host
   link's socket.

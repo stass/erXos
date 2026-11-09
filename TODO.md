@@ -341,7 +341,25 @@ it; git history is the record of completed work.
   `ui_record` is any ui.txt record of its length; each consumer must run ui.txt's reader on it. Calling the
   generated event reader inside the codec would make "an accepted event is an event" hold by construction.
 * [Low] `abi/protocols/web.txt`, [Interfaces](docs/design-web.md#interfaces): the fixed response headers and each
-  file kind's content type, and the header table generated for Erlang and Ruby, are not declared yet.
+  file kind's content type, and the header table generated for Erlang and Ruby, are not declared yet. The host
+  tool's front end holds their one copy (`Erx::Web::Http::SECURITY` in `tools/lib/erx/web_http.rb`,
+  `Erx::Web::Inventory::TYPES` in `tools/lib/erx/web_inventory.rb`); declare them before `erx_web_cowboy` writes a
+  header, and generate both front ends' tables.
+* [Medium] `tools/lib/erx/web_server.rb`, [The host tool's front end](docs/design-web.md#the-host-tools-front-end):
+  every call on the web facet (`connect`, `data`, `close`, and `open`'s hello) is a blocking `HostlinkClient#call`
+  inside the one select loop, so a slow or rebooting machine stalls every connection for up to the call's 10 s
+  (files, pings, the other WebSockets), and each browser message costs one host-link round trip during which the
+  others wait. Send calls with `send_call`, match replies by id in the loop, and keep a pending-connect state per
+  upgrade (the 101 goes out on the `connect` reply), so the loop never waits on the machine by construction. The
+  same change removes the casts a call collects waiting up to 1 s for the next select.
+* [Low] `tools/lib/erx/web_server.rb`: when the host link's socket itself ends (QEMU exited), every later upgrade
+  fails with `Relay::Down` and prints a line, and the server serves files and 503 forever; exit with a diagnostic
+  on the socket's end, or reconnect to `--socket PATH`, and rate-limit the line.
+* [Low] `tools/lib/erx/web_http.rb`, `Http.file`: every file but `index.html` is sent `immutable`, on the
+  design's rule that `make web` names each by its content hash, which `Inventory` does not check; check it when
+  `make web` lands, or send `no-store` for a name without the hash. A refusal of a request that carried bytes
+  after its head (a 405 for a POST with a body) closes with unread input, so the kernel's reset may cost the
+  client the answer; shut down writing and drain briefly before closing.
 * [Low] `test/host/web_node_test.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
   no gate runs `tsc --noEmit` over the client's generated and handwritten TypeScript (Node only strips types),
   and no `web/package.json` records the Node version, whose type stripping and `import.meta.main` the tests
@@ -3463,6 +3481,11 @@ to the corpus and follow rc
   kernel.
 
 ## Security residuals
+
+* [Medium] `tools/erx web --open`, [The host tool's front end](docs/design-web.md#the-host-tools-front-end): not
+  built, because handing the URL to the host's opener (`open`, `xdg-open`) puts the token in an argument vector,
+  which `ps` shows to every user of the host. A channel that keeps it off the command line is needed first, for
+  example an owner-only file whose page forwards to the URL, opened by its path.
 
 * [Medium] `display/memdraw/` and `display/libmemdraw/`, the shapes, G3: a shape's cost follows from its geometry,
   not from the pixels it writes, and every shape runs on the display domain's one pool of dirty CPU schedulers, so

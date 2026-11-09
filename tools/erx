@@ -124,6 +124,8 @@ module Erx
         code_command(command, command_arguments)
       when 'files'
         files_command(command_arguments)
+      when 'web'
+        web_command(command_arguments)
       when '--help', '-h', nil
         help(command_arguments, **collaborators)
       else
@@ -437,7 +439,7 @@ module Erx
     def self.fuzz_ruby(runner:, environment:, seconds:, seed:)
       %w[test/fuzz/abi.rb test/fuzz/qemu_transcript.rb test/fuzz/cli_status.rb tools/fuzz/oracle_results.rb tools/fuzz/crash_frame.rb
          tools/fuzz/boot_record.rb tools/fuzz/etf.rb tools/fuzz/hostlink_frame.rb
-         tools/fuzz/line_escape.rb].each do |path|
+         tools/fuzz/line_escape.rb tools/fuzz/web_front.rb].each do |path|
         runner.run([RbConfig.ruby, File.join(ROOT, path), '--seconds', seconds.to_s, '--seed', seed.to_s],
                    name: "fuzz-#{File.basename(path, '.rb').tr('_', '-')}", deadline: seconds + 30,
                    chdir: ROOT, env: environment)
@@ -608,8 +610,41 @@ module Erx
       0
     end
 
+    # The seconds each call on the web facet may take; past them the host link is taken
+    # as down, and every WebSocket closes.
+    WEB_CALL_SECONDS = 10
+
+    # tools/erx web --socket PATH [--build HEX] [--port N]: serves the web client from
+    # build/web on the loopback address and relays its WebSockets to the host link's web
+    # facet of the guest whose host link socket is PATH (docs/design-web.md, "The host
+    # tool's front end"). Prints the one URL a browser may start from; runs until
+    # interrupted.
+    def self.web_command(arguments)
+      options = { port: 0 }
+      OptionParser.new do |flags|
+        flags.on('--socket PATH') { |value| options[:socket] = value }
+        flags.on('--build HEX', /\A\h+\z/) { |value| options[:build] = value.downcase }
+        flags.on('--port N', Integer) { |value| options[:port] = value }
+      end.parse!(arguments)
+      no_arguments(arguments)
+      raise OptionParser::InvalidArgument, 'web needs --socket PATH' unless options[:socket]
+      raise OptionParser::InvalidArgument, 'web --port is 0 to 65535' unless options[:port].between?(0, 65_535)
+
+      require_relative 'lib/erx/web_server'
+      inventory = Web::Inventory.load(File.join(ROOT, 'build/web'))
+      UNIXSocket.open(options.fetch(:socket)) do |io|
+        relay = Web::Relay.new(link: HostlinkClient.new(io: io, expected_build: options[:build], deadline: WEB_CALL_SECONDS))
+        relay.open
+        server = Web::Server.new(relay: relay, inventory: inventory, port: options[:port], out: Terminal.method(:puts))
+        %w[INT TERM].each { |signal| Signal.trap(signal) { server.stop } }
+        Terminal.puts("web: open #{server.url}")
+        server.serve
+      end
+      0
+    end
+
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
