@@ -4,6 +4,7 @@
 
 require_relative 'abi_ui'
 require_relative 'abi_emit_inspection'
+require_relative 'abi_emit_ui_fields'
 
 module Erx
   module ABI
@@ -11,9 +12,10 @@ module Erx
     # "Widget format") from the `ui` declaration: erx_ui_wire, the Erlang
     # encoder of every record and reader of a renderer's records, and the C
     # reader of the server's records and writer of a renderer's that a native
-    # renderer links. The tables
-    # (kinds, properties and their types, enums, image types, stopgaps) come from
-    # the declaration; the framing and the per-form code are fixed text.
+    # renderer links. The tables (kinds, properties and their types, enums,
+    # image types, stopgaps) and the server's records come from the
+    # declaration, the records' code through UIFields; the framing, the
+    # per-form code and the reports' fields are fixed text.
     module UIWireEmitter
       ERLANG_PATH = 'erlang/apps/erx/src/generated/erx_ui_wire.erl'
       C_HEADER_PATH = 'include/erx/ui_wire.h'
@@ -22,14 +24,11 @@ module Erx
       STATUSES = %w[ok partial unknown unsupported timeout error].freeze
       REPORTERS = %w[own kernel service runtime stopgap].freeze
       FORMS = %w[boolean integer enum image text bytes list event presentation].freeze
-      TAGS = %w[insert remove set move commit event screen input repaint pixels].freeze
       # The longest stopgap and presentation name and the longest canonical text,
       # the sizes abi_ui.rb's insert bound counts.
       NAME_MAX = 63
       PRESENT_MAX = 4096
       DETAILS = %w[none boolean integer text].freeze
-      # An input record's forms, numbered from 1.
-      INPUT_FORMS = %w[pointer key wheel].freeze
       # A pixels report's tag and rectangle, and an event's tag, node, number,
       # detail tag and text length: what a record holds besides its pixels or
       # its text.
@@ -96,10 +95,17 @@ module Erx
 
       def atom(name) = InspectionEmitter.atom(name)
 
+      # Every record's name and tag, the server's and the reports', in tag order.
+      def tags(ui) = (ui.records + ui.reports).sort_by(&:tag).map { |record| [record.name, record.tag] }
+
+      def report_tag(ui, name) = ui.reports.find { |report| report.name == name }&.tag ||
+                                 raise(SchemaError, "ui.txt declares no report #{name}")
+
       # --- Erlang --------------------------------------------------------------
 
       def erlang(ui, stopgaps:)
-        [erlang_head(ui), erlang_encoder, erlang_tables(ui, stopgaps), erlang_reader, erlang_server_reader].join("\n")
+        [erlang_head(ui), erlang_encoder(ui), erlang_tables(ui, stopgaps), erlang_reader, erlang_server_reader(ui)]
+          .join("\n")
       end
 
       def erlang_head(ui)
@@ -128,44 +134,40 @@ module Erx
           -define(NAME_MAX, #{NAME_MAX}).
           -define(PRESENT_MAX, #{PRESENT_MAX}).
           -define(PIXELS_MAX, #{ui.pixels_max}).
-          -define(PROPERTIES, #{wire_properties(ui).size}).
-          -define(EVENT, 6).
-          -define(PIXELS, 10).
+          -define(PROPERTY_MAX, #{wire_properties(ui).size}).
+          -define(EVENT, #{report_tag(ui, 'event')}).
+          -define(PIXELS, #{report_tag(ui, 'pixels')}).
+          -define(IS_I8(V), (is_integer(V) andalso V >= -128 andalso V =< 127)).
+          -define(IS_DIRECTION(V), (V =:= down orelse V =:= up)).
           -define(IS_U8(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ff)).
           -define(IS_U16(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ffff)).
           -define(IS_U32(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ffffffff)).
           -define(IS_NODE(V), (is_integer(V) andalso V >= 1 andalso V =< 16#ffffffff)).
 
           -type node_id() :: 1..16#ffffffff.
-          -type input() :: {pointer, X :: 0..65535, Y :: 0..65535, Buttons :: 0..255}
-                         | {key, down | up, Code :: 0..65535, Rune :: 0..16#10ffff | none}
-                         | {wheel, Steps :: -128..127}.
+          -type input() :: #{UIFields.erlang_types(ui).fetch(:input)}.
           -type detail() :: none | boolean() | integer() | binary().
           %% erx_ui_model's diff_op()s, then the records of a native renderer's pipes.
-          -type wire_record() :: {insert, node_id(), Parent :: node_id() | 0, Index :: 0..65535,
-                                  Kind :: atom(), Props :: map()}
-                               | {remove, node_id()}
-                               | {set, node_id(), Changed :: map(), Removed :: [atom()]}
-                               | {move, node_id(), Index :: 0..65535}
-                               | commit
+          -type wire_record() :: #{UIFields.erlang_types(ui).fetch(:records).join("\n                     | ")}
                                | {event, node_id(), Event :: atom(), detail()}
-                               | {screen, Width :: 0..65535, Height :: 0..65535, Chan :: 0..16#ffffffff}
-                               | {input, input()}
-                               | repaint
                                | {pixels, X :: 0..65535, Y :: 0..65535, Width :: 0..65535,
                                   Height :: 0..65535, Pixels :: binary()}.
           %% A present property's canonical text, erx_present:text/2.
           -type present() :: fun((Type :: atom(), Value :: term()) -> binary()).
           -type reason() :: bad_length | bad_tag | bad_node | bad_event | bad_detail | bad_body.
           %% read_server/1's reasons, those of the C reader erx/ui_wire.h declares.
-          -type refusal() :: bad_length | unknown_tag | short_record | bytes_left_over | bad_node | unknown_kind
-                           | unknown_property | property_twice | too_many_properties | bad_status | bad_value
-                           | unknown_input_form | bad_key_direction | bad_rune.
+          -type refusal() :: #{UIFields.erlang_refusals}.
         ERLANG
       end
 
-      def erlang_encoder
-        <<~'ERLANG'
+      def erlang_encoder(ui)
+        [ENCODER_HEAD + UIFields.erlang_body_clauses(ui) + ENCODER_REPORTS, ENCODER_VALUES,
+         UIFields.erlang_input_encoder(ui), UIFields.erlang_writers(ui)].join("\n")
+      end
+
+      # encode/2, then the clauses of body/2: the server's records', from the
+      # declaration, and the reports'.
+      ENCODER_HEAD = <<~'ERLANG'
           -doc """
           The record's bytes. Props and removals come from a tree erx_ui_schema
           accepted; a value that does not fit its field raises
@@ -180,37 +182,19 @@ module Erx
               Size =< Limit orelse error({too_long, Size}),
               <<Size:32/little, Body/binary>>.
 
-          body({insert, Node, Parent, Index, Kind, Props}, Present)
-            when ?IS_NODE(Node), ?IS_U32(Parent), ?IS_U16(Index), is_map(Props) ->
-              [<<1, Node:32/little, Parent:32/little, Index:16/little, (kind_number(Kind))>> | props(Props, Present)];
-          body({remove, Node}, _Present) when ?IS_NODE(Node) ->
-              <<2, Node:32/little>>;
-          body({set, Node, Changed, Removed}, Present) when ?IS_NODE(Node), is_map(Changed), is_list(Removed) ->
-              Numbers = lists:usort([number(Name) || Name <- Removed, Name =/= key]),
-              [<<3, Node:32/little>>, props(Changed, Present), length(Numbers) | Numbers];
-          body({move, Node, Index}, _Present) when ?IS_NODE(Node), ?IS_U16(Index) ->
-              <<4, Node:32/little, Index:16/little>>;
-          body(commit, _Present) ->
-              <<5>>;
+      ERLANG
+
+      ENCODER_REPORTS = <<~'ERLANG'
           body({event, Node, Event, Detail}, _Present) when ?IS_NODE(Node) ->
               [<<?EVENT, Node:32/little, (event_number(Event))>> | detail(Detail)];
-          body({screen, Width, Height, Chan}, _Present) when ?IS_U16(Width), ?IS_U16(Height), ?IS_U32(Chan) ->
-              <<7, Width:16/little, Height:16/little, Chan:32/little>>;
-          body({input, {pointer, X, Y, Buttons}}, _Present) when ?IS_U16(X), ?IS_U16(Y), ?IS_U8(Buttons) ->
-              <<8, 1, X:16/little, Y:16/little, Buttons>>;
-          body({input, {key, Direction, Code, Rune}}, _Present)
-            when (Direction =:= down orelse Direction =:= up), ?IS_U16(Code) ->
-              <<8, 2, (case Direction of down -> 1; up -> 0 end), Code:16/little, (rune(Rune)):32/little>>;
-          body({input, {wheel, Steps}}, _Present) when is_integer(Steps), Steps >= -128, Steps =< 127 ->
-              <<8, 3, Steps:8/signed>>;
-          body(repaint, _Present) ->
-              <<9>>;
           body({pixels, X, Y, Width, Height, Pixels}, _Present)
             when ?IS_U16(X), ?IS_U16(Y), ?IS_U16(Width), ?IS_U16(Height), is_binary(Pixels) ->
               [<<?PIXELS, X:16/little, Y:16/little, Width:16/little, Height:16/little>> | Pixels];
           body(Record, _Present) ->
               error({bad_record, Record}).
+        ERLANG
 
+      ENCODER_VALUES = <<~'ERLANG'
           %% A u8 count, then each property in number order: its number and value.
           props(Props, Present) ->
               Fields = lists:sort([{number(Name), Name, Value} || Name := Value <- Props, Name =/= key]),
@@ -281,12 +265,7 @@ module Erx
           detail(Value) when is_integer(Value), Value >= -16#80000000, Value =< 16#7fffffff -> <<2, Value:32/little-signed>>;
           detail(Value) when is_binary(Value) -> [<<3, (byte_size(Value)):32/little>> | Value];
           detail(Value) -> error({bad_value, Value}).
-
-          rune(none) -> 16#ffffffff;
-          rune(Rune) when is_integer(Rune), Rune >= 0, Rune =< 16#10ffff, (Rune < 16#d800 orelse Rune > 16#dfff) -> Rune;
-          rune(Rune) -> error({bad_value, Rune}).
         ERLANG
-      end
 
       def erlang_tables(ui, stopgaps)
         properties = wire_properties(ui)
@@ -420,8 +399,12 @@ module Erx
       # The reader of the server's records, the Erlang twin of the C reader:
       # the same fields read in the same order and refused for the same
       # reasons, so the parity test compares the three readers record by record.
-      def erlang_server_reader
-        <<~'ERLANG'
+      def erlang_server_reader(ui)
+        [SERVER_READER, UIFields.erlang_server_fields(ui), UIFields.erlang_read_input(ui),
+         UIFields.erlang_readers(ui), SERVER_VALUES].join("\n")
+      end
+
+      SERVER_READER = <<~'ERLANG'
           -doc """
           The first record of Bytes that the server sends a renderer, and the bytes
           after it; more when Bytes holds no whole record yet. A length of 0 or above
@@ -463,13 +446,6 @@ module Erx
           u32(<<Value:32/little, Rest/binary>>, _Reason) -> {Value, Rest};
           u32(_Bytes, Reason) -> refuse(Reason).
 
-          %% A node's number, never 0.
-          node_id(Bytes) ->
-              case u32(Bytes, bad_node) of
-                  {0, _Rest} -> refuse(bad_node);
-                  Read -> Read
-              end.
-
           %% A length of 1 or 4 bytes, at most Max, and that many bytes of valid UTF-8.
           text(Bytes, Width, Max, Reason) ->
               {Length, Rest} = case Width of 1 -> u8(Bytes, Reason); 4 -> u32(Bytes, Reason) end,
@@ -481,71 +457,13 @@ module Erx
                   _ -> refuse(Reason)
               end.
 
-          %% The fields after the tag, by the tag; event and pixels go the other way.
-          server_fields(<<1, Fields/binary>>) ->
-              {Node, R1} = node_id(Fields),
-              {Parent, R2} = u32(R1, bad_node),
-              {Index, R3} = u16(R2, bad_node),
-              {Number, R4} = u8(R3, bad_node),
-              Kind = case kind_name(Number) of error -> refuse(unknown_kind); Name -> Name end,
-              {Props, R5} = read_props(R4),
-              {{insert, Node, Parent, Index, Kind, Props}, R5};
-          server_fields(<<2, Fields/binary>>) ->
-              {Node, Rest} = node_id(Fields),
-              {{remove, Node}, Rest};
-          server_fields(<<3, Fields/binary>>) ->
-              {Node, R1} = node_id(Fields),
-              {Changed, R2} = read_props(R1),
-              {Removed, R3} = read_removed(R2),
-              {{set, Node, Changed, Removed}, R3};
-          server_fields(<<4, Fields/binary>>) ->
-              {Node, R1} = node_id(Fields),
-              {Index, R2} = u16(R1, bad_node),
-              {{move, Node, Index}, R2};
-          server_fields(<<5, Rest/binary>>) ->
-              {commit, Rest};
-          server_fields(<<7, Fields/binary>>) ->
-              {Width, R1} = u16(Fields, short_record),
-              {Height, R2} = u16(R1, short_record),
-              {Chan, R3} = u32(R2, short_record),
-              {{screen, Width, Height, Chan}, R3};
-          server_fields(<<8, Fields/binary>>) ->
-              {Input, Rest} = read_input(Fields),
-              {{input, Input}, Rest};
-          server_fields(<<9, Rest/binary>>) ->
-              {repaint, Rest};
-          server_fields(_Body) ->
-              refuse(unknown_tag).
+        ERLANG
 
-          read_input(Bytes) ->
-              case u8(Bytes, short_record) of
-                  {1, R1} ->
-                      {X, R2} = u16(R1, short_record),
-                      {Y, R3} = u16(R2, short_record),
-                      {Buttons, R4} = u8(R3, short_record),
-                      {{pointer, X, Y, Buttons}, R4};
-                  {2, R1} ->
-                      {Down, R2} = u8(R1, short_record),
-                      {Code, R3} = u16(R2, short_record),
-                      {Rune, R4} = u32(R3, short_record),
-                      Down =< 1 orelse refuse(bad_key_direction),
-                      {{key, case Down of 1 -> down; 0 -> up end, Code, read_rune(Rune)}, R4};
-                  {3, <<Steps:8/signed, Rest/binary>>} ->
-                      {{wheel, Steps}, Rest};
-                  {3, _Short} ->
-                      refuse(short_record);
-                  {_Form, _Rest} ->
-                      refuse(unknown_input_form)
-              end.
-
-          read_rune(16#ffffffff) -> none;
-          read_rune(Rune) when Rune =< 16#10ffff, (Rune < 16#d800 orelse Rune > 16#dfff) -> Rune;
-          read_rune(_Rune) -> refuse(bad_rune).
-
+      SERVER_VALUES = <<~'ERLANG'
           %% A u8 count and each property: a known number, once, and its value.
           read_props(Bytes) ->
               {Count, Rest} = u8(Bytes, short_record),
-              Count =< ?PROPERTIES orelse refuse(too_many_properties),
+              Count =< ?PROPERTY_MAX orelse refuse(too_many_properties),
               read_props(Count, Rest, #{}).
 
           read_props(0, Rest, Props) ->
@@ -563,7 +481,7 @@ module Erx
           %% A set's removals: a u8 count of known property numbers, each once.
           read_removed(Bytes) ->
               {Count, Rest} = u8(Bytes, short_record),
-              Count =< ?PROPERTIES orelse refuse(too_many_properties),
+              Count =< ?PROPERTY_MAX orelse refuse(too_many_properties),
               read_removed(Count, Rest, []).
 
           read_removed(0, Rest, Names) ->
@@ -644,7 +562,6 @@ module Erx
               {Text, Rest} = text(Bytes, 4, TextMax, bad_value),
               read_list(Count - 1, Rest, TextMax, [Text | Texts]).
         ERLANG
-      end
 
       # --- C -------------------------------------------------------------------
 
@@ -659,13 +576,13 @@ module Erx
           ['ERX_UI_PIXELS_DATA_MAX', ui.pixels_max - PIXELS_FIELDS, 'the most pixel bytes one pixels report carries'],
           ['ERX_UI_PIXELS_AT', 4 + PIXELS_FIELDS, "the offset of a pixels report's pixels, its length word counted"],
           ['ERX_UI_EVENT_TEXT_MAX', ui.op_max - EVENT_TEXT_FIELDS, 'the longest text detail of an event'],
-          ['ERX_UI_PROPERTIES', properties.size, 'the most properties one record carries, each at most once'],
+          ['ERX_UI_PROPERTY_MAX', properties.size, 'the most properties one record carries, each at most once'],
           ['ERX_UI_RUNE_NONE', '0xffffffffU', "a key's rune when it has none"],
           ['ERX_UI_NAME_MAX', NAME_MAX, 'the longest stopgap or presentation name'],
           ['ERX_UI_PRESENT_MAX', PRESENT_MAX, "the longest presentation's canonical text"]
         ]
         groups = [
-          ['Record tags.', TAGS.each_with_index.map { |name, index| [macro('ui', name), index + 1] }],
+          ['Record tags.', tags(ui).map { |name, tag| [macro('ui', name), tag] }],
           ['Kinds.', ui.kinds.map { |kind| [macro('ui_kind', kind.name), kind.number] }],
           ['Properties.', properties.map { |property| [macro('ui_prop', property.name), property.number] }],
           ['Image types.', ui.images.map { |image| [macro('ui_image', image.name), image.number] }],
@@ -675,7 +592,7 @@ module Erx
           ['A status block: the status and the reporter.',
            STATUSES.each_with_index.map { |name, index| [macro('ui_status', name), index] } +
              REPORTERS.each_with_index.map { |name, index| [macro('ui_reporter', name), index] }],
-          ["An input record's forms.", INPUT_FORMS.each_with_index.map { |name, index| [macro('ui_input', name), index + 1] }],
+          ["An input record's forms.", ui.inputs.map { |form| [macro('ui_input', form.name), form.number] }],
           ["An event's detail.", DETAILS.each_with_index.map { |name, index| [macro('ui_detail', name), index] }]
         ]
         <<~C
@@ -706,6 +623,9 @@ module Erx
           #{defines.map { |name, value, comment| "#define #{name.ljust(24)}#{value}\t/* #{comment} */" }.join("\n")}
 
           #{groups.map { |comment, pairs| enum_block(comment, pairs) }.join("\n")}
+          /* The reasons erx_ui_read() refuses a record for, those of the Erlang and TypeScript readers. */
+          #{UIFields.c_refusal_defines}
+
           typedef enum erx_ui_result {
           	ERX_UI_READ_OK,		/* one whole record read */
           	ERX_UI_READ_MORE,	/* the buffer holds no whole record yet */
@@ -755,27 +675,9 @@ module Erx
            */
           typedef struct erx_ui_record erx_ui_record_t;
           struct erx_ui_record {
-          	erx_ui_prop_t	 props[ERX_UI_PROPERTIES];
           	const char	*reason;
-          	uint32_t	 node;
-          	uint32_t	 parent;
-          	uint32_t	 chan;
-          	uint32_t	 rune;
-          	uint16_t	 index;
-          	uint16_t	 width;
-          	uint16_t	 height;
-          	uint16_t	 x;
-          	uint16_t	 y;
-          	uint16_t	 code;
-          	uint8_t		 removed[ERX_UI_PROPERTIES];
+          #{UIFields.c_members(ui).map { |type, name| UIFields.c_member_line(type, name) }.join("\n")}
           	uint8_t		 tag;
-          	uint8_t		 kind;
-          	uint8_t		 nprops;
-          	uint8_t		 nremoved;
-          	uint8_t		 input;
-          	uint8_t		 buttons;
-          	bool		 down;
-          	int8_t		 steps;
           };
 
           /*
@@ -911,6 +813,9 @@ module Erx
           };
 
           #{C_READER}
+          #{UIFields.c_input(ui)}
+          #{UIFields.c_fields(ui)}
+          #{C_READ}
           #{kind_takes(ui)}
           #{C_WRITER}
         C
@@ -953,11 +858,9 @@ module Erx
         static bool erx_ui_status(erx_ui_cursor_t *, erx_ui_prop_t *);
         static bool erx_ui_value(erx_ui_cursor_t *, const erx_ui_type_t *,
             erx_ui_prop_t *);
-        static bool erx_ui_node(erx_ui_cursor_t *, erx_ui_record_t *);
-        static const char *erx_ui_props(erx_ui_cursor_t *, erx_ui_record_t *);
-        static const char *erx_ui_removed(erx_ui_cursor_t *, erx_ui_record_t *);
-        static const char *erx_ui_input(erx_ui_cursor_t *, erx_ui_record_t *);
-        static const char *erx_ui_fields(erx_ui_cursor_t *, erx_ui_record_t *);
+        static const char *erx_ui_props(erx_ui_cursor_t *, erx_ui_prop_t *,
+            uint8_t *);
+        static const char *erx_ui_removed(erx_ui_cursor_t *, uint8_t *, uint8_t *);
 
         static bool
         erx_ui_take(erx_ui_cursor_t *cursor, size_t count, const uint8_t **bytes)
@@ -1182,16 +1085,9 @@ module Erx
         	}
         }
 
-        /* A node's number, never 0. */
-        static bool
-        erx_ui_node(erx_ui_cursor_t *cursor, erx_ui_record_t *record)
-        {
-        	return (erx_ui_u32(cursor, &record->node) && record->node != 0);
-        }
-
         /* A u8 count and each property: a known number, once, and its value. */
         static const char *
-        erx_ui_props(erx_ui_cursor_t *cursor, erx_ui_record_t *record)
+        erx_ui_props(erx_ui_cursor_t *cursor, erx_ui_prop_t *props, uint8_t *nprops)
         {
         	const erx_ui_type_t *type;
         	erx_ui_prop_t *prop;
@@ -1199,138 +1095,59 @@ module Erx
         	uint8_t count;
 
         	if (!erx_ui_u8(cursor, &count))
-        		return ("short record");
-        	if (count > ERX_UI_PROPERTIES)
-        		return ("too many properties");
+        		return (ERX_UI_REFUSAL_SHORT_RECORD);
+        	if (count > ERX_UI_PROPERTY_MAX)
+        		return (ERX_UI_REFUSAL_TOO_MANY_PROPERTIES);
         	for (uint8_t index = 0; index < count; index++) {
-        		prop = &record->props[index];
+        		prop = &props[index];
         		*prop = (erx_ui_prop_t){ .status = ERX_UI_STATUS_OK };
         		if (!erx_ui_u8(cursor, &prop->number))
-        			return ("short record");
+        			return (ERX_UI_REFUSAL_SHORT_RECORD);
         		type = &erx_ui_types[prop->number];
         		if (type->form == 0)
-        			return ("unknown property");
+        			return (ERX_UI_REFUSAL_UNKNOWN_PROPERTY);
         		if (seen[prop->number])
-        			return ("property twice");
+        			return (ERX_UI_REFUSAL_PROPERTY_TWICE);
         		seen[prop->number] = true;
         		prop->form = type->form;
         		if (type->status && !erx_ui_status(cursor, prop))
-        			return ("bad status");
+        			return (ERX_UI_REFUSAL_BAD_STATUS);
         		if ((!type->status || prop->status <= ERX_UI_STATUS_PARTIAL) &&
         		    !erx_ui_value(cursor, type, prop))
-        			return ("bad value");
-        		record->nprops = (uint8_t)(index + 1);
+        			return (ERX_UI_REFUSAL_BAD_VALUE);
+        		*nprops = (uint8_t)(index + 1);
         	}
         	return (NULL);
         }
 
         /* A set's removals: a u8 count of known property numbers, each once. */
         static const char *
-        erx_ui_removed(erx_ui_cursor_t *cursor, erx_ui_record_t *record)
+        erx_ui_removed(erx_ui_cursor_t *cursor, uint8_t *removed, uint8_t *nremoved)
         {
         	bool seen[256] = { false };
         	uint8_t count, number;
 
         	if (!erx_ui_u8(cursor, &count))
-        		return ("short record");
-        	if (count > ERX_UI_PROPERTIES)
-        		return ("too many properties");
+        		return (ERX_UI_REFUSAL_SHORT_RECORD);
+        	if (count > ERX_UI_PROPERTY_MAX)
+        		return (ERX_UI_REFUSAL_TOO_MANY_PROPERTIES);
         	for (uint8_t index = 0; index < count; index++) {
         		if (!erx_ui_u8(cursor, &number))
-        			return ("short record");
+        			return (ERX_UI_REFUSAL_SHORT_RECORD);
         		if (erx_ui_types[number].form == 0)
-        			return ("unknown property");
+        			return (ERX_UI_REFUSAL_UNKNOWN_PROPERTY);
         		if (seen[number])
-        			return ("property twice");
+        			return (ERX_UI_REFUSAL_PROPERTY_TWICE);
         		seen[number] = true;
-        		record->removed[index] = number;
-        		record->nremoved = (uint8_t)(index + 1);
+        		removed[index] = number;
+        		*nremoved = (uint8_t)(index + 1);
         	}
         	return (NULL);
         }
 
-        static const char *
-        erx_ui_input(erx_ui_cursor_t *cursor, erx_ui_record_t *record)
-        {
-        	uint8_t down, steps;
+      C
 
-        	if (!erx_ui_u8(cursor, &record->input))
-        		return ("short record");
-        	switch (record->input) {
-        	case ERX_UI_INPUT_POINTER:
-        		if (!erx_ui_u16(cursor, &record->x) ||
-        		    !erx_ui_u16(cursor, &record->y) ||
-        		    !erx_ui_u8(cursor, &record->buttons))
-        			return ("short record");
-        		return (NULL);
-        	case ERX_UI_INPUT_KEY:
-        		if (!erx_ui_u8(cursor, &down) ||
-        		    !erx_ui_u16(cursor, &record->code) ||
-        		    !erx_ui_u32(cursor, &record->rune))
-        			return ("short record");
-        		if (down > 1)
-        			return ("bad key direction");
-        		if (record->rune != ERX_UI_RUNE_NONE &&
-        		    (record->rune > 0x10ffff ||
-        		    (record->rune >= 0xd800 && record->rune <= 0xdfff)))
-        			return ("bad rune");
-        		record->down = down == 1;
-        		return (NULL);
-        	case ERX_UI_INPUT_WHEEL:
-        		if (!erx_ui_u8(cursor, &steps))
-        			return ("short record");
-        		record->steps = (int8_t)(steps <= INT8_MAX ? steps : steps - 256);
-        		return (NULL);
-        	default:
-        		return ("unknown input form");
-        	}
-        }
-
-        /* The fields of one record whose tag is in, by tag. */
-        static const char *
-        erx_ui_fields(erx_ui_cursor_t *cursor, erx_ui_record_t *record)
-        {
-        	const char *reason;
-
-        	switch (record->tag) {
-        	case ERX_UI_INSERT:
-        		if (!erx_ui_node(cursor, record) ||
-        		    !erx_ui_u32(cursor, &record->parent) ||
-        		    !erx_ui_u16(cursor, &record->index) ||
-        		    !erx_ui_u8(cursor, &record->kind))
-        			return ("bad node");
-        		if (!erx_ui_kinds[record->kind])
-        			return ("unknown kind");
-        		return (erx_ui_props(cursor, record));
-        	case ERX_UI_REMOVE:
-        		return (erx_ui_node(cursor, record) ? NULL : "bad node");
-        	case ERX_UI_SET:
-        		if (!erx_ui_node(cursor, record))
-        			return ("bad node");
-        		reason = erx_ui_props(cursor, record);
-        		return (reason != NULL ? reason : erx_ui_removed(cursor, record));
-        	case ERX_UI_MOVE:
-        		if (!erx_ui_node(cursor, record) ||
-        		    !erx_ui_u16(cursor, &record->index))
-        			return ("bad node");
-        		return (NULL);
-        	case ERX_UI_COMMIT:
-        	case ERX_UI_REPAINT:
-        		return (NULL);
-        	case ERX_UI_SCREEN:
-        		if (!erx_ui_u16(cursor, &record->width) ||
-        		    !erx_ui_u16(cursor, &record->height) ||
-        		    !erx_ui_u32(cursor, &record->chan))
-        			return ("short record");
-        		return (NULL);
-        	case ERX_UI_INPUT:
-        		return (erx_ui_input(cursor, record));
-        	default:
-        		/* Event and pixels go the other way; a renderer refuses them. */
-        		return ("unknown tag");
-        	}
-        }
-
+      C_READ = <<~'C'
         erx_ui_result_t
         erx_ui_read(const uint8_t *buffer, size_t length, erx_ui_record_t *record,
             size_t *used)
@@ -1345,7 +1162,7 @@ module Erx
         	cursor = (erx_ui_cursor_t){ .next = buffer, .left = length };
         	(void)erx_ui_u32(&cursor, &size);
         	if (size == 0 || size > ERX_UI_OP_MAX) {
-        		record->reason = "bad length";
+        		record->reason = ERX_UI_REFUSAL_BAD_LENGTH;
         		return (ERX_UI_READ_BAD);
         	}
         	if (size > cursor.left)
@@ -1354,7 +1171,7 @@ module Erx
         	(void)erx_ui_u8(&cursor, &record->tag);
         	reason = erx_ui_fields(&cursor, record);
         	if (reason == NULL && cursor.left != 0)
-        		reason = "bytes left over";
+        		reason = ERX_UI_REFUSAL_BYTES_LEFT_OVER;
         	if (reason != NULL) {
         		record->reason = reason;
         		return (ERX_UI_READ_BAD);

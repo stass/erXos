@@ -276,11 +276,23 @@ it; git history is the record of completed work.
   image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
   the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
   window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
-* [Medium] `tools/lib/erx/abi_emit_ui_wire.rb` and `abi_emit_ui_wire_ts.rb`, [Widget format](docs/design-abi.md#widget-format):
-  each record's fields (order, width, the reason a short field is refused for) and the 14 refusal reasons are fixed
-  text written six times, in the Erlang, C and TypeScript readers and writers, where the ABI rule wants every fixed
-  binary layout in one source; only the parity test ties them. Declare the records' fields and the reasons in
-  `abi/formats/ui.txt` and generate all six from that table.
+* [Low] `tools/lib/erx/abi_emit_ui_wire.rb` and `abi_emit_ui_wire_ts.rb`, [Widget format](docs/design-abi.md#widget-format):
+  the server's records are declared in `abi/formats/ui.txt` and their code generated, but the two reports' fields
+  (event's node, event number and detail; pixels' rectangle and bytes) and the report reader's six reasons are
+  still fixed text in the Erlang encoder and `read/1`, the C writers and the TypeScript `readReport`, `writeEvent`
+  and `writePixels`, tied by the parity test. Give `report` lines fields (a `detail` and a `rest` type) and
+  generate them as the records are.
+* [Medium] `tools/lib/erx/abi_emit_ui_fields.rb`, [Widget format](docs/design-abi.md#widget-format): a field type's
+  code is spread beyond its `UIFields::CODE` row (the Erlang `read_props`/`read_removed`, the C `erx_ui_props`/
+  `erx_ui_removed`, `kind_number/1`, the `input()` type, the TypeScript `nodeId`/`kindName`/`rune`/`writeRune`
+  helpers, `?IS_I8`/`?IS_DIRECTION`, `c_locals`' and `c_members`' type lists), and much of it is emitted whether
+  or not a field uses the type; so a ui.txt that drops every `removals`, `kind` or `input` field, or declares no
+  input form, is accepted but fails `-Werror` or does not parse. Move each type's helpers into its row and emit
+  them only when used. Lows from the same review: record and form names are not checked against generated C
+  macros (`op_max` makes `ERX_UI_OP_MAX` twice), C keywords or Erlang reserved words; `insert_header` counts only
+  fixed fields and props, so a `removals` or `input` field in insert would undercount `insert_max`;
+  `encode({input, Bad}, _)` raises `{bad_value, Bad}` where other records raise `bad_record`; no refusal case pins
+  that a key input with a bad direction and a truncated code is `bad_key_direction`.
 * [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): a huge integer's
   `leading/1` (a power of ten and a bignum division) costs 110-160 ms for the largest bignum and is charged only
   its 4 KiB print, so about 15 of them fit one projection, about 2 s of the session's CPU per update (13 copies

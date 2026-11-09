@@ -24,8 +24,8 @@ check_lists(const erx_ui_record_t *record, const uint8_t *start, size_t size)
 	erx_ui_bytes_t text;
 	uint32_t count, cursor;
 
-	if (record->nprops > ERX_UI_PROPERTIES ||
-	    record->nremoved > ERX_UI_PROPERTIES)
+	if (record->nprops > ERX_UI_PROPERTY_MAX ||
+	    record->nremoved > ERX_UI_PROPERTY_MAX)
 		abort();
 	for (uint8_t index = 0; index < record->nprops; index++) {
 		prop = &record->props[index];

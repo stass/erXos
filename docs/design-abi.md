@@ -655,10 +655,11 @@ inspection 1
 ### Widget format
 
 `formats/ui.txt` holds the one `ui VERSION` declaration of the display's
-widget trees ([Widget trees](design-display.md#widget-trees)). Its
-members, at two-space indentation, declare value types, image types,
-properties and kinds; the properties a kind takes are at four spaces
-beneath it. Value types and image types share one namespace, properties
+widget trees ([Widget trees](design-display.md#widget-trees)) and of
+their binary form. Its members, at two-space indentation, declare value
+types, image types, properties, kinds, the records of the binary form
+and an input record's forms; the properties a kind takes, and the fields
+of a record or an input form, are at four spaces beneath it. Value types and image types share one namespace, properties
 have one and kinds one, each apart from the root's, so the property
 `image` and the kind `image` are two names; a member refers to
 another by its bare name and to a root `limit` or `enum` by `@name`.
@@ -674,6 +675,10 @@ Every wire number is literal in the source.
 | `prop NAME NUMBER TYPE [common] [status] [default VALUE] [detail state]` | a property, NUMBER from 1 to 255 |
 | `kind NAME NUMBER [children]` | a kind, NUMBER from 1 to 255, which takes children when marked |
 | `prop NAME [state] [fixed] [within LOW HIGH] [index LIST] [hides PROP]` | at four spaces: the kind takes the property, with these marks |
+| `record NAME TAG [short REASON]` | a record the server writes to a renderer, TAG from 1 to 255; a fixed field cut short is refused for REASON, `short_record` unless marked |
+| `input NAME NUMBER` | a form of an input record's event, NUMBER from 1 to 255 |
+| `field NAME TYPE` | at four spaces beneath a record or an input form: its next field in wire order |
+| `report NAME TAG` | a record a renderer writes back, whose tag no record shares |
 
 A property's TYPE is a member type, a root `@enum` of type `u8` whose
 member names are the atoms, `boolean`, `image` (one of the image
@@ -692,12 +697,36 @@ HIGH` an integer that lies between two integer properties of the kind,
 `hides PROP` a fixed boolean under which PROP is refused in a tree,
 never kept, and handed to the application as `{erx_secret, V}`.
 
+A field's TYPE is `u8`, `u16` or `u32`, any unsigned value; `i8`, a
+signed byte; `node`, a `u32` other than 0; `kind`, a declared kind's
+number; `direction`, a key's down 1 or up 0; `rune`, a Unicode scalar
+value or 0xffffffff for none; `props`, a property list; `removals`, a
+set's removed property numbers; or `input`, an input form's number and
+its fields. An input form's fields are of the fixed types, those before
+`props`. Records and reports share one namespace of names and one of
+tags, and the input forms have their own; a field name has one type in
+every record and input form, since a native renderer's record keeps one
+member per name, and a record has at most one field each of `props`,
+`removals` and `input`. The readers and writers of the server's records
+in all three languages follow from these lines: a reader reads and
+checks each field in wire order, and the first that fails gives the
+reason, a fixed field cut short the record's short reason and a value
+outside its type the type's own. The reasons are one list in the
+generator (`UI::REFUSALS` in `tools/lib/erx/abi_ui.rb`), not in the
+declaration, since each is given by a check of the generator's code for a
+field type or for the framing, and a reason declared without such a check
+would mean nothing. A report's fields, the event's detail and the pixels'
+bytes framed by the length alone, are the generator's fixed code.
+
 The generator refuses a number or a name used twice in its namespace; a
 kind that takes an event marked `detail state` without exactly one
 `state` property; a `within`, `index` or `hides` naming a property the
 kind does not take or of the wrong type; a `within` bound without a
 `default`, so a tree that omits it still has a range; a content type other than an
-`image/` type, and `image/svg+xml`; and a kind whose largest `insert`,
+`image/` type, and `image/svg+xml`; and a record or a report whose tag another has; a field type outside the
+list, a `short` reason not among the readers', or an `input` field
+without input forms; kinds without an `insert` record carrying `props`;
+a kind whose largest `insert`,
 every property it takes at its bound, exceeds `web_ui_op_max`, the room
 one web update leaves for an operation
 ([design-web.md](design-web.md#the-protocol)), a root limit of
@@ -735,6 +764,19 @@ ui 1
     prop secret fixed hides text
     prop on_change
     prop on_submit
+  record insert 1 short bad_node
+    field node node
+    field parent u32
+    field index u16
+    field kind kind
+    field props props
+  record screen 7
+    field width u16
+    field height u16
+    field chan u32
+  input wheel 3
+    field steps i8
+  report event 6
 ```
 
 The binary form follows from the declaration, as 9P2000.L's bytes follow

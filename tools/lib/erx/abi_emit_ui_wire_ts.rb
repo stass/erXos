@@ -4,6 +4,7 @@
 
 require_relative 'abi_emit_typescript'
 require_relative 'abi_emit_ui_wire'
+require_relative 'abi_emit_ui_fields'
 
 module Erx
   module ABI
@@ -31,6 +32,7 @@ module Erx
       def typescript(ui, stopgaps:)
         ts = TypeScript
         wire = UIWireEmitter
+        fields = UIFields
         [
           ts.header(source: 'abi/formats/ui.txt', summary: <<~TEXT),
             The reader and writer of ui.txt's binary form in both directions
@@ -57,8 +59,9 @@ module Erx
           ts.names(constant: 'DETAILS', type: 'DetailTag', members: wire::DETAILS, comment: "An event's detail tags, in code order."),
           ts.names(constant: 'STOPGAPS', type: 'Stopgap', members: stopgaps,
                    comment: "The inspection schema's stopgap reporters, the names a status may carry."),
-          "/* Record tags. */\nconst TAG = Object.freeze({ #{numbered(wire::TAGS)} });\n",
-          "/* An input record's forms. */\nconst INPUT = Object.freeze({ #{numbered(wire::INPUT_FORMS)} });\n",
+          "/* Record tags. */\nconst TAG = Object.freeze({ #{pairs(wire.tags(ui))} });\n",
+          "/* An input record's forms. */\nconst INPUT = Object.freeze({ #{pairs(ui.inputs.map { |form| [form.name, form.number] })} });\n",
+          fields.ts_refusals,
           "/* Kinds by name. */\nexport const KINDS: ReadonlyMap<string, number> = " \
           "#{ts.map(ui.kinds.map { |kind| [ts.string(kind.name), kind.number] }, type: 'string, number')};\n",
           TYPES,
@@ -67,11 +70,70 @@ module Erx
           "export const PROPERTIES: ReadonlyMap<string, PropertyType> = " \
           "#{ts.map(wire.wire_properties(ui).map { |property| [ts.string(property.name), property_type(property, ui)] },
                     type: 'string, PropertyType')};\n",
-          CODE
+          CODE,
+          record_types(ui),
+          CODE_READER,
+          record_reader(ui),
+          CODE_WRITER,
+          record_writer(ui),
+          CODE_VALUE_WRITER,
+          input_writer(ui),
+          CODE_REPORTS
         ].join("\n")
       end
 
-      def numbered(names) = names.each_with_index.map { |name, index| "#{name}: #{index + 1}" }.join(', ')
+      def pairs(named) = named.map { |name, number| "#{name}: #{number}" }.join(', ')
+
+      # The server's records and the input forms as ui.txt declares them.
+      def record_types(ui)
+        types = UIFields.ts_types(ui)
+        "/* An input record's event; a key's rune is null when it has none. */\n" \
+          "export type Input =\n#{types.fetch(:input).map { |type| "  | #{type}" }.join("\n")};\n\n" \
+          "/* One record of the server's, by its tag. */\n" \
+          "export type UIRecord<T = MachineText> =\n#{types.fetch(:records).map { |type| "  | #{type}" }.join("\n")};\n"
+      end
+
+      def record_reader(ui)
+        <<~TS
+          /* An input record's event: its form, and the form's fields. */
+          function readInput(cursor: Cursor, cut: string): Input {
+            switch (cursor.u8(cut)) {
+          #{UIFields.ts_input_cases(ui)}    default:
+                return refuse(REFUSAL.unknownInputForm);
+            }
+          }
+
+          /* The fields of one record, by its tag, as ui.txt declares them. */
+          function fields(cursor: Cursor, tag: number): UIRecord {
+            switch (tag) {
+          #{UIFields.ts_read_cases(ui)}    default:
+                /* The reports go the other way; a renderer refuses them. */
+                return refuse(REFUSAL.unknownTag);
+            }
+          }
+        TS
+      end
+
+      def record_writer(ui)
+        <<~TS
+          function writeFields(writer: Writer, record: UIRecord<Uint8Array>): void {
+            writer.integer(1, TAG[record.tag]);
+            switch (record.tag) {
+          #{UIFields.ts_write_cases(ui)}
+            }
+          }
+        TS
+      end
+
+      def input_writer(ui)
+        <<~TS
+          function writeInput(writer: Writer, input: Input): void {
+            switch (input.form) {
+          #{UIFields.ts_input_write_cases(ui)}
+            }
+          }
+        TS
+      end
 
       # The TypeScript twin of UIWireEmitter.kind_takes: the properties every
       # kind takes and those each kind lists beneath it.
@@ -200,30 +262,9 @@ module Erx
           readonly timeoutMs: number;
         } & FormValue<T>;
 
-        /* An input record's event; a key's rune is null when it has none. */
-        export type Input =
-          | { readonly form: 'pointer'; readonly x: number; readonly y: number; readonly buttons: number }
-          | { readonly form: 'key'; readonly down: boolean; readonly code: number; readonly rune: number | null }
-          | { readonly form: 'wheel'; readonly steps: number };
+      TS
 
-        /* One record of the server's, by its tag. */
-        export type UIRecord<T = MachineText> =
-          | {
-              readonly tag: 'insert';
-              readonly node: number;
-              readonly parent: number;
-              readonly index: number;
-              readonly kind: string;
-              readonly props: readonly Prop<T>[];
-            }
-          | { readonly tag: 'remove'; readonly node: number }
-          | { readonly tag: 'set'; readonly node: number; readonly props: readonly Prop<T>[]; readonly removed: readonly string[] }
-          | { readonly tag: 'move'; readonly node: number; readonly index: number }
-          | { readonly tag: 'commit' }
-          | { readonly tag: 'repaint' }
-          | { readonly tag: 'screen'; readonly width: number; readonly height: number; readonly chan: number }
-          | { readonly tag: 'input'; readonly input: Input };
-
+      CODE_READER = <<~'TS'
         /*
          * What read() makes of a buffer's first record: the record and its size,
          * the length word counted; a request for more bytes, the buffer holding
@@ -245,7 +286,7 @@ module Erx
 
         /* A text the machine sends, as the client holds it. */
         const machineText = (cursor: Cursor, width: 1 | 4, limit: number): MachineText =>
-          new MachineText(text(cursor, width, limit, 'bad value'));
+          new MachineText(text(cursor, width, limit, REFUSAL.badValue));
 
         /* A status block, and the one a property that carries none has. */
         interface StatusBlock {
@@ -268,17 +309,17 @@ module Erx
          * timeout. The application's own value is always ok.
          */
         function statusBlock(cursor: Cursor): StatusBlock {
-          const statusCode = cursor.u8('bad status');
-          const reporterCode = cursor.u8('bad status');
-          const stopgapBytes = text(cursor, 1, NAME_MAX, 'bad status');
-          const timeoutMs = cursor.u32('bad status');
+          const statusCode = cursor.u8(REFUSAL.badStatus);
+          const reporterCode = cursor.u8(REFUSAL.badStatus);
+          const stopgapBytes = text(cursor, 1, NAME_MAX, REFUSAL.badStatus);
+          const timeoutMs = cursor.u32(REFUSAL.badStatus);
           const status = STATUSES[statusCode];
           const reporter = REPORTERS[reporterCode];
-          if (status === undefined || reporter === undefined) refuse('bad status');
-          if (reporter === 'own' && status !== 'ok') refuse('bad status');
-          if ((status === 'timeout') !== (timeoutMs !== 0)) refuse('bad status');
+          if (status === undefined || reporter === undefined) refuse(REFUSAL.badStatus);
+          if (reporter === 'own' && status !== 'ok') refuse(REFUSAL.badStatus);
+          if ((status === 'timeout') !== (timeoutMs !== 0)) refuse(REFUSAL.badStatus);
           const stopgap = stopgapNamed(stopgapBytes);
-          if (reporter === 'stopgap' ? stopgap === undefined : stopgapBytes.length !== 0) refuse('bad status');
+          if (reporter === 'stopgap' ? stopgap === undefined : stopgapBytes.length !== 0) refuse(REFUSAL.badStatus);
           return { status, reporter, stopgap: stopgap ?? '', timeoutMs };
         }
 
@@ -289,12 +330,12 @@ module Erx
         function value(cursor: Cursor, type: PropertyType, carried: boolean): FormValue<MachineText> {
           switch (type.form) {
             case 'boolean':
-              return { form: type.form, value: carried ? readBoolean(cursor, 'bad value') : null };
+              return { form: type.form, value: carried ? readBoolean(cursor, REFUSAL.badValue) : null };
             case 'integer':
               return { form: type.form, value: carried ? readInteger(cursor, type) : null };
             case 'enum':
             case 'image':
-              return { form: type.form, value: carried ? (type.members?.get(cursor.u8('bad value')) ?? refuse('bad value')) : null };
+              return { form: type.form, value: carried ? (type.members?.get(cursor.u8(REFUSAL.badValue)) ?? refuse(REFUSAL.badValue)) : null };
             case 'text':
               return { form: type.form, value: carried ? machineText(cursor, 4, type.limit) : null };
             case 'bytes':
@@ -319,38 +360,52 @@ module Erx
 
         function readInteger(cursor: Cursor, type: PropertyType): number {
           /* The u32's two's-complement value: | 0 reads it as a signed 32-bit integer. */
-          const integer = cursor.u32('bad value') | 0;
-          if (integer < type.minimum || integer > type.maximum) refuse('bad value');
+          const integer = cursor.u32(REFUSAL.badValue) | 0;
+          if (integer < type.minimum || integer > type.maximum) refuse(REFUSAL.badValue);
           return integer;
         }
 
         function readBytes(cursor: Cursor, type: PropertyType): Uint8Array {
-          const length = cursor.u32('bad value');
-          if (length > type.limit) refuse('bad value');
-          return cursor.take(length, 'bad value');
+          const length = cursor.u32(REFUSAL.badValue);
+          if (length > type.limit) refuse(REFUSAL.badValue);
+          return cursor.take(length, REFUSAL.badValue);
         }
 
         function readList(cursor: Cursor, type: PropertyType): MachineText[] {
-          const count = cursor.u16('bad value');
-          if (count > type.limit) refuse('bad value');
+          const count = cursor.u16(REFUSAL.badValue);
+          if (count > type.limit) refuse(REFUSAL.badValue);
           return Array.from({ length: count }, () => machineText(cursor, 4, type.elementLimit));
         }
 
         /* A node's number, never 0. */
-        function node(cursor: Cursor): number {
-          const number = cursor.u32('bad node');
-          return number !== 0 ? number : refuse('bad node');
+        function nodeId(number: number): number {
+          return number !== 0 ? number : refuse(REFUSAL.badNode);
+        }
+
+        function kindName(number: number): string {
+          return KIND_NAMES.get(number) ?? refuse(REFUSAL.unknownKind);
+        }
+
+        /* A key's down 1 or up 0. */
+        function direction(byte: number): boolean {
+          return byte <= 1 ? byte === 1 : refuse(REFUSAL.badKeyDirection);
+        }
+
+        /* A Unicode scalar value, or null for 0xffffffff. */
+        function rune(word: number): number | null {
+          if (word === 0xffffffff) return null;
+          return word <= 0x10ffff && (word < 0xd800 || word > 0xdfff) ? word : refuse(REFUSAL.badRune);
         }
 
         /* A u8 count and each property: a known number, once, and its value. */
-        function props(cursor: Cursor): Prop[] {
-          const count = cursor.u8('short record');
-          if (count > PROPERTY_MAX) refuse('too many properties');
+        function readProps(cursor: Cursor): Prop[] {
+          const count = cursor.u8(REFUSAL.shortRecord);
+          if (count > PROPERTY_MAX) refuse(REFUSAL.tooManyProperties);
           const seen = new Set<number>();
           return Array.from({ length: count }, () => {
-            const number = cursor.u8('short record');
-            const type = BY_NUMBER.get(number) ?? refuse('unknown property');
-            if (seen.has(number)) refuse('property twice');
+            const number = cursor.u8(REFUSAL.shortRecord);
+            const type = BY_NUMBER.get(number) ?? refuse(REFUSAL.unknownProperty);
+            if (seen.has(number)) refuse(REFUSAL.propertyTwice);
             seen.add(number);
             const block = type.status ? statusBlock(cursor) : OWN_OK;
             const carried = block.status === 'ok' || block.status === 'partial';
@@ -359,75 +414,22 @@ module Erx
         }
 
         /* A set's removals: a u8 count of known property numbers, each once. */
-        function removed(cursor: Cursor): string[] {
-          const count = cursor.u8('short record');
-          if (count > PROPERTY_MAX) refuse('too many properties');
+        function readRemoved(cursor: Cursor): string[] {
+          const count = cursor.u8(REFUSAL.shortRecord);
+          if (count > PROPERTY_MAX) refuse(REFUSAL.tooManyProperties);
           const seen = new Set<number>();
           return Array.from({ length: count }, () => {
-            const number = cursor.u8('short record');
-            const type = BY_NUMBER.get(number) ?? refuse('unknown property');
-            if (seen.has(number)) refuse('property twice');
+            const number = cursor.u8(REFUSAL.shortRecord);
+            const type = BY_NUMBER.get(number) ?? refuse(REFUSAL.unknownProperty);
+            if (seen.has(number)) refuse(REFUSAL.propertyTwice);
             seen.add(number);
             return type.name;
           });
         }
 
-        function input(cursor: Cursor): Input {
-          const reason = 'short record';
-          switch (cursor.u8(reason)) {
-            case INPUT.pointer:
-              return { form: 'pointer', x: cursor.u16(reason), y: cursor.u16(reason), buttons: cursor.u8(reason) };
-            case INPUT.key: {
-              const down = cursor.u8(reason);
-              const code = cursor.u16(reason);
-              const rune = cursor.u32(reason);
-              if (down > 1) refuse('bad key direction');
-              if (rune !== 0xffffffff && (rune > 0x10ffff || (rune >= 0xd800 && rune <= 0xdfff))) refuse('bad rune');
-              return { form: 'key', down: down === 1, code, rune: rune === 0xffffffff ? null : rune };
-            }
-            case INPUT.wheel:
-              /* A signed u8: shifted to the top of 32 bits and back, extending its sign. */
-              return { form: 'wheel', steps: (cursor.u8(reason) << 24) >> 24 };
-            default:
-              return refuse('unknown input form');
-          }
-        }
+      TS
 
-        /* The fields of one record, by its tag. */
-        function fields(cursor: Cursor, tag: number): UIRecord {
-          switch (tag) {
-            case TAG.insert: {
-              const number = node(cursor);
-              const parent = cursor.u32('bad node');
-              const index = cursor.u16('bad node');
-              const kind = KIND_NAMES.get(cursor.u8('bad node')) ?? refuse('unknown kind');
-              return { tag: 'insert', node: number, parent, index, kind, props: props(cursor) };
-            }
-            case TAG.remove:
-              return { tag: 'remove', node: node(cursor) };
-            case TAG.set: {
-              const number = node(cursor);
-              const changed = props(cursor);
-              return { tag: 'set', node: number, props: changed, removed: removed(cursor) };
-            }
-            case TAG.move:
-              return { tag: 'move', node: node(cursor), index: cursor.u16('bad node') };
-            case TAG.commit:
-              return { tag: 'commit' };
-            case TAG.repaint:
-              return { tag: 'repaint' };
-            case TAG.screen: {
-              const reason = 'short record';
-              return { tag: 'screen', width: cursor.u16(reason), height: cursor.u16(reason), chan: cursor.u32(reason) };
-            }
-            case TAG.input:
-              return { tag: 'input', input: input(cursor) };
-            default:
-              /* Event and pixels go the other way; a renderer refuses them. */
-              return refuse('unknown tag');
-          }
-        }
-
+      CODE_WRITER = <<~'TS'
         /*
          * Read the first record of BUFFER. A record whose length exceeds OP_MAX
          * is refused before its bytes arrive, so a caller never buffers more
@@ -436,12 +438,12 @@ module Erx
         export function read(buffer: Uint8Array): ReadResult {
           if (buffer.length < 4) return { result: 'more' };
           const size = u32At(buffer, 0);
-          if (size === 0 || size > OP_MAX) return { result: 'bad', reason: 'bad length' };
+          if (size === 0 || size > OP_MAX) return { result: 'bad', reason: REFUSAL.badLength };
           if (size > buffer.length - 4) return { result: 'more' };
           const cursor = new Cursor(buffer, 4, 4 + size);
           try {
-            const record = fields(cursor, cursor.u8('short record'));
-            if (cursor.left !== 0) refuse('bytes left over');
+            const record = fields(cursor, cursor.u8(REFUSAL.shortRecord));
+            if (cursor.left !== 0) refuse(REFUSAL.bytesLeftOver);
             return { result: 'ok', record, used: 4 + size };
           } catch (error) {
             if (error instanceof Refusal) return { result: 'bad', reason: error.reason };
@@ -555,45 +557,22 @@ module Erx
           }
         }
 
-        function writeFields(writer: Writer, record: UIRecord<Uint8Array>): void {
-          writer.integer(1, TAG[record.tag]);
-          switch (record.tag) {
-            case 'insert':
-              writeNode(writer, record.node);
-              writeUnsigned(writer, 4, record.parent);
-              writeUnsigned(writer, 2, record.index);
-              writer.integer(1, KINDS.get(record.kind) ?? refuse('unknown kind'));
-              writeProps(writer, record.props);
-              return;
-            case 'remove':
-              writeNode(writer, record.node);
-              return;
-            case 'set':
-              writeNode(writer, record.node);
-              writeProps(writer, record.props);
-              writeRemoved(writer, record.removed);
-              return;
-            case 'move':
-              writeNode(writer, record.node);
-              writeUnsigned(writer, 2, record.index);
-              return;
-            case 'commit':
-            case 'repaint':
-              return;
-            case 'screen':
-              writeUnsigned(writer, 2, record.width);
-              writeUnsigned(writer, 2, record.height);
-              writeUnsigned(writer, 4, record.chan);
-              return;
-            case 'input':
-              writeInput(writer, record.input);
-              return;
-          }
-        }
+      TS
 
+      CODE_VALUE_WRITER = <<~'TS'
         function writeUnsigned(writer: Writer, bytes: 1 | 2 | 4, value: number): void {
           if (!isUnsigned(value, 8 * bytes)) refuse('bad value');
           writer.integer(bytes, value);
+        }
+
+        function writeSigned8(writer: Writer, value: number): void {
+          if (!Number.isInteger(value) || value < -128 || value > 127) refuse(REFUSAL.badValue);
+          writer.integer(1, value);
+        }
+
+        function writeRune(writer: Writer, rune: number | null): void {
+          if (rune !== null && (!isUnsigned(rune, 32) || rune > 0x10ffff || (rune >= 0xd800 && rune <= 0xdfff))) refuse(REFUSAL.badRune);
+          writer.integer(4, rune ?? 0xffffffff);
         }
 
         function writeNode(writer: Writer, node: number): void {
@@ -695,31 +674,9 @@ module Erx
           }
         }
 
-        function writeInput(writer: Writer, input: Input): void {
-          switch (input.form) {
-            case 'pointer':
-              writer.integer(1, INPUT.pointer);
-              writeUnsigned(writer, 2, input.x);
-              writeUnsigned(writer, 2, input.y);
-              writeUnsigned(writer, 1, input.buttons);
-              return;
-            case 'key': {
-              const rune = input.rune;
-              if (rune !== null && (!isUnsigned(rune, 32) || rune > 0x10ffff || (rune >= 0xd800 && rune <= 0xdfff))) refuse('bad rune');
-              writer.integer(1, INPUT.key);
-              writer.integer(1, input.down ? 1 : 0);
-              writeUnsigned(writer, 2, input.code);
-              writer.integer(4, rune ?? 0xffffffff);
-              return;
-            }
-            case 'wheel':
-              if (!Number.isInteger(input.steps) || input.steps < -128 || input.steps > 127) refuse('bad value');
-              writer.integer(1, INPUT.wheel);
-              writer.integer(1, input.steps);
-              return;
-          }
-        }
+      TS
 
+      CODE_REPORTS = <<~'TS'
         /* A record a renderer writes back: an event, or a pixels report. */
         export type Report =
           | { readonly tag: 'event'; readonly node: number; readonly event: string; readonly detail: Detail }

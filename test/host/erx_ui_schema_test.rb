@@ -27,6 +27,12 @@ class ErxUISchemaTest < Minitest::Test
       prop value 5 bound
       prop flag 6 boolean
       prop on_change 7 event detail state
+      record insert 1 short bad_node
+        field node node
+        field parent u32
+        field index u16
+        field kind kind
+        field props props
   UI
 
   # The validator checks a presentation with erx_present, which reads paths with erx_schema.
@@ -70,6 +76,14 @@ class ErxUISchemaTest < Minitest::Test
       'only it, has the type key' => "  prop id 8 key\n",
       'only a text or presentation property carries a status' => "  prop low 8 bound status\n",
       'follows the image types it takes' => "  prop picture 8 image\n",
+      'duplicate tag 1' => "  report other 1\n",
+      'at most one props field' => "  record two 2\n    field a props\n    field b props\n",
+      'expected field NAME TYPE' => "  record wide 2\n    field x u64\n",
+      'field node has two types' => "  record other 2\n    field node u16\n",
+      'a refusal of the readers' => "  record other 2 short no_such_reason\n",
+      'follows the input forms it reads' => "  record other 2\n    field input input\n",
+      'invalid field name "r1"' => "  record other 2\n    field r1 u16\n",
+      'duplicate field x1' => "  record other 2\n    field x_1 u16\n    field x1 u16\n",
       'must lie below the high bound' => "  prop top 8 bound default 0\n  kind s 1\n    prop min\n    prop top\n    prop value within min top\n"
     }.each do |message, addition|
       error = assert_raises(Erx::ABI::SchemaError) { read(BASE + addition) }

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # The display's widget trees (docs/design-abi.md, "Widget format", and
 # docs/design-display.md, "Widget trees"): value types, image types,
-# properties and kinds. Value types and image types share one namespace,
-# properties one and kinds one; image types, properties and kinds each
+# properties, kinds and the records of the binary form. Value types and
+# image types share one namespace, properties one and kinds one; image types, properties and kinds each
 # number from 1 to 255. A kind takes the properties marked common and those
 # listed beneath it. tools/gen_abi.rb generates erx_ui_schema, the validator
 # of whole trees, from it.
@@ -94,3 +94,44 @@ ui 1
     prop image_type
     prop alt
   kind spacer 13
+  # The records the server writes to a renderer, by tag, with their fields
+  # in wire order after the tag; a fixed field cut short is refused for the
+  # record's short reason, short_record unless marked. The readers and the
+  # writers of all three languages are generated from these lines.
+  record insert 1 short bad_node
+    field node node
+    field parent u32
+    field index u16
+    field kind kind
+    field props props
+  record remove 2 short bad_node
+    field node node
+  record set 3 short bad_node
+    field node node
+    field props props
+    field removed removals
+  record move 4 short bad_node
+    field node node
+    field index u16
+  record commit 5
+  record screen 7
+    field width u16
+    field height u16
+    field chan u32
+  record input 8
+    field input input
+  record repaint 9
+  # The forms of an input record's event, by number, and their fields.
+  input pointer 1
+    field x u16
+    field y u16
+    field buttons u8
+  input key 2
+    field down direction
+    field code u16
+    field rune rune
+  input wheel 3
+    field steps i8
+  # The records a renderer writes back to the server.
+  report event 6
+  report pixels 10

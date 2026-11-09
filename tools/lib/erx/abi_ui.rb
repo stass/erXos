@@ -26,8 +26,22 @@ module Erx
       def taken(name) = takes.find { |entry| entry.property.name == name }
       def state = takes.find(&:state)
     end
-    UISchema = Struct.new(:version, :images, :properties, :kinds, :insert_max, :children_max, :op_max, :pixels_max,
-                          keyword_init: true)
+    # A field of a record or of an input form, in wire order; TYPE is a key of
+    # UI::FIELD_TYPES.
+    UIField = Struct.new(:name, :type, keyword_init: true) do
+      def width = UI::FIELD_TYPES.fetch(type)
+      def fixed? = !width.nil?
+    end
+    # A record the server writes to a renderer: its tag, its fields in wire
+    # order, and SHORT, the refusal a fixed field cut short gives.
+    UIRecord = Struct.new(:name, :tag, :short, :fields, keyword_init: true)
+    # A record a renderer writes back, of which the declaration fixes the tag;
+    # its fields are the generators' fixed text.
+    UIReport = Struct.new(:name, :tag, keyword_init: true)
+    # One form of an input record's event: its number and its fields.
+    UIInput = Struct.new(:name, :number, :fields, keyword_init: true)
+    UISchema = Struct.new(:version, :images, :properties, :kinds, :records, :reports, :inputs, :insert_max,
+                          :children_max, :op_max, :pixels_max, keyword_init: true)
 
     # The reader of the one `ui VERSION` declaration (docs/design-abi.md,
     # "Widget format"). It refuses every source the grammar refuses and
@@ -47,8 +61,30 @@ module Erx
       # status block of status, reporter, a stopgap name of at most 63 bytes
       # and a timeout; a presentation's name of at most 63 bytes and its
       # canonical text of at most 4,096 bytes.
-      INSERT_HEADER = 1 + 4 + 4 + 2 + 1 + 1
       STATUS_BLOCK = 1 + 1 + 1 + 63 + 4
+      # A field's type and the bytes it takes, nil for one that reads itself:
+      # u8, u16 and u32 any unsigned value; i8 a signed byte; node a u32 other
+      # than 0; kind a declared kind's number; direction a key's down 1 or up
+      # 0; rune a Unicode scalar value or 0xffffffff for none; props a
+      # property list; removals a set's removed property numbers; input an
+      # input form's number and its fields.
+      FIELD_TYPES = { 'u8' => 1, 'i8' => 1, 'u16' => 2, 'u32' => 4, 'node' => 4, 'kind' => 1, 'direction' => 1,
+                      'rune' => 4, 'props' => nil, 'removals' => nil, 'input' => nil }.freeze
+      # The types an input form's field may have: the fixed ones.
+      INPUT_FIELD_TYPES = FIELD_TYPES.reject { |_, width| width.nil? }.keys.freeze
+      # The reasons a reader of the server's records gives for a refusal, the
+      # one list the Erlang, C and TypeScript readers spell them from; each is
+      # given by the check the generators' code for a field type or for the
+      # framing makes, so the list belongs with that code, not with a
+      # declaration that could add a reason no check gives. A record's
+      # `short` mark names one.
+      REFUSALS = %w[bad_length unknown_tag short_record bytes_left_over bad_node unknown_kind unknown_property
+                    property_twice too_many_properties bad_status bad_value unknown_input_form bad_key_direction
+                    bad_rune].freeze
+      # Field names the generated readers already use: the tag, the reason and
+      # an input's form, and the Erlang reader's own variables (R0, R1 and on,
+      # Short and Present), which a field's variable would rebind.
+      RESERVED_FIELDS = /\A(tag|reason|form|short|present|r\d+)\z/.freeze
       PRESENTATION = 1 + 63 + 4 + 4096
 
       module_function
@@ -81,7 +117,9 @@ module Erx
             if line.indent == 2
               groups << [line, []]
             else
-              line.fail!('a four-space line belongs under a kind') unless groups.last&.first&.words&.first == 'kind'
+              unless %w[kind record input].include?(groups.last&.first&.words&.first)
+                line.fail!('a four-space line belongs under a kind, a record or an input')
+              end
               groups.last.last << line
             end
           end
@@ -99,7 +137,7 @@ module Erx
             when 'integer', 'text', 'bytes', 'list' then types[declare_type(line, type_names)] = value_type(line, types)
             when 'image' then images[declare_type(line, type_names)] = image(line, images)
             when 'prop' then properties[declare(line, properties)] = property(line, types, images, properties)
-            when 'kind' then nil
+            when 'kind', 'record', 'report', 'input' then nil
             else line.fail!("unknown ui member #{line.words.first}")
             end
           end
@@ -107,7 +145,24 @@ module Erx
             kinds[declare(line, kinds)] = kind(line, children, properties, kinds) if line.words.first == 'kind'
           end
           check_key(properties)
-          insert_max = kinds.values.to_h { |kind| [kind.name, insert_size(kind)] }
+          inputs = {}
+          tags = {}
+          records = {}
+          reports = {}
+          @groups.each do |line, children|
+            case line.words.first
+            when 'input' then inputs[declare(line, inputs)] = input(line, children, inputs)
+            when 'report' then tags[declare(line, tags)] = reports[line.words[1]] = report(line, tags)
+            end
+          end
+          @groups.each do |line, children|
+            next unless line.words.first == 'record'
+
+            tags[declare(line, tags)] = records[line.words[1]] = record(line, children, tags, inputs)
+          end
+          check_fields(records.values, inputs.values)
+          insert_header = insert_header(records['insert']) unless kinds.empty?
+          insert_max = kinds.values.to_h { |kind| [kind.name, insert_header + insert_size(kind)] }
           insert_max.each do |name, size|
             next if size <= op_max
 
@@ -115,7 +170,8 @@ module Erx
                    .fail!("kind #{name}'s largest insert, #{size} bytes, exceeds web_ui_op_max")
           end
           UISchema.new(version: version, images: images.values, properties: properties.values,
-                       kinds: kinds.values, insert_max: insert_max, children_max: children_max,
+                       kinds: kinds.values, records: records.values, reports: reports.values,
+                       inputs: inputs.values, insert_max: insert_max, children_max: children_max,
                        op_max: op_max, pixels_max: pixels_max)
         end
 
@@ -319,8 +375,88 @@ module Erx
 
         # The largest insert of KIND: its header and every property it takes
         # at its bound, the key excepted, which is never written.
+        # record NAME TAG [short REASON], its fields at four spaces.
+        def record(line, children, tags, inputs)
+          short = case line.words.drop(3)
+                  in [] then 'short_record'
+                  in ['short', reason] if REFUSALS.include?(reason) then reason
+                  else line.fail!('expected record NAME TAG [short REASON], REASON a refusal of the readers')
+                  end
+          fields = fields(children, FIELD_TYPES.keys)
+          %w[props removals input].each do |type|
+            line.fail!("a record has at most one #{type} field") if fields.count { |field| field.type == type } > 1
+          end
+          if fields.any? { |field| field.type == 'input' } && inputs.empty?
+            line.fail!('an input field follows the input forms it reads')
+          end
+          UIRecord.new(name: line.words[1], tag: tag(line, tags), short: short, fields: fields)
+        end
+
+        # report NAME TAG: a record a renderer writes back, whose tag no record shares.
+        def report(line, tags)
+          line.fail!('expected report NAME TAG') unless line.words.size == 3
+          UIReport.new(name: line.words[1], tag: tag(line, tags))
+        end
+
+        # Records and reports share one namespace of names and one of tags.
+        def tag(line, tags)
+          value = Syntax.integer(line.words[2], line: line)
+          line.fail!("tag #{value} outside 1..255") unless NUMBERS.cover?(value)
+          line.fail!("duplicate tag #{value}") if tags.values.any? { |item| item.tag == value }
+          value
+        end
+
+        # input NAME NUMBER, its fixed fields at four spaces.
+        def input(line, children, inputs)
+          line.fail!('expected input NAME NUMBER') unless line.words.size == 3
+          UIInput.new(name: line.words[1], number: number(line.words[2], line, inputs.values),
+                      fields: fields(children, INPUT_FIELD_TYPES))
+        end
+
+        def fields(children, allowed)
+          children.each_with_object({}) do |line, fields|
+            case line.words
+            in ['field', name, type] if allowed.include?(type)
+              line.fail!("invalid field name #{name.inspect}") unless name.match?(NAME) && !name.match?(RESERVED_FIELDS)
+              # x_1 and x1 are one Erlang variable, X1.
+              line.fail!("duplicate field #{name}") if fields.keys.any? { |other| other.delete('_') == name.delete('_') }
+              fields[name] = UIField.new(name: name, type: type)
+            else line.fail!("expected field NAME TYPE, TYPE one of #{allowed.join(', ')}")
+            end
+          end.values
+        end
+
+        # The generated C reader keeps one member per field name, so a name
+        # has one type in every record and input form.
+        def check_fields(records, inputs)
+          # A record's own field and an input form's would share that member.
+          shared = records.flat_map(&:fields).map(&:name) & inputs.flat_map(&:fields).map(&:name)
+          unless shared.empty?
+            @groups.flat_map(&:last).find { |line| line.words[0..1] == ['field', shared.first] }
+                   .fail!("field #{shared.first} is both a record's and an input form's")
+          end
+          if !inputs.empty? && records.none? { |record| record.fields.any? { |field| field.type == 'input' } }
+            @groups.find { |line, _| line.words[0] == 'input' }.first.fail!('input forms need a record with an input field')
+          end
+          (records + inputs).flat_map(&:fields).group_by(&:name).each do |name, fields|
+            next if fields.map(&:type).uniq.size == 1
+
+            @groups.flat_map(&:last).find { |line| line.words[0..1] == ['field', name] }
+                   .fail!("field #{name} has two types, #{fields.map(&:type).uniq.join(' and ')}")
+          end
+        end
+
+        # An insert's bytes besides its properties: its length word not
+        # counted, the tag, its fixed fields and the property count.
+        def insert_header(record)
+          unless record&.fields&.any? { |field| field.type == 'props' }
+            @groups.find { |line, _| line.words[0] == 'kind' }.first.fail!('kinds need a record insert with props')
+          end
+          1 + record.fields.select(&:fixed?).sum(&:width) + 1
+        end
+
         def insert_size(kind)
-          INSERT_HEADER + kind.takes.sum do |entry|
+          kind.takes.sum do |entry|
             property = entry.property
             next 0 if property.type.form == 'key'
 
