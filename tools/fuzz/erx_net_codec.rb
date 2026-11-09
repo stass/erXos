@@ -6,20 +6,21 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/dependencies'
+require_relative '../lib/erx/erx_net_host'
 require_relative '../lib/erx/generated'
 
 # The fuzz targets of the network stack's codecs (docs/design-network-stack.md,
 # "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire, erx_ip4_wire, erx_icmp4_wire,
 # erx_udp_wire, erx_ip6_wire, erx_icmp6_wire, erx_tcp_wire and erx_dhcp4_wire, and the quoted-packet decoders of erx_icmp4 and
 # erx_icmp6, each driven by test/erlang/MODULE_fuzz.erl,
-# compiled from source with the host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
+# compiled from source with the portable erx_bytes over its C library (Erx::ErxNetHost) and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
 # oracle's). Each target runs its decoder as it is, then a copy with one seeded fault that
 # must fail the target, which shows the target reaches the code the fault changes.
 module ErxNetCodecFuzz
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_net')
-  HOST_BYTES = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
+  PORTABLE_BYTES = File.join(APPLICATION, 'portable/erx_bytes.erl')
   ORACLE = File.join(ROOT, 'test/erlang/erx_net_pkt_oracle.erl')
   DEADLINE_SECONDS = '300'
 
@@ -127,18 +128,19 @@ module ErxNetCodecFuzz
       File.binwrite(module_path, module_text)
       pkt = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
       pkt_include = File.join(pkt, 'include')
-      compile(work, Dir[File.join(pkt, 'src', '*.erl')].sort, includes: ['-I', pkt_include])
+      ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'))
+      compile(ebin, Dir[File.join(pkt, 'src', '*.erl')].sort, includes: ['-I', pkt_include])
       others = Dir[File.join(APPLICATION, 'src', '*.erl')].sort.reject { |path| File.basename(path, '.erl') == module_name }
-      compile(work, [module_path, *others, HOST_BYTES, ORACLE, File.join(ROOT, "test/erlang/#{module_name}_fuzz.erl")],
+      compile(ebin, [module_path, *others, PORTABLE_BYTES, ORACLE, File.join(ROOT, "test/erlang/#{module_name}_fuzz.erl")],
               includes: ['-I', File.join(APPLICATION, 'include'), '-I', pkt_include])
-      Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
+      Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', ebin,
                       '-run', "#{module_name}_fuzz", 'run', seed.to_s, '-s', 'init', 'stop',
                       chdir: work, stdin_data: '')
     end
   end
 
-  def compile(work, sources, includes:)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *includes, '-pa', work, '-o', work, *sources,
+  def compile(ebin, sources, includes:)
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *includes, '-pa', ebin, '-o', ebin, *sources,
                                      stdin_data: '')
     raise output unless status.success?
   end

@@ -2,21 +2,22 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'fileutils'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dependencies'
 require_relative '../../tools/lib/erx/erlang_apps'
+require_relative '../../tools/lib/erx/erx_net_host'
 require_relative '../../tools/lib/erx/generated'
 
 # The network stack's host tests share this: a Minitest mixin that compiles
-# erx_net from source with warnings as errors, with the host's Erlang model of
-# erx_bytes' NIFs (test/erlang/host_bytes) and the given test modules, on
-# stock's compiler and emulator (ERX_ERLC and ERX_ERL, which make check
-# supplies), with the target build's flags (ErlangApps::FLAGS), and runs EUnit
-# over the test modules. The modules go to erx_net/ebin in a temporary
-# directory, so that code:priv_dir(erx_net) names erx_net/priv beside it, where
-# tap: true builds the tap helper with its own makefile. With pkt: true it also
+# erx_net from source with warnings as errors, its portable modules included,
+# and the given test modules, on stock's compiler and emulator (ERX_ERLC and
+# ERX_ERL, which make check supplies), with the target build's flags
+# (ErlangApps::FLAGS), and runs EUnit over the test modules. The modules go to
+# erx_net/ebin in a temporary directory, and c_src/Makefile builds erx_net/priv
+# beside it (Erx::ErxNetHost): the library of the portable erx_bytes, so the
+# stack runs on the same C as on erXos, and with tap: true the tap helper too.
+# With pkt: true it also
 # compiles msantos/pkt from deps.lock's fetched tree, without -Werror since it
 # is not erXos's code, for erx_net_pkt_oracle; a tree without it fails with
 # the command that fetches it.
@@ -28,9 +29,7 @@ module ErxNetEunit
   PORTABLE = File.join(ROOT, 'erlang/apps/erx_net/portable')
   CLIENT = File.join(ROOT, 'erlang/apps/erx_net_client/src')
   INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
-  HOST_BYTES = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
   TESTS = File.join(ROOT, 'test/erlang')
-  C_SRC = File.join(ROOT, 'erlang/apps/erx_net/c_src')
   DEADLINE = 300
 
   # Requires every EUnit case of modules, each test/erlang/MODULE.erl, to pass.
@@ -57,9 +56,7 @@ module ErxNetEunit
 
   def run_erx_net_eunit(modules, extra:, pkt:, tap:, fault:)
     Dir.mktmpdir('erx-net-eunit') do |work|
-      ebin = File.join(work, 'erx_net', 'ebin')
-      FileUtils.mkdir_p(ebin)
-      build_tap_helper(File.join(work, 'erx_net', 'priv')) if tap
+      ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'), tap: tap)
       includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT), '-I', INCLUDE]
       if pkt
         tree = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
@@ -68,7 +65,7 @@ module ErxNetEunit
       end
       application = [APPLICATION, PORTABLE, CLIENT].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
                                            .map { |source| faulty_copy(work, source, fault) }
-      sources = [HOST_BYTES, *application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
+      sources = [*application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
       erlc(ebin, sources, includes: includes, flags: Erx::ErlangApps::FLAGS)
 
       list = "[#{modules.join(', ')}]"
@@ -93,12 +90,6 @@ module ErxNetEunit
   def erlc(ebin, sources, includes:, flags: [])
     output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *flags, *includes, '-pa', ebin, '-o', ebin, *sources,
                                      stdin_data: '')
-    assert status.success?, output
-  end
-
-  # The host C compiler builds the helper as c_src/Makefile does for a user, warnings as errors.
-  def build_tap_helper(priv)
-    output, status = Open3.capture2e('make', '-C', C_SRC, "PRIV=#{priv}", 'CFLAGS=-Werror', stdin_data: '')
     assert status.success?, output
   end
 end

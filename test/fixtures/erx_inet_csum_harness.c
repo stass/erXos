@@ -16,7 +16,7 @@
 
 #include "erx_inet_csum.h"
 
-/* The largest call of erx_bytes_nif.c. */
+/* The largest call of erx_net_bytes.c. */
 #define LARGEST_CALL	65536u
 
 /*

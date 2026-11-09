@@ -2,9 +2,12 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% A stand-in for erx_bytes on stock's emulator, which lacks erXos's statically linked NIFs,
-%% so host tests can run code that calls erx_bytes. Each primitive is a model written from its
-%% definition, sharing nothing with the NIF's C or with the Ruby host tools, and keeps the
-%% NIF's contract, failing with badarg where erx_bytes does:
+%% so host tests of erXos's applications can run code that calls erx_bytes, and the reference
+%% model that the C cores and erx_net's portable erx_bytes over them are compared with
+%% (test/host/erx_net_bytes_test.rb); erx_net's own host runs load that portable module.
+%% Each primitive is a model written from its definition, sharing nothing with the NIF's C or
+%% with the Ruby host tools, and keeps the NIF's contract, failing with badarg where erx_bytes
+%% does:
 %%   * CRC-32C bit by bit: badarg unless Crc is in 0..16#FFFFFFFF and Data a binary of at most
 %%     65536 bytes.
 %%   * The Internet checksum (RFC 1071) a 16-bit word at a time, folding at the end, and RFC

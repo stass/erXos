@@ -68,6 +68,15 @@ class NetChecksTest < Minitest::Test
     end
   end
 
+  # Only the portable erx_bytes may name crypto, and it may not name rand either.
+  def test_crypto_passes_only_in_the_portable_erx_bytes
+    portable = 'erlang/apps/erx_net/portable/erx_bytes.erl'
+    assert_empty source_rules(portable, 'crypto:strong_rand_bytes(N)')
+    assert_equal [['random', 2]], source_rules(portable, 'rand:bytes(N)')
+    assert_equal [['random', 2]], source_rules("#{SRC}/erx_bytes.erl", 'crypto:strong_rand_bytes(N)')
+    assert_equal [['random', 2]], source_rules('erlang/apps/erx_net/portable/erx_net_local.erl', 'crypto:hash(sha256, B)')
+  end
+
   def test_entropy_passes_in_the_clock_and_rand_in_comments_strings_and_names
     assert_empty source_rules("#{SRC}/erx_net_clock.erl", 'erx_bytes:entropy(16)')
     # The design's seeded failure: an interface that draws its key directly.

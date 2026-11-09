@@ -33,4 +33,7 @@ void erx_siphash24_update(erx_siphash_t *state, const uint8_t *data, size_t leng
 /* The hash of the bytes given to state, which is left as it was. */
 uint64_t erx_siphash24_final(const erx_siphash_t *state);
 
+/* Erases state, which holds secrets derived from its key. */
+void erx_siphash24_erase(erx_siphash_t *state);
+
 #endif

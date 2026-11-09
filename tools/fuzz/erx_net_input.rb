@@ -6,10 +6,11 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/dependencies'
+require_relative '../lib/erx/erx_net_host'
 
 # The fuzz target of erx_net_input (docs/design-network-stack.md, "Classification and
 # framing"), driven by test/erlang/erx_net_input_fuzz.erl: compiled from source with the
-# host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
+# portable erx_bytes over its C library (Erx::ErxNetHost) and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's).
 # It runs the classifier as it is, then each copy seeded with one of FAULTS, each of which
 # must fail the target with a failure tag its entry names.
@@ -17,7 +18,7 @@ module ErxNetInputFuzz
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_net')
   SOURCE = File.join(APPLICATION, 'src/erx_net_input.erl')
-  HOST_BYTES = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
+  PORTABLE_BYTES = File.join(APPLICATION, 'portable/erx_bytes.erl')
   ORACLE = File.join(ROOT, 'test/erlang/erx_net_pkt_oracle.erl')
   TARGET = File.join(ROOT, 'test/erlang/erx_net_input_fuzz.erl')
   DEADLINE_SECONDS = '600'
@@ -89,18 +90,19 @@ module ErxNetInputFuzz
       File.binwrite(module_path, module_text)
       pkt = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
       pkt_include = File.join(pkt, 'include')
-      compile(work, Dir[File.join(pkt, 'src', '*.erl')].sort, includes: ['-I', pkt_include])
+      ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'))
+      compile(ebin, Dir[File.join(pkt, 'src', '*.erl')].sort, includes: ['-I', pkt_include])
       others = Dir[File.join(APPLICATION, 'src', '*.erl')].sort.reject { |other| other == path }
-      compile(work, [module_path, *others, HOST_BYTES, ORACLE, TARGET],
+      compile(ebin, [module_path, *others, PORTABLE_BYTES, ORACLE, TARGET],
               includes: ['-I', File.join(APPLICATION, 'include'), '-I', pkt_include])
-      Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
+      Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', ebin,
                       '-run', 'erx_net_input_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',
                       chdir: work, stdin_data: '')
     end
   end
 
-  def compile(work, sources, includes:)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *includes, '-pa', work, '-o', work, *sources,
+  def compile(ebin, sources, includes:)
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *includes, '-pa', ebin, '-o', ebin, *sources,
                                      stdin_data: '')
     raise output unless status.success?
   end

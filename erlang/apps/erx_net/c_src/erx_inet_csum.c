@@ -4,8 +4,9 @@
  *
  * The Internet checksum of RFC 1071 and RFC 1624's incremental update, in portable C. Words
  * are added into 64 bits and folded once at the end, which RFC 1071's "deferred carries"
- * allows: a 64-bit total holds 2^48 words before it can overflow, far beyond any input. It
- * builds for the host, where its unit tests and fuzz target run, and into ERTS.
+ * allows: a 64-bit total holds 2^48 words before it can overflow, far beyond any input.
+ * erXos's ERTS links it statically, erx_net's portable library outside erXos links it too, and
+ * its unit tests and fuzz target build it for the host.
  */
 
 #include "erx_inet_csum.h"

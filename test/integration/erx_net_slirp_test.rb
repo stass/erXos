@@ -7,6 +7,7 @@ require 'open3'
 require 'socket'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/erlang_apps'
+require_relative '../../tools/lib/erx/erx_net_host'
 
 # The network stack on stock OTP against QEMU's user networking
 # (docs/design-network-stack.md, "The stack on a development host"): a QEMU that runs no
@@ -18,12 +19,14 @@ require_relative '../../tools/lib/erx/erlang_apps'
 # a port nobody listens on, which slirp's RST refuses; then two reads compared with stock
 # gen_tcp on the host's own stack against the same echo server: recv/3 of the whole
 # receive buffer, and a fixed-length recv at the server's close. Nothing leaves the host:
-# every answer is slirp's or an echo server's. Needs qemu-system-aarch64 and ERX_ERL and ERX_ERLC.
+# every answer is slirp's or an echo server's. The stack is laid out as a user's build lays it
+# out, its per-byte primitives the portable erx_bytes over the C library c_src builds
+# (Erx::ErxNetHost), so the transfer's time is the stack's own. Needs qemu-system-aarch64,
+# a C compiler and ERX_ERL and ERX_ERLC.
 class ErxNetSlirpTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APP = File.join(ROOT, 'erlang/apps/erx_net')
-  SOURCES = [File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl'),
-             *Dir[File.join(APP, 'src', '*.erl')].sort, *Dir[File.join(APP, 'portable', '*.erl')].sort,
+  SOURCES = [*Dir[File.join(APP, 'src', '*.erl')].sort, *Dir[File.join(APP, 'portable', '*.erl')].sort,
              *Dir[File.join(ROOT, 'erlang/apps/erx_net_client/src', '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_net_slirp_run.erl')].freeze
   DEADLINE = 60
@@ -31,13 +34,13 @@ class ErxNetSlirpTest < Minitest::Test
 
   def test_lease_arp_ping_udp_and_tcp_through_slirp
     Dir.mktmpdir('erx-net-slirp') do |work|
-      compile(work)
+      ebin = compile(work)
       with_echo_server do |echo_port|
         with_tcp_echo_server do |tcp_port|
           qemu_port, stack_port = free_ports(2)
           with_qemu(qemu_port, stack_port) do
             output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'),
-                                             '-noshell', '-pa', work, '-run', 'erx_net_slirp_run', 'main',
+                                             '-noshell', '-pa', ebin, '-run', 'erx_net_slirp_run', 'main',
                                              qemu_port.to_s, stack_port.to_s, echo_port.to_s, tcp_port.to_s,
                                              closed_tcp_port.to_s, stdin_data: '')
             assert status.success?, output
@@ -53,10 +56,13 @@ class ErxNetSlirpTest < Minitest::Test
 
   private
 
+  # erx_net in work with its library, and the stack's modules and the run in its ebin; the ebin.
   def compile(work)
+    ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'))
     output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *Erx::ErlangApps::FLAGS, '-I', File.join(APP, 'include'),
-                                     '-pa', work, '-o', work, *SOURCES, stdin_data: '')
+                                     '-pa', ebin, '-o', ebin, *SOURCES, stdin_data: '')
     assert status.success?, output
+    ebin
   end
 
   # Ports free on the loopback now; QEMU and the stack bind them a moment later.

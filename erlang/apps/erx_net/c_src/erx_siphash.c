@@ -4,16 +4,31 @@
  *
  * SipHash-2-4 in portable C, written from the paper's definition: two rounds per 8-byte word
  * and four to finish. Words are read as little-endian bytes, so the value is the same on every
- * host. It builds for the host, where its unit tests and fuzz target run, and into ERTS.
+ * host. erXos's ERTS links it statically, erx_net's portable library outside erXos links it
+ * too, and its unit tests and fuzz target build it for the host.
  */
 
 #include "erx_siphash.h"
 
+#include <stdint.h>
 #include <strings.h>
 
-#include "erx/explicit_bzero.h"
-
 #define ROTL(x, b)	(((x) << (b)) | ((x) >> (64 - (b))))
+
+/*
+ * Zeroes length bytes at buf even when nothing reads them afterwards, as BSD's explicit_bzero
+ * does: each store goes through a volatile lvalue, which the compiler must perform, where a
+ * plain bzero of a dead buffer may be removed. erx_net carries its own, since it builds
+ * outside erXos's tree and not every host's C library has explicit_bzero.
+ */
+static void
+erase(void *buf, size_t length)
+{
+	volatile uint8_t *bytes = buf;
+
+	for (size_t index = 0; index < length; index++)
+		bytes[index] = 0;
+}
 
 /* The eight bytes at p as a little-endian word. */
 static uint64_t
@@ -58,8 +73,8 @@ erx_siphash24_init(erx_siphash_t *state, const uint8_t key[ERX_SIPHASH_KEY_LENGT
 	state->v[3] = k1 ^ 0x7465646279746573u;
 	bzero(state->pending, sizeof(state->pending));
 	state->length = 0;
-	erx_explicit_bzero(&k0, sizeof(k0));
-	erx_explicit_bzero(&k1, sizeof(k1));
+	erase(&k0, sizeof(k0));
+	erase(&k1, sizeof(k1));
 }
 
 /*
@@ -109,6 +124,13 @@ erx_siphash24_final(const erx_siphash_t *state)
 	v[2] ^= 0xffu;
 	rounds(v, 4);
 	hash = v[0] ^ v[1] ^ v[2] ^ v[3];
-	erx_explicit_bzero(v, sizeof(v));
+	erase(v, sizeof(v));
 	return (hash);
+}
+
+void
+erx_siphash24_erase(erx_siphash_t *state)
+{
+
+	erase(state, sizeof(*state));
 }

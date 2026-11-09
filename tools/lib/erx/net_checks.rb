@@ -19,7 +19,9 @@ module Erx
   #   marker with more after the path, or one below the header) is refused,
   #   so a malformed claim never reads as no claim;
   # * random: no module of erx_net names rand or crypto, since its random
-  #   values come from erx_net_rand, and only erx_net_clock calls
+  #   values come from erx_net_rand, but the portable erx_bytes, whose
+  #   entropy/1 is crypto's generator outside erXos, names crypto; and only
+  #   erx_net_clock calls
   #   erx_bytes:entropy, so every key passes the clock's seam,
   #   to key a generator or draw a stack-wide secret in their initialisation.
   #
@@ -37,6 +39,9 @@ module Erx
 
     ATOM_MAKERS = /(?<![A-Za-z0-9_@])(binary_to_atom|list_to_atom|binary_to_term)(?![A-Za-z0-9_@])/
     RANDOM_MODULES = /(?<![A-Za-z0-9_@])(rand|crypto)(?![A-Za-z0-9_@])/
+    # The one module that may name crypto: the host's generator behind entropy/1
+    # (design-network-stack.md, "Build checks").
+    CRYPTO_CALLER = "#{APPLICATION}/portable/erx_bytes.erl"
     ENTROPY_CALL = /(?<![A-Za-z0-9_@])erx_bytes\s*:\s*entropy(?![A-Za-z0-9_@])/
     # The one module that draws entropy (design-network-stack.md, "The clock").
     ENTROPY_CALLERS = %w[erx_net_clock].freeze
@@ -105,14 +110,16 @@ module Erx
     def random_violations(sources)
       sources.flat_map do |path, text|
         code = calls_text(text)
-        (random_module_lines(code) + entropy_call_lines(path, code)).sort.map do |line, detail|
+        (random_module_lines(path, code) + entropy_call_lines(path, code)).sort.map do |line, detail|
           Violation.new(rule: 'random', path: path, line: line, detail: detail)
         end
       end
     end
 
-    def random_module_lines(code)
-      matches(code, RANDOM_MODULES).map { |line, name| [line, "#{name} in erx_net: random values come from erx_net_rand"] }
+    def random_module_lines(path, code)
+      matches(code, RANDOM_MODULES).filter_map do |line, name|
+        [line, "#{name} in erx_net: random values come from erx_net_rand"] unless name == 'crypto' && path == CRYPTO_CALLER
+      end
     end
 
     def entropy_call_lines(path, code)

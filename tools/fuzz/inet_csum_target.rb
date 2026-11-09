@@ -12,8 +12,8 @@ fills = {
   'zero' => ->(_index) { 0 }
 }
 Erx::PackFuzz.declare_target(
-  sources: ['otp/erts/emulator/nifs/erxos/erx_inet_csum.c'],
-  includes: %w[otp/erts/emulator/nifs/erxos],
+  sources: ['erlang/apps/erx_net/c_src/erx_inet_csum.c'],
+  includes: %w[erlang/apps/erx_net/c_src],
   seeds: starts.to_a.product(fills.to_a).flat_map do |(start_name, start), (fill_name, fill)|
     [0, 1, 2, 3, 20, 21, 64, 1001, 9000].map do |length|
       replacement = fill_name == 'zero' ? Array.new(8, 0) : [1, 2, 3, 4, 0xfe, 0xff, 0x80, 0x7f]

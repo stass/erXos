@@ -8,12 +8,14 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/fuzz/run_pack'
+require_relative '../../tools/lib/erx/erx_net_host'
 require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # The network stack's per-byte primitives, erx_bytes:inet_csum/2, inet_csum_update/3 and
 # siphash24/2 (docs/design-runtime.md, "Per-byte primitives"), in their C cores
-# (otp/erts/emulator/nifs/erxos/erx_inet_csum.c and erx_siphash.c):
+# (erlang/apps/erx_net/c_src/erx_inet_csum.c and erx_siphash.c), which erXos's ERTS links
+# statically and the portable erx_bytes loads as erx_net's priv/erx_bytes_nif.so:
 # * each core's harness (test/fixtures/erx_*_harness.c) passes the published examples and
 #   vectors, its cuts and its model under the address and undefined sanitizers, and fails for
 #   every mutant, each changing one expression of the core;
@@ -23,16 +25,35 @@ require_relative '../fixtures/generated_tree'
 #   test/fixtures/erx_bytes_cases.c and test/erlang/erx_bytes_cases.erl, and the models pass
 #   their EUnit cases (test/erlang/erx_bytes_tests.erl, with the contract of
 #   test/fixtures/erx_net_bytes_probe.erl) on stock's emulator (ERX_ERL and ERX_ERLC, which
-#   make check supplies).
+#   make check supplies);
+# * the portable erx_bytes (erlang/apps/erx_net/portable/erx_bytes.erl) over the library
+#   that c_src/Makefile builds passes the same EUnit cases, answers the random cases and
+#   the probe's calls as the models do, fails its EUnit cases for a seeded fault in each
+#   primitive's NIF function, and without its library refuses every call instead of
+#   answering one.
 class ErxNetBytesTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
+  C_SRC = File.join(ROOT, 'erlang/apps/erx_net/c_src')
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-fno-omit-frame-pointer',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
-  ERLANG = %w[test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_bytes_cases.erl
-              test/erlang/erx_bytes_tests.erl test/fixtures/erx_net_bytes_probe.erl].map { |path| File.join(ROOT, path) }.freeze
+  MODEL = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
+  PORTABLE = File.join(ROOT, 'erlang/apps/erx_net/portable/erx_bytes.erl')
+  CASES = %w[test/erlang/erx_bytes_cases.erl test/erlang/erx_bytes_tests.erl
+             test/fixtures/erx_net_bytes_probe.erl].map { |path| File.join(ROOT, path) }.freeze
   RANDOM_CASES = 600
+  EUNIT = 'halt(case eunit:test([erx_bytes_tests], [verbose]) of ok -> 0; _ -> 1 end)'
+
+  # A seeded fault in each primitive's NIF function (c_src/erx_net_bytes.c): the text it
+  # replaces and the faulty text.
+  NIF_FAULTS = {
+    'inet_csum: a piece at an odd offset summed as at an even one' =>
+      ['*sum = erx_inet_sum(*sum, data, length, before);', '*sum = erx_inet_sum(*sum, data, length, before & ~(size_t)1);'],
+    'inet_csum_update: the bytes before and after swapped' =>
+      ['(uint16_t)checksum, before.data, after.data,', '(uint16_t)checksum, after.data, before.data,'],
+    'siphash24: the last byte of each piece dropped' =>
+      ['erx_siphash24_update(context, data, length);', 'erx_siphash24_update(context, data, length - (length > 0));']
+  }.freeze
 
   Core = Data.define(:kind, :source, :harness, :done, :mutants, :fuzz_catches)
 
@@ -67,7 +88,7 @@ class ErxNetBytesTest < Minitest::Test
   def test_each_harness_passes
     CORES.each do |core|
       Dir.mktmpdir("erx-#{core.kind}-") do |directory|
-        output, status = build_and_run(directory, core, File.join(NIFS, core.source))
+        output, status = build_and_run(directory, core, File.join(C_SRC, core.source))
         assert status.success?, output
         assert_match(/^#{core.done}$/, output)
       end
@@ -89,7 +110,7 @@ class ErxNetBytesTest < Minitest::Test
   def test_each_fuzz_target_declares_its_core_and_its_seeds_pass
     CORES.each do |core|
       Dir.mktmpdir("erx-#{core.kind}-fuzz-") do |directory|
-        output, status = run_fuzz(directory, core, File.join(NIFS, core.source))
+        output, status = run_fuzz(directory, core, File.join(C_SRC, core.source))
         assert status.success?, output
       end
     end
@@ -122,10 +143,77 @@ class ErxNetBytesTest < Minitest::Test
 
   def test_the_erlang_models_pass_their_eunit_cases
     Dir.mktmpdir('erx-net-bytes-eunit-') do |directory|
-      compile_erlang(directory)
-      output, status = run_erlang(directory, 'halt(case eunit:test([erx_bytes_tests], [verbose]) of ok -> 0; _ -> 1 end)')
+      compile_erlang(directory, MODEL)
+      output, status = run_erlang(directory, EUNIT)
       assert status.success?, output
       assert_match(/All \d+ tests passed/, output)
+    end
+  end
+
+  def test_the_portable_nif_passes_the_eunit_cases
+    Dir.mktmpdir('erx-net-bytes-nif-') do |work|
+      output, status = run_erlang(nif_ebin(work), EUNIT)
+      assert status.success?, output
+      assert_match(/All \d+ tests passed/, output)
+    end
+  end
+
+  # The random cases, whose iolists nest pieces of every length at odd and even offsets, and
+  # the probe's calls (test/fixtures/erx_net_bytes_probe.erl): the models answer in one node,
+  # and the portable erx_bytes over its library must answer alike in another.
+  def test_the_portable_nif_answers_as_the_models_do
+    Dir.mktmpdir('erx-net-bytes-nif-diff-') do |work|
+      cases = File.join(work, 'cases.txt')
+      File.write(cases, random_cases(Random.new(1624)).join("\n") << "\n")
+      model = File.join(work, 'model').tap { |directory| FileUtils.mkdir_p(directory) }
+      nif = nif_ebin(work)
+      model_answers = erlang_answers(model, cases)
+      assert_equal RANDOM_CASES, model_answers.size
+      model_answers.zip(answer_cases(nif, cases), File.readlines(cases, chomp: true)).each do |want, got, line|
+        assert_equal want, got, "the portable NIF and the Erlang model differ on: #{line[0, 200]}"
+      end
+      probe = File.join(work, 'probe.etf')
+      output, status = run_erlang(model, "ok = file:write_file(\"#{probe}\", " \
+                                         'term_to_binary(erx_net_bytes_probe:answers())), halt().')
+      assert status.success?, output
+      output, status = run_erlang(nif, "{ok, B} = file:read_file(\"#{probe}\"), " \
+                                       'io:format("~p~n", [erx_net_bytes_probe:check(binary_to_term(B))]), halt().')
+      assert status.success?, output
+      assert_equal '{net_bytes,[],[]}', output.strip
+    end
+  end
+
+  def test_every_seeded_nif_fault_fails_the_eunit_cases
+    NIF_FAULTS.each do |name, (exact, faulty)|
+      Dir.mktmpdir('erx-net-bytes-nif-fault-') do |work|
+        c_src = File.join(work, 'c_src')
+        FileUtils.cp_r(C_SRC, c_src)
+        functions = File.join(c_src, 'erx_net_bytes.c')
+        source = File.read(functions)
+        raise "seeded fault site is gone: #{exact}" unless source.include?(exact)
+
+        File.write(functions, source.sub(exact) { faulty })
+        output, status = run_erlang(nif_ebin(File.join(work, 'run'), c_src: c_src), EUNIT)
+        refute status.success?, "a seeded fault passed the portable NIF's EUnit cases: #{name}"
+        assert_match(/Failed: [1-9]/, output, name)
+      end
+    end
+  end
+
+  # No library in priv/: the module does not load, so every call, entropy/1's included,
+  # fails with undef, and the reason is in the node's log; no call answers from Erlang.
+  def test_without_its_library_the_portable_module_refuses_every_call
+    Dir.mktmpdir('erx-net-bytes-nolib-') do |work|
+      ebin = File.join(work, 'erx_net', 'ebin')
+      FileUtils.mkdir_p([ebin, File.join(work, 'erx_net', 'priv')])
+      compile_erlang(ebin, PORTABLE)
+      calls = 'fun() -> erx_bytes:inet_csum(0, <<1, 2>>) end, fun() -> erx_bytes:inet_csum_update(0, <<>>, <<>>) end, ' \
+              'fun() -> erx_bytes:siphash24(<<0:128>>, <<>>) end, fun() -> erx_bytes:entropy(1) end'
+      output, status = run_erlang(ebin, "io:format(\"~p~n\", [[try F() of V -> {value, V} catch C:R -> {C, R} end " \
+                                        "|| F <- [#{calls}]]]), halt().")
+      assert status.success?, output
+      assert_includes output.lines(chomp: true), '[{error,undef},{error,undef},{error,undef},{error,undef}]'
+      assert_match(/erx_bytes_nif/, output)
     end
   end
 
@@ -155,9 +243,9 @@ class ErxNetBytesTest < Minitest::Test
 
   def c_answers(directory, cases)
     program = File.join(directory, 'cases')
-    output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', NIFS, '-I', File.join(ROOT, 'include'),
+    output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', C_SRC,
                                      File.join(ROOT, 'test/fixtures/erx_bytes_cases.c'),
-                                     File.join(NIFS, 'erx_inet_csum.c'), File.join(NIFS, 'erx_siphash.c'),
+                                     File.join(C_SRC, 'erx_inet_csum.c'), File.join(C_SRC, 'erx_siphash.c'),
                                      '-o', program, stdin_data: '')
     assert status.success?, output
     output, status = Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), program,
@@ -167,15 +255,27 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def erlang_answers(directory, cases)
-    compile_erlang(directory)
+    compile_erlang(directory, MODEL)
+    answer_cases(directory, cases)
+  end
+
+  def answer_cases(directory, cases)
     output, status = run_erlang(directory, "erx_bytes_cases:answer(\"#{cases}\"), halt().")
     assert status.success?, output
     output.lines(chomp: true)
   end
 
-  def compile_erlang(directory)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', directory, *ERLANG, stdin_data: '')
+  # The cases' modules into directory with implementation, the model or the portable module.
+  def compile_erlang(directory, implementation)
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', directory, implementation, *CASES,
+                                     stdin_data: '')
     assert status.success?, output
+  end
+
+  # erx_net laid out in work with the library built from c_src, and the portable erx_bytes
+  # compiled into its ebin with the cases' modules; the ebin.
+  def nif_ebin(work, c_src: C_SRC)
+    Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'), c_src: c_src).tap { |ebin| compile_erlang(ebin, PORTABLE) }
   end
 
   def run_erlang(directory, expression)
@@ -184,7 +284,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def mutate(directory, core, original, replacement)
-    source = File.read(File.join(NIFS, core.source))
+    source = File.read(File.join(C_SRC, core.source))
     raise "mutation site is gone: #{original}" unless source.include?(original)
 
     path = File.join(directory, core.source)
@@ -194,7 +294,7 @@ class ErxNetBytesTest < Minitest::Test
 
   def build_and_run(directory, core, source)
     program = File.join(directory, 'harness')
-    output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', NIFS, '-I', File.join(ROOT, 'include'),
+    output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', C_SRC,
                                      File.join(ROOT, 'test/fixtures', core.harness), source, '-o', program,
                                      stdin_data: '')
     assert status.success?, output
@@ -206,7 +306,7 @@ class ErxNetBytesTest < Minitest::Test
   def run_fuzz(directory, core, source)
     target = Erx::PackFuzz.targets.find { |candidate| candidate.kind == core.kind }
     refute_nil target, "#{core.kind} fuzz target is not declared"
-    core_path = File.join(NIFS, core.source)
+    core_path = File.join(C_SRC, core.source)
     assert_equal [core_path.delete_prefix("#{ROOT}/")], target.sources
     corpus = File.join(directory, 'corpus')
     FileUtils.mkdir_p(corpus)

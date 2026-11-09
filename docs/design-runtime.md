@@ -2332,6 +2332,11 @@ done once per packet, per block and per file around them.
   CPU's CRC and SHA-256 instructions behind the architecture layer where
   the CPU has them, beside portable C, which is their oracle in the same
   test; `erlang:crc32/2` gains them only if `tools/erx bench fs` asks.
+* **One copy of the network's C.** The checksum and SipHash cores and
+  their NIF functions live in `erx_net`'s `c_src/`, and the runtime's
+  build compiles them from there, so `erx_net` used outside erXos loads
+  the same C as a NIF library
+  ([design-network-stack.md](design-network-stack.md#two-places-four-seams)).
 * **Provenance.** The primitives are erXos's own code, except that the
   portable SHA-256 is FreeBSD's, BSD-2-Clause, imported once as erXos's
   code into `kernel/crypto/sha2/` with an `ORIGIN.md`, and built by the kernel's

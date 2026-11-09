@@ -4029,12 +4029,27 @@ document's "residual risks accepted" paragraph.
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,
-  `c_src/`, `test/`); move `test/erlang/host_bytes/erx_bytes.erl` to
-  `portable/` and the stack's tests, fuzz targets and explorer from
-  `test/erlang` into the app's `test/`, runnable on stock OTP from the
+  `c_src/`, `test/`); move the stack's tests, fuzz targets and explorer
+  from `test/erlang`, and the harnesses of `c_src/`'s cores from
+  `test/fixtures`, into the app's `test/`, runnable on stock OTP from the
   app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's licence notice beside `NOTICE-freebsd`; create
-  `erlang/apps/erx_net_client`; and add the build check of N12 with its
-  seeded violation.
+  `erlang/apps/erx_net_client`; and add the build check of N12, which
+  covers `c_src/`'s `#include` lines too, with its seeded violation.
+* [Medium] network, the guards of `erx_bytes:inet_csum/2`, `inet_csum_update/3` and
+  `siphash24/2` are written twice, in `erlang/apps/erx/src/erx_bytes.erl` and
+  `erlang/apps/erx_net/portable/erx_bytes.erl`, with the 64 KiB bound a literal in each, while
+  their C has one copy (`erlang/apps/erx_net/c_src/erx_net_bytes.c`). The shared probe
+  (`test/fixtures/erx_net_bytes_probe.erl`) judges both, but a guard change its contract
+  cases do not cover would make the builds disagree. Give the wrappers and `call_iovec/1` one
+  copy, a header in `erx_net`'s `include/` that both modules include, once erXos's image
+  build can compile `erx` against `erx_net`'s headers; the C bound already has a
+  `_Static_assert`.
+* [Low] upstream OTP, `erlc` (stock OTP 29.1.2, the oracle's): run from a directory whose
+  path is a string prefix of a source's absolute path without being its parent, it strips
+  that prefix and fails: from `/Users/stas/erxos`, `erlc -o /tmp/x
+  /Users/stas/erxos-scratch/a.erl` reports `-scratch/a.erl: no such file or directory`. Find
+  the prefix test (in `erl_compile` or the compile server), fix it in the tree's copy with a
+  test, and report it upstream, which the owner sends.
 * [Low] upstream OTP, `otp/erts/emulator/beam/bif.c` (`list_to_ref_1`): report to OTP, which the owner sends, that in
   stock OTP 29.1.2 `list_to_ref/1` of a text whose six numbers each end in `.` (`"#Ref<4.1.2.3.4.5.>"`) leaves its
   parse loop with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past

@@ -422,7 +422,8 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   puts behind the architecture layer. In a one-off loop on the development host (Apple
   M3 Max, macOS, native, clang 23.1.3 -O2, 2026-11-08), not a benchmark, a 64 KiB call
   took about 16 microseconds for the checksum and 110 for SipHash-2-4, and a 36-byte
-  SipHash (a SYN cookie's input) about 60 nanoseconds; `erx_bytes_nif.c` charges 2 and
+  SipHash (a SYN cookie's input) about 60 nanoseconds; `erx_net_bytes.c` (in `erx_net`'s
+  `c_src/`) charges 2 and
   11 percent of a reduction slice from these. A small call also pays the wrappers'
   `iolist_size/1` and `erlang:iolist_to_iovec/1` when given a list. Measure: the time
   per frame of the bulk-transfer load the network design names, on HVF, against the
@@ -430,8 +431,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   board. In the p620 run of 2026-11-09 (the network entry on one connection process per
   flow), on stock OTP, the pure-Erlang host stand-in for `inet_csum` held 55 percent of
   the connection process's stack samples on send and about half of the busiest process's
-  on receive; on erXos the C primitive replaces it, so what is left to measure there is
-  the call's cost, before and after, on the same run.
+  on receive. The host build loads the same C as erXos (`erx_net`'s
+  `priv/erx_bytes_nif.so`), so what is left to measure is the call's cost on the same
+  run with the library, against that run.
+  `charge` in `erx_net_bytes.c` charges every call at least 1 percent of a slice, about 40
+  reductions, far above a 36-byte SipHash's cost, so a loop of SYN-cookie hashes is preempted
+  early; the same measurement settles whether the floor should go.
   If the checksum is a visible share, add a wider portable loop (32-bit loads,
   deferred carries) and then the AArch64 instructions chosen by feature detection, the
   portable code staying as their oracle.

@@ -190,8 +190,10 @@ steps and carry out their actions. Beneath them:
   portable C, and `erx_bytes:entropy/1`, Erlang's one entry to the
   kernel's generator, `erx_entropy_read`
   ([design-runtime.md](design-runtime.md#per-byte-primitives),
-  [design.md](design.md#decisions)). Outside erXos, the module of the
-  same name in `erx_net`'s `portable/` directory stands in for it
+  [design.md](design.md#decisions)). Their C is `erx_net`'s own, in its
+  `c_src/`. Outside erXos, the module of the same name in `erx_net`'s
+  `portable/` directory loads that same C as a NIF library, and
+  `entropy/1` there is the host's generator
   ([Two places, four seams](#two-places-four-seams)).
 * **The device NIF**: `erx_device:post/4` takes one to four binary
   segments of one request and copies them into a pool buffer, and
@@ -2164,7 +2166,7 @@ tap device or another medium (N12).
 | --- | --- | --- | --- |
 | the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp`, a port program or a test process | each interface's entry in the `interfaces` key |
 | the clock and entropy | `erx_net_clock` over ERTS's monotonic clock and `erx_bytes:entropy/1` | the same; in a test run, the virtual clock and its seeded generator | the `clock` key |
-| the per-byte primitives | `erx_bytes` of the `erx` application, statically linked NIFs | `erx_bytes` of `erx_net`'s `portable/` directory: each primitive in Erlang, written from its definition with the NIF's argument checks, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
+| the per-byte primitives | `erx_bytes` of the `erx` application, statically linked NIFs, those of the network over the C of `erx_net`'s `c_src/` | `erx_bytes` of `erx_net`'s `portable/` directory: the same C, loaded from `priv/erx_bytes_nif.so`, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
 | the runtime | `erx_net_erxos`: the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
 
 The runtime's seam is the behaviour `erx_net_runtime`:
@@ -2202,9 +2204,42 @@ outside erXos comes from another domain, so none arrives in an envelope
 and there is no lane to limit, and the grant's admission needs no variant of
 its own ([The grant's contract](#the-grants-contract)).
 
-The per-byte primitives are portable Erlang outside erXos. A NIF built
-from the portable C of erXos's primitives may later replace the Erlang
-behind the same module where a standalone user's throughput needs it.
+`c_src/` holds the stack's C. Beside the tap helper, built only on a
+host ([The tap helper](#the-tap-helper)), it holds the C of the
+per-byte primitives: the Internet checksum and SipHash-2-4 cores,
+`erx_inet_csum.c` and `erx_siphash.c`, and their NIF functions,
+`erx_net_bytes.c`, which check the arguments and walk an iodata
+argument's pieces. That C has one copy, and both builds compile it from
+there. erXos's ERTS build links it statically, and erXos's `erx_bytes`
+NIF table lists its functions through the one macro of
+`erx_net_bytes.h`, so the names, arities and checks cannot differ
+between the builds. Outside erXos, `c_src/Makefile` (POSIX make, which
+BSD and GNU make both read) builds the same files, with
+`c_src/erx_bytes_nif.c`'s table and nothing else, into
+`priv/erx_bytes_nif.so` against the headers of the host's own OTP. The
+paths run one way: erXos's tree reaches into `erx_net`, and `erx_net`'s
+C includes only its own headers and `erl_nif.h`, so the package builds
+alone on any host with stock OTP and a C compiler. A build step that
+copied the C out of ERTS's tree would make a second copy that a release
+of the package could ship out of step, and leaving the C in ERTS's tree
+would give the package a path into erXos's; the source living in the
+package that ships it removes both.
+
+The portable `erx_bytes` has no Erlang fallback. Its `on_load` loads
+`erx_bytes_nif` from `code:priv_dir(erx_net)`; when that fails, the code
+server logs why, the module stays unloaded, every call to it fails with
+`undef`, `entropy/1`'s included, and the stack does not start. Nothing
+stands in for the C, so the stack never runs on another implementation
+than the one erXos runs, and what a host run measures, over a tap device
+today and netmap, F-Stack or DPDK later, is the stack. The two modules'
+Erlang wrappers carry the same guards; one probe of their shared
+contract judges erXos's NIF in a release and the portable one on stock
+OTP, and both answer the same random calls as the Erlang models of the
+host tests. `entropy/1` outside erXos is the host's generator,
+`crypto:strong_rand_bytes/1`, with the same refusals as erXos's; a
+failure of the host's generator raises `crypto`'s error and never
+returns other bytes.
+
 Faster media are the other extension point: an `AF_PACKET`, netmap or
 DPDK transport is a NIF or port transport behind `erx_net_driver`, and
 nothing above the driver changes for it.
@@ -2759,6 +2794,7 @@ modules are marked P; process modules E.
 | `erx_net_loop`, `erx_net_pipe` | none | the driver's portable transports | E |
 | `erx_virtio_net`, `erx_net_erxos` (in `erxos/`) | none | erXos's transport and runtime | seam |
 | `erx_bytes`, `erx_net_local` (in `portable/`) | none | the portable per-byte primitives and runtime | seam |
+| `erx_net_bytes`, `erx_inet_csum`, `erx_siphash` (in `c_src/`, C17) | none | the per-byte primitives' C, linked into erXos's ERTS and built into the portable library | per-byte |
 | `erx_net_tap` (in `c_src/`, C17) | none | the tap helper, a port program | host tool |
 | `erx_icmp_sock` | `raw_ip.c` (`rip_input`, `rip_send`), the parts `ping` uses | the ICMP echo socket | E |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd` | none | processes | E |
