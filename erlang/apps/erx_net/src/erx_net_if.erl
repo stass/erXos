@@ -33,7 +33,7 @@ Messages:
   Packets}` and `charge_rst`, each against `credit`, and `{hint, NextHop}`;
 * from its erx_dhcp4: `{dhcp_attach, Pid}` once, then `{dhcp, Pid, erx_dhcp4_core:action()}`;
   to it, `{erx_net_if, {reply, Msg} | {link, up | down}}`;
-* `admin/2`, a call, for netadmin's requests (`counters`, `lease`).
+* `admin/2`, a call, for netadmin's requests (`counters`, `lease`, `status`).
 """.
 
 -behaviour(gen_server).
@@ -62,7 +62,7 @@ driver its link supervisor started before it.
 start_link(Name, Config) ->
     gen_server:start_link(?MODULE, {Name, Config}, []).
 
--doc "Asks the interface an administrative question: `counters` or `lease`.".
+-doc "Asks the interface an administrative question: `counters`, `lease` or `status`.".
 -spec admin(pid(), term()) -> term().
 admin(If, Request) ->
     gen_server:call(If, {admin, Request}, infinity).

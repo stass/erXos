@@ -282,6 +282,7 @@ Every piece of protocol state belongs to exactly one process:
 | a TCP connection | `erx_tcp_conn` | the connection's control block (FreeBSD's `struct tcpcb`), its send and receive buffers, its reassembly queue, its owner |
 | a listening socket | `erx_tcp_listen` | its accept queue and its waiting `accept` callers |
 | a UDP socket | `erx_udp_sock` | its receive queue, its options, its owner |
+| an ICMP echo socket | `erx_icmp_sock` | its echo identifier, its queue of echo replies, its owner |
 | a client domain's grant | `erx_net_grant` | the domain's limits, its account, its sockets' buffer reservations |
 
 Each owner is a loop around one pure function of its kind:
@@ -848,6 +849,7 @@ Classification runs in three steps:
 | ICMP or ICMPv6 error | type; the quoted protocol, addresses and ports | the quoted datagram, which the stack sent, read by `decode_quoted/1` with its source as the local end: a TCP connection's key or a connected UDP socket's key is `owned`; a TCP listener's key is `local`, for `syncache_unreach`; else dropped as `no_socket`, and a quote `decode_quoted/1` refuses is dropped with its reason |
 | ICMP echo or timestamp request, ICMPv6 echo request | type | `local` if it may be answered, else dropped as `no_reply` |
 | ICMP redirect; ICMPv6 router and neighbour messages, redirect, MLD query | type | `local` |
+| ICMP echo reply | type; the identifier | the key of the echo socket that holds the identifier: `owned`; else dropped as `no_socket`, and a reply shorter than the echo header as `too_short`. Its checksum and length are checked by `verify/1` (`erx_icmp4_wire:decode/1`), so the socket receives only whole replies |
 | any other ICMP or ICMPv6 type | type | dropped as `icmp_type` |
 | ARP | none | `local` |
 | any other protocol | protocol | `local` if it may be answered, for the protocol unreachable `rip_input` sends (`raw_ip.c:410`) or the parameter problem at the next-header byte `rip6_input` sends (`raw_ip6.c:321-324`); else dropped as `no_reply`. IPv6's No Next Header is dropped as `no_next_header`, as `rip6_input` frees it unanswered |
@@ -2758,6 +2760,7 @@ modules are marked P; process modules E.
 | `erx_virtio_net`, `erx_net_erxos` (in `erxos/`) | none | erXos's transport and runtime | seam |
 | `erx_bytes`, `erx_net_local` (in `portable/`) | none | the portable per-byte primitives and runtime | seam |
 | `erx_net_tap` (in `c_src/`, C17) | none | the tap helper, a port program | host tool |
+| `erx_icmp_sock` | `raw_ip.c` (`rip_input`, `rip_send`), the parts `ping` uses | the ICMP echo socket | E |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd` | none | processes | E |
 
 The packet-script runner `erx_net_script`, the virtual clock, the
@@ -2868,6 +2871,12 @@ principal's policy:
 
 Configuring interfaces and reading every client's statistics is a second
 facet, `netadmin`, granted to administrators.
+Its read side for interfaces is `erx_net:interfaces/0`, the one read
+path for an interface's state: each interface process answers for itself
+with its name, link-layer address, MTU, link state, configuration
+(static or DHCP), addresses, routes and resolver servers, which
+`ifconfig` shows and the resolver reads, and no administrative reader
+takes them from the published tables.
 
 ### Sockets act for one domain
 
@@ -4051,7 +4060,11 @@ behind the same processes, with no change to the core's structure:
   ([The `socket` and `net` modules](#the-socket-and-net-modules));
 * raw ICMP and ICMPv6 sockets for `ping`, translating the parts of
   `raw_ip.c` and `raw_ip6.c` that `ping` uses, each a datagram socket of
-  the grant that receives the ICMP echo replies its identifier names;
+  the grant that receives the ICMP echo replies its identifier names:
+  `erx_icmp_sock` for ICMP, which holds one identifier's demultiplexing
+  key, so the identifier filter `ping` applies to its raw socket is the
+  classifier's ([Classifying a frame](#classifying-a-frame)), and whose
+  credit bounds the replies waiting for its owner;
 * checksum offload where the device offers it
   ([Where C is used, and what is measured](#where-c-is-used-and-what-is-measured));
 * one interface process per receive queue on a device that hashes flows

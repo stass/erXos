@@ -274,8 +274,8 @@ Error in process <0.150.0> with exit value:
   The language has variables, lists, `for`, `if`, functions, pipelines,
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
   Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
-  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `dmesg`, `erl`, `true`
-  and `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
+  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `dmesg`, `ifconfig`,
+  `ping`, `erl`, `true` and `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
   `wc` print what FreeBSD's do for the options they offer; `uname` takes
   FreeBSD's flags and layout, and `uname -v` names the build. `dmesg` prints
   the kernel log from `/proc/kernel/log`, which reads the log without taking
@@ -352,8 +352,9 @@ Error in process <0.150.0> with exit value:
   host server. On FreeBSD it also runs over a tap device through its tap
   helper, where a vnet jail resolves and pings it. On erXos under QEMU it
   runs in the system domain over its virtio-net driver, takes a DHCP
-  lease and answers ARP and ping; the network domain it moves into later
-  is not built yet.
+  lease and answers ARP and ping, and the command shell's `ifconfig` and
+  `ping` show its interface and ping slirp's gateway in FreeBSD's layout;
+  the network domain it moves into later is not built yet.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated

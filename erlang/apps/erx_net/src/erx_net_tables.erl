@@ -40,7 +40,7 @@ then the rows, so a reader that raced a writer finds a newer generation at its n
 -behaviour(gen_server).
 
 -export([start_link/0, register_driver/2, driver/1, register_interface/1, watch_holder/1,
-         generation/0, configuration/0, interface/1, neighbour/2, first_hint/2, demux/1,
+         generation/0, configuration/0, interfaces/0, interface/1, neighbour/2, first_hint/2, demux/1,
          tcp_isn/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -95,6 +95,11 @@ configuration() ->
     Addrs = [{Pid, Order, Row} || {_, Pid, Order, Row} <- ets:tab2list(?ADDRS)],
     Routes = [{Pid, Row} || {_, Pid, Row} <- ets:tab2list(?ROUTES)],
     {Gen, erx_net_frame:snapshot(Ifs, Addrs, Routes)}.
+
+-doc "Each published interface's name and the pid of the incarnation that wrote its row.".
+-spec interfaces() -> [{term(), pid()}].
+interfaces() ->
+    [{Name, Pid} || {Name, Pid, _} <- ets:tab2list(?IFS)].
 
 -doc "The published row of interface `Name`.".
 -spec interface(term()) -> {ok, erx_net_frame:iface()} | none.

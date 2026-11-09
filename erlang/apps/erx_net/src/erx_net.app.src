@@ -9,7 +9,7 @@
  [{description, "erXos TCP/IP stack"},
   {vsn, "1"},
   {modules, [erx_arp, erx_arp_wire, erx_dhcp4, erx_dhcp4_core, erx_dhcp4_wire,
-               erx_icmp4, erx_icmp4_wire, erx_icmp6, erx_icmp6_wire, erx_in6_src,
+               erx_icmp4, erx_icmp4_wire, erx_icmp6, erx_icmp6_wire, erx_icmp_sock, erx_in6_src,
                erx_ip4, erx_ip4_reass, erx_ip4_wire, erx_ip6, erx_ip6_reass,
                erx_ip6_wire, erx_ip_reass, erx_lltable, erx_nd6, erx_nd6_dad,
                erx_nd6_rtr, erx_net, erx_net_addr, erx_net_app, erx_net_bandlim,

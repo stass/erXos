@@ -326,7 +326,11 @@ shell and for `erx:` functions that run commands:
    `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `uname`,
    `dmesg`, `true` and `false`, which follow FreeBSD's utilities of the same names
    ([Text commands](#text-commands)), so toybox's applets of those names
-   are never built; and erXos's own `i`, `domains`, `source`, `trace`,
+   are never built; the network utilities `ifconfig [-a] [interface]`
+   and `ping`, which follow FreeBSD's ifconfig(8) and ping(8) over
+   erXos's own stack, reading interfaces through `erx_net:interfaces/0`
+   and echo replies through `erx_icmp_sock`
+   ([design-network-stack.md](design-network-stack.md)); and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `bind`, `mount` and `unmount`, which have no FreeBSD
    counterpart;
 3. a **program command**: one of toybox's applets or another program of
@@ -1263,6 +1267,18 @@ remain independent of catalog generation.
     and matches the name, the manifest's host, the revision, the date,
     `qemu-virt/development`, the kernel and the machine type. A selection
     in the order of the flags fails.
+  * `ifconfig` and `ping`: ifconfig writes an interface in FreeBSD's
+    layout, flags, netmask in hex and broadcast included, selects one by
+    name, refuses an unknown one, and takes a configuring argument or a
+    bad flag as a usage error; ping's options and their diagnostics are
+    FreeBSD's, and its pure core counts a reply only for a sequence
+    number it sent and remembers, marks and counts a duplicate, takes
+    each round-trip time from its own send record, never from the
+    reply's data, and writes FreeBSD's reply lines and statistics; the
+    network device suite runs `ifconfig` and
+    `ping -c 3 10.0.2.2` at the command shell on QEMU and matches vtnet0
+    with slirp's lease, three replies and no loss. Matching a reply of
+    any sequence number fails.
   * `grep`'s translator: every construct of POSIX basic and extended
     expressions against a table of `regcomp(3)` results taken from the
     guest; a pattern built to backtrack ends with status 2 within the

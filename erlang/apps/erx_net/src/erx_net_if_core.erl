@@ -48,7 +48,7 @@ it while it asks.
 
 -export([new/1, step/3, view/1, next_deadline/1]).
 
--export_type([core/0, config/0, event/0, action/0, rows/0]).
+-export_type([core/0, config/0, event/0, action/0, rows/0, status/0]).
 
 -define(PROTO_UDP, 17).
 -define(DHCP_CLIENT_PORT, 68).
@@ -94,6 +94,17 @@ and its burst.
     | {reply, From :: term(), Reply :: term()}.
 
 -doc """
+What the `status` request answers, netadmin's view of the interface: its name, link-layer
+address and MTU; the driver's latest link state; whether its IPv4 configuration is static
+or from DHCP; its addresses in the order it added them and its routes; and the name
+servers and search list of its lease, empty without one.
+""".
+-type status() :: #{name := term(), lladdr := <<_:48>>, mtu := pos_integer(),
+                    link := up | down, config := static | dhcp,
+                    addrs := [erx_net_addr:row()], routes := [erx_net_route:row()],
+                    dns := [<<_:32>>], search := [binary()]}.
+
+-doc """
 The complete set of the interface's rows, without what only its process knows (its pid,
 its credits and its driver's): its `erx_net_ifs` fields, its addresses in the order it
 added them, and its routes.
@@ -113,6 +124,7 @@ added them, and its routes.
                device_mtu :: pos_integer(),
                mtu :: pos_integer(),
                dhcp :: boolean(),
+               link :: up | down,                % the driver's latest link state
                addrs = [] :: [{non_neg_integer(), erx_net_addr:row()}],
                order = 0 :: non_neg_integer(),   % the next address's place
                routes = [] :: [erx_net_route:row()],
@@ -135,12 +147,12 @@ and configuration `config`. Its first step is `start`.
 """.
 -spec new(#{name := term(), link := erx_net_driver:link_info(), gen := erx_net_rand:gen(),
             config := config()}) -> core().
-new(#{name := Name, link := #{link := ethernet, lladdr := <<_:48>> = Lladdr, mtu := Mtu},
+new(#{name := Name, link := #{link := ethernet, lladdr := <<_:48>> = Lladdr, mtu := Mtu, state := Link},
       gen := Gen0, config := #{ip4 := Ip4} = Config}) ->
     #{rate := Rate, burst := Burst} = maps:get(ingress, Config, ?INGRESS_DEFAULT),
     {LimGen, Gen} = erx_net_rand:split(Gen0),
     Core = #core{name = Name, lladdr = Lladdr, device_mtu = Mtu, mtu = Mtu,
-                 dhcp = Ip4 =:= dhcp, arp = erx_arp:new(), lim = erx_net_bandlim:new(LimGen),
+                 dhcp = Ip4 =:= dhcp, link = Link, arp = erx_arp:new(), lim = erx_net_bandlim:new(LimGen),
                  bucket = #bucket{rate = Rate, burst = Burst, tokens = Burst * ?TOKEN},
                  gen = Gen},
     case Ip4 of
@@ -191,9 +203,9 @@ step({hint, NextHop}, #core{arp = Arp} = Core, _Ctx) when is_binary(NextHop) ->
 step({config, Gen, Snapshot}, Core, _Ctx) ->
     {Core#core{config_gen = Gen, snapshot = Snapshot}, []};
 step({link, State}, #core{dhcp = true} = Core, _Ctx) ->
-    {Core, [{dhcp, {link, State}}]};
-step({link, _State}, Core, _Ctx) ->
-    {Core, []};
+    {Core#core{link = State}, [{dhcp, {link, State}}]};
+step({link, State}, Core, _Ctx) ->
+    {Core#core{link = State}, []};
 step({dhcp, Action}, #core{dhcp = true} = Core, #{now := Now}) ->
     dhcp(Action, Core, Now);
 step({admin, Request, From}, Core, _Ctx) ->
@@ -446,7 +458,18 @@ publish(#core{name = Name, lladdr = Lladdr, mtu = Mtu, addrs = Addrs, routes = R
 
 admin(counters, #core{counters = Counters}) -> {ok, Counters};
 admin(lease, #core{lease = Lease}) -> {ok, Lease};
+admin(status, Core) -> {ok, status(Core)};
 admin(_Request, _Core) -> {error, enotsup}.
+
+status(#core{name = Name, lladdr = Lladdr, mtu = Mtu, link = Link, dhcp = Dhcp, addrs = Addrs,
+             routes = Routes, lease = Lease}) ->
+    {Dns, Search} = case Lease of
+                        #{dns := D, search := S} -> {D, S};
+                        none -> {[], []}
+                    end,
+    #{name => Name, lladdr => Lladdr, mtu => Mtu, link => Link,
+      config => case Dhcp of true -> dhcp; false -> static end,
+      addrs => [Row || {_, Row} <- Addrs], routes => Routes, dns => Dns, search => Search}.
 
 count(Reason, #core{counters = Counters} = Core) ->
     Core#core{counters = maps:update_with(Reason, fun(N) -> N + 1 end, 1, Counters)}.

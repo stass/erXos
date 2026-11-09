@@ -278,6 +278,30 @@ lease_configures_and_unconfigure_withdraws_test() ->
     {_, [{publish, Gone}]} = step({dhcp, unconfigure}, Core1),
     ?assertMatch(#{iface := #{mtu := 1500}, addrs := [], routes := []}, Gone).
 
+%% The status netadmin and ifconfig read: the link from the driver's attach, then each
+%% change; the addresses and routes configured; the lease's name servers under DHCP.
+status_shows_the_link_addresses_and_lease_test() ->
+    Static = started(static()),
+    ?assertMatch({_, [{reply, f, {ok, #{name := en0, lladdr := ?MINE, mtu := 1500, link := up,
+                                        config := static, dns := [], search := [],
+                                        addrs := [#{addr := ?ME4, plen := 24,
+                                                    broadcast := <<10, 0, 2, 255>>}],
+                                        routes := [_ | _]}}}]},
+                 step({admin, status, f}, Static)),
+    {Down, []} = step({link, down}, Static),
+    ?assertMatch({_, [{reply, f, {ok, #{link := down}}}]}, step({admin, status, f}, Down)),
+    Lease = #{addr => ?ME4, mask => <<255, 255, 255, 0>>, mtu => 1400, dns => [<<10, 0, 2, 3>>],
+              search => [<<"example.org">>], server => ?PEER4,
+              routes => [#{prefix => <<0:32>>, plen => 0, gateway => ?PEER4}]},
+    Dhcp0 = started(#{ip4 => dhcp}),
+    ?assertMatch({_, [{reply, f, {ok, #{config := dhcp, addrs := [], dns := []}}}]},
+                 step({admin, status, f}, Dhcp0)),
+    {Dhcp1, _} = step({dhcp, {configure, Lease}}, Dhcp0),
+    ?assertMatch({_, [{reply, f, {ok, #{config := dhcp, mtu := 1400, dns := [<<10, 0, 2, 3>>],
+                                        search := [<<"example.org">>],
+                                        addrs := [#{addr := ?ME4, plen := 24}]}}}]},
+                 step({admin, status, f}, Dhcp1)).
+
 link_change_goes_to_the_client_only_under_dhcp_test() ->
     ?assertMatch({_, [{dhcp, {link, up}}]}, step({link, up}, started(#{ip4 => dhcp}))),
     ?assertMatch({_, []}, step({link, up}, started(static()))).

@@ -70,27 +70,21 @@ arp(If) ->
                   end
           end).
 
-%% An echo request handed to the driver as any sender hands frames; slirp's reply reaches
-%% the interface, which has no raw socket to give it to and counts it as `icmp_type'.
-ping(If) ->
-    Before = maps:get(icmp_type, counters(If), 0),
-    {_, Snap} = erx_net_tables:configuration(),
-    {ok, #{iface := #{driver := Driver, driver_credit := Tx}} = Path} =
-        erx_net_frame:path(?GATEWAY, #{}, Snap),
-    Request = erx_icmp4_wire:encode({icmp4, 8, 0, {echo, 16#e1, 1}}, <<"erx_net ping">>),
-    {ok, Packets, _} = erx_net_frame:ip(Path, 1, Request, erx_net_rand:new(<<1:128>>)),
-    {send, Frames} = erx_net_frame:address(Path, erx_net_tables:neighbour(If, ?GATEWAY), Packets),
-    ok = erx_net_credit:hand(Driver, Tx, length(Frames), {transmit, Frames}),
-    until(fun() ->
-                  case maps:get(icmp_type, counters(If), 0) of
-                      N when N > Before -> ok;
-                      N -> {replies, N}
-                  end
-          end).
-
-counters(If) ->
-    {ok, Counters} = erx_net_if:admin(If, counters),
-    Counters.
+%% An echo request from an echo socket; slirp's reply comes back to the socket that
+%% holds its identifier.
+ping(_If) ->
+    {ok, Sock} = erx_icmp_sock:open(#{}),
+    Payload = <<"erx_net ping">>,
+    Result = case erx_icmp_sock:send(Sock, {10, 0, 2, 2}, 1, #{data => Payload}) of
+                 ok ->
+                     case erx_icmp_sock:recv(Sock, ?WAIT_MS) of
+                         {ok, {{10, 0, 2, 2}, _Ttl, 1, Payload}} -> ok;
+                         Other -> Other
+                     end;
+                 Error -> Error
+             end,
+    ok = erx_icmp_sock:close(Sock),
+    Result.
 
 udp(_If, EchoPort) ->
     {ok, Sock} = erx_udp_sock:open(0, #{active => false}),

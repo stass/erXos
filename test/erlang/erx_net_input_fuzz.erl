@@ -214,6 +214,12 @@ above(inet, 1, <<T, _/binary>> = U, H, Map) when T =:= 3; T =:= 11; T =:= 12 ->
     quote_verdict(inet, read_quote(inet, after8(U)), H, Map);
 above(inet, 1, <<T, _/binary>>, H, _) when T =:= 8; T =:= 13 -> reply(H, {local, icmp});
 above(inet, 1, <<5, _/binary>>, _, _) -> {local, icmp};
+above(inet, 1, <<0, _, _:16, Id:16, _:16, _/binary>>, _, Map) ->
+    case get({icmp_echo, inet, Id}, Map) of
+        [] -> {drop, no_socket};
+        E -> {owned, ids(E), echo}
+    end;
+above(inet, 1, <<0, _/binary>>, _, _) -> {drop, too_short};
 above(inet6, 58, <<T, _/binary>> = U, H, Map) when T >= 1, T =< 4 ->
     quote_verdict(inet6, read_quote(inet6, after8(U)), H, Map);
 above(inet6, 58, <<128, _/binary>>, H, _) -> reply(H, {local, icmp});
@@ -321,7 +327,8 @@ zoned(A, _) -> A.
 %% The two byte properties.
 
 %% Bytes above IP the table does not name: past the ports of TCP and UDP, the code,
-%% checksum and second word of an ICMP or ICMPv6 message, and every byte of any other.
+%% checksum and second word of an ICMP or ICMPv6 message (but an echo reply's identifier),
+%% and every byte of any other.
 unnamed_bytes(_, _, _, _, {drop, too_short}) -> ok;
 unnamed_bytes(Form, Prefix, Upper, View, Verdict) ->
     case unnamed(Prefix, Upper, Form) of
@@ -339,9 +346,13 @@ unnamed_bytes(Form, Prefix, Upper, View, Verdict) ->
 unnamed(Prefix, Upper, Form) ->
     case proto(Prefix, Form) of
         P when P =:= 6; P =:= 17 -> [I || I <- offsets(Upper), I >= 4];
-        P when P =:= 1; P =:= 58 -> [I || I <- offsets(Upper), I >= 1, I =< 7];
+        P when P =:= 1; P =:= 58 -> [I || I <- offsets(Upper), I >= 1, I =< 7, not echo_ident(P, Upper, I)];
         _ -> []
     end.
+
+%% An ICMP echo reply's identifier, which names its socket.
+echo_ident(1, <<0, _/binary>>, I) -> I =:= 4 orelse I =:= 5;
+echo_ident(_, _, _) -> false.
 
 %% A flipped checksum keeps verify/1's drop or makes its success a drop for the sum.
 checksum(Form, Prefix, Upper, View, Verdict, Original) when element(2, Original) =/= none ->
@@ -370,7 +381,7 @@ checksum(_, _, _, _, _, _) ->
 %% The pending kinds whose verify/1 checks a sum above IP.
 summed_kind(Verdict) ->
     lists:member(element(1, element(tuple_size(Verdict), Verdict)),
-                 [conn, tcp, datagram, udp, dhcp, report, icmp]).
+                 [conn, tcp, datagram, udp, dhcp, report, echo, icmp]).
 
 sum_offset(6, Upper) when byte_size(Upper) >= 18 -> 16;
 sum_offset(17, Upper) when byte_size(Upper) >= 8 -> 6;
@@ -572,9 +583,16 @@ demux_map(Ip, Upper, Family, Zone) ->
         [{udp, Family, L, Lp} || {Lp, _} <- Ports, L <- [any, ?ALSO4 | Addrs(Dst)]] ++
         [{T, Family, L, Lp, R, Rp} || {QL, Lp, QR, Rp} <- Quoted, T <- [tcp, udp],
                                       L <- Addrs(QL), R <- Addrs(QR)] ++
-        [{tcp_listen, Family, L, Lp} || {QL, Lp, _, _} <- Quoted, L <- [any | Addrs(QL)]],
+        [{tcp_listen, Family, L, Lp} || {QL, Lp, _, _} <- Quoted, L <- [any | Addrs(QL)]] ++
+        echo_keys(Family, Upper),
     Chosen = [K || K <- Candidates, rand:uniform(4) =:= 1],
     maps:from_list([{K, [entry(K, N)]} || {K, N} <- lists:zip(Chosen, lists:seq(1, length(Chosen)))]).
+
+%% An echo reply's own identifier and its neighbour, so lookups hit and miss.
+echo_keys(inet, <<0, _, _:16, Id:16, _/binary>>) ->
+    [{icmp_echo, inet, Id}, {icmp_echo, inet, (Id + 1) band 16#ffff}];
+echo_keys(_, _) ->
+    [].
 
 entry({tcp_listen, _, _, _}, N) -> #{pid => self(), credit => N, listener => #{rcv_buf => 0, mss => 536, rcv_scale => 0}};
 entry(_, N) -> #{pid => self(), credit => N}.

@@ -924,6 +924,35 @@ it; git history is the record of completed work.
 * [Low] network, `erx_dhcp4_wire_fuzz`: the fuzz target has no field oracle: pkt has no DHCP
   decoder, so its judge reads the options itself (joined bytes, and its own reading of options 15
   and 121) instead.
+* [Medium] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): a ping without `-c` or `-t`
+  runs until interrupted, and `Ctrl-C` ends it without its statistics, because an Erlang command gets
+  no `SIGINT` to catch: FreeBSD's ping writes the statistics and exits on it. Deliver the interrupt to
+  an Erlang command as a message it may handle, and have ping write its statistics then.
+* [Medium] shell, `ping`'s loop (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`, `loop/2`, `tick/2`, `due/2`):
+  the schedule (next request, grace period, `-t` end) lives in an untyped map across three recursive
+  functions that each read the clock, and only `-c 3` on QEMU and the reply-stream case test it. Make it a
+  pure `next(Schedule, Now, Tally) -> {send, Seq} | {wait, Ms} | done` over a record, tested on the host for
+  the count, the grace period, `-t` and exit status 2.
+* [Medium] network, `erx_icmp_sock` (`erlang/apps/erx_net/src/erx_icmp_sock.erl`): no host case drives it:
+  the 17th waiting reply dropped and counted by the interface, the identifier released on `close/1` and on
+  the owner's end, `eaddrinuse` when every identifier is held, the `recv` deadline. Nor does one drive
+  `erx_net:interfaces/0`'s conversion (IPv6 rows, `gateway => none`) and an interface ending while asked.
+  Its waiter, deadline and credit-take code copies `erx_udp_sock`'s; one receive-queue module for both
+  removes the second copy.
+* [Medium] network and shell, ICMP errors to ping: an unreachable, time-exceeded or parameter-problem
+  error quoting one of ping's echo requests is dropped as `no_socket` (`erx_net_input`, `quoted/4`), so
+  ping prints nothing where FreeBSD's `pr_pack` prints `NN bytes from X: Destination Host Unreachable`
+  and the like. Route an ICMP quote by its `{icmp_echo, inet, Ident}` key to the socket and print it.
+* [Low] shell, `ping`: a reply whose slot of the 1024 a later sequence number took is ignored, so with
+  `-i 0.001` and round trips over a second ping reports loss FreeBSD would not; and the grace period
+  after the last request is `max(1 s, 2 * tmax)` in milliseconds, where FreeBSD truncates it to whole
+  seconds. Pin both against ping.c.
+* [Low] shell, usage errors: an Erlang command's `{error, usage}` gives the status `usage`, while ping's
+  out-of-range values give 64, FreeBSD's `EX_USAGE`, which FreeBSD's `usage()` gives too
+  (`erlang/apps/erx_shell/src/erx_shell_runner.erl`). Give `{error, usage}` status 64.
+* [Low] shell, `erlang/apps/erx_shell/src/erx_shell.app.src`: `ifconfig` and `ping` call erx_net, which
+  the application does not list, so on a node without erx_net they end with `undef` rather than a
+  diagnostic. Report a missing stack as `ping: socket: ...` and `ifconfig: network stack: ...` do.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
@@ -3709,6 +3738,9 @@ to the corpus and follow rc
   stock it ends one node. Its fuzz target over every mode offered lands
   with the stack; the owner accepted the reach over a client-side process
   per socket.
+* [Low] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): every session is root's, so ping
+  takes `-s` up to 65507 and `-i` down to 1 ms for everyone. Once sessions have users, a non-root
+  session gets FreeBSD's limits: `-s` at most 56 bytes and `-i` at least 1 s (ping.c's `uid` checks).
 
 * [Medium] stopgap, Phase 1b's deferred guarantees: every guarantee the
   user-facing system on the stopgap rests on but does not get is a row of
@@ -3935,6 +3967,13 @@ document's "residual risks accepted" paragraph.
 * [Low] live inspection, `ps` and `top` ([design-live.md](docs/design-live.md)): the `time` and `pcpu` columns of an
   Erlang process show its reductions, labelled as reductions, instead of `-`; real CPU time per process comes
   later as an opt-in scheduler flag.
+* [Low] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): it does not compare a reply's data
+  with what it sent, so FreeBSD's `wrong data byte` report of a corrupted reply is missing; the
+  checksum check in `erx_icmp4_wire` still drops a reply corrupted on the wire.
+* [Low] shell, `ifconfig` (`erlang/apps/erx_shell/src/erx_cmd_ifconfig.erl`): it shows no `lo0`, since
+  the stack runs no loopback interface process, and no `inet6` lines or `nd6` options: it
+  writes only the IPv4 rows of `erx_net:interfaces/0`. Add `lo0` once a loopback interface
+  process exists, and the IPv6 rows in FreeBSD's layout (`prefixlen`, `scopeid`).
 
 * [Low] website, `site/terminal.js` (`FAULTS`, [site/README.md](site/README.md)): what the fault menu still lacks.
   It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser once the

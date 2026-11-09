@@ -299,10 +299,12 @@ the entries that hold a key, none or one each.
 -doc """
 A demultiplexing key, most specific first: a connection's or a connected datagram
 socket's full four-tuple, local end first, then a listener's or a bound datagram socket's
-local address and port, then the same with any address. Addresses are zoned.
+local address and port, then the same with any address. Addresses are zoned. An ICMP echo
+socket holds its identifier, the one key of the echo replies it takes.
 """.
 -type key() :: {tcp | udp, family(), Local :: addr(), port_number(), Remote :: addr(), port_number()}
-             | {tcp_listen | udp, family(), Local :: addr() | any, port_number()}.
+             | {tcp_listen | udp, family(), Local :: addr() | any, port_number()}
+             | {icmp_echo, inet, Ident :: 0..16#ffff}.
 
 -doc """
 A holder of a key: its pid and the credit a frame for it takes one unit of; a listener's
@@ -345,7 +347,7 @@ path, ARP, a fragment and a parameter problem what each needs: a fragment its zo
 frame's link cast, which reassembly keeps for the datagram, and a parameter problem its
 packet's zone, so the error goes back to the zoned source.
 """.
--opaque pending() :: {conn | datagram | report | udp | icmp | other, head(), binary()}
+-opaque pending() :: {conn | datagram | report | echo | udp | icmp | other, head(), binary()}
                    | {tcp, head(), binary(), entry() | none}
                    | {dhcp, #ip4{}, binary()}
                    | {arp, binary()}
@@ -355,7 +357,8 @@ packet's zone, so the error goes back to the zoned source.
 -doc """
 What `verify/1` hands on. For the holders of an owned frame: a connection's
 `erx_tcp:segment()`; a datagram socket's `{datagram, {Src, SrcPort}, Dst, Payload}`; or an
-ICMP or ICMPv6 error with the datagram it quotes, for the socket that sent it. For the
+ICMP or ICMPv6 error with the datagram it quotes, for the socket that sent it; or an echo
+reply's sender, TTL, identifier, sequence number and data, for the echo socket. For the
 interface: a TCP segment with the listener it is for, or `none` for a closed port; a UDP
 datagram to a closed port, whole, for the port unreachable error that quotes it; a datagram
 for the DHCP path; an ICMP or ICMPv6 message; an ARP
@@ -365,6 +368,8 @@ with the packet it is about, for erx_icmp4 or erx_icmp6 to answer.
 -type item() :: erx_tcp:segment()
               | {datagram, {addr(), port_number()}, addr(), binary()}
               | {report, #icmp4{} | #icmp6{}, erx_icmp4:quoted() | erx_icmp6:quoted()}
+              | {echo_reply, Src :: <<_:32>>, Ttl :: 0..255, Ident :: 0..16#ffff,
+                 Seq :: 0..16#ffff, Data :: binary()}
               | {tcp, head(), #tcp{}, binary(), entry() | none}
               | {udp, head(), #udp{}, Datagram :: binary()}
               | {dhcp, #ip4{}, #udp{}, Payload :: binary()}
@@ -536,12 +541,21 @@ udp(_, _, _) ->
     {drop, too_short}.
 
 %% icmp_input: an error goes to the socket its quote names; an echo or timestamp request
-%% is answered when it may be; a redirect is the interface's; every other type ends here.
+%% is answered when it may be; an echo reply goes to the echo socket holding its identifier,
+%% as rip_input hands it to the raw socket ping(8) filters by its identifier; a redirect is
+%% the interface's; every other type ends here.
 icmp4(Head, <<Type, _/binary>> = Upper, View)
   when Type =:= ?ICMP_UNREACH; Type =:= ?ICMP_TIMXCEED; Type =:= ?ICMP_PARAMPROB ->
     quoted(Head, erx_icmp4:decode_quoted(invoking(Upper)), Upper, View);
 icmp4(Head, <<Type, _/binary>> = Upper, _) when Type =:= ?ICMP_ECHO; Type =:= ?ICMP_TSTAMP ->
     answerable(Head, {icmp, Head, Upper});
+icmp4(Head, <<?ICMP_ECHOREPLY, _Code, _Sum:16, Id:16, _Seq:16, _/binary>> = Upper, #{demux := Demux}) ->
+    case Demux({icmp_echo, inet, Id}) of
+        [_ | _] = Entries -> {owned, holders(Entries), {echo, Head, Upper}};
+        [] -> {drop, no_socket}
+    end;
+icmp4(_, <<?ICMP_ECHOREPLY, _/binary>>, _) ->
+    {drop, too_short};
 icmp4(Head, <<?ICMP_REDIRECT, _/binary>> = Upper, _) ->
     {local, {icmp, Head, Upper}};
 icmp4(_, <<_, _/binary>>, _) ->
@@ -638,6 +652,9 @@ verify({report, Head, Upper}) ->
         {error, Reason} ->
             {drop, Reason}
     end;
+verify({echo, #{ip := #ip4{src = Src, ttl = Ttl}}, Upper}) ->
+    then(erx_icmp4_wire:decode(Upper),
+         fun(#icmp4{msg = {echo, Id, Seq}}, Data) -> {echo_reply, Src, Ttl, Id, Seq, Data} end);
 verify({icmp, Head, Upper}) ->
     then(icmp_wire(Head, Upper), fun(Icmp, Rest) -> {icmp, Head, Icmp, Rest} end);
 verify({arp, Bytes}) ->

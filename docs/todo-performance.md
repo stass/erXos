@@ -46,6 +46,10 @@ block a milestone's numbers.
   limit of `TODO.md` is set; the fixes are a patience-sorting longest run and an indexed
   children sequence.
 
+* **[Low] shell, ping's request data.** `erx_cmd_ping:payload/2` builds the fill with `lists:seq` for every
+  request; at `-s 65507 -i 0.001` that is a 65,507-element list a millisecond, where FreeBSD fills its
+  buffer once. Settle it with the reductions and send rate of `ping -s 65507 -i 0.001 -c 1000` to slirp's
+  gateway under HVF, with the fill built once at start as the baseline.
 * **[Low] kernel, a destroy's slot names.** `erx_cap_slot_name` (`kernel/core/cap.c`) finds a
   listed slot's index by scanning its table's directory, up to `ERX_CAPS_MAX / ERX_CAP_PAGE_SLOTS`
   page pointers per slot a teardown clears. Measure a destroy of an object named by many slots in

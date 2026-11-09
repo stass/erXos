@@ -296,6 +296,26 @@ icmp_echo_request_is_local_when_it_may_be_answered_test() ->
                  classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, ip4(?PEER4, ?BCAST4, ?PROTO_ICMP, Echo))},
                           view())).
 
+%% An echo reply goes to the echo socket holding its identifier, verified, with its
+%% sender, TTL, sequence number and data; one for an identifier no socket holds, a
+%% truncated one and one with a bad checksum go no further.
+icmp_echo_reply_is_owned_by_its_identifier_test() ->
+    Demux = holders([{{icmp_echo, inet, 16#e1}, pinger}, {{icmp_echo, inet, 16#e2}, other}]),
+    Reply = icmp4(0, 0, {echo, 16#e1, 7}, <<"pong">>),
+    ?assertMatch({[pinger], {ok, {echo_reply, ?PEER4, 64, 16#e1, 7, <<"pong">>}}},
+                 owned(classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, Reply)),
+                                view(#{demux => demux(Demux)})))),
+    Stranger = icmp4(0, 0, {echo, 16#e3, 7}, <<"pong">>),
+    ?assertEqual({drop, no_socket}, classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, Stranger)),
+                                             view(#{demux => demux(Demux)}))),
+    ?assertEqual({drop, too_short}, classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, <<0, 0, 0, 0, 0, 16#e1>>)),
+                                             view(#{demux => demux(Demux)}))),
+    <<Head:2/binary, Sum:16, Tail/binary>> = Reply,
+    Corrupt = <<Head/binary, (Sum bxor 1):16, Tail/binary>>,
+    ?assertMatch({[pinger], {drop, bad_sum}},
+                 owned(classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, Corrupt)),
+                                view(#{demux => demux(Demux)})))).
+
 icmp_redirect_and_neighbour_messages_are_local_test() ->
     Redirect = icmp4(5, 0, {redirect, ?ALSO4}, quote4(?PROTO_UDP)),
     ?assertMatch({ok, {icmp, _, #icmp4{type = 5}, _}},

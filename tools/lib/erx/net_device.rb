@@ -24,10 +24,13 @@ module Erx
   # * ICMP: an echo request to that address, answered by an echo reply from GUEST_IP
   #   with the request's identifier, sequence number and data, within REPLY_SECONDS.
   #
-  # The exchange runs as the verifier of the boot transcript's last checkpoint, so QEMU
-  # runs throughout and the run's deadline covers it. Every frame the harness reads is
-  # parsed with bounds checks, since the guest is the code under test; a frame that is
-  # not the awaited answer, slirp's included, is skipped.
+  # The exchange runs as the verifier of the command shell's banner, the boot's last
+  # line, so QEMU runs throughout and the run's deadline covers it. The harness then types
+  # at that shell (shell_checkpoints): `ifconfig`, which must show vtnet0 up with the
+  # link-layer address that answered ARP and slirp's lease, and `ping -c 3` to slirp's
+  # gateway, which must show three replies and FreeBSD's statistics with no loss. Every
+  # frame the harness reads is parsed with bounds checks, since the guest is the code
+  # under test; a frame that is not the awaited answer, slirp's included, is skipped.
   module NetDevice
     GUEST_IP = [10, 0, 2, 15].freeze
     HOST_IP = [10, 0, 2, 100].freeze
@@ -43,8 +46,40 @@ module Erx
     PING_DATA = 'erxos net-device ping'.b
     FRAME_BYTES = 2048
     SERIAL_BYTES = 1 << 20
+    # Each shell line's answer comes within this; the first after the exchange has the
+    # exchange's time as well.
+    SHELL_SECONDS = 30
+    IFCONFIG_LINE = "ifconfig\r"
+    PING_LINE = "ping -c 3 10.0.2.2\r"
+    MS = '[0-9]+\.[0-9]{3}'
 
     module_function
+
+    # What the shell shows after the exchange, whose result mac reads the guest's
+    # link-layer address from: ifconfig's lines for vtnet0, in FreeBSD's layout with the
+    # lease's address, netmask and broadcast, and ping's to slirp's gateway, where only
+    # the TTLs and times may vary. Lines between, such as the echo of each typed line,
+    # are passed over.
+    def shell_checkpoints(mac)
+      ether = lambda do |line|
+        raise Error, "ifconfig showed #{line.inspect}, not #{mac.call}, which answered ARP" unless line.match?(/\A\tether #{mac.call}\r*\n\z/n)
+      end
+      [shell_point('ifconfig-vtnet0', Regexp.escape('vtnet0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500'),
+                   seconds: LEASE_SECONDS + REPLY_SECONDS + SHELL_SECONDS),
+       shell_point('ifconfig-ether', '\tether [0-9a-f]{2}(?::[0-9a-f]{2}){5}', verify: ether),
+       shell_point('ifconfig-inet', Regexp.escape("\tinet 10.0.2.15 netmask 0xffffff00 broadcast 10.0.2.255")),
+       shell_point('ifconfig-status', Regexp.escape("\tstatus: active"), type: PING_LINE),
+       shell_point('ping-head', Regexp.escape('PING 10.0.2.2 (10.0.2.2): 56 data bytes')),
+       *(0..2).map { |seq| shell_point("ping-reply-#{seq}", "64 bytes from 10\\.0\\.2\\.2: icmp_seq=#{seq} ttl=[0-9]+ time=#{MS} ms") },
+       shell_point('ping-statistics', Regexp.escape('--- 10.0.2.2 ping statistics ---')),
+       shell_point('ping-counts', Regexp.escape('3 packets transmitted, 3 packets received, 0.0% packet loss')),
+       shell_point('ping-round-trip', "round-trip min/avg/max/stddev = #{MS}/#{MS}/#{MS}/#{MS} ms")].freeze
+    end
+
+    # A checkpoint for one whole line the shell writes, matched by the pattern source.
+    def shell_point(name, source, seconds: SHELL_SECONDS, type: nil, verify: nil)
+      { name: name, pattern: /\A#{source}\r*\n\z/n, seconds: seconds, **{ type: type, verify: verify }.compact }.freeze
+    end
 
     def arp_request
       ethernet(BROADCAST, ETHERTYPE_ARP,
@@ -184,13 +219,15 @@ module Erx
                                             mode: 0o700)
         link = Link.new
         answered = nil
-        *head, last = Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB)
-        verified = last.merge(seconds: last.fetch(:seconds) + LEASE_SECONDS + REPLY_SECONDS,
-                              verify: ->(_line) { answered = NetDevice.exchange(link) }).freeze
+        shell = ProductionImage::Run::RELEASE_SHELL.merge(verify: ->(_line) { answered = NetDevice.exchange(link) },
+                                                          type: IFCONFIG_LINE).freeze
+        checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN, shell,
+                       *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) })]
         Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
-                                                   directory: directory, checkpoints: [*head, verified], nic: link.nic,
+                                                   directory: directory, checkpoints: checkpoints, nic: link.nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
-        @notes << "#{accel}: the guest at #{GUEST_IP.join('.')} (#{answered.fetch(:mac)}) answered ARP and ICMP echo"
+        @notes << "#{accel}: the guest at #{GUEST_IP.join('.')} (#{answered.fetch(:mac)}) answered ARP and ICMP echo, " \
+                  'and its shell showed vtnet0 with the lease and pinged 10.0.2.2 three times'
         'passed'
       ensure
         link&.close

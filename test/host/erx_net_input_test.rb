@@ -28,6 +28,11 @@ class ErxNetInputTest < Minitest::Test
     udp_looked_up_without_the_address: [
       'erx_net_input', '{udp, Family, Dst, Dport}, {udp, Family, any, Dport}]',
       '{udp, Family, any, Dport}, {udp, Family, any, Dport}]', 'udp_to_the_holders_is_owned_test'
+    ],
+    echo_reply_taken_by_any_echo_socket: [
+      'erx_net_input', "Id:16, _Seq:16, _/binary>> = Upper, \#{demux := Demux}) ->\n    case Demux({icmp_echo, inet, Id})",
+      "_Id:16, _Seq:16, _/binary>> = Upper, \#{demux := Demux}) ->\n    case Demux({icmp_echo, inet, 16#e1})",
+      'icmp_echo_reply_is_owned_by_its_identifier_test'
     ]
   }.freeze
 
