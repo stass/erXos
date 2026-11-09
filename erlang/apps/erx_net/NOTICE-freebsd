@@ -79,3 +79,10 @@ module erx_tcp_cc_cubic
 
 module erx_tcp_reass
   sys/netinet/tcp_reass.c tcp_reass tcp_reass_append tcp_reass_prepend tcp_reass_replace tcp_reass_merge_forward
+
+module erx_arp
+  sys/netinet/if_ether.c arptimer arprequest_internal arpresolve_full in_arpinput arp_check_update_lle arp_mark_lle_reachable arp_announce_ifaddr
+
+module erx_nd6
+  sys/netinet6/nd6.c nd6_llinfo_timer nd6_llinfo_setstate nd6_is_stale nd6_cache_lladdr nd6_resolve_slow nd6_llinfo_get_holdsrc
+  sys/netinet6/nd6_nbr.c nd6_ns_input nd6_na_input nd6_ns_output_fib nd6_na_output_fib
