@@ -525,11 +525,6 @@ it; git history is the record of completed work.
   (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
-* [Medium] network, TCP input (`erx_net_input` or erx_tcp's demux): `tcp_input_with_port` drops a
-  segment whose IPv4 source is `INADDR_ANY` (`ips_badaddr`, `tcp_input.c:738`) or whose IPv6 source is
-  unspecified (`ip6s_badscope`, `:674`), after the checksum and before the data-offset check, but
-  `erx_tcp_wire` sees no addresses and the design gives the check to no module. Name its owner in the
-  design ("Receiving") and apply it there, or a SYN from 0.0.0.0 or `::` reaches the listener.
 * [Medium] network tests, `tools/fuzz/erx_net_codec.rb` (`tcp`): the seeded fault the design names,
   accepting a data offset below 5, is caught because the decoder then raises on a negative option
   length, not by the judge's agreement check. Give the runner a second fault per target that only the
@@ -540,10 +535,12 @@ it; git history is the record of completed work.
   their SPDX line is erXos's own `BSD-2-Clause` and their FreeBSD copyright headers may be left out
   of `NOTICES`. Classify erx_net modules by their `%% FreeBSD:` header lines (or NOTICE-freebsd)
   instead, and say so in the design; check what the packer does today first.
-* [Medium] network, `erlang/apps/erx_net/src/erx_ip6_wire.erl`: an ICMPv6 error quotes a cut-off packet,
-  which `decode/1` refuses as `truncated`, yet erx_icmp6 needs the addresses, next header and ports it
-  quotes (the header walk of `icmp6_notify_error`). Add a `decode_quoted/1` that shares `ext_header/1`
-  with the decoder, with a fuzz target, when erx_icmp6 is written.
+* [Medium] network, `erx_ip_reass` and `erx_ip6:input/4`: reassembly keeps no link-layer cast, so a
+  reassembled datagram's `reply()` comes from the `LinkCast` the interface passes, which it has no record of
+  (FreeBSD keeps the first fragment's `M_BCAST`/`M_MCAST`), and a fragment comes back from `input/4`
+  without a `reply()`, so `erx_ip6_reass:expire/2`'s time-exceeded error is gated only by
+  `erx_icmp6:error/4`'s own address checks. Keep the first fragment's cast in the table, return it with
+  `done` and `expire`, and have `input/4` take `{received | reassembled, LinkCast}`.
 * [Medium] network, `erlang/apps/erx_net/src/erx_ip4_wire.erl`: an ICMPv4 error quotes the invoking IP
   header and only 8 bytes past it, which `decode/1` refuses as `too_short` against the quoted total
   length, yet erx_icmp4 needs the quoted addresses, protocol and ports (`icmp_input` hands the quote to

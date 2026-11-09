@@ -112,6 +112,7 @@ module erx_icmp4
 
 module erx_net_bandlim
   sys/netinet/ip_icmp.c badport_bandlim icmplim_new_jitter
+  sys/netinet6/icmp6.c icmp6_ratelimit icmp6lim_new_jitter
 
 module erx_udp
   sys/netinet/udp_usrreq.c udp_input udp_common_ctlinput
@@ -147,3 +148,12 @@ module erx_nd6_dad
 module erx_tcp_loss_dupack
   sys/netinet/tcp_input.c tcp_do_segment tcp_do_prr_ack tcp_newreno_partial_ack tcp_is_sack_recovery
   sys/netinet/tcp_timer.c tcp_timer_rexmt
+
+module erx_ip6
+  sys/netinet6/ip6_input.c ip6_input
+  sys/netinet6/ip6_output.c ip6_output ip6_fragment
+  sys/netinet6/scope6.c in6_clearscope in6_setscope
+
+module erx_icmp6
+  sys/netinet6/icmp6.c icmp6_input icmp6_error icmp6_reflect icmp6_notify_error icmp6_redirect_input icmp6_errmap
+  sys/netinet6/ip6_input.c ip6_lasthdr ip6_nexthdr

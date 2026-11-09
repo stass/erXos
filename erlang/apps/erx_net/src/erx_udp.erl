@@ -48,15 +48,17 @@ a datagram to a unicast address goes to the one socket bound most specifically, 
 broadcast or multicast address to every socket the lookup found (`udp_multi_input`; the
 lookup stops, as FreeBSD's does, at the first socket that does not share its port), and a
 datagram that names no socket draws a port unreachable only when it may be answered
-(`erx_ip4:reply()`, which leaves out link-layer broadcasts and multicasts as
-`udps_noportbcast` and `udps_noportmcast` do), sent with `erx_icmp4:error/4` within the
-unreachable limit (`udp_blackhole` 0). `report/1` decides whether a reported ICMP error
+(`erx_ip4:reply()` or `erx_ip6:reply()`, which leave out link-layer broadcasts and
+multicasts as `udps_noportbcast` and `udps_noportmcast` do), sent with `erx_icmp4:error/4`
+or `erx_icmp6:error/4` within the unreachable limit (`udp_blackhole` 0); the same decisions
+serve IPv6 datagrams. `report/1` decides whether a reported ICMP or ICMPv6 error
 reaches a socket: only one whose errno is not `none`, and only the socket connected to
 the quoted destination, which the caller looks up by the full four-tuple, as
 `udp_common_ctlinput` does without a wildcard.
 """.
 
 -include("erx_icmp4_wire.hrl").
+-include("erx_ip6.hrl").
 
 -export([input/3, report/1]).
 
@@ -69,19 +71,23 @@ the quoted destination, which the caller looks up by the full four-tuple, as
 What `udp_input` does with a datagram to an address of class Cast, which may be answered
 as Reply says, for which the lookup found Sockets, most specific first.
 """.
--spec input(erx_ip4:cast(), erx_ip4:reply(), [Socket]) -> result(Socket).
+-spec input(erx_ip4:cast() | erx_ip6:cast(), erx_ip4:reply() | erx_ip6:reply(), [Socket]) ->
+          result(Socket).
 input(unicast, _, [Socket | _]) -> {deliver, [Socket]};
 input(_, true, []) -> port_unreach;
 input(_, _, []) -> {drop, no_port};
 input(_, _, Sockets) -> {deliver, Sockets}.
 
 -doc """
-The error to notify a connected socket of for a reported ICMPv4 error, or `ignore`
-(`udp_common_ctlinput` returns when `icmp_errmap` gives 0).
+The error to notify a connected socket of for a reported ICMPv4 or ICMPv6 error, or
+`ignore` (`udp_common_ctlinput` returns when `icmp_errmap` or `icmp6_errmap` gives 0).
 """.
--spec report(#icmp4{}) -> {notify, erx_icmp4:errno()} | ignore.
+-spec report(#icmp4{} | #icmp6{}) -> {notify, erx_icmp4:errno() | erx_icmp6:errno()} | ignore.
 report(Icmp) ->
-    case erx_icmp4:errno(Icmp) of
+    case errno(Icmp) of
         none -> ignore;
         Errno -> {notify, Errno}
     end.
+
+errno(#icmp4{} = Icmp) -> erx_icmp4:errno(Icmp);
+errno(#icmp6{} = Icmp) -> erx_icmp6:errno(Icmp).

@@ -12,8 +12,8 @@ require_relative 'erx_net_eunit'
 class ErxIp4DecisionsTest < Minitest::Test
   include ErxNetEunit
 
-  OVER = 'case Count + 1 > ?ICMPLIM + W#window.jitter of'
-  NEVER_OVER = 'case Count + 1 > ?ICMPLIM * 1000 + W#window.jitter of'
+  OVER = 'case Count + 1 > limit(Which) + W#window.jitter of'
+  NEVER_OVER = 'case Count + 1 > limit(Which) * 1000 + W#window.jitter of'
 
   def test_decision_cases_pass_under_eunit
     assert_erx_net_eunit(:erx_ip4_decisions_tests)

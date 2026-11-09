@@ -1212,7 +1212,26 @@ and the first fragment required to hold the whole header chain (RFC
 7112). `erx_ip6_reass` translates `frag6.c`, with RFC 5722's rule that an
 overlapping fragment discards the whole datagram, and FreeBSD's caps.
 `erx_icmp6` translates `icmp6.c`: echo, errors within their rate limit,
-packet-too-big.
+packet-too-big. Its limits are `icmp6_ratelimit`'s, one window for each
+kind of answer at 100 a second (`icmp6errppslim`, `icmp6.c:2725`) moved
+by a jitter of up to 8 either way (`icmp6lim_jitter`), kept in
+`erx_net_bandlim` beside the IPv4 limits. As for IPv4, `erx_ip6`
+decides once whether a datagram may be answered, and nothing answers a
+packet to a multicast address: FreeBSD answers an echo request to a
+multicast group, and a parameter problem about an option whose type
+asks for one even then (`icmp6_error`, `icmp6.c:268`), which a host
+has no reason to do.
+
+A neighbour-discovery message that came in fragments is dropped (RFC
+6980), as FreeBSD drops one whose mbuf carries `M_FRAGMENTED`
+(`frag6.c:286`; `nd6_nbr.c:146`, `:674`; `nd6_rtr.c:183`, `:384`;
+`icmp6.c:2184`). A reassembled packet carries no fragment header, so
+the interface tells `erx_ip6` whether reassembly rebuilt the packet it
+hands in, and `erx_ip6` drops a router or neighbour message, or a
+redirect, that reassembly rebuilt or that carries an atomic fragment
+header, before `erx_nd6`, `erx_nd6_rtr` or `erx_icmp6` sees it. The
+type it reads is not yet covered by the ICMPv6 checksum, which can only
+turn a drop for a bad checksum into this drop.
 
 `erx_nd6` translates `nd6.c` and `nd6_nbr.c`: the neighbour cache's
 states with unreachability detection, neighbour solicitations and
@@ -1375,7 +1394,7 @@ modules are marked P; process modules E.
 | `erx_ip_reass` | `ip_reass.c`, `frag6.c` | the reassembly table both families share: caps, lifetimes, placing and completing fragments | P |
 | `erx_ip4_reass` | `ip_reass.c` | IPv4 reassembly | P |
 | `erx_icmp4_wire`, `erx_icmp4` | `ip_icmp.c` | ICMP codec and decisions | P |
-| `erx_net_bandlim` | `badport_bandlim` and `icmplim_new_jitter` in `ip_icmp.c` | the rate limits on ICMP answers and RSTs, with their jitter | P |
+| `erx_net_bandlim` | `badport_bandlim` and `icmplim_new_jitter` in `ip_icmp.c`; `icmp6_ratelimit` and `icmp6lim_new_jitter` in `icmp6.c` | the rate limits on ICMP and ICMPv6 answers and RSTs, with their jitter | P |
 | `erx_ip6_wire`, `erx_ip6` | `ip6_input.c`, `ip6_output.c`, `dest6.c`, `route6.c`, `scope6.c`, `ip6_id.c`, the fragment-header checks of `frag6.c` | IPv6 codec with the extension-header walk; decisions | P |
 | `erx_ip6_reass` | `frag6.c` | IPv6 reassembly | P |
 | `erx_icmp6_wire`, `erx_icmp6` | `icmp6.c`, the option parsers of `nd6.c` and the option lengths `nd6_rtr.c` checks | ICMPv6 and neighbour-discovery codec; decisions | P |
