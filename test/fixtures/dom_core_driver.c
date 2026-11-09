@@ -299,6 +299,43 @@ print_steps(const char *variant, const erx_dom_plan_t *plan)
 	printf("\n");
 }
 
+/*
+ * What the plan's space step asks of the kernel: jit for ERX_SPACE_JIT, plain
+ * for none, other for anything else.
+ */
+static void
+print_space(const char *variant, const erx_dom_plan_t *plan)
+{
+	const char *kind;
+
+	for (uint32_t index = 0; index < plan->nsteps; index++) {
+		if (plan->steps[index].kind != ERX_DOM_STEP_SPACE)
+			continue;
+		if (plan->steps[index].flags == ERX_SPACE_JIT)
+			kind = "jit";
+		else if (plan->steps[index].flags == 0)
+			kind = "plain";
+		else
+			kind = "other";
+		printf("space %s %s\n", variant, kind);
+	}
+}
+
+/*
+ * A plan's space only, for the variants that cross the runtime image with
+ * sub-spaces, so the JIT flag is seen to follow from the image and nothing else.
+ */
+static void
+space_one(const char *variant, erx_status_t status, const erx_dom_plan_t *plan)
+{
+	if (status != ERX_OK) {
+		printf("FAIL %s: planned %d\n", variant, (int)status);
+		failures++;
+		return;
+	}
+	print_space(variant, plan);
+}
+
 static void
 explore_one(const char *variant, erx_status_t status,
     const erx_dom_plan_t *plan)
@@ -309,6 +346,7 @@ explore_one(const char *variant, erx_status_t status,
 		return;
 	}
 	print_steps(variant, plan);
+	print_space(variant, plan);
 	for (unsigned at = 0; at <= plan->nsteps; at++)
 		inject(variant, plan, at);
 	ending(variant, plan);
@@ -324,6 +362,14 @@ explore(void)
 	req = base_request();
 	explore_one("request", erx_dom_plan_request(&view, &req, NULL, 0, &plan),
 	    &plan);
+	req.runtime = 1;
+	space_one("request-jit",
+	    erx_dom_plan_request(&view, &req, NULL, 0, &plan), &plan);
+	req.runtime = 0;
+	req.flags = ERX_DOM_SPACES;
+	req.spaces = grant(UINT64_C(5000000), 0x1, 20);
+	space_one("request-spaces",
+	    erx_dom_plan_request(&view, &req, NULL, 0, &plan), &plan);
 	req.flags = ERX_DOM_SPACES;
 	req.spaces = grant(UINT64_C(5000000), 0x1, 20);
 	req.runtime = 1;

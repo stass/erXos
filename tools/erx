@@ -42,6 +42,7 @@ begin
   require_relative 'lib/erx/test_pool'
   require_relative 'lib/erx/bench'
   require_relative 'lib/erx/bench_g3'
+  require_relative 'lib/erx/bench_g5'
   require_relative 'lib/erx/toolchain_provenance'
   require_relative 'lib/erx/code_commands'
 rescue Erx::Error, SystemCallError => error
@@ -605,7 +606,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
       0
     end
 
@@ -1045,22 +1046,34 @@ module Erx
         flags.on('--iterations N', Integer, 'host benchmarks only') { |value| options[:iterations] = value }
         flags.on('--samples N', Integer, 'host benchmarks only') { |value| options[:samples] = value }
         flags.on('--image PATH', 'g3 only: boot this built image instead of building one') { |value| options[:image] = value }
-        flags.on('--accel NAME', %w[tcg hvf], 'g3 only: the guest accelerator') { |value| options[:accel] = value }
+        flags.on('--accel NAME', %w[tcg hvf], 'g3 and g5 only: the guest accelerator') { |value| options[:accel] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
-      inapplicable = name == 'g3' ? %i[iterations samples] : %i[image accel]
+      inapplicable = { 'g3' => %i[iterations samples], 'g5' => %i[iterations samples image flavour] }.fetch(name, %i[image accel])
       refused = inapplicable.select { |option| options.key?(option) }
       unless refused.empty?
         raise OptionParser::InvalidArgument, "#{refused.map { |option| "--#{option}" }.join(', ')} do not apply to bench #{name}"
       end
       return bench_g3(options) if name == 'g3'
+      return bench_g5(options) if name == 'g5'
 
       report = Bench.new(root: ROOT).run(name, flavour: options.fetch(:flavour, 'emu'),
                                          iterations: options.fetch(:iterations, 10_000),
                                          samples: options.fetch(:samples, 7))
       Terminal.puts("native host benchmark: #{report.fetch('report')}")
       0
+    end
+
+    # Gate G5's BeamAsm measurements: interpreter and BeamAsm domains on one workload under
+    # QEMU (BenchG5). The exit status is nonzero unless every domain measured and halted.
+    def self.bench_g5(options)
+      raise OptionParser::MissingArgument, '--accel' unless options[:accel]
+
+      report = BenchG5.new(root: ROOT).run(accel: options.fetch(:accel))
+      Terminal.puts("G5 benchmark (#{options.fetch(:accel)}): #{report.fetch('report')}")
+      Terminal.puts("G5 BeamAsm speedup: #{report.fetch('speedup').inspect}")
+      report.fetch('complete') ? 0 : 1
     end
 
     # Gate G3: erXos under QEMU and on stock OTP on this host (docs/research-g3-baseline.md).

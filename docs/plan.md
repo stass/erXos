@@ -960,6 +960,8 @@ limit and the facets' `max_request` and heap limits
 ([design-domains.md](design-domains.md#performance)); and whether a
 trigger of the ahead-of-time roster fires
 ([design-runtime.md](design-runtime.md#running-erlang-code-the-options)).
+BeamAsm's part is measured with `tools/erx bench g5`, in
+[research-g5-beamasm.md](research-g5-beamasm.md).
 At GK3, on erXos's kernel, it measures E-D3 and E-D4, with
 `tools/erx bench xdomain-stall` and `domain-lifecycle`, and the full form
 of E-S2 with ERTS processes in one domain and in two domains over a

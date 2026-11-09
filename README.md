@@ -302,8 +302,11 @@ Error in process <0.150.0> with exit value:
   end at its fault gate. In the `native_domain` suite a domain runs ERTS
   on its own release to `init` and halts. `liberx` also has a lane's
   writer with its wake handshake, and the funnel's check of a frame's
-  sender and target. Domains do not yet talk to each other, and the
-  booted system starts none of its own.
+  sender and target. In the booted system the domain service,
+  `erx_domain`, starts the manifest's configured domains and creates
+  others on request, each running ERTS as the interpreter or as BeamAsm;
+  only the BeamAsm image, whose manifest marks it, gets a space that can
+  hold generated code. Domains do not yet talk to each other.
 * **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
   and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by

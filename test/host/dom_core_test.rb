@@ -109,6 +109,10 @@ class DomCoreTest < Minitest::Test
     after = lines.grep(/\Aafter-destroy /).to_h { |line| line.split.then { |_, name, *rest| [name, rest] } }
     %w[request request-spaces-jit configured].each { |name| assert_equal OUTER_KEEPS, after.fetch(name) }
     assert_equal %w[OUTER CRASH], after.fetch('partial')
+    spaces = lines.grep(/\Aspace /).to_h { |line| line.split.then { |_, name, kind| [name, kind] } }
+    assert_equal({ 'request' => 'plain', 'request-jit' => 'jit', 'request-spaces' => 'plain', 'request-spaces-jit' => 'jit',
+                   'configured' => 'jit', 'partial' => 'plain' }, spaces,
+                 'only a runtime whose manifest marks JIT gets a space that allows JIT objects')
   end
 
   # erx_dom_principal's validation: the record keeps the configuration with

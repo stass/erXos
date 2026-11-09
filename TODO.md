@@ -909,7 +909,11 @@ it; git history is the record of completed work.
   `erx_domain:create/1` takes the domain library's own request fields (the boot image's
   runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang
   interface" has a spec of a release name and a resource policy compute them. Replace the
-  fields once release lookup by name and the resource policy exist.
+  fields once release lookup by name and the resource policy exist. The runtime index goes
+  with them: the spec's `flavour` (default `jit`) names `runtimes/jit` or `runtimes/emu`, and
+  under `erx.det=1` every domain, configured rows included, runs `runtimes/emu` whatever it
+  names (design-runtime.md, "BeamAsm"), which needs the boot's mode in the system domain.
+  Until then a create names the BeamAsm image by its index and gets it in any boot mode.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`):
   `create/1` answers once the domain's first thread starts, not on the domain's ready report,
   and `boot_timeout` (design-domains.md "Erlang interface") is not implemented, so a domain

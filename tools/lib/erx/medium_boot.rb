@@ -81,16 +81,22 @@ module Erx
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
     # any id at or below it, and the domain service gives ids in turn above it, so the
     # configured domain takes the first, the cell's two creates the library refuses the
-    # next two, and its three domains the three after.
+    # next two, and its four domains the four after.
     SYSTEM_DOMAIN_ID = 4
     CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
-    DOMAIN_IDS = [SYSTEM_DOMAIN_ID + 4, SYSTEM_DOMAIN_ID + 5, SYSTEM_DOMAIN_ID + 6].freeze
+    DOMAIN_IDS = [SYSTEM_DOMAIN_ID + 4, SYSTEM_DOMAIN_ID + 5, SYSTEM_DOMAIN_ID + 6, SYSTEM_DOMAIN_ID + 7].freeze
     # An id nothing takes in the cell, for the calls the shell makes of the library itself.
-    FREE_ID = SYSTEM_DOMAIN_ID + 7
+    FREE_ID = SYSTEM_DOMAIN_ID + 8
 
-    # Where the domain's runtime image and release are in the archive: the boot image's
-    # indexes a create names them by.
-    Domain = Data.define(:runtime, :release, :release_files)
+    # Where the domain's runtime images and release are in the archive: the boot image's
+    # indexes a create names them by. runtime is the interpreter's image, jit the BeamAsm
+    # image's, the one whose manifest carries ERX_IMAGE_JIT.
+    Domain = Data.define(:runtime, :jit, :release, :release_files)
+    # What the BeamAsm domain evaluates in NAMED_HALT's place: a halt with status 0 says its
+    # boot script ran, translated by BeamAsm, which needs a space that allows JIT objects
+    # (docs/design-runtime.md, "BeamAsm"), and that the image it runs is BeamAsm's.
+    JIT_HALT = 'erlang:halt(case erlang:system_info(emu_flavor) of jit->0;_->2 end)'
+    JIT_ARGS = [*DOMAIN_ARGS[0...-1], JIT_HALT].freeze
 
     # The cell's steps as [variable, call, answer], each bound in turn, since each relies
     # on the ones before it. The answer of each is the line's element in its place
@@ -117,19 +123,23 @@ module Erx
       # The configured domain halted once, with status 0, and was not restarted: its one
       # death is the system principal's, and the cell's first create takes the next id.
       ['DlConfigured', 'DlFirstDeaths(600)', "[{#{CONFIGURED_ID},{halt,0}}]"],
-      # Three ERTS domains through erx_domain (DlRun), each watched by a monitor on its domain
+      # Three ERTS domains of the interpreter through erx_domain (DlRun), each watched by a monitor on its domain
       # pid. A halt and a stop end the pid with {domain_down, Id, Info}; a kill ends it at
       # once, and the service stops the domain behind it.
       ['DlHalted', 'DlRun(<<"halts">>,fun(_)->ok end)', "{#{DOMAIN_IDS[0]},ok,{domain_down,#{DOMAIN_IDS[0]},{halt,0}}}"],
       ['DlStopped', 'DlRun(<<"stops">>,fun(DlD)->erx_domain:stop(DlD,shutdown) end)',
        "{#{DOMAIN_IDS[1]},ok,{domain_down,#{DOMAIN_IDS[1]},stopped}}"],
-      ['DlKilled', 'DlRun(<<"killed">>,fun(DlD)->erx_domain:stop(DlD,kill) end)', "{#{DOMAIN_IDS[2]},ok,killed}"]
+      ['DlKilled', 'DlRun(<<"killed">>,fun(DlD)->erx_domain:stop(DlD,kill) end)', "{#{DOMAIN_IDS[2]},ok,killed}"],
+      # A domain of the BeamAsm image, which the library gives a space that allows JIT
+      # objects because the image's manifest marks it: it runs, and halts with status 0.
+      ['DlJit', 'DlRunWith(<<"jitted">>,JitFields,fun(_)->ok end)', "{#{DOMAIN_IDS[3]},ok,{domain_down,#{DOMAIN_IDS[3]},{halt,0}}}"]
     ].freeze
-    # DlRun: asks the domain service for a domain named Name with the request fields of Spec,
-    # monitors its domain pid, does Then to it and waits for the monitor's reason,
-    # answering the id, Then's result and that reason, or the create's refusal; a missing
-    # end is timeout in the reason's place.
-    DOMAIN_LIB_RUN = 'fun(Name,Then)->case erx_domain:create((maps:without([id,principal],Spec))#{name=>Name}) of ' \
+    # DlRunWith: asks the domain service for a domain named Name with the request fields of
+    # Spec changed by Fields, monitors its domain pid, does Then to it and waits for the
+    # monitor's reason, answering the id, Then's result and that reason, or the create's
+    # refusal; a missing end is timeout in the reason's place. DlRun is DlRunWith with
+    # Spec's own fields.
+    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal],Spec),Fields#{name=>Name})) of ' \
                      '{ok,DlDomain}->DlMonitor=monitor(process,erx_domain:pid(DlDomain)),DlThen=Then(DlDomain),' \
                      'DlWhy=receive {\'DOWN\',DlMonitor,process,_,DlReason}->DlReason after 60000->timeout end,' \
                      '{erx_domain:id(DlDomain),DlThen,DlWhy};' \
@@ -163,11 +173,13 @@ module Erx
                         release_files: domain.release_files, memory: DOMAIN_MEMORY, outer: DOMAIN_OUTER,
                         grant: erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
                         lane: 4096, args: "<<#{args}>>", env: '<<>>')
+      jit = erlang_map(runtime: domain.jit, args: "<<#{JIT_ARGS.map { |arg| "\"#{arg}\",0" }.join(',')}>>")
       badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }
-      "io:format(\"~0p~n\",[(fun(Lib,Spec)->DlRun=#{DOMAIN_LIB_RUN},DlAsk=#{DOMAIN_LIB_ASK}," \
+      "io:format(\"~0p~n\",[(fun(Lib,Spec,JitFields)->DlRunWith=#{DOMAIN_LIB_RUN}," \
+        "DlRun=fun(Name,Then)->DlRunWith(Name,\#{},Then) end,DlAsk=#{DOMAIN_LIB_ASK}," \
         "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg}," \
-        "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)(erx_domain_lib,#{spec})])."
+        "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)(erx_domain_lib,#{spec},#{jit})])."
     end
 
     # An Erlang map expression of pairs, each value an expression already.
@@ -178,9 +190,10 @@ module Erx
     # carries the release and the runtime image it names, which is how a manifest makes
     # its image carry them (docs/design-stopgap.md, "The production image"). The domain
     # service starts the row at boot; the shell creates the cell's domains through the
-    # service, one at a time. The room is for two: the configured row, which the build's
-    # planner plans against the principal and which runs while the shell starts, and one
-    # domain of the shell's. So
+    # service, each awaited before the next. The room is for two: the configured row, which
+    # the build's planner plans against the principal and which runs while the shell starts,
+    # and one domain of the shell's, or two at once after a kill, whose domain the service
+    # stops behind its pid while the next create runs, once the configured one has ended. So
     # the system principal's quota and max_domains go from 0 to 2, and its memory and
     # root_memory each grow by two domains' budgets. The development manifest itself,
     # what the production image promises, is unchanged.
@@ -195,15 +208,16 @@ module Erx
         end + DOMAIN_ROW
     end
 
-    # The domain's runtime image and release in the archive at path: the indexes of the
-    # interpreter's image and of DOMAIN_RELEASE's run of entries.
+    # The domain's runtime images and release in the archive at path: the indexes of the
+    # interpreter's image, of the BeamAsm image and of DOMAIN_RELEASE's run of entries.
     def domain_in(archive, codec:)
       paths = PackWire.entries_of(File.binread(archive), codec).map(&:first)
       runtime = paths.index(ProductionImage::DOMAIN_RUNTIME_PATH.b)
+      jit = paths.index(ProductionImage::JIT_RUNTIME_PATH.b)
       run = ReleaseFiles.domain_runs(paths)[DOMAIN_RELEASE.name]
-      raise Error, "the archive #{archive} carries no domain runtime or release" unless runtime && run
+      raise Error, "the archive #{archive} lacks a domain runtime image or the release" unless runtime && jit && run
 
-      Domain.new(runtime: runtime, release: run.fetch('entry'), release_files: run.fetch('files'))
+      Domain.new(runtime: runtime, jit: jit, release: run.fetch('entry'), release_files: run.fetch('files'))
     end
 
     # The device tree source that adds the firmware's two properties to a tree: dtc

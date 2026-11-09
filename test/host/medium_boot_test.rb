@@ -14,7 +14,7 @@ require_relative '../../tools/lib/erx/medium_boot'
 class MediumBootTest < Minitest::Test
   Boot = Erx::MediumBoot
   Choice = Erx::BootRecord::Choice
-  DOMAIN = Erx::MediumBoot::Domain.new(runtime: 41, release: 7, release_files: 30)
+  DOMAIN = Erx::MediumBoot::Domain.new(runtime: 41, jit: 42, release: 7, release_files: 30)
 
   def dtc(*arguments, input: nil)
     output, status = Open3.capture2e('dtc', '-q', *arguments, stdin_data: input.to_s)
@@ -111,19 +111,22 @@ class MediumBootTest < Minitest::Test
   end
 
   # The create map names the archive's indexes, and the answer is the one the configured
-  # domain's halt and the cell's halt, stop and kill give; a line with another end, a
-  # restarted configured domain or a refused create does not pass.
+  # domain's halt and the cell's halt, stop, kill and BeamAsm halt give; a line with another
+  # end, a restarted configured domain or a refused create does not pass.
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
     expression = Boot.domain_lib_expression(DOMAIN)
-    assert_match(/id=>11,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
+    assert_match(/id=>12,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
     # The library refuses an id at or below the system domain's, so the service's ids
     # start above it; the shell's own calls of the library are refused.
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
     assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
-    assert_includes expression, 'DlNotService=Lib:configured(11,0)'
+    assert_includes expression, 'DlNotService=Lib:configured(12,0)'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
-    assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec)->DlRun=fun(Name,Then)->')
+    assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields)->DlRunWith=fun(Name,Fields,Then)->')
+    # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.
+    assert_match(/\},\#\{runtime=>42,args=><<"--",0,.*"-eval",0,"erlang:halt\(case erlang:system_info\(emu_flavor\) of jit->0;_->2 end\)",0>>\}\)\]\)\.\z/,
+                 expression)
     assert_match(/args=><<"--",0,"-root",0,.*"-eval",0,"erlang:halt\(length\(.*init:get_argument\(sname\){7}",0>>,env=><<>>/, expression)
     refute_match(/[^\x20-\x7e]/, expression)
     merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],
@@ -133,7 +136,8 @@ class MediumBootTest < Minitest::Test
     point.fetch(:verify).call("4> #{Boot::DOMAIN_LIB_ANSWER}\r\n")
     [Boot::DOMAIN_LIB_ANSWER.sub('{halt,0}', '{halt,1}'), Boot::DOMAIN_LIB_ANSWER.sub('{error,einval}', '{error,enotsup}'),
      Boot::DOMAIN_LIB_ANSWER.sub('[{5,{halt,0}}]', '[{8,{halt,0}},{5,{halt,0}}]'),
-     Boot::DOMAIN_LIB_ANSWER.sub('{10,ok,killed}', '{error,quota}')].each do |line|
+     Boot::DOMAIN_LIB_ANSWER.sub('{10,ok,killed}', '{error,quota}'),
+     Boot::DOMAIN_LIB_ANSWER.sub('{11,ok,{domain_down,11,{halt,0}}}', '{11,ok,{domain_down,11,crash}}')].each do |line|
       assert_raises(Erx::Error, line) { point.fetch(:verify).call("#{line}\n") }
     end
   end
