@@ -100,3 +100,18 @@ module erx_nd6_rtr
   sys/netinet6/in6_ifattach.c in6_get_stableifid validate_ifid
   sys/netinet6/nd6.c nd6_timer
   sys/netinet6/nd6_nbr.c nd6_dad_timer nd6_dad_duplicated
+
+module erx_ip4
+  sys/netinet/ip_input.c ip_input
+  sys/netinet/ip_options.c ip_dooptions
+  sys/netinet/ip_output.c ip_output ip_fragment
+  sys/netinet/ip_id.c ip_fillid
+
+module erx_icmp4
+  sys/netinet/ip_icmp.c icmp_input icmp_error icmp_reflect icmp_errmap
+
+module erx_net_bandlim
+  sys/netinet/ip_icmp.c badport_bandlim icmplim_new_jitter
+
+module erx_udp
+  sys/netinet/udp_usrreq.c udp_input udp_common_ctlinput

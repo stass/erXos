@@ -1052,6 +1052,10 @@ option, one whose length byte is missing, below 2 or past the header,
 and returns the offset of that byte, which `ip_dooptions` makes the
 pointer of the parameter problem it answers with (`ip_options.c:132-138`),
 so `erx_ip4` can send the same answer after its loopback check.
+`erx_ip4` also drops a TCP segment from 0.0.0.0, the check
+`tcp_input_with_port` makes (`tcp_input.c:751`): it is the one decision
+that sees a segment's IP header before the TCP lookup, and `erx_ip6`
+drops one from `::` in the same place (`tcp_input.c:675`).
 `erx_ip4_reass` translates `ip_reass.c`, with
 FreeBSD's caps on the datagrams in reassembly, the fragments per datagram
 and the lifetime of a queue, all charged to the interface. It and
@@ -1082,7 +1086,12 @@ either way that is drawn again from the interface's generator each time
 the limit is reached, as `badport_bandlim` moves it for every limit it
 keeps, RSTs to closed ports included (`icmplim_jitter`, `ip_icmp.c:93`;
 `icmplim_new_jitter`, `:1107`), so the limit cannot be used to count
-which probes reached open ports. Redirects are accepted by
+which probes reached open ports. The limits are `erx_net_bandlim`'s, a
+pure part of the interface's state with one one-second window for each
+kind of answer, as `badport_bandlim` keeps them. A timestamp reply
+carries the milliseconds since midnight UTC (`iptime`), which the
+interface's loop reads from the wall clock and passes in the
+context. Redirects are accepted by
 FreeBSD's rules, as its defaults accept them (`drop_redirect`,
 `ip_icmp.c:128`; `icmp6_rediraccept`, `icmp6.c:125`): each becomes a
 host route of the interface with FreeBSD's expiry (`icmp_input`'s
@@ -1291,6 +1300,7 @@ modules are marked P; process modules E.
 | `erx_ip_reass` | `ip_reass.c`, `frag6.c` | the reassembly table both families share: caps, lifetimes, placing and completing fragments | P |
 | `erx_ip4_reass` | `ip_reass.c` | IPv4 reassembly | P |
 | `erx_icmp4_wire`, `erx_icmp4` | `ip_icmp.c` | ICMP codec and decisions | P |
+| `erx_net_bandlim` | `badport_bandlim` and `icmplim_new_jitter` in `ip_icmp.c` | the rate limits on ICMP answers and RSTs, with their jitter | P |
 | `erx_ip6_wire`, `erx_ip6` | `ip6_input.c`, `ip6_output.c`, `dest6.c`, `route6.c`, `scope6.c`, `ip6_id.c`, the fragment-header checks of `frag6.c` | IPv6 codec with the extension-header walk; decisions | P |
 | `erx_ip6_reass` | `frag6.c` | IPv6 reassembly | P |
 | `erx_icmp6_wire`, `erx_icmp6` | `icmp6.c`, the option parsers of `nd6.c` and the option lengths `nd6_rtr.c` checks | ICMPv6 and neighbour-discovery codec; decisions | P |
@@ -1688,7 +1698,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | ICMP reports act only when their quoted sequence number is in flight | `erx_tcp_icmp` (RFC 5927) |
 | Reassembly queues, both IP and TCP, have caps on count, bytes and lifetime; held payloads count at the size they keep alive | reassembly modules |
 | Neighbour messages are accepted only by RFC 4861's rules (hop limit 255) and FreeBSD's ARP rules; tables and held packets have bounds | `erx_arp`, `erx_nd6` |
-| Router, prefix and redirect entries have per-interface bounds; new entries past them are ignored, listed ones are never evicted | `erx_nd6_rtr`, `erx_icmp4`, `erx_icmp6` |
+| Router, prefix and redirect entries have per-interface bounds; new entries past them are ignored, listed ones are never evicted | `erx_nd6_rtr`, `erx_net_route` |
 | DHCP replies reach only the interface's DHCP client, and only for its outstanding transaction | the interface's DHCP path |
 | ICMP errors, RSTs to closed ports and echo replies are rate-limited; no reply to a broadcast or multicast | the interface's limiters |
 | Traffic that names no socket spends the interface's budget | the ingress limiter, below |
