@@ -18,8 +18,10 @@ gives back the datagram; and the ICMPv6 rate limits of erx_net_bandlim
 -define(LL_PEER, <<16#fe80:16, 0:96, 1:16>>).
 -define(LL_ME, <<16#fe80:16, 0:96, 2:16>>).
 -define(ALL_NODES, <<16#ff02:16, 0:96, 1:16>>).
--define(VIEW, #{addrs => [?ME, ?LL_ME], notready => [?TENTATIVE], loopback => false}).
--define(LO_VIEW, #{addrs => [<<1:128>>], notready => [], loopback => true}).
+%% The stack holds ?LL_ME on em0 only; packets arrive on em0 unless a case says otherwise.
+-define(VIEW, #{addrs => [?ME, {?LL_ME, em0}], notready => [?TENTATIVE], loopback => false, zone => em0}).
+-define(VIEW_EM1, #{addrs => [?ME, {?LL_ME, em0}], notready => [?TENTATIVE], loopback => false, zone => em1}).
+-define(LO_VIEW, #{addrs => [{<<1:128>>, lo0}], notready => [], loopback => true, zone => lo0}).
 -define(CTX(Now), #{now => Now, loopback => false}).
 
 gen() -> erx_net_rand:new(<<9:128>>).
@@ -74,6 +76,16 @@ destination_search_test() ->
     ?assertMatch({ours, multicast, false, _, _}, input(packet(#{dst => ?ALL_NODES}))),
     ?assertMatch({ours, unicast, false, _, _}, erx_ip6:input(packet(#{}), received, multicast, ?VIEW)),
     ?assertMatch({ours, unicast, false, _, _}, input(packet(#{src => <<0:128>>}))).
+
+%% A link-local address is the stack's only in its own zone: ?LL_ME arriving on em1 is
+%% another host's, and a peer claiming ?LL_ME on em1 is no spoof of the stack's em0 address.
+link_local_addresses_match_in_their_zone_alone_test() ->
+    ToLl = packet(#{src => ?LL_PEER, dst => ?LL_ME}),
+    ?assertMatch({ours, unicast, true, _, _}, input(ToLl)),
+    ?assertEqual({drop, not_ours}, erx_ip6:input(ToLl, received, unicast, ?VIEW_EM1)),
+    FromLl = packet(#{src => ?LL_ME, dst => ?ME}),
+    ?assertEqual({drop, bad_addr}, input(FromLl)),
+    ?assertMatch({ours, unicast, true, _, _}, erx_ip6:input(FromLl, received, unicast, ?VIEW_EM1)).
 
 tcp_from_unspecified_dropped_test() ->
     ?assertEqual({drop, bad_addr}, input(packet(#{src => <<0:128>>, proto => 6}))),

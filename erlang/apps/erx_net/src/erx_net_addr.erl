@@ -172,6 +172,11 @@ field as they are.
 """.
 -type scope() :: 0..15.
 
+%% The zoned form of an address, which every table, view and key inside the
+%% stack holds (docs/design-network-stack.md, "Zones").
+-export([zoned/2]).
+-export_type([zoned/0]).
+
 -define(SCOPE_INTFACELOCAL, 1).
 -define(SCOPE_LINKLOCAL, 2).
 -define(SCOPE_SITELOCAL, 5).
@@ -301,3 +306,25 @@ bit_length(N, Len) -> bit_length(N bsr 1, Len + 1).
 -spec deprecated(row(), integer()) -> boolean().
 deprecated(#{preferred := infinity}, _Now) -> false;
 deprecated(#{preferred := Preferred}, Now) -> Now > Preferred.
+
+
+-doc """
+An address as the stack holds it inside: an IPv6 address of link-local or
+interface-local scope, unicast or multicast, with the name of the interface
+it belongs to, as FreeBSD embeds the zone in the address (`in6_setscope`);
+every other address its bytes alone.
+""".
+-type zoned() :: addr() | {addr6(), Ifname :: term()}.
+
+-doc """
+Addr in the zone of interface Ifname: the pair for an address that `zone/2`
+puts in the interface's zone, the address itself otherwise.
+""".
+-spec zoned(addr(), term()) -> zoned().
+zoned(<<_:128>> = Addr, Ifname) ->
+    case zone(Addr, Ifname) of
+        {ifname, _} -> {Addr, Ifname};
+        global -> Addr
+    end;
+zoned(<<_:32>> = Addr, _Ifname) ->
+    Addr.

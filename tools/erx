@@ -382,6 +382,8 @@ module Erx
                       '--seed', options.fetch(:seed).to_s],
                      name: "fuzz-erx-net-#{target}", deadline: 900, chdir: ROOT, env: environment)
         end
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_net_input.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-net-input', deadline: 3900, chdir: ROOT, env: environment)
       end
       require_relative 'fuzz/run_pack'
       Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')

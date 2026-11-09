@@ -629,6 +629,27 @@ it; git history is the record of completed work.
   accepting a data offset below 5, is caught because the decoder then raises on a negative option
   length, not by the judge's agreement check. Give the runner a second fault per target that only the
   judge catches, such as SACK blocks accepted on a SYN.
+* [Medium] network, `erx_net_input` and the design's "Classifying a frame": a looped IPv6 packet keeps
+  its zone only while it is whole. Its fragment, the `{reassembled, inet6, LinkCast, Bytes}` that
+  erx_ip6_reass returns (keyed by raw addresses) and a parameter problem's packet carry none, so a
+  looped fragmented datagram to the stack's `fe80::x%em0` is classified in lo0's zone (dropped, or
+  owned by a socket bound in lo0's zone). Carry the zone in the fragment and `reassembled` inputs and
+  key reassembly by zoned addresses; the design's `reassembled` tuple needs the zone first.
+* [Medium] network, `erx_net_input`: looped multicast is checked against the loopback interface's
+  `groups`, not the carried zone's interface, and a socket's `report` item holds the quote's raw
+  addresses although the socket was found by its zoned key. Decide with the zone fix above.
+* [Medium] network tests, `erx_net_input`: only the fuzz target (milestone gate) exercises it, and it
+  never generates `{reassembled, ...}` input; its judge shares `erx_icmp4:decode_quoted/1` and
+  `erx_icmp6:decode_quoted/1` with the classifier, so a wrong quote offset would pass both. Have the
+  judge find the quoted header and ports itself, generate reassembled input, and make the RST-flag
+  fault reach the unnamed-byte property, which the judge now always catches first.
+* [Medium] network, `erx_tcp_syncache`: the listener's address checks of `tcp_input.c:1295-1338`
+  (a SYN to or from itself, a multicast or broadcast source or destination, `in_ifnet_broadcast` of
+  the receiving interface) are missing; `erx_net_input` tests only the link cast (`bcast_tcp`).
+  `add/5` needs the interface's broadcast addresses for them.
+* [Low] network, `erx_net_input` provenance: NOTICE-freebsd's entry lacks `sys/netinet/tcp_subr.c`
+  (`tcp_ctlinput`), which the design names as a source; and check whether `udp_common_ctlinput`
+  looks up with `INPLOOKUP_WILDCARD`, which the design says it does not.
 * [Medium] build, the packer's `NOTICES` and `docs/design.md` ("Licences and notices"): a file of
   erXos's counts as third-party for its notice when its SPDX line names a third-party licence, but
   `erx_tcp_cc`, `erx_tcp_cc_newreno` and `erx_tcp_cc_cubic` translate BSD-2-Clause FreeBSD files, so

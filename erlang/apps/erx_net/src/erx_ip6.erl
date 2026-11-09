@@ -119,14 +119,16 @@ Departures, each changing only which packets draw an answer:
 -define(SCOPE_LINKLOCAL, 2).
 
 -doc """
-What `input/4` needs of the interface's published view: the IPv6 addresses of the stack
-that are ready (neither tentative nor duplicated), those that are not, and whether the
-receiving interface is the loopback interface. An address of link-local or
-interface-local scope is listed only for the receiving interface, since each interface is
-its own zone (`in6_setscope`); every other address of the stack is listed for every
-interface (the weak end-system model).
+What `input/4` needs of the interface's view: every IPv6 address of the stack that is
+ready (neither tentative nor duplicated) and every one that is not, on every interface
+(the weak end-system model), each zoned (`erx_net_addr:zoned/0`); whether the receiving
+interface is the loopback interface; and the zone the packet's addresses take, the
+receiving interface's or, on the loopback interface, the one the looped packet carries.
+A link-local or interface-local address therefore matches only in its own zone, as
+`in6_setscope` makes each interface its own zone.
 """.
--type view() :: #{addrs := [<<_:128>>], notready := [<<_:128>>], loopback := boolean()}.
+-type view() :: #{addrs := [erx_net_addr:zoned()], notready := [erx_net_addr:zoned()],
+                  loopback := boolean(), zone := term()}.
 
 -doc """
 How a packet was addressed, erx_ip4's `cast()`: given to `input/4` as the frame's
@@ -226,7 +228,8 @@ malformed(<<_:64, Src:16/binary, Dst:16/binary, _/binary>>, {_, Code, Pointer} =
 %% multicast destination is accepted before the source check, so a duplicate address
 %% detection advertisement to all nodes from an address this stack also holds as
 %% tentative still reaches erx_nd6.
-addresses(Src, Dst, LinkCast, #{addrs := Addrs, notready := NotReady, loopback := Loopback}) ->
+addresses(Src, Dst, LinkCast, #{addrs := Addrs, notready := NotReady, loopback := Loopback,
+                                 zone := Zone}) ->
     Bad = ?IS_MC(Src)
         orelse (mc_scope(Dst) =:= ?SCOPE_INTFACELOCAL andalso not Loopback)
         orelse mc_scope(Dst) =:= ?SCOPE_RESERVED
@@ -234,14 +237,16 @@ addresses(Src, Dst, LinkCast, #{addrs := Addrs, notready := NotReady, loopback :
         orelse Dst =:= ?UNSPECIFIED
         orelse embeds_zone(Src) orelse embeds_zone(Dst)
         orelse ((Src =:= ?LOOPBACK orelse Dst =:= ?LOOPBACK) andalso not Loopback),
-    Sav = not Loopback andalso (lists:member(Src, Addrs) orelse lists:member(Src, NotReady)),
+    ZSrc = erx_net_addr:zoned(Src, Zone),
+    Sav = not Loopback andalso (lists:member(ZSrc, Addrs) orelse lists:member(ZSrc, NotReady)),
     if
         Bad -> {drop, bad_addr};
         ?IS_MC(Dst) -> {ok, multicast, false};
         Sav -> {drop, bad_addr};
-        true -> unicast(Src, Dst, LinkCast, Addrs, NotReady)
+        true -> unicast(Src, erx_net_addr:zoned(Dst, Zone), LinkCast, Addrs, NotReady)
     end.
 
+%% Dst is zoned, as the lists are.
 unicast(Src, Dst, LinkCast, Addrs, NotReady) ->
     case lists:member(Dst, Addrs) of
         true -> {ok, unicast, LinkCast =:= unicast andalso Src =/= ?UNSPECIFIED};
