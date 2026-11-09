@@ -425,10 +425,18 @@ WebSocket, and, on the network front end, `POST /login` and
 
 ```erlang
 -spec step(Input, State) -> {[Action], State}.
-%% Input:  {in, Bytes} | {opened, View, Pid} | {update, View, Body} | {ended, View, Reason} | tick
+%% Input:  {in, Bytes} | {text, Bytes} | {opened, View, Pid} | {update, View, Body}
+%%       | {ended, View, Reason} | tick
 %% Action: {send, Bytes} | {close, Reason} | {open, View, Target} | {next, Pid}
-%%       | {stop, Pid} | {event, Pid, Node, Event, Detail}
+%%       | {stop, Pid} | {event, Pid, Record}
 ```
+
+`{in, Bytes}` and `{text, Bytes}` are a binary and a text WebSocket
+message; `{opened, View, Pid}` reports the process `perform/2` started for
+an `open`; `tick` reports that `web_idle_ms` passed with no frame from the
+browser. An `event` action carries the event's `ui.txt` record as the
+browser sent it, for the renderer to decode ([UIs: the browser
+renderer](#uis-the-browser-renderer)).
 
 A front end owns the process that drives it: cowboy's WebSocket handler
 calls `step/2` from its callbacks; for the host link, the web domain runs
@@ -446,13 +454,21 @@ the front ends differ in how bytes arrive and leave and in nothing else
    bounds; a refused message, a text message or anything before `hello`
    closes the connection with `bye protocol` and is counted;
 2. **opens and closes views**: at most 16 open at once per connection, a
-   17th `ended busy`; an `open` of a number the connection has used
-   before, or a `next` for a view whose last `next` is unanswered, is a
-   protocol error; a `next`, `close` or `event` for a view no longer open
-   is dropped, since the view's `ended` may be on its way;
+   17th `ended busy`, which uses its number; view numbers only grow, so an
+   `open` of a number not above every number the connection opened before
+   is a protocol error, which keeps every number from being reused
+   without the core remembering each; so are a `next` while the view's
+   last request, its `open` or its last `next`, is unanswered, a `next`,
+   `close` or `event` for a number above every one opened, and an `event`
+   for a view that is not a UI; a `next`, `close` or `event` for a view no
+   longer open is dropped, since the view's `ended` may be on its way; a
+   view closed before its process is reported stays among the 16 until
+   the process arrives and is stopped;
 3. **pulls**: `open` asks a view for its first update and each `next`
    for one more; the view answers when it has something new, and the core
-   sends the answer as one `update`;
+   sends the answer as one `update`; an answer no request is waiting for
+   is dropped, and one the codec refuses as too long ends the view
+   `too_large`;
 4. **forwards events** of a UI view to its renderer.
 
 So the web domain holds at most one update for each open view, 16 times
@@ -464,7 +480,9 @@ an `ended` always names the view it ended; a connection that reaches the
 last `u32` closes with `bye limit` before it wraps.
 
 A connection that sends nothing for 60 s, pings included, is closed; the
-front end pings every 30 s, and the browser answers pings by itself.
+front end pings every 30 s, and the browser answers pings by itself. The
+front end then feeds the core `tick`, which stops the connection's views
+and closes it without a `bye`, since nothing is listening.
 
 ### Views on the line
 

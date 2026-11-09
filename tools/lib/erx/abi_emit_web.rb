@@ -383,6 +383,10 @@ module Erx
             sized(Term, Type);
         write({text, Max}, Type, Term, _Level) when is_binary(Term), byte_size(Term) =< Max ->
             sized(Term, Type);
+        write({bytes, _Max, upto}, Type, Term, _Level) when is_binary(Term) ->
+            refuse(too_long, Type);
+        write({text, _Max}, Type, Term, _Level) when is_binary(Term) ->
+            refuse(too_long, Type);
         write({digits, Max}, Type, Term, _Level) when is_binary(Term), byte_size(Term) =< Max ->
             case canonical(Term) of
                 true -> sized(Term, Type);
@@ -405,6 +409,7 @@ module Erx
                 {ok, Count} ->
                     spend(4, Type),
                     [<<Count:32/little>> | [write(Element, Value, Level) || Value <- Term]];
+                too_many -> refuse(too_many, Type);
                 error -> refuse(bad_term, Type)
             end;
         write({tuple, Fields}, _Type, Term, Level) when is_tuple(Term), tuple_size(Term) =:= length(Fields) ->
@@ -443,6 +448,7 @@ module Erx
         %% without walking past the bound.
         bounded_length([], _Max, Count) -> {ok, Count};
         bounded_length([_ | Rest], Max, Count) when Count < Max -> bounded_length(Rest, Max, Count + 1);
+        bounded_length([_ | _], _Max, _Count) -> too_many;
         bounded_length(_, _Max, _Count) -> error.
       ERLANG
     end

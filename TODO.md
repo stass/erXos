@@ -317,9 +317,16 @@ it; git history is the record of completed work.
   40-byte bound, about 1 s for the largest bignum; compare its magnitude with `10^40` first and print a huge one
   without converting it whole.
 * [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
-  term one past each bound in both languages and expects `bad_term TYPE`; every encoded term is in bounds or came
-  from a decoder, so an encoder that stopped refusing an over-bound list, text or integer would pass. A
-  table-driven case over `type/1` and `TYPES` closes it.
+  term one past each bound in both languages; every encoded term is in bounds or came from a decoder, so an
+  encoder that stopped refusing an over-bound list, text or integer would pass. Erlang's encoder refuses
+  over-long bytes and texts as `too_long` and over-count lists as `too_many`, as both decoders do, which
+  `erx_web_conn` relies on to end a view `too_large`; the TypeScript encoder still answers `bad_term` there. Make
+  it match, then a table-driven case over `type/1` and `TYPES` expecting the same reason from both closes it.
+* [Medium] `erlang/apps/erx_web/src/erx_web_conn.erl`, W8 in [Requirements](docs/design-web.md#requirements): a
+  browser's `event` messages have no flow control. Each becomes one message to the UI's renderer, so a hostile
+  browser can fill the renderer's mailbox as fast as its connection carries bytes, while W8 bounds what one
+  browser makes the machine hold. Bound the events in flight per UI view (the renderer acknowledges each, and
+  the core drops an event while one is unacknowledged, or keeps a small credit), in the design first.
 * [Medium] `tools/lib/erx/abi_emit_web.rb`, [The protocol](docs/design-web.md#the-protocol): the protocol hash
   covers the declarations, not the codec code (`abi_web.rb`, both emitters' interpreters, `web/src/wire.ts`), so a
   change to the interpreter alone keeps the hash and an old client passes `hello`. Fold the generator files'
