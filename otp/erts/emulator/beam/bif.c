@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag.
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself.
  *
  * %CopyrightEnd%
  */
@@ -564,6 +564,14 @@ demonitor(Process *c_p, Eterm ref, Eterm *multip)
 
            erts_de_runlock(dep);
 
+           /*
+            * erXos: a monitor this connection never carried has nothing to undo at the
+            * peer; one of another domain's registered names is never carried (monitor/2,3
+            * answers it with a dead dist), and its DEMONITOR_P would end the connection.
+            */
+           if (!deleted)
+               break;
+
            if (mon->flags & ERTS_ML_FLG_NAME)
                watched = ((ErtsMonitorDataExtended *) mdp)->u.name;
            else
@@ -852,7 +860,29 @@ static BIF_RETTYPE monitor(Process *c_p, Eterm type, Eterm target,
 
             case ERTS_DSIG_PREP_PENDING:
             case ERTS_DSIG_PREP_CONNECTED: {
-                int inserted = erts_monitor_dist_insert(&mdp->u.target, dep->mld);
+                int inserted;
+
+                if (byname && erts_dist_peer_is_domain(dep)) {
+                    /*
+                     * erXos: another domain's registered names are never reached (edit 27
+                     * of docs/design-runtime.md), so the monitor is answered here and never
+                     * sent. On a connection that is up the answer is noproc, as for a name
+                     * not registered there. On one still pending it is noconnection, what
+                     * stock answers when the attempt fails, as a domain's own attempts do
+                     * (erx_dist:setup/5). The monitor's dist is dead, so demonitor/1,2
+                     * sends nothing for it.
+                     */
+                    const Eterm reason = (code == ERTS_DSIG_PREP_CONNECTED
+                                          ? am_noproc : am_noconnection);
+
+                    erts_de_runlock(dep);
+                    erts_monitor_set_dead_dist(&mdp->u.target, dep->sysname);
+                    erts_proc_sig_send_monitor_down(NULL, id, &mdp->u.target,
+                                                    reason);
+                    code = ERTS_DSIG_SEND_OK;
+                    break;
+                }
+                inserted = erts_monitor_dist_insert(&mdp->u.target, dep->mld);
                 ASSERT(inserted); (void)inserted;
                 erts_de_runlock(dep);
 

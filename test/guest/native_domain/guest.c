@@ -388,8 +388,10 @@ page_spoil(uint32_t id)
  * The connection case's domain: ERTS distributed over erx_dist, so net_kernel makes it
  * alive as guest@erxos with its domain id as creation and erx_connections opens the system
  * connection from the boot page. Once the system node is up, it checks net_adm:ping of it
- * (pong) and of a domain it has no connection with (pang), that a monitor of a process
- * there is DOWN with noconnection, and that its creation is its id, halting with 1 on any
+ * (pong) and of a domain it has no connection with (pang), that a monitor of a name
+ * there is DOWN with noconnection, that its creation is its id, and that a send to a
+ * registered name of the system node is dropped and counted and a monitor of one is DOWN
+ * with noproc at once, neither reaching the lane, halting with 1 on any
  * failure. Then it sends BURST messages of a KiB each to a pid of the system node, more
  * than the lane holds, waits until the port's counts show the burst and one answer sent,
  * says them, and halts with 1 unless output paused for room and resumed on the bell and the
@@ -415,7 +417,13 @@ static const char connection_eval[] =
     "M=erlang:monitor(process,{x,'absent@erxos'}),"
     "Ok2=Ok1 andalso receive {'DOWN',M,_,_,noconnection}->true after 10000->false end,"
     "Ok3=Ok2 andalso erlang:system_info(creation)==~ andalso node()=='" DOMAIN_NODE "',"
-    "Ok3 orelse erlang:halt(1),"
+    /* a send and a monitor to a registered name of the system domain stay in this domain */
+    "D=erx_dist:names_dropped(),"
+    "{x,S}!m,"
+    "M2=erlang:monitor(process,{x,S}),"
+    "Ok4=Ok3 andalso receive {'DOWN',M2,process,{x,S},noproc}->true after 10000->false end "
+    "andalso erx_dist:names_dropped()>D,"
+    "Ok4 orelse erlang:halt(1),"
     "P=proplists:get_value(S,erlang:system_info(dist_ctrl)),"
     "Pid=binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\",1:32,0:32,4:32>>),"
     "B=binary:copy(<<7>>,1024),"
@@ -438,13 +446,9 @@ static const char connection_eval[] =
 /* The most LINKs the flood writes: far more than ERX_LANE_ANSWERS_MAX of answers. */
 #define FLOOD_MAX	200000u
 #define RECORD_MAX	2048u
-/* The most REG_SENDs of the domain's own services the party skips before each frame it waits for. */
-#define SKIP_MAX	16u
 #define DOP_LINK		1
-#define DOP_REG_SEND		6
 #define DOP_SEND_SENDER		22
 #define DOP_MONITOR_P		19
-#define DOP_DEMONITOR_P		20
 #define DOP_SPAWN_REQUEST	29
 #define DOP_SPAWN_REPLY		31
 #define DOP_PAYLOAD_MONITOR_P_EXIT	28
@@ -735,32 +739,6 @@ party_burst_index(const uint8_t *record, size_t len)
 }
 
 /*
- * Takes the domain's next frame that is not about a registered name. The domain's own
- * kernel services send REG_SENDs, and monitor and demonitor names, when the connection
- * comes up (rex's features_request, global's init_connect), in no fixed order with the
- * eval's frames, which go to pids; the party skips at most SKIP_MAX of them. False also
- * for a record its header does not describe.
- */
-static bool
-party_take_eval(lane_party_t *party, uint8_t *record, uint64_t wait_ns, size_t *len)
-{
-	/* SMALL_TUPLE_EXT of 4, SMALL_INTEGER_EXT DOP_REG_SEND */
-	static const uint8_t reg_send[] = { 104, 4, 97, DOP_REG_SEND };
-	/* SMALL_TUPLE_EXT of 4, SMALL_INTEGER_EXT DOP_MONITOR_P or DOP_DEMONITOR_P */
-	static const uint8_t monitor[] = { 104, 4, 97, DOP_MONITOR_P }, demonitor[] = { 104, 4, 97, DOP_DEMONITOR_P };
-	party_frame_t frame;
-
-	for (uint32_t skipped = 0; skipped <= SKIP_MAX; skipped++) {
-		if (!party_take(party, record, wait_ns, len) || !party_frame_split(record, *len, &frame))
-			return (false);
-		if (!party_ctl_starts(&frame, reg_send, sizeof(reg_send)) && !party_ctl_starts(&frame, monitor, sizeof(monitor)) &&
-		    !party_ctl_starts(&frame, demonitor, sizeof(demonitor)))
-			return (true);
-	}
-	return (false);
-}
-
-/*
  * Whether a frame record is the SPAWN_REPLY {31, ReqId, To, Flags, Result} of a spawn that
  * made a process: Result, the control term's last element, is a pid of the domain.
  */
@@ -833,7 +811,7 @@ party_spawn(lane_party_t *party, uint8_t *record)
 	if (!erx_etf_writer_done(&writer, &payload_len) || !party_put(party, ctl, ctl_len, payload, payload_len, NEXT_NS))
 		return (false);
 	for (int taken = 0; taken < 2; taken++) {
-		if (!party_take_eval(party, record, NEXT_NS, &len))
+		if (!party_take(party, record, NEXT_NS, &len))
 			return (false);
 		replied = replied || party_spawned(party, record, len);
 		sent = sent || party_child_sent(record, len);
@@ -847,7 +825,8 @@ party_spawn(lane_party_t *party, uint8_t *record)
  * order, then monitors an absent pid of the domain and takes the DOWN noproc the
  * domain's drain answers, spawns a process into the domain (party_spawn), then floods
  * LINKs without reading their answers
- * (party_flood). Skips the domain's REG_SENDs throughout (party_take_eval). Serves the
+ * (party_flood). Every frame it takes is one of these: none names a registered name, which
+ * the domain's ERTS keeps to itself (edit 27 of docs/design-runtime.md). Serves the
  * domain's records as it waits, noting its end. Maps both sides as the system domain's
  * runtime would, and releases them.
  */
@@ -878,13 +857,13 @@ lane_party(uint32_t id)
 	    erx_vm_map(ERX_CAP_SELF, peer, peer_bytes, held->made[ERX_DOM_OBJ_DOM_SIDE], 0, ERX_PROT_R) == ERX_OK &&
 	    erx_lane_writer_init(&party.writer, (void *)(uintptr_t)own, (const void *)(uintptr_t)peer, sys.in_size) &&
 	    erx_lane_reader_init(&party.reader, (const void *)(uintptr_t)peer, (void *)(uintptr_t)own, sys.out_size);
-	passed = passed && party_take_eval(&party, record, FIRST_NS, &len) && party_burst_index(record, len) == 1;
+	passed = passed && party_take(&party, record, FIRST_NS, &len) && party_burst_index(record, len) == 1;
 	if (passed)
 		party_sleep(STALL_NS);
 	for (uint32_t i = 2; passed && i <= BURST; i++)
-		passed = party_take_eval(&party, record, NEXT_NS, &len) && party_burst_index(record, len) == i;
+		passed = party_take(&party, record, NEXT_NS, &len) && party_burst_index(record, len) == i;
 	say_count("burst_taken", passed ? BURST : 0);
-	passed = passed && party_monitor(&party) && party_take_eval(&party, record, NEXT_NS, &len) &&
+	passed = passed && party_monitor(&party) && party_take(&party, record, NEXT_NS, &len) &&
 	    party_down_noproc(record, len) && party_spawn(&party, record);
 	say_count("spawned", passed);
 	passed = passed && party_flood(&party);

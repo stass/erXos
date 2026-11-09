@@ -831,7 +831,9 @@ operations that address a registered name of another node: `{Name, Node}
 as a message to a name not registered there, and
 `monitor(process, {Name, Node})`, a `MONITOR_P` of a name, is answered at
 once by the sender's runtime with `DOWN` and reason `noproc`, as for a
-name not registered. A frame that carries either anyway is malformed.
+name not registered (toward a domain whose connection is not up, with
+`noconnection`, as stock answers for a node it cannot reach). A frame
+that carries either anyway is malformed.
 `global` and `pg` therefore stay within each domain, and `rpc` and `erpc`,
 which spawn their calls, reach a domain that exports `spawn` to the
 caller's.
@@ -2625,7 +2627,7 @@ domain](#domain-ids-pids-and-references)):
 | A pid a third domain passed on | behaves as a dead process until its own domain hands it out or exports it |
 | A pid, reference or alias of another machine in a frame to another domain | the frame is malformed and ends the connection; an exposed domain stands a local process in for a remote one ([An exposed domain](#domain-ids-pids-and-references)) |
 | `process_info/2`, `is_process_alive/1`, `suspend_process/1`, `garbage_collect/1`, `register/2`, `erlang:trace/3` on another domain's pid | `badarg`, as for a pid of another node, in every domain the system domain included |
-| Registered names | per domain: `{Name, Node} ! Msg` toward another domain is dropped and counted in the sender's runtime, as a message to a name not registered there, and `monitor(process, {Name, Node})` gets `DOWN` with `noproc` at once; `global` and `pg` therefore span no two domains |
+| Registered names | per domain: `{Name, Node} ! Msg` toward another domain is dropped and counted in the sender's runtime, as a message to a name not registered there, and `monitor(process, {Name, Node})` gets `DOWN` with `noproc` at once, or `noconnection` toward a domain whose connection is not up, as stock answers for a node it cannot reach; `global` and `pg` therefore span no two domains |
 | `rpc:call/4,5`, `rpc:cast/4`, `rpc:multicall`, `rpc:async_call/4` and `erpc` | work through `spawn_request` wherever the caller's domain may spawn in the target, and fail as such a spawn does elsewhere |
 | `net_adm:ping/1` toward a node of the machine | answers from `nodes()`: `pong` for `node()` and every connected domain, `pang` for any other, with no call to the peer and no disconnect, since a connection exists only by introduction ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos)); `erlang:disconnect_node/1` of the system domain's node keeps its meaning, and the domain's system connection ends and with it the domain |
 | `rpc:block_call/4,5`, `rpc:abcast/2,3`, `rpc:sbcast/2,3`, `rpc:server_call/4` and `rpc:multi_server_call/2,3` toward another domain | each sends to a registered name (`rex` or the caller's), which never crosses: `block_call` returns `{badrpc, {'EXIT', {noproc, _}}}`; `abcast` writes no frame; `sbcast` and `multi_server_call` list the domain among the bad nodes; `server_call` returns `{error, nodedown}` |

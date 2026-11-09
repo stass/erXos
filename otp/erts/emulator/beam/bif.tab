@@ -884,7 +884,9 @@ bif erx_trace_ring:clocks/0
 
 #
 # erXos: the boot page's identity for the distribution carrier between domains
-# (docs/design-runtime.md, "Connections in ERTS").
+# (docs/design-runtime.md, "Connections in ERTS"), and the count of sends to another
+# domain's registered names its runtime dropped (edit 27).
 #
 
 bif erx_dist:boot/0
+bif erx_dist:names_dropped/0

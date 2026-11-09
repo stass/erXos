@@ -1882,12 +1882,6 @@ it; git history is the record of completed work.
   process of this domain made toward the peer's process): the peer's
   process then gets an exit of `noproc` for a live link. RT7 replaces the
   lookup and adds the hold's link bit and the conditional `LINK` signal.
-* [High] Runtime, edit 27 of docs/design-runtime.md (`dist.c`): operations on a peer's
-  registered names are not dropped by the sender. Over `erx_dist` a domain's own kernel
-  services send REG_SENDs and name MONITOR_P/DEMONITOR_P to `system@<host>` at nodeup
-  (`global`, `rex`), which the receiving funnel refuses as malformed, so the system
-  domain's side of a system connection (SV2) would end every connection at nodeup.
-  native_domain's party skips these frames (`party_take_eval`). Land edit 27 before SV2.
 * [Low] Runtime, `erx_connections.erl`: the connection agent opens the system
   connection only; `connection_up`, `connection_mapped`, `connection_down`,
   `connection_unmapped` and `connection_lost` are RT6b's second part, and until then

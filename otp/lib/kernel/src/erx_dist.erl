@@ -23,7 +23,7 @@
 
 -export([listen/2, accept/1, accept_connection/5, setup/5, close/1, select/1,
          address/1, system_lost/1]).
--export([boot/0]).
+-export([boot/0, names_dropped/0]).
 
 -include("net_address.hrl").
 -include("dist.hrl").
@@ -47,6 +47,12 @@
 %% domain. A BIF of ERTS (erx_lane_drv.c).
 -spec boot() -> {pos_integer(), {pos_integer(), node()} | none}.
 boot() ->
+    erlang:nif_error(undefined).
+
+%% The sends to another domain's registered names this runtime dropped, which never cross a
+%% domain (edit 27 of docs/design-runtime.md). A BIF of ERTS (dist.c).
+-spec names_dropped() -> non_neg_integer().
+names_dropped() ->
     erlang:nif_error(undefined).
 
 -spec listen(atom(), string()) -> {ok, {term(), #net_address{}, pos_integer()}}.

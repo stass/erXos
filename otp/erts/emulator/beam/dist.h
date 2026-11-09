@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: declares erts_dist_peer_is_domain.
+ *
  * %CopyrightEnd%
  */
 
@@ -434,6 +436,8 @@ extern int erts_dsig_send_exit2(ErtsDSigSendContext *, Eterm, Eterm, Eterm, int)
 extern int erts_dsig_send_demonitor(ErtsDSigSendContext *, Eterm, Eterm, Eterm);
 extern int erts_dsig_send_monitor(ErtsDSigSendContext *, Eterm, Eterm, Eterm);
 extern int erts_dsig_send_m_exit(ErtsDSigSendContext *, Eterm, Eterm, Eterm, Eterm);
+/* erXos: whether a connection is to another domain, whose registered names it never reaches. */
+extern int erts_dist_peer_is_domain(DistEntry *);
 extern int erts_dsig_send_spawn_reply(ErtsDSigSendContext *, Eterm, Eterm, Eterm, Eterm, Eterm);
 
 extern int erts_dsig_send(ErtsDSigSendContext *dsdp);

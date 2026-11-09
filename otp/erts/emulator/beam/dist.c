@@ -18,7 +18,8 @@
  * limitations under the License.
  *
  * Modified by erXos: the lane port driver alone carries distribution input, and
- * erts_net_message answers a frame the funnel found without a target.
+ * erts_net_message answers a frame the funnel found without a target, and no send to
+ * another domain's registered name is written.
  *
  * %CopyrightEnd%
  */
@@ -1126,9 +1127,13 @@ trap_function(Eterm func, int arity)
 
 static BIF_RETTYPE spawn_request_yield_3(BIF_ALIST_3);
 
+/* erXos: the sends to another domain's registered names dropped (erts_dsig_send_msg). */
+static erts_atomic64_t names_dropped;
+
 void init_dist(void)
 {
     init_nodes_monitors();
+    erts_atomic64_init_nob(&names_dropped, 0);
 
 #ifdef ERTS_DIST_MSG_DBG_FILE
     {
@@ -1587,6 +1592,60 @@ static int can_send_seqtrace_token(ErtsDSigSendContext* ctx, Eterm token) {
         signed_val(label) >= (ERTS_SINT32_MIN >> _TAG_IMMED1_SIZE);
 }
 
+/*
+ * erXos: registered names stay inside their domain (docs/design-domains.md, "Registered
+ * names stay inside their domain"; edit 27 of docs/design-runtime.md). No export covers a
+ * name anyone can guess, so the peer's funnel refuses a frame that addresses one, and this
+ * runtime never writes it: a send to {Name, Node} is dropped here and counted, and
+ * monitor/2,3 answers a monitor by name itself (bif.c). names_dropped counts the sends
+ * (init_dist sets it to 0).
+ */
+
+/* The host part of node name node, after its first '@', and its length; NULL without one. */
+static const byte *
+node_host(Eterm node, Uint *len)
+{
+    const Atom *a = atom_tab(atom_val(node));
+    const byte *name = erts_atom_get_name(a);
+    const byte *at = memchr(name, '@', a->len);
+
+    if (at == NULL)
+        return NULL;
+    *len = (Uint) (name + a->len - (at + 1));
+    return at + 1;
+}
+
+/*
+ * Whether dep's node is another domain of this machine: a node at this node's host name,
+ * the rule of erx_dist:select/1. Other machines' nodes are the network carrier's.
+ */
+int
+erts_dist_peer_is_domain(DistEntry *dep)
+{
+    Uint peer_len = 0, own_len = 0;
+    const byte *peer = node_host(dep->sysname, &peer_len);
+    const byte *own = node_host(erts_this_node->sysname, &own_len);
+
+    return (peer != NULL && own != NULL && peer_len == own_len
+            && sys_memcmp(peer, own, own_len) == 0);
+}
+
+/*
+ * erx_dist:names_dropped/0: the sends to another domain's registered names dropped so far,
+ * those toward a domain whose connection was not up included.
+ */
+BIF_RETTYPE
+erx_dist_names_dropped_0(BIF_ALIST_0)
+{
+    const Uint64 dropped = (Uint64) erts_atomic64_read_nob(&names_dropped);
+    Uint size = 0;
+    Eterm *hp;
+
+    (void) erts_bld_uint64(NULL, &size, dropped);
+    hp = HAlloc(BIF_P, size);
+    BIF_RET(erts_bld_uint64(&hp, NULL, dropped));
+}
+
 int
 erts_dsig_send_msg(ErtsDSigSendContext* ctx, Eterm remote, Eterm full_remote,
                    Eterm message, int prio)
@@ -1608,6 +1667,12 @@ erts_dsig_send_msg(ErtsDSigSendContext* ctx, Eterm remote, Eterm full_remote,
     ASSERT(is_external_pid(remote)
            || is_external_ref(remote)
            || is_atom(remote));
+
+    if (is_atom(remote) && erts_dist_peer_is_domain(ctx->dep)) {
+        /* As a message to a name not registered there: gone, and nothing is written. */
+        erts_atomic64_inc_nob(&names_dropped);
+        return ERTS_DSIG_SEND_OK;
+    }
 
     if (have_seqtrace(SEQ_TRACE_TOKEN(sender))) {
 	seq_trace_update_serial(sender);
