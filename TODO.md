@@ -2980,6 +2980,12 @@ to the corpus and follow rc
   no NUL and one `@` inside it. Every name today comes from the manifest's checked identifiers, so `uname -n` and
   anything else that shows a node's host write it unescaped; require both parts to be system identifiers here, so
   that holds whichever path builds the page.
+* [Medium] network, `erx_net_if_core` and `erx_lltable` (`docs/design-network-stack.md`, Residuals,
+  "Resolution is shared between clients"): a client sending to many unresolved on-link addresses makes the
+  interface hold up to 16 packets for each and, once the neighbour table's 1,024 entries are full, evict
+  other clients' entries in resolution; the sender credit bounds only the rate of hand-overs. Bound it per
+  grant: tag each hand-over with its grant, count the entries each grant's packets started, and drop a
+  grant's hand-overs past a cap as lost frames.
 * [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
   `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
   `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can
