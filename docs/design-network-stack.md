@@ -58,6 +58,12 @@ Decisions every reader needs:
   keyed hash, both per-byte primitives of the runtime. Whether TCP's
   established path needs native code is measured on this stack, on
   erXos's kernel.
+* **The same processes run on a development host.** The effect layer
+  runs unchanged on stock OTP 29.1.2, exchanging Ethernet frames through
+  a pipe driver with real peers or with a test, under the real clock or a
+  virtual one. Four seams separate the two places: the driver's
+  transport, the clock, the per-byte primitives and the runtime's calls
+  for grants ([The effect layer](#the-effect-layer)).
 
 ## Contents
 
@@ -67,19 +73,21 @@ Decisions every reader needs:
 4. [Processes and the packet path](#processes-and-the-packet-path)
 5. [The TCP core](#the-tcp-core)
 6. [IP, neighbours and UDP](#ip-neighbours-and-udp)
-7. [Modules and provenance](#modules-and-provenance)
-8. [Authority and admission](#authority-and-admission)
-9. [The interface towards Erlang programs](#the-interface-towards-erlang-programs)
-10. [The interface towards POSIX programs](#the-interface-towards-posix-programs)
-11. [Untrusted input](#untrusted-input)
-12. [Concurrency and failure](#concurrency-and-failure)
-13. [Refusals and error results](#refusals-and-error-results)
-14. [Where C is used, and what is measured](#where-c-is-used-and-what-is-measured)
-15. [Verification](#verification)
-16. [Scope](#scope)
-17. [Decisions](#decisions)
-18. [Alternatives considered](#alternatives-considered)
-19. [References](#references)
+7. [The effect layer](#the-effect-layer)
+8. [Modules and provenance](#modules-and-provenance)
+9. [Authority and admission](#authority-and-admission)
+10. [The interface towards Erlang programs](#the-interface-towards-erlang-programs)
+11. [The interface towards POSIX programs](#the-interface-towards-posix-programs)
+12. [Untrusted input](#untrusted-input)
+13. [Concurrency and failure](#concurrency-and-failure)
+14. [Refusals and error results](#refusals-and-error-results)
+15. [Where C is used, and what is measured](#where-c-is-used-and-what-is-measured)
+16. [Verification](#verification)
+17. [Scope](#scope)
+18. [Decisions](#decisions)
+19. [Open decisions](#open-decisions)
+20. [Alternatives considered](#alternatives-considered)
+21. [References](#references)
 
 ## Context
 
@@ -160,41 +168,47 @@ each row names what in this design removes the fault.
 | a payload copied four times on transmit, checksum in Erlang | headers and payload kept apart until the device NIF's one copy; checksum in C |
 | unbounded neighbour cache and pending queue, unsolicited replies accepted | bounded neighbour tables in the interface process, FreeBSD's acceptance rules |
 
-### What exists today
+### What the stack stands on
 
-* No part of the stack is in the tree: `erlang/apps` holds no network
-  application, and no client of a network service exists in any domain.
-* No Erlang code can read the kernel's entropy generator: the
-  runtimes call `erx_entropy_read` for musl and for ERTS's reference key
-  ([design-runtime.md](design-runtime.md#unguessable-references)), and
-  `erx_bytes:entropy/1`, Erlang's entry to it, is specified
+The stack is two layers in one application, `erx_net`: the pure core,
+the modules marked P in [Modules](#modules), which decide, and the
+effect layer, the processes marked E, which read inputs, call the core's
+steps and carry out their actions. Beneath them:
+
+* **The per-byte primitives** `erx_bytes:inet_csum/2`,
+  `inet_csum_update/3` and `siphash24/2`, statically linked NIFs in
+  portable C, and `erx_bytes:entropy/1`, Erlang's one entry to the
+  kernel's generator, `erx_entropy_read`
   ([design-runtime.md](design-runtime.md#per-byte-primitives),
-  [design.md](design.md#decisions)) but not written. The host link's
-  session identifiers wait on the same entry (`TODO.md`).
-* The per-byte primitives the stack uses, `erx_bytes:inet_csum/2`,
-  `inet_csum_update/3` and `siphash24/2`, are written
-  ([design-runtime.md](design-runtime.md#per-byte-primitives)), as
-  statically linked NIFs in portable C.
-* The device NIF is specified: `erx_device:post/4` takes one to four
-  binary segments of one request and copies them into a pool buffer, and
+  [design.md](design.md#decisions)). On a development host,
+  `test/erlang/host_bytes/erx_bytes.erl` stands in for the module: a
+  model of each primitive written from its definition, with the NIF's
+  argument checks, and `entropy/1` drawn from stock's
+  `crypto:strong_rand_bytes/1`.
+* **The device NIF**: `erx_device:post/4` takes one to four binary
+  segments of one request and copies them into a pool buffer, and
   `erx_device:complete/2` returns up to 64 KiB of completed buffers as
   fresh binaries per call
   ([design-runtime.md](design-runtime.md#the-device-nif)).
-* OTP's kernel already has the seam a new socket backend needs. `gen_tcp`,
-  `gen_udp` and `inet` dispatch every call on a socket of the form
-  `{'$inet', Module, Handle}` to `Module`
-  (`otp/lib/kernel/src/gen_tcp.erl:261`, `otp/lib/kernel/src/inet.erl:469`),
-  and `inet:gen_tcp_module/2` and `inet:gen_udp_module/2` choose the module
-  from the `inet_backend` setting (`inet.erl:3289`, `inet.erl:3410`).
-* The runtime drops OTP's `socket` and `net` NIFs, and `gen_tcp:listen`
-  answers `{error, eprotonosupport}` from `prim_inet` (`TODO.md`).
+* **OTP's dispatch on module sockets.** `gen_tcp`, `gen_udp` and `inet`
+  dispatch every call on a socket of the form `{'$inet', Module, Handle}`
+  to `Module` (the `module_socket` macro, `otp/lib/kernel/src/gen_tcp.erl:261`
+  and `otp/lib/kernel/src/inet.erl:469`), and `inet:gen_tcp_module/1` and
+  `inet:gen_udp_module/1` choose the module from the `inet_backend`
+  setting (`inet.erl:3289-3300`, `inet.erl:3409-3420`).
+* **The runtime drops OTP's `socket` and `net` NIFs**
+  ([design-runtime.md](design-runtime.md)), so in the network domain
+  and in every client domain this stack is the only network
+  implementation.
 
 ## Requirements
 
 * **N1. Behaviour.** On the wire, the stack behaves as FreeBSD 15.1's
   default stack with its default settings, except where this document
   states a departure; every difference found by the oracles is a bug, a
-  documented departure with a test, or a FreeBSD bug recorded as such.
+  documented departure with a test, a FreeBSD bug recorded as such, or,
+  since the oracle runs FreeBSD 16, a change FreeBSD made after 15.1,
+  recorded with its commit ([Open decisions](#open-decisions), 2).
 * **N2. API.** `gen_tcp`, `gen_udp` and `inet` behave as stock OTP 29.1.2
   on the host, as OTP's suites check; a POSIX program's sockets behave as
   on FreeBSD within the POSIX layer's tiers.
@@ -224,6 +238,10 @@ each row names what in this design removes the fault.
 * **N10. Provenance.** Every module that translates FreeBSD code carries
   the FreeBSD files' copyright notices and licence, and names the
   functions it translates, at the pinned commit.
+* **N11. Testable on a host.** Every module of `erx_net` runs unchanged
+  on stock OTP 29.1.2 on a development host, the processes included, so
+  the whole stack is tested there against real peers and packet scripts
+  before and beside the network domain on QEMU.
 
 ## The construction
 
@@ -370,7 +388,8 @@ ERTS bounds no mailbox, and a stack under attack is a set of mailboxes
 that someone else fills. So no stack process hands packets to another
 except through `erx_net_credit`:
 
-* The receiver creates an `atomics` counter and publishes it with its pid:
+* The receiver creates an `atomics` counter (for a connection the
+  interface starts, the interface creates it) and publishes it with its pid:
   the driver in its interface record, a connection or socket in its
   demultiplexing entry, and an interface two counters in its interface
   record, one for its driver's batches and one for what senders hand it.
@@ -509,7 +528,8 @@ erx_net_sup  (rest_for_one)
  |                          monitors each interface, deletes its rows
  |- erx_net_if_sup  (one_for_one)
  |   |- link supervisor per interface  (rest_for_one)
- |       |- the driver       erx_virtio_net, or erx_net_loop for loopback
+ |       |- the driver       erx_net_driver over its transport: erx_virtio_net,
+ |       |                   erx_net_loop for loopback, or erx_net_pipe on a host
  |       |- erx_net_if       the interface process
  |       |- erx_dhcp4        when the interface is configured for DHCP
  |- erx_net_grant_sup  (simple_one_for_one, temporary children)
@@ -543,7 +563,7 @@ one writer, the owner of the state it shows:
 
 | Table | Row | Writer | Readers |
 | --- | --- | --- | --- |
-| `erx_net_ifs` | one per interface: its name; its pid, which every other row it writes names; its two credits, one for its driver's receive batches and one for what senders hand it; its driver's pid and credit; its link (`ethernet`, or `none` for loopback); its link-layer address; its MTU; its IPv6 link MTU; and its IPv6 hop limit | the interface | every sender; every interface's view |
+| `erx_net_ifs` | one per interface: its name; its pid, which every other row it writes names; its two credits, one for its driver's receive batches and one for what senders hand it; its driver's pid and credit; its link (`ethernet`, or `none` for loopback); its link-layer address; its MTU, the driver's fields and these three taken from the driver's answer to the interface's attach ([The driver](#the-driver)); its IPv6 link MTU; and its IPv6 hop limit | the interface | every sender; every interface's view |
 | `erx_net_addrs` | an address, `erx_net_addr:row()`, with its interface's pid and the place the interface added it in | the interface that owns it | every interface's view; every sender's source choice; the grant's `addresses` check |
 | `erx_net_routes` | a route, `erx_net_route:row()`, with its interface's pid | the interface it leaves through | every sender |
 | `erx_net_neigh` | a neighbour the transmit path may address, keyed by the interface's pid and the IP address: its link-layer address, `fresh` or `stale`, and a hint count | the interface, from `erx_lltable`'s `publish` and `unpublish` actions | connections and datagram sockets |
@@ -622,7 +642,8 @@ domain D:
    copies up to 64 KiB of completed frames into fresh binaries: the one
    per-byte copy of the receive path. The driver strips the device's own
    header (virtio's `virtio_net_hdr`) and sends the batch to the interface
-   process in one message, against the interface's receive credit. The driver
+   process in one message, against the interface's receive credit
+   ([The driver](#the-driver)). The driver
    parses nothing else, as sDDF's split of driver and protocol prescribes
    ([design.md](design.md#drivers-and-dma)).
 2. **Interface: classify, reserve, complete.** For each frame the
@@ -881,7 +902,8 @@ looks each segment up anew and finds the listener or nothing.
    binary and its payload sub-binaries.
 4. **Driver to device.** The driver posts each frame with
    `erx_device:post/4` as the segments `[{out, DeviceHeader}, {out,
-   Headers}, {out, Payload}]`; the NIF lays them end to end in a pool
+   Headers}, {out, Payload}, ...]`, at most two payload binaries
+   ([The driver](#the-driver)); the NIF lays them end to end in a pool
    buffer, the one per-byte copy of the transmit path.
 
 ### Framing
@@ -2088,6 +2110,378 @@ bytes as its credit, and drops beyond it, as a UDP socket's receive
 buffer does. UDP-Lite and encapsulation are not part of the stack, and
 multicast delivery is `erx_mcast`'s ([Scope](#scope)).
 
+## The effect layer
+
+The effect layer is the stack's processes: the drivers, the interface
+processes, the sockets, the grants, `erx_net_tables` and `erx_dhcp4`.
+Each reads its inputs, calls its owner's step and carries out the
+actions, and decides nothing a pure function could decide. It is written
+once and runs in two places: in the network domain, and on a
+development host as an application of stock OTP 29.1.2, where the
+stack's interop, impairment and packet-script tests run without QEMU and
+as many at once as the host has cores.
+
+### Two places, four seams
+
+| Seam | In the network domain | On a development host |
+| --- | --- | --- |
+| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp` or a test process |
+| the clock | `erx_net_clock` over ERTS's monotonic clock | the same, or a script's virtual clock |
+| the per-byte primitives and entropy | `erx_bytes`, statically linked NIFs and `erx_entropy_read` | the host model `test/erlang/host_bytes/erx_bytes.erl` |
+| the runtime's calls a grant makes | `erx:cap/1`, `erx:origins/1` and the request limit of erXos's ERTS | host stand-ins: `cap/1` answers what the harness installed, the other two do nothing |
+
+The loopback transport, `erx_net_loop`, is the same in both. Nothing
+else differs: the application, its supervisors, its configuration keys,
+its tables and every process module are the same, and no module asks
+where it runs. The stand-ins of the last two rows are test code, compiled
+only by host tests, as the `erx_bytes` model is. The two stand-ins that
+do nothing are correct on a host, not merely harmless: no message there
+comes from another domain, so there is no envelope to ask for and no
+lane to limit, and the grant's admission needs no variant of its own
+([The grant's contract](#the-grants-contract)).
+
+### The driver
+
+A driver is one process per interface, `erx_net_driver`, running a
+transport, its callback module. `erx_net_driver` holds everything the
+credits and the interface need, written once: the attach, the receive
+and transmit credits, the backlog and the link state. A transport holds
+only its medium.
+
+```erlang
+-callback init(Config :: map()) -> {ok, link_info(), T} | {error, Reason :: term()}.
+-callback event(Msg :: term(), T) -> {[event()], T}.
+-callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}.
+
+-type link_info() :: #{link := ethernet | none,
+                       lladdr := <<_:48>> | none,
+                       mtu := 68..65535,
+                       state := up | down,
+                       tx_limit := pos_integer()}.     % frames waiting at the driver
+-type event() :: {frames, [binary() | {Zone :: term(), binary()}]}
+               | {link, up | down}
+               | writable.                           % room to transmit again
+```
+
+`event/2` turns a message the transport's medium sent the process, an
+interrupt, a datagram or a far end's frame, into events, and any other
+message into none.
+
+**Attaching.** The interface process calls
+`erx_net_driver:attach(Driver, RxCredit)` in its initialisation, with
+its receive credit. The driver monitors the caller and answers
+`{ok, link_info(), TxCredit}`, its transmit credit made at `init` with
+`tx_limit` as its limit. The interface writes its row's driver pid and
+credit, link, link-layer address and MTU from that answer, so those
+fields have one source. A restarted interface attaches again; while no
+interface is attached, the driver drops what it receives and counts it
+as `detached`.
+
+**Receiving.** For each `{frames, Frames}` event the driver hands the
+interface `{frames, self(), Frames}` against the receive credit, one unit
+per frame, and drops a refused batch whole, counted as `no_room`. A batch
+is what one event gives: virtio's `complete/2` calls until 64 KiB, the
+pipe's waiting datagrams up to the same 64 KiB.
+
+**Link changes.** The driver keeps the transport's latest link state and
+the last one it told the interface. While the two differ, it hands
+`{link, self(), State}` against the receive credit, one unit, and tries
+again at each later event when refused. Only the latest state is ever
+told, so a device that flaps its link fills nothing. The interface gives
+the change to its `erx_dhcp4`, which on `up` starts again from
+INIT-REBOOT, as `dhclient` does on a link change (`state_reboot`,
+`sbin/dhclient/dhclient.c:302-309`), and does nothing else: FreeBSD's
+IPv6 does nothing on a link event outside its `EXPERIMENTAL` option
+(`nd6_ifnet_link_event`, `nd6_rtr.c:339-351`), and `ether_output` tests
+only the interface's administrative and driver flags, not its link
+(`if_ethersubr.c:337-339`). The link state is the interface's own state,
+shown by `netadmin` and the inspector, not a published row, so a
+flapping link moves no configuration generation.
+
+**Transmitting.** A sender hands `{transmit, Frames}` against the
+transmit credit, one unit per frame. The driver gives each frame to
+`transmit/2` in order: `ok` and `{drop, Reason}` take the frame's unit,
+the second counted by its reason; `full` keeps that frame and those after
+it in a backlog, which the next `writable` event resumes. A unit is taken
+when its frame leaves the driver, not when its message arrives, so the
+transmit credit bounds the driver's mailbox and its backlog together.
+
+| Transport | `link`, `lladdr` | `mtu` | `state` | `tx_limit` |
+| --- | --- | --- | --- | --- |
+| `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_bytes:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size |
+| `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured |
+| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` while its far end is there | configured |
+
+The virtio transport posts at most four `out` segments: its
+`virtio_net_hdr`, the frame's link, IP and transport headers joined into
+one binary, and the payload's binaries, joining any past the second into
+the last segment. That join is a copy a frame pays only when its
+payload spans more than two of a send buffer's binaries. The loop
+transport makes each frame `{Zone, Packet}` into `{Zone,
+iolist_to_binary(Packet)}`, the one copy a device makes elsewhere, and
+returns it as received.
+
+**The pipe.** `erx_net_pipe` exchanges Ethernet frames with one far end
+and parses nothing:
+
+```erlang
+-type far() :: {udp, Local :: {inet:ip_address(), inet:port_number()},
+                     Peer :: {inet:ip_address(), inet:port_number()}}
+             | {process, pid()}.
+```
+
+Over `udp`, one datagram is one Ethernet frame without its frame check
+sequence, as QEMU's `dgram` network backend carries frames. A datagram
+from any other address than `Peer` is dropped as `stranger`, one longer
+than the MTU and the 14-byte Ethernet header as `too_long`, and a send
+the host refuses as `refused`. UDP has no carrier, so the state is `up`
+from `init` to the end. Over `process`, each frame is a message
+`{erx_net_pipe, Pid, Frame}` in either direction, and the pipe monitors
+the far end and reports `down` when it ends. The `process` end is what
+makes a run deterministic: every frame in flight is a message the test
+can see ([The clock](#the-clock)).
+
+A medium other than UDP reaches the pipe through a QEMU process that runs
+no machine, `-machine none`, with the medium's network backend and a
+`dgram` backend joined on one hub (`-netdev hubport`): QEMU's user
+networking (slirp) on macOS, and a `tap` device on FreeBSD.
+
+### The interface core
+
+`erx_net_if_core` is the interface process's step. It holds the
+sub-cores of the interface's state ([One owner, one step](#one-owner-one-step)):
+`erx_arp` and `erx_nd6` over `erx_lltable`, `erx_nd6_dad`,
+`erx_nd6_rtr`, the reassembly tables, the syncache, the ICMP and RST
+limiters of `erx_net_bandlim`, the ingress bucket, its configuration
+copy and its view, its generator and its counters, and dispatches each
+event to the sub-core it belongs to.
+
+```erlang
+new(#{name := term(), link := erx_net_driver:link_info(),
+      gen := erx_net_rand:gen(), config := map()}) -> core().
+step(event(), core(), #{now := integer()}) -> {core(), [action()]}.
+view(core()) -> erx_net_input:view().        % without demux, which the loop adds
+next_deadline(core()) -> integer() | infinity.
+
+-type event() ::
+      {local, erx_net_input:pending()}               % classify/2 answered local
+    | {reinject, erx_net_input:key(), [erx_tcp:segment()]}
+    | {resolve | reset, NextHop :: term(), Src :: term(), [erx_net_frame:packet()]}
+    | charge_rst
+    | {hint, NextHop :: term()}
+    | {config, Gen :: non_neg_integer(), erx_net_frame:snapshot()}
+    | {link, up | down}
+    | {dhcp, erx_dhcp4_core:action()}                % from the interface's erx_dhcp4
+    | {ifid, Ref :: reference(), {ok, binary()} | unavailable}
+    | {accept_refused, Conn :: term(), erx_tcp:segment()}
+    | {admin, Request :: term(), From :: term()}     % netadmin's requests
+    | {expired, Now :: integer()}.
+
+-type action() ::
+      {transmit, [erx_net_frame:frame()]}            % to its driver
+    | {hand, pid(), erx_net_credit:credit(), Units :: pos_integer(), Msg :: term()}
+    | {input, erx_net_input:input()}                 % classify again: a reassembled datagram
+    | {publish, Rows :: map()}                       % its rows of the three configuration tables
+    | {neigh, publish, Ip :: binary(), LinkAddr :: binary(), fresh | stale}
+    | {neigh, unpublish, Ip :: binary()}
+    | {dhcp, {reply, Msg :: term()} | {link, up | down}}
+    | {ifid_request, Ref :: reference(), Message :: binary()}
+    | {accept, erx_tcp_syncache:listener(), Conn :: term(),
+       erx_tcp_syncache:handshake(), erx_tcp:segment(), erx_net_rand:gen()}
+    | {reply, From :: term(), Reply :: term()}.
+```
+
+The context is the time alone, in microseconds; the sub-cores that keep
+milliseconds get it divided. The step of a `local` event does what
+[Receiving](#receiving) gives the interface: `charge/2` decides whether
+the frame spends a token of the bucket, `erx_net_input:verify/1` checks
+it, a failed check gives the token back, and the verified item goes to
+its sub-core, all inside the one step, so the bucket has no state
+outside the core and nothing to give back after a raise. `hand` reaches
+another stack process through the pid and credit of its published row,
+as the ICMPv6 error of an unresolved neighbour reaches the loopback
+interface. `publish` carries the complete set of the interface's rows in
+`erx_net_ifs`, `erx_net_addrs` and `erx_net_routes` whenever one of them
+changes.
+
+**The loop.** `erx_net_if` takes one message at a time:
+
+1. Before anything else it reads the configuration generation, and when
+   it differs from the core's, steps `{config, Gen, Snapshot}` from
+   `erx_net_tables:configuration/0`.
+2. A batch `{frames, Driver, Frames}` takes its units from the receive
+   credit, and a `{loop, Frames}` its units from the sender credit. Each
+   frame in turn is classified against `view/1` with the `demux` lookup
+   added. An `owned` frame reserves a unit of each destination's credit
+   and is verified, its item kept for each destination that took it, or
+   its units released if it fails. A `local` frame is stepped at once,
+   and every `{input, Input}` action it returns is classified before the
+   next frame. A `drop` is counted. At the batch's end each destination
+   gets one message of its items, its units already reserved.
+3. Any other handed message takes its units from the sender credit and
+   is stepped. `hint`, `link`, the `erx_dhcp4` messages and the key
+   facet's answer carry no credit: a hint is at most one in flight per
+   published row, a link notice took a unit of the receive credit at the
+   driver, and the others come from processes of the interface's own
+   link supervisor or from its own requests, one per step.
+4. A clock hint steps `{expired, Now}`.
+
+After each step the loop performs the actions in order: it writes
+`publish` as new and changed rows first, deleted rows last, and then
+increments the generation; it sends an `ifid_request` to the key facet
+of [IPv6, neighbour discovery and autoconfiguration](#ipv6-neighbour-discovery-and-autoconfiguration),
+and steps `{ifid, Ref, unavailable}` itself when the network domain
+holds none, as on a host. Then it arms the clock at
+`next_deadline/1`. A step that raises is handled as
+[What fails and what survives](#what-fails-and-what-survives) says.
+
+**A connection from the syncache.** For `accept`, the loop reserves one
+unit of the listener's accept credit. Refused, it steps
+`{accept_refused, Conn, Segment}`, and the core answers with a RST under
+its limit ([Connection setup](#connection-setup)). Granted, the loop
+makes the connection's receive credit, spawns the connection with
+`proc_lib:spawn/3`, so the interface never waits on it, and inserts the
+four-tuple through `erx_net_bind` with the new pid and credit before it
+takes the next frame. The connection's first message is the interface's
+verdict on that insertion: `go`, or `abandon` when the key was already
+held, on which it ends without sending anything and the loop releases
+the accept unit. Here the interface, not the receiver, makes the
+receiver's counter, so that the entry exists before the connection runs.
+
+### Credits
+
+`erx_net_credit` is the one module that hands packets between stack
+processes, over one `atomics` counter per receiver
+([Credited queues](#credited-queues)):
+
+```erlang
+-opaque credit() :: {atomics:atomics_ref(), Limit :: pos_integer()}.
+
+new(Limit :: pos_integer()) -> credit().
+hand(pid(), credit(), Units :: pos_integer(), Msg :: term()) -> ok | full.
+reserve(credit(), Units :: pos_integer()) -> ok | full.
+send(pid(), Msg :: term()) -> ok.          % a message whose units are reserved
+release(credit(), Units :: pos_integer()) -> ok.
+take(credit(), Units :: pos_integer()) -> ok.
+free(credit()) -> non_neg_integer().
+```
+
+`reserve/2` adds the units with `atomics:add_get/3` and, past the
+limit, subtracts them again and answers `full`. `hand/4` is `reserve/2`
+followed by `send/2`. `release/2` returns units a sender reserved and
+did not send; `take/2` is the receiver's, for each message or frame it
+takes; `free/1` is the room left, which a connection's loop reads into
+its step's context. The limit is part of the value, fixed when the
+counter is made, so a sender never reads it from anywhere else, and a
+counter can never go below zero, since every unit is added before its
+message is sent. Each credit's unit and limit:
+
+| Credit | Made by | Unit |
+| --- | --- | --- |
+| a driver's transmit credit | the driver, at `init` | a frame |
+| an interface's receive credit | the interface | a frame of a batch, or a link notice |
+| an interface's sender credit | the interface | a handed message |
+| a connection's or datagram socket's credit | the socket, or the interface for a connection it starts | an item |
+| a listener's accept credit | the listener | a connection, its limit the backlog |
+
+The limits are keys of the `erx_net` application's environment, whose
+defaults the flood measurements of plan.md's network gates settle, as
+they settle the ingress bucket's.
+
+### The clock
+
+Every process of `erx_net` reads the time and arms its one timer through
+`erx_net_clock`, and through nothing else:
+
+```erlang
+now() -> integer().                  % microseconds
+arm(Deadline :: integer()) -> ok.    % the caller gets {erx_net_clock, hint} at or after Deadline
+```
+
+The clock is chosen once, from the application's `clock` key, before any
+process starts. `monotonic`, the default and the only value the network
+domain's configuration sets, is `erlang:monotonic_time(microsecond)` and
+`erlang:send_after/4` with `{abs, true}` at the deadline rounded up to
+the millisecond. `{virtual, Clock}` is a test's clock process: `now/0`
+reads its current time from an `atomics` counter it shares, `arm/1`
+tells it the caller and deadline, and the clock moves only when the test
+advances it, setting the new time first and then sending a hint to every
+caller whose deadline it reached, in deadline order.
+
+A virtual clock is this simple because a hint is only a hint
+([Deadlines, not timers](#deadlines-not-timers)): the clock never
+cancels anything, and a hint for a deadline that has since moved finds
+nothing due. Every timeout of the stack is a deadline in some owner's
+state, a request's `Timeout` included, which the socket enforces, so
+nothing in the stack waits on a timer the virtual clock does not see; a
+local call between stack processes waits with a monitor and no timeout.
+A build check keeps it so ([Build checks](#build-checks)). Under the
+virtual clock, `erx_net_script` drives the whole stack through the pipe
+driver's `process` end: it advances the clock only when the stack is
+idle, every process of the `erx_net` tree, every socket and the pipe
+waiting in `receive` with an empty queue, so a 2MSL wait or a
+keepalive's two hours take no time, and a run's frames on the wire are a
+function of its script and its keys. Runs against real peers keep the
+monotonic clock.
+
+### The grant's contract
+
+What the stack's modules rely on from a grant is fixed here, so neither
+the host nor the facet machinery changes them:
+
+* A grant is an `erx_net_grant` process, minted by `erx_net:mint_grant(Grantee,
+  Limits)`, the one function the network service's introduction of a
+  client calls ([The grant](#the-grant)). It holds the limits of
+  [The grant](#the-grant) and the account of
+  [Sockets act for one domain](#sockets-act-for-one-domain), which a
+  pure core, `erx_net_grant_core`, decides over.
+* Every message from outside the stack to a grant or a socket passes one
+  admission path before any step sees it:
+
+  ```erlang
+  erx_net_admit:request(Msg :: term(), Grantee :: local | pos_integer()) ->
+      {ok, Request :: term(), ReplyTo :: pid()} | {refuse, Reason :: term()}.
+  ```
+
+  A message wrapped as `{erx_origin, D, Inner}` comes from domain `D`; a
+  message without an envelope comes from the receiver's own domain,
+  `local` ([design-domains.md](design-domains.md#facets)). The origin
+  must be the grantee; `Inner` must be a request of
+  `abi/services/net.txt`, within its sizes; and the reply target, and
+  any new owner a request names, must be a pid of the grantee's domain.
+  `erx_net_admit` is generated from the schema, and the grant, as an
+  `erx_facet`, reaches the same check through the facet's behaviour.
+  The requests in flight are bounded by the runtime's request limit on
+  the receiving process, which the grant's `max_request` sets.
+* A client finds its grant by `erx:cap(net)` and nothing else.
+
+On a host, the harness mints each grant with the grantee `local`. No
+message there carries an envelope, so every request from a process of
+the host node passes the origin check, and the grant's limits, account
+and refusals are exactly those of the network domain. A host build
+therefore needs no grant that admits by caller: the variant would only
+reproduce what `local` already gives.
+
+### Running on a development host
+
+The host harness starts `erx_net` on stock OTP 29.1.2 with its
+`interfaces` key naming each interface's transport and configuration
+(`{erx_net_pipe, #{far := far(), lladdr := Addr}}`, static addresses or
+DHCP), as the network domain's configuration names `erx_virtio_net`,
+and with its `clock` key. It mints a grant and installs it under `net`
+in the `erx:cap/1` stand-in.
+
+Stock's `inet` accepts only `inet` and `socket` as backends
+(`inet.erl:3297-3300`), so `{inet_backend, erx}` fails there with
+`function_clause`. Host tests therefore open sockets by calling the
+backend directly, `erx_gen_tcp:connect/4`, `erx_gen_tcp:listen/2` and
+`erx_gen_udp:open/2` with `gen_tcp`'s and `gen_udp`'s arguments. Each
+returns `{'$inet', erx_gen_tcp, Pid}` or `{'$inet', erx_gen_udp, Pid}`,
+on which every later `gen_tcp`, `gen_udp` and `inet` call dispatches to
+the backend as on erXos. On erXos the OTP edit that adds `erx` to
+`inet_backend` and makes it the default ([The backend](#the-backend))
+is all that changes: the calls into `erx_gen_tcp` are the same.
+
 ## Modules and provenance
 
 ### Modules
@@ -2141,8 +2535,18 @@ modules are marked P; process modules E.
 | `erx_net_rand` | none; the role of `arc4random` | the keyed random generator each owner holds | P |
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
 | `erx_dhcp4_wire`, `erx_dhcp4_core` | `parse_options`, `parse_option_buffer`, `check_classless_option`, `res_hnok`, `check_search`, `option_as_string` of `sbin/dhclient`; RFC 2131, RFC 2132, RFC 3396, RFC 3442 | DHCP message codec; DHCP client state machine | P |
+| `erx_net_grant_core` | none | the grant's limits, account and buffer reservations | P |
 | `erx_net_credit` | none | credited hand-over | funnel |
-| `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd`, `erx_net_loop` | none | processes | E |
+| `erx_net_clock` | none | the time and the one timer of every process | funnel |
+| `erx_net_admit` | generated from `abi/services/net.txt` | the admission path of grants and sockets | generated |
+| `erx_net_driver` | none | the driver process over its transport | E |
+| `erx_virtio_net`, `erx_net_loop`, `erx_net_pipe` | none | the driver's transports | E |
+| `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd` | none | processes | E |
+
+The packet-script runner `erx_net_script`, the virtual clock, the
+impairment schedule `erx_net_impair` and the relay `erx_net_relay` are
+test code in `test/erlang`, run on a development host
+([The stack on a development host](#the-stack-on-a-development-host)).
 
 The client side lives in the `erx` application, which every domain runs:
 `erx_gen_tcp` and `erx_gen_udp`, the socket backends, and `erx_inet`,
@@ -2357,8 +2761,11 @@ by one owner each.
 ### The backend
 
 erXos's OTP adds a third value to `inet_backend`, `erx`, and makes it the
-default: `inet:gen_tcp_module/2` and `inet:gen_udp_module/2` return
-`erx_gen_tcp` and `erx_gen_udp` for it. A socket is
+default: `inet:gen_tcp_module/1` and `inet:gen_udp_module/1`, through
+their private two-argument clauses, return `erx_gen_tcp` and
+`erx_gen_udp` for it. On stock OTP, where that edit is absent, a host
+test calls the backend directly
+([Running on a development host](#running-on-a-development-host)). A socket is
 `{'$inet', erx_gen_tcp, Pid}` or `{'$inet', erx_gen_udp, Pid}`, where
 `Pid` is the connection, listener or datagram socket, so `gen_tcp`,
 `gen_udp` and `inet` reach the backend through the dispatch they already
@@ -2607,6 +3014,9 @@ packet input.
 | a frame that a step cannot handle (a bug: the step raises) | the interface process, which counts and logs the event | the interface's state from before the frame; every connection | the frame |
 | the interface process crashes outside a step | its link supervisor; `erx_net_tables`, which deletes the rows that name it | the driver, every connection | the interface's soft state: neighbours, reassembly, half-open handshakes; its published rows, and with its `erx_dhcp4` a DHCP lease, which the restarted client asks for again |
 | the driver crashes, or the device breaks its queue | its link supervisor | every connection; their unacknowledged data is retransmitted | the device's queued frames; the interface process restarts after the driver's reset |
+| the driver has no attached interface, between an interface's end and its restart | the driver, which monitors the attached interface | everything | the frames received meanwhile, dropped and counted as `detached` |
+| a device's queue is full, or a transport refuses a frame | the driver | everything | nothing while the backlog has room, which the transmit credit bounds; past it senders' hand-overs are refused and counted where they are made |
+| a pipe's far end goes away | the pipe: a `process` end by its monitor, which reports the link `down`; a `udp` end only as refused sends | everything | the frames sent meanwhile, counted as `refused`; TCP retransmits once the far end returns |
 | a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST, and its owner receives `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or a waiting call gets the error |
 | a socket process is killed or crashes outside a step | its grant, which deletes its entries | everything else | the socket, silently: the peer times out or meets a RST later, and the owner's next call gets `{error, closed}` |
 | a socket's owner exits | the socket, which monitors it | everything else | the socket: a connection sends FIN, or RST if `linger` is zero |
@@ -2668,6 +3078,12 @@ client domain is affected beyond its sockets.
 | `{error, einval}` | an option value out of range |
 | `{error, enotsup}` | `fd`, `netns`, `bind_to_device`, unknown `raw` options, SCTP |
 | `{error, badarg}` | a request the admission path refuses: wrong origin, schema or size |
+
+An interface that cannot start is refused by its driver's `init`, and its
+link supervisor fails to start with the reason: `{lladdr, Addr}` for a
+pipe's address that is not a locally administered unicast address,
+`{mtu, N}` for a pipe's MTU outside 1,280 to 9,000, and the device NIF's
+own errors for virtio ([The driver](#the-driver)).
 
 ## Where C is used, and what is measured
 
@@ -2764,8 +3180,8 @@ longer than one unit.
 
 ### Checksums and random values: the interface's gate and the generators
 
-A host test drives the interface process, with a stand-in driver and
-stand-in sockets, through three cases: a segment with a correct checksum
+A host test drives the interface process, with the pipe driver's
+`process` end and stand-in sockets, through three cases: a segment with a correct checksum
 to a connection with room is delivered; the same segment with one bit of
 its payload flipped is not delivered, is counted as a bad checksum, and
 leaves the connection's credit counter where it was before the frame;
@@ -3085,24 +3501,35 @@ scripts covering every segment type in every TCP state, overlapping
 received data, the socket API and ICMP, in IPv4 and IPv6 variants. Two
 runners execute it:
 
-* **On FreeBSD.** The oracle guest, a FreeBSD 15.1 QEMU image fetched at
-  a pinned hash, runs the scripts with nplab's packetdrill, the version
-  the suite names. packetdrill is GPL-2.0, so its source, fetched by the
-  pinned fetch step, is built and run only inside the guest as a test
-  tool, never linked to or shipped with anything of erXos's. The run
-  records which scripts pass on the pinned release; that record is the
-  expected verdict per script.
+* **On FreeBSD.** The FreeBSD test host, `p620`, running FreeBSD
+  16.0-CURRENT, runs the scripts with nplab's packetdrill, the version
+  the suite names. packetdrill is GPL-2.0, so it is built and run only on
+  that host as a test tool, never linked to or shipped with anything of
+  erXos's. Each run writes one verdict record per script: the suite's
+  commit, the script, its verdict, the kernel's identity as
+  `freebsd-version -k` and `uname -v` print it, and packetdrill's
+  version. The records are raw run data and live in the separate history
+  repository, never in this one.
 * **On erXos.** `erx_net_script`, erXos's own runner in Erlang, reads the
-  scripts' language, with no code of packetdrill's, and drives the stack:
-  on the host against the pure core with virtual time, and in hosted mode
-  against the whole network domain through a packet-pipe driver, so the
-  effect layer and timing run too. A script's socket calls become socket
-  requests; its packets are injected at the interface; its expected
-  packets are matched against what the driver is given.
+  scripts' language, with no code of packetdrill's, and drives the stack
+  under the virtual clock ([The clock](#the-clock)) in two ways: against
+  the pure core, and against the whole stack on a development host
+  through the pipe driver's `process` end, so the effect layer runs too.
+  A script's socket calls become socket requests; its packets are
+  injected at the pipe; its expected packets are matched against what the
+  pipe is given.
 
-Every script's verdict on erXos must equal its verdict on FreeBSD 15.1.
-A difference is a bug, a documented departure with a test, or a recorded
-FreeBSD bug. erXos's own scripts, run by both runners in the same way,
+The oracle is a moving -CURRENT, so a comparison names the kernel it
+compares with: every script's verdict on erXos must equal its verdict in
+the newest record, whose kernel identity the comparison's own record
+repeats. A difference is a bug, a documented departure with a test, a
+recorded FreeBSD bug, or a change FreeBSD made after the release the
+stack translates (`release/15.1.0-p6`), recorded with the FreeBSD commit
+that made it. A script whose verdict differs between two records of
+FreeBSD is a change of the last kind until shown otherwise, and is
+triaged against the pinned source before any erXos verdict is judged
+against the newer record. erXos's own scripts, run by both runners in the
+same way,
 add the decisions this document names that the suite does not cover: a
 RST at `rcv_nxt` while an acknowledgement is delayed, which FreeBSD
 answers with a challenge ACK because it judges against `last_ack_sent`;
@@ -3115,19 +3542,97 @@ which pin the departure that lifting makes.
 *Seeded failures:* the RFC 5961 RST check removed must fail the suite's
 RST scripts on erXos; a script edited to expect a wrong window must fail
 on both runners, which shows the runner compares fields rather than
-passing everything.
+passing everything; and an interface loop that arms its timer a second
+after the core's deadline must fail the suite's retransmission scripts
+through the pipe, though not against the pure core, which shows the
+effect layer's timing is what those runs check.
+
+### The stack on a development host
+
+The host runs of [Running on a development host](#running-on-a-development-host)
+take three peers:
+
+* **QEMU's user networking on macOS.** The stack takes a DHCP lease from
+  slirp through the `-machine none` hub, resolves slirp's gateway by ARP,
+  and runs UDP echo and a TCP transfer to a service on the host through
+  slirp. *Seeded failure:* an ARP reply with its sender and target
+  swapped must leave slirp unable to reach the stack, so the transfer
+  times out, which shows slirp spoke to the stack's own ARP.
+* **FreeBSD's jails on `p620`.** The host's tap devices `/dev/tap0` to
+  `tap7` join a bridge with the vnet jails `erxpeer0` to `erxpeer3`
+  (10.77.0.10 to 10.77.0.13/24), whose stack is the oracle's own kernel;
+  a QEMU hub joins a tap device to the pipe. Bulk transfers, many short
+  connections and request-response loads run between the stack and a
+  jail through `erx_net_relay`, and the same loads between two jails,
+  each joined to the relay through a tap device of its own, under the
+  same schedule, are FreeBSD's baseline. The tests
+  check completion, delivered bytes, and that retransmissions and
+  throughput stay within stated bounds of the baseline's. Each run's
+  record names the kernel as the packet scripts' records do.
+  *Seeded failure:* SACK disabled on erXos must push its retransmissions
+  past the bound under a loss schedule where FreeBSD recovers with SACK.
+* **erXos itself.** Two stacks in one node, each through its pipe's
+  `process` end to one `erx_net_relay`, under the virtual clock, run bulk
+  transfers and many short connections under seeded schedules, as many
+  pairs at once as the host has cores; long waits (2MSL, keepalive,
+  FIN-WAIT-2's idle limit) take no time. *Seeded failure:* a receive
+  path that drops out-of-order segments instead of queueing them must
+  exceed the retransmission bound under a reordering schedule.
+
+**The impairment.** `erx_net_relay` forwards frames between two ends,
+each a pipe-shaped `process` or `udp` end, and runs each direction
+through `erx_net_impair`, a pure state machine keyed by a seed:
+
+```erlang
+-type config() :: #{seed := <<_:128>>,
+                    loss := 0..1000, duplicate := 0..1000,   % per mille
+                    reorder := 0..1000, delay := {Min :: non_neg_integer(), Max :: non_neg_integer()}}.
+new(config()) -> impair().
+frame(Frame, Now :: integer(), impair()) -> {[{At :: integer(), Frame}], impair()}.
+```
+
+`frame/3` decides each frame's fate in order from an `erx_net_rand`
+generator keyed by the seed, one split per direction: none (lost), one
+copy or two (duplicated), each released at its own time; a reordered
+frame is held an extra delay, so that the frames after it overtake it. The relay releases frames
+through `erx_net_clock`, so under the virtual clock a schedule is
+reproduced exactly, and against real peers the decision for the n-th
+frame of a direction is still a function of the seed. The same relay sits
+between a QEMU guest's `dgram` backend and its peer in the runs of
+[Traffic against FreeBSD and Linux](#traffic-against-freebsd-and-linux).
+*Seeded failure:* a schedule that ignores the seed, and so gives two
+seeds the same decisions, must fail the property that two seeds give
+different schedules over a thousand frames; a schedule that shares one
+generator between directions must fail the property that one direction's
+decisions do not change with the other's traffic.
+
+**The driver and the clock.** A host test drives the pipe driver with a
+stand-in interface: a batch refused by a full receive credit is dropped
+whole and counted, and leaves the credit where it was; a link that goes
+down and up again while the receive credit is full is not told at all,
+and one that goes down and stays down is told once when room returns; a
+transmit backlog never holds more frames than
+the transmit credit's limit. *Seeded failures:* a driver that takes a
+frame's unit when its message arrives instead of when the frame leaves
+must let the backlog exceed the limit; one that queues every link change
+must fill the credit under a flapping far end. A virtual-clock test
+checks that every process's hint arrives at or after its deadline and
+that two runs of one script give byte-identical frames; *seeded
+failure:* a socket that arms an `erlang:start_timer/3` of its own must
+fail the build check below, and its script, whose retransmission then
+comes on the wall clock rather than at its virtual time.
 
 ### Traffic against FreeBSD and Linux
 
 Bulk transfers, many short connections and request-response loads run
-between an erXos guest and the FreeBSD guest, and between erXos and the
-Linux oracle guest, through a host relay that drops, delays and reorders
-frames by a seeded schedule. The tests check completion, delivered bytes,
-and that retransmission counts and throughput stay within stated bounds
-of FreeBSD's own against the same schedule.
+between an erXos guest on QEMU and a jail of the FreeBSD test host, and
+between erXos and the Linux oracle guest, through `erx_net_relay` with a
+seeded schedule. The tests check completion, delivered bytes, and that
+retransmission counts and throughput stay within stated bounds of
+FreeBSD's own against the same schedule, as the host runs above do.
 
-*Seeded failure:* SACK disabled on erXos must push its retransmissions
-past the bound under a loss schedule where FreeBSD recovers with SACK.
+*Seeded failure:* the host runs' seed, SACK disabled on erXos, run on
+the guest.
 
 ### OTP's suites
 
@@ -3178,6 +3683,11 @@ Each with a test proving it catches a violation:
 * only `erx_net_tables` reads the configuration tables, so every reader
   gets them through its `configuration/0` and `snapshot/3`'s pid check;
 * only `erx_net_credit` sends packet batches between stack processes;
+* only `erx_net_clock` reads a clock or arms a timer in `erx_net`: no
+  other module calls `erlang:monotonic_time`, `erlang:system_time`,
+  `os:timestamp`, `erlang:start_timer`, `erlang:send_after` or the
+  `timer` module, or writes a `receive ... after` with a timeout other
+  than `infinity` or 0, so the virtual clock sees every wait;
 * a received segment, datagram or ICMP record is constructed only by its
   `*_wire` decoder; that the decoder checks the checksum before it
   decodes is not something a build check can see, and the decoders' fuzz
@@ -3246,7 +3756,7 @@ it plugs into, except pacing, which BBR brings.
 
 ## Decisions
 
-The owner settled these, each as the design recommended.
+The owner settled these: the first seven as the design recommended, the eighth by direction.
 
 1. **The grant's account covers its sockets.** Every reduction a grant's
    sockets spend, on requests and on packets, is charged to the grant's
@@ -3300,6 +3810,36 @@ The owner settled these, each as the design recommended.
    RACK-TLP is a second TCP implementation in FreeBSD, with its own input
    path and the high-precision timer system; the send log keeps it cheap
    to add as a loss module when its value is measured.
+8. **The packet-script and interop oracle is FreeBSD 16.** The FreeBSD
+   test host `p620`, 16.0-CURRENT, and its vnet jails are the oracle for
+   the packet scripts and for traffic; no FreeBSD 15.1 guest is kept.
+   Since the host tracks -CURRENT, every verdict record names its kernel
+   ([Packet scripts against FreeBSD](#packet-scripts-against-freebsd)).
+
+## Open decisions
+
+1. **What the host route uses before the schema generator and
+   `erx_facet` exist.** `erx_net_admit` is generated from
+   `abi/services/net.txt`, and the grant is an `erx_facet`; neither the
+   generator nor the behaviour is written. The choices: (a) the effect
+   layer waits for both; (b) a hand-written `erx_net_admit` with the
+   generated module's exact signature, a stopgap in `TODO.md` deleted
+   when the generator lands, and the grant written as `erx_facet`'s
+   callback module and run, until the behaviour exists, by a test
+   fixture in `test/erlang` that calls its callbacks with no admission.
+   *Recommendation:* (b). It keeps the host route unblocked, the
+   stopgap is one module behind a fixed signature, and the fixture never
+   reaches a release.
+2. **Which FreeBSD the translation follows.** The stack translates
+   `release/15.1.0-p6` (N1, [Provenance and notices](#provenance-and-notices)),
+   and the oracle is FreeBSD 16.0-CURRENT
+   ([Decisions](#decisions), 8). Every behaviour FreeBSD changed in
+   between shows as a difference to be recorded. The choices: keep 15.1
+   and record each such change as a departure, or move the pin to a
+   FreeBSD 16 commit, once 16.0 is released, and translate the changes.
+   *Recommendation:* keep the 15.1 pin until 16.0 is released, record
+   the changes as their own class of difference, and decide the move then
+   with the list of recorded changes in hand.
 
 ## Alternatives considered
 

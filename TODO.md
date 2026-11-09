@@ -3641,13 +3641,22 @@ document's "residual risks accepted" paragraph.
   until then the hosted backend is one process with the rows 1b-A needs where they are cheap. Its design
   is written and reviewed before its code.
 
-* [Medium] network, `docs/design-network-stack.md`: the network stack's
-  design document, written before M14's code, pins the FreeBSD release
-  whose `netinet` and `netinet6` logic the stack translates into Erlang,
-  gives the translation's rules, and settles what [design.md](docs/design.md#networking)
-  leaves to it: an exposed domain's node name and its registration, the
-  error a domain without a network grant gets (provisionally `eacces`),
-  and sockets with several holders.
+* [Medium] network, the effect layer ([design-network-stack.md](docs/design-network-stack.md#the-effect-layer)):
+  the pure core is in `erlang/apps/erx_net/src`; the effect layer is not
+  written. In order, host first: `erx_net_credit`, `erx_net_clock`,
+  `erx_net_if_core`, `erx_net_driver` with `erx_net_pipe` and
+  `erx_net_loop`, the processes, then `erx_net_script`, the virtual
+  clock, `erx_net_impair` and `erx_net_relay` in `test/erlang`, and the
+  host stand-ins of `erx:cap/1` and `erx:origins/1`; `erx_virtio_net`
+  with the network domain. Two things to confirm on the FreeBSD test
+  host `p620` before its runs: that QEMU's `-netdev tap` opens
+  `/dev/tapN` there as an ordinary user, as the macOS slirp hub was
+  confirmed, and that the bridge can put two jails behind separate tap
+  devices for the relay's FreeBSD baseline. The admission path and the
+  grant wait on the design's first open decision.
+* [Medium] network, `docs/design-network-stack.md`: the design does not yet
+  settle sockets with several holders, which [design.md](docs/design.md#networking)
+  leaves to it; settle them before the POSIX socket protocol's code.
 * [Low] live, the `trace/1` shortcut ([design-live.md](docs/design-live.md#erlang-in-every-domain)): the
   shell resolves each call in a function defined at the prompt by name alone (`shell.erl` `reconstruct1/3`,
   through `edlin_expand:shell_default_or_bif/1`), and argument completion does too (`edlin_context`), so an
