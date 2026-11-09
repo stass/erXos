@@ -388,12 +388,21 @@ page_spoil(uint32_t id)
  * The connection case's domain: ERTS distributed over erx_dist, so net_kernel makes it
  * alive as guest@erxos with its domain id as creation and erx_connections opens the system
  * connection from the boot page. Once the system node is up, it checks net_adm:ping of it
- * (pong) and of a domain it has no connection with (pang), that a monitor of a name
- * there is DOWN with noconnection, that its creation is its id, and that a send to a
- * registered name of the system node is dropped and counted and a monitor of one is DOWN
- * with noproc at once, neither reaching the lane, halting with 1 on any
- * failure. Then it sends BURST messages of a KiB each to a pid of the system node, more
- * than the lane holds, waits until the port's counts show the burst and one answer sent,
+* (pong) and of a domain it has no connection with (pang), that a monitor of a name
+* there is DOWN with noconnection, that its creation is its id, and that a send to a
+* registered name of the system node is dropped and counted and a monitor of one is DOWN
+* with noproc at once, neither reaching the lane, halting with 1 on any
+* failure. It checks D2's text property (edit 18) and says {identity, Id}, halting with 1
+* unless Id is, in order: 100, the count of random pids and references of the system node
+* whose text reads back as themselves (stock's text, an atom index, names no creation);
+* true, its own pid prints its id; true, that text reads back; no (badarg), its own pid's
+* text under 0; true, a pid of an earlier system node prints its creation 4000000; no,
+* that text, since no connected node has it; no for each text whose number wraps its
+* field onto the creation 4 (a pid's, a reference's, a port's); and no for a reference
+* whose six numbers each end in '.', which ran past stock's arrays. The vector is
+* positional because the eval must fit ERX_BOOT_STRINGS_MAX with the node names. Then it
+* sends BURST messages of a KiB each to a pid of the system node, more than the lane
+* holds, waits until the port's counts show the burst and one answer sent,
  * says them, and halts with 1 unless output paused for room and resumed on the bell and the
  * drain answered. It then waits: the party's flood of LINKs whose answers it never reads
  * ends the port with erx_lane_answers_unread, and erx_dist halts the domain with
@@ -414,27 +423,40 @@ static const char connection_eval[] =
     "Up=fun U(0)->false;U(T)->lists:member(S,nodes()) orelse receive after 50->U(T-1) end end,"
     "Ok0=Up(600),"
     "Ok1=Ok0 andalso net_adm:ping(S)==pong andalso net_adm:ping('absent@erxos')==pang,"
-    "M=erlang:monitor(process,{x,'absent@erxos'}),"
+    "M=monitor(process,{x,'absent@erxos'}),"
     "Ok2=Ok1 andalso receive {'DOWN',M,_,_,noconnection}->true after 10000->false end,"
     "Ok3=Ok2 andalso erlang:system_info(creation)==~ andalso node()=='" DOMAIN_NODE "',"
-    /* a send and a monitor to a registered name of the system domain stay in this domain */
-    "D=erx_dist:names_dropped(),"
-    "{x,S}!m,"
-    "M2=erlang:monitor(process,{x,S}),"
-    "Ok4=Ok3 andalso receive {'DOWN',M2,process,{x,S},noproc}->true after 10000->false end "
-    "andalso erx_dist:names_dropped()>D,"
-    "Ok4 orelse erlang:halt(1),"
+/* a send and a monitor to a registered name of the system domain stay in this domain */
+"D=erx_dist:names_dropped(),"
+"{x,S}!m,"
+"M2=monitor(process,{x,S}),"
+"(Ok3 andalso receive {'DOWN',M2,process,{x,S},noproc}->true after 10000->false end "
+"andalso erx_dist:names_dropped()>D) orelse halt(1),"
+/* D2: pid, port and reference texts (edit 18); E answers no for badarg */
+"E=fun(F,T)->try erlang:F(T) catch error:badarg->no end end,"
+"Lp=fun(T)->E(list_to_pid,T) end,"
+"X=fun(C,N,Q)->binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\",N:32,Q:32,C:32>>) end,"
+"Rn=fun()->rand:uniform(1 bsl 32)-1 end,"
+"Rs=[ok||_<-lists:seq(1,100),P1<-[X(4,Rn(),Rn())],"
+"R1<-[binary_to_term(<<131,90,3:16,119,12,\"" SYSTEM_NODE "\",4:32,(Rn()):96>>)],"
+"Lp(pid_to_list(P1))=:=P1,E(list_to_ref,ref_to_list(R1))=:=R1],"
+"O=pid_to_list(self()),[_,Rt]=string:split(O,\".\"),Old=pid_to_list(X(4000000,1,0)),"
+"Id=[length(Rs),lists:prefix(\"<~.\",O),Lp(O)=:=self(),"
+"Lp(\"<0.\"++Rt),lists:prefix(\"<4000000.\",Old),Lp(Old),Lp(\"<18446744073709551620.1.0>\"),"
+"E(list_to_ref,\"#Ref<18446744073709551620.1.2>\"),E(list_to_port,\"#Port<4294967300.1>\"),E(list_to_ref,\"#Ref<4.1.2.3.4.5.>\")],"
+"erlang:display({identity,Id}),"
+"Id==[100,true,true,no,true,no,no,no,no,no] orelse halt(1),"
     "P=proplists:get_value(S,erlang:system_info(dist_ctrl)),"
-    "Pid=binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\",1:32,0:32,4:32>>),"
+    "Pid=X(4,1,0),"
     "B=binary:copy(<<7>>,1024),"
     "[Pid!{burst,I,B}||I<-lists:seq(1," BURST_TEXT ")],"
-    "W=fun W(T)->case iolist_to_binary(erlang:port_control(P,0,[])) of "
+    "W=fun W(T)->case iolist_to_binary(port_control(P,0,[])) of "
     "<<N:64,Pa:64,R:64,_:64,A:64,_/binary>> when (N>" BURST_TEXT " andalso A>0) orelse T==0->{N,Pa,R,A};"
     "_->receive after 50->W(T-1) end end end,"
     "{N,Pa,R,A}=W(600),"
     "erlang:display({lane,N,Pa,R,A}),"
     /* output paused for room and resumed on the bell, and the drain answered */
-    "(N>" BURST_TEXT " andalso Pa>0 andalso R>0 andalso A>0) orelse erlang:halt(1),"
+    "(N>" BURST_TEXT " andalso Pa>0 andalso R>0 andalso A>0) orelse halt(1),"
     "receive after infinity->ok end";
 
 /* How long the party waits for the domain's first frame, and for each later one. */

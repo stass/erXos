@@ -1266,8 +1266,9 @@ it; git history is the record of completed work.
   calls `erx_kernel_records` from `erl` at the console is not written yet.
 * [Medium] inspector (`erlang/apps/erx/src/erx_inspector.erl`, `erx.erl`, `erx_process_records.erl`):
   `erx:i/0,1` inspect at scope `all` because every Phase 1 shell runs in the system domain; take the scope from
-  the caller's inspect facet, with `{error, no_facet}`, when sessions run in their own domains. The Phase 1 runtime
-  does not run at its domain's creation, so a process record says `domain 4` beside a pid printed `<0.N.S>`
+  the caller's inspect facet, with `{error, no_facet}`, when sessions run in their own domains. The system domain's
+  runtime is not yet the node `system@<host>` (SV2), so its creation is 0 and a process record says `domain 4`
+  beside a pid printed `<0.N.S>`
   (design-domains, Text). The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written
   in `erx_inspector`; have `erx_schema` export the page and the schema mark which machine paths a scoped facet
   reads. A thread past a partial listing's end is answered `{error, scope}`, as one that does not exist.
@@ -1278,7 +1279,7 @@ it; git history is the record of completed work.
   [The /proc tree](docs/design-live.md#the-proc-tree)): `kernel_safe_sup` starts one tree of scope `all` and mounts
   it at `/proc` in every runtime, since every Phase 1 runtime is the system domain's; when domains come (M5), start
   a tree per inspect facet, linked to it, and the system shell's tree with the console, presenting the system-shell
-  facet. A pid's directory is its pid's text, `0.N.S` until pids print their domain id (the inspector item above),
+  facet. A pid's directory is its pid's text, `0.N.S` in the system domain until its runtime runs as a node (the inspector item above),
   so M5's exit check of `4.N.S` in plan.md waits for them. The design leaves open: a text entry spelled `status`, a module of that
   name, which the directory's `status` file shadows; how many entries `.partial` says were left out, which the
   inspector does not count (the file says `left_out [unknown]`); and what the `status` file of a path the inspector
@@ -1909,10 +1910,37 @@ it; git history is the record of completed work.
   process of this domain made toward the peer's process): the peer's
   process then gets an exit of `noproc` for a live link. RT7 replaces the
   lookup and adds the hold's link bit and the conditional `LINK` signal.
-* [Low] Runtime, `erx_connections.erl`: the connection agent opens the system
-  connection only; `connection_up`, `connection_mapped`, `connection_down`,
-  `connection_unmapped` and `connection_lost` are RT6b's second part, and until then
-  `erx_dist`'s owner of an introduced connection (`system := false`) is never started.
+* [Medium] Runtime, `erx_connections.erl`: the connection agent opens the system
+  connection only, so `erx_dist`'s owner of an introduced connection (`system := false`)
+  is never started. Its protocol (`connection_up`, `connection_mapped`, `connection_down`,
+  `connection_unmapped`, `connection_lost`; design-domains, "Messages between the domain
+  service and a runtime") is built with SV2, because it needs, besides the agent's own
+  code, five things that exist only then: (1) the system domain
+  running as the node `system@<host>` with the system side of each system connection
+  (SV2), since nothing else can send `connection_up`; (2) the agent's pid exported to the
+  system domain by init's ready report (RT7), since `exports_system` gives the system
+  domain only `spawn`; (3) the domain service's pid on the boot page, which
+  design-domains (Domain lifecycle) places there and `boot_info.h` does not carry, as the
+  target of the agent's answers; (4) an edit of `dist.c` that fires links, monitors and
+  pending spawns with the `{domain_down, D, Info}` reason `connection_down` gives, which
+  design-runtime (Closing) attributes to `erts_do_net_exits` but stock ERTS fires as
+  `noconnection` (`monitor_connection_down`) and no numbered edit lists; (5) the lane
+  driver's drain to the write position read at `connection_down`. The agent's check that
+  a record came from the system connection (edit 16's origins) must land no later than
+  RT7's export on encode, which lets any peer sent the agent's pid reach it.
+* [Low] Oracle, pid text (edit 18): OTP cases that write a local pid as `"<0.N.S>"` get `badarg` in a runtime
+  that is alive with a nonzero creation: compiler `core_fold_SUITE:coverage`, emulator `guard_SUITE:guard_bifs`
+  and a case of stdlib `qlc_SUITE`. The hosted runtime is not alive, so they agree there; give them rows in
+  `test/oracle/hosted_known_differences/` once an oracle run's runtime is a node.
+* [Low] Domain library, `liberx/system/dom_core.c` `dom_strings` and `boot_info.c`: the plan admits
+  arguments and environment up to `ERX_BOOT_STRINGS_MAX`, but the boot page counts the node and the system
+  node against the same limit, so a request within the plan's bound fails at apply (step 23, `ERX_EINVAL`)
+  instead of being refused by the plan. Count the names in the plan, or give them their own bound.
+* [Low] Runtime, `otp/erts/emulator/beam/bif.c` (`list_to_ref_1`): report the upstream bug to OTP. In stock
+  OTP 29.1.2, a reference text whose six numbers each end in `.` (`"#Ref<4.1.2.3.4.5.>"`) leaves the parse loop
+  with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past its five:
+  a stack overflow on any text a caller passes to `list_to_ref/1`. erXos's copy refuses that text with `badarg`
+  (edit 18; native_domain's connection case checks it). The owner sends the report.
 * [Low] Runtime, `net_adm:ping/1` (edit 28) decides by `erx_dist:select/1` whether
   the carrier is in use; a node of this kernel under another `-proto_dist` answers
   `pang` for an unconnected node at its own host without trying.

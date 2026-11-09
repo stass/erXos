@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a channel number names the node of that creation.
+ *
  * %CopyrightEnd%
  */
 
@@ -317,25 +319,32 @@ erts_channel_no_to_dist_entry(Uint cno)
 {
     /*
      * Does NOT increase reference count!
+     *
+     * On erXos a channel number is a node's creation, a domain id (edit 18 of
+     * docs/design-runtime.md): this node's own names this node, the creation of exactly
+     * one connected entry names that entry, and any other number names nothing. Domain
+     * ids are never reused within a boot, but a node of another machine has a creation of
+     * its own, so a number two connected entries share is ambiguous and names nothing
+     * rather than whichever connected last (the collision rule is open, TODO.md).
      */
+    DistEntry *lists[2];
+    DistEntry *found = NULL, *dep;
+    int matches = 0, i;
 
-/*
- * For this node (and previous incarnations of this node),
- * ERST_INTERNAL_CHANNEL_NO (will always be 0 I guess) is used as
- * channel no. For other nodes, the atom index of the atom corresponding
- * to the node name is used as channel no.
- */
-    if (cno == ERST_INTERNAL_CHANNEL_NO)
+    if (cno == (Uint) erts_this_node->creation)
 	return erts_this_dist_entry;
 
-    if((cno > MAX_ATOM_INDEX)
-       || (cno >= atom_table_size())
-       ||  (atom_tab(cno) == NULL))
-	return NULL;
-        
-    /* cno is a valid atom index; find corresponding dist entry (if there
-       is one) */
-    return find_dist_entry(make_atom(cno), 0, 0);
+    erts_rwmtx_rlock(&erts_dist_table_rwmtx);
+    lists[0] = erts_visible_dist_entries;
+    lists[1] = erts_hidden_dist_entries;
+    for (i = 0; i < 2; i++)
+        for (dep = lists[i]; dep; dep = dep->next)
+            if ((Uint) dep->creation == cno) {
+                found = dep;
+                matches++;
+            }
+    erts_rwmtx_runlock(&erts_dist_table_rwmtx);
+    return matches == 1 ? found : NULL;
 }
 
 DistEntry *

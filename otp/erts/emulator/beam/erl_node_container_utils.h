@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a term's channel number is the creation of the node it carries.
+ *
  * %CopyrightEnd%
  */
 
@@ -111,9 +113,15 @@
    ? ((Uint) ERST_INTERNAL_CHANNEL_NO)							\
    : (ASSERT(is_atom((x)->sysname)),			        \
       (Uint) atom_val((x)->sysname)))
-#define internal_channel_no(x) ((Uint) ERST_INTERNAL_CHANNEL_NO)
-#define external_channel_no(x) \
-  (dist_entry_channel_no(external_dist_entry((x))))
+/*
+ * On erXos a pid, port or reference prints the creation of the node it carries, its
+ * owner's domain id, local ones included (edit 18 of docs/design-runtime.md). It is read
+ * from the term's own node, not its distribution entry, so a term of an ended domain keeps
+ * that domain's id after a later domain of its name has connected. dist_entry_channel_no
+ * stays stock for the crash dump and erts_debug.
+ */
+#define internal_channel_no(x) ((Uint) erts_this_node->creation)
+#define external_channel_no(x) ((Uint) external_node((x))->creation)
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *\
  * Pids                                                                    *

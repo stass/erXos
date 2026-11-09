@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself.
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width.
  *
  * %CopyrightEnd%
  */
@@ -4526,13 +4526,40 @@ BIF_RETTYPE port_to_list_1(BIF_ALIST_1)
 
 /**********************************************************************/
 
+/*
+ * One decimal number of a pid's, port's or reference's text at *cpp, at most max. On
+ * erXos the text is input from anywhere, so a number past its field's width is refused
+ * rather than wrapped onto another (edit 18 of docs/design-runtime.md). Returns 0 when
+ * no digit starts the text or the number exceeds max; otherwise sets *value, advances
+ * *cpp past the digits and returns 1.
+ */
+static int
+text_number(char **cpp, Uint64 max, Uint64 *value)
+{
+    char *cp = *cpp;
+    Uint64 v = 0;
+
+    if (*cp < '0' || *cp > '9')
+        return 0;
+    for (; *cp >= '0' && *cp <= '9'; cp++) {
+        Uint64 digit = (Uint64) (*cp - '0');
+
+        if (v > (max - digit) / 10)
+            return 0;
+        v = 10*v + digit;
+    }
+    *cpp = cp;
+    *value = v;
+    return 1;
+}
+
 /* convert a list of ascii characters of the form
-   <node.number.serial> to a PID
+   <node.number.serial> to a PID; on erXos node is the creation of a node, a domain id
 */
 
 BIF_RETTYPE list_to_pid_1(BIF_ALIST_1)
 {
-    Uint a = 0, b = 0, c = 0;
+    Uint64 a = 0, b = 0, c = 0;
     char* cp;
     Sint i;
     DistEntry *dep = NULL;
@@ -4552,19 +4579,17 @@ BIF_RETTYPE list_to_pid_1(BIF_ALIST_1)
 
     cp = buf;
     if (*cp++ != '<') goto bad;
-    
-    if (*cp < '0' || *cp > '9') goto bad;
-    while(*cp >= '0' && *cp <= '9') { a = 10*a + (*cp - '0'); cp++; }
+
+    /* The creation and an external pid's number and serial are each 32 bits. */
+    if (!text_number(&cp, ~((Uint32) 0), &a)) goto bad;
 
     if (*cp++ != '.') goto bad;
 
-    if (*cp < '0' || *cp > '9') goto bad;
-    while(*cp >= '0' && *cp <= '9') { b = 10*b + (*cp - '0'); cp++; }
+    if (!text_number(&cp, ~((Uint32) 0), &b)) goto bad;
 
     if (*cp++ != '.') goto bad;
 
-    if (*cp < '0' || *cp > '9') goto bad;
-    while(*cp >= '0' && *cp <= '9') { c = 10*c + (*cp - '0'); cp++; }
+    if (!text_number(&cp, ~((Uint32) 0), &c)) goto bad;
 
     if (*cp++ != '>') goto bad;
     if (*cp != '\0') goto bad;
@@ -4574,7 +4599,7 @@ BIF_RETTYPE list_to_pid_1(BIF_ALIST_1)
 
     /* <a.b.c> a = node, b = process number, c = serial */
 
-    dep = erts_channel_no_to_dist_entry(a);
+    dep = erts_channel_no_to_dist_entry((Uint) a);
 
     if (!dep)
 	goto bad;
@@ -4592,16 +4617,17 @@ BIF_RETTYPE list_to_pid_1(BIF_ALIST_1)
 	  goto bad;
       
       etp = (ExternalThing *) HAlloc(BIF_P, EXTERNAL_PID_HEAP_SIZE);
-      
-      enp = erts_find_or_insert_node(dep->sysname, dep->creation,
+
+      /* The node of the creation the text names, which the entry was found by. */
+      enp = erts_find_or_insert_node(dep->sysname, (Uint32) a,
                                      make_boxed(&etp->header));
       ASSERT(enp != erts_this_node);
 
       etp->header = make_external_pid_header();
       etp->next = MSO(BIF_P).first;
       etp->node = enp;
-      etp->data.pid.num = b;
-      etp->data.pid.ser = c;
+      etp->data.pid.num = (Uint32) b;
+      etp->data.pid.ser = (Uint32) c;
 
       MSO(BIF_P).first = (struct erl_off_heap_header*) etp;
       BIF_RET(make_external_pid(etp));
@@ -4620,9 +4646,8 @@ BIF_RETTYPE list_to_port_1(BIF_ALIST_1)
      * "#Port<Node.Num>" where Node is node and Num is
      * the port id.
      */
-    Uint32 node;
-    Uint64 num;
-    char c, *cp;
+    Uint64 node, num;
+    char *cp;
     int i;
     DistEntry *dep = NULL;
     char buf[6 /* #Port< */
@@ -4642,35 +4667,21 @@ BIF_RETTYPE list_to_port_1(BIF_ALIST_1)
 
     cp += 6; /* sys_strlen("#Port<") */
 
-    node = 0;
-    c = *cp;
-    if (!('0' <= c && c <= '9'))
+    if (!text_number(&cp, ~((Uint32) 0), &node))
 	goto bad;
-    do {
-	node *= 10;
-	node += (Uint32) (c - '0');
-	c = *(++cp);
-    } while ('0' <= c && c <= '9');
 
     if (*(cp++) != '.')
 	goto bad;
 
-    c = *cp;
-    num = 0;
-    if (!('0' <= c && c <= '9'))
+    if (!text_number(&cp, ~((Uint64) 0), &num))
 	goto bad;
-    do {
-	num *= 10;
-	num += (Uint64) (c - '0');
-	c = *(++cp);
-    } while ('0' <= c && c <= '9');
 
     if (*(cp++) != '>')
 	goto bad;
     if (*cp != '\0')
 	goto bad;
     
-    dep = erts_channel_no_to_dist_entry(node);
+    dep = erts_channel_no_to_dist_entry((Uint) node);
 
     if (!dep)
 	goto bad;
@@ -4688,7 +4699,7 @@ BIF_RETTYPE list_to_port_1(BIF_ALIST_1)
 	  goto bad;
 
       etp = (ExternalThing *) HAlloc(BIF_P, EXTERNAL_PORT_HEAP_SIZE);
-      enp = erts_find_or_insert_node(dep->sysname, dep->creation,
+      enp = erts_find_or_insert_node(dep->sysname, (Uint32) node,
                                      make_boxed(&etp->header));
       ASSERT(enp != erts_this_node);
 
@@ -4721,7 +4732,7 @@ BIF_RETTYPE list_to_ref_1(BIF_ALIST_1)
     Eterm res;
     Uint32 refn[ERTS_MAX_REF_NUMBERS];
     int n = 0;
-    Uint ints[1 + ERTS_MAX_REF_NUMBERS] = {0};
+    Uint64 ints[1 + ERTS_MAX_REF_NUMBERS] = {0};
     char* cp;
     Sint i;
     DistEntry *dep = NULL;
@@ -4742,20 +4753,19 @@ BIF_RETTYPE list_to_ref_1(BIF_ALIST_1)
     if (*cp++ != 'f') goto bad;
     if (*cp++ != '<') goto bad;
 
-    for (i = 0; i < sizeof(ints)/sizeof(Uint); i++) {
-        if (*cp < '0' || *cp > '9') goto bad;
-
-        while (*cp >= '0' && *cp <= '9') {
-            ints[i] = 10*ints[i] + (*cp - '0');
-            cp++;
-        }
+    for (i = 0; i < sizeof(ints)/sizeof(ints[0]); i++) {
+        if (!text_number(&cp, ~((Uint32) 0), &ints[i])) goto bad;
 
         n++;
-        if (ints[i] > ~((Uint32) 0)) goto bad;
         if (*cp == '>') break;
         if (*cp++ != '.') goto bad;
     }
 
+    /*
+     * A text of every number each ended by '.' leaves the loop without '>', with i one
+     * past ints, and stock went on to read ints[i] and write past refn; an upstream bug.
+     */
+    if (i == sizeof(ints)/sizeof(ints[0])) goto bad;
     if (*cp++ != '>') goto bad;
     if (*cp != '\0') goto bad;
 
@@ -4766,7 +4776,7 @@ BIF_RETTYPE list_to_ref_1(BIF_ALIST_1)
 
     ASSERT(n <= ERTS_MAX_REF_NUMBERS);
 
-    dep = erts_channel_no_to_dist_entry(ints[0]);
+    dep = erts_channel_no_to_dist_entry((Uint) ints[0]);
 
     if (!dep)
 	goto bad;
@@ -4824,7 +4834,7 @@ BIF_RETTYPE list_to_ref_1(BIF_ALIST_1)
 
       etp = (ExternalThing *) HAlloc(BIF_P, hsz);
 
-      enp = erts_find_or_insert_node(dep->sysname, dep->creation,
+      enp = erts_find_or_insert_node(dep->sysname, (Uint32) ints[0],
                                      make_boxed(&etp->header));
       ASSERT(enp != erts_this_node);
 
