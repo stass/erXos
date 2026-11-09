@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: A magic binary keeps four identity words and pads its data to 8 bytes (edit 17 of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -73,16 +75,11 @@ typedef struct binary {
 #define ERTS_SIZEOF_Binary(Sz) \
     (offsetof(Binary,orig_bytes) + (Sz))
 
-#if ERTS_REF_NUMBERS != 3
+#if ERTS_REF_NUMBERS != 4 || !defined(ARCH_64)
 #error "Update ErtsMagicBinary"
 #endif
 
-#ifdef ARCH_32
- /* *DO NOT USE* only for alignment. */
-#define ERTS_MAGIC_BINARY_STRUCT_ALIGNMENT Uint32 align__;
-#else
 #define ERTS_MAGIC_BINARY_STRUCT_ALIGNMENT
-#endif
 
 typedef struct magic_binary ErtsMagicBinary;
 struct magic_binary {
@@ -91,6 +88,11 @@ struct magic_binary {
     int (*destructor)(Binary *);
     Uint32 refn[ERTS_REF_NUMBERS];
     ErtsAlcType_t alloc_type;
+    /*
+     * erXos (edit 17): four identity words and alloc_type end 4 bytes past an 8-byte
+     * boundary, so this keeps the data 8-byte aligned, as three words left it in stock.
+     */
+    Uint32 pad__;
     union {
         struct {
             ERTS_MAGIC_BINARY_STRUCT_ALIGNMENT
@@ -413,6 +415,7 @@ erts_create_magic_binary_x(Uint size, int (*destructor)(Binary *),
     erts_refc_init(&bptr->intern.refc, 0);
     ERTS_MAGIC_BIN_DESTRUCTOR(bptr) = destructor;
     ERTS_MAGIC_BIN_ATYPE(bptr) = alloc_type;
+    ((ErtsBinary *) bptr)->magic_binary.pad__ = 0;
     erts_make_magic_ref_in_array(ERTS_MAGIC_BIN_REFN(bptr));
     return bptr;
 }

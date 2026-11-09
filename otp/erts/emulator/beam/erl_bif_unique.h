@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: A reference's four words carry no thread id and no kind bits (edit 17 of docs/design-runtime.md); the thread id is deciphered, and pid ref and magic lookups are functions of erl_bif_unique.c.
+ *
  * %CopyrightEnd%
  */
 
@@ -41,7 +43,6 @@ void erts_make_ref_in_array(Uint32 ref[ERTS_REF_NUMBERS]);
 void erts_make_magic_ref_in_array(Uint32 ref[ERTS_REF_NUMBERS]);
 void erts_magic_ref_remove_bin(Uint32 refn[ERTS_REF_NUMBERS]);
 void erts_magic_ref_save_bin__(Eterm ref);
-ErtsMagicBinary *erts_magic_ref_lookup_bin__(Uint32 refn[ERTS_REF_NUMBERS]);
 
 
 /* strict monotonic counter */
@@ -79,14 +80,19 @@ Eterm erts_debug_make_unique_integer(Process *c_p,
 				     Eterm etval1);
 
 
-ERTS_GLB_INLINE void erts_set_ref_numbers(Uint32 ref[ERTS_REF_NUMBERS], Uint32 thr_id, Uint64 value);
-ERTS_GLB_INLINE Uint32 erts_get_ref_numbers_thr_id(Uint32 *ref);
-ERTS_GLB_INLINE int erts_is_ref_numbers_magic(Uint32 *ref);
-ERTS_GLB_INLINE int erts_is_pid_ref_numbers(Uint32 *ref);
-ERTS_GLB_INLINE int erts_is_ordinary_ref_numbers(Uint32 *ref);
-ERTS_GLB_INLINE Uint64 erts_get_ref_numbers_value(Uint32 *ref);
-ERTS_GLB_INLINE void erts_sched_make_ref_in_array(ErtsSchedulerData *esdp,
-						  Uint32 ref[ERTS_REF_NUMBERS]);
+/*
+ * erXos (docs/design-runtime.md, edit 17): an identity carries no thread id and no kind bit.
+ * The thread id of the thread that made a reference is deciphered from its words, and is
+ * ERTS_REF_NO_THR_ID for words no thread of this runtime enciphered; stock's range checks on
+ * a thread id (no scheduler has ~0) then refuse them.
+ */
+#define ERTS_REF_NO_THR_ID (~((Uint32) 0))
+
+void erts_sched_make_ref_in_array(ErtsSchedulerData *esdp, Uint32 ref[ERTS_REF_NUMBERS]);
+Uint32 erts_get_ref_numbers_thr_id(const Uint32 *ref);
+ErtsMagicBinary *erts_magic_ref_lookup_bin(const Uint32 ref[ERTS_REF_NUMBERS]);
+Eterm erts_pid_ref_lookup(const Uint32 *refn, int len);
+
 ERTS_GLB_INLINE void erts_sched_make_magic_ref_in_array(ErtsSchedulerData *esdp,
 							Uint32 ref[ERTS_REF_NUMBERS]);
 ERTS_GLB_INLINE Eterm erts_sched_make_ref_in_buffer(ErtsSchedulerData *esdp,
@@ -95,95 +101,16 @@ ERTS_GLB_INLINE Eterm erts_mk_magic_ref_get_refc(Eterm * *hpp, ErlOffHeap * ohp,
 ERTS_GLB_INLINE Eterm erts_mk_magic_ref(Eterm **hpp, ErlOffHeap *ohp, Binary *mbp);
 ERTS_GLB_INLINE Binary *erts_magic_ref2bin(Eterm mref);
 ERTS_GLB_INLINE void erts_magic_ref_save_bin(Eterm ref);
-ERTS_GLB_INLINE ErtsMagicBinary *erts_magic_ref_lookup_bin(Uint32 ref[ERTS_REF_NUMBERS]);
-ERTS_GLB_INLINE Eterm erts_pid_ref_lookup(Uint32 *refn, int len);
 ERTS_GLB_INLINE Eterm erts_get_pid_of_ref(Eterm ref);
-
-#define ERTS_REF1_MAGIC_MARKER_BIT_NO__ \
-    (_REF_NUM_SIZE-1)
-#define ERTS_REF1_MAGIC_MARKER_BIT__ \
-    (((Uint32) 1) << ERTS_REF1_MAGIC_MARKER_BIT_NO__)
-#define ERTS_REF1_PID_MARKER_BIT_NO__ \
-    (_REF_NUM_SIZE-2)
-#define ERTS_REF1_PID_MARKER_BIT__ \
-    (((Uint32) 1) << ERTS_REF1_PID_MARKER_BIT_NO__)
-#define ERTS_REF1_THR_ID_MASK__ \
-    (ERTS_REF1_PID_MARKER_BIT__-1)
-#define ERTS_REF1_NUM_MASK__ \
-    (~(ERTS_REF1_THR_ID_MASK__|ERTS_REF1_MAGIC_MARKER_BIT__|ERTS_REF1_PID_MARKER_BIT__))
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 
-ERTS_GLB_INLINE void
-erts_set_ref_numbers(Uint32 ref[ERTS_REF_NUMBERS], Uint32 thr_id, Uint64 value)
-{
-    /*
-     * We cannot use thread id in the first 18-bit word since
-     * the hash/phash/phash2 BIFs only hash on this word. If
-     * we did, we would get really poor hash values. Instead
-     * we have to shuffle the bits a bit.
-     */
-    ASSERT(thr_id == (thr_id & ((Uint32) ERTS_REF1_THR_ID_MASK__)));
-    ref[0] = (Uint32) (value & ((Uint64) REF_MASK));
-    ref[1] = (((Uint32) (value & ((Uint64) ERTS_REF1_NUM_MASK__)))
-	      | (thr_id & ((Uint32) ERTS_REF1_THR_ID_MASK__)));
-    ref[2] = (Uint32) ((value >> 32) & ((Uint64) 0xffffffff));
-}
-
-ERTS_GLB_INLINE Uint32
-erts_get_ref_numbers_thr_id(Uint32 *ref)
-{
-    return ref[1] & ((Uint32) ERTS_REF1_THR_ID_MASK__);
-}
-
-ERTS_GLB_INLINE int
-erts_is_ref_numbers_magic(Uint32 *ref)
-{
-    return !!(ref[1] & ERTS_REF1_MAGIC_MARKER_BIT__);
-}
-
-ERTS_GLB_INLINE int
-erts_is_pid_ref_numbers(Uint32 *ref)
-{
-    return !!(ref[1] & ERTS_REF1_PID_MARKER_BIT__);
-}
-
-ERTS_GLB_INLINE int
-erts_is_ordinary_ref_numbers(Uint32 *ref)
-{
-    return !(ref[1] & (ERTS_REF1_MAGIC_MARKER_BIT__
-                       | ERTS_REF1_PID_MARKER_BIT__));
-}
-
-ERTS_GLB_INLINE Uint64
-erts_get_ref_numbers_value(Uint32 *ref)
-{
-    ERTS_CT_ASSERT((ERTS_REF1_NUM_MASK__ | REF_MASK) == 0xffffffff);
-    ERTS_CT_ASSERT((ERTS_REF1_NUM_MASK__ & REF_MASK) == 0);
-
-    return (((((Uint64) ref[2]) & ((Uint64) 0xffffffff)) << 32)
-	    | (((Uint64) ref[1]) & ((Uint64) ERTS_REF1_NUM_MASK__))
-	    | (((Uint64) ref[0]) & ((Uint64) REF_MASK)));
-}
-
-ERTS_GLB_INLINE void
-erts_sched_make_ref_in_array(ErtsSchedulerData *esdp,
-			     Uint32 ref[ERTS_REF_NUMBERS])
-{
-    Uint64 value;
-
-    ASSERT(esdp);
-    value = esdp->ref++;
-    erts_set_ref_numbers(ref, (Uint32) esdp->thr_id, value);
-}
-
+/* A magic reference is an ordinary one; its kind is in its thing, not its identity. */
 ERTS_GLB_INLINE void
 erts_sched_make_magic_ref_in_array(ErtsSchedulerData *esdp,
 				   Uint32 ref[ERTS_REF_NUMBERS])
 {
     erts_sched_make_ref_in_array(esdp, ref);
-    ASSERT(!(ref[1] & ERTS_REF1_MAGIC_MARKER_BIT__));
-    ref[1] |= ERTS_REF1_MAGIC_MARKER_BIT__;
 }
 
 ERTS_GLB_INLINE Eterm
@@ -194,7 +121,7 @@ erts_sched_make_ref_in_buffer(ErtsSchedulerData *esdp,
     Uint32 ref[ERTS_REF_NUMBERS];
 
     erts_sched_make_ref_in_array(esdp, ref);
-    write_ref_thing(hp, ref[0], ref[1], ref[2]);
+    write_ref_thing(hp, ref);
     return make_internal_ref(hp);
 }
 
@@ -239,43 +166,6 @@ erts_magic_ref_save_bin(Eterm ref)
 	erts_magic_ref_save_bin__(ref);
 }
 
-/*
- * Look up the magic binary of a magic ref
- * when the ref comes from the outside world...
- */
-ERTS_GLB_INLINE ErtsMagicBinary *
-erts_magic_ref_lookup_bin(Uint32 ref[ERTS_REF_NUMBERS])
-{
-    if (!erts_is_ref_numbers_magic(ref))
-	return NULL;
-    return erts_magic_ref_lookup_bin__(ref);
-}
-
-/*
- * Look up pid of a pid ref when the ref comes
- * from the outside world...
- */
-ERTS_GLB_INLINE Eterm
-erts_pid_ref_lookup(Uint32 *refn, int len)
-{
-    Eterm pid;
-    if (len != ERTS_PID_REF_NUMBERS)
-        return am_undefined;
-    if (!erts_is_pid_ref_numbers(refn))
-	return am_undefined;
-
-    pid = (((Eterm) refn[3])
-#ifdef ARCH_64
-           | (((Eterm) refn[4]) << 32)
-#endif
-        );
-
-    if (!is_internal_pid(pid))
-        return THE_NON_VALUE; /* We got garbage; we have not created this... */
-
-    return pid;
-}
-
 ERTS_GLB_INLINE Eterm erts_get_pid_of_ref(Eterm ref)
 {
     if (is_internal_pid_ref(ref))
@@ -295,24 +185,24 @@ ERTS_GLB_INLINE Eterm erts_get_pid_of_ref(Eterm ref)
 
 #include "erl_message.h"
 
-#if ERTS_REF_NUMBERS != 3
+#if ERTS_REF_NUMBERS != 4 || ERTS_PID_REF_NUMBERS != 6
 #  error fix this...
 #endif
 
-ERTS_GLB_INLINE int erts_internal_ref_number_cmp(Uint32 *num1, Uint32 *num2);
+ERTS_GLB_INLINE int erts_internal_ref_number_cmp(const Uint32 *num1, const Uint32 *num2);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 
+/* Identities compare most significant word first, the last word the most significant. */
 ERTS_GLB_INLINE int
-erts_internal_ref_number_cmp(Uint32 *num1,
-			     Uint32 *num2)
+erts_internal_ref_number_cmp(const Uint32 *num1,
+			     const Uint32 *num2)
 {
-    if (num1[2] != num2[2])
-	return num1[2] > num2[2] ? 1 : -1;
-    if (num1[1] != num2[1])
-	return num1[1] > num2[1] ? 1 : -1;
-    if (num1[0] != num2[0])
-	return num1[0] > num2[0] ? 1 : -1;
+    int i;
+
+    for (i = ERTS_REF_NUMBERS - 1; i >= 0; i--)
+	if (num1[i] != num2[i])
+	    return num1[i] > num2[i] ? 1 : -1;
     return 0;
 }
 
@@ -347,7 +237,6 @@ erts_iref_storage_save(ErtsIRefStorage *iref, Eterm ref)
 {
     Eterm *hp;
 
-    ERTS_CT_ASSERT(ERTS_REF_NUMBERS == 3);
     ASSERT(is_internal_ref(ref));
 
     hp = boxed_val(ref);
@@ -356,30 +245,12 @@ erts_iref_storage_save(ErtsIRefStorage *iref, Eterm ref)
     iref->is_pid_ref = 0;
     if (is_ordinary_ref_thing(hp)) {
 	ErtsORefThing *rtp = (ErtsORefThing *) hp;
-	iref->u.num[0] = rtp->num[0];
-	iref->u.num[1] = rtp->num[1];
-	iref->u.num[2] = rtp->num[2];
+	sys_memcpy(iref->u.num, rtp->num, ERTS_REF_NUMBERS * sizeof(Uint32));
     }
     else if (is_pid_ref_thing(hp)) {
 	ErtsPRefThing *prtp = (ErtsPRefThing *) hp;
 	iref->is_pid_ref = 1;
-	iref->u.num[0] = prtp->num[0];
-	iref->u.num[1] = prtp->num[1];
-	iref->u.num[2] = prtp->num[2];
-	iref->u.num[3] = prtp->num[3];
-#if defined(ARCH_64)
-	iref->u.num[4] = prtp->num[4];
-
-# if ERTS_PID_REF_NUMBERS != 5
-#  error fix this
-# endif
-
-#else /* ARCH_32 */
-
-# if ERTS_PID_REF_NUMBERS != 4
-#  error fix this
-# endif
-#endif
+	sys_memcpy(iref->u.num, prtp->num, ERTS_PID_REF_NUMBERS * sizeof(Uint32));
     }
     else {
 	ErtsMRefThing *mrtp = (ErtsMRefThing *) hp;
@@ -417,17 +288,13 @@ erts_iref_storage_make_ref(ErtsIRefStorage *iref,
 {
     Eterm *hp = *hpp;
     if (!iref->is_magic && !iref->is_pid_ref) {
-	write_ref_thing(hp, iref->u.num[0], iref->u.num[1],
-			iref->u.num[2]);
+	write_ref_thing(hp, iref->u.num);
 	*hpp += ERTS_REF_THING_SIZE;
     }
     else if (iref->is_pid_ref) {
-        Eterm pid = (Eterm) iref->u.num[3];
-#if defined(ARCH_64)
-        pid |= ((Eterm) iref->u.num[4]) << 32;
-#endif
-	write_pid_ref_thing(hp, iref->u.num[0], iref->u.num[1],
-                            iref->u.num[2], pid);
+        Eterm pid = ((Eterm) iref->u.num[ERTS_REF_NUMBERS])
+            | (((Eterm) iref->u.num[ERTS_REF_NUMBERS + 1]) << 32);
+	write_pid_ref_thing(hp, iref->u.num, pid);
 	*hpp += ERTS_PID_REF_THING_SIZE;        
     }
     else {
@@ -480,22 +347,17 @@ ERTS_GLB_INLINE void
 erts_oiref_storage_save(ErtsOIRefStorage *oiref, Eterm ref)
 {
     ErtsORefThing *rtp;
-    ERTS_CT_ASSERT(ERTS_REF_NUMBERS == 3);
     ASSERT(is_internal_ordinary_ref(ref));
 
     rtp = (ErtsORefThing *) internal_ref_val(ref);
-
-    oiref->num[0] = rtp->num[0];
-    oiref->num[1] = rtp->num[1];
-    oiref->num[2] = rtp->num[2];
+    sys_memcpy(oiref->num, rtp->num, sizeof(oiref->num));
 }
 
 ERTS_GLB_INLINE Eterm
 erts_oiref_storage_make_ref(ErtsOIRefStorage *oiref, Eterm **hpp)
 {
     Eterm *hp = *hpp;
-    ERTS_CT_ASSERT(ERTS_REF_NUMBERS == 3);
-    write_ref_thing(hp, oiref->num[0], oiref->num[1], oiref->num[2]);
+    write_ref_thing(hp, oiref->num);
     *hpp += ERTS_REF_THING_SIZE;
     return make_internal_ref(hp);
 }
@@ -519,7 +381,7 @@ ERTS_GLB_INLINE Eterm
 erts_proc_store_ref(Process *c_p, Uint32 *ref)
 {
     Eterm *hp = HAlloc(c_p, (Sint)ERTS_REF_THING_SIZE);
-    write_ref_thing(hp, ref[0], ref[1], ref[2]);
+    write_ref_thing(hp, ref);
     return make_internal_ref(hp);
 }
 
@@ -533,10 +395,11 @@ erts_proc_store_ref(Process *c_p, Uint32 *ref)
 
 #include "hash.h"
 
+/* A magic reference table's entry, keyed by the reference's identity. */
 typedef struct {
     HashBucket hash;
     ErtsMagicBinary *mb;
-    Uint64 value;
+    Uint32 num[ERTS_REF_NUMBERS];
 } ErtsNSchedMagicRefTableEntry;
 
 typedef struct {

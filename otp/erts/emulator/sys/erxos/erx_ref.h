@@ -99,4 +99,15 @@ int	erx_ref_source_open(erx_ref_runtime_t *runtime, erx_ref_source_t *source);
 int	erx_ref_make(const erx_ref_runtime_t *runtime, erx_ref_source_t *source,
 	    uint32_t words[ERX_REF_WORDS]);
 
+/*
+ * The ordinal of the source whose reference has the identity words, deciphered, so ERTS can
+ * route a request to the thread that owns what the reference names (a timer). words is
+ * untrusted input: ERX_EINVAL, leaving ordinal untouched, unless the block names an ordinal
+ * runtime has handed out and a counter value below the last, as every block erx_ref_make
+ * enciphers does. A forged identity passes with probability about taken / 2^32, and then
+ * names a source that exists, so a caller indexing by the ordinal stays in bounds.
+ */
+int	erx_ref_source_of(const erx_ref_runtime_t *runtime, const uint32_t words[ERX_REF_WORDS],
+	    uint32_t *ordinal);
+
 #endif

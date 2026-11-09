@@ -17,7 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: sleeps through erts_milli_sleep.
+ * Modified by erXos: sleeps through erts_milli_sleep, and the dirty test BIFs'
+ * make_ref checks that a scheduler's references decipher to its own thread id
+ * (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -1374,6 +1376,33 @@ dirty_test(Process *c_p, Eterm type, Eterm arg1, Eterm arg2, ErtsCodePtr I)
 		goto badarg;
 	    }
 	}
+    }
+    else if (ERTS_IS_ATOM_STR("make_ref", arg1)) {
+	/*
+	 * erXos: arg2 references made on this scheduler, each of which must decipher to
+	 * this scheduler's own thread id (erl_bif_unique.c); {error, Own, Deciphered} for
+	 * the first that does not.
+	 */
+	ErtsSchedulerData *esdp = erts_get_scheduler_data();
+	Eterm res = NIL;
+	Sint i, n;
+
+	if (!esdp || !term_to_Sint(arg2, &n) || n < 0 || n > 100000)
+	    goto badarg;
+	for (i = 0; i < n; i++) {
+	    Eterm ref = erts_make_ref(c_p);
+	    Uint32 thr_id = erts_get_ref_numbers_thr_id(internal_ordinary_ref_numbers(ref));
+	    Eterm *hp;
+
+	    if (thr_id != esdp->thr_id) {
+		hp = HAlloc(c_p, 4);
+		res = TUPLE3(hp, am_error, make_small(esdp->thr_id), make_small(thr_id));
+		break;
+	    }
+	    hp = HAlloc(c_p, 2);
+	    res = CONS(hp, ref, res);
+	}
+	ERTS_BIF_PREP_RET(ret, res);
     }
     else if (ERTS_IS_ATOM_STR("ready_wait6_done", arg1)) {
 	ERTS_DECL_AM(ready);

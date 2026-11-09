@@ -38,6 +38,23 @@
 /* What a refused call must leave in its result. */
 #define UNTOUCHED	UINT32_C(0xdeadbeef)
 
+/* The ABI's little-endian u32 fields. */
+static void
+store32(uint8_t *bytes, uint32_t value)
+{
+
+	for (int i = 0; i < 4; i++)
+		bytes[i] = (uint8_t)(value >> (8 * i));
+}
+
+static uint32_t
+load32(const uint8_t *bytes)
+{
+
+	return ((uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 | (uint32_t)bytes[2] << 16 |
+	    (uint32_t)bytes[3] << 24);
+}
+
 static void
 fail(const char *what)
 {
@@ -163,6 +180,39 @@ do_fresh(char **save)
 	make_and_print(&runtime, &source, 1);
 }
 
+/*
+ * "source_of KEY TAKEN ORDINAL HIGH LOW": with TAKEN ordinals handed out, the source that
+ * erx_ref_source_of names for the identity of the block ORDINAL, HIGH:LOW, enciphered.
+ */
+static void
+do_source_of(char **save)
+{
+	erx_ref_runtime_t runtime;
+	uint8_t block[ERX_REF_BLOCK_SIZE], identity[ERX_REF_IDENTITY_SIZE];
+	uint32_t words[ERX_REF_WORDS], ordinal = UNTOUCHED;
+	uint64_t low;
+	uint32_t high;
+
+	runtime_from_request(&runtime, save);
+	atomic_store(&runtime.taken, parse_number(strtok_r(NULL, " ", save), UINT64_C(1) << 32));
+	store32(block + ERX_REF_BLOCK_OFF_SOURCE,
+	    (uint32_t)parse_number(strtok_r(NULL, " ", save), UINT32_MAX));
+	high = (uint32_t)parse_number(strtok_r(NULL, " ", save), UINT32_MAX);
+	low = parse_number(strtok_r(NULL, " ", save), UINT64_MAX);
+	store32(block + ERX_REF_BLOCK_OFF_COUNTER, (uint32_t)low);
+	store32(block + ERX_REF_BLOCK_OFF_COUNTER + 4, (uint32_t)(low >> 32));
+	store32(block + ERX_REF_BLOCK_OFF_COUNTER + 8, high);
+	erx_ref_permute(&runtime, block, identity);
+	for (uint32_t i = 0; i < ERX_REF_WORDS; i++)
+		words[i] = load32(identity + ERX_REF_IDENTITY_OFF_ID + 4 * i);
+	if (erx_ref_source_of(&runtime, words, &ordinal) == ERX_OK)
+		printf("source_of %" PRIu32 "\n", ordinal);
+	else if (ordinal == UNTOUCHED)
+		printf("source_of refused\n");
+	else
+		printf("source_of refused but wrote\n");
+}
+
 static void
 do_sources(char **save)
 {
@@ -269,6 +319,8 @@ main(void)
 			do_make(&save);
 		else if (strcmp(verb, "fresh") == 0)
 			do_fresh(&save);
+		else if (strcmp(verb, "source_of") == 0)
+			do_source_of(&save);
 		else if (strcmp(verb, "sources") == 0)
 			do_sources(&save);
 		else if (strcmp(verb, "threads") == 0)

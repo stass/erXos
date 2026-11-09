@@ -9,8 +9,6 @@
  * the lane's input task; encoders, spawns and the owner's own export write from their
  * own schedulers. Every read and write of a set is under the stripe lock its address
  * picks, so a reader sees a set whole and a set closed at its name's end stays empty.
- *
- * Aliases hold nothing yet, so an alias send from another domain is unheld (TODO.md).
  */
 
 #ifdef HAVE_CONFIG_H
@@ -25,6 +23,7 @@
 #include "bif.h"
 
 #include "erx/abi.h"
+#include "erx_alias.h"
 #include "erx_exports.h"
 
 /* The table's bound, the design's default for `exports` (design-domains.md, "Exports"). */
@@ -34,10 +33,17 @@
 /* The rights a pid and the domain's own name may hold. */
 #define PID_RIGHTS		(ERX_RIGHT_SEND | ERX_RIGHT_LINK | ERX_RIGHT_EXIT | ERX_RIGHT_INTRODUCE)
 #define DOMAIN_RIGHTS		ERX_RIGHT_SPAWN
+/* What a spawner holds on its child. */
+#define CHILD_RIGHTS		(ERX_RIGHT_SEND | ERX_RIGHT_LINK | ERX_RIGHT_EXIT)
 
 static erts_mtx_t stripes[STRIPES];
 /* Live entries across every set, against EXPORTS_MAX. */
 static erts_atomic_t live;
+/*
+ * The holders a hand-out or a spawn could not write (PUT_FULL: the table full, or memory
+ * short): each such name behaves at its peer as a dead process (erx_dist:exports_refused/0).
+ */
+static erts_atomic64_t refused;
 /* The domain's own name's holders: spawn into the domain. */
 static erx_exports_t domain_exports;
 
@@ -63,6 +69,7 @@ erx_exports_init(void)
 		erts_mtx_init(&stripes[i], "erx_exports", NIL,
 		    ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_DISTRIBUTION);
 	erts_atomic_init_nob(&live, 0);
+	erts_atomic64_init_nob(&refused, 0);
 }
 
 static erts_mtx_t *
@@ -185,25 +192,61 @@ live_process(Eterm pid)
 	return (is_internal_pid(pid) ? erts_proc_lookup(pid) : NULL);
 }
 
-/* Writer 1: handing out a name (edit 8). */
+/*
+ * Writer 1: handing out a name, a pid (edit 8) or an alias (edit 14), each a name of a live
+ * record: a live process, or an active alias, whose registry entry stays held, and so alive,
+ * until the write is done. With the table full it writes nothing and counts the refusal, so
+ * the peer holds nothing on the name and what it sends there reaches no one, as a send to a
+ * dead process (design-domains.md, "Exports").
+ */
 void
-erx_exports_hand_out(Eterm pid, uint32_t peer)
+erx_exports_hand_out(Eterm name, uint32_t peer)
 {
-	Process *const p = live_process(pid);
+	erx_alias_hold_t hold = { NULL };
+	erx_exports_t *set = NULL;
+	Process *p;
+	put_t put = PUT_DONE;
 
-	if (p != NULL && peer != 0)
-		(void)holders_put(&p->erx_exports, peer, ERX_RIGHT_SEND, PUT_IF_NONE);
+	if (peer == 0)
+		return;
+	if (is_internal_pid_ref(name))
+		set = erx_alias_hold(internal_ref_numbers(name), &hold);
+	else if ((p = live_process(name)) != NULL)
+		set = &p->erx_exports;
+	if (set != NULL)
+		put = holders_put(set, peer, ERX_RIGHT_SEND, PUT_IF_NONE);
+	if (put == PUT_FULL)
+		erts_atomic64_inc_nob(&refused);
+	if (hold.stripe != NULL)
+		erx_alias_release(&hold);
 }
 
-/* Writer 2: a spawn into the domain, before the child runs. */
+/* What peer holds on the active alias words; nothing once the alias has ended. */
+static uint8_t
+alias_rights(const uint32_t words[ERX_ALIAS_WORDS], uint32_t peer)
+{
+	erx_alias_hold_t hold;
+	erx_exports_t *const set = erx_alias_hold(words, &hold);
+	uint8_t rights;
+
+	if (set == NULL)
+		return (0);
+	rights = holders_rights(set, peer);
+	erx_alias_release(&hold);
+	return (rights);
+}
+
+/* Writer 2: a spawn into the domain, before the child runs; a full table's refusal is counted. */
 void
 erx_exports_spawned(Process *child, DistEntry *dep)
 {
 	const uint32_t peer = erx_exports_peer_of(dep);
+	put_t put = PUT_DONE;
 
 	if (peer != 0)
-		(void)holders_put(&child->erx_exports, peer, ERX_RIGHT_SEND | ERX_RIGHT_LINK | ERX_RIGHT_EXIT,
-		    PUT_WIDEN);
+		put = holders_put(&child->erx_exports, peer, CHILD_RIGHTS, PUT_WIDEN);
+	if (put == PUT_FULL)
+		erts_atomic64_inc_nob(&refused);
 }
 
 /* Writer 3: an explicit export by the name's owner, of exactly rights. */
@@ -252,7 +295,7 @@ erx_exports_lookup(const void *peerp, const erx_funnel_name_t *name)
 	case ERX_FUNNEL_NAME_DOMAIN:
 		return ((erx_funnel_hold_t){ .rights = holders_rights(&domain_exports, peer) });
 	case ERX_FUNNEL_NAME_ALIAS:
-		break;
+		return ((erx_funnel_hold_t){ .rights = alias_rights(name->alias->words, peer) });
 	}
 	return ((erx_funnel_hold_t){ 0 });
 }
@@ -398,6 +441,19 @@ erx_dist_exports_1(BIF_ALIST_1)
 	if (copy != NULL)
 		erts_free(ERTS_ALC_T_TMP, copy);
 	BIF_RET(result);
+}
+
+/* erx_dist:exports_refused(): how many holders a hand-out or a spawn could not write. */
+BIF_RETTYPE
+erx_dist_exports_refused_0(BIF_ALIST_0)
+{
+	const Uint64 n = (Uint64)erts_atomic64_read_nob(&refused);
+	Uint size = 0;
+	Eterm *hp;
+
+	(void)erts_bld_uint64(NULL, &size, n);
+	hp = HAlloc(BIF_P, size);
+	BIF_RET(erts_bld_uint64(&hp, NULL, n));
 }
 
 /*

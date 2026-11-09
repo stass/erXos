@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  * 
+ * Modified by erXos: The monitor tree's insert, delete and foreach_delete keep the alias registry, and an active alias's entry counts in its owner's monitor size (edit 17 of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -36,6 +38,7 @@
 #include "erl_node_tables.h"
 #include "erl_monitor_link.h"
 #include "erl_bif_unique.h"
+#include "erx_alias.h"
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *\
  * Red-black tree implementation used for monitors and links.                *
@@ -686,10 +689,66 @@ erts_monitor_tree_lookup_create(ErtsMonitor **root, int *created, Uint16 type,
     return res;
 }
 
+/*
+ * erXos (docs/design-runtime.md, edit 17): the alias registry (sys/erxos/erx_alias.h) holds
+ * exactly the aliases whose origin monitor is in a monitor tree with an alias state set. The
+ * tree's own insert and delete below are where a monitor enters and leaves a tree, so they
+ * keep the registry, and no caller of them takes part; unalias/1, which clears the state in
+ * place, removes the alias itself.
+ */
+static ERTS_INLINE int
+ml_alias_key(ErtsMonitor *mon, Eterm *key)
+{
+    if (!erts_monitor_is_origin(mon))
+        return 0;
+    *key = ml_get_key((ErtsMonLnkNode *) mon);
+    return is_internal_pid_ref(*key);
+}
+
+static ERTS_INLINE void
+ml_alias_enter(ErtsMonitor *mon)
+{
+    Eterm key;
+
+    if ((mon->flags & ERTS_ML_STATE_ALIAS_MASK) && ml_alias_key(mon, &key))
+        erx_alias_insert(internal_ref_numbers(key),
+                         pid_ref_thing_get_pid(internal_ref_val(key)));
+}
+
+/*
+ * A leave removes the identity whatever the alias state says: unalias/1 clears the state
+ * and removes the entry itself before its monitor leaves the tree, and removing an absent
+ * identity does nothing, so a leave is right whether or not the state is still set.
+ */
+static ERTS_INLINE void
+ml_alias_leave(ErtsMonitor *mon)
+{
+    Eterm key;
+
+    if (ml_alias_key(mon, &key))
+        erx_alias_remove(internal_ref_numbers(key));
+}
+
+/* The callback of a foreach_delete, run after its monitor leaves the registry. */
+typedef struct {
+    ErtsMonitorFunc func;
+    void *arg;
+} ErtsMlAliasLeaveCtxt;
+
+static int
+ml_alias_leave_then(ErtsMonLnkNode *ml, void *vctxt, Sint reds)
+{
+    ErtsMlAliasLeaveCtxt *ctxt = (ErtsMlAliasLeaveCtxt *) vctxt;
+
+    ml_alias_leave((ErtsMonitor *) ml);
+    return ctxt->func((ErtsMonitor *) ml, ctxt->arg, reds);
+}
+
 void
 erts_monitor_tree_insert(ErtsMonitor **root, ErtsMonitor *mon)
 {
     ml_rbt_insert((ErtsMonLnkNode **) root, (ErtsMonLnkNode *) mon);
+    ml_alias_enter(mon);
 }
 
 void
@@ -704,6 +763,7 @@ void
 erts_monitor_tree_delete(ErtsMonitor **root, ErtsMonitor *mon)
 {
     ml_rbt_delete((ErtsMonLnkNode **) root, (ErtsMonLnkNode *) mon);
+    ml_alias_leave(mon);
 }
 
 void
@@ -756,9 +816,8 @@ erts_monitor_tree_foreach_delete(ErtsMonitor **root,
                                  ErtsMonitorFunc func,
                                  void *arg)
 {
-    ml_rbt_foreach_delete((ErtsMonLnkNode **) root,
-                          (int (*)(ErtsMonLnkNode*, void*, Sint)) func,
-                          arg);
+    ErtsMlAliasLeaveCtxt ctxt = {func, arg};
+    ml_rbt_foreach_delete((ErtsMonLnkNode **) root, ml_alias_leave_then, &ctxt);
 }
 
 int
@@ -768,9 +827,9 @@ erts_monitor_tree_foreach_delete_yielding(ErtsMonitor **root,
                                           void **vyspp,
                                           Sint limit)
 {
-    return ml_rbt_foreach_delete_yielding((ErtsMonLnkNode **) root,
-                                          (int (*)(ErtsMonLnkNode*, void*, Sint)) func,
-                                          arg, vyspp, limit);
+    ErtsMlAliasLeaveCtxt ctxt = {func, arg};
+    return ml_rbt_foreach_delete_yielding((ErtsMonLnkNode **) root, ml_alias_leave_then,
+                                          &ctxt, vyspp, limit);
 }
 
 void
@@ -1205,6 +1264,7 @@ Uint
 erts_monitor_size(ErtsMonitor *mon)
 {
     Uint size, refc;
+    Eterm key;
     ErtsMonitorData *mdp = erts_monitor_to_data(mon);
 
     switch (ERTS_ML_GET_TYPE(&mdp->origin)) {
@@ -1244,8 +1304,13 @@ erts_monitor_size(ErtsMonitor *mon)
     
     refc = (Uint) erts_atomic32_read_nob(&mdp->refc);
     ASSERT(refc > 0);
+    size /= refc;
 
-    return size / refc;
+    /* erXos: an active alias's registry entry is its owner's, as its monitor is. */
+    if ((mon->flags & ERTS_ML_STATE_ALIAS_MASK) && ml_alias_key(mon, &key))
+        size += erx_alias_entry_size();
+
+    return size;
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *\

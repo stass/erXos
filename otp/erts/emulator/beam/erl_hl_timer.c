@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: Timer references have four words (edit 17 of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -81,7 +83,7 @@ static void hdbg_chk_srv(ErtsHLTimerService *srv);
 #  define ERTS_HLT_HDBG_CHK_SRV(SRV) ((void) 1)
 #endif
 
-#if ERTS_REF_NUMBERS != 3
+#if ERTS_REF_NUMBERS != 4
 #error "ERTS_REF_NUMBERS changed. Update me..."
 #endif
 
@@ -319,21 +321,13 @@ static ERTS_INLINE int
 refn_is_lt(Uint32 *x, Uint32 *y)
 {
     /* !0 if x < y */
-    if (x[2] < y[2])
-	return 1;
-    if (x[2] != y[2])
-	return 0;
-    if (x[1] < y[1])
-	return 1;
-    if (x[1] != y[1])
-	return 0;
-    return x[0] < y[0];
+    return erts_internal_ref_number_cmp(x, y) < 0;
 }
 
 static ERTS_INLINE int
 refn_is_eq(Uint32 *x, Uint32 *y)
 {
-    return (x[0] == y[0]) & (x[1] == y[1]) & (x[2] == y[2]);
+    return erts_internal_ref_number_cmp(x, y) == 0;
 }
 
 #define ERTS_RBT_PREFIX time
@@ -746,6 +740,7 @@ init_btm_specifics(ErtsSchedulerData *esdp,
     tmr->btm.refn[0] = refn[0];
     tmr->btm.refn[1] = refn[1];
     tmr->btm.refn[2] = refn[2];
+    tmr->btm.refn[3] = refn[3];
 
     tmr->btm.proc_tree.parent = ERTS_HLT_PFIELD_NOT_IN_TABLE;
 
@@ -2050,7 +2045,7 @@ send_sync_info(Process *proc, ErtsProcLocks initial_locks,
 
     mp = erts_alloc_message_heap(proc, &locks, hsz, &hp, &ohp);
 
-    write_ref_thing(hp, refn[0], refn[1], refn[2]);
+    write_ref_thing(hp, refn);
     ref = make_internal_ref(hp);
     hp += ERTS_REF_THING_SIZE;
 
@@ -2136,7 +2131,7 @@ access_sched_local_btm(Process *c_p, Eterm pid,
         if (is_value(tref))
             ref = tref;
         else {
-            write_ref_thing(&heap[0], trefn[0], trefn[1], trefn[2]);
+            write_ref_thing(&heap[0], trefn);
             ref = make_internal_ref(&heap[0]);
         }
         return send_async_info(proc, proc_locks,
@@ -2290,6 +2285,7 @@ access_bif_timer(Process *c_p, Eterm tref, int cancel, int async, int info)
 	req->trefn[0] = trefn[0];
 	req->trefn[1] = trefn[1];
 	req->trefn[2] = trefn[2];
+	req->trefn[3] = trefn[3];
 
 	if (async)
 	    ERTS_BIF_PREP_RET(ret, am_ok);
@@ -2304,6 +2300,7 @@ access_bif_timer(Process *c_p, Eterm tref, int cancel, int async, int info)
 	    req->rrefn[0] = rrefn[0];
 	    req->rrefn[1] = rrefn[1];
 	    req->rrefn[2] = rrefn[2];
+	    req->rrefn[3] = rrefn[3];
 
             /*
              * Caller needs to wait for a message containing

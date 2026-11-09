@@ -296,7 +296,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | Threads, locks, thread data | ethread over pthreads; futexes on Linux | `liberx` threads and umtx | **kept**: ethread over the C library's pthreads, musl's on `liberx` natively and libSystem's hosted, with its events over umtx in every build ([Threads and synchronisation](#threads-and-synchronisation)) | the least change; umtx waits on private memory are allowed to executors |
 | Messages inside a domain | signal queues | none | **kept** | Erlang's semantics are the system's |
 | Messages between domains | distribution: node tables, entries, controllers, control messages, lazy decode (`dist.c`, `erl_node_tables.c`, `external.c`) | lanes, the funnel, the export table | **merged**: every domain is a node `<id>@<host>` with its domain id as creation, and each connection is one stock distribution entry, its controller a port whose driver speaks the lane; the funnel validates each frame before `erts_net_message`; the export table answers authority ([Connections in ERTS](#connections-in-erts)) | ERTS already routes every remote operation through one path, keeps flow control per entry, and decodes lazily in the receiver; a node per domain keeps its node table, `net_kernel` and its tools stock |
-| References | per-scheduler counters (`erl_bif_unique.c`) | none | **redone**: AES-128 of a nonrepeating counter forms every reference; a bounded local registry resolves aliases ([Unguessable references](#unguessable-references)) | identity is unique by construction; guessing an undisclosed reply tag has an explicit cryptographic bound |
+| References | per-scheduler counters (`erl_bif_unique.c`) | none | **redone**: AES-128 of a nonrepeating counter forms every reference; a local registry of the active aliases resolves them ([Unguessable references](#unguessable-references)) | identity is unique by construction; guessing an undisclosed reply tag has an explicit cryptographic bound |
 | Ports | ports, port tasks, linked-in drivers, spawn drivers, `fd` ports (`io.c`, `erl_port_task.c`) | sub-spaces and lanes | **kept** for three linked-in drivers: the lane driver, the program driver and `ram_file_drv`, which `file:open(Bin, [ram])` needs and which reaches no operating system; spawn and `fd` ports, the forker and `erl_child_setup` dropped ([Programs as ports](#programs-as-ports)) | a port already has an owner, a link, serialised work, busy flow control and an exit status |
 | Device drivers | linked-in drivers | Erlang processes over the device NIF | **redone**: a driver is an Erlang process; the C under it is the device NIF, parsing nothing ([The device NIF](#the-device-nif)) | a device that lies corrupts no memory |
 | Operating-system adaptation | the UNIX sys layer, UNIX signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the C path for standard output and error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
@@ -380,13 +380,13 @@ of behaviour, however many lines it touches:
 | `beam/erl_process.c` | 1. `scheduler_wait` parks with `erx_park` instead of the thread event or the poll set; 2. `wake_scheduler` and the enqueue paths wake with `erx_executor_wake`; 3. the safe point in `erts_schedule` runs the adapter's plan (ready list, capacity, urgency); 4. the pick of the next process reads its job tag; 5. schedulers are created as executors, pinned to the run, and `+S` is derived from the grant |
 | `beam/erl_process.h`, `beam/erl_process.c` | 6. `Process` carries a job tag, taken from its parent at `erl_create_process` |
 | `beam/erl_lock_count.c` and the run-queue, process and carrier lock paths | 7. `defer` raised and lowered around the scheduler's and allocator's critical sections, under `ERX_GROUP_DEFER` |
-| `beam/external.c` | 8. encoding one of the domain's own pids or aliases for a connection, a control term's sender included, gives the peer `send` on it where it holds nothing yet; 9. the distribution decoder takes a safe-mode flag, set in the system domain, which creates no atom and reports a refused atom apart from a malformed term |
+| `beam/external.c` | 8. encoding one of the domain's own pids or aliases for a connection, a control term's sender included, gives the peer `send` on it where it holds nothing yet, and past the table's bound writes nothing and counts the failure for `erx_dist:exports_refused/0`; 9. the distribution decoder takes a safe-mode flag, set in the system domain, which creates no atom and reports a refused atom apart from a malformed term |
 | `beam/dist.c` | 10. in the system domain, a message to a peer whose entry's queue is past the manifest's `system_queue` is dropped and counted on the receiver instead of suspending the sender, and any other signal that does not fit ends the connection; 11. an entry counts toward `peer_held` each link and monitor a peer's process holds with a local one and each signal ERTS queues for the peer on behalf of no process, answers a new `LINK` or `MONITOR_P` past it with `system_limit`, and ends the connection when a signal does not fit; 12. `erts_net_message` drops and counts a message whose decoded size, as the funnel measured it, is past its target's `max_request`, the request limit a facet sets on itself |
 | `beam/erl_process.c` (exit) | 13. a process's exit clears its export holders, a field of its own record |
-| `beam/erl_monitor_link.c` | 14. an alias's deactivation clears its export holders and its registry entry, at the one function that leaves the active state |
+| `beam/erl_monitor_link.c`, `beam/bif.c`, `sys/erxos/erx_alias.c` | 14. an alias's registry entry, which holds its export holders, exists exactly while its origin monitor is in a monitor tree with an alias state: the tree's insert adds it, the tree's delete and both of its foreach-delete walks, the exit path's among them, remove it with its holders, and so does `unalias/1`'s in-place clear |
 | `beam/erl_proc_sig_queue.c`, `beam/erl_gc.c`, `beam/erl_process.h` | 15. a process keeps the bytes of its queued undecoded frames from other domains, added when the drain queues a frame on it and released when `erts_proc_sig_decode_dist` decodes the frame or the process exits; the drain leaves in the lane an authorised frame whose target has reached its queue quota, and takes nothing more from that lane until the count falls below it, and the decode or exit that brings it below schedules that lane port's input task again; before a process waits in `receive` while its count is at its quota, it decodes every frame queued on it, its own messages, which from then on count toward its `max_heap_size` alone, so no waiting process holds a lane paused, a `gen_server:call` that skips older messages included; the same bytes count toward the size `max_heap_size` limits, as on-heap message data does |
 | `beam/erl_proc_sig_queue.c`, `beam/bif.tab` | 16. `erts_proc_sig_decode_dist` delivers every message from another domain, sent to a pid or to an alias, as `{erx_origin, D, Msg}`, with `D` the creation of the entry it arrived on, the peer's domain id; nothing turns it off and no signal is wrapped ([design-domains.md](design-domains.md#the-peer)); and the BIF `erx_dist:owner/1`, behind `erx:owner/1`, returns the creation a pid, reference or port carries, since `gen_server` and `gen_statem` (edit 59) cannot call the `erx` application |
-| `beam/erl_bif_unique.c`, `beam/erl_term.h`, `beam/erl_printf_term.c` | 17. a reference's identity is four words from `erx_ref_permute`; creation, comparison, hashing and text keep all four |
+| `beam/erl_bif_unique.c`, `beam/erl_term.h`, `beam/external.c`, `beam/erl_hl_timer.c`, `sys/erxos/erx_ref.c` | 17. a reference's identity is four words from `erx_ref_permute`, from one source per thread; creation, comparison, hashing, text and encoding keep all four, and an alias's owner pid and a resource's pointer are local metadata beside them; the decoder takes exactly four words for a reference of this node and resolves an alias through the registry, and a resource reference only outside a connection; the timer service finds a timer's scheduler by deciphering its reference |
 | `beam/erl_node_container_utils.h`, `beam/erl_node_tables.c` | 18. The two channel-number macros print the creation of the node a term carries, the domain id. `internal_channel_no(x)`, a constant 0 in stock ERTS, gives `erts_this_node->creation`. `external_channel_no(x)`, in stock ERTS the index of the node name's atom read through the term's distribution entry, gives `external_node(x)->creation`, read from the term's own `ErlNode`. The pid, port and reference variants that every printer calls (`internal_pid_channel_no`, `external_ref_channel_no` and their kin) are defined on these two, so pids, ports and references print their owner's domain id, and a pid of an ended domain still prints that domain's id after a later domain of its name has connected. `dist_entry_channel_no`, which only the crash dump's node lines and `erts_debug`'s `channel_number` read, stays stock. The parsing BIFs `list_to_pid`, `list_to_port` and `list_to_ref` in `bif.c` resolve the number through `erts_channel_no_to_dist_entry`, which maps the domain's own id to this node's entry, the creation of exactly one connected entry to that entry, and any other number, or one two connected entries share, to none, which the BIFs answer with `badarg`; each number of the text is read with checked arithmetic, so one past its field's width is `badarg` rather than wrapped onto another |
 | `sys/common/erl_mmap.c`, `sys/common/erl_mmap.h` | 19. reserve, commit, decommit and release are kernel calls; `erl_mseg.c` and the allocators sit above them unchanged |
 | `beam/erl_time_sup.c` | 20. the correction over operating-system clocks is deleted; the counter and the time page are the clock |
@@ -462,7 +462,7 @@ the work. ERTS's Erlang-visible behaviour is checked against stock OTP
 | **R4.** Code is executed only from memory mapped executable, never writable in the same mapping, and only after its runtime made it coherent | BeamAsm writes through the writable mapping of a JIT object and publishes through ERTS's code barrier, which makes every scheduler execute an instruction barrier before the code is reachable; the kernel refuses writable and executable together (K8) | publishing before the barrier completes | ERTS's code-loading tests under BeamAsm on four CPUs, with reloads in a loop |
 | **R5.** A domain's runtime spends only its own budget and grant | every page it uses is committed in its own space and charged to its budget; every thread is in its own group or a child of it | none within the runtime: both are kernel-enforced | the kernel's tests; a test domain that exhausts its budget and its grant |
 | **R6.** A frame reaches ERTS's distribution code only after the funnel accepted it against the export table on the lane it arrived on | the lane port's input task, which ERTS runs under the port's lock, is the only caller of `erts_net_message`, and it calls it only with a frame the funnel returned as accepted, or to have ERTS send the answer or deliver the over-limit exit the funnel chose for a frame it judged; the funnel is the only reader of a lane's ring; the peer's identity is the lane's, never a field of the frame | a second caller of `erts_net_message`; a read of a ring outside the funnel; a frame handed on after a refusal | source checks for both chokepoints, each with a seeded violation; the hostile-peer corpus of [design-domains.md](design-domains.md#the-funnel) replayed into a lane |
-| **R7.** The export table is written at exactly three sites, each an act of the name's owner, and a holder ends with its process or alias | the holders are a field of the name's own record; the writes are the encoder's (edit 8), which adds a peer with `send` alone and only where it holds nothing yet, the spawn-into path's, which gives the spawner every right on its child, and `erx:export/3`'s, which a process of the owning domain calls to set a peer's rights on one of its own names exactly; the only clears are at process exit (edit 13) and alias deactivation (edit 14), which are the one exit path and the one deactivation function ERTS has, and at a connection's end | a fourth writer; an encode that widens a holder's rights; a write on a name the domain does not own; an exit path that skips the clear | a source check that only the three functions write holders, with a seeded fourth; a test that a pid encoded for a peer gives it `send` alone, and that one exported narrowly with `erx:export/3` and encoded again keeps the narrow rights; a test that a frame to an exited pid is answered as to a dead process |
+| **R7.** The export table is written at exactly three sites, each an act of the name's owner, and a holder ends with its process or alias | the holders are a field of the name's own record; the writes are the encoder's (edit 8), which adds a peer with `send` alone and only where it holds nothing yet, the spawn-into path's, which gives the spawner every right on its child, and `erx:export/3`'s, which a process of the owning domain calls to set a peer's rights on one of its own names exactly; the only clears are at process exit (edit 13), at an alias's end (edit 14), when its origin monitor leaves its monitor tree or `unalias/1` clears it, which are the one exit path ERTS has and the monitor tree's own functions, and at a connection's end | a fourth writer; an encode that widens a holder's rights; a write on a name the domain does not own; an exit path that skips the clear | a source check that only the three functions write holders, with a seeded fourth; a test that a pid encoded for a peer gives it `send` alone, and that one exported narrowly with `erx:export/3` and encoded again keeps the narrow rights; a test that a frame to an exited pid is answered as to a dead process |
 | **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from a queue's memory object and an offset, checked against the object, and alone writes one: a register the SVD source marks `ownedByNif` refuses `write/3` and `write_field/4`, and `post/4` takes only bytes, lengths and which segments the device writes, never an address, a descriptor field or a flag. A chain's buffer is its head descriptor's, so no two chains in flight share one. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `negotiate/2`, and after a driver's exit the NIF posts nothing on the device until `negotiate/2`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `negotiate/2` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer before its completion, a seeded post before `negotiate/2`, a seeded write of an owned register and a seeded pool owned by a process each fail the test |
 | **R9.** No binary aliases memory a device can write | `complete/2` copies each buffer's returned bytes into a fresh binary and returns the buffer to its pool, and the NIF makes no binary over a pool | a resource binary over a pool buffer | a model device on the hosted backend that rewrites a buffer after its completion, after which the binary `complete/2` returned is unchanged |
 | **R10.** The system domain holds no generated machine code, no JIT object and no C++ | it runs the interpreter image, built without BeamAsm, asmjit, libc++ and libc++abi, whose manifest carries no `ERX_IMAGE_JIT`, so its space allows no JIT object and the kernel refuses it one (K8; [design-kernel.md](design-kernel.md#image-manifests)) | a symbol of BeamAsm, asmjit or libc++ linked into the interpreter image; a root image marked `ERX_IMAGE_JIT` | the build check on the interpreter image's symbols, which a seeded asmjit object linked into it fails; the packer's refusal of a root image marked for JIT, which a seeded manifest exercises; a boot test in which a NIF of the system domain asks for a JIT object and gets the kernel's refusal |
@@ -1456,8 +1456,15 @@ source ordinal is 32 bits and its counter 96 bits; all fields use the
 byte order generated from the ABI. Each reference-producing thread gets a
 source ordinal that the runtime never reuses, and one counter shared by
 every kind of reference it creates. Allocating another source or
-advancing a counter past its range fails with `system_limit` before
-reuse. Thus reference creation needs no shared counter on its hot path.
+advancing a counter past its range fails before any value repeats:
+`erx_ref_source_open` and `erx_ref_make` return `ERX_ELIMIT`. ERTS opens one source per scheduler thread, and
+one shared by its other threads, at start, and refuses to start without
+them; it stops rather than reuse a counter value. A counter's 2^96
+values outlast any runtime (at 10^9 references a second, over 10^12
+years), and none of ERTS's many reference makers has a failure path,
+so a `system_limit` error would be a path no caller could take. Each
+scheduler finds its source by its thread number at each use. Thus
+reference creation needs no shared counter on its hot path.
 The runtime draws a fresh 128-bit key from `erx_entropy_read` at start
 and refuses to start if it cannot obtain it; the key is used only for
 references.
@@ -1476,23 +1483,65 @@ after a reboot.
 allows up to five uninterpreted ID words in `NEWER_REFERENCE_EXT`; erXos
 uses four. ERTS's local reference representation, constructors,
 comparison, hashing, text and external encoding preserve all four words
-(edit 17). Reference kinds and native resource pointers are local
-metadata, never bits a decoder interprets as a pointer: a reference
-received over a connection is plain data, the decoder never promotes a matching
-identity through the magic-resource table, and native resource APIs
-require locally created resource metadata. An alias send resolves the
-exact identity in the runtime's bounded **alias registry**, a hash table
-from the four words to the owner pid and OTP alias mode, written where
-ERTS activates an alias and cleared where it deactivates one (edit 14);
-inactive or unknown identities name no alias. An ordinary reference used
-as a request tag needs no registration. An alias's identity contains no
-embedded pid, and deactivation follows the alias's OTP mode, with
-ordinary aliases remaining active across repeated sends. So the runtime
-makes none of stock ERTS's pid references, which carry their owner's pid
-in extra words and reach five, and every reference of an erXos domain
-has the four words, printed `#Ref<D.a.b.c.d>`. A reference of another
-machine's node, which only an exposed domain receives, keeps the words
-it arrived with, as stock ERTS decodes it.
+(edit 17). Each local kind, an ordinary reference, an alias and a resource
+reference, has a size of its own, so a reference's header alone tells them
+apart. An alias's owner pid and a resource's native pointer are local
+metadata beside the four words: they are never encoded, compared, hashed or
+printed, so an alias and an ordinary reference of the same identity are
+equal, and every reference of an erXos domain is printed
+`#Ref<D.a.b.c.d>`. Nothing a decoder reads is a pointer or a kind: a
+reference of this domain's node decodes only with exactly four words, since
+no runtime of the domain makes any other, a reference received over a
+connection is plain data, the decoder never promotes a matching identity
+through the magic-resource table, and native resource APIs require locally
+created resource metadata. Promotion is a decision of the decoder's
+caller, not of the words: a decoder over a connection never promotes,
+and a local decode, `binary_to_term/1` with no connection, promotes a
+matching identity to the live table or resource, as stock ERTS does, so
+`binary_to_term(term_to_binary(Tid))` names the table. A peer that
+echoes such an identity inside a binary therefore reaches the table
+only if local code decodes that binary itself, a residual recorded in
+`TODO.md`.
+
+ERTS routes a timer's cancel and read to the scheduler that made its
+reference. The runtime finds that scheduler by deciphering the four words:
+a thread's source ordinal is its ERTS thread number, and the inverse
+permutation is accepted only when it gives an ordinal the runtime handed
+out and a counter value below the last, which no reference takes. A
+guessed reference deciphers to nothing, or to a source with no timer of
+that identity, since the lookup that follows compares all four words.
+
+An alias send, and the decoder, resolve the exact identity in the
+runtime's **alias registry**, a hash table from the four words to the owner
+pid and the holders of the alias as a name of the export table (edit 14);
+inactive or unknown identities name no alias. An entry exists exactly while
+an origin monitor keyed by the alias, with an alias state set, is in a
+monitor tree: its owner's, or the tree the exit path moves it to while
+its owner ends. The tree's own insert adds it, the tree's delete and
+its foreach-delete walks, the exit path's among them, remove it, and
+`unalias/1`, which clears the state in place, removes it. No other code adds
+one, so a reference made without a monitor, as by a monitor of the process
+itself or a spawn that fails, leaves nothing behind, and a peer, which
+reaches no monitor tree, adds nothing. The registry therefore holds no more
+than the domain's own live aliases, each counted in its owner's monitor
+memory, as a stock alias's monitor is. It has no count cap of its own: a
+cap would let one local process, by holding aliases, make every other
+process's `gen_server:call` fail, while the domain's own memory budget
+already bounds what its processes hold. The export table is another
+matter: an alias handed out to a peer takes one of its entries, and pids
+and aliases share its `exports` bound (16,384 by default,
+[design-domains.md](design-domains.md#exports)), under the rule pids
+follow: an alias handed out past that bound gives the peer no entry, the
+failure is counted, and the send goes, so the peer's reply to the alias
+reaches no one and a `gen_server:call` to another domain times out. A
+failed write leaves nothing behind: the alias's registry entry is the
+alias's own, made with its monitor and not by the hand-out, and no holder
+is written. An ordinary reference used as a
+request tag needs no registration. Deactivation follows the alias's OTP
+mode, with ordinary aliases remaining active across repeated sends. A
+reference of another machine's node, which only an exposed domain receives,
+keeps the words it arrived with, as stock ERTS decodes it.
+
 
 **Guessing and replay.** Uniqueness is exact; secrecy is computational.
 For one domain's ideal 128-bit permutation, after observing `q` outputs,

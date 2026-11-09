@@ -369,8 +369,9 @@ class RuntimeHostedSmokeTest < Minitest::Test
 
   # A failed read of the entropy entry raises {entropy, Status} and returns no bytes
   # (docs/design-runtime.md, "Per-byte primitives", the entropy entry): with
-  # ERX_HOSTED_ENTROPY_FAIL set the hosted backend refuses every erx_entropy_read with
-  # ERX_ENOTSUP, as the native backend does when it cannot reach its generator service.
+  # ERX_HOSTED_ENTROPY_FAIL=1 the hosted backend lets the boot's one read, the reference key's,
+  # through and refuses every later erx_entropy_read with ERX_ENOTSUP, as the native backend
+  # does when it cannot reach its generator service.
   def test_a_failed_entropy_read_raises
     Dir.mktmpdir('erx-hosted-home-') do |home|
       spawn_shell(home, 'ERX_HOSTED_ENTROPY_FAIL' => '1') do |reader, writer, pid|
@@ -444,6 +445,33 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'load_nif_probe:go("/nosuch/lib").' =>
         %r{^\{error,\{load_failed,"Failed to load NIF library /nosuch/lib: 'only NIFs linked into the runtime image load'"\}\}$},
       'erl_ddll:load_driver("/nosuch", "nodrv").' => /^\{error,no_ddll_available\}$/
+    )
+  end
+
+  # A runtime refuses to start without entropy for its reference key, since its references
+  # would then be guessable (docs/design-runtime.md, "Representation and aliases"): with every
+  # read failing it stops before init, with its reason.
+  def test_a_start_without_entropy_for_the_reference_key_stops_with_its_reason
+    environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge('ERX_HOSTED_ENTROPY_FAIL' => '0')
+    output, status = Open3.capture2e(environment, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s, OUTPUT.beam,
+                                     OUTPUT.archive, stdin_data: '')
+    refute status.success?, output
+    assert_match(/references: no entropy for the reference key/, output)
+  end
+
+  # Every scheduler thread makes references from a source of its own, so a reference made on
+  # a dirty CPU or dirty I/O scheduler deciphers to that thread's id, and references made at
+  # once on four of each kind of scheduler are all distinct.
+  def test_references_made_on_every_kind_of_scheduler_are_their_threads_own
+    assert_answers(
+      'Make = fun(dirty_cpu) -> erts_debug:dirty_cpu(make_ref, 5000); ' \
+      '(dirty_io) -> erts_debug:dirty_io(make_ref, 5000); ' \
+      '(normal) -> erts_debug:dirty(normal, make_ref, 5000) end, P = self(), ' \
+      'Kinds = [K || K <- [normal, dirty_cpu, dirty_io], _ <- lists:seq(1, 4)], ' \
+      '[spawn(fun() -> P ! {made, Make(K)} end) || K <- Kinds], ' \
+      'Made = [receive {made, R} -> R end || _ <- Kinds], ' \
+      '{refs_made, [E || {error, _, _} = E <- Made], ' \
+      'length(lists:usort(lists:append([R || R <- Made, is_list(R)])))}.' => /\{refs_made,\[\],60000\}\n/
     )
   end
 

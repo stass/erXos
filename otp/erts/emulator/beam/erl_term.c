@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: The three kinds of reference thing differ in size (edit 17 of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -71,36 +73,17 @@ erts_set_literal_tag(Eterm *term, Eterm *hp_start, Eterm hsz)
 void
 erts_term_init(void)
 {
-#ifdef ERTS_ORDINARY_REF_MARKER
-    /* Ordinary and magic references of same size... */
-
-    ErtsRefThing ref_thing;
-
-    ERTS_CT_ASSERT(ERTS_ORDINARY_REF_MARKER == ~((Uint32)0));
-    ref_thing.m.header = ERTS_REF_THING_HEADER;
-    ref_thing.m.mb = (ErtsMagicBinary *) ~((UWord) 3);
-    ref_thing.m.next = (struct erl_off_heap_header *) ~((UWord) 3);
-    if (ref_thing.o.marker == ERTS_ORDINARY_REF_MARKER)
-        ERTS_INTERNAL_ERROR("Cannot differentiate between magic and ordinary references");
-
-    ERTS_CT_ASSERT(offsetof(ErtsORefThing,marker) != 0);
-    ERTS_CT_ASSERT(sizeof(ErtsORefThing) == sizeof(ErtsMRefThing));
-#  ifdef ERTS_MAGIC_REF_THING_HEADER
-#    error Magic ref thing header should not have been defined...
-#  endif
-
-#else
-    /* Ordinary and magic references of different sizes... */
-
-#  ifndef ERTS_MAGIC_REF_THING_HEADER
-#    error Magic ref thing header should have been defined...
-#  endif
+    /*
+     * erXos (edit 17): the three kinds of reference thing differ in size, so the header word
+     * alone tells them apart (erl_term.h).
+     */
     ERTS_CT_ASSERT(sizeof(ErtsORefThing) != sizeof(ErtsMRefThing));
-
-#endif
+    ERTS_CT_ASSERT(sizeof(ErtsORefThing) != sizeof(ErtsPRefThing));
+    ERTS_CT_ASSERT(sizeof(ErtsPRefThing) != sizeof(ErtsMRefThing));
 
     ERTS_CT_ASSERT(ERTS_REF_THING_SIZE*sizeof(Eterm) == sizeof(ErtsORefThing));
     ERTS_CT_ASSERT(ERTS_MAGIC_REF_THING_SIZE*sizeof(Eterm) == sizeof(ErtsMRefThing));
+    ERTS_CT_ASSERT(ERTS_PID_REF_THING_SIZE*sizeof(Eterm) == sizeof(ErtsPRefThing));
 
     ERTS_CT_ASSERT((POS_BIG_SUBTAG & _BIG_TAG_MASK)
                     == POS_BIG_SUBTAG);

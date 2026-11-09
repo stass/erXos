@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a term's channel number is the creation of the node it carries.
+ * Modified by erXos: a term's channel number is the creation of the node it carries. Every kind of internal reference has four numbers (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -266,9 +266,8 @@ extern ErtsPTab erts_port;
  * Refs                                                                    *
 \*                                                                         */
 
-#define internal_ref_no_numbers(x)      (is_internal_pid_ref((x))       \
-                                         ? ERTS_PID_REF_NUMBERS         \
-                                         : ERTS_REF_NUMBERS)
+/* erXos (edit 17): every kind has the four identity words; a pid ref's pid is local. */
+#define internal_ref_no_numbers(x)      ERTS_REF_NUMBERS
 #define internal_ref_numbers(x)		(is_internal_magic_ref((x))     \
 					 ? internal_magic_ref_numbers((x)) \
                                          : internal_non_magic_ref_numbers((x)))

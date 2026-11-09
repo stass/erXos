@@ -473,7 +473,10 @@ ERTS uses it:
 * **No magic reference crosses a domain.** ERTS calls a reference to an ETS
   table, a NIF resource or prepared code a magic reference. Every runtime
   decodes a reference from a frame as a plain reference, so outside its
-  domain it is only a number, even when it comes back.
+  domain it is only a number, even when it comes back. The rule is the
+  decoder's: a decode over a connection never promotes a reference to a
+  table or resource, and a local `binary_to_term/1` does, as in stock
+  OTP ([design-runtime.md](design-runtime.md#unguessable-references)).
 
 **An exposed domain.** A domain that other machines reach keeps its node
 name and creation on the network ([design.md](design.md#networking));
@@ -910,9 +913,11 @@ typedef struct erx_exports {
 ```
 
 An export therefore exists only while its name does: a process's exit and
-an alias's deactivation clear the field at the transition that ends the
-process or deactivates the alias, so no holder outlives what it names, and
-none has to be found and removed. The funnel reaches a target's holders
+an alias's end clear the field at the transition that ends the process or
+the alias, so no holder outlives what it names, and none has to be found
+and removed. An alias's field is in its entry of the runtime's alias
+registry, which exists exactly while the alias's origin monitor is in its
+monitor tree ([design-runtime.md](design-runtime.md#unguessable-references)). The funnel reaches a target's holders
 through the record ERTS already looks up to deliver to it, and a name with
 no live record has none; a peer that was never given a name finds nothing.
 The runtime writes holders in exactly three cases, each an act of the
@@ -953,17 +958,23 @@ domain that owns the name (D4):
 
 Holders end on the path that ends what they name (D13): a pid's when the
 process exits, in ERTS's exit path, before the exit signals go out; an
-alias's when the alias is deactivated, at the same transition as its local
-alias state, under OTP's own rules (`unalias/1`, process exit, the first
+alias's when the alias is deactivated, when its origin monitor leaves its
+monitor tree or `unalias/1` clears its state, under OTP's own rules (`unalias/1`, process exit, the first
 reply through a `reply` alias, the removal of a `demonitor` alias's
 monitor); a holder of any name when `erx:export/3` sets its rights to none;
 and every holder toward a peer when the connection with that peer goes
 down. A pid export therefore lasts as long as the process: the revocable
 name is an alias, as in stock OTP. An **entry** is one peer's hold on one
 name, and the table holds at most `exports` entries (16,384 by default),
-every one of them live. Handing out a name past that writes no entry and
-counts the failure, so the name behaves at the peer as a dead process, and
-an explicit export past it fails with `system_limit`. A domain that fills
+every one of them live. Handing out a name past that, a pid or an alias,
+writes no entry and counts the failure in the one counter
+`erx_dist:exports_refused/0` reads, and so does a spawn whose child the
+table has no room for. The send itself goes, and the name behaves at the
+peer as a dead process: a reply to an alias handed out past the bound
+reaches no one, so a `gen_server:call` that handed it out times out, as one
+to a process that never answers does
+([design-runtime.md](design-runtime.md#unguessable-references)). An explicit
+export past the bound fails with `system_limit`. A domain that fills
 its own table hurts only its own correspondence.
 
 The table answers two questions. The funnel asks whether a peer holds a

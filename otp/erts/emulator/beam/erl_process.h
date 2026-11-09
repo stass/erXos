@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}; a process carries its export holders (edit 13) and F_ERX_ORIGINS (edit 16).
+ * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}; a process carries its export holders (edit 13) and F_ERX_ORIGINS (edit 16). A scheduler keeps no reference counter: its thread id picks its reference source (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -718,7 +718,6 @@ struct ErtsSchedulerData_ {
 
     Uint32 thr_id;
     Uint64 unique;
-    Uint64 ref;
 
     struct {
 	Uint64 out;

@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources, littlefs (from $(ERX_TREE)/littlefs) and libmemdraw (from $(ERX_TREE)/display) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones.
+# Modified by erXos: builds erXos sources, littlefs (from $(ERX_TREE)/littlefs), ctaes (from $(ERX_TREE)/ctaes) and libmemdraw (from $(ERX_TREE)/display) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones. Builds sys/erxos/erx_alias.c (edit 17).
 #
 # %CopyrightBegin%
 #
@@ -1032,6 +1032,10 @@ $(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o $(OBJDIR)/erx_memdraw_nif.o: $
 
 # FreeBSD SHA-256 as erXos imported it, the core of erx_bytes:sha256/1 (docs/design-runtime.md,
 # "Per-byte primitives"), built from its one copy in the tree.
+# ctaes, the reference identity primitive under sys/erxos/erx_ref.c (edit 17).
+$(OBJDIR)/ctaes.o: $(ERX_TREE)/ctaes/ctaes.c
+	$(V_CC) $(CFLAGS) -c $< -o $@
+
 $(OBJDIR)/sha256c.o: $(ERX_TREE)/kernel/crypto/sha2/sha256c.c
 	$(V_CC) $(CFLAGS) -I$(ERX_TREE)/include -c $< -o $@
 
@@ -1302,7 +1306,10 @@ OS_OBJS = \
 	$(OBJDIR)/erx_crash_area.o \
 	$(OBJDIR)/erx_event.o \
 	$(OBJDIR)/erx_event_table.o \
+	$(OBJDIR)/erx_alias.o \
 	$(OBJDIR)/erx_exports.o \
+	$(OBJDIR)/erx_ref.o \
+	$(OBJDIR)/ctaes.o \
 	$(OBJDIR)/erx_device.o \
 	$(OBJDIR)/erx_device_core.o \
 	$(OBJDIR)/erx_device_queue.o \

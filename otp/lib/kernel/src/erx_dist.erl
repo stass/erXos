@@ -23,7 +23,8 @@
 
 -export([listen/2, accept/1, accept_connection/5, setup/5, close/1, select/1,
          address/1, system_lost/1]).
--export([boot/0, names_dropped/0, export/3, exports/1, origins/1]).
+-export([boot/0, names_dropped/0, export/3, exports/1, origins/1, aliases/0,
+         exports_refused/0]).
 
 -include("net_address.hrl").
 -include("dist.hrl").
@@ -77,6 +78,20 @@ exports(_Name) ->
 %% that a peer may reach can tell who sent it; false turns it off.
 -spec origins(boolean()) -> ok.
 origins(_Flag) ->
+    erlang:nif_error(undefined).
+
+%% Edit 17: how many aliases of this domain are active, each an entry of the alias
+%% registry (erx_alias.c) from the moment its monitor is made until the alias ends.
+-spec aliases() -> non_neg_integer().
+aliases() ->
+    erlang:nif_error(undefined).
+
+%% How many times the export table, full or out of memory, refused the holder of a name
+%% handed out to a peer
+%% or of a peer's spawn: each such name behaves at the peer as a dead process. A BIF of
+%% ERTS (erx_exports.c).
+-spec exports_refused() -> non_neg_integer().
+exports_refused() ->
     erlang:nif_error(undefined).
 
 -spec listen(atom(), string()) -> {ok, {term(), #net_address{}, pos_integer()}}.

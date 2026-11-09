@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: A reference hashes its four identity words alone (edit 17 of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -2127,21 +2129,16 @@ make_internal_hash(Eterm term, erts_ihash_t salt)
             }
             break;
             case REF_SUBTAG: {
+                /*
+                 * erXos (edit 17): every kind hashes its four identity words alone, so a
+                 * pid ref hashes as the ordinary reference it equals.
+                 */
                 Uint32 *numbers = internal_ref_numbers(term);
-                ASSERT(internal_ref_no_numbers(term) >= 3);
+                ERTS_CT_ASSERT(ERTS_REF_NUMBERS == 4);
 
                 IHASH_MIX_ALPHA_2F32(IHASH_TYPE_LOCAL_REF, numbers[0]);
                 IHASH_MIX_BETA_2F32(numbers[1], numbers[2]);
-
-                if (is_internal_pid_ref(term)) {
-#ifdef ARCH_64
-                    ASSERT(internal_ref_no_numbers(term) == 5);
-                    IHASH_MIX_ALPHA_2F32(numbers[3], numbers[4]);
-#else
-                    ASSERT(internal_ref_no_numbers(term) == 4);
-                    IHASH_MIX_ALPHA(numbers[3]);
-#endif
-                }
+                IHASH_MIX_ALPHA(numbers[3]);
 
                 goto pop_next;
             }

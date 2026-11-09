@@ -22,7 +22,8 @@
  * select to clean up,
  * and a copy literal area request that gives an on-heap message its first
  * fragment copies the message's other references (its seq_trace token)
- * into that fragment too.
+ * into that fragment too. A reference compares four words (edit 17 of
+ * docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -9080,7 +9081,7 @@ is_same_internal_ref(Eterm x, Eterm y)
     Uint xlen, ylen;
     Uint32 *xnum, *ynum;
 
-    ERTS_CT_ASSERT(ERTS_REF_NUMBERS == 3 && ERTS_PID_REF_NUMBERS >= 3);
+    ERTS_CT_ASSERT(ERTS_REF_NUMBERS == 4);
 
     ASSERT(is_internal_ref(x) && is_internal_ref(y));
 

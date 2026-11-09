@@ -16,8 +16,8 @@ module Erx
     # explicit export sets exactly what its owner named.
     HOLDERS_PUT_SITES = Regexp.union(
       /\Aholders_put\(erx_exports_t \*set, uint32_t peer, uint8_t rights, put_mode_t mode\)\z/,
-      /\A\t\t\(void\)holders_put\(&p->erx_exports, peer, ERX_RIGHT_SEND, PUT_IF_NONE\);\z/,
-      /\A\t\t\(void\)holders_put\(&child->erx_exports, peer, ERX_RIGHT_SEND \| ERX_RIGHT_LINK \| ERX_RIGHT_EXIT,\z/,
+      /\A\t\tput = holders_put\(set, peer, ERX_RIGHT_SEND, PUT_IF_NONE\);\z/,
+      /\A\t\tput = holders_put\(&child->erx_exports, peer, CHILD_RIGHTS, PUT_WIDEN\);\z/,
       /\A\treturn \(holders_put\(set, peer, rights, PUT_EXACT\)\);\z/
     )
 

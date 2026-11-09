@@ -18,7 +18,8 @@
  * limitations under the License.
  *
  * Modified by erXos: the fd, spawn and forker drivers and driver_select are removed, and
- * distribution input reaches erts_net_message only through the lane driver.
+ * distribution input reaches erts_net_message only through the lane driver. References
+ * have four words (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -1067,7 +1068,7 @@ queue_port_sched_op_reply(Process *rp,
     Eterm ref;
 
     ref= make_internal_ref(hp);
-    write_ref_thing(hp, ref_num[0], ref_num[1], ref_num[2]);
+    write_ref_thing(hp, ref_num);
     hp += ERTS_REF_THING_SIZE;
 
     msg = TUPLE2(hp, ref, msg);
@@ -4902,7 +4903,7 @@ reply_io_bytes(void *vreq)
 	mp = erts_alloc_message_heap(rp, &rp_locks, hsz, &hp, &ohp);
 
 	ref = make_internal_ref(hp);
-	write_ref_thing(hp, req->refn[0], req->refn[1], req->refn[2]);
+	write_ref_thing(hp, req->refn);
 	hp += ERTS_REF_THING_SIZE;
 
 	ein = erts_bld_uint64(&hp, NULL, in);
@@ -4941,6 +4942,7 @@ erts_request_io_bytes(Process *c_p)
     req->refn[0] = refn[0];
     req->refn[1] = refn[1];
     req->refn[2] = refn[2];
+    req->refn[3] = refn[3];
     erts_atomic32_init_nob(&req->refc,
 			       (erts_aint32_t) erts_no_schedulers);
 

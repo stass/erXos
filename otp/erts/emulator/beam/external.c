@@ -19,7 +19,10 @@
  *
  * Modified by erXos: encoding a pid for another domain hands it out to that domain (edit 8,
  * erx_exports.c), and a decoded frame keeps the creation of the entry it
- * arrived on (edit 16).
+ * arrived on (edit 16). A reference of this node decodes from exactly four words, as an
+ * active alias, a magic reference only in a decode outside a connection, or an ordinary
+ * one, and an alias encoded for another domain is handed out (edit 17 of
+ * docs/design-runtime.md, edit 14).
  *
  * %CopyrightEnd%
  */
@@ -3648,6 +3651,10 @@ enc_term_int(TTBEncodeContext* ctx, ErtsAtomCacheMap *acmp, Eterm obj, byte* ep,
                 break;
             }
 
+            /* erXos: edit 14, handing an alias out to another domain (erx_exports.c). */
+            if (ctx != NULL && ctx->erx_peer != 0 && is_internal_pid_ref(obj))
+                erx_exports_hand_out(obj, ctx->erx_peer);
+
             *ep++ = NEWER_REFERENCE_EXT;
 
             erts_magic_ref_save_bin(obj);
@@ -4763,8 +4770,7 @@ dec_term_atom_common:
 
 		if ((ep = dec_sysname(edep, ep, &sysname, flags)) == NULL)
 		    goto error;
-		if ((r0 = get_int32(ep)) >= MAX_REFERENCE )
-		    goto error;
+		r0 = get_int32(ep);
 		ep += 4;
 
 		cre = get_int8(ep);
@@ -4788,8 +4794,6 @@ dec_term_atom_common:
 		}
 		r0 = get_int32(ep);
 		ep += 4;
-		if (r0 >= MAX_REFERENCE)
-		    goto error;
 		goto ref_ext_common;
 
             case NEWER_REFERENCE_EXT:
@@ -4803,7 +4807,6 @@ dec_term_atom_common:
 		ep += 4;
 		r0 = get_int32(ep);
 		ep += 4;
-
 	    ref_ext_common:
 
 		if (ref_words > ERTS_MAX_REF_NUMBERS)
@@ -4811,57 +4814,44 @@ dec_term_atom_common:
 
 		node = dec_get_node(sysname, cre, make_boxed(hp));
 		if(node == erts_this_node) {
+                    /*
+                     * erXos (docs/design-runtime.md, edit 17): a reference of this node has
+                     * exactly four words, and any four are an identity, so none is refused
+                     * for its value. Another length is a reference no runtime of this domain
+                     * made. It is an active alias when the registry knows it; else a magic
+                     * reference when the magic table does, but only when not decoding a
+                     * frame from a connection, so a peer never promotes a reference it
+                     * learnt to the resource it names; else an ordinary reference.
+                     */
                     Eterm *rtp = hp;
-                    Uint32 ref_num_buf[ERTS_MAX_REF_NUMBERS];
-                    if (r0 >= MAX_REFERENCE) {
-                          /*
-                           * Must reject local refs with more than 18 bits
-                           * in first word as magic ref table relies on it.
-                           */
-                        goto error;
-                    }
+                    Uint32 ref_num_buf[ERTS_REF_NUMBERS];
+                    ErtsMagicBinary *mb;
+                    Eterm pid;
 
+                    if (ref_words != ERTS_REF_NUMBERS)
+                        goto error;
                     ref_num = &ref_num_buf[0];
                     ref_num[0] = r0;
                     for(i = 1; i < ref_words; i++) {
                         ref_num[i] = get_int32(ep);
                         ep += 4;
                     }
-		    if (ref_words != ERTS_REF_NUMBERS) {
-                        int i;
-                        if (ref_words > ERTS_MAX_REF_NUMBERS)
-                            goto error; /* Not a ref that we created... */
-                        for (i = ref_words; i < ERTS_REF_NUMBERS; i++)
-                            ref_num[i] = 0;
-		    }
-                    if (erts_is_ordinary_ref_numbers(ref_num)) {
-                    make_ordinary_internal_ref:
-                        write_ref_thing(hp, ref_num[0], ref_num[1], ref_num[2]);
-                        hp += ERTS_REF_THING_SIZE;
+                    pid = erts_pid_ref_lookup(ref_num, ref_words);
+                    if (is_internal_pid(pid)) {
+                        write_pid_ref_thing(hp, ref_num, pid);
+                        hp += ERTS_PID_REF_THING_SIZE;
+                    }
+                    else if (edep == NULL
+                             && (mb = erts_magic_ref_lookup_bin(ref_num)) != NULL) {
+                        /* Refc on binary was increased by lookup above... */
+                        write_magic_ref_thing(hp, factory->off_heap, mb);
+                        OH_OVERHEAD(factory->off_heap,
+                                    mb->orig_size / sizeof(Eterm));
+                        hp += ERTS_MAGIC_REF_THING_SIZE;
                     }
                     else {
-                        /* Check if it is a pid reference... */
-                        Eterm pid = erts_pid_ref_lookup(ref_num, ref_words);
-                        if (is_internal_pid(pid)) {
-                            write_pid_ref_thing(hp, ref_num[0], ref_num[1],
-                                                ref_num[2], pid);
-                            hp += ERTS_PID_REF_THING_SIZE;
-                        }
-                        else if (is_non_value(pid)) {
-                            goto error; /* invalid reference... */
-                        }
-                        else {
-                            /* Check if it is a magic reference... */
-                            ErtsMagicBinary *mb = erts_magic_ref_lookup_bin(ref_num);
-                            if (!mb)
-                                goto make_ordinary_internal_ref;
-                            /* Refc on binary was increased by lookup above... */
-                            ASSERT(rtp);
-                            write_magic_ref_thing(hp, factory->off_heap, mb);
-                            OH_OVERHEAD(factory->off_heap,
-                                        mb->orig_size / sizeof(Eterm));
-                            hp += ERTS_MAGIC_REF_THING_SIZE;
-                        }
+                        write_ref_thing(hp, ref_num);
+                        hp += ERTS_REF_THING_SIZE;
                     }
 		    *objp = make_internal_ref(rtp);
 		}

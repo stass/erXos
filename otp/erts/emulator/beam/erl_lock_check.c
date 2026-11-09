@@ -19,6 +19,9 @@
  *
  * Modified by erXos: the event table's lock replaces the poll set's in the order, and the
  * export table's stripes (erx_exports.c) come before the allocator's, taken under them.
+ * The alias registry's stripes come before the export table's, which are taken under
+ * them, and the shared reference source's lock, which holds no other, comes after both
+ * (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -178,7 +181,11 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"record_staging_lock",                     NULL},
     {"global_literals",                         NULL},
     {"errno_table",                             NULL},
+    {"erx_alias",                               NULL},
+    LEVEL,
     {"erx_exports",                             NULL},
+    LEVEL,
+    {"ref_shared_source",                       NULL},
     LEVEL,
     {"alcu_allocator",			        "index"},
     LEVEL,

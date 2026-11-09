@@ -18,7 +18,8 @@
  * limitations under the License.
  *
  * Modified by erXos: statistics(runtime) fails with notsup where CPU time is unsupported, kernel_poll is false and check_io is empty;
- * set_internal_state(jit_alias, How) runs BeamAsm's alias probe.
+ * set_internal_state(jit_alias, How) runs BeamAsm's alias probe. A magic reference is
+ * told by its thing, not its words (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -4825,15 +4826,9 @@ BIF_RETTYPE erts_debug_get_internal_state_1(BIF_ALIST_1)
                 Eterm bin_addr_term, refc_term, test_type;
                 Uint sz;
                 Eterm *hp;
-                if (!is_internal_magic_ref(tp[2])) {
-                    if (is_internal_ordinary_ref(tp[2])) {
-                        ErtsORefThing *rtp;
-                        rtp = (ErtsORefThing *) internal_ref_val(tp[2]);
-                        if (erts_is_ref_numbers_magic(rtp->num))
-                            BIF_RET(am_true);
-                    }
+                /* erXos (edit 17): no identity marks a magic reference; its thing does. */
+                if (!is_internal_magic_ref(tp[2]))
                     BIF_RET(am_false);
-                }
                 bin = erts_magic_ref2bin(tp[2]);
                 refc = erts_refc_read(&bin->intern.refc, 1);
                 bin_addr = (UWord) bin;

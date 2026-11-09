@@ -26,6 +26,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -408,8 +409,31 @@ erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
 }
 
 /*
- * The host's getentropy. With ERX_HOSTED_ENTROPY_FAIL set every read is ERX_ENOTSUP, the failure
- * the native backend gives when it cannot reach its generator service, so a test sees it.
+ * Whether this read is one ERX_HOSTED_ENTROPY_FAIL fails. Its value N lets the first N reads of
+ * the process through and fails every later one, so a test fails the reads after boot (N = 1,
+ * the reference key's read) or every read (N = 0). A value that is not a decimal count fails
+ * every read.
+ */
+static bool
+entropy_read_fails(void)
+{
+	static _Atomic uint64_t reads;
+	const char *word = getenv("ERX_HOSTED_ENTROPY_FAIL");
+	char *end = NULL;
+	unsigned long long through;
+
+	if (word == NULL)
+		return (false);
+	errno = 0;
+	through = strtoull(word, &end, 10);
+	if (*word < '0' || *word > '9' || *end != '\0' || errno != 0)
+		through = 0;
+	return (atomic_fetch_add(&reads, 1) >= through);
+}
+
+/*
+ * The host's getentropy. A read ERX_HOSTED_ENTROPY_FAIL fails is ERX_ENOTSUP, the failure the
+ * native backend gives when it cannot reach its generator service, so a test sees it.
  */
 int
 erx_entropy_read(uint32_t len)
@@ -419,7 +443,7 @@ erx_entropy_read(uint32_t len)
 
 	if (checked != ERX_OK)
 		return (checked);
-	if (getenv("ERX_HOSTED_ENTROPY_FAIL") != NULL)
+	if (entropy_read_fails())
 		return (ERX_ENOTSUP);
 	if (len != 0 && getentropy(words, len) != 0)
 		return (ERX_ENOTSUP);

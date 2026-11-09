@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: References are AES-128 identities of four words from one source per thread id (edit 17 of docs/design-runtime.md), the magic tables are keyed by all four, and a pid ref of this node is looked up in the alias registry.
+ *
  * %CopyrightEnd%
  */
 
@@ -34,67 +36,117 @@
 #include "hash.h"
 #include "erl_binary.h"
 
+#include "erx/explicit_bzero.h"
+#include "liberx/backend/api.h"
+#include "erx_alias.h"
+#include "erx_ref.h"
+
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *\
  * Reference                                                         *
 \*                                                                   */
 
-static union {
-    erts_atomic64_t count;
-    char align__[ERTS_CACHE_LINE_SIZE];
-} global_reference erts_align_attribute(ERTS_CACHE_LINE_SIZE);
-
-
 /*
- * ref[0] indicate thread creating reference as follows:
+ * erXos (docs/design-runtime.md, edit 17): a reference's identity is AES-128, under the
+ * domain's secret key, of the source ordinal of the thread that made it and that source's
+ * counter (sys/erxos/erx_ref.h), so its four words name nothing a party can guess.
  *
- * - ref[0] == 0 => Non-scheduler thread;
- * - else; ref[0] <= erts_no_schedulers =>
- *      ordinary scheduler with id == ref[0];
- * - else; ref[0] <= erts_no_schedulers
- *                   + erts_no_dirty_cpu_schedulers =>
- *      dirty cpu scheduler with id == 'ref[0] - erts_no_schedulers';
- * - else =>
- *      dirty io scheduler with id == 'ref[0]
- *                                     - erts_no_schedulers
- *                                     - erts_no_dirty_cpu_schedulers'
+ * Each thread id has one source, in ref_sources[thr_id]: 0 is shared by the threads that are
+ * no scheduler, under ref_shared_lock, and 1 to max_thr_id are the normal, dirty CPU and
+ * dirty I/O schedulers', each used only by the scheduler whose thread id indexes it. A
+ * maker indexes it at each use: a dirty scheduler's thread id takes its offset only after
+ * init_scheduler_data, so a source picked there would be a normal scheduler's.
+ * init_reference opens them in index order from a fresh runtime, so a source's ordinal is
+ * its thread id, and deciphering a reference (erts_get_ref_numbers_thr_id) gives the thread
+ * id of the thread that made it, which is how a timer's reference reaches its scheduler.
  */
 
-#ifdef DEBUG
+static erx_ref_runtime_t ref_runtime;
+static erx_ref_source_t *ref_sources;
 static Uint32 max_thr_id;
-#endif
+static erts_mtx_t ref_shared_lock;
 
 static void init_magic_ref_tables(void);
 
-static Uint64 ref_init_value;
+/*
+ * The domain's reference key, from one erx_entropy_read, taken and zeroed out of the UTCB at
+ * once, as the entropy NIF does (nifs/erxos/erx_bytes_nif.c). Without it no reference this
+ * runtime makes could be unguessable, so the runtime refuses to start.
+ */
+static void
+read_ref_key(uint8_t key[ERX_REF_KEY_BYTES])
+{
+    uint64_t words[ERX_REF_KEY_BYTES / sizeof(uint64_t)];
+    erx_utcb_t *utcb;
+    unsigned int i;
+    int status;
+
+    ERTS_CT_ASSERT(ERX_REF_KEY_BYTES % sizeof(uint64_t) == 0);
+    ERTS_CT_ASSERT(ERX_REF_KEY_BYTES <= ERX_ENTROPY_BYTES_MAX);
+    status = erx_entropy_read(ERX_REF_KEY_BYTES);
+    if (status != ERX_OK)
+        erts_exit(ERTS_ERROR_EXIT, "references: no entropy for the reference key (status %d)\n",
+                  status);
+    utcb = erx_utcb_self();
+    for (i = 0; i < ERX_REF_KEY_BYTES / sizeof(uint64_t); i++) {
+        (void) erx_utcb_mr_load(utcb, i, &words[i]);
+        (void) erx_utcb_mr_store(utcb, i, 0);
+    }
+    sys_memcpy(key, words, ERX_REF_KEY_BYTES);
+    erx_explicit_bzero(words, sizeof(words));
+}
 
 static void
 init_reference(void)
 {
-    SysTimeval tv;
-    sys_gettimeofday(&tv);
-    ref_init_value = 0;
-    ref_init_value |= (Uint64) tv.tv_sec;
-    ref_init_value |= ((Uint64) tv.tv_usec) << 32;
-    ref_init_value *= (Uint64) 268438039;
-    ref_init_value += (Uint64) tv.tv_usec;
-#ifdef DEBUG
+    uint8_t key[ERX_REF_KEY_BYTES];
+    Uint32 i;
+
     max_thr_id = (Uint32) erts_no_schedulers;
     max_thr_id += (Uint32) erts_no_dirty_cpu_schedulers;
     max_thr_id += (Uint32) erts_no_dirty_io_schedulers;
-#endif
-    erts_atomic64_init_nob(&global_reference.count,
-			   (erts_aint64_t) ref_init_value);
+    read_ref_key(key);
+    erx_ref_runtime_init(&ref_runtime, key);	/* erases key */
+    ref_sources = erts_alloc_permanent_cache_aligned(ERTS_ALC_T_MREF_TAB,
+                                                     sizeof(*ref_sources) * (max_thr_id + 1));
+    for (i = 0; i <= max_thr_id; i++)
+        if (erx_ref_source_open(&ref_runtime, &ref_sources[i]) != ERX_OK
+            || ref_sources[i].ordinal != i)
+            erts_exit(ERTS_ABORT_EXIT, "references: no source for thread %u\n", (unsigned) i);
+    erts_mtx_init(&ref_shared_lock, "ref_shared_source", NIL,
+                  ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
     init_magic_ref_tables();
+    erx_alias_init();
 }
 
+/*
+ * A source holds 2^96 counter values, which no runtime uses up (at 10^9 references a second,
+ * over 10^12 years), so a spent source is a fault of the runtime, never something a party
+ * can bring about, and the runtime stops rather than reuse a value: none of ERTS's reference
+ * makers has a failure path (docs/design-runtime.md, "Unguessable references").
+ */
 static ERTS_INLINE void
-global_make_ref_in_array(Uint32 thr_id, Uint32 ref[ERTS_REF_NUMBERS])
+make_from_source(erx_ref_source_t *source, Uint32 ref[ERTS_REF_NUMBERS])
 {
-    Uint64 value;
+    if (erx_ref_make(&ref_runtime, source, ref) != ERX_OK)
+        erts_exit(ERTS_ABORT_EXIT, "references: source %u is spent\n", (unsigned) source->ordinal);
+}
 
-    value = (Uint64) erts_atomic64_inc_read_mb(&global_reference.count);
-    
-    erts_set_ref_numbers(ref, thr_id, value);
+void
+erts_sched_make_ref_in_array(ErtsSchedulerData *esdp, Uint32 ref[ERTS_REF_NUMBERS])
+{
+    ASSERT(esdp && esdp->thr_id >= 1 && esdp->thr_id <= max_thr_id);
+    make_from_source(&ref_sources[esdp->thr_id], ref);
+}
+
+Uint32
+erts_get_ref_numbers_thr_id(const Uint32 *ref)
+{
+    uint32_t ordinal;
+
+    if (erx_ref_source_of(&ref_runtime, ref, &ordinal) != ERX_OK)
+        return ERTS_REF_NO_THR_ID;
+    ASSERT(ordinal <= max_thr_id);
+    return (Uint32) ordinal;
 }
 
 static ERTS_INLINE void
@@ -103,8 +155,11 @@ make_ref_in_array(Uint32 ref[ERTS_REF_NUMBERS])
     ErtsSchedulerData *esdp = erts_get_scheduler_data();
     if (esdp)
 	erts_sched_make_ref_in_array(esdp, ref);
-    else
-	global_make_ref_in_array(0, ref);
+    else {
+        erts_mtx_lock(&ref_shared_lock);
+        make_from_source(&ref_sources[0], ref);
+        erts_mtx_unlock(&ref_shared_lock);
+    }
 }
 
 void
@@ -113,12 +168,11 @@ erts_make_ref_in_array(Uint32 ref[ERTS_REF_NUMBERS])
     make_ref_in_array(ref);
 }
 
+/* A magic reference is an ordinary one whose identity its magic binary keeps. */
 void
 erts_make_magic_ref_in_array(Uint32 ref[ERTS_REF_NUMBERS])
 {
     make_ref_in_array(ref);
-    ASSERT(!(ref[1] & ERTS_REF1_MAGIC_MARKER_BIT__));
-    ref[1] |= ERTS_REF1_MAGIC_MARKER_BIT__;
 }
 
 Eterm erts_make_ref_in_buffer(Eterm buffer[ERTS_REF_THING_SIZE])
@@ -127,7 +181,7 @@ Eterm erts_make_ref_in_buffer(Eterm buffer[ERTS_REF_THING_SIZE])
     Uint32 ref[ERTS_REF_NUMBERS];
 
     make_ref_in_array(ref);
-    write_ref_thing(hp, ref[0], ref[1], ref[2]);
+    write_ref_thing(hp, ref);
     return make_internal_ref(hp);
 }
 
@@ -141,43 +195,52 @@ Eterm erts_make_ref(Process *c_p)
     hp = HAlloc(c_p, ERTS_REF_THING_SIZE);
 
     make_ref_in_array(ref);
-    write_ref_thing(hp, ref[0], ref[1], ref[2]);
+    write_ref_thing(hp, ref);
 
     return make_internal_ref(hp);
 }
 
+/*
+ * A pid ref: an ordinary identity with its owner's pid kept beside it on the heap. It becomes
+ * an active alias, recorded in the registry, when a monitor keyed by it enters the owner's
+ * monitor tree with an alias state (erx_alias.h).
+ */
 Eterm erts_make_pid_ref(Process *c_p)
 {
     Eterm* hp;
     Uint32 ref[ERTS_REF_NUMBERS];
-    Eterm pid;
 
     ERTS_LC_ASSERT(ERTS_PROC_LOCK_MAIN & erts_proc_lc_my_proc_locks(c_p));
 
     hp = HAlloc(c_p, ERTS_PID_REF_THING_SIZE);
 
     make_ref_in_array(ref);
-
-    ASSERT(!(ref[1] & ERTS_REF1_PID_MARKER_BIT__));
-    ref[1] |= ERTS_REF1_PID_MARKER_BIT__;
-
-    pid = c_p->common.id;
-
-    write_pid_ref_thing(hp, ref[0], ref[1], ref[2], pid);
+    write_pid_ref_thing(hp, ref, c_p->common.id);
 
     return make_internal_ref(hp);
 }
 
 /*
- * Magic reference tables
+ * The pid of the active alias refn of this node, from the registry; am_undefined when refn is
+ * no active alias, so the decoder makes it an ordinary reference. refn is untrusted input.
+ */
+Eterm
+erts_pid_ref_lookup(const Uint32 *refn, int len)
+{
+    uint64_t owner;
+
+    if (len != ERTS_REF_NUMBERS)
+        return am_undefined;
+    owner = erx_alias_owner(refn);
+    return owner == 0 ? am_undefined : (Eterm) owner;
+}
+
+/*
+ * Magic reference tables, keyed by a reference's four words. Identity words are uniform, so
+ * the first one picks the table, whichever thread made the reference.
  */
 
-typedef struct {
-    HashBucket hash;
-    ErtsMagicBinary *mb;
-    Uint64 value;
-    Uint32 thr_id;
-} ErtsMagicRefTableEntry;
+typedef ErtsNSchedMagicRefTableEntry ErtsMagicRefTableEntry;
 
 typedef struct {
     erts_rwmtx_t rwmtx;
@@ -194,22 +257,27 @@ typedef struct {
 
 ErtsAlignedMagicRefTable *magic_ref_table;
 
+static ERTS_INLINE ErtsMagicRefTable *
+magic_ref_table_of(const Uint32 refn[ERTS_REF_NUMBERS])
+{
+    return &magic_ref_table[refn[0] % (erts_no_schedulers + 1)].u.table;
+}
+
+static ERTS_INLINE void
+magic_ref_key(ErtsMagicRefTableEntry *tmpl, const Uint32 refn[ERTS_REF_NUMBERS])
+{
+    sys_memcpy(tmpl->num, refn, sizeof(tmpl->num));
+}
+
 ErtsMagicBinary *
-erts_magic_ref_lookup_bin__(Uint32 refn[ERTS_REF_NUMBERS])
+erts_magic_ref_lookup_bin(const Uint32 refn[ERTS_REF_NUMBERS])
 {
     ErtsMagicRefTableEntry tmpl;
     ErtsMagicRefTableEntry *tep;
     ErtsMagicBinary *mb;
-    ErtsMagicRefTable *tblp;
+    ErtsMagicRefTable *tblp = magic_ref_table_of(refn);
 
-    ASSERT(erts_is_ref_numbers_magic(refn));
-
-    tmpl.value = erts_get_ref_numbers_value(refn);
-    tmpl.thr_id = erts_get_ref_numbers_thr_id(refn);
-    if (tmpl.thr_id > erts_no_schedulers)
-	tblp = &magic_ref_table[0].u.table;
-    else
-	tblp = &magic_ref_table[tmpl.thr_id].u.table;
+    magic_ref_key(&tmpl, refn);
 
     erts_rwmtx_rlock(&tblp->rwmtx);
 
@@ -243,13 +311,8 @@ erts_magic_ref_save_bin__(Eterm ref)
     mrtp = (ErtsMRefThing *) internal_ref_val(ref);
     refn = mrtp->mb->refn;
 
-    tmpl.value = erts_get_ref_numbers_value(refn);
-    tmpl.thr_id = erts_get_ref_numbers_thr_id(refn);
-
-    if (tmpl.thr_id > erts_no_schedulers)
-	tblp = &magic_ref_table[0].u.table;
-    else
-	tblp = &magic_ref_table[tmpl.thr_id].u.table;
+    magic_ref_key(&tmpl, refn);
+    tblp = magic_ref_table_of(refn);
 
     erts_rwmtx_rlock(&tblp->rwmtx);
 
@@ -259,21 +322,10 @@ erts_magic_ref_save_bin__(Eterm ref)
 
     if (!tep) {
 	ErtsMagicRefTableEntry *used_tep;
-	
-	ASSERT(tmpl.value == erts_get_ref_numbers_value(refn));
-	ASSERT(tmpl.thr_id == erts_get_ref_numbers_thr_id(refn));
 
-	if (tblp != &magic_ref_table[0].u.table) {
-	    tep = erts_alloc(ERTS_ALC_T_MREF_NSCHED_ENT,
-			     sizeof(ErtsNSchedMagicRefTableEntry));
-	}
-	else {
-	    tep = erts_alloc(ERTS_ALC_T_MREF_ENT,
-			     sizeof(ErtsMagicRefTableEntry));
-	    tep->thr_id = tmpl.thr_id;
-	}
-
-	tep->value = tmpl.value;
+	tep = erts_alloc(ERTS_ALC_T_MREF_NSCHED_ENT,
+			 sizeof(ErtsMagicRefTableEntry));
+	magic_ref_key(tep, refn);
 	tep->mb = mrtp->mb;
 
 	erts_rwmtx_rwlock(&tblp->rwmtx);
@@ -282,12 +334,8 @@ erts_magic_ref_save_bin__(Eterm ref)
 
 	erts_rwmtx_rwunlock(&tblp->rwmtx);
 
-	if (used_tep != tep) {
-	    if (tblp != &magic_ref_table[0].u.table)
-		erts_free(ERTS_ALC_T_MREF_NSCHED_ENT, (void *) tep);
-	    else
-		erts_free(ERTS_ALC_T_MREF_ENT, (void *) tep);
-	}
+	if (used_tep != tep)
+	    erts_free(ERTS_ALC_T_MREF_NSCHED_ENT, (void *) tep);
     }
 }
 
@@ -296,15 +344,9 @@ erts_magic_ref_remove_bin(Uint32 refn[ERTS_REF_NUMBERS])
 {
     ErtsMagicRefTableEntry tmpl;
     ErtsMagicRefTableEntry *tep;
-    ErtsMagicRefTable *tblp;
+    ErtsMagicRefTable *tblp = magic_ref_table_of(refn);
 
-    tmpl.value = erts_get_ref_numbers_value(refn);
-    tmpl.thr_id = erts_get_ref_numbers_thr_id(refn);
-
-    if (tmpl.thr_id > erts_no_schedulers)
-	tblp = &magic_ref_table[0].u.table;
-    else
-	tblp = &magic_ref_table[tmpl.thr_id].u.table;
+    magic_ref_key(&tmpl, refn);
 
     erts_rwmtx_rlock(&tblp->rwmtx);
 
@@ -313,52 +355,28 @@ erts_magic_ref_remove_bin(Uint32 refn[ERTS_REF_NUMBERS])
     erts_rwmtx_runlock(&tblp->rwmtx);
 
     if (tep) {
-
-	ASSERT(tmpl.value == erts_get_ref_numbers_value(refn));
-	ASSERT(tmpl.thr_id == erts_get_ref_numbers_thr_id(refn));
-
 	erts_rwmtx_rwlock(&tblp->rwmtx);
 
 	tep = hash_remove(&tblp->hash, &tmpl);
-	ASSERT(tep);
 
 	erts_rwmtx_rwunlock(&tblp->rwmtx);
 
-	if (tblp != &magic_ref_table[0].u.table)
+	if (tep)
 	    erts_free(ERTS_ALC_T_MREF_NSCHED_ENT, (void *) tep);
-	else
-	    erts_free(ERTS_ALC_T_MREF_ENT, (void *) tep);
     }
 }
 
-static int nsched_mreft_cmp(void *ve1, void *ve2)
-{
-    ErtsNSchedMagicRefTableEntry *e1 = ve1;
-    ErtsNSchedMagicRefTableEntry *e2 = ve2;
-    return e1->value != e2->value;
-}
-
-static int non_nsched_mreft_cmp(void *ve1, void *ve2)
+static int mreft_cmp(void *ve1, void *ve2)
 {
     ErtsMagicRefTableEntry *e1 = ve1;
     ErtsMagicRefTableEntry *e2 = ve2;
-    return e1->value != e2->value || e1->thr_id != e2->thr_id;
+    return sys_memcmp(e1->num, e2->num, sizeof(e1->num)) != 0;
 }
 
-static HashValue nsched_mreft_hash(void *ve)
-{
-    ErtsNSchedMagicRefTableEntry *e = ve;
-    return (HashValue) e->value;
-}
-
-static HashValue non_nsched_mreft_hash(void *ve)
+static HashValue mreft_hash(void *ve)
 {
     ErtsMagicRefTableEntry *e = ve;
-    HashValue h;
-    h = (HashValue) e->thr_id;
-    h *= 268440163;
-    h += (HashValue) e->value;
-    return h;
+    return (HashValue) e->num[1];
 }
 
 static void *mreft_alloc(void *ve)
@@ -395,14 +413,13 @@ init_magic_ref_tables(void)
 {
     HashFunctions hash_funcs;
     int i;
-    ErtsMagicRefTable *tblp;
 
     magic_ref_table = erts_alloc_permanent_cache_aligned(ERTS_ALC_T_MREF_TAB,
 							 (sizeof(ErtsAlignedMagicRefTable)
 							  * (erts_no_schedulers + 1)));
 
-    hash_funcs.hash = non_nsched_mreft_hash;
-    hash_funcs.cmp = non_nsched_mreft_cmp;
+    hash_funcs.hash = mreft_hash;
+    hash_funcs.cmp = mreft_cmp;
 
     hash_funcs.alloc = mreft_alloc;
     hash_funcs.free = mreft_free;
@@ -410,17 +427,7 @@ init_magic_ref_tables(void)
     hash_funcs.meta_free = mreft_meta_free;
     hash_funcs.meta_print = erts_print;
 
-    tblp = &magic_ref_table[0].u.table;
-    erts_snprintf(&tblp->name[0], sizeof(tblp->name),
-		  "magic_ref_table_0");
-    hash_init(0, &tblp->hash, &tblp->name[0], 1, hash_funcs);
-    erts_rwmtx_init(&tblp->rwmtx, "magic_ref_table", NIL,
-        ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
-
-    hash_funcs.hash = nsched_mreft_hash;
-    hash_funcs.cmp = nsched_mreft_cmp;
-
-    for (i = 1; i <= erts_no_schedulers; i++) {
+    for (i = 0; i <= erts_no_schedulers; i++) {
 	ErtsMagicRefTable *tblp = &magic_ref_table[i].u.table;
 	erts_snprintf(&tblp->name[0], sizeof(tblp->name),
 		      "magic_ref_table_%d", i);
@@ -810,7 +817,6 @@ void
 erts_sched_bif_unique_init(ErtsSchedulerData *esdp)
 {
     esdp->unique = (Uint64) 0;
-    esdp->ref = (Uint64) ref_init_value;
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *\

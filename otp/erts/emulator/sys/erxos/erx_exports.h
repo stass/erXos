@@ -26,16 +26,20 @@ void	erx_exports_init(void);
 /*
  * The three writers (R7), each an act of the name's owner:
  *
- * 1. erx_exports_hand_out: the external encoder put the internal pid pid into a frame
- *    for peer, a domain's id (edit 8); peer gets send where it holds nothing yet.
+ * 1. erx_exports_hand_out: the external encoder put name, an internal pid (edit 8) or an
+ *    active alias (edit 14), into a frame for peer, a domain's id; peer gets send on it
+ *    where it holds nothing yet. An alias's holders are on its registry entry
+ *    (erx_alias.h) and close when the alias ends.
  * 2. erx_exports_spawned: a SPAWN_REQUEST from peer made child; peer gets send, link and
  *    exit on it before the child runs.
+ *    When the table is full, or memory short, either writes nothing and counts the
+ *    refusal (erx_dist:exports_refused/0): the peer holds nothing on the name.
  * 3. erx_dist:export/3, a BIF of this file, and the boot exports the lane driver asks
  *    for with erx_exports_boot: exactly the rights named.
  *
  * tools/lib/erx/chokepoint_rules/exports.rb keeps every other site off the insert.
  */
-void	erx_exports_hand_out(Eterm pid, uint32_t peer);
+void	erx_exports_hand_out(Eterm name, uint32_t peer);
 void	erx_exports_spawned(struct process *child, struct dist_entry_ *dep);
 
 /*

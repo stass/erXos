@@ -74,7 +74,8 @@ class ErxRefTest < Minitest::Test
   CHECKS = %i[test_permutation_is_aes_128 test_identities_are_the_permuted_block_and_counters_carry_and_stop
               test_an_unopened_source_makes_nothing test_ordinals_are_refused_past_the_last
               test_consecutive_identities_differ_in_half_their_bits
-              test_concurrent_sources_reach_every_exhaustion_without_a_repeat].freeze
+              test_concurrent_sources_reach_every_exhaustion_without_a_repeat
+              test_the_source_of_an_identity_is_deciphered_and_bounded].freeze
   # Each fault with the checks that exist to catch it; the mutant test also requires it to build.
   Mutant = Data.define(:original, :replacement, :caught_by)
   MUTANTS = {
@@ -87,6 +88,8 @@ class ErxRefTest < Minitest::Test
                                            [IDENTITIES, :test_an_unopened_source_makes_nothing, CONCURRENT]),
     'one value too many' => Mutant.new('source->remaining_low = ERX_REF_COUNTER_LAST_LOW;',
                                     'source->remaining_low = ERX_REF_COUNTER_LAST_LOW + 1;', [CONCURRENT]),
+    'unbounded source_of' => Mutant.new('if (source >= atomic_load_explicit(&runtime->taken, memory_order_relaxed))',
+                                        'if (false)', [:test_the_source_of_an_identity_is_deciphered_and_bounded]),
     'one ordinal too many' => Mutant.new('if (taken >= SOURCE_ORDINALS)', 'if (taken > SOURCE_ORDINALS)',
                                        [:test_ordinals_are_refused_past_the_last, CONCURRENT])
   }.freeze
@@ -126,6 +129,18 @@ class ErxRefTest < Minitest::Test
   def test_ordinals_are_refused_past_the_last
     answers = run_driver(build, ["sources #{(1 << 32) - 2} 4", 'sources 0 2'])
     assert_equal ["source #{U32 - 1}", "source #{U32}", 'source limit', 'source limit', 'source 0', 'source 1'], answers
+  end
+
+  # A deciphered identity names its source only within what the runtime handed out: the
+  # ordinals taken, and counter values below the last. Forged words, a block of an ordinal
+  # not yet taken or of the last counter value, are refused.
+  def test_the_source_of_an_identity_is_deciphered_and_bounded
+    key = hex(Random.new(SEED).bytes(16))
+    answers = run_driver(build, ["source_of #{key} 3 2 7 9", "source_of #{key} 3 0 0 0",
+                                 "source_of #{key} 3 3 0 0", "source_of #{key} 3 #{U32} 0 0",
+                                 "source_of #{key} 3 1 #{U32} #{U64}", "source_of #{key} 3 1 #{U32} #{U64 - 1}"])
+    assert_equal ["source_of 2", "source_of 0", "source_of refused", "source_of refused", "source_of refused",
+                  "source_of 1"], answers
   end
 
   def test_consecutive_identities_differ_in_half_their_bits

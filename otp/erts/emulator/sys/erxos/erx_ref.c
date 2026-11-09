@@ -127,3 +127,31 @@ erx_ref_make(const erx_ref_runtime_t *runtime, erx_ref_source_t *source,
 		words[i] = load32(identity + ERX_REF_IDENTITY_OFF_ID + i * sizeof(uint32_t));
 	return (ERX_OK);
 }
+
+/*
+ * The block's fields are checked against what erx_ref_make enciphers: an ordinal the
+ * runtime has handed out, and a counter value below the last, which no reference takes.
+ */
+int
+erx_ref_source_of(const erx_ref_runtime_t *runtime, const uint32_t words[ERX_REF_WORDS],
+    uint32_t *ordinal)
+{
+	uint8_t identity[ERX_REF_IDENTITY_SIZE], block[ERX_REF_BLOCK_SIZE];
+	uint64_t low;
+	uint32_t source, high;
+
+	for (uint32_t i = 0; i < ERX_REF_WORDS; i++)
+		store32(identity + ERX_REF_IDENTITY_OFF_ID + i * sizeof(uint32_t), words[i]);
+	AES128_decrypt(&runtime->aes, 1, block, identity);
+	source = load32(block + ERX_REF_BLOCK_OFF_SOURCE);
+	low = (uint64_t)load32(block + ERX_REF_BLOCK_OFF_COUNTER) |
+	    (uint64_t)load32(block + ERX_REF_BLOCK_OFF_COUNTER + sizeof(uint32_t)) << 32;
+	high = load32(block + ERX_REF_BLOCK_OFF_COUNTER + 2 * sizeof(uint32_t));
+	if (source >= atomic_load_explicit(&runtime->taken, memory_order_relaxed))
+		return (ERX_EINVAL);
+	if (high > ERX_REF_COUNTER_LAST_HIGH ||
+	    (high == ERX_REF_COUNTER_LAST_HIGH && low >= ERX_REF_COUNTER_LAST_LOW))
+		return (ERX_EINVAL);
+	*ordinal = source;
+	return (ERX_OK);
+}

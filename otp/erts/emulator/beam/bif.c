@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width.
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width. List_to_ref takes four words for this node, and unalias/1 ends the alias in the alias registry (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -62,6 +62,7 @@
 #include "beam_load.h"
 #include "beam_common.h"
 #include "dtrace-wrapper.h"
+#include "erx_alias.h"
 
 Export *erts_await_result;
 static Export await_exit_trap;
@@ -4782,38 +4783,28 @@ BIF_RETTYPE list_to_ref_1(BIF_ALIST_1)
 	goto bad;
 
     if(dep == erts_this_dist_entry) {
+        /*
+         * erXos (edit 17): a reference of this node has exactly four words, every value of
+         * them an identity; it is an active alias, a magic reference or an ordinary one.
+         */
         ErtsMagicBinary *mb;
-        Uint32 sid;
-        if (refn[0] >= MAX_REFERENCE) goto bad;
-        if (n != ERTS_REF_NUMBERS && n != ERTS_PID_REF_NUMBERS) goto bad;
-        sid = erts_get_ref_numbers_thr_id(refn);
-        if (sid > erts_no_schedulers) goto bad;
-        if (erts_is_ordinary_ref_numbers(refn)) {
-        make_ordinary_internal_ref:
-            hp = HAlloc(BIF_P, ERTS_REF_THING_SIZE);
-            write_ref_thing(hp, refn[0], refn[1], refn[2]);
+        Eterm pid;
+        if (n != ERTS_REF_NUMBERS) goto bad;
+        pid = erts_pid_ref_lookup(refn, n);
+        if (is_internal_pid(pid)) {
+            hp = HAlloc(BIF_P, ERTS_PID_REF_THING_SIZE);
+            write_pid_ref_thing(hp, refn, pid);
             res = make_internal_ref(hp);
         }
+        else if ((mb = erts_magic_ref_lookup_bin(refn)) != NULL) {
+            hp = HAlloc(BIF_P, ERTS_MAGIC_REF_THING_SIZE);
+            res = erts_mk_magic_ref(&hp, &BIF_P->off_heap,
+                                    (Binary *) mb);
+        }
         else {
-            /* Check if it is a pid reference... */
-            Eterm pid = erts_pid_ref_lookup(refn, n);
-            if (is_internal_pid(pid)) {
-                hp = HAlloc(BIF_P, ERTS_PID_REF_THING_SIZE);
-                write_pid_ref_thing(hp, refn[0], refn[1], refn[2], pid);
-                res = make_internal_ref(hp);
-            }
-            else if (is_non_value(pid)) {
-                goto bad;
-            }
-            else {
-                /* Check if it is a magic reference... */
-                mb = erts_magic_ref_lookup_bin(refn);
-                if (!mb)
-                    goto make_ordinary_internal_ref;
-                hp = HAlloc(BIF_P, ERTS_MAGIC_REF_THING_SIZE);
-                res = erts_mk_magic_ref(&hp, &BIF_P->off_heap,
-                                        (Binary *) mb);
-            }
+            hp = HAlloc(BIF_P, ERTS_REF_THING_SIZE);
+            write_ref_thing(hp, refn);
+            res = make_internal_ref(hp);
         }
     }
     else {
@@ -5933,6 +5924,8 @@ BIF_RETTYPE unalias_1(BIF_ALIST_1)
 
     prio = !!(mon->flags & ERTS_ML_FLG_PRIO_ALIAS);
     mon->flags &= ~(ERTS_ML_STATE_ALIAS_MASK|ERTS_ML_FLG_PRIO_ALIAS);
+    /* erXos: the alias ends here, though its monitor may stay in the tree (erx_alias.h). */
+    erx_alias_remove(internal_ref_numbers(BIF_ARG_1));
     if (ERTS_ML_GET_TYPE(mon) == ERTS_MON_TYPE_ALIAS) {
         erts_monitor_tree_delete(&ERTS_P_MONITORS(BIF_P), mon);
         erts_monitor_release(mon);

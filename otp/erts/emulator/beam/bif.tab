@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds erx_device's, erx_trace_ring's and erx_dist's BIFs.
+# Modified by erXos: adds erx_device's, erx_trace_ring's and erx_dist's BIFs. Adds erx_dist:aliases/0 (edit 17) and erx_dist:exports_refused/0.
 #
 
 #
@@ -892,9 +892,12 @@ bif erx_dist:boot/0
 bif erx_dist:names_dropped/0
 
 #
-# erXos: the export table (docs/design-domains.md, "Exports") and the origins flag (edit 16).
+# erXos: the export table (docs/design-domains.md, "Exports"), the origins flag (edit 16),
+# the count of active aliases (edit 17) and of the holders the full table refused.
 #
 
 bif erx_dist:export/3
 bif erx_dist:exports/1
 bif erx_dist:origins/1
+bif erx_dist:aliases/0
+bif erx_dist:exports_refused/0
