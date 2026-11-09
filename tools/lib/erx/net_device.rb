@@ -9,6 +9,7 @@ require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
 require_relative 'runner'
+require_relative 'net_device_name_server'
 
 module Erx
   # The network stack end to end on QEMU virt: the development image boots with a
@@ -25,12 +26,21 @@ module Erx
   #   with the request's identifier, sequence number and data, within REPLY_SECONDS.
   #
   # The exchange runs as the verifier of the command shell's banner, the boot's last
-  # line, so QEMU runs throughout and the run's deadline covers it. The harness then types
-  # at that shell (shell_checkpoints): `ifconfig`, which must show vtnet0 up with the
-  # link-layer address that answered ARP and slirp's lease, and `ping -c 3` to slirp's
-  # gateway, which must show three replies and FreeBSD's statistics with no loss. Every
-  # frame the harness reads is parsed with bounds checks, since the guest is the code
-  # under test; a frame that is not the awaited answer, slirp's included, is skipped.
+  # line, so QEMU runs throughout and the run's deadline covers it. The harness then plays
+  # a name server on the link (NameServer) and types at that shell (shell_checkpoints):
+  # `ifconfig`, which must show vtnet0 up with the link-layer address that answered ARP
+  # and slirp's lease; `ping -c 3` to slirp's gateway, which must show three replies and
+  # FreeBSD's statistics with no loss; `host www HOST_IP`, which must find www in the
+  # lease's domain, NIC_DOMAIN, slirp's option 15, with its address and IPv6 address;
+  # `host nonexistent HOST_IP`, which must be NXDOMAIN; `host ADDRESS HOST_IP`, which
+  # must give the pointer back; and, in the Erlang shell, inet_db's name servers and
+  # search list, which must be the lease's: none, since slirp in restricted mode, which
+  # keeps the guest's traffic on the host, leaves the router and name server options out
+  # of its lease, and NIC_DOMAIN (that a lease's name servers reach inet_db is
+  # erx_net_dns_tests' case on the host); and four query IDs inet_db draws in a row,
+  # which must not each follow the one before, as a counter's do. Every frame the harness
+  # reads is parsed with bounds checks, since the guest is the code under test; a frame
+  # that is not the awaited answer, slirp's included, is skipped.
   module NetDevice
     GUEST_IP = [10, 0, 2, 15].freeze
     HOST_IP = [10, 0, 2, 100].freeze
@@ -52,14 +62,24 @@ module Erx
     IFCONFIG_LINE = "ifconfig\r"
     PING_LINE = "ping -c 3 10.0.2.2\r"
     MS = '[0-9]+\.[0-9]{3}'
+    SERVER = HOST_IP.join('.')
+    HOST_LINE = "host www #{SERVER}\r".freeze
+    MISSING_LINE = "host nonexistent #{SERVER}\r".freeze
+    POINTER_LINE = "host 192.0.2.10 #{SERVER}\r".freeze
+    RESOLVER_LINE = "{inet_db:res_option(nameservers), inet_db:res_option(search)}.\r"
+    # What inet_db holds once the lease is loaded: no name server, which a restricted
+    # slirp does not offer, and NIC_DOMAIN.
+    RESOLVER_ANSWER = "{[],[\"#{QemuPlan::NIC_DOMAIN}\"]}".freeze
+    # Four query IDs inet_db draws in a row, which must not be a counter's run.
+    IDS_LINE = "list_to_tuple([inet_db:res_option(next_id) || _ <- lists:seq(1, 4)]).\r"
 
     module_function
 
     # What the shell shows after the exchange, whose result mac reads the guest's
     # link-layer address from: ifconfig's lines for vtnet0, in FreeBSD's layout with the
-    # lease's address, netmask and broadcast, and ping's to slirp's gateway, where only
-    # the TTLs and times may vary. Lines between, such as the echo of each typed line,
-    # are passed over.
+    # lease's address, netmask and broadcast; ping's to slirp's gateway, where only the
+    # TTLs and times may vary; then the resolver's. Lines between, such as the echo of
+    # each typed line, are passed over.
     def shell_checkpoints(mac)
       ether = lambda do |line|
         raise Error, "ifconfig showed #{line.inspect}, not #{mac.call}, which answered ARP" unless line.match?(/\A\tether #{mac.call}\r*\n\z/n)
@@ -73,7 +93,35 @@ module Erx
        *(0..2).map { |seq| shell_point("ping-reply-#{seq}", "64 bytes from 10\\.0\\.2\\.2: icmp_seq=#{seq} ttl=[0-9]+ time=#{MS} ms") },
        shell_point('ping-statistics', Regexp.escape('--- 10.0.2.2 ping statistics ---')),
        shell_point('ping-counts', Regexp.escape('3 packets transmitted, 3 packets received, 0.0% packet loss')),
-       shell_point('ping-round-trip', "round-trip min/avg/max/stddev = #{MS}/#{MS}/#{MS}/#{MS} ms")].freeze
+       shell_point('ping-round-trip', "round-trip min/avg/max/stddev = #{MS}/#{MS}/#{MS}/#{MS} ms", type: HOST_LINE),
+       *resolver_checkpoints].freeze
+    end
+
+    # What the resolver lines show: each `host` answer, in FreeBSD's lines, and inet_db's
+    # resolver settings in the Erlang shell.
+    def resolver_checkpoints
+      name = "www.#{QemuPlan::NIC_DOMAIN}"
+      [shell_point('host-server', Regexp.escape('Using domain server:')),
+       shell_point('host-server-name', Regexp.escape("Name: #{SERVER}")),
+       shell_point('host-server-address', Regexp.escape("Address: #{SERVER}#53")),
+       shell_point('host-address', Regexp.escape("#{name} has address 192.0.2.10")),
+       shell_point('host-address6', Regexp.escape("#{name} has IPv6 address 2001:db8::10"), type: MISSING_LINE),
+       shell_point('host-nxdomain', Regexp.escape('Host nonexistent not found: 3(NXDOMAIN)'), type: POINTER_LINE),
+       shell_point('host-pointer', Regexp.escape("10.2.0.192.in-addr.arpa domain name pointer #{name}."),
+                   type: ProductionImage::Run::ERL_LINE),
+       ProductionImage::Run::ERLANG_SHELL.merge(type: RESOLVER_LINE).freeze,
+       { name: 'resolver-config', pattern: /\A(?:[0-9]+> )?#{Regexp.escape(RESOLVER_ANSWER)}\r*\n\z/n,
+         seconds: SHELL_SECONDS, type: IDS_LINE }.freeze,
+       { name: 'query-ids', pattern: /\A(?:[0-9]+> )?\{[0-9]+,[0-9]+,[0-9]+,[0-9]+\}\r*\n\z/n,
+         seconds: SHELL_SECONDS, verify: method(:random_ids!) }.freeze]
+    end
+
+    # Refuses four query IDs that each follow the one before, as inet_db's counter's do:
+    # IDs an off-path host can guess (RFC 5452).
+    def random_ids!(line)
+      ids = line.scan(/[0-9]+/).last(4).map(&:to_i)
+      steps = ids.each_cons(2).map { |a, b| (b - a) % 0x10000 }
+      raise Error, "inet_db's query IDs #{ids.join(', ')} are a counter's" if steps.all?(1)
     end
 
     # A checkpoint for one whole line the shell writes, matched by the pattern source.
@@ -218,18 +266,27 @@ module Erx
                                                                           "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"),
                                             mode: 0o700)
         link = Link.new
+        server = NameServer.new(link)
         answered = nil
-        shell = ProductionImage::Run::RELEASE_SHELL.merge(verify: ->(_line) { answered = NetDevice.exchange(link) },
-                                                          type: IFCONFIG_LINE).freeze
+        exchange = lambda do |_line|
+          answered = NetDevice.exchange(link)
+          server.start
+        end
+        shell = ProductionImage::Run::RELEASE_SHELL.merge(verify: exchange, type: IFCONFIG_LINE).freeze
         checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN, shell,
                        *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) })]
         Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
                                                    directory: directory, checkpoints: checkpoints, nic: link.nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
+        failed = server.stop
+        raise failed if failed
+
         @notes << "#{accel}: the guest at #{GUEST_IP.join('.')} (#{answered.fetch(:mac)}) answered ARP and ICMP echo, " \
-                  'and its shell showed vtnet0 with the lease and pinged 10.0.2.2 three times'
+                  'and its shell showed vtnet0 with the lease, pinged 10.0.2.2 three times and resolved www ' \
+                  "in the lease's domain through the name server at #{SERVER}, with random query IDs"
         'passed'
       ensure
+        server&.stop
         link&.close
       end
     end

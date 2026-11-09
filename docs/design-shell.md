@@ -326,10 +326,11 @@ shell and for `erx:` functions that run commands:
    `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `uname`,
    `dmesg`, `true` and `false`, which follow FreeBSD's utilities of the same names
    ([Text commands](#text-commands)), so toybox's applets of those names
-   are never built; the network utilities `ifconfig [-a] [interface]`
-   and `ping`, which follow FreeBSD's ifconfig(8) and ping(8) over
-   erXos's own stack, reading interfaces through `erx_net:interfaces/0`
-   and echo replies through `erx_icmp_sock`
+   are never built; the network utilities `ifconfig [-a] [interface]`,
+   `ping` and `host`, which follow FreeBSD's ifconfig(8), ping(8) and
+   host(1) over erXos's own stack, reading interfaces through
+   `erx_net:interfaces/0`, echo replies through `erx_icmp_sock` and
+   names through `inet_res`
    ([design-network-stack.md](design-network-stack.md)); and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `bind`, `mount` and `unmount`, which have no FreeBSD
    counterpart;
@@ -611,6 +612,19 @@ erXos value and is not offered, nor are the `UNAME_x` environment
 variables that override a field. The values are erXos's own, so the
 FreeBSD oracle has
 no `uname` case; its tests pin the order, the layout and the values.
+
+**`host name [server]`** looks a name or an address up in the DNS, as
+FreeBSD's `host` does, through `inet_res` and the domain's name servers
+([design-network-stack.md](design-network-stack.md#name-resolution)), or
+only `server` when one is given, which a `Using domain server:` header
+names. An address is looked up by its pointer name, a name for its A and
+then its AAAA records, with the search list tried as `res_search(3)`
+tries it. The lines are FreeBSD's: `has address`, `has IPv6 address`,
+`is an alias for`, `domain name pointer`, `Host name not found:
+3(NXDOMAIN)` and `;; connection timed out; no servers could be
+reached`, a failure ending the command with a failure status. Every
+name in a line comes from a reply any host on the path can forge, so
+each passes the field escape.
 
 ### Starting programs
 
@@ -1279,6 +1293,14 @@ remain independent of catalog generation.
     `ping -c 3 10.0.2.2` at the command shell on QEMU and matches vtnet0
     with slirp's lease, three replies and no loss. Matching a reply of
     any sequence number fails.
+  * `host`: the names it tries follow the search list as `res_search(3)`
+    tries them, an address becomes its pointer name, each answer and
+    failure is FreeBSD's line, and a name from a reply passes the field
+    escape; the network device suite runs `host` at the command shell
+    on QEMU against a name server the harness plays on the link, and
+    matches an address and an IPv6 address found through the lease's
+    domain, NXDOMAIN and a pointer. A reply line written unescaped
+    fails the escape case.
   * `grep`'s translator: every construct of POSIX basic and extended
     expressions against a table of `regcomp(3)` results taken from the
     guest; a pattern built to backtrack ends with status 2 within the

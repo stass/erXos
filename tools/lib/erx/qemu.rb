@@ -46,6 +46,9 @@ module Erx
     # transports share a 4 KiB page and a page is one device's (erx_device), so the disks
     # keep the top page, buses .31 to .24, and the network device takes the page below it.
     NIC_TRANSPORT = 23
+    # The domain slirp's DHCP server hands the guest in its lease (option 15), which the
+    # guest's resolver takes as its search list.
+    NIC_DOMAIN = 'erxos.test'
 
     # A virtio-net device on QEMU's user networking (slirp), restricted so that nothing the
     # guest sends leaves the host, which serves the guest DHCP. One hub joins it to a
@@ -147,7 +150,7 @@ module Erx
       return [] if nic.nil?
 
       loopback = '127.0.0.1'
-      ['-netdev', 'user,id=nic_user,restrict=on',
+      ['-netdev', "user,id=nic_user,restrict=on,domainname=#{NIC_DOMAIN}",
        '-netdev', "dgram,id=nic_frames,local.type=inet,local.host=#{loopback},local.port=#{nic.frames_port}," \
                   "remote.type=inet,remote.host=#{loopback},remote.port=#{nic.peer_port}",
        '-netdev', 'hubport,id=nic_hub_user,hubid=0,netdev=nic_user',

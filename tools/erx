@@ -396,6 +396,11 @@ module Erx
         end
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_net_input.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-net-input', deadline: 3900, chdir: ROOT, env: environment)
+        %w[config dns host].each do |target|
+          runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_net_resolver.rb'), '--target', target,
+                      '--seed', options.fetch(:seed).to_s],
+                     name: "fuzz-erx-net-resolver-#{target}", deadline: 900, chdir: ROOT, env: environment)
+        end
         runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/erx_tcp_explore_test.rb')],
                    name: 'explore-erx-tcp', deadline: 900, chdir: ROOT,
                    env: environment.merge('ERX_TCP_EXPLORE' => 'full'))

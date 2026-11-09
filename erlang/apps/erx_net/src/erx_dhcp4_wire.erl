@@ -127,7 +127,9 @@ that length needs and a router, and its prefix keeps only its first prefix-lengt
 one to six names separated by blanks in at most 256 bytes (`check_search`, after
 resolv.conf(5); stricter than `dhclient`, which lets one name that passes `res_hnok`
 through at any length), each name's dot-separated labels letters, digits and hyphens that begin
-and end with a letter or digit (`res_hnok`). So no control character or other byte from a
+and end with a letter or digit (`res_hnok`), each label 1 to 63 bytes and the name at most 253,
+one trailing dot allowed and dropped (stricter than `res_hnok`, which takes an empty label that
+no query can carry). So no control character or other byte from a
 server reaches the resolver's configuration or a display.
 
 `encode/1` writes the options of the map in `?OPTIONS`' order, the message type first, all
@@ -332,13 +334,14 @@ without_final_nul(Bytes) ->
     end.
 
 %% `check_search`: names separated by spaces or tabs, one to six of them in at most 256
-%% bytes, each a host name.
+%% bytes, each a domain name, kept without its trailing dot.
 search_list(Text) when byte_size(Text) =< ?SEARCH_BYTES_MAX ->
     case binary:split(Text, [<<" ">>, <<"\t">>], [global, trim_all]) of
         Names when Names =/= [], length(Names) =< ?SEARCH_NAMES_MAX ->
-            case lists:all(fun host_name/1, Names) of
-                true -> {ok, Names};
-                false -> error
+            Checked = lists:map(fun domain/1, Names),
+            case lists:member(error, Checked) of
+                false -> {ok, [Bare || {ok, Bare} <- Checked]};
+                true -> error
             end;
         _ ->
             error
@@ -346,17 +349,28 @@ search_list(Text) when byte_size(Text) =< ?SEARCH_BYTES_MAX ->
 search_list(_) ->
     error.
 
-%% `res_hnok`: every label between dots is empty or letters, digits and hyphens that begin
-%% and end with a letter or digit (RFC 1123 section 2.1).
-host_name(Name) ->
-    lists:all(fun label/1, binary:split(Name, <<".">>, [global])).
+%% A domain name by `res_hnok`'s rules (RFC 1123 section 2.1): labels between dots of
+%% letters, digits and hyphens that begin and end with a letter or digit. Stricter than
+%% `res_hnok`, which also takes an empty label: each label is 1 to 63 bytes and the name at
+%% most 253 (RFC 1035 section 2.3.4), one trailing dot allowed and dropped, since a resolver
+%% cannot encode anything else as a query name. erx_inet's domain/1 checks the grant's
+%% answer by the same rules.
+domain(Name) ->
+    Bare = case Name of
+               <<Head:(byte_size(Name) - 1)/binary, $.>> -> Head;
+               _ -> Name
+           end,
+    case byte_size(Bare) =< 253 andalso lists:all(fun label/1, binary:split(Bare, <<".">>, [global])) of
+        true -> {ok, Bare};
+        false -> error
+    end.
 
-label(<<>>) ->
-    true;
-label(Label) ->
+label(Label) when byte_size(Label) >= 1, byte_size(Label) =< 63 ->
     border_byte(binary:first(Label)) andalso border_byte(binary:last(Label))
         andalso lists:all(fun(Byte) -> border_byte(Byte) orelse Byte =:= $- end,
-                          binary_to_list(Label)).
+                          binary_to_list(Label));
+label(_) ->
+    false.
 
 border_byte(Byte) ->
     (Byte >= $a andalso Byte =< $z) orelse (Byte >= $A andalso Byte =< $Z)

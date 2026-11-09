@@ -54,12 +54,13 @@ interfaces() ->
                                     {ok, Status} <- [status(Pid)]]}
     end.
 
-%% The interface's answer, or `gone` when it ended before it answered.
+%% The interface's answer, or `gone` when it ended before it answered, however it ended:
+%% no exit of an interface reaches the caller.
 status(Pid) ->
     try
         erx_net_if:admin(Pid, status)
     catch
-        exit:{_, {gen_server, call, _}} ->
+        exit:_ ->
             gone
     end.
 

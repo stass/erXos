@@ -3,11 +3,13 @@
 
 %% The client side of the network stack (docs/design-network-stack.md, "Modules"): the
 %% socket backends every domain, and a node outside erXos beside erx_net, runs. Its one
-%% call into the stack is its `grant` key's, an {M, F, A} that answers {ok, Grant}.
+%% call into the stack is its `grant` key's, an {M, F, A} that answers {ok, Grant}, and its
+%% one process erx_inet's resolver loader.
 {application, erx_net_client,
  [{description, "erXos socket backends"},
   {vsn, "1"},
-  {modules, []},
-  {registered, []},
+  {modules, [erx_gen_tcp, erx_gen_udp, erx_inet, erx_net_client_app, erx_net_client_sup]},
+  {registered, [erx_inet, erx_net_client_sup]},
   {applications, [kernel, stdlib]},
+  {mod, {erx_net_client_app, []}},
   {env, [{grant, {erx_net, local_grant, []}}]}]}.

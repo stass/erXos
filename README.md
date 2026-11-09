@@ -352,9 +352,13 @@ Error in process <0.150.0> with exit value:
   host server. On FreeBSD it also runs over a tap device through its tap
   helper, where a vnet jail resolves and pings it. On erXos under QEMU it
   runs in the system domain over its virtio-net driver, takes a DHCP
-  lease and answers ARP and ping, and the command shell's `ifconfig` and
-  `ping` show its interface and ping slirp's gateway in FreeBSD's layout;
-  the network domain it moves into later is not built yet.
+  lease and answers ARP and ping, the command shell's `ifconfig` and
+  `ping` show its interface and ping slirp's gateway in FreeBSD's layout,
+  and names resolve: the lease's name servers and domain reach `inet_db`
+  through the grant, `gen_udp` and `gen_tcp` go through the grant by
+  default, and the `host` command looks names and addresses up in
+  FreeBSD's lines. The network domain it moves into later is not built
+  yet.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated

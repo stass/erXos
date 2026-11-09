@@ -3141,10 +3141,31 @@ use `socket`, so it comes after them, by the owner's decision
 ### Name resolution
 
 `inet_res`, OTP's DNS resolver in Erlang, runs over `gen_udp` in each
-domain. The grant's `resolver` operation returns the name servers and
-search list the network domain learnt from its static configuration,
-DHCP or router advertisements (RFC 8106), and a domain's `inet_db` loads
-them at start and on the grant's change message.
+domain, through `erx`, the default backend. The grant's `resolver`
+operation returns the name servers and search list the network domain
+learnt from its static configuration, DHCP (options 6 and 15) or router
+advertisements (RFC 8106), within resolv.conf's limits of three name
+servers and six domains, and only reads them; `watch_resolver` returns
+the same answer and makes its caller the grant's one subscriber, which
+`{erx_net_resolver, Grant, Answer}` reaches after each change, so a
+reader never displaces the subscriber. In each domain,
+`erx_net_client`'s resolver loader, `erx_inet`, watches at start and
+again after the grant ends, checks each answer as input from another
+domain, and loads it into `inet_db`: the name servers and search list
+replace inet_db's, `dns` joins the lookup methods after the hosts file,
+and the answer takes the place of resolv.conf, which a domain does not
+have. A search domain is checked by the DHCP client's rules: labels of
+letters, digits and hyphens that begin and end with a letter or digit
+(`res_hnok`), each of 1 to 63 bytes, at most 253 bytes in all, one
+trailing dot allowed and dropped; stricter than `res_hnok`, which also
+takes an empty label, since `inet_dns` cannot encode one and would fail
+the caller's query. A domain that fails the check is dropped and the
+rest of the answer loaded. Query IDs are the kernel's random bytes, not
+`inet_db`'s counter, though erXos releases no `crypto`
+([design-runtime.md](design-runtime.md), edit 63), so an off-path host
+must guess both the ID and the source port (RFC 5452). The `host`
+command ([design-shell.md](design-shell.md)) asks the same name servers,
+or the one it is named.
 
 ### Distribution to other machines
 

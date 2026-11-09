@@ -698,7 +698,10 @@ it; git history is the record of completed work.
   and ranch in the web domain are such owners. Needs the user's choice: a relay per socket
   in the owner's domain under `erx_net_client` that takes the envelope off (recommended,
   one local message per delivery, to measure), or an exception in edit 16 for socket
-  messages whose socket pid is of the lane's domain.
+  messages whose socket pid is of the lane's domain. The grant's `{erx_net_resolver, Grant,
+  Answer}` to `erx_inet` in another domain is dropped the same way, so that domain keeps its
+  first answer; `erx_inet`, the protocol's owner on the client side, takes the envelope off it
+  once the grant is in the network domain, checking `D` is the grant's.
 
 * [Medium] network, `erx_tcp_conn` (`handle_call({recv, ...})`,
   [design-network-stack.md](docs/design-network-stack.md#the-interface-towards-erlang-programs)):
@@ -842,6 +845,32 @@ it; git history is the record of completed work.
   reinitialises the interface when its transmit watchdog (`vtnet_watchdog`) expires after 5 seconds;
   a driver whose backlog has waited on `writable` that long could end, so that its restart resets
   the device.
+* [Medium] network, name resolution (`erlang/apps/erx_net_client/src/erx_gen_tcp.erl`,
+  `otp/lib/kernel/src/inet_res.erl`): a reply with the TC bit set makes `inet_res` ask again over
+  TCP with `{packet, 2}`, which `erx_gen_tcp` refuses (it takes only `{packet, raw}`), so a name whose
+  answer does not fit in 512 bytes fails to resolve. Give the connection `{packet, 2}` framing, or
+  have `erx_gen_tcp` frame the two-byte length itself, and test a truncated reply against a name
+  server on the host.
+* [Medium] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`, `run/2`): a name or server
+  argument with an empty label or a label over 63 bytes (`host a..b`, `host .foo`, `host www .foo`)
+  crashes the command with `function_clause` from `inet_dns:encode_labels`, which stock OTP 29.1.2
+  raises too, where FreeBSD's host(1) writes `host: 'a..b' is not a legal name (empty label)`. Check
+  each candidate and the server name (labels 1 to 63 bytes, 253 in all) before querying and write
+  FreeBSD's line, with cases in `test/erlang/erx_cmd_host_tests.erl`. The same crash from
+  `erx_gen_tcp:connect/4` through `inet:getaddrs_tm/3` is stock's and belongs with the upstream
+  `inet_dns` report.
+* [Medium] network, edit 62 (`otp/lib/kernel/src/inet_dns.erl`, `decode_data/3`): the fix's test (`inet_dns_tests`) calls
+  `inet_dns:decode/1`, and the `dns` fuzz target reaches a formatless type only when a flip lands
+  on a type or class field, and it calls `inet_dns:decode/1` where `inet_res` calls `decode_reply/3`.
+  Make the test decode through `decode_reply/3` as well, and have the fuzz target call `decode_reply/3` with a matching query.
+* [Medium] network, `erx_net_driver` and `erx_net_pipe`: a pipe whose far end ended (a `process`
+  end's peer, a `port` end's helper) reports the link `down` for good, and nothing starts the driver
+  again, since the driver stays alive. Decide whether a far end's end stops the driver so that its
+  supervisor restarts it, with a backoff for a tap that keeps failing.
+* [Low] network, `erx_net_pipe` (`port` end): a tap helper killed by a signal closes both its pipes at
+  once, and a frame the driver writes meanwhile makes ERTS fail the port with `epipe`, which ends the
+  driver linked to it (its supervisor restarts it). A driver that traps exits and takes the port's
+  exit as link `down` would close the case; decide with the restart question above.
 * [Low] network, `erx_net_tap` on Linux: a tap there may refuse a write shorter than an Ethernet
   header with `EINVAL` and treat a write while down differently from FreeBSD's 0-byte return; check
   `tun_get_user` and add Linux's discard cases when Linux hosts run the helper.
@@ -3781,6 +3810,14 @@ to the corpus and follow rc
   memory, so a bug a packet reaches is a bug of the system domain's. `erx_net` starts as a
   `temporary` application (`ReleaseFiles::TEMPORARY`), so a crash loop in it ends the stack and
   not the system domain; a memory-safety bug in a NIF it calls is not contained. Closed by 1b-E.
+* [Medium] network, sockets (`erlang/apps/erx_net/src/erx_net_grant.erl`, `erx_net_bind`,
+  `erx_net_input:udp/3`): a socket bound to a specific address and a port takes that address's
+  datagrams from a socket another domain bound to `any` on the same port, since input tries the
+  specific binding first and the bind asks nothing of who holds the wildcard one; FreeBSD's
+  `in_pcbbind_setup` refuses such a bind with `EADDRINUSE` when the wildcard socket belongs to
+  another user. And a grant opens any number of sockets, since `erx_net_grant_core`'s limits are not
+  built, so one domain can hold every ephemeral port. Refuse a specific bind over another grant's
+  wildcard one, as FreeBSD does across users, and cap each grant's sockets with the grant's limits.
 * [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
   `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
   `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can
@@ -4112,6 +4149,55 @@ document's "residual risks accepted" paragraph.
   parse loop with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past
   its five: a stack overflow on any text a caller passes. erXos's copy refuses it with `badarg`. Send it with a
   reproduction run against stock OTP.
+* [Low] upstream OTP, `otp/lib/kernel/src/inet_dns.erl` (`decode_data/3`): report to OTP, which the owner
+  sends, that in stock OTP 29.1.2 a DNS reply carrying a record of type UINFO, UID, GID or UNSPEC (100 to
+  103), IXFR, AXFR, MAILB, MAILA or ANY (251 to 255), or an A, AAAA or WKS record of a class other than IN,
+  fails `inet_dns:decode/1` with `function_clause`, since those types map to atoms that no clause of
+  `decode_data/3` names and its last clause takes only an integer type; `inet_res`'s `decode_reply` does not
+  catch it, so a forged reply crashes the resolver's caller. erXos keeps their data raw (edit 62);
+  `test/erlang/erx_net_resolver_fuzz.erl`'s `dns` target found it. Send it with a reproduction run against
+  stock OTP.
+* [Medium] network, name resolution (`erlang/apps/erx_net/src/erx_net_if_core.erl`, `erx_net_grant`): the
+  grant's `resolver` answer holds only what DHCP leases gave. Add static name servers and a search list to an
+  interface's configuration, as rc.conf's resolver settings and `resolvconf` give FreeBSD, merged ahead of
+  the leases' within the same limits, and router advertisements' RDNSS and DNSSL (RFC 8106) once IPv6's
+  configuration runs.
+* [Low] network, `erx_gen_udp` and `erx_gen_tcp` (`erlang/apps/erx_net_client/src`): where stock OTP 29.1.2
+  takes `{ip, any}` and `{ip, loopback}` as a local address, the backends pass them to the socket's options,
+  which refuse them with `einval`; and an IPv6 address given to `connect` or `send` on an IPv4 socket answers
+  `einval` where stock answers `eafnosupport`. Take both local forms and answer `eafnosupport`, with a case
+  each against stock's answers.
+* [Low] network, `erx_gen_udp` (`erlang/apps/erx_net_client/src/erx_gen_udp.erl`): stock `inet` and
+  `gen_udp` dispatch `setopts/2`, `getopts/2`, `peername/1` and `send/5` to the backend, which exports none
+  of them, so `inet:setopts(S, [{active, once}])` on an `erx` socket raises `undef` in the caller, and
+  `send/3` with a sockaddr map raises `function_clause`. Answer `{error, enotsup}` as
+  `controlling_process/2` does, and `einval` for `send/3`'s other shapes, with a case each.
+* [Low] network, edit 63 (`otp/lib/kernel/src/inet_db.erl`, `erx_rand_range/1`): `error:undef` stands for
+  "stock OTP", so an erXos node whose `erx_bytes` failed its `on_load` would go back to the counter's
+  guessable query IDs silently. Decide erXos by `os:type() =:= {unix, erxos}`, as `inet_config.erl` does,
+  and raise on erXos for `undef` as for any failed read.
+* [Low] network, `erx_udp_sock` (`erlang/apps/erx_net/src/erx_udp_sock.erl`, `from_peer/2`): an ICMP report
+  passes the connected socket's peer filter and holds receive credit until a `recv` drops it, so a host that
+  knows the port can fill the socket's 64 units between queries; drop reports on arrival, since the socket
+  never delivers them.
+* [Low] network, name resolution (`erlang/apps/erx_net_client/src/erx_inet.erl`): `erx_net_client` starts the
+  resolver loader on every node that runs it, a node outside erXos beside erx_net included, where it empties
+  `resolv_conf` and replaces the host's name servers with the stack's leases'. Start the loader only where
+  the grant is the node's resolver: on erXos, or where an `erx_net_client` key asks for it.
+* [Low] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`, `search/4`): a candidate whose A query
+  answers no records (NODATA) ends the search, where `res_search(3)` notes it and tries the rest of the
+  search list, answering NODATA only when no candidate has the name. Go on past NODATA as `res_search`
+  does, with a case for a search list whose first domain has the name without an address.
+* [Medium] network, edit 54's rest (`otp/lib/kernel/src/inet.erl`,
+  [design-runtime.md](docs/design-runtime.md)): `inet:getifaddrs/0` and `inet:gethostname/0` take the
+  `inet` backend's path, which `inet_backend/0` maps `erx` to, and answer from ERTS's own calls rather than
+  ask the domain's network grant. Add the grant operations and the `erx` clauses, with tests on the host.
+* [Medium] network, `erx_gen_tcp:listen/2`: it answers `{error, enotsup}`, since the grant opens no
+  listening socket, so `gen_tcp:listen/2` fails on erXos. Add the grant's listen and accept operations
+  over the stack's listener and `erx_gen_tcp:accept/1,2`, with the same tests as active open.
+* [Low] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`): FreeBSD's host(1) also asks for MX
+  records and writes `name mail is handled by N exchange.`; erXos's asks only A, AAAA and PTR. Add the MX
+  query and its line, with a case in `test/erlang/erx_cmd_host_tests.erl`.
 * [Low] network, `erlang/apps/erx_net/NOTICE-freebsd` and `erx_net_frame`'s header: they
   name `arpresolve_addr` of `sys/netinet/if_ether.c`, which neither the release nor the pin
   has; the broadcast and multicast link addresses `link_addr/2` translates are

@@ -247,7 +247,13 @@ search_list_test() ->
     ?assertEqual(dropped, Names(<<"lan", 0, 0>>)),
     ?assertEqual(dropped, Names(<<"a b c d e f g">>)),
     ?assertEqual(dropped, Names(<<"-lan">>)),
-    ?assertEqual(dropped, Names(<<"lan", 27, "[2J">>)).
+    ?assertEqual(dropped, Names(<<"lan", 27, "[2J">>)),
+    %% One trailing dot is dropped; an empty label or one over 63 bytes refuses the option.
+    ?assertEqual([<<"corp.example">>, <<"lan">>], Names(<<"corp.example. lan">>)),
+    ?assertEqual(dropped, Names(<<"corp..example">>)),
+    ?assertEqual(dropped, Names(<<".">>)),
+    ?assertEqual(dropped, Names(<<"lan_a">>)),
+    ?assertEqual(dropped, Names(<<(binary:copy(<<"a">>, 64))/binary, ".lan">>)).
 
 %% An ACK for an address or from a server other than the offer's is not the answer.
 ack_against_offer_test() ->

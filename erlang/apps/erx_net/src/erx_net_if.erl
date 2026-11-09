@@ -114,7 +114,9 @@ message({dhcp_attach, Pid}, #state{dhcp = Old} = S) when is_pid(Pid) ->
     _ = [erlang:demonitor(Ref, [flush]) || {_, Ref} <- [Old]],
     S#state{dhcp = {Pid, erlang:monitor(process, Pid)}};
 message({dhcp, Pid, Action}, #state{dhcp = {Pid, _}} = S) ->
-    step({dhcp, Action}, S);
+    Next = step({dhcp, Action}, S),
+    ok = lease_moved(Action),
+    Next;
 message({'DOWN', Ref, process, _, _}, #state{dhcp = {_, Ref}} = S) ->
     S#state{dhcp = none};
 message({erx_net_clock, hint}, S) ->
@@ -234,3 +236,9 @@ delete_others(Table, Present, Kept) ->
     Keep = sets:from_list([element(1, Row) || Row <- Kept], [{version, 2}]),
     [true = ets:delete(Table, Key) || [Key] <- Present, not sets:is_element(Key, Keep)],
     ok.
+
+%% A lease applied or dropped may move the name servers the grants answer: a renewal that
+%% changes nothing is told too, and each grant compares before it tells its subscriber.
+lease_moved({configure, _Lease}) -> erx_net_tables:resolver_moved();
+lease_moved(unconfigure) -> erx_net_tables:resolver_moved();
+lease_moved(_Action) -> ok.

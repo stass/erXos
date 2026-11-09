@@ -27,6 +27,11 @@ deletion of a stopped writer's rows.
   (erx_tcp_isn), so no crash report prints the keys; only this process writes it, and
   only erx_net_bind's claim reads it.
 
+Each process registered with watch_resolver/1, a grant, gets `{erx_net_tables, resolver}`
+when the interfaces' name servers or search list may have moved: after an interface
+applied or dropped a lease (resolver_moved/0) and after an interface stopped. It then
+reads them again through erx_net:interfaces/0.
+
 Rows end with their writer: every row names the pid of the incarnation that wrote it, and
 when a registered interface stops, however it stops, this process deletes every row naming
 that pid and moves the generation. It does the same for the demultiplexing entries of a
@@ -41,7 +46,7 @@ then the rows, so a reader that raced a writer finds a newer generation at its n
 
 -export([start_link/0, register_driver/2, driver/1, register_interface/1, watch_holder/1,
          generation/0, configuration/0, interfaces/0, interface/1, neighbour/2, first_hint/2, demux/1,
-         tcp_isn/0]).
+         tcp_isn/0, watch_resolver/1, resolver_moved/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(IFS, erx_net_ifs).
@@ -142,6 +147,16 @@ time in microseconds, under the stack's secrets; erx_net_bind's claim calls it.
 tcp_isn() ->
     ets:lookup_element(?SECRETS, tcp, 2).
 
+-doc "Monitors `Pid`, which gets `{erx_net_tables, resolver}` whenever the name servers may have moved.".
+-spec watch_resolver(pid()) -> ok.
+watch_resolver(Pid) ->
+    gen_server:call(?MODULE, {watch, resolver, Pid}, infinity).
+
+-doc "Called by an interface after it applied or dropped a lease.".
+-spec resolver_moved() -> ok.
+resolver_moved() ->
+    gen_server:cast(?MODULE, resolver_moved).
+
 %% --- gen_server ------------------------------------------------------------------
 
 -doc false.
@@ -163,6 +178,9 @@ handle_call({watch, Kind, Pid}, _From, Watched) ->
     {reply, ok, Watched#{Ref => {Kind, Pid}}}.
 
 -doc false.
+handle_cast(resolver_moved, Watched) ->
+    ok = notify_resolver(Watched),
+    {noreply, Watched};
 handle_cast(_Msg, Watched) ->
     {noreply, Watched}.
 
@@ -175,6 +193,9 @@ handle_info({'DOWN', Ref, process, _, _}, Watched) ->
             ets:match_delete(?ROUTES, {'_', Pid, '_'}),
             ets:match_delete(?NEIGH, {{Pid, '_'}, '_', '_', '_'}),
             _ = ets:update_counter(?GEN, gen, 1),
+            ok = notify_resolver(Rest),
+            {noreply, Rest};
+        {{resolver, _Pid}, Rest} ->
             {noreply, Rest};
         {{holder, Pid}, Rest} ->
             ets:match_delete(?DEMUX, {'_', Pid, '_'}),
@@ -184,3 +205,7 @@ handle_info({'DOWN', Ref, process, _, _}, Watched) ->
     end;
 handle_info(_Msg, Watched) ->
     {noreply, Watched}.
+
+notify_resolver(Watched) ->
+    _ = [Pid ! {erx_net_tables, resolver} || {resolver, Pid} <- maps:values(Watched)],
+    ok.

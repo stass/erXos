@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: decode_data/3 keeps any type's data raw.
+%%
 %% %CopyrightEnd%
 %%
 -module(inet_dns).
@@ -767,7 +769,11 @@ decode_data(Data, ?S_CAA, _) ->
        end);
 %%
 %% sofar unknown or non standard
-decode_data(Data, Type, _) when is_integer(Type) ->
+%% erXos: and the types named without a format of their own, which a reply may carry, raw
+%% rather than fail the whole reply with function_clause: UINFO, UID, GID and UNSPEC (100
+%% to 103), IXFR, AXFR, MAILB, MAILA and ANY (251 to 255), and A, AAAA and WKS of a class
+%% other than IN, which decode_data/4 passes here (docs/design-runtime.md, edit 62).
+decode_data(Data, _Type, _) ->
     Data.
 
 

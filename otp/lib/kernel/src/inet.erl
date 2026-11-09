@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: erx, the network grant's backend, is the default inet_backend.
+%%
 %% %CopyrightEnd%
 %%
 -module(inet).
@@ -327,7 +329,9 @@ Function `parse_address/1` can be useful:
 %% imports
 -import(lists, [append/1, duplicate/2, filter/2, foldl/3]).
 
--define(DEFAULT_KERNEL_INET_BACKEND, inet). % inet_backend()
+%% erXos: its ERTS has no socket driver and no socket NIF, so `erx`, the network grant's
+%% backend (erx_gen_tcp, erx_gen_udp), is the default (docs/design-runtime.md, edit 54).
+-define(DEFAULT_KERNEL_INET_BACKEND, erx). % inet_backend()
 
 %% Record Signature
 -define(RS(Record),
@@ -485,7 +489,7 @@ the `m:socket` module and its NIF implementation.
 
 This is a _temporary_ option that will be ignored in a future release.
 """.
--type inet_backend() :: {'inet_backend', 'inet' | 'socket'}.
+-type inet_backend() :: {'inet_backend', 'inet' | 'socket' | 'erx'}.
 
 -type socket_setopt() ::
         gen_sctp:option() | gen_tcp:option() | gen_udp:option().
@@ -3297,7 +3301,9 @@ gen_tcp_module(Opts) ->
 gen_tcp_module(Opts, inet) ->
     {gen_tcp, Opts};
 gen_tcp_module(Opts, socket) ->
-    {gen_tcp_socket, Opts}.
+    {gen_tcp_socket, Opts};
+gen_tcp_module(Opts, erx) ->
+    {erx_gen_tcp, Opts}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -3418,7 +3424,9 @@ gen_udp_module(Opts) ->
 gen_udp_module(Opts, inet) ->
     {gen_udp, Opts};
 gen_udp_module(Opts, socket) ->
-    {gen_udp_socket, Opts}.
+    {gen_udp_socket, Opts};
+gen_udp_module(Opts, erx) ->
+    {erx_gen_udp, Opts}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -4747,5 +4755,10 @@ ensure_sockaddr(SockAddr) ->
 
 
 -doc false.
+%% The backend of the calls that need no socket of their own: interfaces, the host name
+%% and services. erXos's `erx` has none of its own, so they take `inet`'s path.
 inet_backend() ->
-    persistent_term:get({kernel, inet_backend}, ?DEFAULT_KERNEL_INET_BACKEND).
+    case persistent_term:get({kernel, inet_backend}, ?DEFAULT_KERNEL_INET_BACKEND) of
+        erx -> inet;
+        Backend -> Backend
+    end.

@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: init accepts the erx inet_backend; crypto_rand_range/1 draws from
+%% erx_bytes:entropy/1 where crypto is not loaded.
+%%
 %% %CopyrightEnd%
 %%
 
@@ -941,7 +944,8 @@ init([]) ->
     case application:get_env(kernel, inet_backend) of
         {ok, Flag}
           when Flag =:= inet;
-               Flag =:= socket ->
+               Flag =:= socket;
+               Flag =:= erx ->
             persistent_term:put({kernel, inet_backend}, Flag);
         _ -> ok
     end,
@@ -2125,10 +2129,20 @@ generate_random_port() ->
 crypto_rand_range(Range) when is_integer(Range), 0 < Range ->
     %% This is how crypto itself checks if it is loaded
     case application:get_env(crypto, fips_mode) of
-        undefined                                               -> undefined;
+        undefined                                               -> erx_rand_range(Range);
         {ok, Fips} when is_boolean(Fips) ->
             try crypto:strong_rand_range(Range) of
                 N when is_integer(N, 0, Range-1)                -> N
             catch error : low_entropy                           -> undefined
             end
+    end.
+
+%% erXos: without crypto, which erXos does not release, the kernel's generator, so that
+%% query IDs and source ports are not inet_db's counter (RFC 5452); where erx_bytes is
+%% not loaded, as on stock OTP, the counter stays. A failed read raises in the resolver's
+%% caller rather than fall back to the guessable counter (docs/design-runtime.md, edit 63).
+erx_rand_range(Range) ->
+    try erx_bytes:entropy(8) of
+        <<N:64>>                                                -> N rem Range
+    catch error : undef                                         -> undefined
     end.
