@@ -1016,7 +1016,31 @@ no other process and creates no process:
   handshake that FreeBSD, whose bucket for it had not overflowed, would
   refuse. The cookie's MAC is required either way. The cookie secrets
   are stack-wide, in `erx_net_tables`, so an ACK that arrives on another
-  interface still validates.
+  interface still validates; FreeBSD's MAC also covers the bucket's
+  address, which one table has no use for.
+* When the table is full, FreeBSD drops the bucket's oldest entry for the
+  new SYN and answers every SYN with a cookie alone for 15 s, longer on a
+  renewed attack, dropping its entries meanwhile (`syncache_insert`,
+  `syncache_pause`, `tcp_syncache.c:2446`). The stack's full table answers
+  the SYN with a cookie and keeps its entries: a flood neither evicts nor
+  stops the handshakes in progress, and needs no pause state or timer.
+  The cost: a flood refills each freed place at once, and each of its
+  entries draws three SYN-ACK retransmissions to a spoofed source, at
+  most 15,360 x 3 in 15.6 s, about 3,000 a second per interface,
+  where FreeBSD's pause answers each SYN once.
+* The secrets are context, not state. `erx_net_tables` draws the two
+  cookie keys and rotates them every 15 s; the interface process reads
+  them, with the timestamp secret, at each SYN or ACK for a listener and
+  passes them to `erx_tcp_syncache` in the step's context. Neither the
+  table nor an entry holds a key: an entry keeps its cookie and its
+  timestamp offset, and those values alone reach the connection in the
+  handshake's result. The secrets value keeps its keys in a closure,
+  whose environment a crash report does not print.
+* A signed (TCP-MD5) SYN or ACK to a listener is dropped: the SYN and
+  an ACK under a cookie as a FreeBSD kernel without TCP-MD5 drops them,
+  an ACK for an entry where FreeBSD would complete it. A SYN repeated for an entry may
+  withdraw ECN but never grant it (`syncache_add`,
+  `tcp_syncache.c:1543-1546`).
 * When the handshake completes, the interface process takes one unit of
   the listener's accept credit, the free places of its backlog, spawns the
   connection process with its initial state, the handshake's result and
@@ -2153,7 +2177,7 @@ time against properties written from FreeBSD's rules:
   no entry.
 
 *Seeded failures:* a rotation that drops the previous secret at once,
-which the second property's one-rotation case must catch; an overflow
+which the first property's one-rotation case must catch; an overflow
 window measured with `=<` where FreeBSD uses `<`.
 
 ### The send log, loss and congestion: properties and a FreeBSD oracle
