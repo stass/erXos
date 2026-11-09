@@ -10,16 +10,19 @@ its three levels:
 erx_net_sup  (rest_for_one)
  |- erx_net_tables
  |- interfaces  (one_for_one)
-     |- link supervisor per interface  (rest_for_one)
-         |- erx_net_driver over its transport
-         |- erx_net_if
-         |- erx_dhcp4, when the interface is configured for DHCP
+ |   |- link supervisor per interface  (rest_for_one)
+ |       |- erx_net_driver over its transport
+ |       |- erx_net_if
+ |       |- erx_dhcp4, when the interface is configured for DHCP
+ |- erx_net_grant, the node's grant `local`, started through the runtime
 ```
 
 `erx_net_tables` comes first, so that its crash restarts everything that wrote into its
 tables. A driver's restart restarts its interface and the interface's DHCP client, which
-lose only soft state. Grants, sockets beyond erx_udp_sock and the port mapper join the
-tree as they are written.
+lose only soft state. The grant comes last, so its restart, which ends the connections
+linked to it, leaves the interfaces running.
+Listeners, datagram sockets under a grant and the port mapper join the tree as they are
+written.
 
 The configuration, a map: `interfaces`, a list of `#{name, transport := {Module, Config},
 ip4, ingress}`; `clock` (`monotonic` when absent); `runtime`, the runtime seam's module
@@ -63,7 +66,8 @@ runtime() ->
 init({stack, Interfaces}) ->
     Children = [#{id => erx_net_tables, start => {erx_net_tables, start_link, []}},
                 #{id => interfaces, type => supervisor,
-                  start => {supervisor, start_link, [?MODULE, {interfaces, Interfaces}]}}],
+                  start => {supervisor, start_link, [?MODULE, {interfaces, Interfaces}]}},
+                #{id => grant, start => {runtime(), start_grant, [local, #{}]}}],
     {ok, {#{strategy => rest_for_one}, Children}};
 init({interfaces, Interfaces}) ->
     Children = [#{id => Name, type => supervisor,

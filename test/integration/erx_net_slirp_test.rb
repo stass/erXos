@@ -12,29 +12,38 @@ require_relative '../../tools/lib/erx/erlang_apps'
 # (docs/design-network-stack.md, "The stack on a development host"): a QEMU that runs no
 # machine joins slirp and a dgram backend on one hub; the stack's pipe exchanges frames
 # with the dgram backend over UDP on the loopback, and test/erlang/erx_net_slirp_run.erl
-# takes a lease, resolves and pings the gateway, and echoes a datagram through slirp off a
-# UDP echo server here on the host. Nothing leaves the host: every answer is slirp's or
-# the echo server's. Needs qemu-system-aarch64 and ERX_ERL and ERX_ERLC.
+# takes a lease, resolves and pings the gateway, echoes a datagram through slirp off a UDP
+# echo server here on the host, and connects through slirp to a TCP echo server here: 1 MiB
+# both ways in passive mode, 64 KiB in active mode closed from both ends, and a connect to
+# a port nobody listens on, which slirp's RST refuses. Nothing leaves the host: every
+# answer is slirp's or an echo server's. Needs qemu-system-aarch64 and ERX_ERL and ERX_ERLC.
 class ErxNetSlirpTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APP = File.join(ROOT, 'erlang/apps/erx_net')
   SOURCES = [File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl'),
              *Dir[File.join(APP, 'src', '*.erl')].sort, *Dir[File.join(APP, 'portable', '*.erl')].sort,
+             *Dir[File.join(ROOT, 'erlang/apps/erx_net_client/src', '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_net_slirp_run.erl')].freeze
   DEADLINE = 60
   LOOPBACK = '127.0.0.1'
 
-  def test_lease_arp_ping_and_udp_through_slirp
+  def test_lease_arp_ping_udp_and_tcp_through_slirp
     Dir.mktmpdir('erx-net-slirp') do |work|
       compile(work)
       with_echo_server do |echo_port|
-        qemu_port, stack_port = free_ports(2)
-        with_qemu(qemu_port, stack_port) do
-          output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'),
-                                           '-noshell', '-pa', work, '-run', 'erx_net_slirp_run', 'main',
-                                           qemu_port.to_s, stack_port.to_s, echo_port.to_s, stdin_data: '')
-          assert status.success?, output
-          %w[lease arp ping udp].each { |step| assert_match(/^#{step} ok$/, output) }
+        with_tcp_echo_server do |tcp_port|
+          qemu_port, stack_port = free_ports(2)
+          with_qemu(qemu_port, stack_port) do
+            output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'),
+                                             '-noshell', '-pa', work, '-run', 'erx_net_slirp_run', 'main',
+                                             qemu_port.to_s, stack_port.to_s, echo_port.to_s, tcp_port.to_s,
+                                             closed_tcp_port.to_s, stdin_data: '')
+            assert status.success?, output
+            %w[lease arp ping udp tcp_passive tcp_active tcp_refused].each do |step|
+              assert_match(/^#{step} ok$/, output)
+            end
+            puts output[/^tcp_transfer_ms \d+$/]
+          end
         end
       end
     end
@@ -67,6 +76,31 @@ class ErxNetSlirpTest < Minitest::Test
   ensure
     thread&.kill
     server&.close
+  end
+
+  # Echoes each connection's bytes until its EOF, then closes it.
+  def with_tcp_echo_server
+    server = TCPServer.new(LOOPBACK, 0)
+    thread = Thread.new do
+      loop do
+        Thread.new(server.accept) do |client|
+          loop { client.write(client.readpartial(65_536)) }
+        rescue EOFError, IOError, SystemCallError
+          nil
+        ensure
+          client.close
+        end
+      end
+    end
+    yield server.addr[1]
+  ensure
+    thread&.kill
+    server&.close
+  end
+
+  # A TCP port nobody listens on.
+  def closed_tcp_port
+    TCPServer.new(LOOPBACK, 0).then { |server| server.addr[1].tap { server.close } }
   end
 
   def with_qemu(qemu_port, stack_port)

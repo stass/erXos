@@ -18,7 +18,12 @@ limit, and doing nothing is correct, not merely harmless.
 serve(MaxRequest) when is_integer(MaxRequest), MaxRequest > 0 ->
     ok.
 
--doc "Grants are not part of the stack yet.".
--spec start_grant(local | pos_integer(), map()) -> {error, enotsup}.
+-doc """
+Starts the node's grant, `local`, linked to the caller (erx_net_sup); a grant for another
+domain has no meaning outside erXos.
+""".
+-spec start_grant(local | pos_integer(), map()) -> {ok, pid()} | {error, term()}.
+start_grant(local, Limits) ->
+    erx_net_grant:start_link(local, Limits);
 start_grant(_Grantee, _Limits) ->
     {error, enotsup}.

@@ -21,7 +21,11 @@ deletion of a stopped writer's rows.
   erx_net_bind;
 * `erx_net_drivers`, `{Name, Pid}`: each interface's driver, which registers itself there
   so that its interface, started after it by their link supervisor, finds it; a
-  restarted driver's registration replaces its predecessor's, and nothing else reads it.
+  restarted driver's registration replaces its predecessor's, and nothing else reads it;
+* `erx_net_secrets`, `{tcp, Isn}`: the stack's TCP secrets, drawn at start, held in a
+  closure that gives a four-tuple's initial sequence number and timestamp offset
+  (erx_tcp_isn), so no crash report prints the keys; only this process writes it, and
+  only erx_net_bind's claim reads it.
 
 Rows end with their writer: every row names the pid of the incarnation that wrote it, and
 when a registered interface stops, however it stops, this process deletes every row naming
@@ -36,7 +40,8 @@ then the rows, so a reader that raced a writer finds a newer generation at its n
 -behaviour(gen_server).
 
 -export([start_link/0, register_driver/2, driver/1, register_interface/1, watch_holder/1,
-         generation/0, configuration/0, interface/1, neighbour/2, first_hint/2, demux/1]).
+         generation/0, configuration/0, interface/1, neighbour/2, first_hint/2, demux/1,
+         tcp_isn/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(IFS, erx_net_ifs).
@@ -46,6 +51,7 @@ then the rows, so a reader that raced a writer finds a newer generation at its n
 -define(GEN, erx_net_gen).
 -define(DEMUX, erx_net_demux).
 -define(DRIVERS, erx_net_drivers).
+-define(SECRETS, erx_net_secrets).
 
 -doc "Starts the owner and creates the tables.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
@@ -122,6 +128,15 @@ first_hint(Pid, Ip) ->
 demux(Key) ->
     [Entry || {_, _, Entry} <- ets:lookup(?DEMUX, Key)].
 
+-doc """
+The closure that gives a four-tuple's initial sequence number and timestamp offset at a
+time in microseconds, under the stack's secrets; erx_net_bind's claim calls it.
+""".
+-spec tcp_isn() -> fun((erx_tcp_isn:four_tuple(), integer()) ->
+                          {erx_tcp_seq:wire(), erx_tcp_seq:wire()}).
+tcp_isn() ->
+    ets:lookup_element(?SECRETS, tcp, 2).
+
 %% --- gen_server ------------------------------------------------------------------
 
 -doc false.
@@ -129,6 +144,12 @@ init([]) ->
     [ets:new(Name, [named_table, public, set, {read_concurrency, true}])
      || Name <- [?IFS, ?ADDRS, ?ROUTES, ?NEIGH, ?GEN, ?DEMUX, ?DRIVERS]],
     true = ets:insert(?GEN, {gen, 0}),
+    _ = ets:new(?SECRETS, [named_table, protected, set, {read_concurrency, true}]),
+    Secrets = erx_tcp_isn:secrets(erx_net_clock:entropy(16), erx_net_clock:entropy(16)),
+    true = ets:insert(?SECRETS, {tcp, fun(FourTuple, Now) ->
+                                              {erx_tcp_isn:isn(Secrets, FourTuple, Now),
+                                               erx_tcp_isn:ts_offset(Secrets, FourTuple)}
+                                      end}),
     {ok, #{}}.
 
 -doc false.

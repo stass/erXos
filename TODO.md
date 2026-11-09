@@ -788,13 +788,34 @@ it; git history is the record of completed work.
   and `erx_net_tap`; `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
   start); `erx_net_loop`; grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a
   provisional `gen_udp`-shaped interface, and `erx_net_tables:watch_holder/1` deletes a dead
-  socket's entries in its grant's place); the TCP, IPv6, reassembly and redirect paths of
+  socket's entries in its grant's place); the listener, IPv6, reassembly and redirect paths of
   `erx_net_if_core` (counted `unsupported`); an `erx_net` application module and its `env` keys
   (the stack starts with `erx_net_sup:start_link/1`); the credit limits are fixed defines, not
   application keys; a datagram socket's credit counts datagrams, not bytes of its receive
   buffer. Build checks still to add: the clock chokepoint (`erlang:send_after`, `monotonic_time`
   and the rest only in `erx_net_clock`), `erx_net_bind` as the only demultiplexing inserter,
   `erx_net_if` as the only configuration writer and `erx_net_credit` as the only batch sender.
+* [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
+  opens over IPv4 only. Not yet: `listen`/`accept`, the syncache hand-off and a SYN reinjected from
+  TIME-WAIT (E3, counted `reinject`); `erx_net_admit` (the grant checks the connect request's
+  shape inline) and the grant's limits, account and buffer reservations (a `reserve_buffer` is
+  granted at once, up to erx_tcp_mss's `SB_MAX`); `exit_on_close` (a socket whose peer closed
+  stays open until its owner closes it), `controlling_process/2` (`enotsup`), the packet modes,
+  `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
+  is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
+  connection's credit limit and buffer sizes are fixed defines, not application keys.
+* [Medium] network, `erx_tcp_conn` (E2 review): a refused or timed-out connect in active mode still
+  sends `tcp_error` and `tcp_closed` for a socket the caller never got; calls after `close` are
+  served (a `recv` waits until the connection ends) where stock answers `{error, closed}`; a RST
+  surfaces as `econnreset` where stock's `show_econnreset` false gives `closed`; a raise outside
+  a segment step crashes the process with no RST, and `guarded` keeps state after effects already
+  ran, where the design ("What fails and what survives") drops the connection with
+  `econnaborted`; the crash report's `reason` and queued messages can hold peer bytes despite
+  `format_status`; a `recv` timeout past `send_after`'s range crashes the connection;
+  `erx_tcp:answer_send` keeps filling the buffer after `snd_closed`; steps continue after
+  `finish`; `watch_holder` runs after the claim, so a kill between them strands the entry; port
+  exhaustion answers `eaddrinuse` where the design says `eaddrnotavail`. The socket's flags
+  (`eof`, `ended`, `told`, `finished`, `connect`, owner `none`) want one closed phase value.
 * [Medium] network, `erx_net_if` (`owned/4`): an interface that dies between reserving a holder's
   unit and the batch's end (a raise outside a frame's step, or its link supervisor's shutdown)
   leaves those units counted on credits that outlive it; trap exits and release the batch, or

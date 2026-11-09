@@ -342,8 +342,11 @@ Error in process <0.150.0> with exit value:
   ICMP errors and path MTU, and an explorer that walks its states,
   across sequence-number wrap too, checking RFC 9293's rules. Frames are
   classified on input and framed on output, and DHCP for IPv4 is decided.
-  The Internet checksum and SipHash-2-4 are its per-byte primitives. It
-  does not reach a device yet.
+  The Internet checksum and SipHash-2-4 are its per-byte primitives. On
+  stock OTP it runs as processes against QEMU's user networking: it takes
+  a DHCP lease, answers ARP and ping, echoes UDP, and opens TCP
+  connections through `gen_tcp`'s calls, echoing 1 MiB each way off a
+  host server. It does not reach a device yet.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated

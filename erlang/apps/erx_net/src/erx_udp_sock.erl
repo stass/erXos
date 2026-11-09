@@ -19,10 +19,8 @@ the binary it is part of (a frame, or a reassembled datagram) is copied out, so 
 datagram never keeps a large one alive.
 
 **Sending.** `send/4` builds the datagram's packets over the path the current
-configuration gives (`erx_net_frame:path/3`, `udp/5`) and addresses them from the next
-hop's neighbour row: with a row they go to the driver against its transmit credit, a stale
-row hinted to the interface once; without one they go to the interface to resolve,
-against its sender credit. A full credit answers `{error, enobufs}`.
+configuration gives (`erx_net_frame:path/3`, `udp/5`) and sends them through erx_net_tx,
+to the driver or to the interface to resolve. A full credit answers `{error, enobufs}`.
 
 **Timeouts.** `recv/2`'s timeout is a deadline in the socket's state, armed on
 erx_net_clock, so the call itself waits with `infinity`.
@@ -209,34 +207,10 @@ transmit(Dst, Dport, Data, #state{ip = Ip, port = Port, gen = Gen0, config = {_,
     maybe
         {ok, Path} ?= erx_net_frame:path(Dst, Opts, Snap),
         {ok, Packets, Gen} ?= erx_net_frame:udp(Path, Port, Dport, Data, Gen0),
-        {address(Path, Packets), S#state{gen = Gen}}
+        {handed(erx_net_tx:send(Path, Packets)), S#state{gen = Gen}}
     else
         {error, _} = Error -> {Error, S}
     end.
-
-address(#{link := Link, next_hop := NextHop, src := Src,
-          iface := #{pid := If, driver := Driver, driver_credit := Tx, credit := IfCredit}} = Path,
-        Packets) ->
-    Neighbour = case Link of
-                    neighbour -> erx_net_tables:neighbour(If, NextHop);
-                    {fixed, _} -> none
-                end,
-    case erx_net_frame:address(Path, Neighbour, Packets) of
-        {send, Frames} ->
-            ok = hint(Neighbour, If, NextHop),
-            handed(erx_net_credit:hand(Driver, Tx, length(Frames), {transmit, Frames}));
-        {resolve, Unaddressed} ->
-            handed(erx_net_credit:hand(If, IfCredit, 1, {resolve, NextHop, Src, Unaddressed}))
-    end.
-
-%% A stale neighbour is hinted to its interface by the first transmitter that uses it.
-hint({_, stale}, If, NextHop) ->
-    case erx_net_tables:first_hint(If, NextHop) of
-        true -> If ! {hint, NextHop}, ok;
-        false -> ok
-    end;
-hint(_Neighbour, _If, _NextHop) ->
-    ok.
 
 handed(ok) -> ok;
 handed(full) -> {error, enobufs}.

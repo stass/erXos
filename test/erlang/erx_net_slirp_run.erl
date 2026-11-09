@@ -15,13 +15,16 @@
 -define(LEASED, <<10, 0, 2, 15>>).
 -define(WAIT_MS, 15000).
 
-main([QemuPort, StackPort, EchoPort]) ->
+main([QemuPort, StackPort, EchoPort, TcpPort, ClosedPort]) ->
     Loopback = {127, 0, 0, 1},
     Far = {udp, {Loopback, list_to_integer(StackPort)}, {Loopback, list_to_integer(QemuPort)}},
     {ok, _} = erx_net_sup:start_link(#{interfaces => [#{name => en0, ip4 => dhcp,
         transport => {erx_net_pipe, #{far => Far, lladdr => <<16#52, 16#54, 0, 16#12, 16#34, 16#56>>}}}]}),
     Steps = [{lease, fun lease/1}, {arp, fun arp/1}, {ping, fun ping/1},
-             {udp, fun(If) -> udp(If, list_to_integer(EchoPort)) end}],
+             {udp, fun(If) -> udp(If, list_to_integer(EchoPort)) end},
+             {tcp_passive, fun(_) -> tcp_passive(list_to_integer(TcpPort)) end},
+             {tcp_active, fun(_) -> tcp_active(list_to_integer(TcpPort)) end},
+             {tcp_refused, fun(_) -> tcp_refused(list_to_integer(ClosedPort)) end}],
     {ok, #{pid := If}} = erx_net_tables:interface(en0),
     Results = [{Name, Step(If)} || {Name, Step} <- Steps],
     [io:format("~s ~p~n", [Name, Result]) || {Name, Result} <- Results],
@@ -97,3 +100,59 @@ udp(_If, EchoPort) ->
              end,
     ok = erx_udp_sock:close(Sock),
     Result.
+
+%% 1 MiB to the host's TCP echo server and back, in passive mode, a sender beside the
+%% reader so that neither direction waits on the other, then a close; the time is printed.
+tcp_passive(Port) ->
+    Payload = pattern(1 bsl 20),
+    Start = erlang:monotonic_time(millisecond),
+    {ok, S} = erx_gen_tcp:connect({10, 0, 2, 2}, Port, [binary, {active, false}], ?WAIT_MS),
+    Self = self(),
+    _ = spawn_link(fun() -> Self ! {sent, gen_tcp:send(S, Payload)} end),
+    Received = recv_all(S, byte_size(Payload), []),
+    Sent = receive {sent, R} -> R after ?WAIT_MS -> timeout end,
+    ok = gen_tcp:close(S),
+    io:format("tcp_transfer_ms ~b~n", [erlang:monotonic_time(millisecond) - Start]),
+    case {Sent, Received =:= Payload} of
+        {ok, true} -> ok;
+        Other -> {Other, byte_size(Received)}
+    end.
+
+recv_all(_S, 0, Acc) ->
+    iolist_to_binary(lists:reverse(Acc));
+recv_all(S, Left, Acc) ->
+    case gen_tcp:recv(S, 0, ?WAIT_MS) of
+        {ok, Data} -> recv_all(S, Left - byte_size(Data), [Data | Acc]);
+        {error, _} -> iolist_to_binary(lists:reverse(Acc))
+    end.
+
+%% 64 KiB in active mode: the data arrives as messages, the half close draws the server's
+%% close, which arrives as tcp_closed after the last byte.
+tcp_active(Port) ->
+    Payload = pattern(1 bsl 16),
+    {ok, S} = erx_gen_tcp:connect({10, 0, 2, 2}, Port, [binary, {active, true}], ?WAIT_MS),
+    ok = gen_tcp:send(S, Payload),
+    ok = gen_tcp:shutdown(S, write),
+    Result = case active_all(S, []) of
+                 {closed, Payload} -> ok;
+                 {Why, Data} -> {Why, byte_size(Data)}
+             end,
+    ok = gen_tcp:close(S),
+    Result.
+
+active_all(S, Acc) ->
+    receive
+        {tcp, S, Data} -> active_all(S, [Data | Acc]);
+        {tcp_closed, S} -> {closed, iolist_to_binary(lists:reverse(Acc))}
+    after ?WAIT_MS -> {timeout, iolist_to_binary(lists:reverse(Acc))}
+    end.
+
+%% A port nobody listens on: slirp's RST to the SYN refuses the connect.
+tcp_refused(Port) ->
+    case erx_gen_tcp:connect({10, 0, 2, 2}, Port, [binary], ?WAIT_MS) of
+        {error, econnrefused} -> ok;
+        Other -> Other
+    end.
+
+pattern(N) ->
+    << <<(I rem 251)>> || I <- lists:seq(0, N - 1) >>.

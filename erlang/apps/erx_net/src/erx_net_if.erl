@@ -29,7 +29,8 @@ sender credits (`rx_credit`, `credit`) and its driver's pid and transmit credit 
 Messages:
 
 * from the driver: `{frames, Driver, [binary()]}`, `{link, Driver, up | down}`;
-* from senders: `{resolve, NextHop, Src, Packets}` against `credit`, `{hint, NextHop}`;
+* from senders: `{resolve, NextHop, Src, Packets}`, a connection's `{reset, NextHop, Src,
+  Packets}` and `charge_rst`, each against `credit`, and `{hint, NextHop}`;
 * from its erx_dhcp4: `{dhcp_attach, Pid}` once, then `{dhcp, Pid, erx_dhcp4_core:action()}`;
   to it, `{erx_net_if, {reply, Msg} | {link, up | down}}`;
 * `admin/2`, a call, for netadmin's requests (`counters`, `lease`).
@@ -100,9 +101,13 @@ message({frames, Driver, Frames}, #state{driver = Driver, rx = Rx} = S) ->
 message({link, Driver, State}, #state{driver = Driver, rx = Rx} = S) ->
     ok = erx_net_credit:take(Rx, 1),
     step({link, State}, S);
-message({resolve, _NextHop, _Src, _Packets} = Event, #state{sender = Sender} = S) ->
+message({Kind, _NextHop, _Src, _Packets} = Event, #state{sender = Sender} = S)
+  when Kind =:= resolve; Kind =:= reset ->
     ok = erx_net_credit:take(Sender, 1),
     step(Event, S);
+message(charge_rst, #state{sender = Sender} = S) ->
+    ok = erx_net_credit:take(Sender, 1),
+    step(charge_rst, S);
 message({hint, _NextHop} = Event, S) ->
     step(Event, S);
 message({dhcp_attach, Pid}, #state{dhcp = Old} = S) when is_pid(Pid) ->

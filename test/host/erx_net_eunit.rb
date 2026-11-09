@@ -23,6 +23,7 @@ module ErxNetEunit
   # The portable seam's modules, built only outside erXos (design-network-stack.md,
   # "Two places, four seams"); compiled after src/, whose behaviours they implement.
   PORTABLE = File.join(ROOT, 'erlang/apps/erx_net/portable')
+  CLIENT = File.join(ROOT, 'erlang/apps/erx_net_client/src')
   INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
   HOST_BYTES = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
   TESTS = File.join(ROOT, 'test/erlang')
@@ -57,7 +58,7 @@ module ErxNetEunit
         includes += ['-I', File.join(tree, 'include')]
         erlc(work, Dir[File.join(tree, 'src', '*.erl')].sort, includes: includes)
       end
-      application = [APPLICATION, PORTABLE].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
+      application = [APPLICATION, PORTABLE, CLIENT].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
                                            .map { |source| faulty_copy(work, source, fault) }
       sources = [HOST_BYTES, *application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
       erlc(work, sources, includes: includes, flags: Erx::ErlangApps::FLAGS)

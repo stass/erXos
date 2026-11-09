@@ -57,7 +57,7 @@ once.
 """.
 
 -export([ephemeral_start/1, next_ephemeral/2]).
--export([insert/3, insert_ephemeral/4, delete/1]).
+-export([insert/3, insert_ephemeral/4, claim_tcp/5, delete/1]).
 
 -export_type([port_number/0]).
 
@@ -114,6 +114,25 @@ search(KeyOf, Port, Start, Pid, Entry) ->
                 exhausted -> Error;
                 Next -> search(KeyOf, Next, Start, Pid, Entry)
             end
+    end.
+
+-doc """
+The claim of an active open: the first free four-tuple of the search from `Start` that
+`KeyOf` gives a key for, as `insert_ephemeral/4` finds it, with the connection's initial
+sequence number and timestamp offset at `Now` under the stack's secrets, which this funnel
+reads and the connection never holds (`tcp_connect` with `in_pcbconnect`'s port choice and
+`tcp_new_isn`).
+""".
+-spec claim_tcp(fun((port_number()) -> erx_net_input:key()), port_number(), pid(),
+                erx_net_input:entry(), integer()) ->
+          {ok, port_number(), Iss :: erx_tcp_seq:wire(), TsOffset :: erx_tcp_seq:wire()}
+          | {error, eaddrinuse}.
+claim_tcp(KeyOf, Start, Pid, Entry, Now) ->
+    maybe
+        {ok, Port} ?= insert_ephemeral(KeyOf, Start, Pid, Entry),
+        {tcp, _Family, Local, Port, Remote, RemotePort} = KeyOf(Port),
+        {Iss, TsOffset} = (erx_net_tables:tcp_isn())({Local, Port, Remote, RemotePort}, Now),
+        {ok, Port, Iss, TsOffset}
     end.
 
 -doc "Removes `Key` from the demultiplexing table.".

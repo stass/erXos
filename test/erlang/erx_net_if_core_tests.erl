@@ -12,6 +12,7 @@
 -include("erx_dhcp4_wire.hrl").
 -include("erx_icmp4_wire.hrl").
 -include("erx_ip4_wire.hrl").
+-include("erx_tcp_wire.hrl").
 -include("erx_net_eth.hrl").
 -include("erx_udp_wire.hrl").
 
@@ -37,6 +38,33 @@ static(Extra) -> Extra#{ip4 => #{addr => ?ME4, plen => 24, gateway => ?PEER4}}.
 started(Config) ->
     {Core, [{publish, Rows} | _]} = step(start, core(Config)),
     configured(Rows, Core).
+
+tcp_frame(Flags, Seq, Ack, Payload) ->
+    Tcp = #tcp{sport = 4000, dport = 80, seq = Seq, ack = Ack, flags = Flags, win = 1024, urp = 0},
+    Segment = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6))),
+    eth(?MINE, ?ETHERTYPE_IP, ip4(?PEER4, ?ME4, 6, Segment)).
+
+rst_of(Frame) ->
+    {_, Packet} = decode(Frame),
+    {ok, #ip4{src = ?ME4, dst = ?PEER4}, Upper} = erx_ip4_wire:decode(Packet),
+    {ok, Tcp, <<>>} = erx_tcp_wire:decode(erx_ip4_wire:pseudo_sum(?ME4, ?PEER4, byte_size(Upper), 6), Upper),
+    Tcp.
+
+%% tcp_dropwithreset without a connection: a SYN with data is answered RST|ACK past all it
+%% occupied, an ACK with a RST at its acknowledgement, a RST with nothing; then the limit.
+closed_tcp_port_draws_a_rst_within_the_limit_test() ->
+    Core0 = started(static()),
+    {Core1, _} = step(local(who_has_me(), Core0), Core0),
+    {Core2, Syn} = step(local(tcp_frame(?TH_SYN, 100, 0, <<"abc">>), Core1), Core1),
+    ?assertMatch([#tcp{sport = 80, dport = 4000, seq = 0, ack = 104, flags = ?TH_RST bor ?TH_ACK, win = 0}],
+                 [rst_of(F) || F <- transmitted(Syn)]),
+    {Core3, Ack} = step(local(tcp_frame(?TH_ACK, 100, 777, <<>>), Core2), Core2),
+    ?assertMatch([#tcp{seq = 777, flags = ?TH_RST}], [rst_of(F) || F <- transmitted(Ack)]),
+    {Core4, []} = step(local(tcp_frame(?TH_RST, 100, 0, <<>>), Core3), Core3),
+    ?assertMatch(#{closed_port := 3}, counters(Core4)),
+    Flood = lists:foldl(fun(_, C) -> element(1, step(local(tcp_frame(?TH_ACK, 1, 2, <<>>), C), C)) end,
+                        Core4, lists:seq(1, 300)),
+    ?assertMatch(#{rst_limited := _}, counters(Flood)).
 
 configured(#{iface := Iface, addrs := Addrs, routes := Routes}, Core) ->
     Pid = self(),
@@ -258,7 +286,7 @@ link_change_goes_to_the_client_only_under_dhcp_test() ->
 
 drops_and_unsupported_events_are_counted_test() ->
     {Core1, []} = step({drop, other_host}, started(static())),
-    {Core2, []} = step(charge_rst, Core1),
+    {Core2, []} = step({ifid, make_ref(), unavailable}, Core1),
     ?assertMatch(#{other_host := 1, unsupported := 1}, counters(Core2)),
     ?assertMatch({_, [{reply, f, {error, enotsup}}]}, step({admin, routes, f}, Core2)).
 

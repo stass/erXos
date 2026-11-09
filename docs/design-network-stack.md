@@ -2677,6 +2677,7 @@ modules are marked P; process modules E.
 | `erx_dhcp4_wire`, `erx_dhcp4_core` | `parse_options`, `parse_option_buffer`, `check_classless_option`, `res_hnok`, `check_search`, `option_as_string` of `sbin/dhclient`; RFC 2131, RFC 2132, RFC 3396, RFC 3442 | DHCP message codec; DHCP client state machine | P |
 | `erx_net_grant_core` | none | the grant's limits, account and buffer reservations | P |
 | `erx_net_credit` | none | credited hand-over | funnel |
+| `erx_net_tx` | none | the sockets' transmit edge: packets to the driver against its credit, or to the interface to resolve | E |
 | `erx_net_clock` | none | the time, the one timer and the entropy of every process | funnel |
 | `erx_net_admit` | generated from `abi/services/net.txt`; hand-written with the same signature until the generator exists | the admission path of grants and sockets | generated |
 | `erx_net_runtime` | none | the runtime seam's behaviour | behaviour |

@@ -6,8 +6,9 @@ require 'minitest/autorun'
 require_relative 'erx_net_eunit'
 
 # Runs the EUnit cases of the network stack's effect layer: the interface core against
-# canned frames (test/erlang/erx_net_if_core_tests.erl) and the driver and pipe with a
-# stand-in interface (erx_net_driver_tests.erl), and seeds the faults the design names for
+# canned frames (test/erlang/erx_net_if_core_tests.erl), the driver and pipe with a
+# stand-in interface (erx_net_driver_tests.erl) and a TCP connection's loop with a
+# stand-in interface, driver and peer (erx_tcp_conn_tests.erl), and seeds the faults the design names for
 # them ("The stack on a development host", "The driver and the clock"; "Receiving").
 class ErxNetEffectTest < Minitest::Test
   include ErxNetEunit
@@ -18,6 +19,33 @@ class ErxNetEffectTest < Minitest::Test
 
   def test_driver_and_pipe_pass_under_eunit
     assert_erx_net_eunit(:erx_net_driver_tests)
+  end
+
+  def test_tcp_connection_passes_under_eunit
+    assert_erx_net_eunit(:erx_tcp_conn_tests)
+  end
+
+  # The connection loop's seeded failures, each failing its own case.
+  CONN_FAULTS = {
+    # The clock left unarmed after a step: no deadline of the step ever runs.
+    syn_is_retransmitted_on_its_timer: [
+      'S#state{armed = erx_net_clock:arm_by(lists:min(Deadlines), Armed)}.', '_ = {Deadlines, Armed}, S.'
+    ],
+    # Bytes handed to the owner never stepped as read: the window stays shut.
+    reading_opens_the_window: [
+      'settle(step({user, {rcvd, Bytes}}, S1))', '_ = Bytes, settle(S1)'
+    ],
+    # A batch's units never taken: the peer's segments hold the credit for good.
+    credit_is_taken_as_items_arrive: [
+      "ok = erx_net_credit:take(Credit, length(Items)),\n    settle(", "_ = Credit,\n    settle("
+    ]
+  }.freeze
+
+  CONN_FAULTS.each do |name, fault|
+    define_method("test_seeded_fault_fails_#{name}") do
+      output = refute_erx_net_eunit(:erx_tcp_conn_tests, fault: { 'erx_tcp_conn' => fault })
+      assert_match(/#{name}/, output)
+    end
   end
 
   # A failed check that keeps the token it spent starves the interface of its bucket.

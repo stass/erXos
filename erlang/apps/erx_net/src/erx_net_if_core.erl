@@ -10,9 +10,16 @@ to the sub-core it belongs to and returns the actions for erx_net_if to perform 
 It holds the interface's IPv4 configuration (static, or a DHCP lease that the interface's
 erx_dhcp4 configures), the ARP table (erx_arp), the ICMP limiters (erx_net_bandlim), the
 ingress bucket, its copy of the stack's configuration, its generator and its counters.
-The paths it carries are ARP, ICMP echo, the DHCP client's messages and UDP to a closed
-port; every other local item and event is counted as `unsupported`, until the cores of
-IPv6, reassembly and TCP join the step.
+The paths it carries are ARP, ICMP echo, the DHCP client's messages, UDP and TCP to a
+closed port, and the RSTs connections hand it; every other local item and event, a segment
+for a listener among them, is counted as `unsupported`, until the cores of IPv6,
+reassembly and the syncache join the step.
+
+**RSTs.** Every RST the stack sends passes the interface's `tcp_rst` limit
+(`badport_bandlim`): the answer to a segment for a closed port, which the core builds as
+`tcp_dropwithreset` does without a connection (sys/netinet/tcp_input.c), and a
+connection's `{reset, ...}`, framed by the connection and resolved here. `charge_rst`
+counts one against the limit without sending anything.
 
 **The ingress bucket.** A local frame, one that names no socket, spends a token of the
 interface's bucket before it is verified, and gets it back when the check fails, all
@@ -37,6 +44,7 @@ it while it asks.
 -include("erx_ip4_wire.hrl").
 -include("erx_net_eth.hrl").
 -include("erx_udp_wire.hrl").
+-include("erx_tcp_wire.hrl").
 
 -export([new/1, step/3, view/1, next_deadline/1]).
 
@@ -170,6 +178,14 @@ step({local, Pending}, Core, #{now := Now}) ->
     local(Pending, Core, Now);
 step({resolve, NextHop, _Src, Packets}, Core, #{now := Now}) ->
     resolve(NextHop, Packets, Core, Now);
+step({reset, NextHop, _Src, Packets}, Core0, #{now := Now}) when is_binary(NextHop) ->
+    case rst_allowed(Core0, Now) of
+        {allow, Core} -> resolve(NextHop, Packets, Core, Now);
+        {deny, Core} -> {count(rst_limited, Core), []}
+    end;
+step(charge_rst, Core0, #{now := Now}) ->
+    {_, Core} = rst_allowed(Core0, Now),
+    {Core, []};
 step({hint, NextHop}, #core{arp = Arp} = Core, _Ctx) when is_binary(NextHop) ->
     {Core#core{arp = erx_arp:hint(NextHop, Arp)}, []};
 step({config, Gen, Snapshot}, Core, _Ctx) ->
@@ -245,8 +261,45 @@ item({udp, #{family := inet, ip := Ip}, #udp{}, Datagram}, #core{lim = Lim0} = C
     Packet = <<(erx_ip4_wire:encode(Ip))/binary, Datagram/binary>>,
     {Actions, Lim} = erx_icmp4:error({unreach, 3}, Packet, icmp_ctx(Now), Lim0),
     icmp_actions(Actions, count(port_unreach, Core#core{lim = Lim}), Now);
+item({tcp, #{family := inet, link := unicast, src := Src, dst := Dst}, #tcp{} = Tcp, Payload, none},
+     Core, Now) ->
+    closed_port(Src, Dst, Tcp, Payload, Core, Now);
+item({tcp, _Head, #tcp{}, _Payload, none}, Core, _Now) ->
+    {count(no_reply, Core), []};
 item(_Item, Core, _Now) ->
     {count(unsupported, Core), []}.
+
+%% tcp_dropwithreset for a segment no connection holds (tcp_input.c): nothing for a RST;
+%% for an ACK, a RST at the acknowledged number; otherwise a RST acknowledging all the
+%% segment occupied, its SYN and FIN included; each within the RST limit. Classification
+%% already refused a segment to a broadcast or multicast destination.
+closed_port(_Peer, _Ours, #tcp{flags = Flags}, _Payload, Core, _Now)
+  when Flags band ?TH_RST =/= 0 ->
+    {count(closed_port, Core), []};
+closed_port(Peer, Ours, Tcp, Payload, Core0, Now) ->
+    case rst_allowed(count(closed_port, Core0), Now) of
+        {deny, Core} ->
+            {count(rst_limited, Core), []};
+        {allow, Core} ->
+            Rst = closed_port_rst(Tcp, Payload),
+            with_path(Peer, Ours, Core,
+                      fun(Path, Gen) -> erx_net_frame:tcp(Path, [Rst], Gen) end, Now)
+    end.
+
+closed_port_rst(#tcp{sport = Sport, dport = Dport, flags = Flags, ack = Ack}, _Payload)
+  when Flags band ?TH_ACK =/= 0 ->
+    rst(Dport, Sport, Ack, 0, ?TH_RST);
+closed_port_rst(#tcp{sport = Sport, dport = Dport, flags = Flags, seq = Seq}, Payload) ->
+    Len = byte_size(Payload) + (Flags band ?TH_SYN) div ?TH_SYN + (Flags band ?TH_FIN),
+    rst(Dport, Sport, 0, erx_tcp_seq:wire(Seq + Len), ?TH_RST bor ?TH_ACK).
+
+rst(Sport, Dport, Seq, Ack, Flags) ->
+    {#tcp{sport = Sport, dport = Dport, seq = Seq, ack = Ack, flags = Flags, win = 0, urp = 0},
+     #{ecn => 0, df => true}, []}.
+
+rst_allowed(#core{lim = Lim0} = Core, Now) ->
+    {Verdict, Lim} = erx_net_bandlim:check(tcp_rst, Now div 1000, Lim0),
+    {Verdict, Core#core{lim = Lim}}.
 
 icmp_ctx(Now) ->
     #{now => Now div 1000, time_of_day => (Now div 1000) rem 86400000}.
