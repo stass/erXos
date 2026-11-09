@@ -3,7 +3,7 @@
 
 -module(erx_udp_wire_fuzz).
 -moduledoc """
-The fuzz target of erx_udp_wire:decode/2 (docs/design-network-stack.md,
+The fuzz target of erx_udp_wire:decode/3 (docs/design-network-stack.md,
 "Codecs: fuzz targets"), run by tools/fuzz/erx_net_codec.rb. Each round builds a UDP
 datagram over IPv4 or IPv6 with a UDP length of an edge value, sometimes trailing bytes
 past it, a zero port or a corrupted byte, and checks that the decoder never raises; that it
@@ -39,7 +39,7 @@ run([Seed]) ->
     end.
 
 check({Family, Bytes}) ->
-    Result = try erx_udp_wire:decode(pseudo(Family, byte_size(Bytes)), Bytes)
+    Result = try erx_udp_wire:decode(Family, pseudo(Family, byte_size(Bytes)), Bytes)
              catch Class:Reason:Stack -> fail(raised, {Family, Bytes, Class, Reason, Stack})
              end,
     case {Result, judge(Family, Bytes)} of
@@ -55,7 +55,7 @@ check({Family, Bytes}) ->
 
 round_trip(Family, Udp, Payload) ->
     Encoded = iolist_to_binary(erx_udp_wire:encode(Udp, Payload, pseudo(Family, 8 + byte_size(Payload)))),
-    case erx_udp_wire:decode(pseudo(Family, byte_size(Encoded)), Encoded) of
+    case erx_udp_wire:decode(Family, pseudo(Family, byte_size(Encoded)), Encoded) of
         {ok, Udp, Payload} -> ok;
         Other -> fail(round_trip_differs, {Family, Udp, Payload, Encoded, Other})
     end.
@@ -72,11 +72,14 @@ fail(Tag, Detail) -> throw({fail, Tag, Detail}).
 
 -doc """
 The reference judge, from RFC 768 with `udp_input`'s rules: an 8-byte header, a UDP length
-from 8 to the bytes delivered, the checksum (when nonzero) over the pseudo-header written
+from 8 to the bytes delivered (over IPv6 equal to them, and a nonzero checksum field, as
+RFC 8200 requires), the checksum (when nonzero) over the pseudo-header written
 out whole with the UDP length and the datagram cut at it, and a nonzero destination port.
 """.
--spec judge(ip4 | ip6, binary()) -> accept | refuse.
+-spec judge(inet | inet6, binary()) -> accept | refuse.
 judge(_, Bytes) when byte_size(Bytes) < 8; byte_size(Bytes) > 16#ffff ->
+    refuse;
+judge(inet6, <<_:32, Ulen:16, Sum:16, _/binary>> = Bytes) when Ulen =/= byte_size(Bytes); Sum =:= 0 ->
     refuse;
 judge(Family, <<_:16, Dport:16, Ulen:16, Sum:16, _/binary>> = Bytes) ->
     Summed = Ulen >= 8 andalso Ulen =< byte_size(Bytes) andalso
@@ -91,19 +94,19 @@ judge(Family, <<_:16, Dport:16, Ulen:16, Sum:16, _/binary>> = Bytes) ->
 full_sum(Family, Ulen, Bytes) ->
     erx_bytes:inet_csum(erx_bytes:inet_csum(0, header(Family, Ulen)), binary:part(Bytes, 0, Ulen)).
 
-header(ip4, Ulen) -> <<?SRC4/binary, ?DST4/binary, 0, ?IPPROTO_UDP, Ulen:16>>;
-header(ip6, Ulen) -> <<?SRC6/binary, ?DST6/binary, Ulen:32, 0:24, ?IPPROTO_UDP>>.
+header(inet, Ulen) -> <<?SRC4/binary, ?DST4/binary, 0, ?IPPROTO_UDP, Ulen:16>>;
+header(inet6, Ulen) -> <<?SRC6/binary, ?DST6/binary, Ulen:32, 0:24, ?IPPROTO_UDP>>.
 
 %% No IP packet delivers more than 65535 bytes, and the decoder refuses such a datagram before
 %% it reads the sum.
 pseudo(_, Len) when Len > 16#ffff -> 0;
-pseudo(ip4, Len) -> erx_ip4_wire:pseudo_sum(?SRC4, ?DST4, Len, ?IPPROTO_UDP);
-pseudo(ip6, Len) -> erx_ip6_wire:pseudo_sum(?SRC6, ?DST6, Len, ?IPPROTO_UDP).
+pseudo(inet, Len) -> erx_ip4_wire:pseudo_sum(?SRC4, ?DST4, Len, ?IPPROTO_UDP);
+pseudo(inet6, Len) -> erx_ip6_wire:pseudo_sum(?SRC6, ?DST6, Len, ?IPPROTO_UDP).
 
 %% A datagram whose UDP length is an edge value against its payload, with trailing bytes
 %% (an Ethernet frame's padding, or garbage) about a third of the time.
 datagram() ->
-    Family = oneof([ip4, ip6]),
+    Family = oneof([inet, inet6]),
     Payload = bytes(payload_size()),
     Ulen = 8 + byte_size(Payload) + oneof([0, 0, 0, 0, 0, -1, 1, -8, -9]),
     Trailing = bytes(oneof([0, 0, 1, 4, rand:uniform(40)])),

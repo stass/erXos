@@ -44,3 +44,4 @@ module erx_icmp4_wire
 
 module erx_udp_wire
   sys/netinet/udp_usrreq.c udp_input
+  sys/netinet6/udp6_usrreq.c udp6_input

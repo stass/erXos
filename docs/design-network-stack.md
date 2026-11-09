@@ -431,9 +431,12 @@ ARP frame has none), the bytes of the layer above, and the fields that
 choose its destination. A
 segment, datagram or ICMP record exists only as the result of its
 checksumming decoder, so no step can be handed one whose checksum was
-not checked. The one record without a checked sum is a UDP datagram
-that carries none, a zero checksum field, which `erx_udp_wire` marks
-`absent` for `erx_udp` to accept over IPv4 and refuse over IPv6.
+not checked; the one exception is an IPv4 UDP datagram that carries no
+checksum, which RFC 768 allows. The UDP decoder takes the IP version
+and applies the rules that differ by it: over IPv4 the bytes past the
+UDP length are cut off and a zero checksum field means none, as in
+`udp_input`; over IPv6 the UDP length must equal the payload length and
+the checksum field must be nonzero, as in `udp6_input`.
 
 Inside a connection, sequence numbers, acknowledgement numbers, SACK
 block edges and timestamps are **unwrapped**: unbounded integers that
@@ -1219,12 +1222,7 @@ of the interface process, not a socket, so it needs no exception in
 
 ### UDP
 
-`erx_udp` translates `udp_usrreq.c` and `udp6_usrreq.c`: the rules that
-differ by IP version (a zero checksum allowed over IPv4, refused over
-IPv6 as `udp6_input` refuses it; over IPv4 bytes past the UDP length
-cut off, which `erx_udp_wire` does for either version, over IPv6 the
-datagram refused unless its UDP length is the IPv6 payload length),
-delivery to
+`erx_udp` translates `udp_usrreq.c` and `udp6_usrreq.c`: delivery to
 the socket bound most specifically, ICMP errors delivered to a connected
 socket, and port unreachable errors within the ICMP limit. A datagram
 socket holds received datagrams up to its receive buffer, counted in
@@ -1253,7 +1251,7 @@ modules are marked P; process modules E.
 | `erx_in6_src` | `in6_src.c` | source address selection | P |
 | `erx_net_addr` | `in.c`, `in6.c` | address checks | P |
 | `erx_net_route` | none | longest-prefix lookup | P |
-| `erx_udp_wire`, `erx_udp` | `udp_usrreq.c`, `udp6_usrreq.c` | UDP codec and decisions | P |
+| `erx_udp_wire`, `erx_udp` | `udp_usrreq.c`, `udp6_usrreq.c` | UDP codec, with the checksum and length rules of each IP version; decisions | P |
 | `erx_tcp_wire` | `tcp.h`, the checksum of `tcp_input_with_port` (`tcp_input.c:640-748`), `tcp_dooptions` (`tcp_input.c:3501`), `tcp_addoptions` (`tcp_output.c:1794`) | TCP codec, checksum first, and options | P |
 | `erx_tcp_seq` | `tcp_seq.h` | lifting and wire conversion | P |
 | `erx_tcp` | `tcp_input_with_port` (`tcp_input.c:594`), per connection | the step: dispatch and output | P |
