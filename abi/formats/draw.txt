@@ -1,0 +1,128 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The draw protocol's messages (docs/design-display.md, "Draw messages", and
+# docs/design-abi.md, "Draw format"): each message's name, its letter and
+# its fields in wire order after the letter, little-endian. A count field
+# is not part of the decoded message: the field that names it carries its
+# items, and the encoder writes the count from them. tools/gen_abi.rb
+# generates the Erlang codec erx_draw_codec and its bounded C twin from it.
+
+draw 1
+  message alloc b
+    field id id
+    field screen u32
+    field refresh u8
+    field chan u32
+    field repl u8
+    field r rect
+    field clipr rect
+    field color u32
+  message clip c
+    field dst id
+    field repl u8
+    field clipr rect
+  message draw d
+    field dst id
+    field src id
+    field mask id
+    field r rect
+    field sp point
+    field mp point
+  message ellipse e
+    field dst id
+    field src id
+    field c point
+    field a i32
+    field b i32
+    field thick i32
+    field sp point
+    field alpha u32
+    field phi i32
+  message fill_ellipse E
+    field dst id
+    field src id
+    field c point
+    field a i32
+    field b i32
+    field thick i32
+    field sp point
+    field alpha u32
+    field phi i32
+  message free f
+    field id id
+  message font i
+    field id id
+    field n u32
+    field ascent u8
+  message glyph l
+    field cache id
+    field src id
+    field index u16
+    field r rect
+    field sp point
+    field left u8
+    field width u8
+  message line L
+    field dst id
+    field p0 point
+    field p1 point
+    field end0 u32
+    field end1 u32
+    field thick i32
+    field src id
+    field sp point
+  message origin o
+    field id id
+    field rmin point
+    field scr point
+  message op O
+    field op u8
+  message poly p
+    field dst id
+    field n u16
+    field end0 u32
+    field end1 u32
+    field thick i32
+    field src id
+    field sp point
+    field points points n
+  message fill_poly P
+    field dst id
+    field n u16
+    field wind i32
+    field ignore point
+    field src id
+    field sp point
+    field points points n
+  message read r
+    field id id
+    field r rect
+  message string s
+    field dst id
+    field src id
+    field font id
+    field p point
+    field clipr rect
+    field sp point
+    field n u16
+    field indices indices n
+  message string_bg x
+    field dst id
+    field src id
+    field font id
+    field p point
+    field clipr rect
+    field sp point
+    field n u16
+    field bg id
+    field bp point
+    field indices indices n
+  message flush v
+  message load y
+    field id id
+    field r rect
+    field pixels pixels id r
+  message cload Y
+    field id id
+    field r rect
+    field pixels compressed id r

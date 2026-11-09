@@ -535,7 +535,13 @@ Both refuse an empty or inverted rectangle, as 9front's `loadmemimage`
 and `cloadmemimage` do, so every row holds at least one byte; each code
 reads at least one byte, so decoding never takes more steps than the
 write has bytes. An id for which `Depth` answers `none` fails with
-`ENOENT`.
+`ENOENT`. A failure's offset is that of the field that failed, counted
+from the message's letter, or 0 for an unknown letter, so a `compressed`
+field fails at its start, as `cloadmemimage` reports no position.
+A back-reference may reach before the rectangle's first byte, which
+`cloadmemimage` accepts and reads from its uninitialised window;
+`erx_draw_image` accepts it alike and reads zeros there, so the two frame
+every payload alike.
 
 `erx_draw_core:plan(Conn, Bytes)` is a left fold over the write: decode
 one message with the depth function of the connection as planned so far,

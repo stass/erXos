@@ -371,12 +371,21 @@ it; git history is the record of completed work.
   quadratic in a node's children (a reversed flat node of 16,000 children: 10 s for `delta/2`, 20 s to apply, on
   Homebrew erl), and an index above 65,535 does not fit `diff_op()` or the binary form. Add a per-node children
   limit to the validity rules (at most 65,536; 1,024 suggested), which bounds both by construction.
+* [Medium] `test/fixtures/erx_draw_cload.c`, the draw codec's C twin and `erx_draw_image`, [Draw
+  messages](docs/design-display.md#draw-messages) and "Verification and testing": the 9front build does not exist yet,
+  so the twin frames a `Y` with `erx_draw_cload_frame`, a stand-in written from `cloadmemimage`'s walk, and the
+  differential test of the codec against the twin compares `erx_draw_image` with that stand-in, not with 9front's
+  decoder. With the 9front build: link its `cloadmemimage` behind `erx_draw_cload_frame` and delete the stand-in, check
+  `y` lengths against its `bytesperline` (the EUnit vectors are hand-computed from its source), and add
+  `erx_draw_image`'s own oracle test (same payloads, counts and pixels) with its seeded run-length fault.
+* [Low] `tools/lib/erx/abi_emit_draw.rb`: design-display.md says the generator also produces the message table of its
+  interface section from `draw.txt`; it does not, and the table in "Draw messages" is hand-written.
 * [Medium] `display/lvgl/erx_lvgl.c`, [The widget server](docs/design-display.md#the-widget-server) and design-abi.md
   "Widget format": gaps the LVGL program had to fill. (1) An `input` key's `code` has no stated meaning; the program
   uses the rune alone, with keyboard(6)'s private-use runes for the cursor keys. (2) `align` `start`, `center` and
   `end` have no LVGL flex equivalent per child; the program gives such a node its own size at the start of the cross
-  axis, so the parity test will differ there. (3) No source declares Plan 9 channel descriptors (`draw.txt` is not
-  written); the program computes the four it renders in (`r5g6b5`, `r8g8b8`, `x8r8g8b8`, `a8r8g8b8`) with draw(2)'s
+  axis, so the parity test will differ there. (3) No source declares Plan 9 channel descriptors (`draw.txt` declares only
+  the messages); the program computes the four it renders in (`r5g6b5`, `r8g8b8`, `x8r8g8b8`, `a8r8g8b8`) with draw(2)'s
   `CHAN` packing, and should take them from the generated table once it exists. (4) A screen row must fit one
   `pixels` report (at most 16,381 pixels at 32 bits); design-abi.md should say a `screen` wider than that is refused.
   (5) A `present` property is shown as LVGL glyphs without the line escape the design asks for, since no C twin of

@@ -14,6 +14,7 @@ include kernel.txt
 include protocols/9p.txt
 include protocols/hostlink.txt
 include formats/ui.txt
+include formats/draw.txt
 include protocols/web.txt
 
 limit page_size u32 4096

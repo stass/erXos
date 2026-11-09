@@ -869,6 +869,58 @@ server's messages in Erlang, C and TypeScript give the same reasons for
 the same refusals, so one parity test feeds a corpus and its mutants to
 all three.
 
+### Draw format
+
+`formats/draw.txt` holds the one `draw VERSION` declaration of the draw
+protocol's messages ([Draw messages](design-display.md#draw-messages)).
+Its members, at two-space indentation, are the messages; the fields of a
+message are at four spaces beneath it, in wire order after the letter.
+Message names have one namespace and letters another; field names have
+one per message, and a field refers to an earlier one of its message by
+its bare name.
+
+| Member | Meaning |
+| --- | --- |
+| `message NAME LETTER` | a message: its name, the tag of its decoded term, and its letter, one printable ASCII byte |
+| `field NAME TYPE` | a fixed field: `u8`, `u16`, `u32`, `i32`, `id` (a u32 image id), `point` (two signed 32-bit coordinates) or `rect` (four) |
+| `field NAME points COUNT` | COUNT + 1 coded points, COUNT an earlier `u16` field |
+| `field NAME indices COUNT` | COUNT u16 glyph indices, COUNT an earlier `u16` field |
+| `field NAME pixels ID RECT` | raw pixels: `bytesperline(RECT, depth)` times Dy(RECT) bytes, depth that of the image ID names |
+| `field NAME compressed ID RECT` | image(6)'s compressed pixels for RECT at ID's depth, ending at the code that completes the last row |
+
+All integers are little-endian. A `u16` that a `points` or `indices`
+field names is a count: it counts exactly one field, is not part of the
+decoded term, and the encoder writes it from that field's items. A
+`pixels` or `compressed` field names an earlier `id` and `rect` field of
+its message.
+
+The generator emits from the declaration one table of every message's
+fields, and the one walk over it in each language reads every message:
+`erx_draw_codec` in Erlang, with `decode/2`, `encode/1`, `layout/1` and
+`letter/1`, and its C twin, `erx_draw_decode` of `erx/draw_codec.h`, a
+host test tool that the fuzz target and the differential test link. A
+message decodes to `{Name, Field...}` with its fields in wire order,
+counts left out, or to the bare `Name` when it has no field; a point is
+`{X, Y}` and a rectangle `{X0, Y0, X1, Y1}`; points are a list of
+points with absolute coordinates, indices a list of integers, and the
+pixels of either kind a binary of the rectangle's bytes, a `compressed`
+field's decoded by `erx_draw_image`. A field type is a closed set whose
+walk code is the generator's, so a message adds no code. A failed
+decode gives the errno and the offset, from the message's letter, of the
+field that failed, or 0 for an empty input or an unknown letter: a
+field that runs past the end, an empty or inverted rectangle, and codes
+that cross a row's end or stop short are `einval`; an id the depth
+function answers `none` for is `enoent`. The C twin frames a
+`compressed` field with a function the program that links it provides,
+`erx_draw_cload_frame`, which is `cloadmemimage`'s walk.
+
+Generation fails for a second `draw` declaration or one outside
+`formats/draw.txt`, a member other than `message`, a field outside a
+message, a duplicate message name, letter or field name, a letter that
+is not one printable byte, an unknown field type, a reference to a
+field that is not an earlier one of the named type, and a count that
+counts two fields.
+
 ### Web protocol
 
 `protocols/web.txt` holds the one `web VERSION` declaration of the web
@@ -1770,6 +1822,7 @@ The output families have explicit locations, shown relative to `build/gen/`:
 | `tools/generated/abi.rb` | immutable values, source-driven packer encodings and host readers |
 | `fuzz/generated/` | entry points invoking production readers |
 | `web/src/generated/` | the web client's TypeScript: `web.txt`'s types, codec, limits and hash; `ui.txt`'s tables and the reader and writer of its binary form; the inspection schema's kinds, attribute names, units, stopgap reporters and `present` marks ([design-web.md](design-web.md#the-client)) |
+| `erlang/apps/erx_display/src/erx_draw_codec.erl`, `include/erx/draw_codec.h`, `display/generated/erx_draw_codec.c` | the draw protocol's codec and its C twin |
 | `docs/generated/abi-reference.md` | signatures, assignments, fields, bounds and mapping tables |
 
 Independent raw-byte fixtures live in `test/fixtures/` and do not derive

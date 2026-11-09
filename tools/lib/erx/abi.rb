@@ -18,6 +18,7 @@ require_relative 'abi_emit_present'
 require_relative 'abi_emit_ui'
 require_relative 'abi_emit_ui_wire'
 require_relative 'abi_emit_ui_wire_ts'
+require_relative 'abi_emit_draw'
 require_relative 'abi_emit_web'
 require_relative 'abi_emit_web_ts'
 
@@ -54,6 +55,7 @@ module Erx
         files.merge!(UIEmitter.outputs(schema))
         files.merge!(UIWireEmitter.outputs(schema))
         files.merge!(UIWireTSEmitter.outputs(schema))
+        files.merge!(DrawEmitter.outputs(schema))
         # The protocol hash covers terminal.txt and its Unicode data, which are
         # not ABI sources, so they join the files this plan reads.
         hashed = schema.web ? WebEmitter.hashed_sources(root: root, inputs: source.inputs) : []
