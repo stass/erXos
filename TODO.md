@@ -281,6 +281,24 @@ it; git history is the record of completed work.
   image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
   the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
   window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
+* [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
+  system](docs/design-display.md#windows-and-the-window-system): settle these when `erx_winfs` is written, with a
+  property case for each.
+  * **A window's end and a screen change.** `erx_winfs` removes an ended window, or takes a new screen size, without
+    asking the policy, so no callback sets the windows' `state` and `rect` afterwards. Under the single policy
+    `input/3` routes to the next oldest window of the application (`erx_wm_single:shown/2`) while the table, and so
+    the layout and `wctl` reads, still marks it hidden until the next `new`: input reaches a window not on screen.
+    Add one callback, `arrange(Windows, Screen, State)`, that `erx_winfs` calls after every change it makes itself
+    (for the single policy, the body of `place(new, ...)`), and let the property test end the shown window.
+  * **Lost key ups.** A key whose up is lost (a keyboard unplugged mid-press) stays held in the chord's state; a
+    lost up of the chord's completing key leaves it withheld, so its next downs are dropped as repeats and the chord
+    does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key
+    means its up was lost, and keep held keys per device, cleared when the device goes away.
+* [High] `erx_wm_rio` (desktop, not built; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
+  the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
+  window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the
+  overlapping policy lands, its design keeps the current window in the policy's state and moves it only on the
+  user's actions (a click, the menu), so a client's request only raises; `decorate/2` then needs that state.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
 * [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "no loop over device-written bytes in the NIF" and "within `erx_device.c` only `write_address` writes a ring's address register" have no check: the first holds as `erx_device_complete` copies with `bcopy` alone, the second by reading the file; a check needs a function-level site.

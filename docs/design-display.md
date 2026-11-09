@@ -901,12 +901,24 @@ decides who may do what.
 `erx_winfs`:
 
 ```erlang
+-callback init(Config :: map()) -> State.
 -callback place(Request :: new | {move, rect()} | {resize, rect()} | hide | show | top | bottom,
-                Window :: window_id(), Windows :: [window()], Screen :: rect()) ->
-          {ok, [window()]} | {error, einval}.
--callback decorate(window(), Screen :: rect()) -> [{rect(), color()}].  % borders, or []
--callback input(input(), Windows :: [window()]) -> {to, window_id(), input()} | {wm, term()} | drop.
+                Window :: window_id(), Windows :: [window()], Screen :: rect(), State) ->
+          {ok, [window()], State} | {error, einval}.
+-callback decorate(Windows :: [window()], Screen :: rect()) ->
+          [{window_id(), [{rect(), color()}]}].           % borders, or []
+-callback input(input(), Windows :: [window()], State) ->
+          {{to, window_id(), input()} | {wm, term()} | {windows, [window()]} | drop, State}.
 ```
+
+The table a policy sees and returns is in stacking order, topmost
+first. `new` is asked with the new
+window already in the table, its rectangle and state the policy's to
+set. The policy's state, from the manifest's configuration, is threaded
+by `erx_winfs`: the overlapping policy keeps, for example, the buttons
+last seen and the drag in progress, and every policy keeps the reserved
+chord's keys held. `{windows, Table}` answers an
+event that rearranges the table, such as a click that raises a window.
 
 The **overlapping** policy, `erx_wm_rio`, keeps windows in a stacking
 order, places a new window where the user drags a rectangle or at a
@@ -945,9 +957,12 @@ does not.
 
 **The reserved chord.** A display's manifest entry may name a key chord,
 the **secure attention chord**. Every policy keeps it, answering
-`input/2` for it with `{wm, chord}`, and delivers it to no window, so no
+`input/3` for it with `{wm, chord}`, and delivers it to no window, so no
 client can read it or wait for it, and no client comes to depend on
-receiving it. It opens nothing: which trusted screen it brings up, a
+receiving it. The chord is the set of keys the entry names; it fires
+on the key down that makes the keys held include that set, whatever
+other keys are held, and that down, its repeats and its up reach no
+window. It opens nothing: which trusted screen it brings up, a
 login or a lock, is the login design's ([Risks and open
 questions](#risks-and-open-questions)).
 
