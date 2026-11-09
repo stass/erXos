@@ -29,12 +29,16 @@ class ErxUISchemaTest < Minitest::Test
       prop on_change 7 event detail state
   UI
 
+  # The validator checks a presentation with erx_present, which reads paths with erx_schema.
+  SCHEMAS = [Erx::ABI::InspectionEmitter::ERLANG_PATH, Erx::ABI::PresentEmitter::ERLANG_PATH]
+            .map { |path| File.join(ROOT, Erx::Generated::OUTPUT, path) }.freeze
+
   def test_generated_schema_cases_pass_under_eunit
     module_text = File.binread(File.join(ROOT, Erx::Generated::OUTPUT, Erx::ABI::UIEmitter::ERLANG_PATH))
     Dir.mktmpdir('erx-ui-schema-test') do |work|
       module_path = File.join(work, 'erx_ui_schema.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, module_path,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, module_path, *SCHEMAS,
                                        File.join(ROOT, 'test/erlang/erx_ui_schema_tests.erl'), stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

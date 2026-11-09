@@ -9,8 +9,12 @@
  * name starts with . (docs/design-live.md, "The /proc tree"). erxText is a
  * presentation's text in the erx: URI encoding, the same with . and / kept
  * (docs/design-display.md, "Presentations"). Both are ASCII and hold no
- * control character, whatever the bytes.
+ * control character, whatever the bytes. presentationPath is the /proc path
+ * a presentation's canonical text names, from the inspection schema's
+ * present marks (web/src/generated/present.ts), as erx_present:path/2 has it.
  */
+
+import { PRESENTATIONS } from './generated/present.ts';
 
 const PROC_KEPT = /[A-Za-z0-9_+,:=@-]/;
 const ERX_KEPT = /[A-Za-z0-9_+,:=@./-]/;
@@ -29,3 +33,22 @@ export const procName = (bytes: Uint8Array): string => percent(bytes, PROC_KEPT)
 
 /* A presentation's canonical text in the erx: URI encoding. */
 export const erxText = (bytes: Uint8Array): string => percent(bytes, ERX_KEPT);
+
+/*
+ * The /proc path a presentation's canonical text names: its marked path
+ * with the text's "/"-separated parts in the variable segments, in order.
+ * Each part is already a /proc entry name, as the canonical text writes
+ * its segments, so none is encoded again. A type the schema does not mark,
+ * or a text of another number of parts or with an empty part, names
+ * nothing: undefined. A part is not checked against its segment's grammar:
+ * the line reads the path, and a part erx_present:parse/2 would refuse
+ * names no entry there (erx_procfs_core:child/2 takes only canonical names).
+ */
+export function presentationPath(type: string, text: string): readonly string[] | undefined {
+  const pattern = PRESENTATIONS.get(type);
+  const parts = text.split('/');
+  if (pattern === undefined || parts.includes('')) return undefined;
+  if (parts.length !== pattern.filter((segment) => 'variable' in segment).length) return undefined;
+  let next = 0;
+  return pattern.map((segment) => ('literal' in segment ? segment.literal : (parts[next++] as string)));
+}

@@ -98,7 +98,8 @@ plain({enum, Atoms}) -> lists:nth(rand:uniform(length(Atoms)), Atoms);
 plain({image, Atoms}) -> lists:nth(rand:uniform(length(Atoms)), Atoms);
 plain(boolean) -> rand:uniform(2) =:= 1;
 plain(event) -> {event, rand:uniform(100)};
-plain(presentation) -> {bytes, rand:uniform(1 bsl 20)}.
+plain(presentation) -> lists:nth(rand:uniform(3), [{pid, self()}, {domain, rand:uniform(1 bsl 32) - 1},
+                                                   {module, {rand:uniform(10), <<"m.x/y">>}}]).
 
 text(Max) ->
     case rand:uniform(4) of
@@ -169,7 +170,9 @@ bad({enum, _Atoms}) -> nowhere;
 bad({image, _Atoms}) -> gif;
 bad(boolean) -> 0;
 bad(key) -> lists:nth(rand:uniform(3), [binary:copy(<<"k">>, 256), 1.0, {k}]);
-bad(presentation) -> lists:nth(rand:uniform(3), [{<<"bytes">>, 1}, bytes, {kernel, {timeout, 0}}]).
+bad(presentation) ->
+    lists:nth(rand:uniform(6), [{<<"bytes">>, 1}, bytes, {kernel, {timeout, 0}}, {bytes, 1}, {pid, 1},
+                                {domain, 1 bsl 32}]).
 
 chain(1) -> {spacer, #{}, []};
 chain(N) -> {column, #{}, [chain(N - 1)]}.

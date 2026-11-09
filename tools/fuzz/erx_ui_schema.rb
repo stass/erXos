@@ -15,16 +15,20 @@ module ErxUISchemaFuzz
   ROOT = File.expand_path('../..', __dir__)
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_ui_schema_fuzz.erl')
   DEADLINE_SECONDS = '300'
+  MODULES = [Erx::ABI::UIEmitter::ERLANG_PATH, Erx::ABI::InspectionEmitter::ERLANG_PATH,
+             Erx::ABI::PresentEmitter::ERLANG_PATH].freeze
 
   module_function
 
   def run(seed:)
-    module_text = Erx::ABI::Generator.plan(root: ROOT).files.fetch(Erx::ABI::UIEmitter::ERLANG_PATH)
+    files = Erx::ABI::Generator.plan(root: ROOT).files
     Dir.mktmpdir('erx-ui-schema-fuzz') do |work|
-      module_path = File.join(work, 'erx_ui_schema.erl')
-      File.binwrite(module_path, module_text)
+      # The validator checks a presentation with erx_present, which reads paths with erx_schema.
+      modules = MODULES.map do |path|
+        File.join(work, File.basename(path)).tap { |module_path| File.binwrite(module_path, files.fetch(path)) }
+      end
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-o', work,
-                                       module_path, TARGET_SOURCE, stdin_data: '')
+                                       *modules, TARGET_SOURCE, stdin_data: '')
       abort(output) unless status.success?
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell',

@@ -15,7 +15,8 @@ require_relative '../../tools/lib/erx/generated'
 class ErxWebValueTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_schema.erl erlang/apps/erx_files/src/erx_procfs_core.erl
+  SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_schema.erl build/gen/erlang/apps/erx/src/generated/erx_present.erl
+               erlang/apps/erx_files/src/erx_procfs_core.erl
                erlang/apps/erx_web/src/erx_web_value.erl test/erlang/erx_web_value_tests.erl]
             .map { |path| File.join(ROOT, path) }.freeze
 

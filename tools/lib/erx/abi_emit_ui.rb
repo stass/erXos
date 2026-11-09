@@ -331,10 +331,20 @@ module Erx
           utf8(_Bytes) -> false.
         ERLANG
         parts << <<~ERLANG if forms.include?('presentation')
-          %% A presentation's name is at most 63 bytes on the wire; whether the
-          %% inspection schema declares it is erx_present's to decide.
-          presentation({Type, _Value}) -> is_atom(Type) andalso byte_size(atom_to_binary(Type)) =< 63;
+          %% A presentation the inspection schema marks, with a value of its
+          %% marked path, so erx_present:text/2 writes its canonical text and a
+          %% valid tree always encodes. path/2 raises badarg for a value outside
+          %% the path's segments; the marks' names are within the wire's 63 bytes.
+          presentation({Type, Value}) when is_atom(Type) ->
+              lists:keymember(Type, 1, erx_present:marks()) andalso presented(Type, Value);
           presentation(_Value) -> false.
+
+          presented(Type, Value) ->
+              try erx_present:path(Type, Value) of
+                  _Path -> true
+              catch
+                  error:badarg -> false
+              end.
         ERLANG
         parts.join("\n")
       end

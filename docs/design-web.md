@@ -378,7 +378,11 @@ as a `bigint`, so no value is rounded; a text keeps its bytes, invalid
 UTF-8 included, for the client's escape to show. A child is its entry
 name, which the client shows as a link to the child's path. A record whose
 encoding does not fit one update ends its view `too_large`, as `/proc`
-marks a record over the same 64 KiB `[partial]`.
+marks a record over the same 64 KiB `[partial]`. `project/1` answers
+`{error, too_large}` itself once its datums pass the 64 KiB: it charges
+each datum its encoded size before projecting what the datum holds, so a
+term that shares its cells costs at most one update's work, never the
+size of its expansion.
 
 ### URLs
 
@@ -684,7 +688,9 @@ notices, and an inventory of the files with their SHA-256. Its parts:
 * **`names.ts`**: the percent encodings of `/proc` entry names, as
   `erx_procfs_core:name/1` writes a text segment, and of `erx:` texts.
   They are two fixed sets of kept bytes, written by hand like their
-  Erlang twin and tested against it, since no source declares them.
+  Erlang twin and tested against it, since no source declares them;
+  and the path a presentation's text names, from the `present` marks
+  generated as `web/src/generated/present.ts`.
 * **`connection.ts`**: the WebSocket to `/ws`, `hello`, a `next` for a
   view once its last update is rendered (for a UI, once an update without
   `commit` is kept), and reconnection after 1 s, doubling to 30 s. On a

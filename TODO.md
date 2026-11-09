@@ -279,11 +279,6 @@ it; git history is the record of completed work.
   image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
   the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
   window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
-* [Medium] `erx_ui_schema` (generated from `abi/formats/ui.txt`), [Widget
-  trees](docs/design-display.md#widget-trees): a `present` value is checked only as `{Atom, Term}` with the atom at
-  most 63 bytes, while `abi/inspection.txt` marks the presentations and `erx_present` is generated from the marks:
-  have the validator check the name against `erx_present:marks/0` and the value with `erx_present:path/2`, so a
-  valid tree always encodes; until then a renderer must not encode `present`.
 * [Medium] `tools/lib/erx/abi_emit_ui_wire.rb`, [Widget format](docs/design-abi.md#widget-format): the generator
   emits the Erlang encoder of every message with the reader of `event` and `pixels`, and the C and TypeScript
   readers of the server's messages with the writers of `event` and `pixels`. Still missing from "a reader and a
@@ -295,24 +290,21 @@ it; git history is the record of completed work.
   hands texts out as bare `Uint8Array`s and `Prop.value` as one union not tied to `form`, where rule W2 types
   every machine text as `MachineText`, which `web/src/text.ts` provides: wrap texts in it and emit `Prop` as a
   union discriminated by form (the parity harness's casts in `web/test/ui_wire_harness.ts` then go).
-* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): `project/1` never
-  emits `present`: project an attribute whose type is a one-segment presentation's to `{present, Type, Text}` with
-  `erx_present:text/2`, generate the `present` marks into the client (design-generation.md's inspection row), and
-  test `web/src/names.ts`'s `erxText` against `erx_present:uri/2` as the design's "encodings and presentation
-  paths" row asks.
-* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): projection has no total
-  budget. Each printed leaf may be 4 KiB however small its input node (a refc binary under one cons), and a term built
-  in the session with sharing expands exponentially (16 x 1000 x 1000 shared cells projected to 224 MB in 1.7 s), while
-  the 64 KiB update check runs only after the whole wire record is built. Thread the remaining update size through
-  `datum/2` and answer `too_large` once it is spent, so the bound holds during projection.
+* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): a huge integer's
+  `leading/1` (a power of ten and a bignum division) costs 110-160 ms for the largest bignum and is charged only
+  its 4 KiB print, so about 15 of them fit one projection, about 2 s of the session's CPU per update (13 copies
+  measured at 1.5 s). Charge the work, or reuse one `10^Dropped` per byte length within a projection, and time
+  15 separate huge integers in `erx_web_value_tests`.
+* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`: a printed map's copy is rebuilt with `maps:from_list`, so
+  its print order can differ from the term's: a map of more than 32 keys cut to 32 or fewer prints sorted where
+  the term prints in hash order, and a huge integer key shortened by `leading/1` can sort before a smaller key.
+  Copy a map as its pairs in the term's own print order, with a property test comparing the copy's print with
+  the term's.
 * [Medium] `web/src/names.ts`, [URLs](docs/design-web.md#urls): the claim that no `/proc` segment is `.` or `..` does
   not hold in a browser, whose URL parser takes `%2E` and `%2E%2E` as dot segments (`new URL('/proc/a/%2E%2E', base)` is
   `/proc/`). An `erx:` text is safe: its raw `.` and `/` are only a pid's and the segments' separators, and a text
   segment's `.` is `%2E` in the canonical text and `%252E` in the link (`erx_present:uri/2`, tested). The design must
   pick the `/proc` fix: encode `%` once more in the client's URL paths, or have the client refuse a dot segment.
-* [Low] `erlang/apps/erx_web/src/erx_web_value.erl`: `datum/2` converts a whole integer to decimal before checking its
-  40-byte bound, about 1 s for the largest bignum; compare its magnitude with `10^40` first and print a huge one
-  without converting it whole.
 * [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
   term one past each bound in both languages; every encoded term is in bounds or came from a decoder, so an
   encoder that stopped refusing an over-bound list, text or integer would pass. Erlang's encoder refuses
@@ -342,7 +334,7 @@ it; git history is the record of completed work.
   `insert_max` (`tools/lib/erx/abi_ui.rb`'s sizes and the encoder's layout are two descriptions of one form).
 * [Low] `abi/formats/ui.txt` and the generated readers: a `present` name is checked only as UTF-8 of at most 63
   bytes, while design-abi.md calls it "a presentation name of the inspection schema", which `abi/inspection.txt`
-  declares: generate the name table into both readers (see the `erx_ui_schema` item above).
+  declares: generate the name table into both readers, as `erx_ui_schema` checks it against `erx_present:marks/0`.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
   system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
   property case.

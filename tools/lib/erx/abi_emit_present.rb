@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'abi_emit_inspection'
+require_relative 'abi_emit_typescript'
 
 module Erx
   module ABI
@@ -11,9 +12,11 @@ module Erx
     # marked `present`, so the only generated data is the table of names and
     # marked paths; the value, canonical text, grammar and inspector path of
     # each follow from erx_schema's path writer and reader, which the code
-    # below calls rather than repeats.
+    # below calls rather than repeats. The same table goes to the web client
+    # as web/src/generated/present.ts (docs/design-web.md, "URLs").
     module PresentEmitter
       ERLANG_PATH = 'erlang/apps/erx/src/generated/erx_present.erl'
+      TS_PATH = 'web/src/generated/present.ts'
 
       # Everything but the table is the same for every schema.
       ERLANG_CODE = <<~'ERLANG'
@@ -185,12 +188,35 @@ module Erx
 
       def outputs(schema)
         inspection = schema.inspection || raise(SchemaError, 'the ABI root includes no inspection schema')
-        { ERLANG_PATH => erlang(inspection) }.freeze
+        { ERLANG_PATH => erlang(inspection), TS_PATH => typescript(inspection) }.freeze
       end
 
       def erlang(inspection)
         marked = inspection.paths.select(&:present)
         [head, marks_function(inspection, marked), type_function(marked), ERLANG_CODE].join("\n")
+      end
+
+      # The client's table: each presentation's marked path, a literal
+      # segment by its name and a variable one by its value type.
+      def typescript(inspection)
+        ts = TypeScript
+        entries = inspection.paths.select(&:present).map do |path|
+          segments = path.segments.map do |segment|
+            segment.variable? ? "{ variable: #{ts.string(segment.type)} }" : "{ literal: #{ts.string(segment.literal)} }"
+          end
+          [ts.string(path.present), "[#{segments.join(', ')}]"]
+        end
+        [
+          ts.header(source: 'abi/inspection.txt', summary: <<~TEXT),
+            The presentation types (docs/design-display.md, "Presentations"), the
+            table erx_present holds: each presentation's marked path, whose
+            variable segments its canonical text fills in order, joined by "/".
+          TEXT
+          "export type PresentSegment = { readonly literal: string } | { readonly variable: string };\n",
+          "/* Each presentation's marked path, in declaration order. */\n" \
+          "export const PRESENTATIONS: ReadonlyMap<string, readonly PresentSegment[]> = " \
+          "#{ts.map(entries, type: 'string, readonly PresentSegment[]')};\n"
+        ].join("\n")
       end
 
       def head

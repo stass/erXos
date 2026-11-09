@@ -26,7 +26,21 @@ valid_trees_test() ->
     ?assertEqual(ok, v({input, #{secret => true, on_submit => {login, 1}}, []})),
     ?assertEqual(ok, v({label, #{text => {kernel, {ok, <<"up">>}}}, []})),
     ?assertEqual(ok, v({label, #{text => {{stopgap, liberx_pool}, {timeout, 5}}}, []})),
-    ?assertEqual(ok, v({label, #{present => {runtime, {partial, {bytes, 4096}}}}, []})).
+    ?assertEqual(ok, v({label, #{present => {runtime, {partial, {pid, self()}}}}, []})),
+    ?assertEqual(ok, v({label, #{present => {module, {0, <<"m.x/y">>}}}, []})).
+
+%% A presentation is one abi/inspection.txt marks, with a value of its marked
+%% path, so every presentation of a valid tree has a canonical text.
+presentations_are_marked_with_values_of_their_paths_test() ->
+    P = fun(Value) -> v({label, #{present => Value}, []}) end,
+    Bad = {error, {bad_value, {[], present}}},
+    ?assertEqual(Bad, P({bytes, 4096})),
+    ?assertEqual(Bad, P({pid, 1})),
+    ?assertEqual(Bad, P({domain, 1 bsl 32})),
+    ?assertEqual(Bad, P({module, 0})),
+    ?assertEqual(Bad, P({module, {0, <<255>>}})),
+    ?assertEqual(Bad, P({kernel, {ok, {domain, -1}}})),
+    ?assertEqual(ok, P({kernel, {ok, {domain, 16#ffffffff}}})).
 
 reasons_name_the_first_fault_in_depth_first_order_test() ->
     Bad = fun(Path, Node) -> put_at(form(), Path, Node) end,
