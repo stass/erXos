@@ -7,8 +7,9 @@ require_relative 'erx_net_eunit'
 
 # Runs the EUnit cases of the TCP connection core: the step's dispatch and settling, user
 # requests, timer expirations and the send buffer (test/erlang/erx_tcp_tests.erl), and the
-# segment pipeline's stages (test/erlang/erx_tcp_input_tests.erl), with seeded faults in
-# the checks that guard against blind injection and at the window's edges.
+# segment pipeline's stages (test/erlang/erx_tcp_input_tests.erl and, from the ACK on, with
+# header prediction, test/erlang/erx_tcp_input_ack_tests.erl), with seeded faults in the checks
+# that guard against blind injection, at the window's edges and in the fast path's preconditions.
 class ErxTcpCoreTest < Minitest::Test
   include ErxNetEunit
 
@@ -21,9 +22,18 @@ class ErxTcpCoreTest < Minitest::Test
   # A segment starting at the window's right edge is past it.
   INSIDE = 'Todrop < Tlen ->'
   INSIDE_AT_EDGE = 'Todrop =< Tlen ->'
+  # RFC 9293 3.10.7.4: only a newer segment (SND.WL1, SND.WL2) updates the send window.
+  NEWER_WINDOW = 'Wl1 < Seq orelse (Wl1 =:= Seq andalso (Wl2 < Ack orelse'
+  ANY_WINDOW = 'true orelse (Wl1 =:= Seq andalso (Wl2 < Ack orelse'
+  # Header prediction takes no segment older than ts_recent (PAWS).
+  HP_PAWS = 'andalso not_older(SegTs, Ts) andalso not Closed'
+  HP_NO_PAWS = 'andalso (not_older(SegTs, Ts) orelse true) andalso not Closed'
+  # An acknowledgement of what was never sent is dropped before the loss module sees it.
+  ACK_TOO_MUCH = 'case Ack > erx_tcp_sendlog:snd_max(Log) of'
+  ACK_ANY = 'case Ack > erx_tcp_sendlog:snd_max(Log) + (1 bsl 32) of'
 
   def test_core_cases_pass_under_eunit
-    assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests)
+    assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests, :erx_tcp_input_ack_tests)
   end
 
   def test_an_in_window_rst_that_resets_is_caught
@@ -42,5 +52,23 @@ class ErxTcpCoreTest < Minitest::Test
     output = refute_erx_net_eunit(:erx_tcp_input_tests,
                                   fault: { 'erx_tcp_input' => [INSIDE, INSIDE_AT_EDGE] })
     assert_match(/trim_back/, output)
+  end
+
+  def test_a_window_update_from_an_old_ack_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_input_ack_tests,
+                                  fault: { 'erx_tcp_input' => [NEWER_WINDOW, ANY_WINDOW] })
+    assert_match(/window_update/, output)
+  end
+
+  def test_header_prediction_without_paws_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_input_ack_tests,
+                                  fault: { 'erx_tcp_input' => [HP_PAWS, HP_NO_PAWS] })
+    assert_match(/agrees_with_the_general_stages/, output)
+  end
+
+  def test_an_ack_of_unsent_data_reaching_the_loss_module_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_input_ack_tests,
+                                  fault: { 'erx_tcp_input' => [ACK_TOO_MUCH, ACK_ANY] })
+    assert_match(/ack_of_unsent_data/, output)
   end
 end

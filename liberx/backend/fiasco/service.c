@@ -243,15 +243,12 @@ service_main(void)
 			atomic_fetch_add_explicit(&service_dropped, 1, memory_order_relaxed);
 			tag = l4_ipc_wait(utcb, &label, L4_IPC_NEVER);
 			continue;
-		/* Each fault and request ends what a task's end in it marked, before the service answers or waits. */
 		case ERX_FIASCO_WIRE_FAULT_PAGE:
 			service_page_fault(mr, decoded.task);
-			erx_fiasco_object_drain();
 			tag = l4_ipc_wait(utcb, &label, L4_IPC_NEVER);
 			continue;
 		case ERX_FIASCO_WIRE_FAULT_EXCEPTION:
 			service_exception(l4_utcb_exc_u(utcb), decoded.task);
-			erx_fiasco_object_drain();
 			tag = l4_ipc_wait(utcb, &label, L4_IPC_NEVER);
 			continue;
 		case ERX_FIASCO_WIRE_REFUSE:
@@ -260,7 +257,6 @@ service_main(void)
 		case ERX_FIASCO_WIRE_REQUEST:
 			reply = (erx_fiasco_reply_t){ .status = 0 };
 			status = service_run(&decoded, &reply);
-			erx_fiasco_object_drain();
 			if (status == ERX_FIASCO_NO_REPLY) {
 				tag = l4_ipc_wait(utcb, &label, L4_IPC_NEVER);
 				continue;

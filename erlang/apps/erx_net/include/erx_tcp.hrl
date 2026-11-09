@@ -25,7 +25,10 @@
 
 %% The snapshot tcp_timer_rexmt takes at the first timeout (snd_cwnd_prev, snd_ssthresh_prev,
 %% snd_recover_prev, TF_WASFRECOVERY, TF_WASCRECOVERY, t_badrxtwin under TF_PREVVALID), from
-%% which CC_RTO_ERR undoes a spurious timeout.
+%% which CC_RTO_ERR undoes a spurious timeout. `badrxtwin` is our timestamp clock (milliseconds,
+%% without ts_offset) when output last sent a segment during the first retransmission
+%% (tcp_output.c:848-849), `none` until then and on a connection without timestamps: an
+%% acknowledgement echoing an earlier time answers the original transmission.
 -record(rexmt_prev, {cwnd :: non_neg_integer(),
                      ssthresh :: non_neg_integer(),
                      recover :: integer(),
@@ -57,12 +60,18 @@
     rcv_adv = 0 :: integer(),
     rcv_wnd = 0 :: non_neg_integer(),
     rcv_up = 0 :: integer(),
+    %% The urgent byte that tcp_pulloutofband keeps out of the stream, by its sequence number,
+    %% so it is left out however the bytes around it arrive; `none` when there is none ahead.
+    rcv_oob = none :: none | integer(),
     last_ack_sent = 0 :: integer(),
 
     %% TF_SENTFIN and TF_NEEDFIN.
     %% A FIN owed and not sent is `queued`: in SYN-SENT and SYN-RECEIVED it waits for the
     %% handshake (TF_NEEDFIN); in FIN-WAIT-1, CLOSING and LAST-ACK output sends it.
     fin = none :: none | queued | {sent, integer()},
+    %% TF_NEEDSYN: a SYN-RECEIVED entered from SYN-SENT on a simultaneous open, whose own SYN
+    %% the peer has not acknowledged yet. Its ACK of the SYN leaves SYN-RECEIVED.
+    need_syn = false :: boolean(),
     %% Options. Before the handshake completes each holds what our SYN asks for
     %% (TF_REQ_TSTMP, TF_REQ_SCALE, TF_SACK_PERMIT); after it, what was negotiated.
     ts = off :: off | {requested, Offset :: erx_tcp_seq:wire()} | #ts{},
@@ -81,6 +90,9 @@
     loss_state :: term(),
     snd_recover = 0 :: integer(),
     rexmt_prev = none :: none | #rexmt_prev{},
+    %% t_bytes_acked: appropriate byte counting above ssthresh, which sets #ccv.abc_sentawnd
+    %% once a window's worth is acknowledged (cc_ack_received).
+    bytes_acked = 0 :: non_neg_integer(),
     sendlog :: erx_tcp_sendlog:log(),
 
     %% Buffers. The send buffer holds the bytes from snd_una on; received bytes leave the
@@ -111,6 +123,7 @@
     %% Per-step requests to output, which output clears.
     ack_now = false :: boolean(),               % TF_ACKNOW
     force_data = false :: boolean(),            % TF_FORCEDATA
+    rxwin0_sent = false :: boolean(),           % TF_RXWIN0SENT: our last window was 0
     %% The loss module's window for this step's output and the one kept after it, which
     %% input sets from allowance/3 after an acknowledgement (erx_tcp_loss).
     allowance = none :: erx_tcp_loss:allowance(),

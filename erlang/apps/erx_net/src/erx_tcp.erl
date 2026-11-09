@@ -148,7 +148,7 @@ segment (`tcp_dropwithreset`), which the interface sends only within its RST rat
 """.
 -type action() :: {transmit, [outgoing()]}
                 | {deliver, iodata()}
-                | {notify, closed | {error, atom()} | {ready, [atom()]}}
+                | {notify, eof | closed | {error, atom()} | {ready, [atom()]}}
                 | {reply, gen_server:from(), term()}
                 | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
                 | {reset, outgoing()}
@@ -315,18 +315,22 @@ signal_state(ecn, #tcb{ccv = Ccv, snd_recover = Recover, snd_max = SndMax, ecn =
             Tcb
     end;
 signal_state(rto, #tcb{ccv = Ccv, ecn = Ecn} = Tcb, _) ->
-    %% t_dupacks and t_bytes_acked are the loss module's, which its rto/4 resets.
-    Tcb#tcb{ccv = Ccv#ccv{fast_recovery = false, cong_recovery = false},
+    %% t_dupacks is the loss module's, which its rto/4 resets.
+    Tcb#tcb{ccv = Ccv#ccv{fast_recovery = false, cong_recovery = false}, bytes_acked = 0,
             ecn = erx_tcp_ecn:signal_cwr(Ecn)};
 signal_state(rto_err, #tcb{rexmt_prev = none} = Tcb, _) ->
     Tcb;
-signal_state(rto_err, #tcb{ccv = Ccv, rexmt_prev = Prev, snd_max = SndMax} = Tcb, _) ->
+%% The timeout's marks leave the send log too, or output would count the original
+%% transmissions out of the pipe and resend what is still in flight.
+signal_state(rto_err, #tcb{ccv = Ccv, rexmt_prev = Prev, snd_max = SndMax, sendlog = Log} = Tcb,
+             _) ->
     #rexmt_prev{cwnd = Cwnd, ssthresh = Ssthresh, recover = Recover, fast = Fast,
                 cong = Cong} = Prev,
     Tcb#tcb{ccv = Ccv#ccv{cwnd = Cwnd, ssthresh = Ssthresh,
                           fast_recovery = Ccv#ccv.fast_recovery orelse Fast,
                           cong_recovery = Ccv#ccv.cong_recovery orelse Cong},
-            snd_recover = Recover, snd_nxt = SndMax, rexmt_prev = none, rxtshift = 0}.
+            snd_recover = Recover, snd_nxt = SndMax, rexmt_prev = none, rxtshift = 0,
+            sendlog = erx_tcp_sendlog:timeout_undone(Log)}.
 
 -doc """
 Makes the calls a loss module returned (erx_tcp_loss), in order: congestion signals, a

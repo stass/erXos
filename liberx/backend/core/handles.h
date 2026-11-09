@@ -54,7 +54,7 @@ typedef struct erx_backend_object {
 	uint32_t	generation;
 	uint32_t	handles;	/* entries in any table naming this record at this generation */
 	uint32_t	mappings;	/* maps made of it, which keep it while it has no handle */
-	uint32_t	ending;		/* nonzero: ended by the service before it answers (fiasco/object.c) */
+	uint32_t	reserved;
 } erx_backend_object_t;
 
 typedef struct erx_backend_handle_entry {

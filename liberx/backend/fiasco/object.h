@@ -28,9 +28,8 @@ const char	*erx_fiasco_object_init(void);
 int	erx_fiasco_object_task_open(uint32_t task, uint32_t cap_limit) ERX_WARN_UNUSED_RESULT;
 
 /*
- * A task's end, once its space is gone: closes every handle it held, and marks the
- * objects whose last handle that was and every object it created, wherever handles to
- * them remain, for erx_fiasco_object_drain to end; their handles then answer ERX_ESTALE.
+ * A task's end, once its space is gone: closes every handle it held, and ends every
+ * object it created, wherever handles to them remain, which then answer ERX_ESTALE.
  */
 void	erx_fiasco_object_task_close(uint32_t task);
 
@@ -63,13 +62,6 @@ int	erx_fiasco_object_find(uint32_t task, uint64_t handle, uint32_t kind, uint32
  * record, leaving every entry naming it stale.
  */
 void	erx_fiasco_object_end(uint32_t index);
-
-/*
- * Ends the records a task's end left marked: what its handles' close freed and what it
- * created. The service runs it after each request and fault, before it answers, so no
- * record ends inside a task's end.
- */
-void	erx_fiasco_object_drain(void);
 
 /* Counts a map of the object at index, which keeps it while it has no handle. */
 void	erx_fiasco_object_mapped(uint32_t index);

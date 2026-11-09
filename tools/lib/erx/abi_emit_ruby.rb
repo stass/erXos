@@ -42,9 +42,8 @@ module Erx
             end
           end
         end
-        # The inspection schema has its own table, tools/generated/abi_inspection.rb;
-        # the web protocol is the web client's and erx_web_proto's, and no host tool reads it.
-        attributes = @schema.each_pair.to_h.reject { |name, _value| %i[types inputs inspection web].include?(name) }
+        # The inspection schema has its own table, tools/generated/abi_inspection.rb.
+        attributes = @schema.each_pair.to_h.reject { |name, _value| %i[types inputs inspection].include?(name) }
         rendered = attributes.map { |key, item| "#{key}: #{value(item)}" }
         rendered << 'types: types.freeze'
         rendered << 'inputs: {}.freeze'

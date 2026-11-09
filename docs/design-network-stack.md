@@ -947,7 +947,7 @@ change afterwards.
 -type action() ::
       {transmit, [outgoing()]}
     | {deliver, iodata()}
-    | {notify, closed | {error, atom()} | {ready, [readiness()]}}
+    | {notify, eof | closed | {error, atom()} | {ready, [readiness()]}}
     | {reply, gen_server:reply_tag(), term()}
     | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
     | {reset, outgoing()}                    % within the interface's RST limit
@@ -1061,20 +1061,47 @@ RST, for example, is judged before the timestamp check):
    (`tcp_input.c:2397-2450`); a segment without ACK goes to `step6` in
    SYN-RECEIVED and is dropped otherwise. A segment that goes on has its
    ECN read here.
-9. `ack`: SYN-RECEIVED to ESTABLISHED and duplicate-ACK detection;
-   `process_ack`, from FreeBSD's `process_ACK` label: the loss
-   module's `ack` callback, `snd_una` advance, the RTT sample and the
-   transitions when our FIN is acknowledged; with nothing acknowledged
-   it jumps to `step6`, as FreeBSD does.
+9. `ack`: SYN-RECEIVED to ESTABLISHED, which moves `snd_una` past our
+   SYN (FreeBSD's `incforsyn` and its `TF_NEEDSYN` block of
+   `tcp_input.c:2869` both do so; `#tcb.need_syn` remains for what a
+   simultaneous open changes elsewhere: output sends the owed SYN only
+   with an ACK due, no window update goes before it, and the peer's FIN
+   is acknowledged with a delay); an acknowledgement of what was never
+   sent dropped with an ACK; the loss module's `ack` callback, whose
+   `drop` ends the segment with `snd_una` where the send log put it;
+   with nothing new acknowledged, a jump to `step6`, as FreeBSD does.
+   `process_ack`, from FreeBSD's `process_ACK` label: the undo of a
+   spurious timeout, the RTT sample (which resets the backoff count, as
+   the undo and leaving persist do), the retransmission timer, the congestion module's
+   `ack_received` with appropriate byte counting, the `snd_una` advance,
+   the end of recovery, and the transitions when our FIN is
+   acknowledged, TIME-WAIT among them (`tcp_twstart`). A timeout is
+   spurious when the acknowledgement echoes a timestamp from before the
+   retransmission, whose time output records (`t_badrxtwin`,
+   `tcp_output.c:848`), for the retransmission alone, where FreeBSD
+   records every segment sent while the backoff is 1, so that an ACK we
+   send after it cannot make a real timeout look spurious (RFC 3522); the
+   undo also clears the timeout's marks in the send log, so the original
+   transmissions count in the pipe again. FreeBSD's other rule, an acknowledgement within
+   half an RTT on a connection without timestamps, is read only by its
+   header prediction (`tcp_input.c:1788`), and the stack's header
+   prediction takes the general rule.
 10. `step6`, FreeBSD's label: the window update under the SND.WL1/SND.WL2
     rule, then the urgent pointer, processed as FreeBSD does
     (`tcp_input.c:3104`); the urgent byte is held out of band, and
-    `gen_tcp`, like stock, has no way to read it.
+    `gen_tcp`, like stock, has no way to read it. The byte is kept out by
+    its sequence number when the bytes are delivered, so the same byte is
+    left out whether its segment arrives in order or waits in the
+    reassembly queue.
 11. `data`: in-order data to the receive buffer, with the delayed-ACK
     decision; out-of-order data to the reassembly queue; the receiver's
-    SACK blocks, D-SACK included (`tcp_input.c:3165`).
+    SACK blocks, D-SACK included (`tcp_input.c:3165`), for every segment
+    that reaches the stage, so a duplicate trimmed away entirely is
+    reported too.
 12. `fin`: the FIN transitions to CLOSE-WAIT, CLOSING or TIME-WAIT
-    (`tcp_input.c:3319`).
+    (`tcp_input.c:3319`). The owner learns of the FIN from a
+    `{notify, eof}` action, after the `deliver` actions of the data
+    before it.
 
 FreeBSD's `drop`, `dropafterack` and `dropwithreset` exits become the
 `done` results of the stages. A challenge ACK goes out at most 5 times in
@@ -1092,12 +1119,19 @@ connection (a pure ACK for new data and pure in-order data,
 established connection, the segment at `rcv_nxt` with only ACK set, the
 window unchanged, no retransmission in progress, an empty reassembly
 queue, the timestamp no older than the last), so it takes the branch
-FreeBSD takes. It is also where a native fast path would
+FreeBSD takes. What it does with a segment it takes is the general
+stages' work from `ack` on: it applies what the checks it skips would
+set (the receive window, `ts_recent`, ECN) and jumps to `ack`. FreeBSD's
+fast path repeats that work in a shorter form that leaves different
+state (`snd_wl1` and `rcv_up` after a pure ACK, `t_dupacks`, the
+spurious-timeout rule), and one translation of each effect cannot
+drift. It is also where a native fast path would
 go, if one is ever measured to be needed
 ([Where C is used, and what is measured](#where-c-is-used-and-what-is-measured)).
-Two translations of one decision must not drift apart, so a property
-test runs every segment and state that header prediction accepts through
-the general stages too and requires the same state and actions
+Its decision to skip the checks must not drift from them, so a property
+test runs generated segments and states, those header prediction accepts
+and their near misses, through the general stages too and requires the
+same state and actions wherever header prediction accepts
 ([The TCP core: exhaustive exploration](#the-tcp-core-exhaustive-exploration)).
 A difference it finds is either a translation bug or a branch FreeBSD
 really takes differently, which a packet script then pins. If the
@@ -2544,7 +2578,7 @@ results without it.
 accepted anywhere in the window; RST judged against `rcv_nxt` with an
 acknowledgement delayed; `rcv_nxt` advanced without lifting; an ICMP
 report acted on without its sequence check; header prediction that skips
-the window-unchanged precondition. Each must be caught with a named
+the timestamp precondition (PAWS). Each must be caught with a named
 property and the shortest trace.
 
 ### The syncache: properties at its boundaries

@@ -35,7 +35,8 @@ est() -> est(5001).
 est(RcvNxt) ->
     (new())#tcb{state = established, irs = RcvNxt - 1, rcv_nxt = RcvNxt, rcv_adv = RcvNxt,
                 last_ack_sent = RcvNxt, rcv_hiwat = 1000, rcv_wnd = 1000, snd_una = ?ISS + 1,
-                snd_nxt = ?ISS + 1, snd_max = ?ISS + 1, wscale = {0, 0}, ts = off, sack = off}.
+                snd_nxt = ?ISS + 1, snd_max = ?ISS + 1, wscale = {0, 0}, ts = off, sack = off,
+                sendlog = erx_tcp_sendlog:new(?ISS + 1)}.
 
 with_ts(Tcb, Recent) -> Tcb#tcb{ts = #ts{recent = Recent, recent_age = ?T0, offset = 7}}.
 
@@ -89,7 +90,8 @@ synack_establishes_with_its_options_test() ->
     ?assertMatch(#ts{recent = 123456, recent_age = ?T0, offset = 7}, T#tcb.ts),
     ?assertEqual(on, T#tcb.sack),
     ?assertEqual(erx_tcp_loss_dupack:init(#{sack => true}), T#tcb.loss_state),
-    ?assertEqual({1460, 1000, 9000}, {T#tcb.maxseg, T#tcb.snd_wnd, T#tcb.snd_wl1}),
+    %% step6 takes the SYN-ACK's window: snd_wl1 is the first byte after the SYN.
+    ?assertEqual({1460, 1000, 9001}, {T#tcb.maxseg, T#tcb.snd_wnd, T#tcb.snd_wl1}),
     %% Buffers rounded up to whole segments of the new MSS are asked of the grant.
     ?assertEqual([{reserve_buffer, snd, 65700}, {reserve_buffer, rcv, 65700}], A),
     ?assert(T#tcb.ack_now),
@@ -238,7 +240,8 @@ missing_timestamp_is_tolerated_test() ->
     ?assertEqual({500, false}, {T#tcb.ts#ts.recent, T#tcb.ended}).
 
 unexpected_timestamp_is_ignored_test() ->
-    {T, []} = input([wire(5001, ?ISS + 1, ?TH_ACK, <<"x">>, #tcp_opts{ts = {1, 0}})], est()),
+    {T, [{deliver, <<"x">>}]} =
+        input([wire(5001, ?ISS + 1, ?TH_ACK, <<"x">>, #tcp_opts{ts = {1, 0}})], est()),
     ?assertEqual({off, false}, {T#tcb.ts, T#tcb.ack_now}).
 
 %% --- trim, tcp_input.c:2247-2389 --------------------------------------------------------

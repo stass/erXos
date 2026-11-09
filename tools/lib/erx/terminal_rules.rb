@@ -15,8 +15,7 @@ module Erx
     TOKENS = %w[byte codepoint field kernel].freeze
     SINGLETONS = %w[terminal unicode unsafe_categories unsafe_property exceptions invalid_scalars kernel_ascii].freeze
     OUTPUTS = %w[include/erx/terminal_ascii.h erlang/apps/erx/src/erx_text_tables.erl
-                 tools/generated/terminal_tables.rb tools/generated/terminal_notices.json
-                 web/src/generated/terminal_tables.ts].freeze
+                 tools/generated/terminal_tables.rb tools/generated/terminal_notices.json].freeze
     # The licence of the Unicode inputs, which every generated table declares.
     LICENSE = 'Unicode-3.0'
     module_function

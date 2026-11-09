@@ -179,7 +179,8 @@ module erx_tcp_timer
   sys/netinet/tcp_timer.h TCPTV_KEEP_IDLE TCPTV_PERSMAX TP_MAXIDLE
 
 module erx_tcp_input
-  sys/netinet/tcp_input.c tcp_do_segment tcp_dropwithreset cc_conn_init
+  sys/netinet/tcp_input.c tcp_do_segment tcp_dropwithreset cc_conn_init cc_ack_received cc_post_recovery tcp_xmit_timer
+  sys/netinet/tcp_timewait.c tcp_twstart
 
 module erx_tcp_output
   sys/netinet/tcp_output.c tcp_output tcp_setpersist tcp_default_output cc_after_idle

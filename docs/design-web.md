@@ -42,9 +42,9 @@ Decisions every reader of this document needs:
   so a client of another build is refused before any view opens.
 * **Machine text is text.** The generated decoder gives the client every
   text from the machine as an opaque `MachineText`, which React refuses
-  to render and whose bytes nothing reads but the line escape, generated
-  into TypeScript from the same Unicode tables as every other display's;
-  one component, `Text`, shows the escape's runs. A build check forbids every
+  to render and whose bytes only one component, `Text`, reads, to show
+  them through the line escape, generated into TypeScript from the same
+  Unicode tables as every other display's. A build check forbids every
   HTML and code sink, and the content security policy forbids inline
   script, `eval` and every origin but the front end's own.
 * **The view is the session's, the relay is the web domain's.** Records,
@@ -252,7 +252,7 @@ opens one view per thing on its screen.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **W1.** A browser sees and does exactly what its principal's console session would | every record, log and trace is fetched in the principal's session domain by a view of `erx_web_line` through the session's own facets, and every UI is the session's applications'; the web domain holds no inspect, trace or shell facet and reaches the inspector only through a line; a session's inspect facet covers its principal's own domains, and only `root`'s in a development build has scope `all`, so a browser sees machine-wide records only as `root` in a development build, and in a release build none does, since machine-wide inspection there is the system shell's at a secure line; the login facet offers only `login` and `logout`, so the web domain reaches a session only through a login or, in a development build, the one the host's `web` facet introduced | a facet held by the web domain; a view the web domain answers from its own knowledge; a login facet operation that names a session; a cookie bound to a line other than its login's | a test that logs two principals in through the network front end and finds each browser's views equal to its principal's `/proc` snapshots and `ended scope` for the other's domains; a scoped principal's view of `/proc/kernel/log` answers the status its `erx:i/1` gets; an xref check that the web domain's release calls no inspect, trace or console client |
-| **W2.** Text from the machine reaches the DOM only as text, through the line escape | the generated decoder types every machine text as `MachineText`, an opaque class React refuses to render, whose bytes only its line escape reads, in `text.ts`; `Text` is the one function that turns one into nodes, through the generated escape, as text nodes; no handwritten source writes an HTML sink | a decoder field typed `string`; a component that reads `MachineText`'s bytes; a sink such as `innerHTML` | the type check (`tsc --noEmit`) of a seeded component rendering a `MachineText` directly fails; the sink source check and its seeded violation; the escape's differential test against `erx_text:escape_line/1`; the headless test of the attributed-text corpus |
+| **W2.** Text from the machine reaches the DOM only as text, through the line escape | the generated decoder types every machine text as `MachineText`, an opaque class React refuses to render, whose bytes are private to `text.tsx`; `Text` is the one function that turns one into nodes, through the generated escape, as text nodes; no handwritten source writes an HTML sink | a decoder field typed `string`; a component that reads `MachineText`'s bytes; a sink such as `innerHTML` | the type check (`tsc --noEmit`) of a seeded component rendering a `MachineText` directly fails; the sink source check and its seeded violation; the escape's differential test against `erx_text:escape_line/1`; the headless test of the attributed-text corpus |
 | **W3.** The browser runs only the client's own files | the machine's messages are data of `web.txt`; the client evaluates none of them; the policy allows script only from the front end's origin and no `eval`; the host tool serves the files from the build tree, never from the machine; both front ends write only the headers of the generated table | a message kind that carries markup or a URL to load; a policy with `unsafe-inline` or `unsafe-eval`; the host tool fetching files from the machine | the policy test in the headless browser, where a seeded inline script and a seeded `eval` are blocked; a source check that `Erx::Web` reads files only from the bundle's inventory; header parity between the front ends |
 | **W4.** The host tool's server gives authority only to the holder of the token | it binds the loopback address; a request whose `Host` is not the tool's address and port is refused first; the WebSocket upgrade needs the session cookie, set once from the printed URL, and an `Origin` equal to the tool's own; without them a client gets only the bundle's public files | a bind to every address; an upgrade without the cookie or the `Origin` check | each refusal tested, with a seeded server that skips the check answering; a test that the token appears in no response and no log line and that the cookie's value is not the token |
 | **W5.** Both front ends carry the same protocol | each front end's job is to authenticate, terminate the WebSocket and hand whole messages to `erx_web_conn`, a pure core both drive; neither reads a message's contents | a front end that answers, filters or caches a message | a differential test: one scripted client through the host tool and through cowboy against the same machine state receives byte-identical message sequences |
@@ -274,12 +274,12 @@ message is a protocol error.
 
 A union may name itself as the element of a `list` or `tuple` member
 when it declares `depth N`, N at most 8, as `datum()` does (below). The
-generator validates the type graph without the edges out of such a
-union's members, so it stays acyclic and every other rule of the grammar
-applies unchanged, and each codec carries the level as an argument: N
-levels, the innermost without the members that name the union, so a
-container's tag at the innermost level is an unknown tag there, refused
-as any other. The bytes of a value are the same at every level.
+generator expands such a union into N levels before it validates the
+declarations, the innermost level without the members that name the
+union, so the type graph stays acyclic and every other rule of the
+grammar applies unchanged. Each codec carries the level as an argument,
+and a container's tag at the innermost level is an unknown tag there,
+refused as any other. The bytes of a value are the same at every level.
 
 Every bound of the protocol is a `limit` of `web.txt`, generated into
 both codecs and covered by the protocol hash, so a client and a machine
@@ -648,25 +648,19 @@ notices, and an inventory of the files with their SHA-256. Its parts:
   `web.txt`; the reader and writer of `ui.txt`'s binary form and its
   kinds, properties and events; the inspection schema's kinds, attribute
   names, units, presentation types and the table from a presentation's
-  text to its inspector path, from `abi/inspection.txt`; and the line escape's table
+  text to its inspector path, from `abi/inspection.txt`; the percent
+  encodings of `/proc` names and `erx:` texts; and the line escape's table
   from `abi/terminal.txt` and OTP's Unicode data, from the same generator
   run that writes `erx_text_tables`.
-* **`text.ts`**: `MachineText`, the opaque class the decoder gives every
-  machine text in, holding its bytes in a JavaScript private field whose
-  one outlet, `runs()`, is the text's line escape, so no other code can
-  read the bytes; and `escapeLine`, which decodes the bytes strictly as
-  UTF-8 by its own table, never with `TextDecoder`, and returns runs of
-  plain text and escape tokens by the generated table, as
-  `erx_text:escape_line/1` does, tab and newline included. Invalid bytes
-  are tokens, never U+FFFD.
-* **`text.tsx`**: `Text`, the one component that renders a `MachineText`:
-  its plain runs as text nodes, tokens in a styled span, the whole in an
-  element with `unicode-bidi: isolate`, so a right-to-left run reorders
-  only within its own text.
-* **`names.ts`**: the percent encodings of `/proc` entry names, as
-  `erx_procfs_core:name/1` writes a text segment, and of `erx:` texts.
-  They are two fixed sets of kept bytes, written by hand like their
-  Erlang twin and tested against it, since no source declares them.
+* **`text.tsx`**: `MachineText`, the opaque class the decoder gives every
+  machine text in, holding its bytes in a private field; `escapeLine`,
+  which decodes the bytes strictly as UTF-8 and returns runs of plain
+  text and escape tokens by the generated table, as `erx_text:escape_line/1`
+  does, tab and newline included; and `Text`, the one component that
+  renders a `MachineText`: plain runs as text nodes, tokens in a styled
+  span, the whole in an element with `unicode-bidi: isolate`, so a
+  right-to-left run reorders only within its own text. Invalid bytes are
+  tokens, never U+FFFD.
 * **`connection.ts`**: the WebSocket to `/ws`, `hello`, a `next` for a
   view once its last update is rendered (for a UI, once an update without
   `commit` is kept), and reconnection after 1 s, doubling to 30 s. On a
@@ -1013,7 +1007,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | Rule | Check |
 | --- | --- |
 | No handwritten client source writes an HTML or code sink | a source check over `web/src` outside `generated/` that fails on `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `writeln`, `srcdoc`, `createContextualFragment`, `DOMParser`, `eval`, `new Function`, a string passed to `setTimeout` or `setInterval`, and a `javascript:` literal; its test is a seeded file with each |
-| Only the line escape reads a `MachineText`'s bytes | by construction: the bytes are a JavaScript private field of the class in `text.ts`, which no code outside the class can name, and its one method returns `escapeLine`'s runs |
+| Only `Text` reads a `MachineText`'s bytes | the class's field is private to `text.tsx`; a source check that no other file names it, whose test is a seeded file that does |
 | Only `hrefOf` writes an `href` | a source check that every `href` in `.tsx` is `hrefOf(...)`, whose test is a seeded literal `href` |
 | Only the generated codecs encode or decode the protocol | the generated tree's determinism test, and a source check that no other module of the web domain or the client reads a message's bytes, whose test is a seeded module that does |
 | The web domain's release calls no inspect, trace, console or shell client | an xref check over the release, whose test is a seeded call of `erx:inspect/2` in a module of the release |

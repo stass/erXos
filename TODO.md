@@ -298,38 +298,8 @@ it; git history is the record of completed work.
   and reader of `event` and `pixels` (design-web.md, "Interfaces").
 * [Medium] `tools/lib/erx/abi_emit_ui_wire_ts.rb`, [The client](docs/design-web.md#the-client): `ui_wire.ts`
   hands texts out as bare `Uint8Array`s and `Prop.value` as one union not tied to `form`, where rule W2 types
-  every machine text as `MachineText`, which `web/src/text.ts` provides: wrap texts in it and emit `Prop` as a
+  every machine text as `MachineText`. When `web/src/text.tsx` lands, wrap texts in it and emit `Prop` as a
   union discriminated by form (the parity harness's casts in `web/test/ui_wire_harness.ts` then go).
-* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): `project/1` never
-  emits `present`, since no member of `abi/inspection.txt` marks a value as a presentation and `erx_present` is not
-  written; once both exist, project a marked attribute to `{present, Type, Text}`, and test `web/src/names.ts`'s
-  `erxText` against `erx_present`'s URI encoding as the design's "encodings and presentation paths" row asks.
-* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): projection has no total
-  budget. Each printed leaf may be 4 KiB however small its input node (a refc binary under one cons), and a term built
-  in the session with sharing expands exponentially (16 x 1000 x 1000 shared cells projected to 224 MB in 1.7 s), while
-  the 64 KiB update check runs only after the whole wire record is built. Thread the remaining update size through
-  `datum/2` and answer `too_large` once it is spent, so the bound holds during projection.
-* [Medium] `web/src/names.ts`, [URLs](docs/design-web.md#urls): the claim that no `/proc` segment is `.` or `..` does
-  not hold in a browser, whose URL parser takes `%2E` and `%2E%2E` as dot segments (`new URL('/proc/a/%2E%2E', base)` is
-  `/proc/`), and an `erx:` text keeps `.` and `/` raw, so a presentation text such as `x/../../ui/3` from an untrusted
-  value links to another client route than it shows. The design must pick a fix: encode `%` once more in the client's
-  URL paths, or encode `.` in an `erx:` segment that is all dots and have the client refuse a dot segment.
-* [Low] `erlang/apps/erx_web/src/erx_web_value.erl`: `datum/2` converts a whole integer to decimal before checking its
-  40-byte bound, about 1 s for the largest bignum; compare its magnitude with `10^40` first and print a huge one
-  without converting it whole.
-* [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
-  term one past each bound in both languages and expects `bad_term TYPE`; every encoded term is in bounds or came
-  from a decoder, so an encoder that stopped refusing an over-bound list, text or integer would pass. A
-  table-driven case over `type/1` and `TYPES` closes it.
-* [Medium] `tools/lib/erx/abi_emit_web.rb`, [The protocol](docs/design-web.md#the-protocol): the protocol hash
-  covers the declarations, not the codec code (`abi_web.rb`, both emitters' interpreters, `web/src/wire.ts`), so a
-  change to the interpreter alone keeps the hash and an old client passes `hello`. Fold the generator files'
-  digests into the hash or hash the generated tables, and say which in design-web.md.
-* [Low] `abi/protocols/web.txt`, [The protocol](docs/design-web.md#the-protocol): an `event`'s and an update's
-  `ui_record` is any ui.txt record of its length; each consumer must run ui.txt's reader on it. Calling the
-  generated event reader inside the codec would make "an accepted event is an event" hold by construction.
-* [Low] `abi/protocols/web.txt`, [Interfaces](docs/design-web.md#interfaces): the fixed response headers and each
-  file kind's content type, and the header table generated for Erlang and Ruby, are not declared yet.
 * [Low] `test/host/web_node_test.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
   no gate runs `tsc --noEmit` over the client's generated and handwritten TypeScript (Node only strips types),
   and no `web/package.json` records the Node version, whose type stripping and `import.meta.main` the tests
@@ -340,6 +310,9 @@ it; git history is the record of completed work.
 * [Low] `abi/formats/ui.txt` and the generated readers: a `present` name is checked only as UTF-8 of at most 63
   bytes, while design-abi.md calls it "a presentation name of the inspection schema"; once the inspection schema
   declares presentations (see the `erx_ui_schema` item above), generate the name table into both readers.
+* [Low] `abi/formats/ui.txt`: `web_ui_op_max` is declared there because `abi/protocols/web.txt` does not exist; it
+  moves under the web protocol when that file lands, and design-web.md should then settle whether a message's `u32`
+  length counts against it.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
   system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
   property case.
@@ -582,19 +555,6 @@ it; git history is the record of completed work.
   stack trace, send-buffer payload and the connection's generator included. Requests
   from other domains need a `{error, einval}` answer or validation in `erx_tcp_conn`,
   and `erx_tcp_conn` needs a `format_status` that redacts `sndbuf` and `gen`.
-* [Medium] erx_net TCP core (`erx_tcp_output:setpersist/2`): it continues from `rxtshift`,
-  which is kept after the send timer stops. FreeBSD's output call sites clear the
-  retransmission timer and `t_rxtshift` first; split it into a start (count 0) and the
-  timer's next probe so output cannot start persist at a retransmission's backoff.
-* [Medium] erx_net TCP core (`#tcb.rxtshift`): only CC_RTO_ERR resets it. The RTT sample
-  (`tcp_xmit_timer`, in ACK processing) and output leaving persist must reset it too, or
-  a connection dies after 12 timeouts in its lifetime; make the function that applies an
-  RTT sample the one place that resets it.
-* [Medium] erx_net TCP core (`erx_tcp_timer:snapshot/2`, input): with timestamps the
-  first timeout's snapshot keeps `badrxtwin = none`, and nothing records the time of the
-  first retransmission that FreeBSD keeps in `t_badrxtwin` (`tcp_output.c:849`), so the
-  spurious-timeout check of `tcp_input.c:1784-1789` has no reference. Input should record
-  it, or compare the echoed timestamp with the send log's transmission time.
 * [Low] erx_net TCP output (`erx_tcp_output`): a FIN-only range the send log marks lost at
   `snd_una` (NewReno, with only a separately sent FIN outstanding) waits for the RTO,
   since the FIN is resent only when `snd_nxt == snd_una`; FreeBSD moves `snd_nxt` to the
@@ -604,6 +564,13 @@ it; git history is the record of completed work.
   as the variant `none | {fast, R} | {congestion, R}`, but `#ccv{}` keeps two booleans
   and `#tcb{}` keeps `snd_recover`. Settle on one form (the variant rules out illegal
   combinations, but FreeBSD does reach fast recovery without congestion recovery).
+* [Low] erx_net TCP input (`erx_tcp_input`, P18): TIME-WAIT always lasts 2 * 30 s;
+  FreeBSD's `tcp_eff_msl` gives a local peer `TCPTV_MSL_LOCAL` (10 ms), so loopback
+  connections wear down the grant's `time_wait` limit. `time_wait/2` is where it goes.
+* [Low] erx_net TCP input (`erx_tcp_input`, `data`): the D-SACK block of a duplicate
+  is recorded in the `data` stage, so it is lost when the segment ends earlier (the loss
+  module's `drop`, CLOSING or LAST-ACK ending); FreeBSD records it in its trim.
+  Recording it in `trim` needs the reassembly ranges held before the segment there.
 * [Low] erx_net TCP core (`erx_tcp:respond/5`): it sets no ECE
   (`tcp_ecn_output_established`) on keepalives and challenge ACKs.
 * [Low] erx_net TCP timers (`erx_tcp_timer`): path MTU black-hole detection, which the
@@ -714,21 +681,15 @@ it; git history is the record of completed work.
   `task-service` timed out; the rerun on the same tree passed on one and four CPUs. The task that
   `erx_fiasco_launch` starts with `ERX_SPACE_JIT` and `MODE_SERVICE` never ended, so the root's
   join waited for good. Find the wait it stuck in.
-* [Medium] liberx Fiasco backend, `launcher.c` `erx_fiasco_task_join_until` and `object.c`
-  `erx_fiasco_object_drain`: a task holding the last handle of its own space's budget is deleted in
-  the request that ends it, its ended semaphore with it, so a root join that got `ERX_EBUSY` before
-  the end waits on a deleted (or, after a new space takes the index, another task's) semaphore:
-  `erx_fiasco_semaphore_down` retries the IPC error until its deadline, or for good. The domain
-  library keeps its copy of every domain's budget, so only a caller that moves its last copy away
-  meets it. Have the service up the joiner's own semaphore, as the other blocking stubs do.
-* [Medium] liberx Fiasco backend, `service_task.c` `task_teardown`: a task's end defers only what its
-  handle table's close frees or what it created (`object_later`); memory whose last mapping goes and
-  the home group still end inside the teardown, safe only because neither kind's end stops a task.
-  Route those ends through the mark too, so nothing ends inside a teardown, and drain once after
-  `service_main`'s dispatch rather than in three arms.
-* [Low] liberx Fiasco backend, `object.c` and `core/handles.h`: rename the record's `ending` word
-  (`end_pending`) and `object_later` (`object_defer_end`), since `budget.c` uses "ending" for an end
-  in progress, and word the core header's comment without naming the Fiasco backend.
+* [High] liberx Fiasco backend, `object.c` `object_pass_type` and `budget.c`: `erx_cap_pass` refuses
+  budget and group handles, which the domain library's install (`erx_dom_install`, DL2) passes to a
+  domain. Before it offers them, take a budget's end out of a task's teardown: a task holding a
+  budget's last handle (by a move, or after the root closed its copy) ends that budget inside
+  `task_end`'s handle close, and the budget's sweeps then reach the task's own space while its row is
+  still live, tearing it down a second time (a lost exit status, an index never reused, a stray exit
+  record), and leave a carved budget whose space is mid-release live with a dangling parent index.
+  Queue the records a task's close frees and end them after the row is reset, so no budget ends
+  inside a task's end; a guard that skips records already ending was tried and is not enough.
 * [Low] liberx Fiasco backend, `budget.c` `budget_sweep`: a budget's object sweep ends a group
   charged to it whose home task, charged to another budget, still has threads, which `erx_object_destroy`
   and a last close refuse ("a group never goes before its threads"). Skip such a group in the sweep, or

@@ -36,7 +36,8 @@ Invariants:
   `(snd_max - snd_una) - sacked - lost + rxt`, RFC 6675's `SetPipe`.
 """.
 
--export([new/1, sent/4, rescued/5, ack/3, mark_lost/3, lose/3, timeout/2, resend_holes/1,
+-export([new/1, sent/4, rescued/5, ack/3, mark_lost/3, lose/3, timeout/2, timeout_undone/1,
+         resend_holes/1,
          next_seg/2]).
 -export([snd_una/1, snd_max/1, snd_fack/1, pipe/1, flight/1, sacked_bytes/1, sent_bytes/1,
          has_holes/1, to_list/1]).
@@ -201,6 +202,18 @@ timeout(#sendlog{ranges = Ranges, una = Una, fack = Fack} = Log, How) when How =
 
 timed_out(#sent{sacked = true} = Sent, keep) -> Sent;
 timed_out(Sent, _) -> Sent#sent{sacked = false, lost = true, rxt = false}.
+
+-doc """
+The timeout was spurious (CC_RTO_ERR): the original transmissions are still in flight, so
+no unSACKed range is lost or counts as retransmitted, and the pipe is again what was sent
+less what is SACKed, as FreeBSD's `snd_max - snd_una` is once `snd_nxt` is back at `snd_max`.
+""".
+-spec timeout_undone(log()) -> log().
+timeout_undone(#sendlog{ranges = Ranges, una = Una} = Log) ->
+    lists:foldl(fun({Start, #sent{sacked = false} = Old}, Acc) ->
+                        store(Acc, Start, Old, Old#sent{lost = false, rxt = false});
+                   (_, Acc) -> Acc
+                end, Log#sendlog{high_rxt = Una}, gb_trees:to_list(Ranges)).
 
 -doc """
 Recovery begins: no unSACKed range counts as retransmitted, so the holes are sent again

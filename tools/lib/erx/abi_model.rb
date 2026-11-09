@@ -118,7 +118,7 @@ module Erx
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
-                        :protocols, :inspection, :ui, :web, :inputs, :statuses, keyword_init: true) do
+                        :protocols, :inspection, :ui, :inputs, :statuses, keyword_init: true) do
       # The enums with args lines, in type order: the ones the generator
       # emits event tables for.
       def event_enums
@@ -131,7 +131,7 @@ module Erx
     module Model
       TOP_LEVEL = %w[abi arch trap reg limit scalar enum flags bytes layout
                      status right type kind cap call reader translation service
-                     projection protocol inspection ui web].freeze
+                     projection protocol inspection ui].freeze
       TYPE_KINDS = %w[scalar enum flags bytes layout].freeze
       BASE_TYPES = [1, 2, 4, 8].flat_map do |size|
         [false, true].map do |signed|
@@ -194,7 +194,6 @@ module Erx
         protocols = validate_protocols(by_kind.fetch('protocol', []), constants)
         inspection = validate_inspection(by_kind, types, rights, objects)
         ui = validate_ui(by_kind, types)
-        web = validate_web(by_kind, inspection)
         validate_event_bindings(types, definitions)
         all_constants = constants.dup
         [type_constants(types), right_constants(rights)].each do |addition|
@@ -215,7 +214,7 @@ module Erx
                    calls: calls.freeze, readers: readers.sort_by(&:name).freeze,
                    translations: translations.freeze, services: services.freeze,
                    projections: projections.freeze, protocols: protocols,
-                   inspection: inspection, ui: ui, web: web, inputs: source.inputs,
+                   inspection: inspection, ui: ui, inputs: source.inputs,
                    statuses: status_values(by_kind)).freeze
         freeze_value(result)
       end
@@ -308,7 +307,7 @@ module Erx
       def unique_definitions(declarations)
         definitions = {}
         declarations.each do |declaration|
-          next if %w[abi arch trap reg cap inspection ui web].include?(declaration.kind)
+          next if %w[abi arch trap reg cap inspection ui].include?(declaration.kind)
           name = Syntax.identifier(declaration.args.first, line: declaration.line)
           declaration.fail!("duplicate definition #{name}") if definitions.key?(name) || BASE_TYPES.key?(name)
           definitions[name] = declaration
@@ -1051,15 +1050,6 @@ module Erx
         require_relative 'abi_ui'
         limits = by_kind.fetch('limit', []).to_h { |item| [item.args[0], Syntax.integer(item.args[2], line: item.line)] }
         UI.validate(by_kind.fetch('ui', []), limits: limits, types: types)
-      end
-
-      # The web protocol's types have a namespace of their own and refer to
-      # root limits and the inspection schema's stopgap reporters
-      # (docs/design-abi.md, "Web protocol").
-      def validate_web(by_kind, inspection)
-        require_relative 'abi_web'
-        limits = by_kind.fetch('limit', []).to_h { |item| [item.args[0], Syntax.integer(item.args[2], line: item.line)] }
-        Web.validate(by_kind.fetch('web', []), limits: limits, stopgaps: inspection ? inspection.stopgaps.keys : [])
       end
 
       def validate_projections(declarations, types)

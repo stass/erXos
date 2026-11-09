@@ -227,7 +227,7 @@ rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_una = Una, snd_max 
     %% SYN-SENT takes no snapshot (FreeBSD's else-if after its snd_cwnd = 1).
     Prev = case {State, Shift} of
                {syn_sent, _} -> Tcb0#tcb.rexmt_prev;
-               {_, 1} -> snapshot(Tcb0, Now);
+               {_, 1} -> snapshot(Tcb0);
                _ -> none
            end,
     Phase = case State of
@@ -246,16 +246,14 @@ rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_una = Una, snd_max 
         _ -> erx_tcp:cong_signal(Tcb2, rto, none, Ctx)
     end.
 
-%% The first timeout's snapshot (TF_PREVVALID). Without timestamps a spurious timeout is
-%% recognised by an acknowledgement within half an RTT (t_badrxtwin); t_srtt is ms * 32.
+%% The first timeout's snapshot (TF_PREVVALID). Output records when it resends with
+%% timestamps (badrxtwin); FreeBSD's window of half an RTT for a connection without them
+%% (tcp_timer.c:618) is read only by header prediction (tcp_input.c:1788-1789), never by
+%% process_ACK, and the stack's header prediction takes the general path's rule.
 snapshot(#tcb{ccv = #ccv{cwnd = Cwnd, ssthresh = Ssthresh, fast_recovery = Fast,
                          cong_recovery = Cong},
-              snd_recover = Recover, ts = Ts, rtt = Rtt}, Now) ->
-    BadRxtWin = case Ts of
-                    #ts{} -> none;
-                    _ -> Now + ms(erx_tcp_rtt:srtt(Rtt) bsr 6)
-                end,
+              snd_recover = Recover}) ->
     #rexmt_prev{cwnd = Cwnd, ssthresh = Ssthresh, recover = Recover, fast = Fast, cong = Cong,
-                badrxtwin = BadRxtWin}.
+                badrxtwin = none}.
 
 ms(Millis) -> Millis * 1000.

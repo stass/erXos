@@ -131,8 +131,6 @@ Departures, each from erXos's model:
   does not move RFC 6675's HighRxt past holes recovery still has to resend.
 * `snd_nxt` is held at or above `snd_una` at the start of each pass, where FreeBSD's input
   moves it up when an acknowledgement passes it.
-* With timestamps, the time of the first retransmission (`t_badrxtwin`, :849) is not
-  recorded here; the spurious-timeout check that reads it belongs to input.
 * Not built, since erXos offers none of them: TCP Fast Open, segmentation offload, IP
   options, TCP-MD5 signatures, UDP tunnelling, `TF_NOOPT`, `TF_NOPUSH`, `TF_MORETOCOME`,
   send-buffer autoscaling and `TCP_MAXUNACKTIME`.
@@ -380,13 +378,15 @@ segment(#rxmt{kind = Kind, start = S, more = More}, Len, Flags, _) ->
     #out_seg{start = S, len = Len, flags = Flags, source = Kind, sendalot = More}.
 
 %% Whether anything is worth a segment (the `goto send` lines), in FreeBSD's order: sender
-%% silly-window avoidance and Nagle for data, a window update, then ACK, RST, SYN, urgent
+%% silly-window avoidance and Nagle for data, a window update, then ACK, RST, a SYN (not
+%% the one a simultaneous open owes, TF_NEEDSYN, which goes only with an ACK due), urgent
 %% data and the FIN.
 send_reason(#out_seg{len = Len, flags = Flags} = Seg, #tcb{} = Tcb, Idle, DataEnd) ->
     (Len > 0 andalso data_goes(Seg, Tcb, Idle, DataEnd))
         orelse window_update(Tcb)
         orelse Tcb#tcb.ack_now
-        orelse Flags band (?TH_RST bor ?TH_SYN) =/= 0
+        orelse Flags band ?TH_RST =/= 0
+        orelse (Flags band ?TH_SYN =/= 0 andalso not Tcb#tcb.need_syn)
         orelse Tcb#tcb.snd_up > Tcb#tcb.snd_una
         orelse (Flags band ?TH_FIN =/= 0
                 andalso (fin_state(Tcb#tcb.fin) =/= sent
@@ -416,14 +416,16 @@ data_goes(#out_seg{start = Start, len = Len, source = Source},
 %% Receiver silly-window avoidance for a window update on its own: only when the window
 %% grows by two segments and by a quarter of the buffer (or the buffer is small or nearly
 %% full), or by half the buffer; never while a delayed ACK will carry it, or once the peer
-%% has sent its FIN.
+%% has sent its FIN, or while a simultaneous open's SYN is unacknowledged (TF_NEEDSYN).
 window_update(#tcb{state = State, rcv_adv = Adv, rcv_nxt = RcvNxt, maxseg = Mss,
-                   rcv_hiwat = Hiwat, deadlines = #deadlines{delack = Delack}} = Tcb) ->
+                   rcv_hiwat = Hiwat, deadlines = #deadlines{delack = Delack},
+                   need_syn = NeedSyn} = Tcb) ->
     Shift = rcv_shift(Tcb),
     RecWin = recwin(Tcb),
     OldWin = max(0, Adv - RcvNxt),
     Growth = max(0, RecWin - OldWin),
-    RecWin > 0 andalso Delack =:= infinity andalso not erx_tcp:have_rcvd_fin(State)
+    RecWin > 0 andalso not NeedSyn andalso Delack =:= infinity
+        andalso not erx_tcp:have_rcvd_fin(State)
         andalso (OldWin bsr Shift) < ((Growth + OldWin) bsr Shift)
         andalso ((Growth >= 2 * Mss
                   andalso (Growth >= Hiwat div 4 orelse RecWin =< Hiwat div 8
@@ -473,8 +475,23 @@ transmit(#out_seg{start = Start, flags = Flags0} = Seg0,
     #tcb{rcv_nxt = RcvNxt, rcv_adv = Adv, deadlines = Deadlines} = Tcb3,
     Tcb = Tcb3#tcb{rcv_adv = max(Adv, RcvNxt + RecWin), last_ack_sent = RcvNxt,
                    ack_now = false, deadlines = Deadlines#deadlines{delack = infinity},
-                   snd_up = Up},
+                   snd_up = Up, rxwin0_sent = Header#tcp.win =:= 0,
+                   rexmt_prev = badrxtwin(Opts, Tcb3, Ctx)},
     {Tcb, {Header, #{ecn => IpEcn, df => Mss > ?TCP_MINMSS}, Payload}, More}.
+
+%% t_badrxtwin (tcp_output.c:848-849): the first segment sent with a timestamp after the
+%% first timeout, the retransmission, records our clock, without the offset, as the time
+%% before which an echoed timestamp shows that an acknowledgement answers an original
+%% transmission. FreeBSD moves it on every segment sent while the backoff is 1, so a pure ACK
+%% sent after the retransmission makes the peer's ACK of it look like one of the original,
+%% and a real timeout is undone; only the first is recorded here (RFC 3522's Eifel
+%% detection, which compares with the retransmission's own timestamp).
+badrxtwin(#tcp_opts{ts = {_, _}},
+          #tcb{rxtshift = 1, rexmt_prev = #rexmt_prev{badrxtwin = none} = Prev},
+          #tcp_ctx{now = Now}) ->
+    Prev#rexmt_prev{badrxtwin = Now div 1000};
+badrxtwin(_, #tcb{rexmt_prev = Prev}, _) ->
+    Prev.
 
 %% The SACK blocks an acknowledgement carries once synchronized with SACK negotiated, and
 %% the receiver's SACK value with the D-SACK block reported.

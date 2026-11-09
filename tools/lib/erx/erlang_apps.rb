@@ -25,7 +25,7 @@ module Erx
     # Applications of another domain's image, written and tested on the host ahead of
     # the milestone that builds that image (docs/plan.md, "Critical path and parallel
     # tracks"): the host tests compile them, and no release holds them yet.
-    UNRELEASED = %w[erx_net erx_display erx_web].freeze
+    UNRELEASED = %w[erx_net erx_display].freeze
     SOURCE = 'erlang/apps'
     # Kernel's own error and warning flags (otp/lib/kernel/src/Makefile, otp/make/otp.mk.in)
     # less its documentation warnings, which erXos's modules do not follow, with

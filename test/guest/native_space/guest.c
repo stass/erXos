@@ -10,8 +10,7 @@
  * gate, and the gate calls' refusals and queue; and spaces: a task that creates spaces
  * below its own, the create's refusals, and a release at the last handle's close; a
  * created space's first thread, which the root makes and starts; budgets and groups as
- * records; handles the root passes into a task with erx_cap_pass; and a budget whose
- * last handle a task holds, which ends after that task's end. Each case says
+ * records; and handles the root passes into a task with erx_cap_pass. Each case says
  * one line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
 
@@ -47,7 +46,6 @@
 #define QUEUE_LABEL	UINT64_C(0x5e0000000000b000)
 #define RELEASE_LABEL	UINT64_C(0x5e0000000000c000)
 #define BUDGET_LABEL	UINT64_C(0x5e0000000000d000)
-#define HELD_LABEL	UINT64_C(0x5e0000000000e000)
 
 void erx_fiasco_root_main(void);
 
@@ -599,21 +597,14 @@ item_word(size_t item, size_t word)
 	return (value);
 }
 
-/* Whether a pass rewrote the item as a handle of the type with exactly these rights. */
-static bool
-item_typed(size_t item, erx_ktype_t type, uint32_t rights)
-{
-	const uint64_t desc = item_word(item, 0);
-
-	return (erx_msg_item_desc_type_get(desc) == type && erx_msg_item_desc_rights_get(desc) == rights &&
-	    erx_msg_item_desc_move_get(desc) == 0 && item_word(item, 1) != ERX_CAP_NULL);
-}
-
 /* Whether a pass rewrote the item as a memory object's handle with exactly these rights. */
 static bool
 item_passed(size_t item, uint32_t rights)
 {
-	return (item_typed(item, ERX_K_MEMORY, rights));
+	const uint64_t desc = item_word(item, 0);
+
+	return (erx_msg_item_desc_type_get(desc) == ERX_K_MEMORY && erx_msg_item_desc_rights_get(desc) == rights &&
+	    erx_msg_item_desc_move_get(desc) == 0 && item_word(item, 1) != ERX_CAP_NULL);
 }
 
 /*
@@ -691,50 +682,6 @@ case_passing(void)
 	passed = passed && status == 0;
 	passed = erx_cap_close(gate) == ERX_OK && passed && erx_fiasco_vm_free_pages() == before;
 	say_case("passing", passed);
-}
-
-/*
- * A task that holds the last handle of the budget its own space is charged to ends that
- * budget with its own end. The root moves the budget and a group charged to it into
- * the space, so it keeps no handle to either, and starts the space's first thread,
- * which ends with FIRST_STATUS. The space ends once: its end closes its handles, and
- * the budget's end, which waits until the space's row is reset, deletes the space and
- * everything else charged to the budget. The deletion withdraws the exit record, as
- * every deletion does, so none reaches the root's gate; the root's handles to the
- * space and to a memory object charged to the budget are stale, and the pages come
- * back.
- */
-static void
-case_budget_held(void)
-{
-	const uint64_t before = erx_fiasco_vm_free_pages();
-	uint64_t gate = ERX_CAP_NULL, budget = ERX_CAP_NULL, group = ERX_CAP_NULL, space = ERX_CAP_NULL;
-	uint64_t mem = ERX_CAP_NULL, copy, thread, pc, label, deadline;
-	erx_fault_t record;
-	bool passed = erx_gate_create(0, &gate) == ERX_OK && erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
-	    erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, 64, 64, &budget) == ERX_OK &&
-	    erx_group_create(budget, 0, &group) == ERX_OK && erx_mem_create(budget, PAGE, 0, &mem) == ERX_OK &&
-	    erx_space_create(budget, ERX_CAP_SELF, gate, HELD_LABEL, 0, TASK_CAP_LIMIT, &space) == ERX_OK &&
-	    erx_image_map(space, 0, program_entry, &pc) == ERX_OK;
-
-	item_put(0, budget, ERX_HR_ALLOC | ERX_HR_DESTROY, true);
-	item_put(1, group, ERX_HR_ATTACH | ERX_HR_SIGNAL, true);
-	passed = passed && erx_cap_pass(ERX_CAP_SELF, space, 2) == ERX_OK && item_typed(0, ERX_K_BUDGET, ERX_HR_ALLOC) &&
-	    item_typed(1, ERX_K_GROUP, ERX_HR_ATTACH | ERX_HR_SIGNAL) && erx_cap_close(budget) == ERX_EINVAL &&
-	    erx_cap_close(group) == ERX_EINVAL;
-	erx_fiasco_launch_set_registers(program_pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
-	passed = passed && erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_OK &&
-	    erx_thread_start(thread) == ERX_OK;
-
-	/* The space's stop and the budget's end are one request, so the object stays until both are done. */
-	deadline = erx_fiasco_clock_ns() + WAIT_NS;
-	while (passed && erx_cap_dup(mem, &copy) == ERX_OK)
-		passed = erx_cap_close(copy) == ERX_OK && erx_fiasco_clock_ns() < deadline;
-	passed = passed && erx_object_destroy(mem) == ERX_ESTALE && erx_object_destroy(space) == ERX_ESTALE &&
-	    !record_wait(erx_fiasco_clock_ns() + SETTLE_NS, &record, &label);
-	passed = erx_cap_close(mem) == ERX_OK && erx_cap_close(space) == ERX_OK && erx_cap_close(gate) == ERX_OK && passed;
-	say_count("held_free_pages", erx_fiasco_vm_free_pages());
-	say_case("budget_held", passed && erx_fiasco_vm_free_pages() == before);
 }
 
 /*
@@ -825,7 +772,6 @@ erx_fiasco_root_main(void)
 	case_groups();
 	case_passing();
 	case_time();
-	case_budget_held();
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

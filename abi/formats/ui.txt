@@ -8,6 +8,9 @@
 # listed beneath it. tools/gen_abi.rb generates erx_ui_schema, the validator
 # of whole trees, from it.
 
+# One ui.txt message inside a web update: the update less 512 bytes kept for
+# its header and the list's count (docs/design-web.md, "The protocol").
+limit web_ui_op_max u32 65024
 # The most children one node of a tree has: it bounds the difference of two
 # trees and keeps every insert's and move's index within a u16.
 limit ui_children u32 1024
