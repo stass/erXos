@@ -134,7 +134,7 @@ Error in process &lt;0.150.0&gt; with exit value:
       </div>
       <div class="terminal-grille" aria-hidden="true"></div>
     </div>
-    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>ps | wc -l</code>, or <code>erl</code> for the Erlang shell.</p>
+    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>ps | wc -l</code>, <code>ifconfig</code>, <code>ping -c 3 192.168.86.1</code>, or <code>erl</code> for the Erlang shell.</p>
     <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
   </div>
 </section>
@@ -329,6 +329,7 @@ Error in process &lt;0.150.0&gt; with exit value:
           <li><span class="tag on">ON</span><span>Files, per-domain namespaces and <code>/tmp</code> on a RAM file system written in Erlang.</span></li>
           <li><span class="tag on">ON</span><span>Storage: a virtio block driver, littlefs and an EROFS reader, all in Erlang.</span></li>
           <li><span class="tag on">ON</span><span>An rc-language command shell, written in Erlang, at the console.</span></li>
+          <li><span class="tag on">ON</span><span>Networking: a virtio-net driver and a TCP/IP stack, both in Erlang. DHCP, <code>ifconfig</code> and <code>ping</code> work.</span></li>
           <li><span class="tag on">ON</span><span>OTP's own test suites compare erXos with stock OTP.</span></li>
         </ul>
       </div>
@@ -338,7 +339,7 @@ Error in process &lt;0.150.0&gt; with exit value:
           <li><span class="tag off">OFF</span><span>erXos's own kernel.</span></li>
           <li><span class="tag off">OFF</span><span>Domains beyond the system domain.</span></li>
           <li><span class="tag off">OFF</span><span>The rest of the command shell.</span></li>
-          <li><span class="tag off">OFF</span><span>Networking.</span></li>
+          <li><span class="tag off">OFF</span><span>Network sockets for programs, and name lookup.</span></li>
           <li><span class="tag off">OFF</span><span>The display and the web UI.</span></li>
           <li><span class="tag off">OFF</span><span>The POSIX-lite layer.</span></li>
         </ul>
@@ -480,6 +481,15 @@ Error in process &lt;0.150.0&gt; with exit value:
         <p><code>ls /</code> lists the root of the namespace.
         <code>ps</code> lists the processes, which are Erlang
         processes.</p>
+      </div>
+      <div>
+        <span class="label"><b>T4</b></span>
+        <h3>On the network</h3>
+        <p><code>ifconfig</code> shows the network device and the address
+        it got by DHCP. <code>ping -c 3 192.168.86.1</code> sends real ICMP
+        through erXos's Erlang stack and driver to a small router emulated
+        in this page; no packet leaves your browser, so Internet hosts do
+        not answer.</p>
       </div>
     </div>
 </div>
