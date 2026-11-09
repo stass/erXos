@@ -378,6 +378,32 @@ it; git history is the record of completed work.
   decoder. With the 9front build: link its `cloadmemimage` behind `erx_draw_cload_frame` and delete the stand-in, check
   `y` lengths against its `bytesperline` (the EUnit vectors are hand-computed from its source), and add
   `erx_draw_image`'s own oracle test (same payloads, counts and pixels) with its seeded run-length fault.
+* [Medium] `test/erlang/erx_draw_ref.erl`, [the pixel primitives](docs/design-display.md#verification-and-testing):
+  the reference models `b`, `c`, `d`, `f`, `O`, `o`, `v`, `y`, `Y` and `r`, and answers `enotsup` to `i`, `l`, `s`
+  and `x`, which the design has it cover as the masked draws they consist of. Add them, a font cache of glyph
+  records with each glyph drawn as a mask, before `erx_memdraw`'s strings are compared with it (Track D P3).
+* [Medium] `test/erlang/erx_draw_ref.erl` against 9front's `libmemdraw`, [the pixel
+  primitives](docs/design-display.md#verification-and-testing): the design checks `erx_memdraw` against both the
+  reference (drawtest.c's `getpixel`, `putpixel` and `drawonepixel`) and the 9front build, and where those two
+  disagree it cannot match both. Read from plan9port's copy, they disagree on these:
+  * Channels. An image of fewer than 8 bits a pixel without a grey channel (`m4`, `r1g1b1x1`): `readnbit` points red,
+    green and blue at one byte, so composing onto it keeps the blue result as its grey, where drawtest writes
+    RGB2K(r, g, b). A map channel other than `m8` alone (`m8a8`, `m4k4`): `readcmap` assumes two bytes a pixel with
+    alpha, and `writebyte` drops the map index. Grey mixed with colour (`k8r8`): `writebyte` writes only the grey.
+  * Fast paths of `memimagedraw`. A plain copy (`memoptdraw`'s `memmove`: S or SoverD, opaque 1x1 replicated mask,
+    the same channel on both sides, no source alpha) keeps the source's `x` bits, which `putpixel` writes as 0. When
+    source, mask and destination are all `k1`, unreplicated and bit-aligned, `memoptdraw` computes
+    `mask ? src : dst` for every operation, so `S` or `Clear` through a 0 bit keeps the destination (an upstream
+    bug: its own `boolcalc1011` clears). A 1x1 replicated source of alpha 0 draws nothing under an operation that
+    keeps DoutS (`_memimagedrawsetup`), even with a colour above its alpha.
+  * Overlap. `alphadraw` buffers only a source that is the destination and walks rows top-down, so a mask that is
+    the destination, or a replicated source that is, is read partly after it is written; the reference reads every
+    pixel as it was before the message.
+  * `y` left of 0. Where `bytesperline` counts one byte more than the row covers (a sub-byte image, R.max.x < 0),
+    `_loadmemimage` writes that byte, which holds pixels right of R; the reference writes only R.
+  Check each against 9front's source when it is imported; then fix erXos's copy (the `k1` path at least), refuse
+  the channels in `b` (a design change to draw(3)'s refusals), or define the case in the design and the reference.
+  Until then the differential test keeps its random operations off these cases.
 * [Low] `tools/lib/erx/abi_emit_draw.rb`: design-display.md says the generator also produces the message table of its
   interface section from `draw.txt`; it does not, and the table in "Draw messages" is hand-written.
 * [Medium] `display/lvgl/erx_lvgl.c`, [The widget server](docs/design-display.md#the-widget-server) and design-abi.md

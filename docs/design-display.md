@@ -2379,10 +2379,15 @@ Each passing case has a seeded failure that proves the code ran.
   * `erx_draw_ref`, a slow Erlang reference, pixel by pixel, of what
     draw(2) and draw(3) define as compositing: the twelve operations,
     masks, channels and their conversion, replication, clipping, `y`
-    (which a `Y` plans to), `r`, and `l`, `s` and `x` as the masked draws they consist of. Its arithmetic
-    is the per-pixel arithmetic of 9front's `libmemdraw` test
-    `drawtest.c` (its `drawonepixel` and channel unpacking), widened from
-    `SoverD` to all twelve operations. Random operations of those kinds
+    (which a `Y` plans to), `r`, and `l`, `s` and `x` as the masked draws they consist of. A test
+    tool, it lives in `test/erlang/` and takes the messages as
+    `erx_draw_codec` decodes them. Its pixels are those of 9front's
+    `libmemdraw` test `drawtest.c` (`getpixel`, `putpixel` and
+    `drawonepixel`, the image laid out in memory as Plan 9 lays it out),
+    widened from `SoverD` to all twelve operations with the factors and
+    rounding of `libmemdraw`'s `alphacalc` functions (`CALC11`,
+    `CALC12`), which agree with `drawonepixel`'s on every premultiplied
+    pixel. Random operations of those kinds
     over random images and channels through `erx_memdraw` and through the
     reference agree pixel for pixel; a seeded change to one Porter-Duff
     operation fails it. `erx_draw_ref` draws no shapes.
