@@ -371,7 +371,7 @@ module Erx
                    name: 'fuzz-erx-erofs', deadline: 1800, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_hostlink_frame.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-hostlink-frame', deadline: 1000, chdir: ROOT, env: environment)
-        %w[eth arp ip4 icmp4 icmp4_quoted udp ip6 icmp6 icmp6_quoted tcp dhcp4 dhcp4_join].each do |target|
+        %w[eth arp ip4 icmp4 icmp4_quoted udp ip6 icmp6 icmp6_quoted tcp dhcp4 dhcp4_join dhcp4_routes].each do |target|
           runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_net_codec.rb'), '--target', target,
                       '--seed', options.fetch(:seed).to_s],
                      name: "fuzz-erx-net-#{target}", deadline: 900, chdir: ROOT, env: environment)

@@ -1401,12 +1401,20 @@ The network domain's configuration names each interface's mode:
 `static` with addresses, routes and name servers; `dhcp`, for which the
 link supervisor starts `erx_dhcp4`; and whether IPv6 autoconfiguration
 runs, which it does by default. `erx_dhcp4_core` is a pure RFC 2131
-state machine with RFC 2132's options, written from the RFCs with
-FreeBSD's `dhclient` as the behavioural reference, over the message codec
-`erx_dhcp4_wire`, the only maker of a received DHCP message; `erx_dhcp4` is its
-process, a child of the link supervisor ([Decisions](#decisions), 3).
-Its transaction ids and the randomised delays and retransmission times
-of RFC 2131 section 4.1 come from the generator in its state.
+state machine with RFC 2132's options and RFC 3442's classless static
+routes, written from the RFCs with FreeBSD's `dhclient` as the
+behavioural reference, over the message codec `erx_dhcp4_wire`, the only
+maker of a received DHCP message, which reads the option overload and
+translates `dhclient`'s checks of routes and domain names; `erx_dhcp4` is
+its process, a child of the link supervisor
+([Decisions](#decisions), 3). Its transaction ids and the randomised
+delays and retransmission times of RFC 2131 section 4.1 come from the
+generator in its state. As `dhclient` does, the client takes the first
+acceptable offer, makes no random wait before its first DISCOVER, counts
+a lease shorter than a minute as a minute, and does not probe the
+offered address with ARP before using it: the interface announces the
+address with a gratuitous ARP when it configures it, and `erx_arp`
+reports another host answering for it as a conflict.
 
 DHCP needs to send and receive before the interface has an address,
 which FreeBSD's `dhclient` does through BPF. Here it is one fixed path
@@ -1427,9 +1435,21 @@ of the interface process, not a socket, so it needs no exception in
   is dropped and counted. These datagrams are unowned traffic and spend
   the interface's ingress bucket.
 * **Applying.** A lease is untrusted input: `erx_dhcp4_core` checks every
-  option's length and value, and what it applies, an address, a netmask,
-  routers and name servers, goes to its own interface only, through the
-  interface's own step, as a static configuration would.
+  option's length and value, and what it applies goes to its own
+  interface only, through the interface's own step, as a static
+  configuration would: an address and netmask; routes, the classless
+  static routes when the server sends them, in which case the router
+  option is ignored (RFC 3442), and otherwise a default route to the
+  first router; an MTU from option 26, at least 68 and at most the
+  device's; and name servers and a search list, from options 6 and 15,
+  which the grant's `resolver` operation hands each domain's `inet_db`
+  ([Name resolution](#name-resolution)), as `dhclient-script` writes
+  resolv.conf's `nameserver` and `search` lines. A route's gateway must
+  be reachable on the link, and no route may take the subnet's own
+  prefix or a destination inside 0.0.0.0/8, 127.0.0.0/8 or 224.0.0.0/3,
+  so a server steers only the traffic RFC 3442 gives it. An ACK counts
+  only for the address and server it answers, and a renewal that
+  changes nothing configures nothing again.
 
 ### UDP
 
@@ -1492,7 +1512,7 @@ modules are marked P; process modules E.
 | `erx_net_frame` | the header-building parts of `ip_output`, `ip6_output`, `ether_output` | encode a frame | P |
 | `erx_net_rand` | none; the role of `arc4random` | the keyed random generator each owner holds | P |
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
-| `erx_dhcp4_wire`, `erx_dhcp4_core` | none; RFC 2131, RFC 2132, RFC 3396 | DHCP message codec; DHCP client state machine | P |
+| `erx_dhcp4_wire`, `erx_dhcp4_core` | `parse_options`, `parse_option_buffer`, `check_classless_option`, `res_hnok`, `check_search`, `option_as_string` of `sbin/dhclient`; RFC 2131, RFC 2132, RFC 3396, RFC 3442 | DHCP message codec; DHCP client state machine | P |
 | `erx_net_credit` | none | credited hand-over | funnel |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd`, `erx_net_loop` | none | processes | E |
 

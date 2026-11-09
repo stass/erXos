@@ -183,3 +183,7 @@ module erx_tcp_input
 
 module erx_tcp_output
   sys/netinet/tcp_output.c tcp_output tcp_setpersist
+
+module erx_dhcp4_wire
+  sbin/dhclient/dhclient.c check_classless_option res_hnok check_search option_as_string
+  sbin/dhclient/options.c parse_options parse_option_buffer

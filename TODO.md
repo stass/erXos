@@ -645,13 +645,16 @@ it; git history is the record of completed work.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
-* [Medium] network, `erx_dhcp4_core` and `erx_dhcp4_wire` (P20 review): open choices for the
-  DHCP client. It configures again on every renewal ACK, even an unchanged one; an ACK in requesting
-  is not checked against the offer; there is no ARP probe and DECLINE before using an address
-  (RFC 2131 4.4.1, RFC 5227); option 26 (MTU) is passed on without a clamp to the device MTU, and
-  where the domain name goes is open; classless static routes (option 121, RFC 3442), option
-  overload and INIT-REBOOT are not read. The fuzz target has no field oracle: pkt has no DHCP
-  decoder, so its judge compares joined option bytes instead.
+* [Low] network, `erx_dhcp4_core`: an ARP probe of the offered address before using it, and a
+  DECLINE when another host answers (RFC 2131 4.4.1, RFC 5227), behind a setting of the
+  interface's `dhcp` mode, off by default as in `dhclient`. Today the address is announced with a
+  gratuitous ARP and a conflict is only reported by erx_arp.
+* [Low] network, `erx_dhcp4_core`: INIT-REBOOT (RFC 2131 3.2, 4.4.2), asking again for the last
+  lease's address after a restart. It needs the lease kept across boots, as `dhclient` keeps
+  /var/db/dhclient.leases, so it waits for the network domain's stored state.
+* [Low] network, `erx_dhcp4_wire_fuzz`: the fuzz target has no field oracle: pkt has no DHCP
+  decoder, so its judge reads the options itself (joined bytes, and its own reading of options 15
+  and 121) instead.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
