@@ -317,6 +317,19 @@ it; git history is the record of completed work.
 * [Low] `erlang/apps/erx_web/src/erx_web_value.erl`: `datum/2` converts a whole integer to decimal before checking its
   40-byte bound, about 1 s for the largest bignum; compare its magnitude with `10^40` first and print a huge one
   without converting it whole.
+* [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
+  term one past each bound in both languages and expects `bad_term TYPE`; every encoded term is in bounds or came
+  from a decoder, so an encoder that stopped refusing an over-bound list, text or integer would pass. A
+  table-driven case over `type/1` and `TYPES` closes it.
+* [Medium] `tools/lib/erx/abi_emit_web.rb`, [The protocol](docs/design-web.md#the-protocol): the protocol hash
+  covers the declarations, not the codec code (`abi_web.rb`, both emitters' interpreters, `web/src/wire.ts`), so a
+  change to the interpreter alone keeps the hash and an old client passes `hello`. Fold the generator files'
+  digests into the hash or hash the generated tables, and say which in design-web.md.
+* [Low] `abi/protocols/web.txt`, [The protocol](docs/design-web.md#the-protocol): an `event`'s and an update's
+  `ui_record` is any ui.txt record of its length; each consumer must run ui.txt's reader on it. Calling the
+  generated event reader inside the codec would make "an accepted event is an event" hold by construction.
+* [Low] `abi/protocols/web.txt`, [Interfaces](docs/design-web.md#interfaces): the fixed response headers and each
+  file kind's content type, and the header table generated for Erlang and Ruby, are not declared yet.
 * [Low] `test/host/web_node_test.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
   no gate runs `tsc --noEmit` over the client's generated and handwritten TypeScript (Node only strips types),
   and no `web/package.json` records the Node version, whose type stripping and `import.meta.main` the tests
@@ -327,9 +340,6 @@ it; git history is the record of completed work.
 * [Low] `abi/formats/ui.txt` and the generated readers: a `present` name is checked only as UTF-8 of at most 63
   bytes, while design-abi.md calls it "a presentation name of the inspection schema"; once the inspection schema
   declares presentations (see the `erx_ui_schema` item above), generate the name table into both readers.
-* [Low] `abi/formats/ui.txt`: `web_ui_op_max` is declared there because `abi/protocols/web.txt` does not exist; it
-  moves under the web protocol when that file lands, and design-web.md should then settle whether a message's `u32`
-  length counts against it.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
   system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
   property case.

@@ -17,6 +17,8 @@ require_relative 'abi_emit_inspection'
 require_relative 'abi_emit_ui'
 require_relative 'abi_emit_ui_wire'
 require_relative 'abi_emit_ui_wire_ts'
+require_relative 'abi_emit_web'
+require_relative 'abi_emit_web_ts'
 
 module Erx
   module ABI
@@ -50,11 +52,15 @@ module Erx
         files.merge!(UIEmitter.outputs(schema))
         files.merge!(UIWireEmitter.outputs(schema))
         files.merge!(UIWireTSEmitter.outputs(schema))
+        # The protocol hash covers terminal.txt and its Unicode data, which are
+        # not ABI sources, so they join the files this plan reads.
+        hashed = schema.web ? WebEmitter.hashed_sources(root: root, inputs: source.inputs) : []
+        files.merge!(WebEmitter.outputs(schema, sources: hashed))
         files.each do |path, bytes|
           raise SchemaError, "generated output is not ASCII: #{path}" unless bytes.ascii_only?
         end
         result = OutputPlan.new(schema: schema, files: files.sort.to_h.freeze,
-                                reads: source.inputs.transform_values { |bytes| Digest::SHA256.hexdigest(bytes) }).freeze
+                                reads: source.inputs.merge(hashed.to_h).transform_values { |bytes| Digest::SHA256.hexdigest(bytes) }).freeze
         Model.freeze_value(result)
       end
 

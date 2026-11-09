@@ -331,6 +331,10 @@ module Erx
                    name: 'fuzz-erx-ui-wire-ts', deadline: 360, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_web_text.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-web-text', deadline: 360, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_web_proto.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-web-proto', deadline: 660, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_web_proto_ts.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-web-proto-ts', deadline: 360, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_pl011_console_uart.rb'), '--seed',
                     options.fetch(:seed).to_s],
                    name: 'fuzz-erx-pl011-console-uart', deadline: 300, chdir: ROOT, env: environment)

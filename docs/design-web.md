@@ -274,12 +274,12 @@ message is a protocol error.
 
 A union may name itself as the element of a `list` or `tuple` member
 when it declares `depth N`, N at most 8, as `datum()` does (below). The
-generator expands such a union into N levels before it validates the
-declarations, the innermost level without the members that name the
-union, so the type graph stays acyclic and every other rule of the
-grammar applies unchanged. Each codec carries the level as an argument,
-and a container's tag at the innermost level is an unknown tag there,
-refused as any other. The bytes of a value are the same at every level.
+generator validates the type graph without the edges out of such a
+union's members, so it stays acyclic and every other rule of the grammar
+applies unchanged, and each codec carries the level as an argument: N
+levels, the innermost without the members that name the union, so a
+container's tag at the innermost level is an unknown tag there, refused
+as any other. The bytes of a value are the same at every level.
 
 Every bound of the protocol is a `limit` of `web.txt`, generated into
 both codecs and covered by the protocol hash, so a client and a machine
