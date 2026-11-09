@@ -7,6 +7,7 @@ require 'fileutils'
 require 'json'
 require 'tmpdir'
 require_relative 'bounded_file'
+require_relative 'build_memo'
 require_relative 'error'
 require_relative 'output_directory'
 require_relative 'pack_provenance'
@@ -44,7 +45,7 @@ module Erx
                     'liberx/elf_plan.c', 'liberx/image_plan.c', 'build/gen/liberx/generated/abi_reader.c'].freeze
     BOOT_FLAGS = %w[-mstrict-align].freeze
     BOOT_ARCHIVE = 'erx_boot.a'
-    FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
+    FLAGS = %w[--no-default-config -std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                -mgeneral-regs-only -mno-outline-atomics -fstack-usage -ffunction-sections
                -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/crypto].freeze
     LEVEL = '-O2'
@@ -61,14 +62,10 @@ module Erx
     SYMBOL = /\A[A-Za-z_.$][A-Za-z0-9_.$]{0,4095}\z/
     # llvm-nm's types of a reference: undefined, and weak undefined.
     UNDEFINED_TYPES = %w[U w v].freeze
-    # The compiles run with nothing of the operator's environment but
-    # PATH, so no CPATH, CCC_OVERRIDE_OPTIONS or the like changes the
-    # archive the kernel links (as Fiasco.build_environment does for the
-    # inherited make).
-    def self.environment
-      ENV.keys.to_h { |name| [name, nil] }.merge('PATH' => ENV.fetch('PATH', ''), 'LC_ALL' => 'C', 'TZ' => 'UTC',
-                                                 'SOURCE_DATE_EPOCH' => '0')
-    end
+    # The compiles and their tools run in the build memo's fixed environment, and clang
+    # reads no configuration file (--no-default-config in FLAGS), so nothing outside what
+    # the Fiasco build's key names changes the archive the kernel links.
+    def self.environment = BuildMemo.tool_environment
 
     # The archive as built: its path, its objects by source, and the
     # directory to give the glue as its one erXos include path.

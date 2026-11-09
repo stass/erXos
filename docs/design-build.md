@@ -31,6 +31,60 @@ host terminal escaper, while raw subprocess bytes remain in logs. The
 status command reports every running command's age and deadline. Missing
 tools, cancellation, timeouts and nonzero exits remain distinct outcomes.
 
+### Reusing build steps
+
+A build step whose inputs are unchanged since it last finished is not run
+again: the build memo (`tools/lib/erx/build_memo.rb`, under `build/memo`)
+keeps what the step made under a key, the SHA-256 of everything the step
+reads, named part by part. The key alone decides reuse, so it must name
+every input; an input left out reuses a stale output, which is worse than
+a slow build. Each step's key therefore names sources by content, the
+programs that run by real path and content, their argument vectors and
+the environment they see, and its test changes each input in turn and
+expects the step to run again. Where it can, the memo makes a step read
+only what its key names rather than enumerating what it might read: a
+step runs in an environment the memo constructs, with every other
+variable unset, and finds programs only in directories whose every
+program the key names.
+
+A program is named by its real path, its content, the content of the
+shared libraries in its install's `lib` directory (clang's driver is a
+small program over `libclang-cpp` and `libLLVM`) and the operating
+system's release, which names the system's own programs and libraries
+(`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`). Homebrew installs each
+version and revision of a package in a directory of its own, so the real
+path also names the helpers a driver runs from its install by path
+(gcc's `cc1`, its `libgcc.a`).
+
+* **Native compiles** (`CompileMemo`, for every compile of `NativeRoot`)
+  are stored: the object and dependency file are copied out of the memo
+  into the directory an image build cleared, so an image rebuilt from
+  unchanged sources compiles nothing and an edit compiles only the sources
+  that read the edited file. The memo runs each compile with
+  `--no-default-config`, so clang reads no configuration file, in a fixed
+  environment. The key covers the command and directory, the compiler,
+  the headers the dependency file names by content, every system header
+  directory clang searches (whole, since `-MMD` leaves them out, with a
+  link counted as the content it reaches), and the absence of any file
+  that would shadow a header the compile found: under the name a search
+  found it by, in each `-I` directory and beside each file the compile
+  read. A compile that asks whether a file exists (`__has_include`,
+  `#include_next`) is never stored, since no dependency list names a file
+  the search did not find.
+* **The stopgap Fiasco build** is recorded in place: its key is the
+  captured inputs' record (FiascoInputs), the build tools' own Ruby, the
+  compiler and the environment the build runs in. Its `PATH` holds the
+  directory each package it uses really lives in (GNU make, the cross gcc
+  and binutils, gawk, dtc, GNU coreutils, findutils and sed) and the operating
+  system's directories, and the key names every program in the former. A
+  hit also needs the image, the kernel, sigma0, the libraries, the user
+  header trees the native compiles include and the receipt to hold the
+  content the finished build left.
+
+A record is written by rename after its step finishes, so an interrupted
+step leaves no record, and a record of another shape is refused with a
+diagnostic. Removing `build/memo` makes every step run again.
+
 ## Sources and imports
 
 `deps.lock` is a checked data file, with unique source identifiers, exact

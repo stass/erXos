@@ -208,6 +208,65 @@ class FiascoTest < Minitest::Test
     assert_empty @runner.commands
   end
 
+  # A build whose PATH the test sets, standing for the programs the build may run.
+  class PathBuild < FixtureBuild
+    attr_accessor :programs
+
+    private
+
+    def build_environment = super.merge('PATH' => [programs, *Erx::BuildMemo::SYSTEM_DIRECTORIES].join(File::PATH_SEPARATOR))
+  end
+
+  def commands_of_a_build(fiasco = @fiasco)
+    before = @runner.commands.size
+    fiasco.build
+    @runner.commands.size - before
+  end
+
+  def test_a_finished_build_is_reused_until_an_input_changes
+    assert commands_of_a_build.positive?
+    assert_equal 0, commands_of_a_build
+    File.write(File.join(@directory, 'fiasco/kernel/extra.cpp'), "int extra;\n")
+    assert commands_of_a_build.positive?
+  end
+
+  def test_every_program_on_the_build_path_is_an_input
+    fiasco = PathBuild.new(root: @directory, runner: @runner, compiler: '/fixture/clang')
+    fiasco.programs = File.join(@directory, 'programs')
+    FileUtils.mkdir_p(fiasco.programs)
+    tool = File.join(fiasco.programs, 'tool')
+    File.write(tool, "#!/bin/sh\n")
+    File.chmod(0o755, tool)
+    assert commands_of_a_build(fiasco).positive?
+    assert_equal 0, commands_of_a_build(fiasco)
+    File.write(tool, "#!/bin/sh\nexit 0\n")
+    assert commands_of_a_build(fiasco).positive?, 'a changed program builds again'
+    other = File.join(fiasco.programs, 'other')
+    File.write(other, "#!/bin/sh\n")
+    File.chmod(0o755, other)
+    assert commands_of_a_build(fiasco).positive?, 'a program added beside the others builds again'
+  end
+
+  def test_the_user_headers_are_outputs_of_the_build
+    header = File.join(@directory, 'build/fiasco/users/include/l4/sys/consts.h')
+    assert commands_of_a_build.positive?
+    FileUtils.mkdir_p(File.dirname(header))
+    File.write(header, "#define L4 1\n")
+    assert commands_of_a_build.positive?, 'headers the last build did not leave build again'
+    assert_equal 0, commands_of_a_build
+    File.write(header, "#define L4 2\n")
+    assert commands_of_a_build.positive?, 'an edited header builds again'
+  end
+
+  def test_the_build_path_holds_only_program_directories_and_the_system
+    path = Erx::Fiasco.build_environment.fetch('PATH').split(File::PATH_SEPARATOR)
+    packages = path - Erx::BuildMemo::SYSTEM_DIRECTORIES
+    assert packages.all? { |directory| directory == File.realpath(directory) }, packages.inspect
+    ambient = ENV.fetch('PATH').split(File::PATH_SEPARATOR) - Erx::BuildMemo::SYSTEM_DIRECTORIES
+    assert_empty packages & ambient
+    assert_equal Erx::BuildMemo::SYSTEM_DIRECTORIES, path.last(Erx::BuildMemo::SYSTEM_DIRECTORIES.size)
+  end
+
   def test_banner_recipe_has_no_default_root_task
     root = File.expand_path('../..', __dir__)
     path = File.join(root, 'config/fiasco/modules.list')

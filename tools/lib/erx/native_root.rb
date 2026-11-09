@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require_relative 'compile_memo'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'interpreter_image'
@@ -204,23 +205,28 @@ module Erx
       program
     end
 
-    # The objects of sources, for a caller that links many programs from them.
+    # The objects of sources, for a caller that links many programs from them. A source
+    # whose inputs did not change since a compile of it is not compiled again (CompileMemo).
     def compile_all(sources:, directory:, flags: [])
       FileUtils.mkdir_p(directory)
-      sources.map { |source| compile(source, directory: directory, flags: flags) }
+      memo = CompileMemo.new(root: @root, runner: @runner)
+      sources.map { |source| compile(source, directory: directory, flags: flags, memo: memo) }
     end
 
     private
 
-    def compile(source, directory:, flags:)
+    def compile(source, directory:, flags:, memo:)
       object = object_path(source, directory)
       headers = @fiasco.user_include_directories.flat_map { |path| ['-isystem', path] }
       # musl declares the BSD memory primitives (bcmp, bcopy, bzero) only under _BSD_SOURCE,
       # which -std=c17 leaves undefined.
       libc = LIBC_SOURCES.include?(source) ? ['-isystem', LIBC_HEADERS, '-D_BSD_SOURCE'] : []
       base = FP_SOURCES.include?(source) ? FLAGS - ['-mgeneral-regs-only'] : FLAGS
-      @runner.run([@compiler, *base, *flags, *headers, *libc, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object],
-                  name: "native-root-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source)
+      argv = [@compiler, *base, *flags, *headers, *libc, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object]
+      memo.compile(argv, chdir: @source, object: object, depfile: "#{object}.d") do |command, environment|
+        @runner.run(command, name: "native-root-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source,
+                             env: environment)
+      end
       object
     end
 

@@ -8,6 +8,7 @@ require 'json'
 require 'tmpdir'
 require_relative 'runner'
 require_relative 'bounded_file'
+require_relative 'build_memo'
 require_relative 'boot_file'
 require_relative 'json_input'
 require_relative 'sources'
@@ -72,6 +73,16 @@ module Erx
     BOOTSTRAP_OBJECTS = 'pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain'
     # Upper bound of a record this tool writes into the build tree.
     BUILD_RECORD_BYTES = 65_536
+    # One program of each package the build runs from outside the operating system:
+    # GNU make, the cross gcc and binutils, gawk (the inherited Makeconf's AWKP), dtc and,
+    # on macOS, GNU coreutils, findutils and sed. The directory each really lives in goes on
+    # the build's PATH (program_directories), so the build finds every other program of
+    # those packages beside it, and memo_key names every program in those directories.
+    PROGRAMS = [*%w[gmake aarch64-elf-gcc aarch64-elf-as gawk dtc],
+                *(RUBY_PLATFORM.include?('darwin') ? %w[gcp gfind gsed] : [])].freeze
+    # The packages whose plain GNU names (make, cp, find), in their libexec/gnubin, the
+    # inherited build expects ahead of the operating system's programs of those names.
+    GNU_NAMED = %w[gmake gcp gfind].freeze
 
     # compiler is the LLVM clang that builds the C17 cores' archive; the
     # resource headers it compiles with must be those the reviewed LLVM
@@ -112,7 +123,6 @@ module Erx
     end
 
     def build(jobs: 4)
-      @input_catalog = nil
       raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
       raise Error, 'set ERX_CLANG to an installed LLVM clang; see README.md' if @compiler.to_s.empty?
       required = %w[kernel mk l4re-core bootstrap libfdt drivers-frst]
@@ -123,12 +133,17 @@ module Erx
       end
       OutputDirectory.prepare(root: @root, path: @build)
       prepare_source_cache
-      cores = build_cores
-      kernel = build_kernel(jobs: jobs, cores: cores)
-      boot_cores = build_boot_cores
-      users = build_users(jobs: jobs, boot_cores: boot_cores)
-      build_image(users: users)
-      record_provenance
+      # A build whose every input is unchanged since the last finished one, with that
+      # build's outputs in place, does nothing (memo_key); make would find nothing to do
+      # but takes a minute to find it, and the audit after it would find what it found.
+      BuildMemo.new(root: @root).in_place('fiasco', key: memo_key, outputs: memo_outputs) do
+        cores = build_cores
+        kernel = build_kernel(jobs: jobs, cores: cores)
+        boot_cores = build_boot_cores
+        users = build_users(jobs: jobs, boot_cores: boot_cores)
+        build_image(users: users)
+        record_provenance
+      end
       image_path
     end
 
@@ -178,11 +193,36 @@ module Erx
     def user_library(name) = File.join(@build, 'users/lib/arm64_armv8a/std/l4f', name)
     def boot_core_archive = File.join(@build, 'boot-cores', CoreArchive::BOOT_ARCHIVE)
 
-    def input_catalog
-      @input_catalog || raise(Error, 'Fiasco build has not produced checked source inputs')
+    private
+
+    # What the build reads: every captured input by content (FiascoInputs' record), the
+    # Ruby that drives it, the compiler, and the environment it runs in. The build finds
+    # programs only on that environment's PATH, which holds the operating system's
+    # directories, named by its release, and directories every program of which the key
+    # names by identity.
+    def memo_key
+      environment = build_environment.compact
+      programs = environment.fetch('PATH').split(File::PATH_SEPARATOR).reject { |directory| BuildMemo::SYSTEM_DIRECTORIES.include?(directory) }
+                            .to_h { |directory| [directory, directory_programs(directory)] }
+      BuildMemo.key('inputs' => @captured.fetch('sha256'), 'tools' => BuildMemo.tools_digest(root: @root),
+                    'compiler' => BuildMemo.program_identity(@compiler), 'programs' => programs,
+                    'system' => BuildMemo.system_release, 'environment' => environment)
     end
 
-    private
+    # Every program in directory, by name and identity.
+    def directory_programs(directory)
+      Dir.children(directory).sort.map { |name| File.join(directory, name) }
+         .select { |path| File.file?(path) && File.executable?(path) }
+         .to_h { |path| [File.basename(path), BuildMemo.program_identity(path)] }
+    end
+
+    # What the build leaves for the image and the native builds, and the receipt that
+    # vouches for it: a hit needs each with the bytes the finished build left, the header
+    # trees the native compiles include by content (BuildMemo#in_place).
+    def memo_outputs
+      [image_path, kernel_path, sigma0_path, boot_core_archive, *%w[libgcc.a libsigma0.a libl4sys.p.a].map { |name| user_library(name) },
+       *user_include_directories, File.join(@build, 'receipt.json'), File.join(@build, 'provenance.json')]
+    end
 
     def record_provenance
       require_relative 'fiasco_provenance'
@@ -193,7 +233,6 @@ module Erx
       auditor.capture_construction
       report = auditor.audit
       auditor.record_receipt(report)
-      @input_catalog = auditor.input_catalog
     end
 
     # Inherited dependency stamps do not cover every generator's code. A
@@ -201,7 +240,7 @@ module Erx
     # ordinary incremental work is reused only for the same source bytes.
     def prepare_source_cache
       @inputs = FiascoInputs.new(root: @root)
-      captured = @inputs.prepare
+      captured = @captured = @inputs.prepare
       expected = {
         'kernel' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + CoreArchive::IMPLEMENTATION_SHA256 +
                                              @inputs.component_id(captured, component: 'kernel')),
@@ -448,21 +487,29 @@ module Erx
       self.class.build_environment
     end
 
+    # The build's whole environment: every variable of this process's unset but these.
     def self.build_environment
-      path = ENV.fetch('PATH')
-      if RUBY_PLATFORM.include?('darwin')
-        directories = %w[gcp gfind gmake].map do |program|
-          executable = path.split(File::PATH_SEPARATOR)
-                           .map { |directory| File.join(directory, program) }
-                           .find { |candidate| File.executable?(candidate) }
-          raise Error, "missing #{program}; install Homebrew coreutils and findutils" unless executable
-          File.expand_path('../libexec/gnubin', File.dirname(File.realpath(executable)))
-        end
-        path = (directories.uniq + [path]).join(File::PATH_SEPARATOR)
-      end
-      ENV.keys.to_h { |name| [name, nil] }.merge('PATH' => path, 'SOURCE_DATE_EPOCH' => '0',
+      ENV.keys.to_h { |name| [name, nil] }.merge('PATH' => program_directories.join(File::PATH_SEPARATOR), 'SOURCE_DATE_EPOCH' => '0',
                                                 'LC_ALL' => 'C', 'TZ' => 'UTC',
                                                 'TMPDIR' => File.realpath(Dir.tmpdir))
+    end
+
+    # The build's PATH: for each of PROGRAMS, found on this process's PATH, the directory
+    # it really lives in, after its package's GNU names (GNU_NAMED); then the operating
+    # system's directories. Nothing else on the caller's PATH reaches the build, so it
+    # runs no program memo_key does not name.
+    def self.program_directories
+      search = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
+      found = PROGRAMS.flat_map do |program|
+        executable = search.map { |directory| File.join(directory, program) }
+                           .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
+        raise Error, "missing #{program}; install it with Homebrew (README.md)" unless executable
+
+        bin = File.dirname(File.realpath(executable))
+        gnu = File.expand_path('../libexec/gnubin', bin)
+        GNU_NAMED.include?(program) && File.directory?(gnu) ? [gnu, bin] : [bin]
+      end
+      (found + BuildMemo::SYSTEM_DIRECTORIES).uniq
     end
   end
 end

@@ -37,12 +37,18 @@ module Erx
   end
 
   class Runner
+    # The wait between looks at a running command starts at FIRST_POLL_SECONDS and doubles
+    # up to POLL_SECONDS, so a short command, as most compiles are, costs no idle 50 ms.
+    FIRST_POLL_SECONDS = 0.001
     POLL_SECONDS = 0.05
     PROGRESS_SECONDS = 30
 
+    # timeout_program, the deadline tool every command runs under, is found once on this
+    # process's PATH, so a command's own environment (a build's constructed PATH) cannot
+    # change or hide it. A name not found there is kept, and running it then fails.
     def initialize(owner_root:, log_dir:, timeout_program: 'gtimeout')
       @log_dir = OutputDirectory.prepare(root: owner_root, path: log_dir)
-      @timeout_program = timeout_program
+      @timeout_program = locate(timeout_program)
     end
 
     # Success predicates are for a persistent guest whose transcript is done.
@@ -61,6 +67,7 @@ module Erx
       pid = nil
       status = nil
       next_progress = started + PROGRESS_SECONDS
+      poll = FIRST_POLL_SECONDS
 
       begin
         File.open(record.fetch('log'), 'wb') do |log|
@@ -92,7 +99,8 @@ module Erx
               progress(record, monotonic - started)
               next_progress += PROGRESS_SECONDS
             end
-            sleep(POLL_SECONDS)
+            sleep(poll)
+            poll = [poll * 2, POLL_SECONDS].min
           end
         end
       rescue Errno::ENOENT => error
@@ -120,6 +128,13 @@ module Erx
     end
 
     private
+
+    def locate(program)
+      return program if program.include?('/')
+
+      ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, program) }
+         .find { |candidate| File.file?(candidate) && File.executable?(candidate) }&.then { |found| File.expand_path(found) } || program
+    end
 
     def validate(argv, name:, deadline:)
       unless argv.is_a?(Array) && !argv.empty? &&

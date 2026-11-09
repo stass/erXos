@@ -1326,6 +1326,43 @@ it; git history is the record of completed work.
   or directly) or passes `Erx::SanitizerEnvironment.call` itself. A new test that runs a failing sanitized program
   without either falls back to macOS's `atos`, which can hang until the test's deadline. Load the fixture from one
   place every test loads, or add a check that fails on a test with `-fsanitize` that reaches neither.
+* [Medium] build memo, `tools/lib/erx/build_memo.rb`: a warm `check-qemu --suite medium_boot` still runs the native
+  runtime builds (OTP make walks, about 25 s of steps: `runtime-emulator`, `runtime-preloaded`, the Erlang apps),
+  the pack-time Fiasco audit (70 `fiasco-audit-member` steps) and about 40 s of the orchestrator's own Ruby
+  (FiascoInputs hashes all 338 MB of `fiasco/` and its private copy on every build, `Runtime.source_digest` hashes
+  `otp/` three times per image build, CompileMemo digests the system header trees once per `compile_all`). Key the
+  runtime builds on `Runtime.source_digest`, musl, the sysroot's inputs, the host OTP and the compiler; cache file
+  digests by (path, size, mtime, inode) with a racy-time check; run independent steps (the two runtime flavours,
+  compiles) in parallel.
+* [Medium] stopgap Fiasco build, `tools/lib/erx/fiasco_inputs.rb`: every file under `liberx/` is an input of the user
+  build, so an edit to any native-root source (`liberx/backend/fiasco/console.c`, which the user build does not
+  compile) discards `build/fiasco/users` and rebuilds it from scratch, about 75 s of a 300 s `medium_boot` run on a
+  loaded host. Capture for each component only the C17 sources its cores read (CoreArchive), so such an edit reruns
+  only the native compiles that read it.
+* [Low] build memo, `tools/lib/erx/compile_memo.rb`: a quoted include that climbs out of its includer's directory
+  (`#include "../x.h"`) and was found through an `-I` directory is not keyed against a file of that name appearing
+  above the includer, which would then come first; the native sources use none. Key each quoted include's name
+  relative to its includer, or refuse to store a compile whose dependency names `..`.
+* [Low] build memo, `tools/lib/erx/build_memo.rb`: `build/memo` grows by one entry per distinct compile and is never
+  pruned. Drop entries no build has restored for some number of builds, or keep a bounded number per source.
+* [Medium] build memo on Linux hosts, `tools/lib/erx/build_memo.rb` `REUSE`: the operating system's directories
+  (`/usr/bin`, `/bin`) are named by the kernel's release, which on Linux does not change with a package upgrade, so
+  on Linux the memo reuses nothing and every step runs (its reuse tests then fail). Name those programs by identity
+  or by the package database's state, then enable reuse there.
+* [Medium] build memo, `tools/lib/erx/build_memo.rb` `program_identity`: a program is named by its own install's
+  `lib` directory, not by the libraries it loads from other packages (`cc1` loads Homebrew's isl, mpc, mpfr, gmp,
+  zstd), and `/usr/bin`'s Xcode shims (`gcc`, `cc`, `m4`; the Fiasco kconfig's `HOSTCC = gcc`) are named only by
+  the macOS release, not by the active developer directory. Key each program's load-command closure (`otool -L`,
+  `ldd`) and `xcode-select -p` with its clang, or point the inherited build's host compiler at the keyed clang.
+* [Low] build memo, `tools/lib/erx/compile_memo.rb`: clang leaves out of `-MMD` a header included under
+  `#pragma GCC system_header` and an `-I` header a system header probes with `__has_include`; the system trees are
+  digested once per `compile_all` and a dependency's change during a compile is caught by mtime only; two builds
+  storing one key race (`Errno::ENOTEMPTY`). Switch the memo to `-MD`, re-digest before storing, and treat a lost
+  rename as success; none of these arise in the tree today.
+* [Medium] stopgap, `test`: the `medium_boot` suite's `release-shell` checkpoint timed out on the first run after a
+  fresh tree twice (master ee3bfe47 and branch mb-incr), the 1-CPU boot's serial log showing the shell's banner
+  interleaved with the domain ERTS's "hold executor slots" line; the next runs passed. Find whether the checkpoint
+  needs a whole line that concurrent console writers can split.
 * [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: `tools/erx`'s entry `ensure` releases
   `build/gen.lock` before any compiler runs, so the long readers that follow do not hold it: the hosted liberx
   compiles and OTP's make with `-I$(ERX_GEN)` in `runtime.rb`, the fuzz compiles, the test pool's compilers, the
