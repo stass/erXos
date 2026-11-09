@@ -129,7 +129,7 @@ names; the table's order is the order.
 | 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in the Fiasco backend, and in the hosted backend where cheap (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
 | 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | 1b-C Track D, parts 1 to 3 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser, and the same interface on a QEMU `virt` kiosk drawn by LVGL, with no login | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and 1b-B's sub-space ports | GW |
-| 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B | GP, provisionally; the G6 baseline |
+| 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; its supervisor resets the device and restarts the driver, and the shell never notices; drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A; littlefs's sub-space port also 1b-B | G9's measurements, deciding nothing |
 | 1b-F Track D, parts 5 to 7 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-E and 1b-C; part 7 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | 1b-E | GN-QEMU's baseline, deciding nothing |
@@ -159,23 +159,25 @@ The order reaches a usable system first:
   product's identity and the instrument every later milestone is debugged
   with; then files from EROFS and littlefs, and the Erlang command shell.
 * Phase 1b stands further on the stopgap, so that every item is a demo a
-  person can watch before erXos's kernel exists. Domains over connections
-  come first (1b-A), since every later item is a domain or runs in one;
-  then programs as ports of their sessions over pipes (1b-B) and the first
-  part of the POSIX personality (1b-D), the shortest road to a UNIX look
-  and feel; gate G6's baseline records the result on the stopgap and
-  decides nothing. The backend grows the rows these need behind the
-  unchanged interface, and the guarantees they would rest on are recorded
-  as residuals, not built.
-* Beside that path: drivers in their own domains (1b-E) once 1b-A lands,
-  networking on QEMU (1b-G) after 1b-E, BeamAsm beside 1b-A, and erXos's
-  F2FS on QEMU (1b-H) at the lowest priority, whenever capacity is idle.
-* The display and the web follow the domains and the session domain, off
-  the critical path: first a browser on the developer's host over the
-  host link, which needs no device on the machine (1b-C), then, once 1b-E
-  gives domains their devices, a kiosk on QEMU `virt` drawn by LVGL
-  (1b-C's part 3) and a desktop with terminal windows (1b-F), and last the
-  boards' panels and the network front end.
+  person can watch before erXos's kernel exists. The order puts the
+  demos a person sees soonest first. Domains over connections come first
+  (1b-A), since every later item is a domain or runs in one; then
+  1b-B's first slice, the session domain, and the web on the developer's
+  host over the host link, which needs no device on the machine (1b-C's
+  parts 1 and 2); then drivers in their own domains (1b-E) and
+  networking on QEMU (1b-G); then the kiosk on QEMU `virt` drawn by LVGL
+  (1b-C's part 3), with 1b-B's sub-space ports, which run the LVGL
+  program. Programs as ports of their sessions over pipes and the first
+  part of the POSIX personality (1b-D) follow, with toybox's applets, the
+  rest of 1b-B, after 1b-D; gate G6's baseline records the result on the
+  stopgap and decides nothing. The desktop with terminal windows (1b-F)
+  comes after all of these, and last the boards' panels and the network
+  front end. The backend grows the rows these need behind the unchanged
+  interface, and the guarantees they would rest on are recorded as
+  residuals, not built.
+* Beside that path: BeamAsm beside 1b-A, and erXos's F2FS on QEMU (1b-H)
+  at the lowest priority, whenever capacity is idle. The network stack's
+  host-first packages run beside everything, since they need no guest.
 * Track K's pilot starts before Phase 1 is complete and runs beside
   Phase 1b; erXos's kernel in full follows 1b-A, written from its design
   documents, which neither phase changes.
@@ -2535,13 +2537,14 @@ Phase 1:   M0 --> M1 --> M3 --> M4 --> M6 --> track S (shell)
             |            ^
             +-> track H -+
 
-Phase 1b:  1b-A domains on the stopgap --> 1b-B track S's programs --> 1b-D track P's first part --> G6 baseline
-             |   (backend rows, hosted backend too; BeamAsm beside it)
-             +--> 1b-E M9 on the stopgap --> 1b-F track D part 5 --> part 6 --> part 7 (after 1b-D)
-             |                          +--> 1b-C track D part 3, the QEMU kiosk (after part 2)
-             |                          +--> 1b-G network domain, GN-QEMU, M14 on QEMU
-             +--> 1b-H M13 on QEMU (any time; lowest priority)
-           session domain (1b-B's first slice) --> 1b-C track D part 1 (GW) --> part 2
+Phase 1b, in order of its demos (backend rows, hosted backend too; BeamAsm beside 1b-A):
+           1b-A domains on the stopgap
+             --> session domain (1b-B's first slice) --> 1b-C track D part 1 (GW) --> part 2
+             --> 1b-E M9 on the stopgap --> 1b-G network domain, GN-QEMU, M14 on QEMU
+             --> 1b-C track D part 3, the QEMU kiosk (with 1b-B's sub-space ports)
+             --> 1b-D track P's first part --> G6 baseline --> toybox's applets (the rest of 1b-B)
+             --> 1b-F track D part 5 --> part 6 --> part 7
+           1b-H M13 on QEMU (any time; lowest priority)
 
 Track K:   pilot (GK1), beside Phase 1b --> kernel in full (GK2), after 1b-A --> M7 (GK3, parity over Phase 1 and 1b)
 
@@ -2553,13 +2556,12 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
 * Phase 1's critical path runs through M1, M3, M4 and M6; track H runs
   beside M1 and carries ERTS's port before the QEMU boot of M3; the shell
   follows M4.
-* Phase 1b's critical path runs through 1b-A, 1b-B and 1b-D: domains,
-  then toybox's applets as ports of the session, then a UNIX program
-  recompiled unchanged. 1b-A comes first because every other item is a
-  domain or runs in one. Beside it: 1b-C once the session domain exists;
-  1b-E once 1b-A lands; 1b-F and 1b-G after 1b-E, part 7 of 1b-F also
-  after 1b-D; 1b-C's part 3 after 1b-E and part 2; BeamAsm beside 1b-A;
-  1b-H whenever capacity is idle.
+* Phase 1b runs in the order of its visible demos: 1b-A; the session
+  domain and 1b-C's parts 1 and 2; 1b-E and 1b-G; 1b-C's part 3 with
+  1b-B's sub-space ports; 1b-D, then toybox's applets; 1b-F last, part 7
+  after 1b-D. 1b-A comes first because every other item is a domain or
+  runs in one. BeamAsm runs beside 1b-A, and 1b-H whenever capacity is
+  idle.
 * Track K's pilot starts before Phase 1 is complete and runs beside
   Phase 1b, since its cores are host-built C17
   with no shared seam and its calibration is needed whatever the order;
