@@ -652,7 +652,9 @@ inspection 1
 widget trees ([Widget trees](design-display.md#widget-trees)). Its
 members, at two-space indentation, declare value types, image types,
 properties and kinds; the properties a kind takes are at four spaces
-beneath it. Members have one namespace of their own; a member refers to
+beneath it. Value types and image types share one namespace, properties
+have one and kinds one, each apart from the root's, so the property
+`image` and the kind `image` are two names; a member refers to
 another by its bare name and to a root `limit` or `enum` by `@name`.
 Every wire number is literal in the source.
 
@@ -687,11 +689,15 @@ never kept, and handed to the application as `{erx_secret, V}`.
 The generator refuses a number or a name used twice in its namespace; a
 kind that takes an event marked `detail state` without exactly one
 `state` property; a `within`, `index` or `hides` naming a property the
-kind does not take or of the wrong type; a content type other than an
+kind does not take or of the wrong type; a `within` bound without a
+`default`, so a tree that omits it still has a range; a content type other than an
 `image/` type, and `image/svg+xml`; and a kind whose largest `insert`,
 every property it takes at its bound, exceeds `web_ui_op_max`, the room
 one web update leaves for an operation
-([design-web.md](design-web.md#the-protocol)).
+([design-web.md](design-web.md#the-protocol)), a root limit `ui.txt`
+declares beside `ui_pixels_max` and `ui_children`, the most children one
+node of a tree has, 1,024, which bounds the difference of two trees and
+keeps every `insert`'s and `move`'s index within its `u16`.
 
 ```text
 ui 1

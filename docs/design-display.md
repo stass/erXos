@@ -662,14 +662,17 @@ carry the same `key`; when an `input` whose `secret` is `true` carries no
 `text`; when it has at most the grant's `ui_nodes` nodes and is at most
 64 deep, since the renderers lay a tree out recursively in languages whose
 stacks are fixed; and when `min` is below `max`, `value` within them and
-`selected` an index of `items`. `erx_ui_schema`, generated from
+`selected` an index of `items`; and when no node has more than
+`ui_children` children, 1,024, a root limit of `ui.txt` that bounds
+`delta/2`'s work and keeps every `insert` and `move` index within 16 bits. `erx_ui_schema`, generated from
 `ui.txt`, decides validity for the whole tree before anything is applied
 and answers the first fault in depth-first order as `{error, {Reason,
 Where}}`, `Reason` one of `not_a_node`, `unknown_kind`,
 `unknown_property`, `bad_value`, `children`, `duplicate_key`,
 `too_many_nodes` and `too_deep`, and `Where` the list of child indexes
-from the root to the node, with the property's name beside it for the
-property reasons. No operation of a valid tree exceeds one 64 KiB update
+from the root to the node, `{Path, Property}` for the property reasons;
+a secret `input` that carries `text` is `bad_value` on `text`, and a
+children list that is not a proper list is `children` at its node. No operation of a valid tree exceeds one 64 KiB update
 of the web, since the generator checks every kind's largest `insert`
 against it ([design-web.md](design-web.md#uis-the-browser-renderer)); a
 larger picture goes in a draw window.

@@ -1,0 +1,99 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The display's widget trees (docs/design-abi.md, "Widget format", and
+# docs/design-display.md, "Widget trees"): value types, image types,
+# properties and kinds. Value types and image types share one namespace,
+# properties one and kinds one; image types, properties and kinds each
+# number from 1 to 255. A kind takes the properties marked common and those
+# listed beneath it. tools/gen_abi.rb generates erx_ui_schema, the validator
+# of whole trees, from it.
+
+# One ui.txt message inside a web update: the update less 512 bytes kept for
+# its header and the list's count (docs/design-web.md, "The protocol").
+limit web_ui_op_max u32 65024
+# The most children one node of a tree has: it bounds the difference of two
+# trees and keeps every insert's and move's index within a u16.
+limit ui_children u32 1024
+# The longest pixels message, its header and its pixels.
+limit ui_pixels_max u32 65536
+
+# Placement of a node within the room it gets.
+enum ui_align u8
+  value start 0
+  value center 1
+  value end 2
+  value fill 3
+
+ui 1
+  integer size 0 16384
+  integer share 0 255
+  integer bound -2147483648 2147483647
+  integer columns 1 64
+  integer item_index 0 255
+  text caption 4096 utf8
+  text short 255 utf8
+  text item 128 utf8
+  list items item 256
+  bytes picture 49152
+  image png 1 "image/png"
+  prop key 1 key common
+  prop width 2 size common
+  prop height 3 size common
+  prop weight 4 share common
+  prop pad 5 share common
+  prop align 6 @ui_align common default fill
+  prop visible 7 boolean common default true
+  prop enabled 8 boolean common default true
+  prop present 9 presentation common status
+  prop on_select 10 event common
+  prop text 11 caption status
+  prop placeholder 12 short
+  prop secret 13 boolean default false
+  prop checked 14 boolean
+  prop min 15 bound default 0
+  prop max 16 bound default 100
+  prop value 17 bound
+  prop items 18 items
+  prop selected 19 item_index
+  prop columns 20 columns default 1
+  prop image 21 picture
+  prop image_type 22 image
+  prop alt 23 short
+  prop on_click 24 event
+  prop on_change 26 event detail state
+  prop on_submit 27 event detail state
+  kind column 1 children
+  kind row 2 children
+  kind grid 3 children
+    prop columns
+  kind scroll 4 children
+  kind stack 5 children
+  kind label 6
+    prop text
+  kind button 7
+    prop text
+    prop on_click
+  kind checkbox 8
+    prop text
+    prop checked state
+    prop on_change
+  kind slider 9
+    prop min
+    prop max
+    prop value state within min max
+    prop on_change
+  kind input 10
+    prop text state
+    prop placeholder
+    prop secret fixed hides text
+    prop on_change
+    prop on_submit
+  kind list 11
+    prop items
+    prop selected state index items
+    prop on_change
+  kind image 12
+    prop image
+    prop image_type
+    prop alt
+  kind spacer 13

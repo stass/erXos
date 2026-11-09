@@ -281,6 +281,16 @@ it; git history is the record of completed work.
   image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
   the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
   window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
+* [Medium] `erx_ui_schema` (generated from `abi/formats/ui.txt`), [Widget
+  trees](docs/design-display.md#widget-trees): a `present` value is checked only as `{Atom, Term}` with the atom at
+  most 63 bytes, because the inspection schema declares no presentation names or grammars yet (design gap: no member
+  of `abi/inspection.txt` declares a presentation). Once it does, the generator emits the table and the validator
+  checks the name and the value's shape, so a valid tree always encodes; until then a renderer must not encode
+  `present`. The reporter-first rule (a two-tuple led by `kernel`, `service` or `runtime` is an `attr()`) also
+  reserves those three names from presentations, which design-display.md should say.
+* [Low] `abi/formats/ui.txt`: `web_ui_op_max` is declared there because `abi/protocols/web.txt` does not exist; it
+  moves under the web protocol when that file lands, and design-web.md should then settle whether a message's `u32`
+  length counts against it.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
   system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
   property case.
