@@ -134,7 +134,7 @@ Error in process &lt;0.150.0&gt; with exit value:
       </div>
       <div class="terminal-grille" aria-hidden="true"></div>
     </div>
-    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>ps | wc -l</code>, <code>ifconfig</code>, <code>ping -c 3 192.168.86.1</code>, or <code>erl</code> for the Erlang shell.</p>
+    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>top</code>, <code>dmesg</code>, <code>ifconfig</code>, <code>ping -c 3 192.168.86.1</code>, or <code>erl</code> for the Erlang shell.</p>
     <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
   </div>
 </section>
@@ -257,8 +257,11 @@ Error in process &lt;0.150.0&gt; with exit value:
       <div class="layer">
         <span class="label">Domains</span>
         <div class="boxes">
-          <div class="box domain accent"><strong>System domain</strong>ERTS &middot; drivers &middot; file servers &middot; services</div>
-          <div class="box domain"><strong>Domain</strong>ERTS &middot; your Erlang applications</div>
+          <div class="box domain accent"><strong>System domain</strong>ERTS &middot; domain service &middot; console &middot; services</div>
+          <div class="box domain"><strong>Network domain</strong>ERTS &middot; virtio-net driver &middot; TCP/IP stack</div>
+          <div class="box domain"><strong>Storage domain</strong>ERTS &middot; block driver &middot; file systems</div>
+          <div class="box domain"><strong>Domain</strong>ERTS &middot; your Erlang application</div>
+          <div class="box domain"><strong>Domain</strong>ERTS &middot; another application, isolated from the first</div>
           <div class="box domain dash"><strong>Domain</strong>native programs on musl</div>
         </div>
       </div>
@@ -480,7 +483,9 @@ Error in process &lt;0.150.0&gt; with exit value:
         <h3>Look around</h3>
         <p><code>ls /</code> lists the root of the namespace.
         <code>ps</code> lists the processes, which are Erlang
-        processes.</p>
+        processes. <code>top</code> shows them live under uptime, memory
+        and run queue; <code>Ctrl-C</code> ends it. <code>dmesg</code>
+        prints the system log from boot on.</p>
       </div>
       <div>
         <span class="label"><b>T4</b></span>
