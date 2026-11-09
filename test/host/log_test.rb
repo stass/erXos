@@ -409,6 +409,19 @@ class LogTest < Minitest::Test
     refute_match(/[^\t\n -~]/, stderr)
   end
 
+  # Standard error shows every record as it is written, so the console's take finds nothing
+  # and a read from the start, as dmesg makes, sees the same lines standard error showed.
+  def test_hosted_take_finds_nothing_and_a_read_sees_what_standard_error_showed
+    probe = build_probe
+    stdout, stderr, status = run_probe(probe, "line:#{hex('one')}", "line:#{hex('two')}", 'take', 'read:0', 'read:2',
+                                       'read:3')
+    assert status.success?, stderr
+    lines = stdout.lines(chomp: true)
+    assert_equal ['status 0', 'status 0', 'take 0 lost 0', 'read 0 lost 0'], lines.first(4)
+    assert_equal stderr.lines(chomp: true).map { |line| "read #{line}" }, lines[4, 2]
+    assert_equal ['read 0 lost 0', 'read -1 lost 0'], lines.drop(6)
+  end
+
   # The same number of lines go in as are shown plus dropped, over a flood from
   # several threads and across a window's end; on a machine slow enough to
   # cross more windows the split moves, and the sum does not.

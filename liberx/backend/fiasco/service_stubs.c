@@ -97,6 +97,21 @@ erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log
 	return (status);
 }
 
+int
+erx_log_take(uint64_t res, void *window, uint64_t size, erx_log_read_result_t *result)
+{
+	const erx_fiasco_log_take_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	    .window = (uint64_t)(uintptr_t)window, .size = size };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_LOG_TAKE, &request, sizeof(request), &reply);
+
+	(void)res;
+	if (status == ERX_OK)
+		*result = (erx_log_read_result_t){ .next_cursor = reply.first, .lost = reply.second,
+		    .written = reply.third };
+	return (status);
+}
+
 /* length is at most ERX_UTCB_BYTES_MAX, so every word index is in range and no store fails. */
 void
 erx_fiasco_utcb_store_bytes(const void *bytes, size_t length)

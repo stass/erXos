@@ -433,6 +433,7 @@ enum fiasco_call u32
   value mem_copy 45
   value release_entry 46
   value group_configure 47
+  value log_take 48
 
 # erx_object_info's topics and the report each writes (docs/design-abi.md,
 # "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
@@ -587,6 +588,13 @@ layout erx_fiasco_log_read_request wire_le 8 32
   field cursor u64 8
   field window u64 16
   field size u64 24
+
+# erx_log_take, the console's read: the window is the root's own memory, so
+# only the root may ask.
+layout erx_fiasco_log_take_request wire_le 8 24
+  field caller u64 0
+  field window u64 8
+  field size u64 16
 
 # erx_object_info: the window is the root's own memory, so only the root may ask.
 layout erx_fiasco_object_info_request wire_le 8 48

@@ -14,7 +14,7 @@
 # The calls ERTS makes into liberx. The rest of liberx, a backend's internal names
 # included, is off limits.
 [liberx]
-erx_debug_log erx_log_next_record erx_log_read erx_log_render
+erx_debug_log erx_log_next_record erx_log_read erx_log_render erx_log_take
 erx_boot_argv_fill erx_boot_argv_plan erx_boot_info erx_boot_info_read
 erx_boot_info_reason erx_clock_ns erx_executor_slot erx_executor_wake
 erx_group_info erx_group_status erx_group_take_ready erx_irq_ack erx_irq_bind

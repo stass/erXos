@@ -30,6 +30,8 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_task_write_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_LOG_READ:
 		return (sizeof(erx_fiasco_log_read_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_LOG_TAKE:
+		return (sizeof(erx_fiasco_log_take_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_OBJECT_INFO:
 		return (sizeof(erx_fiasco_object_info_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_THREAD_CREATE:

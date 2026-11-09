@@ -57,7 +57,8 @@ erx_effect_console_write(const char *line, size_t length)
 	if (driver_lock_depth != 1 || driver_console_lines == CONSOLE_LINES ||
 	    length > ERX_LOG_LINE_MAX)
 		abort();
-	memcpy(driver_console[driver_console_lines++], line, length);
+	memcpy(driver_console[driver_console_lines], line, length);
+	driver_console[driver_console_lines++][length] = '\0';
 }
 
 static erx_utcb_t driver_utcb;
@@ -121,24 +122,47 @@ driver_log(const char *text)
 		abort();
 }
 
-/* A read as the console's reader makes one: "read STATUS lost N", then "reader LINE" each. */
+/*
+ * Prints one window of records as "who OP STATUS lost N", then "who LINE" for each record.
+ */
 static void
-driver_read(uint64_t *cursor)
+driver_print_window(const char *who, const char *op, const erx_log_copy_result_t *copied,
+    const uint8_t *window)
 {
-	static uint8_t window[2 * ERX_LOG_RECORD_MAX];
 	static char text[ERX_LOG_TEXT_MAX], line[ERX_LOG_LINE_MAX + 1];
-	const erx_log_copy_result_t copied = erx_debug_log_read(*cursor, window, sizeof(window));
 	erx_log_view_t view;
 	size_t offset = 0;
 
-	printf("read %d lost %" PRIu64 "\n", (int)copied.status, copied.lost);
-	if (copied.status != ERX_OK)
+	printf("%s %s %d lost %" PRIu64 "\n", who, op, (int)copied->status, copied->lost);
+	if (copied->status != ERX_OK)
 		return;
-	*cursor = copied.next_cursor;
-	while (erx_log_next_record(window, copied.written, &offset, text, &view) == ERX_LOG_NEXT_RECORD) {
+	while (erx_log_next_record(window, copied->written, &offset, text, &view) ==
+	    ERX_LOG_NEXT_RECORD) {
 		line[erx_log_render(&view, line, ERX_LOG_LINE_MAX)] = '\0';
-		printf("reader %s", line);
+		printf("%s %s", who, line);
 	}
+}
+
+/* One read from the cursor of the reader called who, into a window of size bytes. */
+static void
+driver_read_as(const char *who, uint64_t *cursor, size_t size)
+{
+	static uint8_t window[2 * ERX_LOG_RECORD_MAX];
+	const erx_log_copy_result_t copied = erx_debug_log_read(*cursor, window, size);
+
+	driver_print_window(who, "read", &copied, window);
+	if (copied.status == ERX_OK)
+		*cursor = copied.next_cursor;
+}
+
+/* One take by the console, erx_console's read, which moves the log's one shared position. */
+static void
+driver_take(void)
+{
+	static uint8_t window[2 * ERX_LOG_RECORD_MAX];
+	const erx_log_copy_result_t copied = erx_debug_log_take(window, sizeof(window));
+
+	driver_print_window("erx_console", "take", &copied, window);
 }
 
 static void
@@ -150,9 +174,11 @@ driver_console_dump(void)
 }
 
 /*
- * The handoff (docs/design-stopgap.md, "The console"): a line before it reaches the
- * console, lines after it reach only the reader, a cursor past what was taken is refused,
- * and taking the log back writes only what no reader had. Each step prints in order.
+ * The handoff (docs/design-stopgap.md, "The console"): a line before it reaches the early
+ * console, lines after it reach only the console's take, a reader from the start sees every
+ * line and a cursor past the newest record is refused, taking the log back writes only what
+ * the console had not taken, and from then on a take finds nothing. Each step prints in
+ * order.
  */
 static int
 driver_handoff(void)
@@ -161,38 +187,81 @@ driver_handoff(void)
 
 	driver_log("before");
 	driver_console_dump();
-	erx_debug_log_hand_to_reader();
+	erx_debug_log_hand_to_console();
 	driver_log("after-one");
 	driver_log("after-two");
 	driver_console_dump();
-	driver_read(&cursor);
-	driver_read(&cursor);
+	driver_take();
+	driver_take();
 	driver_log("parked");
+	driver_read_as("reader", &cursor, 2 * ERX_LOG_RECORD_MAX);
 	cursor += 1;
-	driver_read(&cursor);
+	driver_read_as("reader", &cursor, 2 * ERX_LOG_RECORD_MAX);
 	erx_debug_log_take_back();
 	driver_console_dump();
 	printf("taken back\n");
 	driver_log("taken-back");
 	driver_console_dump();
-	cursor = 0;
-	driver_read(&cursor);
+	driver_take();
 	return (0);
 }
 
-/* A parked ring that wraps: taking it back says how many records were lost, then the rest. */
+/*
+ * Two readers on one log (docs/design-stopgap.md, "The console"): the console's take starts
+ * where the early console stopped, however often the UART is mapped, and loses no line and
+ * shows none twice, while another reader from the start sees every line, also when it reads
+ * ahead of the console. Neither that reader nor one whose window stops short of the newest
+ * record moves the shared position, so taking the log back writes only "parked".
+ */
+static int
+driver_readers(void)
+{
+	uint64_t other = 0, short_window = 0;
+	char text[501];
+
+	memset(text, 'l', sizeof(text) - 1);
+	text[sizeof(text) - 1] = '\0';
+	driver_log("boot-one");
+	driver_log("boot-two");
+	driver_console_dump();
+	erx_debug_log_hand_to_console();
+	driver_log("after-one");
+	driver_read_as("other", &other, 2 * ERX_LOG_RECORD_MAX);
+	erx_debug_log_hand_to_console();
+	driver_log("after-two");
+	driver_read_as("other", &other, 2 * ERX_LOG_RECORD_MAX);
+	driver_take();
+	for (int index = 0; index < 4; index++)
+		driver_log(text);
+	driver_read_as("short", &short_window, ERX_LOG_RECORD_MAX);
+	driver_take();
+	driver_log("parked");
+	driver_read_as("other", &other, 2 * ERX_LOG_RECORD_MAX);
+	driver_console_dump();
+	printf("taken back\n");
+	erx_debug_log_take_back();
+	driver_console_dump();
+	return (0);
+}
+
+/*
+ * A parked ring that wraps: taking it back says how many records were lost, then the rest,
+ * and a reader from the start is told the same loss.
+ */
 static int
 driver_wrap(void)
 {
+	uint64_t cursor = 0;
 	char text[401];
 
 	memset(text, 'w', sizeof(text) - 1);
 	text[sizeof(text) - 1] = '\0';
-	erx_debug_log_hand_to_reader();
+	erx_debug_log_hand_to_console();
 	for (int index = 0; index < 400; index++)
 		driver_log(text);
 	erx_debug_log_take_back();
 	driver_console_dump();
+	driver_read_as("reader", &cursor, ERX_LOG_RECORD_MAX);
 	return (0);
 }
 
@@ -288,5 +357,7 @@ main(int argc, char **argv)
 		return (driver_handoff());
 	if (strcmp(name, "wrap") == 0)
 		return (driver_wrap());
+	if (strcmp(name, "readers") == 0)
+		return (driver_readers());
 	return (2);
 }

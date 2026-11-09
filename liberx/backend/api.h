@@ -173,8 +173,9 @@ int	erx_entropy_read(uint32_t len) ERX_WARN_UNUSED_RESULT;
 int	erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags) ERX_WARN_UNUSED_RESULT;
 
 /*
- * What one erx_log_read did: where the next read starts, how many records were overwritten
- * before anyone read them, and how many bytes at the window's start are whole records.
+ * What one erx_log_read or erx_log_take did: where the next read starts, how many records
+ * between where it started and the ring's oldest were overwritten, and how many bytes at the
+ * window's start are whole records.
  */
 typedef struct erx_log_read_result {
 	uint64_t	next_cursor;
@@ -183,16 +184,27 @@ typedef struct erx_log_read_result {
 } erx_log_read_result_t;
 
 /*
- * The kernel log's reader (docs/design-stopgap.md, "The console"): copies whole records that
- * nobody has taken, from cursor on, into the window of size bytes, which holds at least
- * ERX_LOG_RECORD_MAX, and counts them as taken. Every read moves the one position of what
- * has been taken, the console's too, so a record leaves exactly once and the log has one
- * reader, the system domain's console. The window is the caller's own memory, which the
- * service writes in place, so natively only the root reads; a task is ERX_ENOTSUP. A short
- * window, or a cursor past what has been taken, is ERX_EINVAL. res is ignored.
+ * The kernel log has two reads (docs/design-stopgap.md, "The console"). Each copies whole
+ * records into the window of size bytes, which holds at least ERX_LOG_RECORD_MAX. The window
+ * is the caller's own memory, which the service writes in place, so natively only the root
+ * reads; a task is ERX_ENOTSUP. A short window is ERX_EINVAL. res is ignored.
+ *
+ * erx_log_read copies from the caller's cursor and changes nothing anyone else sees. A
+ * cursor older than the ring's oldest record, 0 once the ring has wrapped, starts at the
+ * oldest and is told how many records it lost. A cursor at the end, the number the next
+ * record will get, copies nothing, and one past it is ERX_EINVAL. When hosted, a read from 0
+ * also returns the records standard error has already shown.
+ *
+ * erx_log_take is the console's read, the one that writes the log on the line: it copies the
+ * records that neither the early console nor an earlier take had, and counts them as taken,
+ * so the console shows each line once and loses none across the handoff. While the early
+ * console writes every record, before the handoff, once the machine's end takes the log
+ * back and always when hosted, a take copies nothing.
  */
 int	erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size,
 	    erx_log_read_result_t *result) ERX_WARN_UNUSED_RESULT;
+int	erx_log_take(uint64_t res, void *window, uint64_t size, erx_log_read_result_t *result)
+	    ERX_WARN_UNUSED_RESULT;
 
 /*
  * A kernel object's report (docs/design-stopgap.md, "Reporting kernel objects"): writes

@@ -12,6 +12,9 @@
  *   flood:THREADS:LINES  LINES full lines on each of THREADS threads, each
  *                   printing its statuses' sum at the end
  *   sleep:MS        sleep
+ *   read:CURSOR     erx_log_read from CURSOR: "read STATUS lost N", then "read LINE"
+ *                   for each record
+ *   take            erx_log_take: "take STATUS lost N", then "take LINE" for each
  *
  * The log's lines go to standard error, which the test reads.
  */
@@ -24,6 +27,8 @@
 #include <time.h>
 
 #include "erx/abi.h"
+#include "erx/log.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/hosted/log.h"
 #include "liberx/generated/calls.h"
 
@@ -35,6 +40,7 @@ static void *flood_thread(void *);
 static void flood(const char *);
 static void log_bytes(const char *);
 static erx_status_t put_and_log(const uint8_t *, size_t);
+static void read_log(const char *, const char *);
 
 static long flood_lines;
 
@@ -120,6 +126,31 @@ flood(const char *spec)
 	printf("flood failures %ld\n", total);
 }
 
+/* One erx_log_read from cursor, or an erx_log_take when cursor is NULL, printed as op's lines. */
+static void
+read_log(const char *op, const char *cursor)
+{
+	static uint8_t window[2 * ERX_LOG_RECORD_MAX];
+	static char text[ERX_LOG_TEXT_MAX], line[ERX_LOG_LINE_MAX + 1];
+	erx_log_read_result_t result = { 0 };
+	erx_log_view_t view;
+	size_t offset = 0;
+	int status;
+
+	if (cursor == NULL)
+		status = erx_log_take(0, window, sizeof(window), &result);
+	else
+		status = erx_log_read(0, strtoull(cursor, NULL, 10), window, sizeof(window), &result);
+	printf("%s %d lost %" PRIu64 "\n", op, status, result.lost);
+	if (status != ERX_OK || result.written > sizeof(window))
+		return;
+	while (erx_log_next_record(window, (size_t)result.written, &offset, text, &view) ==
+	    ERX_LOG_NEXT_RECORD) {
+		line[erx_log_render(&view, line, ERX_LOG_LINE_MAX)] = '\0';
+		printf("%s %s", op, line);
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -140,6 +171,10 @@ main(int argc, char **argv)
 			pause.tv_sec = milliseconds / 1000;
 			pause.tv_nsec = (milliseconds % 1000) * 1000000;
 			nanosleep(&pause, NULL);
+		} else if (strncmp(argv[index], "read:", 5) == 0) {
+			read_log("read", argv[index] + 5);
+		} else if (strcmp(argv[index], "take") == 0) {
+			read_log("take", NULL);
 		} else {
 			return (2);
 		}

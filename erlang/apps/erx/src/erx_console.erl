@@ -34,13 +34,15 @@
 %%                    {erx_console_size, Columns, Rows}, when the line's size changes
 %%                    erx_console_eof, after every byte read before the end
 %%
-%% The console is also the kernel log's one reader (docs/design-live.md, "The console";
-%% docs/design-stopgap.md, "The console"). Every LOG_POLL_MS it takes the records nobody has
-%% taken, each as the line the log core rendered with every byte of its text escaped, and
-%% sends each to the driver whole, ending in CR-LF, between whatever else is written. A log
-%% line can therefore land inside a program's line or an edited prompt, as a kernel message
-%% does on a Unix serial console. Until the root hands the log to this reader, the root
-%% writes each record to the line itself and a read finds nothing.
+%% The console is also the reader that writes the kernel log on the line (docs/design-live.md,
+%% "The console"; docs/design-stopgap.md, "The console"). Every LOG_POLL_MS it takes the
+%% records nobody has taken, each as the line the log core rendered with every byte of its
+%% text escaped, and sends each to the driver whole, ending in CR-LF, between whatever else
+%% is written. A log line can therefore land inside a program's line or an edited prompt, as
+%% a kernel message does on a UNIX serial console. Until the root hands the log to the
+%% console, the root writes each record to the line itself and takes it, so a take finds
+%% nothing and no line is written twice. Other readers of the log read from cursors of their
+%% own and take nothing from the console.
 %%
 %% It is the log sink's end too: the system domain's erx_log_h sends it each log event as a
 %% record, {log, Level, Text}, and erx_console_log decides whether to take it and renders its
@@ -86,8 +88,6 @@
                 %% Whether the input has ended: each group that gets the input from then
                 %% on is told so.
                 input_ended = false :: boolean(),
-                %% Where the next read of the kernel log starts.
-                log_cursor = 0 :: non_neg_integer(),
                 %% Each domain's log records this second, and those dropped.
                 log_records = erx_console_log:new() :: erx_console_log:state(),
                 %% The start of a character whose other bytes have not been read yet.
@@ -249,18 +249,18 @@ handle_info({erx_console_size, Columns, Rows}, State = #state{tty = TTY})
                           size = {Columns, Rows}}};
 handle_info({erx_console_size, _Columns, _Rows}, State) ->
     {noreply, State};
-handle_info(erx_log_poll, State = #state{driver = Driver, log_cursor = Cursor}) ->
-    case erx_log:read(Cursor) of
-        {Whole, Next, Lost, Lines} ->
+handle_info(erx_log_poll, State = #state{driver = Driver}) ->
+    case erx_log:take() of
+        {Whole, _Next, Lost, Lines} ->
             Notes = [<<"erx_console: ", (integer_to_binary(Lost))/binary, " kernel log records lost\n">>
                      || Lost > 0],
             Broken = [<<"erx_console: a kernel log record failed its checks\n">> || Whole =:= corrupt],
             lists:foreach(fun(Line) -> Driver ! {erx_console_output, none, log_line(Line)} end,
                           Notes ++ Lines ++ Broken),
             erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
-            {noreply, State#state{log_cursor = Next}};
+            {noreply, State};
         {error, Status} ->
-            Line = <<"erx_console: the kernel log refused a read: ", (integer_to_binary(Status))/binary, "\n">>,
+            Line = <<"erx_console: the kernel log refused a take: ", (integer_to_binary(Status))/binary, "\n">>,
             Driver ! {erx_console_output, none, log_line(Line)},
             erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
             {noreply, State}

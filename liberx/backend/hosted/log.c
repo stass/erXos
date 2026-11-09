@@ -34,6 +34,7 @@
 #include "liberx/backend/hosted/log.h"
 
 static void erx_hosted_log_sink(const char *, size_t);
+static int erx_hosted_log_result(const erx_log_copy_result_t *, erx_log_read_result_t *);
 
 static pthread_mutex_t erx_hosted_log_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -198,10 +199,21 @@ erx_hosted_debug_log(erx_utcb_length_t len)
 }
 
 /*
- * erx_log_read: the process is one space, so the window is the caller's own and the core
- * reads straight into it. Nothing here hands the log to a reader, so standard error takes
- * every record as it is written and a read finds nothing.
+ * erx_log_read and erx_log_take: the process is one space, so the window is the caller's
+ * own and the core reads straight into it. Nothing here hands the log to the console, so
+ * standard error takes every record as it is written: a take finds nothing, and a read from
+ * 0 sees what standard error already showed, as dmesg does.
  */
+static int
+erx_hosted_log_result(const erx_log_copy_result_t *copied, erx_log_read_result_t *result)
+{
+	if (copied->status != ERX_OK)
+		return (copied->status);
+	*result = (erx_log_read_result_t){ .next_cursor = copied->next_cursor, .lost = copied->lost,
+	    .written = copied->written };
+	return (ERX_OK);
+}
+
 int
 erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log_read_result_t *result)
 {
@@ -211,9 +223,17 @@ erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log
 	if (window == NULL || result == NULL)
 		return (ERX_EINVAL);
 	copied = erx_debug_log_read(cursor, window, (size_t)size);
-	if (copied.status != ERX_OK)
-		return (copied.status);
-	*result = (erx_log_read_result_t){ .next_cursor = copied.next_cursor, .lost = copied.lost,
-	    .written = copied.written };
-	return (ERX_OK);
+	return (erx_hosted_log_result(&copied, result));
+}
+
+int
+erx_log_take(uint64_t res, void *window, uint64_t size, erx_log_read_result_t *result)
+{
+	erx_log_copy_result_t copied;
+
+	(void)res;
+	if (window == NULL || result == NULL)
+		return (ERX_EINVAL);
+	copied = erx_debug_log_take(window, (size_t)size);
+	return (erx_hosted_log_result(&copied, result));
 }

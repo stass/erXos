@@ -92,7 +92,10 @@ static uint64_t service_cpus_online(void);
 static const char *service_thread_table_init(void);
 static int service_debug_log(uint32_t, const erx_fiasco_debug_log_request_t *);
 static int service_task_write(uint32_t, const erx_fiasco_task_write_request_t *);
+static bool	service_log_window_valid(uint64_t, uint64_t);
+static int service_log_reply(const erx_log_copy_result_t *, erx_fiasco_reply_t *);
 static int service_log_read(uint32_t, const erx_fiasco_log_read_request_t *, erx_fiasco_reply_t *);
+static int service_log_take(uint32_t, const erx_fiasco_log_take_request_t *, erx_fiasco_reply_t *);
 static int service_object_info(uint32_t, const erx_fiasco_object_info_request_t *);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
@@ -328,6 +331,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (service_task_write(decoded->task, words));
 	case ERX_FIASCO_CALL_LOG_READ:
 		return (service_log_read(decoded->task, words, reply));
+	case ERX_FIASCO_CALL_LOG_TAKE:
+		return (service_log_take(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_OBJECT_INFO:
 		return (service_object_info(decoded->task, words));
 	case ERX_FIASCO_CALL_THREAD_CREATE:
@@ -444,10 +449,29 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 }
 
 /*
- * erx_log_read (docs/design-stopgap.md, "The console"). The window is an address in the root,
- * whose address space the service shares, so it is written in place and a task's read, whose
- * address would name its own space, is refused.
+ * erx_log_read and erx_log_take (docs/design-stopgap.md, "The console"). The window is an
+ * address in the root, whose address space the service shares, so it is written in place
+ * and a task's read, whose address would name its own space, is refused.
  */
+static bool
+service_log_window_valid(uint64_t window, uint64_t size)
+{
+	return (window != 0 && size <= UINT64_MAX - window);
+}
+
+/* The reply's three words: the next cursor, the records lost and the bytes written. */
+static int
+service_log_reply(const erx_log_copy_result_t *copied, erx_fiasco_reply_t *reply)
+{
+	if (copied->status != ERX_OK)
+		return (copied->status);
+	reply->first = copied->next_cursor;
+	reply->second = copied->lost;
+	reply->third = copied->written;
+	return (ERX_OK);
+}
+
+/* Any reader of the root but the console: a copy from the caller's own cursor. */
 static int
 service_log_read(uint32_t task, const erx_fiasco_log_read_request_t *request, erx_fiasco_reply_t *reply)
 {
@@ -455,15 +479,24 @@ service_log_read(uint32_t task, const erx_fiasco_log_read_request_t *request, er
 
 	if (task != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
-	if (request->window == 0 || request->size > UINT64_MAX - request->window)
+	if (!service_log_window_valid(request->window, request->size))
 		return (ERX_EINVAL);
 	copied = erx_debug_log_read(request->cursor, (uint8_t *)(uintptr_t)request->window, (size_t)request->size);
-	if (copied.status != ERX_OK)
-		return (copied.status);
-	reply->first = copied.next_cursor;
-	reply->second = copied.lost;
-	reply->third = copied.written;
-	return (ERX_OK);
+	return (service_log_reply(&copied, reply));
+}
+
+/* The console's read: what neither the early console nor an earlier take had. */
+static int
+service_log_take(uint32_t task, const erx_fiasco_log_take_request_t *request, erx_fiasco_reply_t *reply)
+{
+	erx_log_copy_result_t copied;
+
+	if (task != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
+	if (!service_log_window_valid(request->window, request->size))
+		return (ERX_EINVAL);
+	copied = erx_debug_log_take((uint8_t *)(uintptr_t)request->window, (size_t)request->size);
+	return (service_log_reply(&copied, reply));
 }
 
 /*

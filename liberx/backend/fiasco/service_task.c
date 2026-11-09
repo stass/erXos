@@ -701,7 +701,7 @@ erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical
 		return (status);
 	status = erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_physical, request, mem);
 	if (status == ERX_OK && console_base != 0 && request->base == console_base)
-		erx_debug_log_hand_to_reader();
+		erx_debug_log_hand_to_console();
 	return (status);
 }
 
