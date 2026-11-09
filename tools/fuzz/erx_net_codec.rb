@@ -10,7 +10,7 @@ require_relative '../lib/erx/generated'
 
 # The fuzz targets of the network stack's codecs (docs/design-network-stack.md,
 # "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire, erx_ip4_wire, erx_icmp4_wire,
-# erx_udp_wire, erx_ip6_wire and erx_icmp6_wire, each driven by test/erlang/MODULE_fuzz.erl,
+# erx_udp_wire, erx_ip6_wire, erx_icmp6_wire and erx_tcp_wire, each driven by test/erlang/MODULE_fuzz.erl,
 # compiled from source with the host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
 # oracle's). Each target runs its decoder as it is, then a copy with one seeded fault that
@@ -56,7 +56,11 @@ module ErxNetCodecFuzz
     'icmp6' => Target.new(module_name: 'erx_icmp6_wire',
                           exact: '_Overrun -> {error, bad_option}',
                           faulty: 'Overrun -> nd_options(<<>>, Seen + 1, nd_option(Type, Len, Overrun, Opts))',
-                          fault: 'accepting a neighbour-discovery option past the end of the message')
+                          fault: 'accepting a neighbour-discovery option past the end of the message'),
+    'tcp' => Target.new(module_name: 'erx_tcp_wire',
+                        exact: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off < ?TCP_HDR_WORDS; Off * 4 > byte_size(Segment) ->',
+                        faulty: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off * 4 > byte_size(Segment) ->',
+                        fault: 'accepting a data offset below 5')
   }.freeze
 
   module_function

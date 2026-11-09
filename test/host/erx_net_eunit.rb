@@ -44,7 +44,8 @@ module ErxNetEunit
                                        '-eval', "halt(case eunit:test(#{list}, []) of ok -> 0; _ -> 1 end).",
                                        chdir: work, stdin_data: '')
       assert status.success?, output
-      assert_match(/All \d+ tests passed|Test passed/, output)
+      # EUnit words a run of exactly two tests "2 tests passed.", without "All".
+      assert_match(/All \d+ tests passed|^\s*2 tests passed|Test passed/, output)
     end
   end
 

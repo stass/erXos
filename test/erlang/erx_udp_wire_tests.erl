@@ -19,17 +19,17 @@ pseudo(Len) -> erx_ip4_wire:pseudo_sum(?SRC, ?DST, Len, 17).
 known_datagram_test() ->
     Datagram = <<0, 1, 0, 2, 0, 8, 16#EB, 16#D8>>,
     ?assertEqual({ok, #udp{sport = 1, dport = 2}, <<>>}, erx_udp_wire:decode(inet, pseudo(8), Datagram)),
-    ?assertEqual(Datagram, iolist_to_binary(erx_udp_wire:encode(#udp{sport = 1, dport = 2}, <<>>, pseudo(8)))).
+    ?assertEqual(Datagram, iolist_to_binary(erx_udp_wire:encode(#udp{sport = 1, dport = 2}, <<>>, pseudo(0)))).
 
 %% IPv4 delivers more bytes than the UDP length: udp_input cuts them and sums the
 %% pseudo-header with the UDP length, while the caller summed it over what it delivered.
 trailing_bytes_test() ->
-    Datagram = iolist_to_binary(erx_udp_wire:encode(#udp{sport = 53, dport = 5353}, <<"abc">>, pseudo(11))),
+    Datagram = iolist_to_binary(erx_udp_wire:encode(#udp{sport = 53, dport = 5353}, <<"abc">>, pseudo(0))),
     ?assertEqual({ok, #udp{sport = 53, dport = 5353}, <<"abc">>},
                  erx_udp_wire:decode(inet, pseudo(15), <<Datagram/binary, 1, 2, 3, 4>>)).
 
 refusals_test() ->
-    Good = iolist_to_binary(erx_udp_wire:encode(#udp{sport = 1, dport = 2}, <<"x">>, pseudo(9))),
+    Good = iolist_to_binary(erx_udp_wire:encode(#udp{sport = 1, dport = 2}, <<"x">>, pseudo(0))),
     <<Ports:4/binary, _:16, Sum:16, X>> = Good,
     ?assertEqual({error, too_short}, erx_udp_wire:decode(inet, pseudo(7), binary:part(Good, 0, 7))),
     ?assertEqual({error, too_short}, erx_udp_wire:decode(inet, 0, foo)),
@@ -45,7 +45,7 @@ refusals_test() ->
 %% Over IPv6 the UDP length must be the payload length and a checksum must be present; both
 %% are refused before the sum is read.
 ip6_rules_test() ->
-    Good = iolist_to_binary(erx_udp_wire:encode(#udp{sport = 1, dport = 2}, <<"x">>, pseudo(9))),
+    Good = iolist_to_binary(erx_udp_wire:encode(#udp{sport = 1, dport = 2}, <<"x">>, pseudo(0))),
     <<Head:6/binary, _:16, X>> = Good,
     ?assertEqual({error, bad_len}, erx_udp_wire:decode(inet6, 0, <<Good/binary, 0>>)),
     ?assertEqual({error, no_sum}, erx_udp_wire:decode(inet6, 0, <<Head/binary, 0:16, X>>)),

@@ -45,3 +45,11 @@ module erx_icmp4_wire
 module erx_udp_wire
   sys/netinet/udp_usrreq.c udp_input
   sys/netinet6/udp6_usrreq.c udp6_input
+
+module erx_tcp_seq
+  sys/netinet/tcp_seq.h SEQ_LT SEQ_LEQ SEQ_GT SEQ_GEQ
+
+module erx_tcp_wire
+  sys/netinet/tcp.h __tcp_get_flags __tcp_set_flags
+  sys/netinet/tcp_input.c tcp_input_with_port tcp_dooptions
+  sys/netinet/tcp_output.c tcp_addoptions

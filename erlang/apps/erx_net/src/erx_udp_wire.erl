@@ -167,8 +167,11 @@ dest_port(Udp, Payload) -> {ok, Udp, Payload}.
 
 -doc """
 Encodes a datagram carrying Payload, with `PseudoSum` the partial sum of its pseudo-header
-over the datagram's length, 8 bytes more than the payload's. The checksum is always sent, as
-FreeBSD's default `udp_cksum` sends it, and a computed zero goes out as 16#ffff (RFC 768).
+with the length field zero, as every encoder above IP takes it (`erx_tcp_wire:encode/3`):
+the encoder adds the datagram's length, one 16-bit word of either pseudo-header, in place
+of the zero checksum field, which adds nothing, so a sum covers at most 65535 bytes. The
+checksum is always sent, as FreeBSD's default `udp_cksum` sends it, and a computed zero goes
+out as 16#ffff (RFC 768).
 Raises `badarg` for a datagram over 65535 bytes, since the stack encodes only records it
 built.
 """.
@@ -177,7 +180,7 @@ encode(#udp{sport = Sport, dport = Dport}, Payload, PseudoSum) ->
     Len = ?UDP_HDR_LEN + iolist_size(Payload),
     Len =< ?MAX_DATAGRAM orelse erlang:error(badarg),
     Header = <<Sport:16, Dport:16, Len:16>>,
-    Computed = bnot erx_bytes:inet_csum(PseudoSum, [Header, <<0:16>>, Payload]) band 16#ffff,
+    Computed = bnot erx_bytes:inet_csum(PseudoSum, [<<Len:16>>, Header, Payload]) band 16#ffff,
     [Header, <<(nonzero(Computed)):16>>, Payload].
 
 nonzero(0) -> 16#ffff;

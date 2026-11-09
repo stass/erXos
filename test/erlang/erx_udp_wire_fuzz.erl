@@ -54,7 +54,7 @@ check({Family, Bytes}) ->
     end.
 
 round_trip(Family, Udp, Payload) ->
-    Encoded = iolist_to_binary(erx_udp_wire:encode(Udp, Payload, pseudo(Family, 8 + byte_size(Payload)))),
+    Encoded = iolist_to_binary(erx_udp_wire:encode(Udp, Payload, pseudo(Family, 0))),
     case erx_udp_wire:decode(Family, pseudo(Family, byte_size(Encoded)), Encoded) of
         {ok, Udp, Payload} -> ok;
         Other -> fail(round_trip_differs, {Family, Udp, Payload, Encoded, Other})

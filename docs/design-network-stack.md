@@ -436,7 +436,10 @@ checksum, which RFC 768 allows. The UDP decoder takes the IP version
 and applies the rules that differ by it: over IPv4 the bytes past the
 UDP length are cut off and a zero checksum field means none, as in
 `udp_input`; over IPv6 the UDP length must equal the payload length and
-the checksum field must be nonzero, as in `udp6_input`.
+the checksum field must be nonzero, as in `udp6_input`. The encoders
+take the pseudo-header's partial sum with its length field zero and add
+the length themselves, since only an encoder knows its segment's length
+before it encodes; the length is one 16-bit word of either pseudo-header.
 
 Inside a connection, sequence numbers, acknowledgement numbers, SACK
 block edges and timestamps are **unwrapped**: unbounded integers that
@@ -1252,7 +1255,7 @@ modules are marked P; process modules E.
 | `erx_net_addr` | `in.c`, `in6.c` | address checks | P |
 | `erx_net_route` | none | longest-prefix lookup | P |
 | `erx_udp_wire`, `erx_udp` | `udp_usrreq.c`, `udp6_usrreq.c` | UDP codec, with the checksum and length rules of each IP version; decisions | P |
-| `erx_tcp_wire` | `tcp.h`, the checksum of `tcp_input_with_port` (`tcp_input.c:640-748`), `tcp_dooptions` (`tcp_input.c:3501`), `tcp_addoptions` (`tcp_output.c:1794`) | TCP codec, checksum first, and options | P |
+| `erx_tcp_wire` | `tcp.h`, the checksum and data-offset checks of `tcp_input_with_port` (`tcp_input.c:640-756`), `tcp_dooptions` (`tcp_input.c:3501`), `tcp_addoptions` (`tcp_output.c:1794`) | TCP codec, checksum first, and options | P |
 | `erx_tcp_seq` | `tcp_seq.h` | lifting and wire conversion | P |
 | `erx_tcp` | `tcp_input_with_port` (`tcp_input.c:594`), per connection | the step: dispatch and output | P |
 | `erx_tcp_input` | `tcp_do_segment` (`tcp_input.c:1511`) | the segment pipeline | P |
@@ -2168,9 +2171,11 @@ behind the same processes, with no change to the core's structure:
 **Outside the stack,** later, behind its seams: RACK-TLP as a loss
 module, deferred by the owner's decision; BBR as a congestion module,
 with pacing in output; DCTCP as a congestion module over the ECN signal;
-and TCP Fast Open (`tcp_fastopen.c`). None of them is designed here, and
-none needs a change outside the seams it plugs into, except pacing,
-which BBR brings.
+TCP Fast Open (`tcp_fastopen.c`); and TCP-MD5 signatures (RFC 2385),
+whose option `erx_tcp_wire` records so that the syncache refuses a signed
+segment as FreeBSD refuses it for a listener without TCP-MD5 (`syncache_add`, `syncache_expand`).
+None of them is designed here, and none needs a change outside the seams
+it plugs into, except pacing, which BBR brings.
 
 ## Decisions
 
