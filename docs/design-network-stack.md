@@ -1174,8 +1174,16 @@ packet-too-big.
 `erx_nd6` translates `nd6.c` and `nd6_nbr.c`: the neighbour cache's
 states with unreachability detection, neighbour solicitations and
 advertisements accepted only with a hop limit of 255 (RFC 4861),
-duplicate address detection, and 16 frames held per unresolved
-neighbour. `erx_nd6_rtr` translates `nd6_rtr.c` and `in6_ifattach.c`:
+and 16 frames held per unresolved neighbour; a solicitation or
+advertisement about a tentative address goes to `erx_nd6_dad`, which
+translates the detection of `nd6_nbr.c` (RFC 4862 with RFC 7527's
+nonces): one probe after the random delay below, a decision one
+retransmission interval later, and more probes while only the
+interface's own probes come back. Like FreeBSD it decides at the end of
+the probes, not at the first answer. The interface stops the detection
+of an address it removes and, as RFC 4862 5.4 asks, of every tentative
+address when its link goes down, and starts them again when it comes up.
+`erx_nd6_rtr` translates `nd6_rtr.c` and `in6_ifattach.c`:
 router solicitations, router advertisements, the default-router and
 prefix lists with their lifetimes, and stateless address
 autoconfiguration (RFC 4862). The interface joins the all-nodes and
@@ -1328,7 +1336,7 @@ modules are marked P; process modules E.
 | `erx_ip6_wire`, `erx_ip6` | `ip6_input.c`, `ip6_output.c`, `dest6.c`, `route6.c`, `scope6.c`, `ip6_id.c`, the fragment-header checks of `frag6.c` | IPv6 codec with the extension-header walk; decisions | P |
 | `erx_ip6_reass` | `frag6.c` | IPv6 reassembly | P |
 | `erx_icmp6_wire`, `erx_icmp6` | `icmp6.c`, the option parsers of `nd6.c` and the option lengths `nd6_rtr.c` checks | ICMPv6 and neighbour-discovery codec; decisions | P |
-| `erx_nd6`, `erx_nd6_rtr` | `nd6.c`, `nd6_nbr.c`, `nd6_rtr.c`, `in6_ifattach.c` | neighbour cache, DAD; routers, prefixes, autoconfiguration | P |
+| `erx_nd6`, `erx_nd6_dad`, `erx_nd6_rtr` | `nd6.c`, `nd6_nbr.c`, `in6.c`, `nd6_rtr.c`, `in6_ifattach.c` | neighbour cache; DAD; routers, prefixes, autoconfiguration | P |
 | `erx_in6_src` | `in6_src.c` | source address selection | P |
 | `erx_net_addr` | `in.c`, `in6.c` | address checks | P |
 | `erx_net_route` | none | longest-prefix lookup | P |

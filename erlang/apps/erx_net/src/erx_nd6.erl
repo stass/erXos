@@ -78,7 +78,7 @@ address makes no entry, where FreeBSD makes one with neither an address nor a ti
 lasts until the interface goes. A neighbour advertisement whose router flag clears a
 neighbour's produces `not_router` for `erx_nd6_rtr`, which owns the default-router list
 (`defrouter_remove`). Proxy and static entries and CARP are not kept: the stack has no
-command that makes them. Duplicate address detection is not this module's: a solicitation
+command that makes them. Duplicate address detection is `erx_nd6_dad`'s: a solicitation
 or advertisement for a tentative address of the interface is handed on as a `dad` action.
 
 Time is milliseconds of the monotonic clock. Addresses are binaries: sixteen bytes for

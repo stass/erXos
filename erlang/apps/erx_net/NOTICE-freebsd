@@ -139,3 +139,7 @@ module erx_tcp_ecn
 
 module erx_lltable
   sys/net/if_llatbl.c lltable_append_entry_queue
+
+module erx_nd6_dad
+  sys/netinet6/nd6_nbr.c nd6_dad_start nd6_dad_stop nd6_dad_timer nd6_dad_find nd6_dad_ns_output nd6_dad_ns_input nd6_dad_na_input
+  sys/netinet6/in6.c in6_broadcast_ifa
