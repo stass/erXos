@@ -48,6 +48,14 @@ module Erx
       test/oracle/common_test
       test/shell/rc/plan9port
     ].freeze
+    # Git submodules: upstream trees pinned by the commit the superproject
+    # records, whose text is not erXos's and is not scanned. Each records its
+    # origin in an ORIGIN.md in the directory that holds it, outside the
+    # submodule, which the check requires. Any other nested repository is
+    # refused.
+    SUBMODULES = %w[
+      display/lvgl/lvgl
+    ].freeze
     LISTING_BYTES = 64 * 1024 * 1024
     LISTING_DEADLINE = 120
     LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/
@@ -109,12 +117,13 @@ module Erx
     # generators: what Generated.ensure computes the generated tree with,
     # whose files the chokepoint rules read beside the listed ones.
     def initialize(root:, runner:, required_imports: IMPORTS, chokepoints: ChokepointRules::ALL,
-                   generators: Generated::GENERATORS)
+                   generators: Generated::GENERATORS, submodules: SUBMODULES)
       @root = File.expand_path(root)
       @runner = runner
       @required_imports = required_imports
       @chokepoints = chokepoints
       @generators = generators
+      @submodules = submodules
     end
 
     def run
@@ -126,7 +135,13 @@ module Erx
         end
         Origin.new(root: path).check
       end
-      listed = project_files
+      @submodules.each do |relative|
+        marker = File.join(@root, File.dirname(relative), 'ORIGIN.md')
+        next if File.file?(marker) && !File.symlink?(marker)
+
+        raise Error, "missing submodule provenance: #{File.dirname(relative)}/ORIGIN.md"
+      end
+      listed = project_files.reject { |name| @submodules.include?(name) }
       listed_set = listed.to_set
       own_sources = listed.reject { |relative| imported?(relative) }
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }

@@ -508,7 +508,12 @@ The bootstrap builds stock native OTP 29.1.2 with the JIT, offline, from
 the archive the fetch verified. To rebuild it, run
 `tools/erx oracle build --backend native --flavour jit --clean`. The
 modified dependencies live in `otp/`, `musl/` and `fiasco/`, each with
-its recorded origin.
+its recorded origin. LVGL is the git submodule `display/lvgl/lvgl`,
+cloned from erXos's fork at the commit its gitlink records
+(`display/lvgl/ORIGIN.md` says where it comes from): `make fetch` clones
+it, without history, when it is not checked out, and `git submodule update --init display/lvgl/lvgl` does
+the same by hand; `git clone --recurse-submodules` fetches it with the
+tree.
 
 `make check` is the everyday gate. It verifies the oracle runtime, the
 source provenance and the ASCII rule. It generates every

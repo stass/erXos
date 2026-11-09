@@ -40,9 +40,9 @@ class ChecksTest < Minitest::Test
   # they are checked against the active chokepoint rules alone.
   # The fixture checkouts hold no generator inputs, so by default their
   # generated tree is computed by no generator and holds no file.
-  def checks(imports: [], root: @root, generators: [])
+  def checks(imports: [], root: @root, generators: [], submodules: [])
     Erx::Checks.new(root: root, runner: @runner, required_imports: imports,
-                    chokepoints: Erx::ChokepointRules::ACTIVE, generators: generators)
+                    chokepoints: Erx::ChokepointRules::ACTIVE, generators: generators, submodules: submodules)
   end
 
   # The source check runs the chokepoint rules over the git listing, so an
@@ -216,6 +216,27 @@ class ChecksTest < Minitest::Test
     error = assert_raises(Erx::Error) { checks.run }
     assert_equal 'listed directory (a nested repository, a submodule, or a tracked file replaced by a directory) ' \
                  'is unsupported in the source tree: vendor/clone', error.message
+  end
+
+  # A declared submodule's upstream text is not scanned, once the directory
+  # holding it records its origin. Only its gitlink is accepted: the same
+  # repository untracked, listed with a trailing slash, is still refused.
+  def test_declared_submodule_is_not_scanned_and_needs_its_origin
+    nested = File.join(@root, 'vendor/clone')
+    FileUtils.mkdir_p(nested)
+    git_in(@directory, 'init', '-q', nested)
+    File.binwrite(File.join(nested, 'upstream.c'), "/* \xc3\xa9 */\n".b)
+    write('vendor/ORIGIN.md', "# Source origin\n")
+    error = assert_raises(Erx::Error) { checks(submodules: ['vendor/clone']).run }
+    assert_match(/unsupported in the source tree: vendor\/clone\z/, error.message)
+    git_in(nested, 'add', 'upstream.c')
+    git_in(nested, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'upstream')
+    git('add', 'vendor/clone')
+    File.unlink(File.join(@root, 'vendor/ORIGIN.md'))
+    error = assert_raises(Erx::Error) { checks(submodules: ['vendor/clone']).run }
+    assert_equal 'missing submodule provenance: vendor/ORIGIN.md', error.message
+    write('vendor/ORIGIN.md', "# Source origin\n")
+    assert checks(submodules: ['vendor/clone']).run
   end
 
   # The case agent worktrees create: a linked worktree, whose .git is a file,

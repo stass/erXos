@@ -1,0 +1,3 @@
+[submodule "display/lvgl/lvgl"]
+	path = display/lvgl/lvgl
+	url = https://github.com/stass/lvgl

@@ -344,7 +344,15 @@ it; git history is the record of completed work.
   (3) The focus ring follows LVGL's group, which orders nodes by creation, not tree order as design-display.md
   "Kiosks and glasses" asks; rebuild the group at commit. (4) A status shows as `[timeout]` with no milliseconds and
   no reporter, unlike `erx_render`'s tokens (G7). (5) A text holding U+0000 is cut there by LVGL. (6) The Makefile
-  rebuilds LVGL's objects only when `lv_conf.h` changes, not when the compiler or the fetched pin does.
+  rebuilds LVGL's objects when `lv_conf.h` or a source or header they read changes, not when the compiler does.
+* [Medium] `display/lvgl/lvgl` (the fork submodule), `make check`: erXos's own patches committed on the fork are not
+  seen by `make check`'s ASCII and chokepoint scans, which skip the submodule as imported code; pending the owner's
+  decision on a CLAUDE.md rule for what those scans cover in a fork submodule.
+* [Low] `display/lvgl/ORIGIN.md`: nothing checks the commit it records against the superproject's gitlink.
+* [Low] `display/lvgl/Makefile`: `-I$(LVGL)` exposes the whole checkout, so a header at its root could shadow a system
+  header.
+* [Low] `display/lvgl/Makefile`: a `.c` file deleted on a fork branch stays in `liblvgl.a`.
+* [Low] `tools/lib/erx/lvgl.rb`: `git` duplicates `Checks.isolated_git_environment` instead of sharing it.
 * [High] `erx_wm_rio` (desktop, not built; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the
