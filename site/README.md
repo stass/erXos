@@ -144,9 +144,10 @@ progress bar on the case; checks the image and the disk against
 `boot.json`; and boots the image with 160 MiB of guest memory and one
 core (`RAM_MIB` and `CPU_CORES`, the one place to change each, from which
 the readout is built too), v64's page-tier JIT on, the kernel command
-line `erx.watchdog=1,30,600` and the disk as its virtio block device.
-The machine's serial console is attached to the terminal, and the status
-line follows boot milestones in the serial output. The case's
+line `erx.watchdog=1,30,600`, the disk as its virtio block device and a
+virtio network device (below). The machine's serial console is attached
+to the terminal, and the status line follows boot milestones in the
+serial output. The case's
 `data-erx-phase` (booting, live or stopped) colours the lamp and the
 status. Reset destroys the machine and boots the same image again without
 downloading it. Under reduced motion the cursor and the lamp do not
@@ -165,6 +166,68 @@ any disk is; the page does not parse it, it only places the published
 bytes at the extents `boot.json` lists, after checking that they are
 whole sectors, in order, apart, within the disk and use the bytes
 exactly.
+
+### The network
+
+The machine has a virtio-net device on v64's fake router, its `fetch`
+backend (`net_device: { type: "virtio", relay_url: "fetch" }`,
+`NET_DEVICE` in `terminal.js`). The router lives in the page: there is
+no relay server and no CORS proxy (`cors_proxy` is not set). erXos's own
+stack drives the device: the system domain's `erx_net`, through its
+`erx_virtio_net` driver, takes a DHCP lease from the router at boot,
+as it takes one from QEMU's user network. The demo is two shell commands:
+`ifconfig`, which shows the interface with the lease's address,
+192.168.86.100/24, and `ping 192.168.86.1`, which the router answers.
+
+What the router does, and so what the guest's network can do:
+
+* DHCP: one lease, always 192.168.86.100/24, router and name server
+  192.168.86.1.
+* ARP: the router answers for every address but 192.168.86.100 to .255,
+  so the guest reaches any address through it.
+* ICMP: the router answers every echo request itself, to any address
+  the guest can reach; nothing is sent further. A ping shows only that
+  erXos's stack and driver work, not that a host is reachable.
+* DNS: every name's A record is 192.168.87.1; other queries get an
+  empty answer.
+* HTTP: a TCP connection to port 80, at any address the guest can
+  reach, ends in the router; the request on it becomes a `fetch()` by
+  the page, to the URL the request's `Host` header and path name,
+  upgraded to `https:` when the page is served over HTTPS. That is any
+  host: the open Internet, the visitor's LAN, and, for a host named
+  `PORT.external`, the visitor's own `http://localhost:PORT`, under the
+  browser's limits on pages reaching local addresses. The browser's
+  CORS rules apply: the request is sent, but without a proxy its
+  response reaches the guest only from a server that allows the page's
+  origin by its `Access-Control-Allow-Origin`; otherwise the router
+  answers the guest with an error. Cross-origin fetches carry no
+  cookies (the default `credentials: "same-origin"`), and same-origin
+  ones only the site's own, of which GitHub Pages sets none.
+* Nothing else: no other TCP port, no UDP beyond DHCP, DNS, NTP and an
+  echo on port 8, no IPv6, and nothing in the page connects to the
+  guest.
+
+At boot the guest sends only DHCP and ARP; only what the visitor types
+makes it send more. So the network reaches nothing that a script typed
+into the visitor's own browser console could not.
+
+v64 has no setting for which virtio-mmio transport a device takes: it
+gives each the next one down from the last, the disks first and the
+network device after them. erXos's platform record, which the site's
+image shares with the QEMU harness (the production image, built from
+`config/platforms/qemu-virt.json` and the development manifest), puts the
+disk on the last transport, 0x0a003e00, and the network device on the
+last of the page below, 0x0a002e00 (interrupt 71), since a 4 KiB page
+holds eight transports and is one device's alone
+([design-stopgap.md](../docs/design-stopgap.md)). So `terminal.js` gives
+v64 the disk and then seven blank read-only disks of one sector, which
+fill the rest of the disk's 4 KiB page and which no erXos driver is
+given, and the network device lands on the transport the record names.
+`virtio_slots` in `terminal.js` models v64's placement rule, and
+`test/site/terminal_test.mjs` checks that it puts the disk and the
+network device on the record's transports and interrupts, the network
+device on a page of its own, and the blank disks where the record names
+no device.
 
 Every file `boot.json` names (the image, the disk, v64's module and
 core) must be an http or https URL on the page's own origin, or the boot
@@ -232,5 +295,7 @@ session and say so.
 * The footer links (Source, Architecture, Roadmap) point at `#` until the
   source repository has a public address; a TODO comment marks them.
 * The fault menu is checked under Node against a stand-in for v64, not
-  yet in a browser, and its disk entries wait for the machine's disk
-  (`TODO.md`, "Planned features").
+  yet in a browser (`TODO.md`, "Planned features").
+* The network's placement is checked under Node against v64's rule, and
+  no test in the tree boots the site's machine to see its lease
+  (`TODO.md`).

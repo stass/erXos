@@ -11,7 +11,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT }
+import { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT,
+         virtio_disks, virtio_slots, NET_DEVICE }
     from "../../site/terminal.js";
 
 const real_log = readFileSync(new URL("fixtures/boot-160m.log", import.meta.url), "latin1");
@@ -211,4 +212,41 @@ test("corrupt RAM flips bits only inside the parsed range", () => {
     const flipped = ram.reduce((list, byte, i) => (byte ? [...list, i + base] : list), []);
     assert.ok(flipped.length > 0);
     assert.ok(flipped.every(pa => pa >= 0x44000000 && pa <= 0x44000fff));
+});
+
+// The machine's devices against erXos's platform record: v64 places them by
+// its own rule (virtio_slots), and the page must make that rule put each on
+// the transport the record names, the network device on a page of its own.
+const platform = JSON.parse(readFileSync(new URL("../../config/platforms/qemu-virt.json", import.meta.url), "utf8"));
+const record = key => platform.units.find(unit => unit.key === key).devices[0];
+const page_of = address => Math.floor(address / 4096);
+
+test("the disk and the network device land on the transports the platform record names", () => {
+    const disks = virtio_disks({ stand_in: "the disk" });
+    const slots = virtio_slots(disks.length);
+    const named = ({ base, line }) => ({ base, intid: line });
+    const placed = ({ base, intid }) => ({ base, intid });
+    assert.deepEqual(placed(slots.disks[0]), named(record("block")));
+    assert.deepEqual(placed(slots.net), named(record("net")));
+});
+
+test("only the disk's blank fillers share its page, and the network device has its own", () => {
+    const disks = virtio_disks({ stand_in: "the disk" });
+    const { disks: disk_slots, net } = virtio_slots(disks.length);
+    assert.deepEqual(disks[0], { buffer: { stand_in: "the disk" } });
+    for(const { buffer, readonly } of disks.slice(1)) {
+        assert.equal(readonly, true);
+        assert.equal(buffer.byteLength, 512);
+    }
+    assert.ok(disk_slots.every(({ base }) => page_of(base) === page_of(record("block").base)));
+    assert.notEqual(page_of(net.base), page_of(record("block").base));
+    // A blank filler must never stand where the record names a device: no
+    // recorded device but the disk lies on the disk's page.
+    const recorded = platform.units.flatMap(unit => unit.devices);
+    assert.deepEqual(recorded.filter(({ base }) => page_of(base) === page_of(record("block").base)),
+                     [record("block")]);
+});
+
+test("the network device is virtio on v64's fake router, without a CORS proxy", () => {
+    assert.deepEqual({ ...NET_DEVICE }, { type: "virtio", relay_url: "fetch" });
 });

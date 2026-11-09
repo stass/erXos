@@ -1433,7 +1433,10 @@ and the manifest's unit says who holds it. A 4 KiB page holds eight transports a
 device's alone, since `erx_device` opens and maps a device's registers by the page and
 refuses a second device on an open page, so each role takes its own page: the disks the top
 page, `/virtio_mmio@a003e00` for the first and each next disk the transport below it, and
-the network device the page below, `/virtio_mmio@a002e00`. The production image suite checks each
+the network device the page below, `/virtio_mmio@a002e00`. The website's machine, v64,
+which boots the same image, has no setting for a device's transport, so `site/terminal.js`
+fills the rest of the disks' page with blank read-only disks and the network device falls
+on its transport ([site/README.md](../site/README.md#the-network)). The production image suite checks each
 path, base and line against QEMU's own device tree, as it checks every recorded path. The
 root reads no register to choose, since only `erx_device` touches a device's registers; the
 driver's first reads of the transport, its magic, version and device id, say whether its

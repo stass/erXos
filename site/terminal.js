@@ -4,8 +4,9 @@
 // The live console in the hero. Without JavaScript the window shows a
 // recorded session. With it, a "Boot erXos" button downloads v64 (an
 // AArch64 machine in WebAssembly) and the gzip-compressed erXos boot image,
-// boots the image with a disk attached, and attaches the machine's serial
-// console (the PL011, v64's serial0) to an xterm.js terminal.
+// boots the image with a disk and a network device attached, and attaches
+// the machine's serial console (the PL011, v64's serial0) to an xterm.js
+// terminal.
 //
 // Flow: boot.json (written by tools/build_site.rb, fetched past the cache)
 // names the image, its sizes and its SHA-256, the disk, and v64's module and core,
@@ -34,6 +35,49 @@ const MAX_DISK_BYTES = 2 ** 31;
 const SECTOR_BYTES = 512;
 // The disk holds what was written in chunks of this size.
 const DISK_CHUNK_BYTES = 1 << 16;
+
+// Where the machine's devices sit on its 32 virtio-mmio transports, which
+// erXos's platform record says (config/platforms/qemu-virt.json): the disk
+// on the last transport, the top page's, and the network device on the last
+// transport of the page below, since a 4 KiB page holds eight transports
+// and is one device's alone (docs/design-stopgap.md). v64 has no setting
+// for a device's transport: it gives each the next one down from the last,
+// the disks first and the network device after them, so on its own the
+// network device would take the disk's page. The disk is therefore
+// followed by blank read-only disks over the rest of its page, which the
+// platform record names no driver for, and the network device falls on the
+// transport the record names. virtio_slots models v64's placement rule;
+// only test/site/terminal_test.mjs uses it, to check the placement against
+// the platform record.
+const VIRTIO_MMIO = { base: 0x0a000000, size: 0x200, count: 32, first_spi: 16 };
+const NET_SLOT = 23;
+// The network device on v64's fake router (its "fetch" backend): DHCP gives
+// the guest 192.168.86.100, the router at 192.168.86.1 answers ARP, DNS and
+// ICMP echo itself, and an HTTP request to port 80 becomes a fetch() by this
+// page, to any host (a host named PORT.external is the visitor's own
+// localhost:PORT). No CORS proxy (cors_proxy) and no relay server: nothing
+// leaves the browser but those fetches, which the browser's rules govern.
+const NET_DEVICE = Object.freeze({ type: "virtio", relay_url: "fetch" });
+
+// The machine's virtio-blk disks, as v64's virtio_disks takes them: the
+// disk, then the blank ones that fill the rest of its page.
+function virtio_disks(disk) {
+    // v64 gives the disks the transports above the network device's.
+    const disk_count = VIRTIO_MMIO.count - 1 - NET_SLOT;
+    return [{ buffer: disk },
+            ...Array.from({ length: disk_count - 1 },
+                          () => ({ buffer: new ArrayBuffer(SECTOR_BYTES), readonly: true }))];
+}
+
+// The transports v64 gives a machine with this many disks and a network
+// device, each with its address and interrupt (SPI first_spi + slot, as on
+// QEMU's virt machine).
+function virtio_slots(disk_count) {
+    const at = slot => ({ slot, base: VIRTIO_MMIO.base + slot * VIRTIO_MMIO.size,
+                          intid: 32 + VIRTIO_MMIO.first_spi + slot });
+    return { disks: Array.from({ length: disk_count }, (_, n) => at(VIRTIO_MMIO.count - 1 - n)),
+             net: at(VIRTIO_MMIO.count - 1 - disk_count) };
+}
 
 // xterm.js from a CDN, pinned to exact versions and checked by Subresource
 // Integrity.
@@ -663,11 +707,13 @@ const machine = {
         };
         show_state("booting");
         show_status("Starting the machine", DOWNLOAD_SHARE);
+        // net_device is a copy: v64 keeps the object it is given as its own
+        // settings.
         session.emulator = new this.V86({
             cpu_type: "arm64", graphics_adapter: "none", cpu_cores: CPU_CORES,
             memory_size: RAM_MIB << 20, log_level: 0, wasm_path: site_url(this.manifest.emulator.wasm),
-            kernel: { buffer: this.image.slice(0) }, cmdline: CMDLINE, virtio_disks: [{ buffer: this.disk }],
-            jit_switches: { a64_page: 1 }, autostart: true,
+            kernel: { buffer: this.image.slice(0) }, cmdline: CMDLINE, virtio_disks: virtio_disks(this.disk),
+            net_device: { ...NET_DEVICE }, jit_switches: { a64_page: 1 }, autostart: true,
         });
         session.emulator.add_listener("emulator-error", error => {
             if(this.current === session) this.fail(error);
@@ -869,4 +915,5 @@ function init() {
 
 if(page) init();
 
-export { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT };
+export { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT,
+         virtio_disks, virtio_slots, NET_DEVICE };

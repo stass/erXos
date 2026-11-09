@@ -3976,15 +3976,14 @@ document's "residual risks accepted" paragraph.
   process exists, and the IPv6 rows in FreeBSD's layout (`prefixlen`, `scopeid`).
 
 * [Low] website, `site/terminal.js` (`FAULTS`, [site/README.md](site/README.md)): what the fault menu still lacks.
-  It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser once the
-  site's image boots there (it ends in the root task's crash record under QEMU's `virt` at 160 MiB) and the
-  machine has a disk; until then the four disk entries say "this machine has no disk". RAM fail is disabled:
-  v64's bus maps RAM as one region and `register_mmio` refuses a range over it, so it needs a change inside v64
+  It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser, where the
+  site's image reaches the shell (as it does under v64 in Node at 160 MiB). RAM fail is disabled: v64's bus
+  maps RAM as one region and `register_mmio` refuses a range over it, so it needs a change inside v64
   (a list of failed RAM ranges that `AddressSpace::lookup` in `src/rust/aarch64/bus.rs` checks before its RAM
   case, set by a new export that also bumps the bus generation and drops the range's compiled code, as
   `a64_bus_written` does). Clock jump is disabled until erXos reads a wall clock; CPU freeze stops v64's machine
   clock too, so erXos's time does not jump (advancing it would need v64's `MachineClock.set_time`, unchecked
-  against its clamp). Once the machine has a disk, make the power cut a new machine on the same disk buffer, and
+  against its clamp). Make the power cut a new machine on the same disk buffer, and
   take the machine's end from v64's `cpu.powered_off()`: `session.repairs`, `pausing` and `rewatch` then go
   away, and the fault table no longer does lifecycle work. Once drivers run in their own domains (M9, 1b-E), the
   disk faults end only the driver's domain, and the menu's notes should say so.
@@ -3998,7 +3997,15 @@ document's "residual risks accepted" paragraph.
 * [Low] website, `site/index.html`: a `Content-Security-Policy` meta tag (`connect-src 'self'`, `script-src
   'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'`, styles and fonts likewise) would make "the machine's
   files come only from the page's origin" hold for v64's own fetches too, not only for the names `site_url`
-  checks. GitHub Pages sets no headers, so it has to be the meta tag.
+  checks. GitHub Pages sets no headers, so it has to be the meta tag. `connect-src` also bounds the guest's
+  HTTP, which v64's fake router turns into the page's own `fetch()` calls
+  ([site/README.md](site/README.md#the-network)): `'self'` alone lets the guest reach only the site.
+
+* [Low] website, `site/terminal.js` ([site/README.md](site/README.md#the-network)): nothing in the tree boots
+  the site's machine. A check that loads a built `build/site` under Node, starts v64 with the page's own
+  settings (`virtio_disks`, `NET_DEVICE`) and waits for the guest's DHCP lease from the fake router, its
+  gratuitous ARP and an echo reply, would catch a v64 or driver change that the placement test cannot; it
+  needs the built image and v64, so it belongs at the milestone gate.
 
 * [Medium] hosted backend, `liberx/backend/hosted/` ([design-stopgap.md](docs/design-stopgap.md#the-hosted-backend),
   [plan.md](docs/plan.md#track-h-hosted-mode)): the multi-process form, in which each space other than the
