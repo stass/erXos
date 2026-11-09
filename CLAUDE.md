@@ -478,7 +478,8 @@ scripts live in `~/erxos-scratch/tools/`.
   data holds no code pointer outside an allowlist; only `erx_cap_slot_clear`
   clears a capability slot; `liberx`'s entry macro opens every exported
   function of its program layer, which never calls musl's `malloc` or
-  stdio; only `erx_elf_plan` reads executable headers, only `erx_exec`
+  stdio; only `erx_elf_plan` reads executable headers, only `erx_image_plan`
+  reads image-manifest segments, only `erx_exec`
   copies code into a program, and only `liberx`'s loader maps code; only
   the funnel reads a lane's ring; only the device shim touches a device's
   registers; only the block driver's one write path issues writes. The
