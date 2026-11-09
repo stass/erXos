@@ -12,6 +12,8 @@
 #define ERX_FIASCO_TASK_STATUS_UP	INT64_C(-2)
 /* The status of a program linked with musl whose start came back, which it never should. */
 #define ERX_FIASCO_TASK_STATUS_LIBC	INT64_C(-3)
+/* The status of a domain's runtime whose boot information page the reader refused: no program ran. */
+#define ERX_FIASCO_TASK_STATUS_BOOT_PAGE	INT64_C(-4)
 
 /* The program's entry, on the task's first thread. Its result stops the task. */
 int64_t	erx_task_main(uint64_t argument);

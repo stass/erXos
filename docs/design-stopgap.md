@@ -256,7 +256,8 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | `pack_flags`, `release_addr` | the handoff's flags; its archive start, which `sigma0` maps one to one | the archive header's flags; the address of its `mmap` |
 | `group` | what `erx_group_create` returned | `ERX_CAP_SELF`, which a bind accepts |
 | `time_page` | a handle to the time page's object ([the call table](#the-call-table)), which the domain library passes to each domain; the root's own reads find the page with no handle | `ERX_CAP_NULL`: the hosted clock is the host's |
-| `budget`, `space`, `group_ctl`, `group_stat`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*` and `erx_group_status` find theirs with no handle, `erx_release_entry` reads the archive, and no Phase 1 caller takes the rest | the same |
+| `space` | `ERX_CAP_SELF`, as every space names itself | the same |
+| `budget`, `group_ctl`, `group_stat`, `spaces_group`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*` and `erx_group_status` find theirs with no handle, `erx_release_entry` reads the archive, and no Phase 1 caller takes the rest | the same |
 | `cpuset`, `capacity_mcpu` | the manifest's system share's `cpuset` within what `l4_scheduler_info` reports; 1,000 for each CPU, since Phase 1 has no grants | the host's online CPUs; the same |
 | node name | `system@` and the manifest's `host` | the same |
 | `args` | the manifest's `system_args`, the console's words, `-erx boot VALUE SLOT` ([image windows](#image-windows)) and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
@@ -285,8 +286,11 @@ function and maps it read-only.
 
 **A domain task's page** is the domain library's, built by the same function from what
 [Creating a domain](design-system.md#creating-a-domain) gives it, mapped read-only, and passed to the
-task's first thread as its argument; the task's backend initialisation reads it with the same reader,
-and a page the reader refuses ends the task with its reason. Five fields are read differently from
+task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. The domain runtime image's
+entry, `domain_entry.c`, copies the page into its own memory and reads the copy with the same reader
+before musl's start runs, so every later read sees the page it checked; a page the reader refuses, or an argument that names no page, ends the task with the reason on the
+console and the status `ERX_FIASCO_TASK_STATUS_BOOT_PAGE` (-4), which the library's fault gate
+reports as a HALT; no runtime code reads a refused page. Five fields are read differently from
 erXos's kernel:
 
 | Field | On this backend |

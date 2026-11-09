@@ -2,8 +2,9 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * The call under erx_watchdog (docs/design-stopgap.md, "The watchdog"). It runs on a
- * normal scheduler, so a pet says that schedulers run and timers fire.
+ * The calls under erx_watchdog (docs/design-stopgap.md, "The watchdog"). A pet runs on a
+ * normal scheduler, so it says that schedulers run and timers fire. Only the system
+ * domain, whose boot page has ERX_BOOT_ROOT, holds the machine's watchdog.
  */
 
 #define STATIC_ERLANG_NIF 1
@@ -11,6 +12,7 @@
 #include "erl_nif.h"
 
 #include "liberx/backend/api.h"
+#include "liberx/backend/runtime_entry.h"
 
 static ERL_NIF_TERM
 pet_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -25,7 +27,17 @@ pet_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_atom(env, "ok"));
 }
 
+/* The page is the runtime's own memory, written and checked once before ERTS started. */
+static ERL_NIF_TERM
+held_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	(void)argc;
+	(void)argv;
+	return (enif_make_atom(env, (erx_boot_info()->flags & ERX_BOOT_ROOT) != 0 ? "true" : "false"));
+}
+
 static ErlNifFunc nif_funcs[] = {
+	{ "held_nif", 0, held_nif, 0 },
 	{ "pet_nif", 0, pet_nif, 0 },
 };
 

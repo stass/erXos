@@ -4,6 +4,8 @@
 %% What keeps the machine's watchdog from ending the machine (docs/design-stopgap.md,
 %% "The watchdog"): a process at priority max that pets it from a normal scheduler, so
 %% a pet says that schedulers run and timers fire. The root never pets on its behalf.
+%% Only the system domain holds the machine's watchdog, so in any other domain
+%% kernel_sup's child is ignored.
 
 -module(erx_watchdog).
 -moduledoc """
@@ -15,18 +17,22 @@ says that schedulers run and timers fire. The process is registered as
 -export([start_link/0]).
 -export([init/0]).
 
--nifs([pet_nif/0]).
+-nifs([held_nif/0, pet_nif/0]).
 -on_load(on_load/0).
 
 %% Shorter than any period the kernel command line can set, which counts in seconds.
 -define(PET_MILLISECONDS, 500).
 
 -doc """
-Start the watchdog process, registered as `erx_watchdog`, and return once it runs.
+Start the watchdog process, registered as `erx_watchdog`, and return once it runs;
+`ignore` in a domain that does not hold the machine's watchdog.
 """.
--spec start_link() -> {ok, pid()}.
+-spec start_link() -> {ok, pid()} | ignore.
 start_link() ->
-    proc_lib:start_link(?MODULE, init, []).
+    case held_nif() of
+        true -> proc_lib:start_link(?MODULE, init, []);
+        false -> ignore
+    end.
 
 -spec on_load() -> ok | {error, term()}.
 on_load() ->
@@ -52,6 +58,9 @@ wait_until(Deadline) ->
         _Stray -> wait_until(Deadline)
     after Remaining -> loop()
     end.
+
+held_nif() ->
+    erlang:nif_error(undef).
 
 pet_nif() ->
     erlang:nif_error(undef).

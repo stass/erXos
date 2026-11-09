@@ -54,7 +54,9 @@ typedef struct erx_boot_inputs {
 	uint32_t		 pack_flags;
 	uint32_t		 capacity_mcpu;
 	erx_cap_t		 budget;	/* a domain's: the values its installs gave */
+	erx_cap_t		 space;		/* ERX_CAP_SELF, as every space names itself */
 	erx_cap_t		 group;
+	erx_cap_t		 spaces_group;	/* a domain's with ERX_DOM_SPACES: its sub-space group */
 	erx_cap_t		 time_page;
 	erx_cap_t		 release;
 	erx_cap_t		 crash_area;

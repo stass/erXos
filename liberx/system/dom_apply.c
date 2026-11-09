@@ -371,11 +371,20 @@ apply_bootinfo(apply_t *apply)
 		return (ERX_EINVAL);
 	inputs.node = node;
 	inputs.domain_id = spec->id;
+	inputs.flags = apply->lib->det ? ERX_BOOT_DET : 0;
 	inputs.pack_flags = apply->lib->pack_flags;
 	inputs.capacity_mcpu = spec->grant.capacity_mcpu;
 	inputs.cpuset = spec->grant.cpuset;
 	inputs.budget = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_BUDGET] };
+	/*
+	 * No install names a space to itself: a domain names its own as every
+	 * space does, by ERX_CAP_SELF. group_ctl and group_stat stay
+	 * ERX_CAP_NULL on the stopgap, whose group status page is the home
+	 * task's own (docs/design-stopgap.md, "Boot information").
+	 */
+	inputs.space = (erx_cap_t){ .raw = ERX_CAP_SELF };
 	inputs.group = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_GROUP] };
+	inputs.spaces_group = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_SPACES_GROUP] };
 	inputs.time_page = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_TIME_PAGE] };
 	inputs.release = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_SLICE] };
 	inputs.release_addr = apply->release_addr;

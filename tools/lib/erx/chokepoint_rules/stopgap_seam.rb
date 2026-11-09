@@ -76,6 +76,7 @@ module Erx
         liberx/backend/fiasco/libc_root_write.c
         liberx/backend/fiasco/libc_start.h
         liberx/backend/fiasco/libc_task.c
+        liberx/backend/fiasco/domain_entry.c
         liberx/backend/fiasco/release_task.c
         liberx/backend/fiasco/root.c
         liberx/backend/fiasco/root_no_program.c

@@ -49,18 +49,22 @@ module Erx
     # neither the system run nor another domain's (docs/design-stopgap.md, "The
     # production image").
     DOMAINS_PREFIX = 'domains/'
+    # What every domain release ships: kernel and stdlib, which a release boots through,
+    # and erx and erx_files, whose processes erXos's kernel_sup and kernel_safe_sup start
+    # in every domain (its watchdog's child, its namespace table, /tmp and /proc).
+    DOMAIN_BASE = %w[kernel stdlib erx erx_files].freeze
 
     # A domain release named name, of applications, which the system release ships too,
-    # kernel and stdlib among them, since a release boots through both. A name is a
+    # DOMAIN_BASE among them, since a release boots through it. A name is a
     # manifest identifier, so a domain row's @artifact.NAME names the release, and it is
-    # one path component.
+    # one path component. It ships DOMAIN_BASE at the least.
     def self.domain(name, applications:)
       raise Error, "a domain release's name is an identifier, not #{name.inspect}" unless
         name.is_a?(String) && name.match?(Manifest::Frontend::IDENTIFIER) && !name.include?('/')
       unknown = applications - APPLICATIONS
       raise Error, "a domain release ships only applications the runtime builds, not #{unknown.join(', ')}" unless unknown.empty?
-      missing = %w[kernel stdlib] - applications
-      raise Error, "a domain release boots through #{missing.join(' and ')}" unless missing.empty?
+      missing = DOMAIN_BASE - applications
+      raise Error, "a domain release ships what every domain's kernel starts: #{missing.join(', ')}" unless missing.empty?
 
       Release.new(name: name, prefix: "#{DOMAINS_PREFIX}#{name}/", applications: APPLICATIONS & applications, system: false)
     end

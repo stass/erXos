@@ -117,6 +117,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	inputs.flags = ERX_BOOT_ROOT | (boot_args->det ? ERX_BOOT_DET : 0);
 	inputs.pack_flags = handoff->flags;
 	inputs.capacity_mcpu = MCPU_PER_CPU * (uint32_t)__builtin_popcountll(cpuset);
+	inputs.space = (erx_cap_t){ .raw = ERX_CAP_SELF };
 	inputs.group = (erx_cap_t){ .raw = group };
 	inputs.time_page = (erx_cap_t){ .raw = erx_fiasco_time_object() };
 	inputs.release_addr = (uint64_t)(uintptr_t)erx_release_addr();

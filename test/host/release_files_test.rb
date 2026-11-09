@@ -142,7 +142,7 @@ class ReleaseFilesTest < Minitest::Test
   # A domain release is laid out as the system release is, under domains/<name>/, and
   # no file of it carries the system mark, which only the system release's files carry.
   def test_a_domain_release_lies_under_its_prefix_without_the_system_mark
-    files = domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[stdlib kernel]))
+    files = domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[erx_files stdlib erx kernel]))
     paths = files.map { |entry| entry.fetch('path') }
     assert_includes paths, "domains/base/lib/kernel-#{VERSION}/ebin/kernel.app"
     assert_includes paths, "domains/base/lib/stdlib-#{VERSION}/include/qlc.hrl"
@@ -155,22 +155,22 @@ class ReleaseFilesTest < Minitest::Test
   # Its release file carries the domain's name and its applications alone, in the
   # system release's order whatever order they were asked in.
   def test_a_domain_release_file_names_the_domain_and_only_its_applications
-    domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[stdlib kernel]))
+    domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[erx_files stdlib erx kernel]))
     release = File.read(File.join(@scratch, 'domain/start.rel'))
-    assert_equal "{release,{\"base\",\"1\"},{erts,\"#{VERSION}\"},[{kernel,\"#{VERSION}\"},{stdlib,\"#{VERSION}\"}]}.\n", release
+    assert_equal "{release,{\"base\",\"1\"},{erts,\"#{VERSION}\"},[{kernel,\"#{VERSION}\"},{stdlib,\"#{VERSION}\"},{erx,\"#{VERSION}\"},{erx_files,\"#{VERSION}\"}]}.\n", release
   end
 
   def test_a_domain_release_name_is_one_manifest_identifier
     ['', 'Base', '../x', 'a/b', '.hidden', 'x' * 64, :base].each do |name|
-      assert_raises(Erx::Error, name.inspect) { Erx::ReleaseFiles.domain(name, applications: %w[kernel stdlib]) }
+      assert_raises(Erx::Error, name.inspect) { Erx::ReleaseFiles.domain(name, applications: Erx::ReleaseFiles::DOMAIN_BASE) }
     end
-    assert_equal 'domains/a.b-c_1/', Erx::ReleaseFiles.domain('a.b-c_1', applications: %w[kernel stdlib]).prefix
+    assert_equal 'domains/a.b-c_1/', Erx::ReleaseFiles.domain('a.b-c_1', applications: Erx::ReleaseFiles::DOMAIN_BASE).prefix
   end
 
   def test_a_domain_release_boots_through_kernel_and_stdlib_and_ships_only_what_is_built
     error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: %w[kernel]) }
     assert_includes error.message, 'stdlib'
-    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: %w[kernel stdlib mnesia]) }
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'mnesia']) }
     assert_includes error.message, 'mnesia'
   end
 

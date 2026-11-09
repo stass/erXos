@@ -10,12 +10,16 @@
  * library's fault gate reports it: a halt is HALT with the program's status, a
  * fault FAULT, a stop STOPPED. Every domain gets RELEASE as its release,
  * which the program reads through its slice; one with a connection quota
- * reads a lane larger than its own, whose size its boot page must name. After each end the domain is disconnected and
- * retired, and the pool and the root's handle table hold what they held before.
- * Two running domains are connected and disconnected. Then a create, and a
- * connect, fails at each step in turn, before the step and once it has made
- * its object, and is undone, leaving the pool, the handles and the view as
- * they were. Each case says one line, which tools/lib/erx/native_domain.rb holds the transcript to.
+ * reads a lane larger than its own, whose size its boot page must name. Then
+ * a domain runs the ERTS image on the ERTS release to init, which says so and
+ * halts with 0, and one whose boot page was spoiled ends at its runtime's
+ * entry with the reader's reason, before ERTS runs. After each end the domain
+ * is disconnected and retired, and the pool and the root's handle table hold
+ * what they held before. Two running domains are connected and disconnected.
+ * Then a connect, and a create, fails at each step in turn, before the step
+ * and once it has made its object, and is undone, leaving the pool, the
+ * handles and the view as they were. Each case says one line, which
+ * tools/lib/erx/native_domain.rb holds the transcript to.
  */
 
 #include <stdbool.h>
@@ -34,12 +38,17 @@
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
+#include "liberx/backend/fiasco/task_start.h"
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "test/guest/native_domain/modes.h"
 
 #define PROGRAM		"boot/native-domain"
 #define RELEASE		"domains/native/release"
+#define ERTS		"runtimes/emu"
+#define ERTS_RELEASE	"domains/erts/"
+#define ERTS_MEMORY	(UINT64_C(160) << 20)
+#define LIBRARY_MEMORY	(UINT64_C(256) << 20)
 #define WAIT_NS		UINT64_C(10000000000)
 #define DOMAINS		4u
 #define CONNECTIONS	4u
@@ -58,6 +67,24 @@ static erx_dom_file_t files[ERX_PACK_ENTRIES_MAX];
 static erx_dom_lib_t lib;
 static erx_dom_spec_t request;
 static uint32_t release;
+/* The ERTS domain release's run of entries in the boot image. */
+static uint32_t erts_release, erts_files;
+/*
+ * What a domain's ERTS runs: its release's boot script, as the system's
+ * system_args do, then a line that says init ran it, then halt(0). A domain
+ * has no tty yet, and -noshell would start user_drv, whose NIF is gone, so it
+ * starts no user; erlang:display writes to the console through the service.
+ */
+static const char erts_args[] = "--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0"
+    "-boot\0/bin/start\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0"
+    "-eval\0erlang:display(init_started),erlang:halt(0)";
+
+/* What a case does between a domain's create and its end. */
+typedef enum run_action {
+	RUN_PLAIN,	/* starts it and waits */
+	RUN_STOP,	/* starts it, then stops it with STOP_STATUS */
+	RUN_SPOIL	/* spoils its boot page's version, then starts it */
+} run_action_t;
 static uint32_t next_id = ERX_DOM_SYSTEM_ID + 1;
 
 static void
@@ -122,7 +149,7 @@ library_up(void)
 	const erx_grant_t share = { .quota_ns = ERX_QUOTA_NONE, .cpuset = 1, .capacity_mcpu = 1000 };
 	uint64_t budget;
 
-	principals[0] = (erx_dom_principal_t){ .number = PRINCIPAL, .memory = 64 * MIB, .domains_max = DOMAINS,
+	principals[0] = (erx_dom_principal_t){ .number = PRINCIPAL, .memory = LIBRARY_MEMORY, .domains_max = DOMAINS,
 	    .share = share, .default_limits = limits_default(), .ceiling_limits = limits_default() };
 	lib.view = (erx_dom_view_t){ .domains = domains, .max_domains = DOMAINS, .connections = connections,
 	    .max_connections = CONNECTIONS, .principals = principals, .nprincipals = 1, .files = files,
@@ -139,7 +166,7 @@ library_up(void)
 	if (erx_group_create(0, 0, &lib.held.system_group) != ERX_OK ||
 	    erx_group_create(0, 0, &lib.held.principal_group) != ERX_OK)
 		return ("erx: domain: no groups\n");
-	if (erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_ELASTIC, 64 * MIB / ERX_PAGE_SIZE, 64 * MIB / ERX_PAGE_SIZE,
+	if (erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_ELASTIC, LIBRARY_MEMORY / ERX_PAGE_SIZE, LIBRARY_MEMORY / ERX_PAGE_SIZE,
 	    &budget) != ERX_OK)
 		return ("erx: domain: no principal budget\n");
 	lib.held.principal_budget = budget;
@@ -170,6 +197,44 @@ request_for(const char *word, uint32_t program, uint32_t connections)
 	return (&request);
 }
 
+/* A request for a domain whose ERTS image boots the ERTS release with erts_args. */
+static const erx_dom_spec_t *
+erts_request(uint32_t runtime)
+{
+	(void)request_for("erts", runtime, 0);
+	request.release = erts_release;
+	request.release_files = erts_files;
+	request.memory = ERTS_MEMORY;
+	memcpy(request.strings, erts_args, sizeof(erts_args));
+	request.args_len = (uint32_t)sizeof(erts_args);
+	return (&request);
+}
+
+/*
+ * The first entry under ERTS_RELEASE and the count of entries under it. The
+ * index is sorted, so they are one run; an entry past a gap is refused.
+ */
+static bool
+erts_release_find(const erx_pack_view_t *pack)
+{
+	const size_t prefix = strlen(ERTS_RELEASE);
+
+	for (uint32_t index = 0; index < pack->header.nentries; index++) {
+		const uint8_t *name;
+		size_t length;
+
+		if (!erx_pack_path_at(pack, index, &name, &length) || length <= prefix ||
+		    memcmp(name, ERTS_RELEASE, prefix) != 0)
+			continue;
+		if (erts_files == 0)
+			erts_release = index;
+		else if (index != erts_release + erts_files)
+			return (false);
+		erts_files++;
+	}
+	return (erts_files != 0);
+}
+
 /* Waits at the gate until the library ends a domain, handling every record on the way. */
 static bool
 end_wait(erx_dom_report_t *report)
@@ -198,6 +263,26 @@ maps(uint64_t mem, uint64_t size)
 }
 
 /*
+ * Maps domain id's boot page into the root with prot, at *addr, and names
+ * its handles in *held; the caller releases the mapping. False, with
+ * nothing mapped, for an id with no record or a refused mapping.
+ */
+static bool
+boot_page_map(uint32_t id, uint32_t prot, const erx_dom_handles_t **held, uint64_t *addr)
+{
+	*held = NULL;
+	for (uint32_t slot = 0; slot < DOMAINS; slot++)
+		if (domains[slot].id == id)
+			*held = &handles[slot];
+	if (*held == NULL || erx_vm_reserve(ERX_CAP_SELF, 0, ERX_PAGE_SIZE, 0, addr) != ERX_OK)
+		return (false);
+	if (erx_vm_map(ERX_CAP_SELF, *addr, ERX_PAGE_SIZE, (*held)->made[ERX_DOM_OBJ_BOOTINFO], 0, prot) == ERX_OK)
+		return (true);
+	(void)erx_vm_release(ERX_CAP_SELF, *addr, ERX_PAGE_SIZE);
+	return (false);
+}
+
+/*
  * Whether domain id's boot page names the size of the lane it reads from the
  * system domain: the system domain's side takes a mapping of that lane's
  * bytes, and not of a lane twice as large.
@@ -205,18 +290,13 @@ maps(uint64_t mem, uint64_t size)
 static bool
 lanes_agree(uint32_t id)
 {
-	const erx_dom_handles_t *held = NULL;
+	const erx_dom_handles_t *held;
 	uint64_t addr, in_size;
-	bool mapped;
 
-	for (uint32_t slot = 0; slot < DOMAINS; slot++)
-		if (domains[slot].id == id)
-			held = &handles[slot];
-	if (held == NULL || erx_vm_reserve(ERX_CAP_SELF, 0, ERX_PAGE_SIZE, 0, &addr) != ERX_OK)
+	if (!boot_page_map(id, ERX_PROT_R, &held, &addr))
 		return (false);
-	mapped = erx_vm_map(ERX_CAP_SELF, addr, ERX_PAGE_SIZE, held->made[ERX_DOM_OBJ_BOOTINFO], 0, ERX_PROT_R) == ERX_OK;
-	in_size = mapped ? ((const erx_boot_info_t *)(uintptr_t)addr)->system_connection.in_size : 0;
-	if (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) != ERX_OK || !mapped)
+	in_size = ((const erx_boot_info_t *)(uintptr_t)addr)->system_connection.in_size;
+	if (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) != ERX_OK)
 		return (false);
 	say_count("in_size", in_size);
 	return (maps(held->made[ERX_DOM_OBJ_SYS_SIDE], erx_lane_side_bytes(in_size)) &&
@@ -224,17 +304,33 @@ lanes_agree(uint32_t id)
 }
 
 /*
- * Creates a domain running word, starts it, stops it with STOP_STATUS when
- * stop is set, and takes its end; then disconnects and retires it. True when
- * every call succeeded and the end is kind with status.
+ * Spoils domain id's boot page through a writable mapping of the root's:
+ * a version the reader refuses, so its runtime ends with the reason.
  */
 static bool
-domain_run(const char *word, uint32_t program, uint32_t connections, bool stop, erx_dom_end_kind_t kind,
-    int64_t status)
+page_spoil(uint32_t id)
 {
+	const erx_dom_handles_t *held;
+	uint64_t addr;
+
+	if (!boot_page_map(id, ERX_PROT_RW, &held, &addr))
+		return (false);
+	((erx_boot_info_t *)(uintptr_t)addr)->version = ERX_BOOT_VERSION + 1;
+	return (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) == ERX_OK);
+}
+
+/*
+ * Creates the domain spec asks for, does what action says, and takes its
+ * end; then disconnects and retires it. True when every call succeeded and
+ * the end is kind with status.
+ */
+static bool
+domain_run(const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t kind, int64_t status)
+{
+	const uint32_t connections = spec->connections;
 	erx_dom_created_t created;
 	erx_dom_report_t report = { 0 };
-	erx_status_t made = erx_dom_lib_create(&lib, request_for(word, program, connections), NULL, 0, &created);
+	erx_status_t made = erx_dom_lib_create(&lib, spec, NULL, 0, &created);
 	bool passed;
 
 	if (made != ERX_OK) {
@@ -242,10 +338,17 @@ domain_run(const char *word, uint32_t program, uint32_t connections, bool stop, 
 		say_count("failed_step", lib.failed_at);
 		return (false);
 	}
-	passed = created.connection != 0 && (connections == 0 || lanes_agree(created.id)) &&
-	    erx_dom_lib_start(&lib, created.id) == ERX_OK &&
-	    erx_dom_lib_start(&lib, created.id) == ERX_EINVAL;
-	if (passed && stop)
+	passed = created.connection != 0;
+	if (passed && connections != 0)
+		passed = lanes_agree(created.id);
+	if (passed && action == RUN_SPOIL)
+		passed = page_spoil(created.id);
+	if (passed)
+		passed = erx_dom_lib_start(&lib, created.id) == ERX_OK;
+	/* A domain starts once. */
+	if (passed)
+		passed = erx_dom_lib_start(&lib, created.id) == ERX_EINVAL;
+	if (passed && action == RUN_STOP)
 		passed = erx_dom_lib_stop(&lib, created.id, STOP_STATUS) == ERX_OK;
 	passed = passed && end_wait(&report) && report.id == created.id;
 	say_count("end_kind", (uint64_t)report.end.kind);
@@ -276,12 +379,12 @@ rows_used(void)
 
 /* One case: its domain's run, with the pool as it was before. */
 static void
-case_end(const char *name, const char *word, uint32_t program, uint32_t connections, bool stop,
-    erx_dom_end_kind_t kind, int64_t status)
+case_end(const char *name, const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t kind,
+    int64_t status)
 {
 	const uint64_t before = erx_fiasco_vm_free_pages();
 	const uint32_t held = handles_used();
-	const bool passed = domain_run(word, program, connections, stop, kind, status);
+	const bool passed = domain_run(spec, action, kind, status);
 
 	say_count("free_pages_lost", before - erx_fiasco_vm_free_pages());
 	say_count("handles_left", handles_used() - held);
@@ -425,16 +528,19 @@ erx_fiasco_root_main(void)
 	erx_boot_handoff_view_t handoff;
 	static erx_pack_view_t pack;
 	const char *reason = erx_fiasco_root_open(&handoff, &pack);
-	uint32_t program = 0;
+	uint32_t program = 0, erts = 0;
 
 	if (reason == NULL)
 		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
 	if (reason == NULL && (erx_fiasco_launcher_find(&pack, PROGRAM, &program) != ERX_OK ||
-	    erx_fiasco_launcher_find(&pack, RELEASE, &release) != ERX_OK))
+	    erx_fiasco_launcher_find(&pack, RELEASE, &release) != ERX_OK ||
+	    erx_fiasco_launcher_find(&pack, ERTS, &erts) != ERX_OK || !erts_release_find(&pack)))
 		reason = "erx: domain: no program or release\n";
 	if (reason == NULL) {
 		erx_fiasco_task_set_archive(&pack);
 		files_from(&pack, program);
+		files[erts].kind = ERX_ENTRY_IMAGE;
+		files[erts].image_ok = true;
 		reason = library_up();
 	}
 	if (reason != NULL) {
@@ -443,11 +549,13 @@ erx_fiasco_root_main(void)
 	}
 	say_case("library", true);
 	/* The first run takes the root's and the service's tables' pages, so it is not counted. */
-	say_case("warm", domain_run("halt", program, 0, false, ERX_DOM_END_HALT, HALT_STATUS));
-	case_end("halt", "halt", program, 0, false, ERX_DOM_END_HALT, HALT_STATUS);
-	case_end("fault", "fault", program, 0, false, ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
-	case_end("stop", "wait", program, 0, true, ERX_DOM_END_STOPPED, 0);
-	case_end("lanes", "halt", program, 1, false, ERX_DOM_END_HALT, HALT_STATUS);
+	say_case("warm", domain_run(request_for("halt", program, 0), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS));
+	case_end("halt", request_for("halt", program, 0), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
+	case_end("fault", request_for("fault", program, 0), RUN_PLAIN, ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
+	case_end("stop", request_for("wait", program, 0), RUN_STOP, ERX_DOM_END_STOPPED, 0);
+	case_end("lanes", request_for("halt", program, 1), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
+	case_end("erts", erts_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
+	case_end("erts_refused", erts_request(erts), RUN_SPOIL, ERX_DOM_END_HALT, ERX_FIASCO_TASK_STATUS_BOOT_PAGE);
 	case_link(program);
 	case_undo(program);
 	say("erx: domain: done\n");

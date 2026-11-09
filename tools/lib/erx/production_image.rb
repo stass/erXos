@@ -98,7 +98,7 @@ module Erx
     # a table by name once one does. The development manifest configures no domains, so
     # the production image carries neither; a test image may carry some
     # (build_test_image's domains).
-    DOMAIN_APPLICATIONS = %w[kernel stdlib].freeze
+    DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
     # artifact name a domain row's runtime takes. It sorts after domains/ and before

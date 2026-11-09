@@ -139,7 +139,8 @@ check_records(void)
 	CHECK(memcmp(sealing_bytes, sealing_label, 20) == 0);
 
 	/* The root extension: one value per slot, slot 1 first, past the page. */
-	CHECK(ERX_BOOT_INFO_SIZE == 272);
+	CHECK(ERX_BOOT_INFO_SIZE == 280);
+	CHECK(ERX_BOOT_INFO_OFF_SPACES_GROUP == 64 && ERX_BOOT_INFO_OFF_TIME_PAGE == 72);
 	CHECK(ERX_BOOT_ROOT_EXTENSION_SIZE == 88 && ERX_BOOT_ROOT_EXTENSION_ALIGN == 8);
 	CHECK(ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_BUDGET == 0);
 	CHECK(ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_GROUP == 8);

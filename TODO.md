@@ -180,9 +180,6 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`: a physical object's device window pages and a contiguous object's
   run are never given back, so a driver that makes and closes such objects in a loop uses the window or the
   contiguous pool up for good; each object, not each task, now holds them.
-* [Medium] stopgap, `liberx/backend/fiasco/libc_task.c`: no suite yet starts a musl-linked task with a boot
-  information page as its first thread's argument; RT1's `native_domain` cell is the first that does, and should
-  also show a refused page ending the task with the reader's reason.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`: the page index's label map (`vm_label_take`, `vm_label_put`, and
   their use in `erx_fiasco_vm_task_open`, `_close` and `object_fill`) has no test, as `vm.c` builds only for the target and
   no suite makes more than a few tasks. A leaked or doubled label gives two tables one key. A host test should exhaust the
@@ -810,17 +807,13 @@ it; git history is the record of completed work.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/task_refused.c`: in a task,
   `erx_vm_free_pages` reports 0 while commits through the service still succeed, an
   invented count that `api.h`'s exact contract does not allow; it should answer
-  `ERX_ENOTSUP` (the call needs a status return) or the domain budget's room. The same
-  file refuses `erx_boot_info` with a zero page and `erx_time_wall_ns` as unavailable,
-  so the domain runtime image (`runtimes/emu`) ends at its boot page until a task's
-  start (BK11) and ERTS in a domain (RT1) serve them.
+  `ERX_ENOTSUP` (the call needs a status return) or the domain budget's room.
 * [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page's
   system connection names no peer node (`peer_node_off`, `peer_node_len` stay 0), so a
   domain cannot tell the system domain's node name from its boot page.
-* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page is
-  incomplete: the `ERX_DOM_SPACES` sub-space group's install has no field in
-  `erx_boot_info`, `ERX_BOOT_DET` is never passed on, and `space`, `group_ctl` and
-  `group_stat` stay 0. Settle the fields with the runtime's reader (RT1).
+* [Medium] domain library, `include/erx/dom_lib.h` (`det`): no caller sets it, so no
+  domain's page carries `ERX_BOOT_DET` under `erx.det=1`; the library's view at boot
+  (DL2d) should set it from the system's own page.
 * [Medium] domain library, `liberx/system/dom_apply.c`: two stopgap details reach permanent
   code: the fault thread's `erx_dom_lib_take` uses the stopgap's `erx_ipc_wait(deadline,
   *label)` before the target receive signature is settled (the `erx_ipc_wait` item above),
@@ -1678,6 +1671,7 @@ it; git history is the record of completed work.
 * [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
 * [Medium] runtime, the native boot page: the comparison of the two entries' pages waits for a native release that boots, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-stopgap.md](docs/design-stopgap.md#boot-information)).
+* [Medium] runtime, a domain's standard I/O (`otp/lib/kernel/src/user_sup.erl`): a domain has no tty yet, and `-noshell` or `-noinput` start `user_drv`, whose `prim_tty` NIF is gone, so a domain started with them fails at `user`; `native_domain`'s ERTS domain starts with `-nouser` and writes with `erlang:display`. A domain with a user will also need `erx_shell` in its release (`erx.app.src`), beyond `ReleaseFiles::DOMAIN_BASE`. A domain's groups and tty ([design-live.md](docs/design-live.md#the-tty)), and its logger through the log sink (RT11), replace that.
 * [Medium] runtime, `otp/lib/kernel/src/dist_util.erl`: `gen_challenge/0` calls `statistics(runtime)`, which fails with `notsup`, so a distribution handshake ends there. No `1>` reaches it; the first carrier does.
 * [Low] runtime, `liberx/backend/hosted/start.c`: six names of the host's environment reach the page for the stock fd, spawn and forker ports and the stock terminal driver, where the design's page holds none. They go with those layers. The forker exits when `BINDIR` is unset and runs `erl_child_setup` from that host directory, so a boot is not yet free of host files.
 * [Low] runtime, `beam/erl_time_sup.c`: edit 20 of the design is open. The stock correction runs over `erx_clock_ns`, and stays idle since system time moves with it by one offset; deleting it changes nothing a shell sees.

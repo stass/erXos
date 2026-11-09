@@ -80,6 +80,8 @@ typedef struct erx_dom_lib {
 	size_t		 host_len;	/* at most ERX_DOM_HOST_MAX */
 	uint32_t	 pack_flags;	/* the boot image's, for each boot page */
 	uint32_t	 cap_limit;	/* each domain's handle table */
+	bool		 det;		/* the system's boot page has ERX_BOOT_DET,
+					 * so each domain's page carries it */
 #ifdef ERX_DOM_TEST_HOOKS
 	uint32_t	 fail_step;	/* the step a create or a connect fails at,
 					 * with ERX_ENOMEM; UINT32_MAX for none */

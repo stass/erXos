@@ -36,7 +36,7 @@ class DomainImageTest < Minitest::Test
       image.send(:assemble, directory: DIRECTORY, manifest_source: File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST)),
                             added: Erx::ProductionImage.const_get(:NOTHING_ADDED), test_code: false,
                             machine: Erx::ProductionImage::DEVELOPMENT_MACHINE,
-                            domains: [Erx::ReleaseFiles.domain('base', applications: %w[kernel stdlib])])
+                            domains: [Erx::ReleaseFiles.domain('base', applications: Erx::ReleaseFiles::DOMAIN_BASE)])
     end
     @bytes = File.binread(self.class.built.archive)
     @entries = index(@bytes)

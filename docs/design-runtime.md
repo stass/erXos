@@ -482,10 +482,14 @@ typedef struct erx_boot_info {
 	uint32_t	reserved;		/* zero; keeps capability alignment */
 	erx_cap_t	budget;			/* the domain's budget: ALLOC, and with
 						 * SPACES also SPACES, CARVE, DUP, GIVE */
-	erx_cap_t	space;			/* its own space: THREADS, SPACES */
+	erx_cap_t	space;			/* its own space, ERX_CAP_SELF, as every
+						 * space names itself: THREADS, SPACES */
 	erx_cap_t	group;			/* the domain's group: ATTACH, SIGNAL, and
 						 * CONFIGURE on its children */
 	erx_cap_t	group_ctl, group_stat;	/* its shared areas */
+	erx_cap_t	spaces_group;		/* with SPACES, its sub-space group:
+						 * CONFIGURE, ATTACH, SIGNAL, DUP, GIVE;
+						 * otherwise ERX_CAP_NULL */
 	erx_cap_t	time_page;
 	erx_cap_t	release;		/* the slice of its release's files */
 	uint64_t	release_addr;		/* where the slice is mapped, read-only */
@@ -528,7 +532,7 @@ typedef struct erx_boot_info {
 } erx_boot_info_t;
 ```
 
-The fixed prefix is 272 bytes. The kernel supplies `pack_flags` from the
+The fixed prefix is 280 bytes. The kernel supplies `pack_flags` from the
 validated boot-image header; the root entry preserves that value and
 compares its development bit with the system manifest's development bit
 before applying any configuration. Either mismatch is an invalid boot.
@@ -567,7 +571,7 @@ system connection's peer by its node name and id as well, as
 system domain's process that admits the domain, which that process
 exported to the domain before it started
 ([Connections in ERTS](#connections-in-erts)).
-With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 272,
+With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 280,
 with the **root extension**, `erx_boot_root_extension_t`, which the ABI
 generator derives from the ABI file's `cap` lines, so that nothing is copied by
 hand: one capability value for each root slot, the value of slot N at offset

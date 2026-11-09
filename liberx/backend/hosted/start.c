@@ -184,6 +184,7 @@ main(int argc, char **argv)
 		.flags = ERX_BOOT_ROOT,
 		.pack_flags = erx_release_pack_flags(),
 		.capacity_mcpu = MCPU_PER_CPU * cpus,
+		.space = { .raw = ERX_CAP_SELF },
 		.group = { .raw = ERX_CAP_SELF },
 		.release_addr = (uint64_t)(uintptr_t)erx_release_addr(),
 		.cpuset = cpus == 64 ? UINT64_MAX : (UINT64_C(1) << cpus) - 1,
