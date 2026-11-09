@@ -549,21 +549,21 @@ it; git history is the record of completed work.
   length, yet erx_icmp4 needs the quoted addresses, protocol and ports (`icmp_input` hands the quote to
   `ip_ctlprotox`). Add a `decode_quoted/1` sharing the header checks, with a fuzz target, when erx_icmp4 is
   written.
-* [High] network, `erx_tcp_sack` ([design-network-stack.md](docs/design-network-stack.md#the-send-log-sack-and-reassembly),
-  module table): the design has it translate the receiver side of `netinet/tcp_sack.c`
-  (`tcp_update_sack_list`, `tcp_update_dsack_list`, `tcp_clean_dsack_blocks`), but that file carries,
-  besides the Regents' notice, NRL's notice with an advertising clause (`tcp_sack.c:33-70`), the reason
-  the design never translates `netinet/in_cksum.c`. It and `in_cksum.c` are the only such files under
-  `netinet`, `netinet6`, `tcp_stacks` and `cc`. Decide whether to translate it and carry the clause, or
-  write the receiver's SACK and D-SACK blocks from RFC 2018 section 4 and RFC 2883 section 4 and change
-  the design to say so; the module waits on that decision. The sender side has the same question for
-  any module that would translate `tcp_sack_doack` or its neighbours.
 * [Medium] network, `erlang/apps/erx_net/src/erx_nd6_rtr.erl`: the interface process must call
   `select_router/2` after every step that can change the router list or a router's reachability, and diff
   `addresses/1` and `routes/1` to republish, where FreeBSD reselects inside `defrtrlist_update`; until it
   does, a default route through a router that left the list is missing. When the interface process is
   written, pass erx_nd6's reachability into `ra/4`, `tick/2` and `dad_done/3`, select inside, and emit
   `{routes, Rows}` and `{addresses, Rows}` actions only on a change, so it holds by construction.
+* [High] network, the TCP sender's SACK side, package P12 (`erx_tcp_sendlog`, `erx_tcp_loss_dupack`;
+  [design-network-stack.md](docs/design-network-stack.md#provenance-and-notices)): write the scoreboard,
+  `IsLost`, `NextSeg`, the pipe and SACK-based recovery from RFC 6675, without reading
+  `netinet/tcp_sack.c`, which carries NRL's notice with an advertising clause, as `erx_tcp_sack` is
+  written from RFC 2018 and RFC 2883. No RFC specifies the lost-retransmission check (`tcp_do_lrd`), so
+  the design must first describe it from a source other than `tcp_sack.c`. The design still cites
+  `tcp_sack.c` functions and lines for the roles they play ("Loss detection": `tcp_sack_partialack`,
+  `tcp_sack_lost_retransmission`; "Defaults kept": `tcp_do_sack`, `tcp_do_newsack`, `tcp_do_lrd`); P12
+  replaces those citations with the RFC sections it follows.
 * [Low] network, `erx_udp_wire:decode/3`: over IPv4 a datagram whose UDP length is short of its IP
   payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
   64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a

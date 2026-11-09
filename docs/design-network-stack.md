@@ -838,8 +838,17 @@ never unified them, which is one reason RACK is a second stack. Here the
 loss modules read and mark the one log, and output takes the next range
 to send from it.
 
-The receiver's side translates `tcp_update_sack_list`
-(`tcp_sack.c:289`) and D-SACK. `erx_tcp_reass` translates `tcp_reass`
+The receiver's side, `erx_tcp_sack`, is written from RFC 2018 section 4
+and RFC 2883 section 4, not translated from `tcp_sack.c` (see
+"Provenance and notices" for why). It is a pure value beside the reassembly
+queue: the ranges the queue holds above `rcv_nxt`, taken from it after
+every segment and ordered most recently touched first, the range the
+segment touched leading, and the D-SACK block, the lowest part of the
+last duplicate segment that the receiver already had, reported once
+and first, with the range that contains it second. An
+acknowledgement carries at most four blocks, and the encoder keeps as
+many from the front as the other options leave room for.
+`erx_tcp_reass` translates `tcp_reass`
 (`tcp_reass.c:516`): an ordered map of out-of-order ranges with
 FreeBSD's overlap trimming and its cap of 100 queued segments
 (`tcp_reass_maxqueuelen`, `tcp_reass.c:110`), and the bytes it holds
@@ -1318,10 +1327,10 @@ modules are marked P; process modules E.
 | `erx_tcp_user` | `tcp_usrreq.c`, `tcp_drop` (`tcp_subr.c:2393`), `tcp_close` (`:2532`), `tcp_newtcpcb` (`:2233`) | user requests | P |
 | `erx_tcp_rtt` | `tcp_xmit_timer` (`tcp_input.c:3642`) | RFC 6298 estimator | P |
 | `erx_tcp_mss` | `tcp_mss` (`tcp_input.c:3899`), `tcp_mss_update`, `tcp_maxseg` (`tcp_subr.c:3780`), `tcp_compute_initwnd` | MSS and initial window | P |
-| `erx_tcp_sendlog` | `tcp_sack.c` sender side (`tcp_sack_doack`, `:576`; `tcp_sack_output`, `:1061`) | the send log and RFC 6675 scoreboard | P |
-| `erx_tcp_sack` | `tcp_sack.c` receiver side | SACK and D-SACK blocks | P |
+| `erx_tcp_sendlog` | none: written from RFC 6675, the role of `tcp_sack_doack` and `tcp_sack_output` in `tcp_sack.c`, which is not read | the send log and RFC 6675 scoreboard | P |
+| `erx_tcp_sack` | none: written from RFC 2018 and RFC 2883, since `tcp_sack.c` carries an advertising clause | SACK and D-SACK blocks | P |
 | `erx_tcp_reass` | `tcp_reass.c` | out-of-order queue | P |
-| `erx_tcp_loss`, `erx_tcp_loss_dupack` | loss parts of `tcp_input.c` and `tcp_sack.c` | behaviour; default loss detection | P |
+| `erx_tcp_loss`, `erx_tcp_loss_dupack` | loss parts of `tcp_input.c`; RFC 6675 for those of `tcp_sack.c`, which is not read | behaviour; default loss detection | P |
 | `erx_tcp_cc`, `erx_tcp_cc_newreno`, `erx_tcp_cc_cubic` | `cc/cc.h`, `cc/cc.c`, `cc_newreno.c`, `cc_cubic.c`, the `cc_*` callers in `tcp_input.c` | behaviour; NewReno; CUBIC | P |
 | `erx_tcp_ecn` | `tcp_ecn.c` | ECN | P |
 | `erx_tcp_isn` | `tcp_new_isn`, `tcp_new_ts_offset`, `tcp_keyed_hash` (`tcp_subr.c`) | initial sequence numbers, timestamp offsets | P |
@@ -1372,9 +1381,14 @@ against the SHA-256 in the notice. A
 build check fails when a module's header names a FreeBSD file that the
 notice file does not list for it, or the reverse.
 
-Two files are never translated. `netinet/in_cksum.c` carries the
-four-clause BSD licence with its advertising clause (`in_cksum.c:17`);
-the Internet checksum is erXos's own per-byte primitive. RACK's
+Three files are never translated.
+`netinet/in_cksum.c` carries the four-clause BSD licence with its
+advertising clause (`in_cksum.c:17`); the Internet checksum is erXos's
+own per-byte primitive. `netinet/tcp_sack.c` carries, besides the
+Regents' notice, NRL's notice with an advertising clause, which erXos
+does not take into its tree; the receiver's SACK blocks are written from
+RFC 2018 and RFC 2883, and the sender's scoreboard and recovery from RFC
+6675, each without reading it. RACK's
 `tcp_stacks/tailq_hash.c` and `.h` carry no licence header; a RACK module
 reads `rack.c` for its logic and builds its records on the send log.
 
