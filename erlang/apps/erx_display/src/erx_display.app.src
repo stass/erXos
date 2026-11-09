@@ -7,14 +7,15 @@
 %% erx_wm_single; erx_wctl, the text of a window's wctl file; and erx_ui_model,
 %% the realised widget tree and its one difference; and erx_vt, the terminal
 %% emulator's core, with its generated width table erx_vt_width; the draw
-%% protocol's codec erx_draw_codec, generated from abi/formats/draw.txt, and
-%% erx_draw_image, the decoder of a Y message's compressed pixels; erx_vt reads
-%% erx: links through erx's erx_present.
+%% protocol's codec erx_draw_codec, generated from abi/formats/draw.txt, its
+%% pure core erx_draw_core, which checks a write against a connection and plans
+%% it, and erx_draw_image, the decoder of a Y message's compressed pixels;
+%% erx_vt reads erx: links through erx's erx_present.
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_draw_codec, erx_draw_image, erx_screen_core, erx_ui_model, erx_vt, erx_vt_width, erx_wctl, erx_wm,
-              erx_wm_single]},
+  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_screen_core, erx_ui_model, erx_vt,
+              erx_vt_width, erx_wctl, erx_wm, erx_wm_single]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

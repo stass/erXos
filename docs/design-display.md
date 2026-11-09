@@ -1106,6 +1106,30 @@ message. The process performs the operations only after the fold has
 consumed the whole write, so a failed write applies none of them. The
 core is tested exhaustively on the host over small ids and rectangles.
 
+The core's state is the part of the connection later messages read: the
+images with their rectangles, depths, replicate bits and glyph records,
+the bytes charged, and `op`. Image 0 is made with the size and channel the
+policy gave the window, and remade at that size when the policy resizes
+the window, keeping the client's images; it is not charged to the pixel
+quota, which bounds what the client allocates. An image's charge is a
+function of the image, its pixel bytes and its glyph records each rounded
+up to 4 KiB, so `f`, and an `i` that remakes a font cache, give back
+exactly what was taken. A font cache holds its records as 16 bytes each,
+so what the core holds is what it charged. Each `r` replaces what the one
+before it left for reading, so a plan keeps only its write's last `r`. Operations name images by id, and the window process maps ids to
+its `erx_memdraw` images while it applies them in order. Every decision
+that needs the connection is the core's: a `b` carries its clip
+rectangle as devdraw's `rectclip` leaves it (a clip rectangle disjoint
+from r stays as given), a `c` the replicate bit as it stands after it,
+each drawing operation its compose operation, an `e` or `E` whether it
+is an arc, and an `s` or `x` becomes one draw for `x`'s background and
+one per glyph, the glyph's rectangle of the font cache as the mask,
+clipped to the message's clip rectangle, as devdraw's `drawchar`
+computes them. Those are the only coordinates the core derives, and a
+message one of whose derived coordinates leaves draw(3)'s 32 bits fails
+with `EINVAL`, so `erx_memdraw` receives only 32-bit coordinates. An `r`
+rectangle that is inverted lies inside no image and fails with `EINVAL`.
+
 Each operation goes to `erx_memdraw`, which computes the clipped
 rectangle with `erx_draw_clip` from the destination's clip rectangle,
 the source's and the mask's bounds and the operation's rectangle, and

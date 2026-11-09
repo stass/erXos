@@ -8,14 +8,16 @@ require 'tmpdir'
 require_relative '../lib/erx/abi'
 
 # The fuzz target of erx_draw_codec:decode/2 and erx_draw_image:decode/3, the
-# decoders of what a draw client writes (docs/design-display.md, "Draw
+# decoders of what a draw client writes, and of erx_draw_core:plan/2, which
+# checks a whole write against a connection (docs/design-display.md, "Draw
 # messages"). The codec is generated from abi/formats/draw.txt and run with
 # test/erlang/erx_draw_codec_fuzz.erl, which draws its cases from
 # test/erlang/erx_draw_codec_tests.erl, on stock's emulator (ERX_ERL and
 # ERX_ERLC, the oracle's).
 module ErxDrawCodecFuzz
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erlang/apps/erx_display/src/erx_draw_image.erl test/erlang/erx_draw_codec_tests.erl
+  SOURCES = %w[erlang/apps/erx_display/src/erx_draw_image.erl erlang/apps/erx_display/src/erx_draw_core.erl
+               test/erlang/erx_draw_codec_tests.erl test/erlang/erx_draw_core_tests.erl
                test/erlang/erx_draw_codec_fuzz.erl].map { |path| File.join(ROOT, path) }.freeze
   DEADLINE_SECONDS = '300'
 

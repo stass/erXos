@@ -8,7 +8,12 @@
 %% bytes give. Every decode must return a message of a declared name that
 %% consumed at least its letter, whose pixels fill its rectangle exactly
 %% and which re-encodes to a message that decodes to itself; or einval or
-%% enoent at an offset within the bytes; and never raise.
+%% enoent at an offset within the bytes; and never raise. The same bytes
+%% are then planned whole by erx_draw_core:plan/2 from a connection holding
+%% ids 1 to 7 at every depth, which must return a plan whose charge is that
+%% of the images it holds and within the quota and whose operations carry
+%% only 32-bit coordinates, or einval, enoent, eexist or enomem at a
+%% message's offset within the write, and never raise.
 -module(erx_draw_codec_fuzz).
 -export([run/1]).
 
@@ -16,6 +21,7 @@
 
 run([Seed]) ->
     rand:seed(exsss, {list_to_integer(Seed), 23, 29}),
+    put(prelude, erx_draw_core_tests:prelude()),
     try
         lists:foreach(fun(_) -> round() end, lists:seq(1, ?ROUNDS)),
         io:format("fuzz: ~b rounds ok~n", [?ROUNDS])
@@ -31,7 +37,15 @@ round() ->
                _ -> erx_draw_codec_tests:corpus_case()
            end,
     <<Depths:8/binary, Messages/binary>> = Case,
-    walk(Messages, erx_draw_codec_tests:depth_fun(Depths)).
+    walk(Messages, erx_draw_codec_tests:depth_fun(Depths)),
+    plan(erx_draw_core:plan(get(prelude), Messages), byte_size(Messages)).
+
+plan({ok, #{images := Images, bytes := Bytes, quota := #{pixels := Quota}}, Ops}, _Size) ->
+    Bytes = erx_draw_core_tests:charged(Images),
+    true = Bytes =< Quota,
+    true = lists:all(fun erx_draw_core_tests:in_coords/1, Ops);
+plan({error, Errno, Offset}, Size) when Offset < Size ->
+    true = lists:member(Errno, [einval, enoent, eexist, enomem]).
 
 walk(<<>>, _) -> ok;
 walk(Bytes, Depth) ->

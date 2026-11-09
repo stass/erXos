@@ -299,6 +299,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   per dirty rectangle (`erx_device:fill/3`). Settled by frame times on a
   full-screen redraw; the fix on the table is an `erx_memdraw` image over
   the pool buffer.
+* **[Low] display, `erx_draw_core:plan/2` over its worst writes**: a
+  write of `i 4096` messages allocates about 200 MB in all, `l` copies its
+  font cache's records (up to 64 KiB) on each glyph, and one `s` of 32,000
+  indices plans 32,000 draws, about 7 MB of terms. Settled by the plan's
+  time and allocation for each of those writes at 64 KiB; the fix on the
+  table is a mutable record table in the window process.
 * **[Low] display, the dirty-scheduler threshold for draw operations**
   (64 KiB of destination pixels proposed). Settled by latency of small and
   large draws on and off dirty schedulers.
