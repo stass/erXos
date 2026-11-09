@@ -609,6 +609,13 @@ it; git history is the record of completed work.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
+* [Medium] network, `erx_dhcp4_core` and `erx_dhcp4_wire` (P20 review): open choices for the
+  DHCP client. It configures again on every renewal ACK, even an unchanged one; an ACK in requesting
+  is not checked against the offer; there is no ARP probe and DECLINE before using an address
+  (RFC 2131 4.4.1, RFC 5227); option 26 (MTU) is passed on without a clamp to the device MTU, and
+  where the domain name goes is open; classless static routes (option 121, RFC 3442), option
+  overload and INIT-REBOOT are not read. The fuzz target has no field oracle: pkt has no DHCP
+  decoder, so its judge compares joined option bytes instead.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.

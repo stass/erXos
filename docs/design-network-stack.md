@@ -1364,7 +1364,8 @@ The network domain's configuration names each interface's mode:
 link supervisor starts `erx_dhcp4`; and whether IPv6 autoconfiguration
 runs, which it does by default. `erx_dhcp4_core` is a pure RFC 2131
 state machine with RFC 2132's options, written from the RFCs with
-FreeBSD's `dhclient` as the behavioural reference, and `erx_dhcp4` is its
+FreeBSD's `dhclient` as the behavioural reference, over the message codec
+`erx_dhcp4_wire`, the only maker of a received DHCP message; `erx_dhcp4` is its
 process, a child of the link supervisor ([Decisions](#decisions), 3).
 Its transaction ids and the randomised delays and retransmission times
 of RFC 2131 section 4.1 come from the generator in its state.
@@ -1452,7 +1453,7 @@ modules are marked P; process modules E.
 | `erx_net_frame` | the header-building parts of `ip_output`, `ip6_output`, `ether_output` | encode a frame | P |
 | `erx_net_rand` | none; the role of `arc4random` | the keyed random generator each owner holds | P |
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
-| `erx_dhcp4_core` | none; RFC 2131 | DHCP client state machine | P |
+| `erx_dhcp4_wire`, `erx_dhcp4_core` | none; RFC 2131, RFC 2132, RFC 3396 | DHCP message codec; DHCP client state machine | P |
 | `erx_net_credit` | none | credited hand-over | funnel |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd`, `erx_net_loop` | none | processes | E |
 

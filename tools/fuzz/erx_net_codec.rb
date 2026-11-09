@@ -10,7 +10,7 @@ require_relative '../lib/erx/generated'
 
 # The fuzz targets of the network stack's codecs (docs/design-network-stack.md,
 # "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire, erx_ip4_wire, erx_icmp4_wire,
-# erx_udp_wire, erx_ip6_wire, erx_icmp6_wire and erx_tcp_wire, and the quoted-packet decoders of erx_icmp4 and
+# erx_udp_wire, erx_ip6_wire, erx_icmp6_wire, erx_tcp_wire and erx_dhcp4_wire, and the quoted-packet decoders of erx_icmp4 and
 # erx_icmp6, each driven by test/erlang/MODULE_fuzz.erl,
 # compiled from source with the host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
@@ -66,6 +66,14 @@ module ErxNetCodecFuzz
                              exact: '{_, Off} when Off + ?UPPER_MIN > byte_size(Invoking) ->',
                              faulty: '{_, Off} when Off > byte_size(Invoking) ->',
                              fault: 'accepting a quoted packet without 8 bytes of its upper-layer header'),
+    'dhcp4' => Target.new(module_name: 'erx_dhcp4_wire',
+                          exact: 'hlen(Hlen) when Hlen =< ?CHADDR_BYTES -> ok;',
+                          faulty: 'hlen(_) -> ok;',
+                          fault: 'trusting a hardware address length over 16'),
+    'dhcp4_join' => Target.new(module_name: 'erx_dhcp4_wire',
+                               exact: 'raw_options(Rest, maps:update_with(Code, fun(Seen) -> [Data | Seen] end, [Data], Acc));',
+                               faulty: 'raw_options(Rest, Acc#{Code => [Data]});',
+                               fault: 'keeping only the last instance of a long option'),
     'tcp' => Target.new(module_name: 'erx_tcp_wire',
                         exact: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off < ?TCP_HDR_WORDS; Off * 4 > byte_size(Segment) ->',
                         faulty: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off * 4 > byte_size(Segment) ->',

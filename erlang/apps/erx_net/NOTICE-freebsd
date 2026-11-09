@@ -161,3 +161,6 @@ module erx_icmp6
 module erx_tcp_syncache
   sys/netinet/tcp_syncache.c syncache_add syncache_respond syncache_expand syncache_chkrst syncache_unreach syncache_timer syncache_timeout syncache_insert syncache_send_challenge_ack syncookie_mac syncookie_generate syncookie_expand syncookie_reseed
   sys/netinet/tcp_subr.c tcp_challenge_ack_check
+
+module erx_net_bind
+  sys/netinet/in_pcb.c in_pcb_lport_dest
