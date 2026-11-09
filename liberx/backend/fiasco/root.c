@@ -51,6 +51,14 @@ extern char erx_fiasco_image_end[];
 
 ERX_DECLARE_ABI_NOTE(erx_fiasco_root_abi_note);
 
+/*
+ * The archive's view outlives the boot: the service slices and maps the image's
+ * entries through it for every domain the domain library builds (slice.c), and
+ * the library's view reads its entries. Its bytes are the handoff's image, mapped
+ * for the root's life.
+ */
+static erx_pack_view_t root_pack;
+
 void erx_fiasco_root_main(void);
 
 static void root_append(char *, size_t *, const char *);
@@ -73,26 +81,20 @@ erx_fiasco_root_main(void)
 
 	reason = root_boot(&handoff, &manifest, &boot_args);
 	if (reason == NULL)
-		reason = erx_fiasco_program_start(&handoff, &manifest, &boot_args);
+		reason = erx_fiasco_program_start(&handoff, &manifest, &root_pack, &boot_args);
 	root_refuse(reason);
 }
 
 static const char *
 root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_boot_args_t *boot_args)
 {
-	/*
-	 * The archive's view outlives the boot: the service slices and maps the image's
-	 * entries through it for every domain the domain library builds (slice.c). Its
-	 * bytes are the handoff's image, mapped for the root's life.
-	 */
-	static erx_pack_view_t pack;
 	const char *reason;
 
-	reason = erx_fiasco_root_open(handoff, &pack);
+	reason = erx_fiasco_root_open(handoff, &root_pack);
 	if (reason != NULL)
 		return (reason);
-	erx_fiasco_task_set_archive(&pack);
-	reason = erx_fiasco_root_read_manifest(&pack, manifest);
+	erx_fiasco_task_set_archive(&root_pack);
+	reason = erx_fiasco_root_read_manifest(&root_pack, manifest);
 	if (reason != NULL)
 		return (reason);
 	if (!erx_boot_args_parse(handoff->bootargs, handoff->bootargs_len, boot_args))
@@ -112,7 +114,7 @@ root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_b
 	reason = erx_fiasco_watchdog_start(&config, mode);
 	if (reason != NULL)
 		return (reason);
-	root_report(handoff, pack.header.nentries);
+	root_report(handoff, root_pack.header.nentries);
 	root_report_manifest(manifest);
 	root_report_watchdog(&config, mode);
 	return (NULL);

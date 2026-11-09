@@ -18,6 +18,7 @@
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
+#include "erx/pack.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "test/guest/native_task/modes.h"

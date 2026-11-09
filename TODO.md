@@ -799,9 +799,18 @@ it; git history is the record of completed work.
 * [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page's
   system connection names no peer node (`peer_node_off`, `peer_node_len` stay 0), so a
   domain cannot tell the system domain's node name from its boot page.
-* [Medium] domain library, `include/erx/dom_lib.h` (`det`): no caller sets it, so no
-  domain's page carries `ERX_BOOT_DET` under `erx.det=1`; the library's view at boot
-  (DL2d) should set it from the system's own page.
+* [Medium] domain library, `liberx/system/dom_boot.c` and `tools/host/dom_plan.c`: three
+  builders of one view must agree field by field (`manifest.rb` `plan_view`, the host
+  planner's text input, and `erx_dom_boot_view`), and the host planner never runs
+  `erx_dom_principal_check`, so a principal the manifest check admits (memory not
+  page-aligned, say) ends the machine at boot. Have the host planner build its view from
+  the packed manifest and archive through `erx_dom_boot_view`, and add a host test of the
+  boot view and of `erx_dom_boot_layout`'s overflow on a fixture with configured domains.
+* [Medium] domain library, `liberx/system/dom_boot.c` (`erx_dom_boot_up`): each principal's
+  group is a plain `erx_group_create(0, 0)`: no `users` group with the manifest's
+  `users_share`, no principal group under it, and the principal's share never applied
+  (docs/design-system.md, "The root task", step 2). The stopgap ignores the parent, so
+  nothing notices yet.
 * [Medium] domain library, `liberx/system/dom_apply.c`: two stopgap details reach permanent
   code: the fault thread's `erx_dom_lib_take` uses the stopgap's `erx_ipc_wait(deadline,
   *label)` before the target receive signature is settled (the `erx_ipc_wait` item above),

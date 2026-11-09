@@ -11,8 +11,12 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "erx/abi_reader.h"
 #include "erx/cdefs.h"
 #include "erx/dom.h"
+
+/* include/erx/pack.h's; that header's erx_boot_inputs_t is the first stage's, not the boot page's. */
+typedef struct erx_pack_view erx_pack_view_t;
 
 /*
  * The domain library's run-time half (docs/design-system.md, "The domain
@@ -39,10 +43,18 @@
  * the library's handle to its own budget is never the last one.
  */
 
+/* One principal's budget and group, in the root's own table. */
+typedef struct erx_dom_principal_held {
+	uint64_t	budget;		/* carved from the root budget at the
+					 * principal's memory: its domains' budgets
+					 * carve from it */
+	uint64_t	group;		/* its group: its requested domains' CPU parent */
+} erx_dom_principal_held_t;
+
 /* What the library holds of the system domain's: handles in the root's own table. */
 typedef struct erx_dom_held {
-	uint64_t	principal_budget;	/* the built-in system principal's budget */
-	uint64_t	principal_group;	/* its group: a requested domain's CPU parent */
+	erx_dom_principal_held_t *principals;	/* view.nprincipals: principal
+						 * number n at n - 1 */
 	uint64_t	system_group;		/* the system domain's group: its bells, and
 						 * a configured domain's CPU parent */
 	uint64_t	image;			/* the boot image (SYSTEM): what erx_image_slice
@@ -185,5 +197,78 @@ bool		erx_dom_lib_record(erx_dom_lib_t *, uint64_t label,
  */
 erx_dom_lib_t	*erx_dom_lib_system(void);
 void		erx_dom_lib_system_set(erx_dom_lib_t *);
+
+/*
+ * The library at boot (docs/design-system.md, "The root task", steps 2 and
+ * 3), in liberx/system/dom_boot.c. The tables come from memory the caller
+ * supplies, one region laid out by erx_dom_boot_layout from the sizes the
+ * manifest and the boot image give.
+ */
+typedef struct erx_dom_boot_sizes {
+	uint32_t	max_domains;	/* the manifest's: domain records */
+	uint32_t	max_connections; /* the manifest's: connection rows */
+	uint32_t	nprincipals;	/* the manifest's principal rows */
+	uint32_t	nconfigured;	/* its configured-domain rows */
+	uint32_t	nfiles;		/* the boot image's entries */
+} erx_dom_boot_sizes_t;
+
+typedef struct erx_dom_boot_tables {
+	erx_dom_t		*domains;	/* max_domains */
+	erx_dom_handles_t	*handles;	/* max_domains */
+	erx_dom_connection_t	*connections;	/* max_connections */
+	erx_dom_link_handles_t	*links;		/* max_connections */
+	erx_dom_principal_t	*principals;	/* nprincipals */
+	erx_dom_principal_held_t *held;		/* nprincipals */
+	erx_dom_configured_t	*configured;	/* nconfigured */
+	erx_dom_file_t		*files;		/* nfiles */
+} erx_dom_boot_tables_t;
+
+/* The sizes of the view the manifest and the boot image describe. */
+erx_dom_boot_sizes_t erx_dom_boot_sizes(const erx_manifest_view_t *,
+		    const erx_pack_view_t *);
+
+/*
+ * Places the tables of sizes in one region starting at base, which is
+ * page-aligned, each aligned for its type, and sets *bytes to the region's size; base 0 sizes only.
+ * False when the size does not fit a size_t.
+ */
+bool		erx_dom_boot_layout(const erx_dom_boot_sizes_t *, uintptr_t base,
+		    erx_dom_boot_tables_t *tables, size_t *bytes) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * Builds lib's view from the checked manifest and the opened boot image into
+ * tables, which erx_dom_boot_layout placed for erx_dom_boot_sizes: the
+ * header's limits, the principals numbered from 1 in row order and each
+ * admitted by erx_dom_principal_check, the configured rows, every file of
+ * the image, and the host name. Pure: it makes no call. NULL, or the reason
+ * the manifest cannot give a view, with lib's view left partial.
+ */
+const char	*erx_dom_boot_view(erx_dom_lib_t *, const erx_manifest_view_t *,
+		    const erx_pack_view_t *, const erx_dom_boot_tables_t *tables);
+
+/*
+ * The effects at boot, after erx_dom_boot_view: each principal's budget,
+ * carved from the root budget, and group; the fault gate; and the held
+ * handles and boot-page values the system's own page gives (its group,
+ * time page, pack flags and ERX_BOOT_DET), and system_space, the object id
+ * by which the kernel's records name the system domain's space. Names lib with
+ * erx_dom_lib_system_set. NULL, or the reason a call was refused; the
+ * root then ends the machine, so nothing is undone.
+ */
+const char	*erx_dom_boot_up(erx_dom_lib_t *, const erx_boot_info_t *system_page,
+		    uint64_t system_space);
+
+/*
+ * Manifest startup and restart: erx_dom_create of configured-domain row
+ * `row` under domain id `id`, planned by erx_dom_plan_configured and applied
+ * as erx_dom_lib_create applies a request's plan. Like every entry, it runs
+ * under the caller's one library lock. `row` is the row's index in the
+ * manifest's domain table, which the record's origin keeps; manifest
+ * startup walks the boot order, and the host planner, which plans the rows
+ * in that order, gives the domain at place p of it the id
+ * ERX_DOM_SYSTEM_ID + 1 + p, so startup gives the same ids.
+ */
+erx_status_t	erx_dom_lib_configured(erx_dom_lib_t *, uint32_t id, uint32_t row,
+		    erx_dom_created_t *created) ERX_WARN_UNUSED_RESULT;
 
 #endif /* ERX_DOM_LIB_H */

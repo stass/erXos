@@ -32,6 +32,7 @@
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
+#include "erx/pack.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/task_start.h"
 #include "liberx/backend/fiasco/vm.h"

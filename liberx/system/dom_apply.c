@@ -21,6 +21,7 @@
 #include "erx/dom_lib.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
+#include "liberx/system/dom_apply.h"
 #include "liberx/system/dom_install.h"
 
 /* A domain id's decimal digits: at most ten for 32 bits. */
@@ -65,6 +66,7 @@ typedef struct link {
 static void	set_close_under(handle_set_t *, erx_dom_obj_t);
 static erx_dom_obj_t set_find(const handle_set_t *, uint64_t);
 
+static const erx_dom_principal_held_t *apply_principal(const apply_t *);
 static uint64_t	apply_object(const apply_t *, erx_dom_obj_t);
 static int	apply_step(apply_t *, const erx_dom_step_t *);
 static int	apply_map(apply_t *, const erx_dom_step_t *);
@@ -87,6 +89,23 @@ pages_of(uint64_t bytes)
 	return (bytes / ERX_PAGE_SIZE + (bytes % ERX_PAGE_SIZE != 0));
 }
 
+/*
+ * The held handles of the plan's principal. The core planned against a view
+ * whose principals are numbered 1 to nprincipals (erx_dom_boot_view), so the
+ * number always names one; a number outside them names none of the held
+ * handles, and the step that uses them is refused by the backend.
+ */
+static const erx_dom_principal_held_t *
+apply_principal(const apply_t *apply)
+{
+	static const erx_dom_principal_held_t none = { APPLY_NO_HANDLE, APPLY_NO_HANDLE };
+	const uint32_t number = apply->plan->spec.principal;
+
+	if (number == 0 || number > apply->lib->view.nprincipals)
+		return (&none);
+	return (&apply->lib->held.principals[number - 1]);
+}
+
 /* The handle a step names: one the creation made, or one the library holds. */
 static uint64_t
 apply_object(const apply_t *apply, erx_dom_obj_t obj)
@@ -97,11 +116,11 @@ apply_object(const apply_t *apply, erx_dom_obj_t obj)
 		return (apply->handles.made[obj]);
 	switch (obj) {
 	case ERX_DOM_OBJ_PRINCIPAL_BUDGET:
-		return (held->principal_budget);
+		return (apply_principal(apply)->budget);
 	case ERX_DOM_OBJ_PARENT_GROUP:
 		/* The plan's resolved CPU parent; apply does not choose again. */
 		return (apply->plan->parent == ERX_DOM_PARENT_SYSTEM ?
-		    held->system_group : held->principal_group);
+		    held->system_group : apply_principal(apply)->group);
 	case ERX_DOM_OBJ_SYSTEM_SPACE:
 		return (ERX_CAP_SELF);
 	case ERX_DOM_OBJ_SYSTEM_GROUP:
@@ -558,16 +577,25 @@ erx_dom_lib_create(erx_dom_lib_t *lib, const erx_dom_spec_t *req,
 {
 	/* A plan holds a specification with its strings: too large for a stack. */
 	static erx_dom_plan_t plan;
-	static apply_t apply;
 	erx_status_t status;
 
 	status = erx_dom_plan_request(&lib->view, req, limits, given, &plan);
-	if (status == ERX_OK) {
-		apply = (apply_t){ .lib = lib, .plan = &plan };
-		status = apply_plan(&apply, created);
-	}
-	/* No copy of the plan or its strings stays in these static buffers past the call. */
+	if (status == ERX_OK)
+		status = erx_dom_lib_apply(lib, &plan, created);
+	/* No copy of the plan or its strings stays in this static buffer past the call. */
 	memset(&plan, 0, sizeof(plan));
+	return (status);
+}
+
+erx_status_t
+erx_dom_lib_apply(erx_dom_lib_t *lib, const erx_dom_plan_t *plan, erx_dom_created_t *created)
+{
+	/* What the steps learn, with a copy of each handle: too large for a stack. */
+	static apply_t apply;
+	erx_status_t status;
+
+	apply = (apply_t){ .lib = lib, .plan = plan };
+	status = apply_plan(&apply, created);
 	memset(&apply, 0, sizeof(apply));
 	return (status);
 }

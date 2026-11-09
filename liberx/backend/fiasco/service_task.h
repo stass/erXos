@@ -12,8 +12,10 @@
 #include "erx/abi.h"
 #include "erx/log.h"
 #include "erx/core/crash.h"
-#include "erx/pack.h"
 #include "liberx/backend/fiasco/service_wire.h"
+
+/* include/erx/pack.h's; that header's erx_boot_inputs_t is the first stage's, which boot_info.h's readers of this one must not meet. */
+typedef struct erx_pack_view erx_pack_view_t;
 
 /*
  * The service's table of tasks (docs/design-stopgap.md, "Task exit", "Capabilities in

@@ -10,13 +10,16 @@
 #include "erx/core/boot_handoff.h"
 #include "liberx/backend/fiasco/boot_args.h"
 
+/* include/erx/pack.h's; that header's erx_boot_inputs_t is the first stage's, not the boot page's. */
+typedef struct erx_pack_view erx_pack_view_t;
+
 /*
- * What the root task runs once it is up: it fills the boot information page and enters
- * musl's start path. Returns only on a refusal, with the reason. A root built without a
+ * What the root task runs once it is up: it fills the boot information page, builds the
+ * domain library from the manifest and the archive, pack, and enters musl's start path. Returns only on a refusal, with the reason. A root built without a
  * program answers this with root_no_program.c.
  */
 const char	*erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manifest_view_t *manifest,
-	    const erx_boot_args_t *boot_args);
+	    const erx_pack_view_t *pack, const erx_boot_args_t *boot_args);
 
 /*
  * Enters musl's start path with program as main, on a stack of its own with a guard below

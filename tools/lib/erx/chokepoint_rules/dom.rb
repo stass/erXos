@@ -11,14 +11,19 @@ module Erx
     # ends domains and calls neither erx_dom_plan_configured nor
     # erx_dom_plan_partial.
     DOM_LIFE = 'liberx/system/dom_life.c'
-    # The domain library's apply phase, which runs request plans alone and
-    # calls neither entry until manifest startup lands with the NIF.
+    # The domain library's apply phase, which applies the plans the library's
+    # entries make and calls neither manifest entry.
     DOM_APPLY = 'liberx/system/dom_apply.c'
+    # The library at boot and manifest startup: the one caller on the target of
+    # erx_dom_plan_configured.
+    DOM_BOOT = 'liberx/system/dom_boot.c'
     # The library's one install (A7) and the domain service's NIF module, which
     # call neither entry; the NIF reaches only erx_dom_lib_*.
     DOM_INSTALL_FILES = %w[liberx/system/dom_install.c liberx/system/dom_install.h].freeze
     DOM_NIF = 'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c'
     DOM_HEADER = 'include/erx/dom.h'
+    DOM_LIB_HEADER = 'include/erx/dom_lib.h'
+    DOM_APPLY_HEADER = 'liberx/system/dom_apply.h'
     DOM_DRIVER = 'test/fixtures/dom_core_driver.c'
     DOM_FUZZ = 'tools/fuzz/dom_core_fuzz.c'
     # The manifest check's host run of the configured entry over each configured
@@ -29,7 +34,7 @@ module Erx
     ERXOS_NIFS = 'otp/erts/emulator/nifs/erxos/**/*'
 
     declare_group(
-      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY, *DOM_INSTALL_FILES],
+      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY, DOM_APPLY_HEADER, DOM_BOOT, *DOM_INSTALL_FILES],
       rules: [
         # A creation origin is authority provenance: the planning entries
         # build every specification, origin included, inside the core, so
@@ -49,36 +54,49 @@ module Erx
           seed: { 'liberx/system/dom_apply.c' => "spec.origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, row };\n",
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "origin.kind = ERX_DOM_REQUEST;\n" }
         ),
-        # Nothing calls the manifest entries but their definition, their
-        # declaration, the driver, the fuzz target and the manifest check's host
-        # planner. Their first caller on the target
-        # replaces this rule with dom-manifest-entries' check.
-        Chokepoints::Forbidden.new(
-          name: 'dom-manifest-entries-uncalled',
-          rule: 'no file calls erx_dom_plan_configured or erx_dom_plan_partial until the check of their callers ' \
-                '(dom-manifest-entries) lands with them',
-          design: 'docs/design-system.md#the-domain-library',
-          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
-          pattern: /\berx_dom_plan_(?:configured|partial)\b/,
-          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER].map { |path| Chokepoints::Site.new(glob: path) },
-          seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
-                  'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
-                    "status = erx_dom_plan_partial(&view, id, row, &plan);\n" }
-        ),
         # A numeric index a requester supplies never selects manifest
         # authority: only manifest startup and restart call the configured
-        # entry and only the root's partial-boot entry the partial one
-        # (docs/design-system.md, "The domain library"); on the host, the
-        # manifest check plans each configured row too. Its check lands
-        # with the first caller, the library's apply and NIF.
-        Chokepoints::Pending.new(
+        # entry (docs/design-system.md, "The domain library"). On the host,
+        # the manifest check plans each configured row too, and the driver
+        # and fuzz target judge the entry.
+        Chokepoints::Forbidden.new(
           name: 'dom-manifest-entries',
-          rule: 'only manifest startup and restart call erx_dom_plan_configured, and only the root partial-boot ' \
-                'entry calls erx_dom_plan_partial; no domain facet reaches either',
+          rule: "only manifest startup and restart (#{DOM_BOOT}) call erx_dom_plan_configured or its applying " \
+                'entry erx_dom_lib_configured; no domain facet reaches either',
           design: 'docs/design-system.md#the-domain-library',
-          awaits: ['liberx/system/**/*', 'otp/erts/emulator/nifs/erxos/erx_domain_lib*'],
-          existing: [DOM_CORE, DOM_LIFE, DOM_APPLY, *DOM_INSTALL_FILES, DOM_NIF],
-          reason: "the entries' callers land with the domain library's apply and NIF"
+          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
+          pattern: /\berx_dom_(?:plan|lib)_configured\b/,
+          sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER].map { |path| Chokepoints::Site.new(glob: path) },
+          seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
+                  'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
+                    "status = erx_dom_lib_configured(lib, id, row, &created);\n" }
+        ),
+        # The apply phase runs a plan only from the library's own entries,
+        # which planned it: no other file names erx_dom_lib_apply, so no
+        # caller applies a plan it built itself.
+        Chokepoints::Forbidden.new(
+          name: 'dom-apply-private',
+          rule: "only the library's own entries (#{DOM_APPLY}, #{DOM_BOOT}) apply a plan with erx_dom_lib_apply",
+          design: 'docs/design-system.md#the-domain-library',
+          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
+          pattern: /\berx_dom_lib_apply\b/,
+          sites: [DOM_APPLY, DOM_APPLY_HEADER, DOM_BOOT].map { |path| Chokepoints::Site.new(glob: path) },
+          seed: { 'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "status = erx_dom_lib_apply(lib, &plan, &created);\n" }
+        ),
+        # The root's partial-boot entry is the only caller the partial entry
+        # may have, and it does not exist yet: nothing calls it but its
+        # definition, its declaration, the driver and the fuzz target. Its
+        # first caller replaces this rule with one that allows that entry.
+        Chokepoints::Forbidden.new(
+          name: 'dom-partial-entry-uncalled',
+          rule: 'no file calls erx_dom_plan_partial until the root partial-boot entry lands',
+          design: 'docs/design-system.md#the-domain-library',
+          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
+          pattern: /\berx_dom_plan_partial\b/,
+          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ].map { |path| Chokepoints::Site.new(glob: path) },
+          seed: { 'liberx/system/dom_boot.c' => "status = erx_dom_plan_partial(&lib->view, id, row, &plan);\n",
+                  'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
+                    "status = erx_dom_plan_partial(&view, id, row, &plan);\n" }
         )
       ]
     )

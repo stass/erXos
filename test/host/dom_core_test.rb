@@ -112,11 +112,12 @@ class DomCoreTest < Minitest::Test
   end
 
   # erx_dom_principal's validation: the record keeps the configuration with
-  # its counts zeroed, and each broken field has its status.
+  # its counts zeroed, and each broken field has its status. A domain quota
+  # of 0 is a principal holding no domain, which the library admits.
   PRINCIPAL_CASES = {
     'ok' => '0 number=2 carved=0 domains=0 same=1', 'number_taken' => '-11',
     'number_zero' => '-1', 'memory_zero' => '-1', 'memory_unaligned' => '-1', 'share_empty' => '-1',
-    'share_padding' => '-1', 'domains_zero' => '-1', 'default_over' => '-1', 'default_frame_zero' => '-1',
+    'share_padding' => '-1', 'domains_zero' => '0 number=2 carved=0 domains=0 same=1', 'default_over' => '-1', 'default_frame_zero' => '-1',
     'ceiling_frame_zero' => '-1', 'ceiling_frame_over' => '-1', 'ceiling_reserved' => '-1'
   }.freeze
 

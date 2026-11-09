@@ -21,11 +21,13 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
 #include "liberx/backend/core/boot_manifest.h"
+#include "erx/dom_lib.h"
 #include "liberx/backend/fiasco/boot_args.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/runtime_entry.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/runtime_entry.h"
 
@@ -47,6 +49,7 @@ static size_t		 boot_build(erx_boot_pair_t);
 static size_t		 build_id_words(const erx_boot_handoff_view_t *);
 static size_t		 word_append(char *, size_t, size_t, const char *);
 static size_t		 console_uart_number(char *, uint64_t);
+static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
 
@@ -82,9 +85,39 @@ erx_boot_info(void)
 	return ((const erx_boot_info_t *)(const void *)boot_page);
 }
 
+/*
+ * The system domain's one domain library (docs/design-system.md, "The root task", step 3),
+ * built from the manifest and the archive once the system's boot page holds the values the
+ * library copies into every domain's. Its tables come from the root budget, mapped for the
+ * root's life, and the library outlives the boot, so both are never released.
+ */
+static const char *
+library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack)
+{
+	static erx_dom_lib_t lib;
+	const erx_dom_boot_sizes_t sizes = erx_dom_boot_sizes(manifest, pack);
+	erx_dom_boot_tables_t tables;
+	uint64_t addr, mem;
+	size_t bytes;
+	const char *reason;
+
+	if (!erx_dom_boot_layout(&sizes, 0, &tables, &bytes) || bytes > SIZE_MAX - ERX_PAGE_SIZE)
+		return ("the domain library: its tables do not fit the address space");
+	bytes = (bytes + ERX_PAGE_SIZE - 1) / ERX_PAGE_SIZE * ERX_PAGE_SIZE;
+	if (erx_mem_create(ERX_CAP_NULL, bytes, 0, &mem) != ERX_OK ||
+	    erx_vm_reserve(ERX_CAP_SELF, 0, bytes, 0, &addr) != ERX_OK ||
+	    erx_vm_map(ERX_CAP_SELF, addr, bytes, mem, 0, ERX_PROT_RW) != ERX_OK ||
+	    !erx_dom_boot_layout(&sizes, (uintptr_t)addr, &tables, &bytes))
+		return ("the domain library: the backend refused its tables");
+	reason = erx_dom_boot_view(&lib, manifest, pack, &tables);
+	if (reason != NULL)
+		return (reason);
+	return (erx_dom_boot_up(&lib, erx_boot_info(), ERX_FIASCO_TASK_ROOT));
+}
+
 const char *
 erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manifest_view_t *view,
-    const erx_boot_args_t *boot_args)
+    const erx_pack_view_t *pack, const erx_boot_args_t *boot_args)
 {
 	erx_boot_inputs_t inputs = { 0 };
 	erx_boot_manifest_t manifest;
@@ -130,6 +163,9 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	status = erx_boot_info_build(&inputs, boot_page, sizeof(boot_page));
 	if (status != ERX_BOOT_INFO_OK)
 		return (erx_boot_info_reason(status));
+	reason = library_up(view, pack);
+	if (reason != NULL)
+		return (reason);
 	erx_fiasco_libc_root_start(main);
 }
 

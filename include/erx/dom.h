@@ -518,12 +518,14 @@ erx_status_t	erx_dom_plan_record(erx_dom_view_t *, const erx_dom_plan_t *plan);
  * erx_dom_principal's validation of a principal's configuration, from the
  * manifest's principal row: a nonzero number no principal of the view
  * holds (ERX_EEXIST otherwise); a nonzero, page-aligned budget; a share
- * with a rate; a nonzero domain quota; and a ceiling profile no runtime
- * could exceed (a frame within ERX_FRAME_MAX), with the default profile
- * within it. ERX_EINVAL for anything else. On ERX_OK, *record is the
- * principal as the library keeps it, its counts carved and domains zero.
- * Whether the root budget holds its budget, and the users group its share,
- * is the kernel's to say when the library carves and creates them.
+ * with a rate; and a ceiling profile no runtime could exceed (a frame
+ * within ERX_FRAME_MAX), with the default profile within it. A domain
+ * quota of 0 is admitted: the principal holds no domain, as the
+ * development manifest's system principal does not. ERX_EINVAL for
+ * anything else. On ERX_OK, *record is the principal as the library
+ * keeps it, its counts carved and domains zero. Whether the root budget
+ * holds its budget, and the users group its share, is the kernel's to
+ * say when the library carves and creates them.
  */
 erx_status_t	erx_dom_principal_check(const erx_dom_view_t *,
 		    const erx_dom_principal_t *config, erx_dom_principal_t *record);

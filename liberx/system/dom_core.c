@@ -1031,7 +1031,6 @@ erx_dom_principal_check(const erx_dom_view_t *view,
 	/* A ceiling within itself is a profile a runtime can start with. */
 	if (config->memory == 0 || !dom_page_aligned(config->memory) ||
 	    !dom_grant_rate(&config->share, &rate) ||
-	    config->domains_max == 0 ||
 	    !dom_limits_within(&config->ceiling_limits,
 	    &config->ceiling_limits) ||
 	    !dom_limits_within(&config->default_limits,

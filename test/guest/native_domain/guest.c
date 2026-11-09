@@ -37,6 +37,7 @@
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
+#include "erx/pack.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/task_start.h"
 #include "liberx/backend/fiasco/time.h"
@@ -61,6 +62,7 @@ void erx_fiasco_root_main(void);
 static erx_dom_t domains[DOMAINS];
 static erx_dom_connection_t connections[CONNECTIONS];
 static erx_dom_principal_t principals[1];
+static erx_dom_principal_held_t principals_held[1];
 static erx_dom_handles_t handles[DOMAINS];
 static erx_dom_link_handles_t links[CONNECTIONS];
 static erx_dom_file_t files[ERX_PACK_ENTRIES_MAX];
@@ -162,16 +164,17 @@ library_up(void)
 	lib.host_len = 5;
 	lib.cap_limit = 64;
 	lib.fail_step = UINT32_MAX;
+	lib.held.principals = principals_held;
 	lib.held.time_page = erx_fiasco_time_object();
 	/* The stopgap's backend has one archive and reads no image handle. */
 	lib.held.image = 0;
 	if (erx_group_create(0, 0, &lib.held.system_group) != ERX_OK ||
-	    erx_group_create(0, 0, &lib.held.principal_group) != ERX_OK)
+	    erx_group_create(0, 0, &principals_held[0].group) != ERX_OK)
 		return ("erx: domain: no groups\n");
 	if (erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_ELASTIC, LIBRARY_MEMORY / ERX_PAGE_SIZE, LIBRARY_MEMORY / ERX_PAGE_SIZE,
 	    &budget) != ERX_OK)
 		return ("erx: domain: no principal budget\n");
-	lib.held.principal_budget = budget;
+	principals_held[0].budget = budget;
 	if (erx_gate_create(0, &lib.held.gate) != ERX_OK || erx_gate_bind(lib.held.gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK)
 		return ("erx: domain: no fault gate\n");
 	return (NULL);

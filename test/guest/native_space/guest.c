@@ -30,6 +30,7 @@
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
+#include "erx/pack.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
