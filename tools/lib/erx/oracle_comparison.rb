@@ -58,9 +58,10 @@ module Erx
     # of the host that never ran the guest (qemu_failed: why, host_failed: why); `cases`
     # maps each CaseKey to a status of STATUSES or UNRESOLVED_STATUSES; `seconds` is the
     # run's wall-clock time, nil when no record of it exists; `lost` is how many of its
-    # event lines were damaged or missing.
-    Side = Data.define(:state, :cases, :seconds, :lost) do
-      def initialize(state:, cases:, seconds: nil, lost: 0) = super
+    # event lines were damaged or missing; `notes` are lines the report prints
+    # under the run's state, such as which suites came from the stock cache.
+    Side = Data.define(:state, :cases, :seconds, :lost, :notes) do
+      def initialize(state:, cases:, seconds: nil, lost: 0, notes: []) = super
     end
     # One case's two statuses and its verdict. `attempt` is nil only for a
     # table row that names no case either run reached.
@@ -86,7 +87,7 @@ module Erx
         counts = VERDICTS.map { |verdict| "#{verdict} #{rows.count { |row| row.verdict == verdict }}" }
         summary = passed? ? 'PASS' : "FAIL (#{failing.size} cases, stock run #{stock.state}, erXos run #{erxos.state})"
         times = "stock: #{OracleComparison.seconds(stock)}, erXos#{" (#{runtime})" if runtime}: #{OracleComparison.seconds(erxos)}"
-        [*listed, "stock run: #{stock.state}", "erXos run: #{erxos.state}", times, counts.join(', '),
+        [*listed, "stock run: #{stock.state}", *stock.notes, "erXos run: #{erxos.state}", times, counts.join(', '),
          "result: #{summary}"].join("\n") << "\n"
       end
     end

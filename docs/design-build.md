@@ -487,6 +487,28 @@ stock is the same; an exact row whose case agrees, and any row that
 accounts for no difference in two finished runs, is stale and fails the
 comparison, as does every unlisted difference and every unresolved case.
 
+Stock's results depend on the stock build and the suites it runs, not on
+erXos's tree, so each suite's are cached between runs, and stock runs
+only the suites the cache lacks. A suite's key is the SHA-256 of the
+stock build's identity from its receipt (OTP version, source hash,
+flavour, configure flags without the install prefix, compilers, build
+flags), the host's CPU and OS, the scheduler count stock runs (the
+host's CPU count where ERTS's default applies), the group and suite
+names, and a digest of the group's whole test directory, the reporter's
+sources and the host code that starts stock and reads its events
+(`tools/lib/erx/oracle_suites.rb`, `oracle.rb`, `oracle_results.rb`,
+`oracle_comparison.rb`); a change to any of them is a new key, and the
+old entry is never read again. The key does not name which other suites
+shared the stock node, so a cached result may come from a run beside
+other suites. The cache is one JSON file per key in one directory on the
+host, shared by every worktree (`ERX_ORACLE_STOCK_CACHE`, by default
+`~/.cache/erxos/oracle-stock`); each file is written under a temporary
+name and renamed, and only the suites of a complete stock run are
+stored. The report says how many suites came from the cache and the time
+of the stock run they came from, and lists their keys in
+`stock-cached.txt` beside it. `ERX_ORACLE_FRESH_STOCK=1` runs every
+suite on stock again and replaces its entry.
+
 Each controller observation receives a bounded acknowledgement from the
 writer before the controller announces completion, so the completed-run
 event cannot overtake an accepted case record. Detailed arbitrary testcase

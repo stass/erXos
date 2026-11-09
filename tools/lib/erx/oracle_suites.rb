@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'etc'
 require 'fileutils'
 require 'securerandom'
 require 'socket'
 require_relative 'oracle'
 require_relative 'oracle_comparison'
+require_relative 'oracle_stock_cache'
 require_relative 'output_directory'
 require_relative 'runner'
 
@@ -15,7 +17,9 @@ module Erx
   # suites they run, the table of erXos's known differences, the compiled
   # suites and reporter both sides run, and the stock side, which is the same
   # run on stock OTP 29.1.2 on the host whichever erXos side it is compared
-  # with.
+  # with. Stock's per-suite results are kept in an OracleStockCache when
+  # the caller hands one in, so a suite stock already ran with the same
+  # build and inputs is not run again.
   #
   # The suites are OTP's groups of plan.md's M3 (emulator, kernel, stdlib
   # and compiler), and an instance serves one group: suite names repeat
@@ -114,8 +118,11 @@ module Erx
        "overall: #{failed.empty? ? 'PASS' : "FAIL (#{failed.join(', ')})"}\n"].join
     end
 
-    # `source` is the directory the suites come from, by default the group's.
-    def initialize(root:, out:, runner:, deadline:, group:, source: File.join(root, GROUPS.fetch(group)))
+    # `source` is the directory the suites come from, by default the group's;
+    # `stock_cache`, an OracleStockCache or nil, keeps stock's results.
+    def initialize(root:, out:, runner:, deadline:, group:, source: File.join(root, GROUPS.fetch(group)),
+                   stock_cache: nil)
+      @stock_cache = stock_cache
       @root = root
       @out = out
       @runner = runner
@@ -158,7 +165,31 @@ module Erx
       end
     end
 
-    # Runs every suite compiled into `tree` on stock. Stock reads its events
+    # Stock's side for every suite compiled into `tree`: each suite the stock
+    # cache holds for this build (`build`, the stock build's receipt),
+    # scheduler count and inputs comes from the cache, and the rest run on
+    # stock (run_stock_suites); their results are stored when that run is
+    # complete. The side's notes say which suites came from the cache and
+    # from which run.
+    def run_stock(tree, erl:, build: nil, schedulers: nil)
+      directory = File.join(tree, 'test/ct/suites')
+      return run_stock_suites(tree, directory, erl: erl, schedulers: schedulers) unless @stock_cache
+
+      suites = Dir.glob('*_SUITE.beam', base: directory).map { |file| File.basename(file, '.beam') }.sort
+      keys = stock_keys(suites, build: build, schedulers: schedulers)
+      cached = keys.filter_map { |suite, key| @stock_cache.find(key, suite: suite) }
+      missing = suites - cached.map(&:suite)
+      # nil when every suite came from the cache, so nothing ran on stock.
+      fresh = if missing.any?
+                run_stock_suites(tree, stock_directory(directory, missing, all: suites), erl: erl, schedulers: schedulers)
+              end
+      store_stock(fresh, keys.slice(*missing)) if fresh&.state == 'complete'
+      write_cached_listing(cached)
+      merged_stock_side(suites, cached: cached, fresh: fresh)
+    end
+
+    # Runs every suite of `directory` on stock, with the reporter compiled
+    # into `tree`. Stock reads its events
     # where erx_oracle_events writes them, so a run cut off by its deadline
     # still shows the cases it reached. `schedulers`, when given, is the
     # number of schedulers the erXos side runs, which stock then runs too
@@ -166,7 +197,7 @@ module Erx
     # a suite skips the cases that need more schedulers than are online, so
     # sides with different counts would differ in those cases for that alone.
     # The peers a suite starts keep ERTS's default.
-    def run_stock(tree, erl:, schedulers: nil)
+    def run_stock_suites(tree, directory, erl:, schedulers:)
       work = File.join(@out, 'stock')
       FileUtils.rm_rf(work)
       OutputDirectory.prepare(root: @out, path: work)
@@ -180,7 +211,7 @@ module Erx
                                                   'ERL_EPMD_RELAXED_COMMAND_CHECK' => '1')
       record = begin
         finished([erl, *scheduler_flags(schedulers), '-sname', STOCK_NODE, '-noshell', '-pa', File.join(tree, 'test/ct/reporter'),
-                  '-run', 'erx_ct_oracle', 'main', File.join(tree, 'test/ct/suites'), work],
+                  '-run', 'erx_ct_oracle', 'main', directory, work],
                  name: 'stock', deadline: @deadline, chdir: work, env: environment)
       ensure
         stop_epmd(File.join(File.dirname(erl), 'epmd'), environment: environment)
@@ -198,6 +229,74 @@ module Erx
     end
 
     private
+
+    # Each of `suites` with its stock cache key (OracleStockCache.key). The
+    # inputs are the group's whole test directory, since a suite may read
+    # another's data, the reporter's sources, and the host code that starts
+    # stock and turns its events into the cached statuses (this file,
+    # oracle.rb, oracle_results.rb, oracle_comparison.rb). Left out: which
+    # other suites shared the stock node, which the key cannot name.
+    def stock_keys(suites, build:, schedulers:)
+      raise Error, 'the stock cache needs the stock build receipt' unless build
+
+      identity = OracleStockCache.build_identity(build)
+      tests = Dir.glob(File.join(@source, '**/*')).select { |path| File.file?(path) }
+      starter = [*REPORTER.map { |path| File.join(@root, 'test/oracle', path) }, __FILE__,
+                 *%w[oracle.rb oracle_results.rb oracle_comparison.rb].map { |file| File.join(__dir__, file) }]
+      inputs = "#{OracleStockCache.files_digest(@source, tests)} #{OracleStockCache.files_digest(@root, starter)}"
+      suites.to_h do |suite|
+        [suite, OracleStockCache.key(identity: identity, schedulers: schedulers || Etc.nprocessors, inputs: inputs,
+                                     group: @group, suite: suite)]
+      end
+    end
+
+    # The directory stock runs: `directory` itself when every suite of `all`
+    # is `missing`, or else a copy of it without the other suites' beams,
+    # since erx_ct_oracle runs every *_SUITE.beam it finds. Their sources and
+    # data stay, since a suite may read another's data.
+    def stock_directory(directory, missing, all:)
+      return directory if missing == all
+
+      copy = File.join(@out, 'stock-suites')
+      FileUtils.rm_rf(copy)
+      FileUtils.cp_r(directory, copy)
+      FileUtils.rm((all - missing).map { |suite| File.join(copy, "#{suite}.beam") })
+      copy
+    end
+
+    # Stores each suite of `keys` (suite to key) with its cases of `side`.
+    def store_stock(side, keys)
+      run_at = Time.now.utc.iso8601
+      keys.each do |suite, key|
+        @stock_cache.store(key, suite: suite, cases: side.cases.select { |name, _| name.suite == suite }, run_at: run_at)
+      end
+    end
+
+    # Lists each cached suite with its run time and key in stock-cached.txt
+    # beside the stock run, or removes a listing an earlier run left when
+    # nothing came from the cache.
+    def write_cached_listing(cached)
+      listing = File.join(@out, 'stock-cached.txt')
+      FileUtils.rm_f(listing)
+      File.write(listing, cached.map { |entry| "#{entry.suite} #{entry.run_at} #{entry.key}\n" }.join) if cached.any?
+    end
+
+    # The side of `suites` merged from the `cached` entries and the `fresh`
+    # side of the others, in suite order. `fresh` is nil only when every
+    # suite is cached, so the lookup's fallback never reads it then. Each
+    # cached run gets a note with its time; the report prints the notes.
+    def merged_stock_side(suites, cached:, fresh:)
+      by_suite = cached.to_h { |entry| [entry.suite, entry.cases] }
+      cases = suites.flat_map do |suite|
+        by_suite.fetch(suite) { fresh.cases.select { |name, _| name.suite == suite } }.to_a
+      end
+      notes = cached.group_by(&:run_at).map do |run_at, entries|
+        "stock: #{entries.size} of #{suites.size} suites from the cache (#{@stock_cache.directory}), " \
+          "stock run of #{run_at}, so the stock time counts only the others; keys in #{@out}/stock-cached.txt"
+      end
+      OracleComparison::Side.new(state: fresh ? fresh.state : 'complete', cases: cases.to_h, seconds: fresh&.seconds,
+                                 lost: fresh ? fresh.lost : 0, notes: notes)
+    end
 
     def compile_reporter(directory, erlc:, common_test:)
       reporter = REPORTER.map { |path| File.join(@root, 'test/oracle', path) }

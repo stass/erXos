@@ -93,7 +93,8 @@ module Erx
       @qemu = qemu
       @runner = Runner.new(owner_root: @root, log_dir: File.join(@out, 'logs'))
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
-      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group)
+      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group,
+                                 stock_cache: OracleStockCache.from_environment)
     end
 
     # Runs `suites`, names of the group's suites (OracleSuites), on stock and in the guest
@@ -111,7 +112,8 @@ module Erx
         tree = File.join(@out, 'tree')
         compiled = fill_tree(tree, suites, installation: installation, source: oracle.source_path('jit'))
         image = test_image(tree, compiled, fiasco: fiasco)
-        [@suites.run_stock(tree, erl: installation.fetch('erl'), schedulers: schedulers), *run_guest(image, accel: accel, cpus: cpus)]
+        [@suites.run_stock(tree, erl: installation.fetch('erl'), build: installation.fetch('build'), schedulers: schedulers),
+         *run_guest(image, accel: accel, cpus: cpus)]
       end
       result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: "QEMU #{accel}")
       report = File.join(@out, 'report.txt')

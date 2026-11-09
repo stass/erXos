@@ -61,7 +61,8 @@ module Erx
       @runner = Runner.new(owner_root: @out, log_dir: File.join(@out, 'logs'))
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
       @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group,
-                                 source: source || File.join(@root, OracleSuites::GROUPS.fetch(group)))
+                                 source: source || File.join(@root, OracleSuites::GROUPS.fetch(group)),
+                                 stock_cache: OracleStockCache.from_environment)
     end
 
     # Runs `suites`, names of the group's suites, on both sides and compares
@@ -73,7 +74,7 @@ module Erx
       stock, erxos = oracle.with_runtime('jit') do |installation|
         tree = File.join(@out, 'tree')
         fill_tree(tree, suites, installation: installation, stock_source: oracle.source_path('jit'))
-        [@suites.run_stock(tree, erl: installation.fetch('erl')), run_erxos(tree)]
+        [@suites.run_stock(tree, erl: installation.fetch('erl'), build: installation.fetch('build')), run_erxos(tree)]
       end
       result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: 'hosted')
       report = File.join(@out, 'report.txt')
