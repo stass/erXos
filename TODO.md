@@ -346,8 +346,9 @@ it; git history is the record of completed work.
   no reporter, unlike `erx_render`'s tokens (G7). (5) A text holding U+0000 is cut there by LVGL. (6) The Makefile
   rebuilds LVGL's objects when `lv_conf.h` or a source or header they read changes, not when the compiler does.
 * [Medium] `display/lvgl/lvgl` (the fork submodule), `make check`: erXos's own patches committed on the fork are not
-  seen by `make check`'s ASCII and chokepoint scans, which skip the submodule as imported code; pending the owner's
-  decision on a CLAUDE.md rule for what those scans cover in a fork submodule.
+  seen by `make check`'s ASCII and chokepoint scans, which skip the submodule as imported code, though CLAUDE.md (Forks as submodules) holds those patches to the
+  same ASCII and review rules. Scan the fork's diff from the commit ORIGIN.md names to the gitlink; due with the
+  first patch.
 * [Low] `display/lvgl/ORIGIN.md`: nothing checks the commit it records against the superproject's gitlink.
 * [Low] `display/lvgl/Makefile`: `-I$(LVGL)` exposes the whole checkout, so a header at its root could shadow a system
   header.
