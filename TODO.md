@@ -563,6 +563,12 @@ it; git history is the record of completed work.
   write the receiver's SACK and D-SACK blocks from RFC 2018 section 4 and RFC 2883 section 4 and change
   the design to say so; the module waits on that decision. The sender side has the same question for
   any module that would translate `tcp_sack_doack` or its neighbours.
+* [Medium] network, `erlang/apps/erx_net/src/erx_nd6_rtr.erl`: the interface process must call
+  `select_router/2` after every step that can change the router list or a router's reachability, and diff
+  `addresses/1` and `routes/1` to republish, where FreeBSD reselects inside `defrtrlist_update`; until it
+  does, a default route through a router that left the list is missing. When the interface process is
+  written, pass erx_nd6's reachability into `ra/4`, `tick/2` and `dad_done/3`, select inside, and emit
+  `{routes, Rows}` and `{addresses, Rows}` actions only on a change, so it holds by construction.
 * [Low] network, `erx_udp_wire:decode/3`: over IPv4 a datagram whose UDP length is short of its IP
   payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
   64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a
@@ -2867,6 +2873,11 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Low] network, `erlang/apps/erx_net/src/erx_nd6_rtr.erl`: an on-link sender that passes the hop-limit
+  rule and fills the prefix list first with 16 autonomous prefixes of infinite valid lifetime holds the list
+  until reboot, since only an advertisement of the same prefix shortens its addresses' lifetimes; later
+  prefixes are ignored and counted. The design accepts that the lists can be filled first (requirement N4);
+  RA Guard on the switch or a per-sender share of the list would bound it.
 * [Low] liberx, `liberx/backend/core/boot_info.c` (`node_valid`): a boot page's node name is checked only for
   no NUL and one `@` inside it. Every name today comes from the manifest's checked identifiers, so `uname -n` and
   anything else that shows a node's host write it unescaped; require both parts to be system identifiers here, so

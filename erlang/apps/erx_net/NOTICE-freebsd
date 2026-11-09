@@ -86,3 +86,17 @@ module erx_arp
 module erx_nd6
   sys/netinet6/nd6.c nd6_llinfo_timer nd6_llinfo_setstate nd6_is_stale nd6_cache_lladdr nd6_resolve_slow nd6_llinfo_get_holdsrc
   sys/netinet6/nd6_nbr.c nd6_ns_input nd6_na_input nd6_ns_output_fib nd6_na_output_fib
+
+module erx_net_addr
+  sys/netinet/in.c in_localaddr in_localip in_ifaddr_broadcast in_ifnet_broadcast
+  sys/netinet6/in6.c in6_localaddr in6_localip in6_matchlen
+  sys/netinet6/scope6.c in6_addrscope in6_setscope
+
+module erx_in6_src
+  sys/netinet6/in6_src.c in6_selectsrc lookup_addrsel_policy
+
+module erx_nd6_rtr
+  sys/netinet6/nd6_rtr.c nd6_ra_input defrtrlist_update rtpref defrouter_select_fib prelist_update in6_ifadd nd6_defrouter_timer
+  sys/netinet6/in6_ifattach.c in6_get_stableifid validate_ifid
+  sys/netinet6/nd6.c nd6_timer
+  sys/netinet6/nd6_nbr.c nd6_dad_timer nd6_dad_duplicated

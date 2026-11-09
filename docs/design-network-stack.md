@@ -1197,7 +1197,15 @@ machine's other keys across boots and updates
 vault holds, the key never enters the domain that uses it: the system
 domain grants the network domain a key facet whose one purpose is this
 identifier, and `erx_nd6_rtr` asks it for the HMAC of each prefix,
-interface and failure count, once per address it forms. While the vault
+interface and failure count, once per address it forms. The message is
+FreeBSD's without the host UUID, which is the key here: the prefix's
+first 64 bits, the interface's name, the failure count as 8
+little-endian bytes and an offset byte, raised and asked again while the
+identifier falls in a reserved range (`validate_ifid`). The link-local
+address is formed the same way from `fe80::/64`. Router solicitations
+follow RFC 4861 section 6.3.7, which FreeBSD leaves to `rtsold`: after a
+random delay of up to a second, at most 3, 4 seconds apart, until an
+advertisement with a router lifetime arrives. While the vault
 answers `unavailable`, as it does without its partition, the interface
 forms its addresses from random identifiers for that boot, as RFC
 8981's temporary addresses are formed, and logs that it did, so an
@@ -1205,7 +1213,11 @@ address is never derived from the MAC address and is stable whenever the
 vault serves.
 
 `erx_in6_src` translates `in6_src.c`, RFC 6724's source address
-selection. IPv6 sockets are IPv6-only by default, as FreeBSD's
+selection, with the labels of RFC 6724's default policy table, which
+FreeBSD's `rc.d/ip6addrctl` installs at boot over the kernel's empty
+one, and with public addresses preferred over temporary ones, as
+FreeBSD's default `ip6_prefer_tempaddr` of 0 prefers them where RFC 6724
+prefers temporary ones. IPv6 sockets are IPv6-only by default, as FreeBSD's
 `ip6_v6only` is (`in6_proto.c:169`), and `{ipv6_v6only, false}` admits
 IPv4-mapped addresses.
 
