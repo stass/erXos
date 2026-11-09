@@ -2319,12 +2319,18 @@ longer than the MTU and the 14-byte Ethernet header is dropped as
 * **`port`**, a tap device through `erx_net_tap`, a C17 port program
   ([the tap helper](#the-tap-helper)). The pipe opens it with
   `open_port({spawn_executable, Helper}, [{args, [Device]}, {packet, 2},
-  binary, exit_status])`, `Helper` in `erx_net`'s `priv/` directory, so
-  each port message is one frame; `port_command/2` suspends the driver
-  while the port is busy, so the helper's input is the transmit backlog.
-  The state is `up` from `init` until the port's `exit_status`, then
-  `down` for good: later frames are dropped as `refused`, and the link
-  returns when the driver's supervisor restarts the driver.
+  binary])`, `Helper` in `erx_net`'s `priv/` directory, so each port
+  message is one frame, and monitors the port; `port_command/2` suspends
+  the driver while the port is busy, so the helper's input is the
+  transmit backlog. Without `exit_status` the port closes, with reason
+  `normal`, as soon as the helper closes its output, which a failing
+  helper does before it stops reading its input, so the port does not
+  fail with `epipe` under a frame it is writing, an exit signal that would
+  end the driver linked to it. A helper killed by a signal closes both
+  pipes at once and can still end the driver that way; its supervisor
+  then restarts it. The state is `up` from `init` until the
+  monitor's `'DOWN'`, then `down` for good: later frames are dropped as
+  `refused`, and the link returns when the driver is started again.
 * **`process`**, a test. Each frame is a message `{erx_net_pipe, Pid,
   Frame}` in either direction, and a `Frame` that is not a binary is
   dropped as `malformed`, a type check and not a parse. The pipe monitors
@@ -2350,12 +2356,16 @@ of the tap is one frame, which it writes to standard output behind a
 2-byte big-endian length, continuing a write a signal cuts short, so a
 frame is never split; on standard input it reads a 2-byte length and
 exactly that many bytes, and writes them to the tap in one write. It
-reads no byte of a frame. End of file on its input ends it with status
-0, the port having closed; end of file on the tap or inside a frame, a
-write to the
-tap that takes less than the whole frame, or any error but `EINTR` on
+inspects no byte of a frame. A tap may discard a frame as a wire loses one:
+a write that takes none of it, which FreeBSD's `tunwrite` returns while
+the interface is down, or `ENOBUFS`, drops that frame and the relay goes
+on. The port closing, seen as end of file on its input between frames
+or `EPIPE` on its output, ends it with status 0; end of file on the tap
+or inside a frame, a frame longer than the length can carry, a write to
+the tap that takes part of the frame, or any other error but `EINTR` on
 either side ends it with status 1 and a one-line diagnostic on standard
-error. Either way the port closes and the pipe reports the link `down`.
+error, after it has closed its output and read its input to end of
+file. Either way the port closes and the pipe reports the link `down`.
 A port's messages reach the driver as fast as the tap delivers them,
 with no credit ahead of the mailbox ([Residuals](#residuals)).
 
@@ -3184,7 +3194,7 @@ packet input.
 | the driver crashes, or the device breaks its queue | its link supervisor | every connection; their unacknowledged data is retransmitted | the device's queued frames; the interface process restarts after the driver's reset |
 | the driver has no attached interface, between an interface's end and its restart | the driver, which monitors the attached interface | everything | the frames received meanwhile, dropped and counted as `detached` |
 | a device's queue is full, or a transport refuses a frame | the driver | everything | nothing while the backlog has room, which the transmit credit bounds; past it senders' hand-overs are refused and counted where they are made |
-| a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by the helper's exit, each reporting the link `down`; a `udp` end only as refused sends | everything | the frames sent meanwhile, counted as `refused`; TCP retransmits once the far end returns |
+| a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by its port's monitor, each reporting the link `down`; a `udp` end only as refused sends | everything | the frames sent meanwhile, counted as `refused`; TCP retransmits once the far end returns |
 | a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST, and its owner receives `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or a waiting call gets the error |
 | a socket process is killed or crashes outside a step | its grant, which deletes its entries | everything else | the socket, silently: the peer times out or meets a RST later, and the owner's next call gets `{error, closed}` |
 | a socket's owner exits | the socket, which monitors it | everything else | the socket: a connection sends FIN, or RST if `linger` is zero |

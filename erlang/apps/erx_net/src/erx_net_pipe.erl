@@ -18,8 +18,16 @@ take as `refused`.
   direction; a `Frame` that is not a binary is dropped as `malformed` (a type check, not a
   parse), and one from another pid as `stranger`. The pipe monitors the far end and
   reports the link `down` when it ends.
-
-The `port` end, a tap device through the tap helper, is not part of the transport yet.
+* `{port, Device}`, a tap device through the tap helper `erx_net_tap`, a port program in
+  this application's `priv/` (built by `make -C c_src`) that relays whole frames between
+  the device and the port, each port message one frame. `port_command/2` suspends the
+  driver while the port is busy, so the helper's input is the transmit backlog. The pipe
+  monitors the port. A helper that fails closes its output and reads its input until the
+  port has closed, so the port closes with reason normal and does not fail under a frame
+  it is writing (with epipe, which would end the driver linked to it); only a helper
+  killed by a signal can still end the driver that way. The link is `up`
+  from `init` until the port closes, and `down` for good after: later frames are dropped
+  as `refused`, and the link returns only when the driver is started again.
 
 The configuration: `far`; `lladdr`, which must be a unicast address with the locally
 administered bit set; `mtu`, from 1,280 to 9,000 (1,500 when absent); and `tx_limit`, the
@@ -41,10 +49,12 @@ frames that may wait at the driver (256 when absent).
 -doc "The far end of a pipe.".
 -type far() :: {udp, Local :: {inet:ip_address(), inet:port_number()},
                      Peer :: {inet:ip_address(), inet:port_number()}}
+             | {port, Device :: file:filename()}
              | {process, pid()}.
 
 -record(udp, {socket :: gen_udp:socket(), peer :: {inet:ip_address(), inet:port_number()},
               mtu :: pos_integer()}).
+-record(port, {port :: port(), ref :: reference(), up = true :: boolean(), mtu :: pos_integer()}).
 -record(process, {pid :: pid(), ref :: reference(), up = true :: boolean(),
                   mtu :: pos_integer()}).
 
@@ -72,6 +82,22 @@ open({udp, {LocalIp, LocalPort}, {_, _} = Peer}, Mtu) ->
         {ok, Socket} -> {ok, #udp{socket = Socket, peer = Peer, mtu = Mtu}};
         {error, Reason} -> {error, {udp, Reason}}
     end;
+open({port, Device}, Mtu) when is_list(Device); is_binary(Device) ->
+    case code:priv_dir(erx_net) of
+        {error, Reason} ->
+            {error, {port, {priv_dir, Reason}}};
+        Priv ->
+            Helper = filename:join(Priv, "erx_net_tap"),
+            try open_port({spawn_executable, Helper}, [{args, [Device]}, {packet, 2}, binary]) of
+                Port ->
+                    %% Without exit_status the port closes, with reason normal, as soon
+                    %% as the helper closes its standard output; the monitor's 'DOWN'
+                    %% says so. The link closes the port when the driver ends.
+                    {ok, #port{port = Port, ref = erlang:monitor(port, Port), mtu = Mtu}}
+            catch
+                error:Reason -> {error, {port, Reason}}
+            end
+    end;
 open({process, Pid}, Mtu) when is_pid(Pid) ->
     {ok, #process{pid = Pid, ref = erlang:monitor(process, Pid), mtu = Mtu}};
 open(Far, _Mtu) ->
@@ -83,6 +109,13 @@ event({udp, Socket, Ip, Port, Data}, #udp{socket = Socket} = T) ->
 event({udp_passive, Socket}, #udp{socket = Socket} = T) ->
     ok = inet:setopts(Socket, [{active, ?ACTIVE}]),
     {[], T};
+event({Port, {data, Frame}}, #port{port = Port, mtu = Mtu} = T) ->
+    case byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN of
+        true -> {[{frames, [Frame]}], T};
+        false -> {[{dropped, too_long}], T}
+    end;
+event({'DOWN', Ref, port, _, _}, #port{ref = Ref} = T) ->
+    {[{link, down}], T#port{up = false}};
 event({erx_net_pipe, Pid, Frame}, #process{pid = Pid, mtu = Mtu} = T) when is_binary(Frame) ->
     case byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN of
         true -> {[{frames, [Frame]}], T};
@@ -133,6 +166,16 @@ send(Frame, #udp{socket = Socket, peer = {Ip, Port}} = T) ->
         ok -> {ok, T};
         {error, _} -> {{drop, refused}, T}
     end;
+send(_Frame, #port{up = false} = T) ->
+    {{drop, refused}, T};
+send(Frame, #port{port = Port} = T) ->
+    %% The port may have closed with its 'DOWN' still on its way; port_command/2 then
+    %% fails with badarg.
+    try port_command(Port, Frame) of
+        true -> {ok, T}
+    catch
+        error:badarg -> {{drop, refused}, T}
+    end;
 send(_Frame, #process{up = false} = T) ->
     {{drop, refused}, T};
 send(Frame, #process{pid = Pid} = T) ->
@@ -140,4 +183,5 @@ send(Frame, #process{pid = Pid} = T) ->
     {ok, T}.
 
 mtu(#udp{mtu = Mtu}) -> Mtu;
+mtu(#port{mtu = Mtu}) -> Mtu;
 mtu(#process{mtu = Mtu}) -> Mtu.

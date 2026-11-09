@@ -783,9 +783,23 @@ it; git history is the record of completed work.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
+* [Medium] network, `erx_net_driver` and `erx_net_pipe`: a pipe whose far end ended (a `process`
+  end's peer, a `port` end's helper) reports the link `down` for good, and nothing starts the driver
+  again, since the driver stays alive. Decide whether a far end's end stops the driver so that its
+  supervisor restarts it, with a backoff for a tap that keeps failing.
+* [Low] network, `erx_net_pipe` (`port` end): a tap helper killed by a signal closes both its pipes at
+  once, and a frame the driver writes meanwhile makes ERTS fail the port with `epipe`, which ends the
+  driver linked to it (its supervisor restarts it). A driver that traps exits and takes the port's
+  exit as link `down` would close the case; decide with the restart question above.
+* [Low] network, `erx_net_tap` on Linux: a tap there may refuse a write shorter than an Ethernet
+  header with `EINVAL` and treat a write while down differently from FreeBSD's 0-byte return; check
+  `tun_get_user` and add Linux's discard cases when Linux hosts run the helper.
+* [Low] network, `test/host/erx_net_tap_test.rb`: the end-of-file-on-the-tap case relies on BSD and
+  XNU resetting a datagram socket pair's peer on close; Linux does not wake the peer, so the case
+  would time out there. Use a stream pair with a framing shim, or a Linux tap, when Linux hosts are
+  tested.
 * [Medium] network, effect layer (E1, `erx_net_if`, `erx_udp_sock`, `erx_net_tables`): the first
-  package runs ARP, ICMP echo, DHCP and UDP only. Not yet: the `port` (tap) end of `erx_net_pipe`
-  and `erx_net_tap`; `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
+  package runs ARP, ICMP echo, DHCP and UDP only. Not yet: `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
   start); `erx_net_loop`; grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a
   provisional `gen_udp`-shaped interface, and `erx_net_tables:watch_holder/1` deletes a dead
   socket's entries in its grant's place); the listener, IPv6, reassembly and redirect paths of
@@ -3756,14 +3770,11 @@ document's "residual risks accepted" paragraph.
   `erx_net_if_core`, `erx_net_driver` with `erx_net_pipe` and
   `erx_net_loop`, `erx_net_runtime` with `erx_net_local`, the processes,
   then `erx_net_vclock`, `erx_net_script`, `erx_net_impair` and
-  `erx_net_relay` in the app's `test/`, and the tap helper `erx_net_tap`
-  in `c_src/`; `erx_virtio_net` and `erx_net_erxos` with the network
-  domain. Three things to confirm on the FreeBSD test host `p620` before
-  its runs: that the test user can open `/dev/tapN` (a devfs rule) and
-  the tap comes up on open (`net.link.tap.up_on_open`), that the bridge
-  can put two jails behind separate tap devices for the relay's FreeBSD
-  baseline, and that a stock OTP 29.1.2 builds there for the stack's
-  host runs.
+  `erx_net_relay` in the app's `test/`; `erx_virtio_net` and `erx_net_erxos` with the network
+  domain. Two things to confirm on the FreeBSD test host `p620` before
+  the relay's runs: that the bridge can put two jails behind separate tap
+  devices for the relay's FreeBSD baseline, and that a stock OTP 29.1.2
+  builds there for the stack's host runs (29.1.1 is installed).
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,

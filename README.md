@@ -346,7 +346,9 @@ Error in process <0.150.0> with exit value:
   stock OTP it runs as processes against QEMU's user networking: it takes
   a DHCP lease, answers ARP and ping, echoes UDP, and opens TCP
   connections through `gen_tcp`'s calls, echoing 1 MiB each way off a
-  host server. It does not reach a device yet.
+  host server. On FreeBSD it also runs over a tap device through its tap
+  helper, where a vnet jail resolves and pings it. It does not reach a
+  device inside erXos yet.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
