@@ -379,6 +379,10 @@ scripts live in `~/erxos-scratch/tools/`.
       creation and stops when it stops, so no program outlives the domain
       that started it, no sub-space outlives its creator, and nothing is
       orphaned;
+    * no process acts on a message from another domain that its protocol's
+      owner did not admit: every such message arrives as
+      `{erx_origin, D, Msg}`, with no flag and no exception, and only each
+      protocol's owner takes the envelope off its own shapes, never `sys`;
     * the kernel, `liberx` and its backends, the runtimes and Erlang agree
       on the ABI because all of them are generated from `abi/erx_abi.txt`.
 
