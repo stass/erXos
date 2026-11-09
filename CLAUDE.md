@@ -158,6 +158,11 @@ Third-party components are allowed when they pay for themselves.
   edits. Upstream is not tracked, so erXos owns their fixes, security fixes
   included. Each records its origin (repository, release or commit, and the
   SHA-256 of what was imported) in an `ORIGIN.md` beside it.
+* **Forks as submodules.** A component erXos patches upstream-style may
+  instead live as a git submodule of erXos's own fork (LVGL at
+  `display/lvgl/lvgl`), pinned by its gitlink, with an `ORIGIN.md` beside
+  it. Its patches are commits on the fork's `erxos` branch and follow the
+  same ASCII and review rules as code in the tree.
 * **Tools and test oracles stay out of the tree.** What only the build,
   the tests or development use unmodified (stock OTP as the oracle,
   libc-test, plan9port, Arm's machine-readable register data, the TLA+
@@ -593,8 +598,13 @@ within about 20 percent of the length, write plain code.
 
 * Write the tests that would catch a real break in what you build: its
   behaviour and its main failure paths. Do not write tests of the test
-  tooling, mutant seeds, or exhaustive matrices, except for a protocol
-  state machine, which is tested exhaustively.
+  tooling or exhaustive matrices, except for a protocol state machine,
+  which is tested exhaustively.
+* **Seeded faults prove a check catches what it guards.** Where a design
+  names a seeded fault, or a property test, fuzz target or build check
+  guards something subtle, plant the fault (a removed bound, an off-by-one
+  comparison, a dropped key) and confirm the check fails on it. Keep the
+  seeds few and aimed at the failure the check exists for.
 * **Two tiers of gates. Iteration speed comes first.**
   * **Landing gate**, for every commit and batch: `make check`, and the
     QEMU suites the change touches.
