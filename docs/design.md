@@ -1070,10 +1070,12 @@ another domain.
   root task and every domain's space is its child: nothing is left to
   reconcile without it, so there is no recovery protocol, and the kernel
   writes a crash record first. Its services are supervised Erlang, so a
-  bug in a policy service restarts that process, and no service is a
-  significant child; only a fault of its runtime, its halt or a missed
-  watchdog reaches the reset, and the watchdog is petted only while the
-  domain service and the device service answer. More than three
+  bug in a policy service restarts that process. The domain service alone
+  is a significant child, whose end ends the system domain, so it is never
+  restarted and keeps no state for a successor; otherwise only a fault of
+  its runtime, its halt or a missed watchdog reaches the reset, and the
+  watchdog is petted only while the domain service and the device service
+  answer. More than three
   unordered ends in a row boot the system release's rescue
   configuration, so a fault at every boot does not loop forever
   ([design-system.md](design-system.md#boot)). The system domain runs the
@@ -2430,11 +2432,17 @@ user:
   only what its `liberx` alone knows, and every channel message and
   capability value made for one image reaches no other
   ([design-programs.md](design-programs.md#the-handler)).
-* **Each domain's pid is a process of its own.** The domain pids live
-  under the domain service's supervisor, one process per domain, so a
-  crash of the service's coordinator process ends no domain; the domain
-  service links every domain pid and stops a domain whose pid dies,
-  `kill` included ([design-system.md](design-system.md#ending-a-domain)).
+* **Each domain's pid is a process of its own.** One process per domain
+  stands for it, linked to the domain service, which stops a domain whose
+  pid dies, `kill` included, and ends the pid with `{domain_down, D,
+  Info}` when the domain ends, so the two end together
+  ([design-system.md](design-system.md#ending-a-domain)). The domain pid
+  is also its domain's correspondent: the boot information names it,
+  init reports ready to it, and it alone relays the connection protocol
+  between the domain service and the domain's connection agent, so no
+  export is written for the protocol alone, and the system domain's
+  writer gives its messages alone the reserve of the domain's lane
+  ([design-domains.md](design-domains.md#domains)).
 * **A deletion closes first.** Deleting an object invalidates its
   existence lock before it empties its slots, in bounded parts, so the
   object is unreachable from the first part, where Fiasco empties every

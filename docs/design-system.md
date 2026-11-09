@@ -210,11 +210,13 @@ quotas and that no living domain has the name, computes the domain's
 grant and lane sizes, allocates a domain id, and calls the domain library,
 which validates the request into a plan, carves the domain's two
 budgets, creates the objects, gives the domain its capabilities, makes its
-connection to the system domain, and leaves its first thread stopped. The
-domain service exports its own pid to the domain and starts the first
-thread. The runtime, the node `Name@Host` with the domain id as its
-creation, exports its init process and its name to the system domain
-before it reads its first frame, boots, reports ready, receives its facets
+connection to the system domain, and leaves its first thread stopped.
+The system domain's connection agent opens its side of that connection,
+the domain's domain pid, which the boot information names, exports itself
+to the domain, and the domain service starts the first thread. The
+runtime, the node `Name@Host` with the domain id as its creation, exports
+its init process and its name to the system domain before it reads its
+first frame, boots, reports ready to its domain pid, receives its facets
 and serves. When the domain ends, the kernel posts a record to the fault
 gate; the domain library's fault thread classifies the end, destroys the
 domain's own budget, which deletes everything only the domain used at
@@ -233,7 +235,7 @@ then the domain's outer budget.
 | **A3.** The domain library never waits on a domain | every entry does bounded work under the library's one lock and makes no kernel call that waits; the fault thread, an ERTS thread that the NIF module `erx_domain_lib` starts at load, waits only in its open wait on the fault gate, with a timeout from which it also checks the ending record's deadline; a domain's end is one destroy of its own budget, which waits on no party; a connection's child budgets are destroyed only when the domain service asks, once each party has unmapped the connection's objects or ended, never on a timer while a party lives, and the outer budget only once none of its children remains, so no entry waits for an answer: a survivor that never answers `connection_down` keeps that one connection's child budget, and with it the dead domain's outer budget, and the connection counts against its own `connections` quota until it unmaps or ends | an entry that calls a gate a domain serves; a creation step that waits for a runtime; a destroy that waits for a holder to let go; a connection deleted on a timer while a party still maps it | hostile-domain tests: a domain that never reads its lane from the system domain, never answers `connection_down`, or floods it; a runtime that stops reading its lanes; every library entry timed with the manifest's `max_domains` domains alive |
 | **A4.** A domain is built whole or not at all | a creation is validated into a plan by a pure function before any effect; step 1 carves the domain's two budgets, each a wall, and every later object of the domain is charged to one of them, so the undo of a failure is destroying both; a domain whose runtime does not report ready is stopped and ended by the domain service, so `erx_domain:create/1` returns an error only when nothing of the domain remains | an effect before validation; an object of the domain charged to a budget other than its two | an exhaustive host test that injects a failure at every step of a creation and checks that every object is destroyed when the undo returns, and that the principal's budget is back at its baseline once the destroyed records' grace period has passed and the reaper has run, which the test drives, since a destroyed record's cache page stays charged until the reaper frees it ([design-kernel.md](design-kernel.md#budgets)); a QEMU test that injects one at each step through a test-build hook; a domain whose init process never reports ready, after which nothing of it remains |
 | **A5.** Ending a domain deletes everything only it used at once, and nothing another party still uses goes with it | every domain has an own budget and an outer budget, carved side by side from its principal's; the domain library charges to the own budget only what the domain alone maps or uses, and to the outer budget everything another party maps or reads after the domain is gone: on a child budget of it carved for each connection, the side of that connection the domain reads and the bell it waits on, or for its connection to the system domain both sides and both bells; and on the outer budget directly, its crash area, which no other party maps; the library has no entry that maps one domain's memory into another but `erx_dom_connect`, so an outer budget holds exactly its connections' child budgets and its crash area; only the system domain creates a mapping that crosses domains, and every one is a connection's, charged to the child budget of an outer budget for that connection, so the rule holds by construction; destroying a budget deletes every object charged to it and to the budgets carved from it ([design-kernel.md](design-kernel.md#budgets), K25, K26); the fault thread destroys the own budget at the exit record, through `erx_dom_destroy`; the system domain destroys a connection's child budgets through `erx_dom_disconnect` once each party has let go, and the outer budget through `erx_dom_retire` once no child remains and the crash area is read; the domain holds no capability to its outer budget or to any child of it; the system domain charges nothing of a domain's to its own budget, and maps nothing charged to a domain's own budget | a cross-domain mapping, or memory a device may address, charged to a domain's own budget; a library entry other than `erx_dom_connect` that maps one domain's memory into another; a domain holding its outer budget or a child of it; a second path that destroys a domain's budgets | a source check that the domain library destroys a budget only in `erx_dom_destroy`, `erx_dom_disconnect` and `erx_dom_retire`, and that `erx_dom_connect` is the one entry that creates an object another domain maps, and creates it from a child budget of an outer budget, each with a seeded violation; a host test that drives the library over the hosted kernel interface through random creations, introductions, device gives and ends, and checks after each destroy that no object a living party maps was deleted, and after each retire that the principal's budget is back at its baseline once the reaper has run, less any page a failed IOMMU pinned, which the test never provokes; a test that ends a domain while its peer still writes the side the dead domain read and reads the side it wrote, and finds the peer running until it answers `connection_down`; a test whose peer never answers, after which only that connection's child budget stays, with the dead domain's outer budget it is carved from, every other child of that outer budget is gone, and the connection counts against the peer's `connections`; a test that creates and ends domains under load, some with sub-spaces nested three deep, and checks that the principal's budget returns to its baseline once the reaper has run |
-| **A6.** No domain outlives the system domain, and a system domain that cannot serve ends the machine | every domain's space is a child of the system domain's space, which the plan names as every domain's parent (K27); the first space has no fault gate, so a fault in it, a stop of it outside an ordered end, or a watchdog deadline missed goes to the kernel's end path, which writes the crash record and ends the machine by `erx.panic`; the watchdog process pets only after every service it lists has answered a liveness call within the period, so a system domain whose runtime runs but whose domain service or device service stops answering, even after its supervisor restarted it, misses the deadline too; no party outside the kernel and the system domain keeps a record of any domain, so there is nothing to reconcile and no protocol that could be wrong | a domain created under another parent; a system-domain fault handled by anything but the kernel's end path; a watchdog pet from anything but the system domain's runtime; a pet that does not wait for the listed services' answers | a host test that every plan names the system domain's space as parent; a QEMU test that kills the system domain under load and finds the machine ended with the crash record on the console and no domain running; a test that stops the pet and sees the machine end at the deadline; a test that deadlocks the domain service and sees it killed and restarted with the pets going on, and one that keeps it from answering after each restart and sees the machine end at the deadline; a test that a domain's `erx_watchdog_pet` fails with `ERX_ERIGHTS` |
+| **A6.** No domain outlives the system domain, and a system domain that cannot serve ends the machine | every domain's space is a child of the system domain's space, which the plan names as every domain's parent (K27); the first space has no fault gate, so a fault in it, a stop of it outside an ordered end, or a watchdog deadline missed goes to the kernel's end path, which writes the crash record and ends the machine by `erx.panic`; the watchdog process pets only after every service it lists has answered a liveness call within the period, so a system domain whose runtime runs but whose device service stops answering, even after its supervisor restarted it, misses the deadline too; the domain service is the system release's significant child, so its end, the watchdog's kill of it included, ends the system domain outside an ordered end; no party outside the kernel and the system domain keeps a record of any domain, so there is nothing to reconcile and no protocol that could be wrong | a domain created under another parent; a system-domain fault handled by anything but the kernel's end path; a watchdog pet from anything but the system domain's runtime; a pet that does not wait for the listed services' answers | a host test that every plan names the system domain's space as parent; a QEMU test that kills the system domain under load and finds the machine ended with the crash record on the console and no domain running; a test that stops the pet and sees the machine end at the deadline; a test that deadlocks the device service and sees it killed and restarted with the pets going on, and one that keeps it from answering after each restart and sees the machine end at the deadline; a test that deadlocks the domain service and sees the machine end at its kill; a test that a domain's `erx_watchdog_pet` fails with `ERX_ERIGHTS` |
 | **A7.** The system domain installs only what its grant table allows | every `erx_cap_pass` the domain library makes goes through one function, `erx_dom_install`, which takes a row of `erx_dom_grants`, the constant table of installs that [Authority](#authority) describes, and the recipient the validated plan names for the row's role; each install copies one of the library's own capabilities from the system domain's table, never from another domain's, and each mask lies within its recipient's row in the authority table | a pass outside `erx_dom_install`; a pass from another domain's table; a row that grants more than its recipient's row in [Authority](#authority); a recipient the plan did not check | a source check that `erx_cap_pass` is referenced only from `erx_dom_install`, and that its source table is always the system domain's own, with a seeded violation of each; host tests that every row of `erx_dom_grants` lies within the rights the authority table lists for its recipient, transcribed into the test; domain tests that a device's objects reach their domain without `GIVE`, and that a side of a connection reaches its reader with `READ` and `MAP` alone |
 | **A8.** A space never outlives its parent: no domain outlives the system domain, no sub-space its creator, and no program its session | every space has a parent, fixed when it is created, and stops when its parent stops ([design-kernel.md](design-kernel.md#creating-spaces)); the domain library names its own space as every domain's parent; a sub-space's parent is its creator's space or one of that space's sub-spaces, and a session's programs are its sub-spaces ([design-programs.md](design-programs.md#a-program-is-a-port)); a stopped space takes no children, and `erx_thread_start` refuses a stopped space; a parent exists before its child, so the relation is a tree, and the kernel stops it from its root down without anyone keeping a list | a space created anywhere but under its creator's own space or one below it; a creation under a stopped parent; a thread started in a stopped space | the host test of A6; the kernel's host test of stopping over random trees, with creations racing each stop; a domain test that ends a session holding programs three generations deep, each with a sub-space, and sees every one's exit record before the session's |
 | **A9.** A device is held by one domain at a time, and a device never reaches memory its holder did not give it, nor a page anyone else may later use | the device service gives a device only to the domain the manifest names for it, and the domain library refuses a second living holder with `ERX_EBUSY`; the kernel refuses a second IRQ object for a line, a second MMIO object for a page and a second DMA window for a stream; a device's register windows, IRQ objects and DMA window are charged to its holder's own budget, which the fault thread destroys at the holder's exit record, and deleting a confined device's window aborts its stream before any page is freed; an unconfined device's memory is the device's for the boot, charged to the system domain and given to each of its holders in turn, so no page it may still address is ever given to anyone else; the device NIF builds every address it gives a device from a memory object the domain holds, an offset and a length it checks, through `erx_dma_map` or `erx_mem_dma_addr`, alone writes a device-address field or an addressing flag, in a register or a descriptor, posts nothing to a device until its driver has reset it, and leaves an address a device may still hold unused until the device's completion protocol has retired it or the device has been reset; pools and queues are state of the device's record in the NIF, never of a process, so a driver's crash frees nothing a device may still reach; the NIF parses nothing a device wrote | a device given twice; an unconfined device's memory freed or charged to its holder; a NIF that takes a raw address or posts before a reset; an address field or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a descriptor or a device's record parsed in C | domain tests that ask for a device another living domain holds, refused with `ERX_EBUSY`; a test that ends an unconfined device's domain and finds its restarted holder given the same memory, and that memory never charged to or mapped by any other domain; the NIF's host tests over addresses outside the pool's objects, each refused, over a post before `negotiate/2`, refused, and over a seeded write of an address register from Erlang and a seeded pool owned by a process, each failing ([design-runtime.md](design-runtime.md#invariants), R8); a chokepoint check that only the device NIF's address builder references `erx_dma_map` and `erx_mem_dma_addr` in a runtime, with a seeded violation; a hostile virtio device model under QEMU that writes malformed descriptors, which crashes the driver process and nothing else |
@@ -483,8 +485,7 @@ continue to enforce every dynamic use. The roadmap owns tool adoption.
 ### The domain service's record
 
 The domain service keeps one record per domain, in Erlang, holding what
-Erlang decides with, in an ETS table that outlives the service's restarts
-([System services](#system-services)); every capability lives in the
+Erlang decides with, in its own state; every capability lives in the
 domain library's records, keyed by the same id:
 
 ```erlang
@@ -858,7 +859,9 @@ process runs: each period the watchdog process makes a liveness call to
 every service the manifest lists for it, the domain service and the
 device service at least, and pets only once each has answered within the
 period. A service that does not answer is killed, its supervisor restarts
-it, and the pet follows the restarted service's first answer; a service
+it, and the pet follows the restarted service's first answer, except the
+domain service, whose kill ends the machine as its every end does
+([System services](#system-services)); a service
 that never answers again, or a runtime that cannot run the watchdog
 process at all, misses the deadline. A missed deadline ends the machine as
 a fault would, with a crash record naming the watchdog, by `erx.panic`: a
@@ -1164,8 +1167,9 @@ baseline remains the manifest's; runtime changes do not edit it.
       the installs returned, the addresses of the
       mappings, the release slice's and the sealing page's included, the
       label of its own bell, the two data areas' sizes, the domain's own
-      node name, and the system domain's node name and id as the peer of
-      its first connection
+      node name, the system domain's node name and id as the peer of its
+      first connection, and the number and serial of the domain pid the
+      request names
       ([design-runtime.md](design-runtime.md#data-model));
    7. create the first thread, a worker in the domain's group, with the
       boot information page's address as its argument, stopped;
@@ -1182,18 +1186,23 @@ baseline remains the manifest's; runtime changes do not edit it.
    destroying the domain's two budgets, since every object of the creation
    is charged to one of them (A4).
 
-The domain service then creates the domain pid, hands the connection's
-values to the runtime's connection layer, which maps the two sides and
-from then on carries frames between the system domain's processes and the
-domain's ([design-runtime.md](design-runtime.md#connections-in-erts)),
-exports its own pid to the domain with `send`, which the boot information
-names, and calls `erx_dom_start`. The domain's runtime, before it reads
-its first frame, exports its init process with `send` and the domain's
-name with `spawn` to the system domain and to its spawner, both named in
-its boot information, so no frame either sends from the start is dropped
-as one to a name never exported; init then boots the domain's release and
-reports ready, and the domain service answers with the facets the spec
-names ([design-domains.md](design-domains.md#domain-lifecycle)).
+The domain service creates the domain pid before it asks for the plan,
+since the boot information names it, and ends it when the plan fails.
+Once the library returns, the domain service hands the system domain's
+values of the connection to its runtime's connection agent, which maps
+the two sides and from then on carries frames between the system domain's
+processes and the domain's
+([design-runtime.md](design-runtime.md#connections-in-erts)); the domain
+pid exports itself to the domain with `send` and to the caller's domain
+with `send`, `link` and `exit`; and the domain service calls
+`erx_dom_start`. The domain's runtime, before it reads its first frame,
+exports its init process with `send` and the domain's name with `spawn` to
+the system domain and to its spawner, both named in its boot information,
+so no frame either sends from the start is dropped as one to a name never
+exported; init then boots the domain's release and reports ready to the
+domain pid, which passes the report to the domain service, and the domain
+service answers with the facets the spec names
+([design-domains.md](design-domains.md#domain-lifecycle)).
 `erx_domain:create/1` returns `{ok, Domain}` when the init process reports
 ready, or `{error, Reason}` when the runtime fails or the spec's boot
 timeout passes first, after which the domain service has stopped and
@@ -1261,20 +1270,23 @@ and the system domain keeps the delete right to every object of the
 connection and to its child budgets. A connection carries no IPC gate: no
 flow of the design passes a capability between two domains. Each domain
 learns of its new connection, with the values of its share, in
-`connection_up` from the domain service on its lane from the system
-domain, which its connection agent takes from that lane alone, maps, and
-answers with `connection_mapped`
+`connection_up` from the domain service, through its domain pid, on its
+lane from the system domain, once its init has reported ready, which its
+connection agent takes from that lane alone, maps, and answers with `connection_mapped`
 ([design-domains.md](design-domains.md#introduction-and-connection-down)).
 The domain service records the connection under both domains.
 
 A connection ends when either domain ends, when either runtime ends it and
-tells the domain service `connection_lost`, or when policy withdraws the
-introduction: the domain service sends `connection_down` to each party
-still running that did not end the connection itself, over its lane from
-the system domain, into the reserve that lane keeps for it, so the record
+tells its domain pid `connection_lost`, or when policy withdraws the
+introduction: each party still running that did not end the connection
+itself is told `connection_down` by the domain service, through its
+domain pid, over its lane from the system domain, into the reserve that
+lane keeps for it, so the record
 is never dropped and never waits behind other frames. Each party takes
 what the lane it reads holds up to that point, fires its links and
-monitors, unmaps, and answers `connection_unmapped`. The domain service
+monitors with the reason, unmaps, and answers `connection_unmapped`,
+which its domain pid passes to the domain service
+([design-domains.md](design-domains.md#domains)). The domain service
 asks `erx_dom_disconnect`, which destroys the connection's child budgets,
 once each party has unmapped the objects or ended, and never on a timer
 while a party lives. A survivor that never answers keeps that connection's
@@ -1406,19 +1418,27 @@ domain's own and went with it.
 
 The domain service, on `{domain_ended, Id, End, Record}`:
 
-1. **Takes the domain's connections down.** Its own connection layer
-   first takes what the domain published on its lane to the system domain,
-   since a dead domain's position is final, then closes the connection, so
-   every facet of the domain ends and every link and monitor a
-   system-domain process held toward the domain's processes fires with
-   `{domain_down, Id, Info}`; it unmaps both sides, which the domain's
-   child budget for that connection pays for, and asks
-   `erx_dom_disconnect`. For every other connection of
-   the domain it sends `connection_down`, with `{domain_down, Id, Info}`
-   as the reason, to the surviving party, which takes what the dead domain
-   published, fires its links and monitors with that reason, unmaps and
-   answers `connection_unmapped`; the domain service asks
-   `erx_dom_disconnect` once it has
+1. **Takes the domain's connections down.** Its runtime's connection
+   agent has the system domain's side of the domain's system connection
+   finish, taking what the domain published on its lane to the system
+   domain, since a dead domain's position is final, then ends the side's
+   port with `{domain_down, Id, Info}`, so every facet of the domain ends
+   and every link, monitor and pending spawn a system-domain process held
+   toward the domain's processes fires with that reason (edit 56 of
+   [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)),
+   each behind the domain's last messages to that process; a process that
+   must act on those, such as the console facet with the domain's last
+   log records, traps exits or monitors, so the exit does not kill it
+   before it reads them
+   ([design-domains.md](design-domains.md#links-monitors-and-exits)). The
+   agent unmaps both sides, which the domain's child budget for that
+   connection pays for, and the domain service asks `erx_dom_disconnect`.
+   For every other connection of the domain, the domain service sends the
+   surviving party `connection_down` through that party's domain pid,
+   with `{domain_down, Id, Info}` as the reason, and the party takes what
+   the dead domain published, fires its links and monitors with that
+   reason, unmaps and answers `connection_unmapped`; the domain service
+   asks `erx_dom_disconnect` once it has
    ([design-domains.md](design-domains.md#introduction-and-connection-down)).
 2. **Ends the domain pid** with `{domain_down, Id, Info}`, so every
    process that linked to or monitored the domain sees its end, wherever
@@ -1443,8 +1463,8 @@ The domain service, on `{domain_ended, Id, End, Record}`:
 facets or connections without its connection to the system domain, so
 when that connection ends, the domain ends. When the system domain's
 runtime ends it, for a malformed frame, a signal past `peer_held` or past
-the manifest's `system_queue`, or its `peer_held_total`, the connection
-layer tells the domain service, which stops the domain with
+the manifest's `system_queue`, or its `peer_held_total`, its connection
+agent tells the domain service, which stops the domain with
 `erx_dom_stop`; a runtime that ends its own connection to the system
 domain can tell no one, and halts its domain instead
 ([design-runtime.md](design-runtime.md#connections-in-erts)). Either way
@@ -1458,13 +1478,16 @@ operation schema, as every service's requests do
 lane it arrived on stamped by the funnel as `{erx_origin, D, Msg}`, which
 no sender chooses ([design-domains.md](design-domains.md#the-peer)). The
 service acts only on the sender's own side of a connection: a
-`connection_mapped`, `connection_unmapped` or `connection_lost` from `D`
-names a peer, and the domain service applies it only to the connection
-that joins `D` and that peer, in the state that expects it. A message of
-any other shape, one naming a connection `D` is not a party to, or one
-the connection's state does not expect, is dropped and counted, so no
-domain can take another's connection down or make the domain service
-fail by what it sends.
+`connection_mapped`, `connection_unmapped` or `connection_lost` reaches it
+only through `D`'s domain pid, which takes it only as `{erx_origin, D,
+Msg}` and passes on only those three shapes and init's ready report. The
+answer names a peer, and the domain service applies it only to the
+connection that joins `D` and that peer, in the state that expects it.
+A message of any other shape is dropped and counted by the domain pid,
+and one naming a connection `D` is not a party to, or one the
+connection's state does not expect, by the domain service, so no domain
+can take another's connection down or make the domain service fail by
+what it sends.
 
 **Where each object is charged.** Each object the system domain makes
 for a domain is charged where its lifetime belongs, so a domain's end is
@@ -2369,30 +2392,25 @@ The table has no rows.
 
 ### System services
 
-The system release starts these services under one supervisor, and none
-is a significant child: a service's crash restarts that service and
-nothing more, and only a fault of the runtime itself, or a missed
-watchdog deadline, ends the machine. The domain service restarts without
-loss, because it keeps no state only in its own heap: every capability
-lives in the domain library's tables, and its domain and connection
-records live in an ETS table that a holder process under the top
-supervisor creates and gives to the domain service with itself as the
-table's heir, so the table returns to the holder when the service crashes
-and passes to the restarted service, which serves on from it. Each domain
-pid traps the service's exit and links to the restarted service, so a
-domain pid never outlives the record that keeps its domain
-([design-domains.md](design-domains.md#principals-sessions-and-quotas)).
-An end the library reports while the service restarts is not lost: the
-library's record of the domain holds its classified end, and the
-restarted service handles as an end every record the library shows ended
-that its table shows running. The domain service's inputs from other
-domains are hardened as [Ending a domain](#ending-a-domain) says, so no
-domain can crash it. One service of the table runs outside the system
-domain, in a domain the manifest lists: the vault.
+The system release starts these services under its supervisors, and the
+domain service alone is a significant child: a `temporary`, `significant`
+child of a supervisor with `auto_shutdown => any_significant` at the top
+of a permanent application. Its end, however it comes, `kill` included,
+shuts that supervisor down and ends the application, and so the runtime,
+outside an ordered end; the kernel's end path then writes the crash record
+and ends the machine (A6), as for any fault of the system domain. So the
+domain service is never restarted, and its records of every domain and
+connection live in its own heap, with no copy kept for a successor and no
+protocol to rebuild them. Its inputs from other domains are hardened as [Ending a domain](#ending-a-domain) says, so no
+domain can crash it. Any other service's crash restarts that service and
+nothing more, and besides the domain service's end only a fault of the
+runtime itself, or a missed watchdog deadline, ends the machine. One
+service of the table runs outside the system domain, in a domain the
+manifest lists: the vault.
 
 | Service | What it does | Detail |
 | --- | --- | --- |
-| domain service, `erx_domain_srv` | creates the manifest's domains in its boot order and every other domain; introduces, stops and destroys domains through the domain library; keeps domain pids, names and death records in its ETS table; restarts configured domains; runs the ordered end | [Creating a domain](#creating-a-domain), [Ending a domain](#ending-a-domain) |
+| domain service, `erx_domain_srv` | creates the manifest's domains in its boot order and every other domain; introduces, stops and destroys domains through the domain library; keeps domain pids, names, connections and death records; restarts configured domains; runs the ordered end | [Creating a domain](#creating-a-domain), [Ending a domain](#ending-a-domain) |
 | principal service, `erx_principal` | principals, credentials, sessions and quotas | [design-domains.md](design-domains.md#principals-sessions-and-quotas) |
 | facets, `erx_facet` | one process per grant of a service to a domain; admission per client | [design-domains.md](design-domains.md#facets) |
 | resource policy, `erx_policy` | the group tree, grants, capacity, budgets, lane sizes | [Resource policy](#resource-policy) |
@@ -3002,7 +3020,8 @@ partition, as a fresh installation does.
 | A domain ends | the fault gate | nothing of its own budget, which the fault thread destroyed at once, its devices' objects with it; each connection's child budget of its outer budget until both parties have let go of that connection; its outer budget, with its crash area, until no child remains and the crash area is read | the library, the domain service | `{domain_down, D, Info}` in linked processes; `noconnection` across every connection of the domain; the death record in the inspector |
 | A peer never answers `connection_down` | the domain service's record, which shows the connection closing | that connection's child budget, its sides and bells, and with it the dead domain's outer budget, whose other children go as their parties let go; within the survivor's own `connections` quota | the survivor, when it unmaps or ends; then the domain service asks `erx_dom_disconnect` and retires the dead domain | the inspector shows the connection closing, with the party that holds it |
 | A domain sends the domain service a malformed message, or one about a connection it is not a party to | the generated admission and the connection's state | nothing | none needed: the message is dropped | a counter on the sending domain |
-| The domain service or the device service stops answering | the watchdog process's liveness call | the domain service's records, in the ETS table its holder keeps | its supervisor restarts it, and the pets resume at its first answer; a service that never answers again ends the machine at the watchdog's deadline | a log line; at worst the crash record naming the watchdog |
+| The device service stops answering | the watchdog process's liveness call | the devices, each with its holder ([Devices](#devices)) | its supervisor restarts it, and the pets resume at its first answer; a service that never answers again ends the machine at the watchdog's deadline | a log line; at worst the crash record naming the watchdog |
+| The domain service stops answering, or ends | the watchdog process's liveness call, which kills it; its supervisor, at its end | the machine | none: its end ends the system domain, and the kernel writes the crash record and ends the machine by `erx.panic` | the report on the console; the crash record at the next boot |
 | The machine ends unordered more than three times in a row | the reset count, in its own sector beside the boot-selection record | the machine, booted in its rescue configuration | the operator, at the console | the console's login, saying the machine booted for rescue and why |
 | The system domain faults, halts outside an ordered end, or misses the watchdog's deadline | the kernel | the machine | none: the kernel writes the crash record and ends the machine by `erx.panic` | the report on the console, brief in a release build; the previous boot's crash record in the inspector at the next boot, to the system shell, where the platform keeps one |
 | The system release fails to boot | the root task's end | the machine | none | the report on the console; the machine ends by `erx.panic` |
@@ -3061,9 +3080,9 @@ the sanitizers and the construction rules.
 sends a system service passes the generated admission with the lane's
 origin stamped by the funnel; the domain service acts only on the
 sender's own side of a connection and drops and counts anything else
-([Ending a domain](#ending-a-domain)); no service is a significant child,
-and the domain service's records survive its restart in an ETS table its
-holder keeps ([System services](#system-services)); and what a domain can
+([Ending a domain](#ending-a-domain)), so no domain can end the domain
+service, whose end alone among the services ends the machine ([System
+services](#system-services)); and what a domain can
 make the system domain hold is a sum reserved at its admission ([Resource
 policy](#resource-policy)). So a domain can make a system service work,
 within its grant's share, but cannot make it fail or exhaust the system
@@ -3277,8 +3296,10 @@ under test ran.
   comparison, which the test catches; a JIT object's creation in the
   system domain, refused, and a hook that boots a root image carrying
   `ERX_IMAGE_JIT`, which the manifest check must refuse first; the domain
-  service crashed while domains run, which restarts with every domain pid,
-  record and connection in place; a test-build hook that faults the system
+  service killed while domains run, which ends the machine with the crash
+  record on the console and no domain running, and a hook that makes it a
+  `permanent` child, under which the supervisor restarts it and the test
+  finds the machine still running; a test-build hook that faults the system
   domain at every boot, after which the fifth boot comes up in the rescue
   configuration, with no network domain and no user domain, a login clears
   the count, and the next boot is a normal one.
@@ -3327,7 +3348,10 @@ under test ran.
   crashes with a dump, whose own budget is destroyed before the domain
   service reads the crash area, and whose dump is still read whole, and
   a hook that charges the crash area to the own budget, after which the
-  read fails; a vault that faults with keys loaded, after which the
+  read fails; a domain that logs a line and then halts at once, whose line
+  reaches the console, and a hook that has the console facet link the
+  domain's logger proxy without trapping exits, under which the line is
+  lost; a vault that faults with keys loaded, after which the
   system domain's `INSPECT` on its space fails at once and no stopped
   space of it remains; a domain with sub-spaces three deep whose destroy
   returns every charge of every sub-space in the one call; a domain's
@@ -3503,8 +3527,8 @@ under test ran.
   with system processes up to `peer_held`; the system domain stays
   responsive, its memory within the sum it reserved for each admitted
   domain, and every other domain is served; `max_domains` such domains at
-  once, which the system domain's budget holds; a domain that sends the
-  domain service `connection_lost`, `connection_mapped` and
+  once, which the system domain's budget holds; a domain that sends its
+  domain pid `connection_lost`, `connection_mapped` and
   `connection_unmapped` naming connections it is not a party to, and
   malformed ones, each dropped and counted, with the domain service still
   running and every other connection up.

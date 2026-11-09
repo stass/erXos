@@ -423,8 +423,9 @@ of behaviour, however many lines it touches:
 | `lib/stdlib/src/shell.erl`, `lib/stdlib/src/edlin_expand.erl` | 53. a function defined at the prompt has each of its calls resolved, and is itself refused, by name and arity, through `edlin_expand:shell_default_or_bif/2`: a shortcut that `shell_default`'s `erx_shortcuts` attribute lists answers `shell_default` at its own arity only, and every other call gets stock's answer by name alone over OTP's exports, which `shell_default_or_bif/1`, and so argument completion, keeps. A call of a quoted name resolves by its atom: stock's shell resolves it by the name's unquoted text, which for `'Foo'(X)` scans to no atom, so its server dies of a `case_clause`, and for `'self%x'(X)` scans to another atom, `self`, so the call goes to `erlang` ([design-live.md](design-live.md#erlang-in-every-domain)) |
 | `lib/kernel/src/inet.erl` | 54. `inet_backend` takes a third value, `erx`, and it is the default: `gen_tcp_module/2` and `gen_udp_module/2` return `erx_gen_tcp` and `erx_gen_udp` for it, whose sockets are `{'$inet', Module, Pid}` terms that `gen_tcp`, `gen_udp` and `inet` already dispatch on, and `getifaddrs/0` and `gethostname/0` ask the domain's network grant ([design-network-stack.md](design-network-stack.md#the-backend)) |
 | `lib/kernel/src/group.erl` | 55. the driver's `suspend`, which `erx_console` sends for `Ctrl-Z`, reaches the group's shell as `{Group, suspend}`, as an interrupt reaches it as an exit signal, so the command shell can stop its foreground job ([design-shell.md](design-shell.md#job-control)) |
+| `beam/dist.c`, `beam/erl_proc_sig_queue.c` | 56. when a distribution entry goes down with a reason `{domain_down, D, Info}` whose `D` is the creation the entry had as it went down, which `erts_do_net_exits` checks and hands the cleanup with the reason, `link_connection_down` fires each link and `monitor_connection_down` each monitor and pending spawn with that reason, where stock fires `noconnection`, and the conversion of a pending spawn's `DOWN` into the `spawn_request` error reply takes the reason it is given in place of asserting `noconnection`; `Info` is small, a tag or a tag and a status (`{halt, Status}`, `crash`, `{fault, Kind}`, `stopped`), and the cleanup fires from the copy of the reason it already keeps in its own heap for `nodedown_reason`, alive across its yielding passes, which each exit, `DOWN` and error reply copies in turn; every other reason fires `noconnection` as stock, and the reason reaches `net_kernel:monitor_nodes/2`'s `nodedown_reason` as stock passes it ([Connections in ERTS](#connections-in-erts)) |
 
-Fifty-five edits outside `sys/erxos`, in fifty-eight named files outside
+Fifty-six edits outside `sys/erxos`, in fifty-eight named files outside
 the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
 the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
@@ -518,7 +519,13 @@ typedef struct erx_boot_info {
 		uint32_t	in_size;		/* data area of the lane it
 							 * reads, the reserve
 							 * included */
-	} system_connection;			/* its connection to the system domain */
+		uint32_t	domain_pid_number, domain_pid_serial;
+							/* its domain pid, a process
+							 * of the system domain's
+							 * node, as the ID and Serial
+							 * of NEW_PID_EXT */
+	} system_connection;			/* its connection to the system domain;
+						 * all zero in the system domain */
 	uint64_t	cpuset;			/* CPUs its group may use */
 	uint32_t	capacity_mcpu;		/* initial capacity */
 	uint32_t	node_off, node_len;	/* its node name, <id>@<host>, in the page */
@@ -532,7 +539,11 @@ typedef struct erx_boot_info {
 } erx_boot_info_t;
 ```
 
-The fixed prefix is 280 bytes. The kernel supplies `pack_flags` from the
+The fixed prefix is 288 bytes. The domain pid's two words name a pid
+with the system connection's peer node and id, so a domain knows one
+process of the system domain from its start, the one it reports to and
+the one its connection agent answers
+([design-domains.md](design-domains.md#domain-lifecycle)). The kernel supplies `pack_flags` from the
 validated boot-image header; the root entry preserves that value and
 compares its development bit with the system manifest's development bit
 before applying any configuration. Either mismatch is an invalid boot.
@@ -567,11 +578,11 @@ the runtime where. The node name is the domain service's choice, written
 by the domain library, never an argument the specification sets
 ([Connections in ERTS](#connections-in-erts)), and the page names the
 system connection's peer by its node name and id as well, as
-`connection_up` names every later peer. The arguments name, as text, the pid of the
-system domain's process that admits the domain, which that process
-exported to the domain before it started
-([Connections in ERTS](#connections-in-erts)).
-With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 280,
+`connection_up` names every later peer, and with them the domain's domain
+pid, the system domain's process that admits the domain and that the
+domain reports to, which exported itself to the domain with `send` before
+the domain started ([Connections in ERTS](#connections-in-erts)).
+With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 288,
 with the **root extension**, `erx_boot_root_extension_t`, which the ABI
 generator derives from the ABI file's `cap` lines, so that nothing is copied by
 hand: one capability value for each root slot, the value of slot N at offset
@@ -924,14 +935,20 @@ from the boot information page through `erx_dist:boot/0`, a BIF of the
 lane driver's file, and registers with no port mapper, and `erx_dist:select/1` claims every node
 name at this machine's host name; names of other machines belong to the
 network service's carrier. `erx_connections`, the connection agent, is
-the carrier's acceptor. When the system domain introduces this domain to
-a peer, the domain service tells the agent, in `connection_up` over the
-system connection: the peer's id and node name, the slots of the
-domain's own side, the peer's side and the peer's bell, the label the
-system domain bound this domain's bell with, and the two data areas'
-sizes
+the carrier's acceptor, registered in its own domain under its module's
+name. When the system domain introduces this domain to a peer, the
+domain's **domain pid**, its correspondent in the system domain, tells
+the agent, in `connection_up` over the system connection: the peer's id
+and node name, the slots of the domain's own side, the peer's side and
+the peer's bell, the label the system domain bound this domain's bell
+with, and the two data areas' sizes
 ([design-domains.md](design-domains.md#messages-between-the-domain-service-and-a-runtime)).
-The agent takes it from the system connection alone and opens a port on
+The agent sets `erx:origins(true)` (edit 16) and acts only on a record
+that arrives as `{erx_origin, 4, Record}`, from the system connection,
+so a peer that was handed the agent's pid can reach it but not steer it.
+It answers the domain pid, which the boot information page names and
+`erx_dist:boot/0` returns with the system connection's other values. It
+opens a port on
 the lane driver with those values; the driver's open maps the two sides,
 since Erlang cannot map memory, and registers the label as the
 connection's sink in the event table. The agent hands the port to
@@ -962,6 +979,44 @@ node that is not connected: ERTS asks `net_kernel` to connect,
 `erx_dist:setup/5` fails at once, since only the system domain makes
 connections, and ERTS answers `noconnection`, drops the message, or
 fails the spawn, exactly as for a node it cannot reach.
+
+**The system domain is a node like the others.** Its runtime runs
+`net_kernel` over `erx_dist` from its release's arguments
+([Configuration](#configuration)), as the node `system@<host>` with
+creation 4, the domain id the root-task entry writes on its page.
+`kernel` starts `net_sup` before any application, so the system domain is
+alive before the domain service starts, and every pid it hands out, the
+domain pids included, names its node. Its page has no system connection,
+so its agent opens no port at start. The agent opens the system domain's
+side of each domain's system connection when the domain service asks,
+with the values the domain library returned for that side and the
+domain's domain pid, before the domain's first thread runs, and at the
+domain's end finishes it and closes it with the reason the domain
+service gives (**Closing**, below); it serves these two requests as calls
+from the domain service and takes no record from a lane, since the
+system domain is a party of no connection but the system connections.
+The side's writer gives the reserve of the domain's lane from the system
+domain to the messages whose sender is that domain pid, and to no other
+frame ([design-domains.md](design-domains.md#connections)).
+
+**The agent and `net_kernel` live as long as their domain.** The agent
+is linked to `net_kernel`, as every carrier's acceptor is, and in every
+domain the end of either halts the runtime with status 69: a domain's
+domain pid keeps the agent's pid for the domain's life, so a domain
+whose agent ended could take no connection-control record again, and
+the domain's connections end with `net_kernel`; in the system domain
+every system side ends with them, and no domain could learn of it,
+since a lane has no close.
+Neither can be ended or steered from another domain, whoever hands its
+pid out. Edit 8 gives a peer only `send` on a pid it encodes, so no peer
+can link to either or send it an exit. Both set `erx:origins(true)`
+(edit 16): the agent itself, and `net_kernel` through `erx_dist:listen/2`,
+which `net_kernel` runs in its own process as it starts. A message from
+another domain therefore reaches either only as `{erx_origin, D, Msg}`.
+The agent acts on it as above; `net_kernel` matches it with no clause but
+its catch-all, which logs and drops it, so no domain reaches its calls,
+among them `{spawn, M, F, A, Gleader}`, which would run code in its
+domain, and `{disconnect, Node}`, which would end a connection.
 
 **No ticks.** A connection between domains has no tick supervision. The
 carrier reports no ticks: the connection's owner process, which
@@ -1123,19 +1178,34 @@ frame as malformed, when the lane's ring or reader page fails its checks,
 when a signal does not fit the connection's `peer_held`, when a process
 of the domain calls `erlang:disconnect_node/1` on the peer, or when the
 system domain says the connection is down. When the system domain says
-so, in `connection_down`, the runtime first drains the lane up to the
-write position it reads then, through the funnel as always, waiting on
-nothing the peer would have to do: a dead peer's position is final, so
-the frames it published before it ended are delivered, and a live peer's
-frames after that position are lost with the connection. Then, in every
-case, the driver closes the port: ERTS runs `erts_do_net_exits` on the
-entry, which fires every link, monitor and pending spawn the domain holds
-across it with the reason the system domain gave, `{domain_down, D,
-Info}` for a peer that ended and `noconnection` otherwise, sends
-`nodedown` to the node's monitors as on a stock node, and
-`erx_connections` unmaps both sides, closes its three capabilities, and
-answers `connection_unmapped`, or, when this side ended the connection,
-tells the domain service `connection_lost` with the reason. The system
+so, in `connection_down`, the agent first has the port **finish**: the
+lane driver's control command 2, beside 0 for the counts and 1 for one
+run of the input task, reads the lane's write position once and has the
+input task take every whole record before it, through the funnel as
+always, waiting on nothing the peer would have to do. A dead peer's
+position is final, so the frames it published before it ended are
+delivered, and a live peer's frames after that position are lost with the
+connection. While it finishes, the port writes nothing more into the
+other lane, so the bound on unsent answers does not stop the input task,
+since what remains is at most one data area; a process at its queue
+quota pauses it as at any time, which waits on a process of this domain
+and never on the peer; a record that the position cuts short is
+dropped and counted, and a
+malformed one ends the port as a malformed record always does. When the
+last record is taken the driver sends the agent `{Port, erx_lane_finished}`,
+and the agent ends the port with `exit(Port, Reason)`, `Reason` being
+the one `connection_down` gave. In every other case the port ends with
+the driver's own reason, an atom such as `erx_lane_malformed`, or with
+`net_kernel`'s. ERTS then runs `erts_do_net_exits` on the entry with the
+port's reason, which fires every link, monitor and pending spawn the
+domain holds across it with `{domain_down, D, Info}` when that is the
+reason and `D` is the peer's id, and with `noconnection` for every other
+reason (edit 56), so a peer's death and only a peer's death reaches its
+links and monitors as `{domain_down, D, Info}`, the same reason its domain
+pid exits with. It sends `nodedown` to the node's monitors as on a stock
+node, and `erx_connections` unmaps both sides, closes its three
+capabilities, and answers `connection_unmapped`, or, when this side ended
+the connection, tells the domain pid `connection_lost` with the reason. The system
 domain deletes the connection's objects only once both parties have
 unmapped them or ended, never on a timer while a party lives
 ([design-domains.md](design-domains.md#introduction-and-connection-down)).
@@ -1145,7 +1215,12 @@ port or its owner, halts the domain instead, with status 69
 (`EX_UNAVAILABLE`),
 since the domain has no services without that connection and could tell
 no one; when the system domain ends it, the domain service stops the
-domain ([design-system.md](design-system.md#ending-a-domain)).
+domain ([design-system.md](design-system.md#ending-a-domain)). The
+system domain's side closes the same way: at a domain's end the domain
+service has its agent finish that side and end its port with
+`{domain_down, D, Info}`, so every system-domain process linked to or
+monitoring a process of the domain gets that reason, behind everything
+the domain published.
 
 **Facets** are processes of the system domain that act only for their
 grantee; a facet sees frames only from its grantee's lane, since the
@@ -2977,17 +3052,21 @@ The system release's arguments are:
 
 ```
 -- -root / -bindir /bin -progname erl -home / -boot /bin/start
--user erx_console -nocookie -kernel start_distribution false
+-user erx_console -nocookie -no_epmd -proto_dist erx
 ```
 
 `init` exits without `-bindir` (`init.erl:1235`), though nothing is read from it.
 `-home` answers `filename:basedir` and `c`, as no `HOME` exists. `-user` replaces
 `user_drv`, which loads the removed NIF (`user_drv.erl:182`), with `erx_console`,
 and `user_sup` waits ten seconds for it to register `user` (`user_sup.erl:105-119`).
-A release with a carrier replaces `-kernel start_distribution false` with
-`-no_epmd -proto_dist erx`, and `-nocookie` then spares `auth` from reading or
-creating a cookie, which a read-only release with no `HOME` cannot satisfy and
-whose mode `0444` it refuses (`auth.erl:347-374`, `:513`).
+`-no_epmd -proto_dist erx` makes the runtime a node over the `erx` carrier with
+no port mapper, as every domain's release does, so the system domain is
+`system@<host>` from `kernel`'s start
+([Connections in ERTS](#connections-in-erts)); `-nocookie` then spares `auth`
+from reading or creating a cookie, which a read-only release with no `HOME`
+cannot satisfy and whose mode `0444` it refuses (`auth.erl:347-374`, `:513`). A
+release that runs with no carrier says `-kernel start_distribution false`
+instead, and is no node.
 
 `kernel_sup` then starts these, in stock's order with `erx_watchdog` added right after `on_load` (edit 41):
 
@@ -3247,6 +3326,38 @@ own domain, so a runtime that lies harms only itself.
   [design-domains.md](design-domains.md#the-funnel) is replayed into a
   lane, hosted under ASan and UBSan; a seeded skip of the funnel fails
   the chokepoint check (R6).
+* **The system node and closing.** Before the domain service starts, the
+  system domain's `node()` is `system@<host>` and
+  `erlang:system_info(creation)` is 4; seeded failure: a system release
+  with `-kernel start_distribution false`, under which the lane driver
+  refuses to open the first system side and the first creation fails. A
+  domain halts with `erlang:halt(3)` in the middle of a burst to a peer
+  whose process holds a link to and a monitor on one of its processes and
+  a pending `spawn_request` into it: the peer gets the whole burst, then
+  the exit, the `DOWN` and the spawn's error reply, each with
+  `{domain_down, D, {halt, 3}}`, and a system-domain process linked to the
+  same process gets the same; seeded failures: a build without edit 56,
+  under which the three carry `noconnection`, and an agent that ends the
+  port without the finish, under which the burst's tail is lost (D17).
+  `erlang:disconnect_node/1` of a live peer, and a port a process of the
+  domain ends with `{domain_down, D2, Info}` for an id `D2` that is not the
+  peer's, each fire `noconnection`; seeded failure: edit 56 without its
+  creation check. A peer that halts after publishing half of a long
+  record, and a finish whose outbound lane is full with the bound on
+  unsent answers reached, each still end with `{domain_down, D, Info}`,
+  the cut record counted as dropped; seeded failures: a finish that takes
+  the cut record as malformed, and one that keeps the answers bound, each
+  of which ends the port with the driver's reason and fires
+  `noconnection`. A domain that a test hook in the system domain hands
+  `net_kernel`'s pid sends it a `gen_server` call of `{spawn, M, F, A,
+  Gleader}` and one of `{disconnect, Node}` for another domain's node:
+  nothing is spawned in the system domain, no connection ends, and
+  `net_kernel` runs on; seeded failure: an `erx_dist:listen/2` that does
+  not set the origins flag, under which the spawn runs. A domain whose
+  agent is killed halts with status 69; seeded failure: an agent that
+  `net_kernel` restarts, under which the domain runs on and a later
+  introduction never comes up, its `connection_up` sent to the dead
+  agent's pid.
 * **The export table.** A source check lists the callers of its insert
   and fails on a fourth, with a seeded violation; a property test over
   sequences of encode, export, exit and deactivate keeps every entry's

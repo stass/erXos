@@ -751,9 +751,16 @@ smallest power of two that holds the domain's `lane` and the reserve, and
 the domain pays for it, as for both lanes of its system connection. The
 system domain never lets an ordinary frame take the reserve: it writes an
 ordinary record, or the next part of a long one, only into room beyond the
-reserve, and a connection-control record into any room. The domain service
-sends a domain the control records about one peer node name one at a time,
-each once the domain has answered the last: a connection's
+reserve, and a connection-control record into any room. It tells the two
+apart by sender: a message whose sender is the domain's domain pid, which
+the system side's port is given when it opens, is a control record, and
+every other frame is ordinary. The domain pid sends its domain nothing
+but the records the domain service hands it, so only the domain
+service's records reach the reserve, whatever any other process sends,
+and no record's shape is read to class it. The domain service sends a
+domain the control records about one peer node name one at a time,
+through its domain pid, each once the domain has answered the last: a
+connection's
 `connection_down` waits for the answer to its `connection_up`, and the
 `connection_up` of a later domain of the same name waits for the answer to
 the earlier connection's `connection_down`. So at most one record per peer
@@ -934,7 +941,7 @@ domain that owns the name (D4):
    with `spawn`, which is how a domain lets a peer spawn into it, and so
    call it with `rpc` and `erpc`. It is also the only source of
    `introduce`, which means something only on a domain pid: the domain
-   service, which owns every domain pid, writes it. So neither an encoded
+   service, which owns every domain pid, has the domain pid write it. So neither an encoded
    domain pid, such as one in an inspector's listing, nor a
    `connection_up`, which names the peer by its id, carries the authority
    to introduce that domain.
@@ -1045,17 +1052,35 @@ the pid with the domain's exit reason when the domain dies; and when the
 pid dies first, by an exit signal that it cannot trap, a `kill`, or by a
 fault of its own, the domain service takes the connection's exit as a stop
 and stops the domain ([Domain lifecycle](#domain-lifecycle)). The domain
-service's own end is the one exit a domain pid does not take as a stop:
-the domain service is a significant child of the system release, whose end
-is the system domain's end and so, by the kernel's rule that a space never
-outlives its parent, every domain's
+service's own end is the system domain's: the domain service is the
+system release's significant child, so its end ends the system domain
+and with it every domain and every domain pid
 ([design-system.md](design-system.md#system-services)). The domain pid is
 a proxy built from ordinary processes, so nothing in the kernel knows
-about it, and the domain service exports it explicitly to the domain's
-creator with `send`, `link`, `exit` and `introduce`; any other domain the
-system domain hands it to holds `send` on it, enough to monitor the domain
-and nothing more, and gets `introduce` only from an explicit export by the
-domain service's policy.
+about it, and it exports itself, as the domain service directs, to the
+domain's creator with `send`, `link`, `exit` and `introduce`; any other
+domain the system domain hands it to holds `send` on it, enough to
+monitor the domain and nothing more, and gets `introduce` only from an
+explicit export by the domain service's policy.
+
+The domain pid is also its domain's **correspondent**: the one process of
+the system domain the domain knows from its start, since its boot
+information names it and it exports itself to the domain with `send`
+before the domain's first thread runs. Init reports ready to it, naming
+the domain's agents; the domain pid keeps the connection agent's pid from
+that report for the domain's life, which is the agent's life too
+([design-runtime.md](design-runtime.md#connections-in-erts)), and passes
+the report on to the domain service. From then on it relays the
+connection protocol: it sends the agent each connection-control record
+the domain service hands it, and passes each of the agent's answers to the
+domain service ([Messages between the domain service and a
+runtime](#messages-between-the-domain-service-and-a-runtime)). It keeps
+no state about any connection: the domain service alone keeps each
+connection's state and decides when each record goes. It sets
+`erx:origins(true)` and acts on a message from another domain only when it
+arrives as `{erx_origin, D, Msg}` with `D` its own domain, so the creator
+and every other holder of `send` on it can message it but not speak for
+the domain.
 
 ## Algorithms and behavior
 
@@ -1350,7 +1375,7 @@ and drivers](#native-processes-and-drivers)).
 * **Connections.** A runtime starts with one connection, to the system
   domain, whose capabilities, label, sizes, node name and id are in its
   boot information. Every other connection arrives as a `connection_up`
-  message from the domain service on the system connection ([Messages
+  message from its domain pid on the system connection ([Messages
   between the domain service and a
   runtime](#messages-between-the-domain-service-and-a-runtime)). The
   domain's node runs `net_kernel` with `erx_dist` as its distribution
@@ -1615,14 +1640,22 @@ from the domain's child on its system connection; binds each bell to that
 domain's group with the next label below `ERX_LABEL_SPLIT` from the
 counter the domain service keeps for that domain
 ([Connections](#connections)); gives each party its three capabilities,
-without `DESTROY`; and only then records the connection and tells each
-party `connection_up`, naming the peer's id and node name, the slots, the
-label and the two sizes, in the order of [The reserve](#connections) for
-that party and peer name. Each runtime's connection agent maps, opens its
-port and answers `connection_mapped`, and the connection is up when both
-have answered; frames written before the peer has mapped simply wait in
-the lane. A failure anywhere in the plan undoes what was built, so no half
-connection exists.
+without `DESTROY`; and only then the domain service records the
+connection and tells each party `connection_up`, through the party's
+domain pid, naming the peer's id and node name, the slots, the label and
+the two sizes, in the order of [The reserve](#connections) for that party
+and peer name. It tells a domain nothing before the domain's init has
+reported ready, since only that report gives the domain pid the agent's
+pid, so a connection made with the domain, its creator's included, waits
+in the domain service's record until then; a domain's system connection
+needs no record on the
+domain's side, which opens it from its boot information, and on the
+system domain's side the domain service has its own agent open it before
+the domain's first thread runs. Each runtime's connection agent maps,
+opens its port and answers `connection_mapped`, and the connection is up
+when both have answered; frames written before the peer has mapped simply
+wait in the lane. A failure anywhere in the plan undoes what was built,
+so no half connection exists.
 
 **Connection down.** A connection goes down for one of three reasons, and
 all three end the same way:
@@ -1646,25 +1679,34 @@ constraints:
    pending spawns there, discards the entry's output queue and reports
    `nodedown`, ends every export toward the peer, unmaps both sides,
    closes its three capabilities to the connection's objects, and tells
-   the domain service `connection_lost` with the reason. The system
+   its domain pid `connection_lost` with the reason. The system
    connection is the exception: a runtime that finds it malformed halts
    its own domain, and the domain service learns of the end through the
    fault gate. Messages the funnel already queued on its processes stay,
    as ERTS keeps what a connection delivered before it went down.
 2. **The domain service**, on `connection_lost` from either party or on a
    domain's end, marks the connection closing and tells the other party
-   `connection_down`, with `{domain_down, D, Info}` as the reason when the
-   peer ended and `noconnection` otherwise. It sends it once that party has
-   answered the connection's `connection_up`, so the party has at most one
-   control record about that peer name outstanding, which the reserve of
-   its lane from the system domain holds ([Connections](#connections));
-   the record is never dropped and never waits behind other frames.
-3. **The other party**, on `connection_down`, first drains the lane it reads
-   up to the `wpos` it reads then, through the funnel as always, waiting on
-   nothing the peer would have to do: a dead peer's position is final, and a
-   live peer's frames after that position are lost with the connection. Then
-   it does what step 1's runtime did, with the reason it was given for
-   its links and monitors, and answers `connection_unmapped`.
+   `connection_down` through that party's domain pid, with `{domain_down,
+   D, Info}` as the reason when the peer ended and `noconnection`
+   otherwise. It sends it once the party has answered the connection's
+   `connection_up`, so the
+   party has at most one control record about that peer name outstanding,
+   which the reserve of its lane from the system domain holds
+   ([Connections](#connections)); the record is never dropped and never
+   waits behind other frames. When the other party is the system domain,
+   at a domain's end, the domain service asks its own agent instead.
+3. **The other party**, on `connection_down`, first has the port finish:
+   it takes every whole record before the `wpos` it reads then, through
+   the funnel as always, waiting on nothing the peer would have to do; a
+   dead peer's position is final, and a live peer's frames after that
+   position are lost with the connection
+   ([design-runtime.md](design-runtime.md#connections-in-erts)). Then it
+   ends the port with the reason it was given, and the entry goes down as
+   in step 1, except that a reason `{domain_down, D, Info}` naming the peer
+   fires its links, monitors and pending spawns with that reason in place
+   of `noconnection` (edit 56 of
+   [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)); it
+   answers `connection_unmapped`.
 4. **The domain service deletes the four objects** once each party has
    unmapped them or ended, and never on a timer while a party lives, by
    destroying the connection's children; the memory returns to the outer
@@ -1737,6 +1779,18 @@ domain pid exits with the same `{domain_down, D, Info}`; the detail behind
 it, such as a crash slogan, a fault record or the reason a policy stopped
 the domain, is in the domain's crash area
 ([design-system.md](design-system.md#ending-a-domain)).
+
+The exit reaches a linked process behind every message the dead domain's
+process sent it, as ERTS orders signals from one sender, but an exit with
+a reason other than `normal` kills a linked process that does not trap
+exits at once, with those messages still unread in its queue. So a
+process that must act on what a domain sent last, the console facet with
+the domain's last log records and console output among them, traps exits
+or monitors the domain's processes instead of linking without trapping;
+then the exit or `DOWN` arrives as a message behind the tail and is taken
+after it. Every facet traps exits, since the `erx_facet` behaviour does
+([Facets](#facets)), so a facet that links its grantee's processes gets
+the domain's tail whole.
 
 ### Killing a process
 
@@ -1812,11 +1866,13 @@ from the boot image, its connection to the system domain, and its
 connection to the caller's domain
 ([design-system.md](design-system.md#creating-a-domain)). The boot
 information names the domain's node name and id, the system domain's
-node name, id and connection, the domain service's pid, which the domain
-service has exported to the new domain with `send`, and the creator's
-domain as `spawner`. Only then does the library start the domain's first
-thread. The domain service creates the domain pid and exports it to the
-caller's domain with `send`, `link` and `exit`.
+node name, id and connection, the domain's domain pid, which the domain
+service created before the plan and ends if the plan fails, and the
+creator's domain as `spawner`. The domain service then has its own agent
+open the system domain's side of the system connection, and the domain
+pid exports itself to the new domain with `send` and to the caller's
+domain with `send`, `link` and `exit`. Only then does the library start
+the domain's first thread.
 
 The runtime boots, starts its node under its name and id, and spawns the
 domain's init process, and before it reads its first frame it exports
@@ -1824,7 +1880,7 @@ init with `send` and the domain's name with `spawn` to the system domain
 and to its spawner, both named in its boot information, so no frame
 either sends from the start is dropped as one to a name never exported. Init then runs the domain's boot
 script: a small release with `kernel` and `stdlib`, `kernel`'s
-`erx_connections` application being the connection agent; the
+`erx_connections` being the connection agent; the
 code server, which loads the release's modules from the domain's slice and
 the modules that arrive through the domain's code facet
 ([design-live.md](design-live.md#the-code-store)); a `user` that writes with
@@ -1833,10 +1889,16 @@ its log ([design-runtime.md](design-runtime.md#the-console-and-standard-io)); a
 logger proxy, which sends the domain's log records to
 the console facet ([design-live.md](design-live.md#the-console)); and the
 domain agent that answers inspection ([design-live.md](design-live.md)).
-Init reports ready to the domain service, naming the agents, which exports
-them to the system domain by that message; the domain service answers with
-the facets the spec's `facets` names, minted for this domain, which that
-message exports to it, and `erx:cap(Name)` returns them. The spec's `env` is
+Init reports ready to the domain pid, naming the agents, the connection
+agent among them, which exports them to the system domain by that
+message; the domain pid keeps the connection agent's pid, the one process
+that does, and passes the report to the domain service, which from then
+on sends the domain, through the domain pid, the connection-control
+records its connections need, the `connection_up` of its creator's
+connection first.
+The domain service answers init with the facets the spec's `facets`
+names, minted for this domain, which that message exports to it, and
+`erx:cap(Name)` returns them. The spec's `env` is
 the domain's environment, which `os:getenv/1` reads. `create/1` returns
 `{ok, Domain}` when init has reported ready, or `{error, Reason}` if the
 runtime fails or the spec's boot timeout passes first; in every error case
@@ -2448,31 +2510,46 @@ delivery from its group's ready list names the connection exactly
 
 ### Messages between the domain service and a runtime
 
-The domain service and a runtime's connection agent speak in plain Erlang
-messages on the system connection, and nothing of the connection protocol
-travels on any other path. The agent's pid reaches the domain service in the
-domain's ready report, which exports it; the domain service's pid is in the
-domain's boot information and exported to the domain explicitly at its
-creation.
+The domain service decides, and each domain's domain pid relays its
+decisions to that domain's connection agent, in plain Erlang messages on
+the system connection; nothing of the connection protocol travels on any
+other path. Neither side needs an export written for the protocol alone:
+the domain pid exports itself to its domain before the domain starts and
+the boot information names it, and the agent's pid reaches the domain pid
+in init's ready report, whose encoding hands it out with `send` (edit 8 of
+[design-runtime.md](design-runtime.md#the-edits-outside-syserxos)). The
+domain service sends a domain no record before that report. The system
+domain's own agent takes the same two records from the domain service as
+calls, for the system domain's side of each system connection, and
+answers each as the call's result.
 
 | Message | Direction | Meaning |
 | --- | --- | --- |
-| `{erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}` | domain service to agent | a connection to domain `Peer`, node `PeerNode`, exists: the capability slots of the domain's side, the peer's side and the peer's bell, the label the domain's own bell is bound with, and the data areas' sizes, the domain's own lane first; the agent maps, opens the port, brings the entry up and answers `connection_mapped` |
-| `{erx_connection_mapped, Peer}` | agent to domain service | the domain has mapped the connection's objects and its entry is up |
-| `{erx_connection_down, Peer, Reason}` | domain service to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent drains the lane to its current position, fires its links and monitors with `Reason`, unmaps, closes and answers `connection_unmapped` |
-| `{erx_connection_unmapped, Peer}` | agent to domain service | the domain has unmapped the connection's objects and closed its capabilities |
-| `{erx_connection_lost, Peer, Reason}` | agent to domain service | the domain ended the connection from its side: `{malformed, Code}`, `{peer_held, Bytes}`, `{map, Status}` when it could not map it, or `disconnect`; it has already unmapped |
+| `{erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}` | domain pid to agent | a connection to domain `Peer`, node `PeerNode`, exists: the capability slots of the domain's side, the peer's side and the peer's bell, the label the domain's own bell is bound with, and the data areas' sizes, the domain's own lane first; the agent maps, opens the port, brings the entry up and answers `connection_mapped` |
+| `{erx_connection_mapped, Peer}` | agent to domain pid | the domain has mapped the connection's objects and its entry is up |
+| `{erx_connection_down, Peer, Reason}` | domain pid to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent has the port finish at the lane's current position, ends it with `Reason`, which fires its links and monitors with it, unmaps, closes and answers `connection_unmapped` |
+| `{erx_connection_unmapped, Peer}` | agent to domain pid | the domain has unmapped the connection's objects and closed its capabilities |
+| `{erx_connection_lost, Peer, Reason}` | agent to domain pid | the domain ended the connection from its side: `{malformed, Code}`, `{peer_held, Bytes}`, `{map, Status}` when it could not map it, or `disconnect`; it has already unmapped |
 
-The two messages from the domain service are the **connection-control
-records**. It sends the records about one peer node name one at a time,
+The two messages to the agent are the **connection-control records**. The
+domain service sends the records about one peer node name one at a time,
 each once the agent has answered the last, so at most one per peer name
-is outstanding, and the reserve of the domain's lane from the system domain
-holds every one ([Connections](#connections)).
+is outstanding, and the reserve of the domain's lane from the system
+domain holds every one ([Connections](#connections)). It hands each to the
+domain pid tagged with the secret the two share, and the domain pid sends
+it to the agent at once; the domain pid passes each answer to the domain
+service tagged with the same secret, and keeps nothing of either. Every
+answer is built of atoms the system domain's code already holds, so the
+safe decoder creates none. Of its domain's messages the domain pid
+passes on only the three answers and init's ready report, by their
+shapes, and drops and counts any other; the domain service applies an
+answer only to a connection of the domain in the state that expects it,
+and drops and counts the rest ([design-system.md](design-system.md#ending-a-domain)).
 
 A runtime that receives a message of this shape from any lane but the system
 connection ignores it: the envelope the peer puts on every message from
-another domain names the lane, and the agent acts only on the system
-domain's.
+another domain names the lane, `{erx_origin, 4, Msg}` for the system
+domain's (edit 16), and the agent acts only on the system domain's.
 
 ### Erlang interface
 
@@ -2632,7 +2709,7 @@ domain](#domain-ids-pids-and-references)):
 | `net_adm:ping/1` toward a node of the machine | answers from `nodes()`: `pong` for `node()` and every connected domain, `pang` for any other, with no call to the peer and no disconnect, since a connection exists only by introduction ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos)); `erlang:disconnect_node/1` of the system domain's node keeps its meaning, and the domain's system connection ends and with it the domain |
 | `rpc:block_call/4,5`, `rpc:abcast/2,3`, `rpc:sbcast/2,3`, `rpc:server_call/4` and `rpc:multi_server_call/2,3` toward another domain | each sends to a registered name (`rex` or the caller's), which never crosses: `block_call` returns `{badrpc, {'EXIT', {noproc, _}}}`; `abcast` writes no frame; `sbcast` and `multi_server_call` list the domain among the bad nodes; `server_call` returns `{error, nodedown}` |
 | `net_ticktime` and tick supervision | no tick supervises a connection between domains: a peer silent past `net_ticktime`, or starved of CPU that long, stays connected, and no connection ends with `net_tick_timeout` |
-| A link or monitor to a process of a domain that dies | fires with `{domain_down, D, Info}` instead of `noconnection` |
+| A link, monitor or pending spawn toward a process of a domain that dies | fires, or fails the spawn, with `{domain_down, D, Info}` instead of `noconnection` (edit 56 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)) |
 | A link or monitor to a process of a domain the holder has no connection with, or that has died | fires with `noconnection`, as toward a node that cannot be reached |
 | A link or monitor of a process of another domain that was never exported to the holder, or a link to one exported without `link` that holds no link with the holder | an exit or `DOWN` with reason `noproc` from the target's runtime, as for a process that does not exist |
 | `exit/2` or `group_leader/2` on a process of another domain exported to the caller without `exit` | no effect, as on a process that does not exist |
@@ -2876,9 +2953,14 @@ for the same reason.
   at the entry's queue limit and the system domain's drop and end at
   `system_queue`; the reserve of a domain's lane from the system
   domain, filled with ordinary frames and then given one control record
-  per connection; the runtime's `peer_held` accounting and its choice of
-  the connection to end; the domain service's introduction checks against
-  `erx:exports/1` of each domain pid.
+  per connection, and given as well, while full to the reserve's edge, a
+  record of a control record's shape from a sender other than the domain
+  pid, which waits as an ordinary frame; seeded failure: a writer that
+  classes records by shape, under which that record takes the reserve and
+  a later control record does not fit; the runtime's `peer_held`
+  accounting and its choice of the connection to end; the domain
+  service's introduction checks against `erx:exports/1` of each domain
+  pid.
 * **Exhaustive exploration of the protocols**, as pure state machines in
   `liberx`'s functional core. An independent TLA+/TLC model checks the
   connection's lifetime and ordering contract, with every invariant mapped
@@ -2895,13 +2977,19 @@ for the same reason.
     later domain of the peer's name introduced to the same domain, with
     every interleaving of frames in both lanes, the peer's stop, the
     domain service's `connection_up` and `connection_down` and their
-    answers, the drain and the deletion, checking D9, D16 and D17: every
+    answers, the finish and the deletion, checking D9, D16 and D17: every
     frame the dead peer published is delivered, nothing is delivered
     after the `{domain_down, D, Info}`, no object is deleted while a live
-    party that has not answered maps it, at most one control record per
-    peer name is outstanding, the later `connection_up` never reaches the
-    domain while its entry for the name is up, and a runtime that answers
-    `connection_unmapped` never touches a deleted page;
+    party that has not answered maps it, every connection whose parties
+    have let go is deleted, at most one control record per peer name is
+    outstanding, the later `connection_up` never reaches the domain while
+    its entry for the name is up, and a runtime that answers
+    `connection_unmapped` never touches a deleted page; seeded failures:
+    a domain service that sends a connection's `connection_down` before
+    the answer to its `connection_up`, under which two records about one
+    peer name are outstanding, and a finish that reads the write position
+    again after it starts, under which a live peer's later frame is
+    delivered after the `connection_down`;
   * cross-domain links and monitors between three domains with every signal
     kind, links and monitors of dead and unexported processes, a death and a
     connection ended by a malformed frame, checking that every answer about
@@ -3147,6 +3235,20 @@ for the same reason.
   three-domain interleavings; D12 with floods past each receiver limit; D13
   with the soak; D16 with the capability-table check, the budget
   baselines and a survivor that never answers `connection_down`; D17 by killing a domain mid-burst on every CPU.
+* **The connection protocol under QEMU:** a domain whose init delays its
+  ready report while its creator writes a spawn request into their
+  connection: the domain's `connection_up` waits in the domain service's
+  record, the spawn runs once the domain has reported ready and mapped,
+  and `create/1` returns first; seeded failure: a domain service that
+  hands the domain pid the record before the report, which the domain
+  pid, knowing no agent yet, cannot send, so the spawn never runs. The
+  creator sends the domain pid `{erx_connection_lost, Peer, disconnect}`
+  for the domain's live connection to `Peer`, and a peer that was handed
+  the agent's pid sends the agent `{erx_connection_down, Peer,
+  noconnection}`: both are dropped and counted, and the connection
+  carries frames on; seeded failures: a domain pid without its origin
+  check and an agent without its origin check, under each of which the
+  connection goes down.
 * **Sub-spaces and programs:** a domain that ends with sub-spaces nested
   three deep while its connections carry traffic, whose peers see one death,
   for the domain, behind everything it sent; a program that tries to write a

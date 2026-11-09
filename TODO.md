@@ -948,19 +948,20 @@ it; git history is the record of completed work.
   is spelled inside the funnel. Have the funnel take the row and the plan, derive the object
   and the recipient from them, and refuse rights outside the row's.
 * [Medium] domain library NIFs, `otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c`
-  (`fault_main`): an end is lost for good when no process is registered (a domain the root
-  made before the domain service registered, or one that ends between a domain-service crash
-  and its next `register/0`) or when the registered process is dead. The library has already
-  torn the domain down, so its ended record keeps its view slot and its principal's domain
-  count, and `retire/1` needs an id nobody heard. Keep a reported flag per record in the
-  view, set when the report is sent, and have `register/0` re-send every ended record not
-  yet reported.
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: an end or a
-  stop request that reaches the service while it is down is lost. An end goes with the
-  library's record (the item above); a domain pid's `{stop_request, Ref, Id}` goes to the dead
-  service's pid until the restarted service relinks. The restarted service should ask the
-  library for every ended record it has not retired (a NIF that lists them) and stop every
-  domain whose pid asked while it was down.
+  (`fault_main`): an end is lost for good when no process is registered, as for a domain the
+  root made before the domain service registered. The library has already torn the domain
+  down, so its ended record keeps its view slot and its principal's domain count, and
+  `retire/1` needs an id nobody heard. Keep a reported flag per record in the view, set when
+  the report is sent, and have `register/0` send every ended record not yet reported.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_sup.erl`,
+  `erx_domain_table.erl`, `erx_domain_srv.erl`, `erx_domain_pid.erl`: the service restarts
+  from an ETS table that `erx_domain_table` keeps as its heir, and each domain pid traps the
+  service's exit and waits for the restarted service to link again. design-system.md
+  ("System services") makes the service the significant child instead: its end, `kill`
+  included, ends the system domain and the machine. Make `erx_domain_srv` a `temporary`,
+  `significant` child of `erx_domain_sup` (`auto_shutdown => any_significant`), delete
+  `erx_domain_table` and the table, keep the records in the service's own state, and add the
+  QEMU test of design-system.md ("The root task and its end") that kills the service.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`create/2`):
   `erx_domain:create/1` takes the domain library's own request fields (the boot image's
   runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang
@@ -986,24 +987,11 @@ it; git history is the record of completed work.
   machine as a fault would. Report the mark and end the machine on it.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: the service
   trusts every system-domain process. It acts on any `{domain_ended, Id, End, Record}` and
-  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain;
-  and while it is down between a crash and its restart, any process that calls
-  `erx_domain_lib:register/0` first becomes the library's one driver, and the restarted
-  service then fails on `ebusy` until the supervisor gives up. Tag the library's reports
-  with a secret the NIF hands the registrant, and bind registration to the service's
-  identity (its table holder, or `enif_whereis_pid` of `erx_domain_srv`).
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`,
-  `handle_continue/2`): the table is written after the library's create and start return,
-  and the boot's fold saves only at its end, so a service killed between a library call and
-  its save loses a built domain (its later end is ignored and never retired) and re-admits
-  its id, and one killed mid-boot never starts the remaining configured rows. Save the
-  `building` record and the boot's progress before each library call, and on restart
-  resolve `building` records by id and resume unstarted rows.
-* [Medium] domain service, `test/erlang/erx_domain_tests.erl`: nothing tests the service
-  restarting from its table (reclaiming it, relinking the domain pids, ids still increasing,
-  an end after the restart retired), the table holder's end shutting the supervisor down, or
-  the `ebusy` and `erights` answers, which the stand-in library never gives. Add a
-  kill-and-restart case and a stand-in that refuses.
+  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain.
+  Tag the library's reports with a secret the NIF hands the registrant.
+* [Medium] domain service, `test/erlang/erx_domain_tests.erl`: nothing tests the `ebusy`
+  and `erights` answers, which the stand-in library never gives. Add a stand-in that
+  refuses.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`, `erx_ident.erl`: pooled names are
   `<principal>_<n>` ([Identifiers](docs/design-system.md#identifiers)), so stock net_kernel accepts them, but
   an identifier still may hold `.`, which net_kernel refuses in a node name. Build the name pool, and make a
@@ -1947,24 +1935,6 @@ it; git history is the record of completed work.
   process of this domain made toward the peer's process): the peer's
   process then gets an exit of `noproc` for a live link. RT7 replaces the
   lookup and adds the hold's link bit and the conditional `LINK` signal.
-* [Medium] Runtime, `erx_connections.erl`: the connection agent opens the system
-  connection only, so `erx_dist`'s owner of an introduced connection (`system := false`)
-  is never started. Its protocol (`connection_up`, `connection_mapped`, `connection_down`,
-  `connection_unmapped`, `connection_lost`; design-domains, "Messages between the domain
-  service and a runtime") is built with SV2, because it needs, besides the agent's own
-  code, five things that exist only then: (1) the system domain
-  running as the node `system@<host>` with the system side of each system connection
-  (SV2), since nothing else can send `connection_up`; (2) the agent's pid exported to the
-  system domain by init's ready report (RT7), since `exports_system` gives the system
-  domain only `spawn`; (3) the domain service's pid on the boot page, which
-  design-domains (Domain lifecycle) places there and `boot_info.h` does not carry, as the
-  target of the agent's answers; (4) an edit of `dist.c` that fires links, monitors and
-  pending spawns with the `{domain_down, D, Info}` reason `connection_down` gives, which
-  design-runtime (Closing) attributes to `erts_do_net_exits` but stock ERTS fires as
-  `noconnection` (`monitor_connection_down`) and no numbered edit lists; (5) the lane
-  driver's drain to the write position read at `connection_down`. The agent's check that
-  a record came from the system connection (edit 16's origins) must land no later than
-  RT7's export on encode, which lets any peer sent the agent's pid reach it.
 * [Low] Oracle, pid text (edit 18): OTP cases that write a local pid as `"<0.N.S>"` get `badarg` in a runtime
   that is alive with a nonzero creation: compiler `core_fold_SUITE:coverage`, emulator `guard_SUITE:guard_bifs`
   and a case of stdlib `qlc_SUITE`. The hosted runtime is not alive, so they agree there; give them rows in
@@ -1978,12 +1948,31 @@ it; git history is the record of completed work.
   with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past its five:
   a stack overflow on any text a caller passes to `list_to_ref/1`. erXos's copy refuses that text with `badarg`
   (edit 18; native_domain's connection case checks it). The owner sends the report.
+* [Medium] Runtime and domain service, `erx_connections.erl`, `erx_domain_pid.erl`,
+  `erx_domain_srv.erl`, `erx_dist.erl`: the connection agent opens the system connection
+  only, so `erx_dist`'s owner of an introduced connection (`system := false`) is never
+  started. The protocol (design-domains, "Messages between the domain service and a
+  runtime") is built with SV2, with what it needs: the system release as the node
+  `system@<host>` (`-no_epmd -proto_dist erx` in place of `-kernel start_distribution
+  false` in each manifest's `system_args`); the system domain's agent opening, finishing
+  and ending the system side of each system connection for the domain service; the domain
+  pid as the domain's correspondent, created before the plan, its number and serial on the
+  boot page (`abi/erx_abi.txt` `erx_boot_connection`, `boot_info.c`, `erx_dist:boot/0`),
+  relaying the domain service's records to the agent and the agent's answers back; the
+  system side's writer giving the reserve to the domain pid's messages alone; `erx_dist:listen/2`
+  setting `erx:origins(true)` on `net_kernel`; edit 56 in `dist.c` and
+  `erl_proc_sig_queue.c`; and the lane driver's finish (control command 2). Order:
+  nothing but `spawn` crosses a connection before RT7, so the protocol needs RT7's edit 8
+  and `erx:export/3` in both runtimes, and the origin checks of the agent, of
+  `net_kernel` and of the domain pid (edit 16) land with RT7's edit 8, never after it,
+  since edit 8 lets any peer that is handed one of their pids reach it.
 * [Low] Runtime, `net_adm:ping/1` (edit 28) decides by `erx_dist:select/1` whether
   the carrier is in use; a node of this kernel under another `-proto_dist` answers
   `pang` for an unconnected node at its own host without trying.
 * [Low] Runtime, `erx_connections.erl`: if the acceptor ends before it hands the system
   connection over, net_kernel restarts it and the port is opened again mid-stream;
-  the acceptor should halt the domain instead of being restarted.
+  design-runtime.md ("Connections in ERTS") has the end of the agent, at any time, halt its
+  domain with status 69, since the domain pid keeps the agent's pid for the domain's life.
 * [Low] Lane driver, `-erx lane_batch`: the allowance is
   `ERX_LANE_BATCH_DEFAULT` (64); `erl_init.c` does not parse the flag yet.
 * [Medium] Lane driver review residuals, `otp/erts/emulator/sys/erxos/erx_lane_drv.c`
