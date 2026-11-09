@@ -924,8 +924,10 @@ limits, starts the connection process with `proc_lib:start_link/3` and
 waits for its initialisation. The connection claims a local port and its
 four-tuple through `erx_net_bind`, the one funnel for both
 ([Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)),
-computes its initial sequence number with `erx_tcp_isn`, sends the SYN
-and acknowledges its start. `erx_tcp_isn` translates `tcp_new_isn`
+receives from that claim its initial sequence number and timestamp offset,
+which `erx_net_bind` computes with `erx_tcp_isn` because it holds the
+secrets, sends the SYN and acknowledges its start. No connection holds
+the secrets, so no connection's state or crash report can show them. `erx_tcp_isn` translates `tcp_new_isn`
 (`tcp_subr.c:3521`): a SipHash of the four-tuple under a secret, plus a
 clock. FreeBSD's clock is a shared offset advanced at 1,048,576 a second
 and by a random amount per connection, under a lock; the stack's clock is
