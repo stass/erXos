@@ -134,7 +134,7 @@ Error in process &lt;0.150.0&gt; with exit value:
       </div>
       <div class="terminal-grille" aria-hidden="true"></div>
     </div>
-    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>top</code>, <code>dmesg</code>, <code>ifconfig</code>, <code>ping -c 3 192.168.86.1</code>, or <code>erl</code> for the Erlang shell.</p>
+    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>top</code>, <code>dmesg</code>, <code>ifconfig</code>, <code>ping -c 3 8.8.8.8</code>, or <code>erl</code> for the Erlang shell.</p>
     <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
   </div>
 </section>
@@ -491,10 +491,10 @@ Error in process &lt;0.150.0&gt; with exit value:
         <span class="label"><b>T4</b></span>
         <h3>On the network</h3>
         <p><code>ifconfig</code> shows the network device and the address
-        it got by DHCP. <code>ping -c 3 192.168.86.1</code> sends real ICMP
-        through erXos's Erlang stack and driver to a small router emulated
-        in this page; no packet leaves your browser, so Internet hosts do
-        not answer.</p>
+        it got by DHCP. <code>ping -c 3 8.8.8.8</code> sends real ICMP
+        through erXos's Erlang stack and driver. A small router emulated
+        in this page answers every echo itself: no packet leaves your
+        browser.</p>
       </div>
     </div>
 </div>
