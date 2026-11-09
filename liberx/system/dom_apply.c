@@ -21,6 +21,7 @@
 #include "erx/dom_lib.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
+#include "liberx/system/dom_install.h"
 
 /* A domain id's decimal digits: at most ten for 32 bits. */
 #define APPLY_ID_DIGITS	10u
@@ -75,7 +76,6 @@ static int	apply_group(apply_t *, const erx_dom_step_t *);
 static erx_status_t apply_plan(apply_t *, erx_dom_created_t *);
 static void	apply_undo(apply_t *, uint32_t);
 static void	apply_keep(apply_t *, erx_dom_created_t *);
-static int	apply_pass(uint64_t, uint64_t, uint32_t, uint64_t *);
 static erx_status_t teardown_apply(erx_dom_lib_t *, const erx_dom_teardown_t *);
 static void	lib_view_caps(erx_dom_lib_t *, uint32_t);
 static uint32_t	lib_slot(const erx_dom_lib_t *, uint32_t);
@@ -230,10 +230,10 @@ apply_step(apply_t *apply, const erx_dom_step_t *step)
 	case ERX_DOM_STEP_GROUP:
 		return (apply_group(apply, step));
 	case ERX_DOM_STEP_SLICE:
-		status = erx_image_slice(budget, 0, step->index, step->count, &handle);
+		status = erx_image_slice(budget, apply->lib->held.image, step->index, step->count, &handle);
 		break;
 	case ERX_DOM_STEP_IMAGE_MAP:
-		return (erx_image_map(apply_object(apply, step->target), 0, step->index, &apply->pc));
+		return (erx_image_map(apply_object(apply, step->target), apply->lib->held.image, step->index, &apply->pc));
 	case ERX_DOM_STEP_MAP:
 		return (apply_map(apply, step));
 	case ERX_DOM_STEP_INSTALL:
@@ -297,34 +297,11 @@ apply_map(apply_t *apply, const erx_dom_step_t *step)
 	return (ERX_OK);
 }
 
-/*
- * One install (A7): a copy of the library's handle, its rights shrunk to
- * rights, passed into space's table; *value is the value it takes there.
- * Every install of a creation and of a connection is one call of this.
- */
-static int
-apply_pass(uint64_t space, uint64_t handle, uint32_t rights, uint64_t *value)
-{
-	erx_utcb_t *const utcb = erx_utcb_self();
-	uint64_t desc = 0;
-	int status;
-
-	(void)erx_msg_item_desc_rights_set(&desc, rights);
-	(void)erx_msg_item_desc_move_set(&desc, false);
-	(void)erx_utcb_mr_store(utcb, 0, desc);
-	(void)erx_utcb_mr_store(utcb, 1, handle);
-	status = erx_cap_pass(ERX_CAP_SELF, space, 1);
-	if (status != ERX_OK)
-		return (status);
-	(void)erx_utcb_mr_load(utcb, 1, value);
-	return (ERX_OK);
-}
-
-/* A creation's install; the boot page names the value it takes. */
+/* A creation's install (A7), through the library's one funnel; the boot page names the value it takes. */
 static int
 apply_install(apply_t *apply, const erx_dom_step_t *step)
 {
-	return (apply_pass(apply_object(apply, step->target), apply_object(apply, step->obj), step->rights,
+	return (erx_dom_install(step, apply_object(apply, step->obj), apply_object(apply, step->target),
 	    &apply->installed[step->obj]));
 }
 
@@ -775,7 +752,8 @@ link_step(link_t *link, const erx_dom_step_t *step)
 		value = link_value(link, step);
 		if (value == NULL)
 			return (ERX_EINVAL);
-		return (apply_pass(link_object(link, step->target), link_object(link, step->obj), step->rights, value));
+		return (erx_dom_install(step, link_object(link, step->obj), link_object(link, step->target),
+		    value));
 	}
 	if (step->kind == ERX_DOM_STEP_BELL)
 		(step->obj == ERX_DOM_OBJ_BELL_A ? &link->linked.a : &link->linked.b)->label = step->label;
@@ -872,15 +850,19 @@ erx_dom_lib_retire(erx_dom_lib_t *lib, uint32_t id)
 }
 
 erx_status_t
-erx_dom_lib_take(uint64_t deadline, uint64_t *label, erx_fault_t *record)
+erx_dom_lib_take(uint64_t wait_by, uint64_t *label, erx_fault_t *record)
 {
 	const erx_utcb_t *const utcb = erx_utcb_self();
 	uint64_t words[sizeof(*record) / sizeof(uint64_t)];
+	erx_msgtag_t tag;
 	erx_status_t status;
 
-	status = erx_ipc_wait(deadline, label);
+	status = erx_ipc_wait(wait_by, &tag, label);
 	if (status != ERX_OK)
 		return (status);
+	if (erx_msgtag_raw_words_get(tag.raw) != sizeof(words) / sizeof(words[0]) ||
+	    erx_msgtag_raw_items_get(tag.raw) != 0)
+		return (ERX_EINVAL);
 	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
 		words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
 	memcpy(record, words, sizeof(words));
@@ -917,4 +899,19 @@ erx_dom_lib_record(erx_dom_lib_t *lib, uint64_t label, const erx_fault_t *record
 	default:
 		return (false);
 	}
+}
+
+/* Written once, by the root's start, before any thread that reads it runs. */
+static erx_dom_lib_t *dom_lib_system;
+
+erx_dom_lib_t *
+erx_dom_lib_system(void)
+{
+	return (dom_lib_system);
+}
+
+void
+erx_dom_lib_system_set(erx_dom_lib_t *lib)
+{
+	dom_lib_system = lib;
 }

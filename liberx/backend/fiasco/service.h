@@ -129,13 +129,13 @@ int	erx_cap_pass(uint64_t from, uint64_t to, uint32_t n) ERX_WARN_UNUSED_RESULT;
  * thread bound before. label is ignored: a record's label is its space's. A destroy
  * drops the gate's records and leaves its spaces with no gate, whose later records
  * are dropped. erx_ipc_wait takes the oldest record of the gates bound to the
- * calling thread into the head of its UTCB's mr, an erx_fault_t, and its label into
- * *label, or waits for one until the deadline, ERX_ETIMEDOUT; a thread no gate is
+ * calling thread into the head of its UTCB's mr, an erx_fault_t, its tag into *tag
+ * (an erx_fault_t's words, no items, protocol 0) and its label into *label, or waits for one until the deadline, ERX_ETIMEDOUT; a thread no gate is
  * bound to waits for its deadline.
  */
 int	erx_gate_create(uint64_t budget, uint64_t *gate) ERX_WARN_UNUSED_RESULT;
 int	erx_gate_bind(uint64_t gate, uint64_t thread, uint64_t label) ERX_WARN_UNUSED_RESULT;
-int	erx_ipc_wait(uint64_t deadline, uint64_t *label) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_wait(uint64_t wait_by, erx_msgtag_t *tag, uint64_t *label) ERX_WARN_UNUSED_RESULT;
 int	erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes,
 	    erx_fiasco_reply_t *reply);
 

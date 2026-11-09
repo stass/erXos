@@ -22,6 +22,7 @@
              erx_console,
              erx_device,
              erx_device_record,
+             erx_domain_lib,
              erx_inspector,
              erx_kernel_records,
              erx_log,

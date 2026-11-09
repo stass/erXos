@@ -100,6 +100,13 @@ _exit getpid pthread_kill pthread_sigmask select sigwait
 [only_erx_watchdog_nif]
 erx_watchdog_pet
 
+# erx_domain_lib_nif.c alone, the domain service's NIF module: the domain library's
+# entries, and its fault thread's bind to the library's fault gate. Native only: a
+# hosted runtime has no domains and links neither.
+[only_erx_domain_lib_nif]
+erx_dom_lib_connect erx_dom_lib_create erx_dom_lib_disconnect erx_dom_lib_record erx_dom_lib_retire
+erx_dom_lib_start erx_dom_lib_stop erx_dom_lib_system erx_dom_lib_take erx_gate_bind
+
 # erx_stdio_nif.c alone, hosted mode's console device: the only object of the runtime
 # that may use these for a host terminal.
 [only_erx_stdio_nif]

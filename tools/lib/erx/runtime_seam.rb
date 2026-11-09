@@ -19,7 +19,8 @@ module Erx
     # hosted objects make, and the calls of erx_stdio_nif.c, an object the native build
     # does not link. The native check leaves them out, so they do not count as unused there.
     HOSTED_ONLY = %w[libsystem liberx_hosted only_erx_stdio_nif].freeze
-    NATIVE_ONLY = %w[musl stock_native].freeze
+    # erx_domain_lib_nif.c, whose domain library the hosted build does not link, is native too.
+    NATIVE_ONLY = %w[musl stock_native only_erx_domain_lib_nif].freeze
     # Sections only the BeamAsm flavour's objects use: the hosted build and the native
     # interpreter leave them out.
     JIT_ONLY = %w[beamasm].freeze

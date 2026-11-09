@@ -1234,8 +1234,9 @@ the stopgap.
   ([Faults](#faults-and-the-fault-of-the-root-task)).
 * **Posting.** The service appends the record to the gate's queue and, if the bound thread is listed as waiting, takes it off
   the list and runs `l4_semaphore_up` on its semaphore.
-* **`erx_ipc_wait(deadline)`.** The stub asks the service for the oldest record of any gate bound to the calling thread. If
-  there is one, the service copies it into the caller's public UTCB and removes it; otherwise it lists the thread as waiting
+* **`erx_ipc_wait(wait_by)`.** The stub asks the service for the oldest record of any gate bound to the calling thread. If
+  there is one, the service copies it into the caller's public UTCB and removes it, and the stub returns its label and the
+  tag of a message from the kernel, an `erx_fault_t`'s words and no items; otherwise it lists the thread as waiting
   and the stub runs `l4_semaphore_down` with the deadline, then asks again. On a timeout the stub asks the service to take
   it off the list; a thread already taken off is owed the up that posting sent, and the stub absorbs it with an unbounded
   down before it returns `ERX_ETIMEDOUT`. This is [the umtx table](#the-umtx-table)'s invariant: a thread taken off a list

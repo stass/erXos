@@ -37,12 +37,13 @@ class MediumBootTest < Minitest::Test
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
     points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
     merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release)
-    assert_equal %w[banner image-identity boot-value root-identity release-shell erlang-shell image-md5 crc32c] +
+    assert_equal %w[banner image-identity boot-value root-identity release-shell erlang-shell image-md5 crc32c domain-lib] +
                  Boot::COMMAND_SHELL.map { |point| point.fetch(:name) }, merged.map { |point| point.fetch(:name) }
     typed = merged.to_h { |point| [point.fetch(:name), point[:type]] }
     assert_equal "erl\r", typed.fetch('release-shell')
     assert_match %r{\Aapplication:ensure_all_started\(erx_blk\)}, typed.fetch('erlang-shell')
-    assert_equal "erx_shell:start().\r", typed.fetch('crc32c')
+    assert_equal "#{Boot::DOMAIN_LIB_EXPRESSION}\r", typed.fetch('crc32c')
+    assert_equal "erx_shell:start().\r", typed.fetch('domain-lib')
     assert_match merged.find { |point| point.fetch(:name) == 'erlang-shell' }.fetch(:pattern),
                  "Eshell V16.0 (type help(). for help)\r\n"
     verify = merged.fetch(2).fetch(:verify)

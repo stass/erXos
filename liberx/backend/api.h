@@ -273,6 +273,6 @@ int	erx_budget_create(uint64_t parent, uint32_t kind, uint64_t guarantee, uint64
 int	erx_cap_pass(uint64_t from, uint64_t to, uint32_t n) ERX_WARN_UNUSED_RESULT;
 int	erx_gate_create(uint64_t budget, uint64_t *gate) ERX_WARN_UNUSED_RESULT;
 int	erx_gate_bind(uint64_t gate, uint64_t thread, uint64_t label) ERX_WARN_UNUSED_RESULT;
-int	erx_ipc_wait(uint64_t deadline, uint64_t *label) ERX_WARN_UNUSED_RESULT;
+int	erx_ipc_wait(uint64_t wait_by, erx_msgtag_t *tag, uint64_t *label) ERX_WARN_UNUSED_RESULT;
 
 #endif /* ERX_BACKEND_API_H */

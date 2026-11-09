@@ -45,6 +45,8 @@ typedef struct erx_dom_held {
 	uint64_t	principal_group;	/* its group: a requested domain's CPU parent */
 	uint64_t	system_group;		/* the system domain's group: its bells, and
 						 * a configured domain's CPU parent */
+	uint64_t	image;			/* the boot image (SYSTEM): what erx_image_slice
+						 * and erx_image_map read */
 	uint64_t	time_page;		/* the time page's object */
 	uint64_t	gate;			/* the library's fault gate, bound to its
 						 * fault thread */
@@ -159,9 +161,11 @@ erx_status_t	erx_dom_lib_retire(erx_dom_lib_t *, uint32_t id) ERX_WARN_UNUSED_RE
 
 /*
  * The fault thread's wait, outside the lock: the next record at the gates bound
- * to the calling thread, with its label, or the backend's ERX_ETIMEDOUT.
+ * to the calling thread, with its label, or the backend's ERX_ETIMEDOUT. A
+ * message whose tag is not a record from the kernel, an erx_fault_t of words
+ * and no items, is ERX_EINVAL and is not read.
  */
-erx_status_t	erx_dom_lib_take(uint64_t deadline, uint64_t *label,
+erx_status_t	erx_dom_lib_take(uint64_t wait_by, uint64_t *label,
 		    erx_fault_t *record) ERX_WARN_UNUSED_RESULT;
 
 /*
@@ -172,5 +176,14 @@ erx_status_t	erx_dom_lib_take(uint64_t deadline, uint64_t *label,
  */
 bool		erx_dom_lib_record(erx_dom_lib_t *, uint64_t label,
 		    const erx_fault_t *record, erx_dom_report_t *report);
+
+/*
+ * The system domain's one library, which the root's start builds before ERTS
+ * runs (docs/design-system.md, "Starting the system domain", step 3) and
+ * names with erx_dom_lib_system_set; NULL until then. The domain service's
+ * NIF module, erx_domain_lib, reaches the library only through it.
+ */
+erx_dom_lib_t	*erx_dom_lib_system(void);
+void		erx_dom_lib_system_set(erx_dom_lib_t *);
 
 #endif /* ERX_DOM_LIB_H */

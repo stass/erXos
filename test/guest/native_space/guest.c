@@ -126,6 +126,9 @@ task_drop(uint64_t space)
 	(void)erx_fiasco_task_join(space, &ignored);
 }
 
+/* The tag of the last erx_ipc_wait; record_wait checks that it describes a record. */
+static erx_msgtag_t tag;
+
 /* A task made from the program with its image, its records going to gate under label, whose first thread has not started. */
 static bool
 task_make_gated(uint64_t *space, uint64_t gate, uint64_t label)
@@ -140,14 +143,19 @@ task_make_gated(uint64_t *space, uint64_t gate, uint64_t label)
 	return (false);
 }
 
-/* The next record at the gates bound to the calling thread, with its label. */
+/*
+ * The next record at the gates bound to the calling thread, with its label:
+ * a message of a record's words and no items.
+ */
 static bool
 record_wait(uint64_t deadline, erx_fault_t *record, uint64_t *label)
 {
 	const erx_utcb_t *const utcb = erx_utcb_self();
 	uint64_t words[sizeof(*record) / sizeof(uint64_t)];
 
-	if (erx_ipc_wait(deadline, label) != ERX_OK)
+	if (erx_ipc_wait(deadline, &tag, label) != ERX_OK ||
+	    erx_msgtag_raw_words_get(tag.raw) != sizeof(words) / sizeof(words[0]) ||
+	    erx_msgtag_raw_items_get(tag.raw) != 0)
 		return (false);
 	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
 		words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
@@ -335,14 +343,14 @@ case_gate_refusals(void)
 	    erx_gate_bind(gate, ERX_FIASCO_THREADS_MAX - 1, 0) == ERX_EINVAL &&
 	    erx_space_create(0, ERX_CAP_SELF, mem, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE &&
 	    erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
-	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &label) == ERX_ETIMEDOUT &&
+	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &tag, &label) == ERX_ETIMEDOUT &&
 	    erx_gate_bind(gate, ERX_CAP_NULL, 0) == ERX_OK;
 	if (space != 0) {
 		int64_t status;
 
 		/* The exit record waits at the unbound gate until the join withdraws it. */
 		passed = passed && erx_space_stop(space, 0) == ERX_OK && erx_fiasco_task_join(space, &status) == ERX_OK &&
-		    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &label) == ERX_ETIMEDOUT;
+		    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &tag, &label) == ERX_ETIMEDOUT;
 	}
 	passed = passed && erx_cap_close(mem) == ERX_OK && erx_cap_close(gate) == ERX_OK;
 	say_case("gate_refusals", passed);
@@ -374,7 +382,7 @@ case_gate_queue(void)
 	    task_make_gated(&third, other, QUEUE_LABEL + 2) && erx_gate_bind(other, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
 	    erx_space_stop(first, 7) == ERX_OK && erx_object_destroy(other) == ERX_OK &&
 	    erx_space_stop(third, 8) == ERX_OK &&
-	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &label) == ERX_ETIMEDOUT &&
+	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &tag, &label) == ERX_ETIMEDOUT &&
 	    erx_fiasco_task_join(first, &status) == ERX_OK && status == 7 &&
 	    erx_fiasco_task_join(third, &status) == ERX_OK && status == 8 &&
 	    erx_gate_bind(other, ERX_CAP_SELF_THREAD, 0) == ERX_ESTALE;
@@ -424,7 +432,7 @@ case_released(void)
 	uint64_t gate, space, label;
 	bool passed = erx_gate_create(0, &gate) == ERX_OK && erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
 	    task_make_gated(&space, gate, RELEASE_LABEL) && erx_cap_close(space) == ERX_OK &&
-	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &label) == ERX_ETIMEDOUT;
+	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &tag, &label) == ERX_ETIMEDOUT;
 
 	passed = passed && erx_cap_close(gate) == ERX_OK && erx_fiasco_vm_free_pages() == before;
 	say_case("released", passed);
@@ -909,7 +917,7 @@ warm_up(void)
 		say("erx: space: warm-up refused\n");
 	/* The gate table, and the list of waiting threads up to the root's first thread. */
 	if (erx_gate_create(0, &gate) != ERX_OK || erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK ||
-	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &label) != ERX_ETIMEDOUT || erx_cap_close(gate) != ERX_OK)
+	    erx_ipc_wait(erx_fiasco_clock_ns() + SHORT_NS, &tag, &label) != ERX_ETIMEDOUT || erx_cap_close(gate) != ERX_OK)
 		say("erx: space: warm-up refused\n");
 }
 

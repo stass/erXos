@@ -1247,6 +1247,7 @@ NIF_OBJS = \
 	$(OBJDIR)/erx_log_nif.o \
 	$(OBJDIR)/erx_object_info_nif.o \
 	$(OBJDIR)/erx_littlefs_nif.o \
+	$(if $(findstring hosted,$(TARGET)),,$(OBJDIR)/erx_domain_lib_nif.o) \
 	$(OBJDIR)/erl_tracer_nif.o \
 	$(OBJDIR)/prim_buffer_nif.o \
 	$(OBJDIR)/prim_file_nif.o \

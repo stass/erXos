@@ -555,9 +555,15 @@ static const erx_backend_gate_wait_effects_t stub_gate_effects = { .take = stub_
     .cancel = stub_gate_cancel, .absorb = stub_gate_absorb };
 
 int
-erx_ipc_wait(uint64_t deadline, uint64_t *label)
+erx_ipc_wait(uint64_t wait_by, erx_msgtag_t *tag, uint64_t *label)
 {
-	return (erx_backend_gate_wait(&stub_gate_effects, label, deadline));
+	const int status = erx_backend_gate_wait(&stub_gate_effects, label, wait_by);
+
+	/* A gate carries fault and exit records alone, each a message of an erx_fault_t's words. */
+	tag->raw = 0;
+	if (status == ERX_OK)
+		(void)erx_msgtag_raw_words_set(&tag->raw, sizeof(erx_fault_t) / sizeof(uint64_t));
+	return (status);
 }
 
 int

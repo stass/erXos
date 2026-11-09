@@ -163,6 +163,8 @@ library_up(void)
 	lib.cap_limit = 64;
 	lib.fail_step = UINT32_MAX;
 	lib.held.time_page = erx_fiasco_time_object();
+	/* The stopgap's backend has one archive and reads no image handle. */
+	lib.held.image = 0;
 	if (erx_group_create(0, 0, &lib.held.system_group) != ERX_OK ||
 	    erx_group_create(0, 0, &lib.held.principal_group) != ERX_OK)
 		return ("erx: domain: no groups\n");

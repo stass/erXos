@@ -13,6 +13,10 @@ module Erx
     CAP_SLOT_CLEAR = /\berx_cap_slot_clear\b/
     # The capability slot's generated header, which the rules below name.
     CAP_SLOT_IMPL = ABI::Generated::SCHEMA.types.fetch('erx_cap_slot').private_header
+    # The domain library's install funnel, and a pass with its source table as written.
+    DOM_INSTALL = 'liberx/system/dom_install.c'
+    DOM_LIBRARY = %w[liberx/system/**/* otp/erts/emulator/nifs/erxos/**/*].freeze
+    DOM_CAP_PASS = /\berx_cap_pass\b(?:\s*\(\s*[^,;)]*,?)?/
 
     declare_group(
       private_headers: [CAP_IMPL],
@@ -128,6 +132,22 @@ module Erx
           callee: 'erx_cap_install_kind',
           callers: %w[],
           seed: { 'erx_cap_dup' => 'call', 'erx_space_copy' => 'tail_jump', 'cap.o:erx_pass_install' => 'call' }
+        ),
+        # The system domain installs only what its grant table allows (A7): the
+        # domain library and its NIF module pass a capability only in
+        # erx_dom_install, the one function of liberx/system/dom_install.c, and only out of
+        # the system domain's own table, so every install takes its row of
+        # erx_dom_grants and the recipient the checked plan names.
+        Chokepoints::Forbidden.new(
+          name: 'dom-install-funnel',
+          rule: "only erx_dom_install in #{DOM_INSTALL} calls erx_cap_pass in the domain library, and only from ERX_CAP_SELF",
+          design: 'docs/design-system.md#authority',
+          scope: Chokepoints::Scope.new(own: false, extra: DOM_LIBRARY),
+          pattern: DOM_CAP_PASS,
+          sites: [Chokepoints::Site.new(glob: DOM_INSTALL, permits: /\Aerx_cap_pass\(ERX_CAP_SELF,\z/)],
+          seed: { 'liberx/system/dom_apply.c' => "status = erx_cap_pass(ERX_CAP_SELF, space, 1);\n",
+                  DOM_INSTALL => "status = erx_cap_pass(peer_space, recipient, 1);\nint (*p)(uint64_t, uint64_t, uint32_t) = erx_cap_pass;\n",
+                  'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "(void)erx_cap_pass (ERX_CAP_SELF, space, 1);\n" }
         )
       ]
     )

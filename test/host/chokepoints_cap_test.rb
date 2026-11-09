@@ -122,4 +122,19 @@ class ChokepointsCapTest < Minitest::Test
     assert_equal %w[cap-slot-private cap-table-private], found.map(&:rule).sort
     assert_empty evaluate(Rules::ACTIVE, { 'kernel/core/cap_table.c' => "#include \"erx/cap.h\"\n" })
   end
+# The domain library installs only through erx_dom_install (A7): its one
+# pass, out of the system domain's own table, is allowed; a pass elsewhere
+# in the library or its NIF module, or one from another table in the
+# funnel itself, is refused.
+def test_dom_install_is_the_library_s_one_pass
+  funnel = [rule('dom-install-funnel')]
+  allowed = { Rules::DOM_INSTALL => "\tstatus = erx_cap_pass(ERX_CAP_SELF, recipient, 1);\n",
+              'liberx/backend/fiasco/launcher.c' => "(void)erx_cap_pass(task, child, 1);\n" }
+  assert_empty evaluate(funnel, allowed)
+  found = evaluate(funnel, { 'liberx/system/dom_apply.c' => "x;\nstatus = erx_cap_pass(ERX_CAP_SELF, space, 1);\n" })
+  assert_equal ['dom-install-funnel: liberx/system/dom_apply.c:2'], found.map { |v| "#{v.rule}: #{v.path}:#{v.line}" }
+  refute_empty evaluate(funnel, { Rules::DOM_INSTALL => "status = erx_cap_pass(peer_space, recipient, 1);\n" })
+  refute_empty evaluate(funnel, { 'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "erx_cap_pass (ERX_CAP_SELF, s, 1);\n" })
+end
+
 end

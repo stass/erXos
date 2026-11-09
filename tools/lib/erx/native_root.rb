@@ -51,6 +51,9 @@ module Erx
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
                  build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
+    # The domain library: its pure core, its apply phase and install funnel, and the lanes it sizes.
+    DOMAIN_LIBRARY = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c
+                        liberx/system/dom_install.c liberx/erx_lane.c].freeze
     # The root's way to the archive: the record, the launcher and the manifest's reader.
     LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c #{BACKEND}/boot_args.c kernel/core/boot_handoff.c build/gen/liberx/generated/abi_reader.c].freeze
     # A task's own program: its entry, its console and memcpy, and the stubs and
@@ -68,7 +71,8 @@ module Erx
     SYSTEM = [*(RUNTIME - ["#{BACKEND}/root_mem.c"]), *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c",
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
               "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
-              "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c'].freeze
+              "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c',
+              *DOMAIN_LIBRARY].freeze
     # A domain's runtime image: the interpreter ERTS as a task's program, at task.ld's
     # fixed addresses, since erx_image_map loads only an ERX_IMAGE_FIXED image. musl's
     # start enters ERTS's main through domain_entry.c, which first checks the boot page;
@@ -83,7 +87,7 @@ module Erx
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
     # the domain library, and the native_domain root and string functions that link it.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
-                      liberx/system/dom_apply.c liberx/erx_lane.c test/guest/native_domain/guest.c
+                      liberx/system/dom_apply.c liberx/system/dom_install.c liberx/erx_lane.c test/guest/native_domain/guest.c
                       test/guest/native_domain/string.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding

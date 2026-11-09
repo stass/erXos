@@ -43,6 +43,19 @@ module Erx
     # test/host/medium_boot_test.rb.
     CRC32C_ANSWER = '{crc32c,"E3069283","2D78517F",badarg}'
     CRC32C_START = /\A(?:[0-9]+> )?\{crc32c,/n
+    # The domain service's NIF module, erx_domain_lib: it loads in the system domain,
+    # a create map with a key the library sets itself (crash) is badarg before any
+    # library is reached, and an id that is not one is badarg; neither answer depends
+    # on whether the root built a library. The shell does not register, so the domain
+    # service stays the one receiver of ends. It starts with a fun, so the shell's echo
+    # of it does not start {domain_lib, and only the answer matches DOMAIN_LIB_START.
+    DOMAIN_LIB_EXPRESSION = '(fun()->{domain_lib,' \
+                            'try erx_domain_lib:create(#{id=>2,principal=>1,runtime=>0,release=>0,' \
+                            'release_files=>1,memory=>65536,outer=>65536,grant=>#{quota_ns=>0,cpuset=>1},' \
+                            'lane=>0,args=><<>>,env=><<>>,crash=>0}) catch error:badarg->badarg end,' \
+                            'try erx_domain_lib:start(foo) catch error:badarg->badarg end} end)().'
+    DOMAIN_LIB_ANSWER = '{domain_lib,badarg,badarg}'
+    DOMAIN_LIB_START = /\A(?:[0-9]+> )?\{domain_lib,/n
 
     module_function
 
@@ -76,9 +89,10 @@ module Erx
 
       erlang, image_answer = image_checkpoints(ProductionImage::Run::ERLANG_SHELL, release)
       *crc32c, crc32c_answer = crc32c_checkpoints(image_answer)
+      *domain_lib, domain_lib_answer = domain_lib_checkpoints(crc32c_answer)
       [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1],
        points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze, erlang,
-       *crc32c, *command_shell_checkpoints(crc32c_answer)].freeze
+       *crc32c, *domain_lib, *command_shell_checkpoints(domain_lib_answer)].freeze
     end
 
     # After the shell's line previous, the person types CRC32C_EXPRESSION, and its answer
@@ -88,6 +102,15 @@ module Erx
       [previous.merge(type: "#{CRC32C_EXPRESSION}\r").freeze,
        { name: 'crc32c', pattern: CRC32C_START, seconds: 30,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
+    end
+
+    # After the shell's line previous, the person types DOMAIN_LIB_EXPRESSION, and its answer
+    # must be DOMAIN_LIB_ANSWER whole.
+    def domain_lib_checkpoints(previous)
+      whole = /\A(?:[0-9]+> )?#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
+      [previous.merge(type: "#{DOMAIN_LIB_EXPRESSION}\r").freeze,
+       { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 30,
+         verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the domain library expression" unless whole.match?(text) } }.freeze]
     end
 
     # After the Erlang shell's line previous, the person starts a nested command shell, and

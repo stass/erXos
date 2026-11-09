@@ -747,10 +747,9 @@ it; git history is the record of completed work.
   dirty from the pack's own input catalog.
 
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
-  hand-declared `erx_ipc_wait(deadline, *label)` returns no tag, while design-kernel.md's "Receiving"
-  returns the tag and the label. Settle the target signature before the domain library's fault thread
-  (DL2) and a session's gate worker call it, and decide whether BK8b's IRQ deliveries share the same
-  open wait.
+  open wait returns design-kernel.md's tag and label, but only for fault and exit records, the one
+  message its gates carry. Decide whether BK8b's IRQ deliveries share the same open wait before a
+  session's gate worker calls it.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a
   fault takes any free entry of its space's pool, since Fiasco's fault message names only the task, so
   its record's thread is unknown and design-stopgap.md's "a fault in its thread's record" does not
@@ -806,6 +805,38 @@ it; git history is the record of completed work.
   the stopgap is not to rebuild that. The library's own close after a destroy relies on the
   stopgap's stale entries too: under K25 that close names a freed slot, so the Phase 2
   library must not close what a delete already cleared.
+* [Medium] domain library, `test/guest/native_domain`: no case fails a step after it made its
+  object (a bell's bind, a group's configure), and none checks that the root's handle table
+  returns to its starting occupancy after a retire or an undo, which would catch a handle the
+  library forgot to close.
+* [Medium] domain library, `liberx/system/dom_install.c` (`erx_dom_install`): design-system.md
+  A7 and "The grant table" have the install funnel take a row of `erx_dom_grants`, but it
+  takes a step with a raw object, recipient and rights and checks only the step's kind. That
+  the rights lie within the row and the recipient is the row's rests on `erx_dom_plan_check`
+  having run first, and chokepoint `dom-install-funnel` checks only that every `erx_cap_pass`
+  is spelled inside the funnel. Have the funnel take the row and the plan, derive the object
+  and the recipient from them, and refuse rights outside the row's.
+* [Medium] domain library NIFs, `otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c`
+  (`fault_main`): an end is lost for good when no process is registered (a domain the root
+  made before the domain service registered, or one that ends between a domain-service crash
+  and its next `register/1`) or when the registered process is dead. The library has already
+  torn the domain down, so its ended record keeps its view slot and its principal's domain
+  count, and `retire/1` needs an id nobody heard. Keep a reported flag per record in the
+  view, set when the report is sent, and have `register/1` re-send every ended record not
+  yet reported.
+* [Medium] domain library NIFs, `otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c`
+  (`fault_main`): the fault thread waits at the gate with `ERX_WAIT_FOREVER`, while
+  design-system.md A3 has its wait time out to check the ending record's deadline; add the
+  timeout once `erx_dom_end_begin` keeps a deadline. The thread also ends without a
+  diagnostic on a take refused for any reason but a message that is not a record, after which
+  no domain's end is handled; report that to the registered process or the log.
+* [Medium] domain library NIFs, `erlang/apps/erx` and `test/guest/native_domain`: no test
+  reaches the module's paths with a library present: a real create's decoding refusals (an
+  unknown key, a u32 overflow, strings beyond the boot page), the lock, the fault thread's
+  bind handshake and the `{domain_ended, ...}` message. medium_boot's `domain-lib`
+  checkpoint covers only the shape refusals that come before the library. Add them to the
+  end-to-end create, start, stop, `domain_ended` and retire cell once the library's boot
+  view exists (DL2d).
 * [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the flat
   `service_grants` list has no inverse, since `erx_dom_t` keeps no grant, so a retire or
   restart of a configured domain cannot take its grant back, and a restarted configured
