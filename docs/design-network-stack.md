@@ -95,9 +95,8 @@ Decisions every reader needs:
 16. [Verification](#verification)
 17. [Scope](#scope)
 18. [Decisions](#decisions)
-19. [Open decisions](#open-decisions)
-20. [Alternatives considered](#alternatives-considered)
-21. [References](#references)
+19. [Alternatives considered](#alternatives-considered)
+20. [References](#references)
 
 ## Context
 
@@ -1798,7 +1797,7 @@ extension keeps it per destination.
 | RFC 5961 | on (`tcp_insecure_syn`, `tcp_insecure_rst`, `tcp_insecure_ack` all 0, `tcp_input.c:197-209`) | always on; no knob |
 | RFC 6528 | `tcp_new_isn` | always |
 | window scaling and timestamps | on (`tcp_do_rfc1323`, `tcp_subr.c:207`) | on |
-| SACK with RFC 6675 recovery | on (`tcp_do_sack`, `tcp_do_newsack`) | on, written from RFC 2018, RFC 2883 and RFC 6675 |
+| SACK with RFC 6675 recovery | on (`tcp_do_sack`) | on, written from RFC 2018, RFC 2883 and RFC 6675 |
 | lost-retransmission detection | on (`tcp_do_lrd`) | not built: no RFC specifies it and its code is in `tcp_sack.c` |
 | PRR, limited transmit, IW10 | on (`tcp_input.c:162-178`) | on |
 | ECN | 2: accept when the peer asks, never initiate (`tcp_do_ecn`, `tcp_ecn.c:106`) | 2, so a peer that asks for AccECN gets RFC 3168 ECN, as `tcp_ecn_syncache_add` answers it (`tcp_ecn.c:509-537`); like FreeBSD, a SYN-ACK with ECE alone turns ECN on although our SYN did not ask, where RFC 3168 section 6.1.1 would leave it off (`tcp_ecn_input_syn_sent`, `tcp_ecn.c:120`) |
@@ -1808,7 +1807,6 @@ extension keeps it per destination.
 | buffer autosizing | on (`tcp_do_autosndbuf`, `tcp_output.c:116`; `tcp_do_autorcvbuf`, `tcp_input.c:217`) | on, within the grant's buffer budget |
 | CUBIC | default (`cc/cc.c:83`) | default |
 | path MTU discovery; black-hole detection | on; off (`tcp_timer.c:170`) | on; off |
-| `nolocaltimewait` | false (`tcp_timewait.c:91`) | false |
 
 ## IP, neighbours and UDP
 
@@ -1939,7 +1937,8 @@ stack refuses.
 trailing bytes cut, a bounded walk of the extension headers (hop-by-hop
 and destination options parsed and skipped by their option types'
 rules, routing header type 0 refused as RFC 5095 requires, an unknown
-routing type with segments left zero ignored, a jumbogram refused),
+routing type with segments left zero ignored, a zero payload length
+and a jumbo payload option dropped silently, as RFC 2675 is gone upstream),
 and the first fragment required to hold the whole header chain (RFC
 7112). `erx_ip6_reass` translates `frag6.c`, with RFC 5722's rule that an
 overlapping fragment discards the whole datagram, and FreeBSD's caps.
@@ -4049,18 +4048,11 @@ design's recommendation.
     the stack, so the package costs a portable implementation of each,
     a source layout by seam, a build check, and the client backends in
     an application of their own (N12).
-
-## Open decisions
-
-1. **Where the client backends live.** `erx_gen_tcp`, `erx_gen_udp` and
-   `erx_inet` must run beside the stack outside erXos and in every erXos
-   domain. The choices: (a) an application of their own,
-   `erx_net_client`, which every domain's image carries beside `erx`;
-   (b) modules of `erx_net`, which every domain loads as a library
-   application without starting it, carrying the whole stack's code in
-   every domain's image. *Recommendation:* (a), as this document
-   assumes: a client domain carries three modules instead of the stack,
-   and a release of the package is the two applications.
+12. **The client backends are an application of their own.**
+    `erx_gen_tcp`, `erx_gen_udp` and `erx_inet` live in `erx_net_client`,
+    which every domain's image carries beside `erx`, so a client domain
+    carries three modules instead of the stack, and a release of the
+    package is the two applications.
 
 ## Alternatives considered
 

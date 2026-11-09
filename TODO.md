@@ -317,11 +317,11 @@ it; git history is the record of completed work.
   the term prints in hash order, and a huge integer key shortened by `leading/1` can sort before a smaller key.
   Copy a map as its pairs in the term's own print order, with a property test comparing the copy's print with
   the term's.
-* [Medium] `web/src/names.ts`, [URLs](docs/design-web.md#urls): the claim that no `/proc` segment is `.` or `..` does
-  not hold in a browser, whose URL parser takes `%2E` and `%2E%2E` as dot segments (`new URL('/proc/a/%2E%2E', base)` is
-  `/proc/`). An `erx:` text is safe: its raw `.` and `/` are only a pid's and the segments' separators, and a text
-  segment's `.` is `%2E` in the canonical text and `%252E` in the link (`erx_present:uri/2`, tested). The design must
-  pick the `/proc` fix: encode `%` once more in the client's URL paths, or have the client refuse a dot segment.
+* [Medium] `web/src/names.ts`, [URLs](docs/design-web.md#urls): the client refuses a `/proc` segment that
+  decodes to `.` or `..` (`%2E`, `%2E%2E`, in either case of hexadecimal), which a browser's URL parser takes as dot
+  segments (`new URL('/proc/a/%2E%2E', base)` is `/proc/`). `presentationPath` and the router, when it exists, must
+  answer such a segment as a path that names nothing, with a test in `web/test` in both cases of hexadecimal and
+  `erx_present`'s differential test agreeing on the refusal.
 * [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
   term one past each bound in both languages; every encoded term is in bounds or came from a decoder, so an
   encoder that stopped refusing an over-bound list, text or integer would pass. Erlang's encoder refuses
@@ -481,7 +481,8 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: the install zeroes the rings but not the pool, so a device that reports a used length beyond what it wrote returns an earlier request's bytes of the same driver; and the whole-plan install is tested with one queue only.
 * [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
   free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
-  a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.
+  a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`. A recorded
+  stopgap residual, not fixed.
 * [Low] stopgap, `liberx/backend/fiasco/service.c`, `service_thread_reap`: only the reaper should send this
   request, and nothing checks the caller; `watchdog_thread.c` and `service.c` also share the convention of fixed
   helper slots in the kernel-given UTCB page, which one small enum could own.
@@ -789,10 +790,10 @@ it; git history is the record of completed work.
 * [Low] network, `erx_dhcp4_core`: an ARP probe of the offered address before using it, and a
   DECLINE when another host answers (RFC 2131 4.4.1, RFC 5227), behind a setting of the
   interface's `dhcp` mode, off by default as in `dhclient`. Today the address is announced with a
-  gratuitous ARP and a conflict is only reported by erx_arp.
+  gratuitous ARP and a conflict is only reported by erx_arp. Part of the first host network package.
 * [Low] network, `erx_dhcp4_core`: INIT-REBOOT (RFC 2131 3.2, 4.4.2), asking again for the last
   lease's address after a restart. It needs the lease kept across boots, as `dhclient` keeps
-  /var/db/dhclient.leases, so it waits for the network domain's stored state.
+  /var/db/dhclient.leases. Part of the first host network package.
 * [Low] network, `erx_dhcp4_wire_fuzz`: the fuzz target has no field oracle: pkt has no DHCP
   decoder, so its judge reads the options itself (joined bytes, and its own reading of options 15
   and 121) instead.
@@ -938,10 +939,10 @@ it; git history is the record of completed work.
   runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang
   interface" has a spec of a release name and a resource policy compute them. Replace the
   fields once release lookup by name and the resource policy exist. The runtime index goes
-  with them: the spec's `flavour` (default `jit`) names `runtimes/jit` or `runtimes/emu`, and
-  under `erx.det=1` every domain, configured rows included, runs `runtimes/emu` whatever it
-  names (design-runtime.md, "BeamAsm"), which needs the boot's mode in the system domain.
-  Until then a create names the BeamAsm image by its index and gets it in any boot mode.
+  with them: the domain service maps the spec's `flavour` (default `jit`) to `runtimes/jit` or
+  `runtimes/emu` and, under `erx.det=1`, forces `runtimes/emu` for every domain, configured rows
+  included, whatever it names (design-runtime.md, "BeamAsm"), once the boot's mode reaches the
+  system domain. Until then a create names the BeamAsm image by its index and gets it in any boot mode.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`):
   `create/1` answers once the domain's first thread starts, not on the domain's ready report,
   and `boot_timeout` (design-domains.md "Erlang interface") is not implemented, so a domain
@@ -976,13 +977,12 @@ it; git history is the record of completed work.
   an end after the restart retired), the table holder's end shutting the supervisor down, or
   the `ebusy` and `erights` answers, which the stand-in library never gives. Add a
   kill-and-restart case and a stand-in that refuses.
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_ident.erl` and OTP's
-  `net_kernel.erl` (`valid_name_head`): an identifier may hold `.`, which stock net_kernel
-  refuses in a node name, so a domain named `alice.1` (the design's pooled-name form) boots
-  with an `-sname` its own distribution refuses to start. Allow `.` in net_kernel's name rule
-  (with a test), or drop it from identifiers and pooled names.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`, `erx_ident.erl`: pooled names are
+  `<principal>_<n>` ([Identifiers](docs/design-system.md#identifiers)), so stock net_kernel accepts them, but
+  an identifier still may hold `.`, which net_kernel refuses in a node name. Build the name pool, and make a
+  domain's node name refuse a `.` before the domain boots with an `-sname` its own distribution refuses.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl` (`admit/4`): a
-  request name of the pooled form (`<ident>.<digits>`) is not refused with `name_taken`, as
+  request name of the pooled form (`<ident>_<digits>`) is not refused with `name_taken`, as
   design-system.md "Identifiers" says; where the root built no library the service still
   admits a name under an empty host and makes an atom such as `'web@'` before the create is
   refused; and `restart_period_s 0` reads as no limit. Refuse the pooled form, refuse before
@@ -3607,7 +3607,14 @@ document's "residual risks accepted" paragraph.
   `sigfillset`'s generated set, `strsignal` on FreeBSD's text, `sysconf(_SC_RTSIG_MAX)` 62, and new
   `sig2str`, `str2sig`, `sys_signame`, `sys_siglist` and `sys_nsig`; the shell's table read from the generated
   one; the `difference` kind in `test/conformance/libc-test-verdicts.txt` and `tools/lib/erx/libc_test.rb`;
-  the tests of design-programs.md's "Signal numbers" bullet.
+  the tests of design-programs.md's "Signal numbers" bullet. The package also carries the errno numbers as
+  a table of the ABI file, and lands before the Track P ports.
+* [Low] shell and programs, `Ctrl-T` (`SIGINFO`, [design-programs.md](docs/design-programs.md#the-terminal),
+  [design-shell.md](docs/design-shell.md#ctrl-t-status-and-the-info-request)): the status line and the info
+  request, right after the signal and errno table package, which gives `SIGINFO` its number.
+* [Low] live inspection, `ps` and `top` ([design-live.md](docs/design-live.md)): the `time` and `pcpu` columns of an
+  Erlang process show its reductions, labelled as reductions, instead of `-`; real CPU time per process comes
+  later as an opt-in scheduler flag.
 
 * [Low] website, `site/terminal.js` (`FAULTS`, [site/README.md](site/README.md)): what the fault menu still lacks.
   It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser once the
@@ -3664,12 +3671,11 @@ document's "residual risks accepted" paragraph.
   app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's licence notice beside `NOTICE-freebsd`; create
   `erlang/apps/erx_net_client`; and add the build check of N12 with its
   seeded violation.
-* [Low] network, the FreeBSD pin ([design-network-stack.md](docs/design-network-stack.md#decisions), 9):
-  each `port` line of `erlang/apps/erx_net/NOTICE-freebsd` lacks the FreeBSD commit that made
-  the change, which the design requires; the survey's shallow clone has no history between
-  `release/15.1.0-p6` and `975e3605ebb1`. Look each up (`git log 95719d8a..975e3605 -- PATH`
-  in a full clone), add it to its line as `port COMMIT PATH FUNCTION`, and have NetChecks
-  require a 40-digit commit there.
+* [Low] upstream OTP, `otp/erts/emulator/beam/bif.c` (`list_to_ref_1`): report to OTP, which the owner sends, that in
+  stock OTP 29.1.2 `list_to_ref/1` of a text whose six numbers each end in `.` (`"#Ref<4.1.2.3.4.5.>"`) leaves its
+  parse loop with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past
+  its five: a stack overflow on any text a caller passes. erXos's copy refuses it with `badarg`. Send it with a
+  reproduction run against stock OTP.
 * [Low] network, `erlang/apps/erx_net/NOTICE-freebsd` and `erx_net_frame`'s header: they
   name `arpresolve_addr` of `sys/netinet/if_ether.c`, which neither the release nor the pin
   has; the broadcast and multicast link addresses `link_addr/2` translates are

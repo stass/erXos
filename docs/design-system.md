@@ -194,7 +194,7 @@ fault, which is a reset.
    +-----------------+ +-----------------+ |                  | |  sealing       |
                                            +------------------+ +----------------+
    +---------------------+   +----------------------------------+
-   | web@erxos (ERTS)    |   | session alice.1@erxos (ERTS)     |
+   | web@erxos (ERTS)    |   | session alice_1@erxos (ERTS)     |
    +---------------------+   |  programs: sub-spaces and ports  |
                              +----------------------------------+
 ```
@@ -1743,7 +1743,7 @@ root
  `- users (system domain: CONFIGURE)
      |- principal "alice"
      |   |- domain 7 "notes"
-     |   |- session 8 "alice.1"
+     |   |- session 8 "alice_1"
      |   |   `- sub-space group: her programs, one child group each
      |   `- domain 9 ...
      `- principal "bob" ...
@@ -2473,7 +2473,7 @@ whatever displays it under its source escapes it
 **A domain's name is its node name.** Every domain is an Erlang node named
 `Name@Host`: its identifier, then `@`, then the machine's host name, an
 identifier the manifest gives, so `system@erxos`, `pcie@erxos`,
-`web@erxos` and `alice.1@erxos` on a machine named `erxos`. Both parts are
+`web@erxos` and `alice_1@erxos` on a machine named `erxos`. Both parts are
 identifiers, so a node name is ASCII and at most 127 bytes, well within an
 atom's bound. The node's creation is the domain's id, which no domain of
 the boot reuses, so a domain created later under a freed name is a new
@@ -2498,19 +2498,21 @@ name, since it is not a node: it speaks only through its creator.
 **Sessions and command domains take pooled names.** A principal starts
 sessions, and through them command domains, without naming each, so
 these take their names from the principal's **name pool**: each is named
-`<principal>.<n>`, with `n` the lowest number that no living domain of
-the principal holds, so alice's first session is `alice.1@erxos` and a
-command domain started beside it `alice.2@erxos`. A number is free again
+`<principal>_<n>`, with `n` the lowest number that no living domain of
+the principal holds, so alice's first session is `alice_1@erxos` and a
+command domain started beside it `alice_2@erxos`. A number is free again
 for the same principal at its domain's end. The pool's names are names
 the principal binds, counted against its `names` quota, so the system
 domain holds one atom for each number of the pool ever in use, never one
 for each session or command domain started, and a pool that the quota
 leaves no room in refuses the creation with `{error, quota}`. A creation
-that asks for a name of the pool's form, an identifier, `.` and decimal
+that asks for a name of the pool's form, an identifier, `_` and decimal
 digits, is refused with `{error, name_taken}`, so no principal takes
 another's pooled names. The manifest check proves that every principal's
-name, with `.` and the digits of its `names` quota, is still an
-identifier (property 5).
+name, with `_` and the digits of its `names` quota, is still an
+identifier (property 5). The pool uses `_` because `.` is no character of
+a node name that stock distribution accepts, and so no OTP change is
+needed.
 
 ### The vault
 
@@ -3290,11 +3292,11 @@ under test ran.
   skips the quota, after which the hostile-domain test finds the system
   domain's atom table past its bound; a principal that starts and ends
   1,000 sessions and command domains one after another, whose names stay
-  within `alice.1` and `alice.2` and whose system domain's atom count
+  within `alice_1` and `alice_2` and whose system domain's atom count
   stays flat, and a hook that numbers pooled names from a counter instead
   of the lowest free number, after which the same test finds the atom
   count growing and the quota refusing; a creation that asks for
-  `alice.3` by name, refused with `{error, name_taken}`.
+  `alice_3` by name, refused with `{error, name_taken}`.
 * **Connections:** a domain whose peer ends, whose runtime takes what the
   peer published, sees `{domain_down, D, Info}` on everything across the
   connection and answers `connection_down` with `connection_unmapped`,

@@ -407,6 +407,9 @@ byte outside `A-Z a-z 0-9 _ + , : = @ -`, and a leading `.`, is `%` and
 two upper-case hexadecimal digits ([The /proc
 tree](design-live.md#the-proc-tree)), so no segment is `.` or `..` or
 holds `/`; an empty segment is refused by the client and by the line. A
+browser's URL parser reads `%2E` and `%2E%2E` as dot segments, so the
+client also refuses a segment that decodes to `.` or `..`, as a path that
+names nothing, and never puts one in a URL or a link. A
 presentation's text is in the `erx:` URI encoding, which keeps `.` and `/`
 as well ([Presentations](design-display.md#presentations)), so the
 `erx:TYPE/TEXT` link a terminal shows and the `/TYPE/TEXT` link a browser

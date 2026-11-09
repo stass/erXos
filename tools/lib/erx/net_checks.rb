@@ -68,6 +68,8 @@ module Erx
     NOTICE_KEYS = %w[tag commit archive-sha256
                      release-tag release-commit release-archive-sha256].freeze
     NAME = /\A[A-Za-z_][A-Za-z0-9_]*\z/
+    # A FreeBSD commit, in full.
+    COMMIT = /\A[0-9a-f]{40}\z/
 
     Violation = Data.define(:rule, :path, :line, :detail) do
       def to_s = "chokepoint net-#{rule}: #{[path, line].compact.join(':')}: #{detail}"
@@ -233,7 +235,7 @@ module Erx
 
     # The notice parsed, and its malformed lines. The format is line-based:
     # '#' starts a comment line; each of NOTICE_KEYS appears once with one
-    # value; "port PATH FUNCTION" names a function whose change between the
+    # value; "port COMMIT PATH FUNCTION" names a function whose change between the
     # release and the pin was ported; "module NAME" starts a module's entry,
     # and each indented line under it is a FreeBSD path and the names of the
     # functions translated from it.
@@ -285,9 +287,10 @@ module Erx
     end
 
     def port_problem(words)
-      return 'a port line is "port PATH FUNCTION"' unless words.size == 3
-      return "#{words[1]} is not a FreeBSD source path" unless FREEBSD_PATH.match?(words[1])
-      return "#{words[2]} is not a function name" unless NAME.match?(words[2])
+      return 'a port line is "port COMMIT PATH FUNCTION"' unless words.size == 4
+      return "#{words[1]} is not a FreeBSD commit of 40 hex digits" unless COMMIT.match?(words[1])
+      return "#{words[2]} is not a FreeBSD source path" unless FREEBSD_PATH.match?(words[2])
+      return "#{words[3]} is not a function name" unless NAME.match?(words[3])
 
       nil
     end

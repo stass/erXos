@@ -17,7 +17,7 @@ class NetChecksTest < Minitest::Test
     release-tag release/15.1.0-p6
     release-commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
     release-archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
-    port sys/netinet/tcp_ecn.c tcp_ecn_input_segment
+    port 4e28874a6048f3c5a72a42b5bcfcfc7e71cad8a6 sys/netinet/tcp_ecn.c tcp_ecn_input_segment
   NOTICE
   # The line number of the first line after PIN.
   NEXT = PIN.lines.size + 1
@@ -122,8 +122,12 @@ class NetChecksTest < Minitest::Test
     assert_equal [['notices', nil]], rules({}, notice: without_release)
     assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}tag again\n")
     assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}  sys/netinet/tcp.h\n")
-    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port sys/netinet/tcp_ecn.c\n")
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port 4e28874a6048f3c5a72a42b5bcfcfc7e71cad8a6 sys/netinet/tcp_ecn.c\n")
     assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port ../tcp_ecn.c tcp_ecn_input_segment\n")
+    # A port line without its commit, or with a short or upper-case one, is refused.
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port sys/netinet/tcp_ecn.c tcp_ecn_input_segment\n")
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port 4e28874a6048 sys/netinet/tcp_ecn.c tcp_ecn_input_segment\n")
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port 4E28874A6048F3C5A72A42B5BCFCFC7E71CAD8A6 sys/netinet/tcp_ecn.c tcp_ecn_input_segment\n")
     assert_equal [['notices', NEXT + 1]], rules({}, notice: "#{PIN}module m\n  ../etc/passwd\n")
     assert_equal [['notices', NEXT + 1]], rules({}, notice: "#{PIN}module m\nmodule m\n")
     assert_equal [['notices', nil]], rules({ "#{SRC}/m.erl" => module_text('') }, notice: nil)

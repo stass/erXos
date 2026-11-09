@@ -12,8 +12,8 @@
 # the translation was read from (FreeBSD 15.1, its tag, commit and
 # archive SHA-256). Of what changed between the two, only what the wire
 # or an interoperating peer can see and the fixes of real bugs are ported;
-# each "port PATH FUNCTION" line names a FreeBSD function whose change was
-# ported. Everything else is as it was read from the release, so the
+# each "port COMMIT PATH FUNCTION" line names the FreeBSD commit (40 hex
+# digits) that made a change and the function whose change was ported. Everything else is as it was read from the release, so the
 # line citations (file.c:N, and :N after a named file) in erx_net's
 # comments and in the design are to the release.
 #
@@ -33,11 +33,11 @@ release-commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
 release-archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
 
 # A peer's CWR forces an ACK only in ESTABLISHED, FIN-WAIT-1 and FIN-WAIT-2.
-port sys/netinet/tcp_ecn.c tcp_ecn_input_segment
+port 4e28874a6048f3c5a72a42b5bcfcfc7e71cad8a6 sys/netinet/tcp_ecn.c tcp_ecn_input_segment
 # No jumbograms: a zero payload length is dropped silently.
-port sys/netinet6/ip6_input.c ip6_input
+port 069a67374ed9641ff1ada2aecaac1cc61a560649 sys/netinet6/ip6_input.c ip6_input
 # No jumbograms: a jumbo payload option is dropped silently.
-port sys/netinet6/ip6_input.c ip6_process_hopopts
+port 069a67374ed9641ff1ada2aecaac1cc61a560649 sys/netinet6/ip6_input.c ip6_process_hopopts
 
 module erx_net_eth
   sys/net/if_ethersubr.c ether_input_internal
