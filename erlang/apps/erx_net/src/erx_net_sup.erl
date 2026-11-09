@@ -28,8 +28,16 @@ without that interface and no interface ever starts without its driver. The driv
 link's significant child: its end, for any reason, ends the link (`auto_shutdown`), and the
 interfaces supervisor starts the link again through `start_link_sup/1`, which resets the
 device and restarts the interface and its DHCP client, which lose only soft state. An
-interface's or DHCP client's crash is the link supervisor's to restart, and leaves the driver
-running.
+interface's or DHCP client's crash is the link supervisor's to restart, and leaves the
+driver running.
+
+A driver lives a second at the least (erx_net_driver, "The hold"), so a link whose medium
+fails at every start restarts once a second, and the interfaces supervisor's intensity is
+what its links can reach that way, `erx_net_driver:starts_within/1` for each over its
+period: a dead device or far end never makes it give up. What ends a link faster adds to
+the count and can reach the stack's supervisor: a transport whose `init` fails at a
+restart, or an interface or DHCP client crashing past the link's own intensity.
+
 Listeners, datagram sockets under a grant and the port mapper join the tree as they are
 written.
 
@@ -46,6 +54,7 @@ Module}}`.
 -export([init/1, start_link_sup/1]).
 
 -define(RUNTIME, {?MODULE, runtime}).
+-define(LINKS_PERIOD_S, 5).
 
 -type interface() :: #{name := term(), transport := {module(), map()},
                        ip4 := dhcp | map(), ingress => map()}.
@@ -81,7 +90,9 @@ init({stack, Interfaces}) ->
 init({interfaces, Interfaces}) ->
     Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]}}
                 || #{name := Name} = If <- Interfaces],
-    {ok, {#{strategy => one_for_one}, Children}};
+    Intensity = length(Interfaces) * erx_net_driver:starts_within(?LINKS_PERIOD_S),
+    {ok, {#{strategy => one_for_one, intensity => Intensity, period => ?LINKS_PERIOD_S},
+          Children}};
 init({link, #{name := Name, transport := {Transport, TransportConfig}}}) ->
     Driver = #{id => driver, start => {erx_net_driver, start_link, [Name, Transport, TransportConfig]},
                restart => temporary, significant => true},
@@ -101,19 +112,37 @@ start_link_sup(#{name := Name, ip4 := Ip4} = If) ->
     maybe
         {ok, Sup} ?= supervisor:start_link(?MODULE, {link, If}),
         case supervisor:which_children(Sup) of
-            [{driver, Driver, worker, _}] when is_pid(Driver) -> start_children(Sup, Rest);
+            [{driver, Driver, worker, _}] when is_pid(Driver) -> start_children(Sup, Driver, Rest);
             [] -> stop_link(Sup, ignore)
         end
     end.
 
 %% The link's children after its driver, in order; one that fails ends the link, and its
-%% reason is the link's.
-start_children(Sup, []) ->
+%% reason is the link's. A child that failed because the driver ended under it, a driver
+%% crashing in its first second, leaves a link that is ending already: it is answered as
+%% started, and its parent restarts it as any link whose driver ended, so that a driver's
+%% end never fails a link's start, the stack's own start included.
+start_children(Sup, _Driver, []) ->
     {ok, Sup};
-start_children(Sup, [Child | Rest]) ->
-    case supervisor:start_child(Sup, Child) of
-        {ok, _Pid} -> start_children(Sup, Rest);
-        {error, _Reason} = Error -> stop_link(Sup, Error)
+start_children(Sup, Driver, [Child | Rest]) ->
+    case start_child(Sup, Child) of
+        {ok, _Pid} ->
+            start_children(Sup, Driver, Rest);
+        %% The driver is the link supervisor's significant child, so with the driver gone
+        %% the supervisor is ending or has ended, which is why its child failed or its
+        %% call did; its parent sees it end.
+        {error, _Reason} = Error ->
+            case is_process_alive(Driver) of
+                true -> stop_link(Sup, Error);
+                false -> {ok, Sup}
+            end
+    end.
+
+%% supervisor:start_child/2, with a supervisor that ended under the call, after its driver,
+%% answered as an error rather than raised.
+start_child(Sup, Child) ->
+    try supervisor:start_child(Sup, Child)
+    catch exit:Reason -> {error, Reason}
     end.
 
 %% Ends a link supervisor the caller, its parent, has not taken as a child, unlinked first

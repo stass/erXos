@@ -16,20 +16,19 @@
 
 config(Device) -> #{far => {port, Device}, lladdr => ?LLADDR}.
 
-%% A helper that cannot open its device exits; the pipe reports the link down for good
-%% and refuses the frames after.
-missing_device_takes_the_link_down_test() ->
+%% A helper that cannot open its device exits; the port's close stops the pipe, which
+%% ends its driver, and a frame sent before the driver has seen it is refused.
+missing_device_stops_the_pipe_test() ->
     {ok, #{state := up}, T0} = erx_net_pipe:init(config("/nonexistent/erx_net_tap")),
     Down = receive {'DOWN', _, port, _, _} = M -> M after ?WAIT_MS -> timeout end,
-    {Events, T1} = erx_net_pipe:event(Down, T0),
-    ?assertEqual([{link, down}], Events),
-    ?assertMatch({{drop, refused}, _}, erx_net_pipe:transmit(frame(60), T1)).
+    ?assertEqual({stop, {far_end, normal}}, erx_net_pipe:event(Down, T0)),
+    ?assertMatch({{drop, refused}, _}, erx_net_pipe:transmit(frame(60), T0)).
 
 %% The driver keeps sending while the helper exits: a frame that meets the port after the
 %% helper is gone but before the port has closed would make ERTS end the port with epipe,
 %% which the helper prevents by closing its output and reading its input until the port
-%% has closed. The pipe reports the link down once, and the process that owns the port
-%% lives on.
+%% has closed. The pipe stops once the port has closed, and the process that owns the
+%% port lives on.
 transmit_while_the_helper_exits_test() ->
     Test = self(),
     {Owner, Ref} = spawn_monitor(fun() ->
@@ -39,13 +38,13 @@ transmit_while_the_helper_exits_test() ->
     Result = receive {Owner, R} -> R; {'DOWN', Ref, process, Owner, Why} -> {died, Why} end,
     ?assertMatch({down, {{drop, refused}, _}}, Result).
 
-%% Sends frames until a message to the pipe brings the link down, then one frame more.
+%% Sends frames until a message to the pipe stops it, then one frame more.
 keep_sending(T0, Deadline) ->
     {_, T1} = erx_net_pipe:transmit(frame(60), T0),
     receive
         Msg ->
             case erx_net_pipe:event(Msg, T1) of
-                {[{link, down}], T2} -> {down, erx_net_pipe:transmit(frame(60), T2)};
+                {stop, _} -> {down, erx_net_pipe:transmit(frame(60), T1)};
                 {_, T2} -> keep_sending(T2, Deadline)
             end
     after 0 ->

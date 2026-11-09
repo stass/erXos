@@ -14,20 +14,24 @@ take as `refused`.
   the driver's mailbox and the host's socket buffer is the only queue ahead of it; a batch
   is the datagrams waiting, up to 64 KiB. A datagram from any address but `Peer` is
   dropped as `stranger`. UDP has no carrier, so the link is `up` from `init` on.
-* `{process, Pid}`, a test: each frame is a message `{erx_net_pipe, Pid, Frame}` in either
-  direction; a `Frame` that is not a binary is dropped as `malformed` (a type check, not a
-  parse), and one from another pid as `stranger`. The pipe monitors the far end and
-  reports the link `down` when it ends.
+* `{process, Far}`, a test: `Far` is a pid, or a registered name looked up once at
+  `init`, so that a restarted driver finds the far end registered since. Each frame is a
+  message `{erx_net_pipe, Pid, Frame}` in either direction; a `Frame` that is not a
+  binary is dropped as `malformed` (a type check, not a parse), and one from another pid
+  as `stranger`. The pipe monitors the far end and stops when it ends, which ends the
+  driver. A name that names no other process stops the pipe at its first message.
 * `{port, Device}`, a tap device through the tap helper `erx_net_tap`, a port program in
   this application's `priv/` (built by `make -C c_src`) that relays whole frames between
   the device and the port, each port message one frame. `port_command/2` suspends the
   driver while the port is busy, so the helper's input is the transmit backlog. The pipe
-  monitors the port. A helper that fails closes its output and reads its input until the
-  port has closed, so the port closes with reason normal and does not fail under a frame
-  it is writing (with epipe, which would end the driver linked to it); only a helper
-  killed by a signal can still end the driver that way. The link is `up`
-  from `init` until the port closes, and `down` for good after: later frames are dropped
-  as `refused`, and the link returns only when the driver is started again.
+  monitors the port, and its close ends the driver. A helper that fails closes its output
+  and reads its input until the port has closed, so the port closes with reason normal
+  and does not fail under a frame it is writing; a helper killed by a signal can still
+  make it fail with epipe, an exit signal the driver traps and ends on just the same.
+
+The pipe reports its link `up` from `init` on; the far end's end stops it instead of
+taking the link down, and the driver's supervisor starts the pipe again. A frame sent
+after the far end has gone but before the driver has seen it is dropped as `refused`.
 
 The configuration: `far`; `lladdr`, which must be a unicast address with the locally
 administered bit set; `mtu`, from 1,280 to 9,000 (1,500 when absent); and `tx_limit`, the
@@ -50,13 +54,12 @@ frames that may wait at the driver (256 when absent).
 -type far() :: {udp, Local :: {inet:ip_address(), inet:port_number()},
                      Peer :: {inet:ip_address(), inet:port_number()}}
              | {port, Device :: file:filename()}
-             | {process, pid()}.
+             | {process, pid() | atom()}.
 
 -record(udp, {socket :: gen_udp:socket(), peer :: {inet:ip_address(), inet:port_number()},
               mtu :: pos_integer()}).
--record(port, {port :: port(), ref :: reference(), up = true :: boolean(), mtu :: pos_integer()}).
--record(process, {pid :: pid(), ref :: reference(), up = true :: boolean(),
-                  mtu :: pos_integer()}).
+-record(port, {port :: port(), ref :: reference(), mtu :: pos_integer()}).
+-record(process, {pid :: pid() | undefined, ref :: reference(), mtu :: pos_integer()}).
 
 -doc false.
 init(#{far := Far, lladdr := Lladdr} = Config) ->
@@ -100,6 +103,16 @@ open({port, Device}, Mtu) when is_list(Device); is_binary(Device) ->
     end;
 open({process, Pid}, Mtu) when is_pid(Pid) ->
     {ok, #process{pid = Pid, ref = erlang:monitor(process, Pid), mtu = Mtu}};
+open({process, Name}, Mtu) when is_atom(Name) ->
+    case whereis(Name) of
+        Pid when is_pid(Pid), Pid =/= self() ->
+            open({process, Pid}, Mtu);
+        %% Nothing, a port or the driver itself: a far end that has ended, told as one.
+        _ ->
+            Ref = make_ref(),
+            self() ! {'DOWN', Ref, process, Name, noproc},
+            {ok, #process{pid = undefined, ref = Ref, mtu = Mtu}}
+    end;
 open(Far, _Mtu) ->
     {error, {far, Far}}.
 
@@ -114,8 +127,8 @@ event({Port, {data, Frame}}, #port{port = Port, mtu = Mtu} = T) ->
         true -> {[{frames, [Frame]}], T};
         false -> {[{dropped, too_long}], T}
     end;
-event({'DOWN', Ref, port, _, _}, #port{ref = Ref} = T) ->
-    {[{link, down}], T#port{up = false}};
+event({'DOWN', Ref, port, _, Reason}, #port{ref = Ref}) ->
+    {stop, {far_end, Reason}};
 event({erx_net_pipe, Pid, Frame}, #process{pid = Pid, mtu = Mtu} = T) when is_binary(Frame) ->
     case byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN of
         true -> {[{frames, [Frame]}], T};
@@ -125,8 +138,8 @@ event({erx_net_pipe, Pid, _}, #process{pid = Pid} = T) ->
     {[{dropped, malformed}], T};
 event({erx_net_pipe, _, _}, #process{} = T) ->
     {[{dropped, stranger}], T};
-event({'DOWN', Ref, process, _, _}, #process{ref = Ref} = T) ->
-    {[{link, down}], T#process{up = false}};
+event({'DOWN', Ref, process, _, Reason}, #process{ref = Ref}) ->
+    {stop, {far_end, Reason}};
 event(_Msg, T) ->
     {[], T}.
 
@@ -166,8 +179,6 @@ send(Frame, #udp{socket = Socket, peer = {Ip, Port}} = T) ->
         ok -> {ok, T};
         {error, _} -> {{drop, refused}, T}
     end;
-send(_Frame, #port{up = false} = T) ->
-    {{drop, refused}, T};
 send(Frame, #port{port = Port} = T) ->
     %% The port may have closed with its 'DOWN' still on its way; port_command/2 then
     %% fails with badarg.
@@ -176,7 +187,7 @@ send(Frame, #port{port = Port} = T) ->
     catch
         error:badarg -> {{drop, refused}, T}
     end;
-send(_Frame, #process{up = false} = T) ->
+send(_Frame, #process{pid = undefined} = T) ->
     {{drop, refused}, T};
 send(Frame, #process{pid = Pid} = T) ->
     Pid ! {erx_net_pipe, self(), iolist_to_binary(Frame)},

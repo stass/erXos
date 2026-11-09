@@ -828,14 +828,20 @@ it; git history is the record of completed work.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
-* [Medium] network, `erx_net_driver` and `erx_net_pipe`: a pipe whose far end ended (a `process`
-  end's peer, a `port` end's helper) reports the link `down` for good, and nothing starts the driver
-  again, since the driver stays alive. Decide whether a far end's end stops the driver so that its
-  supervisor restarts it, with a backoff for a tap that keeps failing.
-* [Low] network, `erx_net_pipe` (`port` end): a tap helper killed by a signal closes both its pipes at
-  once, and a frame the driver writes meanwhile makes ERTS fail the port with `epipe`, which ends the
-  driver linked to it (its supervisor restarts it). A driver that traps exits and takes the port's
-  exit as link `down` would close the case; decide with the restart question above.
+* [Medium] network, `erx_net_sup` (link restarts): the driver's one-second hold paces every end of a
+  driver that ran, but not a transport whose `init` fails at a restart (the start fails and OTP retries
+  at once, so a persistent failure, such as a `udp` end's vanished local address, ends the interfaces
+  supervisor and then the stack), nor an `erx_net_if` or `erx_dhcp4` crashing past its link
+  supervisor's intensity (reachable from a peer only through a crash bug). Pacing every link start in
+  `start_link_sup/1`, not each way a driver ends, would close both.
+* [Low] network, `erx_net_sup`: a far end or device that stays dead logs a supervisor report about
+  once a second per interface for as long as it stays dead (a tap helper also its standard-error
+  line); the log, not the stack, should fold repeated reports.
+* [Low] network, `erx_net_driver` over `erx_virtio_net`: a device that stops completing transmits
+  ends nothing; its backlog fills, senders are refused and the link stays stuck. FreeBSD's vtnet(4)
+  reinitialises the interface when its transmit watchdog (`vtnet_watchdog`) expires after 5 seconds;
+  a driver whose backlog has waited on `writable` that long could end, so that its restart resets
+  the device.
 * [Low] network, `erx_net_tap` on Linux: a tap there may refuse a write shorter than an Ethernet
   header with `EINVAL` and treat a write while down differently from FreeBSD's 0-byte return; check
   `tun_get_user` and add Linux's discard cases when Linux hosts run the helper.

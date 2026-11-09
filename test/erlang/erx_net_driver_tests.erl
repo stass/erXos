@@ -26,10 +26,14 @@ init(#{nothing_at_restart := Key} = Config) ->
         first -> persistent_term:put(Key, again), init(maps:remove(nothing_at_restart, Config));
         again -> ignore
     end;
+init(#{crash_at_start := true} = Config) ->
+    self() ! {stub, crash},
+    init(maps:remove(crash_at_start, Config));
 init(#{test := Test, room := Room, tx_limit := Limit}) ->
     {ok, #{link => ethernet, lladdr => ?MAC, mtu => 1500, state => up, tx_limit => Limit},
      #{test => Test, room => Room}}.
 
+event({stub, crash}, _T) -> error(crash_at_start);
 event({stub, room, Room}, T) -> {[writable], T#{room := Room}};
 event({stub, Events}, T) -> {Events, T};
 event(_Msg, T) -> {[], T}.
@@ -77,7 +81,8 @@ driver_test_() ->
                  fun backlog_never_exceeds_the_transmit_credit/0,
                  fun detached_frames_are_counted/0,
                  fun process_end_counts_a_frame_that_is_not_a_binary/0,
-                 fun process_end_reports_the_far_end_down/0,
+                 fun process_end_ends_the_driver_after_its_hold/0,
+                 fun linked_exit_ends_the_driver_after_its_hold/0,
                  fun udp_end_bounds_the_driver_queue_against_a_stranger/0]).
 
 refused_batch_is_dropped_whole() ->
@@ -146,12 +151,29 @@ process_end_counts_a_frame_that_is_not_a_binary() ->
     receive {frames, Driver, Frames} -> ?assertEqual([<<"frame">>], Frames) after 1000 -> ?assert(false) end,
     ?assertEqual(#{malformed => 1}, erx_net_driver:counters(Driver)).
 
-process_end_reports_the_far_end_down() ->
+%% The far end's end ends the driver, quietly (a shutdown), once it has lived its hold.
+process_end_ends_the_driver_after_its_hold() ->
     Far = spawn(fun() -> receive stop -> ok end end),
+    Started = erlang:monotonic_time(millisecond),
     Driver = pipe({process, Far}),
-    _ = attached(Driver, 4),
+    Ref = monitor(process, Driver),
     Far ! stop,
-    receive {link, Driver, down} -> ok after 1000 -> ?assert(false) end.
+    receive {'DOWN', Ref, process, Driver, Reason} -> ?assertEqual({shutdown, {far_end, normal}}, Reason)
+    after 3000 -> ?assert(false)
+    end,
+    ?assert(erlang:monotonic_time(millisecond) - Started >= 1000).
+
+%% An exit signal from what the driver is linked to, a tap helper's port failing with
+%% epipe, ends it the same way, after its hold, and not at once.
+linked_exit_ends_the_driver_after_its_hold() ->
+    Started = erlang:monotonic_time(millisecond),
+    Driver = stub(0, 4),
+    Ref = monitor(process, Driver),
+    _ = spawn(fun() -> link(Driver), exit(epipe) end),
+    receive {'DOWN', Ref, process, Driver, Reason} -> ?assertEqual({shutdown, {linked, epipe}}, Reason)
+    after 3000 -> ?assert(false)
+    end,
+    ?assert(erlang:monotonic_time(millisecond) - Started >= 1000).
 
 udp_end_bounds_the_driver_queue_against_a_stranger() ->
     Loopback = {127, 0, 0, 1},
@@ -251,3 +273,138 @@ wait_gone(Name) ->
         undefined -> ok;
         Pid -> Ref = monitor(process, Pid), receive {'DOWN', Ref, _, _, _} -> ok end
     end.
+
+%% --- A far end's end -------------------------------------------------------------
+
+-define(FAR, erx_net_driver_tests_far).
+-define(ME4, <<10, 0, 2, 15>>).
+-define(PEER4, <<10, 0, 2, 2>>).
+-define(PEER_MAC, <<2, 0, 0, 0, 0, 9>>).
+
+far_end_test_() ->
+    [{timeout, 20, fun far_end_end_restarts_the_link/0},
+     {timeout, 20, fun far_end_never_there_spins_no_supervisor/0},
+     {timeout, 20, fun crash_at_start_spins_no_supervisor/0}].
+
+%% A pipe whose far end ends ends its driver, and the link supervisor starts the link
+%% again: a new driver, over the far end now registered under the same name, answers ARP.
+far_end_end_restarts_the_link() ->
+    wait_gone(erx_net_tables),
+    flush(),
+    Old = far_end(),
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [static_pipe()]}),
+    unlink(Stack),
+    try
+        Driver = answers_arp(Old, 50),
+        ?assert(is_pid(Driver)),
+        Ref = monitor(process, Old),
+        exit(Old, kill),
+        receive {'DOWN', Ref, process, Old, killed} -> ok end,
+        New = far_end(),
+        NewDriver = answers_arp(New, 50),
+        ?assert(is_pid(NewDriver)),
+        ?assertNotEqual(Driver, NewDriver)
+    after
+        ok = proc_lib:stop(Stack, shutdown, infinity),
+        stop_far()
+    end.
+
+%% A far end that is never there ends every driver at its start: each lives out its hold,
+%% so the link restarts about once a second and no supervisor above it gives up.
+far_end_never_there_spins_no_supervisor() ->
+    stop_far(),
+    spins_no_supervisor(static_pipe()).
+
+%% A transport that crashes at once at every start, as a device that breaks its queue at
+%% once: the stack starts all the same, though the link's first driver ends under its
+%% interface's start, and the link restarts about once a second as above.
+crash_at_start_spins_no_supervisor() ->
+    spins_no_supervisor(#{name => en0, ip4 => dhcp,
+                          transport => {?MODULE, #{crash_at_start => true, test => self(),
+                                                   room => 64, tx_limit => 4}}}).
+
+%% Starts the stack with Link, whose driver ends at every start, and checks that over
+%% 2.5 seconds its link restarts once a second or so and the supervisors above it stay.
+spins_no_supervisor(Link) ->
+    wait_gone(erx_net_tables),
+    flush(),
+    %% Trapped, so that a start that fails is this case's failure, not its process's end.
+    process_flag(trap_exit, true),
+    Started = erx_net_sup:start_link(#{interfaces => [Link]}),
+    process_flag(trap_exit, false),
+    ?assertMatch({ok, _}, Started),
+    {ok, Stack} = Started,
+    unlink(Stack),
+    Interfaces = interfaces(Stack),
+    Drivers = drivers_seen(erlang:monotonic_time(millisecond) + 2500, []),
+    ?assert(is_process_alive(Stack)),
+    ?assertEqual(Interfaces, interfaces(Stack)),
+    ?assertMatch(N when N >= 2 andalso N =< 4, length(Drivers)),
+    ok = proc_lib:stop(Stack, shutdown, infinity).
+
+%% Ends the far end registered as ?FAR, if any, and waits until the name is free.
+stop_far() ->
+    case whereis(?FAR) of
+        undefined -> ok;
+        Far -> exit(Far, kill), wait_gone(?FAR)
+    end.
+
+static_pipe() ->
+    #{name => en0, ip4 => #{addr => ?ME4, plen => 24, gateway => ?PEER4},
+      transport => {erx_net_pipe, #{far => {process, ?FAR}, lladdr => ?MAC}}}.
+
+interfaces(Stack) ->
+    [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
+    Interfaces.
+
+%% The distinct drivers registered for en0 until Deadline.
+drivers_seen(Deadline, Seen) ->
+    case erlang:monotonic_time(millisecond) > Deadline of
+        true ->
+            Seen;
+        false ->
+            timer:sleep(20),
+            case erx_net_tables:driver(en0) of
+                {ok, Pid} -> drivers_seen(Deadline, lists:usort([Pid | Seen]));
+                none -> drivers_seen(Deadline, Seen)
+            end
+    end.
+
+%% A far end registered as ?FAR: it hands the test what a driver sends it and sends a
+%% driver what the test asks.
+far_end() ->
+    Test = self(),
+    Far = spawn(fun() ->
+                        true = register(?FAR, self()),
+                        Test ! {registered, self()},
+                        far_loop(Test)
+                end),
+    receive {registered, Far} -> Far end.
+
+far_loop(Test) ->
+    receive
+        {erx_net_pipe, Driver, Frame} -> Test ! {far, self(), Driver, Frame};
+        {inject, Driver, Frame} -> Driver ! {erx_net_pipe, self(), Frame}
+    end,
+    far_loop(Test).
+
+%% Asks en0's registered driver, through Far, who has ?ME4, until an ARP reply comes back;
+%% answers the driver that sent it.
+answers_arp(_Far, 0) ->
+    no_answer;
+answers_arp(Far, Tries) ->
+    case erx_net_tables:driver(en0) of
+        {ok, Driver} -> Far ! {inject, Driver, arp_request()};
+        none -> ok
+    end,
+    receive
+        {far, Far, From, <<Dst:6/binary, _:6/binary, 16#0806:16, _:6/binary, 2:16, _/binary>>}
+          when Dst =:= ?PEER_MAC ->
+            From
+    after 100 ->
+        answers_arp(Far, Tries - 1)
+    end.
+
+arp_request() ->
+    <<16#ffffffffffff:48, ?PEER_MAC/binary, 16#0806:16, 1:16, 16#0800:16, 6, 4, 1:16,
+      ?PEER_MAC/binary, ?PEER4/binary, 0:48, ?ME4/binary, 0:144>>.

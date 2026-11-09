@@ -572,7 +572,13 @@ A driver restart resets its device
 interface process, which loses only soft state: neighbour entries,
 reassembly queues and half-open handshakes, which peers retransmit. The
 rows a stopped interface published go with it
-([What owners publish](#what-owners-publish)).
+([What owners publish](#what-owners-publish)). A driver ends when its
+medium does, and is its link supervisor's significant child, so the
+whole link ends with it and the interfaces supervisor starts it again;
+a driver lives a second at the least, which bounds how fast a dead
+medium restarts its link, and the interfaces supervisor's intensity is
+set to the most its links reach at that rate
+([Ending](#the-driver)).
 
 Connections, listeners and datagram sockets are never restarted, since a
 restarted TCP connection would be a different connection: each is a
@@ -2211,7 +2217,7 @@ only its medium.
 
 ```erlang
 -callback init(Config :: map()) -> {ok, link_info(), T} | ignore | {error, Reason :: term()}.
--callback event(Msg :: term(), T) -> {[event()], T}.
+-callback event(Msg :: term(), T) -> {[event()], T} | {stop, Reason :: term()}.
 -callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}.
 
 -type link_info() :: #{link := ethernet | none,
@@ -2228,7 +2234,8 @@ only its medium.
 `event/2` turns a message the transport's medium sent the process, an
 interrupt, a datagram or a far end's frame, into events, and any other
 message into none; a frame the transport refuses is a `dropped` event,
-which the driver counts by its reason. The driver registers its pid
+which the driver counts by its reason, and a medium that has ended is
+`{stop, Reason}` ([Ending](#the-driver)). The driver registers its pid
 with `erx_net_tables` under its interface's name, where the interface,
 started after it by their link supervisor, finds it.
 
@@ -2280,11 +2287,54 @@ neighbour-discovery answers, RSTs, SYN-ACKs) share the transmit credit
 with its clients' data and have no reserved share of it
 ([Residuals](#residuals)).
 
+**Ending.** A driver ends when its medium is gone, and its link
+supervisor starts the whole link again, rather than a driver living on
+over nothing. A transport whose medium has ended, a pipe whose far end
+ended, answers `{stop, Reason}` from `event/2`, and the driver ends
+with `{shutdown, Reason}`. The driver traps exits, so an exit signal
+from what it is linked to other than its supervisor, a port or socket
+of its medium, such as a tap helper's port failing with `epipe`, ends
+it the same way, with `{shutdown, {linked, Reason}}`. A crash ends it
+too, a virtio device's broken queue included. Once the driver runs, no
+end but its supervisor's own stop (`shutdown`) comes before it has lived
+a second, and a driver that has lived longer ends at once. A stop sooner
+waits out the rest of the second still answering, its link told
+`down`, so that the interface its link supervisor is starting beside it
+attaches and the link's start completes; a crash sooner waits in
+`terminate/2`. The hold is measured on the host's clock, not
+[the stack's](#the-clock), since what it paces is the supervisor's,
+which counts the host's seconds. A link start whose interface or DHCP
+client fails because the driver ended under it, a crash in the
+driver's first second, answers the link as started, and the interfaces
+supervisor restarts it like any link whose driver ended, so a driver's
+end never fails a link's start, nor the stack's own start at boot.
+
+A medium that fails at every start, a tap device that is gone or a
+device that breaks its queue at once, therefore restarts its link at
+most once a second. The interfaces supervisor's intensity is
+`erx_net_driver:starts_within/1` restarts per interface over its
+5-second period, six: OTP's supervisor keeps a restart while its whole
+second is within the period of the latest one's, so what it counts
+spans less than six seconds, in which a held link starts at most six
+times. A dead or hostile device, or a far end that never returns, so
+never makes the interfaces supervisor give up and take the stack down,
+and with it, while the system domain runs the stack, the system domain;
+what ends a link faster adds to that count: a transport whose `init`
+fails at a restart, whose start fails at once and is retried at once,
+since the driver never ran and so is not held (`erx_virtio_net` answers
+`ignore` to every failure of its `init`, so on erXos its interface is
+only lost until the next boot), or an interface or DHCP client crashing
+past the link supervisor's own intensity.
+A driver waiting out its hold delays the stack's own stop by at most
+the rest of that second. A device that stops completing transmits ends
+nothing: its backlog fills, senders are refused against the transmit
+credit, and the link stays stuck until the driver's next end.
+
 | Transport | `link`, `lladdr` | `mtu` | `state` | `tx_limit` |
 | --- | --- | --- | --- | --- |
 | `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size |
 | `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured |
-| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` while its far end is there | configured |
+| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured |
 
 The virtio transport posts at most four `out` segments: its
 `virtio_net_hdr`, then the frame's binaries in order, all but the last
@@ -2331,16 +2381,21 @@ longer than the MTU and the 14-byte Ethernet header is dropped as
   transmit backlog. Without `exit_status` the port closes, with reason
   `normal`, as soon as the helper closes its output, which a failing
   helper does before it stops reading its input, so the port does not
-  fail with `epipe` under a frame it is writing, an exit signal that would
-  end the driver linked to it. A helper killed by a signal closes both
-  pipes at once and can still end the driver that way; its supervisor
-  then restarts it. The state is `up` from `init` until the
-  monitor's `'DOWN'`, then `down` for good: later frames are dropped as
-  `refused`, and the link returns when the driver is started again.
-* **`process`**, a test. Each frame is a message `{erx_net_pipe, Pid,
+  fail with `epipe` under a frame it is writing. The monitor's `'DOWN'`
+  stops the pipe, and the driver ends and is started again with a new
+  helper ([Ending](#the-driver)). A helper killed by a signal closes
+  both pipes at once, and a frame written then makes the port fail with
+  `epipe`, an exit signal the driver traps and ends on just the same. The
+  pipe's state stays `up`; a frame sent after the
+  port has closed but before the driver has seen it is dropped as
+  `refused`.
+* **`process`**, a test. The far end is a pid, or a registered name
+  looked up at `init`, so that a restarted driver finds the far end
+  registered since. Each frame is a message `{erx_net_pipe, Pid,
   Frame}` in either direction, and a `Frame` that is not a binary is
   dropped as `malformed`, a type check and not a parse. The pipe monitors
-  the far end and reports `down` when it ends. The `process` end is what
+  the far end, and its end, or a name with nothing registered, stops the
+  pipe and ends the driver. The `process` end is what
   makes a run deterministic: every frame in flight is a message the test
   can see ([The clock](#the-clock)).
 
@@ -2371,7 +2426,8 @@ or inside a frame, a frame longer than the length can carry, a write to
 the tap that takes part of the frame, or any other error but `EINTR` on
 either side ends it with status 1 and a one-line diagnostic on standard
 error, after it has closed its output and read its input to end of
-file. Either way the port closes and the pipe reports the link `down`.
+file. Either way the port closes, the driver ends, and its link
+supervisor starts it again with a new helper ([Ending](#the-driver)).
 A port's messages reach the driver as fast as the tap delivers them,
 with no credit ahead of the mailbox ([Residuals](#residuals)).
 
@@ -3227,10 +3283,10 @@ packet input.
 | --- | --- | --- | --- |
 | a frame that a step cannot handle (a bug: the step raises) | the interface process, which counts and logs the event | the interface's state from before the frame; every connection | the frame |
 | the interface process crashes outside a step | its link supervisor; `erx_net_tables`, which deletes the rows that name it | the driver, every connection | the interface's soft state: neighbours, reassembly, half-open handshakes; its published rows, and with its `erx_dhcp4` a DHCP lease, which the restarted client asks for again |
-| the driver crashes, or the device breaks its queue | its link supervisor | every connection; their unacknowledged data is retransmitted | the device's queued frames; the interface process restarts after the driver's reset |
+| the driver crashes, or the device breaks its queue | its link supervisor, which ends the link; the interfaces supervisor starts it again, at most once a second while the device keeps failing | every connection; their unacknowledged data is retransmitted | the device's queued frames; the interface process restarts after the driver's reset |
 | the driver has no attached interface, between an interface's end and its restart | the driver, which monitors the attached interface | everything | the frames received meanwhile, dropped and counted as `detached` |
 | a device's queue is full, or a transport refuses a frame | the driver | everything | nothing while the backlog has room, which the transmit credit bounds; past it senders' hand-overs are refused and counted where they are made |
-| a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by its port's monitor, each reporting the link `down`; a `udp` end only as refused sends | everything | the frames sent meanwhile, counted as `refused`; TCP retransmits once the far end returns |
+| a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by its port's monitor (or the port's exit signal), each ending the driver, whose link the interfaces supervisor starts again; a `udp` end only as refused sends | every connection | the link's soft state, as a driver crash; a far end that stays away restarts the link once a second; TCP retransmits once the far end returns |
 | a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST, and its owner receives `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or a waiting call gets the error |
 | a socket process is killed or crashes outside a step | its grant, which deletes its entries | everything else | the socket, silently: the peer times out or meets a RST later, and the owner's next call gets `{error, closed}` |
 | a socket's owner exits | the socket, which monitors it | everything else | the socket: a connection sends FIN, or RST if `linger` is zero |
@@ -3845,13 +3901,26 @@ once when room returns; a transmit backlog never holds more frames than
 the transmit credit's limit; 10,000 datagrams from a stranger to a
 `udp` end never put more than 65 messages in the driver's queue; and a
 `process` end's frame that is not a binary is counted as `malformed`
-with no raise in the interface. *Seeded failures:* a driver that takes a
+with no raise in the interface. A `process` end's far end that ends,
+or an exit signal from a process linked to the driver, ends the driver
+no sooner than a second after its start; the stack started over a
+`process` end named by a registered name answers ARP, its far end is
+killed, and the link restarts and answers ARP through a new driver to a
+new far end under the name; and a name with nothing registered restarts
+the link two to four times in 2.5 seconds with the stack's supervisors
+unchanged, as does a transport that crashes at once at every start.
+*Seeded failures:* a driver that takes a
 frame's unit when its message arrives instead of when the frame leaves
 must let the backlog exceed the limit; one that queues every link change
 must fill the credit under a flapping far end; one that retries a link
 notice only at later messages must never tell the silent link; a socket
-opened `{active, true}` must exceed the queue bound; and a `process`
-end without its type check must show the interface's raise. A
+opened `{active, true}` must exceed the queue bound; a `process`
+end without its type check must show the interface's raise; a pipe that
+reports the link `down` on its far end's end, the driver staying alive,
+must never answer the new far end; a driver that ends at once, or an
+interfaces supervisor at OTP's default intensity, must let the far end
+that is never there end the supervisors; and a link start that fails
+when its driver crashes under it must fail the stack's start. A
 virtual-clock test checks that every process's hint arrives at or after
 its deadline, that the clock holds one deadline per caller after a
 million arms, and that two runs of one script and seed give
@@ -3865,7 +3934,7 @@ byte-identical run.
 **The tap helper.** On the FreeBSD test host, frames of 60, 1,514 and
 9,014 bytes cross the helper both ways unchanged, end of file on its
 input ends it with status 0, and a tap destroyed under it ends it with
-status 1, after which the pipe reports the link `down`. *Seeded
+status 1, after which the pipe stops and the driver ends. *Seeded
 failure:* a helper that writes only the low byte of the length must
 fail the 1,514-byte case.
 

@@ -20,6 +20,20 @@ receive and transmit credits, the transmit backlog and the link state.
   refused notice is tried again after each later message and at a hint 10 ms later, so a
   link that goes down and stays silent is still told once there is room, and only the
   latest state is ever told.
+* **Ending.** The driver ends when its medium does, and its supervisor then starts the
+  link again, transport and all. Three things end it. A transport answers `{stop,
+  Reason}` from `event/2` when its medium is gone, such as a pipe whose far end ended,
+  and the driver ends with `{shutdown, Reason}`. The driver traps exits, and an exit
+  signal from anything linked to it but its supervisor (a port or socket of its medium)
+  ends it with `{shutdown, {linked, Reason}}`. A crash ends it with the crash's reason.
+* **The hold.** Once running, the driver lives a second (`?HOLD_MS`) at the least,
+  whatever ends it, except its supervisor's own stop (`shutdown`), which is at once.
+  A stop that comes sooner waits out the rest of the second with the driver still
+  answering and its link told `down`, so that the interface starting beside it attaches;
+  a crash that comes sooner waits in `terminate/2`. A medium that fails at every start
+  therefore restarts its link at most once a second, and `starts_within/1` bounds the
+  restarts a supervisor above can count. A transport whose `init` fails is not held: it
+  never ran, and its start fails.
 * **Transmitting.** A sender hands `{transmit, Frames}` against the transmit credit, one
   unit per frame. Each frame's unit is taken when the frame leaves the driver, sent or
   dropped, not when its message arrives, so the credit bounds the mailbox and the backlog
@@ -32,12 +46,14 @@ either and only checks a frame's type and length.
 
 -behaviour(gen_server).
 
--export([start_link/3, attach/2, counters/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
+-export([start_link/3, attach/2, counters/1, starts_within/1]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, format_status/1]).
 
 -export_type([link_info/0, event/0]).
 
 -define(RETRY_US, 10000).
+%% How long a driver lives at the least: an end sooner waits out the rest.
+-define(HOLD_MS, 1000).
 
 -doc """
 What a transport tells of its medium at `init`: the link and link-layer address, the MTU,
@@ -60,7 +76,7 @@ room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`
                | {dropped, Reason :: atom()}.
 
 -callback init(Config :: map()) -> {ok, link_info(), T :: term()} | ignore | {error, Reason :: term()}.
--callback event(Msg :: term(), T) -> {[event()], T} when T :: term().
+-callback event(Msg :: term(), T) -> {[event()], T} | {stop, Reason :: term()} when T :: term().
 -callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}
     when T :: term().
 
@@ -68,6 +84,8 @@ room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`
                 t :: term(),
                 info :: link_info(),
                 tx :: erx_net_credit:credit(),
+                started :: integer(),    % erlang:monotonic_time() at init, in native units
+                ending = none :: none | {shutdown, term()},  % the end a stop waits to make
                 iface = none :: none | {pid(), reference(), erx_net_credit:credit()},
                 backlog = queue:new() :: queue:queue(erx_net_frame:frame()),
                 blocked = false :: boolean(),
@@ -95,6 +113,18 @@ information and the transmit credit every sender hands frames against.
 attach(Driver, RxCredit) ->
     gen_server:call(Driver, {attach, RxCredit}, infinity).
 
+-doc """
+The most starts of one link that a supervisor counting restarts over `Period` seconds
+can see from its drivers' ends, as an intensity that such starts never exceed. OTP's
+supervisor keeps a restart while its whole second is within `Period` of the latest
+one's, so the restarts it counts at once span less than `Period + 1` seconds; two starts
+of a link are a hold apart at the least, so at most `ceil((Period + 1) s / hold)` of
+them fit, and the supervisor gives up only at one more than its intensity.
+""".
+-spec starts_within(pos_integer()) -> pos_integer().
+starts_within(Period) ->
+    ((Period + 1) * 1000 + ?HOLD_MS - 1) div ?HOLD_MS.
+
 -doc "The driver's drop counters, by reason.".
 -spec counters(pid()) -> #{atom() => pos_integer()}.
 counters(Driver) ->
@@ -104,10 +134,12 @@ counters(Driver) ->
 
 -doc false.
 init({Name, Transport, Config}) ->
+    Started = erlang:monotonic_time(),
+    process_flag(trap_exit, true),
     case Transport:init(Config) of
         {ok, #{state := Link, tx_limit := Limit} = Info, T} ->
             ok = erx_net_tables:register_driver(Name, self()),
-            {ok, #state{transport = Transport, t = T, info = Info,
+            {ok, #state{transport = Transport, t = T, info = Info, started = Started,
                         tx = erx_net_credit:new(Limit), latest = Link, told = Link}};
         ignore ->
             ignore;
@@ -130,8 +162,42 @@ handle_cast(_Msg, S) ->
     {noreply, S}.
 
 -doc false.
+handle_info({?MODULE, held}, #state{ending = {shutdown, _} = End} = S) ->
+    {stop, End, S};
 handle_info(Msg, S0) ->
-    {noreply, tell_link(message(Msg, S0))}.
+    case message(Msg, S0) of
+        {stop, Reason} -> end_after_hold({shutdown, Reason}, S0);
+        S -> {noreply, tell_link(S)}
+    end.
+
+%% A crash before the driver has lived its hold waits out the rest here; the supervisor's
+%% stop ends it at once. The hold is on the host's clock, not erx_net_clock's, since what
+%% it paces is the supervisor's, which counts the host's seconds.
+-doc false.
+terminate(shutdown, _S) ->
+    ok;
+terminate(_Reason, S) ->
+    receive after max(held_in(S), 0) -> ok end.
+
+%% Ends the driver with End once it has lived its hold. Sooner, it keeps answering with its
+%% link down until the hold is over: an interface starting beside it still attaches, so its
+%% link's start completes. The first end decided is the one made.
+end_after_hold(_End, #state{ending = {shutdown, _}} = S) ->
+    {noreply, S};
+end_after_hold(End, S) ->
+    case held_in(S) of
+        Left when Left > 0 ->
+            _ = erlang:send_after(Left, self(), {?MODULE, held}),
+            {noreply, tell_link(S#state{ending = End, latest = down})};
+        _ ->
+            {stop, End, S}
+    end.
+
+%% Milliseconds until the driver has lived its hold, rounded up so that a wait of that
+%% long never ends short of it; zero or less once it has.
+held_in(#state{started = Started}) ->
+    Lived = erlang:convert_time_unit(erlang:monotonic_time() - Started, native, microsecond),
+    (?HOLD_MS * 1000 - Lived + 999) div 1000.
 
 %% A crash report names the frames the driver held by their count, never their bytes, which
 %% are senders' data and the network's.
@@ -146,15 +212,21 @@ format_status(Status) ->
 
 %% --- One message -----------------------------------------------------------------
 
+%% The state after one message, or `{stop, Reason}` when the message ends the medium.
+
 message({transmit, Frames}, #state{backlog = Backlog} = S) when is_list(Frames) ->
     drain(S#state{backlog = queue:join(Backlog, queue:from_list(Frames))});
 message({erx_net_clock, hint}, S) ->
     S#state{armed = infinity};
 message({'DOWN', Ref, process, _, _}, #state{iface = {_, Ref, _}} = S) ->
     S#state{iface = none};
+message({'EXIT', _Medium, Reason}, _S) ->
+    {stop, {linked, Reason}};
 message(Msg, #state{transport = Transport, t = T0} = S) ->
-    {Events, T} = Transport:event(Msg, T0),
-    lists:foldl(fun event/2, S#state{t = T}, Events).
+    case Transport:event(Msg, T0) of
+        {stop, _Reason} = Stop -> Stop;
+        {Events, T} -> lists:foldl(fun event/2, S#state{t = T}, Events)
+    end.
 
 event({frames, []}, S) ->
     S;
@@ -165,6 +237,8 @@ event({frames, Frames}, #state{iface = {Pid, _, Rx}} = S) ->
         ok -> S;
         full -> count(no_room, length(Frames), S)
     end;
+event({link, _}, #state{ending = {shutdown, _}} = S) ->
+    S;
 event({link, State}, S) when State =:= up; State =:= down ->
     S#state{latest = State};
 event(writable, S) ->

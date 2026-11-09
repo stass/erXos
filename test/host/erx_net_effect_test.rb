@@ -95,6 +95,20 @@ class ErxNetEffectTest < Minitest::Test
     # A socket opened {active, true}.
     udp_end_bounds_the_driver_queue_against_a_stranger: [
       'erx_net_pipe', ['{ip, LocalIp}, {active, ?ACTIVE}]', '{ip, LocalIp}, {active, true}]']
+    ],
+    # A driver that stays alive on its far end's end, the link down for good.
+    far_end_end_restarts_the_link: [
+      'erx_net_pipe',
+      ["event({'DOWN', Ref, process, _, Reason}, #process{ref = Ref}) ->\n    {stop, {far_end, Reason}};",
+       "event({'DOWN', Ref, process, _, _Reason}, #process{ref = Ref} = T) ->\n    {[{link, down}], T};"]
+    ],
+    # A driver with no hold to speak of: a far end that is never there restarts its link at once.
+    far_end_never_there_spins_no_supervisor: [
+      'erx_net_driver', ['-define(HOLD_MS, 1000).', '-define(HOLD_MS, 1).']
+    ],
+    # A link start that fails when its driver ends under it: the stack's own start fails.
+    crash_at_start_spins_no_supervisor: [
+      'erx_net_sup', ['false -> {ok, Sup}', 'false -> stop_link(Sup, Error)']
     ]
   }.freeze
 
@@ -103,5 +117,13 @@ class ErxNetEffectTest < Minitest::Test
       output = refute_erx_net_eunit(:erx_net_driver_tests, fault: { mod => fault })
       assert_match(/#{name}/, output)
     end
+  end
+
+  # The interfaces supervisor at OTP's default intensity, below what a held link reaches.
+  def test_seeded_fault_fails_far_end_never_there_at_the_default_intensity
+    output = refute_erx_net_eunit(:erx_net_driver_tests, fault: {
+      'erx_net_sup' => ['Intensity = length(Interfaces)', 'Intensity = 1 + 0 * length(Interfaces)']
+    })
+    assert_match(/far_end_never_there_spins_no_supervisor/, output)
   end
 end
