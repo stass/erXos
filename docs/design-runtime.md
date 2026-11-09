@@ -1502,10 +1502,11 @@ authority; a process's own alias, encoded for a peer, exports it with
 primitive conforming to [FIPS
 197](https://doi.org/10.6028/NIST.FIPS.197-upd1), with a constant-time
 portable C implementation and a matching hardware path where available.
-The candidate is the reviewed, dependency-free MIT
-[`ctaes`](https://github.com/bitcoin-core/ctaes) module; implementation
-selection, source review, origin/hash pinning and known-answer tests are
-required before this feature is enabled. It links no OpenSSL into the
+The portable implementation is the reviewed, dependency-free MIT
+[`ctaes`](https://github.com/bitcoin-core/ctaes) module, in the tree as
+erXos's code at a pinned commit (`ctaes/ORIGIN.md`); FIPS 197's known
+answers and agreement with OpenSSL test it, and the hardware path must
+agree with it. It links no OpenSSL into the
 system domain and defines no custom cipher. Its complete output is used,
 without truncation. `tools/erx bench erts-local` measures the portable and
 hardware paths against stock `make_ref/0`; on a CPU without the AES
@@ -3588,9 +3589,8 @@ libraries OTP bundles under their own
 licences ([The inventory](#the-inventory)), and toybox 0.8.15 with `wak`
 (0BSD), in the tree as erXos's code. The Open POSIX Test Suite is a test
 tool, fetched and built out of tree, never part of an image.
-The reference primitive's candidate is `ctaes` (MIT), selected, reviewed
-and pinned before reference hardening is enabled, as
-[Unguessable references](#unguessable-references) requires. sDDF is a
+The reference primitive is `ctaes` (MIT), reviewed and pinned in the
+tree, as [Unguessable references](#unguessable-references) requires. sDDF is a
 model and an oracle for drivers, nothing imported
 ([design.md](design.md#dependencies)).
 

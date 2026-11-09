@@ -289,6 +289,19 @@ layout erx_frame_header wire_le 4 8
   field ctl_len u32 0
   field payload_len u32 4
 
+# A reference's identity (docs/design-runtime.md, "Unguessable references").
+# The block a domain's reference key permutes with AES-128 holds the source
+# ordinal of the thread that makes the reference and that source's 96-bit
+# counter, its low word first; the block the permutation gives is the
+# reference's four identity words. Every field is little-endian.
+limit ref_words u32 4
+limit ref_key_bytes u32 16
+layout erx_ref_block wire_le 4 16
+  field source u32 0
+  field counter u32 4 count 3
+layout erx_ref_identity wire_le 4 16
+  field id u32 0 count 4
+
 layout erx_runtime_limits wire_le 8 64
   field max_frame u32 0
   field max_message_heap u32 4

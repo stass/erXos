@@ -32,6 +32,7 @@ module Erx
   # Diagnostics carry raw names; the CLI's sink escapes them (Terminal.puts).
   class Checks
     IMPORTS = %w[
+      ctaes
       display/libmemdraw
       fiasco/bootstrap
       fiasco/drivers-frst

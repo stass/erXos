@@ -45,6 +45,9 @@
     }},
     {"path": "littlefs", "notices": [], "grants": {
       "BSD-3-Clause": [{"path": "littlefs/LICENSE.md", "sha256": "0cb4ff1daf5fdc1359c6a6ee3116092f08fc100c9d58b1b77ab17bfd801f856d"}]
+    }},
+    {"path": "ctaes", "notices": [], "grants": {
+      "MIT": [{"path": "ctaes/COPYING", "sha256": "705391f5c3000c942b63c028977a372a5fb12eb0abc6210b3d835115e2544a06"}]
     }}
   ]
 }

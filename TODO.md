@@ -2555,6 +2555,14 @@ it; git history is the record of completed work.
   the boot probe, since the present evidence is a forum thread
   ([design-runtime.md](docs/design-runtime.md#unguessable-references),
   [design-platforms.md](docs/design-platforms.md)).
+* [Medium] runtime, the reference permutation's hardware path:
+  `erx_ref_permute` (`otp/erts/emulator/sys/erxos/erx_ref.c`) is ctaes's
+  portable AES-128 alone. Write the hardware path the design names (the
+  Arm cryptography extension's AES instructions where the CPU has them),
+  settle how a user-mode runtime learns that the CPU has them, test it
+  against the portable path over `test/host/erx_ref_test.rb`'s vectors,
+  and record both paths with `tools/erx bench erts-local`
+  ([design-runtime.md](docs/design-runtime.md#unguessable-references)).
 * [Medium] runtime and live, standard I/O across domains: every other
   domain's standard I/O goes through Erlang's I/O protocol to a group
   leader in the system domain, whose requests carry the writing domain's
