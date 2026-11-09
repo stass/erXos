@@ -397,6 +397,9 @@ module Erx
         runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/erx_tcp_explore_test.rb')],
                    name: 'explore-erx-tcp', deadline: 900, chdir: ROOT,
                    env: environment.merge('ERX_TCP_EXPLORE' => 'full'))
+        runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/erx_hostlink_session_test.rb')],
+                   name: 'explore-erx-hostlink-session', deadline: 900, chdir: ROOT,
+                   env: environment.merge('ERX_EXPLORE_DEPTH' => 'full'))
       end
       require_relative 'fuzz/run_pack'
       Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')

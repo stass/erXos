@@ -515,7 +515,8 @@ rectangle: Dy(r) rows of `bytesperline(r, depth)` bytes each, where
 depth is that of the image's channel and `bytesperline` is 9front's
 formula: the bytes from the one holding the row's first pixel through
 the one holding its last, with bytes aligned at x = 0 on both sides of it
-(`erx_draw_image:bytes_per_line/2`). `y` carries them raw, so its
+(`erx_draw_image:bytes_per_line/2`). A negative x follows the same formula, 9front's, which
+rounds the byte holding the first pixel toward minus infinity, so no separate case exists. `y` carries them raw, so its
 payload is their count. `Y` carries image(6)'s compressed form, a
 sequence of codes each of which is a literal run (a byte c of 128 or
 more, then c-127 bytes as they are) or a back-reference (a byte c below

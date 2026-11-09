@@ -155,7 +155,9 @@ it; git history is the record of completed work.
 * [Medium] BeamAsm, `beam/jit/beam_jit_main.cpp` (`pick_allocator`): JitAllocator's first block is 64 MiB (ERTS's
   `block_size` of 32 MiB, doubled), and the stopgap commits a JIT object's pages when it is created, so every
   BeamAsm domain spends 64 MiB on code space before it loads a module. Upstream's reason for large blocks is file
-  descriptors, which erXos does not spend; pick a small block under `__erxos__` and measure the boot.
+  descriptors, which erXos does not spend. Make the first block a per-image limit in the image manifest, read by
+  the runtime at start, instead of the constant `params.block_size = 32 << 20` in `pick_allocator`; G5's
+  measurements are in [research-g5-beamasm.md](docs/research-g5-beamasm.md).
 * [Low] BeamAsm, `sys/erxos/erx_jit_memory.c` (`erx_jit_memory_unmap`, `erx_jit_memory_map`): an unmap whose second
   release fails has already removed the first alias, against its header's "a refused call changes nothing", and a
   failed handle close after both maps loses the handle; the alias probe hand-encodes its return instruction.
@@ -398,7 +400,10 @@ it; git history is the record of completed work.
   only against `erx_draw_ref`. Build it, run `erx_memdraw`'s operations and the shapes against it, and treat each
   of erXos's edits listed in `display/libmemdraw/ORIGIN.md` as a documented difference with a test. One of those
   edits is an upstream bug (`readbyte`'s alpha-only read of a replicated grey-and-alpha mask wrote grey into the
-  alpha buffer): a candidate report to 9front.
+  alpha buffer): the item below reports it.
+* [Low] display, `display/libmemdraw/draw.c` (`readbyte`): report the upstream bug to 9front. Under an alpha-only read
+  of a replicated grey-and-alpha mask, `readbyte` wrote each pixel's grey into the alpha buffer; erXos's copy fixes it
+  (marked erXos, recorded in `display/libmemdraw/ORIGIN.md`). The owner sends the report.
 * [Medium] `display/memdraw/erx_memdraw_nif.c`, [Draw messages](docs/design-display.md#draw-messages): the move to a
   dirty scheduler counts only the clipped destination's bytes, so two calls that cost more stay on a normal scheduler:
   `alloc`, whose fill writes the whole image, and a draw whose mask, or replicated source, is the destination, which
@@ -3540,6 +3545,12 @@ document's "residual risks accepted" paragraph.
   RFC 6191's timestamp rule with the sequence rule; and a sender that knows the sequence
   numbers keeps TIME-WAIT alive with retransmitted FINs, within the grant's `time_wait`
   limit (`erx_tcp_icmp`, `erx_tcp_timewait`).
+
+* [Medium] domains, the funnel (`liberx/erx_funnel.c`, `otp/erts/emulator/sys/erxos/erx_lane_drv.c`): until RT8
+  adds the queue quota (design-runtime.md edit 15), the funnel delivers every authorised frame whatever the target
+  process already holds queued, so a peer can grow any process's queue it can name without bound, and two domains
+  that send toward each other in a cycle grow each other's queues with nothing to stop them. RT8's quota leaves the
+  next frame in the lane at a process at its quota; the stopgap has no bound here.
 
 ## Planned features
 
