@@ -346,19 +346,18 @@ it; git history is the record of completed work.
     does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key
     means its up was lost, and keep held keys per device, cleared when the device goes away.
 * [Medium] `erlang/apps/erx_display/src/erx_vt.erl`, [The terminal
-  emulator](docs/design-display.md#the-terminal-emulator): the core is built without the OSC 8 link and
-  input-context grammar (an OSC 8 string other than a closing ends the open link and is counted as `link`, its
-  text plain; the reader of `erx:` links must be `erx_present:parse_uri/1`, never a generic percent decoder),
-  `key/2`, `dump/1`, and the libvterm differential harness of [The oracle](docs/design-display.md#the-oracle).
-  The terminal generator writes the width table for Erlang only, not musl's `wcwidth` tables or `erx_width`.
-  Details the tables leave open, which the oracle should settle and the design then state: CAN and SUB drop an
-  unfinished string without dispatching it; DEL in an OSC string and a code point from U+00A0 inside an escape
-  or control sequence are ignored; setting or resetting DECOM homes the cursor; resetting DECAWM, and a resize,
-  clear the pending wrap; IL and DL move the cursor to column 1; VPA is relative to the top margin in origin
-  mode; DL and resizing never save rows except a shorter resize; `CSI ? 1049 h` on the alternate screen and
-  `l` on the main one do nothing; RIS keeps the ignored counters; DECSTR keeps the cursor's place; erasing a
-  row's end clears its `Wrapped` flag; DEC Special Graphics maps `_` to U+00A0; the scrollback charges every
-  row at least one cell, so the cell bound also bounds rows.
+  emulator](docs/design-display.md#the-terminal-emulator): the core is built without `key/2`. The oracle test
+  (`test/host/erx_vt_oracle_test.rb`, libvterm 0.3.3 with `test/vt/vterm_dump.c`) runs only the per-row cases
+  and the open details of `test/vt/corpus.rb`: the exhaustive enumeration, the streams generated from the
+  tables' grammar, the `prim_tty` and toybox recordings, `vttest`'s core (pin `vttest` 20251205, SHA-256
+  `cd6886f9aefe6a3f6c566fa61271a55710901a71849c630bf5376aa984bf77cc` as Homebrew records it, and write the
+  pseudo-terminal driver) and the coverage check of [Verification](docs/design-display.md#verification-and-testing)
+  are not built. Three entries of `test/vt/differences.txt` keep `erx_vt`'s choice where the references read did
+  not settle it, and want xterm's source or DEC STD 070 checked: HT at the last column with a wrap pending,
+  U+00A0 inside a control sequence, and `CSI ? 1049 h` on the alternate screen. The dump holds no scrollback,
+  so what DL and a resize save, and the scrollback's charge per row, are checked only by the EUnit cases.
+  The terminal generator writes the width table for Erlang and `include/erx/vt_width.h`, not musl's
+  `wcwidth` tables or `erx_width`.
 * [Medium] `erlang/apps/erx_display/src/erx_vt.erl`, `full_reset/1`, `soft_reset/1` and `resize/3`: what RIS,
   DECSTR and a resize keep is a list of `#vt{}` fields at each site, so a new field (the link grammar's state,
   `key/2`'s) must be remembered at each. Nest what RIS resets (grids, cursor, pen, modes, margins, tabs,

@@ -1708,6 +1708,32 @@ The terminal generator also reads `abi/termcap` and writes
 capabilities. Nothing parses termcap at run time on erXos, so the file
 is no input to fuzz.
 
+#### Details the tables leave open
+
+The oracle settles these, each with a corpus case, and where libvterm
+differs `test/vt/differences.txt` gives the reason:
+
+* CAN and SUB drop an unfinished string without dispatching it; DEL in
+  an OSC string is ignored, and so is a code point from U+00A0 inside an
+  escape or control sequence, which then completes;
+* a C1 control encoded in UTF-8 acts as a C1 control;
+* setting or resetting DECOM homes the cursor; DECALN homes it too;
+* resetting DECAWM clears the pending wrap, so the next character
+  overwrites the last column; HT clears it too;
+* IL and DL move the cursor to column 1, as DEC's VT510 manual says;
+* VPA and the cursor position report are relative to the top margin in
+  origin mode;
+* DL and a resize save no rows to the scrollback, except a shorter
+  resize, and the scrollback charges every row at least one cell, so
+  the cell bound also bounds its rows;
+* `CSI ? 1049 h` on the alternate screen and `l` on the main one do
+  nothing;
+* RIS keeps the ignored counters; DECSTR keeps the cursor's place;
+* erasing a row's end clears its `Wrapped` flag;
+* writing over either half of a width-2 cell blanks the other half;
+* DEC Special Graphics maps `_` to U+00A0, the blank of the VT100's
+  table.
+
 #### The oracle
 
 `erx_vt` is compared with **libvterm** 0.3.3, Paul Evans's terminal
@@ -1716,10 +1742,11 @@ Neovim. It is a test oracle only, not a dependency: fetched at its pinned
 release and SHA-256 and built out of tree for the host, with a harness of
 erXos's own, `test/vt/vterm_dump.c`, that feeds it a corpus and writes
 the screen after each checkpoint in the dump format `erx_vt:dump/1` also
-writes: each row's cells with their code points, width, flags and
-colours, the cursor and its visibility, and the replies since the last
-checkpoint. libvterm is built with its `WCWIDTH_FUNCTION` hook set to a
-C function generated from `erx_vt`'s width table, so the comparison
+writes: each row's cells with their code points, flags and
+colours, a width-2 cell's right half marked, the cursor and its visibility, and the replies since the last
+checkpoint. libvterm is built without its `unicode.c`, whose two width
+functions the harness supplies from `include/erx/vt_width.h`, generated
+from `erx_vt`'s width table, so the comparison
 covers everything but the widths, which a separate test re-derives from
 the Unicode data. libvterm is chosen because it is a library with no
 process, clock or host locale in the way: a corpus gives the same dump on

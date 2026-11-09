@@ -14,6 +14,7 @@ class TerminalGenerationTest < Minitest::Test
                         otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt
                         otp/lib/stdlib/uc_spec/EastAsianWidth.txt].freeze
   WIDTH_MODULE = 'erlang/apps/erx_display/src/erx_vt_width.erl'
+  WIDTH_HEADER = 'include/erx/vt_width.h'
   FIXTURE_REVIEW = { 'rules' => [], 'default_license' => 'Unicode-3.0',
                      'default_evidence' => 'terminal generation fixture' }.freeze
 
@@ -174,6 +175,15 @@ class TerminalGenerationTest < Minitest::Test
       refute_equal expected, table_widths(Erx::TerminalRules.plan(root: root).fetch(WIDTH_MODULE))
     end
   end
+
+# The C width function libvterm is built with holds the same widths, so the
+# oracle comparison of erx_vt never differs on a width.
+def test_the_c_width_table_agrees_with_the_unicode_data
+  widths = Array.new(0x110000, 1)
+  self.class.output_plan.fetch(WIDTH_HEADER)
+      .scan(/\{ 0x(\h+), 0x(\h+), ([02]) \}/) { |first, last, width| widths.fill(width.to_i, first.hex..last.hex) }
+  assert_equal derived_widths, widths
+end
 
   private
 

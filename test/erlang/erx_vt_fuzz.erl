@@ -47,15 +47,18 @@ verify(VT, Effects, Input) ->
         {error, Invariant} -> fail(Invariant, Input)
     end,
     within_size(VT, Input),
+    links_plain(VT, Input),
     [fail(reply_not_fixed, {Reply, Input}) || {reply, Reply} <- Effects, not fixed_reply(Reply, VT)],
     ok.
 
 %% G8: apart from the scrollback, which check/1 bounds by its cells, the
 %% state is bounded by the grid's size: two grids and the last row written,
-%% the tab stops, and a constant for the parser, the modes and the rest.
+%% the tab stops, and a constant for the parser, the modes and the rest,
+%% the link table among them: 256 links of at most an OSC string each.
 within_size(VT, Input) ->
     {Cols, Rows} = erx_vt:size(VT),
-    Bound = (2 * Rows + 1) * (Cols * ?CELL_WORDS + 8) + 2 * Cols + 600,
+    Links = 256 * (4096 div 8 + 16),
+    Bound = (2 * Rows + 1) * (Cols * ?CELL_WORDS + 8) + 2 * Cols + 600 + Links,
     Words = erts_debug:flat_size(VT) - erts_debug:flat_size(erx_vt:scrollback(VT)),
     case Words =< Bound of
         true -> ok;
@@ -73,6 +76,22 @@ fixed_reply(Reply, VT) ->
         nomatch -> false
     end.
 
+%% Every cell's link is none or a presentation type and a printable ASCII
+%% text: what link_at/3 hands a click came through erx_present.
+links_plain(VT, Input) ->
+    {Cols, Rows} = erx_vt:size(VT),
+    [check_link(erx_vt:link_at(VT, Row, Col), Input) || Row <- lists:seq(1, Rows), Col <- lists:seq(1, Cols)],
+    ok.
+
+check_link(none, _Input) ->
+    ok;
+check_link({Type, Text}, Input) ->
+    Plain = lists:all(fun(B) -> B >= 16#20 andalso B =< 16#7E end, binary_to_list(Text)),
+    case erx_present:type(Type) =/= error andalso Plain of
+        true -> ok;
+        false -> fail(link_not_plain, {Type, Text, Input})
+    end.
+
 fail(What, Detail) -> error({fuzz_failure, What, Detail}).
 
 %%% The streams
@@ -85,7 +104,7 @@ pieces(Stream, From, []) -> [binary:part(Stream, From, byte_size(Stream) - From)
 pieces(Stream, From, [At | Rest]) -> [binary:part(Stream, From, At - From) | pieces(Stream, At, Rest)].
 
 token() ->
-    case rand:uniform(10) of
+    case rand:uniform(11) of
         1 -> text();
         2 -> text();
         3 -> control();
@@ -95,7 +114,8 @@ token() ->
         7 -> sgr();
         8 -> string();
         9 -> modes();
-        10 -> bytes()
+        10 -> bytes();
+        11 -> link()
     end.
 
 text() ->
@@ -135,6 +155,19 @@ string() ->
     Body = binary:copy(pick([<<"a">>, <<"\e">>, utf8(16#E9), <<7>>]), max(1, Length div 8 + rand:uniform(8))),
     Ender = pick([[7], "\e\\", utf8(16#9C), [16#18], "", "\ec"]),
     [Opener, binary:part(binary:copy(<<"x">>, Length), 0, Length), Body, Ender].
+
+%% OSC 8 strings of the link grammar and near it, sometimes a run of more
+%% links than the table holds.
+link() ->
+    Uri = pick([["erx:domain/", integer_to_list(rand:uniform(300))], "erx:module/3/lists", "erx:module/3/%252E",
+                "erx:module/3/a%2eb", "erx:module/3/%2501", "erx:pid/%3C0.1.0%3E", "erx:accept/domain,module",
+                "erx:accept/", "erx:accept/domain,", "erx:nothing/1", "erx:domain/", "https://example.com/", "",
+                ["erx:", bytes()], ["erx:domain/", binary:copy(<<"9">>, 4090 + rand:uniform(8))]]),
+    One = ["\e]8;", pick(["", "id=1", "a=b:c=d", "x;y"]), $;, Uri, pick(["\e\\", [7]])],
+    case rand:uniform(8) of
+        1 -> lists:duplicate(250 + rand:uniform(20), [One, "a"]);
+        _ -> One
+    end.
 
 modes() ->
     ["\e[?", lists:join($;, [pick(["1", "5", "6", "7", "8", "12", "25", "1049", "2004", "9"])

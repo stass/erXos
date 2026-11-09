@@ -17,7 +17,9 @@ module ErxVtFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_vt.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_vt_fuzz.erl')
-  WIDTH_MODULE = 'erlang/apps/erx_display/src/erx_vt_width.erl'
+  # The width table and erx_present, by which erx_vt reads erx: links, with erx_schema.
+  GENERATED = %w[erlang/apps/erx_display/src/erx_vt_width.erl erlang/apps/erx/src/generated/erx_present.erl
+                 erlang/apps/erx/src/generated/erx_schema.erl].freeze
   # A broken guarantee: the text that keeps it, what replaces it, and the property that
   # must then fail, as the target names it.
   Seed = Data.define(:text, :broken, :property)
@@ -32,7 +34,9 @@ module ErxVtFuzz
                                                      broken: 'list_to_tuple(Edited)',
                                                      property: 'wide_cell_unpaired'),
     'UTF-8 carried between calls' => Seed.new(text: 'more -> VT#vt{utf8 = Bytes}', broken: 'more -> VT',
-                                              property: 'split_differs')
+                                              property: 'split_differs'),
+    'the 256-link bound' => Seed.new(text: 'Kept = maps:remove(Id - ?MAX_LINKS, Links),', broken: 'Kept = Links,',
+                                     property: 'links_over_bound')
   }.freeze
   DEADLINE_SECONDS = '600'
 
@@ -59,9 +63,9 @@ module ErxVtFuzz
     Dir.mktmpdir('erx-vt-fuzz') do |work|
       module_path = File.join(work, 'erx_vt.erl')
       File.binwrite(module_path, module_text)
-      width = Erx::Generated.path(WIDTH_MODULE, root: ROOT)
+      generated = GENERATED.map { |path| Erx::Generated.path(path, root: ROOT) }
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-o', work,
-                                       width, module_path, TARGET_SOURCE, stdin_data: '')
+                                       *generated, module_path, TARGET_SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

@@ -19,7 +19,8 @@ module Erx
     INPUTS = %w[east_asian_width properties unicode_data].freeze
     OUTPUTS = %w[include/erx/terminal_ascii.h erlang/apps/erx/src/erx_text_tables.erl
                  tools/generated/terminal_tables.rb tools/generated/terminal_notices.json
-                 web/src/generated/terminal_tables.ts erlang/apps/erx_display/src/erx_vt_width.erl].freeze
+                 web/src/generated/terminal_tables.ts erlang/apps/erx_display/src/erx_vt_width.erl
+                 include/erx/vt_width.h].freeze
     # The licence of the Unicode inputs, which every generated table declares.
     LICENSE = 'Unicode-3.0'
     module_function

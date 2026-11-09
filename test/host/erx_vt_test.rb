@@ -16,7 +16,9 @@ class ErxVtTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_vt.erl')
-  WIDTH = Erx::Generated.path('erlang/apps/erx_display/src/erx_vt_width.erl', root: ROOT)
+  # The width table and erx_present, by which erx_vt reads erx: links, with erx_schema.
+  GENERATED = %w[erlang/apps/erx_display/src/erx_vt_width.erl erlang/apps/erx/src/generated/erx_present.erl
+                 erlang/apps/erx/src/generated/erx_schema.erl].map { |path| Erx::Generated.path(path, root: ROOT) }.freeze
   CASES = File.join(ROOT, 'test/erlang/erx_vt_tests.erl')
   DEADLINE = '300'
   Mutant = Data.define(:text, :broken, :property)
@@ -25,7 +27,10 @@ class ErxVtTest < Minitest::Test
                                       broken: "parse(#parser{state = osc} = P, 16#1B) ->\n    {P, []};\nparse(P, 16#1B) ->\n",
                                       property: /an_unterminated_osc_does_not_stop_a_reset/),
     region_saves_rows: Mutant.new(text: 'Save =:= save andalso Top =:= 1 andalso', broken: 'Save =:= save andalso',
-                                  property: /scroll_up_and_down/)
+                                  property: /scroll_up_and_down/),
+    overflow_keeps_link: Mutant.new(text: 'osc(link_overflow, VT) -> count(link, VT#vt{link = none});',
+                                    broken: 'osc(link_overflow, VT) -> count(link, VT);',
+                                    property: /an_overflowed_link_still_ends_the_open_one/)
   }.freeze
 
   def test_the_cases_pass_under_eunit
@@ -37,6 +42,8 @@ class ErxVtTest < Minitest::Test
   def test_a_string_that_ignores_escape_fails_the_reset_case = assert_mutant_fails(:string_ignores_escape)
 
   def test_saving_a_lower_region_fails_the_scroll_case = assert_mutant_fails(:region_saves_rows)
+
+  def test_an_overflowed_link_that_stays_open_fails_its_case = assert_mutant_fails(:overflow_keeps_link)
 
   private
 
@@ -58,7 +65,7 @@ class ErxVtTest < Minitest::Test
       File.binwrite(copy, module_text)
       flags = strict ? ['-Werror'] : []
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERLC'), *flags, '-o', work,
-                                       WIDTH, copy, CASES, stdin_data: '')
+                                       *GENERATED, copy, CASES, stdin_data: '')
       return [output, status] unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',

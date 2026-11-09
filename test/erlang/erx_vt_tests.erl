@@ -384,6 +384,48 @@ hyperlinks_test() ->
     ?assertEqual(none, erx_vt:link_at(Link, 1, 1)),
     ?assertEqual(none, element(4, cell(Link, 1, 1))).
 
+erx_links_test() ->
+    %% A link carries its type and decoded text to every cell written until
+    %% the next OSC 8 string; a closing ends it.
+    VT = run("\e]8;id=7;erx:domain/3\e\\ab\e]8;;\e\\c\e]8;;erx:module/3/lists\e\\d\e]8;;erx:domain/4\e\\e"),
+    ?assertEqual(#{}, erx_vt:ignored(VT)),
+    ?assertEqual({<<"domain">>, <<"3">>}, erx_vt:link_at(VT, 1, 2)),
+    ?assertEqual(none, erx_vt:link_at(VT, 1, 3)),
+    ?assertEqual({<<"module">>, <<"3/lists">>}, erx_vt:link_at(VT, 1, 4)),
+    ?assertEqual({<<"domain">>, <<"4">>}, erx_vt:link_at(VT, 1, 5)),
+    %% A link erx_present:parse_uri/1 refuses, a lower-case escape among
+    %% them, ends the open link and is counted.
+    Refused = run("\e]8;;erx:domain/3\e\\a\e]8;;erx:module/3/a%2eb\e\\b\e]8;;erx:nothing/3\e\\"),
+    ?assertEqual(2, ignored(Refused, link)),
+    ?assertEqual(none, erx_vt:link_at(Refused, 1, 2)).
+
+input_context_test() ->
+    %% A context replaces the types and opens no link; an empty one clears
+    %% it; one naming no presentation is counted and changes nothing.
+    VT = run("\e]8;;erx:accept/domain,module\e\\a\e]8;;erx:accept/domain,\e\\\e]8;;erx:accept/nothing\e\\"),
+    ?assertEqual([<<"domain">>, <<"module">>], erx_vt:context(VT)),
+    ?assertEqual(none, erx_vt:link_at(VT, 1, 1)),
+    ?assertEqual(2, ignored(VT, link)),
+    ?assertEqual([], erx_vt:context(run("\e]8;;erx:accept/domain\e\\\e]8;;erx:accept/\e\\"))),
+    ?assertEqual([], erx_vt:context(run("\e]8;;erx:accept/domain\e\\\ec"))).
+
+an_overflowed_link_still_ends_the_open_one_test() ->
+    VT = run(["\e]8;;erx:domain/3\e\\a\e]8;;erx:domain/", lists:duplicate(5000, $3), "\e\\b"]),
+    ?assertEqual({<<"domain">>, <<"3">>}, erx_vt:link_at(VT, 1, 1)),
+    ?assertEqual(none, erx_vt:link_at(VT, 1, 2)),
+    ?assertEqual(1, ignored(VT, link)).
+
+the_link_table_evicts_the_oldest_test() ->
+    %% 256 links after the first evict it: its cell becomes plain text, and
+    %% the cell of the newest still names its own link.
+    Links = [["\e]8;;erx:domain/", integer_to_list(N), "\e\\"] || N <- lists:seq(2, 257)],
+    VT = run(["\e]8;;erx:domain/1\e\\a", Links, "b"]),
+    ?assertEqual(ok, erx_vt:check(VT)),
+    ?assertEqual(none, erx_vt:link_at(VT, 1, 1)),
+    ?assertEqual({<<"domain">>, <<"257">>}, erx_vt:link_at(VT, 1, 2)),
+    Kept = run(["\e]8;;erx:domain/1\e\\a", tl(Links), "b"]),
+    ?assertEqual({<<"domain">>, <<"1">>}, erx_vt:link_at(Kept, 1, 1)).
+
 other_strings_are_consumed_and_counted_test() ->
     VT = run(["\e]52;c;eA==", ?BEL, "\ePq#0;2;0;0;0\e\\\e^pm\e\\\e_apc\e\\\eXsos\e\\", utf8([16#90]), "dcs",
               utf8([16#9C]), "x"]),

@@ -1,0 +1,481 @@
+# The differences of erx_vt from its oracle, libvterm 0.3.3, over test/vt/corpus.rb
+# (docs/design-display.md, "The oracle"), read by test/host/erx_vt_oracle_test.rb.
+# Each entry is a corpus case: its kind, documented (erx_vt's behaviour stands, as the
+# reason says) or upstream (a libvterm bug, the reference named), the reason, and
+# erx_vt's dump of the case, which erx_vt must give exactly. A case on which the two
+# terminals differ and that no entry lists fails the test, and so does an entry on
+# which they agree.
+
+case csi-L-none
+kind upstream
+reason IL moves the cursor to column 1, as DEC's VT510 manual says of IL ("the cursor is reset to
+reason the first column"); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 6b 6c 6d 6e 6f 70 71 72 73 74
+row 4 - 75 76 77 78 79 7a 30 31 32 33
+reply -
+end
+
+case csi-L-0
+kind upstream
+reason IL moves the cursor to column 1, as DEC's VT510 manual says of IL ("the cursor is reset to
+reason the first column"); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 6b 6c 6d 6e 6f 70 71 72 73 74
+row 4 - 75 76 77 78 79 7a 30 31 32 33
+reply -
+end
+
+case csi-L-1
+kind upstream
+reason IL moves the cursor to column 1, as DEC's VT510 manual says of IL ("the cursor is reset to
+reason the first column"); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 6b 6c 6d 6e 6f 70 71 72 73 74
+row 4 - 75 76 77 78 79 7a 30 31 32 33
+reply -
+end
+
+case csi-L-4
+kind upstream
+reason IL moves the cursor to column 1, as DEC's VT510 manual says of IL ("the cursor is reset to
+reason the first column"); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-L-10
+kind upstream
+reason IL moves the cursor to column 1, as DEC's VT510 manual says of IL ("the cursor is reset to
+reason the first column"); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-L-99
+kind upstream
+reason IL moves the cursor to column 1, as DEC's VT510 manual says of IL ("the cursor is reset to
+reason the first column"); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-M-none
+kind upstream
+reason DL moves the cursor to column 1, as DEC's VT510 manual says of DL; libvterm keeps the
+reason column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 76 77 78 79 7a 30 31 32 33
+row 3 - 34 35 36 37 38 39 41 42 43 44
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-M-0
+kind upstream
+reason DL moves the cursor to column 1, as DEC's VT510 manual says of DL; libvterm keeps the
+reason column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 76 77 78 79 7a 30 31 32 33
+row 3 - 34 35 36 37 38 39 41 42 43 44
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-M-1
+kind upstream
+reason DL moves the cursor to column 1, as DEC's VT510 manual says of DL; libvterm keeps the
+reason column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 76 77 78 79 7a 30 31 32 33
+row 3 - 34 35 36 37 38 39 41 42 43 44
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-M-4
+kind upstream
+reason DL moves the cursor to column 1, as DEC's VT510 manual says of DL; libvterm keeps the
+reason column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-M-10
+kind upstream
+reason DL moves the cursor to column 1, as DEC's VT510 manual says of DL; libvterm keeps the
+reason column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-M-99
+kind upstream
+reason DL moves the cursor to column 1, as DEC's VT510 manual says of DL; libvterm keeps the
+reason column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case csi-g-3
+kind documented
+reason HT at the last column with a wrap pending clears the pending wrap, so the next character
+reason overwrites the last column; libvterm keeps it pending. The references read do not settle
+reason it.
+dump
+size 10 4
+cursor 3 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 w 6b 6c 6d 6e 6f 70 71 72 73 54
+row 3 - 78 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case sgr-2
+kind documented
+reason erx_vt keeps dim (SGR 2); libvterm has no dim attribute.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41/d:-:- 42/d:-:- 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case sgr-21
+kind documented
+reason erx_vt ignores SGR 21; libvterm implements it as double underline.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 42 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case sgr-4:3
+kind documented
+reason erx_vt ignores the : sub-parameters of SGR, so 4:3 is not an underline; libvterm reads
+reason them.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 42 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case sgr-38:5:1
+kind documented
+reason erx_vt ignores the : sub-parameters of SGR, so 38:5:1 sets no colour; libvterm reads them.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 42 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case sgr-58;5;1
+kind documented
+reason erx_vt skips the colour arguments of SGR 58 (underline colour) as it does those of 38 and
+reason 48; libvterm does not know 58 and reads its arguments 5 and 1 as blink and bold.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 42 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case decset-5
+kind documented
+reason DECSCNM is the reverse_screen mode of erx_vt:modes/1, which erx_term applies when it draws;
+reason libvterm folds it into every cell's reverse attribute.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 42 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case esc-(0
+kind upstream
+reason DEC Special Graphics maps _ (5/15) to a blank, U+00A0, as the VT100 User Guide's table of
+reason the set shows; libvterm's DECdrawing table leaves _ unmapped.
+dump
+size 10 4
+cursor 3 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 w 6b 6c 6d 6e 25c6 2592 2500 2502 a0 41
+row 3 - 78 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case esc-#8
+kind upstream
+reason DECALN moves the cursor home, as DEC's VT510 manual says of DECALN; libvterm keeps the
+reason cursor where it was.
+dump
+size 10 4
+cursor 1 2 - shown
+row 1 - 78 45 45 45 45 45 45 45 45 45
+row 2 - 45 45 45 45 45 45 45 45 45 45
+row 3 - 45 45 45 45 45 45 45 45 45 45
+row 4 - 45 45 45 45 45 45 45 45 45 45
+reply -
+end
+
+case csi-s-u
+kind documented
+reason erx_vt implements SCOSC and SCORC (CSI s, CSI u), rows of the design's table; libvterm
+reason 0.3.3 ignores them.
+dump
+size 10 4
+cursor 2 7 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 78 71 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case c1-ind
+kind documented
+reason erx_vt acts on a C1 control encoded in UTF-8 (here U+0084, IND), as the design's parser
+reason does from any state; libvterm prints it as a character.
+dump
+size 10 4
+cursor 3 7 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 6f 70 71 72 73 74
+row 3 - 75 76 77 78 41 78 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case c1-csi
+kind documented
+reason erx_vt acts on a C1 control encoded in UTF-8 (here U+009B, CSI); libvterm prints it as a
+reason character.
+dump
+size 10 4
+cursor 2 5 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 41 78 6f 70 71 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case dsr-6-origin
+kind upstream
+reason In origin mode the cursor position report is relative to the top margin, as xterm and DEC's
+reason VT510 manual (CPR) report it; libvterm reports the absolute row.
+dump
+size 10 4
+cursor 3 3 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 6f 70 71 72 73 74
+row 3 - 75 78 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply 1b5b323b3252
+end
+
+case da2
+kind documented
+reason erx_vt does not answer DA2 (CSI > c), outside the design's tables; libvterm answers as a
+reason VT100 with firmware 100.
+dump
+size 10 4
+cursor 2 6 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 78 70 71 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case wide-overwrite-half
+kind documented
+reason Writing over the right half of a width-2 cell blanks its left half, so every width-2 cell
+reason is followed by its right half (the design's pairing invariant); libvterm leaves the left
+reason half showing the wide character.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 20 41 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case choice-nbsp-in-csi
+kind documented
+reason erx_vt ignores a code point from U+00A0 inside a control sequence and completes it;
+reason libvterm ends the sequence and prints U+FFFD. The references read do not settle it.
+dump
+size 10 4
+cursor 2 8 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 6f 41 78 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case choice-decawm-reset-pending
+kind upstream
+reason Resetting DECAWM clears the pending wrap, so the next character overwrites the last column,
+reason as xterm prints with wraparound off; libvterm still wraps.
+dump
+size 10 4
+cursor 2 10 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 6f 70 71 72 73 78
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case choice-il-column
+kind upstream
+reason IL moves the cursor to column 1 (VT510 manual, IL); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 20 20 20 20 20 20 20 20 20
+row 3 - 6b 6c 6d 6e 6f 70 71 72 73 74
+row 4 - 75 76 77 78 79 7a 30 31 32 33
+reply -
+end
+
+case choice-dl-column
+kind upstream
+reason DL moves the cursor to column 1 (VT510 manual, DL); libvterm keeps the column.
+dump
+size 10 4
+cursor 2 2 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 78 76 77 78 79 7a 30 31 32 33
+row 3 - 34 35 36 37 38 39 41 42 43 44
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case choice-1049h-on-alt
+kind documented
+reason CSI ? 1049 h on the alternate screen does nothing; libvterm clears the alternate screen
+reason again. The references read do not settle it.
+dump
+size 10 4
+cursor 2 9 - shown
+row 1 - 20 20 20 20 20 20 20 20 20 20
+row 2 - 20 20 20 20 41 42 43 78 20 20
+row 3 - 20 20 20 20 20 20 20 20 20 20
+row 4 - 20 20 20 20 20 20 20 20 20 20
+reply -
+end
+
+case choice-1049l-on-main
+kind upstream
+reason CSI ? 1049 l on the main screen does nothing; libvterm restores a cursor that was never
+reason saved, hidden and black on black, which no reference describes.
+dump
+size 10 4
+cursor 2 7 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e 41 78 71 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+
+case choice-dec-graphics-underscore
+kind upstream
+reason DEC Special Graphics maps _ (5/15) to a blank, U+00A0 (VT100 User Guide); libvterm leaves
+reason it unmapped.
+dump
+size 10 4
+cursor 2 7 - shown
+row 1 - 61 62 63 64 65 66 67 68 69 6a
+row 2 - 6b 6c 6d 6e a0 78 71 72 73 74
+row 3 - 75 76 77 78 79 7a 30 31 32 33
+row 4 - 34 35 36 37 38 39 41 42 43 44
+reply -
+end
+

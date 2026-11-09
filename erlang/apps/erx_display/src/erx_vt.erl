@@ -32,7 +32,7 @@ above holds.
 """.
 
 -export([new/2, feed/2, resize/3, paste/2, link_at/3]).
--export([size/1, grid/1, cursor/1, modes/1, scrollback/1, ignored/1, check/1]).
+-export([size/1, grid/1, cursor/1, modes/1, context/1, scrollback/1, ignored/1, check/1, dump/1]).
 -export_type([state/0, effect/0, cell/0, row/0]).
 
 -type effect() :: {reply, binary()}     % bytes for the tty's input
@@ -77,7 +77,9 @@ above holds.
     params = [] :: [0..?MAX_PARAM],            % reversed
     count = 0 :: 0..?MAX_PARAMS,
     current = none :: none | empty | 0..?MAX_PARAM,
-    osc = <<>> :: binary() | overflow
+    %% Past the 4 KiB bound the text is dropped; an OSC 8 string keeps
+    %% that it was one, since it still ends the open link.
+    osc = <<>> :: binary() | overflow | link_overflow
 }).
 
 -record(modes, {
@@ -232,6 +234,62 @@ scrollback(#vt{scrollback = Queue}) -> queue:to_list(Queue).
 -doc "How many sequences of each kind were parsed and dropped.".
 -spec ignored(state()) -> #{atom() => pos_integer()}.
 ignored(#vt{ignored = Ignored}) -> Ignored.
+
+-doc "The presentation types of the input context, which links of those types highlight.".
+-spec context(state()) -> [binary()].
+context(#vt{context = Context}) -> Context.
+
+-doc """
+The shown screen in the dump format of design-display.md's oracle, which
+test/vt/vterm_dump.c writes for libvterm too, ASCII:
+
+    size COLS ROWS
+    cursor ROW COL WRAP VISIBLE    WRAP: wrap | -, VISIBLE: shown | hidden
+    row N W CELL ...               W: w if the row continues into the next
+
+A cell is its code points in lower-case hex joined by `+`, `-` for the
+right half of a width-2 cell, then, unless its attributes are the
+default, `/FLAGS:FG:BG`: FLAGS from `bdikrhsu` (bold, dim, italic, blink,
+inverse, invisible, strike, underline) or `-`, and each colour `-`, an
+index, or `#rrggbb`. The last row carries no W, which libvterm keeps on
+the row below.
+""".
+-spec dump(state()) -> binary().
+dump(#vt{cols = Cols, rows = Rows, cursor = {Row, Col, Pending}, modes = M} = VT) ->
+    Grid = shown(VT),
+    Lines = [io_lib:format("size ~b ~b\n", [Cols, Rows]),
+             io_lib:format("cursor ~b ~b ~s ~s\n",
+                           [Row, Col, mark(Pending, "wrap"), visibility(M#modes.visible)])
+             | [dump_row(N, element(N, Grid), N < Rows) || N <- lists:seq(1, Rows)]],
+    iolist_to_binary(Lines).
+
+dump_row(N, {Wrapped, Cells}, NotLast) ->
+    [io_lib:format("row ~b ~s", [N, mark(Wrapped andalso NotLast, "w")]),
+     [[$\s, dump_cell(Cell)] || Cell <- tuple_to_list(Cells)], $\n].
+
+mark(true, Text) -> Text;
+mark(false, _Text) -> "-".
+
+visibility(true) -> "shown";
+visibility(false) -> "hidden".
+
+dump_cell(wide_tail) ->
+    "-";
+dump_cell({Chars, _Width, Attrs, _Link}) ->
+    Points = lists:join($+, [integer_to_list(P, 16) || P <- Chars]),
+    case Attrs of
+        ?DEFAULT_ATTRS -> string:lowercase(Points);
+        {Flags, Fg, Bg} ->
+            Letters = [L || {L, F} <- [{$b, bold}, {$d, dim}, {$i, italic}, {$k, blink}, {$r, inverse},
+                                       {$h, invisible}, {$s, strike}, {$u, underline}],
+                            lists:member(F, Flags)],
+            [string:lowercase(Points), $/, case Letters of [] -> "-"; _ -> Letters end,
+             $:, dump_colour(Fg), $:, dump_colour(Bg)]
+    end.
+
+dump_colour(default) -> "-";
+dump_colour(N) when is_integer(N) -> integer_to_list(N);
+dump_colour({R, G, B}) -> io_lib:format("#~2.16.0b~2.16.0b~2.16.0b", [R, G, B]).
 
 -doc "`ok` if the state holds every invariant of the design, else the first it breaks.".
 -spec check(state()) -> ok | {error, atom()}.
@@ -391,8 +449,10 @@ csi_action(P, Final) ->
 
 %% Near the bound the next code point, at most four bytes, may cross it.
 osc_append(overflow, _Point) -> overflow;
+osc_append(link_overflow, _Point) -> link_overflow;
 osc_append(Text, Point) when byte_size(Text) >= ?MAX_OSC - 3 ->
     case <<Text/binary, Point/utf8>> of
+        <<"8;", _/binary>> = Longer when byte_size(Longer) > ?MAX_OSC -> link_overflow;
         Longer when byte_size(Longer) > ?MAX_OSC -> overflow;
         Longer -> Longer
     end;
@@ -593,16 +653,61 @@ extended_colour(_) -> malformed.
 osc(<<"0;", Title/binary>>, VT) -> emit({title, Title}, VT);
 osc(<<"2;", Title/binary>>, VT) -> emit({title, Title}, VT);
 osc(<<"8;", Rest/binary>>, VT) -> hyperlink(Rest, VT#vt{link = none});
+osc(link_overflow, VT) -> count(link, VT#vt{link = none});
 osc(_Text, VT) -> count(osc, VT).
 
-%% Every OSC 8 string ends the open link first. A closing, whose URI is
-%% empty, does nothing more; a link or an input context is read by the
-%% grammar of "Links and the input context", and anything else is counted.
+%% Every OSC 8 string ends the open link first, by the caller. Then the
+%% grammar of "Links and the input context": a closing, whose URI is
+%% empty, does nothing more; an `erx:accept/` URI sets the input context;
+%% any other `erx:` URI opens a link, read by erx_present:parse_uri/1
+%% alone, so a link means here exactly what erx_render wrote. Anything
+%% else, an `https:` URI among them, is counted and its text stays plain.
 hyperlink(Rest, VT) ->
-    case binary:split(Rest, <<";">>) of
-        [Params, <<>>] -> case link_params(Params) of true -> VT; false -> count(link, VT) end;
+    maybe
+        [Params, URI] ?= binary:split(Rest, <<";">>),
+        true ?= link_params(Params),
+        hyperlink_uri(URI, VT)
+    else
         _ -> count(link, VT)
     end.
+
+hyperlink_uri(<<>>, VT) ->
+    VT;
+hyperlink_uri(<<"erx:accept/", Types/binary>>, VT) ->
+    case context_types(Types) of
+        {ok, Names} -> VT#vt{context = Names};
+        error -> count(link, VT)
+    end;
+hyperlink_uri(URI, VT) ->
+    maybe
+        {ok, Type, Value} ?= erx_present:parse_uri(URI),
+        Text = erx_present:text(Type, Value),
+        true ?= plain_text(Text),
+        open_link(atom_to_binary(Type), Text, VT)
+    else
+        _ -> count(link, VT)
+    end.
+
+%% The types of an input context, each a presentation name; none clears it.
+context_types(<<>>) ->
+    {ok, []};
+context_types(Types) ->
+    Names = binary:split(Types, <<",">>, [global]),
+    case lists:all(fun(Name) -> erx_present:type(Name) =/= error end, Names) of
+        true -> {ok, [binary:copy(Name) || Name <- Names]};
+        false -> error
+    end.
+
+%% A link's text is shown and handed to a command. erx_present writes
+%% canonical text as printable ASCII, so that is what is admitted: no
+%% control, and no bidirectional or invisible format character.
+plain_text(Text) -> lists:all(fun(B) -> B >= 16#20 andalso B =< 16#7E end, binary_to_list(Text)).
+
+%% Ids increase from 1 and RIS keeps the next one, so the table holds a
+%% run of consecutive ids and the oldest is the one 256 below the new one.
+open_link(Type, Text, #vt{links = Links, next_link = Id} = VT) ->
+    Kept = maps:remove(Id - ?MAX_LINKS, Links),
+    VT#vt{links = Kept#{Id => {Type, Text}}, next_link = Id + 1, link = Id}.
 
 link_params(Params) -> lists:all(fun(B) -> B >= 16#20 andalso B =< 16#7E andalso B =/= $; end,
                                  binary_to_list(Params)).
@@ -1031,4 +1136,4 @@ parser_bounded(#parser{intermediates = Inter, params = Params, count = Count, os
     (Inter =:= overflow orelse length(Inter) =< ?MAX_INTERMEDIATES) andalso
         length(Params) =:= Count andalso Count =< ?MAX_PARAMS andalso
         lists:all(fun(P) -> P =< ?MAX_PARAM end, Params) andalso
-        (Osc =:= overflow orelse byte_size(Osc) =< ?MAX_OSC).
+        (Osc =:= overflow orelse Osc =:= link_overflow orelse byte_size(Osc) =< ?MAX_OSC).
