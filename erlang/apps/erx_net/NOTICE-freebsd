@@ -63,3 +63,16 @@ module erx_ip4_reass
 
 module erx_ip6_reass
   sys/netinet6/frag6.c frag6_input frag6_freef
+
+module erx_tcp_cc
+  sys/netinet/cc/cc.c newreno_cc_post_recovery newreno_cc_after_idle newreno_cc_cwnd_on_multiplicative_decrease newreno_cc_cwnd_in_cong_avoid
+  sys/netinet/cc/cc.h struct cc_algo struct cc_var
+  sys/netinet/cc/cc_newreno.c newreno_ack_received newreno_newround newreno_rttsample
+
+module erx_tcp_cc_newreno
+  sys/netinet/cc/cc_newreno.c newreno_cb_init newreno_ack_received newreno_after_idle newreno_cong_signal newreno_newround newreno_rttsample
+  sys/netinet/cc/cc_newreno.h struct newreno
+
+module erx_tcp_cc_cubic
+  sys/netinet/cc/cc_cubic.c cubic_does_slow_start cubic_ack_received cubic_after_idle cubic_cb_init cubic_cong_signal cubic_conn_init cubic_post_recovery cubic_record_rtt cubic_get_ssthresh cubic_rttsample cubic_newround
+  sys/netinet/cc/cc_cubic.h cubic_k cubic_cwnd

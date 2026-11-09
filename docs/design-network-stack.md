@@ -892,7 +892,16 @@ module beside CUBIC, with pacing added to output.
 `cong_signal/3` with `CC_NDUPACK`, `CC_ECN`, `CC_RTO` and `CC_RTO_ERR`
 (`cc/cc.h:119-128`), `post_recovery/1`, `after_idle/1`, `ecn_pkt/2`,
 `newround/2` and `rtt_sample/2`, each a pure function of FreeBSD's
-`struct cc_var` as `#ccv{}` and the module's own state. The callers
+`struct cc_var` as `#ccv{}` and the module's own state. As `cc_var`
+holds `cc_data`, the `#ccv{}` holds the module's state and the control
+block fields a module reads through `CCV()`; the connection keeps it for
+its life and refreshes those inputs before each call.
+`ack_received/3` takes the type and the acknowledgement (bytes, segments,
+whether the window limits sending); `cong_signal/3` takes the signal and
+the acknowledgement number, `none` for a timeout. The `#ccv{}` carries
+FreeBSD's two recovery flags, which a module sets as FreeBSD's do and the
+connection clears, and from which the loss module's recovery state is
+taken. The callers
 translate `cc_conn_init`, `cc_ack_received`, `cc_cong_signal` and
 `cc_post_recovery` (`tcp_input.c:290-516`) and `cc_after_idle`
 (`tcp_output.c:174`). `erx_tcp_cc_newreno` and `erx_tcp_cc_cubic`

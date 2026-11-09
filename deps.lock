@@ -137,6 +137,16 @@
       "directory": "pkt-67a4a14",
       "license": "BSD-3-Clause",
       "status": "permanent"
+    },
+    {
+      "id": "freebsd-cc-cubic",
+      "kind": "file",
+      "version": "95719d8a895bf8170851e9844d9b4092b1d2b6fe",
+      "url": "https://raw.githubusercontent.com/freebsd/freebsd-src/95719d8a895bf8170851e9844d9b4092b1d2b6fe/sys/netinet/cc/cc_cubic.h",
+      "sha256": "339e64f74414a9962a9f782a366c1ccb8c0b9f9a7f9a453aa9685368f6456efc",
+      "filename": "cc_cubic.h",
+      "license": "BSD-2-Clause",
+      "status": "permanent"
     }
   ]
 }

@@ -521,6 +521,12 @@ it; git history is the record of completed work.
   accepting a data offset below 5, is caught because the decoder then raises on a negative option
   length, not by the judge's agreement check. Give the runner a second fault per target that only the
   judge catches, such as SACK blocks accepted on a SYN.
+* [Medium] build, the packer's `NOTICES` and `docs/design.md` ("Licences and notices"): a file of
+  erXos's counts as third-party for its notice when its SPDX line names a third-party licence, but
+  `erx_tcp_cc`, `erx_tcp_cc_newreno` and `erx_tcp_cc_cubic` translate BSD-2-Clause FreeBSD files, so
+  their SPDX line is erXos's own `BSD-2-Clause` and their FreeBSD copyright headers may be left out
+  of `NOTICES`. Classify erx_net modules by their `%% FreeBSD:` header lines (or NOTICE-freebsd)
+  instead, and say so in the design; check what the packer does today first.
 * [Medium] network, `erlang/apps/erx_net/src/erx_ip6_wire.erl`: an ICMPv6 error quotes a cut-off packet,
   which `decode/1` refuses as `truncated`, yet erx_icmp6 needs the addresses, next header and ports it
   quotes (the header walk of `icmp6_notify_error`). Add a `decode_quoted/1` that shares `ext_header/1`
