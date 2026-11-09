@@ -86,7 +86,7 @@ class ManifestStopgapTest < Minitest::Test
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
     assert_equal 0, view.count('domains')
-    assert_equal 3, view.count('devices')
+    assert_equal 4, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
   end
@@ -179,7 +179,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def test_root_memory_over_ram_less_the_reserve_is_refused
-    refused(Erx::Manifest::Invalid, 4, 'root_startup', @source.sub('root_memory 100663296', 'root_memory 150999040'), message: /fiasco_reserve/)
+    refused(Erx::Manifest::Invalid, 4, 'root_startup', @source.sub('root_memory 100925440', 'root_memory 150999040'), message: /fiasco_reserve/)
   end
 
   def test_loadable_segments_and_baseline_over_root_memory_are_refused
@@ -241,7 +241,7 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 7, 'devices.role', source, against, message: /M11/)
   end
 
-  # Property 8: the UARTs, the windows and the network device.
+  # Property 8: the UARTs and the windows.
   def test_the_console_and_host_link_must_differ
     refused(Erx::Manifest::Invalid, 8, 'machine.hostlink', @source.sub('hostlink "/pl011@9040000"', 'hostlink "/pl011@9000000"'))
   end
@@ -251,9 +251,11 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 8, 'machine.console', source)
   end
 
-  def test_a_network_device_is_refused
+  # The network stack runs in the system domain in Phase 1, over the device its unit
+  # places there (docs/design-stopgap.md, "Device records").
+  def test_a_network_device_is_admitted
     source, against = with_extra_device(role: 'network')
-    refused(Erx::Manifest::Invalid, 8, 'devices.role', source, against, message: /M9/)
+    admit(source, against)
   end
 
   def test_a_vault_window_is_refused
@@ -327,7 +329,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def test_root_memory_up_to_ram_less_the_reserve_is_admitted
-    assert_instance_of Erx::Manifest::Admitted, admit(@source.sub('root_memory 100663296', 'root_memory 150994944'))
+    assert_instance_of Erx::Manifest::Admitted, admit(@source.sub('root_memory 100925440', 'root_memory 150994944'))
   end
 
   # Property 9: release builds wait for the confinement check.

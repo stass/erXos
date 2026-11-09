@@ -30,7 +30,7 @@ module Erx
     DETERMINISTIC_WORD = 'erx.det=1'
     DETERMINISTIC_ARGUMENTS = %w[-icount shift=0,sleep=off -rtc base=2026-01-01,clock=vm].freeze
     # The most disks a plan attaches; QEMU virt has 32 virtio-mmio slots and the
-    # tests need a handful.
+    # tests need a handful. They fit on the disks' page (NIC_TRANSPORT).
     MAX_DISKS = 4
     # QEMU's virtio-mmio transport offers the legacy interface (version 1) unless
     # told otherwise; the guest's driver supports version 2 only.
@@ -41,6 +41,26 @@ module Erx
     # at 0x0a003e00, which the development manifest names as the block device
     # (config/manifest/qemu-virt-development.txt), and each next disk to the bus below.
     LAST_TRANSPORT = 31
+    # The transport the network device sits on: bus .23 at 0x0a002e00, which the development
+    # manifest names as the network device (config/platforms/qemu-virt.json). Eight
+    # transports share a 4 KiB page and a page is one device's (erx_device), so the disks
+    # keep the top page, buses .31 to .24, and the network device takes the page below it.
+    NIC_TRANSPORT = 23
+
+    # A virtio-net device on QEMU's user networking (slirp), restricted so that nothing the
+    # guest sends leaves the host, which serves the guest DHCP. One hub joins it to a
+    # `dgram` backend on loopback, QEMU's end at frames_port and the harness's at peer_port,
+    # so the harness exchanges raw Ethernet frames with the guest as one more host on its
+    # link.
+    Nic = Data.define(:frames_port, :peer_port) do
+      def initialize(frames_port:, peer_port:)
+        unless [frames_port, peer_port].all? { |port| port.is_a?(Integer) && port.between?(1, 65_535) }
+          raise Error, 'a network device plan names two loopback UDP ports'
+        end
+
+        super
+      end
+    end
     # As hostlink, no host link at all: one serial line, the console's, as on a machine
     # with one UART, such as the website's emulator (docs/design-stopgap.md, "Device paths").
     NO_HOSTLINK = :none
@@ -71,7 +91,7 @@ module Erx
 
     def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
-             disks: [], hostlink: nil)
+             disks: [], hostlink: nil, nic: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
@@ -82,6 +102,7 @@ module Erx
       unless disks.is_a?(Array) && disks.size <= MAX_DISKS && disks.all?(Disk)
         raise Error, "disks are up to #{MAX_DISKS} QemuPlan::Disk values"
       end
+      raise Error, 'a network device is a QemuPlan::Nic' unless nic.nil? || nic.is_a?(Nic)
       words = command_line.to_s.split(/ /)
       raise Error, "the plan adds #{HOSTLINK_WORD} with the host link's serial line" if words.include?(HOSTLINK_WORD)
 
@@ -103,7 +124,8 @@ module Erx
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, *(deterministic ? DETERMINISTIC_ARGUMENTS : []), '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
-       *disk_arguments(disks), '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
+       *(disks.empty? && nic.nil? ? [] : DISK_TRANSPORT_ARGUMENTS), *disk_arguments(disks), *nic_arguments(nic),
+       '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
        '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(line ? ['-append', line] : []),
        *(dtb ? ['-dtb', dtb] : [])].freeze
@@ -113,13 +135,25 @@ module Erx
     # device that serves it, in the order given. Without a disk, nothing, so
     # the transport options reach only plans that have a device to use them.
     def disk_arguments(disks)
-      return [] if disks.empty?
-
       drives = disks.each_with_index.flat_map do |disk, index|
         ['-drive', "file=#{disk.path},format=raw,if=none,id=disk#{index}",
          '-device', "virtio-blk-device,drive=disk#{index},bus=virtio-mmio-bus.#{LAST_TRANSPORT - index}"]
       end
-      DISK_TRANSPORT_ARGUMENTS + drives
+      drives
+    end
+
+    # The network device and its backends (Nic), or nothing.
+    def nic_arguments(nic)
+      return [] if nic.nil?
+
+      loopback = '127.0.0.1'
+      ['-netdev', 'user,id=nic_user,restrict=on',
+       '-netdev', "dgram,id=nic_frames,local.type=inet,local.host=#{loopback},local.port=#{nic.frames_port}," \
+                  "remote.type=inet,remote.host=#{loopback},remote.port=#{nic.peer_port}",
+       '-netdev', 'hubport,id=nic_hub_user,hubid=0,netdev=nic_user',
+       '-netdev', 'hubport,id=nic_hub_frames,hubid=0,netdev=nic_frames',
+       '-netdev', 'hubport,id=nic_hub_guest,hubid=0',
+       '-device', "virtio-net-device,netdev=nic_hub_guest,bus=virtio-mmio-bus.#{NIC_TRANSPORT}"]
     end
 
     # The second serial line, after the console's, which QEMU virt places at
@@ -317,7 +351,7 @@ module Erx
     # Without link, hostlink is QemuPlan.argv's: nil for QEMU's null device, or
     # QemuPlan::NO_HOSTLINK for a machine with no host link UART.
     def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil)
+            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
       raise Error, 'a run with a host link session takes no other host link plan' if link && hostlink
 
@@ -333,7 +367,7 @@ module Erx
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
                            cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd, command_line: command_line,
-                           dtb: dtb, disks: disks, hostlink: socket || hostlink)
+                           dtb: dtb, disks: disks, hostlink: socket || hostlink, nic: nic)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)

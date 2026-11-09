@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # virtio's split virtqueue and the virtio-mmio block device, from the OASIS
 # Virtual I/O Device (VIRTIO) Version 1.2 specification: sections 2.7 (split
-# virtqueues), 4.2.2 (the MMIO transport's values) and 5.2 (the block device).
+# virtqueues), 4.2.2 (the MMIO transport's values), 5.1 (the network device) and 5.2
+# (the block device).
 # Every field is little-endian, as a version 1 device requires.
 limit virtio_mmio_magic u32 0x74726976
 limit virtio_mmio_version u32 2
+limit virtio_id_net u32 1
 limit virtio_id_block u32 2
 # Feature bits, by number below 64. erx_device accepts what the device type defines (bits
 # 0 to 23 and 50 to 63) and, of the bits that extend the queues and the negotiation (24 to
@@ -39,6 +41,22 @@ limit virtio_blk_s_ioerr u8 1
 limit virtio_blk_s_unsupp u8 2
 limit virtio_blk_config_capacity_low u32 0
 limit virtio_blk_config_capacity_high u32 1
+
+# The network device (section 5.1): its receive queue is queue 0 and its transmit queue
+# queue 1; each buffer starts with the 12-byte virtio_net_hdr a VERSION_1 device uses
+# (5.1.6), all zero on transmit, since no offload is negotiated. Its configuration space,
+# read in 32-bit words: word 0 the address's first four bytes, word 1 its last two and
+# then the status, word 2 max_virtqueue_pairs and then the MTU.
+limit virtio_net_f_mtu u32 3
+limit virtio_net_f_mac u32 5
+limit virtio_net_f_status u32 16
+limit virtio_net_s_link_up u32 1
+limit virtio_net_hdr_size u32 12
+limit virtio_net_queue_rx u32 0
+limit virtio_net_queue_tx u32 1
+limit virtio_net_config_mac_low u32 0
+limit virtio_net_config_mac_high_status u32 1
+limit virtio_net_config_pairs_mtu u32 2
 
 # One entry of a queue's descriptor table.
 layout erx_virtq_desc wire_le 8 16

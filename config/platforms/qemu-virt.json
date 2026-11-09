@@ -32,6 +32,15 @@
           "compatible": "virtio,mmio", "bus": 0, "device": 0, "function": 0,
           "dma": "unconfined", "flags": 1, "dma_memory": 2097152, "placement_key": "block" }
       ]
+    },
+    {
+      "key": "net",
+      "devices": [
+        { "selector": "dt", "role": "network", "path": "/virtio_mmio@a002e00", "bridge": "",
+          "base": 167783936, "size": 512, "line": 71,
+          "compatible": "virtio,mmio", "bus": 0, "device": 0, "function": 0,
+          "dma": "unconfined", "flags": 1, "dma_memory": 262144, "placement_key": "net" }
+      ]
     }
   ]
 }

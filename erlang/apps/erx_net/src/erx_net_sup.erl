@@ -18,9 +18,18 @@ erx_net_sup  (rest_for_one)
 ```
 
 `erx_net_tables` comes first, so that its crash restarts everything that wrote into its
-tables. A driver's restart restarts its interface and the interface's DHCP client, which
-lose only soft state. The grant comes last, so its restart, which ends the connections
-linked to it, leaves the interfaces running.
+tables. The grant comes last, so its restart, which ends the connections linked to it,
+leaves the interfaces running.
+
+A link is started by `start_link_sup/1` alone, at the stack's start and at every restart:
+its driver first, then, once the driver runs, its interface and DHCP client. A driver whose
+transport has nothing to drive answers `ignore`, and so does its link, so the stack runs
+without that interface and no interface ever starts without its driver. The driver is the
+link's significant child: its end, for any reason, ends the link (`auto_shutdown`), and the
+interfaces supervisor starts the link again through `start_link_sup/1`, which resets the
+device and restarts the interface and its DHCP client, which lose only soft state. An
+interface's or DHCP client's crash is the link supervisor's to restart, and leaves the driver
+running.
 Listeners, datagram sockets under a grant and the port mapper join the tree as they are
 written.
 
@@ -34,7 +43,7 @@ Module}}`.
 -behaviour(supervisor).
 
 -export([start_link/1, runtime/0]).
--export([init/1]).
+-export([init/1, start_link_sup/1]).
 
 -define(RUNTIME, {?MODULE, runtime}).
 
@@ -70,14 +79,46 @@ init({stack, Interfaces}) ->
                 #{id => grant, start => {runtime(), start_grant, [local, #{}]}}],
     {ok, {#{strategy => rest_for_one}, Children}};
 init({interfaces, Interfaces}) ->
-    Children = [#{id => Name, type => supervisor,
-                  start => {supervisor, start_link, [?MODULE, {link, If}]}}
+    Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]}}
                 || #{name := Name} = If <- Interfaces],
     {ok, {#{strategy => one_for_one}, Children}};
-init({link, #{name := Name, transport := {Transport, TransportConfig}, ip4 := Ip4} = If}) ->
+init({link, #{name := Name, transport := {Transport, TransportConfig}}}) ->
+    Driver = #{id => driver, start => {erx_net_driver, start_link, [Name, Transport, TransportConfig]},
+               restart => temporary, significant => true},
+    {ok, {#{strategy => rest_for_one, auto_shutdown => any_significant}, [Driver]}}.
+
+-doc """
+Starts one interface's link supervisor with its driver, then, once the driver runs, the
+interface and its DHCP client after it, in the `rest_for_one` order of the design. A
+driver that answered `ignore` is no child, which leaves nothing to run, and the link
+answers `ignore`.
+""".
+-spec start_link_sup(interface()) -> {ok, pid()} | ignore | {error, term()}.
+start_link_sup(#{name := Name, ip4 := Ip4} = If) ->
     IfConfig = maps:with([ip4, ingress], If),
-    Dhcp = [#{id => erx_dhcp4, start => {erx_dhcp4, start_link, [Name]}} || Ip4 =:= dhcp],
-    Children = [#{id => driver, start => {erx_net_driver, start_link, [Name, Transport, TransportConfig]}},
-                #{id => interface, start => {erx_net_if, start_link, [Name, IfConfig]}}
-                | Dhcp],
-    {ok, {#{strategy => rest_for_one}, Children}}.
+    Rest = [#{id => interface, start => {erx_net_if, start_link, [Name, IfConfig]}}
+            | [#{id => erx_dhcp4, start => {erx_dhcp4, start_link, [Name]}} || Ip4 =:= dhcp]],
+    maybe
+        {ok, Sup} ?= supervisor:start_link(?MODULE, {link, If}),
+        case supervisor:which_children(Sup) of
+            [{driver, Driver, worker, _}] when is_pid(Driver) -> start_children(Sup, Rest);
+            [] -> stop_link(Sup, ignore)
+        end
+    end.
+
+%% The link's children after its driver, in order; one that fails ends the link, and its
+%% reason is the link's.
+start_children(Sup, []) ->
+    {ok, Sup};
+start_children(Sup, [Child | Rest]) ->
+    case supervisor:start_child(Sup, Child) of
+        {ok, _Pid} -> start_children(Sup, Rest);
+        {error, _Reason} = Error -> stop_link(Sup, Error)
+    end.
+
+%% Ends a link supervisor the caller, its parent, has not taken as a child, unlinked first
+%% so that its end reaches the parent as no exit signal, and answers Answer.
+stop_link(Sup, Answer) ->
+    unlink(Sup),
+    ok = proc_lib:stop(Sup),
+    Answer.

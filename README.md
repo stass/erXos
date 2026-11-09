@@ -347,8 +347,10 @@ Error in process <0.150.0> with exit value:
   a DHCP lease, answers ARP and ping, echoes UDP, and opens TCP
   connections through `gen_tcp`'s calls, echoing 1 MiB each way off a
   host server. On FreeBSD it also runs over a tap device through its tap
-  helper, where a vnet jail resolves and pings it. It does not reach a
-  device inside erXos yet.
+  helper, where a vnet jail resolves and pings it. On erXos under QEMU it
+  runs in the system domain over its virtio-net driver, takes a DHCP
+  lease and answers ARP and ping; the network domain it moves into later
+  is not built yet.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
@@ -357,7 +359,7 @@ Error in process <0.150.0> with exit value:
   web client's protocol and connection core. No screen shows it yet.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
   domain service and messages between domains, the rest of the command
-  shell, the network stack on a device, the display on a screen, the web
+  shell, the network domain, the display on a screen, the web
   UI, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 

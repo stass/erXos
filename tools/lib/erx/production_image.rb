@@ -424,9 +424,17 @@ module Erx
       # -erx build ID, which the root adds to the manifest's.
       ARGUMENTS_ALWAYS = 15
       # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
-      # for the block unit's one device and the host link's UART (docs/design-stopgap.md,
-      # "Device records").
+      # for each device of a RECORD_UNITS unit (docs/design-stopgap.md, "Device records").
       DEVICE_RECORD_WORDS = 8
+      # The manifest unit that holds the host link's UART, which gives a device record only
+      # when the boot sends erx.hostlink=1.
+      HOSTLINK_UNIT = 'hostlink'
+      # The names of the units the root gives device records. Each device of a held unit whose
+      # role and compatible string match a row of boot_manifest.c's device_kinds table gets
+      # one, and the manifest names each such unit after its row's record role word ("block",
+      # "net"), with one device in its placement; the host link's UART gets one too. A host
+      # test keeps this list and that table's role words the same.
+      RECORD_UNITS = ['block', 'net', HOSTLINK_UNIT].freeze
       # What a plain erx.arg word used to break: it joins the last flag's arguments.
       CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
       # An output longer than any FIFO, so the driver writes it through the transmit check.
@@ -528,7 +536,8 @@ module Erx
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
-        records = source.scan(hostlink == QemuPlan::NO_HOSTLINK ? /^unit block$/ : /^unit (?:block|hostlink)$/).size * DEVICE_RECORD_WORDS
+        recorded = hostlink == QemuPlan::NO_HOSTLINK ? RECORD_UNITS - [HOSTLINK_UNIT] : RECORD_UNITS
+        records = source.scan(/^unit (\w+)$/).flatten.count { |unit| recorded.include?(unit) } * DEVICE_RECORD_WORDS
         arguments = ARGUMENTS_ALWAYS + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code

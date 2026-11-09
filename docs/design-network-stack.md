@@ -926,9 +926,9 @@ looks each segment up anew and finds the listener or nothing.
    one message against the driver's credit, each frame as its header
    binary and its payload sub-binaries.
 4. **Driver to device.** The driver posts each frame with
-   `erx_device:post/4` as the segments `[{out, DeviceHeader}, {out,
-   Headers}, {out, Payload}, ...]`, at most two payload binaries
-   ([The driver](#the-driver)); the NIF lays them end to end in a pool
+   `erx_device:post/4` as at most four segments, `[{out, DeviceHeader},
+   {out, Headers}, {out, Payload}, ...]`, joined as
+   [The driver](#the-driver) says; the NIF lays them end to end in a pool
    buffer, the one per-byte copy of the transmit path.
 
 ### Framing
@@ -2210,7 +2210,7 @@ and transmit credits, the backlog and the link state. A transport holds
 only its medium.
 
 ```erlang
--callback init(Config :: map()) -> {ok, link_info(), T} | {error, Reason :: term()}.
+-callback init(Config :: map()) -> {ok, link_info(), T} | ignore | {error, Reason :: term()}.
 -callback event(Msg :: term(), T) -> {[event()], T}.
 -callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}.
 
@@ -2287,11 +2287,14 @@ with its clients' data and have no reserved share of it
 | `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` while its far end is there | configured |
 
 The virtio transport posts at most four `out` segments: its
-`virtio_net_hdr`, the frame's link, IP and transport headers joined into
-one binary, and the payload's binaries, joining any past the second into
-the last segment. That join is a copy a frame pays when its payload
-spans more than two of a send buffer's binaries, which for an owner that
-writes many small binaries is most segments; its cost is on the
+`virtio_net_hdr`, then the frame's binaries in order, all but the last
+two joined into one segment when there are more than three. A frame is
+its headers and its payload's binaries, so a payload of one or two
+binaries is posted as it is and only headers are joined; the transport
+needs no knowledge of a frame's layers to do it. A payload that spans
+more than two of a send buffer's binaries has its first ones joined with
+the headers, a copy which for an owner that writes many small binaries
+is most segments; its cost is on the
 [watch list](todo-performance.md). The loop
 transport makes each frame `{Zone, Packet}` into `{Zone,
 iolist_to_binary(Packet)}`, the one copy a device makes elsewhere, and
@@ -3295,8 +3298,13 @@ client domain is affected beyond its sockets.
 An interface that cannot start is refused by its driver's `init`, and its
 link supervisor fails to start with the reason: `{lladdr, Addr}` for a
 pipe's address that is not a locally administered unicast address,
-`{mtu, N}` for a pipe's MTU outside 1,280 to 9,000, and the device NIF's
-own errors for virtio ([The driver](#the-driver)). The application
+`{mtu, N}` for a pipe's MTU outside 1,280 to 9,000. A virtio device the
+transport cannot drive, an empty transport or one the device NIF
+refuses, is no interface rather than a fault: its `init` answers
+`ignore`, the link supervisor starts nothing and answers `ignore` too,
+and the stack starts without it, as the block driver does without a
+disk; any refusal but an empty transport's is one line in the kernel log
+([The driver](#the-driver)). The application
 itself refuses to start with `{seam, Key, Module}` when a configuration
 key names a seam module the build does not hold
 ([Two places, four seams](#two-places-four-seams)).

@@ -838,7 +838,6 @@ module Erx
         invalid('no domain holds a PCIe function until M9', 3, 'devices.selector') if device.fetch('selector') == @codec.member('mf_selector', 'pci')
         role = device.fetch('role')
         invalid('no domain holds PCIe configuration space until M9', 3, 'devices.role') if role == device_role('configuration')
-        invalid('no domain holds a network device until M9', 8, 'devices.role') if role == device_role('network')
         invalid('no domain holds a TPM until M11', 7, 'devices.role') if role == device_role('tpm')
         case device.fetch('dma')
         when @codec.member('mf_dma', 'confined')

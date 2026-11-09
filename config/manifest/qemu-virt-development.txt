@@ -5,11 +5,12 @@
 # docs/design-stopgap.md's "The Phase 1 manifest check" admits it. Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 160 MiB of RAM (config/platforms/qemu-virt.json), small for the
-# browser emulator yet roomy at the shell; root_memory, 96 MiB, leaves 48 MiB
+# browser emulator yet roomy at the shell; root_memory, 96.25 MiB, leaves 47.75 MiB
 # below RAM less fiasco_reserve for bootstrap and the boot archive. The system
 # baseline, 78 MiB, holds ERTS at the shell with a few hundred processes (about
 # 60 MiB of allocator carriers) and /tmp, whose cap is 16 MiB; with the system
-# principal's 16 MiB it leaves root_memory the block device's 2 MiB. A test
+# principal's 16 MiB it leaves root_memory the block device's 2 MiB and the network
+# device's 256 KiB. A test
 # image that needs more names a larger machine (ProductionImage::Machine), which
 # grows root_memory, the baseline and /tmp's cap.
 # The image release is the system release's EROFS image in the slot, with no
@@ -73,7 +74,7 @@ machine
   console "/pl011@9000000"
   hostlink "/pl011@9040000"
   platform "qemu-virt"
-  root_memory 100663296
+  root_memory 100925440
   system_baseline 81788928
   system_share @share.system
   users_share @share.users
@@ -87,7 +88,7 @@ machine
   sealing none
   system_runtime_limits @runtime_limits.system
   native_limits @limits.native
-  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false"
+  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos"
 unit console
   placement "console-uart"
   holder system
@@ -96,6 +97,9 @@ unit hostlink
   holder system
 unit block
   placement "block"
+  holder system
+unit net
+  placement "net"
   holder system
 window slot_a
   holder system

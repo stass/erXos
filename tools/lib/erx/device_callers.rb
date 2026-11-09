@@ -20,9 +20,14 @@ module Erx
     MODULE = 'erx_device'
     # Applications whose modules drive a device class.
     DRIVER_APPLICATIONS = %w[erx_blk erx_uart].freeze
+    # erXos's own directory of an application that also runs outside erXos, whose other
+    # modules name nothing of erXos's: the network stack's virtio transport
+    # (docs/design-network-stack.md, "Two places, four seams").
+    DRIVER_DIRECTORIES = %w[erlang/apps/erx_net/erxos].freeze
     SCOPE = %w[otp/**/*.{erl,hrl} erlang/**/*.{erl,hrl}].freeze
     SITES = ['erlang/apps/erx/src/erx_device.erl',
-             *DRIVER_APPLICATIONS.map { |application| "erlang/apps/#{application}/**/*" }].freeze
+             *DRIVER_APPLICATIONS.map { |application| "erlang/apps/#{application}/**/*" },
+             *DRIVER_DIRECTORIES.map { |directory| "#{directory}/**/*" }].freeze
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
     NAMED = /(?<![A-Za-z0-9_@])#{MODULE}(?![A-Za-z0-9_@])/
     # Erlang's lexical forms that can hold a % or a quote (otp/lib/stdlib/src/erl_scan.erl):
@@ -44,7 +49,7 @@ module Erx
     /mx
     Violation = Data.define(:path, :line) do
       def to_s = "chokepoint device-callers: #{path}:#{line}: only erx_device and the driver applications " \
-                 "(#{DRIVER_APPLICATIONS.join(', ')}) may name #{MODULE}"
+                 "(#{[*DRIVER_APPLICATIONS, *DRIVER_DIRECTORIES].join(', ')}) may name #{MODULE}"
     end
 
     module_function

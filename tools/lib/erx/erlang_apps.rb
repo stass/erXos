@@ -13,19 +13,20 @@ module Erx
   # OTP copy as lib/<application>/ebin beside kernel and stdlib, where the release takes
   # every application's files from (docs/design.md, the tree layout). Each build starts
   # from an empty ebin, so a module that left the tree leaves the release, and the
-  # application file is the .app.src as written, refused unless it lists exactly the
-  # modules compiled, so systools and the code server see what the release holds. An
+  # application file is the .app.src, refused unless it lists exactly the src/ modules
+  # compiled, with the modules of erxos/ added to its list, so systools and the code
+  # server see what the release holds. An
   # application's generated modules and headers are in the generated tree, at the same
   # paths under build/gen/erlang/apps/<application> (Erx::Generated), and compile with
   # its own.
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
-    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_shell erx_code erx_hostlink erx_domain].freeze
+    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_net erx_shell erx_code erx_hostlink erx_domain].freeze
     # Applications of another domain's image, written and tested on the host ahead of
     # the milestone that builds that image (docs/plan.md, "Critical path and parallel
     # tracks"): the host tests compile them, and no release holds them yet.
-    UNRELEASED = %w[erx_net erx_net_client erx_display erx_web].freeze
+    UNRELEASED = %w[erx_net_client erx_display erx_web].freeze
     SOURCE = 'erlang/apps'
     # Kernel's own error and warning flags (otp/lib/kernel/src/Makefile, otp/make/otp.mk.in)
     # less its documentation warnings, which erXos's modules do not follow, with
@@ -41,12 +42,36 @@ module Erx
 
     # An application's modules, relative to the root: src/**/*.erl of its directory in
     # the tree and in the generated tree, which share no path (Generated.ensure refuses a
-    # file of the tree at a generated file's path).
+    # file of the tree at a generated file's path), and erxos/**/*.erl, the modules of an
+    # application that also runs outside erXos that only erXos's images hold, such as
+    # erx_net's transport and runtime (docs/design-network-stack.md, "Two places, four
+    # seams"). Such an application's portable/ directory is for builds outside erXos.
     def self.modules(root:, application:)
       tree, generated = [source(application), generated(application)].map do |directory|
-        Dir.glob('src/**/*.erl', base: File.join(root, directory)).to_h { |path| [path, File.join(directory, path)] }
+        Dir.glob(%w[src/**/*.erl erxos/**/*.erl], base: File.join(root, directory)).to_h { |path| [path, File.join(directory, path)] }
       end
-      tree.merge(generated).sort.map(&:last)
+      # erxos/ after src/, whose behaviours its modules implement: erlc compiles in this order.
+      tree.merge(generated).sort_by { |path, _| [path.start_with?('erxos/') ? 1 : 0, path] }.map(&:last)
+    end
+
+    # An application's module names in two lists, those of its erxos/ directories, in the
+    # tree and the generated tree, and the rest, src/'s; a name in both is refused, since
+    # one beam would overwrite the other.
+    def self.erxos_and_src(application, modules)
+      places = [source(application), generated(application)].map { |directory| File.join(directory, 'erxos/') }
+      erxos, src = modules.partition { |path| places.any? { |place| path.start_with?(place) } }
+                          .map { |paths| paths.map { |path| File.basename(path, '.erl') } }
+      twice = erxos & src
+      raise Error, "#{application} has modules in both src/ and erxos/: #{twice.join(' ')}" unless twice.empty?
+
+      [erxos, src]
+    end
+
+    # The application file's text with its module list replaced by modules. The .app.src
+    # lists src/ alone, the modules every build holds, so it is right outside erXos too;
+    # erXos's build adds erxos/, and a build outside erXos adds portable/.
+    def self.with_modules(text, modules)
+      text.sub(/\{modules,\s*\[[^\]]*\]\}/m) { "{modules, [#{modules.join(', ')}]}" }
     end
 
     # The module list of an application file's text, which names each by its bare atom.
@@ -99,15 +124,16 @@ module Erx
       source = self.class.source(application)
       modules = self.class.modules(root: @root, application: application)
       resource = File.read(File.join(@root, source, 'src', "#{application}.app.src"))
-      check_modules(application, listed: self.class.modules_of(resource, label: "#{application}.app.src"),
-                                 compiled: modules.map { |path| File.basename(path, '.erl') })
+      listed = self.class.modules_of(resource, label: "#{application}.app.src")
+      erxos, src = self.class.erxos_and_src(application, modules)
+      check_modules(application, listed: listed, compiled: src)
       ebin = File.join(otp, 'lib', application, 'ebin')
       FileUtils.rm_rf(File.dirname(ebin))
       FileUtils.mkdir_p(ebin)
       # -pa ebin: a module of the application may name another's behaviour, compiled first.
       @runner.run([@erlc, *FLAGS, *includes, '-pa', ebin, '-o', ebin, *modules], name: "erlang-app-#{application}",
                                                                    deadline: DEADLINE, chdir: @root, env: Oracle::CLEAN_ERLANG_ENV)
-      File.write(File.join(ebin, "#{application}.app"), resource)
+      File.write(File.join(ebin, "#{application}.app"), self.class.with_modules(resource, [*listed, *erxos]))
     end
 
     # Every application's include directory, so one application can include another's
@@ -117,7 +143,7 @@ module Erx
     def check_modules(application, listed:, compiled:)
       return if listed.sort == compiled.sort
 
-      raise Error, "#{application}.app.src lists #{listed.sort.join(' ')} but #{application}'s sources, in " \
+      raise Error, "#{application}.app.src lists #{listed.sort.join(' ')} but #{application}'s src/ modules, in " \
                    "#{self.class.source(application)}/src and #{self.class.generated(application)}/src, hold " \
                    "#{compiled.sort.join(' ')}"
     end

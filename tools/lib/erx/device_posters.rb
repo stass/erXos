@@ -12,7 +12,9 @@ module Erx
   # request it posts, header and request type included, from its own functions, and only
   # its write/6 builds a request whose type writes. Whatever another module builds, it has
   # no way to hand it to the device. The rule is therefore that no Erlang source but
-  # erx_blk_write calls erx_device:post/4.
+  # erx_blk_write calls erx_device:post/4. The network stack's virtio transport,
+  # erx_virtio_net, is the other site: a network device's requests carry frames, and the
+  # transport is the one module that posts them.
   #
   # The check reads the Erlang sources DeviceCallers reads, with comments removed and
   # strings kept, over the whole text, so a call split across lines is seen too. It
@@ -23,7 +25,7 @@ module Erx
   # applications; within those few modules, this check catches a slip, not a module that
   # holds the module name in a variable, which their review must.
   module DevicePosters
-    SITES = %w[erlang/apps/erx_blk/src/erx_blk_write.erl].freeze
+    SITES = %w[erlang/apps/erx_blk/src/erx_blk_write.erl erlang/apps/erx_net/erxos/erx_virtio_net.erl].freeze
     ATOM = ->(name) { "(?<![A-Za-z0-9_@'])(?:#{name}|'#{name}')(?![A-Za-z0-9_@'])" }
     POSTED = /
       #{ATOM.call('erx_device')} \s* (?: : | , ) \s* #{ATOM.call('post')}

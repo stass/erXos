@@ -99,9 +99,17 @@ class ReleaseFilesTest < Minitest::Test
     assert_includes paths, "system/lib/runtime_tools-#{VERSION}/ebin/dbg.beam"
     release = File.read(File.join(@scratch, 'release/start.rel'))
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
-    [*%w[kernel stdlib], *Erx::ErlangApps::APPLICATIONS].each do |application|
+    [*%w[kernel stdlib], *(Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY)].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
+  end
+
+  # The network stack parses network input in the system domain, so it starts temporary:
+  # its end does not end the system domain.
+  def test_the_release_file_starts_the_network_stack_temporary
+    entries
+    release = File.read(File.join(@scratch, 'release/start.rel'))
+    assert_includes release, "{erx_net,\"#{VERSION}\",temporary}"
   end
 
   def test_the_release_ships_no_appup

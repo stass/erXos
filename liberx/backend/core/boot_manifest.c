@@ -33,6 +33,7 @@ typedef struct device_kind {
 
 static const device_kind_t device_kinds[] = {
 	{ ERX_MF_DEVICE_ROLE_BLOCK, "virtio,mmio", "block", "virtio_mmio" },
+	{ ERX_MF_DEVICE_ROLE_NETWORK, "virtio,mmio", "net", "virtio_mmio" },
 };
 
 /* Selected by machine.hostlink's path, among the UARTs of its driver's compatible string. */

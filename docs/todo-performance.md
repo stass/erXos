@@ -489,10 +489,10 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   frame of a bulk transfer with both and with a build that leaves them out.
 * **[Low] network, the virtio transport's payload join**
   ([design-network-stack.md](design-network-stack.md#the-driver)).
-  `erx_virtio_net` posts at most two payload binaries per frame and joins
-  the rest into the last segment, a copy of the payload past the first
-  binary; an owner that sends many small binaries pays it on most
-  segments. Settled by the CPU time per byte of a bulk send written as
+  `erx_virtio_net` posts a frame's last two binaries as segments of
+  their own and joins the ones before them, the headers and any payload
+  binaries past two, into one; an owner that sends many small binaries
+  pays that copy on most segments. Settled by the CPU time per byte of a bulk send written as
   100-byte `gen_tcp:send/2` calls against one written as 64 KiB calls, on
   QEMU `virt` under HVF; the fixes on the table are more `out` segments
   per request in the device NIF, or joining small binaries once as the

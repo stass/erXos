@@ -399,8 +399,9 @@ class ProductionImageTest < Minitest::Test
   def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
     system_args = File.read(File.join(ROOT, Erx::ProductionImage::MANIFEST))[/^\s*system_args "(.*)"$/, 1].split.size
     refute_equal 0, system_args
-    # The manifest has one block unit and the host link's, so the root adds two device records.
-    always = Erx::ProductionImage::Run::ARGUMENTS_ALWAYS + 2 * Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
+    # The manifest has a block unit, a net unit and the host link's, so the root adds three
+    # device records.
+    always = Erx::ProductionImage::Run::ARGUMENTS_ALWAYS + 3 * Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }
@@ -408,6 +409,19 @@ class ProductionImageTest < Minitest::Test
     plain = always - Erx::ProductionImage::Run::DEVICE_RECORD_WORDS + system_args
     checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{plain} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{always + system_args} arguments\n") }
+  end
+
+  # The root gives a device record to each device that matches a row of boot_manifest.c's
+  # device_kinds table and to the host link's UART, so a row added there whose role word is
+  # not in RECORD_UNITS would leave every production boot's argument count one record short.
+  # Every row is read, and a row this test cannot read fails it rather than going unseen.
+  def test_the_record_units_are_the_roots_device_kinds_and_the_host_link
+    table = File.read(File.join(ROOT, 'liberx/backend/core/boot_manifest.c'))[/device_kinds\[\] = \{\n(.*?)^\};/m, 1]
+    rows = table.lines.grep(/\A\s*\{/)
+    words = rows.map { |row| row[/\A\s*\{\s*ERX_MF_DEVICE_ROLE_\w+,\s*"[^"]*",\s*"(\w+)"/, 1] }
+    refute_empty words
+    refute_includes words, nil
+    assert_equal [*words, Erx::ProductionImage::Run::HOSTLINK_UNIT].sort, Erx::ProductionImage::Run::RECORD_UNITS.sort
   end
 
   # A scheduler short of a CPU, or started as a worker, leaves the count wrong or the line unsaid.
@@ -454,8 +468,8 @@ class ProductionImageTest < Minitest::Test
 
   def test_the_manifest_line_must_carry_the_sources_numbers
     verify = checkpoint_verifier('root-manifest')
-    verify.call("erx: root task: manifest root_memory 100663296 baseline 81788928 units 3 pool pages 12\n")
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 81788928 units 3 pool pages 12\n") }
+    verify.call("erx: root task: manifest root_memory 100925440 baseline 81788928 units 4 pool pages 12\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 81788928 units 4 pool pages 12\n") }
   end
 
   # A build/production-image that links out of the tree is refused before

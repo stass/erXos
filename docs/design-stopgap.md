@@ -374,8 +374,8 @@ seeded violation and each refusal with a seeded record:
 | 5 names | kept | |
 | 6 no JIT in the root | kept; a full boot may use the native root image, since the interpreter image is not yet the root | |
 | 7 the sealing secret | `sealing` is `none`, no entry carries `ERX_ENTRY_SEAL`, no TPM | M11 |
-| 8 partitions and devices reach holders | kept: the UARTs are the system domain's; the slot and data windows are the system domain's or a storage domain's, as the manifest places them; only the network domain holds the network device; the display domain holds the gpu and input devices; no vault partition | M11 (vault) |
-| 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the network domain's net device among them, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
+| 8 partitions and devices reach holders | kept: the UARTs are the system domain's; the slot and data windows are the system domain's or a storage domain's, as the manifest places them; the network device is the system domain's, which runs the network stack until 1b-E, and from 1b-E only the network domain holds it; the display domain holds the gpu and input devices; no vault partition | M11 (vault) |
+| 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the net device among them, which the system domain holds until 1b-E and the network domain from then, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
 | 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_configured` in boot order and `erx_dom_plan_connect` over the introductions, recording each plan, as on erXos's kernel, so the configured domains' sums of 4 and 13 are the planner's; 13 is a configuration check and nothing enforces grants at run time | |
 
 **The root startup rule** is a sanity check, not a proof: the root entry's
@@ -1388,9 +1388,17 @@ compatible `virtio,mmio` and peripheral `virtio_mmio`:
 | Manifest role | Record role | Holder in the development manifest |
 | --- | --- | --- |
 | `block` | `block` | the storage domain, or the system domain when no storage domain is configured |
-| `network` | `net` | the network domain |
+| `network` | `net` | the system domain, which runs the network stack and its driver until the network domain exists at 1b-E; then the network domain |
 | `gpu` | `gpu` | the display domain |
 | `input` | `input` | the display domain |
+
+Until 1b-E builds the network domain, the system domain runs the network stack, `erx_net`,
+and its virtio-net driver, as it runs the block driver until a storage domain is configured:
+the development manifest gives it the `net` record, and its `system_args` name
+`erx_virtio_net:interfaces/0` for the stack's interfaces. The stack's packet parsers then run in the trusted base. The system
+release starts `erx_net` as a `temporary` application, so the stack's end, a crash loop a
+packet provokes included, is reported and ends neither the system domain nor the boot; a
+machine without the device boots the same, with no interface.
 
 `gpu` and `input` are values of the manifest's `mf_device_role` beside `network` and `block`, since
 the manifest check reasons about a display domain's devices by role
@@ -1420,9 +1428,12 @@ two devices whose ranges overlap are refused above this backend, by `erx_dom_dev
 device before it posts anything, so what the old holder left in the device or its memory is not trusted.
 
 Which of QEMU's 32 virtio-mmio transports is which device is configuration: the platform
-record names a transport for each role by the order the harness gives QEMU its virtio
-devices, `/virtio_mmio@a003e00` for the first, the disk, and each next device the transport
-below it, and the manifest's unit says who holds it; the production image suite checks each
+record names a transport for each role, the bus the harness pins that role's device to,
+and the manifest's unit says who holds it. A 4 KiB page holds eight transports and is one
+device's alone, since `erx_device` opens and maps a device's registers by the page and
+refuses a second device on an open page, so each role takes its own page: the disks the top
+page, `/virtio_mmio@a003e00` for the first and each next disk the transport below it, and
+the network device the page below, `/virtio_mmio@a002e00`. The production image suite checks each
 path, base and line against QEMU's own device tree, as it checks every recorded path. The
 root reads no register to choose, since only `erx_device` touches a device's registers; the
 driver's first reads of the transport, its magic, version and device id, say whether its

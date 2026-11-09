@@ -100,7 +100,7 @@ class MediumBootTest < Minitest::Test
     plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
     grown = Boot.manifest(plain)
     growth = 2 * (Boot::DOMAIN_MEMORY + Boot::DOMAIN_OUTER)
-    assert_equal ["principal system\n  memory #{16_777_216 + growth}", "  root_memory #{100_663_296 + growth}",
+    assert_equal ["principal system\n  memory #{16_777_216 + growth}", "  root_memory #{100_925_440 + growth}",
                   "  domains 2", "  max_domains 2"],
                  [grown[/^principal system\n  memory [0-9]+$/], grown[/^  root_memory [0-9]+$/],
                   grown[/^principal system\n(?:  .*\n)*?(  domains [0-9]+)$/, 1], grown[/^  max_domains [0-9]+$/]]

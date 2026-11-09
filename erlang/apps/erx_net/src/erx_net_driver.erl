@@ -33,7 +33,7 @@ either and only checks a frame's type and length.
 -behaviour(gen_server).
 
 -export([start_link/3, attach/2, counters/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 
 -export_type([link_info/0, event/0]).
 
@@ -59,7 +59,7 @@ room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`
                | writable
                | {dropped, Reason :: atom()}.
 
--callback init(Config :: map()) -> {ok, link_info(), T :: term()} | {error, Reason :: term()}.
+-callback init(Config :: map()) -> {ok, link_info(), T :: term()} | ignore | {error, Reason :: term()}.
 -callback event(Msg :: term(), T) -> {[event()], T} when T :: term().
 -callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}
     when T :: term().
@@ -80,9 +80,10 @@ room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`
 
 -doc """
 Starts the driver of interface `Name` over `Transport` with its configuration, and
-registers it with erx_net_tables, where the interface finds it.
+registers it with erx_net_tables, where the interface finds it. A transport with
+nothing to drive answers `ignore` at its `init`, and so does the start.
 """.
--spec start_link(term(), module(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(term(), module(), map()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Name, Transport, Config) ->
     gen_server:start_link(?MODULE, {Name, Transport, Config}, []).
 
@@ -108,6 +109,8 @@ init({Name, Transport, Config}) ->
             ok = erx_net_tables:register_driver(Name, self()),
             {ok, #state{transport = Transport, t = T, info = Info,
                         tx = erx_net_credit:new(Limit), latest = Link, told = Link}};
+        ignore ->
+            ignore;
         {error, Reason} ->
             {stop, Reason}
     end.
@@ -129,6 +132,17 @@ handle_cast(_Msg, S) ->
 -doc false.
 handle_info(Msg, S0) ->
     {noreply, tell_link(message(Msg, S0))}.
+
+%% A crash report names the frames the driver held by their count, never their bytes, which
+%% are senders' data and the network's.
+-doc false.
+format_status(Status) ->
+    maps:map(fun(state, #state{backlog = Backlog} = S) ->
+                     S#state{backlog = {frames, queue:len(Backlog)}};
+                (message, _) -> redacted;
+                (log, _) -> [];
+                (_, Value) -> Value
+             end, Status).
 
 %% --- One message -----------------------------------------------------------------
 

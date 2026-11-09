@@ -852,6 +852,27 @@ it; git history is the record of completed work.
   buffer. Build checks still to add: the clock chokepoint (`erlang:send_after`, `monotonic_time`
   and the rest only in `erx_net_clock`), `erx_net_bind` as the only demultiplexing inserter,
   `erx_net_if` as the only configuration writer and `erx_net_credit` as the only batch sender.
+* [Medium] network, virtio-net transport (`erlang/apps/erx_net/erxos/erx_virtio_net.erl`): what the
+  first package leaves. No host tests of its pure functions (`frame/3`, `mtu/2`, `lladdr/2`,
+  `link_state/2`, `segments/1`, `erx_net_app:interfaces/1`): export them under `TEST` or move
+  them to a pure module of `src/`'s, and test them with EUnit. Checksum offload, which the
+  design asks for, is not negotiated. UDP echo is not tested on QEMU: it needs an echo service
+  in the guest. No build check that only `erxos/` names erXos's own modules (`erx_device`,
+  `erx_device_record`, `erx_log`, design-network-stack.md, "Two places, four seams"), with its
+  seeded violation.
+* [Low] network, virtio-net transport, small points: the manifest admits a network device held
+  by any domain, not only the system domain or the network domain; `VIRTIO_NET_F_MTU` is
+  negotiated even when the device's MTU is above 1,500, the most the receive buffers hold: the
+  transport clamps the MTU and drops longer frames as `too_long`, but should not take the feature; a multicast or zero device MAC is
+  taken as the interface's address; `refill/2`'s `{ok, T}` match after a completion batch ends
+  the driver with a badmatch rather than a named reason; the harness (`net_device.rb`) does not
+  check the IP and ICMP checksums of the guest's replies; `free_port` can race another process
+  for the port it found, and `Link#await` takes a frame from any local sender; `Link#send`
+  shadows `Object#send`; `tx_limit` is the queue size although a frame takes up to four
+  descriptors, so `full` comes before the credit runs out; `init/1` turns any exception into
+  `ignore`, a programming error included; the interrupt status bits are written by hand, as in
+  `erx_blk`, not generated from `abi/formats/virtio.txt`; `erx_net_if` has no `format_status/1`
+  that keeps queued packets out of a crash report, as `erx_net_driver` has.
 * [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
   opens over IPv4 only. Not yet: `listen`/`accept`, the syncache hand-off and a SYN reinjected from
   TIME-WAIT (E3, counted `reinject`); `erx_net_admit` (the grant checks the connect request's
@@ -1803,6 +1824,7 @@ it; git history is the record of completed work.
 * [Medium] runtime, `tools/lib/erx/runtime.rb`: the build record covers neither the pack's own inputs (`tools/lib/erx/release.rb`, `pack*.rb`, `manifest.rb`, `config/platforms`, `config/provenance`) nor the archive's bytes, and is written before the pack runs, so a test run alone can read an older `system.pack`. Wants a release record written after the pack.
 * [Medium] tools, `tools/lib/erx/pack_provenance.rb`: a `compiled` receipt declares its sources and names no `.hrl`; nothing ties a beam to them, and a `release` pack accepts it. Derive them with `erlc -M`, and hold them under a registered import.
 * [Medium] tools, `tools/lib/erx/release.rb`: `boot_file` puts paths into an Erlang expression, so a checkout path holding `"` or `\` breaks or changes it. Pass them with `-extra`.
+* [Medium] tools, `tools/lib/erx/production_image.rb`: `Run.checkpoints` predicts the root's `-erx device` records from unit names (`RECORD_UNITS`), while the root keys on the unit's holder, each device's role and compatible string, and `machine.hostlink`, and a placement may hold several devices. A unit named otherwise, a unit held by another domain or a two-device placement fails the boot suites falsely. Take the count from the root's own record walk over the manifest (the host build `boot_manifest_test.rb` runs prints the records) and delete the list.
 * [Low] tools, `tools/lib/erx/boot_image.rb`: `BootImage#build` removes its directory before `OutputDirectory.prepare` checks the path, so a `build/` that links out of the tree has the linked directory removed. Clear it through a check first, as `ProductionImage.clear_directory` does, with a test like `production_image_test.rb`'s link test.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
 * [Medium] runtime, `tools/fuzz/boot_manifest_fuzz.c`: the target compares the page with the reader's own result, so a swapped limit or a wrong host byte in `erx_boot_manifest_read` passes. Compare with `erx_manifest_open` and `erx_manifest_runtime_limits_at` called directly, field by field.
@@ -3658,6 +3680,13 @@ to the corpus and follow rc
   other clients' entries in resolution; the sender credit bounds only the rate of hand-overs. Bound it per
   grant: tag each hand-over with its grant, count the entries each grant's packets started, and drop a
   grant's hand-overs past a cap as lost frames.
+* [Medium] network, the stack's placement (`erlang/apps/erx_net`, `erx_virtio_net`,
+  [design-stopgap.md](docs/design-stopgap.md#device-records)): network input is parsed in the
+  system domain until 1b-E moves the stack and its driver into the network domain. Every packet
+  parser of `erx_net` runs in the trusted base, beside the system domain's unconfined device
+  memory, so a bug a packet reaches is a bug of the system domain's. `erx_net` starts as a
+  `temporary` application (`ReleaseFiles::TEMPORARY`), so a crash loop in it ends the stack and
+  not the system domain; a memory-safety bug in a NIF it calls is not contained. Closed by 1b-E.
 * [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
   `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
   `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can
@@ -3929,6 +3958,14 @@ document's "residual risks accepted" paragraph.
   the relay's runs: that the bridge can put two jails behind separate tap
   devices for the relay's FreeBSD baseline, and that a stock OTP 29.1.2
   builds there for the stack's host runs (29.1.1 is installed).
+  `erx_net_relay` in the app's `test/`, and the tap helper `erx_net_tap`
+  in `c_src/`. `erx_virtio_net` and `erx_net_erxos` run in the system
+  domain, the stopgap placement, until 1b-E's network domain. Three things to confirm on the FreeBSD test host `p620` before
+  its runs: that the test user can open `/dev/tapN` (a devfs rule) and
+  the tap comes up on open (`net.link.tap.up_on_open`), that the bridge
+  can put two jails behind separate tap devices for the relay's FreeBSD
+  baseline, and that a stock OTP 29.1.2 builds there for the stack's
+  host runs.
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,

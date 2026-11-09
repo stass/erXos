@@ -32,6 +32,13 @@ module Erx
     # A name here that the release does not ship would leave that application started.
     raise Error, "LOAD_ONLY names what the release does not ship: #{LOAD_ONLY - APPLICATIONS}" unless
       (LOAD_ONLY - APPLICATIONS).empty?
+    # Started with start type temporary, so that their end is reported and the system
+    # domain goes on. The network stack parses network input, and it runs in the system
+    # domain until the network domain exists (docs/design-stopgap.md), so a crash loop in
+    # it ends the stack, never the system domain.
+    TEMPORARY = %w[erx_net].freeze
+    raise Error, "TEMPORARY names what the release does not ship: #{TEMPORARY - APPLICATIONS}" unless
+      (TEMPORARY - APPLICATIONS).empty?
 
     NAME = 'erxos'
     BOOT_DEADLINE = 120
@@ -240,10 +247,14 @@ module Erx
     end
 
     # An application's term in the release file: its name and version, and the start
-    # type load for one only loaded; the others take systools' default, permanent.
+    # type load for one only loaded and temporary for TEMPORARY's; the others take
+    # systools' default, permanent.
     def release_entry(application)
       term = "#{application},\"#{version(application)}\""
-      LOAD_ONLY.include?(application) ? "{#{term},load}" : "{#{term}}"
+      if LOAD_ONLY.include?(application) then "{#{term},load}"
+      elsif TEMPORARY.include?(application) then "{#{term},temporary}"
+      else "{#{term}}"
+      end
     end
 
     def file_entry(file)

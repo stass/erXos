@@ -79,7 +79,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false \n"
+    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos \n"
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 
@@ -96,15 +96,16 @@ class BootManifestTest < Minitest::Test
   # "The host link"), and the one device of a unit the system domain holds whose role and
   # compatible string are a row of device_kinds, each with the platform record's window, line
   # and DMA memory. The console's UART, a UART of the same compatible string in a unit the
-  # system domain holds, is no record, so there are two: erx_pl011 reads -erx console_uart.
-  def test_the_block_and_hostlink_units_give_one_device_record_each
+  # system domain holds, is no record, so there are three: erx_pl011 reads -erx console_uart.
+  def test_the_block_net_and_hostlink_units_give_one_device_record_each
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "devices 2\n"
+    assert_includes output, "devices 3\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
                             "words-erx device hostlink pl011 151257088 4096 40 0 exact 1 short 0\n"
     assert_includes output, "device block virtio_mmio 167788032 512 79 2097152 " \
                             "words-erx device block virtio_mmio 167788032 512 79 2097152 exact 1 short 0\n"
+    assert_includes output, "device net virtio_mmio 167783936 512 71 262144 words-erx device net virtio_mmio 167783936 512 71 262144 exact 1 short 0\n"
   end
 
   # The host link is the boot's to ask for (docs/design-stopgap.md, "Device records"): without
@@ -116,7 +117,7 @@ class BootManifestTest < Minitest::Test
     assert_match(/^device hostlink pl011 151257088 /, asked)
     plain, status = read(admitted, hostlink: false)
     assert status.success?, plain
-    assert_includes plain, "devices 1\n"
+    assert_includes plain, "devices 2\n"
     refute_match(/^device hostlink /, plain)
     assert_equal asked.lines.grep(/^device block /), plain.lines.grep(/^device block /)
   end
@@ -127,7 +128,7 @@ class BootManifestTest < Minitest::Test
     refute_equal @source, source
     output, status = read(admitted(source))
     assert status.success?, output
-    assert_includes output, "devices 1\n"
+    assert_includes output, "devices 2\n"
     refute_match(/^device block /, output)
   end
 
@@ -173,8 +174,9 @@ class BootManifestTest < Minitest::Test
 
   def test_a_word_list_without_its_last_nul_is_refused_by_the_reader
     bytes = admitted.dup
-    args = bytes.index("false\0".b)
-    bytes.setbyte(args + 5, 'x'.ord)
+    last = 'erx_net_erxos'
+    args = bytes.index("#{last}\0".b)
+    bytes.setbyte(args + last.size, 'x'.ord)
     output, status = read(bytes)
     assert_equal 1, status.exitstatus, output
     assert_match(/\Arefused /, output)

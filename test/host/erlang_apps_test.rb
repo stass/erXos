@@ -43,4 +43,20 @@ class ErlangAppsTest < Minitest::Test
     assert_equal %w[build/gen/erlang/apps/erx/src/generated/erx_manifest.erl erlang/apps/erx/src/erx.app.src
                     erlang/apps/erx/src/erx_text.erl].map { |path| File.join(@root, path) }, sources.sort
   end
+
+  # An application that also runs outside erXos lists src/ alone in its .app.src; the
+  # build adds erxos/ to the .app, and refuses a module in both, which would overwrite.
+  def test_the_application_file_adds_erxos_modules_to_the_src_list
+    write('erlang/apps/erx_net/src/erx_net_sup.erl')
+    write('erlang/apps/erx_net/erxos/erx_virtio_net.erl')
+    modules = ErlangApps.modules(root: @root, application: 'erx_net')
+    erxos, src = ErlangApps.erxos_and_src('erx_net', modules)
+    assert_equal [%w[erx_virtio_net], %w[erx_net_sup]], [erxos, src]
+    text = '{application, erx_net, [{modules, [erx_net_sup]}, {env, []}]}.'
+    assert_equal '{application, erx_net, [{modules, [erx_net_sup, erx_virtio_net]}, {env, []}]}.',
+                 ErlangApps.with_modules(text, [*src, *erxos])
+    write('erlang/apps/erx_net/erxos/erx_net_sup.erl')
+    twice = ErlangApps.modules(root: @root, application: 'erx_net')
+    assert_raises(Erx::Error) { ErlangApps.erxos_and_src('erx_net', twice) }
+  end
 end

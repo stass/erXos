@@ -13,11 +13,19 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([init/1, event/2, transmit/2]).
+-export([log/2]).
 
 -define(MAC, <<2, 0, 0, 0, 0, 1>>).
 
 %% --- The stub transport ----------------------------------------------------------
 
+init(#{nothing_to_drive := true}) ->
+    ignore;
+init(#{nothing_at_restart := Key} = Config) ->
+    case persistent_term:get(Key, first) of
+        first -> persistent_term:put(Key, again), init(maps:remove(nothing_at_restart, Config));
+        again -> ignore
+    end;
 init(#{test := Test, room := Room, tx_limit := Limit}) ->
     {ok, #{link => ethernet, lladdr => ?MAC, mtu => 1500, state => up, tx_limit => Limit},
      #{test => Test, room => Room}}.
@@ -184,3 +192,62 @@ clock_keeps_one_timer_per_caller_test() ->
     timer:sleep(250),
     ?assertEqual(1, length([x || {erx_net_clock, hint} <- element(2, process_info(self(), messages))])),
     ?assertMatch({_, _}, Armed1).
+
+%% --- A transport with nothing to drive ---------------------------------------------
+
+%% The stack starts without a link whose transport answers ignore, as erXos boots without
+%% its network device: no driver registers, and no interface or DHCP client starts
+%% looking for one.
+nothing_to_drive_is_no_interface_test() ->
+    wait_gone(erx_net_tables),
+    Link = #{name => en0, ip4 => dhcp, transport => {?MODULE, #{nothing_to_drive => true}}},
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [Link]}),
+    unlink(Stack),
+    [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
+    ?assertMatch([{en0, undefined, supervisor, _}], supervisor:which_children(Interfaces)),
+    ?assertEqual(none, erx_net_tables:driver(en0)),
+    ok = proc_lib:stop(Stack, shutdown, infinity).
+
+%% A driver's end restarts its whole link through the one start that decides ignore, so a
+%% restarted driver that finds nothing leaves no interface starting without it: no child
+%% of the link fails to start, and the link is ignored.
+nothing_at_restart_is_no_interface_test() ->
+    wait_gone(erx_net_tables),
+    Key = {?MODULE, nothing_at_restart},
+    _ = persistent_term:erase(Key),
+    ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{test => self()}}),
+    Transport = {?MODULE, #{nothing_at_restart => Key, test => self(), room => 64, tx_limit => 4}},
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [#{name => en0, ip4 => dhcp,
+                                                            transport => Transport}]}),
+    unlink(Stack),
+    [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
+    [{en0, Link, supervisor, _}] = supervisor:which_children(Interfaces),
+    [Driver] = [Pid || {driver, Pid, worker, _} <- supervisor:which_children(Link)],
+    exit(Driver, kill),
+    ?assertEqual(ignored, ignored(Interfaces, 100)),
+    ok = proc_lib:stop(Stack, shutdown, infinity),
+    ok = logger:remove_handler(?MODULE),
+    _ = persistent_term:erase(Key),
+    ?assertEqual(nothing, nothing(supervisor_report_start_error)).
+
+%% Waits until the interfaces supervisor holds en0's link as ignored.
+ignored(_Interfaces, 0) ->
+    timeout;
+ignored(Interfaces, Tries) ->
+    case supervisor:which_children(Interfaces) of
+        [{en0, undefined, supervisor, _}] -> ignored;
+        _ -> timer:sleep(10), ignored(Interfaces, Tries - 1)
+    end.
+
+%% The logger handler of nothing_at_restart_is_no_interface_test: a supervisor's report that
+%% a child failed to start reaches the test.
+log(#{msg := {report, #{label := {supervisor, start_error}}}}, #{config := #{test := Test}}) ->
+    Test ! {supervisor_report_start_error};
+log(_Event, _Config) ->
+    ok.
+
+wait_gone(Name) ->
+    case whereis(Name) of
+        undefined -> ok;
+        Pid -> Ref = monitor(process, Pid), receive {'DOWN', Ref, _, _, _} -> ok end
+    end.
