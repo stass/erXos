@@ -11,7 +11,8 @@ require_relative '../../tools/lib/erx/generated'
 # session protocol and its exhaustive exploration, against erx_hostlink_session and the
 # frame and stream layers it stands on, compiled from source on stock's emulator (ERX_ERL
 # and ERX_ERLC, which make check supplies) with the host stand-in for erx_bytes; they are
-# pure, so they need no hosted build.
+# pure, so they need no hosted build. The exploration stops at depth 5 by default (seconds);
+# the milestone gate sets ERX_EXPLORE_DEPTH=full for its whole depth of 8 (minutes).
 class ErxHostlinkSessionTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.

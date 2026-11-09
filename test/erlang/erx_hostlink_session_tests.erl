@@ -751,6 +751,7 @@ malformed_last_frame_ends_the_session_test() ->
 %% default here, so busy for want of resident bytes is covered by the
 %% scenario tests alone.
 -define(DEPTH, 8).
+-define(QUICK_DEPTH, 5).
 -define(LIMITS, #{window => 2, facets => 1, kept => 12}).
 %% Call 3's payload: one full piece and a short last one.
 -define(LONG, binary:copy(<<"abcd">>, (?PIECE + 4) div 4)).
@@ -758,9 +759,19 @@ malformed_last_frame_ends_the_session_test() ->
 explore_test_() ->
     {timeout, 600, fun() ->
         World = world(open(?LIMITS)),
-        Visited = explore([World], ?DEPTH, sets:new([{version, 2}])),
+        Visited = explore([World], explore_depth(), sets:new([{version, 2}])),
+        io:format(user, "explore depth ~p: ~p states~n", [explore_depth(), sets:size(Visited)]),
         ?assert(sets:size(Visited) > 1000)
     end}.
+
+%% The landing gate explores to ?QUICK_DEPTH. The milestone gate sets
+%% ERX_EXPLORE_DEPTH=full for the whole ?DEPTH (a number sets that depth).
+explore_depth() ->
+    case os:getenv("ERX_EXPLORE_DEPTH") of
+        false -> ?QUICK_DEPTH;
+        "full" -> ?DEPTH;
+        Text -> list_to_integer(Text)
+    end.
 
 %% A world is the host, the current session's nonce, the model of its
 %% window, the message in progress, the host's last frame, the replaced
