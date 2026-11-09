@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: starts the event table in place of check_io, has no +IO options,
+ * Modified by erXos: starts the event table and the export table's locks in place of check_io, has no +IO options,
  * and puts a fatal exit's slogan in the domain's crash area.
  *
  * %CopyrightEnd%
@@ -48,6 +48,7 @@
 #include "erl_cpu_topology.h"
 #include "erl_thr_progress.h"
 #include "erx_event.h"
+#include "erx_exports.h"
 #include "erl_thr_queue.h"
 #include "erl_async.h"
 #include "erl_ptab.h"
@@ -1211,6 +1212,7 @@ early_init(int *argc, char **argv) /*
     erts_errno_init();
 
     erx_event_init();
+    erx_exports_init();
 
     /*
      * Thread progress management:

@@ -19,6 +19,10 @@ start(Kernel, System) ->
 init(_Kernel, none) ->
     loop();
 init(Kernel, {PeerId, PeerNode}) ->
+    %% Any peer handed this pid can reach it; what arrives from another domain comes as
+    %% {erx_origin, D, Record}, so only the system connection's (D the system domain's
+    %% id) can steer it (edit 16).
+    erx_dist:origins(true),
     try
         Port = open_port({spawn_driver, "erx_lane system"}, [binary]),
         hand_over(Kernel, #{port => Port, node => PeerNode, id => PeerId, system => true})
@@ -40,6 +44,6 @@ hand_over(Kernel, #{port := Port} = Connection) ->
             erx_dist:system_lost(unsupported_protocol)
     end.
 
-%% Nothing else is sent to the agent; what arrives is dropped, so its queue stays empty.
+%% Nothing else is acted on yet; what arrives is dropped, so its queue stays empty.
 loop() ->
     receive _ -> loop() end.

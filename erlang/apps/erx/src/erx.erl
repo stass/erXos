@@ -9,7 +9,7 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([i/0, i/1, source/1, trace/1, trace_stop/1]).
+-export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, origins/1]).
 
 %%% Source lines: erx:source/1.
 
@@ -89,3 +89,32 @@ trace(Spec) ->
 -spec trace_stop(reference()) -> ok.
 trace_stop(Ref) ->
     erx_trace:stop(Ref).
+
+%%% The export table and origins (erx_dist, docs/design-domains.md, "Exports").
+
+-doc """
+Sets what the domain `Peer` holds on `Name`, one of this domain's own names
+(a live local pid, or the domain's name `{domain, Id}`), to exactly `Rights`:
+`send`, `link`, `exit` and `introduce` for a pid, `spawn` for the domain.
+`[]` ends the hold. Returns `{error, badarg}` for any other name, a process
+that has exited or a malformed argument, and `{error, system_limit}` when the
+export table is full.
+""".
+-spec export(pid() | {domain, pos_integer()}, [atom()], pos_integer()) ->
+    ok | {error, badarg | system_limit}.
+export(Name, Rights, Peer) ->
+    erx_dist:export(Name, Rights, Peer).
+
+-doc "The peers holding one of this domain's own names, and what each holds.".
+-spec exports(pid() | {domain, pos_integer()}) -> [{pos_integer(), [atom()]}].
+exports(Name) ->
+    erx_dist:exports(Name).
+
+-doc """
+While `true`, a message from another domain reaches the caller as
+`{erx_origin, D, Msg}`, `D` the domain id of the connection it arrived on;
+`false` turns that off.
+""".
+-spec origins(boolean()) -> ok.
+origins(Flag) ->
+    erx_dist:origins(Flag).

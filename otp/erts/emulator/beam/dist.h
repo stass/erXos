@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: declares erts_dist_peer_is_domain.
+ * Modified by erXos: declares erts_dist_peer_is_domain, and the encode context names the domain a frame is for (edit 8).
  *
  * %CopyrightEnd%
  */
@@ -314,6 +314,7 @@ typedef struct TTBEncodeContext_ {
     int debug_fragments;
     int debug_vlen;
 #endif
+    Uint32 erx_peer; /* erXos: the domain the frame is for, 0 for none (edit 8) */
 } TTBEncodeContext;
 
 #define ERTS_INIT_TTBEncodeContext(Ctx, Flags)                  \
@@ -331,6 +332,7 @@ typedef struct TTBEncodeContext_ {
         (Ctx)->fragment_size = ~((Uint) 0);                     \
         (Ctx)->continue_make_lext_hash = 0;                     \
         (Ctx)->lext_vlen = -1;                                  \
+        (Ctx)->erx_peer = 0;                                    \
         if ((Flags) & DFLAG_PENDING_CONNECT) {                  \
             (Ctx)->hopeful_flags = 0;                           \
             (Ctx)->hopeful_flagsp = NULL;                       \

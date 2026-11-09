@@ -903,7 +903,7 @@ typedef struct erx_export_holder {
 typedef struct erx_exports {
 	uint16_t		nholders;
 	uint16_t		cap;		/* holders allocated */
-	uint32_t		pad;
+	uint32_t		closed;		/* the name has ended: holds nothing, written never again */
 	erx_export_holder_t	*holders;	/* one per peer given the name */
 } erx_exports_t;
 ```

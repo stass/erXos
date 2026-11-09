@@ -17,6 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: ErtsDistExternal keeps the creation of the entry a frame arrived on (edit
+ * 16).
+ *
  * %CopyrightEnd%
  */
 
@@ -151,6 +154,7 @@ typedef struct erl_dist_external {
     ErtsDistExternalData *data;
     Uint32 flags;
     Uint32 connection_id;
+    Uint32 erx_origin;  /* erXos: the creation of the entry it arrived on (edit 16) */
     Sint heap_size;
     DistEntry *dep;
     struct ErtsMonLnkDist__ *mld;   /* copied from DistEntry.mld */

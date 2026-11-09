@@ -44,6 +44,7 @@
 #include "erx/lane.h"
 #include "liberx/backend/api.h"
 #include "erx_event.h"
+#include "erx_exports.h"
 #include "erx_lane_drv.h"
 
 /* The pass-through tag ERTS writes before a frame and reads before one (external.c). */
@@ -365,8 +366,8 @@ input_act(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_funnel_ve
 		/*
 		 * A LINK the peer has no link right for is kept when the target already holds a
 		 * link with the sender, as one of this domain's processes makes toward a peer's
-		 * process it was sent. That conditional LINK needs the export table's link record
-		 * (RT7, TODO.md); without it the LINK is answered as for an absent target, which is
+		 * process it was sent. That conditional LINK needs a link record the input task can
+		 * read (TODO.md); without it the LINK is answered as for an absent target, which is
 		 * wrong only when such a link exists: the peer's process then gets an exit of noproc.
 		 */
 	case ERX_FUNNEL_ANSWER_NOPROC:
@@ -388,27 +389,6 @@ input_act(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_funnel_ve
 		break;
 	}
 	return (false);
-}
-
-/* Without an export table the peer holds nothing on any name (RT7, TODO.md). */
-static erx_funnel_hold_t
-exports_none(const void *exports, const erx_funnel_name_t *name)
-{
-	(void)exports;
-	(void)name;
-	return ((erx_funnel_hold_t){ 0 });
-}
-
-/*
- * The system domain holds what every runtime exports to it before its first frame
- * (docs/design-runtime.md, "Connections in ERTS"): spawn on the domain. init's send, and
- * the same exports to the spawner, wait for the export table (RT7, TODO.md).
- */
-static erx_funnel_hold_t
-exports_system(const void *exports, const erx_funnel_name_t *name)
-{
-	(void)exports;
-	return ((erx_funnel_hold_t){ .rights = name->kind == ERX_FUNNEL_NAME_DOMAIN ? ERX_RIGHT_SPAWN : 0 });
 }
 
 typedef enum {
@@ -724,7 +704,7 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 	erx_funnel_asm_init(&conn->assembly, erx_runtime_limits()->max_frame);
 	conn->lane = (erx_funnel_lane_t){ .sender_node = conn->peer_node, .sender_node_len = strlen(conn->peer_node),
 		.receiver_node = conn->own_node, .receiver_node_len = strlen(conn->own_node),
-		.lookup = open.system ? exports_system : exports_none, .exports = NULL, .sender_id = open.peer_id,
+		.lookup = erx_exports_lookup, .exports = &conn->lane.sender_id, .sender_id = open.peer_id,
 		.receiver_id = (uint32_t)erts_this_node->creation };
 	conn->scratch_len = erx_funnel_check_scratch_bytes(&conn->limits);
 	conn->scratch = driver_alloc(conn->scratch_len);
@@ -740,6 +720,9 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 		goto fail;
 	if (erx_event_register_connection(conn->label, driver_mk_port(port)) != ERX_OK)
 		goto fail;
+	/* What every runtime exports to the system domain before its first frame is read. */
+	if (open.system)
+		erx_exports_boot(open.peer_id);
 	return ((ErlDrvData)conn);
 fail:
 	conn_free(conn);

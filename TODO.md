@@ -2014,15 +2014,56 @@ it; git history is the record of completed work.
   connection, with the root as the system party. Two domains connected by
   `erx_dom_lib_connect` cannot open their ports until `connection_up`
   (RT6b) tells a runtime the connection's values; that cell lands with RT6b.
-* [Medium] Lane driver, `erx_lane_drv.c` `exports_none` and `exports_system`: the
-  funnel's export lookup answers that a peer holds nothing, and the system domain
-  only `spawn` on the domain, so every other message, link and spawn from another
-  domain is unheld, `init`'s `send` to the system domain and the spawner's boot
-  exports included, until the export table (RT7) exists. `ERX_FUNNEL_DELIVER_IF_LINKED` is answered `noproc`, which
-  is wrong when the target already holds a link with the sender (one a
-  process of this domain made toward the peer's process): the peer's
-  process then gets an exit of `noproc` for a live link. RT7 replaces the
-  lookup and adds the hold's link bit and the conditional `LINK` signal.
+* [Medium] Runtime, export table, `erx_exports.c`: what the table does not do yet.
+  (1) Aliases hold nothing, so an alias send from another domain is always unheld, and
+  every cross-domain `gen_server:call` and `erpc` reply is dropped, since `gen:call`
+  replies to an alias: handing an alias out (edit 8), its holders and their end at
+  deactivation (edit 14, `erl_monitor_link.c`) belong to RT9b, whose alias registry
+  (design-runtime, edit 17) is the record an alias's holders live on. (2) The spawner's boot exports (`spawn` on the domain,
+  `send` on init) are not written: the boot page names no spawner, only the system
+  domain. (3) A connection's end does not clear the holders toward its peer, which only
+  matters once a peer id can return on a new connection (SV2's introduced connections);
+  the funnel's lookup by peer id keeps a stale holder reachable until then. (4) The bound
+  is the constant 16,384, not a manifest or `-erx exports` value. (5) The hold's
+  `request_words` is 0 until edit 12 (RT8). (6) `ERX_FUNNEL_DELIVER_IF_LINKED` is answered
+  `noproc`, which is wrong when the target already holds a link with the sender (one a
+  process of this domain made toward the peer's process): the peer's process then gets an
+  exit of `noproc` for a live link; it needs a link record the input task can read.
+* [Medium] Runtime, export table, `erl_process.c` `erl_create_process` and
+  `erx_exports_spawned`: a spawn from another domain when the table is full still creates
+  the child, and `erx_exports_spawned` drops the full answer, so the spawner holds nothing
+  on it. Its exit toward the child is unheld, so the parent's death never ends a
+  `spawn_link`ed child, and the parent gets a pid it cannot message. Refuse the spawn with
+  `system_limit` in the `SPAWN_REPLY`, or reserve the entry before the child is made.
+* [Medium] Runtime, export table, `erx_exports.c` `EXPORTS_MAX` and `live`: one bound for
+  every peer, so a peer that can make this domain create processes or hand out new pids
+  (a spawn, or a server that starts a worker per request and answers from it) fills the
+  16,384 entries for all of them, and pids handed to the system domain afterwards behave
+  as dead. design-domains says a domain that fills its table hurts only its own
+  correspondence, and that a refused hand-out is counted; no counter exists. Needs a quota
+  per peer within the bound and a counter of refused hand-outs.
+* [Medium] Runtime, export table and funnel: two sources for a peer's id. The funnel's
+  lookup uses the lane's `sender_id` (`open.peer_id`, `erx_lane_drv.c`), while the writers
+  (`erx_exports_peer_of`) and the origin `D` of edit 16 (`external.c`) use the entry's
+  `creation`, which `erx_dist` sets from the boot page. They agree by convention; an
+  introduced connection (item (3) above) is where they can part. Take both from one
+  source: the lookup reads the entry's creation, or `setnode`'s creation comes from the
+  port. The funnel's `.exports` field, now a pointer to an id, is renamed with it.
+* [Medium] Runtime, `erx_connections.erl`: the connection agent opens the system
+  connection only, so `erx_dist`'s owner of an introduced connection (`system := false`)
+  is never started. Its protocol (`connection_up`, `connection_mapped`, `connection_down`,
+  `connection_unmapped`, `connection_lost`; design-domains, "Messages between the domain
+  service and a runtime") is built with SV2, because it needs, besides the agent's own
+  code, five things that exist only then: (1) the system domain
+  running as the node `system@<host>` with the system side of each system connection
+  (SV2), since nothing else can send `connection_up`; (2) the agent's pid handed out to the
+  system domain, which edit 8 does once the agent sends it a frame (its ready report); (3) the domain service's pid on the boot page, which
+  design-domains (Domain lifecycle) places there and `boot_info.h` does not carry, as the
+  target of the agent's answers; (4) an edit of `dist.c` that fires links, monitors and
+  pending spawns with the `{domain_down, D, Info}` reason `connection_down` gives, which
+  design-runtime (Closing) attributes to `erts_do_net_exits` but stock ERTS fires as
+  `noconnection` (`monitor_connection_down`) and no numbered edit lists; (5) the lane
+  driver's drain to the write position read at `connection_down`.
 * [Low] Oracle, pid text (edit 18): OTP cases that write a local pid as `"<0.N.S>"` get `badarg` in a runtime
   that is alive with a nonzero creation: compiler `core_fold_SUITE:coverage`, emulator `guard_SUITE:guard_bifs`
   and a case of stdlib `qlc_SUITE`. The hosted runtime is not alive, so they agree there; give them rows in
@@ -3524,6 +3565,21 @@ to the corpus and follow rc
   kernel.
 
 ## Security residuals
+
+* [High] Runtime, export table and OTP's `sys` protocol (`gen_server.erl`, `gen_statem.erl`,
+  `gen_event.erl`, `proc_lib`): a peer that holds only `send` on an OTP behaviour process
+  can send it `{system, From, Req}` and terminate it, suspend it, read its whole state
+  (which hands the peer every pid in it) or replace its state with an exported function.
+  A pid gets `send` toward every peer it is encoded for, the sender of each control term
+  included, so any process that calls or messages another domain is exposed.
+  design-domains says `send` cannot kill a process; nothing covers `sys`. Edit 16's
+  origins protect only the processes that set them (net_kernel, the connection agent,
+  `erx_dist`'s connection owner), a list that has to be remembered; the domain pids set
+  none, since no domain is handed one before SV2. The owner chose the fix: every message
+  from another domain arrives as `{erx_origin, D, Msg}`, with no per-process flag, and only
+  each protocol's owner unwraps its own shapes (`gen` and `io` replies, io-server
+  requests, servers started to serve other domains); `sys` never unwraps. It lands
+  before SV2 hands out a domain pid.
 
 * [Medium] `tools/erx web --open`, [The host tool's front end](docs/design-web.md#the-host-tools-front-end): not
   built, because handing the URL to the host's opener (`open`, `xdg-open`) puts the token in an argument vector,

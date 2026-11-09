@@ -19,7 +19,8 @@
  *
  * Modified by erXos: the lane port driver alone carries distribution input, and
  * erts_net_message answers a frame the funnel found without a target, and no send to
- * another domain's registered name is written.
+ * another domain's registered name is written; a frame for another domain is encoded
+ * naming that domain, so the pids it carries are handed out to it (edit 8).
  *
  * %CopyrightEnd%
  */
@@ -54,6 +55,7 @@
 #include "erl_proc_sig_queue.h"
 #include "erl_global_literals.h"
 #include "erl_map.h"
+#include "erx_exports.h"
 
 #define DIST_CTL_DEFAULT_SIZE 64
 
@@ -3526,6 +3528,7 @@ erts_dsig_send(ErtsDSigSendContext *ctx)
 	    erts_finalize_atom_cache_map(ctx->acmp, ctx->dflags);
 
             ERTS_INIT_TTBEncodeContext(&ctx->u.ec, ctx->dflags);
+            ctx->u.ec.erx_peer = erx_exports_peer_of(ctx->dep); /* erXos: edit 8 */
 	    ctx->dhdr_ext_size = erts_encode_ext_dist_header_size(&ctx->u.ec,
                                                                   ctx->acmp,
                                                                   ctx->fragments);

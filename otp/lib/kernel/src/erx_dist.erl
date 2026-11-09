@@ -23,7 +23,7 @@
 
 -export([listen/2, accept/1, accept_connection/5, setup/5, close/1, select/1,
          address/1, system_lost/1]).
--export([boot/0, names_dropped/0]).
+-export([boot/0, names_dropped/0, export/3, exports/1, origins/1]).
 
 -include("net_address.hrl").
 -include("dist.hrl").
@@ -55,8 +55,36 @@ boot() ->
 names_dropped() ->
     erlang:nif_error(undefined).
 
+%% The export table (docs/design-domains.md, "Exports"), BIFs of ERTS (erx_exports.c).
+-type right() :: send | link | exit | spawn | introduce.
+-type own_name() :: pid() | {domain, pos_integer()}.
+
+%% Sets what the domain Peer holds on Name, one of this domain's own names (a live local
+%% pid, or the domain's name {domain, Id}), to exactly Rights; [] ends Peer's hold. A pid
+%% holds send, link, exit and introduce, the domain's name spawn. {error, badarg} for any
+%% other name or a malformed argument, {error, system_limit} when the table is full.
+-spec export(own_name(), [right()], pos_integer()) -> ok | {error, badarg | system_limit}.
+export(_Name, _Rights, _Peer) ->
+    erlang:nif_error(undefined).
+
+%% The peers holding Name, one of this domain's own names, and what each holds.
+-spec exports(own_name()) -> [{pos_integer(), [right()]}].
+exports(_Name) ->
+    erlang:nif_error(undefined).
+
+%% Edit 16: while set, a message from another domain reaches the caller as
+%% {erx_origin, D, Msg}, D the domain id of the connection it arrived on, so a process
+%% that a peer may reach can tell who sent it; false turns it off.
+-spec origins(boolean()) -> ok.
+origins(_Flag) ->
+    erlang:nif_error(undefined).
+
 -spec listen(atom(), string()) -> {ok, {term(), #net_address{}, pos_integer()}}.
 listen(_Name, Host) ->
+    %% Edit 16, in net_kernel's own process, which runs listen/2 as it starts: stock
+    %% net_kernel acts on {spawn, M, F, A, Gleader} and {disconnect, Node} from any caller,
+    %% so what another domain sends it must reach only its catch-all, as {erx_origin, D, Msg}.
+    ok = origins(true),
     {Id, System} = boot(),
     {ok, {System, address(Id, Host), Id}}.
 
@@ -96,10 +124,13 @@ accept_connection(AcceptPid, Connection, MyNode, _Allowed, _SetupTime) ->
 %% pending, makes the port the controller of the peer's entry, runs the port's input task
 %% once for the frames that came before, and reports the node up as dist_util does. Every
 %% way it ends, a refusal or a crash included, goes through ended/2, so the system
-%% connection's owner halts the domain on each.
+%% connection's owner halts the domain on each. It acts on {Kernel, disconnect}, which
+%% names net_kernel by a pid any peer can write, so with origins (edit 16) a message from
+%% another domain reaches only its catch-all, as {erx_origin, D, Msg}.
 owner(Kernel, AcceptPid, MyNode, Connection) ->
     process_flag(trap_exit, true),
     try
+        ok = origins(true),
         owner_up(Kernel, AcceptPid, MyNode, Connection)
     catch
         exit:{shutdown, _} = Shutdown -> exit(Shutdown);

@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: the event table's lock replaces the poll set's in the order.
+ * Modified by erXos: the event table's lock replaces the poll set's in the order, and the
+ * export table's stripes (erx_exports.c) come before the allocator's, taken under them.
  *
  * %CopyrightEnd%
  */
@@ -177,6 +178,7 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"record_staging_lock",                     NULL},
     {"global_literals",                         NULL},
     {"errno_table",                             NULL},
+    {"erx_exports",                             NULL},
     LEVEL,
     {"alcu_allocator",			        "index"},
     LEVEL,

@@ -890,3 +890,11 @@ bif erx_trace_ring:clocks/0
 
 bif erx_dist:boot/0
 bif erx_dist:names_dropped/0
+
+#
+# erXos: the export table (docs/design-domains.md, "Exports") and the origins flag (edit 16).
+#
+
+bif erx_dist:export/3
+bif erx_dist:exports/1
+bif erx_dist:origins/1

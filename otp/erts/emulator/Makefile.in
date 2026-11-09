@@ -1294,6 +1294,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_crash_area.o \
 	$(OBJDIR)/erx_event.o \
 	$(OBJDIR)/erx_event_table.o \
+	$(OBJDIR)/erx_exports.o \
 	$(OBJDIR)/erx_device.o \
 	$(OBJDIR)/erx_device_core.o \
 	$(OBJDIR)/erx_device_queue.o \

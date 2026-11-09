@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: schedulers are executors, created by erts_start_schedulers, that sleep in erx_park, wake with erx_executor_wake and dispatch the event table; there are no poll threads; the spawn option {erx_untraced, true} sets F_ERX_UNTRACED before any trace session's flags are copied in.
+ * Modified by erXos: a process's exit closes its export holders (edit 13) and a spawn from another domain gives the spawner its rights on the child (erx_exports.c); schedulers are executors, created by erts_start_schedulers, that sleep in erx_park, wake with erx_executor_wake and dispatch the event table; there are no poll threads; the spawn option {erx_untraced, true} sets F_ERX_UNTRACED before any trace session's flags are copied in.
  *
  * %CopyrightEnd%
  */
@@ -58,6 +58,7 @@
 #include "erl_nfunc_sched.h"
 #include "erl_proc_sig_queue.h"
 #include "beam_common.h"
+#include "erx_exports.h"
 
 #define ERTS_CHECK_TIME_REDS CONTEXT_REDS
 #define ERTS_DELAYED_WAKEUP_INFINITY (~(Uint64) 0)
@@ -12055,6 +12056,10 @@ static void early_init_process_struct(void *varg, Eterm data)
     proc->dirty_sys_tasks = NULL;
     erts_init_runq_proc(proc, arg->run_queue, arg->bound);
     erts_atomic_init_nob(&proc->sig_inq_buffers, (erts_aint_t)NULL);
+    /* Before the process table publishes the pid: the funnel and the encoder reach the
+     * holders through a lookup by pid (erx_exports.c), so they never see the field
+     * unset. */
+    proc->erx_exports = (erx_exports_t){ 0 };
 
     erts_atomic32_init_relb(&proc->state, arg->state);
 
@@ -12996,6 +13001,10 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
             token = SEQ_TRACE_TOKEN(p);
             seq_trace_output(token, seq_msg, SEQ_TRACE_SEND, parent_id, p);
         }
+
+        /* erXos: the spawner's rights on its child, before the child runs or the reply
+         * hands its pid out (erx_exports.c, writer 2). */
+        erx_exports_spawned(p, so->dist_entry);
 
         code = erts_dsig_prepare(&ctx, so->dist_entry, NULL, 0,
                                  ERTS_DSP_NO_LOCK, 1, 1, 0);
@@ -14100,6 +14109,9 @@ erts_do_exit_process(Process* p, Eterm reason)
     erts_proc_lock(p, ERTS_PROC_LOCKS_ALL_MINOR);
 
     set_self_exiting(p, reason, NULL, NULL, NULL);
+
+    /* erXos: edit 13. The pid's holders end before any exit signal goes out. */
+    erx_exports_close(&p->erx_exports);
 
     if (ERTS_IS_P_TRACED_FL(p, F_TRACE_CALLS))
         erts_schedule_time_break(p, ERTS_BP_CALL_TIME_SCHEDULE_EXITING);

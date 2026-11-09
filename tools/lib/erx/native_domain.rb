@@ -49,20 +49,21 @@ module Erx
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
     CASES = %w[library warm halt fault stop lanes erts logger erts_refused crash jit_reload jit_write_rx jit_run_rw connection
-                 link_warm link link_undo link_end undo].freeze
+                 exports link_warm link link_undo link_end undo].freeze
     RECORD = NativeRoot::DOMAIN_RECORD
     # What a case's domain prints before its case line, each a record of its space and in
     # order: init ran the ERTS domain's release; the logger case's two log records, which
     # the logger proxy wrote into the kernel log, each whole with its tab, escape and
     # newline shown as the log's tokens, the first formatted on one line by erx_log_h and
     # the second of the domain's own making; the connection's system connection ended
-    # with the party's flood unread; and the spoiled page's runtime ended with the
-    # reader's reason.
+    # with the party's flood unread; the exports case's filler filled the export table;
+    # and the spoiled page's runtime ended with the reader's reason.
     CONSOLE = { 'erts' => /\A#{RECORD}init_started/n,
                 'logger' => [/\A#{RECORD}error: tab\\x09here esc\\x1B\[31mred nl, end\r?\n/n,
                              /\A#{RECORD}warning: raw\\x09t\\x1B\[0m\\x0Ax\r?\n/n,
                              /\A#{RECORD}logger_done/n],
                 'connection' => /\A#{RECORD}\{erx_dist,system_connection,erx_lane_answers_unread\}/n,
+                'exports' => /\A#{RECORD}\{exports_filled,1\d{4}\}/n,
                 'erts_refused' => /\A#{RECORD}erx: the boot information page: the page is of another version/n,
                 'jit_reload' => /\A#{RECORD}\{jit_reload_passed,jit,[1-9]\d*\}/n,
                 'jit_write_rx' => /\A#{RECORD}jit_alias_runs/n, 'jit_run_rw' => /\A#{RECORD}jit_alias_runs/n }.freeze

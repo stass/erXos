@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}.
+ * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}; a process carries its export holders (edit 13) and F_ERX_ORIGINS (edit 16).
  *
  * %CopyrightEnd%
  */
@@ -57,6 +57,7 @@ typedef struct process Process;
 #include "erl_node_tables.h"
 #include "erl_monitor_link.h"
 #include "erl_hl_timer.h"
+#include "erx_exports_set.h"
 #include "erl_time.h"
 #include "erl_atom_table.h"
 #include "external.h"
@@ -1199,6 +1200,8 @@ struct process {
     Uint debug_reds_in;
 #endif
 
+    /* erXos: the peers given this pid and their rights (erx_exports.c) */
+    erx_exports_t erx_exports;
 };
 
 extern Eterm erts_init_process_id; /* pid of init process */
@@ -1653,6 +1656,8 @@ extern int erts_system_profile_ts_type;
 #define F_DBG_FORCED_TRAP    (1 << 24) /* DEBUG: Last BIF call was a forced trap */
 #define F_DIRTY_CHECK_CLA    (1 << 25) /* Check if copy literal area GC scheduled */
 #define F_ASYNC_DIST         (1 << 26) /* Truly asynchronous distribution */
+#define F_ERX_ORIGINS        (1 << 27) /* erXos: messages from other domains arrive as
+                                        {erx_origin, D, Msg} (edit 16) */
 
 /* Signal queue flags */
 #define FS_OFF_HEAP_MSGQ       (1 << 0) /* Off heap msg queue */

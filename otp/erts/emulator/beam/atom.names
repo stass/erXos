@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, and erx_untraced.
+# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, erx_untraced, and the export table's (erx_exports.c).
 #
 
 #
@@ -288,6 +288,7 @@ atom error_handler
 atom error_info
 atom error_logger
 atom error_only
+atom domain erx_origin introduce link spawn
 atom erx_untraced
 atom erts_code_purger
 atom erts_debug

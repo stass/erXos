@@ -17,6 +17,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: encoding a pid for another domain hands it out to that domain (edit 8,
+ * erx_exports.c), and a decoded frame keeps the creation of the entry it
+ * arrived on (edit 16).
+ *
  * %CopyrightEnd%
  */
 
@@ -45,6 +49,7 @@
 #include "dist.h"
 #include "erl_binary.h"
 #include "erl_bits.h"
+#include "erx_exports.h"
 #include "erl_zlib.h"
 #include "erl_map.h"
 #include "erl_proc_sig_queue.h"
@@ -945,6 +950,7 @@ erts_prepare_dist_ext(ErtsDistExternal *edep,
     edep->dep = dep;
     edep->mld = dep->mld;
     edep->connection_id = conn_id;
+    edep->erx_origin = dep->creation; /* erXos: edit 16 */
     edep->data->ext_endp = ext+size;
     edep->data->binp = binp;
     edep->data->seq_id = 0;
@@ -3604,6 +3610,9 @@ enc_term_int(TTBEncodeContext* ctx, ErtsAtomCacheMap *acmp, Eterm obj, byte* ep,
 	    break;
 
 	case PID_DEF:
+	    /* erXos: edit 8, handing the pid out to another domain (erx_exports.c). */
+	    if (ctx != NULL && ctx->erx_peer != 0)
+		erx_exports_hand_out(obj, ctx->erx_peer);
 	    ep = enc_internal_pid(acmp, obj, ep, dflags);
 	    break;
 
