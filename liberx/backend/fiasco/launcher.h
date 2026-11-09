@@ -22,18 +22,18 @@ int	erx_fiasco_launch(uint32_t entry, uint32_t flags, uint64_t argument, uint64_
 
 /*
  * erx_fiasco_launch in two steps, so the root can build in the task between them: make
- * the task with its image, then start its first thread at the image's entry. A refusal of either
- * leaves nothing of the task.
+ * the task with its image, which gives the image's entry as pc, then start its first
+ * thread at pc. A refusal of either leaves nothing of the task.
  */
-int	erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task) ERX_WARN_UNUSED_RESULT;
-int	erx_fiasco_launch_start(uint64_t task, uint64_t argument) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task, uint64_t *pc) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_launch_start(uint64_t task, uint64_t pc, uint64_t argument) ERX_WARN_UNUSED_RESULT;
 
 /*
  * Writes the starting registers erx_thread_create reads into the calling thread's
- * public UTCB: argument in the first register, everything else 0.
+ * public UTCB: pc, argument in the first register, everything else 0.
  * erx_fiasco_launch_start does this before its create.
  */
-void	erx_fiasco_launch_set_registers(uint64_t argument);
+void	erx_fiasco_launch_set_registers(uint64_t pc, uint64_t argument);
 
 /*
  * Waits for the task to end, by a stop or a fault, and takes its status. Its pages

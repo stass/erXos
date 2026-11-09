@@ -60,7 +60,6 @@ typedef struct erx_fiasco_task {
 	uint32_t		 group;		/* its home group's record index plus one, 0 for none */
 	uint32_t		 dispatcher;	/* its dispatcher's thread index plus one, 0 until it is named */
 	erx_fiasco_task_tree_t	 tree;
-	uint64_t		 entry;		/* where its first thread starts */
 	bool			 first_made;	/* its creator made index 0, so another create there is ERX_ENOTSUP */
 	int64_t			 status;
 	erx_fiasco_task_thread_t threads[ERX_FIASCO_THREADS_MAX];

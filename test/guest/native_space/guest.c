@@ -49,6 +49,8 @@
 void erx_fiasco_root_main(void);
 
 static uint32_t program_entry;
+/* The program's entry, the same in every task the launcher makes from its fixed image. */
+static uint64_t program_pc;
 
 static void
 say(const char *text)
@@ -91,7 +93,7 @@ say_count(const char *name, uint64_t value)
 static bool
 task_make(uint64_t *space, uint64_t addr, uint64_t pages)
 {
-	return (erx_fiasco_launch_make(program_entry, 0, space) == ERX_OK &&
+	return (erx_fiasco_launch_make(program_entry, 0, space, &program_pc) == ERX_OK &&
 	    erx_vm_reserve(*space, addr, pages * PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK);
 }
 
@@ -100,7 +102,7 @@ task_finish(uint64_t space, uint64_t argument)
 {
 	int64_t status = INT64_MIN;
 
-	if (erx_fiasco_launch_start(space, argument) != ERX_OK ||
+	if (erx_fiasco_launch_start(space, program_pc, argument) != ERX_OK ||
 	    erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
 		return (INT64_MIN);
 	return (status);
@@ -262,7 +264,7 @@ case_revoke(void)
 		    erx_vm_reserve(spaces[slot], SIGNAL_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
 		    erx_vm_map(spaces[slot], SHARED_ADDR, PAGE, mem, 0, ERX_PROT_R) == ERX_OK &&
 		    erx_vm_map(spaces[slot], SIGNAL_ADDR, PAGE, signal, 0, ERX_PROT_RW) == ERX_OK &&
-		    erx_fiasco_launch_start(spaces[slot], MODE_REVOKED | slot << SLOT_SHIFT) == ERX_OK;
+		    erx_fiasco_launch_start(spaces[slot], program_pc, MODE_REVOKED | slot << SLOT_SHIFT) == ERX_OK;
 	deadline = erx_fiasco_clock_ns() + WAIT_NS;
 	for (uint64_t slot = 0; slot < 2 && passed; slot++)
 		while (atomic_load_explicit((_Atomic uint64_t *)(uintptr_t)(signal_addr + slot * sizeof(uint64_t)),
@@ -382,7 +384,7 @@ case_created(void)
 {
 	const uint64_t before = erx_fiasco_vm_free_pages();
 	uint64_t space;
-	const int64_t status = erx_fiasco_launch_make(program_entry, 0, &space) == ERX_OK ?
+	const int64_t status = erx_fiasco_launch_make(program_entry, 0, &space, &program_pc) == ERX_OK ?
 	    task_finish(space, MODE_CREATOR) : INT64_MIN;
 
 	say_count("created_status", (uint64_t)status);
@@ -420,18 +422,13 @@ case_released(void)
 	say_case("released", passed);
 }
 
-/* Starts the first thread of a task the launcher made, in group, with the argument. */
+/* Starts the first thread of a task the launcher made, in group, at the program's entry with the argument. */
 static bool
 group_start(uint64_t space, uint64_t group, uint64_t argument)
 {
-	erx_fiasco_start_t start = { 0 };
-	const uint64_t *const words = (const uint64_t *)(const void *)&start;
-	erx_utcb_t *const utcb = erx_utcb_self();
 	uint64_t thread;
 
-	start.regs.gpr[0] = argument;
-	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
-		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
+	erx_fiasco_launch_set_registers(program_pc, argument);
 	return (erx_thread_create(0, space, group, ERX_THREAD_CLASS_WORKER, &thread) == ERX_OK &&
 	    erx_thread_start(thread) == ERX_OK);
 }
@@ -454,7 +451,7 @@ case_groups(void)
 
 	passed = passed && erx_thread_create(0, 0, second, ERX_THREAD_CLASS_WORKER, &thread) == ERX_ENOTSUP &&
 	    erx_object_destroy(own) == ERX_ENOTSUP && erx_object_destroy(second) == ERX_OK;
-	if (passed && erx_fiasco_launch_make(program_entry, 0, &space) == ERX_OK) {
+	if (passed && erx_fiasco_launch_make(program_entry, 0, &space, &program_pc) == ERX_OK) {
 		if (!group_start(space, domain, MODE_GROUP))
 			task_drop(space);
 		else if (erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
@@ -479,11 +476,11 @@ case_first_thread(void)
 	int64_t status;
 	bool passed;
 
-	if (erx_fiasco_launch_make(program_entry, 0, &space) != ERX_OK) {
+	if (erx_fiasco_launch_make(program_entry, 0, &space, &program_pc) != ERX_OK) {
 		say_case("first_thread", false);
 		return;
 	}
-	erx_fiasco_launch_set_registers(FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
+	erx_fiasco_launch_set_registers(program_pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
 	if (erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK ||
 	    erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &refused) != ERX_ENOTSUP ||
 	    erx_thread_start(thread) != ERX_OK) {
@@ -557,7 +554,7 @@ case_budget_destroy(void)
 	    erx_vm_reserve(space, SIGNAL_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
 	    erx_vm_map(space, SHARED_ADDR, PAGE, shared, 0, ERX_PROT_R) == ERX_OK &&
 	    erx_vm_map(space, SIGNAL_ADDR, PAGE, signal, 0, ERX_PROT_RW) == ERX_OK &&
-	    erx_fiasco_launch_start(space, MODE_REVOKED) == ERX_OK;
+	    erx_fiasco_launch_start(space, program_pc, MODE_REVOKED) == ERX_OK;
 
 	/* The task has read the object, so it runs when its budget goes. */
 	deadline = erx_fiasco_clock_ns() + WAIT_NS;
@@ -695,9 +692,9 @@ warm_up(void)
 {
 	uint64_t mem, addr, gate, label, first = 0, second = 0;
 
-	if (erx_fiasco_launch_make(program_entry, 0, &first) != ERX_OK)
+	if (erx_fiasco_launch_make(program_entry, 0, &first, &program_pc) != ERX_OK)
 		say("erx: space: warm-up refused\n");
-	else if (erx_fiasco_launch_make(program_entry, 0, &second) != ERX_OK)
+	else if (erx_fiasco_launch_make(program_entry, 0, &second, &program_pc) != ERX_OK)
 		say("erx: space: warm-up refused\n");
 	else
 		task_drop(second);

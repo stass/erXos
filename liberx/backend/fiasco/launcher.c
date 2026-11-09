@@ -53,27 +53,26 @@ erx_fiasco_launcher_find(const erx_pack_view_t *view, const char *path, uint32_t
 int
 erx_fiasco_launch(uint32_t entry, uint32_t flags, uint64_t argument, uint64_t *task)
 {
-	uint64_t space;
-	int status = erx_fiasco_launch_make(entry, flags, &space);
+	uint64_t space, pc;
+	int status = erx_fiasco_launch_make(entry, flags, &space, &pc);
 
 	if (status == ERX_OK)
-		status = erx_fiasco_launch_start(space, argument);
+		status = erx_fiasco_launch_start(space, pc, argument);
 	if (status == ERX_OK)
 		*task = space;
 	return (status);
 }
 
 int
-erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task)
+erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task, uint64_t *pc)
 {
-	uint64_t space, pc;
+	uint64_t space;
 	int64_t ignored;
 	int status = erx_space_create(0, ERX_CAP_SELF, 0, 0, flags, LAUNCHER_CAP_LIMIT, &space);
 
 	if (status != ERX_OK)
 		return (status);
-	/* The service keeps the entry for the first thread, so pc is not needed here. */
-	status = erx_image_map(space, 0, entry, &pc);
+	status = erx_image_map(space, 0, entry, pc);
 	if (status != ERX_OK) {
 		(void)erx_space_stop(space, status);
 		(void)erx_fiasco_task_join(space, &ignored);
@@ -84,25 +83,26 @@ erx_fiasco_launch_make(uint32_t entry, uint32_t flags, uint64_t *task)
 }
 
 void
-erx_fiasco_launch_set_registers(uint64_t argument)
+erx_fiasco_launch_set_registers(uint64_t pc, uint64_t argument)
 {
 	erx_fiasco_start_t start = { 0 };
 	const uint64_t *const words = (const uint64_t *)(const void *)&start;
 	erx_utcb_t *const utcb = erx_utcb_self();
 
+	start.regs.pc = pc;
 	start.regs.gpr[0] = argument;
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
 		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
 }
 
 int
-erx_fiasco_launch_start(uint64_t task, uint64_t argument)
+erx_fiasco_launch_start(uint64_t task, uint64_t pc, uint64_t argument)
 {
 	uint64_t thread;
 	int64_t ignored;
 	int status;
 
-	erx_fiasco_launch_set_registers(argument);
+	erx_fiasco_launch_set_registers(pc, argument);
 	status = erx_thread_create(0, task, 0, ERX_THREAD_CLASS_WORKER, &thread);
 	if (status == ERX_OK)
 		status = erx_thread_start(thread);

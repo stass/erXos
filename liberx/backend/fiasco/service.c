@@ -640,19 +640,21 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
  * If a step fails the thread and semaphore go first, and only then the reply: the
  * thread was never runnable, or the deletion's return means it never reaches user
  * mode again, so the caller may free its stack. A thread starts at its own task's
- * trampoline, whose address its stub sends; a task's first thread starts at the
- * image's entry, the only address of the task the root knows.
+ * trampoline, whose address its stub sends; a task's first thread starts at the pc of
+ * the starting registers its creator wrote, as on erXos's kernel.
  */
 static int
 service_thread_start(uint32_t caller, const erx_fiasco_thread_start_request_t *request)
 {
+	const erx_fiasco_thread_record_t *record;
 	uint32_t index, task;
 	uint64_t ip;
 
 	if (!service_thread_name(caller, request->thread, &task, &index) ||
 	    erx_fiasco_task(task)->threads[index] != ERX_FIASCO_TASK_THREAD_CREATED || (task != caller && index != 0))
 		return (ERX_EINVAL);
-	ip = task == caller ? request->trampoline : erx_fiasco_task(task)->entry;
+	record = erx_fiasco_task_record(task, index);
+	ip = task == caller ? request->trampoline : record->start.regs.pc;
 
 	if (!service_thread_steps(task, index, ip)) {
 		service_thread_delete(task, index);

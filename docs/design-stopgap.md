@@ -823,7 +823,7 @@ started when the thread first runs, as the root's does, and the trampoline below
 is refused untouched, since a 1 written over the kernel's 0 would lose the index for good. The service, in order:
 
 1. `l4_thread_control_start`, `_pager` and `_exc_handler` naming the task's gate, `_bind(slot, task)`, `_commit`.
-2. `l4_thread_ex_regs(thread, trampoline, record, 0)`. The trampoline's address comes in the start request, as each task's image has its own. A task's first thread starts at the image's entry instead, which `erx_image_map` returned to the creator and the service keeps, and the creator puts its argument in the starting registers (a domain's boot information page, a program's channel values); the service does not read the starting registers' `pc` there, a recorded difference. The image's first instructions put the task's first stack and its C entry in the record and go to the trampoline.
+2. `l4_thread_ex_regs(thread, trampoline, record, 0)`. The trampoline's address comes in the start request, as each task's image has its own. A task's first thread starts at the `pc` of the starting registers its creator wrote, as on erXos's kernel: the image's entry, which `erx_image_map` returned to the creator, with its argument beside it (a domain's boot information page, a program's channel values). The image's first instructions put the task's first stack and its C entry in the record and go to the trampoline.
 3. `l4_scheduler_run_thread`.
 
 Starting a thread twice is `ERX_EINVAL`.

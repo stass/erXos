@@ -408,8 +408,7 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 	for (uint32_t load = 0; load < task_plan.nloads; load++)
 		if (!task_segment_load(task, image, &task_plan.loads[load], task_plan.fixed_base))
 			return (ERX_ENOMEM);
-	erx_fiasco_task(task)->entry = task_plan.fixed_base + task_plan.entry;
-	*start = erx_fiasco_task(task)->entry;
+	*start = task_plan.fixed_base + task_plan.entry;
 	return (ERX_OK);
 }
 
