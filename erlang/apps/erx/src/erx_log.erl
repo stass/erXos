@@ -8,7 +8,9 @@
 
 -module(erx_log).
 
--export([debug/1, read/1]).
+-export([debug/1, debug_text/1, read/1]).
+
+-include("generated/erx_abi.hrl").
 
 -nifs([debug_nif/1, read_nif/1]).
 -on_load(on_load/0).
@@ -21,6 +23,22 @@ on_load() ->
 -spec debug(iodata()) -> ok | {error, integer()}.
 debug(Bytes) ->
     debug_nif(Bytes).
+
+%% Bytes as debug-level records of at most a UTCB's bytes each, in order: one record for
+%% a short text, and pieces of ERX_UTCB_BYTES_MAX for a longer one. The log escapes each
+%% byte on its own, so a character split between two pieces shows as it would whole.
+%% Stops at the first piece the log refuses.
+-spec debug_text(iodata()) -> ok | {error, integer()}.
+debug_text(Bytes) ->
+    pieces(iolist_to_binary(Bytes)).
+
+pieces(<<Piece:?ERX_UTCB_BYTES_MAX/binary, Rest/binary>>) when Rest =/= <<>> ->
+    case debug_nif(Piece) of
+        ok -> pieces(Rest);
+        Error -> Error
+    end;
+pieces(Last) ->
+    debug_nif(Last).
 
 %% The lines after Cursor, oldest first; the cursor to pass next; and how many records were
 %% overwritten before anyone read them. corrupt says a record failed the reader's checks,

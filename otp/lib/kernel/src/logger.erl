@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: the default handler on a standard device is erx_log_h, the log
+%% sink's handler, in place of logger_std_h.
+%%
 %% %CopyrightEnd%
 %%
 -module(logger).
@@ -1820,6 +1823,12 @@ init_default_config(Type,Env) when Type==standard_io;
                 lists:keyreplace(default, 2, Env,
                                  {handler, default, Module,
                                   maps:merge(DefaultFormatter,Config)});
+            _ when Type =:= standard_io; Type =:= standard_error ->
+                %% erXos: nothing has been configured, so every event goes to the log
+                %% sink, which sends it to the console, where it is shown under the
+                %% domain's name; logger_std_h would write it to this domain's user
+                %% (docs/design-live.md, "The console", Logs).
+                [{handler, default, erx_log_h, DefaultFormatter} | Env];
             _ ->
                 %% Nothing has been configured, use default
                 [{handler, default, logger_std_h, DefaultConfig} | Env]

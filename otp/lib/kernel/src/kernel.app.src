@@ -1,4 +1,5 @@
-%% Modified by erXos: lists erx_dist and erx_connections, the carrier between domains.
+%% Modified by erXos: lists erx_dist and erx_connections, the carrier between domains,
+%% and erx_log_h, the log sink's handler.
 %%
 %% %CopyrightBegin%
 %%
@@ -67,6 +68,7 @@
 	     inet_tcp_dist,
 	     erx_connections,
 	     erx_dist,
+	     erx_log_h,
 	     kernel,
 	     kernel_config,
 	     kernel_refc,

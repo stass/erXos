@@ -15,8 +15,9 @@ modules() ->
     [application, application_controller, binary, calendar, code, code_server,
      epp, erl_error, erl_features, erl_internal, erl_scan, erpc,
      error_logger, erx_fs, erx_fs_grant, erx_fs_version, erx_ramfs, erx_ramfs_core,
-     ets, gb_trees, gen, gen_server, global, io,
-     io_lib, io_lib_format, io_lib_fread, io_lib_pretty, lists, logger,
-     logger_backend, logger_config, logger_formatter, logger_olp, logger_proxy, logger_server,
-     logger_simple_h, maps, os, proc_lib, proplists, re,
-     records, rpc, string, unicode, unicode_util].
+     erx_text, erx_text_tables, ets, gb_trees, gen, gen_server,
+     global, io, io_lib, io_lib_format, io_lib_fread, io_lib_pretty,
+     lists, logger, logger_backend, logger_config, logger_formatter, logger_olp,
+     logger_proxy, logger_server, logger_simple_h, maps, os, proc_lib,
+     proplists, re, records, rpc, string, unicode,
+     unicode_util].

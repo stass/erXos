@@ -371,7 +371,7 @@ fails until the list names it.
 ### The edits outside `sys/erxos`
 
 Everything the adapter adds lives in `sys/erxos`, the drivers and NIFs
-included. The edits to ERTS's own files, and those to nine files of
+included. The edits to ERTS's own files, and those to eleven files of
 `kernel`, four of `stdlib` and the preloaded `erlang.erl`, are these, each at a seam named above; an edit is one change
 of behaviour, however many lines it touches:
 
@@ -410,7 +410,7 @@ of behaviour, however many lines it touches:
 | `lib_src/common/ethr_aux.c` | 40. the page size is `getpagesize()`, in place of `sysconf` |
 | `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load; `kernel_safe_sup`'s `init/1` makes the domain's file version counter (`erx_fs_version:init/0`) and adds `erx_ramfs_sup`, the domain's `/tmp`, as its last child ([design-tmp.md](design-tmp.md#starting-and-mounting)); `start_distribution false` leaves out only `net_sup` and `dist_ac`, so `rex`, `global_name_server` and `global_group` start as on a stock node that is not distributed ([Configuration](#configuration)) |
 | `beam/bif.c` | 42. while another process holds `erx_tty_owner`, `halt_2` with `{flush, true}` traps to `erx_output:halt/2`, which drains the tty before it halts ([The console](#the-console-and-standard-io)) |
-| `lib/kernel/src/logger_simple_h.erl` | 43. `log_internal/2` and `display/1` build each event's text on one line, and print `erx_text:escape_line/1` of it and a CR-LF in one `erlang:display_string/2` ([design-live.md](design-live.md#the-console)) |
+| `lib/kernel/src/logger_simple_h.erl` | 43. `log_internal/2` and `display_log/1` build each event's text on one line, and print `erx_text:escape_line/1` of it and a CR-LF in one `erlang:display_string/2` ([design-live.md](design-live.md#the-console)) |
 | `lib/stdlib/src/shell.erl` | 44. `prompt_width/1` asks no group when `erx_console` calls it, as when `user_drv` does |
 | `lib/kernel/src/user_sup.erl` | 45. `get_user/1` answers `{erx_console, start, []}` when the flags hold `-user erx_console`, whatever `-noshell`, `-noinput` and their kin say, since `erx_console` reads those itself and no flag reaches `user_drv`, whose NIF is gone |
 | `lib/kernel/src/user_drv.erl` | 46. `whereis_group/0` reads the group from `erx_console`'s process when `user_drv` is not running: the current group when it runs the Erlang shell, and `undefined` while a command shell has the input |
@@ -424,8 +424,9 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/inet.erl` | 54. `inet_backend` takes a third value, `erx`, and it is the default: `gen_tcp_module/2` and `gen_udp_module/2` return `erx_gen_tcp` and `erx_gen_udp` for it, whose sockets are `{'$inet', Module, Pid}` terms that `gen_tcp`, `gen_udp` and `inet` already dispatch on, and `getifaddrs/0` and `gethostname/0` ask the domain's network grant ([design-network-stack.md](design-network-stack.md#the-backend)) |
 | `lib/kernel/src/group.erl` | 55. the driver's `suspend`, which `erx_console` sends for `Ctrl-Z`, reaches the group's shell as `{Group, suspend}`, as an interrupt reaches it as an exit signal, so the command shell can stop its foreground job ([design-shell.md](design-shell.md#job-control)) |
 | `beam/dist.c`, `beam/erl_proc_sig_queue.c` | 56. when a distribution entry goes down with a reason `{domain_down, D, Info}` whose `D` is the creation the entry had as it went down, which `erts_do_net_exits` checks and hands the cleanup with the reason, `link_connection_down` fires each link and `monitor_connection_down` each monitor and pending spawn with that reason, where stock fires `noconnection`, and the conversion of a pending spawn's `DOWN` into the `spawn_request` error reply takes the reason it is given in place of asserting `noconnection`; `Info` is small, a tag or a tag and a status (`{halt, Status}`, `crash`, `{fault, Kind}`, `stopped`), and the cleanup fires from the copy of the reason it already keeps in its own heap for `nodedown_reason`, alive across its yielding passes, which each exit, `DOWN` and error reply copies in turn; every other reason fires `noconnection` as stock, and the reason reaches `net_kernel:monitor_nodes/2`'s `nodedown_reason` as stock passes it ([Connections in ERTS](#connections-in-erts)) |
+| `lib/kernel/src/logger.erl`, `lib/kernel/src/error_logger.erl` | 57. `init_default_config/2` makes `erx_log_h` the `default` handler where nothing configures one and the logger's type is a standard device, in place of `logger_std_h`, so every domain's events go to the log sink; `error_logger:tty/1` switches that handler on and off as it does `logger_std_h` on `standard_io`, and never adds a second handler on `standard_io` ([design-live.md](design-live.md#the-console)) |
 
-Fifty-six edits outside `sys/erxos`, in fifty-eight named files outside
+Fifty-seven edits outside `sys/erxos`, in sixty named files outside
 the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
 the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock

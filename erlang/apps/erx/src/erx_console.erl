@@ -41,6 +41,10 @@
 %% line can therefore land inside a program's line or an edited prompt, as a kernel message
 %% does on a Unix serial console. Until the root hands the log to this reader, the root
 %% writes each record to the line itself and a read finds nothing.
+%%
+%% It is the log sink's end too: the system domain's erx_log_h sends it each log event as a
+%% record, {log, Level, Text}, and erx_console_log decides whether to take it and renders its
+%% line, with the line escape, under the system domain's id, principal and name.
 
 -module(erx_console).
 -behaviour(gen_server).
@@ -64,6 +68,8 @@
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
 -define(LOG_POLL_MS, 100).
+%% The system principal, number 1, whose domain the system domain is (include/erx/dom.h).
+-define(SYSTEM_PRINCIPAL, 1).
 
 -record(state, {driver :: pid(),
                 %% The group the console started with, which the others return the input to:
@@ -82,6 +88,8 @@
                 input_ended = false :: boolean(),
                 %% Where the next read of the kernel log starts.
                 log_cursor = 0 :: non_neg_integer(),
+                %% Each domain's log records this second, and those dropped.
+                log_records = erx_console_log:new() :: erx_console_log:state(),
                 %% The start of a character whose other bytes have not been read yet.
                 pending = <<>> :: binary()}).
 
@@ -256,6 +264,17 @@ handle_info(erx_log_poll, State = #state{driver = Driver, log_cursor = Cursor}) 
             Driver ! {erx_console_output, none, log_line(Line)},
             erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
             {noreply, State}
+    end;
+handle_info({log, _Level, _Text} = Record, State = #state{driver = Driver, log_records = Records}) ->
+    %% A record sent to this name is the system domain's: another domain's send to a
+    %% registered name never leaves that domain (edit 27 of docs/design-runtime.md),
+    %% and its records arrive through its console facet, under its own source.
+    case erx_console_log:accept(Record, system_source(), os:perf_counter(nanosecond), Records) of
+        {line, Line, Next} ->
+            Driver ! {erx_console_output, none, Line},
+            {noreply, State#state{log_records = Next}};
+        {dropped, Next} ->
+            {noreply, State#state{log_records = Next}}
     end;
 handle_info({erx_console_written, none}, State) ->
     {noreply, State};
@@ -451,6 +470,11 @@ deliver(menu, #state{driver = Driver, tty = TTY}) ->
 -spec onlcr(binary()) -> binary().
 onlcr(Bytes) ->
     binary:replace(Bytes, <<"\n">>, <<"\r\n">>, [global]).
+
+%% The system domain as the source of its own log records: its id, the system
+%% principal and its name.
+system_source() ->
+    #{id => erx_kernel_records:system_domain(), principal => ?SYSTEM_PRINCIPAL, name => <<"system">>}.
 
 %% A rendered log line ends in its one newline; a terminal's line ends in CR-LF.
 log_line(<<>>) ->

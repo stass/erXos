@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: tty/1 switches the log sink's default handler, erx_log_h, on and
+%% off, and never adds a handler that writes to standard_io.
+%%
 %% %CopyrightEnd%
 %%
 -module(error_logger).
@@ -932,6 +935,12 @@ tty(true) ->
                     {ok,#{module:=logger_std_h,config:=#{type:=standard_io}}} ->
                         logger:remove_handler_filter(default,
                                                      error_logger_tty_false);
+                    %% erXos: the default handler is the log sink's, which
+                    %% shows events escaped under the domain's name; a second
+                    %% handler on standard_io would show them again, raw.
+                    {ok,#{module:=erx_log_h}} ->
+                        logger:remove_handler_filter(default,
+                                                     error_logger_tty_false);
                     _ ->
                         logger:add_handler(error_logger_tty_true,logger_std_h,
                                            #{filter_default=>stop,
@@ -950,6 +959,9 @@ tty(false) ->
     _ = logger:remove_handler(error_logger_tty_true),
     _ = case logger:get_handler_config(default) of
             {ok,#{module:=logger_std_h,config:=#{type:=standard_io}}} ->
+                logger:add_handler_filter(default,error_logger_tty_false,
+                                          {fun(_,_) -> stop end, ok});
+            {ok,#{module:=erx_log_h}} ->
                 logger:add_handler_filter(default,error_logger_tty_false,
                                           {fun(_,_) -> stop end, ok});
             _ ->

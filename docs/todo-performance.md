@@ -14,6 +14,7 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Medium] runtime, the log sink under a flood of events.** `erx_log_h:log/2` sends every record without the queue checks of `logger_olp`, and `erx_console_log` drops past 16 KiB a second only once the record is in `erx_console`'s queue. Settle it with a crash loop logging large reports in the system domain and in a domain: `erx_console`'s queue length and console echo latency, and the proxy's queue and its kernel calls per second, with and without a queue-length bound in `log/2`.
 * **[Medium] display, a layout change in `erx_screen`.** `erx_screen_core:layout/2`
   (`erlang/apps/erx_display/src/erx_screen_core.erl`) tiles and compares in O(L^2 log L) for L
   window and decoration rectangles, and every flush waits behind it. Measure a layout change of

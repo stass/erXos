@@ -97,6 +97,17 @@ static uint32_t erts_release, erts_files;
 #define ERTS_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
     "-boot\0/bin/start\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0-eval\0"
 static const char erts_args[] = ERTS_BOOT "erlang:display(init_started),erlang:halt(0)";
+/*
+ * What the logger case's domain runs: an error logged through the logger, whose text
+ * holds a tab, an escape sequence and a newline, and a record of the domain's own making
+ * sent to its logger proxy, which also holds a newline; then it waits for the proxy and
+ * says it is done. Each record reaches the console as one record of the domain's space,
+ * with every control shown as a token (tools/lib/erx/native_domain.rb).
+ */
+static const char logger_args[] = ERTS_BOOT
+    "logger:error(\"tab\\there esc\\e[31mred nl~s\",[\"\\nend\"]),"
+    "erx_log_h!{log,warning,<<\"raw\",9,\"t\",27,\"[0m\",10,\"x\">>},"
+    "erx_log_h:sync(),erlang:display(logger_done),erlang:halt(0)";
 /* What a BeamAsm domain runs: jit_reload, from the release's /test/, in one of its modes. */
 #define JIT_RUN(mode)	ERTS_BOOT "{ok,B}=erl_prim_loader:read_file(\"/test/jit_reload.beam\")," \
     "{module,jit_reload}=erlang:load_module(jit_reload,B),jit_reload:run(" mode ")"
@@ -245,6 +256,16 @@ erts_request(uint32_t runtime)
 	request.memory = ERTS_MEMORY;
 	memcpy(request.strings, erts_args, sizeof(erts_args));
 	request.args_len = (uint32_t)sizeof(erts_args);
+	return (&request);
+}
+
+/* A request for a domain whose ERTS boots the ERTS release with logger_args. */
+static const erx_dom_spec_t *
+logger_request(uint32_t runtime)
+{
+	(void)erts_request(runtime);
+	memcpy(request.strings, logger_args, sizeof(logger_args));
+	request.args_len = (uint32_t)sizeof(logger_args);
 	return (&request);
 }
 
@@ -1189,6 +1210,7 @@ erx_fiasco_root_main(void)
 	case_end("stop", request_for("wait", program, 0), RUN_STOP, ERX_DOM_END_STOPPED, 0);
 	case_end("lanes", request_for("halt", program, 1), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
 	case_end("erts", erts_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
+	case_end("logger", logger_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("erts_refused", erts_request(erts), RUN_SPOIL, ERX_DOM_END_HALT, ERX_FIASCO_TASK_STATUS_BOOT_PAGE);
 	case_end("crash", crash_request(erts), RUN_CRASH, ERX_DOM_END_CRASH, 0);
 	case_end("jit_reload", jit_request(jit, jit_reload_args, sizeof(jit_reload_args)), RUN_PLAIN, ERX_DOM_END_HALT, 0);

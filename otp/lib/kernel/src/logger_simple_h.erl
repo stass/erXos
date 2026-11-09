@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: each event's text is built on one line and shown with the line
+%% escape and a CR-LF in one write.
+%%
 %% %CopyrightEnd%
 %%
 -module(logger_simple_h).
@@ -105,6 +108,7 @@ do_log(_) ->
 init(Starter) ->
     register(?MODULE,self()),
     Starter ! {self(),started},
+    load_escape(),
     loop(rich, #{buffer_size=>20,dropped=>0,buffer=>[]}).
 
 loop(Mode, Buffer) ->
@@ -164,6 +168,8 @@ drop_msg(N) ->
 %% for each log message that can potentially block. If the logging cannot
 %% be done within 300ms, we instead log the raw log message to stdout
 %% and switch mode to always log using the raw format.
+%% erXos: each event's text is built on one line and shown through display_line/1,
+%% in both modes (edit 43 of docs/design-runtime.md).
 log_internal(simple, Log) ->
     display_log(Log), simple;
 log_internal(rich = Mode, Log) ->
@@ -173,10 +179,11 @@ log_internal(rich = Mode, Log) ->
           fun() ->
                   Str = logger_formatter:format(
                           Log,
-                          #{ legacy_header => true, single_line => false,
-                             depth => unlimited, time_offset => ""
+                          #{ legacy_header => false, single_line => true,
+                             depth => unlimited, time_offset => "",
+                             template => [time, " ", level, ": ", msg]
                            }),
-                  erlang:display_string(stdout, lists:flatten(unicode:characters_to_list(Str)))
+                  display_line(Str)
           end),
     receive
         {'DOWN', Ref, _, _, normal} ->
@@ -197,28 +204,50 @@ log_internal(rich = Mode, Log) ->
             end
     end.
 
-display_log(#{msg:={report,Report},
-         meta:=#{time:=T,error_logger:=#{type:=Type}}}) ->
-    display_date(T),
-    display_report(Type,Report);
-display_log(#{msg:=Msg,meta:=#{time:=T}}) ->
-    display_date(T),
-    display(Msg).
+%% erXos: an event's text is attributed text, so it is shown with the line escape,
+%% which renders each control in it, tab and newline included, as a token, followed by
+%% the line's CR-LF, in one write (docs/design-live.md, "The console", Logs). Text that
+%% is not character data, or a runtime that cannot run the escape, shows a fixed line
+%% instead.
+display_line(Text) ->
+    Line = try erx_text:escape_line(Text)
+           catch error:_ -> <<"logger_simple_h: an event's text could not be shown">>
+           end,
+    erlang:display_string(stdout, unicode:characters_to_list([Line, "\r\n"])).
 
-display_date(Timestamp) when is_integer(Timestamp) ->
+%% erXos: loads erx_text and its tables when the handler starts, so an event shown
+%% later while init is busy, when loading code would block, finds them loaded. The
+%% handler starts before the code server, so the load goes through error_handler and
+%% init:ensure_loaded/1 from the release's code path; should it fail, display_line/1
+%% shows its fixed line.
+load_escape() ->
+    try erx_text:escape_line(<<>>) of
+        _Empty -> ok
+    catch
+        error:_ -> ok
+    end.
+
+display_log(Log) ->
+    display_line(log_text(Log)).
+
+log_text(#{msg:={report,Report},
+         meta:=#{time:=T,error_logger:=#{type:=Type}}}) ->
+    [date_text(T), report_text(Type,Report)];
+log_text(#{msg:=Msg,meta:=#{time:=T}}) ->
+    [date_text(T), msg_text(Msg)].
+
+date_text(Timestamp) when is_integer(Timestamp) ->
     Micro = Timestamp rem 1000000,
     Sec = Timestamp div 1000000,
     {{Y,Mo,D},{H,Mi,S}} = erlang:universaltime_to_localtime(
                             erlang:posixtime_to_universaltime(Sec)),
-    erlang:display_string(
-      stdout,
-      integer_to_list(Y) ++ "-" ++
-	  pad(Mo,2) ++ "-" ++
-	  pad(D,2)  ++ " " ++
-	  pad(H,2)  ++ ":" ++
-	  pad(Mi,2) ++ ":" ++
-	  pad(S,2)  ++ "." ++
-          pad(Micro,6) ++ " ").
+    integer_to_list(Y) ++ "-" ++
+        pad(Mo,2) ++ "-" ++
+        pad(D,2)  ++ " " ++
+        pad(H,2)  ++ ":" ++
+        pad(Mi,2) ++ ":" ++
+        pad(S,2)  ++ "." ++
+        pad(Micro,6) ++ " ".
 
 pad(Int,Size) when is_integer(Int) ->
     pad(integer_to_list(Int),Size);
@@ -227,53 +256,45 @@ pad(Str,Size) when length(Str)==Size ->
 pad(Str,Size) ->
     pad([$0|Str],Size).
 
-display({string,Chardata}) ->
+%% A message as stock's simple mode shows it, unformatted: a format string with each
+%% argument after it, or a report's terms, on one line.
+msg_text({string,Chardata}) ->
     try unicode:characters_to_list(Chardata) of
-        String -> erlang:display_string(stdout, String),
-                  erlang:display_string(stdout, "\n")
-    catch _:_ -> erlang:display(Chardata)
+        String when is_list(String) -> String;
+        _Invalid -> term_text(Chardata)
+    catch _:_ -> term_text(Chardata)
     end;
-display({report,Report}) when is_map(Report) ->
-    display_report(maps:to_list(Report));
-display({report,Report}) ->
-    display_report(Report);
-display({F, A}) when is_list(F), is_list(A) ->
-    erlang:display_string(stdout, F ++ "\n"),
-    [begin
-	 erlang:display_string(stdout, "\t"),
-	 erlang:display(Arg)
-     end || Arg <- A],
-    ok.
+msg_text({report,Report}) when is_map(Report) ->
+    report_text(maps:to_list(Report));
+msg_text({report,Report}) ->
+    report_text(Report);
+msg_text({F, A}) when is_list(F), is_list(A) ->
+    [F | [[$\s, term_text(Arg)] || Arg <- A]].
 
-display_report(Atom, A) when is_atom(Atom) ->
+report_text(Atom, A) when is_atom(Atom) ->
     %% The widest atom seems to be 'supervisor_report' at 17.
     ColumnWidth = 20,
     AtomString = atom_to_list(Atom),
     AtomLength = length(AtomString),
     Padding = lists:duplicate(ColumnWidth - AtomLength, $\s),
-    erlang:display_string(stdout, AtomString ++ Padding),
-    display_report(A);
-display_report(F, A) ->
-    erlang:display({F, A}).
+    [AtomString, Padding, report_text(A)];
+report_text(F, A) ->
+    term_text({F, A}).
 
-display_report(#{ report := Report }) ->
-    display_report(Report);
-display_report([A, []]) ->
+report_text(#{ report := Report }) ->
+    report_text(Report);
+report_text([A, []]) ->
     %% Special case for crash reports when process has no links
-    display_report(A);
-display_report(A = [_|_]) ->
+    report_text(A);
+report_text(A = [_|_]) ->
     case lists:all(fun({Key,_Value}) -> is_atom(Key); (_) -> false end, A) of
 	true ->
-	    erlang:display_string(stdout, "\n"),
-	    lists:foreach(
-	      fun({Key, Value}) ->
-		      erlang:display_string(
-                        stdout,
-                        "    " ++ atom_to_list(Key) ++ ": "),
-		      erlang:display(Value)
-	      end, A);
+	    [["    ", atom_to_list(Key), ": ", term_text(Value)] || {Key, Value} <- A];
 	false ->
-	    erlang:display(A)
+	    term_text(A)
     end;
-display_report(A) ->
-    erlang:display(A).
+report_text(A) ->
+    term_text(A).
+
+term_text(Term) ->
+    io_lib:write(Term).

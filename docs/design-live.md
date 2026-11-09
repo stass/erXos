@@ -853,9 +853,10 @@ reads them with `erx_log_read` and writes each as a log line
     own tty, under no other name. The system release's configuration names it on
     no standard device, which the release check confirms.
 
-  The console accepts only that shape and at most 16 KiB of text per
-  second per domain, the rate `erx_debug_log` allows a space, beyond which
-  it drops and counts records. It renders each like a kernel log record,
+  The console accepts only that shape and at most 16 KiB of log lines per
+  second per domain, the rate `erx_debug_log` allows a space, each record
+  charged the whole line it renders, beyond which it drops and counts
+  records. It renders each like a kernel log record,
   stamped with the time it arrived, with the line escape, under the domain's
   id and principal, which come from the lane the record arrived on and the
   domain service, and then the domain's name, escaped. A name is unique
