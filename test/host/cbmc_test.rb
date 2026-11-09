@@ -4,6 +4,7 @@
 
 require 'json'
 require 'minitest/autorun'
+require 'timeout'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/cbmc'
 
@@ -198,6 +199,30 @@ class CbmcTest < Minitest::Test
       assert_includes error.message, 'CBMC gate failed'
       written = JSON.parse(File.read(File.join(root, 'build/cbmc/report.json')))
       assert_equal %w[failed missed], [written.fetch('state'), written.fetch('mutants').first.fetch('state')]
+    end
+  end
+
+  def test_checks_run_at_once_up_to_the_job_count_and_return_in_order
+    arrived = Queue.new
+    # Each check waits for the other to start, so it returns only if two run at once.
+    meet = lambda do |value|
+      lambda do
+        arrived << value
+        Timeout.timeout(10) { sleep 0.01 while arrived.size < 2 }
+        value
+      end
+    end
+    assert_equal %i[a b], Erx::Cbmc.concurrently([meet.call(:a), meet.call(:b)], jobs: 2)
+    assert_equal [1, 2, 3], Erx::Cbmc.concurrently([-> { sleep 0.05; 1 }, -> { 2 }, -> { 3 }], jobs: 2)
+    error = assert_raises(RuntimeError) { Erx::Cbmc.concurrently([-> { raise 'boom' }, -> { 1 }], jobs: 1) }
+    assert_equal 'boom', error.message
+  end
+
+  def test_the_job_count_is_a_positive_integer_else_the_cpu_count
+    assert_equal 6, Erx::Cbmc.jobs(environment: {}, cpus: 6)
+    assert_equal 2, Erx::Cbmc.jobs(environment: { 'CBMC_JOBS' => '2' }, cpus: 6)
+    %w[0 -1 two 2.5 999].each do |bad|
+      assert_raises(Erx::Error) { Erx::Cbmc.jobs(environment: { 'CBMC_JOBS' => bad }, cpus: 6) }
     end
   end
 end

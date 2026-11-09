@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'etc'
 require 'fileutils'
 require 'json'
 require 'time'
@@ -261,7 +262,8 @@ module Erx
 
     # prepare brings the generated headers the harnesses include up to date.
     def initialize(root:, runner: nil, program: ENV.fetch('CBMC', 'cbmc'), clock: -> { Time.now.utc },
-                   prepare: ->(tree) { Generated.ensure(root: tree) })
+                   prepare: ->(tree) { Generated.ensure(root: tree) }, jobs: nil)
+      @jobs = jobs
       @root = File.expand_path(root)
       @runner = runner || Runner.new(owner_root: @root, log_dir: File.join(@root, 'build/logs'))
       @program = program
@@ -272,6 +274,7 @@ module Erx
     def run(filter: nil)
       # A run that stops early leaves no earlier report to be read as its own.
       remove_reports
+      jobs = @jobs || Cbmc.jobs
       roster = CbmcRoster.read(@root)
       harnesses = roster.fetch('harnesses').select { |entry| filter.nil? || entry.fetch('id').include?(filter) }
       raise Error, 'CBMC filter matched no harness' if harnesses.empty?
@@ -280,17 +283,75 @@ module Erx
       @prepare.call(@root)
       settings = roster.slice('solver', 'checks')
       by_id = harnesses.to_h { |entry| [entry.fetch('id'), entry] }
-      results = harnesses.map { |entry| check_harness(entry, tool: tool, settings: settings) }
-      mutants = roster.fetch('mutants').select { |mutant| by_id.key?(mutant.fetch('harness')) }.map do |mutant|
-        check_mutant(mutant, harness: by_id.fetch(mutant.fetch('harness')), tool: tool, settings: settings)
-      end
-      report = Cbmc.report(tool: tool, settings: settings, filter: filter, harnesses: results, mutants: mutants,
+      selected = roster.fetch('mutants').select { |mutant| by_id.key?(mutant.fetch('harness')) }
+      checks = harnesses.map { |entry| -> { check_harness(entry, tool: tool, settings: settings) } } +
+               selected.map do |mutant|
+                 harness = by_id.fetch(mutant.fetch('harness'))
+                 -> { check_mutant(mutant, harness: harness, tool: tool, settings: settings) }
+               end
+      values = Cbmc.concurrently(checks, jobs: jobs)
+      results = values.first(harnesses.size)
+      mutants = values.drop(harnesses.size)
+      report = Cbmc.report(tool: tool, settings: settings, jobs: jobs, filter: filter, harnesses: results, mutants: mutants,
                            date: @clock.call.iso8601)
       write_report(report)
       Cbmc.summary(report).each_line { |line| Terminal.puts(line.chomp) }
       raise Error, 'CBMC gate failed; see build/cbmc/report.txt' unless report.fetch('state') == 'passed'
 
       report
+    end
+
+    MAX_JOBS = 256
+
+    # How many CBMC runs go at once: CBMC_JOBS when set to a positive count,
+    # else the host's CPUs. Each run is single-threaded and holds its own
+    # SAT state, so the count also bounds the memory the gate may use, and
+    # each run's wall time includes the slowdown of the runs beside it.
+    def self.jobs(environment: ENV, cpus: Etc.nprocessors)
+      requested = environment['CBMC_JOBS']
+      return cpus if requested.nil? || requested.empty?
+
+      unless /\A[1-9][0-9]*\z/.match?(requested) && requested.to_i <= MAX_JOBS
+        raise Error, "CBMC_JOBS must be between 1 and #{MAX_JOBS}"
+      end
+
+      requested.to_i
+    end
+
+    # Calls every check, at most jobs at a time, and returns their values in
+    # the order of checks, whatever order they finish in. A check that
+    # raises stops the others from starting; the runs already going finish
+    # (each is bounded by its deadline) and the first error is raised.
+    def self.concurrently(checks, jobs:)
+      raise Error, 'CBMC jobs must be a positive integer' unless jobs.is_a?(Integer) && jobs.positive?
+
+      pending = Queue.new
+      checks.each_with_index { |check, index| pending << [check, index] }
+      values = Array.new(checks.size)
+      failure = nil
+      lock = Mutex.new
+      workers = Array.new([jobs, checks.size].min) do
+        Thread.new do
+          loop do
+            break if lock.synchronize { failure }
+
+            check, index = begin
+              pending.pop(true)
+            rescue ThreadError
+              break
+            end
+            begin
+              values[index] = check.call
+            rescue StandardError => error
+              lock.synchronize { failure ||= error }
+            end
+          end
+        end
+      end
+      workers.each(&:join)
+      raise failure if failure
+
+      values
     end
 
     # The command line of one harness run, a pure function of the roster
@@ -327,18 +388,18 @@ module Erx
 
     private_class_method :pattern_state
 
-    def self.report(tool:, settings:, filter:, harnesses:, mutants:, date:)
+    def self.report(tool:, settings:, jobs:, filter:, harnesses:, mutants:, date:)
       passed = harnesses.all? { |result| result.fetch('state') == 'verified' } &&
                mutants.all? { |result| result.fetch('state') == 'caught' }
       { 'date' => date, 'state' => passed ? 'passed' : 'failed', 'filter' => filter, 'tool' => tool,
-        'solver' => settings.fetch('solver'), 'checks' => settings.fetch('checks'),
+        'jobs' => jobs, 'solver' => settings.fetch('solver'), 'checks' => settings.fetch('checks'),
         'harnesses' => harnesses, 'mutants' => mutants }
     end
 
     def self.summary(report)
       tool = report.fetch('tool')
       lines = ["CBMC #{tool.fetch('version')} (#{tool.fetch('path')}, sha256 #{tool.fetch('sha256')})",
-               "solver: #{report.fetch('solver')}; checks: #{report.fetch('checks').join(' ')}"]
+               "solver: #{report.fetch('solver')}; jobs: #{report.fetch('jobs')}; checks: #{report.fetch('checks').join(' ')}"]
       lines << "filter: #{report.fetch('filter')}" if report.fetch('filter')
       report.fetch('harnesses').each do |result|
         lines << format('%-16s %-9s %6d properties %8.1fs  %s', result.fetch('id'), result.fetch('state'),
