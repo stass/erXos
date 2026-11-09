@@ -403,6 +403,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   portable code staying as their oracle.
 * [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.
 * [Low] `tools/lib/erx/generated.rb`, `Erx::Generated.require_ruby`: every Ruby process that loads a generated Ruby file (each `tools/erx` call, each host test process using the ABI or terminal tables) loads the generator libraries and hashes every `tools/lib` file and every input and output to check the stamp, about 80 ms over loading the file alone when the tree is fresh (a reviewer's rough number on Apple Silicon macOS, not a recorded measurement). Settled by the wall time of `make check` and of `ruby tools/erx status` with and without the freshness check; if it shows, check a cheap digest of the stamp's inputs before loading the generators.
+* **[Low] network, eviction from a full neighbour table**
+  ([design-network-stack.md](design-network-stack.md#ipv4-and-arp)).
+  `erx_lltable`'s `room/1` walks all 1,024 entries, with two callback
+  calls each, for every new neighbour once the table is full, refused
+  ones included, which an on-link sender can trigger at line rate.
+  Settled by the time per learnt ARP request into a full table against
+  one into an empty one; the fix on the table is an eviction index of
+  rank, age and key kept beside the deadline index.
 * **[Medium] network, a round trip per `gen_tcp:send/2` across a lane**
   ([design-network-stack.md](design-network-stack.md#the-backend)). Each
   send waits for the connection's reply that the data is in its send

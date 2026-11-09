@@ -2868,6 +2868,13 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] network, `erlang/apps/erx_net/src/erx_lltable.erl` (`room/1`): past the neighbour table's bound,
+  an entry learnt from an unsolicited ARP request or neighbour solicitation evicts the oldest unresolved entry
+  first, so an on-link host sending from spoofed on-link addresses about once per round trip keeps this host
+  from resolving a neighbour, the default router included; in ARP it can also evict a reachable neighbour in
+  use, since only an entry in `verify` is ever hinted. An entry this host creates by resolving could be made
+  unevictable by learnt entries, or a learnt entry could only take free room, as FreeBSD's `llt_maxentries`
+  refuses; an on-link attacker can already overwrite ARP entries, so the gain is mainly for IPv6.
 * [Low] network, `erlang/apps/erx_net/src/erx_nd6_rtr.erl`: an on-link sender that passes the hop-limit
   rule and fills the prefix list first with 16 autonomous prefixes of infinite valid lifetime holds the list
   until reboot, since only an advertisement of the same prefix shortens its addresses' lifetimes; later

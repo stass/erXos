@@ -136,3 +136,6 @@ module erx_tcp_ecn
   sys/netinet/tcp_input.c cc_cong_signal
   sys/netinet/tcp_output.c tcp_output
   sys/netinet/tcp_syncache.c syncache_timer
+
+module erx_lltable
+  sys/net/if_llatbl.c lltable_append_entry_queue

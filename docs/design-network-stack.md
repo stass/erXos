@@ -1133,8 +1133,22 @@ drawn the same way.
 times (`arp_maxtries`, `if_ether.c:102`), entries kept 20 minutes once
 resolved (`arpt_keep`, `if_ether.c:100`), 16 frames held per unresolved
 entry, gratuitous ARP and FreeBSD's rules for which replies may create
-or update an entry. The table has a bound per interface, and past it the
-oldest unresolved entry goes first. `erx_arp_wire` accepts the two
+or update an entry. The table has a bound per interface, 1,024 entries;
+past it the oldest unresolved entry is evicted, else the oldest resolved
+entry the protocol lets go, and when there is neither, no entry is
+made. ARP lets go of any resolved entry no transmitter has hinted in its
+last seconds; the IPv6 neighbour cache keeps the same bound and lets go
+only of a stale entry no transmitter has hinted (RFC 4861 5.3), keeping
+reachable, delay and probe entries. FreeBSD's `lltable` has a limit,
+`llt_maxentries`, that refuses every new entry once reached, but neither
+protocol sets it, so its tables are unbounded. An on-link sender that
+fills a table from spoofed sender addresses can therefore push out
+entries this host is resolving, and in ARP a neighbour in use, a
+residual `TODO.md` records. Both tables
+are one module, `erx_lltable`, as FreeBSD's `lltable` serves both: a
+keyed map ordered by deadline, whose `publish` and `unpublish` actions
+for the transmit path follow from each change of an entry, so neither
+protocol can change an entry without publishing it. `erx_arp_wire` accepts the two
 Ethernet hardware types (`ARPHRD_ETHER` and `ARPHRD_IEEE802`) with 6-byte
 addresses and refuses every other. `arpintr` also passes InfiniBand and
 FireWire packets on (`if_ether.c:691-720`), and `in_arpinput` drops
@@ -1305,6 +1319,7 @@ modules are marked P; process modules E.
 | --- | --- | --- | --- |
 | `erx_net_eth` | `if_ethersubr.c` (`ether_input` checks) | Ethernet II codec | P |
 | `erx_arp_wire`, `erx_arp` | `if_ether.c` | ARP codec; neighbour state machine | P |
+| `erx_lltable` | `if_llatbl.c` | the neighbour table of ARP and neighbour discovery | P |
 | `erx_ip4_wire`, `erx_ip4` | `ip.h`, `ip_input.c`, `ip_output.c`, `ip_options.c`, `ip_id.c` | IPv4 codec; input and output decisions | P |
 | `erx_ip_reass` | `ip_reass.c`, `frag6.c` | the reassembly table both families share: caps, lifetimes, placing and completing fragments | P |
 | `erx_ip4_reass` | `ip_reass.c` | IPv4 reassembly | P |
@@ -1711,7 +1726,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | Initial sequence numbers are unpredictable (RFC 6528); timestamp clocks are offset per connection | `erx_tcp_isn` |
 | ICMP reports act only when their quoted sequence number is in flight | `erx_tcp_icmp` (RFC 5927) |
 | Reassembly queues, both IP and TCP, have caps on count, bytes and lifetime; held payloads count at the size they keep alive | reassembly modules |
-| Neighbour messages are accepted only by RFC 4861's rules (hop limit 255) and FreeBSD's ARP rules; tables and held packets have bounds | `erx_arp`, `erx_nd6` |
+| Neighbour messages are accepted only by RFC 4861's rules (hop limit 255) and FreeBSD's ARP rules; tables and held packets have bounds | `erx_arp`, `erx_nd6`, `erx_lltable` |
 | Router, prefix and redirect entries have per-interface bounds; new entries past them are ignored, listed ones are never evicted | `erx_nd6_rtr`, `erx_net_route` |
 | DHCP replies reach only the interface's DHCP client, and only for its outstanding transaction | the interface's DHCP path |
 | ICMP errors, RSTs to closed ports and echo replies are rate-limited; no reply to a broadcast or multicast | the interface's limiters |

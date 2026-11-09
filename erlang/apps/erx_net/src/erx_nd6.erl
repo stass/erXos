@@ -89,6 +89,9 @@ IPv6, six for Ethernet.
 
 -export([new/3, resolve/6, input/5, hint/3, expired/3, next_deadline/1, count/1,
          reachable_time/1]).
+%% erx_lltable's callbacks. Not declared with -behaviour, which needs erx_lltable compiled
+%% first, and erlc compiles erx_net's modules in name order.
+-export([deadline/1, published/1, reclaimable/1]).
 
 -export_type([cache/0, iface/0, action/0]).
 
@@ -143,24 +146,19 @@ message about a tentative address to duplicate address detection.
 %% One neighbour: its state and link-layer address; `deadline' when expired/3 next looks at
 %% it (FreeBSD's callout); `asked' the solicitations sent in this state (la_asked); `used'
 %% whether a transmitter hinted it while stale (the hit time); `router' its IsRouter flag;
-%% `held' the waiting frames with their IPv6 sources, oldest first; `seq' its creation
-%% order, for eviction.
+%% `held' the waiting frames with their IPv6 sources, oldest first.
 -record(entry, {state :: incomplete | reachable | stale | delay | probe,
                 mac = none :: none | <<_:48>>,
                 deadline :: integer(),
                 asked = 0 :: non_neg_integer(),
                 used = false :: boolean(),
                 router = false :: boolean(),
-                held = [] :: [{Src :: <<_:128>>, Frame :: term()}],
-                seq :: non_neg_integer()}).
+                held = [] :: [{Src :: <<_:128>>, Frame :: term()}]}).
 
-%% `timers' orders the entries by deadline, {Deadline, Ip} for every entry. `reachable' is
-%% the drawn reachable time, `recalc' when it is next drawn, `gen' the generator it is drawn
-%% from.
--record(cache, {entries = #{} :: #{<<_:128>> => #entry{}},
-                timers = gb_sets:empty() :: gb_sets:set({integer(), <<_:128>>}),
-                max :: pos_integer(),
-                seq = 0 :: non_neg_integer(),
+%% `table' holds the entries keyed by IPv6 address, which this module describes with
+%% deadline/1, published/1 and reclaimable/1. `reachable' is the drawn reachable time,
+%% `recalc' when it is next drawn, `gen' the generator it is drawn from.
+-record(cache, {table :: erx_lltable:table(),
                 reachable :: pos_integer(),
                 recalc :: integer(),
                 gen :: erx_net_rand:gen()}).
@@ -173,15 +171,13 @@ its own; `max_entries` bounds it (1024 by default).
 """.
 -spec new(erx_net_rand:gen(), integer(), #{max_entries => pos_integer()}) -> cache().
 new(Gen, Now, Opts) ->
-    case maps:get(max_entries, Opts, ?MAX_ENTRIES) of
-        Max when is_integer(Max), Max > 0 -> draw_reachable(Now, #cache{max = Max, gen = Gen});
-        _ -> erlang:error(badarg)
-    end.
+    Table = erx_lltable:new(?MODULE, maps:get(max_entries, Opts, ?MAX_ENTRIES)),
+    draw_reachable(Now, #cache{table = Table, gen = Gen}).
 
 -doc "The number of entries.".
 -spec count(cache()) -> non_neg_integer().
-count(#cache{entries = Entries}) ->
-    map_size(Entries).
+count(#cache{table = Table}) ->
+    erx_lltable:count(Table).
 
 -doc "The reachable time in milliseconds, as last drawn.".
 -spec reachable_time(cache()) -> pos_integer().
@@ -203,13 +199,13 @@ resolve(Ip, Src, Frame, Now, Iface, C0) ->
     end.
 
 resolve_entry(Ip, #entry{state = stale, mac = Mac} = E, _Src, Frame, Now, _Iface, C) ->
-    {C1, Actions} = update(Ip, E, E#entry{state = delay, asked = 0, deadline = Now + ?ND6_DELAY}, C),
-    {C1, Actions ++ [{send, Mac, [Frame]}]};
+    then(put(Ip, E#entry{state = delay, asked = 0, deadline = Now + ?ND6_DELAY}, C),
+         [{send, Mac, [Frame]}]);
 resolve_entry(Ip, #entry{state = incomplete, asked = 0} = E, Src, Frame, Now, Iface, C) ->
     E1 = E#entry{held = hold(E#entry.held, {Src, Frame}), asked = 1, deadline = Now + ?RETRANS_TIMER},
-    {store(Ip, E1, C), [solicit(Ip, multicast, E1, Iface)]};
+    then(put(Ip, E1, C), [solicit(Ip, multicast, E1, Iface)]);
 resolve_entry(Ip, #entry{state = incomplete} = E, Src, Frame, _Now, _Iface, C) ->
-    {store(Ip, E#entry{held = hold(E#entry.held, {Src, Frame})}, C), []};
+    put(Ip, E#entry{held = hold(E#entry.held, {Src, Frame})}, C);
 resolve_entry(_Ip, #entry{mac = Mac}, _Src, Frame, _Now, _Iface, C) ->
     {C, [{send, Mac, [Frame]}]}.
 
@@ -217,17 +213,23 @@ resolve_entry(_Ip, #entry{mac = Mac}, _Src, Frame, _Now, _Iface, C) ->
 prepend(Evicted, {C, Actions}) ->
     {C, Evicted ++ Actions}.
 
+%% A step's result with further actions after its own.
+then({C, Actions}, More) ->
+    {C, Actions ++ More}.
+
 -doc """
 A transmitter used the stale entry of `Ip` at `Now` (FreeBSD's `llentry_provide_feedback`):
 the entry is probed five seconds later unless something resolves it first. Any other entry,
 or one already hinted, is unchanged.
 """.
 -spec hint(<<_:128>>, integer(), cache()) -> cache().
-hint(Ip, Now, #cache{entries = Entries} = C) ->
-    case Entries of
-        #{Ip := #entry{state = stale, used = false} = E} ->
-            store(Ip, E#entry{used = true, deadline = Now + ?ND6_DELAY}, C);
-        #{} ->
+hint(Ip, Now, #cache{table = Table} = C) ->
+    case erx_lltable:find(Ip, Table) of
+        #entry{state = stale, used = false} = E ->
+            %% Hinting changes neither state nor address, so nothing is published.
+{C1, []} = put(Ip, E#entry{used = true, deadline = Now + ?ND6_DELAY}, C),
+            C1;
+        _ ->
             C
     end.
 
@@ -256,58 +258,43 @@ input(#ip6{}, #icmp6{}, _Now, _Iface, C) ->
 -spec expired(integer(), iface(), cache()) -> {cache(), [action()]}.
 expired(Now, Iface, #cache{recalc = Recalc} = C) when Recalc =< Now ->
     expired(Now, Iface, draw_reachable(Now, C));
-expired(Now, Iface, C) ->
-    expired(Now, Iface, C, []).
-
-expired(Now, Iface, C, Acc) ->
-    case next_timer(C) of
-        {Deadline, Ip} when Deadline =< Now ->
-            {C1, Actions} = timer(Ip, maps:get(Ip, C#cache.entries), Now, Iface, C),
-            expired(Now, Iface, C1, lists:reverse(Actions, Acc));
-        _Later ->
-            {C, lists:reverse(Acc)}
-    end.
+expired(Now, Iface, #cache{table = Table} = C) ->
+    {Table1, Actions} = erx_lltable:expire(Now, fun(Ip, E, T) -> timer(Ip, E, Now, Iface, T) end, Table),
+    {C#cache{table = Table1}, Actions}.
 
 -doc "The earliest deadline: an entry's, or when the reachable time is next drawn.".
 -spec next_deadline(cache()) -> integer().
-next_deadline(#cache{recalc = Recalc} = C) ->
-    case next_timer(C) of
-        {Deadline, _Ip} -> min(Deadline, Recalc);
-        none -> Recalc
-    end.
+next_deadline(#cache{table = Table, recalc = Recalc}) ->
+    case erx_lltable:next_deadline(Table) of
+    infinity -> Recalc;
+    Deadline -> min(Deadline, Recalc)
+end.
 
-next_timer(#cache{timers = Timers}) ->
-    case gb_sets:is_empty(Timers) of
-        true -> none;
-        false -> gb_sets:smallest(Timers)
-    end.
-
-%% nd6_llinfo_timer for one entry whose deadline has come.
-timer(Ip, #entry{state = incomplete, asked = Asked} = E, Now, Iface, C) when Asked < ?ND6_MMAXTRIES ->
+%% nd6_llinfo_timer for one entry whose deadline has come, on the table alone.
+timer(Ip, #entry{state = incomplete, asked = Asked} = E, Now, Iface, T) when Asked < ?ND6_MMAXTRIES ->
     E1 = E#entry{asked = Asked + 1, deadline = Now + ?RETRANS_TIMER},
-    {store(Ip, E1, C), [solicit(Ip, multicast, E1, Iface)]};
-timer(Ip, #entry{state = incomplete, held = Held}, _Now, _Iface, C) ->
-    {delete(Ip, C), [{unreachable, Frame} || {_Src, Frame} <- lists:sublist(Held, 1)]};
-timer(Ip, #entry{state = reachable} = E, Now, _Iface, C) ->
-    update(Ip, E, stale(E, Now), C);
-timer(Ip, #entry{state = stale, used = false} = E, _Now, _Iface, C) ->
-    remove(Ip, E, C);
-timer(Ip, #entry{state = State} = E, Now, Iface, C) when State =:= stale; State =:= delay ->
+    then(erx_lltable:put(Ip, E1, T), [solicit(Ip, multicast, E1, Iface)]);
+timer(Ip, #entry{state = incomplete, held = Held}, _Now, _Iface, T) ->
+    then(erx_lltable:remove(Ip, T), [{unreachable, Frame} || {_Src, Frame} <- lists:sublist(Held, 1)]);
+timer(Ip, #entry{state = reachable} = E, Now, _Iface, T) ->
+    erx_lltable:put(Ip, stale(E, Now), T);
+timer(Ip, #entry{state = stale, used = false}, _Now, _Iface, T) ->
+    erx_lltable:remove(Ip, T);
+timer(Ip, #entry{state = State} = E, Now, Iface, T) when State =:= stale; State =:= delay ->
     E1 = E#entry{state = probe, asked = 1, used = false, deadline = Now + ?RETRANS_TIMER},
-    {C1, Actions} = update(Ip, E, E1, C),
-    {C1, Actions ++ [solicit(Ip, unicast, E1, Iface)]};
-timer(Ip, #entry{state = probe, asked = Asked} = E, Now, Iface, C) when Asked < ?ND6_UMAXTRIES ->
+    then(erx_lltable:put(Ip, E1, T), [solicit(Ip, unicast, E1, Iface)]);
+timer(Ip, #entry{state = probe, asked = Asked} = E, Now, Iface, T) when Asked < ?ND6_UMAXTRIES ->
     E1 = E#entry{asked = Asked + 1, deadline = Now + ?RETRANS_TIMER},
-    {store(Ip, E1, C), [solicit(Ip, unicast, E1, Iface)]};
-timer(Ip, #entry{state = probe} = E, _Now, _Iface, C) ->
-    remove(Ip, E, C).
+    then(erx_lltable:put(Ip, E1, T), [solicit(Ip, unicast, E1, Iface)]);
+timer(Ip, #entry{state = probe}, _Now, _Iface, T) ->
+    erx_lltable:remove(Ip, T).
 
 %% nd6_ns_input after the hop limit check.
 ns_input(#ip6{src = Src, dst = Dst}, Target, Opts, Now, Iface, C) ->
     Lladdr = maps:get(slla, Opts, none),
     SourceOk = case Src of
                    ?UNSPECIFIED -> solicited_node_multicast(Dst) andalso Lladdr =:= none;
-                   _ -> neighbour(Src, Iface) orelse is_map_key(Src, C#cache.entries)
+                   _ -> neighbour(Src, Iface) orelse erx_lltable:is_key(Src, C#cache.table)
                end,
     Mine = lists:keyfind(Target, 1, maps:get(addrs, Iface)),
     if
@@ -356,12 +343,12 @@ learn(Src, Mac, Now, #{addrs := Addrs}, C0) ->
         {#entry{mac = Mac}, C, Evicted} ->
             {C, Evicted};
         {E, C, Evicted} ->
-            {C1, Actions} = update(Src, E, (stale(E, Now))#entry{mac = Mac, held = []}, C),
+            {C1, Actions} = put(Src, (stale(E, Now))#entry{mac = Mac, held = []}, C),
             {C1, Evicted ++ Actions ++ release(Mac, E#entry.held)}
     end.
 
 %% nd6_na_input after the hop limit check.
-na_input(#ip6{dst = Dst}, Flags, Target, Opts, Now, Iface, #cache{entries = Entries} = C) ->
+na_input(#ip6{dst = Dst}, Flags, Target, Opts, Now, Iface, #cache{table = Table} = C) ->
     Lladdr = maps:get(tlla, Opts, none),
     Solicited = Flags band ?ND_NA_FLAG_SOLICITED =/= 0,
     Mine = lists:keyfind(Target, 1, maps:get(addrs, Iface)),
@@ -375,9 +362,9 @@ na_input(#ip6{dst = Dst}, Flags, Target, Opts, Now, Iface, #cache{entries = Entr
         Mine =/= false ->
             {C, [{conflict, Target, Lladdr}]};
         true ->
-            case Entries of
-                #{Target := E} -> advertised(Target, E, Flags, Lladdr, Now, C);
-                #{} -> {C, []}
+            case erx_lltable:find(Target, Table) of
+                none -> {C, []};
+                E -> advertised(Target, E, Flags, Lladdr, Now, C)
             end
     end.
 
@@ -399,7 +386,7 @@ advertised(Ip, #entry{mac = Old} = E, Flags, Lladdr, Now, C) ->
     Change = Lladdr =/= none andalso Lladdr =/= Old,
     if
         not Override, Change, E#entry.state =:= reachable ->                     % (1)
-            update(Ip, E, stale(E, Now), C);
+            put(Ip, stale(E, Now), C);
         not Override, Change ->                                                  % (1)
             {C, []};
         true ->
@@ -421,7 +408,7 @@ finish_advert(Ip, Old, New, Flags, C) ->
     Router = Flags band ?ND_NA_FLAG_ROUTER =/= 0,
     NotRouter = [{not_router, Ip} || Old#entry.router, not Router],
     New1 = New#entry{router = Router, asked = 0, held = []},
-    {C1, Actions} = update(Ip, Old, New1, C),
+    {C1, Actions} = put(Ip, New1, C),
     {C1, NotRouter ++ Actions ++ release(New1#entry.mac, Old#entry.held)}.
 
 %% nd6_llinfo_setstate(REACHABLE): good for the drawn reachable time.
@@ -472,10 +459,8 @@ neighbour(Ip, #{onlink := Prefixes}) ->
 release(_Mac, []) -> [];
 release(Mac, Held) -> [{send, Mac, [Frame || {_Src, Frame} <- Held]}].
 
-hold(Held, Frame) when length(Held) >= ?ND6_MAXQUEUELEN ->
-    tl(Held) ++ [Frame];
 hold(Held, Frame) ->
-    Held ++ [Frame].
+    erx_lltable:hold(Held, Frame, ?ND6_MAXQUEUELEN).
 
 %% ND_COMPUTE_RTIME's interval, drawn uniformly.
 draw_reachable(Now, #cache{gen = Gen} = C) ->
@@ -484,65 +469,32 @@ draw_reachable(Now, #cache{gen = Gen} = C) ->
 
 %% The entry of Ip, or a new incomplete one if there is room or room can be made, with
 %% the actions of the eviction that made it; none if there is no room.
-lookup_or_create(Ip, Now, #cache{entries = Entries, seq = Seq} = C) ->
-    case Entries of
-        #{Ip := E} ->
-            {E, C, []};
-        #{} ->
-            case room(C) of
-                full ->
-                    none;
-                {ok, C1, Evicted} ->
-                    New = #entry{state = incomplete, deadline = Now + ?RETRANS_TIMER,
-                                 seq = Seq},
-                    {New, C1#cache{seq = Seq + 1}, Evicted}
-            end
+lookup_or_create(Ip, Now, #cache{table = Table} = C) ->
+    New = #entry{state = incomplete, deadline = Now + ?RETRANS_TIMER},
+    case erx_lltable:lookup_or_create(Ip, New, Table) of
+        none -> none;
+        {E, Table1, Evicted} -> {E, C#cache{table = Table1}, Evicted}
     end.
 
-%% Room for one more entry: there is some, or the oldest incomplete entry goes, else the
-%% oldest resolved one no transmitter has hinted, which is withdrawn; full if neither.
-room(#cache{entries = Entries, max = Max} = C) when map_size(Entries) < Max ->
-    {ok, C, []};
-room(#cache{entries = Entries} = C) ->
-    Incomplete = [{Seq, Ip} || Ip := #entry{state = incomplete, seq = Seq} <- Entries],
-    Unused = [{Seq, Ip} || Ip := #entry{state = stale, used = false, seq = Seq} <- Entries],
-    case {Incomplete, Unused} of
-        {[_ | _], _} -> {ok, delete(element(2, lists:min(Incomplete)), C), []};
-        {[], [_ | _]} -> {_, Ip} = lists:min(Unused), {ok, delete(Ip, C), [{unpublish, Ip}]};
-        {[], []} -> full
-    end.
+%% Stores the entry of Ip, with the publication its change needs.
+put(Ip, E, #cache{table = Table} = C) ->
+    {Table1, Actions} = erx_lltable:put(Ip, E, Table),
+    {C#cache{table = Table1}, Actions}.
+
+-doc false.
+-spec deadline(#entry{}) -> integer().
+deadline(#entry{deadline = Deadline}) -> Deadline.
 
 %% What the transmit path sees of an entry: nothing until it has an address, then the
 %% address, stale while in the stale state.
+-doc false.
+-spec published(#entry{}) -> erx_lltable:published().
 published(#entry{mac = none}) -> none;
 published(#entry{state = stale, mac = Mac}) -> {Mac, stale};
 published(#entry{mac = Mac}) -> {Mac, fresh}.
 
-%% Stores New in place of Old (the entry before the change, or a new one) and publishes
-%% the change of what the transmit path sees, so publication follows from the entry alone.
-update(Ip, Old, New, C) ->
-    Actions = case {published(Old), published(New)} of
-                  {Same, Same} -> [];
-                  {_, {Mac, Freshness}} -> [{publish, Ip, Mac, Freshness}]
-              end,
-    {store(Ip, New, C), Actions}.
-
-remove(Ip, E, C) ->
-    Actions = case published(E) of
-                  none -> [];
-                  _ -> [{unpublish, Ip}]
-              end,
-    {delete(Ip, C), Actions}.
-
-%% Every change of an entry goes through store/3 and delete/2, which keep `timers' in step.
-store(Ip, #entry{deadline = D} = E, #cache{entries = Entries, timers = Timers} = C) ->
-    Timers1 = case Entries of
-                  #{Ip := #entry{deadline = D}} -> Timers;
-                  #{Ip := #entry{deadline = Old}} -> gb_sets:add({D, Ip}, gb_sets:delete({Old, Ip}, Timers));
-                  #{} -> gb_sets:add({D, Ip}, Timers)
-              end,
-    C#cache{entries = Entries#{Ip => E}, timers = Timers1}.
-
-delete(Ip, #cache{entries = Entries, timers = Timers} = C) ->
-    #{Ip := #entry{deadline = D}} = Entries,
-    C#cache{entries = maps:remove(Ip, Entries), timers = gb_sets:delete({D, Ip}, Timers)}.
+%% A stale entry no transmitter has hinted may be evicted (reclaimable by RFC 4861 5.3);
+%% reachable, delay and probe entries are kept.
+-doc false.
+-spec reclaimable(#entry{}) -> boolean().
+reclaimable(#entry{state = State, used = Used}) -> State =:= stale andalso not Used.

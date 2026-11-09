@@ -75,6 +75,9 @@ six for Ethernet.
 
 -export([new/0, new/1, resolve/5, input/4, hint/2, announce/2, expired/3, next_deadline/1,
          count/1]).
+%% erx_lltable's callbacks. Not declared with -behaviour, which needs erx_lltable compiled
+%% first, and erlc compiles erx_net's modules in name order.
+-export([deadline/1, published/1, reclaimable/1]).
 
 -export_type([table/0, iface/0, action/0]).
 
@@ -110,7 +113,7 @@ withdraw a neighbour; note that a host claims one of the interface's addresses.
 %% when a resolved entry lapses or, while incomplete, when its last request went out
 %% (la_expire); `asked' counts requests (la_asked), `preempt' the refreshes left
 %% (la_preempt), `used' whether a transmitter hinted it while in verify (the hit time);
-%% `held' the waiting frames, oldest first; `seq' its creation order, for eviction.
+%% `held' the waiting frames, oldest first.
 -record(entry, {state :: incomplete | reachable | verify,
                 mac = none :: none | <<_:48>>,
                 deadline :: integer(),
@@ -118,17 +121,11 @@ withdraw a neighbour; note that a host claims one of the interface's addresses.
                 asked = 0 :: non_neg_integer(),
                 preempt = 0 :: non_neg_integer(),
                 used = false :: boolean(),
-                held = [] :: [term()],
-                seq :: non_neg_integer()}).
+                held = [] :: [term()]}).
 
-%% `timers' orders the entries by deadline, {Deadline, Ip} for every entry, so that
-%% next_deadline/1 and expired/3 do not walk the table.
--record(table, {entries = #{} :: #{<<_:32>> => #entry{}},
-                timers = gb_sets:empty() :: gb_sets:set({integer(), <<_:32>>}),
-                max :: pos_integer(),
-                seq = 0 :: non_neg_integer()}).
-
--opaque table() :: #table{}.
+%% The entries live in an erx_lltable keyed by IPv4 address, which this module describes
+%% with deadline/1, published/1 and reclaimable/1.
+-opaque table() :: erx_lltable:table().
 
 -doc "An empty table of at most 1024 entries.".
 -spec new() -> table().
@@ -138,15 +135,12 @@ new() ->
 -doc "An empty table; `max_entries` bounds it.".
 -spec new(#{max_entries => pos_integer()}) -> table().
 new(Opts) ->
-    case maps:get(max_entries, Opts, ?MAX_ENTRIES) of
-        Max when is_integer(Max), Max > 0 -> #table{max = Max};
-        _ -> erlang:error(badarg)
-    end.
+    erx_lltable:new(?MODULE, maps:get(max_entries, Opts, ?MAX_ENTRIES)).
 
 -doc "The number of entries.".
 -spec count(table()) -> non_neg_integer().
-count(#table{entries = Entries}) ->
-    map_size(Entries).
+count(T) ->
+    erx_lltable:count(T).
 
 -doc """
 A frame for the on-link neighbour `Ip` that the transmit path could not address
@@ -164,17 +158,21 @@ resolve(Ip, Frame, Now, Iface, T0) ->
 resolve_entry(_Ip, #entry{state = reachable, mac = Mac}, Frame, _Now, _Iface, T) ->
     {T, [{send, Mac, [Frame]}]};
 resolve_entry(Ip, #entry{state = verify, mac = Mac} = E, Frame, _Now, _Iface, T) ->
-    {store(Ip, E#entry{used = true}, T), [{send, Mac, [Frame]}]};
+    then(erx_lltable:put(Ip, E#entry{used = true}, T), [{send, Mac, [Frame]}]);
 resolve_entry(Ip, #entry{state = incomplete} = E, Frame, Now, Iface, T) ->
-    Held = hold(E#entry.held, Frame),
+    Held = erx_lltable:hold(E#entry.held, Frame, ?ARP_MAXHOLD),
     case E#entry.asked =:= 0 orelse Now >= E#entry.expire + ?ARPT_REXMIT of
         true ->
             E1 = E#entry{held = Held, expire = Now, deadline = Now + ?ARPT_DOWN,
                          asked = E#entry.asked + 1},
-            {store(Ip, E1, T), request(Ip, Iface)};
+            then(erx_lltable:put(Ip, E1, T), request(Ip, Iface));
         false ->
-            {store(Ip, E#entry{held = Held}, T), []}
+            erx_lltable:put(Ip, E#entry{held = Held}, T)
     end.
+
+%% A table change's result with further actions after its own.
+then({T, Actions}, More) ->
+    {T, Actions ++ More}.
 
 %% A step's result with the actions of an eviction ahead of its own.
 prepend(Evicted, {T, Actions}) ->
@@ -185,10 +183,14 @@ A transmitter used the stale entry of `Ip` (FreeBSD's `llentry_provide_feedback`
 entry is in `verify`, the next second's look sends a refresh. Any other entry is unchanged.
 """.
 -spec hint(<<_:32>>, table()) -> table().
-hint(Ip, #table{entries = Entries} = T) ->
-    case Entries of
-        #{Ip := #entry{state = verify} = E} -> store(Ip, E#entry{used = true}, T);
-        #{} -> T
+hint(Ip, T) ->
+    case erx_lltable:find(Ip, T) of
+        #entry{state = verify} = E ->
+            %% Hinting changes neither state nor address, so nothing is published.
+{T1, []} = erx_lltable:put(Ip, E#entry{used = true}, T),
+            T1;
+        _ ->
+            T
     end.
 
 -doc """
@@ -227,43 +229,43 @@ announce(Ip, #{lladdr := Lladdr}) ->
 -doc "Runs every entry's deadline at or before `Now` (`arptimer`).".
 -spec expired(integer(), iface(), table()) -> {table(), [action()]}.
 expired(Now, Iface, T) ->
-    expired(Now, Iface, T, []).
-
-expired(Now, Iface, T, Acc) ->
-    case next_timer(T) of
-        {Deadline, Ip} when Deadline =< Now ->
-            {T1, Actions} = timer(Ip, maps:get(Ip, T#table.entries), Now, Iface, T),
-            expired(Now, Iface, T1, lists:reverse(Actions, Acc));
-        _Later ->
-            {T, lists:reverse(Acc)}
-    end.
+    erx_lltable:expire(Now, fun(Ip, E, Tn) -> timer(Ip, E, Now, Iface, Tn) end, T).
 
 -doc "The earliest deadline of any entry, or `infinity`.".
 -spec next_deadline(table()) -> integer() | infinity.
 next_deadline(T) ->
-    case next_timer(T) of
-        {Deadline, _Ip} -> Deadline;
-        none -> infinity
-    end.
-
-next_timer(#table{timers = Timers}) ->
-    case gb_sets:is_empty(Timers) of
-        true -> none;
-        false -> gb_sets:smallest(Timers)
-    end.
+    erx_lltable:next_deadline(T).
 
 %% arptimer for one entry whose deadline has come.
-timer(Ip, #entry{state = reachable, mac = Mac} = E, Now, _Iface, T) ->
-    {store(Ip, E#entry{state = verify, used = false, deadline = Now + ?ARPT_REXMIT}, T),
-     [{publish, Ip, Mac, stale}]};
+timer(Ip, #entry{state = reachable} = E, Now, _Iface, T) ->
+    erx_lltable:put(Ip, E#entry{state = verify, used = false, deadline = Now + ?ARPT_REXMIT}, T);
 timer(Ip, #entry{state = verify, used = true, preempt = P} = E, Now, Iface, T) when P > 0 ->
-    {store(Ip, E#entry{preempt = P - 1, deadline = Now + ?ARPT_REXMIT}, T), request(Ip, Iface)};
+    then(erx_lltable:put(Ip, E#entry{preempt = P - 1, deadline = Now + ?ARPT_REXMIT}, T),
+         request(Ip, Iface));
 timer(Ip, #entry{state = verify, expire = Expire} = E, Now, _Iface, T) when Expire > Now ->
-    {store(Ip, E#entry{deadline = Now + ?ARPT_REXMIT}, T), []};
+    erx_lltable:put(Ip, E#entry{deadline = Now + ?ARPT_REXMIT}, T);
 timer(Ip, #entry{state = verify}, _Now, _Iface, T) ->
-    {delete(Ip, T), [{unpublish, Ip}]};
+    erx_lltable:remove(Ip, T);
 timer(Ip, #entry{state = incomplete}, _Now, _Iface, T) ->
-    {delete(Ip, T), []}.
+    erx_lltable:remove(Ip, T).
+
+-doc false.
+-spec deadline(#entry{}) -> integer().
+deadline(#entry{deadline = Deadline}) -> Deadline.
+
+%% What the transmit path sees: nothing while incomplete, the address once resolved, stale
+%% in the last seconds before it lapses.
+-doc false.
+-spec published(#entry{}) -> erx_lltable:published().
+published(#entry{state = incomplete}) -> none;
+published(#entry{state = reachable, mac = Mac}) -> {Mac, fresh};
+published(#entry{state = verify, mac = Mac}) -> {Mac, stale}.
+
+%% A resolved entry no transmitter has hinted may be evicted. Only an entry in verify is
+%% ever hinted, so every reachable entry may be.
+-doc false.
+-spec reclaimable(#entry{}) -> boolean().
+reclaimable(#entry{used = Used}) -> not Used.
 
 %% in_arpinput's address match: the target if it is ours, else the sender if it is ours (a
 %% conflict), else the interface's first address; none without an IPv4 address.
@@ -280,20 +282,20 @@ my_address(#arp{spa = Spa, tpa = Tpa}, Addrs) ->
 %% packet (arp_check_update_lle); a new one is made only for a packet to our address from a
 %% sender on one of our prefixes, and only if the table has room.
 learn(#arp{spa = Spa, sha = Sha, tpa = Tpa}, MyAddr, Now, #{addrs := Addrs} = Iface,
-      #table{entries = Entries} = T) ->
+      T) ->
     Own = lists:keymember(Spa, 1, Addrs),
-    case Entries of
-        #{} when Own ->
+    case erx_lltable:find(Spa, T) of
+        _ when Own ->
             {T, []};
-        #{Spa := E} ->
-            resolved(Spa, E, Sha, Now, T);
-        #{} when Tpa =:= MyAddr ->
+        none when Tpa =:= MyAddr ->
             case on_link(Spa, Iface) of
                 false -> {T, []};
                 true -> learn_new(Spa, Sha, Now, T)
             end;
-        #{} ->
-            {T, []}
+        none ->
+            {T, []};
+        E ->
+            resolved(Spa, E, Sha, Now, T)
     end.
 
 %% A new entry for a sender, if the table has room for it.
@@ -310,15 +312,11 @@ resolved(Ip, E, Mac, Now, T) ->
     E1 = E#entry{state = reachable, mac = Mac, expire = Now + ?ARPT_KEEP,
                  deadline = Now + ?ARPT_KEEP - ?ARP_MAXTRIES * ?ARPT_REXMIT,
                  asked = 0, preempt = ?ARP_MAXTRIES, used = false, held = []},
-    Publish = case E of
-                  #entry{state = reachable, mac = Mac} -> [];
-                  #entry{} -> [{publish, Ip, Mac, fresh}]
-              end,
     Send = case E#entry.held of
                [] -> [];
                Held -> [{send, Mac, Held}]
            end,
-    {store(Ip, E1, T), Publish ++ Send}.
+    then(erx_lltable:put(Ip, E1, T), Send).
 
 %% The reply half of in_arpinput: only a request for our address is answered, by unicast
 %% to the asker unless the address is IPv4 link-local (RFC 3927), which is answered by
@@ -357,52 +355,7 @@ same_prefix(A, B, Len) ->
     <<Q:Len/bits, _/bits>> = B,
     P =:= Q.
 
-%% lltable_append_entry_queue: the newest frame joins, the oldest goes past arp_maxhold.
-hold(Held, Frame) when length(Held) >= ?ARP_MAXHOLD ->
-    tl(Held) ++ [Frame];
-hold(Held, Frame) ->
-    Held ++ [Frame].
-
-%% The entry of Ip, or a new incomplete one if there is room or room can be made, with
-%% the actions of the eviction that made it; none if there is no room.
-lookup_or_create(Ip, Now, #table{entries = Entries, seq = Seq} = T) ->
-    case Entries of
-        #{Ip := E} ->
-            {E, T, []};
-        #{} ->
-            case room(T) of
-                full ->
-                    none;
-                {ok, T1, Evicted} ->
-                    New = #entry{state = incomplete, deadline = Now + ?ARPT_DOWN, expire = Now,
-                                 seq = Seq},
-                    {New, T1#table{seq = Seq + 1}, Evicted}
-            end
-    end.
-
-%% Room for one more entry: there is some, or the oldest incomplete entry goes, else the
-%% oldest resolved one no transmitter has hinted, which is withdrawn; full if neither.
-room(#table{entries = Entries, max = Max} = T) when map_size(Entries) < Max ->
-    {ok, T, []};
-room(#table{entries = Entries} = T) ->
-    Incomplete = [{Seq, Ip} || Ip := #entry{state = incomplete, seq = Seq} <- Entries],
-    Unused = [{Seq, Ip} || Ip := #entry{state = State, used = false, seq = Seq} <- Entries,
-                           State =/= incomplete],
-    case {Incomplete, Unused} of
-        {[_ | _], _} -> {ok, delete(element(2, lists:min(Incomplete)), T), []};
-        {[], [_ | _]} -> {_, Ip} = lists:min(Unused), {ok, delete(Ip, T), [{unpublish, Ip}]};
-        {[], []} -> full
-    end.
-
-%% Every change of an entry goes through store/3 and delete/2, which keep `timers' in step.
-store(Ip, #entry{deadline = D} = E, #table{entries = Entries, timers = Timers} = T) ->
-    Timers1 = case Entries of
-                  #{Ip := #entry{deadline = D}} -> Timers;
-                  #{Ip := #entry{deadline = Old}} -> gb_sets:add({D, Ip}, gb_sets:delete({Old, Ip}, Timers));
-                  #{} -> gb_sets:add({D, Ip}, Timers)
-              end,
-    T#table{entries = Entries#{Ip => E}, timers = Timers1}.
-
-delete(Ip, #table{entries = Entries, timers = Timers} = T) ->
-    #{Ip := #entry{deadline = D}} = Entries,
-    T#table{entries = maps:remove(Ip, Entries), timers = gb_sets:delete({D, Ip}, Timers)}.
+%% The entry of Ip, or a new incomplete one if there is room or room can be made.
+lookup_or_create(Ip, Now, T) ->
+    erx_lltable:lookup_or_create(
+      Ip, #entry{state = incomplete, deadline = Now + ?ARPT_DOWN, expire = Now}, T).
