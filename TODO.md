@@ -401,6 +401,9 @@ it; git history is the record of completed work.
 * [Low] tests, `test/integration/runtime_hosted_smoke_test.rb`,
   `test_a_module_reloaded_in_a_loop_on_four_schedulers_never_runs_stale_code`: its 60 s wait for the
   next prompt fails at a host load average near 80. Give the wait a deadline that fits the load.
+* [Low] tooling, `tools/build_site.rb`: v64's Makefile runs Closure Compiler with the `java` on PATH, and macOS's
+  `/usr/bin/java` stub fails with "Unable to locate a Java Runtime" when no JDK is registered. Find Homebrew's
+  `openjdk` (or take `ERX_JAVA`) and pass it to the build, failing with a diagnostic naming it.
 * [Low] tooling, `make check-reproducible`: both builds of OTP and musl run at one path, so a path
   of theirs that reached the image would not show.
 * [Low] stopgap, `tools/lib/erx/native_root.rb`: musl's headers are system headers to the root's compile, so a compile record leaves them out and nothing audits them for the root's objects.
