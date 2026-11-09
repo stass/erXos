@@ -905,10 +905,17 @@ it; git history is the record of completed work.
   crash's slogan reaches only the death record and its dump text is read and dropped, since
   no inspector exists to show either; design-runtime.md, "Crash handling", has the inspector
   show both through its escaping.
-* [Low] medium_boot, `tools/lib/erx/production_image.rb` (`RELEASE_SHELL`): the console interleaves a
-  configured domain's start trace (`erx: erts: erl_start runs`, `... hold executor slots`) with the
-  command shell's banner byte by byte, so a run printed `erc: the command shell` and the
-  line-anchored checkpoint timed out; a rerun passed. Lines from two writers should not mix on the console.
+* [Low] console, `liberx/backend/fiasco/console.c` (`erx_fiasco_console_write`): once the console
+  driver holds the UART, four writers still reach it through `l4_vcon_write` beside the driver, so
+  their bytes can fall between the driver's at any byte: the system domain's own ERTS C output
+  (`libc_root_write.c`, a byte per call for `erts_fprintf`), the park report (`park_report.c`), the
+  root's fixed lines (`root.c`, `thread.c`, `vm.c`, `service*.c`) and a program's output through
+  `task_write`. A domain's runtime already logs whole lines (`domain_entry.c`). Have each reach the
+  console through `erx_console` too: the root's lines and the park report as debug log records, and
+  program output by a raw form the ring does not have yet. The service also still answers
+  `task_write` from a domain's task, which its runtime does not call: refuse it there, so a
+  domain has no raw path to the console. A record `erx_console` writes still starts wherever the
+  console's line stands, after a prompt with no newline included (`1> #0 ... debug space 0: erx_blk:`).
 * [Low] ERTS, `otp/erts/emulator/sys/erxos/erx_crash_area.c`: a fatal end reaches the crash area
   only through `erts_exit`, `ERTS_EXIT_AFTER_DUMP`, `ERTS_SYS_ABORT` and `erl_assert_error`; any
   other direct `abort()` in ERTS ends the domain as a fault with no slogan. Give `abort` an

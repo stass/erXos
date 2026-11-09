@@ -97,23 +97,32 @@ erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log
 	return (status);
 }
 
+/* length is at most ERX_UTCB_BYTES_MAX, so every word index is in range and no store fails. */
+void
+erx_fiasco_utcb_store_bytes(const void *bytes, size_t length)
+{
+	const uint8_t *const text = bytes;
+	erx_utcb_t *const utcb = erx_utcb_self();
+
+	for (size_t done = 0; done < length; done += sizeof(uint64_t)) {
+		uint64_t word = 0;
+
+		__builtin_memcpy(&word, text + done, length - done < sizeof(word) ? length - done : sizeof(word));
+		(void)erx_utcb_mr_store(utcb, done / sizeof(word), word);
+	}
+}
+
 void
 erx_fiasco_task_write(const void *bytes, size_t length)
 {
 	const uint8_t *next = bytes;
-	erx_utcb_t *const utcb = erx_utcb_self();
 	erx_fiasco_task_write_request_t request = { .caller = erx_fiasco_thread_self()->index };
 	erx_fiasco_reply_t reply;
 
 	while (length > 0) {
 		const size_t part = length < ERX_UTCB_BYTES_MAX ? length : ERX_UTCB_BYTES_MAX;
 
-		for (size_t done = 0; done < part; done += sizeof(uint64_t)) {
-			uint64_t word = 0;
-
-			__builtin_memcpy(&word, next + done, part - done < sizeof(word) ? part - done : sizeof(word));
-			(void)erx_utcb_mr_store(utcb, done / sizeof(word), word);
-		}
+		erx_fiasco_utcb_store_bytes(next, part);
 		request.len = part;
 		(void)erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_WRITE, &request, sizeof(request), &reply);
 		next += part;

@@ -10,6 +10,7 @@ require_relative 'bench_g3'
 require_relative 'fiasco'
 require_relative 'json_input'
 require_relative 'medium_boot'
+require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -54,8 +55,9 @@ module Erx
     SCALARS = %w[start_us modules beam_bytes prepare_us prepare_errors memory_total memory_code memory_system
                  memory_processes].freeze
     SAMPLES = '\[[0-9]+(?:,[0-9]+)*\]'
-    # The domain's line: the term erlang:display prints, of integers and the flavour's atom.
-    LINE = /\A\{g5,(?<flavour>emu|jit),(?<scalars>[0-9]+(?:,[0-9]+){#{SCALARS.size - 1}}),
+    # The domain's line: the term erlang:display prints, of integers and the flavour's atom, as
+    # a record of the domain's space.
+    LINE = /\A#{NativeRoot::DOMAIN_RECORD}\{g5,(?<flavour>emu|jit),(?<scalars>[0-9]+(?:,[0-9]+){#{SCALARS.size - 1}}),
             (?<lists>#{SAMPLES}(?:,#{SAMPLES}){#{WORKLOADS.size - 1}})\}\r*\n?\z/nx
     DONE = /\AG5DONE (?<ends>.*?)\r*\n?\z/n
     # The end of a domain that measured and halted as it should.
@@ -145,7 +147,7 @@ module Erx
 
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: shell_line(plan, domain)).freeze,
-       *runs(plan).each_index.map { |index| { name: "g5-domain-#{index + 1}", pattern: /\A\{g5,/n, seconds: plan.wait_seconds }.freeze },
+       *runs(plan).each_index.map { |index| { name: "g5-domain-#{index + 1}", pattern: /\A#{NativeRoot::DOMAIN_RECORD}\{g5,/n, seconds: plan.wait_seconds }.freeze },
        { name: 'g5-done', pattern: /\AG5DONE /n, seconds: 600 + plan.wait_seconds }.freeze]
     end
 

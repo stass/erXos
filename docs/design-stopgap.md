@@ -1478,6 +1478,15 @@ harness's deadline ends the run.
 `l4_vcon_write` on `L4_BASE_LOG_CAP`, the kernel's polled UART output, or to a ring of `log.c` records. `erx_log_read` runs `erx_log_copy` into
 its window for the Erlang log reader, `erx_console`, which polls it and writes each line the log core rendered, escaped, to its driver. The window is the root's own memory, which the service shares and writes in place, so a task's read is `ERX_ENOTSUP`; the reply's three words are the next cursor, the records lost and the bytes written. The log has that one reader: a read moves the one position of what has been taken, the console's too, so a record leaves exactly once, and a cursor past it is `ERX_EINVAL`. A ring that wraps while parked costs a line saying how many records were lost. The service is the serialization `log.h` requires.
 
+**A domain's runtime** writes its standard output and standard error as records: `domain_entry.c` gathers each thread's bytes
+into lines with `erx_line_gather_write` and logs each line, without its newline, through `erx_debug_log`, so the log escapes it and
+labels it with the task's space, and once the console driver holds the UART, `erx_console` writes it whole between the driver's
+other writes ([design-runtime.md](design-runtime.md#the-console-and-standard-io)). ERTS writes standard error a format fragment or a
+byte at a time, so passed on as written, each byte would be a call of its own, falling between the driver's. A line longer than
+`utcb_bytes_max` goes out in pieces of that size, one record each. A boot information page the entry refuses, before musl
+starts, has its reason logged the same way, gathered apart, as the first thread has no thread-local storage yet. Standard output
+and standard error share a thread's line, and a line still unfinished when its thread or the task ends is dropped. The system domain's runtime is the root, and its output is the root's, below.
+
 **A program's standard output and standard error** deliver its bytes unchanged, whoever holds the program. The root writes them
 to the console itself. A task holds no log capability, so `libc_task.c` hands them to `erx_fiasco_task_write`, one `task_write` call
 per `utcb_bytes_max`, and the service copies each piece from the caller's public UTCB to `erx_fiasco_console_write`: no record, no

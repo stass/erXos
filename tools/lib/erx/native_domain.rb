@@ -50,13 +50,15 @@ module Erx
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
     CASES = %w[library warm halt fault stop lanes erts erts_refused crash jit_reload jit_write_rx jit_run_rw connection
                  link_warm link link_undo link_end undo].freeze
-    # What a case's domain prints before its case line: init ran the ERTS domain's release,
-    # the connection's system connection ended with the party's flood unread,
-    # and the spoiled page's runtime ended with the reader's reason.
-    CONSOLE = { 'erts' => /\Ainit_started/n, 'connection' => /\A\{erx_dist,system_connection,erx_lane_answers_unread\}/n,
-                'erts_refused' => /\Aerx: the boot information page: the page is of another version/n,
-                'jit_reload' => /\A\{jit_reload_passed,jit,[1-9]\d*\}/n,
-                'jit_write_rx' => /\Ajit_alias_runs/n, 'jit_run_rw' => /\Ajit_alias_runs/n }.freeze
+    RECORD = NativeRoot::DOMAIN_RECORD
+    # What a case's domain prints before its case line, each a record of its space: init ran
+    # the ERTS domain's release, the connection's system connection ended with the party's
+    # flood unread, and the spoiled page's runtime ended with the reader's reason.
+    CONSOLE = { 'erts' => /\A#{RECORD}init_started/n,
+                'connection' => /\A#{RECORD}\{erx_dist,system_connection,erx_lane_answers_unread\}/n,
+                'erts_refused' => /\A#{RECORD}erx: the boot information page: the page is of another version/n,
+                'jit_reload' => /\A#{RECORD}\{jit_reload_passed,jit,[1-9]\d*\}/n,
+                'jit_write_rx' => /\A#{RECORD}jit_alias_runs/n, 'jit_run_rw' => /\A#{RECORD}jit_alias_runs/n }.freeze
     CASE_LINE = /\Aerx: domain: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function

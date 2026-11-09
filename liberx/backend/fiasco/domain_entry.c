@@ -11,9 +11,13 @@
  * task writes, and checks the copy with the reader both entries share: a page it refuses
  * ends the task with the reader's reason on the console, and every later read, ERTS's
  * start reading the page again among them, sees the page that was checked. Then it enters
- * musl's start path, whose main is in runtime_main.c. What the runtime
- * prints goes to the console unchanged, through the service, until the log sink carries
- * its logger.
+ * musl's start path, whose main is in runtime_main.c. What the runtime's C code writes
+ * to standard output and error is its own diagnostic text, so each thread gathers it
+ * into whole lines and logs each as one debug log record, which the log escapes and labels
+ * with the task's space and the console's one sink writes whole (docs/design-runtime.md, "The
+ * console and standard I/O"). A refused page's reason, from before musl starts, goes
+ * the same way. Partial lines a thread or the task leaves at its end are dropped, and
+ * standard output and standard error share the thread's line.
  */
 
 #include <stddef.h>
@@ -21,13 +25,16 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/core/boot_info.h"
+#include "liberx/backend/core/line_gather.h"
 #include "liberx/backend/fiasco/libc_start.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/task_start.h"
 #include "liberx/backend/runtime_entry.h"
+#include "liberx/generated/calls.h"
 
 int	main(int, char **, char **);
 
+static void	log_line(void *, const char *, size_t);
 static void	say(const char *);
 
 /* Written by the first thread before musl's start runs, and never again. */
@@ -39,10 +46,31 @@ erx_boot_info(void)
 	return ((const erx_boot_info_t *)(const void *)boot_page);
 }
 
+/*
+ * The line each thread is gathering, in thread-local storage, which musl's start sets
+ * up for every thread that writes through it. The first thread, before musl starts,
+ * gathers in boot_line, as no other thread exists yet.
+ */
+static _Thread_local erx_line_gather_t output_line;
+static erx_line_gather_t boot_line;
+
 void
 erx_fiasco_libc_write(const void *bytes, size_t length)
 {
-	erx_fiasco_task_write(bytes, length);
+	erx_line_gather_write(&output_line, bytes, length, log_line, NULL);
+}
+
+/*
+ * One gathered line as one debug log record. The log never waits: past the task's rate
+ * it drops and counts the line, and a full ring overwrites its oldest record, which the
+ * reader reports lost, so nothing is retried.
+ */
+static void
+log_line(void *context, const char *line, size_t length)
+{
+	(void)context;
+	erx_fiasco_utcb_store_bytes(line, length);
+	(void)erx_debug_log((erx_utcb_length_t){ .raw = (uint32_t)length });
 }
 
 /*
@@ -75,7 +103,7 @@ erx_task_main(uint64_t argument)
 }
 
 /*
- * Each reason is a fixed ASCII string of the reader's, so it reaches the console as it is.
+ * Each reason is a fixed ASCII string of the reader's, logged as the runtime's lines are.
  * The image's freestanding sources have no <string.h>, hence the loop.
  */
 static void
@@ -85,5 +113,5 @@ say(const char *text)
 
 	while (text[length] != 0)
 		length++;
-	erx_fiasco_task_write(text, length);
+	erx_line_gather_write(&boot_line, text, length, log_line, NULL);
 }

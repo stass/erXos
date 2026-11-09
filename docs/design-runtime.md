@@ -1808,9 +1808,13 @@ itself, and a caller whose owner has gone. All of them use
 
 * Hosted, it is `write` on the process's own descriptor, whose reader is outside
   the runtime.
-* In Phase 1 natively, it is the seam's console write
-  ([design-stopgap.md](design-stopgap.md)), which reaches the UART at once,
-  unchanged, and can interleave with the driver's writes at any byte.
+* In Phase 1 natively, in a domain's runtime, it has the form it has on erXos's
+  kernel, below: each thread gathers a line (`liberx/backend/core/line_gather.c`)
+  and logs it with `erx_debug_log`, so a line reaches the console whole, as a record
+  of the domain's space, through the console's one sink
+  ([design-stopgap.md](design-stopgap.md#the-console)). In the system domain it is
+  the seam's console write, which reaches the UART at once, unchanged, and can
+  interleave with the driver's writes at any byte.
 * On erXos's kernel, it gathers a line in a buffer of the calling thread, as long
   as a debug log record, and calls `erx_debug_log` at each newline or when the
   buffer fills. That is the kernel's own labelled, escaped and rate-limited log,

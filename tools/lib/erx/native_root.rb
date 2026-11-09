@@ -84,7 +84,12 @@ module Erx
     # release from its slice through the service, and
     # task_refused.c answers the calls the service does not answer a task. One
     # image serves every domain (docs/design-runtime.md, "The build").
-    DOMAIN_RUNTIME = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/domain_entry.c",
+    # What a domain's runtime writes reaches the console as debug log records of its space, one
+    # per line (docs/design-runtime.md, "The console and standard I/O"): this is a record's head,
+    # as erx_log_render writes it, for a pattern to put before the line it expects. A Regexp, so
+    # it keeps its own flags inside an extended pattern, whose # would otherwise open a comment.
+    DOMAIN_RECORD = /\#\d+ \d+\.\d+ debug space \d+(?: dropped \d+)?: /n
+    DOMAIN_RUNTIME = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/domain_entry.c", 'liberx/backend/core/line_gather.c',
                       "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
                       "#{BACKEND}/task_refused.c", "#{BACKEND}/release_task.c", 'liberx/release_fs.c', 'liberx/system/dom_dump.c',

@@ -11,8 +11,8 @@ require_relative '../../tools/lib/erx/bench_g5'
 class BenchG5Test < Minitest::Test
   G5 = Erx::BenchG5
   PLAN = G5::Plan.new(accel: 'tcg', length: 10, samples: 3, rounds: 1, wait_seconds: 1)
-  EMU = "{g5,emu,900,120,5000,80,0,30,6,16,13,[40,42,41],[10,10,10],[20,20,20],[90,95,91]}\r\n"
-  JIT = "{g5,jit,1500,120,5000,300,0,40,6,26,13,[10,11,10],[5,5,5],[10,10,10],[30,30,30]}\r\n"
+  EMU = "#41 2.512000 debug space 3: {g5,emu,900,120,5000,80,0,30,6,16,13,[40,42,41],[10,10,10],[20,20,20],[90,95,91]}\r\n"
+  JIT = "#57 3.104000 debug space 4: {g5,jit,1500,120,5000,300,0,40,6,26,13,[10,11,10],[5,5,5],[10,10,10],[30,30,30]}\r\n"
   HALTED = "G5DONE [{domain_down,9,{halt,0}},{domain_down,10,{halt,0}}]\r\n"
 
   def report(text)

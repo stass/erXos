@@ -24,6 +24,8 @@ module Erx
         liberx/backend/core/object_info.c
         liberx/backend/core/object_info.h
         liberx/backend/core/device_check.h
+        liberx/backend/core/line_gather.c
+        liberx/backend/core/line_gather.h
         liberx/backend/api.h
         liberx/backend/fiasco/api_names.c
         liberx/backend/hosted/arch/aarch64/switch_stack.S
