@@ -469,8 +469,21 @@ check_rst(#seg{flags = Flags, seq = Seq} = Seg, Tcb, Ctx) ->
 %% draws a challenge ACK and is dropped; tcp_insecure_syn is FreeBSD's default of 0. FreeBSD
 %% also lets the SYN's ECE turn ECN on here (tcp_ecn_input_syn_sent); a SYN that passed no
 %% sequence check changes nothing here.
-check_syn(#seg{flags = Flags} = Seg, #tcb{state = State} = Tcb, Ctx) ->
-    case has(Flags, ?TH_SYN) andalso State =/= syn_sent andalso State =/= syn_received of
+%%
+%% FreeBSD lets every SYN through in SYN-RECEIVED, where the peer's SYN may come again; trim
+%% strips it, since it lies before rcv_nxt. A SYN at or past rcv_nxt names another initial
+%% sequence number. Kept, as FreeBSD keeps it, its data would be taken one byte early,
+%% since the byte at its sequence number is the SYN. RFC 9293 section 3.10.7.4 treats
+%% SYN-RECEIVED after an active open as a synchronized state, so such a SYN is challenged.
+%% A passive open never reaches this state here (erx_tcp_syncache).
+check_syn(#seg{flags = Flags, seq = Seq} = Seg, #tcb{state = State, rcv_nxt = RcvNxt} = Tcb,
+          Ctx) ->
+    Challenged = case State of
+                     syn_sent -> false;
+                     syn_received -> Seq >= RcvNxt;
+                     _ -> true
+                 end,
+    case has(Flags, ?TH_SYN) andalso Challenged of
         true -> challenge_ack(syn, Tcb, Ctx);
         false -> {continue, Tcb, Seg}
     end.

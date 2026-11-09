@@ -207,6 +207,21 @@ ecn_from_accepted_segments_only_test() ->
 
 %% --- check_syn, tcp_input.c:2196-2215: RFC 5961 section 4 --------------------------------
 
+%% In SYN-RECEIVED, a SYN at or past rcv_nxt names another initial sequence number: it is
+%% challenged, not taken with its data one byte early (RFC 9293 section 3.10.7.4); the
+%% peer's own SYN again, before rcv_nxt, is still trimmed and acknowledged.
+syn_in_syn_received_test() ->
+    Tcb = (syn_sent())#tcb{send_timer = {rexmt, ?T0 + ?S(1000)}},
+    {Rcvd, []} = input([wire(9000, 0, ?TH_SYN)], Tcb),
+    {New, A} = input([wire(9001, ?ISS + 1, ?TH_SYN bor ?TH_ACK, <<"xy">>, #tcp_opts{})], Rcvd),
+    ?assertEqual({syn_received, 9001, 0, [{?ISS + 1, 9001}]},
+                 {New#tcb.state, New#tcb.rcv_nxt, New#tcb.rcv_buffered, challenges(A)}),
+    {Again, []} = input([wire(9000, 0, ?TH_SYN)], Rcvd),
+    ?assertEqual({syn_received, 9001, true}, {Again#tcb.state, Again#tcb.rcv_nxt, Again#tcb.ack_now}),
+    %% The peer's SYN-ACK, at its ISS, completes the simultaneous open.
+    {Est, _} = input([wire(9000, ?ISS + 1, ?TH_SYN bor ?TH_ACK)], Rcvd),
+    ?assertEqual({established, 9001, ?ISS + 1}, {Est#tcb.state, Est#tcb.rcv_nxt, Est#tcb.snd_una}).
+
 syn_when_synchronized_draws_a_challenge_ack_test() ->
     Flags = ?TH_SYN bor ?TH_ECE,
     {T, A} = input([wire(5001, 0, Flags)], est()),

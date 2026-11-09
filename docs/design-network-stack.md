@@ -1255,7 +1255,12 @@ RST, for example, is judged before the timestamp check):
    `rcv_wnd` bytes from `last_ack_sent` gets a challenge ACK; with the
    window closed only the exact match counts.
 5. `check_syn`: RFC 5961 section 4: a SYN in a synchronized state gets a
-   challenge ACK (`tcp_input.c:2196-2215`). FreeBSD also lets that SYN's
+   challenge ACK (`tcp_input.c:2196-2215`), and so does one in SYN-RECEIVED
+   at or past `rcv_nxt`: RFC 9293 section 3.10.7.4 treats SYN-RECEIVED
+   after an active open as synchronized. FreeBSD lets every SYN through in SYN-RECEIVED, where
+   the peer's own SYN again lies before `rcv_nxt` and `trim` strips it; a
+   SYN at or past `rcv_nxt` names another initial sequence number, and
+   FreeBSD would take its data one byte early. FreeBSD also lets that SYN's
    ECE turn ECN on (`tcp_ecn_input_syn_sent`); here a SYN that passed no
    sequence check changes nothing.
 6. `paws`: RFC 7323's check against the last timestamp
