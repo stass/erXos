@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored. beamasm_alias_probe tests the code space's two aliases.
+ *
  * %CopyrightEnd%
  */
 
@@ -365,12 +367,14 @@ void beamasm_init() {
 
         load_header.num_functions = operands.size();
 
-        bma->codegen(jit_allocator,
-                     &_ignored_exec,
-                     &_ignored_rw,
-                     &load_header,
-                     &code_hdr_ro,
-                     &_ignored_code_hdr_rw);
+        if (bma->codegen(jit_allocator,
+                         &_ignored_exec,
+                         &_ignored_rw,
+                         &load_header,
+                         &code_hdr_ro,
+                         &_ignored_code_hdr_rw) != BEAMASM_CODEGEN_OK) {
+            ERTS_INTERNAL_ERROR("jit: cannot generate the runtime's own code");
+        }
         bma->register_metadata(code_hdr_ro);
     }
 
@@ -578,6 +582,45 @@ extern "C"
         delete ba;
     }
 
+    int beamasm_alias_probe(enum beamasm_alias_probe how) {
+#if defined(__aarch64__)
+        static const uint32_t ret = 0xd65f03c0; /* RET */
+        JitAllocator::Span span;
+        Out<JitAllocator::Span> out(span);
+
+        if (jit_allocator->alloc(out, sizeof(ret)) != Error::kOk) {
+            return 0;
+        }
+        if (span.rx() == span.rw()) {
+            jit_allocator->release(span.rx());
+            return 0;
+        }
+
+        VirtMem::protect_jit_memory(VirtMem::ProtectJitAccess::kReadWrite);
+        sys_memcpy(span.rw(), &ret, sizeof(ret));
+        VirtMem::protect_jit_memory(VirtMem::ProtectJitAccess::kReadExecute);
+        VirtMem::flush_instruction_cache(span.rx(), sizeof(ret));
+
+        switch (how) {
+        case BEAMASM_ALIAS_RUN_RX:
+            reinterpret_cast<void (*)(void)>(span.rx())();
+            break;
+        case BEAMASM_ALIAS_WRITE_RX:
+            *static_cast<volatile uint32_t *>(span.rx()) = ret;
+            break;
+        case BEAMASM_ALIAS_RUN_RW:
+            reinterpret_cast<void (*)(void)>(span.rw())();
+            break;
+        }
+
+        jit_allocator->release(span.rx());
+        return 1;
+#else
+        (void)how;
+        return 0;
+#endif
+    }
+
     void beamasm_purge_module(const void *executable_region,
                               void *writable_region,
                               size_t size) {
@@ -617,7 +660,7 @@ extern "C"
         }
     }
 
-    void beamasm_codegen(void *instance,
+    int beamasm_codegen(void *instance,
                          const void **executable_region,
                          void **writable_region,
                          const BeamCodeHeader *in_hdr,
@@ -625,7 +668,7 @@ extern "C"
                          BeamCodeHeader **out_rw_hdr) {
         BeamModuleAssembler *ba = static_cast<BeamModuleAssembler *>(instance);
 
-        ba->codegen(jit_allocator,
+        return ba->codegen(jit_allocator,
                     executable_region,
                     writable_region,
                     in_hdr,

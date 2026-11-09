@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: statistics(runtime) fails with notsup where CPU time is unsupported, kernel_poll is false and check_io is empty.
+ * Modified by erXos: statistics(runtime) fails with notsup where CPU time is unsupported, kernel_poll is false and check_io is empty;
+ * set_internal_state(jit_alias, How) runs BeamAsm's alias probe.
  *
  * %CopyrightEnd%
  */
@@ -61,6 +62,10 @@
 #include "erl_iolist.h"
 #include "erl_debugger.h"
 #include "erl_record.h"
+
+#ifdef BEAMASM
+#  include "beam_asm.h"
+#endif
 
 #ifdef ERTS_ENABLE_LOCK_COUNT
 #include "erl_lock_count.h"
@@ -5385,6 +5390,20 @@ BIF_RETTYPE erts_debug_set_internal_state_2(BIF_ALIST_2)
                 BIF_RET(res);
             default:
                 break;
+            }
+#else
+            BIF_RET(am_notsup);
+#endif
+        } else if (ERTS_IS_ATOM_STR("jit_alias", BIF_ARG_1)) {
+#ifdef BEAMASM
+            /* run_rx returns ok; write_rx and run_rw end the runtime with a
+             * memory fault where write and execute are kept apart. */
+            if (ERTS_IS_ATOM_STR("run_rx", BIF_ARG_2)) {
+                BIF_RET(beamasm_alias_probe(BEAMASM_ALIAS_RUN_RX) ? am_ok : am_notsup);
+            } else if (ERTS_IS_ATOM_STR("write_rx", BIF_ARG_2)) {
+                BIF_RET(beamasm_alias_probe(BEAMASM_ALIAS_WRITE_RX) ? am_ok : am_notsup);
+            } else if (ERTS_IS_ATOM_STR("run_rw", BIF_ARG_2)) {
+                BIF_RET(beamasm_alias_probe(BEAMASM_ALIAS_RUN_RW) ? am_ok : am_notsup);
             }
 #else
             BIF_RET(am_notsup);

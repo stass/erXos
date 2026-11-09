@@ -143,10 +143,22 @@ it; git history is the record of completed work.
   a blocked sender and activates it afterwards, the race `Semaphore` closes with `Thread_sem_woken`, so a timed send can
   return first and the activation land in what the thread blocks in next. The root's one gate is created bound
   (`service.c:161`), and a sender blocks only on an unbound gate, so nothing in `liberx` reaches it. Other runtimes unchecked.
-* [Medium] stopgap, the fork's executable pages under SMP: nothing runs a page rewritten on one CPU and run
-  again on another, so instruction-cache coherence across CPUs and the reuse of an executable page are unverified:
-  the native suites inspect only data after protection changes. The `native_memory` suite needs
-  that case once BeamAsm's JIT alias exists.
+* [Medium] BeamAsm, `test/guest/native_domain/jit_reload.erl`: the reload case shows no stale version on four CPUs,
+  but nothing confirms that a load reused freed code memory, and no seeded fault (the code barrier's instruction
+  barrier removed) has been shown to fail it. Record the probe's code address per load through a test hook, count
+  the reusing rounds, and plant the fault.
+* [Medium] BeamAsm, `beam/jit/asm_load.c` and `beam/beam_load.c`: the failure paths of edit 24 have no test: an
+  encoding error's `badfile`, an exhausted code space's `{error, system_limit}`. Add a test hook that fails the next
+  codegen each way and check `erlang:load_module/2`'s answer. `BeamModuleAssembler::codegen(char *, size_t)` (NIF
+  stubs) still ignores flatten and fixup errors; route the three codegen variants through one checked helper and
+  mark the result `[[nodiscard]]`. The design's inspector counter for an exhausted code space does not exist.
+* [Medium] BeamAsm, `beam/jit/beam_jit_main.cpp` (`pick_allocator`): JitAllocator's first block is 64 MiB (ERTS's
+  `block_size` of 32 MiB, doubled), and the stopgap commits a JIT object's pages when it is created, so every
+  BeamAsm domain spends 64 MiB on code space before it loads a module. Upstream's reason for large blocks is file
+  descriptors, which erXos does not spend; pick a small block under `__erxos__` and measure the boot.
+* [Low] BeamAsm, `sys/erxos/erx_jit_memory.c` (`erx_jit_memory_unmap`, `erx_jit_memory_map`): an unmap whose second
+  release fails has already removed the first alias, against its header's "a refused call changes nothing", and a
+  failed handle close after both maps loses the handle; the alias probe hand-encodes its return instruction.
 * [Medium] stopgap, `liberx/backend/fiasco`, call table of `docs/design-stopgap.md`: `erx_cap_dup`, `erx_cap_close`,
   `erx_object_destroy`, `erx_budget_create` and `erx_log_read` have no body. Their consumers are the Erlang NIF handles, the launcher, the domain library's root
   entry and the Erlang log reader, which arrive with M3; each gets its body and a `test/guest/function_api` row then.

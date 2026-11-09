@@ -36,9 +36,15 @@ module Erx
           design: DEVICE_DESIGN,
           scope: Chokepoints::Scope.new(own: false, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
           pattern: /\berx_(?:mem_create_physical|vm_map)\b/,
-          sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c")],
+          # erx_jit_memory.c maps only the JIT object it has just created, never device
+          # memory, at its two aliases.
+          sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
+                  Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_jit_memory.c', permits: /\Aerx_vm_map\z/)],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_mem_create_physical(0, 0, 0, 0, 0, 0); }\n",
-                  'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n" }
+                  'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n",
+                  'otp/erts/emulator/sys/common/erl_mmap.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n",
+                  'otp/erts/emulator/sys/erxos/erx_jit_memory.c' =>
+                    "void f(void) { erx_mem_create_physical(0, 0, 0, 0, 0, 0); }\n" }
         ),
         Chokepoints::Forbidden.new(
           name: 'device-register-access',

@@ -124,13 +124,14 @@ clock_gettime pthread_cond_timedwait strnlen
 ctime strdup strncasecmp time
 
 # The BeamAsm flavour's objects alone (RuntimeSeam::JIT_ONLY): the interpreter and the
-# hosted build leave this section out. asmjit's VirtMem maps code twice through a POSIX
-# shared memory object and asks for the page size and its environment; edit 23 gives
-# VirtMem an erXos backend over JIT objects, which empties those names. __clear_cache is
-# asmjit's cache maintenance fallback. The rest are BeamAsm's assembly logs and perf
-# outputs, which stay off, and the C++ runtime's registration of static destructors.
+# hosted build leave this section out. BeamAsm's code space is JIT objects, each mapped
+# twice (sys/erxos/erx_jit_memory.c; docs/design-runtime.md, "BeamAsm"), whose
+# handles it closes once both mappings hold them. sysconf is asmjit's CPU detection.
+# __clear_cache is asmjit's cache maintenance fallback. The rest are BeamAsm's assembly
+# logs and perf outputs, which stay off, and the C++ runtime's registration of static
+# destructors.
 [beamasm]
-mmap mprotect munmap shm_open shm_unlink ftruncate unlink sysconf getenv gettimeofday
+erx_cap_close erx_mem_create sysconf
 __clear_cache
 fopen fputs snprintf vsnprintf
 __cxa_atexit __dso_handle

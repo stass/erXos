@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored.
+ *
  * %CopyrightEnd%
  */
 
@@ -69,6 +71,7 @@ struct LoaderState_ {
     int may_load_nif;     /* true if NIFs may later be loaded for this module */
     const ErtsCodeInfo *on_load; /* Pointer to the on_load function, if any */
     unsigned max_opcode;         /* Highest opcode used in module */
+    int code_space_exhausted;    /* The load failed for want of code space */
 
     /*
      * Generic instructions.

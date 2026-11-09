@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored.
+ *
  * %CopyrightEnd%
  */
 
@@ -1107,16 +1109,16 @@ public:
 
     void emit_coverage(void *coverage, Uint index, Uint size);
 
-    void codegen(JitAllocator *allocator,
-                 const void **executable_ptr,
-                 void **writable_ptr,
+    int codegen(JitAllocator *allocator,
+                const void **executable_ptr,
+                void **writable_ptr,
                  const BeamCodeHeader *in_hdr,
                  const BeamCodeHeader **out_exec_hdr,
                  BeamCodeHeader **out_rw_hdr);
 
-    void codegen(JitAllocator *allocator,
-                 const void **executable_ptr,
-                 void **writable_ptr);
+    int codegen(JitAllocator *allocator,
+                const void **executable_ptr,
+                void **writable_ptr);
 
     void codegen(char *buff, size_t len);
 

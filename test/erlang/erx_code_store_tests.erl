@@ -14,7 +14,7 @@
 
 hash(Bytes) -> crypto:hash(sha256, Bytes).
 
-%% Bytes of N bytes that differ from every other call's.
+%% N random bytes, distinct from every other call's only for N of eight or more.
 bytes(N) -> crypto:strong_rand_bytes(N).
 
 flip_bit(<<Byte, Rest/binary>>) -> <<(Byte bxor 1), Rest/binary>>.
@@ -117,10 +117,13 @@ a_blob_larger_than_the_store_is_refused_test() ->
     Empty = erx_code_store:new(100),
     ?assertEqual({error, too_large, Empty}, erx_code_store:put_piece(Empty, hash(<<"a">>), 101, 0, bytes(101))).
 
+%% The two uploads have fixed, distinct names: an upload of a name already in progress
+%% restarts it rather than competing with it for room.
 an_upload_promises_its_whole_size_against_the_limit_test() ->
     Empty = erx_code_store:new(2 * ?PIECE),
-    {ok, {next, ?PIECE}, Started} = erx_code_store:put_piece(Empty, hash(bytes(1)), ?PIECE + 1, 0, bytes(?PIECE)),
-    ?assertEqual({error, store_full, Started}, erx_code_store:put_piece(Started, hash(bytes(1)), ?PIECE, 0, bytes(?PIECE))),
+    {ok, {next, ?PIECE}, Started} = erx_code_store:put_piece(Empty, hash(<<"first">>), ?PIECE + 1, 0, bytes(?PIECE)),
+    ?assertEqual({error, store_full, Started},
+                 erx_code_store:put_piece(Started, hash(<<"second">>), ?PIECE, 0, bytes(?PIECE))),
     ?assertMatch({ok, stored, _}, erx_code_store:put_piece(Started, hash(<<"b">>), 1, 0, <<"b">>)).
 
 %% Loaded once, so its history names it.

@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored.
+ *
  * %CopyrightEnd%
  */
 
@@ -1009,13 +1011,22 @@ int beam_load_finish_emit(LoaderState *stp) {
     stp->line_coverage_valid = NULL;
     stp->loc_index_to_cover_id = NULL;
 
-    /* Move the code to its final location. */
-    beamasm_codegen(stp->ba,
-                    &stp->executable_region,
-                    &stp->writable_region,
-                    stp->load_hdr,
-                    &code_hdr_ro,
-                    &code_hdr_rw);
+/* Move the code to its final location. A failed translation keeps no
+ * code; an exhausted code space fails the load with system_limit. */
+switch (beamasm_codegen(stp->ba,
+                        &stp->executable_region,
+                        &stp->writable_region,
+                        stp->load_hdr,
+                        &code_hdr_ro,
+                        &code_hdr_rw)) {
+case BEAMASM_CODEGEN_OK:
+    break;
+case BEAMASM_CODEGEN_NO_ROOM:
+    stp->code_space_exhausted = 1;
+    BeamLoadError0(stp, "the code space has no room for the module");
+default:
+    BeamLoadError0(stp, "the translator cannot encode the module");
+}
 
     stp->on_load = beamasm_get_on_load(stp->ba);
     module_base = beamasm_get_base(stp->ba);

@@ -4,10 +4,13 @@
 
 require_relative 'abi'
 require_relative 'boot_image'
+require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'native_jit_runtime'
 require_relative 'native_root'
 require_relative 'native_runtime'
+require_relative 'oracle'
 require_relative 'qemu'
 require_relative 'release_files'
 require_relative 'runner'
@@ -17,7 +20,9 @@ module Erx
   # test/guest/native_domain/guest.c links liberx/system and creates domains whose
   # tasks run program.c beside it, and takes their ends at its fault gate; one domain
   # runs the domain runtime image (NativeRoot::DOMAIN_RUNTIME) on a domain release of
-  # ReleaseFiles::DOMAIN_BASE to init. Each case says one line, and the transcript must show each
+  # ReleaseFiles::DOMAIN_BASE to init, and BeamAsm domains run the BeamAsm image
+  # (NativeRoot#build_jit_runtime_receipted) on the same release with the JIT test
+  # modules beside it (JIT_MODULES). Each case says one line, and the transcript must show each
   # passed, in order.
   module NativeDomain
     MEMORY_MIB = 512
@@ -28,6 +33,13 @@ module Erx
     # ERTS's image and its release, at the paths guest.c finds them by.
     ERTS_PATH = 'runtimes/emu'
     ERTS_RELEASE = ReleaseFiles.domain('erts', applications: ReleaseFiles::DOMAIN_BASE)
+    JIT_PATH = 'runtimes/jit'
+    # The modules a BeamAsm domain loads from /test/ (jit_reload.erl): the driver,
+    # and jit_probe compiled once for each of the three versions it reloads.
+    JIT_DRIVER = 'test/guest/native_domain/jit_reload.erl'
+    JIT_PROBE = 'test/guest/native_domain/jit_probe.erl'
+    JIT_TEST_PREFIX = "#{ERTS_RELEASE.prefix}test/"
+    ERLC_DEADLINE = 120
     SYSTEM = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
                 liberx/backend/core/boot_info.c liberx/erx_lane.c].freeze
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
@@ -35,11 +47,14 @@ module Erx
                     'test/guest/native_domain/guest.c'].freeze
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
-    CASES = %w[library warm halt fault stop lanes erts erts_refused link_warm link link_undo link_end undo].freeze
+    CASES = %w[library warm halt fault stop lanes erts erts_refused jit_reload jit_write_rx jit_run_rw
+                 link_warm link link_undo link_end undo].freeze
     # What a case's domain prints before its case line: init ran the ERTS domain's release,
     # and the spoiled page's runtime ended with the reader's reason.
     CONSOLE = { 'erts' => /\Ainit_started/n,
-                'erts_refused' => /\Aerx: the boot information page: the page is of another version/n }.freeze
+                'erts_refused' => /\Aerx: the boot information page: the page is of another version/n,
+                'jit_reload' => /\A\{jit_reload_passed,jit,[1-9]\d*\}/n,
+                'jit_write_rx' => /\Ajit_alias_runs/n, 'jit_run_rw' => /\Ajit_alias_runs/n }.freeze
     CASE_LINE = /\Aerx: domain: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function
@@ -98,12 +113,40 @@ module Erx
                                                         archives: [*erts.otp_archives, erts.libc, fiasco.user_library('libgcc.a')])
         root_task = native.build(name: 'domain-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: ROOT_FLAGS)
         programs = { PROGRAM_PATH => program, RELEASE_PATH => File.join(@root, RELEASE_SOURCE),
-                     ERTS_PATH => runtime.fetch(:program), **release(erts) }
+                     ERTS_PATH => runtime.fetch(:program), JIT_PATH => jit_runtime(native, fiasco, erts),
+                     **release(erts), **jit_modules }
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task, programs: programs)
       end
 
-      # The ERTS release's files, path by path.
+      # The BeamAsm image, over the interpreter build's musl and release.
+      def jit_runtime(native, fiasco, erts)
+        jit = NativeJitRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+                              .build(interpreter: erts)
+        native.build_jit_runtime_receipted(directory: File.join(@build, 'erts-jit'),
+                                           archives: jit.link_archives(libgcc: fiasco.user_library('libgcc.a')))
+              .fetch(:program)
+      end
+
+      # The JIT test modules, compiled by the stock oracle's erlc, at their paths under the release.
+      def jit_modules
+        directory = File.join(@build, 'jit-modules')
+        FileUtils.mkdir_p(directory)
+        { 'jit_reload' => erlc(JIT_DRIVER, directory, []),
+          'jit_probe_1' => erlc(JIT_PROBE, File.join(directory, '1'), ['-DVERSION=1']),
+          'jit_probe_2' => erlc(JIT_PROBE, File.join(directory, '2'), ['-DVERSION=2']),
+          'jit_probe_3' => erlc(JIT_PROBE, File.join(directory, '3'), ['-DVERSION=3']) }
+          .to_h { |name, beam| ["#{JIT_TEST_PREFIX}#{name}.beam", beam] }
+      end
+
+      def erlc(source, directory, defines)
+        FileUtils.mkdir_p(directory)
+        erlc = File.join(File.dirname(Oracle.new(root: @root, runner: @runner).erl_path(Runtime::HOST_OTP_FLAVOUR)), 'erlc')
+        @runner.run([erlc, *ErlangApps::FLAGS, *defines, '-o', directory, File.join(@root, source)],
+                    name: 'erlc-native-domain', deadline: ERLC_DEADLINE, chdir: @root, env: Oracle::CLEAN_ERLANG_ENV)
+        File.join(directory, "#{File.basename(source, '.erl')}.beam")
+      end
+
       def release(erts)
         codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
         ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(@build, 'release'), runner: @runner, codec: codec,

@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a code space without room for a module fails its load with system_limit.
+ *
  * %CopyrightEnd%
  */
 
@@ -225,6 +227,11 @@ erts_prepare_loading(Binary* magic, Process *c_p, Eterm group_leader,
     }
 
     if (!load_code(stp)) {
+#ifdef BEAMASM
+        if (stp->code_space_exhausted) {
+            retval = am_system_limit;
+        }
+#endif
         goto load_error;
     }
 

@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored. beamasm_alias_probe tests the code space's two aliases.
+ *
  * %CopyrightEnd%
  */
 
@@ -57,13 +59,32 @@ void *beamasm_new_assembler(Eterm mod,
                             int num_labels,
                             int num_functions,
                             BeamFile *beam);
-void beamasm_codegen(void *ba,
+/* What a translation's code generation ends with. A failed one keeps no code. */
+enum beamasm_codegen_result {
+    BEAMASM_CODEGEN_OK = 0,
+    BEAMASM_CODEGEN_BAD_CODE, /* the assembler could not encode the module */
+    BEAMASM_CODEGEN_NO_ROOM   /* the code space has no room for it */
+};
+int beamasm_codegen(void *ba,
                      const void **executable_region,
                      void **writable_region,
                      const BeamCodeHeader *in_hdr,
                      const BeamCodeHeader **out_exec_hdr,
                      BeamCodeHeader **out_rw_hdr);
 void *beamasm_register_metadata(void *ba, const BeamCodeHeader *header);
+/*
+ * A test of the code space's aliases (docs/design-runtime.md, "BeamAsm"): a
+ * fresh block holding one return instruction is called through its executable
+ * alias, written through it, or called through its writable alias. Only the
+ * first returns where every mapping keeps write and execute apart. 0 where the
+ * code space has one mapping, no room, or no such probe on this architecture.
+ */
+enum beamasm_alias_probe {
+    BEAMASM_ALIAS_RUN_RX,
+    BEAMASM_ALIAS_WRITE_RX,
+    BEAMASM_ALIAS_RUN_RW
+};
+int beamasm_alias_probe(enum beamasm_alias_probe how);
 void beamasm_unregister_metadata(void *handle);
 void beamasm_purge_module(const void *executable_region,
                           void *writable_region,

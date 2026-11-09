@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored.
+ *
  * %CopyrightEnd%
  */
 
@@ -56,7 +58,11 @@ BeamGlobalAssembler::BeamGlobalAssembler(JitAllocator *allocator)
         const void *executable_region;
         void *writable_region;
 
-        BeamAssembler::codegen(allocator, &executable_region, &writable_region);
+        if (BeamAssembler::codegen(allocator,
+                                   &executable_region,
+                                   &writable_region) != BEAMASM_CODEGEN_OK) {
+            ERTS_INTERNAL_ERROR("jit: cannot generate the runtime's shared code");
+        }
         VirtMem::flush_instruction_cache((void *)executable_region,
                                          code.code_size());
         VirtMem::protect_jit_memory(VirtMem::ProtectJitAccess::kReadExecute);

@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: return_to tracing skips a process spawned erx_untraced, as it skips a sensitive one.
+ * Modified by erXos: return_to tracing skips a process spawned erx_untraced, as it skips a sensitive one;
+ * an encoding error or a code space without room fails the translation at codegen instead of being ignored.
  *
  * %CopyrightEnd%
  */
@@ -86,16 +87,25 @@ size_t BeamAssemblerCommon::getOffset() {
     return assembler.offset();
 }
 
-void BeamAssemblerCommon::codegen(JitAllocator *allocator,
-                                  const void **executable_ptr,
-                                  void **writable_ptr) {
+int BeamAssemblerCommon::codegen(JitAllocator *allocator,
+                                 const void **executable_ptr,
+                                 void **writable_ptr) {
     Error err;
 
+    *executable_ptr = NULL;
+    *writable_ptr = NULL;
+
+    if (encodingError != Error::kOk) {
+        return BEAMASM_CODEGEN_BAD_CODE;
+    }
+
     err = code.flatten();
-    ERTS_ASSERT(err == Error::kOk && "Could not flatten code");
-    err = code.resolve_cross_section_fixups();
-    ERTS_ASSERT(err == Error::kOk && !code.has_unresolved_fixups() &&
-                "Could not resolve all labels");
+    if (err == Error::kOk) {
+        err = code.resolve_cross_section_fixups();
+    }
+    if (err != Error::kOk || code.has_unresolved_fixups()) {
+        return BEAMASM_CODEGEN_BAD_CODE;
+    }
 
     /* Verify that all labels are bound */
 #ifdef DEBUG
@@ -117,11 +127,8 @@ void BeamAssemblerCommon::codegen(JitAllocator *allocator,
     Out<JitAllocator::Span> out(span);
     err = allocator->alloc(out, code.code_size() + 16);
 
-    if (err == Error::kTooManyHandles) {
-        ERTS_ASSERT(!"Failed to allocate module code: "
-                     "out of file descriptors");
-    } else if (err != Error::kOk) {
-        ERTS_ASSERT("Failed to allocate module code");
+    if (err != Error::kOk) {
+        return BEAMASM_CODEGEN_NO_ROOM;
     }
 
     *executable_ptr = span.rx();
@@ -139,6 +146,8 @@ void BeamAssemblerCommon::codegen(JitAllocator *allocator,
         if (FILE *f = l->file())
             fprintf(f, "; CODE_SIZE: %zd\n", code.code_size());
 #endif
+
+    return BEAMASM_CODEGEN_OK;
 }
 
 void *BeamAssemblerCommon::getCode(Label label) {
@@ -150,10 +159,14 @@ byte *BeamAssemblerCommon::getCode(char *labelName) {
     return (byte *)getCode(code.label_by_name(labelName, strlen(labelName)));
 }
 
-void BeamAssemblerCommon::handleError(Error err,
+void BeamAssemblerCommon::handle_error(Error err,
                                       const char *message,
                                       BaseEmitter *origin) {
     comment(message);
+
+    if (encodingError == Error::kOk) {
+        encodingError = err;
+    }
 
     if (logger.file() != NULL) {
         fflush(logger.file());
@@ -216,16 +229,20 @@ void BeamAssemblerCommon::setLogger(FILE *log) {
     code.set_logger(&logger);
 }
 
-void BeamModuleAssembler::codegen(JitAllocator *allocator,
-                                  const void **executable_ptr,
-                                  void **writable_ptr,
-                                  const BeamCodeHeader *in_hdr,
-                                  const BeamCodeHeader **out_exec_hdr,
-                                  BeamCodeHeader **out_rw_hdr) {
+int BeamModuleAssembler::codegen(JitAllocator *allocator,
+                                 const void **executable_ptr,
+                                 void **writable_ptr,
+                                 const BeamCodeHeader *in_hdr,
+                                 const BeamCodeHeader **out_exec_hdr,
+                                 BeamCodeHeader **out_rw_hdr) {
     const BeamCodeHeader *code_hdr_exec;
     BeamCodeHeader *code_hdr_rw;
+    int result;
 
-    BeamAssembler::codegen(allocator, executable_ptr, writable_ptr);
+    result = BeamAssembler::codegen(allocator, executable_ptr, writable_ptr);
+    if (result != BEAMASM_CODEGEN_OK) {
+        return result;
+    }
 
     {
         auto offset = code.label_offset_from_base(code_header);
@@ -255,13 +272,17 @@ void BeamModuleAssembler::codegen(JitAllocator *allocator,
 
     *out_exec_hdr = code_hdr_exec;
     *out_rw_hdr = code_hdr_rw;
+
+    return BEAMASM_CODEGEN_OK;
 }
 
-void BeamModuleAssembler::codegen(JitAllocator *allocator,
-                                  const void **executable_ptr,
-                                  void **writable_ptr) {
-    BeamAssembler::codegen(allocator, executable_ptr, writable_ptr);
+int BeamModuleAssembler::codegen(JitAllocator *allocator,
+                                 const void **executable_ptr,
+                                 void **writable_ptr) {
+    int result = BeamAssembler::codegen(allocator, executable_ptr, writable_ptr);
+
     VirtMem::protect_jit_memory(VirtMem::ProtectJitAccess::kReadExecute);
+    return result;
 }
 
 void BeamModuleAssembler::codegen(char *buff, size_t len) {

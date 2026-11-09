@@ -13,7 +13,13 @@
  * reads a lane larger than its own, whose size its boot page must name. Then
  * a domain runs the ERTS image on the ERTS release to init, which says so and
  * halts with 0, and one whose boot page was spoiled ends at its runtime's
- * entry with the reader's reason, before ERTS runs. After each end the domain
+ * entry with the reader's reason, before ERTS runs. Three domains run the
+ * BeamAsm image (JIT) on the same release, in spaces made with ERX_SPACE_JIT
+ * from the image's flag: one reloads a module in a loop while a process on
+ * each of the domain's CPUs calls it and finds no stale code, and halts with 0;
+ * in the others a block of the code space runs through its executable alias,
+ * then is written through that alias, or run through its writable one, which
+ * ends the domain with a memory fault (jit_reload.erl). After each end the domain
  * is disconnected and retired, and the pool and the root's handle table hold
  * what they held before. Two running domains are connected and disconnected.
  * Then a connect, and a create, fails at each step in turn, before the step
@@ -47,10 +53,12 @@
 #define PROGRAM		"boot/native-domain"
 #define RELEASE		"domains/native/release"
 #define ERTS		"runtimes/emu"
+#define JIT		"runtimes/jit"
 #define ERTS_RELEASE	"domains/erts/"
 #define ERTS_MEMORY	(UINT64_C(160) << 20)
 #define LIBRARY_MEMORY	(UINT64_C(256) << 20)
-#define WAIT_NS		UINT64_C(10000000000)
+/* Under the suite's 60 s per case: a BeamAsm domain boots and reloads for some seconds. */
+#define WAIT_NS		UINT64_C(50000000000)
 #define DOMAINS		4u
 #define CONNECTIONS	4u
 #define PRINCIPAL	1u
@@ -77,9 +85,15 @@ static uint32_t erts_release, erts_files;
  * has no tty yet, and -noshell would start user_drv, whose NIF is gone, so it
  * starts no user; erlang:display writes to the console through the service.
  */
-static const char erts_args[] = "--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0"
-    "-boot\0/bin/start\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0"
-    "-eval\0erlang:display(init_started),erlang:halt(0)";
+#define ERTS_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
+    "-boot\0/bin/start\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0-eval\0"
+static const char erts_args[] = ERTS_BOOT "erlang:display(init_started),erlang:halt(0)";
+/* What a BeamAsm domain runs: jit_reload, from the release's /test/, in one of its modes. */
+#define JIT_RUN(mode)	ERTS_BOOT "{ok,B}=erl_prim_loader:read_file(\"/test/jit_reload.beam\")," \
+    "{module,jit_reload}=erlang:load_module(jit_reload,B),jit_reload:run(" mode ")"
+static const char jit_reload_args[] = JIT_RUN("reload");
+static const char jit_write_rx_args[] = JIT_RUN("write_rx");
+static const char jit_run_rw_args[] = JIT_RUN("run_rw");
 
 /* What a case does between a domain's create and its end. */
 typedef enum run_action {
@@ -148,7 +162,10 @@ files_from(const erx_pack_view_t *pack, uint32_t program)
 static const char *
 library_up(void)
 {
-	const erx_grant_t share = { .quota_ns = ERX_QUOTA_NONE, .cpuset = 1, .capacity_mcpu = 1000 };
+	/* Every CPU, so that a BeamAsm domain can run on each. */
+	const uint64_t cpus = erx_fiasco_cpus_online();
+	const erx_grant_t share = { .quota_ns = ERX_QUOTA_NONE, .cpuset = cpus,
+	    .capacity_mcpu = 1000 * (uint32_t)__builtin_popcountll(cpus) };
 	uint64_t budget;
 
 	principals[0] = (erx_dom_principal_t){ .number = PRINCIPAL, .memory = LIBRARY_MEMORY, .domains_max = DOMAINS,
@@ -212,6 +229,23 @@ erts_request(uint32_t runtime)
 	request.memory = ERTS_MEMORY;
 	memcpy(request.strings, erts_args, sizeof(erts_args));
 	request.args_len = (uint32_t)sizeof(erts_args);
+	return (&request);
+}
+
+/*
+ * A request for a domain whose BeamAsm image runs args (a JIT_RUN) on the
+ * ERTS release, on every CPU.
+ */
+static const erx_dom_spec_t *
+jit_request(uint32_t runtime, const char *args, size_t args_len)
+{
+	const uint64_t cpus = erx_fiasco_cpus_online();
+
+	(void)erts_request(runtime);
+	request.grant = (erx_grant_t){ .quota_ns = ERX_QUOTA_NONE, .cpuset = cpus,
+	    .capacity_mcpu = 1000 * (uint32_t)__builtin_popcountll(cpus) };
+	memcpy(request.strings, args, args_len);
+	request.args_len = (uint32_t)args_len;
 	return (&request);
 }
 
@@ -533,19 +567,28 @@ erx_fiasco_root_main(void)
 	erx_boot_handoff_view_t handoff;
 	static erx_pack_view_t pack;
 	const char *reason = erx_fiasco_root_open(&handoff, &pack);
-	uint32_t program = 0, erts = 0;
+	uint32_t program = 0, erts = 0, jit = 0;
 
 	if (reason == NULL)
 		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
 	if (reason == NULL && (erx_fiasco_launcher_find(&pack, PROGRAM, &program) != ERX_OK ||
 	    erx_fiasco_launcher_find(&pack, RELEASE, &release) != ERX_OK ||
-	    erx_fiasco_launcher_find(&pack, ERTS, &erts) != ERX_OK || !erts_release_find(&pack)))
+	    erx_fiasco_launcher_find(&pack, ERTS, &erts) != ERX_OK ||
+	    erx_fiasco_launcher_find(&pack, JIT, &jit) != ERX_OK || !erts_release_find(&pack)))
 		reason = "erx: domain: no program or release\n";
 	if (reason == NULL) {
 		erx_fiasco_task_set_archive(&pack);
 		files_from(&pack, program);
 		files[erts].kind = ERX_ENTRY_IMAGE;
 		files[erts].image_ok = true;
+		/*
+		 * The BeamAsm image's manifest marks it ERX_IMAGE_JIT, which the domain
+		 * service reads from it; this root reads no manifest, so it sets the flag
+		 * the library makes ERX_SPACE_JIT from.
+		 */
+		files[jit].kind = ERX_ENTRY_IMAGE;
+		files[jit].image_ok = true;
+		files[jit].image_flags = ERX_IMAGE_JIT;
 		reason = library_up();
 	}
 	if (reason != NULL) {
@@ -561,6 +604,11 @@ erx_fiasco_root_main(void)
 	case_end("lanes", request_for("halt", program, 1), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
 	case_end("erts", erts_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("erts_refused", erts_request(erts), RUN_SPOIL, ERX_DOM_END_HALT, ERX_FIASCO_TASK_STATUS_BOOT_PAGE);
+	case_end("jit_reload", jit_request(jit, jit_reload_args, sizeof(jit_reload_args)), RUN_PLAIN, ERX_DOM_END_HALT, 0);
+	case_end("jit_write_rx", jit_request(jit, jit_write_rx_args, sizeof(jit_write_rx_args)), RUN_PLAIN,
+	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
+	case_end("jit_run_rw", jit_request(jit, jit_run_rw_args, sizeof(jit_run_rw_args)), RUN_PLAIN,
+	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
 	case_link(program);
 	case_undo(program);
 	say("erx: domain: done\n");

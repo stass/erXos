@@ -1136,7 +1136,8 @@ JIT_OBJS = \
     $(OBJDIR)/beam_jit_common.o \
     $(OBJDIR)/beam_jit_main.o \
     $(OBJDIR)/beam_jit_metadata.o \
-    $(OBJDIR)/process_main.o
+    $(OBJDIR)/process_main.o \
+    $(OBJDIR)/erx_jit_memory.o
 
 ifeq ($(JIT_ARCH), x86)
 JIT_OBJS += \

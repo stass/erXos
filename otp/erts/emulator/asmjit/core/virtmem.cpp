@@ -2,6 +2,11 @@
 //
 // See <asmjit/core.h> or LICENSE.md for license and copyright information
 // SPDX-License-Identifier: Zlib
+//
+// Modified by erXos: on erXos (__erxos__) VirtMem's one backend is a JIT object
+// mapped twice, read-execute and read-write, through erx_jit_memory.h; single
+// mappings and protection changes are refused, so no page is ever writable and
+// executable (docs/design-runtime.md, "BeamAsm").
 
 #include <asmjit/core/api-build_p.h>
 #ifndef ASMJIT_NO_JIT
@@ -11,7 +16,9 @@
 #include <asmjit/core/virtmem.h>
 #include <asmjit/support/support.h>
 
-#if !defined(_WIN32)
+#if defined(__erxos__)
+  #include "erx_jit_memory.h"
+#elif !defined(_WIN32)
   #include <errno.h>
   #include <fcntl.h>
   #include <sys/mman.h>
@@ -345,10 +352,83 @@ Error release_dual_mapping(DualMapping& dm, size_t size) noexcept {
 
 #endif
 
+// Virtual Memory [erXos]
+// ======================
+
+#if defined(__erxos__)
+
+// Executable memory is a JIT object with two aliases, which the kernel admits only in
+// a space created for JIT objects. The runtime counts as hardened: JitAllocator then
+// asks only for dual mappings, the one kind this backend makes.
+
+static void detect_vm_info(Info& vm_info) noexcept {
+  uint32_t page_size = uint32_t(erx_jit_memory_page());
+
+  vm_info.page_size = page_size;
+  vm_info.page_granularity = Support::max<uint32_t>(page_size, 65536);
+}
+
+static size_t detect_large_page_size() noexcept { return 0; }
+
+static HardenedRuntimeFlags get_hardened_runtime_flags() noexcept {
+  return HardenedRuntimeFlags::kEnabled | HardenedRuntimeFlags::kDualMapping;
+}
+
+static Error error_from_jit_memory(int result) noexcept {
+  switch (result) {
+    case ERX_JIT_MEMORY_OK:
+      return Error::kOk;
+    case ERX_JIT_MEMORY_NO_ROOM:
+      return make_error(Error::kOutOfMemory);
+    default:
+      return make_error(Error::kInvalidArgument);
+  }
+}
+
+// A single mapping of code would be writable and executable at once.
+Error alloc(void** p, size_t size, MemoryFlags memory_flags) noexcept {
+  Support::maybe_unused(size, memory_flags);
+  *p = nullptr;
+  return make_error(Error::kFeatureNotEnabled);
+}
+
+Error release(void* p, size_t size) noexcept {
+  Support::maybe_unused(p, size);
+  return make_error(Error::kFeatureNotEnabled);
+}
+
+// Each alias keeps the protection it was mapped with.
+Error protect(void* p, size_t size, MemoryFlags memory_flags) noexcept {
+  Support::maybe_unused(p, size, memory_flags);
+  return make_error(Error::kFeatureNotEnabled);
+}
+
+Error alloc_dual_mapping(Out<DualMapping> dm, size_t size, MemoryFlags memory_flags) noexcept {
+  Support::maybe_unused(memory_flags);
+  dm->rx = nullptr;
+  dm->rw = nullptr;
+  if (size == 0 || size > SIZE_MAX / 2u) {
+    return make_error(Error::kInvalidArgument);
+  }
+  return error_from_jit_memory(erx_jit_memory_map(size, &dm->rx, &dm->rw));
+}
+
+Error release_dual_mapping(DualMapping& dm, size_t size) noexcept {
+  Error err = error_from_jit_memory(erx_jit_memory_unmap(dm.rx, dm.rw, size));
+
+  if (err == Error::kOk) {
+    dm.rx = nullptr;
+    dm.rw = nullptr;
+  }
+  return err;
+}
+
+#endif
+
 // Virtual Memory [Unix]
 // =====================
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__erxos__)
 
 // Virtual Memory [Unix] - Utilities
 // =================================

@@ -90,9 +90,9 @@ protected:
 
     void lateInit();
 
-    void codegen(JitAllocator *allocator,
-                 const void **executable_ptr,
-                 void **writable_ptr);
+    int codegen(JitAllocator *allocator,
+                const void **executable_ptr,
+                void **writable_ptr);
 
     void comment(const char *format) {
         if (logger.file()) {
@@ -116,7 +116,12 @@ protected:
         assembler.embed((char *)data, size);
     }
 
-    void handleError(Error err, const char *message, BaseEmitter *origin);
+    /* The first encoding error, which fails the translation at codegen. */
+    Error encodingError = Error::kOk;
+
+    void handle_error(Error err,
+                      const char *message,
+                      BaseEmitter *origin) override;
 
     void setLogger(const std::string &log);
     void setLogger(FILE *log);

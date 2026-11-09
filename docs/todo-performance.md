@@ -497,3 +497,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   the addresses on every configuration generation change, for every reader, and an
   unconnected UDP socket builds a path per datagram. Settle with a benchmark of a path
   rebuild over a host-sized configuration (a few interfaces, tens of rows) per datagram.
+
+* A module load under BeamAsm on four CPUs is slow: in `native_domain`'s
+  `jit_reload` case (HVF, 4 CPUs) a round of soft purge, load and every
+  scheduler's call took a few hundred milliseconds, against far less on one
+  CPU, so the case runs 40 rounds rather than 200. The suspects are the code
+  barrier's aux work and the thread-progress ticks a load and a purge wait
+  for, each of which waits for every executor. Settle it with a `tools/erx
+  bench` workload that loads and purges a small module in a loop at 1, 2
+  and 4 CPUs under the interpreter and BeamAsm images.
