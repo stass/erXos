@@ -119,7 +119,7 @@ encapsulation of TCP, so FreeBSD's branches for `path_mtu_discovery` off and for
 not translated.
 """.
 
--export([update/4, mss/5, mssopt/3, maxseg/2, initwnd/1, sack_prohibited/1]).
+-export([update/4, mtudisc/5, mss/5, mssopt/3, maxseg/2, initwnd/1, sack_prohibited/1]).
 
 -export_type([family/0, offer/0, options/0]).
 
@@ -128,6 +128,8 @@ not translated.
 -define(TCP_MSS, 536).
 -define(TCP6_MSS, 1220).
 -define(TCP_MINMSS, 216).
+%% ip6.h: IPV6_MMTU, the least IPv6 MTU.
+-define(IPV6_MMTU, 1280).
 %% tcp_mss_update's floor under every MSS it computes.
 -define(MSS_FLOOR, 64).
 %% sizeof(struct tcpiphdr) and sizeof(struct ip6_hdr) + sizeof(struct tcphdr).
@@ -197,6 +199,34 @@ update(Family, Offer0, PathMtu, CachedMtu)
                   end,
             max(min(Mtu - ProtoH, Offer), ?MSS_FLOOR)
     end.
+
+-doc """
+The MSS for an MTU an ICMP error reported, or `keep` (`tcp_ctlinput_with_port`'s gate and
+`tcp_mtudisc`, sys/netinet/tcp_subr.c:3152-3168 and 3594-3634). The reported MTU is first
+raised to the least the stack accepts: `tcp_minmss` with the IPv4 and TCP headers, 256
+bytes (`tcp_next_pmtu`), or `IPV6_MMTU`, 1,280 (`tcp6_next_pmtu`). Only an MTU below the
+current MSS with its headers acts; the MSS is then `update/4`'s for it, no larger than the
+send buffer (with the 64-byte floor of `update/4`, where FreeBSD would take a smaller
+buffer as it is) and never above `Old`, which also holds when the path has no route and
+`update/4` falls back to the family's default. So the MSS only ever goes down.
+""".
+-spec mtudisc(family(), non_neg_integer(), non_neg_integer(), pos_integer(),
+              non_neg_integer()) -> {lower, pos_integer()} | keep.
+mtudisc(Family, Reported, PathMtu, Old, SndHiwat)
+  when is_integer(Reported), Reported >= 0, is_integer(Old), Old > 0,
+       is_integer(SndHiwat), SndHiwat >= 0 ->
+    ProtoH = min_protoh(Family),
+    Mtu = max(Reported, least_mtu(Family)),
+    case Mtu < Old + ProtoH of
+        true ->
+            Maxseg = min(update(Family, {mtu, Mtu}, PathMtu, 0), Old),
+            {lower, min(Maxseg, max(SndHiwat, ?MSS_FLOOR))};
+        false ->
+            keep
+    end.
+
+least_mtu(inet) -> ?TCP_MINMSS + ?MIN_PROTOH_INET;
+least_mtu(inet6) -> ?IPV6_MMTU.
 
 -doc """
 The MSS when a SYN's option is processed (`tcp_mss`): `update/4`'s result, lowered to the

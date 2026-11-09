@@ -91,8 +91,9 @@ translates the FreeBSD code for it, then runs output, as `tcp_do_segment` ends b
   reaches the low watermark (`sowriteable`) and is answered once they are all in.
 
 Because those answers follow from the state after every step, no stage has to remember to
-give them. The event modules are erx_tcp_input (segments), erx_tcp_user (requests),
-erx_tcp_timer (expirations) and erx_tcp_output (output).
+give them. The event modules are erx_tcp_input (segments, with erx_tcp_timewait for those
+reaching TIME-WAIT), erx_tcp_user (requests), erx_tcp_timer (expirations), erx_tcp_icmp
+(ICMP reports) and erx_tcp_output (output).
 
 The module also holds what those modules share: the state order of `tcp_fsm.h`, the
 connection's side of `cc_cong_signal` and `cc_ack_received` (sys/netinet/tcp_input.c), the
@@ -120,11 +121,13 @@ receive window it advertises.
 -doc """
 What the step is handed: segments from the interface, in order, as erx_tcp_wire decoded
 them; a request; a timer message, whose time is only a hint, since the context's time is
-the one the step uses; or the buffer size the grant reserved.
+the one the step uses; an ICMP or ICMPv6 error quoting one of the connection's segments
+(erx_tcp_icmp); or the buffer size the grant reserved.
 """.
 -type event() :: {segments, [segment()]}
                | {user, request()}
                | {expired, Hint :: integer()}
+               | {icmp, erx_tcp_icmp:report()}
                | {buffer, snd | rcv, Bytes :: non_neg_integer()}.
 
 -doc """
@@ -177,6 +180,8 @@ dispatch({user, Request}, Tcb, Ctx) ->
     erx_tcp_user:request(Request, Tcb, Ctx);
 dispatch({expired, Hint}, Tcb, Ctx) when is_integer(Hint) ->
     erx_tcp_timer:expired(Tcb, Ctx);
+dispatch({icmp, Report}, Tcb, Ctx) ->
+    erx_tcp_icmp:report(Report, Tcb, Ctx);
 dispatch({buffer, snd, Bytes}, Tcb, _) when is_integer(Bytes), Bytes >= 0 ->
     {Tcb#tcb{snd_hiwat = Bytes}, []};
 dispatch({buffer, rcv, Bytes}, Tcb, _) when is_integer(Bytes), Bytes >= 0 ->

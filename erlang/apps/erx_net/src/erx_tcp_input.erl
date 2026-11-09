@@ -22,34 +22,6 @@
 %%
 %% Portions of this software were developed by Robert N. M. Watson under
 %% contract to Juniper Networks, Inc.
-%%
-%% FreeBSD: sys/netinet/tcp_timewait.c
-%% Copyright (c) 1982, 1986, 1988, 1990, 1993, 1995
-%% The Regents of the University of California.  All rights reserved.
-%%
-%% Redistribution and use in source and binary forms, with or without
-%% modification, are permitted provided that the following conditions
-%% are met:
-%% 1. Redistributions of source code must retain the above copyright
-%%    notice, this list of conditions and the following disclaimer.
-%% 2. Redistributions in binary form must reproduce the above copyright
-%%    notice, this list of conditions and the following disclaimer in the
-%%    documentation and/or other materials provided with the distribution.
-%% 3. Neither the name of the University nor the names of its contributors
-%%    may be used to endorse or promote products derived from this software
-%%    without specific prior written permission.
-%%
-%% THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
-%% ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-%% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-%% ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
-%% FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-%% DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
-%% OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-%% HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-%% LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
-%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-%% SUCH DAMAGE.
 
 -module(erx_tcp_input).
 -moduledoc """
@@ -82,6 +54,8 @@ A stage ends the connection with erx_tcp_user:drop/2 (`tcp_drop`) or close/1 (`t
 The segments of one event are processed in order. Once one ends the connection, the rest
 are for a connection that no longer exists, so each goes back to the interface in a
 `reinject` action to be demultiplexed again, as FreeBSD looks each segment up anew.
+A segment that reaches the connection in TIME-WAIT takes none of the stages: it is
+erx_tcp_timewait's (`tcp_twcheck`), and TIME-WAIT begins in erx_tcp_timewait:start/2.
 """.
 
 -include("erx_tcp.hrl").
@@ -113,8 +87,6 @@ handed it before `lift`, a #seg{} after), the control block and the context.
 %% sys/sockbuf.h: SB_MAX, the default sb_max, the largest socket buffer and the bound on the
 %% window shift a SYN asks for.
 -define(SB_MAX, (2 * 1024 * 1024)).
-%% tcp_timer.h: TCPTV_MSL, the maximum segment lifetime, in milliseconds.
--define(TCPTV_MSL, 30000).
 
 -doc "Runs each segment through the stages, in order (see the module documentation).".
 -spec segments([erx_tcp:segment()], #tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:action()]}.
@@ -125,6 +97,9 @@ segments([], Tcb, _, _, Actions) ->
     {Tcb, Actions};
 segments(Rest, #tcb{ended = true} = Tcb, _, _, Actions) ->
     {Tcb, Actions ++ [{reinject, Segment} || Segment <- Rest]};
+segments([Segment | Rest], #tcb{state = time_wait} = Tcb0, Ctx, Stages, Actions) ->
+    {Tcb, More} = erx_tcp_timewait:check(Segment, Tcb0, Ctx),
+    segments(Rest, Tcb, Ctx, Stages, Actions ++ More);
 segments([Segment | Rest], Tcb0, Ctx, Stages, Actions) ->
     {Tcb, More} = run(Stages, Segment, Tcb0, Ctx),
     segments(Rest, Tcb, Ctx, Stages, Actions ++ More).
@@ -179,8 +154,9 @@ stages() ->
 %% the segment is acceptable; the `syn_sent` stage takes them once it has accepted the SYN,
 %% so a RST or SYN that SYN-SENT drops cannot change what the connection asks for.
 %%
-%% TIME-WAIT is tcp_twcheck's, not tcp_do_segment's, and a control block that has not
-%% connected has no four-tuple to receive on, so the pipeline takes neither's segments.
+%% A control block that has not connected has no four-tuple to receive on, so the pipeline
+%% takes none of its segments. TIME-WAIT's are tcp_twcheck's: `segments/3` hands them to
+%% erx_tcp_timewait, and the pipeline refuses any that reach it another way.
 lift(_, #tcb{state = State} = Tcb, _) when State =:= closed; State =:= time_wait ->
     {done, Tcb, []};
 lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = Opts},
@@ -834,19 +810,11 @@ fin_acked(true, Seg, #tcb{state = fin_wait_1, rcv_closed = RcvClosed} = Tcb,
            end,
     {continue, Tcb#tcb{state = fin_wait_2, deadlines = D#deadlines{msl2 = Msl2}}, Seg};
 fin_acked(true, _, #tcb{state = closing} = Tcb, Ctx) ->
-    {done, time_wait(Tcb, Ctx), []};
+    {done, erx_tcp_timewait:start(Tcb, Ctx), []};
 fin_acked(true, _, #tcb{state = last_ack} = Tcb, _) ->
     {done, erx_tcp_user:close(Tcb), []};
 fin_acked(_, Seg, Tcb, _) ->
     {continue, Tcb, Seg}.
-
-%% tcp_twstart (tcp_timewait.c:148-186): TIME-WAIT, with nothing left to send or to keep
-%% alive and the 2MSL deadline armed; output then sends the ACK owed. TIME-WAIT's segments
-%% are tcp_twcheck's, which `lift` hands over; this is where TIME-WAIT begins, and where
-%% tcp_eff_msl's shorter MSL for a local peer belongs.
-time_wait(#tcb{deadlines = D} = Tcb, #tcp_ctx{now = Now}) ->
-    Tcb#tcb{state = time_wait, send_timer = none,
-            deadlines = D#deadlines{keep = infinity, msl2 = Now + ms(2 * ?TCPTV_MSL)}}.
 
 %% ---------------------------------------------------------------------------------------
 %% 11. step6 (tcp_input.c:3081-3163). The send window is taken from a segment with ACK only
@@ -995,7 +963,7 @@ fin(#seg{flags = Flags} = Seg, #tcb{state = State, rcv_nxt = RcvNxt} = Tcb0, Ctx
         syn_received -> {continue, Tcb#tcb{state = close_wait}, Seg, Eof};
         established -> {continue, Tcb#tcb{state = close_wait}, Seg, Eof};
         fin_wait_1 -> {continue, Tcb#tcb{state = closing}, Seg, Eof};
-        fin_wait_2 -> {done, time_wait(Tcb, Ctx), Eof};
+        fin_wait_2 -> {done, erx_tcp_timewait:start(Tcb, Ctx), Eof};
         _ -> {continue, Tcb, Seg, Eof}
     end;
 fin(Seg, Tcb, _) ->

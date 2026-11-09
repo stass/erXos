@@ -39,10 +39,11 @@ check(Invoking) ->
         {_, Judged} -> fail(disagrees_with_reference, {Invoking, Result, Judged})
     end.
 
-fields(<<_:4, Hl:4, _:64, P, _:16, Src:4/binary, Dst:4/binary, _/binary>> = Invoking, Quoted) ->
+fields(<<_:4, Hl:4, _:8, Len:16, _:40, P, _:16, Src:4/binary, Dst:4/binary, _/binary>> = Invoking,
+       Quoted) ->
     <<_:Hl/unit:32, Upper/binary>> = Invoking,
     case Quoted of
-        #{proto := P, src := Src, dst := Dst, upper := Upper} -> accepted;
+        #{proto := P, len := Len, src := Src, dst := Dst, upper := Upper} -> accepted;
         _ -> fail(disagrees_with_reference, {Invoking, Quoted})
     end.
 

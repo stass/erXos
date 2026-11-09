@@ -621,9 +621,25 @@ it; git history is the record of completed work.
   as the variant `none | {fast, R} | {congestion, R}`, but `#ccv{}` keeps two booleans
   and `#tcb{}` keeps `snd_recover`. Settle on one form (the variant rules out illegal
   combinations, but FreeBSD does reach fast recovery without congestion recovery).
-* [Low] erx_net TCP input (`erx_tcp_input`, P18): TIME-WAIT always lasts 2 * 30 s;
-  FreeBSD's `tcp_eff_msl` gives a local peer `TCPTV_MSL_LOCAL` (10 ms), so loopback
-  connections wear down the grant's `time_wait` limit. `time_wait/2` is where it goes.
+* [Low] erx_net TCP connection process: `erx_tcp_timewait` gives a peer on one of the
+  machine's own addresses the 20 ms TIME-WAIT of `tcp_eff_msl` when the control block's
+  `local_peer` is set, but nothing sets it yet: whoever builds the control block
+  (`erx_tcp_user:new/1` for a connect, the syncache's completion for an accept) must
+  pass `local_peer => true` when the route goes through the loopback interface, or
+  loopback connections wear down the grant's `time_wait` limit.
+* [Medium] erx_net TCP core (`erx_tcp_icmp:mtudisc`, `erx_tcp_output:rewind/1`,
+  `erx_tcp_timer:rexmt`): three paths move `snd_nxt` back to `snd_una`, and only the
+  timeout's goes through the loss module (`Loss:rto/4`); the PMTU drop changes the send log
+  directly. FreeBSD has `tfb_tcp_mtu_chg` for this. A loss module that keeps per-range or
+  timer state would keep a stale view: give `erx_tcp_loss` one rewind callback and route
+  all three through it.
+* [Low] erx_net TCP ICMP (`erx_tcp_icmp`, `erx_tcp_input:tcp_mss`): an MTU a too-big
+  report gives in SYN-SENT lowers the MSS until the SYN-ACK, which recomputes it from the
+  path, so the first full-size segment is lost again; FreeBSD keeps it in the host cache
+  (`tcp_hc_updatemtu`), which `erx_tcp_hostcache` will hold.
+* [Low] erx_net TCP ICMP (`erx_tcp_icmp`): reports are sized by `#tcb.family`; check how a
+  connection to an IPv4-mapped IPv6 address is represented, since FreeBSD sizes such a
+  connection's headers as IPv4 (`inp_vflag`).
 * [Low] erx_net TCP input (`erx_tcp_input`, `data`): the D-SACK block of a duplicate
   is recorded in the `data` stage, so it is lost when the segment ends earlier (the loss
   module's `drop`, CLOSING or LAST-ACK ending); FreeBSD records it in its trim.
@@ -3250,6 +3266,15 @@ to the corpus and follow rc
 Every other risk the design accepts is stated in its
 [threat model](docs/design.md#threat-model) and in each subsystem
 document's "residual risks accepted" paragraph.
+
+* [Low] erx_net TCP ICMP and TIME-WAIT, inherited from FreeBSD: one forged too-big report
+  that guesses a sequence number in flight (odds of the flight over 2^32) lowers the MSS for
+  good, down to 216, and a sender stepping the MTU down by one byte per report forces a
+  resend of the flight each time (RFC 5927 section 7 suggests further checks); a blind SYN
+  with an older timestamp still recycles TIME-WAIT about half the time, as FreeBSD ORs
+  RFC 6191's timestamp rule with the sequence rule; and a sender that knows the sequence
+  numbers keeps TIME-WAIT alive with retransmitted FINs, within the grant's `time_wait`
+  limit (`erx_tcp_icmp`, `erx_tcp_timewait`).
 
 ## Planned features
 

@@ -108,7 +108,7 @@ module erx_ip4
   sys/netinet/ip_id.c ip_fillid
 
 module erx_icmp4
-  sys/netinet/ip_icmp.c icmp_input icmp_error icmp_reflect icmp_errmap
+  sys/netinet/ip_icmp.c icmp_input icmp_error icmp_reflect icmp_errmap ip_next_mtu
 
 module erx_net_bandlim
   sys/netinet/ip_icmp.c badport_bandlim icmplim_new_jitter
@@ -180,7 +180,6 @@ module erx_tcp_timer
 
 module erx_tcp_input
   sys/netinet/tcp_input.c tcp_do_segment tcp_dropwithreset cc_conn_init cc_ack_received cc_post_recovery tcp_xmit_timer
-  sys/netinet/tcp_timewait.c tcp_twstart
 
 module erx_tcp_output
   sys/netinet/tcp_output.c tcp_output tcp_setpersist tcp_default_output cc_after_idle
@@ -206,3 +205,9 @@ module erx_net_frame
   sys/netinet6/in6_src.c in6_selectif
   sys/net/if_ethersubr.c ether_output
   sys/netinet/if_ether.c arpresolve_addr
+
+module erx_tcp_icmp
+  sys/netinet/tcp_subr.c tcp_ctlinput_with_port tcp6_ctlinput_with_port tcp_next_pmtu tcp6_next_pmtu tcp_notify tcp_drop_syn_sent tcp_mtudisc
+
+module erx_tcp_timewait
+  sys/netinet/tcp_timewait.c tcp_twstart tcp_twcheck tcp_eff_msl

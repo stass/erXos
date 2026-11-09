@@ -65,7 +65,7 @@ counts against the limit only once its other checks pass.
 -include("erx_ip4_wire.hrl").
 -include("erx_icmp4_wire.hrl").
 
--export([input/6, error/4, decode_quoted/1, errno/1]).
+-export([input/6, error/4, decode_quoted/1, errno/1, next_mtu/1]).
 
 -export_type([ctx/0, action/0, quoted/0, kind/0, errno/0]).
 
@@ -89,11 +89,13 @@ FreeBSD's `iptime`), read by the interface's loop from the wall clock.
 -type ctx() :: #{now := integer(), time_of_day := 0..86399999}.
 
 -doc """
-The datagram and the protocol header an ICMP error quotes: its protocol, source and
-destination, and the bytes after its IP header (at least 8: the ports and, for TCP, the
-sequence number).
+The datagram and the protocol header an ICMP error quotes: its protocol, total length
+(`ip_len`, which `tcp_next_pmtu` reads when a fragmentation-needed message proposes no MTU),
+source and destination, and the bytes after its IP header (at least 8: the ports and, for
+TCP, the sequence number).
 """.
--type quoted() :: #{proto := 0..255, src := <<_:32>>, dst := <<_:32>>, upper := binary()}.
+-type quoted() :: #{proto := 0..255, len := 0..16#ffff, src := <<_:32>>, dst := <<_:32>>,
+                    upper := binary()}.
 
 -doc """
 What the interface does: send an ICMP message (its IP header's fields for
@@ -203,13 +205,14 @@ fields: `icmp_input`'s checks before it hands an error to a protocol, a header o
 the sender of the error claims to have received from us.
 """.
 -spec decode_quoted(binary()) -> {ok, quoted()} | {error, bad_length | bad_addr}.
-decode_quoted(<<_:4, Hl:4, _:64, P, _:16, Src:4/binary, Dst:4/binary, _/binary>> = Invoking)
+decode_quoted(<<_:4, Hl:4, _:8, Len:16, _:40, P, _:16, Src:4/binary, Dst:4/binary,
+               _/binary>> = Invoking)
   when Hl >= 5, byte_size(Invoking) >= Hl * 4 + ?ICMP_MINLEN ->
     Bad = erx_ip4:addr_class(Dst) =:= multicast orelse Src =:= <<0:32>> orelse Dst =:= <<0:32>>,
     case Bad of
         false ->
             <<_:Hl/unit:32, Upper/binary>> = Invoking,
-            {ok, #{proto => P, src => Src, dst => Dst, upper => Upper}};
+            {ok, #{proto => P, len => Len, src => Src, dst => Dst, upper => Upper}};
         true -> {error, bad_addr}
     end;
 decode_quoted(_) ->
@@ -227,3 +230,16 @@ errno(#icmp4{type = ?ICMP_UNREACH, code = Code}) ->
 errno(#icmp4{type = ?ICMP_TIMXCEED, code = 0}) -> ehostunreach;
 errno(#icmp4{type = ?ICMP_PARAMPROB, code = Code}) when Code =< 1 -> enoprotoopt;
 errno(_) -> none.
+
+-doc """
+The MTU to try below a datagram of `Len` bytes that did not fit, when the
+fragmentation-needed message proposes none (`ip_next_mtu(Len, 1)`, ip_icmp.c:1052-1073):
+the first plateau of RFC 1191's table below `Len`, 0 below them all.
+""".
+-spec next_mtu(non_neg_integer()) -> non_neg_integer().
+next_mtu(Len) when is_integer(Len), Len >= 0 ->
+    Plateaus = [65535, 32000, 17914, 8166, 4352, 2002, 1492, 1280, 1006, 508, 296, 68],
+    case [Mtu || Mtu <- Plateaus, Len > Mtu] of
+        [Mtu | _] -> Mtu;
+        [] -> 0
+    end.

@@ -1638,14 +1638,19 @@ holds, with a RST, as BSD sockets do.
 
 TIME-WAIT is a state of the connection process, as FreeBSD 15 keeps it a
 state of the full control block (`tcp_twstart`, `tcp_timewait.c:148`).
-The process hibernates for the 2MSL period, 60 s, so it holds only its
-smallest heap. It keeps FreeBSD's rules (`tcp_twcheck`,
-`tcp_timewait.c:197`): a RST in TIME-WAIT is dropped (RFC 1337), and a
-new SYN that RFC 6191 allows, by a newer timestamp or a higher sequence
-number, ends the old connection: the process removes its entry and
-returns the SYN to its interface process with `{reinject, Segment}`,
-which looks for a listener as `tcp_twcheck` returning true makes
-`tcp_input` do.
+The process hibernates for the 2MSL period, 60 s, or 20 ms when the peer
+is one of the machine's own addresses (`tcp_eff_msl`'s `TCPTV_MSL_LOCAL`,
+which the control block's `local_peer` selects, set by whoever makes it),
+so it holds only its smallest heap. `erx_tcp_timewait` keeps FreeBSD's
+rules (`tcp_twcheck`, `tcp_timewait.c:197`), and the step hands it every
+segment that reaches the connection in TIME-WAIT in place of the
+pipeline: a RST is dropped (RFC 1337); a new SYN that RFC 6191 allows, by
+a newer timestamp or a higher sequence number, ends the old connection:
+the process removes its entry and returns the SYN to its interface
+process with `{reinject, Segment}`, which looks for a listener as
+`tcp_twcheck` returning true makes `tcp_input` do; any other segment
+without ACK is dropped; a retransmitted FIN restarts the 2MSL period; and
+every segment but a bare duplicate ACK is acknowledged.
 
 A connection in TIME-WAIT does not count as one of its grant's sockets.
 It counts toward the grant's `time_wait` limit; past that limit a closing
@@ -1661,8 +1666,17 @@ translates `tcp_ctlinput_with_port` (`tcp_subr.c:3091`): a report whose
 quoted sequence number lies outside `snd_una` to `snd_max` is ignored
 (RFC 5927); fragmentation-needed and packet-too-big lower the path MTU
 through `tcp_mtudisc` (`tcp_subr.c:3594`) and `tcp_mss_update`
-(`tcp_input.c:3742`); an unreachable report in SYN-SENT ends the
-connection, as `tcp_drop_syn_sent` (`tcp_subr.c:3559`) does.
+(`tcp_input.c:3742`), and only ever lower it, from an MTU raised first to
+256 bytes for IPv4 (`tcp_minmss` with its headers, `tcp_next_pmtu`) and
+1,280 for IPv6 (`tcp6_next_pmtu`), and the step's output resends the
+flight from `snd_una` at the new size; a port unreachable or time exceeded
+report in SYN-SENT ends the connection, as `tcp_drop_syn_sent`
+(`tcp_subr.c:3559`) does; and every other error is a soft error
+(`tcp_notify`, `tcp_subr.c:2580`), ignored for a host unreachable once
+established, ending a handshake that has timed out more than three times
+after an earlier one, and otherwise reported by the connection's timeout.
+The lowered MTU lives in the connection's MSS until the host cache
+extension keeps it per destination.
 
 ### Defaults kept
 
@@ -2048,7 +2062,8 @@ modules are marked P; process modules E.
 | `erx_tcp_ecn` | `tcp_ecn.c` | ECN | P |
 | `erx_tcp_isn` | `tcp_new_isn`, `tcp_new_ts_offset`, `tcp_keyed_hash` (`tcp_subr.c`) | initial sequence numbers, timestamp offsets | P |
 | `erx_tcp_syncache` | `tcp_syncache.c` | half-open table, cookies | P |
-| `erx_tcp_icmp` | `tcp_ctlinput_with_port`, `tcp_mtudisc`, `tcp_drop_syn_sent` | ICMP reports for TCP | P |
+| `erx_tcp_icmp` | `tcp_ctlinput_with_port`, `tcp6_ctlinput_with_port`, `tcp_notify`, `tcp_mtudisc`, `tcp_drop_syn_sent` (`tcp_subr.c`) | ICMP reports for TCP | P |
+| `erx_tcp_timewait` | `tcp_twstart`, `tcp_twcheck`, `tcp_eff_msl` (`tcp_timewait.c`) | TIME-WAIT | P |
 | `erx_tcp_hostcache` | `tcp_hostcache.c` | per-destination path values (an extension, [Scope](#scope)) | P |
 | `erx_mcast` | `in_mcast.c`, `igmp.c`, `in6_mcast.c`, `mld6.c` | group membership, IGMPv3 and MLDv2 (an extension) | P |
 | `erx_net_bind` | `in_pcb.c` (`in_pcbbind`, `:716`; `in_pcb_lport_dest`, `:756`; `in_pcbbind_avail`, `:912`; `in_pcbbind_setup`, `:1011`), `in6_pcb.c` | port choice, reuse rules, the claim funnel | P and the funnel |

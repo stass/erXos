@@ -44,6 +44,9 @@
     family :: inet | inet6,
     local :: {Addr :: binary(), Port :: 0..16#ffff},
     remote :: {Addr :: binary(), Port :: 0..16#ffff},
+    %% The peer is one of the machine's own addresses (in_localip of the foreign address),
+    %% which shortens TIME-WAIT (tcp_eff_msl); set by whoever makes the control block.
+    local_peer = false :: boolean(),
 
     %% Sequence space (tcp_var.h), unwrapped.
     iss = 0 :: integer(),
