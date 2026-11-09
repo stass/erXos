@@ -30,6 +30,9 @@ Callbacks:
   table (its `rect` and `state` are the policy's to set), or a `wctl`
   command (erx_wctl:parse/1). It returns the whole new table, or
   `{error, einval}` for a request the policy refuses.
+* arrange(Windows, Screen, State) sets every window's `rect` and
+  `state` after a change erx_winfs makes itself: a window ended or the
+  screen's size changed.
 * decorate(Windows, Screen) returns each shown window's decoration as
   rectangles and colours, or none.
 * input(Input, Windows, State) routes one input event: to one window,
@@ -88,6 +91,8 @@ chord, withheld until their up.
 -callback place(request(), window_id(), Windows :: [window()], Screen :: rect(),
                 State :: term()) ->
     {ok, [window()], State :: term()} | {error, einval}.
+-callback arrange(Windows :: [window()], Screen :: rect(), State :: term()) ->
+    {[window()], State :: term()}.
 -callback decorate(Windows :: [window()], Screen :: rect()) ->
     [{window_id(), [{rect(), color()}]}].
 -callback input(input(), Windows :: [window()], State :: term()) ->

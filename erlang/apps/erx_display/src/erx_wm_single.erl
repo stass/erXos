@@ -20,8 +20,9 @@ window, a later one of the same session or one of any other session, is
 hidden. With no live window of the session, none is shown and input is
 dropped.
 
-Placement. `new` gives every window the screen's rectangle and sets
-each window's state from shown/2. Every `wctl` request is refused with
+Placement. `new` and arrange/3 give every window the screen's rectangle
+and set each window's state from shown/2, so when the shown window ends
+the session's next oldest is shown. Every `wctl` request is refused with
 `einval`, so no window takes the screen by asking.
 
 Input. The reserved chord is answered with `{wm, chord}` and its
@@ -31,7 +32,7 @@ goes to the shown window.
 
 -behaviour(erx_wm).
 
--export([init/1, place/5, decorate/2, input/3, shown/2]).
+-export([init/1, place/5, arrange/3, decorate/2, input/3, shown/2]).
 -export_type([config/0, state/0]).
 
 -doc "The manifest's configuration of the policy.".
@@ -53,19 +54,24 @@ request is refused.
 -spec place(erx_wm:request(), erx_wm:window_id(), [erx_wm:window()],
             erx_wm:rect(), state()) ->
           {ok, [erx_wm:window()], state()} | {error, einval}.
-place(new, Id, Windows, Screen = {X0, Y0, X1, Y1}, State = #{app := App})
+place(new, Id, Windows, Screen = {X0, Y0, X1, Y1}, State)
   when X0 < X1, Y0 < Y1 ->
     case erx_wm:fetch(Id, Windows) of
         {ok, _} ->
-            ShownId = shown(App, Windows),
-            {ok, [W#{rect := Screen,
-                     state := case WindowId of ShownId -> shown; _ -> hidden end}
-                  || W = #{id := WindowId} <- Windows], State};
+            {Arranged, State} = arrange(Windows, Screen, State),
+            {ok, Arranged, State};
         error ->
             {error, einval}
     end;
 place(_Request, _Id, _Windows, _Screen, _State) ->
     {error, einval}.
+
+-doc "The table after a window ended or the screen changed; see the moduledoc.".
+-spec arrange([erx_wm:window()], erx_wm:rect(), state()) -> {[erx_wm:window()], state()}.
+arrange(Windows, Screen, State = #{app := App}) ->
+    ShownId = shown(App, Windows),
+    {[W#{rect := Screen, state := case WindowId of ShownId -> shown; _ -> hidden end}
+      || W = #{id := WindowId} <- Windows], State}.
 
 -doc "The single policy draws nothing.".
 -spec decorate([erx_wm:window()], erx_wm:rect()) -> [].

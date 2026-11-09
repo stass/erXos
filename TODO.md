@@ -282,14 +282,8 @@ it; git history is the record of completed work.
   the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
   window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
-  system](docs/design-display.md#windows-and-the-window-system): settle these when `erx_winfs` is written, with a
-  property case for each.
-  * **A window's end and a screen change.** `erx_winfs` removes an ended window, or takes a new screen size, without
-    asking the policy, so no callback sets the windows' `state` and `rect` afterwards. Under the single policy
-    `input/3` routes to the next oldest window of the application (`erx_wm_single:shown/2`) while the table, and so
-    the layout and `wctl` reads, still marks it hidden until the next `new`: input reaches a window not on screen.
-    Add one callback, `arrange(Windows, Screen, State)`, that `erx_winfs` calls after every change it makes itself
-    (for the single policy, the body of `place(new, ...)`), and let the property test end the shown window.
+  system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
+  property case.
   * **Lost key ups.** A key whose up is lost (a keyboard unplugged mid-press) stays held in the chord's state; a
     lost up of the chord's completing key leaves it withheld, so its next downs are dropped as repeats and the chord
     does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key

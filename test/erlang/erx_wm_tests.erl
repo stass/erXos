@@ -25,9 +25,8 @@
 %% the policy's code. The sequences come from rand with a fixed seed, and
 %% a failure names the policy, sequence, step and operation.
 %%
-%% Under the single policy only hidden windows end in these sequences:
-%% after the shown window ends, no callback lets erx_winfs set the next
-%% one's state in its table (TODO.md); input/3 already routes to it.
+%% A window's end and a change of screen are followed by arrange/3, as
+%% erx_winfs does.
 
 -module(erx_wm_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -85,7 +84,9 @@ step({new, Session}, World = #{policy := Policy, table := Table, next := Id,
     same_windows(Given, Placed),
     World#{table := Placed, next := Id + 1, state := Next};
 step({remove, Id}, World = #{table := Table}) ->
-    World#{table := [W || W = #{id := Other} <- Table, Other =/= Id]};
+    arranged([W || W = #{id := Other} <- Table, Other =/= Id], World);
+step({screen, Screen}, World = #{table := Table}) ->
+    arranged(Table, World#{screen := Screen});
 step({wctl, Id, Request}, World = #{policy := Policy, table := Table,
                                     screen := Screen, state := State}) ->
     case Policy:place(Request, Id, Table, Screen, State) of
@@ -98,6 +99,12 @@ step({wctl, Id, Request}, World = #{policy := Policy, table := Table,
 step({input, Input}, World = #{policy := Policy, table := Table, state := State}) ->
     {Route, Next} = Policy:input(Input, Table, State),
     routed(Input, Route, World#{state := Next}).
+
+%% Asks the policy to arrange a table erx_winfs changed itself.
+arranged(Given, World = #{policy := Policy, screen := Screen, state := State}) ->
+    {Arranged, Next} = Policy:arrange(Given, Screen, State),
+    same_windows(Given, Arranged),
+    World#{table := Arranged, state := Next}.
 
 %% Checks a route against the table the event met, then applies it.
 routed(Input = #{event := Event}, Route, World = #{table := Table}) ->
@@ -221,21 +228,15 @@ decorations_within(#{policy := Policy, table := Table, screen := Screen}) ->
 
 %% Random operations
 
-random_op(World = #{table := Table}) ->
+random_op(#{table := Table}) ->
     Ids = [Id || #{id := Id} <- Table],
     case {rand:uniform(10), Ids} of
         {1, _} -> {new, pick([?APP, ?APP, <<"other">>])};
-        {2, [_, _ | _]} -> removal(World);
+        {2, [_ | _]} -> {remove, pick(Ids)};
+        {3, _} -> {screen, random_screen()};
         {N, [_ | _]} when N =< 5 -> {wctl, pick([99 | Ids]), random_request()};
         {_, []} -> {new, pick([?APP, ?APP, <<"other">>])};
         _ -> {input, random_input()}
-    end.
-
-%% Only a hidden window ends (see the header).
-removal(#{policy := erx_wm_single, table := Table}) ->
-    case [Id || #{id := Id, state := hidden} <- Table] of
-        [] -> {input, random_input()};
-        Hidden -> {remove, pick(Hidden)}
     end.
 
 random_request() ->

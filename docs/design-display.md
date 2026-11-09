@@ -905,6 +905,7 @@ decides who may do what.
 -callback place(Request :: new | {move, rect()} | {resize, rect()} | hide | show | top | bottom,
                 Window :: window_id(), Windows :: [window()], Screen :: rect(), State) ->
           {ok, [window()], State} | {error, einval}.
+-callback arrange(Windows :: [window()], Screen :: rect(), State) -> {[window()], State}.
 -callback decorate(Windows :: [window()], Screen :: rect()) ->
           [{window_id(), [{rect(), color()}]}].           % borders, or []
 -callback input(input(), Windows :: [window()], State) ->
@@ -914,7 +915,9 @@ decides who may do what.
 The table a policy sees and returns is in stacking order, topmost
 first. `new` is asked with the new
 window already in the table, its rectangle and state the policy's to
-set. The policy's state, from the manifest's configuration, is threaded
+set. `erx_winfs` calls `arrange/3` after every change it makes itself,
+a window's end or a change of the screen's size, so the table always
+holds the policy's answer. The policy's state, from the manifest's configuration, is threaded
 by `erx_winfs`: the overlapping policy keeps, for example, the buttons
 last seen and the drag in progress, and every policy keeps the reserved
 chord's keys held. `{windows, Table}` answers an
