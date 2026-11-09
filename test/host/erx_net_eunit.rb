@@ -20,6 +20,7 @@ require_relative '../../tools/lib/erx/generated'
 module ErxNetEunit
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_net/src')
+  INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
   HOST_BYTES = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
   TESTS = File.join(ROOT, 'test/erlang')
   DEADLINE = 300
@@ -28,7 +29,7 @@ module ErxNetEunit
   # extra: further test/erlang module names to compile, such as an oracle.
   def assert_erx_net_eunit(*modules, extra: [], pkt: false)
     Dir.mktmpdir('erx-net-eunit') do |work|
-      includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT)]
+      includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT), '-I', INCLUDE]
       if pkt
         tree = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
         includes += ['-I', File.join(tree, 'include')]

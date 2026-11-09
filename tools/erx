@@ -358,6 +358,11 @@ module Erx
                    name: 'fuzz-erx-erofs', deadline: 1800, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_hostlink_frame.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-hostlink-frame', deadline: 1000, chdir: ROOT, env: environment)
+        %w[eth arp ip4].each do |target|
+          runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_net_codec.rb'), '--target', target,
+                      '--seed', options.fetch(:seed).to_s],
+                     name: "fuzz-erx-net-#{target}", deadline: 900, chdir: ROOT, env: environment)
+        end
       end
       require_relative 'fuzz/run_pack'
       Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')

@@ -17,3 +17,13 @@
 tag release/15.1.0-p6
 commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
 archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
+
+module erx_net_eth
+  sys/net/if_ethersubr.c ether_input_internal
+
+module erx_arp_wire
+  sys/netinet/if_ether.c arpintr in_arpinput
+
+module erx_ip4_wire
+  sys/netinet/ip_input.c ip_input
+  sys/netinet/ip_options.c ip_dooptions

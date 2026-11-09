@@ -1028,7 +1028,12 @@ option is dropped, as FreeBSD's defaults drop one that reaches a host
 (`ip_dosourceroute` and `ip_acceptsourceroute` both 0,
 `ip_options.c:70-80`); skipping the record-route and timestamp options
 is a departure visible only in echo replies, which FreeBSD gives the
-request's options. `erx_ip4_reass` translates `ip_reass.c`, with
+request's options. `erx_ip4_wire` refuses a packet with a malformed
+option, one whose length byte is missing, below 2 or past the header,
+and returns the offset of that byte, which `ip_dooptions` makes the
+pointer of the parameter problem it answers with (`ip_options.c:132-138`),
+so `erx_ip4` can send the same answer after its loopback check.
+`erx_ip4_reass` translates `ip_reass.c`, with
 FreeBSD's caps on the datagrams in reassembly, the fragments per datagram
 and the lifetime of a queue, all charged to the interface. `erx_icmp4`
 translates `ip_icmp.c`: echo replies, but never to a broadcast or
@@ -1072,7 +1077,14 @@ times (`arp_maxtries`, `if_ether.c:102`), entries kept 20 minutes once
 resolved (`arpt_keep`, `if_ether.c:100`), 16 frames held per unresolved
 entry, gratuitous ARP and FreeBSD's rules for which replies may create
 or update an entry. The table has a bound per interface, and past it the
-oldest unresolved entry goes first.
+oldest unresolved entry goes first. `erx_arp_wire` accepts the two
+Ethernet hardware types (`ARPHRD_ETHER` and `ARPHRD_IEEE802`) with 6-byte
+addresses and refuses every other. `arpintr` also passes InfiniBand and
+FireWire packets on (`if_ether.c:691-720`), and `in_arpinput` drops
+those whose address length is not the interface's; so on an Ethernet
+interface FreeBSD answers a packet typed FireWire that announces 6-byte
+addresses, a hardware type no interface of this stack has, which the
+stack refuses.
 
 ### IPv6, neighbour discovery and autoconfiguration
 
