@@ -23,8 +23,8 @@ class ErxTcpSyncacheTest < Minitest::Test
   PAUSE = 'uptime(Now) < Until'
   PAUSE_THROUGH_END = 'uptime(Now) =< Until'
   # tcp_input.c:1297 and :1320 drop a SYN to or from itself before the syncache.
-  NO_SELF = 'admissible({Addr, Port, Addr, Port}, _Cast) -> false;'
-  SELF_ADMITTED = 'admissible({Addr, Port, Addr, Port}, none) -> false;'
+  NO_SELF = 'admissible({Addr, Port, Addr, Port}) -> false;'
+  SELF_ADMITTED = 'admissible({Addr, Port, Addr, Port}) when Port < 0 -> false;'
 
   def test_syncache_properties_pass_under_eunit
     assert_erx_net_eunit(:erx_tcp_syncache_tests)

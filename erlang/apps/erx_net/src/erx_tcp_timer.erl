@@ -211,14 +211,13 @@ persist(Shift, #tcb{state = State, rcvtime = Rcvtime, rtt = Rtt} = Tcb,
 %% tcp_timer_rexmt, with t_rxtshift already incremented. Past tcp_retries the connection
 %% is dropped. Otherwise, in this order: in SYN-SENT the window is one byte; outside it the
 %% first timeout saves what
-%% CC_RTO_ERR restores and keeps the SACK scoreboard, later ones forget both (the loss
-%% module's rto/4); the RTO backs off; and sending restarts from snd_una with snd_recover
+%% CC_RTO_ERR restores and keeps the SACK scoreboard, later ones forget both (the
+%% loss module's rewind/4, through erx_tcp:rewind/3); the RTO backs off; and sending restarts from snd_una with snd_recover
 %% at snd_max, an immediate ACK and no RTT measurement, after CC_RTO outside SYN-SENT. The
 %% timer is re-armed at the new RTO, where FreeBSD's output re-arms it.
 rexmt(Shift, Tcb, _) when Shift > ?TCP_RETRIES ->
     erx_tcp_user:drop(Tcb, etimedout);
-rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_una = Una, snd_max = SndMax,
-                  loss = Loss, loss_state = LossState0, sendlog = Log0} = Tcb0,
+rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_max = SndMax} = Tcb0,
       #tcp_ctx{now = Now} = Ctx) ->
     Ccv1 = case State of
                syn_sent -> Ccv0#ccv{cwnd = 1};
@@ -238,9 +237,8 @@ rexmt(Shift, #tcb{state = State, ccv = Ccv0, rtt = Rtt0, snd_una = Una, snd_max 
     Rtt = erx_tcp_rtt:backoff(Rtt0, Phase, Shift),
     Tcb1 = Tcb0#tcb{ccv = Ccv1, rexmt_prev = Prev, rtt = Rtt,
                     send_timer = {rexmt, Now + ms(erx_tcp_rtt:rto(Rtt))}, rxtshift = Shift},
-    {Log, LossState} = Loss:rto(Log0, LossState0, erx_tcp:ccv(Tcb1, Ctx), Now),
-    Tcb2 = Tcb1#tcb{sendlog = Log, loss_state = LossState, snd_nxt = Una, snd_recover = SndMax,
-                    ack_now = true, rtt_probe = none},
+    Tcb2 = (erx_tcp:rewind({timeout, Shift}, Tcb1, Ctx))#tcb{snd_recover = SndMax, ack_now = true,
+                                                             rtt_probe = none},
     case State of
         syn_sent -> Tcb2;
         _ -> erx_tcp:cong_signal(Tcb2, rto, none, Ctx)

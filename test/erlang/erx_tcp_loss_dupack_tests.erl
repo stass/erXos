@@ -88,10 +88,17 @@ sack_recovery_and_prr_test() ->
     ?assertEqual(400, erx_tcp_sendlog:pipe(Log3)),
     ?assertEqual({500, 500}, erx_tcp_loss_dupack:allowance(Log3, S2, Ccv)),
     %% The first timeout keeps the SACKed bytes, the second forgets them.
-    {Kept, _} = erx_tcp_loss_dupack:rto(Log3, S2, Ccv#ccv{rxtshift = 1}, 0),
+    {Kept, _} = erx_tcp_loss_dupack:rewind({timeout, 1}, Log3, S2, 0),
     ?assertEqual(400, erx_tcp_sendlog:sacked_bytes(Kept)),
-    {Gone, _} = erx_tcp_loss_dupack:rto(Log3, S2, Ccv#ccv{rxtshift = 2}, 0),
-    ?assertEqual(0, erx_tcp_sendlog:sacked_bytes(Gone)).
+    {Gone, _} = erx_tcp_loss_dupack:rewind({timeout, 2}, Log3, S2, 0),
+    ?assertEqual(0, erx_tcp_sendlog:sacked_bytes(Gone)),
+    %% A smaller path MTU forgets the SACKed bytes and keeps the duplicate count
+    %% (tcp_mtudisc); a zero window loses what was sent into it.
+    ?assertMatch({_, S2}, erx_tcp_loss_dupack:rewind(mtu, Log3, S2, 0)),
+    ?assertEqual(0, erx_tcp_sendlog:sacked_bytes(element(1, erx_tcp_loss_dupack:rewind(mtu, Log3, S2, 0)))),
+    {Lost, S2} = erx_tcp_loss_dupack:rewind({window, 100, 1100}, Log3, S2, 0),
+    ?assertEqual(erx_tcp_sendlog:lose(Log3, 100, 1100), Lost),
+    ?assertEqual({Log3, S2}, erx_tcp_loss_dupack:rewind({window, 1100, 1100}, Log3, S2, 0)).
 
 %% An acknowledgement without SACK blocks that fills the last hole is not a duplicate: SACK
 %% recovery is asked after the scoreboard update (tcp_input.c's second

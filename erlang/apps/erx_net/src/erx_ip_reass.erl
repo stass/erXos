@@ -170,7 +170,10 @@ its data, and for a first fragment its head.
 
 -doc """
 What an offset-0 fragment records: the header bytes that IP's limit of
-65,535 counts, and the family's header record. For IPv4 they are the
+65,535 counts, and what its front module rebuilds the datagram from (the
+family's header record, with the fragment's zone and link cast, which
+the datagram takes, as `ip_reass` and `frag6_input` keep the first
+fragment's packet header). For IPv4 the bytes are the
 whole header, since the limit is on the total length; for IPv6 they are
 the unfragmentable extension headers, since the limit is on the payload
 length, which leaves out the 40-byte fixed header.

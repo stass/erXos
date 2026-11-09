@@ -23,8 +23,8 @@ class ErxTcpExploreTest < Minitest::Test
   RST_FROM_RCV_NXT = '#tcb{rcv_nxt = LastAck, rcv_wnd = RcvWnd, state = State} = Tcb,'
   ADVANCED = 'Tcb1#tcb{rcv_nxt = RcvNxt + Tlen}'
   ADVANCED_ON_THE_WIRE = 'Tcb1#tcb{rcv_nxt = erx_tcp_seq:wire(RcvNxt + Tlen)}'
-  COUNTED = '{Tcb#tcb{challenge = {End, Sent + 1}, last_ack_sent = RcvNxt, ack_now = false},'
-  UNCOUNTED = '{Tcb#tcb{challenge = {End, Sent}, last_ack_sent = RcvNxt, ack_now = false},'
+  COUNTED = '{Tcb#tcb{challenge = {End, Sent + 1}, last_ack_sent = RcvNxt},'
+  UNCOUNTED = '{Tcb#tcb{challenge = {End, Sent}, last_ack_sent = RcvNxt},'
 
   def test_the_base_and_wrapped_runs_keep_every_property
     assert_erx_net_eunit(:erx_tcp_explore_tests, extra: [:erx_tcp_explore])

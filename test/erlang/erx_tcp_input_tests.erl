@@ -190,10 +190,17 @@ challenge_acks_are_limited_test() ->
     {_, Later} = erx_tcp_input:segments([hd(Syns)], T, ctx(?T0 + ?S(1001))),
     ?assertEqual(1, length(challenges(Later))).
 
-%% A challenge ACK sent is the ACK an old segment owed: output sends no second one.
-challenge_ack_settles_an_owed_ack_test() ->
-    {T, A} = input([wire(4000, ?ISS - 5, ?TH_ACK, <<"x">>, #tcp_opts{})], est()),
-    ?assertEqual({1, false}, {length(challenges(A)), T#tcb.ack_now}).
+%% A challenge ACK is sent beside output, as tcp_respond is, so it settles no ACK owed:
+%% only output's sent/4 clears ack_now, as only tcp_output clears TF_ACKNOW. In one batch
+%% the SYN of a simultaneous open owes its SYN-ACK, and a SYN at rcv_nxt or an in-window
+%% RST after it draws a challenge ACK that must not cancel it.
+challenge_ack_keeps_the_owed_synack_test_() ->
+    Syn = wire(9000, 0, ?TH_SYN),
+    Batch = fun(Second) -> input([Syn, Second], syn_sent()) end,
+    {AfterRst, Rst} = Batch(wire(9002, 0, ?TH_RST)),
+    {AfterSyn, _} = Batch(wire(9001, 0, ?TH_SYN)),
+    [?_assertEqual({1, true}, {length(challenges(Rst)), AfterRst#tcb.ack_now}),
+     ?_assert(AfterSyn#tcb.ack_now)].
 
 %% ECN is read only from a segment that passed every check (departure from :1592-1595).
 ecn_from_accepted_segments_only_test() ->

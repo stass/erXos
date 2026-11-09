@@ -754,6 +754,8 @@ offset 0, as `ip_reass` and `frag6_input` keep that fragment's packet
 header, and the interface classifies it as `{reassembled, Family, Zone,
 LinkCast, Bytes}`; IPv4's zone is always `none`. A datagram whose
 lifetime ends returns its first fragment with that fragment's zone, and
+only a first fragment that came as a link-layer unicast, since
+`icmp6_error` answers none of the others (`icmp6.c:309`); and
 a parameter problem carries its packet's zone,
 `{param_problem, Family, Zone, Problem, Packet}`, so the ICMPv6 error
 either sends goes back to the zoned source.
@@ -789,7 +791,7 @@ Classification runs in three steps:
 
 | Datagram | Fields read | Verdict |
 | --- | --- | --- |
-| TCP | ports | the connection's key: `owned`. Else a listener's key: `local` when the frame's link cast is `unicast`, else dropped as `bcast_tcp`, as `tcp_input` drops a link-layer broadcast or multicast for a listener (`tcp_input.c:1288`); the address checks that follow it there, a connection to or from itself and a multicast or broadcast source or destination (`tcp_input.c:1295-1338`), are the syncache's, on the verified item. Else `local` if it may be answered (a RST), else dropped as `no_reply` |
+| TCP | ports | the connection's key: `owned`. Else a listener's key: `local` when both the frame's link cast and its destination's class are `unicast`, else dropped as `bcast_tcp`, as `tcp_input` drops a link-layer broadcast or multicast for a listener (`tcp_input.c:1288`) and a SYN to a broadcast or multicast address before `syncache_add` (`tcp_input.c:1326-1338`), and `tcp_dropwithreset` answers neither when SYN is clear (`:3450-3471`), with one departure: an ACK or RST of a handshake in a link-layer broadcast or multicast frame is dropped too, where FreeBSD's `syncache_expand` and `syncache_chkrst` see it first (`:1081`, `:1175`); the checks there that read the four-tuple alone, a connection to or from itself, a multicast source and the limited broadcast as source (`tcp_input.c:1295-1338`), are the syncache's, on the verified item. Else `local` if it may be answered (a RST), else dropped as `no_reply` |
 | UDP | ports | the holders of its keys, most specific first, reduced by `erx_udp:input/3`: `deliver` is `owned` by those sockets, `port_unreach` is `local`, `{drop, no_port}` the verdict |
 | ICMP or ICMPv6 error | type; the quoted protocol, addresses and ports | the quoted datagram, which the stack sent, read by `decode_quoted/1` with its source as the local end: a TCP connection's key or a connected UDP socket's key is `owned`; a TCP listener's key is `local`, for `syncache_unreach`; else dropped as `no_socket`, and a quote `decode_quoted/1` refuses is dropped with its reason |
 | ICMP echo or timestamp request, ICMPv6 echo request | type | `local` if it may be answered, else dropped as `no_reply` |
@@ -1476,8 +1478,12 @@ from FreeBSD's own interfaces.
 %% rest of the segment is processed.
 -callback ack(erx_tcp_loss:ack(), erx_tcp_sendlog:log(), State, Now) ->
     {continue | drop, erx_tcp_sendlog:log(), State, [erx_tcp_loss:event()]}.
-%% The retransmission timer expired.
--callback rto(erx_tcp_sendlog:log(), State, erx_tcp_cc:ccv(), Now) ->
+%% Sending goes back to snd_una: the retransmission timer expired, the
+%% path MTU dropped, or the window shrank to zero after data was sent
+%% into it (FreeBSD's tfb_tcp_mtu_chg, widened to every path that moves
+%% snd_nxt back, so a module never keeps a stale view of the flight).
+-callback rewind({timeout, RxtShift} | mtu | {window, Una, Max},
+                 erx_tcp_sendlog:log(), State, Now) ->
     {erx_tcp_sendlog:log(), State}.
 %% The window for the output after the last acknowledgement.
 -callback allowance(erx_tcp_sendlog:log(), State, erx_tcp_cc:ccv()) ->
@@ -1584,14 +1590,15 @@ no other process and creates no process:
   512 buckets of 30 (`tcp_syncache.c:162-163`), with SYN-ACK
   retransmission under FreeBSD's limit and backoff, driven by the
   interface's deadlines.
-* Before it looks the SYN up, `erx_tcp_syncache:add/6` drops a SYN to
-  or from itself, from or to a multicast address, from the limited
-  broadcast or to a broadcast address, the checks `tcp_input` makes
-  before `syncache_add` (`tcp_input.c:1295-1338`). It is handed the
-  class of the SYN's destination as `erx_ip4` or `erx_ip6` found it on
-  the receiving interface (the item's `cast`), so the broadcast
+* Before it looks the SYN up, `erx_tcp_syncache:add/5` drops a SYN to
+  or from itself, from or to a multicast address or from the limited
+  broadcast, the checks `tcp_input` makes before `syncache_add`
+  (`tcp_input.c:1295-1338`) that read the four-tuple alone. A SYN to a
+  broadcast or multicast address never reaches it: `erx_net_input`'s
+  listener row drops it by the class `erx_ip4` or `erx_ip6` found for
+  the destination on the receiving interface, so the broadcast
   addresses of that interface (`in_ifnet_broadcast`) are tested in one
-  place, the IP layer's; the other checks read the four-tuple alone.
+  place, the IP layer's.
 * SYN cookies are on, as FreeBSD's default (`tcp_syncookies`,
   `tcp_syncache.c:105`): every SYN-ACK's initial sequence number is a
   cookie (`tcp_syncache.c:1726-1729`): 24 bits of a SipHash-2-4 MAC of

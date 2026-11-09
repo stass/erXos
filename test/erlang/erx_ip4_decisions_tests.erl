@@ -139,9 +139,9 @@ refragment(Len, Mtu) ->
 
 reassemble([Bin | Rest], T) ->
     {fragment, Ip, Payload} = erx_ip4:input(Bin, unicast, #{addrs => [?PEER], broadcasts => [], loopback => false}),
-    case erx_ip4_reass:input(Ip, Payload, 0, T) of
+    case erx_ip4_reass:input(Ip, Payload, unicast, 0, T) of
         {held, T1} -> reassemble(Rest, T1);
-        {done, Whole, _} when Rest =:= [] -> Whole
+        {done, none, unicast, Whole, _} when Rest =:= [] -> Whole
     end.
 
 shuffle(List) -> [X || {_, X} <- lists:sort([{rand:uniform(), X} || X <- List])].

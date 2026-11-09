@@ -274,11 +274,12 @@ A looped packet is `unicast`.
 -doc """
 What the interface classifies: a frame from its driver; on the loopback interface, an IP
 packet with the zone its sender's path gave it; or a datagram erx_ip4_reass or
-erx_ip6_reass rebuilt, with its family and the link cast of its fragments.
+erx_ip6_reass rebuilt, with its family and the zone and link cast of its fragment at
+offset 0 (IPv4's zone is `none`).
 """.
 -type input() :: {frame, binary()}
                | {frame, Zone :: term(), binary()}
-               | {reassembled, family(), link_cast(), binary()}.
+               | {reassembled, family(), Zone :: term(), link_cast(), binary()}.
 
 -doc """
 What `classify/2` reads of the interface: its link (`none` for the loopback interface) and
@@ -340,14 +341,16 @@ erx_ip6's `reply()`), its zoned addresses, and the zone they took.
 -doc """
 A classified frame waiting for `verify/1`: its kind (what its consumer is), its head and
 the bytes above IP, for a segment to a listener the listener's entry, and for the DHCP
-path, ARP, a fragment and a parameter problem what each needs.
+path, ARP, a fragment and a parameter problem what each needs: a fragment its zone and its
+frame's link cast, which reassembly keeps for the datagram, and a parameter problem its
+packet's zone, so the error goes back to the zoned source.
 """.
 -opaque pending() :: {conn | datagram | report | udp | icmp | other, head(), binary()}
                    | {tcp, head(), binary(), entry() | none}
                    | {dhcp, #ip4{}, binary()}
                    | {arp, binary()}
-                   | {fragment, family(), #ip4{} | #ip6{}, binary()}
-                   | {param_problem, family(), Problem :: tuple(), Packet :: binary()}.
+                   | {fragment, family(), Zone :: term(), link_cast(), #ip4{} | #ip6{}, binary()}
+                   | {param_problem, family(), Zone :: term(), Problem :: tuple(), Packet :: binary()}.
 
 -doc """
 What `verify/1` hands on. For the holders of an owned frame: a connection's
@@ -366,8 +369,8 @@ with the packet it is about, for erx_icmp4 or erx_icmp6 to answer.
               | {icmp, head(), #icmp4{} | #icmp6{}, binary()}
               | {arp, #arp{}}
               | {other, head(), binary()}
-              | {fragment, family(), #ip4{} | #ip6{}, binary()}
-              | {param_problem, family(), term(), binary()}.
+              | {fragment, family(), Zone :: term(), link_cast(), #ip4{} | #ip6{}, binary()}
+              | {param_problem, family(), Zone :: term(), term(), binary()}.
 
 %% ---------------------------------------------------------------------------------------
 %% Classification
@@ -378,9 +381,9 @@ classify({frame, Bytes}, #{link := ethernet} = View) ->
     ether(Bytes, View);
 classify({frame, Zone, Bytes}, #{link := none} = View) ->
     loopback(Zone, Bytes, View);
-classify({reassembled, inet, LinkCast, Bytes}, View) ->
+classify({reassembled, inet, none, LinkCast, Bytes}, View) ->
     ip4(Bytes, LinkCast, View);
-classify({reassembled, inet6, LinkCast, Bytes}, #{ip6 := #{zone := Zone}} = View) ->
+classify({reassembled, inet6, Zone, LinkCast, Bytes}, View) ->
     ip6(Bytes, reassembled, LinkCast, Zone, View).
 
 %% ether_input drops a frame to another host's unicast address (no promiscuous mode), and
@@ -438,8 +441,8 @@ ip4(Packet, LinkCast, #{ip4 := Ip4View} = View) ->
         {ours, Cast, Reply, #ip4{p = Proto, src = Src, dst = Dst} = Ip, Upper} ->
             Head = head(inet, Ip, LinkCast, Cast, Reply, Src, Dst, none),
             member(Head, Proto, Upper, View);
-        {fragment, Ip, Payload} -> {local, {fragment, inet, Ip, Payload}};
-        {param_problem, _} = Problem -> {local, {param_problem, inet, Problem, Packet}};
+        {fragment, Ip, Payload} -> {local, {fragment, inet, none, LinkCast, Ip, Payload}};
+        {param_problem, _} = Problem -> {local, {param_problem, inet, none, Problem, Packet}};
         {drop, _} = Drop -> Drop
     end.
 
@@ -448,8 +451,8 @@ ip6(Packet, Origin, LinkCast, Zone, #{ip6 := Ip6View} = View) ->
         {ours, Cast, Reply, #ip6{proto = Proto, src = Src, dst = Dst} = Ip, Upper} ->
             Head = head(inet6, Ip, LinkCast, Cast, Reply, Src, Dst, Zone),
             member(Head, Proto, Upper, View);
-        {fragment, Ip, Payload} -> {local, {fragment, inet6, Ip, Payload}};
-        {param_problem, _, _} = Problem -> {local, {param_problem, inet6, Problem, Packet}};
+        {fragment, Ip, Payload} -> {local, {fragment, inet6, Zone, LinkCast, Ip, Payload}};
+        {param_problem, _, _} = Problem -> {local, {param_problem, inet6, Zone, Problem, Packet}};
         {drop, _} = Drop -> Drop
     end.
 
@@ -486,16 +489,21 @@ answerable(_, _) -> {drop, no_reply}.
 
 %% A connection's key owns the segment. Else a listener's key: the interface's, for the
 %% syncache, unless the frame came as a link-layer broadcast or multicast, which
-%% tcp_input drops for a listener (tcp_input.c:1288). Else a closed port, which may draw
-%% a RST.
-tcp(#{family := Family, src := Src, dst := Dst, link := LinkCast} = Head,
+%% tcp_input drops for a listener (tcp_input.c:1288), or was sent to a broadcast or
+%% multicast address, which it drops before syncache_add (:1326-1338); for a segment
+%% without SYN to such an address no handshake can match and tcp_dropwithreset answers
+%% none (:3450-3471), so the row drops them all alike. Departure: an ACK or RST of a
+%% handshake in a link-layer broadcast or multicast frame is dropped here, where FreeBSD's
+%% syncache_expand and syncache_chkrst see it before the drop (:1081, :1175). Else a
+%% closed port, which may draw a RST.
+tcp(#{family := Family, src := Src, dst := Dst, link := LinkCast, cast := Cast} = Head,
     <<Sport:16, Dport:16, _/binary>> = Upper, #{demux := Demux}) ->
     case Demux({tcp, Family, Dst, Dport, Src, Sport}) of
         [_ | _] = Entries ->
             {owned, holders(Entries), {conn, Head, Upper}};
         [] ->
             case listener(Family, Dst, Dport, Demux) of
-                {ok, Entry} when LinkCast =:= unicast -> {local, {tcp, Head, Upper, Entry}};
+                {ok, Entry} when LinkCast =:= unicast, Cast =:= unicast -> {local, {tcp, Head, Upper, Entry}};
                 {ok, _} -> {drop, bcast_tcp};
                 none -> answerable(Head, {tcp, Head, Upper, none})
             end
@@ -634,9 +642,9 @@ verify({arp, Bytes}) ->
     then(erx_arp_wire:decode(Bytes), fun(Arp, _) -> {arp, Arp} end);
 verify({other, _, _} = Other) ->
     {ok, Other};
-verify({fragment, _, _, _} = Fragment) ->
+verify({fragment, _, _, _, _, _} = Fragment) ->
     {ok, Fragment};
-verify({param_problem, _, _, _} = Problem) ->
+verify({param_problem, _, _, _, _} = Problem) ->
     {ok, Problem}.
 
 then({ok, Record, Rest}, Item) -> {ok, Item(Record, Rest)};

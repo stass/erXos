@@ -162,7 +162,35 @@ ip_layer_drop_is_the_verdict_test() ->
 
 fragment_is_local_test() ->
     Packet = ip4(?PEER4, ?ME4, ?PROTO_UDP, udp(?PEER4, ?ME4, 1, 2, binary:copy(<<"x">>, 200)), 0, 100),
-    ?assertMatch({ok, {fragment, inet, #ip4{mf = 1}, _}}, local(classify(ip4_frame(Packet), view()))).
+    ?assertMatch({ok, {fragment, inet, none, unicast, #ip4{mf = 1}, _}},
+                 local(classify(ip4_frame(Packet), view()))).
+
+%% A fragmented SYN that came as a link-layer broadcast keeps that cast through reassembly,
+%% so the listener row drops the rebuilt datagram as bcast_tcp (tcp_input.c:1288).
+reassembled_keeps_the_link_cast_test() ->
+    Syn = tcp(?PEER4, ?ME4, 4000, 80, 2, binary:copy(<<"x">>, 200)),
+    {ok, Fragments, _} = erx_ip4:output(#{src => ?PEER4, dst => ?ME4, proto => ?PROTO_TCP, ttl => 64, tos => 0},
+                                        Syn, 100, gen()),
+    View = view(#{demux => demux(holders([{{tcp_listen, inet, ?ME4, 80}, listener}]))}),
+    %% The accumulator is the table until the last fragment, then the rebuilt datagram.
+    Reassemble = fun(Fragment, Table) ->
+                         Frame = {frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, iolist_to_binary(Fragment))},
+                         {ok, {fragment, inet, none, broadcast, Ip, Payload}} = local(classify(Frame, View)),
+                         case erx_ip4_reass:input(Ip, Payload, broadcast, 0, Table) of
+                             {held, Next} -> Next;
+                             {done, none, broadcast, Whole, _} -> Whole
+                         end
+                 end,
+    Whole = lists:foldl(Reassemble, erx_ip4_reass:new(), Fragments),
+    ?assertEqual({drop, bcast_tcp}, classify({reassembled, inet, none, broadcast, Whole}, View)),
+    ?assertMatch({ok, {tcp, _, #tcp{dport = 80}, _, #{credit := listener}}},
+                 local(classify({reassembled, inet, none, unicast, Whole}, View))).
+
+%% A rebuilt IPv6 datagram's addresses take the zone it carries, not the view's.
+reassembled_takes_its_zone_test() ->
+    Packet = ip6(?PEER6, ?LL1, ?PROTO_UDP, udp(?PEER6, ?LL1, 1000, 53, <<"q">>)),
+    ?assertMatch({drop, _}, classify({reassembled, inet6, em1, unicast, Packet}, view())),
+    ?assertMatch({local, _}, classify({reassembled, inet6, em0, unicast, Packet}, view())).
 
 group_not_joined_is_dropped_test() ->
     Mdns6 = ip6(?LL1, ?MDNS6, ?PROTO_UDP, udp(?LL1, ?MDNS6, 5353, 5353, <<>>)),
@@ -184,6 +212,15 @@ tcp_to_a_connection_is_owned_test() ->
     {[conn], {ok, {#tcp{sport = 4000, dport = 80}, <<"hi">>, 2, unicast}}} =
         owned(classify(ip4_frame(Packet), view(#{demux => demux(Demux)}))).
 
+%% A connection's segment in a link-layer broadcast frame says so, so that the connection's
+%% dropwithreset answers it with no RST (tcp_input.c:3450-3451).
+tcp_to_a_connection_by_link_broadcast_carries_the_cast_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, tcp(?PEER4, ?ME4, 4000, 80, 16, <<"hi">>)),
+    Demux = holders([{{tcp, inet, ?ME4, 80, ?PEER4, 4000}, conn}]),
+    Frame = {frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, Packet)},
+    ?assertMatch({[conn], {ok, {#tcp{}, <<"hi">>, 0, broadcast}}},
+                 owned(classify(Frame, view(#{demux => demux(Demux)})))).
+
 tcp_to_a_listener_is_local_test() ->
     Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, syn()),
     %% A listener on any address owns it too.
@@ -196,6 +233,13 @@ tcp_to_a_listener_by_link_broadcast_is_dropped_test() ->
     Demux = holders([{{tcp_listen, inet, ?ME4, 80}, listener}]),
     ?assertEqual({drop, bcast_tcp},
                  classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, Packet)}, view(#{demux => demux(Demux)}))).
+
+%% A unicast frame to the subnet's broadcast address finds a listener on any address, and is
+%% dropped there too (tcp_input.c:1326-1338), so the syncache never sees it.
+tcp_to_a_listener_at_a_broadcast_address_is_dropped_test() ->
+    Packet = ip4(?PEER4, ?BCAST4, ?PROTO_TCP, tcp(?PEER4, ?BCAST4, 4000, 80, 2, <<>>)),
+    Demux = holders([{{tcp_listen, inet, any, 80}, listener}]),
+    ?assertEqual({drop, bcast_tcp}, classify(ip4_frame(Packet), view(#{demux => demux(Demux)}))).
 
 tcp_to_a_closed_port_may_draw_a_reset_test() ->
     Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, syn()),

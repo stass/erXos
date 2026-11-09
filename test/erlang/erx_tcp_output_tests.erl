@@ -236,10 +236,30 @@ no_route_keeps_the_ack_owed_test() ->
     ?assertEqual({true, 5001, 4000, ?T0 + ?S(40)},
                  {T1#tcb.ack_now, T1#tcb.rcv_adv, T1#tcb.last_ack_sent,
                   T1#tcb.deadlines#deadlines.delack}),
-    {T2, [{#tcp{flags = ?TH_ACK, ack = 5001}, _, []}]} = out(T1),
+    %% The window already advertised, so only the owed ACK sends the next segment.
+    {T2, [{#tcp{flags = ?TH_ACK, ack = 5001}, _, []}]} = out(T1#tcb{rcv_adv = 5001 + 65535}),
     ?assertEqual({false, 5001 + 65535, 5001, infinity},
                  {T2#tcb.ack_now, T2#tcb.rcv_adv, T2#tcb.last_ack_sent,
                   T2#tcb.deadlines#deadlines.delack}).
+
+%% tcp_output.c:1711-1714: an ACK the credit does not cover (ENOBUFS) stays owed, as
+%% TF_ACKNOW stays set on every error return, and the next pass with credit sends it.
+enobufs_keeps_the_ack_owed_test() ->
+    T = (est(0))#tcb{ack_now = true, rcv_adv = 5001 + 65535},
+    {T1, []} = erx_tcp_output:output(T, ctx(0)),
+    ?assert(T1#tcb.ack_now),
+    {T2, [{#tcp{flags = ?TH_ACK, ack = 5001}, _, []}]} = out(T1),
+    ?assertNot(T2#tcb.ack_now).
+
+%% tcp_output.c:1635-1641: the D-SACK block an ACK lost for want of a route reported is
+%% reported again by the next ACK, and cleared only once one has left.
+no_route_keeps_the_dsack_block_test() ->
+    Dsack = erx_tcp_sack:arrived(erx_tcp_sack:new(), {4001, 5001}, 5001, []),
+    T = (est(0))#tcb{sack = on, rcv_sack = Dsack, ack_now = true},
+    {T1, []} = unreachable(T),
+    ?assertEqual(Dsack, T1#tcb.rcv_sack),
+    {T2, [{#tcp{opts = #tcp_opts{sacks = [{4001, 5001}]}}, _, []}]} = out(T1),
+    ?assertEqual({[], T2#tcb.rcv_sack}, erx_tcp_sack:ack(T2#tcb.rcv_sack)).
 
 %% tcp_output.c:1651-1678: a SACK retransmission lost for want of a route leaves snd_nxt and
 %% the send log as they were, so the next pass resends the same range.
@@ -271,3 +291,16 @@ no_route_persist_probe_test() ->
     {T2, []} = unreachable(T1#tcb{force_data = true}),
     ?assertMatch({1001, 1002, {persist, _}, ehostunreach},
                  {T2#tcb.snd_nxt, T2#tcb.snd_max, T2#tcb.send_timer, T2#tcb.soft_error}).
+
+%% A window that shrank to zero after data went into it, and a retransmission timeout, each
+%% move snd_nxt back through the loss module's one rewind callback (erx_tcp:rewind/3).
+spied(Tcb) -> Tcb#tcb{loss = erx_tcp_loss_spy, loss_state = erx_tcp_loss_spy:init(#{sack => false})}.
+
+zero_window_rewinds_through_the_loss_module_test() ->
+    {T1, []} = out(spied((in_flight(3000, 2000))#tcb{snd_wnd = 0})),
+    ?assertEqual({1001, [{window, 1001, 3001}]}, {T1#tcb.snd_nxt, erx_tcp_loss_spy:causes(T1#tcb.loss_state)}).
+
+timeout_rewinds_through_the_loss_module_test() ->
+    T = spied((in_flight(2000, 2000))#tcb{send_timer = {rexmt, ?T0}}),
+    {T1, _} = erx_tcp_timer:expired(T, ctx(64)),
+    ?assertEqual({1001, [{timeout, 1}]}, {T1#tcb.snd_nxt, erx_tcp_loss_spy:causes(T1#tcb.loss_state)}).

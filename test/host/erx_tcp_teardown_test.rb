@@ -25,21 +25,21 @@ class ErxTcpTeardownTest < Minitest::Test
   SAME_TS = 'erx_tcp_seq:lift(Val, Recent) >= Recent;'
 
   def test_cases_pass_under_eunit
-    assert_erx_net_eunit(:erx_tcp_icmp_tests, :erx_tcp_timewait_tests)
+    assert_erx_net_eunit(:erx_tcp_icmp_tests, :erx_tcp_timewait_tests, extra: [:erx_tcp_loss_spy])
   end
 
   def test_a_report_quoting_snd_max_that_acts_is_caught
-    output = refute_erx_net_eunit(:erx_tcp_icmp_tests, fault: { 'erx_tcp_icmp' => [IN_FLIGHT, UP_TO_SND_MAX] })
+    output = refute_erx_net_eunit(:erx_tcp_icmp_tests, extra: [:erx_tcp_loss_spy], fault: { 'erx_tcp_icmp' => [IN_FLIGHT, UP_TO_SND_MAX] })
     assert_match(/sequence_in_flight/, output)
   end
 
   def test_a_report_at_the_current_mtu_that_acts_is_caught
-    output = refute_erx_net_eunit(:erx_tcp_icmp_tests, fault: { 'erx_tcp_mss' => [DECREASE_ONLY, ANY_MTU] })
+    output = refute_erx_net_eunit(:erx_tcp_icmp_tests, extra: [:erx_tcp_loss_spy], fault: { 'erx_tcp_mss' => [DECREASE_ONLY, ANY_MTU] })
     assert_match(/mtu_decreases_only/, output)
   end
 
   def test_an_mss_raised_with_no_route_is_caught
-    output = refute_erx_net_eunit(:erx_tcp_icmp_tests, fault: { 'erx_tcp_mss' => [NEVER_ABOVE_OLD, ANY_UPDATE] })
+    output = refute_erx_net_eunit(:erx_tcp_icmp_tests, extra: [:erx_tcp_loss_spy], fault: { 'erx_tcp_mss' => [NEVER_ABOVE_OLD, ANY_UPDATE] })
     assert_match(/mss_never_grows/, output)
   end
 

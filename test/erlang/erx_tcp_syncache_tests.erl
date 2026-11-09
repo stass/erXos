@@ -40,7 +40,7 @@ ack_for({_, _, #tcp{seq = Iss, ack = RcvNxt, sport = LPort, dport = FPort}, _}, 
 
 %% A SYN to a table of no room, so its SYN-ACK carries a cookie and no entry is made.
 cookie_synack(Conn, Opts, Now, Secrets) ->
-    {Cache, [Synack]} = erx_tcp_syncache:add(Conn, syn(Conn, Opts), unicast, ?LISTENER, ctx(Now, Secrets),
+    {Cache, [Synack]} = erx_tcp_syncache:add(Conn, syn(Conn, Opts), ?LISTENER, ctx(Now, Secrets),
                                              erx_tcp_syncache:new(0)),
     {Cache, Synack}.
 
@@ -121,7 +121,7 @@ add_all(Ports, Now, Cache) ->
     lists:foldl(fun(Port, C0) ->
                         Conn = conn(Port),
                         {C1, [{send, Conn, #tcp{}, _}]} =
-                            erx_tcp_syncache:add(Conn, syn(Conn, #tcp_opts{}), unicast, ?LISTENER, ctx(Now), C0),
+                            erx_tcp_syncache:add(Conn, syn(Conn, #tcp_opts{}), ?LISTENER, ctx(Now), C0),
                         C1
                 end, Cache, Ports).
 
@@ -134,7 +134,7 @@ bound_test() ->
     ?assertEqual(4, erx_tcp_syncache:size(Full)),
     ?assertNot(erx_tcp_syncache:cookies_only(0, Full)),
     %% The oldest entry's SYN-ACK, the same cookie whichever table answered it.
-    {_, [Synack]} = erx_tcp_syncache:add(conn(1000), syn(conn(1000), #tcp_opts{}), unicast, ?LISTENER,
+    {_, [Synack]} = erx_tcp_syncache:add(conn(1000), syn(conn(1000), #tcp_opts{}), ?LISTENER,
                                          ctx(0), erx_tcp_syncache:new()),
     Paused = add_all([1004], 500, Full),
     ?assertEqual(0, erx_tcp_syncache:size(Paused)),
@@ -199,7 +199,7 @@ pause_length(Start, Now, Cache) ->
 retransmit_test() ->
     Ecn = ?TH_SYN bor ?TH_ECE bor ?TH_CWR,
     {C0, [{send, _, #tcp{flags = F0}, _}]} =
-        erx_tcp_syncache:add(?V4, syn(?V4, full_opts(), Ecn), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new()),
+        erx_tcp_syncache:add(?V4, syn(?V4, full_opts(), Ecn), ?LISTENER, ctx(0), erx_tcp_syncache:new()),
     ?assertEqual(?TH_SYN bor ?TH_ACK bor ?TH_ECE, F0),
     Step = fun(Expected, {Cache, Log}) ->
                    Due = erx_tcp_syncache:next_deadline(Cache),
@@ -216,18 +216,18 @@ retransmit_test() ->
 repeated_syn_test() ->
     Ecn = ?TH_SYN bor ?TH_ECE bor ?TH_CWR,
     Flags = fun({_, [{send, _, #tcp{flags = F}, _}]}) -> F band ?TH_ECE end,
-    {WithEcn, _} = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}, Ecn), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new()),
-    Withdrawn = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), unicast, ?LISTENER, ctx(500), WithEcn),
+    {WithEcn, _} = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}, Ecn), ?LISTENER, ctx(0), erx_tcp_syncache:new()),
+    Withdrawn = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), ?LISTENER, ctx(500), WithEcn),
     ?assertEqual(0, Flags(Withdrawn)),
     ?assertEqual(1500, erx_tcp_syncache:next_deadline(element(1, Withdrawn))),
-    ?assertEqual(0, Flags(erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}, Ecn), unicast, ?LISTENER, ctx(600),
+    ?assertEqual(0, Flags(erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}, Ecn), ?LISTENER, ctx(600),
                                                element(1, Withdrawn)))).
 
 %% A signed SYN draws nothing; a signed ACK is dropped and the entry kept.
 signature_test() ->
     Signed = #tcp_opts{signature = true},
-    ?assertMatch({_, []}, erx_tcp_syncache:add(?V4, syn(?V4, Signed), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new())),
-    {Cache, [Synack]} = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new()),
+    ?assertMatch({_, []}, erx_tcp_syncache:add(?V4, syn(?V4, Signed), ?LISTENER, ctx(0), erx_tcp_syncache:new())),
+    {Cache, [Synack]} = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), ?LISTENER, ctx(0), erx_tcp_syncache:new()),
     ?assertEqual({drop, Cache, []}, erx_tcp_syncache:expand(?V4, ack_for(Synack, Signed), ?LISTENER, ctx(0), Cache)),
     {Cookies, Synack2} = cookie_synack(?V4, #tcp_opts{}, 0, secrets()),
     ?assertMatch({drop, _, []}, erx_tcp_syncache:expand(?V4, ack_for(Synack2, Signed), ?LISTENER, ctx(0), Cookies)).
@@ -235,7 +235,7 @@ signature_test() ->
 %% syncache_expand with an entry: the handshake it yields, PAWS, the sequence window with
 %% its rate-limited challenge ACK, and a wrong acknowledgement answered with a RST.
 expand_entry_test() ->
-    {Cache, [Synack]} = erx_tcp_syncache:add(?V4, syn(?V4, full_opts()), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new()),
+    {Cache, [Synack]} = erx_tcp_syncache:add(?V4, syn(?V4, full_opts()), ?LISTENER, ctx(0), erx_tcp_syncache:new()),
     {send, _, #tcp{seq = Iss, opts = #tcp_opts{ts = {TsVal, 1000}}}, Label} = Synack,
     TsOffset = erx_tcp_isn:ts_offset(?ISN_SECRETS, ?V4),
     ?assertEqual(erx_tcp_seq:wire(TsOffset), TsVal),
@@ -263,7 +263,7 @@ expand_entry_test() ->
 %% syncache_chkrst: a RST at exactly IRS + 1 drops the entry, one elsewhere in the window
 %% draws a challenge ACK, one outside it is ignored.
 chkrst_test() ->
-    {Cache, [_]} = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new()),
+    {Cache, [_]} = erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), ?LISTENER, ctx(0), erx_tcp_syncache:new()),
     Rst = fun(Seq) -> erx_tcp_syncache:chkrst(?V4, #tcp{seq = Seq, flags = ?TH_RST}, 0, Cache) end,
     {Dropped, []} = Rst(erx_tcp_seq:wire(?IRS + 1)),
     ?assertEqual(0, erx_tcp_syncache:size(Dropped)),
@@ -274,7 +274,7 @@ chkrst_test() ->
 %% only marks the entry, and a second one drops it only after three retransmissions.
 unreach_test() ->
     {C0, [{send, _, #tcp{seq = Iss}, _}]} =
-        erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), unicast, ?LISTENER, ctx(0), erx_tcp_syncache:new()),
+        erx_tcp_syncache:add(?V4, syn(?V4, #tcp_opts{}), ?LISTENER, ctx(0), erx_tcp_syncache:new()),
     Marked = erx_tcp_syncache:unreach(?V4, Iss, erx_tcp_syncache:unreach(?V4, Iss bxor 1, C0)),
     ?assertEqual(1, erx_tcp_syncache:size(erx_tcp_syncache:unreach(?V4, Iss, Marked))),
     Late = lists:foldl(fun(Now, C) -> element(1, erx_tcp_syncache:expired(Now, C)) end, Marked,
@@ -288,23 +288,21 @@ secrets_hidden_test() ->
     Printed = lists:flatten(io_lib:format("~p", [secrets()])),
     ?assertEqual(nomatch, string:find(Printed, "<<")).
 
-%% tcp_input.c:1295-1338: a SYN to or from itself, from or to a multicast address, to a
-%% broadcast one or from the limited broadcast draws nothing and makes no entry.
+%% tcp_input.c:1295-1338: a SYN to or from itself, from or to a multicast address or from
+%% the limited broadcast draws nothing and makes no entry.
 address_checks_test_() ->
-    Add = fun(Conn, Cast) ->
-                  {Cache, Actions} = erx_tcp_syncache:add(Conn, syn(Conn, #tcp_opts{}), Cast, ?LISTENER,
+    Add = fun(Conn) ->
+                  {Cache, Actions} = erx_tcp_syncache:add(Conn, syn(Conn, #tcp_opts{}), ?LISTENER,
                                                           ctx(0), erx_tcp_syncache:new()),
                   {erx_tcp_syncache:size(Cache), length(Actions)}
           end,
     Lo = <<127, 0, 0, 1>>,
     V6 = <<16#20010db8:32, 0:64, 1:32>>,
-    [?_assertEqual({1, 1}, Add(?V4, unicast)),
-     ?_assertEqual({1, 1}, Add({Lo, 80, Lo, 81}, unicast)),
-     ?_assertEqual({0, 0}, Add({Lo, 80, Lo, 80}, unicast)),
-     ?_assertEqual({0, 0}, Add({V6, 443, V6, 443}, unicast)),
-     ?_assertEqual({0, 0}, Add(?V4, broadcast)),
-     ?_assertEqual({0, 0}, Add(?V6, multicast)),
-     ?_assertEqual({0, 0}, Add({<<224, 0, 0, 1>>, 80, <<192, 0, 2, 7>>, 49152}, unicast)),
-     ?_assertEqual({0, 0}, Add({<<10, 0, 0, 1>>, 80, <<224, 0, 0, 9>>, 49152}, unicast)),
-     ?_assertEqual({0, 0}, Add({<<10, 0, 0, 1>>, 80, <<255, 255, 255, 255>>, 49152}, unicast)),
-     ?_assertEqual({0, 0}, Add({V6, 443, <<16#ff02:16, 0:96, 1:16>>, 50000}, unicast))].
+    [?_assertEqual({1, 1}, Add(?V4)),
+     ?_assertEqual({1, 1}, Add({Lo, 80, Lo, 81})),
+     ?_assertEqual({0, 0}, Add({Lo, 80, Lo, 80})),
+     ?_assertEqual({0, 0}, Add({V6, 443, V6, 443})),
+     ?_assertEqual({0, 0}, Add({<<224, 0, 0, 1>>, 80, <<192, 0, 2, 7>>, 49152})),
+     ?_assertEqual({0, 0}, Add({<<10, 0, 0, 1>>, 80, <<224, 0, 0, 9>>, 49152})),
+     ?_assertEqual({0, 0}, Add({<<10, 0, 0, 1>>, 80, <<255, 255, 255, 255>>, 49152})),
+     ?_assertEqual({0, 0}, Add({V6, 443, <<16#ff02:16, 0:96, 1:16>>, 50000}))].

@@ -157,8 +157,8 @@ fragmentation_then_reassembly_gives_the_datagram_test() ->
 
 reassemble([Bin | Rest], T0) ->
     {fragment, Ip, Data} = input(Bin),
-    case erx_ip6_reass:input(Ip, Data, 0, T0) of
-        {done, Packet, _} -> [] = Rest, Packet;
+    case erx_ip6_reass:input(Ip, Data, none, unicast, 0, T0) of
+        {done, none, unicast, Packet, _} -> [] = Rest, Packet;
         {held, T} -> reassemble(Rest, T)
     end.
 

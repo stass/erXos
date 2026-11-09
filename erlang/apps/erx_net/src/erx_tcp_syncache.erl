@@ -121,7 +121,7 @@ Every function is pure.
 
 -include("erx_tcp_wire.hrl").
 
--export([new/0, new/1, secrets/3, rotate/2, add/6, expand/5, chkrst/4, unreach/3, expired/2,
+-export([new/0, new/1, secrets/3, rotate/2, add/5, expand/5, chkrst/4, unreach/3, expired/2,
          next_deadline/1, size/1, cookies_only/2]).
 
 -export_type([syncache/0, secrets/0, conn/0, listener/0, context/0, action/0, handshake/0,
@@ -268,22 +268,22 @@ rotate(<<_:128>> = NewKey, Secrets) ->
 size(#syncache{entries = Entries}) -> map_size(Entries).
 
 -doc """
-A SYN for a listener (`syncache_add`), with the class of the address it was sent to as
-erx_ip4 and erx_ip6 found it against the receiving interface (`erx_ip4:cast()`). A SYN to
-or from itself, to a broadcast or multicast address or from one is dropped, as tcp_input
-drops it before syncache_add (tcp_input.c:1295-1338), and so is a signed SYN. A SYN for a
+A SYN for a listener (`syncache_add`). A SYN to or from itself, from a multicast address
+or to one, or from the limited broadcast is dropped, as tcp_input drops it before
+syncache_add (tcp_input.c:1295-1338), and so is a signed SYN; one sent to a broadcast or
+multicast address never gets here, since erx_net_input's listener row drops it against
+the class erx_ip4 and erx_ip6 found for its destination. A SYN for a
 four-tuple already in the table updates its timestamp and may withdraw ECN, but never grant
 it, and draws the same SYN-ACK again with the retransmission count reset. Otherwise the SYN
 draws a SYN-ACK whose sequence number is a cookie, and makes an entry if the table is not
 paused and has room. A SYN that finds the table full pauses it (`pause/2`) and makes no
 entry.
 """.
--spec add(conn(), #tcp{}, Cast :: unicast | broadcast | multicast, listener(), context(),
-          syncache()) -> {syncache(), [action()]}.
-add(Conn, #tcp{opts = #tcp_opts{signature = Signed}} = Syn, Cast, Listener,
+-spec add(conn(), #tcp{}, listener(), context(), syncache()) -> {syncache(), [action()]}.
+add(Conn, #tcp{opts = #tcp_opts{signature = Signed}} = Syn, Listener,
     #{now := Now, secrets := Secrets}, #syncache{} = Cache)
-  when ?IS_CONN(Conn), Cast =:= unicast orelse Cast =:= broadcast orelse Cast =:= multicast ->
-    case not Signed andalso admissible(Conn, Cast) of
+  when ?IS_CONN(Conn) ->
+    case not Signed andalso admissible(Conn) of
         false ->
             {Cache, []};
         true ->
@@ -294,15 +294,14 @@ add(Conn, #tcp{opts = #tcp_opts{signature = Signed}} = Syn, Cast, Listener,
             end
     end.
 
-%% tcp_input.c:1295-1338: not a connection to itself, and neither end a multicast address
-%% nor the destination a broadcast one, which erx_ip4 decided against the receiving
-%% interface's broadcast addresses (in_ifnet_broadcast); nor, for IPv4, a source at the
-%% limited broadcast.
-admissible({Addr, Port, Addr, Port}, _Cast) -> false;
-admissible({Local, _, Foreign, _}, unicast) ->
+%% tcp_input.c:1295-1338, the checks that read the four-tuple alone: not a connection to
+%% itself, neither end a multicast address, and for IPv4 not a source at the limited
+%% broadcast. The destination's broadcast test needs the receiving interface's broadcast
+%% addresses (in_ifnet_broadcast) and is erx_net_input's listener row's.
+admissible({Addr, Port, Addr, Port}) -> false;
+admissible({Local, _, Foreign, _}) ->
     not erx_net_addr:is_multicast(Local) andalso not erx_net_addr:is_multicast(Foreign)
-        andalso Foreign =/= <<255, 255, 255, 255>>;
-admissible(_, _) -> false.
+        andalso Foreign =/= <<255, 255, 255, 255>>.
 
 %% The ECN of an entry may be withdrawn by a SYN without it, never granted.
 repeat_syn(Conn, #entry{ts = Ts0, ecn = Ecn0} = Entry0,

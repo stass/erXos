@@ -207,3 +207,10 @@ mss_never_grows_test_() ->
      ?_assertEqual(keep, erx_tcp_mss:mtudisc(inet, 340, 1500, 300, 1 bsl 20)),
      %% A tiny send buffer caps it, at no less than 64 bytes.
      ?_assertEqual({lower, 64}, erx_tcp_mss:mtudisc(inet, 1000, 1500, 1460, 10))].
+
+%% tcp_mtudisc's tfb_tcp_mtu_chg: a smaller MTU sends the flight again through the loss
+%% module's rewind callback (erx_tcp:rewind/3).
+mtudisc_rewinds_through_the_loss_module_test() ->
+    T = (est(inet6, 1440))#tcb{loss = erx_tcp_loss_spy, loss_state = erx_tcp_loss_spy:init(#{sack => false})},
+    T1 = report(too_big(1300, ?UNA), T),
+    ?assertEqual({?UNA, [mtu]}, {T1#tcb.snd_nxt, erx_tcp_loss_spy:causes(T1#tcb.loss_state)}).

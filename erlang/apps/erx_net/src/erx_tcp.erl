@@ -106,7 +106,7 @@ receive window it advertises.
 
 -export([step/3, next_deadline/1]).
 -export([have_rcvd_syn/1, have_established/1, have_rcvd_fin/1, rank/1]).
--export([cong_signal/4, loss_events/4, ccv/2, rxtshift/1, respond/5, challenge_ack/3,
+-export([cong_signal/4, loss_events/4, rewind/3, ccv/2, rxtshift/1, respond/5, challenge_ack/3,
          rcv_space/1, ts_now/2]).
 
 -export_type([state/0, event/0, action/0, request/0, segment/0, outgoing/0]).
@@ -324,7 +324,7 @@ signal_state(ecn, #tcb{ccv = Ccv, snd_recover = Recover, snd_max = SndMax, ecn =
             Tcb
     end;
 signal_state(rto, #tcb{ccv = Ccv, ecn = Ecn} = Tcb, _) ->
-    %% t_dupacks is the loss module's, which its rto/4 resets.
+    %% t_dupacks is the loss module's, which its rewind/4 resets on a timeout.
     Tcb#tcb{ccv = Ccv#ccv{fast_recovery = false, cong_recovery = false}, bytes_acked = 0,
             ecn = erx_tcp_ecn:signal_cwr(Ecn)};
 signal_state(rto_err, #tcb{rexmt_prev = none} = Tcb, _) ->
@@ -340,6 +340,25 @@ signal_state(rto_err, #tcb{ccv = Ccv, rexmt_prev = Prev, snd_max = SndMax, sendl
                           cong_recovery = Ccv#ccv.cong_recovery orelse Cong},
             snd_recover = Recover, snd_nxt = SndMax, rexmt_prev = none, rxtshift = 0,
             sendlog = erx_tcp_sendlog:timeout_undone(Log)}.
+
+-doc """
+Moves `snd_nxt` back to `snd_una` for Cause (erx_tcp_loss:cause()): a retransmission timeout
+(erx_tcp_timer), a smaller path MTU (erx_tcp_icmp) or a window that shrank to zero
+(erx_tcp_output). The loss module marks in the send log what goes again and resets what it
+keeps of the flight (its `rewind/4`, the counterpart of FreeBSD's `tfb_tcp_mtu_chg`), so
+the three paths that send the flight again tell the module alike. A zero window's cause is
+`window`, which this makes the range `{window, snd_una, snd_max}`. The caller sets the rest
+of its path's state (`snd_recover`, the RTT probe).
+""".
+-spec rewind({timeout, pos_integer()} | mtu | window, #tcb{}, #tcp_ctx{}) -> #tcb{}.
+rewind(Cause0, #tcb{loss = Loss, loss_state = State0, sendlog = Log0, snd_una = Una,
+                    snd_max = Max} = Tcb, #tcp_ctx{now = Now}) ->
+    Cause = case Cause0 of
+                window -> {window, Una, Max};
+                _ -> Cause0
+            end,
+    {Log, State} = Loss:rewind(Cause, Log0, State0, Now),
+    Tcb#tcb{sendlog = Log, loss_state = State, snd_nxt = Una}.
 
 -doc """
 Makes the calls a loss module returned (erx_tcp_loss), in order: congestion signals, a
@@ -384,8 +403,9 @@ ts_now(Offset, #tcp_ctx{now = Now}) -> erx_tcp_seq:wire(Now div 1000 + Offset).
 `tcp_send_challenge_ack` with `tcp_challenge_ack_check` (sys/netinet/tcp_subr.c): an ACK of
 `rcv_nxt` at `snd_nxt`, after which `last_ack_sent` is `rcv_nxt`, at most
 `tcp_ack_war_cnt` (5) in each `tcp_ack_war_time_window` (1,000 ms) of the connection, so
-blind segments cannot turn the connection into an ACK flood. A challenge ACK sent is the
-ACK the segment owed, so none is left owed for output.
+blind segments cannot turn the connection into an ACK flood. It leaves `ack_now` alone, as
+`tcp_respond` leaves `TF_ACKNOW`: an ACK already owed, such as a simultaneous open's
+SYN-ACK, is still output's to send, and only a segment output sent settles it.
 
 `Cause` is the segment's kind. For a SYN or an ACK every attempt, sent or not, counts one
 RST against the interface's rate limit (`charge_rst`), as FreeBSD charges `badport_bandlim`:
@@ -404,7 +424,7 @@ challenge_ack(Cause, #tcb{challenge = War, rcv_nxt = RcvNxt, snd_nxt = SndNxt} =
                   end,
     case Sent < ?ACK_WAR_CNT of
         true ->
-            {Tcb#tcb{challenge = {End, Sent + 1}, last_ack_sent = RcvNxt, ack_now = false},
+            {Tcb#tcb{challenge = {End, Sent + 1}, last_ack_sent = RcvNxt},
              Charge ++ [{transmit, [respond(Tcb, Ctx, SndNxt, RcvNxt, ?TH_ACK)]}]};
         false ->
             {Tcb#tcb{challenge = {End, Sent}}, Charge}

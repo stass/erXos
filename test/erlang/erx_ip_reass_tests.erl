@@ -226,14 +226,14 @@ ip4_fragment_checks_test() ->
 %% RFC 3168, section 5.3: CE onto not-ECT, or not-ECT onto ECT, is dropped;
 %% CE onto ECT marks the reassembled datagram CE.
 ecn_test() ->
-    {held, T1} = erx_ip4_reass:input(ip4(1, 0, 1, 0), bytes(8), 0, new(inet)),
-    ?assertMatch({drop, ecn, _}, erx_ip4_reass:input((ip4(1, 1, 0, 0))#ip4{tos = 3}, bytes(8), 0, T1)),
-    {held, U1} = erx_ip4_reass:input((ip4(1, 0, 1, 0))#ip4{tos = 2}, bytes(8), 0, new(inet)),
-    ?assertMatch({drop, ecn, _}, erx_ip4_reass:input(ip4(1, 1, 0, 0), bytes(8), 0, U1)),
-    {done, P, _} = erx_ip4_reass:input((ip4(1, 1, 0, 0))#ip4{tos = 3}, bytes(8), 0, U1),
+    {held, T1} = ip4_input(ip4(1, 0, 1, 0), bytes(8), 0, new(inet)),
+    ?assertMatch({drop, ecn, _}, ip4_input((ip4(1, 1, 0, 0))#ip4{tos = 3}, bytes(8), 0, T1)),
+    {held, U1} = ip4_input((ip4(1, 0, 1, 0))#ip4{tos = 2}, bytes(8), 0, new(inet)),
+    ?assertMatch({drop, ecn, _}, ip4_input(ip4(1, 1, 0, 0), bytes(8), 0, U1)),
+    {done, P, _} = ip4_input((ip4(1, 1, 0, 0))#ip4{tos = 3}, bytes(8), 0, U1),
     {ok, #ip4{tos = 3}, _} = erx_ip4_wire:decode(P),
-    {held, V1} = erx_ip6_reass:input((ip6(1, 0, true))#ip6{tclass = 1}, bytes(8), 0, new(inet6)),
-    {done, Q, _} = erx_ip6_reass:input((ip6(1, 8, false))#ip6{tclass = 3}, bytes(8), 0, V1),
+    {held, V1} = ip6_input((ip6(1, 0, true))#ip6{tclass = 1}, bytes(8), 0, new(inet6)),
+    {done, Q, _} = ip6_input((ip6(1, 8, false))#ip6{tclass = 3}, bytes(8), 0, V1),
     {ok, #ip6{tclass = 3}, _} = erx_ip6_wire:decode(Q).
 
 %% --- IPv6 errors and expiry -----------------------------------------------
@@ -242,7 +242,7 @@ ecn_test() ->
 %% fragment offset field.
 ip6_too_long_test() ->
     ?assertMatch({drop, {param_problem, ?ICMP6_PARAMPROB_HEADER, 42}, _},
-                 erx_ip6_reass:input(ip6(1, 65528, true), bytes(16), 0, new(inet6))).
+                 ip6_input(ip6(1, 65528, true), bytes(16), 0, new(inet6))).
 
 %% Once the offset-0 fragment has arrived, its header bytes count against
 %% 65,535: a later fragment that would pass it is dropped, and an offset-0
@@ -255,21 +255,43 @@ header_bytes_count_against_the_limit_test() ->
     {drop, too_long_held, V4} = input(inet, 0, true, bytes(8), U4),
     ?assertEqual(#{datagrams => 0, fragments => 0, bytes => 0}, erx_ip_reass:held(V4)),
     {held, U6} = input(inet6, 65520, true, bytes(8), new(inet6)),
-    {drop, too_long_held, V6} = erx_ip6_reass:input((ip6(1, 0, true))#ip6{hdrlen = 16}, bytes(8), 0, U6),
+    {drop, too_long_held, V6} = ip6_input((ip6(1, 0, true))#ip6{hdrlen = 16}, bytes(8), 0, U6),
     ?assertEqual(#{datagrams => 0, fragments => 0, bytes => 0}, erx_ip_reass:held(V6)).
 
 %% An expired IPv6 datagram yields its first fragment for a time-exceeded
 %% error; one without it yields nothing; IPv4 drops both silently.
 expiry_test() ->
-    {held, T1} = erx_ip6_reass:input(ip6(1, 0, true), bytes(8), 0, new(inet6)),
-    {held, T2} = erx_ip6_reass:input(ip6(2, 8, true), bytes(8), 10, T1),
+    {held, T1} = ip6_input(ip6(1, 0, true), bytes(8), 0, new(inet6)),
+    {held, T2} = ip6_input(ip6(2, 8, true), bytes(8), 10, T1),
     ?assertEqual(60000, erx_ip6_reass:next_deadline(T2)),
     ?assertMatch({[], _}, erx_ip6_reass:expire(59999, T2)),
-    {[{#ip6{fragment = {0, true, 1}}, _}], T3} = erx_ip6_reass:expire(60000, T2),
+    {[{em0, #ip6{fragment = {0, true, 1}}, _}], T3} = erx_ip6_reass:expire(60000, T2),
     {[], T4} = erx_ip6_reass:expire(60010, T3),
     ?assertEqual(none, erx_ip6_reass:next_deadline(T4)),
-    {held, U1} = erx_ip4_reass:input(ip4(1, 0, 1, 0), bytes(8), 0, new(inet)),
+    {held, U1} = ip4_input(ip4(1, 0, 1, 0), bytes(8), 0, new(inet)),
     ?assertEqual(none, erx_ip4_reass:next_deadline(erx_ip4_reass:expire(30000, U1))).
+
+%% A rebuilt datagram takes the zone and link cast of its fragment at offset 0, whichever
+%% fragment arrives last (ip_reass and frag6_input keep that fragment's packet header).
+first_fragment_gives_zone_and_link_cast_test() ->
+    {held, T1} = erx_ip4_reass:input(ip4(1, 1, 0, 0), bytes(8), unicast, 0, new(inet)),
+    ?assertMatch({done, none, broadcast, _, _}, erx_ip4_reass:input(ip4(1, 0, 1, 0), bytes(8), broadcast, 0, T1)),
+    {held, U1} = erx_ip6_reass:input(ip6(1, 0, true), bytes(8), em0, multicast, 0, new(inet6)),
+    ?assertMatch({done, em0, multicast, _, _}, erx_ip6_reass:input(ip6(1, 8, false), bytes(8), em0, unicast, 0, U1)).
+
+%% Fragments of one link-local source, destination and identification that arrived in two
+%% zones are two datagrams (frag6_input's hash holds the embedded zone).
+ip6_zones_never_join_test() ->
+    {held, T1} = erx_ip6_reass:input(ip6(1, 0, true), bytes(8), em0, unicast, 0, new(inet6)),
+    {held, T2} = erx_ip6_reass:input(ip6(1, 8, false), bytes(8), em1, unicast, 0, T1),
+    ?assertMatch(#{datagrams := 2}, erx_ip6_reass:held(T2)),
+    ?assertMatch({[{em0, #ip6{}, _}], _}, erx_ip6_reass:expire(60000, T2)).
+
+%% icmp6_error answers no packet that came as a link-layer multicast (icmp6.c:309), so an
+%% expired datagram whose first fragment did returns nothing to answer.
+ip6_multicast_first_fragment_expires_unanswered_test() ->
+    {held, T1} = erx_ip6_reass:input(ip6(1, 0, true), bytes(8), em0, multicast, 0, new(inet6)),
+    ?assertMatch({[], _}, erx_ip6_reass:expire(60000, T1)).
 
 %% --- Helpers --------------------------------------------------------------
 
@@ -279,9 +301,18 @@ new(inet6) -> erx_ip6_reass:new().
 input(Family, Off, More, Data, T) -> input(Family, 1, Off, More, Data, 0, T).
 
 input(inet, Id, Off, More, Data, Now, T) ->
-    erx_ip4_reass:input(ip4(Id, Off div 8, bool(More), 0), Data, Now, T);
+    ip4_input(ip4(Id, Off div 8, bool(More), 0), Data, Now, T);
 input(inet6, Id, Off, More, Data, Now, T) ->
-    erx_ip6_reass:input(ip6(Id, Off, More), Data, Now, T).
+    ip6_input(ip6(Id, Off, More), Data, Now, T).
+
+%% The cases above take fragments that arrived unicast, IPv6's in zone em0, and look at the
+%% packet alone.
+ip4_input(Ip, Data, Now, T) -> packet_only(erx_ip4_reass:input(Ip, Data, unicast, Now, T)).
+
+ip6_input(Ip, Data, Now, T) -> packet_only(erx_ip6_reass:input(Ip, Data, em0, unicast, Now, T)).
+
+packet_only({done, _Zone, unicast, Packet, T}) -> {done, Packet, T};
+packet_only(Result) -> Result.
 
 result_table({done, _, T}) -> T;
 result_table({held, T}) -> T;
@@ -317,8 +348,8 @@ head_keeps_no_frame_alive_test() ->
     Packet = iolist_to_binary(erx_ip6_wire:encode(First, bytes(8))),
     Frame = <<Packet/binary, 0:8000/unit:8>>,
     {ok, Ip, Data} = erx_ip6_wire:decode(Frame),
-    {held, T} = erx_ip6_reass:input(Ip, Data, 0, new(inet6)),
+    {held, T} = ip6_input(Ip, Data, 0, new(inet6)),
     #{bytes := Bytes} = erx_ip_reass:held(T),
     ?assertEqual(8 + Ip#ip6.hdrlen - 8, Bytes),
-    {[{#ip6{exthdrs = [{dstopts, [{16#1e, Kept}]}]}, _}], _} = erx_ip6_reass:expire(60000, T),
+    {[{em0, #ip6{exthdrs = [{dstopts, [{16#1e, Kept}]}]}, _}], _} = erx_ip6_reass:expire(60000, T),
     ?assertEqual(byte_size(Kept), binary:referenced_byte_size(Kept)).

@@ -37,7 +37,7 @@ against the log's pipe, and the connection keeps `Keep` in `#ccv.cwnd` afterward
 -include("erx_tcp_loss.hrl").
 
 -export([module/1]).
--export_type([ack/0, params/0, event/0, verdict/0, allowance/0]).
+-export_type([ack/0, params/0, event/0, verdict/0, allowance/0, cause/0]).
 
 -doc "An acknowledgement and the control block fields a loss module reads (erx_tcp_loss.hrl).".
 -type ack() :: #loss_ack{}.
@@ -48,6 +48,13 @@ against the log's pipe, and the connection keeps `Keep` in `#ccv.cwnd` afterward
                | ack_now | resume_at_max.
 -doc "Whether the rest of the segment is processed (`continue`) or skipped (`drop`).".
 -type verdict() :: continue | drop.
+-doc """
+Why sending goes back to `snd_una` (erx_tcp:rewind/3): a retransmission timeout with the
+backoff count it reached, a smaller path MTU, or a window that shrank to zero, with the
+range sent into it.
+""".
+-type cause() :: {timeout, RxtShift :: pos_integer()} | mtu
+               | {window, Una :: integer(), Max :: integer()}.
 -doc "The window for this step's output and the one kept after it, or `none`.".
 -type allowance() :: none | {Send :: non_neg_integer(), Keep :: non_neg_integer()}.
 
@@ -56,8 +63,11 @@ against the log's pipe, and the connection keeps `Keep` in `#ccv.cwnd` afterward
 %% return the calls the connection makes.
 -callback ack(ack(), erx_tcp_sendlog:log(), State, Now :: integer()) ->
     {verdict(), erx_tcp_sendlog:log(), State, [event()]} when State :: term().
-%% The retransmission timer expired; #ccv.rxtshift is already incremented.
--callback rto(erx_tcp_sendlog:log(), State, erx_tcp_cc:ccv(), Now :: integer()) ->
+%% Sending goes back to snd_una: the retransmission timer expired (#ccv.rxtshift already
+%% incremented), the path MTU dropped (tcp_mtudisc), or the window shrank to zero after
+%% data was sent into it, which loses Una..Max. Mark what goes again and reset what the
+%% module keeps of the flight, as FreeBSD's tfb_tcp_mtu_chg lets a stack react.
+-callback rewind(cause(), erx_tcp_sendlog:log(), State, Now :: integer()) ->
     {erx_tcp_sendlog:log(), State} when State :: term().
 %% The window for the output that follows the last acknowledgement.
 -callback allowance(erx_tcp_sendlog:log(), State :: term(), erx_tcp_cc:ccv()) -> allowance().

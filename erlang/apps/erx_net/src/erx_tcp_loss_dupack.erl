@@ -107,7 +107,7 @@ acknowledgement, where FreeBSD writes `pipe - del_data` with `snd_una` not yet a
 -include("erx_tcp_cc.hrl").
 -include("erx_tcp_loss.hrl").
 
--export([init/1, ack/4, rto/4, allowance/3, deadline/1, expired/3]).
+-export([init/1, ack/4, rewind/4, allowance/3, deadline/1, expired/3]).
 
 %% tcprexmtthresh (tcp_input.c).
 -define(REXMT_THRESH, 3).
@@ -160,20 +160,28 @@ ack(#loss_ack{ack = Ack} = A0, Log0, State0, _Now) ->
     end.
 
 -doc """
-The retransmission timer expired. The first timeout keeps the SACK information and resends
-the holes, later ones forget it (`tcp_timer_rexmt`: `tcp_resend_sackholes` when `t_rxtshift`
-is 1, `tcp_free_sackholes` otherwise); `t_dupacks` is cleared, as `cc_cong_signal` does for
-`CC_RTO`.
+Sending goes back to `snd_una` (erx_tcp_loss:cause()). On a retransmission timeout the
+first keeps the SACK information and resends the holes, later ones forget it
+(`tcp_timer_rexmt`: `tcp_resend_sackholes` when `t_rxtshift` is 1, `tcp_free_sackholes`
+otherwise), and `t_dupacks` is cleared, as `cc_cong_signal` does for `CC_RTO`. A smaller path
+MTU forgets the SACK information and keeps `t_dupacks` (`tcp_mtudisc`'s
+`tcp_free_sackholes`). A window that shrank to zero loses what was sent into it, so the pipe
+leaves it out and the log resends it once the window opens.
 """.
--spec rto(erx_tcp_sendlog:log(), #dupack{}, erx_tcp_cc:ccv(), integer()) ->
+-spec rewind(erx_tcp_loss:cause(), erx_tcp_sendlog:log(), #dupack{}, integer()) ->
     {erx_tcp_sendlog:log(), #dupack{}}.
-rto(Log, State, #ccv{rxtshift = Shift}, _Now) ->
-    How = case Shift of
-        1 -> keep;
-        _ -> expunge
-    end,
-    {erx_tcp_sendlog:timeout(Log, How),
-     State#dupack{dupacks = 0, limited_base = none, pending = none}}.
+rewind({timeout, 1}, Log, State, _Now) ->
+    {erx_tcp_sendlog:timeout(Log, keep), timed_out(State)};
+rewind({timeout, _}, Log, State, _Now) ->
+    {erx_tcp_sendlog:timeout(Log, expunge), timed_out(State)};
+rewind(mtu, Log, State, _Now) ->
+    {erx_tcp_sendlog:timeout(Log, expunge), State};
+rewind({window, Una, Max}, Log, State, _Now) when Max > Una ->
+    {erx_tcp_sendlog:lose(Log, Una, Max), State};
+rewind({window, _, _}, Log, State, _Now) ->
+    {Log, State}.
+
+timed_out(State) -> State#dupack{dupacks = 0, limited_base = none, pending = none}.
 
 -doc """
 The window for the output after the last acknowledgement (erx_tcp_loss). Entering SACK

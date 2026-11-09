@@ -150,19 +150,19 @@ reported_mtu(#icmp6{msg = {error, Mtu}}, _) ->
 
 %% tcp_mtudisc (:3594-3651): a smaller MSS (erx_tcp_mss:mtudisc/5, which keeps it from
 %% ever growing), then the flight goes again from snd_una as one that was lost: snd_nxt
-%% back at snd_una, the SACK scoreboard dropped (tcp_free_sackholes), snd_recover at
-%% snd_max, out of SACK fast recovery, no RTT sample pending. The step's output sends it.
+%% back at snd_una and the SACK scoreboard dropped (tcp_free_sackholes) by the loss
+%% module's rewind (tfb_tcp_mtu_chg, through erx_tcp:rewind/3), snd_recover at snd_max, out
+%% of SACK fast recovery, no RTT sample pending. The step's output sends it.
 mtudisc(Reported, #tcb{family = Family, maxseg = Old, snd_hiwat = SndHiwat} = Tcb,
-        #tcp_ctx{mtu = PathMtu}) ->
+        #tcp_ctx{mtu = PathMtu} = Ctx) ->
     case erx_tcp_mss:mtudisc(Family, Reported, PathMtu, Old, SndHiwat) of
-        {lower, Maxseg} -> resend_flight(Tcb#tcb{maxseg = Maxseg});
+        {lower, Maxseg} -> resend_flight(Tcb#tcb{maxseg = Maxseg}, Ctx);
         keep -> Tcb
     end.
 
-resend_flight(#tcb{snd_una = Una, snd_max = SndMax, sack = Sack, sendlog = Log,
-                   ccv = Ccv} = Tcb) ->
-    Tcb#tcb{rtt_probe = none, snd_nxt = Una, snd_recover = SndMax,
-            sendlog = erx_tcp_sendlog:timeout(Log, expunge),
+resend_flight(#tcb{snd_max = SndMax, sack = Sack, ccv = Ccv} = Tcb0, Ctx) ->
+    Tcb = erx_tcp:rewind(mtu, Tcb0, Ctx),
+    Tcb#tcb{rtt_probe = none, snd_recover = SndMax,
             ccv = case Sack of
                       on -> Ccv#ccv{fast_recovery = false};
                       _ -> Ccv

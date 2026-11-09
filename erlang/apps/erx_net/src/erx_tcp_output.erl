@@ -115,16 +115,17 @@ Departures, each from erXos's model:
 * The congestion window is measured against the log's pipe, where FreeBSD measures it
   against `snd_nxt - snd_una` outside SACK recovery; the two agree when nothing is SACKed,
   lost or retransmitted. Where FreeBSD moves `snd_nxt` back because the window shrank to
-  zero, the rewound bytes are also marked lost in the log, so the pipe leaves them out as
-  FreeBSD's offset does and the log resends them once the window opens. The peer's window is a right edge at `snd_una + snd_wnd`. The loss
+  zero, the loss module's rewind (erx_tcp:rewind/3) also marks the rewound bytes lost in
+  the log, so the pipe leaves them out as FreeBSD's offset does and the log resends them
+  once the window opens. The peer's window is a right edge at `snd_una + snd_wnd`. The loss
   module's window (`allowance`) replaces the congestion window for one pass, as
   `tcp_input.c` sets `snd_cwnd` around its calls to `tcp_output`, and its kept window is
   the congestion window afterwards.
 * The credit is the driver's queue. A segment it does not cover is neither sent nor
   recorded; the congestion window drops to one segment, as on `ENOBUFS`, and a segment that
   carried sequence space arms the retransmission timer if no send timer is armed, which
-  FreeBSD asserts there (`TCP_XMIT_TIMER_ASSERT`). The requests are cleared as after every
-  pass, where FreeBSD's error return leaves `TF_ACKNOW` set.
+  FreeBSD asserts there (`TCP_XMIT_TIMER_ASSERT`). The ACK it would have carried stays
+  owed, as FreeBSD's error return leaves `TF_ACKNOW` set (`tcp_output.c:1711-1714`).
 * A retransmission the log chose carries the FIN only when the log's range holds it. A
   sequential segment below `snd_max` (a probe sent again, the FIN an ACK of FIN-WAIT-1
   carries again) is recorded in the log only for what it adds at or past `snd_max`, so it
@@ -177,10 +178,10 @@ Departures, each from erXos's model:
 -doc """
 The segments the connection sends now, at most the context's credit, and the control
 block after sending them (see the module documentation). It clears the requests the step
-left (`force_data`, `allowance`, and `ack_now` unless the context has no route, when an
-ACK lost to EHOSTUNREACH stays owed, as TF_ACKNOW stays set). In CLOSED it sends only the
-RST|ACK of a
-dropped connection that has received a SYN (`reset_peer`, `tcp_outflags[TCPS_CLOSED]`).
+left (`force_data` and `allowance`); `ack_now` and the D-SACK block are settled only by a
+segment that left (sent/4), never by a challenge ACK sent beside output, so an ACK lost to EHOSTUNREACH or beyond the credit (ENOBUFS) stays
+owed, as TF_ACKNOW stays set on every error return. In CLOSED it sends only the RST|ACK of
+a dropped connection that has received a SYN (`reset_peer`, `tcp_outflags[TCPS_CLOSED]`).
 """.
 -spec output(#tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:outgoing()]}.
 output(#tcb{state = closed, reset_peer = true} = Tcb, Ctx) ->
@@ -257,12 +258,11 @@ unreachable(#out_seg{source = Source}, #tcb{state = State} = Before, After,
     end.
 
 %% The end of a pass: the loss module's kept window becomes the congestion window, and the
-%% step's requests are cleared, but for an ACK the pass could not send for want of a route,
-%% which the next pass owes as FreeBSD keeps TF_ACKNOW after an error.
+%% step's requests are cleared. An owed ACK is not one of them: sent/4 settles it.
 done(#tcb{allowance = {_, Keep}, ccv = Ccv} = Tcb, Ctx) ->
     done(Tcb#tcb{allowance = none, ccv = Ccv#ccv{cwnd = Keep}}, Ctx);
-done(#tcb{ack_now = AckNow} = Tcb, #tcp_ctx{route = Route}) ->
-    Tcb#tcb{ack_now = AckNow andalso Route =/= ok, force_data = false, allowance = none}.
+done(Tcb, _Ctx) ->
+    Tcb#tcb{force_data = false, allowance = none}.
 
 %% cc_after_idle: nothing outstanding and nothing received or sent for an RTO.
 after_idle(true, #tcb{rcvtime = Rcvtime, sndtime = Sndtime, rtt = Rtt, cc = Cc} = Tcb,
@@ -313,7 +313,7 @@ decide(#tcb{state = State, snd_una = Una, snd_wnd = SndWnd, sndbuf = Buf,
                     andalso Tcb1#tcb.snd_nxt < DataEnd andalso not persisting(Tcb1) of
                %% The window shrank to zero after we sent into it: back to snd_una, with the
                %% rewound bytes lost in the log, and persist.
-               true -> start_persist(rewind(Tcb1), Ctx);
+               true -> start_persist(erx_tcp:rewind(window, Tcb1, Ctx), Ctx);
                false -> Tcb1
            end,
     Flags = fin_fits(Source, DataFrom, Len, DataEnd, Flags2),
@@ -504,17 +504,12 @@ dont_fragment(#tcb{family = Family, maxseg = Mss}) ->
     Family =:= inet andalso Mss > ?TCP_MINMSS.
 
 %% A segment lost to EHOSTUNREACH (a context without a route) is committed as one sent, and
-%% unreachable/4 backs out its sequence advance; only what tcp_output does on success alone
-%% (sent/3, and the D-SACK block cleared, tcp_output.c:1635-1641) waits for the route.
-commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, #tcb{rcv_sack = RcvSack0} = Tcb0,
-       #tcp_ctx{route = Route} = Ctx) ->
+%% unreachable/4 backs out its sequence advance; what tcp_output does on success alone
+%% waits for the route in sent/4. RcvSack is the receiver's SACK value with the blocks this
+%% segment reports taken, its D-SACK block cleared (tcp_output.c:1635-1641).
+commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, Tcb0, #tcp_ctx{route = Route} = Ctx) ->
     #out_seg{len = Len, flags = Flags1, sendalot = More} = Seg,
-    Sacks = Opts#tcp_opts.sacks,
-    Tcb1 = Tcb0#tcb{rcv_sack = case {Sacks, Route} of
-                                   {[_ | _], ok} -> RcvSack;
-                                   _ -> RcvSack0
-                               end},
-    {Flags, IpEcn, Tcb2} = ecn(Seg#out_seg{flags = Flags1 bor push(Seg, Tcb1)}, Tcb1),
+    {Flags, IpEcn, Tcb2} = ecn(Seg#out_seg{flags = Flags1 bor push(Seg, Tcb0)}, Tcb0),
     {Header, RecWin} = header(Seg#out_seg{flags = Flags}, Opts, Tcb2),
     Payload = case Len of
                   0 -> [];
@@ -528,15 +523,17 @@ commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, #tcb{rcv_sack = RcvSack
     Tcb3 = after_send(Seg#out_seg{flags = Flags}, Tcb2, Ctx),
     Tcb = Tcb3#tcb{snd_up = Up, rxwin0_sent = Header#tcp.win =:= 0,
                    rexmt_prev = badrxtwin(Opts, Tcb3, Ctx)},
-    {sent(Route, RecWin, Tcb), {Header, #{ecn => IpEcn, df => Df}, Payload}, More}.
+    {sent(Route, RecWin, RcvSack, Tcb), {Header, #{ecn => IpEcn, df => Df}, Payload}, More}.
 
 %% "Data sent (as far as we can tell)" (tcp_output.c:1722-1735): the largest window
-%% advertised, the last ACK sent, and the pending ACK and delayed ACK settled. A segment
-%% lost for want of a route settles none of them, so the ACK it carried is still owed.
-sent(ok, RecWin, #tcb{rcv_nxt = RcvNxt, rcv_adv = Adv, deadlines = Deadlines} = Tcb) ->
+%% advertised, the last ACK sent, and the pending ACK and delayed ACK settled, with the
+%% D-SACK block the segment reported (tcp_output.c:1635-1641). This is the only place that
+%% settles them: a segment lost for want of a route settles none of them, and one beyond
+%% the credit never reaches here, so the ACK it would have carried is still owed.
+sent(ok, RecWin, RcvSack, #tcb{rcv_nxt = RcvNxt, rcv_adv = Adv, deadlines = Deadlines} = Tcb) ->
     Tcb#tcb{rcv_adv = max(Adv, RcvNxt + RecWin), last_ack_sent = RcvNxt, ack_now = false,
-            deadlines = Deadlines#deadlines{delack = infinity}};
-sent({error, _}, _, Tcb) ->
+            rcv_sack = RcvSack, deadlines = Deadlines#deadlines{delack = infinity}};
+sent({error, _}, _, _, Tcb) ->
     Tcb.
 
 %% t_badrxtwin (tcp_output.c:848-849): the first segment sent with a timestamp after the
@@ -708,12 +705,6 @@ after_send(#out_seg{start = Start, len = Len, flags = Flags, source = Source},
                     Tcb2
             end
     end.
-
-%% snd_nxt back to snd_una (tcp_output.c:500-502), the bytes after it lost in the log.
-rewind(#tcb{snd_una = Una, snd_max = Max, sendlog = Log} = Tcb) when Max > Una ->
-    Tcb#tcb{snd_nxt = Una, sendlog = erx_tcp_sendlog:lose(Log, Una, Max)};
-rewind(#tcb{snd_una = Una} = Tcb) ->
-    Tcb#tcb{snd_nxt = Una}.
 
 new_data_sent(#tcb{rtt_probe = none} = Tcb, Start, Now) ->
     Tcb#tcb{sndtime = Now, rtt_probe = {Start, Now}};

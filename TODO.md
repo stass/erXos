@@ -596,12 +596,6 @@ it; git history is the record of completed work.
   (`erx_tcp_user:new/1` for a connect, the syncache's completion for an accept) must
   pass `local_peer => true` when the route goes through the loopback interface, or
   loopback connections wear down the grant's `time_wait` limit.
-* [Medium] erx_net TCP core (`erx_tcp_icmp:mtudisc`, `erx_tcp_output:rewind/1`,
-  `erx_tcp_timer:rexmt`): three paths move `snd_nxt` back to `snd_una`, and only the
-  timeout's goes through the loss module (`Loss:rto/4`); the PMTU drop changes the send log
-  directly. FreeBSD has `tfb_tcp_mtu_chg` for this. A loss module that keeps per-range or
-  timer state would keep a stale view: give `erx_tcp_loss` one rewind callback and route
-  all three through it.
 * [Low] erx_net TCP ICMP (`erx_tcp_icmp`, `erx_tcp_input:tcp_mss`): an MTU a too-big
   report gives in SYN-SENT lowers the MSS until the SYN-ACK, which recomputes it from the
   path, so the first full-size segment is lost again; FreeBSD keeps it in the host cache
@@ -638,36 +632,6 @@ it; git history is the record of completed work.
   accepting a data offset below 5, is caught because the decoder then raises on a negative option
   length, not by the judge's agreement check. Give the runner a second fault per target that only the
   judge catches, such as SACK blocks accepted on a SYN.
-* [Medium] network, `erx_net_input`, `erx_ip4_reass` and `erx_ip6_reass`: implement the zone
-  through reassembly that docs/design-network-stack.md ("Classifying a frame", after "Zones")
-  states. Today a looped IPv6 packet keeps its zone only while it is whole: its fragment item, the
-  `{reassembled, Family, LinkCast, Bytes}` input (zone taken from the view) and a parameter
-  problem carry none, erx_ip6_reass keys by raw addresses, and the fragment item carries no link
-  cast either, so the reassembled datagram's link cast has no source. The design's shapes:
-  `{fragment, Family, Zone, LinkCast, Ip, Bytes}`, `{reassembled, Family, Zone, LinkCast, Bytes}`,
-  `{param_problem, Family, Zone, Problem, Packet}`; zone and link cast of the offset-0 fragment;
-  `expire/2` returns the first fragment's zone. Until the fragment item carries the link cast, the
-  consumer that builds `{reassembled, ...}` must not default it to `unicast`: that would let a
-  link-broadcast fragmented SYN past `bcast_tcp` and a fragmented segment draw a RST that
-  `tcp_dropwithreset` refuses (`tcp_input.c:3450-3451`). The link cast in the fragment item can
-  land ahead of the zone work.
-* [Medium] network, `erx_tcp_syncache:add/6` and `erx_net_input:tcp/3` (review of P20c): `add/6`
-  takes the destination's IP cast, which has the same type as the link cast the head also holds,
-  so a caller passing the wrong one (or `unicast` for a reinjected SYN) silently admits a SYN to a
-  subnet broadcast. Consider dropping a non-unicast IP cast in the listener row beside
-  `bcast_tcp` (`{ok, Entry} when LinkCast =:= unicast, Cast =:= unicast`), which FreeBSD's
-  `tcp_dropwithreset` (:3467-3471) makes equivalent for non-SYN segments, leaving `add/5` the
-  checks that read the four-tuple alone; the design table and the fuzz judge change with it.
-* [Medium] network, `erx_tcp_output` (`done/2`, `sent/3`, `commit/6`, `enobufs/3`): an owed ACK
-  survives a pass that met no route but not one that ran out of credit (ENOBUFS), where FreeBSD
-  keeps TF_ACKNOW on every error return (`tcp_output.c:1711-1714`). Make `sent/3` the only place
-  that clears `ack_now` and the D-SACK block, so "what only a delivered segment settles" has one
-  owner, and update the module documentation's ENOBUFS departure.
-* [Medium] network tests, `erx_net_input` (`verify/1`): no test feeds a connection-owned segment in
-  a link-broadcast frame, so replacing `maps:get(link, Head)` with `unicast` passes every suite.
-  Add the case with a seeded fault on that expression. Also untested: the D-SACK route condition
-  in `erx_tcp_output:commit/6`; and `no_route_keeps_the_ack_owed_test`'s second half passes on a
-  window update alone (set `rcv_adv` to `rcv_nxt + recwin` there).
 * [Low] network, `erx_tcp_input:dropwithreset` and the connect path: only the link-cast half of
   `tcp_dropwithreset` is translated; its IP checks (`tcp_input.c:3452-3472`) are left to the rule
   that no connection has a multicast or broadcast foreign address, which FreeBSD enforces in
@@ -678,7 +642,12 @@ it; git history is the record of completed work.
   refresh rather than the next timer; name both as departures in the module documentation.
 * [Medium] network, `erx_net_input`: looped multicast is checked against the loopback interface's
   `groups`, not the carried zone's interface, and a socket's `report` item holds the quote's raw
-  addresses although the socket was found by its zoned key. Decide with the zone fix above.
+  addresses although the socket was found by its zoned key.
+  Decide it when the interface process carries looped multicast.
+* [Low] network, `erx_tcp:signal_state(rto_err, ...)` (review of P20d): undoing a spurious
+  timeout rewrites the send log (`timeout_undone`) and moves `snd_nxt` to `snd_max` behind the
+  loss module's back, so a module with per-range state would be stale after it. Route the undo
+  through the loss module (a cause of `rewind/4` or a sibling callback) before a second module.
 * [Medium] network tests, `erx_net_input_fuzz`: the fuzz target never generates `{reassembled, ...}`
   input; its judge shares `erx_icmp4:decode_quoted/1` and
   `erx_icmp6:decode_quoted/1` with the classifier, so a wrong quote offset would pass both. Have the
@@ -693,12 +662,6 @@ it; git history is the record of completed work.
   their SPDX line is erXos's own `BSD-2-Clause` and their FreeBSD copyright headers may be left out
   of `NOTICES`. Classify erx_net modules by their `%% FreeBSD:` header lines (or NOTICE-freebsd)
   instead, and say so in the design; check what the packer does today first.
-* [Medium] network, `erx_ip_reass` and `erx_ip6:input/4`: reassembly keeps no link-layer cast, so a
-  reassembled datagram's `reply()` comes from the `LinkCast` the interface passes, which it has no record of
-  (FreeBSD keeps the first fragment's `M_BCAST`/`M_MCAST`), and a fragment comes back from `input/4`
-  without a `reply()`, so `erx_ip6_reass:expire/2`'s time-exceeded error is gated only by
-  `erx_icmp6:error/4`'s own address checks. Keep the first fragment's cast in the table, return it with
-  `done` and `expire`, and have `input/4` take `{received | reassembled, LinkCast}`.
 * [Medium] network, `erlang/apps/erx_net/src/erx_ip4_wire.erl`: an ICMPv4 error quotes the invoking IP
   header and only 8 bytes past it, which `decode/1` refuses as `too_short` against the quoted total
   length, yet erx_icmp4 needs the quoted addresses, protocol and ports (`icmp_input` hands the quote to

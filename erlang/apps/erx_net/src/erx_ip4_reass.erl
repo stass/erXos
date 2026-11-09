@@ -39,9 +39,11 @@ The interface process keeps one table and hands it every fragment that
 erx_ip4_wire decoded and erx_ip4 accepted for this host; the table, its
 caps and the steps it takes for a fragment are erx_ip_reass's.
 
-`input/4` first makes `ip_reass`'s checks of the fragment alone: it
+`input/5` first makes `ip_reass`'s checks of the fragment alone: it
 carries data, a multiple of 8 bytes unless it is the last. A completed
-datagram comes back as a packet, its header the first fragment's with
+datagram comes back with the zone `none` and the link cast of its
+fragment at offset 0, whose `M_BCAST` and `M_MCAST` `ip_reass` keeps.
+It comes back as a packet, its header the first fragment's with
 the total length of the whole, no fragment offset or more-fragments flag
 and CE set if any fragment carried it, so that it goes through
 erx_ip4_wire's decoder and erx_ip4's input as any packet does. An expired
@@ -50,7 +52,7 @@ datagram is dropped without an answer, as `ipq_timeout` drops it.
 
 -include("erx_ip4_wire.hrl").
 
--export([new/0, new/1, input/4, expire/2, next_deadline/1, held/1]).
+-export([new/0, new/1, input/5, expire/2, next_deadline/1, held/1]).
 
 -export_type([reason/0]).
 
@@ -65,37 +67,40 @@ new() -> new(#{}).
 new(Limits) -> erx_ip_reass:new(inet, Limits).
 
 -doc """
-Takes fragment Ip, with Payload its data as erx_ip4_wire:decode/1 cut it,
-at time Now in milliseconds. Ip must be a fragment: more fragments follow
-it or its offset is not zero.
+Takes fragment Ip, with Payload its data as erx_ip4_wire:decode/1 cut it
+and LinkCast the cast of its frame (erx_net_input:link_cast()), at time
+Now in milliseconds. Ip must be a fragment: more fragments follow it or
+its offset is not zero. A completed datagram comes back with IPv4's
+zone, `none`, and the link cast of its fragment at offset 0, as
+erx_ip6_reass returns one.
 """.
--spec input(#ip4{}, binary(), integer(), erx_ip_reass:table()) ->
-          {done, Packet :: binary(), erx_ip_reass:table()}
+-spec input(#ip4{}, binary(), erx_net_input:link_cast(), integer(), erx_ip_reass:table()) ->
+          {done, none, erx_net_input:link_cast(), Packet :: binary(), erx_ip_reass:table()}
         | {held, erx_ip_reass:table()}
         | {drop, reason(), erx_ip_reass:table()}.
-input(#ip4{mf = Mf, off = Off} = Ip, Payload, Now, T) when Mf =:= 1; Off > 0 ->
+input(#ip4{mf = Mf, off = Off} = Ip, Payload, LinkCast, Now, T) when Mf =:= 1; Off > 0 ->
     case byte_size(Payload) of
         0 -> {drop, too_small, T};
         Len when Mf =:= 1, Len rem 8 =/= 0 -> {drop, too_small, T};
-        _ -> packet(erx_ip_reass:input(piece(Ip, Payload), Now, T))
+        _ -> packet(erx_ip_reass:input(piece(Ip, Payload, LinkCast), Now, T))
     end.
 
 piece(#ip4{src = Src, dst = Dst, p = P, id = Id, mf = Mf, off = Off, tos = Tos, options = Options} = Ip,
-      Payload) ->
+      Payload, LinkCast) ->
     Head = case Off of
-               0 -> {20 + byte_size(Options), Ip};
+               0 -> {20 + byte_size(Options), {Ip, LinkCast}};
                _ -> none
            end,
     #{key => {Src, Dst, P, Id}, off => Off * 8, more => Mf =:= 1, ecn => Tos band 3,
       data => Payload, head => Head}.
 
-packet({done, {HdrLen, Ip}, Ecn, Data, T}) ->
+packet({done, {HdrLen, {Ip, LinkCast}}, Ecn, Data, T}) ->
     Tos = case Ecn of
               3 -> Ip#ip4.tos bor 3;
               _ -> Ip#ip4.tos
           end,
     Header = erx_ip4_wire:encode(Ip#ip4{len = HdrLen + iolist_size(Data), mf = 0, off = 0, tos = Tos}),
-    {done, iolist_to_binary([Header | Data]), T};
+    {done, none, LinkCast, iolist_to_binary([Header | Data]), T};
 packet(Result) ->
     Result.
 

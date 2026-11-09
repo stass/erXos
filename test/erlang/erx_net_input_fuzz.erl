@@ -183,10 +183,10 @@ above6(Ip, Upper, Link, Cast, Reply, Zone, Map) ->
           #{src => zoned(Ip#ip6.src, Zone), dst => zoned(Ip#ip6.dst, Zone),
             link => Link, cast => Cast, reply => Reply, zone => Zone}, Map).
 
-above(F, 6, <<Sp:16, Dp:16, _/binary>>, #{src := S, dst := D, link := Link} = H, Map) ->
+above(F, 6, <<Sp:16, Dp:16, _/binary>>, #{src := S, dst := D, link := Link, cast := Cast} = H, Map) ->
     case {get({tcp, F, D, Dp, S, Sp}, Map), listen(F, D, Dp, Map)} of
         {[_ | _] = E, _} -> {owned, ids(E), conn};
-        {[], {ok, Id}} when Link =:= unicast -> {local, tcp, Id};
+        {[], {ok, Id}} when Link =:= unicast, Cast =:= unicast -> {local, tcp, Id};
         {[], {ok, _}} -> {drop, bcast_tcp};
         {[], none} -> reply(H, {local, tcp, none})
     end;
