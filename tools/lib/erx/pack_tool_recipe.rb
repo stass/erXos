@@ -24,7 +24,7 @@ module Erx
     PROGRAMS = { 'checker' => ['pack-check', ['kernel/core/pack.c', *BLAKE3].freeze, 'tools/host/pack_check.c'].freeze,
                  'hasher' => ['pack-hash', BLAKE3, 'tools/host/pack_hash.c'].freeze,
                  'planner' => ['elf-plan', ['liberx/elf_plan.c'].freeze, 'tools/host/elf_plan.c'].freeze,
-                 'domains' => ['dom-plan', %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/erx_lane.c].freeze,
+                 'domains' => ['dom-plan', %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_boot_view.c liberx/erx_lane.c].freeze,
                                'tools/host/dom_plan.c'].freeze }.freeze
     COMMON_SOURCES = %w[build/gen/liberx/generated/abi_reader.c tools/host/input.c].freeze
     RECIPE_SOURCES = %w[tools/lib/erx/pack_tool_recipe.rb tools/lib/erx/pack_tools.rb tools/lib/erx/elf_plan.rb

@@ -11,7 +11,7 @@ require_relative '../../tools/lib/erx/runner'
 require_relative '../fixtures/manifest_context'
 
 # Property 12 with the domain library's own host build: the manifest check runs
-# the library (liberx/system/dom_core.c and dom_life.c) through tools/host/dom_plan.c,
+# the library (liberx/system/dom_core.c, dom_life.c and dom_boot_view.c) through tools/host/dom_plan.c,
 # which PackTools builds, planning the configured domains in boot order and then the
 # introductions, each plan recorded before the next. So a configured domain or an
 # introduction the library refuses fails the build, and what the library counts
@@ -147,11 +147,30 @@ class DomPlannerTest < Minitest::Test
     assert_equal 12, assert_raises(Erx::Manifest::Invalid) { admit(@source) }.property
   end
 
-  def test_a_malformed_view_is_refused_by_the_helper
-    path = File.join(@directory, 'bad.txt')
-    ["machine 1 1\n", "file 1 0 0 0\n", "machine 1 1 4096 250 #{'0 ' * 9}0", "domain 1\n"].each do |text|
-      File.binwrite(path, text)
-      assert_raises(Erx::Error, text) { @helper.run([path], runner: @runner, name: 'dom-plan-bad', deadline: 30) }
+  # The seed the shared builder exists for: a principal the Ruby check admits but
+  # erx_dom_principal_check refuses (memory not a whole number of pages), which ended
+  # the machine at boot while the check planned from a view of its own. Without
+  # configured domains too, since a build always plans.
+  def test_a_principal_the_library_refuses_fails_the_build
+    [@plain, @source].each do |source|
+      principal = source.sub(/^(principal system\n(?:  .*\n)*?  memory )(\d+)$/) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2)) - 1}" }
+      refute_equal source, principal
+      error = assert_raises(Erx::Manifest::Invalid) { admit(principal) }
+      assert_equal [12, 'view'], [error.property, error.field], error.message
+      assert_match(/refuses a principal/, error.message)
+    end
+  end
+
+  def test_a_malformed_input_is_refused_by_the_helper
+    manifest = admit(@source).bytes
+    head = @codec.encode_layout('erx_image_manifest', ManifestContextFixture.image(@codec))
+    paths = %w[manifest heads plan].map { |name| File.join(@directory, "bad-#{name}") }
+    [[manifest, '', "order 0 1\n"], [manifest, '', "order 1\n"], [manifest, '', "order 0\norder 0\n"],
+     [manifest, head, "file 1 0 0\norder 0\n"], [manifest, '', "file 1 0 56\norder 0\n"],
+     [manifest, '', "order 0\nfile 1 0 0\n"], [manifest, '', "order 0\nintroduce 0 1\n"],
+     ['short', '', "order 0\n"]].each do |bytes, heads, plan|
+      [bytes, heads, plan].zip(paths).each { |content, file| File.binwrite(file, content) }
+      assert_raises(Erx::Error, plan) { @helper.run(paths, runner: @runner, name: 'dom-plan-bad', deadline: 30) }
     end
   end
 

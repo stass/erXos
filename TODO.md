@@ -783,13 +783,6 @@ it; git history is the record of completed work.
 * [Medium] domain library, `liberx/system/dom_apply.c` (`apply_bootinfo`): the boot page's
   system connection names no peer node (`peer_node_off`, `peer_node_len` stay 0), so a
   domain cannot tell the system domain's node name from its boot page.
-* [Medium] domain library, `liberx/system/dom_boot.c` and `tools/host/dom_plan.c`: three
-  builders of one view must agree field by field (`manifest.rb` `plan_view`, the host
-  planner's text input, and `erx_dom_boot_view`), and the host planner never runs
-  `erx_dom_principal_check`, so a principal the manifest check admits (memory not
-  page-aligned, say) ends the machine at boot. Have the host planner build its view from
-  the packed manifest and archive through `erx_dom_boot_view`, and add a host test of the
-  boot view and of `erx_dom_boot_layout`'s overflow on a fixture with configured domains.
 * [Medium] domain library, `liberx/system/dom_boot.c` (`erx_dom_boot_up`): each principal's
   group is a plain `erx_group_create(0, 0)`: no `users` group with the manifest's
   `users_share`, no principal group under it, and the principal's share never applied
@@ -924,14 +917,26 @@ it; git history is the record of completed work.
   ("Domain identity and placement") asks; only the runtime limits are, by the planner.
   Data and FAT windows may be held by any configured domain, since nothing identifies a
   storage domain (property 8); the slot writer's windows are the system domain's.
-* [Medium] manifest check, `tools/lib/erx/dom_planner.rb`, `tools/host/dom_plan.c`: the
-  planner's text view lists `erx_share` and `erx_runtime_limits_t` fields by hand, and
-  `Stopgap#startup_limits` builds the runtime-limit projection by hand; a field added to
-  either ABI layout would reach the planner as zero. Write the view's records with
-  `codec.encode_layout` and decode them through the generated reader. Values outside the
-  ABI's ranges (`max_connections` over 65536, a `system_lane` of 2^32) fail as a helper
-  error, not as a manifest diagnostic; `limits.crash` never reaches the planner, which
-  sizes every crash area `ERX_CRASH_SIZE`.
+* [Medium] manifest check, `liberx/system/dom_boot_view.c`, `tools/host/dom_plan.c`: the
+  host planner builds the boot view from the packed manifest with the root's own builder,
+  but three things still rest on two sides. (1) The boot order and the introductions come
+  from Ruby's rows as plan lines, not from the packed `boot_order` and `introductions`
+  tables, and a domain's id (`ERX_DOM_SYSTEM_ID + 1 +` its place) and each party's lane
+  side are the planner's rule alone; put the walk of both tables in one pure function the
+  boot sequencer will call too. (2) Each file's `offset` and `size` are 0 on the host while
+  the root reads the entry's span, so a release slice's `STEP_MAP` size differs between
+  the plan checked and the plan applied; pass the spans once the pack is laid out. (3)
+  Whether an entry starts with an image manifest is `row['image']` in `plan_file` and
+  `row.key?('plan')` in `PackWire#write_image`; one helper should give an entry's head
+  for both. `limits.crash` never reaches the view, which sizes every crash area
+  `ERX_CRASH_SIZE`.
+* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_plans`),
+  `tools/lib/erx/pack.rb`, `tools/lib/erx/release.rb`: a manifest with no configured
+  domains is planned only when the caller passes a planner, so a principal
+  `erx_dom_principal_check` refuses still passes a check without one (`Release#pack_with`
+  builds its `Pack` with none). Make the planner a required argument of `Pack.new` and
+  `Manifest.admit`, pass `DomainPlanner` in release.rb and `accepting_planner` in the
+  tests, and delete the nil branch.
 * [Low] manifest check, `tools/lib/erx/manifest.rb` (`Manifest.release_names`): the image
   builds the releases its rows name before the manifest is checked, so a release named
   like another artifact fails as an artifact clash, not a manifest diagnostic.

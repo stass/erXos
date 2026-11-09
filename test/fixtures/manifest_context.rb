@@ -71,7 +71,7 @@ module ManifestContextFixture
 
   # A planner that plans every configured domain and introduction, for checks that
   # test the rest.
-  def accepting_planner = ->(view) { view.slice('domains', 'introductions').transform_values { |rows| rows.map { 0 } } }
+  def accepting_planner = ->(view) { { 'domains' => view.fetch('order').map { 0 }, 'introductions' => view.fetch('introductions').map { 0 } } }
 
   # The same pack with a domain release, app, of two files under domains/app/ and the
   # domain runtime image, runtimes/emu, as ProductionImage.artifacts names them: the

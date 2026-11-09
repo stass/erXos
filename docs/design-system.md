@@ -447,9 +447,14 @@ violation fails the build with the property, the record and the field:
     `erx_dom_link_record`), so a domain or introduction the library would
     refuse fails the build, not the boot, and properties 4 and 13 over
     the configured domains are the planner's own judgment, in its own
-    arithmetic. An empty set of children needs no planner invocation;
-    a nonempty set requires the production planner and fails closed
-    when it is unavailable.
+    arithmetic. The view has one builder, `erx_dom_boot_view`, which the
+    root and the host planner both run on the packed manifest's bytes,
+    with each archive entry judged from the bytes it starts with; so
+    every principal passes `erx_dom_principal_check` at build time, and
+    the boot plans against exactly the view the check proved. The
+    production build always runs the planner; a check without one plans
+    nothing for an empty set of children, and fails closed for a
+    nonempty set.
 13. **The system configuration leaves headroom in `system`:** with each grant
     taken as a rate, its quota over its period (an uncapped grant's rate
     being the size of its cpuset), the configured service domains' grants

@@ -30,7 +30,7 @@ class ManifestDomainsTest < Minitest::Test
 
     def call(view)
       @views << view
-      { 'domains' => view.fetch('domains').each_index.map { |index| @statuses.fetch(index, 0) },
+      { 'domains' => view.fetch('order').each_index.map { |index| @statuses.fetch(index, 0) },
         'introductions' => view.fetch('introductions').each_index.map { |index| @introductions.fetch(index, 0) } }
     end
   end
@@ -97,21 +97,24 @@ class ManifestDomainsTest < Minitest::Test
     assert_equal 2, report.fetch('child_plan_instances')
   end
 
-  # Property 12's view: the machine just booted, its principals numbered from 1, the
-  # pack's files, each row in boot order with its profile resolved, and each
-  # introduction's parties as places in that order.
-  def test_the_planner_sees_every_row_against_the_booted_machine
-    admit("#{@source}introduce @domain.beta @domain.alpha\n")
+  # Property 12's view: the packed manifest itself, which the library's own builder
+  # reads as the root does; every archive entry with the bytes it will start with, an
+  # image its encoded image manifest; the rows in boot order and each introduction's
+  # parties as places in that order.
+  def test_the_planner_sees_the_packed_manifest_and_the_archive
+    admitted = admit("#{@source}introduce @domain.beta @domain.alpha\n")
     view = @planner.views.fetch(0)
+    assert_equal admitted.bytes, view.fetch('manifest')
     assert_equal [{ 'a' => 0, 'b' => 1 }], view.fetch('introductions')
-    assert_equal({ 'max_domains' => 2, 'max_connections' => 4, 'system_lane' => 4096, 'system_reserve' => 250 },
-                 view.fetch('machine').except('system_grant'))
-    assert_equal [1, 1], view.fetch('domains').map { |row| row.fetch('principal') }
-    assert_equal [[4_194_304, 1_048_576, 0, 2]] * 2,
-                 view.fetch('domains').map { |row| row.values_at('memory', 'outer', 'spaces', 'connections') }
-    assert_equal 4096, view.fetch('domains').first.fetch('runtime_limits').fetch('peer_held_total')
-    assert_equal @context.catalog.size, view.fetch('files').size
-    assert_equal [1, 0], view.fetch('files').values_at(2, 3).map { |file| file.fetch('image_ok') }
+    assert_equal [0, 1], view.fetch('order').sort
+    assert_equal @context.catalog.map { |row| row.fetch('kind') }, view.fetch('files').map { |file| file.fetch('kind') }
+    assert_equal @context.catalog.map { |row| row['image'] ? @codec.encode_layout('erx_image_manifest', row['image']) : '' },
+                 view.fetch('files').map { |file| file.fetch('head') }
+  end
+
+  def test_a_refused_view_fails_the_build
+    error = refused(Erx::Manifest::Invalid, 12, 'view', planner: ->(_view) { { 'refused' => 'manifest: why' } })
+    assert_match(/refuses the manifest's view: why\z/, error.message)
   end
 
   def test_a_manifest_without_domains_needs_no_planner

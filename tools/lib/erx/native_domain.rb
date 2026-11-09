@@ -28,7 +28,7 @@ module Erx
     # ERTS's image and its release, at the paths guest.c finds them by.
     ERTS_PATH = 'runtimes/emu'
     ERTS_RELEASE = ReleaseFiles.domain('erts', applications: ReleaseFiles::DOMAIN_BASE)
-    SYSTEM = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_install.c
+    SYSTEM = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
                 liberx/backend/core/boot_info.c liberx/erx_lane.c].freeze
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                     'liberx/backend/core/refused.c', *SYSTEM, 'test/guest/native_domain/string.c',

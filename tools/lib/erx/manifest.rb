@@ -308,6 +308,7 @@ module Erx
         normalized, report = checker.check
         bytes = Encoder.new(codec).encode(normalized)
         codec.open('manifest', bytes)
+        checker.check_plans(bytes, normalized.fetch('tables'))
         new(bytes: bytes, report: report, context: context)
       end
 
@@ -864,7 +865,6 @@ module Erx
         unsupported('a facet resolves its operations and parameters against its service\'s generated declarations and grant checker, which M5 brings', 'facet') unless edges.empty?
         rows['images'], rows['extents'] = normalize_images(rows.fetch('devices'))
         rows['windows'] = normalize_windows(rows.fetch('devices'), rows.fetch('images'))
-        check_plans(rows, max_domains: max_domains)
         RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
                           root_memory: root_memory, platform: @context.platform)
       end
@@ -998,20 +998,28 @@ module Erx
         end
       end
 
-      # Property 12: the domain library's host build plans every configured domain in
-      # boot order, then every introduction, against a model machine that records each
-      # plan as the boot does. So the configured domains' share of properties 4 and 13
-      # (each principal's domain quota and budget, each grant within system and the
-      # service grants within its reserve) and the connection rows are the library's own
-      # judgment, in its own arithmetic. With no domains there is nothing to plan; with
-      # some, a missing planner fails closed.
-      def check_plans(rows, max_domains:)
+      public
+
+      # Property 12: the domain library's host build, given the packed manifest, builds
+      # the boot's view with the root's own builder, so each principal passes
+      # erx_dom_principal_check, then plans every configured domain in boot order and
+      # every introduction against a model machine that records each plan as the boot
+      # does. So the configured domains' share of properties 4 and 13 (each principal's
+      # domain quota and budget, each grant within system and the service grants within
+      # its reserve) and the connection rows are the library's own judgment, in its own
+      # arithmetic. A build passes a planner always; without one, a manifest with no
+      # domains is not planned, and one with some fails closed.
+      def check_plans(bytes, rows)
         domains = rows.fetch('domains')
-        return if domains.empty?
-        raise Unsupported.new('configured domains need the domain library\'s host planner', property: 12, field: 'planner') unless @planner
+        unless @planner
+          return if domains.empty?
+
+          raise Unsupported.new('configured domains need the domain library\'s host planner', property: 12, field: 'planner')
+        end
 
         order = rows.fetch('boot_order').map { |step| step.fetch('domain') }
-        statuses = @planner.call(plan_view(rows, order: order, max_domains: max_domains))
+        statuses = @planner.call(plan_view(bytes, rows, order: order))
+        invalid("the domain library refuses the manifest's view: #{statuses.fetch('refused').delete_prefix('manifest: ')}", 12, 'view') if statuses.key?('refused')
         order.zip(statuses.fetch('domains')).each do |index, status|
           refuse_plan(status, "configured domain #{domains.fetch(index).fetch('name')}", 'domain')
         end
@@ -1021,6 +1029,8 @@ module Erx
         end
       end
 
+      private
+
       # Refuses the manifest naming what the library refused; status 0 passes.
       def refuse_plan(status, what, field)
         return if status.zero?
@@ -1029,55 +1039,23 @@ module Erx
         invalid("the domain library refuses #{what} with #{name}", 12, field)
       end
 
-      # The planner's view (DomainPlanner#call) from the normalized rows and the catalog,
-      # its domains in boot order and each introduction's parties their places in it.
-      def plan_view(rows, order:, max_domains:)
-        machine = @source.machine
-        spaces = @codec.member('mf_limits_flags', 'spaces')
-        limits = rows.fetch('limits')
-        principals = rows.fetch('principals').map do |row|
-          { 'memory' => row.fetch('memory'), 'domains' => row.fetch('domains'), 'grant' => row.fetch('grant'),
-            'default_limits' => startup_limits(rows, row.fetch('default_limits')),
-            'ceiling_limits' => startup_limits(rows, row.fetch('ceiling_limits')) }
-        end
+      # The planner's view (DomainPlanner#call): the packed manifest, each archive entry
+      # with the bytes it will start with, the configured rows in boot order and each
+      # introduction's parties their places in it.
+      def plan_view(bytes, rows, order:)
         place = order.each_with_index.to_h
         introductions = rows.fetch('introductions').map do |row|
           { 'a' => place.fetch(row.fetch('from')), 'b' => place.fetch(row.fetch('to')) }
         end
-        domains = order.map { |index| rows.fetch('domains').fetch(index) }.map do |domain|
-          profile = limits.fetch(domain.fetch('limits'))
-          { 'principal' => domain.fetch('principal') + 1, 'spaces' => (profile.fetch('flags') & spaces).zero? ? 0 : 1,
-            'release' => domain.fetch('release'), 'release_files' => domain.fetch('release_files'),
-            'runtime' => domain.fetch('runtime'), 'memory' => profile.fetch('memory'), 'outer' => profile.fetch('outer'),
-            'grant' => profile.fetch('grant'), 'spaces_grant' => profile.fetch('spaces'),
-            'runtime_limits' => startup_limits(rows, domain.fetch('limits')),
-            'lane' => profile.fetch('lane'), 'connections' => profile.fetch('connections') }
-        end
-        { 'machine' => { 'max_domains' => max_domains, 'max_connections' => number(machine, 'max_connections'),
-                         'system_lane' => number(machine, 'system_lane'),
-                         'system_reserve' => number(machine, 'system_reserve'),
-                         'system_grant' => share(machine, 'system_share') },
-          'principals' => principals, 'files' => @context.catalog.map { |row| plan_file(row) }, 'domains' => domains,
+        { 'manifest' => bytes, 'files' => @context.catalog.map { |row| plan_file(row) }, 'order' => order,
           'introductions' => introductions }
       end
 
-      # erx_runtime_limits_t from a limits record: its runtime-limits profile and its
-      # peer-held bounds.
-      def startup_limits(rows, index)
-        profile = rows.fetch('limits').fetch(index)
-        rows.fetch('runtime_limits').fetch(profile.fetch('runtime_limits')).except('name')
-            .merge(profile.slice('peer_held', 'peer_held_total'))
-      end
-
-      # A boot-image file as the library sees it; an image's manifest passes when its
-      # magic, version and ABI version are this build's.
+      # A boot-image entry as the archive will hold it: an image starts with its image
+      # manifest, which the packer encodes so (PackWire#write_image); the library judges it.
       def plan_file(row)
-        image = row['image']
-        accepted = image.is_a?(Hash) && image['magic'] == @codec.constant('image_magic') &&
-                   image['version'] == @codec.constant('image_version') && image['abi_version'] == @codec.abi_version &&
-                   image['flags'].is_a?(Integer)
-        { 'kind' => row.fetch('kind'), 'flags' => row.fetch('flags'), 'image_ok' => accepted ? 1 : 0,
-          'image_flags' => accepted ? image.fetch('flags') : 0 }
+        head = row['image'].is_a?(Hash) ? @codec.encode_layout('erx_image_manifest', row.fetch('image')) : ''.b
+        { 'kind' => row.fetch('kind'), 'flags' => row.fetch('flags'), 'head' => head }
       end
 
       # The slot writer's roles: in Phase 1 the system domain writes the slots.

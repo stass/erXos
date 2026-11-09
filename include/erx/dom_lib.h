@@ -200,9 +200,11 @@ void		erx_dom_lib_system_set(erx_dom_lib_t *);
 
 /*
  * The library at boot (docs/design-system.md, "The root task", steps 2 and
- * 3), in liberx/system/dom_boot.c. The tables come from memory the caller
- * supplies, one region laid out by erx_dom_boot_layout from the sizes the
- * manifest and the boot image give.
+ * 3). The view is liberx/system/dom_boot_view.c's, pure and built by the
+ * root and by the manifest check's host planner alike; the files and the
+ * effects are liberx/system/dom_boot.c's. The tables come from memory the
+ * caller supplies, one region laid out by erx_dom_boot_layout from the sizes
+ * the manifest and the boot image give.
  */
 typedef struct erx_dom_boot_sizes {
 	uint32_t	max_domains;	/* the manifest's: domain records */
@@ -223,9 +225,10 @@ typedef struct erx_dom_boot_tables {
 	erx_dom_file_t		*files;		/* nfiles */
 } erx_dom_boot_tables_t;
 
-/* The sizes of the view the manifest and the boot image describe. */
-erx_dom_boot_sizes_t erx_dom_boot_sizes(const erx_manifest_view_t *,
-		    const erx_pack_view_t *);
+/* The sizes of the view the manifest and a boot image of nfiles entries describe. */
+erx_dom_boot_sizes_t erx_dom_view_sizes(const erx_manifest_view_t *, uint32_t nfiles);
+/* The same for the opened boot image. */
+erx_dom_boot_sizes_t erx_dom_boot_sizes(const erx_manifest_view_t *, const erx_pack_view_t *);
 
 /*
  * Places the tables of sizes in one region starting at base, which is
@@ -236,12 +239,27 @@ bool		erx_dom_boot_layout(const erx_dom_boot_sizes_t *, uintptr_t base,
 		    erx_dom_boot_tables_t *tables, size_t *bytes) ERX_WARN_UNUSED_RESULT;
 
 /*
- * Builds lib's view from the checked manifest and the opened boot image into
- * tables, which erx_dom_boot_layout placed for erx_dom_boot_sizes: the
- * header's limits, the principals numbered from 1 in row order and each
- * admitted by erx_dom_principal_check, the configured rows, every file of
- * the image, and the host name. Pure: it makes no call. NULL, or the reason
- * the manifest cannot give a view, with lib's view left partial.
+ * Judges file, its kind already set, from head_len bytes at head, the
+ * start of its entry: an image whose manifest has this build's magic,
+ * version and ABI version is accepted, with its flags. Pure.
+ */
+void		erx_dom_boot_image(erx_dom_file_t *file, const uint8_t *head, size_t head_len);
+
+/*
+ * Builds lib's view from the checked manifest into tables, which
+ * erx_dom_boot_layout placed for erx_dom_boot_sizes and whose files hold
+ * nfiles judged entries: the header's limits, the principals numbered from 1
+ * in row order and each admitted by erx_dom_principal_check, the configured
+ * rows, the files, and the host name. Pure: it makes no call. NULL, or the
+ * reason the manifest cannot give a view, with lib's view left partial.
+ */
+const char	*erx_dom_view_build(erx_dom_lib_t *, const erx_manifest_view_t *,
+		    uint32_t nfiles, const erx_dom_boot_tables_t *tables);
+
+/*
+ * The root's view: erx_dom_view_build over every entry of the opened boot
+ * image, each judged by erx_dom_boot_image from the bytes the archive holds
+ * at its start (liberx/system/dom_boot.c).
  */
 const char	*erx_dom_boot_view(erx_dom_lib_t *, const erx_manifest_view_t *,
 		    const erx_pack_view_t *, const erx_dom_boot_tables_t *tables);
