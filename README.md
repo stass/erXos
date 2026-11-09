@@ -296,9 +296,14 @@ Error in process <0.150.0> with exit value:
   address its creator gives, stops a space with everything below it and
   queues its faults and exit record at a gate, keeps budgets and groups
   as records whose objects go with them, and passes handles from the
-  root into the spaces it created. `liberx` also has a lane's writer with
-  its wake handshake, and the funnel's check of a frame's sender and
-  target. No domain beyond the system domain boots yet.
+  root into the spaces it created. Over it, the domain library creates a
+  domain from a request, step by step with each step undone on a
+  failure, connects and disconnects two domains, and hears of a domain's
+  end at its fault gate. In the `native_domain` suite a domain runs ERTS
+  on its own release to `init` and halts. `liberx` also has a lane's
+  writer with its wake handshake, and the funnel's check of a frame's
+  sender and target. Domains do not yet talk to each other, and the
+  booted system starts none of its own.
 * **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
   and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
@@ -329,16 +334,23 @@ Error in process <0.150.0> with exit value:
   address detection, IPv4 and IPv6 with fragment reassembly, ICMP and
   ICMPv6 with their rate limits, UDP, and for TCP its wire format, RTT,
   MSS, initial sequence numbers, ECN, SACK blocks and the RFC 6675
-  scoreboard with duplicate-ACK loss detection. The Internet checksum and
-  SipHash-2-4 are its per-byte primitives. It does not reach a device
-  yet, and the TCP connection itself is still to come.
+  scoreboard with duplicate-ACK loss detection. TCP's connection now runs
+  as a pure step from SYN to TIME-WAIT, with its timers, the syncache,
+  ICMP errors and path MTU, and an explorer that walks its states,
+  across sequence-number wrap too, checking RFC 9293's rules. Frames are
+  classified on input and framed on output, and DHCP for IPv4 is decided.
+  The Internet checksum and SipHash-2-4 are its per-byte primitives. It
+  does not reach a device yet.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
-  and `wctl`, the widget model's deltas, and `ui.txt` with its generated
-  schema and binary form in Erlang and C. No screen shows it yet.
-* **Designed but not built yet:** the rest of erXos's own kernel, domains beyond the
-  system domain, the rest of the command shell, the network stack on a
-  device, the display on a screen, the web UI, and the POSIX-lite layer. Each has a design document in
+  and `wctl`, the widget model's deltas, `ui.txt` with its generated
+  schema and binary form in Erlang, C and TypeScript, presentation types
+  generated from the inspection schema, LVGL built on the host, and the
+  web client's protocol and connection core. No screen shows it yet.
+* **Designed but not built yet:** the rest of erXos's own kernel, the
+  domain service and messages between domains, the rest of the command
+  shell, the network stack on a device, the display on a screen, the web
+  UI, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
 ## Correctness and testing
