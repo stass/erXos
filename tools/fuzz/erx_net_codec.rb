@@ -23,11 +23,15 @@ module ErxNetCodecFuzz
   ORACLE = File.join(ROOT, 'test/erlang/erx_net_pkt_oracle.erl')
   DEADLINE_SECONDS = '300'
 
-  # A target: the module under test and its seeded fault as the text it replaces.
-  Target = Data.define(:module_name, :exact, :faulty, :fault)
   # The failures of a round that show it reached the faulty code: a raise, a refusal or
   # acceptance the reference judge disputes, or a record that does not encode back.
   CAUGHT = %w[raised disagrees_with_reference round_trip_differs fields_differ lease_out_of_bounds].freeze
+
+  # A target: the module under test, its seeded fault as the text it replaces, and the
+  # failure tags that count as catching it (any of CAUGHT unless the fault is aimed at one).
+  Target = Data.define(:module_name, :exact, :faulty, :fault, :caught) do
+    def initialize(caught: CAUGHT, **fields) = super
+  end
 
   TARGETS = {
     'eth' => Target.new(module_name: 'erx_net_eth',
@@ -81,7 +85,12 @@ module ErxNetCodecFuzz
     'tcp' => Target.new(module_name: 'erx_tcp_wire',
                         exact: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off < ?TCP_HDR_WORDS; Off * 4 > byte_size(Segment) ->',
                         faulty: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off * 4 > byte_size(Segment) ->',
-                        fault: 'accepting a data offset below 5')
+                        fault: 'accepting a data offset below 5'),
+    # The data-offset fault is caught by a raise; this one only by the judge's options.
+    'tcp_sack' => Target.new(module_name: 'erx_tcp_wire',
+                             exact: 'option(?TCPOPT_SACK, Blocks, false, Opts)',
+                             faulty: 'option(?TCPOPT_SACK, Blocks, _, Opts)',
+                             fault: 'accepting SACK blocks on a SYN', caught: %w[disagrees_with_reference])
   }.freeze
 
   module_function
@@ -95,8 +104,9 @@ module ErxNetCodecFuzz
     output, status = fuzz(spec.module_name, source, seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted$/)
     output, status = fuzz(spec.module_name, source.sub(spec.exact, spec.faulty), seed: seed)
-    abort("#{spec.fault} passed:\n#{output}") if status.success? || CAUGHT.none? { |tag| output.include?(tag) }
-    puts "#{spec.module_name}:decode agrees with its reference and pkt, and #{spec.fault} does not"
+    abort("#{spec.fault} passed:\n#{output}") if status.success? || spec.caught.none? { |tag| output.include?(tag) }
+    puts "#{spec.module_name}:decode agrees with its reference and pkt, and #{spec.fault} does not " \
+         "(#{output[/^fuzz: (\w+)/, 1]})"
   end
 
   # In a directory of its own, which also takes the crash dump of a failed round.

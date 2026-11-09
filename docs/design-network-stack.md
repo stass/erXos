@@ -896,8 +896,8 @@ neighbour row.
 
 ```erlang
 snapshot(Ifs, Addrs, Routes) -> snapshot().
-path(Dst, Opts, snapshot()) -> {ok, path()} | {error, enetunreach | eaddrnotavail}.
-    % Dst zoned; Opts: src, via (an interface), ttl or hlim, tos or tclass, flow
+path(Dst, Opts, snapshot()) -> {ok, path()} | {error, enetunreach | eaddrnotavail | eacces}.
+    % Dst zoned; Opts: src, via (an interface), ttl or hlim, tos or tclass, flow, broadcast
 tcp(path(), [erx_tcp:outgoing()], gen()) -> {ok, [packet()], gen()} | {error, emsgsize}.
 udp(path(), Sport, Dport, iodata(), gen()) -> {ok, [packet()], gen()} | {error, emsgsize}.
 ip(path(), Proto, iodata(), gen()) -> {ok, [packet()], gen()} | {error, emsgsize}.
@@ -965,6 +965,17 @@ was built at:
   interface's for IPv6, which router advertisements set, and to 64 for
   IPv4 (`IPDEFTTL`). Neighbour discovery's messages set 255, as RFC 4861
   requires.
+* *Broadcast.* A destination that is an IPv4 broadcast address of the
+  outgoing interface (`erx_net_addr:is_broadcast/3`, the limited
+  broadcast among them) marks the path `broadcast`, as `ip_output`
+  sets `isbroadcast`, and is refused as it refuses one
+  (`ip_output.c:661-673`): `eaddrnotavail` on the loopback interface,
+  which cannot broadcast, and `eacces` unless the caller's `broadcast`
+  option allows it. A socket passes its `broadcast` option there
+  (`SO_BROADCAST`, which `ip_output` reads as `IP_ALLOWBROADCAST`), a
+  connection never does, and the interface does for its own
+  broadcasts. `udp/5` and `ip/4` refuse a broadcast packet over the
+  MTU with `emsgsize` instead of fragmenting it.
 
 **Packets and frames.** `tcp/3`, `udp/5` and `ip/4` build IP packets,
 each the iodata `[Header, Payload]` that `erx_ip4:output/4` and
@@ -992,6 +1003,11 @@ in front of their headers: with the path's fixed link address, or the
 row's when the next hop has one; with no row, the packets go to the
 interface instead (`resolve`). `link/3` is the same framing for the
 interface, over its own row, with the link address from its own table.
+
+A multicast whose hop limit is 0 is never handed to a network: a
+datagram socket hands its frames only to the loop below, never to the
+driver, as `ip_output` and `ip6_output` loop such a datagram but free
+the copy for the wire (`ip_output.c:632-643`, `ip6_output.c:921-935`).
 
 A datagram a socket sends through an Ethernet interface to a broadcast
 address, or to a multicast address while the socket's multicast loop
@@ -1127,7 +1143,8 @@ hold the legal ones:
 | `TF_REQ_TSTMP`, `TF_RCVD_TSTMP`, `ts_recent`, `ts_recent_age`, `ts_offset` | `ts`: `off`, `{requested, Offset}` before the handshake completes, or `#ts{recent, recent_age, offset}` |
 | `TF_REQ_SCALE`, `TF_RCVD_SCALE`, `snd_scale`, `rcv_scale` | `wscale`: `off`, `requested` before the handshake completes (the shift asked for follows from `sb_max`), or `{SndShift, RcvShift}` |
 | `TF_SACK_PERMIT` | `sack`: `off`, `requested` or `on` |
-| `TF_FASTRECOVERY`, `TF_CONGRECOVERY`, `snd_recover` | the loss module's state: `none`, `{fast, Recover}` or `{congestion, Recover}` |
+| `TF_FASTRECOVERY`, `TF_CONGRECOVERY` | the congestion module's `#ccv{}`: `fast_recovery` and `cong_recovery`, two flags, since all four combinations are legal: an ECN mark at or past the recovery point leaves congestion recovery and keeps fast recovery, and congestion modules read and set them as FreeBSD's do through `CCV(ccv, t_flags)` |
+| `snd_recover` | `snd_recover`, an unwrapped integer, which the loss module reads in `#loss_ack{}` |
 | `t_timers[]` | `send_timer` and `#deadlines{}` |
 | `t_rxtshift` | `rxtshift`, kept when the send timer stops |
 | `snd_una`, `snd_nxt`, `snd_max`, `snd_wl1`, `snd_wl2`, `iss`, `rcv_nxt`, `rcv_adv`, `last_ack_sent`, `irs` | the same names, unwrapped integers |
@@ -1219,12 +1236,16 @@ RST, for example, is judged before the timestamp check):
 
 1. `lift` the segment into the connection's sequence space
    (`tcp_input.c:1511-1629`): a SYN-ACK in SYN-SENT that acknowledges
-   what was never sent is answered with a RST, `t_rcvtime` is taken,
-   the window scaled and the timestamp echo brought back to our clock.
-   FreeBSD also reads the segment's ECN here, before any check; the
-   stack reads it in `check_ack`, once the segment has passed them all,
-   so a blind segment can neither cut the congestion window with ECE
-   nor make the connection echo CE or stop echoing it. TIME-WAIT's
+   what was never sent is answered with a RST, the window scaled and
+   the timestamp echo brought back to our clock. FreeBSD also takes
+   `t_rcvtime` and reads the segment's ECN here, before any check
+   (`tcp_input.c:1566`, `:1592-1595`); the stack does both once the
+   segment has passed them all (in `check_ack`, header prediction, or
+   `syn_sent` for an acceptable SYN), so a blind segment that knows only
+   the four-tuple can neither keep a dead peer's connection from its
+   keepalive timeout, as FreeBSD's own comment there warns, nor cut the
+   congestion window with ECE, nor make the connection echo CE or stop
+   echoing it. TIME-WAIT's
    segments are `tcp_twcheck`'s
    ([TIME-WAIT](#time-wait)), not the pipeline's.
 2. `timestamps`: RFC 7323 section 3.2's presence rules, as
@@ -1840,12 +1861,17 @@ entry the protocol lets go, and when there is neither, no entry is
 made. ARP lets go of any resolved entry no transmitter has hinted in its
 last seconds; the IPv6 neighbour cache keeps the same bound and lets go
 only of a stale entry no transmitter has hinted (RFC 4861 5.3), keeping
-reachable, delay and probe entries. FreeBSD's `lltable` has a limit,
-`llt_maxentries`, that refuses every new entry once reached, but neither
-protocol sets it, so its tables are unbounded. An on-link sender that
-fills a table from spoofed sender addresses can therefore push out
-entries this host is resolving, and in ARP a neighbour in use, a
-residual `TODO.md` records. Both tables
+reachable, delay and probe entries. Only an entry this host creates to resolve a neighbour makes room so;
+an entry learnt from an unsolicited ARP request or neighbour
+solicitation takes only free room and evicts nothing, as FreeBSD's
+`lltable` limit, `llt_maxentries`, refuses every new entry once
+reached (neither protocol sets it there, so FreeBSD's tables are
+unbounded). An on-link sender cycling through spoofed sender
+addresses in ARP requests or solicitations therefore pushes out
+nothing. One that sends packets drawing a reply (an echo request, a
+segment to a closed port) still makes this host resolve each
+spoofed source, and those resolutions do make room, a residual
+`TODO.md` records. Both tables
 are one module, `erx_lltable`, as FreeBSD's `lltable` serves both: a
 keyed map ordered by deadline, whose `publish` and `unpublish` actions
 for the transmit path follow from each change of an entry, so neither
@@ -2601,7 +2627,17 @@ serves many flows. A socket ends itself properly from its intact state,
 as the table says, and then exits with the exception as its reason, since
 its state is one flow's and a bug in it is not worth keeping alive. Both
 record the exception and the event, a frame's length and its first 128
-bytes escaped, in the kernel log, and count it. No other exception is
+bytes escaped, in the kernel log, and count it. The record keeps the
+stack trace with each frame's arguments replaced by their count, and a
+socket's exit reason is the exception's class and reason alone, so a
+`function_clause` never carries the control block into a log; a
+socket's `format_status` likewise leaves out its buffers, its
+reassembly queue and its generator, so `sys:get_status` shows neither a
+flow's payload nor the generator its sequence numbers and ports come
+from. A request reaches the step only after the admission path has
+checked its shape against the schema, so a malformed request is
+refused there with `{error, einval}` and never raises in the step.
+No other exception is
 caught. The fuzz targets and the explorer fail on any exception, so in
 tested code neither path runs.
 
@@ -2713,8 +2749,10 @@ judge must both refuse.
 
 *Seeded failure:* a decoder variant that trusts the IPv4 total length
 without checking it against the frame, and one that accepts a TCP data
-offset below 5; each must fail its target's agreement check within the
-target's budget.
+offset below 5, must each fail its target within the target's budget;
+and one that accepts SACK blocks on a SYN, which decodes without
+raising, must fail its target's agreement check with the reference
+judge, so the judge itself is shown to catch a wrong decoding.
 
 ### Checksums and random values: the interface's gate and the generators
 
@@ -2897,7 +2935,13 @@ expirations. It explores breadth-first, applying every event of the
 alphabet in every state it reaches, and merges states that agree on an
 abstraction of the control block (the TCP state, the FIN state, which
 send and receive variables are equal, which deadlines are set, the
-recovery state) until no new abstract state appears, or to depth 8. The
+recovery state) and on how the peer model stands against the connection
+(its window's right edge against `snd_una + snd_wnd`, `snd_max` and its
+furthest acknowledgement, its
+SND.WL1/WL2 and furthest acknowledgement against the connection's, and
+the urgent bytes still ahead of delivery), so a state the model judges
+more strictly is explored on its own, until no new abstract state
+appears, or to depth 8. The
 whole exploration runs again with the initial sequence numbers just
 below 2^32, so every position class is also crossed at the wire
 boundary. On every transition it checks:
@@ -2906,16 +2950,27 @@ boundary. On every transition it checks:
 * no byte is delivered twice or out of order, and none beyond what the
   peer sent;
 * no segment is sent beyond the peer's window, except a window probe of
-  one byte, measured from the furthest acknowledgement the peer sent:
-  FreeBSD's window update takes the window of an acknowledgement below
-  `snd_una` as counting from `snd_una` (`tcp_input.c`'s step 6), where
-  RFC 9293 ignores it;
+  one byte. The window is the peer model's newest, kept by the SND.WL1/WL2
+  rule as FreeBSD's step 6 applies it to the segments that pass the
+  sequence and acknowledgement checks as the model judges them, counted
+  from the furthest acknowledgement taken: FreeBSD takes the window of
+  an acknowledgement below `snd_una` as counting from `snd_una`
+  (`tcp_input.c`'s step 6), where RFC 9293 ignores it. The one window
+  the connection may leave untaken is that of a segment FreeBSD could
+  count as a duplicate acknowledgement, which the loss module may end
+  before step 6: the acknowledgement at `snd_una` with the retransmit
+  timer set, not a first FIN, and without SACK no data and the window
+  unchanged, with SACK a block `tcp_sack_doack` takes (`tcp_input.c`
+  2568-2606);
 * a RST resets only at exactly `last_ack_sent`; challenge ACKs never
   exceed their limit;
 * an old acknowledgement never changes the send window (SND.WL1/WL2);
 * every state change is one RFC 9293's state diagram allows;
 * where header prediction accepts the segment, the general stages give
   the same state and actions;
+* an urgent byte of a segment taken at `rcv_nxt` with nothing held for
+  reassembly, before the peer's FIN, is kept out of the stream, since
+  this step delivers it if anything does (`tcp_pulloutofband`);
 * the step never raises.
 
 The base alphabet leaves out dimensions the core also decides on, each of
@@ -2929,11 +2984,13 @@ three times the one before:
 * **timestamps:** a segment without the option, and with a value older
   than, equal to and newer than `ts_recent`, on connections that
   negotiated timestamps and that did not, so the `timestamps` stage and
-  PAWS are reached in every state;
+  PAWS are reached in every state; the clock never reaches
+  `TCP_PAWS_IDLE`, so `ts_recent` is never invalidated by age;
 * **ECN:** ECE and CWR on segments and the CE mark in the IP header, on
   connections with ECN negotiated and without;
 * **urgent data:** URG with the pointer inside the segment, beyond it and
-  beyond the window;
+  beyond the window; no pointer reaches past `SB_MAX`, so the rule that
+  drops such an URG is not explored;
 * **SACK:** duplicate acknowledgements carrying no block, a block inside
   the flight, a block beyond `snd_max` and a block below `snd_una`
   (D-SACK);
@@ -2942,25 +2999,36 @@ three times the one before:
   window scaling or with FreeBSD's least MSS (`tcp_minmss`, 216 bytes).
   That MSS is larger than the base's buffers, so this dimension's
   connection has a send buffer of two such segments and more, and one
-  output pass sends more than one segment (`sendalot`);
+  output pass sends more than one segment (`sendalot`); and an
+  acknowledgement carrying MSS and window scale, options only a SYN may
+  carry;
 * **ICMP reports:** fragmentation-needed or packet-too-big, and
-  unreachable, each quoting a sequence number in flight and one outside
-  it, in every state.
+  unreachable, each quoting `snd_una` (in flight when anything is) and,
+  never in flight, the number below it, `snd_max`, and the number 2^31
+  past `snd_una`, which a comparison of wire numbers rather than lifted
+  ones would place on either side, in every state.
 
-Their added properties: a report quoting a sequence number outside
+Their added properties: a segment PAWS drops changes none of the
+connection's sequence state, its window or `ts_recent`; a report quoting a sequence number outside
 `snd_una` to `snd_max` changes nothing; a window probe is sent only while
 the peer's window is zero; no segment carries more data than the MSS;
 CWR is sent only after the window was reduced, on ECE received or after
 a segment was sent again on a timeout or three duplicates
 (`cc_cong_signal` owes CWR for `CC_ECN`, `CC_RTO` and `CC_NDUPACK`
-alike); and the step's results in the presence of an unnegotiated option
-equal its results without it.
+alike); and the step's results in the presence of an unnegotiated option,
+or of MSS and window scale on a segment without SYN, equal its results
+without it.
 
-*Seeded failures:* the window update without the WL1/WL2 rule; RST
+*Seeded failures:* the window update without the WL1/WL2 rule; a window
+update that never shrinks the window; a window shrink ignored on a pure
+acknowledgement at `snd_una`; a duplicate acknowledgement counted
+whatever window it offers; an urgent byte delivered in band; RST
 accepted anywhere in the window; RST judged against `rcv_nxt` with an
 acknowledgement delayed; `rcv_nxt` advanced without lifting; an ICMP
-report acted on without its sequence check; header prediction that skips
-the timestamp precondition (PAWS). Each must be caught with a named
+report acted on without its sequence check, or checked against `snd_max`
+alone; header prediction that skips the timestamp precondition (PAWS);
+PAWS that never drops an older segment; challenge ACKs counted past
+their limit. Each must be caught with a named
 property and the shortest trace.
 
 ### The syncache: properties at its boundaries

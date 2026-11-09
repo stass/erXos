@@ -145,10 +145,12 @@ stages() ->
 %% ---------------------------------------------------------------------------------------
 %% 1. lift (tcp_input.c:1511-1690): the segment into the connection's sequence space; a
 %% SYN-ACK in SYN-SENT that acknowledges something we never sent answered with a RST
-%% (:1556-1561); t_rcvtime; the window scaled (:1584); the timestamp echo back on our clock
-%% (:1624-1629). FreeBSD reads the segment's ECN here (:1592-1595), before any check; the
-%% stack reads it in `check_ack`, once the segment has passed them all, so a blind segment
-%% can neither cut the congestion window with ECE nor make us echo CE or stop echoing it.
+%% (:1556-1561); the window scaled (:1584); the timestamp echo back on our clock
+%% (:1624-1629). FreeBSD refreshes t_rcvtime and reads the segment's ECN here (:1566,
+%% :1592-1595), before any check; the stack does both in `accepted/3`, once the segment has
+%% passed them all, so a blind segment can neither keep a dead peer's connection from its
+%% keepalive timeout (FreeBSD's own XXX at :1566), nor cut the congestion window with ECE,
+%% nor make us echo CE or stop echoing it.
 %%
 %% FreeBSD also takes a SYN's options here in SYN-SENT (:1636-1690), before it knows whether
 %% the segment is acceptable; the `syn_sent` stage takes them once it has accepted the SYN,
@@ -160,7 +162,7 @@ stages() ->
 lift(_, #tcb{state = State} = Tcb, _) when State =:= closed; State =:= time_wait ->
     {done, Tcb, []};
 lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = Opts},
-      Payload, IpEcn, LinkCast}, Tcb0, #tcp_ctx{now = Now} = Ctx)
+      Payload, IpEcn, LinkCast}, Tcb0, Ctx)
   when is_binary(Payload), is_integer(IpEcn), IpEcn >= 0, IpEcn =< 3,
        LinkCast =:= unicast orelse LinkCast =:= broadcast orelse LinkCast =:= multicast ->
     #tcb{state = State, rcv_nxt = RcvNxt, snd_una = Una, iss = Iss, snd_max = SndMax} = Tcb0,
@@ -185,7 +187,7 @@ lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = O
         true ->
             dropwithreset(Seg, Tcb0, Ctx);
         false ->
-            {continue, Tcb0#tcb{rcvtime = Now}, Seg}
+            {continue, Tcb0, Seg}
     end.
 
 %% TSval against the last one recorded; TSecr, unless 0, less our offset and lifted onto our
@@ -266,7 +268,7 @@ header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, data = Da
         false ->
             {continue, Tcb0, Seg};
         true ->
-            Tcb = ecn(Seg, ts_recent(Seg, Tcb0#tcb{rcv_wnd = rcv_wnd(Tcb0)}, Ctx), Ctx),
+            Tcb = accepted(Seg, ts_recent(Seg, Tcb0#tcb{rcv_wnd = rcv_wnd(Tcb0)}, Ctx), Ctx),
             #ccv{fast_recovery = Fast, cong_recovery = Cong} = Tcb#tcb.ccv,
             PureAck = Data =:= <<>> andalso Ack > Una andalso Ack =< SndMax
                 andalso not Fast andalso not Cong andalso Sacks =:= []
@@ -338,7 +340,8 @@ take_syn(#seg{seq = Irs, flags = Flags0, win = Win, data = Data0} = Seg0, Tcb0, 
                         true -> {binary:part(Data0, 0, RcvWnd), Flags1 band bnot ?TH_FIN};
                         false -> {Data0, Flags1}
                     end,
-    Tcb = Tcb3#tcb{snd_wl1 = Seq - 1, rcv_up = Seq, snd_wnd = Win},
+    %% An acceptable SYN passed SYN-SENT's checks: t_rcvtime (tcp_input.c:1566).
+    Tcb = Tcb3#tcb{snd_wl1 = Seq - 1, rcv_up = Seq, snd_wnd = Win, rcvtime = Ctx#tcp_ctx.now},
     Seg = Seg0#seg{seq = Seq, data = Data, flags = Flags},
     case has(Flags, ?TH_ACK) of
         true -> {goto, process_ack, Tcb, Seg, Buffers};
@@ -596,19 +599,24 @@ ts_recent(_, Tcb, _) ->
 check_ack(#seg{flags = Flags} = Seg, #tcb{state = State, ack_now = AckNow} = Tcb, Ctx) ->
     LowestAck = ack_floor(Tcb),
     case has(Flags, ?TH_ACK) of
-        false when State =:= syn_received -> {goto, step6, ecn(Seg, Tcb, Ctx), Seg, []};
+        false when State =:= syn_received -> {goto, step6, accepted(Seg, Tcb, Ctx), Seg, []};
         false when AckNow -> dropafterack(Seg, Tcb, Ctx);
         false -> {done, Tcb, []};
         true when Seg#seg.ack < LowestAck -> challenge_ack(ack, Tcb, Ctx);
-        true -> {continue, ecn(Seg, Tcb, Ctx), Seg}
+        %% An acknowledgement of what was never sent is dropped by the `ack` stage
+        %% (tcp_input.c:2546); it is not accepted, so it refreshes neither t_rcvtime nor
+        %% ECN, and a blind sender must hit both windows to keep a connection alive.
+        true when Seg#seg.ack > Tcb#tcb.snd_max -> {continue, Tcb, Seg};
+        true -> {continue, accepted(Seg, Tcb, Ctx), Seg}
     end.
 
-%% tcp_ecn_input_segment and its CC_ECN (tcp_input.c:1592-1595) for an accepted segment: the
-%% peer's ECE signals congestion, its CWR asks for an ACK now, and CE owes the peer ECE.
-ecn(#seg{flags = Flags, ip_ecn = IpEcn, ack = Ack}, #tcb{ecn = Ecn0, ack_now = AckNow0} = Tcb0,
-    Ctx) ->
+%% What a segment that passed every check changes before the ACK and data stages: t_rcvtime
+%% (tcp_input.c:1566), and tcp_ecn_input_segment with its CC_ECN (:1592-1595): the peer's ECE
+%% signals congestion, its CWR asks for an ACK now, and CE owes the peer ECE.
+accepted(#seg{flags = Flags, ip_ecn = IpEcn, ack = Ack},
+         #tcb{ecn = Ecn0, ack_now = AckNow0} = Tcb0, #tcp_ctx{now = Now} = Ctx) ->
     {Echo, AckNow, Ecn} = erx_tcp_ecn:input_segment(Flags, IpEcn, Ecn0),
-    Tcb = Tcb0#tcb{ecn = Ecn, ack_now = AckNow0 orelse AckNow},
+    Tcb = Tcb0#tcb{ecn = Ecn, ack_now = AckNow0 orelse AckNow, rcvtime = Now},
     case Echo of
         true -> erx_tcp:cong_signal(Tcb, ecn, Ack, Ctx);
         false -> Tcb

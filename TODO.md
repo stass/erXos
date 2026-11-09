@@ -598,45 +598,22 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] network, `erx_net_frame` (design gap): FreeBSD's `ip_output` refuses a broadcast
-  without `SO_BROADCAST` with EACCES, one on a non-broadcast interface with EADDRNOTAVAIL,
-  and refuses to fragment one (`ip_output.c:661-675`). The design states none of these; the
-  path should carry whether it is a broadcast, and `udp/5` and `ip/4` refuse an oversized
-  one. Multicast with hop limit 0 on a non-loopback interface (`ip6_output.c:929-933`) is
-  also still framed.
 * [Low] network, docs/design-network-stack.md ("Framing", step 3 of the output pass): "past
   SYN-RECEIVED" should read "once a SYN has been received" (`TCPS_HAVERCVDSYN`), as the code
   does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which
   the stack does not.
 
-* [Medium] erx_net TCP explorer (`test/erlang/erx_tcp_explore.erl`): the peer model is
-  looser than the properties it serves. The offered right edge only grows, so after one
-  full window a connection that ignored a shrunk or zeroed one passes (verified by a seeded
-  `snd_wnd = max(Win, snd_wnd)`); keep the edge of the newest window by the WL1/WL2 rule
-  and judge the probe on the peer's last window, not the connection's `snd_wnd`. The merge
-  key leaves out `right_edge`, `acked` and `urgent`, so a merged twin with a stricter
-  model is not explored. The sack and timestamps runs require only hits a connection
-  without the option also gives (want a scoreboard hole and a PAWS drop; a hole first
-  appears at depth 4, past the landing depth). `unnegotiated/2` lists the negotiable
-  options apart from the dimensions that vary them (each dimension should supply its own
-  strip), and MSS, window scale and SACK-permitted off a SYN are never tried. The urgent
-  model allows an urgent byte held out but never requires it; a probe is accepted at any
-  position past the edge, not only at the next byte; ICMP reports never quote a number
-  2^31 away from `snd_una`.
-* [Medium] erx_net TCP core (`erx_tcp`, `erx_tcp_user`): a malformed event or request
-  (`{send, From, NotBinary}`) raises `function_clause` with the whole `#tcb{}` in the
-  stack trace, send-buffer payload and the connection's generator included. Requests
-  from other domains need a `{error, einval}` answer or validation in `erx_tcp_conn`,
-  and `erx_tcp_conn` needs a `format_status` that redacts `sndbuf` and `gen`.
+* [Medium] erx_net TCP explorer (`test/erlang/erx_tcp_explore.erl`): the sack run requires only
+  hits a connection without SACK also gives. Add a property that judges a scoreboard hole (a
+  hole is retransmitted before new data, say) and require it; a hole first appears at depth 4,
+  past the landing depth of 3, so run sack at depth 4 in landing mode (about +0.5 s) or require
+  it in `full` mode only. The model's `loss_dropped/3` reads from the connection whether
+  `snd_wl1`/`snd_wl2` moved on a duplicate ACK rather than modelling the loss module's drop.
 * [Low] erx_net TCP output (`erx_tcp_output`): a FIN-only range the send log marks lost at
   `snd_una` (NewReno, with only a separately sent FIN outstanding) waits for the RTO,
   since the FIN is resent only when `snd_nxt == snd_una`; FreeBSD moves `snd_nxt` to the
   acknowledgement first. And `enobufs/3` sizes the window with no SACK blocks where
   `tcp_maxseg` counts `rcv_numsacks`.
-* [Medium] erx_net TCP core: the design's control-block table gives the recovery state
-  as the variant `none | {fast, R} | {congestion, R}`, but `#ccv{}` keeps two booleans
-  and `#tcb{}` keeps `snd_recover`. Settle on one form (the variant rules out illegal
-  combinations, but FreeBSD does reach fast recovery without congestion recovery).
 * [Low] erx_net TCP connection process: `erx_tcp_timewait` gives a peer on one of the
   machine's own addresses the 20 ms TIME-WAIT of `tcp_eff_msl` when the control block's
   `local_peer` is set, but nothing sets it yet: whoever builds the control block
@@ -675,10 +652,6 @@ it; git history is the record of completed work.
   (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
-* [Medium] network tests, `tools/fuzz/erx_net_codec.rb` (`tcp`): the seeded fault the design names,
-  accepting a data offset below 5, is caught because the decoder then raises on a negative option
-  length, not by the judge's agreement check. Give the runner a second fault per target that only the
-  judge catches, such as SACK blocks accepted on a SYN.
 * [Low] network, `erx_tcp_input:dropwithreset` and the connect path: only the link-cast half of
   `tcp_dropwithreset` is translated; its IP checks (`tcp_input.c:3452-3472`) are left to the rule
   that no connection has a multicast or broadcast foreign address, which FreeBSD enforces in
@@ -695,11 +668,6 @@ it; git history is the record of completed work.
   timeout rewrites the send log (`timeout_undone`) and moves `snd_nxt` to `snd_max` behind the
   loss module's back, so a module with per-range state would be stale after it. Route the undo
   through the loss module (a cause of `rewind/4` or a sibling callback) before a second module.
-* [Medium] network tests, `erx_net_input_fuzz`: the fuzz target never generates `{reassembled, ...}`
-  input; its judge shares `erx_icmp4:decode_quoted/1` and
-  `erx_icmp6:decode_quoted/1` with the classifier, so a wrong quote offset would pass both. Have the
-  judge find the quoted header and ports itself, generate reassembled input, and make the RST-flag
-  fault reach the unnamed-byte property, which the judge now always catches first.
 * [Low] network, `erx_net_input` provenance: NOTICE-freebsd's entry lacks `sys/netinet/tcp_subr.c`
   (`tcp_ctlinput`), which the design names as a source; and check whether `udp_common_ctlinput`
   looks up with `INPLOOKUP_WILDCARD`, which the design says it does not.
@@ -709,11 +677,6 @@ it; git history is the record of completed work.
   their SPDX line is erXos's own `BSD-2-Clause` and their FreeBSD copyright headers may be left out
   of `NOTICES`. Classify erx_net modules by their `%% FreeBSD:` header lines (or NOTICE-freebsd)
   instead, and say so in the design; check what the packer does today first.
-* [Medium] network, `erlang/apps/erx_net/src/erx_ip4_wire.erl`: an ICMPv4 error quotes the invoking IP
-  header and only 8 bytes past it, which `decode/1` refuses as `too_short` against the quoted total
-  length, yet erx_icmp4 needs the quoted addresses, protocol and ports (`icmp_input` hands the quote to
-  `ip_ctlprotox`). Add a `decode_quoted/1` sharing the header checks, with a fuzz target, when erx_icmp4 is
-  written.
 * [Medium] network, `erlang/apps/erx_net/src/erx_nd6_rtr.erl`: the interface process must call
   `select_router/2` after every step that can change the router list or a router's reachability, and diff
   `addresses/1` and `routes/1` to republish, where FreeBSD reselects inside `defrtrlist_update`; until it
@@ -3150,20 +3113,23 @@ to the corpus and follow rc
 
 ## Security residuals
 
-* [Medium] erx_net TCP input (`erx_tcp_input`): a blind segment that only knows the
-  four-tuple still refreshes `t_rcvtime` before any check, so it can keep a dead peer's
-  connection from its keepalive timeout (FreeBSD's own XXX at tcp_input.c:1566), and an
-  out-of-window segment draws an ACK through `dropafterack` with no rate limit, as in
-  FreeBSD. Move `rcvtime` after `check_ack`, and decide whether `dropafterack` ACKs share
-  the challenge-ACK limit.
+* [Medium] erx_net TCP input (`erx_tcp_input:dropafterack`): an out-of-window segment that
+  knows only the four-tuple draws an ACK with no rate limit, as in FreeBSD
+  (`tcp_input.c:3384-3395`), so a blind sender gets one ACK per segment it sends. Decide
+  whether these ACKs share the challenge-ACK limit (`erx_tcp:challenge_ack/3`); RFC 5961
+  section 10 leaves it open.
 
-* [Medium] network, `erlang/apps/erx_net/src/erx_lltable.erl` (`room/1`): past the neighbour table's bound,
-  an entry learnt from an unsolicited ARP request or neighbour solicitation evicts the oldest unresolved entry
-  first, so an on-link host sending from spoofed on-link addresses about once per round trip keeps this host
-  from resolving a neighbour, the default router included; in ARP it can also evict a reachable neighbour in
-  use, since only an entry in `verify` is ever hinted. An entry this host creates by resolving could be made
-  unevictable by learnt entries, or a learnt entry could only take free room, as FreeBSD's `llt_maxentries`
-  refuses; an on-link attacker can already overwrite ARP entries, so the gain is mainly for IPv6.
+* [Medium] network, `erlang/apps/erx_net/src/erx_lltable.erl` (`room/1`): a learnt sender takes
+  only free room, but an on-link sender whose spoofed packets draw a reply (an echo request, a
+  segment to a closed port) makes this host resolve each source through `lookup_or_create/3`,
+  which evicts the oldest unresolved entry (the default router's pending resolution among them),
+  else in ARP a resolved neighbour in use, since only an entry in `verify` is ever hinted. And
+  with the table full of learnt entries, this host's own resolutions push each other out, and a
+  reply arriving after its entry went is no longer learnt. Ranking published entries never used
+  ahead of this host's unresolved ones when making room, and an `erx_nd6` regression test beside
+  `erx_arp_tests:learnt_sender_evicts_nothing_test/0`, are the next step; the gain is mainly for
+  IPv6, as an on-link attacker can already overwrite ARP entries.
+
 * [Low] network, `erlang/apps/erx_net/src/erx_nd6_rtr.erl`: an on-link sender that passes the hop-limit
   rule and fills the prefix list first with 16 autonomous prefixes of infinite valid lifetime holds the list
   until reboot, since only an advertisement of the same prefix shortens its addresses' lifetimes; later

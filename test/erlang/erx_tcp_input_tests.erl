@@ -402,3 +402,25 @@ no_reset_for_link_broadcast_test() ->
     Resets = fun(Cast) -> resets(element(2, input([setelement(4, Bad, Cast)], syn_sent()))) end,
     ?assertMatch([_], Resets(unicast)),
     ?assertEqual({[], []}, {Resets(broadcast), Resets(multicast)}).
+
+%% --- t_rcvtime: refreshed only by a segment that passed every check --------------------
+
+%% A blind segment knowing only the four-tuple (out of the window, or acknowledging below
+%% the floor, or without ACK) must not keep a dead peer's connection from its keepalive
+%% timeout; an accepted segment on the fast path, the slow path or in SYN-SENT does refresh
+%% it (FreeBSD refreshes it before any check, its own XXX at tcp_input.c:1566).
+rcvtime_only_after_the_checks_test_() ->
+    Later = ?T0 + ?S(5000),
+    Rcvtime = fun(Segments, Tcb) ->
+                      {T, _} = erx_tcp_input:segments(Segments, Tcb, ctx(Later)),
+                      T#tcb.rcvtime
+              end,
+    Blind = [wire(5001 + 4000, ?ISS + 1, ?TH_ACK, <<"x">>, #tcp_opts{}), % past the window
+             wire(5001, ?ISS - 100000, ?TH_ACK),         % below the acceptable floor
+             wire(5001, ?ISS + 1 + 100000, ?TH_ACK),     % past snd_max
+             wire(5001, 0, 0, <<"x">>, #tcp_opts{})],          % no ACK
+    Accepted = [wire(5001, ?ISS + 1, ?TH_ACK, <<"x">>, #tcp_opts{}),
+                wire(5001, ?ISS + 1, ?TH_ACK bor ?TH_FIN)],
+    [?_assertEqual(?T0, Rcvtime([S], est())) || S <- Blind]
+        ++ [?_assertEqual(Later, Rcvtime([S], est())) || S <- Accepted]
+        ++ [?_assertEqual(Later, Rcvtime([wire(9000, ?ISS + 1, ?TH_SYN bor ?TH_ACK)], syn_sent()))].

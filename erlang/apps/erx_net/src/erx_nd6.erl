@@ -337,7 +337,7 @@ ns_input(#ip6{src = Src, dst = Dst}, Target, Opts, Now, Iface, C) ->
 learn(_Src, none, _Now, _Iface, C) ->
     {C, []};
 learn(Src, Mac, Now, #{addrs := Addrs}, C0) ->
-    case lists:keymember(Src, 1, Addrs) orelse lookup_or_create(Src, Now, C0) of
+    case lists:keymember(Src, 1, Addrs) orelse lookup_or_learn(Src, Now, C0) of
         Refused when Refused =:= true; Refused =:= none ->
             {C0, []};
         {#entry{mac = Mac}, C, Evicted} ->
@@ -469,9 +469,15 @@ draw_reachable(Now, #cache{gen = Gen} = C) ->
 
 %% The entry of Ip, or a new incomplete one if there is room or room can be made, with
 %% the actions of the eviction that made it; none if there is no room.
-lookup_or_create(Ip, Now, #cache{table = Table} = C) ->
+lookup_or_create(Ip, Now, C) -> entry_for(fun erx_lltable:lookup_or_create/3, Ip, Now, C).
+
+%% The same for a sender learnt from a solicitation, if there is free room: a learnt
+%% sender evicts nothing (erx_lltable:lookup_or_learn/3).
+lookup_or_learn(Ip, Now, C) -> entry_for(fun erx_lltable:lookup_or_learn/3, Ip, Now, C).
+
+entry_for(Lookup, Ip, Now, #cache{table = Table} = C) ->
     New = #entry{state = incomplete, deadline = Now + ?RETRANS_TIMER},
-    case erx_lltable:lookup_or_create(Ip, New, Table) of
+    case Lookup(Ip, New, Table) of
         none -> none;
         {E, Table1, Evicted} -> {E, C#cache{table = Table1}, Evicted}
     end.

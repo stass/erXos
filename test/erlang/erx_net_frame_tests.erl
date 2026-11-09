@@ -134,7 +134,7 @@ snapshot_keeps_only_the_current_incarnation_test() ->
     ?assertEqual({error, enetunreach}, erx_net_frame:path(v4("8.8.8.8"), #{}, Snap)).
 
 route_free_paths_of_the_interface_test() ->
-    Dhcp = path(v4("255.255.255.255"), #{via => eth2, src => v4("0.0.0.0")}),
+    Dhcp = path(v4("255.255.255.255"), #{via => eth2, src => v4("0.0.0.0"), broadcast => true}),
     ?assertEqual({eth2, v4("255.255.255.255"), {fixed, <<16#ffffffffffff:48>>}, v4("0.0.0.0")},
                  via(Dhcp)),
     Rs = path(v6("ff02::2"), #{via => eth2, src => v6("::"), hlim => 255}),
@@ -145,7 +145,29 @@ route_free_paths_of_the_interface_test() ->
     %% A socket's limited broadcast takes a route, and eth2 alone has none.
     P = self(),
     Eth2 = erx_net_frame:snapshot([iface(eth2, P, ?MAC0, #{})], [], []),
-    ?assertEqual({error, enetunreach}, erx_net_frame:path(v4("255.255.255.255"), #{}, Eth2)).
+    ?assertEqual({error, enetunreach}, erx_net_frame:path(v4("255.255.255.255"), #{broadcast => true}, Eth2)).
+
+%% ip_output.c:661-673: a broadcast needs the sender's SO_BROADCAST, an interface that can
+%% broadcast, and fits the MTU unfragmented, where a unicast datagram is fragmented.
+broadcast_refusals_test() ->
+    ?assertEqual({error, eacces}, erx_net_frame:path(v4("10.0.0.255"), #{}, config())),
+    ?assertEqual({error, eacces}, erx_net_frame:path(v4("255.255.255.255"), #{}, config())),
+    ?assertEqual({error, eacces},
+                 erx_net_frame:path(v4("255.255.255.255"), #{via => eth2}, config())),
+    P = self(),
+    Lo = erx_net_frame:snapshot([iface(lo0, P, none, #{link => none, mtu => 16384})],
+                                [{P, 1, addr(lo0, v4("127.0.0.1"), 8)}],
+                                [{P, route(lo0, v4("0.0.0.0"), 0, none)}]),
+    ?assertEqual({error, eaddrnotavail},
+                 erx_net_frame:path(v4("255.255.255.255"), #{broadcast => true}, Lo)),
+    Bcast = path(v4("10.0.0.255"), #{broadcast => true}),
+    ?assert(maps:get(broadcast, Bcast)),
+    ?assertNot(maps:get(broadcast, path(v4("10.0.0.9")))),
+    Big = binary:copy(<<0>>, 1600),
+    ?assertEqual({error, emsgsize}, erx_net_frame:udp(Bcast, 1, 2, Big, gen())),
+    ?assertEqual({error, emsgsize}, erx_net_frame:ip(Bcast, 1, Big, gen())),
+    {ok, [_], _} = erx_net_frame:udp(Bcast, 1, 2, binary:copy(<<0>>, 1472), gen()),
+    {ok, [_, _], _} = erx_net_frame:udp(path(v4("10.0.0.9")), 1, 2, Big, gen()).
 
 hop_limits_mtus_and_first_address_test() ->
     Group = path(v4("224.0.0.251"), #{via => eth0}),
@@ -158,7 +180,7 @@ hop_limits_mtus_and_first_address_test() ->
     %% 23 bits of the group: 239.255.0.1 maps to 01:00:5e:7f:00:01.
     ?assertEqual({fixed, <<1, 0, 16#5e, 16#7f, 0, 1>>},
                  maps:get(link, path(v4("239.255.0.1"), #{via => eth0}))),
-    ?assertEqual({fixed, <<16#ffffffffffff:48>>}, maps:get(link, path(v4("10.0.0.255")))),
+    ?assertEqual({fixed, <<16#ffffffffffff:48>>}, maps:get(link, path(v4("10.0.0.255"), #{broadcast => true}))),
     %% No prefix of eth0 holds the gateway: the first address eth0 added.
     P = self(),
     Snap = erx_net_frame:snapshot([iface(eth0, P, ?MAC0, #{})],
@@ -331,7 +353,7 @@ looped_broadcast_and_multicast_find_a_local_socket_test() ->
                   [] -> ok;
                   [_] -> ?assertEqual({drop, not_member}, erx_net_input:classify({frame, Bytes}, Unjoined))
               end
-      end, [{v4("10.0.0.255"), #{}, inet, []},
+      end, [{v4("10.0.0.255"), #{broadcast => true}, inet, []},
             {v4("224.0.0.251"), #{via => eth0}, inet, [v4("224.0.0.251")]},
             {{v6("ff02::fb"), eth0}, #{}, inet6, [v6("ff02::fb")]}]).
 

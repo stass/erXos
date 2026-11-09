@@ -190,3 +190,12 @@ random_event(Step, T0, Max) ->
     ?assert(erx_arp:count(T) =< Max),
     [?assert(length(Frames) =< 16) || {send, _, Frames} <- Actions],
     T.
+
+%% A sender learnt from a request takes only free room: with the table full of entries this
+%% host is resolving, a request from a new sender (a spoofed one, say) evicts none of them.
+learnt_sender_evicts_nothing_test() ->
+    T0 = erx_arp:new(#{max_entries => 2}),
+    {T1, _} = erx_arp:resolve(<<10, 0, 2, 3>>, a, 0, ?IFACE, T0),
+    {T2, _} = erx_arp:resolve(<<10, 0, 2, 4>>, b, 0, ?IFACE, T1),
+    {T3, _Reply} = erx_arp:input(request(?GW, <<10, 0, 2, 15>>), 1, ?IFACE, T2),
+    ?assertEqual(T2, T3).

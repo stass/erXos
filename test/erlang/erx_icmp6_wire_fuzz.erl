@@ -4,7 +4,7 @@
 -module(erx_icmp6_wire_fuzz).
 -moduledoc """
 The fuzz target of erx_icmp6_wire:decode/2 (docs/design-network-stack.md,
-"Codecs: fuzz targets"), run by tools/fuzz/erx_icmp6_wire.rb. Each round
+"Codecs: fuzz targets"), run by tools/fuzz/erx_net_codec.rb. Each round
 builds an ICMPv6 message of a known or random type, with fixed parts and
 neighbour-discovery options of edge lengths and sometimes a corrupted byte,
 and checks that the decoder never raises; that it accepts exactly what

@@ -36,8 +36,23 @@ The peer model is what the checks measure the connection against without reading
 reasoning: the peer's byte stream is a fixed function of the wire sequence number
 (`stream/2`), so any segment's payload is the stream at its position and the bytes
 delivered must be the stream from the initial receive sequence number on, less the urgent
-bytes the peer pointed at; the model keeps the end of what the peer has sent and the right
-edge of the windows it has offered.
+bytes the peer pointed at, and without those it must keep out; the model keeps the end of
+what the peer has sent and its newest window by the SND.WL1/SND.WL2 rule, applied to the
+segments that pass the connection's sequence and acknowledgement checks as the model
+judges them (`taken/3`). The merge key includes how the model stands against the
+connection, so a stricter twin is explored.
+
+The model reads values of the connection's state before the step: rcv_nxt, rcv_adv,
+rcv_hiwat and rcv_buffered for the receive window (`receive_frame/2`); snd_una, snd_max,
+max_sndwnd and iss for the classes; the state, `ended`, the window scale, ts_recent and
+whether SACK was negotiated. Two of its rules read what the step decided: the handshake's
+first window is taken when the step leaves SYN-SENT or SYN-RECEIVED (`window_offered/5`),
+and a segment FreeBSD could count as a duplicate acknowledgement, which the loss module may
+end before the window update, is excused when SND.WL1/WL2 did not move (`loss_dropped/4`,
+whose conditions are otherwise judged against the model's own state). Three helpers of the
+stack are trusted rather than reimplemented: erx_tcp_seq's wire/1 and lift/2,
+erx_tcp:have_rcvd_fin/1 (the state order; `held/4`, `loss_dropped/4`) and
+erx_tcp_reass:is_empty/1 (`held/4`).
 
 `explore/1` with `wrap => true` runs the same exploration with both initial sequence
 numbers, and the peer's first timestamp, just below 2^32, so that every position class
@@ -100,16 +115,22 @@ also crosses the wire's wrap.
     %% The positions of the bytes the peer's urgent pointers named, which the connection may
     %% keep out of the stream (tcp_pulloutofband).
     urgent = [] :: ordsets:ordset(integer()),
+    %% Those of them the connection must keep out: a pointer within a segment taken at
+    %% rcv_nxt with nothing held for reassembly, whose bytes are delivered at once.
+    held = [] :: ordsets:ordset(integer()),
     %% CWR as a debt: a window reduction owes one CWR and the first CWR sent pays it, as
     %% FreeBSD clears TF2_ECN_SND_CWR once it sends one. A reduction is what the peer can
     %% see of one (cc_cong_signal's CC_ECN, CC_RTO, CC_NDUPACK): ECE it sent on a segment
     %% without SYN, or a segment of ours it received again. `unowed` records a CWR sent
     %% with nothing owed.
     cwr = owed_none :: owed_none | owed | unowed,
-    acked = none :: none | integer(),    % the furthest ACK sent that the connection could take
+    acked = none :: none | integer(),    % the furthest ACK of the segments the connection takes
     ours_end = none :: none | integer(), % past the furthest sequence number of ours received
-    %% The furthest right edge, ack + window, of the windows offered by a segment whose ACK
-    %% the connection could take (at most snd_max), or of a SYN's.
+    %% The newest window offered by the SND.WL1/SND.WL2 rule (window_offered/5): the
+    %% sequence number and ACK that rule compares, and its right edge, counted from the
+    %% furthest ACK taken as FreeBSD's snd_wnd counts from snd_una. What is left of it is
+    %% the right edge less `acked`, zero once the peer has acknowledged up to the edge.
+    wl = none :: none | {integer(), integer()},
     right_edge = none :: none | integer(),
     %% The answers to RST segments received at one instant of the explorer's clock, which
     %% all fall in one window of the challenge-ACK limit whatever its alignment.
@@ -254,10 +275,32 @@ count_hits(Names, Hits) ->
 
 %% What nodes are merged by: the control block's abstraction, widened by the dimension's,
 %% the peer model's count of answers to RSTs at this instant, so that a run of challenges
-%% is followed until the limit stops it, and whether it is owed a CWR.
-key(#node{tcb = Tcb, peer = #peer{challenged = {_, Count}, cwr = Cwr},
+%% is followed until the limit stops it, whether it is owed a CWR, and how the model's
+%% window and urgent bytes stand against the connection (peer_abstraction/2), so that a
+%% node whose model is stricter than its twin's is explored too.
+key(#node{tcb = Tcb, peer = #peer{challenged = {_, Count}, cwr = Cwr} = Peer,
           dim = #{abstraction := Abs}}) ->
-    {abstraction(Tcb), Abs(Tcb), min(Count, ?ACK_WAR_CNT + 1), Cwr}.
+    {abstraction(Tcb), Abs(Tcb), min(Count, ?ACK_WAR_CNT + 1), Cwr, peer_abstraction(Peer, Tcb)}.
+
+%% The peer's newest window against the connection's: its right edge against snd_una plus
+%% snd_wnd and against snd_max, whether it is zero, its SND.WL1/WL2 and the furthest ACK
+%% taken against the connection's; and the urgent bytes not yet passed, as offsets from the
+%% next byte delivered, each with whether it must be kept out.
+peer_abstraction(#peer{right_edge = Edge, wl = Wl, acked = Acked,
+                       next = Next, urgent = Urgent, held = Held},
+                 #tcb{snd_una = Una, snd_wnd = SndWnd, snd_max = SndMax,
+                      snd_wl1 = Wl1, snd_wl2 = Wl2}) ->
+    Pending = case Next of
+                  none -> [];
+                  _ -> [{U - Next, ordsets:is_element(U, Held)} || U <- Urgent, U >= Next]
+              end,
+    {compare(Edge, Una + SndWnd), compare(Edge, SndMax), compare(Edge, Acked),
+     compare(Wl, {Wl1, Wl2}), compare(Acked, Una), Pending}.
+
+compare(none, _) -> none;
+compare(A, B) when A < B -> less;
+compare(A, B) when A > B -> greater;
+compare(_, _) -> equal.
 
 %% One event from Node: the step, the checks on what it did, and the node it reaches with
 %% the properties that judged their non-trivial case on it.
@@ -344,12 +387,13 @@ subsets([]) -> [[]];
 subsets([X | Xs]) -> [S || S0 <- subsets(Xs), S <- [S0, [X | S0]]].
 
 %% Where the position classes are measured: rcv_nxt and the receive window the step will
-%% use (erx_tcp_input's rcv_wnd), or before any SYN is taken, the peer's ISS and a full
+%% use (erx_tcp_input's rcv_wnd: the larger of the space left in the receive buffer and
+%% what was advertised), or before any SYN is taken, the peer's ISS and a full
 %% buffer's worth.
 receive_frame(#tcb{state = syn_sent}, #peer{iss = PeerIss}) ->
     {PeerIss, ?HIWAT};
 receive_frame(#tcb{rcv_nxt = RcvNxt, rcv_adv = RcvAdv} = Tcb, _) ->
-    {RcvNxt, max(erx_tcp:rcv_space(Tcb), RcvAdv - RcvNxt)}.
+    {RcvNxt, max(max(0, Tcb#tcb.rcv_hiwat - Tcb#tcb.rcv_buffered), RcvAdv - RcvNxt)}.
 
 %% The sequence position classes: a segment wholly below the window, one starting a byte
 %% before it (the peer's SYN again in SYN-RECEIVED, a keepalive probe), at its left edge, one
@@ -448,7 +492,9 @@ dimension(timestamps) ->
              (#tcb{ts = #ts{recent = Recent}}) -> {on, Recent =:= 0}
           end,
     (dimension(base))#{variants => Variants, abstraction => Abs,
-                       checks => [{options_unnegotiated_ignored, fun options_unnegotiated_ignored/1}]};
+                       checks => [{options_unnegotiated_ignored,
+                                   options_unnegotiated_ignored(fun strip_timestamps/2)},
+                                  {paws_drops_older, fun paws_drops_older/1}]};
 %% ECE on a SYN-ACK, ECE and CWR on a SYN (mode 2 grants both, tcp_ecn_input_syn_sent and
 %% tcp_ecn_input_parallel_syn), so connections negotiate ECN or not; on any other segment
 %% ECE, CWR, or the CE mark in the IP header.
@@ -466,9 +512,10 @@ dimension(ecn) ->
     Abs = fun(#tcb{ecn = Ecn}) -> Ecn end,
     (dimension(base))#{variants => Variants, abstraction => Abs,
                        checks => [{cwr_only_after_reduction, fun cwr_only_after_reduction/1},
-                                  {options_unnegotiated_ignored, fun options_unnegotiated_ignored/1}]};
+                                  {options_unnegotiated_ignored, options_unnegotiated_ignored(fun strip_ecn/2)}]};
 %% URG on a segment with ACK, its pointer naming the segment's last byte, the byte past it,
-%% and a byte past the receive window.
+%% and a byte past the receive window. No pointer and buffer reach SB_MAX, so the rule that
+%% drops such an URG is not explored.
 dimension(urgent) ->
     Variants = fun(#in{flags = Flags, seq = Seq} = In, #node{tcb = Tcb, peer = Peer})
                      when Flags band ?TH_ACK =/= 0, Flags band ?TH_SYN =:= 0 ->
@@ -485,8 +532,8 @@ dimension(urgent) ->
     (dimension(base))#{variants => Variants, abstraction => Abs};
 %% SACK permitted on a SYN, so connections negotiate it or not; on an acknowledgement a
 %% block inside the flight, one beyond snd_max and one below snd_una (D-SACK); the base
-%% alphabet's ACKs at snd_una are the duplicates without a block. The duplicates counted
-%% join the key, so fast retransmit is reached.
+%% alphabet's ACKs at snd_una are the duplicates without a block, and SACK permitted off a
+%% SYN. The duplicates counted join the key, so fast retransmit is reached.
 dimension(sack) ->
     Variants = fun(#in{flags = Flags, opts = Opts} = In, #node{tcb = Tcb}) ->
                        case {Flags band ?TH_SYN =/= 0, Flags band ?TH_ACK =/= 0} of
@@ -498,7 +545,8 @@ dimension(sack) ->
                                    ++ [{sack_beyond, SndMax + 1, SndMax + 3},
                                        {dsack, Una - 2, Una}],
                                [{Name, In#in{opts = Opts#tcp_opts{sacks = [{erx_tcp_seq:wire(S), erx_tcp_seq:wire(E)}]}}}
-                                || {Name, S, E} <- Blocks];
+                                || {Name, S, E} <- Blocks]
+                                   ++ [{sack_permitted, In#in{opts = Opts#tcp_opts{sack_permitted = true}}}];
                            {false, false} ->
                                []
                        end
@@ -511,11 +559,12 @@ dimension(sack) ->
                   {Sack, erx_tcp_sendlog:has_holes(Log), min(Dupacks, 4)}
           end,
     (dimension(base))#{variants => Variants, abstraction => Abs,
-                       checks => [{options_unnegotiated_ignored, fun options_unnegotiated_ignored/1}]};
+                       checks => [{options_unnegotiated_ignored, options_unnegotiated_ignored(fun strip_sack/2)}]};
 %% The peer's window zero and full besides the base's four, below one MSS, so persist,
 %% window probes and silly-window avoidance are reached; a SYN with window scaling, or with
 %% the least MSS FreeBSD takes, on a connection whose send buffer and send exceed it, so
-%% that one output pass sends more than one segment (sendalot).
+%% that one output pass sends more than one segment (sendalot); and an ACK carrying MSS and
+%% window scale, which only a SYN may.
 dimension(window) ->
     Variants = fun(#in{flags = Flags, opts = Opts} = In, _) ->
                        Syn = case Flags band ?TH_SYN of
@@ -527,7 +576,11 @@ dimension(window) ->
                                   0 -> [];
                                   _ -> [{win_zero, In#in{win = 0}}, {win_full, In#in{win = 16#ffff}}]
                               end,
-                       Syn ++ Wins
+                       OffSyn = case Flags band (?TH_SYN bor ?TH_ACK) of
+                                    ?TH_ACK -> [{syn_options, In#in{opts = Opts#tcp_opts{wscale = 2, mss = ?TCP_MINMSS}}}];
+                                    _ -> []
+                                end,
+                       Syn ++ Wins ++ OffSyn
                end,
     Abs = fun(#tcb{snd_wnd = Wnd, maxseg = Maxseg, wscale = Wscale}) ->
                   {Wnd =:= 0, Wnd < Maxseg, Maxseg, is_tuple(Wscale)}
@@ -535,15 +588,18 @@ dimension(window) ->
     (dimension(base))#{variants => Variants, abstraction => Abs,
                        connection => #{snd_hiwat => 2 * ?TCP_MINMSS + ?HIWAT,
                                        send => stream(0, ?TCP_MINMSS + 1)},
-                       checks => [{sent_within_maxseg, fun sent_within_maxseg/1}]};
+                       checks => [{sent_within_maxseg, fun sent_within_maxseg/1},
+                                  {options_unnegotiated_ignored, options_unnegotiated_ignored(fun strip_window/2)}]};
 %% Fragmentation needed and port unreachable, each quoting snd_una (in flight when anything
-%% is) and, never in flight, the number below it and snd_max, in every state.
+%% is) and, never in flight, the number below it, snd_max, and the number 2^31 past snd_una,
+%% which a comparison of wire numbers rather than lifted ones would place either side.
 dimension(icmp) ->
     Events = fun(#node{tcb = #tcb{snd_una = Una, snd_max = SndMax}}) ->
                      [{{icmp, Kind, Where}, {icmp, Kind, Seq}}
                       || Kind <- [needfrag, unreach],
                          {Where, Seq} <- [{in_flight, Una} || SndMax > Una]
-                                            ++ [{below, Una - 1}, {outside, SndMax}]]
+                                            ++ [{below, Una - 1}, {outside, SndMax},
+                                                {half_space, Una + (1 bsl 31)}]]
              end,
     Abs = fun(#tcb{maxseg = Maxseg, soft_error = Soft}) -> {Maxseg, Soft} end,
     (dimension(base))#{events => Events, abstraction => Abs,
@@ -560,7 +616,7 @@ dimension(Name) ->
 peer_sent(Input, Pre, Post, Actions, Now, Peer0) ->
     Peer1 = case Input of
                 {segment, #in{flags = Flags} = In} ->
-                    challenged(Flags, Actions, Now, sends(In, Pre, Peer0));
+                    challenged(Flags, Actions, Now, sends(In, Pre, Post, Peer0));
                 _ ->
                     Peer0
             end,
@@ -575,43 +631,174 @@ peer_sent(Input, Pre, Post, Actions, Now, Peer0) ->
     end.
 
 %% In SYN-SENT the connection takes the SYN's wire number as it is (erx_tcp_input's lift),
-%% so the data's end is measured on the wire there too. A window is scaled as lift scales
-%% it, by the shift the connection has before the segment (none in SYN-SENT).
-sends(#in{seq = Seq0, ack = Ack, flags = Flags, data = Data, win = Win, urp = Urp},
-      #tcb{state = State, snd_una = Una, snd_max = SndMax, wscale = Wscale}, Peer) ->
+%% so the data's end is measured on the wire there too.
+sends(#in{seq = Seq0, flags = Flags, data = Data, urp = Urp} = In0, #tcb{state = State} = Pre,
+      Post, Peer0) ->
     Seq = case State of
               syn_sent -> erx_tcp_seq:wire(Seq0);
               _ -> Seq0
           end,
+    In = In0#in{seq = Seq},
     First = Seq + syn_len(Flags),
     SentEnd = case Data of
-                  <<>> -> Peer#peer.sent_end;
-                  _ -> max_known(Peer#peer.sent_end, First + byte_size(Data))
+                  <<>> -> Peer0#peer.sent_end;
+                  _ -> max_known(Peer0#peer.sent_end, First + byte_size(Data))
               end,
-    Shift = case Wscale of
-                {Snd, _} -> Snd;
-                _ -> 0
-            end,
-    Edge = case {Flags band ?TH_ACK =/= 0, Flags band ?TH_SYN =/= 0} of
-               {true, _} when Ack =< SndMax ->
-                   max_known(Peer#peer.right_edge, max_known(Peer#peer.acked, Ack) + (Win bsl Shift));
-               {false, true} -> max_known(Peer#peer.right_edge, Una + Win);
-               _ -> Peer#peer.right_edge
-           end,
     Urgent = case Flags band ?TH_URG =/= 0 andalso Urp >= 1 andalso Urp =< byte_size(Data) of
-                 true -> ordsets:add_element(First + Urp - 1, Peer#peer.urgent);
-                 false -> Peer#peer.urgent
+                 true -> ordsets:add_element(First + Urp - 1, Peer0#peer.urgent);
+                 false -> Peer0#peer.urgent
              end,
     Cwr = case Flags band (?TH_ECE bor ?TH_SYN) of
-              ?TH_ECE -> owe_cwr(Peer#peer.cwr);
-              _ -> Peer#peer.cwr
+              ?TH_ECE -> owe_cwr(Peer0#peer.cwr);
+              _ -> Peer0#peer.cwr
           end,
-    Acked = case Flags band ?TH_ACK =/= 0 andalso Ack =< SndMax of
-                true -> max_known(Peer#peer.acked, Ack);
-                false -> Peer#peer.acked
-            end,
-    Peer#peer{sent_end = SentEnd, right_edge = Edge, urgent = Urgent, cwr = Cwr,
-              acked = Acked}.
+    Taken = taken(In, Pre, Peer0),
+    Peer = Peer0#peer{sent_end = SentEnd, urgent = Urgent, cwr = Cwr,
+                      held = held(In, Pre, Taken, Peer0#peer.held)},
+    window_offered(In, Pre, Post, Taken, Peer).
+
+%% How far a segment of a synchronized state gets: `dropped` by a check before the window
+%% update (a SYN, an ACK outside ack_floor to snd_max, PAWS, a segment wholly past the
+%% window), or `{Seen, End}`, the sequence number the window update compares and the end of
+%% the data kept once the bytes below rcv_nxt and past the window are cut off (tcp_input.c
+%% up to step 6, and FreeBSD's acceptance of a segment with no data exactly at the right
+%% edge). `handshake` in SYN-SENT and SYN-RECEIVED, and `ignored` in a state that sends no
+%% data again.
+taken(_, #tcb{state = State}, _) when State =:= syn_sent; State =:= syn_received ->
+    handshake;
+taken(_, #tcb{state = State, ended = Ended}, _) when Ended; State =:= closed; State =:= time_wait ->
+    ignored;
+taken(#in{seq = Seq, ack = Ack, flags = Flags, data = Data, opts = Opts} = In, Tcb, Peer) ->
+    #tcb{rcv_nxt = RcvNxt, snd_max = SndMax} = Tcb,
+    {_, Wnd} = receive_frame(Tcb, Peer),
+    Seen = seen(In, Tcb),
+    End = Seq + byte_size(Data),
+    Checked = Flags band (?TH_ACK bor ?TH_SYN bor ?TH_RST) =:= ?TH_ACK
+        andalso Ack >= ack_floor(Tcb) andalso Ack =< SndMax andalso not paws_dropped(Opts, Tcb),
+    if
+        not Checked -> dropped;
+        End =< RcvNxt + Wnd -> {Seen, End};
+        Seen < RcvNxt + Wnd -> {Seen, RcvNxt + Wnd};
+        Wnd =:= 0, Seen =:= RcvNxt -> {Seen, Seen};
+        true -> dropped
+    end.
+
+%% The sequence number the window update sees: past what trimming drops below rcv_nxt
+%% (tcp_input.c's `th_seq += todrop`).
+seen(#in{seq = Seq, data = Data}, #tcb{rcv_nxt = RcvNxt}) ->
+    Seq + min(max(RcvNxt - Seq, 0), byte_size(Data)).
+
+%% RFC 5961 section 5.2's lowest acceptable ACK, raised to just past the ISS until snd_una is
+%% a maximal window past it (the ghost-ACK check), which the explorer's few bytes never are.
+ack_floor(#tcb{snd_una = Una, max_sndwnd = MaxSndWnd, iss = Iss}) ->
+    max(Iss + 1, Una - MaxSndWnd).
+
+%% RFC 7323 PAWS: a TSval older than a ts_recent that is set (tcp_input.c's `ts_recent &&`).
+%% The rule that invalidates a ts_recent older than TCP_PAWS_IDLE (24 days) is left out: no
+%% exploration's clock moves that far.
+paws_dropped(#tcp_opts{ts = {Val, _}}, #tcb{ts = #ts{recent = Recent}}) when Recent =/= 0 ->
+    erx_tcp_seq:wire(Val - Recent) >= 1 bsl 31;
+paws_dropped(_, _) ->
+    false.
+
+%% An urgent pointer to a byte of a segment taken at rcv_nxt with the reassembly queue
+%% empty, before the peer's FIN: the byte is delivered, if at all, by this step, so the
+%% connection must keep it out (tcp_pulloutofband).
+held(#in{seq = Seq, flags = Flags, urp = Urp}, #tcb{state = State} = Tcb, {Seen, End}, Held)
+  when Flags band ?TH_URG =/= 0, Urp >= 1, Seen =:= Tcb#tcb.rcv_nxt ->
+    Byte = Seq + Urp - 1,
+    case Byte >= Seen andalso Byte < End andalso not erx_tcp:have_rcvd_fin(State)
+        andalso erx_tcp_reass:is_empty(Tcb#tcb.reass) of
+        true -> ordsets:add_element(Byte, Held);
+        false -> Held
+    end;
+held(_, _, _, Held) ->
+    Held.
+
+%% The window the peer offered, kept by the SND.WL1/SND.WL2 rule (RFC 9293 section 3.10.7.4)
+%% as FreeBSD's step 6 applies it: a segment taken replaces the window when its (Seen, ACK)
+%% is newer than the last window's, or equal with a further right edge (FreeBSD's
+%% `tiwin > snd_wnd`). The window counts from the furthest ACK taken, so an older ACK's window
+%% counts from snd_una. The segment that completes the handshake sets the first window, a
+%% SYN-ACK's unscaled; a SYN alone in SYN-SENT offers one from snd_una until then.
+window_offered(#in{seq = Seq, ack = Ack, flags = Flags, win = Win} = In, Pre, Post, Taken, Peer) ->
+    Window = Win bsl shift(Pre),
+    Acked = max_known(Peer#peer.acked, Ack),
+    case Taken of
+        handshake when Flags band ?TH_ACK =/= 0 ->
+            case Post of
+                #tcb{ended = false, state = S} when S =/= syn_sent, S =/= syn_received ->
+                    Seen = case Pre#tcb.state of
+                               syn_sent -> Seq + 1;
+                               syn_received -> seen(In, Pre)
+                           end,
+                    Peer#peer{wl = {Seen, Ack}, right_edge = Ack + Window, acked = Ack};
+                _ ->
+                    Peer
+            end;
+        handshake when Flags band ?TH_SYN =/= 0, Post#tcb.state =:= syn_received ->
+            Peer#peer{right_edge = Pre#tcb.snd_una + Win};
+        {Seen, _} ->
+            Wl = {Seen, Ack},
+            Update = Peer#peer{wl = Wl, right_edge = Acked + Window, acked = Acked},
+            if
+                Peer#peer.wl =/= none, Wl < Peer#peer.wl -> Peer#peer{acked = Acked};
+                Wl =:= Peer#peer.wl, Acked + Window =< Peer#peer.right_edge ->
+                    Peer#peer{acked = Acked};
+                true ->
+                    case loss_dropped(In, Pre, Post, Peer) of
+                        true -> Peer#peer{acked = Acked};
+                        false -> Update
+                    end
+            end;
+        _ ->
+            Peer
+    end.
+
+%% Whether FreeBSD could have counted the segment as a duplicate ACK, which the loss module
+%% may then end before the window update (tcp_input.c:2645, :2723, :2736 and :2795, `goto
+%% drop` past tcprexmtthresh or in recovery). Whether it does is the loss module's own
+%% decision (erx_tcp_loss_dupack and its tests), so such a segment is excused when the
+%% connection's SND.WL1/WL2 did not move; any other newer segment must update the window.
+%%
+%% FreeBSD counts an ACK at snd_una (tcp_input.c:2568) while the retransmit timer is set
+%% (:2606) that is not a first FIN (:2599; a FIN below rcv_nxt is stripped before, at
+%% :2280). Without SACK it must carry no data and offer the window it already has (:2587,
+%% `!no_data || tiwin != tp->snd_wnd`, with snd_wnd clamped at zero as :3001-3003 leave it);
+%% with SACK (:2570, RFC 6675), data or not, it must carry a block tcp_sack_doack takes
+%% (tcp_sack.c:625-632), which sack_changed needs. The model's state stands for the
+%% connection's: its furthest ACK for snd_una, the end of ours it has received for snd_max,
+%% its right edge for the window. An ACK above snd_una is never excused: the explorer's few
+%% SACKed bytes never reach the recovery threshold of :2815-2825.
+loss_dropped(#in{seq = Seq, ack = Ack, flags = Flags, data = Data, win = Win, opts = Opts},
+             #tcb{sack = Sack, state = State, rcv_nxt = RcvNxt, send_timer = Timer} = Pre, Post,
+             #peer{acked = Acked, ours_end = OursEnd, right_edge = RightEdge})
+  when Ack =:= Acked, is_integer(OursEnd), is_integer(RightEdge) ->
+    RexmtSet = is_tuple(Timer) andalso element(1, Timer) =:= rexmt,
+    Counted = case Sack of
+                  on -> lists:any(fun(Block) -> sack_taken(Block, Ack, OursEnd) end,
+                                  Opts#tcp_opts.sacks);
+                  _ -> Data =:= <<>> andalso Ack + (Win bsl shift(Pre)) =:= max(RightEdge, Ack)
+              end,
+    FirstFin = Flags band ?TH_FIN =/= 0 andalso Seq + byte_size(Data) >= RcvNxt
+        andalso not erx_tcp:have_rcvd_fin(State),
+    RexmtSet andalso Counted andalso not FirstFin
+        andalso {Pre#tcb.snd_wl1, Pre#tcb.snd_wl2} =:= {Post#tcb.snd_wl1, Post#tcb.snd_wl2};
+loss_dropped(_, _, _, _) ->
+    false.
+
+%% A SACK block tcp_sack_doack keeps (tcp_sack.c:625-632) with snd_una at the ACK and
+%% snd_max at SndMax. Its size test is left at FreeBSD's floor (no block shorter than
+%% TCP_MINMSS passes unless it reaches snd_max), wider than FreeBSD's, which only excuses more.
+sack_taken({WireStart, WireEnd}, Ack, SndMax) ->
+    {Start, End} = {erx_tcp_seq:lift(WireStart, Ack), erx_tcp_seq:lift(WireEnd, Ack)},
+    End > Start andalso Start > Ack andalso Start < SndMax andalso End =< SndMax
+        andalso (End - Start >= ?TCP_MINMSS orelse End >= SndMax).
+
+%% The shift the connection scales a window by before the segment, as lift scales it (none
+%% in SYN-SENT).
+shift(#tcb{wscale = {Snd, _}}) -> Snd;
+shift(_) -> 0.
 
 %% The peer once it has received the segments the step sent: the furthest sequence number
 %% of ours, and what of CWR is owed (a segment of ours received again owes one).
@@ -654,26 +841,27 @@ max_known(none, Value) -> Value;
 max_known(Known, Value) -> max(Known, Value).
 
 %% The stream position after the bytes delivered, matched from the peer's next position;
-%% `{error, At}` where a byte differs from the stream and is not an urgent byte kept out.
-%% The stream's bytes at adjacent positions always differ, so a byte the connection kept
-%% out shows as a mismatch at its position.
+%% `{error, At}` where a byte differs from the stream and is not an urgent byte kept out,
+%% or is a byte the connection must keep out. The stream's bytes at adjacent positions
+%% always differ, so a byte the connection kept out shows as a mismatch at its position.
 match(<<>>, Next, _, Skipped) ->
     {ok, Next, Skipped};
-match(<<Byte, Rest/binary>> = Bytes, Next, Urgent, Skipped) ->
-    case stream_byte(Next) of
-        Byte -> match(Rest, Next + 1, Urgent, Skipped);
-        _ ->
-            case ordsets:is_element(Next, Urgent) of
-                true -> match(Bytes, Next + 1, Urgent, Skipped + 1);
-                false -> {error, Next}
-            end
+match(<<Byte, Rest/binary>> = Bytes, Next, #peer{urgent = Urgent, held = Held} = Peer, Skipped) ->
+    case {stream_byte(Next), ordsets:is_element(Next, Urgent)} of
+        {Byte, _} ->
+            case ordsets:is_element(Next, Held) of
+                true -> {error, {held, Next}};
+                false -> match(Rest, Next + 1, Peer, Skipped)
+            end;
+        {_, true} -> match(Bytes, Next + 1, Peer, Skipped + 1);
+        {_, false} -> {error, Next}
     end.
 
-delivered_to(Actions, #peer{next = Next, urgent = Urgent}) ->
+delivered_to(Actions, #peer{next = Next} = Peer) ->
     case delivered(Actions) of
         <<>> -> Next;
         Bytes ->
-            {ok, After, _} = match(Bytes, Next, Urgent, 0),
+            {ok, After, _} = match(Bytes, Next, Peer, 0),
             After
     end.
 
@@ -698,13 +886,14 @@ rcv_nxt_never_decreases(#{pre := #tcb{rcv_nxt = Before}, post := #tcb{rcv_nxt = 
     holds(After >= Before, {Before, After}).
 
 %% The bytes delivered continue the peer's stream from irs + 1 where the last left off, but
-%% for urgent bytes the peer pointed at, which the connection keeps out (a hit).
-delivered_in_order(#{actions := Actions, peer := #peer{irs = Irs, next = Next, urgent = Urgent}}) ->
+%% for urgent bytes the peer pointed at, which the connection may keep out (a hit), and
+%% must where the peer model holds them.
+delivered_in_order(#{actions := Actions, peer := #peer{irs = Irs, next = Next} = Peer}) ->
     case delivered(Actions) of
         <<>> -> ok;
         Bytes when Irs =:= none -> {fail, {delivered_before_a_syn, Bytes}};
         Bytes ->
-            case match(Bytes, Next, Urgent, 0) of
+            case match(Bytes, Next, Peer, 0) of
                 {ok, _, 0} -> ok;
                 {ok, _, _} -> hit;
                 {error, At} -> {fail, {Next, Bytes, {differs_at, At}}}
@@ -721,17 +910,18 @@ delivered_only_what_was_sent(#{actions := Actions,
             holds(After =< End, {After, End})
     end.
 
-%% Every data segment sent ends within the right edge the peer offered, but for a window
-%% probe of one byte while the peer's window is zero (a hit).
-sent_within_peer_window(#{actions := Actions, post := #tcb{snd_una = Una, snd_wnd = Wnd},
-                          peer := #peer{right_edge = Edge}}) ->
+%% Every data segment sent ends within the right edge of the peer's newest window, but for
+%% a window probe while nothing of that window is left (the peer has acknowledged up to its
+%% edge or past it): one byte, the next one past the window (a hit).
+sent_within_peer_window(#{actions := Actions, post := #tcb{snd_una = Una},
+                          peer := #peer{right_edge = Edge, acked = Acked}}) ->
     Over = [{Start, Bytes}
             || {Start, Bytes} <- sent_data(Actions, Una), Bytes > 0,
                Edge =:= none orelse Start + Bytes > Edge],
     case Over of
         [] -> ok;
-        [{_, 1}] when Wnd =:= 0 -> hit;
-        _ -> {fail, {Edge, Wnd, Over}}
+        [{Start, 1}] when Edge =< Acked, Start =:= Acked -> hit;
+        _ -> {fail, {Edge, Acked, Over}}
     end.
 
 %% The start and length of the data of each segment sent.
@@ -767,13 +957,13 @@ challenge_acks_within_limit(#{peer := #peer{challenged = {_, Count}}}) ->
 %% A segment older than the last window update by the SND.WL1/SND.WL2 rule (RFC 9293
 %% section 3.10.7.4) takes no window: SND.WL1 and SND.WL2 stay, and the window does not grow
 %% (it shrinks by what the ACK takes, as tcp_input.c's `snd_wnd -= acked` keeps the right
-%% edge). Its sequence number is the one the window update sees: past what trimming drops
-%% below rcv_nxt. An old segment judged is a hit.
-old_ack_keeps_send_window(#{input := {segment, #in{seq = Seq, ack = Ack, flags = Flags, data = Data}},
+%% edge). Its sequence number is the one the window update sees (seen/2). An old segment
+%% judged is a hit.
+old_ack_keeps_send_window(#{input := {segment, #in{ack = Ack, flags = Flags} = In},
                             pre := #tcb{state = State, ended = false} = Pre, post := Post})
   when Flags band ?TH_ACK =/= 0, State =/= syn_sent, State =/= syn_received,
        State =/= time_wait ->
-    Seen = Seq + min(max(Pre#tcb.rcv_nxt - Seq, 0), byte_size(Data)),
+    Seen = seen(In, Pre),
     Window = fun(#tcb{snd_wnd = Wnd, snd_wl1 = Wl1, snd_wl2 = Wl2}) -> {Wnd, Wl1, Wl2} end,
     Old = {Seen, Ack} < {Pre#tcb.snd_wl1, Pre#tcb.snd_wl2},
     Kept = {Pre#tcb.snd_wl1, Pre#tcb.snd_wl2} =:= {Post#tcb.snd_wl1, Post#tcb.snd_wl2}
@@ -865,40 +1055,69 @@ cwr_only_after_reduction(#{actions := Actions, peer := #peer{cwr = Owed}}) ->
         {_, _} -> hit
     end.
 
-%% A segment without SYN carrying an option the connection did not negotiate (a timestamp,
-%% SACK blocks, ECE, CWR or an ECN mark) gives the same step as without it (a hit when there
-%% was one to strip). SYN-SENT, whose SYN-ACK negotiates, is left out.
-options_unnegotiated_ignored(#{input := {segment, #in{flags = Flags} = In},
-                               pre := #tcb{state = State} = Pre, post := Post,
-                               actions := Actions, ctx := Ctx})
-  when Flags band ?TH_SYN =:= 0, State =/= syn_sent ->
-    case unnegotiated(In, Pre) of
-        In ->
+%% A segment without SYN carrying an option the connection must ignore gives the same step
+%% as without it (a hit when there was one to strip). Strip is the dimension's: it removes
+%% from a segment what the dimension varies and the connection has not negotiated (a
+%% timestamp, SACK blocks, ECE, CWR or an ECN mark), and the options only a SYN carries
+%% (MSS, window scale, SACK permitted), which tcp_dooptions takes only with TO_SYN.
+%% SYN-SENT, whose SYN-ACK negotiates, is left out.
+options_unnegotiated_ignored(Strip) ->
+    fun(#{input := {segment, #in{flags = Flags} = In}, pre := #tcb{state = State} = Pre,
+          post := Post, actions := Actions, ctx := Ctx})
+          when Flags band ?TH_SYN =:= 0, State =/= syn_sent ->
+            case Strip(In, Pre) of
+                In ->
+                    ok;
+                Stripped ->
+                    {Event, _} = event({segment, Stripped}, 0),
+                    Without = erx_tcp:step(Event, Pre, Ctx),
+                    case Without =:= {Post, Actions} of
+                        true -> hit;
+                        false -> {fail, {In, differing_fields(Post, element(1, Without))}}
+                    end
+            end;
+       (_) ->
+            ok
+    end.
+
+%% A segment PAWS drops (paws_dropped/2: a TSval older than ts_recent, without RST, in a
+%% synchronized state) changes none of the connection's sequence state, its window or its
+%% ts_recent; it may only ask for an ACK. Such a drop is a hit.
+paws_drops_older(#{input := {segment, #in{flags = Flags, opts = Opts}},
+                   pre := #tcb{state = State, ended = false} = Pre, post := Post})
+  when Flags band ?TH_RST =:= 0, State =/= syn_sent, State =/= syn_received,
+       State =/= time_wait ->
+    Kept = fun(#tcb{state = S, rcv_nxt = RcvNxt, snd_una = Una, snd_wnd = Wnd, snd_wl1 = Wl1,
+                    snd_wl2 = Wl2, ts = #ts{recent = Recent}}) ->
+                   {S, RcvNxt, Una, Wnd, Wl1, Wl2, Recent}
+           end,
+    case paws_dropped(Opts, Pre) of
+        false ->
             ok;
-        Stripped ->
-            {Event, _} = event({segment, Stripped}, 0),
-            Without = erx_tcp:step(Event, Pre, Ctx),
-            case Without =:= {Post, Actions} of
+        true ->
+            case Kept(Pre) =:= Kept(Post) of
                 true -> hit;
-                false -> {fail, {In, differing_fields(Post, element(1, Without))}}
+                false -> {fail, {Kept(Pre), Kept(Post)}}
             end
     end;
-options_unnegotiated_ignored(_) ->
+paws_drops_older(_) ->
     ok.
 
-unnegotiated(#in{opts = Opts0, flags = Flags} = In, #tcb{ts = Ts, sack = Sack, ecn = Ecn}) ->
-    Opts1 = case Ts of
-                off -> Opts0#tcp_opts{ts = none};
-                _ -> Opts0
-            end,
-    Opts = case Sack of
-               on -> Opts1;
-               _ -> Opts1#tcp_opts{sacks = []}
-           end,
+strip_timestamps(#in{opts = Opts} = In, #tcb{ts = off}) -> In#in{opts = Opts#tcp_opts{ts = none}};
+strip_timestamps(In, _) -> In.
+
+strip_ecn(#in{flags = Flags} = In, #tcb{ecn = Ecn}) ->
     case erx_tcp_ecn:enabled(Ecn) of
-        true -> In#in{opts = Opts};
-        false -> In#in{opts = Opts, flags = Flags band bnot (?TH_ECE bor ?TH_CWR), ip_ecn = 0}
+        true -> In;
+        false -> In#in{flags = Flags band bnot (?TH_ECE bor ?TH_CWR), ip_ecn = 0}
     end.
+
+strip_sack(#in{opts = Opts} = In, #tcb{sack = on}) ->
+    In#in{opts = Opts#tcp_opts{sack_permitted = false}};
+strip_sack(#in{opts = Opts} = In, _) ->
+    In#in{opts = Opts#tcp_opts{sack_permitted = false, sacks = []}}.
+
+strip_window(#in{opts = Opts} = In, _) -> In#in{opts = Opts#tcp_opts{mss = none, wscale = none}}.
 
 %% No segment carries more data than the MSS, and a pass that sends more than one data
 %% segment (sendalot) is a hit.

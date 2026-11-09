@@ -4,7 +4,7 @@
 -module(erx_ip6_wire_fuzz).
 -moduledoc """
 The fuzz target of erx_ip6_wire:decode/1 (docs/design-network-stack.md,
-"Codecs: fuzz targets"), run by tools/fuzz/erx_ip6_wire.rb. Each round
+"Codecs: fuzz targets"), run by tools/fuzz/erx_net_codec.rb. Each round
 builds an IPv6 packet with a random chain of extension headers, its lengths
 biased to the edges and sometimes corrupted, and checks that the decoder
 never raises; that it accepts exactly what `judge/1` accepts; that encoding

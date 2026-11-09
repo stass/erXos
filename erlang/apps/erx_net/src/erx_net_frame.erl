@@ -218,6 +218,7 @@ sent to.
 -define(TCP_HDR_LEN, 20).
 -define(UDP_HDR_LEN, 8).
 -define(IP_MAXPACKET, 16#ffff).
+-define(IP_HDR_LEN, 20).
 %% IPDEFTTL (ip_var.h), and IP_DEFAULT_MULTICAST_TTL and ip6_defmcasthlim (in.h:535,
 %% in6.h:521).
 -define(IPDEFTTL, 64).
@@ -252,10 +253,13 @@ the order their interfaces added them, and the current routes.
 What a sender asks of a path: a source it already holds (`src`, which only the interface
 gives as `0.0.0.0` or `::`); the interface a multicast or the limited broadcast leaves
 through (`via`); the hop limit (`ttl` for IPv4, `hlim` for IPv6); the type of service or
-traffic class (`tos`, `tclass`); and the IPv6 flow label (`flow`).
+traffic class (`tos`, `tclass`); the IPv6 flow label (`flow`); and whether an IPv4
+broadcast destination is allowed (`broadcast`, false unless given: a socket's
+`SO_BROADCAST`, which `ip_output` reads as `IP_ALLOWBROADCAST`).
 """.
 -type opts() :: #{src => erx_net_addr:addr(), via => term(), ttl => 0..255, hlim => 0..255,
-                  tos => 0..255, tclass => 0..255, flow => 0..16#fffff}.
+                  tos => 0..255, tclass => 0..255, flow => 0..16#fffff,
+                  broadcast => boolean()}.
 
 -doc """
 The way to one destination. `iface` is the interface the frames leave through, `next_hop`
@@ -263,12 +267,14 @@ the address its link address is found for, and `link` either `{fixed, LinkAddr}`
 broadcast or multicast address, or the zone on the loopback interface) or `neighbour`, when
 the next hop's neighbour row gives it. `mtu` is the interface's MTU for IPv4 and its IPv6
 link MTU for IPv6; `hlim` is the TTL or hop limit; `tos` the type of service or traffic
-class, whose low two bits a TCP segment's ECN field replaces.
+class, whose low two bits a TCP segment's ECN field replaces. `broadcast` says the
+destination is an IPv4 broadcast address of the interface, which is never fragmented.
 """.
 -type path() :: #{family := inet | inet6, iface := iface(),
                   src := erx_net_addr:addr(), dst := erx_net_addr:addr(),
                   next_hop := erx_net_addr:addr(), link := {fixed, term()} | neighbour,
-                  mtu := pos_integer(), hlim := 0..255, tos := 0..255, flow := 0..16#fffff}.
+                  mtu := pos_integer(), hlim := 0..255, tos := 0..255, flow := 0..16#fffff,
+                  broadcast := boolean()}.
 
 -doc "An IP packet, as `erx_ip4:output/4` and `erx_ip6:output/4` build it.".
 -type packet() :: iodata().
@@ -306,7 +312,9 @@ snapshot(Ifs, Addrs, Routes) ->
 -doc """
 The path to Dst under Opts over the configuration, or `enetunreach` when no interface
 leads there and `eaddrnotavail` when the interface has no usable source address
-(`in_pcbladdr`, `in6_selectsrc`). The interface is the first of these that applies:
+(`in_pcbladdr`, `in6_selectsrc`). An IPv4 broadcast destination is `eaddrnotavail` on
+the loopback interface, which cannot broadcast, and `eacces` unless Opts allow it
+(`ip_output.c:661-668`). The interface is the first of these that applies:
 
 * the loopback interface for an address of the stack, compared with its zone;
 * `via` for a multicast destination or the limited broadcast, and an interface- or
@@ -320,11 +328,12 @@ contradicts `via` leads nowhere either, so nothing a peer sends can steer a path
 another interface.
 """.
 -spec path(zoned(), opts(), snapshot()) ->
-          {ok, path()} | {error, enetunreach | eaddrnotavail}.
+          {ok, path()} | {error, enetunreach | eaddrnotavail | eacces}.
 path(Dst0, Opts, #{} = Snap) when is_map(Opts) ->
     maybe
         {ok, Dst, Zone} ?= destination(Dst0, Opts, Snap),
         {ok, Way} ?= way(Dst, Zone, Opts, Snap),
+        ok ?= allowed(Way, Opts),
         {ok, Src} ?= source(Dst, Way, Opts, Snap),
         {ok, header(Dst, Src, Way, Opts)}
     else
@@ -381,7 +390,7 @@ way(Dst, Zone, Opts, #{ifs := Ifs, addrs := Addrs, routes := Routes}) ->
             maybe
                 {ok, Lo} ?= ok_or(loopback(Ifs), enetunreach),
                 {ok, #{iface => Lo, next_hop => Dst, link => {fixed, Owner}, out => Owner,
-                       loopback => true}}
+                       loopback => true, broadcast => false}}
             end;
         none ->
             Unrouted = erx_net_addr:is_multicast(Dst) orelse Dst =:= <<16#ffffffff:32>>,
@@ -411,7 +420,7 @@ unrouted(Dst, Ifname, Ifs) ->
     case Ifs of
         #{Ifname := If} ->
             {ok, #{iface => If, next_hop => Dst, link => {fixed, link_addr(If, Dst)}, out => Ifname,
-                   loopback => false}};
+                   loopback => false, broadcast => Dst =:= <<16#ffffffff:32>>}};
         #{} ->
             {error, enetunreach}
     end.
@@ -438,10 +447,18 @@ routed(Dst, Zone, Ifs, Addrs, Routes) ->
                       {neighbour, <<_/binary>>} -> Gateway;
                       _ -> Dst
                   end,
-            {ok, #{iface => If, next_hop => Hop, link => Link, out => Ifname, loopback => false}};
+            {ok, #{iface => If, next_hop => Hop, link => Link, out => Ifname, loopback => false,
+                   broadcast => Broadcast}};
         _ ->
             {error, enetunreach}
     end.
+
+%% A broadcast leaves only an interface that can broadcast, and only when the sender
+%% allows it (ip_output.c:661-668); the loopback interface has no IFF_BROADCAST.
+allowed(#{broadcast := false}, _Opts) -> ok;
+allowed(#{iface := #{link := none}}, _Opts) -> {error, eaddrnotavail};
+allowed(#{}, #{broadcast := true}) -> ok;
+allowed(#{}, #{}) -> {error, eacces}.
 
 %% A unicast next hop on Ethernet is addressed by its neighbour row; on the loopback
 %% interface the link header is the interface's own name.
@@ -485,7 +502,7 @@ source(<<_:32>>, #{out := Out, next_hop := Hop}, _Opts, #{addrs := Addrs}) ->
         [] -> {error, eaddrnotavail}
     end.
 
-header(Dst, Src, #{iface := If, next_hop := Hop, link := Link}, Opts) ->
+header(Dst, Src, #{iface := If, next_hop := Hop, link := Link, broadcast := Broadcast}, Opts) ->
     Multicast = erx_net_addr:is_multicast(Dst),
     {Family, Mtu, HlimKey, TosKey, Default} =
         case byte_size(Dst) of
@@ -498,7 +515,8 @@ header(Dst, Src, #{iface := If, next_hop := Hop, link := Link}, Opts) ->
                #{} -> Default
            end,
     #{family => Family, iface => If, src => Src, dst => Dst, next_hop => Hop, link => Link,
-      mtu => Mtu, hlim => Hlim, tos => maps:get(TosKey, Opts, 0), flow => maps:get(flow, Opts, 0)}.
+      mtu => Mtu, hlim => Hlim, tos => maps:get(TosKey, Opts, 0), flow => maps:get(flow, Opts, 0),
+      broadcast => Broadcast}.
 
 ok_or({ok, _} = Ok, _Reason) -> Ok;
 ok_or(error, Reason) -> {error, Reason}.
@@ -528,7 +546,9 @@ segment(#{tos := Tos} = Path, {#tcp{opts = Opts} = Header, #{ecn := Ecn, df := D
 
 -doc """
 The packets of a UDP datagram from port Sport to port Dport over Path, fragmented when
-it is over the MTU (`udp_output`, `ip_output`). `emsgsize` when it is over 65535 bytes.
+it is over the MTU (`udp_output`, `ip_output`). `emsgsize` when it is over 65535 bytes,
+or over the MTU to a broadcast destination, which is never fragmented
+(`ip_output.c:669-673`).
 """.
 -spec udp(path(), 0..16#ffff, 0..16#ffff, iodata(), erx_net_rand:gen()) ->
           {ok, [packet()], erx_net_rand:gen()} | {error, emsgsize}.
@@ -544,7 +564,7 @@ udp(#{tos := Tos} = Path, Sport, Dport, Payload, Gen) ->
 
 -doc """
 The packets of a datagram of protocol Proto over Path, whose payload, an ICMP message
-among them, the caller encoded.
+among them, the caller encoded; `emsgsize` as for `udp/5`.
 """.
 -spec ip(path(), 0..255, iodata(), erx_net_rand:gen()) ->
           {ok, [packet()], erx_net_rand:gen()} | {error, emsgsize}.
@@ -556,10 +576,15 @@ pseudo_sum(#{family := inet, src := Src, dst := Dst}, Proto) ->
 pseudo_sum(#{family := inet6, src := Src, dst := Dst}, Proto) ->
     erx_ip6_wire:pseudo_sum(Src, Dst, 0, Proto).
 
-output(#{family := inet, src := Src, dst := Dst, hlim := Ttl, mtu := Mtu}, Proto, Payload, Tos,
-       Df, Gen) ->
-    erx_ip4:output(#{src => Src, dst => Dst, proto => Proto, ttl => Ttl, tos => Tos, df => Df},
-                   Payload, Mtu, Gen);
+output(#{family := inet, src := Src, dst := Dst, hlim := Ttl, mtu := Mtu, broadcast := Broadcast},
+       Proto, Payload, Tos, Df, Gen) ->
+    case Broadcast andalso ?IP_HDR_LEN + iolist_size(Payload) > Mtu of
+        true ->
+            {error, emsgsize};
+        false ->
+            erx_ip4:output(#{src => Src, dst => Dst, proto => Proto, ttl => Ttl, tos => Tos,
+                             df => Df}, Payload, Mtu, Gen)
+    end;
 output(#{family := inet6, src := Src, dst := Dst, hlim := Hlim, flow := Flow, mtu := Mtu}, Proto,
        Payload, Tclass, Df, Gen) ->
     erx_ip6:output(#{src => Src, dst => Dst, proto => Proto, hlim => Hlim, tclass => Tclass,

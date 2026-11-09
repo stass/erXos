@@ -11,9 +11,8 @@ require_relative '../lib/erx/dependencies'
 # framing"), driven by test/erlang/erx_net_input_fuzz.erl: compiled from source with the
 # host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's).
-# It runs the classifier as it is, then each copy seeded with one of the design's five
-# faults and the loopback-zone fault, each of which must fail the target by the
-# property its entry names.
+# It runs the classifier as it is, then each copy seeded with one of FAULTS, each of which
+# must fail the target with a failure tag its entry names.
 module ErxNetInputFuzz
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_net')
@@ -23,23 +22,24 @@ module ErxNetInputFuzz
   TARGET = File.join(ROOT, 'test/erlang/erx_net_input_fuzz.erl')
   DEADLINE_SECONDS = '600'
 
-  # A seeded fault: the text of erx_net_input.erl it replaces, what it does, and the
-  # failure tags of the target that may catch it.
-  Fault = Data.define(:exact, :faulty, :fault, :caught)
+  # A seeded fault: the text it replaces in the source it names (erx_net_input.erl unless
+  # it says otherwise), what it does, and the failure tags of the target that may catch it.
+  Fault = Data.define(:exact, :faulty, :fault, :caught, :source) do
+    def initialize(source: SOURCE, **fields) = super
+  end
   JUDGE = %w[disagrees_with_reference].freeze
 
   FAULTS = [
     Fault.new(exact: 'Keys = [{udp, Family, Dst, Dport, Src, Sport}, {udp, Family, Dst, Dport}, {udp, Family, any, Dport}],',
               faulty: 'Keys = [{udp, Family, any, Dport}],',
               fault: 'looking a UDP datagram up by its port alone', caught: JUDGE),
-    Fault.new(exact: '{ok, Entry} when LinkCast =:= unicast -> {local, {tcp, Head, Upper, Entry}};',
-              faulty: '{ok, Entry} when is_atom(LinkCast) -> {local, {tcp, Head, Upper, Entry}};',
+    Fault.new(exact: '{ok, Entry} when LinkCast =:= unicast, Cast =:= unicast -> {local, {tcp, Head, Upper, Entry}};',
+              faulty: '{ok, Entry} when Cast =:= unicast -> {local, {tcp, Head, Upper, Entry}};',
               fault: 'keeping a link-layer broadcast segment for a listener', caught: JUDGE),
-    Fault.new(exact: "tcp(\#{family := Family, src := Src, dst := Dst, link := LinkCast} = Head,\n",
+    Fault.new(exact: "tcp(\#{family := Family,",
               faulty: "tcp(_, <<_:13/binary, _:5, 1:1, _:2, _/binary>>, _) -> {drop, no_reply};\n" \
-                      "tcp(\#{family := Family, src := Src, dst := Dst, link := LinkCast} = Head,\n",
-              fault: 'reading the RST flag before verification',
-              caught: %w[disagrees_with_reference verdict_read_unnamed_byte]),
+                      "tcp(\#{family := Family,",
+              fault: 'reading the RST flag before verification', caught: %w[verdict_read_unnamed_byte]),
     Fault.new(exact: 'src => erx_net_addr:zoned(Src, Zone), dst => erx_net_addr:zoned(Dst, Zone), zone => Zone}.',
               faulty: 'src => Src, dst => Dst, zone => Zone}.',
               fault: 'building keys from link-local addresses without their zone', caught: JUDGE),
@@ -58,33 +58,39 @@ module ErxNetInputFuzz
               fault: 'taking port 68 for DHCP only after not_ours, by decoding again', caught: JUDGE),
     Fault.new(exact: "classify({frame, Zone, Bytes}, \#{link := none} = View) ->\n",
               faulty: "classify({frame, _, Bytes}, \#{link := none, ip6 := \#{zone := Zone}} = View) ->\n",
-              fault: 'giving a looped packet the zone of the loopback interface', caught: JUDGE)
+              fault: 'giving a looped packet the zone of the loopback interface', caught: JUDGE),
+    Fault.new(source: File.join(APPLICATION, 'src/erx_icmp4.erl'),
+              exact: '<<_:Hl/unit:32, Upper/binary>> = Invoking,',
+              faulty: '<<_:20/binary, Upper/binary>> = Invoking,',
+              fault: "reading a quote's ports at 20 bytes whatever its header length", caught: JUDGE)
   ].freeze
 
   module_function
 
   def run(seed:)
-    source = File.binread(SOURCE)
-    output, status = fuzz(source, seed: seed)
+    output, status = fuzz(SOURCE, File.binread(SOURCE), seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted$/)
     FAULTS.each do |spec|
-      raise "#{SOURCE} lacks the text its seeded fault replaces: #{spec.fault}" unless source.include?(spec.exact)
+      source = File.binread(spec.source)
+      raise "#{spec.source} lacks the text its seeded fault replaces: #{spec.fault}" unless source.include?(spec.exact)
 
-      output, status = fuzz(source.sub(spec.exact, spec.faulty), seed: seed)
-      abort("#{spec.fault} passed:\n#{output}") if status.success? || spec.caught.none? { |tag| output.include?(tag) }
+      output, status = fuzz(spec.source, source.sub(spec.exact, spec.faulty), seed: seed)
+      abort("#{spec.fault} passed:\n#{output}") if status.success? || spec.caught.none? { |tag| output.match?(/^fuzz: #{Regexp.escape(tag)}\b/) }
+      puts "#{spec.fault}: caught as #{output[/^fuzz: (\w+)/, 1]}"
     end
-    puts "erx_net_input agrees with its reference judge, and #{FAULTS.map(&:fault).join('; ')} do not"
+    puts 'erx_net_input agrees with its reference judge, and every seeded fault fails it'
   end
 
-  # In a directory of its own, which also takes the crash dump of a failed round.
-  def fuzz(module_text, seed:)
+  # Path's module replaced by module_text, in a directory of its own, which also takes the
+  # crash dump of a failed round.
+  def fuzz(path, module_text, seed:)
     Dir.mktmpdir('erx-net-input-fuzz') do |work|
-      module_path = File.join(work, 'erx_net_input.erl')
+      module_path = File.join(work, File.basename(path))
       File.binwrite(module_path, module_text)
       pkt = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
       pkt_include = File.join(pkt, 'include')
       compile(work, Dir[File.join(pkt, 'src', '*.erl')].sort, includes: ['-I', pkt_include])
-      others = Dir[File.join(APPLICATION, 'src', '*.erl')].sort.reject { |path| path == SOURCE }
+      others = Dir[File.join(APPLICATION, 'src', '*.erl')].sort.reject { |other| other == path }
       compile(work, [module_path, *others, HOST_BYTES, ORACLE, TARGET],
               includes: ['-I', File.join(APPLICATION, 'include'), '-I', pkt_include])
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

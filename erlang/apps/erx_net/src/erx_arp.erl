@@ -298,11 +298,12 @@ learn(#arp{spa = Spa, sha = Sha, tpa = Tpa}, MyAddr, Now, #{addrs := Addrs} = If
             resolved(Spa, E, Sha, Now, T)
     end.
 
-%% A new entry for a sender, if the table has room for it.
+%% A new entry for a sender, if the table has free room for it: a learnt sender evicts
+%% nothing (erx_lltable:lookup_or_learn/3).
 learn_new(Spa, Sha, Now, T0) ->
-    case lookup_or_create(Spa, Now, T0) of
+    case erx_lltable:lookup_or_learn(Spa, fresh(Now), T0) of
         none -> {T0, []};
-        {E, T, Evicted} -> prepend(Evicted, resolved(Spa, E, Sha, Now, T))
+        {E, T, []} -> resolved(Spa, E, Sha, Now, T)
     end.
 
 %% arp_check_update_lle and arp_mark_lle_reachable: the entry takes the sender's address,
@@ -357,5 +358,6 @@ same_prefix(A, B, Len) ->
 
 %% The entry of Ip, or a new incomplete one if there is room or room can be made.
 lookup_or_create(Ip, Now, T) ->
-    erx_lltable:lookup_or_create(
-      Ip, #entry{state = incomplete, deadline = Now + ?ARPT_DOWN, expire = Now}, T).
+    erx_lltable:lookup_or_create(Ip, fresh(Now), T).
+
+fresh(Now) -> #entry{state = incomplete, deadline = Now + ?ARPT_DOWN, expire = Now}.

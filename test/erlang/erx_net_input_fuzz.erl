@@ -5,10 +5,11 @@
 -moduledoc """
 The fuzz target of erx_net_input (docs/design-network-stack.md, "Classification and
 framing"), run by tools/fuzz/erx_net_input.rb. Each round builds a frame, Ethernet with
-each link cast or a looped packet in one of two zones, carrying IPv4 (with options, some
-malformed) or IPv6 (with hop-by-hop and fragment headers) and TCP, UDP, ICMP and ICMPv6
-errors with their quotes, echo requests, neighbour messages, ARP and other protocols, with
-lengths at the edges; a view of random addresses, groups and DHCP flag, with link-local
+each link cast, a looped packet in one of two zones, or a datagram a reassembly rebuilt
+with its zone and link cast, carrying IPv4 (with options, some malformed) or IPv6 (with
+hop-by-hop and fragment headers) and TCP, UDP, ICMP and ICMPv6 errors with their quotes
+(behind IPv4 options and IPv6 extension headers), echo requests, neighbour messages, ARP
+and other protocols, with lengths at the edges; a view of random addresses, groups and DHCP flag, with link-local
 addresses in the zones em0 and em1; and a demultiplexing map whose keys come mostly from
 the frame's own fields, zoned and unzoned, in its zone and the other. On a DHCP interface
 IPv4 frames lean towards UDP to port 68 with malformed options, foreign destinations and
@@ -17,7 +18,7 @@ fragments. It checks that:
 * `classify/2` and `verify/1` never raise and answer the shapes they declare;
 * the verdict, its holders and its reason agree with `judge/3`, written from the design's
   table over pkt's decoding of the link layer, erx_ip4's and erx_ip6's IP decision, and
-  the raw bytes the table names;
+  the raw bytes the table names, an error's quote included, which it reads itself;
 * changing a byte above IP that the table does not name leaves the verdict as it was, and
   changing the checksum above IP turns `verify/1`'s result only into a drop for its sum.
 
@@ -61,22 +62,25 @@ run([Seed]) ->
 
 fail(Tag, Detail) -> throw({fail, Tag, Detail}).
 
+%% Form says how the generated packet reaches classify/2: `ether`, a frame from the driver;
+%% `{loop, Zone}`, a looped packet with its zone; or `{reassembled, Family, Zone,
+%% LinkCast}`, a datagram a reassembly rebuilt, on the Ethernet interface.
 round() ->
-    Loop = rand:uniform(4) =:= 1,
-    Zone = case Loop of true -> pick([em0, em1, lo0]); false -> em0 end,
-    View0 = view(Loop),
-    {Prefix, Upper, Family} = packet(View0),
-    Map = demux_map(ip_header(Prefix, Loop), Upper, Family, Zone),
+    Kind = pick([ether, ether, ether, ether, ether, loop, loop, reassembled]),
+    View0 = view(Kind =:= loop),
+    {Ip, Upper, Family} = packet(Kind, View0),
+    {Form, Prefix} = form(Kind, Family, Ip),
+    Map = demux_map(Ip, Upper, Family, map_zone(Form)),
     View = View0#{demux => fun(Key) -> maps:get(Key, Map, []) end},
-    Input = input(Loop, Zone, Prefix, Upper),
+    Input = input(Form, Prefix, Upper),
     Verdict = classify(Input, View),
     case {shape(Verdict), judge(Input, View, Map)} of
         {Same, Same} -> ok;
         {Got, Judged} -> fail(disagrees_with_reference, {Input, Got, Judged})
     end,
     Verified = verify(Input, Verdict),
-    unnamed_bytes(Loop, Zone, Prefix, Upper, View, Verdict),
-    checksum(Loop, Zone, Prefix, Upper, View, Verdict, Verified),
+    unnamed_bytes(Form, Prefix, Upper, View, Verdict),
+    checksum(Form, Prefix, Upper, View, Verdict, Verified),
     element(1, Verdict).
 
 classify(Input, View) ->
@@ -105,8 +109,10 @@ shape(Other) -> fail(bad_verdict_shape, Other).
 listener_id(none) -> none;
 listener_id(#{credit := Credit}) -> Credit.
 
-input(true, Zone, Prefix, Upper) -> {frame, Zone, <<Prefix/binary, Upper/binary>>};
-input(false, _, Prefix, Upper) -> {frame, <<Prefix/binary, Upper/binary>>}.
+input(ether, Prefix, Upper) -> {frame, <<Prefix/binary, Upper/binary>>};
+input({loop, Zone}, Prefix, Upper) -> {frame, Zone, <<Prefix/binary, Upper/binary>>};
+input({reassembled, Family, Zone, LinkCast}, Prefix, Upper) ->
+    {reassembled, Family, Zone, LinkCast, <<Prefix/binary, Upper/binary>>}.
 
 %% ---------------------------------------------------------------------------------------
 %% The reference judge, from the table of "Classifying a frame" alone.
@@ -115,9 +121,15 @@ input(false, _, Prefix, Upper) -> {frame, <<Prefix/binary, Upper/binary>>}.
 -spec judge(erx_net_input:input(), erx_net_input:view(), map()) -> tuple().
 judge({frame, Zone, Packet}, #{link := none} = View, Map) ->
     case Packet of
-        <<6:4, _/bits>> -> ip6(Packet, unicast, Zone, View, Map);
+        <<6:4, _/bits>> -> ip6(Packet, received, unicast, Zone, View, Map);
         _ -> ip4(Packet, unicast, View, Map)
     end;
+%% A rebuilt datagram goes to the IP layer with its first fragment's zone and link cast,
+%% and never to the DHCP path, which takes only whole packets.
+judge({reassembled, inet, none, Cast, Packet}, View, Map) ->
+    ip4(Packet, Cast, View, Map);
+judge({reassembled, inet6, Zone, Cast, Packet}, View, Map) ->
+    ip6(Packet, reassembled, Cast, Zone, View, Map);
 judge({frame, Bytes}, #{lladdr := Mine, ip6 := #{zone := Zone}} = View, Map) ->
     case erx_net_pkt_oracle:ether(Bytes) of
         {ok, #{dst := Dst, type := Type}, Payload} when byte_size(Bytes) >= 14 ->
@@ -130,7 +142,7 @@ judge({frame, Bytes}, #{lladdr := Mine, ip6 := #{zone := Zone}} = View, Map) ->
             case {Cast, Type} of
                 {other_host, _} -> {drop, other_host};
                 {_, 16#0800} -> dhcp_first(Payload, Cast, View, Map);
-                {_, 16#86dd} -> ip6(Payload, Cast, Zone, View, Map);
+                {_, 16#86dd} -> ip6(Payload, received, Cast, Zone, View, Map);
                 {_, 16#0806} -> {local, arp};
                 _ -> {drop, ethertype}
             end;
@@ -158,8 +170,8 @@ ip4(Packet, Cast, #{ip4 := Ip4View, groups := Groups}, Map) ->
         {drop, Reason} -> {drop, Reason}
     end.
 
-ip6(Packet, Cast, Zone, #{ip6 := Ip6View, groups := Groups}, Map) ->
-    case erx_ip6:input(Packet, received, Cast, Ip6View#{zone := Zone}) of
+ip6(Packet, Origin, Cast, Zone, #{ip6 := Ip6View, groups := Groups}, Map) ->
+    case erx_ip6:input(Packet, Origin, Cast, Ip6View#{zone := Zone}) of
         {ours, multicast, _, Ip, Upper} ->
             case lists:member(Ip#ip6.dst, Groups) of
                 true -> above6(Ip, Upper, Cast, multicast, false, Zone, Map);
@@ -199,11 +211,11 @@ above(F, 17, <<Sp:16, Dp:16, _/binary>>, #{src := S, dst := D, cast := Cast} = H
     end;
 above(_, P, _, _, _) when P =:= 6; P =:= 17 -> {drop, too_short};
 above(inet, 1, <<T, _/binary>> = U, H, Map) when T =:= 3; T =:= 11; T =:= 12 ->
-    quote(inet, erx_icmp4:decode_quoted(after8(U)), H, Map);
+    quote_verdict(inet, read_quote(inet, after8(U)), H, Map);
 above(inet, 1, <<T, _/binary>>, H, _) when T =:= 8; T =:= 13 -> reply(H, {local, icmp});
 above(inet, 1, <<5, _/binary>>, _, _) -> {local, icmp};
 above(inet6, 58, <<T, _/binary>> = U, H, Map) when T >= 1, T =< 4 ->
-    quote(inet6, erx_icmp6:decode_quoted(after8(U)), H, Map);
+    quote_verdict(inet6, read_quote(inet6, after8(U)), H, Map);
 above(inet6, 58, <<128, _/binary>>, H, _) -> reply(H, {local, icmp});
 above(inet6, 58, <<T, _/binary>>, _, _) when T =:= 130; T >= 133, T =< 137 -> {local, icmp};
 above(inet, 1, <<_, _/binary>>, _, _) -> {drop, icmp_type};
@@ -213,7 +225,7 @@ above(inet6, 58, <<>>, _, _) -> {drop, too_short};
 above(inet6, 59, _, _, _) -> {drop, no_next_header};
 above(_, _, _, H, _) -> reply(H, {local, other}).
 
-quote(F, {ok, #{proto := P, src := QS, dst := QD, upper := <<QSp:16, QDp:16, _/binary>>}}, #{zone := Z}, Map) ->
+quote_verdict(F, {ok, P, QS, QSp, QD, QDp}, #{zone := Z}, Map) ->
     L = zoned(QS, Z),
     R = zoned(QD, Z),
     case P of
@@ -230,7 +242,60 @@ quote(F, {ok, #{proto := P, src := QS, dst := QD, upper := <<QSp:16, QDp:16, _/b
             end;
         _ -> {drop, no_socket}
     end;
-quote(_, {error, Reason}, _, _) -> {drop, Reason}.
+quote_verdict(_, {error, Reason}, _, _) -> {drop, Reason}.
+
+%% The quoted datagram, read here from the RFCs rather than by erx_icmp4's and erx_icmp6's
+%% decode_quoted/1, so that a quote read at the wrong offset disagrees: its protocol, its
+%% source and ports (the local end, since the stack sent it) and its destination and port.
+%% IPv4 (RFC 792, icmp_input): a header of Hl words, at least 5, with the 8 bytes after it,
+%% a destination that is not multicast and neither address 0.0.0.0. IPv6 (RFC 4443 and RFC
+%% 8200, icmp6_notify_error): past hop-by-hop, routing and destination options headers
+%% ((Len + 1) * 8 bytes), an authentication header ((Len + 2) * 4 bytes) and a fragment
+%% header of offset zero, to the first other header or a fragment header of nonzero
+%% offset, with 8 bytes of it inside the quote, and neither address unspecified. A quote
+%% too short for its headers is bad_length, checked before the addresses.
+read_quote(inet, <<_:4, Hl:4, _:8/binary, P, _:16, S:4/binary, D:4/binary, _/binary>> = Q) when Hl >= 5 ->
+    case Q of
+        <<_:Hl/unit:32, Sp:16, Dp:16, _:32, _/binary>> ->
+            Multicast = binary:first(D) bsr 4 =:= 2#1110,
+            case Multicast orelse S =:= <<0:32>> orelse D =:= <<0:32>> of
+                true -> {error, bad_addr};
+                false -> {ok, P, S, Sp, D, Dp}
+            end;
+        _ -> {error, bad_length}
+    end;
+read_quote(inet6, <<_:48, Nxt, _, S:16/binary, D:16/binary, _/binary>> = Q) ->
+    case upper6(Nxt, 40, Q) of
+        {P, Off} when byte_size(Q) >= Off + 8 ->
+            <<_:Off/binary, Sp:16, Dp:16, _/binary>> = Q,
+            case S =:= <<0:128>> orelse D =:= <<0:128>> of
+                true -> {error, bad_addr};
+                false -> {ok, P, S, Sp, D, Dp}
+            end;
+        _ -> {error, bad_length}
+    end;
+read_quote(_, _) ->
+    {error, bad_length}.
+
+%% The upper-layer header's protocol and offset, or `overrun` for a header past the quote.
+upper6(Nxt, Off, Q) when Nxt =:= 0; Nxt =:= 43; Nxt =:= 60 ->
+    case Q of
+        <<_:Off/binary, Next, Len, _/binary>> -> upper6(Next, Off + (Len + 1) * 8, Q);
+        _ -> overrun
+    end;
+upper6(51, Off, Q) ->
+    case Q of
+        <<_:Off/binary, Next, Len, _/binary>> -> upper6(Next, Off + (Len + 2) * 4, Q);
+        _ -> overrun
+    end;
+upper6(44, Off, Q) ->
+    case Q of
+        <<_:Off/binary, _, _, 0:13, _:3, _:32, _/binary>> -> upper6(binary:at(Q, Off), Off + 8, Q);
+        <<_:Off/binary, _, _, _:13, _:3, _:32, _/binary>> -> {44, Off};
+        _ -> overrun
+    end;
+upper6(Nxt, Off, _) ->
+    {Nxt, Off}.
 
 reply(H, Local) -> reply(H, Local, no_reply).
 reply(#{reply := true}, Local, _) -> Local;
@@ -257,30 +322,30 @@ zoned(A, _) -> A.
 
 %% Bytes above IP the table does not name: past the ports of TCP and UDP, the code,
 %% checksum and second word of an ICMP or ICMPv6 message, and every byte of any other.
-unnamed_bytes(_, _, _, _, _, {drop, too_short}) -> ok;
-unnamed_bytes(Loop, Zone, Prefix, Upper, View, Verdict) ->
-    case unnamed(Prefix, Upper, Loop) of
+unnamed_bytes(_, _, _, _, {drop, too_short}) -> ok;
+unnamed_bytes(Form, Prefix, Upper, View, Verdict) ->
+    case unnamed(Prefix, Upper, Form) of
         [] -> ok;
         Offsets ->
             Off = pick(Offsets),
             Mutated = flip(Upper, Off, rand:uniform(255)),
-            Input = input(Loop, Zone, Prefix, Mutated),
+            Input = input(Form, Prefix, Mutated),
             case shape(classify(Input, View)) =:= shape(Verdict) of
                 true -> ok;
-                false -> fail(verdict_read_unnamed_byte, {Off, input(Loop, Zone, Prefix, Upper), Input})
+                false -> fail(verdict_read_unnamed_byte, {Off, input(Form, Prefix, Upper), Input})
             end
     end.
 
-unnamed(Prefix, Upper, Loop) ->
-    case proto(Prefix, Loop) of
+unnamed(Prefix, Upper, Form) ->
+    case proto(Prefix, Form) of
         P when P =:= 6; P =:= 17 -> [I || I <- offsets(Upper), I >= 4];
         P when P =:= 1; P =:= 58 -> [I || I <- offsets(Upper), I >= 1, I =< 7];
         _ -> []
     end.
 
 %% A flipped checksum keeps verify/1's drop or makes its success a drop for the sum.
-checksum(Loop, Zone, Prefix, Upper, View, Verdict, Original) when element(2, Original) =/= none ->
-    case summed_kind(Verdict) andalso sum_offset(proto(Prefix, Loop), Upper) of
+checksum(Form, Prefix, Upper, View, Verdict, Original) when element(2, Original) =/= none ->
+    case summed_kind(Verdict) andalso sum_offset(proto(Prefix, Form), Upper) of
         false -> ok;
         none -> ok;
         Off ->
@@ -288,7 +353,7 @@ checksum(Loop, Zone, Prefix, Upper, View, Verdict, Original) when element(2, Ori
             New = Sum bxor rand:uniform(16#ffff),
             Mutated = <<(binary:part(Upper, 0, Off))/binary, New:16,
                         (binary:part(Upper, Off + 2, byte_size(Upper) - Off - 2))/binary>>,
-            Input = input(Loop, Zone, Prefix, Mutated),
+            Input = input(Form, Prefix, Mutated),
             Again = classify(Input, View),
             Skip = New =:= 0 orelse New =:= 16#ffff orelse Sum =:= 0 orelse Original =:= {drop, bad_sum},
             case {Skip, shape(Again) =:= shape(Verdict), verify(Input, Again), Original} of
@@ -299,7 +364,7 @@ checksum(Loop, Zone, Prefix, Upper, View, Verdict, Original) when element(2, Ori
                 {_, _, Got, _} -> fail(checksum_not_checked, {Input, Got, Original})
             end
     end;
-checksum(_, _, _, _, _, _, _) ->
+checksum(_, _, _, _, _, _) ->
     ok.
 
 %% The pending kinds whose verify/1 checks a sum above IP.
@@ -314,16 +379,16 @@ sum_offset(_, _) -> none.
 
 %% The protocol of the generated packet's upper layer, as packet/1 recorded it in the
 %% prefix's last byte position: the IPv4 protocol field, or the last next-header.
-proto(Prefix, Loop) ->
-    Ip = ip_header(Prefix, Loop),
+proto(Prefix, Form) ->
+    Ip = ip_header(Prefix, Form),
     case Ip of
         <<4:4, _:68, P, _/binary>> -> P;
         <<6:4, _:44, Nxt, _/binary>> -> last_next(Nxt, binary:part(Ip, 40, byte_size(Ip) - 40));
         _ -> none
     end.
 
-ip_header(Prefix, true) -> Prefix;
-ip_header(<<_:14/binary, Ip/binary>>, false) -> Ip.
+ip_header(<<_:14/binary, Ip/binary>>, ether) -> Ip;
+ip_header(Prefix, _) -> Prefix.
 
 last_next(0, <<Nxt, Len, _/binary>> = Ext) when byte_size(Ext) >= 8 * Len + 8 ->
     last_next(Nxt, binary:part(Ext, 8 * Len + 8, byte_size(Ext) - 8 * Len - 8));
@@ -350,24 +415,39 @@ view(Loop) ->
       groups => subset([?ALLNODES, ?SOLICITED]),
       dhcp => (not Loop) andalso rand:uniform(2) =:= 1}.
 
-%% {Prefix, Upper, Family}: the link and IP headers, and the bytes above IP.
-packet(#{link := Link, dhcp := Dhcp}) ->
-    Kind = pick([ip4, ip4, ip6, ip6, arp, junk]),
-    {Ip, Upper, Family} = case Kind of
+%% {Ip, Upper, Family}: the IP header, and the bytes above IP. A rebuilt datagram is IP.
+packet(Kind, #{dhcp := Dhcp}) ->
+    Payload = case Kind of
+        reassembled -> pick([ip4, ip6]);
+        _ -> pick([ip4, ip4, ip6, ip6, arp, junk])
+    end,
+    case Payload of
         ip4 when Dhcp -> ip4_packet(pick([dhcp, dhcp, any]));
         ip4 -> ip4_packet(any);
         ip6 -> ip6_packet();
         arp -> {<<>>, rand:bytes(pick([27, 28, 40])), arp};
         junk -> {<<>>, rand:bytes(rand:uniform(30) - 1), junk}
-    end,
-    case Link of
-        none -> {Ip, Upper, Family};
-        ethernet ->
-            Type = case Family of inet -> 16#0800; inet6 -> 16#86dd; arp -> 16#0806; junk -> pick([16#0800, 16#88b5]) end,
-            Dst = pick([?MINE, ?MINE, <<255, 255, 255, 255, 255, 255>>, <<1, 0, 16#5e, 0, 0, 1>>,
-                        <<16#33, 16#33, 0, 0, 0, 1>>, <<2, 0, 0, 0, 0, 7>>]),
-            {<<Dst/binary, 2, 0, 0, 0, 0, 9, Type:16, Ip/binary>>, Upper, Family}
     end.
+
+%% {Form, Prefix}: how the packet arrives, and what comes before its upper layer: the
+%% Ethernet header and the IP header, or the IP header alone.
+form(ether, Family, Ip) ->
+    Type = case Family of inet -> 16#0800; inet6 -> 16#86dd; arp -> 16#0806; junk -> pick([16#0800, 16#88b5]) end,
+    Dst = pick([?MINE, ?MINE, <<255, 255, 255, 255, 255, 255>>, <<1, 0, 16#5e, 0, 0, 1>>,
+                <<16#33, 16#33, 0, 0, 0, 1>>, <<2, 0, 0, 0, 0, 7>>]),
+    {ether, <<Dst/binary, 2, 0, 0, 0, 0, 9, Type:16, Ip/binary>>};
+form(loop, _, Ip) ->
+    {{loop, pick([em0, em1, lo0])}, Ip};
+form(reassembled, Family, Ip) ->
+    Zone = case Family of inet -> none; inet6 -> pick([em0, em0, em1]) end,
+    {{reassembled, Family, Zone, pick([unicast, unicast, broadcast, multicast])}, Ip}.
+
+%% The zone the demultiplexing keys are built around: the packet's, or the interface's for
+%% IPv4, whose addresses have none.
+map_zone(ether) -> em0;
+map_zone({loop, Zone}) -> Zone;
+map_zone({reassembled, _, none, _}) -> em0;
+map_zone({reassembled, _, Zone, _}) -> Zone.
 
 ip4_packet(Bias) ->
     Src = pick([?PEER4, ?PEER4, ?ME4, <<0:32>>, <<127, 0, 0, 1>>, <<224, 0, 0, 5>>]),
@@ -398,9 +478,11 @@ ip6_packet() ->
     Plen = byte_size(Ext) + byte_size(Upper),
     {<<6:4, 0:8, 0:20, Plen:16, First, 64, Src/binary, Dst/binary, Ext/binary>>, Upper, inet6}.
 
+%% A segment's flags are random but for RST, which stays clear: the table names no flag, so
+%% setting one is the unnamed-byte property's flip, which a classifier that reads RST fails.
 upper(Family, 6, Src, Dst, _) ->
     Segment = <<(port()):16, (port()):16, (rand:uniform(1 bsl 32) - 1):32, 0:32, 5:4, 0:3,
-                (rand:uniform(512) - 1):9, 1024:16, 0:16, 0:16, (rand:bytes(pick([0, 3])))/binary>>,
+                ((rand:uniform(512) - 1) band bnot 16#04):9, 1024:16, 0:16, 0:16, (rand:bytes(pick([0, 3])))/binary>>,
     cut(summed(Family, 6, Src, Dst, Segment, 16));
 upper(Family, 17, Src, Dst, Bias) ->
     Data = rand:bytes(pick([0, 1, 12])),
@@ -409,26 +491,46 @@ upper(Family, 17, Src, Dst, Bias) ->
     cut(summed(Family, 17, Src, Dst, Datagram, 6));
 upper(inet, 1, Src, Dst, _) ->
     Type = pick([3, 3, 11, 12, 8, 13, 5, 0, 42]),
-    Message = <<Type, 0, 0:16, 0:32, (quote(inet, Src, Dst))/binary>>,
+    Message = <<Type, 0, 0:16, 0:32, (quoted_datagram(inet, Src, Dst))/binary>>,
     cut(summed(inet, 1, Src, Dst, Message, 2));
 upper(inet6, 58, Src, Dst, _) ->
     Type = pick([1, 1, 2, 3, 4, 128, 129, 130, 131, 133, 135, 136, 137, 200]),
-    Message = <<Type, 0, 0:16, 0:32, (quote(inet6, Src, Dst))/binary>>,
+    Message = <<Type, 0, 0:16, 0:32, (quoted_datagram(inet6, Src, Dst))/binary>>,
     cut(summed(inet6, 58, Src, Dst, Message, 2));
 upper(_, _, _, _, _) ->
     rand:bytes(pick([0, 4, 20])).
 
 %% The datagram an error quotes, sent by the stack: from one of its addresses (the
-%% error's destination, mostly) to a peer, with 8 bytes of TCP or UDP header.
-quote(inet, _Src, Dst) ->
+%% error's destination, mostly) to a peer, with 8 bytes of TCP or UDP header after IPv4
+%% options or IPv6 extension headers, so that the ports sit at several offsets; some
+%% quotes end one byte short of them, or have an extension header that overruns.
+quoted_datagram(inet, _Src, Dst) ->
     P = pick([6, 17, 47]),
-    Header = <<4:4, 5:4, 0, 48:16, 0:32, 64, P, 0:16, (pick([Dst, ?ME4, ?PEER4]))/binary,
-               (pick([?PEER4, <<0:32>>]))/binary>>,
-    <<Header/binary, (port()):16, (port()):16, 0:32, (rand:bytes(pick([0, 12])))/binary>>;
-quote(inet6, _Src, Dst) ->
+    Options = pick([<<>>, <<>>, <<1, 1, 1, 1>>, <<1, 1, 1, 1, 1, 1, 1, 0>>]),
+    Hl = 5 + byte_size(Options) div 4,
+    Header = <<4:4, Hl:4, 0, 48:16, 0:32, 64, P, 0:16, (pick([Dst, ?ME4, ?PEER4, <<0:32>>]))/binary,
+               (pick([?PEER4, ?PEER4, <<0:32>>, <<224, 0, 0, 1>>]))/binary, Options/binary>>,
+    short(<<Header/binary, (port()):16, (port()):16, 0:32, (rand:bytes(pick([0, 12])))/binary>>, Hl * 4 + 7);
+quoted_datagram(inet6, _Src, Dst) ->
     P = pick([6, 17, 47]),
-    Header = <<6:4, 0:28, 16:16, P, 64, (pick([Dst, ?LL1, ?ME6]))/binary, (pick([?PEER6, ?LLPEER]))/binary>>,
-    <<Header/binary, (port()):16, (port()):16, 0:32>>.
+    {First, Ext} = pick([{P, <<>>}, {P, <<>>},
+                         {0, <<P, 0, 1, 4, 0:32>>},
+                         {60, <<P, 1, 1, 12, 0:96>>},
+                         {44, <<P, 0, 0:16, 9:32>>},
+                         {44, <<P, 0, 8:13, 0:3, 9:32>>},
+                         {43, <<P, 0, 4, 0, 0:32>>},
+                         {51, <<P, 1, 0:16, 9:32, 1:32>>},
+                         {0, <<P, 4, 1, 4, 0:32>>}]),
+    Header = <<6:4, 0:28, 16:16, First, 64, (pick([Dst, ?LL1, ?ME6, <<0:128>>]))/binary,
+               (pick([?PEER6, ?LLPEER]))/binary, Ext/binary>>,
+    short(<<Header/binary, (port()):16, (port()):16, 0:32>>, byte_size(Header) + 7).
+
+%% The quote whole, or now and then cut to Short bytes.
+short(Quote, Short) ->
+    case rand:uniform(8) of
+        1 -> binary:part(Quote, 0, Short);
+        _ -> Quote
+    end.
 
 %% The message with its checksum at Off, mostly right.
 summed(Family, Proto, Src, Dst, Message, Off) ->
@@ -458,7 +560,7 @@ port() -> pick(?PORTS ++ [rand:uniform(16#ffff)]).
 demux_map(Ip, Upper, Family, Zone) ->
     {Src, Dst} = addresses(Ip, Family),
     {Ports, Quoted} = case Upper of
-        <<Sp:16, Dp:16, _/binary>> -> {[{Dp, Sp}], quoted_ports(Upper)};
+        <<Sp:16, Dp:16, _/binary>> -> {[{Dp, Sp}], quoted_ports(Family, Upper)};
         _ -> {[{80, 80}], []}
     end,
     Zones = [Zone, other(Zone)],
@@ -488,17 +590,16 @@ addresses(Ip, Family) ->
         _ -> {?PEER4, ?ME4}
     end.
 
-%% The quote's local end (its source) and ports, as an error message carries them.
-quoted_ports(<<T, _:7/binary, 4:4, Hl:4, _:11/binary, S:4/binary, D:4/binary, _/binary>> = U)
-  when T =:= 3; T =:= 11; T =:= 12 ->
-    case U of
-        <<_:8/binary, _:Hl/unit:32, Sp:16, Dp:16, _/binary>> -> [{S, Sp, D, Dp}];
-        _ -> []
+%% The quote's local end (its source) and ports, as the judge reads them, so that lookups
+%% of a quote hit.
+quoted_ports(Family, <<T, _:7/binary, Quote/binary>>)
+  when Family =:= inet, (T =:= 3 orelse T =:= 11 orelse T =:= 12);
+       Family =:= inet6, T >= 1, T =< 4 ->
+    case read_quote(Family, Quote) of
+        {ok, _, S, Sp, D, Dp} -> [{S, Sp, D, Dp}];
+        {error, _} -> []
     end;
-quoted_ports(<<T, _:7/binary, 6:4, _:60, S:16/binary, D:16/binary, Sp:16, Dp:16, _/binary>>)
-  when T >= 1, T =< 4 ->
-    [{S, Sp, D, Dp}];
-quoted_ports(_) ->
+quoted_ports(_, _) ->
     [].
 
 subset(List) -> [X || X <- List, rand:uniform(3) =/= 1].

@@ -16,6 +16,10 @@ class ErxTcpExploreTest < Minitest::Test
 
   NEWER_WINDOW = 'Wl1 < Seq orelse (Wl1 =:= Seq andalso (Wl2 < Ack orelse (Wl2 =:= Ack andalso Win > SndWnd))).'
   ANY_WINDOW = 'Wl1 =/= Seq orelse Wl2 =/= Ack orelse Win =/= SndWnd.'
+  WINDOW_TAKEN = 'true -> Tcb0#tcb{snd_wnd = Win, snd_wl1'
+  WINDOW_NEVER_SHRUNK = 'true -> Tcb0#tcb{snd_wnd = max(Win, Tcb0#tcb.snd_wnd), snd_wl1'
+  URGENT_KEPT_OUT = '-> {[Before, After], Tcb#tcb{rcv_oob = none}};'
+  URGENT_DELIVERED = '-> {[Before, <<_Urgent>>, After], Tcb#tcb{rcv_oob = none}};'
   RST_EXACT = 'true when Seq =:= LastAck ->'
   RST_IN_WINDOW = 'true when Seq >= LastAck, Seq < LastAck + RcvWnd ->'
   RST_FROM_LAST_ACK = '#tcb{last_ack_sent = LastAck, rcv_wnd = RcvWnd, state = State} = Tcb,'
@@ -28,6 +32,14 @@ class ErxTcpExploreTest < Minitest::Test
   PAWS_SKIPPED = 'andalso (not_older(SegTs, Ts) orelse true) andalso not Closed,'
   SEQUENCE_CHECKED = 'case in_flight(Seq, Tcb) of'
   SEQUENCE_SKIPPED = 'case in_flight(Seq, Tcb) orelse true of'
+  WINDOW_CHECKED = 'has(Flags, ?TH_ACK) andalso newer_window(Seg, Tcb0) of'
+  SHRINK_AT_UNA_IGNORED = 'has(Flags, ?TH_ACK) andalso newer_window(Seg, Tcb0) andalso ' \
+                          'not (element(1, Seg#seg.arrived) =:= element(2, Seg#seg.arrived) andalso ' \
+                          'Ack =:= Tcb0#tcb.snd_una andalso Win < Tcb0#tcb.snd_wnd) of'
+  DUPLICATE_WINDOW = 'pure = First =:= End andalso Win =:= SndWnd,'
+  DUPLICATE_ANY_WINDOW = 'pure = First =:= End andalso (Win =:= SndWnd orelse true),'
+  PAWS_OLDER = 'when Recent =/= 0, Val < Recent ->'
+  PAWS_NEVER = 'when Recent =/= 0, Val < Recent, false ->'
   LOWER_BOUND = 'Lifted >= Una andalso Lifted < SndMax.'
   NO_LOWER_BOUND = 'Lifted >= min(Una, Lifted) andalso Lifted < SndMax.'
 
@@ -37,6 +49,18 @@ class ErxTcpExploreTest < Minitest::Test
 
   def test_a_window_update_without_the_wl1_wl2_rule_is_caught
     assert_caught(NEWER_WINDOW, ANY_WINDOW, /old_ack_keeps_send_window/)
+  end
+
+  # The peer model keeps the newest window by the WL1/WL2 rule, so a connection that keeps
+  # a wider window over a zeroed one sends past the peer's edge.
+  def test_a_window_update_that_never_shrinks_the_window_is_caught
+    assert_caught(WINDOW_TAKEN, WINDOW_NEVER_SHRUNK, /sent_within_peer_window/)
+  end
+
+  # The urgent byte of a segment taken in order is delivered at once, so it must be kept out.
+  def test_an_urgent_byte_delivered_in_band_is_caught
+    output = assert_caught(URGENT_KEPT_OUT, URGENT_DELIVERED, /delivered_in_order/)
+    assert_match(/held/, output)
   end
 
   def test_a_rst_accepted_anywhere_in_the_window_is_caught
@@ -52,6 +76,23 @@ class ErxTcpExploreTest < Minitest::Test
     output = assert_caught(ADVANCED, ADVANCED_ON_THE_WIRE, /rcv_nxt_never_decreases/)
     assert_match(/wrap_run_test.*\*failed\*/, output)
     refute_match(/base_run_test.*\*failed\*/, output)
+  end
+
+  # A pure ACK at snd_una that shrinks the window is no duplicate the loss module may end,
+  # since FreeBSD counts one only when it offers the same window.
+  def test_a_window_shrink_ignored_on_a_pure_ack_at_snd_una_is_caught
+    assert_caught(WINDOW_CHECKED, SHRINK_AT_UNA_IGNORED, /sent_within_peer_window/)
+  end
+
+  # FreeBSD counts a pure ACK as a duplicate only when it offers the window already held, so
+  # a loss module that counts one that changes it drops a window update the peer model keeps.
+  # The window it sends past lies 7 events after connect, past the landing depth.
+  def test_a_duplicate_ack_counted_whatever_its_window_is_caught
+    assert_caught(DUPLICATE_WINDOW, DUPLICATE_ANY_WINDOW, /sent_within_peer_window/, mode: 'base')
+  end
+
+  def test_a_segment_older_than_ts_recent_taken_is_caught
+    assert_caught(PAWS_OLDER, PAWS_NEVER, /paws_drops_older/)
   end
 
   # A data segment at rcv_nxt with a TSval older than ts_recent, two events after connect,

@@ -42,17 +42,21 @@ nothing while it is being resolved or a link-layer address `fresh` or `stale`
 (`published/1`); and whether a published entry may be evicted to make room
 (`reclaimable/1`), which is each protocol's own rule.
 
-Every change goes through `lookup_or_create/3`, `put/3` and `remove/2`, which keep the
+Every change goes through `lookup_or_create/3`, `lookup_or_learn/3`, `put/3` and `remove/2`, which keep the
 deadline index in step and return the `publish` or `unpublish` action the change of the
 published view needs, so a module cannot forget to publish: publication follows from the
-entry. Past `max` entries, `lookup_or_create/3` makes room by deleting the oldest
-unpublished entry, else the oldest reclaimable one, and refuses when there is neither.
-FreeBSD's `lltable` has a limit (`llt_maxentries`) that refuses every new entry once
-reached, but neither ARP nor neighbour discovery sets it, so their tables are unbounded
-(requirement N4).
+entry. Past `max` entries, `lookup_or_create/3`, for a neighbour this host resolves, makes
+room by deleting the oldest unpublished entry, else the oldest reclaimable one, and refuses
+when there is neither; `lookup_or_learn/3`, for a sender learnt from an unsolicited ARP
+request or neighbour solicitation, takes only free room and evicts nothing, so a sender
+cycling through spoofed on-link addresses cannot push out the entries this host is
+resolving or using. FreeBSD's `lltable` has a limit (`llt_maxentries`) that refuses every
+new entry once reached, which learning follows, but neither ARP nor neighbour discovery
+sets it, so their tables are unbounded (requirement N4).
 """.
 
--export([new/2, count/1, find/2, is_key/2, lookup_or_create/3, put/3, remove/2,
+-export([new/2, count/1, find/2, is_key/2, lookup_or_create/3, lookup_or_learn/3, put/3,
+         remove/2,
          expire/3, next_deadline/1, hold/3]).
 
 -export_type([table/0, published/0, action/0]).
@@ -125,6 +129,22 @@ lookup_or_create(Key, Fresh, #lltable{entries = Entries} = T) ->
                     {T2, []} = put(Key, Fresh, T1),
                     {Fresh, T2, Evicted}
             end
+    end.
+
+-doc """
+The entry of `Key`, or else `Fresh` if there is free room for it, `none` otherwise: a
+learnt sender never evicts an entry (`llt_maxentries`' refusal).
+""".
+-spec lookup_or_learn(binary(), term(), table()) -> {term(), table(), []} | none.
+lookup_or_learn(Key, Fresh, #lltable{entries = Entries, max = Max} = T) ->
+    case Entries of
+        #{Key := {_Created, Entry}} ->
+            {Entry, T, []};
+        #{} when map_size(Entries) < Max ->
+            {T1, []} = put(Key, Fresh, T),
+            {Fresh, T1, []};
+        #{} ->
+            none
     end.
 
 -doc """
