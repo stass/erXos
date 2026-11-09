@@ -6,12 +6,14 @@
 #ifndef ERX_FIASCO_SERVICE_H
 #define ERX_FIASCO_SERVICE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
 #include "erx/core/crash.h"
+#include "erx/release.h"
 #include "erx/watchdog.h"
 
 /*
@@ -55,6 +57,28 @@ int	erx_space_create(uint64_t budget, uint64_t parent, uint64_t fault, uint64_t 
 	    uint32_t cap_limit, uint64_t *space) ERX_WARN_UNUSED_RESULT;
 int	erx_image_map(uint64_t space, uint64_t image, uint64_t entry, uint64_t *start) ERX_WARN_UNUSED_RESULT;
 int	erx_space_stop(uint64_t space, int64_t status);
+
+/*
+ * Slices and copies (docs/design-stopgap.md, "The call table"). erx_image_slice, from the
+ * root alone, makes a memory object of entries [first, first + count) of the boot archive,
+ * charged to budget; image is ignored, as this backend has the one image. A map of it is
+ * read-only. erx_mem_copy copies len bytes between two memory objects the caller holds,
+ * 64 pages a request: either gone ERX_ESTALE, a range past its object ERX_ERANGE, a
+ * device's object ERX_ETYPE, a slice as dst ERX_ERIGHTS, each before any byte moves.
+ * erx_fiasco_release_entry is a task's erx_release_entry over the slice release names, its
+ * file checked first when check is set; with entry NULL only the check is made.
+ * Paged objects are not offered: their three calls are ERX_ENOTSUP.
+ */
+int	erx_image_slice(uint64_t budget, uint64_t image, uint64_t first, uint64_t count, uint64_t *slice)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_mem_copy(uint64_t dst, uint64_t dst_offset, uint64_t src, uint64_t src_offset, uint64_t len)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_release_entry(uint64_t release, uint64_t index, bool check, erx_release_entry_t *entry)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_mem_create_paged(uint64_t budget, uint64_t size, uint32_t flags, uint64_t *mem) ERX_WARN_UNUSED_RESULT;
+int	erx_mem_supply(uint64_t mem, uint64_t offset, uint64_t src, uint64_t src_offset, uint64_t len)
+	    ERX_WARN_UNUSED_RESULT;
+int	erx_mem_seal(uint64_t mem) ERX_WARN_UNUSED_RESULT;
 
 /*
  * Handle calls (docs/design-stopgap.md, "Capabilities in Fiasco's object space"): a

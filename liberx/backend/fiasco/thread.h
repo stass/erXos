@@ -40,9 +40,17 @@ typedef enum erx_fiasco_thread_state {
 	ERX_FIASCO_THREAD_STARTED
 } erx_fiasco_thread_state_t;
 
-/* A record's size, and the table of them that each task commits at one constant address. */
+/*
+ * A record's size, and the table of them that each task commits at one constant address;
+ * after the table, on a page of its own, its home group's entry labels (park.c), which the
+ * service's bind writes through the window. Each task commits the area whole.
+ */
 #define ERX_FIASCO_THREAD_RECORD_BYTES	2048u
 #define ERX_FIASCO_THREAD_TABLE_BYTES	((uint64_t)ERX_FIASCO_THREADS_MAX * ERX_FIASCO_THREAD_RECORD_BYTES)
+#define ERX_FIASCO_TASK_AREA_BYTES	(ERX_FIASCO_THREAD_TABLE_BYTES + ERX_PAGE_SIZE)
+
+/* The label page: entry n's label at index n, read by the home task with acquire order. */
+_Atomic uint64_t *erx_fiasco_labels(void);
 
 /* One thread's record. */
 typedef struct erx_fiasco_thread_record {
@@ -95,6 +103,9 @@ uint64_t	erx_fiasco_thread_native_slot(uint32_t);
 uint64_t	erx_fiasco_thread_semaphore_cap(uint32_t);
 uint64_t	erx_fiasco_thread_cap(uint32_t);
 
+/* The most IRQ objects the machine holds at once: each has a slot of the root's. */
+#define ERX_FIASCO_IRQS_MAX	256u
+
 /*
  * The root's capability slots past both per-thread runs, as erx_fiasco_root_slot_cap
  * takes them: its numbering continues the thread capabilities'. One list, so that no
@@ -104,10 +115,10 @@ enum {
 	ERX_FIASCO_SLOT_SERVICE_GATE = ERX_FIASCO_THREADS_MAX,
 	ERX_FIASCO_SLOT_SERVICE_THREAD,
 	ERX_FIASCO_SLOT_WATCHDOG,
-	/* One slot for each IRQ object. */
+	/* One slot for each IRQ object of the machine's, which irq.c keeps. */
 	ERX_FIASCO_SLOT_IRQS,
 	/* Each task's run of slots: service_task.c divides them. */
-	ERX_FIASCO_SLOT_TASK_RUNS = ERX_FIASCO_SLOT_IRQS + ERX_BACKEND_PARK_OBJECTS_MAX
+	ERX_FIASCO_SLOT_TASK_RUNS = ERX_FIASCO_SLOT_IRQS + ERX_FIASCO_IRQS_MAX
 };
 
 uint64_t	erx_fiasco_root_slot_cap(uint32_t);

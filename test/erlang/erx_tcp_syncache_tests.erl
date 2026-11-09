@@ -94,8 +94,9 @@ forgery_test() ->
     [?assertEqual(reset, Expand(Other, Good)) || Other <- [{L, LP, F, FP + 1}, {L, LP + 1, F, FP},
                                                            {L, LP, <<192, 0, 2, 8>>, FP}]].
 
-%% Property 4: an ACK matching no entry is checked as a cookie exactly when the table
-%% overflowed within the last 15 whole seconds of uptime, so still at 15 s, as FreeBSD's
+%% Property 4: an ACK matching no entry is checked as a cookie exactly when the table is
+%% paused or overflowed within the last 15 whole seconds of uptime, so still at 15 s, one
+%% second after the first pause ends, as FreeBSD's
 %% `sch_last_overflow < time_uptime - SYNCOOKIE_LIFETIME` decides, and not at 16 s.
 overflow_window_test() ->
     Secrets = secrets(),
@@ -113,21 +114,85 @@ overflow_window_test() ->
     ?assertMatch({ok, _}, Expand2(14999)),
     ?assertEqual(reset, Expand2(15000)).
 
-%% Property 5: the table never exceeds its bound; a SYN past it gets a SYN-ACK and no entry.
+conn(Port) -> {<<10, 0, 0, 1>>, 80, <<192, 0, 2, 7>>, Port}.
+
+%% SYNs from ports Ports, each at Now, into Cache; every one must draw one SYN-ACK.
+add_all(Ports, Now, Cache) ->
+    lists:foldl(fun(Port, C0) ->
+                        Conn = conn(Port),
+                        {C1, [{send, Conn, #tcp{}, _}]} =
+                            erx_tcp_syncache:add(Conn, syn(Conn, #tcp_opts{}), ?LISTENER, ctx(Now), C0),
+                        C1
+                end, Cache, Ports).
+
+%% Property 5: the table never exceeds its bound, and a SYN that finds it full gets a
+%% SYN-ACK, makes no entry and pauses the table: every entry, the oldest FreeBSD would drop
+%% among them, is dropped and none is retransmitted, and the SYNs of the next 15 s make no
+%% entries. The dropped entries' handshakes still complete by their cookies.
 bound_test() ->
-    Conns = [{<<10, 0, 0, 1>>, 80, <<192, 0, 2, 7>>, Port} || Port <- lists:seq(1000, 1009)],
-    {Cache, Sent} = lists:foldl(
-                      fun(Conn, {C0, N}) ->
-                              {C1, [{send, Conn, #tcp{}, _}]} =
-                                  erx_tcp_syncache:add(Conn, syn(Conn, #tcp_opts{}), ?LISTENER, ctx(0), C0),
-                              ?assert(erx_tcp_syncache:size(C1) =< 4),
-                              {C1, N + 1}
-                      end, {erx_tcp_syncache:new(4), 0}, Conns),
-    ?assertEqual(10, Sent),
-    ?assertEqual(4, erx_tcp_syncache:size(Cache)),
-    %% The four that fit keep their entries; their retransmissions come due.
-    {_, Resent} = erx_tcp_syncache:expired(1000, Cache),
-    ?assertEqual(lists:sublist(Conns, 4), [Conn || {send, Conn, _, _} <- Resent]).
+    Full = add_all(lists:seq(1000, 1003), 0, erx_tcp_syncache:new(4)),
+    ?assertEqual(4, erx_tcp_syncache:size(Full)),
+    ?assertNot(erx_tcp_syncache:cookies_only(0, Full)),
+    %% The oldest entry's SYN-ACK, the same cookie whichever table answered it.
+    {_, [Synack]} = erx_tcp_syncache:add(conn(1000), syn(conn(1000), #tcp_opts{}), ?LISTENER,
+                                         ctx(0), erx_tcp_syncache:new()),
+    Paused = add_all([1004], 500, Full),
+    ?assertEqual(0, erx_tcp_syncache:size(Paused)),
+    ?assert(erx_tcp_syncache:cookies_only(500, Paused)),
+    ?assertEqual({Paused, []}, erx_tcp_syncache:expired(1000, Paused)),
+    ?assertEqual(infinity, erx_tcp_syncache:next_deadline(Paused)),
+    ?assertMatch({{ok, _}, _, []},
+                 erx_tcp_syncache:expand(conn(1000), ack_for(Synack, #tcp_opts{}), ?LISTENER, ctx(900),
+                                         Paused)),
+    ?assertEqual(0, erx_tcp_syncache:size(add_all(lists:seq(1005, 1009), 14999, Paused))).
+
+%% syncache_pause and syncache_unpause: the first pause lasts 15 s and ends when uptime
+%% reaches its end (pause_until - time_uptime no longer positive), so 14.999 s is paused and
+%% 15 s is not. A pause that starts less than the last pause's own length after it ended
+%% doubles, at most six times, to 960 s; one that starts exactly that long after starts again
+%% at 15 s. While paused, an ACK matching no entry is checked as a cookie even when the
+%% overflow was more than 15 s ago.
+pause_test() ->
+    Overflow = fun(Now, C) -> add_all([2000], Now, C) end,
+    P0 = Overflow(0, erx_tcp_syncache:new(0)),
+    ?assert(erx_tcp_syncache:cookies_only(14999, P0)),
+    ?assertNot(erx_tcp_syncache:cookies_only(15000, P0)),
+    %% A paused table makes no entry until the pause ends.
+    Refilled = Overflow(0, add_all([3000], 0, erx_tcp_syncache:new(1))),
+    ?assertEqual(0, erx_tcp_syncache:size(add_all([3001], 14999, Refilled))),
+    ?assertEqual(1, erx_tcp_syncache:size(add_all([3001], 15000, Refilled))),
+    %% 20 s is within 15 s of the first pause's end: 30 s, to 50 s.
+    P1 = Overflow(20000, P0),
+    ?assert(erx_tcp_syncache:cookies_only(49999, P1)),
+    ?assertNot(erx_tcp_syncache:cookies_only(50000, P1)),
+    %% At 36 s the overflow at 20 s is past its 15 s window: a cookie is checked only while
+    %% the 30 s pause holds, not after the 15 s pause of a table that overflowed once.
+    {Once, Synack} = cookie_synack(?V4, full_opts(), 20000, secrets()),
+    Ack = ack_for(Synack, #tcp_opts{}),
+    ?assertMatch({{ok, _}, _, []}, erx_tcp_syncache:expand(?V4, Ack, ?LISTENER, ctx(36000), P1)),
+    ?assertEqual(reset, element(1, erx_tcp_syncache:expand(?V4, Ack, ?LISTENER, ctx(36000), Once))),
+    %% 79 s is within 30 s of 50 s, so 60 s; 80 s is not, so 15 s.
+    ?assert(erx_tcp_syncache:cookies_only(138999, Overflow(79000, P1))),
+    ?assertNot(erx_tcp_syncache:cookies_only(139000, Overflow(79000, P1))),
+    ?assert(erx_tcp_syncache:cookies_only(94999, Overflow(80000, P1))),
+    ?assertNot(erx_tcp_syncache:cookies_only(95000, Overflow(80000, P1))),
+    %% Each pause renewed at once at the end of the last: 15, 30, ..., 960, 960 s.
+    {_, Lengths} = lists:foldl(
+                     fun(_, {{C, Start}, Acc}) ->
+                             C1 = Overflow(Start, C),
+                             Len = pause_length(Start, C1),
+                             {{C1, Start + Len}, [Len div 1000 | Acc]}
+                     end, {{erx_tcp_syncache:new(0), 0}, []}, lists:seq(1, 9)),
+    ?assertEqual([15, 30, 60, 120, 240, 480, 960, 960, 960], lists:reverse(Lengths)).
+
+%% The milliseconds from Start, a whole second, to the end of the pause in force at Start.
+pause_length(Start, Cache) ->
+    pause_length(Start, Start, Cache).
+pause_length(Start, Now, Cache) ->
+    case erx_tcp_syncache:cookies_only(Now, Cache) of
+        true -> pause_length(Start, Now + 1000, Cache);
+        false -> Now - Start
+    end.
 
 %% syncache_timeout and syncache_timer: retransmissions at 1, 3.2 and 7.4 s, the entry
 %% dropped at 15.6 s; ECE on the SYN-ACK and its first retransmission only.

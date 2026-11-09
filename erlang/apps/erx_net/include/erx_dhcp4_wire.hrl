@@ -2,9 +2,10 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% A DHCP message (RFC 2131 section 2) as erx_dhcp4_wire decodes and encodes it. The
-%% server host name and boot file fields are not kept: the client reads neither, and the
-%% encoder writes them as zeros. `chaddr` holds the client hardware address's `hlen` bytes;
-%% `options` holds the options erx_dhcp4_wire knows, each checked (erx_dhcp4_wire:options()).
+%% server host name and boot file fields are not kept: the decoder reads them only for
+%% the options an overload option moves there, and the encoder writes them as zeros.
+%% `chaddr` holds the client hardware address's `hlen` bytes; `options` holds
+%% the options erx_dhcp4_wire knows, each checked (erx_dhcp4_wire:options()).
 -record(dhcp4, {op = request :: request | reply,
                 htype = 1 :: 0..255,
                 hops = 0 :: 0..255,

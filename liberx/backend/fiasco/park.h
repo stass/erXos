@@ -39,9 +39,6 @@ void		erx_fiasco_group_signal(uint32_t object);
 /* Moves up to max listed objects into objects, oldest first, and returns how many. */
 uint32_t	erx_fiasco_group_take(uint32_t max, uint32_t *objects);
 
-/* Entry's label, which a bind writes before the object may fire and a take reads. The caller bounds entry. */
-_Atomic uint64_t *erx_fiasco_park_label(uint32_t entry);
-
 /*
  * Starts the task's dispatcher, a worker created in group (ERX_CAP_NULL, which names no
  * record, for a task's), and names it to the service: once per task, at its backend's

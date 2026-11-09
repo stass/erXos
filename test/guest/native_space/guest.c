@@ -10,7 +10,9 @@
  * gate, and the gate calls' refusals and queue; and spaces: a task that creates spaces
  * below its own, the create's refusals, and a release at the last handle's close; a
  * created space's first thread, which the root makes and starts; budgets and groups as
- * records; and handles the root passes into a task with erx_cap_pass. Each case says
+ * records; handles the root passes into a task with erx_cap_pass; a budget whose
+ * last handle a task holds, which ends after that task's end; and slices of the
+ * image, which a task lists with erx_release_entry, and erx_mem_copy. Each case says
  * one line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
 
@@ -24,6 +26,7 @@
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/log.h"
+#include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -46,6 +49,9 @@
 #define QUEUE_LABEL	UINT64_C(0x5e0000000000b000)
 #define RELEASE_LABEL	UINT64_C(0x5e0000000000c000)
 #define BUDGET_LABEL	UINT64_C(0x5e0000000000d000)
+#define HELD_LABEL	UINT64_C(0x5e0000000000e000)
+/* More pages than one erx_mem_copy request copies. */
+#define COPY_PAGES	66u
 
 void erx_fiasco_root_main(void);
 
@@ -440,7 +446,8 @@ group_start(uint64_t space, uint64_t group, uint64_t argument)
  * it, so a root thread in a second group is a second home group, refused, and the first
  * cannot be destroyed while the root has threads. A domain's group takes its task as
  * home with the task's first thread, and goes with the task, so the root's handle to it
- * is stale once the task is joined. Last, as the root's dispatcher stays.
+ * is stale once the task is joined. The root's dispatcher stays, so only cases that
+ * may find the root with a group of its own follow.
  */
 static void
 case_groups(void)
@@ -597,14 +604,21 @@ item_word(size_t item, size_t word)
 	return (value);
 }
 
+/* Whether a pass rewrote the item as a handle of the type with exactly these rights. */
+static bool
+item_typed(size_t item, erx_ktype_t type, uint32_t rights)
+{
+	const uint64_t desc = item_word(item, 0);
+
+	return (erx_msg_item_desc_type_get(desc) == type && erx_msg_item_desc_rights_get(desc) == rights &&
+	    erx_msg_item_desc_move_get(desc) == 0 && item_word(item, 1) != ERX_CAP_NULL);
+}
+
 /* Whether a pass rewrote the item as a memory object's handle with exactly these rights. */
 static bool
 item_passed(size_t item, uint32_t rights)
 {
-	const uint64_t desc = item_word(item, 0);
-
-	return (erx_msg_item_desc_type_get(desc) == ERX_K_MEMORY && erx_msg_item_desc_rights_get(desc) == rights &&
-	    erx_msg_item_desc_move_get(desc) == 0 && item_word(item, 1) != ERX_CAP_NULL);
+	return (item_typed(item, ERX_K_MEMORY, rights));
 }
 
 /*
@@ -684,6 +698,185 @@ case_passing(void)
 	say_case("passing", passed);
 }
 
+/* Whether the root group's epoch moves past epoch before the deadline: some object of the group fired. */
+static bool
+epoch_moves(uint64_t epoch)
+{
+	const uint64_t deadline = erx_fiasco_clock_ns() + WAIT_NS;
+
+	while (atomic_load_explicit(&erx_fiasco_group_status()->epoch, memory_order_acquire) == epoch)
+		if (erx_fiasco_clock_ns() >= deadline)
+			return (false);
+	return (true);
+}
+
+/*
+ * Doorbells between tasks (docs/design-stopgap.md, "Interrupts and readiness"). The
+ * root binds a bell to a domain group that has no home yet, so the bind waits, and
+ * rings it before the task has a thread: the bind, made once the task's first thread
+ * fixes the home and its dispatcher registers, delivers that ring. The root passes the
+ * task its handles to the bell and to an object bound to the root's own group; the
+ * task's executor takes the bell's label, acks the bell and rings the root's object,
+ * which moves the root group's epoch. The task's end takes its group and the bell's
+ * bind with it, so the bell's destroy finds it unbound; the other is destroyed bound.
+ * A bound object's bind to another group is refused. After case_groups, whose first
+ * group is the root's own, which ERX_CAP_SELF names.
+ */
+static void
+case_doorbells(void)
+{
+	const uint64_t epoch = atomic_load_explicit(&erx_fiasco_group_status()->epoch, memory_order_acquire);
+	uint64_t domain = ERX_CAP_NULL, bell = ERX_CAP_NULL, back = ERX_CAP_NULL, task = 0, argument;
+	int64_t status = INT64_MIN;
+	bool passed = erx_group_create(0, 0, &domain) == ERX_OK && erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &bell) == ERX_OK &&
+	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &back) == ERX_OK && erx_irq_bind(bell, domain, BELL_LABEL) == ERX_OK &&
+	    erx_irq_bind(bell, ERX_CAP_SELF, BELL_LABEL) == ERX_ENOTSUP &&
+	    erx_irq_bind(back, ERX_CAP_SELF, BACK_LABEL) == ERX_OK && erx_irq_trigger(bell) == ERX_OK &&
+	    erx_fiasco_launch_make(program_entry, 0, &task, &program_pc) == ERX_OK;
+
+	item_put(0, bell, ERX_HR_TRIGGER | ERX_HR_ACK, false);
+	item_put(1, back, ERX_HR_TRIGGER, false);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 2) == ERX_OK &&
+	    erx_msg_item_desc_type_get(item_word(0, 0)) == ERX_K_IRQ && erx_msg_item_desc_type_get(item_word(1, 0)) == ERX_K_IRQ;
+	argument = MODE_BELL | (item_word(0, 1) & HANDLE_MASK) << BELL_SHIFT | (item_word(1, 1) & HANDLE_MASK) << BACK_SHIFT;
+	if (passed && group_start(task, domain, argument)) {
+		if (erx_fiasco_task_join_until(task, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+			status = INT64_MIN;
+	} else if (task != 0) {
+		task_drop(task);
+	}
+	say_count("bell_status", (uint64_t)status);
+	passed = passed && status == 0 && epoch_moves(epoch);
+	passed = passed && erx_object_destroy(domain) == ERX_ESTALE && erx_object_destroy(bell) == ERX_OK &&
+	    erx_object_destroy(back) == ERX_OK && erx_irq_trigger(bell) == ERX_ESTALE;
+	say_case("doorbells", passed);
+}
+
+/*
+ * A task that holds the last handle of the budget its own space is charged to ends that
+ * budget with its own end. The root moves the budget and a group charged to it into
+ * the space, so it keeps no handle to either, and starts the space's first thread,
+ * which ends with FIRST_STATUS. The space ends once: its end closes its handles, and
+ * the budget's end, which waits until the space's row is reset, deletes the space and
+ * everything else charged to the budget. The deletion withdraws the exit record, as
+ * every deletion does, so none reaches the root's gate; the root's handles to the
+ * space and to a memory object charged to the budget are stale, and the pages come
+ * back.
+ */
+static void
+case_budget_held(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t gate = ERX_CAP_NULL, budget = ERX_CAP_NULL, group = ERX_CAP_NULL, space = ERX_CAP_NULL;
+	uint64_t mem = ERX_CAP_NULL, copy, thread, pc, label, deadline;
+	erx_fault_t record;
+	bool passed = erx_gate_create(0, &gate) == ERX_OK && erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
+	    erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, 64, 64, &budget) == ERX_OK &&
+	    erx_group_create(budget, 0, &group) == ERX_OK && erx_mem_create(budget, PAGE, 0, &mem) == ERX_OK &&
+	    erx_space_create(budget, ERX_CAP_SELF, gate, HELD_LABEL, 0, TASK_CAP_LIMIT, &space) == ERX_OK &&
+	    erx_image_map(space, 0, program_entry, &pc) == ERX_OK;
+
+	item_put(0, budget, ERX_HR_ALLOC | ERX_HR_DESTROY, true);
+	item_put(1, group, ERX_HR_ATTACH | ERX_HR_SIGNAL, true);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, space, 2) == ERX_OK && item_typed(0, ERX_K_BUDGET, ERX_HR_ALLOC) &&
+	    item_typed(1, ERX_K_GROUP, ERX_HR_ATTACH | ERX_HR_SIGNAL) && erx_cap_close(budget) == ERX_EINVAL &&
+	    erx_cap_close(group) == ERX_EINVAL;
+	erx_fiasco_launch_set_registers(program_pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
+	passed = passed && erx_thread_create(0, space, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_OK &&
+	    erx_thread_start(thread) == ERX_OK;
+
+	/* The space's stop and the budget's end are one request, so the object stays until both are done. */
+	deadline = erx_fiasco_clock_ns() + WAIT_NS;
+	while (passed && erx_cap_dup(mem, &copy) == ERX_OK)
+		passed = erx_cap_close(copy) == ERX_OK && erx_fiasco_clock_ns() < deadline;
+	passed = passed && erx_object_destroy(mem) == ERX_ESTALE && erx_object_destroy(space) == ERX_ESTALE &&
+	    !record_wait(erx_fiasco_clock_ns() + SETTLE_NS, &record, &label);
+	passed = erx_cap_close(mem) == ERX_OK && erx_cap_close(space) == ERX_OK && erx_cap_close(gate) == ERX_OK && passed;
+	say_count("held_free_pages", erx_fiasco_vm_free_pages());
+	say_case("budget_held", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/*
+ * A slice of the image's two domains/sample/ files, mapped read-only into a task and
+ * passed to it, which lists it with erx_release_entry (program.c). A run past the
+ * index is ERX_ERANGE, a writable map of the slice ERX_ERIGHTS, and an entry asked of
+ * a memory object that is no slice ERX_ETYPE.
+ */
+static void
+case_slices(uint32_t first)
+{
+	static erx_release_entry_t entry;
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t space = 0, slice = 0, mem = 0, refused;
+	int64_t status = INT64_MIN;
+	bool passed = erx_image_slice(0, 0, first, 2, &slice) == ERX_OK &&
+	    erx_image_slice(0, 0, first, UINT64_C(1) << 32, &refused) == ERX_ERANGE &&
+	    erx_mem_create(0, PAGE, 0, &mem) == ERX_OK && erx_fiasco_release_entry(mem, 0, false, &entry) == ERX_ETYPE &&
+	    task_make(&space, SLICE_ADDR, SLICE_PAGES) &&
+	    erx_vm_map(space, SLICE_ADDR, SLICE_PAGES * PAGE, slice, 0, ERX_PROT_RW) == ERX_ERIGHTS &&
+	    erx_vm_map(space, SLICE_ADDR, SLICE_PAGES * PAGE, slice, 0, ERX_PROT_R) == ERX_OK;
+
+	if (passed) {
+		item_put(0, slice, ERX_HR_READ, false);
+		passed = erx_cap_pass(ERX_CAP_SELF, space, 1) == ERX_OK;
+	}
+	if (passed)
+		status = task_finish(space, MODE_RELEASE | item_word(0, 1) << SLOT_SHIFT);
+	else if (space != 0)
+		task_drop(space);
+	say_count("release_status", (uint64_t)status);
+	passed = passed && status == 0;
+	passed = (slice == 0 || erx_cap_close(slice) == ERX_OK) && (mem == 0 || erx_cap_close(mem) == ERX_OK) && passed;
+	say_case("slices", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/* An object of size bytes mapped read-write into the root at *addr. */
+static bool
+copy_object(uint64_t size, uint64_t *mem, uint64_t *addr)
+{
+	return (erx_mem_create(0, size, 0, mem) == ERX_OK && erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, addr) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, *addr, size, *mem, 0, ERX_PROT_RW) == ERX_OK);
+}
+
+static uint64_t
+copy_word(uint64_t addr)
+{
+	return (*(volatile const uint64_t *)(uintptr_t)addr);
+}
+
+/*
+ * erx_mem_copy of more pages than one request copies, eight bytes off the source's
+ * page boundaries; a range a byte past the destination and a source offset whose sum
+ * wraps are ERX_ERANGE and leave the destination as it was, a copy into a slice
+ * ERX_ERIGHTS, and one from a destroyed object ERX_ESTALE.
+ */
+static void
+case_copy(uint32_t first)
+{
+	const uint64_t size = COPY_PAGES * PAGE;
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t src = 0, dst = 0, slice = 0, src_addr = 0, dst_addr = 0;
+	bool passed = copy_object(size, &src, &src_addr) && copy_object(size, &dst, &dst_addr) &&
+	    erx_image_slice(0, 0, first, 1, &slice) == ERX_OK;
+
+	for (uint64_t page = 0; passed && page < COPY_PAGES; page++)
+		*(volatile uint64_t *)(uintptr_t)(src_addr + page * PAGE + sizeof(uint64_t)) = ROOT_PATTERN + page;
+	passed = passed && erx_mem_copy(dst, 0, src, sizeof(uint64_t), size - sizeof(uint64_t)) == ERX_OK;
+	for (uint64_t page = 0; passed && page < COPY_PAGES; page++)
+		passed = copy_word(dst_addr + page * PAGE) == ROOT_PATTERN + page;
+	passed = passed && erx_mem_copy(dst, 1, src, 0, size) == ERX_ERANGE &&
+	    erx_mem_copy(dst, 0, src, UINT64_MAX - 7, 16) == ERX_ERANGE && copy_word(dst_addr) == ROOT_PATTERN &&
+	    erx_mem_copy(slice, 0, src, 0, sizeof(uint64_t)) == ERX_ERIGHTS;
+	if (src_addr != 0)
+		passed = erx_vm_release(ERX_CAP_SELF, src_addr, size) == ERX_OK && passed;
+	if (dst_addr != 0)
+		passed = erx_vm_release(ERX_CAP_SELF, dst_addr, size) == ERX_OK && passed;
+	passed = passed && erx_object_destroy(src) == ERX_OK && erx_mem_copy(dst, 0, src, 0, sizeof(uint64_t)) == ERX_ESTALE;
+	passed = (src == 0 || erx_cap_close(src) == ERX_OK) && (dst == 0 || erx_cap_close(dst) == ERX_OK) &&
+	    (slice == 0 || erx_cap_close(slice) == ERX_OK) && passed;
+	say_case("copy", passed && erx_fiasco_vm_free_pages() == before);
+}
+
 /*
  * The root's own tables, and the service's rows for the first two task indices, take
  * their pages here, so no case counts them against its pool.
@@ -748,6 +941,7 @@ erx_fiasco_root_main(void)
 	erx_boot_handoff_view_t handoff;
 	static erx_pack_view_t pack;
 	const char *reason = erx_fiasco_root_open(&handoff, &pack);
+	uint32_t release_first = 0;
 
 	if (reason == NULL)
 		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
@@ -772,6 +966,12 @@ erx_fiasco_root_main(void)
 	case_groups();
 	case_passing();
 	case_time();
+	case_budget_held();
+	case_doorbells();
+	if (erx_fiasco_launcher_find(&pack, RELEASE_FIRST_PATH, &release_first) != ERX_OK)
+		say("erx: space: no domain release\n");
+	case_slices(release_first);
+	case_copy(release_first);
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

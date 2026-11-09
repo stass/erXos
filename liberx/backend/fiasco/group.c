@@ -33,9 +33,8 @@ static int	group_fill(uint32_t, const void *);
 /* Whether the root's first create has begun; group_up says it finished. */
 static _Atomic bool group_created;
 static _Atomic bool group_up;
-/* The root's own group and its dispatcher's index: written before group_up's release, read after its acquire. */
+/* The root's own group: written before group_up's release, read after its acquire. */
 static uint64_t group_root;
-static uint64_t group_dispatcher;
 static _Atomic uint64_t group_cpuset;
 
 /* A group record holds nothing beyond its object record: its home is its home task's row. */
@@ -83,8 +82,10 @@ erx_fiasco_group_admit(uint32_t caller, uint32_t task, uint64_t group, uint32_t 
 void
 erx_fiasco_group_join(uint32_t task, uint32_t record)
 {
-	if (record != ERX_FIASCO_GROUP_NONE)
-		erx_fiasco_task(task)->group = record + 1;
+	if (record == ERX_FIASCO_GROUP_NONE)
+		return;
+	erx_fiasco_task(task)->group = record + 1;
+	erx_fiasco_irq_group_ready(record);
 }
 
 bool
@@ -104,13 +105,14 @@ erx_fiasco_group_free(uint32_t record)
 {
 	uint32_t home;
 
+	erx_fiasco_irq_group_end(record);
 	if (erx_fiasco_task_group_home(record, &home))
 		erx_fiasco_task(home)->group = 0;
 }
 
 /*
  * The thread is one of the task's own, created and not reaped; a task names one
- * dispatcher. Its reader is the bind to a task's group, which IRQ objects in tasks bring.
+ * dispatcher, which receives every IRQ object bound to its home group (irq.c).
  */
 int
 erx_fiasco_dispatcher_set_body(uint32_t task, uint64_t thread)
@@ -120,6 +122,8 @@ erx_fiasco_dispatcher_set_body(uint32_t task, uint64_t thread)
 	if (thread >= ERX_FIASCO_THREADS_MAX || row->threads[thread] == ERX_FIASCO_TASK_THREAD_ABSENT || row->dispatcher != 0)
 		return (ERX_EINVAL);
 	row->dispatcher = (uint32_t)thread + 1;
+	if (row->group != 0)
+		erx_fiasco_irq_group_ready(row->group - 1);
 	return (ERX_OK);
 }
 
@@ -150,7 +154,6 @@ erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group)
 			return (status);
 		}
 		group_root = reply.first;
-		group_dispatcher = thread;
 		atomic_store_explicit(&group_up, true, memory_order_release);
 	}
 	*group = reply.first;
@@ -185,11 +188,10 @@ int
 erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
 {
 	const erx_fiasco_irq_create_request_t request = { .caller = erx_fiasco_thread_self()->index,
-	    .kind = kind, .selector = selector };
+	    .kind = kind, .selector = selector, .budget = budget };
 	erx_fiasco_reply_t reply;
 	int status;
 
-	(void)budget;
 	(void)resource;
 	status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &request, sizeof(request), &reply);
 	if (status == ERX_OK)
@@ -197,56 +199,22 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selec
 	return (status);
 }
 
-/*
- * ERX_CAP_NULL unbinds; ERX_CAP_SELF and the handle of the root's first group both name
- * the root's own. Binding a bound object moves its label, which only the park record holds.
- */
+/* ERX_CAP_NULL unbinds; the service keeps every bind and writes each label (irq.c). */
 int
 erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label)
 {
 	erx_fiasco_reply_t reply;
-	uint64_t previous;
-	int status;
 
-	if (irq >= ERX_BACKEND_PARK_OBJECTS_MAX)
-		return (ERX_EINVAL);
 	if (group == ERX_CAP_NULL) {
 		const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
 
-		status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &request, sizeof(request), &reply);
-		if (status == ERX_OK)
-			atomic_store_explicit(erx_fiasco_park_label((uint32_t)irq), 0, memory_order_release);
-		return (status);
+		return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &request, sizeof(request), &reply));
 	}
-	if (!group_is_root(group))
-		return (ERX_EINVAL);
-	previous = atomic_exchange_explicit(erx_fiasco_park_label((uint32_t)irq), label, memory_order_acq_rel);
 
 	const erx_fiasco_irq_bind_request_t request = { .caller = erx_fiasco_thread_self()->index,
-	    .irq = irq, .thread = group_dispatcher, .record = irq };
+	    .irq = irq, .group = group, .label = label };
 
-	status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &request, sizeof(request), &reply);
-	if (status != ERX_OK)
-		atomic_store_explicit(erx_fiasco_park_label((uint32_t)irq), previous, memory_order_release);
-	return (status);
-}
-
-int
-erx_irq_ack(uint64_t irq)
-{
-	const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
-	erx_fiasco_reply_t reply;
-
-	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_ACK, &request, sizeof(request), &reply));
-}
-
-int
-erx_irq_trigger(uint64_t irq)
-{
-	const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
-	erx_fiasco_reply_t reply;
-
-	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_TRIGGER, &request, sizeof(request), &reply));
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &request, sizeof(request), &reply));
 }
 
 /*

@@ -14,6 +14,7 @@ include kernel.txt
 include protocols/9p.txt
 include protocols/hostlink.txt
 include formats/ui.txt
+include protocols/web.txt
 
 limit page_size u32 4096
 limit copy_max u32 1048576
@@ -395,6 +396,9 @@ enum fiasco_call u32
   value group_create 41
   value dispatcher_set 42
   value cap_pass 43
+  value image_slice 44
+  value mem_copy 45
+  value release_entry 46
 
 # erx_object_info's topics and the report each writes (docs/design-abi.md,
 # "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
@@ -581,16 +585,20 @@ layout erx_fiasco_machine_end_request wire_le 8 24
   field res u64 8
   field how u64 16
 
-layout erx_fiasco_irq_create_request wire_le 8 24
+# erx_irq_create: the record is charged to budget, as every create's.
+layout erx_fiasco_irq_create_request wire_le 8 32
   field caller u64 0
   field kind u64 8
   field selector u64 16
+  field budget u64 24
 
+# erx_irq_bind to a group, ERX_CAP_SELF for the caller's home group; the
+# unbind is irq_unbind's erx_fiasco_irq_request.
 layout erx_fiasco_irq_bind_request wire_le 8 32
   field caller u64 0
   field irq u64 8
-  field thread u64 16
-  field record u64 24
+  field group u64 16
+  field label u64 24
 
 layout erx_fiasco_irq_request wire_le 8 16
   field caller u64 0
@@ -693,6 +701,41 @@ layout erx_fiasco_cap_pass_request wire_le 8 32
   field from u64 8
   field to u64 16
   field count u64 24
+
+# erx_image_slice, from the root alone: the archive's entries [first, first +
+# count) as one memory object, charged to budget; image names the boot image,
+# the one this backend has. The slice's handle is the reply's first word.
+layout erx_fiasco_image_slice_request wire_le 8 40
+  field caller u64 0
+  field budget u64 8
+  field image u64 16
+  field first u64 24
+  field count u64 32
+
+# erx_mem_copy: len bytes from src at src_offset to dst at dst_offset, of
+# which the stub's earlier requests copied done. Each request checks the
+# whole range and copies at most 64 pages more; the reply's first word is
+# the new done.
+layout erx_fiasco_mem_copy_request wire_le 8 56
+  field caller u64 0
+  field dst u64 8
+  field dst_offset u64 16
+  field src u64 24
+  field src_offset u64 32
+  field len u64 40
+  field done u64 48
+
+# erx_release_entry in a task: the index-th entry of the slice release, its
+# file checked first when check is 1. The reply's words are the size, the
+# offset from the slice's first byte and the path's length; the path's bytes
+# from piece on, at most utcb_bytes_max of them, are in the caller's public
+# UTCB.
+layout erx_fiasco_release_entry_request wire_le 8 40
+  field caller u64 0
+  field release u64 8
+  field index u64 16
+  field piece u64 24
+  field check u64 32
 
 # erx_gate_create: the gate's handle is the reply's first word.
 layout erx_fiasco_gate_create_request wire_le 8 16

@@ -694,8 +694,9 @@ kind does not take or of the wrong type; a `within` bound without a
 `image/` type, and `image/svg+xml`; and a kind whose largest `insert`,
 every property it takes at its bound, exceeds `web_ui_op_max`, the room
 one web update leaves for an operation
-([design-web.md](design-web.md#the-protocol)), a root limit `ui.txt`
-declares beside `ui_pixels_max` and `ui_children`, the most children one
+([design-web.md](design-web.md#the-protocol)), a root limit of
+`web.txt` ([Web protocol](#web-protocol)); and beside it `ui.txt`'s own
+`ui_pixels_max` and `ui_children`, the most children one
 node of a tree has, 1,024, which bounds the difference of two trees and
 keeps every `insert`'s and `move`'s index within its `u16`.
 
@@ -809,6 +810,67 @@ Rune | none}}` or `{input, {wheel, Steps}}`, `repaint` is the atom, an
 event is `{event, Node, Event, Detail}` with the detail `none`, a
 boolean, an integer or a binary, and a report is `{pixels, X, Y, Width,
 Height, Pixels}`.
+
+### Web protocol
+
+`protocols/web.txt` holds the one `web VERSION` declaration of the web
+protocol ([design-web.md](design-web.md#the-protocol)) and the root
+limits named `web_*`, its bounds. Each member declares one type:
+`integer NAME u8|u16|u32 [min N]`; `bytes NAME MAX [exact]` and
+`text NAME MAX`, a `u32` length and the bytes, which TypeScript reads as
+a `Uint8Array` and as a `MachineText`; `digits NAME MAX`, a decimal
+integer in its one canonical form (`0`, or digits without a leading zero
+after an optional minus), which TypeScript reads as a `bigint`;
+`stopgap NAME`, the name of a stopgap reporter the inspection schema
+declares; `ui_record NAME MAX`, one record of the widget format's binary
+form, its `u32` length word included, which the widget format's own
+readers decode; `list NAME ELEMENT MAX`, a `u32` count and the elements;
+`tuple NAME FIELD:TYPE...` and `map NAME FIELD:TYPE...`, the fields in
+order; and `union NAME [depth N] [message MAX]`, a `u8` tag and its
+case's fields, with one `case NAME TAG [FIELD:TYPE...]` line beneath it
+per member, tags from 1 to 255. `boolean`, a `u8` of 0 or 1, needs no
+declaration. A MAX is a limit's name or a number from 1 to the largest
+`u32`. Validation refuses an unresolved type, a field named `tag` (the
+TypeScript discriminant), a type named after an Erlang built-in type, a
+cycle of types that passes through no depth union, more than one depth
+union, a depth above 8, a depth union whose every case nests, and a
+message union that another type names.
+
+A union with `depth N` names itself through its cases' fields. Rather
+than expanding the union into N copies, both codecs carry the level as
+an argument: a whole message starts at level 1, a recursive case's
+fields are a level deeper, and at level N a recursive case's tag is an
+unknown tag. A union with `message MAX` is a whole message: at most MAX
+bytes, and no byte after its fields.
+
+The generator emits `erx_web_proto` and `web/src/generated/proto.ts`.
+Each is a fixed interpreter over a generated table of the declaration's
+types, `type/1` in Erlang and `TYPES` in TypeScript, so the two agree on
+every layout and bound because they read one table. In Erlang a map is a
+map with the fields as keys, a tuple a tuple, a case without fields its
+atom and one with fields `{Case, Field...}`; every text is a binary, and
+the decoder creates no atom, since each it returns is a literal of the
+table. In TypeScript a tuple or map is a frozen object with camelCase
+fields, a union of cases without fields a string, and any other union an
+object discriminated by `tag`. Both decoders return a value or a
+refusal, `{error, {Reason, Type}}` and `{ ok: false, reason }` with the
+same reason and type, and never raise on their input; both encoders
+refuse whatever their decoder would refuse; the Erlang encoder counts
+the message's room as it writes, so a term that shares subterms is
+refused at the bound, not after it has been written out. The generated
+TypeScript modules share `web/src/wire.ts`, the cursor, refusal and
+UTF-8 check, which is a source of its own because it holds no table of
+any ABI source. A text decodes as `web/src/text.ts`'s `MachineText`,
+whose one outlet is the line escape; the codec keeps the bytes of each
+text it makes in a private map, so its encoder writes back only texts
+it made, through its decoder or `machineText()`, and no outlet on
+`MachineText` is needed.
+
+Both codecs carry the protocol hash: SHA-256 over one line per source,
+`PATH SHA256\n`, for `web.txt`, `ui.txt`, `inspection.txt`,
+`terminal.txt` and the Unicode data files `terminal.txt` names, in that
+order. The generation plan records terminal.txt and its Unicode data among its inputs, so
+a change to any of them regenerates both codecs.
 
 ## Numeric assignment and versions
 

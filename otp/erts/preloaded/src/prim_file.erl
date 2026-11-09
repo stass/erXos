@@ -662,7 +662,11 @@ read_file_nif(_Filename) ->
 %% one. Like erx_path this calls only BIFs and preloaded modules: read_file/1 reads the
 %% boot script before stdlib is loaded.
 erx_do(Encoded, Op, Flags, Ops) ->
-    erx_run(erx_resolve(Encoded, Op, Flags, erx_table()), erx_mode(Flags), Ops).
+    element(2, erx_do_at(Encoded, Op, Flags, erx_table(), Ops)).
+
+%% erx_do/4 over Table, answering the action the operation ran at as well.
+erx_do_at(Encoded, Op, Flags, Table, Ops) ->
+    erx_run_at(erx_resolve(Encoded, Op, Flags, Table), erx_mode(Flags), Ops).
 
 %% How a target's last name is walked, as the operation's flags follow it.
 erx_mode(#{follow := true}) -> follow;
@@ -679,27 +683,21 @@ erx_resolve(Encoded, Op, Flags, Table) ->
             {error, eio}
     end.
 
-erx_run({error, _} = Error, _Mode, _Ops) ->
-    Error;
-erx_run(Action, Mode, #{release := Local, remote := Remote} = Ops) ->
+%% The action an operation ran at, each walk that stopped handed to its resumption, and
+%% the operation's answer there.
+erx_run_at({error, _} = Error, _Mode, _Ops) ->
+    {Error, Error};
+erx_run_at(Action, Mode, #{release := Local, remote := Remote} = Ops) ->
     case erx_where(Action) of
-        top ->
-            erx_top(Ops);
-        {release, Names} ->
-            Local(Names);
-        {grant, Grant, Where} ->
-            case Remote(Grant, Where) of
-                {resume, 1, Reply} -> erx_run(erx_resume(Action, Reply), Mode, Ops);
-                Answer -> Answer
-            end;
-        {image, Entry, Where} ->
-            case erx_image(Entry, Where, Mode, Ops) of
-                {resume, 1, Reply} -> erx_run(erx_resume(Action, Reply), Mode, Ops);
-                Answer -> Answer
-            end;
-        ended ->
-            {error, eio}
+        top -> {Action, erx_top(Ops)};
+        {release, Names} -> {Action, Local(Names)};
+        {grant, Grant, Where} -> erx_ran(Action, Remote(Grant, Where), Mode, Ops);
+        {image, Entry, Where} -> erx_ran(Action, erx_image(Entry, Where, Mode, Ops), Mode, Ops);
+        ended -> {Action, {error, eio}}
     end.
+
+erx_ran(Action, {resume, 1, Reply}, Mode, Ops) -> erx_run_at(erx_resume(Action, Reply), Mode, Ops);
+erx_ran(Action, Answer, _Mode, _Ops) -> {Action, Answer}.
 
 %% An operation on an EROFS image (design-storage.md, Reading EROFS images), run in the
 %% calling process as a grant's runs at its server.
@@ -862,9 +860,9 @@ erx_link_text(_Entry, _Names) ->
     {error, eio}.
 
 %% The working directory set_cwd/1 would store, as {cwd, Text}: the place its target
-%% reached, the entry's point and then the names below the entry's root, once the
-%% release's walk, the image's or erx_file_remote:set_cwd/2 has found a directory there.
-erx_cwd({target, #{point := Point, root := Root}, Names, _} = Action) ->
+%% reached (erx_path:target_place/1), once the release's walk, the image's or
+%% erx_file_remote:set_cwd/2 has found a directory there.
+erx_cwd({target, _, Names, _} = Action) ->
     Found = case erx_where(Action) of
                 {release, _} -> erx_cwd_on_release(release_walk_nif(Names));
                 {grant, Grant, Where} -> erx_file_remote:set_cwd(Grant, Where);
@@ -872,7 +870,7 @@ erx_cwd({target, #{point := Point, root := Root}, Names, _} = Action) ->
                 ended -> {error, eio}
             end,
     case Found of
-        ok -> {cwd, erx_text(Point ++ erx_below_root(Root, Names))};
+        ok -> {cwd, erx_text(erx_path:target_place(Action))};
         {resume, 1, Reply} -> erx_cwd(erx_resume(Action, Reply));
         Error -> Error
     end;
@@ -894,9 +892,6 @@ erx_cwd_on_release({[_ | _] = Kinds, ok}) ->
     end;
 erx_cwd_on_release({_Kinds, {error, Reason}}) -> {error, Reason};
 erx_cwd_on_release({error, Reason}) -> {error, Reason}.
-
-erx_below_root([Name | Root], [Name | Names]) -> erx_below_root(Root, Names);
-erx_below_root([], Names) -> Names.
 
 %% A place as text: / and each name.
 erx_text([]) -> <<"/">>;
@@ -962,8 +957,7 @@ read_link(Name) -> read_link_1(Name, false).
 read_link_all(Name) -> read_link_1(Name, true).
 
 read_link_1(Name, AcceptRawNames) ->
-    Encoded = encode_path(Name),
-    try erx_do(Encoded, lookup, ?ERX_NOFOLLOW,
+    try erx_do(encode_path(Name), lookup, ?ERX_NOFOLLOW,
                #{release => fun read_link_nif/1, remote => fun erx_file_remote:read_link/2,
                  image => fun erx_erofs:read_link/2}) of
         {ok, RawName} -> translate_raw_name(RawName, AcceptRawNames);
@@ -982,13 +976,17 @@ translate_raw_name(RawName, SilentFailure) ->
 list_dir(Name) -> list_dir_1(Name, true).
 list_dir_all(Name) -> list_dir_1(Name, false).
 
+%% erXos: a directory lists its provider's names and the mount points directly below it
+%% (erx_path:listing/3), from the one table the path resolved over.
 list_dir_1(Name, SkipInvalid) ->
-    Encoded = encode_path(Name),
-    try erx_do(Encoded, lookup, ?ERX_FOLLOW,
-               #{release => fun list_dir_nif/1, remote => fun erx_file_remote:list_dir/2,
-                 image => fun erx_erofs:list_dir/2}) of
-        {ok, RawNames} -> list_dir_convert(RawNames, SkipInvalid, []);
-        {error, Reason} -> {error, Reason}
+    Table = erx_table(),
+    try erx_do_at(encode_path(Name), lookup, ?ERX_FOLLOW, Table,
+                  #{release => fun list_dir_nif/1, remote => fun erx_file_remote:list_dir/2,
+                    image => fun erx_erofs:list_dir/2}) of
+        {Action, {ok, RawNames}} ->
+            list_dir_convert(erx_path:listing(Action, RawNames, Table), SkipInvalid, []);
+        {_, {error, Reason}} ->
+            {error, Reason}
     catch
         error:badarg -> {error, badarg}
     end.

@@ -12,6 +12,17 @@
  * so an object with no handle lives while a mapping does. An object that goes while
  * mapped, by its creator's destroy or its creator's end, is revoked first: every
  * mapping of it, in every task, goes at once.
+ *
+ * No budget or space ends inside a task's end. The close of a task's handle table
+ * ends nothing: it marks the records it frees and those the task created, and the
+ * service ends the marked records once the request or fault that ended the task is
+ * over, before it answers (erx_fiasco_object_drain). The task's end still ends memory
+ * whose last mapping it drops and its home group, neither of which stops a task. A
+ * task can hold the last handle of a budget, its own space's included, and a budget's
+ * end stops and deletes the spaces below it: inside the task's end it would reach the
+ * task's own space while its row is live, and spaces on a stop walk's path. After it,
+ * every space it reaches is either live, with no end under way, or ended with its row
+ * reset.
  */
 
 #include <stdbool.h>
@@ -30,6 +41,7 @@
 static erx_backend_handles_t *object_handles_of(uint32_t);
 static int	object_pass_item(uint32_t, uint32_t, erx_msg_item_t *);
 static int	object_pass_type(uint32_t, erx_ktype_t *);
+static void	object_later(uint32_t);
 static void	object_release(uint32_t);
 static void	object_unheld(uint32_t);
 
@@ -39,6 +51,8 @@ static erx_backend_grow_table_t object_records;
 static uint32_t object_kept = UINT32_MAX;
 /* Each task's handle table, by the task's index. */
 static erx_backend_grow_table_t object_tables;
+/* Whether a record may be marked to end, so the drain has work. */
+static bool object_marked;
 
 const char *
 erx_fiasco_object_init(void)
@@ -77,13 +91,36 @@ erx_fiasco_object_task_close(uint32_t task)
 
 	for (uint64_t handle = 1; handle < end; handle++)
 		if (erx_backend_handle_close(&object_records, handles, handle, &freed, &index) == ERX_OK && freed)
-			object_unheld(index);
+			object_later(index);
 	erx_backend_handles_clear(handles);
 	for (index = 0; index < erx_backend_grow_table_capacity(&object_records); index++) {
 		const erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
 
 		if (erx_backend_object_live(record) && record->creator == task)
-			erx_fiasco_object_end(index);
+			object_later(index);
+	}
+}
+
+/*
+ * Ends every marked record. An end here can stop and delete spaces, whose tasks' ends
+ * mark more records, so the drain sweeps again until a sweep starts from no mark; each
+ * task ends once, so the sweeps are bounded. A sweep's own end may take a marked record
+ * first, and a freed record carries no mark. A group still marked when its home has
+ * threads goes with that home, as at a last close (object_unheld).
+ */
+void
+erx_fiasco_object_drain(void)
+{
+	while (object_marked) {
+		object_marked = false;
+		for (uint32_t index = 0; index < erx_backend_grow_table_capacity(&object_records); index++) {
+			erx_backend_object_t *const record = erx_backend_object_at(&object_records, index);
+
+			if (!erx_backend_object_live(record) || record->ending == 0)
+				continue;
+			record->ending = 0;
+			object_unheld(index);
+		}
 	}
 }
 
@@ -193,6 +230,13 @@ erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle)
 	return (ERX_OK);
 }
 
+static void
+object_later(uint32_t index)
+{
+	erx_backend_object_at(&object_records, index)->ending = 1;
+	object_marked = true;
+}
+
 /*
  * A record whose last handle went and that has no mapping ends, but for a group whose
  * home has threads: its home holds it, and it goes with that home (service_task.c), so a
@@ -288,11 +332,12 @@ object_pass_item(uint32_t from, uint32_t to, erx_msg_item_t *item)
 }
 
 /*
- * The type a passed handle of a record's kind reports. A space's or a gate's handle
- * never passes, so that handles flow down from an object's creator. A budget's or a
- * group's waits for the domain library's install: a task that held the last handle of
- * a budget would end it inside its own teardown (TODO.md). Every kind has its case, so
- * a new one is a build warning here.
+ * The type a passed handle of a record's kind reports: a memory object's; an IRQ
+ * object's, which its holder triggers and acks; and a budget's and a group's, for the
+ * domain library's install. A task that holds a budget's last handle ends it after its
+ * own end, by the drain. A space's or a gate's handle never passes, so that handles flow
+ * down from an object's creator. Every kind has its case, so a new one is a build
+ * warning here.
  */
 static int
 object_pass_type(uint32_t kind, erx_ktype_t *type)
@@ -301,8 +346,15 @@ object_pass_type(uint32_t kind, erx_ktype_t *type)
 	case ERX_BACKEND_OBJECT_MEMORY:
 		*type = ERX_K_MEMORY;
 		return (ERX_OK);
+	case ERX_BACKEND_OBJECT_IRQ:
+		*type = ERX_K_IRQ;
+		return (ERX_OK);
 	case ERX_BACKEND_OBJECT_BUDGET:
+		*type = ERX_K_BUDGET;
+		return (ERX_OK);
 	case ERX_BACKEND_OBJECT_GROUP:
+		*type = ERX_K_GROUP;
+		return (ERX_OK);
 	case ERX_BACKEND_OBJECT_GATE:
 	case ERX_BACKEND_OBJECT_SPACE:
 	case ERX_BACKEND_OBJECT_FREE:
@@ -337,6 +389,9 @@ object_release(uint32_t index)
 		break;
 	case ERX_BACKEND_OBJECT_BUDGET:
 		erx_fiasco_budget_end(index);
+		break;
+	case ERX_BACKEND_OBJECT_IRQ:
+		erx_fiasco_irq_free(index);
 		break;
 	case ERX_BACKEND_OBJECT_FREE:
 	case ERX_BACKEND_OBJECT_RETIRED:

@@ -5,7 +5,8 @@
 -moduledoc """
 Resolves one path against one namespace table and one working directory, as
 FreeBSD's `namei` and `vfs_lookup` resolve it (docs/design-files.md,
-Resolving a path).
+Resolving a path), and lists a directory it reached as its provider and the
+mount points below it show it (Listings across mounts).
 
 A resolution keeps its place: the namespace path of the directory it has
 reached, every name of which a walk answered as a directory, or the table
@@ -48,7 +49,7 @@ functions and the two callbacks, and reads no state but its arguments, so a
 table changed while it runs is not seen by it.
 """.
 
--export([resolve/6, cwd/1]).
+-export([resolve/6, cwd/1, target_place/1, listing/3]).
 -export_type([name/0, place/0, entry/0, table/0, op/0, flags/0, kind/0,
               reply/0, callbacks/0, action/0, resume/0]).
 
@@ -139,6 +140,41 @@ cwd(<<"/", Names/binary>> = Text) when byte_size(Text) < ?ERX_PATH_MAX ->
     end;
 cwd(_) ->
     error.
+
+-doc """
+The place a target lies at: its entry's mount point, then its names below
+the entry's root. Every walk retraces the place, so a target's names are
+its root's and then the place's below the point.
+""".
+-spec target_place(action()) -> place().
+target_place({target, #{point := Point, root := Root}, Names, _}) ->
+    {ok, Below} = below(Root, Names),
+    Point ++ Below.
+
+-doc """
+The names of the directory a lookup reached, as a listing shows them
+(docs/design-files.md, Listings across mounts). For a target, `Listed` is
+what its provider listed, followed by the last name of each mount point
+directly below the target's place that `Listed` lacks, each once, so a
+mount point hides the provider's entry of its name. A directory of the
+empty root has no provider and lists nothing of its own, so it lists the
+next name of each mount point below it. Only the caller's table is read: no
+provider learns of another's mounts.
+""".
+-spec listing(action(), [binary()], table()) -> [binary()].
+listing({target, _, _, _} = Target, Listed, Table) ->
+    Place = target_place(Target),
+    case [Name || #{point := P} <- Table, {ok, [Name]} <- [below(Place, P)]] of
+        [] -> Listed;
+        Mounts -> Listed ++ fresh(Mounts, maps:from_list([{Name, true} || Name <- Listed]))
+    end;
+listing({empty_root, Place}, [], Table) ->
+    fresh([Next || #{point := P} <- Table, {ok, [Next | _]} <- [below(Place, P)]], #{}).
+
+%% Names not in Seen, each once, in order.
+fresh([Name | Names], Seen) when is_map_key(Name, Seen) -> fresh(Names, Seen);
+fresh([Name | Names], Seen) -> [Name | fresh(Names, Seen#{Name => true})];
+fresh([], _) -> [].
 
 plain(Name) ->
     Name =/= <<>> andalso Name =/= <<".">> andalso Name =/= <<"..">> andalso

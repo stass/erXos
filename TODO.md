@@ -91,7 +91,11 @@ it; git history is the record of completed work.
   keeping the seven single-decision harnesses in the gate and moving
   `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
   of the gate's 2 h 33 min and check what the fuzz targets already check.
-  Until the owner decides, the gate runs all nine.
+  Until the owner decides, the gate runs all nine. In the parallel gate
+  on the Mac Pro (master 83221dc9) every harness verified except
+  `cap_slot_list`, which timed out at its 3,600 s deadline, as did its
+  mutants `insert-leaves-head-prev` and `clear-keeps-head`, so the gate
+  fails until that harness shrinks or leaves the gate.
 
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
@@ -114,6 +118,8 @@ it; git history is the record of completed work.
   and returns with the `erx` backend's kernel.
 * [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`. Move handles onto the base. Likewise the root's handle to a created space's first thread is the task above the index (`service_thread_handle` in `service.c`), not the handle-table entry "Thread creation" names, so it can equal one of the root's entries once the root holds 256 of them, and `erx_cap_close` or `erx_cap_dup` of it reaches that entry; give it a value no entry can bear, as the base does.
 * [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`, and an `erx_cap_pass` item holding an own thread's handle is read as the handle table's entry of that number, so it may pass a memory object instead of being refused. Move handles onto the base.
+* [Medium] stopgap, `liberx/backend/fiasco/vm.c`: the page index's size counts the window, contiguous and device pages but not the archive pages a slice adds, one index entry each per live slice, so enough live slices fill the index and `page_find` spins on the service thread. One slice per domain cannot reach it; before a session slices per command, count live slice pages against a cap and refuse past it with `ERX_ENOMEM`, as `vm_device_pages_used` does, and correct `vm_table.h`'s "committing never finds it full".
+* [Low] stopgap, `liberx/backend/fiasco/service_wire.c`: the decoder copies a call's words into `decoded.request` without checking them against `ERX_FIASCO_WIRE_WORDS_MAX`; `erx_fiasco_mem_copy_request` fills all seven, so a longer layout would overflow it. Refuse past the maximum in the decoder, or assert every layout's size.
 * [Low] stopgap, `fiasco/kernel/src/erx/erx_probe.cpp` and `erx_syscall.cpp`
   are reference text for erXos's kernel, out of the build: `erx_syscall.cpp`
   names `Space::erx_log`, which is gone, so it no longer compiles.
@@ -162,13 +168,10 @@ it; git history is the record of completed work.
   a umtx wait on the semaphore the park shares, so an up the race left over returns that wait early and is
   gone before the quiet park looks. The quiet park catches only an up arriving after `settle`; a wait that
   does not block on the semaphore, or a zero-deadline down right after the race, would catch both.
-* [Medium] stopgap, `liberx/backend/fiasco/object.c`: only memory objects are on the object records and handle
-  tables. IRQ objects keep the root's table in `irq.c`, whose index the group's stub also uses as the ready
-  record (`group.c`, `erx_irq_bind`), and a space handle is still the task's index, which the launcher turns
-  into the ended semaphore's slot without the service (`launcher.c`). Both move onto records with BK8a's
-  groups and BK5's space tree (the 1b-A package plan). Until then their values overlap memory handles, so
-  `erx_cap_close` or `erx_object_destroy` given a space or IRQ handle acts on whatever memory entry has that number,
-  and `erx_cap_pass` given an IRQ handle passes that memory entry instead of refusing it.
+* [Medium] stopgap, `liberx/backend/fiasco/object.c`: a space handle is still the task's index, which the
+  launcher turns into the ended semaphore's slot without the service (`launcher.c`). It moves onto records with
+  BK5's space tree (the 1b-A package plan). Until then its value overlaps object handles, so `erx_cap_close` or
+  `erx_object_destroy` given a space handle acts on whatever entry has that number.
 * [Medium] security residual, `liberx/backend/fiasco/vm.c`: nothing records `ERX_MEM_JIT` on an object, so any
   object maps read-write at one address and read-execute at another, a protect moves RW to RX freely, and the
   root maps RX into a child made without `ERX_SPACE_JIT`. No single mapping is ever writable and executable,
@@ -204,9 +207,6 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/beam/erl_crash_dump.c`, `beam/bif.c`, `sys/erxos/sys.c`: what `imports.txt` lists as `[stock_descriptors]`
   and the rest of `[stock_process]`: the crash dump's file, which `open` refuses with `ENOSYS` until the crash area replaces it (edit 34),
   `erlang:display` and `halt`'s output, the terminal's `sys_get_key` and `ethread`'s signal masks. Each is answered as `ENOSYS` tracing shows it.
-* [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
-  group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
-  The first native consumer needs the unbind defined in the interface, with its status checked.
 * [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
   `[stock_process]` and `[stock_descriptors]`, the UNIX process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
   Darwin's main thread, `nice`, `alarm`, `uname` and the crash dump's descriptors (edit 34). The first native boot answers each,
@@ -257,7 +257,6 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
-* [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never destroyed: a restarted driver keeps the one its device's record holds.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
@@ -298,8 +297,38 @@ it; git history is the record of completed work.
   and reader of `event` and `pixels` (design-web.md, "Interfaces").
 * [Medium] `tools/lib/erx/abi_emit_ui_wire_ts.rb`, [The client](docs/design-web.md#the-client): `ui_wire.ts`
   hands texts out as bare `Uint8Array`s and `Prop.value` as one union not tied to `form`, where rule W2 types
-  every machine text as `MachineText`. When `web/src/text.tsx` lands, wrap texts in it and emit `Prop` as a
+  every machine text as `MachineText`, which `web/src/text.ts` provides: wrap texts in it and emit `Prop` as a
   union discriminated by form (the parity harness's casts in `web/test/ui_wire_harness.ts` then go).
+* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): `project/1` never
+  emits `present`, since no member of `abi/inspection.txt` marks a value as a presentation and `erx_present` is not
+  written; once both exist, project a marked attribute to `{present, Type, Text}`, and test `web/src/names.ts`'s
+  `erxText` against `erx_present`'s URI encoding as the design's "encodings and presentation paths" row asks.
+* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): projection has no total
+  budget. Each printed leaf may be 4 KiB however small its input node (a refc binary under one cons), and a term built
+  in the session with sharing expands exponentially (16 x 1000 x 1000 shared cells projected to 224 MB in 1.7 s), while
+  the 64 KiB update check runs only after the whole wire record is built. Thread the remaining update size through
+  `datum/2` and answer `too_large` once it is spent, so the bound holds during projection.
+* [Medium] `web/src/names.ts`, [URLs](docs/design-web.md#urls): the claim that no `/proc` segment is `.` or `..` does
+  not hold in a browser, whose URL parser takes `%2E` and `%2E%2E` as dot segments (`new URL('/proc/a/%2E%2E', base)` is
+  `/proc/`), and an `erx:` text keeps `.` and `/` raw, so a presentation text such as `x/../../ui/3` from an untrusted
+  value links to another client route than it shows. The design must pick a fix: encode `%` once more in the client's
+  URL paths, or encode `.` in an `erx:` segment that is all dots and have the client refuse a dot segment.
+* [Low] `erlang/apps/erx_web/src/erx_web_value.erl`: `datum/2` converts a whole integer to decimal before checking its
+  40-byte bound, about 1 s for the largest bignum; compare its magnitude with `10^40` first and print a huge one
+  without converting it whole.
+* [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
+  term one past each bound in both languages and expects `bad_term TYPE`; every encoded term is in bounds or came
+  from a decoder, so an encoder that stopped refusing an over-bound list, text or integer would pass. A
+  table-driven case over `type/1` and `TYPES` closes it.
+* [Medium] `tools/lib/erx/abi_emit_web.rb`, [The protocol](docs/design-web.md#the-protocol): the protocol hash
+  covers the declarations, not the codec code (`abi_web.rb`, both emitters' interpreters, `web/src/wire.ts`), so a
+  change to the interpreter alone keeps the hash and an old client passes `hello`. Fold the generator files'
+  digests into the hash or hash the generated tables, and say which in design-web.md.
+* [Low] `abi/protocols/web.txt`, [The protocol](docs/design-web.md#the-protocol): an `event`'s and an update's
+  `ui_record` is any ui.txt record of its length; each consumer must run ui.txt's reader on it. Calling the
+  generated event reader inside the codec would make "an accepted event is an event" hold by construction.
+* [Low] `abi/protocols/web.txt`, [Interfaces](docs/design-web.md#interfaces): the fixed response headers and each
+  file kind's content type, and the header table generated for Erlang and Ruby, are not declared yet.
 * [Low] `test/host/web_node_test.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
   no gate runs `tsc --noEmit` over the client's generated and handwritten TypeScript (Node only strips types),
   and no `web/package.json` records the Node version, whose type stripping and `import.meta.main` the tests
@@ -310,9 +339,6 @@ it; git history is the record of completed work.
 * [Low] `abi/formats/ui.txt` and the generated readers: a `present` name is checked only as UTF-8 of at most 63
   bytes, while design-abi.md calls it "a presentation name of the inspection schema"; once the inspection schema
   declares presentations (see the `erx_ui_schema` item above), generate the name table into both readers.
-* [Low] `abi/formats/ui.txt`: `web_ui_op_max` is declared there because `abi/protocols/web.txt` does not exist; it
-  moves under the web protocol when that file lands, and design-web.md should then settle whether a message's `u32`
-  length counts against it.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
   system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
   property case.
@@ -475,9 +501,11 @@ it; git history is the record of completed work.
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
   the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
   and handles with generations; the next part of the port settles it with `libc-test` in a task.
-* [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
-  ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
-  and the task's objects released at its end.
+* [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: a task's dispatcher index is never cleared, so a task
+  that named an ordinary thread its dispatcher and let it exit would have later binds made to whatever thread takes
+  the index. The backend's own dispatcher never exits. A waiting bind is made only because `erx_fiasco_group_join`
+  and `erx_fiasco_dispatcher_set_body`, the two writers of a row's group and dispatcher, both call
+  `erx_fiasco_irq_group_ready`; one setter for both would make that hold by construction.
 * [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does.
 * [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
 * [Medium] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses. `libbeam.a`'s littlefs objects (and, in the BeamAsm flavour, asmjit's) are the one exception, by a hand-written case in `emulator_license` (`EMULATOR_ARCHIVE`) that nothing checks against the build: moving `lfs.o` out of `OS_OBJS` drops or misplaces littlefs's notice silently, and the archive is recorded `permanent` though littlefs is a stopgap. Replace the case with one table of the imports each archive holds, take each import's grant and notice from `config/provenance/import-notices.json`, and check the archive's members at pack time, as `CoreArchive::Built.objects` does for the boot cores.
@@ -666,13 +694,16 @@ it; git history is the record of completed work.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.
-* [Medium] network, `erx_dhcp4_core` and `erx_dhcp4_wire` (P20 review): open choices for the
-  DHCP client. It configures again on every renewal ACK, even an unchanged one; an ACK in requesting
-  is not checked against the offer; there is no ARP probe and DECLINE before using an address
-  (RFC 2131 4.4.1, RFC 5227); option 26 (MTU) is passed on without a clamp to the device MTU, and
-  where the domain name goes is open; classless static routes (option 121, RFC 3442), option
-  overload and INIT-REBOOT are not read. The fuzz target has no field oracle: pkt has no DHCP
-  decoder, so its judge compares joined option bytes instead.
+* [Low] network, `erx_dhcp4_core`: an ARP probe of the offered address before using it, and a
+  DECLINE when another host answers (RFC 2131 4.4.1, RFC 5227), behind a setting of the
+  interface's `dhcp` mode, off by default as in `dhclient`. Today the address is announced with a
+  gratuitous ARP and a conflict is only reported by erx_arp.
+* [Low] network, `erx_dhcp4_core`: INIT-REBOOT (RFC 2131 3.2, 4.4.2), asking again for the last
+  lease's address after a restart. It needs the lease kept across boots, as `dhclient` keeps
+  /var/db/dhclient.leases, so it waits for the network domain's stored state.
+* [Low] network, `erx_dhcp4_wire_fuzz`: the fuzz target has no field oracle: pkt has no DHCP
+  decoder, so its judge reads the options itself (joined bytes, and its own reading of options 15
+  and 121) instead.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
@@ -681,15 +712,21 @@ it; git history is the record of completed work.
   `task-service` timed out; the rerun on the same tree passed on one and four CPUs. The task that
   `erx_fiasco_launch` starts with `ERX_SPACE_JIT` and `MODE_SERVICE` never ended, so the root's
   join waited for good. Find the wait it stuck in.
-* [High] liberx Fiasco backend, `object.c` `object_pass_type` and `budget.c`: `erx_cap_pass` refuses
-  budget and group handles, which the domain library's install (`erx_dom_install`, DL2) passes to a
-  domain. Before it offers them, take a budget's end out of a task's teardown: a task holding a
-  budget's last handle (by a move, or after the root closed its copy) ends that budget inside
-  `task_end`'s handle close, and the budget's sweeps then reach the task's own space while its row is
-  still live, tearing it down a second time (a lost exit status, an index never reused, a stray exit
-  record), and leave a carved budget whose space is mid-release live with a dangling parent index.
-  Queue the records a task's close frees and end them after the row is reset, so no budget ends
-  inside a task's end; a guard that skips records already ending was tried and is not enough.
+* [Medium] liberx Fiasco backend, `launcher.c` `erx_fiasco_task_join_until` and `object.c`
+  `erx_fiasco_object_drain`: a task holding the last handle of its own space's budget is deleted in
+  the request that ends it, its ended semaphore with it, so a root join that got `ERX_EBUSY` before
+  the end waits on a deleted (or, after a new space takes the index, another task's) semaphore:
+  `erx_fiasco_semaphore_down` retries the IPC error until its deadline, or for good. The domain
+  library keeps its copy of every domain's budget, so only a caller that moves its last copy away
+  meets it. Have the service up the joiner's own semaphore, as the other blocking stubs do.
+* [Medium] liberx Fiasco backend, `service_task.c` `task_teardown`: a task's end defers only what its
+  handle table's close frees or what it created (`object_later`); memory whose last mapping goes and
+  the home group still end inside the teardown, safe only because neither kind's end stops a task.
+  Route those ends through the mark too, so nothing ends inside a teardown, and drain once after
+  `service_main`'s dispatch rather than in three arms.
+* [Low] liberx Fiasco backend, `object.c` and `core/handles.h`: rename the record's `ending` word
+  (`end_pending`) and `object_later` (`object_defer_end`), since `budget.c` uses "ending" for an end
+  in progress, and word the core header's comment without naming the Fiasco backend.
 * [Low] liberx Fiasco backend, `budget.c` `budget_sweep`: a budget's object sweep ends a group
   charged to it whose home task, charged to another budget, still has threads, which `erx_object_destroy`
   and a last close refuse ("a group never goes before its threads"). Skip such a group in the sweep, or
@@ -2989,6 +3026,12 @@ to the corpus and follow rc
   no NUL and one `@` inside it. Every name today comes from the manifest's checked identifiers, so `uname -n` and
   anything else that shows a node's host write it unescaped; require both parts to be system identifiers here, so
   that holds whichever path builds the page.
+* [Medium] network, `erx_net_if_core` and `erx_lltable` (`docs/design-network-stack.md`, Residuals,
+  "Resolution is shared between clients"): a client sending to many unresolved on-link addresses makes the
+  interface hold up to 16 packets for each and, once the neighbour table's 1,024 entries are full, evict
+  other clients' entries in resolution; the sender credit bounds only the rate of hand-overs. Bound it per
+  grant: tag each hand-over with its grant, count the entries each grant's packets started, and drop a
+  grant's hand-overs past a cap as lost frames.
 * [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
   `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
   `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can

@@ -143,6 +143,12 @@ erx_fiasco_task_set_archive(const erx_pack_view_t *view)
 	task_archive = view;
 }
 
+const erx_pack_view_t *
+erx_fiasco_task_archive(void)
+{
+	return (task_archive);
+}
+
 static uint32_t *
 task_space_of(uint32_t record)
 {
@@ -275,9 +281,9 @@ task_objects_make(uint32_t task)
 	    l4_obj_fpage(erx_fiasco_task_gate_cap(task), 0, L4_CAP_FPAGE_RWS),
 	    l4_map_obj_control(L4_BASE_PAGER_CAP, L4_MAP_ITEM_MAP))))
 		return (false);
-	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREAD_TABLE_BYTES, ERX_VM_FIXED,
+	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_TASK_AREA_BYTES, ERX_VM_FIXED,
 	    &reserved) == ERX_OK &&
-	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) == ERX_OK &&
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_TASK_AREA_BYTES, 0, NULL) == ERX_OK &&
 	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, ERX_FIASCO_TIME_PAGE_ADDR, ERX_PAGE_SIZE, ERX_VM_FIXED,
 	    &reserved) == ERX_OK && erx_fiasco_time_page_map(task) == ERX_OK);
 }
@@ -466,7 +472,7 @@ task_end(uint32_t task, uint32_t stopper, int64_t status)
 	erx_fiasco_task_tree_t tree;
 
 	task_teardown(task);
-	/* Read after the teardown, whose object close deletes the spaces this task created. */
+	/* The teardown's object close only marks what it frees, so no space of the tree has gone. */
 	tree = row->tree;
 	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .tree = tree, .status = status };
 	erx_fiasco_gate_exit(task, stopper, status);
@@ -493,12 +499,9 @@ task_live_child(uint32_t task)
  * child, so each step ends one space, the walk is iterative whatever the tree's depth,
  * and a child's exit record is posted before its parent's.
  *
- * Each task_end's object close deletes the spaces that task created, and the walk
- * survives it by two invariants: every space a task created lies below it, since a space
- * handle never leaves its creator's table (no pass, and a dup stays in the table); and a
- * stopped task has no live space below it, since a stopped parent takes no child. So the
- * close deletes only stopped spaces below the task it ends, never the walk's path. A
- * call that passed space handles would break both walks.
+ * No task_end deletes a space or ends a budget: its object close marks the records it
+ * frees and those the task created, and the service ends them once the walk is over
+ * (erx_fiasco_object_drain), so every row the walk reads stands until it returns.
  */
 static void
 task_stop_tree(uint32_t task, uint32_t stopper, int64_t status)

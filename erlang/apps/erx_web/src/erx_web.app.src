@@ -1,0 +1,13 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The web domain's services and the session side of its views
+%% (docs/design-web.md): erx_web_value, the projection of an inspection
+%% record into the web protocol's closed set of values.
+{application, erx_web,
+ [{description, "erXos web front end"},
+  {vsn, "1"},
+  {modules, [erx_web_value]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx, erx_files]},
+  {env, []}]}.

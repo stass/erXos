@@ -329,6 +329,12 @@ module Erx
                    name: 'fuzz-erx-ui-wire', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_ui_wire_ts.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-ui-wire-ts', deadline: 360, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_web_text.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-web-text', deadline: 360, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_web_proto.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-web-proto', deadline: 660, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_web_proto_ts.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-web-proto-ts', deadline: 360, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_pl011_console_uart.rb'), '--seed',
                     options.fetch(:seed).to_s],
                    name: 'fuzz-erx-pl011-console-uart', deadline: 300, chdir: ROOT, env: environment)
@@ -371,7 +377,7 @@ module Erx
                    name: 'fuzz-erx-erofs', deadline: 1800, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_hostlink_frame.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-hostlink-frame', deadline: 1000, chdir: ROOT, env: environment)
-        %w[eth arp ip4 icmp4 icmp4_quoted udp ip6 icmp6 icmp6_quoted tcp dhcp4 dhcp4_join].each do |target|
+        %w[eth arp ip4 icmp4 icmp4_quoted udp ip6 icmp6 icmp6_quoted tcp dhcp4 dhcp4_join dhcp4_routes].each do |target|
           runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_net_codec.rb'), '--target', target,
                       '--seed', options.fetch(:seed).to_s],
                      name: "fuzz-erx-net-#{target}", deadline: 900, chdir: ROOT, env: environment)

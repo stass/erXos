@@ -38,7 +38,8 @@ typedef enum erx_backend_object_kind {
 	ERX_BACKEND_OBJECT_GATE,
 	ERX_BACKEND_OBJECT_SPACE,
 	ERX_BACKEND_OBJECT_BUDGET,
-	ERX_BACKEND_OBJECT_GROUP
+	ERX_BACKEND_OBJECT_GROUP,
+	ERX_BACKEND_OBJECT_IRQ
 } erx_backend_object_kind_t;
 
 /* For erx_backend_handle_find: any live kind will do. */
@@ -54,7 +55,7 @@ typedef struct erx_backend_object {
 	uint32_t	generation;
 	uint32_t	handles;	/* entries in any table naming this record at this generation */
 	uint32_t	mappings;	/* maps made of it, which keep it while it has no handle */
-	uint32_t	reserved;
+	uint32_t	ending;		/* nonzero: ended by the service before it answers (fiasco/object.c) */
 } erx_backend_object_t;
 
 typedef struct erx_backend_handle_entry {

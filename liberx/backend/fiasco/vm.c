@@ -75,12 +75,15 @@ _Static_assert(VM_WINDOW_BASE % (UINT64_C(1) << VM_SUPERPAGE_ORDER) == 0,
 typedef enum vm_object_kind {
 	VM_OBJECT_PAGES,
 	VM_OBJECT_PHYSICAL,
-	VM_OBJECT_CONTIGUOUS
+	VM_OBJECT_CONTIGUOUS,
+	VM_OBJECT_SLICE
 } vm_object_kind_t;
 
 typedef struct vm_object {
 	vm_object_kind_t	kind;
 	uint64_t		device_base;	/* VM_OBJECT_CONTIGUOUS: offset 0's device address */
+	uint32_t		slice_first;	/* VM_OBJECT_SLICE: its first archive entry */
+	uint32_t		slice_count;	/* VM_OBJECT_SLICE: how many entries it holds */
 	uint64_t		size;
 	erx_backend_vm_table_t	table;
 } vm_object_t;
@@ -411,12 +414,88 @@ erx_fiasco_vm_object_dma_addr(uint32_t index, uint64_t offset, uint64_t *addr)
 }
 
 int
+erx_fiasco_vm_slice_create(uint32_t object, uintptr_t window, uint64_t size, uint32_t first, uint32_t count)
+{
+	/* vm_give keeps a page below the window out of the pool, so the archive's must lie there. */
+	if (window >= VM_WINDOW_BASE || size > VM_WINDOW_BASE - window)
+		return (ERX_ENOTSUP);
+	const int status = object_fill(object, size, &vm_run_effects, VM_OBJECT_SLICE, window);
+
+	if (status != ERX_OK)
+		return (status);
+	vm_object(object)->slice_first = first;
+	vm_object(object)->slice_count = count;
+	return (ERX_OK);
+}
+
+int
+erx_fiasco_vm_slice_entries(uint32_t index, uint32_t *first, uint32_t *count)
+{
+	const vm_object_t *const object = vm_object(index);
+
+	if (object->kind != VM_OBJECT_SLICE)
+		return (ERX_ETYPE);
+	*first = object->slice_first;
+	*count = object->slice_count;
+	return (ERX_OK);
+}
+
+/* The byte at an offset of an object, through its window page. The offset is inside the object. */
+static uint8_t *
+object_byte(const vm_object_t *object, uint64_t offset)
+{
+	const uint64_t within = offset & ERX_BACKEND_VM_PAGE_MASK;
+
+	return ((uint8_t *)erx_backend_vm_window(&object->table, VM_OBJECT_AREA_START + offset - within) + within);
+}
+
+int
+erx_fiasco_vm_object_copy(uint32_t dst_index, uint64_t dst_offset, uint32_t src_index, uint64_t src_offset, uint64_t len,
+    uint64_t *done)
+{
+	const vm_object_t *const dst = vm_object(dst_index);
+	const vm_object_t *const src = vm_object(src_index);
+	uint64_t dst_end, src_end, cursor, stop;
+
+	if (dst->kind == VM_OBJECT_PHYSICAL || src->kind == VM_OBJECT_PHYSICAL)
+		return (ERX_ETYPE);
+	if (dst->kind == VM_OBJECT_SLICE)
+		return (ERX_ERIGHTS);
+	if (__builtin_add_overflow(dst_offset, len, &dst_end) || dst_end > dst->size ||
+	    __builtin_add_overflow(src_offset, len, &src_end) || src_end > src->size)
+		return (ERX_ERANGE);
+	if (*done > len)
+		return (ERX_EINVAL);
+	cursor = *done;
+	stop = len - cursor < ERX_FIASCO_VM_COPY_BYTES_MAX ? len : cursor + ERX_FIASCO_VM_COPY_BYTES_MAX;
+	/* Each part stays within one page of each object; the parts go forward. */
+	while (cursor < stop) {
+		const uint64_t from = src_offset + cursor;
+		const uint64_t to = dst_offset + cursor;
+		const uint64_t from_room = ERX_PAGE_SIZE - (from & ERX_BACKEND_VM_PAGE_MASK);
+		const uint64_t to_room = ERX_PAGE_SIZE - (to & ERX_BACKEND_VM_PAGE_MASK);
+		uint64_t part = stop - cursor;
+
+		part = part < from_room ? part : from_room;
+		part = part < to_room ? part : to_room;
+		bcopy(object_byte(src, from), object_byte(dst, to), (size_t)part);
+		cursor += part;
+	}
+	*done = cursor;
+	return (ERX_OK);
+}
+
+int
 erx_fiasco_vm_object_map(uint32_t task, uint32_t index, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
 {
 	const vm_object_t *const object = vm_object(index);
 
-	/* A device's memory is never code: registers fault, and a device could write a run. */
-	if (object->kind != VM_OBJECT_PAGES && prot == ERX_PROT_RX)
+	/*
+	 * A device's memory is never code: registers fault, and a device could write a run.
+	 * A slice's pages are the archive's, which no task writes.
+	 */
+	if ((object->kind != VM_OBJECT_PAGES && prot == ERX_PROT_RX) ||
+	    (object->kind == VM_OBJECT_SLICE && prot != ERX_PROT_R))
 		return (ERX_ERIGHTS);
 	const int status = erx_backend_vm_map_object(&vm_task(task)->table, &object->table, index, &vm_effects, addr, size,
 	    offset, prot);

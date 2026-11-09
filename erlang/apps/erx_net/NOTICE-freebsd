@@ -183,7 +183,13 @@ module erx_tcp_input
   sys/netinet/tcp_timewait.c tcp_twstart
 
 module erx_tcp_output
-  sys/netinet/tcp_output.c tcp_output tcp_setpersist tcp_default_output cc_after_idle
+  sys/netinet/tcp_output.c tcp_output tcp_setpersist
+
+module erx_dhcp4_wire
+  sbin/dhclient/dhclient.c check_classless_option res_hnok check_search option_as_string
+  sbin/dhclient/options.c parse_options parse_option_buffer
+
+sys/netinet/tcp_output.c tcp_output tcp_setpersist tcp_default_output cc_after_idle
   sys/netinet/tcp_fsm.h tcp_outflags
   sys/netinet/tcp_usrreq.c tcp_connect
 

@@ -27,7 +27,7 @@ module ErxNetCodecFuzz
   Target = Data.define(:module_name, :exact, :faulty, :fault)
   # The failures of a round that show it reached the faulty code: a raise, a refusal or
   # acceptance the reference judge disputes, or a record that does not encode back.
-  CAUGHT = %w[raised disagrees_with_reference round_trip_differs].freeze
+  CAUGHT = %w[raised disagrees_with_reference round_trip_differs fields_differ lease_out_of_bounds].freeze
 
   TARGETS = {
     'eth' => Target.new(module_name: 'erx_net_eth',
@@ -74,6 +74,10 @@ module ErxNetCodecFuzz
                                exact: 'raw_options(Rest, maps:update_with(Code, fun(Seen) -> [Data | Seen] end, [Data], Acc));',
                                faulty: 'raw_options(Rest, Acc#{Code => [Data]});',
                                fault: 'keeping only the last instance of a long option'),
+    'dhcp4_routes' => Target.new(module_name: 'erx_dhcp4_wire',
+                                 exact: 'classless_routes(<<Plen, Rest/binary>>, Routes) when Plen =< ?PLEN_MAX ->',
+                                 faulty: 'classless_routes(<<Plen, Rest/binary>>, Routes) when Plen =< ?PLEN_MAX + 1 ->',
+                                 fault: 'reading a classless route prefix length of 33'),
     'tcp' => Target.new(module_name: 'erx_tcp_wire',
                         exact: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off < ?TCP_HDR_WORDS; Off * 4 > byte_size(Segment) ->',
                         faulty: 'header(<<_:96, Off:4, _:12, _/binary>> = Segment) when Off * 4 > byte_size(Segment) ->',

@@ -21,8 +21,11 @@
  * service mapped it read-only at the task's creation. Reading it needs no call.
  */
 
-/* In every task, just above the thread table, and reserved there, so no erx_vm_reserve hands it out. */
-#define ERX_FIASCO_TIME_PAGE_ADDR	(ERX_FIASCO_AREA_START + ERX_FIASCO_THREAD_TABLE_BYTES)
+/*
+ * In every task, just above the task area (the thread table and its label page), and
+ * reserved there, so no erx_vm_reserve hands it out.
+ */
+#define ERX_FIASCO_TIME_PAGE_ADDR	(ERX_FIASCO_AREA_START + ERX_FIASCO_TASK_AREA_BYTES)
 /* An odd sequence is a write in progress, so the last write ends at the largest even one. */
 #define ERX_FIASCO_TIME_SEQ_LAST	(UINT64_MAX - 1)
 

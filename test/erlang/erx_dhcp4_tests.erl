@@ -25,7 +25,7 @@ reply(Type, Xid, Options) ->
 
 round_trip_with_long_option_test() ->
     Routers = [<<10, 0, (I div 256), (I rem 256)>> || I <- lists:seq(1, 100)],
-    Msg = reply(ack, 7, #{routers => Routers, lease_time => 3600, domain_name => <<"example.org">>}),
+    Msg = reply(ack, 7, #{routers => Routers, lease_time => 3600, domain_name => [<<"example.org">>]}),
     Bytes = erx_dhcp4_wire:encode(Msg),
     %% 400 bytes of routers go out as two instances of option 3 (RFC 3396).
     ?assertEqual(2, length(binary:matches(Bytes, <<3, 255, 10, 0, 0, 1>>))
@@ -47,14 +47,14 @@ refusals_test() ->
     ?assertMatch({ok, #dhcp4{options = #{message_type := ack} = O}} when map_size(O) =:= 1,
                  erx_dhcp4_wire:decode(Body(<<53, 1, 5, 15, 3, $a, 27, $b, 26, 2, 0, 67>>))),
     ?assertEqual({error, {bad_option, 53}}, erx_dhcp4_wire:decode(Body(<<53, 1, 9>>))),
-    %% Without an end option the message ends the options; trailing NULs leave the domain.
+    %% Without an end option the message ends the options; one final NUL leaves the domain.
     {ok, #dhcp4{options = Opts}} = erx_dhcp4_wire:decode(Body(<<53, 1, 5, 15, 4, $l, $a, $n, 0>>)),
-    ?assertEqual(#{message_type => ack, domain_name => <<"lan">>}, Opts).
+    ?assertEqual(#{message_type => ack, domain_name => [<<"lan">>]}, Opts).
 
 %% --- erx_dhcp4_core ---
 
 new() -> new(<<0:128>>).
-new(Key) -> erx_dhcp4_core:new(?MAC, erx_net_rand:new(Key), 0).
+new(Key) -> erx_dhcp4_core:new(?MAC, 1500, erx_net_rand:new(Key), 0).
 
 ack_options() -> #{lease_time => 3600, routers => [?SERVER, <<224, 0, 0, 1>>], dns => [?SERVER]}.
 
@@ -67,8 +67,9 @@ bound_core() ->
                         options = #{message_type := request, requested_ip := ?ADDR,
                                     server_id := ?SERVER}}, Req),
     {C3, [{configure, Lease}]} = erx_dhcp4_core:step({reply, reply(ack, X, ack_options())}, C2, 200),
-    ?assertEqual(#{addr => ?ADDR, mask => <<255, 0, 0, 0>>, routers => [?SERVER], dns => [?SERVER],
-                   domain => none, mtu => none, server => ?SERVER}, Lease),
+    ?assertEqual(#{addr => ?ADDR, mask => <<255, 0, 0, 0>>,
+                   routes => [#{prefix => ?ANY, plen => 0, gateway => ?SERVER}], mtu => 1500,
+                   dns => [?SERVER], search => [], server => ?SERVER}, Lease),
     ?assertEqual(none, erx_dhcp4_core:xid(C3)),
     {C3, X}.
 
@@ -194,8 +195,142 @@ hostile_lease_test() ->
                                                                ++ [<<10, 0, 0, I>> || I <- [1, 2, 3]]})},
                             C2, 0),
     ?assertEqual(30000, erx_dhcp4_core:next_deadline(C3)),
-    ?assertMatch(#{routers := [?SERVER], dns := [?SERVER, <<10, 0, 0, 1>>, <<10, 0, 0, 2>>]}, Lease),
-    Bcast = reply(ack, X, Mask#{lease_time => 600}),
-    ?assertEqual({C2, []}, erx_dhcp4_core:step({reply, Bcast#dhcp4{yiaddr = <<10, 0, 2, 255>>}}, C2, 0)),
-    Loop = reply(ack, X, #{lease_time => 600, server_id => <<127, 0, 0, 1>>}),
-    ?assertEqual({C2, []}, erx_dhcp4_core:step({reply, Loop#dhcp4{options = (Loop#dhcp4.options)#{server_id => <<127, 0, 0, 1>>}}}, C2, 0)).
+    ?assertMatch(#{routes := [#{prefix := ?ANY, plen := 0, gateway := ?SERVER}],
+                   dns := [?SERVER, <<10, 0, 0, 1>>, <<10, 0, 0, 2>>]}, Lease),
+    %% The subnet's broadcast address as the lease's address, offered and acknowledged.
+    Bcast = fun(Type) -> (reply(Type, X, Mask#{lease_time => 600}))#dhcp4{yiaddr = <<10, 0, 2, 255>>} end,
+    {C4, _} = erx_dhcp4_core:step({reply, Bcast(offer)}, C1, 0),
+    ?assertEqual({C4, []}, erx_dhcp4_core:step({reply, Bcast(ack)}, C4, 0)).
+
+%% --- classless routes, overload, the search list ---
+
+classless_routes_and_overload_test() ->
+    %% 10.1.0.0/15 is sent with a bit past its length, which the decoder clears.
+    Routes = <<0, 10, 0, 2, 2, 15, 10, 1, 10, 0, 2, 3, 32, 192, 0, 2, 7, 0, 0, 0, 0>>,
+    Bad = binary:replace(Routes, <<32, 192>>, <<33, 192>>),
+    Msg = fun(Opts, File, Sname) ->
+                  <<Fixed:236/binary, _/binary>> = erx_dhcp4_wire:encode(reply(ack, 7, #{})),
+                  <<Head:44/binary, _:192/binary>> = Fixed,
+                  <<Head/binary, (field(Sname, 64))/binary, (field(File, 128))/binary,
+                    99, 130, 83, 99, 53, 1, 5, Opts/binary, 255>>
+          end,
+    {ok, #dhcp4{options = #{classless_routes := Decoded}}} =
+        erx_dhcp4_wire:decode(Msg(<<121, 21, Routes/binary>>, <<>>, <<>>)),
+    ?assertEqual([{?ANY, 0, ?SERVER}, {<<10, 0, 0, 0>>, 15, <<10, 0, 2, 3>>},
+                  {<<192, 0, 2, 7>>, 32, ?ANY}], Decoded),
+    ?assertEqual({error, {bad_option, 121}}, erx_dhcp4_wire:decode(Msg(<<121, 21, Bad/binary>>, <<>>, <<>>))),
+    ?assertEqual({error, {bad_option, 121}}, erx_dhcp4_wire:decode(Msg(<<121, 4, 0, 10, 0, 2>>, <<>>, <<>>))),
+    %% Overload 3: the file field, then the sname field, continue the options field's options.
+    {ok, #dhcp4{options = Over}} =
+        erx_dhcp4_wire:decode(Msg(<<52, 1, 3, 6, 4, 10, 0, 0, 1>>, <<6, 4, 10, 0, 0, 2, 255, 1>>,
+                                  <<6, 4, 10, 0, 0, 3>>)),
+    ?assertEqual([<<10, 0, 0, 1>>, <<10, 0, 0, 2>>, <<10, 0, 0, 3>>], maps:get(dns, Over)),
+    %% Without overload the fields are not read; a bad overload or an option running past
+    %% its field refuses the message.
+    {ok, #dhcp4{options = Plain}} = erx_dhcp4_wire:decode(Msg(<<>>, <<6, 4, 10, 0, 0, 2>>, <<>>)),
+    ?assertNot(is_map_key(dns, Plain)),
+    ?assertEqual({error, {bad_option, 52}}, erx_dhcp4_wire:decode(Msg(<<52, 1, 4>>, <<>>, <<>>))),
+    ?assertEqual({error, truncated_option},
+                 erx_dhcp4_wire:decode(Msg(<<52, 1, 2>>, <<>>, <<0:(62 * 8), 6, 4>>))).
+
+field(Bytes, Size) -> <<Bytes/binary, 0:((Size - byte_size(Bytes)) * 8)>>.
+
+search_list_test() ->
+    Body = fun(Opts) ->
+                   <<Fixed:236/binary, _/binary>> = erx_dhcp4_wire:encode(reply(ack, 7, #{})),
+                   <<Fixed/binary, 99, 130, 83, 99, 53, 1, 5, 15, (byte_size(Opts)), Opts/binary>>
+           end,
+    Names = fun(Text) -> {ok, #dhcp4{options = O}} = erx_dhcp4_wire:decode(Body(Text)),
+                         maps:get(domain_name, O, dropped)
+            end,
+    ?assertEqual([<<"lan">>, <<"corp.example">>], Names(<<" lan\tcorp.example ">>)),
+    ?assertEqual(dropped, Names(<<"lan", 0, 0>>)),
+    ?assertEqual(dropped, Names(<<"a b c d e f g">>)),
+    ?assertEqual(dropped, Names(<<"-lan">>)),
+    ?assertEqual(dropped, Names(<<"lan", 27, "[2J">>)).
+
+%% An ACK for an address or from a server other than the offer's is not the answer.
+ack_against_offer_test() ->
+    {C1, [{send, _, _, #dhcp4{xid = X}}]} = erx_dhcp4_core:step(timeout, new(), 0),
+    {C2, _} = erx_dhcp4_core:step({reply, reply(offer, X, #{})}, C1, 0),
+    Ack = reply(ack, X, #{lease_time => 600}),
+    Other = Ack#dhcp4{options = (Ack#dhcp4.options)#{server_id => <<10, 0, 2, 3>>}},
+    ?assertEqual({C2, []}, erx_dhcp4_core:step({reply, Ack#dhcp4{yiaddr = <<10, 0, 2, 16>>}}, C2, 0)),
+    ?assertEqual({C2, []}, erx_dhcp4_core:step({reply, Other}, C2, 0)).
+
+%% A renewal that gives the same lease does not configure the interface again.
+unchanged_renewal_test() ->
+    {Bound, _} = bound_core(),
+    T1 = erx_dhcp4_core:next_deadline(Bound),
+    {Renewing, [{send, _, _, #dhcp4{xid = X2}}]} = erx_dhcp4_core:step(timeout, Bound, T1),
+    {Again, []} = erx_dhcp4_core:step({reply, reply(ack, X2, ack_options())}, Renewing, T1 + 5),
+    ?assertEqual(T1 + 1800 * 1000, erx_dhcp4_core:next_deadline(Again)).
+
+%% A hostile server's routes and MTU: option 121 overrides the routers; routes into
+%% loopback, multicast and the subnet's own prefix, and through an off-link or own
+%% gateway, are dropped; a /32 lease reaches its router through an on-link route; the MTU
+%% is held to the device's.
+hostile_routes_test() ->
+    Lease = fun(Options) ->
+                    {C1, [{send, _, _, #dhcp4{xid = X}}]} = erx_dhcp4_core:step(timeout, new(), 0),
+                    {C2, _} = erx_dhcp4_core:step({reply, reply(offer, X, #{})}, C1, 0),
+                    {_, [{configure, L}]} =
+                        erx_dhcp4_core:step({reply, reply(ack, X, Options#{lease_time => 600})}, C2, 0),
+                    L
+            end,
+    Mask = #{subnet_mask => <<255, 255, 255, 0>>},
+    Gw = <<10, 0, 2, 3>>,
+    #{routes := Routes, mtu := 1500} =
+        Lease(Mask#{mtu => 9000, routers => [?SERVER],
+                    classless_routes => [{<<127, 0, 0, 0>>, 8, Gw}, {<<224, 0, 0, 0>>, 4, Gw},
+                                         {<<10, 0, 2, 0>>, 24, Gw}, {?ANY, 0, <<10, 0, 3, 1>>},
+                                         {?ANY, 0, ?ADDR}, {<<172, 16, 0, 0>>, 12, Gw},
+                                         {<<172, 16, 0, 0>>, 12, ?SERVER}, {?ANY, 0, Gw}]}),
+    ?assertEqual([#{prefix => <<172, 16, 0, 0>>, plen => 12, gateway => Gw},
+                  #{prefix => ?ANY, plen => 0, gateway => Gw}], Routes),
+    Router = <<10, 0, 9, 1>>,
+    #{routes := Host, mtu := 576} =
+        Lease(#{subnet_mask => <<255, 255, 255, 255>>, mtu => 576,
+                classless_routes => [{Router, 32, ?ANY}, {?ANY, 0, Router}]}),
+    ?assertEqual([#{prefix => Router, plen => 32, gateway => none},
+                  #{prefix => ?ANY, plen => 0, gateway => Router}], Host).
+
+%% Gateways judged against the routes kept: an on-link route that a duplicate prefix
+%% displaced reaches nothing; a next hop may be no prefix's network or broadcast address;
+%% a /32 lease with only routers reaches the first through a host route.
+next_hop_test() ->
+    Lease = fun(Options) ->
+                    {C1, [{send, _, _, #dhcp4{xid = X}}]} = erx_dhcp4_core:step(timeout, new(), 0),
+                    {C2, _} = erx_dhcp4_core:step({reply, reply(offer, X, #{})}, C1, 0),
+                    {_, [{configure, L}]} =
+                        erx_dhcp4_core:step({reply, reply(ack, X, Options#{lease_time => 600})}, C2, 0),
+                    maps:get(routes, L)
+            end,
+    Mask = #{subnet_mask => <<255, 255, 255, 0>>},
+    Gw = <<10, 0, 2, 3>>,
+    ?assertEqual([#{prefix => <<10, 9, 0, 0>>, plen => 16, gateway => Gw}],
+                 Lease(Mask#{classless_routes => [{<<10, 9, 0, 0>>, 16, Gw}, {<<10, 9, 0, 0>>, 16, ?ANY},
+                                                  {?ANY, 0, <<10, 9, 0, 7>>}]})),
+    ?assertEqual([#{prefix => <<10, 0, 0, 0>>, plen => 16, gateway => none}],
+                 Lease(Mask#{classless_routes => [{<<10, 0, 0, 0>>, 16, ?ANY}, {?ANY, 0, <<10, 0, 2, 255>>},
+                                                  {?ANY, 0, <<10, 0, 2, 0>>}, {?ANY, 0, <<10, 0, 255, 255>>}]})),
+    Router = <<10, 0, 9, 1>>,
+    ?assertEqual([#{prefix => Router, plen => 32, gateway => none},
+                  #{prefix => ?ANY, plen => 0, gateway => Router}],
+                 Lease(#{subnet_mask => <<255, 255, 255, 255>>, routers => [?ADDR, Router]})).
+
+%% Renewing takes an ACK only from the lease's server; rebinding from any server, and a
+%% new server alone changes nothing the interface holds.
+renewal_server_test() ->
+    {Bound, _} = bound_core(),
+    T1 = erx_dhcp4_core:next_deadline(Bound),
+    {Renewing, [{send, _, _, #dhcp4{xid = X2}}]} = erx_dhcp4_core:step(timeout, Bound, T1),
+    Other = fun(Xid) -> Ack = reply(ack, Xid, ack_options()),
+                        Ack#dhcp4{options = (Ack#dhcp4.options)#{server_id => <<10, 0, 2, 3>>}}
+            end,
+    ?assertEqual({Renewing, []}, erx_dhcp4_core:step({reply, Other(X2)}, Renewing, T1 + 5)),
+    T2 = 100 + 3150 * 1000,
+    {Rebinding, [{send, broadcast, _, #dhcp4{xid = X3}}]} = erx_dhcp4_core:step(timeout, Renewing, T2),
+    {Rebound, []} = erx_dhcp4_core:step({reply, Other(X3)}, Rebinding, T2 + 5),
+    %% The lease counts from the exchange's first REQUEST, sent at T1.
+    ?assertEqual(T1 + 1800 * 1000, erx_dhcp4_core:next_deadline(Rebound)).

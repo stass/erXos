@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
+
 require_relative 'boot_image'
 require_relative 'error'
 require_relative 'fiasco'
@@ -21,7 +23,11 @@ module Erx
                     'liberx/backend/core/refused.c', 'test/guest/native_space/guest.c'].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_space/program.c'].freeze
     CASES = %w[program_found writer_released between_tasks bounds revoke gate_refusals gate_queue
-               created space_refusals released first_thread budget_calls budget_destroy groups passing time].freeze
+               created space_refusals released first_thread budget_calls budget_destroy groups passing time budget_held
+               doorbells slices copy].freeze
+    # The image's domains/sample/ release, as test/guest/native_space/modes.h describes it.
+    RELEASE_FILES = { 'domains/sample/alpha' => "alpha file\n",
+                      "domains/sample/#{'long-name/' * 60}end" => "long file\n" }.freeze
     CASE_LINE = /\Aerx: space: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function
@@ -72,7 +78,18 @@ module Erx
         program = native.build_task(name: 'native-space', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: [])
         root_task = native.build(name: 'space-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: [])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
-                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task, programs: { PROGRAM_PATH => program })
+                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task,
+                        programs: { PROGRAM_PATH => program, **release_files(File.join(@build, 'release')) })
+      end
+
+      # Writes each file of RELEASE_FILES under directory, by its index in the table.
+      def release_files(directory)
+        FileUtils.mkdir_p(directory)
+        RELEASE_FILES.each_with_index.to_h do |(archive_path, bytes), index|
+          file = File.join(directory, index.to_s)
+          File.binwrite(file, bytes)
+          [archive_path, file]
+        end
       end
     end
   end
