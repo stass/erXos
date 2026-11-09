@@ -31,6 +31,9 @@ class ErxTcpCoreTest < Minitest::Test
   # An acknowledgement of what was never sent is dropped before the loss module sees it.
   ACK_TOO_MUCH = 'case Ack > erx_tcp_sendlog:snd_max(Log) of'
   ACK_ANY = 'case Ack > erx_tcp_sendlog:snd_max(Log) + (1 bsl 32) of'
+  # tcp_dropwithreset answers no segment whose frame was link broadcast or multicast.
+  NO_RST_FOR_LINK_CAST = 'Flags band ?TH_RST =/= 0; LinkCast =/= unicast ->'
+  RST_FOR_ANY_LINK_CAST = 'Flags band ?TH_RST =/= 0; LinkCast =:= none ->'
 
   def test_core_cases_pass_under_eunit
     assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests, :erx_tcp_input_ack_tests)
@@ -40,6 +43,12 @@ class ErxTcpCoreTest < Minitest::Test
     output = refute_erx_net_eunit(:erx_tcp_input_tests,
                                   fault: { 'erx_tcp_input' => [EXACT_RST, ANY_RST_IN_WINDOW] })
     assert_match(/rst_in_window_draws_a_challenge_ack/, output)
+  end
+
+  def test_a_reset_for_a_link_broadcast_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_input_tests,
+                                  fault: { 'erx_tcp_input' => [NO_RST_FOR_LINK_CAST, RST_FOR_ANY_LINK_CAST] })
+    assert_match(/no_reset_for_link_broadcast/, output)
   end
 
   def test_a_missing_ghost_ack_floor_is_caught

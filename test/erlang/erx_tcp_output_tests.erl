@@ -223,3 +223,51 @@ no_route_test() ->
     %% The route back, the next pass sends from snd_nxt again.
     {_, Again} = out(T1),
     ?assertEqual([1001, 2001, 3001], seqs(Again)).
+
+unreachable(Tcb) -> erx_tcp_output:output(Tcb, (ctx(64))#tcp_ctx{route = {error, ehostunreach}}).
+
+%% tcp_output.c:1722-1735: a pure ACK lost for want of a route settles neither the window
+%% advertised, the last ACK sent nor the pending and delayed ACK, so the next pass sends it.
+no_route_keeps_the_ack_owed_test() ->
+    #tcb{deadlines = D} = T0 = est(0),
+    T = T0#tcb{ack_now = true, rcv_adv = 5001, last_ack_sent = 4000,
+               deadlines = D#deadlines{delack = ?T0 + ?S(40)}},
+    {T1, []} = unreachable(T),
+    ?assertEqual({true, 5001, 4000, ?T0 + ?S(40)},
+                 {T1#tcb.ack_now, T1#tcb.rcv_adv, T1#tcb.last_ack_sent,
+                  T1#tcb.deadlines#deadlines.delack}),
+    {T2, [{#tcp{flags = ?TH_ACK, ack = 5001}, _, []}]} = out(T1),
+    ?assertEqual({false, 5001 + 65535, 5001, infinity},
+                 {T2#tcb.ack_now, T2#tcb.rcv_adv, T2#tcb.last_ack_sent,
+                  T2#tcb.deadlines#deadlines.delack}).
+
+%% tcp_output.c:1651-1678: a SACK retransmission lost for want of a route leaves snd_nxt and
+%% the send log as they were, so the next pass resends the same range.
+no_route_sack_retransmission_test() ->
+    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, ?T0) end,
+                       erx_tcp_sendlog:new(1001), [1001, 2001, 3001, 4001, 5001]),
+    {Log1, _} = erx_tcp_sendlog:ack(Log0, 1001, [{2001, 6001}]),
+    {Log, 1000} = erx_tcp_sendlog:mark_lost(Log1, 3, 1000),
+    #tcb{ccv = Ccv} = T = est(5000),
+    Recovering = T#tcb{sack = on, sendlog = Log, snd_nxt = 6001, snd_max = 6001,
+                       snd_recover = 6001, send_timer = {rexmt, ?T0 + ?S(1000)},
+                       ccv = Ccv#ccv{cwnd = 3000, fast_recovery = true}},
+    {T1, []} = unreachable(Recovering),
+    ?assertEqual({6001, 6001, ehostunreach}, {T1#tcb.snd_nxt, T1#tcb.snd_max, T1#tcb.soft_error}),
+    {_, Out} = out(T1),
+    ?assertEqual({[1000], [1001]}, {lens(Out), seqs(Out)}).
+
+%% tcp_output.c:1651-1678: a lost SYN keeps its sequence advance and its timer, and in
+%% SYN-SENT, which has received no SYN, the error is not kept as the soft error.
+no_route_syn_test() ->
+    {T1, []} = unreachable((new())#tcb{state = syn_sent}),
+    ?assertMatch({1001, 1001, {rexmt, _}, none},
+                 {T1#tcb.snd_nxt, T1#tcb.snd_max, T1#tcb.send_timer, T1#tcb.soft_error}).
+
+%% tcp_output.c:1651-1678: a persist probe lost for want of a route keeps its advance of
+%% snd_max, as a probe that left would, and the persist timer.
+no_route_persist_probe_test() ->
+    {T1, []} = out((est(3000))#tcb{snd_wnd = 0}),
+    {T2, []} = unreachable(T1#tcb{force_data = true}),
+    ?assertMatch({1001, 1002, {persist, _}, ehostunreach},
+                 {T2#tcb.snd_nxt, T2#tcb.snd_max, T2#tcb.send_timer, T2#tcb.soft_error}).

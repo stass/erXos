@@ -176,7 +176,8 @@
     wscale = none :: none | 0..14,
     sack_permitted = false :: boolean(),
     sacks = [] :: [{integer(), integer()}], % SACK blocks against snd_una
-    ip_ecn :: 0..3                      % the IP header's ECN field, iptos
+    ip_ecn :: 0..3,                     % the IP header's ECN field, iptos
+    link_cast :: unicast | broadcast | multicast % the frame's M_BCAST and M_MCAST
 }).
 
 %% The step's context (docs/design-network-stack.md, "One owner, one step"): the monotonic

@@ -59,6 +59,28 @@
 %% LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 %% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %% SUCH DAMAGE.
+%%
+%% FreeBSD: sys/netinet/tcp_input.c
+%% Copyright (c) 1982, 1986, 1988, 1990, 1993, 1994, 1995
+%% The Regents of the University of California.  All rights reserved.
+%% Copyright (c) 2007-2008,2010
+%% Swinburne University of Technology, Melbourne, Australia.
+%% Copyright (c) 2009-2010 Lawrence Stewart <lstewart@freebsd.org>
+%% Copyright (c) 2010 The FreeBSD Foundation
+%% Copyright (c) 2010-2011 Juniper Networks, Inc.
+%% All rights reserved.
+%%
+%% Portions of this software were developed at the Centre for Advanced Internet
+%% Architectures, Swinburne University of Technology, by Lawrence Stewart,
+%% James Healy and David Hayes, made possible in part by a grant from the Cisco
+%% University Research Program Fund at Community Foundation Silicon Valley.
+%%
+%% Portions of this software were developed at the Centre for Advanced
+%% Internet Architectures, Swinburne University of Technology, Melbourne,
+%% Australia by David Hayes under sponsorship from the FreeBSD Foundation.
+%%
+%% Portions of this software were developed by Robert N. M. Watson under
+%% contract to Juniper Networks, Inc.
 
 -module(erx_tcp_syncache).
 -moduledoc """
@@ -99,7 +121,7 @@ Every function is pure.
 
 -include("erx_tcp_wire.hrl").
 
--export([new/0, new/1, secrets/3, rotate/2, add/5, expand/5, chkrst/4, unreach/3, expired/2,
+-export([new/0, new/1, secrets/3, rotate/2, add/6, expand/5, chkrst/4, unreach/3, expired/2,
          next_deadline/1, size/1, cookies_only/2]).
 
 -export_type([syncache/0, secrets/0, conn/0, listener/0, context/0, action/0, handshake/0,
@@ -246,22 +268,41 @@ rotate(<<_:128>> = NewKey, Secrets) ->
 size(#syncache{entries = Entries}) -> map_size(Entries).
 
 -doc """
-A SYN for a listener (`syncache_add`). A signed SYN is dropped. A SYN for a four-tuple
-already in the table updates its timestamp and may withdraw ECN, but never grant it, and
-draws the same SYN-ACK again with the retransmission count reset. Otherwise the SYN draws a
-SYN-ACK whose sequence number is a cookie, and makes an entry if the table is not paused and
-has room. A SYN that finds the table full pauses it (`pause/2`) and makes no entry.
+A SYN for a listener (`syncache_add`), with the class of the address it was sent to as
+erx_ip4 and erx_ip6 found it against the receiving interface (`erx_ip4:cast()`). A SYN to
+or from itself, to a broadcast or multicast address or from one is dropped, as tcp_input
+drops it before syncache_add (tcp_input.c:1295-1338), and so is a signed SYN. A SYN for a
+four-tuple already in the table updates its timestamp and may withdraw ECN, but never grant
+it, and draws the same SYN-ACK again with the retransmission count reset. Otherwise the SYN
+draws a SYN-ACK whose sequence number is a cookie, and makes an entry if the table is not
+paused and has room. A SYN that finds the table full pauses it (`pause/2`) and makes no
+entry.
 """.
--spec add(conn(), #tcp{}, listener(), context(), syncache()) -> {syncache(), [action()]}.
-add(_Conn, #tcp{opts = #tcp_opts{signature = true}}, _Listener, _Context, Cache) ->
-    {Cache, []};
-add(Conn, #tcp{} = Syn, Listener, #{now := Now, secrets := Secrets}, #syncache{} = Cache)
-  when ?IS_CONN(Conn) ->
-    %% A paused table looks no entry up, as FreeBSD's cookiesonly path does (:1510).
-    case cookies_only(Now, Cache) orelse Cache#syncache.entries of
-        #{Conn := Entry} -> repeat_syn(Conn, Entry, Syn, Now, Cache);
-        _ -> first_syn(Conn, Syn, Listener, Now, Secrets, Cache)
+-spec add(conn(), #tcp{}, Cast :: unicast | broadcast | multicast, listener(), context(),
+          syncache()) -> {syncache(), [action()]}.
+add(Conn, #tcp{opts = #tcp_opts{signature = Signed}} = Syn, Cast, Listener,
+    #{now := Now, secrets := Secrets}, #syncache{} = Cache)
+  when ?IS_CONN(Conn), Cast =:= unicast orelse Cast =:= broadcast orelse Cast =:= multicast ->
+    case not Signed andalso admissible(Conn, Cast) of
+        false ->
+            {Cache, []};
+        true ->
+            %% A paused table looks no entry up, as FreeBSD's cookiesonly path does (:1510).
+            case cookies_only(Now, Cache) orelse Cache#syncache.entries of
+                #{Conn := Entry} -> repeat_syn(Conn, Entry, Syn, Now, Cache);
+                _ -> first_syn(Conn, Syn, Listener, Now, Secrets, Cache)
+            end
     end.
+
+%% tcp_input.c:1295-1338: not a connection to itself, and neither end a multicast address
+%% nor the destination a broadcast one, which erx_ip4 decided against the receiving
+%% interface's broadcast addresses (in_ifnet_broadcast); nor, for IPv4, a source at the
+%% limited broadcast.
+admissible({Addr, Port, Addr, Port}, _Cast) -> false;
+admissible({Local, _, Foreign, _}, unicast) ->
+    not erx_net_addr:is_multicast(Local) andalso not erx_net_addr:is_multicast(Foreign)
+        andalso Foreign =/= <<255, 255, 255, 255>>;
+admissible(_, _) -> false.
 
 %% The ECN of an entry may be withdrawn by a SYN without it, never granted.
 repeat_syn(Conn, #entry{ts = Ts0, ecn = Ecn0} = Entry0,

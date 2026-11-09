@@ -4,7 +4,10 @@
 %% EUnit cases of erx_net_frame (docs/design-network-stack.md, "Classification and
 %% framing"): paths over fixed configurations, the route-free paths of the interface's own
 %% packets, hop limits and MTUs, frames that decode back through the codecs, and a
-%% connection whose MTU drops in mid-transfer.
+%% connection whose MTU drops in mid-transfer; and frames fed to erx_net_input:classify/2 as
+%% the receiving interface sees them: a segment to its peer's connection, the copies of
+%% broadcasts and multicasts the stack loops, and an ICMPv6 error through the loopback
+%% interface in its address's zone.
 
 -module(erx_net_frame_tests).
 
@@ -274,3 +277,79 @@ ipv6_segments_carry_no_dont_fragment_test() ->
     T = conn(inet6, v6("2001:db8::5"), v6("2001:db8::9"), 100),
     {_, [{_, #{df := false}, _}]} = erx_tcp_output:output(T, #tcp_ctx{now = ?T0, credit = 1,
                                                                        mtu = 1500}).
+
+%% --- Frames classified by the interface that receives them -------------------
+
+%% The interface that receives a frame: its link-layer address, addresses and groups, and
+%% the demultiplexing table of the sockets and connections it holds, key to credit.
+rx_view(Link, Mac, Ip4, Ip6, Groups, Table) ->
+    Loop = Link =:= none,
+    Zone = case Loop of
+               true -> lo0;
+               false -> eth0
+           end,
+    #{link => Link, lladdr => Mac,
+      ip4 => #{addrs => Ip4, broadcasts => [v4("10.0.0.255")], loopback => Loop},
+      ip6 => #{addrs => Ip6, notready => [], loopback => Loop, zone => Zone},
+      groups => Groups, dhcp => false,
+      demux => fun(Key) -> [#{pid => self(), credit => Credit} || {K, Credit} <- Table, K =:= Key] end}.
+
+frame_then_classify_round_trip_test() ->
+    Data = [<<"abc">>, <<"defg">>],
+    lists:foreach(
+      fun({Dst, Family}) ->
+              Path = path(Dst),
+              #{src := Src} = Path,
+              {ok, [P], _} = erx_net_frame:tcp(Path, [segment(Data, 2, true)], gen()),
+              {send, [Frame]} = erx_net_frame:address(Path, {?PEER, fresh}, [P]),
+              %% The peer's own view: its address, and the connection from this host.
+              View = rx_view(ethernet, ?PEER, [Dst], [Dst], [], [{{tcp, Family, Dst, 80, Src, 4000}, peer}]),
+              {owned, [{_, peer}], Pending} = erx_net_input:classify({frame, iolist_to_binary(Frame)}, View),
+              ?assertEqual({ok, {element(1, segment(Data, 2, true)), <<"abcdefg">>, 2, unicast}},
+                           erx_net_input:verify(Pending))
+      end, [{v4("10.0.0.9"), inet}, {v6("2001:db8:9::1"), inet6}]).
+
+%% The copy of a socket's broadcast or multicast the stack hands back to the interface it
+%% went out through, as a frame from its driver, finds the local socket bound to the port.
+looped_broadcast_and_multicast_find_a_local_socket_test() ->
+    Addrs6 = [v6("2001:db8::5"), {v6("fe80::5"), eth0}],
+    lists:foreach(
+      fun({Dst, Opts, Family, Groups}) ->
+              Path = path(Dst, Opts),
+              {ok, [P], _} = erx_net_frame:udp(Path, 5353, 5353, [<<"q">>], gen()),
+              {send, [Frame]} = erx_net_frame:address(Path, none, [P]),
+              Bytes = iolist_to_binary(Frame),
+              Table = [{{udp, Family, any, 5353}, socket}],
+              Joined = rx_view(ethernet, ?MAC0, [v4("10.0.0.5")], Addrs6, Groups, Table),
+              {owned, [{_, socket}], Pending} = erx_net_input:classify({frame, Bytes}, Joined),
+              #{src := Src, dst := To} = Path,
+              Zone = fun(Addr) -> erx_net_addr:zoned(Addr, eth0) end,
+              ?assertEqual({ok, {datagram, {Zone(Src), 5353}, Zone(To), <<"q">>}}, erx_net_input:verify(Pending)),
+              %% A group the interface has not joined is dropped from the copy as from the wire.
+              Unjoined = rx_view(ethernet, ?MAC0, [v4("10.0.0.5")], Addrs6, [], Table),
+              case Groups of
+                  [] -> ok;
+                  [_] -> ?assertEqual({drop, not_member}, erx_net_input:classify({frame, Bytes}, Unjoined))
+              end
+      end, [{v4("10.0.0.255"), #{}, inet, []},
+            {v4("224.0.0.251"), #{via => eth0}, inet, [v4("224.0.0.251")]},
+            {{v6("ff02::fb"), eth0}, #{}, inet6, [v6("ff02::fb")]}]).
+
+%% An ICMPv6 error to one of the stack's own link-local addresses crosses the loopback
+%% interface in that address's zone and finds the socket its quote names.
+looped_icmpv6_error_finds_the_socket_its_quote_names_test() ->
+    Local = v6("fe80::5"),
+    Peer = v6("fe80::9"),
+    {ok, [Sent], _} = erx_net_frame:udp(path({Peer, eth0}), 4000, 53, [<<"q">>], gen()),
+    Quote = binary:part(iolist_to_binary(Sent), 0, 48),
+    Out = path({Local, eth0}),
+    #{src := Local, dst := Local} = Out,
+    Message = erx_icmp6_wire:encode(#icmp6{type = 1, code = 4, msg = {error, 0}}, Quote, {Local, Local}),
+    {ok, [P], _} = erx_net_frame:ip(Out, 58, Message, gen()),
+    {send, [{Zone, Packet}]} = erx_net_frame:address(Out, none, [P]),
+    View = rx_view(none, none, [v4("10.0.0.5")], [v6("2001:db8::5"), {Local, eth0}, {v6("fe80::15"), eth1}], [],
+                   [{{udp, inet6, {Local, eth0}, 4000, {Peer, eth0}, 53}, socket}]),
+    {owned, [{_, socket}], Pending} = erx_net_input:classify({frame, Zone, iolist_to_binary(Packet)}, View),
+    ?assertMatch({ok, {report, #icmp6{type = 1, code = 4}, #{proto := 17}}}, erx_net_input:verify(Pending)),
+    %% The same bytes in another zone are an error to no address of the stack.
+    ?assertMatch({drop, _}, erx_net_input:classify({frame, eth1, iolist_to_binary(Packet)}, View)).

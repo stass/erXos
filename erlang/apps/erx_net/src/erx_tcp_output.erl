@@ -177,20 +177,22 @@ Departures, each from erXos's model:
 -doc """
 The segments the connection sends now, at most the context's credit, and the control
 block after sending them (see the module documentation). It clears the requests the step
-left (`ack_now`, `force_data`, `allowance`). In CLOSED it sends only the RST|ACK of a
+left (`force_data`, `allowance`, and `ack_now` unless the context has no route, when an
+ACK lost to EHOSTUNREACH stays owed, as TF_ACKNOW stays set). In CLOSED it sends only the
+RST|ACK of a
 dropped connection that has received a SYN (`reset_peer`, `tcp_outflags[TCPS_CLOSED]`).
 """.
 -spec output(#tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:outgoing()]}.
 output(#tcb{state = closed, reset_peer = true} = Tcb, Ctx) ->
     reset(Tcb, Ctx);
-output(#tcb{state = closed} = Tcb, _) ->
-    {done(Tcb), []};
+output(#tcb{state = closed} = Tcb, Ctx) ->
+    {done(Tcb, Ctx), []};
 output(#tcb{snd_una = Una, snd_max = Max, snd_nxt = Nxt} = Tcb0,
        #tcp_ctx{credit = Credit} = Ctx) ->
     Tcb = Tcb0#tcb{snd_nxt = max(Nxt, Una)},
     Idle = Max =:= Una,
     {Tcb1, Out} = again(after_idle(Idle, Tcb, Ctx), Idle, Credit, Ctx, []),
-    {done(Tcb1), Out}.
+    {done(Tcb1, Ctx), Out}.
 
 -doc """
 `tcp_setpersist` as the persist timer's next probe: arms it backed off by the timeouts so
@@ -255,11 +257,12 @@ unreachable(#out_seg{source = Source}, #tcb{state = State} = Before, After,
     end.
 
 %% The end of a pass: the loss module's kept window becomes the congestion window, and the
-%% step's requests are cleared.
-done(#tcb{allowance = {_, Keep}, ccv = Ccv} = Tcb) ->
-    done(Tcb#tcb{allowance = none, ccv = Ccv#ccv{cwnd = Keep}});
-done(Tcb) ->
-    Tcb#tcb{ack_now = false, force_data = false, allowance = none}.
+%% step's requests are cleared, but for an ACK the pass could not send for want of a route,
+%% which the next pass owes as FreeBSD keeps TF_ACKNOW after an error.
+done(#tcb{allowance = {_, Keep}, ccv = Ccv} = Tcb, Ctx) ->
+    done(Tcb#tcb{allowance = none, ccv = Ccv#ccv{cwnd = Keep}}, Ctx);
+done(#tcb{ack_now = AckNow} = Tcb, #tcp_ctx{route = Route}) ->
+    Tcb#tcb{ack_now = AckNow andalso Route =/= ok, force_data = false, allowance = none}.
 
 %% cc_after_idle: nothing outstanding and nothing received or sent for an RTO.
 after_idle(true, #tcb{rcvtime = Rcvtime, sndtime = Sndtime, rtt = Rtt, cc = Cc} = Tcb,
@@ -500,10 +503,17 @@ transmit(#out_seg{flags = Flags0} = Seg0, #tcb{maxseg = Mss} = Tcb0,
 dont_fragment(#tcb{family = Family, maxseg = Mss}) ->
     Family =:= inet andalso Mss > ?TCP_MINMSS.
 
-commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, #tcb{rcv_sack = RcvSack0} = Tcb0, Ctx) ->
+%% A segment lost to EHOSTUNREACH (a context without a route) is committed as one sent, and
+%% unreachable/4 backs out its sequence advance; only what tcp_output does on success alone
+%% (sent/3, and the D-SACK block cleared, tcp_output.c:1635-1641) waits for the route.
+commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, #tcb{rcv_sack = RcvSack0} = Tcb0,
+       #tcp_ctx{route = Route} = Ctx) ->
     #out_seg{len = Len, flags = Flags1, sendalot = More} = Seg,
     Sacks = Opts#tcp_opts.sacks,
-    Tcb1 = Tcb0#tcb{rcv_sack = case Sacks of [] -> RcvSack0; _ -> RcvSack end},
+    Tcb1 = Tcb0#tcb{rcv_sack = case {Sacks, Route} of
+                                   {[_ | _], ok} -> RcvSack;
+                                   _ -> RcvSack0
+                               end},
     {Flags, IpEcn, Tcb2} = ecn(Seg#out_seg{flags = Flags1 bor push(Seg, Tcb1)}, Tcb1),
     {Header, RecWin} = header(Seg#out_seg{flags = Flags}, Opts, Tcb2),
     Payload = case Len of
@@ -516,12 +526,18 @@ commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, #tcb{rcv_sack = RcvSack
              false -> Tcb2#tcb.snd_una
          end,
     Tcb3 = after_send(Seg#out_seg{flags = Flags}, Tcb2, Ctx),
-    #tcb{rcv_nxt = RcvNxt, rcv_adv = Adv, deadlines = Deadlines} = Tcb3,
-    Tcb = Tcb3#tcb{rcv_adv = max(Adv, RcvNxt + RecWin), last_ack_sent = RcvNxt,
-                   ack_now = false, deadlines = Deadlines#deadlines{delack = infinity},
-                   snd_up = Up, rxwin0_sent = Header#tcp.win =:= 0,
+    Tcb = Tcb3#tcb{snd_up = Up, rxwin0_sent = Header#tcp.win =:= 0,
                    rexmt_prev = badrxtwin(Opts, Tcb3, Ctx)},
-    {Tcb, {Header, #{ecn => IpEcn, df => Df}, Payload}, More}.
+    {sent(Route, RecWin, Tcb), {Header, #{ecn => IpEcn, df => Df}, Payload}, More}.
+
+%% "Data sent (as far as we can tell)" (tcp_output.c:1722-1735): the largest window
+%% advertised, the last ACK sent, and the pending ACK and delayed ACK settled. A segment
+%% lost for want of a route settles none of them, so the ACK it carried is still owed.
+sent(ok, RecWin, #tcb{rcv_nxt = RcvNxt, rcv_adv = Adv, deadlines = Deadlines} = Tcb) ->
+    Tcb#tcb{rcv_adv = max(Adv, RcvNxt + RecWin), last_ack_sent = RcvNxt, ack_now = false,
+            deadlines = Deadlines#deadlines{delack = infinity}};
+sent({error, _}, _, Tcb) ->
+    Tcb.
 
 %% t_badrxtwin (tcp_output.c:848-849): the first segment sent with a timestamp after the
 %% first timeout, the retransmission, records our clock, without the offset, as the time
@@ -720,10 +736,10 @@ enobufs(#out_seg{len = Len, flags = Flags}, #tcb{ccv = Ccv, maxseg = Mss, ts = T
 
 %% The RST|ACK of a dropped connection (tcp_drop's tcp_output in CLOSED): at snd_max,
 %% acknowledging rcv_nxt, as erx_tcp:respond/5 builds a RST.
-reset(#tcb{} = Tcb, #tcp_ctx{credit = 0}) ->
-    {done(Tcb#tcb{reset_peer = false}), []};
+reset(#tcb{} = Tcb, #tcp_ctx{credit = 0} = Ctx) ->
+    {done(Tcb#tcb{reset_peer = false}, Ctx), []};
 reset(#tcb{snd_max = Max, rcv_nxt = RcvNxt} = Tcb, Ctx) ->
-    {done(Tcb#tcb{reset_peer = false}), [erx_tcp:respond(Tcb, Ctx, Max, RcvNxt, ?TH_RST bor ?TH_ACK)]}.
+    {done(Tcb#tcb{reset_peer = false}, Ctx), [erx_tcp:respond(Tcb, Ctx, Max, RcvNxt, ?TH_RST bor ?TH_ACK)]}.
 
 %% The send timer: the retransmission or the persist timer, never both (send_timer), with
 %% the backoff count beside it (rxtshift, FreeBSD's t_rxtshift).

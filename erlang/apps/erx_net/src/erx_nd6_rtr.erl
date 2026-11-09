@@ -454,8 +454,9 @@ same_prefix(_, _, _) -> false.
 autoconf(Prefix, Plen, Vl, Pl, Now, Actions, #{addrs := Addrs, failures := Failures} = S) ->
     Refresh = fun(#{valid := V} = Row) ->
                       case autoconf_of(Row, Prefix, Plen) of
-                          true -> Row#{valid := deadline(Now, valid_lifetime(remaining(V, Now), Vl)),
-                                       preferred := deadline(Now, Pl)};
+                          true ->
+                              Valid = deadline(Now, valid_lifetime(remaining(V, Now), Vl)),
+                              deprecation(Row#{valid := Valid, preferred := deadline(Now, Pl)}, Now);
                           false -> Row
                       end
               end,
@@ -611,7 +612,8 @@ dad_done(Addr, Outcome, #{addrs := Addrs, failures := Failures} = S) ->
 -doc """
 Advances to Now: sends a due router solicitation, removes routers and
 addresses whose lifetime ended before Now (`nd6_defrouter_timer`,
-`nd6_timer`), takes expired prefixes off link and removes those with
+`nd6_timer`), marks `deprecated` the addresses whose preferred lifetime
+ended before Now, takes expired prefixes off link and removes those with
 no address of theirs and no identifier request pending.
 """.
 -spec tick(integer(), state()) -> {[action()], state()}.
@@ -619,7 +621,7 @@ tick(Now, S0) ->
     {Actions, S1} = solicit(Now, S0),
     #{routers := Routers, addrs := Addrs, prefixes := Prefixes} = S1,
     Live = [R || #{expire := E} = R <- Routers, E >= Now],
-    Addrs2 = [A || #{valid := V} = A <- Addrs, not passed(V, Now)],
+    Addrs2 = [deprecation(A, Now) || #{valid := V} = A <- Addrs, not passed(V, Now)],
     Prefixes2 = lists:filtermap(fun(P) -> expire_prefix(P, Addrs2, map_get(pending, S1), Now) end,
                                 Prefixes),
     {Actions, S1#{routers := Live, addrs := Addrs2, prefixes := Prefixes2}}.
@@ -639,6 +641,16 @@ expire_prefix(#{prefix := Prefix, plen := Plen, valid := V} = P, Addrs, Pending,
 passed(infinity, _Now) -> false;
 passed(Deadline, Now) -> Deadline < Now.
 
+%% IN6_IFF_DEPRECATED as nd6_timer keeps it: set once the preferred lifetime has passed
+%% (nd6.c:984-987), cleared while it has not, so an advertisement that extends it makes
+%% the address preferred again (nd6.c:1041). The flag follows from the deadline alone.
+deprecation(#{preferred := Preferred, flags := Flags} = Row, Now) ->
+    Kept = lists:delete(deprecated, Flags),
+    Row#{flags := case passed(Preferred, Now) of
+                      true -> [deprecated | Kept];
+                      false -> Kept
+                  end}.
+
 solicit(Now, #{rs_next := Next, rs_left := Left} = S) when is_integer(Next), Next =< Now ->
     case Left - 1 of
         0 -> {[send_rs], S#{rs_left := 0, rs_next := none}};
@@ -650,12 +662,15 @@ solicit(_Now, S) ->
 -doc """
 The earliest time `tick/2` has work: the next solicitation, or the
 first moment after a router's, an address's or an on-link prefix's
-lifetime; `none` when nothing is timed.
+lifetime or a preferred address's preferred lifetime; `none` when
+nothing is timed.
 """.
 -spec next_deadline(state()) -> integer() | none.
 next_deadline(#{rs_next := Rs, routers := Routers, addrs := Addrs, prefixes := Prefixes}) ->
     Ends = [E + 1 || #{expire := E} <- Routers]
         ++ [V + 1 || #{valid := V} <- Addrs, V =/= infinity]
+        ++ [P + 1 || #{preferred := P, flags := Flags} <- Addrs, P =/= infinity,
+                     not lists:member(deprecated, Flags)]
         ++ [V + 1 || #{valid := V, onlink := true} <- Prefixes, V =/= infinity],
     case [T || T <- [Rs | Ends], is_integer(T)] of
         [] -> none;

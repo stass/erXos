@@ -123,6 +123,26 @@ lists_are_bounded_test() ->
                  [R || #{addr := A} = R <- erx_nd6_rtr:routers(S3), A =:= router(2)]),
     ?assertNot(lists:any(fun(#{addr := A}) -> A =:= router(17) end, erx_nd6_rtr:routers(S3))).
 
+%% nd6.c:984-987 and :1041: an address is deprecated once its preferred lifetime has passed,
+%% and preferred again when an advertisement extends that lifetime.
+deprecation_test() ->
+    Id = <<1, 2, 3, 4, 5, 6, 7, 8>>,
+    Advertise = fun(Now, S) ->
+                        erx_nd6_rtr:ra(pkt(router(1)), ra(1800, #{prefixes => [pi(?PREFIX, 3600, 600)]}),
+                                       Now, S)
+                end,
+    {A1, S1} = Advertise(0, new()),
+    {_, S2} = answer(A1, Id, 0, S1),
+    S3 = erx_nd6_rtr:dad_done(<<16#2001:16, 16#db8:16, 0:32, Id/binary>>, ok, S2),
+    Flags = fun(St) -> [F || #{flags := F} <- erx_nd6_rtr:addresses(St)] end,
+    ?assertEqual(600001, erx_nd6_rtr:next_deadline(S3)),
+    {[], S4} = erx_nd6_rtr:tick(600000, S3),
+    ?assertEqual([[autoconf]], Flags(S4)),
+    {[], S5} = erx_nd6_rtr:tick(600001, S4),
+    ?assertEqual({[[deprecated, autoconf]], 1800001}, {Flags(S5), erx_nd6_rtr:next_deadline(S5)}),
+    {_, S6} = Advertise(700000, S5),
+    ?assertEqual([[autoconf]], Flags(S6)).
+
 two_hour_rule_test() ->
     Id = <<1, 2, 3, 4, 5, 6, 7, 8>>,
     {A1, S1} = advertise(0, 86400, new()),

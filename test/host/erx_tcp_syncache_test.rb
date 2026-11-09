@@ -22,6 +22,9 @@ class ErxTcpSyncacheTest < Minitest::Test
   # keeps the table cookies-only one second longer than FreeBSD's syncache_unpause.
   PAUSE = 'uptime(Now) < Until'
   PAUSE_THROUGH_END = 'uptime(Now) =< Until'
+  # tcp_input.c:1297 and :1320 drop a SYN to or from itself before the syncache.
+  NO_SELF = 'admissible({Addr, Port, Addr, Port}, _Cast) -> false;'
+  SELF_ADMITTED = 'admissible({Addr, Port, Addr, Port}, none) -> false;'
 
   def test_syncache_properties_pass_under_eunit
     assert_erx_net_eunit(:erx_tcp_syncache_tests)
@@ -43,5 +46,11 @@ class ErxTcpSyncacheTest < Minitest::Test
     output = refute_erx_net_eunit(:erx_tcp_syncache_tests,
                                   fault: { 'erx_tcp_syncache' => [PAUSE, PAUSE_THROUGH_END] })
     assert_match(/pause_test/, output)
+  end
+
+  def test_address_checks_catch_a_connection_to_itself
+    output = refute_erx_net_eunit(:erx_tcp_syncache_tests,
+                                  fault: { 'erx_tcp_syncache' => [NO_SELF, SELF_ADMITTED] })
+    assert_match(/address_checks_test/, output)
   end
 end

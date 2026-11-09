@@ -160,8 +160,9 @@ stages() ->
 lift(_, #tcb{state = State} = Tcb, _) when State =:= closed; State =:= time_wait ->
     {done, Tcb, []};
 lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = Opts},
-      Payload, IpEcn}, Tcb0, #tcp_ctx{now = Now} = Ctx)
-  when is_binary(Payload), is_integer(IpEcn), IpEcn >= 0, IpEcn =< 3 ->
+      Payload, IpEcn, LinkCast}, Tcb0, #tcp_ctx{now = Now} = Ctx)
+  when is_binary(Payload), is_integer(IpEcn), IpEcn >= 0, IpEcn =< 3,
+       LinkCast =:= unicast orelse LinkCast =:= broadcast orelse LinkCast =:= multicast ->
     #tcb{state = State, rcv_nxt = RcvNxt, snd_una = Una, iss = Iss, snd_max = SndMax} = Tcb0,
     %% In SYN-SENT nothing has been received to measure against: the SYN's own number is
     %% the initial receive sequence number, its wire value as the ISS is ours.
@@ -177,7 +178,8 @@ lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = O
                ts = ts_option(Opts#tcp_opts.ts, Tcb0#tcb.ts, Ctx),
                mss = Opts#tcp_opts.mss, wscale = Opts#tcp_opts.wscale,
                sack_permitted = Opts#tcp_opts.sack_permitted,
-               sacks = sack_blocks(Opts#tcp_opts.sacks, Tcb0), ip_ecn = IpEcn},
+               sacks = sack_blocks(Opts#tcp_opts.sacks, Tcb0), ip_ecn = IpEcn,
+               link_cast = LinkCast},
     BadAck = State =:= syn_sent andalso has(Flags, ?TH_ACK) andalso (Ack =< Iss orelse Ack > SndMax),
     case BadAck of
         true ->
@@ -986,14 +988,15 @@ dropafterack(#seg{flags = Flags, ack = Ack} = Seg,
 dropafterack(_, Tcb, _) ->
     {done, Tcb#tcb{ack_now = true}, []}.
 
-%% tcp_dropwithreset (tcp_input.c:3437): never a RST for a RST; for an ACK, a RST at the
-%% acknowledged number; otherwise a RST acknowledging everything the segment occupied. The
-%% header's own flags decide, with the segment's number and length as the stages left them.
-%% The interface sends it within its RST rate limit and never to a broadcast or multicast
-%% address.
-dropwithreset(#seg{hdr_flags = Flags, ack = Ack, seq = Seq, data = Data}, Tcb, Ctx) ->
+%% tcp_dropwithreset (tcp_input.c:3437): never a RST for a RST or for a segment whose frame
+%% was link broadcast or multicast (:3450-3451); for an ACK, a RST at the acknowledged
+%% number; otherwise a RST acknowledging everything the segment occupied. The header's own
+%% flags decide, with the segment's number and length as the stages left them. The
+%% interface sends it within its RST rate limit.
+dropwithreset(#seg{hdr_flags = Flags, ack = Ack, seq = Seq, data = Data, link_cast = LinkCast},
+              Tcb, Ctx) ->
     if
-        Flags band ?TH_RST =/= 0 ->
+        Flags band ?TH_RST =/= 0; LinkCast =/= unicast ->
             {done, Tcb, []};
         Flags band ?TH_ACK =/= 0 ->
             {done, Tcb, [{reset, erx_tcp:respond(Tcb, Ctx, Ack, 0, ?TH_RST)}]};

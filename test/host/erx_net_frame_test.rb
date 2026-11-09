@@ -7,7 +7,9 @@ require_relative 'erx_net_eunit'
 
 # Runs the EUnit cases of erx_net_frame (test/erlang/erx_net_frame_tests.erl): paths,
 # route-free paths, hop limits and MTUs, frames that decode back, and a connection whose
-# MTU drops in mid-transfer; and requires each seeded failure of the design's
+# MTU drops in mid-transfer, and frames that erx_net_input classifies as the receiving
+# interface sees them (a segment to its peer, looped broadcasts and multicasts, a looped
+# ICMPv6 error in its zone); and requires each seeded failure of the design's
 # "Classification and framing" to fail its case.
 class ErxNetFrameTest < Minitest::Test
   include ErxNetEunit
@@ -29,7 +31,14 @@ class ErxNetFrameTest < Minitest::Test
                                         '#{} when Multicast, Family =:= inet -> ?MULTICAST_HLIM;',
                                         'hop_limits_mtus_and_first_address_test'],
     sized_by_maxseg_alone: ['erx_tcp_output', 'case Df andalso ?IP4_TCP_HDR_LEN + Optlen + Seg#out_seg.len > Mtu of',
-                            'case Df andalso Mtu < 0 of', 'mtu_drop_mid_transfer_test']
+                            'case Df andalso Mtu < 0 of', 'mtu_drop_mid_transfer_test'],
+    # The frame of a broadcast must carry the broadcast address, or the interface that gets
+    # its copy back drops it as another host's.
+    broadcast_to_a_unicast_address: ['erx_net_frame', '#{link := ethernet}, <<16#ffffffff:32>>) -> ?ETHER_BROADCAST;',
+                                     '#{link := ethernet}, <<16#ffffffff:32>>) -> <<2, 0, 0, 0, 0, 7>>;',
+                                     'looped_broadcast_and_multicast_find_a_local_socket_test'],
+    loopback_drops_the_zone: ['erx_net_frame', '[{Zone, P} || P <- Packets].', '[{element(1, {global, Zone}), P} || P <- Packets].',
+                              'looped_icmpv6_error_finds_the_socket_its_quote_names_test']
   }.freeze
 
   def test_framing_cases_pass_under_eunit

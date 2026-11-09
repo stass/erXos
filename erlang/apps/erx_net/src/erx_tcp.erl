@@ -132,10 +132,14 @@ the one the step uses; an ICMP or ICMPv6 error quoting one of the connection's s
 
 -doc """
 A received segment as the interface hands it on: the header and payload erx_tcp_wire
-decoded, and the ECN field of its IP header (the low two bits of the IPv4 TOS or IPv6
-traffic class byte, tcp_do_segment's `iptos`).
+decoded, the ECN field of its IP header (the low two bits of the IPv4 TOS or IPv6 traffic
+class byte, tcp_do_segment's `iptos`), and the link cast of its frame
+(`erx_net_input:link_cast()`, FreeBSD's `M_BCAST` and `M_MCAST`). The step answers a segment
+with a `reset` only when its frame was link unicast (`tcp_dropwithreset`,
+tcp_input.c:3450-3451), and a reinjected segment takes its link cast back to the interface.
 """.
--type segment() :: {#tcp{}, Payload :: binary(), IpEcn :: 0..3}.
+-type segment() :: {#tcp{}, Payload :: binary(), IpEcn :: 0..3,
+                    LinkCast :: unicast | broadcast | multicast}.
 
 -doc """
 A segment to send: its TCP header with the values on the wire, and its payload, which

@@ -607,7 +607,8 @@ fragment, a parameter problem and a datagram of another protocol pass as they ar
 """.
 -spec verify(pending()) -> {ok, item()} | {drop, reason()}.
 verify({conn, Head, Upper}) ->
-    then(tcp_wire(Head, Upper), fun(Tcp, Payload) -> {Tcp, Payload, ecn(Head)} end);
+    then(tcp_wire(Head, Upper),
+         fun(Tcp, Payload) -> {Tcp, Payload, ecn(Head), maps:get(link, Head)} end);
 verify({tcp, Head, Upper, Listener}) ->
     then(tcp_wire(Head, Upper), fun(Tcp, Payload) -> {tcp, Head, Tcp, Payload, Listener} end);
 verify({datagram, #{src := Src, dst := Dst} = Head, Upper}) ->

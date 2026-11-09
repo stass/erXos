@@ -1,0 +1,285 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+%%
+%% EUnit cases of erx_net_input:classify/2 and verify/1 (docs/design-network-stack.md,
+%% "Classifying a frame"): one case per row of the verdict table, each asserting the
+%% verdict and, where the frame is not dropped, the item verify/1 hands on.
+
+-module(erx_net_input_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+-include("erx_tcp_wire.hrl").
+-include("erx_udp_wire.hrl").
+-include("erx_net_eth.hrl").
+-include("erx_ip4_wire.hrl").
+-include("erx_ip6.hrl").
+-include("erx_icmp4_wire.hrl").
+-include("erx_arp_wire.hrl").
+
+-define(MINE, <<2, 0, 0, 0, 0, 1>>).
+-define(OTHER_MAC, <<2, 0, 0, 0, 0, 7>>).
+-define(PEER_MAC, <<2, 0, 0, 0, 0, 9>>).
+-define(BROADCAST_MAC, <<16#ffffffffffff:48>>).
+-define(ME4, <<10, 0, 0, 1>>).
+-define(ALSO4, <<10, 0, 0, 2>>).
+-define(PEER4, <<10, 0, 0, 9>>).
+-define(BCAST4, <<10, 0, 0, 255>>).
+-define(FOREIGN4, <<192, 0, 2, 7>>).
+-define(GROUP4, <<224, 0, 0, 251>>).
+-define(ME6, <<16#2001:16, 16#db8:16, 0:80, 1:16>>).
+-define(PEER6, <<16#2001:16, 16#db8:16, 0:80, 9:16>>).
+-define(LL1, <<16#fe80:16, 0:96, 1:16>>).
+-define(LLPEER, <<16#fe80:16, 0:96, 9:16>>).
+-define(ALLNODES, <<16#ff02:16, 0:96, 1:16>>).
+-define(MDNS6, <<16#ff02:16, 0:96, 16#fb:16>>).
+-define(PROTO_ICMP, 1).
+-define(PROTO_TCP, 6).
+-define(PROTO_UDP, 17).
+-define(PROTO_GRE, 47).
+-define(PROTO_NONE, 59).
+-define(PROTO_ICMPV6, 58).
+
+%% --- Views and builders ------------------------------------------------------
+
+%% The Ethernet interface em0: 10.0.0.1 and its broadcast address, 2001:db8::1 and a
+%% link-local address, joined to the all-nodes group, not configured for DHCP.
+view() ->
+    view(#{}).
+
+view(Extra) ->
+    maps:merge(#{link => ethernet, lladdr => ?MINE,
+                 ip4 => #{addrs => [?ME4], broadcasts => [?BCAST4], loopback => false},
+                 ip6 => #{addrs => [?ME6, {?LL1, em0}], notready => [], loopback => false, zone => em0},
+                 groups => [?ALLNODES], dhcp => false, demux => demux(#{})}, Extra).
+
+%% The loopback interface, which holds every address of the stack.
+loop_view(Demux) ->
+    #{link => none, lladdr => none,
+      ip4 => #{addrs => [?ME4, <<127, 0, 0, 1>>], broadcasts => [], loopback => true},
+      ip6 => #{addrs => [?ME6, {?LL1, em0}], notready => [], loopback => true, zone => lo0},
+      groups => [], dhcp => false, demux => demux(Demux)}.
+
+demux(Map) -> fun(Key) -> maps:get(Key, Map, []) end.
+
+%% A holder for the key of each credit given.
+holders(Keys) ->
+    maps:from_list([{Key, [entry(Key, Credit)]} || {Key, Credit} <- Keys]).
+
+entry({tcp_listen, _, _, _}, Credit) ->
+    #{pid => self(), credit => Credit, listener => #{rcv_buf => 0, mss => 536, rcv_scale => 0}};
+entry(_, Credit) ->
+    #{pid => self(), credit => Credit}.
+
+gen() -> erx_net_rand:new(<<7:128>>).
+
+ip4(Src, Dst, Proto, Upper) -> ip4(Src, Dst, Proto, Upper, 0, 1500).
+
+ip4(Src, Dst, Proto, Upper, Tos, Mtu) ->
+    {ok, [Packet | _], _} = erx_ip4:output(#{src => Src, dst => Dst, proto => Proto, ttl => 64, tos => Tos},
+                                           Upper, Mtu, gen()),
+    iolist_to_binary(Packet).
+
+ip6(Src, Dst, Proto, Upper) ->
+    {ok, [Packet], _} = erx_ip6:output(#{src => Src, dst => Dst, proto => Proto, hlim => 64}, Upper,
+                                       1500, gen()),
+    iolist_to_binary(Packet).
+
+eth(Dst, Type, Packet) ->
+    iolist_to_binary([erx_net_eth:encode(#eth{dst = Dst, src = ?PEER_MAC, type = Type}), Packet]).
+
+pseudo(Src, Dst, Proto) when byte_size(Src) =:= 4 -> erx_ip4_wire:pseudo_sum(Src, Dst, 0, Proto);
+pseudo(Src, Dst, Proto) -> erx_ip6_wire:pseudo_sum(Src, Dst, 0, Proto).
+
+tcp(Src, Dst, Sport, Dport, Flags, Payload) ->
+    Header = #tcp{sport = Sport, dport = Dport, seq = 1, ack = 2, flags = Flags, win = 100, urp = 0},
+    iolist_to_binary(erx_tcp_wire:encode(Header, Payload, pseudo(Src, Dst, ?PROTO_TCP))).
+
+udp(Src, Dst, Sport, Dport, Payload) ->
+    iolist_to_binary(erx_udp_wire:encode(#udp{sport = Sport, dport = Dport}, Payload,
+                                         pseudo(Src, Dst, ?PROTO_UDP))).
+
+icmp4(Type, Code, Msg, Rest) ->
+    iolist_to_binary(erx_icmp4_wire:encode(#icmp4{type = Type, code = Code, msg = Msg}, Rest)).
+
+icmp6(Src, Dst, Type, Code, Msg, Rest) ->
+    iolist_to_binary(erx_icmp6_wire:encode(#icmp6{type = Type, code = Code, msg = Msg}, Rest, {Src, Dst})).
+
+%% The datagram an error quotes: the stack's own, from ME4:4000 to PEER4:80, with its ports.
+quote4(Proto) ->
+    Upper = case Proto of
+                ?PROTO_TCP -> tcp(?ME4, ?PEER4, 4000, 80, 2, <<>>);
+                ?PROTO_UDP -> udp(?ME4, ?PEER4, 4000, 80, <<>>)
+            end,
+    binary:part(ip4(?ME4, ?PEER4, Proto, Upper), 0, 28).
+
+classify(Frame, View) -> erx_net_input:classify(Frame, View).
+
+%% A frame to the interface's own address, from the peer.
+unicast(Packet, Type) -> {frame, eth(?MINE, Type, Packet)}.
+
+ip4_frame(Packet) -> unicast(Packet, ?ETHERTYPE_IP).
+ip6_frame(Packet) -> unicast(Packet, ?ETHERTYPE_IPV6).
+
+%% A local verdict, and what verify/1 makes of it.
+local(Verdict) ->
+    {local, Pending} = Verdict,
+    erx_net_input:verify(Pending).
+
+%% An owned verdict: the holders' credits, and what verify/1 makes of it.
+owned(Verdict) ->
+    {owned, Holders, Pending} = Verdict,
+    {[Credit || {_, Credit} <- Holders], erx_net_input:verify(Pending)}.
+
+%% --- Link --------------------------------------------------------------------
+
+other_host_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_UDP, udp(?PEER4, ?ME4, 1, 2, <<>>)),
+    ?assertEqual({drop, other_host}, classify({frame, eth(?OTHER_MAC, ?ETHERTYPE_IP, Packet)}, view())).
+
+ethertype_test() ->
+    ?assertEqual({drop, ethertype}, classify({frame, eth(?MINE, 16#88b5, <<0:64>>)}, view())).
+
+loopback_frame_is_a_unicast_packet_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_UDP, udp(?PEER4, ?ME4, 1000, 53, <<"q">>)),
+    Demux = holders([{{udp, inet, any, 53}, a}]),
+    {[a], Verified} = owned(classify({frame, em0, Packet}, loop_view(Demux))),
+    ?assertEqual({ok, {datagram, {?PEER4, 1000}, ?ME4, <<"q">>}}, Verified).
+
+%% --- IP ----------------------------------------------------------------------
+
+dhcp_comes_first_test() ->
+    %% An offer unicast to an address that is not yet the stack's.
+    Offer = ip4(?PEER4, ?FOREIGN4, ?PROTO_UDP, udp(?PEER4, ?FOREIGN4, 67, 68, <<"offer">>)),
+    {ok, {dhcp, #ip4{dst = ?FOREIGN4}, #udp{dport = 68}, <<"offer">>}} =
+        local(classify(ip4_frame(Offer), view(#{dhcp => true}))),
+    %% Without DHCP configured it is one more packet to a stranger.
+    ?assertMatch({drop, _}, classify(ip4_frame(Offer), view())).
+
+ip_layer_drop_is_the_verdict_test() ->
+    Packet = ip4(?PEER4, ?FOREIGN4, ?PROTO_UDP, udp(?PEER4, ?FOREIGN4, 1, 2, <<>>)),
+    {drop, _} = Expected = erx_ip4:input(Packet, unicast, maps:get(ip4, view())),
+    ?assertEqual(Expected, classify(ip4_frame(Packet), view())).
+
+fragment_is_local_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_UDP, udp(?PEER4, ?ME4, 1, 2, binary:copy(<<"x">>, 200)), 0, 100),
+    ?assertMatch({ok, {fragment, inet, #ip4{mf = 1}, _}}, local(classify(ip4_frame(Packet), view()))).
+
+group_not_joined_is_dropped_test() ->
+    Mdns6 = ip6(?LL1, ?MDNS6, ?PROTO_UDP, udp(?LL1, ?MDNS6, 5353, 5353, <<>>)),
+    Mdns4 = ip4(?PEER4, ?GROUP4, ?PROTO_UDP, udp(?PEER4, ?GROUP4, 5353, 5353, <<>>)),
+    ?assertEqual({drop, not_member},
+                 classify({frame, eth(<<16#33, 16#33, 0, 0, 0, 16#fb>>, ?ETHERTYPE_IPV6, Mdns6)}, view())),
+    ?assertEqual({drop, not_member},
+                 classify({frame, eth(<<1, 0, 16#5e, 0, 0, 16#fb>>, ?ETHERTYPE_IP, Mdns4)}, view())).
+
+%% --- TCP ---------------------------------------------------------------------
+
+syn() -> tcp(?PEER4, ?ME4, 4000, 80, 2, <<>>).
+
+tcp_to_a_connection_is_owned_test() ->
+    Data = tcp(?PEER4, ?ME4, 4000, 80, 16, <<"hi">>),
+    %% ECN-capable (ECT(0)) IP header: the field passes on with the frame's link cast.
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, Data, 2, 1500),
+    Demux = holders([{{tcp, inet, ?ME4, 80, ?PEER4, 4000}, conn}]),
+    {[conn], {ok, {#tcp{sport = 4000, dport = 80}, <<"hi">>, 2, unicast}}} =
+        owned(classify(ip4_frame(Packet), view(#{demux => demux(Demux)}))).
+
+tcp_to_a_listener_is_local_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, syn()),
+    %% A listener on any address owns it too.
+    Demux = holders([{{tcp_listen, inet, any, 80}, listener}]),
+    {ok, {tcp, #{src := ?PEER4}, #tcp{dport = 80}, <<>>, #{credit := listener}}} =
+        local(classify(ip4_frame(Packet), view(#{demux => demux(Demux)}))).
+
+tcp_to_a_listener_by_link_broadcast_is_dropped_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, syn()),
+    Demux = holders([{{tcp_listen, inet, ?ME4, 80}, listener}]),
+    ?assertEqual({drop, bcast_tcp},
+                 classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, Packet)}, view(#{demux => demux(Demux)}))).
+
+tcp_to_a_closed_port_may_draw_a_reset_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_TCP, syn()),
+    ?assertMatch({ok, {tcp, _, #tcp{dport = 80}, <<>>, none}}, local(classify(ip4_frame(Packet), view()))).
+
+tcp_to_a_closed_port_by_broadcast_is_not_answered_test() ->
+    Broadcast = ip4(?PEER4, ?BCAST4, ?PROTO_TCP, tcp(?PEER4, ?BCAST4, 4000, 80, 2, <<>>)),
+    ?assertEqual({drop, no_reply},
+                 classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, Broadcast)}, view())).
+
+%% --- UDP ---------------------------------------------------------------------
+
+udp_packet(Dst) -> ip4(?PEER4, Dst, ?PROTO_UDP, udp(?PEER4, Dst, 1000, 53, <<"q">>)).
+
+udp_to_the_holders_is_owned_test() ->
+    %% A socket bound to this address and a socket bound to another: only the first holds it.
+    Demux = holders([{{udp, inet, ?ME4, 53}, bound}, {{udp, inet, ?ALSO4, 53}, elsewhere}]),
+    {[bound], {ok, {datagram, {?PEER4, 1000}, ?ME4, <<"q">>}}} =
+        owned(classify(ip4_frame(udp_packet(?ME4)), view(#{demux => demux(Demux)}))).
+
+udp_to_a_closed_port_may_draw_port_unreachable_test() ->
+    ?assertMatch({ok, {udp, _, #udp{dport = 53}, <<"q">>}}, local(classify(ip4_frame(udp_packet(?ME4)), view()))).
+
+udp_broadcast_to_a_closed_port_is_dropped_test() ->
+    ?assertEqual({drop, no_port},
+                 classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, udp_packet(?BCAST4))}, view())).
+
+%% --- ICMP and ICMPv6 ---------------------------------------------------------
+
+unreachable() -> icmp4(3, 3, {error, 0}, quote4(?PROTO_TCP)).
+
+icmp_error_to_a_connection_is_owned_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_ICMP, unreachable()),
+    Demux = holders([{{tcp, inet, ?ME4, 4000, ?PEER4, 80}, conn}]),
+    {[conn], {ok, {report, #icmp4{type = 3}, #{proto := ?PROTO_TCP}}}} =
+        owned(classify(ip4_frame(Packet), view(#{demux => demux(Demux)}))).
+
+icmp_error_to_a_listener_is_local_test() ->
+    Packet = ip4(?PEER4, ?ME4, ?PROTO_ICMP, unreachable()),
+    Demux = holders([{{tcp_listen, inet, ?ME4, 4000}, listener}]),
+    ?assertMatch({ok, {icmp, _, #icmp4{type = 3}, _}},
+                 local(classify(ip4_frame(Packet), view(#{demux => demux(Demux)})))),
+    %% A quote of a datagram no socket sent, or of a protocol with no sockets here.
+    ?assertEqual({drop, no_socket}, classify(ip4_frame(Packet), view())),
+    Raw = ip4(?PEER4, ?ME4, ?PROTO_ICMP, icmp4(3, 3, {error, 0}, binary:part(ip4(?ME4, ?PEER4, ?PROTO_GRE, <<0:64>>), 0, 28))),
+    ?assertEqual({drop, no_socket}, classify(ip4_frame(Raw), view())).
+
+icmp_echo_request_is_local_when_it_may_be_answered_test() ->
+    Echo = icmp4(8, 0, {echo, 1, 1}, <<"ping">>),
+    ?assertMatch({ok, {icmp, #{reply := true}, #icmp4{type = 8}, <<"ping">>}},
+                 local(classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, Echo)), view()))),
+    %% An echo to the broadcast address is not answered.
+    ?assertEqual({drop, no_reply},
+                 classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, ip4(?PEER4, ?BCAST4, ?PROTO_ICMP, Echo))},
+                          view())).
+
+icmp_redirect_and_neighbour_messages_are_local_test() ->
+    Redirect = icmp4(5, 0, {redirect, ?ALSO4}, quote4(?PROTO_UDP)),
+    ?assertMatch({ok, {icmp, _, #icmp4{type = 5}, _}},
+                 local(classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, Redirect)), view()))),
+    Ns = icmp6(?LLPEER, ?LL1, 135, 0, {ns, ?LL1, #{}}, <<>>),
+    ?assertMatch({ok, {icmp, _, #icmp6{type = 135}, _}},
+                 local(classify(ip6_frame(ip6(?LLPEER, ?LL1, ?PROTO_ICMPV6, Ns)), view()))).
+
+other_icmp_types_are_dropped_test() ->
+    Advert = icmp4(9, 0, other, <<0:32>>),
+    ?assertEqual({drop, icmp_type}, classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, Advert)), view())),
+    Mld = icmp6(?LLPEER, ?LL1, 143, 0, other, <<0:32>>),
+    ?assertEqual({drop, icmp_type}, classify(ip6_frame(ip6(?LLPEER, ?LL1, ?PROTO_ICMPV6, Mld)), view())).
+
+%% --- ARP and other protocols -------------------------------------------------
+
+arp_is_local_test() ->
+    Arp = #arp{hrd = 1, op = 1, sha = ?PEER_MAC, spa = ?PEER4, tha = <<0:48>>, tpa = ?ME4},
+    ?assertMatch({ok, {arp, #arp{op = 1}}},
+                 local(classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_ARP, erx_arp_wire:encode(Arp))}, view()))).
+
+other_protocols_draw_an_error_only_when_they_may_be_answered_test() ->
+    Gre = ip4(?PEER4, ?ME4, ?PROTO_GRE, <<0:64>>),
+    ?assertMatch({ok, {other, #{family := inet}, <<0:64>>}}, local(classify(ip4_frame(Gre), view()))),
+    Broadcast = ip4(?PEER4, ?BCAST4, ?PROTO_GRE, <<0:64>>),
+    ?assertEqual({drop, no_reply}, classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, Broadcast)}, view())),
+    Gre6 = ip6(?PEER6, ?ME6, ?PROTO_GRE, <<0:64>>),
+    ?assertMatch({ok, {other, #{family := inet6}, _}}, local(classify(ip6_frame(Gre6), view()))),
+    %% IPv6's No Next Header is freed unanswered.
+    None = ip6(?PEER6, ?ME6, ?PROTO_NONE, <<>>),
+    ?assertEqual({drop, no_next_header}, classify(ip6_frame(None), view())).

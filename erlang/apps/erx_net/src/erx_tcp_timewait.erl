@@ -88,7 +88,7 @@ lifting; its numbers are compared with the connection's as FreeBSD's modular com
 do.
 """.
 -spec check(erx_tcp:segment(), #tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:action()]}.
-check({#tcp{flags = Flags} = Th, Payload, _} = Segment, #tcb{state = time_wait} = Tcb, Ctx)
+check({#tcp{flags = Flags} = Th, Payload, _, _} = Segment, #tcb{state = time_wait} = Tcb, Ctx)
   when is_binary(Payload) ->
     if
         Flags band ?TH_RST =/= 0 ->

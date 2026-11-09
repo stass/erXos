@@ -59,7 +59,7 @@ wire(Seq, Ack, Flags, Data) -> wire(Seq, Ack, Flags, Data, #tcp_opts{}).
 wire(Seq, Ack, Flags, Data, Opts) -> wire(Seq, Ack, Flags, Data, Opts, 10000, 0).
 wire(Seq, Ack, Flags, Data, Opts, Win, Urp) ->
     {#tcp{sport = 80, dport = 4000, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
-          flags = Flags, win = Win, urp = Urp, opts = Opts}, Data, 0}.
+          flags = Flags, win = Win, urp = Urp, opts = Opts}, Data, 0, unicast}.
 
 input(Segments, Tcb) -> input(Segments, Tcb, ctx()).
 input(Segments, Tcb, Ctx) -> erx_tcp_input:segments(Segments, Tcb, Ctx).
@@ -459,9 +459,9 @@ generate(R0) ->
               true -> get(snd_wnd, C);
               false -> 7000
           end,
-    {Header, Data, _} = wire(?RCV + get(seq, S), Ack, ?ACK bor get(flag, S),
+    {Header, Data, _, _} = wire(?RCV + get(seq, S), Ack, ?ACK bor get(flag, S),
                              binary:copy(<<"p">>, Len), Opts, Win, 1),
-    {Tcb, {Header, Data, get(ecn, S)}, R}.
+    {Tcb, {Header, Data, get(ecn, S), unicast}, R}.
 
 get(Key, Choices) -> maps:get(Key, Choices).
 

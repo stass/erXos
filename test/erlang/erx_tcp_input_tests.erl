@@ -43,7 +43,7 @@ with_ts(Tcb, Recent) -> Tcb#tcb{ts = #ts{recent = Recent, recent_age = ?T0, offs
 wire(Seq, Ack, Flags) -> wire(Seq, Ack, Flags, <<>>, #tcp_opts{}).
 wire(Seq, Ack, Flags, Data, Opts) ->
     {#tcp{sport = 80, dport = 4000, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
-          flags = Flags, win = 1000, urp = 0, opts = Opts}, Data, 0}.
+          flags = Flags, win = 1000, urp = 0, opts = Opts}, Data, 0, unicast}.
 
 input(Segments, Tcb) -> erx_tcp_input:segments(Segments, Tcb, ctx()).
 
@@ -54,7 +54,7 @@ stage(Name, Seg, Tcb) ->
 
 seg(Seq, Flags, Data) ->
     #seg{seq = Seq, ack = ?ISS + 1, flags = Flags, hdr_flags = Flags, win = 1000, urp = 0,
-         data = Data, arrived = {Seq, Seq + byte_size(Data)}, ip_ecn = 0}.
+         data = Data, arrived = {Seq, Seq + byte_size(Data)}, ip_ecn = 0, link_cast = unicast}.
 
 %% The RST a {reset, _} action carries: {Seq, Ack, Flags, Win}.
 resets(Actions) ->
@@ -372,3 +372,11 @@ stopping_the_retransmission_timer_keeps_the_backoff_test() ->
 time_wait_segments_are_not_taken_test() ->
     Tcb = (est())#tcb{state = time_wait},
     ?assertEqual({Tcb, []}, input([wire(5001, 0, ?TH_RST)], Tcb)).
+
+%% tcp_input.c:3450-3451: a segment that would draw a RST draws none when its frame was
+%% link broadcast or multicast.
+no_reset_for_link_broadcast_test() ->
+    Bad = wire(9000, ?ISS, ?TH_SYN bor ?TH_ACK),
+    Resets = fun(Cast) -> resets(element(2, input([setelement(4, Bad, Cast)], syn_sent()))) end,
+    ?assertMatch([_], Resets(unicast)),
+    ?assertEqual({[], []}, {Resets(broadcast), Resets(multicast)}).

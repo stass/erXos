@@ -697,7 +697,7 @@ domain D:
 where a frame goes and no further. Its input is a frame from the driver,
 `{frame, Bytes}`; on the loopback interface, an IP packet with the zone
 its sender's path gave it, `{frame, Zone, Bytes}` ([Loopback](#loopback));
-or a datagram reassembly rebuilt, `{reassembled, Family, LinkCast,
+or a datagram reassembly rebuilt, `{reassembled, Family, Zone, LinkCast,
 Bytes}`. Its view is a map:
 
 ```erlang
@@ -743,6 +743,21 @@ arrives through the loopback interface in that address's zone and finds
 the socket its quote names. A scoped address given without its zone is
 no address of the stack, as FreeBSD's lookup finds none for it.
 
+A fragment keeps its zone through reassembly. Its item carries the zone
+its packet's addresses took and its frame's link cast,
+`{fragment, Family, Zone, LinkCast, Ip, Bytes}`, and `erx_ip6_reass`
+keys a datagram by its zoned source and destination and its
+identification, so fragments that arrived in two zones never join, as
+FreeBSD's embedded zone keeps them apart in `frag6_input`'s hash. The
+rebuilt datagram takes the zone and the link cast of its fragment at
+offset 0, as `ip_reass` and `frag6_input` keep that fragment's packet
+header, and the interface classifies it as `{reassembled, Family, Zone,
+LinkCast, Bytes}`; IPv4's zone is always `none`. A datagram whose
+lifetime ends returns its first fragment with that fragment's zone, and
+a parameter problem carries its packet's zone,
+`{param_problem, Family, Zone, Problem, Packet}`, so the ICMPv6 error
+either sends goes back to the zoned source.
+
 Classification runs in three steps:
 
 1. **Link.** On Ethernet, a frame to the interface's address is
@@ -757,7 +772,11 @@ Classification runs in three steps:
    that carries UDP with at least a UDP header's 8 bytes to port 68 is
    `local`, for the DHCP path, before any address check. This is the
    test of `dhclient`'s receive filter, which sees every frame ahead of
-   `ip_input` (`dhcp_bpf_filter`, `bpf.c:188-251`); a unicast offer to
+   `ip_input` (`dhcp_bpf_filter`, `bpf.c:188-251`). That filter tests
+   only the fragment offset, so it also passes a first fragment; erXos
+   takes only a whole packet, since a DHCP message fits in one frame, and
+   a fragmented one is reassembled and classified like any other
+   datagram, without the DHCP path. A unicast offer to
    the address being offered passes it although that address is not yet
    the stack's. Every other packet goes to `erx_ip4:input/3` or
    `erx_ip6:input/4`, with the view's `ip4` or `ip6` and, for IPv6, the
@@ -778,6 +797,10 @@ Classification runs in three steps:
 | any other ICMP or ICMPv6 type | type | dropped as `icmp_type` |
 | ARP | none | `local` |
 | any other protocol | protocol | `local` if it may be answered, for the protocol unreachable `rip_input` sends (`raw_ip.c:410`) or the parameter problem at the next-header byte `rip6_input` sends (`raw_ip6.c:321-324`); else dropped as `no_reply`. IPv6's No Next Header is dropped as `no_next_header`, as `rip6_input` frees it unanswered |
+
+A datagram too short to hold the fields its row reads (the ports, or an
+ICMP type) is dropped as `too_short` before verification, where
+FreeBSD's decoder drops it in the same place under its own counter.
 
 The keys of a datagram from `RemoteAddr:RemotePort` to
 `LocalAddr:LocalPort` are, most specific first,
@@ -1079,8 +1102,8 @@ a copy to save messages, a trade on the performance watch list.
 Traffic to the machine's own addresses goes through a loopback interface,
 whose driver, `erx_net_loop`, hands each frame it is given back to its
 interface process. The loopback interface carries IP packets with no
-link header but their zone: the interface whose link a packet's scoped
-addresses belong to, or `global`, which the sender's path gives and
+link header but their zone: the name of the interface that owns the
+packet's destination, which the sender's path gives and
 `classify/2` gives the packet's addresses
 ([Classifying a frame](#classifying-a-frame)). Everything else about it
 is the same: the same credits, the same interface process, the same step
@@ -1556,6 +1579,14 @@ no other process and creates no process:
   512 buckets of 30 (`tcp_syncache.c:162-163`), with SYN-ACK
   retransmission under FreeBSD's limit and backoff, driven by the
   interface's deadlines.
+* Before it looks the SYN up, `erx_tcp_syncache:add/6` drops a SYN to
+  or from itself, from or to a multicast address, from the limited
+  broadcast or to a broadcast address, the checks `tcp_input` makes
+  before `syncache_add` (`tcp_input.c:1295-1338`). It is handed the
+  class of the SYN's destination as `erx_ip4` or `erx_ip6` found it on
+  the receiving interface (the item's `cast`), so the broadcast
+  addresses of that interface (`in_ifnet_broadcast`) are tested in one
+  place, the IP layer's; the other checks read the four-tuple alone.
 * SYN cookies are on, as FreeBSD's default (`tcp_syncookies`,
   `tcp_syncache.c:105`): every SYN-ACK's initial sequence number is a
   cookie (`tcp_syncache.c:1726-1729`): 24 bits of a SipHash-2-4 MAC of

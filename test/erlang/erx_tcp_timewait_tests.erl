@@ -38,7 +38,7 @@ with_ts(Tcb, Recent) -> Tcb#tcb{ts = #ts{recent = Recent, recent_age = ?T0, offs
 wire(Seq, Ack, Flags) -> wire(Seq, Ack, Flags, <<>>, #tcp_opts{}).
 wire(Seq, Ack, Flags, Data, Opts) ->
     {#tcp{sport = 80, dport = 4000, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
-          flags = Flags, win = 1000, urp = 0, opts = Opts}, Data, 0}.
+          flags = Flags, win = 1000, urp = 0, opts = Opts}, Data, 0, unicast}.
 syn(Seq) -> wire(Seq, 0, ?TH_SYN).
 syn_ts(Seq, Val) -> wire(Seq, 0, ?TH_SYN, <<>>, #tcp_opts{ts = {Val, 0}}).
 

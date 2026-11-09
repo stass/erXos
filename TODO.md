@@ -582,23 +582,12 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] network, `erx_nd6_rtr` and `erx_in6_src`: address rows carry `deprecated` and
-  `erx_in6_src:select/3` reads only that flag, but nothing sets it yet: `erx_nd6_rtr` should
-  set it when an address's preferred deadline passes (`nd6.c:984-987`), clear it when an
-  advertisement makes the address preferred again (`nd6.c:1041`), and wake for preferred
-  deadlines in `next_deadline/1`. Until then RFC 6724 rule 3 never fires.
 * [Medium] network, `erx_net_frame` (design gap): FreeBSD's `ip_output` refuses a broadcast
   without `SO_BROADCAST` with EACCES, one on a non-broadcast interface with EADDRNOTAVAIL,
   and refuses to fragment one (`ip_output.c:661-675`). The design states none of these; the
   path should carry whether it is a broadcast, and `udp/5` and `ip/4` refuse an oversized
   one. Multicast with hop limit 0 on a non-loopback interface (`ip6_output.c:929-933`) is
   also still framed.
-* [Medium] network, `erx_tcp_output:unreachable/4`: a segment lost to EHOSTUNREACH still
-  clears `ack_now` and the delayed ACK and advances `rcv_adv` and `last_ack_sent`, which
-  FreeBSD does only on success (`tcp_output.c:1635-1641`, `:1722-1735`), so a lost pure ACK
-  is not retried. Pass the outcome into the commit so nothing is undone field by field.
-  Its tests cover only new data in ESTABLISHED: add a send-log retransmission, a SYN, a
-  persist probe and SYN-SENT (no soft error).
 * [Low] network, docs/design-network-stack.md ("Framing", step 3 of the output pass): "past
   SYN-RECEIVED" should read "once a SYN has been received" (`TCPS_HAVERCVDSYN`), as the code
   does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which
@@ -666,24 +655,52 @@ it; git history is the record of completed work.
   accepting a data offset below 5, is caught because the decoder then raises on a negative option
   length, not by the judge's agreement check. Give the runner a second fault per target that only the
   judge catches, such as SACK blocks accepted on a SYN.
-* [Medium] network, `erx_net_input` and the design's "Classifying a frame": a looped IPv6 packet keeps
-  its zone only while it is whole. Its fragment, the `{reassembled, inet6, LinkCast, Bytes}` that
-  erx_ip6_reass returns (keyed by raw addresses) and a parameter problem's packet carry none, so a
-  looped fragmented datagram to the stack's `fe80::x%em0` is classified in lo0's zone (dropped, or
-  owned by a socket bound in lo0's zone). Carry the zone in the fragment and `reassembled` inputs and
-  key reassembly by zoned addresses; the design's `reassembled` tuple needs the zone first.
+* [Medium] network, `erx_net_input`, `erx_ip4_reass` and `erx_ip6_reass`: implement the zone
+  through reassembly that docs/design-network-stack.md ("Classifying a frame", after "Zones")
+  states. Today a looped IPv6 packet keeps its zone only while it is whole: its fragment item, the
+  `{reassembled, Family, LinkCast, Bytes}` input (zone taken from the view) and a parameter
+  problem carry none, erx_ip6_reass keys by raw addresses, and the fragment item carries no link
+  cast either, so the reassembled datagram's link cast has no source. The design's shapes:
+  `{fragment, Family, Zone, LinkCast, Ip, Bytes}`, `{reassembled, Family, Zone, LinkCast, Bytes}`,
+  `{param_problem, Family, Zone, Problem, Packet}`; zone and link cast of the offset-0 fragment;
+  `expire/2` returns the first fragment's zone. Until the fragment item carries the link cast, the
+  consumer that builds `{reassembled, ...}` must not default it to `unicast`: that would let a
+  link-broadcast fragmented SYN past `bcast_tcp` and a fragmented segment draw a RST that
+  `tcp_dropwithreset` refuses (`tcp_input.c:3450-3451`). The link cast in the fragment item can
+  land ahead of the zone work.
+* [Medium] network, `erx_tcp_syncache:add/6` and `erx_net_input:tcp/3` (review of P20c): `add/6`
+  takes the destination's IP cast, which has the same type as the link cast the head also holds,
+  so a caller passing the wrong one (or `unicast` for a reinjected SYN) silently admits a SYN to a
+  subnet broadcast. Consider dropping a non-unicast IP cast in the listener row beside
+  `bcast_tcp` (`{ok, Entry} when LinkCast =:= unicast, Cast =:= unicast`), which FreeBSD's
+  `tcp_dropwithreset` (:3467-3471) makes equivalent for non-SYN segments, leaving `add/5` the
+  checks that read the four-tuple alone; the design table and the fuzz judge change with it.
+* [Medium] network, `erx_tcp_output` (`done/2`, `sent/3`, `commit/6`, `enobufs/3`): an owed ACK
+  survives a pass that met no route but not one that ran out of credit (ENOBUFS), where FreeBSD
+  keeps TF_ACKNOW on every error return (`tcp_output.c:1711-1714`). Make `sent/3` the only place
+  that clears `ack_now` and the D-SACK block, so "what only a delivered segment settles" has one
+  owner, and update the module documentation's ENOBUFS departure.
+* [Medium] network tests, `erx_net_input` (`verify/1`): no test feeds a connection-owned segment in
+  a link-broadcast frame, so replacing `maps:get(link, Head)` with `unicast` passes every suite.
+  Add the case with a seeded fault on that expression. Also untested: the D-SACK route condition
+  in `erx_tcp_output:commit/6`; and `no_route_keeps_the_ack_owed_test`'s second half passes on a
+  window update alone (set `rcv_adv` to `rcv_nxt + recwin` there).
+* [Low] network, `erx_tcp_input:dropwithreset` and the connect path: only the link-cast half of
+  `tcp_dropwithreset` is translated; its IP checks (`tcp_input.c:3452-3472`) are left to the rule
+  that no connection has a multicast or broadcast foreign address, which FreeBSD enforces in
+  `tcp_usr_connect` and erx_net does not yet (a connect to 224.0.0.1 is not refused). Refuse it at
+  connect and say so in the comment.
+* [Low] network, `erx_nd6_rtr:deprecation/2`: it also clears `deprecated` on a tentative address,
+  which `nd6_timer` never reaches (`nd6.c:1041` is its final branch), and clears it at the RA's
+  refresh rather than the next timer; name both as departures in the module documentation.
 * [Medium] network, `erx_net_input`: looped multicast is checked against the loopback interface's
   `groups`, not the carried zone's interface, and a socket's `report` item holds the quote's raw
   addresses although the socket was found by its zoned key. Decide with the zone fix above.
-* [Medium] network tests, `erx_net_input`: only the fuzz target (milestone gate) exercises it, and it
-  never generates `{reassembled, ...}` input; its judge shares `erx_icmp4:decode_quoted/1` and
+* [Medium] network tests, `erx_net_input_fuzz`: the fuzz target never generates `{reassembled, ...}`
+  input; its judge shares `erx_icmp4:decode_quoted/1` and
   `erx_icmp6:decode_quoted/1` with the classifier, so a wrong quote offset would pass both. Have the
   judge find the quoted header and ports itself, generate reassembled input, and make the RST-flag
   fault reach the unnamed-byte property, which the judge now always catches first.
-* [Medium] network, `erx_tcp_syncache`: the listener's address checks of `tcp_input.c:1295-1338`
-  (a SYN to or from itself, a multicast or broadcast source or destination, `in_ifnet_broadcast` of
-  the receiving interface) are missing; `erx_net_input` tests only the link cast (`bcast_tcp`).
-  `add/5` needs the interface's broadcast addresses for them.
 * [Low] network, `erx_net_input` provenance: NOTICE-freebsd's entry lacks `sys/netinet/tcp_subr.c`
   (`tcp_ctlinput`), which the design names as a source; and check whether `udp_common_ctlinput`
   looks up with `INPLOOKUP_WILDCARD`, which the design says it does not.
