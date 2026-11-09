@@ -1,0 +1,14 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The network stack (docs/design-network-stack.md): the network domain's TCP/IP
+%% stack, pure cores translated from FreeBSD's netinet and netinet6 under the
+%% processes that own each interface, connection and socket. NOTICE-freebsd beside
+%% src/ records what each module derives from.
+{application, erx_net,
+ [{description, "erXos TCP/IP stack"},
+  {vsn, "1"},
+  {modules, []},
+  {registered, []},
+  {applications, [kernel, stdlib, erx]},
+  {env, []}]}.

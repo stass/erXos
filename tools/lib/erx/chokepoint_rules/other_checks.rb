@@ -52,6 +52,22 @@ module Erx
           test: 'test/host/checks_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'net-atoms', rule: 'no module of erx_net names binary_to_atom, list_to_atom or binary_to_term',
+          design: 'docs/design-network-stack.md#build-checks', check: 'NetChecks, in Checks',
+          test: 'test/host/net_checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'net-seq-wrap', rule: 'among the TCP modules of erx_net, only erx_tcp_seq does sequence-space wrap arithmetic',
+          design: 'docs/design-network-stack.md#build-checks', check: 'NetChecks, in Checks',
+          test: 'test/host/net_checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'net-notices', rule: "the FreeBSD files the header of a module of erx_net names are those NOTICE-freebsd " \
+                                     'lists for it, and the reverse',
+          design: 'docs/design-network-stack.md#provenance-and-notices', check: 'NetChecks, in Checks',
+          test: 'test/host/net_checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
         )

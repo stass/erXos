@@ -1277,9 +1277,10 @@ about 3,000. These are estimates for planning, not budgets.
 ### Provenance and notices
 
 A module that translates FreeBSD code is a derived work of each FreeBSD
-file it translates. Its header carries, after erXos's own notice, every
-copyright line and the licence text of each such file at the pinned
-commit, and its SPDX line names both licences, such as
+file it translates. Its header carries, after erXos's own notice, a line
+`%% FreeBSD: PATH` for each such file, naming it by its path in the source
+tree, followed by every copyright line and the licence text of that file
+at the pinned commit, and its SPDX line names both licences, such as
 `SPDX-License-Identifier: BSD-2-Clause AND BSD-3-Clause`, so the packer
 counts it as third-party for `NOTICES`
 ([design.md](design.md#licences-and-notices)). Its `-moduledoc` names the
@@ -1288,9 +1289,10 @@ FreeBSD function says so in its `-doc`, with the FreeBSD function's name,
 so a reviewer compares the two side by side.
 
 `erlang/apps/erx_net/NOTICE-freebsd` records the pinned tag and commit,
-the SHA-256 of the source archive the translation was read from, and for
-every module the FreeBSD files and functions it derives from, as
-`kernel/NOTICE-fiasco` records the kernel's translation from Fiasco. A
+the SHA-256 of the source archive the translation was read from, which
+are deps.lock's pin of `freebsd-src`, and for every module the FreeBSD
+files and functions it derives from, as `kernel/NOTICE-fiasco` records the
+kernel's translation from Fiasco. A
 build check fails when a module's header names a FreeBSD file that the
 notice file does not list for it, or the reverse.
 
@@ -1611,7 +1613,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | Decoders are total: `{ok, ...}` or `{error, Reason}`, never an exception | fuzz targets fail on any exception |
 | No field a checksum covers is read before the checksum is checked, except the fields that choose a frame's destination, which only the lookup reads; a segment, datagram or ICMP record is made only by its decoder, which checks the checksum first | `erx_net_input`, the `*_wire` decoders; a build check that only the decoders make those records; tests that the decoders check the sum first: the fuzz targets' wrong-sum inputs and the interface's gate |
 | No atom is made from packet data; unknown protocol values stay integers | the codecs; a build check fails on `binary_to_atom`, `list_to_atom` and `binary_to_term` in `erx_net` |
-| Sequence-space conversion happens only in `erx_tcp_seq` | a chokepoint check fails on `16#ffffffff` or `bsl 32` arithmetic in any other TCP module |
+| Sequence-space conversion happens only in `erx_tcp_seq` | a chokepoint check fails on 2^31, 2^32 - 1 or 2^32 written as an integer literal in any base, or a left shift by a literal 31 or 32, in any other TCP module |
 | Half-open connections live only in the bounded syncache; overflow is answered statelessly with cookies | `erx_tcp_syncache` |
 | A RST resets only at exactly `last_ack_sent`; a SYN in a synchronized state and an out-of-range ACK get rate-limited challenge ACKs | RFC 5961 stages |
 | IP identification values reveal nothing: zero on atomic IPv4 datagrams, random otherwise and on IPv6 fragments | `erx_ip4`, `erx_ip6` |

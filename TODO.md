@@ -462,6 +462,21 @@ it; git history is the record of completed work.
   that ninja's libc++ build does not see as a change; and the libc++ configure stamp records the compiler's path, not its
   version, so a Homebrew upgrade of LLVM at the same path keeps the old objects (ERTS's stamp has the same gap). Stamp the
   merged headers' digest and `clang --version` instead.
+* [Medium] network build checks, `tools/lib/erx/net_checks.rb` (seq-wrap, atoms): the checks scan text
+  with a regex copy of Erlang's lexer and a list of literal spellings, so they miss the idiomatic wrap
+  `<<D:32/signed>> = <<(A - B):32>>`, a mask defined by a macro in a non-TCP header and used in a TCP
+  module, and an escaped quoted atom such as `'list\_to_atom'`. Tokenize with stock OTP's `erl_scan`
+  (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
+  bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
+  `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
+* [Medium] fetch, `deps.lock` (`freebsd-src`): every `make fetch` downloads FreeBSD's whole source tree
+  (367 MB archive, 1.7 GB and about 109,000 files unpacked: 72% and 85% of `Sources`' archive and tree
+  limits) under curl's 180-second cap, though only the CUBIC oracle and the packet-script runner will
+  read it. Fetch it on demand, or carve the `sys/net*` and `share/termcap` subset, before a slow link
+  or a pin bump makes `make fetch` fail.
+* [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
+  because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
+  release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
   hand-declared `erx_ipc_wait(deadline, *label)` returns no tag, while design-kernel.md's "Receiving"
   returns the tag and the label. Settle the target signature before the domain library's fault thread

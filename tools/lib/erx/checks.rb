@@ -6,9 +6,11 @@ require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
 require_relative 'device_callers'
+require_relative 'dependencies'
 require_relative 'device_posters'
 require_relative 'erofs_reads'
 require_relative 'generated'
+require_relative 'net_checks'
 require_relative 'ns_writers'
 require_relative 'attach_fields'
 require_relative 'origin'
@@ -133,6 +135,7 @@ module Erx
       check_device_callers(listed)
       check_device_posters(listed)
       check_erofs_reads(listed)
+      check_net(listed)
       check_ns_writers(listed)
       check_attach_fields(listed)
       # The chokepoint rules read the same listing, imports included, since
@@ -309,6 +312,19 @@ module Erx
     def check_erofs_reads(listed)
       sources = listed.select { |relative| ErofsReads.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = ErofsReads.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # erx_net's atoms, sequence-wrap and FreeBSD notice rules, against deps.lock's pin.
+    def check_net(listed)
+      files = listed.select { |relative| NetChecks.covers?(relative) && File.file?(File.join(@root, relative)) }
+      return if files.empty?
+
+      lock = DependencySchema.parse(File.binread(File.join(@root, 'deps.lock')))
+                             .find { |source| source.fetch('id') == NetChecks::LOCK_ID }
+      raise Error, "deps.lock has no #{NetChecks::LOCK_ID}" unless lock
+
+      violations = NetChecks.violations(files.to_h { |relative| [relative, File.binread(File.join(@root, relative))] }, lock: lock)
       raise Error, violations.join("\n") unless violations.empty?
     end
 
