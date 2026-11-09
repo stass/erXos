@@ -12,6 +12,7 @@
  */
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -200,6 +201,49 @@ mode_bell(uint64_t argument)
 	return (result == BELL_RUNNING ? 63 : result);
 }
 
+static bool
+bytes_equal(const uint8_t *bytes, const char *text, size_t length)
+{
+	for (size_t index = 0; index < length; index++)
+		if (bytes[index] != (uint8_t)text[index])
+			return (false);
+	return (true);
+}
+
+/* Whether entry is the file at path, holding these bytes, which it reads where the root mapped the slice. */
+static bool
+entry_is(const erx_release_entry_t *entry, const char *contents, size_t size)
+{
+	return (entry->size == size && bytes_equal((const uint8_t *)(uintptr_t)(SLICE_ADDR + entry->offset), contents, size));
+}
+
+/*
+ * Lists the slice the root passed with erx_release_entry, as a domain's runtime lists
+ * its release: each path without its domains/sample/ prefix, the long one whole from
+ * its pieces, each file's bytes at its offset from the mapping, and no third entry.
+ */
+static int64_t
+mode_release(uint64_t slice)
+{
+	static erx_release_entry_t entry;
+	const size_t part = sizeof(RELEASE_LONG_PART) - 1;
+
+	if (erx_fiasco_release_entry(slice, 0, true, &entry) != ERX_OK || entry.path_length != sizeof(RELEASE_ALPHA) - 1 ||
+	    !bytes_equal(entry.path, RELEASE_ALPHA, entry.path_length) ||
+	    !entry_is(&entry, RELEASE_ALPHA_BYTES, sizeof(RELEASE_ALPHA_BYTES) - 1))
+		return (80);
+	if (erx_fiasco_release_entry(slice, 1, true, &entry) != ERX_OK ||
+	    entry.path_length != RELEASE_LONG_PARTS * part + sizeof(RELEASE_LONG_TAIL) - 1 ||
+	    !entry_is(&entry, RELEASE_LONG_BYTES, sizeof(RELEASE_LONG_BYTES) - 1))
+		return (81);
+	for (size_t index = 0; index < RELEASE_LONG_PARTS; index++)
+		if (!bytes_equal(entry.path + index * part, RELEASE_LONG_PART, part))
+			return (82);
+	if (!bytes_equal(entry.path + RELEASE_LONG_PARTS * part, RELEASE_LONG_TAIL, sizeof(RELEASE_LONG_TAIL) - 1))
+		return (83);
+	return (erx_fiasco_release_entry(slice, 2, false, &entry) == ERX_ERANGE ? 0 : 84);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -222,6 +266,8 @@ erx_task_main(uint64_t argument)
 		return (mode_time());
 	case MODE_BELL:
 		return (mode_bell(argument));
+	case MODE_RELEASE:
+		return (mode_release(argument >> SLOT_SHIFT));
 	default:
 		return (90);
 	}

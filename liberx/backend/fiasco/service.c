@@ -40,6 +40,7 @@
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
+#include "liberx/backend/fiasco/slice.h"
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
@@ -413,6 +414,12 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 
 		return (erx_fiasco_budget_resize_body(decoded->task, resize->budget, resize->guarantee, resize->cap));
 	}
+	case ERX_FIASCO_CALL_IMAGE_SLICE:
+		return (erx_fiasco_slice_create_body(decoded->task, words, &reply->first));
+	case ERX_FIASCO_CALL_MEM_COPY:
+		return (erx_fiasco_mem_copy_body(decoded->task, words, &reply->first));
+	case ERX_FIASCO_CALL_RELEASE_ENTRY:
+		return (erx_fiasco_release_entry_body(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_IMAGE_MAP:
 		return (erx_fiasco_task_image_map_body(decoded->task, ((const erx_fiasco_image_map_request_t *)words)->space,
 		    ((const erx_fiasco_image_map_request_t *)words)->entry, &reply->first));

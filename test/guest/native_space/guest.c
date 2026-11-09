@@ -10,8 +10,9 @@
  * gate, and the gate calls' refusals and queue; and spaces: a task that creates spaces
  * below its own, the create's refusals, and a release at the last handle's close; a
  * created space's first thread, which the root makes and starts; budgets and groups as
- * records; handles the root passes into a task with erx_cap_pass; and a budget whose
- * last handle a task holds, which ends after that task's end. Each case says
+ * records; handles the root passes into a task with erx_cap_pass; a budget whose
+ * last handle a task holds, which ends after that task's end; and slices of the
+ * image, which a task lists with erx_release_entry, and erx_mem_copy. Each case says
  * one line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
 
@@ -49,6 +50,8 @@
 #define RELEASE_LABEL	UINT64_C(0x5e0000000000c000)
 #define BUDGET_LABEL	UINT64_C(0x5e0000000000d000)
 #define HELD_LABEL	UINT64_C(0x5e0000000000e000)
+/* More pages than one erx_mem_copy request copies. */
+#define COPY_PAGES	66u
 
 void erx_fiasco_root_main(void);
 
@@ -794,6 +797,87 @@ case_budget_held(void)
 }
 
 /*
+ * A slice of the image's two domains/sample/ files, mapped read-only into a task and
+ * passed to it, which lists it with erx_release_entry (program.c). A run past the
+ * index is ERX_ERANGE, a writable map of the slice ERX_ERIGHTS, and an entry asked of
+ * a memory object that is no slice ERX_ETYPE.
+ */
+static void
+case_slices(uint32_t first)
+{
+	static erx_release_entry_t entry;
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t space = 0, slice = 0, mem = 0, refused;
+	int64_t status = INT64_MIN;
+	bool passed = erx_image_slice(0, 0, first, 2, &slice) == ERX_OK &&
+	    erx_image_slice(0, 0, first, UINT64_C(1) << 32, &refused) == ERX_ERANGE &&
+	    erx_mem_create(0, PAGE, 0, &mem) == ERX_OK && erx_fiasco_release_entry(mem, 0, false, &entry) == ERX_ETYPE &&
+	    task_make(&space, SLICE_ADDR, SLICE_PAGES) &&
+	    erx_vm_map(space, SLICE_ADDR, SLICE_PAGES * PAGE, slice, 0, ERX_PROT_RW) == ERX_ERIGHTS &&
+	    erx_vm_map(space, SLICE_ADDR, SLICE_PAGES * PAGE, slice, 0, ERX_PROT_R) == ERX_OK;
+
+	if (passed) {
+		item_put(0, slice, ERX_HR_READ, false);
+		passed = erx_cap_pass(ERX_CAP_SELF, space, 1) == ERX_OK;
+	}
+	if (passed)
+		status = task_finish(space, MODE_RELEASE | item_word(0, 1) << SLOT_SHIFT);
+	else if (space != 0)
+		task_drop(space);
+	say_count("release_status", (uint64_t)status);
+	passed = passed && status == 0;
+	passed = (slice == 0 || erx_cap_close(slice) == ERX_OK) && (mem == 0 || erx_cap_close(mem) == ERX_OK) && passed;
+	say_case("slices", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/* An object of size bytes mapped read-write into the root at *addr. */
+static bool
+copy_object(uint64_t size, uint64_t *mem, uint64_t *addr)
+{
+	return (erx_mem_create(0, size, 0, mem) == ERX_OK && erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, addr) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, *addr, size, *mem, 0, ERX_PROT_RW) == ERX_OK);
+}
+
+static uint64_t
+copy_word(uint64_t addr)
+{
+	return (*(volatile const uint64_t *)(uintptr_t)addr);
+}
+
+/*
+ * erx_mem_copy of more pages than one request copies, eight bytes off the source's
+ * page boundaries; a range a byte past the destination and a source offset whose sum
+ * wraps are ERX_ERANGE and leave the destination as it was, a copy into a slice
+ * ERX_ERIGHTS, and one from a destroyed object ERX_ESTALE.
+ */
+static void
+case_copy(uint32_t first)
+{
+	const uint64_t size = COPY_PAGES * PAGE;
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t src = 0, dst = 0, slice = 0, src_addr = 0, dst_addr = 0;
+	bool passed = copy_object(size, &src, &src_addr) && copy_object(size, &dst, &dst_addr) &&
+	    erx_image_slice(0, 0, first, 1, &slice) == ERX_OK;
+
+	for (uint64_t page = 0; passed && page < COPY_PAGES; page++)
+		*(volatile uint64_t *)(uintptr_t)(src_addr + page * PAGE + sizeof(uint64_t)) = ROOT_PATTERN + page;
+	passed = passed && erx_mem_copy(dst, 0, src, sizeof(uint64_t), size - sizeof(uint64_t)) == ERX_OK;
+	for (uint64_t page = 0; passed && page < COPY_PAGES; page++)
+		passed = copy_word(dst_addr + page * PAGE) == ROOT_PATTERN + page;
+	passed = passed && erx_mem_copy(dst, 1, src, 0, size) == ERX_ERANGE &&
+	    erx_mem_copy(dst, 0, src, UINT64_MAX - 7, 16) == ERX_ERANGE && copy_word(dst_addr) == ROOT_PATTERN &&
+	    erx_mem_copy(slice, 0, src, 0, sizeof(uint64_t)) == ERX_ERIGHTS;
+	if (src_addr != 0)
+		passed = erx_vm_release(ERX_CAP_SELF, src_addr, size) == ERX_OK && passed;
+	if (dst_addr != 0)
+		passed = erx_vm_release(ERX_CAP_SELF, dst_addr, size) == ERX_OK && passed;
+	passed = passed && erx_object_destroy(src) == ERX_OK && erx_mem_copy(dst, 0, src, 0, sizeof(uint64_t)) == ERX_ESTALE;
+	passed = (src == 0 || erx_cap_close(src) == ERX_OK) && (dst == 0 || erx_cap_close(dst) == ERX_OK) &&
+	    (slice == 0 || erx_cap_close(slice) == ERX_OK) && passed;
+	say_case("copy", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/*
  * The root's own tables, and the service's rows for the first two task indices, take
  * their pages here, so no case counts them against its pool.
  */
@@ -857,6 +941,7 @@ erx_fiasco_root_main(void)
 	erx_boot_handoff_view_t handoff;
 	static erx_pack_view_t pack;
 	const char *reason = erx_fiasco_root_open(&handoff, &pack);
+	uint32_t release_first = 0;
 
 	if (reason == NULL)
 		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
@@ -883,6 +968,10 @@ erx_fiasco_root_main(void)
 	case_time();
 	case_budget_held();
 	case_doorbells();
+	if (erx_fiasco_launcher_find(&pack, RELEASE_FIRST_PATH, &release_first) != ERX_OK)
+		say("erx: space: no domain release\n");
+	case_slices(release_first);
+	case_copy(release_first);
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

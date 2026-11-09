@@ -143,6 +143,12 @@ erx_fiasco_task_set_archive(const erx_pack_view_t *view)
 	task_archive = view;
 }
 
+const erx_pack_view_t *
+erx_fiasco_task_archive(void)
+{
+	return (task_archive);
+}
+
 static uint32_t *
 task_space_of(uint32_t record)
 {

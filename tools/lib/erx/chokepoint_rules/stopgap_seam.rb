@@ -76,6 +76,7 @@ module Erx
         liberx/backend/fiasco/libc_root_write.c
         liberx/backend/fiasco/libc_start.h
         liberx/backend/fiasco/libc_task.c
+        liberx/backend/fiasco/release_task.c
         liberx/backend/fiasco/root.c
         liberx/backend/fiasco/root_no_program.c
         liberx/backend/fiasco/runtime_entry.c
@@ -93,6 +94,8 @@ module Erx
         liberx/backend/fiasco/service_stubs.c
         liberx/backend/fiasco/service_wire.c
         liberx/backend/fiasco/service_wire.h
+        liberx/backend/fiasco/slice.c
+        liberx/backend/fiasco/slice.h
         liberx/backend/fiasco/task.ld
         liberx/backend/fiasco/task_refused.c
         liberx/backend/fiasco/task_start.c
