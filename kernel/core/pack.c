@@ -18,6 +18,7 @@
 
 #include "blake3/blake3.h"
 #include "erx/abi_reader.h"
+#include "erx/elf_plan.h"
 #include "erx/pack.h"
 
 _Static_assert(ERX_PACK_HASH_SIZE == ERX_BLAKE3_OUT_LEN,
@@ -52,8 +53,7 @@ static bool erx_path_valid(const uint8_t *, size_t);
 static bool erx_is_manifest_path(const uint8_t *, size_t);
 static bool erx_image_valid(const uint8_t *, size_t, bool,
     erx_pack_error_t *, uint32_t);
-static bool erx_phdr_covered(const uint8_t *, size_t,
-    const erx_image_manifest_t *);
+static bool erx_phdr_covered(const erx_elf_plan_t *, uint64_t, uint32_t);
 static bool erx_pack_manifest_valid(const uint8_t *, size_t, uint32_t,
     erx_pack_error_t *, uint32_t);
 static bool erx_entry_decode(const uint8_t *, size_t,
@@ -239,109 +239,100 @@ erx_entry_decode(const uint8_t *bytes, size_t length,
 	    ERX_PACK_ENTRY_SIZE, entry));
 }
 
+/*
+ * True when the program-header table, phnum entries from phdr_offset in the
+ * image's memory, lies wholly in the stored file bytes of the plan's
+ * segments, which are ascending and do not overlap.
+ */
 static bool
-erx_phdr_covered(const uint8_t *bytes, size_t length,
-    const erx_image_manifest_t *image)
+erx_phdr_covered(const erx_elf_plan_t *plan, uint64_t phdr_offset,
+    uint32_t phnum)
 {
-	erx_image_segment_t segment;
-	uint64_t cursor, end, segment_end, table_bytes, offset;
+	const erx_image_segment_t *segment;
+	uint64_t cursor, end, segment_end, table_bytes;
 
-	if (image->phnum == 0 ||
-	    __builtin_mul_overflow((uint64_t)image->phnum,
+	if (phnum == 0 ||
+	    __builtin_mul_overflow((uint64_t)phnum,
 	    (uint64_t)ERX_ELF64_PHDR_SIZE, &table_bytes) ||
-	    __builtin_add_overflow(image->phdr_offset, table_bytes, &end))
+	    __builtin_add_overflow(phdr_offset, table_bytes, &end))
 		return (false);
-	cursor = image->phdr_offset;
-	for (uint16_t index = 0; index < image->nsegments && cursor < end; index++) {
-		offset = ERX_IMAGE_MANIFEST_SIZE +
-		    (uint64_t)index * ERX_IMAGE_SEGMENT_SIZE;
-		if (!erx_extent(offset, ERX_IMAGE_SEGMENT_SIZE, length) ||
-		    !erx_image_segment_decode(bytes + (size_t)offset,
-		    ERX_IMAGE_SEGMENT_SIZE, &segment) ||
-		    __builtin_add_overflow(segment.mem_offset,
-		    segment.file_size, &segment_end))
+	cursor = phdr_offset;
+	for (uint32_t index = 0; index < plan->nloads && cursor < end; index++) {
+		segment = &plan->loads[index].segment;
+		if (__builtin_add_overflow(segment->mem_offset, segment->file_size,
+		    &segment_end))
 			return (false);
 		if (cursor >= segment_end)
 			continue;
-		if (cursor < segment.mem_offset)
+		if (cursor < segment->mem_offset)
 			return (false);
 		cursor = segment_end < end ? segment_end : end;
 	}
 	return (cursor == end);
 }
 
+/*
+ * An image entry as the boot image stores it (design-kernel.md, The boot
+ * image). Its manifest and segments must first pass erx_image_plan, the
+ * rules the loader reads the entry by, and a refusal there carries the
+ * planner's reason. The rest is the layout only the pack tool's output has,
+ * checked over the plan's loads.
+ * The root carries no JIT flag. The first page is zero after the segment
+ * table. Each segment's stored bytes start where the one before ended, the
+ * first at the second page: a writable segment stores its file bytes, a
+ * read-only or read-execute one its whole memory, and each is zero from its
+ * file bytes to the end of its last stored page. The entry ends with the
+ * last segment's stored bytes, the span ends with its memory, and the
+ * program-header table lies in the segments' file bytes.
+ */
 static bool
 erx_image_valid(const uint8_t *bytes, size_t length, bool root,
     erx_pack_error_t *error, uint32_t entry)
 {
 	erx_image_manifest_t image;
-	erx_image_segment_t segment;
-	uint64_t table_bytes, table_end, data_cursor, storage, data_end;
-	uint64_t memory_end, rounded_end, previous_end, offset;
-	bool executable_entry;
+	erx_elf_plan_t plan;
+	/* Every refusal of the planner sets its reason; this one is a fallback. */
+	erx_elf_error_t refusal = { .reason = "image_plan" };
+	const erx_image_segment_t *segment;
+	uint64_t table_end, cursor, storage, data_end, memory_end, span_end;
 
-	if (!erx_image_manifest_decode(bytes, length, &image) ||
-	    image.magic != ERX_IMAGE_MAGIC || image.version != ERX_IMAGE_VERSION ||
-	    image.abi_version != ERX_ABI_VERSION ||
-	    image.base_alignment < ERX_PAGE_SIZE ||
-	    (image.base_alignment & (image.base_alignment - 1)) != 0 ||
-	    image.nsegments == 0 || image.nsegments > ERX_IMAGE_SEGMENTS_MAX ||
-	    (image.flags & ~(ERX_IMAGE_FIXED | ERX_IMAGE_JIT)) != 0 ||
-	    (root && (image.flags & ERX_IMAGE_JIT) != 0))
-		return (erx_pack_fail(error, entry, "image_header"));
-	if (__builtin_mul_overflow((uint64_t)image.nsegments,
-	    (uint64_t)ERX_IMAGE_SEGMENT_SIZE, &table_bytes) ||
-	    __builtin_add_overflow((uint64_t)ERX_IMAGE_MANIFEST_SIZE,
-	    table_bytes, &table_end) || table_end > ERX_PAGE_SIZE ||
-	    !erx_zeroes(bytes, table_end, ERX_PAGE_SIZE, length))
+	if (!erx_image_plan(bytes, length, &plan, &refusal))
+		return (erx_pack_fail(error, entry, refusal.reason));
+	if (root && (plan.flags & ERX_IMAGE_JIT) != 0)
+		return (erx_pack_fail(error, entry, "image_root_jit"));
+	/* The plan holds at most ERX_IMAGE_SEGMENTS_MAX loads in the page. */
+	table_end = ERX_IMAGE_MANIFEST_SIZE +
+	    (uint64_t)plan.nloads * ERX_IMAGE_SEGMENT_SIZE;
+	if (!erx_zeroes(bytes, table_end, ERX_PAGE_SIZE, length))
 		return (erx_pack_fail(error, entry, "image_index"));
-	if (image.span == 0 || image.span > ERX_IMAGE_SPAN_MAX ||
-	    image.span % ERX_PAGE_SIZE != 0 ||
-	    ((image.flags & ERX_IMAGE_FIXED) == 0 && image.fixed_base != 0) ||
-	    ((image.flags & ERX_IMAGE_FIXED) != 0 &&
-	    (image.base_alignment != ERX_PAGE_SIZE ||
-	    image.fixed_base < ERX_USER_BASE_MIN ||
-	    image.fixed_base % ERX_PAGE_SIZE != 0 ||
-	    !erx_extent(image.fixed_base, image.span, ERX_ARCH_USER_LIMIT))))
-		return (erx_pack_fail(error, entry, "image_span"));
-	data_cursor = ERX_PAGE_SIZE;
-	previous_end = 0;
-	executable_entry = false;
-	for (uint16_t index = 0; index < image.nsegments; index++) {
-		offset = ERX_IMAGE_MANIFEST_SIZE +
-		    (uint64_t)index * ERX_IMAGE_SEGMENT_SIZE;
-		if (!erx_image_segment_decode(bytes + (size_t)offset,
-		    ERX_IMAGE_SEGMENT_SIZE, &segment))
-			return (erx_pack_fail(error, entry, "image_segment"));
-		if (segment.mem_size == 0 || segment.mem_size < segment.file_size ||
-		    segment.mem_offset % ERX_PAGE_SIZE != 0 ||
-		    segment.file_offset != data_cursor ||
-		    (segment.flags & ~ERX_SEG_GUARDED) != 0 ||
-		    (segment.prot != ERX_PROT_R && segment.prot != ERX_PROT_RW &&
-		    segment.prot != ERX_PROT_RX) ||
-		    (segment.prot == ERX_PROT_RW &&
-		    segment.mem_size > ERX_IMAGE_WRITABLE_MAX) ||
-		    __builtin_add_overflow(segment.mem_offset, segment.mem_size,
-		    &memory_end) || !erx_round_page(memory_end, &rounded_end) ||
-		    segment.mem_offset < previous_end || rounded_end > image.span)
-			return (erx_pack_fail(error, entry, "image_segment_range"));
-		storage = segment.prot == ERX_PROT_RW ?
-		    segment.file_size : segment.mem_size;
-		if (!erx_round_page(storage, &storage) ||
-		    !erx_extent(segment.file_offset, storage, length) ||
-		    __builtin_add_overflow(segment.file_offset,
-		    segment.file_size, &data_end) ||
-		    !erx_zeroes(bytes, data_end, segment.file_offset + storage, length))
+	cursor = ERX_PAGE_SIZE;
+	memory_end = 0;
+	for (uint32_t index = 0; index < plan.nloads; index++) {
+		segment = &plan.loads[index].segment;
+		storage = segment->prot == ERX_PROT_RW ?
+		    segment->file_size : segment->mem_size;
+		/* The plan put file_offset + file_size inside length. */
+		data_end = segment->file_offset + segment->file_size;
+		if (segment->file_offset != cursor ||
+		    !erx_round_page(storage, &storage) ||
+		    !erx_extent(cursor, storage, length) ||
+		    !erx_zeroes(bytes, data_end, cursor + storage, length))
 			return (erx_pack_fail(error, entry, "image_payload"));
-		if (segment.prot == ERX_PROT_RX && image.entry >= segment.mem_offset &&
-		    image.entry < memory_end)
-			executable_entry = true;
-		data_cursor = segment.file_offset + storage;
-		previous_end = rounded_end;
+		cursor += storage;
+		/* The plan proved mem_offset + mem_size rounds within the span. */
+		memory_end = segment->mem_offset + segment->mem_size;
 	}
-	if (data_cursor != length || previous_end != image.span ||
-	    !executable_entry || !erx_phdr_covered(bytes, length, &image))
-		return (erx_pack_fail(error, entry, "image_entry_or_phdr"));
+	if (cursor != length)
+		return (erx_pack_fail(error, entry, "image_length"));
+	if (!erx_round_page(memory_end, &span_end) || span_end != plan.span)
+		return (erx_pack_fail(error, entry, "image_span_end"));
+	/*
+	 * The plan carries no program-header table, so its fields come from the
+	 * manifest the planner has already accepted.
+	 */
+	if (!erx_image_manifest_decode(bytes, length, &image) ||
+	    !erx_phdr_covered(&plan, image.phdr_offset, image.phnum))
+		return (erx_pack_fail(error, entry, "image_phdr"));
 	return (true);
 }
 

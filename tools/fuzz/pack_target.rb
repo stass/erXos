@@ -11,6 +11,6 @@ require_relative '../../test/fixtures/pack_fixture'
 # prefixes, and the same archive left unfixed.
 valid = "\x03".b + PackFixture.valid
 Erx::PackFuzz.declare_target(
-  sources: ['kernel/core/pack.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
+  sources: ['kernel/core/pack.c', 'liberx/image_plan.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
   seeds: Erx::PackFuzz.prefix_seeds(valid).merge('valid-unfixed' => "\x00".b + valid.byteslice(1..))
 )

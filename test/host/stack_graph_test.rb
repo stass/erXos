@@ -20,16 +20,18 @@ class StackGraphTest < Minitest::Test
                     -mgeneral-regs-only -mno-outline-atomics -fstack-usage].freeze
   # Sources that use no effect and call out only to memcpy and memset: the
   # pure cores and primitives, and the generated ABI reader the pack
-  # validator calls. A floor: a new core needs no entry, since the graph of
-  # every core below holds it to the archive's own allowlist.
+  # validator calls, with the image planner it reads image entries by. A
+  # floor: a new core needs no entry, since the graph of every core below
+  # holds it to the archive's own allowlist.
   PURE_SOURCES = %w[kernel/core/pack.c kernel/core/rng.c kernel/core/tlb_plan.c kernel/core/watchdog.c
                     kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
                     kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
-                    build/gen/liberx/generated/abi_reader.c].freeze
+                    liberx/image_plan.c build/gen/liberx/generated/abi_reader.c].freeze
 
   # The archive's sources, the bootstrap core it leaves out, and the reader.
   def core_sources
-    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/elf_plan.c', 'build/gen/liberx/generated/abi_reader.c']
+    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/elf_plan.c', 'liberx/image_plan.c',
+     'build/gen/liberx/generated/abi_reader.c']
   end
 
   Name = Erx::StackGraph::Name

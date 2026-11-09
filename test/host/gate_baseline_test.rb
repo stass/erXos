@@ -34,7 +34,7 @@ class GateBaselineTest < Minitest::Test
   # Each native fuzz target's least seed count and sources.
   FUZZ_TARGETS = {
     'blake3' => { seeds: 10, sources: %w[kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c] },
-    'boot' => { seeds: 6, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
+    'boot' => { seeds: 6, sources: %w[kernel/core/pack.c liberx/image_plan.c kernel/crypto/blake3/blake3.c
                                            kernel/crypto/blake3/blake3_portable.c] },
     'cap' => { seeds: 4, sources: %w[kernel/core/cap.c] },
     'chacha20' => { seeds: 16, sources: %w[kernel/crypto/chacha20/chacha.c] },
@@ -49,9 +49,9 @@ class GateBaselineTest < Minitest::Test
     'lfs_image' => { seeds: 6, sources: %w[littlefs/lfs.c littlefs/lfs_util.c] },
     'log' => { seeds: 8, sources: %w[kernel/core/log.c] },
     'map' => { seeds: 6, sources: %w[kernel/core/map.c] },
-    'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
+    'pack' => { seeds: 11, sources: %w[kernel/core/pack.c liberx/image_plan.c kernel/crypto/blake3/blake3.c
                                             kernel/crypto/blake3/blake3_portable.c] },
-    'release' => { seeds: 16, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
+    'release' => { seeds: 16, sources: %w[kernel/core/pack.c liberx/image_plan.c kernel/crypto/blake3/blake3.c
                                          kernel/crypto/blake3/blake3_portable.c build/gen/liberx/generated/abi_reader.c
                                          liberx/release.c liberx/release_fs.c] },
     'release_names' => { seeds: 12, sources: %w[liberx/release_fs.c] },

@@ -24,7 +24,7 @@ root = boot_place_elf(0x4400_1000, [[1, 0x1000, 0x4400_1000, 0x1000, 0x2000, 0x1
 archive = PackFixture.valid(paths: %w[boot/kernel boot/sigma0 boot/stopgap-root system/root],
                             files: { 'boot/kernel'.b => kernel, 'boot/sigma0'.b => sigma0, 'boot/stopgap-root'.b => root })
 Erx::PackFuzz.declare_target(
-  sources: ['kernel/core/boot_place.c', 'kernel/core/pack.c', 'liberx/elf_plan.c',
+  sources: ['kernel/core/boot_place.c', 'kernel/core/pack.c', 'liberx/elf_plan.c', 'liberx/image_plan.c',
             'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
   seeds: { 'kernel' => "\x00".b + kernel, 'sigma0' => "\x00".b + sigma0,
            'plan' => "\xFF".b + archive, 'plan-tight' => "\x03".b + archive,

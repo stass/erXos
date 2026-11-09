@@ -225,7 +225,7 @@ class ReleaseFsTest < Minitest::Test
     sanitizers = ENV.fetch('ERX_SANITIZERS', '').split(',').reject(&:empty?)
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     output = File.join(@directory, 'release-driver')
-    sources = %w[liberx/release.c build/gen/liberx/generated/abi_reader.c kernel/core/pack.c kernel/crypto/blake3/blake3.c
+    sources = %w[liberx/release.c build/gen/liberx/generated/abi_reader.c kernel/core/pack.c liberx/image_plan.c kernel/crypto/blake3/blake3.c
                  kernel/crypto/blake3/blake3_portable.c test/fixtures/release_driver.c]
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *flags,
                  *Erx::Generated.include_flags(root: @root),

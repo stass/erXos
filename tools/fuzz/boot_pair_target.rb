@@ -12,7 +12,7 @@ boot_pair = lambda do |partition, tryboot, shape: 0x24|
 end
 cell = ->(number) { [number].pack('N') }
 Erx::PackFuzz.declare_target(
-  sources: ['kernel/core/boot_place.c', 'kernel/core/pack.c', 'liberx/elf_plan.c',
+  sources: ['kernel/core/boot_place.c', 'kernel/core/pack.c', 'liberx/elf_plan.c', 'liberx/image_plan.c',
             'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
   seeds: Erx::PackFuzz.indexed_seeds(
     [boot_pair.call(cell.call(2), cell.call(0)),

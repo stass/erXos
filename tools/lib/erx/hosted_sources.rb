@@ -15,7 +15,7 @@ module Erx
       kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c kernel/core/pack.c
       kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
       build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c
-      build/gen/liberx/generated/abi_reader.c liberx/release.c liberx/release_fs.c
+      build/gen/liberx/generated/abi_reader.c liberx/image_plan.c liberx/release.c liberx/release_fs.c
       liberx/backend/core/object_info.c liberx/backend/core/park_table.c liberx/backend/core/refused.c
       liberx/backend/core/trace_ring.c liberx/backend/core/vm_table.c liberx/backend/core/grow_table.c
       liberx/backend/hosted/object_info.c

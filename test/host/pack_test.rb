@@ -19,36 +19,66 @@ class PackTest < Minitest::Test
     unless (sanitizers - %w[address undefined]).empty?
       raise Erx::Error, 'unsupported pack-test sanitizer'
     end
-    flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
+    @flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
+    compile(File.join(@root, 'tools/host/pack_check.c'), @checker)
+  end
+
+  # Builds a host program over the validator and the image planner, the
+  # planner's source given so a test can seed a change into it.
+  def compile(main, output, planner: File.join(@root, 'liberx/image_plan.c'))
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, *Erx::Generated.include_flags(root: @root),
+                 *@flags, *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
-                 File.join(@root, 'kernel/core/pack.c'),
+                 File.join(@root, 'kernel/core/pack.c'), planner,
                  File.join(@root, 'kernel/crypto/blake3/blake3.c'),
                  File.join(@root, 'kernel/crypto/blake3/blake3_portable.c'),
                  Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
-                 File.join(@root, 'tools/host/input.c'),
-                 File.join(@root, 'tools/host/pack_check.c'), '-o', @checker],
-                name: 'compile-pack', deadline: 60)
+                 File.join(@root, 'tools/host/input.c'), main, '-o', output],
+                name: "compile-#{File.basename(output)}", deadline: 60)
+  end
+
+  def run_tool(program, bytes)
+    path = File.join(@directory, 'input.bin')
+    File.binwrite(path, bytes)
+    command = @runner.run([program, path], name: File.basename(program), deadline: 30)
+    [command.fetch('exit_status'), File.read(command.fetch('log'))]
+  rescue Erx::CommandError => error
+    [error.result.fetch('exit_status'), File.read(error.result.fetch('log'))]
   end
 
   def teardown
     FileUtils.remove_entry(@directory) if passed? && File.directory?(@directory)
   end
 
-  def check(bytes)
-    path = File.join(@directory, 'input.pack')
-    File.binwrite(path, bytes)
-    command = @runner.run([@checker, path], name: 'check-pack', deadline: 30)
-    [command.fetch('exit_status'), File.read(command.fetch('log'))]
-  rescue Erx::CommandError => error
-    [error.result.fetch('exit_status'), File.read(error.result.fetch('log'))]
-  end
+  def check(bytes) = run_tool(@checker, bytes)
 
   def reject(bytes, reason)
     status, output = check(bytes)
     assert_equal 1, status, output
     assert_match(/error #{Regexp.escape(reason)} /, output)
+  end
+
+  # The validator reads an image entry's segments through erx_image_plan, so
+  # a segment rule changed in the planner alone binds both readers: seeded
+  # here, a segment must be a whole page or more, which the fixture's root
+  # image (one 128-byte segment) breaks.
+  def test_a_segment_rule_changed_in_the_planner_binds_the_validator
+    planner = File.read(File.join(@root, 'liberx/image_plan.c'))
+    seeded = planner.sub('segment->mem_size == 0 ||', 'segment->mem_size < ERX_PAGE_SIZE ||')
+    refute_equal planner, seeded
+    File.write(File.join(@directory, 'seeded_image_plan.c'), seeded)
+    checker = File.join(@directory, 'seeded-pack-check')
+    image_planner = File.join(@directory, 'seeded-image-plan')
+    compile(File.join(@root, 'tools/host/pack_check.c'), checker, planner: File.join(@directory, 'seeded_image_plan.c'))
+    compile(File.join(@root, 'tools/host/image_plan.c'), image_planner,
+            planner: File.join(@directory, 'seeded_image_plan.c'))
+    assert_equal [0, "ok 2\n"], check(PackFixture.valid), 'the unseeded validator accepts the archive'
+    status, output = run_tool(image_planner, PackFixture.image)
+    assert_equal 1, status, output
+    assert_match(/^error segment_memory /, output)
+    status, output = run_tool(checker, PackFixture.valid)
+    assert_equal 1, status, output
+    assert_match(/error segment_memory /, output)
   end
 
   def test_independent_valid_image
@@ -106,13 +136,13 @@ class PackTest < Minitest::Test
     reject(PackFixture.rehash(bytes), 'release_run')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 12, 2)
-    reject(PackFixture.rehash(bytes), 'image_header')
+    reject(PackFixture.rehash(bytes), 'image_root_jit')
   end
 
   def test_image_cannot_map_manifest_or_nonzero_tail
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 56, 0, width: 8)
-    reject(PackFixture.rehash(bytes), 'image_segment_range')
+    reject(PackFixture.rehash(bytes), 'segment_file')
     bytes = PackFixture.valid
     bytes[PackFixture.root_offset(bytes) + 4096 + 128] = 'x'
     reject(PackFixture.rehash(bytes), 'image_payload')
@@ -121,19 +151,19 @@ class PackTest < Minitest::Test
   def test_entry_and_complete_phdr_range_must_be_mapped
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 32, 128, width: 8)
-    reject(PackFixture.rehash(bytes), 'image_entry_or_phdr')
+    reject(PackFixture.rehash(bytes), 'entry_not_executable')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 40, 100, width: 8)
-    reject(PackFixture.rehash(bytes), 'image_entry_or_phdr')
+    reject(PackFixture.rehash(bytes), 'image_phdr')
   end
 
   def test_image_virtual_span_and_flags_are_checked
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 16, 8192, width: 8)
-    reject(PackFixture.rehash(bytes), 'image_entry_or_phdr')
+    reject(PackFixture.rehash(bytes), 'image_span_end')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 56 + 32, 7)
-    reject(PackFixture.rehash(bytes), 'image_segment_range')
+    reject(PackFixture.rehash(bytes), 'segment_prot')
   end
 
   def test_zero_file_writable_segment_has_no_stored_pages
@@ -144,7 +174,7 @@ class PackTest < Minitest::Test
     status, output = check(PackFixture.valid(image_bytes: image))
     assert_equal 0, status, output
     PackFixture.integer(image, 96 + 8, 0, width: 8)
-    reject(PackFixture.valid(image_bytes: image), 'image_segment_range')
+    reject(PackFixture.valid(image_bytes: image), 'segment_memory')
   end
 
   def test_readonly_anonymous_tail_is_stored_and_zero

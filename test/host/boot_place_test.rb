@@ -42,7 +42,7 @@ class BootPlaceTest < Minitest::Test
     @driver = File.join(@directory, 'driver')
     sanitizers = ENV.fetch('ERX_SANITIZERS', '').split(',').reject(&:empty?)
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer', '-fno-sanitize-recover=all']
-    sources = %w[kernel/core/boot_place.c kernel/core/boot_handoff.c kernel/core/pack.c liberx/elf_plan.c
+    sources = %w[kernel/core/boot_place.c kernel/core/boot_handoff.c kernel/core/pack.c liberx/elf_plan.c liberx/image_plan.c
                  build/gen/liberx/generated/abi_reader.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
                  test/fixtures/boot_place_driver.c].map { |source| File.join(@root, source) }
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *flags,

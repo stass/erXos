@@ -5,7 +5,9 @@
 
 /*
  * The planner of an image entry: the one reader of an erx_image_manifest's
- * segments outside the boot image validator. An image entry is the manifest
+ * segments. The loader maps an entry by its plan, and the boot image
+ * validator (kernel/core/pack.c) checks the pack tool's layout over the same
+ * plan, so each segment rule here binds both. An image entry is the manifest
  * at offset 0, its segment table after it in the same page, then each
  * segment's bytes at its file_offset (tools/lib/erx/pack_wire.rb,
  * write_image). The bytes are read as untrusted, though the archive's hash

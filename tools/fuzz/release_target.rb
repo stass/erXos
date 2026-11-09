@@ -13,7 +13,7 @@ archive = lambda do |path|
 end
 valid = archive.call('system/lib/a')
 Erx::PackFuzz.declare_target(
-  sources: ['kernel/core/pack.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
+  sources: ['kernel/core/pack.c', 'liberx/image_plan.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
             'build/gen/liberx/generated/abi_reader.c', 'liberx/release.c', 'liberx/release_fs.c'],
   seeds: Erx::PackFuzz.prefix_seeds(valid).merge(
     'valid-unfixed' => "\x00".b + valid.byteslice(1..),

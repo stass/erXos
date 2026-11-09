@@ -16,7 +16,7 @@ initrd = ['ERXBOOT', 1, 0, 0, 0].pack('a8VVQ<Q<') +
          [0x4020_0000, 0x2100, 0x3000, 1, 0x4800_0000, 0x3000, 0x4800_3000, 0x1_0000, *memory].pack('Q<*')
 
 Erx::PackFuzz.declare_target(
-  sources: ['kernel/core/pack.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
+  sources: ['kernel/core/pack.c', 'liberx/image_plan.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
   seeds: { 'single' => located.call(off: 0x3000, size: 0x3000), 'initrd' => initrd.b,
            'at-linked-end' => located.call(off: 0x3000, size: 0x3000, linked_end: 0x3000),
            'past-linked-end' => located.call(off: 0x3000, size: 0x3000, linked_end: 0x3001),

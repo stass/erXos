@@ -21,7 +21,7 @@ module Erx
     # (docs/todo-performance.md).
     BLAKE3 = %w[kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c].freeze
     # Each program: its binary's name, the cores it links and its main.
-    PROGRAMS = { 'checker' => ['pack-check', ['kernel/core/pack.c', *BLAKE3].freeze, 'tools/host/pack_check.c'].freeze,
+    PROGRAMS = { 'checker' => ['pack-check', ['kernel/core/pack.c', 'liberx/image_plan.c', *BLAKE3].freeze, 'tools/host/pack_check.c'].freeze,
                  'hasher' => ['pack-hash', BLAKE3, 'tools/host/pack_hash.c'].freeze,
                  'planner' => ['elf-plan', ['liberx/elf_plan.c'].freeze, 'tools/host/elf_plan.c'].freeze,
                  'domains' => ['dom-plan', %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_boot_view.c liberx/erx_lane.c].freeze,
