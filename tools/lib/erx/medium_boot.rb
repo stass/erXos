@@ -10,6 +10,8 @@ require_relative 'fiasco'
 require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
+require_relative 'pack_wire'
+require_relative 'release_files'
 require_relative 'release_medium'
 require_relative 'runner'
 
@@ -43,21 +45,137 @@ module Erx
     # test/host/medium_boot_test.rb.
     CRC32C_ANSWER = '{crc32c,"E3069283","2D78517F",badarg}'
     CRC32C_START = /\A(?:[0-9]+> )?\{crc32c,/n
-    # The domain service's NIF module, erx_domain_lib: it loads in the system domain,
-    # a create map with a key the library sets itself (crash) is badarg before any
-    # library is reached, and an id that is not one is badarg; neither answer depends
-    # on whether the root built a library. The shell does not register, so the domain
-    # service stays the one receiver of ends. It starts with a fun, so the shell's echo
-    # of it does not start {domain_lib, and only the answer matches DOMAIN_LIB_START.
-    DOMAIN_LIB_EXPRESSION = '(fun()->{domain_lib,' \
-                            'try erx_domain_lib:create(#{id=>2,principal=>1,runtime=>0,release=>0,' \
-                            'release_files=>1,memory=>65536,outer=>65536,grant=>#{quota_ns=>0,cpuset=>1},' \
-                            'lane=>0,args=><<>>,env=><<>>,crash=>0}) catch error:badarg->badarg end,' \
-                            'try erx_domain_lib:start(foo) catch error:badarg->badarg end} end)().'
-    DOMAIN_LIB_ANSWER = '{domain_lib,badarg,badarg}'
+    # The machine of a medium boot: the production image's, with room for the medium
+    # manifest's two domains (manifest). RAM grows to 768 MiB, Fiasco keeping about
+    # 6% of it, and the root moves up to 192 MiB, as on the QEMU oracle's machine, since the
+    # archive below it carries the domain runtime images and the domain release; QEMU puts
+    # the device tree 128 MiB into a machine this large (docs/design-platforms.md).
+    MACHINE = ProductionImage::Machine.new(memory_mib: 768, fiasco_reserve_mib: 48, system_growth_mib: 0, tmp_growth_mib: 0,
+                                           root_mib: 192)
+    # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
+    DOMAIN_MEMORY = 160 << 20
+    DOMAIN_OUTER = 1 << 20
+    # The release the domain runs, the applications every domain boots through, as the
+    # image's build defines a domain release named by a manifest row (ProductionImage).
+    DOMAIN_RELEASE = ReleaseFiles.domain('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
+    # What the domain's ERTS runs: its release's boot script, as the system's system_args
+    # do, then halt(0), so a halt with status 0 says init ran the boot script and -eval.
+    DOMAIN_ARGS = %w[-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie
+                     -kernel start_distribution false -eval erlang:halt(0)].freeze
+    # The medium manifest's configured domain: the interpreter's image on DOMAIN_RELEASE,
+    # in a limits profile of the domain's budgets, with DOMAIN_ARGS, the arguments the
+    # cell's own creates pass.
+    DOMAIN_ROW = "limits erts\n  memory #{DOMAIN_MEMORY}\n  outer #{DOMAIN_OUTER}\n  grant @share.users\n  spaces none\n" \
+                 "  lane 4096\n  connections 0\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
+                 "  peer_held 4096\n  peer_held_total 4096\n" \
+                 "domain erts\n  principal @principal.system\n  limits @limits.erts\n  kind service\n  flags none\n" \
+                 "  runtime @artifact.#{ProductionImage::DOMAIN_RUNTIME_ARTIFACT}\n  release @artifact.#{DOMAIN_RELEASE.name}\n" \
+                 "  restarts 0\n  restart_period_s 5\n  args \"#{DOMAIN_ARGS.join(' ')}\"\n"
+
+    # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
+    # any id at or below it, so the cell's two domains take the first two ids above it.
+    SYSTEM_DOMAIN_ID = 4
+    DOMAIN_IDS = [SYSTEM_DOMAIN_ID + 1, SYSTEM_DOMAIN_ID + 2].freeze
+
+    # Where the domain's runtime image and release are in the archive: the boot image's
+    # indexes a create names them by.
+    Domain = Data.define(:runtime, :release, :release_files)
+
+    # The cell's steps as [variable, call, answer], each bound in turn, since each relies
+    # on the ones before it. The answer of each is the line's element in its place
+    # (DOMAIN_LIB_ANSWER). DlBadarg turns the NIF's badarg into the atom badarg.
+    DOMAIN_LIB_STEPS = [
+      # The maps the NIF refuses before the library is reached.
+      ['DlCrash', 'DlBadarg(fun()->Lib:create(Spec#{crash=>0})end)', 'badarg'], # a key the library sets
+      ['DlWide', 'DlBadarg(fun()->Lib:create(Spec#{id=>1 bsl 32})end)', 'badarg'], # wider than its field
+      ['DlArgs', 'DlBadarg(fun()->Lib:create(Spec#{args=><<(binary:copy(<<"a">>,2048))/binary,0>>})end)',
+       'badarg'], # one byte past the boot page's strings
+      ['DlBoth', 'DlBadarg(fun()->Lib:create(Spec#{args=><<(binary:copy(<<"a">>,2046))/binary,0>>,env=><<"x",0>>})end)',
+       'badarg'], # args and env together one past them
+      ['DlNotId', 'DlBadarg(fun()->Lib:start(foo)end)', 'badarg'],
+      # Before register/1: einval from a present library only (an absent one answers enotsup).
+      ['DlEarly', 'Lib:create(Spec)', '{error,einval}'],
+      ['DlRegistered', 'Lib:register(self())', 'ok'],
+      # The maps the library itself refuses.
+      ['DlFiles', 'Lib:create(Spec#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
+      ['DlUnaligned', 'Lib:create(Spec#{memory=>4097})', '{error,einval}'], # not whole pages
+      ['DlSystem', "Lib:create(Spec\#{id=>#{SYSTEM_DOMAIN_ID}})", '{error,einval}'],
+      # Two ERTS domains, DOMAIN_IDS (Run). The halt's status is 0. A stop's end reads
+      # {stopped,0} whatever status stop/2 is given (erx_dom_plan_stop and
+      # erx_dom_classify, liberx/system/dom_life.c, as native_domain's stop case
+      # expects); 7 is not 0, so a library that passed the status through would show.
+      ['DlHalted', 'Run(Lib,Spec,fun(_)->ok end)', '{ok,ok,{halt,0},ok,ok}'],
+      ['DlStopped', "Run(Lib,Spec\#{id=>#{DOMAIN_IDS.last}},fun(DlId)->Lib:stop(DlId,7) end)",
+       '{ok,ok,{stopped,0},ok,ok}']
+    ].freeze
+    # Run: creates a domain, starts it, does Then to it, waits for its {domain_ended, ...}
+    # message, disconnects its system connection and retires it, answering each result in
+    # that order, or the create's refusal; a missing end is timeout in the end's place.
+    DOMAIN_LIB_RUN = 'fun(Lib,Spec,Then)->case Lib:create(Spec) of ' \
+                     '{ok,#{id:=DlId,connection:=DlConnection}}->DlStarted=Lib:start(DlId),DlThen=Then(DlId),' \
+                     'DlEnd=receive {domain_ended,DlId,DlKind,_}->DlKind after 60000->timeout end,' \
+                     '{DlStarted,DlThen,DlEnd,Lib:disconnect(DlConnection),Lib:retire(DlId)};' \
+                     'DlRefused->DlRefused end end'
+    # The line the cell prints: every step's answer, in order.
+    DOMAIN_LIB_ANSWER = "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:last).join(',')}}".freeze
     DOMAIN_LIB_START = /\A(?:[0-9]+> )?\{domain_lib,/n
 
     module_function
+
+    # The domain service's NIF module, erx_domain_lib, in the system domain, with the
+    # library the root built from the medium manifest: DOMAIN_LIB_STEPS in order, then
+    # their answers. Variables are fun parameters or carry a Dl prefix no earlier
+    # expression binds, since the shell keeps every binding. The shell's evaluator stays
+    # registered afterwards, so every later end reaches it; only this test registers. The
+    # answers are printed with ~0p, on one line however long, and the shell's own ok
+    # follows on the next. The expression starts with io:format, so the shell's echo of it
+    # does not start {domain_lib, and only the printed answer matches DOMAIN_LIB_START.
+    def domain_lib_expression(domain)
+      args = DOMAIN_ARGS.map { |arg| "\"#{arg}\",0" }.join(',')
+      spec = erlang_map(id: DOMAIN_IDS.first, principal: 1, runtime: domain.runtime, release: domain.release,
+                        release_files: domain.release_files, memory: DOMAIN_MEMORY, outer: DOMAIN_OUTER,
+                        grant: erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
+                        lane: 4096, args: "<<#{args}>>", env: '<<>>')
+      badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
+      steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }
+      "io:format(\"~0p~n\",[(fun(Lib,Spec,Run)->#{badarg},#{steps.join(',')}," \
+        "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)(erx_domain_lib,#{spec},#{DOMAIN_LIB_RUN})])."
+    end
+
+    # An Erlang map expression of pairs, each value an expression already.
+    def erlang_map(pairs) = "\#{#{pairs.map { |key, value| "#{key}=>#{value}" }.join(',')}}"
+
+    # The development manifest with a domain row and room for two domains (MACHINE's
+    # manifest, with no growth of the system). The row, DOMAIN_ROW, is there so the image
+    # carries the release and the runtime image it names, which is how a manifest makes
+    # its image carry them (docs/design-stopgap.md, "The production image"). The root
+    # starts no configured domain; the shell creates both of the cell's domains through
+    # the domain library, one at a time. The room is for two: the configured row, which
+    # the build's planner plans against the principal, and one domain of the shell's. So
+    # the system principal's quota and max_domains go from 0 to 2, and its memory and
+    # root_memory each grow by two domains' budgets. The development manifest itself,
+    # what the production image promises, is unchanged.
+    def manifest(source)
+      growth = 2 * (DOMAIN_MEMORY + DOMAIN_OUTER)
+      { /^(principal system\n  memory )([0-9]+)$/ => growth, /^(  root_memory )([0-9]+)$/ => growth,
+        /^(principal system\n(?:  .*\n)*?  domains )(0)$/ => 2, /^(  max_domains )(0)$/ => 2 }
+        .reduce(MACHINE.manifest(source)) do |text, (pattern, added)|
+          raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
+
+          text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + added}" }
+        end + DOMAIN_ROW
+    end
+
+    # The domain's runtime image and release in the archive at path: the indexes of the
+    # interpreter's image and of DOMAIN_RELEASE's run of entries.
+    def domain_in(archive, codec:)
+      paths = PackWire.entries_of(File.binread(archive), codec).map(&:first)
+      runtime = paths.index(ProductionImage::DOMAIN_RUNTIME_PATH.b)
+      run = ReleaseFiles.domain_runs(paths)[DOMAIN_RELEASE.name]
+      raise Error, "the archive #{archive} carries no domain runtime or release" unless runtime && run
+
+      Domain.new(runtime: runtime, release: run.fetch('entry'), release_files: run.fetch('files'))
+    end
 
     # The device tree source that adds the firmware's two properties to a tree: dtc
     # merges a node defined twice, so appended to QEMU's own tree it adds them under its
@@ -82,14 +200,14 @@ module Erx
     # then starts a nested command shell and types at it (command_shell_checkpoints),
     # whose lines read the mounts. Each list takes the line before it and sets what the
     # person types there.
-    def checkpoints(points, choice, release:)
+    def checkpoints(points, choice, release:, domain:)
       at = points.index { |point| point.fetch(:name) == 'image-identity' }
       raise Error, 'the production checkpoints name no image-identity' unless at
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       erlang, image_answer = image_checkpoints(ProductionImage::Run::ERLANG_SHELL, release)
       *crc32c, crc32c_answer = crc32c_checkpoints(image_answer)
-      *domain_lib, domain_lib_answer = domain_lib_checkpoints(crc32c_answer)
+      *domain_lib, domain_lib_answer = domain_lib_checkpoints(crc32c_answer, domain)
       [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1],
        points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze, erlang,
        *crc32c, *domain_lib, *command_shell_checkpoints(domain_lib_answer)].freeze
@@ -104,12 +222,13 @@ module Erx
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
     end
 
-    # After the shell's line previous, the person types DOMAIN_LIB_EXPRESSION, and its answer
-    # must be DOMAIN_LIB_ANSWER whole.
-    def domain_lib_checkpoints(previous)
+    # After the shell's line previous, the person types domain_lib_expression of the
+    # archive's domain, and its answer must be DOMAIN_LIB_ANSWER whole. Two ERTS domains
+    # boot and end before it, so it has more time than the other answers.
+    def domain_lib_checkpoints(previous, domain)
       whole = /\A(?:[0-9]+> )?#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
-      [previous.merge(type: "#{DOMAIN_LIB_EXPRESSION}\r").freeze,
-       { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 30,
+      [previous.merge(type: "#{domain_lib_expression(domain)}\r").freeze,
+       { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 180,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the domain library expression" unless whole.match?(text) } }.freeze]
     end
 
@@ -186,7 +305,7 @@ module Erx
 
     # Boots the production image from its release medium to the shell under HVF.
     class Run
-      MEMORY_MIB = ProductionImage::MEMORY_MIB
+      MEMORY_MIB = MACHINE.memory_mib
       # Under HVF the watchdog numbers are the kernel's defaults, whatever they are.
       WATCHDOG = '[0-9]+,[0-9]+,[0-9]+'
 
@@ -197,6 +316,7 @@ module Erx
         @compiler = compiler
         @linker = linker
         @qemu = qemu
+        @manifest = MediumBoot.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
       end
 
       # Packs the production image and its release medium once, then boots each CPU
@@ -207,13 +327,14 @@ module Erx
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/medium-boot/image'))
         built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                        .build_medium(directory: directory)
-        cpus.to_h { |count| ["hvf-#{count}cpu", boot(count, built, written)] }
+                                        .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        domain = MediumBoot.domain_in(built.archive, codec: ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
+        cpus.to_h { |count| ["hvf-#{count}cpu", boot(count, built, written, domain)] }
       end
 
       private
 
-      def boot(count, built, written)
+      def boot(count, built, written, domain)
         directory = OutputDirectory.prepare(root: @root, mode: 0o700,
                                             path: File.join(@root, 'build/medium-boot', "hvf-#{count}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"))
         medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors)
@@ -222,10 +343,11 @@ module Erx
         raise Error, 'the slot parser chose a file that is not the packed image' unless FileUtils.compare_file(image, built.single)
 
         disks = [QemuPlan::Disk.new(path: medium)]
-        points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: WATCHDOG, cpus: count)
+        points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: WATCHDOG, cpus: count, manifest_source: @manifest,
+                                                  memory_mib: MEMORY_MIB)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(accel: 'hvf', cpus: count, image: image, memory_mib: MEMORY_MIB, directory: File.join(directory, 'boot'),
-                 checkpoints: MediumBoot.checkpoints(points, choice, release: built.release), dtb: firmware_tree(count, image, disks, choice, directory),
+                 checkpoints: MediumBoot.checkpoints(points, choice, release: built.release, domain: domain), dtb: firmware_tree(count, image, disks, choice, directory),
                  disks: disks)
         'passed'
       end

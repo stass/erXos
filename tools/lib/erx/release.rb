@@ -16,6 +16,7 @@ require_relative 'output_directory'
 require_relative 'pack'
 require_relative 'pack_provenance'
 require_relative 'pack_tools'
+require_relative 'pack_wire'
 require_relative 'release_files'
 require_relative 'release_medium'
 require_relative 'runner'
@@ -40,7 +41,7 @@ module Erx
 
     # The archive's release files as [path, content hash], sorted, from its index alone.
     def self.file_table(archive:, codec:)
-      rows = entries_of(File.binread(archive), codec).map { |path, entry| [path, entry.fetch('file_hash').unpack1('H*')] }
+      rows = PackWire.entries_of(File.binread(archive), codec).map { |path, entry| [path, entry.fetch('file_hash').unpack1('H*')] }
       excluded = [*NOT_RELEASE_FILES, codec.fixed_bytes('build_facts_path')]
       rows.select { |path, _hash| path.start_with?('system/') && !excluded.include?(path) }.sort.freeze
     end
@@ -48,23 +49,11 @@ module Erx
     # The bytes of one file of an archive, found through its index.
     def self.file_bytes(archive:, path:, codec:)
       bytes = File.binread(archive)
-      entries_of(bytes, codec).each do |name, entry|
+      PackWire.entries_of(bytes, codec).each do |name, entry|
         return bytes.byteslice(entry.fetch('data_off'), entry.fetch('data_size')) if name == path
       end
       raise Error, "#{archive} holds no #{path}"
     end
-
-    # Each file of an archive as [path, entry], in the index's order.
-    def self.entries_of(bytes, codec)
-      header = codec.decode_layout('erx_pack_header', bytes)
-      strings = bytes.byteslice(header.fetch('strings_off'), header.fetch('strings_size'))
-      Array.new(header.fetch('nentries')) do |index|
-        at = header.fetch('entries_off') + index * header.fetch('entry_size')
-        entry = codec.decode_layout('erx_pack_entry', bytes.byteslice(at, header.fetch('entry_size')))
-        [strings.byteslice(entry.fetch('path_off'), entry.fetch('path_len')), entry]
-      end
-    end
-    private_class_method :entries_of
 
     # What one table has and the other does not, as [path, hash] rows: empty when the
     # two archives hold the same release.

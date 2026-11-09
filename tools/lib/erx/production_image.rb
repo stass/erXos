@@ -96,8 +96,8 @@ module Erx
     # domain needs more, this one list, the applications every domain boots through,
     # stands for the table under every name (ReleaseFiles.domain); domain_releases reads
     # a table by name once one does. The development manifest configures no domains, so
-    # the production image carries neither; a test image may carry some
-    # (build_test_image's domains).
+    # the production image carries neither; medium_boot's manifest configures one
+    # (MediumBoot.manifest), and a test image may carry some (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
@@ -195,9 +195,12 @@ module Erx
     end
 
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
-    # directory, which must be clean.
-    def build_medium(directory:)
-      built = build(directory: directory)
+    # directory, which must be clean: by default the production image. A boot that creates
+    # a domain (MediumBoot) names a larger machine and a manifest with room for it, whose
+    # domain row names the release and runtime image the image then carries.
+    def build_medium(directory:, machine: DEVELOPMENT_MACHINE, manifest_source: File.binread(File.join(@root, MANIFEST)))
+      built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
+                       machine: machine, domains: domain_releases(manifest_source))
       [built, ReleaseMedium.write(built: built, directory: built_directory(built))]
     end
 
@@ -515,13 +518,13 @@ module Erx
       # carries the numbers the source says, so a root that misread it fails. ERTS's
       # arguments count each device record. hostlink is the boot's QemuPlan host link: a
       # plan of QemuPlan::NO_HOSTLINK sends no erx.hostlink=1, so the host link's UART gives
-      # no record. Schedulers are
+      # no record. memory_mib is the RAM QEMU gives the guest, which bootstrap reports. Schedulers are
       # one per CPU of the system's share on this machine. Erlang's init then boots the
       # release, `kernel` starts, and erx_console's slogan and its command shell's banner,
       # written through erx_pl011, prove the release ran that far. The command shell's
       # prompt ends no line, so no point names it.
       def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)),
-                           hostlink: nil)
+                           hostlink: nil, memory_mib: MEMORY_MIB)
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
@@ -533,7 +536,7 @@ module Erx
         image = /\Aerx: boot image build #{built.build_id} index #{built.index_hash} flags 0x#{built.flags.to_s(16)} archive /n
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
         manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
-        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+        [*Qemu.boot_transcript(memory_mib: memory_mib),
          point('image-identity', /\Aerx: boot image build/n, image, speaker: 'the kernel reports'),
          point('root-identity', /\Aerx: root task: build/n, identity),
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),

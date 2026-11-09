@@ -37,10 +37,11 @@ module Erx
     PATTERNS = [*CORE_PATTERNS, 'kernel/crypto/*/*.c', 'build/gen/kernel/generated/*.c'].freeze
     # Cores the stopgap links into bootstrap, not into the kernel.
     BOOTSTRAP_SOURCES = %w[kernel/core/boot_place.c kernel/core/pack.c].freeze
-    # What bootstrap links: those cores with what they call. Translation is off
+    # What bootstrap links: those cores with what they call, and the image planner
+    # the root's service reads an image entry with (NativeRoot links this archive). Translation is off
     # when they run, so every load and store must be aligned.
     BOOT_SOURCES = [*BOOTSTRAP_SOURCES, 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
-                    'liberx/elf_plan.c', 'build/gen/liberx/generated/abi_reader.c'].freeze
+                    'liberx/elf_plan.c', 'liberx/image_plan.c', 'build/gen/liberx/generated/abi_reader.c'].freeze
     BOOT_FLAGS = %w[-mstrict-align].freeze
     BOOT_ARCHIVE = 'erx_boot.a'
     FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding

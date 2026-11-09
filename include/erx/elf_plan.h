@@ -45,6 +45,18 @@ bool erx_elf_plan(const uint8_t *, size_t, uint64_t,
     erx_elf_plan_t *, erx_elf_error_t *);
 
 /*
+ * The plan of an image entry of the boot archive (liberx/image_plan.c): its
+ * erx_image_manifest page and the segments after it, as the pack tool wrote
+ * them from erx_elf_plan's plan. Each load's source_offset is its segment's
+ * file_offset in the entry's bytes; virtual_origin is 0 and output_size the
+ * entry's length. The loads, span, base and entry hold erx_elf_plan's
+ * invariants; the plan carries no program-header table, so phdr_offset and
+ * phnum are 0.
+ */
+bool erx_image_plan(const uint8_t *, size_t, erx_elf_plan_t *,
+    erx_elf_error_t *);
+
+/*
  * The kernel profile: an executable that bootstrap places by physical address
  * before translation is on. A segment's addresses are the ELF's physical ones;
  * with a dynamic section the image relocates itself, so bootstrap may place it

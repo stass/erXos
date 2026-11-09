@@ -394,8 +394,11 @@ task_segment_load(uint32_t task, const uint8_t *image, const erx_elf_load_t *loa
 
 /*
  * The kernel's call takes a slice of the image and an entry of it; this backend has
- * one image, the boot archive, and no slices, so image is ignored. Only a program
- * linked at fixed addresses can load, as there is no relocation here.
+ * one image, the boot archive, and no slices, so image is ignored. An entry loads in
+ * either of its two forms: an image entry (a domain's runtime) by the manifest the
+ * pack tool wrote, through erx_image_plan, or a file entry holding an ELF executable
+ * (the test launcher's programs) through erx_elf_plan. Only a program linked at fixed
+ * addresses can load, as there is no relocation here.
  */
 int
 erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start)
@@ -404,6 +407,7 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 	erx_elf_error_t error;
 	const uint8_t *image;
 	uint32_t task;
+	bool planned;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
@@ -411,8 +415,11 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 	    task_archive == NULL || !erx_pack_entry_at(task_archive, (uint32_t)entry, &file))
 		return (ERX_EINVAL);
 	image = task_archive->bytes + file.data_off;
-	if (!erx_elf_plan(image, (size_t)file.data_size, UINT64_MAX, &task_plan, &error) ||
-	    (task_plan.flags & ERX_IMAGE_FIXED) == 0)
+	if (file.kind == ERX_ENTRY_IMAGE)
+		planned = erx_image_plan(image, (size_t)file.data_size, &task_plan, &error);
+	else
+		planned = erx_elf_plan(image, (size_t)file.data_size, UINT64_MAX, &task_plan, &error);
+	if (!planned || (task_plan.flags & ERX_IMAGE_FIXED) == 0)
 		return (ERX_EINVAL);
 	for (uint32_t load = 0; load < task_plan.nloads; load++)
 		if (!task_segment_load(task, image, &task_plan.loads[load], task_plan.fixed_base))

@@ -2978,6 +2978,17 @@ to the corpus and follow rc
   `uncompress.cc`, `mk/tool/imagebuilder`) are unbuilt and the other platforms'
   sources still name them. Delete them or fix those platforms with the first
   port that needs one.
+* [Medium] boot image, liberx: `erx_image_valid` (`kernel/core/pack.c`) and
+  `erx_image_plan` (`liberx/image_plan.c`) each restate an image manifest's
+  segment rules, and the planner checks only what the loader needs: it
+  accepts what the validator refuses for layout (zero padding, contiguous
+  file ranges, stored bytes covering an R or RX segment's memory, `span`
+  equal to the last segment's end, a mapped program-header table, the
+  root's JIT flag). Make it one reader by construction: `erx_image_valid`
+  calls `erx_image_plan` and adds only the layout checks (both are in
+  `erx_boot.a`; the `pack`, `release` and boot-place fuzz targets and host
+  tests then build `image_plan.c` too), or else a differential fuzz target
+  requiring that every image the validator accepts plans with the same loads.
 * [Medium] build, stopgap bootstrap: `kernel/core/pack.c` is left out of
   the kernel's archive (`CoreArchive::BOOTSTRAP_SOURCES`) but is not yet
   linked into `bootstrap`, since nothing there calls it until the boot

@@ -50,6 +50,25 @@ module Erx
   # identifier, the first bytes of the index run's hash with both identity
   # fields zero, then the index hash, with its own field zero.
   class PackWire
+    # Each file of an archive as [path, entry], in the index's order. A strings area or
+    # a path outside the archive is refused, never read short.
+    def self.entries_of(bytes, codec)
+      header = codec.decode_layout('erx_pack_header', bytes)
+      within = ->(offset, length, size) { offset + length <= size }
+      raise Error, 'the archive\'s strings lie outside it' unless
+        within.call(header.fetch('strings_off'), header.fetch('strings_size'), bytes.bytesize)
+
+      strings = bytes.byteslice(header.fetch('strings_off'), header.fetch('strings_size'))
+      Array.new(header.fetch('nentries')) do |index|
+        at = header.fetch('entries_off') + index * header.fetch('entry_size')
+        entry = codec.decode_layout('erx_pack_entry', bytes.byteslice(at, header.fetch('entry_size')))
+        raise Error, "the archive's entry #{index} names a path outside its strings" unless
+          within.call(entry.fetch('path_off'), entry.fetch('path_len'), strings.bytesize)
+
+        [strings.byteslice(entry.fetch('path_off'), entry.fetch('path_len')), entry]
+      end
+    end
+
     ZERO_CHUNK = ("\0".b * 65_536).freeze
     Layout = Data.define(:header, :entries, :strings, :index_end, :total)
     private_constant :Layout
