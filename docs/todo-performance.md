@@ -476,6 +476,16 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Each hand-over costs an `atomics:add_get/3` and each socket step two
   `process_info/2` reads and an `atomics:add/3`. Settled by the time per
   frame of a bulk transfer with both and with a build that leaves them out.
+* **[Low] network, the virtio transport's payload join**
+  ([design-network-stack.md](design-network-stack.md#the-driver)).
+  `erx_virtio_net` posts at most two payload binaries per frame and joins
+  the rest into the last segment, a copy of the payload past the first
+  binary; an owner that sends many small binaries pays it on most
+  segments. Settled by the CPU time per byte of a bulk send written as
+  100-byte `gen_tcp:send/2` calls against one written as 64 KiB calls, on
+  QEMU `virt` under HVF; the fixes on the table are more `out` segments
+  per request in the device NIF, or joining small binaries once as the
+  send buffer takes them.
 
 * The syntax-tree chokepoint pass (`tools/lib/erx/syntax_tree.rb`, run by
   `StackProofRun`): it dumps every core's tree, 20-27 MB of JSON each,

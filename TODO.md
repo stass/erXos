@@ -661,6 +661,12 @@ it; git history is the record of completed work.
   domain at the driver's first read. The word goes once erXos's kernel finds
   the UART in the device tree and the root hands the record only for a UART
   that is there ([design-stopgap.md](docs/design-stopgap.md#the-command-line)).
+* [Medium] network, `erx_net_admit` ([design-network-stack.md](docs/design-network-stack.md#the-grants-contract)):
+  the admission path of grants and sockets is hand-written, with the
+  generated module's exact signature, until the schema generator over
+  `abi/services` exists; replace it with the module generated from
+  `abi/services/net.txt` then. Until `erx_facet` exists, a grant on a host
+  runs under `erx_net_local`'s loop.
 
 ## Bugs by subsystem
 
@@ -3645,15 +3651,45 @@ document's "residual risks accepted" paragraph.
   the pure core is in `erlang/apps/erx_net/src`; the effect layer is not
   written. In order, host first: `erx_net_credit`, `erx_net_clock`,
   `erx_net_if_core`, `erx_net_driver` with `erx_net_pipe` and
-  `erx_net_loop`, the processes, then `erx_net_script`, the virtual
-  clock, `erx_net_impair` and `erx_net_relay` in `test/erlang`, and the
-  host stand-ins of `erx:cap/1` and `erx:origins/1`; `erx_virtio_net`
-  with the network domain. Two things to confirm on the FreeBSD test
-  host `p620` before its runs: that QEMU's `-netdev tap` opens
-  `/dev/tapN` there as an ordinary user, as the macOS slirp hub was
-  confirmed, and that the bridge can put two jails behind separate tap
-  devices for the relay's FreeBSD baseline. The admission path and the
-  grant wait on the design's first open decision.
+  `erx_net_loop`, `erx_net_runtime` with `erx_net_local`, the processes,
+  then `erx_net_vclock`, `erx_net_script`, `erx_net_impair` and
+  `erx_net_relay` in the app's `test/`, and the tap helper `erx_net_tap`
+  in `c_src/`; `erx_virtio_net` and `erx_net_erxos` with the network
+  domain. Three things to confirm on the FreeBSD test host `p620` before
+  its runs: that the test user can open `/dev/tapN` (a devfs rule) and
+  the tap comes up on open (`net.link.tap.up_on_open`), that the bridge
+  can put two jails behind separate tap devices for the relay's FreeBSD
+  baseline, and that a stock OTP 29.1.2 builds there for the stack's
+  host runs.
+* [Medium] network, `erx_net` as a package of its own (N12 of
+  [design-network-stack.md](docs/design-network-stack.md#requirements)):
+  lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,
+  `c_src/`, `test/`); move `test/erlang/host_bytes/erx_bytes.erl` to
+  `portable/` and the stack's tests, fuzz targets and explorer from
+  `test/erlang` into the app's `test/`, runnable on stock OTP from the
+  app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's licence notice beside `NOTICE-freebsd`; create
+  `erlang/apps/erx_net_client`; and add the build check of N12 with its
+  seeded violation.
+* [Medium] network, the FreeBSD pin ([design-network-stack.md](docs/design-network-stack.md#decisions), 9):
+  port to `erx_net` the changes between `release/15.1.0-p6` and
+  `975e3605ebb1` that the wire or an interoperating peer can see and the
+  real bug fixes, from the survey of those changes, each recorded with
+  its FreeBSD commit in `NOTICE-freebsd`, and move the notice's pin.
+* [Low] network, the interface's own frames on transmit
+  ([design-network-stack.md](docs/design-network-stack.md#residuals)):
+  ARP and neighbour-discovery answers, RSTs and SYN-ACKs share the
+  driver's transmit credit with clients' data, so a sender that keeps it
+  full delays resolution and handshakes. A small share of the credit
+  reserved for the interface's own frames would bound it.
+* [Low] docs, the FreeBSD guest: [plan.md](docs/plan.md) (the network
+  stage, "packetdrill tests and a FreeBSD guest" and "in a FreeBSD 15.1
+  guest") still names a FreeBSD guest for the network stack, whose
+  oracle is the FreeBSD test host; and
+  [design-shell.md](docs/design-shell.md)'s oracle cases link the
+  FreeBSD 15.1 oracle guest to design-network-stack.md, which no longer
+  has one. Point plan.md at the test host, and either link the shell's
+  guest to design.md's dependency row or move the shell's oracle to the
+  test host.
 * [Medium] network, `docs/design-network-stack.md`: the design does not yet
   settle sockets with several holders, which [design.md](docs/design.md#networking)
   leaves to it; settle them before the POSIX socket protocol's code.
