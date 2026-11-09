@@ -82,7 +82,7 @@ design's decision (docs/design-network-stack.md, "IPv4 and ARP").
 
 -include("erx_ip4_wire.hrl").
 
--export([decode/1, encode/1, options/1]).
+-export([decode/1, encode/1, options/1, pseudo_sum/4]).
 
 -export_type([error_reason/0, option/0]).
 
@@ -194,3 +194,12 @@ encode(#ip4{tos = Tos, len = Len, id = Id, rf = Rf, df = Df, mf = Mf, off = Off,
     Tail = <<Src/binary, Dst/binary, Options/binary>>,
     Sum = bnot erx_bytes:inet_csum(0, [Head, Tail]) band 16#FFFF,
     <<Head/binary, Sum:16, Tail/binary>>.
+
+-doc """
+The partial Internet checksum of the pseudo-header that the upper layer's checksum covers
+(RFC 768; RFC 9293, section 3.1): source and destination address, a zero byte, the protocol
+and the upper-layer length, for `erx_bytes:inet_csum/2` to continue over the upper layer.
+""".
+-spec pseudo_sum(<<_:32>>, <<_:32>>, 0..16#FFFF, 0..255) -> 0..16#FFFF.
+pseudo_sum(<<_:32>> = Src, <<_:32>> = Dst, Len, P) when ?UINT(Len, 16), ?UINT(P, 8) ->
+    erx_bytes:inet_csum(0, <<Src/binary, Dst/binary, 0, P, Len:16>>).

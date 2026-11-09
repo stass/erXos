@@ -38,3 +38,9 @@ module erx_ip6_wire
   sys/netinet6/dest6.c dest6_input
   sys/netinet6/route6.c route6_input
   sys/netinet6/frag6.c frag6_input
+
+module erx_icmp4_wire
+  sys/netinet/ip_icmp.c icmp_input
+
+module erx_udp_wire
+  sys/netinet/udp_usrreq.c udp_input

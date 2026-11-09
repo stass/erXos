@@ -9,9 +9,9 @@ require_relative '../lib/erx/dependencies'
 require_relative '../lib/erx/generated'
 
 # The fuzz targets of the network stack's codecs (docs/design-network-stack.md,
-# "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire, erx_ip4_wire, erx_ip6_wire and
-# erx_icmp6_wire, each driven by test/erlang/MODULE_fuzz.erl, compiled from source with the
-# host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
+# "Codecs: fuzz targets"): erx_net_eth, erx_arp_wire, erx_ip4_wire, erx_icmp4_wire,
+# erx_udp_wire, erx_ip6_wire and erx_icmp6_wire, each driven by test/erlang/MODULE_fuzz.erl,
+# compiled from source with the host's model of erx_bytes and with msantos/pkt (deps.lock's fetched tree) behind
 # erx_net_pkt_oracle, and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
 # oracle's). Each target runs its decoder as it is, then a copy with one seeded fault that
 # must fail the target, which shows the target reaches the code the fault changes.
@@ -41,6 +41,14 @@ module ErxNetCodecFuzz
                         exact: 'payload(Rest, Length) when Length =< byte_size(Rest) -> {ok, binary:part(Rest, 0, Length)};',
                         faulty: 'payload(Rest, Length) -> {ok, binary:part(Rest, 0, min(Length, byte_size(Rest)))};',
                         fault: 'trusting the total length without checking it against the packet'),
+    'icmp4' => Target.new(module_name: 'erx_icmp4_wire',
+                          exact: 'Hl >= ?IP_HDR_WORDS andalso byte_size(Invoking) >= Hl * 4 + 8;',
+                          faulty: 'Hl >= ?IP_HDR_WORDS;',
+                          fault: 'accepting an error message whose quoted header runs past the message'),
+    'udp' => Target.new(module_name: 'erx_udp_wire',
+                        exact: 'checksum(with_length(PseudoSum, byte_size(Bytes), Ulen), Datagram).',
+                        faulty: 'checksum(PseudoSum, Datagram).',
+                        fault: 'summing the pseudo-header over the bytes delivered instead of the UDP length'),
     'ip6' => Target.new(module_name: 'erx_ip6_wire',
                         exact: '_Short -> {error, truncated}',
                         faulty: 'Short -> fixed(Header, Short)',

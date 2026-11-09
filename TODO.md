@@ -500,6 +500,15 @@ it; git history is the record of completed work.
   which `decode/1` refuses as `truncated`, yet erx_icmp6 needs the addresses, next header and ports it
   quotes (the header walk of `icmp6_notify_error`). Add a `decode_quoted/1` that shares `ext_header/1`
   with the decoder, with a fuzz target, when erx_icmp6 is written.
+* [Medium] network, `erlang/apps/erx_net/src/erx_ip4_wire.erl`: an ICMPv4 error quotes the invoking IP
+  header and only 8 bytes past it, which `decode/1` refuses as `too_short` against the quoted total
+  length, yet erx_icmp4 needs the quoted addresses, protocol and ports (`icmp_input` hands the quote to
+  `ip_ctlprotox`). Add a `decode_quoted/1` sharing the header checks, with a fuzz target, when erx_icmp4 is
+  written.
+* [Low] network, `erx_udp_wire:decode/2`: over IPv4 a datagram whose UDP length is short of its IP
+  payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
+  64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a
+  payload smaller than a quarter of its frame is copied out) to datagrams too.
 * [Medium] network tests, `test/erlang/erx_ip6_wire_fuzz.erl` and `erx_icmp6_wire_fuzz.erl`: the reference
   judges walk the chain as the decoders do and only accept or refuse, and pkt compares only the fixed
   header, so extension-header contents, parameter-problem pointers and neighbour-discovery option values

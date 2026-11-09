@@ -431,7 +431,9 @@ ARP frame has none), the bytes of the layer above, and the fields that
 choose its destination. A
 segment, datagram or ICMP record exists only as the result of its
 checksumming decoder, so no step can be handed one whose checksum was
-not checked.
+not checked. The one record without a checked sum is a UDP datagram
+that carries none, a zero checksum field, which `erx_udp_wire` marks
+`absent` for `erx_udp` to accept over IPv4 and refuse over IPv6.
 
 Inside a connection, sequence numbers, acknowledgement numbers, SACK
 block edges and timestamps are **unwrapped**: unbounded integers that
@@ -1217,8 +1219,12 @@ of the interface process, not a socket, so it needs no exception in
 
 ### UDP
 
-`erx_udp` translates `udp_usrreq.c` and `udp6_usrreq.c`: the checksum
-rules (a zero checksum allowed over IPv4, refused over IPv6), delivery to
+`erx_udp` translates `udp_usrreq.c` and `udp6_usrreq.c`: the rules that
+differ by IP version (a zero checksum allowed over IPv4, refused over
+IPv6 as `udp6_input` refuses it; over IPv4 bytes past the UDP length
+cut off, which `erx_udp_wire` does for either version, over IPv6 the
+datagram refused unless its UDP length is the IPv6 payload length),
+delivery to
 the socket bound most specifically, ICMP errors delivered to a connected
 socket, and port unreachable errors within the ICMP limit. A datagram
 socket holds received datagrams up to its receive buffer, counted in
