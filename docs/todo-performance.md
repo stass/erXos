@@ -568,6 +568,31 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   segments per step. A FreeBSD-stack baseline through the same tap needs
   an address on the host's side of bridge0, a setting change on p620 that
   waits for the owner's go-ahead.
+* **[Medium] network, checksums in the copy**
+  ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)). The design
+  removes the separate checksum pass on each path: `erx_tcp_wire:encode/3`'s sum in the
+  connection process and `decode/2`'s in the interface process. The copy computes the sum
+  instead. The only figure behind the change is the pure-Erlang stand-in's 55 percent in
+  the p620 run of 2026-11-09. The C primitive costs about 0.30 microseconds for a
+  1,480-byte segment on the development host (Apple M3 Max, macOS, stock OTP 29.1.2 JIT,
+  clang -O2, 200,000 calls), which would be about a sixth of a scheduler per direction at
+  lwIP's 550,000 frames a second, an estimate that is not measured. Measure, before and
+  after the change:
+  - the stage breakdown of the bulk transfer of plan.md's GN-QEMU (completion,
+    classification, checksum, step, encoding, posting), with `tools/erx bench` under HVF.
+    That network entry is not written yet. Record which finisher the device took (the
+    transport's start line). The harness's hub port is expected to offer no
+    `VIRTIO_NET_F_CSUM`, so the copy finishes there;
+  - the p620 send and receive of 2026-11-09 repeated with the C primitive loaded from
+    `priv/` as the baseline, over tap, where nothing should change, and over netmap,
+    where the copy sums, with the share of the connection's and the interface's samples
+    in `erx_bytes:inet_csum/2` and in the NIF's copy;
+  - `erx_inet_copy_sum` against a plain copy followed by `erx_inet_sum` over the
+    destination in one C call, over 64 to 9,014 bytes, on the development host and on
+    p620. If the fused loop is slower at frame sizes, the core does the copy and then
+    the sum inside the same call. That keeps the interface and its trust argument, since
+    the sum is still over the binary's bytes.
+  Remove this item once those numbers are recorded.
 * **[Medium] network, fixed buffer sizes and connection credit**
   ([design-network-stack.md](design-network-stack.md#credited-queues)).
   A connection has a 32 KiB send buffer and a 64 KiB receive buffer

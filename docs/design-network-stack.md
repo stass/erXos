@@ -180,7 +180,7 @@ each row names what in this design removes the fault.
 | any ACK overwrites the send window | the SND.WL1/SND.WL2 rule, translated |
 | no congestion control, go-back-N, dropped out-of-order data | the default stack's loss detection, CUBIC, the reassembly queue |
 | wall-clock RTT samples | the monotonic clock, passed to pure functions as an argument |
-| a payload copied four times on transmit, checksum in Erlang | headers and payload kept apart until the device NIF's one copy; checksum in C |
+| a payload copied four times on transmit, checksum in Erlang | headers and payload kept apart until the device NIF's one copy, which also computes the checksum ([Checksums in the copy](#checksums-in-the-copy)) |
 | unbounded neighbour cache and pending queue, unsolicited replies accepted | bounded neighbour tables in the interface process, FreeBSD's acceptance rules |
 
 ### What the stack stands on
@@ -204,7 +204,9 @@ steps and carry out their actions. Beneath them:
   segments of one request and copies them into a pool buffer, and
   `erx_device:complete/2` returns up to 64 KiB of completed buffers as
   fresh binaries per call
-  ([design-runtime.md](design-runtime.md#the-device-nif)).
+  ([design-runtime.md](design-runtime.md#the-device-nif)); `post/5` and
+  `complete/3` also finish or compute the Internet checksum in that copy
+  ([Checksums in the copy](#checksums-in-the-copy)).
 * **OTP's dispatch on module sockets.** `gen_tcp`, `gen_udp` and `inet`
   dispatch every call on a socket of the form `{'$inet', Module, Handle}`
   to `Module` (the `module_socket` macro, `otp/lib/kernel/src/gen_tcp.erl:261`
@@ -246,9 +248,11 @@ steps and carry out their actions. Beneath them:
 * **N7. Few hops, few copies.** A received segment reaches its connection
   through two local messages per batch, and a transmitted one reaches the
   driver through one; inside the network domain a frame is copied once on
-  receive and once on transmit, both in the device NIF. A delivery takes
-  one local message more, in the owner's domain, from the socket process
-  to the owner.
+  receive and once on transmit, both in the device NIF, and those copies
+  compute the Internet checksum, so each byte of a TCP segment is read
+  once on each path ([Checksums in the copy](#checksums-in-the-copy)). A
+  delivery takes one local message more, in the owner's domain, from the
+  socket process to the owner.
 * **N8. Functional core.** Every protocol decision is a pure function,
   tested on the host, and protocol state machines are explored
   exhaustively over an abstract alphabet to a stated depth.
@@ -688,9 +692,11 @@ A TCP segment for an established connection whose owner is in client
 domain D:
 
 1. **Device to driver.** The device writes a frame into a pool buffer. The
-   driver's interrupt message makes it call `erx_device:complete/2`, which
+   driver's interrupt message makes it call `erx_device:complete/3`, which
    copies up to 64 KiB of completed frames into fresh binaries: the one
-   per-byte copy of the receive path. The driver strips the device's own
+   per-byte copy of the receive path, which also returns each frame's
+   network sum ([Checksums in the copy](#checksums-in-the-copy)). The
+   driver strips the device's own
    header (virtio's `virtio_net_hdr`) and sends the batch to the interface
    process in one message, against the interface's receive credit
    ([The driver](#the-driver)). The driver
@@ -717,10 +723,13 @@ domain D:
    ([Untrusted input](#untrusted-input)); a frame that finds neither is
    dropped and counted. Only a frame that holds its unit or token reaches
    `verify/1`, which runs the decoder of the layer above IP, or ARP's:
-   for TCP, UDP, ICMP and ICMPv6 the checksum first, with
-   `erx_bytes:inet_csum/2` (a read pass, no copy), then the header and
-   options. A frame that fails gives its unit or token back and is
-   dropped. So the checksum, the one cost that grows with a frame's
+   for TCP, UDP, ICMP and ICMPv6 the checksum first, then the header and
+   options. The checksum comes from the frame's network sum when its
+   transport gave one, which reads only headers and padding, and
+   otherwise from `erx_bytes:inet_csum/2`, a read pass with no copy
+   ([Checksums in the copy](#checksums-in-the-copy)). A frame that fails
+   gives its unit or token back and is dropped. So where the checksum
+   still reads the frame, that cost, the one that grows with a frame's
    length, is spent only on a frame something has room for, and a
    frame dropped for want of room costs a header decode and one lookup,
    whoever it names. A frame that holds room and then fails its checksum
@@ -773,10 +782,11 @@ domain D:
 `ip_input`, `ip6_input` and the pcb lookups of `tcp_input_with_port`,
 `udp_input` and the protocols' ICMP handlers, taken as far as choosing
 where a frame goes and no further. Its input is a frame from the driver,
-`{frame, Bytes}`; on the loopback interface, an IP packet with the zone
+`{frame, Bytes, Sum}`, with `Sum` its network sum or `none`
+([Checksums in the copy](#checksums-in-the-copy)); on the loopback interface, an IP packet with the zone
 its sender's path gave it, `{frame, Zone, Bytes}` ([Loopback](#loopback));
 or a datagram reassembly rebuilt, `{reassembled, Family, Zone, LinkCast,
-Bytes}`. Its view is a map:
+Bytes}`. The last two carry no sum. Its view is a map:
 
 ```erlang
 -type view() :: #{link := ethernet | none,      % none: the loopback interface
@@ -953,16 +963,20 @@ looks each segment up anew and finds the listener or nothing.
    of binaries, and runs output. Each segment's payload is a sub-binary
    of the buffer. The connection encodes the TCP, IP and link headers
    with `erx_net_frame` over its path and the next hop's neighbour row
-   ([Framing](#framing)), computing the checksum over the headers and
-   payload with `erx_bytes:inet_csum/2`.
+   ([Framing](#framing)). When the interface's driver finishes
+   checksums, the segment's checksum is left delayed for the copy in
+   step 4; otherwise it is computed over the headers and payload with
+   `erx_bytes:inet_csum/2` ([Checksums in the copy](#checksums-in-the-copy)).
 3. **Connection to driver.** All frames of the step go to the driver in
    one message against the driver's credit, each frame as its header
    binary and its payload sub-binaries.
 4. **Driver to device.** The driver posts each frame with
-   `erx_device:post/4` as at most four segments, `[{out, DeviceHeader},
+   `erx_device:post/4`, or `post/5` when the copy finishes a delayed
+   checksum, as at most four segments, `[{out, DeviceHeader},
    {out, Headers}, {out, Payload}, ...]`, joined as
    [The driver](#the-driver) says; the NIF lays them end to end in a pool
-   buffer, the one per-byte copy of the transmit path.
+   buffer, the one per-byte copy of the transmit path, and with
+   `post/5` finishes a delayed checksum in that copy.
 
 ### Framing
 
@@ -1063,7 +1077,11 @@ each the iodata `[Header, Payload]` that `erx_ip4:output/4` and
 binaries as they were given, not copied. Only a datagram that IP
 fragments has its payload joined into one binary, which those functions
 then cut into fragments. `tcp/3` encodes each segment with
-`erx_tcp_wire:encode/3` over the path's pseudo-header sum and
+`erx_tcp_wire:encode/4` over the path's pseudo-header sum, its checksum
+delayed for the driver to finish when the path's interface row says the
+driver finishes checksums and IP will not fragment the segment, a
+packet then of the form `{csum, Start, Field, Packet}`
+([Checksums in the copy](#checksums-in-the-copy)), and
 `erx_ip4:output/4` or `erx_ip6:output/4` with the segment's marks: its
 ECN field in the low bits of the type of service or traffic class, and
 don't-fragment as the segment says. A segment without don't-fragment
@@ -1185,8 +1203,8 @@ holds is not counted, a residual ([Residuals](#residuals)).
 
 | Path | Local messages | Lane crossings | Copies in the network domain |
 | --- | --- | --- | --- |
-| receive, TCP segment | driver to interface (per batch), interface to connection (per batch); in the owner's domain, socket process to owner (per delivery) | one per push of up to a piece, and one credit message per half of the socket process's target, in every active mode | one, `erx_device:complete/2` |
-| transmit, TCP segment | in the owner's domain, caller to socket process (per `send` call); connection to driver (per step) | two per piece of a `send`, the request and its reply | one, `post/4` |
+| receive, TCP segment | driver to interface (per batch), interface to connection (per batch); in the owner's domain, socket process to owner (per delivery) | one per push of up to a piece, and one credit message per half of the socket process's target, in every active mode | one, `erx_device:complete/3`, which also sums the frame |
+| transmit, TCP segment | in the owner's domain, caller to socket process (per `send` call); connection to driver (per step) | two per piece of a `send`, the request and its reply | one, `post/5`, which also finishes the checksum |
 | receive, UDP datagram | driver to interface, interface to socket; in the owner's domain, socket process to owner | one per datagram, and one credit message per half of the socket process's target | one |
 | ARP, neighbour discovery, ICMP echo, SYN | driver to interface; replies interface to driver | none | one each way |
 
@@ -1196,6 +1214,318 @@ delivery that coalesces several segments' payloads into one binary adds
 a copy to save messages, a trade on the performance watch list. The
 local hop from the socket process to the owner copies no payload over
 64 bytes, since ERTS passes a binary that size or larger by reference.
+
+### Checksums in the copy
+
+Inside the network domain each byte of a TCP segment is read once on
+each path: by the copy between a device's buffer and a binary. That copy
+also computes the segment's Internet checksum, so no second pass reads
+the segment to sum it. The same holds on a host whose transport copies
+frames in C, as a netmap transport does; over a tap device it does not,
+and this section says why that is accepted.
+
+**The problem.** Without this, a received segment is read twice: by the
+copy out of the device's buffer, and by `erx_tcp_wire:decode/2`, which
+sums the segment with `erx_bytes:inet_csum/2` in the interface process.
+A sent segment is read twice as well: by `erx_tcp_wire:encode/3`, which
+sums its header and payload in the connection process, and by the copy
+into the device's buffer. The second read finds the bytes in the cache,
+but it costs a NIF call, a walk over the frame's binaries and a pass
+over its bytes, in the two processes every segment passes through: the
+interface process, which classifies for every client, and the
+connection, which is one flow's ceiling
+([todo-performance.md](todo-performance.md)). The evidence is thin, and
+the measurements below settle it. In the p620 run of 2026-11-09 the
+checksum held 55 percent of the connection process's samples on send,
+but that was the pure-Erlang stand-in, which the C primitive replaces
+([Two places, four seams](#two-places-four-seams)). The C primitive
+takes about 0.30 microseconds for a 1,480-byte segment on the
+development host (Apple M3 Max, macOS, stock OTP 29.1.2 with the JIT,
+clang -O2, 200,000 calls). lwIP reached 6.5 Gbit/s over the same tap,
+about 550,000 frames a second each way. At that rate, 0.30 microseconds
+a frame would be about a sixth of one scheduler in each direction. That
+estimate is not measured on p620.
+
+**The construction.** A checksum is a sum of 16-bit words, and a copy
+reads every word, so the copy sums what it copies. What it hands over
+is a sum, never a verdict, because the copy parses nothing:
+
+* *Receiving*, the copy returns each frame with its **network sum**:
+  the RFC 1071 one's-complement sum, folded to 16 bits and not
+  complemented, of the frame's bytes from the end of its link header to
+  its end. That is what `erx_bytes:inet_csum(0, Bytes)` returns for
+  those bytes. The copy knows only the offset where the sum starts. Each
+  layer above derives the sum of the bytes its checksum covers from the
+  network sum. It subtracts the sums of the bytes it does not cover:
+  headers its decoders read anyway, and the frame's padding. No payload
+  byte is read again to check it.
+* *Transmitting*, a TCP segment can leave its sender with a **delayed
+  checksum**. Its checksum field holds the sum of the pseudo-header with
+  the segment's length, not complemented, and the frame names the
+  offset where the summed range starts and the field's offset within
+  it. Whatever copies the frame onto the medium finishes it. As it
+  copies, it sums the bytes from that start to the frame's end, field
+  included, and stores the complement in the field. This is FreeBSD's
+  delayed checksum: `tcp_output` sets `CSUM_TCP`, with the field's
+  offset in `csum_data` and `in_pseudo` in `th_sum`. `ip_output` then
+  finishes it with `in_delayed_cksum` when the interface's
+  `if_hwassist` lacks the flag, and `ip_fragment` finishes it before it
+  cuts. Here the device NIF's copy takes the place of the device.
+
+The stack sees one interface whichever medium is behind it. A received
+frame comes with its network sum or without one, and a sent segment is
+delayed only when its interface's driver finishes checksums, which the
+driver states once, when the interface attaches.
+
+**What crosses the driver's seam.** These types extend those of
+[The driver](#the-driver) and [Framing](#framing):
+
+```erlang
+%% erx_net_driver: a received frame, and who finishes a delayed checksum
+-type rx_frame() :: binary()                      % no sum: verify/1 sums it
+                  | {sum, 0..16#ffff, binary()}   % with its network sum
+                  | {Zone :: term(), binary()}.   % the loopback interface's
+-type link_info() :: #{..., csum := device | copy | none}.
+
+%% erx_net_frame: a frame handed to a driver
+-type frame() :: iodata()
+               | {csum, Start :: non_neg_integer(), Field :: non_neg_integer(), iodata()}
+               | {Zone :: term(), packet()}.
+```
+
+`csum` says who finishes a delayed checksum: `device` when the device
+does, `copy` when the transport's own copy does, and `none` when nobody
+below the sender does. With `none`, the sender finishes every checksum
+itself. The interface writes `csum` into its row with the MTU, from the
+one answer to its attach, so the value has one source. Who finishes is
+a fixed property of the transport: `erx_virtio_net` finishes through the
+device or its copy at every start, a ring transport always through its
+copy, and the pipe and the loop never. So a driver's restart never
+changes whether a row's driver finishes.
+
+| Transport | Received frames | `csum` |
+| --- | --- | --- |
+| `erx_virtio_net` | `{sum, S, Frame}`, from `erx_device:complete/3` | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM`, an extension ([Scope](#scope)) |
+| a ring transport of a host whose NIF copies the slots, such as netmap's | `{sum, S, Frame}`, from its NIF's copy | `copy` |
+| `erx_net_pipe` | `Frame`; a test's `process` end may give `{sum, S, Frame}` | `none` |
+| `erx_net_loop` | `{Zone, Packet}` | `none` |
+
+**The copy's core.** The C core of the checksum, `erx_inet_csum.c` in
+`erx_net`'s `c_src/`, gains one function. Every copy that sums or
+finishes calls it:
+
+```c
+/*
+ * Copies length bytes from src to dst and returns sum continued over the bytes stored, as
+ * erx_inet_sum(sum, dst, length, offset) would return after the copy. Each word of src is
+ * loaded once, and the value loaded is both stored and added.
+ */
+uint16_t erx_inet_copy_sum(uint16_t sum, uint8_t *dst, const uint8_t *src, size_t length,
+    size_t offset);
+```
+
+It loads eight bytes at a time and adds them with deferred carries, the
+widening of the portable loop that the watch list already names. Each
+word is loaded once and the loaded value is the one stored, so the sum
+is the sum of the bytes in the binary even when a device writes its
+buffer again during the copy. A copy followed by a pass over the source
+would not give that. `erx_inet_sum` stays as the core's oracle in its
+tests. erXos's device NIF and a host transport's NIF link the same core
+from `c_src/`. Those are the paths of
+[Two places, four seams](#two-places-four-seams), and they run one way.
+
+**Receiving.** `erx_device:complete(Dev, Q, SumFrom)` copies exactly as
+`complete/2` does and answers `{ok, [{Tag, Bytes, Sum}]}`. `Sum` is the
+sum of `Bytes` from the even offset `SumFrom` to its end, and 0 when
+`Bytes` is shorter. The virtio transport passes 26: its 12-byte
+`virtio_net_hdr` and the 14-byte Ethernet header. So after it strips its
+header, each `{sum, S, Frame}` carries the network sum of `Frame`. The
+copy is the same bounded call as before: 64 KiB of frames per call,
+with nothing added but the additions.
+
+In the stack, a frame's input to `classify/2` carries its sum,
+`{frame, Bytes, Sum}` with `Sum` a sum or `none`. A reassembled datagram
+and every loopback packet carry `none`. Ethernet decoding strips the
+link header, which the sum does not cover. The IP layer decodes its
+header as before, and IPv4 still checks its header checksum over the
+header's own 20 to 60 bytes, which it reads to decode them anyway. The
+upper layer's sum is then one pure function of `erx_net_sum`:
+
+```erlang
+span(Packet :: binary(), Sum :: 0..16#ffff, Start :: non_neg_integer(),
+     Length :: non_neg_integer()) -> 0..16#ffff.
+```
+
+It returns `Sum` less the sum of the bytes before `Start` and less the
+sum of the bytes after `Start + Length`, by one's-complement
+subtraction. When the bytes after start at an odd offset, their sum is
+byte-swapped first (RFC 1071, section 2(B)). `Start` is the IP header's
+length: 20 plus an IPv4 header's options, or 40 plus `hdrlen`, the
+extension headers the IPv6 walk passed. `Length` is the upper layer's
+length. `Start` is even in both families. The bytes before are headers
+the decoders have just read. The bytes after are an Ethernet frame's
+padding, at most 26 bytes behind an IPv4 packet and 6 behind an IPv6
+one. A frame whose IP length leaves more bytes behind it costs a pass
+over those bytes, which is never more than summing the frame.
+`erx_net_input`'s pending value carries the bytes of the layer above IP
+with their sum. The UDP decoder over IPv4 cuts its datagram at the UDP
+length, and it takes the cut's sum with `span/4` as well.
+
+`verify/1` hands the sum to the decoder above IP:
+`erx_tcp_wire:decode(PseudoSum, Segment, Sum)`, and likewise for UDP,
+ICMP and ICMPv6. Each decoder checks
+`erx_net_sum:add(PseudoSum, Sum) =:= 16#ffff` when `Sum` is a sum, and
+`erx_bytes:inet_csum(PseudoSum, Segment) =:= 16#ffff` when it is `none`,
+then decodes as before. ICMPv4 has no pseudo-header, so its `PseudoSum`
+is 0. The decoders still make every segment, datagram and ICMP record
+after checking a checksum. Only where the sum comes from changes.
+
+One's-complement arithmetic has two zeros, 0 and 16#ffff. A fold of a
+positive total is never 0. So every sum derived by subtraction or
+addition from a nonzero sum lies in 1..16#ffff, with zero written
+16#ffff, which is the form the checks compare with. A frame's network
+sum is nonzero whenever it reaches `verify/1`, since its IP header's
+version is nonzero.
+
+The check stays where [Receiving](#receiving) puts it, after the frame
+holds room. For a frame with a network sum the check costs a constant,
+so such a frame that fails costs no more than one dropped for want of
+room. The work that grows with a frame's length was spent in the copy,
+which every frame costs.
+
+**Transmitting.** The TCP encoder takes who finishes:
+
+```erlang
+erx_tcp_wire:encode(#tcp{}, Payload :: iodata(), PseudoSum, sender | driver) -> iodata().
+```
+
+With `sender`, the field is the complement of the sum over the
+pseudo-header, the length, the header and the payload. With `driver`, it
+is `erx_net_sum:add(PseudoSum, Len)` and no payload byte is read.
+Finishing sums the field along with the rest, so both give the same
+bytes on the wire. `erx_net_frame:tcp/3` chooses `driver` when the path
+interface's row has `csum` other than `none` and IP will not fragment
+the segment, and `sender` otherwise. A delayed segment's packet is
+`{csum, Start, 16, Packet}`, with `Start` the IP header's length and 16
+the offset of `th_sum`. `address/3` and `link/3` add the link header's
+length to `Start` when they put the header in front. Only TCP segments
+are delayed. A datagram's checksum is finished by its encoder. So the
+frames a datagram socket also hands its own interface as
+`{loop, Frames}`, and every packet sent on the loopback interface, are
+already finished.
+
+A delayed checksum is finished at each copy and never stored, so
+retransmission and segment boundaries need nothing of their own. Output
+cuts each segment from the send buffer's binaries afresh at each pass
+([Output](#output)), whatever the owner's writes were and whatever an
+earlier transmission of the same bytes looked like. The copy of that
+pass sums exactly the bytes it sends.
+
+The virtio transport finishes a delayed frame in one of two ways, by its
+`csum`:
+
+* `copy`: `erx_device:post(Dev, Tx, Tag, Segments, {inet_csum, 12 + Start, Field})`
+  with a zero `virtio_net_hdr`, the 12 bytes in front of the frame. The
+  NIF copies the `out` bytes before `12 + Start` plainly and the rest
+  through `erx_inet_copy_sum`, in one pass, and then stores the
+  complement of that sum at `12 + Start + Field`, in network byte order.
+  Both offsets must be even, and the field must lie inside the `out`
+  bytes.
+* `device`: `post/4` with the `virtio_net_hdr`'s `NEEDS_CSUM` flag,
+  `csum_start` equal to `Start` and `csum_offset` equal to `Field`, as
+  section 5.1.6.2 of the virtio specification has a driver ask the
+  device to finish a partial checksum.
+
+A frame that is not delayed is posted with `post/4` as before. A delayed
+frame whose field does not lie inside it is dropped as `malformed`.
+Only a bug in framing can make one. A transport whose `csum` is `none`
+drops a delayed frame as `malformed`, as every transport drops a frame
+shape it does not take.
+
+**Device offload.** On transmit, `VIRTIO_NET_F_CSUM` lets the device
+finish the checksum, so the guest spends nothing on it. It fits behind
+the same request as the copy, and it needs no trust: a device that
+computes a wrong checksum only makes the peer drop the segment, and a
+device can corrupt any frame anyway. It is an extension rather than the
+core ([Scope](#scope)), because no medium of the test harness reaches
+it. The harness's virtio device sits on a QEMU hub port. As far as this
+design knows, QEMU offers `CSUM` and `GUEST_CSUM` only when the device's
+backend carries virtio-net headers, as a tap or vhost backend does, and
+this has not been checked against QEMU's source. The transport logs
+which way it finishes at each start (`checksum copy` or
+`checksum device`), so a run shows which path it took.
+
+On receive, the stack never negotiates `VIRTIO_NET_F_GUEST_CSUM`.
+Without it the device delivers frames with complete checksums
+(section 5.1.6.4). With it, a device may set `DATA_VALID`, a claim the
+stack would have to take on trust, or `NEEDS_CSUM`, on a frame whose
+checksum field holds only the pseudo-header's sum, which the stack
+would have to accept unchecked. The copy's network sum makes both
+unnecessary at the cost of the additions, so the stack takes no
+checksum claim from any device. A netmap port gives no claim either:
+the netmap transport does not accept virtio-net headers, so each slot
+holds a bare frame. Its NIF's copies call the same core. Receiving
+returns `{sum, S, Frame}`, and sending finishes a delayed frame as it
+copies the frame into the slot.
+
+**Tap.** Over a tap device the idea is not worth its complexity. The
+tap helper relays each frame with one `read` and one `write` and
+inspects no byte ([The tap helper](#the-tap-helper)). There is no copy
+of ours to add to. Summing in the helper would add a pass there, and the
+helper would need the request in its framing. Each frame on that path
+already costs three copies in the kernel and as many system calls. So
+`erx_net_pipe`'s `csum` is `none` and its frames carry no sum. A stack
+over tap sums each segment once more, in C: in the connection on send
+and in the interface on receive.
+
+**What the stack believes.** The stack believes one thing: the network
+sum a transport of `erx_net` hands up, computed by the stack's own C
+over the bytes the binary holds. It believes nothing a device or a
+host's kernel says about a checksum. This is safe even against a sum
+that is wrong. The Internet checksum detects accidents. It
+authenticates nothing: whoever can write a frame can write a correct
+checksum for it. A wrong sum can make the stack drop a good frame, or
+keep one whose bytes changed on the way, and a device can do either by
+writing bytes. A wrong sum cannot make a decoder read past what it
+checked, because every length is checked against the binary, never
+against a sum. What the stack checks for itself is unchanged: every
+length and offset, and the IPv4 header checksum over the header's own
+bytes.
+
+**Concurrency and failure.** The sum is made in the same NIF call as
+the copy, and it travels with its binary as a value. Nothing else holds it, and no process or message is added. A
+broken core or a lying transport makes frames fail their check. They
+are counted as `bad_sum`, as a corrupted frame is, and `netadmin` and
+the inspector show that count.
+
+**Refusals.** `complete/3` with an odd `SumFrom` is `badarg`. So is
+`post/5` with an odd offset or `Field`, or a field outside the `out`
+bytes. The transport's own check drops such a frame first, so only a
+bug in the transport reaches `badarg`. A delayed frame given to a
+transport that does not finish is dropped as `malformed`, and a frame
+that fails its check as `bad_sum`.
+
+**Open decisions.**
+
+1. *Build before the baseline, or after.* The only measured share is
+   the pure-Erlang stand-in's. The p620 rerun with the C primitive
+   loaded from `priv/` is this change's baseline in any case, and it is
+   cheap. Recommended: take it first, and build both halves together,
+   since they share the core and the tests, if `erx_bytes:inet_csum/2`
+   still holds more than about 5 percent of the connection's or the
+   interface's samples; below that, the owner decides whether one
+   function in each copy is still worth the change.
+2. *Device finishing in the core or as an extension.* The `device` path needs a
+   `VIRTIO_NET_F_CSUM` bit and the `virtio_net_hdr`'s checksum fields
+   in `abi/formats/virtio.txt`, and one branch in the transport, and no
+   suite of the harness reaches it. Recommended: keep it an extension until the
+   plan brings a harness medium that offers the bit, a Linux host with
+   a tap backend, and test it there against the copy.
+3. *UDP.* Datagrams could be delayed too. That needs RFC 768's rule
+   that a computed zero is sent as 16#ffff in every finisher, and a
+   device's finisher may not apply it; it also needs the looped frames
+   finished before they are looped. Recommended: no, until a UDP bulk
+   workload is measured.
 
 ### Loopback
 
@@ -2298,8 +2628,9 @@ only its medium.
                        lladdr := <<_:48>> | none,
                        mtu := 68..65535,
                        state := up | down,
-                       tx_limit := pos_integer()}.     % frames waiting at the driver
--type event() :: {frames, [binary() | {Zone :: term(), binary()}]}
+                       tx_limit := pos_integer(),      % frames waiting at the driver
+                       csum := device | copy | none}.  % who finishes a delayed checksum
+-type event() :: {frames, [rx_frame()]}                % binary(), {sum, S, binary()}, {Zone, binary()}
                | {link, up | down}
                | writable                            % room to transmit again
                | {dropped, Reason :: atom()}.        % too_long, stranger, malformed
@@ -2318,15 +2649,15 @@ started after it by their link supervisor, finds it.
 its receive credit. The driver monitors the caller and answers
 `{ok, link_info(), TxCredit}`, its transmit credit made at `init` with
 `tx_limit` as its limit. The interface writes its row's driver pid and
-credit, link, link-layer address and MTU from that answer, so those
-fields have one source. A restarted interface attaches again; while no
+credit, link, link-layer address, MTU and `csum` from that answer, so those
+fields have one source ([Checksums in the copy](#checksums-in-the-copy)). A restarted interface attaches again; while no
 interface is attached, the driver drops what it receives and counts it
 as `detached`.
 
 **Receiving.** For each `{frames, Frames}` event the driver hands the
 interface `{frames, self(), Frames}` against the receive credit, one unit
 per frame, and drops a refused batch whole, counted as `no_room`. A batch
-is what one event gives: virtio's `complete/2` calls until 64 KiB, the
+is what one event gives: virtio's `complete/3` calls until 64 KiB, the
 pipe's waiting datagrams up to the same 64 KiB.
 
 **Link changes.** The driver keeps the transport's latest link state and
@@ -2404,12 +2735,12 @@ the rest of that second. A device that stops completing transmits ends
 nothing: its backlog fills, senders are refused against the transmit
 credit, and the link stays stuck until the driver's next end.
 
-| Transport | `link`, `lladdr` | `mtu` | `state` | `tx_limit` |
-| --- | --- | --- | --- | --- |
-| `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size |
-| `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured |
-| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured |
-| `erx_netmap` | `ethernet`; the configured address, which must be unicast | configured, default 1,500, from 1,280 to 9,000 and within the port's buffer with the Ethernet header | `up` from a successful registration; `down` from an `init` whose registration failed, and while the driver waits out its hold | configured, default the transmit ring's slot count |
+| Transport | `link`, `lladdr` | `mtu` | `state` | `tx_limit` | `csum` |
+| --- | --- | --- | --- | --- | --- |
+| `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM`, an extension |
+| `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured | `none` |
+| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured | `none` |
+| `erx_netmap` | `ethernet`; the configured address, which must be unicast | configured, default 1,500, from 1,280 to 9,000 and within the port's buffer with the Ethernet header | `up` from a successful registration; `down` from an `init` whose registration failed, and while the driver waits out its hold | configured, default the transmit ring's slot count | `copy` |
 
 The virtio transport posts at most four `out` segments: its
 `virtio_net_hdr`, then the frame's binaries in order, all but the last
@@ -2420,7 +2751,10 @@ needs no knowledge of a frame's layers to do it. A payload that spans
 more than two of a send buffer's binaries has its first ones joined with
 the headers, a copy which for an owner that writes many small binaries
 is most segments; its cost is on the
-[watch list](todo-performance.md). The loop
+[watch list](todo-performance.md). A delayed frame's checksum is
+finished by the copy of `post/5` or by the device, and receive
+completions are taken with `complete/3`, which sums each frame past its
+Ethernet header ([Checksums in the copy](#checksums-in-the-copy)). The loop
 transport makes each frame `{Zone, Packet}` into `{Zone,
 iolist_to_binary(Packet)}`, the one copy a device makes elsewhere, and
 returns it as received.
@@ -2468,7 +2802,11 @@ longer than the MTU and the 14-byte Ethernet header is dropped as
   looked up at `init`, so that a restarted driver finds the far end
   registered since. Each frame is a message `{erx_net_pipe, Pid,
   Frame}` in either direction, and a `Frame` that is not a binary is
-  dropped as `malformed`, a type check and not a parse. The pipe monitors
+  dropped as `malformed`, a type check and not a parse. Towards the
+  stack a test may also send `{sum, S, Frame}`, with `S` an integer
+  from 0 to 16#ffff, which the pipe hands up as it is: the test then
+  plays a transport that sums as it copies, a lying one included
+  ([Checksums in the copy](#checksums-in-the-copy)). The pipe monitors
   the far end, and its end, or a name with nothing registered, stops the
   pipe and ends the driver. The `process` end is what
   makes a run deterministic: every frame in flight is a message the test
@@ -2638,16 +2976,18 @@ handle's state has one user and needs no lock.
    a frame larger than one buffer); the handle keeps whether a chain is
    open, so a chain across two calls is dropped whole. Every other slot
    is a frame. The plan stops at 64 KiB of frames or 256 slots.
-4. Copy each frame into a new binary. Then store the new `cur`, then the
-   new `head`, with release ordering. That order keeps every pair the
-   kernel reads valid, `head` never past `cur`, even when ERTS's poll
-   thread syncs the ring from another thread in the middle.
+4. Copy each frame into a new binary through `erx_inet_copy_sum`, which
+   sums the bytes past the Ethernet header in the same pass
+   ([Checksums in the copy](#checksums-in-the-copy)). Then store the new
+   `cur`, then the new `head`, with release ordering. That order keeps
+   every pair the kernel reads valid, `head` never past `cur`, even when
+   ERTS's poll thread syncs the ring from another thread in the middle.
 5. If the plan stopped at its limit with slots left, answer `more`.
    Otherwise the ring is empty after the call's own sync, and the call
    arms the descriptor for reading and answers `armed`.
 
-The answer is `{ok, Frames, Drops, more | armed}` with `Drops` a count
-per reason, or `{error, Reason}`: `broken`, the sync's error number, or
+The answer is `{ok, Frames, Drops, more | armed}`, each frame
+`{sum, S, Frame}` and `Drops` a count per reason, or `{error, Reason}`: `broken`, the sync's error number, or
 `arm` when `enif_select` answers a negative value, the batch's frames
 then going with the medium. The call charges `enif_consume_timeslice`
 for the bytes it copied and the slots it read. The transport turns the
@@ -2684,7 +3024,10 @@ a frame reaches the C as one binary's size, which the core checks like
 every other length. `enif_inspect_iovec` would spare the join, but OTP
 lets the vector it returns hold more elements than the bound it is
 given, so its count would be one more length crossing into C, and a
-frame past the bound would still need a second path.
+frame past the bound would still need a second path. A delayed frame,
+`{csum, Start, Field, Frame}`, is joined the same way, and the NIF
+finishes its checksum as it copies the binary into the slot
+([Checksums in the copy](#checksums-in-the-copy)).
 
 The core plans the send from the binary's size and a snapshot of the
 slot at the handle's `head`. A size below the Ethernet header's 14
@@ -3278,6 +3621,7 @@ modules are marked P; process modules E.
 | `erx_in6_src` | `in6_src.c` | source address selection | P |
 | `erx_net_addr` | `in.c`, `in6.c` | address checks | P |
 | `erx_net_route` | none | longest-prefix lookup | P |
+| `erx_net_sum` | none: RFC 1071's arithmetic | one's-complement addition and subtraction of sums, and the sum of a span of a packet from the packet's sum ([Checksums in the copy](#checksums-in-the-copy)) | P |
 | `erx_udp_wire`, `erx_udp` | `udp_usrreq.c`, `udp6_usrreq.c` | UDP codec, with the checksum and length rules of each IP version; decisions | P |
 | `erx_tcp_wire` | `tcp.h`, the checksum and data-offset checks of `tcp_input_with_port` (`tcp_input.c:640-756`), `tcp_dooptions` (`tcp_input.c:3501`), `tcp_addoptions` (`tcp_output.c:1794`) | TCP codec, checksum first, and options | P |
 | `erx_tcp_seq` | `tcp_seq.h` | lifting and wire conversion | P |
@@ -4133,6 +4477,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | Every length read from a header is checked against the enclosing layer before use; trailing bytes are cut at the length the header states | each `*_wire` decoder; fuzz targets |
 | Decoders are total: `{ok, ...}` or `{error, Reason}`, never an exception | fuzz targets fail on any exception |
 | No field a checksum covers is read before the checksum is checked, except the fields that choose a frame's destination, which only the lookup reads; a segment, datagram or ICMP record is made only by its decoder, which checks the checksum first | `erx_net_input`, the `*_wire` decoders; a build check that only the decoders make those records; tests that the decoders check the sum first: the fuzz targets' wrong-sum inputs and the interface's gate |
+| No checksum claim from a device or a host's kernel is believed: a frame's network sum is computed by `erx_net`'s own C over the bytes its binary holds, each word loaded once, and `VIRTIO_NET_F_GUEST_CSUM` is never negotiated | `erx_inet_copy_sum` and its callers, `erx_virtio_net`'s wanted features; the interface's gate with a lying sum ([Checksums in the copy](#checksums-in-the-copy)) |
 | No atom is made from packet data; unknown protocol values stay integers | the codecs; a build check fails on `binary_to_atom`, `list_to_atom` and `binary_to_term` in `erx_net` |
 | Sequence-space conversion happens only in `erx_tcp_seq` | a chokepoint check fails on 2^31, 2^32 - 1 or 2^32 written as an integer literal in any base, or a left shift by a literal 31 or 32, in any other TCP module |
 | Half-open connections live only in the bounded syncache; overflow is answered statelessly with cookies | `erx_tcp_syncache` |
@@ -4250,8 +4595,9 @@ flood measurements of plan.md's network gates.
 
 **What a flood costs the interface.** Every frame, owned or unowned,
 costs the interface process a header decode and one lookup before it is
-kept or dropped, and only a frame that holds room costs a checksum and
-more ([Receiving](#receiving)). A flood of frames with valid checksums aimed
+kept or dropped, and only a frame that holds room costs more: its check,
+which reads the frame only when its transport gave no network sum, and
+its decode ([Receiving](#receiving)). A flood of frames with valid checksums aimed
 at one client's established connection therefore costs the interface
 process no more per frame than any flood of minimum-size frames: once
 the connection's credit is full, each further frame is decoded, looked
@@ -4259,8 +4605,9 @@ up and dropped, and what the connection takes, at the rate its grant's
 share lets it take it, is charged to that grant. The interface's own
 cost per frame is spent on the network domain's grant, the same whoever
 the frame names. A frame that holds room and fails its checksum returns
-its room, so the checksums of such frames are bounded by link capacity
-alone, not by credit or the bucket. Whether one interface process keeps up with
+its room, so the checks of such frames are bounded by link capacity
+alone, not by credit or the bucket; with a network sum each check costs
+a constant ([Checksums in the copy](#checksums-in-the-copy)). Whether one interface process keeps up with
 minimum-size frames at line rate is what the network gates measure;
 where it cannot, the driver's credit fills and the driver drops frames
 for every client alike ([Residuals](#residuals)).
@@ -4275,7 +4622,7 @@ Each of these is a known gap, with the reason it stays:
   cost per frame dropped for want of room is a header decode and a
   lookup, kept small by [Receiving](#receiving)'s order, but a frame that
   holds room and fails its checksum costs a checksum as well, at the rate
-  the link delivers such frames; one interface process per receive
+  the link delivers such frames, when its transport gave no network sum; one interface process per receive
   queue, on devices that hash flows to several queues ([Scope](#scope)),
   divides the work. A bound per client here would need a classifier ahead
   of the interface process, which is what the interface process is.
@@ -4437,10 +4784,13 @@ C does per-byte work only, as the design requires
   per-byte primitives, over an iolist so headers and payload are summed
   without being joined. It uses the CPU's checksum-friendly instructions
   where the architecture layer has them, with portable C as their oracle.
-  Where the device offers checksum offload, as virtio-net does, the
-  driver uses it ([Scope](#scope)): it saves this pass but adds
-  per-frame flag handling to the driver, and the C checksum stays for
-  devices without it and as the offload's oracle.
+  On the paths that carry segments it is not a pass of its own: the copy
+  between a device's buffer and a binary computes it, through
+  `erx_inet_copy_sum` of the same core, and a device that offers
+  checksum offload on transmit may finish it instead, an extension
+  ([Checksums in the copy](#checksums-in-the-copy), [Scope](#scope)).
+  `inet_csum/2` stays for transports that copy nothing in C, for
+  headers, and as the oracle of both.
 * **SipHash-2-4,** a primitive this design adds,
   `erx_bytes:siphash24/2`, taking a 16-byte key and an iolist, for
   initial sequence numbers, timestamp offsets and SYN cookies, the hash
@@ -4577,6 +4927,76 @@ nonce; and a step that takes a random value from `rand:uniform/1`
 instead of its generator, which the first property must catch and the
 build check below must refuse; and a `split/1` that gives the child the
 parent's key and counter, which the fourth must catch.
+
+### The checksum in the copy: differentials and a lying sum
+
+These test [Checksums in the copy](#checksums-in-the-copy). The
+oracle throughout is the plain checksum, `erx_inet_sum` in C and
+`erx_bytes:inet_csum/2` in Erlang.
+
+* **The core.** A host test of `erx_inet_copy_sum` covers lengths 0 to
+  9,014 and both parities of `offset`, with source and destination at
+  every alignment modulo 8. Each copy must leave the destination equal
+  to the source, and the returned sum must equal `erx_inet_sum` over the
+  destination. The `inet_csum` fuzz target calls it too, under
+  AddressSanitizer, over the same random inputs, and checks the same two
+  facts. *Seeded failures:* a loop that leaves out a last odd byte and
+  one that skips the swap at an odd `offset`, which the test must catch;
+  and a loop that reads one word past `length`, which the fuzz target
+  must catch.
+* **The span.** A property test of `erx_net_sum:span/4` runs over random
+  binaries of 0 to 9,000 bytes, with every even `Start` and every
+  `Length` that fits, odd lengths included. Each result must equal
+  `erx_bytes:inet_csum(0, binary:part(Packet, Start, Length))` as a
+  one's-complement value, 0 and 16#ffff counting as equal. *Seeded
+  failure:* a `span/4` that leaves the trailer's sum unswapped when the
+  trailer starts at an odd offset, which odd-length segments must catch.
+* **The decoders, two ways.** Each fuzz target of a decoder above IP
+  decodes every input twice: with `none`, and with the true sum of the
+  bytes it is given. The two results must be identical, refusals
+  included. *Seeded failure:* a TCP decoder that adds the pseudo-header
+  twice when given a sum, which refuses every right segment it is given
+  a sum for, and the agreement check must catch it.
+* **The encoder, two ways.** For random segments, `encode/4` with
+  `driver`, finished by an Erlang model of the finisher (the field
+  replaced by the complement of `erx_bytes:inet_csum/2` over the range),
+  must give the same bytes as `encode/4` with `sender`. A host
+  transport's NIF, which runs the core over a frame's pieces as `post/5`
+  does, is checked over its fake ring against the `sender` bytes.
+  `post/5` itself is checked end to end, below, since the hosted
+  runtime has no device with queues. *Seeded failure:* a delayed field
+  without the segment's length, which every comparison must catch.
+* **The interface's gate, with a lying transport.** This extends the
+  gate test of [Checksums and random values](#checksums-and-random-values-the-interfaces-gate-and-the-generators).
+  The pipe's `process` end hands up `{sum, S, Frame}`, in four cases:
+  1. a correct segment with its true sum is delivered;
+  2. the same segment with a wrong sum is not delivered, is counted as
+     `bad_sum`, and leaves the connection's credit where it was;
+  3. a segment with a payload bit flipped, handed up with the true sum
+     of its flipped bytes, is not delivered, because the checksum field
+     no longer matches;
+  4. that segment handed up without a sum is not delivered either.
+
+  *Seeded failure:* a `verify/1` that ignores a given sum and sums the
+  bytes itself, which delivers the segment of the second case. This is
+  the test that shows the sum is used. A `verify/1` that skips the
+  check fails the third case.
+* **End to end.** The network QEMU suite's TCP transfer to the host's
+  peer runs through `complete/3` and `post/5`. A wrong sum either way
+  stalls it, since the peer's stack drops what our copy finished wrongly
+  and ours drops what its copy summed wrongly. The transport's start line
+  names `checksum copy` or `checksum device`. On p620 the netmap run
+  through the VALE switch to FreeBSD's jail must end with the jail's
+  count of segments discarded for bad checksums
+  (`netstat -s -p tcp`) and the stack's `bad_sum` counts both unchanged.
+  *Seeded failure:* a `post/5` that stores the sum uncomplemented,
+  which must make the transfer fail.
+
+The measurements this change owes are on the
+[watch list](todo-performance.md): the stage breakdown of the bulk
+transfer, with `tools/erx bench` under HVF, before and after; the p620
+run repeated over tap and netmap with the C primitive as the baseline;
+and the copy core against a copy followed by a separate sum.
 
 ### Classification and framing
 
@@ -5268,8 +5688,9 @@ behind the same processes, with no change to the core's structure:
   key, so the identifier filter `ping` applies to its raw socket is the
   classifier's ([Classifying a frame](#classifying-a-frame)), and whose
   credit bounds the replies waiting for its owner;
-* checksum offload where the device offers it
-  ([Where C is used, and what is measured](#where-c-is-used-and-what-is-measured));
+* the device finishing a sent segment's delayed checksum where
+  virtio-net offers `VIRTIO_NET_F_CSUM`, behind the same request the
+  copy finishes ([Checksums in the copy](#checksums-in-the-copy));
 * one interface process per receive queue on a device that hashes flows
   to several, so each flow still passes through one interface process
   and [Ordering](#ordering) holds;
@@ -5572,6 +5993,35 @@ are weighed in [The netmap transport](#the-netmap-transport).
 **lwIP behind a NIF.** A C stack in the domain that parses hostile
 packets, whose numbers would decide nothing about an Erlang stack. The
 stack has no stopgap.
+
+**A sum carried with the send buffer.** The payload's sum could be
+computed where the owner's bytes first arrive and kept beside each of
+the send buffer's binaries, with the header's checksum filled from it.
+But output cuts segments at offsets the owner's writes never chose, and
+the cut changes from one transmission of the same bytes to the next.
+The sum of a cut is the sum of whole binaries plus the sums of partial
+ones, and computing a partial one reads its bytes. So the buffer would
+carry sums that each segment still has to correct by reading. Finishing
+the checksum at the last copy needs no stored sum and reads each byte
+once whatever the cut, as FreeBSD's delayed checksum does
+([Checksums in the copy](#checksums-in-the-copy)).
+
+**Device offload alone.** It removes the checksum only where a device
+offers it: not on the harness's hub port, not on a netmap port, and not
+on every board. Elsewhere it leaves the two passes. The copy's sum
+works on every medium that is copied in C, and offload fits behind the
+same request.
+
+**A verdict from the copy.** A copy that checked the TCP checksum would
+have to find the IP header's length, the protocol and the addresses,
+which is parsing in C what the decoders parse in Erlang. A sum from a
+fixed offset needs none of that, and the stack derives every layer's
+sum from it.
+
+**Receive offload (`GUEST_CSUM`).** It saves only the additions the copy
+makes anyway. It also brings frames whose checksum is a claim, or is
+missing, into a stack that otherwise believes nothing a device says
+([Checksums in the copy](#checksums-in-the-copy)).
 
 ## References
 

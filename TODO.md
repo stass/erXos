@@ -4135,6 +4135,19 @@ document's "residual risks accepted" paragraph.
   can put two jails behind separate tap devices for the relay's FreeBSD
   baseline, and that a stock OTP 29.1.2 builds there for the stack's
   host runs.
+* [Medium] network, checksums in the copy
+  ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)): the copy between a
+  device's buffer and a binary sums each received frame and finishes each sent TCP segment's delayed
+  checksum, so no pass reads a segment only to sum it. First the p620 rerun with the C primitive loaded
+  from `priv/`, the baseline (the design's first open decision). Then, after `erx_net`'s `c_src/` holds the
+  checksum core: `erx_inet_copy_sum` in `erx_inet_csum.c` with its host test and the `inet_csum` fuzz
+  target's new case; `erx_device:complete/3` and `post/5`; `erx_net_sum` (P); the sum argument of the
+  decoders above IP and `erx_net_input`'s `{frame, Bytes, Sum}`; `erx_tcp_wire:encode/4` and
+  `erx_net_frame`'s `{csum, Start, Field, Packet}`; `link_info`'s `csum` and the interface row's;
+  `erx_virtio_net` on `complete/3` and `post/5` with its start line naming the finisher; the pipe's
+  `process` end taking `{sum, S, Frame}`; and the tests of the design's Verification section. The netmap
+  transport's NIF takes the same core when it lands. The device finishing on `VIRTIO_NET_F_CSUM` stays an
+  extension until a harness medium offers the bit.
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,
