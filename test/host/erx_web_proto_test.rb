@@ -29,7 +29,8 @@ class ErxWebProtoTest < Minitest::Test
   # The sources the protocol hash covers, listed here independently of the
   # generator, so a generator that drops one fails.
   HASHED = %w[abi/protocols/web.txt abi/formats/ui.txt abi/inspection.txt abi/terminal.txt
-              otp/lib/stdlib/uc_spec/UnicodeData.txt otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt].freeze
+              otp/lib/stdlib/uc_spec/UnicodeData.txt otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt
+              otp/lib/stdlib/uc_spec/EastAsianWidth.txt].freeze
 
   def test_random_erlang_messages_come_back_from_typescript_as_the_same_bytes
     in_erlang do |work|

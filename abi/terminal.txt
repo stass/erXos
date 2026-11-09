@@ -11,6 +11,7 @@ terminal 1
 unicode 17.0.0
 input unicode_data otp/lib/stdlib/uc_spec/UnicodeData.txt
 input properties otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt
+input east_asian_width otp/lib/stdlib/uc_spec/EastAsianWidth.txt
 unsafe_categories Cc Cf Zl Zp Cn
 unsafe_property Default_Ignorable_Code_Point
 exceptions 200C 200D FE0E FE0F
@@ -20,3 +21,9 @@ token codepoint <U+ 4 6 >
 token byte <0x 2 2 >
 token kernel \x 2 2 -
 token field \x 2 2 -
+# The terminal emulator's width of a code point (docs/design-display.md, "Cells
+# and the grid state"): 0 for a code point of the zero-width categories other
+# than the exceptions, else 2 for the wide East Asian Width values, else 1.
+width_zero_categories Mn Me Cf
+width_zero_exceptions 00AD
+width_wide W F

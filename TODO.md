@@ -345,6 +345,27 @@ it; git history is the record of completed work.
     lost up of the chord's completing key leaves it withheld, so its next downs are dropped as repeats and the chord
     does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key
     means its up was lost, and keep held keys per device, cleared when the device goes away.
+* [Medium] `erlang/apps/erx_display/src/erx_vt.erl`, [The terminal
+  emulator](docs/design-display.md#the-terminal-emulator): the core is built without the OSC 8 link and
+  input-context grammar (an OSC 8 string other than a closing ends the open link and is counted as `link`, its
+  text plain; the reader of `erx:` links must be `erx_present:parse_uri/1`, never a generic percent decoder),
+  `key/2`, `dump/1`, and the libvterm differential harness of [The oracle](docs/design-display.md#the-oracle).
+  The terminal generator writes the width table for Erlang only, not musl's `wcwidth` tables or `erx_width`.
+  Details the tables leave open, which the oracle should settle and the design then state: CAN and SUB drop an
+  unfinished string without dispatching it; DEL in an OSC string and a code point from U+00A0 inside an escape
+  or control sequence are ignored; setting or resetting DECOM homes the cursor; resetting DECAWM, and a resize,
+  clear the pending wrap; IL and DL move the cursor to column 1; VPA is relative to the top margin in origin
+  mode; DL and resizing never save rows except a shorter resize; `CSI ? 1049 h` on the alternate screen and
+  `l` on the main one do nothing; RIS keeps the ignored counters; DECSTR keeps the cursor's place; erasing a
+  row's end clears its `Wrapped` flag; DEC Special Graphics maps `_` to U+00A0; the scrollback charges every
+  row at least one cell, so the cell bound also bounds rows.
+* [Medium] `erlang/apps/erx_display/src/erx_vt.erl`, `full_reset/1`, `soft_reset/1` and `resize/3`: what RIS,
+  DECSTR and a resize keep is a list of `#vt{}` fields at each site, so a new field (the link grammar's state,
+  `key/2`'s) must be remembered at each. Nest what RIS resets (grids, cursor, pen, modes, margins, tabs,
+  character sets, saved cursors, links) in a record of its own beside what lives as long as the terminal
+  (scrollback, counters, decoder and parser states, the next link id), so RIS replaces the inner record with
+  `new/2`'s and lists nothing. Also from the core's review: the `Wrapped` flag is set on a bottom row below the
+  region that autowrap then overwrites, and ECH to the row's end leaves it set.
 * [Medium] `abi/formats/ui.txt` validity and `erlang/apps/erx_display/src/erx_ui_model.erl`, [Widget
   trees](docs/design-display.md#widget-trees): no rule bounds one node's children below the grant's `ui_nodes`, which
   has no value yet. `delta/2`'s longest kept run and its index bookkeeping, and `apply_ops/2`'s insert and move, are

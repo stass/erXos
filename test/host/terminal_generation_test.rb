@@ -11,7 +11,9 @@ class TerminalGenerationTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze
   GENERATION_FILES = %w[abi/terminal.txt tools/gen_terminal.rb tools/lib/erx/terminal_generation.rb
                         tools/lib/erx/terminal_rules.rb otp/lib/stdlib/uc_spec/UnicodeData.txt
-                        otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt].freeze
+                        otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt
+                        otp/lib/stdlib/uc_spec/EastAsianWidth.txt].freeze
+  WIDTH_MODULE = 'erlang/apps/erx_display/src/erx_vt_width.erl'
   FIXTURE_REVIEW = { 'rules' => [], 'default_license' => 'Unicode-3.0',
                      'default_evidence' => 'terminal generation fixture' }.freeze
 
@@ -31,7 +33,7 @@ class TerminalGenerationTest < Minitest::Test
                    .lines.take_while { |line| line.start_with?('#') || line.strip.empty? }.join
     assert_equal original, notice.fetch('original_unicode_notice')
     assert_equal 'Unicode-3.0', notice.fetch('license')
-    assert_equal 2, notice.fetch('inputs').size
+    assert_equal 3, notice.fetch('inputs').size
   end
 
   # The kernel's class is a printable range and nothing else: no line of the
@@ -54,7 +56,7 @@ class TerminalGenerationTest < Minitest::Test
     assert_equal [0x200c, 0x200d, 0xfe0e, 0xfe0f], model.fetch('exceptions')
     assert_equal({ 'prefix' => '<U+', 'minimum' => 4, 'maximum' => 6,
                    'suffix' => '>', 'digits' => 'uppercase_hex' }, model.fetch('token').fetch('codepoint'))
-    assert_equal %w[properties unicode_data], model.fetch('input').keys.sort
+    assert_equal %w[east_asian_width properties unicode_data], model.fetch('input').keys.sort
     assert model.frozen?
   end
 
@@ -161,7 +163,45 @@ class TerminalGenerationTest < Minitest::Test
     end
   end
 
+  # erx_vt's width table agrees, code point by code point, with widths derived
+  # here straight from UnicodeData.txt and EastAsianWidth.txt by the design's
+  # rule; a source that leaves F out of the wide values does not.
+  def test_the_width_table_agrees_with_the_unicode_data
+    expected = derived_widths
+    assert_equal expected, table_widths(self.class.output_plan.fetch(WIDTH_MODULE))
+    Dir.mktmpdir('erx-terminal-width-') do |directory|
+      root = generation_root(directory, extra: { 'abi/terminal.txt' => source.sub("width_wide W F\n", "width_wide W\n") })
+      refute_equal expected, table_widths(Erx::TerminalRules.plan(root: root).fetch(WIDTH_MODULE))
+    end
+  end
+
   private
+
+  def derived_widths
+    widths = Array.new(0x110000, 1)
+    File.foreach(File.join(ROOT, 'otp/lib/stdlib/uc_spec/EastAsianWidth.txt')) do |line|
+      next unless (match = line.match(/\A(\h+)(?:\.\.(\h+))?\s*;\s*(W|F)\s/))
+
+      widths.fill(2, match[1].hex..(match[2] || match[1]).hex)
+    end
+    first = nil
+    File.foreach(File.join(ROOT, 'otp/lib/stdlib/uc_spec/UnicodeData.txt')) do |line|
+      point, name, category = line.split(';')
+      first = point.hex if name.end_with?('First>')
+      next if name.end_with?('First>') || !%w[Mn Me Cf].include?(category)
+
+      widths.fill(0, (name.end_with?('Last>') ? first : point.hex)..point.hex)
+    end
+    widths[0xad] = 1
+    widths
+  end
+
+  def table_widths(text)
+    widths = Array.new(0x110000, 1)
+    text.scan(/\{16#(\h+), 16#(\h+), ([02])\}/) { |first, last, width| widths.fill(width.to_i, first.hex..last.hex) }
+    widths
+  end
+
 
   # A minimal tree generation can run in: its sources, the two Unicode inputs
   # (extra adds files or replaces their bytes) and an OTP import recorded over

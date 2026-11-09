@@ -20,6 +20,17 @@ block a milestone's numbers.
   a 64-window rio layout and of a weave on QEMU `virt` under HVF and TCG once `erx_screen` exists;
   the fixes (newest layout only, a rectangle cap) are in `TODO.md`'s security residual for G3.
 
+* **[Medium] display, the terminal emulator's throughput.** `erx_vt:feed/2`
+  (`erlang/apps/erx_display/src/erx_vt.erl`) copies the row tuple at least twice for every printed
+  character (`write_cells/4`, then `put_row/3`), and every line feed at the bottom margin turns the
+  whole grid into a list and back and trims the row it saves (`scroll_up/5`, `push_row/2`). A
+  review probe on the development host's stock OTP took about 1.1 s for 1 MB of printable ASCII on
+  80x24 and 3.7 s on 640x256, and about 5 us per scrolling line feed on 80x24; `cat` of a 10 MB log
+  would cost about 10 s of CPU. Measure the design's `erx_vt` throughput workload (bytes per second,
+  a code point at a time and in runs) under `tools/erx bench`; the fix on the table is a
+  ground-state path that writes a run of printable code points into one row in one rebuild, and a
+  grid whose scroll does not rebuild every row.
+
 * **[Medium] display, the widget tree's difference.** `erx_ui_model:delta/2` and `apply_ops/2`
   (`erlang/apps/erx_display/src/erx_ui_model.erl`) are quadratic in one node's children, and the
   browser renderer recomputes `delta(Sent, Pending)` for every update of a long change. Measure

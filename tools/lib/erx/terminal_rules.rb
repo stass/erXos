@@ -13,10 +13,13 @@ module Erx
     # The escape tokens: the line escape's code point and byte, the kernel log's
     # byte, and the /proc field escape's byte.
     TOKENS = %w[byte codepoint field kernel].freeze
-    SINGLETONS = %w[terminal unicode unsafe_categories unsafe_property exceptions invalid_scalars kernel_ascii].freeze
+    SINGLETONS = %w[terminal unicode unsafe_categories unsafe_property exceptions invalid_scalars kernel_ascii
+                    width_zero_categories width_zero_exceptions width_wide].freeze
+    EAST_ASIAN_WIDTHS = %w[A F H N Na W].freeze
+    INPUTS = %w[east_asian_width properties unicode_data].freeze
     OUTPUTS = %w[include/erx/terminal_ascii.h erlang/apps/erx/src/erx_text_tables.erl
                  tools/generated/terminal_tables.rb tools/generated/terminal_notices.json
-                 web/src/generated/terminal_tables.ts].freeze
+                 web/src/generated/terminal_tables.ts erlang/apps/erx_display/src/erx_vt_width.erl].freeze
     # The licence of the Unicode inputs, which every generated table declares.
     LICENSE = 'Unicode-3.0'
     module_function
@@ -54,6 +57,14 @@ module Erx
       when 'unsafe_categories'
         raise Error, 'invalid Unicode categories' unless !values.empty? && values.uniq == values && (values - CATEGORIES).empty?
         values
+      when 'width_zero_categories'
+        raise Error, 'invalid zero-width categories' unless !values.empty? && values.uniq == values && (values - CATEGORIES).empty?
+        values
+      when 'width_zero_exceptions'
+        points(values)
+      when 'width_wide'
+        raise Error, 'invalid wide East Asian Width values' unless !values.empty? && values.uniq == values && (values - EAST_ASIAN_WIDTHS).empty?
+        values
       when 'unsafe_property'
         raise Error, 'unsupported Unicode property' unless values == ['Default_Ignorable_Code_Point']
         values.first
@@ -75,7 +86,7 @@ module Erx
       case kind
       when 'input'
         name, path = values
-        unless values.size == 2 && %w[unicode_data properties].include?(name) &&
+        unless values.size == 2 && INPUTS.include?(name) &&
                path.start_with?('otp/') && path.split('/').all? { |part| part.match?(/\A[A-Za-z0-9_.-]+\z/) && !%w[. ..].include?(part) }
           raise Error, 'invalid terminal input path'
         end
@@ -106,7 +117,7 @@ module Erx
 
     def validate_model(model)
       raise Error, 'incomplete terminal rules' unless (SINGLETONS - model.keys).empty?
-      raise Error, 'incomplete terminal input list' unless model.fetch('input').keys.sort == %w[properties unicode_data]
+      raise Error, 'incomplete terminal input list' unless model.fetch('input').keys.sort == INPUTS
       raise Error, 'incomplete escape token grammar' unless model.fetch('token').keys.sort == TOKENS
     end
     private_class_method :validate_model
@@ -165,6 +176,71 @@ module Erx
       raise Error, 'missing default-ignorable property' if selected.empty?
       immutable(selected)
     end
+
+    # EastAsianWidth.txt's ranges, [first, last, value], in order and disjoint.
+    # A code point it does not list is N, the file's one @missing default.
+    def east_asian_widths(bytes, version:)
+      text = bounded_text(bytes, maximum: 8 * 1024 * 1024)
+      raise Error, 'East Asian Width version differs from declaration' unless text.lines.first == "# EastAsianWidth-#{version}.txt\n"
+      records = []
+      text.each_line do |line|
+        if line.start_with?('# @missing:') && line.strip != '# @missing: 0000..10FFFF; N'
+          raise Error, 'EastAsianWidth has a default other than N'
+        end
+        content = line.split('#', 2).first.to_s.strip
+        next if content.empty?
+        fields = content.split(';').map(&:strip)
+        raise Error, 'invalid EastAsianWidth record' unless fields.size == 2 && EAST_ASIAN_WIDTHS.include?(fields[1])
+        first, last = interval(fields.first)
+        raise Error, 'unordered or overlapping EastAsianWidth ranges' if !records.empty? && first <= records.last[1]
+        records << [first, last, fields[1]]
+      end
+      raise Error, 'empty EastAsianWidth' if records.empty?
+      immutable(records)
+    end
+
+    # The terminal's width of every code point whose width is not 1
+    # (docs/design-display.md, "Cells and the grid state"), as sorted, disjoint
+    # [first, last, width] ranges: 0 for the zero-width categories less their
+    # exceptions, else 2 for the wide East Asian Width values.
+    def width_intervals(model, records:, widths:)
+      zero_categories = model.fetch('width_zero_categories')
+      zero = merge(records.select { |_first, _last, category| zero_categories.include?(category) }
+                          .map { |first, last, _category| [first, last] })
+      zero = subtract(zero, model.fetch('width_zero_exceptions').sort.map { |point| [point, point] })
+      wide_values = model.fetch('width_wide')
+      wide = subtract(merge(widths.select { |_first, _last, value| wide_values.include?(value) }
+                                  .map { |first, last, _value| [first, last] }), zero)
+      ranges = (zero.map { |first, last| [first, last, 0] } + wide.map { |first, last| [first, last, 2] }).sort
+      immutable(ranges)
+    end
+
+    def merge(intervals)
+      intervals.sort.each_with_object([]) do |(first, last), result|
+        if !result.empty? && first <= result.last[1] + 1
+          result.last[1] = [result.last[1], last].max
+        else
+          result << [first, last]
+        end
+      end
+    end
+    private_class_method :merge
+
+    # The parts of sorted, disjoint intervals outside sorted, disjoint holes.
+    def subtract(intervals, holes)
+      intervals.flat_map do |first, last|
+        pieces = []
+        start = first
+        holes.each do |hole_first, hole_last|
+          next if hole_last < start || hole_first > last
+          pieces << [start, hole_first - 1] if hole_first > start
+          start = hole_last + 1
+        end
+        pieces << [start, last] if start <= last
+        pieces
+      end
+    end
+    private_class_method :subtract
 
     def unsafe_intervals(model, records:, ignorables:)
       categories = model.fetch('unsafe_categories')
