@@ -667,8 +667,9 @@ hold the legal ones:
 | --- | --- |
 | `t_state` | `state`, one of `closed`, `syn_sent`, `syn_received`, `established`, `close_wait`, `fin_wait_1`, `closing`, `last_ack`, `fin_wait_2`, `time_wait` |
 | `TF_SENTFIN`, `TF_NEEDFIN` | `fin`: `none`, `queued` or `{sent, Seq}` |
-| `TF_REQ_TSTMP`, `TF_RCVD_TSTMP`, `ts_recent`, `ts_recent_age`, `ts_offset` | `ts`: `off` or `#ts{recent, recent_age, offset}` |
-| `TF_REQ_SCALE`, `TF_RCVD_SCALE`, `snd_scale`, `rcv_scale` | `wscale`: `off` or `{SndShift, RcvShift}` |
+| `TF_REQ_TSTMP`, `TF_RCVD_TSTMP`, `ts_recent`, `ts_recent_age`, `ts_offset` | `ts`: `off`, `{requested, Offset}` before the handshake completes, or `#ts{recent, recent_age, offset}` |
+| `TF_REQ_SCALE`, `TF_RCVD_SCALE`, `snd_scale`, `rcv_scale` | `wscale`: `off`, `requested` before the handshake completes (the shift asked for follows from `sb_max`), or `{SndShift, RcvShift}` |
+| `TF_SACK_PERMIT` | `sack`: `off`, `requested` or `on` |
 | `TF_FASTRECOVERY`, `TF_CONGRECOVERY`, `snd_recover` | the loss module's state: `none`, `{fast, Recover}` or `{congestion, Recover}` |
 | `t_timers[]` | `send_timer` and `#deadlines{}` |
 | `snd_una`, `snd_nxt`, `snd_max`, `snd_wl1`, `snd_wl2`, `iss`, `rcv_nxt`, `rcv_adv`, `last_ack_sent`, `irs` | the same names, unwrapped integers |
@@ -701,6 +702,24 @@ change afterwards.
 `erx_tcp:step/3` is the only entry. It dispatches the event to the module
 that translates the FreeBSD code for it, then runs output, as
 `tcp_do_segment` ends by calling `tcp_output` when an ACK or data is due.
+
+The user requests are FreeBSD's `pr_usrreqs` for a connected stream:
+`connect`, `send`, `rcvd` (the owner has read so many bytes, which reopens
+the window), `shutdown`, `close` and `abort`. The socket layer above them,
+the owner, the active mode, packet framing and the bytes not yet handed to
+the owner, belongs to the connection process; the control block counts
+those bytes so that the advertised window follows them. A request that
+waits carries its caller, and the step answers it from the state it
+reaches, after output: `connect` once the connection is established,
+`send` once all its bytes are in the send buffer, which takes them as its
+free space reaches the low watermark (`sowriteable`), and every
+waiting caller with the error when the connection ends. A connection
+that `tcp_close` ended (FreeBSD's `INP_DROPPED`, the record's `ended`) is
+done, which a new control block in CLOSED is not: the step runs output
+only for a connection dropped after it received a SYN, so that output is
+the RST of `tcp_drop`, then tells the owner how it ended and returns
+`finish`. No stage has to remember any of this, since it follows from the
+state.
 
 `tcp_do_segment` is about 2,000 lines that mix state handling, ACK
 processing and data delivery. It is split by stage, not ported in order.
@@ -1435,6 +1454,7 @@ modules are marked P; process modules E.
 | `erx_tcp_output` | `tcp_output.c` | output | P |
 | `erx_tcp_timer` | `tcp_timer.c`, `tcp_timer.h` | expirations | P |
 | `erx_tcp_user` | `tcp_usrreq.c`, `tcp_drop` (`tcp_subr.c:2393`), `tcp_close` (`:2532`), `tcp_newtcpcb` (`:2233`) | user requests | P |
+| `erx_tcp_sndbuf` | none | the send buffer: a queue of the owner's binaries, read as sub-binaries | P |
 | `erx_tcp_rtt` | `tcp_xmit_timer` (`tcp_input.c:3642`), the timeout of `tcp_timer_rexmt` (`tcp_timer.c:631-635`), `TCP_REXMTVAL`, the estimator fields of `tcp_newtcpcb` | RFC 6298 estimator and the backed-off timeout | P |
 | `erx_tcp_mss` | `tcp_mss` (`tcp_input.c:3899`), `tcp_mss_update`, `tcp_mssopt`, `tcp_maxseg` (`tcp_subr.c:3780`), `tcp_compute_initwnd` | MSS and initial window | P |
 | `erx_tcp_sendlog` | none: written from RFC 6675 sections 4 and 5, as `tcp_sack.c` is not read | the send log and RFC 6675 scoreboard | P |

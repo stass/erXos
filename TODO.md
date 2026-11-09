@@ -549,6 +549,29 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] erx_net TCP core (`erx_tcp`, `erx_tcp_user`): a malformed event or request
+  (`{send, From, NotBinary}`) raises `function_clause` with the whole `#tcb{}` in the
+  stack trace, send-buffer payload and the connection's generator included. Requests
+  from other domains need a `{error, einval}` answer or validation in `erx_tcp_conn`,
+  and `erx_tcp_conn` needs a `format_status` that redacts `sndbuf` and `gen`.
+* [Medium] erx_net TCP core (`erx_tcp_output:setpersist/2`): it continues the backoff of
+  whatever send timer is armed. FreeBSD's output call sites clear the retransmission
+  timer and `t_rxtshift` first; split it into a start (count 0) and the timer's next
+  probe so output cannot start persist at a retransmission's backoff.
+* [Medium] erx_net TCP core: the design's control-block table gives the recovery state
+  as the variant `none | {fast, R} | {congestion, R}`, but `#ccv{}` keeps two booleans
+  and `#tcb{}` keeps `snd_recover`. Settle on one form (the variant rules out illegal
+  combinations, but FreeBSD does reach fast recovery without congestion recovery).
+* [Medium] erx_net TCP core (`erx_tcp`): the retransmission count lives in `send_timer`,
+  as the design types it, so stopping the timer on a full acknowledgement resets it to 0,
+  where FreeBSD keeps `t_rxtshift` until an RTT sample; the next timeout then counts as
+  the first.
+* [Low] erx_net TCP core (`erx_tcp:respond/5`): it advertises a window on a RST, where
+  `tcp_respond` sends 0, and sets no ECE (`tcp_ecn_output_established`) on keepalives and
+  challenge ACKs.
+* [Low] erx_net TCP timers (`erx_tcp_timer`): path MTU black-hole detection, which the
+  design says is translated (off by default, `tcp_pmtud_blackhole_detect`), is not.
+
 * [Medium] runtime build, `tools/lib/erx/runtime_seam.rb` (`check_imports_of`): the BeamAsm image's import check counts
   what libc++ and libc++abi define as available to ERTS, but never checks their own undefined names (`malloc`, `abort`,
   pthreads) against `otp/erts/emulator/sys/erxos/imports.txt`, so the C library seam does not cover the C++ runtime. Add

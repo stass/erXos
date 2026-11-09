@@ -126,6 +126,7 @@ module erx_tcp_rtt
   sys/netinet/tcp_timer.c tcp_timer_rexmt
   sys/netinet/tcp_timer.h TCPT_RANGESET
   sys/netinet/tcp_var.h TCP_REXMTVAL
+  sys/netinet/tcp_output.c tcp_setpersist
 
 module erx_tcp_mss
   sys/netinet/tcp.h PADTCPOLEN
@@ -164,3 +165,21 @@ module erx_tcp_syncache
 
 module erx_net_bind
   sys/netinet/in_pcb.c in_pcb_lport_dest
+
+module erx_tcp
+  sys/netinet/tcp_input.c tcp_input_with_port cc_cong_signal cc_ack_received
+  sys/netinet/tcp_subr.c tcp_respond
+
+module erx_tcp_user
+  sys/netinet/tcp_usrreq.c tcp_connect tcp_usr_send tcp_usr_rcvd tcp_usr_shutdown tcp_usr_close tcp_usr_abort tcp_disconnect tcp_usrclosed
+  sys/netinet/tcp_subr.c tcp_newtcpcb tcp_drop tcp_close
+
+module erx_tcp_timer
+  sys/netinet/tcp_timer.c tcp_timer_delack tcp_timer_2msl tcp_timer_keep tcp_timer_persist tcp_timer_rexmt tcp_timer_next tcp_timer_enter
+  sys/netinet/tcp_timer.h TCPTV_KEEP_IDLE TCPTV_PERSMAX TP_MAXIDLE
+
+module erx_tcp_input
+  sys/netinet/tcp_input.c tcp_do_segment
+
+module erx_tcp_output
+  sys/netinet/tcp_output.c tcp_output tcp_setpersist
