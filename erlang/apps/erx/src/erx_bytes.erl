@@ -10,16 +10,18 @@ it stays within a reduction slice. `crc32c/2` and `inet_csum/2` leave longer inp
 caller, who passes each result as the next call's first argument; the SHA-256 calls take a
 binary of any size and stream it to their NIF 64 KiB at a time themselves. `inet_csum/2` and
 `siphash24/2` take iodata, so a header and a payload are summed or hashed without being
-joined first.
+joined first. `entropy/1`, beside them, is Erlang's entry to the kernel's generator.
 """.
 
--export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2]).
+-export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, entropy/1]).
 -export([sha256/1, sha256_init/0, sha256_update/2, sha256_final/1]).
 -export_type([sha256_state/0]).
 
--nifs([crc32c_nif/2, inet_csum_nif/2, inet_csum_update_nif/3, siphash24_nif/2]).
+-nifs([crc32c_nif/2, inet_csum_nif/2, inet_csum_update_nif/3, siphash24_nif/2, entropy_nif/1]).
 -nifs([sha256_nif/1, sha256_init_nif/0, sha256_update_nif/2, sha256_final_nif/1]).
 -on_load(on_load/0).
+
+-include("generated/erx_abi.hrl").
 
 %% The most bytes one NIF call takes (ERX_BYTES_CALL_MAX in erx_bytes_nif.c).
 -define(CALL_MAX, 65536).
@@ -150,6 +152,21 @@ SHA-256 state.
 sha256_final(State) ->
     sha256_final_nif(State).
 
+-doc """
+`N` bytes from the kernel's generator, read by one `erx_entropy_read` (docs/design-runtime.md,
+"Per-byte primitives", the entropy entry). Keys, secrets and identifiers an attacker must not
+guess come from here, directly or through a generator keyed from here, never from `rand`. It
+is a synchronous kernel call, on the stopgap a request to the root's generator service. Fails
+with `badarg` unless `N` is an integer from 1 to 256, and with `{entropy, Status}`, `Status`
+the ABI file's name of the status the read returned (its integer for a value no status
+names), when the read fails: it never returns fewer bytes, or bytes from any other source.
+""".
+-spec entropy(N :: 1..?ERX_ENTROPY_BYTES_MAX) -> binary().
+entropy(N) when is_integer(N), N >= 1, N =< ?ERX_ENTROPY_BYTES_MAX ->
+    entropy_nif(N);
+entropy(_N) ->
+    erlang:error(badarg).
+
 crc32c_nif(_Crc, _Data) ->
     erlang:nif_error(undef).
 
@@ -160,6 +177,9 @@ inet_csum_update_nif(_Checksum, _Before, _After) ->
     erlang:nif_error(undef).
 
 siphash24_nif(_Key, _Data) ->
+    erlang:nif_error(undef).
+
+entropy_nif(_N) ->
     erlang:nif_error(undef).
 
 sha256_nif(_Data) ->

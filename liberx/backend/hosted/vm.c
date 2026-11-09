@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 #include "erx/abi.h"
+#include "erx/explicit_bzero.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
 #include "liberx/backend/core/vm_table.h"
@@ -397,6 +398,10 @@ erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
 	return (ERX_EINVAL);
 }
 
+/*
+ * The host's getentropy. With ERX_HOSTED_ENTROPY_FAIL set every read is ERX_ENOTSUP, the failure
+ * the native backend gives when it cannot reach its generator service, so a test sees it.
+ */
 int
 erx_entropy_read(uint32_t len)
 {
@@ -405,10 +410,13 @@ erx_entropy_read(uint32_t len)
 
 	if (checked != ERX_OK)
 		return (checked);
+	if (getenv("ERX_HOSTED_ENTROPY_FAIL") != NULL)
+		return (ERX_ENOTSUP);
 	if (len != 0 && getentropy(words, len) != 0)
 		return (ERX_ENOTSUP);
 	for (uint32_t done = 0; done < len; done += sizeof(uint64_t))
 		erx_backend_mr_put_bytes(erx_utcb_self(), done, words[done / sizeof(uint64_t)], len);
+	erx_explicit_bzero(words, sizeof(words));
 	return (ERX_OK);
 }
 

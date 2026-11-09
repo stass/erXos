@@ -54,6 +54,20 @@ class NetChecksTest < Minitest::Test
     assert_empty source_rules("#{SRC}/erx_net_x.erl", body)
   end
 
+  # The design's seeded failure: a step that takes its value from rand:uniform/1.
+  def test_rand_crypto_and_stray_entropy_calls_fail
+    { 'rand:uniform(6)' => 2, "apply('crypto', strong_rand_bytes, [16])" => 2,
+      "erx_bytes:\n  entropy(16)" => 2, 'fun erx_bytes:entropy/1' => 2 }.each do |body, line|
+      assert_equal [['random', line]], source_rules("#{SRC}/erx_net_x.erl", body), body
+    end
+  end
+
+  def test_entropy_passes_in_process_modules_and_rand_in_comments_strings_and_names
+    assert_empty source_rules("#{SRC}/erx_net_if.erl", 'erx_bytes:entropy(16)')
+    body = "%% rand is not used\n-doc \"\"\"\nNot `rand`.\n\"\"\".\nerx_net_rand:new(K), \"crypto\""
+    assert_empty source_rules("#{SRC}/erx_net_x.erl", body)
+  end
+
   def test_wrap_literals_and_shifts_fail_in_tcp_modules
     ['X band 16#ffffffff', 'X band 16#FFFF_FFFF', 'X rem 4294967296', 'X rem 4_294_967_296',
      '(1 bsl 32)', 'D bsl  31', 'D < 2147483648', 'X band 2#11111111111111111111111111111111',

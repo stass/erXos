@@ -349,23 +349,44 @@ class RuntimeHostedSmokeTest < Minitest::Test
     end
   end
 
-# The network stack's per-byte primitives run in the release and agree with the host
-# stand-in's models: the probe (test/fixtures/erx_net_bytes_probe.erl) answers its calls on
-# stock OTP with test/erlang/host_bytes/erx_bytes.erl, then checks the NIF's answers to the
-# same calls against those, over iolists whose binaries over 512 bytes reach the NIF as pieces
-# of their own at odd and even offsets, and every refusal and acceptance of the contract
-# against its literal answer; the answer is empty lists only if each check passed.
-def test_the_network_primitives_run_in_the_release_and_agree_with_the_models
-  Dir.mktmpdir('erx-hosted-net-bytes-') do |directory|
-    probe = compiled_fixture('erx_net_bytes_probe', directory)
-    answers = stand_in_net_bytes_answers(directory)
-    assert_answers(
-      "{module, erx_net_bytes_probe} = code:load_binary(erx_net_bytes_probe, \"probe\", base64:decode(\"#{probe}\")), " \
-      'loaded.' => /^loaded$/,
-      "erx_net_bytes_probe:check(#{answers})." => /^\{net_bytes,\[\],\[\]\}$/
-    )
+  # The network stack's per-byte primitives run in the release and agree with the host
+  # stand-in's models: the probe (test/fixtures/erx_net_bytes_probe.erl) answers its calls on
+  # stock OTP with test/erlang/host_bytes/erx_bytes.erl, then checks the NIF's answers to the
+  # same calls against those, over iolists whose binaries over 512 bytes reach the NIF as pieces
+  # of their own at odd and even offsets, and every refusal and acceptance of the contract
+  # against its literal answer; the answer is empty lists only if each check passed.
+  def test_the_network_primitives_run_in_the_release_and_agree_with_the_models
+    Dir.mktmpdir('erx-hosted-net-bytes-') do |directory|
+      probe = compiled_fixture('erx_net_bytes_probe', directory)
+      answers = stand_in_net_bytes_answers(directory)
+      assert_answers(
+        "{module, erx_net_bytes_probe} = code:load_binary(erx_net_bytes_probe, \"probe\", base64:decode(\"#{probe}\")), " \
+        'loaded.' => /^loaded$/,
+        "erx_net_bytes_probe:check(#{answers})." => /^\{net_bytes,\[\],\[\]\}$/
+      )
+    end
   end
-end
+
+  # A failed read of the entropy entry raises {entropy, Status} and returns no bytes
+  # (docs/design-runtime.md, "Per-byte primitives", the entropy entry): with
+  # ERX_HOSTED_ENTROPY_FAIL set the hosted backend refuses every erx_entropy_read with
+  # ERX_ENOTSUP, as the native backend does when it cannot reach its generator service.
+  def test_a_failed_entropy_read_raises
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home, 'ERX_HOSTED_ENTROPY_FAIL' => '1') do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        erlang_shell(reader, writer, transcript, deadline)
+        writer.write("try erx_bytes:entropy(16) catch error:Reason -> Reason end.\n")
+        read_until(reader, transcript, /^\{entropy,notsup\}\n.*^2> /m, deadline)
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        status = wait_for(pid, deadline, transcript)
+        @reaped = true
+        assert status.success?, "the runtime ended with #{status.inspect}\n#{plain(transcript)}"
+      end
+    end
+  end
 
   # M4's exit criterion "a module reloaded in a loop on four CPUs never runs stale code",
   # through the release's code service: the probe (test/fixtures/erx_code_reload_probe.erl)

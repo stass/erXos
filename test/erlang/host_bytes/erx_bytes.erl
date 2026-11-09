@@ -14,10 +14,13 @@
 %%   * SipHash-2-4 from the paper, with 64-bit arithmetic masked: badarg unless Key is a 16-byte
 %%     binary and Data iodata of at most 65536 bytes.
 %%   * SHA-256 is stock's crypto:hash/2: badarg unless Data is a binary.
+%%   * entropy/1 is stock's crypto:strong_rand_bytes/1, the host's generator: badarg unless N
+%%     is an integer from 1 to 256. It never fails a read, so the raise of a failed read is
+%%     judged in the release (test/integration/runtime_hosted_smoke_test.rb).
 %% Only host tests compile it; it never reaches a release.
 
 -module(erx_bytes).
--export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, sha256/1]).
+-export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, sha256/1, entropy/1]).
 
 -define(CALL_MAX, 65536).
 -define(MASK64, 16#FFFFFFFFFFFFFFFF).
@@ -63,6 +66,12 @@ siphash24(_Key, _Data) ->
 sha256(Data) when is_binary(Data) ->
     crypto:hash(sha256, Data);
 sha256(_Data) ->
+    erlang:error(badarg).
+
+-spec entropy(1..256) -> binary().
+entropy(N) when is_integer(N), N >= 1, N =< 256 ->
+    crypto:strong_rand_bytes(N);
+entropy(_N) ->
     erlang:error(badarg).
 
 bytes(<<Byte, Rest/binary>>, State) -> bytes(Rest, bits(State bxor Byte, 8));

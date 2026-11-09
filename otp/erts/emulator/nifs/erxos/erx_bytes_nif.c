@@ -6,15 +6,18 @@
  * statically linked NIFs on binaries. Each works on at most ERX_BYTES_CALL_MAX bytes, so a call
  * ends within a reduction slice on a normal scheduler and never waits; the Erlang wrappers
  * stream longer inputs. The work is in the cores beside this file and in kernel/crypto/sha2,
- * which build for the host.
+ * which build for the host. Beside them, entropy_nif is Erlang's entry to the kernel's generator.
  */
 
 #define STATIC_ERLANG_NIF 1
+
+#include <string.h>
 
 #include "erl_nif.h"
 
 #include "erx/explicit_bzero.h"
 #include "kernel/crypto/sha2/sha256.h"
+#include "liberx/backend/api.h"
 
 #include "erx_crc32c.h"
 #include "erx_inet_csum.h"
@@ -331,6 +334,46 @@ sha256_state_dtor(ErlNifEnv *env, void *object)
 	erx_explicit_bzero(object, sizeof(erx_sha256_ctx_t));
 }
 
+/*
+ * entropy_nif(N): N bytes, 1 to ERX_ENTROPY_BYTES_MAX, from one erx_entropy_read, which leaves
+ * them at the head of this thread's UTCB mr, each word's bytes from its low byte. A failed read
+ * raises {entropy, Status}, Status the ABI file's name of the status, or its integer for a value
+ * no status names; nothing stands in for the bytes. The wrapper checks N, and so does this, since
+ * a larger N would read past the result. The words are taken and zeroed right after the read,
+ * before anything else can run on this thread (the binary's allocation included), so no later
+ * store to mr can pass for entropy and no key stays behind in the UTCB or on the stack.
+ */
+static ERL_NIF_TERM
+entropy_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	uint64_t words[ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t)] = { 0 };
+	erx_utcb_t *utcb;
+	const char *name;
+	ERL_NIF_TERM bytes, status_term;
+	unsigned int len, count;
+	int status;
+
+	(void)argc;
+	if (!enif_get_uint(env, argv[0], &len) || len < 1 || len > ERX_ENTROPY_BYTES_MAX)
+		return (enif_make_badarg(env));
+	status = erx_entropy_read(len);
+	if (status != ERX_OK) {
+		name = erx_status_name(status);
+		status_term = name != NULL ? enif_make_atom(env, name) : enif_make_int(env, status);
+		return (enif_raise_exception(env, enif_make_tuple2(env, enif_make_atom(env, "entropy"), status_term)));
+	}
+	utcb = erx_utcb_self();
+	count = (len + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+	for (unsigned int i = 0; i < count; i++) {
+		(void)erx_utcb_mr_load(utcb, i, &words[i]);
+		(void)erx_utcb_mr_store(utcb, i, 0);
+	}
+	_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "a word's first byte is its low byte");
+	memcpy(enif_make_new_binary(env, len, &bytes), words, len);
+	erx_explicit_bzero(words, sizeof(words));
+	return (bytes);
+}
+
 static int
 load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 {
@@ -347,6 +390,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "inet_csum_nif", 2, inet_csum_nif, 0 },
 	{ "inet_csum_update_nif", 3, inet_csum_update_nif, 0 },
 	{ "siphash24_nif", 2, siphash24_nif, 0 },
+	{ "entropy_nif", 1, entropy_nif, 0 },
 	{ "sha256_nif", 1, sha256_nif, 0 },
 	{ "sha256_init_nif", 0, sha256_init_nif, 0 },
 	{ "sha256_update_nif", 2, sha256_update_nif, 0 },

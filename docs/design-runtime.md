@@ -2181,7 +2181,8 @@ done once per packet, per block and per file around them.
   returns exactly `N` bytes from one `erx_entropy_read`; any other `N`
   raises `badarg`. A read the kernel or the backend does not complete
   raises `erlang:error({entropy, Status})`, `Status` being the returned
-  status's name in the ABI file as an atom, and the call
+  status's name in the ABI file as an atom (its integer for a value no
+  status names), and the call
   never returns fewer bytes, zeros, or bytes from `rand`, the clock or
   any other source. On erXos's kernel the read fails only on a length
   that `badarg` already refuses, since the generator is seeded before any

@@ -4,8 +4,8 @@
 -module(erx_net_bytes_probe).
 
 -moduledoc """
-Judges erx_bytes's network primitives, `inet_csum/2`, `inet_csum_update/3` and `siphash24/2`,
-in a running erXos release against the Erlang models of the host stand-in
+Judges erx_bytes's network primitives, `inet_csum/2`, `inet_csum_update/3`, `siphash24/2` and
+`entropy/1`, in a running erXos release against the Erlang models of the host stand-in
 (test/erlang/host_bytes/erx_bytes.erl). The host tests run `answers/0` on stock OTP with the
 stand-in, then load this module into the release and hand those answers to `check/1`, which
 compares them with the NIF's answers to the same calls. The calls come from a fixed seed of
@@ -21,7 +21,7 @@ against literal answers, so on stock it judges the stand-in's contract too.
 -define(RANDOM_CALLS, 20).
 -define(CALL_MAX, 65536).
 
--type answer() :: non_neg_integer() | badarg.
+-type answer() :: non_neg_integer() | badarg | {size, pos_integer()} | boolean().
 
 -doc "The answers of erx_bytes, whichever implementation is loaded, to the probe's calls.".
 -spec answers() -> [answer()].
@@ -49,6 +49,14 @@ wrong_contract_answers() ->
                 || {Index, {Call, Want}} <- lists:enumerate(contract())],
     [Wrong || {_Index, Want, Got} = Wrong <- Answered, Want =/= Got].
 
+%% entropy/1 answers with the size of its bytes, and entropy_pair with whether two draws of
+%% its size differ, which equal draws of 32 bytes do with probability 2^-256.
+answer({entropy, [N]}) ->
+    try {size, byte_size(erx_bytes:entropy(N))}
+    catch error:badarg -> badarg
+    end;
+answer({entropy_pair, [N]}) ->
+    erx_bytes:entropy(N) =/= erx_bytes:entropy(N);
 answer({Function, Arguments}) ->
     try apply(erx_bytes, Function, Arguments)
     catch error:badarg -> badarg
@@ -103,4 +111,11 @@ contract() ->
      {{siphash24, [Key, <<Max/binary, 1>>]}, badarg},
      {{siphash24, [Key, [1 | 2]]}, badarg},
      {{siphash24, [Key, lists:seq(0, 14)]}, 16#a129ca6149be45e5},
-     {{siphash24, [Key, []]}, 16#726fdb47dd0e0e31}].
+     {{siphash24, [Key, []]}, 16#726fdb47dd0e0e31},
+     {{entropy, [0]}, badarg},
+     {{entropy, [257]}, badarg},
+     {{entropy, [-1]}, badarg},
+     {{entropy, [16.0]}, badarg},
+     {{entropy, [atom]}, badarg},
+     {{entropy_pair, [32]}, true}
+     | [{{entropy, [N]}, {size, N}} || N <- lists:seq(1, 256)]].

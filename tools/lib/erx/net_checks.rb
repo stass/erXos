@@ -17,7 +17,11 @@ module Erx
   #   "%% FreeBSD: PATH" line each, are the files NOTICE-freebsd lists for
   #   that module, and the reverse; any other line naming "FreeBSD:" (a
   #   marker with more after the path, or one below the header) is refused,
-  #   so a malformed claim never reads as no claim.
+  #   so a malformed claim never reads as no claim;
+  # * random: no module of erx_net names rand or crypto, since its random
+  #   values come from erx_net_rand, and only its process modules (the
+  #   "processes" row of the design's module table) call erx_bytes:entropy,
+  #   to key a generator or draw a stack-wide secret in their initialisation.
   #
   # Like DeviceCallers these read the source text with comments removed, and
   # catch a slip, not a determined bypass that builds a name from pieces. The
@@ -32,6 +36,11 @@ module Erx
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
     ATOM_MAKERS = /(?<![A-Za-z0-9_@])(binary_to_atom|list_to_atom|binary_to_term)(?![A-Za-z0-9_@])/
+    RANDOM_MODULES = /(?<![A-Za-z0-9_@])(rand|crypto)(?![A-Za-z0-9_@])/
+    ENTROPY_CALL = /(?<![A-Za-z0-9_@])erx_bytes\s*:\s*entropy(?![A-Za-z0-9_@])/
+    # The "processes" row of design-network-stack.md's module table; change both together.
+    ENTROPY_CALLERS = %w[erx_net_if erx_tcp_conn erx_tcp_listen erx_udp_sock erx_net_grant erx_net_tables
+                         erx_dhcp4 erx_epmd erx_net_loop].freeze
     # The TCP modules the seq-wrap rule covers, and the one module it lets do
     # the arithmetic.
     TCP_SOURCE = /\Aerx_tcp(?:_[a-z0-9_]+)?\.(?:erl|hrl)\z/
@@ -75,7 +84,8 @@ module Erx
     # covered file.
     def violations(files)
       sources = files.select { |path, _| File.fnmatch?(SCOPE, path, GLOB_FLAGS) }
-      [*atom_violations(sources), *seq_violations(sources), *notice_violations(sources, notice: files[NOTICE])]
+      [*atom_violations(sources), *random_violations(sources), *seq_violations(sources),
+       *notice_violations(sources, notice: files[NOTICE])]
     end
 
     def atom_violations(sources)
@@ -87,6 +97,32 @@ module Erx
                         detail: "#{name} in erx_net: no atom or term is made from packet data")
         end
       end
+    end
+
+    def random_violations(sources)
+      sources.flat_map do |path, text|
+        code = calls_text(text)
+        (random_module_lines(code) + entropy_call_lines(path, code)).sort.map do |line, detail|
+          Violation.new(rule: 'random', path: path, line: line, detail: detail)
+        end
+      end
+    end
+
+    def random_module_lines(code)
+      matches(code, RANDOM_MODULES).map { |line, name| [line, "#{name} in erx_net: random values come from erx_net_rand"] }
+    end
+
+    def entropy_call_lines(path, code)
+      return [] if ENTROPY_CALLERS.include?(File.basename(path, '.erl'))
+
+      matches(code, ENTROPY_CALL).map do |line, _|
+        [line, "erx_bytes:entropy outside erx_net's process modules (#{ENTROPY_CALLERS.join(', ')})"]
+      end
+    end
+
+    # Each match of pattern in code, which may span lines, as [line of its start, text].
+    def matches(code, pattern)
+      code.to_enum(:scan, pattern).map { [code[0...Regexp.last_match.begin(0)].count("\n") + 1, Regexp.last_match(0)] }
     end
 
     def seq_violations(sources)
@@ -117,6 +153,16 @@ module Erx
                   Integer(match[:based].delete('_'), match[:base].to_i, exception: false)
                 end
         [match.begin(0), value] if value
+      end
+    end
+
+    # The text with each comment, string and character literal blanked and
+    # each quoted atom unquoted, every line kept: a call names its module as
+    # an atom, quoted or not, and never inside a string such as a -moduledoc.
+    def calls_text(text)
+      text.b.gsub(DeviceCallers::LEXEME) do
+        lexeme = Regexp.last_match(0)
+        lexeme.start_with?("'") ? lexeme.delete("'") : lexeme.gsub(/[^\n]/, ' ')
       end
     end
 

@@ -37,10 +37,11 @@ static _Alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 static uint64_t wall_offset_ns;
 
 /*
- * What liberx's group report looks for (group.c). It stays beside TZ in libSystem's
- * environment, which only liberx reads: ERTS's environment is the page's.
+ * The words liberx itself looks for: the group report's (group.c) and the failing entropy
+ * reads' (vm.c). They stay beside TZ in libSystem's environment, which only liberx reads:
+ * ERTS's environment is the page's.
  */
-static const char *const report_words[] = { "ERX_HOSTED_GROUP_REPORT" };
+static const char *const report_words[] = { "ERX_HOSTED_GROUP_REPORT", "ERX_HOSTED_ENTROPY_FAIL" };
 #define REPORT_WORDS_COUNT	(sizeof(report_words) / sizeof(report_words[0]))
 
 /* libSystem's own environment: its local time reads TZ, and nothing else of the host's stays. */
