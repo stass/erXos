@@ -536,13 +536,6 @@ it; git history is the record of completed work.
   `erx_budget_create`'s parent is read the same way. Move them to `ERX_CAP_SELF` and refuse `ERX_CAP_NULL`
   with `ERX_ETYPE`, on the hosted backend too.
 
-* [Medium] design-domains.md, The peer, the `peer_held` bound: past
-  `peer_held` a runtime answers "a new `LINK`" with a `system_limit` exit. A `LINK` to a
-  process that already holds a link with its sender creates nothing, but the text does
-  not exempt it, and such an exit would end the sender's half of a link whose other
-  half exists, the case the `noproc` rule of "Signals that need no right" rules out.
-  Decide whether a `LINK` that creates nothing is ever refused for a limit, and extend
-  `specs/tla/Links.tla` (which has no limits) if so.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/task_refused.c`: in a task,
   `erx_vm_free_pages` reports 0 while commits through the service still succeed, an
   invented count that `api.h`'s exact contract does not allow; it should answer
