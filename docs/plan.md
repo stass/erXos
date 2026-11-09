@@ -2404,10 +2404,12 @@ stack, on QEMU and then on both boards, every connection a process the
 inspector shows, and a network domain killed under load comes back.
 
 **Scope.** The network stack's design is
-[design-network-stack.md](design-network-stack.md): FreeBSD 15.1's
-default TCP stack (`release/15.1.0-p6`, `95719d8a`) translated into
-Erlang, its processes and packet path, grants and sockets, and its
-verification. TCP's fast path in native code, behind the same process
+[design-network-stack.md](design-network-stack.md): FreeBSD's default
+TCP stack translated into Erlang, read from FreeBSD 15.1
+(`release/15.1.0-p6`, `95719d8a`) and pinned at FreeBSD 16.0-CURRENT
+(`main-n285245`, `975e3605`) with the changes between the two that the
+wire can see ported, its processes and packet path, grants and sockets,
+and its verification. TCP's fast path in native code, behind the same process
 interface, only if GK3 decides so on erXos's kernel. The work comes in
 two stages, the design's core and then its extensions
 ([Scope](design-network-stack.md#scope)):

@@ -33,7 +33,7 @@ active_open_test() ->
     ?assertNot(erx_tcp_ecn:enabled(
                  erx_tcp_ecn:input_syn_sent(?TH_SYN bor ?TH_ACK bor ?TH_ECE bor ?TH_CWR, New))),
     ?assertEqual({0, 0, New}, erx_tcp_ecn:output(data(#{}), New)),
-    ?assertEqual({false, false, New}, erx_tcp_ecn:input_segment(?TH_ECE, ?CE, New)).
+    ?assertEqual({false, false, New}, erx_tcp_ecn:input_segment(?TH_ECE, ?CE, established, New)).
 
 %% A simultaneous open's SYN with ECE and CWR owes one ECE, sent on the SYN-ACK.
 parallel_syn_test() ->
@@ -48,19 +48,39 @@ parallel_syn_test() ->
 %% The receiver: a CE mark makes it send ECE until the sender's CWR, which also forces an ACK.
 receiver_test() ->
     On = erx_tcp_ecn:syncache_socket(true),
-    {false, false, Marked} = erx_tcp_ecn:input_segment(?TH_ACK, ?CE, On),
+    {false, false, Marked} = erx_tcp_ecn:input_segment(?TH_ACK, ?CE, established, On),
     ?assertMatch({?TH_ECE, ?ECT0, _}, erx_tcp_ecn:output(data(#{}), Marked)),
     ?assertMatch({?TH_ECE, 0, _}, erx_tcp_ecn:output(data(#{len => 0}), Marked)),
-    {false, true, Cleared} = erx_tcp_ecn:input_segment(?TH_ACK bor ?TH_CWR, ?ECT0, Marked),
+    {false, true, Cleared} =
+        erx_tcp_ecn:input_segment(?TH_ACK bor ?TH_CWR, ?ECT0, established, Marked),
     ?assertMatch({0, ?ECT0, _}, erx_tcp_ecn:output(data(#{}), Cleared)).
+
+%% The sender's CWR ends our ECE in every state, but forces an ACK only in the states
+%% past the handshake before the peer's FIN: ESTABLISHED, FIN-WAIT-1 and FIN-WAIT-2. One
+%% case per state.
+cwr_ack_now_by_state_test_() ->
+    On = erx_tcp_ecn:syncache_socket(true),
+    {false, false, Marked} = erx_tcp_ecn:input_segment(?TH_ACK, ?CE, established, On),
+    Forced = [established, fin_wait_1, fin_wait_2],
+    [{atom_to_list(State),
+      fun() ->
+              {false, AckNow, Cleared} =
+                  erx_tcp_ecn:input_segment(?TH_ACK bor ?TH_CWR, ?ECT0, State, Marked),
+              ?assertEqual(lists:member(State, Forced), AckNow),
+              ?assertMatch({0, ?ECT0, _}, erx_tcp_ecn:output(data(#{}), Cleared))
+      end}
+     || State <- [syn_received, established, close_wait, fin_wait_1, closing, last_ack,
+                  fin_wait_2]].
 
 %% The sender: an echoed ECE (not on a SYN) is a congestion signal; after the window
 %% reduction CWR goes on the next new data only, not on a retransmission or window probe.
 sender_test() ->
     On = erx_tcp_ecn:syncache_socket(true),
-    ?assertMatch({true, false, _}, erx_tcp_ecn:input_segment(?TH_ACK bor ?TH_ECE, ?ECT0, On)),
+    ?assertMatch({true, false, _},
+                 erx_tcp_ecn:input_segment(?TH_ACK bor ?TH_ECE, ?ECT0, established, On)),
     ?assertMatch({false, false, _},
-                 erx_tcp_ecn:input_segment(?TH_SYN bor ?TH_ACK bor ?TH_ECE, ?ECT0, On)),
+                 erx_tcp_ecn:input_segment(?TH_SYN bor ?TH_ACK bor ?TH_ECE, ?ECT0,
+                                           established, On)),
     Reduced = erx_tcp_ecn:signal_cwr(On),
     {0, 0, Reduced} = erx_tcp_ecn:output(data(#{snd_nxt => 900}), Reduced),
     {0, 0, Reduced} = erx_tcp_ecn:output(data(#{len => 1, forced => true}), Reduced),

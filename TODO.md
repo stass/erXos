@@ -3670,11 +3670,17 @@ document's "residual risks accepted" paragraph.
   app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's licence notice beside `NOTICE-freebsd`; create
   `erlang/apps/erx_net_client`; and add the build check of N12 with its
   seeded violation.
-* [Medium] network, the FreeBSD pin ([design-network-stack.md](docs/design-network-stack.md#decisions), 9):
-  port to `erx_net` the changes between `release/15.1.0-p6` and
-  `975e3605ebb1` that the wire or an interoperating peer can see and the
-  real bug fixes, from the survey of those changes, each recorded with
-  its FreeBSD commit in `NOTICE-freebsd`, and move the notice's pin.
+* [Low] network, the FreeBSD pin ([design-network-stack.md](docs/design-network-stack.md#decisions), 9):
+  each `port` line of `erlang/apps/erx_net/NOTICE-freebsd` lacks the FreeBSD commit that made
+  the change, which the design requires; the survey's shallow clone has no history between
+  `release/15.1.0-p6` and `975e3605ebb1`. Look each up (`git log 95719d8a..975e3605 -- PATH`
+  in a full clone), add it to its line as `port COMMIT PATH FUNCTION`, and have NetChecks
+  require a 40-digit commit there.
+* [Low] network, `erlang/apps/erx_net/NOTICE-freebsd` and `erx_net_frame`'s header: they
+  name `arpresolve_addr` of `sys/netinet/if_ether.c`, which neither the release nor the pin
+  has; the broadcast and multicast link addresses `link_addr/2` translates are
+  `ether_resolve_addr` of `sys/net/if_ethersubr.c` with the `ETHER_MAP_*` macros of
+  `sys/netinet/if_ether.h`. Fix the entry and the module's FreeBSD headers to match.
 * [Low] network, the interface's own frames on transmit
   ([design-network-stack.md](docs/design-network-stack.md#residuals)):
   ARP and neighbour-discovery answers, RSTs and SYN-ACKs share the

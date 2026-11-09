@@ -11,10 +11,16 @@ class NetChecksTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SRC = 'erlang/apps/erx_net/src'
   PIN = <<~NOTICE
-    tag release/15.1.0-p6
-    commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
-    archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
+    tag main-n285245
+    commit 975e3605ebb15cbaf5a25c1c9d1f51aed41291d0
+    archive-sha256 f71de70a45f84130e235b067f76bd9eefcc691bb02db054e01863981c2f74588
+    release-tag release/15.1.0-p6
+    release-commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
+    release-archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
+    port sys/netinet/tcp_ecn.c tcp_ecn_input_segment
   NOTICE
+  # The line number of the first line after PIN.
+  NEXT = PIN.lines.size + 1
   DERIVED = <<~ERL
     %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
     %% SPDX-License-Identifier: BSD-2-Clause AND BSD-3-Clause
@@ -112,10 +118,14 @@ class NetChecksTest < Minitest::Test
 
   def test_notice_must_parse
     assert_equal [['notices', nil]], rules({}, notice: PIN.lines.drop(1).join)
-    assert_equal [['notices', 4]], rules({}, notice: "#{PIN}tag again\n")
-    assert_equal [['notices', 4]], rules({}, notice: "#{PIN}  sys/netinet/tcp.h\n")
-    assert_equal [['notices', 5]], rules({}, notice: "#{PIN}module m\n  ../etc/passwd\n")
-    assert_equal [['notices', 5]], rules({}, notice: "#{PIN}module m\nmodule m\n")
+    without_release = PIN.lines.reject { |line| line.start_with?('release-commit') }.join
+    assert_equal [['notices', nil]], rules({}, notice: without_release)
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}tag again\n")
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}  sys/netinet/tcp.h\n")
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port sys/netinet/tcp_ecn.c\n")
+    assert_equal [['notices', NEXT]], rules({}, notice: "#{PIN}port ../tcp_ecn.c tcp_ecn_input_segment\n")
+    assert_equal [['notices', NEXT + 1]], rules({}, notice: "#{PIN}module m\n  ../etc/passwd\n")
+    assert_equal [['notices', NEXT + 1]], rules({}, notice: "#{PIN}module m\nmodule m\n")
     assert_equal [['notices', nil]], rules({ "#{SRC}/m.erl" => module_text('') }, notice: nil)
   end
 end

@@ -56,9 +56,8 @@ SYN recycles it.
 FreeBSD's switches are taken at their defaults and not translated: `drop_synfin` 0, so a SYN
 with FIN is judged as a SYN; `tcp_tolerate_missing_ts` 1, so a segment without a timestamp
 on a connection that negotiated them is not dropped, and a SYN with a timestamp to one that
-did not is not a reason to recycle; and the obsolete `nolocaltimewait` off. The check that
-the UDP encapsulation port is unchanged has nothing to compare, as the stack does not
-tunnel TCP over UDP.
+did not is not a reason to recycle. The check that the UDP encapsulation port is unchanged
+has nothing to compare, as the stack does not tunnel TCP over UDP.
 """.
 
 -include("erx_tcp.hrl").

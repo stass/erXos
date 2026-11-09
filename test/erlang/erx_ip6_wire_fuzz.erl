@@ -107,8 +107,8 @@ judge(<<6:4, TClass:8, Flow:20, Plen:16, Nxt, Hlim, Src:16/binary, Dst:16/binary
         Rest/binary>> = Frame) when Plen =< byte_size(Rest) ->
     Packet = binary:part(Frame, 0, 40 + Plen),
     Fixed = #ip6{tclass = TClass, flow = Flow, hlim = Hlim, src = Src, dst = Dst, proto = Nxt},
-    case {Plen, Nxt} of
-        {0, 0} -> {refuse, {param_problem, 0, 4}};   % a jumbogram without its option
+    case Plen of
+        0 -> {refuse, silent};                       % no jumbograms
         _ -> chain(Packet, Nxt, 6, 40, 0, [], Fixed)
     end;
 judge(_) ->
@@ -199,10 +199,11 @@ header_end(_, _) ->
     none.
 
 %% The options from offset At to the header's End. An option lies inside its
-%% header; the router alert, known only to hop-by-hop headers, has 4 bytes
-%% left for it and two of data; an unknown type's two high bits say whether to
-%% keep it, drop silently or answer with a parameter problem at its type
-%% byte, to any destination or only a unicast one.
+%% header. Only hop-by-hop headers know the router alert, which has 4 bytes
+%% left for it and two of data, and the jumbo payload option, which drops the
+%% packet silently. An unknown type's two high bits say whether to keep it,
+%% drop silently or answer with a parameter problem at its type byte, to any
+%% destination or only a unicast one.
 options(_, End, End, _, Acc) ->
     {ok, lists:reverse(Acc)};
 options(P, At, End, Kind, Acc) ->
@@ -221,6 +222,7 @@ options(P, At, End, Kind, Acc) ->
                 {5, hopopts, _} when End - At < 4 -> {refuse, silent};
                 {5, hopopts, _} when Len =/= 2 -> {refuse, {param_problem, 0, At + 1}};
                 {5, hopopts, _} -> options(P, At + 2 + Len, End, Kind, [{Type, Data} | Acc]);
+                {16#c2, hopopts, _} -> {refuse, silent};        % no jumbograms
                 _ ->
                     case Type bsr 6 of
                         0 -> options(P, At + 2 + Len, End, Kind, [{Type, Data} | Acc]);

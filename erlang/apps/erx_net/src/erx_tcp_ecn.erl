@@ -175,7 +175,7 @@ class byte, whose low two bits are the ECN field.
 
 -include("erx_tcp_wire.hrl").
 
--export([new/0, input_syn_sent/2, input_parallel_syn/2, input_segment/3, output/2, signal_cwr/1,
+-export([new/0, input_syn_sent/2, input_parallel_syn/2, input_segment/4, output/2, signal_cwr/1,
          enabled/1, syncache_add/1, syncache_respond/2, syncache_retransmit/2,
          syncache_socket/1]).
 
@@ -226,19 +226,25 @@ input_parallel_syn(Flags, State) when Flags band (?TH_CWR bor ?TH_ECE) =:= ?TH_C
 input_parallel_syn(_Flags, State) -> State.
 
 -doc """
-A segment arriving on a synchronized connection (`tcp_ecn_input_segment`). Returns whether
-the peer echoed congestion (ECE on a segment without SYN), for which the caller signals its
-congestion module with `CC_ECN`; whether an ACK must go out now, because the peer's CWR ended
-our ECE; and the new state, which owes ECE when the segment arrived marked CE. A congestion
-module's per-packet ECN hook (`cc_ecnpkt_handler`, DCTCP's) is the caller's.
+A segment arriving once the connection has a SYN from its peer, in TcpState, the state
+before the segment (`tcp_ecn_input_segment`). Returns whether the peer echoed congestion
+(ECE on a segment without SYN), for which the caller signals its congestion module with
+`CC_ECN`; whether an ACK must go out now, because the peer's CWR ended our ECE in a state
+past the handshake in which the peer has sent no FIN (ESTABLISHED, FIN-WAIT-1 or
+FIN-WAIT-2; in any other the CWR ends our ECE without an ACK); and the new state, which
+owes ECE when the segment arrived marked CE. A congestion module's per-packet ECN hook
+(`cc_ecnpkt_handler`, DCTCP's) is the caller's.
 """.
--spec input_segment(0..16#fff, 0..255, state()) -> {Echo :: boolean(), AckNow :: boolean(), state()}.
-input_segment(_Flags, _IpTos, off) ->
+-spec input_segment(0..16#fff, 0..255, erx_tcp:state(), state()) ->
+          {Echo :: boolean(), AckNow :: boolean(), state()}.
+input_segment(_Flags, _IpTos, _TcpState, off) ->
     {false, false, off};
-input_segment(Flags, IpTos, #ecn{} = State0) ->
+input_segment(Flags, IpTos, TcpState, #ecn{} = State0) ->
     Echo = Flags band (?TH_SYN bor ?TH_ECE) =:= ?TH_ECE,
-    AckNow = Flags band ?TH_CWR =/= 0,
-    State1 = case AckNow of
+    Cwr = Flags band ?TH_CWR =/= 0,
+    AckNow = Cwr andalso (TcpState =:= established orelse TcpState =:= fin_wait_1
+                          orelse TcpState =:= fin_wait_2),
+    State1 = case Cwr of
                  true -> State0#ecn{snd_ece = false};
                  false -> State0
              end,

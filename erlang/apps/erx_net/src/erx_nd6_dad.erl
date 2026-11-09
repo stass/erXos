@@ -96,7 +96,7 @@ Duplicate address detection for the tentative addresses of one interface (RFC 48
 discovery and autoconfiguration"), translated from `nd6_dad_start`, `nd6_dad_stop`,
 `nd6_dad_timer`, `nd6_dad_find`, `nd6_dad_ns_output`, `nd6_dad_ns_input` and
 `nd6_dad_na_input` of FreeBSD's `sys/netinet6/nd6_nbr.c` and the delay of
-`in6_broadcast_ifa` of `sys/netinet6/in6.c`, at commit 95719d8a
+`in6_broadcast_ifa` of `sys/netinet6/in6.c`, at commit 975e3605
 (erlang/apps/erx_net/NOTICE-freebsd). The state is a pure value in the interface process's
 state; `expired/3` returns the next state and the actions the process performs, in order.
 

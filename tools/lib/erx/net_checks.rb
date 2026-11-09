@@ -64,7 +64,9 @@ module Erx
     # A FreeBSD file named by a module's header, alone on its line.
     HEADER_MARK = /\A%+[ \t]*FreeBSD:[ \t]+(?<path>\S+)[ \t]*\z/
     FREEBSD_PATH = %r{\A[a-z0-9_]+(?:/[A-Za-z0-9_][A-Za-z0-9_.-]*)+\z}
-    NOTICE_KEYS = %w[tag commit archive-sha256].freeze
+    # The pin, and the release the translation was read from.
+    NOTICE_KEYS = %w[tag commit archive-sha256
+                     release-tag release-commit release-archive-sha256].freeze
     NAME = /\A[A-Za-z_][A-Za-z0-9_]*\z/
 
     Violation = Data.define(:rule, :path, :line, :detail) do
@@ -230,9 +232,10 @@ module Erx
     def header_files(text) = header_lines(text).filter_map { |line| line[HEADER_MARK, :path] }
 
     # The notice parsed, and its malformed lines. The format is line-based:
-    # '#' starts a comment line; "tag", "commit" and "archive-sha256" each
-    # appear once with one value; "module NAME" starts a module's entry, and
-    # each indented line under it is a FreeBSD path and the names of the
+    # '#' starts a comment line; each of NOTICE_KEYS appears once with one
+    # value; "port PATH FUNCTION" names a function whose change between the
+    # release and the pin was ported; "module NAME" starts a module's entry,
+    # and each indented line under it is a FreeBSD path and the names of the
     # functions translated from it.
     def parse_notice(text)
       keys = {}
@@ -247,12 +250,14 @@ module Erx
         problem =
           if line.start_with?(' ', "\t")
             add_file(modules, current, words)
+          elsif words.first == 'port'
+            port_problem(words)
           elsif words.first == 'module'
             add_module(modules, words).tap { |refusal| current = refusal ? nil : words[1] }
           elsif NOTICE_KEYS.include?(words.first)
             add_key(keys, words)
           else
-            'not a key, a module or a file line'
+            'not a key, a port, a module or a file line'
           end
         problems << notice_violation(number, problem) if problem
       end
@@ -276,6 +281,14 @@ module Erx
       return "module #{words[1]} is listed twice" if modules.key?(words[1])
 
       modules[words[1]] = {}
+      nil
+    end
+
+    def port_problem(words)
+      return 'a port line is "port PATH FUNCTION"' unless words.size == 3
+      return "#{words[1]} is not a FreeBSD source path" unless FREEBSD_PATH.match?(words[1])
+      return "#{words[2]} is not a function name" unless NAME.match?(words[2])
+
       nil
     end
 

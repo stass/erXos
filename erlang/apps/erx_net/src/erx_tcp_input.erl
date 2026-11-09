@@ -612,10 +612,12 @@ check_ack(#seg{flags = Flags} = Seg, #tcb{state = State, ack_now = AckNow} = Tcb
 
 %% What a segment that passed every check changes before the ACK and data stages: t_rcvtime
 %% (tcp_input.c:1566), and tcp_ecn_input_segment with its CC_ECN (:1592-1595): the peer's ECE
-%% signals congestion, its CWR asks for an ACK now, and CE owes the peer ECE.
+%% signals congestion, its CWR asks for an ACK now unless the handshake is not over or
+%% the peer has sent its FIN, and CE owes the peer ECE.
 accepted(#seg{flags = Flags, ip_ecn = IpEcn, ack = Ack},
-         #tcb{ecn = Ecn0, ack_now = AckNow0} = Tcb0, #tcp_ctx{now = Now} = Ctx) ->
-    {Echo, AckNow, Ecn} = erx_tcp_ecn:input_segment(Flags, IpEcn, Ecn0),
+         #tcb{state = TcpState, ecn = Ecn0, ack_now = AckNow0} = Tcb0,
+         #tcp_ctx{now = Now} = Ctx) ->
+    {Echo, AckNow, Ecn} = erx_tcp_ecn:input_segment(Flags, IpEcn, TcpState, Ecn0),
     Tcb = Tcb0#tcb{ecn = Ecn, ack_now = AckNow0 orelse AckNow, rcvtime = Now},
     case Echo of
         true -> erx_tcp:cong_signal(Tcb, ecn, Ack, Ctx);

@@ -39,7 +39,7 @@ discovery and autoconfiguration"), translated from `nd6_resolve_slow`, `nd6_llin
 `nd6_llinfo_setstate`, `nd6_is_stale`, `nd6_cache_lladdr` and `nd6_llinfo_get_holdsrc` of
 FreeBSD's `sys/netinet6/nd6.c`, and `nd6_ns_input`, `nd6_na_input` and the address choices
 of `nd6_na_output_fib` and `nd6_ns_output_fib` of `sys/netinet6/nd6_nbr.c`, at commit
-95719d8a (erlang/apps/erx_net/NOTICE-freebsd). The cache is a pure value in the interface
+975e3605 (erlang/apps/erx_net/NOTICE-freebsd). The cache is a pure value in the interface
 process's state; every function returns the next cache and the actions the process
 performs, in order.
 

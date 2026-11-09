@@ -324,6 +324,7 @@ other_protocols_draw_an_error_only_when_they_may_be_answered_test() ->
     ?assertEqual({drop, no_reply}, classify({frame, eth(?BROADCAST_MAC, ?ETHERTYPE_IP, Broadcast)}, view())),
     Gre6 = ip6(?PEER6, ?ME6, ?PROTO_GRE, <<0:64>>),
     ?assertMatch({ok, {other, #{family := inet6}, _}}, local(classify(ip6_frame(Gre6), view()))),
-    %% IPv6's No Next Header is freed unanswered.
-    None = ip6(?PEER6, ?ME6, ?PROTO_NONE, <<>>),
+    %% IPv6's No Next Header is freed unanswered, with the bytes after it (an empty
+    %% payload is a jumbogram, dropped before).
+    None = ip6(?PEER6, ?ME6, ?PROTO_NONE, <<0:64>>),
     ?assertEqual({drop, no_next_header}, classify(ip6_frame(None), view())).

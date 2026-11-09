@@ -67,7 +67,7 @@ reassembled datagram, and makes the checks `ip_input` makes before it reads a pa
 version, header length, header checksum and total length, cutting the trailing bytes at the
 total length; then it walks the options as `ip_dooptions` does, checking each one's length.
 `encode/1` writes a header to send. Translated from FreeBSD's
-`sys/netinet/ip_input.c` and `sys/netinet/ip_options.c` at commit 95719d8a
+`sys/netinet/ip_input.c` and `sys/netinet/ip_options.c` at commit 975e3605
 (erlang/apps/erx_net/NOTICE-freebsd).
 
 Two departures. The first changes only which counter a refused packet lands in, with

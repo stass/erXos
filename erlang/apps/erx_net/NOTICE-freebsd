@@ -4,19 +4,40 @@
 # The modules of erx_net that translate FreeBSD code are derived works of the
 # FreeBSD files they translate. Each such module's header carries, after
 # erXos's own notice, one "%% FreeBSD: PATH" line per file, followed by every
-# copyright line and the licence text of that file at the commit below.
+# copyright line and the licence text of that file at the pinned commit
+# below, which are the same at the release.
 #
-# This file records the release tag and commit the translation was read from,
-# the SHA-256 of the GitHub source archive of that commit, and for
-# every module the FreeBSD files it derives from: "module NAME", then one
-# indented line per file, its path in the source tree followed by the names
-# of the FreeBSD functions translated from it. NetChecks (make check) fails
-# when a module's header and its entry here name different files, when an
-# entry names no module of erx_net, or when the commit or SHA-256 is missing.
+# This file records the pin (tag, commit and the SHA-256 of the GitHub
+# source archive of that commit, FreeBSD 16.0-CURRENT) and the release
+# the translation was read from (FreeBSD 15.1, its tag, commit and
+# archive SHA-256). Of what changed between the two, only what the wire
+# or an interoperating peer can see and the fixes of real bugs are ported;
+# each "port PATH FUNCTION" line names a FreeBSD function whose change was
+# ported. Everything else is as it was read from the release, so the
+# line citations (file.c:N, and :N after a named file) in erx_net's
+# comments and in the design are to the release.
+#
+# Then, for every module, the FreeBSD files it derives from: "module NAME",
+# then one indented line per file, its path in the source tree followed by
+# the names of the FreeBSD functions translated from it. NetChecks (make
+# check) fails when a module's header and its entry here name different
+# files, when an entry names no module of erx_net, or when a commit or
+# SHA-256 is missing.
 
-tag release/15.1.0-p6
-commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
-archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
+tag main-n285245
+commit 975e3605ebb15cbaf5a25c1c9d1f51aed41291d0
+archive-sha256 f71de70a45f84130e235b067f76bd9eefcc691bb02db054e01863981c2f74588
+
+release-tag release/15.1.0-p6
+release-commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
+release-archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
+
+# A peer's CWR forces an ACK only in ESTABLISHED, FIN-WAIT-1 and FIN-WAIT-2.
+port sys/netinet/tcp_ecn.c tcp_ecn_input_segment
+# No jumbograms: a zero payload length is dropped silently.
+port sys/netinet6/ip6_input.c ip6_input
+# No jumbograms: a jumbo payload option is dropped silently.
+port sys/netinet6/ip6_input.c ip6_process_hopopts
 
 module erx_net_eth
   sys/net/if_ethersubr.c ether_input_internal

@@ -19,6 +19,11 @@ drops blank lines and comments (a crude `/* */` and `//` stripper, good to
 a few percent). The licence survey came from another scratch script that
 reads each file's SPDX line.
 
+erx_net's translation, read from this source, is pinned at a FreeBSD
+16.0-CURRENT commit, with the changes between the two that the wire can see
+ported (erlang/apps/erx_net/NOTICE-freebsd). This record describes the
+15.1 source above and was not re-checked against that commit.
+
 **Corrections.** This record's citations were checked against the same
 pinned source, by the design's author and again when the record entered
 the tree, and the errors found were corrected, each marked

@@ -34,7 +34,7 @@
 The ARP codec for IPv4 over Ethernet (docs/design-network-stack.md, "IPv4 and ARP").
 `decode/1` takes the payload of an Ethernet frame of type ARP and makes the checks of
 `arpintr` and the first check of `in_arpinput`, translated from FreeBSD's
-`sys/netinet/if_ether.c` at commit 95719d8a (erlang/apps/erx_net/NOTICE-freebsd); `encode/1`
+`sys/netinet/if_ether.c` at commit 975e3605 (erlang/apps/erx_net/NOTICE-freebsd); `encode/1`
 writes a packet to send. Which packets create or update a neighbour entry, and which are
 answered, is `erx_arp`'s decision.
 

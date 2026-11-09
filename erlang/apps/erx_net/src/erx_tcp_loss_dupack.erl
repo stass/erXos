@@ -86,9 +86,9 @@ sys/netinet/tcp_sack.c, which erXos does not read, is written from the RFCs: the
 is erx_tcp_sendlog's (RFC 6675), and a partial acknowledgement without SACK blocks in SACK
 recovery takes PRR's path (RFC 6937) where FreeBSD calls `tcp_sack_partialack`.
 
-FreeBSD's defaults are fixed, as erXos has no sysctl for them: RFC 6675 recovery
-(`tcp_do_newsack`), PRR (`tcp_do_prr`, RFC 6937) and limited transmit (`tcp_do_rfc3042`,
-RFC 3042) are on, and the duplicate threshold is 3 (`tcprexmtthresh`). Branches that only
+FreeBSD's defaults are fixed, as erXos has no sysctl for them: PRR (`tcp_do_prr`, RFC 6937)
+and limited transmit (`tcp_do_rfc3042`, RFC 3042) are on, and the duplicate threshold is 3
+(`tcprexmtthresh`); RFC 6675 recovery has no switch in FreeBSD either. Branches that only
 those settings switched off reach are not translated. FreeBSD's lost-retransmission
 detection (`tcp_do_lrd`) is not built: no RFC specifies it and its code is in tcp_sack.c.
 

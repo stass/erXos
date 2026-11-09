@@ -34,7 +34,7 @@ The keyed neighbour table that `erx_arp` and `erx_nd6` keep their entries in
 the module's own entry, ordered by each entry's deadline, with the transmit path's view of
 every entry derived from the entry alone. FreeBSD's `lltable` is shared by ARP and neighbour
 discovery the same way; the frame queue's rule is `lltable_append_entry_queue` of
-`sys/net/if_llatbl.c` at commit 95719d8a (erlang/apps/erx_net/NOTICE-freebsd).
+`sys/net/if_llatbl.c` at commit 975e3605 (erlang/apps/erx_net/NOTICE-freebsd).
 
 The owning module is a callback module that says three things of its entries: when the
 table next hands an entry back to it (`deadline/1`); what the transmit path sees of it,

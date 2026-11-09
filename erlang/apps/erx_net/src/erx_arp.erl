@@ -34,7 +34,7 @@
 The ARP neighbour table of one interface (docs/design-network-stack.md, "IPv4 and ARP"),
 translated from `arpresolve_full`, `in_arpinput`, `arp_check_update_lle`,
 `arp_mark_lle_reachable`, `arptimer`, `arprequest_internal` and `arp_announce_ifaddr` of
-FreeBSD's `sys/netinet/if_ether.c` at commit 95719d8a (erlang/apps/erx_net/NOTICE-freebsd).
+FreeBSD's `sys/netinet/if_ether.c` at commit 975e3605 (erlang/apps/erx_net/NOTICE-freebsd).
 The table is a pure value in the interface process's state; every function returns the next
 table and the actions the process performs, in order.
 

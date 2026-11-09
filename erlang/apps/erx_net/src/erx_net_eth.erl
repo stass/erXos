@@ -35,7 +35,7 @@ The Ethernet II codec (docs/design-network-stack.md, "Packets become checked rec
 once"). `decode/1` is the first decoder of a received frame, whose device header the driver
 has already stripped; `encode/1` writes the header of a frame to send. The check is the one
 `ether_input_internal` makes before reading the header, translated from FreeBSD's
-`sys/net/if_ethersubr.c` at commit 95719d8a (erlang/apps/erx_net/NOTICE-freebsd).
+`sys/net/if_ethersubr.c` at commit 975e3605 (erlang/apps/erx_net/NOTICE-freebsd).
 
 What the addresses and the EtherType mean (broadcast, multicast, which protocol) is the
 classifier's decision, not the codec's: any EtherType decodes, and 802.3 length fields and

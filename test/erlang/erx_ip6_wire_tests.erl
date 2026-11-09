@@ -49,12 +49,17 @@ hop_by_hop_router_alert_test() ->
     ?assertEqual({error, {param_problem, ?ICMP6_PARAMPROB_HEADER, 43}},
                  erx_ip6_wire:decode(packet(?IPPROTO_HOPOPTS, Bad))).
 
-jumbograms_are_refused_test() ->
+%% No jumbograms: a zero payload length, whatever follows the fixed header, and a
+%% jumbo payload option in a hop-by-hop header are dropped silently. Elsewhere the
+%% option's type is an unknown one, whose rule answers a unicast packet.
+jumbograms_are_dropped_test() ->
     Jumbo = opts(?IPPROTO_UDP, <<16#c2, 4, 70000:32>>),
+    ?assertEqual({error, jumbogram}, erx_ip6_wire:decode(packet(?IPPROTO_HOPOPTS, Jumbo))),
+    ?assertEqual({error, jumbogram}, erx_ip6_wire:decode(packet(?IPPROTO_HOPOPTS, 0, Jumbo))),
+    ?assertEqual({error, jumbogram}, erx_ip6_wire:decode(packet(?IPPROTO_UDP, 0, udp()))),
+    ?assertEqual({error, jumbogram}, erx_ip6_wire:decode(packet(?IPPROTO_NONE, <<>>))),
     ?assertEqual({error, {param_problem_unicast, ?ICMP6_PARAMPROB_OPTION, 42}},
-                 erx_ip6_wire:decode(packet(?IPPROTO_HOPOPTS, Jumbo))),
-    ?assertEqual({error, {param_problem, ?ICMP6_PARAMPROB_HEADER, 4}},
-                 erx_ip6_wire:decode(packet(?IPPROTO_HOPOPTS, 0, Jumbo))).
+                 erx_ip6_wire:decode(packet(?IPPROTO_DSTOPTS, Jumbo))).
 
 unknown_option_actions_test() ->
     Decode = fun(Type) ->

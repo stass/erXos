@@ -84,10 +84,11 @@ departure in which ICMPv6 error a refused packet draws. Along the walk:
 * hop-by-hop and destination options are parsed and skipped by their
   option types' rules (`ip6_unknown_opt`); every option must lie inside its
   header, as `dest6_input` requires of both kinds;
-* a jumbo payload option is an option this stack does not recognise, so its
-  type's rule refuses it (RFC 2675: a node without jumbogram support treats
-  it as unrecognised), and a zero payload length with a hop-by-hop header
-  is refused as `ip6_input_hbh` refuses it;
+* jumbograms (RFC 2675) are not supported: a zero payload length, whatever
+  follows the fixed header, and a jumbo payload option in a hop-by-hop
+  header are dropped silently, as `ip6_input` and `ip6_process_hopopts`
+  drop them; in a destination options header the jumbo option's type is an
+  unknown one, as `dest6_input` treats it;
 * a hop-by-hop header after the first position is an unrecognised next
   header (RFC 8200, section 4.1);
 * a routing header with segments left is refused, whatever its type, which
@@ -141,6 +142,7 @@ bytes, its more-fragments flag and its identification.
                 | header_too_long           % ip6s_exthdrtoolong
                 | bad_option                % ip6s_toosmall in the options
                 | too_many_headers          % ip6s_toomanyhdr
+                | jumbogram                 % ifs6_in_discard; none for the option
                 | unknown_option
                 | {param_problem, 0..3, non_neg_integer()}
                 | {param_problem_unicast, 2, non_neg_integer()}.
@@ -153,6 +155,7 @@ bytes, its more-fragments flag and its identification.
 -define(IP6OPT_PAD1, 0).
 -define(IP6OPT_PADN, 1).
 -define(IP6OPT_ROUTER_ALERT, 5).
+-define(IP6OPT_JUMBO, 16#c2).
 -define(IP6OPT_RTALERT_LEN, 4).
 -define(IP6F_OFF_MASK, 16#fff8).
 -define(IP6F_MORE_FRAG, 16#0001).
@@ -191,10 +194,10 @@ decode(<<6:4, TClass:8, Flow:20, Plen:16, Nxt:8, Hlim:8,
 decode(_) ->
     {error, bad_version}.
 
-%% A zero payload length with a hop-by-hop header announces a jumbogram,
-%% refused as ip6_input_hbh refuses one without its option.
-fixed(#ip6{proto = ?IPPROTO_HOPOPTS}, <<>>) ->
-    {error, {param_problem, ?ICMP6_PARAMPROB_HEADER, ?PLEN_PTR}};
+%% A zero payload length announces a jumbogram, which ip6_input drops before it
+%% reads any extension header.
+fixed(_, <<>>) ->
+    {error, jumbogram};
 fixed(#ip6{proto = Nxt} = Header, Payload) ->
     walk(Nxt, #walk{}, Payload, Header).
 
@@ -312,8 +315,10 @@ options(_, _, _, _) ->
     {error, bad_option}.
 
 %% One option, Avail the bytes left in its header from its type on. Only
-%% hop-by-hop headers know the router alert (ip6_process_hopopts); a jumbo
-%% payload option is unknown here, so its type's rule refuses it.
+%% hop-by-hop headers know the router alert and the jumbo payload option,
+%% which ip6_process_hopopts drops; elsewhere both are unknown types.
+option(?IP6OPT_JUMBO, _, _, _, hopopts) ->
+    {error, jumbogram};
 option(?IP6OPT_PADN, _, _, _, _) ->
     skip;
 option(?IP6OPT_ROUTER_ALERT, _, Avail, _, hopopts) when Avail < ?IP6OPT_RTALERT_LEN ->

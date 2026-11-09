@@ -41,7 +41,7 @@
 The port rules of the demultiplexing table's one insertion funnel
 (docs/design-network-stack.md, "Ports and the demultiplexing table"). This module holds
 their pure part, the choice of an ephemeral port, translated from `in_pcb_lport_dest` of
-FreeBSD's `sys/netinet/in_pcb.c` at commit 95719d8a (erlang/apps/erx_net/NOTICE-freebsd),
+FreeBSD's `sys/netinet/in_pcb.c` at commit 975e3605 (erlang/apps/erx_net/NOTICE-freebsd),
 with FreeBSD's defaults: the range 10000 to 65535 (`ipport_firstauto`,
 `ipport_lastauto`) searched from a random start (`ipport_randomized`, 1).
 

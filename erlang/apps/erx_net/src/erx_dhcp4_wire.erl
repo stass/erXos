@@ -97,7 +97,7 @@ options and RFC 3442's classless static routes; docs/design-network-stack.md, "A
 and routes"). It is written from the RFCs, except that the option overload, the routes'
 checks and the domain name's checks translate FreeBSD's `dhclient` (`parse_options` of
 `sbin/dhclient/options.c`; `check_classless_option`, `res_hnok`, `check_search` and
-`option_as_string` of `sbin/dhclient/dhclient.c`, at commit 95719d8a,
+`option_as_string` of `sbin/dhclient/dhclient.c`, at commit 975e3605,
 erlang/apps/erx_net/NOTICE-freebsd). A message arrives as the payload of a UDP datagram
 that erx_udp_wire has already checked, so this decoder checks no sum of its own; it is the
 only maker of a received `#dhcp4{}`.
