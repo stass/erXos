@@ -1,0 +1,181 @@
+/*
+ * Modified by erXos (ORIGIN.md):
+ * memimagemove and the image pool are gone: images are calloc'd,
+ * zeroed with their row padding, with one word past the rows, and
+ * the caller-pc word is 0.
+ */
+#include <u.h>
+#include <libc.h>
+#include <draw.h>
+#include <memdraw.h>
+
+
+Memimage*
+allocmemimaged(Rectangle r, ulong chan, Memdata *md)
+{
+	int d;
+	Memimage *i;
+
+	if((d = chantodepth(chan)) == 0) {
+		werrstr("bad channel descriptor %.8lux", chan);
+		return nil;
+	}
+	if(badrect(r)){
+		werrstr("bad rectangle %R", r);
+		return nil;
+	}
+
+	i = mallocz(sizeof(Memimage), 1);
+	if(i == nil)
+		return nil;
+
+	i->data = md;
+	i->width = wordsperline(r, d);
+	i->zero = r.min.y*(int)(sizeof(ulong)*i->width) + ((r.min.x*d) >> 3);
+	i->zero = -i->zero;
+
+	i->r = r;
+	i->clipr = r;
+	i->flags = Dx(r) == 1 && Dy(r) == 1? Fsimple: 0;
+	i->layer = nil;
+	i->cmap = memdefcmap;
+	if(memsetchan(i, chan) < 0){
+		free(i);
+		return nil;
+	}
+	return i;
+}
+
+Memimage*
+allocmemimage(Rectangle r, ulong chan)
+{
+	int d;
+	ulong nw;
+	uchar *p;
+	Memdata *md;
+	Memimage *i;
+
+	if((d = chantodepth(chan)) == 0) {
+		werrstr("bad channel descriptor %.8lux", chan);
+		return nil;
+	}
+	if(badrect(r)){
+		werrstr("bad rectangle %R", r);
+		return nil;
+	}
+	nw = wordsperline(r, d)*Dy(r);
+	if(nw >= ((1UL<<31)-sizeof(Memdata*)-sizeof(ulong))/sizeof(ulong)){
+		werrstr("bad rectangle %R, depth %d", r, d);
+		return nil;
+	}
+
+	md = malloc(sizeof(Memdata));
+	if(md == nil)
+		return nil;
+
+	md->ref = 1;
+	/*
+	 * erXos: calloc zeroes the row padding; and one word past the rows,
+	 * since readbyte loads four bytes for each pixel of a 24-bit image.
+	 */
+	md->base = calloc(1, sizeof(Memdata*)+(2+nw)*sizeof(ulong));
+	if(md->base == nil){
+		free(md);
+		return nil;
+	}
+
+	p = (uchar*)md->base;
+	*(Memdata**)p = md;
+	p += sizeof(Memdata*);
+
+	*(ulong*)p = 0;
+	p += sizeof(ulong);
+
+	/* if this changes, memimagemove must change too */
+	md->bdata = p;
+	md->allocd = 1;
+
+	i = allocmemimaged(r, chan, md);
+	if(i == nil){
+		free(md->base);
+		free(md);
+		return nil;
+	}
+	md->imref = i;
+	return i;
+}
+
+void
+freememimage(Memimage *i)
+{
+	if(i == nil)
+		return;
+	if(--i->data->ref == 0 && i->data->allocd){
+		if(i->data->base)
+			free(i->data->base);
+		free(i->data);
+	}
+	free(i);
+}
+
+/*
+ * Wordaddr is deprecated.
+ */
+ulong*
+wordaddr(Memimage *i, Point p)
+{
+	return (ulong*) ((uintptr)byteaddr(i, p) & ~(sizeof(ulong)-1));
+}
+
+uchar*
+byteaddr(Memimage *i, Point p)
+{
+	uchar *a = i->data->bdata+i->zero;
+	return a + p.y*(int)(sizeof(ulong)*i->width) + ((p.x*i->depth) >> 3);
+}
+
+int
+memsetchan(Memimage *i, ulong chan)
+{
+	int d;
+	int t, j, k;
+	ulong cc;
+	int bytes, usedt;
+
+	if((d = chantodepth(chan)) == 0) {
+		werrstr("bad channel descriptor");
+		return -1;
+	}
+
+	i->depth = d;
+	i->chan = chan;
+	i->flags &= ~(Fgrey|Falpha|Fcmap|Fbytes);
+	bytes = 1;
+	usedt = 0;
+	for(cc=chan, j=0, k=0; cc; j+=NBITS(cc), cc>>=8, k++){
+		t=TYPE(cc);
+		if(t < 0 || t >= NChan || (t != CIgnore && usedt & (1<<t))){
+			werrstr("bad channel string");
+			return -1;
+		}
+		if(t == CGrey)
+			i->flags |= Fgrey;
+		if(t == CAlpha)
+			i->flags |= Falpha;
+		if(t == CMap && i->cmap == nil){
+			i->cmap = memdefcmap;
+			i->flags |= Fcmap;
+		}
+
+		i->shift[t] = j;
+		i->mask[t] = (1<<NBITS(cc))-1;
+		i->nbits[t] = NBITS(cc);
+		usedt |= 1<<t;
+		if(NBITS(cc) != 8)
+			bytes = 0;
+	}
+	i->nchan = k;
+	if(bytes)
+		i->flags |= Fbytes;
+	return 0;
+}

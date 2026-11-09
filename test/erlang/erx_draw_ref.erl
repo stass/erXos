@@ -79,8 +79,9 @@ step({alloc, _, Screen, _, _, _, _, _, _}, _State) when Screen =/= 0 ->
 step({alloc, Id, _, _, _, _, _, _, _}, #{images := Images}) when is_map_key(Id, Images) ->
     {error, eexist};
 step({alloc, Id, _, _, Chan, Repl, R, Clipr, Color}, #{side := Side} = State) ->
-    case {depth(Chan), bad_rect(R, Side)} of
-        {Depth, false} when Depth > 0 ->
+    Depth = depth(Chan),
+    case Depth > 0 andalso supported_chan(Chan, Depth) andalso not bad_rect(R, Side) of
+        true ->
             %% devdraw intersects the clip rectangle with R unless the image
             %% replicates; that is unobservable, since every draw clips to both
             %% and `c` replaces the clip rectangle whole, so Clipr is kept.
@@ -114,7 +115,7 @@ step(flush, State) ->
     {ok, State};
 step({Load, Id, R, Pixels}, State) when Load =:= load; Load =:= cload ->
     with_image(Id, State, fun(Image) ->
-        case inside(R, maps:get(r, Image)) andalso
+        case not empty(R) andalso inside(R, maps:get(r, Image)) andalso
              byte_size(Pixels) =:= wire_bytes(R, Image) * height(R) of
             true -> {ok, put_image(Id, load(Image, R, Pixels), State)};
             false -> {error, einval}
@@ -122,7 +123,7 @@ step({Load, Id, R, Pixels}, State) when Load =:= load; Load =:= cload ->
     end);
 step({read, Id, R}, State) ->
     with_image(Id, State, fun(Image) ->
-        case not inverted(R) andalso inside(R, maps:get(r, Image)) of
+        case not empty(R) andalso inside(R, maps:get(r, Image)) of
             true -> {reply, unload(Image, R), State};
             false -> {error, einval}
         end
@@ -142,9 +143,37 @@ put_image(Id, Image, #{images := Images} = State) ->
 %% An image rectangle draw(3) refuses: empty or inverted, as badrect and
 %% allocmemimage refuse it, or wider or taller than the quota's side.
 bad_rect({X0, Y0, X1, Y1}, Side) ->
-    X1 - X0 < 1 orelse Y1 - Y0 < 1 orelse X1 - X0 > Side orelse Y1 - Y0 > Side.
+    X1 - X0 < 1 orelse Y1 - Y0 < 1 orelse X1 - X0 > Side orelse Y1 - Y0 > Side orelse
+        not badrect_bounds({X0, Y0, X1, Y1}).
 
-inverted({X0, Y0, X1, Y1}) -> X1 < X0 orelse Y1 < Y0.
+%% 9front's badrect: x within 2^25 either side of 0 and x's width times
+%% each y within 2^28, so libmemdraw's int arithmetic cannot overflow.
+badrect_bounds({X0, Y0, X1, Y1}) ->
+    DX = X1 - X0,
+    lists:all(fun(X) -> X >= -(1 bsl 25) andalso X < 1 bsl 25 end, [X0, X1]) andalso
+        lists:all(fun(Y) -> DX * Y >= -(1 bsl 28) andalso DX * Y < 1 bsl 28 end, [Y0, Y1]).
+
+%% The channels erx_memdraw draws as draw(2) defines them (design-display.md,
+%% "The pixel primitives"): no type twice but x, as memsetchan asks; below
+%% 8 bits a pixel one grey channel; a map channel m8 alone; and no grey
+%% beside a colour. Types are draw.h's: r, g, b 0 to 2, k 3, m 5, x 6.
+supported_chan(Chan, Depth) ->
+    Types = chan_types(Chan),
+    Named = [Type || Type <- Types, Type =/= 6],
+    Colour = [Type || Type <- Types, Type =< 2],
+    lists:usort(Named) =:= lists:sort(Named) andalso
+        case {Depth < 8, lists:member(5, Types)} of
+            {true, _} -> Types =:= [3];
+            {false, true} -> Chan =:= 16#58;
+            {false, false} -> not (lists:member(3, Types) andalso Colour =/= [])
+        end.
+
+chan_types(0) -> [];
+chan_types(Chan) -> [(Chan band 16#ff) bsr 4 | chan_types(Chan bsr 8)].
+
+%% loadmemimage and unloadmemimage refuse, through badrect, an empty or
+%% inverted rectangle.
+empty({X0, Y0, X1, Y1}) -> X1 =< X0 orelse Y1 =< Y0.
 
 %%% Channel descriptors
 

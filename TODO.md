@@ -383,39 +383,51 @@ it; git history is the record of completed work.
   quadratic in a node's children (a reversed flat node of 16,000 children: 10 s for `delta/2`, 20 s to apply, on
   Homebrew erl), and an index above 65,535 does not fit `diff_op()` or the binary form. Add a per-node children
   limit to the validity rules (at most 65,536; 1,024 suggested), which bounds both by construction.
-* [Medium] `test/fixtures/erx_draw_cload.c`, the draw codec's C twin and `erx_draw_image`, [Draw
-  messages](docs/design-display.md#draw-messages) and "Verification and testing": the 9front build does not exist yet,
-  so the twin frames a `Y` with `erx_draw_cload_frame`, a stand-in written from `cloadmemimage`'s walk, and the
-  differential test of the codec against the twin compares `erx_draw_image` with that stand-in, not with 9front's
-  decoder. With the 9front build: link its `cloadmemimage` behind `erx_draw_cload_frame` and delete the stand-in, check
-  `y` lengths against its `bytesperline` (the EUnit vectors are hand-computed from its source), and add
-  `erx_draw_image`'s own oracle test (same payloads, counts and pixels) with its seeded run-length fault.
+* [Low] `test/fixtures/erx_draw_codec_harness.c` and `tools/fuzz/draw_codec_target.rb`, the draw codec's C twin,
+  [Draw messages](docs/design-display.md#draw-messages): the twin still frames a `Y` with the stand-in
+  `erx_draw_cload_frame`, so the differential test of the codec against it compares `erx_draw_image` with the
+  stand-in, not with 9front's decoder. Link `display/libmemdraw/cload.c` behind it and delete the stand-in.
+  `cloadmemimage`'s `badrect` bounds are narrower than the stand-in's, so keep the harness's rectangles within them.
 * [Medium] `test/erlang/erx_draw_ref.erl`, [the pixel primitives](docs/design-display.md#verification-and-testing):
   the reference models `b`, `c`, `d`, `f`, `O`, `o`, `v`, `y`, `Y` and `r`, and answers `enotsup` to `i`, `l`, `s`
   and `x`, which the design has it cover as the masked draws they consist of. Add them, a font cache of glyph
   records with each glyph drawn as a mask, before `erx_memdraw`'s strings are compared with it (Track D P3).
-* [Medium] `test/erlang/erx_draw_ref.erl` against 9front's `libmemdraw`, [the pixel
-  primitives](docs/design-display.md#verification-and-testing): the design checks `erx_memdraw` against both the
-  reference (drawtest.c's `getpixel`, `putpixel` and `drawonepixel`) and the 9front build, and where those two
-  disagree it cannot match both. Read from plan9port's copy, they disagree on these:
-  * Channels. An image of fewer than 8 bits a pixel without a grey channel (`m4`, `r1g1b1x1`): `readnbit` points red,
-    green and blue at one byte, so composing onto it keeps the blue result as its grey, where drawtest writes
-    RGB2K(r, g, b). A map channel other than `m8` alone (`m8a8`, `m4k4`): `readcmap` assumes two bytes a pixel with
-    alpha, and `writebyte` drops the map index. Grey mixed with colour (`k8r8`): `writebyte` writes only the grey.
-  * Fast paths of `memimagedraw`. A plain copy (`memoptdraw`'s `memmove`: S or SoverD, opaque 1x1 replicated mask,
-    the same channel on both sides, no source alpha) keeps the source's `x` bits, which `putpixel` writes as 0. When
-    source, mask and destination are all `k1`, unreplicated and bit-aligned, `memoptdraw` computes
-    `mask ? src : dst` for every operation, so `S` or `Clear` through a 0 bit keeps the destination (an upstream
-    bug: its own `boolcalc1011` clears). A 1x1 replicated source of alpha 0 draws nothing under an operation that
-    keeps DoutS (`_memimagedrawsetup`), even with a colour above its alpha.
-  * Overlap. `alphadraw` buffers only a source that is the destination and walks rows top-down, so a mask that is
-    the destination, or a replicated source that is, is read partly after it is written; the reference reads every
-    pixel as it was before the message.
-  * `y` left of 0. Where `bytesperline` counts one byte more than the row covers (a sub-byte image, R.max.x < 0),
-    `_loadmemimage` writes that byte, which holds pixels right of R; the reference writes only R.
-  Check each against 9front's source when it is imported; then fix erXos's copy (the `k1` path at least), refuse
-  the channels in `b` (a design change to draw(3)'s refusals), or define the case in the design and the reference.
-  Until then the differential test keeps its random operations off these cases.
+* [Medium] `display/memdraw/erx_memdraw.c`, [the pixel
+  primitives](docs/design-display.md#verification-and-testing): the 9front build (unmodified 9front `libmemdraw`
+  built for the host, the test tool of design.md's dependency table) does not exist yet, so `erx_memdraw` is checked
+  only against `erx_draw_ref`. Build it, run `erx_memdraw`'s operations and the shapes against it, and treat each
+  of erXos's edits listed in `display/libmemdraw/ORIGIN.md` as a documented difference with a test. One of those
+  edits is an upstream bug (`readbyte`'s alpha-only read of a replicated grey-and-alpha mask wrote grey into the
+  alpha buffer): a candidate report to 9front.
+* [Medium] `display/memdraw/erx_memdraw_nif.c`, [Draw messages](docs/design-display.md#draw-messages): the move to a
+  dirty scheduler counts only the clipped destination's bytes, so two calls that cost more stay on a normal scheduler:
+  `alloc`, whose fill writes the whole image, and a draw whose mask, or replicated source, is the destination, which
+  copies the whole destination image first (`snapshot`) however small the clipped rectangle. Count the bytes each call
+  actually touches; measure a full-screen `alloc` and a 1-pixel self-masked draw on a 4K screen image to set the bound.
+  `erx_memdraw_draw_bytes` also reads the live image headers, apart from the draw's own copy, so a concurrent `clip`
+  can make a large draw count small (scheduling only; the draw itself is checked on its copy).
+* [Medium] `display/memdraw/`, the chokepoint "only `erx_memdraw`'s listed functions touch pixel memory, and each
+  takes an `erx_clip_t`" of [Chokepoints](docs/design-display.md#chokepoints) and G2: no build check enforces it, and
+  its wording does not fit `load`, `unload`, `cload` and `alloc`'s fill, which touch pixels over a rectangle
+  `rows_of` or `allocmemimage` checked, not an `erx_clip_t`. Restate the rule (every pixel loop runs over a rectangle
+  that one of a listed set of checkers produced) and add the build check with its seeded violation.
+  The same rule should make the header race impossible by construction: `erx_memdraw_draw` copies each image's
+  header once because `clip` rewrites `flags` and `clipr` in the shared `Memimage` (a C11 data race, memory-safe only
+  because the copy is checked whole). Every later primitive that reads `clipr` or `Frepl` (lines, ellipses, strings)
+  must copy it too. Take the replicate bit and clip rectangle out of the shared header (kept by the image's owner and
+  passed to each call, or a per-image record `clip` replaces whole), so the header is immutable after `alloc`.
+* [Low] `display/memdraw/`, erx_memdraw's tests: nothing exercises a draw that moves to a dirty scheduler or an
+  `enomem` answer (`alphadraw`'s buffer or the snapshot failing to allocate). Add a draw over 64 KiB and an
+  allocation-failure seed to `test/erlang/erx_memdraw_tests.erl`.
+* [Low] `display/libmemdraw/draw.c`, `alphadraw`: its per-call buffer comes from `mallocz(n, 0)`, not zeroed, as
+  upstream's was not. Zero it (`mallocz(n, 1)`), or show that every byte is written before it is read and
+  say so beside the call.
+* [Low] `test/erlang/erx_draw_ref.erl` and `erlang/apps/erx_display/src/erx_draw_core.erl`: `supported_chan/2` is
+  copied between the core and the reference, so a change to the channels `b` refuses must be made in both. Export it
+  from the core, or keep the copy as the oracle's own and say so in it.
+* [Low] `display/memdraw/erx_memdraw_nif.c`: `ERL_NIF_INIT` gives no `upgrade` callback, so reloading `erx_memdraw`
+  while images are live fails rather than taking over the resource type. Add one (`enif_open_resource_type` with
+  `ERL_NIF_RT_TAKEOVER`) when hot reload of the display domain is wanted.
 * [Low] `tools/lib/erx/abi_emit_draw.rb`: design-display.md says the generator also produces the message table of its
   interface section from `draw.txt`; it does not, and the table in "Draw messages" is hand-written.
 * [Medium] `display/lvgl/erx_lvgl.c`, [The widget server](docs/design-display.md#the-widget-server) and design-abi.md

@@ -472,11 +472,30 @@ above 11 is refused with `EINVAL`, which devdraw does not check: 0 to 11
 are the twelve Porter-Duff operations of draw(2).
 Every other refusal is devdraw's own check, mapped to an errno: an id the
 connection does not hold `ENOENT`; an id it holds, in `b`, `EEXIST`; past
-the quota `ENOMEM`; and `EINVAL` for an unknown channel, a negative
+the quota `ENOMEM`; and `EINVAL` for an unknown or refused channel (below), a negative
 semi-axis or thickness, a glyph index outside the font cache, an `s`,
 `x` or `l` naming an image that is not one, an `r`, `y` or `Y` rectangle
-not inside its image, and an image rectangle that 9front's `badrect`
-refuses or wider or taller than the quota's side.
+not inside its image, an empty `y` or `r` rectangle, as `loadmemimage` and
+`unloadmemimage` refuse it, and an image rectangle that 9front's `badrect`
+refuses or wider or taller than the quota's side. `badrect` keeps x within
+[-2^25, 2^25), y within [-2^28, 2^28) and the width times each y within
+2^28, so `libmemdraw`'s 32-bit arithmetic over a rectangle cannot overflow.
+An image wider than 2^16 pixels is refused with `EINVAL` whatever the
+quota (`erx_memdraw`'s `ERX_MEMDRAW_MAX_WIDTH`): `alphadraw` sizes its row
+buffer in `int`, at worst about 136 bytes a pixel of the row, and this
+bound keeps it below 2^24 bytes.
+
+**Channels `b` refuses.** `b` refuses with `EINVAL` the channels that
+`libmemdraw` does not draw as draw(2) defines them: below 8 bits a pixel,
+anything but `k1`, `k2` or `k4` alone; a map channel other than `m8`
+alone; grey beside a colour channel (`k8r8`); and a channel type twice
+(`x` excepted). This departs from draw(3), which accepts any well-formed
+channel descriptor: `libmemdraw`'s `readnbit`, `readcmap` and `writebyte`
+would compose these wrongly (a sub-byte image without grey keeps one
+colour as its grey, a map channel with alpha is read as two bytes a pixel
+and loses its index, `k8r8` writes only the grey), and the pixels would
+match no definition. `erx_draw_core`, the reference `erx_draw_ref` and the
+NIF all refuse them.
 
 `A`, `F`, `S` and `t` (screens and layers), `N` and `n` (names), `D`
 (debugging), `a` and `w` (9front's affine warp, which plan9port's
@@ -493,7 +512,10 @@ holding a 23-bit signed value, as plan9port's `libdraw` writes them and
 devdraw reads them; the manual's `dp[2*2*(n+1)]` is their uncoded size.
 And the pixels of `y` and `Y` are exactly the bytes that fill the
 rectangle: Dy(r) rows of `bytesperline(r, depth)` bytes each, where
-depth is that of the image's channel. `y` carries them raw, so its
+depth is that of the image's channel and `bytesperline` is 9front's
+formula: the bytes from the one holding the row's first pixel through
+the one holding its last, with bytes aligned at x = 0 on both sides of it
+(`erx_draw_image:bytes_per_line/2`). `y` carries them raw, so its
 payload is their count. `Y` carries image(6)'s compressed form, a
 sequence of codes each of which is a literal run (a byte c of 128 or
 more, then c-127 bytes as they are) or a back-reference (a byte c below
@@ -1128,7 +1150,8 @@ clipped to the message's clip rectangle, as devdraw's `drawchar`
 computes them. Those are the only coordinates the core derives, and a
 message one of whose derived coordinates leaves draw(3)'s 32 bits fails
 with `EINVAL`, so `erx_memdraw` receives only 32-bit coordinates. An `r`
-rectangle that is inverted lies inside no image and fails with `EINVAL`.
+rectangle that is inverted lies inside no image, and one that is empty is
+refused as a `y` is; both fail with `EINVAL`.
 
 Each operation goes to `erx_memdraw`, which computes the clipped
 rectangle with `erx_draw_clip` from the destination's clip rectangle,
@@ -1137,14 +1160,20 @@ runs `libmemdraw`'s primitive over it: `memimagedraw` for `d`, for `l`
 with operation `S`, for each glyph of `s` and `x` with the glyph as
 mask, and for `x`'s background; `memline`, `mempoly`, `memfillpoly`,
 `memellipse` and `memarc` for the shapes; `loadmemimage` for `y`, and
-`unloadmemimage` for `r`. A `Y` message never reaches `erx_memdraw` as
+`unloadmemimage` for `r`. Each operation returns the clipped rectangle it
+touched, or `none` when it drew nothing: for a draw, the destination rectangle
+after clipping; for a `y`, its rectangle. The window process unions those
+into its 16-rectangle dirty list; `erx_draw_core` computes no dirty
+rectangles. A `Y` message never reaches `erx_memdraw` as
 compressed bytes: the codec decoded it with `erx_draw_image` while
 framing it, and the operation it plans is the `y` load of the decoded
 pixels. So `erx_memdraw` parses nothing a client wrote: it takes decoded
 messages, rectangles and pixel rows, and a load is given exactly the
-bytes of its rectangle. Every size, offset,
-stride and count `erx_memdraw` computes from a message, and the union of
-dirty rectangles, uses checked arithmetic. The primitives read no global
+bytes of its rectangle. `erx_draw_image` is the one decoder of `Y`;
+`libmemdraw`'s `cloadmemimage` is linked only into tests, as its oracle.
+Every size, offset, stride and count `erx_memdraw` computes from a message,
+and the window process's union of dirty rectangles, uses checked
+arithmetic. The primitives read no global
 state after their initialisation at load, which is checked when
 `libmemdraw` is imported. An operation over more than 64 KiB of
 destination pixels runs on a dirty scheduler, so a full-screen compose
@@ -1152,6 +1181,18 @@ never holds a normal scheduler. Fonts are the client's: `i` makes an
 image it allocated a font cache and `l` copies a glyph's pixels into it
 from another of its images, so the display
 domain renders no client's text and parses no client's font.
+
+**What a draw leaves.**
+* A clip rectangle may be empty or inverted, which draw(3) checks neither
+  of; a draw through one touches nothing. `erx_draw_clip` computes
+  `drawclip`'s rectangles in 64 bits, so a draw rectangle or point
+  anywhere in 32 bits clips without overflow.
+* A mask that is the destination, or a replicated source that is, is read
+  from a snapshot taken before the draw, so every pixel composes from the
+  pixels as they were before the message. `alphadraw` itself buffers only
+  a nonreplicated source that is the destination.
+* The `x` bits of a pixel are undefined after a draw: a plain copy keeps
+  the source's and `alphadraw` writes 0. Clients must not depend on them.
 
 A flush `v` calls `erx_screen:flush/2` with image 0 and the dirty
 rectangles, and clears them when it returns. Image 0 is the window's
@@ -2389,7 +2430,8 @@ Each passing case has a seeded failure that proves the code ran.
     `CALC12`), which agree with `drawonepixel`'s on every premultiplied
     pixel. Random operations of those kinds
     over random images and channels through `erx_memdraw` and through the
-    reference agree pixel for pixel; a seeded change to one Porter-Duff
+    reference agree pixel for pixel, with the `x` bits masked since a draw
+    leaves them undefined; a seeded change to one Porter-Duff
     operation fails it. `erx_draw_ref` draws no shapes.
   * Lines, polygons, ellipses and arcs (`L`, `p`, `P`, `e`, `E`) have no
     definition finer than `libmemdraw`'s algorithms: draw(2) says what
@@ -2424,8 +2466,8 @@ Each passing case has a seeded failure that proves the code ran.
   ASan and UBSan in `make check-fuzz`, which asserts that every decoded
   result holds exactly the rectangle's bytes and that the bytes consumed
   never pass the end of the write, where a seeded removal of the
-  end-of-row bound fails it. Its oracle is `cloadmemimage` of the 9front
-  build: over Plan 9's compressed images and the fuzz corpus, the two
+  end-of-row bound fails it. Its oracle is `cloadmemimage` of the imported `libmemdraw` (the import
+  edits only its software-cursor call): over Plan 9's compressed images and the fuzz corpus, the two
   accept the same payloads, consume the same count and yield the same
   pixels, where a seeded off-by-one in a run's length fails the
   agreement. The codec's C twin frames a `Y` with the same
@@ -2704,7 +2746,7 @@ A new device is a new driver behind `erx_display` or a new producer of
 
 | Component | Purpose | Licence | Status |
 | --- | --- | --- | --- |
-| Plan 9's `libmemdraw`, from 9front | the per-byte pixel primitives of `erx_memdraw`; its image(6) loader `cloadmemimage` is linked into no release, since the `Y` decoder is the Erlang `erx_draw_image` | MIT (9front's `lib/legal/NOTICE`, whose exceptions cover only fonts) | permanent; imported as erXos's code with an origin file |
+| Plan 9's `libmemdraw`, from 9front | the per-byte pixel primitives of `erx_memdraw`; its image(6) loader `cloadmemimage` is linked into no release, since the `Y` decoder is the Erlang `erx_draw_image` | MIT (9front's `lib/legal/NOTICE`, whose exceptions cover only fonts) | permanent; 9front at commit 2859ae04, imported as erXos's code into `display/libmemdraw` with an `ORIGIN.md` listing its edits |
 | the 9front build: 9front's `libmemdraw` and the parts of its `libdraw` it links, unmodified | test tool: the oracle of the shapes' pixels, of every `erx_memdraw` operation against the code it was imported from, and through `cloadmemimage` of `erx_draw_image`'s decoding and of the C twin's framing of `Y` (Verification) | MIT | tool, never part of a shipped image; fetched at the commit the import's origin file records, verified against a pinned SHA-256, and built for the host out of tree by erXos's own compiler invocations against plan9port's `lib9`, which is already fetched for rc; 9front's mkfiles never run |
 | plan9port's `libdraw`, acme, sam, 9term | draw clients, and oracles of the draw protocol's compatibility | MIT (to be confirmed at import) | permanent; ported as erXos's code with the connection code replaced |
 | LVGL 9 | the native widget renderer for panels | MIT | stopgap, replaced by the Erlang renderer when the parity test and the panel's frame times admit it; a git submodule from erXos's fork pinned at a recorded commit, built out of tree as a native program, its display and input glue erXos's own |

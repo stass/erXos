@@ -177,7 +177,7 @@ expected_errno(#{images := Images, bytes := Bytes, quota := #{pixels := Quota, s
     Font = fun(Id) -> case Images of #{Id := #{glyphs := G}} -> glyph_count(G); #{} -> 0 end end,
     Inside = fun(Id, {X0, Y0, X1, Y1}) ->
                      #{r := {A, B, C, D}} = maps:get(Id, Images),
-                     A =< X0 andalso X0 =< X1 andalso X1 =< C andalso B =< Y0 andalso Y0 =< Y1 andalso Y1 =< D
+                     A =< X0 andalso X0 < X1 andalso X1 =< C andalso B =< Y0 andalso Y0 < Y1 andalso Y1 =< D
              end,
     first(case Msg of
               {alloc, Id, Screen, _, Chan, _, {X0, Y0, X1, Y1}, _, _} ->
@@ -303,7 +303,7 @@ shapes_and_strings_test() ->
 %% its load, and image 0.
 plan_test_() ->
     [fun() -> plan_case(Chan, Depth) end || {Chan, Depth} <- [{?K1, 1}, {16#32, 2}, {16#34, 4}, {?K8, 8},
-                                                             {16#3838, 16}, {16#383838, 24}, {?ARGB32, 32}]].
+                                                             {16#051625, 16}, {16#081828, 24}, {?ARGB32, 32}]].
 
 plan_case(Chan, Depth) ->
     State = new(?SMALL_QUOTA),

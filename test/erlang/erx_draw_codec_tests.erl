@@ -37,10 +37,10 @@ errors_test() ->
     ?assertMatch({ok, {load, 1, {0, 0, 2, 2}, <<0:32>>}, <<"v">>},
                  erx_draw_codec:decode(<<"y", 1:32/little, Rect/binary, 0:32, "v">>, D)).
 
-%% 9front's bytesperline, dividing toward zero: a row wholly left of 0 can
-%% count a byte more than it covers, and the sign of min.x matters.
+%% 9front's bytesperline: the bytes from the one holding the first pixel
+%% through the one holding the last, with bytes aligned at x = 0.
 bytes_per_line_test() ->
-    Cases = [{{-16, 0, -8, 1}, 8, 9}, {{-9, 0, -8, 1}, 1, 2}, {{-3, 0, 5, 1}, 8, 8}, {{3, 0, 10, 1}, 4, 4},
+    Cases = [{{-16, 0, -8, 1}, 8, 8}, {{-9, 0, -8, 1}, 1, 1}, {{-15, 0, -9, 1}, 1, 1}, {{-9, 0, -7, 1}, 1, 2}, {{-3, 0, 5, 1}, 8, 8}, {{3, 0, 10, 1}, 4, 4},
              {{-1, 0, 0, 1}, 1, 1}, {{0, 0, 1, 1}, 32, 4}, {{-7, 0, 9, 1}, 24, 48}, {{1, 0, 2, 1}, 1, 1}],
     [?assertEqual({R, Depth, Want}, {R, Depth, erx_draw_image:bytes_per_line(R, Depth)})
      || {R, Depth, Want} <- Cases].

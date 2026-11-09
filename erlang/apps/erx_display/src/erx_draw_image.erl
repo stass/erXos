@@ -27,14 +27,12 @@ rectangle.
 
 -doc """
 The bytes one row of R takes at Bits a pixel, as 9front's bytesperline counts
-them: dividing toward zero, as C does, which counts one byte more than the
-row covers for some rows left of 0.
+them: from the byte holding R's first pixel through the byte holding its last,
+with bytes aligned at x = 0 on both sides of it.
 """.
 -spec bytes_per_line(rect(), 1..32) -> pos_integer().
-bytes_per_line({X0, _, X1, _}, Bits) when X0 >= 0 ->
-    (X1 * Bits + 7) div 8 - (X0 * Bits) div 8;
 bytes_per_line({X0, _, X1, _}, Bits) ->
-    (-X0 * Bits + 7) div 8 + (X1 * Bits + 7) div 8.
+    (X1 * Bits - ((X0 * Bits) band -8) + 7) div 8.
 
 -doc "R's pixels from the codes at the start of Bytes, and the bytes after them.".
 -spec decode(binary(), rect(), 1..32) -> {ok, Pixels :: binary(), Rest :: binary()} | error.

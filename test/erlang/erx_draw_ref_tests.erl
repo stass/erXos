@@ -263,7 +263,7 @@ op_lasts_one_draw_test() ->
                       draw(?ONE, {0, 0}, {0, 0})], ?ONE)).
 
 %% Rectangles draw(3) refuses: an image's empty, inverted or past the quota's
-%% side; a read's inverted.
+%% side; a read's inverted or empty.
 bad_rectangles_test() ->
     S = erx_draw_ref:new({0, 0, 4, 4}, ?RGBA32, ?SIDE),
     Refused = fun(Message) -> {error, Errno} = erx_draw_ref:step(Message, S), Errno end,
@@ -271,7 +271,7 @@ bad_rectangles_test() ->
      || R <- [{3, 0, 1, 1}, {0, 3, 1, 1}, {0, 0, 0, 1}, {0, 0, ?SIDE + 1, 1}, {-16#80000000, 0, 16#7fffffff, 1}]],
     ?assertEqual(einval, Refused({alloc, 1, 0, 0, ?GREY8, 1, {0, 0, 0, 1}, ?WIDE, ?BLACK})),
     ?assertEqual(einval, Refused({read, 0, {2, 0, 1, 1}})),
-    ?assertMatch({reply, <<>>, _}, erx_draw_ref:step({read, 0, {1, 0, 1, 1}}, S)),
+    ?assertEqual(einval, Refused({read, 0, {1, 0, 1, 1}})),
     ?assertError(badarg, erx_draw_ref:new({1, 0, 0, 1}, ?RGBA32, ?SIDE)).
 
 %% The mask is read at its own point: a 3x1 mask of 0, 255, 0 read from

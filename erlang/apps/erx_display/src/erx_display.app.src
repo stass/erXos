@@ -10,11 +10,12 @@
 %% protocol's codec erx_draw_codec, generated from abi/formats/draw.txt, its
 %% pure core erx_draw_core, which checks a write against a connection and plans
 %% it, and erx_draw_image, the decoder of a Y message's compressed pixels;
+%% erx_memdraw, the NIF of the images and their pixel primitives;
 %% erx_vt reads erx: links through erx's erx_present.
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_screen_core, erx_ui_model, erx_vt,
+  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_memdraw, erx_screen_core, erx_ui_model, erx_vt,
               erx_vt_width, erx_wctl, erx_wm, erx_wm_single]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},

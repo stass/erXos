@@ -157,6 +157,17 @@
       "directory": "libvterm-0.3.3",
       "license": "MIT",
       "status": "permanent"
+    },
+    {
+      "id": "9front",
+      "kind": "tar",
+      "version": "2859ae04e800737307470538a942ab8f8261253b",
+      "url": "https://github.com/9front/9front/archive/2859ae04e800737307470538a942ab8f8261253b.tar.gz",
+      "sha256": "f370f3008b10d3e26a96d30d9a2920c421b5f1e7b644d50e20b6f5bd730ce9f7",
+      "directory": "9front-2859ae04e800737307470538a942ab8f8261253b",
+      "members": "lib/legal sys/include sys/src/libmemdraw sys/src/libdraw",
+      "license": "MIT",
+      "status": "permanent"
     }
   ]
 }

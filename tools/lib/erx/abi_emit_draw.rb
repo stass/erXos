@@ -417,16 +417,21 @@ module Erx
         }
 
         /*
-         * 9front's bytesperline, in 64 bits so that no coordinate overflows; it
-         * divides as C does, toward zero, which counts one byte more than the
-         * row covers for some rows left of 0, and the twin keeps that.
+         * 9front's bytesperline, in 64 bits so that no coordinate overflows:
+         * the bytes from the one holding the first pixel through the one
+         * holding the last, with bytes aligned at x = 0. first is the bit
+         * offset of the first pixel rounded down to a byte, toward minus
+         * infinity, as 9front's (x0*depth) & ~7 rounds it.
          */
         int64_t
         erx_draw_bytesperline(int32_t x0, int32_t x1, int depth)
         {
-        	if (x0 >= 0)
-        		return (((int64_t)x1 * depth + 7) / 8 - (int64_t)x0 * depth / 8);
-        	return ((-(int64_t)x0 * depth + 7) / 8 + ((int64_t)x1 * depth + 7) / 8);
+        	int64_t start = (int64_t)x0 * depth;
+        	int64_t first = start / 8 * 8;
+
+        	if (first > start)
+        		first -= 8;
+        	return (((int64_t)x1 * depth - first + 7) / 8);
         }
 
         /* One coded coordinate at p, of at most left bytes; *used its size. */

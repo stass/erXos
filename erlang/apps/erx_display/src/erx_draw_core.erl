@@ -190,6 +190,7 @@ step(State, {alloc, Id, Screen, _Refresh, Chan, Repl, R, Clipr, Color}) ->
         ok ?= absent(State, Id),
         ok ?= check(Screen =:= 0, enoent),
         {ok, Depth} ?= chan_depth(Chan),
+        ok ?= check(supported_chan(Chan, Depth), einval),
         ok ?= check_image_rect(R, quota(State)),
         Clip = alloc_clip(Repl =/= 0, R, Clipr),
         {ok, Next} ?= replace(State, Id, #{r => R, depth => Depth, repl => Repl =/= 0, glyphs => none}),
@@ -377,20 +378,28 @@ font_cache(State, Id) ->
         {error, _} = Error -> Error
     end.
 
-%% R lies within the image, as devdraw's rectinrect asks of r, y and Y; an
-%% inverted rectangle is no rectangle and lies within nothing.
+%% R lies within the image, as devdraw's rectinrect asks of r, y and Y, and
+%% is not empty, as loadmemimage's and unloadmemimage's badrect asks.
 inside(State, Id, {X0, Y0, X1, Y1}) ->
     maybe
         {ok, #{r := {IX0, IY0, IX1, IY1}}} ?= lookup(State, Id),
-        check(IX0 =< X0 andalso X0 =< X1 andalso X1 =< IX1 andalso IY0 =< Y0 andalso Y0 =< Y1 andalso Y1 =< IY1,
+        check(IX0 =< X0 andalso X0 < X1 andalso X1 =< IX1 andalso IY0 =< Y0 andalso Y0 < Y1 andalso Y1 =< IY1,
               einval)
     end.
 
 %% An image's rectangle passes 9front's badrect and the quota's side.
-check_image_rect({X0, Y0, X1, Y1}, #{side := Side}) ->
+check_image_rect({X0, Y0, X1, Y1} = R, #{side := Side}) ->
     DX = X1 - X0,
     DY = Y1 - Y0,
-    check(DX > 0 andalso DY > 0 andalso DX * DY < ?MAX_AREA andalso DX =< Side andalso DY =< Side, einval).
+    check(DX > 0 andalso DY > 0 andalso DX * DY < ?MAX_AREA andalso DX =< Side andalso DY =< Side andalso
+          badrect_bounds(R), einval).
+
+%% 9front's badrect: x within 2^25 either side of 0 and x's width times
+%% each y within 2^28, so libmemdraw's int arithmetic cannot overflow.
+badrect_bounds({X0, Y0, X1, Y1}) ->
+    DX = X1 - X0,
+    lists:all(fun(X) -> X >= -(1 bsl 25) andalso X < 1 bsl 25 end, [X0, X1]) andalso
+        lists:all(fun(Y) -> DX * Y >= -(1 bsl 28) andalso DX * Y < 1 bsl 28 end, [Y0, Y1]).
 
 %% devdraw's b: clipr as given for a replicated image, otherwise clipped
 %% to r by rectclip, which leaves a rectangle disjoint from r as it was.
@@ -475,3 +484,21 @@ chan_depth(Chan, Depth) ->
 valid_depth(Depth) when Depth > 0, Depth < 8 -> 8 rem Depth =:= 0;
 valid_depth(Depth) when Depth >= 8 -> Depth rem 8 =:= 0;
 valid_depth(_Depth) -> false.
+
+%% The channels erx_memdraw draws as draw(2) defines them (design-display.md,
+%% "The pixel primitives"): no type twice but x, as memsetchan asks; below
+%% 8 bits a pixel one grey channel; a map channel m8 alone; and no grey
+%% beside a colour. Types are draw.h's: r, g, b 0 to 2, k 3, m 5, x 6.
+supported_chan(Chan, Depth) ->
+    Types = chan_types(Chan),
+    Named = [Type || Type <- Types, Type =/= 6],
+    Colour = [Type || Type <- Types, Type =< 2],
+    lists:usort(Named) =:= lists:sort(Named) andalso
+        case {Depth < 8, lists:member(5, Types)} of
+            {true, _} -> Types =:= [3];
+            {false, true} -> Chan =:= 16#58;
+            {false, false} -> not (lists:member(3, Types) andalso Colour =/= [])
+        end.
+
+chan_types(0) -> [];
+chan_types(Chan) -> [(Chan band 16#ff) bsr 4 | chan_types(Chan bsr 8)].

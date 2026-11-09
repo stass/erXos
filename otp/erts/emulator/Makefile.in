@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources and littlefs (from $(ERX_TREE)/littlefs) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones.
+# Modified by erXos: builds erXos sources, littlefs (from $(ERX_TREE)/littlefs) and libmemdraw (from $(ERX_TREE)/display) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones.
 #
 # %CopyrightBegin%
 #
@@ -1014,6 +1014,21 @@ $(OBJDIR)/lfs.o $(OBJDIR)/lfs_util.o: $(OBJDIR)/%.o: $(LFS_DIR)/%.c
 
 $(OBJDIR)/erx_littlefs_nif.o: CFLAGS += $(LFS_CFLAGS)
 
+# erx_memdraw, the display's pixel primitives (docs/design-display.md, "The pixel
+# primitives"): 9front's libmemdraw as erXos imported it in display/libmemdraw, its
+# loader cload.c left out (tests alone link it), and erXos's clipping and NIF in
+# display/memdraw. The imported files keep Plan 9's pragmas and USED(a, b).
+MEMDRAW_LIB = alloc arith badrect bytesperline chan cmap draw drawrepl load rectclip unload
+MEMDRAW_CFLAGS = -I$(ERX_TREE)/display/libmemdraw -I$(ERX_TREE)/display/memdraw \
+	-Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function
+MEMDRAW_OBJS = $(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o) $(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o
+
+$(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o): $(OBJDIR)/memdraw_%.o: $(ERX_TREE)/display/libmemdraw/%.c
+	$(V_CC) $(CFLAGS) $(MEMDRAW_CFLAGS) -c $< -o $@
+
+$(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o $(OBJDIR)/erx_memdraw_nif.o: $(OBJDIR)/%.o: $(ERX_TREE)/display/memdraw/%.c
+	$(V_CC) $(CFLAGS) $(MEMDRAW_CFLAGS) $(INCLUDES) -c $< -o $@
+
 # FreeBSD SHA-256 as erXos imported it, the core of erx_bytes:sha256/1 (docs/design-runtime.md,
 # "Per-byte primitives"), built from its one copy in the tree.
 $(OBJDIR)/sha256c.o: $(ERX_TREE)/kernel/crypto/sha2/sha256c.c
@@ -1248,6 +1263,7 @@ NIF_OBJS = \
 	$(OBJDIR)/erx_log_nif.o \
 	$(OBJDIR)/erx_object_info_nif.o \
 	$(OBJDIR)/erx_littlefs_nif.o \
+	$(OBJDIR)/erx_memdraw_nif.o \
 	$(if $(findstring hosted,$(TARGET)),,$(OBJDIR)/erx_domain_lib_nif.o) \
 	$(OBJDIR)/erl_tracer_nif.o \
 	$(OBJDIR)/prim_buffer_nif.o \
@@ -1290,6 +1306,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_prim_file.o \
 	$(OBJDIR)/lfs.o \
 	$(OBJDIR)/lfs_util.o \
+	$(MEMDRAW_OBJS) \
 	$(OBJDIR)/sys_float.o \
 	$(OBJDIR)/sys_time.o
 
@@ -1528,6 +1545,7 @@ $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_GEN) -I$(ERX_GEN)/include -I$(ERX_TREE) -I$(ERX_TREE)/include $(LFS_CFLAGS) $(wildcard nifs/erxos/*.c) >> $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_TREE)/include $(ERX_TREE)/kernel/crypto/sha2/sha256c.c >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(MEMDRAW_CFLAGS) $(INCLUDES) $(wildcard $(ERX_TREE)/display/memdraw/*.c) >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
