@@ -28,6 +28,7 @@
              erx_manifest,
              erx_ns,
              erx_object_info,
+             erx_present,
              erx_process_records,
              erx_runtime_records,
              erx_schema,

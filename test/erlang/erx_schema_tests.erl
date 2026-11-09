@@ -123,6 +123,14 @@ unknown_paths_test() ->
     [?assertEqual({error, unknown_path}, erx_schema:resolve_text(Text))
      || Text <- [<<"cpus/64">>, <<"budgets/0">>, <<"domains/4/modules/lists.erl">>, <<"kernel">>]].
 
+%% A pid is read only in the spelling the runtime writes it: stock OTP's list_to_pid/1
+%% takes any domain number on a node that is not distributed as its own, which would
+%% give "processes/3.N.S" a second spelling.
+pid_text_is_read_in_the_runtimes_one_spelling_test() ->
+    [_, N, S] = string:split(string:trim(pid_to_list(self()), both, "<>"), ".", all),
+    ?assertMatch({ok, [processes, _], _}, erx_schema:resolve_text(iolist_to_binary(["processes/0.", N, ".", S]))),
+    ?assertEqual({error, unknown_path}, erx_schema:resolve_text(iolist_to_binary(["processes/3.", N, ".", S]))).
+
 %% /proc's status file and the shell show fields in schema order.
 fields_test() ->
     {ok, Keys} = erx_schema:attributes(budget),

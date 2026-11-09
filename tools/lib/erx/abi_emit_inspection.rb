@@ -316,18 +316,50 @@ module Erx
         %% D.N.S, each a canonical decimal of at most 32 bits, made a pid by the
         %% runtime's own list_to_pid/1, which refuses one it cannot name: on erXos
         %% a pid of a domain this runtime is not connected to. The inspector answers
-        %% such an unknown path as it answers a path outside the caller's scope.
+        %% such an unknown path as it answers a path outside the caller's scope. The
+        %% pid is kept only when the runtime writes it back as the same text, since
+        %% stock OTP on a node that is not distributed takes any D as its own node,
+        %% which would give a pid a second spelling.
         pid_text(Part) ->
             case [decimal(Number) || Number <- binary:split(Part, <<".">>, [global])] of
                 [{ok, D}, {ok, N}, {ok, S}] when D >= 0, D =< ?U32, N >= 0, N =< ?U32, S >= 0, S =< ?U32 ->
                     Text = "<" ++ integer_to_list(D) ++ "." ++ integer_to_list(N) ++ "."
                         ++ integer_to_list(S) ++ ">",
-                    try {ok, list_to_pid(Text)}
+                    try list_to_pid(Text) of
+                        Pid ->
+                            case pid_to_list(Pid) =:= Text of
+                                true -> {ok, Pid};
+                                false -> error
+                            end
                     catch error:badarg -> error
                     end;
                 _ ->
                     error
             end.
+
+        %% The text of one path segment, the spelling resolve_text/1 reads back as
+        %% it: a literal as itself, an integer in decimal, a pid as D.N.S and a
+        %% text with every byte that plain/1 refuses written as %XX.
+        -spec segment_text(segment()) -> binary().
+        segment_text(Segment) when is_atom(Segment) ->
+            atom_to_binary(Segment);
+        segment_text(Segment) when is_integer(Segment) ->
+            integer_to_binary(Segment);
+        segment_text(Segment) when is_pid(Segment) ->
+            %% "<D.N.S>" without its brackets, so a shell needs no quoting.
+            Text = list_to_binary(pid_to_list(Segment)),
+            binary:part(Text, 1, byte_size(Text) - 2);
+        segment_text(Segment) when is_binary(Segment) ->
+            << <<(escaped(Byte))/binary>> || <<Byte>> <= Segment >>.
+
+        escaped(Byte) ->
+            case plain(Byte) of
+                true -> <<Byte>>;
+                false -> <<$%, (hex_digit(Byte bsr 4)), (hex_digit(Byte band 15))>>
+            end.
+
+        hex_digit(Digit) when Digit < 10 -> $0 + Digit;
+        hex_digit(Digit) -> $A + Digit - 10.
 
         %% The attributes of Kind that the rendering Projection shows in a Build
         %% (release or development), in field order.
@@ -372,7 +404,7 @@ module Erx
           -export([schema/0, kinds/0, attributes/1, attribute/2, fields/3, stopgaps/0, stopgap/1,
                    trace_rows/0, trace_row/1,
                    reporter_label/1, unit_label/1, type/1, declarations/0, valid/2, validate_attr/4,
-                   validate_record/1, resolve/1, resolve_text/1, report_layout/1, decode_report/2,
+                   validate_record/1, resolve/1, resolve_text/1, segment_text/1, report_layout/1, decode_report/2,
                    status_name/1]).
           -export_type([record/0, attr/0, reporter/0, value/0, segment/0, descriptor/0, declaration/0]).
           %% record() is the inspection record's name in docs/design-live.md.

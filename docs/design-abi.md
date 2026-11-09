@@ -574,13 +574,19 @@ A path's marks, at four spaces:
 
 Presentation names are a namespace of their own, as trace rows are, so
 `domain` may name a kind and a presentation, and they become atoms of
-`erx_schema`. The generator refuses a presentation named `accept`, the
+`erx_present`. A presentation's name is the link grammar's `type`, at
+most 32 bytes. The generator refuses a presentation named `accept`, the
 input context's URI ([Links and the input
-context](design-display.md#links-and-the-input-context)), or `proc`, `ui`,
+context](design-display.md#links-and-the-input-context)), `proc`, `ui`,
 `trace`, `login` or `ws`, the web's fixed routes
-([URLs](design-web.md#urls)); a presentation declared twice; and two
-presentations of one variable segment over the same type, since an
-attribute of that type is shown as that presentation.
+([URLs](design-web.md#urls)), or `kernel`, `service` or `runtime`, which
+lead a widget value's attribute pair
+([Widget trees](design-display.md#widget-trees)); a presentation declared
+twice; two presentations of one variable segment over the same type,
+since an attribute of that type is shown as that presentation; and a
+presentation whose longest canonical text exceeds 4,096 bytes, the
+widget format's bound for it, or whose longest link, after the OSC 8
+string's `8;;`, exceeds that string's 4 KiB.
 
 A stopgap reporter appears in a record as `{stopgap, NAME}`. Its label
 and scope come from the schema, so a record carries no free text about

@@ -14,6 +14,7 @@ require_relative 'abi_emit_protocol'
 require_relative 'abi_emit_wire'
 require_relative 'generation_plan'
 require_relative 'abi_emit_inspection'
+require_relative 'abi_emit_present'
 require_relative 'abi_emit_ui'
 require_relative 'abi_emit_ui_wire'
 require_relative 'abi_emit_ui_wire_ts'
@@ -49,6 +50,7 @@ module Erx
         files.merge!(ProtocolEmitter.outputs(schema))
         files.merge!(WireEmitter.outputs(schema))
         files.merge!(InspectionEmitter.outputs(schema))
+        files.merge!(PresentEmitter.outputs(schema))
         files.merge!(UIEmitter.outputs(schema))
         files.merge!(UIWireEmitter.outputs(schema))
         files.merge!(UIWireTSEmitter.outputs(schema))

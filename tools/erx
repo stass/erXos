@@ -342,6 +342,8 @@ module Erx
                    name: 'fuzz-erx-device-record', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_schema.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-schema', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_present.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-present', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_procfs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-procfs', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_request.rb'), '--seed', options.fetch(:seed).to_s],

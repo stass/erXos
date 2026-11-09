@@ -31,8 +31,9 @@ module Erx
     # outermost first. LITERAL_CHILDREN is the literal names that extend the
     # path by one, in declaration order, and VARIABLE_CHILD the type
     # reference of its one variable extension, or nil; ENTRIES is nil or
-    # [type reference, maximum].
-    InspectionPath = Struct.new(:kind, :segments, :entries, :append_only,
+    # [type reference, maximum]. PRESENT is the presentation name the path
+    # is marked with (docs/design-display.md, "Presentations"), or nil.
+    InspectionPath = Struct.new(:kind, :segments, :entries, :append_only, :present,
                                 :visibility, :literal_children, :variable_child,
                                 keyword_init: true)
     InspectionSchema = Struct.new(:version, :units, :types, :member_types, :stopgaps,
@@ -57,6 +58,20 @@ module Erx
       MAX_TUPLE = 16
       MAX_SEGMENTS = 16
       MAX_SEGMENT_TEXT = 256
+      # A presentation's name is the `type` of the OSC 8 link grammar
+      # (docs/design-display.md, "Links and the input context"): a lower-case
+      # letter, then at most 31 of lower-case letters, digits and `_`. The
+      # input context's URI, the web's fixed routes and the reporter
+      # categories, which lead a widget value's attr() pair, are not
+      # presentations.
+      PRESENTATION = /\A[a-z][a-z0-9_]{0,31}\z/.freeze
+      NOT_PRESENTATIONS = (%w[accept proc ui trace login ws] + CATEGORIES).freeze
+      # The longest canonical text of a presentation, the bound the widget
+      # format's encoder takes it within (docs/design-abi.md, "Widget format").
+      MAX_PRESENT_TEXT = 4096
+      # The longest OSC 8 string a terminal takes (docs/design-display.md,
+      # "Links and the input context"), which holds "8;;" and the link.
+      MAX_OSC8 = 4096
       # Bounds the grammar leaves open, chosen here: a record is at most
       # 64 KiB (docs/design-live.md, "The /proc tree"), so no text exceeds
       # it; labels and scopes are one renderer line.
@@ -435,7 +450,50 @@ module Erx
             check_prefixes(line, item, shapes)
             check_extension(line, item, shapes)
           end
+          check_presentations(declared, types)
           declared.map { |_line, item| complete(item, shapes) }
+        end
+
+        # A presentation's name is declared once and its path holds a
+        # variable segment; one segment's type is shown as at most one
+        # presentation; its longest canonical text fits the widget format's
+        # bound and its longest link a terminal's OSC 8 string.
+        def check_presentations(declared, types)
+          marked = declared.select { |_line, item| item.present }
+          marked.group_by { |_line, item| item.present }.each do |name, (_first, (second_line, _second))|
+            second_line&.fail!("presentation #{name} is declared twice")
+          end
+          marked.each { |line, item| check_presented(line, item, types) }
+          singles = marked.select { |_line, item| item.segments.count(&:variable?) == 1 }
+          singles.group_by { |_line, item| item.segments.find(&:variable?).type }.each do |type, same|
+            next if same.size == 1
+
+            names = same.map { |_line, item| item.present }.join(' and ')
+            second_line, _second = same[1]
+            second_line.fail!("presentations #{names} both show type #{type}")
+          end
+        end
+
+        def check_presented(line, item, types)
+          variables = item.segments.filter_map { |segment| segment.variable? && types.fetch(segment.type) }
+          line.fail!('a presented path has a variable segment') if variables.empty?
+          separators = variables.size - 1
+          text = variables.sum { |type| longest_text(type, escaped: 3) } + separators
+          line.fail!("a presentation's text is at most #{MAX_PRESENT_TEXT} bytes") if text > MAX_PRESENT_TEXT
+          link = "8;;erx:#{item.present}/".bytesize + variables.sum { |type| longest_text(type, escaped: 5) } + separators
+          line.fail!("a presentation's link is at most #{MAX_OSC8} bytes with its OSC 8 prefix") if link > MAX_OSC8
+        end
+
+        # The longest text of one segment of TYPE: D.N.S of 32-bit numbers, a
+        # decimal with its sign, or every byte of a text written in ESCAPED
+        # bytes: 3 for its %XX in the canonical text, 5 in a link, which writes
+        # that % as %25.
+        def longest_text(type, escaped:)
+          case type.form
+          when 'pid' then 3 * 10 + 2
+          when 'integer' then [type.minimum, type.maximum].map { |bound| bound.to_s.size }.max
+          else escaped * type.maximum
+          end
         end
 
         def path(line, children, kinds, types)
@@ -446,7 +504,8 @@ module Erx
           line.fail!("a path has at most #{MAX_SEGMENTS} segments") if segments.size > MAX_SEGMENTS
           marks = path_marks(children, types)
           [line, InspectionPath.new(kind: kind, segments: segments, entries: marks[:entries],
-                                    append_only: marks[:append_only], visibility: marks[:visible])]
+                                    append_only: marks[:append_only], present: marks[:present],
+                                    visibility: marks[:visible])]
         end
 
         def segment(word, line, types)
@@ -481,12 +540,21 @@ module Erx
             when 'visible'
               line.fail!('expected visible CLASS') unless words.size == 2
               marks[:visible] = choice(words[1], VISIBILITY, 'visibility', line)
+            when 'present'
+              line.fail!('expected present NAME') unless words.size == 2
+              marks[:present] = presentation(words[1], line)
             else
               line.fail!("unknown path mark #{mark}")
             end
           end
           children.first.fail!('append_only marks a path with entries') if marks[:append_only] && !marks[:entries]
           marks
+        end
+
+        def presentation(name, line)
+          line.fail!("invalid presentation name #{name.inspect}") unless name.match?(PRESENTATION)
+          line.fail!("#{name} is not a presentation name") if NOT_PRESENTATIONS.include?(name)
+          name
         end
 
         def shape_of(segments)

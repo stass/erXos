@@ -8,7 +8,10 @@
 # derived is one the inspector computes from the inputs it lists. A kind
 # that erx_object_info reports has a root layout erx_info_<kind>, whose
 # fields and reported bits are named after the kind's kernel attributes.
-# tools/gen_abi.rb generates erx_schema and the host tool's table from it.
+# A path marked present is a presentation type (docs/design-display.md,
+# "Presentations"), whose names are a namespace apart as well.
+# tools/gen_abi.rb generates erx_schema, erx_present and the host tool's
+# table from it.
 
 inspection 1
   unit pages "pages"
@@ -139,18 +142,23 @@ inspection 1
   path listing groups
     visible all
   path group groups *group_id
+    present group
   path listing budgets
     visible all
   path budget budgets *budget_id
+    present budget
   path listing domains
   path domain domains *domain_id
+    present domain
   path budget domains *domain_id budget
   path group domains *domain_id group
   path listing domains *domain_id threads
   path thread domains *domain_id threads *thread_id
   path listing domains *domain_id modules
   path module domains *domain_id modules *module_name
+    present module
   path listing domains *domain_id processes
     entries pid 1048576
   path listing processes
   path process processes *pid
+    present pid

@@ -247,6 +247,28 @@ class AbiInspectionTest < Minitest::Test
     assert_refused(with("path listing log\n  hidden"), /unknown path mark hidden/)
   end
 
+  # Presentation names are a namespace of their own, so a kind's name may be one.
+  def test_present_marks
+    marked = ->(name) { BASE.sub("things *index\n", "things *index\n    present #{name}\n") }
+    assert_equal 'thing', model(marked.call('thing')).inspection.paths.last.present
+    assert_refused(marked.call('accept'), /accept is not a presentation name/)
+    assert_refused(marked.call('ws'), /ws is not a presentation name/)
+    assert_refused(marked.call('kernel'), /kernel is not a presentation name/)
+    assert_refused(marked.call('a' * 33), /invalid presentation name/)
+    assert_refused(BASE.sub("things\n", "things\n    present things\n"), /a presented path has a variable segment/)
+    others = "  path listing others\n  path thing others *index\n    present %s\n"
+    assert_refused(marked.call('thing') + format(others, 'thing'), /presentation thing is declared twice/)
+    assert_refused(marked.call('thing') + format(others, 'other'), /presentations thing and other both show type index/)
+    model(marked.call('thing') + "  path listing others\n  path listing others *index\n" \
+                                 "  path thing others *index *index\n    present pair\n")
+    wide = "text wide 256\npath listing w\n" + (1..5).map { |depth| "path listing w#{' *wide' * depth}\n" }.join +
+           "path thing w#{' *wide' * 6}\n  present wide"
+    assert_refused(with(wide), /a presentation's text is at most 4096 bytes/)
+    long = "text wide 256\npath listing w\n" + (1..3).map { |depth| "path listing w#{' *wide' * depth}\n" }.join +
+           "path thing w#{' *wide' * 4}\n  present wide"
+    assert_refused(with(long), /a presentation's link is at most 4096 bytes/)
+  end
+
   # A path's visibility is its own mark and every mark above it.
   def test_visibility_reaches_every_path_below_its_mark
     text = BASE.sub("  path listing things\n", "  path listing things\n    visible all\n") +

@@ -787,6 +787,10 @@ the type follows from that path:
 * the **inspector path** it names is the marked path with the value in
   its variable positions.
 
+A pid's text reads back only while the runtime can name the pid: a pid
+of a domain the runtime is not connected to, or one `list_to_pid/1`
+would write back as other text, parses as `error`.
+
 | Presentation | Marked path | Value | Text |
 | --- | --- | --- | --- |
 | `pid` | `processes *pid` | a pid | `3.45.0` |
@@ -814,7 +818,11 @@ of a presentation of several segments, a module or a program, is made by
 the code that knows the parts, as `erx:ps()` names a program.
 
 The generator emits `erx_present:text/2`, `erx_present:parse/2` and
-`erx_present:path/2`, and the same marks into the web client. A command
+`erx_present:path/2`; `uri/2` and `parse_uri/1`, which write and read
+the link below; `type/1`, which reads a presentation's name from input
+without making an atom; and `marks/0`, the table of names and marked
+paths. It emits the same marks into the web client. `parse/2` and
+`parse_uri/1` read untrusted text and have a fuzz target. A command
 declares the types of its arguments with `-erx_args([pid, ...])` beside
 `-erx_needs`, from the presentation names, and the catalog carries them
 ([Interfaces](design-shell.md#interfaces)).
@@ -2086,8 +2094,8 @@ binary form of `diff_op()`, events, `input`, `screen`, `repaint` and
 `pair/3`, `delta/2`, `apply_ops/2` and `hit/4`.
 
 **Presentations**: the `present` marks of `abi/inspection.txt`,
-`erx_present:text/2`, `parse/2` and `path/2`, the `-erx_args` declaration, the link
-and input-context sequences, the `links` capability of a terminal.
+`erx_present:text/2`, `parse/2`, `path/2`, `uri/2`, `parse_uri/1`, `type/1` and
+`marks/0`, the `-erx_args` declaration, the link and input-context sequences, the `links` capability of a terminal.
 
 **The terminal**: `erx_term` and its supervisor `erx_term_sup` in a
 session's release, its two key bindings, Ctrl-Shift-N and Shift with

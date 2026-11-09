@@ -13,13 +13,14 @@ every decision is tested with made-up answers.
   record is the file `{status, Path}`, and a listing the inspector could
   not give whole has a marker file, `{partial, Path}` (`.partial`) or
   `{unknown, Path}` (`.unknown`).
-* **Names.** A path's segment becomes an entry name through name/1, the
-  writer of the encoding erx_schema:resolve_text/1 reads: a literal as
-  itself, an integer in decimal, a pid as `D.N.S`, a text with every byte
-  outside `A-Z a-z 0-9 _+,:=@-` as `%XX`. child/2 reads a name by handing
-  the parent's text and the name to resolve_text/1, so `/proc` has one
-  reader of path text, and a name is accepted only in the spelling name/1
-  writes. Names that start with `.` are the tree's markers, since no
+* **Names.** A path's segment becomes an entry name through name/1, which
+  is erx_schema:segment_text/1, the writer of the encoding
+  erx_schema:resolve_text/1 reads: a literal as itself, an integer in
+  decimal, a pid as `D.N.S`, a text with every byte outside
+  `A-Z a-z 0-9 _+,:=@-` as `%XX`. child/2 reads a name by handing the
+  parent's text and the name to resolve_text/1, so `/proc` has one writer
+  and one reader of path text, and a name is accepted only in the
+  spelling name/1 writes. Names that start with `.` are the tree's markers, since no
   encoded name does.
 * **Content.** status/2 writes one line per attribute the projection
   `proc` shows: its name, its value as erx_render:value/1 prints it (an
@@ -53,24 +54,8 @@ The entry name of a path segment: the spelling erx_schema:resolve_text/1
 reads back as that segment.
 """.
 -spec name(erx_schema:segment()) -> binary().
-name(Segment) when is_atom(Segment) ->
-    atom_to_binary(Segment);
-name(Segment) when is_integer(Segment) ->
-    integer_to_binary(Segment);
-name(Segment) when is_pid(Segment) ->
-    %% "<D.N.S>" without its brackets, so a shell needs no quoting.
-    Text = list_to_binary(pid_to_list(Segment)),
-    binary:part(Text, 1, byte_size(Text) - 2);
-name(Segment) when is_binary(Segment) ->
-    << <<(encoded(Byte))/binary>> || <<Byte>> <= Segment >>.
-
-encoded(Byte) when Byte >= $A, Byte =< $Z; Byte >= $a, Byte =< $z; Byte >= $0, Byte =< $9 ->
-    <<Byte>>;
-encoded(Byte) ->
-    case lists:member(Byte, "_+,:=@-") of
-        true -> <<Byte>>;
-        false -> list_to_binary(io_lib:format("%~2.16.0B", [Byte]))
-    end.
+name(Segment) ->
+    erx_schema:segment_text(Segment).
 
 -doc """
 The path one level below Path that the entry name Name names, read by
