@@ -80,27 +80,6 @@ int	erx_fiasco_vm_physical_create(uint32_t object, uint64_t base, uint64_t size)
 int	erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit) ERX_WARN_UNUSED_RESULT;
 /* A contiguous object's device address at an offset in it; another kind of object is ERX_ETYPE, an offset past it ERX_ERANGE. */
 int	erx_fiasco_vm_object_dma_addr(uint32_t object, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
-/*
- * A slice: an object over size bytes of the boot archive's own pages from window, the
- * root's address of entry first's run, holding count entries. Its pages are never
- * written and never join the pool. A run at or above the window is ERX_ENOTSUP.
- */
-int	erx_fiasco_vm_slice_create(uint32_t object, uintptr_t window, uint64_t size, uint32_t first, uint32_t count)
-	    ERX_WARN_UNUSED_RESULT;
-/* A slice's run of archive entries; another kind of object is ERX_ETYPE. */
-int	erx_fiasco_vm_slice_entries(uint32_t object, uint32_t *first, uint32_t *count) ERX_WARN_UNUSED_RESULT;
-
-/* The most one erx_mem_copy request copies, so the stub loops for a longer copy. */
-#define ERX_FIASCO_VM_COPY_BYTES_MAX	((uint64_t)64 * ERX_PAGE_SIZE)
-/*
- * One request of erx_mem_copy: len bytes from src at src_offset to dst at dst_offset,
- * of which *done are copied; copies up to ERX_FIASCO_VM_COPY_BYTES_MAX more and
- * advances *done. Before any byte moves: a physical object either side ERX_ETYPE, a
- * slice as dst ERX_ERIGHTS, either range past its object ERX_ERANGE, *done past len
- * ERX_EINVAL. Overlapping ranges of one object copy forward, page by page.
- */
-int	erx_fiasco_vm_object_copy(uint32_t dst, uint64_t dst_offset, uint32_t src, uint64_t src_offset, uint64_t len,
-	    uint64_t *done) ERX_WARN_UNUSED_RESULT;
 /* Removes every mapping of the object at index from every space, and their records. */
 void	erx_fiasco_vm_object_revoke(uint32_t index);
 /*

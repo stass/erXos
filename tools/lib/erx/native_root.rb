@@ -41,7 +41,7 @@ module Erx
             liberx/backend/core/gate.c].freeze
     # The root service and what it runs on: threads, waits and the end path. The
     # crash writer comes in source, since Fiasco's boot archive holds no crash core.
-    SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/slice.c #{BACKEND}/thread.c
+    SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
                  #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c
                  liberx/backend/core/object_info.c
                  #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_page.c #{BACKEND}/time_table.c
@@ -71,15 +71,14 @@ module Erx
               "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c'].freeze
     # A domain's runtime image: the interpreter ERTS as a task's program, at task.ld's
     # fixed addresses, since erx_image_map loads only an ERX_IMAGE_FIXED image. musl's
-    # start enters ERTS's main through libc_task.c, as it enters a task's test program;
-    # the boot information reader comes as it comes to the root, release_task.c reads the
-    # release from its slice through the service, and
-    # task_refused.c answers the calls the service does not answer a task. One
+    # start enters ERTS's main through libc_task.c, as it enters a task's test program,
+    # and the release and boot information readers come as they come to the root, with
+    # task_refused.c for the calls the service does not answer a task. One
     # image serves every domain (docs/design-runtime.md, "The build").
     DOMAIN_RUNTIME = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_task.c",
                       "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
-                      "#{BACKEND}/task_refused.c", "#{BACKEND}/release_task.c", 'liberx/release_fs.c'].freeze
+                      "#{BACKEND}/task_refused.c", 'liberx/release.c', 'liberx/release_fs.c'].freeze
     # The sources of SYSTEM that read musl's headers, which NativeRuntime's sysroot holds.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'

@@ -40,7 +40,6 @@
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
-#include "liberx/backend/fiasco/slice.h"
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
@@ -161,9 +160,9 @@ service_thread_table_init(void)
 	l4_fpage_t area = l4_fpage(erx_fiasco_thread_native_slot(0), ERX_FIASCO_UTCB_AREA_ORDER, L4_FPAGE_RW);
 	uint64_t reserved;
 
-	if (erx_fiasco_vm_body(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_TASK_AREA_BYTES, ERX_VM_FIXED,
+	if (erx_fiasco_vm_body(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREAD_TABLE_BYTES, ERX_VM_FIXED,
 	    &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_TASK_AREA_BYTES, 0, NULL) != ERX_OK)
+	    erx_fiasco_vm_body(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) != ERX_OK)
 		return ("threads: no memory for the thread table");
 	if (l4_error(l4_task_add_ku_mem(L4_BASE_TASK_CAP, &area)) < 0)
 		return ("threads: the kernel refused the UTCB area");
@@ -278,26 +277,31 @@ service_main(void)
 }
 
 /*
- * The IRQ calls (irq.c): the root makes, binds and unbinds an object, and any task
- * holding its handle triggers and acks it.
+ * The IRQ calls. Their one table holds the root's objects, bound to the root's threads,
+ * and no task has a consumer for them, so a task's call is refused rather than taking
+ * a root thread of the same index for its own.
  */
 static int
 service_irq(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 {
 	const void *const words = decoded->request;
-	const erx_fiasco_irq_request_t *const irq_request = words;
 
+	if (decoded->task != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
 	switch (decoded->call) {
 	case ERX_FIASCO_CALL_IRQ_CREATE:
-		return (erx_fiasco_irq_create_body(decoded->task, words, &reply->first));
+		return (erx_fiasco_irq_create_body(((const erx_fiasco_irq_create_request_t *)words)->kind,
+		    ((const erx_fiasco_irq_create_request_t *)words)->selector, &reply->first));
 	case ERX_FIASCO_CALL_IRQ_BIND:
-		return (erx_fiasco_irq_bind_body(decoded->task, words));
+		return (erx_fiasco_irq_bind_body(((const erx_fiasco_irq_bind_request_t *)words)->irq,
+		    ((const erx_fiasco_irq_bind_request_t *)words)->thread,
+		    ((const erx_fiasco_irq_bind_request_t *)words)->record));
 	case ERX_FIASCO_CALL_IRQ_UNBIND:
-		return (erx_fiasco_irq_unbind_body(decoded->task, irq_request->irq));
+		return (erx_fiasco_irq_unbind_body(((const erx_fiasco_irq_request_t *)words)->irq));
 	case ERX_FIASCO_CALL_IRQ_ACK:
-		return (erx_fiasco_irq_ack_body(decoded->task, irq_request->irq));
+		return (erx_fiasco_irq_ack_body(((const erx_fiasco_irq_request_t *)words)->irq));
 	case ERX_FIASCO_CALL_IRQ_TRIGGER:
-		return (erx_fiasco_irq_trigger_body(decoded->task, irq_request->irq));
+		return (erx_fiasco_irq_trigger_body(((const erx_fiasco_irq_request_t *)words)->irq));
 	default:
 		return (ERX_ENOTSUP);
 	}
@@ -414,12 +418,6 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 
 		return (erx_fiasco_budget_resize_body(decoded->task, resize->budget, resize->guarantee, resize->cap));
 	}
-	case ERX_FIASCO_CALL_IMAGE_SLICE:
-		return (erx_fiasco_slice_create_body(decoded->task, words, &reply->first));
-	case ERX_FIASCO_CALL_MEM_COPY:
-		return (erx_fiasco_mem_copy_body(decoded->task, words, &reply->first));
-	case ERX_FIASCO_CALL_RELEASE_ENTRY:
-		return (erx_fiasco_release_entry_body(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_IMAGE_MAP:
 		return (erx_fiasco_task_image_map_body(decoded->task, ((const erx_fiasco_image_map_request_t *)words)->space,
 		    ((const erx_fiasco_image_map_request_t *)words)->entry, &reply->first));

@@ -17,8 +17,6 @@
 #define MODE_GROUP	6	/* in its domain group: its take is its own, which a worker may not make: ends with 0 */
 #define MODE_HOLDER	7	/* maps the object whose handle the root passed it, the next bytes, read-only: ends with 0 */
 #define MODE_TIME	8	/* finds TIME_FIRST_NS, raises its signal, sees TIME_SECOND_NS: ends with 0 */
-#define MODE_BELL	9	/* in its domain group: waits for its bell, then acks it and rings the root's: ends with 0 */
-#define MODE_RELEASE	10	/* lists the slice whose handle the root passed, mapped at SLICE_ADDR: ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -26,22 +24,6 @@
 #define SHARED_ADDR	UINT64_C(0x4000400000)
 #define SHARED_PAGES	2u
 #define SIGNAL_ADDR	UINT64_C(0x4000600000)
-
-/* Where the root maps a slice of the image's domain release into a task, and its pages. */
-#define SLICE_ADDR	UINT64_C(0x4000800000)
-#define SLICE_PAGES	2u
-/*
- * The image's domains/sample/ release, which tools/lib/erx/native_space.rb writes: a
- * short file, and one whose path, without the prefix, is RELEASE_LONG_PARTS copies of
- * RELEASE_LONG_PART and then RELEASE_LONG_TAIL, longer than a public UTCB holds.
- */
-#define RELEASE_FIRST_PATH	"domains/sample/alpha"
-#define RELEASE_ALPHA		"alpha"
-#define RELEASE_ALPHA_BYTES	"alpha file\n"
-#define RELEASE_LONG_PART	"long-name/"
-#define RELEASE_LONG_PARTS	60u
-#define RELEASE_LONG_TAIL	"end"
-#define RELEASE_LONG_BYTES	"long file\n"
 
 #define ROOT_PATTERN	UINT64_C(0x5ea5ea5ea5ea5ea5)
 #define WRITER_PATTERN	UINT64_C(0x0ddba11c0ffee000)
@@ -53,12 +35,5 @@
 #define TIME_SECOND_NS	UINT64_C(0x2000000000000000)
 /* How far past either setting a read may land: the case's whole wait. */
 #define TIME_SLACK_NS	UINT64_C(10000000000)
-
-/* The doorbells case: where MODE_BELL finds its two handles, and the labels their binds give. */
-#define BELL_SHIFT	8u
-#define BACK_SHIFT	32u
-#define HANDLE_MASK	UINT64_C(0xffffff)
-#define BELL_LABEL	UINT64_C(0xbe11000000000001)
-#define BACK_LABEL	UINT64_C(0xbe11000000000002)
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

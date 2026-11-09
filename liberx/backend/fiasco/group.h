@@ -16,8 +16,8 @@
 /*
  * Groups as records and interrupts (docs/design-stopgap.md, "Budgets and groups as
  * records", "Interrupts and readiness"): the service's group records, and the root's
- * stubs of the group and IRQ calls. An IRQ object is an object record, which handles
- * name as they name every other.
+ * stubs of the group and IRQ calls. An IRQ object's handle is its index in the
+ * service's table.
  */
 
 /* What erx_fiasco_group_admit gives for a thread that names no group. */
@@ -53,42 +53,31 @@ void	erx_fiasco_group_join(uint32_t task, uint32_t record);
  * outlives its handles and refuses its destroy, and goes with its home.
  */
 bool	erx_fiasco_group_home_has_threads(uint32_t record);
-/* The release of a record that ends: its binds go, and its home, if any, is a home no more. */
+/* The release of a record that ends: its home, if any, is a home no more. */
 void	erx_fiasco_group_free(uint32_t record);
 /* Names the task's dispatcher, one of its own threads, once; a second is ERX_EINVAL. */
 int	erx_fiasco_dispatcher_set_body(uint32_t task, uint64_t thread);
 
 /*
- * IRQ objects (docs/design-stopgap.md, "Interrupts and readiness"), made by the root
- * alone: kind is ERX_IRQ_SOFT, or ERX_IRQ_LINE with selector the line, and resource is
- * ignored. A line the kernel will not attach, taken or not there, is ERX_EBUSY; an object
- * past the machine's ERX_FIASCO_IRQS_MAX, ERX_ENOMEM. A task's create is ERX_ENOTSUP.
+ * kind is ERX_IRQ_SOFT, or ERX_IRQ_LINE with selector the line. budget and
+ * resource are ignored. A line the kernel will not attach, taken or not there, is ERX_EBUSY.
  */
 int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector,
 	    uint64_t *irq) ERX_WARN_UNUSED_RESULT;
 /*
- * Binds the object to the group, or ERX_CAP_SELF for the caller's home, with the label
- * its deliveries report, and lets a line deliver; the root alone binds. A bind waits
- * until the group has a home with a dispatcher. Binding a bound object to its group again
- * moves its label; to another group, ERX_ENOTSUP. A group's 65th object is ERX_ELIMIT.
- * A group of ERX_CAP_NULL unbinds it.
+ * Binds the object to the group with the label its deliveries report, and lets a line
+ * deliver. Binding a bound object moves its label; a group of ERX_CAP_NULL unbinds it.
  */
 int	erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label) ERX_WARN_UNUSED_RESULT;
-/* From any task holding the object. An ack lets a line deliver again, which it does not after a delivery until then. */
+/* Lets a line deliver again, which it does not after a delivery until this call. */
 int	erx_irq_ack(uint64_t irq) ERX_WARN_UNUSED_RESULT;
 int	erx_irq_trigger(uint64_t irq) ERX_WARN_UNUSED_RESULT;
 
-/* The calls' bodies, on the service, for the calling task. */
-int	erx_fiasco_irq_create_body(uint32_t task, const erx_fiasco_irq_create_request_t *request, uint64_t *irq);
-int	erx_fiasco_irq_bind_body(uint32_t task, const erx_fiasco_irq_bind_request_t *request);
-int	erx_fiasco_irq_unbind_body(uint32_t task, uint64_t irq);
-int	erx_fiasco_irq_ack_body(uint32_t task, uint64_t irq);
-int	erx_fiasco_irq_trigger_body(uint32_t task, uint64_t irq);
-/* What an IRQ record's end gives back: its bind goes, then its kernel object. */
-void	erx_fiasco_irq_free(uint32_t record);
-/* Makes every waiting bind to the group record once its home and the home's dispatcher both exist. */
-void	erx_fiasco_irq_group_ready(uint32_t record);
-/* A group's end: every bind to it goes, so its objects stay, unbound. */
-void	erx_fiasco_irq_group_end(uint32_t record);
+/* The calls' bodies, on the service. */
+int	erx_fiasco_irq_create_body(uint64_t kind, uint64_t selector, uint64_t *irq);
+int	erx_fiasco_irq_bind_body(uint64_t irq, uint64_t thread, uint64_t record);
+int	erx_fiasco_irq_unbind_body(uint64_t irq);
+int	erx_fiasco_irq_ack_body(uint64_t irq);
+int	erx_fiasco_irq_trigger_body(uint64_t irq);
 
 #endif /* ERX_FIASCO_GROUP_H */

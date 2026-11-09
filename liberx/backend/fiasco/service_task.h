@@ -108,9 +108,8 @@ void		*erx_fiasco_task_record(uint32_t task, uint32_t index);
 int	erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *index)
 	    ERX_WARN_UNUSED_RESULT;
 
-/* The archive that erx_image_map and erx_image_slice read, which outlives every call; NULL until named. */
+/* The archive that erx_image_map reads, which outlives every call. */
 void		erx_fiasco_task_set_archive(const erx_pack_view_t *view);
-const erx_pack_view_t	*erx_fiasco_task_archive(void);
 
 /* The bodies. caller is the calling task; each result is the call table's. */
 int	erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_request_t *request, uint64_t *space);

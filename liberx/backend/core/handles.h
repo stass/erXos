@@ -38,8 +38,7 @@ typedef enum erx_backend_object_kind {
 	ERX_BACKEND_OBJECT_GATE,
 	ERX_BACKEND_OBJECT_SPACE,
 	ERX_BACKEND_OBJECT_BUDGET,
-	ERX_BACKEND_OBJECT_GROUP,
-	ERX_BACKEND_OBJECT_IRQ
+	ERX_BACKEND_OBJECT_GROUP
 } erx_backend_object_kind_t;
 
 /* For erx_backend_handle_find: any live kind will do. */

@@ -332,12 +332,11 @@ object_pass_item(uint32_t from, uint32_t to, erx_msg_item_t *item)
 }
 
 /*
- * The type a passed handle of a record's kind reports: a memory object's; an IRQ
- * object's, which its holder triggers and acks; and a budget's and a group's, for the
- * domain library's install. A task that holds a budget's last handle ends it after its
- * own end, by the drain. A space's or a gate's handle never passes, so that handles flow
- * down from an object's creator. Every kind has its case, so a new one is a build
- * warning here.
+ * The type a passed handle of a record's kind reports. A space's or a gate's handle
+ * never passes, so that handles flow down from an object's creator. A budget and a
+ * group pass for the domain library's install; a task that holds a budget's last
+ * handle ends it after its own end, by the drain. Every kind has its case, so a new
+ * one is a build warning here.
  */
 static int
 object_pass_type(uint32_t kind, erx_ktype_t *type)
@@ -345,9 +344,6 @@ object_pass_type(uint32_t kind, erx_ktype_t *type)
 	switch ((erx_backend_object_kind_t)kind) {
 	case ERX_BACKEND_OBJECT_MEMORY:
 		*type = ERX_K_MEMORY;
-		return (ERX_OK);
-	case ERX_BACKEND_OBJECT_IRQ:
-		*type = ERX_K_IRQ;
 		return (ERX_OK);
 	case ERX_BACKEND_OBJECT_BUDGET:
 		*type = ERX_K_BUDGET;
@@ -389,9 +385,6 @@ object_release(uint32_t index)
 		break;
 	case ERX_BACKEND_OBJECT_BUDGET:
 		erx_fiasco_budget_end(index);
-		break;
-	case ERX_BACKEND_OBJECT_IRQ:
-		erx_fiasco_irq_free(index);
 		break;
 	case ERX_BACKEND_OBJECT_FREE:
 	case ERX_BACKEND_OBJECT_RETIRED:

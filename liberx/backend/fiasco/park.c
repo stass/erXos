@@ -8,8 +8,7 @@
  * readiness of the task's home group, static data of which each task image has its own copy.
  * It holds the effects under park_table.c, which are the park lock and each executor's
  * semaphore, the one its umtx waits use, at 0 whenever its thread enters either wait;
- * the task's dispatcher; and the local take. Each entry's label is on the label page
- * (thread.h), at the constant address the service's bind writes it to.
+ * each entry's label; the task's dispatcher; and the local take.
  */
 
 #include <stdatomic.h>
@@ -47,6 +46,11 @@ static erx_backend_park_group_t park_group = { .status = &park_status };
 static erx_fiasco_lock_t park_group_lock;
 /* Which thread index runs in each slot, written by the claim before the thread starts. */
 static _Atomic uint32_t park_slot_index[ERX_GROUP_EXECUTORS_MAX];
+/*
+ * Each entry's label, which a take reports. A bind writes it before it lets the object
+ * fire, and a move changes the label a later take reads.
+ */
+static _Atomic uint64_t park_label[ERX_BACKEND_PARK_OBJECTS_MAX];
 static _Alignas(16) uint8_t dispatcher_stack[DISPATCHER_STACK_BYTES];
 static _Atomic bool dispatcher_started;
 
@@ -156,6 +160,12 @@ erx_executor_wake(uint32_t slot)
 	return (erx_backend_park_wake(&park_group, &park_effects, NULL, slot));
 }
 
+_Atomic uint64_t *
+erx_fiasco_park_label(uint32_t entry)
+{
+	return (&park_label[entry]);
+}
+
 int
 erx_group_take_ready(uint32_t max)
 {
@@ -167,8 +177,7 @@ erx_group_take_ready(uint32_t max)
 		return (ERX_ETYPE);
 	count = erx_fiasco_group_take(max < ERX_MSG_WORDS ? max : ERX_MSG_WORDS, objects);
 	for (uint32_t index = 0; index < count; index++)
-		atomic_store_explicit(&utcb->mr[index],
-		    atomic_load_explicit(&erx_fiasco_labels()[objects[index]], memory_order_acquire),
+		atomic_store_explicit(&utcb->mr[index], atomic_load_explicit(&park_label[objects[index]], memory_order_acquire),
 		    memory_order_relaxed);
 	return ((int)count);
 }
@@ -193,7 +202,7 @@ dispatcher_main(uint64_t unused)
 		/* Before the trigger, so the delivery precedes the wake it causes in the ring. */
 		if (record < ERX_BACKEND_PARK_OBJECTS_MAX)
 			erx_backend_trace_write(ERX_TRACE_EVENT_IRQ_DELIVER,
-			    atomic_load_explicit(&erx_fiasco_labels()[record], memory_order_relaxed), 0, 0);
+			    atomic_load_explicit(&park_label[record], memory_order_relaxed), 0, 0);
 		erx_fiasco_group_signal((uint32_t)record);
 	}
 }
