@@ -270,10 +270,13 @@ Error in process <0.150.0> with exit value:
   The language has variables, lists, `for`, `if`, functions, pipelines,
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
   Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
-  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `mount`, `uname`, `erl`, `true` and
+  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `erl`, `true` and
   `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
   `wc` print what FreeBSD's do for the options they offer; `uname` takes
-  FreeBSD's flags and layout. Its language is checked against
+  FreeBSD's flags and layout, and `uname -v` names the build. `top` shows
+  the process table under a header of uptime, memory and run queue, read
+  from the one tree of system values that `/proc` also serves; a figure
+  the stopgap kernel measures only in part says so and names its source. Its language is checked against
   plan9port's rc, built on the host as the oracle. Job control works for
   Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
   programs is not on master yet.
@@ -284,7 +287,16 @@ Error in process <0.150.0> with exit value:
   `erx:trace/1` streams trace events; `/proc` serves the same records as
   read-only files. Values the stopgap kernel cannot measure show as
   unsupported or partial, never invented.
-* **Hosted mode** runs the runtime as a macOS process. There, OTP's
+* **Domains are coming up on the stopgap.** `liberx`'s Fiasco backend
+  creates spaces in a tree, starts a created space's first thread at the
+  address its creator gives, stops a space with everything below it and
+  queues its faults and exit record at a gate, keeps budgets and groups
+  as records whose objects go with them, and passes handles from the
+  root into the spaces it created. `liberx` also has a lane's writer with
+  its wake handshake, and the funnel's check of a frame's sender and
+  target. No domain beyond the system domain boots yet.
+* **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
+  and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
   case with stock OTP against tables of known differences, each with its
   cause (`test/oracle/hosted_known_differences/`). On QEMU the system domain
@@ -300,12 +312,16 @@ Error in process <0.150.0> with exit value:
   storm, a frozen CPU, a power cut) that shows how the system meets each.
   When the machine goes down it prints a picture and its crash record.
 * **The build checks itself.** Generated ABI and hardware layers,
-  reproducible boot images, fuzzing, ASan, UBSan, TSan and TLA+ models
-  all run as build gates.
+  reproducible boot images, fuzzing, ASan, UBSan, TSan, TLA+ models (of
+  the lane, the connection and links among others) and herd7 litmus tests
+  of memory ordering all run as build gates.
 * **erXos's own kernel has begun** as host-built C17 cores: the object
   store, the capability table, budgets, the grace tracker and the page
   funnel, with host tests, fuzzing and a CBMC model-checking gate. None
   of it boots yet; the modified Fiasco is still the running kernel.
+* **Later tracks have host-built cores:** the screen's composition
+  (`erx_screen_core`) and the network stack's per-byte primitives, the
+  Internet checksum and SipHash-2-4, each tested on the host.
 * **Designed but not built yet:** the rest of erXos's own kernel, domains beyond the
   system domain, the rest of the command shell, networking, the display
   and web UI, and the POSIX-lite layer. Each has a design document in
