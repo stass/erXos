@@ -2886,8 +2886,8 @@ the property must find the overlap.
 
 ### The TCP core: exhaustive exploration
 
-`erx_tcp_explore` drives a connection with a small window and MSS, and
-a model of its peer, over an abstract alphabet: segments with every
+`erx_tcp_explore` drives a connection with small buffers and windows,
+and a model of its peer, over an abstract alphabet: segments with every
 combination of SYN, ACK, FIN and RST and with or without data, at each
 sequence position class (below the window, at `rcv_nxt`, inside, at the
 right edge, beyond) and each acknowledgement class (below
@@ -2906,7 +2906,10 @@ boundary. On every transition it checks:
 * no byte is delivered twice or out of order, and none beyond what the
   peer sent;
 * no segment is sent beyond the peer's window, except a window probe of
-  one byte;
+  one byte, measured from the furthest acknowledgement the peer sent:
+  FreeBSD's window update takes the window of an acknowledgement below
+  `snd_una` as counting from `snd_una` (`tcp_input.c`'s step 6), where
+  RFC 9293 ignores it;
 * a RST resets only at exactly `last_ack_sent`; challenge ACKs never
   exceed their limit;
 * an old acknowledgement never changes the send window (SND.WL1/WL2);
@@ -2917,8 +2920,11 @@ boundary. On every transition it checks:
 
 The base alphabet leaves out dimensions the core also decides on, each of
 which would multiply its size. Each runs as an exploration of its own,
-the base alphabet plus that one dimension, with the abstraction widened
-by the state the dimension reads:
+the base alphabet plus that one dimension's variants of its segments
+(none of a RST, which is judged before anything a dimension varies),
+with the abstraction widened by the state the dimension reads, to a
+depth bound of its own (5 to 8 events), since each level costs two to
+three times the one before:
 
 * **timestamps:** a segment without the option, and with a value older
   than, equal to and newer than `ts_recent`, on connections that
@@ -2932,16 +2938,23 @@ by the state the dimension reads:
   the flight, a block beyond `snd_max` and a block below `snd_una`
   (D-SACK);
 * **the peer's window:** zero, below one MSS and full, so persist,
-  window probes and silly-window avoidance are reached;
+  window probes and silly-window avoidance are reached, and a SYN with
+  window scaling or with FreeBSD's least MSS (`tcp_minmss`, 216 bytes).
+  That MSS is larger than the base's buffers, so this dimension's
+  connection has a send buffer of two such segments and more, and one
+  output pass sends more than one segment (`sendalot`);
 * **ICMP reports:** fragmentation-needed or packet-too-big, and
   unreachable, each quoting a sequence number in flight and one outside
   it, in every state.
 
 Their added properties: a report quoting a sequence number outside
 `snd_una` to `snd_max` changes nothing; a window probe is sent only while
-the peer's window is zero; CWR is sent only after ECE was received; and
-the step's results in the presence of an unnegotiated option equal its
-results without it.
+the peer's window is zero; no segment carries more data than the MSS;
+CWR is sent only after the window was reduced, on ECE received or after
+a segment was sent again on a timeout or three duplicates
+(`cc_cong_signal` owes CWR for `CC_ECN`, `CC_RTO` and `CC_NDUPACK`
+alike); and the step's results in the presence of an unnegotiated option
+equal its results without it.
 
 *Seeded failures:* the window update without the WL1/WL2 rule; RST
 accepted anywhere in the window; RST judged against `rcv_nxt` with an

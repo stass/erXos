@@ -108,6 +108,7 @@ acknowledgement, where FreeBSD writes `pipe - del_data` with `snd_una` not yet a
 -include("erx_tcp_loss.hrl").
 
 -export([init/1, ack/4, rewind/4, allowance/3, deadline/1, expired/3]).
+-export([dupacks/1]).
 
 %% tcprexmtthresh (tcp_input.c).
 -define(REXMT_THRESH, 3).
@@ -134,6 +135,10 @@ acknowledgement, where FreeBSD writes `pipe - del_data` with `snd_una` not yet a
 -spec init(erx_tcp_loss:params()) -> #dupack{}.
 init(#{sack := Sack}) when is_boolean(Sack) -> #dupack{sack = Sack};
 init(_) -> erlang:error(badarg).
+
+-doc "The duplicate acknowledgements counted (`t_dupacks`), which the TCP explorer abstracts on.".
+-spec dupacks(#dupack{}) -> non_neg_integer().
+dupacks(#dupack{dupacks = Dupacks}) -> Dupacks.
 
 -doc """
 Translates the acknowledgement processing of `tcp_do_segment` for the synchronized states:

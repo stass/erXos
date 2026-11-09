@@ -576,6 +576,20 @@ it; git history is the record of completed work.
   does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which
   the stack does not.
 
+* [Medium] erx_net TCP explorer (`test/erlang/erx_tcp_explore.erl`): the peer model is
+  looser than the properties it serves. The offered right edge only grows, so after one
+  full window a connection that ignored a shrunk or zeroed one passes (verified by a seeded
+  `snd_wnd = max(Win, snd_wnd)`); keep the edge of the newest window by the WL1/WL2 rule
+  and judge the probe on the peer's last window, not the connection's `snd_wnd`. The merge
+  key leaves out `right_edge`, `acked` and `urgent`, so a merged twin with a stricter
+  model is not explored. The sack and timestamps runs require only hits a connection
+  without the option also gives (want a scoreboard hole and a PAWS drop; a hole first
+  appears at depth 4, past the landing depth). `unnegotiated/2` lists the negotiable
+  options apart from the dimensions that vary them (each dimension should supply its own
+  strip), and MSS, window scale and SACK-permitted off a SYN are never tried. The urgent
+  model allows an urgent byte held out but never requires it; a probe is accepted at any
+  position past the edge, not only at the next byte; ICMP reports never quote a number
+  2^31 away from `snd_una`.
 * [Medium] erx_net TCP core (`erx_tcp`, `erx_tcp_user`): a malformed event or request
   (`{send, From, NotBinary}`) raises `function_clause` with the whole `#tcb{}` in the
   stack trace, send-buffer payload and the connection's generator included. Requests

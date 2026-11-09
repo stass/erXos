@@ -5,13 +5,12 @@
 require 'minitest/autorun'
 require_relative 'erx_net_eunit'
 
-# Runs the TCP core's exhaustive exploration over the base alphabet
-# (test/erlang/erx_tcp_explore.erl, docs/design-network-stack.md, "The TCP core: exhaustive
-# exploration") at the landing gate's depth, or with ERX_TCP_EXPLORE=full at the design's
-# depth of 8, as tools/erx check-fuzz runs it at the milestone gate. Each of the design's
-# seeded failures of the base alphabet must be caught by the property named for it; the
-# exploration is breadth-first, so the trace it reports is a shortest one in the graph
-# it explores.
+# Runs the TCP core's exhaustive exploration over the base alphabet and its six extra
+# dimensions (test/erlang/erx_tcp_explore.erl, docs/design-network-stack.md, "The TCP core:
+# exhaustive exploration") at the landing gate's depths, or with ERX_TCP_EXPLORE=full at
+# the milestone gate's, as tools/erx check-fuzz runs it. Each of the design's seeded
+# failures must be caught by the property named for it; the exploration is breadth-first,
+# so the trace it reports is a shortest one in the graph it explores.
 class ErxTcpExploreTest < Minitest::Test
   include ErxNetEunit
 
@@ -25,6 +24,12 @@ class ErxTcpExploreTest < Minitest::Test
   ADVANCED_ON_THE_WIRE = 'Tcb1#tcb{rcv_nxt = erx_tcp_seq:wire(RcvNxt + Tlen)}'
   COUNTED = '{Tcb#tcb{challenge = {End, Sent + 1}, last_ack_sent = RcvNxt},'
   UNCOUNTED = '{Tcb#tcb{challenge = {End, Sent}, last_ack_sent = RcvNxt},'
+  PAWS_CHECKED = 'andalso not_older(SegTs, Ts) andalso not Closed,'
+  PAWS_SKIPPED = 'andalso (not_older(SegTs, Ts) orelse true) andalso not Closed,'
+  SEQUENCE_CHECKED = 'case in_flight(Seq, Tcb) of'
+  SEQUENCE_SKIPPED = 'case in_flight(Seq, Tcb) orelse true of'
+  LOWER_BOUND = 'Lifted >= Una andalso Lifted < SndMax.'
+  NO_LOWER_BOUND = 'Lifted >= min(Una, Lifted) andalso Lifted < SndMax.'
 
   def test_the_base_and_wrapped_runs_keep_every_property
     assert_erx_net_eunit(:erx_tcp_explore_tests, extra: [:erx_tcp_explore])
@@ -49,24 +54,46 @@ class ErxTcpExploreTest < Minitest::Test
     refute_match(/base_run_test.*\*failed\*/, output)
   end
 
+  # A data segment at rcv_nxt with a TSval older than ts_recent, two events after connect,
+  # is the shortest: the fast path takes what PAWS drops.
+  def test_header_prediction_skipping_paws_is_caught
+    output = assert_caught(PAWS_CHECKED, PAWS_SKIPPED, /header_prediction_agrees/)
+    assert_match(/ts_older/, output)
+  end
+
+  # A report quoting the number below snd_una in SYN-SENT, the first event after connect,
+  # is the shortest, for the whole check left out and for its lower bound alone.
+  def test_an_icmp_report_without_its_sequence_check_is_caught
+    output = assert_caught(SEQUENCE_CHECKED, SEQUENCE_SKIPPED, /icmp_outside_flight_changes_nothing/,
+                           module_name: 'erx_tcp_icmp')
+    assert_match(/\[connect,\s*\{icmp,needfrag,below\}\]/, output)
+  end
+
+  def test_an_icmp_report_checked_only_against_snd_max_is_caught
+    output = assert_caught(LOWER_BOUND, NO_LOWER_BOUND, /icmp_outside_flight_changes_nothing/,
+                           module_name: 'erx_tcp_icmp')
+    assert_match(/\[connect,\s*\{icmp,needfrag,below\}\]/, output)
+  end
+
   # The sixth challenge lies 7 events after connect, past the landing depth, so this seed
-  # runs at the full depth.
+  # runs the base at the full depth.
   def test_challenge_acks_past_the_limit_are_caught
-    previous = ENV.fetch('ERX_TCP_EXPLORE', nil)
-    ENV['ERX_TCP_EXPLORE'] = 'full'
-    output = refute_erx_net_eunit(:erx_tcp_explore_tests, extra: [:erx_tcp_explore],
-                                                          fault: { 'erx_tcp' => [COUNTED, UNCOUNTED] })
-    assert_match(/challenge_acks_within_limit/, output)
-  ensure
-    ENV['ERX_TCP_EXPLORE'] = previous
+    assert_caught(COUNTED, UNCOUNTED, /challenge_acks_within_limit/, module_name: 'erx_tcp', mode: 'base')
   end
 
   private
 
-  def assert_caught(exact, faulty, property)
+  # Runs the explorer's cases on a copy of the module with the fault planted, at the
+  # landing gate's depths unless `mode` names another (so a full run at the milestone gate
+  # explores each seed only as deep as it needs), and expects the property to fail.
+  def assert_caught(exact, faulty, property, module_name: 'erx_tcp_input', mode: nil)
+    previous = ENV.fetch('ERX_TCP_EXPLORE', nil)
+    ENV['ERX_TCP_EXPLORE'] = mode
     output = refute_erx_net_eunit(:erx_tcp_explore_tests, extra: [:erx_tcp_explore],
-                                                          fault: { 'erx_tcp_input' => [exact, faulty] })
+                                                          fault: { module_name => [exact, faulty] })
     assert_match(property, output)
     output
+  ensure
+    ENV['ERX_TCP_EXPLORE'] = previous
   end
 end
