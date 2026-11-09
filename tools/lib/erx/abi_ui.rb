@@ -10,8 +10,8 @@ module Erx
     # enum, boolean, image, key, event and presentation. MINIMUM and MAXIMUM
     # bound an integer; MAXIMUM is a text's or bytes' byte count and a list's
     # entry count; ELEMENT is a list's text type; ATOMS are an enum's or the
-    # image types' names in number order.
-    UIType = Struct.new(:name, :form, :minimum, :maximum, :element, :atoms, keyword_init: true)
+    # image types' names in number order, and NUMBERS their wire numbers.
+    UIType = Struct.new(:name, :form, :minimum, :maximum, :element, :atoms, :numbers, keyword_init: true)
     UIImage = Struct.new(:name, :number, :content_type, keyword_init: true)
     # DEFAULT is the value the property's absence means, as an Integer, true,
     # false or an enum member's name, or nil. DETAIL is 'state' for an event
@@ -26,7 +26,8 @@ module Erx
       def taken(name) = takes.find { |entry| entry.property.name == name }
       def state = takes.find(&:state)
     end
-    UISchema = Struct.new(:version, :images, :properties, :kinds, :insert_max, :children_max, keyword_init: true)
+    UISchema = Struct.new(:version, :images, :properties, :kinds, :insert_max, :children_max, :op_max, :pixels_max,
+                          keyword_init: true)
 
     # The reader of the one `ui VERSION` declaration (docs/design-abi.md,
     # "Widget format"). It refuses every source the grammar refuses and
@@ -65,8 +66,10 @@ module Erx
         declaration.fail!('ui version must be positive and fit 32 bits') unless version.between?(1, 0xffffffff)
         op_max = limits['web_ui_op_max'] || declaration.fail!('ui.txt needs the root limit web_ui_op_max')
         children_max = limits['ui_children'] || declaration.fail!('ui.txt needs the root limit ui_children')
+        pixels_max = limits['ui_pixels_max'] || declaration.fail!('ui.txt needs the root limit ui_pixels_max')
+        declaration.fail!('ui_pixels_max must be at least web_ui_op_max') unless pixels_max >= op_max
         declaration.fail!('ui_children must lie in 1..65536, an index being a u16') unless children_max.between?(1, 65_536)
-        Reader.new(declaration, types).schema(version, op_max: op_max, children_max: children_max)
+        Reader.new(declaration, types).schema(version, op_max: op_max, children_max: children_max, pixels_max: pixels_max)
       end
 
       # Validation state for one declaration: the members grouped with their
@@ -84,7 +87,7 @@ module Erx
           end
         end
 
-        def schema(version, op_max:, children_max:)
+        def schema(version, op_max:, children_max:, pixels_max:)
           types = {}
           images = {}
           # Value types and image types share a namespace with the built-in types.
@@ -112,7 +115,8 @@ module Erx
                    .fail!("kind #{name}'s largest insert, #{size} bytes, exceeds web_ui_op_max")
           end
           UISchema.new(version: version, images: images.values, properties: properties.values,
-                       kinds: kinds.values, insert_max: insert_max, children_max: children_max)
+                       kinds: kinds.values, insert_max: insert_max, children_max: children_max,
+                       op_max: op_max, pixels_max: pixels_max)
         end
 
         private
@@ -208,11 +212,13 @@ module Erx
           if word.start_with?('@')
             enum = @root_types[word.delete_prefix('@')]
             line.fail!("#{word} is not a root enum of type u8") unless enum.is_a?(EnumType) && !enum.flags && enum.base.size == 1 && !enum.base.signed
-            return UIType.new(name: word, form: 'enum', atoms: enum.members.sort_by { |_, value| value }.map(&:first))
+            members = enum.members.sort_by { |_, value| value }
+            return UIType.new(name: word, form: 'enum', atoms: members.map(&:first), numbers: members.map(&:last))
           end
           if word == 'image'
             line.fail!('an image property follows the image types it takes') if images.empty?
-            return UIType.new(name: word, form: word, atoms: images.values.sort_by(&:number).map(&:name))
+            ordered = images.values.sort_by(&:number)
+            return UIType.new(name: word, form: word, atoms: ordered.map(&:name), numbers: ordered.map(&:number))
           end
           return UIType.new(name: word, form: word) if BUILTIN_TYPES.include?(word)
 

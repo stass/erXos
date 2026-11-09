@@ -39,6 +39,7 @@
              erx_trace_ring,
              erx_tracer,
              erx_ui_schema,
+             erx_ui_wire,
              erx_watchdog]},
   {registered, [erx_console, erx_ns, erx_watchdog]},
   {applications, [kernel, stdlib]},

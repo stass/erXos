@@ -782,6 +782,30 @@ so whether a node exists, takes a property or an event, or fits its
 parent is decided by the renderer's `apply_ops` and by `hit/4`, never by
 the reader.
 
+A message's `u32` length counts its tag and fields, not itself, and is
+never 0. An event's text detail is a `u32` length and that many bytes of
+valid UTF-8, bounded by the message. A reader also refuses node 0 where a
+node is named; a status block from the application's own reporter whose
+status is not `ok`, since the application's own value is a plain value; a
+timeout of 0 with `timeout` or a non-zero one with any other status; a key
+`input` whose rune is neither a Unicode scalar value nor 0xffffffff; and a
+presentation name or a text that is not valid UTF-8.
+
+The generator emits `erx_ui_wire`, the Erlang encoder of every message
+and reader of `event` and `pixels`, and `erx/ui_wire.h` with its
+freestanding C source, the reader of `insert` to `commit`, `screen`,
+`input` and `repaint` that a native renderer links. The C reader
+allocates nothing: texts point into the caller's buffer, and a list's
+texts are walked from its encoded bytes. The encoder takes the canonical
+text of a `present` value as a function, `erx_present:text/2` in the
+widget server, so the generated module depends on no presentation table.
+In Erlang, `screen` is `{screen, Width, Height, Chan}`, `input` is
+`{input, {pointer, X, Y, Buttons}}`, `{input, {key, down | up, Code,
+Rune | none}}` or `{input, {wheel, Steps}}`, `repaint` is the atom, an
+event is `{event, Node, Event, Detail}` with the detail `none`, a
+boolean, an integer or a binary, and a report is `{pixels, X, Y, Width,
+Height, Pixels}`.
+
 ## Numeric assignment and versions
 
 The declaration source contains every assignment literally. Generation
