@@ -1031,7 +1031,7 @@ connection, as `tcp_drop_syn_sent` (`tcp_subr.c:3559`) does.
 | window scaling and timestamps | on (`tcp_do_rfc1323`, `tcp_subr.c:207`) | on |
 | SACK with RFC 6675 recovery, lost-retransmission detection | on (`tcp_do_sack`, `tcp_do_newsack`, `tcp_sack.c:125-130`; `tcp_do_lrd`, `tcp_sack.c:152`) | on |
 | PRR, limited transmit, IW10 | on (`tcp_input.c:162-178`) | on |
-| ECN | 2: accept when the peer asks, never initiate (`tcp_do_ecn`, `tcp_ecn.c:106`) | 2, so a peer that asks for AccECN gets RFC 3168 ECN, as `tcp_ecn_syncache_add` answers it (`tcp_ecn.c:509-537`) |
+| ECN | 2: accept when the peer asks, never initiate (`tcp_do_ecn`, `tcp_ecn.c:106`) | 2, so a peer that asks for AccECN gets RFC 3168 ECN, as `tcp_ecn_syncache_add` answers it (`tcp_ecn.c:509-537`); like FreeBSD, a SYN-ACK with ECE alone turns ECN on although our SYN did not ask, where RFC 3168 section 6.1.1 would leave it off (`tcp_ecn_input_syn_sent`, `tcp_ecn.c:120`) |
 | missing timestamps on a connection that negotiated them | tolerated (`tcp_tolerate_missing_ts`, `tcp_subr.c:219`) | tolerated |
 | FIN-WAIT-2 recycling at 60 s | off (`tcp_fast_finwait2_recycle`, `tcp_timer.c:143`) | off |
 | delayed ACK | on (`tcp_delack_enabled`, `tcp_input.c:152`) | on |
@@ -1325,8 +1325,8 @@ modules are marked P; process modules E.
 | `erx_tcp_output` | `tcp_output.c` | output | P |
 | `erx_tcp_timer` | `tcp_timer.c`, `tcp_timer.h` | expirations | P |
 | `erx_tcp_user` | `tcp_usrreq.c`, `tcp_drop` (`tcp_subr.c:2393`), `tcp_close` (`:2532`), `tcp_newtcpcb` (`:2233`) | user requests | P |
-| `erx_tcp_rtt` | `tcp_xmit_timer` (`tcp_input.c:3642`) | RFC 6298 estimator | P |
-| `erx_tcp_mss` | `tcp_mss` (`tcp_input.c:3899`), `tcp_mss_update`, `tcp_maxseg` (`tcp_subr.c:3780`), `tcp_compute_initwnd` | MSS and initial window | P |
+| `erx_tcp_rtt` | `tcp_xmit_timer` (`tcp_input.c:3642`), the timeout of `tcp_timer_rexmt` (`tcp_timer.c:631-635`), `TCP_REXMTVAL`, the estimator fields of `tcp_newtcpcb` | RFC 6298 estimator and the backed-off timeout | P |
+| `erx_tcp_mss` | `tcp_mss` (`tcp_input.c:3899`), `tcp_mss_update`, `tcp_mssopt`, `tcp_maxseg` (`tcp_subr.c:3780`), `tcp_compute_initwnd` | MSS and initial window | P |
 | `erx_tcp_sendlog` | none: written from RFC 6675, the role of `tcp_sack_doack` and `tcp_sack_output` in `tcp_sack.c`, which is not read | the send log and RFC 6675 scoreboard | P |
 | `erx_tcp_sack` | none: written from RFC 2018 and RFC 2883, since `tcp_sack.c` carries an advertising clause | SACK and D-SACK blocks | P |
 | `erx_tcp_reass` | `tcp_reass.c` | out-of-order queue | P |

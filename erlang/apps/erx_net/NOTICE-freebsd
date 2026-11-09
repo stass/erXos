@@ -115,3 +115,24 @@ module erx_net_bandlim
 
 module erx_udp
   sys/netinet/udp_usrreq.c udp_input udp_common_ctlinput
+
+module erx_tcp_isn
+  sys/netinet/tcp_subr.c tcp_keyed_hash tcp_new_isn tcp_new_ts_offset
+
+module erx_tcp_rtt
+  sys/netinet/tcp_input.c tcp_xmit_timer
+  sys/netinet/tcp_subr.c tcp_newtcpcb
+  sys/netinet/tcp_timer.c tcp_timer_rexmt
+  sys/netinet/tcp_timer.h TCPT_RANGESET
+  sys/netinet/tcp_var.h TCP_REXMTVAL
+
+module erx_tcp_mss
+  sys/netinet/tcp.h PADTCPOLEN
+  sys/netinet/tcp_input.c tcp_mss_update tcp_mss tcp_mssopt tcp_compute_initwnd
+  sys/netinet/tcp_subr.c tcp_maxseg
+
+module erx_tcp_ecn
+  sys/netinet/tcp_ecn.c tcp_ecn_input_syn_sent tcp_ecn_input_parallel_syn tcp_ecn_input_segment tcp_ecn_output_established tcp_ecn_syncache_socket tcp_ecn_syncache_add tcp_ecn_syncache_respond
+  sys/netinet/tcp_input.c cc_cong_signal
+  sys/netinet/tcp_output.c tcp_output
+  sys/netinet/tcp_syncache.c syncache_timer
