@@ -57,10 +57,10 @@ seg(Seq, Flags, Data) ->
 
 %% The RST a {reset, _} action carries: {Seq, Ack, Flags, Win}.
 resets(Actions) ->
-    [{S, A, F, W} || {reset, {#tcp{seq = S, ack = A, flags = F, win = W}, []}} <- Actions].
+    [{S, A, F, W} || {reset, {#tcp{seq = S, ack = A, flags = F, win = W}, _, []}} <- Actions].
 
 challenges(Actions) ->
-    [{S, A} || {transmit, [{#tcp{seq = S, ack = A, flags = ?TH_ACK}, []}]} <- Actions].
+    [{S, A} || {transmit, [{#tcp{seq = S, ack = A, flags = ?TH_ACK}, _, []}]} <- Actions].
 
 %% --- lift, tcp_input.c:1556-1561: a SYN-ACK for something never sent --------------------
 
@@ -300,7 +300,7 @@ data_after_close_resets_test() ->
 
 reset_carries_no_options_test() ->
     Tcb = with_ts((est())#tcb{user_closed = true}, 500),
-    {_, [{reset, {Rst, []}}]} = input([wire(5001, 0, 0, <<"x">>, #tcp_opts{ts = {600, 0}})], Tcb),
+    {_, [{reset, {Rst, _, []}}]} = input([wire(5001, 0, 0, <<"x">>, #tcp_opts{ts = {600, 0}})], Tcb),
     ?assertEqual({0, 5002, ?TH_RST bor ?TH_ACK, 0, #tcp_opts{}},
                  {Rst#tcp.seq, Rst#tcp.ack, Rst#tcp.flags, Rst#tcp.win, Rst#tcp.opts}).
 

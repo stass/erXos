@@ -138,7 +138,7 @@ traffic class byte, tcp_do_segment's `iptos`).
 A segment to send: its TCP header with the values on the wire, and its payload, which
 erx_net_frame encodes with the path's headers.
 """.
--type outgoing() :: {#tcp{}, Payload :: [binary()]}.
+-type outgoing() :: {#tcp{}, #{ecn := 0..3, df := boolean()}, Payload :: [binary()]}.
 
 -doc """
 What the step asks its process to do, in order. `{reset, Segment}` is a RST answering a
@@ -425,4 +425,4 @@ respond(#tcb{local = {_, LPort}, remote = {_, RPort}, wscale = Wscale, ts = Ts} 
     {#tcp{sport = LPort, dport = RPort, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
           flags = Flags, win = Win, urp = 0,
           opts = Opts},
-     []}.
+     #{ecn => 0, df => true}, []}.

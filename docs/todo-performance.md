@@ -466,3 +466,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Settle it with a host benchmark of one recovery episode over a 10,000-
   segment window; if it matters, keep a hint of the first range not yet
   retransmitted, as FreeBSD keeps `sackhint.nexthole`.
+* **The send buffer's walk for each segment.** `erx_tcp_sndbuf:range/3`
+  turns the queue of the owner's binaries into a list and skips to the
+  offset on every call, and `erx_tcp_output` calls it once per segment, so a
+  pass of C segments over a buffer of N binaries costs C * N; an owner that
+  writes small binaries makes N large. Settle it with a host benchmark of
+  one output pass at a credit of 64 over a full buffer written in 1-byte and
+  in 1,460-byte sends; if it matters, keep the chunks in a tree keyed by
+  offset, or hand output an iterator that one pass advances.

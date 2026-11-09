@@ -563,6 +563,16 @@ it; git history is the record of completed work.
   (`tcp_xmit_timer`, in ACK processing) and output leaving persist must reset it too, or
   a connection dies after 12 timeouts in its lifetime; make the function that applies an
   RTT sample the one place that resets it.
+* [Medium] erx_net TCP core (`erx_tcp_timer:snapshot/2`, input): with timestamps the
+  first timeout's snapshot keeps `badrxtwin = none`, and nothing records the time of the
+  first retransmission that FreeBSD keeps in `t_badrxtwin` (`tcp_output.c:849`), so the
+  spurious-timeout check of `tcp_input.c:1784-1789` has no reference. Input should record
+  it, or compare the echoed timestamp with the send log's transmission time.
+* [Low] erx_net TCP output (`erx_tcp_output`): a FIN-only range the send log marks lost at
+  `snd_una` (NewReno, with only a separately sent FIN outstanding) waits for the RTO,
+  since the FIN is resent only when `snd_nxt == snd_una`; FreeBSD moves `snd_nxt` to the
+  acknowledgement first. And `enobufs/3` sizes the window with no SACK blocks where
+  `tcp_maxseg` counts `rcv_numsacks`.
 * [Medium] erx_net TCP core: the design's control-block table gives the recovery state
   as the variant `none | {fast, R} | {congestion, R}`, but `#ccv{}` keeps two booleans
   and `#tcb{}` keeps `snd_recover`. Settle on one form (the variant rules out illegal

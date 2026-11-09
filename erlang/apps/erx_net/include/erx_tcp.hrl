@@ -74,6 +74,7 @@
     %% Estimators and the seams of loss detection and congestion control.
     rtt :: erx_tcp_rtt:rtt(),
     rtt_probe = none :: none | {Seq :: integer(), SentAt :: integer()}, % t_rtseq, t_rtttime
+    sndtime = none :: none | integer(),         % t_sndtime, when snd_max last advanced
     cc :: module(),
     ccv :: #ccv{},
     loss :: module(),
@@ -110,6 +111,9 @@
     %% Per-step requests to output, which output clears.
     ack_now = false :: boolean(),               % TF_ACKNOW
     force_data = false :: boolean(),            % TF_FORCEDATA
+    %% The loss module's window for this step's output and the one kept after it, which
+    %% input sets from allowance/3 after an acknowledgement (erx_tcp_loss).
+    allowance = none :: erx_tcp_loss:allowance(),
     %% Socket options read by the step.
     nodelay = false :: boolean(),               % TF_NODELAY
     linger = off :: off | non_neg_integer(),    % SO_LINGER and so_linger, seconds

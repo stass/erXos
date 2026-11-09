@@ -25,12 +25,21 @@ new() ->
 
 %% A connection in State with its handshake done at T0.
 in(State) ->
-    (new())#tcb{state = State, irs = 5000, rcv_nxt = 5001, snd_una = 1001, snd_nxt = 1001,
-                snd_max = 1001, wscale = {0, 0}, ts = off, sack = off}.
+    (new())#tcb{state = State, irs = 5000, rcv_nxt = 5001, rcv_adv = 5001 + 65536,
+                snd_una = 1001, snd_nxt = 1001, snd_max = 1001,
+                sendlog = erx_tcp_sendlog:new(1001), wscale = {0, 0}, ts = off, sack = off}.
 
 step(Event, Tcb, Now) -> erx_tcp:step(Event, Tcb, ctx(Now)).
 
 ended(Actions) -> lists:last(Actions) =:= finish.
+
+%% The actions after the RST|ACK output sends first for a connection dropped after a SYN.
+after_rst([{transmit, [{#tcp{flags = Flags, win = 0}, _, []}]} | Rest])
+  when Flags =:= ?TH_RST bor ?TH_ACK ->
+    Rest.
+
+%% A timer expiry without the output that follows it in erx_tcp:step/3.
+expire(Tcb, Now) -> erx_tcp_timer:expired(Tcb, ctx(Now)).
 
 %% --- tcp_newtcpcb and tcp_connect ---
 
@@ -46,19 +55,21 @@ new_test() ->
 connect_arms_the_establishment_timer_test() ->
     {T, Actions} = step({user, {connect, ?FROM}}, new(), ?T0),
     ?assertEqual(syn_sent, T#tcb.state),
-    ?assertEqual(?T0 + ?S(75000), erx_tcp:next_deadline(T)),
-    ?assertEqual([], Actions),
+    ?assertEqual(?T0 + ?S(75000), T#tcb.deadlines#deadlines.keep),
+    %% Output sent the SYN and armed its retransmission timer.
+    ?assertMatch([{transmit, [{#tcp{flags = ?TH_SYN, seq = 1000}, _, []}]}], Actions),
+    ?assertEqual(?T0 + ?S(1000), erx_tcp:next_deadline(T)),
     {_, Again} = step({user, {connect, ?FROM}}, T, ?T0),
     ?assertEqual([{reply, ?FROM, {error, ealready}}], Again).
 
 connect_is_answered_once_established_test() ->
-    {T0, []} = step({user, {connect, ?FROM}}, new(), ?T0),
+    {T0, [{transmit, _}]} = step({user, {connect, ?FROM}}, new(), ?T0),
     {T1, Actions} = step({user, {rcvd, 0}}, T0#tcb{state = established}, ?T0),
     ?assertEqual([{reply, ?FROM, ok}], Actions),
     ?assertEqual(none, T1#tcb.connect_waiter).
 
 establishment_timeout_answers_connect_test() ->
-    {T0, []} = step({user, {connect, ?FROM}}, new(), ?T0),
+    {T0, [{transmit, _}]} = step({user, {connect, ?FROM}}, new(), ?T0),
     {_, Actions} = step({expired, ?T0 + ?S(75000)}, T0, ?T0 + ?S(75000)),
     %% tcp_timer_keep before ESTABLISHED: dropped with ETIMEDOUT, no RST (no SYN received).
     ?assertEqual([{reply, ?FROM, {error, etimedout}}, {notify, {error, etimedout}},
@@ -86,8 +97,8 @@ close_before_established_ends_quietly_test() ->
 
 close_established_sends_fin_test() ->
     {T, Actions} = step({user, close}, in(established), ?T0),
-    ?assertEqual({fin_wait_1, queued, true, true}, {T#tcb.state, T#tcb.fin, T#tcb.user_closed, T#tcb.snd_closed}),
-    ?assertEqual([], Actions).
+    ?assertEqual({fin_wait_1, {sent, 1001}, true, true}, {T#tcb.state, T#tcb.fin, T#tcb.user_closed, T#tcb.snd_closed}),
+    ?assertMatch([{transmit, [{#tcp{flags = ?TH_FIN bor ?TH_ACK, seq = 1001}, _, []}]}], Actions).
 
 close_in_time_wait_changes_nothing_test() ->
     T = in(time_wait),
@@ -95,15 +106,13 @@ close_in_time_wait_changes_nothing_test() ->
 
 linger_zero_drops_with_rst_test() ->
     {T, Actions} = step({user, close}, (in(established))#tcb{linger = 0}, ?T0),
-    ?assert(T#tcb.reset_peer),
     ?assertEqual(none, T#tcb.error),
-    ?assertEqual([{notify, closed}, finish], Actions).
+    ?assertEqual([{notify, closed}, finish], after_rst(Actions)).
 
 abort_test() ->
     {T, Actions} = step({user, abort}, (in(established))#tcb{send_waiter = {?FROM, <<"x">>}}, ?T0),
-    ?assert(T#tcb.reset_peer),
     ?assertEqual([{reply, ?FROM, {error, econnaborted}}, {notify, {error, econnaborted}},
-                  {notify, closed}, finish], Actions),
+                  {notify, closed}, finish], after_rst(Actions)),
     ?assertEqual({none, infinity}, {T#tcb.send_waiter, erx_tcp:next_deadline(T)}).
 
 drop_reports_the_soft_error_on_timeout_test() ->
@@ -115,8 +124,8 @@ drop_reports_the_soft_error_on_timeout_test() ->
 %% --- tcp_usr_send, tcp_usr_rcvd, tcp_usr_shutdown ---
 
 send_test() ->
-    {_, NotYet} = step({user, {send, ?FROM, <<"x">>}}, in(syn_sent), ?T0),
-    ?assertEqual([{reply, ?FROM, {error, enotconn}}], NotYet),
+    {_, NotYet} = step({user, {send, ?FROM, <<"x">>}}, (new())#tcb{state = syn_sent}, ?T0),
+    ?assertMatch([{reply, _, {error, enotconn}}, {transmit, _}], NotYet),
     {T1, Now} = step({user, {send, ?FROM, binary:copy(<<"a">>, 100)}}, in(established), ?T0),
     ?assertEqual([{reply, ?FROM, ok}], Now),
     %% The buffer is at its high watermark (100): the caller waits with its bytes, nothing
@@ -134,7 +143,7 @@ send_test() ->
                  {Answered, T4#tcb.send_waiter, erx_tcp_sndbuf:size(T4#tcb.sndbuf)}).
 
 send_after_shutdown_test() ->
-    {T, [{reply, _, ok}]} = step({user, {shutdown, ?FROM, write}}, in(close_wait), ?T0),
+    {T, [{reply, _, ok}, {transmit, _}]} = step({user, {shutdown, ?FROM, write}}, in(close_wait), ?T0),
     ?assertEqual(last_ack, T#tcb.state),
     ?assertEqual([{reply, ?FROM, {error, epipe}}],
                  element(2, step({user, {send, ?FROM, <<"x">>}}, T, ?T0))).
@@ -162,7 +171,7 @@ early_timer_changes_nothing_test() ->
 
 delack_requests_an_ack_test() ->
     T = (in(established))#tcb{deadlines = #deadlines{delack = ?T0 + 40}},
-    {T1, []} = step({expired, ?T0 + 40}, T, ?T0 + 40),
+    {T1, []} = expire(T, ?T0 + 40),
     ?assert(T1#tcb.ack_now),
     ?assertEqual(infinity, erx_tcp:next_deadline(T1)).
 
@@ -174,7 +183,7 @@ keepalive_waits_out_the_idle_time_test() ->
 keepalive_probe_test() ->
     Now = ?T0 + ?S(7200000),
     T = (in(established))#tcb{rcvtime = ?T0, deadlines = #deadlines{keep = Now}},
-    {T1, [{transmit, [{Probe, []}]}]} = step({expired, Now}, T, Now),
+    {T1, [{transmit, [{Probe, _, []}]}]} = step({expired, Now}, T, Now),
     %% One byte below snd_una, acknowledging rcv_nxt: the peer must answer.
     ?assertMatch(#tcp{sport = 4000, dport = 80, seq = 1000, ack = 5001, flags = ?TH_ACK}, Probe),
     ?assertEqual(Now + ?S(75000), T1#tcb.deadlines#deadlines.keep).
@@ -182,9 +191,8 @@ keepalive_probe_test() ->
 keepalive_gives_up_test() ->
     Now = ?T0 + ?S(7200000 + 8 * 75000),
     T = (in(established))#tcb{rcvtime = ?T0, deadlines = #deadlines{keep = Now}},
-    {T1, Actions} = step({expired, Now}, T, Now),
-    ?assert(T1#tcb.reset_peer),
-    ?assertEqual([{notify, {error, etimedout}}, {notify, closed}, finish], Actions).
+    {_, Actions} = step({expired, Now}, T, Now),
+    ?assertEqual([{notify, {error, etimedout}}, {notify, closed}, finish], after_rst(Actions)).
 
 keepalive_in_fin_wait_2_rearms_test() ->
     Now = ?T0 + ?S(7200000 + 8 * 75000),
@@ -204,10 +212,10 @@ msl2_test() ->
     ?assertEqual([{notify, closed}, finish], Gone).
 
 rexmt_in_syn_sent_test() ->
-    {T0, []} = step({user, {connect, ?FROM}}, new(), ?T0),
+    {T0, [{transmit, _}]} = step({user, {connect, ?FROM}}, new(), ?T0),
     T = T0#tcb{snd_nxt = 1001, snd_max = 1001, send_timer = {rexmt, ?T0 + ?S(1000)}},
     Now = ?T0 + ?S(1000),
-    {T1, []} = step({expired, Now}, T, Now),
+    {T1, []} = expire(T, Now),
     %% tcp_rexmit_initial * tcp_backoff[1] + 200 ms.
     ?assertEqual({{rexmt, Now + ?S(2200)}, 1}, {T1#tcb.send_timer, T1#tcb.rxtshift}),
     ?assertEqual({1000, 1001, 1, true}, {T1#tcb.snd_nxt, T1#tcb.snd_recover,
@@ -216,9 +224,8 @@ rexmt_in_syn_sent_test() ->
 rexmt_gives_up_after_tcp_retries_test() ->
     T = (in(established))#tcb{send_timer = {rexmt, ?T0}, rxtshift = 12, soft_error = ehostunreach,
                                connect_waiter = none},
-    {T1, Actions} = step({expired, ?T0}, T, ?T0),
-    ?assert(T1#tcb.reset_peer),
-    ?assertEqual([{notify, {error, ehostunreach}}, {notify, closed}, finish], Actions).
+    {_, Actions} = step({expired, ?T0}, T, ?T0),
+    ?assertEqual([{notify, {error, ehostunreach}}, {notify, closed}, finish], after_rst(Actions)).
 
 rexmt_first_timeout_keeps_a_snapshot_test() ->
     Ccv = (in(established))#tcb.ccv,
@@ -226,7 +233,7 @@ rexmt_first_timeout_keeps_a_snapshot_test() ->
                                send_timer = {rexmt, ?T0},
                                ccv = Ccv#ccv{cwnd = 10000, ssthresh = 8000, fast_recovery = true,
                                              cong_recovery = true}},
-    {T1, []} = step({expired, ?T0}, T, ?T0),
+    {T1, []} = expire(T, ?T0),
     ?assertMatch(#rexmt_prev{cwnd = 10000, ssthresh = 8000, recover = 900, fast = true,
                              cong = true}, T1#tcb.rexmt_prev),
     %% CC_RTO leaves recovery and NewReno's timeout response sets the window to one segment.
@@ -234,7 +241,7 @@ rexmt_first_timeout_keeps_a_snapshot_test() ->
     ?assertEqual({1001, 3001}, {T1#tcb.snd_nxt, T1#tcb.snd_recover}),
     %% The second timeout forgets the snapshot.
     {{rexmt, At}, 1} = {T1#tcb.send_timer, T1#tcb.rxtshift},
-    {T2, []} = step({expired, At}, T1, At),
+    {T2, []} = expire(T1, At),
     ?assertEqual({none, 2}, {T2#tcb.rexmt_prev, erx_tcp:rxtshift(T2)}),
     %% CC_RTO_ERR from the first restores it.
     T3 = erx_tcp:cong_signal(T1, rto_err, 1001, ctx(?T0)),
@@ -243,7 +250,7 @@ rexmt_first_timeout_keeps_a_snapshot_test() ->
 
 persist_backs_off_test() ->
     T = (in(established))#tcb{send_timer = {persist, ?T0}},
-    {T1, []} = step({expired, ?T0}, T, ?T0),
+    {T1, []} = expire(T, ?T0),
     %% No RTT sample yet: the base is under tcp_persmin, so 5 s.
     ?assertEqual({{persist, ?T0 + ?S(5000)}, 1}, {T1#tcb.send_timer, T1#tcb.rxtshift}),
     ?assert(T1#tcb.force_data).
@@ -306,8 +313,8 @@ keepalive_options_of_zero_are_the_defaults_test() ->
                                             now => 0, keep_intvl => -1})).
 
 rexmt_in_syn_sent_takes_no_snapshot_test() ->
-    {T0, []} = step({user, {connect, ?FROM}}, new(), ?T0),
-    {T1, []} = step({expired, ?T0}, T0#tcb{send_timer = {rexmt, ?T0}}, ?T0),
+    {T0, [{transmit, _}]} = step({user, {connect, ?FROM}}, new(), ?T0),
+    {T1, []} = expire(T0#tcb{send_timer = {rexmt, ?T0}}, ?T0),
     ?assertEqual(none, T1#tcb.rexmt_prev).
 
 shutdown_after_fin_wait_2_is_enotconn_test() ->

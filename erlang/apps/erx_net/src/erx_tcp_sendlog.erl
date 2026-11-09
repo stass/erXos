@@ -244,11 +244,12 @@ first_unretransmitted({Start, #sent{sacked = false, rxt = false} = Sent, _}) -> 
 first_unretransmitted({_, _, Iter}) -> first_unretransmitted(gb_trees:next(Iter));
 first_unretransmitted(none) -> none.
 
-rescue_seg(#sendlog{una = Una, rescue = RescueRxt, ranges = Ranges}, Mss)
+rescue_seg(#sendlog{una = Una, rescue = RescueRxt, ranges = Ranges, high_rxt = HighRxt}, Mss)
   when RescueRxt =:= none; Una > RescueRxt ->
+    %% Rule 4 rescues only an unSACKed byte above HighRxt (HighRxt < S2 <= HighData).
     case highest_unsacked(gb_trees:next(gb_trees:iterator(Ranges, reversed))) of
-        {Start, Next} -> {rescue, max(Start, Next - Mss), Next};
-        none -> none
+        {Start, Next} when Next > HighRxt -> {rescue, max(Start, Next - Mss), Next};
+        _ -> none
     end;
 rescue_seg(_, _) ->
     none.

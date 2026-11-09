@@ -139,7 +139,7 @@ The 32-bit numbers stay as received; erx_tcp_seq lifts them inside the connectio
 
 -include("erx_tcp_wire.hrl").
 
--export([decode/2, encode/3]).
+-export([decode/2, encode/3, optlen/1]).
 
 -export_type([reason/0]).
 
@@ -265,6 +265,13 @@ encode(#tcp{sport = Sport, dport = Dport, seq = Seq, ack = Ack, flags = Flags, w
     Tail = <<Urp:16, Options/binary>>,
     Sum = bnot erx_bytes:inet_csum(PseudoSum, [<<Len:16>>, Head, Tail, Payload]) band 16#ffff,
     [Head, <<Sum:16>>, Tail, Payload].
+
+-doc """
+The bytes `encode/3` gives the options, a multiple of four: the `optlen` `tcp_addoptions`
+returns, which output takes from the segment's payload room.
+""".
+-spec optlen(#tcp_opts{}) -> non_neg_integer().
+optlen(#tcp_opts{} = Opts) -> byte_size(add_options(Opts)).
 
 -doc """
 Translates `tcp_addoptions`: the options in FreeBSD's order (MSS, window scale,
