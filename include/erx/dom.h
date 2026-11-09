@@ -116,6 +116,9 @@ typedef struct erx_dom {
 	erx_cap_t	first_thread;
 	uint32_t	system_connection;	/* its connection to the system domain */
 	uint32_t	connections;	/* its connections quota, the spec's */
+	erx_grant_t	grant;		/* its group's grant, the spec's: a living
+					 * configured domain's counts against
+					 * system's reserve */
 	uint64_t	carved;		/* bytes its two budgets took of its principal's,
 					 * which its retire gives back */
 	uint32_t	labels;		/* bell labels its event table has taken: the
@@ -260,11 +263,13 @@ typedef struct erx_dom_partial {
  * The library's view of the machine, which planning reads under the
  * library lock. The tables are the library's own; the rest is fixed at
  * boot from the checked system manifest and the boot image, except
- * service_grants, the grants of the living configured domains under
- * system, and ending. The planners read the view through a const
- * pointer; erx_dom_plan_record and erx_dom_link_record write the domain
- * records, the connection rows, the principals' counts, the service
- * grants and next_connection, so those tables are not const.
+ * ending. The service grants, those of the living configured domains
+ * under system, are no table of their own: the system-reserve check
+ * derives them from the records' grants, so a retired or ended domain
+ * drops out with nothing to take back. The planners read the view
+ * through a const pointer; erx_dom_plan_record and erx_dom_link_record
+ * write the domain records, the connection rows, the principals' counts
+ * and next_connection, so those tables are not const.
  */
 typedef struct erx_dom_view {
 	erx_dom_t		*domains;	/* max_domains records */
@@ -286,8 +291,6 @@ typedef struct erx_dom_view {
 	erx_runtime_limits_t	 native_limits;
 	erx_grant_t		 system_grant;	/* system's grant */
 	uint32_t		 system_reserve;	/* thousandths of system's rate */
-	erx_grant_t		*service_grants; /* room for max_domains */
-	uint32_t		 nservice_grants;
 	uint32_t		 system_lane;	/* the manifest's */
 	uint32_t		 next_connection; /* the next connection's number:
 						  * numbers start at 1 and only grow,
@@ -491,11 +494,12 @@ erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 /*
  * Records a creation plan in the view it was planned against, as the
  * domain then lives: the plan's slot becomes the domain's record, built,
- * with its id, principal, origin, flags and connections quota, and, with
- * a system connection, that connection's number and the first bell
- * label; its principal counts one more domain and carves its two
- * budgets; a configured domain's grant joins the service grants; and the
- * system connection takes its row and number. The record's capabilities
+ * with its id, principal, origin, flags, connections quota and grant,
+ * and, with a system connection, that connection's number and the first
+ * bell label; its principal counts one more domain and carves its two
+ * budgets; and the system connection takes its row and number. A
+ * configured domain's grant then counts against system's reserve while
+ * its record lives. The record's capabilities
  * are left as they are, for the apply phase to fill from its effects.
  * The manifest check's host planner (tools/host/dom_plan.c) records each
  * configured domain's plan before planning the next; the apply phase,
@@ -505,7 +509,8 @@ erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
  * ERX_OK; ERX_EINVAL, with the view unchanged, for a plan that does not
  * fit the view: a slot or row out of range or taken, an id a record
  * holds, an unknown principal, a connection number not the view's next,
- * a carve past 64 bits, or no room for one more service grant.
+ * a carve past 64 bits, or a configured domain's grant that no longer
+ * leaves system's reserve.
  */
 erx_status_t	erx_dom_plan_record(erx_dom_view_t *, const erx_dom_plan_t *plan);
 

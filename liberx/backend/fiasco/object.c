@@ -161,6 +161,20 @@ erx_fiasco_object_capacity(void)
 	return (erx_backend_grow_table_capacity(&object_records));
 }
 
+uint32_t
+erx_fiasco_object_handles_used(uint32_t task)
+{
+	const erx_backend_handles_t *const handles = object_handles_of(task);
+	const erx_backend_handle_entry_t *entry;
+	uint32_t used = 0;
+
+	for (uint32_t index = 0; handles != NULL && index < erx_backend_grow_table_capacity(&handles->entries); index++) {
+		entry = erx_backend_grow_table_at(&handles->entries, index);
+		used += entry != NULL && entry->object != 0;
+	}
+	return (used);
+}
+
 int
 erx_fiasco_object_find(uint32_t task, uint64_t handle, uint32_t kind, uint32_t *index)
 {

@@ -90,6 +90,13 @@ int	erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle) ERX_WARN_UNUS
 int	erx_fiasco_cap_pass_body(uint32_t task, uint32_t caller, const erx_fiasco_cap_pass_request_t *request)
 	    ERX_WARN_UNUSED_RESULT;
 
+/*
+ * The entries in use in task's handle table: what a test compares before and after
+ * a run to find a handle nothing closed. Read it only while no request runs, as
+ * erx_fiasco_test_object_age says; 0 for a task with no table.
+ */
+uint32_t	erx_fiasco_object_handles_used(uint32_t task);
+
 #ifdef ERX_FIASCO_TEST_HOOKS
 /*
  * Sets the lowest free record's generation to its last value, so the next object

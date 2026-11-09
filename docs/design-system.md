@@ -550,6 +550,9 @@ typedef struct erx_dom {
 					 * ERX_ENTRY_SEAL */
 	erx_cap_t	first_thread;
 	uint32_t	system_connection;	/* the number of its connection to the system domain */
+	erx_grant_t	grant;		/* its group's grant: a living configured
+					 * domain's is one of the admitted service
+					 * grants */
 	erx_dom_end_t	stop;		/* the stop the library made: FAULT with the
 					 * kind, or STOPPED; NONE until it stops
 					 * the space */
@@ -1061,7 +1064,8 @@ baseline remains the manifest's; runtime changes do not edit it.
    pure function of its source and of the library's view of the machine (free
    records, the principal's budget, group and count of domains, the
    checked manifest, principal defaults and ceilings, `system`'s group
-   and admitted service grants, the number
+   and admitted service grants, which are the grants of the living
+   configured domains' records, the number
    of domains alive, the boot image's index, whether a living domain holds
    the sealing page). It checks the version; every size against its range;
    that `id` is nonzero and names no record; that the release's files
@@ -1151,9 +1155,10 @@ baseline remains the manifest's; runtime changes do not edit it.
    8. record the plan in the library's view with `erx_dom_plan_record`,
       the function the manifest check's host planner records with
       (property 12): the record enters `ERX_DOM_BUILT`, the principal
-      counts the domain and its two budgets, a configured domain's grant
-      joins the admitted service grants, and the system connection takes
-      its row and number.
+      counts the domain and its two budgets, the record keeps the
+      domain's grant, so a configured domain's counts against `system`'s
+      reserve until the domain ends, and the system connection takes its
+      row and number.
 3. **Return** the domain's record, with the connection's number and
    the system domain's values of its connection's objects, or the
    failing step's status after undoing what was applied, which is

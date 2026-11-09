@@ -27,7 +27,7 @@ module Erx
                     'test/guest/native_domain/guest.c'].freeze
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
-    CASES = %w[library warm halt fault stop lanes undo].freeze
+    CASES = %w[library warm halt fault stop lanes link_warm link link_undo link_end undo].freeze
     CASE_LINE = /\Aerx: domain: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function

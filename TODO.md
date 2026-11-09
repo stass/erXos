@@ -832,15 +832,30 @@ it; git history is the record of completed work.
   *label)` before the target receive signature is settled (the `erx_ipc_wait` item above),
   and the boot image's handle is passed as 0 to `erx_image_slice` and `erx_image_map`;
   `erx_dom_held_t` should hold the image's handle.
-* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_install`): design-system.md A7
+* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_pass`): design-system.md A7
   asks that every `erx_cap_pass` of the library go through one function, `erx_dom_install`,
   with a chokepoint rule in `tools/lib/erx/chokepoint_rules/` and its seeded violation;
-  `apply_install` takes its rights from an `erx_dom_grants` row but is neither so named nor
-  checked by a rule.
-* [Medium] domain library, `test/guest/native_domain`: no case fails a step after it made its
-  object (a bell's bind, a group's configure), and none checks that the root's handle table
-  returns to its starting occupancy after a retire or an undo, which would catch a handle the
-  library forgot to close.
+  `apply_pass` is the one call, for a creation's and a connection's installs, but it takes a
+  bare rights mask rather than the `erx_dom_grants` row, and no rule checks it.
+* [Medium] domain library, `test/guest/native_domain` (`hook_step`): the hooked failure
+  refuses a step before it is applied or after it completed, never between a step's two
+  calls (a bell's create and bind, a group's create and configure), so a handle noted
+  only after the second call would pass the undo cases. Put a hook point between the calls.
+* [Low] domain library, `test/guest/native_domain` (`case_link`): the case checks each
+  party's connection values only as present and its labels; no party maps its sides or
+  triggers the other's bell, so a swapped side or peer side would pass.
+* [Low] domain library, `liberx/system/dom_apply.c`: `apply_plan` and `erx_dom_lib_connect`
+  repeat one apply loop (hooks, record, undo of the refused step included); the device give
+  will be a third. One runner over a step list, or a core undo for "refused at step k",
+  would keep the rule in one place. `link_value` also restates the connection rows of
+  `erx_dom_grants`; a role carried in the row would remove that second list.
+* [Low] stopgap, `liberx/backend/fiasco/object.c` (residual of K25): a destroyed object's
+  entries in other tables stay stale until their holder closes them, so a refused connect
+  leaves up to three stale entries in each party's table that the party never learns, and a
+  disconnect leaves the party's three to close. erXos's kernel clears them at the delete;
+  the stopgap is not to rebuild that. The library's own close after a destroy relies on the
+  stopgap's stale entries too: under K25 that close names a freed slot, so the Phase 2
+  library must not close what a delete already cleared.
 * [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the flat
   `service_grants` list has no inverse, since `erx_dom_t` keeps no grant, so a retire or
   restart of a configured domain cannot take its grant back, and a restarted configured
@@ -854,6 +869,30 @@ it; git history is the record of completed work.
   connection number) passes record's re-checks, which a view generation stamped into
   each plan would refuse whole. The host planner records each plan at once and meets
   none of these. Found by MF1b's review.
+  `apply_install` takes its rights from an `erx_dom_grants` row but is neither so named nor
+  checked by a rule.
+* [Medium] domain library, `test/guest/native_domain`: no case fails a step after it made its
+  object (a bell's bind, a group's configure), and none checks that the root's handle table
+  returns to its starting occupancy after a retire or an undo, which would catch a handle the
+  library forgot to close.
+* [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the record
+  fills only the plan-made fields and leaves the capability fields of a reused slot for
+  the applier, so one function should write the whole record from the plan and the
+  apply's made objects; dropping `const` on the view's tables lets every planner write
+  them, so give the record functions their own writable tables and keep the planners'
+  view const; and a stale partial-boot plan (no connection number) passes record's
+  re-checks, which a view generation stamped into each plan would refuse whole. The host
+  planner records each plan at once and meets none of these. Found by MF1b's review.
+* [Low] domain library, `liberx/system/dom_apply.c` (`erx_dom_lib_record`): the record
+  enters `ERX_DOM_ENDED` whatever `teardown_apply` and its own-budget destroy returned,
+  and `dom_system_reserve` stops counting an ended configured domain's grant because its
+  group went with that budget; a failed destroy would leave the group under `system`
+  uncounted, so a restart of its row could pass the reserve. Enter ENDED only on a
+  destroy that succeeded, or keep such a record counted.
+* [Low] domain library fuzz target, `tools/fuzz/dom_core_fuzz.c`: the planning view's
+  records are always `fuzz_domains`, so the input never chooses a living, ended or
+  garbage record for `dom_system_reserve` to sum; seed them from the input and check an
+  accepted configured plan against an independent sum of the counted rates.
 * [Low] manifest check, `tools/host/dom_plan.c`: a refusal of property 12 names the
   status alone (`inval` covers a grant past `system`, the reserve, files and limits),
   so the operator cannot tell which sum failed; and the fuzz target's

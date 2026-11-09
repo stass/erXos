@@ -35,7 +35,6 @@ static erx_dom_connection_t connections[NCONNECTIONS];
 static erx_dom_principal_t principal;
 static erx_dom_configured_t configured;
 static erx_dom_partial_t partial;
-static erx_grant_t services[4];
 static erx_dom_view_t view;
 static unsigned long failures;
 
@@ -122,8 +121,7 @@ reset_view(void)
 	    .configured = &configured, .nconfigured = 1, .partial = &partial,
 	    .npartial = 1, .partial_principal = 1, .native_limits = limits(1),
 	    .system_grant = grant(ERX_QUOTA_NONE, 0xf, 63),
-	    .system_reserve = 250, .service_grants = services,
-	    .nservice_grants = 0, .system_lane = 16384, .next_connection = 1 };
+	    .system_reserve = 250, .system_lane = 16384, .next_connection = 1 };
 }
 
 static erx_dom_spec_t
@@ -372,6 +370,15 @@ run_case(const char *name, origin_pick_t pick,
 	reset_view();
 }
 
+/* A running domain of origin kind in slot, with grant, as if recorded. */
+static void
+running(uint32_t slot, uint32_t kind, erx_grant_t grant)
+{
+	domains[slot] = (erx_dom_t){ .id = 100 + slot, .principal = 1,
+	    .origin = { .kind = kind }, .state = ERX_DOM_RUNNING,
+	    .grant = grant };
+}
+
 #define MUTATION(name, body)						\
 	static void name(erx_dom_spec_t *s) { (void)s; body; }
 MUTATION(m_id_zero, s->id = 0)
@@ -425,16 +432,22 @@ MUTATION(m_ending, view.ending = true)
 MUTATION(m_configured_outside, configured.grant.cpuset = 0x30)
 MUTATION(m_configured_ceiling, view.system_grant.ceiling.raw = 20)
 MUTATION(m_configured_flags, configured.grant.flags = ERX_GROUP_DEFER)
-/* configured: system's 3 CPUs of headroom with services taking 2.5 of them */
-MUTATION(m_services_room, (services[0] = grant(ERX_QUOTA_NONE, 0x3, 1),
-    services[1] = grant(UINT64_C(5000000), 0x4, 1), view.nservice_grants = 2))
-MUTATION(m_services_over, (services[0] = grant(ERX_QUOTA_NONE, 0x3, 1),
-    services[1] = grant(UINT64_C(6000000), 0x4, 1), view.nservice_grants = 2))
+/*
+ * configured: system's 3 CPUs of headroom with running configured domains
+ * taking 2.5 of them
+ */
+MUTATION(m_services_room, (running(0, ERX_DOM_CONFIGURED, grant(ERX_QUOTA_NONE, 0x3, 1)),
+    running(1, ERX_DOM_CONFIGURED, grant(UINT64_C(5000000), 0x4, 1))))
+MUTATION(m_services_over, (running(0, ERX_DOM_CONFIGURED, grant(ERX_QUOTA_NONE, 0x3, 1)),
+    running(1, ERX_DOM_CONFIGURED, grant(UINT64_C(6000000), 0x4, 1))))
+/* a request's group is under its principal's, so its grant takes no reserve */
+MUTATION(m_services_request, running(0, ERX_DOM_REQUEST, grant(ERX_QUOTA_NONE, 0xf, 1)))
 /* grants outside system's CPUs still count in the rate clause */
 MUTATION(m_services_outside, (view.system_grant = grant(ERX_QUOTA_NONE, 0x3, 63),
-    view.system_reserve = 1, services[0] = grant(ERX_QUOTA_NONE, 0xc, 1),
-    services[1] = grant(ERX_QUOTA_NONE, 0x30, 1), view.nservice_grants = 2,
-    services[2] = grant(UINT64_C(5000000), 0x1, 1), view.nservice_grants = 3))
+    view.system_reserve = 1,
+    running(0, ERX_DOM_CONFIGURED, grant(ERX_QUOTA_NONE, 0xc, 1)),
+    running(1, ERX_DOM_CONFIGURED, grant(ERX_QUOTA_NONE, 0x30, 1)),
+    running(2, ERX_DOM_CONFIGURED, grant(UINT64_C(5000000), 0x1, 1))))
 /* a narrow principal share: a configured service fits system, a request not */
 MUTATION(m_narrow_share, principal.share = grant(ERX_QUOTA_NONE, 0x1, 40))
 MUTATION(m_narrow_share_request, (principal.share = grant(ERX_QUOTA_NONE, 0x1, 40),
@@ -500,6 +513,7 @@ cases(void)
 	run_case("configured_flags", PICK_CONFIGURED, m_configured_flags);
 	run_case("services_room", PICK_CONFIGURED, m_services_room);
 	run_case("services_over", PICK_CONFIGURED, m_services_over);
+	run_case("services_request", PICK_CONFIGURED, m_services_request);
 	run_case("services_outside", PICK_CONFIGURED, m_services_outside);
 	run_case("narrow_share_configured", PICK_CONFIGURED, m_narrow_share);
 	run_case("narrow_share_request", PICK_REQUEST, m_narrow_share_request);
@@ -621,20 +635,28 @@ seeded(void)
 
 /*
  * What a plan's record left in the view: the slot's record, the
- * principal's counts, the service grants, the next connection number and
- * the plan's connection row, or "-" for none.
+ * principal's counts, the built or running configured records whose grant
+ * is the configured row's, the next connection number and the plan's
+ * connection row, or "-" for none.
  */
 static void
 print_record(const char *name, erx_status_t status, const erx_dom_plan_t *plan)
 {
 	const erx_dom_t *dom = &domains[plan->slot % NDOMAINS];
 	const erx_dom_connection_t *row;
+	unsigned services = 0;
 
+	for (uint32_t index = 0; index < NDOMAINS; index++)
+		services += domains[index].origin.kind == ERX_DOM_CONFIGURED &&
+		    (domains[index].state == ERX_DOM_BUILT ||
+		    domains[index].state == ERX_DOM_RUNNING) &&
+		    memcmp(&domains[index].grant, &configured.grant,
+		    sizeof(configured.grant)) == 0;
 	printf("record %s %d id=%u state=%d labels=%u connection=%u "
 	    "principal=%u,%llu services=%u next=%u", name, (int)status, dom->id,
 	    (int)dom->state, dom->labels, dom->system_connection,
 	    principal.domains, (unsigned long long)principal.carved,
-	    view.nservice_grants, view.next_connection);
+	    services, view.next_connection);
 	if (plan->connection_row >= NCONNECTIONS) {
 		printf(" row=-\n");
 		return;
@@ -656,8 +678,68 @@ configured_plan(void)
 }
 
 /*
+ * A restart of a configured domain whose grant takes two of system's
+ * three CPUs of headroom: while the first domain lives a second plan of
+ * its row is past the reserve, and once it has ended, or ended and been
+ * retired, the restart fits, since only a living record's grant counts.
+ * Two plans made against the same view each fit it alone; once the first
+ * is recorded, the second no longer leaves the reserve.
+ */
+static void
+restarts(void)
+{
+	erx_dom_teardown_t teardown;
+	erx_dom_plan_t plan, again;
+	erx_dom_t *dom;
+
+	reset_view();
+	configured.grant = grant(ERX_QUOTA_NONE, 0x3, 50);
+	if (erx_dom_plan_configured(&view, 6, 0, &plan) != ERX_OK ||
+	    erx_dom_plan_record(&view, &plan) != ERX_OK) {
+		failures++;
+		return;
+	}
+	dom = &domains[plan.slot];
+	printf("record restart_living %d\n",
+	    (int)erx_dom_plan_configured(&view, 7, 0, &again));
+	dom->state = ERX_DOM_RUNNING;
+	printf("record restart_running %d\n",
+	    (int)erx_dom_plan_configured(&view, 7, 0, &again));
+	dom->state = ERX_DOM_ENDED;
+	printf("record restart_ended %d\n",
+	    (int)erx_dom_plan_configured(&view, 7, 0, &again));
+	/* The system connection closed, as erx_dom_disconnect leaves it. */
+	connections[plan.connection_row] = (erx_dom_connection_t){ 0 };
+	if (erx_dom_plan_retire(&view, 6, &teardown) != ERX_OK) {
+		failures++;
+		return;
+	}
+	erx_dom_retire_record(&view, &teardown);
+	printf("record restart_retired %d id=%u principal=%u,%llu\n",
+	    (int)erx_dom_plan_configured(&view, 7, 0, &again), dom->id,
+	    principal.domains, (unsigned long long)principal.carved);
+
+	reset_view();
+	configured.grant = grant(ERX_QUOTA_NONE, 0x3, 50);
+	if (erx_dom_plan_configured(&view, 6, 0, &plan) != ERX_OK ||
+	    erx_dom_plan_configured(&view, 7, 0, &again) != ERX_OK ||
+	    erx_dom_plan_record(&view, &plan) != ERX_OK) {
+		failures++;
+		return;
+	}
+	/* Only the reserve stands between the second plan and its record. */
+	again.slot = plan.slot + 1;
+	again.connection_row = plan.connection_row + 1;
+	again.connection = view.next_connection;
+	printf("record restart_stale %d\n", (int)erx_dom_plan_record(&view, &again));
+	configured.grant = grant(UINT64_C(5000000), 0x3, 50);
+	again.spec.grant = configured.grant;
+	printf("record restart_stale_fits %d\n", (int)erx_dom_plan_record(&view, &again));
+}
+
+/*
  * erx_dom_plan_record: each recorded plan is what the next plan sees, a
- * configured domain's grant joins the service grants and its system
+ * configured domain's record keeps its grant and its system
  * connection takes the next number, a partial-boot domain takes neither,
  * and a plan that no longer fits the view leaves it as it was.
  */
@@ -694,11 +776,9 @@ records(void)
 	print_record("unknown_principal", erx_dom_plan_record(&view, &plan),
 	    &plan);
 	plan = configured_plan();
-	view.nservice_grants = NDOMAINS;
-	print_record("services_full", erx_dom_plan_record(&view, &plan), &plan);
-	plan = configured_plan();
 	principal.carved = UINT64_MAX;
 	print_record("carve_overflow", erx_dom_plan_record(&view, &plan), &plan);
+	restarts();
 	return (failures == 0 ? 0 : 1);
 }
 

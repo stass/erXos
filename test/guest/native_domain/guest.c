@@ -11,9 +11,11 @@
  * fault FAULT, a stop STOPPED. Every domain gets RELEASE as its release,
  * which the program reads through its slice; one with a connection quota
  * reads a lane larger than its own, whose size its boot page must name. After each end the domain is disconnected and
- * retired, and the pool holds what it held before. Then a create fails at each
- * step in turn and is undone, leaving the pool and the view as they were. Each
- * case says one line, which tools/lib/erx/native_domain.rb holds the transcript to.
+ * retired, and the pool and the root's handle table hold what they held before.
+ * Two running domains are connected and disconnected. Then a create, and a
+ * connect, fails at each step in turn, before the step and once it has made
+ * its object, and is undone, leaving the pool, the handles and the view as
+ * they were. Each case says one line, which tools/lib/erx/native_domain.rb holds the transcript to.
  */
 
 #include <stdbool.h>
@@ -28,6 +30,7 @@
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/log.h"
+#include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -49,8 +52,8 @@ void erx_fiasco_root_main(void);
 static erx_dom_t domains[DOMAINS];
 static erx_dom_connection_t connections[CONNECTIONS];
 static erx_dom_principal_t principals[1];
-static erx_grant_t service_grants[DOMAINS];
 static erx_dom_handles_t handles[DOMAINS];
+static erx_dom_link_handles_t links[CONNECTIONS];
 static erx_dom_file_t files[ERX_PACK_ENTRIES_MAX];
 static erx_dom_lib_t lib;
 static erx_dom_spec_t request;
@@ -124,9 +127,10 @@ library_up(void)
 	lib.view = (erx_dom_view_t){ .domains = domains, .max_domains = DOMAINS, .connections = connections,
 	    .max_connections = CONNECTIONS, .principals = principals, .nprincipals = 1, .files = files,
 	    .nfiles = ERX_PACK_ENTRIES_MAX, .native_limits = limits_default(), .system_grant = share,
-	    .service_grants = service_grants, .system_lane = ERX_LANE_MIN, .next_connection = 1,
+	    .system_lane = ERX_LANE_MIN, .next_connection = 1,
 	    .system_space = ERX_FIASCO_TASK_ROOT };
 	lib.handles = handles;
+	lib.links = links;
 	lib.host = "erxos";
 	lib.host_len = 5;
 	lib.cap_limit = 64;
@@ -252,16 +256,138 @@ domain_run(const char *word, uint32_t program, uint32_t connections, bool stop, 
 	return (erx_dom_lib_retire(&lib, created.id) == ERX_OK && passed);
 }
 
+/* The entries in use in the root's handle table. */
+static uint32_t
+handles_used(void)
+{
+	return (erx_fiasco_object_handles_used(ERX_FIASCO_TASK_ROOT));
+}
+
+/* The connection rows the view holds. */
+static uint32_t
+rows_used(void)
+{
+	uint32_t used = 0;
+
+	for (uint32_t row = 0; row < CONNECTIONS; row++)
+		used += connections[row].number != 0;
+	return (used);
+}
+
 /* One case: its domain's run, with the pool as it was before. */
 static void
 case_end(const char *name, const char *word, uint32_t program, uint32_t connections, bool stop,
     erx_dom_end_kind_t kind, int64_t status)
 {
 	const uint64_t before = erx_fiasco_vm_free_pages();
+	const uint32_t held = handles_used();
 	const bool passed = domain_run(word, program, connections, stop, kind, status);
 
 	say_count("free_pages_lost", before - erx_fiasco_vm_free_pages());
-	say_case(name, passed && erx_fiasco_vm_free_pages() == before);
+	say_count("handles_left", handles_used() - held);
+	say_case(name, passed && erx_fiasco_vm_free_pages() == before && handles_used() == held);
+}
+
+/* Creates and starts a domain that waits to be stopped; its id, or 0. */
+static uint32_t
+waiter(uint32_t program, uint32_t *connection)
+{
+	erx_dom_created_t created;
+
+	*connection = 0;
+	if (erx_dom_lib_create(&lib, request_for("wait", program, 1), NULL, 0, &created) != ERX_OK ||
+	    erx_dom_lib_start(&lib, created.id) != ERX_OK)
+		return (0);
+	*connection = created.connection;
+	return (created.id);
+}
+
+/* Stops two waiters, takes both ends, disconnects them from the system domain and retires them. */
+static bool
+waiters_end(const uint32_t *ids, const uint32_t *system)
+{
+	erx_dom_report_t report;
+	bool passed = true;
+
+	for (int which = 0; which < 2; which++)
+		passed = erx_dom_lib_stop(&lib, ids[which], STOP_STATUS) == ERX_OK && passed;
+	for (int which = 0; which < 2; which++)
+		passed = end_wait(&report) && report.end.kind == ERX_DOM_END_STOPPED && passed;
+	for (int which = 0; which < 2; which++)
+		passed = erx_dom_lib_disconnect(&lib, system[which]) == ERX_OK &&
+		    erx_dom_lib_retire(&lib, ids[which]) == ERX_OK && passed;
+	return (passed);
+}
+
+/*
+ * A connection between two running domains: each party is given its side,
+ * the other's side and the other's bell, and its own bell's label, past the
+ * system connection's; a self-connection is refused, and a disconnect frees
+ * the row once; a second connection takes the next labels and no page. Then a connect refused at each step in
+ * turn, before the step and once it has made its object, is undone with the
+ * pool, the handles and the rows as they were. Last, the domains end, and
+ * the pool and the handles are those of before the case.
+ */
+static void
+case_link(uint32_t program)
+{
+	uint64_t before;
+	uint32_t held;
+	erx_dom_linked_t linked = { 0 };
+	uint32_t ids[2], system[2], steps = 0;
+	uint64_t pages, warm;
+	uint32_t handles, rows;
+	bool passed;
+
+	/* Two domains alive at once grow the service's task tables first, which they keep; not counted. */
+	ids[0] = waiter(program, &system[0]);
+	ids[1] = waiter(program, &system[1]);
+	passed = ids[0] != 0 && ids[1] != 0 && waiters_end(ids, system);
+	say_case("link_warm", passed);
+	before = erx_fiasco_vm_free_pages();
+	held = handles_used();
+	ids[0] = waiter(program, &system[0]);
+	ids[1] = waiter(program, &system[1]);
+	pages = erx_fiasco_vm_free_pages();
+	passed = passed && ids[0] != 0 && ids[1] != 0 &&
+	    erx_dom_lib_connect(&lib, ids[0], ids[0], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_EINVAL &&
+	    erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_OK &&
+	    linked.number != 0 && linked.a.side != ERX_CAP_NULL && linked.a.peer_side != ERX_CAP_NULL &&
+	    linked.a.peer_bell != ERX_CAP_NULL && linked.b.side != ERX_CAP_NULL &&
+	    linked.b.peer_side != ERX_CAP_NULL && linked.b.peer_bell != ERX_CAP_NULL &&
+	    linked.a.label == ERX_DOM_SYSTEM_LABEL + 1 && linked.b.label == ERX_DOM_SYSTEM_LABEL + 1 &&
+	    erx_dom_lib_disconnect(&lib, linked.number) == ERX_OK &&
+	    erx_dom_lib_disconnect(&lib, linked.number) == ERX_EINVAL;
+	/* The first connection takes the service's tables' pages, as the first domain does; a second takes none. */
+	warm = pages - erx_fiasco_vm_free_pages();
+	pages = erx_fiasco_vm_free_pages();
+	passed = passed && erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_OK &&
+	    linked.a.label == ERX_DOM_SYSTEM_LABEL + 2 && erx_dom_lib_disconnect(&lib, linked.number) == ERX_OK &&
+	    erx_fiasco_vm_free_pages() == pages;
+	say_count("link_warm_pages", warm);
+	say_case("link", passed);
+
+	pages = erx_fiasco_vm_free_pages();
+	handles = handles_used();
+	rows = rows_used();
+	for (uint32_t step = 0; passed && step < 2 * ERX_DOM_LINK_STEPS; step++) {
+		lib.fail_step = step / 2;
+		lib.fail_made = step % 2 != 0;
+		passed = erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_ENOMEM &&
+		    lib.failed_at == step / 2 && erx_fiasco_vm_free_pages() == pages && handles_used() == handles &&
+		    rows_used() == rows;
+		steps = passed ? step + 1 : step;
+	}
+	lib.fail_step = UINT32_MAX;
+	lib.fail_made = false;
+	say_count("link_undo_steps", steps);
+	say_case("link_undo", passed && steps == 2 * ERX_DOM_LINK_STEPS);
+
+	passed = waiters_end(ids, system);
+	say_count("link_ended", passed);
+	say_count("free_pages_lost", before - erx_fiasco_vm_free_pages());
+	say_count("handles_left", handles_used() - held);
+	say_case("link_end", passed && erx_fiasco_vm_free_pages() + warm == before && handles_used() == held);
 }
 
 /*
@@ -273,20 +399,24 @@ case_undo(uint32_t program)
 {
 	static erx_dom_plan_t plan;
 	const uint64_t before = erx_fiasco_vm_free_pages();
+	const uint32_t held = handles_used();
 	erx_dom_created_t created;
 	bool passed = erx_dom_plan_request(&lib.view, request_for("halt", program, 0), NULL, 0, &plan) == ERX_OK;
 	uint32_t failed = 0;
 
-	for (uint32_t step = 0; passed && step < plan.nsteps; step++) {
-		lib.fail_step = step;
+	/* Each step twice: refused before it is applied, then once it has made its object. */
+	for (uint32_t step = 0; passed && step < 2 * plan.nsteps; step++) {
+		lib.fail_step = step / 2;
+		lib.fail_made = step % 2 != 0;
 		passed = erx_dom_lib_create(&lib, request_for("halt", program, 0), NULL, 0, &created) == ERX_ENOMEM &&
-		    erx_fiasco_vm_free_pages() == before && principals[0].domains == 0 && domains[0].id == 0 &&
-		    connections[0].number == 0;
+		    lib.failed_at == step / 2 && erx_fiasco_vm_free_pages() == before && handles_used() == held &&
+		    principals[0].domains == 0 && domains[0].id == 0 && connections[0].number == 0;
 		failed = passed ? step + 1 : step;
 	}
 	lib.fail_step = UINT32_MAX;
+	lib.fail_made = false;
 	say_count("undo_steps", failed);
-	say_case("undo", passed && failed == plan.nsteps);
+	say_case("undo", passed && failed == 2 * plan.nsteps);
 }
 
 void
@@ -318,6 +448,7 @@ erx_fiasco_root_main(void)
 	case_end("fault", "fault", program, 0, false, ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
 	case_end("stop", "wait", program, 0, true, ERX_DOM_END_STOPPED, 0);
 	case_end("lanes", "halt", program, 1, false, ERX_DOM_END_HALT, HALT_STATUS);
+	case_link(program);
 	case_undo(program);
 	say("erx: domain: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);

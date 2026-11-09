@@ -19,8 +19,8 @@
  *   undo, once fully applied, by destroying exactly its carved budgets,
  *   the last carved first;
  *   record into the view it was planned against, leaving the domain's
- *   record, its principal within its quota and budget, the service
- *   grants and its system connection's row as the plan named them, so a
+ *   record with its grant, its principal within its quota and budget,
+ *   and its system connection's row as the plan named them, so a
  *   second plan of the same id is refused.
  * A connection's plan, likewise, records into its view, and a second plan
  * of the same pair takes another row and the next number.
@@ -317,8 +317,8 @@ fuzz_check(const fuzz_input_t *in, uint32_t origin, const erx_dom_view_t *view,
 /*
  * Records an accepted plan into the view it was planned against: it must
  * fit, and leave the record, the principal's counts within its quota and
- * budget, the service grants and the system connection's row as the plan
- * named them.
+ * budget, the grant and the system connection's row as the plan named
+ * them.
  */
 static void
 fuzz_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
@@ -327,16 +327,13 @@ fuzz_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	const erx_dom_principal_t *principal = &view->principals[0];
 	const erx_dom_t *dom = &view->domains[plan->slot];
 	const erx_dom_connection_t *row;
-	uint32_t services = view->nservice_grants;
 
 	if (erx_dom_plan_record(view, plan) != ERX_OK || dom->id != spec->id ||
 	    dom->state != ERX_DOM_BUILT ||
 	    dom->system_connection != plan->connection ||
 	    principal->domains > principal->domains_max ||
 	    principal->carved > principal->memory ||
-	    view->nservice_grants != services +
-	    (spec->origin.kind == ERX_DOM_CONFIGURED) ||
-	    view->nservice_grants > view->max_domains)
+	    memcmp(&dom->grant, &spec->grant, sizeof(spec->grant)) != 0)
 		abort();
 	if (plan->connection_row != ERX_DOM_NO_ROW) {
 		row = &view->connections[plan->connection_row];
@@ -396,10 +393,8 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	};
 	erx_dom_t domains[2];
 	erx_dom_connection_t connections[2];
-	erx_grant_t services[2];
 	erx_dom_view_t view = { .domains = domains, .max_domains = 2,
 	    .connections = connections, .max_connections = 2,
-	    .service_grants = services,
 	    .principals = &principal, .nprincipals = 1, .files = fuzz_files,
 	    .nfiles = sizeof(fuzz_files) / sizeof(fuzz_files[0]),
 	    .configured = &in.configured, .nconfigured = 1,
@@ -432,7 +427,6 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	/* Each run starts from the same records; a record writes only these. */
 	memcpy(domains, fuzz_domains, sizeof(domains));
 	memcpy(connections, fuzz_connections, sizeof(connections));
-	memset(services, 0, sizeof(services));
 	if (bytes[0] % 5 >= 3) {
 		fuzz_life(&in, bytes[0] % 5 == 3);
 		return (0);

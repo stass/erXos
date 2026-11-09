@@ -91,6 +91,7 @@ static uint32_t	dom_popcount(uint64_t);
 static erx_dom_principal_t *dom_principal(const erx_dom_view_t *, uint32_t);
 static bool	dom_grant_rate(const erx_grant_t *, uint64_t *);
 static bool	dom_grant_fits(const erx_grant_t *, const erx_grant_t *);
+static bool	dom_service_grant(const erx_dom_t *);
 static bool	dom_system_reserve(const erx_dom_view_t *, const erx_grant_t *);
 static bool	dom_limits_within(const erx_runtime_limits_t *,
 		    const erx_runtime_limits_t *);
@@ -208,29 +209,61 @@ dom_grant_fits(const erx_grant_t *child, const erx_grant_t *parent)
 }
 
 /*
+ * Whether a record's grant is a service grant, one that counts against
+ * system's reserve: a configured domain's, whose group is under system,
+ * from the plan's apply until the domain ends. BUILDING counts, so a
+ * group that may already exist is never left out; whatever marks a
+ * record BUILDING writes its grant with it. An ended domain's group went
+ * with its own budget, and a retired record is free, so neither counts
+ * and nothing has to be taken back.
+ */
+static bool
+dom_service_grant(const erx_dom_t *dom)
+{
+	if (dom->origin.kind != ERX_DOM_CONFIGURED)
+		return (false);
+	switch (dom->state) {
+	case ERX_DOM_BUILDING:
+	case ERX_DOM_BUILT:
+	case ERX_DOM_RUNNING:
+		return (true);
+	case ERX_DOM_FREE:
+	case ERX_DOM_ENDED:
+	case ERX_DOM_RETIRED:
+		return (false);
+	}
+	return (false);
+}
+
+/*
  * The system-reserve predicate (docs/design-system.md, "The manifest",
- * property 13), over the living service grants with grant added: their
- * rates sum to at most system's rate less system_reserve of it. A grant
- * on system's CPUs takes at most its rate there, and system's rate is at
- * most its CPUs, so no separate per-CPU clause is needed.
+ * property 13), over the service grants of the view's records with
+ * grant added: their rates sum to at most system's rate less
+ * system_reserve of it. A grant on system's CPUs takes at most its rate
+ * there, and system's rate is at most its CPUs, so no separate per-CPU
+ * clause is needed.
  */
 static bool
 dom_system_reserve(const erx_dom_view_t *view, const erx_grant_t *grant)
 {
-	const erx_grant_t *each;
-	uint64_t system_rate, rate, rates = 0;
+	uint64_t system_rate, rate, rates;	/* rates starts at grant's */
 	uint64_t keep = DOM_MILLI - view->system_reserve;
 
 	if (view->system_reserve > DOM_MILLI ||
-	    !dom_grant_rate(&view->system_grant, &system_rate))
+	    !dom_grant_rate(&view->system_grant, &system_rate) ||
+	    !dom_grant_rate(grant, &rates))
 		return (false);
-	for (uint64_t index = 0; index <= view->nservice_grants; index++) {
-		each = index < view->nservice_grants ?
-		    &view->service_grants[index] : grant;
-		if (!dom_grant_rate(each, &rate) || !dom_add(rates, rate, &rates))
+	for (uint32_t index = 0; index < view->max_domains; index++) {
+		if (!dom_service_grant(&view->domains[index]))
+			continue;
+		if (!dom_grant_rate(&view->domains[index].grant, &rate) ||
+		    !dom_add(rates, rate, &rates))
 			return (false);
 	}
-	/* Rates are at most 64,000 each over at most 2^32 grants: no overflow. */
+	/*
+	 * Each rate is at most 64,000, and there are at most 2^32 - 1 records
+	 * and grant, so rates is under 2^48 and rates * DOM_MILLI under 2^58.
+	 */
 	return (rates * DOM_MILLI <= system_rate * keep);
 }
 
@@ -828,7 +861,6 @@ erx_status_t
 erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 {
 	const erx_dom_spec_t *spec = &plan->spec;
-	bool service = spec->origin.kind == ERX_DOM_CONFIGURED;
 	bool connected = plan->connection_row != ERX_DOM_NO_ROW;
 	erx_dom_principal_t *principal;
 	erx_dom_connection_t *row;
@@ -841,8 +873,11 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	    !dom_add(principal->carved, spec->memory, &carved) ||
 	    !dom_add(carved, spec->outer, &carved) ||
 	    plan->slot >= view->max_domains ||
-	    view->domains[plan->slot].id != 0 ||
-	    (service && view->nservice_grants >= view->max_domains))
+	    view->domains[plan->slot].id != 0)
+		return (ERX_EINVAL);
+	/* A plan made against an older view may no longer leave the reserve. */
+	if (spec->origin.kind == ERX_DOM_CONFIGURED &&
+	    !dom_system_reserve(view, &spec->grant))
 		return (ERX_EINVAL);
 	/* The slot's id is 0, so this also refuses an id of 0. */
 	for (uint32_t index = 0; index < view->max_domains; index++)
@@ -864,6 +899,7 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	dom->flags = spec->flags;
 	dom->system_connection = plan->connection;
 	dom->connections = spec->connections;
+	dom->grant = spec->grant;
 	dom->labels = connected ? ERX_DOM_SYSTEM_LABEL : 0;
 	dom->stop = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
 	dom->end = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
@@ -872,8 +908,6 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	dom->carved = spec->memory + spec->outer;
 	principal->domains++;
 	principal->carved = carved;
-	if (service)
-		view->service_grants[view->nservice_grants++] = spec->grant;
 	if (connected) {
 		row = &view->connections[plan->connection_row];
 		row->number = plan->connection;

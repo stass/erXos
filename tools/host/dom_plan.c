@@ -292,17 +292,14 @@ main(int argc, char **argv)
 		return (2);
 
 	/*
-	 * The machine just booted: every record free, no connection made, no
-	 * service grant admitted. One spare entry each keeps a zero-sized
-	 * table a valid allocation.
+	 * The machine just booted: every record free, so no service grant is
+	 * admitted, and no connection made. One spare entry each keeps a
+	 * zero-sized table a valid allocation.
 	 */
 	view.domains = calloc(view.max_domains + 1, sizeof(*view.domains));
 	view.connections = calloc(view.max_connections + 1,
 	    sizeof(*view.connections));
-	view.service_grants = calloc(view.max_domains + 1,
-	    sizeof(*view.service_grants));
-	if (view.domains == NULL || view.connections == NULL ||
-	    view.service_grants == NULL)
+	if (view.domains == NULL || view.connections == NULL)
 		return (2);
 	view.principals = principals;
 	view.nprincipals = nprincipals;

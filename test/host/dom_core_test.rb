@@ -37,7 +37,7 @@ class DomCoreTest < Minitest::Test
   OUTER_KEEPS = %w[OUTER CRASH SYS_BUDGET SYS_SIDE DOM_SIDE SYS_BELL DOM_BELL].freeze
 
   OK_CASES = %w[ok_request ok_configured ok_partial partial_connections_full env_ok spaces_ok
-                services_room narrow_share_configured limits_reserved_cleared].freeze
+                services_room services_request narrow_share_configured limits_reserved_cleared].freeze
   OTHER_CASES = { 'quota_full' => ELIMIT, 'table_full' => ELIMIT, 'connections_full' => ELIMIT,
                   'principal_memory' => ENOMEM, 'ending' => EBUSY }.freeze
   EINVAL_CASES = %w[id_zero id_system id_last id_in_use unknown_flag secret unknown_principal
@@ -72,9 +72,13 @@ class DomCoreTest < Minitest::Test
        'if (!dom_system_reserve'],
     'request strings tail kept' => ['memset(spec->strings + used, 0, sizeof(spec->strings) - used);', '(void)used;'],
     'record forgets the principal domain count' => ["\tprincipal->domains++;\n", ''],
-    'record forgets the service grant' =>
-      ["\t\tview->service_grants[view->nservice_grants++] = spec->grant;\n", "\t\t(void)0;\n"],
-    'record overwrites a taken slot' => ["\t    view->domains[plan->slot].id != 0 ||\n", '']
+    'record skips the reserve' => ["\tif (spec->origin.kind == ERX_DOM_CONFIGURED &&\n\t    !dom_system_reserve(view, &spec->grant))\n\t\treturn (ERX_EINVAL);\n", ''],
+    'record forgets the grant' => ["\tdom->grant = spec->grant;\n", ''],
+    'reserve counts every origin' => ["\tif (dom->origin.kind != ERX_DOM_CONFIGURED)\n\t\treturn (false);\n", ''],
+    'reserve counts an ended domain' => ["\tcase ERX_DOM_RUNNING:\n\t\treturn (true);\n\tcase ERX_DOM_FREE:\n\tcase ERX_DOM_ENDED:\n",
+                                         "\tcase ERX_DOM_RUNNING:\n\tcase ERX_DOM_ENDED:\n\t\treturn (true);\n\tcase ERX_DOM_FREE:\n"],
+    'record overwrites a taken slot' => ["plan->slot >= view->max_domains ||\n\t    view->domains[plan->slot].id != 0)\n",
+                                       "plan->slot >= view->max_domains)\n"]
   }.freeze
 
   def setup
@@ -130,7 +134,7 @@ class DomCoreTest < Minitest::Test
   end
 
   # erx_dom_plan_record: the record, the principal's domains and carved bytes, the
-  # service grants, the next connection number and the plan's connection row after
+  # built configured records keeping their grant, the next connection number and the plan's connection row after
   # each record. Recorded plans are what the next plan sees, so the fourth domain
   # is past the quota of three; a plan that no longer fits leaves the view as it was.
   RECORDS = {
@@ -142,8 +146,13 @@ class DomCoreTest < Minitest::Test
     'slot_taken' => '-1 id=9 state=0 labels=0 connection=0 principal=0,0 services=0 next=1 row=0,0,0',
     'not_next' => '-1 id=0 state=0 labels=0 connection=0 principal=0,0 services=0 next=2 row=0,0,0',
     'unknown_principal' => '-1 id=0 state=0 labels=0 connection=0 principal=0,0 services=0 next=1 row=0,0,0',
-    'services_full' => '-1 id=0 state=0 labels=0 connection=0 principal=0,0 services=4 next=1 row=0,0,0',
-    'carve_overflow' => '-1 id=0 state=0 labels=0 connection=0 principal=0,18446744073709551615 services=0 next=1 row=0,0,0'
+    'carve_overflow' => '-1 id=0 state=0 labels=0 connection=0 principal=0,18446744073709551615 services=0 next=1 row=0,0,0',
+    'restart_living' => EINVAL.to_s,
+    'restart_running' => EINVAL.to_s,
+    'restart_ended' => '0',
+    'restart_retired' => '0 id=0 principal=0,0',
+    'restart_stale' => EINVAL.to_s,
+    'restart_stale_fits' => '0'
   }.freeze
 
   def test_each_record_moves_the_view_as_the_domain_then_lives
@@ -202,7 +211,8 @@ class DomCoreTest < Minitest::Test
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-Wswitch-enum',
                  '-pedantic', '-O1', '-g', *@flags, *Erx::Generated.include_flags(root: @root),
-                 '-I', File.join(@root, 'include'), core, File.join(@root, 'liberx/erx_lane.c'),
+                 '-I', File.join(@root, 'include'), core, File.join(@root, 'liberx/system/dom_life.c'),
+                 File.join(@root, 'liberx/erx_lane.c'),
                  Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
                  File.join(@root, 'test/fixtures/dom_core_driver.c'), '-o', output],
                 name: "dom-core-#{name}", deadline: 120)

@@ -57,18 +57,36 @@ typedef struct erx_dom_handles {
 							 * or a budget carved from */
 } erx_dom_handles_t;
 
+/*
+ * One connection between two domains' handles, object by object from
+ * ERX_DOM_OBJ_LINK_BUDGET_A: its two child budgets, two sides and two
+ * bells. A system connection's handles are its domain's, so its row's
+ * stay empty.
+ */
+#define ERX_DOM_LINK_OBJS	(ERX_DOM_OBJ_BELL_B - ERX_DOM_OBJ_LINK_BUDGET_A + 1u)
+
+typedef struct erx_dom_link_handles {
+	uint64_t	made[ERX_DOM_LINK_OBJS];	/* ERX_CAP_NULL for none */
+	erx_dom_obj_t	charge[ERX_DOM_LINK_OBJS];	/* the budget each is charged to,
+							 * or carved from */
+} erx_dom_link_handles_t;
+
 typedef struct erx_dom_lib {
 	erx_dom_view_t	 view;		/* the core's view; its tables are the caller's */
 	erx_dom_handles_t *handles;	/* view.max_domains, record for record */
+	erx_dom_link_handles_t *links;	/* view.max_connections, row for row */
 	erx_dom_held_t	 held;
 	const char	*host;		/* the host part of a domain's node name */
 	size_t		 host_len;	/* at most ERX_DOM_HOST_MAX */
 	uint32_t	 pack_flags;	/* the boot image's, for each boot page */
 	uint32_t	 cap_limit;	/* each domain's handle table */
 #ifdef ERX_DOM_TEST_HOOKS
-	uint32_t	 fail_step;	/* the step a create fails at, before applying
-					 * it, with ERX_ENOMEM; UINT32_MAX for none */
-	uint32_t	 failed_at;	/* the step the last refused create stopped at */
+	uint32_t	 fail_step;	/* the step a create or a connect fails at,
+					 * with ERX_ENOMEM; UINT32_MAX for none */
+	bool		 fail_made;	/* fail it once it has made its object, as
+					 * a refused bind or configure does; else
+					 * before it is applied */
+	uint32_t	 failed_at;	/* the step the last refused one stopped at */
 #endif
 } erx_dom_lib_t;
 
@@ -105,6 +123,33 @@ erx_status_t	erx_dom_lib_start(erx_dom_lib_t *, uint32_t id) ERX_WARN_UNUSED_RES
 
 /* erx_dom_stop: erx_dom_plan_stop's answer, or the backend's refusal of the stop. */
 erx_status_t	erx_dom_lib_stop(erx_dom_lib_t *, uint32_t id, int64_t status) ERX_WARN_UNUSED_RESULT;
+
+/* One party's values of a connection, in its own table. */
+typedef struct erx_dom_party {
+	uint64_t	side;		/* its own side, which it writes */
+	uint64_t	peer_side;	/* the other's side, which it reads */
+	uint64_t	peer_bell;	/* the other's bell, which it triggers */
+	uint32_t	label;		/* the label its own bell delivers to its group */
+} erx_dom_party_t;
+
+/* What erx_dom_lib_connect returns: the connection's number and each party's values. */
+typedef struct erx_dom_linked {
+	uint32_t	number;
+	erx_dom_party_t	a, b;
+} erx_dom_linked_t;
+
+/*
+ * erx_dom_connect(a, b, a_reads, b_reads), erx_dom_plan_connect's
+ * arguments: plans, applies each step in order, and records the
+ * connection in the view. On a refused step the children carved so far
+ * are destroyed, which deletes the sides and bells charged to them and,
+ * on erXos's kernel, clears every install of them (K25), and the step's status is returned with
+ * *linked untouched: ERX_ENOMEM when a party's outer budget cannot hold
+ * its child.
+ */
+erx_status_t	erx_dom_lib_connect(erx_dom_lib_t *, uint32_t a, uint32_t b,
+		    uint32_t a_reads, uint32_t b_reads, erx_dom_linked_t *linked)
+		    ERX_WARN_UNUSED_RESULT;
 
 /* erx_dom_disconnect and erx_dom_retire: their plans' answers. */
 erx_status_t	erx_dom_lib_disconnect(erx_dom_lib_t *, uint32_t number) ERX_WARN_UNUSED_RESULT;

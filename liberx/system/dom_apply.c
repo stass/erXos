@@ -41,6 +41,29 @@ typedef struct apply {
 	uint64_t		 release_addr;	/* where it sees its release slice */
 } apply_t;
 
+/*
+ * A run of made objects' handles with the budget each is charged to:
+ * made[i] is object first + i. A creation's are its domain's
+ * erx_dom_handles_t, a connection's its row's erx_dom_link_handles_t.
+ */
+typedef struct handle_set {
+	uint64_t	*made;
+	erx_dom_obj_t	*charge;
+	erx_dom_obj_t	 first;
+	uint32_t	 count;
+} handle_set_t;
+
+/* One connection in progress: the plan, the handles made so far, and each party's values. */
+typedef struct link {
+	erx_dom_lib_t			*lib;
+	const erx_dom_link_plan_t	*plan;
+	erx_dom_link_handles_t		 handles;
+	erx_dom_linked_t		 linked;
+} link_t;
+
+static void	set_close_under(handle_set_t *, erx_dom_obj_t);
+static erx_dom_obj_t set_find(const handle_set_t *, uint64_t);
+
 static uint64_t	apply_object(const apply_t *, erx_dom_obj_t);
 static int	apply_step(apply_t *, const erx_dom_step_t *);
 static int	apply_map(apply_t *, const erx_dom_step_t *);
@@ -52,9 +75,7 @@ static int	apply_group(apply_t *, const erx_dom_step_t *);
 static erx_status_t apply_plan(apply_t *, erx_dom_created_t *);
 static void	apply_undo(apply_t *, uint32_t);
 static void	apply_keep(apply_t *, erx_dom_created_t *);
-static void	handles_close_under(erx_dom_handles_t *, erx_dom_obj_t);
-static erx_dom_obj_t handles_find(const erx_dom_handles_t *, uint64_t);
-static uint32_t	teardown_owner(const erx_dom_lib_t *, const erx_dom_teardown_t *, uint32_t);
+static int	apply_pass(uint64_t, uint64_t, uint32_t, uint64_t *);
 static erx_status_t teardown_apply(erx_dom_lib_t *, const erx_dom_teardown_t *);
 static void	lib_view_caps(erx_dom_lib_t *, uint32_t);
 static uint32_t	lib_slot(const erx_dom_lib_t *, uint32_t);
@@ -98,41 +119,60 @@ apply_object(const apply_t *apply, erx_dom_obj_t obj)
 	}
 }
 
-/* Notes a handle the step made, with its budget, before anything else can fail. */
+static handle_set_t
+set_of_domain(erx_dom_handles_t *handles)
+{
+	return ((handle_set_t){ handles->made, handles->charge, ERX_DOM_OBJ_NONE, ERX_DOM_OBJ_MADE_COUNT });
+}
+
+static handle_set_t
+set_of_link(erx_dom_link_handles_t *handles)
+{
+	return ((handle_set_t){ handles->made, handles->charge, ERX_DOM_OBJ_LINK_BUDGET_A, ERX_DOM_LINK_OBJS });
+}
+
+static bool
+set_holds(const handle_set_t *set, erx_dom_obj_t obj)
+{
+	return (obj >= set->first && (uint32_t)(obj - set->first) < set->count);
+}
+
+/* Notes a handle a step made, with its budget, before anything else can fail. */
+static void
+set_note(handle_set_t *set, const erx_dom_step_t *step, uint64_t handle)
+{
+	set->made[step->obj - set->first] = handle;
+	set->charge[step->obj - set->first] = step->budget;
+}
+
 static void
 apply_made(apply_t *apply, const erx_dom_step_t *step, uint64_t handle)
 {
-	apply->handles.made[step->obj] = handle;
-	apply->handles.charge[step->obj] = step->budget;
+	handle_set_t set = set_of_domain(&apply->handles);
+
+	set_note(&set, step, handle);
 }
 
 /*
- * One step's call. A step that makes its object in one call breaks to the
- * common apply_made; a step that makes its object and then configures it
- * (GROUP, BELL, THREAD) notes the handle itself between the two calls and
- * returns, so a failed second call still leaves the object to the undo.
+ * The steps a creation and a connection share, each making one object of
+ * the set: a wall budget (K32) under budget, or a memory object or a bell
+ * charged to it. The library binds each bell itself, since BIND says where
+ * its deliveries go; the bell is noted before the bind, so a refused bind
+ * leaves it to the undo, which reaches it by its budget.
  */
 static int
-apply_step(apply_t *apply, const erx_dom_step_t *step)
+make_step(handle_set_t *set, const erx_dom_step_t *step, uint64_t budget, uint64_t target)
 {
-	uint64_t budget = apply_object(apply, step->budget);
-	uint64_t handle = ERX_CAP_NULL;
-	uint64_t pages;
+	uint64_t handle = ERX_CAP_NULL, pages;
 	int status;
 
+	if (!set_holds(set, step->obj))
+		return (ERX_EINVAL);
 	switch (step->kind) {
 	case ERX_DOM_STEP_CARVE:
-		/* A wall: guarantee and cap together (K32). */
 		pages = pages_of(step->size);
 		status = erx_budget_create(budget, ERX_BUDGET_WALL, pages, pages, &handle);
 		break;
-	case ERX_DOM_STEP_SPACE:
-		status = erx_space_create(budget, apply_object(apply, step->target),
-		    apply_object(apply, step->aux), step->label, step->flags,
-		    apply->lib->cap_limit, &handle);
-		break;
-	case ERX_DOM_STEP_GROUP:
-		return (apply_group(apply, step));
 	case ERX_DOM_STEP_MEM:
 		status = erx_mem_create(budget, pages_of(step->size) * ERX_PAGE_SIZE, 0, &handle);
 		break;
@@ -140,9 +180,55 @@ apply_step(apply_t *apply, const erx_dom_step_t *step)
 		status = erx_irq_create(budget, ERX_CAP_NULL, ERX_IRQ_SOFT, 0, &handle);
 		if (status != ERX_OK)
 			return (status);
-		/* The library binds each bell itself: BIND says where deliveries go. */
-		apply_made(apply, step, handle);
-		return (erx_irq_bind(handle, apply_object(apply, step->target), step->label));
+		set_note(set, step, handle);
+		return (erx_irq_bind(handle, target, step->label));
+	default:
+		return (ERX_EINVAL);
+	}
+	if (status == ERX_OK)
+		set_note(set, step, handle);
+	return (status);
+}
+
+#ifdef ERX_DOM_TEST_HOOKS
+/* The hooked failure (dom_lib.h) of step, before it is applied or once it has been. */
+static erx_status_t
+hook_step(const erx_dom_lib_t *lib, uint32_t step, bool after, erx_status_t status)
+{
+	return (step == lib->fail_step && after == lib->fail_made && status == ERX_OK ? ERX_ENOMEM : status);
+}
+#else
+#define hook_step(lib, step, after, status)	(status)
+#endif
+
+/*
+ * One step's call. A step that makes its object in one call breaks to the
+ * common apply_made; a step that makes its object and then configures it
+ * (GROUP, THREAD, and BELL in make_step) notes the handle itself between the
+ * two calls and returns, so a failed second call still leaves the object to
+ * the undo. The steps a connection shares are make_step's.
+ */
+static int
+apply_step(apply_t *apply, const erx_dom_step_t *step)
+{
+	uint64_t budget = apply_object(apply, step->budget);
+	uint64_t handle = ERX_CAP_NULL;
+	handle_set_t set;
+	int status;
+
+	switch (step->kind) {
+	case ERX_DOM_STEP_CARVE:
+	case ERX_DOM_STEP_MEM:
+	case ERX_DOM_STEP_BELL:
+		set = set_of_domain(&apply->handles);
+		return (make_step(&set, step, budget, apply_object(apply, step->target)));
+	case ERX_DOM_STEP_SPACE:
+		status = erx_space_create(budget, apply_object(apply, step->target),
+		    apply_object(apply, step->aux), step->label, step->flags,
+		    apply->lib->cap_limit, &handle);
+		break;
+	case ERX_DOM_STEP_GROUP:
+		return (apply_group(apply, step));
 	case ERX_DOM_STEP_SLICE:
 		status = erx_image_slice(budget, 0, step->index, step->count, &handle);
 		break;
@@ -212,27 +298,34 @@ apply_map(apply_t *apply, const erx_dom_step_t *step)
 }
 
 /*
- * One install (A7): a copy of the library's handle, its rights shrunk to the
- * step's, passed into the domain's table. The value it takes there is what
- * the boot page names.
+ * One install (A7): a copy of the library's handle, its rights shrunk to
+ * rights, passed into space's table; *value is the value it takes there.
+ * Every install of a creation and of a connection is one call of this.
  */
+static int
+apply_pass(uint64_t space, uint64_t handle, uint32_t rights, uint64_t *value)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t desc = 0;
+	int status;
+
+	(void)erx_msg_item_desc_rights_set(&desc, rights);
+	(void)erx_msg_item_desc_move_set(&desc, false);
+	(void)erx_utcb_mr_store(utcb, 0, desc);
+	(void)erx_utcb_mr_store(utcb, 1, handle);
+	status = erx_cap_pass(ERX_CAP_SELF, space, 1);
+	if (status != ERX_OK)
+		return (status);
+	(void)erx_utcb_mr_load(utcb, 1, value);
+	return (ERX_OK);
+}
+
+/* A creation's install; the boot page names the value it takes. */
 static int
 apply_install(apply_t *apply, const erx_dom_step_t *step)
 {
-	erx_utcb_t *const utcb = erx_utcb_self();
-	uint64_t desc = 0, value = ERX_CAP_NULL;
-	int status;
-
-	(void)erx_msg_item_desc_rights_set(&desc, step->rights);
-	(void)erx_msg_item_desc_move_set(&desc, false);
-	(void)erx_utcb_mr_store(utcb, 0, desc);
-	(void)erx_utcb_mr_store(utcb, 1, apply_object(apply, step->obj));
-	status = erx_cap_pass(ERX_CAP_SELF, apply_object(apply, step->target), 1);
-	if (status != ERX_OK)
-		return (status);
-	(void)erx_utcb_mr_load(utcb, 1, &value);
-	apply->installed[step->obj] = value;
-	return (ERX_OK);
+	return (apply_pass(apply_object(apply, step->target), apply_object(apply, step->obj), step->rights,
+	    &apply->installed[step->obj]));
 }
 
 /*
@@ -344,48 +437,57 @@ apply_thread(apply_t *apply, const erx_dom_step_t *step)
 
 /*
  * Whether obj's charge leads to budget: obj is budget, or is charged to it or
- * to a budget carved from it. A chain passes each made object once at most.
+ * to a budget carved from it. A chain passes each made object once at most,
+ * and ends at a budget outside the set, such as a party's outer budget.
  */
 static bool
-handles_under(const erx_dom_handles_t *handles, erx_dom_obj_t obj, erx_dom_obj_t budget)
+set_under(const handle_set_t *set, erx_dom_obj_t obj, erx_dom_obj_t budget)
 {
-	for (uint32_t hops = 0; hops < ERX_DOM_OBJ_MADE_COUNT && obj < ERX_DOM_OBJ_MADE_COUNT; hops++) {
+	for (uint32_t hops = 0; hops < set->count && set_holds(set, obj); hops++) {
 		if (obj == budget)
 			return (true);
-		obj = handles->charge[obj];
+		obj = set->charge[obj - set->first];
 	}
 	return (false);
 }
 
 /* Closes every handle whose object went with budget's destroy. */
 static void
-handles_close_under(erx_dom_handles_t *handles, erx_dom_obj_t budget)
+set_close_under(handle_set_t *set, erx_dom_obj_t budget)
 {
-	for (uint32_t obj = 0; obj < ERX_DOM_OBJ_MADE_COUNT; obj++) {
-		if (handles->made[obj] == ERX_CAP_NULL || !handles_under(handles, (erx_dom_obj_t)obj, budget))
+	for (uint32_t index = 0; index < set->count; index++) {
+		if (set->made[index] == ERX_CAP_NULL || !set_under(set, (erx_dom_obj_t)(set->first + index), budget))
 			continue;
-		(void)erx_cap_close(handles->made[obj]);
-		handles->made[obj] = ERX_CAP_NULL;
+		(void)erx_cap_close(set->made[index]);
+		set->made[index] = ERX_CAP_NULL;
 	}
 }
 
 /*
- * The undo of the first applied steps (A4): destroy the budgets they carved,
- * last first, which deletes every object charged to them, then close the
- * handles to what went. A destroy of a budget the library made cannot fail.
+ * The undo of applied steps (A4): destroys the count budgets of undo, which
+ * a plan's undo lists last first, each deleting every object charged to it,
+ * then closes the handles to what went. A destroy of a budget the library
+ * made cannot fail.
  */
+static void
+set_undo(handle_set_t *set, const erx_dom_obj_t *undo, uint32_t count)
+{
+	for (uint32_t index = 0; index < count; index++) {
+		if (!set_holds(set, undo[index]) || set->made[undo[index] - set->first] == ERX_CAP_NULL)
+			continue;
+		(void)erx_object_destroy(set->made[undo[index] - set->first]);
+		set_close_under(set, undo[index]);
+	}
+}
+
+/* The undo of a creation's first applied steps. */
 static void
 apply_undo(apply_t *apply, uint32_t applied)
 {
 	erx_dom_obj_t undo[ERX_DOM_PLAN_STEPS_MAX];
-	const uint32_t count = erx_dom_plan_undo(apply->plan, applied, undo);
+	handle_set_t set = set_of_domain(&apply->handles);
 
-	for (uint32_t index = 0; index < count; index++) {
-		if (apply->handles.made[undo[index]] == ERX_CAP_NULL)
-			continue;
-		(void)erx_object_destroy(apply->handles.made[undo[index]]);
-		handles_close_under(&apply->handles, undo[index]);
-	}
+	set_undo(&set, undo, erx_dom_plan_undo(apply->plan, applied, undo));
 }
 
 /* Copies the record's capabilities in the view from the handles the library keeps for it. */
@@ -445,13 +547,9 @@ apply_plan(apply_t *apply, erx_dom_created_t *created)
 	uint32_t applied;
 
 	for (applied = 0; applied < plan->nsteps; applied++) {
-#ifdef ERX_DOM_TEST_HOOKS
-		if (applied == apply->lib->fail_step) {
-			status = ERX_ENOMEM;
-			break;
-		}
-#endif
-		status = apply_step(apply, &plan->steps[applied]);
+		status = hook_step(apply->lib, applied, false, ERX_OK);
+		if (status == ERX_OK)
+			status = hook_step(apply->lib, applied, true, apply_step(apply, &plan->steps[applied]));
 		if (status != ERX_OK)
 			break;
 	}
@@ -540,65 +638,195 @@ erx_dom_lib_stop(erx_dom_lib_t *lib, uint32_t id, int64_t status)
 	return (lib_stop(lib, &action));
 }
 
-/* The made object whose handle is cap, or ERX_DOM_OBJ_MADE_COUNT for none. */
+/* The made object whose handle is cap, or ERX_DOM_OBJ_COUNT for none. */
 static erx_dom_obj_t
-handles_find(const erx_dom_handles_t *handles, uint64_t cap)
+set_find(const handle_set_t *set, uint64_t cap)
 {
-	for (uint32_t obj = 0; cap != ERX_CAP_NULL && obj < ERX_DOM_OBJ_MADE_COUNT; obj++)
-		if (handles->made[obj] == cap)
-			return ((erx_dom_obj_t)obj);
-	return (ERX_DOM_OBJ_MADE_COUNT);
+	for (uint32_t index = 0; cap != ERX_CAP_NULL && index < set->count; index++)
+		if (set->made[index] == cap)
+			return ((erx_dom_obj_t)(set->first + index));
+	return (ERX_DOM_OBJ_COUNT);
 }
 
 /*
- * The record of the domain whose handles hold the teardown's capability
- * number index: the destroyed or retired domain itself, or for a
- * disconnect the party whose child budget it is (b alone for a system
- * connection, whose child holds both sides). view.max_domains for none.
+ * The handles that hold the teardown's capabilities: the destroyed or
+ * retired domain's; for a system connection its domain's (b), whose child
+ * holds both sides; for a connection between domains its row's. *slot is
+ * the record whose capabilities the view copies again after, or
+ * view.max_domains for a connection's own. False when the record is none.
  */
-static uint32_t
-teardown_owner(const erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown, uint32_t index)
+static bool
+teardown_set(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown, handle_set_t *set, uint32_t *slot)
 {
 	const erx_dom_connection_t *row;
-	bool between_domains;
 
-	if (teardown->kind != ERX_DOM_DISCONNECT)
-		return (teardown->index);
-	row = &lib->view.connections[teardown->index];
-	/* Two budgets are a connection between two domains, a's first; one is a system connection's, b's. */
-	between_domains = teardown->ndestroy == 2;
-	return (lib_slot(lib, between_domains && index == 0 ? row->a : row->b));
+	*slot = teardown->index;
+	if (teardown->kind == ERX_DOM_DISCONNECT) {
+		row = &lib->view.connections[teardown->index];
+		if (row->a != ERX_DOM_SYSTEM_ID) {
+			*set = set_of_link(&lib->links[teardown->index]);
+			*slot = lib->view.max_domains;
+			return (true);
+		}
+		*slot = lib_slot(lib, row->b);
+	}
+	if (*slot >= lib->view.max_domains)
+		return (false);
+	*set = set_of_domain(&lib->handles[*slot]);
+	return (true);
 }
 
 /*
- * Destroys the budgets the teardown names, each found among the handles of
- * the domain it belongs to before any is destroyed, then closes the handles
- * to what went and copies the records' capabilities again. ERX_EINVAL,
- * destroying nothing, when a capability is not among its owner's handles: a
- * value that matched elsewhere could name another domain's object.
+ * Destroys the budgets the teardown names, each found among the handles
+ * that hold it before any is destroyed, then closes the handles to what
+ * went and copies the record's capabilities again. ERX_EINVAL, destroying
+ * nothing, when a capability is not among those handles: a value that
+ * matched elsewhere could name another domain's object.
  */
 static erx_status_t
 teardown_apply(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
 {
-	uint32_t owner[2];
 	erx_dom_obj_t obj[2];
+	handle_set_t set;
+	uint32_t slot;
 	const uint32_t count = teardown->ndestroy;
 
-	if (count > 2)
+	if (count > 2 || !teardown_set(lib, teardown, &set, &slot))
 		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < count; index++) {
-		owner[index] = teardown_owner(lib, teardown, index);
-		if (owner[index] >= lib->view.max_domains)
-			return (ERX_EINVAL);
-		obj[index] = handles_find(&lib->handles[owner[index]], teardown->destroy[index].raw);
-		if (obj[index] == ERX_DOM_OBJ_MADE_COUNT)
+		obj[index] = set_find(&set, teardown->destroy[index].raw);
+		if (obj[index] == ERX_DOM_OBJ_COUNT)
 			return (ERX_EINVAL);
 	}
 	for (uint32_t index = 0; index < count; index++) {
 		(void)erx_object_destroy(teardown->destroy[index].raw);
-		handles_close_under(&lib->handles[owner[index]], obj[index]);
-		lib_view_caps(lib, owner[index]);
+		set_close_under(&set, obj[index]);
 	}
+	if (slot < lib->view.max_domains)
+		lib_view_caps(lib, slot);
+	return (ERX_OK);
+}
+
+/* The handle a connection's step names: one it made, or one of a party's records. */
+static uint64_t
+link_object(const link_t *link, erx_dom_obj_t obj)
+{
+	const uint64_t *const a = link->lib->handles[link->plan->a_slot].made;
+	const uint64_t *const b = link->lib->handles[link->plan->b_slot].made;
+
+	if (obj >= ERX_DOM_OBJ_LINK_BUDGET_A && obj <= ERX_DOM_OBJ_BELL_B)
+		return (link->handles.made[obj - ERX_DOM_OBJ_LINK_BUDGET_A]);
+	switch (obj) {
+	case ERX_DOM_OBJ_OUTER_A:
+		return (a[ERX_DOM_OBJ_OUTER]);
+	case ERX_DOM_OBJ_OUTER_B:
+		return (b[ERX_DOM_OBJ_OUTER]);
+	case ERX_DOM_OBJ_GROUP_A:
+		return (a[ERX_DOM_OBJ_GROUP]);
+	case ERX_DOM_OBJ_GROUP_B:
+		return (b[ERX_DOM_OBJ_GROUP]);
+	case ERX_DOM_OBJ_SPACE_A:
+		return (a[ERX_DOM_OBJ_SPACE]);
+	case ERX_DOM_OBJ_SPACE_B:
+		return (b[ERX_DOM_OBJ_SPACE]);
+	default:
+		return (APPLY_NO_HANDLE);
+	}
+}
+
+/*
+ * Where an install's value goes: the party whose space it enters, as its
+ * own side, the other's side or the other's bell; NULL for anything else.
+ */
+static uint64_t *
+link_value(link_t *link, const erx_dom_step_t *step)
+{
+	const bool to_a = step->target == ERX_DOM_OBJ_SPACE_A;
+	erx_dom_party_t *const party = to_a ? &link->linked.a : &link->linked.b;
+
+	if (!to_a && step->target != ERX_DOM_OBJ_SPACE_B)
+		return (NULL);
+	if (step->obj == (to_a ? ERX_DOM_OBJ_SIDE_A : ERX_DOM_OBJ_SIDE_B))
+		return (&party->side);
+	if (step->obj == (to_a ? ERX_DOM_OBJ_SIDE_B : ERX_DOM_OBJ_SIDE_A))
+		return (&party->peer_side);
+	if (step->obj == (to_a ? ERX_DOM_OBJ_BELL_B : ERX_DOM_OBJ_BELL_A))
+		return (&party->peer_bell);
+	return (NULL);
+}
+
+/* One step of a connection; a bell's label is the one its party learns. */
+static int
+link_step(link_t *link, const erx_dom_step_t *step)
+{
+	handle_set_t set = set_of_link(&link->handles);
+	uint64_t *value;
+
+	if (step->kind == ERX_DOM_STEP_INSTALL) {
+		value = link_value(link, step);
+		if (value == NULL)
+			return (ERX_EINVAL);
+		return (apply_pass(link_object(link, step->target), link_object(link, step->obj), step->rights, value));
+	}
+	if (step->kind == ERX_DOM_STEP_BELL)
+		(step->obj == ERX_DOM_OBJ_BELL_A ? &link->linked.a : &link->linked.b)->label = step->label;
+	return (make_step(&set, step, link_object(link, step->budget), link_object(link, step->target)));
+}
+
+/* Copies a connection row's capabilities in the view from the handles the library keeps for it. */
+static void
+link_view_caps(erx_dom_lib_t *lib, uint32_t row)
+{
+	const uint64_t *const made = lib->links[row].made;
+	erx_dom_connection_t *const conn = &lib->view.connections[row];
+
+#define CAP(obj)	((erx_cap_t){ .raw = made[(obj) - ERX_DOM_OBJ_LINK_BUDGET_A] })
+	conn->budget_a = CAP(ERX_DOM_OBJ_LINK_BUDGET_A);
+	conn->budget_b = CAP(ERX_DOM_OBJ_LINK_BUDGET_B);
+	conn->side_a = CAP(ERX_DOM_OBJ_SIDE_A);
+	conn->side_b = CAP(ERX_DOM_OBJ_SIDE_B);
+	conn->bell_a = CAP(ERX_DOM_OBJ_BELL_A);
+	conn->bell_b = CAP(ERX_DOM_OBJ_BELL_B);
+#undef CAP
+}
+
+erx_status_t
+erx_dom_lib_connect(erx_dom_lib_t *lib, uint32_t a, uint32_t b, uint32_t a_reads, uint32_t b_reads,
+    erx_dom_linked_t *linked)
+{
+	erx_dom_obj_t undo[ERX_DOM_LINK_STEPS];
+	erx_dom_link_plan_t plan;
+	link_t link;
+	handle_set_t set;
+	erx_status_t status;
+	uint32_t applied;
+
+	status = erx_dom_plan_connect(&lib->view, a, b, a_reads, b_reads, &plan);
+	if (status != ERX_OK)
+		return (status);
+	link = (link_t){ .lib = lib, .plan = &plan };
+	for (applied = 0; applied < plan.nsteps; applied++) {
+		status = hook_step(lib, applied, false, ERX_OK);
+		if (status == ERX_OK)
+			status = hook_step(lib, applied, true, link_step(&link, &plan.steps[applied]));
+		if (status != ERX_OK)
+			break;
+	}
+	if (status == ERX_OK)
+		status = erx_dom_link_record(&lib->view, &plan);
+#ifdef ERX_DOM_TEST_HOOKS
+	lib->failed_at = applied;
+#endif
+	if (status != ERX_OK) {
+		/* The refused step may have made its object; the undo reaches it by its budget. */
+		set = set_of_link(&link.handles);
+		set_undo(&set, undo, erx_dom_link_undo(&plan, applied < plan.nsteps ? applied + 1 : plan.nsteps, undo));
+		return (status);
+	}
+	lib->links[plan.row] = link.handles;
+	link_view_caps(lib, plan.row);
+	link.linked.number = plan.number;
+	*linked = link.linked;
 	return (ERX_OK);
 }
 
@@ -614,6 +842,7 @@ erx_dom_lib_disconnect(erx_dom_lib_t *lib, uint32_t number)
 	if (status != ERX_OK)
 		return (status);
 	memset(&lib->view.connections[teardown.index], 0, sizeof(lib->view.connections[0]));
+	memset(&lib->links[teardown.index], 0, sizeof(lib->links[0]));
 	return (ERX_OK);
 }
 
