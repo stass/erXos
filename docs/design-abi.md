@@ -798,8 +798,11 @@ timeout of 0 with `timeout` or a non-zero one with any other status; a key
 `input` whose rune is neither a Unicode scalar value nor 0xffffffff; and a
 presentation name or a text that is not valid UTF-8.
 
-The generator emits `erx_ui_wire`, the Erlang encoder of every message
-and reader of `event` and `pixels`, and `erx/ui_wire.h` with its
+The generator emits `erx_ui_wire`, the Erlang encoder of every message,
+its reader of `event` and `pixels` and its reader of the server's
+messages; `web/src/generated/ui_wire.ts`, the same readers and writers in
+TypeScript, whose reader of the server's messages hands every text out as
+a `MachineText` ([The client](design-web.md#the-client)); and `erx/ui_wire.h` with its
 freestanding C source, the reader of `insert` to `commit`, `screen`,
 `input` and `repaint` and the writer of `event` and `pixels` that a
 native renderer links. The C code allocates nothing: texts read point
@@ -815,7 +818,14 @@ In Erlang, `screen` is `{screen, Width, Height, Chan}`, `input` is
 Rune | none}}` or `{input, {wheel, Steps}}`, `repaint` is the atom, an
 event is `{event, Node, Event, Detail}` with the detail `none`, a
 boolean, an integer or a binary, and a report is `{pixels, X, Y, Width,
-Height, Pixels}`.
+Height, Pixels}`. The Erlang reader of the server's messages returns them
+as the encoder takes them, with what the binary form carries of each
+value: an event property as `true`, a presentation as `{Name, Text}`, two
+binaries, since a name read from input makes no atom, and an `error`
+status as the atom `error`, without its reason. The readers of the
+server's messages in Erlang, C and TypeScript give the same reasons for
+the same refusals, so one parity test feeds a corpus and its mutants to
+all three.
 
 ### Web protocol
 

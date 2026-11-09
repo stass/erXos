@@ -11,15 +11,16 @@ require_relative '../../tools/lib/erx/web_stage'
 
 # ui.txt's binary form (docs/design-abi.md, "Widget format"), generated into
 # build/gen: the EUnit cases of erx_ui_wire on stock's emulator (ERX_ERL and
-# ERX_ERLC), and the parity of the Erlang encoder with the C reader. For the
-# parity, erx_ui_wire_tests:corpus/3 encodes random records of every kind and
-# property and writes what each means by name; the C reader, under ASan and
-# UBSan, reads the stream and prints what it read by number; the names are
-# mapped to numbers here through the ABI model, the generators' common
-# source, and the two must agree line for line. The TypeScript reader of
-# web/test/ui_wire_harness.ts reads the same stream and prints names, as the
-# Erlang lines do, so its lines and Erlang's must agree once both are mapped
-# to numbers. The other way, the C and TypeScript harnesses' writers write
+# ERX_ERLC), and the parity of the three readers and writers. For the
+# readers of the server's records, erx_ui_wire_tests:corpus/3 encodes random
+# records of every kind and property, reads them back with the Erlang reader
+# and writes what it read by name; the C reader, under ASan and UBSan, reads
+# the same stream and prints what it read by number, and the TypeScript
+# reader of web/test/ui_wire_harness.ts by name; the names are mapped to
+# numbers here through the ABI model, the generators' common source, and the
+# three must agree line for line, on the corpus and on its mutants. The
+# TypeScript writer writes each record it read back to the Erlang encoder's
+# bytes. The other way, the C and TypeScript harnesses' writers write
 # random event and pixels records and say what each means, by number from C
 # and by name from TypeScript; erx_ui_wire_tests:read_corpus/2 reads them and
 # says what it read by name, and the two must agree the same way.
@@ -40,17 +41,21 @@ class ErxUIWireTest < Minitest::Test
     end
   end
 
-  def test_c_and_typescript_readers_read_what_the_erlang_encoder_writes
+  def test_the_three_readers_read_the_corpus_alike
     in_erlang do |work|
       stream = File.join(work, 'stream')
-      expected = File.join(work, 'expected')
+      read = File.join(work, 'read')
       run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
-           "erx_ui_wire_tests:corpus(\"#{stream}\", \"#{expected}\", 7), halt(0)", chdir: work)
-      want = File.readlines(expected, chomp: true).map { |line| numeric(line) }
-      assert_operator want.size, :>, 600
-      assert_equal want, read_stream([harness(work)], stream), 'the C reader'
+           "erx_ui_wire_tests:corpus(\"#{stream}\", \"#{read}\", 7), halt(0)", chdir: work)
+      native = read_stream([harness(work)], stream)
+      assert_operator native.size, :>, 600
+      assert_equal native, File.readlines(read, chomp: true).map { |line| numeric(line) }, 'the Erlang reader'
       typescript_harness do |reader|
-        assert_equal want, read_stream(reader, stream).map { |line| numeric(line) }, 'the TypeScript reader'
+        # In "rewrite" mode the harness also writes each record it read with
+        # the TypeScript writer, and refuses the stream unless the bytes are
+        # the Erlang encoder's.
+        assert_equal native, read_stream([*reader, 'rewrite'], stream).map { |line| numeric(line) },
+                     'the TypeScript reader and writer'
       end
     end
   end
@@ -72,20 +77,21 @@ class ErxUIWireTest < Minitest::Test
   end
 
   # Each record of the Erlang corpus with a byte changed, its body cut short or
-  # a byte added, framed again, read record by record by both readers, which
+  # a byte added, framed again, read record by record by the three readers, which
   # must refuse the same records for the same reasons and read the same
   # meaning from the rest: the readers' checks of bounds, members, statuses and
   # lengths compared on what no valid corpus reaches.
-  def test_c_and_typescript_readers_agree_on_mutated_records
+  def test_the_three_readers_agree_on_mutated_records
     in_erlang do |work|
       stream = File.join(work, 'stream')
       mutated = File.join(work, 'mutated')
       run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
            "erx_ui_wire_tests:corpus(\"#{stream}\", \"#{File.join(work, 'expected')}\", 11), halt(0)", chdir: work)
       File.binwrite(mutated, mutations(File.binread(stream), random: Random.new(11)))
-      native = read_stream([harness(work), 'each'], mutated)
+      native = read_stream([harness(work), 'each'], mutated).map { |line| in_number_order(line) }
       assert_operator native.count { |line| line.start_with?('refused: ') }, :>, 500
       assert_operator native.count { |line| !line.start_with?('refused: ') }, :>, 500
+      assert_equal native, read_each_in_erlang(work, mutated), 'the Erlang reader'
       typescript_harness do |reader|
         lines = read_stream([*reader, 'each'], mutated)
         assert_equal native, lines.map { |line| line.start_with?('refused: ', 'more') ? line : numeric(line) }
@@ -110,18 +116,42 @@ class ErxUIWireTest < Minitest::Test
   end
 
   # A valid record with one field broken, for each reason the C reader gives;
-  # the TypeScript reader refuses each for the same reason.
-  def test_c_and_typescript_readers_refuse_each_broken_record_for_its_reason
-    visible, placeholder, text = %w[visible placeholder text].map { |name| property(name).number }
-    Dir.mktmpdir('erx-ui-wire-refusal') { |work| refusals([harness(work)], visible:, placeholder:, text:) }
-    typescript_harness { |reader| refusals(reader, visible:, placeholder:, text:) }
+  # the TypeScript and Erlang readers refuse each for the same reason.
+  def test_the_three_readers_refuse_each_broken_record_for_its_reason
+    cases = refusals
+    Dir.mktmpdir('erx-ui-wire-refusal') { |work| refused_alike([harness(work)], cases) }
+    typescript_harness { |reader| refused_alike(reader, cases) }
+    in_erlang do |work|
+      stream = File.join(work, 'refusals')
+      File.binwrite(stream, cases.keys.join)
+      assert_equal cases.values.map { |reason| "refused: #{reason}" }, read_each_in_erlang(work, stream)
+    end
   end
 
   private
 
-  def refusals(reader, visible:, placeholder:, text:)
+  def refused_alike(reader, cases)
+    cases.each do |bytes, reason|
+      _out, error, status = Open3.capture3(*timed(reader), stdin_data: bytes, binmode: true)
+      refute status.success?, "accepted a record refused for #{reason}"
+      assert_equal "refused at 0: #{reason}", error.chomp
+    end
+  end
+
+  # The lines erx_ui_wire_tests:read_each/2 writes for the stream at path,
+  # with the names it prints mapped to numbers as the C harness prints them.
+  def read_each_in_erlang(work, path)
+    out = File.join(work, 'each')
+    run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+         "erx_ui_wire_tests:read_each(\"#{path}\", \"#{out}\"), halt(0)", chdir: work)
+    File.readlines(out, chomp: true).map { |line| line.start_with?('refused: ', 'more') ? line : numeric(line) }
+  end
+
+  # Records refused for each reason, the one refused for a bad length last,
+  # since a reader reading on stops there.
+  def refusals
+    visible, placeholder, text = %w[visible placeholder text].map { |name| property(name).number }
     {
-      [0].pack('V') => 'bad length',
       record('C', 11) => 'unknown tag',
       record('CVCC', 6, 1, 10, 0) => 'unknown tag',
       record('CV', 2, 0) => 'bad node',
@@ -137,12 +167,9 @@ class ErxUIWireTest < Minitest::Test
       record('CCCvV', 8, 2, 2, 0, 65) => 'bad key direction',
       record('CCCvV', 8, 2, 1, 0, 0xd800) => 'bad rune',
       record('CC', 5, 0) => 'bytes left over',
-      record('Cv', 7, 1) => 'short record'
-    }.each do |bytes, reason|
-      _out, error, status = Open3.capture3(*timed(reader), stdin_data: bytes, binmode: true)
-      refute status.success?, "accepted a record refused for #{reason}"
-      assert_equal "refused at 0: #{reason}", error.chomp
-    end
+      record('Cv', 7, 1) => 'short record',
+      [0].pack('V') => 'bad length'
+    }
   end
 
   # Four mutants of each record of stream: one byte replaced, the body cut
@@ -226,6 +253,15 @@ class ErxUIWireTest < Minitest::Test
       ['set', tokens[1], *props(tokens[2...slash]), '/', *removed].join(' ')
     else line
     end
+  end
+
+  # A line of the C harness with an insert's or a set's properties in number
+  # order, as numeric/1 puts them: a mutant may list them in any order, and
+  # the Erlang reader reads them into a map.
+  def in_number_order(line)
+    tokens = line.split(' ')
+    first, last = { 'insert' => [5, tokens.size], 'set' => [2, tokens.index('/')] }.fetch(tokens.first) { return line }
+    [*tokens[0...first], *tokens[first...last].sort_by { |token| token.to_i }, *tokens[last..]].join(' ')
   end
 
   def props(tokens)

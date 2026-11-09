@@ -13,17 +13,24 @@
  *
  * With the argument "each", reads on past a refused record as the C harness
  * does: "refused: REASON" for it, then the record after the bytes its length
- * word counts, stopping at "refused: bad length" or at "more".
+ * word counts, stopping at "refused: bad length" or at "more". With the
+ * argument "rewrite", also writes each record it read with the generated
+ * writeRecord() and exits 1 unless the bytes are those it read.
  *
  * With the arguments "write PATH SEED", writes the other way instead: random
  * event and pixels records, with the generated writer, to PATH, and one line
  * per record to standard output naming what it wrote, in the format of
  * erx_ui_wire_tests:read_corpus/2. Every event property is written, each
  * detail tag at its bounds and at random, and pixels from empty to the
- * longest.
+ * longest; the generated readReport() must read each back as written.
+ *
+ * Texts come out of read() as MachineText, whose one view is its line
+ * escape; bytesOf() takes the escape's runs back to the bytes, so the
+ * harness prints the bytes the reader read without reaching past that view.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { BYTE_TOKEN, CODEPOINT_TOKEN, type Token } from '../src/generated/terminal_tables.ts';
 import {
   EVENT_TEXT_MAX,
   PIXELS_DATA_MAX,
@@ -31,41 +38,84 @@ import {
   REPORTERS,
   STATUSES,
   read,
+  readReport,
   writeEvent,
   writePixels,
+  writeRecord,
   type Detail,
   type Prop,
+  type Report,
   type UIRecord,
-  type Value,
 } from '../src/generated/ui_wire.ts';
+import type { MachineText } from '../src/text.ts';
 
 const hex = (bytes: Uint8Array): string => `x${Buffer.from(bytes).toString('hex')}`;
 
-function valueText(prop: Prop, value: Value | null): string {
-  if (value === null) return '-';
+/* The number a token of TOKEN's shape names, or null for a run of another shape. */
+function tokenValue(text: string, token: Token): number | null {
+  if (!text.startsWith(token.prefix) || !text.endsWith(token.suffix)) return null;
+  return Number.parseInt(text.slice(token.prefix.length, text.length - token.suffix.length), 16);
+}
+
+/* The bytes whose line escape TEXT's runs are: plain text as UTF-8, each token as what it names. */
+function bytesOf(text: MachineText): Uint8Array {
+  const parts = text.runs().map((run) => {
+    if (run.kind === 'plain') return Buffer.from(run.text, 'utf8');
+    const byte = tokenValue(run.text, BYTE_TOKEN);
+    if (byte !== null) return Uint8Array.of(byte);
+    const point = tokenValue(run.text, CODEPOINT_TOKEN) ?? fail(`not a token: ${run.text}`);
+    return Buffer.from(String.fromCodePoint(point), 'utf8');
+  });
+  return Uint8Array.from(Buffer.concat(parts));
+}
+
+/* A property read, with its texts as bytes. */
+function withBytes(prop: Prop): Prop<Uint8Array> {
   switch (prop.form) {
-    case 'list':
-      return `[${(value as Uint8Array[]).map(hex).join(',')}]`;
-    case 'presentation': {
-      const { name, text } = value as { name: Uint8Array; text: Uint8Array };
-      return `${hex(name)}:${hex(text)}`;
-    }
     case 'text':
-    case 'bytes':
-      return hex(value as Uint8Array);
+      return { ...prop, value: prop.value && bytesOf(prop.value) };
+    case 'list':
+      return { ...prop, value: prop.value && prop.value.map(bytesOf) };
+    case 'presentation':
+      return { ...prop, value: prop.value && { name: bytesOf(prop.value.name), text: bytesOf(prop.value.text) } };
     default:
-      return String(value);
+      return prop;
   }
 }
 
-function propToken(prop: Prop): string {
+function recordWithBytes(record: UIRecord): UIRecord<Uint8Array> {
+  switch (record.tag) {
+    case 'insert':
+    case 'set':
+      return { ...record, props: record.props.map(withBytes) };
+    default:
+      return record;
+  }
+}
+
+function valueText(prop: Prop<Uint8Array>): string {
+  if (prop.value === null) return '-';
+  switch (prop.form) {
+    case 'list':
+      return `[${prop.value.map(hex).join(',')}]`;
+    case 'presentation':
+      return `${hex(prop.value.name)}:${hex(prop.value.text)}`;
+    case 'text':
+    case 'bytes':
+      return hex(prop.value);
+    default:
+      return String(prop.value);
+  }
+}
+
+function propToken(prop: Prop<Uint8Array>): string {
   const block = PROPERTIES.get(prop.name)?.status
     ? `${STATUSES.indexOf(prop.status)},${REPORTERS.indexOf(prop.reporter)},${prop.stopgap},${prop.timeoutMs}:`
     : '';
-  return `${prop.name}=${block}${valueText(prop, prop.value)}`;
+  return `${prop.name}=${block}${valueText(prop)}`;
 }
 
-function line(record: UIRecord): string {
+function line(record: UIRecord<Uint8Array>): string {
   switch (record.tag) {
     case 'insert':
       return ['insert', record.node, record.parent, record.index, record.kind, ...record.props.map(propToken)].join(' ');
@@ -89,7 +139,7 @@ function line(record: UIRecord): string {
   }
 }
 
-function readStream(stream: Uint8Array, { each }: { each: boolean }): number {
+function readStream(stream: Uint8Array, { each, rewrite }: { each: boolean; rewrite: boolean }): number {
   const lines: string[] = [];
   for (let offset = 0; offset < stream.length; ) {
     const result = read(stream.subarray(offset));
@@ -106,7 +156,10 @@ function readStream(stream: Uint8Array, { each }: { each: boolean }): number {
       process.stderr.write(`${message}\n`);
       return 1;
     }
-    lines.push(`${line(result.record)}\n`);
+    const record = recordWithBytes(result.record);
+    const original = stream.subarray(offset, offset + result.used);
+    if (rewrite && !Buffer.from(writeRecord(record) ?? []).equals(original)) fail(`rewrote the record at ${offset} otherwise`);
+    lines.push(`${line(record)}\n`);
     offset += result.used;
   }
   process.stdout.write(lines.join(''));
@@ -150,6 +203,23 @@ function detailText(detail: Detail): string {
   }
 }
 
+function reportLine(report: Report): string {
+  if (report.tag === 'event') return `event ${report.node} ${report.event} ${detailText(report.detail)}\n`;
+  return `pixels ${report.x} ${report.y} ${report.width} ${report.height} ${hex(report.pixels)}\n`;
+}
+
+/* The lines readReport() reads from STREAM, which it must read whole. */
+function readReports(stream: Uint8Array): string[] {
+  const lines: string[] = [];
+  for (let offset = 0; offset < stream.length; ) {
+    const result = readReport(stream.subarray(offset));
+    if (result.result !== 'ok') fail(`readReport ${result.result === 'bad' ? result.reason : 'more'} at ${offset}`);
+    lines.push(reportLine(result.report));
+    offset += result.used;
+  }
+  return lines;
+}
+
 function writeCorpus(path: string, seed: number): number {
   const below = generator(seed);
   const events = [...PROPERTIES.values()].filter((type) => type.form === 'event').map((type) => type.name);
@@ -191,4 +261,4 @@ const [mode, path, seed] = process.argv.slice(2);
 process.exitCode =
   mode === 'write' && path !== undefined
     ? writeCorpus(path, Number(seed))
-    : readStream(readFileSync(0), { each: mode === 'each' });
+    : readStream(readFileSync(0), { each: mode === 'each', rewrite: mode === 'rewrite' });

@@ -99,7 +99,7 @@ module Erx
       # --- Erlang --------------------------------------------------------------
 
       def erlang(ui, stopgaps:)
-        [erlang_head(ui), erlang_encoder, erlang_tables(ui, stopgaps), erlang_reader].join("\n")
+        [erlang_head(ui), erlang_encoder, erlang_tables(ui, stopgaps), erlang_reader, erlang_server_reader].join("\n")
       end
 
       def erlang_head(ui)
@@ -113,18 +113,22 @@ module Erx
           -moduledoc """
           ui.txt's binary form (docs/design-abi.md, "Widget format"). encode/2 writes
           any record; read/1 reads the records a renderer sends the server, event and
-          pixels, and refuses every other tag. A record is a u32 length, which counts
-          the tag and the fields, then a u8 tag and the fields; integers are
-          little-endian. The reader keeps no state between records and decides
-          nothing that depends on a node's kind.
+          pixels, and refuses every other tag; read_server/1 reads the records the
+          server sends a renderer, insert to commit, screen, input and repaint, and
+          refuses event and pixels. A record is a u32 length, which counts the tag
+          and the fields, then a u8 tag and the fields; integers are little-endian.
+          The readers keep no state between records, decide nothing that depends on
+          a node's kind and make no atom: every name they return comes from the
+          declaration's tables.
           """.
-          -export([encode/2, read/1]).
-          -export_type([wire_record/0, present/0, reason/0]).
+          -export([encode/2, read/1, read_server/1]).
+          -export_type([wire_record/0, present/0, reason/0, refusal/0]).
 
           -define(OP_MAX, #{ui.op_max}).
           -define(NAME_MAX, #{NAME_MAX}).
           -define(PRESENT_MAX, #{PRESENT_MAX}).
           -define(PIXELS_MAX, #{ui.pixels_max}).
+          -define(PROPERTIES, #{wire_properties(ui).size}).
           -define(EVENT, 6).
           -define(PIXELS, 10).
           -define(IS_U8(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ff)).
@@ -153,6 +157,10 @@ module Erx
           %% A present property's canonical text, erx_present:text/2.
           -type present() :: fun((Type :: atom(), Value :: term()) -> binary()).
           -type reason() :: bad_length | bad_tag | bad_node | bad_event | bad_detail | bad_body.
+          %% read_server/1's reasons, those of the C reader erx/ui_wire.h declares.
+          -type refusal() :: bad_length | unknown_tag | short_record | bytes_left_over | bad_node | unknown_kind
+                           | unknown_property | property_twice | too_many_properties | bad_status | bad_value
+                           | unknown_input_form | bad_key_direction | bad_rune.
         ERLANG
       end
 
@@ -295,10 +303,33 @@ module Erx
           clauses('event_name', events.map { |property| [property.number.to_s, atom(property.name)] },
                   fallback: 'event_name(_Number) -> error.'),
           "stopgap(Name) -> lists:member(Name, [#{stopgaps.map { |name| atom(name) }.join(', ')}]).\n",
+          clauses('kind_name', ui.kinds.map { |kind| [kind.number.to_s, atom(kind.name)] },
+                  fallback: 'kind_name(_Number) -> error.',
+                  comment: "The reader's tables: each kind and property by number, each stopgap by name."),
+          clauses('property', properties.map { |property| [property.number.to_s, reader_entry(property)] },
+                  fallback: 'property(_Number) -> error.'),
+          clauses('stopgap_name', stopgaps.map { |name| ["<<\"#{name}\">>", atom(name)] },
+                  fallback: 'stopgap_name(_Name) -> error.'),
           value_clauses(status),
           "%% A value of the property's own type.\n" +
             properties.map { |property| plain_clause(property) }.join(";\n") + ".\n"
         ].join("\n")
+      end
+
+      # A property's entry in the reader's table: its name, whether a status
+      # block precedes its value, and what read_value/2 reads.
+      def reader_entry(property)
+        type = property.type
+        read =
+          case type.form
+          when 'integer' then "{integer, #{type.minimum}, #{type.maximum}}"
+          when 'boolean', 'event', 'presentation' then type.form
+          when 'enum', 'image'
+            "{member, [#{type.numbers.zip(type.atoms).map { |number, member| "{#{number}, #{atom(member)}}" }.join(', ')}]}"
+          when 'text', 'bytes' then "{#{type.form}, #{type.maximum}}"
+          when 'list' then "{list, #{type.element.maximum}, #{type.maximum}}"
+          end
+        "{#{atom(property.name)}, #{property.status}, #{read}}"
       end
 
       def clauses(name, pairs, fallback:, comment: nil)
@@ -383,6 +414,235 @@ module Erx
           utf8(<<>>) -> true;
           utf8(<<_Character/utf8, Rest/binary>>) -> utf8(Rest);
           utf8(_Bytes) -> false.
+        ERLANG
+      end
+
+      # The reader of the server's records, the Erlang twin of the C reader:
+      # the same fields read in the same order and refused for the same
+      # reasons, so the parity test compares the three readers record by record.
+      def erlang_server_reader
+        <<~'ERLANG'
+          -doc """
+          The first record of Bytes that the server sends a renderer, and the bytes
+          after it; more when Bytes holds no whole record yet. A length of 0 or above
+          ui_op_max is refused before the record's bytes arrive.
+
+          A record reads as encode/2 takes it, with what the binary form carries of
+          each value: an event property as true, the node taking it; a presentation
+          as {Name, Text}, its type's name and canonical text, both binaries of valid
+          UTF-8, for the name read from input makes no atom; and an error status as
+          the atom error, whose reason the form does not carry. A set's removals are
+          in the order the record lists them.
+          """.
+          -spec read_server(binary()) -> {ok, wire_record(), Rest :: binary()} | more | {error, refusal()}.
+          read_server(<<Length:32/little, _/binary>>) when Length =:= 0; Length > ?OP_MAX ->
+              {error, bad_length};
+          read_server(<<Length:32/little, Body:Length/binary, Rest/binary>>) ->
+              try server_fields(Body) of
+                  {Record, <<>>} -> {ok, Record, Rest};
+                  {_Record, _Left} -> {error, bytes_left_over}
+              catch
+                  throw:{?MODULE, Reason} -> {error, Reason}
+              end;
+          read_server(Bytes) when is_binary(Bytes) ->
+              more.
+
+          %% A refusal ends the read of one record: thrown from the field that
+          %% breaks a rule, caught by read_server/1 alone.
+          refuse(Reason) -> throw({?MODULE, Reason}).
+
+          %% A field and the bytes after it, or a refusal for Reason when it is
+          %% cut short: the reason the C reader gives for that field, so an insert's
+          %% parent cut short is bad_node and a screen's width short_record.
+          u8(<<Value, Rest/binary>>, _Reason) -> {Value, Rest};
+          u8(_Bytes, Reason) -> refuse(Reason).
+
+          u16(<<Value:16/little, Rest/binary>>, _Reason) -> {Value, Rest};
+          u16(_Bytes, Reason) -> refuse(Reason).
+
+          u32(<<Value:32/little, Rest/binary>>, _Reason) -> {Value, Rest};
+          u32(_Bytes, Reason) -> refuse(Reason).
+
+          %% A node's number, never 0.
+          node_id(Bytes) ->
+              case u32(Bytes, bad_node) of
+                  {0, _Rest} -> refuse(bad_node);
+                  Read -> Read
+              end.
+
+          %% A length of 1 or 4 bytes, at most Max, and that many bytes of valid UTF-8.
+          text(Bytes, Width, Max, Reason) ->
+              {Length, Rest} = case Width of 1 -> u8(Bytes, Reason); 4 -> u32(Bytes, Reason) end,
+              Length =< Max orelse refuse(Reason),
+              case Rest of
+                  <<Text:Length/binary, After/binary>> ->
+                      utf8(Text) orelse refuse(Reason),
+                      {Text, After};
+                  _ -> refuse(Reason)
+              end.
+
+          %% The fields after the tag, by the tag; event and pixels go the other way.
+          server_fields(<<1, Fields/binary>>) ->
+              {Node, R1} = node_id(Fields),
+              {Parent, R2} = u32(R1, bad_node),
+              {Index, R3} = u16(R2, bad_node),
+              {Number, R4} = u8(R3, bad_node),
+              Kind = case kind_name(Number) of error -> refuse(unknown_kind); Name -> Name end,
+              {Props, R5} = read_props(R4),
+              {{insert, Node, Parent, Index, Kind, Props}, R5};
+          server_fields(<<2, Fields/binary>>) ->
+              {Node, Rest} = node_id(Fields),
+              {{remove, Node}, Rest};
+          server_fields(<<3, Fields/binary>>) ->
+              {Node, R1} = node_id(Fields),
+              {Changed, R2} = read_props(R1),
+              {Removed, R3} = read_removed(R2),
+              {{set, Node, Changed, Removed}, R3};
+          server_fields(<<4, Fields/binary>>) ->
+              {Node, R1} = node_id(Fields),
+              {Index, R2} = u16(R1, bad_node),
+              {{move, Node, Index}, R2};
+          server_fields(<<5, Rest/binary>>) ->
+              {commit, Rest};
+          server_fields(<<7, Fields/binary>>) ->
+              {Width, R1} = u16(Fields, short_record),
+              {Height, R2} = u16(R1, short_record),
+              {Chan, R3} = u32(R2, short_record),
+              {{screen, Width, Height, Chan}, R3};
+          server_fields(<<8, Fields/binary>>) ->
+              {Input, Rest} = read_input(Fields),
+              {{input, Input}, Rest};
+          server_fields(<<9, Rest/binary>>) ->
+              {repaint, Rest};
+          server_fields(_Body) ->
+              refuse(unknown_tag).
+
+          read_input(Bytes) ->
+              case u8(Bytes, short_record) of
+                  {1, R1} ->
+                      {X, R2} = u16(R1, short_record),
+                      {Y, R3} = u16(R2, short_record),
+                      {Buttons, R4} = u8(R3, short_record),
+                      {{pointer, X, Y, Buttons}, R4};
+                  {2, R1} ->
+                      {Down, R2} = u8(R1, short_record),
+                      {Code, R3} = u16(R2, short_record),
+                      {Rune, R4} = u32(R3, short_record),
+                      Down =< 1 orelse refuse(bad_key_direction),
+                      {{key, case Down of 1 -> down; 0 -> up end, Code, read_rune(Rune)}, R4};
+                  {3, <<Steps:8/signed, Rest/binary>>} ->
+                      {{wheel, Steps}, Rest};
+                  {3, _Short} ->
+                      refuse(short_record);
+                  {_Form, _Rest} ->
+                      refuse(unknown_input_form)
+              end.
+
+          read_rune(16#ffffffff) -> none;
+          read_rune(Rune) when Rune =< 16#10ffff, (Rune < 16#d800 orelse Rune > 16#dfff) -> Rune;
+          read_rune(_Rune) -> refuse(bad_rune).
+
+          %% A u8 count and each property: a known number, once, and its value.
+          read_props(Bytes) ->
+              {Count, Rest} = u8(Bytes, short_record),
+              Count =< ?PROPERTIES orelse refuse(too_many_properties),
+              read_props(Count, Rest, #{}).
+
+          read_props(0, Rest, Props) ->
+              {Props, Rest};
+          read_props(Count, Bytes, Props) ->
+              {Number, R1} = u8(Bytes, short_record),
+              {Name, Status, Type} = case property(Number) of error -> refuse(unknown_property); Entry -> Entry end,
+              is_map_key(Name, Props) andalso refuse(property_twice),
+              {Value, R2} = case Status of
+                                true -> read_status(R1, Type);
+                                false -> read_value(R1, Type)
+                            end,
+              read_props(Count - 1, R2, Props#{Name => Value}).
+
+          %% A set's removals: a u8 count of known property numbers, each once.
+          read_removed(Bytes) ->
+              {Count, Rest} = u8(Bytes, short_record),
+              Count =< ?PROPERTIES orelse refuse(too_many_properties),
+              read_removed(Count, Rest, []).
+
+          read_removed(0, Rest, Names) ->
+              {lists:reverse(Names), Rest};
+          read_removed(Count, Bytes, Names) ->
+              {Number, Rest} = u8(Bytes, short_record),
+              {Name, _Status, _Type} = case property(Number) of error -> refuse(unknown_property); Entry -> Entry end,
+              lists:member(Name, Names) andalso refuse(property_twice),
+              read_removed(Count - 1, Rest, [Name | Names]).
+
+          %% The status block: a status and a reporter within their codes, a
+          %% stopgap's name that is a declared stopgap exactly when the reporter is
+          %% a stopgap, and a timeout set exactly when the status is timeout. The
+          %% application's own value is always ok, and reads as the plain value.
+          read_status(Bytes, Type) ->
+              {StatusCode, R1} = u8(Bytes, bad_status),
+              {ReporterCode, R2} = u8(R1, bad_status),
+              {StopgapName, R3} = text(R2, 1, ?NAME_MAX, bad_status),
+              {Ms, R4} = u32(R3, bad_status),
+              (StatusCode =< 5 andalso ReporterCode =< 4) orelse refuse(bad_status),
+              (ReporterCode =:= 0 andalso StatusCode =/= 0) andalso refuse(bad_status),
+              (StatusCode =:= 4) =:= (Ms =/= 0) orelse refuse(bad_status),
+              Reporter = reporter(ReporterCode, StopgapName),
+              case StatusCode of
+                  0 when Reporter =:= own -> read_value(R4, Type);
+                  0 -> carried(ok, Reporter, read_value(R4, Type));
+                  1 -> carried(partial, Reporter, read_value(R4, Type));
+                  2 -> {{Reporter, unknown}, R4};
+                  3 -> {{Reporter, unsupported}, R4};
+                  4 -> {{Reporter, {timeout, Ms}}, R4};
+                  5 -> {{Reporter, error}, R4}
+              end.
+
+          carried(Status, Reporter, {Value, Rest}) -> {{Reporter, {Status, Value}}, Rest}.
+
+          reporter(0, <<>>) -> own;
+          reporter(1, <<>>) -> kernel;
+          reporter(2, <<>>) -> service;
+          reporter(3, <<>>) -> runtime;
+          reporter(4, Name) ->
+              case stopgap_name(Name) of
+                  error -> refuse(bad_status);
+                  Stopgap -> {stopgap, Stopgap}
+              end;
+          reporter(_Code, _Name) -> refuse(bad_status).
+
+          %% A value of the property's type, bounded by the type and by what remains.
+          read_value(Bytes, {integer, Min, Max}) ->
+              case Bytes of
+                  <<Value:32/little-signed, Rest/binary>> when Value >= Min, Value =< Max -> {Value, Rest};
+                  _ -> refuse(bad_value)
+              end;
+          read_value(<<0, Rest/binary>>, boolean) -> {false, Rest};
+          read_value(<<1, Rest/binary>>, boolean) -> {true, Rest};
+          read_value(<<Number, Rest/binary>>, {member, Members}) ->
+              case lists:keyfind(Number, 1, Members) of
+                  {Number, Member} -> {Member, Rest};
+                  false -> refuse(bad_value)
+              end;
+          read_value(Bytes, {text, Max}) ->
+              text(Bytes, 4, Max, bad_value);
+          read_value(<<Length:32/little, Value:Length/binary, Rest/binary>>, {bytes, Max}) when Length =< Max ->
+              {Value, Rest};
+          read_value(<<Count:16/little, Rest/binary>>, {list, TextMax, Max}) when Count =< Max ->
+              read_list(Count, Rest, TextMax, []);
+          read_value(Rest, event) ->
+              {true, Rest};
+          read_value(Bytes, presentation) ->
+              {Name, R1} = text(Bytes, 1, ?NAME_MAX, bad_value),
+              {Text, R2} = text(R1, 4, ?PRESENT_MAX, bad_value),
+              {{Name, Text}, R2};
+          read_value(_Bytes, _Type) ->
+              refuse(bad_value).
+
+          read_list(0, Rest, _TextMax, Texts) ->
+              {lists:reverse(Texts), Rest};
+          read_list(Count, Bytes, TextMax, Texts) ->
+              {Text, Rest} = text(Bytes, 4, TextMax, bad_value),
+              read_list(Count - 1, Rest, TextMax, [Text | Texts]).
         ERLANG
       end
 

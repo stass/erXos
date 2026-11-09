@@ -4,11 +4,12 @@
  *
  * The runtime every generated reader and writer of the web client shares
  * (docs/design-web.md, "The client"): the cursor over an input's bytes and
- * the refusal it throws, little-endian loads and the UTF-8 check. The
- * generated modules of src/generated import it; it holds no table of any
- * ABI source, so it is a source of its own and not generated. The check is
- * not text.ts's decoder, which yields the units the escape needs: a reader
- * only asks whether a text is valid, without a unit list per text.
+ * the refusal it throws, the writer of an output, little-endian loads and
+ * the UTF-8 check. The generated modules of src/generated import it; it
+ * holds no table of any ABI source, so it is a source of its own and not
+ * generated. The check is not text.ts's decoder, which yields the units the
+ * escape needs: a reader only asks whether a text is valid, without a unit
+ * list per text.
  */
 
 /* A refused input, thrown inside a reader and caught by that reader's entry point alone. */
@@ -68,6 +69,45 @@ export class Cursor {
     if (this.left < 4) refuse(reason);
     this.at += 4;
     return u32At(this.bytes, this.at - 4);
+  }
+}
+
+/* The bytes of one output of at most MAX bytes, refused with REASON once it would pass them. */
+export class Writer {
+  readonly bytes: Uint8Array;
+  readonly reason: string;
+  at = 0;
+
+  constructor(max: number, reason: string) {
+    this.bytes = new Uint8Array(max);
+    this.reason = reason;
+  }
+
+  room(count: number): void {
+    if (count > this.bytes.length - this.at) refuse(this.reason);
+  }
+
+  /* VALUE's low BYTES bytes, little-endian. */
+  integer(bytes: 1 | 2 | 4, value: number): void {
+    this.room(bytes);
+    for (let index = 0; index < bytes; index++) this.bytes[this.at++] = (value >>> (8 * index)) & 0xff;
+  }
+
+  put(bytes: Uint8Array): void {
+    this.room(bytes.length);
+    this.bytes.set(bytes, this.at);
+    this.at += bytes.length;
+  }
+
+  /* BYTES after their length as a u32. */
+  sized(bytes: Uint8Array): void {
+    this.integer(4, bytes.length);
+    this.put(bytes);
+  }
+
+  /* What has been written, copied. */
+  written(): Uint8Array {
+    return this.bytes.slice(0, this.at);
   }
 }
 

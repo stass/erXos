@@ -34,7 +34,7 @@ module Erx
             Neither direction throws on what it is handed: each returns a value
             or a refusal with its reason.
           TEXT
-          "import { MachineText } from '../text.ts';\nimport { Cursor, Refusal, refuse } from '../wire.ts';\n",
+          "import { MachineText } from '../text.ts';\nimport { Cursor, Refusal, Writer, refuse } from '../wire.ts';\n",
           ts.constant(name: 'PROTOCOL_HASH_HEX', value: ts.string(hash),
                       comment: 'The SHA-256 over web.txt, ui.txt, inspection.txt, terminal.txt and its Unicode data.'),
           web.limits.map { |name, value| ts.constant(name: name.upcase, value: value, comment: "The limit #{name}.") }.join,
@@ -308,43 +308,11 @@ module Erx
           return value;
         }
 
-        /* The bytes of one message, refused once they would pass its bound. */
-        class Writer {
-          readonly bytes: Uint8Array;
-          readonly reason: string;
-          at = 0;
-
-          constructor(max: number, message: string) {
-            this.bytes = new Uint8Array(max);
-            this.reason = `too_long ${message}`;
-          }
-
-          room(count: number): void {
-            if (count > this.bytes.length - this.at) refuse(this.reason);
-          }
-
-          integer(bytes: 1 | 2 | 4, value: number): void {
-            this.room(bytes);
-            for (let index = 0; index < bytes; index++) this.bytes[this.at++] = (value >>> (8 * index)) & 0xff;
-          }
-
-          put(bytes: Uint8Array): void {
-            this.room(bytes.length);
-            this.bytes.set(bytes, this.at);
-            this.at += bytes.length;
-          }
-
-          sized(bytes: Uint8Array): void {
-            this.integer(4, bytes.length);
-            this.put(bytes);
-          }
-        }
-
         function encode(message: string, max: number, value: unknown): Encoded {
-          const writer = new Writer(max, message);
+          const writer = new Writer(max, `too_long ${message}`);
           try {
             write(message, value, writer, 1);
-            return { ok: true, bytes: writer.bytes.slice(0, writer.at) };
+            return { ok: true, bytes: writer.written() };
           } catch (error) {
             if (error instanceof Refusal) return { ok: false, reason: error.reason };
             throw error;

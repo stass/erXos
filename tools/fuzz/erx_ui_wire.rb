@@ -7,8 +7,9 @@ require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/abi'
 
-# The fuzz target of erx_ui_wire:read/1, the reader of the records a renderer
-# sub-space writes (docs/design-abi.md, "Widget format"). The module is
+# The fuzz target of erx_ui_wire:read/1 and read_server/1, the readers of the
+# records a renderer sub-space writes and of those the widget server writes
+# (docs/design-abi.md, "Widget format"). The module is
 # generated from abi/formats/ui.txt and run with test/erlang/erx_ui_wire_fuzz.erl
 # alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's).
 module ErxUIWireFuzz

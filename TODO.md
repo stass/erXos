@@ -279,17 +279,11 @@ it; git history is the record of completed work.
   image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
   the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
   window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
-* [Medium] `tools/lib/erx/abi_emit_ui_wire.rb`, [Widget format](docs/design-abi.md#widget-format): the generator
-  emits the Erlang encoder of every message with the reader of `event` and `pixels`, and the C and TypeScript
-  readers of the server's messages with the writers of `event` and `pixels`. Still missing from "a reader and a
-  writer of both directions in Erlang, C and TypeScript" (design-display.md, "Widget trees"): the Erlang reader
-  of the server's messages, so the parity test feeds one corpus to three readers instead of checking the Erlang
-  encoder against the C and TypeScript readers by meaning; and TypeScript's encoder of the server's messages
-  and reader of `event` and `pixels` (design-web.md, "Interfaces").
-* [Medium] `tools/lib/erx/abi_emit_ui_wire_ts.rb`, [The client](docs/design-web.md#the-client): `ui_wire.ts`
-  hands texts out as bare `Uint8Array`s and `Prop.value` as one union not tied to `form`, where rule W2 types
-  every machine text as `MachineText`, which `web/src/text.ts` provides: wrap texts in it and emit `Prop` as a
-  union discriminated by form (the parity harness's casts in `web/test/ui_wire_harness.ts` then go).
+* [Medium] `tools/lib/erx/abi_emit_ui_wire.rb` and `abi_emit_ui_wire_ts.rb`, [Widget format](docs/design-abi.md#widget-format):
+  each record's fields (order, width, the reason a short field is refused for) and the 14 refusal reasons are fixed
+  text written six times, in the Erlang, C and TypeScript readers and writers, where the ABI rule wants every fixed
+  binary layout in one source; only the parity test ties them. Declare the records' fields and the reasons in
+  `abi/formats/ui.txt` and generate all six from that table.
 * [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): a huge integer's
   `leading/1` (a power of ten and a bignum division) costs 110-160 ms for the largest bignum and is charged only
   its 4 KiB print, so about 15 of them fit one projection, about 2 s of the session's CPU per update (13 copies

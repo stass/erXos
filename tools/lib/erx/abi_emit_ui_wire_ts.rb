@@ -7,14 +7,16 @@ require_relative 'abi_emit_ui_wire'
 
 module Erx
   module ABI
-    # Emits web/src/generated/ui_wire.ts, the web client's reader of the
-    # records the widget server writes in ui.txt's binary form and writer of
-    # the event and pixels records a renderer writes back (docs/design-abi.md,
-    # "Widget format"; docs/design-web.md, "The client"). It is the TypeScript
-    # twin of the C reader and writer UIWireEmitter emits: the same framing,
-    # bounds and refusal reasons, so one parity test covers all three readers.
-    # The tables come from the `ui` declaration and the inspection schema's
-    # stopgaps; the reader and writer are fixed text.
+    # Emits web/src/generated/ui_wire.ts, the web client's reader and writer
+    # of both directions of ui.txt's binary form (docs/design-abi.md, "Widget
+    # format"; docs/design-web.md, "The client"): of the records the widget
+    # server writes, whose texts it reads as MachineText (rule W2), and of the
+    # event and pixels records a renderer writes back. Its reader of the
+    # server's records is the TypeScript twin of the C reader and of
+    # erx_ui_wire:read_server/1, with the same framing, bounds and refusal
+    # reasons, so one parity test covers all three readers; its reader of
+    # reports is erx_ui_wire:read/1's. The tables come from the `ui`
+    # declaration and the inspection schema's stopgaps; the code is fixed text.
     module UIWireTSEmitter
       PATH = 'web/src/generated/ui_wire.ts'
 
@@ -31,16 +33,20 @@ module Erx
         wire = UIWireEmitter
         [
           ts.header(source: 'abi/formats/ui.txt', summary: <<~TEXT),
-            The reader of the records the widget server writes to a renderer in
-            ui.txt's binary form (docs/design-abi.md, "Widget format"): insert,
-            remove, set, move, commit, screen, input and repaint; and the writer of
-            the records a renderer writes back: event and pixels. A record is a u32
-            length, which counts the tag and the fields, then a u8 tag and the
-            fields; integers are little-endian. The reader never throws on what it
-            is handed: it returns a record, a request for more bytes or a refusal
-            with its reason, the reasons of the C reader erx/ui_wire.h declares.
+            The reader and writer of ui.txt's binary form in both directions
+            (docs/design-abi.md, "Widget format"): read() and writeRecord() of the
+            records the widget server writes to a renderer, insert, remove, set,
+            move, commit, screen, input and repaint; and readReport(), writeEvent()
+            and writePixels() of the records a renderer writes back, event and
+            pixels. A record is a u32 length, which counts the tag and the fields,
+            then a u8 tag and the fields; integers are little-endian. read() hands
+            every text out as a MachineText. The readers never throw on what they
+            are handed: they return a record, a request for more bytes or a
+            refusal with its reason, read()'s those of the C reader erx/ui_wire.h
+            declares and readReport()'s those of erx_ui_wire:read/1. The writers
+            return null for what a reader would refuse.
           TEXT
-          "import { Cursor, Refusal, isUTF8, refuse, u32At } from '../wire.ts';\n\n" \
+          "import { MachineText } from '../text.ts';\nimport { Cursor, Refusal, Writer, isUTF8, refuse, u32At } from '../wire.ts';\n\n" \
             "/* The UTF-8 check of the shared runtime, offered to the callers of this module too. */\n" \
             "export { isUTF8 };\n",
           constants(ui),
@@ -152,37 +158,47 @@ module Erx
         const BY_NUMBER: ReadonlyMap<number, PropertyType> = new Map([...PROPERTIES.values()].map((type) => [type.number, type]));
 
         /*
-         * A presentation's value: its type's name and canonical text, both
-         * valid UTF-8.
+         * A record's texts are of the text type T: MachineText in what read()
+         * returns, so a text the machine sends reaches the DOM only through its line
+         * escape (docs/design-web.md, rule W2), and Uint8Array in what writeRecord()
+         * takes, the bytes themselves.
          */
-        export interface Presentation {
-          readonly name: Uint8Array;
-          readonly text: Uint8Array;
+
+        /* A presentation's value: its type's name and canonical text, both valid UTF-8. */
+        export interface Presentation<T> {
+          readonly name: T;
+          readonly text: T;
         }
 
         /*
-         * A property's value by its form: a boolean; an integer within its
-         * bounds; an enum's or image's member by name; a text's valid UTF-8 or
-         * bytes' bytes; a list's texts; a presentation.
+         * A property's value by its form: a boolean; an integer within its bounds;
+         * an enum's or image's member by name; a text of valid UTF-8; bytes; a
+         * list's texts; a presentation. It is null for an event, which has none,
+         * and for a status that is neither ok nor partial.
          */
-        export type Value = boolean | number | string | Uint8Array | readonly Uint8Array[] | Presentation;
+        export type FormValue<T> =
+          | { readonly form: 'boolean'; readonly value: boolean | null }
+          | { readonly form: 'integer'; readonly value: number | null }
+          | { readonly form: 'enum' | 'image'; readonly value: string | null }
+          | { readonly form: 'text'; readonly value: T | null }
+          | { readonly form: 'bytes'; readonly value: Uint8Array | null }
+          | { readonly form: 'list'; readonly value: readonly T[] | null }
+          | { readonly form: 'event'; readonly value: null }
+          | { readonly form: 'presentation'; readonly value: Presentation<T> | null };
 
         /*
-         * One property of an insert or a set. Status, reporter, stopgap and
-         * timeoutMs are its status block, and ok, own, "" and 0 for a property
-         * that carries none. Value is null for an event, which has none, and for
-         * a status that is neither ok nor partial.
+         * One property of an insert or a set, its value discriminated by its form.
+         * Status, reporter, stopgap and timeoutMs are its status block, and ok, own,
+         * "" and 0 for a property that carries none.
          */
-        export interface Prop {
+        export type Prop<T = MachineText> = {
           readonly name: string;
           readonly number: number;
-          readonly form: Form;
           readonly status: Status;
           readonly reporter: Reporter;
           readonly stopgap: string;
           readonly timeoutMs: number;
-          readonly value: Value | null;
-        }
+        } & FormValue<T>;
 
         /* An input record's event; a key's rune is null when it has none. */
         export type Input =
@@ -191,17 +207,17 @@ module Erx
           | { readonly form: 'wheel'; readonly steps: number };
 
         /* One record of the server's, by its tag. */
-        export type UIRecord =
+        export type UIRecord<T = MachineText> =
           | {
               readonly tag: 'insert';
               readonly node: number;
               readonly parent: number;
               readonly index: number;
               readonly kind: string;
-              readonly props: readonly Prop[];
+              readonly props: readonly Prop<T>[];
             }
           | { readonly tag: 'remove'; readonly node: number }
-          | { readonly tag: 'set'; readonly node: number; readonly props: readonly Prop[]; readonly removed: readonly string[] }
+          | { readonly tag: 'set'; readonly node: number; readonly props: readonly Prop<T>[]; readonly removed: readonly string[] }
           | { readonly tag: 'move'; readonly node: number; readonly index: number }
           | { readonly tag: 'commit' }
           | { readonly tag: 'repaint' }
@@ -226,6 +242,10 @@ module Erx
           if (!isUTF8(bytes)) refuse(reason);
           return bytes;
         }
+
+        /* A text the machine sends, as the client holds it. */
+        const machineText = (cursor: Cursor, width: 1 | 4, limit: number): MachineText =>
+          new MachineText(text(cursor, width, limit, 'bad value'));
 
         /* A status block, and the one a property that carries none has. */
         interface StatusBlock {
@@ -262,41 +282,58 @@ module Erx
           return { status, reporter, stopgap: stopgap ?? '', timeoutMs };
         }
 
-        /* A value of TYPE, bounded by the type and by what remains. */
-        function value(cursor: Cursor, type: PropertyType): Value | null {
-          const reason = 'bad value';
+        /*
+         * The value of TYPE when CARRIED, bounded by the type and by what remains,
+         * with the form that says its shape; a null value when not carried.
+         */
+        function value(cursor: Cursor, type: PropertyType, carried: boolean): FormValue<MachineText> {
           switch (type.form) {
-            case 'boolean': {
-              const byte = cursor.u8(reason);
-              if (byte > 1) refuse(reason);
-              return byte === 1;
-            }
-            case 'integer': {
-              /* The u32's two's-complement value: | 0 reads it as a signed 32-bit integer. */
-              const integer = cursor.u32(reason) | 0;
-              if (integer < type.minimum || integer > type.maximum) refuse(reason);
-              return integer;
-            }
+            case 'boolean':
+              return { form: type.form, value: carried ? readBoolean(cursor, 'bad value') : null };
+            case 'integer':
+              return { form: type.form, value: carried ? readInteger(cursor, type) : null };
             case 'enum':
             case 'image':
-              return type.members?.get(cursor.u8(reason)) ?? refuse(reason);
+              return { form: type.form, value: carried ? (type.members?.get(cursor.u8('bad value')) ?? refuse('bad value')) : null };
             case 'text':
-              return text(cursor, 4, type.limit, reason);
-            case 'bytes': {
-              const length = cursor.u32(reason);
-              if (length > type.limit) refuse(reason);
-              return cursor.take(length, reason);
-            }
-            case 'list': {
-              const count = cursor.u16(reason);
-              if (count > type.limit) refuse(reason);
-              return Array.from({ length: count }, () => text(cursor, 4, type.elementLimit, reason));
-            }
+              return { form: type.form, value: carried ? machineText(cursor, 4, type.limit) : null };
+            case 'bytes':
+              return { form: type.form, value: carried ? readBytes(cursor, type) : null };
+            case 'list':
+              return { form: type.form, value: carried ? readList(cursor, type) : null };
             case 'event':
-              return null;
+              return { form: type.form, value: null };
             case 'presentation':
-              return { name: text(cursor, 1, NAME_MAX, reason), text: text(cursor, 4, PRESENT_MAX, reason) };
+              return {
+                form: type.form,
+                value: carried ? { name: machineText(cursor, 1, NAME_MAX), text: machineText(cursor, 4, PRESENT_MAX) } : null,
+              };
           }
+        }
+
+        function readBoolean(cursor: Cursor, reason: string): boolean {
+          const byte = cursor.u8(reason);
+          if (byte > 1) refuse(reason);
+          return byte === 1;
+        }
+
+        function readInteger(cursor: Cursor, type: PropertyType): number {
+          /* The u32's two's-complement value: | 0 reads it as a signed 32-bit integer. */
+          const integer = cursor.u32('bad value') | 0;
+          if (integer < type.minimum || integer > type.maximum) refuse('bad value');
+          return integer;
+        }
+
+        function readBytes(cursor: Cursor, type: PropertyType): Uint8Array {
+          const length = cursor.u32('bad value');
+          if (length > type.limit) refuse('bad value');
+          return cursor.take(length, 'bad value');
+        }
+
+        function readList(cursor: Cursor, type: PropertyType): MachineText[] {
+          const count = cursor.u16('bad value');
+          if (count > type.limit) refuse('bad value');
+          return Array.from({ length: count }, () => machineText(cursor, 4, type.elementLimit));
         }
 
         /* A node's number, never 0. */
@@ -317,7 +354,7 @@ module Erx
             seen.add(number);
             const block = type.status ? statusBlock(cursor) : OWN_OK;
             const carried = block.status === 'ok' || block.status === 'partial';
-            return { name: type.name, number, form: type.form, ...block, value: carried ? value(cursor, type) : null };
+            return { name: type.name, number, ...block, ...value(cursor, type, carried) };
           });
         }
 
@@ -423,7 +460,7 @@ module Erx
         const EVENT_VALUE_AT = 4 + 1 + 4 + 1 + 1;
         const PIXELS_AT = 4 + 1 + 4 * 2;
 
-        function isUnsigned(value: number, bits: 16 | 32): boolean {
+        function isUnsigned(value: number, bits: number): boolean {
           return Number.isInteger(value) && value >= 0 && value < 2 ** bits;
         }
 
@@ -496,6 +533,275 @@ module Erx
           view.setUint16(11, height, true);
           bytes.set(pixels, PIXELS_AT);
           return bytes;
+        }
+
+        /*
+         * The bytes of a record of the server's, its length word included, as the
+         * widget server writes it; null when the record breaks a rule a reader
+         * checks or is longer than OP_MAX. Its properties and removals are written
+         * in the order given, and its texts are the bytes themselves.
+         */
+        export function writeRecord(record: UIRecord<Uint8Array>): Uint8Array | null {
+          const writer = new Writer(4 + OP_MAX, 'too long');
+          try {
+            writer.integer(4, 0);
+            writeFields(writer, record);
+            const bytes = writer.written();
+            new DataView(bytes.buffer).setUint32(0, bytes.length - 4, true);
+            return bytes;
+          } catch (error) {
+            if (error instanceof Refusal) return null;
+            throw error;
+          }
+        }
+
+        function writeFields(writer: Writer, record: UIRecord<Uint8Array>): void {
+          writer.integer(1, TAG[record.tag]);
+          switch (record.tag) {
+            case 'insert':
+              writeNode(writer, record.node);
+              writeUnsigned(writer, 4, record.parent);
+              writeUnsigned(writer, 2, record.index);
+              writer.integer(1, KINDS.get(record.kind) ?? refuse('unknown kind'));
+              writeProps(writer, record.props);
+              return;
+            case 'remove':
+              writeNode(writer, record.node);
+              return;
+            case 'set':
+              writeNode(writer, record.node);
+              writeProps(writer, record.props);
+              writeRemoved(writer, record.removed);
+              return;
+            case 'move':
+              writeNode(writer, record.node);
+              writeUnsigned(writer, 2, record.index);
+              return;
+            case 'commit':
+            case 'repaint':
+              return;
+            case 'screen':
+              writeUnsigned(writer, 2, record.width);
+              writeUnsigned(writer, 2, record.height);
+              writeUnsigned(writer, 4, record.chan);
+              return;
+            case 'input':
+              writeInput(writer, record.input);
+              return;
+          }
+        }
+
+        function writeUnsigned(writer: Writer, bytes: 1 | 2 | 4, value: number): void {
+          if (!isUnsigned(value, 8 * bytes)) refuse('bad value');
+          writer.integer(bytes, value);
+        }
+
+        function writeNode(writer: Writer, node: number): void {
+          if (node === 0) refuse('bad node');
+          writeUnsigned(writer, 4, node);
+        }
+
+        /* A u8 count and each property: a known name of its number and form, once, and its value. */
+        function writeProps(writer: Writer, props: readonly Prop<Uint8Array>[]): void {
+          if (props.length > PROPERTY_MAX) refuse('too many properties');
+          writer.integer(1, props.length);
+          const seen = new Set<number>();
+          for (const prop of props) {
+            const type = PROPERTIES.get(prop.name) ?? refuse('unknown property');
+            if (type.number !== prop.number || type.form !== prop.form) refuse('unknown property');
+            if (seen.has(type.number)) refuse('property twice');
+            seen.add(type.number);
+            writer.integer(1, type.number);
+            if (type.status) writeStatus(writer, prop);
+            else if (prop.status !== 'ok' || prop.reporter !== 'own' || prop.stopgap !== '' || prop.timeoutMs !== 0) refuse('bad status');
+            const carried = prop.status === 'ok' || prop.status === 'partial';
+            if (prop.form !== 'event' && carried !== (prop.value !== null)) refuse('bad value');
+            if (carried) writeValue(writer, type, prop);
+          }
+        }
+
+        /* The status block, under the rules statusBlock() reads it by. */
+        function writeStatus(writer: Writer, prop: Prop<Uint8Array>): void {
+          const status = STATUSES.indexOf(prop.status);
+          const reporter = REPORTERS.indexOf(prop.reporter);
+          if (status < 0 || reporter < 0 || (prop.reporter === 'own' && prop.status !== 'ok')) refuse('bad status');
+          if (!isUnsigned(prop.timeoutMs, 32) || (prop.status === 'timeout') !== (prop.timeoutMs !== 0)) refuse('bad status');
+          const named = STOPGAPS.some((name) => name === prop.stopgap);
+          if (prop.reporter === 'stopgap' ? !named : prop.stopgap !== '') refuse('bad status');
+          const stopgap = new TextEncoder().encode(prop.stopgap);
+          writer.integer(1, status);
+          writer.integer(1, reporter);
+          writer.integer(1, stopgap.length);
+          writer.put(stopgap);
+          writer.integer(4, prop.timeoutMs);
+        }
+
+        function writeValue(writer: Writer, type: PropertyType, prop: Prop<Uint8Array>): void {
+          const reason = 'bad value';
+          switch (prop.form) {
+            case 'boolean':
+              if (typeof prop.value !== 'boolean') refuse(reason);
+              writer.integer(1, prop.value ? 1 : 0);
+              return;
+            case 'integer':
+              if (prop.value === null || !Number.isInteger(prop.value) || prop.value < type.minimum || prop.value > type.maximum) refuse(reason);
+              writer.integer(4, prop.value);
+              return;
+            case 'enum':
+            case 'image': {
+              const member = [...(type.members ?? [])].find(([, name]) => name === prop.value);
+              writer.integer(1, member?.[0] ?? refuse(reason));
+              return;
+            }
+            case 'text':
+              writeText(writer, 4, type.limit, prop.value);
+              return;
+            case 'bytes':
+              if (prop.value === null || prop.value.length > type.limit) refuse(reason);
+              writer.sized(prop.value);
+              return;
+            case 'list':
+              if (prop.value === null || prop.value.length > type.limit) refuse(reason);
+              writer.integer(2, prop.value.length);
+              for (const entry of prop.value) writeText(writer, 4, type.elementLimit, entry);
+              return;
+            case 'event':
+              return;
+            case 'presentation':
+              if (prop.value === null) refuse(reason);
+              writeText(writer, 1, NAME_MAX, prop.value.name);
+              writeText(writer, 4, PRESENT_MAX, prop.value.text);
+              return;
+          }
+        }
+
+        /* A length of WIDTH bytes and the bytes: valid UTF-8 of at most LIMIT bytes. */
+        function writeText(writer: Writer, width: 1 | 4, limit: number, bytes: Uint8Array | null): void {
+          if (bytes === null || bytes.length > limit || !isUTF8(bytes)) refuse('bad value');
+          writer.integer(width, bytes.length);
+          writer.put(bytes);
+        }
+
+        /* A set's removals: a u8 count of known property names, each once. */
+        function writeRemoved(writer: Writer, removed: readonly string[]): void {
+          if (removed.length > PROPERTY_MAX) refuse('too many properties');
+          writer.integer(1, removed.length);
+          const seen = new Set<number>();
+          for (const name of removed) {
+            const number = PROPERTIES.get(name)?.number ?? refuse('unknown property');
+            if (seen.has(number)) refuse('property twice');
+            seen.add(number);
+            writer.integer(1, number);
+          }
+        }
+
+        function writeInput(writer: Writer, input: Input): void {
+          switch (input.form) {
+            case 'pointer':
+              writer.integer(1, INPUT.pointer);
+              writeUnsigned(writer, 2, input.x);
+              writeUnsigned(writer, 2, input.y);
+              writeUnsigned(writer, 1, input.buttons);
+              return;
+            case 'key': {
+              const rune = input.rune;
+              if (rune !== null && (!isUnsigned(rune, 32) || rune > 0x10ffff || (rune >= 0xd800 && rune <= 0xdfff))) refuse('bad rune');
+              writer.integer(1, INPUT.key);
+              writer.integer(1, input.down ? 1 : 0);
+              writeUnsigned(writer, 2, input.code);
+              writer.integer(4, rune ?? 0xffffffff);
+              return;
+            }
+            case 'wheel':
+              if (!Number.isInteger(input.steps) || input.steps < -128 || input.steps > 127) refuse('bad value');
+              writer.integer(1, INPUT.wheel);
+              writer.integer(1, input.steps);
+              return;
+          }
+        }
+
+        /* A record a renderer writes back: an event, or a pixels report. */
+        export type Report =
+          | { readonly tag: 'event'; readonly node: number; readonly event: string; readonly detail: Detail }
+          | {
+              readonly tag: 'pixels';
+              readonly x: number;
+              readonly y: number;
+              readonly width: number;
+              readonly height: number;
+              readonly pixels: Uint8Array;
+            };
+
+        /* What readReport() makes of a buffer's first record, as ReadResult says of read(). */
+        export type ReportResult =
+          | { readonly result: 'ok'; readonly report: Report; readonly used: number }
+          | { readonly result: 'more' }
+          | { readonly result: 'bad'; readonly reason: string };
+
+        /*
+         * Read the first record of BUFFER that a renderer writes back, as
+         * erx_ui_wire:read/1 does, with its reasons in words. A pixels report is at
+         * most PIXELS_MAX long and any other record OP_MAX, refused as soon as its
+         * tag is in, so a caller never buffers more than PIXELS_MAX + 4 bytes. The
+         * pixels are framed by the length alone; their count and rectangle are for
+         * the caller, which knows the target, to check.
+         */
+        export function readReport(buffer: Uint8Array): ReportResult {
+          if (buffer.length < 4) return { result: 'more' };
+          const size = u32At(buffer, 0);
+          if (size === 0 || size > PIXELS_MAX) return { result: 'bad', reason: 'bad length' };
+          if (buffer.length < 5) return { result: 'more' };
+          const tag = buffer[4] as number;
+          if (tag !== TAG.pixels && size > OP_MAX) return { result: 'bad', reason: 'bad length' };
+          if (size > buffer.length - 4) return { result: 'more' };
+          try {
+            return { result: 'ok', report: report(new Cursor(buffer, 5, 4 + size), tag), used: 4 + size };
+          } catch (error) {
+            if (error instanceof Refusal) return { result: 'bad', reason: error.reason };
+            throw error;
+          }
+        }
+
+        function report(cursor: Cursor, tag: number): Report {
+          switch (tag) {
+            case TAG.event: {
+              const node = cursor.u32('bad body');
+              const type = BY_NUMBER.get(cursor.u8('bad body'));
+              if (node === 0) refuse('bad node');
+              if (type?.form !== 'event') refuse('bad event');
+              return { tag: 'event', node, event: type.name, detail: detail(cursor) };
+            }
+            case TAG.pixels: {
+              const reason = 'bad body';
+              const [x, y, width, height] = [cursor.u16(reason), cursor.u16(reason), cursor.u16(reason), cursor.u16(reason)];
+              return { tag: 'pixels', x, y, width, height, pixels: cursor.take(cursor.left, reason) };
+            }
+            default:
+              return refuse('bad tag');
+          }
+        }
+
+        /* An event's detail, which ends the record; a text is valid UTF-8 bounded by the record. */
+        function detail(cursor: Cursor): Detail {
+          const reason = 'bad detail';
+          const tag = DETAILS[cursor.u8(reason)] ?? refuse(reason);
+          let read: Detail;
+          switch (tag) {
+            case 'none':
+              read = { tag };
+              break;
+            case 'boolean':
+              read = { tag, value: readBoolean(cursor, reason) };
+              break;
+            case 'integer':
+              read = { tag, value: cursor.u32(reason) | 0 };
+              break;
+            case 'text':
+              read = { tag, value: text(cursor, 4, OP_MAX, reason) };
+              break;
+          }
+          if (cursor.left !== 0) refuse(reason);
+          return read;
         }
       TS
     end

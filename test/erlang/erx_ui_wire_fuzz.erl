@@ -1,11 +1,12 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
-%% The fuzz target of erx_ui_wire:read/1, the reader of what a renderer
-%% sub-space writes to the widget server (docs/design-abi.md, "Widget format").
-%% Each round encodes a random stream of events and pixels reports, which must
-%% read back to the same records, then breaks it (bytes flipped, cut, spliced
-%% or replaced by random bytes), which must read as records, more or an
-%% error, and never raise.
+%% The fuzz target of erx_ui_wire's two readers (docs/design-abi.md, "Widget
+%% format"): read/1, of what a renderer sub-space writes to the widget
+%% server, and read_server/1, of what the server writes to a renderer. Each
+%% round encodes a random stream of one direction's records, which must read
+%% back to the same records, then breaks it (bytes flipped, cut, spliced or
+%% replaced by random bytes), which must read as records, more or an error,
+%% and never raise.
 -module(erx_ui_wire_fuzz).
 -export([run/1]).
 
@@ -24,13 +25,55 @@ run([Seed]) ->
     end.
 
 round() ->
-    Records = [record() || _ <- lists:seq(1, rand:uniform(4))],
+    {Read, Make} = pick([{fun read_all/2, fun record/0}, {fun read_all_server/2, fun server_record/0}]),
+    Records = [Make() || _ <- lists:seq(1, rand:uniform(4))],
     Stream = iolist_to_binary([erx_ui_wire:encode(Record, fun(_, _) -> <<>> end) || Record <- Records]),
-    case read_all(Stream, []) of
+    case Read(Stream, []) of
         {Records, <<>>} -> ok;
         Other -> error({round_trip, Records, Other})
     end,
-    read_all(break(Stream), []).
+    Read(break(Stream), []).
+
+%% Server records whose every value reads back as written: no presentation,
+%% whose name reads as a binary, no error, whose reason the form drops, and
+%% removals in number order.
+server_record() ->
+    Node = rand:uniform(16#ffffffff),
+    Props = maps:from_list([Prop || Prop <- [{text, status(text())}, {visible, pick([true, false])},
+                                             {width, rand:uniform(16385) - 1}, {on_click, true}],
+                                    rand:uniform(2) =:= 1]),
+    pick([{insert, Node, rand:uniform(16#100000000) - 1, u16(), pick([label, button, column]), Props},
+          {set, Node, Props, pick([[], [width], [width, visible]])},
+          {remove, Node}, {move, Node, u16()}, commit, repaint,
+          {screen, u16(), u16(), rand:uniform(16#100000000) - 1},
+          {input, {pointer, u16(), u16(), rand:uniform(256) - 1}},
+          {input, {key, pick([down, up]), u16(), pick([none, $a, 16#10ffff])}},
+          {input, {wheel, rand:uniform(256) - 129}}]).
+
+status(Value) ->
+    pick([Value, {kernel, {ok, Value}}, {{stopgap, liberx_pool}, {partial, Value}}, {service, unknown},
+          {runtime, unsupported}, {kernel, {timeout, rand:uniform(16#ffffffff)}}]).
+
+text() -> unicode:characters_to_binary([pick([$a, 0, 16#e9, 16#1f600]) || _ <- lists:seq(1, rand:uniform(20))]).
+
+-define(SERVER_TAGS, [insert, set, remove, move, commit, repaint, screen, input]).
+-define(REFUSALS, [bad_length, unknown_tag, short_record, bytes_left_over, bad_node, unknown_kind, unknown_property,
+                   property_twice, too_many_properties, bad_status, bad_value, unknown_input_form, bad_key_direction,
+                   bad_rune]).
+
+%% Every result of read_server/1 is a server record, more or one of its
+%% reasons; a record consumes bytes, so the walk ends.
+read_all_server(Bytes, Acc) ->
+    case erx_ui_wire:read_server(Bytes) of
+        {ok, Record, Rest} when byte_size(Rest) < byte_size(Bytes) ->
+            Tag = case Record of _ when is_atom(Record) -> Record; _ -> element(1, Record) end,
+            true = lists:member(Tag, ?SERVER_TAGS),
+            read_all_server(Rest, [Record | Acc]);
+        more -> {lists:reverse(Acc), Bytes};
+        {error, Reason} ->
+            true = lists:member(Reason, ?REFUSALS),
+            {lists:reverse(Acc), {error, Reason}}
+    end.
 
 record() ->
     case rand:uniform(3) of
@@ -39,8 +82,7 @@ record() ->
     end.
 
 detail() ->
-    pick([none, true, false, rand:uniform(16#100000000) - 16#80000001,
-          unicode:characters_to_binary([pick([$a, 0, 16#e9, 16#1f600]) || _ <- lists:seq(1, rand:uniform(20))])]).
+    pick([none, true, false, rand:uniform(16#100000000) - 16#80000001, text()]).
 
 break(Stream) ->
     Size = byte_size(Stream),

@@ -1,11 +1,13 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 %% The EUnit cases of erx_ui_wire, ui.txt's binary form, generated from
-%% abi/formats/ui.txt, and corpus/3, which writes the parity corpus that
-%% test/host/erx_ui_wire_test.rb feeds to the generated C reader.
+%% abi/formats/ui.txt; corpus/3, which writes the parity corpus that
+%% test/host/erx_ui_wire_test.rb feeds to the generated Erlang, C and
+%% TypeScript readers; and read_each/2 and read_corpus/2, the Erlang side of
+%% that test's other comparisons.
 -module(erx_ui_wire_tests).
 -include_lib("eunit/include/eunit.hrl").
--export([corpus/3, read_corpus/2, present/2]).
+-export([corpus/3, read_each/2, read_corpus/2, present/2]).
 
 %% The canonical text a test stands in for erx_present:text/2.
 present(_Type, Value) -> iolist_to_binary(io_lib:format("~0p", [Value])).
@@ -57,6 +59,71 @@ key_is_never_written_test() ->
     ?assertEqual(encode({insert, 4, 0, 0, label, #{}}), encode({insert, 4, 0, 0, label, #{key => k}})),
     ?assertEqual(<<9:32/little, 3, 4:32/little, 0, 2, 2, 11>>, encode({set, 4, #{}, [text, key, width]})).
 
+%% A server record reads back as what the binary form carries of it.
+server_records_read_back_test() ->
+    Records = fixed() ++
+        [{insert, 3, 0, 2, input, #{key => k, text => <<"caf", 16#e9/utf8>>, secret => true, on_submit => {app, term}}},
+         {insert, 4, 3, 0, label, #{present => {group, 7}, text => {kernel, {timeout, 30}}}},
+         {insert, 5, 3, 1, label, #{text => {{stopgap, liberx_pool}, {error, gone}}, present => {service, unknown}}},
+         {set, 4, #{text => {runtime, {partial, <<"p">>}}, visible => false}, [width, key, text]}],
+    Stream = iolist_to_binary([encode(Record) || Record <- Records]),
+    ?assertEqual([meaning(Record) || Record <- Records], read_all_server(Stream)).
+
+every_strict_prefix_of_a_server_record_is_more_test() ->
+    Bytes = encode({insert, 9, 1, 0, label, #{text => <<"hello">>}}),
+    [?assertEqual(more, erx_ui_wire:read_server(binary:part(Bytes, 0, N))) || N <- lists:seq(0, byte_size(Bytes) - 1)].
+
+%% test/host/erx_ui_wire_test.rb checks every reason against the C and
+%% TypeScript readers; these are the ones only the Erlang reader's clauses
+%% decide apart from the cursor's reads.
+server_refusals_test_() ->
+    Read = fun(Body) -> erx_ui_wire:read_server(frame(Body)) end,
+    [?_assertEqual({error, bad_length}, erx_ui_wire:read_server(<<0:32, 5>>)),
+     ?_assertEqual({error, bad_length}, erx_ui_wire:read_server(<<65025:32/little, 1>>)),
+     ?_assertEqual({error, unknown_tag}, Read(<<6, 1:32/little, 24, 0>>)),
+     ?_assertEqual({error, unknown_tag}, Read(<<10, 0:64>>)),
+     ?_assertEqual({error, bytes_left_over}, Read(<<5, 0>>)),
+     ?_assertEqual({error, bad_node}, Read(<<2, 0:32>>)),
+     ?_assertEqual({error, unknown_property}, Read(<<3, 1:32/little, 0, 1, 1>>)),
+     ?_assertEqual({error, property_twice}, Read(<<3, 1:32/little, 0, 2, 2, 2>>)),
+     ?_assertEqual({error, short_record}, Read(<<8, 3>>)),
+     ?_assertEqual({error, bad_rune}, Read(<<8, 2, 1, 0:16, 16#110000:32/little>>))].
+
+read_all_server(<<>>) -> [];
+read_all_server(Bytes) ->
+    {ok, Record, Rest} = erx_ui_wire:read_server(Bytes),
+    [Record | read_all_server(Rest)].
+
+%% What a reader makes of Record's bytes: no key; an event property as true;
+%% a presentation as its type's name and canonical text; an error without its
+%% reason; a set's removals in number order, each once.
+meaning({insert, Node, Parent, Index, Kind, Props}) -> {insert, Node, Parent, Index, Kind, meaning(Props)};
+meaning({set, Node, Changed, Removed}) ->
+    Numbered = lists:usort([{number(Name), Name} || Name <- Removed, Name =/= key]),
+    {set, Node, meaning(Changed), [Name || {_Number, Name} <- Numbered]};
+meaning(Props) when is_map(Props) ->
+    #{Name => carried_meaning(Name, Value) || Name := Value <- Props, Name =/= key};
+meaning(Record) -> Record.
+
+carried_meaning(Name, {Reporter, Carried}) when Reporter =:= kernel; Reporter =:= service; Reporter =:= runtime;
+                                               element(1, Reporter) =:= stopgap ->
+    case Carried of
+        {ok, Value} -> {Reporter, {ok, value_meaning(Name, Value)}};
+        {partial, Value} -> {Reporter, {partial, value_meaning(Name, Value)}};
+        {error, _Reason} -> {Reporter, error};
+        _ -> {Reporter, Carried}
+    end;
+carried_meaning(Name, Value) -> value_meaning(Name, Value).
+
+value_meaning(Name, Value) ->
+    case erx_ui_schema:property(Name) of
+        #{type := event} -> true;
+        #{type := presentation} -> {Type, Of} = Value, {atom_to_binary(Type), present(Type, Of)};
+        _ -> Value
+    end.
+
+number(Name) -> maps:get(number, erx_ui_schema:property(Name)).
+
 read_all(<<>>) -> [];
 read_all(Bytes) ->
     {ok, Record, Rest} = erx_ui_wire:read(Bytes),
@@ -67,16 +134,43 @@ frame(Body) -> <<(byte_size(Body)):32/little, Body/binary>>.
 %% --- The parity corpus ------------------------------------------------------
 
 -doc """
-Writes Count random server records to StreamPath in the binary form and, to
-ExpectedPath, one line per record naming what it means: kinds, properties
-and enum members by name, texts in hex. The Ruby test maps the names to
-numbers through the ABI model and compares the lines with the C reader's.
+Writes random server records to StreamPath in the binary form, reads the
+stream back with erx_ui_wire:read_server/1, which must read what each
+record means, and writes to ReadPath one line per record naming what it
+read: kinds, properties and enum members by name, texts in hex. The Ruby
+test maps the names to numbers through the ABI model and compares the lines
+with the C and TypeScript readers'.
 """.
-corpus(StreamPath, ExpectedPath, Seed) ->
+corpus(StreamPath, ReadPath, Seed) ->
     rand:seed(exsss, {Seed, 3, 5}),
     Records = [record() || _ <- lists:seq(1, 600)] ++ fixed(),
-    ok = file:write_file(StreamPath, [encode(Record) || Record <- Records]),
-    ok = file:write_file(ExpectedPath, [[line(Record), $\n] || Record <- Records]).
+    Stream = iolist_to_binary([encode(Record) || Record <- Records]),
+    Read = read_all_server(Stream),
+    Read =:= [meaning(Record) || Record <- Records] orelse error(read_is_not_the_meaning),
+    ok = file:write_file(StreamPath, Stream),
+    ok = file:write_file(ReadPath, [[line(Record), $\n] || Record <- Read]).
+
+-doc """
+Reads the server records of StreamPath one by one as the C harness's "each"
+mode does and writes a line for each to OutPath: what it read, "refused:
+REASON" with the reason in the C reader's words, then on with the record
+after the bytes its length word counts, stopping at a bad length or at
+"more".
+""".
+read_each(StreamPath, OutPath) ->
+    {ok, Stream} = file:read_file(StreamPath),
+    ok = file:write_file(OutPath, [[Line, $\n] || Line <- each(Stream)]).
+
+each(<<>>) -> [];
+each(Bytes) ->
+    case erx_ui_wire:read_server(Bytes) of
+        {ok, Record, Rest} -> [line(Record) | each(Rest)];
+        more -> ["more"];
+        {error, bad_length} -> ["refused: bad length"];
+        {error, Reason} ->
+            <<Length:32/little, _:Length/binary, Rest/binary>> = Bytes,
+            ["refused: " ++ string:replace(atom_to_list(Reason), "_", " ", all) | each(Rest)]
+    end.
 
 fixed() ->
     [commit, repaint, {screen, 0, 0, 0}, {screen, 65535, 65535, 16#ffffffff},
@@ -120,7 +214,8 @@ value({enum, Atoms}) -> pick(Atoms);
 value({image, Atoms}) -> pick(Atoms);
 value(boolean) -> pick([true, false]);
 value(event) -> true;
-value(presentation) -> {pick([pid, port, binary]), rand:uniform(1000)}.
+%% A value of a presentation the inspection schema marks, within its id's type.
+value(presentation) -> {pick([group, budget, domain]), rand:uniform(16#ffffffff)}.
 
 text(Max) ->
     Characters = [pick([$a, $\n, 0, 16#e9, 16#20ac, 16#1f600]) || _ <- lists:seq(1, rand:uniform(12))],
@@ -129,7 +224,7 @@ text(Max) ->
 
 pick(List) -> lists:nth(rand:uniform(length(List)), List).
 
-%% One record's meaning, in the line format the C harness prints, with names
+%% One record as read, in the line format the C harness prints, with names
 %% where it prints numbers.
 line({insert, Node, Parent, Index, Kind, Props}) ->
     join(["insert", integer_to_list(Node), integer_to_list(Parent), integer_to_list(Index), atom_to_list(Kind)
@@ -171,7 +266,7 @@ carried({partial, V}, R, S, Type) -> lists:concat(["1,", R, ",", S, ",0:", value
 carried(unknown, R, S, _Type) -> lists:concat(["2,", R, ",", S, ",0:-"]);
 carried(unsupported, R, S, _Type) -> lists:concat(["3,", R, ",", S, ",0:-"]);
 carried({timeout, Ms}, R, S, _Type) -> lists:concat(["4,", R, ",", S, ",", Ms, ":-"]);
-carried({error, _}, R, S, _Type) -> lists:concat(["5,", R, ",", S, ",0:-"]).
+carried(error, R, S, _Type) -> lists:concat(["5,", R, ",", S, ",0:-"]).
 
 value_text({integer, _, _}, V) -> integer_to_list(V);
 value_text(boolean, V) -> atom_to_list(V);
@@ -181,7 +276,7 @@ value_text({text, _}, V) -> hex(V);
 value_text({bytes, _}, V) -> hex(V);
 value_text({list, _, _}, V) -> "[" ++ lists:join(",", [hex(T) || T <- V]) ++ "]";
 value_text(event, _V) -> "-";
-value_text(presentation, {Type, V}) -> hex(atom_to_binary(Type)) ++ ":" ++ hex(present(Type, V)).
+value_text(presentation, {Name, Text}) -> hex(Name) ++ ":" ++ hex(Text).
 
 -doc """
 Reads the stream of event and pixels records that the C harness's writer

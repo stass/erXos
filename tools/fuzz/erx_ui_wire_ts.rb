@@ -6,7 +6,7 @@ require 'open3'
 require 'optparse'
 require_relative '../lib/erx/web_stage'
 
-# The fuzz target of the web client's reader of ui.txt's binary form,
+# The fuzz target of the web client's readers of ui.txt's binary form,
 # web/src/generated/ui_wire.ts (docs/design-abi.md, "Widget format"):
 # web/test/ui_wire_fuzz.ts under Node, from the staged web tree.
 module ErxUIWireTSFuzz
