@@ -319,12 +319,22 @@ Error in process <0.150.0> with exit value:
   store, the capability table, budgets, the grace tracker and the page
   funnel, with host tests, fuzzing and a CBMC model-checking gate. None
   of it boots yet; the modified Fiasco is still the running kernel.
-* **Later tracks have host-built cores:** the screen's composition
-  (`erx_screen_core`) and the network stack's per-byte primitives, the
-  Internet checksum and SipHash-2-4, each tested on the host.
+* **The network stack is growing on the host** as an Erlang translation
+  of FreeBSD's logic (`erx_net`), tested there: Ethernet, ARP and one
+  neighbour table shared with IPv6 neighbour discovery and its duplicate
+  address detection, IPv4 and IPv6 with fragment reassembly, ICMP and
+  ICMPv6 with their rate limits, UDP, and for TCP its wire format, RTT,
+  MSS, initial sequence numbers, ECN, SACK blocks and the RFC 6675
+  scoreboard with duplicate-ACK loss detection. The Internet checksum and
+  SipHash-2-4 are its per-byte primitives. It does not reach a device
+  yet, and the TCP connection itself is still to come.
+* **The display has host-built parts:** the screen's composition
+  (`erx_screen_core`), the single-window policy with its reserved chord
+  and `wctl`, the widget model's deltas, and `ui.txt` with its generated
+  schema and binary form in Erlang and C. No screen shows it yet.
 * **Designed but not built yet:** the rest of erXos's own kernel, domains beyond the
-  system domain, the rest of the command shell, networking, the display
-  and web UI, and the POSIX-lite layer. Each has a design document in
+  system domain, the rest of the command shell, the network stack on a
+  device, the display on a screen, the web UI, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
 ## Correctness and testing
