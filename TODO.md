@@ -91,7 +91,11 @@ it; git history is the record of completed work.
   keeping the seven single-decision harnesses in the gate and moving
   `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
   of the gate's 2 h 33 min and check what the fuzz targets already check.
-  Until the owner decides, the gate runs all nine.
+  Until the owner decides, the gate runs all nine. In the parallel gate
+  on the Mac Pro (master 83221dc9) every harness verified except
+  `cap_slot_list`, which timed out at its 3,600 s deadline, as did its
+  mutants `insert-leaves-head-prev` and `clear-keeps-head`, so the gate
+  fails until that harness shrinks or leaves the gate.
 
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
