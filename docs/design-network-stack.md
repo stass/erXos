@@ -251,7 +251,7 @@ step(Event, State, Context) -> {State, [Action]}
 
 `Context` carries everything from outside the process the decision needs:
 the current monotonic time, the credit the transmit path offers, the
-route and link MTU, the published neighbour entry. The function reads no
+path's MTU and whether it has a route ([Framing](#framing)). The function reads no
 clock, no ETS table, no process and no entropy source; it returns the
 next state and a list of actions from a closed vocabulary (transmit
 these frames, deliver these bytes, reply to this caller, end). The loop
@@ -329,8 +329,9 @@ Because no state has two writers, there are no locks, no reference counts
 and no epochs: a connection's end is its process's exit, and a pid that
 names a dead process names nothing ([design-domains.md](design-domains.md#invariants), D1).
 Other processes read only what an owner publishes in an ETS table: the
-demultiplexing entries, each held by one socket, and the neighbour
-entries and routes, each written by its interface.
+demultiplexing entries, each held by one socket, and the interfaces,
+addresses, routes and neighbour entries, each written by its interface
+([What owners publish](#what-owners-publish)).
 
 ### Deadlines, not timers
 
@@ -526,6 +527,38 @@ restarted TCP connection would be a different connection: each is a
 so the grant's end ends it and its crash is reported to the grant. The
 grant traps exits, so a socket's crash ends only that socket.
 
+### What owners publish
+
+Every table one process writes and another reads is an ETS table of
+`erx_net_tables`, so a writer's crash loses no table, and every row has
+one writer, the owner of the state it shows:
+
+| Table | Row | Writer | Readers |
+| --- | --- | --- | --- |
+| `erx_net_ifs` | one per interface: its name, pid and credit, its driver's pid and credit, its link (`ethernet`, or `none` for loopback), its link-layer address, its MTU and its IPv6 hop limit | the interface | every sender; every interface's view |
+| `erx_net_addrs` | an address, `erx_net_addr:row()` | the interface that owns it | every interface's view; every sender's source choice; the grant's `addresses` check |
+| `erx_net_routes` | a route, `erx_net_route:row()` | the interface it leaves through | every sender |
+| `erx_net_neigh` | a neighbour the transmit path may address: interface, IP address, link-layer address, `fresh` or `stale`, and a hint count | the interface, from `erx_lltable`'s `publish` and `unpublish` actions | connections and datagram sockets |
+| `erx_net_demux` | a demultiplexing entry ([Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)) | `erx_net_bind`, for the socket that holds it | interfaces, through `classify/2` |
+| the secrets | the ISN, timestamp and cookie keys | `erx_net_tables` | interfaces; `erx_net_bind` |
+
+The first three are the stack's configuration, and one counter row of
+`erx_net_ifs`, the configuration generation, changes with them: a writer
+increments it after each change of its rows. A reader reads the
+generation first and the rows after it, and keeps what it builds from
+them, an interface's view or a sender's path, with that generation; it
+reads the rows again when the generation differs. A reader that raced a
+writer may build from rows newer than its generation, and then finds a
+newer generation at its next read, so every copy follows a change within
+one read, and nobody locks. The generation and a neighbour row's hint
+count are the only fields with several writers; like a credit counter,
+each carries a count and nothing else.
+
+Nothing else is published. The syncache and its cookies-only state, the
+neighbour tables themselves with their held packets, the reassembly
+queues and the rate limiters are the interface's own state, which only
+its own step reads.
+
 ### Receiving
 
 A TCP segment for an established connection whose owner is in client
@@ -543,7 +576,7 @@ domain D:
    interface process runs two pure functions of `erx_net_input` around
    one effect:
    ```erlang
-   classify(Frame, View) -> {owned, Pid, Credit, pending()}
+   classify(Input, View) -> {owned, [{Pid, Credit}, ...], pending()}
                           | {local, pending()}
                           | {drop, Reason}.
    verify(pending()) -> {ok, Item} | {drop, Reason}.
@@ -551,14 +584,12 @@ domain D:
    `classify/2` decodes the Ethernet and IP layers, reads the fields that
    choose a destination (the addresses, the protocol, the ports, and an
    ICMP message's type and the addresses and ports it quotes) and looks
-   them up in the interface's published view and the demultiplexing
-   table. Its result is `owned` for a segment, datagram or ICMP report
-   that belongs to a socket, `local` for what the interface itself
-   handles (ARP, neighbour discovery, ICMP echo, fragments, segments for
-   a listener, segments and datagrams that name no socket and may be
-   answered with a RST or a port unreachable), and `drop`. An owned frame
-   then takes one unit of its destination's credit, and a local frame one
-   token of the interface's ingress bucket
+   them up in the interface's view and the demultiplexing table
+   ([Classifying a frame](#classifying-a-frame)). Its result is `owned`
+   for a segment, datagram or ICMP report that belongs to sockets,
+   `local` for what the interface itself handles, and `drop`. An owned
+   frame then takes one unit of each destination's credit, and a local
+   frame one token of the interface's ingress bucket
    ([Untrusted input](#untrusted-input)); a frame that finds neither is
    dropped and counted. Only a frame that holds its unit or token reaches
    `verify/1`, which runs the decoder of the layer above IP, or ARP's:
@@ -604,6 +635,115 @@ domain D:
    `{tcp, Socket, Data}` sent to the owner in domain D: a frame on the
    lane from the network domain to D, decoded by D's funnel.
 
+### Classifying a frame
+
+`erx_net_input` is the receive decision of FreeBSD's `ether_demux`,
+`ip_input`, `ip6_input` and the pcb lookups of `tcp_input_with_port`,
+`udp_input` and the protocols' ICMP handlers, taken as far as choosing
+where a frame goes and no further. Its input is a frame from the driver,
+`{frame, Bytes}`, or a datagram reassembly rebuilt, `{reassembled,
+Family, LinkCast, Bytes}`. Its view is a map:
+
+```erlang
+-type view() :: #{link := ethernet | none,      % none: the loopback interface
+                  lladdr := <<_:48>> | none,
+                  ip4 := erx_ip4:view(),
+                  ip6 := erx_ip6:view(),
+                  groups := [<<_:128>>],         % IPv6 groups the interface joined
+                  dhcp := boolean(),             % configured for DHCP
+                  demux := fun((key()) -> [entry()])}.
+```
+
+Everything but `demux` is built by the interface core from its own state
+and its copy of the configuration ([What owners publish](#what-owners-publish)),
+and rebuilt when the configuration generation changes: `ip4` and `ip6`
+list every address of the stack, as the weak end-system model accepts
+any of them on any interface, except that link-local and
+interface-local IPv6 addresses are listed only for their own interface,
+each being its own zone (`erx_ip6:view()`); and `groups` are the all-nodes group and
+the solicited-node group of each of the interface's IPv6 addresses,
+tentative ones included, which it joins before duplicate address
+detection. `demux` is the lookup the loop passes: `ets:lookup/2` on the
+demultiplexing table in the interface, a map in the tests and the fuzz
+target. It is the only shared state `classify/2` reads, so its result is
+a function of the frame, the view and what the lookup answers.
+
+Classification runs in three steps:
+
+1. **Link.** On Ethernet, a frame to the interface's address is
+   `unicast`, one to the broadcast address `broadcast`, one with the group
+   bit `multicast`, and any other is dropped as `other_host`, as
+   `ether_input` drops it without promiscuous mode; an EtherType other
+   than IPv4, IPv6 and ARP is dropped as `ethertype`. On loopback the
+   frame is the IP packet, `unicast`, its family read from the version.
+2. **IP.** `erx_ip4:input/3` or `erx_ip6:input/4` with the view's `ip4`
+   or `ip6`. A drop is the verdict; a fragment and a parameter problem are
+   `local`. A datagram to an IPv6 group the interface has not joined, or
+   to any IPv4 group, is dropped as `not_member`: the core joins no IPv4
+   group, and `erx_mcast` adds sockets' memberships to the view. On a
+   DHCP interface a UDP datagram to port 68 is `local` whether the
+   decision accepted it or refused it as `not_ours` alone, which a
+   unicast offer to the address being offered is; on that refusal alone
+   `classify/2` decodes the header again with `erx_ip4_wire:decode/1` to
+   read the port.
+3. **Above IP.** Only the fields the table names are read:
+
+| Datagram | Fields read | Verdict |
+| --- | --- | --- |
+| TCP | ports | the connection's key: `owned`. Else a listener's key: `local` to a unicast destination, else dropped as `bcast_tcp` (`tcp_input.c:1288`). Else `local` if it may be answered (a RST), else dropped as `no_reply` |
+| UDP | ports | the holders of its keys, most specific first, reduced by `erx_udp:input/3`: `deliver` is `owned` by those sockets, `port_unreach` is `local`, `{drop, no_port}` the verdict |
+| ICMP or ICMPv6 error | type; the quoted protocol, addresses and ports | the quoted datagram, which the stack sent, read by `decode_quoted/1` with its source as the local end: a TCP connection's key or a connected UDP socket's key is `owned`; a TCP listener's key is `local`, for `syncache_unreach`; else dropped as `no_socket`, and a quote `decode_quoted/1` refuses is dropped with its reason |
+| ICMP echo or timestamp request, ICMPv6 echo request | type | `local` if it may be answered, else dropped as `no_reply` |
+| ICMP redirect; ICMPv6 router and neighbour messages, redirect, MLD query | type | `local` |
+| any other ICMP or ICMPv6 type | type | dropped as `icmp_type` |
+| ARP | none | `local` |
+| any other protocol | protocol | `local` if it may be answered, for the protocol unreachable `rip_input` sends (`raw_ip.c:410`) or the parameter problem at the next-header byte `rip6_input` sends (`raw_ip6.c:321-324`); else dropped as `no_reply`. IPv6's No Next Header is dropped as `no_next_header`, as `rip6_input` frees it unanswered |
+
+The keys of a datagram from `RemoteAddr:RemotePort` to
+`LocalAddr:LocalPort` are, most specific first,
+`{tcp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`,
+`{tcp_listen, Family, LocalAddr, LocalPort}` and
+`{tcp_listen, Family, any, LocalPort}`, and for UDP the same three with
+`udp`. An ICMP error's quote finds an owner by the first key alone, as
+`tcp_ctlinput` and `udp_common_ctlinput` look up only the full
+four-tuple; a TCP quote without one goes to the syncache, as
+`tcp_ctlinput` hands it to `syncache_unreach` (`tcp_subr.c:3128-3176`),
+but only when a listener's key exists, since only a listener's
+handshakes are in the syncache. `pending()` holds what `verify/1` and the item's consumer
+need: the link and IP records, the cast and whether the datagram may be
+answered, the bytes above IP with their pseudo-header's partial sum, and
+the listener's entry for a segment to a listener.
+
+**Room.** An owned frame takes one unit of each destination's credit; a
+destination without room is skipped and counted, and a frame no
+destination took is dropped as `no_room`. Which local frames spend a
+token is `erx_net_if_core:charge/2`'s decision, since only the core
+holds the neighbour tables: an ARP reply or a neighbour advertisement
+whose target the core is resolving is free, and every other local frame
+spends one, or is dropped as `no_token`.
+
+**Verification.** `verify/1` is a function of `pending()` alone: the
+TCP, UDP and ICMPv6 decoders with the pseudo-header's sum, the ICMP and
+ARP decoders over their bytes. A fragment, a parameter problem and a
+datagram of another protocol have nothing more to check and pass as
+they are. Its item is the record its consumer's step takes: for a
+connection `erx_tcp:segment()`, the decoded header, the ECN field of its
+IP header and its payload; for a datagram socket `{datagram, {SrcAddr,
+SrcPort}, DstAddr, Payload}`; for a socket an ICMP report, the decoded
+message with its quote; and for the interface the same records with the
+IP record and whether the datagram may be answered, which the core hands
+to `erx_arp`, `erx_nd6`, `erx_icmp4`, `erx_icmp6`, `erx_tcp_syncache`,
+`erx_udp`, its DHCP path or its reassembly. A frame owned by several
+sockets is verified once and its item delivered to each.
+
+**Order within a batch.** The interface classifies, reserves for and
+verifies its frames one at a time, and runs the core on a local frame
+before it classifies the next, so a key the core inserts, a connection
+the syncache completed, and a datagram reassembly completed are seen
+from the next frame on; owned items are sent at the end of the batch,
+grouped by destination. A segment that a connection in TIME-WAIT
+returns with `reinject` is looked up by the listener keys alone.
+
 ### Transmitting
 
 1. **Owner to connection.** `gen_tcp:send/2` in D sends `{send, Data}` to
@@ -611,26 +751,136 @@ domain D:
    network domain's funnel into a binary of the network domain.
 2. **Connection.** The step appends the binary to the send buffer, a queue
    of binaries, and runs output. Each segment's payload is a sub-binary
-   of the buffer. The connection encodes the TCP, IP and link headers into
-   one binary with `erx_net_frame`, using the route and the neighbour
-   entry it reads from ETS on every output pass, and computes the
-   checksum over the headers and payload with `erx_bytes:inet_csum/2`.
+   of the buffer. The connection encodes the TCP, IP and link headers
+   with `erx_net_frame` over its path and the next hop's neighbour row
+   ([Framing](#framing)), computing the checksum over the headers and
+   payload with `erx_bytes:inet_csum/2`.
 3. **Connection to driver.** All frames of the step go to the driver in
    one message against the driver's credit, each frame as its header
-   binary and its payload sub-binary.
+   binary and its payload sub-binaries.
 4. **Driver to device.** The driver posts each frame with
    `erx_device:post/4` as the segments `[{out, DeviceHeader}, {out,
    Headers}, {out, Payload}]`; the NIF lays them end to end in a pool
    buffer, the one per-byte copy of the transmit path.
 
-When the neighbour entry for the next hop is missing or incomplete, the
-frame goes to the interface process instead, which holds it while it
-resolves the address, at most 16 frames per neighbour as FreeBSD holds
-(`arp_maxhold`, `if_ether.c:114`; `nd6_maxqueuelen`, `nd6.c:125`), and
-sends it when the neighbour answers. When an entry is stale, the first
-transmitter to see it flips the entry's probe flag with
-`ets:update_counter/3` and alone sends the interface one hint, so the
-interface probes it as FreeBSD's `arpresolve` and `nd6_resolve` do.
+### Framing
+
+Every owner that sends IP, a connection, a datagram socket or an
+interface, frames through `erx_net_frame`, which translates the
+header-building and next-hop parts of `in_pcbladdr`, `ip_output`,
+`ip6_output`, `ether_output` and `arpresolve_addr`. It is pure; what it
+needs from the published tables reaches it as two values the caller
+reads: a path, built from the configuration, and the next hop's
+neighbour row.
+
+```erlang
+snapshot(Ifs, Addrs, Routes) -> snapshot().
+path(Dst, Opts, snapshot()) -> {ok, path()} | {error, enetunreach | eaddrnotavail}.
+    % Opts: src, scope (an interface), ttl or hlim, tos or tclass, flow
+tcp(path(), [erx_tcp:outgoing()], gen()) -> {[packet()], gen()}.
+udp(path(), Sport, Dport, iodata(), gen()) -> {ok, [packet()], gen()} | {error, emsgsize}.
+ip(path(), Proto, iodata(), gen()) -> {ok, [packet()], gen()} | {error, emsgsize}.
+address(path(), none | {LinkAddr, fresh | stale}, [packet()]) ->
+    {send, [frame()]} | {resolve, [packet()]}.
+link(Iface, LinkAddr, [packet()]) -> [frame()].
+```
+
+**The path** is everything about the way to one destination that does
+not change from packet to packet, with the configuration generation it
+was built at:
+
+* *Interface.* A destination that is an address of the stack leaves
+  through the loopback interface, as the loopback route FreeBSD adds for
+  each address sends it (`ifa_maintain_loopback_route`); any other takes
+  `erx_net_route:lookup/2`, or `lookup/3` for a scoped destination, and
+  no route is `enetunreach`, as `in_pcbladdr` refuses
+  (`in_pcb.c:1270`).
+* *Next hop and its link address.* The route's gateway, or the
+  destination when the route has none. On loopback there is no link
+  header; a broadcast destination takes the broadcast address, and a
+  multicast one its mapped address (`ETHER_MAP_IP_MULTICAST`,
+  `if_ether.c:620`, and its IPv6 twin), as `arpresolve_addr` gives them;
+  any other unicast next hop is addressed by its neighbour row.
+* *Source.* The one given, as `erx_net_bind` checked it when the socket
+  bound, or the one chosen: `erx_in6_src:select/4` for IPv6, and for IPv4 the
+  outgoing interface's address whose prefix holds the next hop, else its
+  first, as `in_pcbladdr` takes the route's interface address; no usable
+  address is `eaddrnotavail`.
+* *Header fields.* The MTU and the driver's and interface's pids and
+  credits from the interface's row; the hop limit, type of service or
+  traffic class and flow label from the caller's options, the hop limit
+  defaulting to the interface's, which router advertisements set for
+  IPv6, and 64 for IPv4.
+
+**Packets and frames.** `tcp/3`, `udp/5` and `ip/4` build IP packets,
+each `{Headers, Payload}`: the header bytes they build, joined into one
+binary, and the payload binaries as they were given, never joined or
+copied. `tcp/3` encodes each segment with `erx_tcp_wire:encode/3` over
+the path's pseudo-header sum and `erx_ip4:output/4` or `erx_ip6:output/4`
+with the segment's marks: its ECN field in the low bits of the type of
+service or traffic class, and don't-fragment as the segment says. A
+segment under don't-fragment always fits, since output sizes segments
+to the context's MTU, which is the path's, so `tcp/3` raises on one that
+does not; one without it is fragmented by `erx_ip4:output/4`. An IPv4
+datagram without don't-fragment takes its identification from the
+generator passed in, which is returned advanced: a datagram socket's
+own, the interface's own, and for a connection a second generator its
+loop splits from its initial one, since the control block's generator is
+the step's. `address/3` turns packets into frames, the link header put
+in front of their headers: with the path's fixed link address, or the
+row's when the next hop has one; with no row, the packets go to the
+interface instead (`resolve`). `link/3` is the same framing for the
+interface, over its own row, with the link address from its own table.
+
+**A connection's output pass** reads the published state at fixed
+points around its step:
+
+1. It reads the configuration generation and, when it differs from its
+   path's, reads the three configuration tables and builds the path
+   again; a path whose route has gone keeps that state with the
+   generation.
+2. When the path addresses its next hop by row, it reads that row.
+3. Its step's context holds the path's MTU, the free credit of where the
+   frames will go (the driver when the next hop is addressed, the
+   interface when it has no row), and the route's state: `ok`, or
+   `{error, ehostunreach}` when the path has no route, `ip_output`'s
+   error for it (`ip_output.c:493`). With that error output sends nothing
+   and takes `tcp_output`'s branch for it (`tcp_output.c:1709-1716`): the
+   retransmission timer runs as on loss, and past SYN-RECEIVED the error
+   is kept as the connection's soft error, which its timeout reports in
+   place of `etimedout`.
+4. It frames the step's segments with `tcp/3` and `address/3` and sends
+   the frames to the driver, or hands the packets to the interface as
+   `{resolve, NextHop, Src, Packets}`, each against the receiver's
+   credit.
+5. When the row was `stale`, it increments the row's hint count with
+   `ets:update_counter/3`; the one transmitter that gets 1 sends the
+   interface `{hint, NextHop}`, and the interface's next `publish` of the
+   row writes the count back to zero. A row deleted between the read and
+   the increment gives no hint.
+
+A datagram socket does the same per datagram, with a path kept per
+destination of a connected socket and built for each destination of an
+unconnected one. The interface frames its own packets (ICMP answers,
+RSTs, SYN-ACKs, neighbour discovery) with the same functions over the
+same configuration copy as its view, but resolves its next hops in its
+own tables instead of reading rows.
+
+**Resolution.** The interface hands each packet of a `resolve` to
+`erx_arp:resolve/5` or `erx_nd6:resolve/6`, which send it at once when
+the entry has meanwhile been resolved and otherwise hold it, at most 16
+per neighbour as FreeBSD holds (`arp_maxhold`, `if_ether.c:114`;
+`nd6_maxqueuelen`, `nd6.c:125`), the oldest dropped past that
+(`lltable_append_entry_queue`); their `{send, LinkAddr, Packets}` action
+becomes frames by `link/3`. Handing a packet to the interface counts as
+sending it, as `ether_output` reports success for a packet `arpresolve`
+holds (`if_ethersubr.c:350`), so TCP recovers a dropped one by
+retransmission. An ARP entry that is never answered is deleted with its
+packets after 20 s (`arpt_down`); a neighbour-discovery entry returns its
+oldest packet as `unreachable`, and the interface sends an ICMPv6
+address-unreachable error to that packet's source, an address of the
+stack, so the error crosses the loopback interface and `classify/2`
+hands it to the socket its quote names, as any ICMP error.
 
 ### Hops and copies
 
@@ -683,21 +933,32 @@ change afterwards.
 
 ```erlang
 -type event() ::
-      {segments, [erx_tcp_wire:segment()]}   % from the interface, in order
+      {segments, [segment()]}                % from the interface, in order
     | {user, erx_tcp_user:request()}         % connect, send, recv, close, ...
     | {expired, Now :: integer()}            % a timer hint
     | {icmp, erx_tcp_icmp:report()}          % unreachable, too big
     | {buffer, Kind :: snd | rcv, Bytes :: non_neg_integer()}.
 
 -type action() ::
-      {transmit, [erx_tcp_wire:outgoing()]}
+      {transmit, [outgoing()]}
     | {deliver, iodata()}
     | {notify, closed | {error, atom()} | {ready, [readiness()]}}
     | {reply, gen_server:reply_tag(), term()}
     | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
-    | {reinject, erx_tcp_wire:segment()}
+    | {reinject, segment()}
     | finish.
+
+-type segment() :: {#tcp{}, Payload :: binary(), IpEcn :: 0..3}.
+-type outgoing() :: {#tcp{}, #{ecn := 0..3, df := boolean()}, Payload :: [binary()]}.
 ```
+
+A segment carries the ECN field of the IP header it came in, which
+`erx_tcp_ecn` reads, and an outgoing segment the two IP header fields
+TCP decides per segment, as `tcp_output` sets them: the ECN field,
+ECT(0) on new data, and don't-fragment, set while path MTU discovery
+runs and the maximum segment is above `tcp_minmss`
+(`tcp_output.c:1487-1500`); `erx_net_frame` builds the rest of the IP
+header from the path.
 
 `erx_tcp:step/3` is the only entry. It dispatches the event to the module
 that translates the FreeBSD code for it, then runs output, as
@@ -810,8 +1071,10 @@ sender and receiver silly-window avoidance, window updates, zero-window
 probes, options on each segment (`tcp_addoptions`, `tcp_output.c:1794`),
 and, from the loss module, what to retransmit first. It takes the
 transmit credit from the context and never emits more frames than the
-credit allows. It produces abstract segments; `erx_net_frame` encodes
-them with the path's headers. The stack uses no segmentation offload.
+credit allows, sizes segments to the context's MTU, and with the
+context's `{error, ehostunreach}` sends nothing ([Framing](#framing)).
+It produces `outgoing()` segments; `erx_net_frame` encodes them with the
+path's headers. The stack uses no segmentation offload.
 
 ### Timers
 
@@ -1394,8 +1657,10 @@ keyed by the interface. `erx_net_addr` translates the address checks of
 `in.c` and `in6.c` (local, broadcast, scope). `erx_net_route` looks up
 the longest matching prefix over the published rows, a small table on a
 host; it is erXos's own code, since the stack needs nothing of FreeBSD's
-forwarding tables. A connection keeps its route and the route table's
-generation, and checks the generation on every output pass.
+forwarding tables. A sender keeps its path, built by `erx_net_frame`
+from the rows, with the configuration generation it was built at, and
+checks the generation on every output pass
+([What owners publish](#what-owners-publish), [Framing](#framing)).
 
 The network domain's configuration names each interface's mode:
 `static` with addresses, routes and name servers; `dhcp`, for which the
@@ -1508,8 +1773,8 @@ modules are marked P; process modules E.
 | `erx_tcp_hostcache` | `tcp_hostcache.c` | per-destination path values (an extension, [Scope](#scope)) | P |
 | `erx_mcast` | `in_mcast.c`, `igmp.c`, `in6_mcast.c`, `mld6.c` | group membership, IGMPv3 and MLDv2 (an extension) | P |
 | `erx_net_bind` | `in_pcb.c` (`in_pcbbind`, `:716`; `in_pcb_lport_dest`, `:756`; `in_pcbbind_avail`, `:912`; `in_pcbbind_setup`, `:1011`), `in6_pcb.c` | port choice, reuse rules, the claim funnel | P and the funnel |
-| `erx_net_input` | `ether_input`, `ip_input`, `ip6_input`, the pcb lookup of `tcp_input_with_port` and `udp_input` | classify one frame; verify it once it holds room | P |
-| `erx_net_frame` | the header-building parts of `ip_output`, `ip6_output`, `ether_output` | encode a frame | P |
+| `erx_net_input` | `ether_input`, `ether_demux`, `ip_input`, `ip6_input`, the pcb lookups of `tcp_input_with_port`, `udp_input`, `tcp_ctlinput` and `udp_common_ctlinput` | classify one frame against the interface's view; verify it once it holds room | P |
+| `erx_net_frame` | `in_pcbladdr`, the header-building and next-hop parts of `ip_output`, `ip6_output`, `ether_output`, `arpresolve_addr` | a destination's path from the configuration; packets; frames or a hand-over to the interface | P |
 | `erx_net_rand` | none; the role of `arc4random` | the keyed random generator each owner holds | P |
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
 | `erx_dhcp4_wire`, `erx_dhcp4_core` | `parse_options`, `parse_option_buffer`, `check_classless_option`, `res_hnok`, `check_search`, `option_as_string` of `sbin/dhclient`; RFC 2131, RFC 2132, RFC 3396, RFC 3442 | DHCP message codec; DHCP client state machine | P |
@@ -1686,17 +1951,20 @@ reservation and releases it when the socket exits, by whatever means.
 
 ### Ports and the demultiplexing table
 
-The demultiplexing table, in `erx_net_tables`, maps a key to the socket
-that receives for it and the socket's credit:
+The demultiplexing table, `erx_net_demux` in `erx_net_tables`, maps a
+key to the socket that receives for it, its entry `#{pid, credit}`:
 
 * `{tcp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`: a
   connection;
-* `{tcp_listen, Family, LocalAddr | any, LocalPort}`: a listener, with
-  its grant and its options for accepted connections;
-* `{udp, ...}`: a datagram socket, bound or connected.
+* `{tcp_listen, Family, LocalAddr | any, LocalPort}`: a listener, whose
+  entry also holds its grant and its options for accepted connections
+  (`erx_tcp_syncache:listener()`), and whose credit is its accept credit;
+* `{udp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`: a
+  connected datagram socket;
+* `{udp, Family, LocalAddr | any, LocalPort}`: a bound one.
 
 Lookup goes from the most specific key to the wildcard, as
-`in_pcblookup_hash` does. Every insertion goes through `erx_net_bind`,
+`in_pcblookup_hash` does ([Classifying a frame](#classifying-a-frame)). Every insertion goes through `erx_net_bind`,
 with `ets:insert_new/2`, so a key is held by exactly one socket by
 construction and a race between two binders is decided by ERTS. A
 chokepoint check fails the build on any other insertion into the table.
@@ -1971,6 +2239,10 @@ packet input.
 | a socket's owner exits | the socket, which monitors it | everything else | the socket: a connection sends FIN, or RST if `linger` is zero |
 | the grant ends (revocation, its domain ends) | its sockets, by the link: each connection sends RST and exits | other grants | the domain's sockets and registrations |
 | a client domain stops reading | its lane fills | other domains | that domain's connections slow, then drop, as TCP does |
+| a socket died and its entries are not yet deleted | nobody: `classify/2` finds the entry and the frame's message goes to a dead pid | everything else | the frames that arrive before its grant deletes the entries, as if dropped; a TCP peer retransmits and meets a RST once the entry is gone |
+| the configuration changed during a batch or between output passes | the next batch's view, the next pass's path | everything | nothing: frames classified or framed against the old copy behave as under FreeBSD's epoch, which lets a lookup finish against the table it started on |
+| a next hop does not answer resolution | the interface, which holds up to 16 packets for it | everything else | its held packets: dropped after 20 s for ARP, or the oldest returned as an ICMPv6 address-unreachable to the stack's own socket for neighbour discovery ([Framing](#framing)) |
+| a route goes away under a connection | the connection's next output pass | the connection, which sends nothing until a route returns | the connection, at its retransmission timeout: with `ehostunreach` once it has received a SYN, with `etimedout` in SYN-SENT |
 | `erx_net_tables` or a top-level child exceeds its restart intensity | the network domain's supervisor | nothing in the domain | every socket; owners' next calls get `{error, closed}` |
 
 A raising step is caught in two places, and in both the step's purity
@@ -2000,10 +2272,11 @@ client domain is affected beyond its sockets.
 | `{error, emfile}` | the grant's `sockets` limit is reached |
 | `{error, enobufs}` | a buffer reservation exceeds the grant's `buffers` limit |
 | `{error, eaddrinuse}` | the key is held, under FreeBSD's reuse rules |
-| `{error, eaddrnotavail}` | the local address is not the machine's, or no ephemeral port is free |
+| `{error, eaddrnotavail}` | the local address is not the machine's, no usable source address leaves through the route's interface, or no ephemeral port is free |
 | `{error, econnrefused}` | a RST answered the SYN |
 | `{error, etimedout}` | connection setup or retransmission exceeded FreeBSD's limits |
-| `{error, ehostunreach}`, `{error, enetunreach}` | no route, or an unreachable report in SYN-SENT |
+| `{error, enetunreach}` | `connect`, or a datagram sent without a local address, finds no route (`in_pcbladdr`) |
+| `{error, ehostunreach}` | a datagram's route has gone (`ip_output`); a synchronized connection's soft error at its timeout; an unreachable report in SYN-SENT |
 | `{error, econnreset}` | a RST in a synchronized state, under `show_econnreset` as on stock |
 | `{error, closed}` | the socket is closed, as on stock |
 | `{error, timeout}` | an Erlang call's own timeout, as on stock |
@@ -2075,8 +2348,7 @@ test must catch, kept as a fixture, which proves the code under test ran.
 One fuzz target per decoder, in `test/erlang/*_fuzz.erl`, run by `make
 check-fuzz`: Ethernet, ARP, IPv4 with options, IPv6 with extension
 headers, ICMP, ICMPv6 with neighbour-discovery options, UDP, TCP with
-options, DHCP, epmd's requests, `erx_net_input:classify/2` and
-`verify/1` over whole frames, the packet-mode framing over random
+options, DHCP, epmd's requests, the packet-mode framing over random
 streams (`decode_packet` over every mode the options offer), and the
 socket protocol's requests through the generated validators. Each
 target checks that the decoder never raises; that encode then decode
@@ -2140,6 +2412,60 @@ nonce; and a step that takes a random value from `rand:uniform/1`
 instead of its generator, which the first property must catch and the
 build check below must refuse; and a `split/1` that gives the child the
 parent's key and counter, which the fourth must catch.
+
+### Classification and framing
+
+The fuzz target of `erx_net_input` generates whole frames, Ethernet and
+loopback, IPv4 with options and IPv6 with extension headers and
+fragments, carrying TCP, UDP, ICMP and ICMPv6 errors with their quotes,
+echo requests, neighbour messages, ARP and other protocols, with lengths
+biased to the edges and link destinations of each cast; and a view of
+random addresses, groups and DHCP flag, with a demultiplexing map whose
+keys are drawn mostly from the frame's own fields, so that lookups hit.
+It runs `classify/2` on each frame and `verify/1` on what it keeps, and
+checks that:
+
+* neither raises, and every verdict and reason is of the closed sets
+  [Classifying a frame](#classifying-a-frame) lists;
+* the verdict, its destinations and its reason agree with a reference
+  judge written from that section's table alone, over `pkt`'s decoding
+  of the frame and the same map;
+* changing the checksum of the layer above IP, or any byte above IP that
+  the table does not name, never changes the verdict of `classify/2`,
+  and changes the result of `verify/1` only to a drop for its sum.
+
+*Seeded failures:* a classifier that looks a UDP datagram up by its port
+alone, which the judge must catch on a frame to a socket bound to another
+address; one that keeps a TCP segment to a broadcast destination for a
+listener, which the judge must catch; and one that reads a segment's RST
+flag to drop it before verification, which the third property must catch
+when the flag is flipped.
+
+`erx_net_frame`'s tests run on fixed configurations:
+
+* `path/3` takes the gateway of a route that has one and the destination
+  otherwise, the longest match across two interfaces, the loopback
+  interface for an address of the stack, the zone's interface for a
+  scoped destination, and refuses with `enetunreach` and `eaddrnotavail`
+  where the section says;
+* every frame `tcp/3` and `address/3` make decodes, through the codecs
+  with their checksums checked, back to the segment's header and payload
+  with its ECN field and don't-fragment, an identification of zero under
+  don't-fragment and the generator's next draw otherwise, and the
+  payload binaries it was given; broadcast and multicast destinations
+  carry their link addresses; no row gives `resolve` with packets that
+  decode the same;
+* a connection's segments framed by `erx_net_frame` and classified by
+  the peer's `classify/2`, with a view holding the reversed key, come out
+  owned by the peer with the same `segment()`.
+
+*Seeded failures:* a path that addresses the destination although the
+route has a gateway; an encoder that writes the ECN field into the
+DSCP bits; and a multicast mapping that keeps 24 low bits instead of 23;
+each must fail its case. With the connection's loop, a host test of the
+hint rule has two transmitters see one stale row and checks that the
+interface gets one hint, and another after the row is published again;
+a loop that hints without the count must send two.
 
 ### Reassembly and buffers: properties against a byte map
 
@@ -2351,6 +2677,8 @@ Each with a test proving it catches a violation:
 
 * only `erx_tcp_seq` does sequence-space wrap arithmetic;
 * only `erx_net_bind` inserts into the demultiplexing table;
+* only `erx_net_if` writes the configuration and neighbour tables, the
+  hint count's increment by a transmitter excepted;
 * only `erx_net_credit` sends packet batches between stack processes;
 * a received segment, datagram or ICMP record is constructed only by its
   `*_wire` decoder; that the decoder checks the checksum before it

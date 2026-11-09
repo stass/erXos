@@ -431,9 +431,9 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   per byte of a fragmented UDP receive against one that handed over the
   fragments without the copy.
 * **[Low] network, ETS reads on every output pass**
-  ([design-network-stack.md](design-network-stack.md#transmitting)). A
-  connection reads its neighbour entry and the route table's generation
-  from ETS each time it outputs. Settled by the time per frame of a bulk
+  ([design-network-stack.md](design-network-stack.md#framing)). A
+  connection reads the configuration generation and its next hop's
+  neighbour row from ETS each time it outputs. Settled by the time per frame of a bulk
   send with and without caching them across a step's frames.
 * **[Medium] network, one interface process per interface as a ceiling**
   ([design-network-stack.md](design-network-stack.md#residuals)). Every
