@@ -794,9 +794,13 @@ presentation name or a text that is not valid UTF-8.
 The generator emits `erx_ui_wire`, the Erlang encoder of every message
 and reader of `event` and `pixels`, and `erx/ui_wire.h` with its
 freestanding C source, the reader of `insert` to `commit`, `screen`,
-`input` and `repaint` that a native renderer links. The C reader
-allocates nothing: texts point into the caller's buffer, and a list's
-texts are walked from its encoded bytes. The encoder takes the canonical
+`input` and `repaint` and the writer of `event` and `pixels` that a
+native renderer links. The C code allocates nothing: texts read point
+into the caller's buffer, and a list's texts are walked from its encoded
+bytes; a record is written into the caller's buffer, refused whole when
+it does not fit or breaks a rule a reader checks, and the writer's
+pixels may already sit where the record puts them, so a renderer can
+draw into the record itself. The encoder takes the canonical
 text of a `present` value as a function, `erx_present:text/2` in the
 widget server, so the generated module depends on no presentation table.
 In Erlang, `screen` is `{screen, Width, Height, Chan}`, `input` is

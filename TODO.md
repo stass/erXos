@@ -290,19 +290,14 @@ it; git history is the record of completed work.
   reserves those three names from presentations, which design-display.md should say.
 * [Medium] `tools/lib/erx/abi_emit_ui_wire.rb`, [Widget format](docs/design-abi.md#widget-format): the generator
   emits the Erlang encoder of every message with the reader of `event` and `pixels`, and the C reader of the
-  server's messages. Still missing from "a reader and a writer of both directions in Erlang, C and TypeScript"
-  (design-display.md, "Widget trees"): the C writer of `event` and `pixels`, which `erx-lvgl` needs; the
-  TypeScript reader and writer, which need a TypeScript emitter (shared with `web.txt`'s `proto.ts`) and a
-  `node --test` runner wired into `make check`, neither of which the tree has; and the Erlang reader of the
-  server's messages, so the parity test feeds one corpus to three readers instead of checking the Erlang
-  encoder against the C reader by meaning.
-* [Medium] `test/host/erx_ui_wire_test.rb`, [Widget format](docs/design-abi.md#widget-format): no test asserts a
-  refusal of the generated C reader (bad length, tag, kind, property, value, a property twice, the status-block
-  rules, node 0, a bad rune, invalid UTF-8, bytes left over, the event and pixels tags); the parity test feeds it
-  only what the Erlang encoder writes and the fuzz target checks only bounds. Add one table of valid records with
-  one field broken and the expected reason, read by both readers. Nor does a test encode each kind's largest
-  `insert`, every property at its bound, and compare its size with the generator's `insert_max`
-  (`tools/lib/erx/abi_ui.rb`'s sizes and the encoder's layout are two descriptions of one form).
+  server's messages with the writer of `event` and `pixels`. Still missing from "a reader and a writer of both
+  directions in Erlang, C and TypeScript" (design-display.md, "Widget trees"): the TypeScript reader and writer,
+  which need a TypeScript emitter (shared with `web.txt`'s `proto.ts`) and a `node --test` runner wired into
+  `make check`, neither of which the tree has; and the Erlang reader of the server's messages, so the parity
+  test feeds one corpus to three readers instead of checking the Erlang encoder against the C reader by meaning.
+* [Medium] `test/host/erx_ui_wire_test.rb`, [Widget format](docs/design-abi.md#widget-format): no test encodes
+  each kind's largest `insert`, every property at its bound, and compares its size with the generator's
+  `insert_max` (`tools/lib/erx/abi_ui.rb`'s sizes and the encoder's layout are two descriptions of one form).
 * [Low] `abi/formats/ui.txt` and the generated readers: a `present` name is checked only as UTF-8 of at most 63
   bytes, while design-abi.md calls it "a presentation name of the inspection schema"; once the inspection schema
   declares presentations (see the `erx_ui_schema` item above), generate the name table into both readers.

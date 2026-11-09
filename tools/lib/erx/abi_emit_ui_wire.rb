@@ -10,7 +10,8 @@ module Erx
     # Emits the readers and writers of ui.txt's binary form (docs/design-abi.md,
     # "Widget format") from the `ui` declaration: erx_ui_wire, the Erlang
     # encoder of every record and reader of a renderer's records, and the C
-    # reader of the server's records that a native renderer links. The tables
+    # reader of the server's records and writer of a renderer's that a native
+    # renderer links. The tables
     # (kinds, properties and their types, enums, image types, stopgaps) come from
     # the declaration; the framing and the per-form code are fixed text.
     module UIWireEmitter
@@ -26,6 +27,12 @@ module Erx
       # the sizes abi_ui.rb's insert bound counts.
       NAME_MAX = 63
       PRESENT_MAX = 4096
+      DETAILS = %w[none boolean integer text].freeze
+      # A pixels report's tag and rectangle, and an event's tag, node, number,
+      # detail tag and text length: what a record holds besides its pixels or
+      # its text.
+      PIXELS_FIELDS = 1 + 4 * 2
+      EVENT_TEXT_FIELDS = 1 + 4 + 1 + 1 + 4
 
       module_function
 
@@ -354,6 +361,9 @@ module Erx
           ['ERX_UI_VERSION', ui.version, "ui.txt's version"],
           ['ERX_UI_OP_MAX', ui.op_max, 'the longest record but a pixels report, its tag and fields'],
           ['ERX_UI_PIXELS_MAX', ui.pixels_max, 'the longest pixels report'],
+          ['ERX_UI_PIXELS_DATA_MAX', ui.pixels_max - PIXELS_FIELDS, 'the most pixel bytes one pixels report carries'],
+          ['ERX_UI_PIXELS_AT', 4 + PIXELS_FIELDS, "the offset of a pixels report's pixels, its length word counted"],
+          ['ERX_UI_EVENT_TEXT_MAX', ui.op_max - EVENT_TEXT_FIELDS, 'the longest text detail of an event'],
           ['ERX_UI_PROPERTIES', properties.size, 'the most properties one record carries, each at most once'],
           ['ERX_UI_RUNE_NONE', '0xffffffffU', "a key's rune when it has none"],
           ['ERX_UI_NAME_MAX', NAME_MAX, 'the longest stopgap or presentation name'],
@@ -370,7 +380,8 @@ module Erx
           ['A status block: the status and the reporter.',
            STATUSES.each_with_index.map { |name, index| [macro('ui_status', name), index] } +
              REPORTERS.each_with_index.map { |name, index| [macro('ui_reporter', name), index] }],
-          ["An input record's forms.", %w[pointer key wheel].each_with_index.map { |name, index| [macro('ui_input', name), index + 1] }]
+          ["An input record's forms.", %w[pointer key wheel].each_with_index.map { |name, index| [macro('ui_input', name), index + 1] }],
+          ["An event's detail.", DETAILS.each_with_index.map { |name, index| [macro('ui_detail', name), index] }]
         ]
         <<~C
           /*
@@ -382,10 +393,12 @@ module Erx
            * The reader of the records the widget server writes to a native
            * renderer in ui.txt's binary form (docs/design-abi.md, "Widget
            * format"): insert, remove, set, move, commit, screen, input and
-           * repaint. A record is a u32 length, which counts the tag and the
-           * fields, then a u8 tag and the fields; integers are little-endian.
-           * The reader allocates nothing and copies no bytes: texts point into
-           * the caller's buffer.
+           * repaint; and the writer of the records a renderer writes back:
+           * event and pixels. A record is a u32 length, which counts the tag
+           * and the fields, then a u8 tag and the fields; integers are
+           * little-endian. Neither allocates: the reader copies no bytes, and
+           * texts point into the caller's buffer; the writer writes into the
+           * caller's buffer and nothing past its size.
            */
 
           #ifndef ERX_UI_WIRE_H
@@ -404,7 +417,10 @@ module Erx
           	ERX_UI_READ_BAD		/* the record is refused; reason says why */
           } erx_ui_result_t;
 
-          /* Bytes inside the buffer handed to erx_ui_read(). */
+          /*
+           * A pointer and a length: bytes inside the buffer handed to
+           * erx_ui_read(), or bytes the caller hands a writer.
+           */
           typedef struct erx_ui_bytes erx_ui_bytes_t;
           struct erx_ui_bytes {
           	const uint8_t	*data;
@@ -483,6 +499,46 @@ module Erx
           bool erx_ui_list_next(const erx_ui_prop_t *list, uint32_t *cursor,
               erx_ui_bytes_t *text);
 
+          /*
+           * An event's detail: tag is an ERX_UI_DETAIL_* value; a boolean's 0 or 1,
+           * or an integer, is in integer; a text, valid UTF-8 of at most
+           * ERX_UI_EVENT_TEXT_MAX bytes, in text.
+           */
+          typedef struct erx_ui_detail erx_ui_detail_t;
+          struct erx_ui_detail {
+          	erx_ui_bytes_t	 text;
+          	int32_t		 integer;
+          	uint8_t		 tag;
+          };
+
+          /*
+           * Write an event record, its length word included, to buffer[0..size):
+           * that node's event property number event fired with detail, whose
+           * text must not overlap the buffer. Return
+           * the bytes written, or 0, with nothing written, when the record is
+           * refused: node 0, a number that is not an event property, a detail
+           * outside its tag's values or text that is not valid UTF-8, or a
+           * buffer too small for the record.
+           */
+          size_t erx_ui_write_event(uint8_t *buffer, size_t size, uint32_t node,
+              uint8_t event, const erx_ui_detail_t *detail);
+
+          /*
+           * Write a pixels record, its length word included, to buffer[0..size):
+           * the rectangle at x and y of width by height and its length bytes of
+           * pixels, at most ERX_UI_PIXELS_DATA_MAX. Whether length is the
+           * rectangle's size at the target's depth is for the reader to check.
+           * Pixels must not overlap the buffer, except that they may already sit
+           * at buffer + ERX_UI_PIXELS_AT, where the record puts them, and are
+           * then left in place: a renderer that draws into the record itself
+           * places the buffer so that buffer + ERX_UI_PIXELS_AT, an odd offset,
+           * meets its toolkit's alignment. Return the bytes written, or 0, with nothing written, when
+           * the pixels are too long or the buffer too small for the record.
+           */
+          size_t erx_ui_write_pixels(uint8_t *buffer, size_t size, uint16_t x,
+              uint16_t y, uint16_t width, uint16_t height, const uint8_t *pixels,
+              size_t length);
+
           #endif /* !ERX_UI_WIRE_H */
         C
       end
@@ -501,11 +557,13 @@ module Erx
            * Generated by tools/gen_abi.rb from abi/formats/ui.txt.
            * Do not edit this file.
            *
-           * The reader of the server's records in ui.txt's binary form; see
-           * erx/ui_wire.h. Freestanding: it calls nothing but the memset the
-           * compiler emits to zero a record. Every count and
-           * length read from the record is checked against what remains of it
-           * before it is used.
+           * The reader of the server's records and the writer of a renderer's
+           * in ui.txt's binary form; see erx/ui_wire.h. Freestanding: it calls
+           * nothing but the memset and memcpy the compiler emits to zero a
+           * record and copy pixels. Every count and length read from a record
+           * is checked against what remains of it before it is used, and every
+           * record written is checked against the caller's size before a byte
+           * of it is.
            */
 
           #include <erx/ui_wire.h>
@@ -550,6 +608,7 @@ module Erx
           };
 
           #{C_READER}
+          #{C_WRITER}
         C
       end
 
@@ -1018,6 +1077,118 @@ module Erx
         	text->length = length;
         	*cursor += 4 + length;
         	return (true);
+        }
+      C
+
+      C_WRITER = <<~'C'
+        static void erx_ui_put16(uint8_t *, uint16_t);
+        static void erx_ui_put32(uint8_t *, uint32_t);
+
+        static void
+        erx_ui_put16(uint8_t *at, uint16_t value)
+        {
+        	at[0] = (uint8_t)value;
+        	at[1] = (uint8_t)(value >> 8);
+        }
+
+        static void
+        erx_ui_put32(uint8_t *at, uint32_t value)
+        {
+        	at[0] = (uint8_t)value;
+        	at[1] = (uint8_t)(value >> 8);
+        	at[2] = (uint8_t)(value >> 16);
+        	at[3] = (uint8_t)(value >> 24);
+        }
+
+        /* An event record's tag, node, number and detail tag, before the value. */
+        #define ERX_UI_EVENT_HEAD	(1 + 4 + 1 + 1)
+
+        /*
+         * The record is checked whole, then written: length word, the head,
+         * and the detail's value, a u8 for a boolean, a signed u32 for an
+         * integer, a u32 length and the bytes for a text.
+         */
+        size_t
+        erx_ui_write_event(uint8_t *buffer, size_t size, uint32_t node,
+            uint8_t event, const erx_ui_detail_t *detail)
+        {
+        	uint8_t *at;
+        	uint32_t record, value;
+
+        	if (node == 0 || erx_ui_types[event].form != ERX_UI_FORM_EVENT)
+        		return (0);
+        	switch (detail->tag) {
+        	case ERX_UI_DETAIL_NONE:
+        		value = 0;
+        		break;
+        	case ERX_UI_DETAIL_BOOLEAN:
+        		if (detail->integer != 0 && detail->integer != 1)
+        			return (0);
+        		value = 1;
+        		break;
+        	case ERX_UI_DETAIL_INTEGER:
+        		value = 4;
+        		break;
+        	case ERX_UI_DETAIL_TEXT:
+        		if (detail->text.length > ERX_UI_EVENT_TEXT_MAX ||
+        		    !erx_ui_utf8(detail->text.data, detail->text.length))
+        			return (0);
+        		value = 4 + detail->text.length;
+        		break;
+        	default:
+        		return (0);
+        	}
+        	record = ERX_UI_EVENT_HEAD + value;
+        	if (size < 4 || size - 4 < record)
+        		return (0);
+        	at = buffer;
+        	erx_ui_put32(at, record);
+        	at[4] = ERX_UI_EVENT;
+        	erx_ui_put32(at + 5, node);
+        	at[9] = event;
+        	at[10] = detail->tag;
+        	at += 4 + ERX_UI_EVENT_HEAD;
+        	switch (detail->tag) {
+        	case ERX_UI_DETAIL_BOOLEAN:
+        		at[0] = (uint8_t)detail->integer;
+        		break;
+        	case ERX_UI_DETAIL_INTEGER:
+        		erx_ui_put32(at, (uint32_t)detail->integer);
+        		break;
+        	case ERX_UI_DETAIL_TEXT:
+        		erx_ui_put32(at, detail->text.length);
+        		for (uint32_t index = 0; index < detail->text.length; index++)
+        			at[4 + index] = detail->text.data[index];
+        		break;
+        	}
+        	return (4 + (size_t)record);
+        }
+
+        size_t
+        erx_ui_write_pixels(uint8_t *buffer, size_t size, uint16_t x,
+            uint16_t y, uint16_t width, uint16_t height, const uint8_t *pixels,
+            size_t length)
+        {
+        	uint8_t *at;
+        	uint32_t record;
+
+        	if (length > ERX_UI_PIXELS_DATA_MAX)
+        		return (0);
+        	record = 1 + 4 * 2 + (uint32_t)length;
+        	if (size < 4 || size - 4 < record)
+        		return (0);
+        	erx_ui_put32(buffer, record);
+        	buffer[4] = ERX_UI_PIXELS;
+        	erx_ui_put16(buffer + 5, x);
+        	erx_ui_put16(buffer + 7, y);
+        	erx_ui_put16(buffer + 9, width);
+        	erx_ui_put16(buffer + 11, height);
+        	at = buffer + ERX_UI_PIXELS_AT;
+        	if (pixels != at) {
+        		for (size_t index = 0; index < length; index++)
+        			at[index] = pixels[index];
+        	}
+        	return (4 + (size_t)record);
         }
       C
     end

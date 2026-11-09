@@ -1860,8 +1860,9 @@ its target: a `screen` record with the target's size and channel, at
 start and on every change, the target's `input` records, and a
 `repaint` record when the target has lost what it showed. The program
 maps each kind to an LVGL object, sets its properties, renders in LVGL's
-partial mode into its own buffer of at most `ui_pixels_max` bytes, in
-the target's channel, and writes each rectangle LVGL flushes as a
+partial mode into its own buffer of at most `ui_pixels_max` bytes less
+a report's header, in the target's channel with Plan 9's rows of
+`bytesperline` bytes (LVGL's stride aligned to 32 bits), and writes each rectangle LVGL flushes as a
 `pixels` report on its standard output, beside its events in the same
 format, which `erx_ui_lvgl` reads with the generated Erlang reader.
 

@@ -7,10 +7,19 @@
  * in the format of erx_ui_wire_tests:corpus/3 with numbers where that has
  * names, and every property's status block. Exits 1 at a refused record or a
  * stream that ends inside one.
+ *
+ * With the arguments "write PATH SEED", writes the other way instead: random
+ * event and pixels records, with the generated writer, to PATH, and one line
+ * per record to standard output naming what it wrote, in the format of
+ * erx_ui_wire_tests:read_corpus/2 with the event's number for its name. It
+ * checks on the way that each record fits a buffer of exactly its size and is
+ * refused by one byte less, and that the writer refuses what the form cannot
+ * hold; it exits 1 at the first that does not.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <erx/ui_wire.h>
 
@@ -122,13 +131,257 @@ print_record(const erx_ui_record_t *record)
 	putchar('\n');
 }
 
+/* xorshift64: the corpus is a function of the seed. */
+static uint64_t
+next_random(uint64_t *state)
+{
+	*state ^= *state << 13;
+	*state ^= *state >> 7;
+	*state ^= *state << 17;
+	return (*state);
+}
+
+static uint32_t
+below(uint64_t *state, uint32_t bound)
+{
+	return ((uint32_t)(next_random(state) % bound));
+}
+
+/* At most max bytes of valid UTF-8 of scalars of every encoded length. */
+static uint32_t
+random_utf8(uint64_t *state, uint8_t *out, uint32_t max)
+{
+	static const uint32_t lowest[] = { 0x20, 0x80, 0x800, 0x10000 };
+	static const uint32_t highest[] = { 0x7e, 0x7ff, 0xffff, 0x10ffff };
+	static const uint8_t lead[] = { 0, 0, 0xc0, 0xe0, 0xf0 };
+	uint32_t bytes, length, point, range;
+
+	length = 0;
+	for (;;) {
+		range = below(state, 4);
+		point = lowest[range] +
+		    below(state, highest[range] - lowest[range] + 1);
+		if (point >= 0xd800 && point <= 0xdfff)
+			point = 0xfffd;
+		bytes = point < 0x80 ? 1 : point < 0x800 ? 2 :
+		    point < 0x10000 ? 3 : 4;
+		if (bytes > max - length)
+			return (length);
+		if (bytes == 1) {
+			out[length++] = (uint8_t)point;
+			continue;
+		}
+		out[length++] = (uint8_t)(lead[bytes] |
+		    (point >> (6 * (bytes - 1))));
+		for (uint32_t shift = 6 * (bytes - 1); shift > 0; shift -= 6)
+			out[length++] = (uint8_t)(0x80 | ((point >> (shift - 6)) &
+			    0x3f));
+	}
+}
+
+/*
+ * Write one record by write_one into a buffer of exactly its size after
+ * checking that one byte less is refused, and append it to out.
+ */
+typedef size_t (*writer_t)(uint8_t *, size_t, const void *);
+
+static void
+emit(FILE *out, writer_t write_one, const void *what)
+{
+	static uint8_t record[ERX_UI_PIXELS_MAX + 4];
+	size_t size;
+
+	size = write_one(record, sizeof(record), what);
+	if (size < 5) {
+		fprintf(stderr, "writer refused a valid record\n");
+		exit(1);
+	}
+	if (write_one(record, size - 1, what) != 0) {
+		fprintf(stderr, "writer accepted a buffer one byte short\n");
+		exit(1);
+	}
+	if (write_one(record, size, what) != size) {
+		fprintf(stderr, "writer refused a buffer of the record's size\n");
+		exit(1);
+	}
+	fwrite(record, 1, size, out);
+}
+
+typedef struct event event_t;
+struct event {
+	erx_ui_detail_t	 detail;
+	uint32_t	 node;
+	uint8_t		 number;
+};
+
+typedef struct pixels pixels_t;
+struct pixels {
+	const uint8_t	*data;
+	size_t		 length;
+	uint16_t	 x, y, width, height;
+};
+
+static size_t
+write_event(uint8_t *buffer, size_t size, const void *what)
+{
+	const event_t *event = what;
+
+	return (erx_ui_write_event(buffer, size, event->node, event->number,
+	    &event->detail));
+}
+
+static size_t
+write_pixels(uint8_t *buffer, size_t size, const void *what)
+{
+	const pixels_t *pixels = what;
+
+	return (erx_ui_write_pixels(buffer, size, pixels->x, pixels->y,
+	    pixels->width, pixels->height, pixels->data, pixels->length));
+}
+
+/* What the writer must refuse, whatever the buffer; exits at the first not. */
+static void
+check_refusals(uint8_t event_number, uint8_t other_number)
+{
+	static uint8_t buffer[ERX_UI_PIXELS_MAX + 4], source[ERX_UI_PIXELS_MAX];
+	static const uint8_t bad_utf8[] = { 'a', 0xc0, 0x80 };
+	static const uint8_t surrogate[] = { 0xed, 0xa0, 0x80 };
+	const event_t refused[] = {
+		{ .node = 0, .number = event_number },
+		{ .node = 1, .number = other_number },
+		{ .node = 1, .number = event_number,
+		    .detail = { .tag = ERX_UI_DETAIL_BOOLEAN, .integer = 2 } },
+		{ .node = 1, .number = event_number,
+		    .detail = { .tag = ERX_UI_DETAIL_TEXT, .text = { bad_utf8, 3 } } },
+		{ .node = 1, .number = event_number,
+		    .detail = { .tag = ERX_UI_DETAIL_TEXT, .text = { surrogate, 3 } } },
+		{ .node = 1, .number = event_number,
+		    .detail = { .tag = ERX_UI_DETAIL_TEXT,
+		    .text = { source, ERX_UI_EVENT_TEXT_MAX + 1 } } },
+		{ .node = 1, .number = event_number,
+		    .detail = { .tag = ERX_UI_DETAIL_TEXT + 1 } }
+	};
+	const pixels_t too_long = { .data = source,
+	    .length = ERX_UI_PIXELS_DATA_MAX + 1 };
+
+	memset(source, 'a', sizeof(source));
+	for (size_t index = 0; index < sizeof(refused) / sizeof(refused[0]);
+	    index++) {
+		if (write_event(buffer, sizeof(buffer), &refused[index]) != 0) {
+			fprintf(stderr, "writer wrote refused event %zu\n", index);
+			exit(1);
+		}
+	}
+	if (write_pixels(buffer, sizeof(buffer), &too_long) != 0) {
+		fprintf(stderr, "writer wrote pixels too long\n");
+		exit(1);
+	}
+}
+
+static void
+print_bytes(const uint8_t *data, size_t length)
+{
+	putchar('x');
+	for (size_t index = 0; index < length; index++)
+		printf("%02x", data[index]);
+}
+
+/*
+ * Every event property, each detail tag at its bounds and at random, and
+ * pixels reports from empty to the longest; the event numbers are those the
+ * writer accepts, which the reader on the other side names.
+ */
+static int
+write_corpus(const char *path, uint64_t seed)
+{
+	static uint8_t data[ERX_UI_PIXELS_DATA_MAX];
+	static const int32_t integers[] = { 0, 1, -1, INT32_MIN, INT32_MAX };
+	const erx_ui_detail_t none = { .tag = ERX_UI_DETAIL_NONE };
+	uint8_t events[256], probe[16], refused_number;
+	uint64_t state;
+	uint32_t count, nevents, max;
+	event_t event;
+	pixels_t pixels;
+	FILE *out;
+
+	_Static_assert(ERX_UI_EVENT_TEXT_MAX <= sizeof(data),
+	    "an event's longest text fits the corpus's buffer");
+	nevents = 0;
+	refused_number = 0;
+	for (uint32_t number = 0; number < 256; number++) {
+		if (erx_ui_write_event(probe, sizeof(probe), 1, (uint8_t)number,
+		    &none) != 0)
+			events[nevents++] = (uint8_t)number;
+		else
+			refused_number = (uint8_t)number;
+	}
+	if (nevents == 0 || nevents == 256)
+		return (1);
+	check_refusals(events[0], refused_number);
+	count = 0;
+	if ((out = fopen(path, "wb")) == NULL)
+		return (1);
+	state = seed * 0x9e3779b97f4a7c15ULL + 1;
+	for (uint32_t index = 0; index < 600; index++) {
+		if (index % 3 == 2) {
+			max = index % 50 == 2 ? ERX_UI_PIXELS_DATA_MAX : 64;
+			pixels = (pixels_t){ .data = data,
+			    .length = index % 50 == 2 ? max : below(&state, max + 1),
+			    .x = (uint16_t)next_random(&state),
+			    .y = (uint16_t)next_random(&state),
+			    .width = (uint16_t)next_random(&state),
+			    .height = (uint16_t)next_random(&state) };
+			for (size_t at = 0; at < pixels.length; at++)
+				data[at] = (uint8_t)next_random(&state);
+			emit(out, write_pixels, &pixels);
+			printf("pixels %u %u %u %u ", pixels.x, pixels.y,
+			    pixels.width, pixels.height);
+			print_bytes(pixels.data, pixels.length);
+			putchar('\n');
+			continue;
+		}
+		event = (event_t){ .number = events[count++ % nevents],
+		    .node = index % 7 == 0 ? UINT32_MAX :
+		    1 + below(&state, UINT32_MAX),
+		    .detail = { .tag = (uint8_t)(index % 4) } };
+		printf("event %u %u ", event.node, event.number);
+		switch (event.detail.tag) {
+		case ERX_UI_DETAIL_NONE:
+			printf("none");
+			break;
+		case ERX_UI_DETAIL_BOOLEAN:
+			event.detail.integer = (int32_t)below(&state, 2);
+			fputs(event.detail.integer ? "true" : "false", stdout);
+			break;
+		case ERX_UI_DETAIL_INTEGER:
+			event.detail.integer = index % 5 == 0 ?
+			    integers[below(&state, 5)] :
+			    (int32_t)next_random(&state);
+			printf("%d", (int)event.detail.integer);
+			break;
+		case ERX_UI_DETAIL_TEXT:
+			max = index % 41 == 3 ? ERX_UI_EVENT_TEXT_MAX :
+			    below(&state, 41);
+			event.detail.text.data = data;
+			event.detail.text.length = random_utf8(&state, data, max);
+			print_bytes(data, event.detail.text.length);
+			break;
+		}
+		putchar('\n');
+		emit(out, write_event, &event);
+	}
+	return (fclose(out) == 0 ? 0 : 1);
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
 	static uint8_t stream[64 << 20];
 	erx_ui_record_t record;
 	size_t length, offset, used;
 
+	if (argc == 4 && strcmp(argv[1], "write") == 0)
+		return (write_corpus(argv[2], strtoull(argv[3], NULL, 10)));
 	length = fread(stream, 1, sizeof(stream), stdin);
 	if (length == sizeof(stream)) {
 		fprintf(stderr, "stream too long\n");

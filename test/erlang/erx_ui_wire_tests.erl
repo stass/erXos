@@ -5,7 +5,7 @@
 %% test/host/erx_ui_wire_test.rb feeds to the generated C reader.
 -module(erx_ui_wire_tests).
 -include_lib("eunit/include/eunit.hrl").
--export([corpus/3, present/2]).
+-export([corpus/3, read_corpus/2, present/2]).
 
 %% The canonical text a test stands in for erx_present:text/2.
 present(_Type, Value) -> iolist_to_binary(io_lib:format("~0p", [Value])).
@@ -182,6 +182,26 @@ value_text({bytes, _}, V) -> hex(V);
 value_text({list, _, _}, V) -> "[" ++ lists:join(",", [hex(T) || T <- V]) ++ "]";
 value_text(event, _V) -> "-";
 value_text(presentation, {Type, V}) -> hex(atom_to_binary(Type)) ++ ":" ++ hex(present(Type, V)).
+
+-doc """
+Reads the stream of event and pixels records that the C harness's writer
+wrote to StreamPath and writes, to OutPath, one line per record naming what
+erx_ui_wire:read/1 read: the event by name, the detail as none, true, false,
+an integer or a text in hex, and the pixels in hex. The Ruby test maps the
+names to numbers and compares the lines with what the writer says it wrote.
+""".
+read_corpus(StreamPath, OutPath) ->
+    {ok, Stream} = file:read_file(StreamPath),
+    ok = file:write_file(OutPath, [[read_line(Record), $\n] || Record <- read_all(Stream)]).
+
+read_line({event, Node, Event, Detail}) ->
+    join(["event", integer_to_list(Node), atom_to_list(Event), detail_text(Detail)]);
+read_line({pixels, X, Y, Width, Height, Pixels}) ->
+    join(["pixels" | [integer_to_list(N) || N <- [X, Y, Width, Height]]] ++ [hex(Pixels)]).
+
+detail_text(Detail) when is_atom(Detail) -> atom_to_list(Detail);
+detail_text(Detail) when is_integer(Detail) -> integer_to_list(Detail);
+detail_text(Detail) when is_binary(Detail) -> hex(Detail).
 
 hex(Binary) -> "x" ++ binary_to_list(binary:encode_hex(Binary, lowercase)).
 
