@@ -1256,11 +1256,13 @@ that translates the FreeBSD code for it, then runs output, as
 `tcp_do_segment` ends by calling `tcp_output` when an ACK or data is due.
 
 The user requests are FreeBSD's `pr_usrreqs` for a connected stream:
-`connect`, `send`, `rcvd` (the owner has read so many bytes, which reopens
-the window), `shutdown`, `close` and `abort`. The socket layer above them,
+`connect`, `send`, `rcvd` (so many bytes left the receive buffer, read by
+the owner or held by a waiting `recv`, which reopens the window), `shutdown`, `close` and `abort`. The socket layer above them,
 the owner, the active mode, packet framing and the bytes not yet handed to
 the owner, belongs to the connection process; the control block counts
-those bytes so that the advertised window follows them. A request that
+those bytes, except those a waiting `recv` already holds
+([The interface towards Erlang programs](#the-interface-towards-erlang-programs)),
+so that the advertised window follows them. A request that
 waits carries its caller, and the step answers it from the state it
 reaches, after output: `connect` once the connection is established,
 `send` once all its bytes are in the send buffer, which takes them as its
@@ -2798,7 +2800,7 @@ principal's policy:
 | Limit | Meaning | Default |
 | --- | --- | --- |
 | `sockets` | sockets open at once, listeners and accepted connections included | 1,024 |
-| `buffers` | bytes of send and receive buffer reserved across the grant's sockets | 16 MiB |
+| `buffers` | bytes of send and receive buffer reserved across the grant's sockets; a connection's receive side reserves twice its receive buffer, the buffer and what a waiting `recv` may hold outside it | 16 MiB |
 | `time_wait` | connections in TIME-WAIT | 4,096 |
 | `ports` | local ports the grant may bind explicitly; ports below 1,024 only when listed, as FreeBSD requires privilege for them (`ipport_reservedhigh`, `in_pcb.c:132`) | 1,024 to 65,535 |
 | `listen` | whether the grant may listen, and on which of its ports | yes |
@@ -2972,6 +2974,31 @@ mode, as on stock, nothing limits deliveries except the lane to the
 owner's domain: when that lane is full, the connection waits, its credit
 fills and its segments are dropped, so memory stays bounded and TCP
 recovers when the owner drains.
+
+In passive raw mode `recv(S, 0)` takes what is queued and `recv(S, Length)`
+waits for exactly `Length` bytes, as stock's does (inet_drv's `tcp_recv`).
+While a recv waits, the bytes queued for it leave the receive buffer, as
+FreeBSD's `soreceive` copies them out to the caller under `MSG_WAITALL`
+and calls `pru_rcvd` before it sleeps, so the window reopens for the rest
+of the recv; counted against the buffer, they would leave a recv near the
+buffer's size waiting for the last part of a segment, which the sender's
+silly window avoidance sends only as a persist probe. A recv that times
+out leaves the bytes queued for the next one, as stock does. The
+connection so holds less than twice its receive buffer in bytes, whatever
+the peer sends: the buffer, and what a recv holds, less than its `Length`.
+As in the reassembly queue, a payload smaller than a quarter of its frame
+is copied out as it is queued, so tiny segments do not keep their frames
+alive. Two results differ from stock's:
+
+* a `Length` above the connection's receive buffer is refused with
+  `{error, enomem}`, where stock accepts up to 64 MiB
+  (`TCP_MAX_PACKET_SIZE`), since what a recv holds is the network
+  domain's memory and no limit of the owner's grant counts it;
+* when the peer's FIN leaves fewer bytes than a waiting recv asks for,
+  the recv answers `{error, closed}`, as stock's does
+  (`tcp_recv_closed`), but the bytes stay queued for a `recv(S, 0)`,
+  after which recvs answer `{error, closed}`; stock discards them and
+  answers `{error, enotconn}` from then on.
 
 The packet modes (`{packet, 1|2|4}`, `line`, `http`, `http_bin` and the
 rest) frame the stream in the connection with `erlang:decode_packet/3`,
@@ -3257,8 +3284,9 @@ client domain is affected beyond its sockets.
 | `{error, enetunreach}` | `connect`, or a datagram sent without a local address, finds no route (`in_pcbladdr`) |
 | `{error, ehostunreach}` | a datagram's route has gone (`ip_output`); a synchronized connection's soft error at its timeout; an unreachable report in SYN-SENT |
 | `{error, econnreset}` | a RST in a synchronized state, under `show_econnreset` as on stock |
-| `{error, closed}` | the socket is closed, as on stock |
+| `{error, closed}` | the socket is closed, as on stock; a `recv` that the peer's FIN leaves short, as on stock, though its bytes stay for `recv(S, 0)` |
 | `{error, timeout}` | an Erlang call's own timeout, as on stock |
+| `{error, enomem}` | a `recv` longer than the connection's receive buffer, where stock allows 64 MiB |
 | `{error, emsgsize}` | a datagram larger than IP allows, or a packet over `packet_size` |
 | `{error, einval}` | an option value out of range |
 | `{error, enotsup}` | `fd`, `netns`, `bind_to_device`, unknown `raw` options, SCTP |

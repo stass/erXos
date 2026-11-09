@@ -15,8 +15,10 @@ require_relative '../../tools/lib/erx/erlang_apps'
 # takes a lease, resolves and pings the gateway, echoes a datagram through slirp off a UDP
 # echo server here on the host, and connects through slirp to a TCP echo server here: 1 MiB
 # both ways in passive mode, 64 KiB in active mode closed from both ends, and a connect to
-# a port nobody listens on, which slirp's RST refuses. Nothing leaves the host: every
-# answer is slirp's or an echo server's. Needs qemu-system-aarch64 and ERX_ERL and ERX_ERLC.
+# a port nobody listens on, which slirp's RST refuses; then two reads compared with stock
+# gen_tcp on the host's own stack against the same echo server: recv/3 of the whole
+# receive buffer, and a fixed-length recv at the server's close. Nothing leaves the host:
+# every answer is slirp's or an echo server's. Needs qemu-system-aarch64 and ERX_ERL and ERX_ERLC.
 class ErxNetSlirpTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APP = File.join(ROOT, 'erlang/apps/erx_net')
@@ -39,10 +41,10 @@ class ErxNetSlirpTest < Minitest::Test
                                              qemu_port.to_s, stack_port.to_s, echo_port.to_s, tcp_port.to_s,
                                              closed_tcp_port.to_s, stdin_data: '')
             assert status.success?, output
-            %w[lease arp ping udp tcp_passive tcp_active tcp_refused].each do |step|
+            %w[lease arp ping udp tcp_passive tcp_active tcp_refused tcp_whole_buffer tcp_short_tail].each do |step|
               assert_match(/^#{step} ok$/, output)
             end
-            puts output[/^tcp_transfer_ms \d+$/]
+            puts output.scan(/^tcp_\w+_ms .*$/)
           end
         end
       end

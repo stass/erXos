@@ -698,6 +698,22 @@ it; git history is the record of completed work.
   one local message per delivery, to measure), or an exception in edit 16 for socket
   messages whose socket pid is of the lane's domain.
 
+* [Medium] network, `erx_tcp_conn` (`handle_call({recv, ...})`,
+  [design-network-stack.md](docs/design-network-stack.md#the-interface-towards-erlang-programs)):
+  `recv(S, Length)` with `Length` above the connection's receive buffer
+  answers `{error, enomem}`, where stock gen_tcp accepts up to 64 MiB. A
+  waiting recv's held bytes are the network domain's memory, which the
+  `buffers` limit counts as a second receive buffer per connection (its
+  reservations are not built yet); lifting the bound means reserving a
+  recv's `Length` against the grant when the recv starts instead.
+* [Low] network, `erx_tcp_conn` (`perform({deliver, _})`): the receive queue
+  counts payload bytes only, not the binary and list cell each queued
+  segment costs, which `erx_tcp_reass` counts as `PIECE_OVERHEAD`. A peer
+  sending one-byte in-order segments to a connection whose owner reads
+  slowly, or to a waiting recv, makes its queue cost about 40 bytes of heap
+  per byte, a few MiB per connection, where FreeBSD bounds the same with
+  the mbuf limit `sb_mbmax`. Count the overhead against the receive buffer,
+  or join small payloads as they are queued.
 * [Low] network, docs/design-network-stack.md ("Framing", step 3 of the output pass): "past
   SYN-RECEIVED" should read "once a SYN has been received" (`TCPS_HAVERCVDSYN`), as the code
   does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which

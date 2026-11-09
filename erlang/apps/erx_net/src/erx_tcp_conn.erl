@@ -27,14 +27,20 @@ actions in order:
 
 After the actions the loop hands the receive queue to the owner, in active mode as one
 `{tcp, Socket, Data}` or to a waiting `recv/3`, and steps `{user, {rcvd, Bytes}}` for what
-it handed, so the window opens as the owner reads. Then it arms the clock no later than the
-earliest of the step's deadline and the connect and recv deadlines.
+left the receive buffer, so the window opens as the owner reads: the bytes it handed, and
+those a recv still short of its length holds, as FreeBSD's soreceive copies them out to
+the caller under MSG_WAITALL. Then it arms the clock no later than the earliest of the
+step's deadline and the connect and recv deadlines.
 
 **Bounds.** The interface hands segments only against the connection's credit, and the
-step keeps the bytes it delivered counted until the owner has them (`rcv_buffered`), so
-the receive queue never holds more than the receive buffer; the send buffer holds at most
-its high watermark, the rest of a `send` waiting with its caller. In `{active, true}`
-mode, as with `gen_tcp`, the owner's mailbox is bounded only by how fast the owner reads.
+step keeps the bytes it delivered counted until they leave the receive buffer
+(`rcv_buffered`), so the receive queue holds at most the receive buffer and what a recv
+held, which is less than its length; since a recv asks for at most the receive buffer
+(`{error, enomem}` beyond it), the queue holds less than twice the buffer in bytes, whatever
+the peer sends. A payload smaller than a quarter of its frame is copied out as it is queued,
+so tiny segments do not keep their frames alive. The send buffer holds at most its high watermark, the rest of a `send` waiting with
+its caller. In `{active, true}` mode, as with `gen_tcp`, the owner's mailbox is bounded
+only by how fast the owner reads.
 
 **Raises.** A step over segments or a report that raises is counted as `raised` and the
 connection keeps its state from before it, so a segment that trips a bug costs only
@@ -83,6 +89,7 @@ generator split from the grant's.
                 mode :: binary | list,
                 rcvq = [] :: [binary()],             % newest first
                 rcv_bytes = 0 :: non_neg_integer(),
+                rcv_held = 0 :: non_neg_integer(),   % rcvq's first bytes, held by a recv
                 eof = false :: boolean(),            % the peer's FIN
                 error = none :: none | atom(),
                 ended = false :: boolean(),          % the connection closed
@@ -253,7 +260,7 @@ perform({transmit, Segments}, #state{path = Path, gen = Gen0} = S) ->
         {error, Reason} -> count(Reason, S)
     end;
 perform({deliver, Data}, #state{rcvq = Q, rcv_bytes = N} = S) ->
-    Bin = iolist_to_binary(Data),
+    Bin = compact(iolist_to_binary(Data)),
     S#state{rcvq = [Bin | Q], rcv_bytes = N + byte_size(Bin)};
 perform({notify, eof}, S) ->
     S#state{eof = true};
@@ -289,6 +296,15 @@ perform({reinject, _Segment}, S) ->
 perform(finish, S) ->
     S#state{finished = true}.
 
+%% A payload smaller than a quarter of the frame it references is copied out, as the
+%% reassembly queue copies it (erx_tcp_reass), so that queued tiny segments do not keep
+%% their whole frames alive.
+compact(Bin) ->
+    case binary:referenced_byte_size(Bin) > 4 * byte_size(Bin) of
+        true -> binary:copy(Bin);
+        false -> Bin
+    end.
+
 sent(ok, _Reason, S) -> S;
 sent(full, Reason, S) -> count(Reason, S).
 
@@ -306,11 +322,14 @@ owner_closed(#state{owner_ref = Ref, recv = Recv} = S) ->
 
 %% --- Settling: the owner, the end and the clock --------------------------------------
 
-%% Hands the receive queue over, stepping `rcvd` for what was handed until nothing more
-%% moves, tells the owner of the end, then ends the process or arms the clock.
+%% Hands the receive queue over, stepping `rcvd` for what left the receive buffer until
+%% nothing more does, tells the owner of the end, then ends the process or arms the clock.
+%% What left the buffer is what it counted before the hand-over less what it counts after,
+%% so no way of handing over can step more or less than it took.
 settle(S0) ->
-    case hand_over(S0) of
-        {0, S1} ->
+    S1 = hand_over(S0),
+    case counted(S0) - counted(S1) of
+        0 ->
             S = tell_end(S1),
             case S of
                 #state{finished = true, key = Key} ->
@@ -319,22 +338,33 @@ settle(S0) ->
                 _ ->
                     {noreply, arm(S)}
             end;
-        {Bytes, S1} ->
-            settle(step({user, {rcvd, Bytes}}, S1))
+        Released ->
+            settle(step({user, {rcvd, Released}}, S1))
     end.
+
+%% The queued bytes the receive buffer still counts: those after the held ones.
+counted(#state{rcv_bytes = N, rcv_held = Held}) -> N - Held.
 
 %% What the owner takes now: all of the queue in active mode or for `recv(_, 0, _)`,
 %% `Length` bytes for a recv that waits for them, and the whole queue, dropped, once the
 %% owner is gone.
+%%
+%% A recv still short of its `Length` holds what is queued: those bytes leave the receive
+%% buffer, as soreceive copies them out to the caller under MSG_WAITALL, and stay at the
+%% front of the queue (`rcv_held`), so the window reopens for the rest of the recv. Counted
+%% against the buffer, they would leave a recv near the buffer's size waiting on its last
+%% bytes, less than a segment, which the peer's silly window avoidance sends only as a
+%% persist probe, 5 s or more apart. What a recv held stays held when it times out, for the
+%% next recv or the next hand-over.
 hand_over(#state{rcv_bytes = 0} = S) ->
-    {0, S};
-hand_over(#state{owner = none, rcv_bytes = N} = S) ->
-    {N, S#state{rcvq = [], rcv_bytes = 0}};
+    S;
+hand_over(#state{owner = none} = S) ->
+    S#state{rcvq = [], rcv_bytes = 0, rcv_held = 0};
 hand_over(#state{active = Active, owner = Owner, socket = Sock, mode = Mode, rcv_bytes = N} = S)
   when Active =/= false ->
     {Data, Rest} = take(N, S),
     Owner ! {tcp, Sock, data(Mode, Data)},
-    {N, passive_notice(Rest#state{active = spend(Active)})};
+    passive_notice(Rest#state{active = spend(Active)});
 hand_over(#state{recv = {From, Length, _}, mode = Mode, rcv_bytes = N} = S) when N >= Length ->
     Take = case Length of
                0 -> N;
@@ -342,13 +372,17 @@ hand_over(#state{recv = {From, Length, _}, mode = Mode, rcv_bytes = N} = S) when
            end,
     {Data, Rest} = take(Take, S),
     gen_server:reply(From, {ok, data(Mode, Data)}),
-    {Take, Rest#state{recv = none}};
+    Rest#state{recv = none};
+hand_over(#state{recv = {_, _, _}, rcv_bytes = N} = S) ->
+    S#state{rcv_held = N};
 hand_over(S) ->
-    {0, S}.
+    S.
 
-take(Bytes, #state{rcvq = Q, rcv_bytes = N} = S) ->
+%% The first Bytes of the queue; the held ones go first.
+take(Bytes, #state{rcvq = Q, rcv_bytes = N, rcv_held = Held} = S) ->
     <<Data:Bytes/binary, Left/binary>> = iolist_to_binary(lists:reverse(Q)),
-    {Data, S#state{rcvq = [Left || Left =/= <<>>], rcv_bytes = N - Bytes}}.
+    {Data, S#state{rcvq = [Left || Left =/= <<>>], rcv_bytes = N - Bytes,
+                   rcv_held = max(Held - Bytes, 0)}}.
 
 data(binary, Data) -> Data;
 data(list, Data) -> binary_to_list(Data).
@@ -366,7 +400,9 @@ passive_notice(S) ->
 
 %% The end of the stream, once everything before it was handed over: in active mode
 %% `{tcp_error, S, Reason}` when there was one and then `{tcp_closed, S}`, once; a waiting
-%% recv gets the error, or `closed`, also when fewer bytes remain than it waits for.
+%% recv gets the error, or `closed`, also when fewer bytes remain than it waits for, as
+%% stock's recv does (inet_drv's tcp_recv_closed). Stock discards those bytes; they stay
+%% queued here, for a `recv(_, 0)` or until the connection ends.
 tell_end(#state{eof = false, ended = false} = S) ->
     S;
 tell_end(#state{owner = none} = S) ->

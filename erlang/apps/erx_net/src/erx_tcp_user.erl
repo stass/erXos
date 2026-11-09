@@ -87,9 +87,9 @@ calling `tcp_output`.
 -export_type([request/0, init/0]).
 
 -doc """
-A request: `connect` (`tcp_connect`), `send` (`tcp_usr_send`), `rcvd` (the owner read
-`Bytes`, `tcp_usr_rcvd`), `shutdown` (`tcp_usr_shutdown`), `close` (`tcp_usr_close`) and
-`abort` (`tcp_usr_abort`).
+A request: `connect` (`tcp_connect`), `send` (`tcp_usr_send`), `rcvd` (`Bytes` left the
+receive buffer, read by the owner or held by a waiting recv, `tcp_usr_rcvd`), `shutdown`
+(`tcp_usr_shutdown`), `close` (`tcp_usr_close`) and `abort` (`tcp_usr_abort`).
 """.
 -type request() :: {connect, gen_server:from()}
                  | {send, gen_server:from(), binary()}

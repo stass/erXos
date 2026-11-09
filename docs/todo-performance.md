@@ -416,7 +416,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   `iolist_size/1` and `erlang:iolist_to_iovec/1` when given a list. Measure: the time
   per frame of the bulk-transfer load the network design names, on HVF, against the
   same load with the checksum stubbed; and one 64 KiB call of each on each target
-  board. If the checksum is a visible share, add a wider portable loop (32-bit loads,
+  board. In the p620 run of 2026-11-09 (the network entry on one connection process per
+  flow), on stock OTP, the pure-Erlang host stand-in for `inet_csum` held 55 percent of
+  the connection process's stack samples on send and about half of the busiest process's
+  on receive; on erXos the C primitive replaces it, so what is left to measure there is
+  the call's cost, before and after, on the same run.
+  If the checksum is a visible share, add a wider portable loop (32-bit loads,
   deferred carries) and then the AArch64 instructions chosen by feature detection, the
   portable code staying as their oracle.
 * [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.
@@ -448,8 +453,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   ([design-network-stack.md](design-network-stack.md#hops-and-copies)).
   A connection delivers each step's in-order data in one message; joining
   several segments' payloads into one binary saves messages and lane
-  frames at the cost of a copy. Settled by a bulk receive's CPU time per
-  byte both ways.
+  frames at the cost of a copy. In the p620 run of 2026-11-09 (see the
+  entry on one connection process per flow) `{active, true}` received
+  512 MiB in 370,768 `{tcp, S, Data}` messages, one per 1,448-byte
+  segment, at 952 Mbit/s against 1,115 for passive `recv(S, 0)` (median
+  of 3 each). Settled by a bulk receive's CPU time per byte both ways, and
+  by the same active receive with one message per drain of the receive
+  queue.
 * **[Low] network, a reassembled datagram copied and decoded again**
   ([design-network-stack.md](design-network-stack.md#ipv4-and-arp)).
   `erx_ip4_reass` and `erx_ip6_reass` return a completed datagram as a
@@ -487,6 +497,72 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   QEMU `virt` under HVF; the fixes on the table are more `out` segments
   per request in the device NIF, or joining small binaries once as the
   send buffer takes them.
+* **[Medium] network, one connection process per flow as a ceiling**
+  ([design-network-stack.md](design-network-stack.md#one-owner-one-step)).
+  Every segment of a connection is stepped in its one process, so a flow
+  gets at most one scheduler. The p620 run of 2026-11-09: host p620,
+  FreeBSD 16.0-CURRENT (main-n285245-975e3605ebb1, GENERIC-NODEBUG), AMD
+  Ryzen Threadripper PRO 5995WX, native, stock OTP 29 (erts 17.1) with
+  default scheduler flags; erx_net at 6de4bb62 on stock OTP with the
+  pure-Erlang host stand-in for `erx_bytes`, over the pipe's port end and
+  the tap helper to tap0, bridge0 and an epair into a jail running
+  FreeBSD's stack; 512 MiB per run in 64 KiB sends, passive `recv(S, 0)`,
+  median of 3; raw data in `~/erxos-history/net-bench-p620-2026-11-09/` at erxos-history commit f3573e4.
+  erx_net sent at 767 Mbit/s and received at 1,115. The baselines, both
+  inside FreeBSD's stack over bridge0 without the tap: stock `gen_tcp` in
+  a jail with the same driver sent at 7,098 and received at 7,159, and
+  iperf3 jail to jail did 6,420. On send the connection process ran at
+  about 91M reductions a second, one saturated scheduler; on receive the
+  interface process ran at 95M and the connection at 59M. Past the
+  checksum (the per-byte primitives' entry), the per-segment work adds up:
+  `erx_tcp_wire:add_options`, the send log's and the reassembly queue's
+  `gb_trees`, decide and commit. Settled by an eprof of `erx_tcp_conn`
+  over 1 GiB with the checksum stubbed; the fix on the table is several
+  segments per step. A FreeBSD-stack baseline through the same tap needs
+  an address on the host's side of bridge0, a setting change on p620 that
+  waits for the owner's go-ahead.
+* **[Medium] network, fixed buffer sizes and connection credit**
+  ([design-network-stack.md](design-network-stack.md#credited-queues)).
+  A connection has a 32 KiB send buffer and a 64 KiB receive buffer
+  (FreeBSD's defaults, without its autosizing) and a credit of 256 items;
+  32 KiB in flight over a path of 0.1 to 0.3 ms caps one flow. In the p620
+  run of 2026-11-09 (the entry on one connection process per flow) the
+  counters showed no drops and no retransmissions and the tap helper used
+  2 percent of a CPU, so the limit is on the Erlang side; the sizes'
+  effect was not measured. Settled by the same send and receive with the
+  buffers at 32 KiB to 2 MiB and the credit at 64 to 1,024; the fix on
+  the table is FreeBSD's buffer autosizing (`tcp_autorcvbuf`,
+  `tcp_autosndbuf`).
+* **[Medium] network, a fixed-length `recv` of a few segments**
+  ([design-network-stack.md](design-network-stack.md#the-interface-towards-erlang-programs)).
+  `erx_tcp_conn`'s `take/2` joins the whole receive queue into one binary
+  for every recv that takes part of it, and each recv is a call to the
+  connection. In the p620 run of 2026-11-09 (the entry on one connection
+  process per flow, here 64 MiB, one run each) `recv(S, 1460)` read at
+  29 Mbit/s (18.5 s), `recv(S, 16384)` at 984 and `recv(S, 0)` at 1,115;
+  how the time splits between the join, the call and the acknowledgements
+  was not measured. Settled by a profile of the `recv(S, 1460)` run; the
+  fixes on the table are splitting the queue at the length without
+  joining what stays, and answering a recv from bytes the owner's side
+  already holds.
+* **[Low] network, a `rcvd` step per batch while a recv waits**
+  ([design-network-stack.md](design-network-stack.md#the-interface-towards-erlang-programs)).
+  While a recv longer than what is queued waits, every batch of segments
+  the connection takes is followed by a `{user, {rcvd, N}}` step and an
+  output pass for the bytes the recv now holds, where a read once took one
+  per answered recv. The p620 numbers above predate it. Settled by the
+  same `recv(S, 16384)` and `recv(S, 65536)` receives on that path, or a
+  host benchmark of a 64 MiB receive through the test pipe, with and
+  without the hold; the fix on the table is stepping `rcvd` only once the
+  held bytes reach a quarter of the buffer.
+* **[Low] network, the tap helper's frame per system call**
+  ([design-network-stack.md](design-network-stack.md#the-tap-helper)).
+  `erx_net_tap` reads and writes one frame per system call and port
+  message. In the p620 run of 2026-11-09 (the entry on one connection
+  process per flow) it used 0.18 s of CPU in 11 s of a 1 GiB send, about
+  65,000 frames a second, 2 percent of a CPU. Settled by its CPU time at
+  the frame rates a faster stack reaches; the fix on the table is several
+  frames per read, write and port message.
 
 * The syntax-tree chokepoint pass (`tools/lib/erx/syntax_tree.rb`, run by
   `StackProofRun`): it dumps every core's tree, 20-27 MB of JSON each,

@@ -33,7 +33,17 @@ class ErxNetEffectTest < Minitest::Test
     ],
     # Bytes handed to the owner never stepped as read: the window stays shut.
     reading_opens_the_window: [
-      'settle(step({user, {rcvd, Bytes}}, S1))', '_ = Bytes, settle(S1)'
+      'settle(step({user, {rcvd, Released}}, S1))', '_ = Released, settle(S1)'
+    ],
+    # A recv short of its length holds nothing: its bytes keep the window shut, and a
+    # sender's silly window avoidance never sends the last part of a segment it waits for.
+    recv_of_the_whole_buffer_completes: [
+      'S#state{rcv_held = N};', '_ = N, S;'
+    ],
+    # Held bytes still marked held once taken: they are stepped as read a second time,
+    # and the window overstates the room.
+    recv_that_times_out_keeps_what_it_held: [
+      'rcv_held = max(Held - Bytes, 0)}}.', 'rcv_held = Held + 0 * Bytes}}.'
     ],
     # A batch's units never taken: the peer's segments hold the credit for good.
     credit_is_taken_as_items_arrive: [

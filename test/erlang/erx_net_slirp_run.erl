@@ -24,7 +24,9 @@ main([QemuPort, StackPort, EchoPort, TcpPort, ClosedPort]) ->
              {udp, fun(If) -> udp(If, list_to_integer(EchoPort)) end},
              {tcp_passive, fun(_) -> tcp_passive(list_to_integer(TcpPort)) end},
              {tcp_active, fun(_) -> tcp_active(list_to_integer(TcpPort)) end},
-             {tcp_refused, fun(_) -> tcp_refused(list_to_integer(ClosedPort)) end}],
+             {tcp_refused, fun(_) -> tcp_refused(list_to_integer(ClosedPort)) end},
+             {tcp_whole_buffer, fun(_) -> tcp_whole_buffer(list_to_integer(TcpPort)) end},
+             {tcp_short_tail, fun(_) -> tcp_short_tail(list_to_integer(TcpPort)) end}],
     {ok, #{pid := If}} = erx_net_tables:interface(en0),
     Results = [{Name, Step(If)} || {Name, Step} <- Steps],
     [io:format("~s ~p~n", [Name, Result]) || {Name, Result} <- Results],
@@ -153,6 +155,54 @@ tcp_refused(Port) ->
         {error, econnrefused} -> ok;
         Other -> Other
     end.
+
+%% Four reads of the whole receive buffer, 64 KiB each, of 256 KiB echoed: stock answers
+%% each with exactly 64 KiB at once, and so must the stack. Its window closes short of the
+%% full buffer when a waiting read counts against it, and only the sender's persist probes,
+%% 5 s apart at the least, then complete the read; the reads must take less than that.
+tcp_whole_buffer(Port) ->
+    case {whole_buffer(erx, Port), whole_buffer(stock, Port)} of
+        {Same, Same} -> ok;
+        Differ -> Differ
+    end.
+
+whole_buffer(Stack, Port) ->
+    Payload = pattern(4 * 65536),
+    Start = erlang:monotonic_time(millisecond),
+    {ok, S} = connect(Stack, Port),
+    _ = spawn(fun() -> gen_tcp:send(S, Payload) end),
+    Reads = [gen_tcp:recv(S, 65536, ?WAIT_MS) || _ <- lists:seq(1, 4)],
+    Ms = erlang:monotonic_time(millisecond) - Start,
+    ok = gen_tcp:close(S),
+    io:format("tcp_whole_buffer_ms ~s ~b~n", [Stack, Ms]),
+    {[size_of(R) || R <- Reads], iolist_to_binary([D || {ok, D} <- Reads]) =:= Payload,
+     {within_persist, Ms < 2500}}.
+
+%% 3000 bytes echoed and the server's close, read 1460 at a time: two full reads, then
+%% `{error, closed}` for the 80 bytes left, on both. Then stock has discarded the 80 bytes
+%% and its read side (`{error, enotconn}`); the stack keeps them for `recv(_, 0)`.
+tcp_short_tail(Port) ->
+    case {short_tail(erx, Port), short_tail(stock, Port)} of
+        {{Same, {ok, 80}}, {Same, {error, enotconn}}} -> ok;
+        Differ -> Differ
+    end.
+
+short_tail(Stack, Port) ->
+    {ok, S} = connect(Stack, Port),
+    ok = gen_tcp:send(S, pattern(3000)),
+    ok = gen_tcp:shutdown(S, write),
+    Reads = [size_of(gen_tcp:recv(S, 1460, ?WAIT_MS)) || _ <- lists:seq(1, 3)],
+    After = size_of(gen_tcp:recv(S, 0, ?WAIT_MS)),
+    ok = gen_tcp:close(S),
+    {Reads, After}.
+
+connect(erx, Port) ->
+    erx_gen_tcp:connect({10, 0, 2, 2}, Port, [binary, {active, false}], ?WAIT_MS);
+connect(stock, Port) ->
+    gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], ?WAIT_MS).
+
+size_of({ok, Data}) -> {ok, byte_size(Data)};
+size_of(Error) -> Error.
 
 pattern(N) ->
     << <<(I rem 251)>> || I <- lists:seq(0, N - 1) >>.

@@ -99,7 +99,8 @@
     sendlog :: erx_tcp_sendlog:log(),
 
     %% Buffers. The send buffer holds the bytes from snd_una on; received bytes leave the
-    %% step in `deliver` actions and stay counted in rcv_buffered until the owner reads them.
+    %% step in `deliver` actions and stay counted in rcv_buffered until they leave the receive
+    %% buffer: read by the owner, or held by a waiting recv.
     sndbuf :: erx_tcp_sndbuf:buf(),
     snd_hiwat :: non_neg_integer(),             % so_snd.sb_hiwat
     snd_lowat :: non_neg_integer(),             % so_snd.sb_lowat: free space that wakes a writer
