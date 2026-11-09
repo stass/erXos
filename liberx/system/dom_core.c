@@ -96,6 +96,7 @@ static bool	dom_system_reserve(const erx_dom_view_t *, const erx_grant_t *);
 static bool	dom_limits_within(const erx_runtime_limits_t *,
 		    const erx_runtime_limits_t *);
 static bool	dom_strings(const erx_dom_spec_t *);
+static bool	dom_name(const erx_dom_spec_t *);
 static bool	dom_reader_lane(const erx_dom_spec_t *, uint64_t *);
 static erx_status_t dom_check_origin(const erx_dom_spec_t *,
 		    const erx_dom_view_t *);
@@ -106,6 +107,7 @@ static void	dom_spec_configured(const erx_dom_view_t *, uint32_t,
 		    uint32_t, erx_dom_spec_t *);
 static void	dom_spec_partial(const erx_dom_view_t *, uint32_t, uint32_t,
 		    erx_dom_spec_t *);
+static void	dom_decimal(uint32_t, erx_dom_spec_t *);
 static erx_status_t dom_plan(const erx_dom_spec_t *, const erx_dom_view_t *,
 		    erx_dom_plan_t *);
 static erx_status_t dom_check_files(const erx_dom_spec_t *,
@@ -300,6 +302,27 @@ dom_strings(const erx_dom_spec_t *spec)
 }
 
 /*
+ * The name is an identifier (docs/design-system.md, "Identifiers"): 1 to
+ * ERX_DOM_NAME_MAX bytes of [a-z0-9._-], the first a letter or digit, so
+ * the node name the boot page carries is ASCII and has one '@'.
+ */
+static bool
+dom_name(const erx_dom_spec_t *spec)
+{
+	char c;
+
+	if (spec->name_len == 0 || spec->name_len > ERX_DOM_NAME_MAX)
+		return (false);
+	for (uint32_t at = 0; at < spec->name_len; at++) {
+		c = spec->name[at];
+		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+		    (at > 0 && (c == '.' || c == '_' || c == '-'))))
+			return (false);
+	}
+	return (true);
+}
+
+/*
  * The data area of the lane the domain reads from the system domain: the
  * smallest power of two holding its lane and the reserve for its
  * connections' control records.
@@ -403,7 +426,7 @@ dom_check_sizes(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 
 	if (spec->memory == 0 || !dom_page_aligned(spec->memory) ||
 	    !dom_page_aligned(spec->outer) || spec->crash != ERX_CRASH_SIZE ||
-	    !dom_strings(spec))
+	    !dom_strings(spec) || !dom_name(spec))
 		return (ERX_EINVAL);
 
 	*reader = 0;
@@ -503,9 +526,10 @@ dom_check_room(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 /*
  * The request constructor: req's fields with every field the library
  * owns set here, and the runtime limits not given taken from the
- * principal's defaults. The strings past the arguments and environment
- * are zeroed, so nothing the caller left there reaches the boot page.
- * ERX_EINVAL when the copy's strings overrun their buffer.
+ * principal's defaults. The strings past the arguments and environment,
+ * and the name's bytes past its length, are zeroed, so nothing the caller
+ * left there reaches the boot page. ERX_EINVAL when the copy's strings or
+ * name overrun their buffer.
  */
 static erx_status_t
 dom_spec_request(const erx_dom_view_t *view,
@@ -516,9 +540,11 @@ dom_spec_request(const erx_dom_view_t *view,
 	size_t used;
 
 	*spec = *req;
-	if ((uint64_t)spec->args_len + spec->env_len > sizeof(spec->strings))
+	if ((uint64_t)spec->args_len + spec->env_len > sizeof(spec->strings) ||
+	    spec->name_len > sizeof(spec->name))
 		return (ERX_EINVAL);
 	used = (size_t)spec->args_len + spec->env_len;
+	memset(spec->name + spec->name_len, 0, sizeof(spec->name) - spec->name_len);
 	spec->version = ERX_DOM_SPEC_VERSION;
 	spec->origin = (erx_dom_origin_t){ ERX_DOM_REQUEST, ERX_MF_NONE };
 	spec->system_lane = view->system_lane;
@@ -544,7 +570,13 @@ dom_spec_request(const erx_dom_view_t *view,
 	return (ERX_OK);
 }
 
-/* The configured constructor: everything from the checked manifest row. */
+/*
+ * The configured constructor: everything from the checked manifest row,
+ * whose name, arguments and environment fit the spec (boot_configured holds
+ * the view's rows to that). The bound on the name is checked again here, as
+ * the copy's own: a name that did not fit would be left empty, which
+ * planning refuses.
+ */
 static void
 dom_spec_configured(const erx_dom_view_t *view, uint32_t id, uint32_t row,
     erx_dom_spec_t *spec)
@@ -569,9 +601,22 @@ dom_spec_configured(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 	spec->connections = source->connections;
 	spec->system_lane = view->system_lane;
 	spec->crash = ERX_CRASH_SIZE;
+	if (source->name_len <= sizeof(spec->name)) {
+		spec->name_len = source->name_len;
+		memcpy(spec->name, source->name, source->name_len);
+	}
+	spec->args_len = source->args_len;
+	spec->env_len = source->env_len;
+	if (source->args_len != 0)
+		memcpy(spec->strings, source->args, source->args_len);
+	if (source->env_len != 0)
+		memcpy(spec->strings + source->args_len, source->env, source->env_len);
 }
 
-/* The partial-boot constructor: the program row and the native limits. */
+/*
+ * The partial-boot constructor: the program row and the native limits. A
+ * native program's row has no name, so its name is its id in decimal.
+ */
 static void
 dom_spec_partial(const erx_dom_view_t *view, uint32_t id, uint32_t row,
     erx_dom_spec_t *spec)
@@ -583,12 +628,29 @@ dom_spec_partial(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 	spec->id = id;
 	spec->principal = view->partial_principal;
 	spec->origin = (erx_dom_origin_t){ ERX_DOM_PARTIAL_BOOT, row };
+	dom_decimal(id, spec);
 	spec->runtime = source->runtime;
 	spec->memory = source->memory;
 	spec->outer = source->outer;
 	spec->grant = source->grant;
 	spec->runtime_limits = view->native_limits;
 	spec->crash = ERX_CRASH_SIZE;
+}
+
+/* id in decimal as spec's name: at most ten digits, which ERX_DOM_NAME_MAX holds. */
+static void
+dom_decimal(uint32_t id, erx_dom_spec_t *spec)
+{
+	char digits[10];
+	uint32_t count = 0;
+
+	do {
+		digits[count++] = (char)('0' + id % 10);
+		id /= 10;
+	} while (id != 0);
+	spec->name_len = count;
+	for (uint32_t at = 0; at < count; at++)
+		spec->name[at] = digits[count - 1 - at];
 }
 
 static void

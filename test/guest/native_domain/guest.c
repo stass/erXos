@@ -226,6 +226,8 @@ request_for(const char *word, uint32_t program, uint32_t connections)
 	request.lane = ERX_LANE_MIN;
 	memcpy(request.strings, word, length);
 	request.args_len = (uint32_t)length;
+	request.name_len = 5;
+	memcpy(request.name, "guest", 5);
 	return (&request);
 }
 

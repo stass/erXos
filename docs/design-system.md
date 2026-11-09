@@ -1032,9 +1032,14 @@ The public request schema has no origin, manifest-row or CPU-parent
 field; supplying one is an unknown-field error. Only the three entries
 build `erx_dom_origin_t`, enforced by a source check with a seeded
 violation. The configured and partial entries are called only from
-manifest startup/restart and root partial-boot entry points,
-respectively, also checked; neither is an operation exposed through a
-domain facet. A numeric index supplied by a requester never selects
+manifest startup/restart and the root partial-boot entry point,
+respectively, which source checks enforce in C. From Erlang the
+configured entry is reached only through the domain library's NIF,
+whose every entry that changes the library answers only the process
+that registered with it, the domain service, and the service calls it
+only from manifest startup and restart: there the rule holds by that
+caller check, not by a check of the Erlang source. Neither is an
+operation exposed through a domain facet. A numeric index supplied by a requester never selects
 manifest authority. The planner checks the origin's range; the
 specification's static fields are the row's by construction, and origin
 metadata does not bypass the ordinary whole-plan checks.

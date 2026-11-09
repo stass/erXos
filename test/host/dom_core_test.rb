@@ -41,7 +41,7 @@ class DomCoreTest < Minitest::Test
   OTHER_CASES = { 'quota_full' => ELIMIT, 'table_full' => ELIMIT, 'connections_full' => ELIMIT,
                   'principal_memory' => ENOMEM, 'ending' => EBUSY }.freeze
   EINVAL_CASES = %w[id_zero id_system id_last id_in_use unknown_flag secret unknown_principal
-                    configured_row_out partial_row_out runtime_out runtime_file runtime_bad
+                    configured_row_out partial_row_out name_empty name_lead name_upper name_long runtime_out runtime_file runtime_bad
                     release_past_end release_empty release_system release_sealed release_image release_wraps
                     memory_zero memory_unaligned outer_small lane_small lane_large connections_over
                     strings_long strings_wrap args_no_nul env_no_nul limits_ceiling
@@ -174,8 +174,9 @@ class DomCoreTest < Minitest::Test
     end
     assert_includes lines, 'ctor request_owned 0 1 1 4294967295 16384 16384 2 0',
                     'a forged origin and library fields are overwritten; the strings tail is zeroed'
-    assert_includes lines, 'ctor configured_owned 0 2 0 1', 'a configured domain goes under system'
-    assert_includes lines, 'ctor partial_owned 0 3 0 4294967295', 'a partial-boot domain has no connection row'
+    assert_includes lines, 'ctor configured_owned 0 2 0 1 srv', 'a configured domain goes under system, named by its row'
+    assert_includes lines, 'ctor partial_owned 0 3 0 4294967295 7',
+                    'a partial-boot domain has no connection row and its id for a name'
   end
 
   # A7: a plan that installs a foreign gate, or more rights than its grants

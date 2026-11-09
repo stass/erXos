@@ -118,6 +118,9 @@ typedef struct fuzz_input {
 	erx_runtime_limits_t	limits;
 	uint32_t		given, id, row;
 	erx_dom_configured_t	configured;
+	/* The manifest strings the configured row points into (fuzz_row_strings). */
+	char			names[ERX_DOM_NAME_MAX];
+	char			strings[ERX_BOOT_STRINGS_MAX];
 	erx_dom_partial_t	partial;
 	/* The entries after creation: their records, rows and arguments. */
 	erx_dom_t		doms[3];
@@ -142,6 +145,30 @@ typedef struct fuzz_input {
  * by its range, and undoes every object it made; a principal's record
  * starts with no counts.
  */
+/*
+ * The configured row as the boot view holds it: its name, arguments and
+ * environment point into the manifest's strings, and boot_configured held
+ * their lengths to ERX_DOM_NAME_MAX and ERX_BOOT_STRINGS_MAX. Patches choose
+ * the lengths and the bytes, never the pointers, so these are set again
+ * after the patches, into the input's own strings, and the lengths held to
+ * them.
+ */
+static void
+fuzz_row_strings(fuzz_input_t *in)
+{
+	erx_dom_configured_t *row = &in->configured;
+
+	if (row->name_len > sizeof(in->names))
+		row->name_len = sizeof(in->names);
+	if (row->args_len > sizeof(in->strings))
+		row->args_len = sizeof(in->strings);
+	if (row->env_len > sizeof(in->strings) - row->args_len)
+		row->env_len = (uint32_t)(sizeof(in->strings) - row->args_len);
+	row->name = in->names;
+	row->args = in->strings;
+	row->env = in->strings + row->args_len;
+}
+
 static void
 fuzz_life(const fuzz_input_t *in, bool connect)
 {
@@ -360,7 +387,8 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		.req = { .id = 5, .principal = 1, .release = 2,
 		    .release_files = 2, .memory = 4 * FUZZ_MIB, .outer = FUZZ_MIB,
 		    .grant = fuzz_grant(UINT64_C(10000000), 0x3), .lane = 65536,
-		    .connections = 2, .args_len = 2, .strings = "a" },
+		    .connections = 2, .args_len = 2, .strings = "a",
+		    .name_len = 3, .name = "dom" },
 		.limits = fuzz_limits(1), .given = 0, .id = 6, .row = 0,
 		.configured = { .principal = 1, .flags = ERX_DOM_SPACES,
 		    .release = 2, .release_files = 2, .runtime = 1,
@@ -368,7 +396,8 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .grant = fuzz_grant(UINT64_C(5000000), 0x3),
 		    .spaces = fuzz_grant(UINT64_C(2500000), 0x1),
 		    .runtime_limits = fuzz_limits(1), .lane = 65536,
-		    .connections = 2 },
+		    .connections = 2, .name_len = 3 },
+		.names = "srv",
 		.partial = { .runtime = 0, .memory = FUZZ_MIB, .outer = 64 * 1024,
 		    .grant = fuzz_grant(UINT64_C(1000000), 0x1) },
 		.doms = { { .id = 5, .state = ERX_DOM_RUNNING, .budget = { 51 },
@@ -423,6 +452,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		memcpy(target + offset, bytes + at, count);
 		at += count;
 	}
+	fuzz_row_strings(&in);
 
 	/* Each run starts from the same records; a record writes only these. */
 	memcpy(domains, fuzz_domains, sizeof(domains));

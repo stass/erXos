@@ -45,6 +45,7 @@ static bool	boot_place(size_t *, size_t, size_t, uint32_t, size_t *);
 static bool	boot_limits(const erx_manifest_view_t *, uint32_t, erx_runtime_limits_t *);
 static const char *boot_principals(erx_dom_lib_t *, const erx_manifest_view_t *,
 		    const erx_dom_boot_tables_t *);
+static const char *boot_places(erx_dom_configured_t *, uint32_t, const erx_manifest_view_t *);
 static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_configured_t *);
 
@@ -168,6 +169,27 @@ boot_principals(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, const e
 	return (NULL);
 }
 
+/*
+ * Each row's place in the boot order, which the check computed (property 10)
+ * and the packer wrote: every configured row exactly once, so the domain
+ * service walks the rows in that order by place.
+ */
+static const char *
+boot_places(erx_dom_configured_t *configured, uint32_t nconfigured, const erx_manifest_view_t *manifest)
+{
+	erx_mf_boot_order_t step;
+
+	if (manifest->header.boot_order.count != nconfigured)
+		return ("manifest: the boot order does not place every configured domain");
+	for (uint32_t place = 0; place < nconfigured; place++) {
+		if (!erx_manifest_boot_order_at(manifest, place, &step) || step.domain >= nconfigured ||
+		    configured[step.domain].place != UINT32_MAX)
+			return ("manifest: the boot order does not place every configured domain once");
+		configured[step.domain].place = place;
+	}
+	return (NULL);
+}
+
 /* Each configured-domain row, its limits resolved from its limits record. */
 static const char *
 boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_configured_t *configured)
@@ -175,6 +197,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 	erx_mf_domain_t domain;
 	erx_mf_limits_t profile;
 	erx_dom_configured_t *row;
+	const char *strings;
 
 	view->configured = configured;
 	view->nconfigured = 0;
@@ -192,9 +215,25 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		    .spaces = profile.spaces, .lane = profile.lane, .connections = profile.connections };
 		if (!boot_limits(manifest, domain.limits, &row->runtime_limits))
 			return ("manifest: a configured domain names no limits record");
+		if (domain.name.length == 0 || domain.name.length > ERX_DOM_NAME_MAX)
+			return ("manifest: a configured domain's name is not 1 to 63 bytes");
+		if ((uint64_t)domain.args.length + domain.env.length > ERX_BOOT_STRINGS_MAX)
+			return ("manifest: a configured domain's arguments and environment exceed the boot page's strings");
+		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
+		strings = (const char *)manifest->bytes + manifest->header.strings.offset;
+		row->name = strings + domain.name.offset;
+		row->name_len = domain.name.length;
+		row->args = strings + domain.args.offset;
+		row->args_len = domain.args.length;
+		row->env = strings + domain.env.offset;
+		row->env_len = domain.env.length;
+		row->kind = domain.kind;
+		row->restarts = domain.restarts;
+		row->restart_period_s = domain.restart_period_s;
+		row->place = UINT32_MAX;
 		view->nconfigured = index + 1;
 	}
-	return (NULL);
+	return (boot_places(configured, view->nconfigured, manifest));
 }
 
 const char *

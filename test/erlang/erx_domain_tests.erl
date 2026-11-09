@@ -1,0 +1,165 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% EUnit cases of the domain service: erx_ident's rule, erx_domain_core's ids,
+%% names and lives, and erx_domain_srv over erx_domain_fake_lib.
+-module(erx_domain_tests).
+-include_lib("eunit/include/eunit.hrl").
+
+ident(Name) -> erx_ident:new(Name).
+
+ident_test() ->
+    [?assertEqual(Name, erx_ident:to_binary(ident(Name))) || Name <- [<<"a">>, <<"web">>, <<"alice.1">>, <<"x_y-z">>]],
+    [?assertEqual({error, bad_identifier}, ident(Bad))
+     || Bad <- [<<>>, <<"Web">>, <<".a">>, <<"-a">>, <<"a b">>, <<"a@b">>, <<"caf", 195, 169>>,
+                binary:copy(<<"a">>, 64), "web", web]],
+    ?assertEqual(<<"a">>, erx_ident:to_binary(ident(binary:copy(<<"a">>, 1)))),
+    ?assertMatch({erx_ident, _}, ident(binary:copy(<<"a">>, 63))).
+
+admit(Name, Principal, Origin, Core) ->
+    {ok, Domain, Next} = erx_domain_core:admit(ident(Name), Principal, Origin, Core),
+    {Domain, Next}.
+
+%% Runs a domain through its life to retired.
+live(Name, Core0) ->
+    {#{id := Id} = Domain, Core1} = admit(Name, 1, request, Core0),
+    Core2 = erx_domain_core:running(Id, erx_domain_core:built(Id, 7, self(), make_ref(), Core1)),
+    {stopped, _, Core3} = erx_domain_core:ended(Id, {stopped, 0}, 0, Core2),
+    {Domain, erx_domain_core:retired(Id, Core3)}.
+
+%% D1: ids start above the system domain's 4, increase, and are never reused,
+%% whether a creation succeeded or was refused.
+ids_increase_test() ->
+    Core0 = erx_domain_core:new(<<"erxos">>),
+    {#{id := 5, node := 'web@erxos'}, Core1} = live(<<"web">>, Core0),
+    {#{id := 6}, Core2} = admit(<<"web">>, 1, request, Core1),
+    Core3 = erx_domain_core:failed(6, Core2),
+    {#{id := 7, node := 'web@erxos'}, _} = admit(<<"web">>, 1, request, Core3).
+
+names_test() ->
+    Core0 = erx_domain_core:new(<<"erxos">>),
+    {#{id := Id}, Core1} = admit(<<"web">>, 1, request, Core0),
+    ?assertEqual({error, name_taken}, erx_domain_core:admit(ident(<<"web">>), 1, request, Core1)),
+    Core2 = erx_domain_core:failed(Id, Core1),
+    %% The name stays the first principal's for the boot.
+    ?assertEqual({error, name_taken}, erx_domain_core:admit(ident(<<"web">>), 2, request, Core2)),
+    {_, _} = admit(<<"web">>, 1, request, Core2).
+
+names_quota_test() ->
+    Core = lists:foldl(fun(N, Acc) ->
+                               {#{id := Id}, Next} = admit(integer_to_binary(N), 2, request, Acc),
+                               erx_domain_core:failed(Id, Next)
+                       end, erx_domain_core:new(<<"erxos">>), lists:seq(1, 64)),
+    ?assertEqual({error, quota}, erx_domain_core:admit(ident(<<"one-more">>), 2, request, Core)),
+    %% A name bound already is no new atom, and the quota does not hold it back.
+    {_, _} = admit(<<"1">>, 2, request, Core),
+    %% The manifest's rows are outside the quota.
+    {_, _} = admit(<<"one-more">>, 2, {configured, 0}, Core).
+
+life_test() ->
+    Core0 = erx_domain_core:new(<<"erxos">>),
+    {#{id := Id}, Core1} = admit(<<"a">>, 1, request, Core0),
+    ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, 0, Core1)),
+    ?assertError({badmatch, _}, erx_domain_core:running(Id, Core1)),
+    Core2 = erx_domain_core:built(Id, 0, self(), make_ref(), Core1),
+    ?assertMatch({ok, #{id := Id}}, erx_domain_core:find_pid(self(), Core2)),
+    {{halt, 3}, _, Core3} = erx_domain_core:ended(Id, {halt, 3}, 9, Core2),
+    ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, 0, Core3)),
+    ?assertMatch([#{id := Id, info := {halt, 3}, at := 9}], erx_domain_core:deaths(1, Core3)),
+    [?assertEqual(Info, erx_domain_core:info(End))
+     || {End, Info} <- [{{halt, 1}, {halt, 1}}, {{crash, 5}, crash}, {{fault, 2}, {fault, 2}}, {{stopped, 0}, stopped}]].
+
+deaths_kept_test() ->
+    Core = lists:foldl(fun(_, Acc) -> element(2, live(<<"d">>, Acc)) end,
+                       erx_domain_core:new(<<"erxos">>), lists:seq(1, 20)),
+    Deaths = erx_domain_core:deaths(1, Core),
+    ?assertEqual(16, length(Deaths)),
+    ?assertMatch([#{id := 24} | _], Deaths).
+
+restart_test() ->
+    Core0 = erx_domain_core:new(<<"erxos">>),
+    {yes, Core1} = erx_domain_core:restart(0, 2, 10, 100, Core0),
+    {yes, Core2} = erx_domain_core:restart(0, 2, 10, 105, Core1),
+    {no, Core3} = erx_domain_core:restart(0, 2, 10, 109, Core2),
+    {yes, _} = erx_domain_core:restart(0, 2, 10, 111, Core3),
+    {no, _} = erx_domain_core:restart(1, 0, 10, 100, Core0).
+
+%% The service over the stand-in: configured domains in boot order, a create,
+%% a stop, a kill, {domain_down, Id, Info} at the domain pid's monitors, and a
+%% configured domain's restarts within its intensity.
+service_test_() ->
+    {setup,
+     fun() ->
+             Log = erx_domain_fake_lib:start_log(),
+             {ok, Table} = erx_domain_table:start_link(),
+             unlink(Table),
+             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib}),
+             unlink(Service),
+             {Log, Table, Service}
+     end,
+     fun({Log, Table, Service}) ->
+             exit(Service, kill),
+             exit(Table, kill),
+             exit(Log, kill)
+     end,
+     fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0]} end}.
+
+next_call() ->
+    erx_domain_fake_lib:next_call().
+
+boot_order() ->
+    %% Row 1 (a) is first in the boot order, so it takes id 5.
+    ?assertEqual({configured, 5, 1}, next_call()),
+    ?assertEqual({start, 5}, next_call()),
+    ?assertEqual({configured, 6, 0}, next_call()),
+    ?assertEqual({start, 6}, next_call()).
+
+create_stop_kill() ->
+    Spec = #{name => <<"web">>, memory => 4096},
+    ?assertEqual({error, bad_identifier}, erx_domain:create(Spec#{name => <<"Web">>})),
+    ?assertEqual({error, {bad_spec, id}}, erx_domain:create(Spec#{id => 4})),
+    ?assertEqual({error, no_memory}, erx_domain:create(Spec#{memory => 1})),
+    ?assertEqual({error, name_taken}, erx_domain:create(Spec#{name => <<"a">>})),
+    {ok, Domain} = erx_domain:create(Spec),
+    Id = erx_domain:id(Domain),
+    %% Id 7 went to the request the library refused, which spends its id; one
+    %% refused before admission spends none.
+    ?assertEqual(8, Id),
+    ?assertEqual('web@erxos', erx_domain:node(Domain)),
+    ?assertMatch({create, #{id := 8, name := <<"web">>, principal := 1, memory := 4096}}, next_call()),
+    ?assertEqual({start, 8}, next_call()),
+    Ref = monitor(process, erx_domain:pid(Domain)),
+    %% A normal exit signal is ignored, as by a process that does not trap exits.
+    ok = erx_domain:stop(Domain, normal),
+    ok = erx_domain:stop(Domain, shutdown),
+    ?assertEqual({stop, 8}, next_call()),
+    ?assertEqual({disconnect, 80}, next_call()),
+    ?assertEqual({retire, 8}, next_call()),
+    Down = receive {'DOWN', Ref, process, _, Reason} -> Reason after 5000 -> timeout end,
+    ?assertEqual({domain_down, 8, stopped}, Down),
+    %% The name is free again at the domain's end; kill ends the pid at once.
+    {ok, Again} = erx_domain:create(Spec),
+    ?assertEqual(9, erx_domain:id(Again)),
+    _ = [next_call(), next_call()],
+    Ref2 = monitor(process, erx_domain:pid(Again)),
+    ok = erx_domain:stop(Again, kill),
+    ?assertEqual(killed, receive {'DOWN', Ref2, process, _, R2} -> R2 after 5000 -> timeout end),
+    ?assertEqual({stop, 9}, next_call()),
+    ?assertEqual({disconnect, 90}, next_call()),
+    ?assertEqual({retire, 9}, next_call()).
+
+configured_restart() ->
+    %% Row 0 (b, id 6) may restart once a minute: its first end restarts it
+    %% under the next id, keeping its name.
+    erx_domain_srv ! {domain_ended, 6, {halt, 1}, #{}},
+    ?assertEqual({disconnect, 60}, next_call()),
+    ?assertEqual({retire, 6}, next_call()),
+    ?assertEqual({configured, 10, 0}, next_call()),
+    ?assertEqual({start, 10}, next_call()),
+    %% Its second end within the minute is final: the next call the library
+    %% sees is a request's create, which takes the next id.
+    erx_domain_srv ! {domain_ended, 10, {halt, 1}, #{}},
+    ?assertEqual({disconnect, 100}, next_call()),
+    ?assertEqual({retire, 10}, next_call()),
+    {ok, _} = erx_domain:create(#{name => <<"after">>, memory => 4096}),
+    ?assertMatch({create, #{id := 11}}, next_call()).

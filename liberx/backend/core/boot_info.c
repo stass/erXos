@@ -269,7 +269,7 @@ erx_boot_info_reason(erx_boot_info_status_t status)
 	case ERX_BOOT_INFO_BOUNDS:
 		return ("a string outside the page");
 	case ERX_BOOT_INFO_NODE:
-		return ("a node name not of the form <id>@<host>");
+		return ("a node name not of the form <name>@<host>");
 	case ERX_BOOT_INFO_WORDS:
 		return ("an empty word, or a list not ended by a NUL");
 	case ERX_BOOT_INFO_ENV:

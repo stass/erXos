@@ -24,10 +24,8 @@
 #include "liberx/system/dom_apply.h"
 #include "liberx/system/dom_install.h"
 
-/* A domain id's decimal digits: at most ten for 32 bits. */
-#define APPLY_ID_DIGITS	10u
-/* A domain's node name: its id in decimal, '@', and the host. */
-#define APPLY_NODE_MAX	(APPLY_ID_DIGITS + 1u + ERX_DOM_HOST_MAX)
+/* A domain's node name: its name, '@', and the host. */
+#define APPLY_NODE_MAX	(ERX_DOM_NAME_MAX + 1u + ERX_DOM_HOST_MAX)
 /* A handle no table holds: what a step gets for an object no creation names. */
 #define APPLY_NO_HANDLE	UINT64_MAX
 
@@ -71,7 +69,7 @@ static uint64_t	apply_object(const apply_t *, erx_dom_obj_t);
 static int	apply_step(apply_t *, const erx_dom_step_t *);
 static int	apply_map(apply_t *, const erx_dom_step_t *);
 static int	apply_install(apply_t *, const erx_dom_step_t *);
-static bool	apply_node(const erx_dom_lib_t *, uint32_t, char *, size_t *);
+static bool	apply_node(const erx_dom_lib_t *, const erx_dom_spec_t *, char *, size_t *);
 static int	apply_bootinfo(apply_t *);
 static int	apply_thread(apply_t *, const erx_dom_step_t *);
 static int	apply_group(apply_t *, const erx_dom_step_t *);
@@ -325,27 +323,20 @@ apply_install(apply_t *apply, const erx_dom_step_t *step)
 }
 
 /*
- * The domain's node name into node (APPLY_NODE_MAX bytes): its id in
- * decimal, '@', and the library's host. False for a host longer than
+ * The domain's node name into node (APPLY_NODE_MAX bytes): its name,
+ * which planning checked is an identifier, '@', and the library's host.
+ * False for a name longer than ERX_DOM_NAME_MAX or a host longer than
  * ERX_DOM_HOST_MAX, which the caller set.
  */
 static bool
-apply_node(const erx_dom_lib_t *lib, uint32_t id, char *node, size_t *len)
+apply_node(const erx_dom_lib_t *lib, const erx_dom_spec_t *spec, char *node, size_t *len)
 {
-	char digits[APPLY_ID_DIGITS];
-	size_t count = 0, used = 0;
-
-	if (lib->host_len > ERX_DOM_HOST_MAX)
+	if (spec->name_len > ERX_DOM_NAME_MAX || lib->host_len > ERX_DOM_HOST_MAX)
 		return (false);
-	do {
-		digits[count++] = (char)('0' + id % 10);
-		id /= 10;
-	} while (id != 0);
-	while (count > 0)
-		node[used++] = digits[--count];
-	node[used++] = '@';
-	memcpy(node + used, lib->host, lib->host_len);
-	*len = used + lib->host_len;
+	memcpy(node, spec->name, spec->name_len);
+	node[spec->name_len] = '@';
+	memcpy(node + spec->name_len + 1, lib->host, lib->host_len);
+	*len = spec->name_len + 1 + lib->host_len;
 	return (true);
 }
 
@@ -363,7 +354,7 @@ apply_bootinfo(apply_t *apply)
 	uint64_t addr;
 	int status;
 
-	if (!apply_node(apply->lib, spec->id, node, &inputs.node_len))
+	if (!apply_node(apply->lib, spec, node, &inputs.node_len))
 		return (ERX_EINVAL);
 	inputs.node = node;
 	inputs.domain_id = spec->id;

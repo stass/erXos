@@ -62,15 +62,19 @@ module Erx
         # and fuzz target judge the entry.
         Chokepoints::Forbidden.new(
           name: 'dom-manifest-entries',
-          rule: "only manifest startup and restart (#{DOM_BOOT}) call erx_dom_plan_configured or its applying " \
-                'entry erx_dom_lib_configured; no domain facet reaches either',
+          rule: "only manifest startup and restart (#{DOM_BOOT}, and the domain service through #{DOM_NIF}) " \
+                'call erx_dom_plan_configured or its applying entry erx_dom_lib_configured; no domain facet ' \
+                'reaches either',
           design: 'docs/design-system.md#the-domain-library',
           scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
           pattern: /\berx_dom_(?:plan|lib)_configured\b/,
-          sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER].map { |path| Chokepoints::Site.new(glob: path) },
+          # The NIF's configured entry is the one way from Erlang to it, and it
+          # refuses every caller but the library's registered process, the
+          # domain service. task_refused.c is the backend's refusing stub.
+          sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER, DOM_NIF,
+                  'liberx/backend/fiasco/task_refused.c'].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
-                  'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
-                    "status = erx_dom_lib_configured(lib, id, row, &created);\n" }
+                  'liberx/system/dom_life.c' => "status = erx_dom_lib_configured(lib, id, row, &created);\n" }
         ),
         # The apply phase runs a plan only from the library's own entries,
         # which planned it: no other file names erx_dom_lib_apply, so no

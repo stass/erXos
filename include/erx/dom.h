@@ -41,6 +41,8 @@
 #define ERX_DOM_SYSTEM_ID	4u
 /* The last id the domain service's counter hands out. */
 #define ERX_DOM_ID_MAX		UINT32_C(0xfffffffe)
+/* A domain name, an identifier (docs/design-system.md, "Identifiers"): 1 to this many bytes. */
+#define ERX_DOM_NAME_MAX	63u
 
 /* Origin kinds; zero is no origin, so a zeroed origin fails planning. */
 #define ERX_DOM_REQUEST		1u
@@ -185,13 +187,16 @@ typedef struct erx_dom_device_entry {
 /*
  * A creation specification: the domain service's description of a domain,
  * a fixed layout built only by an origin constructor
- * (docs/design-system.md, "The domain library"). strings holds args_len
+ * (docs/design-system.md, "The domain library"). name is the domain's
+ * identifier, its node name before the @ and the host. strings holds args_len
  * bytes of NUL-separated arguments, then env_len bytes of NUL-separated
  * environment.
  */
 typedef struct erx_dom_spec {
 	uint32_t	version;	/* ERX_DOM_SPEC_VERSION */
 	uint32_t	id;		/* allocated by the domain service; nonzero, unused */
+	uint32_t	name_len;	/* 1 to ERX_DOM_NAME_MAX */
+	char		name[ERX_DOM_NAME_MAX];
 	uint32_t	principal;
 	erx_dom_origin_t origin;	/* set by the library's origin constructor */
 	uint32_t	flags;		/* ERX_DOM_SECRET, ERX_DOM_SPACES */
@@ -250,6 +255,18 @@ typedef struct erx_dom_configured {
 	erx_grant_t	grant, spaces;
 	erx_runtime_limits_t runtime_limits;
 	uint32_t	lane, connections;
+	/* What the domain service reads of the row (erx_domain_lib:configured/0). */
+	const char	*name;		/* an identifier in the manifest's strings, */
+	uint32_t	name_len;	/* which outlive the view; <= ERX_DOM_NAME_MAX */
+	uint32_t	kind;		/* ERX_MF_SERVICE or ERX_MF_SECRET */
+	uint32_t	restarts;	/* its restart intensity: at most restarts */
+	uint32_t	restart_period_s; /* within this many seconds */
+	uint32_t	place;		/* its place in the boot order, from 0 */
+	/* Its arguments and environment, NUL-terminated words in the manifest's
+	 * strings as a request's are in its own; args_len + env_len <=
+	 * ERX_BOOT_STRINGS_MAX. A pointer is NULL only with its length 0. */
+	const char	*args, *env;
+	uint32_t	args_len, env_len;
 } erx_dom_configured_t;
 
 /* A checked native program row of a partial-boot manifest. */

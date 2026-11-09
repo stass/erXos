@@ -894,11 +894,75 @@ it; git history is the record of completed work.
 * [Medium] domain library NIFs, `otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c`
   (`fault_main`): an end is lost for good when no process is registered (a domain the root
   made before the domain service registered, or one that ends between a domain-service crash
-  and its next `register/1`) or when the registered process is dead. The library has already
+  and its next `register/0`) or when the registered process is dead. The library has already
   torn the domain down, so its ended record keeps its view slot and its principal's domain
   count, and `retire/1` needs an id nobody heard. Keep a reported flag per record in the
-  view, set when the report is sent, and have `register/1` re-send every ended record not
+  view, set when the report is sent, and have `register/0` re-send every ended record not
   yet reported.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: an end or a
+  stop request that reaches the service while it is down is lost. An end goes with the
+  library's record (the item above); a domain pid's `{stop_request, Ref, Id}` goes to the dead
+  service's pid until the restarted service relinks. The restarted service should ask the
+  library for every ended record it has not retired (a NIF that lists them) and stop every
+  domain whose pid asked while it was down.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`create/2`):
+  `erx_domain:create/1` takes the domain library's own request fields (the boot image's
+  runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang
+  interface" has a spec of a release name and a resource policy compute them. Replace the
+  fields once release lookup by name and the resource policy exist.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`):
+  `create/1` answers once the domain's first thread starts, not on the domain's ready report,
+  and `boot_timeout` (design-domains.md "Erlang interface") is not implemented, so a domain
+  whose runtime never comes up still counts as created. Wait for the ready report, with the
+  timeout, once runtimes send it.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names
+  quota is fixed at 64 per principal, not the manifest principal's own field, which the
+  library's view does not expose yet. Expose it in `configured/0` (or a principal entry) and
+  use it.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`
+  (`start_configured/2`, `restart/2`): a configured domain that fails to start, or ends
+  beyond its restart intensity, is only logged, also when the manifest marks it `required`,
+  which `configured/0` does not report yet; design-system.md has a required domain end the
+  machine as a fault would. Report the mark and end the machine on it.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: the service
+  trusts every system-domain process. It acts on any `{domain_ended, Id, End, Record}` and
+  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain;
+  and while it is down between a crash and its restart, any process that calls
+  `erx_domain_lib:register/0` first becomes the library's one driver, and the restarted
+  service then fails on `ebusy` until the supervisor gives up. Tag the library's reports
+  with a secret the NIF hands the registrant, and bind registration to the service's
+  identity (its table holder, or `enif_whereis_pid` of `erx_domain_srv`).
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`,
+  `handle_continue/2`): the table is written after the library's create and start return,
+  and the boot's fold saves only at its end, so a service killed between a library call and
+  its save loses a built domain (its later end is ignored and never retired) and re-admits
+  its id, and one killed mid-boot never starts the remaining configured rows. Save the
+  `building` record and the boot's progress before each library call, and on restart
+  resolve `building` records by id and resume unstarted rows.
+* [Medium] domain service, `test/erlang/erx_domain_tests.erl`: nothing tests the service
+  restarting from its table (reclaiming it, relinking the domain pids, ids still increasing,
+  an end after the restart retired), the table holder's end shutting the supervisor down, or
+  the `ebusy` and `erights` answers, which the stand-in library never gives. Add a
+  kill-and-restart case and a stand-in that refuses.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_ident.erl` and OTP's
+  `net_kernel.erl` (`valid_name_head`): an identifier may hold `.`, which stock net_kernel
+  refuses in a node name, so a domain named `alice.1` (the design's pooled-name form) boots
+  with an `-sname` its own distribution refuses to start. Allow `.` in net_kernel's name rule
+  (with a test), or drop it from identifiers and pooled names.
+* [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl` (`admit/4`): a
+  request name of the pooled form (`<ident>.<digits>`) is not refused with `name_taken`, as
+  design-system.md "Identifiers" says; where the root built no library the service still
+  admits a name under an empty host and makes an atom such as `'web@'` before the create is
+  refused; and `restart_period_s 0` reads as no limit. Refuse the pooled form, refuse before
+  admission when there is no library, and decide the meaning of period 0.
+* [Low] domain library, `include/erx/dom_lib.h` (`ERX_DOM_HOST_MAX`): the host bound is 64
+  bytes and `dom_boot_view.c` checks only its length, where design-system.md has the host an
+  identifier of at most 63. Check the host with the identifier rule and bound it at 63.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_ident.erl`: identifiers are an
+  opaque type checked at `erx_ident:new/1`, and Dialyzer is the only check that no other
+  module builds one. design-system.md "Identifiers" has a build check over the system
+  domain's syntax trees fail on a record expression that builds a named record outside its
+  owning module; add it (as `tools/lib/erx/ns_writers.rb` checks its Erlang rules).
 * [Medium] domain library NIFs, `otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c`
   (`fault_main`): the fault thread waits at the gate with `ERX_WAIT_FOREVER`, while
   design-system.md A3 has its wait time out to check the ending record's deadline; add the

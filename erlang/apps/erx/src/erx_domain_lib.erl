@@ -8,7 +8,7 @@ The domain service's way into the system domain's domain library
 liberx's erx_dom_lib entries, under the library's one lock.
 
 The library reports with one kind of message, which its fault thread sends
-to the process register/1 named, once a domain has ended and its own budget
+to the process that called register/0, once a domain has ended and its own budget
 is gone:
 
     {domain_ended, Id, {Kind, Status}, Record}
@@ -21,19 +21,23 @@ return value of the call that caused it.
 A refused call is {error, Name}, Name the ABI file's status name with an
 e before it (einval, enomem, ebusy, enotsup), or {error, {status, N}} for
 a status the ABI file does not name. Where the root built no library,
-every well-formed call but register/1 is {error, enotsup}. A hosted
+every well-formed call but register/0 is {error, enotsup}. A hosted
 runtime links no domain library, so this module does not load there; nor
 does it load a second time, since its library, lock and fault thread live
 as long as the system domain.
+
+The registered process, the domain service, is also the only one that may
+change the library: create/1, configured/2, start/1, stop/2, retire/1,
+connect/4 and disconnect/1 answer {error, erights} to any other caller.
 """.
 
--export([register/1, create/1, start/1, stop/2, retire/1, connect/4, disconnect/1,
-         code_object/2, code_drop/2]).
--nifs([register_nif/1, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, connect_nif/4,
-       disconnect_nif/1]).
+-export([register/0, create/1, start/1, stop/2, retire/1, connect/4, disconnect/1,
+         configured/0, configured/2, code_object/2, code_drop/2]).
+-nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, connect_nif/4,
+       disconnect_nif/1, configured_nif/0, configured_create_nif/2]).
 -on_load(on_load/0).
 
--export_type([spec/0, created/0, error/0]).
+-export_type([spec/0, created/0, error/0, configured/0]).
 
 -type error() :: {error, atom() | {status, integer()}}.
 -type grant() :: #{quota_ns := non_neg_integer(), cpuset := non_neg_integer(),
@@ -46,7 +50,8 @@ as long as the system domain.
                     peer_held_total => non_neg_integer()}.
 -doc """
 An admitted request (erx_dom_spec_t): the domain's id, which the domain
-service allocates, its principal, the boot image's indexes of its runtime
+service allocates, its name, the identifier its node name carries before
+the @ and the host, its principal, the boot image's indexes of its runtime
 image and its release's first file with the release's file count, its own
 and outer budgets' bytes, its group's grant, its lane's data area, and its
 arguments and environment as NUL-ended strings. Optional are its
@@ -58,7 +63,7 @@ here, a value of the wrong kind or width, or strings beyond the boot page's
 room is badarg; the library validates every value against its view before
 it makes anything.
 """.
--type spec() :: #{id := pos_integer(), principal := pos_integer(), runtime := non_neg_integer(),
+-type spec() :: #{id := pos_integer(), name := binary(), principal := pos_integer(), runtime := non_neg_integer(),
                   release := non_neg_integer(), release_files := non_neg_integer(),
                   memory := non_neg_integer(), outer := non_neg_integer(), grant := grant(),
                   lane := non_neg_integer(), args := binary(), env := binary(),
@@ -68,20 +73,31 @@ it makes anything.
 -type created() :: #{id := pos_integer(), connection := non_neg_integer(), side := non_neg_integer(),
                      peer_side := non_neg_integer(), bell := non_neg_integer()}.
 
+-doc """
+A configured domain of the system manifest: its row in the manifest's domain
+table, its place in the boot order (from 0), its name, an identifier the
+manifest check accepted, its principal, its kind, and its restart intensity:
+at most restarts restarts within restart_period_s seconds.
+""".
+-type configured() :: #{row := non_neg_integer(), place := non_neg_integer(), name := binary(),
+                        principal := pos_integer(), kind := service | secret,
+                        restarts := non_neg_integer(), restart_period_s := non_neg_integer()}.
+
 on_load() ->
     erlang:load_nif(atom_to_list(?MODULE), #{}).
 
 -doc """
-Names Pid as the process that hears of every end. While another
-registered process is alive the answer is {error, ebusy}.
+Makes the caller the process that hears of every end and the one that may
+change the library. While another registered process is alive the answer
+is {error, ebusy}.
 """.
--spec register(pid()) -> ok | error().
-register(Pid) ->
-    register_nif(Pid).
+-spec register() -> ok | error().
+register() ->
+    register_nif().
 
 -doc """
-Plans and builds a domain from Spec. A create before register/1 is
-{error, einval}, so no end goes unheard. A refused step undoes every step
+Plans and builds a domain from Spec. A create by any process but the
+registered one is {error, erights}, so no end goes unheard. A refused step undoes every step
 before it.
 """.
 -spec create(spec()) -> {ok, created()} | error().
@@ -118,6 +134,24 @@ connect(A, B, AReads, BReads) ->
 disconnect(Number) ->
     disconnect_nif(Number).
 
+-doc """
+What the domain service reads of the system manifest at boot: the machine's
+host name and the configured domains, in row order.
+""".
+-spec configured() -> {ok, #{host := binary(), domains := [configured()]}} | error().
+configured() ->
+    configured_nif().
+
+-doc """
+Manifest startup and restart: builds configured row Row under id Id, as
+create/1 builds a request's domain. The domain service calls it from its
+manifest startup and restart with a row configured/0 gave, never a row a
+request names.
+""".
+-spec configured(pos_integer(), non_neg_integer()) -> {ok, created()} | error().
+configured(Id, Row) ->
+    configured_create_nif(Id, Row).
+
 -doc "A session's code object: {error, enotsup} until sessions exist.".
 -spec code_object(pos_integer(), non_neg_integer()) -> {ok, map()} | error().
 code_object(_Session, _Size) ->
@@ -128,7 +162,7 @@ code_object(_Session, _Size) ->
 code_drop(_Session, _Number) ->
     {error, enotsup}.
 
-register_nif(_Pid) ->
+register_nif() ->
     erlang:nif_error(undef).
 
 create_nif(_Spec) ->
@@ -147,4 +181,10 @@ connect_nif(_A, _B, _AReads, _BReads) ->
     erlang:nif_error(undef).
 
 disconnect_nif(_Number) ->
+    erlang:nif_error(undef).
+
+configured_nif() ->
+    erlang:nif_error(undef).
+
+configured_create_nif(_Id, _Row) ->
     erlang:nif_error(undef).

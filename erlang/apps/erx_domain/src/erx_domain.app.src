@@ -1,0 +1,21 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The domain service (docs/design-system.md, "System services"): domain ids,
+%% names, domain pids, the domains the system manifest configures, and
+%% erx_domain, the interface other processes create and stop domains through. It
+%% runs in the system domain only, whose release alone ships it.
+{application, erx_domain,
+ [{description, "erXos domain service"},
+  {vsn, "1"},
+  {modules, [erx_domain,
+             erx_domain_app,
+             erx_domain_core,
+             erx_domain_pid,
+             erx_domain_srv,
+             erx_domain_sup,
+             erx_domain_table,
+             erx_ident]},
+  {registered, [erx_domain_sup, erx_domain_srv, erx_domain_table]},
+  {applications, [kernel, stdlib, erx]},
+  {mod, {erx_domain_app, []}}]}.

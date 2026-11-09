@@ -20,9 +20,11 @@ class ChokepointsDomTest < Minitest::Test
                                      Rules::DOM_APPLY => "/* not erx_dom_plan_configured */\nx;\n" })
     found = evaluate(entries, { Rules::DOM_APPLY => "x;\n#{CONFIGURED_CALL}" })
     assert_equal ['dom-manifest-entries: liberx/system/dom_apply.c:2'], found.map { |v| "#{v.rule}: #{v.path}:#{v.line}" }
-    refute_empty evaluate(entries, { Rules::DOM_NIF => CONFIGURED_CALL })
-    # The applying entry is manifest authority too: a NIF that hands it a row is refused.
-    refute_empty evaluate(entries, { Rules::DOM_NIF => "status = erx_dom_lib_configured(lib, id, row, &created);\n" })
+    # The NIF's configured entry is allowed; the lifecycle code, which a
+    # domain facet's requests reach, may name neither entry.
+    assert_empty evaluate(entries, { Rules::DOM_NIF => "status = erx_dom_lib_configured(lib, id, row, &created);\n" })
+    refute_empty evaluate(entries, { Rules::DOM_LIFE => CONFIGURED_CALL })
+    refute_empty evaluate(entries, { Rules::DOM_LIFE => "status = erx_dom_lib_configured(lib, id, row, &created);\n" })
     assert_empty evaluate(entries, { Rules::DOM_LIB_HEADER => "erx_status_t erx_dom_lib_configured(void);\n" })
     found = evaluate(entries, { Rules::DOM_BOOT => "status = erx_dom_plan_partial(&lib->view, id, row, &plan);\n" })
     assert_equal ['dom-partial-entry-uncalled'], found.map(&:rule)

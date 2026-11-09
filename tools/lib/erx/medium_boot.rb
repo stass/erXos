@@ -52,6 +52,9 @@ module Erx
     # the device tree 128 MiB into a machine this large (docs/design-platforms.md).
     MACHINE = ProductionImage::Machine.new(memory_mib: 768, fiasco_reserve_mib: 48, system_growth_mib: 0, tmp_growth_mib: 0,
                                            root_mib: 192)
+    # The halt DOMAIN_ARGS evaluates: erlang:halt(N), N the digits leading its -sname.
+    NAMED_HALT = 'erlang:halt(length(lists:takewhile(fun(C)->(C>=$0)andalso(C=<$9)end,' \
+                 'hd(hd(element(2,init:get_argument(sname)))))))'
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
     DOMAIN_MEMORY = 160 << 20
     DOMAIN_OUTER = 1 << 20
@@ -59,12 +62,15 @@ module Erx
     # image's build defines a domain release named by a manifest row (ProductionImage).
     DOMAIN_RELEASE = ReleaseFiles.domain('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
     # What the domain's ERTS runs: its release's boot script, as the system's system_args
-    # do, then halt(0), so a halt with status 0 says init ran the boot script and -eval.
-    DOMAIN_ARGS = %w[-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie
-                     -kernel start_distribution false -eval erlang:halt(0)].freeze
+    # do, then a halt whose status is the count of digits that lead the -sname the boot
+    # page gave (Name@Host). So a halt with status 0 says init ran the boot script and
+    # -eval, and that the node is named by the domain's name, not by its id.
+    DOMAIN_ARGS = %W[-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie
+                     -kernel start_distribution false -eval #{NAMED_HALT}].freeze
     # The medium manifest's configured domain: the interpreter's image on DOMAIN_RELEASE,
     # in a limits profile of the domain's budgets, with DOMAIN_ARGS, the arguments the
-    # cell's own creates pass.
+    # cell's own creates pass. The domain service starts it at boot and, with restarts 0,
+    # never again once it halts.
     DOMAIN_ROW = "limits erts\n  memory #{DOMAIN_MEMORY}\n  outer #{DOMAIN_OUTER}\n  grant @share.users\n  spaces none\n" \
                  "  lane 4096\n  connections 0\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                  "  peer_held 4096\n  peer_held_total 4096\n" \
@@ -73,9 +79,14 @@ module Erx
                  "  restarts 0\n  restart_period_s 5\n  args \"#{DOMAIN_ARGS.join(' ')}\"\n"
 
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
-    # any id at or below it, so the cell's two domains take the first two ids above it.
+    # any id at or below it, and the domain service gives ids in turn above it, so the
+    # configured domain takes the first, the cell's two creates the library refuses the
+    # next two, and its three domains the three after.
     SYSTEM_DOMAIN_ID = 4
-    DOMAIN_IDS = [SYSTEM_DOMAIN_ID + 1, SYSTEM_DOMAIN_ID + 2].freeze
+    CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
+    DOMAIN_IDS = [SYSTEM_DOMAIN_ID + 4, SYSTEM_DOMAIN_ID + 5, SYSTEM_DOMAIN_ID + 6].freeze
+    # An id nothing takes in the cell, for the calls the shell makes of the library itself.
+    FREE_ID = SYSTEM_DOMAIN_ID + 7
 
     # Where the domain's runtime image and release are in the archive: the boot image's
     # indexes a create names them by.
@@ -93,29 +104,45 @@ module Erx
       ['DlBoth', 'DlBadarg(fun()->Lib:create(Spec#{args=><<(binary:copy(<<"a">>,2046))/binary,0>>,env=><<"x",0>>})end)',
        'badarg'], # args and env together one past them
       ['DlNotId', 'DlBadarg(fun()->Lib:start(foo)end)', 'badarg'],
-      # Before register/1: einval from a present library only (an absent one answers enotsup).
-      ['DlEarly', 'Lib:create(Spec)', '{error,einval}'],
-      ['DlRegistered', 'Lib:register(self())', 'ok'],
-      # The maps the library itself refuses.
-      ['DlFiles', 'Lib:create(Spec#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
-      ['DlUnaligned', 'Lib:create(Spec#{memory=>4097})', '{error,einval}'], # not whole pages
-      ['DlSystem', "Lib:create(Spec\#{id=>#{SYSTEM_DOMAIN_ID}})", '{error,einval}'],
-      # Two ERTS domains, DOMAIN_IDS (Run). The halt's status is 0. A stop's end reads
-      # {stopped,0} whatever status stop/2 is given (erx_dom_plan_stop and
-      # erx_dom_classify, liberx/system/dom_life.c, as native_domain's stop case
-      # expects); 7 is not 0, so a library that passed the status through would show.
-      ['DlHalted', 'Run(Lib,Spec,fun(_)->ok end)', '{ok,ok,{halt,0},ok,ok}'],
-      ['DlStopped', "Run(Lib,Spec\#{id=>#{DOMAIN_IDS.last}},fun(DlId)->Lib:stop(DlId,7) end)",
-       '{ok,ok,{stopped,0},ok,ok}']
+      # The domain service registered at its start, so no other process takes its ends
+      # or changes the library: a well-formed create, a configured row and a stop from the
+      # shell are refused.
+      ['DlRegistered', 'Lib:register()', '{error,ebusy}'],
+      ['DlNotCreate', 'Lib:create(Spec)', '{error,erights}'],
+      ['DlNotService', "Lib:configured(#{FREE_ID},0)", '{error,erights}'],
+      ['DlNotStop', "Lib:stop(#{CONFIGURED_ID},0)", '{error,erights}'],
+      # The maps the library itself refuses, asked of the service, which spends an id on each.
+      ['DlFiles', 'DlAsk(<<"files">>,#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
+      ['DlUnaligned', 'DlAsk(<<"unaligned">>,#{memory=>4097})', '{error,einval}'], # not whole pages
+      # The configured domain halted once, with status 0, and was not restarted: its one
+      # death is the system principal's, and the cell's first create takes the next id.
+      ['DlConfigured', 'DlFirstDeaths(600)', "[{#{CONFIGURED_ID},{halt,0}}]"],
+      # Three ERTS domains through erx_domain (DlRun), each watched by a monitor on its domain
+      # pid. A halt and a stop end the pid with {domain_down, Id, Info}; a kill ends it at
+      # once, and the service stops the domain behind it.
+      ['DlHalted', 'DlRun(<<"halts">>,fun(_)->ok end)', "{#{DOMAIN_IDS[0]},ok,{domain_down,#{DOMAIN_IDS[0]},{halt,0}}}"],
+      ['DlStopped', 'DlRun(<<"stops">>,fun(DlD)->erx_domain:stop(DlD,shutdown) end)',
+       "{#{DOMAIN_IDS[1]},ok,{domain_down,#{DOMAIN_IDS[1]},stopped}}"],
+      ['DlKilled', 'DlRun(<<"killed">>,fun(DlD)->erx_domain:stop(DlD,kill) end)', "{#{DOMAIN_IDS[2]},ok,killed}"]
     ].freeze
-    # Run: creates a domain, starts it, does Then to it, waits for its {domain_ended, ...}
-    # message, disconnects its system connection and retires it, answering each result in
-    # that order, or the create's refusal; a missing end is timeout in the end's place.
-    DOMAIN_LIB_RUN = 'fun(Lib,Spec,Then)->case Lib:create(Spec) of ' \
-                     '{ok,#{id:=DlId,connection:=DlConnection}}->DlStarted=Lib:start(DlId),DlThen=Then(DlId),' \
-                     'DlEnd=receive {domain_ended,DlId,DlKind,_}->DlKind after 60000->timeout end,' \
-                     '{DlStarted,DlThen,DlEnd,Lib:disconnect(DlConnection),Lib:retire(DlId)};' \
+    # DlRun: asks the domain service for a domain named Name with the request fields of Spec,
+    # monitors its domain pid, does Then to it and waits for the monitor's reason,
+    # answering the id, Then's result and that reason, or the create's refusal; a missing
+    # end is timeout in the reason's place.
+    DOMAIN_LIB_RUN = 'fun(Name,Then)->case erx_domain:create((maps:without([id,principal],Spec))#{name=>Name}) of ' \
+                     '{ok,DlDomain}->DlMonitor=monitor(process,erx_domain:pid(DlDomain)),DlThen=Then(DlDomain),' \
+                     'DlWhy=receive {\'DOWN\',DlMonitor,process,_,DlReason}->DlReason after 60000->timeout end,' \
+                     '{erx_domain:id(DlDomain),DlThen,DlWhy};' \
                      'DlRefused->DlRefused end end'
+    # DlAsk: the domain service's answer to a create of Name with the request fields of Spec
+    # changed by Fields.
+    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal],Spec),Fields#{name=>Name})) end'
+    # DlFirstDeaths: the system principal's deaths as {Id, Info}, once there is one, polled from the
+    # domain service's state every 100 ms at most N times; timeout if none comes.
+    DOMAIN_LIB_WAIT = 'fun DlWait(0)->timeout;DlWait(N)->' \
+                      'case erx_domain_core:deaths(1,maps:get(core,sys:get_state(erx_domain_srv))) of ' \
+                      '[]->timer:sleep(100),DlWait(N-1);' \
+                      'DlDeaths->[{DlI,DlInfo}||#{id:=DlI,info:=DlInfo}<-DlDeaths] end end'
     # The line the cell prints: every step's answer, in order.
     DOMAIN_LIB_ANSWER = "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:last).join(',')}}".freeze
     DOMAIN_LIB_START = /\A(?:[0-9]+> )?\{domain_lib,/n
@@ -125,21 +152,22 @@ module Erx
     # The domain service's NIF module, erx_domain_lib, in the system domain, with the
     # library the root built from the medium manifest: DOMAIN_LIB_STEPS in order, then
     # their answers. Variables are fun parameters or carry a Dl prefix no earlier
-    # expression binds, since the shell keeps every binding. The shell's evaluator stays
-    # registered afterwards, so every later end reaches it; only this test registers. The
+    # expression binds, since the shell keeps every binding. The domain service is the
+    # library's registrant, so the shell's own register is refused and no end reaches it. The
     # answers are printed with ~0p, on one line however long, and the shell's own ok
     # follows on the next. The expression starts with io:format, so the shell's echo of it
     # does not start {domain_lib, and only the printed answer matches DOMAIN_LIB_START.
     def domain_lib_expression(domain)
       args = DOMAIN_ARGS.map { |arg| "\"#{arg}\",0" }.join(',')
-      spec = erlang_map(id: DOMAIN_IDS.first, principal: 1, runtime: domain.runtime, release: domain.release,
+      spec = erlang_map(id: FREE_ID, name: '<<"cell">>', principal: 1, runtime: domain.runtime, release: domain.release,
                         release_files: domain.release_files, memory: DOMAIN_MEMORY, outer: DOMAIN_OUTER,
                         grant: erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
                         lane: 4096, args: "<<#{args}>>", env: '<<>>')
       badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }
-      "io:format(\"~0p~n\",[(fun(Lib,Spec,Run)->#{badarg},#{steps.join(',')}," \
-        "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)(erx_domain_lib,#{spec},#{DOMAIN_LIB_RUN})])."
+      "io:format(\"~0p~n\",[(fun(Lib,Spec)->DlRun=#{DOMAIN_LIB_RUN},DlAsk=#{DOMAIN_LIB_ASK}," \
+        "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg}," \
+        "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)(erx_domain_lib,#{spec})])."
     end
 
     # An Erlang map expression of pairs, each value an expression already.
@@ -148,10 +176,11 @@ module Erx
     # The development manifest with a domain row and room for two domains (MACHINE's
     # manifest, with no growth of the system). The row, DOMAIN_ROW, is there so the image
     # carries the release and the runtime image it names, which is how a manifest makes
-    # its image carry them (docs/design-stopgap.md, "The production image"). The root
-    # starts no configured domain; the shell creates both of the cell's domains through
-    # the domain library, one at a time. The room is for two: the configured row, which
-    # the build's planner plans against the principal, and one domain of the shell's. So
+    # its image carry them (docs/design-stopgap.md, "The production image"). The domain
+    # service starts the row at boot; the shell creates the cell's domains through the
+    # service, one at a time. The room is for two: the configured row, which the build's
+    # planner plans against the principal and which runs while the shell starts, and one
+    # domain of the shell's. So
     # the system principal's quota and max_domains go from 0 to 2, and its memory and
     # root_memory each grow by two domains' budgets. The development manifest itself,
     # what the production image promises, is unchanged.
@@ -223,12 +252,13 @@ module Erx
     end
 
     # After the shell's line previous, the person types domain_lib_expression of the
-    # archive's domain, and its answer must be DOMAIN_LIB_ANSWER whole. Two ERTS domains
-    # boot and end before it, so it has more time than the other answers.
+    # archive's domain, and its answer must be DOMAIN_LIB_ANSWER whole. Three ERTS domains
+    # boot and end before it, the configured one first, so it has more time than the other
+    # answers.
     def domain_lib_checkpoints(previous, domain)
       whole = /\A(?:[0-9]+> )?#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
       [previous.merge(type: "#{domain_lib_expression(domain)}\r").freeze,
-       { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 180,
+       { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 300,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the domain library expression" unless whole.match?(text) } }.freeze]
     end
 

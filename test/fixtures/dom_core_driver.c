@@ -111,7 +111,8 @@ reset_view(void)
 	    .runtime = 1, .memory = 4 * MIB, .outer = MIB,
 	    .grant = grant(UINT64_C(5000000), 0x3, 50),
 	    .spaces = grant(UINT64_C(2500000), 0x1, 50),
-	    .runtime_limits = limits(1), .lane = 65536, .connections = 2 };
+	    .runtime_limits = limits(1), .lane = 65536, .connections = 2,
+	    .name = "srv", .name_len = 3 };
 	partial = (erx_dom_partial_t){ .runtime = 0, .memory = MIB,
 	    .outer = 64 * 1024, .grant = grant(UINT64_C(1000000), 0x1, 10) };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
@@ -143,6 +144,8 @@ base_request(void)
 	req.runtime_limits = limits(1);
 	req.args_len = 2;
 	memcpy(req.strings, "a", 2);
+	req.name_len = 3;
+	memcpy(req.name, "dom", 3);
 	return (req);
 }
 
@@ -390,6 +393,10 @@ MUTATION(m_secret, s->flags |= ERX_DOM_SECRET)
 MUTATION(m_unknown_principal, s->principal = 9)
 MUTATION(m_configured_row_out, case_row = 1)
 MUTATION(m_partial_row_out, case_row = 1)
+MUTATION(m_name_empty, s->name_len = 0)
+MUTATION(m_name_lead, s->name[0] = '-')
+MUTATION(m_name_upper, s->name[1] = 'O')
+MUTATION(m_name_long, s->name_len = ERX_DOM_NAME_MAX + 1)
 MUTATION(m_runtime_out, s->runtime = 99)
 MUTATION(m_runtime_file, s->runtime = 2)
 MUTATION(m_runtime_bad, s->runtime = 7)
@@ -468,6 +475,10 @@ cases(void)
 	run_case("secret", PICK_REQUEST, m_secret);
 	run_case("unknown_principal", PICK_REQUEST, m_unknown_principal);
 	run_case("configured_row_out", PICK_CONFIGURED, m_configured_row_out);
+	run_case("name_empty", PICK_REQUEST, m_name_empty);
+	run_case("name_lead", PICK_REQUEST, m_name_lead);
+	run_case("name_upper", PICK_REQUEST, m_name_upper);
+	run_case("name_long", PICK_REQUEST, m_name_long);
 	run_case("partial_row_out", PICK_PARTIAL, m_partial_row_out);
 	run_case("partial_connections_full", PICK_PARTIAL, m_connections_full);
 	run_case("runtime_out", PICK_REQUEST, m_runtime_out);
@@ -571,11 +582,13 @@ constructors(void)
 	printf("ctor partial_row_out %d\n",
 	    (int)erx_dom_plan_partial(&view, 6, 1, &plan));
 	status = erx_dom_plan_configured(&view, 6, 0, &plan);
-	printf("ctor configured_owned %d %u %u %u\n", (int)status,
-	    plan.spec.origin.kind, plan.spec.origin.record, (unsigned)plan.parent);
+	printf("ctor configured_owned %d %u %u %u %.*s\n", (int)status,
+	    plan.spec.origin.kind, plan.spec.origin.record, (unsigned)plan.parent,
+	    (int)plan.spec.name_len, plan.spec.name);
 	status = erx_dom_plan_partial(&view, 7, 0, &plan);
-	printf("ctor partial_owned %d %u %u %u\n", (int)status,
-	    plan.spec.origin.kind, plan.connection, plan.connection_row);
+	printf("ctor partial_owned %d %u %u %u %.*s\n", (int)status,
+	    plan.spec.origin.kind, plan.connection, plan.connection_row,
+	    (int)plan.spec.name_len, plan.spec.name);
 }
 
 static int

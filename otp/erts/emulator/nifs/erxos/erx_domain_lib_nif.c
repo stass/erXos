@@ -20,8 +20,17 @@
  * The library is the one the root's start built (erx_dom_lib_system). Where
  * the root built none, no thread starts and every entry but register answers
  * {error, enotsup}. A hosted runtime has no domains and does not link this
- * module (Makefile.in, NIF_OBJS). A create needs a registered process first,
- * so no domain the module made can end with no one to hear of it.
+ * module (Makefile.in, NIF_OBJS).
+ *
+ * The process that registers is the one that hears of every end, and the
+ * only one that may change the library: every entry that does (create,
+ * configured_create, start, stop, retire, connect, disconnect) asks
+ * caller_is_service first, under the lock, and answers {error, erights} to
+ * any other caller. So only the process that registered drives the
+ * library, and no domain the module made can end with no one to hear of
+ * it. Which process registers is the domain service's to win: it registers
+ * at its start, and a registration while it lives is refused (TODO.md, the
+ * domain service's trust in system-domain processes).
  *
  * Every term an entry decodes comes from an Erlang caller and is checked
  * here for shape only: a map with exactly the keys its reader takes, each
@@ -260,6 +269,36 @@ read_limits(map_reader_t *reader, erx_runtime_limits_t *limits, uint32_t *given)
 }
 
 /*
+ * Whether the calling process is the registered one, the domain service.
+ * Every entry that changes the library asks this first, under lib_lock.
+ */
+static bool
+caller_is_service(ErlNifEnv *env)
+{
+	ErlNifPid self;
+
+	return (service_set && enif_self(env, &self) != NULL && enif_compare_pids(&self, &service) == 0);
+}
+
+/*
+ * The domain's name: name, a binary of 1 to ERX_DOM_NAME_MAX bytes, which
+ * the library checks is an identifier.
+ */
+static bool
+read_name(map_reader_t *reader, erx_dom_spec_t *spec)
+{
+	ERL_NIF_TERM term;
+	ErlNifBinary name;
+
+	if (!reader_take(reader, "name", &term) || !enif_inspect_binary(reader->env, term, &name) ||
+	    name.size > sizeof(spec->name))
+		return (false);
+	memcpy(spec->name, name.data, name.size);
+	spec->name_len = (uint32_t)name.size;
+	return (true);
+}
+
+/*
  * A request's map as an erx_dom_spec_t and its limits. Only its shape is
  * checked here: erx_dom_plan_request validates every value against the
  * library's view before anything is made. The fields the library sets
@@ -275,6 +314,7 @@ spec_from(ErlNifEnv *env, ERL_NIF_TERM map, erx_dom_spec_t *spec, erx_runtime_li
 	memset(spec, 0, sizeof(*spec));
 	spec->version = ERX_DOM_SPEC_VERSION;
 	if (!reader_open(env, map, &reader) || !read_u32(&reader, "id", &spec->id) ||
+	    !read_name(&reader, spec) ||
 	    !read_u32(&reader, "principal", &spec->principal) ||
 	    !read_u32(&reader, "runtime", &spec->runtime) ||
 	    !read_u32(&reader, "release", &spec->release) ||
@@ -294,6 +334,98 @@ spec_from(ErlNifEnv *env, ERL_NIF_TERM map, erx_dom_spec_t *spec, erx_runtime_li
 	return (reader_done(&reader));
 }
 
+/* A created domain's values as the map create_nif and configured_create_nif return. */
+static ERL_NIF_TERM
+created_term(ErlNifEnv *env, const erx_dom_created_t *created)
+{
+	ERL_NIF_TERM keys[5], values[5], result;
+
+	keys[0] = atom(env, "id"), values[0] = enif_make_uint(env, created->id);
+	keys[1] = atom(env, "connection"), values[1] = enif_make_uint(env, created->connection);
+	keys[2] = atom(env, "side"), values[2] = enif_make_uint64(env, created->side);
+	keys[3] = atom(env, "peer_side"), values[3] = enif_make_uint64(env, created->peer_side);
+	keys[4] = atom(env, "bell"), values[4] = enif_make_uint64(env, created->bell);
+	if (!enif_make_map_from_arrays(env, keys, values, 5, &result))
+		return (enif_make_badarg(env));
+	return (enif_make_tuple2(env, atom(env, "ok"), result));
+}
+
+/*
+ * What the domain service reads of the manifest's configured domains:
+ * {ok, #{host => Host, domains => Rows}}, Rows in row order, each
+ * #{row, place, name, principal, kind, restarts, restart_period_s}, place
+ * its place in the boot order. The view is fixed at boot, so this reads it
+ * without the lock.
+ */
+static ERL_NIF_TERM
+configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ERL_NIF_TERM keys[7], values[7], row, rows, host, result;
+	const erx_dom_configured_t *configured;
+	unsigned char *bytes;
+	uint32_t index;
+
+	(void)argv;
+	if (argc != 0)
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	rows = enif_make_list(env, 0);
+	/* Built from the last row back, so the list's head is row 0. */
+	for (index = lib->view.nconfigured; index-- > 0;) {
+		configured = &lib->view.configured[index];
+		bytes = enif_make_new_binary(env, configured->name_len, &values[1]);
+		if (bytes == NULL)
+			return (enif_make_badarg(env));
+		memcpy(bytes, configured->name, configured->name_len);
+		keys[0] = atom(env, "row"), values[0] = enif_make_uint(env, index);
+		keys[1] = atom(env, "name");
+		keys[2] = atom(env, "principal"), values[2] = enif_make_uint(env, configured->principal);
+		keys[3] = atom(env, "kind"),
+		    values[3] = atom(env, configured->kind == ERX_MF_SECRET ? "secret" : "service");
+		keys[4] = atom(env, "restarts"), values[4] = enif_make_uint(env, configured->restarts);
+		keys[5] = atom(env, "restart_period_s"), values[5] = enif_make_uint(env, configured->restart_period_s);
+		keys[6] = atom(env, "place"), values[6] = enif_make_uint(env, configured->place);
+		if (!enif_make_map_from_arrays(env, keys, values, 7, &row))
+			return (enif_make_badarg(env));
+		rows = enif_make_list_cell(env, row, rows);
+	}
+	bytes = enif_make_new_binary(env, lib->host_len, &host);
+	if (bytes == NULL)
+		return (enif_make_badarg(env));
+	memcpy(bytes, lib->host, lib->host_len);
+	keys[0] = atom(env, "host"), values[0] = host;
+	keys[1] = atom(env, "domains"), values[1] = rows;
+	if (!enif_make_map_from_arrays(env, keys, values, 2, &result))
+		return (enif_make_badarg(env));
+	return (enif_make_tuple2(env, atom(env, "ok"), result));
+}
+
+/*
+ * Manifest startup and restart: creates configured row Row under id Id
+ * (erx_dom_lib_configured). Only the domain service may, as for every
+ * entry that changes the library, so a row is built only from one
+ * configured_nif named, never from a number a request carries.
+ */
+static ERL_NIF_TERM
+configured_create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_dom_created_t created;
+	erx_status_t status;
+	unsigned int id, row;
+
+	if (argc != 2 || !enif_get_uint(env, argv[0], &id) || !enif_get_uint(env, argv[1], &row))
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	enif_mutex_lock(lib_lock);
+	status = caller_is_service(env) ? erx_dom_lib_configured(lib, id, row, &created) : ERX_ERIGHTS;
+	enif_mutex_unlock(lib_lock);
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (created_term(env, &created));
+}
+
 static ERL_NIF_TERM
 create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
@@ -303,7 +435,6 @@ create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_status_t status;
 	uint32_t given;
 	bool shaped;
-	ERL_NIF_TERM keys[5], values[5], result;
 
 	if (argc != 1)
 		return (enif_make_badarg(env));
@@ -313,8 +444,8 @@ create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		status = ERX_EINVAL;
 	else if (lib == NULL)
 		status = ERX_ENOTSUP;
-	else if (!service_set)
-		status = ERX_EINVAL;
+	else if (!caller_is_service(env))
+		status = ERX_ERIGHTS;
 	else
 		status = erx_dom_lib_create(lib, &spec, &limits, given, &created);
 	/* No copy of the request's strings stays past the call, as in the library's own buffers. */
@@ -324,14 +455,7 @@ create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		return (enif_make_badarg(env));
 	if (status != ERX_OK)
 		return (status_error(env, status));
-	keys[0] = atom(env, "id"), values[0] = enif_make_uint(env, created.id);
-	keys[1] = atom(env, "connection"), values[1] = enif_make_uint(env, created.connection);
-	keys[2] = atom(env, "side"), values[2] = enif_make_uint64(env, created.side);
-	keys[3] = atom(env, "peer_side"), values[3] = enif_make_uint64(env, created.peer_side);
-	keys[4] = atom(env, "bell"), values[4] = enif_make_uint64(env, created.bell);
-	if (!enif_make_map_from_arrays(env, keys, values, 5, &result))
-		return (enif_make_badarg(env));
-	return (enif_make_tuple2(env, atom(env, "ok"), result));
+	return (created_term(env, &created));
 }
 
 /* One id's entry under the lock: start, retire, disconnect. */
@@ -347,7 +471,7 @@ id_entry(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[],
 	if (lib == NULL)
 		return (status_error(env, ERX_ENOTSUP));
 	enif_mutex_lock(lib_lock);
-	status = entry(lib, id);
+	status = caller_is_service(env) ? entry(lib, id) : ERX_ERIGHTS;
 	enif_mutex_unlock(lib_lock);
 	return (status_term(env, status));
 }
@@ -398,7 +522,7 @@ connect_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	if (lib == NULL)
 		return (status_error(env, ERX_ENOTSUP));
 	enif_mutex_lock(lib_lock);
-	status = erx_dom_lib_connect(lib, a, b, a_reads, b_reads, &linked);
+	status = caller_is_service(env) ? erx_dom_lib_connect(lib, a, b, a_reads, b_reads, &linked) : ERX_ERIGHTS;
 	enif_mutex_unlock(lib_lock);
 	if (status != ERX_OK)
 		return (status_error(env, status));
@@ -431,16 +555,17 @@ stop_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	if (lib == NULL)
 		return (status_error(env, ERX_ENOTSUP));
 	enif_mutex_lock(lib_lock);
-	status = erx_dom_lib_stop(lib, id, halt);
+	status = caller_is_service(env) ? erx_dom_lib_stop(lib, id, halt) : ERX_ERIGHTS;
 	enif_mutex_unlock(lib_lock);
 	return (status_term(env, status));
 }
 
 /*
- * register(Pid): Pid hears of every end from now on. While another
- * registered process lives, the answer is {error, ebusy}, so no process
- * takes the domain service's ends away from it; once that process is
- * dead, its restart registers again.
+ * register(): the caller hears of every end from now on and is the one
+ * process that may change the library. While another registered process
+ * lives, the answer is {error, ebusy}, so no process takes the domain
+ * service's place; once that process is dead, its restart registers
+ * again. Only the caller itself registers, never a pid it names.
  */
 static ERL_NIF_TERM
 register_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -448,7 +573,8 @@ register_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	ErlNifPid pid;
 	bool taken;
 
-	if (argc != 1 || !enif_get_local_pid(env, argv[0], &pid))
+	(void)argv;
+	if (argc != 0 || enif_self(env, &pid) == NULL)
 		return (enif_make_badarg(env));
 	enif_mutex_lock(lib_lock);
 	taken = service_set && enif_compare_pids(&service, &pid) != 0 &&
@@ -618,13 +744,15 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 
 static ErlNifFunc nif_funcs[] = {
 	/* register takes the lock a create holds across backend calls, so it is dirty too. */
-	{ "register_nif", 1, register_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "register_nif", 0, register_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "create_nif", 1, create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "start_nif", 1, start_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "stop_nif", 2, stop_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "retire_nif", 1, retire_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "connect_nif", 4, connect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "configured_create_nif", 2, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 };
 
 ERL_NIF_INIT(erx_domain_lib, nif_funcs, load, NULL, NULL, NULL)

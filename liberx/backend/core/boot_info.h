@@ -21,7 +21,7 @@
  * After the fixed part, and the root extension when ERX_BOOT_ROOT is set, come the
  * strings: the node name, then the arguments, then the environment. A word list is words
  * each ended by a NUL, with no empty word, and an environment word is KEY=VALUE with a
- * key. The node name, <id>@<host>, has no NUL of its own.
+ * key. The node name, <name>@<host>, has no NUL of its own.
  */
 
 typedef enum erx_boot_info_status {
@@ -33,7 +33,7 @@ typedef enum erx_boot_info_status {
 	ERX_BOOT_INFO_RESERVED,		/* a reserved word that is not zero */
 	ERX_BOOT_INFO_STRINGS,		/* more than ERX_BOOT_STRINGS_MAX of strings */
 	ERX_BOOT_INFO_BOUNDS,		/* a string outside the page */
-	ERX_BOOT_INFO_NODE,		/* a node name not of the form <id>@<host> */
+	ERX_BOOT_INFO_NODE,		/* a node name not of the form <name>@<host> */
 	ERX_BOOT_INFO_WORDS,		/* an empty word, or a list not ended by a NUL */
 	ERX_BOOT_INFO_ENV		/* an environment word that is not KEY=VALUE */
 } erx_boot_info_status_t;
