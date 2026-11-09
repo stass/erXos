@@ -97,7 +97,7 @@ sack_recovery_and_prr_test() ->
     ?assertMatch({_, S2}, erx_tcp_loss_dupack:rewind(mtu, Log3, S2, 0)),
     ?assertEqual(0, erx_tcp_sendlog:sacked_bytes(element(1, erx_tcp_loss_dupack:rewind(mtu, Log3, S2, 0)))),
     {Lost, S2} = erx_tcp_loss_dupack:rewind({window, 100, 1100}, Log3, S2, 0),
-    ?assertEqual(erx_tcp_sendlog:lose(Log3, 100, 1100), Lost),
+    ?assertEqual(erx_tcp_sendlog:lose(Log3, 1100), Lost),
     ?assertEqual({Log3, S2}, erx_tcp_loss_dupack:rewind({window, 1100, 1100}, Log3, S2, 0)).
 
 %% An acknowledgement without SACK blocks that fills the last hole is not a duplicate: SACK
@@ -123,3 +123,92 @@ module_table_test() ->
     ?assertEqual({ok, erx_tcp_loss_dupack}, erx_tcp_loss:module(<<"dupack">>)),
     ?assertEqual({error, unknown}, erx_tcp_loss:module(<<"rack">>)),
     ?assertError(badarg, erx_tcp_loss_dupack:init(#{})).
+
+%% snd_limited counts what limited transmit itself sent (tcp_input.c:2782-2793): after the
+%% first duplicate's segment and an advancing acknowledgement that counts as the first
+%% duplicate again (RFC 6675), three segments the window let go do not use up the second
+%% duplicate's segment.
+limited_transmit_counts_its_own_output_test() ->
+    S0 = erx_tcp_loss_dupack:init(#{sack => true}),
+    Ccv = ccv(1000, 64000),
+    Log0 = log(),
+    Sack = fun(Log, Ack, Blocks) ->
+                   (dup(Log, Ccv))#loss_ack{ack = Ack, sack_opt = true, sack_blocks = Blocks,
+                                            pure = false}
+           end,
+    {drop, Log1, S1, _} = erx_tcp_loss_dupack:ack(Sack(Log0, 0, [{900, 1000}]), Log0, S0, 0),
+    ?assertEqual({1000, 1000}, erx_tcp_loss_dupack:allowance(Log1, S1, Ccv)),
+    Log2 = erx_tcp_sendlog:sent(Log1, 1000, 1100, 1),
+    {continue, Log3, S2, []} = erx_tcp_loss_dupack:ack(Sack(Log2, 100, [{900, 1000}]), Log2, S1, 0),
+    ?assertEqual(1, erx_tcp_loss_dupack:dupacks(S2)),
+    Log4 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, 2) end,
+                       Log3, lists:seq(11, 13)),
+    {drop, Log5, S3, [{ack_received, dupack}]} =
+        erx_tcp_loss_dupack:ack(Sack(Log4, 100, [{900, 1000}, {1300, 1400}]), Log4, S2, 0),
+    %% The flight 1300 and one segment for the duplicate limited transmit has not used,
+    %% measured against the pipe 1100.
+    ?assertEqual({1200, 1000}, erx_tcp_loss_dupack:allowance(Log5, S3, Ccv)).
+
+%% ECN's window reduction runs PRR on counters of its own (cc_post_recovery zeroes them when
+%% fast recovery ends, tcp_input.c:497-499), here after the acknowledgement that ended a
+%% NewReno recovery: nothing delivered and nothing sent, so PRR-CRB lets one segment go.
+ecn_reduction_starts_prr_afresh_test() ->
+    S0 = erx_tcp_loss_dupack:init(#{sack => false}),
+    Log0 = log(),
+    Dup = fun(Log, Ccv) -> dup(Log, Ccv) end,
+    {drop, Log1, S1, _} = erx_tcp_loss_dupack:ack(Dup(Log0, ccv(1000, 64000)), Log0, S0, 0),
+    {drop, Log2, S2, _} = erx_tcp_loss_dupack:ack(Dup(Log1, ccv(1000, 64000)), Log1, S1, 0),
+    {drop, Log3, S3, _} = erx_tcp_loss_dupack:ack(Dup(Log2, ccv(1000, 64000)), Log2, S2, 0),
+    Fast = (ccv(1000, 500))#ccv{fast_recovery = true},
+    Log4 = erx_tcp_sendlog:sent(Log3, 0, 100, 1),
+    Full = #loss_ack{ack = 1000, snd_nxt = 1000, recover = 1000, pure = true, rexmt_armed = true,
+                     ccv = Fast},
+    {continue, Log5, S4, []} = erx_tcp_loss_dupack:ack(Full, Log4, S3, 0),
+    Log6 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, 2) end,
+                       Log5, lists:seq(10, 19)),
+    Cong = (ccv(1000, 500))#ccv{cong_recovery = true},
+    Ecn = #loss_ack{ack = 1100, snd_nxt = 2000, recover = 2001, pure = true, rexmt_armed = true,
+                    ccv = Cong},
+    {continue, Log7, S5, []} = erx_tcp_loss_dupack:ack(Ecn, Log6, S4, 0),
+    %% prr_delivered 100 against recover_fs 1000 (FreeBSD keeps it from the last recovery):
+    %% sndcnt is (50 + 99) div 100, one segment over the pipe of 900.
+    ?assertEqual({1000, 1000}, erx_tcp_loss_dupack:allowance(Log7, S5, Cong)).
+
+%% A partial acknowledgement without SACK blocks that clears the scoreboard leaves PRR outside
+%% SACK recovery; its window is still sndcnt segments over the pipe output measures against,
+%% not the flight before the acknowledgement, which would let the acknowledged bytes go again
+%% as a burst.
+prr_window_is_over_the_pipe_test() ->
+    S0 = erx_tcp_loss_dupack:init(#{sack => true}),
+    Log0 = log(),
+    A = (dup(Log0, ccv(1000, 64000)))#loss_ack{sack_opt = true, sack_blocks = [{300, 600}],
+                                               pure = false},
+    {drop, Log1, S1, _} = erx_tcp_loss_dupack:ack(A, Log0, S0, 0),
+    Log2 = erx_tcp_sendlog:sent(Log1, 0, 100, 1),
+    Fast = (ccv(1000, 500))#ccv{fast_recovery = true},
+    Partial = #loss_ack{ack = 600, snd_nxt = 1000, recover = 1000, pure = true, rexmt_armed = true,
+                        ccv = Fast},
+    {continue, Log3, S2, [stop_rexmt, ack_now]} = erx_tcp_loss_dupack:ack(Partial, Log2, S1, 0),
+    ?assertNot(erx_tcp_sendlog:has_holes(Log3)),
+    ?assertEqual(400, erx_tcp_sendlog:pipe(Log3)),
+    %% prr_delivered 200 and prr_out 100: sndcnt (100 - 100 + 99) div 100 is none.
+    ?assertEqual({400, 400}, erx_tcp_loss_dupack:allowance(Log3, S2, Fast)).
+
+%% A timeout ends the recovery episode (CC_RTO's EXIT_RECOVERY), so an ECN signal on the next
+%% acknowledgement starts PRR afresh even though the module never saw the flags clear.
+ecn_after_timeout_starts_prr_afresh_test() ->
+    S0 = erx_tcp_loss_dupack:init(#{sack => false}),
+    Log0 = log(),
+    Dup = fun(Log) -> dup(Log, ccv(1000, 64000)) end,
+    {drop, Log1, S1, _} = erx_tcp_loss_dupack:ack(Dup(Log0), Log0, S0, 0),
+    {drop, Log2, S2, _} = erx_tcp_loss_dupack:ack(Dup(Log1), Log1, S1, 0),
+    {drop, Log3, S3, _} = erx_tcp_loss_dupack:ack(Dup(Log2), Log2, S2, 0),
+    {Log4, S4} = erx_tcp_loss_dupack:rewind({timeout, 1}, Log3, S3, 0),
+    Cong = (ccv(1000, 500))#ccv{cong_recovery = true},
+    Ecn = #loss_ack{ack = 100, snd_nxt = 1000, recover = 1001, pure = true, rexmt_armed = true,
+                    ccv = Cong},
+    {continue, Log5, S5, []} = erx_tcp_loss_dupack:ack(Ecn, Log4, S4, 0),
+    %% Everything is lost, so the pipe is 0: PRR-SSRB's limit max(100 - 0, 100) + 100 is two
+    %% segments; the fast recovery's prr_delivered would have made it three.
+    ?assertEqual(0, erx_tcp_sendlog:pipe(Log5)),
+    ?assertEqual({200, 200}, erx_tcp_loss_dupack:allowance(Log5, S5, Cong)).

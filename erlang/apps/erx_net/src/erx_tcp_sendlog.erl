@@ -12,7 +12,7 @@ written from RFC 6675, not translated: FreeBSD's sender-side scoreboard lives in
 The log tiles `[snd_una, snd_max)` with ranges, an ordered map from each range's first
 byte to `#sent{}`: where it ends, when it was last sent, how often, and three marks.
 `sacked` is RFC 6675's SACKed. `lost` is `IsLost`, set by the loss module (`mark_lost/3`
-computes RFC 6675's definition; `lose/3` marks a range NewReno infers lost; `timeout/2`
+computes RFC 6675's definition; `lose/2` marks what NewReno infers lost; `timeout/2`
 marks everything). `rxt` is "retransmitted during the current recovery", RFC 6675's octets
 at or below `HighRxt`, kept per range for the pipe; `HighRxt` itself is kept too, as the
 point `NextSeg` searches from. Neighbouring SACKed ranges merge, so a run of SACKed data is
@@ -28,15 +28,15 @@ Invariants:
   to the ranges it newly SACKs, not to the window.
 * The unSACKed ranges marked lost are a prefix of the unSACKed ranges. `IsLost` is
   monotone in that direction (a byte below a lost byte has at least as much SACKed data
-  above it), and every marking keeps it: `mark_lost/3` marks downward, `lose/3` is used
-  at `snd_una`, `timeout/2` marks all.
+  above it), and every marking keeps it: `mark_lost/3` marks downward, `lose/2` marks
+  from `snd_una` up, `timeout/2` marks all.
 * The counters `sacked`, `lost` and `rxt` are the byte totals of SACKed ranges, of
   unSACKed lost ranges and of unSACKed retransmitted ranges. Every change of a range
   goes through `store/4`, which keeps them, so the pipe is a constant-time sum:
   `(snd_max - snd_una) - sacked - lost + rxt`, RFC 6675's `SetPipe`.
 """.
 
--export([new/1, sent/4, rescued/5, ack/3, mark_lost/3, lose/3, timeout/2, timeout_undone/1,
+-export([new/1, sent/4, rescued/5, ack/3, mark_lost/3, lose/2, timeout/2, timeout_undone/1,
          resend_holes/1,
          next_seg/2]).
 -export([snd_una/1, snd_max/1, snd_fack/1, pipe/1, flight/1, sacked_bytes/1, sent_bytes/1,
@@ -166,25 +166,22 @@ mark_lost({Start, #sent{next = Next} = Old, Iter}, {DupThresh, Limit} = Th, {Abo
     end.
 
 -doc """
-Marks lost, and not retransmitted, every unSACKed range overlapping `[Start, Next)`, whole:
-NewReno's inference that the segment at `snd_una` is lost (RFC 6582 section 3.2, steps 2
-and 3). Callers keep the lost ranges a prefix by marking only at `snd_una`.
+Marks lost, and not retransmitted, every unSACKed range overlapping `[snd_una, Next)`,
+whole: NewReno's inference that the segment at `snd_una` is lost (RFC 6582 section 3.2,
+steps 2 and 3), and the bytes a window that shrank to zero took. Marking starts at
+`snd_una`, so the lost ranges this marks are always a prefix of the log.
 """.
--spec lose(log(), integer(), integer()) -> log().
-lose(#sendlog{ranges = Ranges} = Log, Start, Next) when is_integer(Start), is_integer(Next) ->
-    From = case gb_trees:smaller(Start + 1, Ranges) of
-        {Key, _} -> Key;
-        none -> Start
-    end,
-    lose(gb_trees:next(gb_trees:iterator_from(From, Ranges)), Start, Next, Log).
+-spec lose(log(), integer()) -> log().
+lose(#sendlog{ranges = Ranges} = Log, Next) when is_integer(Next) ->
+    lose(gb_trees:next(gb_trees:iterator(Ranges)), Next, Log).
 
-lose({Key, #sent{next = RangeNext} = Old, Iter}, Start, Next, Log) when Key < Next ->
-    Log1 = case RangeNext > Start andalso not Old#sent.sacked of
-        true -> store(Log, Key, Old, Old#sent{lost = true, rxt = false});
-        false -> Log
+lose({Key, #sent{} = Old, Iter}, Next, Log) when Key < Next ->
+    Log1 = case Old#sent.sacked of
+        false -> store(Log, Key, Old, Old#sent{lost = true, rxt = false});
+        true -> Log
     end,
-    lose(gb_trees:next(Iter), Start, Next, Log1);
-lose(_, _, _, Log) ->
+    lose(gb_trees:next(Iter), Next, Log1);
+lose(_, _, Log) ->
     Log.
 
 -doc """

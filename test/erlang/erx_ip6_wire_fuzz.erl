@@ -40,15 +40,22 @@ check(Frame) ->
              catch Class:Reason:Stack -> fail(decoder_raised, {Frame, Class, Reason, Stack})
              end,
     case {Result, judge(Frame)} of
-        {{ok, Header, Payload}, accept} ->
+        {{ok, Header, Payload}, {accept, Header, Payload}} ->
             round_trip(Header, Payload),
             agree_with_pkt(Frame, Header, Payload),
             accepted;
-        {{error, _}, refuse} ->
+        {{error, Reason1}, {refuse, Why}} ->
+            refusal(Reason1) =:= Why orelse fail(disagrees_with_reference, {Frame, Result, Why}),
             refused;
         {_, Judged} ->
             fail(disagrees_with_reference, {Frame, Result, Judged})
     end.
+
+%% A refusal FreeBSD answers with a parameter problem must carry the judge's code and
+%% pointer; the silent ones differ only in the counter they name.
+refusal({param_problem, _, _} = Problem) -> Problem;
+refusal({param_problem_unicast, _, _} = Problem) -> Problem;
+refusal(_) -> silent.
 
 %% The encoder writes options with the least padding, so the offsets that
 %% padding moves (proto_ptr, hdrlen) are compared only through pkt below.
@@ -86,76 +93,143 @@ exthdr_type({fragment, _, _, _}) -> 44.
 fail(Tag, Detail) -> throw({fail, Tag, Detail}).
 
 -doc """
-The reference judge, from RFC 8200's rules and the limits the design
-adopts from FreeBSD: accept or refuse, nothing more. It walks the same
-chain the decoder walks, so it is a second reading of the rules rather
-than independent evidence; what it adds is a short, separate statement
-of when a packet is acceptable, and it says nothing about pointers or
-the fields of an accepted packet, which the EUnit cases pin.
+The reference judge, from RFC 8200's rules and the limits and pointers the
+design adopts from FreeBSD (ip6_input.c, dest6.c, route6.c, frag6.c). It
+reads the packet by absolute offsets, where the decoder matches binaries
+header by header, and says what the decoder must return: the record and
+payload of an accepted packet (every extension header's contents, the
+fragment, the upper layer and the offsets of its next-header byte and its
+first byte), or the code and pointer of a refusal FreeBSD answers with a
+parameter problem; any other refusal is `silent`.
 """.
--spec judge(binary()) -> accept | refuse.
-judge(<<6:4, _:28, Plen:16, Nxt, _, _:32/binary, Rest/binary>>) when Plen =< byte_size(Rest) ->
+-spec judge(binary()) -> {accept, #ip6{}, binary()} | {refuse, silent | erx_ip6_wire:reason()}.
+judge(<<6:4, TClass:8, Flow:20, Plen:16, Nxt, Hlim, Src:16/binary, Dst:16/binary,
+        Rest/binary>> = Frame) when Plen =< byte_size(Rest) ->
+    Packet = binary:part(Frame, 0, 40 + Plen),
+    Fixed = #ip6{tclass = TClass, flow = Flow, hlim = Hlim, src = Src, dst = Dst, proto = Nxt},
     case {Plen, Nxt} of
-        {0, 0} -> refuse;          % a jumbogram, which the stack does not take
-        _ -> chain(Nxt, binary:part(Rest, 0, Plen), 0, true)
+        {0, 0} -> {refuse, {param_problem, 0, 4}};   % a jumbogram without its option
+        _ -> chain(Packet, Nxt, 6, 40, 0, [], Fixed)
     end;
 judge(_) ->
-    refuse.
+    {refuse, silent}.
 
-%% The header chain from Nxt over Bin, after Depth hand-offs not counting a
-%% hop-by-hop header; the upper layer is a hand-off too.
-chain(_, _, Depth, _) when Depth >= ?NEST_LIMIT -> refuse;
-chain(0, _, _, false) -> refuse;   % hop-by-hop only first
-chain(Nxt, Bin, Depth, _) when Nxt =:= 0; Nxt =:= 60 ->
-    whole(Bin, fun(Next, <<_, _, Options/binary>>, More) ->
-                       case tlvs_ok(Options, Nxt) of
-                           true -> chain(Next, More, Depth + min(Nxt, 1), false);
-                           false -> refuse
-                       end
-               end);
-chain(43, <<_, _, _, SegLeft, _/binary>>, _, _) when SegLeft =/= 0 -> refuse;
-chain(43, Bin, Depth, _) ->
-    whole(Bin, fun(Next, _, More) -> chain(Next, More, Depth + 1, false) end);
-chain(44, <<Next, _, Off:13, _:2, M:1, _:32, Data/binary>>, Depth, _) ->
-    if
-        M =:= 1, byte_size(Data) rem 8 =/= 0 -> refuse;
-        Off =:= 0, M =:= 0 -> chain(Next, Data, Depth + 1, false);
-        Data =:= <<>> -> refuse;
-        Off =:= 0 -> first_fragment(Next, Data, Depth + 1);
-        true -> accept
+%% The header named at offset Ptr starts at Off, after Depth hand-offs not counting
+%% a hop-by-hop header (ip6_hdrnestlimit); Seen holds the headers passed, newest first.
+chain(_, _, _, _, Depth, _, _) when Depth >= ?NEST_LIMIT ->
+    {refuse, silent};
+chain(_, 0, Ptr, Off, _, _, _) when Off =/= 40 ->
+    {refuse, {param_problem, 1, Ptr}};             % hop-by-hop only first
+chain(P, Nxt, _, Off, Depth, Seen, H) when Nxt =:= 0; Nxt =:= 60 ->
+    Kind = case Nxt of 0 -> hopopts; 60 -> dstopts end,
+    case header_end(P, Off) of
+        none -> {refuse, silent};
+        End ->
+            case options(P, Off + 2, End, Kind, []) of
+                {ok, Options} ->
+                    chain(P, binary:at(P, Off), Off, End, Depth + hand_offs(Kind),
+                          [{Kind, Options} | Seen], H);
+                Refused -> Refused
+            end
     end;
-chain(44, _, _, _) -> refuse;
-chain(_, _, _, _) -> accept.
+chain(P, 43, _, Off, _, _, _) when Off + 4 =< byte_size(P), binary_part(P, Off + 3, 1) =/= <<0>> ->
+    {refuse, {param_problem, 0, Off + 2}};         % segments left: the type's offset
+chain(P, 43, _, Off, Depth, Seen, H) ->
+    case header_end(P, Off) of
+        none -> {refuse, silent};
+        End ->
+            Routing = {routing, binary:at(P, Off + 2), binary:part(P, Off + 4, End - Off - 4)},
+            chain(P, binary:at(P, Off), Off, End, Depth + 1, [Routing | Seen], H)
+    end;
+chain(P, 44, _, Off, _, _, _) when Off + 8 > byte_size(P) ->
+    {refuse, silent};
+chain(P, 44, _, Off, Depth, Seen, H) ->
+    <<_:Off/binary, Next, _, Offset:13, _:2, More:1, Id:32, Data/binary>> = P,
+    if
+        More =:= 1, byte_size(Data) rem 8 =/= 0 -> {refuse, {param_problem, 0, 4}};
+        Offset =:= 0, More =:= 0 ->
+            chain(P, Next, Off, Off + 8, Depth + 1, [{fragment, 0, false, Id} | Seen], H);
+        Data =:= <<>> -> {refuse, {param_problem, 0, 4}};
+        true ->
+            Accept = {accept, H#ip6{exthdrs = lists:reverse(Seen),
+                                    fragment = {Offset * 8, More =:= 1, Id}, proto = Next,
+                                    proto_ptr = Off, hdrlen = Off + 8 - 40}, Data},
+            case Offset of
+                0 -> first_fragment(P, Next, Off + 8, Depth + 1, Accept);
+                _ -> Accept
+            end
+    end;
+chain(P, Nxt, Ptr, Off, _, Seen, H) ->
+    {accept, H#ip6{exthdrs = lists:reverse(Seen), proto = Nxt, proto_ptr = Ptr,
+                   hdrlen = Off - 40}, binary:part(P, Off, byte_size(P) - Off)}.
 
-%% RFC 7112: the rest of the chain and the upper layer's header are here.
-first_fragment(Nxt, _, Depth) when Depth >= ?NEST_LIMIT, ?IS_EXT(Nxt) -> refuse;
-first_fragment(44, <<Next, _:7/binary, More/binary>>, Depth) -> first_fragment(Next, More, Depth + 1);
-first_fragment(44, _, _) -> refuse;
-first_fragment(Nxt, Bin, Depth) when ?IS_EXT(Nxt) ->
-    whole(Bin, fun(Next, _, More) -> first_fragment(Next, More, Depth + 1) end);
-first_fragment(Nxt, Bin, _) ->
+%% A hop-by-hop header is handled before ip6_input's loop, so it is no hand-off.
+hand_offs(hopopts) -> 0;
+hand_offs(dstopts) -> 1.
+
+%% RFC 7112: the rest of the chain and the upper layer's fixed header are in the
+%% first fragment, whose data starts at Off.
+first_fragment(_, Nxt, _, Depth, _) when Depth >= ?NEST_LIMIT, ?IS_EXT(Nxt) ->
+    {refuse, silent};
+first_fragment(P, 44, Off, Depth, Accept) when Off + 8 =< byte_size(P) ->
+    first_fragment(P, binary:at(P, Off), Off + 8, Depth + 1, Accept);
+first_fragment(P, Nxt, Off, Depth, Accept) when ?IS_EXT(Nxt), Nxt =/= 44 ->
+    case header_end(P, Off) of
+        none -> {refuse, {param_problem, 3, 0}};
+        End -> first_fragment(P, binary:at(P, Off), End, Depth + 1, Accept)
+    end;
+first_fragment(P, Nxt, Off, _, Accept) when not ?IS_EXT(Nxt) ->
     Need = maps:get(Nxt, #{6 => 20, 17 => 8, 58 => 8}, 0),
-    case byte_size(Bin) >= Need of true -> accept; false -> refuse end.
+    case byte_size(P) - Off >= Need of
+        true -> Accept;
+        false -> {refuse, {param_problem, 3, 0}}
+    end;
+first_fragment(_, _, _, _, _) ->
+    {refuse, {param_problem, 3, 0}}.
 
-%% A header of (Len + 1) * 8 bytes must be all there.
-whole(<<Next, Len, _/binary>> = Bin, Then) when byte_size(Bin) >= (Len + 1) * 8 ->
-    <<Header:((Len + 1) * 8)/binary, More/binary>> = Bin,
-    Then(Next, Header, More);
-whole(_, _) ->
-    refuse.
+%% The end of the options or routing header at Off, (Len + 1) * 8 bytes by its
+%% second byte, or none when the packet does not hold it all.
+header_end(P, Off) when Off + 2 =< byte_size(P) ->
+    End = Off + (binary:at(P, Off + 1) + 1) * 8,
+    case End =< byte_size(P) of
+        true -> End;
+        false -> none
+    end;
+header_end(_, _) ->
+    none.
 
-%% Options lie inside their header; an unknown type must say "skip"; a
-%% router alert, known only to hop-by-hop headers, has two bytes.
-tlvs_ok(<<>>, _) -> true;
-tlvs_ok(<<0, Rest/binary>>, Kind) -> tlvs_ok(Rest, Kind);
-tlvs_ok(<<Type, Len, Data:Len/binary, Rest/binary>>, Kind) ->
-    Known = case {Type, Kind} of
-                {1, _} -> true;
-                {5, 0} -> byte_size(Data) =:= 2;
-                _ -> Type band 16#c0 =:= 0
-            end,
-    Known andalso tlvs_ok(Rest, Kind);
-tlvs_ok(_, _) -> false.
+%% The options from offset At to the header's End. An option lies inside its
+%% header; the router alert, known only to hop-by-hop headers, has 4 bytes
+%% left for it and two of data; an unknown type's two high bits say whether to
+%% keep it, drop silently or answer with a parameter problem at its type
+%% byte, to any destination or only a unicast one.
+options(_, End, End, _, Acc) ->
+    {ok, lists:reverse(Acc)};
+options(P, At, End, Kind, Acc) ->
+    case binary:at(P, At) of
+        0 -> options(P, At + 1, End, Kind, Acc);
+        _ when At + 2 > End -> {refuse, silent};
+        Type ->
+            Len = binary:at(P, At + 1),
+            Data = case At + 2 + Len =< End of
+                       true -> binary:part(P, At + 2, Len);
+                       false -> overrun
+                   end,
+            case {Type, Kind, Data} of
+                {_, _, overrun} -> {refuse, silent};
+                {1, _, _} -> options(P, At + 2 + Len, End, Kind, Acc);
+                {5, hopopts, _} when End - At < 4 -> {refuse, silent};
+                {5, hopopts, _} when Len =/= 2 -> {refuse, {param_problem, 0, At + 1}};
+                {5, hopopts, _} -> options(P, At + 2 + Len, End, Kind, [{Type, Data} | Acc]);
+                _ ->
+                    case Type bsr 6 of
+                        0 -> options(P, At + 2 + Len, End, Kind, [{Type, Data} | Acc]);
+                        1 -> {refuse, silent};
+                        2 -> {refuse, {param_problem, 2, At}};
+                        3 -> {refuse, {param_problem_unicast, 2, At}}
+                    end
+            end
+    end.
 
 %% A random packet: a chain of up to five extension headers, an upper-layer
 %% header of an edge length, a payload length that is usually right, and

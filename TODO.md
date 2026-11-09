@@ -682,29 +682,34 @@ it; git history is the record of completed work.
   does, a default route through a router that left the list is missing. When the interface process is
   written, pass erx_nd6's reachability into `ra/4`, `tick/2` and `dad_done/3`, select inside, and emit
   `{routes, Rows}` and `{addresses, Rows}` actions only on a change, so it holds by construction.
-* [Medium] network, `erx_tcp_loss_dupack` and `erx_tcp_sendlog` (P12; review findings left for the
-  connection packages P14-P17, which settle the contract they depend on):
-  PRR's counters `prr_delivered` and `prr_base` are set only on entering fast recovery and never
-  reset, so an ECN window reduction runs PRR on stale counters (FreeBSD zeroes them in
-  `cc_post_recovery`); the module needs to notice `#ccv.cong_recovery` turning on or recovery ending.
-  `snd_limited` is taken from every byte sent since the first duplicate and `limited_base` is not
-  cleared on an advancing acknowledgement, where FreeBSD counts only limited transmit's own output.
-  PRR's window in SACK recovery is RFC 6937's `pipe + sndcnt` over the pipe after the acknowledgement,
-  where FreeBSD sets `pipe - del_data + sndcnt` and measures it against its own pipe; compare the two
-  in the packet scripts against FreeBSD before deciding. The non-SACK PRR window
-  `(snd_max - snd_una) + sndcnt` is measured against the pipe after the acknowledgement. The
-  lost-ranges-are-a-prefix property rests on `lose/3` being called at `snd_una` only; give `lose/3`
-  no range, or keep it explicitly, before a second loss module (RACK) marks by time. P17 must say what
-  output measures against when `allowance/3` is `none`, and whether `snd_nxt` still rewinds after a
-  timeout now that the log's lost marks say what to resend.
+* [Medium] network, `erx_tcp_loss_dupack` (`prr/5`): in SACK recovery PRR measures the pipe after
+  the acknowledgement, where FreeBSD's `tcp_do_prr_ack` computes `tcp_compute_pipe` with
+  `snd_una` not yet advanced and sets `snd_cwnd = pipe - del_data + sndcnt`; whether that pipe
+  already leaves out the bytes this acknowledgement newly SACKed (and so whether FreeBSD
+  subtracts them twice) depends on `tcp_sack_doack`, which erXos does not read. Settle it from a
+  FreeBSD 15.1 run: a SACK recovery in which one acknowledgement advances `snd_una` by A bytes
+  and newly SACKs S bytes, once with the pipe above `ssthresh` and once below, recording
+  `tcpi_snd_cwnd` (TCP_INFO) or the segments sent in reply, and compare with `pipe_after +
+  sndcnt` and `pipe_after - S + sndcnt`, for both the window and the `pipe >= ssthresh` choice.
+* [Medium] network, `erx_tcp_loss_dupack` (`episode/3`, `ended/2`): where a recovery episode
+  ends is decided twice, by the connection (`erx_tcp_input` `end_recovery`, `erx_tcp`
+  `signal_state`) and again by the module from the acknowledgement and its own `pending`
+  value, and episodes it did not begin are inferred from the flags. Today the two agree; make
+  it hold by construction with an episode number in `#ccv` that every entry and exit bumps, and
+  record the one departure it brings (ECN's signal on the acknowledgement that ends recovery
+  would start fresh counters, where FreeBSD carries them).
+* [Low] network, `erx_tcp_loss_dupack` (`prr/5`): in the recorded departure where a partial
+  acknowledgement without SACK blocks takes PRR's path, a scoreboard without holes credits
+  `maxseg` delivered per acknowledgement, so a peer splitting one segment's acknowledgement
+  front-loads PRR's sending (bounded by ssthresh); credit `min(maxseg, ack - snd_una)` there.
+* [Low] network, `erx_ip6_wire` (`options/4`): a router alert whose length is wrong but which
+  runs past its header is dropped silently, where FreeBSD's `ip6_process_hopopts` checks only
+  that 4 bytes remain and answers with a parameter problem; a second departure in which ICMPv6
+  error a packet draws, missing from the module's documentation, and the fuzz judge shares it.
 * [Low] network, `erx_udp_wire:decode/3`: over IPv4 a datagram whose UDP length is short of its IP
   payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
   64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a
   payload smaller than a quarter of its frame is copied out) to datagrams too.
-* [Medium] network tests, `test/erlang/erx_ip6_wire_fuzz.erl` and `erx_icmp6_wire_fuzz.erl`: the reference
-  judges walk the chain as the decoders do and only accept or refuse, and pkt compares only the fixed
-  header, so extension-header contents, parameter-problem pointers and neighbour-discovery option values
-  are checked only by the EUnit cases. Give the judges an independent reading of those fields.
 * [Low] network, `erx_icmp6_wire` (`error_code/2`): as in FreeBSD, an incoming parameter problem of code 3
   (RFC 7112's incomplete header chain) is refused as `bad_code`, though `erx_ip6_wire` reports code 3 for
   erx_ip6 to send; decide with erx_icmp6 whether to accept it.

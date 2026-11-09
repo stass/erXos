@@ -97,9 +97,21 @@ restores it; here the module returns the window for the output and the one to ke
 (erx_tcp_loss, `allowance/3`). NewReno's retransmission of the segment at `snd_una`, which
 FreeBSD makes by moving `snd_nxt` back, is a range marked lost in the log, which output
 retransmits first. The number of segments limited transmit sent (`snd_limited`) and PRR's
-bytes sent (`prr_out`) are taken from the log instead of counted in `tcp_output`. In SACK
-recovery PRR's window is RFC 6937's pipe plus `sndcnt` over the log's pipe after this
-acknowledgement, where FreeBSD writes `pipe - del_data` with `snd_una` not yet advanced.
+bytes sent (`prr_out`) are taken from the log instead of counted in `tcp_output`: limited
+transmit's segments are counted as the log's growth in `snd_max` until the next
+acknowledgement, so other output in that interval counts as limited transmit's. PRR's window is the
+log's pipe after this acknowledgement plus `sndcnt` segments, since the log's pipe is
+what output measures the window against; FreeBSD writes `pipe - del_data` in SACK
+recovery, with `snd_una` not yet advanced, and `snd_max - snd_una` outside it, which its
+output measures against `snd_nxt - snd_una`.
+
+PRR's counters belong to one recovery episode. FreeBSD zeroes them when recovery ends
+(`cc_post_recovery`) and counts `prr_out` only while in recovery; here an episode the
+module did not begin itself, ECN's window reduction or recovery an undone timeout
+restores, starts its counters at zero, and a timeout ends the episode, where FreeBSD
+leaves `prr_out` as the timeout found it. ECN's signal on the acknowledgement that
+reaches `snd_recover` moves `snd_recover` first, so, as in FreeBSD, the episode it
+begins carries the counters of the one that acknowledgement would have ended.
 """.
 
 -behaviour(erx_tcp_loss).
@@ -124,9 +136,13 @@ acknowledgement, where FreeBSD writes `pipe - del_data` with `snd_una` not yet a
 -record(dupack, {
     sack :: boolean(),                         % TF_SACK_PERMIT
     dupacks = 0 :: non_neg_integer(),          % t_dupacks
-    limited_base = none :: none | integer(),   % snd_max at the first duplicate (RFC 3042)
+    snd_limited = 0 :: 0..2,                   % snd_limited (RFC 3042)
+    %% snd_max when limited transmit last opened the window, until the next acknowledgement
+    %% counts what it sent
+    limited_mark = none :: none | integer(),
     prr_delivered = 0 :: integer(),            % sackhint.prr_delivered
-    prr_base = 0 :: non_neg_integer(),         % the log's sent_bytes when recovery began
+    %% the log's sent_bytes when this recovery episode began, none outside one
+    prr_base = none :: none | non_neg_integer(),
     recover_fs = 0 :: non_neg_integer(),       % sackhint.recover_fs
     pending = none :: pending()
 }).
@@ -150,10 +166,17 @@ during recovery, and NewReno's partial acknowledgement (RFC 6582).
 """.
 -spec ack(erx_tcp_loss:ack(), erx_tcp_sendlog:log(), #dupack{}, integer()) ->
     {erx_tcp_loss:verdict(), erx_tcp_sendlog:log(), #dupack{}, [erx_tcp_loss:event()]}.
-ack(#loss_ack{ack = Ack} = A0, Log0, State0, _Now) ->
-    State = State0#dupack{pending = none},
+%% In order: what limited transmit sent at the last acknowledgement and the recovery
+%% episode are settled before this one is processed, which reads both; whether it ended
+%% the episode is decided after, from what the processing began.
+ack(A0, Log0, State0, _Now) ->
     Una = erx_tcp_sendlog:snd_una(Log0),
     A = A0#loss_ack{una = Una},
+    State = episode(A, Log0, limited_sent(A, Log0, State0#dupack{pending = none})),
+    {Verdict, Log, State1, Events} = processed(A, Log0, State),
+    {Verdict, Log, ended(A, State1), Events}.
+
+processed(#loss_ack{ack = Ack, una = Una} = A, Log0, State) ->
     %% tcp_is_sack_recovery is asked before the scoreboard update and again after it, when
     %% holes the acknowledgement filled no longer count.
     {Log, Change, Delivered} = scoreboard(sack_recovery(A, Log0, State), A, Log0),
@@ -182,11 +205,13 @@ rewind({timeout, _}, Log, State, _Now) ->
 rewind(mtu, Log, State, _Now) ->
     {erx_tcp_sendlog:timeout(Log, expunge), State};
 rewind({window, Una, Max}, Log, State, _Now) when Max > Una ->
-    {erx_tcp_sendlog:lose(Log, Una, Max), State};
+    {erx_tcp_sendlog:lose(Log, Max), State};
 rewind({window, _, _}, Log, State, _Now) ->
     {Log, State}.
 
-timed_out(State) -> State#dupack{dupacks = 0, limited_base = none, pending = none}.
+timed_out(State) ->
+    State#dupack{dupacks = 0, limited_mark = none, prr_delivered = 0, prr_base = none,
+                 pending = none}.
 
 -doc """
 The window for the output after the last acknowledgement (erx_tcp_loss). Entering SACK
@@ -214,6 +239,41 @@ deadline(_) -> infinity.
 -spec expired(erx_tcp_sendlog:log(), #dupack{}, integer()) ->
     {erx_tcp_sendlog:log(), #dupack{}, [erx_tcp_loss:event()]}.
 expired(Log, State, _Now) -> {Log, State, []}.
+
+%% What limited transmit sent after the last acknowledgement, counted as tcp_do_segment
+%% counts it after its tcp_output (tcp_input.c:2782-2793): more than a segment makes two.
+limited_sent(_, _, #dupack{limited_mark = none} = State) ->
+    State;
+limited_sent(#loss_ack{ccv = #ccv{maxseg = Mss}}, Log, #dupack{limited_mark = Mark,
+                                                               snd_limited = Limited} = State) ->
+    Sent = erx_tcp_sendlog:snd_max(Log) - Mark,
+    Count = if
+        Sent > Mss -> 2;
+        Sent > 0 -> min(2, Limited + 1);
+        true -> Limited
+    end,
+    State#dupack{snd_limited = Count, limited_mark = none}.
+
+%% The recovery episode PRR's counters belong to: outside recovery there is none, and an
+%% episode this module did not begin (the connection's ECN signal, or an undone timeout)
+%% starts with nothing delivered or sent.
+episode(#loss_ack{ccv = #ccv{fast_recovery = false, cong_recovery = false}}, _, State) ->
+    State#dupack{prr_delivered = 0, prr_base = none};
+episode(_, Log, #dupack{prr_base = none} = State) ->
+    State#dupack{prr_delivered = 0, prr_base = erx_tcp_sendlog:sent_bytes(Log)};
+episode(_, _, State) ->
+    State.
+
+%% cc_post_recovery (tcp_input.c:3015-3018, :497-499): an acknowledgement that reaches
+%% snd_recover during recovery ends the episode, unless it began a new one, which moved
+%% snd_recover. The next acknowledgement may carry ECN's signal, so the episode ends here
+%% rather than when the connection's flags are seen clear.
+ended(#loss_ack{ack = Ack, recover = Recover, ccv = #ccv{fast_recovery = Fast, cong_recovery = Cong}},
+      #dupack{pending = Pending} = State)
+  when Fast orelse Cong, Ack >= Recover, Pending =/= sack_entry, Pending =/= newreno_entry ->
+    State#dupack{prr_delivered = 0, prr_base = none};
+ended(_, State) ->
+    State.
 
 %% tcp_is_sack_recovery: SACK negotiated, and SACK blocks on this segment or holes kept.
 sack_recovery(#loss_ack{sack_opt = Opt}, Log, #dupack{sack = Sack}) ->
@@ -287,21 +347,21 @@ enter_recovery(#loss_ack{ack = Ack, una = Una, snd_nxt = SndNxt, recover = Recov
         true ->
             {continue, Log, State#dupack{dupacks = 0}, []};
         false ->
-            Limited = snd_limited(Log, State, Mss),
+            Limited = State#dupack.snd_limited,
             PrrDelivered = case SackRecovery of
                 true -> min(erx_tcp_sendlog:snd_max(Log) - Ack, (Limited + 1) * Mss);
                 false -> Mss
             end,
             State1 = State#dupack{prr_delivered = PrrDelivered, recover_fs = max(1, SndNxt - Una),
                                   prr_base = erx_tcp_sendlog:sent_bytes(Log),
-                                  limited_base = none},
+                                  snd_limited = 0},
             Events = [{cong_signal, ndupack}, {ack_received, dupack}, stop_rexmt],
             case SackRecovery of
                 true ->
                     {drop, erx_tcp_sendlog:resend_holes(Log), State1#dupack{pending = sack_entry},
                      Events ++ [resume_at_max]};
                 false ->
-                    {drop, erx_tcp_sendlog:lose(Log, Ack, Ack + 1),
+                    {drop, erx_tcp_sendlog:lose(Log, Ack + 1),
                      State1#dupack{pending = newreno_entry}, Events}
             end
     end.
@@ -314,28 +374,18 @@ limited_transmit(#loss_ack{una = Una, snd_nxt = SndNxt,
                            ccv = #ccv{maxseg = Mss, cwnd = Cwnd, rxtshift = Shift}},
                  Log, #dupack{dupacks = Dupacks} = State0) ->
     SndMax = erx_tcp_sendlog:snd_max(Log),
-    State = case Dupacks of
-        1 -> State0#dupack{limited_base = SndMax};
-        _ -> State0
+    Limited = case Dupacks of
+        1 -> 0;
+        _ -> State0#dupack.snd_limited
     end,
     Base = case SndNxt =:= SndMax andalso Shift =:= 0 of
         true -> SndNxt - Una;
         false -> Cwnd
     end,
-    Window = Base + (Dupacks - snd_limited(Log, State, Mss)) * Mss,
+    Window = Base + (Dupacks - Limited) * Mss,
     Send = max(0, Window - erx_tcp_sendlog:flight(Log) + erx_tcp_sendlog:pipe(Log)),
-    {drop, Log, State#dupack{pending = {window, Send, Cwnd}}, [{ack_received, dupack}]}.
-
-%% snd_limited: the segments limited transmit sent since the first duplicate, at most 2.
-snd_limited(_, #dupack{limited_base = none}, _) ->
-    0;
-snd_limited(Log, #dupack{limited_base = Base}, Mss) ->
-    Sent = erx_tcp_sendlog:snd_max(Log) - Base,
-    if
-        Sent > Mss -> 2;
-        Sent > 0 -> 1;
-        true -> 0
-    end.
+    {drop, Log, State0#dupack{snd_limited = Limited, limited_mark = SndMax,
+                              pending = {window, Send, Cwnd}}, [{ack_received, dupack}]}.
 
 %% th_ack > snd_una. With SACK, an acknowledgement that also changes the scoreboard counts
 %% as a duplicate (RFC 6675 section 5) and may begin recovery; below snd_recover it is a
@@ -373,7 +423,7 @@ partial(#loss_ack{ack = Ack, una = Una, recover = Recover,
 %% window by the bytes acknowledged, plus a segment.
 newreno_partial_ack(#loss_ack{ack = Ack, una = Una, ccv = #ccv{maxseg = Mss, cwnd = Cwnd}}, Log,
                     State) ->
-    Log1 = erx_tcp_sendlog:lose(Log, Ack, Ack + 1),
+    Log1 = erx_tcp_sendlog:lose(Log, Ack + 1),
     Keep = max(Cwnd - (Ack - Una), 0) + Mss,
     {continue, Log1, State#dupack{pending = {window, erx_tcp_sendlog:pipe(Log1) + Mss, Keep}},
      [stop_rexmt, ack_now]}.
@@ -381,7 +431,7 @@ newreno_partial_ack(#loss_ack{ack = Ack, una = Una, ccv = #ccv{maxseg = Mss, cwn
 %% tcp_do_prr_ack: PRR's window for this acknowledgement (RFC 6937 section 3), kept as the
 %% pending window with the PRR counters it updates.
 prr(#loss_ack{una = Una, snd_nxt = SndNxt, recover = Recover,
-              ccv = #ccv{maxseg = Mss, ssthresh = Ssthresh, cwnd = Cwnd,
+              ccv = #ccv{maxseg = Mss, ssthresh = Ssthresh,
                          fast_recovery = Fast, cong_recovery = Cong}} = A,
     Log, #dupack{dupacks = Dupacks, prr_delivered = PrrDelivered0, prr_base = PrrBase,
                  recover_fs = RecoverFs0} = State,
@@ -415,13 +465,8 @@ prr(#loss_ack{una = Una, snd_nxt = SndNxt, recover = Recover,
             {min(Ssthresh - Pipe, Limit), RecoverFs0}
     end,
     SndCnt = max(SndCnt0, 0) div Mss,
-    Window = if
-        Fast, SackRecovery -> Pipe + SndCnt * Mss;
-        Fast -> (SndMax - Una) + SndCnt * Mss;
-        Cong -> Pipe + SndCnt * Mss;
-        true -> Cwnd
-    end,
-    W = max(Mss, Window),
+    %% Called only in fast recovery or ECN's window reduction.
+    W = max(Mss, erx_tcp_sendlog:pipe(Log) + SndCnt * Mss),
     State#dupack{prr_delivered = PrrDelivered, recover_fs = RecoverFs, pending = {window, W, W}}.
 
 ceil_div(N, D) -> (N + D - 1) div D.

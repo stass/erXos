@@ -1458,7 +1458,7 @@ was sent; a block covering part of a range is conservative, the range
 stays unSACKed, and neighbouring SACKed ranges merge, so repeated or
 wide blocks cannot grow the log. And the unSACKed ranges marked lost are
 a prefix of the unSACKed ranges, since `IsLost` is monotone downwards and
-`lose/3` marks ranges only from `snd_una`, so the pipe is a
+`lose/2` takes only an end and marks from `snd_una`, so the pipe is a
 constant-time sum of byte counters kept by the one function that changes
 a range, `(snd_max - snd_una) - sacked - lost + rxt`, as FreeBSD's
 `tcp_compute_pipe` computes it (`tcp_input.c:4149`).
@@ -2745,14 +2745,22 @@ as a test oracle and kept out of the tree. Generators bias lengths to the
 edges: empty, one short, exact, one long. A target whose decoder checks
 a checksum sets the correct sum on most inputs, so the fields behind it
 are reached, and a wrong one on the rest, which the decoder and the
-judge must both refuse.
+judge must both refuse. The IPv6 and ICMPv6 judges go further: reading
+the packet by absolute offsets, where the decoders match binaries, they
+state the whole decoded record (extension-header contents, the
+fragment, the upper layer's offsets, neighbour-discovery fields and
+option values) and, for a refusal FreeBSD answers with a parameter
+problem, its code and pointer, which pkt does not decode.
 
 *Seeded failure:* a decoder variant that trusts the IPv4 total length
 without checking it against the frame, and one that accepts a TCP data
 offset below 5, must each fail its target within the target's budget;
 and one that accepts SACK blocks on a SYN, which decodes without
 raising, must fail its target's agreement check with the reference
-judge, so the judge itself is shown to catch a wrong decoding.
+judge, so the judge itself is shown to catch a wrong decoding; so must
+an IPv6 decoder that points a routing header's parameter problem at
+its segments-left byte, and an ICMPv6 decoder that takes an MTU option
+longer than one unit.
 
 ### Checksums and random values: the interface's gate and the generators
 

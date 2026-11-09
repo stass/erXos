@@ -41,7 +41,7 @@ check(Message) ->
              catch Class:Reason:Stack -> fail(decoder_raised, {Message, Class, Reason, Stack})
              end,
     case {Result, judge(Message)} of
-        {{ok, Decoded, Rest}, accept} ->
+        {{ok, Decoded, Rest}, {accept, Decoded, Rest}} ->
             round_trip(Decoded, Rest),
             agree_with_pkt(Message, Decoded),
             accepted;
@@ -85,44 +85,93 @@ fail(Tag, Detail) -> throw({fail, Tag, Detail}).
 -doc """
 The reference judge, from RFC 4443's and RFC 4861's rules with the limits
 the design adopts from FreeBSD (8-byte header, the codes FreeBSD accepts,
-eleven options read): accept or refuse.
+eleven options read, `nd6_options` keeping the first of each single option
+and every prefix, `nd6_ra_input` taking an MTU option of length 1 and prefix
+options of length 4). It reads the message by absolute offsets, where the
+decoder matches binaries, and says what the decoder must return: the record
+and the rest of an accepted message (an error's second word, which is a
+parameter problem's pointer, an echo's identifier and sequence number, and
+every fixed field and option value of neighbour discovery), or `refuse`.
 """.
--spec judge(binary()) -> accept | refuse.
+-spec judge(binary()) -> {accept, #icmp6{}, binary()} | refuse.
 judge(Message) when byte_size(Message) < 8 ->
     refuse;
 judge(Message) when byte_size(Message) > 16#ffff ->
     refuse;
 judge(Message) ->
     case erx_bytes:inet_csum(pseudo(byte_size(Message)), Message) of
-        16#ffff -> fields(Message);
+        16#ffff -> fields(Message, binary:at(Message, 0), binary:at(Message, 1));
         _ -> refuse
     end.
 
-%% The fields of a message whose sum is right.
-fields(<<Type, Code, _:16, Body/binary>>) when Type < 128 ->
+%% The fields of a message whose sum is right, by its type and code.
+fields(M, Type, Code) when Type < 128 ->
     Codes = #{1 => 4, 3 => 1, 4 => 2},
-    case Code =< maps:get(Type, Codes, 255) andalso byte_size(Body) >= 4 + 40 of
-        true -> accept;
+    case Code =< maps:get(Type, Codes, 255) andalso byte_size(M) >= 8 + 40 of
+        true -> {accept, #icmp6{type = Type, code = Code, msg = {error, u32(M, 4)}}, from(M, 8)};
         false -> refuse
     end;
-fields(<<Type, Code, _:16, Body/binary>>) when Type =:= 128; Type =:= 129 ->
-    case Code of 0 when byte_size(Body) >= 4 -> accept; _ -> refuse end;
-fields(<<Type, Code, _:16, Body/binary>>) when Type >= 133, Type =< 137 ->
-    Fixed = element(Type - 132, {4, 12, 20, 20, 36}),
-    case {Code, Body} of
-        {0, <<_:Fixed/binary, Options/binary>>} -> options(Options, 0);
-        _ -> refuse
+fields(M, Type, 0) when Type =:= 128; Type =:= 129 ->
+    {accept, #icmp6{type = Type, code = 0, msg = {echo, u16(M, 4), u16(M, 6)}}, from(M, 8)};
+fields(M, Type, 0) when Type >= 133, Type =< 137 ->
+    OptionsAt = 4 + nd_fixed(Type),
+    case OptionsAt =< byte_size(M) andalso options(M, OptionsAt, 0, []) of
+        false -> refuse;
+        refuse -> refuse;
+        Read ->
+            Opts = nd_opts(M, Read),
+            Msg = case Type of
+                      133 -> {rs, Opts};
+                      134 -> {ra, binary:at(M, 4), binary:at(M, 5), u16(M, 6), u32(M, 8),
+                              u32(M, 12), Opts};
+                      135 -> {ns, binary:part(M, 8, 16), Opts};
+                      136 -> {na, binary:at(M, 4) bsr 5, binary:part(M, 8, 16), Opts};
+                      137 -> {redirect, binary:part(M, 8, 16), binary:part(M, 24, 16), Opts}
+                  end,
+            {accept, #icmp6{type = Type, code = 0, msg = Msg}, <<>>}
     end;
-fields(_) ->
-    accept.
+fields(_, Type, _) when Type =:= 128; Type =:= 129; Type >= 133, Type =< 137 ->
+    refuse;
+fields(M, Type, Code) ->
+    {accept, #icmp6{type = Type, code = Code, msg = other}, from(M, 4)}.
 
-%% Every option has a nonzero length that keeps it inside the message, up
-%% to the eleventh; what follows that is not read.
-options(<<>>, _) -> accept;
-options(_, 11) -> accept;
-options(<<_, Len, Rest/binary>>, Read) when Len > 0, Len * 8 - 2 =< byte_size(Rest) ->
-    options(binary:part(Rest, Len * 8 - 2, byte_size(Rest) - (Len * 8 - 2)), Read + 1);
-options(_, _) -> refuse.
+%% The options from offset At, as {Type, Units, Offset} in wire order: each has a
+%% nonzero length that keeps it inside the message, up to the eleventh; what follows
+%% that is not read.
+options(M, At, _, Read) when At =:= byte_size(M) ->
+    lists:reverse(Read);
+options(_, _, 11, Read) ->
+    lists:reverse(Read);
+options(M, At, Count, Read) when At + 2 =< byte_size(M) ->
+    Units = binary:at(M, At + 1),
+    case Units > 0 andalso At + Units * 8 =< byte_size(M) of
+        true -> options(M, At + Units * 8, Count + 1, [{binary:at(M, At), Units, At} | Read]);
+        false -> refuse
+    end;
+options(_, _, _, _) ->
+    refuse.
+
+%% What the options say: the first source and target link-layer address, redirected
+%% header and nonce; the first MTU option, taken only if it is one unit long; every
+%% prefix information option four units long.
+nd_opts(M, Read) ->
+    First = fun(Type) -> lists:keyfind(Type, 1, Read) end,
+    Body = fun({_, Units, At}, Skip) -> binary:part(M, At + Skip, Units * 8 - Skip) end,
+    Single = [{Key, Body(Option, Skip)}
+              || {Key, Type, Skip} <- [{slla, 1, 2}, {tlla, 2, 2}, {redirected, 4, 8}, {nonce, 14, 2}],
+                 Option <- [First(Type)], Option =/= false],
+    Mtu = [{mtu, u32(M, At + 4)} || {5, 1, At} <- [First(5)]],
+    Prefixes = [#{len => binary:at(M, At + 2), flags => binary:at(M, At + 3), valid => u32(M, At + 4),
+                  preferred => u32(M, At + 8), prefix => binary:part(M, At + 16, 16)}
+                || {3, 4, At} <- Read],
+    maps:from_list(Single ++ Mtu ++ [{prefixes, Prefixes} || Prefixes =/= []]).
+
+%% The bytes of a neighbour-discovery message's fixed part after its first four.
+nd_fixed(Type) -> element(Type - 132, {4, 12, 20, 20, 36}).
+
+u16(M, At) -> binary:decode_unsigned(binary:part(M, At, 2)).
+u32(M, At) -> binary:decode_unsigned(binary:part(M, At, 4)).
+from(M, At) -> binary:part(M, At, byte_size(M) - At).
 
 %% A random message of a weighted type with a fixed part of an edge length.
 message() ->
@@ -135,7 +184,7 @@ message() ->
 body(Type) when Type < 128 ->
     bytes(4 + oneof([39, 40, 41, 48, rand:uniform(100)]));
 body(Type) when Type >= 133, Type =< 137 ->
-    Fixed = element(Type - 132, {4, 12, 20, 20, 36}),
+    Fixed = nd_fixed(Type),
     iolist_to_binary([bytes(Fixed + oneof([0, 0, 0, 0, 0, -1, 1])),
                       [option() || _ <- lists:seq(1, oneof([0, 1, 2, 3, 5, 12]))]]);
 body(_) ->
