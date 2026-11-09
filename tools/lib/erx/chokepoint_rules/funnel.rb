@@ -9,15 +9,13 @@ module Erx
     NET_MESSAGE = /.*\berts_net_message\b.*/
     # The lane driver, whose drain hands ERTS a frame only when
     # erx_funnel_check returned it for delivery.
-    LANE_DRIVER = 'otp/erts/emulator/sys/erxos/erl_lane_drv.c'
-    # Stock ERTS's own lines: the declaration, the definition, and the two
+    LANE_DRIVER = 'otp/erts/emulator/sys/erxos/erx_lane_drv.c'
+    # Stock ERTS's own lines: the declaration and the definition. Its two
     # stock carriers, a port driver's output to a distribution port (io.c)
-    # and dist_ctrl_put_data (dist.c), whose removal TODO.md holds.
+    # and dist_ctrl_put_data (dist.c), refuse for every entry.
     NET_MESSAGE_STOCK = {
       'otp/erts/emulator/beam/global.h' => /\Aextern int erts_net_message\(Port \*prt,\s*\z/,
-      'otp/erts/emulator/beam/dist.c' =>
-        /\A(?:int erts_net_message\(Port \*prt,|\s*\(void\) erts_net_message\(NULL, dep, conn_id, NULL, 0, bin, data, size\);)\s*\z/,
-      'otp/erts/emulator/beam/io.c' => /\A\s*return erts_net_message\(prt,\s*\z/
+      'otp/erts/emulator/beam/dist.c' => /\Aint erts_net_message\(Port \*prt,\s*\z/
     }.freeze
 
     declare_group(
@@ -30,10 +28,7 @@ module Erx
         # the lane driver may call it, with what erx_funnel_check returned;
         # this text rule keeps every other file of erXos's own C, the
         # inherited OTP and musl off it. That the drain calls it only with a
-        # delivered frame is the drain's own test's. It sees names, not
-        # paths: a caller of the stock carriers' entry points (a port
-        # driver's output on a distribution port, dist_ctrl_put_data)
-        # reaches erts_net_message unseen until TODO.md's item removes them.
+        # delivered frame is the drain's own test's.
         Chokepoints::Forbidden.new(
           name: 'funnel-net-message',
           rule: "only #{LANE_DRIVER}, whose drain hands ERTS a frame only when erx_funnel_check returned it for " \

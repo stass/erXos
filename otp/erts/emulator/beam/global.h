@@ -1197,6 +1197,18 @@ extern int erts_do_net_exits(DistEntry*, Eterm);
 extern int distribution_info(fmtfn_t, void *);
 extern int is_node_name_atom(Eterm a);
 
+/*
+ * What the lane driver's funnel decided for a frame it hands to distribution input:
+ * deliver it, or answer it as stock ERTS answers the same operation on a process that
+ * does not exist, through the entry's own queue (docs/design-runtime.md, "Authority").
+ */
+typedef enum {
+    ERX_NET_DELIVER,
+    ERX_NET_NOPROC,             /* a LINK or MONITOR_P: noproc */
+    ERX_NET_SPAWN_UNAUTHORISED, /* a SPAWN_REQUEST: a SPAWN_REPLY of noconnection */
+    ERX_NET_SPAWN_LIMIT         /* a SPAWN_REQUEST: a SPAWN_REPLY of system_limit */
+} erx_net_answer_t;
+
 extern int erts_net_message(Port *prt,
                             DistEntry *dep,
                             Uint32 conn_id,
@@ -1204,7 +1216,8 @@ extern int erts_net_message(Port *prt,
                             ErlDrvSizeT hlen,
                             Binary *bin,
                             const byte *buf,
-                            ErlDrvSizeT len);
+                            ErlDrvSizeT len,
+                            erx_net_answer_t answer);
 
 int erts_dist_pend_spawn_exit_delete(ErtsMonitor *mon);
 int erts_dist_pend_spawn_exit_parent_setup(ErtsMonitor *mon);

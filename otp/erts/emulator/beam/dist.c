@@ -17,6 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the lane port driver alone carries distribution input, and
+ * erts_net_message answers a frame the funnel found without a target.
+ *
  * %CopyrightEnd%
  */
 
@@ -190,7 +193,6 @@ Export spawn_request_yield_export;
 Export* dmonitor_node_trap = NULL;
 
 /* local variables */
-static Export *dist_ctrl_put_data_trap;
 
 /* forward declarations */
 
@@ -1146,9 +1148,6 @@ void init_dist(void)
 
     /* Lookup/Install all references to trap functions */
     dmonitor_node_trap = trap_function(am_dmonitor_node,3);
-    dist_ctrl_put_data_trap = erts_export_put(am_erts_internal,
-                                              am_dist_ctrl_put_data,
-                                              2);
     erts_init_trap_export(&spawn_request_yield_export,
                           am_erts_internal, am_spawn_request_yield,
                           3, spawn_request_yield_3);
@@ -2021,7 +2020,8 @@ int erts_net_message(Port *prt,
 		     ErlDrvSizeT hlen,
                      Binary *bin,
 		     const byte *buf,
-		     ErlDrvSizeT len)
+		     ErlDrvSizeT len,
+		     erx_net_answer_t answer)
 {
     ErtsDistExternal ede, *edep = &ede;
     ErtsDistExternalData ede_data;
@@ -2220,6 +2220,15 @@ int erts_net_message(Port *prt,
 
     token = NIL;
 
+    /*
+     * The lane driver asks for the absent target's answer only for a LINK, a MONITOR_P or a
+     * spawn request; any other operation it asks to answer fails closed, as invalid.
+     */
+    if (answer != ERX_NET_DELIVER && unsigned_val(tuple[1]) != DOP_LINK &&
+        unsigned_val(tuple[1]) != DOP_MONITOR_P && unsigned_val(tuple[1]) != DOP_SPAWN_REQUEST &&
+        unsigned_val(tuple[1]) != DOP_SPAWN_REQUEST_TT)
+        goto invalid_message;
+
     switch (type = unsigned_val(tuple[1])) {
     case DOP_LINK: {
         ErtsDSigSendContext ctx;
@@ -2242,7 +2251,7 @@ int erts_net_message(Port *prt,
                 goto invalid_message;
             /* old incarnation of node; reply noproc... */
         }
-        else if (is_internal_pid(to)) {
+        else if (is_internal_pid(to) && answer == ERX_NET_DELIVER) {
             ErtsLinkData *ldp = erts_link_external_create(ERTS_LNK_TYPE_DIST_PROC,
                                                           to, from);
             ASSERT(ldp->dist.other.item == to);
@@ -2363,7 +2372,7 @@ int erts_net_message(Port *prt,
 
         if (is_internal_pid(watched)) {
             name = NIL;
-            pid = watched;
+            pid = answer == ERX_NET_DELIVER ? watched : am_undefined;
         }
         else if (is_atom(watched)) {
             name = watched;
@@ -2930,10 +2939,14 @@ int erts_net_message(Port *prt,
 
         opts_error = erts_parse_spawn_opts(&so, opts, NULL, 0);
         if (opts_error) {
-            ErtsDSigSendContext ctx;
             if (opts_error > 1)
                 goto invalid_message;
             error = am_badopt;
+            goto dist_spawn_error;
+        }
+        if (answer != ERX_NET_DELIVER) {
+            ErtsDSigSendContext ctx;
+            error = answer == ERX_NET_SPAWN_LIMIT ? am_system_limit : am_noconnection;
         dist_spawn_error:
             if (ede_hfrag) {
                 erts_free_dist_ext_copy(erts_get_dist_ext(ede_hfrag));
@@ -4332,77 +4345,11 @@ dist_ctrl_get_data_notification_1(BIF_ALIST_1)
 BIF_RETTYPE
 dist_ctrl_put_data_2(BIF_ALIST_2)
 {
-    DistEntry *dep;
-    Eterm input_handler;
-    Uint32 conn_id;
-    Binary *bin = NULL;
-
-    if (is_list(BIF_ARG_2)) {
-        BIF_TRAP2(dist_ctrl_put_data_trap,
-                  BIF_P, BIF_ARG_1, BIF_ARG_2);
-    }
-
-    dep = erts_dhandle_to_dist_entry(BIF_ARG_1, &conn_id);
-    if (!dep) {
-        BIF_ERROR(BIF_P, BADARG);
-    }
-
-    input_handler = (Eterm)erts_atomic_read_nob(&dep->input_handler);
-
-    if (input_handler != BIF_P->common.id) {
-        BIF_ERROR(BIF_P, EXC_NOTSUP);
-    }
-
-    erts_atomic64_inc_nob(&dep->in);
-
-    if (is_bitstring(BIF_ARG_2)) {
-        ERTS_DECLARE_DUMMY(Eterm br_flags);
-        const byte *data, *temp_alloc = NULL;
-        Uint offset, size;
-        BinRef *br;
-
-        ERTS_PIN_BITSTRING(BIF_ARG_2, br_flags, br, data, offset, size);
-
-        if (TAIL_BITS(size) != 0) {
-            BIF_ERROR(BIF_P, BADARG);
-        }
-
-        if (BIT_OFFSET(offset) == 0) {
-            data = &data[BYTE_OFFSET(offset)];
-            size = BYTE_SIZE(size);
-
-            bin = br ? br->val : NULL;
-        } else {
-            ERTS_DECLARE_DUMMY(Uint dummy);
-            data = (byte *) erts_get_aligned_binary_bytes(BIF_ARG_2,
-                                                          &size,
-                                                          &temp_alloc);
-        }
-
-        if (!data) {
-            BIF_ERROR(BIF_P, BADARG);
-        }
-
-        erts_proc_unlock(BIF_P, ERTS_PROC_LOCK_MAIN);
-
-        (void) erts_net_message(NULL, dep, conn_id, NULL, 0, bin, data, size);
-        /*
-         * We ignore any decode failures. On fatal failures the
-         * connection will be taken down by killing the
-         * distribution channel controller...
-         */
-
-        erts_proc_lock(BIF_P, ERTS_PROC_LOCK_MAIN);
-
-        BUMP_REDS(BIF_P, 5);
-
-        erts_free_aligned_binary_bytes(temp_alloc);
-
-    } else if (is_not_nil(BIF_ARG_2)) {
-        BIF_ERROR(BIF_P, BADARG);
-    }
-
-    BIF_RET(am_ok);
+    /*
+     * A process controller is stock distribution's carrier; on erXos distribution input is
+     * the lane driver's drain alone (docs/design-runtime.md, R6), so it is refused.
+     */
+    BIF_ERROR(BIF_P, EXC_NOTSUP);
 }
 
 BIF_RETTYPE

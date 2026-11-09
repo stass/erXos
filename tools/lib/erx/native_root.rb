@@ -51,9 +51,12 @@ module Erx
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
                  build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
+    # What ERTS's lane port driver (erx_lane_drv.c) calls: the lanes, the funnel and the
+    # ETF reader and writer, which hashes atoms with BLAKE3.
+    CONNECTION = %w[liberx/erx_lane.c liberx/erx_funnel.c liberx/erx_etf.c].freeze
     # The domain library: its pure core, its apply phase and install funnel, and the lanes it sizes.
     DOMAIN_LIBRARY = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c
-                        liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/erx_lane.c].freeze
+                        liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c].freeze
     # The root's way to the archive: the record, the launcher and the manifest's reader.
     LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c #{BACKEND}/boot_args.c kernel/core/boot_handoff.c build/gen/liberx/generated/abi_reader.c].freeze
     # A task's own program: its entry, its console and memcpy, and the stubs and
@@ -72,7 +75,7 @@ module Erx
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
               "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
               "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c',
-              *DOMAIN_LIBRARY].freeze
+              *DOMAIN_LIBRARY, *CONNECTION].freeze
     # A domain's runtime image: the interpreter ERTS as a task's program, at task.ld's
     # fixed addresses, since erx_image_map loads only an ERX_IMAGE_FIXED image. musl's
     # start enters ERTS's main through domain_entry.c, which first checks the boot page;
@@ -83,13 +86,18 @@ module Erx
     DOMAIN_RUNTIME = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/domain_entry.c",
                       "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
-                      "#{BACKEND}/task_refused.c", "#{BACKEND}/release_task.c", 'liberx/release_fs.c'].freeze
+                      "#{BACKEND}/task_refused.c", "#{BACKEND}/release_task.c", 'liberx/release_fs.c',
+                      'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c', *CONNECTION].freeze
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
     # the domain library, and the native_domain root and string functions that link it.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
-                      liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/erx_lane.c test/guest/native_domain/guest.c
+                      liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/erx_lane.c liberx/erx_funnel.c
+                      liberx/erx_etf.c test/guest/native_domain/guest.c
                       test/guest/native_domain/string.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
+    # The sources that use the FP registers, which a task may (only the kernel runs no FP
+    # instruction): erx_etf.c reads and writes floats.
+    FP_SOURCES = %w[liberx/erx_etf.c].freeze
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
                -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I build/gen -I build/gen/include -I include -I kernel/crypto -I build/gen/kernel/generated -I kernel/core -I .].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
@@ -200,8 +208,11 @@ module Erx
     def compile(source, directory:, flags:)
       object = object_path(source, directory)
       headers = @fiasco.user_include_directories.flat_map { |path| ['-isystem', path] }
-      libc = LIBC_SOURCES.include?(source) ? ['-isystem', LIBC_HEADERS] : []
-      @runner.run([@compiler, *FLAGS, *flags, *headers, *libc, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object],
+      # musl declares the BSD memory primitives (bcmp, bcopy, bzero) only under _BSD_SOURCE,
+      # which -std=c17 leaves undefined.
+      libc = LIBC_SOURCES.include?(source) ? ['-isystem', LIBC_HEADERS, '-D_BSD_SOURCE'] : []
+      base = FP_SOURCES.include?(source) ? FLAGS - ['-mgeneral-regs-only'] : FLAGS
+      @runner.run([@compiler, *base, *flags, *headers, *libc, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object],
                   name: "native-root-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source)
       object
     end

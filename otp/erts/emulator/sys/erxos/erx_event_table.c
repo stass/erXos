@@ -5,6 +5,7 @@
 
 #include <stdatomic.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "erx_event_table.h"
 
@@ -28,12 +29,42 @@ erx_event_table_add(erx_event_table_t *table, const erx_event_sink_t *sink, uint
 	return (ERX_ELIMIT);
 }
 
+static erx_event_sink_t *
+connection_slot(erx_event_table_t *table, uint32_t label)
+{
+	for (uint32_t index = 0; index < ERX_EVENT_CONNECTIONS; index++) {
+		if (table->connections[index].kind == ERX_EVENT_SINK_CONNECTION &&
+		    table->connections[index].owner == label)
+			return (&table->connections[index]);
+	}
+	return (NULL);
+}
+
+int
+erx_event_table_add_connection(erx_event_table_t *table, uint32_t label, uint64_t port, uint64_t unsettled)
+{
+	_Static_assert(ERX_EVENT_CONNECTIONS <= 64, "a slot is one bit of unsettled");
+
+	if (label >= ERX_LABEL_SPLIT || connection_slot(table, label) != NULL)
+		return (ERX_EINVAL);
+	for (uint32_t index = 0; index < ERX_EVENT_CONNECTIONS; index++) {
+		if (table->connections[index].kind == ERX_EVENT_SINK_FREE && (unsettled >> index & 1u) == 0) {
+			table->connections[index] = (erx_event_sink_t){ .kind = ERX_EVENT_SINK_CONNECTION,
+				.owner = label, .detail = port };
+			return (ERX_OK);
+		}
+	}
+	return (ERX_ELIMIT);
+}
+
 const erx_event_sink_t *
 erx_event_table_find(const erx_event_table_t *table, uint32_t label)
 {
 	const erx_event_sink_t *sink;
 
-	if (label < ERX_LABEL_SPLIT || label - ERX_LABEL_SPLIT >= ERX_EVENT_LABELS)
+	if (label < ERX_LABEL_SPLIT)
+		return (connection_slot((erx_event_table_t *)(uintptr_t)table, label));
+	if (label - ERX_LABEL_SPLIT >= ERX_EVENT_LABELS)
 		return (NULL);
 	sink = &table->sinks[label - ERX_LABEL_SPLIT];
 	return (sink->kind == ERX_EVENT_SINK_FREE ? NULL : sink);
@@ -46,7 +77,7 @@ erx_event_table_remove(erx_event_table_t *table, uint32_t label)
 	const erx_event_sink_t removed = sink != NULL ? *sink : (erx_event_sink_t){ .kind = ERX_EVENT_SINK_FREE };
 
 	if (sink != NULL)
-		table->sinks[label - ERX_LABEL_SPLIT] = (erx_event_sink_t){ .kind = ERX_EVENT_SINK_FREE };
+		*(erx_event_sink_t *)(uintptr_t)sink = (erx_event_sink_t){ .kind = ERX_EVENT_SINK_FREE };
 	return (removed);
 }
 

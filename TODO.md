@@ -1761,13 +1761,73 @@ it; git history is the record of completed work.
   generator emits only `_decode` for `wire_le` layouts; a field whose width
   changed in `abi/erx_abi.txt` would be written at its old width. Emit an
   `_encode` for `wire_le` layouts and call `erx_lane_rec_encode`.
-* [Medium] ERTS distribution input, `beam/io.c` (`driver_output`,
-  `driver_output_binary`, `driver_output2` on a distribution port) and
-  `beam/dist.c` (`dist_ctrl_put_data`): stock ERTS's two carriers still
-  call `erts_net_message`, where R6 of design-runtime.md makes the lane
-  driver's drain its only caller. The `funnel-net-message` chokepoint
-  permits exactly those stock lines; delete them, or refuse them for every
-  entry, when the lane driver lands, and drop their sites from the rule.
+* [Medium] Lane driver test between two domains, `test/guest/native_domain`:
+  the `connection` cell drives the driver over one domain's system
+  connection, with the root as the system party. Two domains connected by
+  `erx_dom_lib_connect` cannot open their ports until `connection_up`
+  (RT6b) tells a runtime the connection's values; that cell lands with RT6b.
+* [Medium] Lane driver, `erx_lane_drv.c` `exports_none`: the funnel's
+  export lookup answers that the peer holds nothing, so every message,
+  link and spawn from another domain is unheld until the export table
+  (RT7) exists. `ERX_FUNNEL_DELIVER_IF_LINKED` is answered `noproc`, which
+  is wrong when the target already holds a link with the sender (one a
+  process of this domain made toward the peer's process): the peer's
+  process then gets an exit of `noproc` for a live link. RT7 replaces the
+  lookup and adds the hold's link bit and the conditional `LINK` signal.
+* [Low] Lane driver, `-erx lane_batch`: the allowance is
+  `ERX_LANE_BATCH_DEFAULT` (64); `erl_init.c` does not parse the flag yet.
+* [Medium] Lane driver review residuals, `otp/erts/emulator/sys/erxos/erx_lane_drv.c`
+  and `test/guest/native_domain`: (1) one run of the input task is bounded by
+  frames, not bytes, so 64 frames of `max_frame` each hold a scheduler for one
+  run; bound it by bytes too, or charge reductions per byte. (2) The
+  `ERX_FUNNEL_TOO_LARGE`, malformed-record, failed-grow, allowance-reschedule
+  and port-stop paths have no QEMU case; the connection cell covers output
+  pause and resume, an answer and the answers bound only; no case delivers a
+  right-0 frame (`PAYLOAD_EXIT`, `UNLINK_ID`). (3) The step's sequencing
+  (plan, grow or take, took, check, the answer gate, deliver, next) lives in
+  `input_step`, which does not build for the host, so "DELIVER only with the
+  record whole" and the answer gate have no unit test; design-domains.md's
+  `erx_funnel_step` is that step as a pure function in `liberx` returning the
+  next action, with host tests and a fuzz target, and the driver only carries
+  the action out. Until then the asm fuzz target should feed several records
+  through one grown buffer and assert no `DELIVER` while `held < frame`; no
+  landing-gate host test drives `erx_funnel_asm` either. (4) The party's and
+  the driver's frame headers are packed by hand until the generator emits
+  `erx_frame_header_encode` (see the `wire_le` item above); until then the
+  driver should use `ERX_FRAME_HEADER_OFF_*`, and output relies on the
+  header's last byte doubling as the pass-through byte. (5) `answers_unsent` measures `total_qsize -
+  qsize`, which also counts this domain's own sends with no process and its
+  `async_dist` processes' sends, so a healthy connection can end; and an
+  `UNLINK_ID` to a live target is acked later by the target, past the check.
+  Count the answers at their source in `erts_net_message`'s `ERX_NET_*` path
+  and take the bound from the boot page's `peer_held` (design-domains.md,
+  "Flow control"), which deletes `op_answered`; `ERX_LANE_ANSWERS_MAX` stands
+  in for it. (6) The connection case can end the port between two of the
+  domain's 50 ms polls, and `domain_run` does not stop a domain whose end it
+  did not see; `party_flood` does not tell a stall from a refusal. (7) No case
+  streams between two domains (the deadlock the busy gate could cause); it
+  lands with RT6b's two-domain cell. (8) `erx_funnel_asm_ungrown` and its
+  `funnel.h` contract are used only by the fuzz target, and
+  `erx_funnel_asm_took` treats a `GROW` plan as a skip rather than refusing
+  it. (9) The open command (`lane_open_parse`) takes raw capability slots, a
+  label and the peer's node name from any Erlang caller in the domain: open
+  by an opaque connection id the runtime recorded from `connection_up` or
+  the boot page instead, with the node name from the same record, and map
+  the sides where that record is made, so the driver leaves the
+  `device-memory-mapping` rule's sites; a table of
+  {field, maximum} would also replace the positional `words[7]`. (10)
+  `erts_net_message`'s result is ignored, so a frame the funnel accepted and
+  ERTS refused does not end the port; output drops a frame with a control
+  term of length 0 or past the limit but keeps the connection. Both should
+  end the port. (11) The generic `erx_event_unregister` resolves a label below
+  `ERX_LABEL_SPLIT` to a connection slot and frees it without aborting its
+  tasks; no caller passes one, but it should refuse them. (12) `erx_funnel_asm_t`'s `held` and `hold` differ by a
+  letter and mean different things; rename `hold` to `keep`.
+  `connection_schedule` finds its handles by pointer arithmetic on the
+  global table; keep them in the slot or pass the index. (13) A peer can grow
+  a live process's signal queue without limit with right-0 signals
+  (`UNLINK_ID`, `DEMONITOR_P`, `PAYLOAD_EXIT`); the queue quota covers only
+  undecoded messages, and no design text bounds these.
 * [Medium] Funnel authority, design-domains.md "The funnel" step 5: a
   `LINK` without `link` to a live process that holds no link with the
   sender is answered `noproc` by the target process when it handles the

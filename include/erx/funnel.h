@@ -56,6 +56,8 @@
 #include "erx/abi.h"
 #include "erx/etf.h"
 
+struct erx_lane_part;
+
 typedef struct erx_funnel_control erx_funnel_control_t;
 typedef struct erx_funnel_header erx_funnel_header_t;
 
@@ -393,5 +395,77 @@ void erx_funnel_check(const uint8_t *frame, uint32_t frame_len, size_t held,
     const erx_funnel_lane_t *lane, const erx_funnel_limits_t *limits,
     void *scratch, size_t scratch_len, erx_funnel_verdict_t *verdict);
 size_t erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits);
+
+/*
+ * A frame's assembly from the parts erx_lane_take returns, a pure state
+ * machine over a buffer the caller owns.  Before each take the caller asks
+ * erx_funnel_asm_plan where the take's bytes go; after it, it reports the
+ * part to erx_funnel_asm_took, which says when the record is whole.  The
+ * buffer starts at ERX_FUNNEL_ASM_FIRST bytes or more and grows only when
+ * the plan asks, never past the record, so a record's length word alone
+ * never makes the caller allocate.
+ *
+ * Once a record's 8-byte frame header is held, the assembly decides from
+ * it whether the record is kept whole: one whose header erx_funnel_header
+ * refuses, or whose payload is past max_frame, is held only to its first
+ * ERX_FUNNEL_ASM_KEEP bytes (its header, the longest control term and the
+ * payload's first byte), and the rest is skipped as it arrives; so is the
+ * rest of a record whose buffer could not grow.  erx_funnel_check judges
+ * such a frame from what it holds, as malformed or over a limit.
+ */
+#define ERX_FUNNEL_ASM_KEEP	(ERX_FRAME_HEADER_SIZE + ERX_CTL_MAX + 1u)
+/* The first buffer: what is kept of any record, and room for an exit
+ * reason the runtime writes after a held control term. */
+#define ERX_FUNNEL_ASM_FIRST	(ERX_FUNNEL_ASM_KEEP + 63u)
+
+typedef struct erx_funnel_asm {
+	uint32_t	 max_frame;	/* the receiver's limit on a payload */
+	uint32_t	 frame;		/* the open record's length, 0 between
+					   records */
+	uint32_t	 held;		/* its bytes in the buffer, from 0 */
+	uint32_t	 hold;		/* its bytes the buffer keeps */
+	bool		 sized;		/* the header was read */
+	bool		 discard;	/* it is kept only in part */
+} erx_funnel_asm_t;
+
+typedef enum erx_funnel_asm_where {
+	ERX_FUNNEL_ASM_COPY,	/* take at most room bytes into buf + at */
+	ERX_FUNNEL_ASM_GROW,	/* grow the buffer to want bytes, or call
+				   erx_funnel_asm_ungrown, and plan again */
+	ERX_FUNNEL_ASM_SKIP	/* take into a scratch buffer: dropped */
+} erx_funnel_asm_where_t;
+
+typedef struct erx_funnel_asm_plan {
+	erx_funnel_asm_where_t	 where;
+	uint32_t		 at;	/* COPY: the buffer offset */
+	uint32_t		 room;	/* COPY: at most this many bytes, >= 1 */
+	uint32_t		 want;	/* GROW: the buffer's new size */
+} erx_funnel_asm_plan_t;
+
+typedef enum erx_funnel_asm_status {
+	ERX_FUNNEL_ASM_MORE = 1,	/* the record is still open */
+	ERX_FUNNEL_ASM_WHOLE,		/* judge the buffer's first held bytes
+					   as a frame of frame bytes, then
+					   erx_funnel_asm_next */
+	ERX_FUNNEL_ASM_MALFORMED	/* not a frame record: end the lane */
+} erx_funnel_asm_status_t;
+
+/* Between records, for a receiver whose payloads are at most max_frame. */
+void erx_funnel_asm_init(erx_funnel_asm_t *, uint32_t max_frame);
+/* Where the next take goes, for a buffer of cap bytes. */
+void erx_funnel_asm_plan(const erx_funnel_asm_t *, size_t cap,
+    erx_funnel_asm_plan_t *);
+/* The buffer could not grow: the rest of the record is skipped. */
+void erx_funnel_asm_ungrown(erx_funnel_asm_t *);
+/*
+ * Accounts for a take that returned ERX_LANE_TOOK with part, made where
+ * plan said; buf is the buffer, whose first held bytes it reads once the
+ * header has arrived.
+ */
+erx_funnel_asm_status_t erx_funnel_asm_took(erx_funnel_asm_t *,
+    const erx_funnel_asm_plan_t *, const struct erx_lane_part *,
+    const uint8_t *buf);
+/* Closes a whole record, so the next take opens the next one. */
+void erx_funnel_asm_next(erx_funnel_asm_t *);
 
 #endif /* !ERX_FUNNEL_H */

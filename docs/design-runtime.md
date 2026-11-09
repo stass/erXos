@@ -243,9 +243,9 @@ copies the frame into the connection's outbound lane and, if its store of
 the write position crosses the position the peer published in its reader
 page, rings the peer's bell. In the peer, the
 bell lists itself on the group's ready list and wakes a parked
-executor; at the next safe point an executor takes the ready list, finds
-the connection's label, and takes the connection's drain word; it copies
-each frame out of the ring once, runs the funnel against the export
+executor; at the next safe point an executor takes the ready list, finds the
+connection's label, and schedules the lane port's input task; the
+scheduler that runs it copies each frame out of the ring once, runs the funnel against the export
 table, and hands each accepted frame to `erts_net_message`, which queues
 the still-encoded message to its receiver, where it is decoded when
 received ([design-domains.md](design-domains.md#the-peer)).
@@ -384,7 +384,7 @@ of behaviour, however many lines it touches:
 | `beam/dist.c` | 10. in the system domain, a message to a peer whose entry's queue is past the manifest's `system_queue` is dropped and counted on the receiver instead of suspending the sender, and any other signal that does not fit ends the connection; 11. an entry counts toward `peer_held` each link and monitor a peer's process holds with a local one and each signal ERTS queues for the peer on behalf of no process, answers a new `LINK` or `MONITOR_P` past it with `system_limit`, and ends the connection when a signal does not fit; 12. `erts_net_message` drops and counts a message whose decoded size, as the funnel measured it, is past its target's `max_request`, the request limit a facet sets on itself |
 | `beam/erl_process.c` (exit) | 13. a process's exit clears its export holders, a field of its own record |
 | `beam/erl_monitor_link.c` | 14. an alias's deactivation clears its export holders and its registry entry, at the one function that leaves the active state |
-| `beam/erl_proc_sig_queue.c`, `beam/erl_gc.c`, `beam/erl_process.h` | 15. a process keeps the bytes of its queued undecoded frames from other domains, added when the drain queues a frame on it and released when `erts_proc_sig_decode_dist` decodes the frame or the process exits; the drain leaves in the lane an authorised frame whose target has reached its queue quota, and takes nothing more from that lane until the count falls below it, and the decode or exit that brings it below schedules that lane's drain again; before a process waits in `receive` while its count is at its quota, it decodes every frame queued on it, its own messages, which from then on count toward its `max_heap_size` alone, so no waiting process holds a lane paused, a `gen_server:call` that skips older messages included; the same bytes count toward the size `max_heap_size` limits, as on-heap message data does |
+| `beam/erl_proc_sig_queue.c`, `beam/erl_gc.c`, `beam/erl_process.h` | 15. a process keeps the bytes of its queued undecoded frames from other domains, added when the drain queues a frame on it and released when `erts_proc_sig_decode_dist` decodes the frame or the process exits; the drain leaves in the lane an authorised frame whose target has reached its queue quota, and takes nothing more from that lane until the count falls below it, and the decode or exit that brings it below schedules that lane port's input task again; before a process waits in `receive` while its count is at its quota, it decodes every frame queued on it, its own messages, which from then on count toward its `max_heap_size` alone, so no waiting process holds a lane paused, a `gen_server:call` that skips older messages included; the same bytes count toward the size `max_heap_size` limits, as on-heap message data does |
 | `beam/erl_proc_sig_queue.c`, `beam/erl_process.h` | 16. `erts_proc_sig_decode_dist` delivers a message from another domain to a process whose origins flag `erx:origins(true)` set as `{erx_origin, D, Msg}`, with `D` the creation of the entry it arrived on, the peer's domain id |
 | `beam/erl_bif_unique.c`, `beam/erl_term.h`, `beam/erl_printf_term.c` | 17. a reference's identity is four words from `erx_ref_permute`; creation, comparison, hashing and text keep all four |
 | `beam/erl_node_container_utils.h`, `beam/erl_node_tables.c` | 18. The two channel-number macros print the creation of the node a term carries, the domain id. `internal_channel_no(x)`, a constant 0 in stock ERTS, gives `erts_this_node->creation`. `external_channel_no(x)`, in stock ERTS the index of the node name's atom read through the term's distribution entry, gives `external_node(x)->creation`, read from the term's own `ErlNode`. The pid, port and reference variants that every printer calls (`internal_pid_channel_no`, `external_ref_channel_no` and their kin) are defined on these two, so pids, ports and references print their owner's domain id, and a pid of an ended domain still prints that domain's id after a later domain of its name has connected. `dist_entry_channel_no`, which only the crash dump's node lines and `erts_debug`'s `channel_number` read, stays stock. The parsing BIFs `list_to_pid`, `list_to_port` and `list_to_ref` in `bif.c` resolve the number through `erts_channel_no_to_dist_entry`, which maps the domain's own id to this node's entry, the creation of a connected entry to that entry, and any other number to none, which the BIFs answer with `badarg` |
@@ -455,7 +455,7 @@ the work. ERTS's Erlang-visible behaviour is checked against stock OTP
 | **R3.** No executor waits outside its domain | ERTS's normal and dirty CPU schedulers are created as executors, so the kernel refuses their blocking calls (S3); the adapter's own waits are `erx_park` and umtx waits on private memory; the gate worker, which waits on the domain's fault gate, is a worker; no lock an executor takes is held across a worker's blocking call in ERTS's or the adapter's code, so a umtx wait never waits on another domain | a scheduler created as a worker; an adapter path that waits on an IRQ object or an IPC gate; a lock held across a blocking call, which a NIF can still do, as it can stall a scheduler on a host, bounded by that call's deadline | the thread-creation code checks the class it passes; E-S10 counts refusals over OTP's suites |
 | **R4.** Code is executed only from memory mapped executable, never writable in the same mapping, and only after its runtime made it coherent | BeamAsm writes through the writable mapping of a JIT object and publishes through ERTS's code barrier, which makes every scheduler execute an instruction barrier before the code is reachable; the kernel refuses writable and executable together (K8) | publishing before the barrier completes | ERTS's code-loading tests under BeamAsm on four CPUs, with reloads in a loop |
 | **R5.** A domain's runtime spends only its own budget and grant | every page it uses is committed in its own space and charged to its budget; every thread is in its own group or a child of it | none within the runtime: both are kernel-enforced | the kernel's tests; a test domain that exhausts its budget and its grant |
-| **R6.** A frame reaches ERTS's distribution code only after the funnel accepted it against the export table on the lane it arrived on | the lane driver's drain, which one executor at a time runs under the connection's drain word, is the only caller of `erts_net_message`, and it calls it only with a frame the funnel returned as accepted; the funnel is the only reader of a lane's ring; the peer's identity is the lane's, never a field of the frame | a second caller of `erts_net_message`; a read of a ring outside the funnel; a frame handed on after a refusal | source checks for both chokepoints, each with a seeded violation; the hostile-peer corpus of [design-domains.md](design-domains.md#the-funnel) replayed into a lane |
+| **R6.** A frame reaches ERTS's distribution code only after the funnel accepted it against the export table on the lane it arrived on | the lane port's input task, which ERTS runs under the port's lock, is the only caller of `erts_net_message`, and it calls it only with a frame the funnel returned as accepted, or to have ERTS send the answer or deliver the over-limit exit the funnel chose for a frame it judged; the funnel is the only reader of a lane's ring; the peer's identity is the lane's, never a field of the frame | a second caller of `erts_net_message`; a read of a ring outside the funnel; a frame handed on after a refusal | source checks for both chokepoints, each with a seeded violation; the hostile-peer corpus of [design-domains.md](design-domains.md#the-funnel) replayed into a lane |
 | **R7.** The export table is written at exactly three sites, each an act of the name's owner, and a holder ends with its process or alias | the holders are a field of the name's own record; the writes are the encoder's (edit 8), which adds a peer with `send` alone and only where it holds nothing yet, the spawn-into path's, which gives the spawner every right on its child, and `erx:export/3`'s, which a process of the owning domain calls to set a peer's rights on one of its own names exactly; the only clears are at process exit (edit 13) and alias deactivation (edit 14), which are the one exit path and the one deactivation function ERTS has, and at a connection's end | a fourth writer; an encode that widens a holder's rights; a write on a name the domain does not own; an exit path that skips the clear | a source check that only the three functions write holders, with a seeded fourth; a test that a pid encoded for a peer gives it `send` alone, and that one exported narrowly with `erx:export/3` and encoded again keeps the narrow rights; a test that a frame to an exited pid is answered as to a dead process |
 | **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from a queue's memory object and an offset, checked against the object, and alone writes one: a register the SVD source marks `ownedByNif` refuses `write/3` and `write_field/4`, and `post/4` takes only bytes, lengths and which segments the device writes, never an address, a descriptor field or a flag. A chain's buffer is its head descriptor's, so no two chains in flight share one. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `negotiate/2`, and after a driver's exit the NIF posts nothing on the device until `negotiate/2`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `negotiate/2` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer before its completion, a seeded post before `negotiate/2`, a seeded write of an owned register and a seeded pool owned by a process each fail the test |
 | **R9.** No binary aliases memory a device can write | `complete/2` copies each buffer's returned bytes into a fresh binary and returns the buffer to its pool, and the NIF makes no binary over a pool | a resource binary over a pool buffer | a model device on the hosted backend that rewrites a buffer after its completion, after which the binary `complete/2` returned is unchanged |
@@ -625,7 +625,7 @@ and name.
 
 **The event table** is C in `sys/erxos`: a label, the 32-bit value the
 kernel returns with each IRQ object taken from the ready list, maps to a
-**sink**: a connection, which its dispatching executor drains, a port,
+**sink**: a connection, whose lane port gets an input task, a port,
 which gets an input task, or a process with a term, which gets a message.
 The ABI splits every group's label space in two at `ERX_LABEL_SPLIT`
 (2^31). The system domain assigns the labels below it, from a per-domain
@@ -807,10 +807,10 @@ returns their labels, each once
 ([design-kernel.md](design-kernel.md#messages-gates-and-irq-objects)). The
 adapter dispatches each label through the event table:
 
-* **A connection sink** is drained by the dispatching executor itself,
-  when it takes the connection's drain word, as [Connections in
-  ERTS](#connections-in-erts) describes: a connection's bell says only
-  "look at this connection", and one executor at a time answers it.
+* **A connection sink** gets the lane port's input task scheduled, as
+  [Connections in ERTS](#connections-in-erts) describes: a connection's
+  bell says only "look at this connection", and the port's input task
+  answers it on a normal scheduler, under the port's lock.
 * **A port sink** gets an input task scheduled on its port, ERTS's own
   `ERTS_PORT_TASK_INPUT`, which a scheduler runs under the port's lock at
   its next turn. The program driver's ports are port sinks: the channel's
@@ -929,9 +929,10 @@ domain's own side, the peer's side and the peer's bell, the label the
 system domain bound this domain's bell with, and the two data areas'
 sizes
 ([design-domains.md](design-domains.md#messages-between-the-domain-service-and-a-runtime)).
-The agent takes it from the system connection alone, maps the two sides,
-opens a port on the lane driver with those values, registers the label
-as the connection's sink in the event table, and hands the port to
+The agent takes it from the system connection alone and opens a port on
+the lane driver with those values; the driver's open maps the two sides,
+since Erlang cannot map memory, and registers the label as the
+connection's sink in the event table. The agent hands the port to
 `net_kernel` as an accepted connection. `erx_dist:accept_connection/5`
 runs no handshake: the peer's name, creation and flags are the
 introduction's, and no cookie is asked, since the lane itself names the
@@ -978,8 +979,8 @@ The ring is single-producer by construction: ERTS runs a port's
 callbacks under the port's lock. When the ring lacks room, the driver
 publishes the position it waits for, leaves the rest at the head of the
 entry's queue and pauses the port's output; the peer, once its read
-position crosses that position, rings this domain's bell, and the
-executor that answers the bell resumes the output. Frames for a full
+position crosses that position, rings this domain's bell, and the lane port's input task, which that bell schedules, resumes the
+output. Frames for a full
 lane therefore wait in the entry's queue, in this domain's memory. The
 entry is **busy** once that queue passes ERTS's busy limit, 1 MiB
 (`ERTS_DE_BUSY_LIMIT`), and ERTS suspends a process that sends on a busy
@@ -993,18 +994,40 @@ connection (edit 10). A frame larger than `ERX_FRAME_MAX`, which no lane carries
 takes ERTS's own too-large path, `ERTS_DSIG_SEND_TOO_LRG`: the sender
 gets `system_limit`.
 
-**Receiving.** A lane has one consumer, so one executor at a time drains
-it: the one that takes the connection's drain word with a
-compare-and-swap, when the ready list names the connection's label at a
-safe point or before it parks; an executor that finds the word taken
-leaves the drain to its holder
-([design-domains.md](design-domains.md#the-peer)). The holder runs the
-funnel's steps up to its allowance, `-erx lane_batch` frames, then stores
-the read position, clears the word, executes a full fence and reads the
-peer's write position once more; if it moved, another drain is due, which
-the executor leaves for its next safe point rather than loop into, and at
-each safe point an executor also looks at connections whose last drain
-reached its allowance. When its store of the read position crosses the
+**Receiving.** A connection is a port sink like any other. Its bell
+schedules the lane port's input task; ERTS runs that task on a normal
+scheduler under the port's lock, so the lane has one consumer by
+construction and no executor drains a lane directly. The input task runs
+the funnel's steps up to its allowance, `-erx lane_batch` frames,
+resumes paused output if the peer's read position has crossed the
+published wait, and reschedules itself when it reached its allowance;
+otherwise it returns with its take armed, so the peer's next write rings
+the bell. `erx_dist` schedules the task once
+after `setnode/3`, so frames that arrived before the port controlled the
+entry are drained without a bell. A dirty scheduler that dispatches a
+bell only schedules the task. The bell schedules the task through one of
+two reusable task handles, since ERTS clears an input task's handle only
+after the task returns: a bell during a run schedules the next run on
+the other handle, and a bell that finds both set schedules nothing, since
+one of the two runs has not started and reads what the bell announced. A
+port that ends inside its own input task holds that task's handle until
+the task returns, so a slot goes to a new connection only once both its
+handles are clear. Input never waits on output: the task takes frames whether
+or not the entry is busy, so two domains streaming to each other cannot
+hold each other's lanes. The funnel's answers, and ERTS's own to a
+`LINK`, `MONITOR_P`, `UNLINK_ID` or spawn request, go on the entry's
+queue as sends with no sending process, which ignore the busy limit and
+count only toward the queue's total (`total_qsize` beyond `qsize`).
+Only a frame that can produce such an answer is bounded: each answer
+counts toward the entry's `peer_held` (change 11 of `beam/dist.c` above),
+and a connection whose answers do not fit ends, since a peer that asks
+and never reads its answers has stopped working. The current
+implementation measures the answers the entry holds unsent, the queue's
+total beyond `qsize`, against `ERX_LANE_ANSWERS_MAX`, 1 MiB: the task
+takes such a frame only while they stay under it, and past it ends the
+port with `erx_lane_answers_unread`.
+The input task reads the lane as its consumer
+([design-domains.md](design-domains.md#the-peer)): when its store of the read position crosses the
 position the producer published in the ring's header, it rings the
 peer's bell. Each step copies one record out of the ring, through
 `liberx`'s `erx_lane_take`, the only reader of a ring, into a private
@@ -2126,7 +2149,7 @@ decides batching per device class
 ([design-system.md](design-system.md#the-driver-table)).
 
 **Chokepoints.** Only `erx_device` calls `erx_mem_create_physical`, `erx_vm_map`, `erx_dma_map`, `erx_mem_dma_addr`
-and the user-mode cache maintenance in a runtime, so nothing else in a runtime has a mapping of device memory; only its generated
+and the user-mode cache maintenance in a runtime, but for the lane port driver's `erx_vm_map` of a connection's two lane sides, so nothing else in a runtime has a mapping of device memory; only its generated
 accessors, called only by its BIFs and its NIF, touch a register window, and no runtime source includes a peripheral header that `tools/gen_hw.rb` generates or names one of its accessors, which the kernel platform layer alone uses ([design-hardware-generation.md](design-hardware-generation.md)); a record's window is private to the source that holds them; only `erx_device.c` stores to a register the NIF owns, and within it only its one address function writes a ring's address
 or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
@@ -2556,10 +2579,10 @@ layers:
   parking are condition variables with the same epoch protocol, and
   quotas are accounted but enforced only by a watchdog thread.
 * **Lanes and the funnel**: `erx_lane`, the producer's and consumer's
-  sides of a lane over its ring and reader page, with `erx_lane_take` as
-  the only reader of a ring and a consumer's **drain word**, which one
-  executor at a time takes with a compare-and-swap to drain a lane, so a
-  lane has one consumer however many executors answer its bell
+  sides of a lane over its ring and reader page, with `erx_lane_take` as the only reader of a ring, and
+  `erx_funnel_asm`, the pure assembly of a frame from the parts a take
+  returns; a lane has one consumer by construction, the lane port's
+  input task, however many executors answer its bell
   ([design-domains.md](design-domains.md#the-peer)); `erx_funnel`, the
   structural and authority validation of a frame against a lane's peer
   and an export lookup the
@@ -2975,7 +2998,7 @@ specification writes each `+` as `-`:
 | `+sbt u` | executors unpinned, placed by the kernel at each wake; any other value pins in cpuset order |
 | `+sbwt`, `+sbwtdcpu`, `+sbwtdio`: `none` (default) or `very_short` | busy waiting before parking, which spends the group's quota; longer settings are clamped to `very_short` |
 | `+JPperf`, `+JMsingle` | ignored with a warning: there is no `perf`, and a mapping is never writable and executable at once |
-| `-erx lane_batch N` | frames one drain of a connection takes before it clears the drain word and leaves the rest for the next safe point |
+| `-erx lane_batch N` | frames one run of a connection port's input task takes before it reschedules itself |
 | `-erx queue_quota N` | the queue quota of each process of a domain outside the system domain: the bytes of undecoded frames from other domains queued on it past which the drain leaves the next frame for it in the lane; unset by default, so a process's queue grows until its `max_heap_size`, as in stock OTP; the system domain ignores it and takes each process's quota from its facet's grant or the manifest's `system_queue` ([design-domains.md](design-domains.md#flow-control)) |
 
 ## Compatibility and migration

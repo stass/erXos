@@ -50,7 +50,7 @@ module Erx
           pattern: LANE_LAYOUT,
           sites: [LANE_READER, *ABI_C_OUTPUTS, *LANE_PRODUCERS].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/erx_funnel.c' => "void f(void) { erx_lane_hdr_wpos_load(hdr, &wpos); }\n",
-                  'otp/erts/emulator/sys/erxos/erl_lane_drv.c' => "const erx_lane_rec_t *rec = ring;\n",
+                  'otp/erts/emulator/sys/erxos/erx_lane_drv.c' => "const erx_lane_rec_t *rec = ring;\n",
                   'liberx/backend/hosted/peek.c' => "data = side + ERX_LANE_SIDE_DATA;\n",
                   'liberx/erx_lane_peek.c' => "#define RING struct erx_lane_hdr\n",
                   'liberx/erx_lane_port.c' => "erx_lane_hdr_wpos_store(hdr, pos);\n" }

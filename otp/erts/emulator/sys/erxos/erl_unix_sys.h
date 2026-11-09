@@ -200,6 +200,13 @@ void erx_runtime_env(const char **words, size_t *length);
 /* The startup limits' cap of the domain's /tmp, in bytes. */
 uint64_t erx_runtime_tmp_limit(void);
 
+/* The checked boot information page, its startup limits, and whether it is the system domain's. */
+struct erx_boot_info;
+struct erx_runtime_limits;
+const struct erx_boot_info *erx_runtime_boot(void);
+const struct erx_runtime_limits *erx_runtime_limits(void);
+int erx_runtime_is_system(void);
+
 /*
  * Functions for getting the performance counter
  */

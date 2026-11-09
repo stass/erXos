@@ -429,6 +429,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Settled by the time per learnt ARP request into a full table against
   one into an empty one; the fix on the table is an eviction index of
   rank, age and key kept beside the deadline index.
+* **[Medium] lanes, a bell's hop to the lane port's input task**
+  (`otp/erts/emulator/sys/erxos/erx_lane_drv.c`): a connection's bell
+  schedules the port's input task instead of draining at the dispatching
+  executor, the same hop stock ERTS pays from the poll thread to a TCP
+  distribution port. Settled by the time from the peer's bell to
+  `erts_net_message` on HVF, with one scheduler and with every `+S`
+  scheduler busy.
+
 * **[Medium] network, a round trip per `gen_tcp:send/2` across a lane**
   ([design-network-stack.md](design-network-stack.md#the-backend)). Each
   send waits for the connection's reply that the data is in its send

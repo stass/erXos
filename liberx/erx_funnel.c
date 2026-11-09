@@ -25,6 +25,7 @@
 #include "erx/abi_reader.h"
 #include "erx/etf.h"
 #include "erx/funnel.h"
+#include "erx/lane.h"
 
 /* ERTS's small integers on a 64-bit build: 60 bits, signed. */
 #define SMALL_MIN		(-((int64_t)1 << 59))
@@ -721,4 +722,102 @@ target_name(const uint8_t *node, size_t node_len, uint32_t creation,
 	else if (!in_range)
 		return (ERX_FUNNEL_ERR_TARGET);
 	return (ERX_FUNNEL_OK);
+}
+
+/* ------------------------------------------------------- frame assembly */
+
+void
+erx_funnel_asm_init(erx_funnel_asm_t *a, uint32_t max_frame)
+{
+	*a = (erx_funnel_asm_t){ .max_frame = max_frame };
+}
+
+void
+erx_funnel_asm_next(erx_funnel_asm_t *a)
+{
+	erx_funnel_asm_init(a, a->max_frame);
+}
+
+static uint32_t
+min_u32(uint64_t a, uint64_t b)
+{
+	return ((uint32_t)(a < b ? a : b));
+}
+
+/*
+ * Before a record opens, a take may copy only what is kept of every
+ * record; until its header is read, only the rest of the header.  So the
+ * plan never asks for room that the header may later disown.
+ */
+void
+erx_funnel_asm_plan(const erx_funnel_asm_t *a, size_t cap,
+    erx_funnel_asm_plan_t *plan)
+{
+	const uint32_t limit = a->sized ? a->hold :
+	    min_u32(a->hold, ERX_FRAME_HEADER_SIZE);
+
+	if (a->frame == 0) {
+		*plan = (erx_funnel_asm_plan_t){ .where = ERX_FUNNEL_ASM_COPY,
+		    .room = min_u32(cap, ERX_FRAME_HEADER_SIZE) };
+	} else if (a->held >= limit) {
+		*plan = (erx_funnel_asm_plan_t){ .where = ERX_FUNNEL_ASM_SKIP };
+	} else if (a->held >= cap) {
+		/* Doubling, never past what the record keeps. */
+		*plan = (erx_funnel_asm_plan_t){ .where = ERX_FUNNEL_ASM_GROW,
+		    .want = min_u32(limit, (uint64_t)cap * 2) };
+	} else {
+		*plan = (erx_funnel_asm_plan_t){ .where = ERX_FUNNEL_ASM_COPY,
+		    .at = a->held, .room = min_u32(cap, limit) - a->held };
+	}
+}
+
+void
+erx_funnel_asm_ungrown(erx_funnel_asm_t *a)
+{
+	a->discard = true;
+	a->hold = a->held;
+}
+
+/* The header's verdict on how much of the record the buffer keeps. */
+static void
+asm_size(erx_funnel_asm_t *a, const uint8_t *buf)
+{
+	erx_funnel_header_t header;
+
+	a->sized = true;
+	if (a->discard)
+		return;
+	if (erx_funnel_header(buf, a->frame, &header) != ERX_FUNNEL_OK ||
+	    header.payload_len > a->max_frame) {
+		a->discard = true;
+		a->hold = min_u32(a->frame, ERX_FUNNEL_ASM_KEEP);
+	} else {
+		a->hold = a->frame;
+	}
+}
+
+erx_funnel_asm_status_t
+erx_funnel_asm_took(erx_funnel_asm_t *a, const erx_funnel_asm_plan_t *plan,
+    const erx_lane_part_t *part, const uint8_t *buf)
+{
+	if (part->opened) {
+		if (a->frame != 0 || part->kind != ERX_REC_FRAME ||
+		    part->zero != 0 || part->len < ERX_FRAME_HEADER_SIZE)
+			return (ERX_FUNNEL_ASM_MALFORMED);
+		a->frame = part->len;
+		a->held = 0;
+		a->hold = min_u32(part->len, ERX_FUNNEL_ASM_KEEP);
+	} else if (a->frame == 0) {
+		return (ERX_FUNNEL_ASM_MALFORMED);
+	}
+	if (plan->where == ERX_FUNNEL_ASM_COPY) {
+		/* The reader copies at most room bytes of the record's body. */
+		if (part->copied > plan->room ||
+		    part->copied > (uint64_t)a->frame - a->held)
+			return (ERX_FUNNEL_ASM_MALFORMED);
+		a->held += (uint32_t)part->copied;
+	}
+	if (!a->sized && a->held >= ERX_FRAME_HEADER_SIZE)
+		asm_size(a, buf);
+	return (part->closed ? ERX_FUNNEL_ASM_WHOLE : ERX_FUNNEL_ASM_MORE);
 }

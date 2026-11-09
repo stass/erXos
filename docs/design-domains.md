@@ -289,7 +289,7 @@ A message from Q in domain `web` to R in domain `db`:
    nothing more. Without room in the lane, the frame waits in the entry's
    queue in `web`'s runtime, and Q is suspended as a sender to a busy
    connection only when that queue is long.
-2. An executor of `db`, at its next safe point or woken by the bell, copies
+2. The bell schedules the input task of `db`'s lane port, which copies
    the frame out of the lane once, into `db`'s private memory, and runs the
    funnel on the copy: the lane's positions and the record's header, the
    control grammar, the sender rule (Q carries `web@erxos` and 7, the
@@ -728,7 +728,7 @@ from its group's ready list, without polling any of them
 **Lane sizes.** A domain's `lane` limit sizes the data area of every lane
 it reads ([Principals, sessions and
 quotas](#principals-sessions-and-quotas)), 64 KiB by default: enough that
-a sender of small frames and a receiver that drains at each safe point
+a sender of small frames and a receiver that drains at each bell
 rarely meet a full lane, and small enough that a domain's connections cost
 it tens of kilobytes each. The system domain sizes the lane it reads from
 each domain by its own `system_lane` (16 KiB by default) when it admits
@@ -1021,7 +1021,6 @@ typedef struct erx_connection {
 	erx_funnel_state_t	funnel;		/* the explicit stack of the payload pass */
 	void			*entry;		/* ERTS's distribution entry, or the
 						 * native mailbox binding */
-	_Atomic uint32_t	drain;		/* one executor drains the lane at a time */
 	uint8_t			state;		/* UP, or DOWN with its reason */
 	erx_connection_counters_t	counters;	/* frames, bytes, drops by reason */
 } erx_connection_t;
@@ -1076,9 +1075,9 @@ and its export table, it returns the verdict (deliver, drop with a reason,
 answer as for a dead process, or malformed) and reads no shared memory, so
 it builds for the host and is fuzzed and explored there.
 `erx_funnel_step(connection, allowance)` drives both: it consumes records up
-to an allowance of bytes and records and returns, so an executor serves its
-connections in turn and never loops under an arrival flood. The funnel runs
-on an executor of the receiving domain, on the receiving domain's own grant:
+to an allowance of bytes and records and returns, so the lane port's input
+task reschedules itself instead of looping under an arrival flood. The funnel
+runs in that task, on a scheduler of the receiving domain and its own grant:
 a receiver spends its own CPU validating what it drains, bounded by its own
 drain rate, as every network stack does. Its work is linear in the bytes it
 reads, plus the sorting of each native record's field names.
@@ -1404,24 +1403,21 @@ and drivers](#native-processes-and-drivers)).
   busy distribution connection; `erlang:send/3` with `nosuspend` returns
   `nosuspend`; processes sending to other domains carry on. That is the
   whole of flow control ([Flow control](#flow-control)).
-* **Input.** A lane has one consumer, so one executor at a time drains it:
-  the one that takes the connection's drain word with a compare-and-swap,
-  at a safe point or before it parks
-  ([design-runtime.md](design-runtime.md#liberx)); an executor that finds
-  the word taken leaves the drain to its holder. The holder runs
-  `erx_funnel_step` up to its allowance, then stores `rpos`, clears the
-  word, executes a full fence and reads the peer's `wpos` once more; if it
-  moved and the lane is not paused at a queue quota, another step is due,
-  which the executor schedules rather than loops into; a paused lane is
-  scheduled again by the decode or exit that ends its pause ([Flow
+* **Input.** A lane has one consumer by construction: the lane port's
+  input task, which the connection's bell schedules and ERTS runs on a
+  normal scheduler under the port's lock
+  ([design-runtime.md](design-runtime.md#connections-in-erts)); no
+  executor drains a lane directly. The task runs `erx_funnel_step` up to
+  its allowance and reschedules itself when it reached the allowance or
+  the peer's `wpos` moved since its last read, unless the lane is paused
+  at a queue quota; a paused lane's task is scheduled again by the
+  decode or exit that ends its pause ([Flow
   control](#flow-control)). Each step is `erx_lane_take`, then
   `erx_funnel_check`, then `erts_net_message` on the connection's entry,
   which keeps order per connection, or the funnel's own answer, queued on
   that same entry so it keeps its place behind what the runtime sent
-  before ([The funnel](#the-funnel)). An executor learns which connections
-  rang from its group's ready list, each once, and drains those first; at
-  a safe point it also looks at connections whose last step reached its
-  allowance.
+  before ([The funnel](#the-funnel)). An executor learns which connections rang from its group's ready list,
+  each once, and schedules their ports' input tasks.
 * **Origins.** To a process that asked with `erx:origins(true)`, as every
   facet does, the peer delivers each message from another domain, sent to
   the process's pid or to an alias of it, and no signal, as `{erx_origin, D,
@@ -3157,8 +3153,7 @@ for the same reason.
   link into a domain that then crashes, delivering `{domain_down, D,
   crash}`; forged pids inside a domain doing nothing.
 * **Concurrency:** the lane protocol and the funnel on the hosted build
-  under ThreadSanitizer, with every executor of a domain contending for the
-  drain word.
+  under ThreadSanitizer, with every executor of a domain ringing one connection's bell at once.
 * **Determinism:** a deterministic-mode transcript of a domain's life is
   byte-identical across runs.
 

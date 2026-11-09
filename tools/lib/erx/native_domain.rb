@@ -41,17 +41,17 @@ module Erx
     JIT_TEST_PREFIX = "#{ERTS_RELEASE.prefix}test/"
     ERLC_DEADLINE = 120
     SYSTEM = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
-                liberx/backend/core/boot_info.c liberx/erx_lane.c].freeze
+                liberx/backend/core/boot_info.c liberx/erx_lane.c liberx/erx_etf.c].freeze
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                     'liberx/backend/core/refused.c', *SYSTEM, 'test/guest/native_domain/string.c',
                     'test/guest/native_domain/guest.c'].freeze
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
-    CASES = %w[library warm halt fault stop lanes erts erts_refused jit_reload jit_write_rx jit_run_rw
+    CASES = %w[library warm halt fault stop lanes erts erts_refused jit_reload jit_write_rx jit_run_rw connection
                  link_warm link link_undo link_end undo].freeze
     # What a case's domain prints before its case line: init ran the ERTS domain's release,
     # and the spoiled page's runtime ended with the reader's reason.
-    CONSOLE = { 'erts' => /\Ainit_started/n,
+    CONSOLE = { 'erts' => /\Ainit_started/n, 'connection' => /\A\{lane,/n,
                 'erts_refused' => /\Aerx: the boot information page: the page is of another version/n,
                 'jit_reload' => /\A\{jit_reload_passed,jit,[1-9]\d*\}/n,
                 'jit_write_rx' => /\Ajit_alias_runs/n, 'jit_run_rw' => /\Ajit_alias_runs/n }.freeze

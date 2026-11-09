@@ -124,6 +124,7 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"dirty_break_point_index",		        NULL},
     {"cpu_info",				NULL},
     {"erx_event",                               NULL},
+    {"erx_event_task",                          NULL},
     {"alcu_init_atoms",			        NULL},
     {"mseg_init_atoms",			        NULL},
     {"mmap_init_atoms",			        NULL},

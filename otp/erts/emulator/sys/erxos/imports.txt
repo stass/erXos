@@ -26,14 +26,12 @@ erx_release_fs_list_start erx_release_fs_lookup erx_release_fs_walk
 erx_space_protect erx_backend_trace_read erx_trace_read erx_entropy_read
 erx_time_wall_ns erx_umtx_wait erx_umtx_wake erx_utcb_self erx_vm_commit
 erx_vm_decommit erx_vm_map erx_vm_release erx_vm_reserve
-
-# The liberx calls only the hosted build's objects make: erx_stdio_nif.c, which the
-# native build does not link, wakes the console's reader with erx_irq_trigger, and
-# erx_device_nif.c's stand-in device fires its line with it under
-# ERX_DEVICE_STAND_IN, which the native build leaves undefined. A native object that
-# calls it fails the check.
-[liberx_hosted]
-erx_irq_trigger
+erx_irq_trigger erx_lane_reader_init erx_lane_writer_init erx_lane_side_bytes
+erx_lane_take erx_lane_take_armed erx_lane_put erx_lane_put_armed
+erx_funnel_check erx_funnel_check_scratch_bytes erx_etf_reader_init erx_etf_next
+erx_funnel_asm_init erx_funnel_asm_plan erx_funnel_asm_took erx_funnel_asm_next
+erx_etf_writer_init erx_etf_writer_done erx_etf_put_tuple erx_etf_put_atom
+erx_etf_put_integer
 
 [iso_c]
 abort atoi bsearch calloc exit free malloc memchr memcmp memcpy memmove memset

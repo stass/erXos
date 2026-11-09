@@ -27,10 +27,12 @@ module Erx
     HOST_OTP_FLAVOUR = 'emu'
     # The emulator flavour OTP's make builds: the interpreter, unless a subclass says otherwise.
     FLAVOR = 'emu'
-    # The function API's test has a main of its own, so the entry and what only it calls join here.
+    # The function API's test has a main of its own, so the entry and what only it calls join here,
+    # with the lanes, the funnel and the ETF reader ERTS's lane port driver calls.
     LIBERX_SOURCES = [*HostedSources::ALL.reject { |source| source.start_with?(HostedSources::GUEST) },
                       'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
-                      'liberx/backend/hosted/start.c'].freeze
+                      'liberx/backend/hosted/start.c', 'liberx/erx_lane.c', 'liberx/erx_funnel.c',
+                      'liberx/erx_etf.c'].freeze
     # The tracked trees the hosted archive and the release's manifest are compiled from, for
     # the build record; their generated C is in the generated tree, which SOURCE_TREES adds.
     LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 liberx].freeze

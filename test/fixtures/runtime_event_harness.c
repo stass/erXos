@@ -239,6 +239,25 @@ check_the_table(void)
 	CHECK(erx_event_table_add(&table, &sink, &label) == ERX_OK && label == ERX_LABEL_SPLIT + 3);
 }
 
+/*
+ * A connection takes a slot no task of a gone connection may still hold: a slot whose bit
+ * is set in unsettled is passed over, and with every free slot unsettled the table is full.
+ */
+static void
+check_a_connection_skips_an_unsettled_slot(void)
+{
+	static erx_event_table_t table;
+
+	CHECK(erx_event_table_add_connection(&table, ERX_LABEL_SPLIT, 9, 0) == ERX_EINVAL);
+	CHECK(erx_event_table_add_connection(&table, 5, 9, UINT64_C(1)) == ERX_OK);
+	CHECK(table.connections[0].kind == ERX_EVENT_SINK_FREE);
+	CHECK(table.connections[1].kind == ERX_EVENT_SINK_CONNECTION && table.connections[1].owner == 5);
+	CHECK(erx_event_table_find(&table, 5)->detail == 9);
+	CHECK(erx_event_table_add_connection(&table, 5, 9, 0) == ERX_EINVAL);
+	CHECK(erx_event_table_add_connection(&table, 6, 9, ~UINT64_C(0)) == ERX_ELIMIT);
+	CHECK(erx_event_table_add_connection(&table, 6, 9, 0) == ERX_OK && table.connections[0].owner == 6);
+}
+
 /* A burst longer than one take arrives whole, and a label with no entry is dropped. */
 static uint32_t burst_next;
 static uint32_t burst_end;
@@ -375,6 +394,7 @@ main(void)
 	check_a_cleared_flag_stops_the_sleep();
 	check_no_executor_leaves_with_a_label();
 	check_the_table();
+	check_a_connection_skips_an_unsettled_slot();
 	check_a_long_burst_arrives_whole();
 	check_the_race();
 	puts("event table done");

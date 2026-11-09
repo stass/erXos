@@ -1294,7 +1294,8 @@ OS_OBJS = \
 	$(OBJDIR)/sys_time.o
 
 DRV_OBJS = \
-	$(OBJDIR)/ram_file_drv.o
+	$(OBJDIR)/ram_file_drv.o \
+	$(OBJDIR)/erx_lane_drv.o
 endif
 
 ifneq ($(STATIC_NIFS),no)

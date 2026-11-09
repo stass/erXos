@@ -18,30 +18,47 @@
 /*
  * The runtime's half of the label space, from ERX_LABEL_SPLIT. A label indexes the table
  * directly and the lowest free one is taken first, so labels stay dense and a lookup never
- * searches. The system domain's half arrives with the connection sink, its first user.
+ * searches.
  */
 #define ERX_EVENT_LABELS	256
+/*
+ * The system domain's half, below ERX_LABEL_SPLIT: the labels it bound the domain's bells
+ * with, one per connection, each a connection sink. A domain holds few connections, and
+ * the label is the system domain's choice, so these are searched.
+ */
+#define ERX_EVENT_CONNECTIONS	64	/* one bit each in a uint64_t mask */
 
 typedef enum {
 	ERX_EVENT_SINK_FREE = 0,
 	ERX_EVENT_SINK_PORT,
-	ERX_EVENT_SINK_PROCESS
+	ERX_EVENT_SINK_PROCESS,
+	ERX_EVENT_SINK_CONNECTION
 } erx_event_sink_kind_t;
 
 /* A sink names its owner by id, never by pointer, so a stale entry finds nothing to touch. */
 typedef struct {
 	erx_event_sink_kind_t	kind;
-	uint64_t		owner;		/* the port's or the process's id */
-	uint64_t		detail;		/* the driver's event, or the message term */
+	uint64_t		owner;		/* the port's or the process's id; a connection's label */
+	uint64_t		detail;		/* the driver's event, the message term, or a connection's port */
 	void			*storage;	/* what holds the message term */
 } erx_event_sink_t;
 
 typedef struct {
 	erx_event_sink_t	sinks[ERX_EVENT_LABELS];
+	erx_event_sink_t	connections[ERX_EVENT_CONNECTIONS];
 } erx_event_table_t;
 
 /* ERX_OK with the label, or ERX_ELIMIT with the table full. The caller holds the write lock. */
 int	erx_event_table_add(erx_event_table_t *table, const erx_event_sink_t *sink, uint32_t *label);
+/*
+ * A connection sink at the label the system domain chose, below ERX_LABEL_SPLIT: ERX_OK,
+ * ERX_EINVAL for a label of the runtime's half or one already a sink, or ERX_ELIMIT with
+ * the connections full. A free slot whose bit is set in unsettled is passed over: a task
+ * of the connection that last held it may still hold one of its handles
+ * (erx_event.c). The caller holds the write lock.
+ */
+int	erx_event_table_add_connection(erx_event_table_t *table, uint32_t label, uint64_t port,
+	    uint64_t unsettled);
 /* The sink the label named, for the caller to release, or a free one if it named none. */
 erx_event_sink_t erx_event_table_remove(erx_event_table_t *table, uint32_t label);
 /* The sink, or NULL: a label whose entry is gone is dropped, since a delivery is a hint. */

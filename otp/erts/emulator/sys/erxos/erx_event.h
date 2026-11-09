@@ -25,6 +25,18 @@ int	erx_event_register_process(const ErlNifPid *pid, ERL_NIF_TERM term, uint32_t
 /* The port gets an input task for `event` at each delivery. */
 int	erx_event_register_port(uint64_t port, uint64_t event, uint32_t *label);
 void	erx_event_unregister(uint32_t label);
+/*
+ * A connection's bell, at the label the system domain bound it with, for the lane port
+ * `port`: each delivery schedules the port's input task, as erx_event_schedule_connection
+ * does for the port itself. ERX_OK, ERX_EINVAL for a label of the runtime's half or one
+ * already a sink, or ERX_ELIMIT with the connections full. Unregistering, under the port's
+ * lock, aborts the input tasks still scheduled.
+ */
+int	erx_event_register_connection(uint32_t label, uint64_t port);
+void	erx_event_schedule_connection(uint32_t label);
+/* port is the lane port's ErlDrvPort; this header is included before erl_driver.h may be. */
+struct _erl_drv_port;
+void	erx_event_unregister_connection(uint32_t label, struct _erl_drv_port *port);
 
 /* Takes the group's ready list and delivers it. Only a thread with an executor slot may. */
 void	erx_event_dispatch(void);

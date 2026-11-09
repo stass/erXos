@@ -48,6 +48,25 @@ erx_runtime_tmp_limit(void)
     return boot_view.info.limits.tmp;
 }
 
+const struct erx_boot_info *
+erx_runtime_boot(void)
+{
+    return &boot_view.info;
+}
+
+const struct erx_runtime_limits *
+erx_runtime_limits(void)
+{
+    return &boot_view.info.limits;
+}
+
+/* The system domain is the root task (docs/design-runtime.md, "The root-task entry"). */
+int
+erx_runtime_is_system(void)
+{
+    return (boot_view.info.flags & ERX_BOOT_ROOT) != 0;
+}
+
 /*
  * erl_start reads its arguments as emulator flags, --, then init's arguments, and edits
  * the vector, which is why the page's words are copied. See docs/design-runtime.md,

@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: the fd, spawn and forker drivers and driver_select are removed.
+ * Modified by erXos: the fd, spawn and forker drivers and driver_select are removed, and
+ * distribution input reaches erts_net_message only through the lane driver.
  *
  * %CopyrightEnd%
  */
@@ -560,8 +561,11 @@ erts_open_driver(erts_driver_t* driver,	/* Pointer to driver. */
 
     erts_rwmtx_rlock(&erts_driver_list_lock);
     if (!driver) {
+	/* The command's first word names the driver, as in stock ERTS; the rest is its own. */
+	const size_t name_len = strcspn(name, " ");
+
 	for (driver = driver_list; driver; driver = driver->next) {
-	    if (sys_strcmp(driver->name, name) == 0)
+	    if (strlen(driver->name) == name_len && strncmp(driver->name, name, name_len) == 0)
 		break;
 	}
 	if (!driver) { 
@@ -6221,19 +6225,8 @@ int driver_output_binary(ErlDrvPort ix, char* hbuf, ErlDrvSizeT hlen,
     else
 	erts_atomic64_add_nob(&bytes_in, (erts_aint64_t) (hlen + len));
     if (state & ERTS_PORT_SFLG_DISTRIBUTION) {
-        DistEntry* dep = (DistEntry*) erts_prtsd_get(prt, ERTS_PRTSD_DIST_ENTRY);
-        Uint32 conn_id = (Uint32)(UWord) erts_prtsd_get(prt, ERTS_PRTSD_CONN_ID);
-
-        ERTS_ASSUME(dep);
-
-        erts_atomic64_inc_nob(&dep->in);
-
-	return erts_net_message(prt,
-				dep,
-                                conn_id,
-				(byte*) hbuf, hlen,
-                                ErlDrvBinary2Binary(bin),
-				(byte*) (bin->orig_bytes+offs), len);
+        /* Distribution input is the lane driver's drain alone (docs/design-runtime.md, R6). */
+        return -1;
     }
     else
 	deliver_bin_message(prt, ERTS_PORT_GET_CONNECTED(prt), 
@@ -6270,27 +6263,8 @@ int driver_output2(ErlDrvPort ix, char* hbuf, ErlDrvSizeT hlen,
     else
 	erts_atomic64_add_nob(&bytes_in, (erts_aint64_t) (hlen + len));
     if (state & ERTS_PORT_SFLG_DISTRIBUTION) {
-        DistEntry *dep = (DistEntry*) erts_prtsd_get(prt, ERTS_PRTSD_DIST_ENTRY);
-        Uint32 conn_id = (Uint32)(UWord) erts_prtsd_get(prt, ERTS_PRTSD_CONN_ID);
-
-        ERTS_ASSUME(dep);
-
-        erts_atomic64_inc_nob(&dep->in);
-
-	if (len == 0)
-	    return erts_net_message(prt,
-				    dep,
-                                    conn_id,
-				    NULL, 0,
-                                    NULL,
-				    (byte*) hbuf, hlen);
-	else
-	    return erts_net_message(prt,
-				    dep,
-                                    conn_id,
-				    (byte*) hbuf, hlen,
-                                    NULL,
-				    (byte*) buf, len);
+        /* Distribution input is the lane driver's drain alone (docs/design-runtime.md, R6). */
+        return -1;
     }
     else if (state & ERTS_PORT_SFLG_LINEBUF_IO)
 	deliver_linebuf_message(prt, state, ERTS_PORT_GET_CONNECTED(prt),
