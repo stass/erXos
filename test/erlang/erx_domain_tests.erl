@@ -24,7 +24,7 @@ admit(Name, Principal, Origin, Core) ->
 live(Name, Core0) ->
     {#{id := Id} = Domain, Core1} = admit(Name, 1, request, Core0),
     Core2 = erx_domain_core:running(Id, erx_domain_core:built(Id, 7, self(), make_ref(), Core1)),
-    {stopped, _, Core3} = erx_domain_core:ended(Id, {stopped, 0}, 0, Core2),
+    {stopped, _, Core3} = erx_domain_core:ended(Id, {stopped, 0}, none, 0, Core2),
     {Domain, erx_domain_core:retired(Id, Core3)}.
 
 %% D1: ids start above the system domain's 4, increase, and are never reused,
@@ -59,15 +59,28 @@ names_quota_test() ->
 life_test() ->
     Core0 = erx_domain_core:new(<<"erxos">>),
     {#{id := Id}, Core1} = admit(<<"a">>, 1, request, Core0),
-    ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, 0, Core1)),
+    ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, none, 0, Core1)),
     ?assertError({badmatch, _}, erx_domain_core:running(Id, Core1)),
     Core2 = erx_domain_core:built(Id, 0, self(), make_ref(), Core1),
     ?assertMatch({ok, #{id := Id}}, erx_domain_core:find_pid(self(), Core2)),
-    {{halt, 3}, _, Core3} = erx_domain_core:ended(Id, {halt, 3}, 9, Core2),
-    ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, 0, Core3)),
+    {{halt, 3}, _, Core3} = erx_domain_core:ended(Id, {halt, 3}, none, 9, Core2),
+    ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, none, 0, Core3)),
     ?assertMatch([#{id := Id, info := {halt, 3}, at := 9}], erx_domain_core:deaths(1, Core3)),
     [?assertEqual(Info, erx_domain_core:info(End))
      || {End, Info} <- [{{halt, 1}, {halt, 1}}, {{crash, 5}, crash}, {{fault, 2}, {fault, 2}}, {{stopped, 0}, stopped}]].
+
+%% A crash's death keeps the slogan the service read, or why it could not;
+%% no other end keeps one.
+crash_death_test() ->
+    Core0 = erx_domain_core:new(<<"erxos">>),
+    {#{id := A}, Core1} = admit(<<"a">>, 1, request, Core0),
+    {#{id := B}, Core2} = admit(<<"b">>, 1, request, Core1),
+    Built = erx_domain_core:built(A, 0, self(), make_ref(), Core2),
+    Core3 = erx_domain_core:built(B, 0, self(), make_ref(), Built),
+    {crash, _, Core4} = erx_domain_core:ended(A, {crash, 0}, <<"boom">>, 1, Core3),
+    {crash, _, Core5} = erx_domain_core:ended(B, {crash, 0}, {unreadable, ecorrupt}, 2, Core4),
+    ?assertMatch([#{id := B, slogan := {unreadable, ecorrupt}}, #{id := A, slogan := <<"boom">>}],
+                 erx_domain_core:deaths(1, Core5)).
 
 deaths_kept_test() ->
     Core = lists:foldl(fun(_, Acc) -> element(2, live(<<"d">>, Acc)) end,

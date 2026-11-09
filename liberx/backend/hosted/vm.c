@@ -328,6 +328,15 @@ erx_space_protect(uint64_t space, uint64_t addr, uint64_t size, uint32_t prot)
 	return (vm_call(space, ERX_BACKEND_VM_PROTECT, addr, size, 0, prot, NULL));
 }
 
+/* The hosted process is the system domain alone, which ends by exiting, so no space stops. */
+int
+erx_space_stop(uint64_t space, int64_t status)
+{
+	(void)space;
+	(void)status;
+	return (ERX_ENOTSUP);
+}
+
 uint64_t
 erx_vm_free_pages(void)
 {

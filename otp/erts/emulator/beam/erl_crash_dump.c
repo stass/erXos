@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: says a dump was begun only once its file opened.
+ * Modified by erXos: says a dump was begun only once its file opened, and a domain
+ * other than the system domain writes its dump to its crash area.
  *
  * %CopyrightEnd%
  */
@@ -508,6 +509,19 @@ erl_crash_dump_v(char *file, int line, const char* fmt, va_list args)
         dumpname = &dumpnamebuf[0];
     }
 
+#ifdef __erxos__
+    /* Another domain's dump goes to its crash area, or nowhere (erx_crash_area.h). */
+    if (!erx_runtime_is_system()) {
+        if (!erx_crash_area_mapped())
+            return;
+        erts_fprintf(stderr,"\nCrash dump is being written to the crash area...");
+        base.to = &erx_crash_area_write;
+        base.to_arg = NULL;
+        base.close = &erx_crash_area_close;
+        goto base_ready;
+    }
+#endif
+
     fd = open(dumpname,O_WRONLY | O_CREAT | O_TRUNC,0640);
     if (fd < 0) {
         erts_fprintf(stderr,"\nNo crash dump: %s cannot be created\n", dumpname);
@@ -543,6 +557,9 @@ erl_crash_dump_v(char *file, int line, const char* fmt, va_list args)
         base.close = &close_fd;
     }
 
+#ifdef __erxos__
+base_ready:
+#endif
     outer = &base;
 
 #ifdef ENCRYPTED_CRASH_DUMPS

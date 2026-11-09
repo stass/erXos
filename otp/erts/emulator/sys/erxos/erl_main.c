@@ -18,7 +18,7 @@
  * limitations under the License.
  *
  * Modified by erXos: ERTS starts on the boot information page, whose entry owns main,
- * and reads the startup limits from it.
+ * reads the startup limits from it, and maps the domain's crash area.
  *
  * %CopyrightEnd%
  */
@@ -31,6 +31,7 @@
 
 #include "liberx/backend/core/boot_info.h"
 #include "liberx/backend/runtime_entry.h"
+#include "erx_crash_area.h"
 
 static erx_boot_view_t boot_view;
 
@@ -85,6 +86,7 @@ erx_runtime_main(void)
         fprintf(stderr, "erx: the boot information page: %s\n", erx_boot_info_reason(status));
         exit(1);
     }
+    erx_crash_area_init();
     plan = erx_boot_argv_plan(&boot_view);
     argv = malloc((plan.argc + 1) * sizeof(*argv));
     strings = malloc(plan.strings);

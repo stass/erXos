@@ -214,7 +214,7 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/beam/erl_process.c`: the safe point of `docs/design-runtime.md`, "Scheduling", handles the ready list only: its
   capacity and urgency steps land with the adapter that publishes them.
 * [Medium] `otp/erts/emulator/beam/erl_crash_dump.c`, `beam/bif.c`, `sys/erxos/sys.c`: what `imports.txt` lists as `[stock_descriptors]`
-  and the rest of `[stock_process]`: the crash dump's file, which `open` refuses with `ENOSYS` until the crash area replaces it (edit 34),
+  and the rest of `[stock_process]`: the system domain's crash dump file, which `open` refuses with `ENOSYS` (another domain's dump goes to its crash area),
   `erlang:display` and `halt`'s output, the terminal's `sys_get_key` and `ethread`'s signal masks. Each is answered as `ENOSYS` tracing shows it.
 * [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
   `[stock_process]` and `[stock_descriptors]`, the UNIX process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
@@ -889,6 +889,23 @@ it; git history is the record of completed work.
   object (a bell's bind, a group's configure), and none checks that the root's handle table
   returns to its starting occupancy after a retire or an undo, which would catch a handle the
   library forgot to close.
+* [Medium] domain library, `liberx/system/dom_core.c` (`dom_check_sizes`): every crash area is
+  `ERX_CRASH_SIZE`, 16 KiB, not design-runtime.md's per-domain size with its 1 MiB default, so
+  a full dump arrives truncated with its slogan intact, and the design's one-page crash area
+  test cannot be written: `limits.crash` never reaches the view. Take the size from the
+  startup limits and add that test.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`slogan/3`): a
+  crash's slogan reaches only the death record and its dump text is read and dropped, since
+  no inspector exists to show either; design-runtime.md, "Crash handling", has the inspector
+  show both through its escaping.
+* [Low] medium_boot, `tools/lib/erx/production_image.rb` (`RELEASE_SHELL`): the console interleaves a
+  configured domain's start trace (`erx: erts: erl_start runs`, `... hold executor slots`) with the
+  command shell's banner byte by byte, so a run printed `erc: the command shell` and the
+  line-anchored checkpoint timed out; a rerun passed. Lines from two writers should not mix on the console.
+* [Low] ERTS, `otp/erts/emulator/sys/erxos/erx_crash_area.c`: a fatal end reaches the crash area
+  only through `erts_exit`, `ERTS_EXIT_AFTER_DUMP`, `ERTS_SYS_ABORT` and `erl_assert_error`; any
+  other direct `abort()` in ERTS ends the domain as a fault with no slogan. Give `abort` an
+  `only_` section of `imports.txt` held by the crash path, so every fatal end goes through it.
 * [Medium] domain library, `liberx/system/dom_install.c` (`erx_dom_install`): design-system.md
   A7 and "The grant table" have the install funnel take a row of `erx_dom_grants`, but it
   takes a step with a raw object, recipient and rights and checks only the step's kind. That
@@ -1064,8 +1081,7 @@ it; git history is the record of completed work.
   the plan checked and the plan applied; pass the spans once the pack is laid out. (3)
   Whether an entry starts with an image manifest is `row['image']` in `plan_file` and
   `row.key?('plan')` in `PackWire#write_image`; one helper should give an entry's head
-  for both. `limits.crash` never reaches the view, which sizes every crash area
-  `ERX_CRASH_SIZE`.
+  for both.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_plans`),
   `tools/lib/erx/pack.rb`, `tools/lib/erx/release.rb`: a manifest with no configured
   domains is planned only when the caller passes a planner, so a principal
@@ -3666,7 +3682,15 @@ document's "residual risks accepted" paragraph.
   [design-live.md](docs/design-live.md#invariants)) wait for M5, where the flag
   first takes effect. Until then `erx_code` loads the verified bytes from its own
   heap with `code:prepare_loading/1` and `code:finish_loading/1`, and any code in
-  the system domain can still load bytes with `code:load_binary/3`; the
+  the system domain can still load bytes with `code:load_binary/3`. One package
+  lands them together, tested in medium_boot: setting the flag alone would refuse
+  `erx_code`'s own loads, the harness's probes (`code:load_binary` in
+  `test/integration/runtime_literal_token_test.rb`, `prim_file_compare.erl`,
+  `runtime_hosted_smoke_test.rb`, `tools/lib/erx/bench_guest.rb`,
+  `production_image.rb`), which must go through the install facet, and even release
+  code, since `prim_file`'s `read_file` copies a release file to the heap
+  (`erx_prim_file.c`, `erx_copy_out`) instead of returning a binary over the mapped
+  slice; the refusal itself goes in `erts_internal_prepare_loading_2`. The
   chokepoint check that only `erx_code` calls `install_beam/2` lands with it.
 * [Medium] code service, other domains and principals
   (`erlang/apps/erx_code/src/erx_code_store.erl`): the store is one in-memory

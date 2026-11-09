@@ -266,6 +266,8 @@ int	erx_image_map(uint64_t space, uint64_t image, uint64_t entry, uint64_t *star
 int	erx_space_stop(uint64_t space, int64_t status);
 int	erx_image_slice(uint64_t budget, uint64_t image, uint64_t first, uint64_t count, uint64_t *slice)
 	    ERX_WARN_UNUSED_RESULT;
+int	erx_mem_copy(uint64_t dst, uint64_t dst_offset, uint64_t src, uint64_t src_offset, uint64_t len)
+	    ERX_WARN_UNUSED_RESULT;
 int	erx_cap_close(uint64_t cap) ERX_WARN_UNUSED_RESULT;
 int	erx_object_destroy(uint64_t object) ERX_WARN_UNUSED_RESULT;
 int	erx_budget_create(uint64_t parent, uint32_t kind, uint64_t guarantee, uint64_t cap, uint64_t *budget)

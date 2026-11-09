@@ -28,12 +28,13 @@ as long as the system domain.
 
 The registered process, the domain service, is also the only one that may
 change the library: create/1, configured/2, start/1, stop/2, retire/1,
-connect/4 and disconnect/1 answer {error, erights} to any other caller.
+connect/4 and disconnect/1 answer {error, erights} to any other caller, and
+so does crash/1, which reads a domain's crash dump.
 """.
 
--export([register/0, create/1, start/1, stop/2, retire/1, connect/4, disconnect/1,
+-export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/4, disconnect/1,
          configured/0, configured/2, code_object/2, code_drop/2]).
--nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, connect_nif/4,
+-nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/4,
        disconnect_nif/1, configured_nif/0, configured_create_nif/2]).
 -on_load(on_load/0).
 
@@ -120,6 +121,19 @@ retire(Id) ->
     retire_nif(Id).
 
 -doc """
+Ended domain Id's crash area, read before its retire: {ok, Slogan, Dump,
+Truncated}, the slogan and the dump text as the domain wrote them, which
+are untrusted text and reach a terminal or a log only through that sink's
+escaping. {error, ecorrupt} for a header that fails the reader's checks,
+{error, einval} for a domain not ended or without a crash area, and
+{error, erights} to any caller but the domain service, since the dump
+holds the domain's data.
+""".
+-spec crash(pos_integer()) -> {ok, binary(), binary(), boolean()} | error().
+crash(Id) ->
+    crash_nif(Id).
+
+-doc """
 Connects domains A and B, A reading a ring of AReads bytes and B one of
 BReads: {ok, #{number => N, a => Party, b => Party}}, each Party the
 side, peer_side, peer_bell and label in that domain's own table.
@@ -175,6 +189,9 @@ stop_nif(_Id, _Status) ->
     erlang:nif_error(undef).
 
 retire_nif(_Id) ->
+    erlang:nif_error(undef).
+
+crash_nif(_Id) ->
     erlang:nif_error(undef).
 
 connect_nif(_A, _B, _AReads, _BReads) ->

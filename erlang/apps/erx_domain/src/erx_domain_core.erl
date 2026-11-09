@@ -31,9 +31,9 @@ goes from building to nothing, freeing its name. A transition from any other
 state is a bug of the caller and fails with a badmatch.
 """.
 
--export([new/1, host/1, admit/4, built/5, running/2, failed/2, ended/4, retired/2,
+-export([new/1, host/1, admit/4, built/5, running/2, failed/2, ended/5, retired/2,
          restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1]).
--export_type([state/0, domain/0, origin/0, info/0]).
+-export_type([state/0, domain/0, origin/0, info/0, slogan/0]).
 
 -define(SYSTEM_ID, 4).
 -define(ID_MAX, 16#ffffffff).
@@ -48,7 +48,10 @@ state is a bug of the caller and fails with a badmatch.
                     pid := pid() | undefined, ref := reference() | undefined,
                     connection := non_neg_integer(), ended := undefined | {info(), integer()}}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
--type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer()}.
+-type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
+                   slogan => slogan()}.
+%% A crash's slogan as the domain wrote it, untrusted text, or why its crash area could not be read.
+-type slogan() :: binary() | {unreadable, atom() | {status, integer()}}.
 -opaque state() :: #{host := binary(), next_id := pos_integer(),
                      names := #{binary() => binding()},
                      bound := #{pos_integer() => non_neg_integer()},
@@ -118,17 +121,19 @@ failed(Id, #{domains := Domains} = State) ->
 Domain Id ended with End, the library's {Kind, Status}, at Now: the domain's
 Info for {domain_down, Id, Info}, the domain as it was, and the state with the
 domain ended, its name free and its death recorded, the last ?DEATHS_KEPT per
-principal. The end of an unknown id, or of a domain neither built nor
-running, is none.
+principal. Slogan is what the domain service read from a crash's crash
+area, which the crash's death record keeps; none for any other end. The end
+of an unknown id, or of a domain neither built nor running, is none.
 """.
--spec ended(pos_integer(), {atom(), integer()}, integer(), state()) -> {info(), domain(), state()} | none.
-ended(Id, End, Now, #{domains := Domains, deaths := Deaths} = State) ->
+-spec ended(pos_integer(), {atom(), integer()}, slogan() | none, integer(), state()) ->
+          {info(), domain(), state()} | none.
+ended(Id, End, Slogan, Now, #{domains := Domains, deaths := Deaths} = State) ->
     case Domains of
         #{Id := #{state := Life, principal := Principal, name := Name} = Domain}
           when Life =:= built; Life =:= running ->
             Info = info(End),
-            Kept = lists:sublist([#{id => Id, name => Name, info => Info, at => Now}
-                                  | maps:get(Principal, Deaths, [])], ?DEATHS_KEPT),
+            Death = death(#{id => Id, name => Name, info => Info, at => Now}, Slogan),
+            Kept = lists:sublist([Death | maps:get(Principal, Deaths, [])], ?DEATHS_KEPT),
             Next = State#{domains := Domains#{Id := Domain#{state := ended, ended := {Info, Now}}},
                           deaths := Deaths#{Principal => Kept}},
             {Info, Domain, free_name(Domain, Next)};
@@ -188,6 +193,10 @@ info({halt, Status}) -> {halt, Status};
 info({crash, _}) -> crash;
 info({fault, Kind}) -> {fault, Kind};
 info({stopped, _}) -> stopped.
+
+%% Only a crash's death carries a slogan.
+death(#{info := crash} = Death, Slogan) when Slogan =/= none -> Death#{slogan => Slogan};
+death(Death, none) -> Death.
 
 update(Id, From, Changes, #{domains := Domains} = State) ->
     #{Id := #{state := From} = Domain} = Domains,

@@ -6,7 +6,8 @@
 %% stop sends the service the end the library's fault thread would.
 -module(erx_domain_fake_lib).
 -export([start_log/0, next_call/0]).
--export([register/0, configured/0, configured/2, create/1, start/1, stop/2, retire/1, disconnect/1]).
+-export([register/0, configured/0, configured/2, create/1, start/1, stop/2, retire/1, crash/1,
+         disconnect/1]).
 
 start_log() ->
     Pid = spawn(fun() -> queue([], []) end),
@@ -38,4 +39,5 @@ create(#{id := Id} = Spec) -> log({create, Spec}), {ok, #{id => Id, connection =
 start(Id) -> log({start, Id}).
 stop(Id, _Status) -> log({stop, Id}), erx_domain_srv ! {domain_ended, Id, {stopped, 0}, #{}}, ok.
 retire(Id) -> log({retire, Id}).
+crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
 disconnect(Number) -> log({disconnect, Number}).

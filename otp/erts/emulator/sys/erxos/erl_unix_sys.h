@@ -19,7 +19,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  * 
- * Modified by erXos: ERTS's clocks are liberx's, and the zone is UTC.
+ * Modified by erXos: ERTS's clocks are liberx's, and the zone is UTC; a fatal exit in a
+ * domain other than the system domain stops its space with ERX_EXIT_CRASH.
  *
  * %CopyrightEnd%
  *
@@ -49,6 +50,7 @@
 #include <sys/param.h>
 #include <fcntl.h>
 #include "erl_errno.h"
+#include "erx_crash_area.h"
 #include <signal.h>
 #include <setjmp.h>
 
@@ -318,7 +320,12 @@ ERTS_GLB_INLINE struct tm *sys_localtime_r(time_t *the_clock, struct tm *buff) {
 extern int init_async(int);
 extern int exit_async(void);
 
-#define ERTS_EXIT_AFTER_DUMP _exit
+/*
+ * A domain other than the system domain ends a fatal exit by stopping its space with
+ * ERX_EXIT_CRASH (erx_crash_area.h); the system domain exits or aborts as stock ERTS does.
+ */
+#define ERTS_EXIT_AFTER_DUMP(n) (erx_crash_area_stop(), _exit(n))
+#define ERTS_SYS_ABORT() (erx_crash_area_stop(), abort())
 
 
 #endif /* #ifndef _ERL_UNIX_SYS_H */

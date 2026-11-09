@@ -28,7 +28,8 @@
  * caller_is_service first, under the lock, and answers {error, erights} to
  * any other caller. So only the process that registered drives the
  * library, and no domain the module made can end with no one to hear of
- * it. Which process registers is the domain service's to win: it registers
+ * it. crash, which reads an ended domain's crash area, asks the same, since
+ * the dump holds that domain's data. Which process registers is the domain service's to win: it registers
  * at its start, and a registration while it lives is refused (TODO.md, the
  * domain service's trust in system-domain processes).
  *
@@ -488,6 +489,82 @@ retire_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (id_entry(env, argc, argv, erx_dom_lib_retire));
 }
 
+/*
+ * The object a crash area is copied into, ERX_CRASH_SIZE bytes on the
+ * system domain's budget, made at the first read and mapped read-only for
+ * the library's life; both under lib_lock. The source area is never mapped.
+ */
+static uint64_t crash_copy = ERX_CAP_NULL;
+static const uint8_t *crash_view;
+
+static erx_status_t
+crash_copy_up(void)
+{
+	uint64_t mem, addr;
+	erx_status_t status;
+
+	if (crash_view != NULL)
+		return (ERX_OK);
+	status = erx_mem_create(ERX_CAP_NULL, ERX_CRASH_SIZE, 0, &mem);
+	if (status != ERX_OK)
+		return (status);
+	status = erx_vm_reserve(ERX_CAP_SELF, 0, ERX_CRASH_SIZE, 0, &addr);
+	if (status == ERX_OK) {
+		status = erx_vm_map(ERX_CAP_SELF, addr, ERX_CRASH_SIZE, mem, 0, ERX_PROT_R);
+		if (status != ERX_OK)
+			(void)erx_vm_release(ERX_CAP_SELF, addr, ERX_CRASH_SIZE);
+	}
+	if (status != ERX_OK) {
+		(void)erx_cap_close(mem);
+		return (status);
+	}
+	crash_copy = mem;
+	crash_view = (const uint8_t *)(uintptr_t)addr;
+	return (ERX_OK);
+}
+
+static ERL_NIF_TERM
+bytes_term(ErlNifEnv *env, const uint8_t *bytes, size_t len)
+{
+	ERL_NIF_TERM term;
+
+	memcpy(enif_make_new_binary(env, len, &term), bytes, len);
+	return (term);
+}
+
+/*
+ * crash_nif(Id): ended domain Id's crash area, copied out and read
+ * (erx_dom_lib_crash_copy, erx_dom_dump_read): {ok, Slogan, Dump,
+ * Truncated}, the slogan and dump text as binaries the domain wrote,
+ * still untrusted text. {error, ecorrupt} for a header that fails a check,
+ * {error, einval} for a domain not ended or without an area. Only the
+ * service may read, as the dump holds the domain's data.
+ */
+static ERL_NIF_TERM
+crash_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_dom_dump_t dump;
+	ERL_NIF_TERM result = 0;
+	unsigned int id;
+	erx_status_t status;
+
+	if (argc != 1 || !enif_get_uint(env, argv[0], &id))
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	enif_mutex_lock(lib_lock);
+	status = caller_is_service(env) ? crash_copy_up() : ERX_ERIGHTS;
+	if (status == ERX_OK)
+		status = erx_dom_lib_crash_copy(lib, id, crash_copy);
+	if (status == ERX_OK)
+		status = erx_dom_dump_read(crash_view, ERX_CRASH_SIZE, &dump);
+	if (status == ERX_OK)
+		result = enif_make_tuple4(env, atom(env, "ok"), bytes_term(env, dump.slogan, dump.slogan_len),
+		    bytes_term(env, dump.text, (size_t)dump.length), atom(env, dump.truncated ? "true" : "false"));
+	enif_mutex_unlock(lib_lock);
+	return (status == ERX_OK ? result : status_error(env, status));
+}
+
 /* One party's values of a connection, as a map. */
 static ERL_NIF_TERM
 party_term(ErlNifEnv *env, const erx_dom_party_t *party)
@@ -749,6 +826,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "start_nif", 1, start_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "stop_nif", 2, stop_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "retire_nif", 1, retire_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "crash_nif", 1, crash_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "connect_nif", 4, connect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },

@@ -869,6 +869,20 @@ erx_dom_lib_retire(erx_dom_lib_t *lib, uint32_t id)
 }
 
 erx_status_t
+erx_dom_lib_crash_copy(erx_dom_lib_t *lib, uint32_t id, uint64_t dst)
+{
+	const uint32_t slot = lib_slot(lib, id);
+	const erx_dom_t *dom;
+
+	if (slot == lib->view.max_domains)
+		return (ERX_EINVAL);
+	dom = &lib->view.domains[slot];
+	if (dom->state != ERX_DOM_ENDED || dom->crash.raw == ERX_CAP_NULL)
+		return (ERX_EINVAL);
+	return (erx_mem_copy(dst, 0, dom->crash.raw, 0, ERX_CRASH_SIZE));
+}
+
+erx_status_t
 erx_dom_lib_take(uint64_t wait_by, uint64_t *label, erx_fault_t *record)
 {
 	const erx_utcb_t *const utcb = erx_utcb_self();

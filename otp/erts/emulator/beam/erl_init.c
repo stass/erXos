@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: starts the event table in place of check_io, and has no +IO options.
+ * Modified by erXos: starts the event table in place of check_io, has no +IO options,
+ * and puts a fatal exit's slogan in the domain's crash area.
  *
  * %CopyrightEnd%
  */
@@ -2704,6 +2705,17 @@ erts_exit_vv(int n, int flush, const char *fmt, va_list args1, va_list args2)
 
     erts_exit_code = n;
 
+#ifdef __erxos__
+    /* The slogan goes into the crash area before any dump is tried (erx_crash_area.h). */
+    if (n == ERTS_DUMP_EXIT || n == ERTS_ERROR_EXIT || n == ERTS_ABORT_EXIT) {
+	va_list slogan;
+
+	va_copy(slogan, args1);
+	erx_crash_area_begin(fmt, slogan);
+	va_end(slogan);
+    }
+#endif
+
     /* Produce an Erlang crash dump if error */
     if (((n == ERTS_ERROR_EXIT && erts_no_crash_dump == 0) || n == ERTS_DUMP_EXIT)
 	&& erts_initialized) {
@@ -2728,7 +2740,7 @@ __decl_noreturn void __noreturn erts_exit_epilogue(int flush)
     else if (n == ERTS_DUMP_EXIT)
 	ERTS_EXIT_AFTER_DUMP(1);
     else if (n == ERTS_ERROR_EXIT || n == ERTS_ABORT_EXIT)
-        abort();
+        ERTS_SYS_ABORT();
     (void) (flush ? exit(n) : _exit(n));
 }
 

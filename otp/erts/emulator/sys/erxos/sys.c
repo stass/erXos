@@ -628,6 +628,8 @@ erl_assert_error(const char* expr, const char* func, const char* file, int line)
     fprintf(stderr, "%s:%d:%s() Assertion failed: %s\n",
             file, line, func, expr);
     fflush(stderr);
+    /* A domain ends as a crash with this slogan; the system domain aborts. */
+    erx_crash_area_fail("%s:%d:%s() Assertion failed: %s\n", file, line, func, expr);
     abort();
 }
 

@@ -172,6 +172,17 @@ erx_status_t	erx_dom_lib_disconnect(erx_dom_lib_t *, uint32_t number) ERX_WARN_U
 erx_status_t	erx_dom_lib_retire(erx_dom_lib_t *, uint32_t id) ERX_WARN_UNUSED_RESULT;
 
 /*
+ * Copies ended domain id's crash area, all ERX_CRASH_SIZE bytes, into dst at
+ * offset 0, a memory object of the caller's at least that large, with
+ * erx_mem_copy: the library never maps the area, so a deleted one fails the
+ * copy with ERX_ESTALE instead of faulting. ERX_EINVAL for a domain not
+ * ended, or one created without a crash area; the backend's refusal otherwise.
+ * The caller reads dst with erx_dom_dump_read before the domain's retire.
+ */
+erx_status_t	erx_dom_lib_crash_copy(erx_dom_lib_t *, uint32_t id, uint64_t dst)
+		    ERX_WARN_UNUSED_RESULT;
+
+/*
  * The fault thread's wait, outside the lock: the next record at the gates bound
  * to the calling thread, with its label, or the backend's ERX_ETIMEDOUT. A
  * message whose tag is not a record from the kernel, an erx_fault_t of words

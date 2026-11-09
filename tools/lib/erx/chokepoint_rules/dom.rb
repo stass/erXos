@@ -18,6 +18,8 @@ module Erx
     # erx_dom_plan_configured.
     DOM_BOOT = 'liberx/system/dom_boot.c'
     DOM_BOOT_VIEW = 'liberx/system/dom_boot_view.c'
+    # The reader of a domain's crash area, which calls no planning entry.
+    DOM_DUMP = 'liberx/system/dom_dump.c'
     # The library's one install (A7) and the domain service's NIF module, which
     # call neither entry; the NIF reaches only erx_dom_lib_*.
     DOM_INSTALL_FILES = %w[liberx/system/dom_install.c liberx/system/dom_install.h].freeze
@@ -35,7 +37,7 @@ module Erx
     ERXOS_NIFS = 'otp/erts/emulator/nifs/erxos/**/*'
 
     declare_group(
-      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY, DOM_APPLY_HEADER, DOM_BOOT, DOM_BOOT_VIEW, *DOM_INSTALL_FILES],
+      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY, DOM_APPLY_HEADER, DOM_BOOT, DOM_BOOT_VIEW, DOM_DUMP, *DOM_INSTALL_FILES],
       rules: [
         # A creation origin is authority provenance: the planning entries
         # build every specification, origin included, inside the core, so

@@ -1290,6 +1290,7 @@ OS_OBJS = \
 else
 OS_OBJS = \
 	$(OBJDIR)/sys.o \
+	$(OBJDIR)/erx_crash_area.o \
 	$(OBJDIR)/erx_event.o \
 	$(OBJDIR)/erx_event_table.o \
 	$(OBJDIR)/erx_device.o \

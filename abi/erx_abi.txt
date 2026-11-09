@@ -345,6 +345,24 @@ layout erx_boot_info wire_le 8 280
   field hwcap2 u64 208
   field limits erx_runtime_limits 216
 
+# The header of a domain's crash area (docs/design-runtime.md, "Data
+# model"), which the domain library makes ERX_CRASH_SIZE bytes. The
+# domain's runtime writes the dump text after it, then length, flags and
+# the slogan, then magic last; the domain service copies the area out
+# and checks every field before it believes one. "ERXD" in memory.
+limit dump_magic u32 0x44585245
+limit dump_version u32 1
+limit dump_slogan u32 232
+flags dump_flags u32
+  bit truncated 0
+layout erx_dump_header wire_le 8 256
+  field magic u32 0
+  field version u32 4
+  field flags dump_flags 8
+  field pad u32 12
+  field length u64 16
+  field slogan u8 24 count 232
+
 # How a machine ends (docs/design-stopgap.md, "The end path").
 enum end u32
   value off 1

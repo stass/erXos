@@ -643,7 +643,8 @@ it, so the runtime has one readiness mechanism and no scan of its
 sources ([The event table](#the-event-table)).
 
 **The crash area** is a memory object the domain library creates for each
-domain and maps writable into it, charged to the domain's **outer
+domain and hands it writable through the boot information page, which the
+domain's runtime maps at start-up, charged to the domain's **outer
 budget**, which the domain library carves beside the domain's own: the own
 budget pays for what the domain alone maps and is destroyed at once when
 the domain ends, and the outer budget pays for what another domain also
@@ -657,20 +658,20 @@ survives the domain's end, and the domain service reads it afterwards. It
 starts with a header whose layout is in the ABI file:
 
 ```c
-typedef struct erx_crash_header {
-	uint32_t	magic;		/* ERX_CRASH_MAGIC once a dump is complete */
+typedef struct erx_dump_header {
+	uint32_t	magic;		/* ERX_DUMP_MAGIC once a dump is complete */
 	uint32_t	version;	/* 1 */
-	uint32_t	flags;		/* ERX_CRASH_TRUNCATED: the dump did not fit */
+	uint32_t	flags;		/* ERX_DUMP_TRUNCATED: the dump did not fit */
 	uint32_t	pad;		/* zero */
 	uint64_t	length;		/* bytes of dump text stored after the header */
 	char		slogan[232];	/* ERTS's one-line reason, NUL-terminated */
-} erx_crash_header_t;		/* 256 bytes */
+} erx_dump_header_t;		/* 256 bytes */
 ```
 
 The domain writes the text first and the magic last, with a release store.
 `length` counts only the bytes stored, so a dump that fills the area
 exactly is complete, and a dump cut at the area's end says so with
-`ERX_CRASH_TRUNCATED`, never with its length. Whoever reads it treats it
+`ERX_DUMP_TRUNCATED`, never with its length. Whoever reads it treats it
 as untrusted input: the magic and version must match, `flags` may hold no
 other bit and `pad` must be zero, `length` must fit in the area after the
 header, the slogan must hold a NUL within its 232 bytes, and every byte
@@ -2358,11 +2359,14 @@ no OpenSSL in any domain, the system domain included
 Every fatal path of ERTS in a domain (`erts_exit` with a dump, a failed
 assertion, an allocation failure, an exhausted atom or code table) runs
 ERTS's exit path, which writes the crash dump, truncated to the crash
-area's size (1 MiB by default) and then marked `ERX_CRASH_TRUNCATED`, into
+area's size (1 MiB by default) and then marked `ERX_DUMP_TRUNCATED`, into
 the crash area the boot information page names, completes its header
 ([Data model](#data-model)), and stops its own space with
 `erx_space_stop(ERX_CAP_SELF, ERX_EXIT_CRASH)`, a negative status the ABI
-file defines. A domain created without a crash area, as the vault's is
+file defines. The slogan goes into the header on every such path before
+any dump is attempted, so an exit before ERTS has finished starting,
+which writes no dump, still names its reason. A domain created without a
+crash area, as the vault's is
 ([design-system.md](design-system.md#the-vault)), writes no dump and
 stops with the same status. A deliberate `erlang:halt/1` stops the space
 with its status, a non-negative number, and writes no dump. Either way the
@@ -3044,7 +3048,7 @@ across them is the conformance suite.
 | A write to the release file system or an EROFS image | `erx_prim_file` | nothing | none needed | `{error, erofs}` |
 | An EROFS block fails its hash check | the hash-checking primitive under the EROFS reader | the mount, read-only | none needed | `{error, eio}` for the read, and a log line naming the image and the block |
 | The RAM file system reaches its cap | the cap's check in `erx_ramfs`, which refuses the whole request of at most 64 KiB ([design-tmp.md](design-tmp.md#failure-handling)) | the file as before the refused request; a larger write keeps the requests before it, as after a short write ([design-files.md](design-files.md#open-files-and-offsets)) | none needed | `{error, enospc}`, and `ENOSPC` in a program writing through its session's grant or at the write-back of its shared mapping |
-| The crash dump exceeds the crash area | the dump writer's bound | the dump cut at the area's end, with its stored length and `ERX_CRASH_TRUNCATED` in the header | none needed | the inspector marks the dump truncated |
+| The crash dump exceeds the crash area | the dump writer's bound | the dump cut at the area's end, with its stored length and `ERX_DUMP_TRUNCATED` in the header | none needed | the inspector marks the dump truncated |
 | The console's driver has no free transmit buffer | `{error, empty}` from its pool | the unwritten bytes in the console service | the console service, once the driver reports room | output delayed, never reordered or dropped |
 
 **Diagnostics.** The inspector shows, per domain, every executor's state,

@@ -144,6 +144,13 @@ erx_dom_lib_retire(erx_dom_lib_t *lib, uint32_t id)
 }
 
 erx_status_t
+erx_dom_lib_crash_copy(erx_dom_lib_t *lib, uint32_t id, uint64_t dst)
+{
+	(void)lib, (void)id, (void)dst;
+	return (ERX_ENOTSUP);
+}
+
+erx_status_t
 erx_dom_lib_take(uint64_t wait_by, uint64_t *label, erx_fault_t *record)
 {
 	(void)wait_by, (void)label, (void)record;

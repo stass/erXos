@@ -712,6 +712,29 @@ typedef struct erx_dom_action {
 erx_dom_end_t	erx_dom_classify(const erx_fault_t *exit,
 		    uint64_t system_space, erx_dom_end_t noted);
 
+/* A crash area's dump as erx_dom_dump_read found it; every pointer is into the area. */
+typedef struct erx_dom_dump {
+	const uint8_t	*slogan;	/* ERTS's one-line reason, without its NUL */
+	size_t		 slogan_len;
+	const uint8_t	*text;		/* the dump text after the header */
+	uint64_t	 length;
+	bool		 truncated;	/* the dump did not fit the area */
+} erx_dom_dump_t;
+
+/*
+ * Reads the crash area a domain wrote (docs/design-runtime.md, "Data
+ * model"), size bytes at area, which the caller copied out of the domain's
+ * area into memory of its own, so nothing changes under the read. The
+ * domain wrote it, so every field is checked: the magic and version
+ * match, flags hold no unknown bit, pad is zero, length fits after the
+ * header, and the slogan has a NUL within its bytes. ERX_OK with *dump;
+ * ERX_ECORRUPT, with *dump untouched, when a check fails, a domain that
+ * never completed its header included. The bytes stay untrusted text,
+ * which reaches a terminal or a log only through that sink's escaping.
+ */
+erx_status_t	erx_dom_dump_read(const uint8_t *area, size_t size,
+		    erx_dom_dump_t *dump);
+
 /*
  * The fault thread's step for a record at the library's gate whose label
  * is label. An exit record of a built or running domain ends it: its own

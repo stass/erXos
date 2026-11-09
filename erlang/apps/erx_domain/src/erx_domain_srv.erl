@@ -186,7 +186,7 @@ stop(Id, #{lib := Lib}) ->
     end.
 
 ended(Id, End, #{lib := Lib, core := Core} = State) ->
-    case erx_domain_core:ended(Id, End, erlang:system_time(second), Core) of
+    case erx_domain_core:ended(Id, End, slogan(Lib, Id, End), erlang:system_time(second), Core) of
         none ->
             State;
         {Info, #{pid := Pid, ref := Ref, connection := Connection, origin := Origin}, Ended} ->
@@ -198,6 +198,15 @@ ended(Id, End, #{lib := Lib, core := Core} = State) ->
                       end,
             restart(Origin, save(State#{core := Retired}))
     end.
+
+%% A crash's slogan, from its crash area, which goes at the retire after it.
+slogan(Lib, Id, {crash, _}) ->
+    case Lib:crash(Id) of
+        {ok, Slogan, _Dump, _Truncated} -> Slogan;
+        {error, Reason} -> {unreadable, Reason}
+    end;
+slogan(_Lib, _Id, _End) ->
+    none.
 
 disconnect(_Lib, 0) -> ok;
 disconnect(Lib, Connection) -> Lib:disconnect(Connection).

@@ -103,13 +103,17 @@ static const char erts_args[] = ERTS_BOOT "erlang:display(init_started),erlang:h
 static const char jit_reload_args[] = JIT_RUN("reload");
 static const char jit_write_rx_args[] = JIT_RUN("write_rx");
 static const char jit_run_rw_args[] = JIT_RUN("run_rw");
+/* What the crash case's domain runs: a halt with a slogan, which writes a crash dump. */
+#define CRASH_SLOGAN	"native crash"
+static const char crash_args[] = ERTS_BOOT "erlang:halt(\"" CRASH_SLOGAN "\")";
 
 /* What a case does between a domain's create and its end. */
 typedef enum run_action {
 	RUN_PLAIN,	/* starts it and waits */
 	RUN_STOP,	/* starts it, then stops it with STOP_STATUS */
 	RUN_SPOIL,	/* spoils its boot page's version, then starts it */
-	RUN_LANE	/* starts it, then plays the system party on its connection */
+	RUN_LANE,	/* starts it, then plays the system party on its connection */
+	RUN_CRASH	/* starts it, waits, then reads its crash area (crash_read) */
 } run_action_t;
 static uint32_t next_id = ERX_DOM_SYSTEM_ID + 1;
 
@@ -241,6 +245,16 @@ erts_request(uint32_t runtime)
 	request.memory = ERTS_MEMORY;
 	memcpy(request.strings, erts_args, sizeof(erts_args));
 	request.args_len = (uint32_t)sizeof(erts_args);
+	return (&request);
+}
+
+/* A request for a domain whose ERTS halts with CRASH_SLOGAN. */
+static const erx_dom_spec_t *
+crash_request(uint32_t runtime)
+{
+	(void)erts_request(runtime);
+	memcpy(request.strings, crash_args, sizeof(crash_args));
+	request.args_len = (uint32_t)sizeof(crash_args);
 	return (&request);
 }
 
@@ -786,6 +800,40 @@ lane_party(uint32_t id)
 }
 
 /*
+ * Copies ended domain id's crash area into an object of the root's,
+ * mapped read-only, and reads it as the domain service does: the slogan
+ * is CRASH_SLOGAN, the text starts as an ERTS dump does, and a truncated
+ * dump fills the area. Prints the dump's length and truncation, never
+ * its text, which the domain wrote.
+ */
+static bool
+crash_read(uint32_t id)
+{
+	static const char start[] = "=erl_crash_dump:0.5\n";
+	erx_dom_dump_t dump;
+	uint64_t mem, addr = 0;
+	bool passed;
+
+	if (erx_mem_create(ERX_CAP_NULL, ERX_CRASH_SIZE, 0, &mem) != ERX_OK)
+		return (false);
+	passed = erx_dom_lib_crash_copy(&lib, id, mem) == ERX_OK &&
+	    erx_vm_reserve(ERX_CAP_SELF, 0, ERX_CRASH_SIZE, 0, &addr) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, addr, ERX_CRASH_SIZE, mem, 0, ERX_PROT_R) == ERX_OK &&
+	    erx_dom_dump_read((const uint8_t *)(uintptr_t)addr, ERX_CRASH_SIZE, &dump) == ERX_OK;
+	if (passed) {
+		say_count("crash_length", dump.length);
+		say_count("crash_truncated", dump.truncated);
+		passed = dump.slogan_len == sizeof(CRASH_SLOGAN) - 1 &&
+		    memcmp(dump.slogan, CRASH_SLOGAN, dump.slogan_len) == 0 &&
+		    dump.length >= sizeof(start) - 1 && memcmp(dump.text, start, sizeof(start) - 1) == 0 &&
+		    (!dump.truncated || dump.length == ERX_CRASH_SIZE - ERX_DUMP_HEADER_SIZE);
+	}
+	if (addr != 0)
+		passed = erx_vm_release(ERX_CAP_SELF, addr, ERX_CRASH_SIZE) == ERX_OK && passed;
+	return (erx_cap_close(mem) == ERX_OK && passed);
+}
+
+/*
  * Creates the domain spec asks for, does what action says, and takes its
  * end; then disconnects and retires it. True when every call succeeded and
  * the end is kind with status.
@@ -833,6 +881,8 @@ domain_run(const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t k
 	say_count("end_status", (uint64_t)report.end.status);
 	passed = passed && report.end.kind == kind && report.end.status == status &&
 	    erx_dom_lib_retire(&lib, created.id) == ERX_EBUSY;
+	if (passed && action == RUN_CRASH)
+		passed = crash_read(created.id);
 	passed = erx_dom_lib_disconnect(&lib, created.connection) == ERX_OK && passed;
 	return (erx_dom_lib_retire(&lib, created.id) == ERX_OK && passed);
 }
@@ -1043,6 +1093,7 @@ erx_fiasco_root_main(void)
 	case_end("lanes", request_for("halt", program, 1), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
 	case_end("erts", erts_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("erts_refused", erts_request(erts), RUN_SPOIL, ERX_DOM_END_HALT, ERX_FIASCO_TASK_STATUS_BOOT_PAGE);
+	case_end("crash", crash_request(erts), RUN_CRASH, ERX_DOM_END_CRASH, 0);
 	case_end("jit_reload", jit_request(jit, jit_reload_args, sizeof(jit_reload_args)), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("jit_write_rx", jit_request(jit, jit_write_rx_args, sizeof(jit_write_rx_args)), RUN_PLAIN,
 	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);

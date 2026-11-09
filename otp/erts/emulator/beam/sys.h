@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: has no poll set debug info.
+ * Modified by erXos: has no poll set debug info, and the system layer may define
+ * ERTS_SYS_ABORT.
  *
  * %CopyrightEnd%
  */
@@ -237,6 +238,11 @@ typedef ERTS_SYS_FD_TYPE ErtsSysFdType;
 
 #ifndef ERTS_EXIT_AFTER_DUMP
 #  define ERTS_EXIT_AFTER_DUMP exit
+#endif
+
+/* How erts_exit ends an error or abort exit. */
+#ifndef ERTS_SYS_ABORT
+#  define ERTS_SYS_ABORT() abort()
 #endif
 
 /* In VC++, noreturn is a declspec that has to be before the types,
