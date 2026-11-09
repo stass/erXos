@@ -94,6 +94,9 @@ class ManifestReaderTest < Minitest::Test
     status, output = decode(AbiManifestFixture.facet_parameter(kind: 4, scalar: 0, text: 'bad\/name'))
     assert_equal 1, status, output
     assert_match(/error string_class facet_parameters\[\].bytes.offset/, output)
+    status, output = decode(AbiManifestFixture.facet_parameter(kind: 4, scalar: 0, text: 'a.b'))
+    assert_equal 1, status, output
+    assert_match(/error string_class facet_parameters\[\].bytes.offset/, output)
   end
 
   def test_device_selector_refuses_inactive_fields

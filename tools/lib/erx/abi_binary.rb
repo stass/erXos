@@ -458,7 +458,7 @@ module Erx
       def valid_string?(kind, bytes)
         case kind
         when 'bytes' then true
-        when 'identifier' then bytes.bytesize.between?(1, 63) && bytes.match?(/\A[a-z0-9][a-z0-9._-]*\z/)
+        when 'identifier' then bytes.bytesize.between?(1, 63) && bytes.match?(/\A[a-z0-9][a-z0-9_-]*\z/)
         when 'utf8'
           text = bytes.dup.force_encoding(Encoding::UTF_8)
           text.valid_encoding? && text.codepoints.none? { |point| point < 0x20 || point.between?(0x7f, 0x9f) }

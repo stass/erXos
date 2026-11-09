@@ -927,7 +927,7 @@ module Erx
             AlphaNumeric = (Byte >= $a andalso Byte =< $z) orelse
                            (Byte >= $0 andalso Byte =< $9),
             Valid = AlphaNumeric orelse (Position =:= rest andalso
-                     (Byte =:= $. orelse Byte =:= $_ orelse Byte =:= $-)),
+                     (Byte =:= $_ orelse Byte =:= $-)),
             Valid andalso identifier(Rest, rest).
 
         valid_utf8(<<>>, _Clean) -> true;

@@ -207,6 +207,10 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 5, 'machine.host', @source.sub('host "erxos"', 'host "Not An Identifier"'))
   end
 
+  def test_a_host_name_with_a_dot_is_refused
+    refused(Erx::Manifest::Invalid, 5, 'machine.host', @source.sub('host "erxos"', 'host "a.b"'))
+  end
+
   def test_two_services_sharing_a_name_are_refused
     second = "service other\n  name \"log\"\n  server system\n  interface 2\n"
     refused(Erx::Manifest::Invalid, 5, 'service.name', @source + SERVICE + second)

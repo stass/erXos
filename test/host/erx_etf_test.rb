@@ -106,8 +106,8 @@ class ErxEtfTest < Minitest::Test
   end
 
   def test_node_names_are_identifiers_at_the_host
-    good = ['web@erxos', 'w.b-_9@erxos', "#{'a' * 63}@erxos", '0@erxos']
-    bad = ['web', 'Web@erxos', '.web@erxos', "#{'a' * 64}@erxos", 'web@erxos2', 'web@', '@erxos', 'w b@erxos',
+    good = ['web@erxos', 'w_b-9@erxos', "#{'a' * 63}@erxos", '0@erxos']
+    bad = ['web', 'Web@erxos', '.web@erxos', 'a.b@erxos', "#{'a' * 64}@erxos", 'web@erxos2', 'web@', '@erxos', 'w b@erxos',
            'web@erxos@erxos', 'web@ERXOS']
     answers = check((good + bad).flat_map { |node| [term(pid(node)), term(ref(node))] })
     assert(answers.first(good.size * 2).all? { |answer| answer.start_with?('accepted ') })

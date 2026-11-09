@@ -114,6 +114,7 @@ class AbiErlangTest < Minitest::Test
       'domain_invalid' => AbiErlangFixture.parameter(kind: 6, index: 1),
       'name_valid' => AbiErlangFixture.parameter(kind: 4, text: 'valid'),
       'name_invalid' => AbiErlangFixture.parameter(kind: 4, text: 'bad/name'),
+      'name_dotted' => AbiErlangFixture.parameter(kind: 4, text: 'a.b'),
       'path_valid' => AbiErlangFixture.parameter(kind: 5, text: '/public'),
       'path_invalid' => AbiErlangFixture.parameter(kind: 5, text: 'relative'),
       'opaque_bytes' => AbiErlangFixture.parameter(kind: 9, text: "\xff\0".b)

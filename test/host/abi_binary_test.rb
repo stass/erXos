@@ -113,8 +113,10 @@ class AbiBinaryTest < Minitest::Test
     assert_raises(Erx::ABI::DecodeError) do
       @codec.open('manifest', AbiManifestFixture.facet_parameter(kind: 6, scalar: 0, index: 1))
     end
-    assert_raises(Erx::ABI::DecodeError) do
-      @codec.open('manifest', AbiManifestFixture.facet_parameter(kind: 4, scalar: 0, text: 'bad/name'))
+    %w[bad/name a.b].each do |text|
+      assert_raises(Erx::ABI::DecodeError) do
+        @codec.open('manifest', AbiManifestFixture.facet_parameter(kind: 4, scalar: 0, text: text))
+      end
     end
   end
 

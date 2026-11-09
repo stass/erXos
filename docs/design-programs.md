@@ -1092,7 +1092,7 @@ the path into one of four images:
   interpreter flavour
   ([design-runtime.md](design-runtime.md#programs-as-ports)). Its name
   comes from the principal's pool of reusable names,
-  `<principal>.<n>@<host>`, and is free again for that principal at the
+  `<principal>_<n>@<host>`, and is free again for that principal at the
   domain's end, so the command domains a principal's programs make over a
   boot hold one atom of the system domain's per slot of the pool
   ([design-system.md](design-system.md#identifiers)). The domain

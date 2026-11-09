@@ -9,9 +9,9 @@
 ident(Name) -> erx_ident:new(Name).
 
 ident_test() ->
-    [?assertEqual(Name, erx_ident:to_binary(ident(Name))) || Name <- [<<"a">>, <<"web">>, <<"alice.1">>, <<"x_y-z">>]],
+    [?assertEqual(Name, erx_ident:to_binary(ident(Name))) || Name <- [<<"a">>, <<"web">>, <<"alice_1">>, <<"x_y-z">>]],
     [?assertEqual({error, bad_identifier}, ident(Bad))
-     || Bad <- [<<>>, <<"Web">>, <<".a">>, <<"-a">>, <<"a b">>, <<"a@b">>, <<"caf", 195, 169>>,
+     || Bad <- [<<>>, <<"Web">>, <<".a">>, <<"a.b">>, <<"-a">>, <<"a b">>, <<"a@b">>, <<"caf", 195, 169>>,
                 binary:copy(<<"a">>, 64), "web", web]],
     ?assertEqual(<<"a">>, erx_ident:to_binary(ident(binary:copy(<<"a">>, 1)))),
     ?assertMatch({erx_ident, _}, ident(binary:copy(<<"a">>, 63))).

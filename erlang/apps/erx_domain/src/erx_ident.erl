@@ -5,7 +5,7 @@
 -moduledoc """
 System identifiers (docs/design-system.md, "Identifiers"): the names of
 principals, domains, services, facets and releases. An identifier matches
-[a-z0-9][a-z0-9._-]* and is 1 to 63 bytes long, so it is ASCII by
+[a-z0-9][a-z0-9_-]* and is 1 to 63 bytes long, so it is ASCII by
 construction. Nothing is normalised: two identifiers are equal exactly when
 their bytes are. new/1 is the one constructor of t(); every record that holds
 a name holds a t(), so no name reaches one unchecked.
@@ -36,6 +36,6 @@ to_binary({erx_ident, Bin}) ->
 lead(C) -> (C >= $a andalso C =< $z) orelse (C >= $0 andalso C =< $9).
 
 tail(<<C, Rest/binary>>) ->
-    (lead(C) orelse C =:= $. orelse C =:= $_ orelse C =:= $-) andalso tail(Rest);
+    (lead(C) orelse C =:= $_ orelse C =:= $-) andalso tail(Rest);
 tail(<<>>) ->
     true.

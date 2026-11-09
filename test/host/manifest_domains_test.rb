@@ -187,7 +187,12 @@ class ManifestDomainsTest < Minitest::Test
 
   # Property 5 over the configured domains and the services they serve.
   def test_a_domain_with_a_pooled_name_is_refused
-    refused(Erx::Manifest::Invalid, 5, 'domain.name', @source.sub('domain alpha', 'domain alice.1'))
+    refused(Erx::Manifest::Invalid, 5, 'domain.name', @source.sub('domain alpha', 'domain alice_1'))
+  end
+
+  def test_a_domain_name_with_a_dot_is_refused
+    error = assert_raises(Erx::ABI::SchemaError) { admit(@source.sub('domain alpha', 'domain a.b')) }
+    assert_match(/needs one identifier/, error.message)
   end
 
   def test_a_domain_named_as_a_principal_is_refused

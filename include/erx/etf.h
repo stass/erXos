@@ -122,7 +122,7 @@ typedef enum erx_etf_reason {
 /*
  * What the receiver admits.  host names the machine: every pid's and
  * reference's node atom must be an identifier, "@" and exactly these
- * bytes.  An identifier is 1 to 63 bytes of [a-z0-9._-], starting with a
+ * bytes.  An identifier is 1 to 63 bytes of [a-z0-9_-], starting with a
  * letter or digit.
  */
 struct erx_etf_rules {

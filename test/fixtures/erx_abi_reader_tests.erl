@@ -178,6 +178,8 @@ tagged_parameter_checks_test() ->
     {ok, _} = erx_manifest:read(fixture("name_valid.bin")),
     ?assertMatch({error, #{reason := string_class}},
                  erx_manifest:read(fixture("name_invalid.bin"))),
+    ?assertMatch({error, #{reason := string_class}},
+                 erx_manifest:read(fixture("name_dotted.bin"))),
     {ok, _} = erx_manifest:read(fixture("path_valid.bin")),
     ?assertMatch({error, #{reason := string_class}},
                  erx_manifest:read(fixture("path_invalid.bin"))),

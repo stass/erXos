@@ -32,7 +32,7 @@ class ErxFunnelOracleTest < Minitest::Test
   class ControlGenerator
     include EtfWire
 
-    NODES = %w[web@erxos system@erxos a.1@erxos].freeze
+    NODES = %w[web@erxos system@erxos a_1@erxos].freeze
     PAYLOAD = [22, 24, 26, 28, 29, 33].freeze
 
     def initialize(random) = @random = random

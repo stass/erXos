@@ -442,6 +442,7 @@ MUTATION(m_partial_row_out, case_row = 1)
 MUTATION(m_name_empty, s->name_len = 0)
 MUTATION(m_name_lead, s->name[0] = '-')
 MUTATION(m_name_upper, s->name[1] = 'O')
+MUTATION(m_name_dot, s->name[1] = '.')
 MUTATION(m_name_long, s->name_len = ERX_DOM_NAME_MAX + 1)
 MUTATION(m_runtime_out, s->runtime = 99)
 MUTATION(m_runtime_file, s->runtime = 2)
@@ -524,6 +525,7 @@ cases(void)
 	run_case("name_empty", PICK_REQUEST, m_name_empty);
 	run_case("name_lead", PICK_REQUEST, m_name_lead);
 	run_case("name_upper", PICK_REQUEST, m_name_upper);
+	run_case("name_dot", PICK_REQUEST, m_name_dot);
 	run_case("name_long", PICK_REQUEST, m_name_long);
 	run_case("partial_row_out", PICK_PARTIAL, m_partial_row_out);
 	run_case("partial_connections_full", PICK_PARTIAL, m_connections_full);

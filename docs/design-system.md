@@ -2465,7 +2465,9 @@ system domain gives it and keeps for it:
 
 A **system identifier** names something the system keeps: a principal, a
 domain, a service, a facet or a release. Every identifier matches
-`[a-z0-9][a-z0-9._-]*` and is 1 to 63 bytes long, ASCII by construction.
+`[a-z0-9][a-z0-9_-]*` and is 1 to 63 bytes long, ASCII by construction.
+The rule has no `.`: an identifier becomes the name part of a node name, or
+its host part under `-sname`, and stock `net_kernel` refuses a `.` in either.
 `erx_ident:new/1` checks a binary against that rule and returns the opaque
 `erx_ident:t()`, or `{error, bad_identifier}`; the name field of every
 record the system services keep has that type. Each such record is built
@@ -2528,9 +2530,8 @@ that asks for a name of the pool's form, an identifier, `_` and decimal
 digits, is refused with `{error, name_taken}`, so no principal takes
 another's pooled names. The manifest check proves that every principal's
 name, with `_` and the digits of its `names` quota, is still an
-identifier (property 5). The pool uses `_` because `.` is no character of
-a node name that stock distribution accepts, and so no OTP change is
-needed.
+identifier (property 5). A pooled name is itself an identifier, so it is a
+node name that stock distribution accepts and needs no OTP change.
 
 ### The vault
 

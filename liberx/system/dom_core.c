@@ -303,7 +303,7 @@ dom_strings(const erx_dom_spec_t *spec)
 
 /*
  * The name is an identifier (docs/design-system.md, "Identifiers"): 1 to
- * ERX_DOM_NAME_MAX bytes of [a-z0-9._-], the first a letter or digit, so
+ * ERX_DOM_NAME_MAX bytes of [a-z0-9_-], the first a letter or digit, so
  * the node name the boot page carries is ASCII and has one '@'.
  */
 static bool
@@ -316,7 +316,7 @@ dom_name(const erx_dom_spec_t *spec)
 	for (uint32_t at = 0; at < spec->name_len; at++) {
 		c = spec->name[at];
 		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-		    (at > 0 && (c == '.' || c == '_' || c == '-'))))
+		    (at > 0 && (c == '_' || c == '-'))))
 			return (false);
 	}
 	return (true);

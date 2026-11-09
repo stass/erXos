@@ -22,7 +22,7 @@ require_relative 'etf_wire'
 class EtfGenerator
   include EtfWire
 
-  NODES = %w[web@erxos system@erxos a.1@erxos].freeze
+  NODES = %w[web@erxos system@erxos a_1@erxos].freeze
   NAMES = ['ok', 'a', 'b', 'error', '', "\u00e9t\u00e9", "\u{1F600}", 'x' * 255].freeze
   INTEGERS = [0, 1, 255, 256, -1, (2**31) - 1, -(2**31), 2**31, (2**59) - 1, 2**59, 2**63, -(2**63), 2**64].freeze
 

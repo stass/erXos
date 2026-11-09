@@ -110,7 +110,7 @@ module Erx
           		alnum = (byte >= 'a' && byte <= 'z') ||
           		    (byte >= '0' && byte <= '9');
           		if (!alnum && (index == 0 ||
-          		    (byte != '.' && byte != '_' && byte != '-')))
+          		    (byte != '_' && byte != '-')))
           			return (false);
           	}
           	return (true);

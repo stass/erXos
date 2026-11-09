@@ -426,7 +426,7 @@ ERTS uses it:
   new creation. The configured domains are created first at boot, so they
   hold their names before any principal can take one. Sessions and command
   domains take numbered names from their principal's pool instead,
-  `<principal>.<n>@<host>`, free again at each domain's end
+  `<principal>_<n>@<host>`, free again at each domain's end
   ([design-system.md](design-system.md#identifiers)). Each principal binds
   at most `names` names in a boot ([Principals, sessions and
   quotas](#principals-sessions-and-quotas)), which bounds the atoms the

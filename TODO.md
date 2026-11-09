@@ -1049,6 +1049,36 @@ it; git history is the record of completed work.
   `<principal>_<n>` ([Identifiers](docs/design-system.md#identifiers)), so stock net_kernel accepts them, but
   an identifier still may hold `.`, which net_kernel refuses in a node name. Build the name pool, and make a
   domain's node name refuse a `.` before the domain boots with an `-sname` its own distribution refuses.
+  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain;
+  and while it is down between a crash and its restart, any process that calls
+  `erx_domain_lib:register/0` first becomes the library's one driver, and the restarted
+  service then fails on `ebusy` until the supervisor gives up. Tag the library's reports
+  with a secret the NIF hands the registrant, and bind registration to the service's
+  identity (its table holder, or `enif_whereis_pid` of `erx_domain_srv`).
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`,
+  `handle_continue/2`): the table is written after the library's create and start return,
+  and the boot's fold saves only at its end, so a service killed between a library call and
+  its save loses a built domain (its later end is ignored and never retired) and re-admits
+  its id, and one killed mid-boot never starts the remaining configured rows. Save the
+  `building` record and the boot's progress before each library call, and on restart
+  resolve `building` records by id and resume unstarted rows.
+* [Medium] domain service, `test/erlang/erx_domain_tests.erl`: nothing tests the service
+  restarting from its table (reclaiming it, relinking the domain pids, ids still increasing,
+  an end after the restart retired), the table holder's end shutting the supervisor down, or
+  the `ebusy` and `erights` answers, which the stand-in library never gives. Add a
+  kill-and-restart case and a stand-in that refuses.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the name pool
+  (`<principal>_<n>`, [Identifiers](docs/design-system.md#identifiers)) is not built. Build it.
+* [Low] domain library, `liberx/backend/core/boot_info.c` (`node_flag`), `boot_info.h`,
+  `test/fixtures/boot_info_driver.c`, `docs/design-runtime.md`: a host is an identifier and has no
+  `.`, so the `-name` branch for a dotted host is unreachable; always pass `-sname`, delete
+  `BOOT_FLAG_DOTTED` and its test case and sentence, and have `erx_boot_info_read` refuse a node
+  whose two parts are not identifiers.
+* [Low] ABI, `abi/manifest.txt` and `tools/lib/erx/abi_contracts.rb`: the identifier rule has
+  seven hand-written copies (`erx_ident.erl`, `erx_etf.c` `node_ok`, `dom_core.c` `dom_name`,
+  `abi_binary.rb`, the emitters `abi_emit_erlang.rb` and `abi_emit_reader.rb`, `manifest.rb`
+  `IDENTIFIER`). Define the `identifier` string class once in the ABI source and generate the C
+  predicate, the Erlang predicate and the Ruby pattern from it.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl` (`admit/4`): a
   request name of the pooled form (`<ident>_<digits>`) is not refused with `name_taken`, as
   design-system.md "Identifiers" says; where the root built no library the service still

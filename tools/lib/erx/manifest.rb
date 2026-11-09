@@ -172,7 +172,7 @@ module Erx
       OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[args env], 'service' => %w[name],
                    'facet' => %w[name queue], 'image' => %w[salt] }.freeze
       DIRECTIVES = { 'introduce' => 2, 'liveness' => 1, 'shell_principal' => 1 }.freeze
-      IDENTIFIER = /\A[a-z0-9][a-z0-9._-]{0,62}\z/.freeze
+      IDENTIFIER = /\A[a-z0-9][a-z0-9_-]{0,62}\z/.freeze
       module_function
 
       def parse(bytes, version:)
@@ -628,7 +628,7 @@ module Erx
                      'domains' => number(record, 'domains'), 'names' => number(record, 'names'),
                      'default_limits' => reference(record, 'default_limits', 'limits'),
                      'ceiling_limits' => reference(record, 'ceiling_limits', 'limits') }
-          pooled = "#{record.name}.#{values.fetch('names')}"
+          pooled = "#{record.name}_#{values.fetch('names')}"
           invalid('name pool exceeds identifier bound', 5, 'principal.names') unless pooled.bytesize <= 63
           defaults = rows.fetch('limits').fetch(values.fetch('default_limits'))
           ceilings = rows.fetch('limits').fetch(values.fetch('ceiling_limits'))
@@ -902,9 +902,9 @@ module Erx
         invalid('no entry carries the sealing secret until the vault at M11', 7, 'catalog.flags')
       end
 
-      # A pooled name: an identifier, a dot and decimal digits (docs/design-system.md,
+      # A pooled name: an identifier, an underscore and decimal digits (docs/design-system.md,
       # "Identifiers").
-      POOLED = /\A(?<stem>.+)\.[0-9]+\z/.freeze
+      POOLED = /\A(?<stem>.+)_[0-9]+\z/.freeze
 
       # The configured domains in name order, which their references' indices follow.
       # A domain's runtime and release are artifacts of this pack: the runtime an

@@ -161,10 +161,10 @@ class ReleaseFilesTest < Minitest::Test
   end
 
   def test_a_domain_release_name_is_one_manifest_identifier
-    ['', 'Base', '../x', 'a/b', '.hidden', 'x' * 64, :base].each do |name|
+    ['', 'Base', '../x', 'a/b', 'a.b', '.hidden', 'x' * 64, :base].each do |name|
       assert_raises(Erx::Error, name.inspect) { Erx::ReleaseFiles.domain(name, applications: Erx::ReleaseFiles::DOMAIN_BASE) }
     end
-    assert_equal 'domains/a.b-c_1/', Erx::ReleaseFiles.domain('a.b-c_1', applications: Erx::ReleaseFiles::DOMAIN_BASE).prefix
+    assert_equal 'domains/a-b_c1/', Erx::ReleaseFiles.domain('a-b_c1', applications: Erx::ReleaseFiles::DOMAIN_BASE).prefix
   end
 
   def test_a_domain_release_boots_through_kernel_and_stdlib_and_ships_only_what_is_built

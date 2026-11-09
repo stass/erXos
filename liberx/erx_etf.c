@@ -590,7 +590,7 @@ token(const uint8_t *b, size_t len, size_t *pos, etf_token_t *t)
 
 /*
  * A node name an identifier, "@" and the rules' host: the identifier 1 to
- * IDENT_MAX bytes of [a-z0-9._-], its first a letter or digit.
+ * IDENT_MAX bytes of [a-z0-9_-], its first a letter or digit.
  */
 static bool
 node_ok(const erx_etf_rules_t *rules, const uint8_t *node, size_t len)
@@ -603,7 +603,7 @@ node_ok(const erx_etf_rules_t *rules, const uint8_t *node, size_t len)
 	for (at = 0; at < len && node[at] != '@'; at++) {
 		c = node[at];
 		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-		    (at > 0 && (c == '.' || c == '_' || c == '-'))))
+		    (at > 0 && (c == '_' || c == '-'))))
 			return (false);
 	}
 	if (at == 0 || at > IDENT_MAX || at == len)
