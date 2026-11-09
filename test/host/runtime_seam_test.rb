@@ -140,4 +140,35 @@ class RuntimeSeamTest < Minitest::Test
       assert_equal %w[unused_call], report.unused
     end
   end
+
+  # The BeamAsm flavour's check: a name the C++ runtime's archive defines is inside, and
+  # [beamasm] joins the list; without the runtime that section is neither used nor unused.
+  def test_the_beamasm_check_admits_the_cxx_runtime_and_its_own_section
+    compiler = ENV.fetch('ERX_CLANG', nil)
+    skip 'the native check needs ERX_CLANG and its llvm-nm' if compiler.nil? || compiler.empty?
+
+    Dir.mktmpdir('erx-seam-') do |directory|
+      object = compile(compiler, directory, 'calls', "extern int _Znwm(void);\nextern int mprotect(void);\n" \
+                                                     "int f(void) { return _Znwm() + mprotect(); }\n")
+      runtime = compile(compiler, directory, 'runtime', "int _Znwm(void) { return 0; }\n")
+      nm = File.join(File.dirname(compiler), 'llvm-nm')
+      text = "[iso_c]\nmemcpy\n[beamasm]\nmprotect\n"
+      report = Seam.check_elf_objects(objects: [object], imports_text: text, nm: nm, cxx_runtime: [runtime])
+      assert_empty report.violations
+      assert_equal %w[memcpy], report.unused
+      report = Seam.check_elf_objects(objects: [object], imports_text: text, nm: nm)
+      assert_equal %w[_Znwm mprotect], report.violations.map(&:name).sort
+      assert_equal %w[memcpy], report.unused
+    end
+  end
+
+  private
+
+  def compile(compiler, directory, name, text)
+    source = File.join(directory, "#{name}.c")
+    File.write(source, text)
+    object = File.join(directory, "#{name}.o")
+    assert system(compiler, '--target=aarch64-none-elf', '-c', source, '-o', object), "clang compiles #{name}.c"
+    object
+  end
 end

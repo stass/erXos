@@ -22,6 +22,7 @@ require_relative 'code_watch'
 require_relative 'json_input'
 require_relative 'manifest'
 require_relative 'native_root'
+require_relative 'native_jit_runtime'
 require_relative 'native_runtime'
 require_relative 'output_directory'
 require_relative 'pack'
@@ -96,6 +97,12 @@ module Erx
     # system/, and carries no system mark, since the root task does not run it.
     DOMAIN_RUNTIME_PATH = 'runtimes/emu'
     DOMAIN_RUNTIME_ARTIFACT = 'emu'
+    # The BeamAsm image beside it, which ordinary domains run by default: the one entry
+    # whose manifest carries ERX_IMAGE_JIT (docs/design-runtime.md, "The build").
+    JIT_RUNTIME_PATH = 'runtimes/jit'
+    JIT_RUNTIME_ARTIFACT = 'jit'
+    # The C++ runtime archives' notices, in the fetched llvm-project tree.
+    LIBCXX_NOTICES = { 'libc++.a' => 'libcxx/LICENSE.TXT', 'libc++abi.a' => 'libcxxabi/LICENSE.TXT' }.freeze
 
     # The QEMU virt machine an image boots on: its RAM, the part of it Fiasco keeps
     # (fiasco_reserve, which grows with RAM, since Fiasco sizes its kernel memory as
@@ -142,13 +149,16 @@ module Erx
                                       root_mib: 64)
 
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
-                   runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
+                   runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco),
+                   jit_runtime: NativeJitRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker,
+                                                     fiasco: fiasco))
       @root = File.realpath(root)
       @runner = runner
       @compiler = compiler
       @linker = linker
       @fiasco = fiasco
       @runtime = runtime
+      @jit_runtime = jit_runtime
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
     end
 
@@ -214,9 +224,12 @@ module Erx
       File.write(self.class.sources_path(archive), sources)
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
-      domain = domain_parts(domains, erts: erts, archives: archives, directory: directory)
+      # Only domains run the BeamAsm image, so an image without them does not build it.
+      jit = domains.empty? ? nil : @jit_runtime.build(interpreter: erts)
+      domain = domain_parts(domains, erts: erts, jit: jit, archives: archives, directory: directory)
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *domain.entries, *added.entries], root_task: root_task,
-                    images: images, manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
+                    images: images, manifest_source: manifest_source, erts: erts, jit: jit, output: archive,
+                    imports: IMPORTS.merge(added.imports),
                     inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *domain.inputs, *added.inputs].uniq,
                     test_code: test_code, machine: machine)
       single = File.join(directory, 'image.boot')
@@ -1059,9 +1072,10 @@ module Erx
     end
 
     # The domain releases' entries, each file under its release's prefix without the
-    # system mark, and the domain runtime image's, with the files their receipts name;
-    # nothing when there are no domain releases.
-    def domain_parts(domains, erts:, archives:, directory:)
+    # system mark, and the two runtime images', the interpreter's and the BeamAsm one
+    # (jit, NativeJitRuntime's build), with the files their receipts name; nothing when
+    # there are no domain releases.
+    def domain_parts(domains, erts:, jit:, archives:, directory:)
       return NOTHING_ADDED if domains.empty?
       # Only ReleaseFiles.domain checks a name, so a release built any other way, whose
       # name could leave the work directory or disagree with its prefix, is refused.
@@ -1075,14 +1089,20 @@ module Erx
         ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains', release.name), runner: @runner,
                          codec: @codec, release: release).entries
       end
+      beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
+                          .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
+                                                       archives: jit.link_archives(libgcc: @fiasco.user_library('libgcc.a')))
       image = { 'path' => DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
                 'id' => 'domain-runtime', 'artifact' => runtime.fetch(:program), 'receipt' => runtime.fetch(:receipt) }
-      Added.new(entries: [image, *releases].freeze, inputs: [*runtime.fetch(:inputs), *ReleaseFiles.inputs_of(releases, root: @root)].freeze,
+      jit_image = { 'path' => JIT_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0, 'jit' => true,
+                    'id' => 'jit-runtime', 'artifact' => beamasm.fetch(:program), 'receipt' => beamasm.fetch(:receipt) }
+      Added.new(entries: [image, jit_image, *releases].freeze,
+                inputs: [*runtime.fetch(:inputs), *beamasm.fetch(:inputs), *ReleaseFiles.inputs_of(releases, root: @root)].freeze,
                 imports: {}.freeze)
     end
 
     # What a manifest's references name in an archive of these sorted paths: the root
-    # and the domain runtime image as executables, images as built EROFS artifacts, and
+    # and the two domain runtime images as executables, images as built EROFS artifacts, and
     # each domain release as its run of entries (ReleaseFiles.domain_runs). Two of them
     # under one name would leave a reference ambiguous, so that is refused.
     def self.artifacts(paths, images:)
@@ -1090,6 +1110,8 @@ module Erx
                ReleaseFiles.domain_runs(paths)]
       runtime = paths.index(DOMAIN_RUNTIME_PATH)
       named << { DOMAIN_RUNTIME_ARTIFACT => { 'kind' => 'executable', 'entry' => runtime } } if runtime
+      beamasm = paths.index(JIT_RUNTIME_PATH)
+      named << { JIT_RUNTIME_ARTIFACT => { 'kind' => 'executable', 'entry' => beamasm } } if beamasm
       names = named.flat_map(&:keys)
       raise Error, "two artifacts of the archive share a name: #{names.tally.select { |_, count| count > 1 }.keys.join(', ')}" unless
         names.uniq.size == names.size
@@ -1097,10 +1119,10 @@ module Erx
       named.reduce(:merge)
     end
 
-    def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, output:, imports:, test_code:, machine:)
+    def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, jit:, output:, imports:, test_code:, machine:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
-      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts), runner: @runner,
+      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts, jit), runner: @runner,
                                       imports: imports, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       platform = machine.platform(JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record'))
@@ -1129,25 +1151,17 @@ module Erx
     end
 
     # The clang that built the root, and Fiasco's archives its link takes members of.
-    def external(erts)
+    # jit is the BeamAsm build when the image carries its runtime image, or nil.
+    def external(erts, jit)
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
       installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
       ToolchainProvenance.registry(profile: File.join(@root, 'config/provenance/llvm-23.1.3.json'), installation: installation) +
-        archives(erts).map { |archive| external_archive(archive) }
+        [*archives(erts), *jit_archives(jit)].map { |archive| external_archive(archive) }
     end
 
     def archives(erts)
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
-      otp = erts.otp_archives.map do |path|
-        name = File.basename(path)
-        license, notices = if name == EMULATOR_ARCHIVE
-                             ['Apache-2.0 AND BSD-3-Clause', ['otp/LICENSE.txt', 'littlefs/LICENSE.md']]
-                           else
-                             ['Apache-2.0', ['otp/LICENSE.txt']]
-                           end
-        Archive.new(path: path, label: "otp #{name}", license: license, status: 'permanent', notices: notices)
-      end
-      [*otp,
+      [*otp_archives(erts.otp_archives, flavour: 'emu'),
        Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notices: ['musl/COPYRIGHT']),
        Archive.new(path: @fiasco.user_library('libgcc.a'), label: 'fiasco/l4re-core libgcc',
                    license: 'GPL-3.0-only WITH GCC-exception-3.1', status: 'stopgap', notices: [spdx]),
@@ -1157,6 +1171,39 @@ module Erx
                    license: 'MIT', status: 'stopgap', notices: [spdx]),
        Archive.new(path: @fiasco.boot_core_archive, label: 'kernel/core boot cores',
                    license: 'BSD-2-Clause', status: 'permanent', notices: [LICENSE])]
+    end
+
+    # The BeamAsm build's own archives: ERTS's BeamAsm flavour, asmjit's Zlib licence
+    # within libbeam.a's whole, and the C++ runtime. musl's libc.a is the interpreter's.
+    def jit_archives(jit)
+      return [] unless jit
+
+      tree = Dependencies.new(root: @root, runner: @runner).fetched_tree(Libcxx::SOURCE_ID).delete_prefix("#{@root}/")
+      [*otp_archives(jit.otp_archives, flavour: 'jit'),
+       *jit.cxx_archives.map do |path|
+         name = File.basename(path)
+         Archive.new(path: path, label: "llvm #{name}", license: 'Apache-2.0 WITH LLVM-exception',
+                     status: 'permanent', notices: [File.join(tree, LIBCXX_NOTICES.fetch(name))])
+       end]
+    end
+
+    def otp_archives(paths, flavour:)
+      paths.map do |path|
+        name = File.basename(path)
+        license, notices = if name == EMULATOR_ARCHIVE
+                             emulator_license(flavour)
+                           else
+                             ['Apache-2.0', ['otp/LICENSE.txt']]
+                           end
+        Archive.new(path: path, label: "otp #{flavour} #{name}", license: license, status: 'permanent', notices: notices)
+      end
+    end
+
+    # libbeam.a holds littlefs's objects, and in the BeamAsm flavour asmjit's too.
+    def emulator_license(flavour)
+      return ['Apache-2.0 AND BSD-3-Clause', ['otp/LICENSE.txt', 'littlefs/LICENSE.md']] unless flavour == 'jit'
+
+      ['Apache-2.0 AND BSD-3-Clause AND Zlib', ['otp/LICENSE.txt', 'littlefs/LICENSE.md', 'otp/erts/emulator/asmjit/LICENSE.md']]
     end
 
     def external_archive(archive)

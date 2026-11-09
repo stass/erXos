@@ -383,7 +383,7 @@ it; git history is the record of completed work.
   and the task's objects released at its end.
 * [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does.
 * [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
-* [Medium] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses. `libbeam.a`'s littlefs objects are the one exception, by a hand-written case in `archives` (`EMULATOR_ARCHIVE`) that nothing checks against the build: moving `lfs.o` out of `OS_OBJS` drops or misplaces littlefs's notice silently, and the archive is recorded `permanent` though littlefs is a stopgap. Replace the case with one table of the imports each archive holds, take each import's grant and notice from `config/provenance/import-notices.json`, and check the archive's members at pack time, as `CoreArchive::Built.objects` does for the boot cores.
+* [Medium] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses. `libbeam.a`'s littlefs objects (and, in the BeamAsm flavour, asmjit's) are the one exception, by a hand-written case in `emulator_license` (`EMULATOR_ARCHIVE`) that nothing checks against the build: moving `lfs.o` out of `OS_OBJS` drops or misplaces littlefs's notice silently, and the archive is recorded `permanent` though littlefs is a stopgap. Replace the case with one table of the imports each archive holds, take each import's grant and notice from `config/provenance/import-notices.json`, and check the archive's members at pack time, as `CoreArchive::Built.objects` does for the boot cores.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
   registers travel in the UTCB. One call taking the start state and the word to clear ends the order and the leak
   a failed clear-word call would leave, with the thread package's `erx_fiasco_reaper_start` as its second user.
@@ -453,6 +453,15 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] runtime build, `tools/lib/erx/runtime_seam.rb` (`check_imports_of`): the BeamAsm image's import check counts
+  what libc++ and libc++abi define as available to ERTS, but never checks their own undefined names (`malloc`, `abort`,
+  pthreads) against `otp/erts/emulator/sys/erxos/imports.txt`, so the C library seam does not cover the C++ runtime. Add
+  the two archives to the undefined-name pass.
+* [Low] runtime build, `tools/lib/erx/libcxx.rb` and `tools/lib/erx/native_runtime.rb` (`build_sysroot`): the merged
+  sysroot headers are copied with their original times, so a header dropped from an upper layer can leave an older time
+  that ninja's libc++ build does not see as a change; and the libc++ configure stamp records the compiler's path, not its
+  version, so a Homebrew upgrade of LLVM at the same path keeps the old objects (ERTS's stamp has the same gap). Stamp the
+  merged headers' digest and `clang --version` instead.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
   hand-declared `erx_ipc_wait(deadline, *label)` returns no tag, while design-kernel.md's "Receiving"
   returns the tag and the label. Settle the target signature before the domain library's fault thread

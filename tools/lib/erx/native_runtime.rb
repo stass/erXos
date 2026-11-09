@@ -25,12 +25,18 @@ module Erx
     # What the root's link takes: OTP's objects and archives, and musl's libc.a.
     Built = Data.define(:otp_archives, :libc, :otp)
 
-    def self.output(root:)
-      base = File.join(root, 'build/runtime/native')
-      otp = File.join(base, 'otp')
-      Output.new(root: otp, beam: File.join(otp, 'bin', TARGET, 'beam.emu'),
-                 objects: File.join(otp, 'erts/emulator/obj', TARGET, 'opt/emu'),
-                 liberx: File.join(base, 'sysroot/lib/liberxroot.a'), archive: nil)
+    BASE = 'build/runtime/native'
+    # The musl sysroot, which the BeamAsm build (NativeJitRuntime) shares.
+    SYSROOT = "#{BASE}/sysroot".freeze
+
+    def self.output(root:) = flavour_output(root: root, base: BASE, flavour: FLAVOR)
+
+    # The build of one flavour under base: OTP's copy, its emulator and objects.
+    def self.flavour_output(root:, base:, flavour:)
+      otp = File.join(root, base, 'otp')
+      Output.new(root: otp, beam: File.join(otp, 'bin', TARGET, "beam.#{flavour}"),
+                 objects: File.join(otp, 'erts/emulator/obj', TARGET, 'opt', flavour),
+                 liberx: File.join(root, SYSROOT, 'lib/liberxroot.a'), archive: nil)
     end
 
     def initialize(root:, runner:, compiler:, linker:, fiasco:, oracle: Oracle.new(root: root, runner: runner))
@@ -38,8 +44,8 @@ module Erx
       @compiler = compiler
       @linker = linker
       @fiasco = fiasco
-      @base = File.join(@root, 'build/runtime/native')
-      @sysroot = File.join(@base, 'sysroot')
+      @base = File.join(@root, self.class::BASE)
+      @sysroot = File.join(@root, SYSROOT)
       @tools = File.dirname(compiler)
       OutputDirectory.check(root: @root, path: @base)
     end
@@ -85,7 +91,9 @@ module Erx
     end
 
     # configure looks for headers under one directory, so musl's search order, first one
-    # winning, becomes one tree: the last layer copied is the first searched.
+    # winning, becomes one tree: the last layer copied is the first searched. Each copy
+    # keeps its source's time, so a build that copies again leaves BeamAsm's precompiled
+    # asmjit header, which clang judges by its headers' times, valid.
     def merge_headers(search_order)
       include_dir = File.join(@root, NativeRoot::LIBC_HEADERS)
       FileUtils.rm_rf(include_dir)
@@ -93,7 +101,7 @@ module Erx
         Dir.glob('**/*.h', base: layer).each do |path|
           target = File.join(include_dir, path)
           FileUtils.mkdir_p(File.dirname(target))
-          FileUtils.cp(File.join(layer, path), target)
+          FileUtils.cp(File.join(layer, path), target, preserve: true)
         end
       end
     end
@@ -109,12 +117,16 @@ module Erx
                                                                           deadline: DEADLINES.fetch(:compile), chdir: @root)
     end
 
+    def check_imports = check_imports_of(cxx_runtime: [])
+
     # The sections that name what only the other backend's C library makes of the calls
     # stay out: make check-runtime-seam reads the same file for the hosted build.
-    def check_imports
+    # cxx_runtime are the C++ runtime's archives the BeamAsm image links, whose names
+    # its objects may use.
+    def check_imports_of(cxx_runtime:)
       report = RuntimeSeam.check_elf_objects(objects: RuntimeSeam.objects(@output, target: TARGET),
                                              imports_text: File.read(in_copy(RuntimeSeam::IMPORTS_FILE)),
-                                             nm: File.join(@tools, 'llvm-nm'))
+                                             nm: File.join(@tools, 'llvm-nm'), cxx_runtime: cxx_runtime)
       warn("listed and imported by nothing on the native build: #{report.unused.join(' ')}") unless report.unused.empty?
       return if report.violations.empty?
 
@@ -137,8 +149,25 @@ module Erx
         'ERX_GEN' => File.join(@root, Generated::OUTPUT),
         # root.ld's place for ERTS's own links (otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf).
         'ERX_ROOT_PLACE_FLAGS' => NativeRoot.place_flags(NativeRoot::PLACE).map { |flag| "-Wl,#{flag}" }.join(' ')
-      ).freeze
+      ).merge(flavour_environment).freeze
     end
+
+    # The cross file's ERX_TARGET_FLAGS, the target and headers its CC and CXX compile
+    # with, expanded as configure's shell expands them, so libc++ is built with the
+    # compiler ERTS is. The value names only the two directories expanded here.
+    def target_flags
+      text = File.read(File.join(@root, 'otp', XCOMP_FILE))
+      flags = text[/^ERX_TARGET_FLAGS="([^"]*)"$/, 1] or raise Error, "#{XCOMP_FILE} sets no ERX_TARGET_FLAGS"
+      values = { 'ERX_SYSROOT' => @sysroot, 'ERX_CLANG_INCLUDE' => File.join(resource_directory, 'include') }
+      flags.gsub(/\$([A-Z_]+)/) do
+        name = Regexp.last_match(1)
+        values.fetch(name) { raise Error, "ERX_TARGET_FLAGS in #{XCOMP_FILE} names $#{name}, which the build does not expand" }
+      end.split
+    end
+
+    # The cross file's flavour switches: the interpreter's configure disables the JIT
+    # and its links take no C++ runtime.
+    def flavour_environment = { 'ERX_JIT' => '--disable-jit', 'ERX_CXX_INCLUDE' => '', 'ERX_CXX_LIBS' => '' }
 
     def resource_directory
       @resource_directory ||= begin

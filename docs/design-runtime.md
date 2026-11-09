@@ -2710,16 +2710,29 @@ OTP's built-in zlib, so both targets build the same zlib.
 ### The build
 
 The top-level `Makefile` and `tools/erx` are erXos's build. They invoke
-ERTS's machinery through one entry point, `tools/erx build runtime`, which
-runs OTP's `configure` with the `aarch64-unknown-erxos` target and the
-build's cross-compilation file, once per image, with the JIT disabled for
-the interpreter image, then OTP's `make` for the emulator, the preloaded
-modules and the applications erXos ships. ERTS's Perl generators run as
-part of that. The outputs are the two runtime images, each a static
-position-independent executable that the packer turns into a boot-image
-entry with a manifest, the BeamAsm image's alone marked `ERX_IMAGE_JIT`,
-and the hosted executables. A build check fails when the interpreter
-image links a symbol of BeamAsm, asmjit, libc++ or libc++abi. Erlang code
+ERTS's machinery through one entry point per image, `tools/erx build
+runtime` for the interpreter image and `tools/erx build jit-runtime` for
+the BeamAsm image, each of which runs OTP's `configure` with the
+`aarch64-unknown-erxos` target and the build's cross-compilation file,
+the JIT disabled for the interpreter image and enabled for the BeamAsm
+image, then OTP's `make`. The interpreter build makes the emulator, the
+preloaded modules and the applications erXos ships; the BeamAsm build
+makes only its emulator, `FLAVOR=jit`, with the preloaded modules it
+embeds, in a private copy of its own, and takes musl, `liberx` and the
+release's beams, which are the same bytes for both images, from the
+interpreter build. Before it, libc++ and
+libc++abi are built with CMake from the pinned llvm-project source, of
+which the fetch extracts only the directories its runtimes build reads,
+against the same musl headers, and BeamAsm's C++ compiles with their
+headers first. ERTS's Perl generators run as part of both. The outputs
+are the two runtime images, each a static position-independent
+executable that the packer turns into a boot-image entry with a
+manifest, the BeamAsm image's alone marked `ERX_IMAGE_JIT`, and the
+hosted executables. An image that carries no domain release carries no
+BeamAsm image and does not build it. A build check fails when the
+interpreter image links a symbol of BeamAsm, asmjit, libc++ or
+libc++abi, and when the BeamAsm image links neither BeamAsm nor asmjit.
+Erlang code
 is compiled with the host OTP's `erlc` of the same release, built from the
 pinned tarball ([design.md](design.md#build-and-toolchain)), which is also where
 OTP's cross build finds `yielding_c_fun`. The build runs in a private copy under

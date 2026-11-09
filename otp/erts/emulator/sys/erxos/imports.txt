@@ -115,3 +115,15 @@ clock_gettime pthread_cond_timedwait strnlen
 # the design's list with a reason.
 [stock_unsorted]
 ctime strdup strncasecmp time
+
+# The BeamAsm flavour's objects alone (RuntimeSeam::JIT_ONLY): the interpreter and the
+# hosted build leave this section out. asmjit's VirtMem maps code twice through a POSIX
+# shared memory object and asks for the page size and its environment; edit 23 gives
+# VirtMem an erXos backend over JIT objects, which empties those names. __clear_cache is
+# asmjit's cache maintenance fallback. The rest are BeamAsm's assembly logs and perf
+# outputs, which stay off, and the C++ runtime's registration of static destructors.
+[beamasm]
+mmap mprotect munmap shm_open shm_unlink ftruncate unlink sysconf getenv gettimeofday
+__clear_cache
+fopen fputs snprintf vsnprintf
+__cxa_atexit __dso_handle

@@ -108,9 +108,15 @@ module Erx
       total = 0
       staged_bytes = 0
       rows = entries.each_with_index.map do |entry, index|
-        unless entry.is_a?(Hash) && (entry.keys - %w[path kind flags artifact receipt id]).empty?
+        unless entry.is_a?(Hash) && (entry.keys - %w[path kind flags artifact receipt id jit]).empty? &&
+               [nil, true].include?(entry['jit'])
           raise Error, 'invalid pack artifact fields'
         end
+        raise Error, 'only an image entry makes JIT objects' if entry.key?('jit') && entry['kind'] != @codec.member('entry_kind', 'image')
+        if entry.key?('jit') && entry['flags'].is_a?(Integer) && entry['flags'].anybits?(@codec.member('entry_flags', 'system'))
+          raise Error, "the system domain's image makes no JIT objects"
+        end
+
         path = entry.fetch('path')
         raise Error, 'invalid pack artifact path' unless path.is_a?(String)
         original = File.expand_path(entry.fetch('artifact'), @root)
@@ -146,7 +152,7 @@ module Erx
                 'snapshot' => target }
         if row.fetch('kind') == @codec.member('entry_kind', 'image')
           plan = @planner.call(target, budget: budget - total)
-          row['image'] = image_manifest(plan)
+          row['image'] = image_manifest(plan, jit: entry.fetch('jit', false))
           row['size'] = plan.fetch('output_size')
           row['plan'] = plan
         elsif row.fetch('kind') == @codec.member('entry_kind', 'file')
@@ -163,8 +169,12 @@ module Erx
       raise Error, "missing pack artifact field: #{error.key}"
     end
 
-    def image_manifest(plan)
-      PackWire.new(codec: @codec).image_manifest(plan)
+    # An entry that declares jit is an image the build makes JIT objects with, the
+    # BeamAsm runtime image, and its manifest alone carries ERX_IMAGE_JIT
+    # (docs/design-kernel.md, "Image manifests"); the planner never sets it.
+    def image_manifest(plan, jit:)
+      flags = plan.fetch('flags') | (jit ? @codec.member('image_flags', 'jit') : 0)
+      PackWire.new(codec: @codec).image_manifest(plan.merge('flags' => flags))
     end
 
     def validate_paths(rows)

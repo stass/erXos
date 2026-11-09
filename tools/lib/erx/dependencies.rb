@@ -36,7 +36,9 @@ module Erx
       raise Error, 'invalid source declaration' unless source.is_a?(Hash)
       case source['kind']
       when 'tar'
-        fields = COMMON_FIELDS + %w[url directory]
+        # members, when given, names what of directory is extracted: an archive whose
+        # whole tree exceeds Sources' bounds pins the parts a build reads.
+        fields = COMMON_FIELDS + %w[url directory] + (source.key?('members') ? %w[members] : [])
         member = 'directory'
       when 'git'
         fields = COMMON_FIELDS + %w[url directory commit]
@@ -59,6 +61,9 @@ module Erx
         unless /\A[a-zA-Z0-9][a-zA-Z0-9_.-]*\z/.match?(source.fetch(field))
           raise Error, "invalid source #{field}"
         end
+      end
+      if source.key?('members') && (source.fetch('directory') == '.' || !Sources.valid_members?(source.fetch('members')))
+        raise Error, 'invalid source members'
       end
       raise Error, 'invalid source SHA-256' unless /\A[0-9a-f]{64}\z/.match?(source.fetch('sha256'))
       raise Error, 'invalid source commit' if source.fetch('kind') == 'git' && !/\A[0-9a-f]{40}\z/.match?(source.fetch('commit'))
@@ -354,7 +359,8 @@ module Erx
           end
           Sources.unpack(archive: archive, sha256: source.fetch('sha256'),
                          destination: selected, owner_root: temporary,
-                         source_directory: source.fetch('directory'), runner: @runner, tar_program: @tar_program)
+                         source_directory: source.fetch('directory'), runner: @runner, tar_program: @tar_program,
+                         members: source.fetch('members', '').split)
         else
           Dir.mkdir(extracted)
           file = File.join(extracted, source.fetch('filename'))

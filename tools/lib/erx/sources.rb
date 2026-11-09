@@ -18,7 +18,22 @@ module Erx
                 'TAR_WRITER_OPTIONS' => nil }.freeze
     module_function
 
-    def unpack(archive:, sha256:, destination:, owner_root:, source_directory:, runner:, tar_program: 'tar')
+    # A deps.lock members value: paths below a source's directory, separated by spaces,
+    # each of plain components, none of them `.` or `..` or starting with `-`, and
+    # none named twice.
+    MEMBER = %r{\A[A-Za-z0-9_+][A-Za-z0-9_.+-]*(?:/[A-Za-z0-9_+][A-Za-z0-9_.+-]*)*\z}
+
+    def valid_members?(text)
+      members = text.split(' ')
+      !members.empty? && members.size <= 64 && members.uniq == members &&
+        members.all? { |member| member.bytesize <= 255 && MEMBER.match?(member) }
+    end
+
+    # members are the paths below source_directory to extract, or none for all of it.
+    def unpack(archive:, sha256:, destination:, owner_root:, source_directory:, runner:, tar_program: 'tar', members: [])
+      unless members.empty? || (source_directory != '.' && valid_members?(members.join(' ')))
+        raise Error, 'invalid source archive members'
+      end
       unless sha256.is_a?(String) && /\A[0-9a-f]{64}\z/.match?(sha256)
         raise Error, 'invalid source SHA-256'
       end
@@ -51,7 +66,7 @@ module Erx
         tree = File.join(temporary, 'tree')
         Dir.mkdir(tree)
         runner.run([tar_program, '--no-same-owner', '--no-same-permissions',
-                    '-xf', snapshot, '-C', tree],
+                    '-xf', snapshot, '-C', tree, *members.map { |member| "#{source_directory}/#{member}" }],
                    name: 'extract-source', deadline: 120, env: TAR_ENV)
         validate_tree(tree)
         selected = tree

@@ -123,7 +123,7 @@ class DependenciesTest < Minitest::Test
     end
   end
 
-  def prepare_cached_source(tar_program: 'tar')
+  def prepare_cached_source(tar_program: 'tar', members: nil)
     archive = File.join(@cache, 'source.tar.gz')
     stream = StringIO.new(''.b)
     Gem::Package::TarWriter.new(stream) do |tar|
@@ -134,6 +134,7 @@ class DependenciesTest < Minitest::Test
     Zlib::GzipWriter.open(archive) { |file| file.write(stream.string) }
     entry = source.merge('directory' => 'source-1',
                          'sha256' => Digest::SHA256.file(archive).hexdigest)
+    entry['members'] = members if members
     lock = File.join(@directory, 'deps.lock')
     File.write(lock, JSON.generate('version' => 1, 'sources' => [entry]))
     runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
@@ -142,6 +143,23 @@ class DependenciesTest < Minitest::Test
 
   def extracted_file
     File.join(@directory, 'build/third_party/fixture/source-1/file')
+  end
+
+  # A source pinned with members extracts only those paths below its directory, and a
+  # members value that could name anything else is refused before any fetch.
+  def test_members_extract_only_the_named_parts
+    dependencies = prepare_cached_source(members: 'kept') do |tar|
+      tar.mkdir('source-1/kept', 0o755)
+      tar.add_file_simple('source-1/kept/inner', 0o644, 4) { |file| file.write('kept') }
+    end
+    dependencies.fetch(cache: @cache)
+    tree = File.join(@directory, 'build/third_party/fixture/source-1')
+    assert_equal 'kept', File.read(File.join(tree, 'kept/inner'))
+    refute File.exist?(File.join(tree, 'file')), 'a path outside members is not extracted'
+    ['', '../up', 'a/../b', 'a a', '/abs', 'a/./b'].each do |members|
+      assert_raises(Erx::Error, members) { parse([source.merge('members' => members)]) }
+    end
+    assert_raises(Erx::Error) { parse([source.merge('directory' => '.', 'members' => 'a')]) }
   end
 
   def test_fetch_replaces_tampered_derived_source

@@ -143,6 +143,36 @@ class MetadataFilesTest < Minitest::Test
     assert_equal 'fixture data', File.binread(File.join(destination, 'inner/link'))
   end
 
+  # A source pinned with members extracts only those paths below its directory: tar is
+  # handed each one, and a members value that could leave the directory is refused.
+  def test_members_name_what_tar_extracts_below_the_directory
+    archive = File.join(@root, 'fixture.tar')
+    bytes = 'fixture archive'
+    File.binwrite(archive, bytes)
+    asked = nil
+    extractor = Object.new
+    extractor.define_singleton_method(:run) do |arguments, **_options|
+      asked = arguments.drop(arguments.index('-C') + 2)
+      selected = File.join(arguments.fetch(arguments.index('-C') + 1), 'package')
+      FileUtils.mkdir_p(File.join(selected, 'a/b'))
+      File.binwrite(File.join(selected, 'a/b/payload'), 'fixture data')
+    end
+    destination = File.join(@root, 'members')
+    Erx::Sources.unpack(archive: archive, sha256: Digest::SHA256.hexdigest(bytes), destination: destination,
+                        owner_root: @root, source_directory: 'package', runner: extractor, members: %w[a/b c])
+    assert_equal %w[package/a/b package/c], asked
+    assert_equal 'fixture data', File.binread(File.join(destination, 'a/b/payload'))
+    ['a ../b', '../a', 'a/./b', '/a', 'a a', '', 'a/'].each do |members|
+      refute Erx::Sources.valid_members?(members), members.inspect
+    end
+    assert Erx::Sources.valid_members?('cmake llvm/cmake libc++')
+    error = assert_raises(Erx::Error) do
+      Erx::Sources.unpack(archive: archive, sha256: Digest::SHA256.hexdigest(bytes), destination: File.join(@root, 'whole'),
+                          owner_root: @root, source_directory: '.', runner: extractor, members: %w[a])
+    end
+    assert_includes error.message, 'members'
+  end
+
   def test_bounded_read_preserves_exact_immutable_bytes
     path = File.join(@root, 'bytes')
     File.binwrite(path, "\x00\xff\n".b)

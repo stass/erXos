@@ -56,6 +56,19 @@ module Erx
       raise Error, "the interpreter image #{program} links what the system domain must not hold: #{listed.join('; ')}"
     end
 
+    # The families the BeamAsm image must link, or it is the interpreter under the JIT's
+    # name: BeamAsm's translator and asmjit's assembler.
+    BEAMASM = %w[BeamAsm asmjit].freeze
+
+    # Raises unless program, the BeamAsm image, lists ERTS's entry and the JIT's families.
+    def check_beamasm(program:, nm:, runner:)
+      names = symbol_names(program: program, nm: nm, runner: runner)
+      raise Error, "#{program} lists no #{WITNESS}, so its symbols cannot show what it links" unless names.include?(WITNESS)
+
+      missing = BEAMASM - foreign_symbols(names).keys
+      raise Error, "the BeamAsm image #{program} links no #{missing.join(' and no ')}" unless missing.empty?
+    end
+
     # One name per line. The Runner's log holds llvm-nm's warnings too, which carry a
     # space, as no symbol name does, so they are dropped.
     def symbol_names(program:, nm:, runner:)

@@ -25,6 +25,8 @@ module Erx
     # The host OTP on PATH. Host tests hold an exclusive lock on the `jit` oracle
     # while they run, and this build only reads, so it stays off that one.
     HOST_OTP_FLAVOUR = 'emu'
+    # The emulator flavour OTP's make builds: the interpreter, unless a subclass says otherwise.
+    FLAVOR = 'emu'
     # The function API's test has a main of its own, so the entry and what only it calls join here.
     LIBERX_SOURCES = [*HostedSources::ALL.reject { |source| source.start_with?(HostedSources::GUEST) },
                       'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
@@ -248,7 +250,7 @@ module Erx
       # makefile's empty .SECONDARY makes a missing beam.emu no reason to link while
       # beam.smp exists.
       FileUtils.rm_f([@output.beam, File.join(File.dirname(@output.beam), 'beam.smp')])
-      @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/emulator', 'opt', 'FLAVOR=emu', "TARGET=#{self.class::TARGET}"],
+      @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/emulator', 'opt', "FLAVOR=#{self.class::FLAVOR}", "TARGET=#{self.class::TARGET}"],
                   name: 'runtime-emulator', deadline: DEADLINES.fetch(:emulator), chdir: @output.root,
                   env: build_environment)
       raise Error, "the emulator's build left no #{@output.beam}" unless File.file?(@output.beam)

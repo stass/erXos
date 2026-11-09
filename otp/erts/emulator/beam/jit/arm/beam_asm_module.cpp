@@ -17,12 +17,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: veneer label names are built with std::string, since libc++ is built without localisation and has no streams.
+ *
  * %CopyrightEnd%
  */
 
 #include <algorithm>
 #include <cstring>
-#include <sstream>
+#include <string>
 #include <float.h>
 
 #include "beam_asm.hpp"
@@ -708,9 +710,9 @@ const Label &BeamModuleAssembler::resolve_label(const Label &target,
          * sequence number in the label name because if the module is
          * huge more than one veneer can be created for each entry
          * label. */
-        std::stringstream name;
-        name << '@' << labelName << '-' << labelSeq++;
-        anchor = a.new_named_label(name.str().c_str());
+        std::string name =
+                "@" + std::string(labelName) + "-" + std::to_string(labelSeq++);
+        anchor = a.new_named_label(name.c_str());
     }
 
     auto it = _veneers.emplace(target.id(), Veneer{maxOffset, anchor, target});

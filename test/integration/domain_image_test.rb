@@ -11,7 +11,8 @@ require_relative '../../tools/lib/erx/runner'
 # (docs/design-stopgap.md, "The production image"): the release is one run of whole
 # entries under domains/<name>/ without the system mark, which leaves the system run
 # whole, and the domain runtime image is the interpreter ERTS at task.ld's fixed
-# addresses, without JIT authority or the system mark. The production image carries
+# addresses, without JIT authority or the system mark, and the BeamAsm image beside
+# it is the one entry whose manifest carries ERX_IMAGE_JIT. The production image carries
 # no domain release while the manifest check admits no domain row, so the image here
 # goes through the same assembly with one release asked for.
 #
@@ -74,14 +75,31 @@ class DomainImageTest < Minitest::Test
     assert(marked.all? { |number| @entries[number].fetch('path').start_with?('system/') })
   end
 
-  def test_the_domain_runtime_is_a_fixed_interpreter_image_without_the_system_mark
-    entry = @entries.find { |candidate| candidate.fetch('path') == Erx::ProductionImage::DOMAIN_RUNTIME_PATH }
-    refute_nil entry, 'the image carries the domain runtime image'
-    assert_equal @codec.member('entry_kind', 'image'), entry.fetch('kind')
+  def image?(entry) = entry.fetch('kind') == @codec.member('entry_kind', 'image')
+
+  def manifest_flags(entry)
+    @codec.decode_layout('erx_image_manifest', @bytes.byteslice(entry.fetch('data_off'), entry.fetch('data_size'))).fetch('flags')
+  end
+
+  # The flags of the runtime image at path, which must be an unmarked image entry.
+  def runtime_flags(path)
+    entry = @entries.find { |candidate| candidate.fetch('path') == path }
+    refute_nil entry, "the image carries #{path}"
+    assert image?(entry)
     refute system?(entry)
-    manifest = @codec.decode_layout('erx_image_manifest', @bytes.byteslice(entry.fetch('data_off'), entry.fetch('data_size')))
-    flags = manifest.fetch('flags')
+    manifest_flags(entry)
+  end
+
+  def test_the_domain_runtime_is_a_fixed_interpreter_image_without_the_system_mark
+    flags = runtime_flags(Erx::ProductionImage::DOMAIN_RUNTIME_PATH)
     assert flags.anybits?(@codec.member('image_flags', 'fixed')), 'task.ld gives fixed addresses'
     refute flags.anybits?(@codec.member('image_flags', 'jit')), 'the interpreter image makes no code'
+  end
+
+  def test_the_beamasm_runtime_alone_carries_the_jit_mark
+    flags = runtime_flags(Erx::ProductionImage::JIT_RUNTIME_PATH)
+    assert flags.anybits?(@codec.member('image_flags', 'fixed')), 'task.ld gives fixed addresses'
+    jit = @entries.select { |entry| image?(entry) && manifest_flags(entry).anybits?(@codec.member('image_flags', 'jit')) }
+    assert_equal [Erx::ProductionImage::JIT_RUNTIME_PATH], jit.map { |entry| entry.fetch('path') }, 'no other image makes code'
   end
 end

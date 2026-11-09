@@ -68,6 +68,18 @@ class InterpreterImageTest < Minitest::Test
     assert_includes error.message, 'erl_start'
   end
 
+  # The BeamAsm image's own check: a link without asmjit is no BeamAsm image, and one
+  # with BeamAsm's and asmjit's names passes.
+  def test_the_beamasm_image_must_link_beamasm_and_asmjit
+    tools!
+    error = assert_raises(Erx::Error) do
+      Erx::InterpreterImage.check_beamasm(program: program(seeded: false), nm: nm, runner: @runner)
+    end
+    assert_includes error.message, 'links no BeamAsm and no asmjit'
+    jit = program(seeded: true, extra: "void beamasm_init(void) { }\n")
+    Erx::InterpreterImage.check_beamasm(program: jit, nm: nm, runner: @runner)
+  end
+
   private
 
   def tools!
@@ -77,8 +89,8 @@ class InterpreterImageTest < Minitest::Test
   def nm = File.join(File.dirname(@compiler), 'llvm-nm')
 
   # A freestanding AArch64 program of entry, with the seeded asmjit object linked in or not.
-  def program(seeded:, entry: 'erl_start')
-    sources = { 'main' => "void #{entry}(void) { for (;;) { } }\n" }
+  def program(seeded:, entry: 'erl_start', extra: '')
+    sources = { 'main' => "void #{entry}(void) { for (;;) { } }\n#{extra}" }
     sources['seed'] = "void #{ASMJIT_NAME}(void) { }\n" if seeded
     objects = sources.map do |name, text|
       source = File.join(@directory, "#{name}.c")

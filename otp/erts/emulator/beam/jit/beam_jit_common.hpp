@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: includes <cstdlib> for std::abs of integers, which libc++ declares there alone.
+ *
  * %CopyrightEnd%
  */
 
@@ -25,6 +27,7 @@
 
 #include <asmjit/core.h>
 
+#include <cstdlib> /* std::abs of integers, which libc++ declares here alone */
 #include <string>
 #include <vector>
 #include <unordered_map>

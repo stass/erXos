@@ -644,11 +644,29 @@ module Erx
       built.archive
     end
 
+    # The BeamAsm image, linked as the production image links it for its domains, into
+    # build/runtime/native-jit/image; Fiasco's build must have run.
+    def self.build_jit_runtime(jobs)
+      require_relative 'lib/erx/native_jit_runtime'
+
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      compiler = ENV.fetch('ERX_CLANG', '')
+      linker = ENV.fetch('ERX_LLD', '')
+      fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
+      interpreter = NativeRuntime.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco).build(jobs: jobs)
+      jit = NativeJitRuntime.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
+                            .build(interpreter: interpreter, jobs: jobs)
+      NativeRoot.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
+                .build_jit_runtime_receipted(directory: File.join(ROOT, NativeJitRuntime::BASE, 'image'),
+                                             archives: jit.link_archives(libgcc: fiasco.user_library('libgcc.a')))
+                .fetch(:program)
+    end
+
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      unless %w[fiasco runtime rc-oracle fsimg herd7].include?(component)
-        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, rc-oracle, fsimg or herd7'
+      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7].include?(component)
+        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg or herd7'
       end
       jobs = 4
       parser = OptionParser.new do |options|
@@ -658,6 +676,7 @@ module Erx
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       path = case component
              when 'runtime' then build_runtime(jobs)
+             when 'jit-runtime' then build_jit_runtime(jobs)
              when 'rc-oracle' then build_rc_oracle
              when 'fsimg' then build_fsimg(jobs)
              when 'herd7' then build_herd7(jobs)

@@ -20,6 +20,9 @@ module Erx
     # does not link. The native check leaves them out, so they do not count as unused there.
     HOSTED_ONLY = %w[libsystem liberx_hosted only_erx_stdio_nif].freeze
     NATIVE_ONLY = %w[musl stock_native].freeze
+    # Sections only the BeamAsm flavour's objects use: the hosted build and the native
+    # interpreter leave them out.
+    JIT_ONLY = %w[beamasm].freeze
     NAME = /\A[A-Za-z_][A-Za-z0-9_$.]*\z/
     OWN_LIST_PREFIX = 'only_'
 
@@ -80,7 +83,7 @@ module Erx
     # of the own lists, which their one object answers for.
     def check_objects(objects:, executable:, liberx:, imports_path:)
       undefined = objects.to_h { |object| [object, symbol_names(nm('-u', object))] }
-      imports = parse_imports(File.read(imports_path)).except(*NATIVE_ONLY)
+      imports = parse_imports(File.read(imports_path)).except(*NATIVE_ONLY, *JIT_ONLY)
       undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
       inside = objects.flat_map { |object| defined_names(object) }.uniq
       check(undefined_by_object: undefined, inside: inside, imports: imports)
@@ -88,7 +91,10 @@ module Erx
 
     # The native build's check: ELF objects and archives through llvm-nm, whose C names
     # carry no prefix. OTP's own link of beam.emu has already shown that no name is missing.
-    def check_elf_objects(objects:, imports_text:, nm:)
+    # cxx_runtime are the archives of the C++ runtime the BeamAsm image links: what they
+    # define counts as inside, and the sections only BeamAsm uses join the list. Without
+    # them those sections stay out, so they do not count as unused.
+    def check_elf_objects(objects:, imports_text:, nm:, cxx_runtime: [])
       names = lambda do |*arguments|
         output, error, status = Open3.capture3(nm, '--format=just-symbols', *arguments, stdin_data: '')
         raise Error, "llvm-nm #{arguments.join(' ')}: #{error.lines.first}" unless status.success?
@@ -96,8 +102,8 @@ module Erx
         output.each_line(chomp: true).reject { |line| line.empty? || line.end_with?(':') }.uniq
       end
       check(undefined_by_object: objects.to_h { |object| [object, names.call('--undefined-only', object)] },
-            inside: objects.flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
-            imports: parse_imports(imports_text).except(*HOSTED_ONLY))
+            inside: (objects + cxx_runtime).flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
+            imports: parse_imports(imports_text).except(*HOSTED_ONLY, *(cxx_runtime.empty? ? JIT_ONLY : [])))
     end
 
     def defined_names(path) = symbol_names(nm('-g', '-U', '-j', path))
@@ -117,7 +123,8 @@ module Erx
       missing = libraries.reject { |library| File.file?(library) }
       raise Error, "the build left no #{missing.first}" unless missing.empty?
 
-      emulator = Dir[File.join(output.objects, '*.o')]
+      # The BeamAsm flavour keeps asmjit's objects in subdirectories of its own.
+      emulator = Dir[File.join(output.objects, '**/*.o')]
       raise Error, "the build left no objects in #{output.objects}" if emulator.empty?
 
       (emulator + libraries).sort

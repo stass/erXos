@@ -135,6 +135,18 @@ module Erx
       receipted(program, sources: DOMAIN_RUNTIME, script: TASK_LINK_SCRIPT, directory: directory)
     end
 
+    # The BeamAsm image: DOMAIN_RUNTIME over the archives of ERTS's BeamAsm flavour, musl
+    # and the C++ runtime (NativeJitRuntime), with its receipt. The check that it links
+    # BeamAsm and asmjit keeps an interpreter link from passing as it. The link map keeps
+    # C++ names mangled: a demangled one such as `std::(anonymous namespace)::x` reads
+    # as an input contribution to the map's reader (PackProvenance.contributors).
+    def build_jit_runtime_receipted(directory:, archives:)
+      program = build(name: 'erts-jit', sources: DOMAIN_RUNTIME, directory: directory, archives: archives, strip_debug: true,
+                      script: TASK_LINK_SCRIPT, link_flags: [*TASK_LINK_FLAGS, '--no-demangle'], place: nil)
+      InterpreterImage.check_beamasm(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
+      receipted(program, sources: DOMAIN_RUNTIME, script: TASK_LINK_SCRIPT, directory: directory)
+    end
+
     # The linker flag that gives root.ld its place: an address in RAM on a page boundary.
     def self.place_flags(place)
       raise Error, format('a root place must be a page-aligned address in RAM, not 0x%x', place) unless

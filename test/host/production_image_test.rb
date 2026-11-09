@@ -302,6 +302,13 @@ class ProductionImageTest < Minitest::Test
                  Erx::ProductionImage.artifacts(['system/manifest', 'system/root'], images: {}))
   end
 
+  # The BeamAsm image is an executable artifact of its own, which a domain row's runtime
+  # names as jit.
+  def test_the_artifacts_name_the_beamasm_image
+    paths = ['domains/base/bin/start.boot', 'runtimes/emu', 'runtimes/jit', 'system/root']
+    assert_equal({ 'kind' => 'executable', 'entry' => 2 }, Erx::ProductionImage.artifacts(paths, images: {}).fetch('jit'))
+  end
+
   def test_a_domain_release_named_as_another_artifact_is_refused
     %w[root emu release].each do |name|
       paths = ["domains/#{name}/bin/start.boot", 'runtimes/emu', 'system/root']
