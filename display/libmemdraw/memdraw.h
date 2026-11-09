@@ -1,6 +1,7 @@
 /*
  * Modified by erXos (ORIGIN.md):
- * erx_clip_t, erx_draw_clip and memimagedraw's erXos signature;
+ * erx_clip_t, erx_draw_clip, erx_memdraw_nomem and memimagedraw's
+ * erXos signature;
  * drawclip, hwdraw and memimagemove are gone.
  */
 #pragma	src	"/sys/src/libmemdraw"
@@ -153,6 +154,11 @@ typedef struct erx_clip
 } erx_clip_t;
 extern int	memimagedraw(Memimage*, Memimage*, Memimage*, const erx_clip_t*, int);
 extern _Bool	erx_draw_clip(erx_clip_t*, const Memimage*, Rectangle, Rectangle, const Memimage*, Point, const Memimage*, Point);
+/*
+ * erXos: a shape (line.c, poly.c, fillpoly.c, ellipse.c, arc.c) could not
+ * allocate what it needed; erx_memdraw then reports ENOMEM for it.
+ */
+extern void	erx_memdraw_nomem(void);
 extern void	memimageline(Memimage*, Point, Point, int, int, int, Memimage*, Point, int);
 extern void	_memimageline(Memimage*, Point, Point, int, int, int, Memimage*, Point, Rectangle, int);
 extern Point	memimagestring(Memimage*, Point, Memimage*, Point, Memsubfont*, char*);

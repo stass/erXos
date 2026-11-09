@@ -390,10 +390,6 @@ it; git history is the record of completed work.
   `erx_draw_cload_frame`, so the differential test of the codec against it compares `erx_draw_image` with the
   stand-in, not with 9front's decoder. Link `display/libmemdraw/cload.c` behind it and delete the stand-in.
   `cloadmemimage`'s `badrect` bounds are narrower than the stand-in's, so keep the harness's rectangles within them.
-* [Medium] `test/erlang/erx_draw_ref.erl`, [the pixel primitives](docs/design-display.md#verification-and-testing):
-  the reference models `b`, `c`, `d`, `f`, `O`, `o`, `v`, `y`, `Y` and `r`, and answers `enotsup` to `i`, `l`, `s`
-  and `x`, which the design has it cover as the masked draws they consist of. Add them, a font cache of glyph
-  records with each glyph drawn as a mask, before `erx_memdraw`'s strings are compared with it (Track D P3).
 * [Medium] `display/memdraw/erx_memdraw.c`, [the pixel
   primitives](docs/design-display.md#verification-and-testing): the 9front build (unmodified 9front `libmemdraw`
   built for the host, the test tool of design.md's dependency table) does not exist yet, so `erx_memdraw` is checked
@@ -404,6 +400,11 @@ it; git history is the record of completed work.
 * [Low] display, `display/libmemdraw/draw.c` (`readbyte`): report the upstream bug to 9front. Under an alpha-only read
   of a replicated grey-and-alpha mask, `readbyte` wrote each pixel's grey into the alpha buffer; erXos's copy fixes it
   (marked erXos, recorded in `display/libmemdraw/ORIGIN.md`). The owner sends the report.
+  primitives](docs/design-display.md#verification-and-testing): the 9front build (`MemdrawBuild.oracle`) checks
+  only the shapes, under `SoverD`. Run `erx_memdraw`'s draws and loads against it too, and treat each of erXos's
+  edits listed in `display/libmemdraw/ORIGIN.md` as a documented difference with a test. One of those edits is an
+  upstream bug (`readbyte`'s alpha-only read of a replicated grey-and-alpha mask wrote grey into the alpha
+  buffer): a candidate report to 9front.
 * [Medium] `display/memdraw/erx_memdraw_nif.c`, [Draw messages](docs/design-display.md#draw-messages): the move to a
   dirty scheduler counts only the clipped destination's bytes, so two calls that cost more stay on a normal scheduler:
   `alloc`, whose fill writes the whole image, and a draw whose mask, or replicated source, is the destination, which
@@ -411,16 +412,18 @@ it; git history is the record of completed work.
   actually touches; measure a full-screen `alloc` and a 1-pixel self-masked draw on a 4K screen image to set the bound.
   `erx_memdraw_draw_bytes` also reads the live image headers, apart from the draw's own copy, so a concurrent `clip`
   can make a large draw count small (scheduling only; the draw itself is checked on its copy).
-* [Medium] `display/memdraw/`, the chokepoint "only `erx_memdraw`'s listed functions touch pixel memory, and each
-  takes an `erx_clip_t`" of [Chokepoints](docs/design-display.md#chokepoints) and G2: no build check enforces it, and
-  its wording does not fit `load`, `unload`, `cload` and `alloc`'s fill, which touch pixels over a rectangle
-  `rows_of` or `allocmemimage` checked, not an `erx_clip_t`. Restate the rule (every pixel loop runs over a rectangle
-  that one of a listed set of checkers produced) and add the build check with its seeded violation.
-  The same rule should make the header race impossible by construction: `erx_memdraw_draw` copies each image's
-  header once because `clip` rewrites `flags` and `clipr` in the shared `Memimage` (a C11 data race, memory-safe only
-  because the copy is checked whole). Every later primitive that reads `clipr` or `Frepl` (lines, ellipses, strings)
-  must copy it too. Take the replicate bit and clip rectangle out of the shared header (kept by the image's owner and
-  passed to each call, or a per-image record `clip` replaces whole), so the header is immutable after `alloc`.
+* [Medium] `display/memdraw/erx_memdraw.c`: `clip` rewrites `flags` and `clipr` in an image's shared `Memimage`
+  while another process may be drawing from it, a C11 data race that is memory-safe only because
+  `erx_memdraw_draw` and `shape_begin` each copy every header once and check the copy whole. Take the replicate
+  bit and clip rectangle out of the shared header (kept by the image's owner and passed to each call, or a
+  per-image record `clip` replaces whole), so the header is immutable after `alloc` and no copy is needed.
+* [Medium] `display/memdraw/`, the chokepoints `memdraw-clip` and `memdraw-pixels`
+  (tools/lib/erx/chokepoint_rules/memdraw.rb) are file-level: they admit every function of `erx_memdraw.c` and
+  `draw.c`, where the design names `erx_memdraw_draw` and `memdraw` as `memimagedraw`'s only callers and
+  `snapshot` as erx_memdraw's only pixel copy. Move the two funnels and the snapshot into a file of their own, or
+  scope the rules by function.
+* [Low] `display/memdraw/erx_memdraw_nif.c`, `get_points`: a failed `enif_alloc` of a shape's points answers
+  `badarg`, not `enomem`.
 * [Low] `display/memdraw/`, erx_memdraw's tests: nothing exercises a draw that moves to a dirty scheduler or an
   `enomem` answer (`alphadraw`'s buffer or the snapshot failing to allocate). Add a draw over 64 KiB and an
   allocation-failure seed to `test/erlang/erx_memdraw_tests.erl`.
@@ -3345,6 +3348,14 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] `display/memdraw/` and `display/libmemdraw/`, the shapes, G3: a shape's cost follows from its geometry,
+  not from the pixels it writes, and every shape runs on the display domain's one pool of dirty CPU schedulers, so
+  one client can delay every other's dirty work (composes included). A very thick, skinny ellipse is brushed with
+  a disc of up to (2*2^10+1)^2 pixels at each of up to about 2^16 steps, minutes of one scheduler; a `p` of
+  thickness 2^10 builds two 2049 by 2049 brushes a vertex; a disc end's brush (up to 2049 by 2049 bits) is
+  allocated from the domain's heap and not charged to the window's quota. Bound the work a shape may do (steps
+  times the brush's area, vertices times brushes) and refuse past it, or charge it to the window's grant; cache
+  the brush in the thread's shape record.
 * [Medium] erx_net TCP input (`erx_tcp_input:dropafterack`): an out-of-window segment that
   knows only the four-tuple draws an ACK with no rate limit, as in FreeBSD
   (`tcp_input.c:3384-3395`), so a blind sender gets one ACK per segment it sends. Decide

@@ -40,10 +40,16 @@ run(diff, Rounds) ->
     repeat(Rounds, fun() -> walk(?MESSAGES, connection()) end);
 run(y, Rounds) ->
     repeat(Rounds, fun y_case/0);
+run(strings, Rounds) ->
+    repeat(Rounds, fun() ->
+                       #{ref := #{images := #{0 := #{r := Window}}}} = Connection = connection(),
+                       lists:foldl(fun step/2, Connection, strings(Window))
+                   end);
 run(unit, _) ->
     lists:foreach(fun(Case) -> Case() end,
                   [fun new_image_padding_is_zero/0, fun far_draw_touches_the_clip/0,
-                   fun empty_clip_draws_nothing/0, fun replicated_grey_alpha_mask/0, fun refusals/0]).
+                   fun empty_clip_draws_nothing/0, fun replicated_grey_alpha_mask/0, fun refusals/0,
+                   fun shape_limits/0]).
 
 repeat(0, _Fun) -> ok;
 repeat(N, Fun) -> Fun(), repeat(N - 1, Fun).
@@ -145,7 +151,7 @@ inside({X0, Y0, X1, Y1}, {A0, B0, A1, B1}) ->
 message(#{ref := #{images := Images}}) ->
     Held = maps:keys(Images),
     Id = fun() -> pick([0, 1, 2, 3]) end,
-    case rand:uniform(12) of
+    case rand:uniform(16) of
         1 -> {alloc, pick([1, 2, 3]), 0, 0, pick(chans() ++ refused_chans()), rand:uniform(2) - 1,
               image_rect(), clip_rect(), color()};
         2 -> {clip, Id(), rand:uniform(2) - 1, clip_rect()};
@@ -153,6 +159,10 @@ message(#{ref := #{images := Images}}) ->
         4 -> {free, pick([1, 2, 3])};
         5 -> load(Images);
         6 -> {read, Id(), within(Images)};
+        7 -> {font, pick([1, 2, 3, 0]), pick([rand:uniform(8), 0, 5000]), byte()};
+        8 -> {glyph, pick([1, 2, 3]), pick(Held), rand:uniform(10) - 1, within(Images), point(), byte(), byte()};
+        9 -> {string, pick(Held), pick(Held), pick([1, 2, 3]), point(), clip_rect(), point(), indices()};
+        10 -> {string_bg, pick(Held), pick(Held), Id(), point(), clip_rect(), point(), Id(), point(), indices()};
         _ -> {draw, pick(Held), pick(Held), pick(Held), clip_rect(), point(), point()}
     end.
 
@@ -247,6 +257,49 @@ y_case() ->
         Other -> error({y, Chan, R1, Payload, Other})
     end.
 
+%% A font cache (image 1) and a source (image 2) holding random pixels,
+%% glyphs copied into the cache from the source, then strings drawn onto
+%% the window (rectangle Window) from either image through the cache, as a
+%% client draws text, mostly with SoverD.
+strings(Window) ->
+    {W, H} = {rand:uniform(?SIDE), rand:uniform(?SIDE)},
+    CacheR = {0, 0, W, H},
+    {X, Y} = {small(), small()},
+    SrcR = {X, Y, X + rand:uniform(?SIDE), Y + rand:uniform(?SIDE)},
+    N = rand:uniform(6),
+    alloc_loaded(1, CacheR, CacheR, 0) ++ alloc_loaded(2, SrcR, clip_rect(), rand:uniform(2) - 1)
+    ++ [{font, 1, N, rand:uniform(H) - 1}]
+    ++ [{glyph, 1, 2, I, inner(CacheR), {small(), small()}, byte(), byte()} || I <- lists:seq(0, N - 1)]
+    ++ lists:append([[{op, rand:uniform(12) - 1} || rand:uniform(4) =:= 1] ++ [string_message(Window, N)]
+                     || _ <- lists:seq(1, 6)]).
+
+%% A nonempty rectangle inside R.
+inner({X0, Y0, X1, Y1}) ->
+    A = X0 + rand:uniform(X1 - X0) - 1,
+    B = Y0 + rand:uniform(Y1 - Y0) - 1,
+    {A, B, A + rand:uniform(X1 - A), B + rand:uniform(Y1 - B)}.
+
+alloc_loaded(Id, R, Clipr, Repl) ->
+    Chan = pick(chans()),
+    {X0, Y0, X1, Y1} = R,
+    Pixels = case X1 > X0 andalso Y1 > Y0 of
+                 true -> rand:bytes(erx_draw_image:bytes_per_line(R, erx_draw_ref:depth(Chan)) * (Y1 - Y0));
+                 false -> <<>>
+             end,
+    [{alloc, Id, 0, 0, Chan, Repl, R, Clipr, ?NOFILL}, {load, Id, R, Pixels}].
+
+string_message({X0, Y0, X1, Y1}, N) ->
+    %% Now and then an index one past the cache's last glyph, which is refused.
+    Past = [N || rand:uniform(8) =:= 1],
+    Indices = [rand:uniform(N) - 1 || _ <- lists:seq(1, rand:uniform(5))] ++ Past,
+    Clipr = pick([{-?SIDE, -?SIDE, 2 * ?SIDE, 2 * ?SIDE}, clip_rect()]),
+    P = {X0 + rand:uniform(X1 - X0 + 4) - 3, Y0 + rand:uniform(Y1 - Y0 + 8) - 1},
+    case rand:uniform(2) of
+        1 -> {string, 0, pick([1, 2]), 1, P, Clipr, {small(), small()}, Indices};
+        2 -> {string_bg, 0, pick([1, 2]), 1, P, Clipr, {small(), small()}, pick([1, 2]), {small(), small()},
+              Indices}
+    end.
+
 %% Bytes with repeats, so codes reach back.
 pixels(N) -> << <<(pick([0, 255, rand:uniform(256) - 1]))>> || _ <- lists:seq(1, N) >>.
 
@@ -321,3 +374,29 @@ refusals() ->
     {error, einval} = erx_memdraw:read(Image, {1, 1, 1, 3}),
     {ok, {0, 0, 2, 2}} = erx_memdraw:load(Image, {0, 0, 2, 2}, <<1, 2, 3, 4>>),
     {ok, <<1, 2, 3, 4>>} = erx_memdraw:read(Image, {0, 0, 2, 2}).
+
+%% A string's glyph indices, some past a small font cache's end.
+indices() -> [rand:uniform(10) - 1 || _ <- lists:seq(1, rand:uniform(4) - 1)].
+
+%% An ascent, left offset or advance: mostly small, so glyphs land on the images.
+byte() -> pick([rand:uniform(8) - 1, rand:uniform(8) - 1, rand:uniform(256) - 1]).
+
+%% A shape inside its image reports a touched rectangle within it; one at
+%% erx_memdraw's limits draws nothing here, and one past them is refused.
+shape_limits() ->
+    R = {0, 0, 8, 8},
+    K8 = erx_draw_ref:chan([{grey, 8}]),
+    {ok, Dst} = erx_memdraw:alloc(K8, R, R, false, 0),
+    {ok, Src} = erx_memdraw:alloc(K8, {0, 0, 1, 1}, {-100, -100, 100, 100}, true, 16#ffffffff),
+    {ok, T} = erx_memdraw:line(Dst, {1, 1}, {6, 6}, 0, 0, 0, Src, {0, 0}, 11),
+    true = inside(T, R),
+    {ok, none} = erx_memdraw:ellipse(Dst, {(1 bsl 19) - 1, 0}, 1 bsl 14, 1 bsl 14, 1 bsl 10, Src, {0, 0}, 11),
+    %% An edge whose x falls as y grows: row 5 is covered from x = 2 on.
+    {ok, _} = erx_memdraw:fill_poly(Dst, [{6, 0}, {0, 7}, {6, 7}], -1, Src, {0, 0}, 11),
+    {ok, <<0, 0, 255, 255, 255, 255, 0, 0>>} = erx_memdraw:read(Dst, {0, 5, 8, 6}),
+    {ok, _} = erx_memdraw:arc(Dst, {4, 4}, 3, 3, fill, Src, {0, 0}, 0, 90, 11),
+    {ok, _} = erx_memdraw:poly(Dst, [{0, 0}, {7, 7}, {7, 0}], 1, 2, 1, Src, {0, 0}, 11),
+    {error, einval} = erx_memdraw:line(Dst, {1 bsl 19, 0}, {0, 0}, 0, 0, 0, Src, {0, 0}, 11),
+    {error, einval} = erx_memdraw:ellipse(Dst, {0, 0}, (1 bsl 14) + 1, 1, 1, Src, {0, 0}, 11),
+    {error, einval} = erx_memdraw:arc(Dst, {0, 0}, 1, 1, (1 bsl 10) + 1, Src, {0, 0}, 0, 90, 11),
+    {error, einval} = erx_memdraw:poly(Dst, [{0, 0}, {0, -(1 bsl 19) - 1}], 0, 0, 1, Src, {0, 0}, 11).

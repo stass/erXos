@@ -56,7 +56,8 @@ alphabet() ->
     Chans = [?K1, ?K8, ?ARGB32, 16#33, 16#78, 0],
     AllocRects = [{0, 0, 4, 4}, {0, 0, 5, 4}, {0, 0, 4, 5}, {-1, -1, 1, 1}, {1, 1, 1, 2}, {2, 2, 1, 3}],
     Alpha = [0, 16#80000005, 16#c0000000],
-    Axes = [{0, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 0, -1}, {2, 1, 1}],
+    Axes = [{0, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 0, -1}, {2, 1, 1}, {1 bsl 14, 1, 1 bsl 10},
+            {(1 bsl 14) + 1, 1, 0}, {1, (1 bsl 14) + 1, 0}, {1, 1, (1 bsl 10) + 1}],
     lists:append(
       [[{alloc, Id, Screen, 0, Chan, Repl, R, Clipr, 0}
         || Id <- ids(), Screen <- [0, 1], Chan <- Chans, Repl <- [0, 1], R <- AllocRects,
@@ -68,11 +69,13 @@ alphabet() ->
        [{free, Id} || Id <- ids()],
        [{font, Id, N, 3} || Id <- ids(), N <- [0, 1, 256, 257, 4096, 4097]],
        [{glyph, C, S, Index, {0, 0, 2, 3}, {0, 0}, 255, 2} || C <- ids(), S <- ids(), Index <- [0, 1, 256]],
-       [{line, D, {0, 0}, {3, 3}, 0, 0, T, S, {0, 0}} || D <- ids(), T <- [-1, 0], S <- ids()],
+       [{line, D, {0, 0}, P1, 0, 0, T, S, {0, 0}}
+        || D <- ids(), T <- [-1, 0, 1 bsl 10, (1 bsl 10) + 1], S <- ids(), P1 <- [{3, 3}, {1 bsl 19, 3}]],
        [{origin, Id, {0, 0}, {0, 0}} || Id <- ids()],
        [{op, Op} || Op <- [0, 11, 12, 255]],
-       [{poly, D, 0, 0, T, S, {0, 0}, [{0, 0}, {1, 1}]} || D <- ids(), T <- [-1, 1], S <- ids()],
-       [{fill_poly, D, 0, {0, 0}, S, {0, 0}, [{0, 0}, {1, 1}, {2, 0}]} || D <- ids(), S <- ids()],
+       [{poly, D, 0, 0, T, S, {0, 0}, [{0, 0}, {1, 1}]} || D <- ids(), T <- [-1, 1, (1 bsl 10) + 1], S <- ids()],
+       [{fill_poly, D, 0, {0, 0}, S, {0, 0}, [{0, 0}, {1, Y}, {2, 0}]}
+        || D <- ids(), S <- ids(), Y <- [1, -(1 bsl 19), -(1 bsl 19) - 1]],
        [{read, Id, R} || Id <- ids(), R <- rects()],
        [{string, D, S, F, {0, 3}, {0, 0, 4, 4}, Sp, Is}
         || D <- [0, 1], S <- [0, 1], F <- ids(), Is <- [[], [0], [0, 255], [256]],
@@ -188,19 +191,25 @@ expected_errno(#{images := Images, bytes := Bytes, quota := #{pixels := Quota, s
                                                    * (Y1 - Y0)) > Quota end}];
               {clip, Id, _, _} -> [{enoent, not Held(Id)}];
               {draw, D, S, M, _, _, _} -> unheld([D, S, M], Held);
-              {K, D, S, _, A, B, T, _, _, _} when K =:= ellipse; K =:= fill_ellipse ->
-                  unheld([D, S], Held) ++ [{einval, A < 0 orelse B < 0 orelse T < 0}];
+              {K, D, S, C, A, B, T, Sp, _, _} when K =:= ellipse; K =:= fill_ellipse ->
+                  unheld([D, S], Held) ++ [{einval, A < 0 orelse B < 0 orelse T < 0 orelse A > 1 bsl 14 orelse
+                                                     B > 1 bsl 14 orelse not shape_coords([C, Sp])},
+                                           {einval, K =:= ellipse andalso T > 1 bsl 10}];
               {free, Id} -> [{einval, Id =:= 0}, {enoent, not Held(Id)}];
               {font, Id, N, _} ->
                   [{einval, Id =:= 0}, {enoent, not Held(Id)}, {einval, N < 1 orelse N > 4096},
                    {enomem, fun() -> Bytes - pages(16 * Font(Id)) + pages(16 * N) > Quota end}];
               {glyph, C, S, Index, _, _, _, _} ->
                   [{enoent, not Held(C)}, {einval, Font(C) =:= 0}, {enoent, not Held(S)}, {einval, Index >= Font(C)}];
-              {line, D, _, _, _, _, T, S, _} -> unheld([D], Held) ++ [{einval, T < 0}] ++ unheld([S], Held);
+              {line, D, P0, P1, _, _, T, S, Sp} ->
+                  unheld([D], Held) ++ [{einval, T < 0 orelse T > 1 bsl 10 orelse not shape_coords([P0, P1, Sp])}]
+                      ++ unheld([S], Held);
               {origin, Id, _, _} -> unheld([Id], Held);
               {op, Op} -> [{einval, Op > 11}];
-              {poly, D, _, _, T, S, _, _} -> unheld([D], Held) ++ [{einval, T < 0}] ++ unheld([S], Held);
-              {fill_poly, D, _, _, S, _, _} -> unheld([D, S], Held);
+              {poly, D, _, _, T, S, Sp, Ps} ->
+                  unheld([D], Held) ++ [{einval, T < 0 orelse T > 1 bsl 10 orelse not shape_coords([Sp | Ps])}]
+                      ++ unheld([S], Held);
+              {fill_poly, D, _, _, S, Sp, Ps} -> unheld([D, S], Held) ++ [{einval, not shape_coords([Sp | Ps])}];
               {read, Id, R} -> [{enoent, not Held(Id)}, {einval, fun() -> not Inside(Id, R) end}];
               {string, D, S, F, P, _, Sp, Is} ->
                   string_checks(D, S, F, none, Is, Held, Font)
@@ -375,3 +384,7 @@ prelude() ->
                || {Id, Chan} <- lists:zip(lists:seq(1, 7), Chans) >>,
     {ok, State, _} = erx_draw_core:plan(new(#{pixels => 64 * ?PAGE, side => 64}), Write),
     State.
+
+%% Within erx_memdraw's limits on a shape's points (erx_draw_core, SHAPE_COORD).
+shape_coords(Points) ->
+    lists:all(fun({X, Y}) -> lists:all(fun(V) -> V >= -(1 bsl 19) andalso V < 1 bsl 19 end, [X, Y]) end, Points).

@@ -9,7 +9,8 @@ mask and the twelve Porter-Duff operations of draw(2), replication, clipping,
 `y`, `Y` and `r`, computed one pixel at a time and written to be read, not to
 be fast. It is the oracle `erx_memdraw` is compared with pixel for pixel, so
 step/2 takes the messages exactly as `erx_draw_codec:decode/2` returns them.
-It draws no shapes; of the quotas it keeps only the side of an image, which
+It draws no shapes (the 9front build is their oracle), and it models `i`,
+`l`, `s` and `x` as devdraw's font cache and the masked draws of drawchar; of the quotas it keeps only the side of an image, which
 bounds the work of every message.
 
 An image is stored as Plan 9 lays it out in memory, so that `r` returns what
@@ -38,6 +39,7 @@ colour channel exceeds its alpha and the sum passes 257.
 -type rgba() :: {byte(), byte(), byte(), byte()}.
 -type image() :: #{r := rect(), clipr := rect(), repl := boolean(),
                    chan := pos_integer(), depth := 1..32,
+                   glyphs := none | {Ascent :: byte(), N :: pos_integer(), #{non_neg_integer() => tuple()}},
                    rows := #{integer() => binary()}}.
 -type state() :: #{images := #{image_id() => image()}, op := 0..11, side := pos_integer()}.
 
@@ -50,6 +52,9 @@ colour channel exceeds its alpha and the sum passes 257.
 -define(SoverD, 11).
 %% draw(3)'s colour meaning "do not fill" (DNofill).
 -define(NOFILL, 16#ffffff00).
+-define(S, 10).
+%% devdraw's bound on a font cache's glyphs.
+-define(MAX_GLYPHS, 4096).
 
 %%% The connection
 
@@ -128,6 +133,32 @@ step({read, Id, R}, State) ->
             false -> {error, einval}
         end
     end);
+step({font, 0, _N, _Ascent}, _State) ->
+    {error, einval};
+step({font, Id, N, Ascent}, State) ->
+    %% devdraw's i: the image becomes a font cache of N zeroed glyph
+    %% records, dropping any it held.
+    with_image(Id, State, fun
+        (Image) when N >= 1, N =< ?MAX_GLYPHS -> {ok, put_image(Id, Image#{glyphs => {Ascent, N, #{}}}, State)};
+        (_) -> {error, einval}
+    end);
+step({glyph, Cache, Src, Index, {X0, Y0, X1, Y1} = R, Sp, Left, Width}, #{images := Images} = State) ->
+    %% devdraw's l: R of the cache from Src with S, and the glyph's record,
+    %% its rows kept to a byte each as FChar keeps them.
+    with_font(Cache, State, fun(#{glyphs := {Ascent, N, Glyphs}} = Font) ->
+        case maps:find(Src, Images) of
+            {ok, _} when Index >= N -> {error, einval};
+            {ok, S} ->
+                Glyph = {X0, X1, Y0 band 255, Y1 band 255, signed_byte(Left), Width},
+                Drawn = draw(Font, R, S, Sp, opaque(), Sp, ?S),
+                {ok, put_image(Cache, Drawn#{glyphs := {Ascent, N, Glyphs#{Index => Glyph}}}, State)};
+            error -> {error, enoent}
+        end
+    end);
+step({string, Dst, Src, Font, P, Clipr, Sp, Indices}, State) ->
+    string(State, Dst, Src, Font, P, Clipr, Sp, none, Indices);
+step({string_bg, Dst, Src, Font, P, Clipr, Sp, Bg, Bp, Indices}, State) ->
+    string(State, Dst, Src, Font, P, Clipr, Sp, {Bg, Bp}, Indices);
 step(_Message, _State) ->
     {error, enotsup}.
 
@@ -139,6 +170,70 @@ with_image(Id, #{images := Images}, Fun) ->
 
 put_image(Id, Image, #{images := Images} = State) ->
     State#{images := Images#{Id => Image}}.
+
+with_font(Id, State, Fun) ->
+    with_image(Id, State, fun
+        (#{glyphs := {_, _, _}} = Font) -> Fun(Font);
+        (_) -> {error, einval}
+    end).
+
+signed_byte(B) when B >= 128 -> B - 256;
+signed_byte(B) -> B.
+
+%% A 1x1 replicated k1 image of 1, the opaque mask.
+opaque() ->
+    fill(image({0, 0, 1, 1}, {-(1 bsl 31), -(1 bsl 31), (1 bsl 31) - 1, (1 bsl 31) - 1}, true, 16#31, 1),
+         16#ffffffff).
+
+%% devdraw's s and x, from its drawchar: for x the background, from p
+%% raised by the ascent, as wide as the glyphs' advances and as tall as the
+%% cache, drawn from Bg with Bp at its corner; then each glyph, its rows
+%% placed by the ascent and its columns by its left offset, drawn from Src
+%% through its rectangle of the cache, the point and source point advancing
+%% by its width. Every draw is clipped to Clipr in place of the
+%% destination's clip rectangle, and reads the destination as the draws
+%% before it left it.
+string(#{images := Images, op := Op} = State, Dst, Src, Font, P, Clipr, Sp, Background, Indices) ->
+    Held = fun(Ids) -> lists:all(fun(Id) -> is_map_key(Id, Images) end, Ids) end,
+    case {Held([Dst, Src, Font]), maps:get(Font, Images, none), Held([Bg || {Bg, _} <- [Background]])} of
+        {false, _, _} ->
+            {error, enoent};
+        {true, #{glyphs := {_, _, _}}, false} ->
+            {error, enoent};
+        {true, #{glyphs := {Ascent, N, Glyphs}, r := {_, FY0, _, FY1}}, true} ->
+            Gs = [maps:get(I, Glyphs, {0, 0, 0, 0, 0, 0}) || I <- Indices, I < N],
+            Draws = background(Background, P, Ascent, FY1 - FY0, Gs) ++ glyph_draws(Gs, P, Sp, Src, Font, Ascent),
+            case lists:all(fun(I) -> I < N end, Indices) andalso lists:all(fun in_32_bits/1, Draws) of
+                true ->
+                    Of = fun(opaque, _D) -> opaque();
+                            (Id, D) when Id =:= Dst -> D;
+                            (Id, _D) -> maps:get(Id, Images)
+                         end,
+                    Drawn = lists:foldl(fun({R, S, SP, M, MP}, D) ->
+                                            Image = draw(D#{clipr := Clipr}, R, Of(S, D), SP, Of(M, D), MP, Op),
+                                            Image#{clipr := maps:get(clipr, D)}
+                                        end, maps:get(Dst, Images), Draws),
+                    {ok, put_image(Dst, Drawn, State#{op := ?SoverD})};
+                false ->
+                    {error, einval}
+            end;
+        {true, _, _} ->
+            {error, einval}
+    end.
+
+background(none, _P, _Ascent, _Height, _Gs) -> [];
+background({Bg, Bp}, {X, Y}, Ascent, Height, Gs) ->
+    Advance = lists:sum([W || {_, _, _, _, _, W} <- Gs]),
+    [{{X, Y - Ascent, X + Advance, Y - Ascent + Height}, Bg, Bp, opaque, {0, 0}}].
+
+glyph_draws([], _P, _Sp, _Src, _Font, _Ascent) -> [];
+glyph_draws([{MinX, MaxX, MinY, MaxY, Left, Width} | Gs], {X, Y}, {SX, SY}, Src, Font, Ascent) ->
+    {RX, RY} = {X + Left, Y - (Ascent - MinY)},
+    [{{RX, RY, RX + (MaxX - MinX), RY + (MaxY - MinY)}, Src, {SX + Left, SY + MinY}, Font, {MinX, MinY}}
+     | glyph_draws(Gs, {X + Width, Y}, {SX + Width, SY}, Src, Font, Ascent)].
+
+in_32_bits({{X0, Y0, X1, Y1}, _, {SX, SY}, _, _}) ->
+    lists:all(fun(V) -> V >= -(1 bsl 31) andalso V < 1 bsl 31 end, [X0, Y0, X1, Y1, SX, SY]).
 
 %% An image rectangle draw(3) refuses: empty or inverted, as badrect and
 %% allocmemimage refuse it, or wider or taller than the quota's side.
@@ -236,7 +331,7 @@ image(R, Clipr, Repl, Chan, Depth) ->
     {_, Y0, _, Y1} = R,
     Row = binary:copy(<<0>>, stored_bytes(R, Depth)),
     #{r => R, clipr => Clipr, repl => Repl, chan => Chan, depth => Depth,
-      rows => maps:from_list([{Y, Row} || Y <- lists:seq(Y0, Y1 - 1)])}.
+      glyphs => none, rows => maps:from_list([{Y, Row} || Y <- lists:seq(Y0, Y1 - 1)])}.
 
 %% The bytes a stored row of R covers at Depth: from the byte that holds R's
 %% left edge to the one that holds its last pixel.

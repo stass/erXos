@@ -7,9 +7,9 @@
  * The NIF of erx_memdraw (erlang/apps/erx_display/src/erx_memdraw.erl):
  * terms in, erx_memdraw.h's calls, terms out. An image is a resource
  * whose destructor alone frees it, so an image lives while any process
- * holds it (G2). An operation over 64 KiB of destination bytes moves
- * itself to a dirty CPU scheduler, so a full-screen compose never holds
- * a normal one.
+ * holds it (G2). A draw, load or read over 64 KiB of destination bytes
+ * moves itself to a dirty CPU scheduler, so a full-screen compose never
+ * holds a normal one, and a shape always runs on one.
  */
 #ifndef ERX_MEMDRAW_LOADABLE
 #define STATIC_ERLANG_NIF 1
@@ -31,7 +31,7 @@ typedef struct image_res {
 
 static ErlNifResourceType *image_type;
 static ERL_NIF_TERM atom_ok, atom_error, atom_einval, atom_enomem, atom_none, atom_dst, atom_opaque, atom_true,
-    atom_false;
+    atom_false, atom_fill;
 
 static void
 image_dtor(ErlNifEnv *env, void *object)
@@ -213,6 +213,156 @@ draw_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return touched(env, erx_memdraw_draw(dst, r, src, sp, mask, mp, op, clip, &out), out);
 }
 
+/* A list of at most 2^20 {X, Y} points into *pts, allocated with enif_alloc; false on a bad term. */
+static bool
+get_points(ErlNifEnv *env, ERL_NIF_TERM list, erx_point_t **pts, size_t *n)
+{
+	unsigned len;
+	ERL_NIF_TERM head;
+
+	if (!enif_get_list_length(env, list, &len) || len > (1u << 20))
+		return false;
+	*pts = enif_alloc((len > 0 ? len : 1) * sizeof **pts);
+	if (*pts == NULL)
+		return false;
+	for (unsigned i = 0; i < len; i++) {
+		if (!enif_get_list_cell(env, list, &head, &list) || !get_point(env, head, &(*pts)[i])) {
+			enif_free(*pts);
+			return false;
+		}
+	}
+	*n = len;
+	return true;
+}
+
+/* An ellipse's thickness, or fill: -1, which libmemdraw takes as a fill. */
+static bool
+get_thick(ErlNifEnv *env, ERL_NIF_TERM term, int32_t *out)
+{
+	if (enif_is_identical(term, atom_fill)) {
+		*out = -1;
+		return true;
+	}
+	return get_i32(env, term, out) && *out >= 0;
+}
+
+/*
+ * As touched/3, but a shape that failed with ENOMEM may have drawn part of
+ * itself: {error, enomem, Touched | none}, so the window still marks it.
+ */
+static ERL_NIF_TERM
+shape_touched(ErlNifEnv *env, erx_memdraw_status_t status, erx_rect_t r)
+{
+	if (status != ERX_MEMDRAW_ENOMEM)
+		return touched(env, status, r);
+	ERL_NIF_TERM drawn = r.x0 < r.x1 && r.y0 < r.y1 ? make_rect(env, r) : atom_none;
+
+	return enif_make_tuple3(env, atom_error, atom_enomem, drawn);
+}
+
+/*
+ * The shapes run on a dirty scheduler (their table entries): what one
+ * costs follows from its geometry, not from the pixels it writes.
+ */
+
+/* line(Dst, P0, P1, End0, End1, Thick, Src, Sp, Op) -> {ok, rect() | none} | {error, einval | enomem} */
+static ERL_NIF_TERM
+line_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_mdimage_t *dst, *src;
+	erx_point_t p0, p1, sp;
+	uint32_t end0, end1;
+	int32_t thick;
+	int op;
+	erx_rect_t out = { 0, 0, 0, 0 };
+
+	(void)argc;
+	if (!get_image(env, argv[0], &dst) || !get_point(env, argv[1], &p0) || !get_point(env, argv[2], &p1) ||
+	    !get_u32(env, argv[3], &end0) || !get_u32(env, argv[4], &end1) || !get_i32(env, argv[5], &thick) ||
+	    !get_image(env, argv[6], &src) || !get_point(env, argv[7], &sp) || !enif_get_int(env, argv[8], &op))
+		return enif_make_badarg(env);
+	return shape_touched(env, erx_memdraw_line(dst, p0, p1, end0, end1, thick, src, sp, op, &out), out);
+}
+
+/* poly(Dst, Points, End0, End1, Thick, Src, Sp, Op) -> as line/9 */
+static ERL_NIF_TERM
+poly_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_mdimage_t *dst, *src;
+	erx_point_t *pts, sp;
+	size_t n;
+	uint32_t end0, end1;
+	int32_t thick;
+	int op;
+	erx_rect_t out = { 0, 0, 0, 0 };
+
+	(void)argc;
+	if (!get_image(env, argv[0], &dst) || !get_u32(env, argv[2], &end0) || !get_u32(env, argv[3], &end1) ||
+	    !get_i32(env, argv[4], &thick) || !get_image(env, argv[5], &src) || !get_point(env, argv[6], &sp) ||
+	    !enif_get_int(env, argv[7], &op) || !get_points(env, argv[1], &pts, &n))
+		return enif_make_badarg(env);
+	erx_memdraw_status_t status = erx_memdraw_poly(dst, pts, n, end0, end1, thick, src, sp, op, &out);
+	enif_free(pts);
+	return shape_touched(env, status, out);
+}
+
+/* fill_poly(Dst, Points, Wind, Src, Sp, Op) -> as line/9 */
+static ERL_NIF_TERM
+fill_poly_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_mdimage_t *dst, *src;
+	erx_point_t *pts, sp;
+	size_t n;
+	int32_t wind;
+	int op;
+	erx_rect_t out = { 0, 0, 0, 0 };
+
+	(void)argc;
+	if (!get_image(env, argv[0], &dst) || !get_i32(env, argv[2], &wind) || !get_image(env, argv[3], &src) ||
+	    !get_point(env, argv[4], &sp) || !enif_get_int(env, argv[5], &op) || !get_points(env, argv[1], &pts, &n))
+		return enif_make_badarg(env);
+	erx_memdraw_status_t status = erx_memdraw_fill_poly(dst, pts, n, wind, src, sp, op, &out);
+	enif_free(pts);
+	return shape_touched(env, status, out);
+}
+
+/* ellipse(Dst, C, A, B, Thick | fill, Src, Sp, Op) -> as line/9 */
+static ERL_NIF_TERM
+ellipse_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_mdimage_t *dst, *src;
+	erx_point_t c, sp;
+	int32_t a, b, thick;
+	int op;
+	erx_rect_t out = { 0, 0, 0, 0 };
+
+	(void)argc;
+	if (!get_image(env, argv[0], &dst) || !get_point(env, argv[1], &c) || !get_i32(env, argv[2], &a) ||
+	    !get_i32(env, argv[3], &b) || !get_thick(env, argv[4], &thick) || !get_image(env, argv[5], &src) ||
+	    !get_point(env, argv[6], &sp) || !enif_get_int(env, argv[7], &op))
+		return enif_make_badarg(env);
+	return shape_touched(env, erx_memdraw_ellipse(dst, c, a, b, thick, src, sp, op, &out), out);
+}
+
+/* arc(Dst, C, A, B, Thick | fill, Src, Sp, Alpha, Phi, Op) -> as line/9 */
+static ERL_NIF_TERM
+arc_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_mdimage_t *dst, *src;
+	erx_point_t c, sp;
+	int32_t a, b, thick, alpha, phi;
+	int op;
+	erx_rect_t out = { 0, 0, 0, 0 };
+
+	(void)argc;
+	if (!get_image(env, argv[0], &dst) || !get_point(env, argv[1], &c) || !get_i32(env, argv[2], &a) ||
+	    !get_i32(env, argv[3], &b) || !get_thick(env, argv[4], &thick) || !get_image(env, argv[5], &src) ||
+	    !get_point(env, argv[6], &sp) || !get_i32(env, argv[7], &alpha) || !get_i32(env, argv[8], &phi) ||
+	    !enif_get_int(env, argv[9], &op))
+		return enif_make_badarg(env);
+	return shape_touched(env, erx_memdraw_arc(dst, c, a, b, thick, src, sp, alpha, phi, op, &out), out);
+}
+
 /* load(Image, R, Pixels) -> {ok, rect()} | {error, einval} */
 static ERL_NIF_TERM
 load_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -307,6 +457,7 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	atom_opaque = enif_make_atom(env, "opaque");
 	atom_true = enif_make_atom(env, "true");
 	atom_false = enif_make_atom(env, "false");
+	atom_fill = enif_make_atom(env, "fill");
 	return 0;
 }
 
@@ -316,6 +467,11 @@ static ErlNifFunc functions[] = {
 	{ "draw", 8, draw_nif, 0 },
 	{ "load", 3, load_nif, 0 },
 	{ "read", 2, read_nif, 0 },
+	{ "line", 9, line_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "poly", 8, poly_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "fill_poly", 6, fill_poly_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "ellipse", 8, ellipse_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "arc", 10, arc_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 #ifdef ERX_MEMDRAW_CLOAD
 	{ "cload", 3, cload_nif, 0 },
 #endif

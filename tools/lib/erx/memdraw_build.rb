@@ -5,6 +5,9 @@
 require 'fileutils'
 require 'open3'
 require_relative 'abi'
+require_relative 'bounded_file'
+require_relative 'dependencies'
+require_relative 'json_input'
 require_relative 'error'
 
 module Erx
@@ -19,7 +22,8 @@ module Erx
     LIBMEMDRAW = 'display/libmemdraw'
     MEMDRAW = 'display/memdraw'
     # The files of 9front's libmemdraw and libdraw that erXos imported (display/libmemdraw/ORIGIN.md).
-    IMPORTED = %w[alloc arith badrect bytesperline chan cload cmap draw drawrepl load rectclip unload].freeze
+    IMPORTED = %w[alloc arc arith badrect bytesperline chan cload cmap draw drawrepl ellipse fillpoly icossin icossin2 line
+                  load poly rectclip unload].freeze
     OURS = %w[erx_draw_clip erx_memdraw].freeze
     # The imported files keep Plan 9's pragmas and USED(a, b).
     WARNINGS = %w[-Wall -Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function -Werror].freeze
@@ -72,6 +76,51 @@ module Erx
     def program(root:, harness:, directory:, compiler:, seed: nil)
       sources = sources(root: root, directory: directory, seed: seed) << File.join(root, harness)
       compile(compiler, SANITIZE, sources, File.join(directory, File.basename(harness, '.c')), root: root)
+    end
+
+    # The 9front build (docs/design-display.md, "The pixel primitives"):
+    # 9front's libmemdraw and the parts of libdraw it links, unmodified
+    # from the fetched pin, compiled for the host against erXos's
+    # test/display/memdraw_oracle headers and the pin's own draw.h,
+    # memdraw.h and memlayer.h (copied, so the pin's other system headers
+    # never shadow the host's), with harness built -DERX_ORACLE.
+    ORACLE_SOURCES = { 'libmemdraw' => %w[alloc arc cmap draw ellipse fillpoly hwdraw line load poly unload],
+                       'libdraw' => %w[arith badrect bytesperline chan drawrepl icossin icossin2 rectclip] }.freeze
+    ORACLE_HEADERS = %w[draw.h memdraw.h memlayer.h].freeze
+    ORACLE_SHIM = 'test/display/memdraw_oracle'
+    NINEFRONT = '9front'
+
+    def oracle(root:, harness:, directory:, compiler:)
+      tree = ninefront_tree(root)
+      headers = File.join(directory, 'oracle-include')
+      FileUtils.mkdir_p(headers)
+      ORACLE_HEADERS.each { |name| FileUtils.cp(File.join(tree, 'sys/include', name), headers) }
+      sources = ORACLE_SOURCES.flat_map { |lib, names| names.map { |name| File.join(tree, 'sys/src', lib, "#{name}.c") } }
+      output = File.join(directory, "#{File.basename(harness, '.c')}-9front")
+      # Plan 9's qsort comparators take void *, and its sources warn freely.
+      command = [compiler, '-std=c17', '-g', '-O1', '-w', '-Wno-incompatible-function-pointer-types', '-DERX_ORACLE', '-I', File.join(root, ORACLE_SHIM), '-I', headers,
+                 '-o', output, File.join(root, harness), *sources]
+      text, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, *command, stdin_data: '')
+      raise Error, "9front build failed:\n#{text}" unless status.success?
+
+      output
+    end
+
+    # The fetched 9front tree, only as deps.lock pins it.
+    def ninefront_tree(root)
+      pin = DependencySchema.parse(File.binread(File.join(root, 'deps.lock')))
+                            .find { |source| source.fetch('id') == NINEFRONT } ||
+            raise(Error, "deps.lock has no #{NINEFRONT} source")
+      parent = File.join(root, 'build/third_party', NINEFRONT)
+      marker = File.join(parent, '.source.json')
+      recorded = File.file?(marker) &&
+                 JsonInput.parse(BoundedFile.read(marker, maximum: 65_536), max_bytes: 65_536,
+                                 label: 'source download record')
+      unless recorded == pin
+        raise Error, "9front is not fetched at deps.lock's pin: run tools/erx fetch --source #{NINEFRONT}"
+      end
+
+      File.join(parent, pin.fetch('directory'))
     end
 
     def sources(root:, directory:, seed:)

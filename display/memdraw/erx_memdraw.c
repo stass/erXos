@@ -275,6 +275,303 @@ erx_memdraw_rect_bytes(const erx_mdimage_t *image, erx_rect_t r)
 	return rows_of(cmem(image), r, &n) ? n : 0;
 }
 
+/*
+ * The shapes: libmemdraw's memline, mempoly, memfillpoly, memellipse and
+ * memarc. Each breaks its shape into draws through memdraw below, so
+ * erx_draw_clip clips every pixel they touch, and draws temporaries
+ * (a disc brush, an arc's wedge) the same way.
+ *
+ * libmemdraw computes a shape in int, scaling coordinates by 2^10 for
+ * the polygon fill, whose scan also forms products in long, 64 bits on
+ * every erXos target. Within these limits, which erx_draw_core holds
+ * every shape to, nothing it computes overflows: a point, centre or
+ * source point within 2^19 of the origin, a semi-axis up to 2^14, a
+ * thickness up to 2^10.
+ *
+ * Every pixel such a shape draws lies within SHAPE_REACH of the origin:
+ * a point within 2^19, widened by at most a semi-axis (2^14) and a
+ * thickness (2^10), or by an arrow head's at most 511 + 2^10, stays
+ * below 2^19 + 2^15 < 2^20. A source pixel is a destination pixel plus
+ * sp - p for points within 2^19, so lies within 2^20 + 2^20 = 2^21.
+ */
+#define SHAPE_COORD (1 << 19)
+#define SHAPE_AXIS (1 << 14)
+#define SHAPE_THICK (1 << 10)
+#define SHAPE_REACH (1 << 20)
+#define SHAPE_SOURCE_REACH (1 << 21)
+
+/* p and P carry at most a write's worth of points, far below this. */
+#define SHAPE_MAX_POINTS (1 << 20)
+
+/*
+ * One shape, as the wrappers below decode it: which algorithm, and the
+ * parameters each takes (pts and n for p and P, c, a, b and the angles
+ * for e and E, the ends for L and p).
+ */
+typedef enum shape_kind { SHAPE_LINE, SHAPE_POLY, SHAPE_FILL_POLY, SHAPE_ELLIPSE, SHAPE_ARC } shape_kind_t;
+
+typedef struct shape_args {
+	shape_kind_t kind;
+	Point p0, p1, sp;	/* L's ends; e's and E's centre in p0; every shape's source point */
+	const erx_point_t *pts;	/* p and P */
+	size_t n;
+	int end0, end1, thick;	/* thick -1 fills an ellipse or arc */
+	int a, b, alpha, phi, wind;
+} shape_args_t;
+
+/*
+ * The shape this thread is drawing: copies of its images' headers, the
+ * union of the destination rectangles its draws touched, and whether an
+ * allocation failed. draw_shape sets it around its one call into
+ * libmemdraw and clears it after.
+ */
+typedef struct shape {
+	Memimage dst, src;
+	Memimage *copy;		/* the source's snapshot, when it is the destination */
+	Rectangle touched;
+	bool any, failed;
+} shape_t;
+
+static _Thread_local shape_t *drawing;
+
+void
+erx_memdraw_nomem(void)
+{
+	if (drawing != NULL)
+		drawing->failed = true;
+}
+
+/*
+ * libmemlayer's memdraw and memline for an image that is not a layer,
+ * which erXos has no other kind of: every draw a shape makes, into its
+ * destination or a temporary, is clipped here by erx_draw_clip.
+ */
+void
+memdraw(Memimage *dst, Rectangle r, Memimage *src, Point sp, Memimage *mask, Point mp, int op)
+{
+	erx_clip_t clip;
+
+	if (!erx_draw_clip(&clip, dst, dst->clipr, r, src, sp, mask, mp))
+		return;
+	if (memimagedraw(dst, src, mask, &clip, op) != 0) {
+		erx_memdraw_nomem();
+		return;
+	}
+	if (drawing != NULL && dst->data == drawing->dst.data) {
+		if (!drawing->any)
+			drawing->touched = clip.r;
+		else
+			combinerect(&drawing->touched, clip.r);
+		drawing->any = true;
+	}
+}
+
+void
+memline(Memimage *dst, Point p0, Point p1, int end0, int end1, int radius, Memimage *src, Point sp, int op)
+{
+	memimageline(dst, p0, p1, end0, end1, radius, src, sp, op);
+}
+
+/*
+ * *r becomes its intersection with b; false when that is empty. Unlike
+ * rectclip, an empty or inverted r or b gives false.
+ */
+static bool
+intersect(Rectangle *r, Rectangle b)
+{
+	Rectangle i = Rect(r->min.x > b.min.x ? r->min.x : b.min.x, r->min.y > b.min.y ? r->min.y : b.min.y,
+	    r->max.x < b.max.x ? r->max.x : b.max.x, r->max.y < b.max.y ? r->max.y : b.max.y);
+
+	if (i.min.x >= i.max.x || i.min.y >= i.max.y)
+		return false;
+	*r = i;
+	return true;
+}
+
+static bool
+coord_ok(erx_point_t p)
+{
+	return p.x >= -SHAPE_COORD && p.x < SHAPE_COORD && p.y >= -SHAPE_COORD && p.y < SHAPE_COORD;
+}
+
+static bool
+axis_ok(int32_t a)
+{
+	return a >= 0 && a <= SHAPE_AXIS;
+}
+
+static bool
+thick_ok(int32_t t, bool fill_allowed)
+{
+	return (t >= 0 || (fill_allowed && t == -1)) && t <= SHAPE_THICK;
+}
+
+/* Every point of p or P within the limits, and not too many of them. */
+static bool
+points_ok(const erx_point_t *pts, size_t n)
+{
+	if (n > SHAPE_MAX_POINTS)
+		return false;
+	for (size_t i = 0; i < n; i++)
+		if (!coord_ok(pts[i]))
+			return false;
+	return true;
+}
+
+/*
+ * The destination's clip rectangle as the shape reads it. Its columns
+ * and its bottom are narrowed to the image, which changes no pixel drawn:
+ * memdraw clips every span to the image anyway, and the polygon fill
+ * scans its rows from the top down. Its top only to SHAPE_REACH, above
+ * every row a shape draws: the fill computes each edge's position from
+ * the row its scan starts at, and its rounding of a falling edge
+ * (smuldivmod) depends on that row, so a top narrowed to the image could
+ * change pixels. False when the shape can touch no pixel.
+ */
+static bool
+shape_clip(Rectangle *clipr, Rectangle r)
+{
+	Rectangle below = Rect(r.min.x, -SHAPE_REACH, r.max.x, r.max.y);
+
+	return intersect(clipr, Rect(-SHAPE_REACH, -SHAPE_REACH, SHAPE_REACH, SHAPE_REACH)) && intersect(clipr, below);
+}
+
+/* libmemdraw's algorithm for a over the header copies in s. */
+static erx_memdraw_status_t
+run_shape(shape_t *s, const shape_args_t *a, int op)
+{
+	Point *vert = NULL;
+
+	if (a->kind == SHAPE_POLY || a->kind == SHAPE_FILL_POLY) {
+		if ((vert = malloc((a->n > 0 ? a->n : 1) * sizeof(Point))) == nil)
+			return ERX_MEMDRAW_ENOMEM;
+		for (size_t i = 0; i < a->n; i++)
+			vert[i] = Pt(a->pts[i].x, a->pts[i].y);
+	}
+	switch (a->kind) {
+	case SHAPE_LINE:
+		memline(&s->dst, a->p0, a->p1, a->end0, a->end1, a->thick, &s->src, a->sp, op);
+		break;
+	case SHAPE_POLY:
+		mempoly(&s->dst, vert, (int)a->n, a->end0, a->end1, a->thick, &s->src, a->sp, op);
+		break;
+	case SHAPE_FILL_POLY:
+		memfillpoly(&s->dst, vert, (int)a->n, a->wind, &s->src, a->sp, op);
+		break;
+	case SHAPE_ELLIPSE:
+		memellipse(&s->dst, a->p0, a->a, a->b, a->thick, &s->src, a->sp, op);
+		break;
+	case SHAPE_ARC:
+		memarc(&s->dst, a->p0, a->a, a->b, a->thick, &s->src, a->sp, a->alpha, a->phi, op);
+		break;
+	}
+	free(vert);
+	return ERX_MEMDRAW_DONE;
+}
+
+/*
+ * The one way a shape is drawn. It copies the headers the shape reads
+ * once, as erx_memdraw_draw does: the destination's with its clip
+ * rectangle narrowed by shape_clip, the source's narrowed to
+ * SHAPE_SOURCE_REACH, which changes no pixel and keeps libmemdraw's
+ * arithmetic over them in range. A source that is the destination is
+ * read from a snapshot taken before the shape, as a draw's is. The
+ * thread's shape record is set only around run_shape, so memdraw
+ * accounts every draw of this shape and of no other.
+ */
+static erx_memdraw_status_t
+draw_shape(erx_mdimage_t *dsti, erx_mdimage_t *srci, const shape_args_t *a, int op, erx_rect_t *touched)
+{
+	const Rectangle source_reach = Rect(-SHAPE_SOURCE_REACH, -SHAPE_SOURCE_REACH, SHAPE_SOURCE_REACH,
+	    SHAPE_SOURCE_REACH);
+	shape_t s = { .dst = *mem(dsti) };
+
+	if (op < 0 || op >= Ncomp)
+		return ERX_MEMDRAW_EINVAL;
+	if (!shape_clip(&s.dst.clipr, s.dst.r))
+		return ERX_MEMDRAW_NOTHING;
+	if (srci == dsti) {
+		if ((s.copy = snapshot(mem(dsti))) == nil)
+			return ERX_MEMDRAW_ENOMEM;
+		s.src = *s.copy;
+	} else {
+		s.src = *mem(srci);
+	}
+	erx_memdraw_status_t st = ERX_MEMDRAW_NOTHING;
+	if (intersect(&s.src.clipr, source_reach)) {
+		drawing = &s;
+		st = run_shape(&s, a, op);
+		drawing = NULL;
+	}
+	freememimage(s.copy);
+	if (s.any)
+		*touched = erect(s.touched);
+	if (st != ERX_MEMDRAW_DONE)
+		return st;
+	if (s.failed)
+		return ERX_MEMDRAW_ENOMEM;
+	return s.any ? ERX_MEMDRAW_DONE : ERX_MEMDRAW_NOTHING;
+}
+
+static Point
+pt(erx_point_t p)
+{
+	return Pt(p.x, p.y);
+}
+
+erx_memdraw_status_t
+erx_memdraw_line(erx_mdimage_t *dst, erx_point_t p0, erx_point_t p1, uint32_t end0, uint32_t end1, int32_t thick,
+    erx_mdimage_t *src, erx_point_t sp, int op, erx_rect_t *touched)
+{
+	if (!coord_ok(p0) || !coord_ok(p1) || !coord_ok(sp) || !thick_ok(thick, false))
+		return ERX_MEMDRAW_EINVAL;
+	shape_args_t a = { .kind = SHAPE_LINE, .p0 = pt(p0), .p1 = pt(p1), .sp = pt(sp), .end0 = (int)end0,
+		.end1 = (int)end1, .thick = thick };
+	return draw_shape(dst, src, &a, op, touched);
+}
+
+erx_memdraw_status_t
+erx_memdraw_poly(erx_mdimage_t *dst, const erx_point_t *pts, size_t n, uint32_t end0, uint32_t end1, int32_t thick,
+    erx_mdimage_t *src, erx_point_t sp, int op, erx_rect_t *touched)
+{
+	if (!points_ok(pts, n) || !coord_ok(sp) || !thick_ok(thick, false))
+		return ERX_MEMDRAW_EINVAL;
+	shape_args_t a = { .kind = SHAPE_POLY, .pts = pts, .n = n, .sp = pt(sp), .end0 = (int)end0, .end1 = (int)end1,
+		.thick = thick };
+	return draw_shape(dst, src, &a, op, touched);
+}
+
+erx_memdraw_status_t
+erx_memdraw_fill_poly(erx_mdimage_t *dst, const erx_point_t *pts, size_t n, int32_t wind, erx_mdimage_t *src,
+    erx_point_t sp, int op, erx_rect_t *touched)
+{
+	if (!points_ok(pts, n) || !coord_ok(sp))
+		return ERX_MEMDRAW_EINVAL;
+	shape_args_t a = { .kind = SHAPE_FILL_POLY, .pts = pts, .n = n, .sp = pt(sp), .wind = wind };
+	return draw_shape(dst, src, &a, op, touched);
+}
+
+erx_memdraw_status_t
+erx_memdraw_ellipse(erx_mdimage_t *dst, erx_point_t c, int32_t a, int32_t b, int32_t thick, erx_mdimage_t *src,
+    erx_point_t sp, int op, erx_rect_t *touched)
+{
+	if (!coord_ok(c) || !coord_ok(sp) || !axis_ok(a) || !axis_ok(b) || !thick_ok(thick, true))
+		return ERX_MEMDRAW_EINVAL;
+	shape_args_t s = { .kind = SHAPE_ELLIPSE, .p0 = pt(c), .sp = pt(sp), .a = a, .b = b, .thick = thick };
+	return draw_shape(dst, src, &s, op, touched);
+}
+
+erx_memdraw_status_t
+erx_memdraw_arc(erx_mdimage_t *dst, erx_point_t c, int32_t a, int32_t b, int32_t thick, erx_mdimage_t *src,
+    erx_point_t sp, int32_t alpha, int32_t phi, int op, erx_rect_t *touched)
+{
+	if (!coord_ok(c) || !coord_ok(sp) || !axis_ok(a) || !axis_ok(b) || !thick_ok(thick, true))
+		return ERX_MEMDRAW_EINVAL;
+	shape_args_t s = { .kind = SHAPE_ARC, .p0 = pt(c), .sp = pt(sp), .a = a, .b = b, .thick = thick,
+		.alpha = alpha, .phi = phi };
+	return draw_shape(dst, src, &s, op, touched);
+}
+
 #ifdef ERX_MEMDRAW_CLOAD
 erx_memdraw_status_t
 erx_memdraw_cload(erx_mdimage_t *image, erx_rect_t r, const uint8_t *data, size_t n, size_t *consumed)

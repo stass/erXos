@@ -15,13 +15,17 @@ require_relative '../../tools/lib/erx/memdraw_build'
 # pixel with erx_draw_ref, and Y payloads decode alike through erx_draw_image
 # and 9front's cloadmemimage. The emulator cannot load ASan's runtime into a
 # NIF (TODO.md, storage), so the same operations, rectangles far outside every
-# image among them, also run in a harness under ASan and UBSan. Each check is
-# shown to fail on the fault it guards.
+# image among them, also run in a harness under ASan and UBSan. Strings (a font
+# cache, glyphs and s and x) agree with erx_draw_ref too. The shapes run through
+# erx_memdraw and through the 9front build, 9front's libmemdraw unmodified, and
+# agree pixel for pixel; at their limits they run under ASan and UBSan. Each
+# check is shown to fail on the fault it guards.
 class ErxMemdrawTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   OTP = File.join(ROOT, 'build/oracle/jit/install/lib/erlang')
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
   HARNESS = 'test/display/erx_memdraw_stress.c'
+  SHAPES = 'test/display/memdraw_shapes.c'
   MODULES = Erx::MemdrawBuild::MODULES
   Seed = Erx::MemdrawBuild::Seed
 
@@ -42,6 +46,21 @@ class ErxMemdrawTest < Minitest::Test
   def test_y_decodes_alike_through_cloadmemimage
     prepare
     assert_equal 'y ok', run_cases('y', 4000)
+  end
+
+  def test_strings_agree_with_erx_draw_ref
+    prepare
+    assert_equal 'strings ok', run_cases('strings', 300)
+  end
+
+  def test_seeded_glyph_row_fails_the_string_comparison
+    prepare
+    core = File.join(@directory, 'erx_draw_core.erl')
+    seeded = File.read(File.join(ROOT, 'erlang/apps/erx_display/src/erx_draw_core.erl'))
+                 .sub('    Y0 = Y - (Ascent - MinY),', '    Y0 = Y - (Ascent - MinY) + 1,')
+    File.write(core, seeded)
+    erlc(core)
+    assert_match(/\Astrings FAIL/, run_cases('strings', 300))
   end
 
   def test_unit_cases
@@ -77,6 +96,26 @@ class ErxMemdrawTest < Minitest::Test
     assert_match(/\Ay FAIL/, run_cases('y', 4000))
   end
 
+  def test_shapes_agree_with_the_9front_build
+    ours, theirs = shapes('diff', 3000)
+    assert_match(/^diff ok$/, ours)
+    assert_equal theirs, ours
+  end
+
+  def test_shapes_at_their_limits_stay_in_range_under_asan
+    output, status = run_program(Erx::MemdrawBuild.program(root: ROOT, harness: SHAPES, directory: @directory,
+                                                           compiler: COMPILER), 'far', 600)
+    assert status.success?, output
+    assert_match(/^far ok$/, output)
+  end
+
+  def test_seeded_memline_step_fails_the_shape_comparison
+    ours, theirs = shapes('diff', 3000, seed: Seed.new(path: 'display/libmemdraw/line.c',
+                                                       from: 'dx = (sin*(2*radius+1))/2;',
+                                                       to: 'dx = (sin*(2*radius+2))/2;'))
+    refute_equal theirs, ours
+  end
+
   private
 
   def prepare(seed: nil)
@@ -87,6 +126,18 @@ class ErxMemdrawTest < Minitest::Test
 
   def run_cases(mode, rounds, seed: 1)
     Erx::MemdrawBuild.run_cases(otp: OTP, directory: @directory, mode: mode, rounds: rounds, seed: seed)
+  end
+
+  # The shapes harness through erx_memdraw (seeded or not) and through the 9front build.
+  def shapes(mode, rounds, seed: nil)
+    ours = Erx::MemdrawBuild.program(root: ROOT, harness: SHAPES, directory: @directory, compiler: COMPILER, seed: seed)
+    theirs = Erx::MemdrawBuild.oracle(root: ROOT, harness: SHAPES, directory: @directory, compiler: COMPILER)
+    [run_program(ours, mode, rounds).first, run_program(theirs, mode, rounds).first]
+  end
+
+  def run_program(program, mode, rounds)
+    Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0:abort_on_error=0' }, 'gtimeout', '-k', '10', '300',
+                    program, mode, '1', rounds.to_s, stdin_data: '')
   end
 
   def stress(seed: nil)

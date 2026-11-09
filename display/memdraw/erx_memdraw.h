@@ -87,6 +87,30 @@ size_t erx_memdraw_draw_bytes(const erx_mdimage_t *dst, erx_rect_t r, const erx_
     const erx_mdimage_t *mask, erx_point_t mp, const erx_rect_t *clipr);
 size_t erx_memdraw_rect_bytes(const erx_mdimage_t *image, erx_rect_t r);
 
+/*
+ * The shapes, libmemdraw's algorithms over src's pixels with sp aligned
+ * as draw(3) aligns it, composed onto dst with operation op: L, p and P
+ * (end0 and end1 are draw(3)'s line ends, thick its thickness, wind its
+ * winding rule), and e and E (thick -1 fills the ellipse; alpha and phi
+ * are degrees). Every point, centre and source point lies within 2^19
+ * of the origin, every semi-axis is at most 2^14 and every thickness at
+ * most 2^10, or EINVAL; within them libmemdraw's int arithmetic does not
+ * overflow. *touched is the union of the clipped rectangles written.
+ * ENOMEM when a temporary could not be allocated, after which part of
+ * the shape may have been drawn: *touched is then what was, unchanged
+ * when nothing was.
+ */
+erx_memdraw_status_t erx_memdraw_line(erx_mdimage_t *dst, erx_point_t p0, erx_point_t p1, uint32_t end0,
+    uint32_t end1, int32_t thick, erx_mdimage_t *src, erx_point_t sp, int op, erx_rect_t *touched);
+erx_memdraw_status_t erx_memdraw_poly(erx_mdimage_t *dst, const erx_point_t *pts, size_t n, uint32_t end0,
+    uint32_t end1, int32_t thick, erx_mdimage_t *src, erx_point_t sp, int op, erx_rect_t *touched);
+erx_memdraw_status_t erx_memdraw_fill_poly(erx_mdimage_t *dst, const erx_point_t *pts, size_t n, int32_t wind,
+    erx_mdimage_t *src, erx_point_t sp, int op, erx_rect_t *touched);
+erx_memdraw_status_t erx_memdraw_ellipse(erx_mdimage_t *dst, erx_point_t c, int32_t a, int32_t b, int32_t thick,
+    erx_mdimage_t *src, erx_point_t sp, int op, erx_rect_t *touched);
+erx_memdraw_status_t erx_memdraw_arc(erx_mdimage_t *dst, erx_point_t c, int32_t a, int32_t b, int32_t thick,
+    erx_mdimage_t *src, erx_point_t sp, int32_t alpha, int32_t phi, int op, erx_rect_t *touched);
+
 #ifdef ERX_MEMDRAW_CLOAD
 /*
  * Test tool only, linked into no release: 9front's cloadmemimage, the

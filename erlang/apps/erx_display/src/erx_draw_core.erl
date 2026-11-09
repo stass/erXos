@@ -68,6 +68,13 @@ operation.
 -define(MAX_AREA, 16#10000000).
 -define(COORD_MIN, -16#80000000).
 -define(COORD_MAX, 16#7fffffff).
+%% The limits within which erx_memdraw draws a shape, since libmemdraw
+%% computes it in 32-bit int (display/memdraw/erx_memdraw.c, SHAPE_COORD,
+%% SHAPE_AXIS and SHAPE_THICK): every point, centre and source point within
+%% 2^19 of the origin, a semi-axis up to 2^14 and a thickness up to 2^10.
+-define(SHAPE_COORD, (1 bsl 19)).
+-define(SHAPE_AXIS, (1 bsl 14)).
+-define(SHAPE_THICK, (1 bsl 10)).
 
 -type image_id() :: erx_draw_codec:image_id().
 -type point() :: erx_draw_codec:point().
@@ -213,7 +220,9 @@ step(State, {draw, Dst, Src, Mask, R, Sp, Mp}) ->
 step(State, {Kind, Dst, Src, C, A, B, Thick, Sp, Alpha, Phi}) when Kind =:= ellipse; Kind =:= fill_ellipse ->
     maybe
         ok ?= held(State, [Dst, Src]),
-        ok ?= check(A >= 0 andalso B >= 0 andalso Thick >= 0, einval),
+        ok ?= check(axis_ok(A) andalso axis_ok(B) andalso Thick >= 0 andalso coords_ok([C, Sp]), einval),
+        %% E fills, so its thickness is not drawn.
+        ok ?= check(Kind =:= fill_ellipse orelse thick_ok(Thick), einval),
         {Op, Next} = take_op(State),
         {ok, Next, [ellipse(Kind, Dst, Src, C, A, B, Thick, Sp, arc(Alpha), Phi, Op)]}
     end;
@@ -246,7 +255,7 @@ step(State, {glyph, Cache, Src, Index, {X0, Y0, X1, Y1} = R, Sp, Left, Width}) -
 step(State, {line, Dst, P0, P1, End0, End1, Thick, Src, Sp}) ->
     maybe
         ok ?= held(State, [Dst]),
-        ok ?= check(Thick >= 0, einval),
+        ok ?= check(thick_ok(Thick) andalso coords_ok([P0, P1, Sp]), einval),
         ok ?= held(State, [Src]),
         {Op, Next} = take_op(State),
         {ok, Next, [{line, Dst, P0, P1, End0, End1, Thick, Src, Sp, Op}]}
@@ -261,7 +270,7 @@ step(_State, {op, _Op}) -> {error, einval};
 step(State, {poly, Dst, End0, End1, Thick, Src, Sp, Points}) ->
     maybe
         ok ?= held(State, [Dst]),
-        ok ?= check(Thick >= 0, einval),
+        ok ?= check(thick_ok(Thick) andalso coords_ok([Sp | Points]), einval),
         ok ?= held(State, [Src]),
         {Op, Next} = take_op(State),
         {ok, Next, [{poly, Dst, Points, End0, End1, Thick, Src, Sp, Op}]}
@@ -269,6 +278,7 @@ step(State, {poly, Dst, End0, End1, Thick, Src, Sp, Points}) ->
 step(State, {fill_poly, Dst, Wind, _Ignore, Src, Sp, Points}) ->
     maybe
         ok ?= held(State, [Dst, Src]),
+        ok ?= check(coords_ok([Sp | Points]), einval),
         {Op, Next} = take_op(State),
         {ok, Next, [{fill_poly, Dst, Points, Wind, Src, Sp, Op}]}
     end;
@@ -332,6 +342,16 @@ glyph_draws(#{dst := Dst, src := Src, font := Font, op := Op, clip := Clip, asce
 %% message, which hold only those.
 in_coords({draw, _Dst, {X0, Y0, X1, Y1}, _Src, {SX, SY}, _Mask, _Mp, _Op, _Clip}) ->
     lists:all(fun(V) -> V >= ?COORD_MIN andalso V =< ?COORD_MAX end, [X0, Y0, X1, Y1, SX, SY]).
+
+%% A shape within erx_memdraw's limits (SHAPE_COORD, SHAPE_AXIS, SHAPE_THICK).
+coords_ok(Points) ->
+    lists:all(fun({X, Y}) -> coord_ok(X) andalso coord_ok(Y) end, Points).
+
+coord_ok(V) -> V >= -?SHAPE_COORD andalso V < ?SHAPE_COORD.
+
+axis_ok(A) -> A >= 0 andalso A =< ?SHAPE_AXIS.
+
+thick_ok(T) -> T >= 0 andalso T =< ?SHAPE_THICK.
 
 %% An e or E as the shape alpha's high bit picks: the whole ellipse or an arc.
 ellipse(Kind, Dst, Src, C, A, B, Thick, Sp, Arc, Phi, Op) ->

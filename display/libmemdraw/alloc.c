@@ -2,7 +2,8 @@
  * Modified by erXos (ORIGIN.md):
  * memimagemove and the image pool are gone: images are calloc'd,
  * zeroed with their row padding, with one word past the rows, and
- * the caller-pc word is 0.
+ * the caller-pc word is 0; a failed allocation is reported
+ * (erx_memdraw_nomem).
  */
 #include <u.h>
 #include <libc.h>
@@ -70,8 +71,10 @@ allocmemimage(Rectangle r, ulong chan)
 	}
 
 	md = malloc(sizeof(Memdata));
-	if(md == nil)
+	if(md == nil){
+		erx_memdraw_nomem();
 		return nil;
+	}
 
 	md->ref = 1;
 	/*
@@ -81,6 +84,7 @@ allocmemimage(Rectangle r, ulong chan)
 	md->base = calloc(1, sizeof(Memdata*)+(2+nw)*sizeof(ulong));
 	if(md->base == nil){
 		free(md);
+		erx_memdraw_nomem();
 		return nil;
 	}
 
@@ -99,6 +103,7 @@ allocmemimage(Rectangle r, ulong chan)
 	if(i == nil){
 		free(md->base);
 		free(md);
+		erx_memdraw_nomem();
 		return nil;
 	}
 	md->imref = i;

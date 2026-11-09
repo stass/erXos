@@ -1018,7 +1018,8 @@ $(OBJDIR)/erx_littlefs_nif.o: CFLAGS += $(LFS_CFLAGS)
 # primitives"): 9front's libmemdraw as erXos imported it in display/libmemdraw, its
 # loader cload.c left out (tests alone link it), and erXos's clipping and NIF in
 # display/memdraw. The imported files keep Plan 9's pragmas and USED(a, b).
-MEMDRAW_LIB = alloc arith badrect bytesperline chan cmap draw drawrepl load rectclip unload
+MEMDRAW_LIB = alloc arc arith badrect bytesperline chan cmap draw drawrepl ellipse fillpoly icossin icossin2 \
+	line load poly rectclip unload
 MEMDRAW_CFLAGS = -I$(ERX_TREE)/display/libmemdraw -I$(ERX_TREE)/display/memdraw \
 	-Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function
 MEMDRAW_OBJS = $(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o) $(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o
