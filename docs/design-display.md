@@ -1906,7 +1906,10 @@ operations:
 
 The widget server sends `{ui, Window, Term, Detail}` to the process that
 opened the window, and `{ui_down, Window, Reason}` when the window ends
-other than by `close_ui`. On `ui_tree` the server:
+other than by `close_ui`. An application in another domain receives each
+as `{erx_origin, D, Msg}`, `D` the display's domain, as every message from
+another domain arrives ([design-domains.md](design-domains.md#the-peer)).
+On `ui_tree` the server:
 
 1. **validates** the tree whole against the kinds, properties and bounds
    of `abi/formats/ui.txt` with the generated `erx_ui_schema`, answering

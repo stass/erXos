@@ -371,8 +371,8 @@ fails until the list names it.
 ### The edits outside `sys/erxos`
 
 Everything the adapter adds lives in `sys/erxos`, the drivers and NIFs
-included. The edits to ERTS's own files, and those to eleven files of
-`kernel`, four of `stdlib` and the preloaded `erlang.erl`, are these, each at a seam named above; an edit is one change
+included. The edits to ERTS's own files, and those to thirteen files of
+`kernel`, eight of `stdlib` and the preloaded `erlang.erl`, are these, each at a seam named above; an edit is one change
 of behaviour, however many lines it touches:
 
 | File | Edit |
@@ -385,7 +385,7 @@ of behaviour, however many lines it touches:
 | `beam/erl_process.c` (exit) | 13. a process's exit clears its export holders, a field of its own record |
 | `beam/erl_monitor_link.c` | 14. an alias's deactivation clears its export holders and its registry entry, at the one function that leaves the active state |
 | `beam/erl_proc_sig_queue.c`, `beam/erl_gc.c`, `beam/erl_process.h` | 15. a process keeps the bytes of its queued undecoded frames from other domains, added when the drain queues a frame on it and released when `erts_proc_sig_decode_dist` decodes the frame or the process exits; the drain leaves in the lane an authorised frame whose target has reached its queue quota, and takes nothing more from that lane until the count falls below it, and the decode or exit that brings it below schedules that lane port's input task again; before a process waits in `receive` while its count is at its quota, it decodes every frame queued on it, its own messages, which from then on count toward its `max_heap_size` alone, so no waiting process holds a lane paused, a `gen_server:call` that skips older messages included; the same bytes count toward the size `max_heap_size` limits, as on-heap message data does |
-| `beam/erl_proc_sig_queue.c`, `beam/erl_process.h` | 16. `erts_proc_sig_decode_dist` delivers a message from another domain to a process whose origins flag `erx:origins(true)` set as `{erx_origin, D, Msg}`, with `D` the creation of the entry it arrived on, the peer's domain id; the flag is `F_ERX_ORIGINS`, set by the BIF `erx_dist:origins/1` behind `erx:origins/1`, since kernel code that sets it (the connection agent, `net_kernel` through `erx_dist:listen/2`, and `erx_dist`'s connection owner, which acts on `{Kernel, disconnect}`) cannot call the `erx` application |
+| `beam/erl_proc_sig_queue.c`, `beam/bif.tab` | 16. `erts_proc_sig_decode_dist` delivers every message from another domain, sent to a pid or to an alias, as `{erx_origin, D, Msg}`, with `D` the creation of the entry it arrived on, the peer's domain id; nothing turns it off and no signal is wrapped ([design-domains.md](design-domains.md#the-peer)); and the BIF `erx_dist:owner/1`, behind `erx:owner/1`, returns the creation a pid, reference or port carries, since `gen_server` and `gen_statem` (edit 59) cannot call the `erx` application |
 | `beam/erl_bif_unique.c`, `beam/erl_term.h`, `beam/erl_printf_term.c` | 17. a reference's identity is four words from `erx_ref_permute`; creation, comparison, hashing and text keep all four |
 | `beam/erl_node_container_utils.h`, `beam/erl_node_tables.c` | 18. The two channel-number macros print the creation of the node a term carries, the domain id. `internal_channel_no(x)`, a constant 0 in stock ERTS, gives `erts_this_node->creation`. `external_channel_no(x)`, in stock ERTS the index of the node name's atom read through the term's distribution entry, gives `external_node(x)->creation`, read from the term's own `ErlNode`. The pid, port and reference variants that every printer calls (`internal_pid_channel_no`, `external_ref_channel_no` and their kin) are defined on these two, so pids, ports and references print their owner's domain id, and a pid of an ended domain still prints that domain's id after a later domain of its name has connected. `dist_entry_channel_no`, which only the crash dump's node lines and `erts_debug`'s `channel_number` read, stays stock. The parsing BIFs `list_to_pid`, `list_to_port` and `list_to_ref` in `bif.c` resolve the number through `erts_channel_no_to_dist_entry`, which maps the domain's own id to this node's entry, the creation of exactly one connected entry to that entry, and any other number, or one two connected entries share, to none, which the BIFs answer with `badarg`; each number of the text is read with checked arithmetic, so one past its field's width is `badarg` rather than wrapped onto another |
 | `sys/common/erl_mmap.c`, `sys/common/erl_mmap.h` | 19. reserve, commit, decommit and release are kernel calls; `erl_mseg.c` and the allocators sit above them unchanged |
@@ -425,8 +425,12 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/group.erl` | 55. the driver's `suspend`, which `erx_console` sends for `Ctrl-Z`, reaches the group's shell as `{Group, suspend}`, as an interrupt reaches it as an exit signal, so the command shell can stop its foreground job ([design-shell.md](design-shell.md#job-control)) |
 | `beam/dist.c`, `beam/erl_proc_sig_queue.c` | 56. when a distribution entry goes down with a reason `{domain_down, D, Info}` whose `D` is the creation the entry had as it went down, which `erts_do_net_exits` checks and hands the cleanup with the reason, `link_connection_down` fires each link and `monitor_connection_down` each monitor and pending spawn with that reason, where stock fires `noconnection`, and the conversion of a pending spawn's `DOWN` into the `spawn_request` error reply takes the reason it is given in place of asserting `noconnection`; `Info` is small, a tag or a tag and a status (`{halt, Status}`, `crash`, `{fault, Kind}`, `stopped`), and the cleanup fires from the copy of the reason it already keeps in its own heap for `nodedown_reason`, alive across its yielding passes, which each exit, `DOWN` and error reply copies in turn; every other reason fires `noconnection` as stock, and the reason reaches `net_kernel:monitor_nodes/2`'s `nodedown_reason` as stock passes it ([Connections in ERTS](#connections-in-erts)) |
 | `lib/kernel/src/logger.erl`, `lib/kernel/src/error_logger.erl` | 57. `init_default_config/2` makes `erx_log_h` the `default` handler where nothing configures one and the logger's type is a standard device, in place of `logger_std_h`, so every domain's events go to the log sink; `error_logger:tty/1` switches that handler on and off as it does `logger_std_h` on `standard_io`, and never adds a second handler on `standard_io` ([design-live.md](design-live.md#the-console)) |
+| `lib/stdlib/src/gen.erl` | 58. every receive of a call's reply, in `do_call` and in `send_request`'s `wait_response`, `receive_response` and `check_response` with their collection forms, also takes the reply as `{erx_origin, D, {Tag, Reply}}`, the envelope of edit 16; `Tag` holds the call's own alias, which only the callee's domain was handed, so the reply's domain needs no check ([design-domains.md](design-domains.md#the-peer)) |
+| `lib/stdlib/src/gen_server.erl`, `lib/stdlib/src/gen_statem.erl` | 59. the start option `{erx_serve, any}` or `{erx_serve, own}`, the default, is kept in the server's state at `init_it`; a server started with `any` takes `{erx_origin, D, {'$gen_call', {Pid, Tag}, Req}}` as a call when `erx_dist:owner/1` gives `D` for `Pid` and for the alias in `Tag` when it holds one, drops it otherwise, and takes `{erx_origin, D, {'$gen_cast', Msg}}` as a cast; every other message, and every one under `own`, reaches `handle_info` or the info event as it arrived, `{system, _, _}` in its envelope included |
+| `lib/stdlib/src/io.erl` | 60. `execute_request` also takes its reply as `{erx_origin, D, {io_reply, Mref, Reply}}` |
+| `lib/kernel/src/group.erl`, `lib/kernel/src/file_io_server.erl`, `lib/kernel/src/application_master.erl` | 61. each io server's receive takes `{erx_origin, D, {io_request, From, ReplyAs, Req}}` as the request inside it when `erx_dist:owner(From)` is `D`, and drops it otherwise; an application master relays the bare request to its own group leader, which answers `From` |
 
-Fifty-seven edits outside `sys/erxos`, in sixty named files outside
+Sixty-one edits outside `sys/erxos`, in sixty-six named files outside
 the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
 the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
@@ -944,9 +948,10 @@ and node name, the slots of the domain's own side, the peer's side and
 the peer's bell, the label the system domain bound this domain's bell
 with, and the two data areas' sizes
 ([design-domains.md](design-domains.md#messages-between-the-domain-service-and-a-runtime)).
-The agent sets `erx:origins(true)` (edit 16) and acts only on a record
-that arrives as `{erx_origin, 4, Record}`, from the system connection,
-so a peer that was handed the agent's pid can reach it but not steer it.
+Every message from another domain arrives in its envelope (edit 16), and
+the agent acts only on a record that arrives as `{erx_origin, 4,
+Record}`, from the system connection, so a peer that was handed the
+agent's pid can reach it but not steer it.
 It answers the domain pid, which the boot information page names and
 `erx_dist:boot/0` returns with the system connection's other values. It
 opens a port on
@@ -1010,14 +1015,17 @@ every system side ends with them, and no domain could learn of it,
 since a lane has no close.
 Neither can be ended or steered from another domain, whoever hands its
 pid out. Edit 8 gives a peer only `send` on a pid it encodes, so no peer
-can link to either or send it an exit. Both set `erx:origins(true)`
-(edit 16): the agent itself, and `net_kernel` through `erx_dist:listen/2`,
-which `net_kernel` runs in its own process as it starts. A message from
-another domain therefore reaches either only as `{erx_origin, D, Msg}`.
-The agent acts on it as above; `net_kernel` matches it with no clause but
-its catch-all, which logs and drops it, so no domain reaches its calls,
-among them `{spawn, M, F, A, Gleader}`, which would run code in its
-domain, and `{disconnect, Node}`, which would end a connection.
+can link to either or send it an exit, and edit 16 wraps every message
+from another domain, so one reaches either only as `{erx_origin, D,
+Msg}`. The agent acts on it as above; `net_kernel` is a `gen_server`
+started without `{erx_serve, any}` (edit 59), so a call from another
+domain reaches its `handle_info`, whose catch-all logs and drops it, and
+no domain reaches its calls, among them `{spawn, M, F, A, Gleader}`,
+which would run code in its domain, and `{disconnect, Node}`, which
+would end a connection. `erx_dist`'s connection owner acts on
+`{Kernel, disconnect}`, which names `net_kernel` by a pid any peer can
+write; from another domain that message arrives wrapped and falls to the
+owner's catch-all.
 
 **No ticks.** A connection between domains has no tick supervision. The
 carrier reports no ticks: the connection's owner process, which
@@ -1225,8 +1233,8 @@ the domain published.
 
 **Facets** are processes of the system domain that act only for their
 grantee; a facet sees frames only from its grantee's lane, since the
-funnel marks nothing and the drain names the entry; `erx:origins(true)`
-delivers each message as `{erx_origin, D, Msg}` with `D` the lane's peer
+funnel marks nothing and the drain names the entry; each message from
+another domain arrives as `{erx_origin, D, Msg}` with `D` the lane's peer
 (edit 16), and a message whose decoded size is past the facet's
 `max_request` is dropped and counted before it is queued (edit 12)
 ([design-domains.md](design-domains.md#facets)).
@@ -3028,7 +3036,9 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `global`, `pg` | see only the local node: neither spans domains, by design. A name registry shared across domains would let any domain register or join any name, so a send to a registered name (`REG_SEND`) is outside the frame grammar ([design-domains.md](design-domains.md#the-funnel)): `{Name, Node} ! Msg` toward another domain is dropped at the sender, and `monitor(process, {Name, Node})` gets a `DOWN` with reason `noproc` at once. A name one domain offers another is an export its owner's runtime writes ([design-domains.md](design-domains.md#exports)). `kernel`'s `connect_all` is `false` in every erXos release, so `global` attempts no fully connected network and disconnects no node |
 | a message larger than the connection's lane allows | `system_limit` from the send, ERTS's own too-large path |
 | `erx:export/3` | added: `erx:export(Name, Rights, Peer)` sets what a peer holds on one of the calling domain's own names, a pid or alias of the domain or the domain itself, to exactly `Rights`, widening or narrowing; only the owner grants, and an encode gives a peer `send` alone ([Connections in ERTS](#connections-in-erts)) |
-| `erx:origins/1` | added: `erx:origins(true)` delivers each message from another domain to the caller as `{erx_origin, D, Msg}`, `D` the lane's peer ([design-domains.md](design-domains.md#facets)) |
+| a message from another domain | arrives as `{erx_origin, D, Msg}`, `D` the lane's peer, in every process (edit 16); `gen` and `io` take call and io replies in their envelopes (edits 58, 60), and `sys` takes nothing apart ([design-domains.md](design-domains.md#the-peer)) |
+| `erx:owner/1` | added: the domain id a pid, reference or port carries, its creation ([design-domains.md](design-domains.md#erlang-interface)) |
+| `{erx_serve, any}` | added: a start option of `gen_server` and `gen_statem`, `{erx_serve, own}` the default; with `any` the server takes calls and casts from other domains (edit 59) ([design-domains.md](design-domains.md#erlang-interface)) |
 | `erx_program:start/1`, `send/2`, `install/2`, `pause/1`, `resume/1`, `stop/3`, `fork/2`, `exec/2`, and `{Port, {exit_status, N}}`, `{erx_channel, Port, Request}`, `{erx_channel_room, Port}` | added: the program driver's interface ([Programs as ports](#programs-as-ports)) |
 | `erx_device` | added: the device NIF ([The device NIF](#the-device-nif)) |
 | a NIF that blocks on a normal or dirty CPU scheduler | the blocking call fails with `ERX_EWOULDBLOCK`, which the NIF reports as an error ([NIFs and blocking](#nifs-and-blocking)) |
@@ -3354,8 +3364,8 @@ own domain, so a runtime that lies harms only itself.
   `net_kernel`'s pid sends it a `gen_server` call of `{spawn, M, F, A,
   Gleader}` and one of `{disconnect, Node}` for another domain's node:
   nothing is spawned in the system domain, no connection ends, and
-  `net_kernel` runs on; seeded failure: an `erx_dist:listen/2` that does
-  not set the origins flag, under which the spawn runs. A domain whose
+  `net_kernel` runs on; seeded failure: an edit 16 that delivers raw,
+  under which the spawn runs. A domain whose
   agent is killed halts with status 69; seeded failure: an agent that
   `net_kernel` restarts, under which the domain runs on and a later
   introduction never comes up, its `connection_up` sent to the dead

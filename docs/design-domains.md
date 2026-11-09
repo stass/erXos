@@ -325,6 +325,7 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D13.** A stale export costs nothing to find | an export's holders live on its name's own record, the process or the active alias, and go with it, at the transition that ends the process or deactivates the alias; a peer's holders end when the connection goes down; a pid names its process by number and serial, so a lookup that finds no live record finds no holder | holders kept anywhere but on their name's own record; an entry keyed in a way a later process can match | a soak test of a million alias exports and deactivations from one live process, with every OTP alias mode, and of pids handed out by processes that then exit; the export table stays at its live names |
 | **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each party writes exactly one memory object of a connection and maps the other's read-only; the system domain carves the connection's children and creates both sides and both bells from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
 | **D17.** A domain's end reaches each peer behind everything the domain published on their lane | the kernel posts a space's exit record only when no thread of it can run, so the dead domain's write position is final; a runtime told that a connection is down first drains that lane to the position it reads then, waiting on nothing the dead domain would have to do, and only then fires its links and monitors with the peer's processes | a runtime that acts on a connection down before draining; a stop reported while a thread can still run | a test that kills a domain mid-burst on every CPU and checks that each peer sees the burst, then the death |
+| **D18.** No process acts on a message from another domain that the owner of its protocol did not admit | the peer delivers every message from another domain, to a pid or to an alias, as `{erx_origin, D, Msg}`, `D` the domain of the lane it arrived on, with no flag and no exception (edit 16 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), so such a message never has the shape of one from the receiver's own domain; only the owner of a protocol that crosses domains takes the envelope off, in its own receive and only for its own shapes: `gen` for call replies, `io` for io replies, the io servers for io requests, and `gen_server` and `gen_statem` for calls and casts to a server started with `{erx_serve, any}`; each unwrap of a request admits it only when the names its reply goes to are of `D` ([The peer](#the-peer)); everything else reaches its process as an unknown message that carries its origin, and `sys` takes nothing apart | a delivery path that skips the wrap; an OTP module outside the list that matches the envelope, `sys` or `proc_lib` above all; a served unwrap without the check of `From` | the source check of [design.md](design.md#chokepoint-checks) on OTP's modules, with a seeded extra site; every `sys` call from another domain on a `gen_server`, a `gen_statem`, a `gen_event` and a plain `sys` loop times out, the process runs on and its state is unchanged, with the seeded failure of edit 16 delivering raw ([Verification and testing](#verification-and-testing)) |
 
 ## On the stopgap
 
@@ -922,11 +923,15 @@ domain that owns the name (D4):
    P, in the control term or the payload, and P holds nothing on the name
    yet, it adds P with `send` alone, which covers messages, alias sends
    and monitors. The sender of every control term is a name handed out
-   this way, never with more. So a peer can message, call and monitor a
-   process whose name it was handed, which is what answering a call and
+   this way, never with more. So a peer can message and monitor a process
+   whose name it was handed, which is what answering a call and
    `gen_server:call/3`'s monitor need, and cannot link to it, kill it or set
-   its group leader. A name encoded again toward a peer that already holds
-   it changes nothing.
+   its group leader. `send` is the right to put a message into the
+   process's mailbox inside its envelope; what the message then does is
+   decided by the owner of the protocol it belongs to ([The
+   peer](#the-peer)), so the peer can call the process only when it is a
+   server started to serve other domains. A name encoded again toward a
+   peer that already holds it changes nothing.
 2. **A spawn into the domain.** When a peer's `SPAWN_REQUEST` makes a
    process, the runtime adds the spawner to the child's holders with
    `send`, `link` and `exit` before the child runs, so a parent keeps over
@@ -1076,11 +1081,11 @@ the domain service hands it, and passes each of the agent's answers to the
 domain service ([Messages between the domain service and a
 runtime](#messages-between-the-domain-service-and-a-runtime)). It keeps
 no state about any connection: the domain service alone keeps each
-connection's state and decides when each record goes. It sets
-`erx:origins(true)` and acts on a message from another domain only when it
-arrives as `{erx_origin, D, Msg}` with `D` its own domain, so the creator
-and every other holder of `send` on it can message it but not speak for
-the domain.
+connection's state and decides when each record goes. Every message from
+another domain reaches it as `{erx_origin, D, Msg}` ([The
+peer](#the-peer)), and it acts on one only when `D` is its own domain, so
+the creator and every other holder of `send` on it can message it but not
+speak for the domain.
 
 ## Algorithms and behavior
 
@@ -1445,14 +1450,48 @@ and drivers](#native-processes-and-drivers)).
   that same entry so it keeps its place behind what the runtime sent
   before ([The funnel](#the-funnel)). An executor learns which connections rang from its group's ready list,
   each once, and schedules their ports' input tasks.
-* **Origins.** To a process that asked with `erx:origins(true)`, as every
-  facet does, the peer delivers each message from another domain, sent to
-  the process's pid or to an alias of it, and no signal, as `{erx_origin, D,
-  Msg}`, with `D` the domain of the lane the message arrived on, so no
-  sender chooses it. An Erlang tuple that imitates the envelope arrives
-  wrapped, as every message from another domain does, so a process cannot be
-  fooled by one; a message without an envelope comes from a process of the
-  receiver's own domain.
+* **Origins.** The peer delivers every message from another domain, sent
+  to a process's pid or to an alias of it, as `{erx_origin, D, Msg}`, with
+  `D` the domain of the lane the message arrived on, so no sender chooses
+  it. No process asks for the envelope and none can refuse it, and no
+  signal is wrapped (edit 16 of
+  [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)). An
+  alias gets no exception: a peer that holds a reply alias could
+  otherwise send its owner any message bare, `{system, From, Req}`
+  included, and the owner's loop would take it for its own domain's. A tuple a sender builds to look like the envelope arrives wrapped
+  once more, as `{erx_origin, D, {erx_origin, D2, Msg}}`, so a process
+  cannot be fooled by one; a message without an envelope comes from a
+  process of the receiver's own domain, or from its own runtime when a
+  signal makes one (`'DOWN'`, `'EXIT'`, a spawn reply). Only the owner of
+  a protocol takes the envelope off, in its own receive and only for its
+  own shapes:
+  * `gen` takes a call's reply wrapped as well as bare, in `gen:call` and
+    in `send_request`'s `wait_response`, `receive_response` and
+    `check_response`; the reply comes to the call's own alias, which only
+    the callee's domain was handed;
+  * `io` takes an `io_reply` the same way;
+  * the io servers, `group`, `file_io_server` and an application
+    master's relay to its group leader, take an `io_request` whose `From`
+    is of `D` and answer it as stock does, so a process spawned into
+    another domain writes and reads through its spawner's group leader;
+  * a `gen_server` or `gen_statem` started with `{erx_serve, any}` takes
+    `{'$gen_call', {Pid, Tag}, Req}` as a call when `Pid`, and the alias in
+    `Tag` when it holds one, are of `D` by `erx:owner/1`, since its reply
+    goes to those names, and drops it otherwise; it takes `{'$gen_cast',
+    Msg}` as a cast. A server started without the option, as every server
+    is by default, serves its own domain only.
+
+  Everything else, `{system, From, Req}` among it, reaches its process as
+  it arrived: in a `gen_server`'s `handle_info`, a `gen_statem`'s info
+  event, the `handle_info` of a `gen_event`'s handlers, or a loop's
+  catch-all, as an unknown message that carries its origin. `sys` takes
+  nothing apart, so no process of another domain terminates, suspends,
+  reads or replaces the state of a process through `sys`, whatever it
+  holds on it (D18). erXos's own protocols take the envelope whole: a
+  facet and a socket of the network service check `D` against their
+  grantee, the connection agent against the system domain, the domain
+  pid against its own domain, and an application takes the display's
+  events as `{erx_origin, D, {ui, Window, Term, Detail}}`.
 * **What it holds for other domains.** A runtime also holds state because of
   another domain's processes: the links and monitors they hold with its
   processes, and the signals ERTS queues for them on behalf of no running
@@ -2156,7 +2195,7 @@ nothing more; and the funnel already drops a frame to the facet from any
 domain the facet's pid was never exported toward, which is every domain but
 the grantee, since the facet's pid reached the grantee in a frame to the
 grantee alone ([Exports](#exports)). The behaviour checks again, from the
-envelope: the peer hands a facet each message from another domain as
+envelope: every message from another domain reaches the facet as
 `{erx_origin, D, Msg}`, where `D` is the lane's domain ([The
 peer](#the-peer)), and a request whose `D` is not the grantee is refused and
 counted. A facet's pid is a name like any other, which its grantee can pass
@@ -2174,8 +2213,9 @@ before its callback sees a request:
   behaviour forwards each admitted request itself, with a fresh alias as its
   tag, and a forward stops being outstanding at its reply, so a reply from
   any other party, or a second reply, matches nothing and counts as a
-  request. A facet's callback makes no plain OTP call into another domain,
-  whose reply, wrapped, `gen:call` would never match;
+  request. An OTP call that a facet's callback makes is answered inside
+  `gen:call`'s own receive, which takes the wrapped reply, so its reply
+  never reaches this sort;
 * **a signal**: links, monitors and exits are signals, which ERTS handles,
   and the behaviour takes every `'DOWN'` and `'EXIT'` message that ERTS
   makes from one, matches it against the monitors and links the facet set
@@ -2257,7 +2297,9 @@ domain's runtime has exported to the caller's domain:
 
 | Operation | Exported with the right | Otherwise |
 | --- | --- | --- |
-| `Pid ! Msg`, a send to an alias | delivered (send) | dropped, as for a dead process |
+| `Pid ! Msg`, a send to an alias | delivered as `{erx_origin, D, Msg}` (send) | dropped, as for a dead process |
+| `gen_server:call/2,3`, `gen_statem:call/2,3`, `send_request/2` and their casts | served when the server was started with `{erx_serve, any}` (send) | the call times out, and the server takes it as an unknown message |
+| `sys:get_state/1`, `sys:replace_state/2`, `sys:suspend/1`, `sys:terminate/2` and every other `sys` call | times out, whatever the caller holds: the target takes it as an unknown message | times out |
 | `monitor(process, Pid)` | `DOWN` on death (send) | `DOWN` with `noproc` at once |
 | `{Name, Node} ! Msg`, `monitor(process, {Name, Node})` | never leaves the sender's runtime: no right covers a registered name | dropped, as for a name not registered; `DOWN` with `noproc` at once |
 | `link(Pid)` | linked (link) | exit `noproc` to the caller, unless `Pid` already holds a link with it |
@@ -2268,10 +2310,11 @@ domain's runtime has exported to the caller's domain:
 | `is_process_alive/1`, `process_info/2`, `suspend_process/1`, `garbage_collect/1`, `register/2`, `erlang:trace/3` | `badarg`, as for a pid of another node | `badarg` |
 | `erx:inspect([processes, Pid])` | what the caller's inspect facet allows | refused |
 
-A name handed out in a frame carries `send` alone, so a process can call
-and monitor a server of another domain whose pid it was given, and links to
-it, kills it or sets its group leader only when the server's domain
-exported that right explicitly, or when it spawned the server.
+A name handed out in a frame carries `send` alone, so a process can
+message and monitor a process of another domain whose pid it was given,
+and call it when it is a server started to serve other domains; it links
+to it, kills it or sets its group leader only when the process's domain
+exported that right explicitly, or when it spawned the process.
 
 The system domain is no exception: its processes hold on another domain's
 processes what that domain exported to it. The inspector reaches a process
@@ -2590,7 +2633,11 @@ domain's (edit 16), and the agent acts only on the system domain's.
 -spec erx:export(name(), [right()], Peer :: pos_integer()) -> ok | {error, term()}.
 -spec erx:exports(name()) -> [{Peer :: pos_integer(), [right()]}].
 -spec erx:cap(Name :: atom()) -> pid() | undefined.
--spec erx:origins(boolean()) -> ok.
+-spec erx:owner(pid() | reference() | port()) -> pos_integer().
+
+%% A start option of gen_server:start/3,4, start_link/3,4, start_monitor/3,4
+%% and of gen_statem's same functions:
+-type serve() :: {erx_serve, own | any}.       % default own
 ```
 
 * `create/1` returns `{error, quota}` when the principal's domains hold all
@@ -2640,18 +2687,23 @@ domain's (edit 16), and the agent acts only on the system domain's.
 * `erx:exports/1` lists what the calling domain has exported one of its own
   names toward, and is how a service checks that a peer holds a name before
   it acts on the peer's word about it.
-* `erx:origins(true)` makes the domain's peer deliver each message from
-  another domain to the calling process, sent to its pid or to an alias of
-  it, as `{erx_origin, D, Msg}`, with `D` the domain of the lane it arrived
-  on ([The peer](#the-peer)); `erx:origins(false)` turns that off. It exists
-  in every domain, so the facets a session serves run the same behaviour as
-  the system domain's.
+* `erx:owner/1` returns the id of the domain that owns a pid, reference or
+  port, its creation (D1), local names included. It is how an owner of a
+  protocol checks that a name in a message from another domain belongs to
+  the message's origin `D`.
+* `{erx_serve, any}` starts a `gen_server` or `gen_statem` that serves
+  other domains: it takes their calls and casts as its own domain's, a
+  call only when every name its reply goes to is of the caller's domain
+  ([The peer](#the-peer)), and `erx:owner(element(1, From))` in
+  `handle_call` names that domain. With `own`, the default, other
+  domains' calls and casts reach `handle_info` or the info event in their
+  envelopes. The option exists in every domain, and outside erXos stock
+  OTP ignores it as an unknown option.
 
-A facet implements the `erx_facet` behaviour, which calls
-`erx:origins(true)` when the facet starts, sets its process's request limit
-for messages from other domains to the grant's `max_request` and its heap
-limit as the grant says, and takes its grantee from the grant it is minted
-with. Before it calls `admit/3`, the behaviour sorts what arrives by its tag
+A facet implements the `erx_facet` behaviour, which sets its process's
+request limit for messages from other domains to the grant's
+`max_request` and its heap limit as the grant says, and takes its grantee
+from the grant it is minted with. Before it calls `admit/3`, the behaviour sorts what arrives by its tag
 first, takes the replies to its own forwards and the messages that signals
 make, accounts the reductions each forward's reply reports, enforces the
 grant's limit in flight and the grantee's share, and makes the origin check
@@ -2705,6 +2757,12 @@ domain](#domain-ids-pids-and-references)):
 | A pid, reference or alias of another machine in a frame to another domain | the frame is malformed and ends the connection; an exposed domain stands a local process in for a remote one ([An exposed domain](#domain-ids-pids-and-references)) |
 | `process_info/2`, `is_process_alive/1`, `suspend_process/1`, `garbage_collect/1`, `register/2`, `erlang:trace/3` on another domain's pid | `badarg`, as for a pid of another node, in every domain the system domain included |
 | Registered names | per domain: `{Name, Node} ! Msg` toward another domain is dropped and counted in the sender's runtime, as a message to a name not registered there, and `monitor(process, {Name, Node})` gets `DOWN` with `noproc` at once, or `noconnection` toward a domain whose connection is not up, as stock answers for a node it cannot reach; `global` and `pg` therefore span no two domains |
+| A message from another domain, to a pid or to an alias, one sent through a monitor's alias or by `erlang:send_after/3` included | arrives as `{erx_origin, D, Msg}`, `D` the sender's domain; a tuple built to look like the envelope arrives wrapped once more; `gen` and `io` take call and io replies in their envelopes, so calls, `send_request/2`, `erpc`, `rpc` and io return what they return on stock ([The peer](#the-peer)) |
+| `gen_server:call/2,3`, `gen_statem:call/2,3` and their `send_request/2` toward a server of another domain not started with `{erx_serve, any}` | exits with `{timeout, _}` after its timeout, and with `infinity` waits until the server ends; the server gets the request, and a `cast/2`, in its envelope in `handle_info` or as an info event; supervisors are never served, so `supervisor:which_children/1` and its kin time out the same way |
+| A call to a served server whose `From` names a process or alias of a domain other than the caller's | dropped by the server; the call times out |
+| `sys:get_state/1`, `sys:replace_state/2`, `sys:suspend/1`, `sys:change_code/4`, `sys:install/2`, `sys:terminate/2` and every other `sys` call toward a process of another domain, `gen_server:stop/1,3`, `gen_statem:stop/1,3` and `proc_lib:stop/1,3` among them | exits with `{timeout, _}`, or `stop` with `timeout`, after its timeout, and with the `infinity` of `stop/1` waits until the process ends; the target takes the request as an unknown message and runs on, its state unchanged |
+| `gen_event:call/3,4`, `sync_notify/2`, `add_handler/3`, `which_handlers/1` and the manager's other calls toward a manager of another domain | time out as above, or with `infinity`, as `add_handler/3` waits, wait until the manager ends; `notify/2` reaches the handlers' `handle_info` in its envelope |
+| An io request to an io server of another domain | served by `group`, `file_io_server` and an application master's relay, so a process spawned into another domain writes and reads through its spawner's group leader; any other io server, `standard_error` reached by its pid or one an application writes, takes the request as an unknown message, and the caller waits until the server ends |
 | `rpc:call/4,5`, `rpc:cast/4`, `rpc:multicall`, `rpc:async_call/4` and `erpc` | work through `spawn_request` wherever the caller's domain may spawn in the target, and fail as such a spawn does elsewhere |
 | `net_adm:ping/1` toward a node of the machine | answers from `nodes()`: `pong` for `node()` and every connected domain, `pang` for any other, with no call to the peer and no disconnect, since a connection exists only by introduction ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos)); `erlang:disconnect_node/1` of the system domain's node keeps its meaning, and the domain's system connection ends and with it the domain |
 | `rpc:block_call/4,5`, `rpc:abcast/2,3`, `rpc:sbcast/2,3`, `rpc:server_call/4` and `rpc:multi_server_call/2,3` toward another domain | each sends to a registered name (`rex` or the caller's), which never crosses: `block_call` returns `{badrpc, {'EXIT', {noproc, _}}}`; `abcast` writes no frame; `sbcast` and `multi_server_call` list the domain among the bad nodes; `server_call` returns `{error, nodedown}` |
@@ -2808,7 +2866,12 @@ rights only the owner sets, a name handed out in a frame carries `send`
 alone, and a name passed on by a third party conveys nothing (D4). The
 system domain's atom table never grows from another domain's input (D5). A
 domain speaks only for its own processes, because the lane says who it is
-(D6). Stopping a domain needs nothing from it (D7). Every page a domain
+(D6). No process acts on a message from another domain that the owner of
+its protocol did not admit, because every such message arrives in its
+envelope and only a protocol's owner takes the envelope off (D18): a
+peer that holds `send` on a process cannot make `sys`, a supervisor or a
+server that does not serve other domains act for it. Stopping a domain needs
+nothing from it (D7). Every page a domain
 shares with a peer has one writer, is paid for by its reader, or on a
 domain's system connection by the domain, and can be deleted by neither
 (D16). The funnel never recurses: it walks terms with an explicit stack in
@@ -2843,8 +2906,9 @@ policy. It can:
   they were charged and count against the peer's own `connections`, so
   what it keeps of another's memory is bounded by its own quota, and the
   inspector shows it;
-* message, call and monitor the receiver's processes whose names the
-  receiver handed it in frames;
+* message and monitor the receiver's processes whose names the receiver
+  handed it in frames, each message arriving in its envelope, and call
+  those of them that are servers started to serve other domains;
 * lie about its own processes' deaths and exits, which it could cause anyway
   (D6), and rewrite its published bytes while they are copied, which changes
   only its own frames.
@@ -2854,6 +2918,9 @@ process the receiver never exported toward it, or learn whether one exists;
 link to, kill or set the group leader of a process whose name it was only
 handed in a frame, a server that answered its call included, unless the
 receiver exported that right or the peer spawned the process;
+terminate, suspend, read the state of or replace the state of any process
+through `sys`, or change its code; call a server not started to serve
+other domains, or make a served one reply to a name of another domain;
 widen a right; make the receiver pay for any page, since the receiver paid
 only for the lane it chose to read; make the receiver fault, since it holds
 no delete right and writes no page the receiver executes or trusts without a
@@ -3107,6 +3174,24 @@ for the same reason.
     whose pids it was handed in replies: the link is answered with
     `noproc`, the exit and the group leader have no effect, and a monitor
     of the same process works;
+  * sends `{system, From, Req}` for `terminate`, `suspend`, `get_state`,
+    `replace_state`, `install` and `change_code` to a `gen_server`, a
+    `gen_statem`, a `gen_event` manager and a plain `sys` loop of the
+    receiver whose pids it was handed: none answers, each runs on, and
+    `sys:get_state/1` called from its own domain shows its state
+    unchanged. Seeded failure: edit 16 delivering raw, under which the
+    first `terminate` ends its target (D18);
+  * calls a server of the receiver started without `{erx_serve, any}`, and
+    one started with it with a `From` that names a process, and then an
+    alias, of a third domain: no call is answered and the third domain
+    receives nothing. Seeded failure: a served unwrap without the check of
+    `From`, under which the third domain's process receives the reply;
+  * sends `net_kernel` `gen_server` calls of `{spawn, M, F, A, Gleader}`
+    and `{disconnect, Node}`, and `erx_dist`'s connection owner a
+    `{NetKernelPid, disconnect}`: nothing is spawned and no connection
+    ends;
+  * sends tuples shaped as `{erx_origin, D, Msg}` with `D` the receiver's
+    own domain and the system domain's: each arrives wrapped once more;
   * spawns into a domain that has not exported `spawn` to it, into one whose
     export table it has filled, and into one that never answers: the first
     fails with `noconnection`, the second with `system_limit` and no child
@@ -3116,6 +3201,32 @@ for the same reason.
   * monitors and links processes it was never given, and processes that sent
     it messages and then died, and checks that every answer arrives after
     those messages.
+* **Origins** between two ERTS domains under QEMU, each case with its
+  seeded failure:
+  * a message to a pid and one to an alias from the other domain arrive
+    wrapped, the receiver's own domain's arrive bare; seeded failure: an
+    edit 16 that skips alias targets, under which the alias message
+    arrives bare;
+  * a server started with `{erx_serve, any}` answers `gen_server:call/3`,
+    `gen_statem:call/3`, `send_request/2` followed by `receive_response/2`
+    and by `check_response/2`, and takes a cast, and
+    `erx:owner(element(1, From))` in its `handle_call` is the caller's
+    domain; the same server started without the option leaves the call
+    unanswered and gets it in `handle_info`; seeded failure: a `gen`
+    without its wrapped-reply clause, under which every call times out;
+  * a process spawned into the other domain, with a shell's `group` and
+    then an application master as its group leader, gets from
+    `io:format/2` and `io:get_line/1` what a local process gets, and a
+    file opened in one domain and handed to a process of the other reads
+    and writes as it does locally; seeded failure: a `group` without its
+    unwrap, under which `io:format/2` never returns;
+  * the source check on OTP's modules fails on a seeded extra module that
+    matches the envelope;
+  * the oracle run records, case by case, the cases of `gen_server_SUITE`,
+    `gen_statem_SUITE`, `gen_event_SUITE`, `sys_SUITE`, `supervisor_SUITE`,
+    `proc_lib_SUITE` and `io_SUITE` that cross nodes and differ, each tied
+    to its row of the compatibility table; the list comes from the run,
+    not from this document.
 * **Hostile clients** of each system service send requests naming pids they
   do not hold and reply targets in other domains; they expect refusals, and
   other clients' requests are served on time. A domain H that grantee G
@@ -3234,7 +3345,7 @@ for the same reason.
   exits; D7 with runtimes that never return or never drain; D9 with
   three-domain interleavings; D12 with floods past each receiver limit; D13
   with the soak; D16 with the capability-table check, the budget
-  baselines and a survivor that never answers `connection_down`; D17 by killing a domain mid-burst on every CPU.
+  baselines and a survivor that never answers `connection_down`; D17 by killing a domain mid-burst on every CPU; D18 with the hostile runtimes' `sys` requests and forged `From`s and the source check on OTP's modules.
 * **The connection protocol under QEMU:** a domain whose init delays its
   ready report while its creator writes a spawn request into their
   connection: the domain's `connection_up` waits in the domain service's
@@ -3494,6 +3605,7 @@ own domain.
 | Small lanes throttle large frames into many turns | medium | low | a record is read as it is published, so a large frame costs turns, not failure; E-D1 sets the default and a domain raises its own `lane` |
 | A domain with many connections spends too much on draining and ringing | medium | medium | E-D2; the ready list names only the lanes that rang; the allowance per step bounds each look |
 | Code that links to a pid of another domain it was only handed fails with `noproc` | medium | low | the compatibility table states it; OTP's own cross-node calls monitor rather than link; a server that links to its clients monitors them across domains, or its clients' domains export `link` to it |
+| Code that calls a server of another domain, or uses `sys` on one, times out | medium | medium | the compatibility table states it; a server meant for other domains is started with `{erx_serve, any}` or stands behind a facet; the oracle records every differing case; `rpc` and `erpc` are unaffected, since their results travel in `DOWN` reasons |
 | A busy domain falls behind the system domain's queue and is stopped by a signal past `system_queue` | low | high | the system domain sends a domain few signals; E-D4 sizes `system_queue`; the inspector counts the system domain's queue per domain |
 | A peer fills a process's queue until `max_heap_size` ends it | medium | low | stock Erlang's exposure to a connected node; a domain that admits distrusting peers sets `-erx queue_quota` or its processes' limits; the receiver's budget bounds the rest |
 | A distribution entry per peer costs a domain with many connections more than its frames do | low | medium | entries are stock ERTS's and exist only for introduced pairs; E-D2 measures |
@@ -3516,16 +3628,40 @@ domains; the alternative is names the administrator assigns to each
 principal in the configuration, which closes squatting and makes the atom
 bound exact at the cost of a configuration step per name. The
 recommendation is binding by first use, with the configured domains' names
-held from boot. The user's decisions on every domain being a node,
-spawners' rights, pid text and names as exports are recorded where they
-apply: every domain is a node named by its identifier at the machine's
+held from boot.
+
+Open question for the user: how a stock protocol that pushes messages
+across domains keeps its stock shape. The network service's sockets send
+their owners `gen_tcp`'s and `gen_udp`'s active-mode messages,
+`{tcp, S, Data}` and its kin ([design-network-stack.md](design-network-stack.md#the-backend)),
+and an owner in another domain receives each as `{erx_origin, D, {tcp, S,
+Data}}`, which no stock `receive {tcp, S, Data}` matches, so an
+application that uses active mode outside the network domain, cowboy and
+ranch in the web domain among them, fails. The recommendation is a relay
+per socket in the owner's domain, started by `erx_net_client` when the
+socket is opened or accepted: the socket sends its deliveries to the
+relay, which, as the protocol's owner on that side, takes the envelope
+off a message whose `D` is the socket's own domain, passes the bare
+message to the owner, follows `controlling_process/2` and ends with the
+owner. It costs one local message per delivery, which is measured against
+the direct send before the choice is made. The alternative, an exception
+in edit 16 for socket messages whose socket pid is of the lane's domain,
+saves that message but puts a list of shapes into the runtime and gives
+D18 an exception.
+
+The user's decisions on every domain being a node,
+spawners' rights, pid text, names as exports and origins are recorded
+where they apply: every domain is a node named by its identifier at the machine's
 host, its creation its domain id ([Domain ids, pids and
 references](#domain-ids-pids-and-references)); a spawner holds every right
 on its child in another domain ([Authority](#authority)); every pid prints
 as `<D.N.S>`, local pids included, a documented difference from stock OTP
 ([Domain ids, pids and references](#domain-ids-pids-and-references)); and
 a process's own pid, placed in a frame by its owner, exports it, with
-`send` alone ([Exports](#exports)).
+`send` alone ([Exports](#exports)); and every message from another domain
+arrives as `{erx_origin, D, Msg}`, with no flag of the receiving process,
+and only the owner of each protocol takes the envelope off its own shapes
+([The peer](#the-peer)).
 
 ## References
 

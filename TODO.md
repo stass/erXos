@@ -689,6 +689,15 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [High] network and domains, the envelope (design-domains, "Risks and open questions"):
+  every message from another domain arrives as `{erx_origin, D, Msg}`, so a socket's
+  active-mode delivery `{tcp, S, Data}` (and `gen_udp`'s) reaches an owner outside the
+  network domain wrapped, and a stock `receive {tcp, S, Data}` never matches it; cowboy
+  and ranch in the web domain are such owners. Needs the user's choice: a relay per socket
+  in the owner's domain under `erx_net_client` that takes the envelope off (recommended,
+  one local message per delivery, to measure), or an exception in edit 16 for socket
+  messages whose socket pid is of the lane's domain.
+
 * [Low] network, docs/design-network-stack.md ("Framing", step 3 of the output pass): "past
   SYN-RECEIVED" should read "once a SYN has been received" (`TCPS_HAVERCVDSYN`), as the code
   does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which
@@ -2088,13 +2097,13 @@ it; git history is the record of completed work.
   pid as the domain's correspondent, created before the plan, its number and serial on the
   boot page (`abi/erx_abi.txt` `erx_boot_connection`, `boot_info.c`, `erx_dist:boot/0`),
   relaying the domain service's records to the agent and the agent's answers back; the
-  system side's writer giving the reserve to the domain pid's messages alone; `erx_dist:listen/2`
-  setting `erx:origins(true)` on `net_kernel`; edit 56 in `dist.c` and
-  `erl_proc_sig_queue.c`; and the lane driver's finish (control command 2). Order:
-  nothing but `spawn` crosses a connection before RT7, so the protocol needs RT7's edit 8
-  and `erx:export/3` in both runtimes, and the origin checks of the agent, of
-  `net_kernel` and of the domain pid (edit 16) land with RT7's edit 8, never after it,
-  since edit 8 lets any peer that is handed one of their pids reach it.
+  system side's writer giving the reserve to the domain pid's messages alone; edit 56 in
+  `dist.c` and `erl_proc_sig_queue.c`; and the lane driver's finish (control command 2).
+  Order: nothing but `spawn` crosses a connection before RT7, so the protocol needs RT7's
+  edit 8 and `erx:export/3` in both runtimes, and edit 16 in its universal form (the
+  origins item under "Security residuals"), since the domain pid acts only on
+  `{erx_origin, D, Msg}` from its own domain and edit 8 lets any peer that is handed its
+  pid reach it.
 * [Low] Runtime, `net_adm:ping/1` (edit 28) decides by `erx_dist:select/1` whether
   the carrier is in use; a node of this kernel under another `-proto_dist` answers
   `pang` for an unconnected node at its own host without trying.
@@ -3566,20 +3575,27 @@ to the corpus and follow rc
 
 ## Security residuals
 
-* [High] Runtime, export table and OTP's `sys` protocol (`gen_server.erl`, `gen_statem.erl`,
-  `gen_event.erl`, `proc_lib`): a peer that holds only `send` on an OTP behaviour process
-  can send it `{system, From, Req}` and terminate it, suspend it, read its whole state
-  (which hands the peer every pid in it) or replace its state with an exported function.
-  A pid gets `send` toward every peer it is encoded for, the sender of each control term
-  included, so any process that calls or messages another domain is exposed.
-  design-domains says `send` cannot kill a process; nothing covers `sys`. Edit 16's
-  origins protect only the processes that set them (net_kernel, the connection agent,
-  `erx_dist`'s connection owner), a list that has to be remembered; the domain pids set
-  none, since no domain is handed one before SV2. The owner chose the fix: every message
-  from another domain arrives as `{erx_origin, D, Msg}`, with no per-process flag, and only
-  each protocol's owner unwraps its own shapes (`gen` and `io` replies, io-server
-  requests, servers started to serve other domains); `sys` never unwraps. It lands
-  before SV2 hands out a domain pid.
+* [High] Runtime, origins (edits 16 and 58-61 of design-runtime, design-domains D18): the
+  code wraps a message from another domain only for a process that set the flag
+  `erx_dist:origins/1` (net_kernel, the connection agent, `erx_dist`'s connection owner),
+  so a peer that holds only `send` on any other OTP behaviour process can send it
+  `{system, From, Req}` and terminate it, suspend it, read its whole state (which hands
+  the peer every pid in it) or replace its state with an exported function; a pid gets
+  `send` toward every peer it is encoded for, so any process that calls or messages
+  another domain is exposed. What remains, in order:
+  1. edit 16 wraps every message, with `F_ERX_ORIGINS`, `erx_dist:origins/1`,
+     `erx:origins/1` and their calls in `erx_dist.erl` and `erx_connections.erl` deleted,
+     landing together with the reply unwraps of `gen.erl` and `io.erl` (edits 58 and 60),
+     without which cross-domain calls and io break; the guest step that sets and clears
+     the flag (`test/guest/native_domain/guest.c`, step 8) checks the universal envelope
+     instead. This closes the `sys` exposure and lands before SV2 hands out a domain pid;
+  2. the io servers' request unwraps (edit 61), without which io from a process spawned
+     into another domain waits forever;
+  3. `{erx_serve, any}` (edit 59) and `erx:owner/1`, without which no `gen_server` or
+     `gen_statem` serves another domain;
+  4. the source check on OTP's modules (design.md, "Chokepoint checks") with its seeded
+     extra site, the tests of design-domains' "Origins" and hostile-runtime cases, and the
+     oracle's differing cases recorded per case.
 
 * [Medium] `tools/erx web --open`, [The host tool's front end](docs/design-web.md#the-host-tools-front-end): not
   built, because handing the URL to the host's opener (`open`, `xdg-open`) puts the token in an argument vector,

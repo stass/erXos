@@ -2155,14 +2155,15 @@ tap device or another medium (N12).
 | the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp`, a port program or a test process | each interface's entry in the `interfaces` key |
 | the clock and entropy | `erx_net_clock` over ERTS's monotonic clock and `erx_bytes:entropy/1` | the same; in a test run, the virtual clock and its seeded generator | the `clock` key |
 | the per-byte primitives | `erx_bytes` of the `erx` application, statically linked NIFs | `erx_bytes` of `erx_net`'s `portable/` directory: each primitive in Erlang, written from its definition with the NIF's argument checks, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
-| the runtime | `erx_net_erxos`: `erx:origins/1`, the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
+| the runtime | `erx_net_erxos`: the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
 
 The runtime's seam is the behaviour `erx_net_runtime`:
 
 ```erlang
 -callback serve(MaxRequest :: pos_integer()) -> ok.
-    % the calling process takes requests from other domains: they arrive
-    % enveloped with their origin, at most MaxRequest at once
+    % the calling process takes requests from other domains, at most
+    % MaxRequest at once; on erXos every one arrives enveloped with its
+    % origin
 -callback start_grant(Grantee :: local | pos_integer(), Limits :: map()) ->
     {ok, pid()} | {error, Reason :: term()}.
 ```
@@ -2187,8 +2188,8 @@ erXos, so a network domain can never be configured with the local
 runtime. A key that names a module the build does not hold stops the
 application's start with `{error, {seam, Key, Module}}`. `erx_net_local`
 doing nothing for `serve/1` is correct, not merely harmless: no message
-outside erXos comes from another domain, so there is no envelope to ask
-for and no lane to limit, and the grant's admission needs no variant of
+outside erXos comes from another domain, so none arrives in an envelope
+and there is no lane to limit, and the grant's admission needs no variant of
 its own ([The grant's contract](#the-grants-contract)).
 
 The per-byte primitives are portable Erlang outside erXos. A NIF built
@@ -2817,8 +2818,9 @@ socket's pid is encoded only in frames to the grantee, so the network
 domain's runtime exports it to the grantee alone, with `send` only, and
 no other domain can message it
 ([design-domains.md](design-domains.md#exports)). A socket receives
-messages from other domains wrapped with their origin
-(`erx:origins(true)`) and checks each request as a facet does, through
+messages from other domains wrapped with their origin, as every process
+does ([design-domains.md](design-domains.md#the-peer)), and checks each
+request as a facet does, through
 the admission path generated from the same schema: the request's origin
 against the grantee, its operation and arguments against the schema, its
 size and the requests in flight. A reply target or a new owner must be a
@@ -2936,7 +2938,11 @@ test calls the backend directly
 `Pid` is the connection, listener or datagram socket, so `gen_tcp`,
 `gen_udp` and `inet` reach the backend through the dispatch they already
 have. The connection builds the same term for the messages it sends, so
-an owner's `receive {tcp, S, Data}` matches as on stock.
+an owner's `receive {tcp, S, Data}` matches as on stock. An owner in
+another domain receives them in the envelope every message from another
+domain arrives in; how they keep their stock shape there is an open
+question for the user in
+[design-domains.md](design-domains.md#risks-and-open-questions).
 
 Each call is one request to one process: the grant for `connect`,
 `listen` and `open`; the socket for the rest.

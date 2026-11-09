@@ -1475,7 +1475,7 @@ the end reaches the fault gate and runs as above
 domain reaches the domain service through the generated admission of its
 operation schema, as every service's requests do
 ([design-domains.md](design-domains.md#authority)), with the domain of the
-lane it arrived on stamped by the funnel as `{erx_origin, D, Msg}`, which
+lane it arrived on stamped by the system domain's peer as `{erx_origin, D, Msg}`, which
 no sender chooses ([design-domains.md](design-domains.md#the-peer)). The
 service acts only on the sender's own side of a connection: a
 `connection_mapped`, `connection_unmapped` or `connection_lost` reaches it
