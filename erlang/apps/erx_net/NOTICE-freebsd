@@ -143,3 +143,7 @@ module erx_lltable
 module erx_nd6_dad
   sys/netinet6/nd6_nbr.c nd6_dad_start nd6_dad_stop nd6_dad_timer nd6_dad_find nd6_dad_ns_output nd6_dad_ns_input nd6_dad_na_input
   sys/netinet6/in6.c in6_broadcast_ifa
+
+module erx_tcp_loss_dupack
+  sys/netinet/tcp_input.c tcp_do_segment tcp_do_prr_ack tcp_newreno_partial_ack tcp_is_sack_recovery
+  sys/netinet/tcp_timer.c tcp_timer_rexmt

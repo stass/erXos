@@ -458,3 +458,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Settle it by timing `make check-stack-proof` with and without the
   pass; if it matters, run the dumps in parallel or cache them by the
   tree's hash.
+* **The send log's walks during SACK recovery.** `erx_tcp_sendlog`'s
+  `next_seg/2` walks from `snd_una` past SACKed and retransmitted ranges,
+  `mark_lost/3` walks down from the highest SACKed range to the first lost
+  one, and `timeout/2` and `resend_holes/1` rewrite every range; with a
+  large window and many ranges each is linear in the ranges per call.
+  Settle it with a host benchmark of one recovery episode over a 10,000-
+  segment window; if it matters, keep a hint of the first range not yet
+  retransmitted, as FreeBSD keeps `sackhint.nexthole`.

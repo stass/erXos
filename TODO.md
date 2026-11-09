@@ -555,15 +555,21 @@ it; git history is the record of completed work.
   does, a default route through a router that left the list is missing. When the interface process is
   written, pass erx_nd6's reachability into `ra/4`, `tick/2` and `dad_done/3`, select inside, and emit
   `{routes, Rows}` and `{addresses, Rows}` actions only on a change, so it holds by construction.
-* [High] network, the TCP sender's SACK side, package P12 (`erx_tcp_sendlog`, `erx_tcp_loss_dupack`;
-  [design-network-stack.md](docs/design-network-stack.md#provenance-and-notices)): write the scoreboard,
-  `IsLost`, `NextSeg`, the pipe and SACK-based recovery from RFC 6675, without reading
-  `netinet/tcp_sack.c`, which carries NRL's notice with an advertising clause, as `erx_tcp_sack` is
-  written from RFC 2018 and RFC 2883. No RFC specifies the lost-retransmission check (`tcp_do_lrd`), so
-  the design must first describe it from a source other than `tcp_sack.c`. The design still cites
-  `tcp_sack.c` functions and lines for the roles they play ("Loss detection": `tcp_sack_partialack`,
-  `tcp_sack_lost_retransmission`; "Defaults kept": `tcp_do_sack`, `tcp_do_newsack`, `tcp_do_lrd`); P12
-  replaces those citations with the RFC sections it follows.
+* [Medium] network, `erx_tcp_loss_dupack` and `erx_tcp_sendlog` (P12; review findings left for the
+  connection packages P14-P17, which settle the contract they depend on):
+  PRR's counters `prr_delivered` and `prr_base` are set only on entering fast recovery and never
+  reset, so an ECN window reduction runs PRR on stale counters (FreeBSD zeroes them in
+  `cc_post_recovery`); the module needs to notice `#ccv.cong_recovery` turning on or recovery ending.
+  `snd_limited` is taken from every byte sent since the first duplicate and `limited_base` is not
+  cleared on an advancing acknowledgement, where FreeBSD counts only limited transmit's own output.
+  PRR's window in SACK recovery is RFC 6937's `pipe + sndcnt` over the pipe after the acknowledgement,
+  where FreeBSD sets `pipe - del_data + sndcnt` and measures it against its own pipe; compare the two
+  in the packet scripts against FreeBSD before deciding. The non-SACK PRR window
+  `(snd_max - snd_una) + sndcnt` is measured against the pipe after the acknowledgement. The
+  lost-ranges-are-a-prefix property rests on `lose/3` being called at `snd_una` only; give `lose/3`
+  no range, or keep it explicitly, before a second loss module (RACK) marks by time. P17 must say what
+  output measures against when `allowance/3` is `none`, and whether `snd_nxt` still rewinds after a
+  timeout now that the log's lost marks say what to resend.
 * [Low] network, `erx_udp_wire:decode/3`: over IPv4 a datagram whose UDP length is short of its IP
   payload yields a payload that is a sub-binary of the whole frame, so a 1-byte payload can hold a
   64 KiB reassembled datagram. When erx_udp is written, apply the TCP rule (design "Receiving": a

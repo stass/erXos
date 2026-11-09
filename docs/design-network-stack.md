@@ -828,15 +828,31 @@ FreeBSD (`tcp_ts_offset_per_conn`, `tcp_subr.c:224`).
 
 The sender's record of what it has sent is one structure,
 `erx_tcp_sendlog`: an ordered map from each sent range's first byte to
-`#sent{last, sent_at, transmissions, sacked, lost}`. Because sequence
+`#sent{next, sent_at, transmissions, sacked, lost, rxt}`, `next` being the
+sequence number after the range. Because sequence
 numbers are integers, the map is an ordinary `gb_trees` keyed by them.
 RFC 6675's scoreboard is computed from it, holes, `IsLost`, `NextSeg` and
-the pipe included, and so is what RACK-TLP needs: each range's last
-transmission time is there. FreeBSD keeps two structures for this, the
+the pipe included (RFC 6675 section 4), and so is what RACK-TLP needs:
+each range's last transmission time is there. `rxt` marks a range
+retransmitted during the current recovery, RFC 6675's octets at or below
+`HighRxt` kept per range. FreeBSD keeps two structures for this, the
 default stack's hole list (`tcp_sack.c`) and RACK's sent-segment hash, and
 never unified them, which is one reason RACK is a second stack. Here the
 loss modules read and mark the one log, and output takes the next range
-to send from it.
+to send from it (`NextSeg`). The log is written from RFC 6675, not
+translated from `tcp_sack.c`.
+
+Two properties hold by construction. A SACK block marks only the ranges
+it covers whole, so only the sender's own transmissions create range
+boundaries and a peer cannot split the log into pieces smaller than what
+was sent; a block covering part of a range is conservative, the range
+stays unSACKed, and neighbouring SACKed ranges merge, so repeated or
+wide blocks cannot grow the log. And the unSACKed ranges marked lost are
+a prefix of the unSACKed ranges, since `IsLost` is monotone downwards and
+`lose/3` marks ranges only from `snd_una`, so the pipe is a
+constant-time sum of byte counters kept by the one function that changes
+a range, `(snd_max - snd_una) - sacked - lost + rxt`, as FreeBSD's
+`tcp_compute_pipe` computes it (`tcp_input.c:4149`).
 
 The receiver's side, `erx_tcp_sack`, is written from RFC 2018 section 4
 and RFC 2883 section 4, not translated from `tcp_sack.c` (see
@@ -870,28 +886,54 @@ from FreeBSD's own interfaces.
 ```erlang
 -callback init(erx_tcp_loss:params()) -> State :: term().
 %% An acknowledgement arrived: mark ranges SACKed or lost, enter or leave
-%% recovery, and return the congestion signals it raises.
+%% recovery, and return the calls the connection makes and whether the
+%% rest of the segment is processed.
 -callback ack(erx_tcp_loss:ack(), erx_tcp_sendlog:log(), State, Now) ->
-    {erx_tcp_sendlog:log(), State, [erx_tcp_cc:signal()]}.
+    {continue | drop, erx_tcp_sendlog:log(), State, [erx_tcp_loss:event()]}.
 %% The retransmission timer expired.
--callback rto(erx_tcp_sendlog:log(), State, Now) ->
+-callback rto(erx_tcp_sendlog:log(), State, erx_tcp_cc:ccv(), Now) ->
     {erx_tcp_sendlog:log(), State}.
-%% How much may be sent now during recovery, and from where.
--callback allowance(State, erx_tcp_cc:ccv()) -> erx_tcp_loss:allowance().
+%% The window for the output after the last acknowledgement.
+-callback allowance(erx_tcp_sendlog:log(), State, erx_tcp_cc:ccv()) ->
+    none | {Send :: non_neg_integer(), Keep :: non_neg_integer()}.
 %% The module's own deadline, such as RACK's reordering timer.
 -callback deadline(State) -> integer() | infinity.
 -callback expired(erx_tcp_sendlog:log(), State, Now) ->
-    {erx_tcp_sendlog:log(), State, [erx_tcp_cc:signal()]}.
+    {erx_tcp_sendlog:log(), State, [erx_tcp_loss:event()]}.
 ```
 
-The default module, `erx_tcp_loss_dupack`, translates the default stack:
-three duplicate ACKs, RFC 6675 SACK-based recovery, NewReno partial
-ACKs when SACK is off (`tcp_newreno_partial_ack`, `tcp_input.c:4114`;
-`tcp_sack_partialack`, `tcp_sack.c:971`), proportional rate reduction
-(`tcp_do_prr_ack`, `tcp_input.c:4026`; on by default, `tcp_do_prr`,
-`tcp_input.c:162`), limited transmit (`tcp_do_rfc3042`, `:172`) and the
-lost-retransmission check (`tcp_sack_lost_retransmission`,
-`tcp_sack.c:1156`). It is the only loss module. RACK-TLP, deferred by
+A loss module never calls the congestion module. Its events are the calls
+the connection makes, in order: `{cong_signal, Signal}`,
+`{ack_received, dupack}`, stopping the retransmission timer, `TF_ACKNOW`,
+and `snd_nxt = snd_max`. `drop` is FreeBSD's `goto drop` after a
+duplicate acknowledgement or the entry to recovery. During recovery and
+limited transmit the loss module, not the congestion module, sets the
+window, as `tcp_input.c` sets `snd_cwnd` around its calls to
+`tcp_output`: the connection calls `allowance/3` once after each `ack/4`,
+after applying its events; `{Send, Keep}` means that step's output runs
+with the window `Send`, measured against the log's pipe, and `Keep` stays
+in `#ccv.cwnd` afterwards. What FreeBSD counts in `tcp_output` for the
+loss code (`snd_limited`, PRR's `prr_out`) is read from the log instead,
+and NewReno's retransmission from `snd_una`, which FreeBSD makes by moving
+`snd_nxt` back, is a range marked lost that output resends first.
+
+The default module, `erx_tcp_loss_dupack`, translates the default stack's
+duplicate-acknowledgement processing in `tcp_do_segment`: three duplicate
+ACKs, SACK-based recovery (RFC 6675 section 5, entered on the third
+duplicate or on more than `(DupThresh - 1) * SMSS` SACKed bytes), NewReno
+partial ACKs when SACK is off (`tcp_newreno_partial_ack`,
+`tcp_input.c:4114`; RFC 6582 section 3.2), proportional rate reduction
+(`tcp_do_prr_ack`, `tcp_input.c:4026`; RFC 6937 section 3; on by default,
+`tcp_do_prr`, `tcp_input.c:162`), limited transmit (`tcp_do_rfc3042`,
+`:172`; RFC 3042), and the timeout's choice between resending the holes
+and forgetting the SACK information (`tcp_timer_rexmt`; RFC 6675 section
+5.1). Where FreeBSD's code is in `tcp_sack.c` the module follows the RFC:
+a partial acknowledgement without SACK blocks during SACK recovery takes
+PRR's path (RFC 6937), and "new loss" for PRR (RFC 6937 section 3) is bytes
+newly marked by `IsLost`. FreeBSD's lost-retransmission detection
+(`tcp_do_lrd`) is not built: no RFC specifies it, and its only description
+is its code in `tcp_sack.c`, which erXos does not read. It is the only
+loss module. RACK-TLP, deferred by
 the owner's decision, would be a second one, `erx_tcp_loss_rack`,
 implementing RFC 8985 over the same log; BBR would be a congestion
 module beside CUBIC, with pacing added to output.
@@ -1029,7 +1071,8 @@ connection, as `tcp_drop_syn_sent` (`tcp_subr.c:3559`) does.
 | RFC 5961 | on (`tcp_insecure_syn`, `tcp_insecure_rst`, `tcp_insecure_ack` all 0, `tcp_input.c:197-209`) | always on; no knob |
 | RFC 6528 | `tcp_new_isn` | always |
 | window scaling and timestamps | on (`tcp_do_rfc1323`, `tcp_subr.c:207`) | on |
-| SACK with RFC 6675 recovery, lost-retransmission detection | on (`tcp_do_sack`, `tcp_do_newsack`, `tcp_sack.c:125-130`; `tcp_do_lrd`, `tcp_sack.c:152`) | on |
+| SACK with RFC 6675 recovery | on (`tcp_do_sack`, `tcp_do_newsack`) | on, written from RFC 2018, RFC 2883 and RFC 6675 |
+| lost-retransmission detection | on (`tcp_do_lrd`) | not built: no RFC specifies it and its code is in `tcp_sack.c` |
 | PRR, limited transmit, IW10 | on (`tcp_input.c:162-178`) | on |
 | ECN | 2: accept when the peer asks, never initiate (`tcp_do_ecn`, `tcp_ecn.c:106`) | 2, so a peer that asks for AccECN gets RFC 3168 ECN, as `tcp_ecn_syncache_add` answers it (`tcp_ecn.c:509-537`); like FreeBSD, a SYN-ACK with ECE alone turns ECN on although our SYN did not ask, where RFC 3168 section 6.1.1 would leave it off (`tcp_ecn_input_syn_sent`, `tcp_ecn.c:120`) |
 | missing timestamps on a connection that negotiated them | tolerated (`tcp_tolerate_missing_ts`, `tcp_subr.c:219`) | tolerated |
@@ -1350,10 +1393,10 @@ modules are marked P; process modules E.
 | `erx_tcp_user` | `tcp_usrreq.c`, `tcp_drop` (`tcp_subr.c:2393`), `tcp_close` (`:2532`), `tcp_newtcpcb` (`:2233`) | user requests | P |
 | `erx_tcp_rtt` | `tcp_xmit_timer` (`tcp_input.c:3642`), the timeout of `tcp_timer_rexmt` (`tcp_timer.c:631-635`), `TCP_REXMTVAL`, the estimator fields of `tcp_newtcpcb` | RFC 6298 estimator and the backed-off timeout | P |
 | `erx_tcp_mss` | `tcp_mss` (`tcp_input.c:3899`), `tcp_mss_update`, `tcp_mssopt`, `tcp_maxseg` (`tcp_subr.c:3780`), `tcp_compute_initwnd` | MSS and initial window | P |
-| `erx_tcp_sendlog` | none: written from RFC 6675, the role of `tcp_sack_doack` and `tcp_sack_output` in `tcp_sack.c`, which is not read | the send log and RFC 6675 scoreboard | P |
+| `erx_tcp_sendlog` | none: written from RFC 6675 sections 4 and 5, as `tcp_sack.c` is not read | the send log and RFC 6675 scoreboard | P |
 | `erx_tcp_sack` | none: written from RFC 2018 and RFC 2883, since `tcp_sack.c` carries an advertising clause | SACK and D-SACK blocks | P |
 | `erx_tcp_reass` | `tcp_reass.c` | out-of-order queue | P |
-| `erx_tcp_loss`, `erx_tcp_loss_dupack` | loss parts of `tcp_input.c`; RFC 6675 for those of `tcp_sack.c`, which is not read | behaviour; default loss detection | P |
+| `erx_tcp_loss`, `erx_tcp_loss_dupack` | loss parts of `tcp_input.c` and `tcp_timer_rexmt` in `tcp_timer.c`; RFC 6675, RFC 6937, RFC 3042 and RFC 6582 for those of `tcp_sack.c`, which is not read | behaviour; default loss detection | P |
 | `erx_tcp_cc`, `erx_tcp_cc_newreno`, `erx_tcp_cc_cubic` | `cc/cc.h`, `cc/cc.c`, `cc_newreno.c`, `cc_cubic.c`, the `cc_*` callers in `tcp_input.c` | behaviour; NewReno; CUBIC | P |
 | `erx_tcp_ecn` | `tcp_ecn.c` | ECN | P |
 | `erx_tcp_isn` | `tcp_new_isn`, `tcp_new_ts_offset`, `tcp_keyed_hash` (`tcp_subr.c`) | initial sequence numbers, timestamp offsets | P |
