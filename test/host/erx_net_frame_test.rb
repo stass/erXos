@@ -1,0 +1,45 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'minitest/autorun'
+require_relative 'erx_net_eunit'
+
+# Runs the EUnit cases of erx_net_frame (test/erlang/erx_net_frame_tests.erl): paths,
+# route-free paths, hop limits and MTUs, frames that decode back, and a connection whose
+# MTU drops in mid-transfer; and requires each seeded failure of the design's
+# "Classification and framing" to fail its case.
+class ErxNetFrameTest < Minitest::Test
+  include ErxNetEunit
+
+  # Each fault: the module, its exact text, the faulty text, and the case that must fail.
+  SEEDED = {
+    gateway_ignored: ['erx_net_frame', '{neighbour, <<_/binary>>} -> Gateway;',
+                      '{neighbour, <<_/binary>>} -> Dst;', 'gateway_and_longest_match_test'],
+    ecn_in_dscp: ['erx_net_frame', '(Tos band 16#fc) bor Ecn', '(Tos band 16#fc) bor (Ecn bsl 2)',
+                  'tcp_frames_decode_back_test'],
+    multicast_24_bits: ['erx_net_frame', '<<_:9, Low:23>>) -> <<16#01005e:24, 0:1, Low:23>>;',
+                        '<<_:8, Low:24>>) -> <<16#01005e:24, Low:24>>;',
+                        'hop_limits_mtus_and_first_address_test'],
+    route_for_every_destination: ['erx_net_frame',
+                                  'Unrouted = erx_net_addr:is_multicast(Dst) orelse Dst =:= <<16#ffffffff:32>>,',
+                                  'Unrouted = byte_size(Dst) > 16,',
+                                  'route_free_paths_of_the_interface_test'],
+    interface_hop_limit_for_multicast: ['erx_net_frame', '#{} when Multicast -> ?MULTICAST_HLIM;',
+                                        '#{} when Multicast, Family =:= inet -> ?MULTICAST_HLIM;',
+                                        'hop_limits_mtus_and_first_address_test'],
+    sized_by_maxseg_alone: ['erx_tcp_output', 'case Df andalso ?IP4_TCP_HDR_LEN + Optlen + Seg#out_seg.len > Mtu of',
+                            'case Df andalso Mtu < 0 of', 'mtu_drop_mid_transfer_test']
+  }.freeze
+
+  def test_framing_cases_pass_under_eunit
+    assert_erx_net_eunit(:erx_net_frame_tests)
+  end
+
+  SEEDED.each do |name, (mod, exact, faulty, failing)|
+    define_method("test_seeded_#{name}_is_caught") do
+      output = refute_erx_net_eunit(:erx_net_frame_tests, fault: { mod => [exact, faulty] })
+      assert_match(/#{failing}/, output)
+    end
+  end
+end

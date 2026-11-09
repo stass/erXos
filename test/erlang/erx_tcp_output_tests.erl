@@ -210,3 +210,16 @@ snd_nxt_behind_snd_una_test() ->
     {T1, Out} = out(T#tcb{sndbuf = erx_tcp_sndbuf:drop(T#tcb.sndbuf, 1)}),
     ?assertMatch([1002 | _], seqs(Out)),
     ?assert(T1#tcb.snd_nxt > 1002).
+
+%% With no route the segment is lost as on the wire: nothing goes out, snd_nxt stays, the
+%% retransmission timer runs, and the error becomes the connection's soft error.
+no_route_test() ->
+    T = est(3000),
+    {T1, Out} = erx_tcp_output:output(T, (ctx(64))#tcp_ctx{route = {error, ehostunreach}}),
+    ?assertEqual([], Out),
+    ?assertEqual({1001, 1001 + 1000}, {T1#tcb.snd_nxt, T1#tcb.snd_max}),
+    ?assertMatch({rexmt, _}, T1#tcb.send_timer),
+    ?assertEqual(ehostunreach, T1#tcb.soft_error),
+    %% The route back, the next pass sends from snd_nxt again.
+    {_, Again} = out(T1),
+    ?assertEqual([1001, 2001, 3001], seqs(Again)).

@@ -585,6 +585,28 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] network, `erx_nd6_rtr` and `erx_in6_src`: address rows carry `deprecated` and
+  `erx_in6_src:select/3` reads only that flag, but nothing sets it yet: `erx_nd6_rtr` should
+  set it when an address's preferred deadline passes (`nd6.c:984-987`), clear it when an
+  advertisement makes the address preferred again (`nd6.c:1041`), and wake for preferred
+  deadlines in `next_deadline/1`. Until then RFC 6724 rule 3 never fires.
+* [Medium] network, `erx_net_frame` (design gap): FreeBSD's `ip_output` refuses a broadcast
+  without `SO_BROADCAST` with EACCES, one on a non-broadcast interface with EADDRNOTAVAIL,
+  and refuses to fragment one (`ip_output.c:661-675`). The design states none of these; the
+  path should carry whether it is a broadcast, and `udp/5` and `ip/4` refuse an oversized
+  one. Multicast with hop limit 0 on a non-loopback interface (`ip6_output.c:929-933`) is
+  also still framed.
+* [Medium] network, `erx_tcp_output:unreachable/4`: a segment lost to EHOSTUNREACH still
+  clears `ack_now` and the delayed ACK and advances `rcv_adv` and `last_ack_sent`, which
+  FreeBSD does only on success (`tcp_output.c:1635-1641`, `:1722-1735`), so a lost pure ACK
+  is not retried. Pass the outcome into the commit so nothing is undone field by field.
+  Its tests cover only new data in ESTABLISHED: add a send-log retransmission, a SYN, a
+  persist probe and SYN-SENT (no soft error).
+* [Low] network, docs/design-network-stack.md ("Framing", step 3 of the output pass): "past
+  SYN-RECEIVED" should read "once a SYN has been received" (`TCPS_HAVERCVDSYN`), as the code
+  does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which
+  the stack does not.
+
 * [Medium] erx_net TCP core (`erx_tcp`, `erx_tcp_user`): a malformed event or request
   (`{send, From, NotBinary}`) raises `function_clause` with the whole `#tcb{}` in the
   stack trace, send-buffer payload and the connection's generator included. Requests

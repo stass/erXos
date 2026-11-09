@@ -94,7 +94,7 @@ scope_test() ->
 
 broadcast_and_on_link_test() ->
     Row = #{addr => <<192, 168, 1, 10>>, plen => 24, ifname => eth0, flags => [],
-            preferred => infinity, valid => infinity, broadcast => <<192, 168, 1, 255>>},
+            broadcast => <<192, 168, 1, 255>>},
     ?assert(erx_net_addr:is_broadcast(<<192, 168, 1, 255>>, eth0, [Row])),
     ?assertNot(erx_net_addr:is_broadcast(<<192, 168, 1, 255>>, eth1, [Row])),
     ?assert(erx_net_addr:is_broadcast(<<255, 255, 255, 255>>, eth1, [])),

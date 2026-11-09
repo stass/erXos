@@ -152,6 +152,8 @@ Departures, each from erXos's model:
 %% V_tcp_minmss (tcp_subr.c): with path MTU discovery on, its default, a connection whose
 %% MSS is above it sets DF on every segment (tcp_output.c:1494-1498).
 -define(TCP_MINMSS, 216).
+%% sizeof(struct tcpiphdr): the IPv4 and TCP headers without options.
+-define(IP4_TCP_HDR_LEN, 40).
 %% PADTCPOLEN(TCPOLEN_TIMESTAMP).
 -define(TS_OPTLEN, 12).
 
@@ -210,19 +212,46 @@ request_r_scale() ->
     hd([Shift || Shift <- lists:seq(0, ?TCP_MAX_WINSHIFT - 1), ?TCP_MAXWIN bsl Shift >= ?SB_MAX]
        ++ [?TCP_MAX_WINSHIFT]).
 
-%% The `again` loop. A segment beyond the credit is the ENOBUFS case.
-again(Tcb0, Idle, Credit, Ctx, Acc) ->
+%% The `again` loop, with the ip_output errors FreeBSD meets after `send:` taken where
+%% they are known before it (tcp_output.c:1651-1724): with no route the first segment is
+%% lost (unreachable/4); a segment beyond the credit is the ENOBUFS case; one IP must refuse
+%% under don't-fragment lowers t_maxseg and goes round again (EMSGSIZE), which ends, since
+%% each lowering is strictly smaller and an MSS of TCP_MINMSS or less sets no DF.
+again(Tcb0, Idle, Credit, #tcp_ctx{route = Route} = Ctx, Acc) ->
     case decide(Tcb0, Idle, Ctx) of
         {stop, Tcb} ->
             {Tcb, lists:reverse(Acc)};
-        {send, Seg, Tcb} when Credit =:= 0 ->
+        {send, Seg, Tcb} when Credit =:= 0, Route =:= ok ->
             {enobufs(Seg, Tcb, Ctx), lists:reverse(Acc)};
         {send, Seg, Tcb1} ->
-            {Tcb, Out, More} = transmit(Seg, Tcb1, Ctx),
-            case More of
-                true -> again(Tcb, Idle, Credit - 1, Ctx, [Out | Acc]);
-                false -> {Tcb, lists:reverse([Out | Acc])}
+            case transmit(Seg, Tcb1, Ctx) of
+                {emsgsize, Mss} -> again(Tcb1#tcb{maxseg = Mss}, Idle, Credit, Ctx, Acc);
+                {Tcb, Out, _} when Route =/= ok -> {unreachable(Seg, Tcb1, Tcb, Out), []};
+                {Tcb, Out, true} -> again(Tcb, Idle, Credit - 1, Ctx, [Out | Acc]);
+                {Tcb, Out, false} -> {Tcb, lists:reverse([Out | Acc])}
             end
+    end.
+
+%% EHOSTUNREACH (tcp_output.c:1651-1678, 1709-1716): the segment is lost as on the wire,
+%% its timers and snd_max kept, and the sequence advance backed out, unless it is a SYN or
+%% a probe in persist; a connection that has received a SYN keeps the error as its soft
+%% error, which its timeout reports in place of ETIMEDOUT (erx_tcp_user:drop/2).
+unreachable(#out_seg{source = Source}, #tcb{state = State} = Before, After,
+            {#tcp{flags = Flags}, _Marks, Payload}) ->
+    BackOut = Flags band ?TH_SYN =:= 0
+        andalso not (Before#tcb.force_data andalso persisting(Before)),
+    Tcb = case {BackOut, Source} of
+              {false, _} ->
+                  After;
+              {true, next} ->
+                  Sent = iolist_size(Payload) + bit(Flags, ?TH_FIN),
+                  After#tcb{snd_nxt = After#tcb.snd_nxt - Sent};
+              {true, _} ->
+                  After#tcb{snd_nxt = Before#tcb.snd_nxt, sendlog = Before#tcb.sendlog}
+          end,
+    case erx_tcp:have_rcvd_syn(State) of
+        true -> Tcb#tcb{soft_error = ehostunreach};
+        false -> Tcb
     end.
 
 %% The end of a pass: the loss module's kept window becomes the congestion window, and the
@@ -446,9 +475,11 @@ nothing_sent(Tcb, _) ->
     Tcb.
 
 %% From `send:` to the end of the pass: the options and the MSS clamp, the header, the
-%% receive window, then the sequence numbers, the send log and the timers.
-transmit(#out_seg{start = Start, flags = Flags0} = Seg0,
-         #tcb{rcv_sack = RcvSack0, maxseg = Mss} = Tcb0, Ctx) ->
+%% receive window, then the sequence numbers, the send log and the timers. A segment that
+%% would not fit the context's MTU under don't-fragment is not committed: the answer is
+%% `{emsgsize, Mss}`, `tcp_mss_update(tp, -1, mtu)` of that MTU (tcp_output.c:1694-1709).
+transmit(#out_seg{flags = Flags0} = Seg0, #tcb{maxseg = Mss} = Tcb0,
+         #tcp_ctx{mtu = Mtu} = Ctx) ->
     Syn = Flags0 band ?TH_SYN =/= 0,
     {Sacks, RcvSack} = sack_blocks(Syn, Tcb0),
     Opts = (options(Syn, Tcb0, Ctx))#tcp_opts{sacks = Sacks},
@@ -458,7 +489,20 @@ transmit(#out_seg{start = Start, flags = Flags0} = Seg0,
                                    sendalot = true};
               false -> Seg0
           end,
+    Df = dont_fragment(Tcb0),
+    case Df andalso ?IP4_TCP_HDR_LEN + Optlen + Seg#out_seg.len > Mtu of
+        true -> {emsgsize, erx_tcp_mss:update(inet, {mtu, Mtu}, Mtu, 0)};
+        false -> commit(Seg, Opts, RcvSack, Df, Tcb0, Ctx)
+    end.
+
+%% DF on every IPv4 segment while the MSS is above tcp_minmss (tcp_output.c:1494-1498); an
+%% IPv6 segment carries none, so ip6_output fragments it (tcp_output.c:1455-1458).
+dont_fragment(#tcb{family = Family, maxseg = Mss}) ->
+    Family =:= inet andalso Mss > ?TCP_MINMSS.
+
+commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, #tcb{rcv_sack = RcvSack0} = Tcb0, Ctx) ->
     #out_seg{len = Len, flags = Flags1, sendalot = More} = Seg,
+    Sacks = Opts#tcp_opts.sacks,
     Tcb1 = Tcb0#tcb{rcv_sack = case Sacks of [] -> RcvSack0; _ -> RcvSack end},
     {Flags, IpEcn, Tcb2} = ecn(Seg#out_seg{flags = Flags1 bor push(Seg, Tcb1)}, Tcb1),
     {Header, RecWin} = header(Seg#out_seg{flags = Flags}, Opts, Tcb2),
@@ -477,7 +521,7 @@ transmit(#out_seg{start = Start, flags = Flags0} = Seg0,
                    ack_now = false, deadlines = Deadlines#deadlines{delack = infinity},
                    snd_up = Up, rxwin0_sent = Header#tcp.win =:= 0,
                    rexmt_prev = badrxtwin(Opts, Tcb3, Ctx)},
-    {Tcb, {Header, #{ecn => IpEcn, df => Mss > ?TCP_MINMSS}, Payload}, More}.
+    {Tcb, {Header, #{ecn => IpEcn, df => Df}, Payload}, More}.
 
 %% t_badrxtwin (tcp_output.c:848-849): the first segment sent with a timestamp after the
 %% first timeout, the retransmission, records our clock, without the offset, as the time

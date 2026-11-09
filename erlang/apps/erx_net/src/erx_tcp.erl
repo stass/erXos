@@ -410,7 +410,8 @@ past 16 bits is sent as the largest one, where FreeBSD's cast would truncate it.
 carries a window of 0 and no options, as `tcp_respond` sends it.
 """.
 -spec respond(#tcb{}, #tcp_ctx{}, integer(), integer(), 0..16#fff) -> outgoing().
-respond(#tcb{local = {_, LPort}, remote = {_, RPort}, wscale = Wscale, ts = Ts} = Tcb, Ctx,
+respond(#tcb{family = Family, local = {_, LPort}, remote = {_, RPort}, wscale = Wscale,
+             ts = Ts} = Tcb, Ctx,
         Seq, Ack, Flags) ->
     RcvShift = case Wscale of
                    {_, Rcv} -> Rcv;
@@ -429,4 +430,4 @@ respond(#tcb{local = {_, LPort}, remote = {_, RPort}, wscale = Wscale, ts = Ts} 
     {#tcp{sport = LPort, dport = RPort, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
           flags = Flags, win = Win, urp = 0,
           opts = Opts},
-     #{ecn => 0, df => true}, []}.
+     #{ecn => 0, df => Family =:= inet}, []}.

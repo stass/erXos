@@ -182,7 +182,7 @@ seconds, 0xffffffff meaning infinity.
          next_deadline/1, select_router/2, addresses/1, routes/1, routers/1,
          prefixes/1, params/1, stats/1]).
 
--export_type([state/0, action/0, ref/0, packet/0]).
+-export_type([state/0, action/0, ref/0, packet/0, address/0]).
 
 -define(MAX_ROUTERS, 16).
 -define(MAX_PREFIXES, 16).
@@ -214,9 +214,18 @@ formed from a random identifier.
 """.
 -type action() :: send_rs
                 | {ifid_request, ref(), Message :: binary()}
-                | {dad, erx_net_addr:row()}
+                | {dad, address()}
                 | {cache_lladdr, Router :: erx_net_addr:addr6(), binary() | none}
                 | {random_ifid, Prefix :: erx_net_addr:addr6()}.
+
+-doc """
+An address the interface formed: the fields of its row of the address table, and its
+preferred and valid deadlines, which stay here (docs/design-network-stack.md, "What owners
+publish").
+""".
+-type address() :: #{addr := erx_net_addr:addr6(), plen := 0..128, ifname := term(),
+                     flags := [erx_net_addr:flag()], preferred := erx_net_addr:deadline(),
+                     valid := erx_net_addr:deadline()}.
 
 -doc "An identifier request: the /64 prefix it is for and the offset tried.".
 -type ref() :: {Prefix :: erx_net_addr:addr6(), Offset :: 0..254}.
@@ -237,7 +246,7 @@ and hop limit, and whether it arrived in fragments (RFC 6980).
 -opaque state() :: #{ifname := binary(), if_mtu := pos_integer(),
                      gen := erx_net_rand:gen(),
                      routers := [router()], installed := erx_net_addr:addr6() | none,
-                     prefixes := [prefix()], addrs := [erx_net_addr:row()],
+                     prefixes := [prefix()], addrs := [address()],
                      pending := #{erx_net_addr:addr6() =>
                                       {erx_net_addr:deadline(), erx_net_addr:deadline()}},
                      failures := non_neg_integer(),
@@ -694,8 +703,11 @@ next_router(Installed, Routers) ->
 
 %% --- Views ----------------------------------------------------------------
 
--doc "The addresses the interface formed, as rows of the address table.".
--spec addresses(state()) -> [erx_net_addr:row()].
+-doc """
+The addresses the interface formed, each a row of the address table with the preferred
+and valid deadlines its owner keeps, which the published row does not carry.
+""".
+-spec addresses(state()) -> [address()].
 addresses(#{addrs := Addrs}) -> Addrs.
 
 -doc """

@@ -8,8 +8,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(NOW, 1000000).
-
 a(Text) ->
     {ok, Tuple} = inet:parse_ipv6strict_address(Text),
     << <<W:16>> || W <- tuple_to_list(Tuple) >>.
@@ -17,15 +15,11 @@ a(Text) ->
 row(Text) -> row(Text, []).
 row(Text, Opts) ->
     #{addr => a(Text), plen => 64, ifname => proplists:get_value(ifname, Opts, eth0),
-      flags => proplists:get_value(flags, Opts, []),
-      preferred => case proplists:get_bool(deprecated, Opts) of
-                       true -> ?NOW - 1;
-                       false -> infinity
-                   end,
-      valid => infinity}.
+      flags => proplists:get_value(flags, Opts, [])
+                   ++ [deprecated || proplists:get_bool(deprecated, Opts)]}.
 
 pick(Dst, Rows) ->
-    {ok, #{addr := Addr}} = erx_in6_src:select(a(Dst), eth0, Rows, ?NOW),
+    {ok, #{addr := Addr}} = erx_in6_src:select(a(Dst), eth0, Rows),
     Addr.
 
 %% Each example in both candidate orders, since the walk keeps a tie.
@@ -79,5 +73,4 @@ unusable_rows_skipped_test() ->
                  erx_in6_src:select(a("2001:db8::1"), eth0,
                                     [row("2001:db8::2", [{flags, [anycast]}]),
                                      #{addr => <<10, 0, 0, 1>>, plen => 8, ifname => eth0,
-                                       flags => [], preferred => infinity, valid => infinity}],
-                                    ?NOW)).
+                                       flags => []}])).

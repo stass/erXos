@@ -38,8 +38,8 @@ IPv6 source address selection, RFC 6724 section 5, translated from
 (docs/design-network-stack.md, "IPv6, neighbour discovery and
 autoconfiguration").
 
-`select/4` takes the destination, the outgoing interface the route lookup
-chose, the rows of the address table and the time, and returns the row
+`select/3` takes the destination, the outgoing interface the route lookup
+chose and the rows of the address table, and returns the row
 whose address is the source. It walks the rows in order as FreeBSD walks
 its address list, keeping the best so far: a candidate replaces it or is
 passed over by the first of these rules that tells them apart, and a
@@ -51,7 +51,10 @@ candidate no rule tells apart is passed over.
   outgoing one). Deprecated addresses stay candidates, as FreeBSD's
   default `ip6_use_deprecated` of 1 keeps them.
 * Rule 1, the same address as the destination, ends the walk.
-* Rule 2, the appropriate scope; rule 3, avoid deprecated addresses;
+* Rule 2, the appropriate scope; rule 3, avoid deprecated addresses,
+  those whose row carries the `deprecated` flag, which the owner sets
+  once the preferred lifetime has passed where `in6_selectsrc` tests
+  `IFA6_IS_DEPRECATED` against the clock;
   rule 5, prefer the outgoing interface; rule 6, prefer a label matching
   the destination's; rule 7, prefer public over temporary addresses;
   last, FreeBSD's rule 14, the longest prefix matching the destination.
@@ -66,7 +69,7 @@ The labels are those of RFC 6724's default policy table, the table
 FreeBSD's `rc.d/ip6addrctl` installs at boot on a host with IPv6.
 """.
 
--export([select/4, label/1]).
+-export([select/3, label/1]).
 
 %% RFC 6724 section 2.1, longest prefixes first: {Prefix, Plen, Label}.
 
@@ -82,16 +85,16 @@ FreeBSD's `rc.d/ip6addrctl` installs at boot on a host with IPv6.
 
 -doc """
 The source for destination Dst leaving through interface OutIf, chosen
-among Rows at time Now, or `{error, eaddrnotavail}` when no row is usable,
-as `in6_selectsrc` fails.
+among Rows, or `{error, eaddrnotavail}` when no row is usable, as
+`in6_selectsrc` fails.
 """.
--spec select(erx_net_addr:addr6(), term(), [erx_net_addr:row()], integer()) ->
+-spec select(erx_net_addr:addr6(), term(), [erx_net_addr:row()]) ->
           {ok, erx_net_addr:row()} | {error, eaddrnotavail}.
-select(<<_:128>> = Dst, OutIf, Rows, Now) ->
+select(<<_:128>> = Dst, OutIf, Rows) ->
     Zone = erx_net_addr:zone(Dst, OutIf),
     Usable = [Row || Row <- Rows, usable(Row, Dst, Zone, OutIf)],
-    walk(Usable, none, #{dst => Dst, out => OutIf, now => Now,
-                         scope => erx_net_addr:scope(Dst), label => label(Dst)}).
+    walk(Usable, none, #{dst => Dst, out => OutIf, scope => erx_net_addr:scope(Dst),
+                         label => label(Dst)}).
 
 usable(#{addr := <<_:128>> = Addr, ifname := If, flags := Flags}, Dst, Zone, OutIf) ->
     erx_net_addr:zone(Dst, If) =:= Zone
@@ -144,8 +147,8 @@ scope_rule(#{addr := B}, #{addr := C}, #{scope := D}) ->
     end.
 
 %% Rule 3.
-deprecated_rule(Best, Row, #{now := Now}) ->
-    prefer_false(erx_net_addr:deprecated(Best, Now), erx_net_addr:deprecated(Row, Now)).
+deprecated_rule(#{flags := B}, #{flags := C}, _Ctx) ->
+    prefer_false(lists:member(deprecated, B), lists:member(deprecated, C)).
 
 %% Rule 5.
 interface_rule(#{ifname := B}, #{ifname := C}, #{out := Out}) ->

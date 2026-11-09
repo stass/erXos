@@ -180,4 +180,6 @@
 %% time in microseconds, the frames the transmit path accepts this step, and the path MTU.
 -record(tcp_ctx, {now :: integer(),
                   credit :: non_neg_integer(),
-                  mtu :: pos_integer()}).
+                  mtu :: pos_integer(),
+                  %% The path's route: `ok`, or ip_output's EHOSTUNREACH when it has none.
+                  route = ok :: ok | {error, ehostunreach}}).

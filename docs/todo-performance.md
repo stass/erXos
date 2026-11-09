@@ -474,3 +474,8 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   one output pass at a credit of 64 over a full buffer written in 1-byte and
   in 1,460-byte sends; if it matters, keep the chunks in a tree keyed by
   offset, or hand output an iterator that one pass advances.
+
+* `erx_net_frame:snapshot/3` rebuilds the route table with `erx_net_route:put/2` and sorts
+  the addresses on every configuration generation change, for every reader, and an
+  unconnected UDP socket builds a path per datagram. Settle with a benchmark of a path
+  rebuild over a host-sized configuration (a few interfaces, tens of rows) per datagram.

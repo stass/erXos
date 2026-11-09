@@ -25,15 +25,19 @@ prefix: a second gateway for the same prefix on the same interface
 replaces the first, which suits the one installed default router of
 `erx_nd6_rtr` and a static configuration's one gateway.
 
-The table's generation changes with every change of its rows and with
-nothing else. A connection keeps its route and the generation it was
-looked up at, and looks the route up again when the generation differs.
+The table's own generation counts the changes of its rows and nothing
+else; it serves its owner and tests. What a sender keeps is not this but
+the configuration generation of `erx_net_gen`, with the path
+`erx_net_frame` built from the published rows, and a sender builds its
+path again when that generation moves (docs/design-network-stack.md,
+"What owners publish"). The published route table holds each row with the
+pid of the interface incarnation that wrote it (`published()`).
 """.
 
 -export([new/0, put/2, delete/2, delete_interface/2, lookup/2, lookup/3,
          generation/1, rows/1]).
 
--export_type([row/0, key/0, table/0]).
+-export_type([row/0, published/0, key/0, table/0]).
 
 -doc """
 A route: destinations within Prefix/Plen leave through interface Ifname,
@@ -41,6 +45,9 @@ to Gateway or, when it is `none`, directly to the destination on the link.
 """.
 -type row() :: #{prefix := erx_net_addr:addr(), plen := 0..128, ifname := term(),
                  gateway := erx_net_addr:addr() | none, metric := non_neg_integer()}.
+
+-doc "A row as `erx_net_routes` holds it: the pid of the interface that wrote it, and the row.".
+-type published() :: {pid(), row()}.
 
 -type key() :: {Prefix :: erx_net_addr:addr(), Plen :: 0..128, Ifname :: term()}.
 
@@ -107,7 +114,7 @@ lookup(Dst, T) -> find(Dst, fun(_Key) -> true end, T).
 -spec lookup(erx_net_addr:addr(), term(), table()) -> {ok, row()} | none.
 lookup(Dst, Ifname, T) -> find(Dst, fun({_, _, If}) -> If =:= Ifname end, T).
 
--doc "The table's generation.".
+-doc "The count of changes to the table's rows, not the configuration generation.".
 -spec generation(table()) -> non_neg_integer().
 generation(#{gen := Gen}) -> Gen.
 

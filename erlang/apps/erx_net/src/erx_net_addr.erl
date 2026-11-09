@@ -128,18 +128,21 @@ pure and total over well-formed rows and addresses; a function that takes
 an address of either family dispatches on its size.
 
 A row is one address an interface process owns and publishes, keyed by
-the interface (`row()`). Lifetimes are deadlines in milliseconds on the
-caller's clock, or `infinity`. A row is deprecated once its preferred
-deadline has passed, as `IFA6_IS_DEPRECATED` tests it, and invalid once
-its valid deadline has; the owner deletes invalid rows, so the checks here
-do not look at `valid`.
+the interface (`row()`). A row carries the address's flags and no
+lifetimes: the owner keeps the preferred and valid deadlines in its own
+state (`deadline()`, milliseconds on its clock or `infinity`), sets
+`deprecated` when the preferred one passes, as `nd6_timer` sets
+`IN6_IFF_DEPRECATED`, and deletes the row when the valid one passes
+(docs/design-network-stack.md, "What owners publish"). The table holds each
+row with the pid of the interface incarnation that wrote it and the place
+that interface added it in (`published()`).
 """.
 
 -export([is_unspecified/1, is_loopback/1, is_multicast/1, is_link_local/1,
          is_v4mapped/1, scope/1, zone/2, is_broadcast/3, is_local/2, is_on_link/2,
-         masked/2, matchlen/2, deprecated/2]).
+         masked/2, matchlen/2]).
 
--export_type([addr/0, addr4/0, addr6/0, row/0, flag/0, deadline/0, scope/0]).
+-export_type([addr/0, addr4/0, addr6/0, row/0, published/0, flag/0, deadline/0, scope/0]).
 
 -type addr4() :: <<_:32>>.
 -type addr6() :: <<_:128>>.
@@ -150,20 +153,27 @@ do not look at `valid`.
 -doc """
 An address's state, after FreeBSD's `ia6_flags`: `tentative` while
 duplicate address detection runs, `duplicated` once it found another
-holder, `anycast`, `detached`, `temporary` (RFC 8981) and `autoconf`
-(formed from a router advertisement's prefix).
+holder, `deprecated` once its preferred lifetime has passed, `anycast`,
+`detached`, `temporary` (RFC 8981) and `autoconf` (formed from a router
+advertisement's prefix).
 """.
--type flag() :: tentative | duplicated | anycast | detached | temporary | autoconf.
+-type flag() :: tentative | duplicated | deprecated | anycast | detached | temporary
+              | autoconf.
 
 -doc """
 A row of the address table: the address, its prefix length, the interface
-that owns it, its flags and its preferred and valid deadlines. An IPv4
-row may carry `broadcast`, the subnet's broadcast address, as
-`ia_broadaddr` does on a broadcast interface.
+that owns it and its flags. An IPv4 row may carry `broadcast`, the subnet's
+broadcast address, as `ia_broadaddr` does on a broadcast interface.
 """.
 -type row() :: #{addr := addr(), plen := 0..128, ifname := term(),
-                 flags := [flag()], preferred := deadline(), valid := deadline(),
-                 broadcast => addr4()}.
+                 flags := [flag()], broadcast => addr4()}.
+
+-doc """
+A row as `erx_net_addrs` holds it: the pid of the interface incarnation
+that wrote it, the place that interface added it in (`if_addrhead`'s
+order, which IPv4 source selection follows), and the row.
+""".
+-type published() :: {pid(), Order :: non_neg_integer(), row()}.
 
 -doc """
 An IPv6 scope, as scope6.c numbers them: 1 interface-local, 2 link-local,
@@ -301,11 +311,6 @@ matchlen(A, B) when byte_size(A) =:= byte_size(B) ->
 bit_length(N) -> bit_length(N, 0).
 bit_length(0, Len) -> Len;
 bit_length(N, Len) -> bit_length(N bsr 1, Len + 1).
-
--doc "Whether Row's preferred lifetime ended before Now (`IFA6_IS_DEPRECATED`).".
--spec deprecated(row(), integer()) -> boolean().
-deprecated(#{preferred := infinity}, _Now) -> false;
-deprecated(#{preferred := Preferred}, Now) -> Now > Preferred.
 
 
 -doc """
