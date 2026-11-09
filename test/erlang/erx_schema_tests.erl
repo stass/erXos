@@ -13,7 +13,7 @@
 
 schema_test() ->
     ?assertEqual(1, erx_schema:schema()),
-    ?assertEqual([machine, cpu, group, budget, domain, thread, process, module, listing], erx_schema:kinds()).
+    ?assertEqual([machine, cpu, group, budget, domain, thread, process, log, module, listing], erx_schema:kinds()).
 
 %% An attribute each reporter may report, and one it may not. The collector names the
 %% reporter, so a frame's own tag is never read.
@@ -95,7 +95,7 @@ match(_, _) -> false.
 
 every_path_resolves_to_exactly_one_declaration_test() ->
     Declarations = erx_schema:declarations(),
-    ?assertEqual(18, length(Declarations)),
+    ?assertEqual(20, length(Declarations)),
     [begin
          {Path, Texts} = samples(Pattern),
          ?assertEqual([Declaration], matching(Path)),
@@ -115,13 +115,16 @@ machine_wide_paths_are_marked_test() ->
     ?assertEqual([], Visible([domains, 4, budget])),
     ?assertEqual([], Visible([processes, self()])),
     {ok, Processes} = erx_schema:resolve([domains, 4, processes]),
-    ?assertMatch(#{entries := {pid, 1048576}, append_only := false}, Processes).
+    ?assertMatch(#{entries := {pid, 1048576}, append_only := false}, Processes),
+    ?assertEqual([all], Visible([kernel, log])),
+    {ok, Log} = erx_schema:resolve([kernel, log]),
+    ?assertMatch(#{kind := log, entries := {{type, log_line}, 65536}, append_only := true}, Log).
 
 unknown_paths_test() ->
     [?assertEqual({error, unknown_path}, erx_schema:resolve(Path))
-     || Path <- [[cpus, 64], [budgets, 0], [domains, <<"4">>], [domains, 4, modules, lists], [kernel]]],
+     || Path <- [[cpus, 64], [budgets, 0], [domains, <<"4">>], [domains, 4, modules, lists], [kernel, trace]]],
     [?assertEqual({error, unknown_path}, erx_schema:resolve_text(Text))
-     || Text <- [<<"cpus/64">>, <<"budgets/0">>, <<"domains/4/modules/lists.erl">>, <<"kernel">>]].
+     || Text <- [<<"cpus/64">>, <<"budgets/0">>, <<"domains/4/modules/lists.erl">>, <<"kernel/trace">>]].
 
 %% A pid is read only in the spelling the runtime writes it: stock OTP's list_to_pid/1
 %% takes any domain number on a node that is not distributed as its own, which would

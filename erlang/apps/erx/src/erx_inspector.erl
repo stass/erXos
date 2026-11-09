@@ -11,7 +11,10 @@ inspect facet, whose value is that scope; `/proc` and the host link ask
 it with the scope of the inspect facet they serve.
 
 * inspect/2 answers the record of one path; entries/2 the records of a
-  listing's entries, the listing's own status beside them.
+  listing's entries, the listing's own status beside them. inspect/3
+  takes the query's options: `offset`, for a path the schema marks
+  append-only, is the sequence number its entries start from, 0 when
+  it is left out (docs/design-live.md, "Paths").
 * A scope is `all` or a list of domain ids. A path's owner is decided by
   construction: `[domains, D | _]` is D's, `[processes, Pid]` is the
   domain of the pid, and every other path is the machine's. A path the
@@ -27,19 +30,20 @@ it with the scope of the inspect facet they serve.
 
 In Phase 1 the inspector answers for the system domain only: its kernel
 objects through erx_kernel_records, on the root's own capabilities, its
-domain record through erx_runtime_records and its processes through
-erx_process_records. A pid of another runtime, and
+domain record through erx_runtime_records, its processes through
+erx_process_records, and the kernel log through erx_log_records. A pid of another runtime, and
 a domain other than the system domain, name nothing it can reach and are
 answered `{error, scope}`; a path the schema declares that has no
 collector here is `{error, unsupported}`.
 """.
 
--export([inspect/2, entries/2, overview/1]).
+-export([inspect/2, inspect/3, entries/2, overview/1]).
 -export([scoped/3, declared_reachable/3, listing/2]).
 -export_type([scope/0, answer/0, entries/0]).
 
 -type scope() :: all | [non_neg_integer()].
--type answer() :: {ok, erx_schema:record()} | {error, scope | unsupported}.
+-type answer() :: {ok, erx_schema:record()} | {error, scope | unsupported | invalid | failed}.
+-type options() :: #{offset => non_neg_integer()}.
 -type entries() :: {ok | partial, [erx_schema:record()]} | {error, scope | unsupported}.
 %% Whose a path is: the machine's, or a domain's by its id.
 -type owner() :: machine | {domain, non_neg_integer()}.
@@ -54,7 +58,17 @@ collector here is `{error, unsupported}`.
 -doc "The record of Path as Scope may see it.".
 -spec inspect(term(), scope()) -> answer().
 inspect(Path, Scope) ->
-    within(Path, Scope, fun(Owner) -> project(collect(Path, Scope), Owner, Scope) end).
+    inspect(Path, Scope, #{}).
+
+-doc """
+The record of Path as Scope may see it, for the query's Options, which
+only an append-only path reads: there an offset that is not a sequence
+number, and options that are not a map, are `{error, invalid}`, and any
+other path ignores them.
+""".
+-spec inspect(term(), scope(), options()) -> answer().
+inspect(Path, Scope, Options) ->
+    within(Path, Scope, fun(Owner) -> project(collect(Path, Scope, Options), Owner, Scope) end).
 
 -doc """
 The records of the entries of the listing at Path as Scope may see them,
@@ -164,6 +178,15 @@ project(Error, _Owner, _Scope) -> Error.
 %% One clause per path shape this inspector collects; a domain path is
 %% collected only for the system domain, the one whose objects the root
 %% names, and every other domain names nothing it reaches.
+collect([kernel, log], _Scope, Options) ->
+    case Options of
+        #{offset := Offset} -> erx_log_records:log(Offset);
+        #{} -> erx_log_records:log(0);
+        _ -> {error, invalid}
+    end;
+collect(Path, Scope, _Options) ->
+    collect(Path, Scope).
+
 collect([], _Scope) ->
     {ok, erx_kernel_records:machine()};
 collect([processes, Pid], _Scope) ->
@@ -175,8 +198,17 @@ collect([domains, Domain | Rest] = Path, Scope) ->
         true -> system_domain(Path, Rest, Scope);
         false -> {error, scope}
     end;
+collect([kernel] = Path, _Scope) ->
+    literals(Path);
 collect(Path, Scope) ->
     listing(Path, enumerate(Path, Scope)).
+
+%% The record of a listing the schema extends by literal segments: those
+%% segments, from the declaration alone.
+literals(Path) ->
+    {ok, #{children := {literals, Children}}} = erx_schema:resolve(Path),
+    erx_schema:validate_record(#{schema => erx_schema:schema(), path => Path, kind => listing,
+                                 id => lists:last(Path), attrs => #{}, children => Children}).
 
 system_domain(_Path, [], _Scope) ->
     erx_runtime_records:domain(erx_kernel_records:system_domain());

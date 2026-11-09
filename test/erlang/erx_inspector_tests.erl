@@ -301,3 +301,78 @@ domain_record_core_test() ->
     ?assertEqual({service, unsupported}, maps:get(state, Attrs)),
     {ok, Keys} = erx_schema:attributes(domain),
     ?assertEqual(lists:sort(Keys), lists:sort(maps:keys(Attrs))).
+
+%%% The kernel log (erx_log_records), from made-up reads
+
+%% A read that answers each cursor from Answers, and refuses one it does not list.
+reads(Answers) ->
+    fun(Cursor) -> maps:get(Cursor, Answers, {error, ?ERX_EINVAL}) end.
+
+log_entries(Offset, Answers) ->
+    case erx_log_records:record(Offset, reads(Answers)) of
+        {ok, #{path := [kernel, log], kind := log, entries := Entries}} -> Entries;
+        Error -> Error
+    end.
+
+%% Records the ring overwrote before the read reached them are left out,
+%% and each line keeps its record's number, so the gap says how many.
+a_read_past_lost_records_numbers_its_lines_test() ->
+    Answers = #{0 => {ok, 7, 5, [<<"#5 five\n">>, <<"#6 six\n">>]}, 7 => {ok, 7, 0, []}},
+    ?assertEqual({ok, 7, [{5, <<"#5 five">>}, {6, <<"#6 six">>}]}, log_entries(0, Answers)),
+    ?assertEqual({ok, 7, [{6, <<"#6 six">>}]},
+                 log_entries(6, #{6 => {ok, 7, 0, [<<"#6 six\n">>]}, 7 => {ok, 7, 0, []}})).
+
+%% A read stops at a record that fails its checks but moves past it, so
+%% the records it could not show are a gap too, never a line.
+unreadable_records_are_a_gap_test() ->
+    Answers = #{0 => {corrupt, 4, 0, [<<"#0 a\n">>]}, 4 => {ok, 6, 0, [<<"#4 b\n">>, <<"#5 c\n">>]},
+                6 => {ok, 6, 0, []}},
+    ?assertEqual({ok, 6, [{0, <<"#0 a">>}, {4, <<"#4 b">>}, {5, <<"#5 c">>}]}, log_entries(0, Answers)).
+
+%% A log that keeps growing still ends the query, at a page, partial.
+a_growing_log_ends_at_a_page_test() ->
+    Growing = fun(Cursor) -> {ok, Cursor + 3, 0, [<<"x\n">>, <<"y\n">>, <<"z\n">>]} end,
+    {ok, #{entries := {partial, 1000, Entries}}} = erx_log_records:record(0, Growing),
+    ?assertEqual(lists:seq(0, 999), [Sequence || {Sequence, _} <- Entries]),
+    Lossy = fun(Cursor) -> {ok, Cursor + 1, 1, []} end,
+    ?assertMatch({ok, #{entries := {partial, 1000, []}}}, erx_log_records:record(0, Lossy)).
+
+log_refusals_are_named_test() ->
+    ?assertEqual({error, invalid}, log_entries(9, #{})),
+    ?assertEqual({error, unsupported}, erx_log_records:record(0, fun(_) -> {error, ?ERX_ENOTSUP} end)),
+    %% Counts that do not add up, more lines than the read moved past.
+    ?assertEqual({error, failed}, log_entries(0, #{0 => {ok, 1, 0, [<<"a\n">>, <<"b\n">>]}})),
+    ?assertEqual({error, invalid}, erx_log_records:record(-1, reads(#{}))),
+    ?assertEqual({error, invalid}, erx_log_records:record(1 bsl 64, reads(#{}))),
+    %% A refusal after the first read ends the entries where they stopped.
+    ?assertEqual({partial, 1, [{0, <<"a">>}]}, log_entries(0, #{0 => {ok, 1, 0, [<<"a\n">>]}})).
+
+kernel_paths_need_scope_all_test() ->
+    ?assertEqual({ok, #{schema => 1, path => [kernel], kind => listing, id => kernel, attrs => #{},
+                        children => [log]}},
+                 erx_inspector:inspect([kernel], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([kernel], [?SYSTEM])),
+    ?assertEqual({error, scope}, erx_inspector:inspect([kernel, log], [?SYSTEM], #{offset => 0})),
+    %% The offset is the caller's: one that is no sequence number is refused before any read.
+    ?assertEqual({error, invalid}, erx_inspector:inspect([kernel, log], all, #{offset => -1})),
+    ?assertEqual({error, invalid}, erx_inspector:inspect([kernel, log], all, #{offset => <<"0">>})),
+    ?assertEqual({error, invalid}, erx_inspector:inspect([kernel, log], all, [{offset, 0}])).
+
+%% Entries are checked like the rest of a record: only where the schema
+%% declares them, numbered in order below Next, of the entry type.
+the_record_validator_checks_entries_test() ->
+    Record = #{schema => 1, path => [kernel, log], kind => log, id => log, attrs => #{}, children => []},
+    Valid = fun(Entries) -> erx_schema:validate_record(Record#{entries => Entries}) end,
+    ?assertMatch({ok, _}, Valid({ok, 3, [{0, <<"a">>}, {2, <<"b">>}]})),
+    ?assertMatch({ok, _}, erx_schema:validate_record(Record)),
+    ?assertEqual({error, entries}, Valid({ok, 3, [{2, <<"a">>}, {1, <<"b">>}]})),
+    ?assertEqual({error, entries}, Valid({ok, 3, [{1, <<"a">>}, {1, <<"b">>}]})),
+    ?assertEqual({error, entries}, Valid({ok, 3, [{3, <<"a">>}]})),
+    ?assertEqual({error, entries}, Valid({ok, 3, [{0, a}]})),
+    ?assertEqual({error, entries}, Valid({whole, 3, []})),
+    ?assertEqual({error, entries}, Valid({ok, 1 bsl 64, []})),
+    ?assertEqual({error, entries}, Valid({ok, 1001, [{N, <<>>} || N <- lists:seq(0, 1000)]})),
+    ?assertEqual({error, entries},
+                 erx_schema:validate_record(#{schema => 1, path => [kernel], kind => listing, id => kernel,
+                                              attrs => #{}, children => [log], entries => {ok, 0, []}})),
+    ?assertEqual({error, malformed}, erx_schema:validate_record(Record#{entries => {ok, 0, []}, other => 1})).

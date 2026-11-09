@@ -56,21 +56,25 @@ module Erx
 
         %% A whole record: its path resolves to a declaration of its kind, each
         %% attribute passes validate_attr/4 under the reporter the record gives
-        %% it, which the inspector assigned, and each child is a distinct segment
-        %% the declaration admits. The first refusal is the answer.
+        %% it, which the inspector assigned, each child is a distinct segment
+        %% the declaration admits, and its entries, where it has them, pass
+        %% valid_entries/2. The first refusal is the answer.
         -spec validate_record(term()) -> {ok, record()} | {error, atom()}.
         validate_record(#{schema := Schema, path := Path, kind := Kind, id := _Id,
                           attrs := Attrs, children := Children} = Record)
-          when map_size(Record) =:= 6, is_map(Attrs) ->
+          when is_map(Attrs), map_size(Record) =:= 6 orelse
+                              (map_size(Record) =:= 7 andalso is_map_key(entries, Record)) ->
             case {Schema =:= schema(), resolve(Path)} of
                 {false, _} ->
                     {error, schema};
                 {true, {ok, #{kind := Kind} = Declaration}} ->
                     case validate_attrs(Kind, maps:to_list(Attrs), #{}) of
                         {ok, Checked} ->
-                            case valid_children(Declaration, Children) of
-                                true -> {ok, Record#{attrs := Checked}};
-                                false -> {error, children}
+                            case {valid_children(Declaration, Children),
+                                  valid_entries(Declaration, maps:get(entries, Record, none))} of
+                                {true, true} -> {ok, Record#{attrs := Checked}};
+                                {false, _} -> {error, children};
+                                {true, false} -> {error, entries}
                             end;
                         {error, _Reason} = Error ->
                             Error
@@ -112,6 +116,28 @@ module Erx
 
         valid_child({literals, Literals}, Segment) -> is_atom(Segment) andalso lists:member(Segment, Literals);
         valid_child({variable, Type}, Segment) -> valid_segment(Type, Segment).
+
+        %% A record's entries, which only a path the schema marks with entries
+        %% may carry: {ok | partial, Next, [{Sequence, Value}]}, at most a page
+        %% of values of the path's entry type, each with its sequence number,
+        %% the numbers increasing and each below Next, the number a query
+        %% continues from; partial when entries remain from Next on. A number
+        %% the entries skip names an entry the query did not get.
+        valid_entries(_Declaration, none) ->
+            true;
+        valid_entries(#{entries := {Type, Maximum}}, {Status, Next, Items})
+          when Status =:= ok orelse Status =:= partial, is_integer(Next), Next >= 0, Next =< ?U64 ->
+            valid_entries(Type, Items, -1, Next, min(Maximum, ?PAGE));
+        valid_entries(_Declaration, _Entries) ->
+            false.
+
+        valid_entries(_Type, [], _Previous, _Next, _Room) ->
+            true;
+        valid_entries(Type, [{Sequence, Value} | Rest], Previous, Next, Room)
+          when is_integer(Sequence), Sequence > Previous, Sequence < Next, Room > 0 ->
+            valid(Type, Value) andalso valid_entries(Type, Rest, Sequence, Next, Room - 1);
+        valid_entries(_Type, _Items, _Previous, _Next, _Room) ->
+            false.
 
         %% Whether Value is of the type a descriptor describes. Descriptors come
         %% from this module's own clauses; anything else is not a type.
@@ -415,6 +441,7 @@ module Erx
           %% Sixteen segments of the longest text, each byte encoded as three.
           -define(MAX_PATH_TEXT, #{Inspection::MAX_SEGMENTS * (Inspection::MAX_SEGMENT_TEXT * 3 + 1)}).
           -define(U32, 16#ffffffff).
+          -define(U64, 16#ffffffffffffffff).
 
           -type kind() :: #{union(kinds.map { |name| atom(name) })}.
           -type reporter() :: #{union(reporters)}.
@@ -424,7 +451,8 @@ module Erx
           -type segment() :: atom() | integer() | binary() | pid().
           -type record() :: \#{schema := #{inspection.version}, path := [segment()], kind := kind(), id := term(),
                               attrs := \#{atom() => attr()},
-                              children := [segment()] | {partial, [segment()]} | unknown}.
+                              children := [segment()] | {partial, [segment()]} | unknown,
+                              entries => {ok | partial, non_neg_integer(), [{non_neg_integer(), term()}]}}.
           -type class() :: #{union(Inspection::VISIBILITY.map { |name| atom(name) })}.
           -type descriptor() :: {type, atom()} | {integer, integer(), integer(), pos_integer()}
                               | {text, pos_integer(), bytes | utf8} | {atoms, [atom()]} | {flags, [atom()]}

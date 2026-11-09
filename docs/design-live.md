@@ -264,7 +264,8 @@ with it.
                     kind := atom(),          % machine, cpu, thread, group, domain, program, ...
                     id := term(),
                     attrs := #{atom() => attr()},
-                    children := children()}.
+                    children := children(),
+                    entries => entries()}.     % only on a path the schema marks with entries
 
 -type attr() :: {reporter(), value()}.
 -type reporter() :: kernel | service | runtime
@@ -274,8 +275,19 @@ with it.
 
 -type children() :: [segment()] | {partial, [segment()]} | unknown.
 
+-type entries() :: {ok | partial, Next :: non_neg_integer(),
+                    [{Sequence :: non_neg_integer(), term()}]}.
+
 -type segment() :: atom() | integer() | binary() | pid().
 ```
+
+A record of a path the schema marks with `entries` may carry them: each
+entry's value, of the path's entry type, with its sequence number, the
+numbers increasing and each below `Next`, the number the next query of
+the path starts from. `partial` says entries remain from `Next` on. A
+number the entries skip is an entry the query did not get, so a gap,
+never a made-up entry, is what shows one; `erx_schema:validate_record/1`
+checks the entries with the rest of the record, at most a page of them.
 
 A reporter is one of three categories, or a stopgap reporter: a stopgap
 component that does the kernel's, a service's or a runtime's work in its
@@ -388,8 +400,12 @@ entries that only grows at the end, as a ring's readers see it:
 `[kernel, log]`. Each entry of such a path carries its sequence number,
 and a query with `offset` returns the entries from that number on,
 starting at the oldest the ring still holds, so a reader that follows the
-path learns how many entries it missed. The web's log view reads such a
-path ([design-web.md](design-web.md#views-on-the-line)).
+path learns how many entries it missed. An offset past the newest entry,
+or one that is not a sequence number, is `{error, invalid}`. A record of
+the kernel log holds at most a page of lines, each as the log core
+rendered it without its newline, and a record the ring overwrote, or one
+that failed the reader's checks, is a gap in the numbers. The web's log
+view reads such a path ([design-web.md](design-web.md#views-on-the-line)).
 
 Generated builders and validators preserve every status and reporter.
 A reporter tag does not authenticate a report; the inspector checks the
@@ -1302,7 +1318,14 @@ until the facet ends.
   the process's location, as `erx:source/1` prints them, and
   `/proc/domains/7/crash` the domain's last crash dump; the server fetches
   their pages from the inspector as reads reach them. `/proc/kernel/log`
-  shows the kernel log's recent lines without consuming them, and
+  shows the kernel log's lines without consuming them, from the oldest
+  the ring still holds, one entry per line, with a line `[missing N]` where
+  N entries of the sequence are missing, whether the ring overwrote them
+  or they failed the reader's checks; an open asks for its pages
+  from sequence number 0, each from where the page before stopped, and
+  `dmesg` writes the file ([design-shell.md](design-shell.md#text-commands)).
+  `/proc/kernel/log` answers wherever `[kernel, log]` does, for an inspect
+  facet of scope `all`, and
   `/proc/kernel/crash` is `[kernel, crash]`, the last reset's crash
   record, rendered as a file: it answers only where that query does, in
   the system shell's tree, and reads as `enoent` in every other tree.
@@ -1338,7 +1361,8 @@ until the facet ends.
   log already escaped, shows each of its backslashes doubled. Only
   `/proc`'s generated content is escaped: `cat`, pipes and files still
   pass their bytes unchanged.
-* **Snapshots.** Opening a file runs one inspector query, whose deadline
+* **Snapshots.** Opening a file runs one inspector query, or for an
+  append-only path's file one a page, at most 16, whose deadline
   is the inspector's own (500 ms by default), and reads see that snapshot
   until the file is closed; a record is at most 64 KiB, and a larger one is
   cut, with `[partial]` as its last line. A grant holds at most 256 open

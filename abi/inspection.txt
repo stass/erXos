@@ -41,6 +41,9 @@ inspection 1
   text module_name 255 utf8
   text file_name 4096 utf8
   text digest 64
+  # A line the kernel log's core rendered, without its newline: at most a
+  # record's bytes, far more than any line it renders.
+  text log_line 65536
   atoms dma_profile confined unconfined
   atoms domain_state booting running ending
   atoms process_state exiting garbage_collecting waiting running runnable suspended
@@ -128,6 +131,9 @@ inspection 1
     attr links pids reporters runtime visible owner build all projections shell,host,proc,web
     attr monitors pids reporters runtime visible owner build all projections shell,host,proc,web
 
+  # The kernel log: its record is its lines, entries of [kernel, log].
+  kind log
+
   kind module
     attr version digest reporters runtime visible owner build all projections shell,host,proc,web
     attr md5 digest reporters runtime visible owner build all projections shell,host,proc,web
@@ -162,3 +168,10 @@ inspection 1
   path listing processes
   path process processes *pid
     present pid
+  path listing kernel
+    visible all
+  # The kernel log from any sequence number on; its ring holds fewer than
+  # 65,536 records.
+  path log kernel log
+    entries log_line 65536
+    append_only

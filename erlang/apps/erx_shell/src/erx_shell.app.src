@@ -15,6 +15,7 @@
   {modules, [erx_cmd,
              erx_cmd_cat,
              erx_cmd_cp,
+             erx_cmd_dmesg,
              erx_cmd_echo,
              erx_cmd_grep,
              erx_cmd_erl,

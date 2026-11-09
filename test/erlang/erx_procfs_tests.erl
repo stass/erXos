@@ -64,7 +64,8 @@ markers_exist_only_where_the_listing_says_test() ->
 %%% Listings
 
 root_lists_what_the_scope_reaches_test() ->
-    ?assertEqual([<<"status">>, <<"cpus">>, <<"groups">>, <<"budgets">>, <<"domains">>, <<"processes">>],
+    ?assertEqual([<<"status">>, <<"cpus">>, <<"groups">>, <<"budgets">>, <<"domains">>, <<"processes">>,
+                  <<"kernel">>],
                  names(erx_procfs_core:listing([], none, all))),
     ?assertEqual([<<"status">>, <<"processes">>], names(erx_procfs_core:listing([], none, [4]))).
 
@@ -125,6 +126,65 @@ a_record_over_64_kib_is_cut_at_a_line_test() ->
     ?assertEqual(Line, binary:part(Text, byte_size(Text) - 1010, 1000)),
     Whole = erx_procfs_core:cut(lists:duplicate(65, Line)),
     ?assertEqual(65000, byte_size(Whole)).
+
+%%% The kernel log
+
+%% /proc/kernel is a directory and its log a file, which a walk reaches
+%% without collecting it.
+the_kernel_log_is_a_file_test() ->
+    Exists = fun({exists, _}) -> {ok, listing} end,
+    ?assertEqual({ok, {dir, [kernel]}}, erx_procfs_core:walk([], <<"kernel">>, Exists)),
+    ?assertEqual({ok, {lines, [kernel, log]}}, erx_procfs_core:walk([kernel], <<"log">>, Exists)),
+    ?assertEqual([{<<"status">>, {status, [kernel]}}, {<<"log">>, {lines, [kernel, log]}}],
+                 erx_procfs_core:listing([kernel], none, all)).
+
+log_page(Status, Next, Entries) ->
+    {ok, #{schema => 1, path => [kernel, log], kind => log, id => log, attrs => #{}, children => [],
+           entries => {Status, Next, Entries}}}.
+
+%% Each line through the field escape: no byte a domain chose is a control
+%% on the reader's terminal, and the bytes come back with unescape_field.
+log_lines_escape_and_round_trip_test() ->
+    Hostile = [<<"#0 1.000000 info evil", 27, "]8;;x", 7, "\\e[2J">>,
+               <<"#1 tab\\t", 9, "nl", 10, "end">>,
+               <<"#2 ", 16#e2, 16#80, 16#ae, "bidi", 16#c2, 16#9b, "csi", 255>>],
+    Text = erx_procfs_core:lines([log_page(ok, 3, lists:enumerate(0, Hostile))]),
+    Lines = binary:split(Text, <<"\n">>, [global, trim_all]),
+    ?assertEqual(length(Hostile), length(Lines)),
+    ?assertEqual(nomatch, binary:match(Text, [<<C>> || C <- lists:seq(0, 31), C =/= $\n] ++
+                                                [<<127>>, <<16#c2, 16#9b>>, <<255>>, <<16#e2, 16#80, 16#ae>>])),
+    ?assertEqual([{ok, Line} || Line <- Hostile], [erx_text:unescape_field(Line) || Line <- Lines]),
+    %% A backslash the log core already wrote is doubled, as design-live.md says.
+    ?assertEqual(<<"#1 tab\\\\t\\tnl\\nend">>, lists:nth(2, Lines)).
+
+%% Entries the inspector could not give are a line that says how many, at
+%% the start, between entries, after the last entry and between pages.
+log_lines_show_what_is_lost_test() ->
+    Pages = [log_page(partial, 9, [{3, <<"a">>}, {4, <<"b">>}, {7, <<"c">>}]),
+             log_page(ok, 13, [{12, <<"d">>}])],
+    ?assertEqual(<<"[missing 3]\na\nb\n[missing 2]\nc\n[missing 1]\n[missing 3]\nd\n">>, erx_procfs_core:lines(Pages)),
+    ?assertEqual(<<"a\n">>, erx_procfs_core:lines([log_page(ok, 1, [{0, <<"a">>}])])),
+    ?assertEqual(<<>>, erx_procfs_core:lines([log_page(ok, 0, [])])),
+    ?assertEqual(<<"[missing 5]\n">>, erx_procfs_core:lines([log_page(ok, 5, [])])).
+
+%% A file that stops short says so, never ends as if whole.
+log_lines_never_fabricate_test() ->
+    ?assertEqual(<<"a\n[partial]\n">>, erx_procfs_core:lines([log_page(partial, 1, [{0, <<"a">>}])])),
+    ?assertEqual(<<"[unsupported]\n">>, erx_procfs_core:lines([{error, unsupported}])),
+    ?assertEqual(<<"a\n[error]\n">>,
+                 erx_procfs_core:lines([log_page(partial, 1, [{0, <<"a">>}]), {error, failed}])),
+    Long = binary:copy(<<"x">>, 999),
+    Text = erx_procfs_core:lines([log_page(ok, 70, lists:enumerate(0, lists:duplicate(70, Long)))]),
+    ?assert(byte_size(Text) =< 65536),
+    ?assertMatch({_, 10}, binary:match(Text, <<"[partial]\n">>, [{scope, {byte_size(Text) - 10, 10}}])).
+
+%% A tree whose scope is not all has no /proc/kernel, as a path that names nothing.
+a_scoped_tree_has_no_kernel_log_test() ->
+    {ok, Fs} = erx_procfs:init([4]),
+    ?assertEqual({error, enoent}, erx_procfs:walk(erx_procfs_core:root(), <<"kernel">>, Fs)),
+    {ok, All} = erx_procfs:init(all),
+    {ok, Kernel, _} = erx_procfs:walk(erx_procfs_core:root(), <<"kernel">>, All),
+    ?assertMatch({ok, {lines, [kernel, log]}, _}, erx_procfs:walk(Kernel, <<"log">>, All)).
 
 %%% The tree over the real inspector
 

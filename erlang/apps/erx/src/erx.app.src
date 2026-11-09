@@ -27,6 +27,7 @@
              erx_inspector,
              erx_kernel_records,
              erx_log,
+             erx_log_records,
              erx_manifest,
              erx_ns,
              erx_object_info,

@@ -324,7 +324,7 @@ shell and for `erx:` functions that run commands:
    implements the `erx_cmd` behaviour and declares its name
    (`-erx_command(ps)`): the UNIX utilities `ps`, `echo`, `cat`, `ls`,
    `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `uname`,
-   `true` and `false`, which follow FreeBSD's utilities of the same names
+   `dmesg`, `true` and `false`, which follow FreeBSD's utilities of the same names
    ([Text commands](#text-commands)), so toybox's applets of those names
    are never built; and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `bind`, `mount` and `unmount`, which have no FreeBSD
@@ -517,6 +517,20 @@ do. The text filters:
 * **`wc [-clmw] [file ...]`** counts lines, words and bytes, or characters
   under `-m`, in FreeBSD's layout, with a total line when more than one
   file is named.
+
+**`dmesg [-a]`** writes the kernel's message buffer, as FreeBSD's
+`dmesg` writes `kern.msgbuf`: erXos's buffer is the kernel log, and
+`dmesg` writes `/proc/kernel/log` unchanged, its lines from the oldest
+the ring still holds, each through the field escape, with `[missing N]`
+where records are missing
+([design-live.md](design-live.md#the-proc-tree)). `-a`, FreeBSD's
+"syslog records and console output too", is accepted and changes
+nothing, since the log holds only its lines. `-c`, which clears the
+buffer, is a usage error, since nothing in user space clears the kernel
+log, as are `-M` and `-N`, which read a crash dump's buffer, and an
+argument; the usage line is FreeBSD's, `usage: dmesg [-ac] [-M core [-N
+system]]`. `dmesg` reads only what its namespace's `/proc` shows, so it
+shows the log only where the tree's facet has scope `all`.
 
 **`uname [-abiKmnoprsv]`** writes what system this is, as FreeBSD's
 `uname` does: the fields its flags select on one line, one space apart,

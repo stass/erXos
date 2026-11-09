@@ -274,10 +274,13 @@ Error in process <0.150.0> with exit value:
   The language has variables, lists, `for`, `if`, functions, pipelines,
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
   Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
-  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `erl`, `true` and
-  `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
+  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `dmesg`, `erl`, `true`
+  and `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
   `wc` print what FreeBSD's do for the options they offer; `uname` takes
-  FreeBSD's flags and layout, and `uname -v` names the build. `top` shows
+  FreeBSD's flags and layout, and `uname -v` names the build. `dmesg` prints
+  the kernel log from `/proc/kernel/log`, which reads the log without taking
+  it from the console and marks the records it cannot show, overwritten or
+  unreadable, as `[missing N]`. `top` shows
   the process table under a header of uptime, memory and run queue, read
   from the one tree of system values that `/proc` also serves; a figure
   the stopgap kernel measures only in part says so and names its source. Its language is checked against

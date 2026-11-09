@@ -16,7 +16,10 @@ nothing that erx:i/1 with the same scope does not.
   processes.
 * **Snapshots.** An open runs the inspector's query once: a `status` file
   holds its rendered record and a directory its entries, and reads see that
-  snapshot until the clunk. A grant holds at most 256 snapshots; the 257th
+  snapshot until the clunk. The file of an append-only path, such as
+  `/proc/kernel/log`, runs it once a page, from sequence number 0, each
+  page from where the one before stopped, while the inspector answers
+  partial and the entries fit the file's 64 KiB, for at most 16 pages. A grant holds at most 256 snapshots; the 257th
   open answers `emfile`.
 * **Attributes.** Every node is read-only, owned by uid 0, size 0 as a
   Linux `/proc` file is, so a reader reads to the end of the file.
@@ -39,6 +42,11 @@ supervisor starts one grant of scope `all` with start_link/0, mounted at
 -define(POINT, <<"/proc">>).
 %% The most open snapshots of one grant (design-live.md, Snapshots).
 -define(MAX_SNAPSHOTS, 256).
+%% The most pages one open of an append-only path asks for.
+-define(MAX_PAGES, 16).
+%% The most bytes of one file (design-live.md, Snapshots): once the entries
+%% asked for hold that many, the file is cut there anyway.
+-define(MAX_FILE, 65536).
 %% statfs's type: Linux's PROC_SUPER_MAGIC.
 -define(PROC_SUPER_MAGIC, 16#9fa0).
 -define(DT_DIR, 4).
@@ -146,8 +154,29 @@ snapshot({status, Path}, Scope) ->
         {error, scope} -> {error, enoent};
         Answer -> {ok, {bytes, erx_procfs_core:status(Answer, build(Scope))}}
     end;
+snapshot({lines, Path}, Scope) ->
+    case pages(Path, 0, Scope, ?MAX_PAGES, 0) of
+        [{error, scope}] -> {error, enoent};
+        Answers -> {ok, {bytes, erx_procfs_core:lines(Answers)}}
+    end;
 snapshot({Marker, Path}, Scope) ->
     {ok, {bytes, erx_procfs_core:marker(Marker, ask({listing, Path}, Scope))}}.
+
+%% The inspector's answers for an append-only path's pages from Offset on:
+%% the next page is asked from where a partial one stopped, up to Left
+%% pages, and only while the entries so far, Bytes of values, fit the
+%% file, since each entry's line is at least its value's bytes.
+pages(Path, Offset, Scope, Left, Bytes) ->
+    case erx_inspector:inspect(Path, Scope, #{offset => Offset}) of
+        {ok, #{entries := {partial, Next, Entries}}} = Answer when Left > 1 ->
+            Held = Bytes + lists:sum([byte_size(Value) || {_Sequence, Value} <- Entries]),
+            case Held < ?MAX_FILE of
+                true -> [Answer | pages(Path, Next, Scope, Left - 1, Held)];
+                false -> [Answer]
+            end;
+        Answer ->
+            [Answer]
+    end.
 
 %% The inspector's answer for a directory's listing, asked only of a
 %% directory that lists the inspector's entries.
@@ -191,11 +220,13 @@ read_mode() -> immediate.
 %% The inspector's answers
 %% ---------------------------------------------------------------------------
 
-%% Whether a path names something: a listing exists wherever the scope
-%% reaches it, so no listing is built for a walk; any other path is asked.
+%% Whether a path names something: a listing, and an append-only path,
+%% exists wherever the scope reaches it, so neither is collected for a walk;
+%% any other path is asked.
 ask({exists, Path}, Scope) ->
     case erx_schema:resolve(Path) of
-        {ok, #{kind := listing} = Declaration} ->
+        {ok, #{kind := Kind, append_only := AppendOnly} = Declaration}
+          when Kind =:= listing; AppendOnly =:= true ->
             case erx_inspector:declared_reachable(Path, {ok, Declaration}, Scope) of
                 {ok, _Owner} -> {ok, listing};
                 error -> {error, scope}

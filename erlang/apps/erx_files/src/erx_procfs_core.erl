@@ -12,7 +12,9 @@ every decision is tested with made-up answers.
 * **Nodes.** A directory is `{dir, Path}`, one per inspector path; its
   record is the file `{status, Path}`, and a listing the inspector could
   not give whole has a marker file, `{partial, Path}` (`.partial`) or
-  `{unknown, Path}` (`.unknown`).
+  `{unknown, Path}` (`.unknown`). A path the schema marks append-only,
+  such as `[kernel, log]`, is instead the file `{lines, Path}`, one entry
+  per line.
 * **Names.** A path's segment becomes an entry name through name/1, which
   is erx_schema:segment_text/1, the writer of the encoding
   erx_schema:resolve_text/1 reads: a literal as itself, an integer in
@@ -27,15 +29,19 @@ every decision is tested with made-up answers.
   `ok` value bare, any other status as `[partial]`, `[unknown]`,
   `[unsupported]`, `[timeout N]` or `[error]`) and its reporter, a stopgap
   one by its label, separated by tabs, each field through
-  erx_text:escape_field/1. A record over 64 KiB is cut at a line's end
-  and ends with a `[partial]` line.
+  erx_text:escape_field/1. lines/1 writes an append-only path's entries,
+  each through the same escape, with a `[missing N]` line where N entries
+  are missing from the sequence. A file over 64 KiB is cut at a line's
+  end and ends with a `[partial]` line.
 """.
 
--export([root/0, name/1, child/2, walk/3, listing/3, lists_entries/1, status/2, marker/2, cut/1]).
+-export([root/0, name/1, child/2, walk/3, listing/3, lists_entries/1, status/2, lines/1, marker/2,
+         cut/1]).
 -export_type([node_/0, entry/0]).
 
 -type path() :: [erx_schema:segment()].
--type node_() :: {dir, path()} | {status, path()} | {partial, path()} | {unknown, path()}.
+-type node_() :: {dir, path()} | {status, path()} | {lines, path()}
+               | {partial, path()} | {unknown, path()}.
 -type entry() :: {binary(), node_()}.
 
 %% The longest entry name read: a text segment of 255 bytes, each encoded
@@ -104,7 +110,15 @@ walk(Dir, Name, Lookup) ->
 exists(Path, Lookup) ->
     case Lookup({exists, Path}) of
         {error, scope} -> {error, enoent};
-        _Answer -> {ok, {dir, Path}}
+        _Answer -> {ok, path_node(Path)}
+    end.
+
+%% The node of a path below the root: the file of its lines for a path the
+%% schema marks append-only, a directory for every other.
+path_node(Path) ->
+    case erx_schema:resolve(Path) of
+        {ok, #{append_only := true}} -> {lines, Path};
+        _ -> {dir, Path}
     end.
 
 marker_node(Marker, Dir, Lookup) ->
@@ -134,7 +148,7 @@ below(Path, ListingAnswer, Scope) ->
             listed(Path, children(ListingAnswer));
         false ->
             {literals, Literals} = declaration_children(Path),
-            [{name(Literal), {dir, Path ++ [Literal]}}
+            [{name(Literal), path_node(Path ++ [Literal])}
              || Literal <- Literals, reachable(Path ++ [Literal], Scope)]
     end.
 
@@ -193,6 +207,47 @@ line(Key, {Reporter, _Value} = Attr) ->
     {ok, Label} = erx_schema:reporter_label(Reporter),
     Fields = [atom_to_binary(Key), erx_render:value(Attr), Label],
     [lists:join($\t, [erx_text:escape_field(Field) || Field <- Fields]), $\n].
+
+-doc """
+The text of an append-only path's file from the inspector's answers for
+its pages, in order: the first asked from sequence number 0, each later
+one from the Next of the page before, the last one whole or the last the
+tree asked for. Each entry is one line, its value through
+erx_text:escape_field/1. Where the sequence skips numbers, from 0 to the
+first entry, between entries or from the last entry to the page's Next,
+a line `[missing N]` says how many entries the inspector did not give,
+whether the ring overwrote them or they failed the reader's checks; a
+last page that stopped short ends in `[partial]`, and an answer without
+entries is one line with its status, after the pages before it. Cut to
+64 KiB.
+""".
+-spec lines([erx_inspector:answer()]) -> binary().
+lines(Answers) ->
+    cut(log_lines(0, Answers)).
+
+%% The file's lines, one list element each.
+log_lines(Expected, [{ok, #{entries := {Status, Next, Entries}}} | Rest]) ->
+    {Lines, Last} = lists:mapfoldl(fun({Sequence, Value}, Seen) ->
+                                           {missing(Seen, Sequence) ++ [entry_line(Value)], Sequence + 1}
+                                   end, Expected, Entries),
+    Ending = case {Status, Rest} of
+                 {partial, []} -> [?CUT_LINE];     % the tree asked no further: the file stops short
+                 _ -> log_lines(Next, Rest)
+             end,
+    lists:append(Lines) ++ missing(Last, Next) ++ Ending;
+log_lines(_Expected, [Answer | _]) ->
+    [status(Answer, release)];
+log_lines(_Expected, []) ->
+    [].
+
+entry_line(Value) ->
+    [erx_text:escape_field(Value), $\n].
+
+%% A line for the entries between Seen and Sequence, if any are missing.
+missing(Seen, Sequence) when Sequence > Seen ->
+    [[<<"[missing ">>, integer_to_binary(Sequence - Seen), <<"]\n">>]];
+missing(_Seen, _Sequence) ->
+    [].
 
 -doc """
 Lines as one file of at most 64 KiB: whole lines while they fit, then a

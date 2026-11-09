@@ -1357,10 +1357,14 @@ it; git history is the record of completed work.
   `[kernel, trace]` repeat the fields of the crash-record and trace-record layouts, and the grammar has no form
   that takes a kind's attributes from a root `layout`, so they would be copied by hand. Add one (`fields @layout`)
   before those kinds are declared.
-* [Medium] `docs/design-live.md` [Inspection records](docs/design-live.md#inspection-records): `record()` has no
-  field for the sequence of a path marked `entries` (a domain's pids, the kernel log), nor for an append-only
-  entry's sequence number, so `erx_schema:validate_record/1` checks only the six declared keys and refuses any
-  other. Name the field and its paging (`offset`, `limit`, partial) and generate its validator with it.
+* [Medium] `erlang/apps/erx/src/erx_inspector.erl` [Inspection records](docs/design-live.md#inspection-records):
+  `record()`'s `entries` is answered only for `[kernel, log]`; a domain's pids, also marked `entries`, are still
+  a listing's children, and no query takes `limit`, so a page is always erx_schema's 1,000. Answer every
+  `entries` path with entries and take `limit` in `erx_inspector:inspect/3`.
+* [Low] `erlang/apps/erx_shell/src/erx_render.erl`, `erlang/apps/erx_web/src/erx_web_value.erl`: neither shows a
+  record's `entries`, so `erx:i([kernel, log])` prints an empty record and the web's log view
+  ([design-web.md](docs/design-web.md#views-on-the-line)) has nothing to read; `/proc/kernel/log` and `dmesg`
+  are the only readers.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): the name encoding writes "every
   byte outside `A`-`Z`, `a`-`z`, `0`-`9` and `_+,:=@-`, and a leading `.`" as `%XX`; `.` is outside that set, so
   the leading-`.` clause says nothing, unless `.` was meant to stay plain after the first byte. `erx_schema`
@@ -1408,8 +1412,11 @@ it; git history is the record of completed work.
   so M5's exit check of `4.N.S` in plan.md waits for them. The design leaves open: a text entry spelled `status`, a module of that
   name, which the directory's `status` file shadows; how many entries `.partial` says were left out, which the
   inspector does not count (the file says `left_out [unknown]`); and what the `status` file of a path the inspector
-  answers `{error, unsupported}` holds (one line, `[unsupported]`). Not built: `source`, `crash`,
-  `/proc/kernel/log` and `/proc/kernel/crash`, which have no inspector path yet. An open asks the inspector in the
+  answers `{error, unsupported}` holds (one line, `[unsupported]`). Not built: `source`, `crash`
+  and `/proc/kernel/crash`, which have no inspector path yet. `/proc/kernel/log` keeps a file's oldest lines when
+  its 64 KiB cut applies, as every file does, so a full ring whose escaped lines pass 64 KiB ends in `[partial]`
+  where the newest lines would be, which are the ones `dmesg` is read for; cut a log file at its start, after a
+  `[missing N]` line, instead. An open asks the inspector in the
   grant's process, so a slow query holds the grant's other requests, and each walk step collects a record (or, for
   a CPU or thread, the listing) only to learn that it exists; the machine record is asked once per status open for
   the build's projection. The tree's grant is a direct child of `kernel_safe_sup` and shares its restart budget
@@ -3818,6 +3825,12 @@ to the corpus and follow rc
   in the registers a callee may change until they are overwritten, and an
   interrupt taken in kernel mode in that window saves them to the stack,
   below any burn. Reading them needs another kernel bug.
+* [Medium] The kernel log has no reader gate on the stopgap (`erlang/apps/erx/src/erx_log_records.erl`,
+  `liberx/backend/fiasco/service.c`): `erx_log_read` takes a resource with the `TRACE` right on erXos's kernel
+  ([design-kernel.md](docs/design-kernel.md#console-log-and-panic)), but the Phase 1 service ignores it and reads
+  for the root, so `[kernel, log]`, `/proc/kernel/log` and `dmesg` show every domain's log text to any caller
+  whose inspect facet has scope `all`. Every such caller is root code today. A less-trusted session, once there
+  is one, needs a policy gate on that path, as FreeBSD's `security.bsd.unprivileged_read_msgbuf` gates `dmesg`.
 * [Medium] The kernel log's limit is per space, and the ring is shared
   (`kernel/core/log.c`, `erx_log_rate_t`): 16 KiB per second lets one space
   push every record, the kernel's included, out of the 64 KiB ring in about

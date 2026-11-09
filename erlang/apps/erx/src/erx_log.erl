@@ -10,6 +10,7 @@
 -module(erx_log).
 
 -export([debug/1, debug_text/1, read/1, take/0]).
+-export_type([lines/0]).
 
 -include("generated/erx_abi.hrl").
 

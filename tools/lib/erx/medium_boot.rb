@@ -292,7 +292,8 @@ module Erx
     # with `pwd`; `ls -1 /`, which lists the mount points proc and tmp among the
     # release's names (docs/design-files.md, Listings across mounts); `uname -a`, whose
     # host is the manifest's and whose version the build facts give (the source revision, its date, the configuration and the kernel), then
-    # `uname -i` and `uname -K` alone; and exit, after which the Erlang shell answers again. Lines between
+    # `uname -i` and `uname -K` alone; `dmesg | grep`, which finds the boot's littlefs line in
+    # /proc/kernel/log after the console has written it; and exit, after which the Erlang shell answers again. Lines between
     # the matched ones, such as the other applications, are passed over. The line editor
     # echoes each line as typed and then redraws it after cursor movements, which no
     # pattern here matches; it rings the bell at a `}` with no `{` on its line.
@@ -318,7 +319,8 @@ module Erx
       ['rc-ls-tmp', /\Atmp\r*\n\z/n, "uname -a\r"],
       ['rc-uname', %r{\AerXos erxos [0-9][0-9.]* (?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n, "uname -i\r"],
       ['rc-uname-i', %r{\Aqemu-virt/development\r*\n\z}n, "uname -K\r"],
-      ['rc-uname-k', /\Afiasco-[0-9a-f]{12}\r*\n\z/n, "exit\r"],
+      ['rc-uname-k', /\Afiasco-[0-9a-f]{12}\r*\n\z/n, "dmesg | grep 'erx_lfs: volume mounted'\r"],
+      ['rc-dmesg', /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n, "exit\r"],
       ['rc-exit', /\A% exit\r*\n\z/n, nil],
       ['rc-returned', /\Aok\r*\n\z/n, "rc_ended.\r"],
       ['erlang-shell-again', /\Arc_ended\r*\n\z/n, nil]
