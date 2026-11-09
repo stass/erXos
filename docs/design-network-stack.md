@@ -1289,10 +1289,13 @@ FreeBSD function says so in its `-doc`, with the FreeBSD function's name,
 so a reviewer compares the two side by side.
 
 `erlang/apps/erx_net/NOTICE-freebsd` records the pinned tag and commit,
-the SHA-256 of the source archive the translation was read from, which
-are deps.lock's pin of `freebsd-src`, and for every module the FreeBSD
-files and functions it derives from, as `kernel/NOTICE-fiasco` records the
-kernel's translation from Fiasco. A
+the SHA-256 of the source archive the translation was read from, and for
+every module the FreeBSD files and functions it derives from, as
+`kernel/NOTICE-fiasco` records the kernel's translation from Fiasco. The
+FreeBSD source is a reference for readers, fetched by hand and not by the
+build: the archive is
+`https://github.com/freebsd/freebsd-src/archive/<commit>.tar.gz`, checked
+against the SHA-256 in the notice. A
 build check fails when a module's header names a FreeBSD file that the
 notice file does not list for it, or the reverse.
 

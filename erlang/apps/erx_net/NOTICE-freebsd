@@ -7,13 +7,12 @@
 # copyright line and the licence text of that file at the commit below.
 #
 # This file records the release tag and commit the translation was read from,
-# the SHA-256 of the source archive deps.lock pins as freebsd-src, and for
+# the SHA-256 of the GitHub source archive of that commit, and for
 # every module the FreeBSD files it derives from: "module NAME", then one
 # indented line per file, its path in the source tree followed by the names
 # of the FreeBSD functions translated from it. NetChecks (make check) fails
 # when a module's header and its entry here name different files, when an
-# entry names no module of erx_net, or when the commit or SHA-256 differs from
-# deps.lock's.
+# entry names no module of erx_net, or when the commit or SHA-256 is missing.
 
 tag release/15.1.0-p6
 commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe

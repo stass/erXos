@@ -3,7 +3,6 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
-require_relative '../../tools/lib/erx/dependencies'
 require_relative '../../tools/lib/erx/net_checks'
 
 # erx_net's build checks (tools/lib/erx/net_checks.rb): the tree passes, and
@@ -11,12 +10,10 @@ require_relative '../../tools/lib/erx/net_checks'
 class NetChecksTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SRC = 'erlang/apps/erx_net/src'
-  LOCK = Erx::DependencySchema.parse(File.binread(File.join(ROOT, 'deps.lock')))
-                              .find { |source| source.fetch('id') == 'freebsd-src' }
   PIN = <<~NOTICE
     tag release/15.1.0-p6
-    commit #{LOCK.fetch('version')}
-    archive-sha256 #{LOCK.fetch('sha256')}
+    commit 95719d8a895bf8170851e9844d9b4092b1d2b6fe
+    archive-sha256 016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998
   NOTICE
   DERIVED = <<~ERL
     %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
@@ -28,8 +25,8 @@ class NetChecksTest < Minitest::Test
     -module(erx_tcp_seq).
   ERL
 
-  def violations(files, notice: PIN, lock: LOCK)
-    Erx::NetChecks.violations(files.merge(Erx::NetChecks::NOTICE => notice).compact, lock: lock)
+  def violations(files, notice: PIN)
+    Erx::NetChecks.violations(files.merge(Erx::NetChecks::NOTICE => notice).compact)
   end
 
   def rules(files, **options) = violations(files, **options).map { |violation| [violation.rule, violation.line] }
@@ -42,7 +39,7 @@ class NetChecksTest < Minitest::Test
   def test_the_tree_passes
     paths = [Erx::NetChecks::NOTICE, *Dir.glob(Erx::NetChecks::SCOPE, base: ROOT)]
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
-    assert_empty Erx::NetChecks.violations(files, lock: LOCK).map(&:to_s)
+    assert_empty Erx::NetChecks.violations(files).map(&:to_s)
   end
 
   def test_atom_makers_fail_in_code_and_quoted_atoms
@@ -99,9 +96,7 @@ class NetChecksTest < Minitest::Test
     assert_equal [['notices', nil]], rules({ "#{SRC}/erx_tcp.erl" => module_text('') }, notice: notice)
   end
 
-  def test_notice_must_match_the_pin_and_parse
-    assert_equal [['notices', nil]], rules({}, notice: PIN.sub(LOCK.fetch('sha256'), '0' * 64))
-    assert_equal [['notices', nil]], rules({}, notice: PIN.sub(LOCK.fetch('version'), 'f' * 40))
+  def test_notice_must_parse
     assert_equal [['notices', nil]], rules({}, notice: PIN.lines.drop(1).join)
     assert_equal [['notices', 4]], rules({}, notice: "#{PIN}tag again\n")
     assert_equal [['notices', 4]], rules({}, notice: "#{PIN}  sys/netinet/tcp.h\n")

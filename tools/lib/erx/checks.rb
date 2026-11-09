@@ -315,16 +315,12 @@ module Erx
       raise Error, violations.join("\n") unless violations.empty?
     end
 
-    # erx_net's atoms, sequence-wrap and FreeBSD notice rules, against deps.lock's pin.
+    # erx_net's atoms, sequence-wrap and FreeBSD notice rules.
     def check_net(listed)
       files = listed.select { |relative| NetChecks.covers?(relative) && File.file?(File.join(@root, relative)) }
       return if files.empty?
 
-      lock = DependencySchema.parse(File.binread(File.join(@root, 'deps.lock')))
-                             .find { |source| source.fetch('id') == NetChecks::LOCK_ID }
-      raise Error, "deps.lock has no #{NetChecks::LOCK_ID}" unless lock
-
-      violations = NetChecks.violations(files.to_h { |relative| [relative, File.binread(File.join(@root, relative))] }, lock: lock)
+      violations = NetChecks.violations(files.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

@@ -17,8 +17,7 @@ module Erx
   #   "%% FreeBSD: PATH" line each, are the files NOTICE-freebsd lists for
   #   that module, and the reverse; any other line naming "FreeBSD:" (a
   #   marker with more after the path, or one below the header) is refused,
-  #   so a malformed claim never reads as no claim; the notice's commit and archive SHA-256
-  #   are deps.lock's pin of freebsd-src.
+  #   so a malformed claim never reads as no claim.
   #
   # Like DeviceCallers these read the source text with comments removed, and
   # catch a slip, not a determined bypass that builds a name from pieces. The
@@ -31,7 +30,6 @@ module Erx
     NOTICE = "#{APPLICATION}/NOTICE-freebsd"
     SCOPE = "#{APPLICATION}/**/*.{erl,hrl}"
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
-    LOCK_ID = 'freebsd-src'
 
     ATOM_MAKERS = /(?<![A-Za-z0-9_@])(binary_to_atom|list_to_atom|binary_to_term)(?![A-Za-z0-9_@])/
     # The TCP modules the seq-wrap rule covers, and the one module it lets do
@@ -74,10 +72,10 @@ module Erx
     def covers?(path) = path == NOTICE || File.fnmatch?(SCOPE, path, GLOB_FLAGS)
 
     # The violations among files, a map of path to source text holding every
-    # covered file, given deps.lock's freebsd-src entry.
-    def violations(files, lock:)
+    # covered file.
+    def violations(files)
       sources = files.select { |path, _| File.fnmatch?(SCOPE, path, GLOB_FLAGS) }
-      [*atom_violations(sources), *seq_violations(sources), *notice_violations(sources, notice: files[NOTICE], lock: lock)]
+      [*atom_violations(sources), *seq_violations(sources), *notice_violations(sources, notice: files[NOTICE])]
     end
 
     def atom_violations(sources)
@@ -128,22 +126,14 @@ module Erx
       text.b.gsub(DeviceCallers::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
     end
 
-    def notice_violations(sources, notice:, lock:)
+    def notice_violations(sources, notice:)
       return [] if sources.empty? && notice.nil?
       return [notice_violation(nil, 'erx_net has sources but no NOTICE-freebsd')] if notice.nil?
 
       parsed, malformed = parse_notice(notice)
       return malformed unless malformed.empty?
 
-      [*pin_violations(parsed, lock: lock), *pairing_violations(sources, parsed)]
-    end
-
-    def pin_violations(notice, lock:)
-      { 'commit' => 'version', 'archive-sha256' => 'sha256' }.filter_map do |key, field|
-        next if notice.keys.fetch(key) == lock.fetch(field)
-
-        notice_violation(nil, "#{key} #{notice.keys.fetch(key)} is not deps.lock's #{LOCK_ID} #{field} #{lock.fetch(field)}")
-      end
+      pairing_violations(sources, parsed)
     end
 
     # Each module's header against its notice entry, every notice entry

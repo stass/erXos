@@ -128,16 +128,6 @@
       "status": "permanent"
     },
     {
-      "id": "freebsd-src",
-      "kind": "tar",
-      "version": "95719d8a895bf8170851e9844d9b4092b1d2b6fe",
-      "url": "https://github.com/freebsd/freebsd-src/archive/95719d8a895bf8170851e9844d9b4092b1d2b6fe.tar.gz",
-      "sha256": "016e7c86ea4dfbb17bd8a7b1136a7af5a7ce4d9e6de5a559e73dc7336824b998",
-      "directory": "freebsd-src-95719d8a895bf8170851e9844d9b4092b1d2b6fe",
-      "license": "BSD-2-Clause AND BSD-3-Clause",
-      "status": "permanent"
-    },
-    {
       "id": "pkt",
       "kind": "git",
       "version": "67a4a14f596fded5ad5f2d8f94318faa8ad2c288",

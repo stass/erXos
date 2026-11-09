@@ -469,11 +469,6 @@ it; git history is the record of completed work.
   (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
-* [Medium] fetch, `deps.lock` (`freebsd-src`): every `make fetch` downloads FreeBSD's whole source tree
-  (367 MB archive, 1.7 GB and about 109,000 files unpacked: 72% and 85% of `Sources`' archive and tree
-  limits) under curl's 180-second cap, though only the CUBIC oracle and the packet-script runner will
-  read it. Fetch it on demand, or carve the `sys/net*` and `share/termcap` subset, before a slow link
-  or a pin bump makes `make fetch` fail.
 * [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
   because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
   release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
