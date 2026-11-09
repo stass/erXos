@@ -51,6 +51,7 @@ erx_backend_object_take(erx_backend_grow_table_t *objects, uint32_t kind, uint32
 	record->budget = budget;
 	record->handles = 0;
 	record->mappings = 0;
+	record->ending = 0;
 	*index = found;
 	return (ERX_OK);
 }
@@ -62,6 +63,7 @@ erx_backend_object_free(erx_backend_grow_table_t *objects, uint32_t index)
 
 	record->handles = 0;
 	record->mappings = 0;
+	record->ending = 0;
 	if (record->generation == UINT32_MAX) {
 		record->kind = ERX_BACKEND_OBJECT_RETIRED;
 		return;

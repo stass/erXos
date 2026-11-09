@@ -13,10 +13,10 @@
  *
  * A sweep survives the records an end takes with it, since each record is checked live
  * when the sweep reaches it, but not an end that comes back to a record already
- * ending. None does, because only the root holds a budget handle: a task's end, run
- * from inside a sweep, closes no budget's last handle and so starts no budget's end.
- * A call that passed budget handles to a task would have to keep that true, as a pass
- * of space handles would break task_stop_tree's walk.
+ * ending. None does: a task's end, run from inside a sweep, ends nothing its handles
+ * named or it created, but marks it, and the service ends what is marked once the
+ * request is over (erx_fiasco_object_drain), so no budget's end starts inside another
+ * record's end, even when a task held the budget's last handle.
  */
 
 #include <stdbool.h>

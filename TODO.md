@@ -666,15 +666,21 @@ it; git history is the record of completed work.
   `task-service` timed out; the rerun on the same tree passed on one and four CPUs. The task that
   `erx_fiasco_launch` starts with `ERX_SPACE_JIT` and `MODE_SERVICE` never ended, so the root's
   join waited for good. Find the wait it stuck in.
-* [High] liberx Fiasco backend, `object.c` `object_pass_type` and `budget.c`: `erx_cap_pass` refuses
-  budget and group handles, which the domain library's install (`erx_dom_install`, DL2) passes to a
-  domain. Before it offers them, take a budget's end out of a task's teardown: a task holding a
-  budget's last handle (by a move, or after the root closed its copy) ends that budget inside
-  `task_end`'s handle close, and the budget's sweeps then reach the task's own space while its row is
-  still live, tearing it down a second time (a lost exit status, an index never reused, a stray exit
-  record), and leave a carved budget whose space is mid-release live with a dangling parent index.
-  Queue the records a task's close frees and end them after the row is reset, so no budget ends
-  inside a task's end; a guard that skips records already ending was tried and is not enough.
+* [Medium] liberx Fiasco backend, `launcher.c` `erx_fiasco_task_join_until` and `object.c`
+  `erx_fiasco_object_drain`: a task holding the last handle of its own space's budget is deleted in
+  the request that ends it, its ended semaphore with it, so a root join that got `ERX_EBUSY` before
+  the end waits on a deleted (or, after a new space takes the index, another task's) semaphore:
+  `erx_fiasco_semaphore_down` retries the IPC error until its deadline, or for good. The domain
+  library keeps its copy of every domain's budget, so only a caller that moves its last copy away
+  meets it. Have the service up the joiner's own semaphore, as the other blocking stubs do.
+* [Medium] liberx Fiasco backend, `service_task.c` `task_teardown`: a task's end defers only what its
+  handle table's close frees or what it created (`object_later`); memory whose last mapping goes and
+  the home group still end inside the teardown, safe only because neither kind's end stops a task.
+  Route those ends through the mark too, so nothing ends inside a teardown, and drain once after
+  `service_main`'s dispatch rather than in three arms.
+* [Low] liberx Fiasco backend, `object.c` and `core/handles.h`: rename the record's `ending` word
+  (`end_pending`) and `object_later` (`object_defer_end`), since `budget.c` uses "ending" for an end
+  in progress, and word the core header's comment without naming the Fiasco backend.
 * [Low] liberx Fiasco backend, `budget.c` `budget_sweep`: a budget's object sweep ends a group
   charged to it whose home task, charged to another budget, still has threads, which `erx_object_destroy`
   and a last close refuse ("a group never goes before its threads"). Skip such a group in the sweep, or
