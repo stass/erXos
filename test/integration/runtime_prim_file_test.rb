@@ -119,11 +119,20 @@ class RuntimePrimFileTest < Minitest::Test
     assert_operator stock.size, :>, 200, 'the comparison ran its corpus'
     differences = (stock.keys | release.keys).filter_map do |key|
       next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'image ', 'remote ', 'resources', 'tmp', 'open ')
-      next if named?(key)
+      next if named?(key) || only_mounts_added?(key, stock[key], release[key])
 
       "#{describe(key)}\n  stock:   #{stock[key]}\n  release: #{release[key]}"
     end
     assert_empty differences, differences.join("\n")
+  end
+
+  # The release's root, the corpus's "..", lists the runtime's mount points beside its own
+  # names (design-files.md, Listings across mounts), where stock's directory holds none.
+  ROOT_MOUNTS = %w[proc tmp].freeze
+
+  def only_mounts_added?(key, stock, release)
+    names = ->(listing) { listing.to_s.scan(/"([^"]*)"/).flatten }
+    key == line_key('list_dir', '..') && names.(release) == (names.(stock) + ROOT_MOUNTS).sort
   end
 
   # /tmp against stock OTP in a fresh host directory (design-tmp.md, Verification, "Against
@@ -356,7 +365,11 @@ class RuntimePrimFileTest < Minitest::Test
     release = table(@fixture.release)
     { 'ns before' => '{error,enoent}', 'ns mount' => 'ok', 'ns info' => "{ok,directory,read_write,#{0o40755}}",
       'ns read' => '{error,eisdir}', 'ns again' => '{error,eexist}', 'ns bad tree' => '{error,einval}',
-      'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}", 'ns unmount' => 'ok',
+      'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}",
+      'ns list root' => '[{"b",1},{"tmp",1}]',
+      'ns list mount' => '{ok,["a","f","l","x"]}', 'ns list point info' => "{ok,directory,read_write,#{0o40755}}",
+      'ns list via link' => '{ok,["b","f","z"]}',
+      'ns unmount' => 'ok',
       'ns after' => '{error,enoent}', 'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok',
       'ns gone' => '{error,eio}', 'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
       'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[{target,[<<"a">>,<<"c">>]},true]}',

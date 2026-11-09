@@ -45,6 +45,8 @@ main([PrefixText, Mode]) ->
     [call(Prefix, Op, Path) || Path <- paths(Prefix), Op <- operations()],
     cwd(Prefix),
     loader(Prefix),
+    %% A name that is no file name is refused with badarg, not raised.
+    io:format("bad_name\t~0tp~n", [[prim_file:list_dir({x}), prim_file:read_link({x})]]),
     release_opens(Prefix),
     pins(Mode),
     tmp(Prefix, Mode),
@@ -206,6 +208,20 @@ namespace("release") ->
     Show("bad tree", erx_ns:mount(self(), <<"/x">>, [{tree, <<"a/b">>}])),
     Show("bind", erx_ns:bind(<<"/tmp/a">>, <<"/b">>, [ro])),
     Show("bound", info(prim_file:read_file_info(<<"/b/f">>))),
+    %% A listing holds each mount point directly below its directory once, a point
+    %% hiding the provider's entry of its name (design-files.md, Listings across mounts),
+    %% and ls -l reads a point's information as the mounted directory's. A listing
+    %% through a link holds the mount points below the link's target.
+    Show("list root", listed(<<"/">>, ["b", "tmp"])),
+    ok = erx_ns:bind(<<"/tmp/a">>, <<"/tmp/f">>, [ro]),
+    ok = erx_ns:bind(<<"/tmp/a">>, <<"/tmp/x">>, [ro]),
+    ok = erx_ns:bind(<<"/tmp/a">>, <<"/tmp/a/z">>, [ro]),
+    Show("list mount", sorted(prim_file:list_dir(<<"/tmp">>))),
+    Show("list point info", info(prim_file:read_link_info(<<"/tmp/f">>))),
+    Show("list via link", sorted(prim_file:list_dir(<<"/tmp/l">>))),
+    ok = erx_ns:unmount(<<"/tmp/a/z">>),
+    ok = erx_ns:unmount(<<"/tmp/f">>),
+    ok = erx_ns:unmount(<<"/tmp/x">>),
     Show("unmount", erx_ns:unmount(<<"/tmp">>)),
     Show("after", prim_file:read_file_info(<<"/tmp/a">>)),
     Show("root", erx_ns:unmount(<<"/">>)),
@@ -649,6 +665,11 @@ same_device(One, Other) ->
 
 sorted({ok, Names}) -> {ok, lists:sort(Names)};
 sorted(Other) -> Other.
+
+%% How many times each of Names appears in Path's listing.
+listed(Path, Names) ->
+    {ok, Listed} = prim_file:list_dir(Path),
+    [{Name, length([Found || Found <- Listed, Found =:= Name])} || Name <- Names].
 
 %% A server's replies are untrusted: whatever it answers, the caller gets an error and
 %% goes on.

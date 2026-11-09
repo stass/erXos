@@ -199,12 +199,16 @@ Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threa
 
 rc: the command shell; erl starts the Erlang shell
 % # The command shell runs rc's language, written in Erlang.
-% ls /
+% ls -1 /
 NOTICES
 bin
+data
 lib
 manifest
+proc
+releases
 root
+tmp
 % echo hello from erXos > /tmp/hi
 % cat /tmp/hi
 hello from erXos
