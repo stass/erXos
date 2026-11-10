@@ -463,7 +463,8 @@ ip4(Packet, Sum, LinkCast, #{ip4 := Ip4View} = View) ->
     case erx_ip4:input(Packet, LinkCast, Ip4View) of
         {ours, Cast, Reply, #ip4{p = Proto, src = Src, dst = Dst, options = Options} = Ip, Upper} ->
             Head = head(inet, Ip, LinkCast, Cast, Reply, Src, Dst, none),
-            above_sum(member(Head, Proto, Upper, View), Packet, Sum, ?IP_HDR_LEN + byte_size(Options));
+            From = after_checked_header(Packet, Sum, ?IP_HDR_LEN + byte_size(Options)),
+            above_sum(member(Head, Proto, Upper, View), From);
         {fragment, Ip, Payload} -> {local, {fragment, inet, none, LinkCast, Ip, Payload}};
         {param_problem, _} = Problem -> {local, {param_problem, inet, none, Problem, Packet}};
         {drop, _} = Drop -> Drop
@@ -473,25 +474,31 @@ ip6(Packet, Sum, Origin, LinkCast, Zone, #{ip6 := Ip6View} = View) ->
     case erx_ip6:input(Packet, Origin, LinkCast, Ip6View#{zone := Zone}) of
         {ours, Cast, Reply, #ip6{proto = Proto, src = Src, dst = Dst, hdrlen = HdrLen} = Ip, Upper} ->
             Head = head(inet6, Ip, LinkCast, Cast, Reply, Src, Dst, Zone),
-            above_sum(member(Head, Proto, Upper, View), Packet, Sum, ?IP6_HDR_LEN + HdrLen);
+            above_sum(member(Head, Proto, Upper, View), sum_from(Packet, Sum, ?IP6_HDR_LEN + HdrLen));
         {fragment, Ip, Payload} -> {local, {fragment, inet6, Zone, LinkCast, Ip, Payload}};
         {param_problem, _, _} = Problem -> {local, {param_problem, inet6, Zone, Problem, Packet}};
         {drop, _} = Drop -> Drop
     end.
 
-%% A datagram for a consumer above IP carries what the sum of its bytes above IP comes from:
-%% its packet, the packet's network sum and Start, where the bytes above IP begin in it, or
-%% `none` without a network sum. `verify/1` derives the sum, so a frame dropped for want of
-%% room costs no addition.
-above_sum({owned, Holders, Above}, Packet, Sum, Start) ->
-    {owned, Holders, {above, sum_from(Packet, Sum, Start), Above}};
-above_sum({local, Above}, Packet, Sum, Start) ->
-    {local, {above, sum_from(Packet, Sum, Start), Above}};
-above_sum({drop, _} = Drop, _, _, _) ->
-    Drop.
+%% A datagram for a consumer above IP carries what the sum of its bytes above IP comes from,
+%% or `none` without a network sum. `verify/1` derives the sum, so a frame dropped for want
+%% of room costs no addition.
+above_sum({owned, Holders, Above}, From) -> {owned, Holders, {above, From, Above}};
+above_sum({local, Above}, From) -> {local, {above, From, Above}};
+above_sum({drop, _} = Drop, _) -> Drop.
 
+%% What the sum of the bytes above IP comes from: the packet, its network sum and Start, where
+%% the bytes above IP begin in it.
 sum_from(_, none, _) -> none;
 sum_from(Packet, Sum, Start) -> {Packet, Sum, Start}.
+
+%% An IPv4 header whose checksum has been checked sums to 16#ffff, one's-complement zero, so
+%% the packet's sum is also that of the bytes after the header, which are handed over with
+%% Start 0: the header is not read again. An IPv6 header has no checksum, so `sum_from/3`
+%% keeps it, and `upper_sum/2` subtracts its sum.
+after_checked_header(_, none, _) -> none;
+after_checked_header(Packet, Sum, HdrLen) ->
+    {binary_part(Packet, HdrLen, byte_size(Packet) - HdrLen), Sum, 0}.
 
 %% The sum of Upper, the bytes above IP: the packet's sum less its header's and its padding's.
 upper_sum(none, _) -> none;

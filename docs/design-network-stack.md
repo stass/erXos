@@ -1370,14 +1370,20 @@ uint16_t erx_inet_copy_sum(uint16_t sum, uint8_t *dst, const uint8_t *src, size_
     size_t offset);
 ```
 
-It loads eight bytes at a time and adds them with deferred carries, the
-widening of the portable loop that the watch list already names. Each
-word is loaded once and the loaded value is the one stored, so the sum
-is the sum of the bytes in the binary even when a device writes its
-buffer again during the copy. A copy followed by a pass over the source
-would not give that. `erx_inet_sum` stays as the core's oracle in its
-tests. erXos's device NIF and a host transport's NIF link the same core
-from `c_src/`. Those are the paths of
+It loads eight bytes at a time, two words a step into two totals, and
+adds them with deferred carries. Each word is loaded once and the loaded
+value is the one stored, so the sum is the sum of the bytes in the
+binary even when a device writes its buffer again during the copy. C
+would let a compiler load a plain object a second time for a second
+use, so each loaded word passes through an empty assembly statement
+that hides its value from the compiler, and every use reads the
+register it was loaded into. A copy followed by a pass over the source
+would not give that. `erx_inet_sum` runs the same loop without the
+store, and the core's oracle in its tests and fuzz target is a model
+that adds one byte at a time. No test can see a second load of the
+source, so review keeps every load of the loop behind the statement.
+erXos's device NIF and a host
+transport's NIF link the same core from `c_src/`. Those are the paths of
 [Two places, four seams](#two-places-four-seams), and they run one way.
 
 **Receiving.** `erx_device:complete(Dev, Q, SumFrom)` copies exactly as
@@ -1410,11 +1416,14 @@ span(Packet :: binary(), Sum :: 0..16#ffff, Start :: non_neg_integer(),
 It returns `Sum` less the sum of the bytes before `Start` and less the
 sum of the bytes after `Start + Length`, by one's-complement
 subtraction. When the bytes after start at an odd offset, their sum is
-byte-swapped first (RFC 1071, section 2(B)). `Start` is the IP header's
-length: 20 plus an IPv4 header's options, or 40 plus `hdrlen`, the
-extension headers the IPv6 walk passed. `Length` is the upper layer's
-length. `Start` is even in both families. The bytes before are headers
-the decoders have just read. The bytes after are an Ethernet frame's
+byte-swapped first (RFC 1071, section 2(B)). An IPv4 header whose
+checksum has been checked sums to 16#ffff, one's-complement zero, so
+the packet's sum is also the sum of the bytes after the header: the
+IPv4 path passes those bytes with `Start` 0, and its header, options
+included, is not read again. An IPv6 header has no checksum, so the
+IPv6 path passes the packet with `Start` 40 plus `hdrlen`, the extension
+headers the IPv6 walk passed, which are headers the decoder has just
+read. `Length` is the upper layer's length, and `Start` is even. The bytes after are an Ethernet frame's
 padding, at most 26 bytes behind an IPv4 packet and 6 behind an IPv6
 one. A frame whose IP length leaves more bytes behind it costs a pass
 over those bytes, which is never more than summing the frame.

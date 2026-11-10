@@ -37,11 +37,15 @@ class ErxNetInputTest < Minitest::Test
       'icmp_echo_reply_is_owned_by_its_identifier_test'
     ],
     ip6_sum_without_the_extension_headers: [
-      'erx_net_input', '?IP6_HDR_LEN + HdrLen);', '?IP6_HDR_LEN + 0 * HdrLen);',
+      'erx_net_input', '?IP6_HDR_LEN + HdrLen));', '?IP6_HDR_LEN + 0 * HdrLen));',
       'network_sum_behind_an_ip6_extension_header_test'
     ],
     span_keeps_the_padding: [
-      'erx_net_sum', 'at(Start + Length, erx_bytes:inet_csum(0, After))', 'at(Start + Length, 0 * byte_size(After))',
+      'erx_net_sum', 'at(Start + Length, piece(After))', 'at(Start + Length, 0 * byte_size(After))',
+      'network_sum_behind_ip4_options_and_padding_test'
+    ],
+    ip4_sum_keeps_the_header: [
+      'erx_net_input', 'binary_part(Packet, HdrLen, byte_size(Packet) - HdrLen)', 'binary_part(Packet, 0 * HdrLen, byte_size(Packet))',
       'network_sum_behind_ip4_options_and_padding_test'
     ],
     span_padding_from_an_odd_offset_unswapped: [

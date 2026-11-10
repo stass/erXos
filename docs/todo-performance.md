@@ -420,14 +420,16 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   same run should time one 64 KiB call on each target board, since `erx_bytes_bif.c`
   charges it a quarter of a reduction slice from the host's number.
 * **[Low] per-byte primitives, `erx_bytes:inet_csum/2` and `siphash24/2` run portable C
-  only.** The checksum adds one 16-bit word at a time into 64 bits and does not use the
+  only.** The checksum adds two 64-bit words a step with deferred carries and does not use the
   CPU's checksum-friendly instructions that
   [the network design](design-network-stack.md#where-c-is-used-and-what-is-measured)
   puts behind the architecture layer. In a one-off loop on the development host (Apple
   M3 Max, macOS, native, clang 23.1.3 -O2, 2026-11-08), not a benchmark, a 64 KiB call
-  took about 16 microseconds for the checksum and 110 for SipHash-2-4, and a 36-byte
-  SipHash (a SYN cookie's input) about 60 nanoseconds; `erx_bytes_reductions` (in
-  `erx_net`'s `c_src/erx_iodata.h`) charges a 64 KiB call 2 and 11 percent of a
+  took about 16 microseconds for the checksum, then a two-byte loop, and 110 for
+  SipHash-2-4, and a 36-byte SipHash (a SYN cookie's input) about 60 nanoseconds; with
+  the 64-bit loop (same host and compiler, 2026-11-10, 20,000 calls) a 64 KiB checksum
+  takes about 2.5 microseconds. `erx_bytes_reductions` (in `erx_net`'s
+  `c_src/erx_iodata.h`) charges a 64 KiB call a three-hundredth and 11 percent of a
   reduction slice from these. Measure: the time
   per frame of the bulk-transfer load the network design names, on HVF, against the
   same load with the checksum stubbed; and one 64 KiB call of each on each target
@@ -445,8 +447,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   measurement on the host settles whether that matters there. The walk charges a reduction
   for each 64 list cells, a guess eight times below ERTS's own `iolist_size/1` rate; time a
   call over 131072 cells on each target board and set the rate from it.
-  If the checksum is a visible share, add a wider portable loop (32-bit loads,
-  deferred carries) and then the AArch64 instructions chosen by feature detection, the
+  If the checksum is a visible share, add the AArch64 instructions chosen by feature detection, the
   portable code staying as their oracle.
 * [Low] per-byte primitives, the portable `erx_bytes` walks a list argument twice
   (`erlang/apps/erx_net/portable/erx_bytes.erl`, `iodata_fits/1`): on stock OTP, before
@@ -746,15 +747,3 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   bench` workload that loads and purges a small module in a loop at 1, 2
   and 4 CPUs under the interpreter and BeamAsm images.
 
-* **The receive sums' own costs** (`c_src/erx_tap_nif.c`, `erx_net_sum:span/4`). With the
-  tap NIF summing each received frame and the decoders checking from that sum, bulk receive
-  on the FreeBSD test host (FreeBSD 16.0-CURRENT amd64, native, stock OTP 29, 512 MiB over
-  `/dev/tap1`, median of 5 against the same tree without the sums) went from 1,911 to 1,867
-  Mbit/s, where skipping the receive check altogether had gained 4 percent. The suspects:
-  the tap NIF sums with `erx_inet_sum`, the portable two-byte loop, not the eight-byte loop
-  of `erx_inet_copy_sum`, in the driver process, which may be receive's bottleneck; and
-  `span/4` makes two `inet_csum` calls a frame, one usually over no bytes, the other over
-  an IPv4 header whose sum is 16#ffff once its checksum has been checked, so it need not be
-  read again. Settled by a profile of bulk receive that names either, or by a run with the
-  eight-byte loop in `erx_inet_sum` and a `span/4` that takes the IPv4 header's sum as
-  known and skips the empty call; the merge (fast path 7) reads the same sums.

@@ -106,13 +106,13 @@ erx_iodata_status_t erx_iodata_walk(const erx_iodata_layer_t *layer, erx_iodata_
  * reduction slice is ERX_BYTES_SLICE_REDS reductions (ERTS's CONTEXT_REDS), about a
  * millisecond. A call over ERX_BYTES_CALL_MAX bytes is charged its primitive's REDS_AT_MAX,
  * in proportion for fewer, and a reduction for each ERX_IODATA_CELLS_PER_REDUCTION cells it
- * walked. Over 64 KiB the Internet checksum takes about 16 microseconds and SipHash-2-4 about
- * 110 on the development host (Apple M3 Max, native, clang 23.1.3 -O2), charged here a fiftieth
- * and a ninth of a slice; slower targets are a watch-list item (docs/todo-performance.md).
+ * walked. Over 64 KiB the Internet checksum takes about 2.5 microseconds and SipHash-2-4 about
+ * 110 on the development host (Apple M3 Max, native, clang 23.1.3 -O2), charged here a
+ * three-hundredth and a ninth of a slice; slower targets are a watch-list item (docs/todo-performance.md).
  */
 #define ERX_BYTES_SLICE_REDS		4000u
 #define ERX_IODATA_CELLS_PER_REDUCTION	64u
-#define ERX_INET_CSUM_REDS_AT_MAX	80u
+#define ERX_INET_CSUM_REDS_AT_MAX	13u
 #define ERX_SIPHASH_REDS_AT_MAX		440u
 
 /* The reductions of a call that took bytes in cells, its primitive's reds_at_max at 64 KiB. */

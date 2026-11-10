@@ -98,23 +98,22 @@ it; git history is the record of completed work.
   5. checksums in the copy
      ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), the
      owner's decision to build it as part of the fast path, since the cut and the merge rest
-     on it. The receive half is in the tree: `erx_inet_copy_sum` in `erx_inet_csum.c` with its
-     harness cases, mutants and the `inet_csum` fuzz target's copy case; `erx_net_sum`; the
-     sum argument of the decoders above IP; `erx_net_input`'s `{frame, Bytes, Sum}`, checked
+     on it. The receive half is in the tree: `erx_inet_copy_sum` in `erx_inet_csum.c`, whose
+     two-words-a-step loop `erx_inet_sum` shares and whose loads an empty assembly statement
+     keeps single, with its harness cases, mutants and the `inet_csum` fuzz target's copy
+     case; `erx_net_sum`; the sum argument of the decoders above IP; `erx_net_input`'s `{frame, Bytes, Sum}`, checked
      against the unsummed path by its EUnit cases and its fuzz target; and the tap NIF's
-     `{sum, S, Frame}`. What remains is the send half and the other media:
+     `{sum, S, Frame}`. On the FreeBSD test host (median of 5, min-max) the receive half first
+     cost bulk receive 1,907 (1,876-1,973) to 1,837 (1,823-1,877) Mbit/s; with the wide loop
+     and the IPv4 header not read again it is 1,936 (1,926-1,968), bulk send 1,164 to 1,150
+     and rr 64 B 16,927 to 17,110 txn/s, within their spreads (raw data:
+     ~/erxos-history net-bench-freebsd-fast-p5b-2026-11-10, commit ea64849). What remains is the send half and the other media:
      `erx_tcp_wire:encode/4` and `erx_net_frame`'s `{csum, Start, Field, Packet}`;
      `link_info`'s `finish` and the interface row's; the tap NIF finishing a delayed frame;
      `erx_device:complete/3` and `post_frame/5`'s delayed frames; `erx_virtio_net` on
      `complete/3` and `post_frame/5` with its start line naming the finisher; and the pipe's
      `process` end taking `{sum, S, Frame}`. The netmap NIF takes the same core when it is
      built;
-     * [Medium] `erx_inet_copy_sum` (`c_src/erx_inet_csum.c`): the single read of each source
-       word that makes the sum that of the bytes stored rests on code generation, since C
-       allows a second load of a plain `memcpy` source; before the device NIF or the cut copies
-       from memory a device can write, make it explicit (a relaxed atomic load of aligned
-       words, or a compiler barrier on the loaded word through the inline-assembly allowlist)
-       or check the emitted code in the build.
      * [Medium] `erx_net_input_fuzz`: its frames carry no Ethernet padding and its UDP lengths
        always fill the IP payload, so `erx_net_sum:span/4`'s bytes after the packet and
        `erx_udp_wire`'s datagram sum are checked only by EUnit cases

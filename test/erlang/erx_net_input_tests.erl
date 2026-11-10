@@ -148,8 +148,8 @@ owned(Verdict) ->
 %% --- Network sums ------------------------------------------------------------
 
 %% The checksum above IP is checked from the frame's network sum: the sum of the bytes above
-%% IP is the network sum less the IP header's, options or extension headers included, and
-%% less the padding's after the packet, here of an odd count from an odd offset. With a sum
+%% IP is the network sum less an IPv6 header's, extension headers included (a checked IPv4
+%% header, options included, sums to zero), and less the padding's after the packet, here of an odd count from an odd offset. With a sum
 %% off by one the segment is dropped as bad_sum, as a corrupted one is.
 network_sum_behind_ip4_options_and_padding_test() ->
     Tcp = tcp(?PEER4, ?ME4, 4000, 80, 16, <<"odd">>),

@@ -40,10 +40,11 @@ sub(_, _) -> error(badarg).
 -doc """
 The sum of the `Length` bytes of Packet from `Start`, given `Sum`, the sum of all of Packet:
 `Sum` less the sum of the bytes before `Start` and less that of the bytes after
-`Start + Length`. `Start` must be even, as an IP header's length is, so the bytes from it are
-summed as words from their first byte. When the bytes after start at an odd offset, their
-sum is byte-swapped first (RFC 1071, section 2(B)). A range past Packet's end raises
-`badarg`; its bounds come from decoders that have checked them against Packet.
+`Start + Length`. `Start` must be even, as an IP header's length is, so the bytes from it
+are summed as words from their first byte. When the bytes
+after start at an odd offset, their sum is byte-swapped first (RFC 1071, section 2(B)). A
+range past Packet's end raises `badarg`; its bounds come from decoders that have checked
+them against Packet.
 """.
 -spec span(binary(), sum(), non_neg_integer(), non_neg_integer()) -> sum().
 span(Packet, Sum, Start, Length) when is_binary(Packet), ?IS_SUM(Sum),
@@ -51,9 +52,14 @@ span(Packet, Sum, Start, Length) when is_binary(Packet), ?IS_SUM(Sum),
                                       is_integer(Length), Length >= 0,
                                       Start + Length =< byte_size(Packet) ->
     <<Before:Start/binary, _:Length/binary, After/binary>> = Packet,
-    sub(sub(Sum, erx_bytes:inet_csum(0, Before)), at(Start + Length, erx_bytes:inet_csum(0, After)));
+    sub(sub(Sum, piece(Before)), at(Start + Length, piece(After)));
 span(_, _, _, _) ->
     error(badarg).
+
+%% The sum of a piece, without a call for the empty one: every IPv4 header, which the IPv4 path
+%% has already taken off, and every frame without padding.
+piece(<<>>) -> 0;
+piece(Bytes) -> erx_bytes:inet_csum(0, Bytes).
 
 %% A sum taken from a piece's first byte, as seen from Offset in the whole.
 at(Offset, Sum) when Offset rem 2 =:= 0 -> Sum;
