@@ -36,6 +36,7 @@
 #include "erlang/apps/erx_net/c_src/erx_inet_csum.h"
 #include "erlang/apps/erx_net/c_src/erx_iodata.h"
 #include "erlang/apps/erx_net/c_src/erx_siphash.h"
+#include "erlang/apps/erx_net/c_src/erx_tcp_merge.h"
 #include "erx/explicit_bzero.h"
 #include "kernel/crypto/sha2/sha256.h"
 #include "liberx/backend/api.h"
@@ -293,6 +294,118 @@ erx_bytes_siphash24_2(BIF_ALIST_2)
 	if (status != ERX_IODATA_OK)
 		WALK_ERROR(BIF_P, status);
 	BIF_RET(erts_make_integer((Uint)hash, BIF_P));
+}
+
+/*
+ * One frame of a tcp_merge/1 batch: a binary of whole bytes, or {sum, Sum, Binary} with Sum its
+ * network sum. *binary is the frame's binary term; its bytes are not reached yet, so a batch
+ * past the merge's limit is refused before anything is copied.
+ */
+static bool
+get_merge_frame(Eterm term, erx_tcp_merge_in_t *frame, Eterm *binary)
+{
+	Eterm *tuple;
+	Uint size, sum;
+
+	*frame = (erx_tcp_merge_in_t){ .has_sum = false };
+	*binary = term;
+	if (is_tuple(term)) {
+		tuple = tuple_val(term);
+		if (arityval(tuple[0]) != 3 || tuple[1] != am_sum || !get_small_upto(tuple[2], 0xffffu, &sum))
+			return (false);
+		frame->has_sum = true;
+		frame->sum = (uint16_t)sum;
+		*binary = tuple[3];
+	}
+	if (!binary_size(*binary, &size))
+		return (false);
+	frame->length = size;
+	return (true);
+}
+
+/*
+ * tcp_merge(Frames): the units of erx_tcp_merge over one batch, in order of their first frames
+ * (erlang/apps/erx_net/c_src/erx_tcp_merge.h), as the portable NIF answers them: a frame on its
+ * own is {sum, Sum, Frame}, the very term it came as when it came with its sum; a unit of
+ * several is {merged, N, First, Last, Payload}, its first and last frames so and each member's
+ * payload, a sub-binary of its frame, in order, the empty ones left out. badarg unless Frames is
+ * a proper list of frames within the merge's limit. A frame at a bit offset is copied before
+ * the merge reads it, at most twice ERX_TCP_MERGE_BYTES_MAX bytes in all.
+ */
+BIF_RETTYPE
+erx_bytes_tcp_merge_1(BIF_ALIST_1)
+{
+	erx_tcp_merge_in_t in[ERX_TCP_MERGE_FRAMES_MAX];
+	erx_tcp_merge_out_t out[ERX_TCP_MERGE_FRAMES_MAX];
+	Eterm given[ERX_TCP_MERGE_FRAMES_MAX], binaries[ERX_TCP_MERGE_FRAMES_MAX];
+	Eterm summed[ERX_TCP_MERGE_FRAMES_MAX], payloads[ERX_TCP_MERGE_FRAMES_MAX];
+	byte *copies[ERX_TCP_MERGE_FRAMES_MAX];
+	size_t count, i;
+	erx_tcp_merge_status_t status;
+	Eterm list, unit, units, *hp;
+
+	count = 0;
+	for (list = BIF_ARG_1; is_list(list); list = CDR(list_val(list)), count++) {
+		if (count == ERX_TCP_MERGE_FRAMES_MAX ||
+		    !get_merge_frame(CAR(list_val(list)), &in[count], &binaries[count]))
+			BIF_ERROR(BIF_P, BADARG);
+		given[count] = CAR(list_val(list));
+	}
+	if (is_not_nil(list) || !erx_tcp_merge_within_limit(in, count))
+		BIF_ERROR(BIF_P, BADARG);
+	for (i = 0; i < count; i++)
+		in[i].data = binary_prefix(binaries[i], in[i].length, &copies[i]);
+	status = erx_tcp_merge(in, count, out);
+	BUMP_REDS(BIF_P, erx_bytes_reductions(erx_tcp_merge_bytes_read(in, count), 0,
+	    ERX_INET_CSUM_REDS_AT_MAX));
+	for (i = 0; i < count; i++)
+		if (copies[i] != NULL)
+			erts_free(ERTS_ALC_T_TMP, copies[i]);
+	if (status != ERX_TCP_MERGE_OK)
+		BIF_ERROR(BIF_P, BADARG);
+	/*
+	 * summed[i] is frame i as {sum, Sum, Frame}; payloads[i] is the list of payloads of the unit
+	 * that frame i starts, built from the back so each piece is consed in front of the later
+	 * ones, as the units' list is.
+	 */
+	for (i = 0; i < count; i++) {
+		summed[i] = given[i];
+		if (!in[i].has_sum) {
+			hp = HAlloc(BIF_P, 4);
+			summed[i] = TUPLE3(hp, am_sum, make_small(out[i].sum), binaries[i]);
+		}
+		payloads[i] = NIL;
+	}
+	for (i = count; i-- > 0;) {
+		if (out[i].payload_length > 0) {
+			unit = erts_make_sub_binary(BIF_P, binaries[i], out[i].payload, out[i].payload_length);
+			hp = HAlloc(BIF_P, 2);
+			payloads[out[i].unit] = CONS(hp, unit, payloads[out[i].unit]);
+		}
+	}
+	units = NIL;
+	for (i = count; i-- > 0;) {
+		if (out[i].members == 0)
+			continue;
+		unit = summed[i];
+		if (out[i].members > 1) {
+			hp = HAlloc(BIF_P, 6);
+			unit = TUPLE5(hp, am_merged, make_small(out[i].members), summed[i],
+			    summed[out[i].last], payloads[i]);
+		}
+		hp = HAlloc(BIF_P, 2);
+		units = CONS(hp, unit, units);
+	}
+	BIF_RET(units);
+}
+
+/* tcp_merge_limit(): {ERX_TCP_MERGE_FRAMES_MAX, ERX_TCP_MERGE_BYTES_MAX}, the merge's limit. */
+BIF_RETTYPE
+erx_bytes_tcp_merge_limit_0(BIF_ALIST_0)
+{
+	Eterm *hp = HAlloc(BIF_P, 3);
+
+	BIF_RET(TUPLE2(hp, make_small(ERX_TCP_MERGE_FRAMES_MAX), make_small(ERX_TCP_MERGE_BYTES_MAX)));
 }
 
 /*

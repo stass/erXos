@@ -1042,7 +1042,8 @@ $(OBJDIR)/sha256c.o: $(ERX_TREE)/kernel/crypto/sha2/sha256c.c
 # erx_net's per-byte cores and their iodata walk (docs/design-network-stack.md, "Two places,
 # four seams"), under erx_bytes's BIFs, built from erx_net's c_src, their one copy, which
 # erx_net's own makefile also builds into the portable library outside erXos.
-ERX_NET_C_OBJS = $(OBJDIR)/erx_inet_csum.o $(OBJDIR)/erx_siphash.o $(OBJDIR)/erx_iodata.o
+ERX_NET_C_OBJS = $(OBJDIR)/erx_inet_csum.o $(OBJDIR)/erx_siphash.o $(OBJDIR)/erx_iodata.o \
+	$(OBJDIR)/erx_tcp_merge.o
 
 $(ERX_NET_C_OBJS): $(OBJDIR)/%.o: $(ERX_TREE)/erlang/apps/erx_net/c_src/%.c
 	$(V_CC) $(CFLAGS) $(INCLUDES) -c $< -o $@

@@ -16,6 +16,8 @@
 %%     After are binaries of one even size of at most 65536 bytes.
 %%   * SipHash-2-4 from the paper, with 64-bit arithmetic masked: badarg unless Key is a 16-byte
 %%     binary and Data iodata of at most 65536 bytes in lists of at most 131072 cells in all.
+%%   * The merge of received TCP segments is erx_tcp_merge_model (beside this file), written
+%%     from docs/design-network-fastpath.md, "The merge": badarg past its limit.
 %%   * SHA-256 is stock's crypto:hash/2: badarg unless Data is a binary.
 %%   * entropy/1 is stock's crypto:strong_rand_bytes/1, the host's generator: badarg unless N
 %%     is an integer from 1 to 256. It never fails a read, so the raise of a failed read is
@@ -23,7 +25,8 @@
 %% Only host tests compile it; it never reaches a release.
 
 -module(erx_bytes).
--export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, sha256/1, entropy/1]).
+-export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, tcp_merge/1, tcp_merge_limit/0, sha256/1,
+         entropy/1]).
 
 -define(CALL_MAX, 65536).
 -define(CELLS_MAX, 131072).
@@ -71,6 +74,14 @@ sha256(Data) when is_binary(Data) ->
     crypto:hash(sha256, Data);
 sha256(_Data) ->
     erlang:error(badarg).
+
+-spec tcp_merge(term()) -> [tuple()].
+tcp_merge(Frames) ->
+    erx_tcp_merge_model:merge(Frames).
+
+-spec tcp_merge_limit() -> {pos_integer(), pos_integer()}.
+tcp_merge_limit() ->
+    erx_tcp_merge_model:limit().
 
 -spec entropy(1..256) -> binary().
 entropy(N) when is_integer(N), N >= 1, N =< 256 ->

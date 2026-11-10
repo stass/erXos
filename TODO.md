@@ -126,10 +126,20 @@ it; git history is the record of completed work.
   6. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
      the tap and netmap NIFs, and `erx_net_frame:cut/1` as the reference: send toward
      4.4 Gbit/s;
-  7. the merge on receive: `erx_bytes:tcp_merge/1` with `tcp_merge_limit/0`, the driver's cut
-     of every batch to that limit, segment counts in TCP, payloads as lists of binaries,
-     credit by segments and the copy check: receive toward 4.4 Gbit/s, and a sender's ACKs
-     cut by the merged units' length;
+  7. the merge on receive: receive toward 4.4 Gbit/s, and a sender's ACKs cut by the merged
+     units' length. `erx_bytes:tcp_merge/1` with `tcp_merge_limit/0` is in the tree
+     (`c_src/erx_tcp_merge.c`, the portable NIF and erXos's BIF, judged against
+     `erx_tcp_merge_model` by the network primitives' probe and EUnit cases, with its
+     `tcp_merge` fuzz target), and so is the driver's cut of every batch to that limit. What
+     remains is its use: the interface merging each batch before it classifies (the loopback
+     input left out), classifying a unit by its first frame and verifying its first and last;
+     segment counts in TCP, payloads as lists of binaries (`erx_tcp_payload`), the ACK,
+     window and congestion rules of a merged segment; credit by segments; and the copy check,
+     with the tests 5, 7 and 13 of the fast path's design and the `net_device` bursts. A
+     merged payload's pieces are sub-binaries that keep their whole frames alive, so the
+     receive queue and reassembly must count the bytes they hold, or copy small pieces as
+     FreeBSD's `sbcompress` does, before a peer's tiny segments can pin more memory than its
+     window allows;
   8. netmap with runs and merged batches, over VALE against lwIP over VALE;
   9. request-reply: the driver-to-interface hop and scheduler placement measured, and what
      their profiles name changed, toward the request-reply target;

@@ -324,16 +324,17 @@ erXos a NIF of the portable build. The rule is FreeBSD's
 (`tcp_lro_rx_common`, `tcp_lro.c:1280-1426`; `tcp_lro_condense`,
 `:963-1106`); [The merge](#the-merge) gives it in full.
 
-**The merge's limit.** One call takes at most 256 frames, and the frames
-before its last hold less than 64 KiB, so a call's work is bounded and it
-runs on a normal scheduler. `erx_bytes:tcp_merge_limit/0` answers the C
+**The merge's limit.** One call takes at most 256 frames, the frames
+before its last hold less than 64 KiB, and no frame holds more than
+64 KiB, so a call reads at most 128 KiB and runs on a normal scheduler. `erx_bytes:tcp_merge_limit/0` answers the C
 core's own two constants, `{256, 65536}`, so no other copy of them
 exists. The bound holds by construction at the one place every
 transport's frames pass: `erx_net_driver`, the code all transports
 share, cuts each `{frames, Frames}` event of its transport into batches
 within the limit before it hands any to the interface
 ([The driver](design-network-stack.md#the-driver)). A batch ends at the
-256th frame, or at the frame that brings it to 64 KiB. So whatever a
+256th frame, or at the frame that brings it to 64 KiB, and the driver
+drops a frame of more than 64 KiB as `too_long`. So whatever a
 medium gives at once, virtio's completions, a burst of datagrams, a
 netmap ring or a test's injected frames, no batch of a correct stack
 exceeds the limit, and a flood of minimum-size frames costs more batches,
@@ -606,31 +607,54 @@ A candidate joins the open unit of its flow when all of these hold:
   is never merged away and ECN sees every mark.
 * **In order:** its sequence number is the unit's next (`tcp_lro.c:1065`).
 * **The acknowledgement moves forward:** its ACK is at or past the
-  unit's, and a frame without payload joins only when its ACK passes the
-  unit's. FreeBSD ends a unit at a duplicate ACK (`:1068-1070`) and merges
-  a pure window update whose window grew (`:1081-1085`). The stack passes
-  on alone every pure ACK that does not advance, a duplicate and a
-  window update alike, because each carries a fact, a duplicate's count
-  or a window, that a merged unit would hide, and one rule covers both.
+  unit's; past it when the frame carries no payload; and past the first
+  frame's when the first frame carries none. FreeBSD ends a unit at a duplicate ACK (`:1068-1070`) and merges
+  a pure window update whose window grew (`:1081-1085`). The stack never
+  merges a pure ACK that does not advance, a duplicate and a window
+  update alike, neither into a unit nor as the first frame that data with
+  the same ACK would join, because each carries a fact, a duplicate's
+  count or a window, that a merged unit would hide, and one rule covers
+  both. FreeBSD also merges a data segment whose ACK goes back
+  (`:1075-1080`); the stack ends the unit there instead, since a unit's
+  last acknowledgement stands for all of its members'.
 * **Timestamps move forward:** its TSval is at or past the unit's
   (`:1054-1063`).
-* **The size fits:** the unit's payload stays within FreeBSD's
-  `TCP_LRO_LENGTH_MAX`, 65,280 bytes (`tcp_lro.h:200`), so the merged
-  segment fits one IP packet.
+* **The size fits:** the unit's payload stays below FreeBSD's
+  `TCP_LRO_LENGTH_MAX`, 65,280 bytes (`tcp_lro.h:200`), as FreeBSD flushes
+  an entry that reaches it (`tcp_lro.c:1032`), so the merged segment fits
+  one IP packet.
 
-Up to eight units are open at once, one per flow, FreeBSD's
-`TCP_LRO_ENTRIES` (`tcp_lro.h:41`); a candidate of a ninth flow closes the
-oldest unit. A frame that is not a candidate, or a candidate that cannot
-join its flow's unit, first closes that flow's unit, as FreeBSD's
-`tcp_push_and_replace` flushes an entry (`tcp_lro.c:903`), so a flow's
-frames keep their order; such a candidate then opens a new unit. Every
+The flow compares the link addresses, which FreeBSD's
+`lro_address_compare` does not, so frames that came through different
+neighbours are never one unit; and FreeBSD's refusal of an unspecified
+IPv4 or IPv6 address (`tcp_lro.c:283-286`, `:333-335`) has no rule here:
+a unit of such segments reaches TCP with its first frame's addresses, which
+TCP's own checks of the addresses judge as they judge each member.
+
+Up to eight units are open at once, one per connection (IP version,
+addresses and ports), FreeBSD's `TCP_LRO_ENTRIES` (`tcp_lro.h:41`); a
+candidate of a ninth connection closes the oldest unit. A TCP segment of
+the connection that is not a candidate, or a candidate that cannot join
+the connection's unit, first closes that unit, as FreeBSD's
+`tcp_push_and_replace` flushes an entry (`tcp_lro.c:903`), so a
+connection's frames keep their order; FreeBSD flushes every entry on a
+frame it cannot merge at all (`tcp_lro_flush_active`, `:1441`), which a
+batch that closes every unit at its end does not need; such a candidate then opens a new
+unit. The connection is read from any TCP segment directly behind IPv4
+or IPv6 whose ports are in the frame, a first fragment and a segment
+behind IPv4 options included. A frame from which no connection can be
+read, one that is not TCP, a later fragment or a segment behind IPv6
+extension headers, closes no unit: it is passed on where it stood, and a
+later frame of a connection it belonged to may then come before it, which
+TCP's reassembly takes as reordering. Every
 unit closes at the end of the call. Nothing of one batch waits for the
 next, so the merge keeps no state between calls and nothing has to time
 out, where FreeBSD keeps entries across calls and flushes them on a timer
 (`tcp_lro_flush_inactive`).
 
 Each unit, and each frame on its own, stands in the output where its
-first frame stood in the input. A unit of one frame is that frame. A unit
+first frame stood in the input. A unit of one frame is that frame, as
+`{sum, Sum, Frame}`, the very term it came as when it came with its sum. A unit
 of several is `{merged, N, First, Last, Payload}`: its first and last
 frames as they arrived, each with its sum, and every member's payload as
 a sub-binary, in order; the pure ACKs a unit holds have no payload and
@@ -1154,7 +1178,9 @@ Each test is paired with a seeded fault it must catch.
    another segment size; a block marking a segment it covers in part.
 4. **The merge equals its model.** `erx_tcp_merge_model`, an Erlang
    model written from `tcp_lro_condense`'s rule as this document states
-   it, against the C over random batches: interleaved flows past eight,
+   it, which the host stand-in of `erx_bytes` answers with, against the
+   C through the portable NIF and erXos's BIF over the random batches of
+   the network primitives' probe and the EUnit cases of `erx_bytes`: interleaved flows past eight,
    gaps, every flag, other options, differing type of service, bad
    checksums, duplicate ACKs, window updates, padding. Unit by unit the
    outputs are equal. *Seeded faults:* a merge across differing type of

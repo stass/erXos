@@ -5,8 +5,8 @@
 # on the host they run on: `make -C c_src`, or one of them by its target name.
 # * nif: erx_bytes_nif.so, the per-byte primitives of the portable erx_bytes
 #   (portable/erx_bytes.erl), against the headers of the emulator that ERL
-#   runs, the one that will load it. Its cores, erx_inet_csum.c and
-#   erx_siphash.c, and the iodata walk, erx_iodata.c, are also linked
+#   runs, the one that will load it. Its cores, erx_inet_csum.c,
+#   erx_siphash.c and erx_tcp_merge.c, and the iodata walk, erx_iodata.c, are also linked
 #   statically into erXos's ERTS, whose build compiles them from here.
 # * tap: erx_tap_nif.so, the NIF of the tap transport (portable/erx_tap.erl),
 #   against the same headers. It is never built for erXos's target.
@@ -21,8 +21,8 @@ CC = cc
 ERL = erl
 PRIV = ../priv
 ERX_CFLAGS = -std=c17 -O2 -Wall -Wextra -Wpedantic
-NIF_SOURCES = erx_bytes_nif.c erx_iodata.c erx_inet_csum.c erx_siphash.c
-NIF_HEADERS = erx_iodata.h erx_inet_csum.h erx_siphash.h
+NIF_SOURCES = erx_bytes_nif.c erx_iodata.c erx_inet_csum.c erx_siphash.c erx_tcp_merge.c
+NIF_HEADERS = erx_iodata.h erx_inet_csum.h erx_siphash.h erx_tcp_merge.h
 TAP_SOURCES = erx_tap_nif.c erx_inet_csum.c
 TAP_HEADERS = erx_inet_csum.h
 # A NIF library from its sources: the headers of the emulator ERL runs, then

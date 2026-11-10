@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * The NIF library of the portable erx_bytes (portable/erx_bytes.erl), erx_net's per-byte
- * primitives outside erXos: the NIFs inet_csum_nif/2, inet_csum_update_nif/3 and
- * siphash24_nif/2, which the module's inet_csum/2, inet_csum_update/3 and siphash24/2 call
- * once their arguments fit. c_src/Makefile builds it into
+ * primitives outside erXos: the NIFs inet_csum_nif/2, inet_csum_update_nif/3, siphash24_nif/2,
+ * tcp_merge_nif/1 and tcp_merge_limit_nif/0, which the module's functions of those names
+ * without _nif call once their arguments fit. c_src/Makefile builds it into
  * priv/erx_bytes_nif.so, which the module loads as it is loaded. On erXos the same functions are
  * BIFs of ERTS (otp/erts/emulator/nifs/erxos/erx_bytes_bif.c) over the same cores and the same
  * iodata walk (erx_iodata.c), so the two builds differ only in how a term is read. entropy/1
@@ -26,6 +26,7 @@
 #include "erx_inet_csum.h"
 #include "erx_iodata.h"
 #include "erx_siphash.h"
+#include "erx_tcp_merge.h"
 
 _Static_assert(sizeof(ERL_NIF_TERM) == sizeof(erx_iodata_term_t), "a term is a word");
 
@@ -204,10 +205,109 @@ siphash24(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_uint64(env, hash));
 }
 
+/*
+ * One frame of a tcp_merge/1 batch: a binary, or {sum, Sum, Binary} with Sum its network sum.
+ * *binary is the frame's binary term.
+ */
+static int
+get_merge_frame(ErlNifEnv *env, ERL_NIF_TERM term, erx_tcp_merge_in_t *frame, ERL_NIF_TERM *binary)
+{
+	const ERL_NIF_TERM *fields;
+	ErlNifBinary bin;
+	unsigned int sum;
+	int arity;
+
+	*frame = (erx_tcp_merge_in_t){ .has_sum = false };
+	*binary = term;
+	if (enif_get_tuple(env, term, &arity, &fields)) {
+		if (arity != 3 || !enif_is_identical(fields[0], enif_make_atom(env, "sum")) ||
+		    !enif_get_uint(env, fields[1], &sum) || sum > 0xffffu)
+			return (0);
+		frame->has_sum = true;
+		frame->sum = (uint16_t)sum;
+		*binary = fields[2];
+	}
+	if (!enif_inspect_binary(env, *binary, &bin))
+		return (0);
+	frame->data = bin.data;
+	frame->length = bin.size;
+	return (1);
+}
+
+/*
+ * tcp_merge(Frames): the units of erx_tcp_merge over one batch, in order of their first frames
+ * (erx_tcp_merge.h). A frame on its own is {sum, Sum, Frame}, the very term it came as when it
+ * came with its sum; a unit of several is {merged, N, First, Last, Payload}, its first and last
+ * frames so and each member's payload, a sub-binary of its frame, in order, the empty ones left
+ * out. badarg unless Frames is a proper list of frames within the merge's limit.
+ */
+static ERL_NIF_TERM
+tcp_merge(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_tcp_merge_in_t in[ERX_TCP_MERGE_FRAMES_MAX];
+	erx_tcp_merge_out_t out[ERX_TCP_MERGE_FRAMES_MAX];
+	ERL_NIF_TERM given[ERX_TCP_MERGE_FRAMES_MAX], binaries[ERX_TCP_MERGE_FRAMES_MAX];
+	ERL_NIF_TERM summed[ERX_TCP_MERGE_FRAMES_MAX], payloads[ERX_TCP_MERGE_FRAMES_MAX];
+	size_t count, i;
+	ERL_NIF_TERM list, head, sum_atom, merged_atom, unit, units;
+
+	if (argc != 1)
+		return (enif_make_badarg(env));
+	count = 0;
+	for (list = argv[0]; enif_get_list_cell(env, list, &head, &list); count++) {
+		if (count == ERX_TCP_MERGE_FRAMES_MAX ||
+		    !get_merge_frame(env, head, &in[count], &binaries[count]))
+			return (enif_make_badarg(env));
+		given[count] = head;
+	}
+	if (!enif_is_empty_list(env, list) || erx_tcp_merge(in, count, out) != ERX_TCP_MERGE_OK)
+		return (enif_make_badarg(env));
+	charge(env, erx_bytes_reductions(erx_tcp_merge_bytes_read(in, count), 0,
+	    ERX_INET_CSUM_REDS_AT_MAX));
+	/*
+	 * summed[i] is frame i as {sum, Sum, Frame}; payloads[i] is the list of payloads of the unit
+	 * that frame i starts, built from the back so each piece is consed in front of the later
+	 * ones, as the units' list is.
+	 */
+	sum_atom = enif_make_atom(env, "sum");
+	merged_atom = enif_make_atom(env, "merged");
+	for (i = 0; i < count; i++) {
+		summed[i] = in[i].has_sum ? given[i] :
+		    enif_make_tuple3(env, sum_atom, enif_make_uint(env, out[i].sum), binaries[i]);
+		payloads[i] = enif_make_list(env, 0);
+	}
+	for (i = count; i-- > 0;)
+		if (out[i].payload_length > 0)
+			payloads[out[i].unit] = enif_make_list_cell(env, enif_make_sub_binary(env,
+			    binaries[i], out[i].payload, out[i].payload_length), payloads[out[i].unit]);
+	units = enif_make_list(env, 0);
+	for (i = count; i-- > 0;) {
+		if (out[i].members == 0)
+			continue;
+		unit = out[i].members == 1 ? summed[i] : enif_make_tuple5(env, merged_atom,
+		    enif_make_uint(env, out[i].members), summed[i], summed[out[i].last], payloads[i]);
+		units = enif_make_list_cell(env, unit, units);
+	}
+	return (units);
+}
+
+/* tcp_merge_limit(): {ERX_TCP_MERGE_FRAMES_MAX, ERX_TCP_MERGE_BYTES_MAX}, the merge's limit. */
+static ERL_NIF_TERM
+tcp_merge_limit(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+
+	(void)argc;
+	(void)argv;
+	return (enif_make_tuple2(env, enif_make_uint(env, ERX_TCP_MERGE_FRAMES_MAX),
+	    enif_make_uint(env, ERX_TCP_MERGE_BYTES_MAX)));
+}
+
 static ErlNifFunc nif_funcs[] = {
 	{ "inet_csum_nif", 2, inet_csum, 0 },
 	{ "inet_csum_update_nif", 3, inet_csum_update, 0 },
 	{ "siphash24_nif", 2, siphash24, 0 },
+	{ "tcp_merge_nif", 1, tcp_merge, 0 },
+	{ "tcp_merge_limit_nif", 0, tcp_merge_limit, 0 },
 };
 
 /*

@@ -12,9 +12,13 @@ receive and transmit credits, the transmit backlog and the link state.
   monitors it and answers its link information and its transmit credit, made at start
   with the transport's `tx_limit`. While no interface is attached, received frames are
   dropped and counted as `detached`.
-* **Receiving.** Each batch the transport delivers goes to the interface as one message
-  `{frames, Driver, Frames}` against the receive credit, one unit per frame; a refused
-  batch is dropped whole and counted as `no_room`.
+* **Receiving.** Each batch the transport delivers is cut into batches within the merge's
+  limit, `erx_bytes:tcp_merge_limit/0` (docs/design-network-fastpath.md, "The merge, before
+  classification"), so the interface's merge never refuses one: a batch ends at its last
+  allowed frame or at the frame that brings it to the limit's bytes, and a frame longer than
+  those bytes, which no medium's MTU allows, is dropped and counted as `too_long`. Each batch
+  goes to the interface as one message `{frames, Driver, Frames}` against the receive credit,
+  one unit per frame; a refused batch is dropped whole and counted as `no_room`.
 * **Link changes.** The driver keeps the transport's latest link state and the last one it
   told the interface; while they differ it hands `{link, Driver, State}`, one unit. A
   refused notice is tried again after each later message and at a hint 10 ms later, so a
@@ -105,6 +109,7 @@ room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`
                 latest :: up | down,     % the transport's link state
                 told :: up | down,       % the last state the interface was told
                 armed = infinity :: erx_net_clock:armed(),
+                merge_limit :: {pos_integer(), pos_integer()},  % erx_bytes:tcp_merge_limit/0
                 counters = #{} :: #{atom() => pos_integer()}}).
 
 %% --- API -------------------------------------------------------------------------
@@ -153,7 +158,8 @@ init({Name, Transport, Config}) ->
         {ok, #{state := Link, tx_limit := Limit} = Info, T} ->
             ok = erx_net_tables:register_driver(Name, self()),
             {ok, #state{transport = Transport, t = T, info = Info, started = Started,
-                        tx = erx_net_credit:new(Limit), latest = Link, told = Link}};
+                        tx = erx_net_credit:new(Limit), latest = Link, told = Link,
+                        merge_limit = erx_bytes:tcp_merge_limit()}};
         ignore ->
             ignore;
         {error, Reason} ->
@@ -245,11 +251,10 @@ event({frames, []}, S) ->
     S;
 event({frames, Frames}, #state{iface = none} = S) ->
     count(detached, length(Frames), S);
-event({frames, Frames}, #state{iface = {Pid, _, Rx}} = S) ->
-    case erx_net_credit:hand(Pid, Rx, length(Frames), {frames, self(), Frames}) of
-        ok -> S;
-        full -> count(no_room, length(Frames), S)
-    end;
+event({frames, Frames}, #state{iface = {Pid, _, Rx}, merge_limit = Limit} = S0) ->
+    {Batches, TooLong} = batches(Frames, Limit),
+    S = case TooLong of 0 -> S0; _ -> count(too_long, TooLong, S0) end,
+    lists:foldl(fun(Batch, S1) -> hand_batch(Pid, Rx, Batch, S1) end, S, Batches);
 event({link, _}, #state{ending = {shutdown, _}} = S) ->
     S;
 event({link, State}, S) when State =:= up; State =:= down ->
@@ -303,6 +308,38 @@ tell_link(#state{iface = {Pid, _, Rx}, latest = Latest, told = Told} = S) when L
     end;
 tell_link(S) ->
     S.
+
+hand_batch(Pid, Rx, Batch, S) ->
+    case erx_net_credit:hand(Pid, Rx, length(Batch), {frames, self(), Batch}) of
+        ok -> S;
+        full -> count(no_room, length(Batch), S)
+    end.
+
+%% Frames cut into batches within {MaxFrames, MaxBytes}, in order, and how many frames of more
+%% than MaxBytes bytes were left out. A batch ends at its MaxFrames-th frame or at the frame that
+%% brings its bytes to MaxBytes, so the frames before its last hold fewer.
+batches(Frames, Limit) ->
+    cut(Frames, Limit, [], 0, 0, [], 0).
+
+cut([], _Limit, Batch, _N, _Bytes, Batches, Long) ->
+    {lists:reverse(closed(Batch, Batches)), Long};
+cut([Frame | Rest], {MaxFrames, MaxBytes} = Limit, Batch, N, Bytes, Batches, Long) ->
+    Size = frame_size(Frame),
+    if
+        Size > MaxBytes ->
+            cut(Rest, Limit, Batch, N, Bytes, Batches, Long + 1);
+        N + 1 =:= MaxFrames; Bytes + Size >= MaxBytes ->
+            cut(Rest, Limit, [], 0, 0, closed([Frame | Batch], Batches), Long);
+        true ->
+            cut(Rest, Limit, [Frame | Batch], N + 1, Bytes + Size, Batches, Long)
+    end.
+
+closed([], Batches) -> Batches;
+closed(Batch, Batches) -> [lists:reverse(Batch) | Batches].
+
+frame_size({sum, _Sum, Bytes}) -> byte_size(Bytes);
+frame_size({_Zone, Bytes}) -> byte_size(Bytes);
+frame_size(Bytes) -> byte_size(Bytes).
 
 count(Reason, N, #state{counters = Counters} = S) ->
     S#state{counters = maps:update_with(Reason, fun(C) -> C + N end, N, Counters)}.

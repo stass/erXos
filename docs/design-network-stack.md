@@ -2655,7 +2655,8 @@ the per-byte primitives: the Internet checksum and SipHash-2-4 cores,
 the NIF library's functions and table, `erx_bytes_nif.c`. The cores and the
 walk are the C that both builds share, and each has one copy. erXos's ERTS
 compiles them with its own `erx_bytes` BIFs, `erx_bytes_bif.c`, so there
-`inet_csum/2`, `inet_csum_update/3` and `siphash24/2` are BIFs; outside
+`inet_csum/2`, `inet_csum_update/3`, `siphash24/2`, `tcp_merge/1` and
+`tcp_merge_limit/0` are BIFs; outside
 erXos, `c_src/Makefile` (POSIX make, which BSD and GNU make both read)
 builds them with `erx_bytes_nif.c`, where the same functions are NIFs, into
 `priv/erx_bytes_nif.so` against the headers of the host's own OTP. Each
@@ -2748,7 +2749,9 @@ medium gave: virtio's `complete/3` calls, the pipe's waiting datagrams or
 a test's injected frames, a tap or netmap `recv/1`. The driver cuts it
 into batches within the merge's limit, `erx_bytes:tcp_merge_limit/0`: a
 batch ends at its 256th frame, or at the frame that brings it to 64 KiB
-([design-network-fastpath.md](design-network-fastpath.md#the-merge-before-classification)).
+([design-network-fastpath.md](design-network-fastpath.md#the-merge-before-classification)),
+and a frame of more than 64 KiB, which no medium's MTU allows, is dropped
+and counted as `too_long`.
 It hands each batch to the interface as `{frames, self(), Batch}`
 against the receive credit, one unit per frame, and drops a refused batch
 whole, counted as `no_room`. Since every transport's frames pass this one

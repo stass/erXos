@@ -78,6 +78,7 @@ nothing(Pattern) ->
 
 driver_test_() ->
     with_tables([fun refused_batch_is_dropped_whole/0,
+                 fun batches_are_cut_to_the_merge_limit/0,
                  fun flap_while_full_is_not_told/0,
                  fun silent_link_is_told_once_room_returns/0,
                  fun backlog_never_exceeds_the_transmit_credit/0,
@@ -100,6 +101,34 @@ refused_batch_is_dropped_whole() ->
     ?assertEqual(nothing, nothing(frames)),
     ?assertEqual(#{no_room => 2}, erx_net_driver:counters(Driver)),
     ?assertEqual(1, erx_net_credit:free(Rx)).
+
+%% One event of a thousand minimum-size frames, then one of 300 jumbo frames with their sums
+%% and one too long for any MTU: every batch the interface takes is within the merge's limit,
+%% so the merge refuses none, and every frame but the long one reaches it once, in order.
+batches_are_cut_to_the_merge_limit() ->
+    Driver = stub(0, 4),
+    {_Rx, _} = attached(Driver, 2000),
+    {MaxFrames, MaxBytes} = erx_bytes:tcp_merge_limit(),
+    Small = [<<N:32, 0:(56 * 8)>> || N <- lists:seq(1, 1000)],
+    Jumbo = [{sum, 0, <<N:32, 0:(9010 * 8)>>} || N <- lists:seq(1, 300)],
+    Driver ! {stub, [{frames, Small}]},
+    Driver ! {stub, [{frames, Jumbo ++ [binary:copy(<<0>>, MaxBytes + 1)]}]},
+    settle(Driver),
+    Batches = taken_batches([]),
+    Size = fun({sum, _, Bytes}) -> byte_size(Bytes); (Bytes) -> byte_size(Bytes) end,
+    [begin
+         ?assert(length(Batch) =< MaxFrames),
+         ?assert(lists:sum([Size(F) || F <- lists:droplast(Batch)]) < MaxBytes),
+         ?assertMatch([_ | _], erx_bytes:tcp_merge(Batch))
+     end || Batch <- Batches],
+    ?assertEqual(Small ++ Jumbo, lists:append(Batches)),
+    ?assert(length(Batches) > 2),
+    ?assertEqual(#{too_long => 1}, erx_net_driver:counters(Driver)).
+
+taken_batches(Taken) ->
+    receive {frames, _Driver, Batch} -> taken_batches([Batch | Taken])
+    after 0 -> lists:reverse(Taken)
+    end.
 
 flap_while_full_is_not_told() ->
     Driver = stub(0, 4),

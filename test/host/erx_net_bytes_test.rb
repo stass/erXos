@@ -38,7 +38,8 @@ class ErxNetBytesTest < Minitest::Test
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-fno-omit-frame-pointer',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
-  MODEL = File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl')
+  MODELS = %w[test/erlang/host_bytes/erx_bytes.erl test/erlang/host_bytes/erx_tcp_merge_model.erl]
+           .map { |path| File.join(ROOT, path) }.freeze
   PORTABLE = File.join(ROOT, 'erlang/apps/erx_net/portable/erx_bytes.erl')
   CASES = %w[test/erlang/erx_bytes_cases.erl test/erlang/erx_bytes_tests.erl
              test/fixtures/erx_net_bytes_probe.erl].map { |path| File.join(ROOT, path) }.freeze
@@ -56,6 +57,19 @@ class ErxNetBytesTest < Minitest::Test
     'siphash24: the last byte of each piece dropped' =>
       ['erx_bytes_nif.c', 'erx_siphash24_update(context, data, length);',
        'erx_siphash24_update(context, data, length - (length > 0));'],
+    'tcp_merge: the first frame given as the last' =>
+      ['erx_bytes_nif.c', 'summed[i], summed[out[i].last], payloads[i]', 'summed[i], summed[i], payloads[i]'],
+    'tcp_merge: a merge across differing type of service' =>
+      ['erx_tcp_merge.c', 'return (ip_a[1] == ip_b[1]);', 'return (true);'],
+    'tcp_merge: a first frame with a bad TCP checksum accepted' =>
+      ['erx_tcp_merge.c', "\tif (sum_add(tcp_sum, pseudo) != 0xffffu)\n\t\treturn;\n\tparse_tcp(seg, total - IP_HDR);",
+       "\tif (sum_add(tcp_sum, pseudo) != 0xffffu && false)\n\t\treturn;\n\tparse_tcp(seg, total - IP_HDR);"],
+    'tcp_merge: a pure ACK that does not advance merged' =>
+      ['erx_tcp_merge.c', 'if (seg->payload_length == 0 && seg->ack == u->ack)',
+       'if (seg->payload_length == 0 && seg->ack == u->ack && false)'],
+    'tcp_merge: data joining a pure ACK that does not advance' =>
+      ['erx_tcp_merge.c', 'if (u->first.payload_length == 0 && seg->ack == u->first.ack)',
+       'if (u->first.payload_length == 0 && seg->ack == u->first.ack && false)'],
     'walk: one cell over the limit taken' =>
       ['erx_iodata.c', 'if (++walk->cells > ERX_IODATA_CELLS_MAX)', 'if (++walk->cells > ERX_IODATA_CELLS_MAX + 1)'],
     'walk: an integer tail taken as a byte' =>
@@ -128,6 +142,18 @@ class ErxNetBytesTest < Minitest::Test
                    'a binary of exactly the room left refused']
   )
 
+  # The merge of received TCP segments (c_src/erx_tcp_merge.c), which has no harness of its own:
+  # the EUnit cases and the probe's random batches judge it against the model through the
+  # portable library (NIF_FAULTS), and its fuzz target's oracle judges every unit.
+  MERGE = Core.new(
+    kind: 'tcp_merge', source: 'erx_tcp_merge.c', harness: nil, done: nil,
+    mutants: { 'a merge across differing ports' => ['memcmp(a->frame + a->tcp, b->frame + b->tcp, 4) == 0', '1'],
+               'a unit past its length' => ['u->bytes + seg->payload_length < ERX_TCP_MERGE_UNIT_MAX',
+                                            'u->bytes + seg->payload_length < 2 * ERX_TCP_MERGE_UNIT_MAX'],
+               'ports read past a frame' => ['room < header + 4 ||', 'room < header ||'] },
+    fuzz_catches: ['a merge across differing ports', 'a unit past its length', 'ports read past a frame']
+  )
+
   def test_each_harness_passes
     CORES.each do |core|
       Dir.mktmpdir("erx-#{core.kind}-") do |directory|
@@ -151,7 +177,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def test_each_fuzz_target_declares_its_core_and_its_seeds_pass
-    [*CORES, WALK].each do |core|
+    [*CORES, WALK, MERGE].each do |core|
       Dir.mktmpdir("erx-#{core.kind}-fuzz-") do |directory|
         output, status = run_fuzz(directory, core, File.join(C_SRC, core.source))
         assert status.success?, output
@@ -160,7 +186,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def test_each_fuzz_target_catches_its_seeded_faults
-    [*CORES, WALK].each do |core|
+    [*CORES, WALK, MERGE].each do |core|
       core.fuzz_catches.each do |name|
         original, replacement = core.mutants.fetch(name)
         Dir.mktmpdir("erx-#{core.kind}-fuzz-mutant-") do |directory|
@@ -186,7 +212,7 @@ class ErxNetBytesTest < Minitest::Test
 
   def test_the_erlang_models_pass_their_eunit_cases
     Dir.mktmpdir('erx-net-bytes-eunit-') do |directory|
-      compile_erlang(directory, MODEL)
+      compile_erlang(directory, *MODELS)
       output, status = run_erlang(directory, EUNIT)
       assert status.success?, output
       assert_match(/All \d+ tests passed/, output)
@@ -349,7 +375,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def erlang_answers(directory, cases)
-    compile_erlang(directory, MODEL)
+    compile_erlang(directory, *MODELS)
     answer_cases(directory, cases)
   end
 
@@ -359,9 +385,9 @@ class ErxNetBytesTest < Minitest::Test
     output.lines(chomp: true)
   end
 
-  # The cases' modules into directory with implementation, the model or the portable module.
-  def compile_erlang(directory, implementation)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', directory, implementation, *CASES,
+  # The cases' modules into directory with implementations, the models or the portable module.
+  def compile_erlang(directory, *implementations)
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', directory, *implementations, *CASES,
                                      stdin_data: '')
     assert status.success?, output
   end
@@ -401,7 +427,7 @@ class ErxNetBytesTest < Minitest::Test
     target = Erx::PackFuzz.targets.find { |candidate| candidate.kind == core.kind }
     refute_nil target, "#{core.kind} fuzz target is not declared"
     core_path = File.join(C_SRC, core.source)
-    assert_equal [core_path.delete_prefix("#{ROOT}/")], target.sources
+    assert_equal core_path.delete_prefix("#{ROOT}/"), target.sources.first
     corpus = File.join(directory, 'corpus')
     FileUtils.mkdir_p(corpus)
     target.seeds.each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }

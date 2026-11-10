@@ -16,7 +16,7 @@ and a payload are summed or hashed without being joined first. `entropy/1`, besi
 Erlang's entry to the kernel's generator.
 """.
 
--export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, entropy/1]).
+-export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, tcp_merge/1, tcp_merge_limit/0, entropy/1]).
 -export([sha256/1, sha256_init/0, sha256_update/2, sha256_final/1]).
 -export_type([sha256_state/0]).
 
@@ -77,6 +77,35 @@ SipHash-2-4 (Aumasson and Bernstein, 2012) of `Data`'s bytes under the 16-byte `
 """.
 -spec siphash24(Key :: <<_:128>>, Data :: iodata()) -> 0..16#FFFFFFFFFFFFFFFF.
 siphash24(_Key, _Data) ->
+    erlang:nif_error(undef).
+
+-doc """
+The merge of one batch of received Ethernet frames, FreeBSD's large receive offload rule
+(docs/design-network-fastpath.md, "The merge"): each frame is a binary, or `{sum, Sum, Frame}`
+with `Sum` the network sum its transport's copy computed, the sum of its bytes after the
+Ethernet header. In-order TCP segments of one flow whose checksums are right become one unit
+`{merged, N, First, Last, Payload}`: its `N` frames' first and last, each as `{sum, Sum,
+Frame}`, and each member's payload, a sub-binary of its frame, in order, with the empty
+payloads of the pure ACKs it holds left out. Every other frame is `{sum, Sum, Frame}`, the
+term it came as when it came with its sum. Each unit stands where its first frame stood, so a
+flow's frames keep their order. The merge only groups: it writes no header, and every value
+TCP acts on is decoded again from the frames. A sum is believed as the copy's, as FreeBSD
+believes a device's checksum verdict. Fails with `badarg` unless `Frames` is a proper list
+within `tcp_merge_limit/0`, and no frame holds more than its byte limit.
+""".
+-spec tcp_merge(Frames :: [binary() | {sum, 0..16#FFFF, binary()}]) ->
+          [{sum, 0..16#FFFF, binary()}
+           | {merged, 2..256, {sum, 0..16#FFFF, binary()}, {sum, 0..16#FFFF, binary()}, [binary()]}].
+tcp_merge(_Frames) ->
+    erlang:nif_error(undef).
+
+-doc """
+The merge's limit, `{Frames, Bytes}`: a batch of `tcp_merge/1` holds at most `Frames` frames,
+the frames before its last hold fewer than `Bytes` bytes in all, and no frame more than
+`Bytes`. The answer is the C core's own two constants.
+""".
+-spec tcp_merge_limit() -> {pos_integer(), pos_integer()}.
+tcp_merge_limit() ->
     erlang:nif_error(undef).
 
 -doc """

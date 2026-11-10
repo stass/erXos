@@ -29,9 +29,9 @@ measured, on another implementation than the one erXos runs.
 in `erx_net`.
 """.
 
--export([inet_csum/2, inet_csum_update/3, siphash24/2, entropy/1]).
+-export([inet_csum/2, inet_csum_update/3, siphash24/2, tcp_merge/1, tcp_merge_limit/0, entropy/1]).
 
--nifs([inet_csum_nif/2, inet_csum_update_nif/3, siphash24_nif/2]).
+-nifs([inet_csum_nif/2, inet_csum_update_nif/3, siphash24_nif/2, tcp_merge_nif/1, tcp_merge_limit_nif/0]).
 -on_load(on_load/0).
 
 %% The most bytes one entropy/1 call returns, as on erXos (entropy_bytes_max of its ABI).
@@ -95,6 +95,36 @@ siphash24(Key, Data) ->
     (binary_fits(Key) andalso iodata_fits(Data)) orelse erlang:error(badarg),
     siphash24_nif(Key, Data).
 
+-doc """
+The merge of one batch of received Ethernet frames, FreeBSD's large receive offload rule
+(docs/design-network-fastpath.md, "The merge"): each frame is a binary, or `{sum, Sum, Frame}`
+with `Sum` the network sum its transport's copy computed, the sum of its bytes after the
+Ethernet header. In-order TCP segments of one flow whose checksums are right become one unit
+`{merged, N, First, Last, Payload}`: its `N` frames' first and last, each as `{sum, Sum,
+Frame}`, and each member's payload, a sub-binary of its frame, in order, with the empty
+payloads of the pure ACKs it holds left out. Every other frame is `{sum, Sum, Frame}`, the
+term it came as when it came with its sum. Each unit stands where its first frame stood, so a
+flow's frames keep their order. The merge only groups: it writes no header, and every value
+TCP acts on is decoded again from the frames. A sum is believed as the copy's, as FreeBSD
+believes a device's checksum verdict. Fails with `badarg` unless `Frames` is a proper list
+within `tcp_merge_limit/0`, and no frame holds more than its byte limit.
+""".
+-spec tcp_merge(Frames :: [binary() | {sum, 0..16#FFFF, binary()}]) ->
+          [{sum, 0..16#FFFF, binary()}
+           | {merged, 2..256, {sum, 0..16#FFFF, binary()}, {sum, 0..16#FFFF, binary()}, [binary()]}].
+tcp_merge(Frames) ->
+    frames_fit(Frames, 0, 0) orelse erlang:error(badarg),
+    tcp_merge_nif(Frames).
+
+-doc """
+The merge's limit, `{Frames, Bytes}`: a batch of `tcp_merge/1` holds at most `Frames` frames,
+the frames before its last hold fewer than `Bytes` bytes in all, and no frame more than
+`Bytes`. The answer is the C core's own two constants.
+""".
+-spec tcp_merge_limit() -> {pos_integer(), pos_integer()}.
+tcp_merge_limit() ->
+    tcp_merge_limit_nif().
+
 %% The checks below only bound what a NIF is handed; they never decide a refusal the NIF or
 %% its walk would not also make. Their bounds are twice the walk's limits, so every limit is
 %% the C's alone, and its tests judge it.
@@ -133,6 +163,28 @@ fits_rest([], Bytes, Cells) ->
 fits_rest([Next | Rest], Bytes, Cells) ->
     iodata_fits(Next, Rest, Bytes, Cells).
 
+%% False when Frames has more than twice the merge's frames, or its binaries before the last
+%% hold more than ?FITS_BYTES bytes, or the last more than ?FITS_BYTES; true otherwise. Like
+%% the checks above it only bounds what the NIF is handed and copies nothing: the merge's
+%% limit is the C's alone.
+-define(FITS_FRAMES, 512).
+
+-spec frames_fit(term(), non_neg_integer(), non_neg_integer()) -> boolean().
+frames_fit(_Frames, Count, Bytes) when Count > ?FITS_FRAMES; Bytes > ?FITS_BYTES ->
+    false;
+frames_fit([Frame], _Count, _Bytes) ->
+    binary_fits(frame_binary(Frame));
+frames_fit([Frame | Rest], Count, Bytes) ->
+    frames_fit(Rest, Count + 1, Bytes + frame_size(frame_binary(Frame)));
+frames_fit(_Frames, _Count, _Bytes) ->
+    true.
+
+frame_binary({sum, _Sum, Frame}) -> Frame;
+frame_binary(Frame) -> Frame.
+
+frame_size(Frame) when is_binary(Frame) -> byte_size(Frame);
+frame_size(_Frame) -> 0.
+
 %% The NIFs of c_src/erx_bytes_nif.c, which replace these stubs as the module loads.
 inet_csum_nif(_Sum, _Data) ->
     erlang:nif_error(undef).
@@ -141,6 +193,12 @@ inet_csum_update_nif(_Checksum, _Before, _After) ->
     erlang:nif_error(undef).
 
 siphash24_nif(_Key, _Data) ->
+    erlang:nif_error(undef).
+
+tcp_merge_nif(_Frames) ->
+    erlang:nif_error(undef).
+
+tcp_merge_limit_nif() ->
     erlang:nif_error(undef).
 
 -doc """

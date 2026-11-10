@@ -911,6 +911,8 @@ bif erx_bytes:crc32c/2
 bif erx_bytes:inet_csum/2
 bif erx_bytes:inet_csum_update/3
 bif erx_bytes:siphash24/2
+bif erx_bytes:tcp_merge/1
+bif erx_bytes:tcp_merge_limit/0
 bif erx_bytes:sha256_init/0
 bif erx_bytes:sha256_update/2
 bif erx_bytes:sha256_final/1

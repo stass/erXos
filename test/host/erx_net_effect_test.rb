@@ -123,6 +123,10 @@ class ErxNetEffectTest < Minitest::Test
     queued_batches_reach_a_holder_as_one_message: [
       'erx_net_if', ['queued_frames([Frames], S);', '_ = fun queued_frames/2, frames([Frames], S);']
     ],
+    # The driver's cut removed: an event reaches the interface whole, past the merge's limit.
+    batches_are_cut_to_the_merge_limit: [
+      'erx_net_driver', ['    cut(Frames, Limit, [], 0, 0, [], 0).', '    _ = fun cut/7, _ = Limit, {[Frames], 0}.']
+    ],
     # A link start that fails when its driver ends under it: the stack's own start fails.
     crash_at_start_spins_no_supervisor: [
       'erx_net_sup', ['false -> {ok, Sup}', 'false -> stop_link(Sup, Error)']

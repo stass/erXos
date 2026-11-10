@@ -25,6 +25,8 @@ class RuntimeHostedSmokeTest < Minitest::Test
   OUTPUT = Erx::Runtime.output(root: ROOT)
   # A boot to `1>` takes seconds; the budget is the whole dialogue on a loaded host.
   BUDGET_SECONDS = 60
+  # The Erlang shell prompt's node name, (system@erxos), before its count.
+  PROMPT = '(?:\(\S+\))?'
   ESCAPE_SEQUENCE = /\e\[[0-9;?]*[A-Za-z]/n
   GROUP_LINE = /erx: hosted: group: parked (\d+) of (\d+)\n/
   # What an idle sample waits for, and the most an idle runtime may spend, with liberx's
@@ -63,7 +65,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
         deadline = monotonic + BUDGET_SECONDS
         erlang_shell(reader, writer, transcript, deadline)
         writer.write("1+1.\n")
-        read_until(reader, transcript, /^2\n.*^2> /m, deadline)
+        read_until(reader, transcript, /^2\n.*^#{PROMPT}2> /m, deadline)
         writer.write("halt().\n")
         read_to_end(reader, transcript, deadline)
         status = wait_for(pid, deadline, transcript)
@@ -84,7 +86,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
         at_prompt = plain(transcript).scan(RUNS_LINE)
         report_runs('at 1>', at_prompt)
         writer.write("length(lists:seq(1, 4000000)).\n")
-        read_until(reader, transcript, /^4000000\n.*^2> /m, deadline)
+        read_until(reader, transcript, /^4000000\n.*^#{PROMPT}2> /m, deadline)
         since_prompt = plain(transcript).scan(RUNS_LINE).drop(at_prompt.size)
         report_runs('after a list of 4000000', since_prompt)
         assert_operator since_prompt.map { |line| line.last.to_i }.max, :>, at_prompt.last.last.to_i
@@ -106,7 +108,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
         deadline = monotonic + BUDGET_SECONDS
         erlang_shell(reader, writer, transcript, deadline)
         writer.write("{erlang:system_info(schedulers), erlang:system_info(dirty_cpu_schedulers)}.\n")
-        read_until(reader, transcript, /^\{\d+,\d+\}\n.*^2> /m, deadline)
+        read_until(reader, transcript, /^\{\d+,\d+\}\n.*^#{PROMPT}2> /m, deadline)
         schedulers, dirty = plain(transcript)[/^\{(\d+),(\d+)\}\n/, 0].scan(/\d+/).map(&:to_i)
         assert_idle(reader, transcript, pid, schedulers: schedulers, dirty: dirty, moment: 'at the first prompt')
         WAKE_PATTERNS.each do |expression, answer|
@@ -132,7 +134,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
         deadline = monotonic + BUDGET_SECONDS
         erlang_shell(reader, writer, transcript, deadline)
         writer.write("{erlang:system_info(schedulers), erlang:system_info(dirty_cpu_schedulers)}.\n")
-        read_until(reader, transcript, /^\{\d+,\d+\}\n.*^2> /m, deadline)
+        read_until(reader, transcript, /^\{\d+,\d+\}\n.*^#{PROMPT}2> /m, deadline)
         schedulers, dirty = plain(transcript)[/^\{(\d+),(\d+)\}\n/, 0].scan(/\d+/).map(&:to_i)
         writer.write("spawn(fun() -> (fun Spin() -> Spin() end)() end), spinning.\n")
         read_until(reader, transcript, /\bspinning\n/, deadline)
@@ -379,7 +381,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
         deadline = monotonic + BUDGET_SECONDS
         erlang_shell(reader, writer, transcript, deadline)
         writer.write("try erx_bytes:entropy(16) catch error:Reason -> Reason end.\n")
-        read_until(reader, transcript, /^\{entropy,notsup\}\n.*^2> /m, deadline)
+        read_until(reader, transcript, /^\{entropy,notsup\}\n.*^#{PROMPT}2> /m, deadline)
         writer.write("halt().\n")
         read_to_end(reader, transcript, deadline)
         status = wait_for(pid, deadline, transcript)
@@ -535,8 +537,8 @@ class RuntimeHostedSmokeTest < Minitest::Test
         erlang_shell(reader, writer, transcript, deadline)
         answers = expected.each_with_index.map do |(expression, _), index|
           writer.write("#{expression}\n")
-          read_until(reader, transcript, /^#{index + 2}> /, deadline)
-          plain(transcript)[/^#{index + 1}> .*\z/m]
+          read_until(reader, transcript, /^#{PROMPT}#{index + 2}> /, deadline)
+          plain(transcript)[/^#{PROMPT}#{index + 1}> .*\z/m]
         end
         writer.write("halt().\n")
         read_to_end(reader, transcript, deadline)
@@ -603,8 +605,8 @@ class RuntimeHostedSmokeTest < Minitest::Test
         erlang_shell(reader, writer, transcript, deadline)
         answers = expected.each_with_index.map do |(expression, _), index|
           writer.write("#{expression}\n")
-          read_until(reader, transcript, /^#{index + 2}> /, deadline)
-          plain(transcript)[/^#{index + 1}> .*\z/m]
+          read_until(reader, transcript, /^#{PROMPT}#{index + 2}> /, deadline)
+          plain(transcript)[/^#{PROMPT}#{index + 1}> .*\z/m]
         end
         writer.write("halt().\n")
         read_to_end(reader, transcript, deadline)
@@ -646,7 +648,8 @@ def stand_in_net_bytes_answers(directory)
   stand_in = File.join(directory, 'stand-in')
   FileUtils.mkdir_p(stand_in)
   log, status = Open3.capture2e(File.join(ROOT, 'build/oracle/emu/install/bin/erlc'), '+no_docs', '-o', stand_in,
-                                File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl'), stdin_data: '')
+                                File.join(ROOT, 'test/erlang/host_bytes/erx_bytes.erl'),
+                                File.join(ROOT, 'test/erlang/host_bytes/erx_tcp_merge_model.erl'), stdin_data: '')
   assert status.success?, log
   output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
                                    File.join(ROOT, 'build/oracle/emu/install/bin/erl'), '-noshell',
@@ -663,7 +666,7 @@ end
   def erlang_shell(reader, writer, transcript, deadline)
     read_until(reader, transcript, /^rc: the command shell; erl starts the Erlang shell\r?\n(?:[^\n]*\n)*% /, deadline)
     writer.write("erl\n")
-    read_until(reader, transcript, /^1> /, deadline)
+    read_until(reader, transcript, /^#{PROMPT}1> /, deadline)
   end
 
   def spawn_shell(home, extra_environment = {})

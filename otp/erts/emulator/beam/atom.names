@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, entropy of erx_bytes's, erx_untraced, and the export table's (erx_exports.c), and domain_down (edit 56 of docs/design-runtime.md).
+# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, entropy, merged and sum of erx_bytes's, erx_untraced, and the export table's (erx_exports.c), and domain_down (edit 56 of docs/design-runtime.md).
 #
 
 #
@@ -460,6 +460,7 @@ atom message_queue_data
 atom message_queue_len
 atom messages
 atom merge_trap
+atom merged
 atom meta
 atom meta_match_spec
 atom micro_seconds
@@ -727,6 +728,7 @@ atom stream
 atom strict_monotonic
 atom strict_monotonic_timestamp
 atom success_only
+atom sum
 atom sunrm
 atom suspend
 atom suspended
