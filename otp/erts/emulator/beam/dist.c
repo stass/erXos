@@ -23,7 +23,8 @@
  * naming that domain, so the pids it carries are handed out to it (edit 8). A
  * connection that ends with its peer domain's {domain_down, D, Info} fires what it held
  * with that reason (edit 56). A lane port's entry takes its creation from the port,
- * and the port the connection's serial from the entry.
+ * and the port the connection's serial from the entry. erts_dist_other_run tells a
+ * pid of an ended domain of a connected peer's name (edit 66).
  *
  * %CopyrightEnd%
  */
@@ -1663,6 +1664,30 @@ erts_dist_peer_is_domain(DistEntry *dep)
 
     return (peer != NULL && own != NULL && peer_len == own_len
             && sys_memcmp(peer, own, own_len) == 0);
+}
+
+/*
+ * erXos: edit 66 of docs/design-runtime.md. Whether pid, a pid of dep's node, belongs to
+ * another run of that node than the one dep is connected to, on a connection to another
+ * domain that is up: every domain of a name has a creation of its own
+ * (docs/design-domains.md, "Domain ids, pids and references"), so the pid names no process
+ * the connection reaches. An older creation is an ended domain of the name; a newer one is
+ * a later domain this entry has not been replaced by yet, or a forgery. link/1,2 and
+ * monitor/2,3 answer a link or monitor of such a pid themselves, as stock answers one of a
+ * pid of an earlier run of this node, and send nothing: the peer could answer only in that
+ * pid's name, which the funnel's sender rule refuses. The caller holds dep's lock; the
+ * entry's state and creation alone decide, and the creation is the lane port's, so no frame
+ * another domain sends changes the answer.
+ */
+int
+erts_dist_other_run(DistEntry *dep, Eterm pid)
+{
+    ERTS_LC_ASSERT(erts_lc_is_de_rlocked(dep) || erts_lc_is_de_rwlocked(dep));
+    ASSERT(is_external_pid(pid) && external_pid_dist_entry(pid) == dep);
+
+    return (dep->state == ERTS_DE_STATE_CONNECTED
+            && erts_dist_peer_is_domain(dep)
+            && external_pid_creation(pid) != dep->creation);
 }
 
 /*

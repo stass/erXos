@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width. List_to_ref takes four words for this node, and unalias/1 ends the alias in the alias registry (edit 17 of docs/design-runtime.md).
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; link/1,2 and monitor/2,3 answer a link or monitor of a pid of another run of a connected domain's node themselves (edit 66); list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width. List_to_ref takes four words for this node, and unalias/1 ends the alias in the alias registry (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -270,9 +270,20 @@ static BIF_RETTYPE link_opt(Process *c_p, Eterm other, Eterm opts)
         ErtsLink *lnk, *rlnk;
         int code;
         ErtsDSigSendContext ctx;
+        int other_run = 0;
 
         dep = external_pid_dist_entry(other);
-        if (dep == erts_this_dist_entry && !(c_p->flags & F_TRAP_EXIT))
+        if (dep != erts_this_dist_entry) {
+            /*
+             * erXos: edit 66. A caller that does not trap exits gets the error a pid of an
+             * earlier run of this node gets; the link itself is decided again below, under
+             * the lock that sends it.
+             */
+            erts_de_rlock(dep);
+            other_run = erts_dist_other_run(dep, other);
+            erts_de_runlock(dep);
+        }
+        if ((dep == erts_this_dist_entry || other_run) && !(c_p->flags & F_TRAP_EXIT))
             goto res_no_proc;
 
         lnk = erts_link_external_tree_lookup_create(&ERTS_P_LINKS(c_p),
@@ -344,6 +355,31 @@ static BIF_RETTYPE link_opt(Process *c_p, Eterm other, Eterm opts)
 
         case ERTS_DSIG_PREP_PENDING:
         case ERTS_DSIG_PREP_CONNECTED: {
+            if (erts_dist_other_run(dep, other)) {
+                /*
+                 * erXos: edit 66. The link is answered here, never sent, with the noproc
+                 * exit that the dep == erts_this_dist_entry branch above sends for a pid of
+                 * an earlier run of this node. It is left with a dead dist, as the
+                 * NOT_CONNECTED case leaves one, so unlink/1 sends nothing for it; one still
+                 * being unlinked from an earlier connection is replaced, as below for a
+                 * connection that changed. As in erts_proc_sig_send_link_exit_noconnection,
+                 * the exit holds no reference to the link, so the dist half, which no
+                 * connection holds, is released once the exit is sent; the half in the
+                 * process's tree goes when the exit arrives.
+                 */
+                erts_de_runlock(dep);
+                if (!created) {
+                    rlnk = lnk;
+                    relnk = erts_link_dist_delete(&elnk->ld.dist) ? elnk : NULL;
+                    elnk = pelnk;
+                    replace = !0;
+                }
+                erts_link_set_dead_dist(&elnk->ld.dist, dep->sysname);
+                erts_proc_sig_send_dist_link_exit(dep, other, c_p->common.id, NULL, NULL,
+                                                  am_noproc, NIL);
+                erts_link_release(&elnk->ld.dist);
+                break;
+            }
             /*
              * We have a connection (or a pending connection).
              * Setup link and enqueue link signal.
@@ -434,6 +470,29 @@ BIF_RETTYPE link_1(BIF_ALIST_1)
 BIF_RETTYPE link_2(BIF_ALIST_2)
 {
     return link_opt(BIF_P, BIF_ARG_1, BIF_ARG_2);
+}
+
+/*
+ * erXos: for a monitor toward dep, a peer node, the reason of the DOWN that monitor/2,3
+ * delivers at once instead of sending a frame, or THE_NON_VALUE when it sends the monitor
+ * as stock does. dep's lock is held, and prep is erts_dsig_prepare's result, pending or
+ * connected; id is the node's name for a monitor by name (byname), else the pid. Only a
+ * peer that is another domain gets either answer:
+ *  - Another domain's registered names are never reached (edit 27 of
+ *    docs/design-runtime.md): on a connection that is up the answer is noproc, as for a
+ *    name not registered there, and on one still pending noconnection, what stock
+ *    answers when the attempt fails, as a domain's own attempts do (erx_dist:setup/5).
+ *  - A pid of another run of the peer's node than the connected one gets noproc, as a
+ *    pid of an earlier run of this node does (edit 66, erts_dist_other_run).
+ */
+static Eterm
+erx_monitor_answer(DistEntry *dep, int prep, int byname, Eterm id)
+{
+    if (!byname)
+        return (erts_dist_other_run(dep, id) ? am_noproc : THE_NON_VALUE);
+    if (!erts_dist_peer_is_domain(dep))
+        return THE_NON_VALUE;
+    return (prep == ERTS_DSIG_PREP_CONNECTED ? am_noproc : am_noconnection);
 }
 
 static Eterm
@@ -567,8 +626,9 @@ demonitor(Process *c_p, Eterm ref, Eterm *multip)
 
            /*
             * erXos: a monitor this connection never carried has nothing to undo at the
-            * peer; one of another domain's registered names is never carried (monitor/2,3
-            * answers it with a dead dist), and its DEMONITOR_P would end the connection.
+            * peer; one of another domain's registered names, or of a pid of another run of
+            * its node, is never carried (monitor/2,3 answers it with a dead dist, edits 27
+            * and 66), and its DEMONITOR_P would end the connection.
             */
            if (!deleted)
                break;
@@ -862,24 +922,18 @@ static BIF_RETTYPE monitor(Process *c_p, Eterm type, Eterm target,
             case ERTS_DSIG_PREP_PENDING:
             case ERTS_DSIG_PREP_CONNECTED: {
                 int inserted;
+                const Eterm answer = erx_monitor_answer(dep, code, byname, id);
 
-                if (byname && erts_dist_peer_is_domain(dep)) {
+                if (is_value(answer)) {
                     /*
-                     * erXos: another domain's registered names are never reached (edit 27
-                     * of docs/design-runtime.md), so the monitor is answered here and never
-                     * sent. On a connection that is up the answer is noproc, as for a name
-                     * not registered there. On one still pending it is noconnection, what
-                     * stock answers when the attempt fails, as a domain's own attempts do
-                     * (erx_dist:setup/5). The monitor's dist is dead, so demonitor/1,2
-                     * sends nothing for it.
+                     * erXos: a monitor a domain peer could not answer is answered here and
+                     * never sent (erx_monitor_answer). The monitor's dist is dead, so
+                     * demonitor/1,2 sends nothing for it.
                      */
-                    const Eterm reason = (code == ERTS_DSIG_PREP_CONNECTED
-                                          ? am_noproc : am_noconnection);
-
                     erts_de_runlock(dep);
                     erts_monitor_set_dead_dist(&mdp->u.target, dep->sysname);
                     erts_proc_sig_send_monitor_down(NULL, id, &mdp->u.target,
-                                                    reason);
+                                                    answer);
                     code = ERTS_DSIG_SEND_OK;
                     break;
                 }

@@ -120,12 +120,14 @@ class SystemDomainTest < Minitest::Test
       .each { |answer| assert_raises(Erx::Error) { ignored.fetch(:verify).call("#{answer}\r\n") } }
     # The later domain of peer: one that reused the ended domain's id, a nodeup before
     # the nodedown, or a message to the ended domain's pid that ended the connection (a
-    # target rule that requires the receiver's creation), or a stale pid taken for the
-    # later domain's process of the same number and serial, each fails.
+    # target rule that requires the receiver's creation), a monitor of that pid answered
+    # by the connection's end (a monitor sent to the later peer), or a stale pid taken for
+    # the later domain's process of the same number and serial, each fails.
     refute_match later.fetch(:pattern), "1> #{line}\r\n"
     later.fetch(:verify).call("#{Suite::LATER_DOMAIN_ANSWER}\r\n")
     [Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{6,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
-     Suite::LATER_DOMAIN_ANSWER.sub('nodeup],up}', 'nodeup],down}'), Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{error,name_taken}'),
+     Suite::LATER_DOMAIN_ANSWER.sub('true},up}', 'true},down}'), Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{error,name_taken}'),
+     Suite::LATER_DOMAIN_ANSWER.sub('{noproc,noproc,noproc,noproc,', '{noconnection,noproc,noconnection,noconnection,'),
      Suite::LATER_DOMAIN_ANSWER.sub('sd_new', 'sd_old')]
       .each { |answer| assert_raises(Erx::Error) { later.fetch(:verify).call("#{answer}\r\n") } }
     refute_match ends.fetch(:pattern), "1> #{line}\r\n"

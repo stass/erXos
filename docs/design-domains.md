@@ -442,10 +442,13 @@ ERTS uses it:
   name and creation, and hashes them by number alone in `phash/2` and
   `phash2/1`, so order and hashes agree in every domain. A pid of an
   ended domain carries that domain's id, which no later domain of the
-  same name has, so it names no process of the later one: a signal to it
-  is answered as for a process that does not exist ([The
-  funnel](#the-funnel), step 4), as stock ERTS treats a pid of an earlier
-  run of a node.
+  same name has, so it names no process of the later one: a message or an
+  exit signal to it reaches the later domain's funnel, which finds its
+  target dead ([The funnel](#the-funnel), step 4), and a link or monitor
+  of it is never sent: the asking runtime answers it itself, with the
+  exit or `DOWN` of reason `noproc`, as stock ERTS answers one of a pid of
+  an earlier run of its own node. The later domain could answer it only
+  in the dead pid's name, which the sender rule refuses (D6).
 * **References.** A reference carries its creator's node name and
   creation in the same way, so references of different domains never
   collide, and a runtime recognises its own. Every reference has four
@@ -1268,7 +1271,12 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    carries frames for its consumer and no one else; one whose creation is
    not the receiving domain's id names a process of an ended domain of
    the same name, which no longer exists, and goes to step 7 as a frame
-   whose target is dead. **The sender rule:** every pid of the sender's
+   whose target is dead. A link or monitor of such a pid is never sent,
+   since the asking runtime answers it itself ([Domain ids, pids and
+   references](#domain-ids-pids-and-references), Pids): the answer would
+   name the dead pid as its sender, which fails the sender rule at the
+   asker's funnel, so a runtime that sends one anyway ends its own
+   connection. **The sender rule:** every pid of the sender's
    own in a control term carries the lane's node name and domain id:
    `FromPid`, `FromProc`, `From` of a `SPAWN_REQUEST`,
    the child in a successful `SPAWN_REPLY` and the new leader of
@@ -3447,9 +3455,12 @@ for the same reason.
     the same peer: the later one has a new creation, `nodedown` then
     `nodeup` reach the peer in that order, and a frame from the peer to
     a pid of the ended domain is answered as for a dead process, the
-    connection staying up. Seeded failure: a target rule that requires
-    the receiver's creation, under which that frame ends the
-    connection;
+    connection staying up, and the peer's monitor of that pid gets
+    `DOWN` with `noproc`, its link raises `noproc` and, trapping exits,
+    gets an exit of `noproc`, each from its own runtime. Seeded
+    failures: a target rule that requires the receiver's creation, under
+    which the message ends the connection, and a runtime that sends the
+    monitor, under which the later domain's answer ends it;
   * creating a domain under a name a live domain holds, or one another
     principal bound earlier in the boot, fails with `name_taken`, and a
     principal past its `names` gets `quota` and leaves the system

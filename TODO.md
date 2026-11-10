@@ -3722,21 +3722,20 @@ to the corpus and follow rc
   `connections` quota. Leave headroom in `max_domains` for such records,
   and state how much
   ([design-system.md](docs/design-system.md#risks-and-open-questions)).
-* [High] domains, the funnel's sender rule (`liberx/erx_funnel.c` `sender_rule`,
-  docs/design-domains.md "The funnel", step 4): a link or monitor of a pid of an ended
-  domain, sent once a later domain of its name is connected, ends the connection. The later
-  domain's funnel finds the target dead and has ERTS answer noproc, and ERTS's answer
-  (`PAYLOAD_EXIT`, or `PAYLOAD_MONITOR_P_EXIT` from `erts_dsig_send_m_exit`) names the dead
-  pid as its sender, as stock ERTS does; that pid carries the ended domain's id, so the
-  asker's sender rule finds a sending pid of another creation and refuses the frame as
-  malformed. A client that keeps a monitor on a service domain's process and monitors it
-  again after the service's domain was replaced is enough. Seen in the system_domain
-  suite's later-domain step with a monitor in place of its message. Two fixes: the asking
-  runtime answers a link or monitor of a pid whose creation is not its connected entry's
-  itself, with noproc and no frame, as stock ERTS does for its own node's earlier runs
-  (recommended: no rule changes, and nothing a stock test sees); or the sender rule admits,
-  in those two answers alone, a pid of the lane's node name with an earlier id, which lets a
-  later domain report deaths of its name's ended domains. The user decides.
+* [Medium] domains, edit 66 (`beam/bif.c` `link_opt` and `monitor`,
+  docs/design-runtime.md): the asker answers a link or monitor of a pid of another run of a
+  peer's node only while its entry for the name is connected. One made while the entry is
+  pending, in the short window of an introduction or of a stock auto-connect that an
+  introduction takes over, is queued as stock queues it and sent once the peer is
+  connected; the peer's `noproc` answer names that pid, the asker's sender rule refuses
+  it, and the connection ends. The pid need not be real: any domain that can send the
+  asker a term can forge one with the peer's name and another creation, so a service
+  that monitors pids its clients hand it can be made to lose its connection to a third
+  domain, in that window. A pending entry does not know the peer's id; the complete fix
+  answers the frame where it is written to the lane port, whose id is known, which would
+  also hold edit 66 for every operation by construction. Related: a pid with a creation
+  newer than a connected entry's, a later domain while the asker has not yet taken the
+  ended one's `connection_down`, gets `noproc` where stock would give `noconnection`.
 * [Low] kernel ABI generator, `tools/lib/erx/abi_model.rb`: a private
   layout stays out of every public declaration by three separate
   refusals (embedding as a field, as a tail, and projection), so a new

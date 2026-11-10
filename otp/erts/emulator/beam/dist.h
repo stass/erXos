@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: declares erts_dist_peer_is_domain, and the encode context names the domain a frame is for (edit 8).
+ * Modified by erXos: declares erts_dist_peer_is_domain and erts_dist_other_run, and the encode context names the domain a frame is for (edit 8).
  *
  * %CopyrightEnd%
  */
@@ -441,6 +441,8 @@ extern int erts_dsig_send_monitor(ErtsDSigSendContext *, Eterm, Eterm, Eterm);
 extern int erts_dsig_send_m_exit(ErtsDSigSendContext *, Eterm, Eterm, Eterm, Eterm);
 /* erXos: whether a connection is to another domain, whose registered names it never reaches. */
 extern int erts_dist_peer_is_domain(DistEntry *);
+/* erXos: whether a domain peer's pid is of another run than the connection's (edit 66). */
+extern int erts_dist_other_run(DistEntry *, Eterm);
 extern int erts_dsig_send_spawn_reply(ErtsDSigSendContext *, Eterm, Eterm, Eterm, Eterm, Eterm);
 
 extern int erts_dsig_send(ErtsDSigSendContext *dsdp);
