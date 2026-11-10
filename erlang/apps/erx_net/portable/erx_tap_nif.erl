@@ -90,8 +90,19 @@ its checksum finished: the NIF sums the frame's bytes from `Start` to its end, t
 `Start + Field` included, and writes the complement in place of the field's two bytes, an
 iovec of its own, so no binary is changed or copied. `Start` and `Field` must be even and
 the field must lie inside the frame, else `badarg`.
+
+A run (`erx_net_frame:run()`) of at most 64 payload binaries is cut by `c_src/erx_tcp_cut.c`
+as it is written, into the frames `erx_net_frame:cut/1` gives, each in one `writev` of its
+headers, from a buffer of the NIF's own, and its payload slice, from the run's binaries where
+they lie. `{ok, N}`, N > 0, for the first N frames taken: all of them, the first 64 of a run
+of more, or those before the first the device did not take, which the next call answers for
+itself. A run whose first frame is not taken is answered as a frame is, `{drop, too_long}`
+when its first frame, its longest, is over the MTU. A run the cut refuses, a template
+`erx_net_frame:template/2` does not make, a zero segment size, a field wider than the wire's,
+or more than 65,535 bytes with its IP and TCP headers, is `badarg`; one of more than 64
+binaries is answered `pieces`, with nothing written, for the transport to cut itself.
 """.
--spec send(handle(), iodata() | erx_net_frame:delayed()) ->
-    {ok, 1} | full | {drop, malformed | too_long | refused} | {error, term()}.
+-spec send(handle(), iodata() | erx_net_frame:delayed() | erx_net_frame:run()) ->
+    {ok, pos_integer()} | pieces | full | {drop, malformed | too_long | refused} | {error, term()}.
 send(_Handle, _Frame) ->
     erlang:nif_error(undef).

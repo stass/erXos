@@ -154,6 +154,37 @@ class ErxNetBytesTest < Minitest::Test
     fuzz_catches: ['a merge across differing ports', 'a unit past its length', 'ports read past a frame']
   )
 
+  # The cut of a run into its frames (c_src/erx_tcp_cut.c), which has no harness of its own:
+  # the tap NIF's EUnit cases judge it against erx_net_frame:cut/1 (test/host/erx_tap_test.rb),
+  # and its fuzz target's oracle re-derives every frame from the input.
+  CUT = Core.new(
+    kind: 'tcp_cut', source: 'erx_tcp_cut.c', harness: nil, done: nil,
+    mutants: {
+      'a short last frame one byte short' => ['return (left < plan->run->seg ? left : plan->run->seg);',
+                                              'return (left < plan->run->seg ? left - (left > 0) : plan->run->seg);'],
+      'the timestamps only in the first frame' => ['if (run->has_ts) {', 'if (run->has_ts && i == 0) {'],
+      'the sequence number not advanced per frame' => ['put32(th + 4, run->seq + i * run->seg);',
+                                                       'put32(th + 4, run->seq);'],
+      'the TCP checksum over the header without its options' =>
+        ['sum = sum_add(sum, erx_inet_sum(0, th, plan->tcp_length, 0));',
+         'sum = sum_add(sum, erx_inet_sum(0, th, TCP_HDR, 0));'],
+      'the IPv4 header checksum taken before the length is stored' =>
+        ["\t\tput16(ip + 2, IP_HDR + tcp_length);\n\t\tput16(ip + 10, 0);\n" \
+         "\t\tput16(ip + 10, (uint16_t)~erx_inet_sum(0, ip, IP_HDR, 0));",
+         "\t\tput16(ip + 10, 0);\n\t\tput16(ip + 10, (uint16_t)~erx_inet_sum(0, ip, IP_HDR, 0));\n" \
+         "\t\tput16(ip + 2, IP_HDR + tcp_length);"],
+      'a run one byte over IP_MAXPACKET accepted' => ['if (payload > ERX_TCP_CUT_PACKET_MAX - ip - tcp)',
+                                                      'if (payload > ERX_TCP_CUT_PACKET_MAX - ip - tcp + 1)'],
+      'bytes after the TCP header accepted' => ['if (run->headers_length != ip + tcp)',
+                                                'if (run->headers_length < ip + tcp)']
+    },
+    fuzz_catches: ['a short last frame one byte short', 'the timestamps only in the first frame',
+                   'the sequence number not advanced per frame',
+                   'the TCP checksum over the header without its options',
+                   'the IPv4 header checksum taken before the length is stored',
+                   'a run one byte over IP_MAXPACKET accepted', 'bytes after the TCP header accepted']
+  )
+
   def test_each_harness_passes
     CORES.each do |core|
       Dir.mktmpdir("erx-#{core.kind}-") do |directory|
@@ -177,7 +208,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def test_each_fuzz_target_declares_its_core_and_its_seeds_pass
-    [*CORES, WALK, MERGE].each do |core|
+    [*CORES, WALK, MERGE, CUT].each do |core|
       Dir.mktmpdir("erx-#{core.kind}-fuzz-") do |directory|
         output, status = run_fuzz(directory, core, File.join(C_SRC, core.source))
         assert status.success?, output
@@ -186,7 +217,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def test_each_fuzz_target_catches_its_seeded_faults
-    [*CORES, WALK, MERGE].each do |core|
+    [*CORES, WALK, MERGE, CUT].each do |core|
       core.fuzz_catches.each do |name|
         original, replacement = core.mutants.fetch(name)
         Dir.mktmpdir("erx-#{core.kind}-fuzz-mutant-") do |directory|

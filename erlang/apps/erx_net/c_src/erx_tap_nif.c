@@ -21,8 +21,8 @@
  * a descriptor number the process has reused.
  *
  * Each call does a bounded amount of work on a normal scheduler: recv/1 at
- * most 64 reads or 64 KiB, send/2 one frame of at most the MTU, which its
- * caller has checked before handing it over.  No thread waits: an empty
+ * most 64 reads or 64 KiB, send/2 one frame of at most the MTU, or at most
+ * 64 frames of a run, each one writev(2).  No thread waits: an empty
  * device is armed for reading, and a full one for writing, with
  * enif_select, whose message is the transport's wake.
  *
@@ -36,7 +36,12 @@
  * sum is a sum of whatever bytes the frame holds, never a verdict.  A sent
  * frame whose TCP checksum the stack delayed is finished in send/2's writev(2):
  * its sum is taken over the frame's binaries where they lie, and its checksum
- * field is written from an iovec of its own (erx_tap_finish).
+ * field is written from an iovec of its own (erx_tap_finish).  A run, the
+ * frames of a TCP run over one header template (erx_net_frame.hrl's #run{}),
+ * is cut by erx_tcp_cut.c as send/2 hands it over: each frame's headers are
+ * written to a buffer of the NIF's own with the payload slice summed where it
+ * lies, and one writev(2) hands the kernel the headers and the slice
+ * (docs/design-network-fastpath.md, "The cut, in the copy").
  */
 
 #define _POSIX_C_SOURCE	200809L
@@ -56,6 +61,7 @@
 #include "erl_nif.h"
 
 #include "erx_inet_csum.h"
+#include "erx_tcp_cut.h"
 
 #define ERX_TAP_ETHER_HDR_LEN	14
 #define ERX_TAP_MTU_MIN		68
@@ -67,6 +73,10 @@
 #define ERX_TAP_IOV_MAX		64
 /* The most writes of one frame that EINTR interrupts before send/2 gives up. */
 #define ERX_TAP_WRITE_TRIES	8
+/* One send/2 call writes at most this many frames of a run. */
+#define ERX_TAP_RUN_FRAMES	64
+/* A run term: {run, Link, Template, Seq, Ack, Flags, Win, Ts, Seg, Payload}. */
+#define ERX_TAP_RUN_ARITY	10
 /* The walk of a frame's iodata gives up, and joins it, past these. */
 #define ERX_TAP_WALK_DEPTH	8
 #define ERX_TAP_WALK_CELLS	256
@@ -119,9 +129,9 @@ typedef enum erx_tap_walk {
 static ErlNifResourceType *erx_tap_type;
 
 static ERL_NIF_TERM atom_armed, atom_csum, atom_drop, atom_eof, atom_error,
-    atom_erx_tap, atom_full, atom_malformed, atom_more, atom_ok, atom_partial,
-    atom_readable, atom_refused, atom_sum, atom_too_long, atom_undefined,
-    atom_writable;
+    atom_erx_tap, atom_full, atom_malformed, atom_more, atom_none, atom_ok,
+    atom_partial, atom_pieces, atom_readable, atom_refused, atom_run, atom_sum,
+    atom_too_long, atom_undefined, atom_writable;
 
 /* --- The decision core ------------------------------------------------- */
 
@@ -600,13 +610,192 @@ erx_tap_frame_term(ErlNifEnv *env, ERL_NIF_TERM term, ERL_NIF_TERM *frame,
 	return (true);
 }
 
+/* {ok, N}: N frames taken. */
+static ERL_NIF_TERM
+erx_tap_ok(ErlNifEnv *env, uint32_t n)
+{
+
+	return (enif_make_tuple2(env, atom_ok, enif_make_uint(env, n)));
+}
+
+/*
+ * One frame's writev(2) of len bytes, tried again when interrupted, a few
+ * times at the most; *error is the errno of the last try.
+ */
+static erx_tap_write_kind_t
+erx_tap_write(erx_tap_t *tap, const struct iovec *iov, int niov, size_t len,
+    int *error)
+{
+	erx_tap_write_kind_t kind;
+	ssize_t n;
+	int tries;
+
+	for (tries = 0; tries < ERX_TAP_WRITE_TRIES; tries++) {
+		n = writev(tap->fd, iov, niov);
+		*error = errno;
+		if ((kind = erx_tap_write_kind(n, *error, len)) !=
+		    ERX_TAP_WRITE_AGAIN)
+			return (kind);
+	}
+	*error = EINTR;
+	return (ERX_TAP_WRITE_FAILED);
+}
+
+/*
+ * The answer for a frame the device did not take, as kind says: full arms
+ * the device for writing.
+ */
+static ERL_NIF_TERM
+erx_tap_not_taken(ErlNifEnv *env, erx_tap_t *tap, erx_tap_write_kind_t kind,
+    int error)
+{
+
+	switch (kind) {
+	case ERX_TAP_WRITE_REFUSED:
+		return (erx_tap_drop(env, atom_refused));
+	case ERX_TAP_WRITE_FULL:
+		if (!erx_tap_arm(env, tap, false))
+			return (enif_make_tuple2(env, atom_error,
+			    enif_make_atom(env, "arm")));
+		return (atom_full);
+	case ERX_TAP_WRITE_PARTIAL:
+		return (enif_make_tuple2(env, atom_error, atom_partial));
+	default:
+		return (erx_tap_failed(env, "write", error));
+	}
+}
+
+/*
+ * The fields of a run term, {run, Link, Template, Seq, Ack, Flags, Win, Ts,
+ * Seg, Payload} (erx_net_frame.hrl's #run{}), in parts, into run, with its
+ * payload's binaries in pieces, which has room for ERX_TCP_CUT_PIECES_MAX.
+ * Only the term's shape is read here; every length and field width is
+ * erx_tcp_cut_plan's to check.  False for a field of another type or a
+ * payload of more binaries than pieces holds.
+ */
+static bool
+erx_tap_run_term(ErlNifEnv *env, const ERL_NIF_TERM *parts, erx_tcp_run_t *run,
+    erx_tcp_cut_piece_t *pieces)
+{
+	const ERL_NIF_TERM *ts;
+	ERL_NIF_TERM head, tail;
+	ErlNifBinary link, headers, piece;
+	unsigned seq, ack, flags, win, tsval, tsecr, seg;
+	size_t npieces;
+	int arity;
+	bool has_ts;
+
+	if (!enif_inspect_binary(env, parts[1], &link) ||
+	    !enif_inspect_binary(env, parts[2], &headers) ||
+	    !enif_get_uint(env, parts[3], &seq) ||
+	    !enif_get_uint(env, parts[4], &ack) ||
+	    !enif_get_uint(env, parts[5], &flags) ||
+	    !enif_get_uint(env, parts[6], &win) ||
+	    !enif_get_uint(env, parts[8], &seg))
+		return (false);
+	has_ts = !enif_is_identical(parts[7], atom_none);
+	tsval = tsecr = 0;
+	if (has_ts && (!enif_get_tuple(env, parts[7], &arity, &ts) ||
+	    arity != 2 || !enif_get_uint(env, ts[0], &tsval) ||
+	    !enif_get_uint(env, ts[1], &tsecr)))
+		return (false);
+	npieces = 0;
+	for (tail = parts[9]; enif_get_list_cell(env, tail, &head, &tail);
+	    npieces++) {
+		if (npieces == ERX_TCP_CUT_PIECES_MAX ||
+		    !enif_inspect_binary(env, head, &piece))
+			return (false);
+		pieces[npieces].data = piece.data;
+		pieces[npieces].length = piece.size;
+	}
+	if (!enif_is_empty_list(env, tail))
+		return (false);
+	*run = (erx_tcp_run_t){
+		.link = link.data,
+		.link_length = link.size,
+		.headers = headers.data,
+		.headers_length = headers.size,
+		.seq = seq,
+		.ack = ack,
+		.flags = flags,
+		.win = win,
+		.has_ts = has_ts,
+		.tsval = tsval,
+		.tsecr = tsecr,
+		.seg = seg,
+		.pieces = pieces,
+		.npieces = npieces,
+	};
+	return (true);
+}
+
+/*
+ * send(Handle, Run) -> {ok, N} | pieces | full | {drop, Reason} |
+ * {error, Reason}: the frames of a run, from the first, cut by erx_tcp_cut.c
+ * straight into one writev(2) each: the headers from a buffer of the NIF's
+ * own, the payload slice from the run's binaries where they lie, so no binary
+ * is copied or changed.  {ok, N}, N > 0, for N frames taken: all of them, the
+ * first ERX_TAP_RUN_FRAMES of a longer run, or those before the first one not
+ * taken, which the transport's next call answers for itself.  A run whose
+ * first frame is not taken is answered as a frame is.  pieces, writing
+ * nothing, for a payload of more binaries than the cut takes, which the
+ * transport then cuts itself, so the bound lives here alone.  {drop,
+ * too_long} for a run whose first frame, its longest, is over the MTU; a run
+ * erx_tcp_cut_plan refuses is badarg, since only a bug of the stack makes
+ * one.
+ */
+static ERL_NIF_TERM
+erx_tap_send_run(ErlNifEnv *env, erx_tap_t *tap, const ERL_NIF_TERM *parts)
+{
+	erx_tcp_cut_piece_t pieces[ERX_TCP_CUT_PIECES_MAX];
+	erx_tcp_cut_piece_t slice[ERX_TCP_CUT_PIECES_MAX];
+	struct iovec iov[1 + ERX_TCP_CUT_PIECES_MAX];
+	uint8_t headers[ERX_TCP_CUT_HEADER_MAX];
+	erx_tcp_cut_plan_t plan;
+	erx_tcp_run_t run;
+	erx_tap_write_kind_t kind;
+	size_t n, p;
+	uint32_t frames, i;
+	unsigned length;
+	int error;
+
+	if (enif_get_list_length(env, parts[9], &length) &&
+	    length > ERX_TCP_CUT_PIECES_MAX)
+		return (atom_pieces);
+	if (!erx_tap_run_term(env, parts, &run, pieces) ||
+	    !erx_tcp_cut_plan(&run, &plan))
+		return (enif_make_badarg(env));
+	if (erx_tcp_cut_length(&plan, 0) >
+	    (size_t)tap->mtu + ERX_TAP_ETHER_HDR_LEN)
+		return (erx_tap_drop(env, atom_too_long));
+	frames = plan.frames < ERX_TAP_RUN_FRAMES ? plan.frames :
+	    ERX_TAP_RUN_FRAMES;
+	for (i = 0; i < frames; i++) {
+		iov[0].iov_base = headers;
+		iov[0].iov_len = erx_tcp_cut_header(&plan, i, headers,
+		    sizeof(headers));
+		n = erx_tcp_cut_slice(&plan, i, slice);
+		for (p = 0; p < n; p++) {
+			iov[1 + p].iov_base = (void *)slice[p].data;
+			iov[1 + p].iov_len = slice[p].length;
+		}
+		kind = erx_tap_write(tap, iov, (int)(1 + n),
+		    erx_tcp_cut_length(&plan, i), &error);
+		if (kind != ERX_TAP_WRITE_TAKEN)
+			return (i == 0 ? erx_tap_not_taken(env, tap, kind,
+			    error) : erx_tap_ok(env, i));
+	}
+	return (erx_tap_ok(env, frames));
+}
+
 /*
  * send(Handle, Frame) -> {ok, 1} | full | {drop, Reason} | {error, Reason}:
  * one frame, iodata, handed to the kernel in one writev(2) of its binaries.
  * A delayed frame, {csum, Start, Field, Frame}, is handed over with its
  * checksum finished (erx_tap_finish); offsets that do not fit the frame are
  * badarg, since the transport drops such a frame before it calls.  full: none
- * of it was taken, and the device is armed for writing.
+ * of it was taken, and the device is armed for writing.  A run goes to
+ * erx_tap_send_run.
  */
 static ERL_NIF_TERM
 erx_tap_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -614,18 +803,22 @@ erx_tap_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	struct iovec iov[ERX_TAP_IOV_MAX], finished[ERX_TAP_IOV_MAX + 2];
 	ERL_NIF_TERM frame;
 	ErlNifBinary joined;
+	const ERL_NIF_TERM *parts;
 	struct iovec *write_iov;
 	erx_tap_t *tap;
+	erx_tap_write_kind_t kind;
 	size_t len;
-	ssize_t n;
 	unsigned start, field;
 	uint8_t field_bytes[2];
-	int niov, nwrite, tries;
+	int arity, error, niov, nwrite;
 	bool is_delayed;
 
 	(void)argc;
 	if ((tap = erx_tap_handle(env, argv[0])) == NULL)
 		return (enif_make_badarg(env));
+	if (enif_get_tuple(env, argv[1], &arity, &parts) &&
+	    arity == ERX_TAP_RUN_ARITY && enif_is_identical(parts[0], atom_run))
+		return (erx_tap_send_run(env, tap, parts));
 	if (!erx_tap_frame_term(env, argv[1], &frame, &is_delayed, &start,
 	    &field))
 		return (enif_make_badarg(env));
@@ -655,31 +848,10 @@ erx_tap_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 			return (enif_make_badarg(env));
 		write_iov = finished;
 	}
-
-	/* An interrupted write is tried again, a few times at the most. */
-	for (tries = 0; tries < ERX_TAP_WRITE_TRIES; tries++) {
-		n = writev(tap->fd, write_iov, nwrite);
-		switch (erx_tap_write_kind(n, errno, len)) {
-		case ERX_TAP_WRITE_AGAIN:
-			continue;
-		case ERX_TAP_WRITE_TAKEN:
-			return (enif_make_tuple2(env, atom_ok,
-			    enif_make_int(env, 1)));
-		case ERX_TAP_WRITE_REFUSED:
-			return (erx_tap_drop(env, atom_refused));
-		case ERX_TAP_WRITE_FULL:
-			if (!erx_tap_arm(env, tap, false))
-				return (enif_make_tuple2(env, atom_error,
-				    enif_make_atom(env, "arm")));
-			return (atom_full);
-		case ERX_TAP_WRITE_PARTIAL:
-			return (enif_make_tuple2(env, atom_error,
-			    atom_partial));
-		case ERX_TAP_WRITE_FAILED:
-			return (erx_tap_failed(env, "write", errno));
-		}
-	}
-	return (erx_tap_failed(env, "write", EINTR));
+	kind = erx_tap_write(tap, write_iov, nwrite, len, &error);
+	if (kind != ERX_TAP_WRITE_TAKEN)
+		return (erx_tap_not_taken(env, tap, kind, error));
+	return (erx_tap_ok(env, 1));
 }
 
 /* --- The handle's life -------------------------------------------------- */
@@ -759,10 +931,13 @@ erx_tap_load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	atom_full = enif_make_atom(env, "full");
 	atom_malformed = enif_make_atom(env, "malformed");
 	atom_more = enif_make_atom(env, "more");
+	atom_none = enif_make_atom(env, "none");
 	atom_ok = enif_make_atom(env, "ok");
 	atom_partial = enif_make_atom(env, "partial");
+	atom_pieces = enif_make_atom(env, "pieces");
 	atom_readable = enif_make_atom(env, "readable");
 	atom_refused = enif_make_atom(env, "refused");
+	atom_run = enif_make_atom(env, "run");
 	atom_sum = enif_make_atom(env, "sum");
 	atom_too_long = enif_make_atom(env, "too_long");
 	atom_undefined = enif_make_atom(env, "undefined");

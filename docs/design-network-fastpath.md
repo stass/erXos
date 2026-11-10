@@ -169,8 +169,11 @@ cached template, which the frame layer cuts with `cut/1` for a transport
 that finishes nothing and hands whole to one that does; a segment that is
 not a run is encoded as before (`erx_tcp_wire:encode/4`, `add_options/1`,
 the IP and link headers, the checksum delayed when the transport finishes
-it). The tap cuts a run with `cut/1` in Erlang and writes it frame by
-frame, so a run's frames still cost their headers and checksums in Erlang. The send log inserts one range per
+it). The tap's NIF cuts a run with `erx_tcp_cut.c` as it writes it, one
+`writev` a frame of its headers and its payload slice, so a run costs
+Erlang one call for each 64 of its frames; the NIF answers `pieces` for a
+run whose payload lies in more than 64 binaries, which the tap then
+sends frame by frame as `cut/1` cuts it. The send log inserts one range per
 run. The step's frames go to the driver in one `{transmit, Frames}`
 message, and the driver joins every `{transmit, ...}` waiting in its
 mailbox to its backlog and hands each frame to its transport. The tap
@@ -261,27 +264,38 @@ netmap NIF and the tap NIF as they link the checksum core of
 
 ```c
 /*
- * Checks a run and plans its frames: for frame i, the payload's offset and length, the IP
- * length, the sequence number and the flags. Writes nothing and returns ERX_EINVAL when the
- * template is not one the stack makes, the segment size is zero, the payload has more than
- * 64 pieces, or the run with its headers exceeds IP_MAXPACKET.
+ * Checks a run and plans its frames: their count, the headers' length and the payload's,
+ * from which frame i's payload offset and length, IP length, sequence number and flags
+ * follow. Returns false, writing nothing, when the link header is over 32 bytes, the
+ * template is not one the stack makes or its timestamps differ from the run's, a field is
+ * wider than the wire's, the segment size is zero, the payload has more than 64 pieces, or
+ * the run with its headers exceeds IP_MAXPACKET.
  */
-int	erx_tcp_cut_plan(const erx_tcp_run_t *run, erx_tcp_cut_plan_t *plan);
+bool	erx_tcp_cut_plan(const erx_tcp_run_t *run, erx_tcp_cut_plan_t *plan);
+
+/* The length of frame i of a plan, headers included; 0 when there is no frame i. */
+size_t	erx_tcp_cut_length(const erx_tcp_cut_plan_t *plan, uint32_t i);
 
 /*
  * Writes frame i of a plan to dst, which has room bytes: the link header, the template with
  * the plan's values stored, the payload slice copied through erx_inet_copy_sum, the IPv4
- * header checksum and the TCP checksum. Returns the frame's length, which the plan bounds.
+ * header checksum and the TCP checksum. Returns the frame's length, or 0, writing nothing,
+ * when there is no frame i or room is shorter than the frame.
  */
 size_t	erx_tcp_cut_frame(const erx_tcp_cut_plan_t *plan, uint32_t i, uint8_t *dst, size_t room);
 
 /*
  * As erx_tcp_cut_frame, for a medium whose copy is the kernel's: writes only the headers to
  * dst and sums the payload slice where it lies (erx_inet_sum), so the caller hands the kernel
- * the headers and the slice.
+ * the headers and the slice that erx_tcp_cut_slice gives as pieces of the run's own.
  */
 size_t	erx_tcp_cut_header(const erx_tcp_cut_plan_t *plan, uint32_t i, uint8_t *dst, size_t room);
+size_t	erx_tcp_cut_slice(const erx_tcp_cut_plan_t *plan, uint32_t i, erx_tcp_cut_piece_t *out);
 ```
+
+The plan is a `bool` and not a status code: its one refusal means only
+that the stack handed over a run it does not make, which every NIF answers
+with `badarg`, and the status codes are the generated ABI's alone.
 
 The plan is complete and checked before any byte moves
 ([style.md](style.md#functional-core)). The template is the stack's own
@@ -521,7 +535,7 @@ the connection's samples fall by the run's length.
 | --- | --- | --- | --- |
 | `erx_virtio_net` (erXos) | `erx_device:post_frame/5`: the device NIF posts the run's frames from the first, each as one request in one pool buffer (the 12-byte `virtio_net_hdr`, then the frame), cut and summed through `erx_tcp_cut_frame` as it copies, until the queue has no free entry | one, into the pool buffer | one NIF call and one doorbell per run |
 | `erx_netmap` (a host) | its NIF's `send/2`: the core plans the run's slots from one snapshot of the ring, syncs at most once when it is full, and cuts each frame into its slot's buffer | one, into the slot | one NIF call per run; one sync per flush |
-| `erx_tap` (a host) | its NIF's `send/2`: each frame's headers go to the NIF's scratch through `erx_tcp_cut_header`, which sums the payload slice where it lies, and one `writev` hands the kernel the headers and the slice | one, the kernel's; the payload is read once more to sum it | one NIF call per run, one system call per frame |
+| `erx_tap` (a host) | its NIF's `send/2`: each frame's headers go to the NIF's scratch through `erx_tcp_cut_header`, which sums the payload slice where it lies, and one `writev` hands the kernel the headers and the slice | one, the kernel's; the payload is read once more to sum it | one NIF call per 64 frames of a run, one system call per frame |
 | `erx_net_pipe` (`udp`, `process`) | the frame layer, `erx_net_frame:cut/1` | none of the stack's: `gen_udp` copies into the kernel, and a test process shares the binaries | Erlang work per frame |
 | `erx_net_loop` | the frame layer, as for the pipe | none | Erlang work per frame |
 
@@ -1165,10 +1179,16 @@ unit when its call returns, so nothing is held between calls.
 
 ## Refusals and error results
 
-* `erx_tcp_cut_plan` refuses with `ERX_EINVAL` a template that is not
-  one the stack makes, a zero segment size, more than 64 pieces, or a
-  run over `IP_MAXPACKET`; the NIFs answer `badarg`. Only a bug of the
-  stack reaches it.
+* `erx_tcp_cut_plan` refuses, returning false, a template that is not
+  one the stack makes, timestamps that differ from the template's, a
+  field wider than the wire's, a link header over 32 bytes, a zero
+  segment size, more than 64 pieces, or a run over `IP_MAXPACKET`; the
+  NIFs answer `badarg`. Only a bug of the stack reaches it.
+* The tap NIF's `send/2` drops a run whose first frame, its longest, is
+  over the MTU as `too_long`, writes at most 64 of a run's frames a call,
+  and answers `{ok, N}` for the first N frames taken, as a transport's
+  partial take is answered ([Each transport's
+  cut](#each-transports-cut)).
 * `erx_device:post_frame/5` answers `{ok, N}` for N frames posted,
   `{error, full}` with nothing posted when no entry is free, and
   `{error, broken}` as `post/4` does; `badarg` as above.
@@ -1195,13 +1215,17 @@ Each test is paired with a seeded fault it must catch.
 
 ### Tests
 
-1. **The cut equals the reference.** A host property test, through a
-   test NIF over `erx_tcp_cut.c`: random runs (IPv4 and IPv6, with and
-   without timestamps, PSH and FIN, segment sizes, payloads split into
-   random pieces, partial tails) cut by the C give byte for byte the
-   frames of `erx_net_frame:cut/1`. *Seeded faults:* PSH kept on every
-   frame; the sequence number advanced by `seg - 1`; the IPv4 checksum
-   computed before the last frame's length is stored.
+1. **The cut equals the reference.** A host property test, through the
+   tap NIF, which links `erx_tcp_cut.c`, over a pair of datagram sockets:
+   random runs (IPv4 and IPv6, with and without timestamps, any flags,
+   segment sizes up to the MTU, payloads split into up to 64 random
+   pieces, an empty one among them, partial tails, sequence numbers across
+   the wrap) cut by the C give byte for byte the frames of
+   `erx_net_frame:cut/1`, one a datagram. *Seeded faults:* a short last
+   frame one byte short; the timestamps written only into the first
+   frame; the sequence number not advanced per frame; the TCP checksum
+   over the header without its options; the IPv4 header checksum
+   computed before the frame's length is stored.
 2. **Output with runs equals output per segment.** A property test of
    the TCP core, and the explorer's runs ([The TCP core: exhaustive
    exploration](design-network-stack.md#the-tcp-core-exhaustive-exploration)):
@@ -1311,10 +1335,15 @@ Each test is paired with a seeded fault it must catch.
 
 * **`tcp_cut`:** arbitrary templates, segment sizes and piece lists into
   `erx_tcp_cut_plan` and every frame of an accepted plan into a buffer of
-  the planned size, under AddressSanitizer. Its oracle re-derives each
-  frame's length, sequence number and checksum from the input. *Seeded
-  fault:* the TCP header's length bound off by one, which the target
-  must find within its budget.
+  the planned size, under AddressSanitizer. Its oracle decides on its own
+  reading whether the plan must accept the run, and re-derives each
+  frame's length, link header, template bytes, IP length, sequence
+  number, flags, timestamps, payload slice and both checksums from the
+  input; the headers `erx_tcp_cut_header` writes followed by
+  `erx_tcp_cut_slice`'s pieces must be the same frame. *Seeded faults,*
+  each failing on the target's seeds: a run one byte over `IP_MAXPACKET`
+  accepted, bytes after the TCP header accepted, and the five faults of
+  test 1.
 * **`tcp_merge`:** arbitrary batches within the merge's limit, and
   past it, which must be refused, with and without sums, under
   AddressSanitizer. Its oracle checks every unit:

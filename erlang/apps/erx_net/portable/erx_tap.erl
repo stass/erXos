@@ -11,9 +11,13 @@ nothing. Each received frame comes as `{sum, Sum, Frame}`, with the network sum 
 right after the `read` (docs/design-network-stack.md, "Checksums in the copy"). The tap
 finishes checksums in its copy (`finish` `copy`): a delayed frame, `{csum, Start, Field,
 Frame}`, has its checksum finished by the NIF as it hands the frame to `writev`. A run
-(`erx_net_frame:run()`) goes frame by frame, as `erx_net_frame:cut/1` cuts it; when a frame
-after the first N is not taken the answer is `{ok, N}`, and the driver hands the rest again,
-which the tap then answers itself (`full`, armed, or a drop). A frame
+(`erx_net_frame:run()`) is cut by the NIF as it writes it (`c_src/erx_tcp_cut.c`), one
+`writev` a frame: the headers from the NIF's own buffer, the payload from the run's binaries
+where they lie, the bytes `erx_net_frame:cut/1` gives. A run whose payload is more binaries
+than the NIF takes, which it answers `pieces`, goes frame by frame as `cut/1` cuts it. When a frame
+after the first N is not taken, or the NIF's bound of frames a call is reached, the answer is
+`{ok, N}`, and the driver hands the rest again, which the tap then answers itself (`full`,
+armed, or a drop). A run whose first frame is over the MTU is dropped as `too_long`. A frame
 shorter than the Ethernet header is dropped as `malformed`, one longer than the MTU and its
 14-byte header as `too_long`, and one the tap discards as `refused`.
 
@@ -142,10 +146,18 @@ transmit({_Zone, _Packet}, T) ->
     {{drop, malformed}, T};
 transmit(_Frame, #tap{failed = true} = T) ->
     {{drop, refused}, T};
-transmit(#run{link = Link, template = Template, seg = Seg} = Run, #tap{mtu = Mtu} = T) ->
-    case byte_size(Link) + byte_size(Template) + Seg =< Mtu + ?ETHER_HDR_LEN of
-        true -> send_run(erx_net_frame:cut(Run), 0, T);
-        false -> {{drop, too_long}, T}
+%% A run whose payload is more binaries than the NIF's cut takes is cut here; its first
+%% frame, the longest, is checked as the NIF checks it.
+transmit(#run{} = Run, T0) ->
+    case send(Run, T0) of
+        {pieces, T} ->
+            [First | _] = Frames = erx_net_frame:cut(Run),
+            case iolist_size(First) =< T#tap.mtu + ?ETHER_HDR_LEN of
+                true -> send_run(Frames, 0, T);
+                false -> {{drop, too_long}, T}
+            end;
+        Answer ->
+            Answer
     end;
 %% The NIF joins a frame of many pieces before it checks its size, so the size is checked
 %% here first, as the pipe checks it.
@@ -176,10 +188,20 @@ send_run([Frame | Frames], Taken, T0) ->
 
 send(Frame, #tap{handle = Handle} = T) ->
     case erx_tap_nif:send(Handle, Frame) of
-        {ok, 1} -> {ok, T};
+        {ok, N} -> {taken(Frame, N), T};
         full -> {full, T};
+        pieces -> {pieces, T};
         {drop, _} = Drop -> {Drop, T};
         {error, Reason} ->
             self() ! {erx_tap, failed, Reason},
             {{drop, refused}, T#tap{failed = true}}
     end.
+
+%% A frame goes whole; of a run, the NIF answers how many of its frames went.
+taken(#run{} = Run, N) ->
+    case N < erx_net_frame:frames(Run) of
+        true -> {ok, N};
+        false -> ok
+    end;
+taken(_Frame, 1) ->
+    ok.

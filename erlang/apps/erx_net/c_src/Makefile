@@ -9,6 +9,7 @@
 #   erx_siphash.c and erx_tcp_merge.c, and the iodata walk, erx_iodata.c, are also linked
 #   statically into erXos's ERTS, whose build compiles them from here.
 # * tap: erx_tap_nif.so, the NIF of the tap transport (portable/erx_tap.erl),
+#   with the checksum core and the cut of a run, erx_tcp_cut.c,
 #   against the same headers. It is never built for erXos's target.
 # POSIX make, so BSD make and GNU make both read it. The recipe asks uname how
 # to link a loadable module, the one thing that differs between hosts.
@@ -23,8 +24,8 @@ PRIV = ../priv
 ERX_CFLAGS = -std=c17 -O2 -Wall -Wextra -Wpedantic
 NIF_SOURCES = erx_bytes_nif.c erx_iodata.c erx_inet_csum.c erx_siphash.c erx_tcp_merge.c
 NIF_HEADERS = erx_iodata.h erx_inet_csum.h erx_siphash.h erx_tcp_merge.h
-TAP_SOURCES = erx_tap_nif.c erx_inet_csum.c
-TAP_HEADERS = erx_inet_csum.h
+TAP_SOURCES = erx_tap_nif.c erx_inet_csum.c erx_tcp_cut.c
+TAP_HEADERS = erx_inet_csum.h erx_tcp_cut.h
 # A NIF library from its sources: the headers of the emulator ERL runs, then
 # uname's way to link a loadable module.
 NIF_BUILD = include=`$(ERL) -noshell -eval 'io:format("~ts", [filename:join([code:root_dir(), "erts-" ++ erlang:system_info(version), "include"])]), halt().'` && \

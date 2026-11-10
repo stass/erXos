@@ -191,6 +191,132 @@ full_peer_refuses_test() ->
         ?assert(lists:member({drop, refused}, Answers))
     end).
 
+%% --- Runs ----------------------------------------------------------------------------
+
+%% The NIF's cut (c_src/erx_tcp_cut.c) is judged by erx_net_frame:cut/1: over random runs
+%% (IPv4 and IPv6, with the timestamps and without, any flags, segment sizes up to the MTU,
+%% payloads in up to 64 binaries, an empty one among them, a short last frame or none), the
+%% frames written are cut/1's, byte for byte, one a datagram.
+runs_are_cut_as_the_reference_cuts_them_test() ->
+    with_pair(fun(H, Far) ->
+        lists:foldl(fun(_, R0) ->
+                            {Run, R} = random_run(R0),
+                            Frames = erx_net_frame:frames(Run),
+                            ?assertEqual({Run, {ok, Frames}}, {Run, erx_tap_nif:send(H, Run)}),
+                            ?assertEqual({Run, [iolist_to_binary(F) || F <- erx_net_frame:cut(Run)]},
+                                         {Run, recv_frames(Far, Frames)}),
+                            R
+                    end, rand:seed_s(exsss, {6, 7, 9}), lists:seq(1, 300)),
+        ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
+    end).
+
+%% The cases the random runs reach only by chance, each made certain: a pure ACK with no
+%% binary and with empty ones, a payload of exactly four segments, a run across the wrap of
+%% the sequence number, 64 binaries of one byte, and IPv6 without the timestamps.
+run_boundaries_are_cut_as_the_reference_cuts_them_test() ->
+    with_pair(fun(H, Far) ->
+        Run = run(100, 450),
+        Four = binary:copy(<<"f">>, 400),
+        Runs = [Run#run{payload = []}, Run#run{payload = [<<>>]}, Run#run{payload = [<<>>, <<>>]},
+                Run#run{payload = [Four]}, Run#run{payload = [<<>>, Four, <<>>]},
+                Run#run{seq = 16#ffffff00, payload = [Four, <<"tail">>]},
+                Run#run{seg = 3, payload = [<<I>> || I <- lists:seq(1, 64)]},
+                ipv6_run()],
+        [begin
+             Frames = erx_net_frame:frames(R),
+             ?assertEqual({R, {ok, Frames}}, {R, erx_tap_nif:send(H, R)}),
+             ?assertEqual({R, [iolist_to_binary(F) || F <- erx_net_frame:cut(R)]},
+                          {R, recv_frames(Far, Frames)})
+         end || R <- Runs]
+    end).
+
+ipv6_run() ->
+    Header = #tcp{sport = 5, dport = 6, seq = 0, ack = 0, flags = 0, win = 0, urp = 0,
+                  opts = #tcp_opts{}},
+    Path = #{family => inet6, src => binary:copy(<<1>>, 16), dst => binary:copy(<<2>>, 16),
+             hlim => 64, tos => 0, flow => 16#12345},
+    {ok, Template} = erx_net_frame:template(Path, {Header, #{ecn => 2, df => false}, []}),
+    #run{link = <<2, 0, 0, 0, 0, 2, ?LLADDR/binary, 16#86, 16#dd>>, template = Template,
+         seq = 1, ack = 2, flags = 16#11, win = 3, ts = none, seg = 1000,
+         payload = [binary:copy(<<"v">>, 2500)]}.
+
+%% One call writes at most 64 frames of a run; the tail the driver hands again writes the rest.
+run_frames_per_call_are_bounded_test() ->
+    with_pair(fun(H, Far) ->
+        Run = (run(10, 1000))#run{payload = [binary:copy(<<"p">>, 1000)]},
+        ?assertEqual({ok, 64}, erx_tap_nif:send(H, Run)),
+        Tail = erx_net_frame:run_tail(Run, 64),
+        ?assertEqual({ok, 36}, erx_tap_nif:send(H, Tail)),
+        ?assertEqual([iolist_to_binary(F) || F <- erx_net_frame:cut(Run)], recv_frames(Far, 100))
+    end).
+
+%% A run the cut refuses is badarg, one of more binaries than it takes is answered pieces,
+%% one whose first frame is over the MTU is dropped as too_long, and none writes a byte.
+run_refusals_test() ->
+    with_pair(fun(H, Far) ->
+        Run = run(100, 450),
+        #run{template = <<Ip:20/binary, Tcp/binary>>} = Run,
+        <<V, Tos, Len:16, Id:16, _Df:16, Rest/binary>> = Ip,
+        <<Ports:12/binary, _Off:4, Low:12, More/binary>> = Tcp,
+        Bad = [Run#run{template = <<V, Tos, Len:16, Id:16, 0:16, Rest/binary, Tcp/binary>>},
+               Run#run{template = <<Ip/binary, Ports/binary, 9:4, Low:12, More/binary, 0:32>>},
+               Run#run{template = <<Ip/binary, Tcp/binary, 0>>},
+               Run#run{template = binary:part(Run#run.template, 0, 39)},
+               Run#run{ts = none},
+               Run#run{seg = 0},
+               Run#run{flags = 16#1000},
+               Run#run{win = 16#10000},
+               Run#run{seq = 1 bsl 32},
+               Run#run{link = binary:copy(<<0>>, 33)},
+               Run#run{payload = [binary:copy(<<"x">>, 65535 - 52 + 1)]},
+               Run#run{payload = [<<"x">> | <<"y">>]},
+               Run#run{payload = [<<"x">>, "y"]},
+               Run#run{ts = {1}},
+               setelement(1, Run, csum)],
+        [?assertError(badarg, erx_tap_nif:send(H, B)) || B <- Bad],
+        ?assertEqual(pieces, erx_tap_nif:send(H, Run#run{payload = lists:duplicate(65, <<"x">>)})),
+        ?assertEqual({drop, too_long}, erx_tap_nif:send(H, run(?MTU, 2 * ?MTU))),
+        ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
+    end).
+
+%% A random run over a random template, every frame within the MTU and at most 64 of them.
+random_run(R0) ->
+    {[FamilyN, TsN, Cuts0, Empty, Tos, Ecn, Hlim, Flow, Frames, Short], R1} =
+        uniforms([2, 2, 63, 64, 256, 4, 255, 1 bsl 20, 64, 3], R0),
+    {Family, AddrLen, IpLen} = case FamilyN of 1 -> {inet, 4, 20}; 2 -> {inet6, 16, 40} end,
+    {Words, R2} = rand:bytes_s(2 * AddrLen + 14 + 4 * 6, R1),
+    <<Src:AddrLen/binary, Dst:AddrLen/binary, Link:14/binary, Sport:16, Dport:16, Seq:32,
+      Ack:32, TsVal:32, TsEcr:32, Flags:12, _:4, Win:16>> = Words,
+    Ts = case TsN of 1 -> none; 2 -> {TsVal, TsEcr} end,
+    TcpLen = case Ts of none -> 20; _ -> 32 end,
+    {SegN, R3} = rand:uniform_s(?MTU - IpLen - TcpLen, R2),
+    Seg = case Short of 1 -> min(SegN, 64); _ -> SegN end,
+    MaxSize = min(Frames * Seg, 65535 - IpLen - TcpLen),
+    {SizeN, R4} = rand:uniform_s(Seg + 1, R3),
+    Size = max(0, MaxSize - SizeN + 1),
+    {Bytes, R5} = rand:bytes_s(Size, R4),
+    %% Up to 62 cuts make up to 63 binaries, and one empty binary goes among them.
+    {Cuts, R6} = case Size >= 2 of
+                     true -> cuts(Size, Cuts0 - 1, R5);
+                     false -> {[], R5}
+                 end,
+    Slices = [binary:part(Bytes, From, To - From)
+              || {From, To} <- lists:zip([0 | Cuts], Cuts ++ [Size])],
+    {Before, After} = lists:split(min(Empty - 1, length(Slices)), Slices),
+    Payload = Before ++ [<<>> | After],
+    Path = #{family => Family, src => Src, dst => Dst, hlim => Hlim, tos => Tos - 1,
+             flow => Flow - 1},
+    Header = #tcp{sport = Sport, dport = Dport, seq = 0, ack = 0, flags = 0, win = 0, urp = 0,
+                  opts = #tcp_opts{ts = Ts}},
+    {ok, Template} = erx_net_frame:template(Path, {Header, #{ecn => Ecn - 1, df => true}, []}),
+    {#run{link = Link, template = Template, seq = Seq, ack = Ack, flags = Flags, win = Win,
+          ts = Ts, seg = Seg, payload = Payload}, R6}.
+
+uniforms(Maxes, R0) -> lists:mapfoldl(fun(Max, R) -> rand:uniform_s(Max, R) end, R0, Maxes).
+
+recv_frames(Far, N) ->
+    [begin {ok, F} = socket:recv(Far, 0, ?WAIT_MS), F end || _ <- lists:seq(1, N)].
+
 %% --- The NIF over a FIFO -----------------------------------------------------------
 
 %% Frames written until the device is full, the first answer `full`; once the reader has
@@ -309,15 +435,18 @@ transport_receives_and_transmits_test() ->
         ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
     end).
 
-%% A run goes frame by frame, as erx_net_frame:cut/1 cuts it; one whose full frame is over
-%% the MTU is dropped before the NIF.
+%% A run goes out as erx_net_frame:cut/1 cuts it: through the NIF's cut, or frame by frame
+%% when its payload is more binaries than the NIF takes. One whose full frame is over the
+%% MTU is dropped.
 transport_sends_a_run_frame_by_frame_test() ->
     with_socket_pair(fun(Near, Far) ->
         {ok, _, T0} = erx_tap:init(#{fd => near_fd(Near), lladdr => ?LLADDR}),
-        Run = run(100, 450),
-        ?assertMatch({ok, _}, erx_tap:transmit(Run, T0)),
-        [?assertEqual({ok, iolist_to_binary(F)}, socket:recv(Far, 0, ?WAIT_MS))
-         || F <- erx_net_frame:cut(Run)],
+        Many = (run(100, 450))#run{payload = lists:duplicate(65, <<"many">>)},
+        [begin
+             ?assertMatch({ok, _}, erx_tap:transmit(Run, T0)),
+             [?assertEqual({ok, iolist_to_binary(F)}, socket:recv(Far, 0, ?WAIT_MS))
+              || F <- erx_net_frame:cut(Run)]
+         end || Run <- [run(100, 450), Many]],
         ?assertMatch({{drop, too_long}, _}, erx_tap:transmit(run(?MTU, 2 * ?MTU), T0)),
         ?assertEqual({error, timeout}, socket:recv(Far, 0, 100)),
         flush_more()

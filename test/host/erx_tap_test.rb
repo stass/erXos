@@ -8,7 +8,8 @@ require_relative 'erx_net_eunit'
 # The tap transport and its NIF (docs/design-network-stack.md, "The tap transport") on a
 # host without a tap device: test/erlang/erx_tap_tests.erl over a Unix datagram socket
 # pair and a FIFO, with the NIF built into erx_net's priv/. Each seeded fault plants in
-# erx_tap_nif.c the break one case exists for, and that case must fail.
+# erx_tap_nif.c, or in the cut of a run it links (erx_tcp_cut.c), the break one case
+# exists for, and that case must fail.
 class ErxTapTest < Minitest::Test
   include ErxNetEunit
 
@@ -79,6 +80,39 @@ class ErxTapTest < Minitest::Test
                                                           'copy = fd;'] })
     refute status.success?, "the seeded fault #{NIF} passed:\n#{output}"
     assert_match(/stealing control of fd=/, output)
+  end
+
+  # Seeded faults in the cut of a run (c_src/erx_tcp_cut.c), each a frame that differs from
+  # erx_net_frame:cut/1's, which the random runs compare byte for byte.
+  CUT_FAULTS = {
+    'a short last frame one byte short' =>
+      ['return (left < plan->run->seg ? left : plan->run->seg);',
+       'return (left < plan->run->seg ? left - (left > 0) : plan->run->seg);'],
+    'the timestamps only in the first frame' => ['if (run->has_ts) {', 'if (run->has_ts && i == 0) {'],
+    'the sequence number not advanced per frame' => ['put32(th + 4, run->seq + i * run->seg);',
+                                                     'put32(th + 4, run->seq);'],
+    'the TCP checksum over the header without its options' =>
+      ['sum = sum_add(sum, erx_inet_sum(0, th, plan->tcp_length, 0));',
+       'sum = sum_add(sum, erx_inet_sum(0, th, TCP_HDR, 0));'],
+    'the IPv4 header checksum taken before the length is stored' =>
+      ["\t\tput16(ip + 2, IP_HDR + tcp_length);\n\t\tput16(ip + 10, 0);\n" \
+       "\t\tput16(ip + 10, (uint16_t)~erx_inet_sum(0, ip, IP_HDR, 0));",
+       "\t\tput16(ip + 10, 0);\n\t\tput16(ip + 10, (uint16_t)~erx_inet_sum(0, ip, IP_HDR, 0));\n" \
+       "\t\tput16(ip + 2, IP_HDR + tcp_length);"]
+  }.freeze
+
+  def test_seeded_cut_faults_are_caught
+    CUT_FAULTS.each do |name, seed|
+      output = refute_erx_net_eunit('erx_tap_tests', c_fault: { 'erx_tcp_cut.c' => seed }, tap: true)
+      assert_match(/runs_are_cut_as_the_reference_cuts_them_test\.\.\.\*failed\*/, output, name)
+    end
+  end
+
+  # A run whose frames past the first N are not taken answered as all taken: the transport
+  # counts the whole run as sent, and the device that filled in the middle shows it was not.
+  def test_seeded_run_taken_whole_is_caught
+    assert_seed_fails('transport_takes_part_of_a_run_test',
+                      [': erx_tap_ok(env, i));', ': erx_tap_ok(env, frames));'])
   end
 
   private
