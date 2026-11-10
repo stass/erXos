@@ -117,6 +117,17 @@ handle_call({info, Id}, From, #{core := Core} = State) ->
         _ ->
             {reply, {error, badarg}, State}
     end;
+handle_call({test_record, Id, Peer}, _From, #{core := Core} = State) when is_integer(Peer), Peer > 0 ->
+    %% A test's hook: the domain pid of ready domain Id writes a connection_down about
+    %% connection Peer, which the domain holds none of, so its agent answers it unmapped.
+    %% Peer is an id never spent, so the record can name no connection a domain holds.
+    case erx_domain_core:unspent(Peer, Core) of
+        true ->
+            {Reply, Next} = record(Id, Peer, {erx_connection_down, Peer, noconnection}, State),
+            {reply, Reply, Next};
+        false ->
+            {reply, {error, badarg}, State}
+    end;
 handle_call(_Request, _From, State) ->
     {reply, {error, badarg}, State}.
 
@@ -127,6 +138,8 @@ handle_info({domain_ended, Id, End, _Record}, State) ->
     {noreply, ended(Id, End, State)};
 handle_info({domain_ready, Ref, Id, _Agents}, State) ->
     {noreply, ready(Id, Ref, State)};
+handle_info({domain_answer, Ref, Id, Answer}, State) ->
+    {noreply, answer(Id, Ref, Answer, State)};
 handle_info({timeout, _Timer, {boot_timeout, Id}}, #{core := Core} = State) ->
     %% Ids are never reused, so the timer of a domain that reported ready or ended finds
     %% it ready or gone. A domain stopping for its timeout takes no late report
@@ -229,11 +242,11 @@ build(Ident, Principal, Origin, Make, Timeout, #{core := Core} = State) ->
             Ref = make_ref(),
             Pid = erx_domain_pid:start_link(self(), Id, Node, Ref),
             case made(Make, Id, Pid) of
-                {ok, #{connection := Connection} = Created} ->
-                    Built = erx_domain_core:built(Id, Connection, Pid, Ref, Admitted),
+                {ok, #{connection := Connection, ctl_slots := CtlSlots} = Created} ->
+                    Built = erx_domain_core:built(Id, Connection, CtlSlots, Pid, Ref, Admitted),
                     Next = State#{core := Built},
                     Domain = {erx_domain, Id, Node, Pid},
-                    case started(Id, Pid, Created#{node => Node}, Next) of
+                    case started(Id, Pid, Ref, Created#{node => Node}, Next) of
                         ok when Connection =:= 0 ->
                             Ready = erx_domain_core:ready(Id, erx_domain_core:running(Id, Built)),
                             {{ready, Domain}, State#{core := Ready}};
@@ -267,12 +280,13 @@ refusal(enomem) -> no_memory;
 refusal(Reason) -> Reason.
 
 %% A made domain's system side, opened with the library's values of it and the domain's
-%% node, then its domain pid's export to it, then its first thread; a domain with no
+%% node, its port handed to the domain pid, which writes the domain's control records
+%% through it, then the domain pid's export to it, then its first thread; a domain with no
 %% system connection has no side. The domain gets send on its pid, its one way to report
 %% ready and answer; its creator, a process of the system domain, which holds every
 %% right on the system domain's own pids, needs no export.
-started(Id, Pid, Values, #{lib := Lib, agent := Agent, exports := Exports}) ->
-    first_refusal([{system_side, fun() -> open_side(Agent, Id, Values) end},
+started(Id, Pid, Ref, Values, #{lib := Lib, agent := Agent, exports := Exports}) ->
+    first_refusal([{system_side, fun() -> open_side(Agent, Id, Pid, Ref, Values) end},
                    {export, fun() -> export(Exports, Pid, Id, Values) end},
                    {start, fun() -> Lib:start(Id) end}]).
 
@@ -347,13 +361,55 @@ settle(Id, #{waiting := Waiting} = State) ->
 unreported(stopping, _Info) -> timeout;
 unreported(_Life, Info) -> {boot, Info}.
 
-open_side(_Agent, _Id, #{connection := 0}) ->
+open_side(_Agent, _Id, _Pid, _Ref, #{connection := 0}) ->
     ok;
-open_side(Agent, Id, Values) ->
+open_side(Agent, Id, Pid, Ref, Values) ->
     case Agent:open_side(Id, Values) of
-        {ok, _Port} -> ok;
-        {error, _} = Refused -> Refused
+        {ok, Port} ->
+            Pid ! {Ref, port, Port},
+            ok;
+        {error, _} = Refused ->
+            Refused
     end.
+
+%% A connection-control record about connection Peer, which domain Id's domain pid writes
+%% at once into the slot the core gives it (docs/design-domains.md, "The control table").
+record(Id, Peer, Record, #{core := Core} = State) ->
+    case erx_domain_core:record_slot(Id, Peer, expects(Record), Core) of
+        {ok, Slot, Next} ->
+            {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(Id, Next),
+            Pid ! {Ref, record, Slot, Record},
+            {{ok, Slot}, State#{core := Next}};
+        {error, _} = Refused ->
+            {Refused, State}
+    end.
+
+%% The answer a record waits for, which alone frees its slot.
+expects({erx_connection_up, _Peer, _Values}) -> mapped;
+expects({erx_connection_down, _Peer, _Reason}) -> unmapped.
+
+%% An answer domain Id's pid passed on with Ref, which frees the connection's slot when it
+%% is the answer the slot's record waits for; any other changes nothing.
+answer(Id, Ref, Answer, #{core := Core} = State) ->
+    case erx_domain_core:fetch(Id, Core) of
+        {ok, #{ref := Ref}} ->
+            case erx_domain_core:answered(Id, answer_peer(Answer), answer_kind(Answer), Core) of
+                {ok, Next} -> State#{core := Next};
+                none -> State
+            end;
+        _ ->
+            State
+    end.
+
+%% The pid passes on only answers (erx_domain_pid:is_answer/1); any other shape, which
+%% would come from a domain, answers no record.
+answer_kind({erx_connection_mapped, _Peer}) -> mapped;
+answer_kind({erx_connection_unmapped, _Peer}) -> unmapped;
+answer_kind({erx_connection_lost, _Peer, _Reason}) -> lost;
+answer_kind(_Answer) -> other.
+
+answer_peer(Answer) when tuple_size(Answer) >= 2 -> element(2, Answer);
+answer_peer(_Answer) -> none.
 
 stop(Id, #{lib := Lib}) ->
     case Lib:stop(Id, 0) of

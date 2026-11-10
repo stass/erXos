@@ -8,6 +8,7 @@
 #ifndef ERX_LANE_DRV_H
 #define ERX_LANE_DRV_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -17,6 +18,20 @@
  */
 #define ERX_LANE_BATCH_DEFAULT	64u
 extern uint32_t erx_lane_batch;
+
+/*
+ * -erx test_lane_hold, a test's switch, off by default: port_control 4 may then hold the
+ * ring of this domain's system connection (erx_lane_drv.c, control_hold).
+ */
+extern bool erx_lane_test_hold;
+
+/*
+ * The runtime's -erx flags among the emulator flags, before "--": "-erx lane_batch N" and
+ * "-erx test_lane_hold". Takes each from argv, which keeps the rest in order and ends in
+ * NULL. false for an -erx flag it does not know or a value out of range, and the runtime
+ * does not start.
+ */
+bool erx_lane_flags(int *argc, char **argv);
 
 /*
  * The bytes of answers a connection's entry may hold unsent (exits, DOWNs, unlink acks and
@@ -38,6 +53,8 @@ typedef enum erx_lane_count {
 	ERX_LANE_COUNT_OUT_DROPPED,	/* frames of ERTS's no lane carries, or sent while finishing */
 	ERX_LANE_COUNT_OUT_REFUSED,	/* outputs the lane refused, ending the port */
 	ERX_LANE_COUNT_RING_FAILED,	/* bell triggers that failed */
+	ERX_LANE_COUNT_CTL_TAKEN,	/* control-table records taken */
+	ERX_LANE_COUNT_CTL_REWRITTEN,	/* of those, slots whose seq moved by anything but one */
 	ERX_LANE_COUNTS
 } erx_lane_count_t;
 

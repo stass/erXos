@@ -12,12 +12,15 @@ class SystemDomainTest < Minitest::Test
   PLAIN = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
 
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
-  # over the erx carrier, as MediumBoot's, so each is a node; the manifest differs
-  # from MediumBoot's only in that row's arguments and in the second row, peer.
+  # over the erx carrier, as MediumBoot's, so each is a node, behind the flag that lets the
+  # control_table step hold a domain's ring; the manifest differs from MediumBoot's only in
+  # that row's arguments, its one connection, the control table's one slot, and in the
+  # second row, peer.
   def test_the_configured_domains_stay_up_as_nodes_and_are_the_manifests_one_change
     row_args = Suite::DOMAIN_ROW[/^  args "(.*)"$/, 1].split
     medium_args = Erx::MediumBoot::DOMAIN_ARGS[0...-2]
-    assert_equal medium_args, row_args
+    assert_equal ['-erx', 'test_lane_hold', *medium_args], row_args
+    assert_match(/^  connections 1$/, Suite::DOMAIN_ROW)
     assert_equal %w[-no_epmd -proto_dist erx], row_args.each_cons(3).find { |three| three.first == '-no_epmd' }
     refute_includes row_args, '-eval'
     refute_includes row_args, 'start_distribution'
@@ -27,7 +30,8 @@ class SystemDomainTest < Minitest::Test
     ours = Suite.manifest(PLAIN)
     assert ours.end_with?(Suite::DOMAIN_ROW + Suite::PEER_ROW)
     kept = medium.lines.size - 1
-    assert_equal medium.lines[0...-1], ours.lines[0...kept]
+    assert_equal [["  connections 0\n", "  connections 1\n"]],
+                 medium.lines[0...-1].zip(ours.lines[0...kept]).reject { |theirs, mine| theirs == mine }
     assert_match(/^  args ".* -eval /, medium.lines.last)
     assert_equal ["  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", *Suite::PEER_ROW.lines], ours.lines[kept..]
   end
@@ -39,11 +43,12 @@ class SystemDomainTest < Minitest::Test
   def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
-    assert_equal %w[image-identity release-shell erlang-shell domain-running domain-ends system-domain-ended],
+    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table domain-ends
+                    system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
-    running, ends, ended = points.last(3)
+    running, table, ends, ended = points.last(4)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
@@ -52,6 +57,18 @@ class SystemDomainTest < Minitest::Test
      good.sub('{6,peer@erxos,6}', '{6,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
      good.sub('{6,peer@erxos,ready}', '{6,peer@erxos,running}'), good.sub('{2,erts@erxos}', '{3,erts@erxos}')].each do |line|
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
+    end
+    # The control table: every record through the full lane and the paused side, the stray
+    # command 3 refused. A record that waited behind the paused port (a domain pid that sends
+    # it as a message), a stray call that wrote a slot (no caller check), or a lane never
+    # filled each fails.
+    refute_match table.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    good_table = '{control_table,ok,full,true,badarg,[ok,ok,ok],{ok,3,0}}'
+    table.fetch(:verify).call("#{good_table}\r\n")
+    [good_table.sub('[ok,ok,ok]', '[timeout,timeout,timeout]').sub('{ok,3,0}', '{timeout,0,0}'),
+     good_table.sub('badarg', 'ok').sub('{ok,3,0}', '{ok,4,0}'), good_table.sub('full', 'never'), good_table.sub(',ok,full', ',timeout,full'),
+     good_table.sub('true', 'false')].each do |line|
+      assert_raises(Erx::Error) { table.fetch(:verify).call("#{line}\r\n") }
     end
     refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     down = '{domain_down,5,{halt,69}}'

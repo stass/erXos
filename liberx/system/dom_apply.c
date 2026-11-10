@@ -393,7 +393,8 @@ apply_bootinfo(apply_t *apply)
 		    .peer_bell = { .raw = apply->installed[ERX_DOM_OBJ_SYS_BELL] },
 		    .label = ERX_DOM_SYSTEM_LABEL, .peer = ERX_DOM_SYSTEM_ID,
 		    .out_size = spec->system_lane, .in_size = plan->reader,
-		    .domain_pid_number = spec->domain_pid.number, .domain_pid_serial = spec->domain_pid.serial };
+		    .domain_pid_number = spec->domain_pid.number, .domain_pid_serial = spec->domain_pid.serial,
+		    .ctl_slots = spec->connections };
 	}
 	inputs.args = &args;
 	inputs.nargs = spec->args_len != 0;
@@ -538,6 +539,8 @@ apply_keep(apply_t *apply, erx_dom_created_t *created)
 	created->bell = made[ERX_DOM_OBJ_DOM_BELL];
 	created->reader = (uint32_t)plan->reader;
 	created->system_lane = plan->spec.system_lane;
+	created->ctl_slots = plan->spec.connections;
+	created->domain_pid = plan->spec.domain_pid;
 }
 
 /*

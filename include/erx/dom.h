@@ -54,13 +54,6 @@
 #define ERX_DOM_SPACES		0x2u	/* holds SPACES, with a sub-space group */
 #define ERX_DOM_FLAGS_KNOWN	(ERX_DOM_SECRET | ERX_DOM_SPACES)
 
-/*
- * The room the lane a domain reads from the system domain keeps for one
- * connection-control record, per connection its quota allows
- * (docs/design-domains.md, "The reserve"): a control payload of at most
- * ERX_CTL_MAX bytes with its frame and record headers.
- */
-#define ERX_DOM_CTL_RESERVE	(ERX_CTL_MAX + 64u)
 /* What a plan reserves on a budget for one bell, an IRQ object. */
 #define ERX_DOM_BELL_BYTES	ERX_PAGE_SIZE
 /* The most steps a creation plan holds. */

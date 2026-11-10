@@ -124,6 +124,9 @@ typedef struct erx_dom_created {
 					 * one the domain reads */
 	uint32_t	system_lane;	/* data area of side's lane, the one
 					 * the system domain reads */
+	uint32_t	ctl_slots;	/* slots of the control table that
+					 * ends peer_side */
+	erx_dom_pid_t	domain_pid;	/* the one process that writes it */
 } erx_dom_created_t;
 
 /* An end the fault thread reports as {domain_ended, Id, End, Record}. */

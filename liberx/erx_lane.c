@@ -713,3 +713,149 @@ erx_lane_put_armed(erx_lane_writer_t *writer, const erx_lane_item_t *item,
 			return (st);
 	}
 }
+
+/*
+ * The control table (docs/design-domains.md, "The control table").  It
+ * starts where a side's data area ends: an index of one erx_lane_ctl_t per
+ * slot, then each slot's frame of ERX_LANE_CTL_SLOT bytes, the whole
+ * rounded up to a page.  erx_lane_ctl_put is its one writer and
+ * erx_lane_ctl_take its one reader; neither reads back what it wrote, and
+ * the reader loads each index field once and copies the frame once, every
+ * load an aligned relaxed atomic load of one word, as lane_copy does.
+ */
+
+#define LANE_CTL_WORD	sizeof(uint64_t)
+
+_Static_assert(ERX_LANE_CTL_SIZE == LANE_GRAIN, "an index entry is one grain");
+_Static_assert(ERX_LANE_CTL_SLOT % LANE_GRAIN == 0, "a slot is whole grains");
+_Static_assert(ERX_LANE_CTL_SLOT >= ERX_FRAME_HEADER_SIZE &&
+    ERX_LANE_CTL_SLOT <= UINT32_MAX, "a slot holds a frame header");
+
+static erx_lane_ctl_t *
+lane_ctl_entry(const void *side, uint64_t size, uint32_t slot)
+{
+	return ((erx_lane_ctl_t *)((uintptr_t)side + ERX_LANE_SIDE_DATA + size +
+	    (uint64_t)slot * ERX_LANE_CTL_SIZE));
+}
+
+static _Atomic uint64_t *
+lane_ctl_frame(const void *side, uint64_t size, uint32_t slots, uint32_t slot)
+{
+	return ((_Atomic uint64_t *)((uintptr_t)side + ERX_LANE_SIDE_DATA +
+	    size + (uint64_t)slots * ERX_LANE_CTL_SIZE +
+	    (uint64_t)slot * ERX_LANE_CTL_SLOT));
+}
+
+/* A page-aligned side, a lane's area size and a slot of the table. */
+static bool
+lane_ctl_sound(const void *side, uint64_t size, uint32_t slots, uint32_t slot)
+{
+	return (side != NULL && (uintptr_t)side % ERX_PAGE_SIZE == 0 &&
+	    lane_size_sound(size) && slot < slots);
+}
+
+/*
+ * What a slot's seq says against the copy the reader kept: unchanged, one
+ * record more, or any other change, which only a writer that rewrote a
+ * slot before its record was answered makes.
+ */
+static erx_lane_ctl_status_t
+lane_ctl_decide(uint64_t kept, uint64_t seq)
+{
+	if (seq == kept)
+		return (ERX_LANE_CTL_UNCHANGED);
+	if (seq == kept + 1)
+		return (ERX_LANE_CTL_TOOK);
+	return (ERX_LANE_CTL_REWRITTEN);
+}
+
+static void
+lane_le32(unsigned char *at, uint32_t value)
+{
+	for (size_t i = 0; i < 4; i++)
+		at[i] = (unsigned char)(value >> (8 * i));
+}
+
+uint64_t
+erx_lane_ctl_side_bytes(uint64_t size, uint32_t slots)
+{
+	const uint64_t table = (uint64_t)slots *
+	    (ERX_LANE_CTL_SIZE + ERX_LANE_CTL_SLOT);
+	const uint64_t side = erx_lane_side_bytes(size);
+
+	if (side == 0)
+		return (0);
+	return ((side + table + ERX_PAGE_SIZE - 1) & ~(uint64_t)(ERX_PAGE_SIZE - 1));
+}
+
+bool
+erx_lane_ctl_put(void *side, uint64_t size, uint32_t slots, uint32_t slot,
+    uint64_t seq, const void *ctl, size_t ctl_len, const void *payload,
+    size_t payload_len)
+{
+	unsigned char frame[ERX_LANE_CTL_SLOT];
+	_Atomic uint64_t *words;
+	erx_lane_ctl_t *entry;
+	uint64_t word;
+	size_t len;
+
+	if (!lane_ctl_sound(side, size, slots, slot) ||
+	    (ctl == NULL && ctl_len != 0) ||
+	    (payload == NULL && payload_len != 0) ||
+	    ctl_len > ERX_LANE_CTL_SLOT - ERX_FRAME_HEADER_SIZE ||
+	    payload_len > ERX_LANE_CTL_SLOT - ERX_FRAME_HEADER_SIZE - ctl_len)
+		return (false);
+	len = ERX_FRAME_HEADER_SIZE + ctl_len + payload_len;
+	/* The whole slot, zero past the frame, so no earlier record's bytes stay. */
+	memset(frame, 0, sizeof(frame));
+	lane_le32(frame, (uint32_t)ctl_len);
+	lane_le32(frame + 4, (uint32_t)payload_len);
+	if (ctl_len != 0)
+		memcpy(frame + ERX_FRAME_HEADER_SIZE, ctl, ctl_len);
+	if (payload_len != 0)
+		memcpy(frame + ERX_FRAME_HEADER_SIZE + ctl_len, payload,
+		    payload_len);
+	words = lane_ctl_frame(side, size, slots, slot);
+	for (size_t i = 0; i < sizeof(frame) / LANE_CTL_WORD; i++) {
+		memcpy(&word, frame + i * LANE_CTL_WORD, sizeof(word));
+		atomic_store_explicit(&words[i], word, memory_order_relaxed);
+	}
+	entry = lane_ctl_entry(side, size, slot);
+	(void)erx_lane_ctl_len_store(entry, (uint32_t)len);
+	(void)erx_lane_ctl_zero_store(entry, 0);
+	(void)erx_lane_ctl_seq_store(entry, seq);
+	return (true);
+}
+
+erx_lane_ctl_status_t
+erx_lane_ctl_take(const void *side, uint64_t size, uint32_t slots,
+    uint32_t slot, uint64_t kept, void *buf, uint32_t *len, uint64_t *seq)
+{
+	const _Atomic uint64_t *words;
+	const erx_lane_ctl_t *entry;
+	erx_lane_ctl_status_t status;
+	uint32_t got, zero;
+	uint64_t word;
+
+	if (!lane_ctl_sound(side, size, slots, slot) || buf == NULL ||
+	    len == NULL || seq == NULL)
+		return (ERX_LANE_CTL_MALFORMED);
+	entry = lane_ctl_entry(side, size, slot);
+	(void)erx_lane_ctl_seq_load(entry, seq);
+	status = lane_ctl_decide(kept, *seq);
+	if (status == ERX_LANE_CTL_UNCHANGED)
+		return (status);
+	(void)erx_lane_ctl_len_load(entry, &got);
+	(void)erx_lane_ctl_zero_load(entry, &zero);
+	if (got < ERX_FRAME_HEADER_SIZE || got > ERX_LANE_CTL_SLOT || zero != 0)
+		return (ERX_LANE_CTL_MALFORMED);
+	words = lane_ctl_frame(side, size, slots, slot);
+	for (uint32_t at = 0; at < got; at += LANE_CTL_WORD) {
+		word = atomic_load_explicit(&words[at / LANE_CTL_WORD],
+		    memory_order_relaxed);
+		memcpy((unsigned char *)buf + at, &word,
+		    lane_min(LANE_CTL_WORD, got - at));
+	}
+	*len = got;
+	return (status);
+}

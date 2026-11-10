@@ -66,7 +66,7 @@ admit(Name, Principal, Origin, Core) ->
 %% Runs a domain through its life to retired.
 live(Name, Core0) ->
     {#{id := Id} = Domain, Core1} = admit(Name, 1, request, Core0),
-    Core2 = erx_domain_core:running(Id, erx_domain_core:built(Id, 7, self(), make_ref(), Core1)),
+    Core2 = erx_domain_core:running(Id, erx_domain_core:built(Id, 7, 0, self(), make_ref(), Core1)),
     {stopped, _, Core3} = erx_domain_core:ended(Id, {stopped, 0}, none, 0, Core2),
     {Domain, erx_domain_core:retired(Id, Core3)}.
 
@@ -104,7 +104,7 @@ life_test() ->
     {#{id := Id}, Core1} = admit(<<"a">>, 1, request, Core0),
     ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, none, 0, Core1)),
     ?assertError({badmatch, _}, erx_domain_core:running(Id, Core1)),
-    Core2 = erx_domain_core:built(Id, 0, self(), make_ref(), Core1),
+    Core2 = erx_domain_core:built(Id, 0, 0, self(), make_ref(), Core1),
     ?assertMatch({ok, #{id := Id}}, erx_domain_core:find_pid(self(), Core2)),
     {{halt, 3}, _, Core3} = erx_domain_core:ended(Id, {halt, 3}, none, 9, Core2),
     ?assertEqual(none, erx_domain_core:ended(Id, {halt, 0}, none, 0, Core3)),
@@ -118,8 +118,8 @@ crash_death_test() ->
     Core0 = erx_domain_core:new(<<"erxos">>),
     {#{id := A}, Core1} = admit(<<"a">>, 1, request, Core0),
     {#{id := B}, Core2} = admit(<<"b">>, 1, request, Core1),
-    Built = erx_domain_core:built(A, 0, self(), make_ref(), Core2),
-    Core3 = erx_domain_core:built(B, 0, self(), make_ref(), Built),
+    Built = erx_domain_core:built(A, 0, 0, self(), make_ref(), Core2),
+    Core3 = erx_domain_core:built(B, 0, 0, self(), make_ref(), Built),
     {crash, _, Core4} = erx_domain_core:ended(A, {crash, 0}, <<"boom">>, 1, Core3),
     {crash, _, Core5} = erx_domain_core:ended(B, {crash, 0}, {unreadable, ecorrupt}, 2, Core4),
     ?assertMatch([#{id := B, slogan := {unreadable, ecorrupt}}, #{id := A, slogan := <<"boom">>}],
@@ -410,3 +410,36 @@ service_end_ends_domain_pids() ->
     ?assertEqual(timeout, receive {'DOWN', Ref, process, _, Forged} -> Forged after 200 -> timeout end),
     exit(Service, kill),
     ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).
+
+%% The control table's slots (docs/design-domains.md, "The control table"): a connection
+%% takes the lowest slot no other holds and keeps it until the domain gives the answer its
+%% record waits for; a second record before that is busy, a full table refuses with
+%% system_limit, and a domain that has not reported ready gets no record. A
+%% connection_lost frees a connection_up's slot, not a connection_down's; an answer out
+%% of turn or one about a connection holding no slot frees nothing.
+control_slots_test() ->
+    Core0 = erx_domain_core:new(<<"erxos">>),
+    {#{id := Id}, Core1} = admit(<<"web">>, 1, request, Core0),
+    Built = erx_domain_core:running(Id, erx_domain_core:built(Id, 7, 2, self(), make_ref(), Core1)),
+    ?assertEqual({error, badarg}, erx_domain_core:record_slot(Id, 20, unmapped, Built)),
+    Ready = erx_domain_core:ready(Id, Built),
+    {ok, 0, Down20} = erx_domain_core:record_slot(Id, 20, unmapped, Ready),
+    {ok, 1, Up21} = erx_domain_core:record_slot(Id, 21, mapped, Down20),
+    ?assertEqual({error, system_limit}, erx_domain_core:record_slot(Id, 22, mapped, Up21)),
+    ?assertEqual({error, busy}, erx_domain_core:record_slot(Id, 20, unmapped, Up21)),
+    ?assertEqual(none, erx_domain_core:answered(Id, 20, lost, Up21)),
+    ?assertEqual(none, erx_domain_core:answered(Id, 20, mapped, Up21)),
+    ?assertEqual(none, erx_domain_core:answered(Id, 22, unmapped, Up21)),
+    {ok, Freed} = erx_domain_core:answered(Id, 20, unmapped, Up21),
+    ?assertEqual(none, erx_domain_core:answered(Id, 20, unmapped, Freed)),
+    {ok, 0, Up22} = erx_domain_core:record_slot(Id, 22, mapped, Freed),
+    {ok, Mapped21} = erx_domain_core:answered(Id, 21, mapped, Up22),
+    {ok, 1, Down21} = erx_domain_core:record_slot(Id, 21, unmapped, Mapped21),
+?assertEqual(none, erx_domain_core:answered(Id, 21, lost, Down21)),
+?assertEqual(none, erx_domain_core:answered(Id, 21, other, Down21)),
+%% A connection_up the domain could not map is answered connection_lost.
+{ok, Lost22} = erx_domain_core:answered(Id, 22, lost, Down21),
+{ok, 0, _} = erx_domain_core:record_slot(Id, 23, mapped, Lost22),
+    %% The test_record hook's peer is an id no domain was given.
+    ?assertNot(erx_domain_core:unspent(Id, Ready)),
+    ?assert(erx_domain_core:unspent(Id + 1, Ready)).

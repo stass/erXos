@@ -285,4 +285,54 @@ erx_lane_put_status_t erx_lane_put(erx_lane_writer_t *,
 erx_lane_put_status_t erx_lane_put_armed(erx_lane_writer_t *,
     const erx_lane_item_t *, erx_lane_put_t *);
 
+/*
+ * The control table (docs/design-domains.md, "The control table"): slots
+ * fixed slots after the data area of the system domain's side of a
+ * domain's system connection, each holding at most one frame of
+ * ERX_LANE_CTL_SLOT bytes.  The system domain writes a slot with
+ * erx_lane_ctl_put, the table's one writer; the domain reads it with
+ * erx_lane_ctl_take, its one reader.  Each keeps its own copy of every
+ * slot's seq, the writer the one it stored last and the reader the one it
+ * took last, so neither reads back what it wrote.
+ */
+typedef enum erx_lane_ctl_status {
+	ERX_LANE_CTL_UNCHANGED,	/* seq is the reader's copy: nothing to take */
+	ERX_LANE_CTL_TOOK,	/* seq is one past the copy: the record taken */
+	ERX_LANE_CTL_REWRITTEN,	/* seq moved by anything but one: the
+				 * newest record taken, and the slot was
+				 * rewritten before its record was answered */
+	ERX_LANE_CTL_MALFORMED	/* a len or zero out of range, or a bad call */
+} erx_lane_ctl_status_t;
+
+/*
+ * The bytes of a side whose data area is size bytes followed by a control
+ * table of slots slots, rounded up to a page; erx_lane_side_bytes(size)
+ * rounded up for 0 slots.  0 for a size that is not a lane's.
+ */
+uint64_t erx_lane_ctl_side_bytes(uint64_t, uint32_t);
+
+/*
+ * Writes slot slot of the table on side, whose data area is size bytes
+ * and whose table has slots slots: the frame header, ctl_len bytes of ctl
+ * and payload_len bytes of payload, zeros to the slot's end, then len,
+ * and last seq with release order.  seq is the writer's own count of the
+ * records written into the slot, plus one.  The caller rings the domain's
+ * bell after it.  false, writing nothing, for a misaligned side, a size
+ * that is not a lane's, a slot past the table or a frame longer than
+ * ERX_LANE_CTL_SLOT.
+ */
+bool erx_lane_ctl_put(void *, uint64_t, uint32_t, uint32_t, uint64_t,
+    const void *, size_t, const void *, size_t);
+
+/*
+ * Looks at slot slot of the table on side, against kept, the seq the
+ * caller took from it last.  Unless seq is unchanged, copies len and zero
+ * once, checks len from ERX_FRAME_HEADER_SIZE to ERX_LANE_CTL_SLOT and zero
+ * zero, and copies the frame once into buf, which holds ERX_LANE_CTL_SLOT
+ * bytes; *len is the frame's length and *seq the seq it was read under,
+ * which the caller keeps once it has delivered the frame.
+ */
+erx_lane_ctl_status_t erx_lane_ctl_take(const void *, uint64_t, uint32_t,
+    uint32_t, uint64_t, void *, uint32_t *, uint64_t *);
+
 #endif /* ERX_LANE_H */

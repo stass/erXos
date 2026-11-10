@@ -172,7 +172,7 @@ class DomCoreTest < Minitest::Test
   def test_constructors_own_the_origin_and_fill_defaults
     lines = run_driver(driver, 'seeded').grep(/\Actor /)
     assert_includes lines, 'ctor given_atoms 0 5000 1024', 'atoms given, processes the default'
-    assert_includes lines, 'ctor spans 3 131072', 'the slice maps its files\' pages; the reader holds the reserve'
+    assert_includes lines, 'ctor spans 3 65536', 'the slice maps its files\' pages; the reader is the lane alone'
     %w[unknown_mask null_limits unknown_principal configured_row_out partial_row_out].each do |name|
       assert_includes lines, "ctor #{name} #{EINVAL}", name
     end

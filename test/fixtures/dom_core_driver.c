@@ -598,8 +598,8 @@ constructors(void)
 	    plan.spec.runtime_limits.atoms, plan.spec.runtime_limits.processes);
 	/*
 	 * Files 2-4 start at page 3 and the last ends 100 bytes into page 5, so
-	 * the slice's map covers three pages; the lane the domain reads holds
-	 * its 64 KiB lane and two connections' reserve, so it is 128 KiB.
+	 * the slice's map covers three pages; the lane the domain reads is its
+	 * 64 KiB lane alone, the control records travelling in the table.
 	 */
 	for (uint32_t index = 0; index < plan.nsteps; index++)
 		if (plan.steps[index].kind == ERX_DOM_STEP_MAP &&

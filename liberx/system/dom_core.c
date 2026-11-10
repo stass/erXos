@@ -323,22 +323,16 @@ dom_name(const erx_dom_spec_t *spec)
 }
 
 /*
- * The data area of the lane the domain reads from the system domain: the
- * smallest power of two holding its lane and the reserve for its
- * connections' control records.
+ * The data area of the lane the domain reads from the system domain: its
+ * lane alone, since connection-control records travel in the control
+ * table after it (docs/design-domains.md, "The control table").
  */
 static bool
 dom_reader_lane(const erx_dom_spec_t *spec, uint64_t *area)
 {
-	uint64_t need = (uint64_t)spec->connections * ERX_DOM_CTL_RESERVE;
-	uint64_t size = ERX_LANE_MIN;
-
-	if (spec->lane < ERX_LANE_MIN || spec->lane > ERX_LANE_MAX ||
-	    !dom_add(need, spec->lane, &need) || need > ERX_LANE_MAX)
+	if (erx_lane_ctl_side_bytes(spec->lane, spec->connections) == 0)
 		return (false);
-	while (size < need)
-		size *= 2;
-	*area = size;
+	*area = spec->lane;
 	return (true);
 }
 
@@ -440,7 +434,7 @@ dom_check_sizes(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 		    spec->system_lane != view->system_lane ||
 		    !dom_reader_lane(spec, reader))
 			return (ERX_EINVAL);
-		sys_side = erx_lane_side_bytes(*reader);
+		sys_side = erx_lane_ctl_side_bytes(*reader, spec->connections);
 		dom_side = erx_lane_side_bytes(spec->system_lane);
 		if (sys_side == 0 || dom_side == 0 ||
 		    !dom_add(sys_side, dom_side, child) ||
@@ -769,7 +763,7 @@ dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t span,
 		    .size = child });
 		dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_MEM,
 		    .obj = ERX_DOM_OBJ_SYS_SIDE, .budget = ERX_DOM_OBJ_SYS_BUDGET,
-		    .size = erx_lane_side_bytes(reader) });
+		    .size = erx_lane_ctl_side_bytes(reader, spec->connections) });
 		dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_MEM,
 		    .obj = ERX_DOM_OBJ_DOM_SIDE, .budget = ERX_DOM_OBJ_SYS_BUDGET,
 		    .size = erx_lane_side_bytes(spec->system_lane) });

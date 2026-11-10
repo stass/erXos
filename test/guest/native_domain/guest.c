@@ -373,23 +373,31 @@ boot_page_map(uint32_t id, uint32_t prot, const erx_dom_handles_t **held, uint64
 
 /*
  * Whether domain id's boot page names the size of the lane it reads from the
- * system domain: the system domain's side takes a mapping of that lane's
- * bytes, and not of a lane twice as large.
+ * system domain and its control table's slots: the system domain's side
+ * takes a mapping of exactly that lane with that table, and not of one page
+ * more.
  */
 static bool
 lanes_agree(uint32_t id)
 {
+	const erx_boot_info_t *info;
 	const erx_dom_handles_t *held;
-	uint64_t addr, in_size;
+	uint64_t addr, in_size, side;
+	uint32_t ctl_slots;
 
 	if (!boot_page_map(id, ERX_PROT_R, &held, &addr))
 		return (false);
-	in_size = ((const erx_boot_info_t *)(uintptr_t)addr)->system_connection.in_size;
+	info = (const erx_boot_info_t *)(uintptr_t)addr;
+	in_size = info->system_connection.in_size;
+	ctl_slots = info->system_connection.ctl_slots;
 	if (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) != ERX_OK)
 		return (false);
 	say_count("in_size", in_size);
-	return (maps(held->made[ERX_DOM_OBJ_SYS_SIDE], erx_lane_side_bytes(in_size)) &&
-	    !maps(held->made[ERX_DOM_OBJ_SYS_SIDE], erx_lane_side_bytes(in_size * 2)));
+	say_count("ctl_slots", ctl_slots);
+	side = erx_lane_ctl_side_bytes(in_size, ctl_slots);
+	return (ctl_slots > 0 && side != 0 &&
+	    maps(held->made[ERX_DOM_OBJ_SYS_SIDE], side) &&
+	    !maps(held->made[ERX_DOM_OBJ_SYS_SIDE], side + ERX_PAGE_SIZE));
 }
 
 /*

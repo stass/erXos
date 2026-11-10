@@ -34,20 +34,34 @@ creator's or any other domain's included, is dropped and counted; the
 service reads the count with {Ref, info, From}. A process of the system
 domain can write the envelope itself, so the check keeps other domains,
 not the system domain's own trusted processes, from speaking for this one.
+
+The pid writes the records the service hands it, {Ref, record, Slot, Record},
+into its domain's control table (docs/design-domains.md, "The control
+table"), through the system side's port the service handed it, {Ref, port,
+Port}: with the lane driver's control command 3, as a frame from itself to the
+agent, never as an ordinary message, which could wait behind a full lane or a
+paused port. The driver refuses the call with badarg from any other process
+and for a record that does not fit; the pid does not catch it, so its end
+stops the domain.
 """.
 
 -export([start_link/4]).
 
+%% The lane driver's port_control command that writes a control record (erx_lane_drv.c),
+%% and the SEND_SENDER control term's tag.
+-define(CONTROL_RECORD, 3).
+-define(SEND_SENDER, 22).
+
 %% What the pid knows of its domain: its service, id, node and secret, the agent its
 %% ready report named (none before the report) and how many messages it dropped.
 -type state() :: #{service := pid(), id := pos_integer(), node := node(), ref := reference(),
-                   agent := pid() | none, dropped := non_neg_integer()}.
+                   agent := pid() | none, port := port() | none, dropped := non_neg_integer()}.
 
 -spec start_link(pid(), pos_integer(), node(), reference()) -> pid().
 start_link(Service, Id, Node, Ref) ->
     %% Not proc_lib: a domain pid ends with {domain_down, Id, Info} at every
     %% end of its domain, which is no crash to report.
-    State = #{service => Service, id => Id, node => Node, ref => Ref, agent => none, dropped => 0},
+    State = #{service => Service, id => Id, node => Node, ref => Ref, agent => none, port => none, dropped => 0},
     spawn_link(fun() -> init(State) end).
 
 init(State) ->
@@ -59,6 +73,11 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
     receive
         {Ref, domain_down, Info} ->
             finish(Info, State);
+        {Ref, port, Port} ->
+            loop(State#{port := Port});
+        {Ref, record, Slot, Record} ->
+            write(Slot, Record, State),
+            loop(State);
         {Ref, info, From} ->
             #{agent := Agent, dropped := Dropped} = State,
             gen_server:reply(From, {ok, #{connections => Agent, dropped => Dropped}}),
@@ -80,6 +99,12 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
         _Other ->
             loop(dropped(State))
     end.
+
+%% A record into slot Slot of the table, from this pid to the agent the domain's report
+%% named; the service sends none before the report.
+write(Slot, Record, #{agent := Agent, port := Port}) when is_pid(Agent), is_port(Port) ->
+    Ctl = term_to_binary({?SEND_SENDER, self(), Agent}),
+    erlang:port_control(Port, ?CONTROL_RECORD, [<<Slot:32>>, Ctl, term_to_binary(Record)]).
 
 %% The domain's end, which the service tells the pid only once it has closed the domain's
 %% system side, so every frame the side delivered is in the pid's queue by then, though

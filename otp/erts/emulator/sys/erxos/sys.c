@@ -80,6 +80,7 @@
 #include "erl_cpu_topology.h"
 #include "erl_osenv.h"
 #include "erx_stdio.h"
+#include "erx_lane_drv.h"
 #include "erl_dyn_lock_check.h"
 extern int  driver_interrupt(int, int);
 extern void do_break(void);
@@ -674,5 +675,7 @@ erl_sys_args(int* argc, char** argv)
 {
     ASSERT(argc && argv);
 
+    if (!erx_lane_flags(argc, argv))
+        erts_exit(1, "erx: an -erx flag that is not lane_batch N, N from 1 to 2^32-1, or test_lane_hold\n");
     erts_sys_env_init();
 }

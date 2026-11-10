@@ -51,11 +51,11 @@ configured(Id, Row, DomainPid) when is_pid(DomainPid) ->
     {ok, #{domains := Rows}} = configured(),
     [Name] = [Name || #{row := R, name := Name} <- Rows, R =:= Row],
     put({domain, Id}, {DomainPid, Name}),
-    log({configured, Id, Row}), {ok, #{id => Id, connection => Id * 10}}.
+    log({configured, Id, Row}), {ok, #{id => Id, connection => Id * 10, ctl_slots => 4}}.
 create(#{memory := 1, domain_pid := DomainPid}) -> log({refused, DomainPid}), {error, enomem};
 create(#{id := Id, name := Name, domain_pid := DomainPid} = Spec) ->
     put({domain, Id}, {DomainPid, Name}),
-    log({create, Spec}), {ok, #{id => Id, connection => Id * 10}}.
+    log({create, Spec}), {ok, #{id => Id, connection => Id * 10, ctl_slots => 4}}.
 start(Id) ->
     case get({domain, Id}) of
         {_, <<"silent">>} -> ok;

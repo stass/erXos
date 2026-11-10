@@ -70,6 +70,10 @@ class LaneTest < Minitest::Test
                                                 '} else if (0 && __builtin_add_overflow(writer->pos,'],
     'a stopped reader loads wpos again' => ["\tif (reader->stopped)\n\t\twpos = reader->stop_wpos;", "\tif (0)\n\t\twpos = reader->stop_wpos;"],
     'a stop that skips its check' => ["\tif (fault != ERX_LANE_SOUND) {\n\t\t(void)lane_refuse(reader, fault);", "\tif (0) {\n\t\t(void)lane_refuse(reader, fault);"],
+    'a rewritten slot taken as one record' => ['return (ERX_LANE_CTL_REWRITTEN);', 'return (ERX_LANE_CTL_TOOK);'],
+    'a control len past the slot accepted' => ['got > ERX_LANE_CTL_SLOT ||', 'got > ERX_LANE_CTL_SLOT + 8 ||'],
+    'a short control frame leaves the old record' => ['for (size_t i = 0; i < sizeof(frame) / LANE_CTL_WORD; i++) {',
+                                                     'for (size_t i = 0; i < (len + 7) / LANE_CTL_WORD; i++) {'],
     'a crossed wake not rung' => ['return (lane_crossed(published, writer->pos, wake));', 'return (false);']
   }.freeze
 
@@ -109,7 +113,7 @@ class LaneTest < Minitest::Test
   def test_seeded_failures_are_caught
     MUTANTS.each do |name, (original, replacement)|
       mutant = build_driver(mutant_source(name, original, replacement), name: "mutant-#{slug(name)}", flags: [])
-      caught = %w[limits wlimits explore cuts writer].any? do |mode|
+      caught = %w[limits wlimits explore cuts writer ctl].any? do |mode|
         run_mode(mutant, mode)
         false
       rescue Erx::Error
@@ -117,6 +121,13 @@ class LaneTest < Minitest::Test
       end
       assert caught, "seeded failure not caught: #{name}"
     end
+  end
+
+  # The control table (docs/design-domains.md, "The control table"): its
+  # one writer and one reader over every slot, a rewritten slot, and every
+  # len and slot out of range.
+  def test_the_control_table
+    assert_equal({ 'cases' => 28 }, counters(run_mode(driver, 'ctl').fetch('ctl')))
   end
 
   WRITER_COUNTERS = %w[scenarios puts armed short empty header_only closes prod_parks rings_prod rings_cons

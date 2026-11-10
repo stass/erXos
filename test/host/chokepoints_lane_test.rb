@@ -27,6 +27,11 @@ class ChokepointsLaneTest < Minitest::Test
                                                     'otp/erts/emulator/sys/erxos/erl_lane_drv.c'])
     refute_empty evaluate(lane, { 'otp/erts/emulator/sys/erxos/erl_lane_drv.c' => "erx_lane_hdr_wpos_store(h, pos);\n" },
                           imported: ['otp/erts/emulator/sys/erxos/erl_lane_drv.c'])
+    # The control table's index is a shared layout too; the slot's size is a limit any caller may name.
+    refute_empty evaluate(lane, { 'otp/erts/emulator/sys/erxos/erl_lane_drv.c' => "const erx_lane_ctl_t *ctl = table;\n" },
+                          imported: ['otp/erts/emulator/sys/erxos/erl_lane_drv.c'])
+    assert_empty evaluate(lane, { 'otp/erts/emulator/sys/erxos/erl_lane_drv.c' => "uint8_t slot[ERX_LANE_CTL_SLOT];\nst = erx_lane_ctl_take(s, n, k, i, kept, slot, &len, &seq);\n" },
+                          imported: ['otp/erts/emulator/sys/erxos/erl_lane_drv.c'])
     refute_empty evaluate(lane, { 'otp/erts/emulator/beam/dist.c' => "struct erx_lane_hdr *h;\n" },
                           imported: ['otp/erts/emulator/beam/dist.c'])
     refute_empty evaluate(lane, { 'musl/src/thread/x.c' => "x = ERX_LANE_REC_SIZE;\n" }, imported: ['musl/src/thread/x.c'])

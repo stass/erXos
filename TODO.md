@@ -1510,14 +1510,9 @@ it; git history is the record of completed work.
   the principal's policy, which design-system.md requires for an ordinary
   domain; add the policy bit with the principal work after Phase 1b-A's
   one built-in principal.
-* [Low] domain library, `include/erx/dom.h`: `ERX_DOM_CTL_RESERVE`
-  (`ERX_CTL_MAX` plus 64 per connection) and `ERX_DOM_BELL_BYTES` (a
-  page per bell) are hand-chosen bounds. The control slot's room,
-  `ERX_LANE_CTL_SLOT` in
-  [design-domains.md](docs/design-domains.md#lanes-and-frames-in-the-abi),
-  should be the longest connection-control record (about ten times
-  smaller, so a domain's control table costs it about 100 KiB at 256
-  connections, not 1 MiB), and the bell's the kernel's IRQ object cost.
+* [Low] domain library, `include/erx/dom.h`: `ERX_DOM_BELL_BYTES` (a page
+  per bell) is a hand-chosen bound; it should be the kernel's IRQ object
+  cost.
 * [Low] domain library, `dom_core.c`: `erx_dom_plan_check` checks a
   plan's structure (order, charges, grants) but not the fields derivable
   from its specification (slice index and count, carve and object sizes,
@@ -2412,6 +2407,38 @@ it; git history is the record of completed work.
   design-domains (Domain lifecycle) places there and `boot_info.h` does not carry, as the
   target of the agent's answers; (4) the lane
   driver's drain to the write position read at `connection_down`.
+* [Low] Lane driver and domain service, two test hooks: the lane driver's control command 4
+  (`erx_lane_drv.c`, `control_hold`, allowed only under `-erx test_lane_hold`) holds a domain's
+  ring takes so the system_domain suite can fill the lane from the system domain, and
+  `erx_domain_srv`'s `{test_record, Id, Peer}` call has a domain pid write a dummy
+  `connection_down` about a peer id no domain was ever given. Edit 15's queue quota fills a ring by design and introduced connections
+  (`erx_domain:introduce/2`) send real records; once each lands, drive the suite's
+  control_table step from it and delete the hook, with the flag and `DOMAIN_ARGS`'s use of it.
+* [Medium] Domain service, control slots (`erx_domain_core` `record_slot/4`, `answered/4`):
+  the service core keeps a domain's control slots apart from the connection sides of
+  `erx_domain_links`, and frees a slot on the answer its record expects
+  (`connection_mapped` or `connection_lost` to `connection_up`, `connection_unmapped` to
+  `connection_down`), so both must agree on which answer ends a record. When introduced
+  connections send real records, let `erx_domain_links` own each side's slot, given with
+  the record it sends and freed by the one function that moves the side on an answer, and delete the core's slot
+  map. The core's one-record check is per peer domain id, while the design's one
+  outstanding record is per peer node name, which the links queues already keep.
+* [Low] Domain service, `erx_domain_links`: its model drops a `connection_lost` while a
+  side is `up_sent` ("a runtime answers connection_mapped before its port can report
+  connection_lost"), but design-domains' agent protocol answers a `connection_up` it could
+  not map with `{erx_connection_lost, Peer, {map, Status}}`, and the control slots free a
+  `connection_up`'s slot on either. Settle which, and make the links model and its
+  exhaustive test agree.
+* [Medium] Lane control table, `liberx/erx_lane.c` `erx_lane_ctl_take`: the reader loads a
+  slot's `seq`, then copies its frame, and does not load `seq` again after the copy, so a
+  writer that rewrote the slot during the copy (one that broke "A slot is rewritten only
+  after its last record is answered") yields a torn frame taken as one record. Load `seq`
+  again after the copy and report a change as a rewritten slot, with a host test that
+  rewrites between the two loads.
+* [Medium] Lane driver, `erx_lane_drv.c`: a side's part in its control table (writer,
+  reader, none) is read from which of `ctl_seq` and `ctl_in` are NULL at each site
+  (`table_step`, `control_record`, `control_hold`, the open). Give the connection an
+  explicit role enum set once at open, so each site matches on it.
 * [Low] ERTS distribution (`beam/dist.c`, `beam/erl_process.c`): where `erts_link_dist_insert` fails (dist.c's DOP_LINK and spawn paths, a remote spawn's link in `erl_process.c`), the link's `dist` stays NULL and `erts_proc_sig_send_link_exit_noconnection` dereferences it; stock, and thought unreachable on erXos, whose lane port holds the port lock across input and `erts_do_net_exits`, but not traced on every input path.
 * [Low] OTP kernel, `global_group` (edit 64 of design-runtime): `continue_handle_info/2`'s config-check `DOWN` takes `noconnection` as no contact and every other reason as a sync error, so with `global_groups` configured a domain's end, `{domain_down, D, Info}` (edit 56), puts the node in `sync_error`; erXos configures no global groups, but the guard is one line.
 * [Low] Oracle, pid text (edit 18): OTP cases that write a local pid as `"<0.N.S>"` get `badarg` in a runtime

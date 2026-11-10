@@ -66,6 +66,11 @@ limit ctl_max u32 4096
 limit rec_frame u32 1
 limit lane_side_rpage u32 4096
 limit lane_side_data u32 8192
+# The bytes of one control slot (docs/design-domains.md, "The control
+# table"): the longest connection-control record, a connection_up naming
+# a peer of the longest node name, as one frame, rounded up to 16.
+# test/host/lane_ctl_slot_test.rb encodes that record and checks it fits.
+limit lane_ctl_slot u32 896
 limit label_split u32 2147483648
 limit boot_version u32 1
 limit boot_strings_max u32 2048
@@ -281,6 +286,26 @@ layout erx_lane_rpage shared 8 16
   owner wake consumer all
   visibility rpos release
   visibility wake release
+# A control table index entry (docs/design-domains.md, "The control
+# table"). The system domain writes len and the frame, then seq with
+# release order; the domain loads seq with acquire order, then len and
+# zero once each.
+layout erx_lane_ctl shared 8 16
+  field seq u64 0
+  field len u32 8
+  field zero u32 12
+  atomic seq load acquire store release
+  atomic len load relaxed store relaxed
+  atomic zero load relaxed store relaxed
+  writer seq producer
+  writer len producer
+  writer zero producer
+  owner seq producer all
+  owner len producer all
+  owner zero producer all
+  visibility seq release
+  visibility len release
+  visibility zero release
 layout erx_lane_rec wire_le 8 16
   field len u32 0
   field kind u32 4
@@ -320,8 +345,9 @@ layout erx_runtime_limits wire_le 8 64
 # A connection on the boot page (docs/design-runtime.md, "Data model").
 # domain_pid_number and domain_pid_serial are the domain pid's ID and
 # Serial as NEW_PID_EXT writes them, a process of the peer's node; all
-# zero with no peer.
-layout erx_boot_connection wire_le 8 56
+# zero with no peer. ctl_slots is the number of slots of the control
+# table that ends the peer's side, the side the domain reads.
+layout erx_boot_connection wire_le 8 64
   field side cap 0
   field peer_side cap 8
   field peer_bell cap 16
@@ -333,7 +359,9 @@ layout erx_boot_connection wire_le 8 56
   field in_size u32 44
   field domain_pid_number u32 48
   field domain_pid_serial u32 52
-layout erx_boot_info wire_le 8 288
+  field ctl_slots u32 56
+  padding 60 4
+layout erx_boot_info wire_le 8 296
   field version u32 0
   field abi_version u32 4
   field domain_id u32 8
@@ -352,18 +380,18 @@ layout erx_boot_info wire_le 8 288
   field seal_addr u64 96
   field crash_area cap 104
   field system_connection erx_boot_connection 112
-  field cpuset u64 168
-  field capacity_mcpu u32 176
-  field node_off u32 180
-  field node_len u32 184
-  field args_off u32 188
-  field args_len u32 192
-  field env_off u32 196
-  field env_len u32 200
-  padding 204 4
-  field hwcap u64 208
-  field hwcap2 u64 216
-  field limits erx_runtime_limits 224
+  field cpuset u64 176
+  field capacity_mcpu u32 184
+  field node_off u32 188
+  field node_len u32 192
+  field args_off u32 196
+  field args_len u32 200
+  field env_off u32 204
+  field env_len u32 208
+  padding 212 4
+  field hwcap u64 216
+  field hwcap2 u64 224
+  field limits erx_runtime_limits 232
 
 # The header of a domain's crash area (docs/design-runtime.md, "Data
 # model"), which the domain library makes ERX_CRASH_SIZE bytes. The

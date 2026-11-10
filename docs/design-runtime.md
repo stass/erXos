@@ -594,7 +594,7 @@ system connection's peer by its node name and id as well, as
 pid, the system domain's process that admits the domain and that the
 domain reports to, which exported itself to the domain with `send` before
 the domain started ([Connections in ERTS](#connections-in-erts)).
-With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 288,
+With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 296,
 with the **root extension**, `erx_boot_root_extension_t`, which the ABI
 generator derives from the ABI file's `cap` lines, so that nothing is copied by
 hand: one capability value for each root slot, the value of slot N at offset
@@ -1009,7 +1009,17 @@ service gives (**Closing**, below); it serves these two requests as calls
 from the domain service and takes no record from a lane, since the
 system domain is a party of no connection but the system connections.
 The agent's answer to the open call names the port, which the domain
-service hands to the domain pid.
+service hands to the domain pid. The open command of that side is
+`erx_lane table` and its words, the system domain's own side first, then
+the domain's side, the domain's bell, the label, the data areas of the
+lanes the port writes and reads, the domain's id, the number and serial
+of the domain pid, the one process whose records the port writes, the
+control table's slots, and the domain's node; the domain library's
+created map carries every one of them (`ctl_slots`,
+`domain_pid_number` and `domain_pid_serial` beside the sides, the bell,
+the label and the sizes). A domain's own port for its system connection
+opens as `erx_lane system`, from its boot page, whose system connection
+names the table's `ctl_slots` too.
 
 **Control records.** The system domain's side of each domain's system
 connection ends in the domain's control table
@@ -3283,6 +3293,7 @@ specification writes each `+` as `-`:
 | `+sbwt`, `+sbwtdcpu`, `+sbwtdio`: `none` (default) or `very_short` | busy waiting before parking, which spends the group's quota; longer settings are clamped to `very_short` |
 | `+JPperf`, `+JMsingle` | ignored with a warning: there is no `perf`, and a mapping is never writable and executable at once |
 | `-erx lane_batch N` | frames one run of a connection port's input task takes before it reschedules itself |
+| `-erx test_lane_hold` | a test's switch, off by default: a process of the domain may then hold its own system connection's ring with the lane driver's control command 4, `port_control(Port, 4, <<1>>)`, which the input task obeys by taking only the control table until `<<0>>` releases it; without the flag the command answers `badarg`. It reaches only the domain's own port, so no other domain |
 | `-erx queue_quota N` | the queue quota of each process of a domain outside the system domain: the bytes of undecoded frames from other domains queued on it past which the drain leaves the next frame for it in the lane; unset by default, so a process's queue grows until its `max_heap_size`, as in stock OTP; the system domain ignores it and takes each process's quota from its facet's grant or the manifest's `system_queue` ([design-domains.md](design-domains.md#flow-control)) |
 
 ## Compatibility and migration

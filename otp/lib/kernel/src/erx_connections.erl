@@ -24,7 +24,8 @@
 -type side_values() :: #{node := node(), connection := pos_integer(), side := non_neg_integer(),
                          peer_side := non_neg_integer(), bell := non_neg_integer(),
                          reader := pos_integer(), system_lane := pos_integer(),
-                         atom() => term()}.
+                         ctl_slots := non_neg_integer(), domain_pid_number := non_neg_integer(),
+                         domain_pid_serial := non_neg_integer(), atom() => term()}.
 
 %% The acceptor, linked to net_kernel as OTP's carriers start theirs.
 -spec start(pid(), {pos_integer(), node(), pid()} | none) -> pid().
@@ -67,7 +68,7 @@ init(Kernel, System) ->
 %% loops act on net_kernel's end, which the agent's link brings as 'EXIT' (kernel_ended/1).
 serve(Kernel, none) ->
     sides(Kernel, #{});
-serve(Kernel, {PeerId, PeerNode, _DomainPid}) ->
+serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
     try
         Port = open_port({spawn_driver, "erx_lane system"}, [binary]),
         case hand_over(Kernel, #{port => Port, node => PeerNode, id => PeerId, system => true}) of
@@ -80,7 +81,7 @@ serve(Kernel, {PeerId, PeerNode, _DomainPid}) ->
         exit:shutdown -> exit(shutdown);
         Class:Reason -> erx_dist:unavailable(system_connection, {Class, Reason})
     end,
-    drop(Kernel).
+    records(Kernel, PeerId, DomainPid).
 
 %% The system domain's agent: the domain service's two calls, with each open side by domain
 %% id as {Port, Monitor, Service}: its port, the monitor on it and the process that opened
@@ -130,19 +131,25 @@ sides(Kernel, Sides) ->
             sides(Kernel, Sides)
     end.
 
-%% The port's open command names the system domain's own side first, the one it writes,
-%% then the domain's, the domain's bell, the label, the data areas of the lanes it writes
-%% and reads, and the peer, the domain, by id and node (erx_lane_drv.c, lane_open_parse).
+%% The port's open command, "erx_lane table" and its words, names the system domain's own
+%% side first, the one it writes and whose control table it ends in, then the domain's, the
+%% domain's bell, the label, the data areas of the lanes it writes and reads, the peer, the
+%% domain, by id, the number and serial of the domain pid, the one process whose control
+%% records the port writes, the table's slots, and the domain's node (erx_lane_drv.c,
+%% lane_open_parse).
 %% The library names the sides and the bell from the domain's view: side and bell are the
 %% domain's, peer_side the system domain's; reader is the lane the system domain writes,
 %% system_lane the one it reads. A port that net_kernel did not take is ended before the
 %% answer, so no refused open leaves a port mapping the connection's objects.
 open(Kernel, Id, #{node := Node, connection := Label, side := DomainSide, peer_side := OwnSide,
-                   bell := Bell, reader := Reader, system_lane := SystemLane})
+                   bell := Bell, reader := Reader, system_lane := SystemLane, ctl_slots := CtlSlots,
+                   domain_pid_number := PidNumber, domain_pid_serial := PidSerial})
   when is_atom(Node), is_integer(Label), is_integer(DomainSide), is_integer(OwnSide),
-       is_integer(Bell), is_integer(Reader), is_integer(SystemLane) ->
-    Words = [integer_to_list(Word) || Word <- [OwnSide, DomainSide, Bell, Label, Reader, SystemLane, Id]],
-    Command = lists:join($\s, ["erx_lane" | Words] ++ [atom_to_list(Node)]),
+       is_integer(Bell), is_integer(Reader), is_integer(SystemLane), is_integer(CtlSlots),
+       is_integer(PidNumber), is_integer(PidSerial) ->
+    Words = [integer_to_list(Word) || Word <- [OwnSide, DomainSide, Bell, Label, Reader, SystemLane, Id,
+                                               PidNumber, PidSerial, CtlSlots]],
+    Command = lists:join($\s, ["erx_lane", "table" | Words] ++ [atom_to_list(Node)]),
     try open_port({spawn_driver, lists:flatten(Command)}, [binary]) of
         Port -> accepted(Kernel, Port, #{port => Port, node => Node, id => Id, system => false})
     catch
@@ -222,12 +229,21 @@ hand_over(Kernel, #{port := Port} = Connection) ->
             kernel_ended(Reason)
     end.
 
-%% A domain's agent acts on nothing but net_kernel's end; what else arrives is dropped, so
-%% its queue stays empty.
-drop(Kernel) ->
+%% A domain's agent, once its system connection is up: the connection-control records the
+%% system domain's domain pid writes into the control table, which arrive in the envelope
+%% of the system domain, PeerId, and net_kernel's end; what else arrives is dropped, so its
+%% queue stays empty. The agent maps no introduced connection, so a connection_down names
+%% one it does not hold, which it answers as unmapped (docs/design-domains.md, "Messages
+%% between the domain service and a runtime").
+records(Kernel, PeerId, DomainPid) ->
     receive
-        {'EXIT', Kernel, Reason} -> kernel_ended(Reason);
-        _ -> drop(Kernel)
+        {erx_origin, PeerId, {erx_connection_down, Peer, _Reason}} when is_integer(Peer) ->
+            DomainPid ! {erx_connection_unmapped, Peer},
+            records(Kernel, PeerId, DomainPid);
+        {'EXIT', Kernel, Reason} ->
+            kernel_ended(Reason);
+        _ ->
+            records(Kernel, PeerId, DomainPid)
     end.
 
 %% net_kernel's end. net_kernel traps exits, so only its supervisor ends it with shutdown:

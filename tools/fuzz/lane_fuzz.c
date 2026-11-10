@@ -19,6 +19,18 @@
  *   7  stop: the reader fixes wpos at what it loads, and every later take
  *      is judged against that copy
  *
+ * With setup bit 2 the script drives the control table after a 4 KiB area
+ * instead (docs/design-domains.md, "The control table"), each operation
+ * an opcode byte and a slot byte, the slot one past the table included:
+ *
+ *   0  an index entry = an 8-byte seq, a 4-byte len and a 4-byte zero
+ *   1  a frame word of the slot = an 8-byte value, at a 1-byte word index
+ *   2  take the slot against the seq last taken from it
+ *
+ * and every take must agree with the harness's plain copy of the table:
+ * nothing for an unchanged seq, a refusal exactly for a len or zero out of
+ * range, and otherwise the frame's len bytes as written.
+ *
  * The harness writes the producer's side only through atomic stores and
  * keeps a plain copy of the area, so after every take it can check that
  * the reader copied exactly the bytes at the positions it claims, never
@@ -38,11 +50,13 @@
 
 #define FUZZ_AREA_MAX	8192
 #define FUZZ_BUF	65536
+#define FUZZ_SLOTS	3u
+#define FUZZ_TABLE	(FUZZ_SLOTS * (ERX_LANE_CTL_SIZE + ERX_LANE_CTL_SLOT))
 
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 static _Alignas(ERX_PAGE_SIZE) unsigned char
-    peer_side[ERX_LANE_SIDE_DATA + FUZZ_AREA_MAX];
+    peer_side[ERX_LANE_SIDE_DATA + FUZZ_AREA_MAX + FUZZ_TABLE];
 static _Alignas(ERX_PAGE_SIZE) unsigned char own_side[ERX_LANE_SIDE_DATA];
 static unsigned char shadow[FUZZ_AREA_MAX];
 static unsigned char buf[FUZZ_BUF];
@@ -135,6 +149,95 @@ judge(const erx_lane_reader_t *reader, erx_lane_status_t st,
 	*last_rpos = rpos;
 }
 
+/* The control table after a 4 KiB area, and the harness's plain copy of it. */
+typedef struct ctl_shadow {
+	uint64_t	 seq[FUZZ_SLOTS], kept[FUZZ_SLOTS];
+	uint32_t	 len[FUZZ_SLOTS], zero[FUZZ_SLOTS];
+	unsigned char	 frame[FUZZ_SLOTS][ERX_LANE_CTL_SLOT];
+} ctl_shadow_t;
+
+static erx_lane_ctl_t *
+ctl_entry(uint64_t slot)
+{
+	return ((erx_lane_ctl_t *)(peer_side + ERX_LANE_SIDE_DATA + ERX_LANE_MIN +
+	    slot * ERX_LANE_CTL_SIZE));
+}
+
+static _Atomic uint64_t *
+ctl_word(uint64_t slot, uint64_t index)
+{
+	return ((_Atomic uint64_t *)(peer_side + ERX_LANE_SIDE_DATA +
+	    ERX_LANE_MIN + FUZZ_SLOTS * ERX_LANE_CTL_SIZE +
+	    slot * ERX_LANE_CTL_SLOT) + index);
+}
+
+static void
+ctl_take(ctl_shadow_t *t, uint64_t slot)
+{
+	uint32_t len = 0;
+	uint64_t seq = 0;
+	erx_lane_ctl_status_t st;
+
+	st = erx_lane_ctl_take(peer_side, ERX_LANE_MIN, FUZZ_SLOTS,
+	    (uint32_t)slot, slot < FUZZ_SLOTS ? t->kept[slot] : 0, buf, &len,
+	    &seq);
+	if (slot >= FUZZ_SLOTS) {
+		check(st == ERX_LANE_CTL_MALFORMED);
+		return;
+	}
+	check(seq == t->seq[slot]);
+	if (seq == t->kept[slot]) {
+		check(st == ERX_LANE_CTL_UNCHANGED);
+		return;
+	}
+	if (t->len[slot] < ERX_FRAME_HEADER_SIZE ||
+	    t->len[slot] > ERX_LANE_CTL_SLOT || t->zero[slot] != 0) {
+		check(st == ERX_LANE_CTL_MALFORMED);
+		return;
+	}
+	check(st == (seq == t->kept[slot] + 1 ? ERX_LANE_CTL_TOOK :
+	    ERX_LANE_CTL_REWRITTEN));
+	check(len == t->len[slot] && memcmp(buf, t->frame[slot], len) == 0);
+	t->kept[slot] = seq;
+}
+
+static int
+ctl_script(script_t *s)
+{
+	static ctl_shadow_t t;
+	uint64_t op, slot, seq, len, zero, index, word;
+
+	memset(&t, 0, sizeof(t));
+	while (script_take(s, 1, &op) && script_take(s, 1, &slot)) {
+		slot %= FUZZ_SLOTS + 1;
+		switch (op % 3) {
+		case 0:
+			if (!script_take(s, 8, &seq) || !script_take(s, 4, &len) ||
+			    !script_take(s, 4, &zero) || slot >= FUZZ_SLOTS)
+				return (0);
+			t.seq[slot] = seq, t.len[slot] = (uint32_t)len;
+			t.zero[slot] = (uint32_t)zero;
+			(void)erx_lane_ctl_len_store(ctl_entry(slot), (uint32_t)len);
+			(void)erx_lane_ctl_zero_store(ctl_entry(slot), (uint32_t)zero);
+			(void)erx_lane_ctl_seq_store(ctl_entry(slot), seq);
+			break;
+		case 1:
+			if (!script_take(s, 1, &index) || !script_take(s, 8, &word) ||
+			    slot >= FUZZ_SLOTS)
+				return (0);
+			index %= ERX_LANE_CTL_SLOT / 8;
+			memcpy(t.frame[slot] + index * 8, &word, 8);
+			atomic_store_explicit(ctl_word(slot, index), word,
+			    memory_order_relaxed);
+			break;
+		default:
+			ctl_take(&t, slot);
+			break;
+		}
+	}
+	return (0);
+}
+
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
@@ -155,6 +258,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	memset(peer_side, 0, sizeof(peer_side));
 	memset(own_side, 0, sizeof(own_side));
 	memset(shadow, 0, sizeof(shadow));
+	if ((value & 4) != 0)
+		return (ctl_script(&s));
 	rpage = (erx_lane_rpage_t *)(own_side + ERX_LANE_SIDE_RPAGE);
 	check(erx_lane_reader_init(&reader, peer_side, own_side, area));
 	/* A lane that starts high: as if base bytes had passed. */

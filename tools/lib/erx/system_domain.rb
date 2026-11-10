@@ -45,16 +45,22 @@ module Erx
     MACHINE = MediumBoot::MACHINE
     # What the configured domains' ERTS runs: MediumBoot's arguments without the -eval
     # that halts, so its init runs the release's boot script over the erx carrier and the
-    # domain stays up as a node.
+    # domain stays up as a node, behind the emulator flag that lets the control_table step
+    # hold its system connection's ring (erx_lane_drv.c, port_control 4).
     raise Error, 'MediumBoot::DOMAIN_ARGS no longer ends in its -eval' unless MediumBoot::DOMAIN_ARGS[-2] == '-eval'
+    raise Error, 'MediumBoot::UP_ARGS no longer starts with --' unless MediumBoot::UP_ARGS.first == '--'
 
-    DOMAIN_ARGS = MediumBoot::UP_ARGS
+    DOMAIN_ARGS = ['-erx', 'test_lane_hold', *MediumBoot::UP_ARGS].freeze
 
-    # MediumBoot's configured row with DOMAIN_ARGS, and a second domain, peer, of the same
-    # limits and arguments: restarts 0, so the domain service starts each once, at boot.
+    # MediumBoot's configured row with DOMAIN_ARGS and one connection, so its control table
+    # has one slot, and a second domain, peer, of the same limits and arguments: restarts 0,
+    # so the domain service starts each once, at boot.
     ARGS_LINE = /^  args ".*"\n\z/
-    DOMAIN_ROW = MediumBoot::DOMAIN_ROW.sub(ARGS_LINE, "  args \"#{DOMAIN_ARGS.join(' ')}\"\n").freeze
-    raise Error, 'MediumBoot::DOMAIN_ROW does not end in its args line' if DOMAIN_ROW == MediumBoot::DOMAIN_ROW
+    CONNECTIONS_LINE = /^  connections 0\n/
+    DOMAIN_ROW = MediumBoot::DOMAIN_ROW.sub(ARGS_LINE, "  args \"#{DOMAIN_ARGS.join(' ')}\"\n")
+                                       .sub(CONNECTIONS_LINE, "  connections 1\n").freeze
+    raise Error, 'MediumBoot::DOMAIN_ROW does not end in its args line' unless DOMAIN_ROW.include?('test_lane_hold')
+    raise Error, 'MediumBoot::DOMAIN_ROW has no connections 0 line' unless DOMAIN_ROW.include?("  connections 1\n")
 
     PEER_ROW = DOMAIN_ROW[/^domain erts\n.*/m].to_s.sub(/\Adomain erts\n/, "domain peer\n").freeze
     raise Error, 'MediumBoot::DOMAIN_ROW has no domain erts' unless PEER_ROW.start_with?("domain peer\n")
@@ -165,6 +171,44 @@ module Erx
                          '{lists:reverse(SdTacc),timeout} end end,{SdTgot,SdTex}=SdTl([]),SdTs!{sd_collected,self(),' \
                          '{length(SdTgot),SdTgot=:=lists:seq(1,length(SdTgot)),SdTex}} end),' \
                          'receive {sd_collecting,SdTc}->SdTc end end'
+    # The control table (docs/design-domains.md, "The control table"): SdHold runs in
+    # erts and, told {sd_hold, R, N}, holds its system connection's ring (port_control 4,
+    # allowed by DOMAIN_ARGS's -erx test_lane_hold), says {sd_holding, H} to R, waits until
+    # its port counts N more control records taken (the counts' eleventh word, ctl_taken,
+    # erx_lane_drv.h), lets 500 ms more pass, releases the ring and answers
+    # {sd_held, H, Got, Taken, Rewritten}. While it holds, the shell fills erts's lane with
+    # 1 KiB sends to a sink until a send would suspend, so the system side's port is paused
+    # (its second word grew), calls command 3 on that port itself, which only the domain pid
+    # may (badarg), and then has the domain service write N records one at a time through
+    # erts's domain pid (its test_record hook), each a connection_down about a connection
+    # erts does not hold, which erts's agent gets as {erx_origin, 4, Msg} and answers
+    # unmapped, so the slot is free again (SdFree). Every record arrives behind the full,
+    # paused lane, and the stray call writes none: Taken is N exactly.
+    RECORDS = 3
+    SERVICE_KILL_TABLE = 'SdTid=' + CONFIGURED_ID.to_s + ',' \
+                         'SdHold=fun()->receive {erx_origin,_,{sd_hold,SdHr,SdHn}}->ok end,SdHp=hd([SdHq||SdHq<-erlang:ports(),' \
+                         'erlang:port_info(SdHq,name)=:={name,"erx_lane system"}]),' \
+                         'SdHc=fun()-><<_:80/binary,SdHt:64,SdHw:64>>=iolist_to_binary(erlang:port_control(SdHp,0,[])),{SdHt,SdHw} end,' \
+                         '{SdHt0,_}=SdHc(),erlang:port_control(SdHp,4,<<1>>),SdHr!{sd_holding,self()},' \
+                         'SdHwt=fun SdHwf(0)->timeout;SdHwf(SdHk)->case SdHc() of {SdHt1,_} when SdHt1>=SdHt0+SdHn->ok;' \
+                         '_->timer:sleep(10),SdHwf(SdHk-1) end end,SdHg=SdHwt(3000),timer:sleep(500),{SdHt2,SdHw2}=SdHc(),' \
+                         'erlang:port_control(SdHp,4,<<0>>),SdHr!{sd_held,self(),SdHg,SdHt2-SdHt0,SdHw2} end,' \
+                         'SdSys=hd([SdSp||SdSp<-erlang:ports(),{name,SdSn}<-[erlang:port_info(SdSp,name)],lists:suffix(" erts@erxos",SdSn)]),' \
+                         'SdPaused=fun()-><<_:64,SdPw:64,_/binary>>=iolist_to_binary(erlang:port_control(SdSys,0,[])),SdPw end,' \
+                         'SdSlots=fun()->{ok,#{slots:=SdSs}}=erx_domain_core:fetch(SdTid,maps:get(core,sys:get_state(erx_domain_srv))),SdSs end,' \
+                         'SdFree=fun SdFf(0)->timeout;SdFf(SdFk)->case SdSlots() of #{}=SdFm when map_size(SdFm)=:=0->ok;' \
+                         '_->timer:sleep(10),SdFf(SdFk-1) end end,' \
+                         'SdTag=erpc:call(erts@erxos,erlang,whereis,[erx_connections],10000),' \
+                         'SdSink=spawn(erts@erxos,timer,sleep,[infinity]),SdHo=spawn(erts@erxos,SdHold),SdHm=monitor(process,SdHo),' \
+                         "SdHo!{sd_hold,self(),#{RECORDS}},SdHolding=receive {erx_origin,_,{sd_holding,SdHo}}->ok;{'DOWN',SdHm,_,_,SdHx0}->{down,SdHx0} " \
+                         'after 10000->timeout end,SdP0=SdPaused(),' \
+                         'SdFill=fun SdFl(0)->never;SdFl(SdFk)->case erlang:send(SdSink,<<0:8192>>,[nosuspend]) of ' \
+                         'nosuspend->full;_->SdFl(SdFk-1) end end,SdFull=SdFill(100000),' \
+                         'SdStray=try erlang:port_control(SdSys,3,[<<0:32>>,term_to_binary({22,self(),SdTag}),' \
+                         'term_to_binary({erx_connection_down,999,noconnection})]) catch error:badarg->badarg end,' \
+                         "SdRecs=[case gen_server:call(erx_domain_srv,{test_record,SdTid,100+SdRi}) of {ok,0}->SdFree(3000);SdRo->SdRo end||SdRi<-lists:seq(1,#{RECORDS})]," \
+                         "SdHeld=receive {erx_origin,_,{sd_held,SdHo,SdHg1,SdHt3,SdHw3}}->{SdHg1,SdHt3,SdHw3};{'DOWN',SdHm,_,_,SdHx1}->{down,SdHx1} " \
+                         'after 60000->timeout end'
     # A watcher of a process of peer, then peer's system side's port, found by its open
     # command, whose last word is the domain's node (erx_connections:open/3), ended with
     # {domain_down, D2, x}, D2 erts's id and not peer's: the watcher's link and monitor
@@ -202,6 +246,7 @@ module Erx
                               "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL},#{SERVICE_KILL_BURST}," \
                               'SdL=SdWait(600),' \
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
+                              "#{SERVICE_KILL_TABLE},io:format(\"~0p~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdRecs,SdHeld}])," \
                               "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
@@ -225,6 +270,10 @@ module Erx
         "{#{BURST},true,#{down}}}".freeze
     end
     DOMAIN_ENDS_START = /\A\{domain_ends,/n
+    # The lane filled and the side paused, the stray call refused, every record answered and
+    # its slot freed, and erts's port took the records and nothing more, none rewritten.
+    CONTROL_TABLE_ANSWER = "{control_table,ok,full,true,badarg,[#{(['ok'] * RECORDS).join(',')}],{ok,#{RECORDS},0}}"
+    CONTROL_TABLE_START = /\A\{control_table,/n
     # init's slogan as it halts the runtime once the permanent application erx_domain has
     # ended, shut down by its supervisor; it may follow an unended prompt. The application
     # controller's reason is a string, which init prints with its quotes:
@@ -244,10 +293,13 @@ module Erx
 
       answer = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
       ends = /\A#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
+      table = /\A#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: "#{SERVICE_KILL_EXPRESSION}\r").freeze,
        { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
+       { name: 'control-table', pattern: CONTROL_TABLE_START, seconds: 180,
+         verify: ->(text) { raise Error, "the control table answered #{text.inspect}" unless table.match?(text) } }.freeze,
        { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,
          verify: ->(text) { raise Error, "the domains ended as #{text.inspect}" unless ends.match?(text) } }.freeze,
        { name: 'system-domain-ended', pattern: SLOGAN_PATTERN, seconds: 60,

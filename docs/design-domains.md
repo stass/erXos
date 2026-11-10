@@ -799,20 +799,22 @@ that `len` lies in range and `zero` is zero, copies the frame once and
 runs it through the funnel as it does a frame from the ring, which
 delivers it as a message from its sender, the domain pid
 ([design-runtime.md](design-runtime.md#connections-in-erts)). Which slot
-a record goes in is the domain service's choice: a connection of the
-domain holds one slot from its introduction until the domain has
-answered every record written into that slot, or has ended, and takes
-the lowest slot no other connection of the domain holds. A connection
-counts against `connections` for at least that long, so every connection
-the domain service may make finds a free slot.
+a record goes in is the domain service's choice: each record takes the
+lowest slot no other connection of the domain holds, and its connection
+holds that slot until the domain gives the answer the record waits for
+(`connection_mapped` or `connection_lost` to a `connection_up`,
+`connection_unmapped` to a `connection_down`), or has ended. A
+connection has at most one record unanswered and counts against
+`connections` for at least that long, so every connection the domain
+service may make finds a free slot.
 
 **A slot is rewritten only after its last record is answered.** A slot
-passes to another connection only once the domain has answered every
-record written into it, and within one connection the domain service
+passes to another record only once the domain has answered the one
+written into it, and within one connection the domain service
 writes `connection_down` only once the domain has answered the
 connection's `connection_up`. The domain answers a record only after it
 has taken it, so no write overlaps the domain's copy and no record is
-overwritten before it is taken. A `seq` that moved by more than one says
+overwritten before it is taken. A `seq` that moved by anything but one says
 the system domain broke that rule; the domain counts it as a rewritten
 slot and takes the newest record.
 
@@ -1897,7 +1899,10 @@ keeps any.
   dead domain written before its peer learnt of the end is lost with the
   connection.
 
-`Info` is `{halt, Status}`, `crash`, `{fault, Kind}` or `stopped`. The
+`Info` is `{halt, Status}`, `crash`, `{fault, Kind}` or `stopped`, its
+`Status` and `Kind` each a 64-bit integer, so a `connection_down` is
+bounded and shorter than the longest `connection_up`, which alone fixes
+`ERX_LANE_CTL_SLOT`. The
 domain pid exits with the same `{domain_down, D, Info}`; the detail behind
 it, such as a crash slogan, a fault record or the reason a policy stopped
 the domain, is in the domain's crash area

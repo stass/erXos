@@ -31,6 +31,14 @@
  * the port is in its finish, and what it does for each event, is erx_lane_core.c's pure
  * decision; the callbacks here gather an event's facts and apply that decision. This file
  * is the one caller of erts_net_message (tools/lib/erx/chokepoint_rules/funnel.rb).
+ *
+ * The control table (docs/design-domains.md, "The control table"), on a domain's system
+ * connection only: the system domain's port for it writes each connection-control record
+ * into a slot of the table at the end of its own side (port_control 3), from the domain pid
+ * alone, and rings the domain's bell; neither the ring nor the entry's queue is touched, so
+ * a full lane or a paused port never holds a record back. The domain's port takes every
+ * changed slot at the top of each run that takes, before the ring and outside the allowance,
+ * into a buffer of one slot's size, and judges and delivers it as a ring's frame.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -67,11 +75,15 @@
 #define CONTROL_COUNTS		0
 #define CONTROL_KICK		1
 #define CONTROL_FINISH		2
+#define CONTROL_RECORD		3
+#define CONTROL_HOLD		4
 /* Room for an over-limit exit's reason behind the held control term (input_too_large). */
 #define TOO_LARGE_REASON_MAX	(ERX_FUNNEL_ASM_FIRST - ERX_FUNNEL_ASM_KEEP)
 
 /* The allowance of one run of the input task, -erx lane_batch. */
 uint32_t erx_lane_batch = ERX_LANE_BATCH_DEFAULT;
+/* -erx test_lane_hold: port_control 4 may hold the ring of the system connection. */
+bool erx_lane_test_hold = false;
 
 typedef struct lane_conn {
 	ErlDrvPort		 port;
@@ -104,6 +116,20 @@ typedef struct lane_conn {
 	/* Where the port is in its finish, and the process that asked for it, told when done. */
 	erx_lane_port_state_t	 state;
 	ErlDrvTermData		 finisher;
+
+	/*
+	 * The control table: ctl_slots slots after the data area of the system domain's side,
+	 * which is the own side of the table's writer and the peer side of its reader; no table
+	 * when ctl_seq is NULL. ctl_seq holds each slot's seq, the one the writer stored last or
+	 * the reader took last. The writer serves only the domain pid, the system domain's
+	 * process of pid_number and pid_serial; the reader copies a slot's frame into ctl_in.
+	 */
+	uint32_t		 ctl_slots;
+	uint64_t		*ctl_seq;
+	uint8_t			*ctl_in;
+	uint32_t		 pid_number, pid_serial;
+	uint32_t		 out_size, in_size;
+	bool			 ring_held;	/* port_control 4, -erx test_lane_hold only */
 
 	/* What the port did, for erlang:port_control/3 and the tests. */
 	uint64_t		 counts[ERX_LANE_COUNTS];
@@ -360,25 +386,39 @@ input_grow(lane_conn_t *conn, size_t want)
 }
 
 /*
+ * A frame to judge and act on: the ring's open record, in the record buffer, or a control
+ * slot's copy, in ctl_in. len is the record's len, held the bytes of it in buf (fewer only
+ * for a ring record in discard mode), cap the bytes buf holds.
+ */
+typedef struct lane_frame {
+	uint8_t		*buf;
+	uint32_t	 len;
+	size_t		 held;
+	size_t		 cap;
+} lane_frame_t;
+
+/*
  * The frame ERTS reads: the control term behind a pass-through byte, which overwrites
  * the frame header's last byte once the funnel has judged it, and then the payload.
  */
 static void
-input_deliver(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, size_t len, erx_net_answer_t answer)
+input_deliver(DistEntry *dep, Uint32 conn_id, uint8_t *buf, size_t len, erx_net_answer_t answer)
 {
-	conn->in[ERX_FRAME_HEADER_SIZE - 1] = PASS_THROUGH;
+	buf[ERX_FRAME_HEADER_SIZE - 1] = PASS_THROUGH;
 	erts_atomic64_inc_nob(&dep->in);	/* erlang:dist_get_stat/1's count of frames in */
-	(void)erts_net_message(NULL, dep, conn_id, NULL, 0, NULL, conn->in + ERX_FRAME_HEADER_SIZE - 1,
+	(void)erts_net_message(NULL, dep, conn_id, NULL, 0, NULL, buf + ERX_FRAME_HEADER_SIZE - 1,
 	    len - (ERX_FRAME_HEADER_SIZE - 1), answer);
 }
 
 /*
  * An exit whose payload is over a limit arrives with reason {erx_reason_too_large, Bytes},
- * written behind the held control term: the buffer never shrinks below
- * ERX_FUNNEL_ASM_FIRST, which leaves room for it behind the longest one.
+ * written behind the held control term: the record buffer never shrinks below
+ * ERX_FUNNEL_ASM_FIRST, which leaves room for it behind the longest one; a slot's copy
+ * without the room drops it.
  */
 static void
-input_too_large(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_funnel_verdict_t *verdict)
+input_too_large(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const lane_frame_t *frame,
+    const erx_funnel_verdict_t *verdict)
 {
 	const size_t at = ERX_FRAME_HEADER_SIZE + verdict->header.ctl_len;
 	uint8_t reason[TOO_LARGE_REASON_MAX];
@@ -389,24 +429,25 @@ input_too_large(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_fun
 	erx_etf_put_tuple(&writer, 2);
 	erx_etf_put_atom(&writer, "erx_reason_too_large", 20);
 	erx_etf_put_integer(&writer, (int64_t)verdict->header.payload_len);
-	if (!erx_etf_writer_done(&writer, &reason_len) || conn->in_cap < at + reason_len) {
+	if (!erx_etf_writer_done(&writer, &reason_len) || frame->cap < at + reason_len) {
 		count(conn, ERX_LANE_COUNT_DROPPED);
 		return;
 	}
-	memcpy(conn->in + at, reason, reason_len);
-	input_deliver(conn, dep, conn_id, at + reason_len, ERX_NET_DELIVER);
+	memcpy(frame->buf + at, reason, reason_len);
+	input_deliver(dep, conn_id, frame->buf, at + reason_len, ERX_NET_DELIVER);
 	count(conn, ERX_LANE_COUNT_DELIVERED);
 }
 
 /* What the verdict table chose for a whole frame, done through the entry's own queue. */
 static bool
-input_act(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_funnel_verdict_t *verdict)
+input_act(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const lane_frame_t *frame,
+    const erx_funnel_verdict_t *verdict)
 {
 	const size_t control = ERX_FRAME_HEADER_SIZE + verdict->header.ctl_len;
 
 	switch (verdict->action) {
 	case ERX_FUNNEL_DELIVER:
-		input_deliver(conn, dep, conn_id, conn->assembly.frame, ERX_NET_DELIVER);
+		input_deliver(dep, conn_id, frame->buf, frame->len, ERX_NET_DELIVER);
 		count(conn, ERX_LANE_COUNT_DELIVERED);
 		return (true);
 	case ERX_FUNNEL_DELIVER_IF_LINKED:
@@ -418,16 +459,16 @@ input_act(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_funnel_ve
 		 * wrong only when such a link exists: the peer's process then gets an exit of noproc.
 		 */
 	case ERX_FUNNEL_ANSWER_NOPROC:
-		input_deliver(conn, dep, conn_id, control, ERX_NET_NOPROC);
+		input_deliver(dep, conn_id, frame->buf, control, ERX_NET_NOPROC);
 		count(conn, ERX_LANE_COUNT_ANSWERED);
 		return (true);
 	case ERX_FUNNEL_ANSWER_SPAWN:
-		input_deliver(conn, dep, conn_id, control, verdict->cause == ERX_FUNNEL_CAUSE_OVER_LIMIT ?
+		input_deliver(dep, conn_id, frame->buf, control, verdict->cause == ERX_FUNNEL_CAUSE_OVER_LIMIT ?
 		    ERX_NET_SPAWN_LIMIT : ERX_NET_SPAWN_UNAUTHORISED);
 		count(conn, ERX_LANE_COUNT_ANSWERED);
 		return (true);
 	case ERX_FUNNEL_TOO_LARGE:
-		input_too_large(conn, dep, conn_id, verdict);
+		input_too_large(conn, dep, conn_id, frame, verdict);
 		return (true);
 	case ERX_FUNNEL_DROP:
 		count(conn, ERX_LANE_COUNT_DROPPED);
@@ -439,7 +480,7 @@ input_act(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const erx_funnel_ve
 }
 
 typedef enum {
-	STEP_TOOK,		/* a whole record was taken and acted on */
+	STEP_TOOK,		/* a whole record was taken and acted on, or every changed slot */
 	STEP_EMPTY,		/* nothing more is published, and the wait is */
 	STEP_BROKEN,		/* the lane or a frame failed a check: nothing more is delivered */
 	STEP_NO_MEMORY,		/* the record's buffer could not grow */
@@ -491,19 +532,81 @@ input_take(lane_conn_t *conn, const erx_funnel_asm_plan_t *plan, erx_lane_part_t
 }
 
 /*
- * One funnel step: the rest of the open record, or the next one, judged once whole and
- * then acted on, dropped or ending the port as erx_lane_core.c decides. dep is NULL while
- * the port controls no entry, and the core acts on no frame then. The answers' queue is read
- * only for a frame that can be answered, as it costs the queue's lock.
+ * A whole frame judged by the funnel and then acted on, dropped or ending the port as
+ * erx_lane_core.c decides. dep is NULL while the port controls no entry, and the core acts
+ * on no frame then. The answers' queue is read only for a frame that can be answered, as it
+ * costs the queue's lock.
  */
+static step_t
+frame_judge(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const lane_frame_t *frame)
+{
+	erx_funnel_verdict_t verdict;
+	erx_lane_port_do_t what;
+	bool answerable;
+
+	erx_funnel_check(frame->buf, frame->len, frame->held, &conn->lane, &conn->limits, conn->scratch,
+	    conn->scratch_len, &verdict);
+	answerable = dep != NULL && verdict.action != ERX_FUNNEL_MALFORMED &&
+	    erx_lane_port_answered(verdict.control.op);
+	what = port_decide(conn, &(erx_lane_port_input_t){
+	    .event = ERX_LANE_PORT_FRAME, .entry = dep != NULL, .action = verdict.action,
+	    .op = verdict.control.op,
+	    .answers_full = answerable && answers_unsent(dep) >= ERX_LANE_ANSWERS_MAX }, ERX_LANE_COUNT_DROPPED);
+	if (what == ERX_LANE_DO_END_MALFORMED)
+		return (STEP_BROKEN);
+	if (what == ERX_LANE_DO_END_ANSWERS)
+		return (STEP_ANSWERS_UNREAD);
+	if (what == ERX_LANE_DO_ACT && !input_act(conn, dep, conn_id, frame, &verdict))
+		return (STEP_BROKEN);
+	return (STEP_TOOK);
+}
+
+/*
+ * The control table's step, at the top of each run that takes: every slot whose seq moved
+ * since the copy is taken once into ctl_in and judged as a ring's frame, so the record is
+ * delivered as a message from its sender, the domain pid. A len or zero out of range breaks
+ * the lane, as a malformed ring record does. The seq is kept once frame_judge has dealt with
+ * the record, acted on or dropped and counted; every other outcome ends the port.
+ */
+static step_t
+table_step(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id)
+{
+	lane_frame_t frame = { .buf = conn->ctl_in, .cap = ERX_LANE_CTL_SLOT };
+	uint64_t seq;
+	step_t step;
+
+	if (conn->ctl_in == NULL)
+		return (STEP_TOOK);
+	for (uint32_t slot = 0; slot < conn->ctl_slots; slot++) {
+		switch (erx_lane_ctl_take(conn->peer_side, conn->in_size, conn->ctl_slots, slot, conn->ctl_seq[slot],
+		    conn->ctl_in, &frame.len, &seq)) {
+		case ERX_LANE_CTL_UNCHANGED:
+			continue;
+		case ERX_LANE_CTL_MALFORMED:
+			return (STEP_BROKEN);
+		case ERX_LANE_CTL_REWRITTEN:
+			count(conn, ERX_LANE_COUNT_CTL_REWRITTEN);
+			break;
+		case ERX_LANE_CTL_TOOK:
+			break;
+		}
+		count(conn, ERX_LANE_COUNT_CTL_TAKEN);
+		frame.held = frame.len;
+		step = frame_judge(conn, dep, conn_id, &frame);
+		if (step != STEP_TOOK)
+			return (step);
+		conn->ctl_seq[slot] = seq;
+	}
+	return (STEP_TOOK);
+}
+
+/* One funnel step: the rest of the open record, or the next one, judged once whole. */
 static step_t
 input_step(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id)
 {
 	erx_funnel_asm_plan_t plan;
-	erx_funnel_verdict_t verdict;
 	erx_lane_part_t part;
-	erx_lane_port_do_t what;
-	bool answerable;
+	step_t step;
 
 	for (;;) {
 		erx_funnel_asm_plan(&conn->assembly, conn->in_cap, &plan);
@@ -531,22 +634,11 @@ input_step(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id)
 		}
 		break;
 	}
-	erx_funnel_check(conn->in, conn->assembly.frame, conn->assembly.held, &conn->lane, &conn->limits,
-	    conn->scratch, conn->scratch_len, &verdict);
-	answerable = dep != NULL && verdict.action != ERX_FUNNEL_MALFORMED &&
-	    erx_lane_port_answered(verdict.control.op);
-	what = port_decide(conn, &(erx_lane_port_input_t){
-	    .event = ERX_LANE_PORT_FRAME, .entry = dep != NULL, .action = verdict.action,
-	    .op = verdict.control.op,
-	    .answers_full = answerable && answers_unsent(dep) >= ERX_LANE_ANSWERS_MAX }, ERX_LANE_COUNT_DROPPED);
-	if (what == ERX_LANE_DO_END_MALFORMED)
-		return (STEP_BROKEN);
-	if (what == ERX_LANE_DO_END_ANSWERS)
-		return (STEP_ANSWERS_UNREAD);
-	if (what == ERX_LANE_DO_ACT && !input_act(conn, dep, conn_id, &verdict))
-		return (STEP_BROKEN);
-	erx_funnel_asm_next(&conn->assembly);
-	return (STEP_TOOK);
+	step = frame_judge(conn, dep, conn_id, &(lane_frame_t){ .buf = conn->in, .len = conn->assembly.frame,
+	    .held = conn->assembly.held, .cap = conn->in_cap });
+	if (step == STEP_TOOK)
+		erx_funnel_asm_next(&conn->assembly);
+	return (step);
 }
 
 /* The finish's end, once every whole record before the stop is taken: the agent is told. */
@@ -570,8 +662,8 @@ finish_tell(lane_conn_t *conn)
  * lanes. Before the port controls an entry it takes nothing, and erx_dist runs it again
  * after setnode/3; a finishing one takes what is before the stop, entry or not. A finishing
  * port's empty take is its finish's end (erx_lane_core.c, decide_empty), and the record the
- * stop cut short, which the reader holds open, is counted as dropped. NULL, or the reason
- * the port must end.
+ * stop cut short, which the reader holds open, is counted as dropped. The control table's
+ * changed slots come first, outside the allowance. NULL, or the reason the port must end.
  */
 static const char *
 input_run(lane_conn_t *conn)
@@ -579,29 +671,34 @@ input_run(lane_conn_t *conn)
 	const uint32_t allowance = erx_lane_batch != 0 ? erx_lane_batch : 1;
 	Uint32 conn_id = 0;
 	DistEntry *const dep = conn_entry(conn, &conn_id);
+	step_t step;
 
 	if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_RUN, .entry = dep != NULL },
 	    ERX_LANE_COUNT_DROPPED) != ERX_LANE_DO_TAKE)
 		return (NULL);
-	for (uint32_t steps = 0; steps < allowance; steps++) {
-		switch (input_step(conn, dep, conn_id)) {
-		case STEP_TOOK:
-			break;
-		case STEP_EMPTY:
-			if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_EMPTY,
-			    .cut = conn->reader.phase == ERX_LANE_IN_BODY }, ERX_LANE_COUNT_DROPPED) == ERX_LANE_DO_TELL)
-				finish_tell(conn);
-			return (NULL);
-		case STEP_BROKEN:
-			count(conn, ERX_LANE_COUNT_MALFORMED);
-			return ("erx_lane_malformed");
-		case STEP_NO_MEMORY:
-			return ("erx_lane_no_memory");
-		case STEP_ANSWERS_UNREAD:
-			return ("erx_lane_answers_unread");
-		}
+	step = table_step(conn, dep, conn_id);
+	/* A test's hold (port_control 4) leaves the ring for the run after its release. */
+	if (step == STEP_TOOK && conn->ring_held)
+		return (NULL);
+	for (uint32_t steps = 0; step == STEP_TOOK && steps < allowance; steps++)
+		step = input_step(conn, dep, conn_id);
+	switch (step) {
+	case STEP_TOOK:
+		input_schedule(conn);	/* at its allowance: the next run takes the rest */
+		return (NULL);
+	case STEP_EMPTY:
+		if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_EMPTY,
+		    .cut = conn->reader.phase == ERX_LANE_IN_BODY }, ERX_LANE_COUNT_DROPPED) == ERX_LANE_DO_TELL)
+			finish_tell(conn);
+		return (NULL);
+	case STEP_BROKEN:
+		count(conn, ERX_LANE_COUNT_MALFORMED);
+		return ("erx_lane_malformed");
+	case STEP_NO_MEMORY:
+		return ("erx_lane_no_memory");
+	case STEP_ANSWERS_UNREAD:
+		return ("erx_lane_answers_unread");
 	}
-	input_schedule(conn);	/* at its allowance: the next run takes the rest */
 	return (NULL);
 }
 
@@ -650,6 +747,10 @@ conn_free(lane_conn_t *conn)
 		erts_free(ERTS_ALC_T_DRV, conn->in);
 	if (conn->scratch != NULL)
 		driver_free(conn->scratch);
+	if (conn->ctl_seq != NULL)
+		driver_free(conn->ctl_seq);
+	if (conn->ctl_in != NULL)
+		driver_free(conn->ctl_in);
 	driver_free(conn);
 }
 
@@ -657,9 +758,11 @@ conn_free(lane_conn_t *conn)
 typedef struct lane_open {
 	uint64_t	 side, peer_side, peer_bell;
 	uint32_t	 label, out_size, in_size, peer_id;
+	uint32_t	 pid_number, pid_serial, ctl_slots;
 	const char	*peer_node;
 	size_t		 peer_node_len;
-	bool		 system;	/* the system connection, from the boot page */
+	bool		 system;	/* the system connection, from the boot page: the table's reader */
+	bool		 table;		/* the system domain's side of one: the table's writer */
 } lane_open_t;
 
 /* One decimal word of at most max, then a space or the end. */
@@ -684,7 +787,10 @@ open_word(const char **at, uint64_t max, uint64_t *value)
 }
 
 /*
- * "erx_lane system", the boot page's system connection and its peer's node name, or
+ * "erx_lane system", the boot page's system connection, its table's slots and its peer's
+ * node name; "erx_lane table Side PeerSide PeerBell Label OutSize InSize PeerId PidNumber
+ * PidSerial CtlSlots PeerNode", the system domain's side of domain PeerId's system
+ * connection, whose table it writes for the domain pid of PidNumber and PidSerial; or
  * "erx_lane Side PeerSide PeerBell Label OutSize InSize PeerId PeerNode". The node name is
  * checked by copy_name's length and by every frame's sender rule, which compares it whole.
  */
@@ -692,9 +798,12 @@ static bool
 lane_open_parse(const char *command, lane_open_t *open)
 {
 	static const char system_word[] = "erx_lane system";
+	static const char table_word[] = "erx_lane table ";
 	static const char driver_word[] = "erx_lane ";
 	const char *at = command;
-	uint64_t words[7];
+	uint64_t words[10];
+	size_t count = 7;
+	bool table = false;
 
 	if (strcmp(at, system_word) == 0) {
 		const erx_boot_info_t *const boot = erx_runtime_boot();
@@ -702,18 +811,29 @@ lane_open_parse(const char *command, lane_open_t *open)
 
 		*open = (lane_open_t){ .side = sys->side.raw, .peer_side = sys->peer_side.raw, .peer_bell = sys->peer_bell.raw,
 			.label = sys->label, .out_size = sys->out_size, .in_size = sys->in_size, .peer_id = sys->peer,
-			.system = true };
+			.ctl_slots = sys->ctl_slots, .system = true };
 		open->peer_node = erx_runtime_system_node(&open->peer_node_len);
-	} else {
-		if (strncmp(at, driver_word, sizeof(driver_word) - 1) != 0)
-			return (false);
+		return (open->label != 0 && open->label < ERX_LABEL_SPLIT);
+	}
+	if (strncmp(at, table_word, sizeof(table_word) - 1) == 0) {
+		at += sizeof(table_word) - 1;
+		count = 10;
+		table = true;
+	} else if (strncmp(at, driver_word, sizeof(driver_word) - 1) == 0) {
 		at += sizeof(driver_word) - 1;
-		for (size_t i = 0; i < 7; i++)
-			if (!open_word(&at, i < 3 ? UINT64_MAX : UINT32_MAX, &words[i]))
-				return (false);
-		*open = (lane_open_t){ .side = words[0], .peer_side = words[1], .peer_bell = words[2],
-			.label = (uint32_t)words[3], .out_size = (uint32_t)words[4], .in_size = (uint32_t)words[5],
-			.peer_id = (uint32_t)words[6], .peer_node = at, .peer_node_len = strlen(at) };
+	} else {
+		return (false);
+	}
+	for (size_t i = 0; i < count; i++)
+		if (!open_word(&at, i < 3 ? UINT64_MAX : UINT32_MAX, &words[i]))
+			return (false);
+	*open = (lane_open_t){ .side = words[0], .peer_side = words[1], .peer_bell = words[2],
+		.label = (uint32_t)words[3], .out_size = (uint32_t)words[4], .in_size = (uint32_t)words[5],
+		.peer_id = (uint32_t)words[6], .peer_node = at, .peer_node_len = strlen(at), .table = table };
+	if (table) {
+		open->pid_number = (uint32_t)words[7];
+		open->pid_serial = (uint32_t)words[8];
+		open->ctl_slots = (uint32_t)words[9];
 	}
 	return (open->label != 0 && open->label < ERX_LABEL_SPLIT);
 }
@@ -730,9 +850,11 @@ copy_name(char *into, const char *from, size_t len)
 
 /*
  * Opens a connection's port: "erx_lane system" for the system connection, whose values
- * are the boot page's, or "erx_lane Side PeerSide PeerBell Label OutSize InSize
- * PeerId PeerNode" for one connection_up introduced. Maps both sides, prepares the lane's
- * writer and reader, and registers the bell's label as the connection's sink.
+ * are the boot page's, "erx_lane table ..." for the system domain's side of a domain's
+ * system connection, or "erx_lane Side PeerSide PeerBell Label OutSize InSize PeerId
+ * PeerNode" for one connection_up introduced (lane_open_parse). Maps both sides, the
+ * system domain's with its control table, prepares the lane's writer and reader and the
+ * table's copies, and registers the bell's label as the connection's sink.
  */
 static ErlDrvData
 lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
@@ -761,8 +883,27 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 	conn->prt = erts_drvport2port(port);
 	conn->peer_bell = open.peer_bell;
 	conn->label = open.label;
-	conn->own_bytes = erx_lane_side_bytes(open.out_size);
-	conn->peer_bytes = erx_lane_side_bytes(open.in_size);
+	conn->out_size = open.out_size;
+	conn->in_size = open.in_size;
+	conn->own_bytes = open.table ? erx_lane_ctl_side_bytes(open.out_size, open.ctl_slots) :
+	    erx_lane_side_bytes(open.out_size);
+	conn->peer_bytes = open.system ? erx_lane_ctl_side_bytes(open.in_size, open.ctl_slots) :
+	    erx_lane_side_bytes(open.in_size);
+	if (open.system || open.table) {
+		conn->ctl_slots = open.ctl_slots;
+		conn->pid_number = open.pid_number;
+		conn->pid_serial = open.pid_serial;
+		/* One word more, so an empty table has its copies too and needs no case of its own. */
+		conn->ctl_seq = driver_alloc(((size_t)open.ctl_slots + 1) * sizeof(*conn->ctl_seq));
+		if (conn->ctl_seq == NULL)
+			goto fail;
+		memset(conn->ctl_seq, 0, ((size_t)open.ctl_slots + 1) * sizeof(*conn->ctl_seq));
+	}
+	if (open.system) {
+		conn->ctl_in = driver_alloc(ERX_LANE_CTL_SLOT);
+		if (conn->ctl_in == NULL)
+			goto fail;
+	}
 	host_off = (size_t)(at - name) + 1;
 	if (!copy_name(conn->own_node, (const char *)name, (size_t)own->len) ||
 	    !copy_name(conn->host, (const char *)name + host_off, (size_t)own->len - host_off) ||
@@ -810,6 +951,55 @@ lane_stop(ErlDrvData data)
 }
 
 /*
+ * port_control(Port, 3, [<<Slot:32>>, Ctl, Payload]), on the system domain's side of a
+ * domain's system connection, from the domain pid alone: the record whose control term is
+ * Ctl and whose payload is Payload, both term_to_binary/1's, written into slot Slot of the
+ * domain's control table, its seq one past the last, and the domain's bell rung. badarg,
+ * writing nothing, from any other process, on a port with no table to write, for a slot past
+ * the table's last, a control term that does not end within ERX_CTL_MAX bytes or a frame
+ * longer than ERX_LANE_CTL_SLOT (docs/design-runtime.md, "Control records").
+ */
+static ErlDrvSSizeT
+control_record(lane_conn_t *conn, const char *buf, ErlDrvSizeT len)
+{
+	const Eterm caller = (Eterm)driver_caller(conn->port);
+	const uint8_t *const bytes = (const uint8_t *)buf;
+	uint32_t slot;
+	size_t ctl_len;
+
+	if (conn->ctl_seq == NULL || conn->ctl_in != NULL || !is_internal_pid(caller) ||
+	    internal_pid_number(caller) != conn->pid_number || internal_pid_serial(caller) != conn->pid_serial ||
+	    len < 4)
+		return (-1);
+	slot = (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | bytes[3];
+	ctl_len = control_length(bytes + 4, len - 4);
+	if (slot >= conn->ctl_slots || ctl_len == 0 ||
+	    !erx_lane_ctl_put(conn->own_side, conn->out_size, conn->ctl_slots, slot, conn->ctl_seq[slot] + 1,
+	    bytes + 4, ctl_len, bytes + 4 + ctl_len, len - 4 - ctl_len))
+		return (-1);
+	conn->ctl_seq[slot]++;
+	ring_peer(conn);
+	return (0);
+}
+
+/*
+ * port_control(Port, 4, <<Hold>>), a test's only and refused without -erx test_lane_hold:
+ * Hold 1 has the system connection's input task take its control table and leave its ring,
+ * so the system domain's side fills and pauses while records still arrive; Hold 0 releases
+ * it and runs the task. It holds only this domain's own port, so it reaches no other domain.
+ */
+static ErlDrvSSizeT
+control_hold(lane_conn_t *conn, const char *buf, ErlDrvSizeT len)
+{
+	if (!erx_lane_test_hold || conn->ctl_in == NULL || len != 1 || (buf[0] != 0 && buf[0] != 1))
+		return (-1);
+	conn->ring_held = buf[0] == 1;
+	if (!conn->ring_held)
+		input_schedule(conn);
+	return (0);
+}
+
+/*
  * port_control(Port, 0, []): the counts, as 64-bit words. port_control(Port, 1, []): one
  * run of the input task, which erx_dist asks for after setnode/3 makes the port the
  * entry's controller, so frames that arrived before then are taken without a bell.
@@ -824,8 +1014,10 @@ lane_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, 
 	lane_conn_t *const conn = (lane_conn_t *)data;
 	const ErlDrvSizeT need = ERX_LANE_COUNTS * 8;
 
-	(void)buf;
-	(void)len;
+	if (command == CONTROL_RECORD)
+		return (control_record(conn, buf, len));
+	if (command == CONTROL_HOLD)
+		return (control_hold(conn, buf, len));
 	if (command == CONTROL_KICK) {
 		input_schedule(conn);
 		return (0);
@@ -922,4 +1114,58 @@ erx_dist_boot_0(BIF_ALIST_0)
 	}
 	hp = HAlloc(BIF_P, 3);
 	BIF_RET(TUPLE2(hp, make_small((Uint)boot->domain_id), system));
+}
+
+/* One -erx flag at argv[at], its name next and any value after it; the words it takes, or 0. */
+static int
+lane_flag(int argc, char **argv, int at)
+{
+	const char *name = at + 1 < argc ? argv[at + 1] : "";
+	const char *digit;
+	uint64_t batch = 0;
+
+	if (strcmp(name, "test_lane_hold") == 0) {
+		erx_lane_test_hold = true;
+		return (2);
+	}
+	if (strcmp(name, "lane_batch") != 0 || at + 2 >= argc || argv[at + 2][0] == '\0')
+		return (0);
+	for (digit = argv[at + 2]; *digit != '\0'; digit++) {
+		if (*digit < '0' || *digit > '9')
+			return (0);
+		batch = batch * 10 + (uint64_t)(*digit - '0');
+		if (batch > UINT32_MAX)
+			return (0);
+	}
+	if (batch == 0)
+		return (0);
+	erx_lane_batch = (uint32_t)batch;
+	return (3);
+}
+
+bool
+erx_lane_flags(int *argc, char **argv)
+{
+	int kept = 1;
+
+	for (int at = 1; at < *argc; ) {
+		int took;
+
+		if (strcmp(argv[at], "--") == 0) {
+			while (at < *argc)
+				argv[kept++] = argv[at++];
+			break;
+		}
+		if (strcmp(argv[at], "-erx") != 0) {
+			argv[kept++] = argv[at++];
+			continue;
+		}
+		took = lane_flag(*argc, argv, at);
+		if (took == 0)
+			return (false);
+		at += took;
+	}
+	*argc = kept;
+	argv[kept] = NULL;
+	return (true);
 }

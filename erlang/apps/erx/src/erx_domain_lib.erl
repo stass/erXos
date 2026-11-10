@@ -81,7 +81,9 @@ lanes the domain and the system domain read.
 """.
 -type created() :: #{id := pos_integer(), connection := non_neg_integer(), side := non_neg_integer(),
                      peer_side := non_neg_integer(), bell := non_neg_integer(),
-                     reader := non_neg_integer(), system_lane := non_neg_integer()}.
+                     reader := non_neg_integer(), system_lane := non_neg_integer(),
+                     ctl_slots := non_neg_integer(), domain_pid_number := non_neg_integer(),
+                     domain_pid_serial := non_neg_integer()}.
 
 -doc """
 A configured domain of the system manifest: its row in the manifest's domain

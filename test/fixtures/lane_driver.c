@@ -1595,6 +1595,163 @@ wrace(uint64_t seed, unsigned long puts)
 	return (0);
 }
 
+/*
+ * The control table: every slot of a table after a 4 KiB area written once
+ * and taken once, in a buffer that holds exactly one slot; a slot written
+ * twice before the reader looks taken once, as the newer record, and
+ * counted as rewritten; a len or zero out of range refused; a frame longer
+ * than a slot, a slot past the table and a bad size refused by the writer,
+ * which writes nothing then.  Prints "ctl: cases=N".
+ */
+#define CTL_SLOTS	5u
+#define CTL_AREA	ERX_LANE_MIN
+
+static _Alignas(ERX_PAGE_SIZE) unsigned char ctl_side[ERX_LANE_SIDE_DATA +
+    CTL_AREA + CTL_SLOTS * (ERX_LANE_CTL_SIZE + ERX_LANE_CTL_SLOT) +
+    ERX_PAGE_SIZE];
+
+static erx_lane_ctl_t *
+ctl_entry(uint32_t slot)
+{
+	return ((erx_lane_ctl_t *)(ctl_side + ERX_LANE_SIDE_DATA + CTL_AREA +
+	    slot * ERX_LANE_CTL_SIZE));
+}
+
+/* The frame a writer puts for (slot, round): ctl and payload bytes that name both. */
+static size_t
+ctl_record(uint32_t slot, uint32_t round, unsigned char *ctl,
+    unsigned char *payload, size_t *payload_len)
+{
+	const size_t ctl_len = 1 + (slot * 7 + round) % 40;
+
+	*payload_len = (slot * 13 + round * 5) % (ERX_LANE_CTL_SLOT -
+	    ERX_FRAME_HEADER_SIZE - ctl_len + 1);
+	for (size_t i = 0; i < ctl_len; i++)
+		ctl[i] = (unsigned char)(slot ^ (round << 4) ^ i);
+	for (size_t i = 0; i < *payload_len; i++)
+		payload[i] = (unsigned char)(slot + round + i * 3);
+	return (ctl_len);
+}
+
+/* Takes slot against kept and checks the copy is exactly (slot, round). */
+static void
+ctl_expect(uint32_t slot, uint32_t round, uint64_t kept,
+    erx_lane_ctl_status_t want, uint64_t want_seq)
+{
+	unsigned char ctl[64], payload[ERX_LANE_CTL_SLOT], buf[ERX_LANE_CTL_SLOT];
+	size_t ctl_len, payload_len;
+	uint32_t len = 0;
+	uint64_t seq = 0;
+	erx_lane_ctl_status_t st;
+
+	ctl_len = ctl_record(slot, round, ctl, payload, &payload_len);
+	st = erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, slot, kept, buf,
+	    &len, &seq);
+	CHECK(st == want, "ctl take status", st, want);
+	CHECK(seq == want_seq, "ctl take seq", seq, want_seq);
+	if (st == ERX_LANE_CTL_UNCHANGED)
+		return;
+	CHECK(len == ERX_FRAME_HEADER_SIZE + ctl_len + payload_len, "ctl len",
+	    len, ctl_len + payload_len);
+	CHECK(buf[0] == ctl_len && buf[1] == 0 && buf[4] == (payload_len & 0xff) &&
+	    buf[5] == payload_len >> 8, "ctl frame header", buf[0], buf[4]);
+	CHECK(memcmp(buf + ERX_FRAME_HEADER_SIZE, ctl, ctl_len) == 0 &&
+	    memcmp(buf + ERX_FRAME_HEADER_SIZE + ctl_len, payload,
+	    payload_len) == 0, "ctl frame bytes", slot, round);
+}
+
+static void
+ctl_put(uint32_t slot, uint32_t round, uint64_t seq)
+{
+	unsigned char ctl[64], payload[ERX_LANE_CTL_SLOT];
+	size_t ctl_len, payload_len;
+
+	ctl_len = ctl_record(slot, round, ctl, payload, &payload_len);
+	CHECK(erx_lane_ctl_put(ctl_side, CTL_AREA, CTL_SLOTS, slot, seq, ctl,
+	    ctl_len, payload, payload_len), "ctl put", slot, round);
+}
+
+static int
+ctl_table(void)
+{
+	unsigned char big[ERX_LANE_CTL_SLOT], buf[ERX_LANE_CTL_SLOT];
+	uint64_t seq;
+	uint32_t len;
+	unsigned cases = 0;
+
+	CHECK(erx_lane_ctl_side_bytes(CTL_AREA, 0) == ERX_LANE_SIDE_DATA +
+	    CTL_AREA, "a side without a table", 0, 0);
+	CHECK(erx_lane_ctl_side_bytes(CTL_AREA, CTL_SLOTS) == sizeof(ctl_side) -
+	    ERX_PAGE_SIZE + (ERX_PAGE_SIZE - (CTL_SLOTS * (ERX_LANE_CTL_SIZE +
+	    ERX_LANE_CTL_SLOT)) % ERX_PAGE_SIZE) % ERX_PAGE_SIZE,
+	    "a table rounds to a page", erx_lane_ctl_side_bytes(CTL_AREA,
+	    CTL_SLOTS), 0);
+	CHECK(erx_lane_ctl_side_bytes(CTL_AREA + 1, 1) == 0, "a bad area", 0, 0);
+	cases += 3;
+	/* Every slot written once and taken once; a second look takes nothing. */
+	for (uint32_t slot = 0; slot < CTL_SLOTS; slot++)
+		ctl_expect(slot, 0, 0, ERX_LANE_CTL_UNCHANGED, 0);
+	for (uint32_t slot = 0; slot < CTL_SLOTS; slot++)
+		ctl_put(slot, 1, 1);
+	for (uint32_t slot = 0; slot < CTL_SLOTS; slot++) {
+		ctl_expect(slot, 1, 0, ERX_LANE_CTL_TOOK, 1);
+		ctl_expect(slot, 1, 1, ERX_LANE_CTL_UNCHANGED, 1);
+		cases += 2;
+	}
+	/* Written twice before the reader looks: one take, the newer record. */
+	ctl_put(2, 2, 2);
+	ctl_put(2, 3, 3);
+	ctl_expect(2, 3, 1, ERX_LANE_CTL_REWRITTEN, 3);
+	ctl_expect(2, 3, 3, ERX_LANE_CTL_UNCHANGED, 3);
+	/* A seq that moved back is a rewrite too. */
+	ctl_put(3, 4, 0);
+	ctl_expect(3, 4, 1, ERX_LANE_CTL_REWRITTEN, 0);
+	cases += 3;
+	/* A len or zero out of range, written behind the writer, is refused. */
+	(void)erx_lane_ctl_len_store(ctl_entry(4), ERX_LANE_CTL_SLOT + 1);
+	(void)erx_lane_ctl_seq_store(ctl_entry(4), 2);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, 4, 1, buf, &len,
+	    &seq) == ERX_LANE_CTL_MALFORMED, "a len past the slot", 0, 0);
+	(void)erx_lane_ctl_len_store(ctl_entry(4), ERX_FRAME_HEADER_SIZE - 1);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, 4, 1, buf, &len,
+	    &seq) == ERX_LANE_CTL_MALFORMED, "a len below a header", 0, 0);
+	(void)erx_lane_ctl_len_store(ctl_entry(4), ERX_LANE_CTL_SLOT);
+	(void)erx_lane_ctl_zero_store(ctl_entry(4), 1);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, 4, 1, buf, &len,
+	    &seq) == ERX_LANE_CTL_MALFORMED, "a nonzero zero", 0, 0);
+	(void)erx_lane_ctl_zero_store(ctl_entry(4), 0);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, 4, 1, buf, &len,
+	    &seq) == ERX_LANE_CTL_TOOK && len == ERX_LANE_CTL_SLOT,
+	    "a len of the whole slot", len, 0);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, CTL_SLOTS, 0, buf,
+	    &len, &seq) == ERX_LANE_CTL_MALFORMED, "a slot past the table", 0, 0);
+	cases += 5;
+	/* The writer refuses, writing nothing, what does not fit. */
+	memset(big, 7, sizeof(big));
+	CHECK(!erx_lane_ctl_put(ctl_side, CTL_AREA, CTL_SLOTS, 0, 9, big, 1, big,
+	    ERX_LANE_CTL_SLOT - ERX_FRAME_HEADER_SIZE), "a frame past the slot", 0, 0);
+	CHECK(!erx_lane_ctl_put(ctl_side, CTL_AREA, CTL_SLOTS, CTL_SLOTS, 9, big,
+	    1, big, 1), "a slot past the table", 0, 0);
+	CHECK(!erx_lane_ctl_put(ctl_side, CTL_AREA + 16, CTL_SLOTS, 0, 9, big, 1,
+	    big, 1), "a bad area", 0, 0);
+	ctl_expect(0, 1, 1, ERX_LANE_CTL_UNCHANGED, 1);
+	CHECK(erx_lane_ctl_put(ctl_side, CTL_AREA, CTL_SLOTS, 0, 2, big, 1, big,
+	    ERX_LANE_CTL_SLOT - ERX_FRAME_HEADER_SIZE - 1), "a frame of the whole slot", 0, 0);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, 0, 1, buf, &len,
+	    &seq) == ERX_LANE_CTL_TOOK && len == ERX_LANE_CTL_SLOT, "the whole slot taken", len, 0);
+	/* A shorter record leaves none of the longer one behind it. */
+	ctl_put(0, 5, 3);
+	CHECK(erx_lane_ctl_take(ctl_side, CTL_AREA, CTL_SLOTS, 0, 2, buf, &len,
+	    &seq) == ERX_LANE_CTL_TOOK, "the shorter record taken", len, 0);
+	for (size_t i = len; i < ERX_LANE_CTL_SLOT; i++)
+		CHECK(ctl_side[ERX_LANE_SIDE_DATA + CTL_AREA + CTL_SLOTS *
+		    ERX_LANE_CTL_SIZE + i] == 0,
+		    "a byte of the earlier record stayed", i, 0);
+	cases += 7;
+	printf("ctl: cases=%u\n", cases);
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1608,13 +1765,15 @@ main(int argc, char **argv)
 		return (writer_trips());
 	if (argc == 2 && strcmp(argv[1], "wlimits") == 0)
 		return (wlimits());
+	if (argc == 2 && strcmp(argv[1], "ctl") == 0)
+		return (ctl_table());
 	if (argc == 4 && strcmp(argv[1], "race") == 0)
 		return (race(strtoull(argv[2], NULL, 10),
 		    strtoul(argv[3], NULL, 10)));
 	if (argc == 4 && strcmp(argv[1], "wrace") == 0)
 		return (wrace(strtoull(argv[2], NULL, 10),
 		    strtoul(argv[3], NULL, 10)));
-	fprintf(stderr, "usage: lane_driver explore|cuts|limits|writer|wlimits|"
+	fprintf(stderr, "usage: lane_driver explore|cuts|limits|writer|wlimits|ctl|"
 	    "race SEED N|wrace SEED N\n");
 	return (2);
 }

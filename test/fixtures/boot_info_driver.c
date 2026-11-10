@@ -107,15 +107,16 @@ test_domain_pid(void)
 	inputs.system_node = "system@host";
 	inputs.system_node_len = 11;
 	inputs.system_connection = (erx_boot_connection_t){ .label = 3, .peer = 4, .domain_pid_number = 0xfffffffe,
-	    .domain_pid_serial = 0x80000001 };
+	    .domain_pid_serial = 0x80000001, .ctl_slots = 7 };
 	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "a domain's page is refused");
 	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "a domain's page does not read back");
 	CHECK(view.info.system_connection.domain_pid_number == 0xfffffffe &&
-	    view.info.system_connection.domain_pid_serial == 0x80000001 && view.info.system_connection.peer == 4,
-	    "the domain pid's words");
+	    view.info.system_connection.domain_pid_serial == 0x80000001 && view.info.system_connection.peer == 4 &&
+	    view.info.system_connection.ctl_slots == 7, "the domain pid's words and the table's slots");
 	CHECK(ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + ERX_BOOT_CONNECTION_OFF_DOMAIN_PID_NUMBER == 160 &&
 	    ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + ERX_BOOT_CONNECTION_OFF_DOMAIN_PID_SERIAL == 164 &&
-	    ERX_BOOT_INFO_SIZE == 288, "the domain pid's place on the page");
+	    ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + ERX_BOOT_CONNECTION_OFF_CTL_SLOTS == 168 &&
+	    ERX_BOOT_INFO_SIZE == 296, "the domain pid's and the table's place on the page");
 
 	/* The node as its own peer. */
 	inputs.system_node = "web@host";

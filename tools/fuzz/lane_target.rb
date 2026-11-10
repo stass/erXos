@@ -21,6 +21,9 @@ Erx::PackFuzz.declare_target(
                [5, 100].pack('Cv'),
     'stop' => "\x00".b + [3, 40].pack('CV') + [1, 2].pack('Cv') + [7].pack('C') + [1, 4].pack('Cv') +
               [5, 1000].pack('Cv') + [5, 1000].pack('Cv'),
+    # The control table: a record written and taken, then rewritten twice and taken, then a len past the slot.
+    'table' => "\x04".b + [1, 0, 0, 0x0000000800000005].pack('CCCQ<') + [0, 0, 1, 24, 0].pack('CCQ<VV') + [2, 0].pack('CC') +
+               [0, 0, 3, 16, 0].pack('CCQ<VV') + [2, 0].pack('CC') + [0, 1, 1, 897, 0].pack('CCQ<VV') + [2, 1, 2, 3].pack('CCCC'),
     'too-long' => "\x00".b + [3, 0x1000001].pack('CV') + [1, 1].pack('Cv') + [5, 16].pack('Cv')
   }
 )

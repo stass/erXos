@@ -9,7 +9,11 @@ module Erx
     # ring header, reader page and record, their generated accessors, and
     # the offsets of a side's parts.
     LANE_READER = 'liberx/erx_lane.c'
-    LANE_LAYOUT = /\b(?:erx_lane_(?:hdr|rpage|rec)\w*|ERX_LANE_(?:HDR|RPAGE|REC|SIDE)_\w*)/
+    # The control table's index, erx_lane_ctl, is a layout too; its functions
+    # (erx_lane_ctl_put, _take, _side_bytes), their status names and the
+    # slot's size, ERX_LANE_CTL_SLOT, are the table's interface.
+    LANE_LAYOUT = /\b(?:erx_lane_(?:hdr|rpage|rec)\w*|erx_lane_ctl(?:_t|_(?:seq|len|zero)_\w+)?\b|
+                    ERX_LANE_(?:HDR|RPAGE|REC|SIDE)_\w*|ERX_LANE_CTL_(?:SIZE|ALIGN|OFF_\w+)\b)/x
     # The inherited runtimes and C library erXos edits in place, where a
     # second reader could otherwise hide: no upstream name starts erx_.
     INHERITED_RUNTIME = %w[otp/**/* musl/**/*].freeze
@@ -44,13 +48,13 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'lane-pages-reader',
           rule: "only #{LANE_READER}, whose erx_lane_take and erx_lane_put are the one reader and the one " \
-                "writer of a lane's ring, names a lane's shared layouts, their accessors or the offsets of a side (D3)",
+                "writer of a lane's ring and erx_lane_ctl_take and erx_lane_ctl_put of its control table, names a lane's shared layouts, their accessors or the offsets of a side (D3)",
           design: "#{DOMAINS}#the-funnel",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*', *INHERITED_RUNTIME], except: [ASMJIT]),
           pattern: LANE_LAYOUT,
           sites: [LANE_READER, *ABI_C_OUTPUTS, *LANE_PRODUCERS].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/erx_funnel.c' => "void f(void) { erx_lane_hdr_wpos_load(hdr, &wpos); }\n",
-                  'otp/erts/emulator/sys/erxos/erx_lane_drv.c' => "const erx_lane_rec_t *rec = ring;\n",
+                  'otp/erts/emulator/sys/erxos/erx_lane_drv.c' => "const erx_lane_ctl_t *ctl = table;\n",
                   'liberx/backend/hosted/peek.c' => "data = side + ERX_LANE_SIDE_DATA;\n",
                   'liberx/erx_lane_peek.c' => "#define RING struct erx_lane_hdr\n",
                   'liberx/erx_lane_port.c' => "erx_lane_hdr_wpos_store(hdr, pos);\n" }
