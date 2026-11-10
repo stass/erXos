@@ -2,16 +2,16 @@
 
 Every domain that runs ERTS loads its own copy of the modules its release
 uses: each prepares the same `lists`, `gen_server` and `erx_*` modules from
-the same files, into its own memory, charged to its own budget. On a
-160 MiB machine that copy is the largest single part of a domain's runtime
-once its tables are sized to its limits. This document makes the loaded
-code of the modules every domain release ships one copy for the whole
-machine, for the domains that run the interpreter image `runtimes/emu`:
-the code, the literals, and the atoms, exports and funs that the code
-names. The ERTS executable's own text and read-only data are shared by a
-separate mechanism of the image loader; the two fit together as [The
-executable's own pages](#the-executables-own-pages) explains, and neither
-depends on the other.
+the same files, into its own memory, charged to its own budget. Loaded code
+and its literals are the largest part of what ERTS accounts for in a
+domain, about 10 of the 16 MB the system domain reports at its shell. This
+document makes the loaded code of the modules every domain release ships
+one copy for the whole machine, for the domains that run the interpreter
+image `runtimes/emu`: the code, the literals, and the atoms, exports and
+funs that the code names. The ERTS executable's own text and read-only
+data are shared by a separate mechanism of the image loader; the two fit
+together as [The executable's own pages](#the-executables-own-pages)
+explains, and neither depends on the other.
 
 Decisions every reader needs:
 
@@ -28,7 +28,11 @@ Decisions every reader needs:
   (`ReleaseFiles::DOMAIN_BASE`, `tools/lib/erx/release_files.rb:68`).
   A module whose literals name an identity or hold a reference-counted
   binary, or that has an `on_load` function, is left out and loads
-  privately, as today.
+  privately.
+* **Every adopting domain binds every module of the image.** The packer
+  refuses a boot image in which any domain release holds a file of the
+  image's modules with other bytes than the file the image was built
+  from, so there is nothing per domain to choose.
 * **The system domain neither builds nor uses the image.** Its ERTS is a
   different executable, linked at the root task's place, so threaded code
   loaded there names handler addresses no domain shares.
@@ -37,9 +41,12 @@ Decisions every reader needs:
   every domain's tables. Exports and fun entries are addresses: they are
   **cells**, records at a fixed address in a per-domain area that each
   domain builds itself. Everything else the code points at lies inside
-  the image or in the ERTS executable, which is at the same address in
-  every domain that runs `runtimes/emu`; the build proves that by building
-  twice with everything else displaced.
+  the image or in the ERTS executable's text, which is at the same
+  address in every domain that runs `runtimes/emu`. The build checks this
+  by building twice in one boot, the second time with its private memory
+  elsewhere and every input a domain may vary changed: identical images
+  show that no word points into private memory or depends on such an
+  input.
 * **Where a module's memory came from is its address.** A module whose
   code lies in the image's code range, or a literal area in the image's
   literal part, is the image's, whatever has happened to it since; the
@@ -69,11 +76,17 @@ embedded system.
 from `erlang:memory()`: total 16,021,056 bytes, of which `code` 7,972,341
 and `atom` 343,161, and `literal_alloc` holds 2,050,008 bytes in use. These
 are the runs behind commit 932db011, after ERTS's tables were sized from
-the boot page's limits; the same domain held 9,268 `liberx` pool pages
-(36.2 MiB) in that commit's own run. So loaded code and its literals are
-about 10 MB of the 16 MB ERTS accounts for. The system domain is the one
-ERTS domain measured at a shell so far; a session, which runs the same
-applications' code under the domain interpreter image, has the same shape.
+the boot page's limits. So loaded code and its literals are about 10 MB of
+the 16 MB ERTS accounts for. The system domain is the one ERTS domain
+measured at a shell; a session, which runs the same applications' code
+under the domain interpreter image, has the same shape.
+
+A domain's whole page count is not part of this evidence. The run above
+also counted the system domain's `liberx` pool pages, 36.2 MiB, but that
+count includes the funnel's check scratch at 16 MiB per lane connection,
+which the funnel sizes by each frame's bytes instead
+(`erx_etf_scratch_bytes`, `liberx/erx_etf.c:1347`). The first step of
+[When this is built](#when-this-is-built) measures a session's pages.
 
 **What the image's contents cost in one domain.** `erlang:memory(code)` is
 the module table, the export table and entries, the fun table and entries,
@@ -187,20 +200,31 @@ rules:
 
 The design is ready; its implementation waits for the system to need it.
 
-* **The trigger.** Implementation starts when a real manifest runs three
-  or more interpreter domains at once, which 1b-E reaches: the system
-  domain, root's session, and the storage and network domains of
-  [plan.md](plan.md); or earlier, when the start time of command domains
-  needs it. The system domain never adopts the image, so of those four
-  the adopters are root's session and the storage and network domains if
-  they run the interpreter, which is open decision 1 below.
-* **What comes first.** Each of these is cheaper and helps every domain,
-  whether or not it adopts an image: ERTS's table sizing; the shared image
-  segments of [The executable's own pages](#the-executables-own-pages);
-  the JIT's first block as a per-image limit instead of 64 MiB in every
-  BeamAsm domain (`TODO.md:337-342`); shrinking what each domain loads;
-  and a measurement of a session's pages at its prompt, which replaces the
-  estimates of [Memory saved and what it costs](#memory-saved-and-what-it-costs).
+* **The trigger.** Three domains that adopt the image running at once,
+  or the start time of command domains needing what adoption saves. The
+  system domain never adopts the image, and with two adopters the image
+  about breaks even ([Memory saved and what it costs](#memory-saved-and-what-it-costs)),
+  so a count of interpreter domains overstates the gain. 1b-E's manifest
+  of [plan.md](plan.md) has at most three adopters: root's session, and
+  the storage and network domains if they run the interpreter, which is
+  open decision 1 below.
+* **The order of work before it.** Each step is cheaper than this design
+  and helps every domain, whether or not it adopts an image:
+  1. Measure a session's pages at its prompt, with the funnel's scratch
+     sized by frame, replacing the estimates of [Memory saved and what it
+     costs](#memory-saved-and-what-it-costs).
+  2. Land the shared image segments of [The executable's own
+     pages](#the-executables-own-pages).
+  3. Make the JIT's first block a per-image limit instead of 64 MiB in
+     every BeamAsm domain (`TODO.md:342-347`).
+  4. Settle open decision 1, which domains run the interpreter.
+  5. Build this design, if the count of adopters and the session's
+     measurement still call for it.
+
+  The session's measurement also weighs [binding less per
+  domain](#alternatives-considered): if sessions use a small part of the
+  image, the cells and atoms each adopter builds for the whole image
+  weigh more against what it saves.
 * **What it saves.** Measured: a domain at a shell holds about 10.4 MB of
   code, literals and atoms (the system domain above). Estimated, until
   the benchmark below runs: an image of about 12 MB, resident once; about
@@ -239,13 +263,21 @@ therefore contains no snapshot of any mutable ERTS structure: no hash
 table, lock or allocator state, which is what made Emacs's `unexec`
 fragile. It contains immutable bytes and lists.
 
-Pointer ownership is a checked property of the build, not a list to keep
-complete: the build runs twice, the second time with every ordinary
-allocation displaced, and requires byte-identical images. A word of the
-image that points at anything outside the three ranges and the
-executable's fixed segments differs between the two builds, whichever
-loader path wrote it. So a pointer the design did not foresee fails the
-build instead of reaching a domain.
+What the image may depend on is a checked property of the build, not a
+list to keep complete. The build runs the builder twice in one boot. The
+second run's private memory lies in an address range disjoint from the
+first's, and the second run differs from the first in every input a
+domain may vary; the executable, the three ranges and the module files
+are the same. The two images must be byte-identical. So no word of the
+image points into memory a domain places privately, and no word depends
+on an input a domain may vary, whichever loader path wrote it: a pointer
+or a dependence the design did not foresee fails the build instead of
+reaching a domain. The comparison cannot see a pointer into an area that
+every domain holds privately at one fixed address, the executable's
+writable segment, `liberx`'s thread table and the time page, because such
+an area is at the same address in both runs; [What loaded code points
+at](#what-loaded-code-points-at) is the argument that loaded code holds
+none.
 
 Every requirement follows from that:
 
@@ -258,20 +290,19 @@ Every requirement follows from that:
   what a stock loader would have built, at different addresses only for
   the image's part (requirement 2);
 * a mismatch is refused because the image is valid for one runtime file,
-  whose hash the image records and the grant and the runtime check
+  whose hash the image records and the packer and the grant check
   (requirement 8).
 
 ### What loaded code points at
 
 `beam_load_finalize_code` (`emu_load.c:560-760`) and the emit step before
 it produce every word of a module's code. Each kind of pointer is
-same-in-every-domain for one reason in this table, and the displaced
-build checks that no other kind exists.
+same-in-every-domain for one reason in this table.
 
 | What the code embeds | Where it points | Same in every domain because |
 | --- | --- | --- |
 | instruction words | handlers in the emulator's text (`erl_vm.h:289`) | the executable is at one address |
-| BIF function pointers and `bif_table` entries (`emu_load.c:137`, `:711-713`) | the executable's text and data | the executable is at one address |
+| BIF function pointers, read from `bif_table` entries (`emu_load.c:137`, `:1088`, `:711-713`) | the executable's text | the executable is at one address |
 | labels, strings, line table, function table (`emu_load.c:470-520`) | inside the module's code chunk | the chunk is at one address |
 | the NIF vector `are_nifs` of a module that declares `-nifs` (`emu_load.c:1437-1446`) | inside the module's code chunk | finalizing copies it into the chunk, in every module, imaged or not |
 | literals (`emu_load.c:329-336`) | the module's literal area | the literal area is in the image's literal part |
@@ -280,6 +311,14 @@ build checks that no other kind exists.
 | catch labels (`emu_load.c:589-601`) | indices into the catch table | the image's catches are a prefix of the table |
 | imports (`emu_load.c:604-627`) | export entries | export entries are cells |
 | fun creation (`emu_load.c:671-680`) and literal funs (`:663`) | fun entries | fun entries are cells |
+
+Every executable address in the table is in the text. `bif_table` itself
+lies in the executable's writable segment, but the loader copies an
+entry's function pointer, never the entry's address, so loaded code holds
+no address in the writable segment, and none in `liberx`'s thread table
+or the time page. This is the part of the image's correctness that the
+two runs cannot check; a loader change that embeds such an address must
+change this table.
 
 `are_nifs` is the one field of the interpreter's code header
 (`otp/erts/emulator/beam/beam_code.h:59-85`) allocated apart from the
@@ -338,13 +377,15 @@ generated bounded reader ([design-abi.md](design-abi.md)).
 
 * **Header**: magic, format version, the BLAKE3 hash of the file run of
   the `runtimes/emu` entry the build ran, which is the `file_hash` the
-  boot index records for that entry (`abi/erx_abi.txt:239`); the loader
-  options it was built with (line tables on, debugger support off); the
-  three bases and the lengths of the image's parts; the export and fun
-  cell sizes; the count and offset of every list; and the value of each
-  `ERTS_GLOBAL_LIT_*` variable, a list generated from the declarations of
-  `erl_global_literals.h`, so a singleton OTP adds is carried without
-  anyone remembering it.
+  boot index records for that entry (`abi/erx_abi.txt:239`); the lengths
+  of the image's parts; the count and offset of every list; and the value
+  of each `ERTS_GLOBAL_LIT_*` variable, a list generated from the
+  declarations of `erl_global_literals.h`, so a singleton OTP adds is
+  carried without anyone remembering it. The three bases and the cell
+  sizes are constants compiled into the runtime that built the image, and
+  the loader options are ERTS's defaults, since the builders' arguments
+  set none; a domain whose runtime has the image's runtime hash has all
+  of them, so the header carries none.
 * **Atoms**: every atom of the build's table beyond ERTS's built-in
   ones, in index order, as length and UTF-8 text.
 * **Export cells**, in index order: module, function and arity as atom
@@ -359,8 +400,7 @@ generated bounded reader ([design-abi.md](design-abi.md)).
   fun cells with their code addresses, its records (name atom and
   definition literal), whether it is preloaded, and for a module of an
   application its path within a release and the BLAKE3 hash of that
-  file's file run, the value the boot index records for the file in every
-  release that ships it.
+  file's file run, which the packer compares with every domain release.
 * **Exclusions**: each module the build left out, with its reason.
 
 The image needs no hash of its own: the boot index's `file_hash` for
@@ -370,47 +410,89 @@ the file check at its first slice verify it
 
 ## Building the image
 
-**What is shared.** The machine record of the system manifest sets
-`shared_code_memory`, the largest image the build may pack; zero packs
-none, and every domain then loads its code privately. The image holds
-the preloaded modules and every module of `DOMAIN_BASE`, in a fixed
-order, minus the exclusions below. Every domain release ships
-`DOMAIN_BASE` (`release_files.rb:68-83`), so there is no per-release
-choice of what is shared.
+**Whether there is one.** The machine record of the system manifest sets
+`shared_code_image`, true or false; with false the build packs no image,
+and every domain loads its code privately. The image holds the preloaded
+modules and every module of `DOMAIN_BASE`, in a fixed order, minus the
+exclusions below. Every domain release ships `DOMAIN_BASE`
+(`release_files.rb:68-83`), so there is no per-release choice of what is
+shared.
 
-**The build run.** The build boots a build-only image under QEMU, with
-TCG in deterministic mode (`erx.det=1`), on the build host. It holds the
-stopgap kernel, a small native root that links `liberx`'s domain library,
-as the `native_domain` suite's root does
-(`tools/lib/erx/native_domain.rb`, `test/guest/native_domain/guest.c`),
-the `runtimes/emu` file the boot image will carry, and a release of
-`DOMAIN_BASE`. The root creates one **builder domain** with a fixed
-argument vector and a boot information page that marks it as building.
-The builder's ERTS builds the image on its one start-up thread, before
-any scheduler or Erlang process exists, and halts. The root then writes
-the image's bytes, raw, to the second UART, which the build connects to a
-file of the build tree, and prints the image's length and BLAKE3 hash on
-the console; the build accepts the file only when both agree.
+**The build run.** The build boots a build-only image under QEMU on the
+build host, with TCG in deterministic mode (`erx.det=1`) and QEMU's
+semihosting enabled for user mode
+(`-semihosting-config enable=on,target=native,userspace=on`). The image
+holds the stopgap kernel; a small native **build root** that links
+`liberx`'s domain library, as the `native_domain` suite's root does
+(`tools/lib/erx/native_domain.rb`, `test/guest/native_domain/guest.c`);
+the `runtimes/emu` file the boot image will carry; and a release of
+`DOMAIN_BASE`. The build root runs two **builders** in sequence, run A
+and run B, each a domain of `runtimes/emu` whose boot information page
+carries the **build mark**. The root creates the three ranges of each
+builder as memory objects of its own and maps them writable into the
+builder at their fixed bases, so they outlive the builder. Each builder's
+ERTS builds an image into its ranges and halts.
+
+The root then compares the two images byte by byte, writes run A's image
+to a file of the build tree with semihosting's `SYS_OPEN`, `SYS_WRITE`
+and `SYS_CLOSE`, and prints on the console the image's length and BLAKE3
+hash, and either that the runs agree or the first offset at which they
+differ. The root writes the parts where the header puts them and adds
+nothing of its own. The build accepts the file only when its length and
+hash are the console's and the runs agree. When they differ it fails,
+naming the offset, the part of the image it lies in and, in a code chunk
+or literal area, the module, which it reads from the written image's
+lists.
+
+**Assumption: semihosting from user mode under the stopgap.** It is not
+verified that the build root, a user-mode task on Fiasco, can make a
+semihosting call. The design assumes that, with `userspace=on`, QEMU's
+TCG translator turns the semihosting instruction into a host call at any
+privilege level, so the instruction never reaches Fiasco. **Fallback**, if
+it does not: the build root writes the image to the second UART with a
+polling transmit loop of its own, which the build connects to a file,
+and the build accepts the file by the same length and hash. At
+[design-live.md](design-live.md#performance)'s estimate of 0.1 to 1 MB/s
+for the UART, that is 12 to 120 s for about 12 MB. A virtio-console
+transport would be faster but needs a C virtio driver in the build root,
+which nothing else needs.
+
+**Who sets the build mark.** The shipped `runtimes/emu` carries the build
+code, since it is the very file the image is built for. Only the build
+root sets the build mark, and with it a builder's placement start: the
+domain library's planning entries take no input for either and it never
+writes them, and in a shipped boot image the system domain plans every
+domain through the domain library, so no domain there starts in build
+mode. The three ranges of a domain the domain library plans are read-only
+or absent, so build code that ran there would fault at its first
+allocation in them and end only that domain.
 
 This is the target's own loader running on the target's own executable,
 at the target's addresses. There is no second loader on the host to keep
 in step with ERTS, and nothing about the image depends on the machine
 that later boots it.
 
-**The build**, in the builder's ERTS start:
+**The build**, in each builder:
 
-1. From `init_global_literals` (`otp/erts/emulator/beam/erl_init.c:264`)
+1. With the build mark, `liberx`'s runtime entry runs ERTS on a thread it
+   creates instead of the task's first thread. musl maps a created
+   thread's stack and thread-local storage together, as placed memory
+   (`musl/src/thread/pthread_create.c:296-314`), while the first thread's
+   stack is in the executable's `.bss`
+   (`liberx/backend/fiasco/arch/aarch64/task_start.S`) and its
+   thread-local storage in musl's static block when it is small, as
+   ERTS's is (`musl/src/env/__init_tls.c:133-145`): both at one fixed
+   address in every domain.
+2. From `init_global_literals` (`otp/erts/emulator/beam/erl_init.c:264`)
    until the report, every `ERTS_ALC_T_LITERAL` allocation comes from the
    literal part, which places ERTS's global literal chunks there,
    singletons and export funs included
    (`otp/erts/emulator/beam/erl_global_literals.c:93-117`); export and fun
    entries come from the cell areas in creation order; code chunks come
-   from the code range one page-aligned module at a time. The three ranges
-   are the builder's own memory, mapped writable at their fixed bases.
-   The code range allocator lets the module being loaded grow and shrink
-   its last block, as the loader's `erts_realloc` requires
-   (`emu_load.c:41`, `:280`).
-2. At the point where ERTS loads its preloaded modules (`erl_init.c:511`,
+   from the code range one page-aligned module at a time. The code range
+   allocator lets the module being loaded grow and shrink its last block,
+   as the loader's `erts_realloc` requires (`emu_load.c:41`, `:280`).
+3. At the point where ERTS loads its preloaded modules (`erl_init.c:511`,
    called at `:2530`), the build loads every module of the image's list
    in order, through the same prepare and finish steps that preloading
    uses, reading each file from the builder's release slice. Decoding a
@@ -424,56 +506,113 @@ that later boots it.
    `on_load` function, when it fails to prepare, when its literals use an
    identity encoding, or when its literal area holds any off-heap object,
    which once identities are refused is a reference-counted binary.
-3. The build writes the lists from its own tables and the header at the
-   start of the code range, and hands the three ranges to the root, which
-   lays them out as the image file.
+4. The build writes the lists from its own tables and the header at the
+   start of the code range, and halts.
 
-**The displaced build.** The build runs twice. In the second run the root
-reserves an extra range at the bottom of the builder's space before it
-starts, so that every ordinary allocation of ERTS, `liberx` and musl lands
-at another address, while the executable and the three ranges stay where
-they are. The two images must be byte-identical; when they are not, the
-build fails and names the first differing offset, the part of the image
-it lies in and, in a code chunk or literal area, the module. Both runs are
-deterministic, so any difference is a pointer into displaced memory.
+**Why literal binaries are excluded, not kept on the heap.** A literal
+binary over `ERL_ONHEAP_BINARY_LIMIT` cannot be decoded as a heap binary
+instead, because ERTS relies on every heap bitstring being at most that
+size, beyond its assertion (`erl_bits.h:167-172`).
+`erts_build_sub_bitstring` makes any result over the limit a sub-bitstring
+of the `BinRef` it is given and reads that binary's flags
+(`otp/erts/emulator/beam/erl_bits.c:2635-2668`, `:2656`), and
+`ERTS_GET_BITSTRING_REF` gives no `BinRef` for a heap bitstring
+(`erl_bits.h:402-408`), so `binary:part/3` of 65 bytes of such a literal
+(`otp/erts/emulator/beam/erl_bif_binary.c:1993-2007`) reads through a null
+pointer. The interpreter's `i_bs_get_fixed_binary` takes a match
+context's origin as a `BinRef` without checking
+(`otp/erts/emulator/beam/emu/bs_instrs.tab:1447-1459`), so a match of 65
+bytes from such a literal reads the binary's first bytes as a pointer. A
+sub-bitstring accepts another origin only as a match context
+(`erl_bits.h:501-512`).
+
+**The two runs.** Run B differs from run A in where its private memory
+lies and in every input a domain may vary.
+
+* **Placement.** `liberx` places a space's private mappings, those
+  without a fixed address, from a **placement start** that space creation
+  takes. On the stopgap it is where `liberx`'s lowest-free search begins
+  (`find_free_range`, `liberx/backend/core/vm_table.c:504-525`); on erXos's
+  kernel it is the space's placement base, below which the kernel places
+  at the highest free range
+  ([design-kernel.md](design-kernel.md#virtual-memory)). The domain
+  library always passes the layout's default. Run B's placement start
+  lies 64 GiB further than run A's, in the direction its kernel places,
+  and clear of the fixed ranges, so every mapping either run places lies
+  in a range of its own: its heaps and allocator carriers, whatever their
+  alignment, the build thread's stack and thread-local storage, its boot
+  page, its release slice, and ERTS's copy of its argument words. The
+  distance is far beyond a builder's whole use; as a check, the root reads
+  the address range of each run's placed mappings and fails the build when
+  the two meet.
+* **Inputs.** Run B has another domain id and node name, other `init`
+  arguments and environment, another CPU set and so another scheduler
+  count, other runtime limits (each still enough for the build), its
+  hardware capability words cut to the architecture's baseline, and,
+  since it runs later in the same boot, a later clock and other entropy
+  (`liberx/backend/fiasco/entropy.c` seeds from the counter).
+
+Identical images show that no word of the image points into private
+memory and no word depends on an input a domain may vary. They also show
+that the image depends on the build root, the kernel and the root's side
+of `liberx` only through what a builder sees of them, which is what run B
+varies, so none of these is an input of the image.
 
 **Packing.** The packer adds the image to the boot image as the file
-`runtimes/emu.code`, without the system mark, and refuses it, failing the
-build with a diagnostic, when its header's runtime hash is not the
-`file_hash` of the `runtimes/emu` entry it packs, or when it is larger
-than `shared_code_memory`. The image is a generated file: it lives in the
-build tree and is never checked in. The build runs the step again only
-when one of its inputs changes: the runtime file, the image's module
-files, or the layout constants.
+`runtimes/emu.code`, without the system mark, and fails the build with a
+diagnostic when:
+
+* the header's runtime hash is not the `file_hash` of the `runtimes/emu`
+  entry it packs;
+* a domain release lacks a file of the image's module list at that
+  module's path within the release, or holds it with another file hash.
+  Every domain release ships `DOMAIN_BASE` from the same build, so this
+  holds whenever the build is sound, at the cost of one comparison per
+  file, and it is what lets every adopting domain bind every module;
+* a configured domain or a session template of the system manifest runs
+  `runtimes/emu`, does not set `shared_code none`, and has an `atoms`
+  limit below the image's atom count plus ERTS's built-in atoms, the
+  **atom floor**.
+
+The image is a generated file: it lives in the build tree and is never
+checked in. The build runs the step again only when one of its inputs
+changes: the runtime file, the image's module files, or the layout
+constants. The build root, the kernel and the root's side of `liberx` are
+not inputs, as the two runs show.
 
 ## Adopting the image
 
 **The grant**, in the domain library, when it plans a domain: a domain is
 granted the image when the boot image holds one, its runtime entry's
 `file_hash` is the image header's runtime hash, its specification does not
-set `shared_code none`, and its atom limit is at least the image's atom
-count plus ERTS's built-in atoms. The decision is a pure function of the
-specification, the runtime entry and the image's header. A granted
-domain's creation plan maps the image's slice into the domain's space,
-read-only, at the code range and the literal part, and marks the boot
-information page; nothing about the image changes in a domain not
-granted it, which loads its code privately, as today.
+set `shared_code none`, and its emulator arguments, the words before
+`--`, set no loader option: no word begins with `-L`, which drops line
+tables (`erl_init.c:1465-1466`), or `-D`, which sets debugger
+instrumentation (`:1640-1665`). The image was built with ERTS's default
+loader options, which such a domain would not have. The decision is a
+pure function of the specification, the runtime entry and the image's
+header. The atom floor is not a grant reason: a configured domain or
+template below it fails the build, and the plan's check of each runtime
+limit against the runtime's bounds
+([design-system.md](design-system.md#creating-a-domain)) takes the floor
+as the `atoms` limit's lower bound for a specification the image would
+be granted to, so a request below it fails as a limit out of bounds
+fails. A granted domain's creation plan maps the image's slice into the
+domain's space, read-only, at the code range and the literal part, and
+marks the boot information page; nothing about the image changes in a
+domain not granted it, which loads its code privately.
 
 **Preflight**, in a granted domain's ERTS, at the start of `erl_init`
 before `init_global_literals`: ERTS checks the header through the
-generated reader (magic and format version, its own runtime entry's hash,
-which the boot page carries, against the header's, its own loader
-options, the bases, lengths and cell sizes against the layout constants
-it was built with, and every list's offset and count against the image's
-length, with checked arithmetic). It then computes the modules it binds:
-every preloaded module of the image, and every module whose path within
-the release and file hash appear in its own release slice's index.
-Release paths in the archive carry each release's prefix
-(`domains/<name>/`), so the agreement compares the path after it. The
-check and the agreement are pure functions of the bytes they read and
-build for the host. Last, ERTS commits the cell range's pages, the one
-allocation adoption makes. Everything that can fail on input or on
-resources fails here, before anything of the runtime has changed.
+generated reader, its magic and format version, and every part's length
+and every list's offset and count against the image's length, with
+checked arithmetic. It does not compare the runtime hash again: the
+domain library granted the image because the runtime it started has that
+hash, and the bases and cell sizes are constants of that runtime. The
+check is a pure function of the bytes it reads and builds for the host.
+Last, ERTS commits the cell range's pages, the one allocation adoption
+makes. Everything that can fail on input or on resources fails here,
+before anything of the runtime has changed.
 
 **The stages**, at the points where ERTS creates the corresponding state.
 Past preflight, adoption only constructs; a stage that finds its
@@ -505,17 +644,17 @@ postcondition broken ends the start.
   exports, `erts_export_put` finds the cells and initialises them as it
   would its own.
 * **Binding**, at the point where ERTS loads its preloaded modules: for
-  each module it binds, the stage creates the module table entry with the
-  image's code header as the current instance, both its regions set to
-  that header as finalizing does (`emu_load.c:574-575`), its catch chain
-  and the **read-only mark**, which says only that the instance's pages
-  are still the image's; it points the module's export cells and fun cells
-  at its code in every code index, registers its records and code range,
-  and adds its size to the total code size. ERTS then loads the preloaded
-  modules the image does not hold, as today. The binding runs under the
-  code staging protocol the preloading path uses.
+  every module of the image, the stage creates the module table entry
+  with the image's code header as the current instance, both its regions
+  set to that header as finalizing does (`emu_load.c:574-575`), its catch
+  chain and the **read-only mark**, which says only that the instance's
+  pages are still the image's; it points the module's export cells and
+  fun cells at its code in every code index, registers its records and
+  code range, and adds its size to the total code size. ERTS then loads
+  the preloaded modules the image does not hold. The binding runs under
+  the code staging protocol the preloading path uses.
 
-**The code server** learns the bound modules from `init`. A BIF returns
+**The code server** learns the image's modules from `init`. A BIF returns
 the bound modules of applications with their paths; `init` adds them to
 the list `init:fetch_loaded/0` returns (`otp/erts/preloaded/src/init.erl:459-461`),
 which the code server reads at its start
@@ -526,13 +665,13 @@ embedded boot loads nothing twice.
 
 **What the domain owns.** Its atom table, catch table, module table, code
 ranges, export and fun tables with their cells, its own global literals,
-and every module it loads or privatises. **What it shares.** The bound
+and every module it loads or privatises. **What it shares.** The image's
 modules' code and literals, the external funs of its export cells, and
 the global literals the image carries.
 
 ## Loading, purging and patching
 
-**Hot loading** is stock: loading a new version of a bound module
+**Hot loading** is stock: loading a new version of an image module
 prepares a private module in the domain's own memory, makes the image's
 instance old and points the module's export cells at the new code. Every
 other module, imaged or not, reaches the module through those cells, so
@@ -626,7 +765,7 @@ every local function of the image would privatise about 9 MB.
 
 Global call tracing that is set leaves loaded code alone: its breakpoints
 live in the export entry (`beam_bp.c:2181-2199`), which is a cell. A pure
-read of a bound instance needs nothing: `module_info/0,1`,
+read of an image instance needs nothing: `module_info/0,1`,
 `erlang:fun_info/2`, `erts_debug:df/1` and stack traces read the code.
 
 **Garbage collection and copying** need nothing: shared literals are in
@@ -638,29 +777,29 @@ literal collection writes a count in the image.
 
 ## Behaviour against stock OTP
 
-Everything Erlang code can observe of a bound module is what a stock node
-shows for a module it loaded at boot: `code:which/1`, `module_info/0,1`
-and its MD5, `erlang:fun_info/2`, `erlang:phash2/1` of funs, external fun
-equality, the identity of `{}`, hot loading, `code:purge/1`,
-`code:soft_purge/1`, `code:delete/1`, `erlang:check_process_code/2`,
-tracing of every kind, NIF loading, ETS and message copies of literals.
-Excluded modules load privately and behave exactly as today.
+Everything Erlang code can observe of an image module is what a stock
+node shows for a module it loaded at boot: `code:which/1`,
+`module_info/0,1` and its MD5, `erlang:fun_info/2`, `erlang:phash2/1` of
+funs, external fun equality, the identity of `{}`, hot loading,
+`code:purge/1`, `code:soft_purge/1`, `code:delete/1`,
+`erlang:check_process_code/2`, tracing of every kind, NIF loading, ETS
+and message copies of literals. Excluded modules load privately and
+behave as on a domain without the image.
 
 Documented differences, each with its own test:
 
-* **Bound modules are loaded from the start.** In embedded mode the boot
-  loads them anyway, so nothing differs. In interactive mode
-  `erlang:module_loaded/1`, `code:is_loaded/1`, `code:all_loaded/0` and
-  `erlang:loaded/0` show them before their first call.
-* **Every atom of the image exists from the start**, in every domain that
-  adopts it, so `list_to_existing_atom/1` and `binary_to_existing_atom/2`
-  succeed for them and `erlang:system_info(atom_count)` is higher.
-* **Every export and fun of the image has an entry**, unloaded where its
-  module is not bound, visible only in the table sizes of
-  `erlang:system_info(info)`.
-* **`erlang:memory/0`** counts bound code in `code` and `total`, as OTP's
+* **The image's modules are loaded from the start, with their atoms,
+  exports and funs.** In embedded mode the boot loads every module of the
+  release's applications, `DOMAIN_BASE`'s among them, so nothing differs.
+  In interactive mode `erlang:module_loaded/1`, `code:is_loaded/1`,
+  `code:all_loaded/0` and `erlang:loaded/0` show them before their first
+  call; `list_to_existing_atom/1` and `binary_to_existing_atom/2` succeed
+  for every atom of the image, those the excluded modules' preparation
+  made included; and `erlang:system_info(atom_count)` and the table sizes
+  of `erlang:system_info(info)` are those of a node that has loaded them.
+* **`erlang:memory/0`** counts image code in `code` and `total`, as OTP's
   BeamAsm build counts code that lives outside ERTS's allocators
-  (`erl_alloc.c:2508-2513`), and bound literals in `system` and `total`,
+  (`erl_alloc.c:2508-2513`), and image literals in `system` and `total`,
   so a domain's figures read as a stock node's with the same modules
   loaded. What is shared and what is private is the inspector's to say.
 
@@ -688,8 +827,8 @@ shown as unsupported with its reporter named.
 
 ## Concurrency
 
-The build runs on the builder's one start-up thread on the build host,
-and nothing at boot writes the image. Adoption runs on a domain's one
+The build runs on one builder thread at a time on the build host, and
+nothing at boot writes the image. Adoption runs on a domain's one
 start-up thread, before ERTS creates a scheduler or any Erlang process
 (`erl_init.c:264-312`, `:2530`), so it meets no other thread of its
 runtime; the image was mapped by the domain library before that thread
@@ -699,13 +838,25 @@ After start, cells are export and fun entries, written under ERTS's
 existing staging lock and code permissions as any entry is. A `write`
 preparation runs in the requesting BIF, under code modification
 permission, with thread progress blocked for the swap, as loading over a
-traced module blocks it (`beam_bif_load.c:462-472`). No managed scheduler
-runs code during the swap. A thread that is not a managed scheduler never
-runs threaded code of a module that still has the read-only mark: dirty
-schedulers enter a module's code only through a NIF stub, and a NIF stub
-exists only once its module is prepared. The purge's release of an
-image instance runs under code modification permission, after the purge
-has established that no process runs the instance, as stock OTP's
+traced module blocks it (`beam_bif_load.c:462-472`). Blocking thread
+progress stops the threads it manages, the normal schedulers, the
+auxiliary thread and the system message dispatcher
+(`otp/erts/emulator/beam/erl_process.c:3264`, `:8684`,
+`otp/erts/emulator/beam/erl_trace.c:2678`), so none of them runs or reads
+code during the swap. It does not stop the dirty schedulers or the async
+threads (`erl_process.c:8753`, `:8804`,
+`otp/erts/emulator/beam/erl_async.c:395`). These never run threaded code
+of a module that still has the read-only mark: dirty schedulers enter a
+module's code only through a NIF stub, and a NIF stub exists only once
+its module is prepared. They may read it: a dirty BIF or NIF can look up
+the function a return address lies in, as a stack trace does, which reads
+the function table inside a module's code, and nothing rules that out
+during a swap. On erXos's kernel such a read is harmless, since the swap
+is one mapping call that replaces the image's pages with a copy of the
+same bytes and never leaves the range unmapped. On the stopgap it joins
+the residual of [Phase 1](#phase-1-on-the-stopgap). The purge's release
+of an image instance runs under code modification permission, after the
+purge has established that no process runs the instance, as stock OTP's
 `erts_free` of the same code does.
 
 ## Failure handling, refusals and error results
@@ -716,35 +867,40 @@ and fails the same way when a domain loads it privately; one whose
 literals use an identity encoding with reason `literal_identity`; one
 whose literal area holds a reference-counted binary with reason
 `literal_binary`. Exclusions are not failures. The build fails, with a
-diagnostic and no boot image, when the build run ends without an image or
-misses its deadline, when the two runs' images differ, when the transfer's
-length or hash disagrees with the console's, when the image's runtime
-hash is not the packed runtime's, and when the image is larger than
-`shared_code_memory`.
+diagnostic and no boot image, when a builder ends without an image or the
+build run misses its deadline, when the two runs' images differ, when
+their placed mappings meet, when the file's length or hash disagrees with
+the console's, when the image's runtime hash is not the packed runtime's,
+when a domain release's copy of an image module's file differs from the
+image's, and when a configured domain or session template is below the
+atom floor.
 
 **The grant.** A domain is not granted the image when the boot image holds
-none, its runtime entry is not the image's (a BeamAsm domain among them),
-its specification sets `shared_code none`, or its atom limit is below the
-image's atoms plus ERTS's built-in atoms. The domain library records which
-reason, the inspector shows it, and the domain loads privately. This is a
-decision, not a failure.
+none (`no_image`), its runtime entry is not the image's, a BeamAsm
+domain among them (`runtime`), its specification sets `shared_code none`
+(`not_wanted`), or its emulator arguments set a loader option
+(`loader_options`). The domain library records which reason, the
+inspector shows it, and the domain loads privately. This is a decision,
+not a failure. A domain request whose `atoms` limit is below the atom
+floor is refused by the plan, as any limit out of bounds is.
 
 **Adoption.** A granted domain that cannot adopt the image ends its start
 with a diagnostic naming the reason, from a closed set declared in the
-ABI: `format`, `runtime`, `loader_options` and `layout` from the header
-check, `memory` when the cell range's commit is refused, and
-`postcondition` when a stage finds a table not empty or an atom or catch
-at the wrong index. The domain library takes the failed start as it takes
-any, and the domain's supervisor in the system domain decides what
-follows. A granted domain never falls back to loading privately: a
-failure here means a damaged boot image, a build defect or a budget sized
-without the cells, and each is a bug to see, not a mode to run in.
+ABI: `format` from the header check, `memory` when the cell range's commit
+is refused, and `postcondition` when a stage finds a table not empty or an
+atom or catch at the wrong index. The domain library takes the failed
+start as it takes any, and the domain's supervisor in the system domain
+decides what follows. A granted domain never falls back to loading
+privately: a failure here means a damaged boot image, a build defect or a
+budget sized without the cells, and each is a bug to see, not a mode to
+run in.
 
 **After start.** A BIF that must privatise and cannot get the pages fails
 with no breakpoint set and no stub written: `system_limit` from the three
 breakpoint BIFs, `{error, {load_failed, Text}}` from `load_nif/2`. On the
 stopgap only, a refusal after the image's pages are released and before
-the copy is in place ends the domain with a diagnostic
+the copy is in place, or a read of the module's code by a thread that
+blocking thread progress does not stop, ends the domain with a diagnostic
 ([Phase 1](#phase-1-on-the-stopgap)). The purge of an image instance
 reports as usual.
 
@@ -762,6 +918,14 @@ reader of a boot file does, not against a forged one. No party at boot
 builds, supplies or seals anything, so the image adds no party to any
 domain's trusted base.
 
+**The build run's semihosting.** Semihosting gives the guest's code the
+host's files with QEMU's own rights. Only the build run enables it, and
+its guest runs only code the same build made from the tree: the stopgap
+kernel, the build root, `runtimes/emu` and the installed files of
+`DOMAIN_BASE`. QEMU runs it in a working directory of its own under the
+build tree, and the build root opens one relative name there. No boot
+image a domain runs in has semihosting.
+
 **No domain writes a page another domain uses.** The image's pages are a
 slice of the boot image, which no mapping can write
 ([design-kernel.md](design-kernel.md#memory)). The domain library maps
@@ -772,17 +936,17 @@ on behalf of loaded code goes to its cells or to pages it privatised, in
 its own space.
 
 **The image holds no authority.** Its contents are a pure function of the
-runtime file, its loader options and the installed files of
-`DOMAIN_BASE`; the build ran with a fixed argument vector, before any
-domain exists, and no domain's actions change the image. Its literals
-hold no pid, port or reference of any kind, local or external, because
-the build refuses those encodings and leaves the module out, and it holds
-no capability.
+runtime file and the installed files of `DOMAIN_BASE`: the two runs show
+that nothing a domain may vary, and nothing the build root or the kernel
+decides, reaches it, and the builders ran before any domain exists. Its
+literals hold no pid, port or reference of any kind, local or external,
+because the build refuses those encodings and leaves the module out, and
+it holds no capability.
 
 **The atom bound.** The image's atoms come from installed modules, count
-against each adopting domain's atoms limit, which the grant checks, and
-are inserted at the domain's start, not from any frame. The system
-domain's atom table gains none of them.
+against each adopting domain's `atoms` limit, whose floor the packer and
+the plan enforce, and are inserted at the domain's start, not from any
+frame. The system domain's atom table gains none of them.
 
 **Residual: shared pages and timing.** The interpreter reads threaded
 code as data, and user mode may clean and invalidate cache lines by
@@ -809,19 +973,19 @@ them.
   reads.
 * **Each adopting domain** builds cells and tables for every export and
   fun of the image, about 1.5 MB and 0.4 MB, a module table entry per
-  bound module, at most 0.17 MB, and the atom prefix, about 0.5 MB: about
+  image module, at most 0.17 MB, and the atom prefix, about 0.5 MB: about
   2.5 MB. It also loads privately whichever excluded modules it uses, at
   most about 1.2 MB of code.
 * **A domain at a shell**, of the shape measured in the system domain,
-  holds today about 8.0 MB of `code`, 2.0 MB of literals and 0.3 MB of
-  atoms, about 10.4 MB; with the image it holds about 3 to 3.5 MB, a
-  saving of about 7 MB. A session's release saves 5 to 7 MB, depending on
-  how many of the image's modules it reaches.
+  holds about 8.0 MB of `code`, 2.0 MB of literals and 0.3 MB of atoms
+  without the image, about 10.4 MB; with the image it holds about 3 to
+  3.5 MB, a saving of about 7 MB. A session's release saves 5 to 7 MB,
+  depending on how many of the image's modules it reaches.
 * **Machine-wide**, the system domain's own use is unchanged. With one
-  adopting domain the image costs about 5 MB more than today; with two the
-  costs are about even, and each further adopting domain saves about
-  7 MB. Four sessions or command domains would hold about 26 MB instead of
-  about 42 MB.
+  adopting domain the image costs about 5 MB more than without it; with
+  two the costs are about even, and each further adopting domain saves
+  about 7 MB. Four sessions or command domains would hold about 26 MB
+  instead of about 42 MB.
 
 **Start-up.** Boot carries nothing for the image: no domain is created
 for it and nothing is copied. Each adopting domain inserts about 18,000
@@ -830,11 +994,11 @@ modules, which the same research measured at 92 ms for a 244-module
 embedded boot ([research-g5-beamasm.md](research-g5-beamasm.md)).
 
 **Build time.** The build run is two ERTS starts to the point of
-preloading, under TCG in deterministic mode, each preparing about 240
-modules, and a transfer of about 12 MB over the second UART. Neither cost
-is measured; both go on the performance watch list, and a transfer too
-slow for the UART moves to the virtio-console transport that
-[design-live.md](design-live.md#performance) names for the host link.
+preloading in one boot, under TCG in deterministic mode, each preparing
+about 240 modules, a comparison of two images of about 12 MB, and one
+semihosting write of about 12 MB. None of it is measured; the run's
+duration goes on the performance watch list, with the UART fallback's
+transfer if the fallback is taken.
 
 **Per call.** Nothing: the code and cells are what a private load
 produces, and the interpreter's path is unchanged.
@@ -845,15 +1009,14 @@ breakpoint or NIF load.
 
 The benchmark that settles these, `tools/erx bench shared-code`, beside
 G5's (`tools/lib/erx/bench_g5.rb`), boots the development image with one,
-two and four sessions, with the image and with `shared_code_memory` set
-to zero, on HVF, QEMU 11.1.3, 4 CPUs, one boot each way, and records each
-domain's pool pages and `erlang:memory()`, the image's size by part, the
-boot time to the prompt, each domain's start time, the time to set a
-local trace pattern on one imaged module, and `erx_otp_bench`'s
-call-heavy cases with and without the image; and on the build host, the
-build run's duration and the transfer's. Adoption's cost, privatising's
-cost and the per-domain cells belong on the performance watch list until
-it runs.
+two and four sessions, with `shared_code_image` true and false, on HVF,
+QEMU 11.1.3, 4 CPUs, one boot each way, and records each domain's pool
+pages, `erlang:memory()` and start time, the image's size by part, the
+time to set a local trace pattern on one imaged module, and
+`erx_otp_bench`'s call-heavy cases with and without the image; and on the
+build host, the build run's duration. Adoption's cost, privatising's cost
+and the per-domain cells belong on the performance watch list until it
+runs.
 
 ## Phase 1, on the stopgap
 
@@ -876,15 +1039,18 @@ of the prepared copy over the module's page range, which replaces the
 image's pages there or fails and leaves them, since a range call is
 planned whole, its allocations made and its charge taken before anything
 changes ([design-kernel.md](design-kernel.md#overview), the row for range
-calls). On the
-stopgap the copy is a memory object of the domain's budget, created and
-filled through a scratch mapping before the swap, so it is funded before
-anything is released; the swap then releases the module's mapping,
-reserves its range again and maps the object there. A refusal at either
-of the last two steps leaves live code unmapped and cannot be undone in
-user mode, so the runtime ends the domain with a diagnostic naming the
-module. That is a residual of the stopgap, recorded and not worked
-around; erXos's kernel has no step between.
+calls). On the stopgap the copy is a memory object of the domain's
+budget, created and filled through a scratch mapping before the swap, so
+it is funded before anything is released; the swap then releases the
+module's mapping, reserves its range again and maps the object there.
+Between the release and the new mapping the module's code is unmapped,
+and that window is a residual of the stopgap, recorded and not worked
+around, with two ways to end the domain: a refusal at either of the last
+two steps, which cannot be undone in user mode, so the runtime ends the
+domain with a diagnostic naming the module; and a read of the module's
+code by a thread that blocking thread progress does not stop, a dirty
+scheduler or an async thread, which faults ([Concurrency](#concurrency)).
+erXos's kernel has no step between.
 
 **Purging.** Releasing an image instance's page range is releasing the
 module's whole mapping on the stopgap, and a range release on erXos's
@@ -911,10 +1077,10 @@ data.
 The two fit together without touching:
 
 * **This design needs only the executable's addresses.** Loaded code
-  points into the executable's text and data, which `task.ld` places at
-  one address in every domain whether its pages are shared or copied. So
-  the image works with or without shared executable pages, and they work
-  with or without the image.
+  points into the executable's text, which `task.ld` places at one
+  address in every domain whether its pages are shared or copied. So the
+  image works with or without shared executable pages, and they work with
+  or without the image.
 * **They share no memory or range.** Both are archive pages, never written
   by anyone; the executable's are at `task.ld`'s program range, the
   image's at the ranges above the placement base. Neither maps into the
@@ -923,7 +1089,8 @@ The two fit together without touching:
   Erlang code, which is data to the interpreter, in the image's code
   range; it never touches the executable's text. The executable's
   writable segment, which holds ERTS's own variables, is private in each
-  space either way.
+  space either way, and loaded code holds no address in it ([What loaded
+  code points at](#what-loaded-code-points-at)).
 * **They name the runtime the same way.** The grant compares a domain's
   runtime entry with the image's by the entry's BLAKE3 `file_hash`, the
   same entry whose pages the loader shares; one boot image cannot hold
@@ -944,7 +1111,7 @@ kinds of shared page.
   a design of its own.
 * **Literals alone for BeamAsm domains.** About 2 MB per domain, but it
   needs the atom prefix and the cells anyway, and a JIT loader that reads
-  prepared literals. Not worth it now.
+  prepared literals. Not worth it at that size.
 * **The atom table itself.** Sharing its entries would save about 0.5 MB
   per domain, but a hash table's growth rewrites every entry's chain.
 * **The system domain's loaded code.** Its ERTS is linked with the root
@@ -953,45 +1120,48 @@ kinds of shared page.
   domain to run `runtimes/emu` at `task.ld`'s addresses, which would make
   the root a task program; the saving, one domain's code, does not pay
   for that.
-* **Excluded modules**, applications outside `DOMAIN_BASE`, files of
-  another version than the image's, and modules a domain reads later from
-  an EROFS image: they load privately.
+* **Excluded modules**, applications outside `DOMAIN_BASE`, and modules a
+  domain reads later from an EROFS image: they load privately.
 
 ## Verification
 
 ### Host tests
 
 The functional core builds for the host: the image reader and header
-check, the agreement between an image's modules and a release index, and
-the grant decision.
+check, the grant decision and the atom floor.
 
 * **Header check.** A valid header passes; each field corrupted in turn
-  (magic, version, runtime hash, loader options, each base, each cell
-  size, each list's offset and count, an offset plus count that overflows)
-  is refused with its reason. Seeded fault: the bound on one list's offset
-  removed; the case with that offset past the image's end then fails, and
-  ASan reports the read.
-* **Agreement.** Same path and file hash binds; same path with another
-  hash, another path, or a module absent from the release does not; a
-  preloaded module always binds; a path under another release's prefix
-  binds when the path within the release and the hash agree. Seeded fault:
-  comparing paths only; the other-hash case then binds and fails.
+  (magic, version, each part's length, each list's offset and count, an
+  offset plus count that overflows) is refused with `format`. Seeded
+  fault: the bound on one list's offset removed; the case with that offset
+  past the image's end then fails, and ASan reports the read.
 * **Grant.** A domain that runs the image's runtime entry, with
-  `shared_code default` and enough atoms, is granted; one that runs
-  `runtimes/jit`, one with `shared_code none`, and one whose atom limit is
-  one below the image's count plus the built-in atoms are not, each with
-  its reason. Seeded fault: the runtime entry comparison dropped; the
-  BeamAsm case is then granted and fails.
-* **Fuzz target.** The image reader, the header check and the agreement,
-  over arbitrary image bytes and release indexes, run by
-  `make check-fuzz`, since they parse a boot file.
+  `shared_code default` and no loader option, is granted, and so is one
+  whose `-L` comes after `--`, as an `init` argument; one that runs
+  `runtimes/jit`, one with `shared_code none`, and ones whose emulator
+  words hold `-L` or `-Dibpl` are not, each with its reason. Seeded fault:
+  the runtime entry comparison dropped; the BeamAsm case is then granted
+  and fails.
+* **Atom floor.** The manifest check refuses a configured domain and a
+  session template one atom below the floor and passes them at it; the
+  plan refuses a request one below and plans one at it; a specification
+  with `shared_code none` or for `runtimes/jit` has no floor. Seeded
+  fault: the floor compared with `<=` instead of `<`; the cases at the
+  floor are then refused and fail.
+* **Fuzz target.** The image reader and the header check, over arbitrary
+  image bytes, run by `make check-fuzz`, since they parse a boot file.
 
 ### Build checks
 
-* **The displaced build.** Every image build runs it. Seeded fault:
-  `are_nifs` allocated from `ERTS_ALC_T_PREPARED_CODE` again instead of in
-  the chunk; the image of a module that declares `-nifs` then differs
-  between the two runs and the build fails naming that module.
+* **The two runs.** Every image build runs them. Seeded faults, each of
+  which fails the build naming the module: `are_nifs` allocated from
+  `ERTS_ALC_T_PREPARED_CODE` again instead of in the chunk, a pointer
+  into a placed heap; the build writing the address of one of its own
+  stack variables into a module's code chunk, a pointer into the build
+  thread's stack; and the build writing the scheduler count into a
+  module's code chunk, a dependence on a varied input. A fourth seed gives
+  run B run A's placement start; the root's range check then fails the
+  build.
 * **Exclusions.** A fixture release beside `DOMAIN_BASE` holds four
   modules, one each with a local pid literal, an external reference
   literal, a literal binary of 1 KiB and an `on_load` function, built
@@ -1007,9 +1177,10 @@ the grant decision.
   `beam_bp.c`, and a call of `erts_unseal_module` on `&modp->curr`; each
   fails the check.
 * **Packing.** The packer refuses an image whose runtime hash is not the
-  packed runtime's. Seeded fault: the comparison dropped, with an image
-  built from a runtime that differs in one byte; the boot image then
-  packs, and the check fails.
+  packed runtime's, and a boot image with a domain release whose
+  `lists.beam` differs from the image's in one byte. Seeded faults: each
+  comparison dropped in turn; the boot image then packs, and the check
+  fails.
 
 ### QEMU tests
 
@@ -1017,20 +1188,21 @@ Sessions under the development image, each test in its own domains so
 its seeds stay local.
 
 * **The image is adopted and bound.** The inspector shows two sessions
-  granted the image, both bound to the image's module count less its
-  exclusions, and the image's pages in neither domain's budget. Seeded
-  fault: the binding stage skips the last module; the bound count then
-  differs and the test fails.
-* **A granted domain that cannot adopt ends its start.** A test hook makes
-  one domain's boot page carry another runtime hash: that domain's start
-  ends with the `runtime` diagnostic, the inspector shows the failed start,
-  and the other session reaches its prompt. Seeded fault: adoption falling
+  granted the image, both bound to the image's module count, and the
+  image's pages in neither domain's budget. Seeded fault: the binding
+  stage skips the last module; the bound count then differs and the test
+  fails.
+* **A granted domain that cannot adopt ends its start.** A test hook
+  refuses one domain's commit of its cell range: that domain's start ends
+  with the `memory` diagnostic, the inspector shows the failed start, and
+  the other session reaches its prompt. Seeded fault: adoption falling
   back to private loading on refusal; the domain then reaches its prompt
   and the test fails.
 * **A domain not granted loads privately.** A domain with `shared_code
-  none` reaches its prompt with no image mapped and the reason shown.
-  Seeded fault: the grant ignoring the specification; the domain then
-  adopts and the test fails.
+  none`, and one whose emulator words hold `-L`, each reach their prompt
+  with no image mapped and the reason shown. Seeded fault: the grant
+  ignoring the specification; the first domain then adopts and the test
+  fails.
 * **The image is mapped read-only and never executable.** The inspector
   shows every image mapping of a session with read permission only, and a
   test hook's store to an image page ends that session with a fault while
@@ -1106,41 +1278,52 @@ at `build/oracle/emu`. The suites that exercise this design most are
 `trace_session_SUITE`, `code_SUITE`, `fun_SUITE`, `nif_SUITE`,
 `erts_debug_SUITE`, `persistent_term_SUITE`, `process_SUITE` and
 `bif_SUITE`, with `literal_area_collector_test`, and `kernel`'s
-`code_SUITE`. A difference that disappears with `shared_code_memory` set
-to zero is this design's, and is a bug or one of the documented
+`code_SUITE`. A difference that disappears with `shared_code_image`
+false is this design's, and is a bug or one of the documented
 differences.
 
 ## Interfaces
 
-* **ABI** (`abi/erx_abi.txt`): the three bases and spans; the header, list
-  and module record layouts; the format version; the grant's reasons, the
-  adoption failure reasons and the exclusion reasons; the boot information
-  page's entry for the image (whether the domain builds, adopts or has no
-  image); the inspector's records for the image and for a domain.
-* **System manifest**: the machine record's `shared_code_memory`; each
-  domain specification's `shared_code`, `default` or `none`.
-* **The build**: the build run's native root and its manifest; the
-  displaced second run; the transfer over the second UART; the packer's
-  checks and the `runtimes/emu.code` entry.
+* **ABI** (`abi/erx_abi.txt`): the three bases and spans and the cell
+  sizes; the header, list and module record layouts; the format version;
+  the grant's reasons, the adoption failure reasons and the exclusion
+  reasons; the boot information page's entry for the image (whether the
+  domain builds, adopts or has no image), whose build value only the
+  build root writes; the inspector's records for the image and for a
+  domain.
+* **System manifest**: the machine record's `shared_code_image`, a
+  boolean; each domain specification's `shared_code`, `default` or
+  `none`; the atom floor in the manifest check.
+* **The build**: the build root and its manifest; the two runs, their
+  placement starts, varied inputs and range check; the comparison in the
+  guest and the semihosting write, with the second UART as fallback; the
+  packer's checks and the `runtimes/emu.code` entry.
 * **ERTS**: the build, preflight, the stages, `erx_code_prepare` and its
   handle in one erXos file of the runtime's `sys/erxos` layer, around the
-  pure header check and agreement; the placement of literals, cells and
-  code during the build in `erl_global_literals.c`, `export.c`,
-  `erl_fun.c`, `erl_code_staged.h` and the code allocator; `are_nifs` in
-  the chunk in `emu_load.c` and the purge; the decoder's identity flag in
+  pure header check; the placement of literals, cells and code during the
+  build in `erl_global_literals.c`, `export.c`, `erl_fun.c`,
+  `erl_code_staged.h` and the code allocator; `are_nifs` in the chunk in
+  `emu_load.c` and the purge; the decoder's identity flag in
   `external.c`; the stage calls in `erl_init.c`, `beam_file.c` and
   `erl_bif_info.c`; the funnel's handle in `module.c` and its call sites
   in `beam_bp.c`, `erl_nif.c` and `beam_bif_load.c`; the matcher's intent
   in `beam_bp.c` and its callers in `erl_bif_trace.c` and `beam_debug.c`;
   the purge's two release rules in `beam_bif_load.c`; the literal range's
   fixed base in `erl_mmap.c`; the memory figures in `erl_alloc.c`; and in
-  `init.erl`, the bound modules in `fetch_loaded/0` and the `primLoad`
+  `init.erl`, the image's modules in `fetch_loaded/0` and the `primLoad`
   skip.
-* **`liberx`**: the swap of one module's pages for a prepared private
-  copy, as one fixed mapping on erXos's kernel and as release, reserve and
-  map on the stopgap.
-* **The domain library**: the grant decision; one slice of the image; and
-  mapping it read-only into a granted domain's space in its creation plan.
+* **`liberx`**: the placement start that space creation takes; with the
+  build mark, the runtime entry running ERTS on a thread it creates; the
+  swap of one module's pages for a prepared private copy, as one fixed
+  mapping on erXos's kernel and as release, reserve and map on the
+  stopgap.
+* **erXos's kernel**: space creation takes the space's placement base
+  from its creator when given, in place of the random choice that
+  [design-kernel.md](design-kernel.md#virtual-memory)'s placement rule
+  makes, so that a build on erXos's kernel can displace its second run.
+* **The domain library**: the grant decision; the atom floor in the
+  plan's check of runtime limits; one slice of the image; and mapping it
+  read-only into a granted domain's space in its creation plan.
 
 ## Alternatives considered
 
@@ -1176,6 +1359,12 @@ differences.
   valid only for the target executable, so a host tool would be a second
   loader that must agree with ERTS's word for word. Running ERTS itself
   under QEMU has no second loader.
+* **Literal binaries kept on the heap.** Decoding the build's literal
+  binaries over 64 bytes as heap binaries would keep the 14 excluded
+  modules in the image with no new mechanism, but ERTS's sub-bitstring
+  paths rely on no heap bitstring exceeding the limit, as [Building the
+  image](#building-the-image) shows, so it would crash `binary:part/3` and
+  binary matching on those literals.
 * **Cells for literal binaries.** A per-domain cell per reference-counted
   literal binary, allocated at its final address while the build decodes
   it so that every bitstring's cached base already points there, would
@@ -1185,18 +1374,22 @@ differences.
   adopting domain.
 * **Binding on first load**, by matching a loaded file's hash against the
   image, as stock interactive mode loads on first call: it removes the
-  first documented difference and the cells' cost for unbound modules, but
-  every load path consults the image, the code server depends on it, and
-  the atoms must still all exist at start. Trigger: a suite or user that
-  depends on interactive-mode loading order.
-* **Cells only for what a domain binds**, from per-module reference lists:
-  saves about 1 MB in a domain that binds a small part of the image, for
-  lists, sparse commits and a check that the lists are complete. Trigger:
-  the benchmark showing cells as a large part of small domains.
+  first documented difference and the cost of binding modules a domain
+  never calls, but every load path consults the image, the code server
+  depends on it, and the atoms must still all exist at start. Trigger: a
+  suite or user that depends on interactive-mode loading order.
+* **Binding less per domain.** Each release, or each domain, names the
+  part of the image it binds, and a domain builds cells only for that
+  part, from per-module reference lists: it saves up to about 1 MB of
+  cells and tables in a domain that uses a small part of the image, for
+  the lists, sparse commits, a check that the lists are complete, and
+  a bound set per domain in place of the packer's one check. Trigger:
+  the session's measurement showing that sessions use little of the image
+  and that the cells are a large part of what they hold.
 * **Larger or layered images**, adding applications some releases ship,
   as CDS's dynamic archives and Android's app images do: `DOMAIN_BASE` is
-  what every domain shares today. Trigger: several domains sharing
-  applications outside it.
+  what every domain shares. Trigger: several domains sharing applications
+  outside it.
 * **A per-domain breakpoint table** consulted by the interpreter instead of
   patched code: it changes the interpreter's hot path, which privatising
   avoids.
@@ -1218,16 +1411,16 @@ collector.
    domain runs BeamAsm unless its specification chooses the interpreter
    ([design-runtime.md](design-runtime.md#beamasm)). The choice turns on
    BeamAsm's 64 MiB first JIT block, which every BeamAsm domain commits
-   before it loads a module (`TODO.md:337-342`), not on this image, which
+   before it loads a module (`TODO.md:342-347`), not on this image, which
    saves an interpreter domain about 7 MB against that 64 MiB.
    Recommendation: make the first block a per-image limit first, then
    measure a BeamAsm domain with that limit against an interpreter domain,
    and default to the interpreter for every domain whose measurement does
    not show the interpreter limiting it. This decision constrains several
    subsystems and belongs in [design.md](design.md) once made.
-2. **Interactive-mode loading.** Recommendation: accept that bound modules
-   are loaded from the start, as documented and tested, and keep binding
-   on first load as the alternative above.
+2. **Interactive-mode loading.** Recommendation: accept that the image's
+   modules are loaded from the start, as documented and tested, and keep
+   binding on first load as the alternative above.
 
 ## References
 
@@ -1237,11 +1430,14 @@ collector.
   entry, files.
 * [design-domains.md](design-domains.md): domain specifications and the
   domain library's plan.
+* [design-system.md](design-system.md): creating a domain and the check
+  of its runtime limits.
 * [design-kernel.md](design-kernel.md): the boot image and its slices,
-  virtual memory, copy-on-write children, K4 and K8.
+  virtual memory and placement, copy-on-write children, K4 and K8.
 * [design-stopgap.md](design-stopgap.md): the call table of Phase 1, and
   `erx_image_map`, which shares the executable's read-only segments.
-* [design-live.md](design-live.md): the host link and its transports.
+* [design-live.md](design-live.md): the host link, its transports and
+  their estimated throughput.
 * [plan.md](plan.md): 1b-E, the trigger's milestone.
 * [research-g5-beamasm.md](research-g5-beamasm.md): the interpreter's load
   times and footprint.
@@ -1249,5 +1445,8 @@ collector.
   `beam_bif_load.c`, `export.c`, `erl_fun.c`, `erl_code_staged.h`,
   `beam_catches.c`, `beam_file.c`, `erl_global_literals.c`, `external.c`,
   `erl_init.c`, `erl_bif_trace.c`, `beam_debug.c`, `erl_debugger.c`,
-  `erl_nif.c`: the loader, global literals, the code-write funnel and its
-  callers, breakpoints, purge, entries and start-up, as cited above.
+  `erl_nif.c`, `erl_bits.c`, `erl_bits.h`: the loader, global literals,
+  the code-write funnel and its callers, breakpoints, purge, entries,
+  start-up and bitstrings, as cited above.
+* `musl/src/thread/pthread_create.c`, `musl/src/env/__init_tls.c`: where
+  a thread's stack and thread-local storage are placed.
