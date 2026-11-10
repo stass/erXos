@@ -215,10 +215,8 @@ The design is ready; its implementation waits for the system to need it.
      costs](#memory-saved-and-what-it-costs).
   2. Land the shared image segments of [The executable's own
      pages](#the-executables-own-pages).
-  3. Make the JIT's first block a per-image limit instead of 64 MiB in
-     every BeamAsm domain (`TODO.md:342-347`).
-  4. Settle open decision 1, which domains run the interpreter.
-  5. Build this design, if the count of adopters and the session's
+  3. Settle open decision 1, which domains run the interpreter.
+  4. Build this design, if the count of adopters and the session's
      measurement still call for it.
 
   The session's measurement also weighs [binding less per
@@ -1410,12 +1408,14 @@ collector.
    domains run `runtimes/emu`; every other ERTS domain except the system
    domain runs BeamAsm unless its specification chooses the interpreter
    ([design-runtime.md](design-runtime.md#beamasm)). The choice turns on
-   BeamAsm's 64 MiB first JIT block, which every BeamAsm domain commits
-   before it loads a module (`TODO.md:342-347`), not on this image, which
-   saves an interpreter domain about 7 MB against that 64 MiB.
-   Recommendation: make the first block a per-image limit first, then
-   measure a BeamAsm domain with that limit against an interpreter domain,
-   and default to the interpreter for every domain whose measurement does
+   what BeamAsm's code space costs a domain beyond the interpreter's,
+   which the medium boot cell measures (`DlJitExtra`): the code space
+   starts with a 2 MiB block and each later block doubles the last, up to
+   64 MiB, so it stays within about twice the code a domain loads. It
+   does not turn on this image, which saves an interpreter domain about
+   7 MB. Recommendation: measure a BeamAsm domain against an interpreter
+   domain, and default to the interpreter for every domain whose
+   measurement does
    not show the interpreter limiting it. This decision constrains several
    subsystems and belongs in [design.md](design.md) once made.
 2. **Interactive-mode loading.** Recommendation: accept that the image's

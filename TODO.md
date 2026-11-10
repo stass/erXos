@@ -339,12 +339,6 @@ it; git history is the record of completed work.
   codegen each way and check `erlang:load_module/2`'s answer. `BeamModuleAssembler::codegen(char *, size_t)` (NIF
   stubs) still ignores flatten and fixup errors; route the three codegen variants through one checked helper and
   mark the result `[[nodiscard]]`. The design's inspector counter for an exhausted code space does not exist.
-* [Medium] BeamAsm, `beam/jit/beam_jit_main.cpp` (`pick_allocator`): JitAllocator's first block is 64 MiB (ERTS's
-  `block_size` of 32 MiB, doubled), and the stopgap commits a JIT object's pages when it is created, so every
-  BeamAsm domain spends 64 MiB on code space before it loads a module. Upstream's reason for large blocks is file
-  descriptors, which erXos does not spend. Make the first block a per-image limit in the image manifest, read by
-  the runtime at start, instead of the constant `params.block_size = 32 << 20` in `pick_allocator`; G5's
-  measurements are in [research-g5-beamasm.md](docs/research-g5-beamasm.md).
 * [Low] BeamAsm, `sys/erxos/erx_jit_memory.c` (`erx_jit_memory_unmap`, `erx_jit_memory_map`): an unmap whose second
   release fails has already removed the first alias, against its header's "a refused call changes nothing", and a
   failed handle close after both maps loses the handle; the alias probe hand-encodes its return instruction.

@@ -139,13 +139,13 @@ class MediumBootTest < Minitest::Test
   # end, a restarted configured domain or a refused create does not pass.
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
     expression = Boot.domain_lib_expression(DOMAIN)
-    assert_match(/id=>13,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
+    assert_match(/id=>15,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
     # The library refuses an id at or below the system domain's, so the service's ids
     # start above it; the shell's own calls of the library are refused.
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
     assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
-    assert_includes expression, 'DlNotService=Lib:configured(13,0,self())'
+    assert_includes expression, 'DlNotService=Lib:configured(15,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
     assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=fun(Id)->')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.
@@ -165,7 +165,8 @@ class MediumBootTest < Minitest::Test
     [Boot::DOMAIN_LIB_ANSWER.sub('{halt,0}', '{halt,1}'), Boot::DOMAIN_LIB_ANSWER.sub('{error,einval}', '{error,enotsup}'),
      Boot::DOMAIN_LIB_ANSWER.sub('[{5,{halt,0}}]', '[{8,{halt,0}},{5,{halt,0}}]'),
      Boot::DOMAIN_LIB_ANSWER.sub('{10,ok,killed}', '{error,quota}'),
-     Boot::DOMAIN_LIB_ANSWER.sub('{11,ok,{domain_down,11,{halt,0}}}', '{11,ok,{domain_down,11,crash}}')].each do |line|
+     Boot::DOMAIN_LIB_ANSWER.sub('{11,ok,{domain_down,11,{halt,0}}}', '{11,ok,{domain_down,11,crash}}'),
+     Boot::DOMAIN_LIB_ANSWER.sub(/true\}\z/, 'false}')].each do |line|
       assert_raises(Erx::Error, line) { point.fetch(:verify).call("#{line}\n") }
     end
   end

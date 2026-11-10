@@ -86,12 +86,12 @@ module Erx
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
     # any id at or below it, and the domain service gives ids in turn above it, so the
     # configured domain takes the first, the cell's two creates the library refuses the
-    # next two, and its five domains the five after.
+    # next two, and its seven domains the seven after.
     SYSTEM_DOMAIN_ID = 4
     CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
-    DOMAIN_IDS = (4..8).map { |offset| SYSTEM_DOMAIN_ID + offset }.freeze
+    DOMAIN_IDS = (4..10).map { |offset| SYSTEM_DOMAIN_ID + offset }.freeze
     # An id nothing takes in the cell, for the calls the shell makes of the library itself.
-    FREE_ID = SYSTEM_DOMAIN_ID + 9
+    FREE_ID = SYSTEM_DOMAIN_ID + 11
 
     # Where the domain's runtime images and release are in the archive: the boot image's
     # indexes a create names them by. runtime is the interpreter's image, jit the BeamAsm
@@ -102,6 +102,14 @@ module Erx
     # (docs/design-runtime.md, "BeamAsm"), and that the image it runs is BeamAsm's.
     JIT_HALT = 'erlang:halt(case erlang:system_info(emu_flavor) of jit->0;_->2 end)'
     JIT_ARGS = [*DOMAIN_ARGS[0...-1], JIT_HALT].freeze
+    # The most, in bytes, a BeamAsm domain of DOMAIN_RELEASE may take from the machine's
+    # free memory beyond what an interpreter domain of it takes. The interpreter holds its
+    # loaded code, about 5 MiB of this release, in ERTS's own memory; BeamAsm holds it in
+    # its code space instead, two blocks of 2 and 4 MiB, so the extra is the code space
+    # less those 5 MiB. The bound leaves room for one more doubling of the code space as
+    # the release grows, and fails a first block of 32 MiB or more, such as upstream's
+    # 64 MiB.
+    JIT_EXTRA_BOUND = 16 << 20
     # What the faceted domain evaluates in NAMED_HALT's place: a gen_server call of ping
     # to its facet echo (erx:cap/1, docs/design-domains.md, "Facets"), which forwards it to
     # the process of the system domain behind it, whose answer is the call's. A halt with
@@ -153,7 +161,14 @@ module Erx
       # domain service mints it a facet in front of the process and answers its init's
       # report with it, and the domain's call through the facet answers, so it halts 0.
       ['DlFacet', 'DlRunWith(<<"faceted">>,FacetFields,fun(_)->ok end)',
-       "{#{DOMAIN_IDS[4]},ok,{domain_down,#{DOMAIN_IDS[4]},{halt,0}}}"]
+       "{#{DOMAIN_IDS[4]},ok,{domain_down,#{DOMAIN_IDS[4]},{halt,0}}}"],
+      # What a BeamAsm domain costs the machine beyond an interpreter domain of the same
+      # release, each up, measured, then stopped before the next is made: below
+      # JIT_EXTRA_BOUND, so BeamAsm's code space grows with the code it holds and does not
+      # start at a large fixed block.
+      ['DlJitExtra', "begin DlJitCost=DlCost(<<\"jitcost\">>,maps:merge(JitFields,UpFields))," \
+                     "DlEmuCost=DlCost(<<\"emucost\">>,UpFields),DlJitCost-DlEmuCost<#{JIT_EXTRA_BOUND} end",
+       'true']
     ].freeze
     # DlRunWith: asks the domain service for a domain named Name with the request fields of
     # Spec changed by Fields, monitors its domain pid, does Then to it and waits for the
@@ -183,6 +198,18 @@ module Erx
     DOMAIN_LIB_DEATH = 'fun(Id)->case [DlDInfo||#{id:=DlDId,info:=DlDInfo}<-erx_domain_core:deaths(1,' \
                        'maps:get(core,sys:get_state(erx_domain_srv))),DlDId=:=Id] of ' \
                        '[DlDInfo1|_]->{domain_down,Id,DlDInfo1};[]->noproc end end'
+    # DlFree: the machine's free memory in bytes, as the stopgap's page pool reports it.
+    DOMAIN_LIB_FREE = 'fun()->#{attrs:=#{memory_free:={_,{partial,DlFreeB}}}}=erx_kernel_records:machine(),DlFreeB end'
+    # DlCost: what a domain named Name with the request fields of Spec changed by Fields
+    # takes from the machine's free memory once its create has answered, which comes after
+    # its init reported ready. The domain is then stopped, and its domain_down awaited,
+    # which the service sends only after the library's teardown has returned the domain's
+    # pages, so the next DlCost starts from a pool without them. Prints the figure, so a
+    # failing DlJitExtra shows both.
+    DOMAIN_LIB_COST = 'fun(Name,Fields)->DlCostBefore=DlFree(),' \
+                      '{_,DlCostTaken,{domain_down,_,stopped}}=DlRunWith(Name,Fields,fun(DlCostDomain)->' \
+                      'DlCostTakenNow=DlCostBefore-DlFree(),erx_domain:stop(DlCostDomain,shutdown),DlCostTakenNow end),' \
+                      'io:format("~s ~w~n",[Name,DlCostTaken]),DlCostTaken end'
     # The line the cell prints: every step's answer, in order.
     DOMAIN_LIB_ANSWER = "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:last).join(',')}}".freeze
     DOMAIN_LIB_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{domain_lib,/n
@@ -209,7 +236,7 @@ module Erx
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }
       "io:format(\"~0p~n\",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=#{DOMAIN_LIB_DEATH}," \
         "DlRunWith=#{DOMAIN_LIB_RUN},DlRun=fun(Name,Then)->DlRunWith(Name,\#{},Then) end,DlAsk=#{DOMAIN_LIB_ASK}," \
-        "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg}," \
+        "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg},DlFree=#{DOMAIN_LIB_FREE},DlCost=#{DOMAIN_LIB_COST}," \
         "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)" \
         "(erx_domain_lib,#{spec},#{jit},#{facet},#{up})])."
     end

@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored. beamasm_alias_probe tests the code space's two aliases.
+ * Modified by erXos: a translation whose code generation fails (an encoding error, or a code space without room) fails the load instead of being ignored. beamasm_alias_probe tests the code space's two aliases. The code space starts with a small block (pick_allocator) and grows with the code loaded.
  *
  * %CopyrightEnd%
  */
@@ -209,13 +209,18 @@ static JitAllocator *pick_allocator() {
      * regions of the same code. This is required for platforms that enforce
      * W^X, and we prefer it when available to catch errors sooner.
      *
-     * `blockSize` is analogous to "carrier size," and we pick something
-     * much larger than the default since dual-mapping implies having one
-     * file descriptor per block on most platforms. The block sizes do grow
-     * over time, but we don't want to waste half a dozen fds just to get to
-     * the shell on platforms that are very fd-constrained. */
+     * `blockSize` is analogous to "carrier size." Upstream picks 32 MiB
+     * because dual mapping costs a file descriptor per block on most
+     * platforms. On erXos a block costs one JIT object and its two
+     * mappings, no descriptor, and on the stopgap a JIT object's pages are
+     * committed when it is made, so a large block is memory the domain
+     * spends before it loads a module. JitAllocator makes its first block
+     * twice this size and each later block twice the last, up to 64 MiB,
+     * so with 1 MiB the code space starts at 2 MiB and stays within about
+     * twice the most code the domain has held. The domain's budget, not
+     * this size, bounds the code space. */
     params.reset();
-    params.block_size = 32 << 20;
+    params.block_size = 1 << 20;
 
     allocator = nullptr;
     single_mapped = false;
