@@ -376,10 +376,15 @@ resize_test() ->
     ?assertMatch({ok, _, [{load, 0, _, _}]}, erx_draw_core:step(Resized, Load)),
     ?assertEqual(maps:get(1, maps:get(images, State)), maps:get(1, maps:get(images, Resized))).
 
+%% The fuzz target's connection plans: it holds one image at each depth.
+prelude_test() ->
+    Images = maps:get(images, prelude()),
+    ?assertEqual([1, 2, 4, 8, 16, 24, 32], [maps:get(depth, maps:get(Id, Images)) || Id <- lists:seq(1, 7)]).
+
 %% The connection the fuzz target plans from: ids 1 to 7 allocated at the
 %% depths 1, 2, 4, 8, 16, 24 and 32.
 prelude() ->
-    Chans = [?K1, 16#32, 16#34, ?K8, 16#3838, 16#383838, ?ARGB32],
+    Chans = [?K1, 16#32, 16#34, ?K8, 16#051625, 16#081828, ?ARGB32],
     Write = << <<(erx_draw_codec:encode({alloc, Id, 0, 0, Chan, 0, {-2, -2, 6, 6}, {0, 0, 4, 4}, 0}))/binary>>
                || {Id, Chan} <- lists:zip(lists:seq(1, 7), Chans) >>,
     {ok, State, _} = erx_draw_core:plan(new(#{pixels => 64 * ?PAGE, side => 64}), Write),
