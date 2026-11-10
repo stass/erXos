@@ -966,6 +966,11 @@ it; git history is the record of completed work.
   (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
+* [Medium] build checks, inline assembly outside the kernel (`erlang/apps/erx_net/c_src/erx_inet_csum.c`,
+  `LOADED_ONCE`): the rule that only listed functions use inline assembly has a check for the kernel
+  alone (design-kernel's chokepoint table), so `LOADED_ONCE`'s empty `__asm__`, the first in erXos's
+  user-mode C, is guarded by review only. Extend the `asm`-keyword check to liberx, the NIFs and
+  `sys/erxos`, with `LOADED_ONCE` its one listed site, and a seeded unlisted `__asm__` that fails it.
 * [Low] network, `erx_tcp_input:dropwithreset` and the connect path: only the link-cast half of
   `tcp_dropwithreset` is translated; its IP checks (`tcp_input.c:3452-3472`) are left to the rule
   that no connection has a multicast or broadcast foreign address, which FreeBSD enforces in
