@@ -1066,6 +1066,11 @@ it; git history is the record of completed work.
   normal scheduler. Check `F_GETFL` at each call and fail with `{error, blocking}`, or poll with a
   zero timeout before each read and write. Also refuse a descriptor not open for reading and
   writing at adoption.
+* [Low] network tests, `erx_tap_tests:owner_end_closes_the_descriptor_test`: under a host load
+  near 20 the FIFO's reader was still blocked 2 s after the owner's `DOWN` (`{value, blocked}`,
+  line 138), and the same file passed alone at once. Find what closes the descriptor after the
+  owner's end (the resource's down callback or its destructor) and wait on that, not on a fixed
+  2 s.
 * [Low] network, `erx_tap` (unprivileged runs): the privileged opener that hands the node a tap
   descriptor over `SCM_RIGHTS` ([design-network-stack.md](docs/design-network-stack.md), "The tap
   transport") is not built; it must hand the descriptor over close-on-exec, so no port program
