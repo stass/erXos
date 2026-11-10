@@ -315,7 +315,12 @@ timeout_rewinds_through_the_loss_module_test() ->
 %% is the same in every field. Random states cover windows, the congestion window, the
 %% credit, outstanding data, timestamps, MSS and MTU, Nagle, a FIN owed, SACK and D-SACK
 %% blocks to report, and urgent data.
-runs_equal_per_segment_output_test() ->
+%% Its 3000 states take a few seconds alone and longer on a loaded host, past
+%% EUnit's default 5 s, so the case carries its own limit.
+runs_equal_per_segment_output_test_() ->
+    {timeout, 120, fun runs_equal_per_segment_output/0}.
+
+runs_equal_per_segment_output() ->
     rand:seed(exsss, {6, 6, 6}),
     Made = lists:sum([differential(random_state()) || _ <- lists:seq(1, 3000)]),
     %% The property is not vacuous: most states make a run.
