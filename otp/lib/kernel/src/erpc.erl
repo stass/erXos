@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: a request whose process or spawn ends with its domain's end,
+%% {domain_down, D, Info}, raises {erpc, noconnection} (edit 64).
+%%
 %% %CopyrightEnd%
 %%
 %% Author: Rickard Green
@@ -1382,8 +1385,15 @@ result(down, _ReqId, Res, {Res, error, {?MODULE, _} = ErpcErr}) ->
     error(ErpcErr);
 result(down, _ReqId, _Res, noconnection) ->
     error({?MODULE, noconnection});
+result(down, _ReqId, _Res, {domain_down, _, _}) ->
+    %% erXos edit 64: the end of the node's domain is, to a request,
+    %% the lost connection stock reports.
+    error({?MODULE, noconnection});
 result(down, _ReqId, _Res, Reason) ->
     exit({signal, Reason});
+result(spawn_reply, _ReqId, _Res, {domain_down, _, _}) ->
+    %% erXos edit 64, as for down.
+    error({?MODULE, noconnection});
 result(spawn_reply, _ReqId, _Res, Reason) ->
     error({?MODULE, Reason});
 result(timeout, ReqId, Res, _Reason) ->

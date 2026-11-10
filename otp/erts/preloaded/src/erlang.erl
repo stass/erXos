@@ -18,6 +18,8 @@
 %% limitations under the License.
 %%
 %% Modified by erXos: spawn_opt_option() includes {erx_untraced, boolean()}.
+%% A distributed spawn whose error reply is a domain's end, {domain_down, D, Info},
+%% fails as for noconnection (edit 64).
 %%
 %% %CopyrightEnd%
 %%
@@ -10908,6 +10910,19 @@ spawn_monitor(N,M,F,A) when erlang:is_atom(N),
                 _:Err1 ->
                     error_with_info(Err1, [N, M, F, A])
             end;
+        {spawn_reply, Ref, error, {domain_down, _, _}} ->
+            %% erXos edit 64: the end of the domain that is Node fails the
+            %% spawn as a lost connection does, with a pid that exits with
+            %% noconnection.
+            try
+                erlang:spawn_opt(erts_internal,crasher,
+                                 [N,M,F,A,[monitor],
+                                  noconnection],
+                                 [monitor])
+            catch
+                _:Err1 ->
+                    error_with_info(Err1, [N, M, F, A])
+            end;
         {spawn_reply, Ref, error, Err2} ->
             error_with_info(Err2, [N, M, F, A])
     end;
@@ -11069,6 +11084,17 @@ spawn_opt(N, M, F, A, O) when erlang:is_atom(N),
             try
                 erlang:spawn_opt(erts_internal,crasher,
                                  [N,M,F,A,O,Err0], O)
+            catch
+                _:Err1 ->
+                    error_with_info(Err1, [N, M, F, A, O])
+            end;
+        {spawn_reply, Ref, error, {domain_down, _, _}} ->
+            %% erXos edit 64: the end of the domain that is Node fails the
+            %% spawn as a lost connection does, with a pid that exits with
+            %% noconnection.
+            try
+                erlang:spawn_opt(erts_internal,crasher,
+                                 [N,M,F,A,O,noconnection], O)
             catch
                 _:Err1 ->
                     error_with_info(Err1, [N, M, F, A, O])

@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, entropy of erx_bytes's, erx_untraced, and the export table's (erx_exports.c).
+# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, entropy of erx_bytes's, erx_untraced, and the export table's (erx_exports.c), and domain_down (edit 56 of docs/design-runtime.md).
 #
 
 #
@@ -511,6 +511,7 @@ atom none
 atom no_auto_capture
 atom noconnect
 atom noconnection
+atom domain_down
 atom node
 atom node_type
 atom nodedown

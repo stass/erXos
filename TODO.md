@@ -2347,11 +2347,10 @@ it; git history is the record of completed work.
   (SV2), since nothing else can send `connection_up`; (2) the agent's pid handed out to the
   system domain, which edit 8 does once the agent sends it a frame (its ready report); (3) the domain service's pid on the boot page, which
   design-domains (Domain lifecycle) places there and `boot_info.h` does not carry, as the
-  target of the agent's answers; (4) an edit of `dist.c` that fires links, monitors and
-  pending spawns with the `{domain_down, D, Info}` reason `connection_down` gives, which
-  design-runtime (Closing) attributes to `erts_do_net_exits` but stock ERTS fires as
-  `noconnection` (`monitor_connection_down`) and no numbered edit lists; (5) the lane
+  target of the agent's answers; (4) the lane
   driver's drain to the write position read at `connection_down`.
+* [Low] ERTS distribution (`beam/dist.c`, `beam/erl_process.c`): where `erts_link_dist_insert` fails (dist.c's DOP_LINK and spawn paths, a remote spawn's link in `erl_process.c`), the link's `dist` stays NULL and `erts_proc_sig_send_link_exit_noconnection` dereferences it; stock, and thought unreachable on erXos, whose lane port holds the port lock across input and `erts_do_net_exits`, but not traced on every input path.
+* [Low] OTP kernel, `global_group` (edit 64 of design-runtime): `continue_handle_info/2`'s config-check `DOWN` takes `noconnection` as no contact and every other reason as a sync error, so with `global_groups` configured a domain's end, `{domain_down, D, Info}` (edit 56), puts the node in `sync_error`; erXos configures no global groups, but the guard is one line.
 * [Low] Oracle, pid text (edit 18): OTP cases that write a local pid as `"<0.N.S>"` get `badarg` in a runtime
   that is alive with a nonzero creation: compiler `core_fold_SUITE:coverage`, emulator `guard_SUITE:guard_bifs`
   and a case of stdlib `qlc_SUITE`. The hosted runtime is not alive, so they agree there; give them rows in
@@ -2375,8 +2374,7 @@ it; git history is the record of completed work.
   and ending the system side of each system connection for the domain service; the domain
   pid as the domain's correspondent, which the boot page and `erx_dist:boot/0` name,
   relaying the domain service's records to the agent and the agent's answers back; the
-  system side's writer giving the reserve to the domain pid's messages alone; edit 56 in
-  `dist.c` and `erl_proc_sig_queue.c`; and the lane driver's finish (control command 2).
+  system side's writer giving the reserve to the domain pid's messages alone; and the lane driver's finish (control command 2).
   Order: nothing but `spawn` crosses a connection before RT7, so the protocol needs RT7's
   edit 8 and `erx:export/3` in both runtimes, and edit 16 in its universal form (the
   origins item under "Security residuals"), since the domain pid acts only on

@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  * 
- * Modified by erXos: The monitor tree's insert, delete and foreach_delete keep the alias registry, and an active alias's entry counts in its owner's monitor size (edit 17 of docs/design-runtime.md).
+ * Modified by erXos: The monitor tree's insert, delete and foreach_delete keep the alias registry, and an active alias's entry counts in its owner's monitor size (edit 17 of docs/design-runtime.md). A connection's record keeps its peer domain's end reason (edit 56).
  *
  * %CopyrightEnd%
  */
@@ -565,6 +565,7 @@ erts_mon_link_dist_create(Eterm nodename)
     erts_mtx_init(&mld->mtx, "dist_entry_links", nodename,
                   ERTS_LOCK_FLAGS_CATEGORY_DISTRIBUTION);
     mld->alive = !0;
+    erts_atomic_init_nob(&mld->down_reason, (erts_aint_t) NULL);
     mld->links = NULL;
     mld->monitors = NULL;
     mld->orig_name_monitors = NULL;
@@ -572,10 +573,46 @@ erts_mon_link_dist_create(Eterm nodename)
     return mld;
 }
 
+/* erXos: edit 56. The copy of a connection's down reason, in a heap of its own. */
+typedef struct {
+    Eterm reason;
+    ErlOffHeap off_heap;
+    Eterm heap[1];
+} ErtsMonLnkDistReason;
+
+void
+erts_mon_link_dist_set_down_reason(ErtsMonLnkDist *mld, Eterm reason)
+{
+    ErtsMonLnkDistReason *down;
+    Uint size;
+    Eterm *hp;
+
+    ERTS_ML_ASSERT(is_tuple(reason));
+    ERTS_ML_ASSERT(!erts_atomic_read_nob(&mld->down_reason));
+    size = size_object(reason);
+    down = erts_alloc(ERTS_ALC_T_ML_DIST,
+                      sizeof(ErtsMonLnkDistReason) + (size - 1) * sizeof(Eterm));
+    ERTS_INIT_OFF_HEAP(&down->off_heap);
+    hp = &down->heap[0];
+    down->reason = copy_struct(reason, size, &hp, &down->off_heap);
+    /* Released before the record is marked dead, so whoever finds it dead reads it. */
+    erts_atomic_set_relb(&mld->down_reason, (erts_aint_t) down);
+}
+
+Eterm
+erts_mon_link_dist_down_reason(ErtsMonLnkDist *mld)
+{
+    ErtsMonLnkDistReason *down;
+
+    down = (ErtsMonLnkDistReason *) erts_atomic_read_acqb(&mld->down_reason);
+    return down ? down->reason : am_noconnection;
+}
+
 static void
 mon_link_dist_destroy(void* vmld)
 {
     ErtsMonLnkDist *mld = (ErtsMonLnkDist*)vmld;
+    ErtsMonLnkDistReason *down;
     ERTS_ML_ASSERT(erts_atomic_read_nob(&mld->refc) == 0);
     ERTS_ML_ASSERT(!mld->alive);
     ERTS_ML_ASSERT(!mld->links);
@@ -583,6 +620,11 @@ mon_link_dist_destroy(void* vmld)
     ERTS_ML_ASSERT(!mld->orig_name_monitors);
     ERTS_ML_ASSERT(!mld->dist_pend_spawn_exit);
 
+    down = (ErtsMonLnkDistReason *) erts_atomic_read_nob(&mld->down_reason);
+    if (down) {
+        erts_cleanup_offheap(&down->off_heap);
+        erts_free(ERTS_ALC_T_ML_DIST, down);
+    }
     erts_mtx_destroy(&mld->mtx);
     erts_free(ERTS_ALC_T_ML_DIST, mld);
 }

@@ -16,7 +16,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
+ *
+ * Modified by erXos: a lost connection's link exit carries its peer domain's end reason
+ * where it has one (edit 56 of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -469,6 +472,10 @@ erts_proc_sig_send_dist_exit(DistEntry *dep,
  *
  * @brief Send an exit signal due to a link to a process being
  * broken by connection loss.
+ *
+ * erXos: edit 56 of docs/design-runtime.md. The reason is noconnection, or the
+ * {domain_down, D, Info} the link's connection went down with when that was its peer
+ * domain's end (erts_mon_link_dist_down_reason).
  *
  * @param[in]     lnk           Pointer to link structure
  *                              from the sending side. It

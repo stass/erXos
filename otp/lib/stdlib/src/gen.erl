@@ -18,7 +18,8 @@
 %% limitations under the License.
 %%
 %% Modified by erXos: a call's reply is also taken in the envelope of a message from
-%% another domain, {erx_origin, D, {Tag, Reply}} (edit 58).
+%% another domain, {erx_origin, D, {Tag, Reply}} (edit 58). A call whose callee's
+%% domain ends, {domain_down, D, Info}, exits {nodedown, Node} (edit 64).
 %%
 %% %CopyrightEnd%
 %%
@@ -283,6 +284,10 @@ do_call(Process, Label, Request, Timeout) when is_atom(Process) =:= false ->
         {'DOWN', Mref, _, _, noconnection} ->
             Node = get_node(Process),
             exit({nodedown, Node});
+        {'DOWN', Mref, _, _, {domain_down, _, _}} ->
+            %% erXos edit 64: the end of the callee's domain is, to a call,
+            %% its node's going down.
+            exit({nodedown, get_node(Process)});
         {'DOWN', Mref, _, _, Reason} ->
             exit(Reason)
     after Timeout ->

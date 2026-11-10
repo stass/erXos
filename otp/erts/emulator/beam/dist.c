@@ -20,7 +20,9 @@
  * Modified by erXos: the lane port driver alone carries distribution input, and
  * erts_net_message answers a frame the funnel found without a target, and no send to
  * another domain's registered name is written; a frame for another domain is encoded
- * naming that domain, so the pids it carries are handed out to it (edit 8).
+ * naming that domain, so the pids it carries are handed out to it (edit 8). A
+ * connection that ends with its peer domain's {domain_down, D, Info} fires what it held
+ * with that reason (edit 56).
  *
  * %CopyrightEnd%
  */
@@ -922,6 +924,27 @@ schedule_kill_dist_ctrl_proc(Eterm pid)
 }
 
 /*
+ * erXos: edit 56 of docs/design-runtime.md. A connection ends because its peer domain
+ * did when its reason is {domain_down, D, Info} with D the creation of the peer, the
+ * domain's id. Any other reason, a {domain_down, ...} naming another domain included,
+ * fires noconnection as stock.
+ */
+static int
+is_peer_domain_end(Eterm reason, Uint32 creation)
+{
+    const Eterm *tp;
+
+    if (!is_tuple_arity(reason, 3))
+        return 0;
+    tp = tuple_val(reason);
+    /* Exactly the creation: a larger D is another id, never this one truncated. */
+    return (tp[1] == am_domain_down
+            && is_small(tp[2])
+            && signed_val(tp[2]) >= 0
+            && (Uint) signed_val(tp[2]) == (Uint) creation);
+}
+
+/*
  * proc is currently running or exiting process.
  */
 int erts_do_net_exits(DistEntry *dep, Eterm reason)
@@ -1075,6 +1098,14 @@ int erts_do_net_exits(DistEntry *dep, Eterm reason)
 
 	nodename = dep->sysname;
 	flags = dep->dflags;
+
+        /*
+         * erXos: edit 56. Recorded before the cleanup marks mld dead, so every exit and
+         * DOWN fired for it, by the cleanup or by a link or monitor that finds it dead,
+         * carries the reason (erts_mon_link_dist_down_reason).
+         */
+        if (mld && is_peer_domain_end(reason, dep->creation))
+            erts_mon_link_dist_set_down_reason(mld, reason);
 
         erts_atomic_set_nob(&dep->input_handler, (erts_aint_t) NIL);
         cache = dep->cache;

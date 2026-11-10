@@ -22,7 +22,8 @@
  * and a copy literal area request that gives an on-heap message its first
  * fragment copies the message's other references (its seq_trace token)
  * into that fragment too. A reference compares four words (edit 17 of
- * docs/design-runtime.md).
+ * docs/design-runtime.md). A lost connection's exits and DOWNs carry its peer
+ * domain's end reason where it has one (edit 56).
  *
  * %CopyrightEnd%
  */
@@ -2518,8 +2519,10 @@ erts_proc_sig_send_link_exit_noconnection(ErtsLink *lnk)
     from_tag = elnk->dist->nodename;
     conn_id = elnk->dist->connection_id;
 
+    /* erXos: edit 56. noconnection, or the peer domain's end the connection went down with. */
     send_gen_exit_signal(NULL, from_tag, from_item, am_process, to,
-                         ERTS_SIG_Q_OP_EXIT_LINKED, am_noconnection, NULL, NULL,
+                         ERTS_SIG_Q_OP_EXIT_LINKED,
+                         erts_mon_link_dist_down_reason(elnk->dist), NULL, NULL,
                          NIL, NIL, 0, !0, conn_id, 0);
 
     erts_link_release(lnk);
@@ -4798,7 +4801,7 @@ convert_to_down_message(Process *c_p,
     Eterm node = am_undefined;
     ErtsMessage *mp;
     ErtsProcLocks locks = ERTS_PROC_LOCK_MAIN;
-    Uint hsz;
+    Uint hsz, reason_sz;
     Eterm *hp, ref, from, type, reason, tag;
     ErlOffHeap *ohp;
 
@@ -4810,6 +4813,20 @@ convert_to_down_message(Process *c_p,
     reason = mdp->u.target.other.item;
     ASSERT(is_immed(reason));
     ASSERT(&mdp->origin == *omon);
+
+    /*
+     * erXos: edit 56. A lost connection sends every monitor and pending spawn its DOWN
+     * as noconnection; where the connection went down with its peer domain's end, the
+     * message carries that reason, copied from the connection's record, which this
+     * monitor holds.
+     */
+    if (mon_type == ERTS_MON_TYPE_DIST_PROC && reason == am_noconnection) {
+        ErtsMonitorDataExtended *mdep = (ErtsMonitorDataExtended *) mdp;
+        ASSERT(mdp->origin.flags & ERTS_ML_FLG_EXTENDED);
+        if (mdep->dist)
+            reason = erts_mon_link_dist_down_reason(mdep->dist);
+    }
+    reason_sz = is_immed(reason) ? 0 : size_object(reason);
            
     if (mdp->origin.flags & ERTS_ML_FLG_SPAWN_PENDING) {
         /*
@@ -4819,7 +4836,7 @@ convert_to_down_message(Process *c_p,
         ErtsMonitorDataExtended *mdep;
 
         /* Should only happen when connection breaks... */
-        ASSERT(reason == am_noconnection);
+        ASSERT(reason == am_noconnection || is_tuple(reason));
 
         *priop = !!(mdp->origin.flags & ERTS_ML_FLG_PRIO_ML);
 
@@ -4839,6 +4856,7 @@ convert_to_down_message(Process *c_p,
 
         mdep = (ErtsMonitorDataExtended *) mdp;
         hsz = 5; /* 4-tuple */
+        hsz += reason_sz;
 
         ASSERT(is_ref(mdp->ref));
         hsz += NC_HEAP_SIZE(mdp->ref);
@@ -4855,7 +4873,9 @@ convert_to_down_message(Process *c_p,
         tag = save_heap_frag_eterm(c_p, mp, &mdep->u.name);
 
         ref = STORE_NC(&hp, ohp, mdp->ref);
-        
+        if (reason_sz)
+            reason = copy_struct(reason, reason_sz, &hp, ohp);
+
         ERL_MESSAGE_FROM(mp) = am_undefined;
         ERL_MESSAGE_TERM(mp) = TUPLE4(hp, tag, ref, am_error, reason);
 
@@ -4868,6 +4888,7 @@ convert_to_down_message(Process *c_p,
         Eterm message;
 
         hsz = 6; /* 5-tuple */
+        hsz += reason_sz;
 
         if (mdp->origin.flags & ERTS_ML_FLG_NAME)
             hsz += 3;  /* reg name 2-tuple */
@@ -4981,6 +5002,8 @@ convert_to_down_message(Process *c_p,
             tag = save_heap_frag_eterm(c_p, mp, tag_storage);
         }
 
+        if (reason_sz)
+            reason = copy_struct(reason, reason_sz, &hp, ohp);
         message = TUPLE5(hp, tag, ref, type, from, reason);
         hp += 6;
 

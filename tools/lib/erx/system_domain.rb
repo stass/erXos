@@ -22,11 +22,17 @@ module Erx
   # connection, and then kills the domain service. The system domain is system@<host> with
   # creation 4, alive since kernel started net_kernel, before the domain service; each
   # domain's node() is its name at the host and its creation its id, as erpc:call from the
-  # system shell, which needs the system side to carry frames both ways, answers. Killing
-  # the owner of peer's system side in the system domain stops peer and only peer
-  # (docs/design-system.md, "A lost system connection ends the domain"); killing erts's
-  # own agent, its erx_connections, halts erts with status 69; and the system domain runs
-  # on to the service's kill. The service is the system release's
+  # system shell, which needs the system side to carry frames both ways, answers. Ending
+  # peer's system side's port in the system domain with {domain_down, D2, x}, D2 not
+  # peer's id, fires noconnection on a system-domain process's link to and monitor on a
+  # process of peer, and stops peer and only peer (docs/design-system.md, "A lost system
+  # connection ends the domain"); killing erts's own agent, its erx_connections, halts
+  # erts with status 69, and the domain service's end of erts's side fires
+  # {domain_down, Erts, {halt, 69}} on a link, a monitor and a pending spawn_request
+  # into it (edit 56 of docs/design-runtime.md), while gen:call, erpc:call, rpc:call,
+  # spawn_monitor/4 and spawn_link/4 into it keep stock's results for a node gone down
+  # (edit 64);
+  # and the system domain runs on to the service's kill. The service is the system release's
   # significant child, so its end shuts its supervisor down and ends the permanent
   # application, and init ends the runtime with its slogan on the console, which is the
   # report of the failure table's row; the root's stop then ends the machine. The machine
@@ -91,23 +97,82 @@ module Erx
                           'maps:get(core,sys:get_state(erx_domain_srv)))]) end,' \
                           'SdUntil=fun SdU(_,0)->SdDeaths();SdU(SdN,SdK)->case SdDeaths() of SdDs when length(SdDs)>=SdN->SdDs;' \
                           '_->timer:sleep(100),SdU(SdN,SdK-1) end end'
-    # Kills the owner of peer's system side, the process its lane port is connected to, the
-    # port found by its open command, whose last word is the domain's node
-    # (erx_connections:open/3); then, once peer has ended, has erts kill its own agent,
-    # its pid asked of erts first, since the system domain may only send to it. SdE1 and
-    # SdE2 are the deaths after each, SdL1 the domains still alive after the first.
-    SERVICE_KILL_ENDS = 'SdOwner=hd([SdC||SdP<-erlang:ports(),{name,SdNm}<-[erlang:port_info(SdP,name)],' \
-                        'lists:suffix(" peer@erxos",SdNm),{connected,SdC}<-[erlang:port_info(SdP,connected)]]),' \
-                        'exit(SdOwner,kill),SdE1=SdUntil(1,600),SdL1=SdLives(),' \
+    # SdWatch: a system-domain process that traps exits, links to and monitors process P of
+    # a domain, and answers the shell once it watches. Told {sd_spawn, Node}, it then makes a
+    # spawn_request into Node and says so; told sd_go, it makes none. It answers
+    # {sd_watched, W, [Exit, Down | Spawn]}: the reason of P's 'EXIT', of its 'DOWN', and the
+    # spawn_reply's {error, Reason} or {ok, Pid}, timeout for any not come within 60 s.
+    # SdGone: polls Node with an erpc:call of 500 ms at most K times, 100 ms apart, until no
+    # answer comes, then gone; alive if it always answered.
+    SERVICE_KILL_WATCH = 'SdWatch=fun(SdP)->SdSelf=self(),SdW=spawn(fun()->process_flag(trap_exit,true),link(SdP),' \
+                         'SdM=monitor(process,SdP),SdSelf!{sd_watching,self()},' \
+                         'SdQ=receive {sd_spawn,SdNd}->SdQ0=spawn_request(SdNd,timer,sleep,[infinity],[]),' \
+                         'SdSelf!{sd_spawned,self()},[SdQ0];sd_go->[] end,' \
+                         'SdX=receive {\'EXIT\',SdP,SdX0}->SdX0 after 60000->timeout end,' \
+                         'SdD=receive {\'DOWN\',SdM,process,SdP,SdD0}->SdD0 after 60000->timeout end,' \
+                         'SdR=[receive {spawn_reply,SdQ1,SdOk,SdR0}->{SdOk,SdR0} after 60000->timeout end||SdQ1<-SdQ],' \
+                         'SdSelf!{sd_watched,self(),[SdX,SdD|SdR]} end),receive {sd_watching,SdW}->SdW end end,' \
+                         'SdGone=fun SdG(_,0)->alive;SdG(SdN,SdK)->try erpc:call(SdN,erlang,node,[],500) of ' \
+                         '_->timer:sleep(100),SdG(SdN,SdK-1) catch _:_->gone end end'
+    # SdCall: a system-domain process that traps exits, runs Fn and answers the shell
+    # {sd_called, C, Result}, Result Fn's value or the class and reason it raised.
+    # SdBlocked: polls process C every 10 ms at most K times until it waits in a receive,
+    # its call's request sent; timeout if it never does, which the printed answer shows,
+    # since a call made after the side ended would get stock's results without edit 64.
+    SERVICE_KILL_CALL = 'SdCall=fun(SdFn)->SdCs=self(),spawn(fun()->process_flag(trap_exit,true),' \
+                        'SdCs!{sd_called,self(),try SdFn() catch SdCc:SdCr->{SdCc,SdCr} end} end) end,' \
+                        'SdBlocked=fun SdB(_,0)->timeout;SdB(SdBp,SdBk)->case process_info(SdBp,status) of ' \
+                        '{status,waiting}->ok;_->timer:sleep(10),SdB(SdBp,SdBk-1) end end'
+    # The library calls into erts that its end interrupts, which keep stock's node-level
+    # results (edit 64): an rpc:call made while erts runs, whose process erts
+    # created before its agent is killed, since the agent's pid is asked of erts after the
+    # call's request went out; then, made while erts no longer answers and its side still
+    # stands, a gen:call to the process the watcher watches, an erpc:call, and a
+    # spawn_monitor and a spawn_link into erts.
+    SERVICE_KILL_RPC = 'SdC1=SdCall(fun()->rpc:call(erts@erxos,timer,sleep,[infinity],infinity) end),SdB1=SdBlocked(SdC1,500)'
+    SERVICE_KILL_PENDING = 'SdC2=SdCall(fun()->gen:call(SdPe,\'$gen_call\',x,60000) end),' \
+                           'SdC3=SdCall(fun()->erpc:call(erts@erxos,timer,sleep,[infinity],60000) end),' \
+                           'SdC4=SdCall(fun()->{SdMp,SdMr}=spawn_monitor(erts@erxos,timer,sleep,[infinity]),' \
+                           'receive {\'DOWN\',SdMr,process,SdMp,SdMd}->SdMd after 60000->timeout end end),' \
+                           'SdC5=SdCall(fun()->SdLp=spawn_link(erts@erxos,timer,sleep,[infinity]),' \
+                           'receive {\'EXIT\',SdLp,SdLx}->SdLx after 60000->timeout end end),' \
+                           'SdB2=[SdBlocked(SdCb,500)||SdCb<-[SdC2,SdC3,SdC4,SdC5]]'
+    # A watcher of a process of peer, then peer's system side's port, found by its open
+    # command, whose last word is the domain's node (erx_connections:open/3), ended with
+    # {domain_down, D2, x}, D2 erts's id and not peer's: the watcher's link and monitor
+    # fire noconnection (edit 56 of docs/design-runtime.md), and peer stops, its system
+    # side lost (docs/design-system.md, "A lost system connection ends the domain"). Then a
+    # watcher of a process of erts, and erts made to kill its own agent, its pid asked of
+    # erts first, since the system domain may only send to it, with the domain service
+    # suspended until erts no longer answers and the watcher's spawn_request into it is
+    # made, so the request is pending as the side ends, as are the library calls of
+    # SERVICE_KILL_PENDING; SERVICE_KILL_RPC's call runs in erts as it halts. erts halts
+    # with status 69, and the link, the monitor and the spawn all fire
+    # {domain_down, Erts, {halt, 69}}, the reason the service ends the side's port with.
+    # SdE1 and SdE2 are the deaths after each, SdL1 the domains still alive after the
+    # first, SdV1 and SdV2 what the watchers saw, SdG2 the probe's verdict, SdB1 and SdB2 whether each
+    # library call was blocked in its request before erts's side ended, SdV3 what the
+    # library calls returned.
+    SERVICE_KILL_ENDS = 'SdPp=spawn(peer@erxos,timer,sleep,[infinity]),SdW1=SdWatch(SdPp),SdW1!sd_go,' \
+                        'SdPort=hd([SdPt||SdPt<-erlang:ports(),{name,SdNm}<-[erlang:port_info(SdPt,name)],' \
+                        'lists:suffix(" peer@erxos",SdNm)]),' \
+                        "exit(SdPort,{domain_down,#{DOMAINS.fetch('erts')},x}),SdE1=SdUntil(1,600),SdL1=SdLives()," \
+                        'SdV1=receive {sd_watched,SdW1,SdV1w}->SdV1w after 60000->timeout end,' \
+                        "SdPe=spawn(erts@erxos,timer,sleep,[infinity]),SdW2=SdWatch(SdPe),#{SERVICE_KILL_RPC}," \
                         'SdAgent=erpc:call(erts@erxos,erlang,whereis,[erx_connections],10000),' \
-                        'erpc:cast(erts@erxos,erlang,exit,[SdAgent,kill]),SdE2=SdUntil(2,600)'
+                        'sys:suspend(erx_domain_srv),erpc:cast(erts@erxos,erlang,exit,[SdAgent,kill]),' \
+                        'SdG2=SdGone(erts@erxos,100),SdW2!{sd_spawn,erts@erxos},' \
+                        "receive {sd_spawned,SdW2}->ok after 10000->timeout end,#{SERVICE_KILL_PENDING}," \
+                        'sys:resume(erx_domain_srv),' \
+                        'SdE2=SdUntil(2,600),SdV2=receive {sd_watched,SdW2,SdV2w}->SdV2w after 60000->timeout end,' \
+                        'SdV3=[receive {sd_called,SdCk,SdCv}->SdCv after 60000->timeout end||SdCk<-[SdC1,SdC2,SdC3,SdC4,SdC5]]'
     # Prints the answer, ends the two domains, prints how they ended, then kills the
     # service. The line starts with a binding, so the shell's echo of it starts neither
     # {service_kill nor {domain_ends, and only the printed answers match.
-    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
+    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL}," \
                               'SdL=SdWait(600),' \
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL)}])," \
-                              "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdE2}])," \
+                              "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
       lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,running}" }.join(',')
@@ -116,11 +181,17 @@ module Erx
       "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}]}".freeze
     end
     SERVICE_KILL_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{service_kill,/n
-    # peer stopped by its side's end while erts runs, then erts halted with status 69.
+    # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
+    # then erts halted with status 69, its watcher told {domain_down, Erts, {halt, 69}} by
+    # the link, the monitor and the spawn's error reply, and the library calls given
+    # stock's results for a node gone down.
     DOMAIN_ENDS_ANSWER = begin
       erts = DOMAINS.fetch('erts')
       peer = DOMAINS.fetch('peer')
-      "{domain_ends,[{#{peer},stopped}],[{#{erts},erts@erxos,running}],[{#{erts},{halt,69}},{#{peer},stopped}]}".freeze
+      down = "{domain_down,#{erts},{halt,69}}"
+      "{domain_ends,[{#{peer},stopped}],[{#{erts},erts@erxos,running}],[noconnection,noconnection],gone," \
+        "[{#{erts},{halt,69}},{#{peer},stopped}],[#{down},#{down},{error,#{down}}]," \
+        'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection]}'.freeze
     end
     DOMAIN_ENDS_START = /\A\{domain_ends,/n
     # init's slogan as it halts the runtime once the permanent application erx_domain has

@@ -53,11 +53,26 @@ class SystemDomainTest < Minitest::Test
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
     end
     refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
-    good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,running}],[{5,{halt,69}},{6,stopped}]}'
+    down = '{domain_down,5,{halt,69}}'
+    good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,running}],[noconnection,noconnection],gone,' \
+                "[{5,{halt,69}},{6,stopped}],[#{down},#{down},{error,#{down}}]," \
+                'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection]}'
     ends.fetch(:verify).call("#{good_ends}\r\n")
-    # erts stopped with peer, or ended otherwise than by the halt, or not at all.
-    [good_ends.sub('[{5,erts@erxos,running}]', '[]'), good_ends.sub('{halt,69}', 'stopped'),
-     good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{6,stopped}]')].each do |line|
+    # erts stopped with peer, or ended otherwise than by the halt, or not at all; a watcher
+    # told noconnection for erts's end (no edit 56) or erts's reason for peer's end (no
+    # creation check); erts still answering when the spawn was made; a library call given
+    # the raw domain_down reason, not stock's result for a node gone down.
+    [good_ends.sub('[{5,erts@erxos,running}]', '[]'), good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{5,stopped},{6,stopped}]'),
+     good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{6,stopped}]'),
+     good_ends.sub("[#{down},#{down},{error,#{down}}]", '[noconnection,noconnection,{error,noconnection}]'),
+     good_ends.sub('[noconnection,noconnection]', '[{domain_down,5,x},{domain_down,5,x}]'),
+     good_ends.sub(',gone,', ',alive,'),
+     good_ends.sub(',ok,[ok,ok,ok,ok],', ',ok,[ok,timeout,ok,ok],'),
+     good_ends.sub('{badrpc,nodedown}', "{badrpc,{'EXIT',#{down}}}"),
+     good_ends.sub('{exit,{nodedown,erts@erxos}}', "{exit,#{down}}"),
+     good_ends.sub('{error,{erpc,noconnection}}', "{error,{erpc,#{down}}}"),
+     good_ends.sub('noconnection,noconnection]}', "{error,#{down}},{error,#{down}}]}"),
+     good_ends.sub('noconnection,noconnection]}', "#{down},#{down}]}")].each do |line|
       assert_raises(Erx::Error) { ends.fetch(:verify).call("#{line}\r\n") }
     end
     # The line as a boot printed it, after the shell's prompt.

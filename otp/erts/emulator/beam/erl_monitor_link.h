@@ -17,6 +17,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a connection's record of links and monitors keeps the reason
+ * {domain_down, D, Info} it went down with when that was its peer domain's end (edit 56
+ * of docs/design-runtime.md).
+ *
  * %CopyrightEnd%
  */
 
@@ -563,6 +567,7 @@ typedef struct ErtsMonLnkDist__ {
     erts_atomic_t refc;
     erts_mtx_t mtx;
     int alive;
+    erts_atomic_t down_reason; /* erXos: edit 56; see erts_mon_link_dist_down_reason() */
     ErtsMonLnkNode *links; /* Link double linked circular list */
     ErtsMonLnkNode *monitors; /* Monitor double linked circular list */
     ErtsMonLnkNode *orig_name_monitors; /* Origin named monitors
@@ -595,6 +600,17 @@ void erts_monitor_link_init(void);
  *
  */
 ErtsMonLnkDist *erts_mon_link_dist_create(Eterm nodename);
+
+/*
+ * erXos: edit 56 of docs/design-runtime.md. Why a connection went down, when that was
+ * its peer domain's end. erts_do_net_exits sets it at most once, to a copy of
+ * {domain_down, D, Info}, before the record is marked dead; the copy is freed with the
+ * record, which every link and monitor of the connection holds, so it outlives each
+ * exit and DOWN that reads it. erts_mon_link_dist_down_reason() answers it, or
+ * noconnection for a record that has none, which every other end leaves.
+ */
+void erts_mon_link_dist_set_down_reason(ErtsMonLnkDist *mld, Eterm reason);
+Eterm erts_mon_link_dist_down_reason(ErtsMonLnkDist *mld);
 
 /**
  *
