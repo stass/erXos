@@ -35,6 +35,12 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	if (view.info.node_len == 0 || (const uint8_t *)view.node < bytes ||
 	    (const uint8_t *)view.node + view.info.node_len > bytes + length)
 		abort();
+	/* A domain pid only beside a peer, and never a pid of the node itself. */
+	if (view.info.system_connection.peer_node_len == 0 ?
+	    (view.info.system_connection.domain_pid_number | view.info.system_connection.domain_pid_serial) != 0 :
+	    view.info.system_connection.peer_node_len == view.info.node_len &&
+	    memcmp(view.system_node, view.node, view.info.node_len) == 0)
+		abort();
 	if (view.info.args_len != 0 && view.args[view.info.args_len - 1] != '\0')
 		abort();
 	if (view.info.env_len != 0 && view.env[view.info.env_len - 1] != '\0')

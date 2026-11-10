@@ -27,15 +27,15 @@ does it load a second time, since its library, lock and fault thread live
 as long as the system domain.
 
 The registered process, the domain service, is also the only one that may
-change the library: create/1, configured/2, start/1, stop/2, retire/1,
+change the library: create/1, configured/3, start/1, stop/2, retire/1,
 connect/4 and disconnect/1 answer {error, erights} to any other caller, and
 so does crash/1, which reads a domain's crash dump.
 """.
 
 -export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/4, disconnect/1,
-         configured/0, configured/2, code_object/2, code_drop/2]).
+         configured/0, configured/3, code_object/2, code_drop/2]).
 -nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/4,
-       disconnect_nif/1, configured_nif/0, configured_create_nif/2]).
+       disconnect_nif/1, configured_nif/0, configured_create_nif/3]).
 -on_load(on_load/0).
 
 -export_type([spec/0, created/0, error/0, configured/0]).
@@ -52,7 +52,8 @@ so does crash/1, which reads a domain's crash dump.
 -doc """
 An admitted request (erx_dom_spec_t): the domain's id, which the domain
 service allocates, its name, the identifier its node name carries before
-the @ and the host, its principal, the boot image's indexes of its runtime
+the @ and the host, its principal, its domain pid, the process of this node
+the domain service made for it, which the domain's boot page names, the boot image's indexes of its runtime
 image and its release's first file with the release's file count, its own
 and outer budgets' bytes, its group's grant, its lane's data area, and its
 arguments and environment as NUL-ended strings. Optional are its
@@ -64,7 +65,8 @@ here, a value of the wrong kind or width, or strings beyond the boot page's
 room is badarg; the library validates every value against its view before
 it makes anything.
 """.
--type spec() :: #{id := pos_integer(), name := binary(), principal := pos_integer(), runtime := non_neg_integer(),
+-type spec() :: #{id := pos_integer(), name := binary(), principal := pos_integer(), domain_pid := pid(),
+                  runtime := non_neg_integer(),
                   release := non_neg_integer(), release_files := non_neg_integer(),
                   memory := non_neg_integer(), outer := non_neg_integer(), grant := grant(),
                   lane := non_neg_integer(), args := binary(), env := binary(),
@@ -157,14 +159,14 @@ configured() ->
     configured_nif().
 
 -doc """
-Manifest startup and restart: builds configured row Row under id Id, as
-create/1 builds a request's domain. The domain service calls it from its
+Manifest startup and restart: builds configured row Row under id Id and
+domain pid DomainPid, as create/1 builds a request's domain. The domain service calls it from its
 manifest startup and restart with a row configured/0 gave, never a row a
 request names.
 """.
--spec configured(pos_integer(), non_neg_integer()) -> {ok, created()} | error().
-configured(Id, Row) ->
-    configured_create_nif(Id, Row).
+-spec configured(pos_integer(), non_neg_integer(), pid()) -> {ok, created()} | error().
+configured(Id, Row, DomainPid) ->
+    configured_create_nif(Id, Row, DomainPid).
 
 -doc "A session's code object: {error, enotsup} until sessions exist.".
 -spec code_object(pos_integer(), non_neg_integer()) -> {ok, map()} | error().
@@ -203,5 +205,5 @@ disconnect_nif(_Number) ->
 configured_nif() ->
     erlang:nif_error(undef).
 
-configured_create_nif(_Id, _Row) ->
+configured_create_nif(_Id, _Row, _DomainPid) ->
     erlang:nif_error(undef).

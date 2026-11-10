@@ -198,6 +198,11 @@ create_stop_kill() ->
     ?assertEqual({error, bad_identifier}, erx_domain:create(Spec#{name => <<"Web">>})),
     ?assertEqual({error, {bad_spec, id}}, erx_domain:create(Spec#{id => 4})),
     ?assertEqual({error, no_memory}, erx_domain:create(Spec#{memory => 1})),
+    %% The domain pid was made before the plan, which the library refused, so it ends.
+    {refused, Refused} = next_call(),
+    RefusedRef = monitor(process, Refused),
+    ?assert(lists:member(receive {'DOWN', RefusedRef, process, _, Why} -> Why after 5000 -> timeout end,
+                         [killed, noproc])),
     ?assertEqual({error, name_taken}, erx_domain:create(Spec#{name => <<"a">>})),
     {ok, Domain} = erx_domain:create(Spec),
     Id = erx_domain:id(Domain),
@@ -205,7 +210,9 @@ create_stop_kill() ->
     %% refused before admission spends none.
     ?assertEqual(8, Id),
     ?assertEqual('web@erxos', erx_domain:node(Domain)),
-    ?assertMatch({create, #{id := 8, name := <<"web">>, principal := 1, memory := 4096}}, next_call()),
+    %% The pid the library was given, which the boot page names, is the domain pid.
+    {create, #{id := 8, name := <<"web">>, principal := 1, memory := 4096, domain_pid := DomainPid}} = next_call(),
+    ?assertEqual(erx_domain:pid(Domain), DomainPid),
     ?assertEqual({start, 8}, next_call()),
     Ref = monitor(process, erx_domain:pid(Domain)),
     %% A normal exit signal is ignored, as by a process that does not trap exits.

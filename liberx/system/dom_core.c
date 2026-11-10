@@ -104,7 +104,7 @@ static erx_status_t	dom_spec_request(const erx_dom_view_t *,
 		    const erx_dom_principal_t *, const erx_dom_spec_t *,
 		    const erx_runtime_limits_t *, uint32_t, erx_dom_spec_t *);
 static void	dom_spec_configured(const erx_dom_view_t *, uint32_t,
-		    uint32_t, erx_dom_spec_t *);
+		    uint32_t, erx_dom_pid_t, erx_dom_spec_t *);
 static void	dom_spec_partial(const erx_dom_view_t *, uint32_t, uint32_t,
 		    erx_dom_spec_t *);
 static void	dom_decimal(uint32_t, erx_dom_spec_t *);
@@ -579,7 +579,7 @@ dom_spec_request(const erx_dom_view_t *view,
  */
 static void
 dom_spec_configured(const erx_dom_view_t *view, uint32_t id, uint32_t row,
-    erx_dom_spec_t *spec)
+    erx_dom_pid_t domain_pid, erx_dom_spec_t *spec)
 {
 	const erx_dom_configured_t *source = &view->configured[row];
 
@@ -587,6 +587,7 @@ dom_spec_configured(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 	spec->version = ERX_DOM_SPEC_VERSION;
 	spec->id = id;
 	spec->principal = source->principal;
+	spec->domain_pid = domain_pid;
 	spec->origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, row };
 	spec->flags = source->flags;
 	spec->release = source->release;
@@ -836,13 +837,13 @@ erx_dom_plan_request(const erx_dom_view_t *view, const erx_dom_spec_t *req,
 
 erx_status_t
 erx_dom_plan_configured(const erx_dom_view_t *view, uint32_t id,
-    uint32_t row, erx_dom_plan_t *plan)
+    uint32_t row, erx_dom_pid_t domain_pid, erx_dom_plan_t *plan)
 {
 	erx_dom_spec_t spec;
 
 	if (row >= view->nconfigured)
 		return (ERX_EINVAL);
-	dom_spec_configured(view, id, row, &spec);
+	dom_spec_configured(view, id, row, domain_pid, &spec);
 	return (dom_plan(&spec, view, plan));
 }
 

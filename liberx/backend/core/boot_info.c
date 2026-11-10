@@ -33,6 +33,31 @@ node_valid(const char *node, size_t length)
 	return (memchr(at + 1, '@', length - (size_t)(at + 1 - node)) == NULL);
 }
 
+static bool
+all_zero(const uint8_t *bytes, size_t length)
+{
+	for (size_t at = 0; at < length; at++) {
+		if (bytes[at] != 0)
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * A system connection with no peer, the system domain's, is all zero, its domain pid
+ * included, wherever its empty name's offset points; one with a peer names a node other
+ * than the page's own, so the domain pid its words name is never a pid of this node.
+ */
+static bool
+peer_valid(erx_boot_connection_t connection, const char *node, size_t node_len, const char *peer, size_t peer_len)
+{
+	if (peer_len == 0) {
+		connection.peer_node_off = 0;
+		return (all_zero((const uint8_t *)&connection, sizeof(connection)));
+	}
+	return (peer_len != node_len || memcmp(peer, node, node_len) != 0);
+}
+
 /*
  * Checks each word of a list. A last word with no NUL of its own ends at length: the builder
  * adds that NUL, and the reader has refused such a list before it gets here.
@@ -125,6 +150,9 @@ build_plan(const erx_boot_inputs_t *inputs, size_t *args_len, size_t *env_len, s
 		return (ERX_BOOT_INFO_STRINGS);
 	if (inputs->system_node_len != 0 && !node_valid(inputs->system_node, inputs->system_node_len))
 		return (ERX_BOOT_INFO_NODE);
+	if (!peer_valid(inputs->system_connection, inputs->node, inputs->node_len, inputs->system_node,
+	    inputs->system_node_len))
+		return (ERX_BOOT_INFO_PEER);
 	*total = inputs->node_len + inputs->system_node_len;
 	status = parts_plan(inputs->args, inputs->nargs, false, total, args_len);
 	if (status != ERX_BOOT_INFO_OK)
@@ -196,16 +224,6 @@ span_ok(uint32_t off, uint32_t len, size_t fixed, size_t size)
 	return (len == 0 || (off >= fixed && off <= size && len <= size - off));
 }
 
-static bool
-all_zero(const uint8_t *bytes, size_t length)
-{
-	for (size_t at = 0; at < length; at++) {
-		if (bytes[at] != 0)
-			return (false);
-	}
-	return (true);
-}
-
 /* A word list on the page ends in its last word's NUL. */
 static erx_boot_info_status_t
 list_check(const char *bytes, size_t length, bool env)
@@ -256,6 +274,9 @@ erx_boot_info_read(const void *page, size_t size, erx_boot_view_t *view)
 	if (info->system_connection.peer_node_len != 0 &&
 	    !node_valid(view->system_node, info->system_connection.peer_node_len))
 		return (ERX_BOOT_INFO_NODE);
+	if (!peer_valid(info->system_connection, view->node, info->node_len, view->system_node,
+	    info->system_connection.peer_node_len))
+		return (ERX_BOOT_INFO_PEER);
 	status = list_check(view->args, info->args_len, false);
 	if (status != ERX_BOOT_INFO_OK)
 		return (status);
@@ -284,6 +305,8 @@ erx_boot_info_reason(erx_boot_info_status_t status)
 		return ("a string outside the page");
 	case ERX_BOOT_INFO_NODE:
 		return ("a node name not of the form <name>@<host>");
+	case ERX_BOOT_INFO_PEER:
+		return ("a system connection with no peer that is not all zero, or whose peer is the node itself");
 	case ERX_BOOT_INFO_WORDS:
 		return ("an empty word, or a list not ended by a NUL");
 	case ERX_BOOT_INFO_ENV:

@@ -12,13 +12,13 @@
 -export([start/2]).
 
 %% The acceptor, linked to net_kernel as OTP's carriers start theirs.
--spec start(pid(), {pos_integer(), node()} | none) -> pid().
+-spec start(pid(), {pos_integer(), node(), pid()} | none) -> pid().
 start(Kernel, System) ->
     spawn_opt(fun() -> init(Kernel, System) end, [link, {priority, max}]).
 
 init(_Kernel, none) ->
     loop();
-init(Kernel, {PeerId, PeerNode}) ->
+init(Kernel, {PeerId, PeerNode, _DomainPid}) ->
     %% Any peer handed this pid can reach it; what arrives from another domain comes as
     %% {erx_origin, D, Msg} (edit 16), and loop/0 acts on no message, so no peer steers it.
     try

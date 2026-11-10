@@ -771,6 +771,32 @@ it; git history is the record of completed work.
   `erx_inet` reads the key and that every call's timeout is `infinity`.
   While the stack runs in the system domain the grant is the caller's own node's, so nothing
   reaches the client from another domain yet.
+* [Medium] Fiasco backend and its QEMU suite, `test/guest/native_task/program.c`
+  (`mode_irq_refused`), `liberx/backend/fiasco/service.c` (`service_irq`): the task case
+  `irq_refused` expects every IRQ call from a task to answer `ERX_ENOTSUP`, but the service
+  serves IRQ calls from tasks (BK8b), so the ack of handle 0 answers otherwise, the task
+  ends with status 82 and `native_task` fails at 1 CPU every run. Decide which is right:
+  drop or rewrite the case for the per-holder IRQ objects, or restore the refusal.
+* [High] network and domains, the envelope (design-domains, "Risks and open questions"):
+  every message from another domain arrives as `{erx_origin, D, Msg}`, so a socket's
+  active-mode delivery `{tcp, S, Data}` (and `gen_udp`'s) reaches an owner outside the
+  network domain wrapped, and a stock `receive {tcp, S, Data}` never matches it; cowboy
+  and ranch in the web domain are such owners. Needs the user's choice: a relay per socket
+  in the owner's domain under `erx_net_client` that takes the envelope off (recommended,
+  one local message per delivery, to measure), or an exception in edit 16 for socket
+  messages whose socket pid is of the lane's domain. The grant's `{erx_net_resolver, Grant,
+  Answer}` to `erx_inet` in another domain is dropped the same way, so that domain keeps its
+  first answer; `erx_inet`, the protocol's owner on the client side, takes the envelope off it
+  once the grant is in the network domain, checking `D` is the grant's.
+
+* [Medium] network, `erx_tcp_conn` (`handle_call({recv, ...})`,
+  [design-network-stack.md](docs/design-network-stack.md#the-interface-towards-erlang-programs)):
+  `recv(S, Length)` with `Length` above the connection's receive buffer
+  answers `{error, enomem}`, where stock gen_tcp accepts up to 64 MiB. A
+  waiting recv's held bytes are the network domain's memory, which the
+  `buffers` limit counts as a second receive buffer per connection (its
+  reservations are not built yet); lifting the bound means reserving a
+  recv's `Length` against the grant when the recv starts instead.
 * [Low] network, `erx_tcp_conn` (`perform({deliver, _})`): the receive queue
   counts payload bytes only, not the binary and list cell each queued
   segment costs, which `erx_tcp_reass` counts as `PIECE_OVERHEAD`. A peer
@@ -2299,8 +2325,7 @@ it; git history is the record of completed work.
   `system@<host>` (`-no_epmd -proto_dist erx` in place of `-kernel start_distribution
   false` in each manifest's `system_args`); the system domain's agent opening, finishing
   and ending the system side of each system connection for the domain service; the domain
-  pid as the domain's correspondent, created before the plan, its number and serial on the
-  boot page (`abi/erx_abi.txt` `erx_boot_connection`, `boot_info.c`, `erx_dist:boot/0`),
+  pid as the domain's correspondent, which the boot page and `erx_dist:boot/0` name,
   relaying the domain service's records to the agent and the agent's answers back; the
   system side's writer giving the reserve to the domain pid's messages alone; edit 56 in
   `dist.c` and `erl_proc_sig_queue.c`; and the lane driver's finish (control command 2).
@@ -2309,6 +2334,11 @@ it; git history is the record of completed work.
   origins item under "Security residuals"), since the domain pid acts only on
   `{erx_origin, D, Msg}` from its own domain and edit 8 lets any peer that is handed its
   pid reach it.
+* [Low] Domain service, `erx_domain_core.erl`, `erx_ident`, the manifest check: nothing reserves
+  the name `system`, so a request or a configured row named `system` is admitted, spends an
+  id and is refused only when the boot page is built (its node would be its own peer,
+  `ERX_BOOT_INFO_PEER`), as `einval`. Reserve the name where names are bound, so the answer
+  is `name_taken`, and refuse it in the manifest check.
 * [Low] Runtime, `net_adm:ping/1` (edit 28) decides by `erx_dist:select/1` whether
   the carrier is in use; a node of this kernel under another `-proto_dist` answers
   `pang` for an unconnected node at its own host without trying.

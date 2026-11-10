@@ -316,7 +316,12 @@ layout erx_runtime_limits wire_le 8 64
   field peer_held u64 48
   field peer_held_total u64 56
   zero reserved all
-layout erx_boot_connection wire_le 8 48
+
+# A connection on the boot page (docs/design-runtime.md, "Data model").
+# domain_pid_number and domain_pid_serial are the domain pid's ID and
+# Serial as NEW_PID_EXT writes them, a process of the peer's node; all
+# zero with no peer.
+layout erx_boot_connection wire_le 8 56
   field side cap 0
   field peer_side cap 8
   field peer_bell cap 16
@@ -326,7 +331,9 @@ layout erx_boot_connection wire_le 8 48
   field peer_node_len u32 36
   field out_size u32 40
   field in_size u32 44
-layout erx_boot_info wire_le 8 280
+  field domain_pid_number u32 48
+  field domain_pid_serial u32 52
+layout erx_boot_info wire_le 8 288
   field version u32 0
   field abi_version u32 4
   field domain_id u32 8
@@ -345,18 +352,18 @@ layout erx_boot_info wire_le 8 280
   field seal_addr u64 96
   field crash_area cap 104
   field system_connection erx_boot_connection 112
-  field cpuset u64 160
-  field capacity_mcpu u32 168
-  field node_off u32 172
-  field node_len u32 176
-  field args_off u32 180
-  field args_len u32 184
-  field env_off u32 188
-  field env_len u32 192
-  padding 196 4
-  field hwcap u64 200
-  field hwcap2 u64 208
-  field limits erx_runtime_limits 216
+  field cpuset u64 168
+  field capacity_mcpu u32 176
+  field node_off u32 180
+  field node_len u32 184
+  field args_off u32 188
+  field args_len u32 192
+  field env_off u32 196
+  field env_len u32 200
+  padding 204 4
+  field hwcap u64 208
+  field hwcap2 u64 216
+  field limits erx_runtime_limits 224
 
 # The header of a domain's crash area (docs/design-runtime.md, "Data
 # model"), which the domain library makes ERX_CRASH_SIZE bytes. The

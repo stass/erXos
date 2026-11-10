@@ -77,6 +77,20 @@ typedef struct erx_dom_origin {
 					 * index in the origin's manifest table */
 } erx_dom_origin_t;
 
+/*
+ * A domain's domain pid, the system domain's process that stands for it
+ * (docs/design-domains.md, "Domain lifecycle"), as the ID and Serial of
+ * NEW_PID_EXT: the domain service makes it before the plan, and the boot
+ * page names it. ERX_DOM_PID_NONE where nothing does, as for a domain with
+ * no system connection or a plan made only to be checked.
+ */
+typedef struct erx_dom_pid {
+	uint32_t	number;
+	uint32_t	serial;
+} erx_dom_pid_t;
+
+#define ERX_DOM_PID_NONE	((erx_dom_pid_t){ 0, 0 })
+
 typedef enum erx_dom_state {
 	ERX_DOM_FREE,		/* no domain; id is 0 */
 	ERX_DOM_BUILDING,	/* plan being applied */
@@ -198,6 +212,7 @@ typedef struct erx_dom_spec {
 	uint32_t	name_len;	/* 1 to ERX_DOM_NAME_MAX */
 	char		name[ERX_DOM_NAME_MAX];
 	uint32_t	principal;
+	erx_dom_pid_t	domain_pid;	/* made by the domain service before the plan */
 	erx_dom_origin_t origin;	/* set by the library's origin constructor */
 	uint32_t	flags;		/* ERX_DOM_SECRET, ERX_DOM_SPACES */
 	uint32_t	release;	/* index of the release's first file in the boot image */
@@ -490,21 +505,21 @@ extern const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS];
  *
  * erx_dom_plan_request plans an admitted request: req supplies id,
  * principal, flags, release, release_files, runtime, memory, outer, grant,
- * spaces, lane, connections, args_len, env_len and strings, and every other
- * field is ignored; given is a mask over the fields of erx_runtime_limits_t
+ * spaces, lane, connections, domain_pid, args_len, env_len and strings,
+ * and every other field is ignored; given is a mask over the fields of erx_runtime_limits_t
  * in layout order, each field given read from limits, which may be NULL
  * when given is 0, and each other field the principal's default.
  *
  * erx_dom_plan_configured plans configured-domain row `row` of the checked
- * manifest under domain id `id`; only manifest startup and restart call
- * it. erx_dom_plan_partial plans partial-boot program row `row`; only the
+ * manifest under domain id `id` and domain pid `domain_pid`; only
+ * manifest startup and restart call it. erx_dom_plan_partial plans partial-boot program row `row`; only the
  * root's partial-boot entry calls it.
  */
 erx_status_t	erx_dom_plan_request(const erx_dom_view_t *,
 		    const erx_dom_spec_t *req, const erx_runtime_limits_t *limits,
 		    uint32_t given, erx_dom_plan_t *plan);
 erx_status_t	erx_dom_plan_configured(const erx_dom_view_t *, uint32_t id,
-		    uint32_t row, erx_dom_plan_t *plan);
+		    uint32_t row, erx_dom_pid_t domain_pid, erx_dom_plan_t *plan);
 erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_plan_t *plan);
 

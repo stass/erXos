@@ -469,7 +469,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		break;
 	case 1:
 		origin = ERX_DOM_CONFIGURED;
-		status = erx_dom_plan_configured(&view, in.id, in.row, &plan);
+		status = erx_dom_plan_configured(&view, in.id, in.row, ERX_DOM_PID_NONE, &plan);
 		break;
 	default:
 		origin = ERX_DOM_PARTIAL_BOOT;
@@ -486,7 +486,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    in.given, &plan);
 		break;
 	case ERX_DOM_CONFIGURED:
-		status = erx_dom_plan_configured(&view, in.id, in.row, &plan);
+		status = erx_dom_plan_configured(&view, in.id, in.row, ERX_DOM_PID_NONE, &plan);
 		break;
 	default:
 		status = erx_dom_plan_partial(&view, in.id, in.row, &plan);

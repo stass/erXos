@@ -375,7 +375,7 @@ explore(void)
 	req.runtime = 1;
 	explore_one("request-spaces-jit",
 	    erx_dom_plan_request(&view, &req, NULL, 0, &plan), &plan);
-	explore_one("configured", erx_dom_plan_configured(&view, 6, 0, &plan),
+	explore_one("configured", erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan),
 	    &plan);
 	explore_one("partial", erx_dom_plan_partial(&view, 7, 0, &plan), &plan);
 	printf("explore variants=4 applied=%lu undone=%lu failures=%lu\n",
@@ -407,7 +407,7 @@ run_case(const char *name, origin_pick_t pick,
 		    ERX_DOM_LIMITS_ALL, &plan);
 		break;
 	case PICK_CONFIGURED:
-		status = erx_dom_plan_configured(&view, 6, case_row, &plan);
+		status = erx_dom_plan_configured(&view, 6, case_row, ERX_DOM_PID_NONE, &plan);
 		break;
 	case PICK_PARTIAL:
 		status = erx_dom_plan_partial(&view, 7, case_row, &plan);
@@ -626,10 +626,10 @@ constructors(void)
 	    plan.spec.crash, plan.spec.system_lane, (unsigned)plan.parent,
 	    plan.spec.strings[5]);
 	printf("ctor configured_row_out %d\n",
-	    (int)erx_dom_plan_configured(&view, 6, 1, &plan));
+	    (int)erx_dom_plan_configured(&view, 6, 1, ERX_DOM_PID_NONE, &plan));
 	printf("ctor partial_row_out %d\n",
 	    (int)erx_dom_plan_partial(&view, 6, 1, &plan));
-	status = erx_dom_plan_configured(&view, 6, 0, &plan);
+	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
 	printf("ctor configured_owned %d %u %u %u %.*s\n", (int)status,
 	    plan.spec.origin.kind, plan.spec.origin.record, (unsigned)plan.parent,
 	    (int)plan.spec.name_len, plan.spec.name);
@@ -733,7 +733,7 @@ configured_plan(void)
 	erx_dom_plan_t plan;
 
 	reset_view();
-	if (erx_dom_plan_configured(&view, 6, 0, &plan) != ERX_OK)
+	if (erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan) != ERX_OK)
 		failures++;
 	return (plan);
 }
@@ -755,20 +755,20 @@ restarts(void)
 
 	reset_view();
 	configured.grant = grant(ERX_QUOTA_NONE, 0x3, 50);
-	if (erx_dom_plan_configured(&view, 6, 0, &plan) != ERX_OK ||
+	if (erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan) != ERX_OK ||
 	    erx_dom_plan_record(&view, &plan) != ERX_OK) {
 		failures++;
 		return;
 	}
 	dom = &domains[plan.slot];
 	printf("record restart_living %d\n",
-	    (int)erx_dom_plan_configured(&view, 7, 0, &again));
+	    (int)erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again));
 	dom->state = ERX_DOM_RUNNING;
 	printf("record restart_running %d\n",
-	    (int)erx_dom_plan_configured(&view, 7, 0, &again));
+	    (int)erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again));
 	dom->state = ERX_DOM_ENDED;
 	printf("record restart_ended %d\n",
-	    (int)erx_dom_plan_configured(&view, 7, 0, &again));
+	    (int)erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again));
 	/* The system connection closed, as erx_dom_disconnect leaves it. */
 	connections[plan.connection_row] = (erx_dom_connection_t){ 0 };
 	if (erx_dom_plan_retire(&view, 6, &teardown) != ERX_OK) {
@@ -777,13 +777,13 @@ restarts(void)
 	}
 	erx_dom_retire_record(&view, &teardown);
 	printf("record restart_retired %d id=%u principal=%u,%llu\n",
-	    (int)erx_dom_plan_configured(&view, 7, 0, &again), dom->id,
+	    (int)erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again), dom->id,
 	    principal.domains, (unsigned long long)principal.carved);
 
 	reset_view();
 	configured.grant = grant(ERX_QUOTA_NONE, 0x3, 50);
-	if (erx_dom_plan_configured(&view, 6, 0, &plan) != ERX_OK ||
-	    erx_dom_plan_configured(&view, 7, 0, &again) != ERX_OK ||
+	if (erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan) != ERX_OK ||
+	    erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again) != ERX_OK ||
 	    erx_dom_plan_record(&view, &plan) != ERX_OK) {
 		failures++;
 		return;
@@ -812,7 +812,7 @@ records(void)
 
 	plan = configured_plan();
 	print_record("configured", erx_dom_plan_record(&view, &plan), &plan);
-	if (erx_dom_plan_configured(&view, 7, 0, &plan) != ERX_OK)
+	if (erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &plan) != ERX_OK)
 		failures++;
 	print_record("configured_again", erx_dom_plan_record(&view, &plan),
 	    &plan);

@@ -34,6 +34,7 @@ typedef enum erx_boot_info_status {
 	ERX_BOOT_INFO_STRINGS,		/* more than ERX_BOOT_STRINGS_MAX of strings */
 	ERX_BOOT_INFO_BOUNDS,		/* a string outside the page */
 	ERX_BOOT_INFO_NODE,		/* a node name not of the form <name>@<host> */
+	ERX_BOOT_INFO_PEER,		/* a system connection with no peer not all zero, or the node as its own peer */
 	ERX_BOOT_INFO_WORDS,		/* an empty word, or a list not ended by a NUL */
 	ERX_BOOT_INFO_ENV		/* an environment word that is not KEY=VALUE */
 } erx_boot_info_status_t;
@@ -60,7 +61,8 @@ typedef struct erx_boot_inputs {
 	erx_cap_t		 time_page;
 	erx_cap_t		 release;
 	erx_cap_t		 crash_area;
-	erx_boot_connection_t	 system_connection;	/* its peer node fields from system_node */
+	erx_boot_connection_t	 system_connection;	/* its peer node fields from system_node;
+							 * all zero without one */
 	uint64_t		 release_addr;
 	uint64_t		 cpuset;
 	const char		*node;

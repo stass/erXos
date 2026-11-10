@@ -101,9 +101,10 @@ erx_dom_lib_create(erx_dom_lib_t *lib, const erx_dom_spec_t *req, const erx_runt
 }
 
 erx_status_t
-erx_dom_lib_configured(erx_dom_lib_t *lib, uint32_t id, uint32_t row, erx_dom_created_t *created)
+erx_dom_lib_configured(erx_dom_lib_t *lib, uint32_t id, uint32_t row, erx_dom_pid_t domain_pid,
+    erx_dom_created_t *created)
 {
-	(void)lib, (void)id, (void)row, (void)created;
+	(void)lib, (void)id, (void)row, (void)domain_pid, (void)created;
 	return (ERX_ENOTSUP);
 }
 

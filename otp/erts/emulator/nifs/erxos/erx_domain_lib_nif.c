@@ -35,7 +35,8 @@
  *
  * Every term an entry decodes comes from an Erlang caller and is checked
  * here for shape only: a map with exactly the keys its reader takes, each
- * an integer of its field's width or a binary that fits. The library
+ * an integer of its field's width, a binary that fits, or a pid of this
+ * node. The library
  * validates every value against its view. No atom is made from a caller's
  * term: the keys looked up are this file's own names.
  */
@@ -48,6 +49,8 @@
 #include <string.h>
 
 #include "erl_nif.h"
+#include "sys.h"
+#include "global.h"
 
 #include "erx/abi.h"
 #include "erx/dom.h"
@@ -300,6 +303,23 @@ read_name(map_reader_t *reader, erx_dom_spec_t *spec)
 }
 
 /*
+ * A domain pid, a pid of this node, as the ID and Serial NEW_PID_EXT
+ * writes for it (external.c, enc_internal_pid), which the boot page
+ * carries to the domain as a pid of the system domain's node.
+ */
+static bool
+domain_pid_from(ErlNifEnv *env, ERL_NIF_TERM term, erx_dom_pid_t *pid)
+{
+	ErlNifPid local;
+
+	if (!enif_get_local_pid(env, term, &local))
+		return (false);
+	*pid = (erx_dom_pid_t){ .number = (uint32_t)internal_pid_number(local.pid),
+	    .serial = (uint32_t)internal_pid_serial(local.pid) };
+	return (true);
+}
+
+/*
  * A request's map as an erx_dom_spec_t and its limits. Only its shape is
  * checked here: erx_dom_plan_request validates every value against the
  * library's view before anything is made. The fields the library sets
@@ -311,12 +331,14 @@ spec_from(ErlNifEnv *env, ERL_NIF_TERM map, erx_dom_spec_t *spec, erx_runtime_li
     uint32_t *given)
 {
 	map_reader_t reader;
+	ERL_NIF_TERM domain_pid;
 
 	memset(spec, 0, sizeof(*spec));
 	spec->version = ERX_DOM_SPEC_VERSION;
 	if (!reader_open(env, map, &reader) || !read_u32(&reader, "id", &spec->id) ||
 	    !read_name(&reader, spec) ||
 	    !read_u32(&reader, "principal", &spec->principal) ||
+	    !reader_take(&reader, "domain_pid", &domain_pid) || !domain_pid_from(env, domain_pid, &spec->domain_pid) ||
 	    !read_u32(&reader, "runtime", &spec->runtime) ||
 	    !read_u32(&reader, "release", &spec->release) ||
 	    !read_u32(&reader, "release_files", &spec->release_files) ||
@@ -412,15 +434,17 @@ static ERL_NIF_TERM
 configured_create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
 	erx_dom_created_t created;
+	erx_dom_pid_t domain_pid;
 	erx_status_t status;
 	unsigned int id, row;
 
-	if (argc != 2 || !enif_get_uint(env, argv[0], &id) || !enif_get_uint(env, argv[1], &row))
+	if (argc != 3 || !enif_get_uint(env, argv[0], &id) || !enif_get_uint(env, argv[1], &row) ||
+	    !domain_pid_from(env, argv[2], &domain_pid))
 		return (enif_make_badarg(env));
 	if (lib == NULL)
 		return (status_error(env, ERX_ENOTSUP));
 	enif_mutex_lock(lib_lock);
-	status = caller_is_service(env) ? erx_dom_lib_configured(lib, id, row, &created) : ERX_ERIGHTS;
+	status = caller_is_service(env) ? erx_dom_lib_configured(lib, id, row, domain_pid, &created) : ERX_ERIGHTS;
 	enif_mutex_unlock(lib_lock);
 	if (status != ERX_OK)
 		return (status_error(env, status));
@@ -830,7 +854,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "connect_nif", 4, connect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
-	{ "configured_create_nif", 2, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "configured_create_nif", 3, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 };
 
 ERL_NIF_INIT(erx_domain_lib, nif_funcs, load, NULL, NULL, NULL)

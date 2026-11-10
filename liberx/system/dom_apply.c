@@ -392,7 +392,8 @@ apply_bootinfo(apply_t *apply)
 		    .peer_side = { .raw = apply->installed[ERX_DOM_OBJ_SYS_SIDE] },
 		    .peer_bell = { .raw = apply->installed[ERX_DOM_OBJ_SYS_BELL] },
 		    .label = ERX_DOM_SYSTEM_LABEL, .peer = ERX_DOM_SYSTEM_ID,
-		    .out_size = spec->system_lane, .in_size = plan->reader };
+		    .out_size = spec->system_lane, .in_size = plan->reader,
+		    .domain_pid_number = spec->domain_pid.number, .domain_pid_serial = spec->domain_pid.serial };
 	}
 	inputs.args = &args;
 	inputs.nargs = spec->args_len != 0;

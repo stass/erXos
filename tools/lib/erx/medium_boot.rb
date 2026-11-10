@@ -115,7 +115,7 @@ module Erx
       # shell are refused.
       ['DlRegistered', 'Lib:register()', '{error,ebusy}'],
       ['DlNotCreate', 'Lib:create(Spec)', '{error,erights}'],
-      ['DlNotService', "Lib:configured(#{FREE_ID},0)", '{error,erights}'],
+      ['DlNotService', "Lib:configured(#{FREE_ID},0,self())", '{error,erights}'],
       ['DlNotStop', "Lib:stop(#{CONFIGURED_ID},0)", '{error,erights}'],
       # The maps the library itself refuses, asked of the service, which spends an id on each.
       ['DlFiles', 'DlAsk(<<"files">>,#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
@@ -139,14 +139,14 @@ module Erx
     # monitor's reason, answering the id, Then's result and that reason, or the create's
     # refusal; a missing end is timeout in the reason's place. DlRun is DlRunWith with
     # Spec's own fields.
-    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal],Spec),Fields#{name=>Name})) of ' \
+    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name})) of ' \
                      '{ok,DlDomain}->DlMonitor=monitor(process,erx_domain:pid(DlDomain)),DlThen=Then(DlDomain),' \
                      'DlWhy=receive {\'DOWN\',DlMonitor,process,_,DlReason}->DlReason after 60000->timeout end,' \
                      '{erx_domain:id(DlDomain),DlThen,DlWhy};' \
                      'DlRefused->DlRefused end end'
     # DlAsk: the domain service's answer to a create of Name with the request fields of Spec
     # changed by Fields.
-    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal],Spec),Fields#{name=>Name})) end'
+    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name})) end'
     # DlFirstDeaths: the system principal's deaths as {Id, Info}, once there is one, polled from the
     # domain service's state every 100 ms at most N times; timeout if none comes.
     DOMAIN_LIB_WAIT = 'fun DlWait(0)->timeout;DlWait(N)->' \
@@ -172,7 +172,7 @@ module Erx
       spec = erlang_map(id: FREE_ID, name: '<<"cell">>', principal: 1, runtime: domain.runtime, release: domain.release,
                         release_files: domain.release_files, memory: DOMAIN_MEMORY, outer: DOMAIN_OUTER,
                         grant: erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
-                        lane: 4096, args: "<<#{args}>>", env: '<<>>')
+                        lane: 4096, args: "<<#{args}>>", env: '<<>>', domain_pid: 'self()')
       jit = erlang_map(runtime: domain.jit, args: "<<#{JIT_ARGS.map { |arg| "\"#{arg}\",0" }.join(',')}>>")
       badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }

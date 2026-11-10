@@ -785,10 +785,35 @@ ErlDrvEntry erx_lane_driver_entry = {
 };
 
 /*
+ * The domain pid the boot page names, a pid of the system domain's node Node, whose creation
+ * is its domain id, PeerId, as erx_dist's creations are; any two words name a pid of another
+ * node, as NEW_PID_EXT's do (external.c, dec_pid). An external pid must never name this node:
+ * the reader refused a page whose peer is the node itself, and if this node has since taken
+ * the peer's name and creation, the BIF answers badarg.
+ */
+static Eterm
+boot_domain_pid(Process *p, Eterm node, const erx_boot_connection_t *sys)
+{
+	ExternalThing *etp;
+
+	if (node == erts_this_node->sysname && sys->peer == erts_this_node->creation)
+		return (THE_NON_VALUE);
+	etp = (ExternalThing *)HAlloc(p, EXTERNAL_PID_HEAP_SIZE);
+	etp->header = make_external_pid_header();
+	etp->next = MSO(p).first;
+	etp->node = erts_find_or_insert_node(node, sys->peer, make_boxed(&etp->header));
+	etp->data.pid.num = sys->domain_pid_number;
+	etp->data.pid.ser = sys->domain_pid_serial;
+	MSO(p).first = (struct erl_off_heap_header *)etp;
+	return (make_external_pid(etp));
+}
+
+/*
  * erx_dist:boot/0, the boot page's identity for erx_dist's listen/2 and acceptor:
- * {DomainId, {PeerId, PeerNode}} for a domain with a system connection, and {DomainId, none}
- * for the system domain, which has none. Its one atom is the system domain's node name,
- * which the domain library wrote and the boot page's reader checked is <name>@<host>.
+ * {DomainId, {PeerId, PeerNode, DomainPid}} for a domain with a system connection, and
+ * {DomainId, none} for the system domain, which has none. Its one atom is the system domain's
+ * node name, which the domain library wrote and the boot page's reader checked is
+ * <name>@<host>.
  */
 BIF_RETTYPE
 erx_dist_boot_0(BIF_ALIST_0)
@@ -801,12 +826,16 @@ erx_dist_boot_0(BIF_ALIST_0)
 
 	if (node_len != 0) {
 		const Eterm node = erts_atom_put((const byte *)node_name, (Sint)node_len, ERTS_ATOM_ENC_UTF8, 0);
+		Eterm pid;
 
 		if (is_non_value(node))
 			BIF_ERROR(BIF_P, SYSTEM_LIMIT);
-		hp = HAlloc(BIF_P, 3);
+		pid = boot_domain_pid(BIF_P, node, sys);
+		if (is_non_value(pid))
+			BIF_ERROR(BIF_P, BADARG);
+		hp = HAlloc(BIF_P, 4);
 		/* A u32 is a small integer on the 64-bit builds erXos makes. */
-		system = TUPLE2(hp, make_small((Uint)sys->peer), node);
+		system = TUPLE3(hp, make_small((Uint)sys->peer), node, pid);
 	}
 	hp = HAlloc(BIF_P, 3);
 	BIF_RET(TUPLE2(hp, make_small((Uint)boot->domain_id), system));

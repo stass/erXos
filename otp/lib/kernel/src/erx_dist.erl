@@ -44,9 +44,10 @@
 -type connection() :: #{port := port(), node := node(), id := pos_integer(),
                         system := boolean()}.
 
-%% The boot page's domain id and its system connection's peer, or none in the system
-%% domain. A BIF of ERTS (erx_lane_drv.c).
--spec boot() -> {pos_integer(), {pos_integer(), node()} | none}.
+%% The boot page's domain id and its system connection's peer, its id and node, with the
+%% domain pid, the peer's process that stands for this domain; none in the system domain.
+%% A BIF of ERTS (erx_lane_drv.c).
+-spec boot() -> {pos_integer(), {pos_integer(), node(), pid()} | none}.
 boot() ->
     erlang:nif_error(undefined).
 

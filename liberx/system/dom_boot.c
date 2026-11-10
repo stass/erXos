@@ -96,13 +96,14 @@ erx_dom_boot_up(erx_dom_lib_t *lib, const erx_boot_info_t *system_page, uint64_t
 }
 
 erx_status_t
-erx_dom_lib_configured(erx_dom_lib_t *lib, uint32_t id, uint32_t row, erx_dom_created_t *created)
+erx_dom_lib_configured(erx_dom_lib_t *lib, uint32_t id, uint32_t row, erx_dom_pid_t domain_pid,
+    erx_dom_created_t *created)
 {
 	/* A plan holds a specification with its strings: too large for a stack. */
 	static erx_dom_plan_t plan;
 	erx_status_t status;
 
-	status = erx_dom_plan_configured(&lib->view, id, row, &plan);
+	status = erx_dom_plan_configured(&lib->view, id, row, domain_pid, &plan);
 	if (status == ERX_OK)
 		status = erx_dom_lib_apply(lib, &plan, created);
 	memset(&plan, 0, sizeof(plan));

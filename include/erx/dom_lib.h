@@ -289,15 +289,16 @@ const char	*erx_dom_boot_up(erx_dom_lib_t *, const erx_boot_info_t *system_page,
 
 /*
  * Manifest startup and restart: erx_dom_create of configured-domain row
- * `row` under domain id `id`, planned by erx_dom_plan_configured and applied
- * as erx_dom_lib_create applies a request's plan. Like every entry, it runs
- * under the caller's one library lock. `row` is the row's index in the
+ * `row` under domain id `id` and domain pid `domain_pid`, planned by
+ * erx_dom_plan_configured and applied as erx_dom_lib_create applies a
+ * request's plan. Like every entry, it runs under the caller's one
+ * library lock. `row` is the row's index in the
  * manifest's domain table, which the record's origin keeps; manifest
  * startup walks the boot order, and the host planner, which plans the rows
  * in that order, gives the domain at place p of it the id
  * ERX_DOM_SYSTEM_ID + 1 + p, so startup gives the same ids.
  */
 erx_status_t	erx_dom_lib_configured(erx_dom_lib_t *, uint32_t id, uint32_t row,
-		    erx_dom_created_t *created) ERX_WARN_UNUSED_RESULT;
+		    erx_dom_pid_t domain_pid, erx_dom_created_t *created) ERX_WARN_UNUSED_RESULT;
 
 #endif /* ERX_DOM_LIB_H */

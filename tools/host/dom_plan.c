@@ -281,7 +281,7 @@ main(int argc, char **argv)
 
 	for (uint32_t place = 0; place < in.norder; place++) {
 		row = in.order[place];
-		status = erx_dom_plan_configured(&lib.view, ERX_DOM_SYSTEM_ID + 1 + place, row, &plan);
+		status = erx_dom_plan_configured(&lib.view, ERX_DOM_SYSTEM_ID + 1 + place, row, ERX_DOM_PID_NONE, &plan);
 		if (status == ERX_OK)
 			status = erx_dom_plan_record(&lib.view, &plan);
 		printf("domain %" PRIu32 " %d\n", place, (int)status);

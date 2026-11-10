@@ -438,6 +438,13 @@ page_spoil(uint32_t id)
 #define TEXT_OF_(x)	#x
 #define TEXT_OF(x)	TEXT_OF_(x)
 #define BURST_TEXT	TEXT_OF(BURST)	/* BURST, as the expression writes it */
+/*
+ * The domain pid the root names on a distributed domain's boot page, as a domain service
+ * would: words of no process of the party's, so only the page can have given them.
+ */
+#define BOOT_PID_NUMBER	77
+#define BOOT_PID_SERIAL	3
+#define BOOT_PID_TEXT	TEXT_OF(BOOT_PID_NUMBER) ":32," TEXT_OF(BOOT_PID_SERIAL) ":32"
 /* erx_dist's status when the system connection ends: EX_UNAVAILABLE of sysexits(3). */
 #define DIST_LOST_STATUS	69
 #define ERTS_DIST_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
@@ -566,6 +573,9 @@ static const char exports_eval[] =
  *  7         neither acted on it: the system node is still connected.
  *  8         m1 arrived with D 4, the system domain's id, which erx_dist:owner/1 gives the
  *            party's pid, and owner/1 gives the domain's own pid and references its id.
+ *  9         erx_dist:boot/0 names the party, id 4 and node S, and the domain pid the root
+ *            wrote on the boot page, of words BOOT_PID_NUMBER and BOOT_PID_SERIAL: a pid of
+ *            S whose creation is 4.
  */
 static const char origins_eval[] =
     "S='" SYSTEM_NODE "',"
@@ -582,8 +592,10 @@ static const char origins_eval[] =
     "{_,Dc}=lists:keyfind(S,1,erlang:system_info(dist_ctrl)),{connected,O}=erlang:port_info(Dc,connected),"
     "P!{n,whereis(net_kernel)},P!{k,O},E(m2,6),sys:get_state(net_kernel),receive after 500->ok end,"
     "lists:member(S,nodes()) orelse Fail(7),"
-    "{Id,_}=erx_dist:boot(),"
+    "{Id,Sys}=erx_dist:boot(),"
     "(Dm==4 andalso erx_dist:owner(P)==Dm andalso erx_dist:owner(self())==Id andalso erx_dist:owner(make_ref())==Id) orelse Fail(8),"
+    "case Sys of {4,S,Bp}->(Bp=:=binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\"," BOOT_PID_TEXT ",4:32>>) andalso "
+    "node(Bp)==S andalso erx_dist:owner(Bp)==4) orelse Fail(9);_->Fail(9) end,"
     "case get(failed) of []->halt(0);Fs->halt(lists:min(Fs)) end";
 
 /*
@@ -705,6 +717,7 @@ connection_request(uint32_t runtime, const char *eval)
 	size_t at = sizeof(ERTS_DIST_BOOT) - 1;
 
 	(void)erts_request(runtime);
+	request.domain_pid = (erx_dom_pid_t){ .number = BOOT_PID_NUMBER, .serial = BOOT_PID_SERIAL };
 	memcpy(request.strings, ERTS_DIST_BOOT, at);
 	if (!args_put(request.strings, sizeof(request.strings) - 1, &at, eval, request.id)) {
 		/* the boot words and the eval past boot_strings_max: the case fails with no domain */

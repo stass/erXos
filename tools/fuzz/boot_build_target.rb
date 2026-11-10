@@ -20,7 +20,7 @@ Erx::PackFuzz.declare_target(
                                       request.call([node, '', '', '', ''], flags: 0),
                                       request.call([node, args, 'start', env, 'C=3'], flags: 8),
                                       request.call([node, args, 'start', env, 'C=3'], reserved: 1),
-                                      request.call([node, args, 'start', env, 'C=3'], page: 280),
+                                      request.call([node, args, 'start', env, 'C=3'], page: 288),
                                       request.call(['system', args, '', '', '']),
                                       request.call(['a@b@c', args, '', '', '']),
                                       request.call([node, "--\0\0-boot\0", '', '', '']),

@@ -29,7 +29,8 @@ reach it only through facets, which arrive with the connections.
 %% Every domain is the system principal's, number 1, the one principal the library's
 %% view has (include/erx/dom.h, erx_dom_principal_t).
 -define(SYSTEM_PRINCIPAL, 1).
-%% The keys of a request beyond its name: erx_domain_lib:spec()'s, less id and principal.
+%% The keys of a request beyond its name: erx_domain_lib:spec()'s, less id, principal and
+%% domain_pid, which the service sets.
 -define(REQUEST_KEYS, [runtime, release, release_files, memory, outer, grant, lane, args, env,
                        connections, flags, spaces, limits]).
 
@@ -109,8 +110,9 @@ create(#{name := Name} = Spec, State) ->
                     {Error, State};
                 Ident ->
                     #{lib := Lib} = State,
-                    Make = fun(Id) ->
-                                   Lib:create(Fields#{id => Id, name => Name, principal => ?SYSTEM_PRINCIPAL})
+                    Make = fun(Id, Pid) ->
+                                   Lib:create(Fields#{id => Id, name => Name, principal => ?SYSTEM_PRINCIPAL,
+                                                      domain_pid => Pid})
                            end,
                     build(Ident, ?SYSTEM_PRINCIPAL, request, Make, State)
             end
@@ -124,7 +126,7 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
             logger:error("erx_domain: configured row ~b has no identifier for a name", [Row]),
             State;
         Ident ->
-            Make = fun(Id) -> Lib:configured(Id, Row) end,
+            Make = fun(Id, Pid) -> Lib:configured(Id, Row, Pid) end,
             case build(Ident, Principal, {configured, Row}, Make, State) of
                 {{ok, _}, Next} ->
                     Next;
@@ -134,18 +136,19 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
             end
     end.
 
-%% Admits Ident, has the library make it with Make(Id), makes its domain pid and
-%% starts its first thread. A domain the library made whose start is refused is
-%% stopped, and its end retires it as any end does.
+%% Admits Ident, makes its domain pid, which its boot page names, has the library
+%% make it with Make(Id, Pid) and starts its first thread. A refused plan ends the
+%% pid, unlinked first, so no domain is stopped for it; a domain the library made
+%% whose start is refused is stopped, and its end retires it as any end does.
 build(Ident, Principal, Origin, Make, #{lib := Lib, core := Core} = State) ->
     case erx_domain_core:admit(Ident, Principal, Origin, Core) of
         {error, _} = Error ->
             {Error, State};
         {ok, #{id := Id, node := Node}, Admitted} ->
-            case made(Make, Id) of
+            Ref = make_ref(),
+            Pid = erx_domain_pid:start_link(self(), Id, Ref),
+            case made(Make, Id, Pid) of
                 {ok, #{connection := Connection}} ->
-                    Ref = make_ref(),
-                    Pid = erx_domain_pid:start_link(self(), Id, Ref),
                     Built = erx_domain_core:built(Id, Connection, Pid, Ref, Admitted),
                     case Lib:start(Id) of
                         ok ->
@@ -156,13 +159,22 @@ build(Ident, Principal, Origin, Make, #{lib := Lib, core := Core} = State) ->
                             {{error, {start, Reason}}, Next}
                     end;
                 {error, Reason} ->
+                    unlink(Pid),
+                    exit(Pid, kill),
                     {{error, refusal(Reason)}, State#{core := erx_domain_core:failed(Id, Admitted)}}
             end
     end.
 
-made(Make, Id) ->
-    try Make(Id)
-    catch error:badarg -> {error, badarg}
+%% Any other exception ends the domain pid before it reaches the service, so no pid
+%% outlives a plan that was never made.
+made(Make, Id, Pid) ->
+    try Make(Id, Pid)
+    catch
+        error:badarg -> {error, badarg};
+        Class:Reason:Stack ->
+            unlink(Pid),
+            exit(Pid, kill),
+            erlang:raise(Class, Reason, Stack)
     end.
 
 refusal(enomem) -> no_memory;

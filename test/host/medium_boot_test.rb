@@ -121,7 +121,7 @@ class MediumBootTest < Minitest::Test
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
     assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
-    assert_includes expression, 'DlNotService=Lib:configured(12,0)'
+    assert_includes expression, 'DlNotService=Lib:configured(12,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
     assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields)->DlRunWith=fun(Name,Fields,Then)->')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.

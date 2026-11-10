@@ -84,6 +84,68 @@ test_round_trip(void)
 	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_NODE, "system node: a name without a host is accepted");
 }
 
+/*
+ * The system connection's domain pid: a domain's page carries its two words through, the
+ * system domain's connection is all zero, and a page whose connection says otherwise, or
+ * whose peer is the node itself, is refused by the builder and the reader alike.
+ */
+static void
+test_domain_pid(void)
+{
+	erx_boot_inputs_t inputs = good_inputs();
+	erx_boot_view_t view;
+	erx_boot_info_t info;
+
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "the system page");
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "the system page does not read back");
+	for (size_t at = 0; at < ERX_BOOT_CONNECTION_SIZE; at++)
+		CHECK(page[ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + at] == 0, "the system page's connection: byte %zu is set", at);
+
+	inputs.flags = 0;
+	inputs.node = "web@host";
+	inputs.node_len = 8;
+	inputs.system_node = "system@host";
+	inputs.system_node_len = 11;
+	inputs.system_connection = (erx_boot_connection_t){ .label = 3, .peer = 4, .domain_pid_number = 0xfffffffe,
+	    .domain_pid_serial = 0x80000001 };
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "a domain's page is refused");
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "a domain's page does not read back");
+	CHECK(view.info.system_connection.domain_pid_number == 0xfffffffe &&
+	    view.info.system_connection.domain_pid_serial == 0x80000001 && view.info.system_connection.peer == 4,
+	    "the domain pid's words");
+	CHECK(ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + ERX_BOOT_CONNECTION_OFF_DOMAIN_PID_NUMBER == 160 &&
+	    ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + ERX_BOOT_CONNECTION_OFF_DOMAIN_PID_SERIAL == 164 &&
+	    ERX_BOOT_INFO_SIZE == 288, "the domain pid's place on the page");
+
+	/* The node as its own peer. */
+	inputs.system_node = "web@host";
+	inputs.system_node_len = 8;
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_PEER, "the node as its own peer is built");
+	inputs.system_node = "system@host";
+	inputs.system_node_len = 11;
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "the domain's page");
+	memcpy(&info, page, sizeof(info));
+	memcpy(page + info.system_connection.peer_node_off, "web@host", 8);
+	info.system_connection.peer_node_len = 8;
+	memcpy(page, &info, sizeof(info));
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_PEER, "the node as its own peer is read");
+
+	/* A connection with no peer that is not all zero; its empty name's offset points anywhere. */
+	inputs.system_node_len = 0;
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_PEER, "a connection with no peer is built");
+	inputs.system_connection = (erx_boot_connection_t){ 0 };
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "a domain with no connection");
+	for (size_t at = 0; at < ERX_BOOT_CONNECTION_SIZE; at++) {
+		const size_t off = ERX_BOOT_INFO_OFF_SYSTEM_CONNECTION + at;
+		const bool name_off = at >= ERX_BOOT_CONNECTION_OFF_PEER_NODE_OFF && at < ERX_BOOT_CONNECTION_OFF_PEER_NODE_LEN;
+
+		page[off] = 0x01;
+		CHECK((erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK) == name_off,
+		    "a connection with no peer and byte %zu set", at);
+		page[off] = 0;
+	}
+}
+
 static void
 test_strings_limit(void)
 {
@@ -404,6 +466,7 @@ int
 main(void)
 {
 	test_round_trip();
+	test_domain_pid();
 	test_strings_limit();
 	test_too_small();
 	test_words();

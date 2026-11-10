@@ -27,6 +27,8 @@ class BootInfoTest < Minitest::Test
     'a strings limit one too wide' => [INFO, 'need > ERX_BOOT_STRINGS_MAX - *total', 'need > ERX_BOOT_STRINGS_MAX + 1 - *total', 'strings limit'],
     'a word past the limit accepted' => [ARGS, 'length + 1 > ERX_BOOT_STRINGS_MAX - out->arg_bytes', 'false', 'erx.arg limit'],
     'the system node laid over the node' => [INFO, '(uint32_t)(fixed + inputs->node_len) : 0', '(uint32_t)fixed : 0', 'system node'],
+    'the node let through as its own peer' => [INFO, 'return (peer_len != node_len || memcmp(peer, node, node_len) != 0);', 'return ((void)node, (void)node_len, (void)peer, true);', 'own peer'],
+    'a connection with no peer let through' => [INFO, 'return (all_zero((const uint8_t *)&connection, sizeof(connection)));', 'return (true);', 'no peer'],
     'an empty word let through' => [INFO, 'if (word == 0)', 'if (false)', 'word list'],
     'the page marked before the checks' => [INFO, "\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", "\tmemset(page, 0, size);\n\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", 'untouched']
   }.freeze
