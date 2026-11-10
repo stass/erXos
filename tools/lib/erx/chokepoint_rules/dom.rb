@@ -28,6 +28,9 @@ module Erx
     DOM_LIB_HEADER = 'include/erx/dom_lib.h'
     DOM_APPLY_HEADER = 'liberx/system/dom_apply.h'
     DOM_DRIVER = 'test/fixtures/dom_core_driver.c'
+    # The host driver of the core after creation, whose records carry the
+    # origins a device give is placed by.
+    DOM_LIFE_DRIVER = 'test/fixtures/dom_life_driver.c'
     DOM_FUZZ = 'tools/fuzz/dom_core_fuzz.c'
     # The manifest check's host run of the configured entry over each configured
     # domain's row (docs/design-system.md, "The manifest", property 12). It builds
@@ -44,8 +47,10 @@ module Erx
         # no caller hands the planner an origin. This keeps the origin
         # kinds out of every other file, so no file builds one to store or
         # compare as if it were the library's. The driver names them to
-        # forge an origin in a request, which the entry must overwrite, and
-        # the fuzz target to check each plan carries its entry's origin.
+        # forge an origin in a request, which the entry must overwrite, the
+        # life driver to give its records the origins a device give is
+        # placed by, and the fuzz target to check each plan carries its
+        # entry's origin.
         Chokepoints::Forbidden.new(
           name: 'dom-origin-constructors',
           rule: "only #{DOM_CORE}'s origin constructors build a domain's creation origin: no other file names " \
@@ -53,7 +58,9 @@ module Erx
           design: 'docs/design-system.md#the-domain-library',
           scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
           pattern: /\bERX_DOM_(?:REQUEST|CONFIGURED|PARTIAL_BOOT|SESSION)\b/,
-          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ].map { |path| Chokepoints::Site.new(glob: path) },
+          sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_LIFE_DRIVER, DOM_FUZZ].map do |path|
+            Chokepoints::Site.new(glob: path)
+          end,
           seed: { 'liberx/system/dom_apply.c' => "spec.origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, row };\n",
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "origin.kind = ERX_DOM_REQUEST;\n" }
         ),

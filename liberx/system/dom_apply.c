@@ -24,8 +24,6 @@
 #include "liberx/system/dom_apply.h"
 #include "liberx/system/dom_install.h"
 
-/* A domain's node name: its name, '@', and the host. */
-#define APPLY_NODE_MAX	(ERX_DOM_NAME_MAX + 1u + ERX_DOM_HOST_MAX)
 /* The system domain's identifier, its node's name before '@'. */
 #define SYSTEM_NAME	"system"
 /* A handle no table holds: what a step gets for an object no creation names. */
@@ -325,7 +323,7 @@ apply_install(apply_t *apply, const erx_dom_step_t *step)
 }
 
 /*
- * A node name into node (APPLY_NODE_MAX bytes): name, an identifier
+ * A node name into node (ERX_DOM_NODE_MAX bytes): name, an identifier
  * (planning checked a domain's), '@', and the library's host. False for
  * a name longer than ERX_DOM_NAME_MAX or a host longer than
  * ERX_DOM_HOST_MAX, which the caller set.
@@ -351,7 +349,7 @@ apply_bootinfo(apply_t *apply)
 	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
 	const erx_boot_words_t args = { spec->strings, spec->args_len };
 	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
-	char node[APPLY_NODE_MAX], system_node[APPLY_NODE_MAX];
+	char node[ERX_DOM_NODE_MAX], system_node[ERX_DOM_NODE_MAX];
 	erx_boot_inputs_t inputs = { 0 };
 	uint64_t addr;
 	int status;

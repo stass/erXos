@@ -708,6 +708,13 @@ erx_dom_plan_device_give(const erx_dom_view_t *view, uint32_t id,
 		return (ERX_EINVAL);
 	entry = &view->devices[index];
 	record = &view->device_records[index];
+	/*
+	 * Only to a domain of the configured row the manifest places the
+	 * device's unit on: not a requested or session domain, nor one of
+	 * another row.
+	 */
+	if (!erx_dom_from_row(&view->domains[draft.slot], entry->row))
+		return (ERX_EINVAL);
 	if (record->index != index || !life_entry_ok(entry) ||
 	    life_overlaps(view, index))
 		return (ERX_EINVAL);

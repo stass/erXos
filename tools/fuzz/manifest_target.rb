@@ -4,8 +4,10 @@
 
 require_relative 'manifest_seeds'
 
-# The system manifest's generated C reader.
+# The system manifest's generated C reader, and the domain library's boot view
+# over what it accepts.
 Erx::PackFuzz.declare_target(
-  sources: ['build/gen/liberx/generated/abi_reader.c'],
+  sources: ['build/gen/liberx/generated/abi_reader.c', 'liberx/system/dom_boot_view.c', 'liberx/system/dom_core.c',
+            'liberx/system/dom_life.c', 'liberx/erx_lane.c'],
   seeds: Erx::ManifestSeeds.all
 )

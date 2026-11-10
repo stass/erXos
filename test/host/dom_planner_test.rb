@@ -203,6 +203,42 @@ class DomPlannerTest < Minitest::Test
     end
   end
 
+  # The boot page's strings hold both node names beside a row's arguments and
+  # environment, and a -erx given record per device the row holds, so a row whose
+  # own words fit the strings alone, as the Ruby check counts them, is refused at
+  # the view rather than at its creation. Words of 100 bytes with their NULs: 19
+  # leave less than the two node names' 256 bytes, and 17 leave room for those but
+  # not for the network transport's record once alpha holds its unit.
+  def test_a_row_that_leaves_no_room_for_what_the_library_adds_fails_the_build
+    holder = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    full = ->(source, count) { source.sub("domain alpha\n", "domain alpha\n  args \"#{(['a' * 99] * count).join(' ')}\"\n") }
+    [[@source, 1], [@source, 17], [holder, 1]].each do |source, count|
+      assert_equal 1, admit(full.call(source, count)).report.fetch('child_plan_instances')
+    end
+    [[@source, 19], [holder, 17]].each do |source, count|
+      error = assert_raises(Erx::Manifest::Invalid) { admit(full.call(source, count)) }
+      assert_equal [12, 'view'], [error.property, error.field], error.message
+      assert_match(/reserve/, error.message)
+    end
+  end
+
+  # The platform record's units, with the network transport moved into the block
+  # transport's register page: the view derives units from pages, so two units that
+  # share one are a split unit, whether one holder takes both or two do. No view is
+  # built from such a manifest, so no row is created from it and nothing is given.
+  def test_units_that_share_a_register_page_fail_the_build
+    platform = JSON.parse(JSON.generate(@context.platform))
+    block = platform.fetch('units').find { |unit| unit.fetch('key') == 'block' }.fetch('devices').first
+    platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices').first['base'] = block.fetch('base') - 0x200
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    two = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    [@source, two].each do |source|
+      error = assert_raises(Erx::Manifest::Invalid) { admit(source) }
+      assert_equal [12, 'view'], [error.property, error.field], error.message
+      assert_match(/share a register page/, error.message)
+    end
+  end
+
   def test_a_malformed_input_is_refused_by_the_helper
     manifest = admit(@source).bytes
     head = @codec.encode_layout('erx_image_manifest', ManifestContextFixture.image(@codec))

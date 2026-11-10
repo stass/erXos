@@ -1631,6 +1631,21 @@ it; git history is the record of completed work.
   bridge's windows, its MSIs and its requester id's stream
   ([design-system.md](docs/design-system.md#devices)), lands with the PCIe
   enumerator.
+* [Low] domain library, `liberx/system/dom_boot_view.c` and
+  `erx_dom_plan_device_give`: the catalogue has an entry per device, so a
+  unit of several devices that share a register page (the Raspberry Pi 4's
+  mini UART and auxiliary SPI controllers) cannot be given to a configured
+  domain: each entry's window covers the shared page and the give refuses
+  overlapping entries. Make the catalogue's entry the unit, its ranges the
+  union of its devices' pages and its lines theirs, before a board places
+  such a unit outside the system domain.
+* [Low] domain library, `dom_core.c` request planning: a requested
+  domain's args and env are checked against `ERX_BOOT_STRINGS_MAX` alone,
+  while its boot page also holds both node names, so a request that
+  leaves no room for them is planned and fails at `apply_bootinfo` after
+  its objects are made (the undo clears them). Hold requests to the boot
+  view's reserve (`boot_strings_fit` in `dom_boot_view.c`, both node names
+  at `ERX_DOM_NODE_MAX`) so the plan refuses them.
 * [Medium] domain library, `dom.h`: the apply phase's rules are not
   written down: who sets a connection's `closing`; that `labels` and
   `next_connection` advance only after a successful apply, and

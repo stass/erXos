@@ -455,7 +455,13 @@ violation fails the build with the property, the record and the field:
     root and the host planner both run on the packed manifest's bytes,
     with each archive entry judged from the bytes it starts with; so
     every principal passes `erx_dom_principal_check` at build time, and
-    the boot plans against exactly the view the check proved. The
+    the boot plans against exactly the view the check proved. The view
+    also holds the device catalogue and its placement
+    ([Devices](#devices), Units), and admits a configured row only when
+    its arguments and environment leave room in its boot page's strings
+    for what the library adds there
+    ([Boot information](design-stopgap.md#boot-information)), so a
+    placement or a row the boot would refuse fails the build. The
     production build always runs the planner; a check without one plans
     nothing for an empty set of children, and fails closed for a
     nonempty set.
@@ -2225,7 +2231,14 @@ the library deletes the window's and the line's objects and keeps the
 contiguous memory for the restarted holder, as this section says of any
 unconfined device. QEMU `virt`, as the harness starts it, has no IOMMU
 and attaches its devices over virtio-mmio, so every DMA device on the
-stopgap is unconfined. The development manifest still gives each device
+stopgap is unconfined. The catalogue is the manifest's device table:
+the domain library's boot view builds an entry per device, placed on its
+unit's holder, derives the units from the devices' register pages, and
+refuses the whole view when devices that share a page are in two unit
+rows, or when a device is marked confined, since the stopgap lists no
+IOMMU stream; the manifest check builds the same view, so such a
+manifest fails the build, and no domain is created from a placement the
+view did not admit. The development manifest still gives each device
 to its own domain once drivers move out of the system domain: the block
 device to the storage domain, which runs the block driver and the file
 systems, littlefs as its sub-space port; the network device to the network
@@ -2381,9 +2394,15 @@ controller's are ([design-platforms.md](design-platforms.md#pcie-bridges)).
 The manifest gives devices by unit, and the check proves each unit given
 whole to one domain (property 1). At boot the device service computes the
 units from the catalogue's register ranges and the kernel's listing, so
-no list of units is trusted unchecked, and gives a unit that the manifest
-splits across domains to no domain, with a diagnostic; a unit goes to one
-domain, whose drivers reset its devices together.
+no list of units is trusted unchecked, and gives a unit that the machine's
+listing splits across the manifest's domains to no domain, with a
+diagnostic; a manifest whose own units split a page never gets that far,
+since the domain library's boot view, which the manifest check runs too,
+refuses it whole. A unit goes to one
+domain, whose drivers reset its devices together. The domain library
+holds the placement as well: `erx_dom_device_give` gives a device only to
+a domain of the configured row the manifest places its unit on, never to
+a requested or session domain or to another row's.
 
 **Partition windows.** The block driver serves each partition of its
 medium as a window ([design-storage.md](design-storage.md#data-model)).

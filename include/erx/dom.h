@@ -178,7 +178,8 @@ typedef struct erx_dom_connection {
  * that names no living domain holds nothing.
  */
 typedef struct erx_dom_device {
-	uint32_t	index;		/* in the root resource's device list */
+	uint32_t	index;		/* its catalogue entry's: the manifest's
+					 * device row */
 	uint32_t	holder;		/* the living domain it is given to; 0 for none */
 	erx_cap_t	resource;	/* the carved resource */
 	erx_cap_t	windows[ERX_DEVICE_RANGES_MAX];	/* its register windows */
@@ -196,10 +197,19 @@ typedef struct erx_dom_range {
 } erx_dom_range_t;
 
 /*
- * One entry of the device service's catalogue, from the root resource's
- * device list: what erx_dom_device_give creates for the device.
+ * One entry of the device service's catalogue: what erx_dom_device_give
+ * creates for the device, and where the manifest places it. The boot view
+ * builds one per row of the manifest's device table, in its order, so an
+ * entry's index is its device row, which a give's carve of the root
+ * resource names the device by; its
+ * range the pages its register window touches, and admits only a
+ * placement that gives each unit whole to one holder (erx_dom_view_build).
  */
 typedef struct erx_dom_device_entry {
+	uint32_t	unit;		/* the manifest's unit row it belongs to */
+	uint32_t	row;		/* the configured row its unit is placed
+					 * on; ERX_MF_NONE for the system domain */
+	uint32_t	role;		/* ERX_MF_DEVICE_ROLE_* */
 	uint32_t	nranges;	/* at most ERX_DEVICE_RANGES_MAX */
 	uint32_t	nlines;		/* at most ERX_DEVICE_IRQS_MAX */
 	erx_dom_range_t	ranges[ERX_DEVICE_RANGES_MAX];	/* its register ranges */
@@ -561,6 +571,12 @@ erx_status_t	erx_dom_plan_configured(const erx_dom_view_t *, uint32_t id,
 erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_plan_t *plan);
 /*
+ * Whether dom was created from configured-domain row `row`, so its origin
+ * is ERX_DOM_CONFIGURED of that row. False for every other origin, and so
+ * for ERX_MF_NONE, which names the system domain and no configured row.
+ */
+bool		erx_dom_from_row(const erx_dom_t *dom, uint32_t row);
+/*
  * erx_dom_plan_session plans a session of session template `template` of
  * the view, under domain id `id`, domain pid `domain_pid` and name_len
  * bytes of `name`, the name the domain service chose; only the domain
@@ -866,7 +882,8 @@ typedef struct erx_dom_device_plan {
 
 /*
  * Plans erx_dom_device_give(id, index). ERX_OK; ERX_EINVAL for a domain
- * with no record or outside built and running, an index past the
+ * with no record or outside built and running, a domain that is not the
+ * configured row the entry's unit is placed on, an index past the
  * catalogue or a record whose index is not its own, an entry with more
  * ranges or lines than the ABI allows or a
  * range that is empty, unaligned, wraps, or overlaps another entry's;

@@ -586,6 +586,12 @@ dom_spec_request(const erx_dom_view_t *view,
 	return (ERX_OK);
 }
 
+bool
+erx_dom_from_row(const erx_dom_t *dom, uint32_t row)
+{
+	return (dom->origin.kind == ERX_DOM_CONFIGURED && dom->origin.record == row);
+}
+
 /*
  * The configured constructor: everything from the checked manifest row,
  * whose name, arguments and environment fit the spec (boot_configured holds

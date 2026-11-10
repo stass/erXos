@@ -315,6 +315,7 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 			nmade += give.steps[index].kind != ERX_DOM_STEP_INSTALL;
 		if (erx_dom_device_check(&give) != ERX_OK || give.index >= 2 ||
 		    give.slot >= 3 || doms[give.slot].id != in->a ||
+		    !erx_dom_from_row(&doms[give.slot], devs[give.index].row) ||
 		    (doms[give.slot].state != ERX_DOM_BUILT &&
 		    doms[give.slot].state != ERX_DOM_RUNNING) ||
 		    erx_dom_device_undo(&give, give.nsteps, made) != nmade)
@@ -450,6 +451,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		.partial = { .runtime = 0, .memory = FUZZ_MIB, .outer = 64 * 1024,
 		    .grant = fuzz_grant(UINT64_C(1000000), 0x1) },
 		.doms = { { .id = 5, .state = ERX_DOM_RUNNING, .budget = { 51 },
+		    .origin = { ERX_DOM_CONFIGURED, 0 },
 		    .outer = { 52 }, .connections = 2, .labels = 1 },
 		    { .id = 6, .principal = 1, .state = ERX_DOM_ENDED, .budget = { 61 },
 		    .outer = { 62 }, .connections = 2, .labels = 1 },

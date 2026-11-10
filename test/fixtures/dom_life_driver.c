@@ -36,7 +36,11 @@ static erx_dom_principal_t principals[1];
 /* The system domain's space, as records name it; 77 is a domain's own. */
 #define SYSTEM_SPACE	UINT64_C(4000)
 static erx_dom_view_t view;
-/* The catalogue: 0 an unconfined virtio-mmio transport, 1 a confined device. */
+/*
+ * The catalogue: 0 an unconfined virtio-mmio transport placed on configured
+ * row 0, which domain 5 was created from, and 1 a confined device placed on
+ * row 1, domain 6's.
+ */
 #define NDEVICES	3
 static erx_dom_device_entry_t devices[NDEVICES];
 static erx_dom_device_t device_records[NDEVICES];
@@ -63,9 +67,11 @@ reset_view(void)
 	memset(connections, 0, sizeof(connections));
 	memset(remains, 0, sizeof(remains));
 	domains[0] = (erx_dom_t){ .id = 5, .state = ERX_DOM_RUNNING,
+	    .origin = { ERX_DOM_CONFIGURED, 0 },
 	    .budget = { 501 }, .outer = { 502 }, .connections = 2,
 	    .labels = ERX_DOM_SYSTEM_LABEL };
 	domains[1] = (erx_dom_t){ .id = 6, .state = ERX_DOM_BUILT,
+	    .origin = { ERX_DOM_CONFIGURED, 1 },
 	    .budget = { 601 }, .outer = { 602 }, .connections = 1, .labels = 3 };
 	principals[0] = (erx_dom_principal_t){ .number = 1, .domains = 1, .carved = 12288 };
 	domains[2] = (erx_dom_t){ .id = 7, .principal = 1, .state = ERX_DOM_ENDED,
@@ -89,7 +95,7 @@ reset_view(void)
 	    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
 	devices[1] = (erx_dom_device_entry_t){ .nranges = 2, .nlines = 2,
 	    .ranges = { { 0x10000000, 0x4000 }, { 0x10010000, 0x1000 } },
-	    .confined = true };
+	    .confined = true, .row = 1 };
 	for (uint32_t index = 0; index < NDEVICES; index++)
 		device_records[index].index = index;
 }
@@ -580,6 +586,16 @@ device_cases(void)
 	device_records[0].holder = 9;
 	device_case("dev_holder_retired", 5, 0);
 
+	/* Placement: only a domain of the row the manifest places the unit on. */
+	reset_view();
+	device_case("dev_wrong_holder", 6, 0);
+	devices[0].row = ERX_MF_NONE;
+	device_case("dev_system_device", 5, 0);
+	domains[0].origin = (erx_dom_origin_t){ ERX_DOM_REQUEST, ERX_MF_NONE };
+	device_case("dev_requested_domain", 5, 0);
+	devices[0].row = 0;
+	device_case("dev_requested_domain_row", 5, 0);
+
 	reset_view();
 	view.ndevices = 3;
 	devices[2] = (erx_dom_device_entry_t){ .nranges = 1,
@@ -639,6 +655,7 @@ device_explore(void)
 
 	for (uint32_t index = 0; index < 2; index++) {
 		reset_view();
+		devices[1].row = 0;
 		devices[1].nranges = ERX_DEVICE_RANGES_MAX;
 		devices[1].nlines = ERX_DEVICE_IRQS_MAX;
 		for (uint32_t range = 0; range < ERX_DEVICE_RANGES_MAX; range++)

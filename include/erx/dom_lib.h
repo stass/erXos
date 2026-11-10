@@ -109,6 +109,8 @@ typedef struct erx_dom_lib {
 } erx_dom_lib_t;
 
 #define ERX_DOM_HOST_MAX	64u
+/* A node name, name@host, as a boot page holds it, without a NUL. */
+#define ERX_DOM_NODE_MAX	(ERX_DOM_NAME_MAX + 1u + ERX_DOM_HOST_MAX)
 
 /*
  * What erx_dom_create returns: the domain's id and the system domain's values
@@ -238,6 +240,7 @@ typedef struct erx_dom_boot_sizes {
 	uint32_t	nconfigured;	/* its configured-domain rows */
 	uint32_t	ntemplates;	/* its session templates */
 	uint32_t	nfiles;		/* the boot image's entries */
+	uint32_t	ndevices;	/* the manifest's device rows */
 } erx_dom_boot_sizes_t;
 
 typedef struct erx_dom_boot_tables {
@@ -252,6 +255,8 @@ typedef struct erx_dom_boot_tables {
 	erx_dom_configured_t	*configured;	/* nconfigured */
 	erx_dom_template_t	*templates;	/* ntemplates */
 	erx_dom_file_t		*files;		/* nfiles */
+	erx_dom_device_entry_t	*devices;	/* ndevices: the catalogue */
+	erx_dom_device_t	*device_records; /* ndevices, entry for entry */
 } erx_dom_boot_tables_t;
 
 /* The sizes of the view the manifest and a boot image of nfiles entries describe. */
@@ -278,8 +283,10 @@ void		erx_dom_boot_image(erx_dom_file_t *file, const uint8_t *head, size_t head_
  * Builds lib's view from the checked manifest into tables, which
  * erx_dom_boot_layout placed for erx_dom_boot_sizes and whose files hold
  * nfiles judged entries: the header's limits, the principals numbered from 1
- * in row order and each admitted by erx_dom_principal_check, the configured
- * rows, the files, and the host name. Pure: it makes no call. NULL, or the
+ * in row order and each admitted by erx_dom_principal_check, the device
+ * catalogue and its placement, the configured rows, each with room in its
+ * boot page's strings for what the library adds, the files, and the host
+ * name. Pure: it makes no call. NULL, or the
  * reason the manifest cannot give a view, with lib's view left partial.
  */
 const char	*erx_dom_view_build(erx_dom_lib_t *, const erx_manifest_view_t *,

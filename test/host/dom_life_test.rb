@@ -109,7 +109,9 @@ DEVICES = {
   'dev_index_past' => EINVAL, 'dev_overlap' => EINVAL, 'dev_overlap_wrapping' => EINVAL,
   'dev_ranges_over' => EINVAL, 'dev_lines_over' => EINVAL, 'dev_range_unaligned' => EINVAL,
   'dev_range_empty' => EINVAL, 'dev_range_wraps' => EINVAL, 'dev_confined_memory' => EINVAL,
-  'dev_memory_unaligned' => EINVAL
+  'dev_memory_unaligned' => EINVAL,
+  'dev_wrong_holder' => EINVAL, 'dev_system_device' => EINVAL, 'dev_requested_domain' => EINVAL,
+  'dev_requested_domain_row' => EINVAL
 }.freeze
 
   SEEDED = %w[foreign_gate creation_object extra_right peer_side_writable creation_space writer_pays
@@ -169,6 +171,9 @@ DEVICES = {
       ["!life_entry_ok(entry) ||\n\t    life_overlaps(view, index))", "!life_entry_ok(entry) ||\n\t    (life_overlaps(view, index) && false))", 'dev dev_overlap '],
     'kept memory made again' => ['record->memory.raw != ERX_CAP_NULL;', 'record->memory.raw == ERX_CAP_NULL;',
                                  'dev dev_unconfined_kept '],
+    'a give skips the assigned holder' =>
+      ['if (!erx_dom_from_row(&view->domains[draft.slot], entry->row))',
+       'if (false)', 'dev dev_wrong_holder '],
     'a device install ignores its row' =>
       ["life_granted(step));\n\tcase ERX_DOM_STEP_CARVE:", "true);\n\tcase ERX_DOM_STEP_CARVE:", 'seeded dev_window_phys ']
   }.freeze

@@ -289,7 +289,13 @@ function and maps it read-only.
 
 **A domain task's page** is the domain library's, built by the same function from what
 [Creating a domain](design-system.md#creating-a-domain) gives it, mapped read-only, and passed to the
-task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. The domain runtime image's
+task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. Its strings hold the
+domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`: a record
+per device it holds ([Device records](#device-records)), and `-erx boot VALUE SLOT` when it holds a block device. The
+domain library's boot view admits a configured row or a session template only when its own words leave room within
+`ERX_BOOT_STRINGS_MAX` for all of those at their longest (`ERX_DOM_NODE_MAX` per node name, and the record sizes of
+`include/erx/boot_words.h`), and refuses the manifest with a reason naming that reserve otherwise, so a creation never
+fails on its strings and the manifest check refuses such a row at build time. The domain runtime image's
 entry, `domain_entry.c`, copies the page into its own memory and reads the copy with the same reader
 before musl's start runs, so every later read sees the page it checked; a page the reader refuses, or an argument that names no page, ends the task with the reason on the
 console and the status `ERX_FIASCO_TASK_STATUS_BOOT_PAGE` (-4), which the library's fault gate

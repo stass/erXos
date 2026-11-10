@@ -68,7 +68,7 @@ _Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 3 * C
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_DEVICE_WORDS_MAX];
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
 static const char boot_prefix[] = "-erx\0boot";
-static char boot_words[sizeof(boot_prefix) + sizeof("unknown") + sizeof("none")];
+static char boot_words[ERX_BOOT_PAIR_WORDS_MAX];
 /*
  * -erx build ID: the boot image's build identifier, its bytes read as one big-endian number in
  * decimal and its NUL. init reads an -erx word's values as terms, so a value must scan as one,

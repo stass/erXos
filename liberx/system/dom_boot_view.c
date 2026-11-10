@@ -23,6 +23,13 @@
  * profile, and the rows stay in the manifest's table order, since a
  * record's origin names its row there. The files are judged one entry at a
  * time by erx_dom_boot_image from the bytes that start the entry.
+ *
+ * The device catalogue is the manifest's device table, entry for entry,
+ * each entry placed on its unit's holder; the view is refused unless the
+ * placement gives every unit whole to one holder (boot_devices), so
+ * nothing builds a domain from a placement the view did not admit. Each
+ * configured row and session template must leave room in its boot page's
+ * strings for what the library adds to its own words (boot_strings_fit).
  */
 
 #include <stdbool.h>
@@ -32,6 +39,7 @@
 
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
+#include "erx/boot_words.h"
 #include "erx/dom.h"
 #include "erx/dom_lib.h"
 
@@ -45,6 +53,12 @@ static bool	boot_place(size_t *, size_t, size_t, uint32_t, size_t *);
 static bool	boot_limits(const erx_manifest_view_t *, uint32_t, erx_runtime_limits_t *);
 static const char *boot_principals(erx_dom_lib_t *, const erx_manifest_view_t *,
 		    const erx_dom_boot_tables_t *);
+static bool	boot_pages(uint64_t, uint64_t, erx_dom_range_t *);
+static bool	boot_pages_meet(const erx_dom_device_entry_t *, const erx_dom_device_entry_t *);
+static const char *boot_units(const erx_manifest_view_t *, erx_dom_device_entry_t *);
+static const char *boot_devices(erx_dom_view_t *, const erx_manifest_view_t *,
+		    erx_dom_device_entry_t *, erx_dom_device_t *);
+static bool	boot_strings_fit(uint64_t, uint64_t, uint32_t, bool);
 static const char *boot_places(erx_dom_configured_t *, uint32_t, const erx_manifest_view_t *);
 static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_configured_t *);
@@ -58,7 +72,8 @@ erx_dom_view_sizes(const erx_manifest_view_t *manifest, uint32_t nfiles)
 	    .max_connections = manifest->header.max_connections,
 	    .nprincipals = manifest->header.principals.count,
 	    .nconfigured = manifest->header.domains.count,
-	    .ntemplates = manifest->header.sessions.count, .nfiles = nfiles });
+	    .ntemplates = manifest->header.sessions.count, .nfiles = nfiles,
+	    .ndevices = manifest->header.devices.count });
 }
 
 /*
@@ -96,7 +111,9 @@ erx_dom_boot_layout(const erx_dom_boot_sizes_t *sizes, uintptr_t base, erx_dom_b
 	    !BOOT_PLACE(held, sizes->nprincipals) ||
 	    !BOOT_PLACE(configured, sizes->nconfigured) ||
 	    !BOOT_PLACE(templates, sizes->ntemplates) ||
-	    !BOOT_PLACE(files, sizes->nfiles))
+	    !BOOT_PLACE(files, sizes->nfiles) ||
+	    !BOOT_PLACE(devices, sizes->ndevices) ||
+	    !BOOT_PLACE(device_records, sizes->ndevices))
 		return (false);
 #undef BOOT_PLACE
 	*bytes = used;
@@ -176,6 +193,149 @@ boot_principals(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, const e
 }
 
 /*
+ * The pages a device's register window touches, from its base's page to its
+ * last byte's. False for an empty window or one that runs past the address
+ * space, so the pages' end never wraps either.
+ */
+static bool
+boot_pages(uint64_t base, uint64_t size, erx_dom_range_t *pages)
+{
+	const uint64_t mask = ~(uint64_t)(ERX_PAGE_SIZE - 1);
+	uint64_t end;
+
+	if (size == 0 || __builtin_add_overflow(base, size, &end) ||
+	    __builtin_add_overflow(end, ERX_PAGE_SIZE - 1, &end))
+		return (false);
+	*pages = (erx_dom_range_t){ base & mask, (end & mask) - (base & mask) };
+	return (true);
+}
+
+/* Whether two entries' register pages share a page; an entry with no window shares none. */
+static bool
+boot_pages_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b)
+{
+	const erx_dom_range_t *x = &a->ranges[0], *y = &b->ranges[0];
+
+	return (a->nranges != 0 && b->nranges != 0 &&
+	    x->base < y->base + y->size && y->base < x->base + x->size);
+}
+
+/*
+ * Each entry's unit and holder, from the unit rows' spans of the device
+ * table. The reader proved the spans a partition of the table; a span off
+ * a row boundary, past the table, or over a device another span holds is
+ * refused all the same, so every entry has exactly one unit.
+ */
+static const char *
+boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
+{
+	const erx_mf_span_t table = manifest->header.devices;
+	erx_mf_unit_t unit;
+	uint32_t first;
+
+	for (uint32_t index = 0; index < table.count; index++)
+		entries[index] = (erx_dom_device_entry_t){ .unit = UINT32_MAX };
+	for (uint32_t at = 0; at < manifest->header.units.count; at++) {
+		if (!erx_manifest_units_at(manifest, at, &unit) || unit.devices.offset < table.offset ||
+		    (unit.devices.offset - table.offset) % ERX_MF_DEVICE_SIZE != 0)
+			return ("manifest: a unit's devices are not a span of the device table");
+		first = (unit.devices.offset - table.offset) / ERX_MF_DEVICE_SIZE;
+		if (first > table.count || unit.devices.count > table.count - first)
+			return ("manifest: a unit's devices are not a span of the device table");
+		for (uint32_t index = first; index < first + unit.devices.count; index++) {
+			if (entries[index].unit != UINT32_MAX)
+				return ("manifest: a device is in two units");
+			entries[index].unit = at;
+			entries[index].row = unit.holder;
+		}
+	}
+	for (uint32_t index = 0; index < table.count; index++)
+		if (entries[index].unit == UINT32_MAX)
+			return ("manifest: a device is in no unit");
+	return (NULL);
+}
+
+/*
+ * The device catalogue and its placement (docs/design-system.md,
+ * "Devices"): an entry per device row, in its unit and on its unit's
+ * holder, and a record per entry with no holder and no object yet. A
+ * device-tree device has its register window, as whole pages, and its
+ * line; a PCIe function has neither, since configuration space gives
+ * them. Units are derived from register pages, since a page has at most
+ * one MMIO object: devices whose pages meet are one unit, so the manifest
+ * must have them in one unit row, which has one holder. A unit split
+ * across two rows, two holders on one page included, refuses the view.
+ * So does a device marked confined: the stopgap's catalogue lists no IOMMU
+ * stream, and a confined device is given only on one; and DMA memory that is
+ * not whole pages, which no give can make.
+ */
+static const char *
+boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries,
+    erx_dom_device_t *records)
+{
+	const uint32_t count = manifest->header.devices.count;
+	erx_mf_device_t device;
+	erx_dom_device_entry_t *entry;
+	const char *reason;
+
+	view->devices = entries;
+	view->device_records = records;
+	view->ndevices = 0;
+	if ((reason = boot_units(manifest, entries)) != NULL)
+		return (reason);
+	for (uint32_t index = 0; index < count; index++) {
+		entry = &entries[index];
+		if (!erx_manifest_devices_at(manifest, index, &device))
+			return ("manifest: a device row the reader cannot read");
+		if (device.dma == ERX_MF_DMA_CONFINED)
+			return ("manifest: a device marked confined has no IOMMU stream");
+		entry->role = device.role;
+		entry->memory = device.dma == ERX_MF_DMA_UNCONFINED ? device.dma_memory : 0;
+		if (entry->memory % ERX_PAGE_SIZE != 0)
+			return ("manifest: a device's DMA memory is not whole pages");
+		if (device.selector == ERX_MF_SELECTOR_DT) {
+			if (!boot_pages(device.base, device.size, &entry->ranges[0]))
+				return ("manifest: a device's register window is empty or wraps");
+			entry->nranges = 1;
+			entry->nlines = 1;
+		}
+		records[index] = (erx_dom_device_t){ .index = index, .resource = { ERX_CAP_NULL },
+		    .dma = { ERX_CAP_NULL }, .memory = { ERX_CAP_NULL } };
+		for (uint32_t at = 0; at < ERX_DEVICE_RANGES_MAX; at++)
+			records[index].windows[at] = (erx_cap_t){ ERX_CAP_NULL };
+		for (uint32_t at = 0; at < ERX_DEVICE_IRQS_MAX; at++)
+			records[index].irqs[at] = (erx_cap_t){ ERX_CAP_NULL };
+	}
+	for (uint32_t a = 0; a < count; a++)
+		for (uint32_t b = a + 1; b < count; b++)
+			if (entries[a].unit != entries[b].unit && boot_pages_meet(&entries[a], &entries[b]))
+				return ("manifest: devices that share a register page are in two units");
+	view->ndevices = count;
+	return (NULL);
+}
+
+/*
+ * Whether a domain's boot page's strings hold its arguments and
+ * environment beside what the library writes there (docs/design-stopgap.md,
+ * "Boot information"): its own node name and the system node's, a
+ * -erx given record per device it holds, and -erx boot when it holds a
+ * block device. The reserve takes each at its longest, so a row the view
+ * admits never fails its creation for its strings: a node name at
+ * ERX_DOM_NODE_MAX, though the system node's is at most 71 bytes, and the
+ * difference also covers the NUL the page adds to args or env that lack a
+ * final one. No sum can wrap: each term is at most a u32 times a small
+ * constant.
+ */
+static bool
+boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t held, bool block)
+{
+	const uint64_t reserve = 2u * (uint64_t)ERX_DOM_NODE_MAX + (uint64_t)held * ERX_BOOT_GIVEN_WORDS_MAX +
+	    (block ? ERX_BOOT_PAIR_WORDS_MAX : 0);
+
+	return (args_len + env_len + reserve <= ERX_BOOT_STRINGS_MAX);
+}
+
+/*
  * Each row's place in the boot order, which the check computed (property 10)
  * and the packer wrote: every configured row exactly once, so the domain
  * service walks the rows in that order by place.
@@ -196,7 +356,11 @@ boot_places(erx_dom_configured_t *configured, uint32_t nconfigured, const erx_ma
 	return (NULL);
 }
 
-/* Each configured-domain row, its limits resolved from its limits record. */
+/*
+ * Each configured-domain row, its limits resolved from its limits record and
+ * its strings judged against the devices the catalogue places on it, so
+ * it reads view->devices, which boot_devices builds first.
+ */
 static const char *
 boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_configured_t *configured)
 {
@@ -204,6 +368,8 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 	erx_mf_limits_t profile;
 	erx_dom_configured_t *row;
 	const char *strings;
+	uint32_t held;
+	bool block;
 
 	view->configured = configured;
 	view->nconfigured = 0;
@@ -223,8 +389,17 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 			return ("manifest: a configured domain names no limits record");
 		if (domain.name.length == 0 || domain.name.length > ERX_DOM_NAME_MAX)
 			return ("manifest: a configured domain's name is not 1 to 63 bytes");
-		if ((uint64_t)domain.args.length + domain.env.length > ERX_BOOT_STRINGS_MAX)
-			return ("manifest: a configured domain's arguments and environment exceed the boot page's strings");
+		held = 0;
+		block = false;
+		for (uint32_t device = 0; device < view->ndevices; device++) {
+			if (view->devices[device].row != index)
+				continue;
+			held++;
+			block = block || view->devices[device].role == ERX_MF_DEVICE_ROLE_BLOCK;
+		}
+		if (!boot_strings_fit(domain.args.length, domain.env.length, held, block))
+			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
+			    "no reserve for its node names and device records");
 		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
 		strings = (const char *)manifest->bytes + manifest->header.strings.offset;
 		row->name = strings + domain.name.offset;
@@ -270,8 +445,9 @@ boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_do
 		principal = session.principal + 1;
 		if (index > 0 && principal <= templates[index - 1].principal)
 			return ("manifest: the session templates are not one per principal in principal order");
-		if ((uint64_t)session.args.length + session.env.length > ERX_BOOT_STRINGS_MAX)
-			return ("manifest: a session template's arguments and environment exceed the boot page's strings");
+		if (!boot_strings_fit(session.args.length, session.env.length, 0, false))
+			return ("manifest: a session template's arguments and environment leave the boot page's strings "
+			    "no reserve for its node names");
 		templates[index] = (erx_dom_template_t){ .principal = principal,
 		    .flags = (profile.flags & ERX_MF_LIMITS_SPACES) != 0 ? ERX_DOM_SPACES : 0,
 		    .memory = profile.memory, .outer = profile.outer, .grant = profile.grant,
@@ -320,6 +496,7 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 	lib->remains_held = tables->remains_held;
 	lib->held.principals = tables->held;
 	if ((reason = boot_principals(lib, manifest, tables)) != NULL ||
+	    (reason = boot_devices(&lib->view, manifest, tables->devices, tables->device_records)) != NULL ||
 	    (reason = boot_configured(&lib->view, manifest, tables->configured)) != NULL ||
 	    (reason = boot_templates(&lib->view, manifest, tables->templates)) != NULL)
 		return (reason);

@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include "erx/abi.h"
+#include "erx/boot_words.h"
 #include "liberx/backend/core/boot_info.h"
 
 /*
@@ -40,8 +41,7 @@ typedef struct erx_boot_console {
  * command line.
  */
 #define ERX_BOOT_DEVICES_MAX	8
-/* -erx device, two names of at most 15 bytes, four numbers of at most 20 digits, each word with its NUL. */
-#define ERX_BOOT_DEVICE_WORDS_MAX	(sizeof("-erx") + sizeof("device") + 2 * 16 + 4 * 21)
+/* Each record's words fit ERX_BOOT_DEVICE_WORDS_MAX (erx/boot_words.h). */
 
 typedef struct erx_boot_device {
 	const char	*role;		/* the record's role word: "block" or "hostlink" */
