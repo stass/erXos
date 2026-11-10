@@ -162,8 +162,12 @@ its own.
 Sending: `gen_tcp:send/2` appends a binary to the connection's send
 buffer, a queue of binaries (`erx_tcp_sndbuf`). `erx_tcp_output` decides
 one segment or run per pass of its `again` loop by the run rule of
-[Output makes runs](#output-makes-runs) and commits it, copying the
-control block in `commit/6`, `after_send/3` and `done/2`.
+[Output makes runs](#output-makes-runs), a segment whose header is a
+run's going as a run of one, and commits it, copying the control block in
+`commit/7`, `after_send/3` and `done/2`. A run's payload is the range
+`erx_tcp_sndbuf:range/4` gives in at most 64 binaries, so a run of
+several frames ends where they end, and a segment of more than 64
+binaries is no run.
 `erx_net_frame:tcp/4` makes a run a `#run{}` over the connection's
 cached template, which the frame layer cuts with `cut/1` for a transport
 that finishes nothing and hands whole to one that does; a segment that is
@@ -171,9 +175,7 @@ not a run is encoded as before (`erx_tcp_wire:encode/4`, `add_options/1`,
 the IP and link headers, the checksum delayed when the transport finishes
 it). The tap's NIF cuts a run with `erx_tcp_cut.c` as it writes it, one
 `writev` a frame of its headers and its payload slice, so a run costs
-Erlang one call for each 64 of its frames; the NIF answers `pieces` for a
-run whose payload lies in more than 64 binaries, which the tap then
-sends frame by frame as `cut/1` cuts it. The send log inserts one range per
+Erlang one call for each 64 of its frames. The send log inserts one range per
 run. The step's frames go to the driver in one `{transmit, Frames}`
 message, and the driver joins every `{transmit, ...}` waiting in its
 mailbox to its backlog and hands each frame to its transport. The tap
@@ -467,8 +469,9 @@ A segment that is not a run of several frames is a run of one whenever
 its header is a run's (conditions 1 and 3 to 6), retransmissions
 included, so no steady segment is encoded in Erlang. The others, a SYN or
 SYN-ACK with its options, a RST, a segment reporting SACK blocks, a
-segment with urgent data, a probe and an IPv4 segment without
-don't-fragment, are encoded by `erx_tcp_wire` as per-segment output
+segment with urgent data, a probe, an IPv4 segment without
+don't-fragment and a segment whose payload lies in more than 64 binaries
+of the send buffer, are encoded by `erx_tcp_wire` as per-segment output
 encodes every segment, with the delayed checksum of the checksum
 design.
 

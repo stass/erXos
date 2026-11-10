@@ -500,6 +500,19 @@ finished(Packets) ->
                      (Packet) -> [iolist_to_binary(Packet)]
                   end, Packets).
 
+%% A run over more than RUN_PIECES binaries goes as its segments, which the C that cuts a run
+%% would refuse; one over exactly RUN_PIECES binaries is a run.
+run_over_the_piece_bound_goes_as_segments_test() ->
+    Path0 = path(v4("8.8.8.8"), #{}),
+    #{iface := If} = Path0,
+    Path = Path0#{iface := If#{finish := copy}},
+    {Header, Marks, _} = segment([], 0, true),
+    Run = fun(Pieces) -> {Header, Marks#{seg => 100}, lists:duplicate(Pieces, <<"abcd">>)} end,
+    {ok, [#run{}], _} = erx_net_frame:tcp(Path, [Run(?RUN_PIECES)], gen()),
+    {ok, Over, _} = erx_net_frame:tcp(Path, [Run(?RUN_PIECES + 1)], gen()),
+    ?assertEqual(3, length(Over)),
+    ?assertNot(lists:any(fun(P) -> is_record(P, run) end, Over)).
+
 %% A run's tail cuts to the run's last frames, and the credit counts a run by its frames.
 run_tail_cuts_to_the_last_frames_test() ->
     rand:seed(exsss, {6, 2, 2}),

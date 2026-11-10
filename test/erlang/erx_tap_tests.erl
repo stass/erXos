@@ -250,8 +250,8 @@ run_frames_per_call_are_bounded_test() ->
         ?assertEqual([iolist_to_binary(F) || F <- erx_net_frame:cut(Run)], recv_frames(Far, 100))
     end).
 
-%% A run the cut refuses is badarg, one of more binaries than it takes is answered pieces,
-%% one whose first frame is over the MTU is dropped as too_long, and none writes a byte.
+%% A run the cut refuses is badarg, one of more than 64 binaries among them, one whose
+%% first frame is over the MTU is dropped as too_long, and none writes a byte.
 run_refusals_test() ->
     with_pair(fun(H, Far) ->
         Run = run(100, 450),
@@ -271,10 +271,10 @@ run_refusals_test() ->
                Run#run{payload = [binary:copy(<<"x">>, 65535 - 52 + 1)]},
                Run#run{payload = [<<"x">> | <<"y">>]},
                Run#run{payload = [<<"x">>, "y"]},
+               Run#run{payload = lists:duplicate(65, <<"x">>)},
                Run#run{ts = {1}},
                setelement(1, Run, csum)],
         [?assertError(badarg, erx_tap_nif:send(H, B)) || B <- Bad],
-        ?assertEqual(pieces, erx_tap_nif:send(H, Run#run{payload = lists:duplicate(65, <<"x">>)})),
         ?assertEqual({drop, too_long}, erx_tap_nif:send(H, run(?MTU, 2 * ?MTU))),
         ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
     end).
@@ -435,18 +435,15 @@ transport_receives_and_transmits_test() ->
         ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
     end).
 
-%% A run goes out as erx_net_frame:cut/1 cuts it: through the NIF's cut, or frame by frame
-%% when its payload is more binaries than the NIF takes. One whose full frame is over the
-%% MTU is dropped.
-transport_sends_a_run_frame_by_frame_test() ->
+%% A run goes out as erx_net_frame:cut/1 cuts it, through the NIF's cut. One whose full
+%% frame is over the MTU is dropped.
+transport_sends_a_run_as_the_reference_cuts_it_test() ->
     with_socket_pair(fun(Near, Far) ->
         {ok, _, T0} = erx_tap:init(#{fd => near_fd(Near), lladdr => ?LLADDR}),
-        Many = (run(100, 450))#run{payload = lists:duplicate(65, <<"many">>)},
-        [begin
-             ?assertMatch({ok, _}, erx_tap:transmit(Run, T0)),
-             [?assertEqual({ok, iolist_to_binary(F)}, socket:recv(Far, 0, ?WAIT_MS))
-              || F <- erx_net_frame:cut(Run)]
-         end || Run <- [run(100, 450), Many]],
+        Run = run(100, 450),
+        ?assertMatch({ok, _}, erx_tap:transmit(Run, T0)),
+        [?assertEqual({ok, iolist_to_binary(F)}, socket:recv(Far, 0, ?WAIT_MS))
+         || F <- erx_net_frame:cut(Run)],
         ?assertMatch({{drop, too_long}, _}, erx_tap:transmit(run(?MTU, 2 * ?MTU), T0)),
         ?assertEqual({error, timeout}, socket:recv(Far, 0, 100)),
         flush_more()

@@ -328,7 +328,12 @@ differential({Tcb, Ctx}) ->
     ?assertEqual({{Tcb, Ctx}, T2, Out2}, {{Tcb, Ctx}, T1, wire(Out1)}),
     %% A run's frames fill the credit as its segments would.
     ?assert(length(wire(Out1)) =< Ctx#tcp_ctx.credit),
-    length([run || {_, #{seg := _}, _} <- Out1]).
+    %% No run lies in more binaries than the cut walks (ERX_TCP_CUT_PIECES_MAX).
+    ?assertEqual([], [P || {_, #{seg := _}, P} <- Out1, length(P) > 64]),
+    length(several(Out1)).
+
+%% The runs of several frames among outgoing segments.
+several(Out) -> [run || {_, #{seg := Seg}, P} <- Out, iolist_size(P) > Seg].
 
 random_state() ->
     Mss = pick([536, 1000, 1448, 1460, 8960]),
@@ -345,11 +350,12 @@ random_state() ->
              0 -> est(Bytes);
              _ -> in_flight(Bytes, Sent)
          end,
-    %% Some buffers hold the data in several binaries, so frames cross binary boundaries.
-    Buf = case pick([one, many]) of
+    %% Some buffers hold the data in several binaries, so frames cross binary boundaries,
+    %% and some in binaries so small that 64 of them end a run or hold less than a segment.
+    Buf = case pick([one, many, tiny]) of
               one -> T0#tcb.sndbuf;
-              many -> lists:foldl(fun(B, Acc) -> erx_tcp_sndbuf:append(Acc, B) end,
-                                  erx_tcp_sndbuf:new(), pieces(Bytes))
+              many -> append_all(pieces(Bytes, 3000));
+              tiny -> append_all(pieces(Bytes, 40))
           end,
     #tcb{ccv = Ccv} = T0,
     T1 = T0#tcb{maxseg = Mss, ccv = Ccv#ccv{cwnd = rand:uniform(80000), maxseg = Mss},
@@ -372,11 +378,14 @@ random_state() ->
     {T2#tcb{sndbuf = Buf}, #tcp_ctx{now = ?T0, credit = rand:uniform(70) - 1,
                                     mtu = pick([1500, 9000]), route = Route}}.
 
-%% Bytes of "x" as binaries of random sizes.
-pieces(0) -> [];
-pieces(Bytes) ->
-    N = min(Bytes, rand:uniform(3000)),
-    [binary:copy(<<"x">>, N) | pieces(Bytes - N)].
+%% Bytes of "x" as binaries of random sizes up to Max.
+pieces(0, _Max) -> [];
+pieces(Bytes, Max) ->
+    N = min(Bytes, rand:uniform(Max)),
+    [binary:copy(<<"x">>, N) | pieces(Bytes - N, Max)].
+
+append_all(Bins) ->
+    lists:foldl(fun(B, Acc) -> erx_tcp_sndbuf:append(Acc, B) end, erx_tcp_sndbuf:new(), Bins).
 
 %% SACK fast recovery after the peer SACKed the upper half of what is in flight.
 recovering(#tcb{maxseg = Mss, ccv = Ccv} = T, Sent) ->
@@ -403,7 +412,7 @@ run_of_full_segments_test() ->
     ?assertEqual({11001, 11001}, {T1#tcb.snd_nxt, T1#tcb.snd_max}).
 
 %% A run is bounded by the credit, one unit a frame, and by IP_MAXPACKET with its headers;
-%% a window of less than two segments makes no run.
+%% a window of less than two segments makes no run of several frames.
 run_bounds_test() ->
     {_, [{_, #{seg := 1000}, P3} | _]} = erx_tcp_output:output(est(10000), ctx(3)),
     ?assertEqual(3000, iolist_size(P3)),
@@ -412,7 +421,7 @@ run_bounds_test() ->
     {_, [{_, #{seg := 1000}, P65} | _]} = erx_tcp_output:output(Big, ctx(100)),
     ?assertEqual(65000, iolist_size(P65)),
     {_, Two} = out((est(10000))#tcb{snd_wnd = 1999}),
-    ?assertEqual([], [run || {_, #{seg := _}, _} <- Two]).
+    ?assertEqual([], several(Two)).
 
 %% The FIN rides on the last frame of a run that sends the data's end (the per-segment
 %% wire, where FreeBSD sends it apart after a TSO burst, tcp_output.c:965-969).
@@ -424,7 +433,7 @@ run_ends_with_the_fin_test() ->
     ?assertEqual({sent, 4001}, T1#tcb.fin).
 
 %% During SACK recovery every pass asks the send log first (source/3), so a pass whose bytes
-%% follow snd_max sends no run: per-segment output turns to a hole once the new data passes
+%% follow snd_max sends no run of several frames: per-segment output turns to a hole once the new data passes
 %% the window's right edge over the pipe (NextSeg's rules 3 and 4).
 no_run_in_recovery_test() ->
     #tcb{ccv = Ccv} = T0 = in_flight(40000, 10000),
@@ -433,7 +442,79 @@ no_run_in_recovery_test() ->
                ccv = Ccv#ccv{cwnd = 12000, fast_recovery = true}},
     {_, Out} = out(T),
     ?assertEqual([11001, 12001, 1001, 2001, 3001, 4001, 5001], seqs(Out)),
-    ?assertEqual([], [run || {_, #{seg := _}, _} <- Out]).
+    ?assertEqual([], several(Out)).
+
+%% A run ends where its 64th binary does (ERX_TCP_CUT_PIECES_MAX): of the ten segments of
+%% 1,000 bytes the congestion window allows, in binaries of 100, a run takes the six whole
+%% segments that 64 binaries hold, and the next pass sends the other four.
+run_ends_at_its_64th_binary_test() ->
+    T = (est(0))#tcb{sndbuf = append_all(lists:duplicate(105, binary:copy(<<"y">>, 100)))},
+    {_, [{_, #{seg := 1000}, Run} | _] = Out} = out(T),
+    ?assertEqual({6000, 60}, {iolist_size(Run), length(Run)}),
+    ?assertEqual(lists:seq(1001, 10001, 1000), seqs(Out)),
+    ?assertEqual(binary:copy(<<"y">>, 10000), iolist_to_binary([P || {_, _, P} <- wire(Out)])).
+
+%% A segment of more than 64 binaries is no run, not even of one: the cut refuses it, so it
+%% is encoded as per-segment output encodes it.
+segment_of_more_than_64_binaries_is_no_run_test() ->
+    T = (est(0))#tcb{sndbuf = append_all(lists:duplicate(300, <<"z">>))},
+    {_, [{_, Marks, Payload}]} = out(T),
+    ?assertEqual({300, false}, {length(Payload), is_map_key(seg, Marks)}).
+
+%% A segment whose header is a run's goes as a run of one: a pure ACK, a short segment and a
+%% retransmission each carry the segment size; a SYN and an ACK reporting a D-SACK block do not
+%% (docs/design-network-fastpath.md, "Output makes runs").
+runs_of_one_test() ->
+    {_, [{_, #{seg := 1000}, []}]} = out((est(0))#tcb{ack_now = true}),
+    {_, [{_, #{seg := 1000}, Short}]} = out(est(300)),
+    ?assertEqual(300, iolist_size(Short)),
+    %% After a timeout rewinds snd_nxt, each segment sent again is a run of one.
+    {_, Again} = out((in_flight(2000, 2000))#tcb{snd_nxt = 1001}),
+    ?assertEqual([{1001, 1000, 1000}, {2001, 1000, 1000}],
+                 [{Seq, Seg, iolist_size(P)} || {#tcp{seq = Seq}, #{seg := Seg}, P} <- Again]),
+    {_, [{#tcp{flags = Syn}, SynMarks, _}]} = out((new())#tcb{state = syn_sent}),
+    ?assertEqual({?TH_SYN, false}, {Syn band ?TH_SYN, is_map_key(seg, SynMarks)}),
+    Sack = (est(0))#tcb{sack = on, ack_now = true,
+                        rcv_sack = erx_tcp_sack:arrived(erx_tcp_sack:new(), {4001, 5001}, 5001, [])},
+    {_, [{#tcp{opts = #tcp_opts{sacks = [_ | _]}}, SackMarks, []}]} = out(Sack),
+    ?assertNot(is_map_key(seg, SackMarks)).
+
+%% The bound is exact: a run reads at most 64 binaries of the send buffer, and keeps the whole
+%% frames in them. After N binaries of one byte and binaries of 1,000, they hold 64 - N of
+%% the large ones: 3 frames for N = 61, 2 for 62, 1 for 63, and for 64 not even one, so that
+%% segment is no run and goes in its 65 binaries as per-segment output sends it.
+run_bound_is_exact_test() ->
+    Out1 = fun(N) ->
+                   Bins = lists:duplicate(N, <<"o">>) ++ lists:duplicate(10, binary:copy(<<"b">>, 1000)),
+                   {_, [{_, Marks, Payload} | _]} = out((est(0))#tcb{sndbuf = append_all(Bins)}),
+                   {maps:get(seg, Marks, none), iolist_size(Payload), length(Payload)}
+           end,
+    ?assertEqual({1000, 3000, 64}, Out1(61)),
+    ?assertEqual({1000, 2000, 64}, Out1(62)),
+    ?assertEqual({1000, 1000, 64}, Out1(63)),
+    ?assertEqual({none, 1000, 65}, Out1(64)).
+
+%% The segments that are not a run's go as they are: with urgent data ahead and as a persist
+%% probe the header is no run's, and with an ECN state that changes, or a segment on an IPv4
+%% path that does not set don't-fragment (an MSS at or below tcp_minmss, 216), the marks say so.
+%% Where ECN stays as it was, a run of one carries the ECT codepoint.
+runs_of_one_irregular_test() ->
+    {_, [{#tcp{urp = Urp}, UrgentMarks, _}]} = out((est(300))#tcb{snd_up = 1001 + 100}),
+    ?assertNotEqual(0, Urp),
+    ?assertNot(is_map_key(seg, UrgentMarks)),
+    Probing = (est(3000))#tcb{snd_wnd = 0, force_data = true, send_timer = {persist, ?T0}, rxtshift = 1},
+    {_, [{_, ProbeMarks, Probe}]} = out(Probing),
+    ?assertEqual(1, iolist_size(Probe)),
+    ?assertNot(is_map_key(seg, ProbeMarks)),
+    Ecn = erx_tcp_ecn:input_syn_sent(?TH_ECE, off),
+    {_, [{_, #{ecn := IpEcn} = EcnMarks, _}]} = out((est(300))#tcb{ecn = Ecn}),
+    ?assertEqual({true, true}, {is_map_key(seg, EcnMarks), IpEcn =/= 0}),
+    {_, [{_, CwrMarks, _}]} = out((est(300))#tcb{ecn = erx_tcp_ecn:signal_cwr(Ecn)}),
+    ?assertNot(is_map_key(seg, CwrMarks)),
+    #tcb{ccv = Ccv} = Small = est(100),
+    {_, [{_, SmallMarks, Bytes}]} = out(Small#tcb{maxseg = 216, ccv = Ccv#ccv{maxseg = 216}}),
+    ?assertEqual(100, iolist_size(Bytes)),
+    ?assertEqual({false, false}, {maps:get(df, SmallMarks), is_map_key(seg, SmallMarks)}).
 
 %% segments/1 by hand: a run over three binaries cut at 1000 bytes, each frame's bytes, its
 %% sequence number across the wrap and its flags.

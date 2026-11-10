@@ -99,10 +99,10 @@ of more, or those before the first the device did not take, which the next call 
 itself. A run whose first frame is not taken is answered as a frame is, `{drop, too_long}`
 when its first frame, its longest, is over the MTU. A run the cut refuses, a template
 `erx_net_frame:template/2` does not make, a zero segment size, a field wider than the wire's,
-or more than 65,535 bytes with its IP and TCP headers, is `badarg`; one of more than 64
-binaries is answered `pieces`, with nothing written, for the transport to cut itself.
+more than 64 payload binaries, or more than 65,535 bytes with its IP and TCP headers, is
+`badarg`: output makes none (`erx_tcp_sndbuf:range/4`).
 """.
 -spec send(handle(), iodata() | erx_net_frame:delayed() | erx_net_frame:run()) ->
-    {ok, pos_integer()} | pieces | full | {drop, malformed | too_long | refused} | {error, term()}.
+    {ok, pos_integer()} | full | {drop, malformed | too_long | refused} | {error, term()}.
 send(_Handle, _Frame) ->
     erlang:nif_error(undef).

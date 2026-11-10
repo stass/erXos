@@ -13,9 +13,8 @@ finishes checksums in its copy (`finish` `copy`): a delayed frame, `{csum, Start
 Frame}`, has its checksum finished by the NIF as it hands the frame to `writev`. A run
 (`erx_net_frame:run()`) is cut by the NIF as it writes it (`c_src/erx_tcp_cut.c`), one
 `writev` a frame: the headers from the NIF's own buffer, the payload from the run's binaries
-where they lie, the bytes `erx_net_frame:cut/1` gives. A run whose payload is more binaries
-than the NIF takes, which it answers `pieces`, goes frame by frame as `cut/1` cuts it. When a frame
-after the first N is not taken, or the NIF's bound of frames a call is reached, the answer is
+where they lie, the bytes `erx_net_frame:cut/1` gives. When a frame after the first N is not taken,
+or the NIF's bound of frames a call is reached, the answer is
 `{ok, N}`, and the driver hands the rest again, which the tap then answers itself (`full`,
 armed, or a drop). A run whose first frame is over the MTU is dropped as `too_long`. A frame
 shorter than the Ethernet header is dropped as `malformed`, one longer than the MTU and its
@@ -146,19 +145,6 @@ transmit({_Zone, _Packet}, T) ->
     {{drop, malformed}, T};
 transmit(_Frame, #tap{failed = true} = T) ->
     {{drop, refused}, T};
-%% A run whose payload is more binaries than the NIF's cut takes is cut here; its first
-%% frame, the longest, is checked as the NIF checks it.
-transmit(#run{} = Run, T0) ->
-    case send(Run, T0) of
-        {pieces, T} ->
-            [First | _] = Frames = erx_net_frame:cut(Run),
-            case iolist_size(First) =< T#tap.mtu + ?ETHER_HDR_LEN of
-                true -> send_run(Frames, 0, T);
-                false -> {{drop, too_long}, T}
-            end;
-        Answer ->
-            Answer
-    end;
 %% The NIF joins a frame of many pieces before it checks its size, so the size is checked
 %% here first, as the pipe checks it.
 transmit({csum, _Start, _Field, Bytes} = Frame, #tap{mtu = Mtu} = T) ->
@@ -176,21 +162,10 @@ transmit(Frame, #tap{mtu = Mtu} = T) when is_list(Frame) ->
 transmit(Frame, T) ->
     send(Frame, T).
 
-%% A run's frames, each no longer than its first, which was checked; Taken of them went.
-send_run([], _Taken, T) ->
-    {ok, T};
-send_run([Frame | Frames], Taken, T0) ->
-    case {send(Frame, T0), Taken} of
-        {{ok, T}, _} -> send_run(Frames, Taken + 1, T);
-        {{_FullOrDrop, _} = Answer, 0} -> Answer;
-        {{_FullOrDrop, T}, _} -> {{ok, Taken}, T}
-    end.
-
 send(Frame, #tap{handle = Handle} = T) ->
     case erx_tap_nif:send(Handle, Frame) of
         {ok, N} -> {taken(Frame, N), T};
         full -> {full, T};
-        pieces -> {pieces, T};
         {drop, _} = Drop -> {Drop, T};
         {error, Reason} ->
             self() ! {erx_tap, failed, Reason},

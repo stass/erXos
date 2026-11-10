@@ -29,7 +29,7 @@ class ErxTcpOutputTest < Minitest::Test
                                     'no_route_keeps_the_dsack_block'],
     # Runs (docs/design-network-fastpath.md, "Output makes runs"): each fault makes a run's
     # frames differ from per-segment output's, which the differential case compares.
-    run_drops_its_last_byte: ['Len = Frames * Size,', 'Len = Frames * Size - 1,',
+    run_drops_its_last_byte: ['Len = N * Size,', 'Len = N * Size - 1,',
                               'runs_equal_per_segment_output'],
     run_loses_its_fin: ["true -> Flags0;\n", "true -> Flags0 band bnot ?TH_FIN;\n",
                         'runs_equal_per_segment_output'],
@@ -47,6 +47,12 @@ class ErxTcpOutputTest < Minitest::Test
     run_without_a_route: ['Route =:= ok andalso erx_tcp:have_established(State)',
                           'is_tuple(Route) andalso erx_tcp:have_established(State)',
                           'runs_equal_per_segment_output'],
+    # A run over more binaries than the C cut walks, which the tap NIF refuses with badarg.
+    run_past_its_64th_binary: ['payload(Seg, Want, ?RUN_PIECES, Tcb)', 'payload(Seg, Want, infinity, Tcb)',
+                               'run_ends_at_its_64th_binary'],
+    # One binary past the bound: the exact case sees a run of 65 binaries.
+    run_bound_off_by_one: ['payload(Seg, Want, ?RUN_PIECES, Tcb)', 'payload(Seg, Want, ?RUN_PIECES + 1, Tcb)',
+                           'run_bound_is_exact'],
     run_with_cwr: ['andalso ecn_steady(ecn(Seg, Tcb), Flags, Ecn).', 'andalso (ecn_steady(ecn(Seg, Tcb), Flags, Ecn) orelse true).',
                    'runs_equal_per_segment_output']
   }.freeze

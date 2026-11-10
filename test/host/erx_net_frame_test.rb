@@ -78,7 +78,9 @@ class ErxNetFrameTest < Minitest::Test
     run_push_on_every_frame: ['erx_net_frame', 'Flags band bnot (?TH_PUSH bor ?TH_FIN).', 'Flags band bnot ?TH_FIN.',
                               'runs_give_the_bytes_of_their_segments_test'],
     run_tail_a_piece_short: ['erx_net_frame', 'payload = Rest}.', 'payload = tl(Rest)}.',
-                             'run_tail_cuts_to_the_last_frames_test']
+                             'run_tail_cuts_to_the_last_frames_test'],
+    run_over_the_piece_bound: ['erx_net_frame', 'length(Payload) =< ?RUN_PIECES ->', 'length(Payload) >= 0 ->',
+                               'run_over_the_piece_bound_goes_as_segments_test']
   }.freeze
 
   def test_framing_cases_pass_under_eunit

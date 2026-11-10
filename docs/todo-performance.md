@@ -755,7 +755,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Settle it with a host benchmark of one recovery episode over a 10,000-
   segment window; if it matters, keep a hint of the first range not yet
   retransmitted, as FreeBSD keeps `sackhint.nexthole`.
-* **The send buffer's walk for each segment.** `erx_tcp_sndbuf:range/3`
+* **The send buffer's walk for each segment.** `erx_tcp_sndbuf:range/4`
   turns the queue of the owner's binaries into a list and skips to the
   offset on every call, and `erx_tcp_output` calls it once per segment, so a
   pass of C segments over a buffer of N binaries costs C * N; an owner that
@@ -787,3 +787,5 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   and 64 stopped sessions and measures the system domain's reductions and
   the UART's latency; the fix on the table is a master that tells the tty
   it holds the output, so the tty stops asking.
+* **A segment of more than 64 binaries walks the send buffer twice** (`erlang/apps/erx_net/src/erx_tcp_output.erl`, `run/6`). Output asks `erx_tcp_sndbuf:range/4` for at most 64 binaries first and, when they cannot hold even one whole segment, asks again without the bound for the per-segment encoding. A send buffer of many tiny binaries pays the walk twice per segment. Settle it with a `tools/erx bench` send of 1-byte `gen_tcp:send/2` calls queued before the first ACK, against the same run with 1 KiB binaries; if it shows, coalesce the buffer's binaries at append.
+* **ECN alternates the frame layer's one-entry template cache** (`erlang/apps/erx_net/src/erx_net_frame.erl`, `cached_template/3`). With ECN negotiated, a pure ACK goes out as a run of one with ECN codepoint 0 and the data with ECT, and the key holds the codepoint, so a connection that interleaves them rebuilds the template on each change. Settle it with an ECN-negotiated bulk send with ACKs flowing both ways, counting template builds a second; if it shows, keep one template per codepoint.

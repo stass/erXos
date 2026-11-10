@@ -130,7 +130,7 @@ static ErlNifResourceType *erx_tap_type;
 
 static ERL_NIF_TERM atom_armed, atom_csum, atom_drop, atom_eof, atom_error,
     atom_erx_tap, atom_full, atom_malformed, atom_more, atom_none, atom_ok,
-    atom_partial, atom_pieces, atom_readable, atom_refused, atom_run, atom_sum,
+    atom_partial, atom_readable, atom_refused, atom_run, atom_sum,
     atom_too_long, atom_undefined, atom_writable;
 
 /* --- The decision core ------------------------------------------------- */
@@ -730,19 +730,18 @@ erx_tap_run_term(ErlNifEnv *env, const ERL_NIF_TERM *parts, erx_tcp_run_t *run,
 }
 
 /*
- * send(Handle, Run) -> {ok, N} | pieces | full | {drop, Reason} |
+ * send(Handle, Run) -> {ok, N} | full | {drop, Reason} |
  * {error, Reason}: the frames of a run, from the first, cut by erx_tcp_cut.c
  * straight into one writev(2) each: the headers from a buffer of the NIF's
  * own, the payload slice from the run's binaries where they lie, so no binary
  * is copied or changed.  {ok, N}, N > 0, for N frames taken: all of them, the
  * first ERX_TAP_RUN_FRAMES of a longer run, or those before the first one not
  * taken, which the transport's next call answers for itself.  A run whose
- * first frame is not taken is answered as a frame is.  pieces, writing
- * nothing, for a payload of more binaries than the cut takes, which the
- * transport then cuts itself, so the bound lives here alone.  {drop,
- * too_long} for a run whose first frame, its longest, is over the MTU; a run
- * erx_tcp_cut_plan refuses is badarg, since only a bug of the stack makes
- * one.
+ * first frame is not taken is answered as a frame is.  {drop, too_long}
+ * for a run whose first frame, its longest, is over the MTU; a run
+ * erx_tcp_cut_plan refuses, one of more than ERX_TCP_CUT_PIECES_MAX payload
+ * binaries among them, is badarg, since only a bug of the stack makes one:
+ * output bounds a run's payload (erx_tcp_sndbuf:range/4).
  */
 static ERL_NIF_TERM
 erx_tap_send_run(ErlNifEnv *env, erx_tap_t *tap, const ERL_NIF_TERM *parts)
@@ -756,12 +755,8 @@ erx_tap_send_run(ErlNifEnv *env, erx_tap_t *tap, const ERL_NIF_TERM *parts)
 	erx_tap_write_kind_t kind;
 	size_t n, p;
 	uint32_t frames, i;
-	unsigned length;
 	int error;
 
-	if (enif_get_list_length(env, parts[9], &length) &&
-	    length > ERX_TCP_CUT_PIECES_MAX)
-		return (atom_pieces);
 	if (!erx_tap_run_term(env, parts, &run, pieces) ||
 	    !erx_tcp_cut_plan(&run, &plan))
 		return (enif_make_badarg(env));
@@ -934,7 +929,6 @@ erx_tap_load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	atom_none = enif_make_atom(env, "none");
 	atom_ok = enif_make_atom(env, "ok");
 	atom_partial = enif_make_atom(env, "partial");
-	atom_pieces = enif_make_atom(env, "pieces");
 	atom_readable = enif_make_atom(env, "readable");
 	atom_refused = enif_make_atom(env, "refused");
 	atom_run = enif_make_atom(env, "run");

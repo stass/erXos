@@ -8,7 +8,7 @@ A connection's send buffer (docs/design-network-stack.md, "Transmitting"): the b
 range as sub-binaries of them; an acknowledgement drops bytes from the front.
 """.
 
--export([new/0, append/2, size/1, range/3, drop/2]).
+-export([new/0, append/2, size/1, range/4, drop/2]).
 
 -export_type([buf/0]).
 
@@ -32,20 +32,28 @@ append(#sndbuf{size = Size, chunks = Chunks}, Data) when is_binary(Data) ->
 size(#sndbuf{size = Size}) -> Size.
 
 -doc """
-The `Len` bytes at offset `Off` from the front as sub-binaries, shorter when the buffer ends
-first.
+The `Len` bytes at offset `Off` from the front as at most `Max` sub-binaries, one for each
+binary the range meets, so shorter when the buffer ends first or the range meets more
+binaries than `Max`. A run's payload is at most the 64 binaries that the C which cuts it
+walks (docs/design-network-fastpath.md, "A run").
 """.
--spec range(buf(), non_neg_integer(), non_neg_integer()) -> [binary()].
-range(#sndbuf{chunks = Chunks}, Off, Len) when is_integer(Off), Off >= 0, is_integer(Len), Len >= 0 ->
-    take(queue:to_list(Chunks), Off, Len).
+-spec range(buf(), non_neg_integer(), non_neg_integer(), pos_integer() | infinity) -> [binary()].
+range(#sndbuf{chunks = Chunks}, Off, Len, Max)
+  when is_integer(Off), Off >= 0, is_integer(Len), Len >= 0,
+       Max =:= infinity orelse is_integer(Max) andalso Max > 0 ->
+    take(queue:to_list(Chunks), Off, Len, Max).
 
-take(_, _, 0) -> [];
-take([], _, _) -> [];
-take([Chunk | Rest], Off, Len) when Off >= byte_size(Chunk) ->
-    take(Rest, Off - byte_size(Chunk), Len);
-take([Chunk | Rest], Off, Len) ->
+take(_, _, 0, _) -> [];
+take(_, _, _, 0) -> [];
+take([], _, _, _) -> [];
+take([Chunk | Rest], Off, Len, Max) when Off >= byte_size(Chunk) ->
+    take(Rest, Off - byte_size(Chunk), Len, Max);
+take([Chunk | Rest], Off, Len, Max) ->
     N = min(Len, byte_size(Chunk) - Off),
-    [binary:part(Chunk, Off, N) | take(Rest, 0, Len - N)].
+    [binary:part(Chunk, Off, N) | take(Rest, 0, Len - N, fewer(Max))].
+
+fewer(infinity) -> infinity;
+fewer(Max) -> Max - 1.
 
 -doc "Drops the first `N` bytes, at most what the buffer holds (`sbdrop`).".
 -spec drop(buf(), non_neg_integer()) -> buf().

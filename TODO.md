@@ -151,16 +151,14 @@ it; git history is the record of completed work.
      Mbit/s in all four rounds), rr 64 B (14,894 to 15,094 txn/s) and 64 B x16 (86,775 to
      87,474) stayed within their spreads (raw data: ~/erxos-history
      net-bench-freebsd-fast-p6c-2026-11-10, commit 83f7a0a). What remains:
-     * `erx_tcp_sndbuf:range/4` with the 64-binary bound that the C walks, output ending
-       a run where the range ends, and a single segment of more than 64 binaries; until
-       then the tap NIF answers `pieces` for a run of more and `erx_tap` cuts it with
-       `cut/1`, a fallback that goes with the bound;
+     * [Low] the 64-binary run bound is two hand-kept constants, `RUN_PIECES` in
+       `erx_net_frame.hrl` and `ERX_TCP_CUT_PIECES_MAX` in `erx_tcp_cut.h`; make it one
+       fact (the NIF reports it at load), and fold output's `run` and `frames` fields into
+       one `frames :: none | pos_integer()`;
      * [Low] the `tcp_cut` fuzz oracle checks each checksum by the frame's whole sum, so a
        field written as 0x0000 where 0xffff belongs passes it (the tap's byte-for-byte
        test against `cut/1` catches it); and the cut's seeded faults are listed twice, in
        `test/host/erx_tap_test.rb` and `erx_net_bytes_test.rb`;
-     * a segment that is not a run of several frames sent as a run of one whenever its
-       header is a run's, retransmissions included;
      * `erx_device:post_frame/5` in the erXos device NIF and `erx_virtio_net` on it,
        with package 5's `erx_device:complete/3` and its delayed frames;
      * the interface's `runs` and `run_frames` counters, and design test 2's remaining

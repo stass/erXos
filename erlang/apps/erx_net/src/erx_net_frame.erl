@@ -619,7 +619,8 @@ run(#{mtu := Mtu, iface := #{finish := Finish}} = Path,
     {#tcp{seq = Seq, ack = Ack, flags = Flags, win = Win, urp = 0, opts = Opts}, #{seg := Seg},
      Payload} = Segment, Cache0) ->
     case cached_template(Path, Segment, Cache0) of
-        {ok, Template, Cache} when byte_size(Template) + Seg =< Mtu ->
+        {ok, Template, Cache} when byte_size(Template) + Seg =< Mtu,
+                                   length(Payload) =< ?RUN_PIECES ->
             Run = #run{template = Template, seq = Seq, ack = Ack, flags = Flags, win = Win,
                        ts = Opts#tcp_opts.ts, seg = Seg, payload = Payload},
             case {byte_size(Template) + iolist_size(Payload) =< ?IP_MAXPACKET, Finish} of

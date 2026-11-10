@@ -312,11 +312,15 @@ sndbuf_test() ->
     B = lists:foldl(fun(D, Acc) -> erx_tcp_sndbuf:append(Acc, D) end, erx_tcp_sndbuf:new(),
                     [<<"abc">>, <<>>, <<"defg">>, <<"h">>]),
     ?assertEqual(8, erx_tcp_sndbuf:size(B)),
-    ?assertEqual(<<"cdef">>, iolist_to_binary(erx_tcp_sndbuf:range(B, 2, 4))),
-    ?assertEqual(<<"h">>, iolist_to_binary(erx_tcp_sndbuf:range(B, 7, 10))),
-    ?assertEqual([], erx_tcp_sndbuf:range(B, 8, 1)),
+    ?assertEqual(<<"cdef">>, iolist_to_binary(erx_tcp_sndbuf:range(B, 2, 4, infinity))),
+    ?assertEqual(<<"h">>, iolist_to_binary(erx_tcp_sndbuf:range(B, 7, 10, infinity))),
+    ?assertEqual([], erx_tcp_sndbuf:range(B, 8, 1, infinity)),
+    %% At most Max binaries: the range ends where the Max-th binary does.
+    ?assertEqual([<<"c">>, <<"defg">>], erx_tcp_sndbuf:range(B, 2, 6, 2)),
+    ?assertEqual([<<"c">>], erx_tcp_sndbuf:range(B, 2, 6, 1)),
+    ?assertEqual([<<"de">>], erx_tcp_sndbuf:range(B, 3, 2, 1)),
     B1 = erx_tcp_sndbuf:drop(B, 4),
-    ?assertEqual({4, <<"efgh">>}, {erx_tcp_sndbuf:size(B1), iolist_to_binary(erx_tcp_sndbuf:range(B1, 0, 8))}),
+    ?assertEqual({4, <<"efgh">>}, {erx_tcp_sndbuf:size(B1), iolist_to_binary(erx_tcp_sndbuf:range(B1, 0, 8, infinity))}),
     ?assertEqual(0, erx_tcp_sndbuf:size(erx_tcp_sndbuf:drop(B1, 99))).
 
 %% --- regressions from review ---

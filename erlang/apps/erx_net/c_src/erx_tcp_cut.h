@@ -23,8 +23,8 @@
  */
 
 /*
- * The pieces a run's payload may lie in. A run of more is refused, and the tap NIF answers
- * it with pieces, so its transport cuts it with erx_net_frame:cut/1.
+ * The pieces a run's payload may lie in. A run of more is refused; output makes none, since
+ * it ends a run where erx_tcp_sndbuf:range/4 ends it (erx_tcp_output's RUN_PIECES).
  */
 #define ERX_TCP_CUT_PIECES_MAX	64u
 /* The longest link header in front of a frame: Ethernet's 14 bytes, with room to spare. */

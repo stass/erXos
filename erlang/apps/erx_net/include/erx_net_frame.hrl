@@ -16,4 +16,9 @@
               win :: 0..16#ffff,
               ts :: none | {TsVal :: 0..16#ffffffff, TsEcr :: 0..16#ffffffff},
               seg :: pos_integer(),          % the payload bytes of each frame but the last
-              payload :: [binary()]}).       % sub-binaries of the send buffer
+              payload :: [binary()]}).       % sub-binaries of the send buffer, at most RUN_PIECES
+
+%% The binaries a run's payload may lie in: ERX_TCP_CUT_PIECES_MAX, the bound the C that cuts
+%% a run walks (c_src/erx_tcp_cut.h). Output ends a run where they end, and the frame layer
+%% sends a run of more as its segments.
+-define(RUN_PIECES, 64).
