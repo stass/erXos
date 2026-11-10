@@ -3,58 +3,113 @@
 
 -module(erx_inet).
 -moduledoc """
-The client side's shared requests (docs/design-network-stack.md, "Modules", "Name
-resolution"): grant/0, the one way the backends find their grant, and the domain's
-resolver loader, the process that keeps inet_db's name servers and search list those of
-the grant's `resolver` operation, as dhclient-script keeps resolv.conf the lease's.
+The client side's one path to the grant, and the domain's resolver loader
+(docs/design-network-stack.md, "Modules", "Answers from the grant", "Name resolution").
 
-**Loading.** The loader sends the grant `watch_resolver`, which answers the grant's
+**The path to the grant.** call/1 finds the grant through the `erx_net_client`
+application's `grant` key, an `{M, F, A}` that answers `{ok, Grant, Origin}` or
+`{error, Reason}`, calls it, and answers what erx_sock_admit:answer/3 rebuilt from the
+grant's reply. This module alone reads the key and exports no grant pid, so every
+answer of the grant passes the check before program code sees it; both are build
+checks. The call waits with the timeout `infinity`, as every call of the stack does:
+its monitor ends the wait when the grant ends, which answers `{error, closed}`, and an
+open's own timeout is the socket's to enforce. An answer that fails the check is
+`{error, badarg}` and one line in the log naming the operation and the check, never
+the term.
+
+**Loading.** The loader, the process that keeps inet_db's name servers and search list
+those of the grant's `resolver` operation as dhclient-script keeps resolv.conf the
+lease's, sends the grant `watch_resolver` through the same path. The grant answers its
 resolver and makes the loader its subscriber, so each later change arrives as
-`{erx_net_resolver, Grant, Answer}`. Every answer, the first and each change, is checked
-by resolver_config/1 and loaded by load/1; one that fails the check is dropped and the
-previous one stays. When the grant cannot be found, does not answer, or ends, the loader
-tries again after a second, doubling the wait up to thirty seconds. A domain without a
-grant keeps inet_db as it is.
+`{erx_net_resolver, Grant, Answer}`, bare from a grant of the loader's own domain and
+in the envelope `{erx_origin, D, Msg}` from a grant of domain `D`; erx_sock_admit:change/3
+takes the envelope off and checks the answer against the grant and the origin it was
+found with. Every answer, the first and each change, is loaded by load/1 once it passes;
+one that fails is dropped and the previous one stays. The loader watches the grant it
+found, whatever its first answer, and looks for a grant again only when it finds none
+or the grant ends: after a second, doubling the wait up to thirty seconds. A domain
+without a grant keeps inet_db as it is.
 
 load/1 puts the answer in place of resolv.conf: it empties inet_db's `resolv_conf`, so
 inet_db stops checking a file that erXos does not have and would clear the name servers
 on finding it missing; `nameservers` and `search` replace inet_db's; and `dns` joins the
 lookup methods after the ones there, so the hosts file still comes first.
 
-**Checking.** The answer comes from another domain, so it is untrusted: a map of exactly
-`nameservers`, at most three `{Ip, 53}` with an IPv4 address, and `search`, at most six
-entries; anything else refuses the whole answer. Each search entry is checked alone by
-the DHCP client's rules (erx_dhcp4_wire's `domain/1`): a binary of labels joined by
-dots, each label 1 to 63 letters, digits and hyphens that begins and ends with a letter
-or digit, as `res_hnok` takes them, at most 253 bytes, with one trailing dot allowed and
-dropped. That is stricter than `res_hnok`, which also takes an empty label, since
-inet_dns cannot encode one and would fail the caller's query. An entry that fails is
-dropped and the rest of the answer, its name servers included, is loaded. A name that
-passes holds no byte a terminal acts on.
+**Checking.** resolver_config/1 is the resolver reply type's check, which
+erx_sock_admit applies: a map of exactly `nameservers`, at most three `{Ip, 53}` with an
+IPv4 address, and `search`, at most six entries; anything else refuses the whole
+answer. Each search entry is checked alone by the DHCP client's rules (erx_dhcp4_wire's
+`domain/1`): a binary of labels joined by dots, each label 1 to 63 letters, digits and
+hyphens that begins and ends with a letter or digit, as `res_hnok` takes them, at most
+253 bytes, with one trailing dot allowed and dropped. That is stricter than `res_hnok`,
+which also takes an empty label, since inet_dns cannot encode one and would fail the
+caller's query. An entry that fails is dropped and the rest of the answer, its name
+servers included, is loaded. A name that passes holds no byte a terminal acts on.
 """.
 
 -behaviour(gen_server).
 
--export([grant/0, start_link/0, resolver_config/1, load/1]).
+-export([call/1, start_link/0, resolver_config/1, load/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--export_type([resolver/0]).
+-export_type([request/0, resolver/0]).
 
 -define(MAXNS, 3).
 -define(MAXDNSRCH, 6).
 -define(DNS_PORT, 53).
--define(CALL_TIMEOUT, 5000).
 -define(RETRY_FIRST, 1000).
 -define(RETRY_MOST, 30000).
 -define(IS_BYTE(X), (is_integer(X) andalso X >= 0 andalso X =< 255)).
 
 -type resolver() :: #{nameservers := [{inet:ip4_address(), 53}], search := [string()]}.
 
--doc "The grant the `erx_net_client` application's `grant` key names.".
--spec grant() -> {ok, pid()} | {error, term()}.
-grant() ->
+-doc "A request of the grant, each operation's as the grant takes it.".
+-type request() :: {tcp_connect, inet, inet:ip4_address(), inet:port_number(), [term()], timeout()}
+                 | {udp_open, inet, any | inet:ip4_address(), inet:port_number(), [term()]}
+                 | resolver
+                 | watch_resolver.
+
+-doc """
+Calls the grant with `Request` and answers its reply as erx_sock_admit admitted it: an
+open's `{ok, Pid}`, a resolver's `{ok, resolver()}`, or `{error, Reason}`.
+""".
+-spec call(request()) -> {ok, pid() | resolver()} | {error, term()}.
+call(Request) ->
+    case find() of
+        {ok, Grant, _Origin} -> ask(Grant, Request);
+        {error, _} = Error -> Error
+    end.
+
+%% The grant and its origin, from the one reader of the `grant` key.
+find() ->
     {M, F, A} = application:get_env(erx_net_client, grant, {erx_net, local_grant, []}),
-    apply(M, F, A).
+    case apply(M, F, A) of
+        {ok, Grant, Origin} when is_pid(Grant) -> {ok, Grant, Origin};
+        {error, _} = Error -> Error
+    end.
+
+%% The one call of the grant: the request, then the reply through its admission. Only
+%% the call is guarded, so a grant that ends answers as a closed socket and no crash of
+%% the check is mistaken for one.
+ask(Grant, Request) ->
+    Operation = operation(Request),
+    try gen_server:call(Grant, Request, infinity) of
+        Answer -> admitted(Operation, Grant, Answer)
+    catch
+        exit:_ -> {error, closed}
+    end.
+
+operation(Request) when is_atom(Request) -> Request;
+operation(Request) when is_tuple(Request) -> element(1, Request).
+
+admitted(Operation, Grant, Answer) ->
+    case erx_sock_admit:answer(Operation, Grant, Answer) of
+        {ok, Reply} ->
+            Reply;
+        {refused, Check} ->
+            logger:warning("erx_inet: the grant's answer to ~s fails the ~s check", [Operation, Check]),
+            {error, badarg}
+    end.
 
 -doc "Starts the resolver loader, registered as `erx_inet`.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
@@ -127,49 +182,35 @@ handle_call(_Request, _From, S) ->
 handle_cast(_Msg, S) ->
     {noreply, S}.
 
+%% `grant` is `none` or the grant watched, `{Grant, Origin, Monitor}`; it is set before
+%% the first answer is asked for, so the grant's end is seen whatever that answer is.
 -doc false.
 handle_info(find, #{grant := none, retry := Retry} = S) ->
-    case subscribe() of
-        {ok, Grant, Ref} -> {noreply, S#{grant := {Grant, Ref}, retry := ?RETRY_FIRST}};
-        error -> {noreply, again(S#{retry := min(Retry * 2, ?RETRY_MOST)}, Retry)}
+    case find() of
+        {ok, Grant, Origin} ->
+            Ref = erlang:monitor(process, Grant),
+            ok = take(ask(Grant, watch_resolver)),
+            {noreply, S#{grant := {Grant, Origin, Ref}, retry := ?RETRY_FIRST}};
+        {error, _} ->
+            {noreply, again(S#{retry := min(Retry * 2, ?RETRY_MOST)}, Retry)}
     end;
-handle_info({erx_net_resolver, Grant, Answer}, #{grant := {Grant, _}} = S) ->
-    ok = take(Answer),
-    {noreply, S};
-handle_info({'DOWN', Ref, process, _, _}, #{grant := {_, Ref}, retry := Retry} = S) ->
+handle_info({'DOWN', Ref, process, _, _}, #{grant := {_, _, Ref}, retry := Retry} = S) ->
     {noreply, again(S#{grant := none}, Retry)};
-handle_info(_Msg, S) ->
+%% Every other message to a loader that watches a grant is checked as a change of that
+%% grant; whatever fails the check, a stray message among them, is dropped.
+handle_info(Message, #{grant := {Grant, Origin, _}} = S) ->
+    case erx_sock_admit:change(Origin, Grant, Message) of
+        {ok, Resolver} -> ok = load(Resolver);
+        {refused, _} -> ok
+    end,
+    {noreply, S};
+handle_info(_Message, S) ->
     {noreply, S}.
 
 again(S, After) ->
     _ = erlang:send_after(After, self(), find),
     S.
 
-%% Finds the grant, watches it, and loads its first answer. A grant that does not answer
-%% is let go, so each retry watches only the grant it found.
-subscribe() ->
-    maybe
-        {ok, Grant} ?= grant(),
-        Ref = erlang:monitor(process, Grant),
-        {ok, Grant, Ref} ?= answered(Grant, Ref, ask(Grant))
-    else
-        _ -> error
-    end.
-
-answered(Grant, Ref, {ok, Answer}) ->
-    ok = take(Answer),
-    {ok, Grant, Ref};
-answered(_Grant, Ref, _Refused) ->
-    true = erlang:demonitor(Ref, [flush]),
-    error.
-
-ask(Grant) ->
-    try gen_server:call(Grant, watch_resolver, ?CALL_TIMEOUT)
-    catch exit:_ -> {error, unreachable}
-    end.
-
-take(Answer) ->
-    case resolver_config(Answer) of
-        {ok, Resolver} -> load(Resolver);
-        {error, badarg} -> ok
-    end.
+%% Loads the first answer when it passed; a refusal leaves inet_db as it is.
+take({ok, Resolver}) -> load(Resolver);
+take({error, _}) -> ok.

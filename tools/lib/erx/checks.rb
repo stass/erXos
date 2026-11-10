@@ -342,7 +342,8 @@ module Erx
       raise Error, violations.join("\n") unless violations.empty?
     end
 
-    # erx_net's atoms, sequence-wrap and FreeBSD notice rules.
+    # erx_net's atoms, sequence-wrap and FreeBSD notice rules, and the grant-key
+    # and call-timeout rules of erx_net and its client, erx_net_client.
     def check_net(listed)
       files = listed.select { |relative| NetChecks.covers?(relative) && File.file?(File.join(@root, relative)) }
       return if files.empty?

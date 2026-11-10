@@ -35,12 +35,12 @@ search list, empty without a lease.
                                     gateway := inet:ip_address() | none}],
                        dns := [inet:ip4_address()], search := [binary()]}.
 
--doc "The node's own grant, `local`, which erx_net_sup started.".
--spec local_grant() -> {ok, pid()} | {error, enotconn}.
+-doc "The node's own grant, `local`, which erx_net_sup started; its messages arrive bare, from the origin `local`.".
+-spec local_grant() -> {ok, pid(), local} | {error, enotconn}.
 local_grant() ->
     case whereis(erx_net_grant) of
         undefined -> {error, enotconn};
-        Pid -> {ok, Pid}
+        Pid -> {ok, Pid, local}
     end.
 
 -doc "Every interface, in the order of their names; `enotconn` when the stack is not running.".

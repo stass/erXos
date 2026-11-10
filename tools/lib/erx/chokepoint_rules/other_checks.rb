@@ -68,6 +68,18 @@ module Erx
           test: 'test/host/net_checks_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'net-grant-key', rule: "in erx_net_client, only erx_inet reads the application's grant key, so every " \
+                                       'answer of the grant passes erx_sock_admit through erx_inet:call/1',
+          design: 'docs/design-network-stack.md#build-checks', check: 'NetChecks, in Checks',
+          test: 'test/host/net_checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'net-call-timeout', rule: 'in erx_net and erx_net_client, every gen_server, gen_statem and gen call ' \
+                                          'waits with the literal infinity',
+          design: 'docs/design-network-stack.md#build-checks', check: 'NetChecks, in Checks',
+          test: 'test/host/net_checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
         )

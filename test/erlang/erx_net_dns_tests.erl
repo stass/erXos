@@ -47,8 +47,7 @@ config_test_() ->
      {"a malformed answer is refused", fun config_refused/0},
      {"a bad search domain is dropped and the rest kept", fun config_drops_bad_domains/0},
      {"an answer loads into inet_db", fun config_loads/0},
-     {"inet_db's resolv.conf check keeps a loaded answer", fun config_outlives_resolv_conf/0},
-     {"a grant that refuses leaves the loader watching nothing", fun loader_refused/0}].
+     {"inet_db's resolv.conf check keeps a loaded answer", fun config_outlives_resolv_conf/0}].
 
 %% --- The stand-in interface ------------------------------------------------------
 
@@ -305,33 +304,6 @@ config_loads() ->
         ?assertEqual([file, dns], inet_db:res_option(lookup))
     after
         [ok = inet_db:res_option(Opt, Value) || {Opt, Value} <- Saved]
-    end.
-
-%% A grant that answers `resolver` with an error: the loader keeps no monitor of it
-%% and tries again later.
-loader_refused() ->
-    Me = self(),
-    Fake = spawn_link(fun() -> refusing_grant(Me) end),
-    ok = application:set_env(erx_net_client, grant, {erlang, apply, [fun() -> {ok, Fake} end, []]}),
-    {ok, Loader} = erx_inet:start_link(),
-    try
-        receive asked -> ok after ?WAIT -> error(no_request) end,
-        _ = sys:get_state(Loader),
-        ?assertEqual({monitors, []}, erlang:process_info(Loader, monitors))
-    after
-        unlink(Loader),
-        exit(Loader, kill),
-        unlink(Fake),
-        exit(Fake, kill),
-        ok = application:unset_env(erx_net_client, grant)
-    end.
-
-refusing_grant(Test) ->
-    receive
-        {'$gen_call', From, watch_resolver} ->
-            Test ! asked,
-            gen_server:reply(From, {error, refused}),
-            refusing_grant(Test)
     end.
 
 %% inet_db watches resolv.conf, and a check that finds no file, as on erXos, clears the

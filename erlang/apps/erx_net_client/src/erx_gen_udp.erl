@@ -11,10 +11,10 @@ and `close/1` reach this module through the dispatch they already have, and
 stock OTP, whose `inet` knows no `erx` backend, a caller opens the socket with `open/2`
 here.
 
-Each call is one request to one process: `open` to the grant erx_inet:grant/0 finds, the
-rest to the socket. Every request waits with the timeout `infinity`, since a `recv`
-timeout is a deadline the socket enforces. A socket that has ended answers as a closed
-socket does, `{error, closed}`, and closing it again is `ok`.
+Each call is one request to one process: `open` to the grant through erx_inet:call/1,
+which admits its answer, the rest to the socket. Every request waits with the timeout
+`infinity`, since a `recv` timeout is a deadline the socket enforces. A socket that has
+ended answers as a closed socket does, `{error, closed}`, and closing it again is `ok`.
 
 Only IPv4 is taken: `inet6` and `local` are refused with `eafnosupport`. Port -1, OTP's
 private request for a port drawn more randomly than an ephemeral one, is an ephemeral
@@ -41,8 +41,7 @@ open(Port) ->
 open(Port, Opts) when is_integer(Port), Port >= -1, Port =< 16#ffff, is_list(Opts) ->
     maybe
         {ok, Local, Rest} ?= local(Opts, any, []),
-        {ok, Grant} ?= erx_inet:grant(),
-        {ok, Sock} ?= call(Grant, {udp_open, inet, Local, max(Port, 0), Rest}),
+        {ok, Sock} ?= erx_inet:call({udp_open, inet, Local, max(Port, 0), Rest}),
         {ok, {'$inet', ?MODULE, Sock}}
     end;
 open(_Port, _Opts) ->
@@ -117,8 +116,9 @@ controlling_process({'$inet', ?MODULE, _Sock}, Pid) when is_pid(Pid) ->
     {error, enotsup}.
 
 %% A request to a process that has ended, however it ended, answers as a closed socket, so
-%% no crash reason of the stack reaches the caller.
-call(Pid, Request) ->
+%% no crash reason of the stack reaches the caller. Only a pid is called, never a name that
+%% gen_server would look up; every socket's pid was admitted by erx_sock_admit.
+call(Pid, Request) when is_pid(Pid) ->
     try
         gen_server:call(Pid, Request, infinity)
     catch

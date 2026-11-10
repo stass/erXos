@@ -52,7 +52,7 @@ cleanup(Lookup) ->
 with_grant(Case) ->
     Self = self(),
     Grant = spawn(fun() -> grant(Self) end),
-    ok = application:set_env(erx_net_client, grant, {erlang, apply, [fun() -> {ok, Grant} end, []]}),
+    ok = application:set_env(erx_net_client, grant, {erlang, apply, [fun() -> {ok, Grant, local} end, []]}),
     try Case()
     after
         exit(Grant, kill),

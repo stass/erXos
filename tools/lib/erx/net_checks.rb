@@ -23,18 +23,31 @@ module Erx
   #   entropy/1 is crypto's generator outside erXos, names crypto; and only
   #   erx_net_clock calls
   #   erx_bytes:entropy, so every key passes the clock's seam,
-  #   to key a generator or draw a stack-wide secret in their initialisation.
+  #   to key a generator or draw a stack-wide secret in their initialisation;
+  # * grant-key: in the client application, erx_net_client, only erx_inet
+  #   calls application:get_env, get_all_env or get_key, or names
+  #   erx_net:local_grant or the registered erx_net_grant, so only it reads
+  #   the `grant` key and knows the grant's pid, and every answer of the grant passes
+  #   erx_sock_admit through erx_inet:call/1;
+  # * call-timeout: in erx_net and erx_net_client, every gen_server:call and
+  #   gen_statem:call has three arguments and every gen:call four, the last
+  #   the literal `infinity`, and no `fun` names one of them, so no wait of
+  #   the stack or its clients ends on a clock of its own.
   #
   # Like DeviceCallers these read the source text with comments removed, and
   # catch a slip, not a determined bypass that builds a name from pieces. The
   # atoms check keeps strings and quoted atoms, since `apply(erlang,
   # 'list_to_atom', ...)` names the function as surely as a call does; the
   # seq-wrap check blanks them, since a literal inside a string is no
-  # arithmetic.
+  # arithmetic. The call-timeout check splits a call's arguments at the commas
+  # outside brackets, so a call holding a `fun` or `case` with a comma among
+  # its arguments is refused rather than misread.
   module NetChecks
     APPLICATION = 'erlang/apps/erx_net'
     NOTICE = "#{APPLICATION}/NOTICE-freebsd"
     SCOPE = "#{APPLICATION}/**/*.{erl,hrl}"
+    CLIENT_APPLICATION = 'erlang/apps/erx_net_client'
+    CLIENT_SCOPE = "#{CLIENT_APPLICATION}/**/*.{erl,hrl}"
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
     ATOM_MAKERS = /(?<![A-Za-z0-9_@])(binary_to_atom|list_to_atom|binary_to_term)(?![A-Za-z0-9_@])/
@@ -65,6 +78,18 @@ module Erx
     # and an optional parenthesis.
     SHIFT = /\bbsl\b\s*\(?\s*(?=\d)/
 
+    # The one client module that reads the application's environment, and so
+    # the `grant` key (design-network-stack.md, "Answers from the grant").
+    GRANT_KEY_READER = "#{CLIENT_APPLICATION}/src/erx_inet.erl"
+    GRANT_READ = /(?<![A-Za-z0-9_@])(?:application\s*:\s*(?:get_env|get_all_env|get_key)|erx_net\s*:\s*local_grant|erx_net_grant)(?![A-Za-z0-9_@])/
+    # The calls whose timeout must be the literal infinity, each with the
+    # arity at which the timeout is its last argument.
+    CALL = /(?<![A-Za-z0-9_@])(?<module>gen_server|gen_statem|gen)\s*:\s*call(?![A-Za-z0-9_@])/
+    CALL_ARITY = { 'gen_server' => 3, 'gen_statem' => 3, 'gen' => 4 }.freeze
+    # The brackets an argument may hold commas inside, and what closes each.
+    CLOSER = { '(' => ')', '[' => ']', '{' => '}', '<<' => '>>' }.freeze
+    BRACKET = /<<|>>|[()\[\]{},]/
+
     # A FreeBSD file named by a module's header, alone on its line.
     HEADER_MARK = /\A%+[ \t]*FreeBSD:[ \t]+(?<path>\S+)[ \t]*\z/
     FREEBSD_PATH = %r{\A[a-z0-9_]+(?:/[A-Za-z0-9_][A-Za-z0-9_.-]*)+\z}
@@ -86,14 +111,83 @@ module Erx
     module_function
 
     # Whether a path is one the checks read: an erx_net source or the notice.
-    def covers?(path) = path == NOTICE || File.fnmatch?(SCOPE, path, GLOB_FLAGS)
+    def covers?(path) = path == NOTICE || [SCOPE, CLIENT_SCOPE].any? { |scope| File.fnmatch?(scope, path, GLOB_FLAGS) }
 
     # The violations among files, a map of path to source text holding every
     # covered file.
     def violations(files)
       sources = files.select { |path, _| File.fnmatch?(SCOPE, path, GLOB_FLAGS) }
+      client = files.select { |path, _| File.fnmatch?(CLIENT_SCOPE, path, GLOB_FLAGS) }
       [*atom_violations(sources), *random_violations(sources), *seq_violations(sources),
-       *notice_violations(sources, notice: files[NOTICE])]
+       *notice_violations(sources, notice: files[NOTICE]), *grant_key_violations(client),
+       *call_timeout_violations(sources.merge(client))]
+    end
+
+    def grant_key_violations(client)
+      client.reject { |path, _| path == GRANT_KEY_READER }.flat_map do |path, text|
+        matches(calls_text(text), GRANT_READ).map do |line, read|
+          Violation.new(rule: 'grant-key', path: path, line: line,
+                        detail: "#{read.delete(" \t\n")} outside erx_inet: only erx_inet:call/1 reaches the grant")
+        end
+      end
+    end
+
+    def call_timeout_violations(sources)
+      sources.flat_map do |path, text|
+        code = calls_text(text)
+        code.to_enum(:scan, CALL).filter_map do
+          match = Regexp.last_match
+          problem = call_problem(match[:module], code[match.end(0)..])
+          next unless problem
+
+          Violation.new(rule: 'call-timeout', path: path, line: code[0...match.begin(0)].count("\n") + 1,
+                        detail: "#{match[:module]}:call #{problem}")
+        end
+      end
+    end
+
+    # Why the call of module_name whose text follows its name breaks the
+    # call-timeout rule, or nil when it keeps it. A name followed by neither
+    # an argument list nor a fun's arity is no call.
+    def call_problem(module_name, rest)
+      return 'is named by a fun, which hides its timeout' if rest.match?(%r{\A\s*/})
+      return nil unless (open = rest[/\A\s*\(/])
+
+      arguments = call_arguments(rest[open.size..])
+      arity = CALL_ARITY.fetch(module_name)
+      return 'has arguments whose brackets do not balance' unless arguments
+      return "has #{arguments.size} arguments, not #{arity} with the timeout last" unless arguments.size == arity
+      return "waits with #{arguments.last}, not the literal infinity" unless arguments.last == 'infinity'
+
+      nil
+    end
+
+    # The arguments of a call, given its text after the opening parenthesis,
+    # split at the commas outside brackets and stripped; nil when a bracket
+    # closes out of order or the text ends first.
+    def call_arguments(text)
+      closers = []
+      arguments = []
+      start = 0
+      text.to_enum(:scan, BRACKET).each do
+        token = Regexp.last_match(0)
+        at = Regexp.last_match.begin(0)
+        if CLOSER.key?(token)
+          closers.push(CLOSER.fetch(token))
+        elsif token == ','
+          next unless closers.empty?
+
+          arguments << text[start...at].strip
+          start = at + 1
+        elsif closers.empty?
+          return nil unless token == ')'
+
+          return arguments << text[start...at].strip
+        elsif closers.pop != token
+          return nil
+        end
+      end
+      nil
     end
 
     def atom_violations(sources)

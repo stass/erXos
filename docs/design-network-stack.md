@@ -4899,6 +4899,7 @@ client domain is affected beyond its sockets.
 | `{error, enetunreach}` | `connect`, or a datagram sent without a local address, finds no route (`in_pcbladdr`) |
 | `{error, ehostunreach}` | a datagram's route has gone (`ip_output`); a synchronized connection's soft error at its timeout; an unreachable report in SYN-SENT |
 | `{error, econnreset}` | a RST in a synchronized state, under `show_econnreset` as on stock |
+| `{error, enoprotoopt}` | an ICMP parameter problem answered the SYN, as FreeBSD's `icmp_errmap` maps it |
 | `{error, closed}` | the socket is closed, as on stock; a `recv` that the peer's FIN leaves short, as on stock |
 | `{error, enotconn}` | a `recv` after one the peer's FIN left short, as on stock |
 | `{error, timeout}` | an Erlang call's own timeout, as on stock |

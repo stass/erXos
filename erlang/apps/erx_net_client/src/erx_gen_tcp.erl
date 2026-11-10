@@ -9,8 +9,8 @@ The TCP socket backend (docs/design-network-stack.md, "The backend"). A socket i
 reach this module through the dispatch they already have. On stock OTP, whose `inet`
 knows no `erx` backend, a caller opens the socket with `connect/4` here.
 
-Each call is one request to one process: `connect` to the grant erx_inet:grant/0 finds,
-the rest to the connection. Every request waits with the
+Each call is one request to one process: `connect` to the grant through erx_inet:call/1,
+which admits its answer, the rest to the connection. Every request waits with the
 timeout `infinity`, since a `recv` timeout is a deadline the connection enforces. A
 connection that has ended answers as a closed socket does, `{error, closed}`, and closing
 it again is `ok`.
@@ -49,20 +49,21 @@ connect(_Address, _Port, _Opts, _Timeout) ->
     {error, einval}.
 
 %% Tries each address in turn, as gen_tcp's own backend does: a refusal or an unreachable
-%% address moves on to the next, while a bad argument or the timeout ends the attempt.
+%% address moves on to the next, while a bad argument, the timeout or an answer of the
+%% grant that fails its check (badarg) ends the attempt.
 connect_each([Address | Rest], Port, Opts, Timer, _Last) ->
     case connect_one(Address, Port, Opts, inet:timeout(Timer)) of
         {ok, _} = Ok -> Ok;
-        {error, Reason} = Error when Reason =:= einval; Reason =:= timeout -> Error;
+        {error, Reason} = Error when Reason =:= einval; Reason =:= timeout; Reason =:= badarg -> Error;
         {error, _} = Error -> connect_each(Rest, Port, Opts, Timer, Error)
     end;
 connect_each([], _Port, _Opts, _Timer, Last) ->
     Last.
 
 connect_one(Address, Port, Opts, Timeout) ->
-    maybe
-        {ok, Grant} ?= erx_inet:grant(),
-        call(Grant, {tcp_connect, inet, Address, Port, Opts, Timeout})
+    case erx_inet:call({tcp_connect, inet, Address, Port, Opts, Timeout}) of
+        {ok, Conn} -> {ok, {'$inet', ?MODULE, Conn}};
+        {error, _} = Error -> Error
     end.
 
 -doc "Not offered by this backend, which answers `enotsup`: a socket-address map, `gen_tcp:connect/3`'s first form.".
@@ -134,8 +135,9 @@ peername({'$inet', ?MODULE, Conn}) ->
     call(Conn, peername).
 
 %% A request to a process that has ended, however it ended, answers as a closed socket, so
-%% no crash reason of the stack reaches the caller.
-call(Pid, Request) ->
+%% no crash reason of the stack reaches the caller. Only a pid is called, never a name that
+%% gen_server would look up; every socket's pid was admitted by erx_sock_admit.
+call(Pid, Request) when is_pid(Pid) ->
     try
         gen_server:call(Pid, Request, infinity)
     catch

@@ -10,6 +10,7 @@ require_relative '../../tools/lib/erx/net_checks'
 class NetChecksTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SRC = 'erlang/apps/erx_net/src'
+  CLIENT = 'erlang/apps/erx_net_client/src'
   PIN = <<~NOTICE
     tag main-n285245
     commit 975e3605ebb15cbaf5a25c1c9d1f51aed41291d0
@@ -43,7 +44,7 @@ class NetChecksTest < Minitest::Test
   def source_rules(path, body) = rules({ path => module_text(body) })
 
   def test_the_tree_passes
-    paths = [Erx::NetChecks::NOTICE, *Dir.glob(Erx::NetChecks::SCOPE, base: ROOT)]
+    paths = [Erx::NetChecks::NOTICE, *Dir.glob([Erx::NetChecks::SCOPE, Erx::NetChecks::CLIENT_SCOPE], base: ROOT)]
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     assert_empty Erx::NetChecks.violations(files).map(&:to_s)
   end
@@ -142,5 +143,42 @@ class NetChecksTest < Minitest::Test
     assert_equal [['notices', NEXT + 1]], rules({}, notice: "#{PIN}module m\n  ../etc/passwd\n")
     assert_equal [['notices', NEXT + 1]], rules({}, notice: "#{PIN}module m\nmodule m\n")
     assert_equal [['notices', nil]], rules({ "#{SRC}/m.erl" => module_text('') }, notice: nil)
+  end
+
+  # The design's seeded failure: a backend that reads the grant key itself
+  # and so calls the grant past erx_sock_admit.
+  def test_grant_key_reads_fail_outside_erx_inet
+    { 'application:get_env(erx_net_client, grant)' => 2, "'application':get_all_env()" => 2,
+      "fun application:\n  get_env/2" => 2, 'application:get_key(erx_net_client, env)' => 2,
+      '{ok, G, _} = erx_net:local_grant()' => 2, 'whereis(erx_net_grant)' => 2 }.each do |body, line|
+      assert_equal [['grant-key', line]], source_rules("#{CLIENT}/erx_gen_tcp.erl", body), body
+    end
+  end
+
+  def test_grant_key_reads_pass_in_erx_inet_comments_and_the_stack
+    body = 'application:get_env(erx_net_client, grant, {erx_net, local_grant, []})'
+    assert_empty source_rules("#{CLIENT}/erx_inet.erl", body)
+    assert_empty source_rules("#{CLIENT}/erx_gen_udp.erl", "%% application:get_env is erx_inet's\nmy_application:get_env(k)")
+    assert_empty source_rules("#{SRC}/erx_net_app.erl", 'application:get_env(erx_net, interfaces)')
+  end
+
+  # The design's seeded failure: the resolver loader's watch_resolver call
+  # with a timeout of 5000 ms.
+  def test_calls_without_the_literal_infinity_fail
+    { 'gen_server:call(Grant, watch_resolver, 5000)' => 2, 'gen_server:call(Grant, watch_resolver)' => 2,
+      'gen_statem:call(S, r, ?TIMEOUT)' => 2, "gen:call(P, '$gen_call', r)" => 2, 'fun gen_server:call/3' => 2,
+      "x(),\n  'gen_server':call(P, {a, b}, Timeout)" => 3, 'gen_server:call(P, r, {infinity})' => 2,
+      'gen_server:call(P, fun() -> a, b end, infinity)' => 2, 'gen_server:call(P, r' => 2 }.each do |body, line|
+      assert_equal [['call-timeout', line]], source_rules("#{CLIENT}/erx_inet.erl", body), body
+      assert_equal [['call-timeout', line]], source_rules("#{SRC}/erx_net_if.erl", body), body
+    end
+  end
+
+  def test_calls_with_the_literal_infinity_pass
+    body = "gen_server:call(P, {a, [b, c], <<1, 2>>, \#{k => v}}, infinity),\n" \
+           "gen_statem:call(P, r,\n    infinity), gen:call(P, '$gen_call', r, 'infinity'),\n" \
+           "%% gen_server:call(P, r)\nmy_gen_server:call(P, r), gen_server:call_x(P), \"gen_server:call(P, r)\""
+    assert_empty source_rules("#{CLIENT}/erx_gen_tcp.erl", body)
+    assert_empty source_rules("#{SRC}/erx_net_if.erl", body)
   end
 end
