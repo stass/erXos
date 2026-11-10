@@ -142,7 +142,7 @@ module Erx
     end
 
     def self.check(input_arguments, runner_class: Runner, checks_class: Checks, arch_terms: ArchTerms,
-                   runtime: method(:with_test_runtime), rc_oracle: method(:ensure_rc_oracle))
+                   runtime: method(:with_test_runtime), rc_oracle: method(:ensure_rc_oracle), platform: RUBY_PLATFORM)
       arguments = input_arguments.dup
       OptionParser.new.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
@@ -151,14 +151,16 @@ module Erx
       checks_class.new(root: ROOT, runner: runner).run
       arch_terms.check(root: ROOT)
       rc_oracle.call(runner: runner)
+      left_out = []
       runtime.call(runner: runner) do |environment|
         stack_proof(runner: runner, environment: environment)
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
         raise Error, 'no host tests found' if tests.empty?
-        run_tests(tests, runner: runner, name: 'host-tests', environment: environment)
-        run_tests(integration_tests(ROOT), runner: runner, name: 'native-integration', environment: environment)
+        left_out = run_tests(tests, runner: runner, name: 'host-tests', environment: environment, platform: platform) +
+                   run_tests(integration_tests(ROOT), runner: runner, name: 'native-integration',
+                                     environment: environment, platform: platform)
       end
-      Terminal.puts('offline source, generation, host and native integration checks passed')
+      Terminal.puts("offline source, generation, host and native integration checks passed#{not_run_note(left_out)}")
       0
     end
 
@@ -240,9 +242,23 @@ module Erx
     # times that, and a hang costs one file's deadline, not the step's.
     TEST_FILE_DEADLINE = 900
 
-    # Each file is its own process, under its own deadline (see TestPool).
-    def self.run_tests(paths, runner:, name:, environment:, deadline: TEST_FILE_DEADLINE)
-      TestPool.run(paths, runner: runner, name: name, environment: environment, deadline: deadline, root: ROOT)
+    # Runs the files this host can run, each its own process under its own
+    # deadline (see TestPool), and returns the ones it left out
+    # (Runtime.host_test_plan), each named on the terminal before the rest
+    # start, so the step's closing line counts them as not run, not passed.
+    def self.run_tests(paths, runner:, name:, environment:, platform: RUBY_PLATFORM, deadline: TEST_FILE_DEADLINE)
+      plan = Runtime.host_test_plan(paths, root: ROOT, platform: platform)
+      plan.not_run.each { |entry| Terminal.puts("#{name}: #{entry.path}: not run on this host: #{entry.reason}") }
+      # A step this host left wholly out has nothing to run, which is not the pool's empty-list error.
+      unless plan.run.empty? && !plan.not_run.empty?
+        TestPool.run(plan.run, runner: runner, name: name, environment: environment, deadline: deadline, root: ROOT)
+      end
+      plan.not_run
+    end
+
+    # The closing line's tail when files were left out: never silent about them.
+    def self.not_run_note(not_run)
+      not_run.empty? ? '' : "; #{not_run.size} test files not run on this host (listed above)"
     end
 
     def self.check_reproducible(arguments)
@@ -264,16 +280,18 @@ module Erx
       0
     end
 
-    def self.check_sanitizers(arguments, runner_class: Runner, runtime: method(:with_test_runtime))
+    def self.check_sanitizers(arguments, runner_class: Runner, runtime: method(:with_test_runtime), platform: RUBY_PLATFORM)
       no_arguments(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      tests = SanitizerTests.discover(root: ROOT)
+      tests = SanitizerTests.discover(root: ROOT).map { |test| File.join(ROOT, test) }
+      left_out = []
       runtime.call(runner: runner) do |environment|
-        run_tests(tests.map { |test| File.join(ROOT, test) }, runner: runner, name: 'sanitizer-tests',
-                  environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
+        left_out = run_tests(tests, runner: runner, name: 'sanitizer-tests', platform: platform,
+                             environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
       end
+      passed = tests - left_out.map(&:path)
       Terminal.puts('these tests passed with ERX_SANITIZERS=address,undefined: ' \
-                    "#{tests.map { |test| File.basename(test, '_test.rb') }.join(' ')}")
+                    "#{passed.map { |test| File.basename(test, '_test.rb') }.join(' ')}#{not_run_note(left_out)}")
       if RbConfig::CONFIG.fetch('host_os').include?('darwin')
         Terminal.puts('LeakSanitizer and ASan initialization-order checks: unsupported on macOS; Linux run required')
       end

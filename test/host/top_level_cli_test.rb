@@ -111,11 +111,17 @@ class TopLevelCliTest < Minitest::Test
     end
   end
 
+  MACOS = 'arm64-darwin25'
+  FREEBSD = 'amd64-freebsd16'
+
+  def hosted_only = Erx::Runtime::HOSTED_ONLY_TESTS.map { |path| File.join(Erx::ROOT, path) }
+
   def test_check_runs_the_stack_proof_and_native_integration
     commands = []
     with_checks(commands) do |collaborators|
-      status, output = run_cli('check', **collaborators)
+      status, output = run_cli('check', **collaborators, platform: MACOS)
       assert_equal 0, status, output
+      refute_includes output, 'not run on this host'
     end
     proof = commands.find { |_argv, options| options.fetch(:name) == 'stack-proof' }
     assert proof, 'check runs the stack proof'
@@ -131,6 +137,23 @@ class TopLevelCliTest < Minitest::Test
     end
     assert integration.all? { |_argv, options| options.fetch(:env).fetch('ERX_ERL') == '/verified/erl' }
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
+  end
+
+  # Off macOS the hosted runtime's files are named as not run, with the rule, and
+  # counted in the closing line; the rest still run.
+  def test_check_off_macos_reports_the_hosted_files_as_not_run
+    commands = []
+    output = nil
+    with_checks(commands) do |collaborators|
+      status, output = run_cli('check', **collaborators, platform: FREEBSD)
+      assert_equal 0, status, output
+    end
+    discovered = Dir.glob(File.join(Erx::ROOT, 'test/host/*_test.rb'))
+    assert_equal (discovered - hosted_only).sort, step_commands(commands, 'host-tests').map { |argv, _options| argv.last }.sort
+    hosted_only.each do |path|
+      assert_includes output, "host-tests: #{path}: not run on this host: #{Erx::Runtime::HOST_RULE}"
+    end
+    assert_includes output, "checks passed; #{hosted_only.size} test files not run on this host (listed above)"
   end
 
   # The command shell's integration tests read the rc oracle, so check makes sure of it
@@ -384,14 +407,33 @@ class TopLevelCliTest < Minitest::Test
   def test_sanitizer_gate_instruments_the_pack_and_elf_regression_corpora
     commands = []
     with_checks(commands) do |collaborators|
-      status, output = run_cli('check-sanitizers', **collaborators.slice(:runner_class, :runtime))
+      status, output = run_cli('check-sanitizers', **collaborators.slice(:runner_class, :runtime), platform: MACOS)
       assert_equal 0, status, output
     end
     tests = step_commands(commands, 'sanitizer-tests')
     expected = Erx::SanitizerTests.discover(root: Erx::ROOT).map { |path| File.join(Erx::ROOT, path) }
     refute_empty expected
     assert_equal expected.sort, tests.map { |argv, _options| argv.last }.sort
+    assert_sanitizer_gate_leaves_out_the_hosted_files_off_macos(expected)
     assert tests.all? { |_argv, options| options.fetch(:env).fetch('ERX_SANITIZERS') == 'address,undefined' }
+  end
+
+  def assert_sanitizer_gate_leaves_out_the_hosted_files_off_macos(expected)
+    commands = []
+    output = nil
+    with_checks(commands) do |collaborators|
+      status, output = run_cli('check-sanitizers', **collaborators.slice(:runner_class, :runtime), platform: FREEBSD)
+      assert_equal 0, status, output
+    end
+    left_out = expected & hosted_only
+    refute_empty left_out
+    assert_equal (expected - left_out).sort, step_commands(commands, 'sanitizer-tests').map { |argv, _options| argv.last }.sort
+    passed_line = output.lines.find { |line| line.start_with?('these tests passed') }
+    left_out.each do |path|
+      assert_includes output, "sanitizer-tests: #{path}: not run on this host"
+      refute_match(/ #{File.basename(path, '_test.rb')}( |;|$)/, passed_line)
+    end
+    assert_includes passed_line, "; #{left_out.size} test files not run on this host (listed above)"
   end
 
   def test_fuzz_limits_are_checked_before_starting_commands

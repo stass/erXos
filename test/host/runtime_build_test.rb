@@ -140,7 +140,7 @@ class RuntimeBuildTest < Minitest::Test
   TREE = File.expand_path('../..', __dir__)
 
   def setup
-    skip 'the hosted runtime builds only on macOS' unless RUBY_PLATFORM.include?('darwin')
+    skip Erx::Runtime::HOST_RULE unless Erx::Runtime.host_supported?
 
     @root = File.realpath(Dir.mktmpdir('erx-runtime-build-'))
     @sdk = '/sdk/one'

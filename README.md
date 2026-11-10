@@ -517,7 +517,9 @@ export ERX_LLD=/usr/local/llvm23/bin/ld.lld
 
 `make setup` finds the newest `/usr/local/llvmNN` by itself when these
 are unset. The hosted runtime builds only on macOS, so on FreeBSD setup
-leaves it out and the tests that need it skip, saying so.
+leaves it out, `make check` names the test files that test only it
+(`Runtime::HOSTED_ONLY_TESTS`) as not run on this host, and the other
+tests that need it skip, saying so.
 
 ## Fresh worktree
 

@@ -778,6 +778,20 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] host tests on FreeBSD, `tools/lib/erx/runner.rb`: the seeded-fault (mutant) binaries
+  that abort by design dump core into the tree root (`mutant-*.core`, `page.core`,
+  `object.core`; FreeBSD's `kern.corefile` is `%N.core` in the working directory), 17 files
+  per `make check`. Test commands should run with `RLIMIT_CORE` 0.
+* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb` (`program_directories`,
+  `memo_key`), `test/host/fiasco_test.rb`: `tools/erx build fiasco` stops in kconfig with
+  `gcc: not found`, because Fiasco's host tools build with `HOSTCC=gcc` and FreeBSD has no
+  `gcc`, so the port's cross GCC 11.3 is never reached; the build should name the host
+  compiler (`cc`, or the build's clang). `fiasco_test` fails there too: the port installs the
+  cross tools in `/usr/local/bin`, which is also on the caller's PATH, so the build PATH test
+  finds an ambient directory in it, and four reuse tests see a second build of an unchanged
+  fixture run 2 commands instead of none, with the memo key fingerprinting every program in
+  `/usr/local/bin` and every library in `/usr/local/lib`; why that key changes between two
+  builds is not yet known.
 * [High] network, `erx_net_client` (`erx_gen_tcp`, `erx_gen_udp`; design-network-stack, "The
   socket process"): the socket process is not built. `erx_gen_tcp` calls the connection
   directly with `gen_server:call`, and `erx_tcp_conn` and `erx_udp_sock` present the stream

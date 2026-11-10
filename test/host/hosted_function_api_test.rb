@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/function_api'
+require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
@@ -53,7 +54,7 @@ class HostedFunctionApiTest < Minitest::Test
   }.freeze
 
   def setup
-    skip 'the hosted backend needs a macOS host' unless RUBY_PLATFORM.include?('darwin')
+    skip Erx::Runtime::HOST_RULE unless Erx::Runtime.host_supported?
     @directory = Dir.mktmpdir('hosted-function-api')
   end
 

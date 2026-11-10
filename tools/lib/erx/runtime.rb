@@ -130,8 +130,40 @@ module Erx
       OutputDirectory.check(root: @root, path: File.join(@root, 'build/runtime/hosted'))
     end
 
+    # The hosted runtime and the hosted backend under it build only on macOS.
+    HOST_RULE = 'the hosted runtime and its backend build only on macOS'
+    def self.host_supported?(platform: RUBY_PLATFORM) = platform.include?('darwin')
+
+    # The host test files that test only the hosted runtime or backend, so every
+    # test in them skips on another host. There the check leaves them out and
+    # reports each as not run, where running them would end in a file that ran
+    # no tests. On macOS they run, and a file skipping every test still fails.
+    HOSTED_ONLY_TESTS = %w[
+      test/host/hosted_executor_test.rb
+      test/host/hosted_function_api_test.rb
+      test/host/runtime_build_test.rb
+    ].freeze
+
+    # The host test files to run on this host, and each one left out with why.
+    HostTestPlan = Data.define(:run, :not_run)
+    NotRun = Data.define(:path, :reason)
+
+    # Splits paths, each root joined with a path relative to the tree, by
+    # HOSTED_ONLY_TESTS.
+    # A listed file that does not exist raises, so a renamed file cannot drop
+    # out of the list and start failing, or the list keep a stale name.
+    def self.host_test_plan(paths, root:, platform: RUBY_PLATFORM)
+      listed = HOSTED_ONLY_TESTS.map { |path| File.join(root, path) }
+      missing = listed.reject { |path| File.file?(path) }
+      raise Error, "HOSTED_ONLY_TESTS names missing files: #{missing.join(' ')}" unless missing.empty?
+      return HostTestPlan.new(run: paths, not_run: []) if host_supported?(platform: platform)
+
+      left_out, run = paths.partition { |path| listed.include?(path) }
+      HostTestPlan.new(run: run, not_run: left_out.map { |path| NotRun.new(path: path, reason: HOST_RULE) })
+    end
+
     def build(jobs: 4)
-      raise Error, 'the hosted runtime builds only on macOS' unless RUBY_PLATFORM.include?('darwin')
+      raise Error, HOST_RULE unless self.class.host_supported?
 
       @oracle.verify(HOST_OTP_FLAVOUR)
       FileUtils.rm_f(self.class.record_path(@output))
