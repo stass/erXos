@@ -37,10 +37,10 @@ it; git history is the record of completed work.
   1. the benchmarks, `tools/erx bench net-freebsd` (bulk and request-reply on the FreeBSD test host, erx_net and
      lwIP, with its counters' hook: the interface's `runs`, `run_frames`, `units`,
      `unit_segments` and `frames_dropped` totals, reported unsupported until it keeps them)
-     are in the tree; what remains is `tools/erx bench net-bulk` and `net-rr` under HVF,
+     are in the tree; what remains is the bulk and request-reply benchmarks under HVF,
      which need a TCP peer on QEMU's medium (the Linux oracle guest is not built yet); no
      gain, it fixes the baseline;
-     * [Medium] `net-bulk`/`net-rr` under HVF (`tools/erx bench`): no TCP peer on QEMU's
+     * [Medium] the bulk and request-reply benchmarks under HVF: no TCP peer on QEMU's
        medium yet (the Linux oracle guest is not built; the harness's virtio-net hub carries
        raw frames to a Ruby harness, and slirp's guest forward carries the `net_device`
        suite's TCP to a Ruby echo server over one host stream, which checks the guest's TCP
@@ -4301,8 +4301,11 @@ document's "residual risks accepted" paragraph.
 * [Low] stopgap, entropy (`liberx/backend/fiasco/service_stubs.c`, `erx_entropy_read`, and the
   generator service it calls): the bytes of a read stay in the Fiasco UTCB message registers of
   the reading thread and of the service until a later message long enough overwrites those
-  words (a read's own one-word request does not), and wherever the service's code leaves them. liberx erases its stack copy and, after a failed read, the erXos UTCB;
-  erXos's kernel puts the bytes in the reader's UTCB itself, so these copies go with Fiasco.
+  words (a read's own one-word request does not), in the CPU registers and stack spill slots
+  the compiler used on both sides, which no erasure in C reaches, and wherever the service's
+  code leaves them. liberx erases its stack copy and, after a failed read, the erXos UTCB;
+  erXos's kernel puts the bytes in the reader's UTCB itself, so the UTCB and service copies
+  go with Fiasco.
 * [Low] network, the portable `erx_bytes:siphash24/2` (`erlang/apps/erx_net/c_src/erx_bytes_nif.c`):
   a key at a bit offset is copied by `enif_inspect_binary` into a temporary block that ERTS
   frees without erasing, and the NIF API offers neither a way to erase it nor one to read the

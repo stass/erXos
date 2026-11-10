@@ -445,8 +445,11 @@ erx_entropy_read(uint32_t len)
 		return (checked);
 	if (entropy_read_fails())
 		return (ERX_ENOTSUP);
-	if (len != 0 && getentropy(words, len) != 0)
+	if (len != 0 && getentropy(words, len) != 0) {
+		/* getentropy may have filled part of words before it failed. */
+		erx_explicit_bzero(words, sizeof(words));
 		return (ERX_ENOTSUP);
+	}
 	for (uint32_t done = 0; done < len; done += sizeof(uint64_t))
 		erx_backend_mr_put_bytes(erx_utcb_self(), done, words[done / sizeof(uint64_t)], len);
 	erx_explicit_bzero(words, sizeof(words));

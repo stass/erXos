@@ -1258,7 +1258,8 @@ QEMU version where there is one, the compiler and flags, the workload and
 the baseline, and every measurement reports the counters of frames per
 run, segments per merged unit and frames dropped. A bulk measurement
 whose counters show no runs sent or no units merged fails, so the number
-is known to come from the path under test.
+is known to come from the path under test. `tools/erx bench net-freebsd` takes both
+measurements over tap on the FreeBSD test host, and its `--only` picks among their workloads.
 
 * **Bulk on the FreeBSD test host.** 512 MiB each way in 64 KiB sends, passive
   `recv(S, 0)`, the median of three, over the tap transport and over a
@@ -1274,7 +1275,7 @@ is known to come from the path under test.
   request-reply mode, against the same echo server. *Target:* a rate of
   at least a third of lwIP's and CPU per transaction at most three times
   lwIP's.
-* **`tools/erx bench net-bulk` and `tools/erx bench net-rr` under HVF.**
+* **Bulk and request-reply under HVF.**
   An erXos guest and the Linux oracle guest on the path plan.md's gate
   GN-QEMU measures, with the same workloads. Baseline: the Linux oracle
   guest at both ends of the same path, which shows what the medium

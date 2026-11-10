@@ -227,14 +227,16 @@ class ErxNetBytesTest < Minitest::Test
                  fun() -> erx_bytes:siphash24(Big, <<>>) end,
                  fun() -> erx_bytes:siphash24(<<0:128>>, [Big]) end],
         Refusals = [catch Call() || Call <- Calls],
-        Peak = lists:max([0 | [Max || {instance, _, Info} <- erlang:system_info({allocator, temp_alloc}),
-                                      {sbcs, Carriers} <- [lists:keyfind(sbcs, 1, Info)],
-                                      {carriers_size, _, _, Max} <- Carriers]]),
-        io:format("~p~n", [{[Reason || {'EXIT', {Reason, _}} <- Refusals], Peak < Size}]),
+        Peaks = [Max || {instance, _, Info} <- erlang:system_info({allocator, temp_alloc}),
+                        {sbcs, Carriers} <- [lists:keyfind(sbcs, 1, Info)],
+                        {carriers_size, _, _, Max} <- Carriers],
+        io:format("~p~n", [{[Reason || {'EXIT', {Reason, _}} <- Refusals], Peaks =/= [], lists:max([0 | Peaks]) < Size}]),
         halt().
       ERLANG
       assert status.success?, output
-      assert_equal '{[badarg,badarg,badarg,badarg,badarg],true}', output.strip
+      # The middle true says temp_alloc reported its single-block carrier statistics in the
+      # shape the probe reads, so a change of that shape cannot pass the size check vacuously.
+      assert_equal '{[badarg,badarg,badarg,badarg,badarg],true,true}', output.strip
     end
   end
 

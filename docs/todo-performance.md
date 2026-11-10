@@ -448,6 +448,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   If the checksum is a visible share, add a wider portable loop (32-bit loads,
   deferred carries) and then the AArch64 instructions chosen by feature detection, the
   portable code staying as their oracle.
+* [Low] per-byte primitives, the portable `erx_bytes` walks a list argument twice
+  (`erlang/apps/erx_net/portable/erx_bytes.erl`, `iodata_fits/1`): on stock OTP, before
+  `inet_csum/2` or `siphash24/2` hands a list to the NIF, the Erlang
+  `iodata_fits/1` walks it to refuse what the NIF API would copy, and the NIF's C walk then
+  walks it again. erXos's BIFs walk once. Settled by the time of the largest call the
+  limits accept with the most cells (a 64 KiB list of one-byte binaries, or nested lists
+  near the cell limit), with and without `iodata_fits/1`, on the development host; if the
+  first walk shows, bound only what the copy needs instead of the whole list.
 * [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.
 * [Low] `tools/lib/erx/abi_emit_draw.rb`, `erx_draw_codec:decode/2`: every message of a draw write is decoded by one walk over its field table, which a reviewer timed at about 1.6 us per `d` message on Homebrew erl 16.0.2 (JIT, Apple Silicon), against about 0.012 us for one compiled binary match of the same message (not a recorded measurement). Settled by the decode time of a 64 KiB write of `d`, `s` and `y` messages against `erx_memdraw`'s time for the same write; if it shows, the generator emits a first clause per letter matching its fixed fields at once, the walk kept for the failure offset.
 * [Low] `tools/lib/erx/generated.rb`, `Erx::Generated.require_ruby`: every Ruby process that loads a generated Ruby file (each `tools/erx` call, each host test process using the ABI or terminal tables) loads the generator libraries and hashes every `tools/lib` file and every input and output to check the stamp, about 80 ms over loading the file alone when the tree is fresh (a reviewer's rough number on Apple Silicon macOS, not a recorded measurement). Settled by the wall time of `make check` and of `ruby tools/erx status` with and without the freshness check; if it shows, check a cheap digest of the stamp's inputs before loading the generators.

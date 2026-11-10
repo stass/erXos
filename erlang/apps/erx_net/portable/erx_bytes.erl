@@ -109,9 +109,9 @@ binary_fits(Term) ->
 
 %% False when Term is a binary of more than ?FITS_BYTES bytes, or a list whose binaries hold
 %% more than ?FITS_BYTES bytes or that has more than ?FITS_CELLS cells; true otherwise. It
-%% walks the list as the walk does, sharing walked again, skips every term but a list or a
-%% binary, copies nothing, and stops past either bound, so it visits at most ?FITS_CELLS + 1
-%% cells.
+%% walks the list as the NIF's C walk does, walking a sublist again each time it is shared,
+%% skips every term but a list or a binary, copies nothing, and stops past either bound, so it
+%% visits at most ?FITS_CELLS + 1 cells.
 -spec iodata_fits(term()) -> boolean().
 iodata_fits(Term) when is_list(Term) ->
     iodata_fits(Term, [], 0, 0);
