@@ -145,6 +145,16 @@ class QemuTest < Minitest::Test
     assert_equal 1, argv.count('-global')
   end
 
+  # The guest's one way to the host is the guest forward to the echo server's loopback
+  # port: slirp stays restricted and forwards nothing from the host into the guest.
+  def test_a_network_device_is_restricted_slirp_with_one_guest_forward_to_loopback
+    nic = Erx::QemuPlan::Nic.new(frames_port: 5001, peer_port: 5002, echo_port: 5003)
+    argv = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', nic: nic)
+    users = argv.each_cons(2).select { |flag, value| flag == '-netdev' && value.start_with?('user,') }.map(&:last)
+    assert_equal ['user,id=nic_user,restrict=on,domainname=erxos.test,guestfwd=tcp:10.0.2.4:7-tcp:127.0.0.1:5003'], users
+    refute(argv.any? { |argument| argument.include?('hostfwd') })
+  end
+
   def test_a_disk_path_that_could_change_what_qemu_opens_is_refused
     ['relative.img', 'nbd:host:1', '/a,b', "/a\0b", '', nil, 5].each do |path|
       assert_raises(Erx::Error, path.inspect) { DISK.new(path: path) }

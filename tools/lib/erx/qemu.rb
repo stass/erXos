@@ -51,15 +51,23 @@ module Erx
     # guest's resolver takes as its search list.
     NIC_DOMAIN = 'erxos.test'
 
+    # The address and port of the guest forward: slirp carries a guest's TCP connection to
+    # them to the host's loopback port Nic#echo_port, the one host service the guest reaches.
+    # The address is the one slirp gives a guest forward that names none.
+    NIC_ECHO_ADDRESS = '10.0.2.4'
+    NIC_ECHO_PORT = 7
+
     # A virtio-net device on QEMU's user networking (slirp), restricted so that nothing the
-    # guest sends leaves the host, which serves the guest DHCP. One hub joins it to a
-    # `dgram` backend on loopback, QEMU's end at frames_port and the harness's at peer_port,
-    # so the harness exchanges raw Ethernet frames with the guest as one more host on its
-    # link.
-    Nic = Data.define(:frames_port, :peer_port) do
-      def initialize(frames_port:, peer_port:)
-        unless [frames_port, peer_port].all? { |port| port.is_a?(Integer) && port.between?(1, 65_535) }
-          raise Error, 'a network device plan names two loopback UDP ports'
+    # guest sends leaves the host, which serves the guest DHCP, except through one guest
+    # forward: a TCP connection to NIC_ECHO_ADDRESS port NIC_ECHO_PORT, which QEMU carries
+    # over its one connection, made when it starts, to the harness's server at loopback
+    # port echo_port. One hub joins it to a `dgram` backend on loopback, QEMU's end at
+    # frames_port and the harness's at peer_port, so the harness exchanges raw Ethernet
+    # frames with the guest as one more host on its link.
+    Nic = Data.define(:frames_port, :peer_port, :echo_port) do
+      def initialize(frames_port:, peer_port:, echo_port:)
+        unless [frames_port, peer_port, echo_port].all? { |port| port.is_a?(Integer) && port.between?(1, 65_535) }
+          raise Error, 'a network device plan names two loopback UDP ports and a loopback TCP port'
         end
 
         super
@@ -151,7 +159,8 @@ module Erx
       return [] if nic.nil?
 
       loopback = '127.0.0.1'
-      ['-netdev', "user,id=nic_user,restrict=on,domainname=#{NIC_DOMAIN}",
+      ['-netdev', "user,id=nic_user,restrict=on,domainname=#{NIC_DOMAIN}," \
+                  "guestfwd=tcp:#{NIC_ECHO_ADDRESS}:#{NIC_ECHO_PORT}-tcp:#{loopback}:#{nic.echo_port}",
        '-netdev', "dgram,id=nic_frames,local.type=inet,local.host=#{loopback},local.port=#{nic.frames_port}," \
                   "remote.type=inet,remote.host=#{loopback},remote.port=#{nic.peer_port}",
        '-netdev', 'hubport,id=nic_hub_user,hubid=0,netdev=nic_user',

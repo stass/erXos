@@ -38,12 +38,13 @@ it; git history is the record of completed work.
      lwIP, with its counters' hook: the interface's `runs`, `run_frames`, `units`,
      `unit_segments` and `frames_dropped` totals, reported unsupported until it keeps them)
      are in the tree; what remains is `tools/erx bench net-bulk` and `net-rr` under HVF,
-     which need a TCP peer on QEMU's medium (the Linux oracle guest is not built yet) and
-     the guest's TCP path beyond ARP and ICMP; no gain, it fixes the baseline;
+     which need a TCP peer on QEMU's medium (the Linux oracle guest is not built yet); no
+     gain, it fixes the baseline;
      * [Medium] `net-bulk`/`net-rr` under HVF (`tools/erx bench`): no TCP peer on QEMU's
        medium yet (the Linux oracle guest is not built; the harness's virtio-net hub carries
-       raw frames to a Ruby harness only), the guest's TCP path is tested only to ARP and
-       ICMP, and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
+       raw frames to a Ruby harness, and slirp's guest forward carries the `net_device`
+       suite's TCP to a Ruby echo server over one host stream, which checks the guest's TCP
+       but is no benchmark peer), and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
        `BenchGuest` loads its module. The Linux-guest baseline stays unsupported until then.
      * [Medium] `erx_net_if_core` counters: the map keeps only counters that were
        incremented, so "kept, zero" reads as "unsupported" in `tools/erx bench net-p620`.

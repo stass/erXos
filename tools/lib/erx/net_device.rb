@@ -9,6 +9,7 @@ require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
 require_relative 'runner'
+require_relative 'net_device_echo_server'
 require_relative 'net_device_name_server'
 
 module Erx
@@ -41,6 +42,15 @@ module Erx
   # which must not each follow the one before, as a counter's do. Every frame the harness
   # reads is parsed with bounds checks, since the guest is the code under test; a frame
   # that is not the awaited answer, slirp's included, is skipped.
+  #
+  # Last, the Erlang shell opens TCP connections with erx_gen_tcp (tcp_checkpoints): one
+  # through slirp's guest forward to the harness's echo server (EchoServer), over which
+  # it sends TCP_BYTES random bytes and must read the same bytes back, while the server's
+  # MD5 of what it took must equal the guest's of what it sent; and one to the gateway,
+  # 10.0.2.2, at the echo server's own host port. An unrestricted slirp would carry that
+  # one to the host's loopback, where the echo server listens, and connect; slirp in
+  # restricted mode must refuse it, since the guest reaches the host only through the
+  # forward.
   module NetDevice
     GUEST_IP = [10, 0, 2, 15].freeze
     HOST_IP = [10, 0, 2, 100].freeze
@@ -72,6 +82,37 @@ module Erx
     RESOLVER_ANSWER = "{[],[\"#{QemuPlan::NIC_DOMAIN}\"]}".freeze
     # Four query IDs inet_db draws in a row, which must not be a counter's run.
     IDS_LINE = "list_to_tuple([inet_db:res_option(next_id) || _ <- lists:seq(1, 4)]).\r"
+    # The Erlang shell's prompt, which may open the line its answer is on.
+    ERL_PROMPT = '(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?'
+    # The TCP lines, whose shell bindings are: S, a connection through the guest forward;
+    # D, TCP_BYTES random bytes; R, a fun that receives RECV_PIECE bytes from S within
+    # TCP_RECV_MS or raises; E, what came back; T, the milliseconds from the start of the
+    # send to the last byte received. ECHO_LINE does the whole exchange in one expression,
+    # so T holds no serial round trip.
+    #
+    # TCP_BYTES is four times the connection's receive buffer: while the shell sits in its
+    # send, the guest reads nothing, so its receive window closes and must open again for
+    # the echo to finish. Each recv asks for at most that buffer, 64 KiB, since
+    # erx_tcp_conn answers {error, enomem} beyond it where stock gen_tcp takes up to 64 MiB
+    # (TODO.md).
+    TCP_BYTES = 262_144
+    RECV_PIECE = 65_536
+    TCP_RECV_MS = 10_000
+    # Longer than the four recvs' timeouts, so a recv that times out shows as its error.
+    TCP_SECONDS = 60
+    # What the echo server takes before it fails the run: more than TCP_BYTES, so a guest
+    # that sends too much is told so by the byte count check, not by the server.
+    ECHO_LIMIT = 4 * TCP_BYTES
+    ECHO_TUPLE = "{#{QemuPlan::NIC_ECHO_ADDRESS.tr('.', ',')}}".freeze
+    CONNECT_LINE = "{ok, S} = erx_gen_tcp:connect(#{ECHO_TUPLE}, #{QemuPlan::NIC_ECHO_PORT}, " \
+                   "[binary, {active, false}], 10000), ok.\r".freeze
+    DATA_LINE = "D = rand:bytes(#{TCP_BYTES}), " \
+                "R = fun() -> {ok, B} = erx_gen_tcp:recv(S, #{RECV_PIECE}, #{TCP_RECV_MS}), B end, byte_size(D).\r".freeze
+    ECHO_LINE = "T0 = erlang:monotonic_time(millisecond), ok = erx_gen_tcp:send(S, D), " \
+                "E = iolist_to_binary([R() || _ <- lists:seq(1, #{TCP_BYTES / RECV_PIECE})]), " \
+                "T = erlang:monotonic_time(millisecond) - T0, E =:= D.\r".freeze
+    DIGEST_LINE = "{T, binary:encode_hex(erlang:md5(D))}.\r"
+    CLOSE_LINE = "erx_gen_tcp:close(S).\r"
 
     module_function
 
@@ -110,10 +151,38 @@ module Erx
        shell_point('host-pointer', Regexp.escape("10.2.0.192.in-addr.arpa domain name pointer #{name}."),
                    type: ProductionImage::Run::ERL_LINE),
        ProductionImage::Run::ERLANG_SHELL.merge(type: RESOLVER_LINE).freeze,
-       { name: 'resolver-config', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(RESOLVER_ANSWER)}\r*\n\z/n,
-         seconds: SHELL_SECONDS, type: IDS_LINE }.freeze,
-       { name: 'query-ids', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{[0-9]+,[0-9]+,[0-9]+,[0-9]+\}\r*\n\z/n,
-         seconds: SHELL_SECONDS, verify: method(:random_ids!) }.freeze]
+       erl_point('resolver-config', Regexp.escape(RESOLVER_ANSWER), type: IDS_LINE),
+       erl_point('query-ids', '\{[0-9]+,[0-9]+,[0-9]+,[0-9]+\}', verify: method(:random_ids!), type: CONNECT_LINE)]
+    end
+
+    # The gateway at a host port: the echo server's, which listens on the host's loopback.
+    def refused_line(port) = "erx_gen_tcp:connect({10,0,2,2}, #{port}, [binary], 10000).\r"
+
+    # What the TCP lines show in the Erlang shell: each step's answer; the comparison of
+    # what came back with what was sent, which must be true; T and D's MD5, which the
+    # caller's verify_digest checks against the echo server's; and the refusal of the
+    # connection to the gateway at refused_port.
+    def tcp_checkpoints(refused_port:, verify_digest:)
+      echoed = lambda do |line|
+        raise Error, "the #{TCP_BYTES} bytes the guest read back over TCP differ from those it sent" if line.include?('false')
+      end
+      [erl_point('tcp-connect', 'ok', type: DATA_LINE),
+       erl_point('tcp-data', TCP_BYTES.to_s, type: ECHO_LINE),
+       erl_point('tcp-echo', '(?:true|false)', seconds: TCP_SECONDS, verify: echoed, type: DIGEST_LINE),
+       erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: CLOSE_LINE),
+       erl_point('tcp-close', 'ok', type: refused_line(refused_port)),
+       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'))].freeze
+    end
+
+    # Checks the tcp-digest line against what the echo server took, received
+    # (EchoServer#received): TCP_BYTES bytes whose MD5 is the one the guest gives of what
+    # it sent. Returns the line's T, the transfer's milliseconds.
+    def check_echo!(line, received)
+      ms, md5 = line.match(/\{([0-9]+),<<"([0-9A-F]{32})">>\}/n).captures
+      raise Error, "the echo server took #{received.fetch(:bytes)} bytes, not #{TCP_BYTES}" unless received.fetch(:bytes) == TCP_BYTES
+      raise Error, "the guest sent bytes of MD5 #{md5}, the echo server took bytes of MD5 #{received.fetch(:md5)}" unless md5 == received.fetch(:md5)
+
+      Integer(ms, 10)
     end
 
     # Refuses four query IDs that each follow the one before, as inet_db's counter's do:
@@ -128,6 +197,9 @@ module Erx
     def shell_point(name, source, seconds: SHELL_SECONDS, type: nil, verify: nil)
       { name: name, pattern: /\A#{source}\r*\n\z/n, seconds: seconds, **{ type: type, verify: verify }.compact }.freeze
     end
+
+    # A checkpoint for the Erlang shell's answer, alone on its line or after the prompt.
+    def erl_point(name, source, **options) = shell_point(name, "#{ERL_PROMPT}#{source}", **options)
 
     def arp_request
       ethernet(BROADCAST, ETHERTYPE_ARP,
@@ -186,7 +258,9 @@ module Erx
         @frames_port = free_port
       end
 
-      def nic = QemuPlan::Nic.new(frames_port: @frames_port, peer_port: @socket.addr[1])
+      attr_reader :frames_port
+
+      def peer_port = @socket.addr[1]
 
       def close = @socket.close
 
@@ -241,6 +315,7 @@ module Erx
         @compiler = compiler
         @linker = linker
         @notes = []
+        @measurements = []
       end
 
       # Boots the development image with a network device under each accelerator and
@@ -259,6 +334,10 @@ module Erx
 
       def notes = @notes.dup.freeze
 
+      # One line per boot with the TCP transfer's time and rate, for the gate's output
+      # only: no check reads them.
+      def measurements = @measurements.dup.freeze
+
       private
 
       def boot(accel, image)
@@ -267,28 +346,41 @@ module Erx
                                             mode: 0o700)
         link = Link.new
         server = NameServer.new(link)
+        echo = EchoServer.new(limit: ECHO_LIMIT).start
+        nic = QemuPlan::Nic.new(frames_port: link.frames_port, peer_port: link.peer_port, echo_port: echo.port)
         answered = nil
+        transfer_ms = nil
+        verify_digest = ->(line) { transfer_ms = NetDevice.check_echo!(line, echo.received) }
         exchange = lambda do |_line|
           answered = NetDevice.exchange(link)
           server.start
         end
         shell = ProductionImage::Run::RELEASE_SHELL.merge(verify: exchange, type: IFCONFIG_LINE).freeze
         checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN, shell,
-                       *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) })]
+                       *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) }),
+                       *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest)]
         Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
-                                                   directory: directory, checkpoints: checkpoints, nic: link.nic,
+                                                   directory: directory, checkpoints: checkpoints, nic: nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
-        failed = server.stop
+        failed = server.stop || echo.stop
         raise failed if failed
 
         @notes << "#{accel}: the guest at #{GUEST_IP.join('.')} (#{answered.fetch(:mac)}) answered ARP and ICMP echo, " \
                   'and its shell showed vtnet0 with the lease, pinged 10.0.2.2 three times and resolved www ' \
-                  "in the lease's domain through the name server at #{SERVER}, with random query IDs"
+                  "in the lease's domain through the name server at #{SERVER}, with random query IDs; " \
+                  "its Erlang shell sent #{TCP_BYTES} bytes over TCP to the echo server and read them back, " \
+                  "and was refused the host's loopback"
+        @measurements << "net_device: #{accel}, 1 CPU: TCP from the guest's Erlang shell through slirp's guest forward " \
+                         "to the harness's echo server: #{TCP_BYTES} bytes each way in #{transfer_ms} ms " \
+                         "(#{rate(transfer_ms)} each way), from the start of the send to the last byte back"
         'passed'
       ensure
+        echo&.stop
         server&.stop
         link&.close
       end
+
+      def rate(ms) = ms.positive? ? format('%.1f MiB/s', TCP_BYTES * 1000.0 / ms / (1 << 20)) : 'too fast to rate'
     end
   end
 end
