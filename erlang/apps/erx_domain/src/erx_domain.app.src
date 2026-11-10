@@ -11,6 +11,7 @@
   {modules, [erx_domain,
              erx_domain_app,
              erx_domain_core,
+             erx_domain_facet,
              erx_domain_links,
              erx_domain_pid,
              erx_domain_srv,

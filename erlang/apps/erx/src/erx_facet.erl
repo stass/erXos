@@ -1,0 +1,208 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+-module(erx_facet).
+-moduledoc """
+The facet behaviour (docs/design-domains.md, "Facets"): a process that stands
+for one grant of one service to one grantee domain, bound to that grantee
+when it is minted, so the checks below hold for every facet by construction.
+
+start/3 runs the callback's init/1 in the new process, exports the facet's
+pid toward the grantee with send alone, and only then returns the pid, so
+the grantee can message and monitor the facet and nothing more, before
+anyone hands the pid out. The facet ends, with the same reason, when a
+process its grant names in ends_with ends: the grantee's domain pid, so
+the facet ends with its domain, and the facet or service behind it, so
+revoking that grant revokes this one. It monitors them and traps no exits,
+so its own end ends nothing but itself.
+
+What arrives is sorted by its shape before the callback sees a request:
+
+* a reply to one of the facet's own forwards, {[alias | Alias], Reply},
+  whose alias is a forward still outstanding: from a process of the facet's
+  own domain, without an envelope, or from the forward's service's domain,
+  in the envelope; the facet passes the reply to the grantee's caller. A
+  reply from any other party, or a second one, matches nothing and is
+  dropped;
+* a 'DOWN' of one of its monitors: the end of a process in ends_with ends
+  the facet, and the end of a forward's service drops the forward, whose
+  request failed there; every other 'DOWN' is dropped;
+* {'$erx_facet', From, info}, without an envelope: info/1, from the facet's
+  own domain;
+* a request: {erx_origin, D, {'$gen_call', {Pid, [alias | Alias]}, Request}},
+  a gen_server call from the grantee. D, which the connection sets, must be
+  the grantee, the message's encoded size at most the grant's max_request,
+  and the caller's pid and alias both names of the grantee's (erx:owner/1),
+  so the reply goes to the grantee and never to a third domain. Anything
+  else is dropped and counted, with no answer, since an answer would go to
+  a name the sender chose. A request past the grant's limit in flight is
+  refused with {error, badarg} and counted, as is one the callback refuses.
+  admit/3 decides the rest: a reply, a refusal, or a forward, which the
+  behaviour sends itself as a gen_server call with a fresh alias as its tag.
+
+Every other message, a local one without an envelope included, is dropped
+and counted: a facet acts for its grantee alone.
+
+Stopgap residuals of the behaviour, each in TODO.md: the
+generated admission path from the service's operation schema; admission by
+the grantee's share of reductions; the funnel's check of max_request
+before a message is queued, and the facet's queue quota and heap limit.
+""".
+
+-export([start/3, info/1]).
+
+-callback init(Grant :: grant()) -> {ok, State :: term()}.
+-callback admit(Request :: term(), From :: pid(), State :: term()) ->
+              {forward, Service :: pid(), Request1 :: term(), State1 :: term()}
+            | {reply, Reply :: term(), State1 :: term()}
+            | {refuse, Reason :: term(), State1 :: term()}.
+
+-export_type([grant/0]).
+
+%% A grant: the grantee's domain id, the processes whose end ends the facet, the largest
+%% message the facet takes from the grantee, in encoded bytes, and how many forwards may
+%% be outstanding at once; the callback's own keys besides.
+-type grant() :: #{grantee := pos_integer(), ends_with := [pid()],
+                   max_request => pos_integer(), in_flight => pos_integer(), atom() => term()}.
+
+%% docs/design-domains.md, "What a facet costs its domain": 4 KiB by default.
+-define(MAX_REQUEST, 4096).
+-define(IN_FLIGHT, 16).
+%% How long start/3 waits for the new facet's init and export.
+-define(START_TIMEOUT, 5000).
+
+%% The facet's state: its grant's checks, the callback and its state, the monitors of
+%% ends_with, each outstanding forward by its monitor, which is also its reply's alias,
+%% and the counts info/1 reports.
+-type forward() :: #{from := {pid(), [alias | reference()]}, service := pid()}.
+-type state() :: #{callback := module(), cb_state := term(), grantee := pos_integer(),
+                   max_request := pos_integer(), in_flight := pos_integer(), exports := module(),
+                   ends_with := #{reference() => pid()}, forwards := #{reference() => forward()},
+                   dropped := non_neg_integer(), refused := non_neg_integer()}.
+
+-doc """
+Starts a facet of Callback for Grant. Opts may name exports, the export table's
+module (erx_dist), for a host test's stand-in. {error, Reason} when the callback's
+init fails, when a process of ends_with has already ended, or when the export
+table refuses the export.
+""".
+-spec start(module(), grant(), #{exports => module()}) -> {ok, pid()} | {error, term()}.
+start(Callback, #{grantee := Grantee, ends_with := EndsWith} = Grant, Opts)
+  when is_atom(Callback), is_integer(Grantee), Grantee > 0, is_list(EndsWith) ->
+    Exports = maps:get(exports, Opts, erx_dist),
+    Parent = self(),
+    Tag = make_ref(),
+    {Pid, Monitor} = spawn_monitor(fun() -> init(Parent, Tag, Callback, Grant, Exports) end),
+    receive
+        {Tag, ok} ->
+            demonitor(Monitor, [flush]),
+            {ok, Pid};
+        {'DOWN', Monitor, process, Pid, Reason} ->
+            {error, Reason}
+    after ?START_TIMEOUT ->
+            demonitor(Monitor, [flush]),
+            exit(Pid, kill),
+            {error, timeout}
+    end.
+
+-doc "The facet's grantee and counts, asked from the facet's own domain.".
+-spec info(pid()) -> #{grantee := pos_integer(), dropped := non_neg_integer(),
+                       refused := non_neg_integer(), outstanding := non_neg_integer()}.
+info(Facet) ->
+    {ok, Info} = gen:call(Facet, '$erx_facet', info),
+    Info.
+
+init(Parent, Tag, Callback, #{grantee := Grantee, ends_with := EndsWith} = Grant, Exports) ->
+    Monitors = maps:from_list([{monitor(process, Pid), Pid} || Pid <- EndsWith]),
+    {ok, CbState} = Callback:init(Grant),
+    %% No facet starts, or is exported, for a grant one of whose local processes has
+    %% ended; the 'DOWN' of one that ends from here on, or of a remote one, ends the facet.
+    case [Pid || Pid <- EndsWith, node(Pid) =:= node(), not is_process_alive(Pid)] of
+        [] -> ok;
+        [_ | _] -> exit(noproc)
+    end,
+    case Exports:export(self(), [send], Grantee) of
+        ok -> ok;
+        {error, Reason} -> exit({export, Reason})
+    end,
+    Parent ! {Tag, ok},
+    loop(#{callback => Callback, cb_state => CbState, grantee => Grantee,
+           max_request => maps:get(max_request, Grant, ?MAX_REQUEST),
+           in_flight => maps:get(in_flight, Grant, ?IN_FLIGHT), exports => Exports,
+           ends_with => Monitors, forwards => #{}, dropped => 0, refused => 0}).
+
+-spec loop(state()) -> no_return().
+loop(#{ends_with := EndsWith, forwards := Forwards, exports := Exports} = State) ->
+    receive
+        {[alias | Alias], Reply} when is_map_key(Alias, Forwards) ->
+            loop(replied(Alias, Reply, State));
+        {erx_origin, D, {[alias | Alias], Reply}} = Message when is_map_key(Alias, Forwards) ->
+            #{Alias := #{service := Service}} = Forwards,
+            case Exports:owner(Service) of
+                D -> loop(replied(Alias, Reply, State));
+                _ -> loop(request(Message, State))
+            end;
+        {'DOWN', Monitor, process, _Pid, Reason} when is_map_key(Monitor, EndsWith) ->
+            exit(Reason);
+        {'DOWN', Monitor, process, _Pid, _Reason} when is_map_key(Monitor, Forwards) ->
+            loop(State#{forwards := maps:remove(Monitor, Forwards)});
+        {'DOWN', _Monitor, _Type, _Object, _Info} ->
+            loop(State);
+        {'$erx_facet', From, info} ->
+            gen:reply(From, info_of(State)),
+            loop(State);
+        Message ->
+            loop(request(Message, State))
+    end.
+
+info_of(#{grantee := Grantee, dropped := Dropped, refused := Refused, forwards := Forwards}) ->
+    #{grantee => Grantee, dropped => Dropped, refused => Refused, outstanding => map_size(Forwards)}.
+
+%% The service's reply to the forward under Alias goes to the grantee's caller.
+replied(Alias, Reply, #{forwards := Forwards} = State) ->
+    {#{from := From}, Rest} = maps:take(Alias, Forwards),
+    demonitor(Alias, [flush]),
+    gen:reply(From, Reply),
+    State#{forwards := Rest}.
+
+%% A message that is no reply, signal or info: a request if the grantee sent it in the
+%% shape a request has, within the size the grant allows, and its reply goes to a name of
+%% the grantee's; dropped and counted otherwise.
+request({erx_origin, Grantee, {'$gen_call', {Pid, [alias | Alias]} = From, Request} = Message},
+        #{grantee := Grantee, max_request := MaxRequest, exports := Exports} = State)
+  when is_pid(Pid), is_reference(Alias) ->
+    case erlang:external_size(Message) =< MaxRequest andalso
+         Exports:owner(Pid) =:= Grantee andalso Exports:owner(Alias) =:= Grantee of
+        true -> admit(Request, From, State);
+        false -> dropped(State)
+    end;
+request(_Message, State) ->
+    dropped(State).
+
+admit(_Request, From, #{forwards := Forwards, in_flight := InFlight} = State)
+  when map_size(Forwards) >= InFlight ->
+    refuse(From, badarg, State);
+admit(Request, {Pid, _Tag} = From, #{callback := Callback, cb_state := CbState} = State) ->
+    case Callback:admit(Request, Pid, CbState) of
+        {forward, Service, Request1, CbState1} when is_pid(Service) ->
+            forward(Service, Request1, From, State#{cb_state := CbState1});
+        {reply, Reply, CbState1} ->
+            gen:reply(From, Reply),
+            State#{cb_state := CbState1};
+        {refuse, Reason, CbState1} ->
+            refuse(From, Reason, State#{cb_state := CbState1})
+    end.
+
+%% A gen_server call to Service whose tag is the alias of a monitor on it, as gen:call
+%% makes one, so the reply and the service's end both name the forward.
+forward(Service, Request, From, #{forwards := Forwards} = State) ->
+    Alias = monitor(process, Service, [{alias, demonitor}]),
+    Service ! {'$gen_call', {self(), [alias | Alias]}, Request},
+    State#{forwards := Forwards#{Alias => #{from => From, service => Service}}}.
+
+refuse(From, Reason, #{refused := Refused} = State) ->
+    gen:reply(From, {error, Reason}),
+    State#{refused := Refused + 1}.
+
+dropped(#{dropped := Dropped} = State) ->
+    State#{dropped := Dropped + 1}.

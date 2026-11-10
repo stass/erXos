@@ -114,19 +114,19 @@ class MediumBootTest < Minitest::Test
   end
 
   # The create map names the archive's indexes, and the answer is the one the configured
-  # domain's halt and the cell's halt, stop, kill and BeamAsm halt give; a line with another
+  # domain's halt and the cell's halt, stop, kill, BeamAsm halt and faceted halt give; a line with another
   # end, a restarted configured domain or a refused create does not pass.
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
     expression = Boot.domain_lib_expression(DOMAIN)
-    assert_match(/id=>12,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
+    assert_match(/id=>13,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
     # The library refuses an id at or below the system domain's, so the service's ids
     # start above it; the shell's own calls of the library are refused.
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
     assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
-    assert_includes expression, 'DlNotService=Lib:configured(12,0,self())'
+    assert_includes expression, 'DlNotService=Lib:configured(13,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
-    assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields,UpFields)->DlDeath=fun(Id)->')
+    assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=fun(Id)->')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.
     assert_match(/\},\#\{runtime=>42,args=><<"--",0,.*"-eval",0,"erlang:halt\(case erlang:system_info\(emu_flavor\) of jit->0;_->2 end\)",0>>\},/,
                  expression)

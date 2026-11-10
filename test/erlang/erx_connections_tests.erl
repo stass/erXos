@@ -27,7 +27,8 @@ agent_test_() ->
     [{atom_to_list(Name), fun() -> with_agent(Case) end}
      || {Name, Case} <- [{mapped_then_lost, fun mapped_then_lost/1}, {ended_before_up, fun ended_before_up/1},
                          {owner_ended, fun owner_ended/1}, {refused_hand_over, fun refused_hand_over/1},
-                         {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1}]].
+                         {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1},
+                         {facets, fun facets/1}]].
 
 %% Runs Case with an agent started from the test's own process, which plays the
 %% agent's environment, and ends the agent after.
@@ -35,8 +36,9 @@ with_agent(Case) ->
     Agent = start(),
     try Case(Agent) after stop(Agent) end.
 
-%% The agent, registered as start/2 registers it, with the stand-in opener; the test
-%% is its net_kernel and its domain pid.
+%% The agent, registered as start/2 registers it, with the stand-in opener, once its
+%% name is taken, so erx_connections:dropped/0 reaches it; the test is its net_kernel
+%% and its domain pid.
 start() ->
     Test = self(),
     start(fun(Command) ->
@@ -47,11 +49,13 @@ start() ->
 
 start(Open) ->
     Test = self(),
-    spawn(fun() ->
-                  process_flag(trap_exit, true),
-                  true = register(erx_connections, self()),
-                  erx_connections:introduced(Test, ?SYSTEM, Test, Open)
-          end).
+    Agent = spawn(fun() ->
+                          process_flag(trap_exit, true),
+                          true = register(erx_connections, self()),
+                          Test ! {registered, self()},
+                          erx_connections:introduced(Test, ?SYSTEM, Test, Open)
+                  end),
+    receive {registered, Agent} -> Agent end.
 
 %% Ends the agent and waits until its name is free for the next.
 stop(Agent) ->
@@ -221,3 +225,29 @@ forged(Agent) ->
     ?assertMatch([_ | _], erlang:port_info(Port)),
     record(Agent, {erx_connection_down, ?PEER, noconnection}),
     ?assertEqual({erx_connection_unmapped, ?PEER}, answer()).
+
+facets(Agent) ->
+    %% The domain service's facets answer reaches init only in the system connection's
+    %% envelope, and as a map, of which init gets the entries naming a facet's pid by an
+    %% atom. One a peer sends, one sent bare, one that is not a map and one wrapped twice
+    %% are dropped and counted, so no domain but the system domain names init's facets.
+    Init = whereis(init),
+    Facet = spawn(fun() -> receive stop -> ok end end),
+    erlang:trace(Init, true, ['receive']),
+    Agent ! {erx_origin, ?PEER, {erx_facets, #{forged => Facet}}},
+    Agent ! {erx_facets, #{forged => Facet}},
+    Agent ! {erx_origin, ?SYSTEM, {erx_facets, [forged]}},
+    Agent ! {erx_origin, ?SYSTEM, {erx_origin, ?PEER, {erx_facets, #{forged => Facet}}}},
+    record(Agent, {erx_facets, #{echo => Facet, <<"bin">> => Facet, bad => 3}}),
+    ?assertEqual(4, erx_connections:dropped()),
+    erlang:trace(Init, false, ['receive']),
+    ?assertEqual([#{echo => Facet}], init_facets()),
+    Facet ! stop.
+
+%% The facets answers init received, in order, from the trace of its receives.
+init_facets() ->
+    receive
+        {trace, _, 'receive', {erx_facets, Facets}} -> [Facets | init_facets()];
+        {trace, _, 'receive', _} -> init_facets()
+    after 100 -> []
+    end.

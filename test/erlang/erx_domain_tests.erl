@@ -188,7 +188,8 @@ service_test_() ->
                           fun refused_side/0, fun side_ended/0, fun ready_report/0, fun boot_timeout/0,
                           fun report_overtaken/0, fun introduce/0, {timeout, 30, fun connection_down/0},
                           fun retire_answers_create/0, fun lost_side/0, fun ended_in_library/0,
-                          fun forged_answer/0, fun refused_stop/0, fun service_end_ends_domain_pids/0]} end}.
+                          fun forged_answer/0, fun refused_stop/0, fun facets/0,
+                          fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
     erx_domain_fake_lib:next_call().
@@ -698,6 +699,52 @@ refused_stop() ->
     ?assertEqual({stop, Id}, next_call()),
     ?assertEqual({created, {error, {system_side, enomem}}},
                  receive {created, _} = Created -> Created after 2000 -> none end).
+
+facets() ->
+    %% A spec's facets are its own: the library never sees them, and a spec whose
+    %% facets are not a map of names to the service's own pids is refused.
+    Echo = spawn(fun Loop() -> receive {'$gen_call', From, Req} -> gen:reply(From, Req), Loop() end end),
+    ?assertEqual({error, {bad_spec, facets}}, erx_domain:create(#{name => <<"f">>, facets => [echo]})),
+    ?assertEqual({error, {bad_spec, facets}}, erx_domain:create(#{name => <<"f">>, facets => #{echo => self}})),
+    ?assertEqual({error, {bad_spec, facets}},
+                 erx_domain:create(#{name => <<"f">>, facets => #{<<"echo">> => Echo}})),
+    ?assertEqual({error, {bad_spec, facets}},
+                 erx_domain:create(#{name => <<"f">>, facets => #{echo => erx_domain_fake_lib:agent(<<"f">>, 5)}})),
+    %% The service mints a facet in front of each, bound to the domain, which exports
+    %% itself to the domain, and answers the domain's report, through its domain pid,
+    %% with the facets by name, only once the report has come: the pid's first message
+    %% from the service after the report is the answer.
+    Self = self(),
+    erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
+    {ok, Domain} = erx_domain:create(#{name => <<"facets">>, memory => 4096, facets => #{echo => Echo}}),
+    erlang:trace(new_processes, false, ['receive']),
+    Id = erx_domain:id(Domain),
+    Pid = erx_domain:pid(Domain),
+    {create, Spec} = next_call(),
+    ?assertNot(is_map_key(facets, Spec)),
+    ?assertEqual({open_side, Id, 'facets@erxos', Id * 10}, next_call()),
+    ?assertEqual({export, Id, [send]}, next_call()),
+    ?assertEqual({start, Id}, next_call()),
+    ?assertEqual({export, Id, [send]}, next_call()),
+    Received = [Message || {trace, P, 'receive', Message} <- trace_messages(), P =:= Pid],
+    ?assertMatch([{_, port, _}, {erx_origin, Id, {erx_ready, _}}, {_, facets, #{echo := _}}], Received),
+    [#{echo := Facet}] = [Facets || {_, facets, Facets} <- Received],
+    _ = [erlang:trace(Traced, false, ['receive']) || Traced <- [Pid, Facet]],
+    _ = trace_messages(),
+    ?assertMatch(#{grantee := Id, dropped := 0}, erx_facet:info(Facet)),
+    %% The facet ends with the domain.
+    Monitor = monitor(process, Facet),
+    ok = erx_domain:stop(Domain, shutdown),
+    ?assertEqual({stop, Id}, next_call()),
+    ?assertEqual({close_side, Id, {domain_down, Id, stopped}}, next_call()),
+    ?assertEqual({disconnect, Id * 10}, next_call()),
+    ?assertEqual({retire, Id}, next_call()),
+    ?assertEqual({domain_down, Id, stopped}, receive {'DOWN', Monitor, process, _, R} -> R after 2000 -> timeout end),
+    exit(Echo, kill).
+
+%% The trace messages that have come, in order.
+trace_messages() ->
+    receive {trace, _, _, _} = T -> [T | trace_messages()] after 100 -> [] end.
 
 service_end_ends_domain_pids() ->
     %% The service's end ends every domain pid with its reason: no domain

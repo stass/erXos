@@ -10,10 +10,11 @@
 %% domain service asks, closes it at the domain's end, and tells the service when a side
 %% ends by itself. A domain's agent also maps each connection the system domain introduces
 %% it to, on the connection_up its domain pid writes, finishes and ends it on
-%% connection_down, and tells the domain pid when one ends by itself (records/3). Each
-%% agent counts the messages it drops (dropped/0). The
-%% agent and net_kernel live as long as the runtime: the agent halts it on net_kernel's
-%% end other than an ordered stop, and erx_dist:accept/1 on the agent's.
+%% connection_down, and tells the domain pid when one ends by itself (records/3); it hands
+%% init the domain's facets, the domain service's answer to init's ready report. Each
+%% agent counts the messages it drops (dropped/0). The agent and net_kernel live as long
+%% as the runtime: the agent halts it on net_kernel's end other than an ordered stop, and
+%% erx_dist:accept/1 on the agent's.
 -module(erx_connections).
 -moduledoc false.
 
@@ -78,10 +79,11 @@ init(Kernel, System) ->
     serve(Kernel, System).
 
 %% Any process handed this pid can reach it, and what arrives from another domain comes as
-%% {erx_origin, D, Msg} (edit 16): the one such message either loop acts on is a domain's
-%% record from the system domain, so no peer steers it. Both loops act on net_kernel's end, which the
-%% agent's link brings as 'EXIT' (kernel_ended/1), answer dropped/0 with the count of
-%% what they dropped, and answer any other call badarg.
+%% {erx_origin, D, Msg} (edit 16): the only such messages either loop acts on are a
+%% domain's records and facets answer from the system domain, so no peer steers it. Both
+%% loops act on net_kernel's end, which the agent's link brings as 'EXIT'
+%% (kernel_ended/1), answer dropped/0 with the count of what they dropped, and answer any
+%% other call badarg.
 serve(Kernel, none) ->
     sides(Kernel, #{}, 0);
 serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
@@ -267,11 +269,15 @@ hand_over(Kernel, #{port := Port} = Connection) ->
             kernel_ended(Reason)
     end.
 
-%% A domain's agent, once its system connection is up: the connection-control records the
-%% system domain's domain pid writes into the control table, which it acts on only as they
-%% arrive in the envelope of the system connection, {erx_origin, SystemId, Record}, so a
-%% peer handed the agent's pid can reach it but not steer it; erx_dist's word that an
-%% introduced connection's entry is up; each introduced port's end; and net_kernel's end.
+%% A domain's agent, once its system connection is up. It acts on
+%% * the connection-control records the system domain's domain pid writes into the
+%%   control table, only as they arrive in the envelope of the system connection,
+%%   {erx_origin, SystemId, Record}, so a peer handed the agent's pid can reach it but
+%%   not steer it;
+%% * in the same envelope, the domain service's answer to init's ready report, the
+%%   domain's facets by name, which the agent hands init (edit 65);
+%% * erx_dist's word that an introduced connection's entry is up;
+%% * each introduced port's end, and net_kernel's end.
 %% What else arrives is dropped and counted in Dropped, so its queue stays empty
 %% (docs/design-domains.md, "Messages between the domain service and a runtime"). Held is
 %% each introduced connection by the peer's domain id, as {Phase, Port, Monitor}: mapping
@@ -288,6 +294,9 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Env, connection_up(Env, Peer, PeerNode, Values, Held), Dropped);
         {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
             records(Env, connection_down(Env, Peer, Reason, Held), Dropped);
+        {erx_origin, SystemId, {erx_facets, Facets}} when is_map(Facets) ->
+            init ! {erx_facets, #{Name => Facet || Name := Facet <- Facets, is_atom(Name), is_pid(Facet)}},
+            records(Env, Held, Dropped);
         {erx_connection_inserted, Peer, Port} ->
             records(Env, inserted(Env, Peer, Port, Held), Dropped);
         {{connection_ended, Peer}, Monitor, port, Port, Reason} ->

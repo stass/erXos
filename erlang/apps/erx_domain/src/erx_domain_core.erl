@@ -50,7 +50,8 @@ state is a bug of the caller and fails with a badmatch.
                     principal := pos_integer(), origin := origin(), state := life(),
                     pid := pid() | undefined, ref := reference() | undefined,
                     connection := non_neg_integer(), ended := undefined | {info(), integer()},
-                    ctl_slots := non_neg_integer(), reader := non_neg_integer()}.
+                    ctl_slots := non_neg_integer(), reader := non_neg_integer(),
+                    facets := #{atom() => pid()}}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
 -type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
                    slogan => slogan()}.
@@ -101,7 +102,7 @@ take(Name, #{node := Node} = Binding, Principal, Origin,
      #{next_id := Id, names := Names, domains := Domains} = State) ->
     Domain = #{id => Id, name => Name, node => Node, principal => Principal, origin => Origin,
                state => building, pid => undefined, ref => undefined, connection => 0, ended => undefined,
-               ctl_slots => 0, reader => 0},
+               ctl_slots => 0, reader => 0, facets => #{}},
     Next = State#{next_id := Id + 1, names := Names#{erx_ident:to_binary(Name) => Binding#{holder := Id}},
                   domains := Domains#{Id => Domain}},
     {ok, Domain, Next}.
@@ -110,13 +111,15 @@ take(Name, #{node := Node} = Binding, Principal, Origin,
 The library built domain Id, with system connection Connection, whose control table has
 CtlSlots slots, one per connection the domain may hold, and whose rings it reads have
 Reader bytes of data each; Pid and Ref are its domain pid's.
+Facets, if given, are the processes the domain gets a facet in front of when it reports
+ready (erx_domain_srv).
 """.
 -spec built(pos_integer(), #{connection := non_neg_integer(), ctl_slots := non_neg_integer(),
                              reader := non_neg_integer(), atom() => term()},
             pid(), reference(), state()) -> state().
-built(Id, #{connection := Connection, ctl_slots := CtlSlots, reader := Reader}, Pid, Ref, State) ->
+built(Id, #{connection := Connection, ctl_slots := CtlSlots, reader := Reader} = Created, Pid, Ref, State) ->
     update(Id, building, #{state => built, connection => Connection, ctl_slots => CtlSlots, reader => Reader,
-                           pid => Pid, ref => Ref}, State).
+                           pid => Pid, ref => Ref, facets => maps:get(facets, Created, #{})}, State).
 
 -doc "Domain Id's first thread started.".
 -spec running(pos_integer(), state()) -> state().

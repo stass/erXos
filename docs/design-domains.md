@@ -2028,7 +2028,10 @@ records its connections need, the `connection_up` of its creator's
 connection first.
 The domain service answers init with the facets the spec's `facets`
 names, minted for this domain, which that message exports to it, and
-`erx:cap(Name)` returns them. The spec's `env` is
+`erx:cap(Name)` returns them: the domain pid sends the answer to the
+connection agent, which hands it to init, and init waits for it before
+`-eval`, `-s` and `-run`, so the domain holds its facets before any of them runs; the
+applications of its boot script, which start before the report, hold none yet. The spec's `env` is
 the domain's environment, which `os:getenv/1` reads. `create/1` returns
 `{ok, Domain}` when init has reported ready, or `{error, Reason}` if the
 runtime fails or the spec's boot timeout passes first; in every error case
@@ -2291,8 +2294,8 @@ the grantee, since the facet's pid reached the grantee in a frame to the
 grantee alone ([Exports](#exports)). The behaviour checks again, from the
 envelope: every message from another domain reaches the facet as
 `{erx_origin, D, Msg}`, where `D` is the lane's domain ([The
-peer](#the-peer)), and a request whose `D` is not the grantee is refused and
-counted. A facet's pid is a name like any other, which its grantee can pass
+peer](#the-peer)), and a request whose `D` is not the grantee is dropped and
+counted, unanswered. A facet's pid is a name like any other, which its grantee can pass
 on; a domain that learns it gets nothing from it. The peer wraps every
 message from another domain, whether sent to the facet's pid or to an alias
 of it, and wraps no signal, so a message without an envelope comes from a
@@ -2325,10 +2328,16 @@ before its callback sees a request:
   runtime exported to the facet's domain by encoding it; it names where the
   result goes, never who asks.
 
-A request that fails a check is refused with `{error, badarg}` and counted,
-so a service behind a facet cannot be made a confused deputy: a domain that
-has learnt a facet's pid, its grantee's pids and a reply alias of its
-grantee's gets nothing from the facet.
+A request that fails the origin check, its lane's domain not the grantee,
+the size check or the reply-target check is dropped and counted,
+unanswered: an answer would go to the reply target, a name the sender
+chose, so answering would let any domain have the facet send to a third
+party, and an oversized request is dropped before it is decoded. A request
+that passes those and fails any other check is refused with
+`{error, badarg}` and counted. Either way a
+service behind a facet cannot be made a confused deputy: a domain that has
+learnt a facet's pid, its grantee's pids and a reply alias of its grantee's
+gets nothing from the facet.
 
 **A facet for a service in another domain** forwards the admitted request on
 its own domain's connection with the service's domain, as itself, with a
@@ -2669,8 +2678,9 @@ answers each as the call's result.
 | `{erx_connection_down, Peer, Reason}` | domain pid to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent has the port finish at the lane's current position, ends it with `Reason`, which fires its links and monitors with it, unmaps, closes and answers `connection_unmapped`; about a connection the domain has already lost, which it ended from its side while the record was on its way, the agent answers `connection_unmapped` at once, since it has unmapped |
 | `{erx_connection_unmapped, Peer}` | agent to domain pid | the domain has unmapped the connection's objects and closed its capabilities |
 | `{erx_connection_lost, Peer, Reason}` | agent to domain pid | the domain ended the connection from its side, `Reason` saying how: `malformed` for a malformed frame, position or record from the peer, or a peer that does not read its answers, `no_memory` when the runtime could not allocate for it, `disconnect` after `erlang:disconnect_node/1`, and `noconnection` for any other end, a signal past `peer_held` among them; `{map, refused}` when the open or `net_kernel` refused it, and `{map, R}`, `R` one of the four, when it ended before its entry was up; it has already unmapped |
+| `{erx_facets, #{Name => Facet}}` | domain pid to agent | the domain service's answer to init's ready report: the domain's facets by name, every domain that reported getting one, with no facets too; an ordinary message, in the ring; the agent hands it to init, which keeps it for `erx:cap/1` (edit 65) |
 
-The two messages to the agent are the **connection-control records**. The
+The `erx_connection_up` and `erx_connection_down` messages are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,
 each once the agent has answered the last, so at most one per peer name
 is outstanding, and every record is answered, which is what frees its
@@ -2767,6 +2777,9 @@ from a control slot, and the agent acts only on the system domain's.
   a holder of the exit right on the domain pid. With `kill` it ends the
   domain pid at once, and the domain service then stops the domain ([Domain
   lifecycle](#domain-lifecycle)).
+* `erx:cap/1` returns the facet of that name the domain started with, or
+  `undefined` when it holds none; it never waits, since init holds the
+  facets before `-eval`, `-s` and `-run`.
 * `erx_domain:grant/4` mints a facet for a running domain, in front of a
   live facet the caller holds, within that facet's scope and `Limits`
   ([Facets](#facets)); `{ok, FacetPid}` means the facet runs and its pid has
@@ -3364,23 +3377,24 @@ for the same reason.
     to its row of the compatibility table; the list comes from the run,
     not from this document.
 * **Hostile clients** of each system service send requests naming pids they
-  do not hold and reply targets in other domains; they expect refusals, and
-  other clients' requests are served on time. A domain H that grantee G
+  do not hold and reply targets in other domains; they expect refusals, no
+  answer at all for a reply target in another domain, and other clients'
+  requests are served on time. A domain H that grantee G
   introduced to G's facet, to G's pid and to a reply alias of G's asks the
   facet, with `From` set to G's pid and that alias, for an exit signal to a
   process that H holds with send and G holds with exit: H's frame never
   reaches the facet, since the facet's pid was exported to G alone, and when
-  the test exports it to H as well the facet refuses the request as not from
-  its grantee, so the process lives either way. A reply to one of a facet's
-  forwards that comes from a domain other than the service's, or comes
-  twice, and a `'DOWN'` tuple sent as a message, are refused as requests not
-  from the grantee; an attenuating facet's request through the facet behind
+  the test exports it to H as well the facet drops and counts the request as
+  not from its grantee, so the process lives either way. A reply to one of a
+  facet's forwards that comes from a domain other than the service's, or
+  comes twice, and a `'DOWN'` tuple sent as a message, are dropped and
+  counted as requests not from the grantee; an attenuating facet's request through the facet behind
   it, and a request to a facet of a service in the system domain, are each
   answered, the reply coming without an envelope and taken by its tag; the
   facet behind an attenuating facet exits, and the attenuating facet exits
   with the same reason, while a command domain's end, which ends its facets,
   leaves its starter's facet serving; a session's own facet, run by the same
-  behaviour, refuses every domain but its grantee; a revoked facet, whose
+  behaviour, drops the requests of every domain but its grantee; a revoked facet, whose
   attenuating facets end with it, whose queued requests get no answer and
   whose caller's monitor fires, while a request it forwarded before
   completes at the service; a callback that reaches an authority-consuming

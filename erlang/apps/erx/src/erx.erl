@@ -9,7 +9,7 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1]).
+-export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1]).
 
 %%% Source lines: erx:source/1.
 
@@ -121,3 +121,16 @@ that name claims, so a reply sent to a forged name goes to no third domain.
 -spec owner(pid() | reference() | port()) -> non_neg_integer().
 owner(Name) ->
     erx_dist:owner(Name).
+
+%%% Facets (docs/design-domains.md, "Facets").
+
+-doc """
+The facet named `Name` that the domain service minted for this domain when
+it started, as its spec's `facets` named it, or `undefined` when the domain
+holds none of that name. The domain's init waits for them after its ready
+report, before any `-eval`, `-s` or `-run`, and keeps them (edit 65); the
+system domain, which reports nothing, holds none.
+""".
+-spec cap(atom()) -> pid() | undefined.
+cap(Name) when is_atom(Name) ->
+    maps:get(Name, persistent_term:get({erx, facets}, #{}), undefined).

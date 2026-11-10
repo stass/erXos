@@ -47,9 +47,9 @@ reach it only through facets, which arrive with the connections.
 %% view has (include/erx/dom.h, erx_dom_principal_t).
 -define(SYSTEM_PRINCIPAL, 1).
 %% The keys of a request beyond its name and boot_timeout: erx_domain_lib:spec()'s, less
-%% id, principal and domain_pid, which the service sets.
+%% id, principal and domain_pid, which the service sets, and facets, the service's own.
 -define(REQUEST_KEYS, [runtime, release, release_files, memory, outer, grant, lane, args, env,
-                       connections, flags, spaces, limits]).
+                       connections, flags, spaces, limits, facets]).
 %% How long a domain's init has to report ready, in milliseconds, unless its request
 %% sets boot_timeout (docs/design-domains.md, "Erlang interface"); a configured domain
 %% always has this long.
@@ -207,11 +207,15 @@ handle_info({'EXIT', Pid, _Reason}, #{core := Core} = State) when Core =/= undef
 handle_info(_Message, State) ->
     {noreply, State}.
 
-%% A request: its name and fields checked, then built as a configured row is.
+%% A request: its name and fields checked, then built as a configured row is. Its facets
+%% name processes of the system domain, by facet name; the domain gets a facet in front of
+%% each once it reports ready (grant_facets/2), and the library never sees them.
 create(_Spec, #{lib := none} = State) ->
     {{error, enotsup}, State};
 create(#{name := Name} = Spec, State) ->
     Timeout = maps:get(boot_timeout, Spec, ?BOOT_TIMEOUT),
+    Facets = maps:get(facets, Spec, #{}),
+    ValidFacets = valid_facets(Facets),
     Fields = maps:without([name, boot_timeout], Spec),
     case [Key || Key <- maps:keys(Fields), not lists:member(Key, ?REQUEST_KEYS)] of
         [Key | _] ->
@@ -219,6 +223,8 @@ create(#{name := Name} = Spec, State) ->
         [] when not (Timeout =:= infinity orelse
                      (is_integer(Timeout) andalso Timeout >= 0 andalso Timeout =< ?BOOT_TIMEOUT_MAX)) ->
             {{error, {bad_spec, boot_timeout}}, State};
+        [] when not ValidFacets ->
+            {{error, {bad_spec, facets}}, State};
         [] ->
             case erx_ident:new(Name) of
                 {error, bad_identifier} = Error ->
@@ -226,14 +232,22 @@ create(#{name := Name} = Spec, State) ->
                 Ident ->
                     #{lib := Lib} = State,
                     Make = fun(Id, Pid) ->
-                                   Lib:create(Fields#{id => Id, name => Name, principal => ?SYSTEM_PRINCIPAL,
-                                                      domain_pid => Pid})
+                                   Lib:create((maps:without([facets], Fields))#{id => Id, name => Name,
+                                                                                principal => ?SYSTEM_PRINCIPAL,
+                                                                                domain_pid => Pid})
                            end,
-                    build(Ident, ?SYSTEM_PRINCIPAL, request, Make, Timeout, State)
+                    build(Ident, ?SYSTEM_PRINCIPAL, request, Make, Facets, Timeout, State)
             end
     end;
 create(_Spec, State) ->
     {{error, {bad_spec, name}}, State}.
+
+%% A spec's facets: a map from facet names to live or dead processes of the system domain.
+valid_facets(Facets) when is_map(Facets) ->
+    lists:all(fun({Name, Behind}) -> is_atom(Name) andalso is_pid(Behind) andalso node(Behind) =:= node() end,
+              maps:to_list(Facets));
+valid_facets(_Facets) ->
+    false.
 
 start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := Lib} = State) ->
     case erx_ident:new(Name) of
@@ -242,7 +256,7 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
             State;
         Ident ->
             Make = fun(Id, Pid) -> Lib:configured(Id, Row, Pid) end,
-            case build(Ident, Principal, {configured, Row}, Make, ?BOOT_TIMEOUT, State) of
+            case build(Ident, Principal, {configured, Row}, Make, #{}, ?BOOT_TIMEOUT, State) of
                 {{error, Reason}, Next} ->
                     logger:error("erx_domain: configured domain ~ts did not start: ~0p", [Name, Reason]),
                     Next;
@@ -261,8 +275,10 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
 %% whose side, export or start is refused is stopped, its end retires it as any end
 %% does, and its create is refused once it is retired. A started domain is waiting for
 %% its init's ready report, which Timeout bounds, unless it has no system connection,
-%% the one path a report could take: then it is ready at its start.
-build(Ident, Principal, Origin, Make, Timeout, #{core := Core} = State) ->
+%% the one path a report could take: then it is ready at its start. Facets are the
+%% processes the domain gets a facet in front of when it reports ready; a domain with no
+%% system connection never reports, so it gets none.
+build(Ident, Principal, Origin, Make, Facets, Timeout, #{core := Core} = State) ->
     case erx_domain_core:admit(Ident, Principal, Origin, Core) of
         {error, _} = Error ->
             {Error, State};
@@ -271,7 +287,7 @@ build(Ident, Principal, Origin, Make, Timeout, #{core := Core} = State) ->
             Pid = erx_domain_pid:start_link(self(), Id, Node, Ref),
             case made(Make, Id, Pid) of
                 {ok, #{connection := Connection} = Created} ->
-                    Built = erx_domain_core:built(Id, Created, Pid, Ref, Admitted),
+                    Built = erx_domain_core:built(Id, Created#{facets => Facets}, Pid, Ref, Admitted),
                     Next = State#{core := Built, links := add_party(Id, Node, Created, State)},
                     Domain = {erx_domain, Id, Node, Pid},
                     case started(Id, Pid, Ref, Created#{node => Node}, Next) of
@@ -356,11 +372,36 @@ ready(Id, Ref, #{core := Core, waiting := Waiting} = State) ->
         {{ok, #{ref := Ref, state := running}}, _} ->
             {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
             Ready = State#{core := erx_domain_core:ready(Id, Core), links := Links},
-            answer_ready(Id, perform(Actions, Ready));
+            answer_ready(Id, grant_facets(Id, perform(Actions, Ready)));
         {_, #{Id := #{ref := Ref, ended := {running, _Info}}}} ->
             answer_ready(Id, State);
         _ ->
             State
+    end.
+
+%% The answer to domain Id's ready report, its facets by name. Each is minted in front of
+%% the process the spec named, bound to the domain and exported to it (erx_facet:start/3),
+%% and ends with the domain pid or that process. The answer goes to the domain pid, which
+%% hands it to the domain's agent for init (edit 65). Init waits for it, so every domain
+%% that reported is answered, with no facets too.
+grant_facets(Id, #{core := Core, exports := Exports} = State) ->
+    {ok, #{pid := Pid, ref := Ref, facets := Facets}} = erx_domain_core:fetch(Id, Core),
+    Minted = maps:filtermap(fun(Name, Behind) -> mint(Id, Pid, Name, Behind, Exports) end, Facets),
+    Pid ! {Ref, facets, Minted},
+    State.
+
+mint(Id, DomainPid, Name, Behind, Exports) ->
+    Grant = #{grantee => Id, ends_with => [DomainPid, Behind], behind => Behind},
+    case erx_facet:start(erx_domain_facet, Grant, #{exports => Exports}) of
+        {ok, Facet} ->
+            {true, Facet};
+        %% The domain or the process behind ended while the service minted.
+        {error, noproc} ->
+            false;
+        %% Left out, so erx:cap/1 in the domain finds none of that name.
+        {error, Reason} ->
+            logger:error("erx_domain: domain ~b's facet ~ts did not start: ~0p", [Id, Name, Reason]),
+            false
     end.
 
 answer_ready(Id, #{waiting := Waiting} = State) ->

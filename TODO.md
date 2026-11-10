@@ -809,7 +809,7 @@ it; git history is the record of completed work.
   the admission path of grants and sockets is hand-written, with the
   generated module's exact signature, until the schema generator over
   `abi/services` exists; replace it with the module generated from
-  `abi/services/net.txt` then. Until `erx_facet` exists, a grant on a host
+  `abi/services/net.txt` then. Until a network grant is an `erx_facet`, a grant on a host
   runs under `erx_net_local`'s loop.
 
 ## Bugs by subsystem
@@ -1367,6 +1367,20 @@ it; git history is the record of completed work.
   shares; the service drops them without counting (design-system.md "What a domain sends
   the domain service"). Bound what a domain can make the pid and the service spend, and
   count the service's drops, when the connection protocol applies answers.
+* [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` and `erx_domain_srv.erl`
+  (`grant_facets/2`): the facet behaviour checks the origin, the reply target, the
+  encoded size against `max_request` and the limit in flight, and nothing else of
+  design-domains.md "Facets". Stopgap residuals, of fairness and memory rather than
+  authority: no admission by the grantee's measured share of reductions, no queue quota and
+  no heap limit, so a grantee can fill its facet's mailbox and the facet's heap as fast as its
+  lane delivers; `max_request` is checked by the facet once the message is decoded and
+  queued, not by the funnel before; and admission is hand-written, not the generated path
+  from the service's operation schema. Missing: the domain service's grant records, the check
+  that a facet handed on is granted to the starter (every creator is a process of the system
+  domain, whose own processes stand behind every facet it names), `erx_domain:grant/4`, and
+  facets from a configured or session template row, since the stopgap manifest check refuses
+  manifest facet rows; a spec's `facets` is the one source of a domain's facets. Init waits
+  at most 5 s for the answer and then runs with none.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
   always get the default 10 s boot timeout; the manifest has no field for it.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names

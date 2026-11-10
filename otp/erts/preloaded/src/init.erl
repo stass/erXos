@@ -17,7 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: a domain's runtime reports ready to its domain pid before -s,
+%% Modified by erXos: a domain's runtime reports ready to its domain pid, and waits for
+%% its facets, before -s,
 %% -run and -eval (report_ready/0).
 %%
 %% %CopyrightEnd%
@@ -700,6 +701,11 @@ boot_loop(BootPid, State) ->
 	    boot_loop(BootPid,State#state{status = {InS,NewStatus}});
 	{BootPid,{script_id,Id}} ->
 	    boot_loop(BootPid,State#state{script_id = Id});
+	%% erXos edit 65: the domain's facets, which its connection agent hands init,
+	%% for the boot process, which waits for them in report_ready/0.
+	{erx_facets, Facets} when is_map(Facets) ->
+	    BootPid ! {erx_facets, Facets},
+	    boot_loop(BootPid, State);
 	{'EXIT',BootPid,normal} ->
             {_,PS} = State#state.status,
 	    notify(State#state.subscribed),
@@ -1233,19 +1239,37 @@ do_boot(Init,Flags,Start) ->
 %% {erx_ready, #{connections => Agent}}, naming its connection agent; the frame's
 %% encoding hands the agent out to the system domain with send (edit 8). The system
 %% domain, whose boot page names no domain pid, and a runtime that is no node, which
-%% runs no agent and has no system connection up, report nothing.
+%% runs no agent and has no system connection up, report nothing. The boot process,
+%% which reports, then waits for the domain service's answer, the domain's facets by
+%% name, which its agent hands init as {erx_facets, Facets} and init's boot_loop/2
+%% passes on to it, and keeps them as the persistent
+%% term {erx, facets}, which erx:cap/1 reads, so -eval and every -s and -run find
+%% them. An answer that has not come in ?FACETS_TIMEOUT milliseconds leaves the domain
+%% with no facets.
 report_ready() ->
     case erlang:system_info(os_type) of
         {unix, erxos} ->
             case {erx_dist:boot(), whereis(erx_connections)} of
                 {{_Id, {_SystemId, _SystemNode, DomainPid}}, Agent} when is_pid(Agent) ->
                     DomainPid ! {erx_ready, #{connections => Agent}},
-                    ok;
+                    receive_facets();
                 _ ->
                     ok
             end;
         _ ->
             ok
+    end.
+
+-define(FACETS_TIMEOUT, 5000).
+
+receive_facets() ->
+    receive
+        {erx_facets, Facets} when is_map(Facets) ->
+            persistent_term:put({erx, facets}, Facets)
+    after ?FACETS_TIMEOUT ->
+            %% The boot script has started kernel, whose logger runs by now.
+            logger:error("init: no answer to the ready report in ~b ms; the domain has no facets",
+                         [?FACETS_TIMEOUT])
     end.
 
 get_root(Flags) ->

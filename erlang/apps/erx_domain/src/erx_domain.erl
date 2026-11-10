@@ -48,9 +48,11 @@ or stopped.
 -doc """
 Creates a domain: {ok, Domain}, or {error, Reason}, Reason bad_identifier,
 name_taken, quota, system_limit, no_memory, badarg (a field of the wrong
-shape), {bad_spec, Key} (a key the spec does not take, or a boot_timeout
-that is no timeout), {system_side, Error} (the system side of its system
-connection did not open: noproc where the system domain is no node),
+shape), {bad_spec, Key} (a key the spec does not take, a boot_timeout
+that is no timeout, or facets that are not a map of names to processes of
+the system domain, each of which the domain gets a facet in front of),
+{system_side, Error} (the system side of its system connection did not
+open: noproc where the system domain is no node),
 {export, Error} (the export table refused the domain pid's), {start, Error},
 timeout (init did not report ready within boot_timeout, and the service
 stopped the domain), {boot, Info} (the domain ended before it reported,

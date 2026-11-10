@@ -85,12 +85,12 @@ module Erx
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
     # any id at or below it, and the domain service gives ids in turn above it, so the
     # configured domain takes the first, the cell's two creates the library refuses the
-    # next two, and its four domains the four after.
+    # next two, and its five domains the five after.
     SYSTEM_DOMAIN_ID = 4
     CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
-    DOMAIN_IDS = [SYSTEM_DOMAIN_ID + 4, SYSTEM_DOMAIN_ID + 5, SYSTEM_DOMAIN_ID + 6, SYSTEM_DOMAIN_ID + 7].freeze
+    DOMAIN_IDS = (4..8).map { |offset| SYSTEM_DOMAIN_ID + offset }.freeze
     # An id nothing takes in the cell, for the calls the shell makes of the library itself.
-    FREE_ID = SYSTEM_DOMAIN_ID + 8
+    FREE_ID = SYSTEM_DOMAIN_ID + 9
 
     # Where the domain's runtime images and release are in the archive: the boot image's
     # indexes a create names them by. runtime is the interpreter's image, jit the BeamAsm
@@ -101,6 +101,16 @@ module Erx
     # (docs/design-runtime.md, "BeamAsm"), and that the image it runs is BeamAsm's.
     JIT_HALT = 'erlang:halt(case erlang:system_info(emu_flavor) of jit->0;_->2 end)'
     JIT_ARGS = [*DOMAIN_ARGS[0...-1], JIT_HALT].freeze
+    # What the faceted domain evaluates in NAMED_HALT's place: a gen_server call of ping
+    # to its facet echo (erx:cap/1, docs/design-domains.md, "Facets"), which forwards it to
+    # the process of the system domain behind it, whose answer is the call's. A halt with
+    # status 0 says the domain held the facet before -eval and the call went through it
+    # and back; 3 is another answer, 4 a call that raised, as one to undefined does.
+    FACET_HALT = 'erlang:halt(try gen_server:call(erx:cap(echo),ping,10000) of ping->0;_->3 catch _:_->4 end)'
+    FACET_ARGS = [*DOMAIN_ARGS[0...-1], FACET_HALT].freeze
+    # The process of the system domain behind the facet: it answers every gen_server call
+    # with its request.
+    FACET_ECHO = %q{spawn(fun DlEcho()->receive {'$gen_call',DlEF,DlEM}->gen:reply(DlEF,DlEM),DlEcho() end end)}
 
     # The cell's steps as [variable, call, answer], each bound in turn, since each relies
     # on the ones before it. The answer of each is the line's element in its place
@@ -137,7 +147,12 @@ module Erx
       ['DlKilled', 'DlRunWith(<<"killed">>,UpFields,fun(DlD)->erx_domain:stop(DlD,kill) end)', "{#{DOMAIN_IDS[2]},ok,killed}"],
       # A domain of the BeamAsm image, which the library gives a space that allows JIT
       # objects because the image's manifest marks it: it runs, and halts with status 0.
-      ['DlJit', 'DlRunWith(<<"jitted">>,JitFields,fun(_)->ok end)', "{#{DOMAIN_IDS[3]},ok,{domain_down,#{DOMAIN_IDS[3]},{halt,0}}}"]
+      ['DlJit', 'DlRunWith(<<"jitted">>,JitFields,fun(_)->ok end)', "{#{DOMAIN_IDS[3]},ok,{domain_down,#{DOMAIN_IDS[3]},{halt,0}}}"],
+      # A domain whose spec names an echo process of the system domain under facets: the
+      # domain service mints it a facet in front of the process and answers its init's
+      # report with it, and the domain's call through the facet answers, so it halts 0.
+      ['DlFacet', 'DlRunWith(<<"faceted">>,FacetFields,fun(_)->ok end)',
+       "{#{DOMAIN_IDS[4]},ok,{domain_down,#{DOMAIN_IDS[4]},{halt,0}}}"]
     ].freeze
     # DlRunWith: asks the domain service for a domain named Name with the request fields of
     # Spec changed by Fields, monitors its domain pid, does Then to it and waits for the
@@ -187,13 +202,15 @@ module Erx
                         grant: erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
                         lane: 4096, args: binary_args(DOMAIN_ARGS), env: '<<>>', domain_pid: 'self()')
       jit = erlang_map(runtime: domain.jit, args: binary_args(JIT_ARGS))
+      facet = erlang_map(args: binary_args(FACET_ARGS), facets: erlang_map(echo: FACET_ECHO))
       up = erlang_map(args: binary_args(UP_ARGS))
       badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }
-      "io:format(\"~0p~n\",[(fun(Lib,Spec,JitFields,UpFields)->DlDeath=#{DOMAIN_LIB_DEATH},DlRunWith=#{DOMAIN_LIB_RUN}," \
-        "DlRun=fun(Name,Then)->DlRunWith(Name,\#{},Then) end,DlAsk=#{DOMAIN_LIB_ASK}," \
+      "io:format(\"~0p~n\",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=#{DOMAIN_LIB_DEATH}," \
+        "DlRunWith=#{DOMAIN_LIB_RUN},DlRun=fun(Name,Then)->DlRunWith(Name,\#{},Then) end,DlAsk=#{DOMAIN_LIB_ASK}," \
         "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg}," \
-        "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)(erx_domain_lib,#{spec},#{jit},#{up})])."
+        "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)" \
+        "(erx_domain_lib,#{spec},#{jit},#{facet},#{up})])."
     end
 
     # A boot page's argument strings as an Erlang binary expression: each NUL-terminated.
