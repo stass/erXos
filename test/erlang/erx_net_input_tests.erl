@@ -92,7 +92,7 @@ pseudo(Src, Dst, Proto) -> erx_ip6_wire:pseudo_sum(Src, Dst, 0, Proto).
 
 tcp(Src, Dst, Sport, Dport, Flags, Payload) ->
     Header = #tcp{sport = Sport, dport = Dport, seq = 1, ack = 2, flags = Flags, win = 100, urp = 0},
-    iolist_to_binary(erx_tcp_wire:encode(Header, Payload, pseudo(Src, Dst, ?PROTO_TCP))).
+    iolist_to_binary(erx_tcp_wire:encode(Header, Payload, pseudo(Src, Dst, ?PROTO_TCP), sender)).
 
 udp(Src, Dst, Sport, Dport, Payload) ->
     iolist_to_binary(erx_udp_wire:encode(#udp{sport = Sport, dport = Dport}, Payload,

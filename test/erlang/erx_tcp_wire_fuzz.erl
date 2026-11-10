@@ -61,7 +61,7 @@ check({Family, Bytes}) ->
 round_trip(_, _, Payload) when byte_size(Payload) > 16#ffff - 60 ->
     ok;
 round_trip(Family, Tcp, Payload) ->
-    Encoded = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, pseudo(Family, 0))),
+    Encoded = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, pseudo(Family, 0), sender)),
     Unsigned = Tcp#tcp{opts = (Tcp#tcp.opts)#tcp_opts{signature = false}},
     case erx_tcp_wire:decode(pseudo(Family, byte_size(Encoded)), Encoded) of
         {ok, Unsigned, Payload} -> ok;

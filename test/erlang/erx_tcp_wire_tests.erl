@@ -73,11 +73,11 @@ addoptions_layout_test() ->
     ?assertEqual({ok, Ack#tcp{opts = #tcp_opts{ts = {5, 6}, sacks = lists:sublist(Blocks, 3)}}, <<>>},
                  decode(encoded(Ack))).
 
-encoded(Tcp) -> iolist_to_binary(erx_tcp_wire:encode(Tcp, <<>>, pseudo(0))).
+encoded(Tcp) -> iolist_to_binary(erx_tcp_wire:encode(Tcp, <<>>, pseudo(0), sender)).
 
 %% The run layouts' clauses against the fold: over random option sets, half of them a run's
 %% layout (none, or the timestamps alone), each with a random header, payload and
-%% pseudo-header sum, `encode/3` gives the bytes of the reference encoder below and
+%% pseudo-header sum, `encode/4` gives the bytes of the reference encoder below and
 %% `optlen/1` the length of its options. Signature is drawn too, since the encoder writes
 %% none whatever it says.
 encoder_matches_reference_test() ->
@@ -85,11 +85,27 @@ encoder_matches_reference_test() ->
                         {Tcp, Payload, Pseudo, R} = random_segment(R0),
                         Expected = reference_encode(Tcp, Payload, Pseudo),
                         ?assertEqual({Tcp, Expected},
-                                     {Tcp, iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, Pseudo))}),
+                                     {Tcp, iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, Pseudo, sender))}),
                         ?assertEqual({Tcp#tcp.opts, byte_size(reference_options(Tcp#tcp.opts))},
                                      {Tcp#tcp.opts, erx_tcp_wire:optlen(Tcp#tcp.opts)}),
                         R
                 end, rand:seed_s(exsss, {3, 5, 7}), lists:seq(1, 20000)).
+
+%% A segment encoded for the driver to finish carries the pseudo-header's sum with its
+%% length in th_sum, not complemented, and finished it is the sender's encoding: over
+%% random segments, the sum of the bytes from the segment's start, field included,
+%% complemented into the field, gives encode/4's bytes with `sender`.
+driver_encoding_finishes_to_the_senders_test() ->
+    lists:foldl(fun(_, R0) ->
+                        {Tcp, Payload, Pseudo, R} = random_segment(R0),
+                        Sender = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, Pseudo, sender)),
+                        Driver = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, Pseudo, driver)),
+                        <<_:16/binary, Field:16, _/binary>> = Driver,
+                        ?assertEqual(erx_net_sum:add(Pseudo, byte_size(Driver)), Field),
+                        ?assertEqual({Tcp, Sender},
+                                     {Tcp, erx_net_frame:finish({csum, 0, 16, Driver})}),
+                        R
+                end, rand:seed_s(exsss, {5, 7, 11}), lists:seq(1, 5000)).
 
 random_segment(R0) ->
     {[Sport, Dport, Win, Urp, Pseudo], R1} = values(5, 16#ffff, R0),

@@ -40,6 +40,27 @@ class ErxTapTest < Minitest::Test
                       ['sum = erx_inet_sum(0, bin.data + ERX_TAP_ETHER_HDR_LEN,', 'sum = erx_inet_sum(0, bin.data,'])
   end
 
+  # A delayed frame whose field is looked for two bytes late gets its checksum written over
+  # the wrong bytes.
+  def test_seeded_field_two_bytes_late_is_caught
+    assert_seed_fails('delayed_frames_are_finished_in_the_write_test',
+                      ['at = start + field;', 'at = start + field + 2;'])
+  end
+
+  # A finish that writes the field's own bytes instead of the sum sends the partial sum.
+  def test_seeded_field_left_unfinished_is_caught
+    assert_seed_fails('delayed_frames_are_finished_in_the_write_test',
+                      ['out[*nout].iov_base = field_bytes;',
+                       'out[*nout].iov_base = (void *)(base + (at - pos));'])
+  end
+
+  # A bound that lets the field's second byte lie past the frame writes a frame one byte
+  # longer instead of refusing it.
+  def test_seeded_field_half_outside_the_frame_is_caught
+    assert_seed_fails('delayed_frame_refusals_test',
+                      ['len - start - field < 2)', 'len - start - field < 1)'])
+  end
+
   # A stop callback that leaves the descriptor open keeps an armed handle's descriptor
   # after its owner has ended.
   def test_seeded_stop_without_close_is_caught

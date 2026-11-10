@@ -84,8 +84,14 @@ which arms the device for writing; `{drop, Reason}` for a frame shorter than the
 header (`malformed`), longer than the MTU and the header (`too_long`), or that the tap
 discarded as a wire loses one (`refused`). `{error, Reason}` ends the medium: `partial` for a
 write that took part of the frame, `arm`, or `{write, Errno}`.
+
+A delayed frame, `{csum, Start, Field, Frame}` (`erx_net_frame:delayed()`), is written with
+its checksum finished: the NIF sums the frame's bytes from `Start` to its end, the field at
+`Start + Field` included, and writes the complement in place of the field's two bytes, an
+iovec of its own, so no binary is changed or copied. `Start` and `Field` must be even and
+the field must lie inside the frame, else `badarg`.
 """.
--spec send(handle(), iodata()) ->
+-spec send(handle(), iodata() | erx_net_frame:delayed()) ->
     {ok, 1} | full | {drop, malformed | too_long | refused} | {error, term()}.
 send(_Handle, _Frame) ->
     erlang:nif_error(undef).

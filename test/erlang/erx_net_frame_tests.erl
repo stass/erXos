@@ -34,7 +34,7 @@ v6(Text) ->
 
 iface(Name, Pid, Mac, Extra) ->
     maps:merge(#{name => Name, pid => Pid, link => ethernet, lladdr => Mac, mtu => 1500,
-                 mtu6 => 1500, hlim => 64, driver => Pid}, Extra).
+                 mtu6 => 1500, hlim => 64, finish => none, driver => Pid}, Extra).
 
 addr(Name, Addr, Plen) -> #{addr => Addr, plen => Plen, ifname => Name, flags => []}.
 
@@ -264,6 +264,66 @@ emsgsize_never_raises_test() ->
                  erx_net_frame:udp(Over, 1, 2, binary:copy(<<0>>, 65530), gen())),
     %% IPv6 without don't-fragment fragments a segment over its 1280-byte link MTU.
     {ok, [_, _], _} = erx_net_frame:tcp(Path, [segment([Big], 0, false)], gen()).
+
+%% --- Delayed checksums ----------------------------------------------------------
+
+%% Path with its interface's driver finishing checksums in its copy.
+finishing(#{iface := If} = Path) -> Path#{iface := If#{finish := copy}}.
+
+%% Over an interface that finishes, each segment's packet is delayed, with the segment
+%% after the IP header and th_sum 16 bytes into it, and its field holding the
+%% pseudo-header's sum with the segment's length; finished, packet and frame are the bytes
+%% the sender's own checksum gives, from the same generator. Payloads of odd and even
+%% lengths, in pieces, over IPv4 and IPv6.
+delayed_segments_finish_to_the_senders_bytes_test() ->
+    Segments = [segment([<<"abc">>, <<"defg">>], 2, true), segment([], 1, false),
+                segment([<<"x">>, <<>>, <<"yz">>], 0, true)],
+    [begin
+         Path = path(Dst),
+         {ok, Plain, Gen} = erx_net_frame:tcp(Path, Segments, gen()),
+         {ok, Delayed, Gen} = erx_net_frame:tcp(finishing(Path), Segments, gen()),
+         [begin
+              {csum, Start, 16, Bytes} = D,
+              ?assertEqual(Header, Start),
+              <<_:Start/binary, Segment/binary>> = iolist_to_binary(Bytes),
+              <<_:16/binary, Field:16, _/binary>> = Segment,
+              ?assertEqual(erx_net_sum:add(pseudo(Path), byte_size(Segment)), Field),
+              ?assertEqual(iolist_to_binary(P), erx_net_frame:finish(D))
+          end || {P, D} <- lists:zip(Plain, Delayed)],
+         {send, PlainFrames} = erx_net_frame:address(Path, {?PEER, stale}, Plain),
+         {send, Frames} = erx_net_frame:address(finishing(Path), {?PEER, stale}, Delayed),
+         ?assertEqual([{csum, 14 + Header, 16} || _ <- Frames],
+                      [{csum, Start, Field} || {csum, Start, Field, _} <- Frames]),
+         ?assertEqual([iolist_to_binary(F) || F <- PlainFrames],
+                      [erx_net_frame:finish(F) || F <- Frames])
+     end || {Dst, Header} <- [{v4("8.8.8.8"), 20}, {v6("2001:db8:9::1"), 40}]].
+
+%% The loopback interface has nothing below it that finishes, so link/3 hands it a delayed
+%% packet finished.
+loopback_gets_delayed_packets_finished_test() ->
+    Path = path(v4("8.8.8.8")),
+    {ok, [P], _} = erx_net_frame:tcp(Path, [segment([<<"lo">>], 0, true)], gen()),
+    {ok, [D], _} = erx_net_frame:tcp(finishing(Path), [segment([<<"lo">>], 0, true)], gen()),
+    ?assertEqual([{lo0, iolist_to_binary(P)}], erx_net_frame:link(#{link => none}, lo0, [D])).
+
+pseudo(#{family := inet, src := Src, dst := Dst}) -> erx_ip4_wire:pseudo_sum(Src, Dst, 0, 6);
+pseudo(#{family := inet6, src := Src, dst := Dst}) -> erx_ip6_wire:pseudo_sum(Src, Dst, 0, 6).
+
+%% A segment that IP fragments leaves with its checksum finished, since no transport can
+%% finish it across fragments: the fragments are those of an interface that does not finish.
+fragmented_segments_are_finished_by_the_sender_test() ->
+    Path = path({v6("fe80::9"), eth1}),
+    Segments = [segment([binary:copy(<<"z">>, 1600)], 0, false)],
+    {ok, [_, _] = Fragments, Gen} = erx_net_frame:tcp(Path, Segments, gen()),
+    ?assertEqual({ok, Fragments, Gen}, erx_net_frame:tcp(finishing(Path), Segments, gen())).
+
+%% finish/1 takes only even offsets with the field inside the frame.
+finish_refusals_test() ->
+    Frame = binary:copy(<<1>>, 40),
+    ?assertEqual(<<1, 1, 16#fc, 16#fc, 1, 1>>,
+                 erx_net_frame:finish({csum, 0, 2, binary:copy(<<1>>, 6)})),
+    [?assertError(badarg, erx_net_frame:finish({csum, Start, Field, Frame}))
+     || {Start, Field} <- [{1, 2}, {2, 1}, {38, 2}, {40, 0}, {42, 0}, {0, 39}, {-2, 2}]].
 
 %% --- A connection over a path ------------------------------------------------
 

@@ -33,7 +33,10 @@
  * Ethernet header (erx_inet_csum.c), taken right after the read while the
  * bytes are in the cache, so no Erlang process reads them to check a
  * checksum (docs/design-network-stack.md, "Checksums in the copy").  The
- * sum is a sum of whatever bytes the frame holds, never a verdict.
+ * sum is a sum of whatever bytes the frame holds, never a verdict.  A sent
+ * frame whose TCP checksum the stack delayed is finished in send/2's writev(2):
+ * its sum is taken over the frame's binaries where they lie, and its checksum
+ * field is written from an iovec of its own (erx_tap_finish).
  */
 
 #define _POSIX_C_SOURCE	200809L
@@ -46,6 +49,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -114,9 +118,10 @@ typedef enum erx_tap_walk {
 
 static ErlNifResourceType *erx_tap_type;
 
-static ERL_NIF_TERM atom_armed, atom_drop, atom_eof, atom_error, atom_erx_tap,
-    atom_full, atom_malformed, atom_more, atom_ok, atom_partial, atom_readable,
-    atom_refused, atom_sum, atom_too_long, atom_undefined, atom_writable;
+static ERL_NIF_TERM atom_armed, atom_csum, atom_drop, atom_eof, atom_error,
+    atom_erx_tap, atom_full, atom_malformed, atom_more, atom_ok, atom_partial,
+    atom_readable, atom_refused, atom_sum, atom_too_long, atom_undefined,
+    atom_writable;
 
 /* --- The decision core ------------------------------------------------- */
 
@@ -215,6 +220,66 @@ erx_tap_walk(ErlNifEnv *env, ERL_NIF_TERM frame, struct iovec *iov,
 		cur = tails[--depth];
 	}
 	return (ERX_TAP_WALK_JOIN);
+}
+
+/*
+ * Finishes the delayed checksum of a frame of len bytes held in the niov
+ * pieces of iov (docs/design-network-stack.md, "Checksums in the copy"):
+ * field_bytes receives, in network byte order, the complement of the sum of
+ * the frame's bytes from start to its end, the field's two bytes at
+ * start + field included, and out receives the frame's pieces with those two
+ * bytes replaced by field_bytes, so no binary is written.  *nout is out's
+ * count: one piece may become three, so at most niov + 2.  False, with
+ * nothing written, when start or field is odd or the field does not lie
+ * inside the frame; start and field come from the caller's term and are
+ * checked here, once, before either is used.
+ */
+static bool
+erx_tap_finish(const struct iovec *iov, int niov, size_t len, size_t start,
+    size_t field, uint8_t field_bytes[2], struct iovec *out, int *nout)
+{
+	const uint8_t *base;
+	size_t after_from, at, end, pos, sum_from;
+	uint16_t running;
+	int i;
+
+	if (start % 2 != 0 || field % 2 != 0 || start > len ||
+	    field > len - start || len - start - field < 2)
+		return (false);
+	at = start + field;
+	running = 0;
+	*nout = 0;
+	for (i = 0, pos = 0; i < niov; i++, pos = end) {
+		base = iov[i].iov_base;
+		end = pos + iov[i].iov_len;
+		/* The piece's bytes at start and after it are summed. */
+		if (end > start) {
+			sum_from = start > pos ? start - pos : 0;
+			running = erx_inet_sum(running, base + sum_from,
+			    iov[i].iov_len - sum_from, pos + sum_from - start);
+		}
+		/* Its bytes before the field, the field, and its bytes after. */
+		if (pos < at) {
+			out[*nout].iov_base = (void *)base;
+			out[*nout].iov_len = (end < at ? end : at) - pos;
+			(*nout)++;
+		}
+		if (pos <= at && at < end) {
+			out[*nout].iov_base = field_bytes;
+			out[*nout].iov_len = 2;
+			(*nout)++;
+		}
+		if (end > at + 2) {
+			after_from = pos > at + 2 ? 0 : at + 2 - pos;
+			out[*nout].iov_base = (void *)(base + after_from);
+			out[*nout].iov_len = iov[i].iov_len - after_from;
+			(*nout)++;
+		}
+	}
+	running = (uint16_t)~running;
+	field_bytes[0] = (uint8_t)(running >> 8);
+	field_bytes[1] = (uint8_t)(running & 0xff);
+	return (true);
 }
 
 /* --- Terms -------------------------------------------------------------- */
@@ -512,28 +577,63 @@ erx_tap_recv(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /*
+ * The parts of a frame term: a delayed frame {csum, Start, Field, Frame} gives
+ * its Frame, Start and Field, with *is_delayed set; any other term is the
+ * frame itself.  False for a tuple of another shape.
+ */
+static bool
+erx_tap_frame_term(ErlNifEnv *env, ERL_NIF_TERM term, ERL_NIF_TERM *frame,
+    bool *is_delayed, unsigned *start, unsigned *field)
+{
+	const ERL_NIF_TERM *parts;
+	int arity;
+
+	*frame = term;
+	*is_delayed = enif_get_tuple(env, term, &arity, &parts);
+	if (!*is_delayed)
+		return (true);
+	if (arity != 4 || !enif_is_identical(parts[0], atom_csum) ||
+	    !enif_get_uint(env, parts[1], start) ||
+	    !enif_get_uint(env, parts[2], field))
+		return (false);
+	*frame = parts[3];
+	return (true);
+}
+
+/*
  * send(Handle, Frame) -> {ok, 1} | full | {drop, Reason} | {error, Reason}:
  * one frame, iodata, handed to the kernel in one writev(2) of its binaries.
- * full: none of it was taken, and the device is armed for writing.
+ * A delayed frame, {csum, Start, Field, Frame}, is handed over with its
+ * checksum finished (erx_tap_finish); offsets that do not fit the frame are
+ * badarg, since the transport drops such a frame before it calls.  full: none
+ * of it was taken, and the device is armed for writing.
  */
 static ERL_NIF_TERM
 erx_tap_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	struct iovec iov[ERX_TAP_IOV_MAX];
+	struct iovec iov[ERX_TAP_IOV_MAX], finished[ERX_TAP_IOV_MAX + 2];
+	ERL_NIF_TERM frame;
 	ErlNifBinary joined;
+	struct iovec *write_iov;
 	erx_tap_t *tap;
 	size_t len;
 	ssize_t n;
-	int niov, tries;
+	unsigned start, field;
+	uint8_t field_bytes[2];
+	int niov, nwrite, tries;
+	bool is_delayed;
 
 	(void)argc;
 	if ((tap = erx_tap_handle(env, argv[0])) == NULL)
 		return (enif_make_badarg(env));
-	switch (erx_tap_walk(env, argv[1], iov, &niov, &len)) {
+	if (!erx_tap_frame_term(env, argv[1], &frame, &is_delayed, &start,
+	    &field))
+		return (enif_make_badarg(env));
+	switch (erx_tap_walk(env, frame, iov, &niov, &len)) {
 	case ERX_TAP_WALK_IOV:
 		break;
 	case ERX_TAP_WALK_JOIN:
-		if (!enif_inspect_iolist_as_binary(env, argv[1], &joined))
+		if (!enif_inspect_iolist_as_binary(env, frame, &joined))
 			return (enif_make_badarg(env));
 		iov[0].iov_base = joined.data;
 		iov[0].iov_len = joined.size;
@@ -547,10 +647,18 @@ erx_tap_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		return (erx_tap_drop(env, atom_malformed));
 	if (len > (size_t)tap->mtu + ERX_TAP_ETHER_HDR_LEN)
 		return (erx_tap_drop(env, atom_too_long));
+	write_iov = iov;
+	nwrite = niov;
+	if (is_delayed) {
+		if (!erx_tap_finish(iov, niov, len, start, field, field_bytes,
+		    finished, &nwrite))
+			return (enif_make_badarg(env));
+		write_iov = finished;
+	}
 
 	/* An interrupted write is tried again, a few times at the most. */
 	for (tries = 0; tries < ERX_TAP_WRITE_TRIES; tries++) {
-		n = writev(tap->fd, iov, niov);
+		n = writev(tap->fd, write_iov, nwrite);
 		switch (erx_tap_write_kind(n, errno, len)) {
 		case ERX_TAP_WRITE_AGAIN:
 			continue;
@@ -643,6 +751,7 @@ erx_tap_load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	if (erx_tap_type == NULL)
 		return (1);
 	atom_armed = enif_make_atom(env, "armed");
+	atom_csum = enif_make_atom(env, "csum");
 	atom_drop = enif_make_atom(env, "drop");
 	atom_eof = enif_make_atom(env, "eof");
 	atom_error = enif_make_atom(env, "error");

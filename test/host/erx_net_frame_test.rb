@@ -37,8 +37,27 @@ class ErxNetFrameTest < Minitest::Test
     broadcast_to_a_unicast_address: ['erx_net_frame', '#{link := ethernet}, <<16#ffffffff:32>>) -> ?ETHER_BROADCAST;',
                                      '#{link := ethernet}, <<16#ffffffff:32>>) -> <<2, 0, 0, 0, 0, 7>>;',
                                      'looped_broadcast_and_multicast_find_a_local_socket_test'],
-    loopback_drops_the_zone: ['erx_net_frame', '[{Zone, P} || P <- Packets].', '[{element(1, {global, Zone}), P} || P <- Packets].',
-                              'looped_icmpv6_error_finds_the_socket_its_quote_names_test']
+    loopback_drops_the_zone: ['erx_net_frame', '[{Zone, finished(P)} || P <- Packets].',
+                              '[{element(1, {global, Zone}), finished(P)} || P <- Packets].',
+                              'looped_icmpv6_error_finds_the_socket_its_quote_names_test'],
+    # A delayed frame whose Start still counts from the IP header has its sum taken over
+    # the wrong bytes and its field looked for 14 bytes early.
+    delayed_start_left_behind_the_link_header: ['erx_net_frame', '{csum, byte_size(Header) + Start, Field, [Header, Packet]};',
+                                                '{csum, Start, Field, [Header, Packet]};',
+                                                'delayed_segments_finish_to_the_senders_bytes_test'],
+    # A segment delayed with its checksum already finished is finished a second time.
+    delayed_and_finished_by_the_sender: ['erx_net_frame', 'case packets(Path, Segment, driver, Gen0) of',
+                                         'case packets(Path, Segment, sender, Gen0) of',
+                                         'delayed_segments_finish_to_the_senders_bytes_test'],
+    # Fragments of a delayed segment that nothing finishes leave with the partial sum.
+    fragments_left_unfinished: ['erx_net_frame', "        {ok, _Fragments, _} ->\n            packets(Path, Segment, sender, Gen0);",
+                                "        {ok, _Fragments, _} ->\n            packets(Path, Segment, driver, Gen0);",
+                                'fragmented_segments_are_finished_by_the_sender_test'],
+    # A delayed field without the pseudo-header's sum finishes to a checksum of the segment
+    # alone.
+    delayed_field_without_the_pseudo_header: ['erx_tcp_wire', 'erx_net_sum:add(PseudoSum, Len)',
+                                              'erx_net_sum:add(0, Len)',
+                                              'delayed_segments_finish_to_the_senders_bytes_test']
   }.freeze
 
   def test_framing_cases_pass_under_eunit

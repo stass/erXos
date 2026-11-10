@@ -56,7 +56,7 @@ either and only checks a frame's type and length.
 -export([start_link/3, attach/2, counters/1, starts_within/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, format_status/1]).
 
--export_type([link_info/0, event/0, rx_frame/0]).
+-export_type([link_info/0, finisher/0, event/0, rx_frame/0]).
 
 -define(RETRY_US, 10000).
 %% How long a driver lives at the least: an end sooner waits out the rest.
@@ -64,13 +64,26 @@ either and only checks a frame's type and length.
 
 -doc """
 What a transport tells of its medium at `init`: the link and link-layer address, the MTU,
-the link state and how many frames may wait at the driver.
+the link state, how many frames may wait at the driver, and who finishes a frame's delayed
+checksum (`finisher()`).
 """.
 -type link_info() :: #{link := ethernet | none,
                        lladdr := <<_:48>> | none,
                        mtu := 68..65535,
                        state := up | down,
-                       tx_limit := pos_integer()}.
+                       tx_limit := pos_integer(),
+                       finish := finisher()}.
+
+-doc """
+Who finishes what a sender leaves unfinished, a delayed checksum
+(docs/design-network-stack.md, "Checksums in the copy"): `device` when the device does,
+`copy` when the transport's own copy does, and `none` when nobody below the sender does,
+so the frame layer finishes every checksum itself. It is fixed by the transport and its
+configuration, so a driver's restart never changes it. A transport whose `finish` is
+`none` drops a delayed frame (`erx_net_frame:delayed()`) as `malformed`, and one that
+finishes drops a frame that is not `erx_net_frame:finishable/2` the same way.
+""".
+-type finisher() :: copy | device | none.
 
 -doc """
 A received frame: its bytes alone, which the frame's decoders sum; with its network sum, the

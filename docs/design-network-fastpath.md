@@ -164,7 +164,7 @@ buffer, a queue of binaries (`erx_tcp_sndbuf`). `erx_tcp_output` decides
 one segment per pass of its `again` loop and commits it, copying the
 control block in `commit/6`, `after_send/3` and `done/2`.
 `erx_net_frame:tcp/3` encodes the TCP header and its options
-(`erx_tcp_wire:encode/3`, `add_options/1`) and the IP and link headers,
+(`erx_tcp_wire:encode/4`, `add_options/1`) and the IP and link headers,
 summing the segment with the checksum BIF, three calls per segment. The
 send log inserts one range per
 segment. The step's frames go to the driver in one `{transmit, Frames}`

@@ -107,13 +107,20 @@ it; git history is the record of completed work.
      cost bulk receive 1,907 (1,876-1,973) to 1,837 (1,823-1,877) Mbit/s; with the wide loop
      and the IPv4 header not read again it is 1,936 (1,926-1,968), bulk send 1,164 to 1,150
      and rr 64 B 16,927 to 17,110 txn/s, within their spreads (raw data:
-     ~/erxos-history net-bench-freebsd-fast-p5b-2026-11-10, commit ea64849). What remains is the send half and the other media:
-     `erx_tcp_wire:encode/4` and `erx_net_frame`'s `{csum, Start, Field, Packet}`;
-     `link_info`'s `finish` and the interface row's; the tap NIF finishing a delayed frame;
-     `erx_device:complete/3` and `post_frame/5`'s delayed frames; `erx_virtio_net` on
-     `complete/3` and `post_frame/5` with its start line naming the finisher; and the pipe's
-     `process` end taking `{sum, S, Frame}`. The netmap NIF takes the same core when it is
-     built;
+     ~/erxos-history net-bench-freebsd-fast-p5b-2026-11-10, commit ea64849). The send half
+     is in the tree for the tap: `erx_tcp_wire:encode/4`; `erx_net_frame`'s
+     `{csum, Start, Field, Packet}`, with `finish/1` and `finishable/2`, the loopback's
+     packets finished by `link/3`; `link_info`'s `finish`, written into the interface row;
+     the tap NIF finishing a delayed frame in its `writev`; and the pipe's `process` end in
+     its offload mode, which finishes with `finish/1` and hands frames up with their sum.
+     On the FreeBSD test host (median of 5, min-max, against master the same hour) bulk send
+     went from 1,151 (1,138-1,182) to 1,163 (1,146-1,206) Mbit/s, bulk receive 1,913 to 1,926
+     and rr 64 B 16,619 to 16,941 txn/s, all within their spreads, where a hack that summed
+     each sent segment twice had cost 2 to 4 percent (raw data: ~/erxos-history
+     net-bench-freebsd-fast-p5c-2026-11-10). What remains is the other media:
+     `erx_device:complete/3` and `post_frame/5`'s delayed frames, and `erx_virtio_net` on them with its start line
+     naming the finisher; until then it declares `finish` `none` and drops a delayed frame.
+     The netmap NIF takes the same core when it is built;
      * [Medium] `erx_net_input_fuzz`: its frames carry no Ethernet padding and its UDP lengths
        always fill the IP payload, so `erx_net_sum:span/4`'s bytes after the packet and
        `erx_udp_wire`'s datagram sum are checked only by EUnit cases

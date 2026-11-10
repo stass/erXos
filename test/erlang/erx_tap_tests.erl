@@ -16,6 +16,8 @@
 -module(erx_tap_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("erx_ip4_wire.hrl").
+-include("erx_tcp_wire.hrl").
 
 -define(LLADDR, <<2, 0, 0, 0, 0, 1>>).
 -define(MTU, 1500).
@@ -76,6 +78,108 @@ iodata_frames_are_written_whole_test() ->
              ?assertEqual({ok, Frame}, socket:recv(Far, 0, ?WAIT_MS))
          end || Iodata <- [Pieces, Nested]],
         ?assertError(badarg, erx_tap_nif:send(H, [Frame, atom]))
+    end).
+
+%% --- Delayed checksums --------------------------------------------------------------
+
+%% A delayed frame leaves with its checksum finished, whatever pieces it comes in: over
+%% random frames, offsets and cuts, a piece boundary falling anywhere, inside the field
+%% too, and iodata the NIF joins first (byte integers, more than 64 pieces), the bytes
+%% written are those erx_net_frame:finish/1 makes.
+delayed_frames_are_finished_in_the_write_test() ->
+    with_pair(fun(H, Far) ->
+        lists:foldl(fun(_, R0) ->
+                            {Delayed, R} = random_delayed(R0),
+                            ?assertEqual({ok, 1}, erx_tap_nif:send(H, Delayed)),
+                            ?assertEqual({Delayed, {ok, erx_net_frame:finish(flat(Delayed))}},
+                                         {Delayed, socket:recv(Far, 0, ?WAIT_MS)}),
+                            R
+                    end, rand:seed_s(exsss, {2, 3, 5}), lists:seq(1, 400))
+    end).
+
+%% A TCP segment whose checksum the encoder delayed reaches the wire with the checksum the
+%% decoder checks, independently of finish/1: behind an Ethernet and an IPv4 header, its
+%% header and payload in pieces of their own.
+delayed_tcp_segment_decodes_on_the_wire_test() ->
+    with_pair(fun(H, Far) ->
+        Src = <<10, 0, 0, 5>>,
+        Dst = <<10, 0, 0, 2>>,
+        Tcp = #tcp{sport = 4000, dport = 80, seq = 7, ack = 9, flags = ?TH_ACK, win = 512,
+                   urp = 0},
+        Payload = [<<"abc">>, <<"defgh">>, binary:copy(<<"z">>, 1001)],
+        Segment = erx_tcp_wire:encode(Tcp, Payload, erx_ip4_wire:pseudo_sum(Src, Dst, 0, 6),
+                                      driver),
+        Ip = erx_ip4_wire:encode(#ip4{len = 20 + iolist_size(Segment), ttl = 64, p = 6,
+                                      src = Src, dst = Dst}),
+        Eth = <<?LLADDR/binary, ?LLADDR/binary, 16#0800:16>>,
+        ?assertEqual({ok, 1}, erx_tap_nif:send(H, {csum, 34, 16, [Eth, Ip, Segment]})),
+        {ok, <<_:34/binary, Wire/binary>>} = socket:recv(Far, 0, ?WAIT_MS),
+        Pseudo = erx_ip4_wire:pseudo_sum(Src, Dst, byte_size(Wire), 6),
+        ?assertMatch({ok, #tcp{seq = 7, ack = 9}, _}, erx_tcp_wire:decode(Pseudo, Wire))
+    end).
+
+%% Odd offsets, a field wholly or half outside the frame and a malformed delayed term are
+%% badarg, and nothing is written.
+delayed_frame_refusals_test() ->
+    with_pair(fun(H, Far) ->
+        Frame = frame(8, 60),
+        [?assertError(badarg, erx_tap_nif:send(H, Delayed))
+         || Delayed <- [{csum, 1, 16, Frame}, {csum, 14, 3, Frame}, {csum, 58, 2, Frame},
+                        {csum, 60, 0, Frame}, {csum, 62, 0, Frame}, {csum, 14, 46, Frame},
+                        {csum, -2, 16, Frame}, {csum, 14, 16}, {sum, 14, 16, Frame},
+                        {csum, 14, 16, Frame, x}, {csum, 1 bsl 40, 0, Frame},
+                        {csum, 14, 46, frame(9, 61)}]],
+        ?assertEqual({ok, 1}, erx_tap_nif:send(H, {csum, 58, 0, Frame})),
+        ?assertMatch({ok, <<_:58/binary, _:16>>}, socket:recv(Far, 0, ?WAIT_MS)),
+        ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
+    end).
+
+%% A random delayed frame of 14 to 1514 bytes: even Start and Field with the field inside,
+%% the frame cut at random points into binaries, now and then with byte integers or more
+%% pieces than the NIF writes without joining.
+random_delayed(R0) ->
+    {Size, R1} = rand:uniform_s(1501, R0),
+    Len = Size + 13,
+    {Bytes, R2} = rand:bytes_s(Len, R1),
+    {Start, R3} = even_below(Len - 1, R2),
+    {Field, R4} = even_below(Len - Start - 1, R3),
+    {Kind, R5} = rand:uniform_s(4, R4),
+    {Cuts, R6} = cuts(Len, case Kind of 4 -> 80; _ -> 6 end, R5),
+    Pieces = [binary:part(Bytes, From, To - From)
+              || {From, To} <- lists:zip([0 | Cuts], Cuts ++ [Len])],
+    Iodata = case Kind of
+                 3 -> [binary:bin_to_list(hd(Pieces)) | tl(Pieces)];
+                 _ -> Pieces
+             end,
+    {{csum, Start, Field, Iodata}, R6}.
+
+%% An even number below Max, which is at least 1.
+even_below(Max, R0) ->
+    {N, R} = rand:uniform_s(Max, R0),
+    {(N - 1) band bnot 1, R}.
+
+%% Up to N distinct cut points inside 1..Len - 1, in order.
+cuts(Len, N, R0) ->
+    {Points, R} = lists:mapfoldl(fun(_, R1) -> rand:uniform_s(Len - 1, R1) end, R0,
+                                 lists:seq(1, N)),
+    {lists:usort(Points), R}.
+
+flat({csum, Start, Field, Iodata}) -> {csum, Start, Field, iolist_to_binary(Iodata)}.
+
+%% The cuts the random frames reach only by chance, each made certain: a 60-byte frame
+%% with its field at 30, cut at Start, at the field, between its bytes and after it, and
+%% into single bytes around it.
+delayed_frames_cut_around_the_field_test() ->
+    with_pair(fun(H, Far) ->
+        Frame = frame(10, 60),
+        [begin
+             Pieces = [binary:part(Frame, From, To - From)
+                       || {From, To} <- lists:zip([0 | Cuts], Cuts ++ [60])],
+             ?assertEqual({ok, 1}, erx_tap_nif:send(H, {csum, 14, 16, Pieces})),
+             ?assertEqual({Cuts, {ok, erx_net_frame:finish({csum, 14, 16, Frame})}},
+                          {Cuts, socket:recv(Far, 0, ?WAIT_MS)})
+         end || Cuts <- [[14], [30], [31], [32], [30, 31, 32], [29, 30, 31, 32, 33],
+                         [14, 31], [59]]]
     end).
 
 %% A peer that takes no more answers ENOBUFS, and the frame is dropped as a wire loses one.
@@ -181,7 +285,7 @@ open_refusals_test() ->
 transport_receives_and_transmits_test() ->
     with_socket_pair(fun(Near, Far) ->
         {ok, #{link := ethernet, lladdr := ?LLADDR, mtu := ?MTU, state := up,
-               tx_limit := 256}, T0} =
+               tx_limit := 256, finish := copy}, T0} =
             erx_tap:init(#{fd => near_fd(Near), lladdr => ?LLADDR}),
         ok = socket:send(Far, frame(1, 60)),
         ok = socket:send(Far, frame(2, 13)),
@@ -191,7 +295,17 @@ transport_receives_and_transmits_test() ->
         ?assertMatch({[{frames, [_]}], _}, erx_tap:event(wake(readable), T1)),
         ?assertMatch({ok, _}, erx_tap:transmit([frame(4, 60)], T1)),
         ?assertEqual({ok, frame(4, 60)}, socket:recv(Far, 0, ?WAIT_MS)),
-        ?assertMatch({{drop, malformed}, _}, erx_tap:transmit({zone, <<"packet">>}, T1))
+        ?assertMatch({{drop, malformed}, _}, erx_tap:transmit({zone, <<"packet">>}, T1)),
+        %% A delayed frame goes out finished; one over the MTU is dropped before the NIF.
+        Delayed = {csum, 14, 2, [frame(5, 30), frame(6, 30)]},
+        ?assertMatch({ok, _}, erx_tap:transmit(Delayed, T1)),
+        ?assertEqual({ok, erx_net_frame:finish(Delayed)}, socket:recv(Far, 0, ?WAIT_MS)),
+        ?assertMatch({{drop, too_long}, _},
+                     erx_tap:transmit({csum, 14, 2, [frame(7, ?MTU), frame(8, 15)]}, T1)),
+        %% So is one whose offsets do not fit it, as malformed, before the NIF's badarg.
+        [?assertMatch({{drop, malformed}, _}, erx_tap:transmit(Bad, T1))
+         || Bad <- [{csum, 13, 2, frame(9, 60)}, {csum, 14, 46, frame(9, 61)}]],
+        ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
     end).
 
 %% A batch that reaches its bound sends the next `more`; the last one arms the device.

@@ -203,19 +203,30 @@ travels with the name of its interface, every other address is its bytes alone
 ("Zones"). On the loopback interface a frame is the packet with that zone in front of it,
 `{Zone, Packet}`, where Zone is the name of the interface whose address the packet is
 sent to.
+
+A TCP segment's checksum is delayed when the interface's driver finishes checksums
+(its row's `finish` is not `none`) and IP does not fragment the segment ("Checksums in
+the copy"). Its packet is then `{csum, Start, Field, Packet}`: the segment starts at byte
+`Start` of Packet and its checksum field at byte `Field` of the segment, and the field
+holds the pseudo-header's sum, not complemented. The transport's copy finishes it as
+`finish/1` does. `link/3` moves `Start` past the link header it puts in front.
 """.
 
 -include("erx_net_eth.hrl").
 -include("erx_tcp_wire.hrl").
 -include("erx_udp_wire.hrl").
 
--export([snapshot/3, path/3, tcp/3, udp/5, ip/4, address/3, link/3]).
+-export([snapshot/3, path/3, tcp/3, udp/5, ip/4, address/3, link/3, finish/1,
+         finishable/2]).
 
--export_type([iface/0, zoned/0, snapshot/0, opts/0, path/0, packet/0, frame/0]).
+-export_type([iface/0, zoned/0, snapshot/0, opts/0, path/0, packet/0, frame/0, delayed/0]).
 
 -define(IPPROTO_TCP, 6).
 -define(IPPROTO_UDP, 17).
 -define(TCP_HDR_LEN, 20).
+%% The offset of th_sum in the TCP header.
+-define(TCP_SUM_OFFSET, 16).
+-define(IS_EVEN(N), (is_integer(N) andalso N >= 0 andalso N band 1 =:= 0)).
 -define(UDP_HDR_LEN, 8).
 -define(IP_MAXPACKET, 16#ffff).
 -define(IP_HDR_LEN, 20).
@@ -228,12 +239,14 @@ sent to.
 -doc """
 An interface's row of `erx_net_ifs`: its name; the pid of the incarnation that wrote it;
 its link, `ethernet` or `none` for the loopback interface; its link-layer address; its MTU;
-its IPv6 link MTU (`IN6_LINKMTU`); its IPv6 hop limit; and its driver's pid. The row's other
-fields, its credits among them, pass through to the path untouched.
+its IPv6 link MTU (`IN6_LINKMTU`); its IPv6 hop limit; who finishes a delayed checksum
+(`finish`, from its driver's `erx_net_driver:link_info()`); and its driver's pid. The row's
+other fields, its credits among them, pass through to the path untouched.
 """.
 -type iface() :: #{name := term(), pid := pid(), link := ethernet | none,
                    lladdr := <<_:48>> | none, mtu := pos_integer(), mtu6 := pos_integer(),
-                   hlim := 0..255, driver := pid() | none, atom() => term()}.
+                   hlim := 0..255, finish := erx_net_driver:finisher(),
+                   driver := pid() | none, atom() => term()}.
 
 -doc """
 A destination as the stack holds it: an IPv6 address of interface- or link-local scope
@@ -276,11 +289,23 @@ destination is an IPv4 broadcast address of the interface, which is never fragme
                   mtu := pos_integer(), hlim := 0..255, tos := 0..255, flow := 0..16#fffff,
                   broadcast := boolean()}.
 
--doc "An IP packet, as `erx_ip4:output/4` and `erx_ip6:output/4` build it.".
--type packet() :: iodata().
+-doc """
+An IP packet, as `erx_ip4:output/4` and `erx_ip6:output/4` build it, or a TCP segment's
+packet with its checksum delayed (`delayed()`).
+""".
+-type packet() :: iodata() | delayed().
 
--doc "An Ethernet frame, or on the loopback interface a packet with its zone.".
--type frame() :: iodata() | {Zone :: term(), packet()}.
+-doc """
+An Ethernet frame, a delayed segment's Ethernet frame, or on the loopback interface a
+packet with its zone.
+""".
+-type frame() :: iodata() | delayed() | {Zone :: term(), packet()}.
+
+-doc """
+Bytes holding a TCP segment whose checksum is delayed: the segment starts at byte `Start`,
+and its checksum field, which holds the pseudo-header's sum, at byte `Start + Field`.
+""".
+-type delayed() :: {csum, Start :: non_neg_integer(), Field :: non_neg_integer(), iodata()}.
 
 %% --- The configuration --------------------------------------------------------
 
@@ -528,21 +553,38 @@ The packets of a connection's segments over Path, with the identification genera
 advanced: each segment encoded over the path's pseudo-header, its ECN field in the low
 bits of the type of service or traffic class and don't-fragment as it says. `emsgsize`
 when any segment is over 65535 bytes or IP refuses it, and then no packet is returned.
+A segment's checksum is delayed when the path's interface has a finisher and IP sends
+the segment whole, and finished here otherwise.
 """.
 -spec tcp(path(), [erx_tcp:outgoing()], erx_net_rand:gen()) ->
           {ok, [packet()], erx_net_rand:gen()} | {error, emsgsize}.
 tcp(Path, Segments, Gen) ->
     each(fun(Segment, G) -> segment(Path, Segment, G) end, Segments, Gen).
 
-segment(#{tos := Tos} = Path, {#tcp{opts = Opts} = Header, #{ecn := Ecn, df := Df}, Payload},
-        Gen) ->
-    case ?TCP_HDR_LEN + erx_tcp_wire:optlen(Opts) + iolist_size(Payload) =< ?IP_MAXPACKET of
-        true ->
-            Segment = erx_tcp_wire:encode(Header, Payload, pseudo_sum(Path, ?IPPROTO_TCP)),
-            output(Path, ?IPPROTO_TCP, Segment, (Tos band 16#fc) bor Ecn, Df, Gen);
-        false ->
-            {error, emsgsize}
+segment(#{iface := #{finish := Finish}} = Path, {#tcp{opts = Opts}, _, Payload} = Segment, Gen) ->
+    Len = ?TCP_HDR_LEN + erx_tcp_wire:optlen(Opts) + iolist_size(Payload),
+    if
+        Len > ?IP_MAXPACKET -> {error, emsgsize};
+        Finish =:= none -> packets(Path, Segment, sender, Gen);
+        true -> delayed(Path, Segment, Len, Gen)
     end.
+
+%% IP fragments a datagram over the MTU into two fragments at least, so a segment that comes
+%% back as one packet went whole, with the segment at its end: its checksum stays delayed.
+%% A fragmented one is encoded again with its checksum finished, from the same generator.
+delayed(Path, Segment, Len, Gen0) ->
+    case packets(Path, Segment, driver, Gen0) of
+        {ok, [Packet], Gen} ->
+            {ok, [{csum, iolist_size(Packet) - Len, ?TCP_SUM_OFFSET, Packet}], Gen};
+        {ok, _Fragments, _} ->
+            packets(Path, Segment, sender, Gen0);
+        {error, emsgsize} = Error ->
+            Error
+    end.
+
+packets(#{tos := Tos} = Path, {Header, #{ecn := Ecn, df := Df}, Payload}, SummedBy, Gen) ->
+    Encoded = erx_tcp_wire:encode(Header, Payload, pseudo_sum(Path, ?IPPROTO_TCP), SummedBy),
+    output(Path, ?IPPROTO_TCP, Encoded, (Tos band 16#fc) bor Ecn, Df, Gen).
 
 -doc """
 The packets of a UDP datagram from port Sport to port Dport over Path, fragmented when
@@ -619,15 +661,27 @@ address(#{link := neighbour, iface := If}, {LinkAddr, _Freshness}, Packets) ->
 
 -doc """
 The frames of IP Packets on interface If to link address LinkAddr: an Ethernet header from
-the interface's address, with the EtherType of each packet's IP version, in front of it;
-on the loopback interface, the packet with LinkAddr as its zone.
+the interface's address, with the EtherType of each packet's IP version, in front of it,
+a delayed packet's `Start` moved past the header; on the loopback interface, the packet
+with LinkAddr as its zone, finished, since nothing below the loopback finishes.
 """.
 -spec link(iface(), term(), [packet()]) -> [frame()].
 link(#{link := ethernet, lladdr := Src}, <<_:48>> = Dst, Packets) ->
-    [[erx_net_eth:encode(#eth{dst = Dst, src = Src, type = ethertype(P)}), P] || P <- Packets];
+    [ethernet(erx_net_eth:encode(#eth{dst = Dst, src = Src, type = ethertype(P)}), P)
+     || P <- Packets];
 link(#{link := none}, Zone, Packets) ->
-    [{Zone, P} || P <- Packets].
+    [{Zone, finished(P)} || P <- Packets].
 
+finished({csum, _Start, _Field, _Packet} = Delayed) -> finish(Delayed);
+finished(Packet) -> Packet.
+
+ethernet(Header, {csum, Start, Field, Packet}) ->
+    {csum, byte_size(Header) + Start, Field, [Header, Packet]};
+ethernet(Header, Packet) ->
+    [Header, Packet].
+
+ethertype({csum, _Start, _Field, Packet}) ->
+    ethertype(Packet);
 ethertype(Packet) ->
     case first_byte(Packet) of
         <<6:4, _:4>> -> ?ETHERTYPE_IPV6;
@@ -642,3 +696,29 @@ first_byte([Head | Tail]) ->
         Byte -> Byte
     end;
 first_byte(_) -> none.
+
+-doc """
+The bytes of a delayed frame with its checksum finished, as a transport that finishes
+checksums puts them on its medium: the sum of the bytes from `Start` to the end, the field
+included, complemented into the field. Raises `badarg` when the frame is not
+`finishable/2`.
+""".
+-spec finish(delayed()) -> binary().
+finish({csum, Start, Field, Frame} = Delayed) ->
+    Bytes = iolist_to_binary(Frame),
+    finishable(Delayed, byte_size(Bytes)) orelse error(badarg),
+    <<Head:Start/binary, Summed/binary>> = Bytes,
+    <<Before:Field/binary, _:16, After/binary>> = Summed,
+    Sum = bnot erx_bytes:inet_csum(0, Summed) band 16#ffff,
+    <<Head/binary, Before/binary, Sum:16, After/binary>>;
+finish(_) ->
+    error(badarg).
+
+-doc """
+Whether a delayed frame of `Size` bytes can be finished: `Start` and `Field` even and the
+field inside the frame. A transport that finishes drops a frame that is not as
+`malformed` before it reaches the copy, whose own check refuses it as `badarg`.
+""".
+-spec finishable(delayed(), non_neg_integer()) -> boolean().
+finishable({csum, Start, Field, _Frame}, Size) ->
+    ?IS_EVEN(Start) andalso ?IS_EVEN(Field) andalso Start + Field + 2 =< Size.

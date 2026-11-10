@@ -110,7 +110,8 @@ its credits and its driver's): its `erx_net_ifs` fields, its addresses in the or
 added them, and its routes.
 """.
 -type rows() :: #{iface := #{name := term(), link := ethernet, lladdr := <<_:48>>,
-                             mtu := pos_integer(), mtu6 := pos_integer(), hlim := 0..255},
+                             mtu := pos_integer(), mtu6 := pos_integer(), hlim := 0..255,
+                             finish := erx_net_driver:finisher()},
                   addrs := [{Order :: non_neg_integer(), erx_net_addr:row()}],
                   routes := [erx_net_route:row()]}.
 
@@ -123,6 +124,7 @@ added them, and its routes.
                lladdr :: <<_:48>>,
                device_mtu :: pos_integer(),
                mtu :: pos_integer(),
+               finish :: erx_net_driver:finisher(),  % the driver's, written into the row
                dhcp :: boolean(),
                link :: up | down,                % the driver's latest link state
                addrs = [] :: [{non_neg_integer(), erx_net_addr:row()}],
@@ -147,11 +149,13 @@ and configuration `config`. Its first step is `start`.
 """.
 -spec new(#{name := term(), link := erx_net_driver:link_info(), gen := erx_net_rand:gen(),
             config := config()}) -> core().
-new(#{name := Name, link := #{link := ethernet, lladdr := <<_:48>> = Lladdr, mtu := Mtu, state := Link},
+new(#{name := Name,
+      link := #{link := ethernet, lladdr := <<_:48>> = Lladdr, mtu := Mtu, state := Link,
+                finish := Finish},
       gen := Gen0, config := #{ip4 := Ip4} = Config}) ->
     #{rate := Rate, burst := Burst} = maps:get(ingress, Config, ?INGRESS_DEFAULT),
     {LimGen, Gen} = erx_net_rand:split(Gen0),
-    Core = #core{name = Name, lladdr = Lladdr, device_mtu = Mtu, mtu = Mtu,
+    Core = #core{name = Name, lladdr = Lladdr, device_mtu = Mtu, mtu = Mtu, finish = Finish,
                  dhcp = Ip4 =:= dhcp, link = Link, arp = erx_arp:new(), lim = erx_net_bandlim:new(LimGen),
                  bucket = #bucket{rate = Rate, burst = Burst, tokens = Burst * ?TOKEN},
                  gen = Gen},
@@ -451,9 +455,10 @@ arp_action({conflict, _Ip, _Mac}, _Core) ->
 
 %% --- Publishing and administration -------------------------------------------------
 
-publish(#core{name = Name, lladdr = Lladdr, mtu = Mtu, addrs = Addrs, routes = Routes}) ->
+publish(#core{name = Name, lladdr = Lladdr, mtu = Mtu, finish = Finish, addrs = Addrs,
+              routes = Routes}) ->
     {publish, #{iface => #{name => Name, link => ethernet, lladdr => Lladdr, mtu => Mtu,
-                           mtu6 => Mtu, hlim => ?HLIM},
+                           mtu6 => Mtu, hlim => ?HLIM, finish => Finish},
                 addrs => Addrs, routes => Routes}}.
 
 admin(counters, #core{counters = Counters}) -> {ok, Counters};

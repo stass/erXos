@@ -139,7 +139,7 @@ The 32-bit numbers stay as received; erx_tcp_seq lifts them inside the connectio
 
 -include("erx_tcp_wire.hrl").
 
--export([decode/2, decode/3, encode/3, optlen/1]).
+-export([decode/2, decode/3, encode/4, optlen/1]).
 
 -export_type([reason/0]).
 
@@ -269,21 +269,34 @@ segment's length, which only it knows before encoding, since the options decide 
 length. The length is one 16-bit word of either pseudo-header, so adding it to the sum is
 writing it there. Raises `badarg` for a segment over 65535 bytes, since the stack encodes only
 records it built.
+
+`SummedBy` says who completes the checksum. With `sender` the encoder does: the field is the
+complement of the sum over the pseudo-header, the header and the payload. With `driver` the
+segment's checksum is delayed (`CSUM_TCP` in FreeBSD's `tcp_output`): the field holds the
+pseudo-header's sum with the length, not complemented, no payload byte is read, and the
+transport's copy finishes it by summing the segment, field included, and storing the
+complement there. Both give the same bytes on the wire.
 """.
--spec encode(#tcp{}, iodata(), 0..16#ffff) -> iodata().
+-spec encode(#tcp{}, iodata(), 0..16#ffff, sender | driver) -> iodata().
 encode(#tcp{sport = Sport, dport = Dport, seq = Seq, ack = Ack, flags = Flags, win = Win,
-            urp = Urp, opts = Opts}, Payload, PseudoSum) ->
+            urp = Urp, opts = Opts}, Payload, PseudoSum, SummedBy) ->
     Options = add_options(Opts),
     Off = ?TCP_HDR_WORDS + byte_size(Options) div 4,
     Len = Off * 4 + iolist_size(Payload),
     Len =< ?TCP_MAXSEG orelse erlang:error(badarg),
     Head = <<Sport:16, Dport:16, Seq:32, Ack:32, Off:4, Flags:12, Win:16>>,
     Tail = <<Urp:16, Options/binary>>,
-    Sum = bnot erx_bytes:inet_csum(PseudoSum, [<<Len:16>>, Head, Tail, Payload]) band 16#ffff,
+    Sum = case SummedBy of
+              sender ->
+                  Covered = erx_bytes:inet_csum(PseudoSum, [<<Len:16>>, Head, Tail, Payload]),
+                  bnot Covered band 16#ffff;
+              driver ->
+                  erx_net_sum:add(PseudoSum, Len)
+          end,
     [Head, <<Sum:16>>, Tail, Payload].
 
 -doc """
-The bytes `encode/3` gives the options, a multiple of four: the `optlen` `tcp_addoptions`
+The bytes `encode/4` gives the options, a multiple of four: the `optlen` `tcp_addoptions`
 returns, which output takes from the segment's payload room.
 """.
 -spec optlen(#tcp_opts{}) -> non_neg_integer().
@@ -298,7 +311,7 @@ as many SACK blocks as fit, and end-of-options and zeros to a 4-byte boundary.
 The options of almost every segment of an established connection are one of the two
 layouts a run's frames share (docs/design-network-fastpath.md, "A run"): none, or the
 timestamps alone, which the translation lays out as `NOP NOP TS` (`tcp_output.c:1794`).
-Output, the frame layer and `encode/3` each ask for a segment's options, so those two are
+Output, the frame layer and `encode/4` each ask for a segment's options, so those two are
 written directly; `erx_tcp_wire_tests` checks them against the fold over random option
 sets.
 """.

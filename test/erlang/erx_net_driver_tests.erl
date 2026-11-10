@@ -32,7 +32,8 @@ init(#{crash_at_start := true} = Config) ->
     self() ! {stub, crash},
     init(maps:remove(crash_at_start, Config));
 init(#{test := Test, room := Room, tx_limit := Limit}) ->
-    {ok, #{link => ethernet, lladdr => ?MAC, mtu => 1500, state => up, tx_limit => Limit},
+    {ok, #{link => ethernet, lladdr => ?MAC, mtu => 1500, state => up, tx_limit => Limit,
+           finish => none},
      #{test => Test, room => Room}}.
 
 event({stub, crash}, _T) -> error(crash_at_start);
@@ -338,7 +339,8 @@ far_end_test_() ->
     [{timeout, 20, fun far_end_end_restarts_the_link/0},
      {timeout, 30, fun far_end_never_there_spins_no_supervisor/0},
      {timeout, 30, fun crash_at_start_spins_no_supervisor/0},
-     {timeout, 20, fun queued_batches_reach_a_holder_as_one_message/0}].
+     {timeout, 20, fun queued_batches_reach_a_holder_as_one_message/0},
+     {timeout, 20, fun offload_pipe_finishes_the_stacks_segments/0}].
 
 %% A pipe whose far end ends ends its driver, and the link supervisor starts the link
 %% again: a new driver, over the far end now registered under the same name, answers ARP.
@@ -395,12 +397,66 @@ queued_batches_reach_a_holder_as_one_message() ->
         stop_far()
     end.
 
+%% The stack over a pipe in its offload mode and over a plain one: the interface's row
+%% names the driver's finisher, and a segment to a closed port, which reaches the stack
+%% with its network sum in the offload mode, is answered with a RST whose checksum the
+%% far end's decoder accepts, finished by the pipe or by the frame layer.
+offload_pipe_finishes_the_stacks_segments() ->
+    [begin
+         wait_gone(erx_net_tables),
+         flush(),
+         Far = far_end(),
+         #{transport := {erx_net_pipe, Config}} = Link = static_pipe(),
+         Piped = Link#{transport := {erx_net_pipe, Config#{offload => Offload}}},
+         {ok, Stack} = erx_net_sup:start_link(#{interfaces => [Piped]}),
+         unlink(Stack),
+         try
+             Driver = answers_arp(Far, 50),
+             ?assertMatch([{en0, _, #{finish := Finish}}], ets:lookup(erx_net_ifs, en0)),
+             Far ! {inject, Driver, peer_segment(9, 1)},
+             receive
+                 {far, Far, Driver, <<_:12/binary, 16#0800:16, Packet/binary>>} ->
+                     {ok, #ip4{p = 6, src = Src, dst = Dst}, Segment} = erx_ip4_wire:decode(Packet),
+                     Pseudo = erx_ip4_wire:pseudo_sum(Src, Dst, byte_size(Segment), 6),
+                     ?assertMatch({Offload, {ok, #tcp{dport = ?PEER_PORT, flags = ?TH_RST}, <<>>}},
+                                  {Offload, erx_tcp_wire:decode(Pseudo, Segment)})
+             after 3000 -> error({no_rst, Offload})
+             end
+         after
+             ok = proc_lib:stop(Stack, shutdown, infinity),
+             stop_far()
+         end
+     end || {Offload, Finish} <- [{true, copy}, {false, none}]].
+
+%% The pipe alone: without the offload mode a delayed frame is dropped as `malformed` and
+%% frames come up bare; with it a delayed frame reaches the far end finished and each frame
+%% comes up with its network sum. Only a process end has the mode.
+pipe_offload_mode_test() ->
+    flush(),
+    Config = #{far => {process, self()}, lladdr => ?MAC},
+    Delayed = {csum, 14, 2, [<<0:112>>, <<1, 2, 3>>, <<4, 5, 6>>]},
+    Frame = <<0:112, 1, 2, 3>>,
+    {ok, #{finish := none}, Plain} = erx_net_pipe:init(Config),
+    ?assertMatch({{drop, malformed}, _}, erx_net_pipe:transmit(Delayed, Plain)),
+    ?assertEqual({[{frames, [Frame]}], Plain}, erx_net_pipe:event({erx_net_pipe, self(), Frame}, Plain)),
+    {ok, #{finish := copy}, Offload} = erx_net_pipe:init(Config#{offload => true}),
+    ?assertMatch({{drop, malformed}, _}, erx_net_pipe:transmit({csum, 13, 2, Frame}, Offload)),
+    ?assertMatch({ok, _}, erx_net_pipe:transmit(Delayed, Offload)),
+    receive {erx_net_pipe, _, Sent} -> ?assertEqual(erx_net_frame:finish(Delayed), Sent)
+    after 1000 -> error(nothing_sent)
+    end,
+    ?assertEqual({[{frames, [{sum, erx_bytes:inet_csum(0, <<1, 2, 3>>), Frame}]}], Offload},
+                 erx_net_pipe:event({erx_net_pipe, self(), Frame}, Offload)),
+    Udp = {udp, {{127, 0, 0, 1}, 0}, {{127, 0, 0, 1}, 9}},
+    ?assertEqual({error, {offload, true}}, erx_net_pipe:init(Config#{far := Udp, offload => true})),
+    ?assertEqual({error, {offload, yes}}, erx_net_pipe:init(Config#{offload => yes})).
+
 %% A frame from the peer to ?ME4's Port: a TCP segment with sequence number Seq.
 peer_segment(Port, Seq) ->
     Tcp = #tcp{sport = ?PEER_PORT, dport = Port, seq = Seq, ack = 0, flags = ?TH_ACK,
                win = 65535, urp = 0},
     Seg = iolist_to_binary(erx_tcp_wire:encode(Tcp, <<"batch">>,
-                                               erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6))),
+                                               erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6), sender)),
     Ip = erx_ip4_wire:encode(#ip4{len = 20 + byte_size(Seg), ttl = 64, p = 6, src = ?PEER4,
                                   dst = ?ME4}),
     <<?MAC/binary, ?PEER_MAC/binary, 16#0800:16, Ip/binary, Seg/binary>>.

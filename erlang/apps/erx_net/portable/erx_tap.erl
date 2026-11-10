@@ -8,7 +8,9 @@ without their frame check sequence, exchanged with a host's tap device through t
 `erx_tap_nif`, one frame per `read` and per `writev`, the kernel's copy the only copy of a
 frame's bytes. Built only outside erXos; on FreeBSD the device is `/dev/tapN`. It parses
 nothing. Each received frame comes as `{sum, Sum, Frame}`, with the network sum the NIF took
-right after the `read` (docs/design-network-stack.md, "Checksums in the copy"). A frame
+right after the `read` (docs/design-network-stack.md, "Checksums in the copy"). The tap
+finishes checksums in its copy (`finish` `copy`): a delayed frame, `{csum, Start, Field,
+Frame}`, has its checksum finished by the NIF as it hands the frame to `writev`. A frame
 shorter than the Ethernet header is dropped as `malformed`, one longer than the MTU and its
 14-byte header as `too_long`, and one the tap discards as `refused`.
 
@@ -56,7 +58,8 @@ init(#{lladdr := Lladdr} = Config) ->
         ok ?= check(tx_limit, Limit, is_integer(Limit) andalso Limit > 0),
         {ok, Handle} ?= medium(maps:with([device, fd], Config), Mtu),
         self() ! {erx_tap, more},
-        {ok, #{link => ethernet, lladdr => Lladdr, mtu => Mtu, state => up, tx_limit => Limit},
+        {ok, #{link => ethernet, lladdr => Lladdr, mtu => Mtu, state => up, tx_limit => Limit,
+               finish => copy},
          #tap{handle = Handle, mtu = Mtu}}
     end.
 
@@ -136,6 +139,13 @@ transmit(_Frame, #tap{failed = true} = T) ->
     {{drop, refused}, T};
 %% The NIF joins a frame of many pieces before it checks its size, so the size is checked
 %% here first, as the pipe checks it.
+transmit({csum, _Start, _Field, Bytes} = Frame, #tap{mtu = Mtu} = T) ->
+    Size = iolist_size(Bytes),
+    case {Size =< Mtu + ?ETHER_HDR_LEN, erx_net_frame:finishable(Frame, Size)} of
+        {false, _} -> {{drop, too_long}, T};
+        {true, false} -> {{drop, malformed}, T};
+        {true, true} -> send(Frame, T)
+    end;
 transmit(Frame, #tap{mtu = Mtu} = T) when is_list(Frame) ->
     case iolist_size(Frame) =< Mtu + ?ETHER_HDR_LEN of
         true -> send(Frame, T);

@@ -187,7 +187,7 @@ dest_port(Udp, Payload) -> {ok, Udp, Payload}.
 
 -doc """
 Encodes a datagram carrying Payload, with `PseudoSum` the partial sum of its pseudo-header
-with the length field zero, as every encoder above IP takes it (`erx_tcp_wire:encode/3`):
+with the length field zero, as every encoder above IP takes it (`erx_tcp_wire:encode/4`):
 the encoder adds the datagram's length, one 16-bit word of either pseudo-header, in place
 of the zero checksum field, which adds nothing, so a sum covers at most 65535 bytes. The
 checksum is always sent, as FreeBSD's default `udp_cksum` sends it, and a computed zero goes

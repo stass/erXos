@@ -620,7 +620,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   waits for the owner's go-ahead.
 * **[Medium] network, checksums in the copy**
   ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)). The design
-  removes the separate checksum pass on each path: `erx_tcp_wire:encode/3`'s sum in the
+  removes the separate checksum pass on each path: the TCP encoder's sum in the
   connection process and `decode/2`'s in the interface process. The copy computes the sum
   instead. With the C primitive loaded, `erx_bytes` held 3.1 percent of the connection's
   samples on send in the FreeBSD profile of 2026-11-09

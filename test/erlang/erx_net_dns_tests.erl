@@ -73,7 +73,7 @@ setup() ->
 
 iface(Name, Pid, Tx) ->
     #{name => Name, pid => Pid, link => ethernet, lladdr => <<2, 0, 0, 0, 0, 1>>, mtu => 1500,
-      mtu6 => 1500, hlim => 64, driver => self(), driver_credit => Tx,
+      mtu6 => 1500, hlim => 64, finish => none, driver => self(), driver_credit => Tx,
       rx_credit => erx_net_credit:new(256), credit => erx_net_credit:new(256)}.
 
 %% A stand-in interface: it answers the status request with its name servers and search

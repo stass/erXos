@@ -25,7 +25,8 @@
 
 %% --- Fixtures --------------------------------------------------------------------
 
-link() -> #{link => ethernet, lladdr => ?MINE, mtu => 1500, state => up, tx_limit => 16}.
+link() -> #{link => ethernet, lladdr => ?MINE, mtu => 1500, state => up, tx_limit => 16,
+            finish => none}.
 
 core(Config) ->
     erx_net_if_core:new(#{name => en0, link => link(), gen => erx_net_rand:new(<<7:128>>),
@@ -41,7 +42,7 @@ started(Config) ->
 
 tcp_frame(Flags, Seq, Ack, Payload) ->
     Tcp = #tcp{sport = 4000, dport = 80, seq = Seq, ack = Ack, flags = Flags, win = 1024, urp = 0},
-    Segment = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6))),
+    Segment = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6), sender)),
     eth(?MINE, ?ETHERTYPE_IP, ip4(?PEER4, ?ME4, 6, Segment)).
 
 rst_of(Frame) ->

@@ -25,9 +25,17 @@ The pipe reports its link `up` from `init` on; the far end's end stops it instea
 taking the link down, and the driver's supervisor starts the pipe again. A frame sent
 after the far end has gone but before the driver has seen it is dropped as `refused`.
 
+The pipe finishes no checksum (`finish` `none`) and drops a delayed frame as `malformed`,
+except in the process end's offload mode, a test configuration that stands for a medium
+whose copy sums (docs/design-network-stack.md, "Checksums in the copy"): there its
+`finish` is `copy`, a delayed frame reaches the far end with its checksum finished
+(`erx_net_frame:finish/1`), and each received frame is handed up as `{sum, S, Frame}`
+with its network sum.
+
 The configuration: `far`; `lladdr`, which must be a unicast address with the locally
-administered bit set; `mtu`, from 1,280 to 9,000 (1,500 when absent); and `tx_limit`, the
-frames that may wait at the driver (256 when absent).
+administered bit set; `mtu`, from 1,280 to 9,000 (1,500 when absent); `tx_limit`, the
+frames that may wait at the driver (256 when absent); and `offload`, true for the offload
+mode of a process end (false when absent).
 """.
 
 -behaviour(erx_net_driver).
@@ -49,45 +57,54 @@ frames that may wait at the driver (256 when absent).
 
 -record(udp, {socket :: gen_udp:socket(), peer :: {inet:ip_address(), inet:port_number()},
               mtu :: pos_integer()}).
--record(process, {pid :: pid() | undefined, ref :: reference(), mtu :: pos_integer()}).
+-record(process, {pid :: pid() | undefined, ref :: reference(), mtu :: pos_integer(),
+                  offload :: boolean()}).
 
 -doc false.
 init(#{far := Far, lladdr := Lladdr} = Config) ->
     Mtu = maps:get(mtu, Config, ?MTU_DEFAULT),
     Limit = maps:get(tx_limit, Config, ?TX_LIMIT_DEFAULT),
+    Offload = maps:get(offload, Config, false),
     maybe
         ok ?= check(lladdr, Lladdr, is_local_unicast(Lladdr)),
         ok ?= check(mtu, Mtu, is_integer(Mtu) andalso Mtu >= 1280 andalso Mtu =< 9000),
         ok ?= check(tx_limit, Limit, is_integer(Limit) andalso Limit > 0),
-        {ok, T} ?= open(Far, Mtu),
-        {ok, #{link => ethernet, lladdr => Lladdr, mtu => Mtu, state => up, tx_limit => Limit}, T}
+        ok ?= check(offload, Offload, offload_allowed(Offload, Far)),
+        {ok, T} ?= open(Far, Mtu, Offload),
+        {ok, #{link => ethernet, lladdr => Lladdr, mtu => Mtu, state => up, tx_limit => Limit,
+               finish => case Offload of true -> copy; false -> none end}, T}
     end.
 
 check(_Key, _Value, true) -> ok;
 check(Key, Value, false) -> {error, {Key, Value}}.
 
+%% Only a process end has the offload mode.
+offload_allowed(false, _Far) -> true;
+offload_allowed(true, {process, _}) -> true;
+offload_allowed(_Offload, _Far) -> false.
+
 %% Unicast (the group bit clear) and locally administered (the next bit set).
 is_local_unicast(<<_:6, 1:1, 0:1, _:40>>) -> true;
 is_local_unicast(_) -> false.
 
-open({udp, {LocalIp, LocalPort}, {_, _} = Peer}, Mtu) ->
+open({udp, {LocalIp, LocalPort}, {_, _} = Peer}, Mtu, false) ->
     case gen_udp:open(LocalPort, [binary, {ip, LocalIp}, {active, ?ACTIVE}]) of
         {ok, Socket} -> {ok, #udp{socket = Socket, peer = Peer, mtu = Mtu}};
         {error, Reason} -> {error, {udp, Reason}}
     end;
-open({process, Pid}, Mtu) when is_pid(Pid) ->
-    {ok, #process{pid = Pid, ref = erlang:monitor(process, Pid), mtu = Mtu}};
-open({process, Name}, Mtu) when is_atom(Name) ->
+open({process, Pid}, Mtu, Offload) when is_pid(Pid) ->
+    {ok, #process{pid = Pid, ref = erlang:monitor(process, Pid), mtu = Mtu, offload = Offload}};
+open({process, Name}, Mtu, Offload) when is_atom(Name) ->
     case whereis(Name) of
         Pid when is_pid(Pid), Pid =/= self() ->
-            open({process, Pid}, Mtu);
+            open({process, Pid}, Mtu, Offload);
         %% Nothing, a port or the driver itself: a far end that has ended, told as one.
         _ ->
             Ref = make_ref(),
             self() ! {'DOWN', Ref, process, Name, noproc},
-            {ok, #process{pid = undefined, ref = Ref, mtu = Mtu}}
+            {ok, #process{pid = undefined, ref = Ref, mtu = Mtu, offload = Offload}}
     end;
-open(Far, _Mtu) ->
+open(Far, _Mtu, _Offload) ->
     {error, {far, Far}}.
 
 -doc false.
@@ -98,7 +115,7 @@ event({udp_passive, Socket}, #udp{socket = Socket} = T) ->
     {[], T};
 event({erx_net_pipe, Pid, Frame}, #process{pid = Pid, mtu = Mtu} = T) when is_binary(Frame) ->
     case byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN of
-        true -> {[{frames, [Frame]}], T};
+        true -> {[{frames, [received(Frame, T)]}], T};
         false -> {[{dropped, too_long}], T}
     end;
 event({erx_net_pipe, Pid, _}, #process{pid = Pid} = T) ->
@@ -132,8 +149,21 @@ split(Datagrams, #udp{peer = {PeerIp, PeerPort}, mtu = Mtu}) ->
                     end, {[], []}, Datagrams),
     Drops ++ [{frames, Frames}].
 
+%% In the offload mode a frame comes with its network sum, as from a medium whose copy sums.
+received(<<_:?ETHER_HDR_LEN/binary, Above/binary>> = Frame, #process{offload = true}) ->
+    {sum, erx_bytes:inet_csum(0, Above), Frame};
+received(Frame, #process{}) ->
+    Frame.
+
 -doc false.
 transmit({_Zone, _Packet}, T) ->
+    {{drop, malformed}, T};
+transmit({csum, _Start, _Field, Bytes} = Frame, #process{offload = true} = T) ->
+    case erx_net_frame:finishable(Frame, iolist_size(Bytes)) of
+        true -> transmit(erx_net_frame:finish(Frame), T);
+        false -> {{drop, malformed}, T}
+    end;
+transmit({csum, _Start, _Field, _Bytes}, T) ->
     {{drop, malformed}, T};
 transmit(Frame, T) ->
     case iolist_size(Frame) =< mtu(T) + ?ETHER_HDR_LEN of

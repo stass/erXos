@@ -1267,7 +1267,7 @@ copy that sums also cuts a run into its frames
 **The problem.** Without this, a received segment is read twice: by the
 copy out of the device's buffer, and by `erx_tcp_wire:decode/2`, which
 sums the segment with `erx_bytes:inet_csum/2` in the interface process.
-A sent segment is read twice as well: by `erx_tcp_wire:encode/3`, which
+A sent segment is read twice as well: by the TCP encoder, which
 sums its header and payload in the connection process, and by the copy
 into the device's buffer. The second read finds the bytes in the cache,
 but it costs a call, a walk over the frame's pieces and a pass
@@ -2841,7 +2841,7 @@ credit, and the link stays stuck until the driver's next end.
 | --- | --- | --- | --- | --- | --- |
 | `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM` with `VIRTIO_NET_F_HOST_TSO4` and `HOST_TSO6`, an extension |
 | `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured | `none` |
-| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured | `none` |
+| `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured | `none`; `copy` in the `process` end's offload mode |
 | `erx_tap` | `ethernet`; the configured address, checked as the pipe's | configured, checked as the pipe's | `up` from `init`; an error of its descriptor ends the medium, and the driver tells the interface `down` while it waits out its hold | configured, default 256 | `copy` |
 | `erx_netmap` | `ethernet`; the configured address, which must be unicast | configured, default 1,500, from 1,280 to 9,000 and within the port's buffer with the Ethernet header | `up` from a successful registration; `down` from an `init` whose registration failed, and while the driver waits out its hold | configured, default the transmit ring's slot count | `copy` |
 

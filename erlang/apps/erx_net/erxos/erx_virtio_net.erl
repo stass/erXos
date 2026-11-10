@@ -129,7 +129,8 @@ start(Spec) ->
         T0 = #t{dev = Dev, rx = Rx, tx = Tx, features = Features, mtu = Mtu},
         {ok, T} ?= refill(?QUEUE_SIZE, T0),
         {ok, #{link => ethernet, lladdr => lladdr(Features, Words), mtu => Mtu,
-               state => link_state(Features, Words), tx_limit => ?QUEUE_SIZE}, T}
+               state => link_state(Features, Words), tx_limit => ?QUEUE_SIZE,
+               finish => none}, T}
     end.
 
 identify(Dev) ->
@@ -262,6 +263,9 @@ frame(_Short, _Mtu, {Drops, Frames}) ->
 
 -doc false.
 transmit({_Zone, _Packet}, T) ->
+    {{drop, malformed}, T};
+%% Its finish is none: a delayed frame is a shape it does not take.
+transmit({csum, _Start, _Field, _Frame}, T) ->
     {{drop, malformed}, T};
 transmit(Frame, #t{mtu = Mtu} = T) ->
     case iolist_size(Frame) of
