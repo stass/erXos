@@ -2808,9 +2808,11 @@ from a control slot, and the agent acts only on the system domain's.
   the owner's act, and the only way a peer comes to hold `link` or `exit`
   on a name other than a child it spawned. With `[]` it leaves the peer
   holding nothing, which is what a peer that was never given the name
-  has. It returns `{error, badarg}` for a name of another domain, a
-  process that has exited or an inactive alias, and `{error,
-  system_limit}` when the table is full.
+  has. What it sets holds on the connection the two domains have, and
+  ends with it, as every holder does. It returns `{error, badarg}` for a
+  name of another domain, a process that has exited or an inactive
+  alias, `{error, noconnection}` for a grant to a `Peer` with no
+  connection with the domain (`[]` then answers `ok`), and `{error, system_limit}` when the table is full.
 * `erx:exports/1` lists what the calling domain has exported one of its own
   names toward, and is how a service checks that a peer holds a name before
   it acts on the peer's word about it.

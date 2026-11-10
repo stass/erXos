@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a distribution entry carries its connection's serial.
+ *
  * %CopyrightEnd%
  */
 
@@ -139,6 +141,8 @@ struct dist_entry_ {
     Eterm cid;			/* connection handler (pid or port),
                                    NIL == free */
     Uint32 connection_id;	/* Connection id incremented on connect */
+    Uint64 erx_serial;		/* erXos: the connection's serial, taken with
+                                   connection_id (erx_exports_set.h) */
     enum dist_entry_state state;
     int pending_nodedown;
     Process* suspended_nodeup;

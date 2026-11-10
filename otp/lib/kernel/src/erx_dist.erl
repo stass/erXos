@@ -71,9 +71,13 @@ names_dropped() ->
 
 %% Sets what the domain Peer holds on Name, one of this domain's own names (a live local
 %% pid, or the domain's name {domain, Id}), to exactly Rights; [] ends Peer's hold. A pid
-%% holds send, link, exit and introduce, the domain's name spawn. {error, badarg} for any
-%% other name or a malformed argument, {error, system_limit} when the table is full.
--spec export(own_name(), [right()], pos_integer()) -> ok | {error, badarg | system_limit}.
+%% holds send, link, exit and introduce, the domain's name spawn. The hold is on the
+%% connection the two domains have and ends with it, so a domain exports again after a
+%% reintroduction. {error, badarg} for any other name or a malformed argument,
+%% {error, noconnection} for a grant to a peer with no connection with this domain,
+%% {error, system_limit} when the table is full.
+-spec export(own_name(), [right()], pos_integer()) ->
+          ok | {error, badarg | noconnection | system_limit}.
 export(_Name, _Rights, _Peer) ->
     erlang:nif_error(undefined).
 

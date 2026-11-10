@@ -22,7 +22,8 @@
  * another domain's registered name is written; a frame for another domain is encoded
  * naming that domain, so the pids it carries are handed out to it (edit 8). A
  * connection that ends with its peer domain's {domain_down, D, Info} fires what it held
- * with that reason (edit 56).
+ * with that reason (edit 56). A lane port's entry takes its creation from the port,
+ * and the port the connection's serial from the entry.
  *
  * %CopyrightEnd%
  */
@@ -58,6 +59,7 @@
 #include "erl_global_literals.h"
 #include "erl_map.h"
 #include "erx_exports.h"
+#include "erx_lane_drv.h"
 
 #define DIST_CTL_DEFAULT_SIZE 64
 
@@ -3400,6 +3402,7 @@ retry:
     ctx->deref_dep = 0;
     ctx->cid = dep->cid;
     ctx->connection_id = dep->connection_id;
+    ctx->erx_conn = erx_exports_conn_of(dep); /* erXos: edit 8, under dep's lock */
     ctx->no_suspend = no_suspend;
     ctx->no_trap = no_trap;
     ctx->dflags = dep->dflags;
@@ -3559,7 +3562,7 @@ erts_dsig_send(ErtsDSigSendContext *ctx)
 	    erts_finalize_atom_cache_map(ctx->acmp, ctx->dflags);
 
             ERTS_INIT_TTBEncodeContext(&ctx->u.ec, ctx->dflags);
-            ctx->u.ec.erx_peer = erx_exports_peer_of(ctx->dep); /* erXos: edit 8 */
+            ctx->u.ec.erx_conn = ctx->erx_conn; /* erXos: edit 8 */
 	    ctx->dhdr_ext_size = erts_encode_ext_dist_header_size(&ctx->u.ec,
                                                                   ctx->acmp,
                                                                   ctx->fragments);
@@ -5339,6 +5342,14 @@ BIF_RETTYPE erts_internal_create_dist_channel_3(BIF_ALIST_3)
 
         if(dep->pending_nodedown)
             goto suspend;
+
+        /*
+         * erXos: a lane port takes the connection's serial, which the entry took when it
+         * went pending, and gives the peer id it opened with as the creation, so the
+         * entry's creation, which the encoder's holders and edit 16's D read, is the
+         * funnel's sender id by construction, whatever the caller passed.
+         */
+        erx_lane_connect(pp, dep->erx_serial, &creation);
 
         erts_atomic32_read_bor_nob(&pp->state, ERTS_PORT_SFLG_DISTRIBUTION);
 

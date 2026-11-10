@@ -15,10 +15,10 @@ module Erx
     # peer holds nothing, a spawn adds every right of a child, and an
     # explicit export sets exactly what its owner named.
     HOLDERS_PUT_SITES = Regexp.union(
-      /\Aholders_put\(erx_exports_t \*set, uint32_t peer, uint8_t rights, put_mode_t mode\)\z/,
-      /\A\t\tput = holders_put\(set, peer, ERX_RIGHT_SEND, PUT_IF_NONE\);\z/,
-      /\A\t\tput = holders_put\(&child->erx_exports, peer, CHILD_RIGHTS, PUT_WIDEN\);\z/,
-      /\A\treturn \(holders_put\(set, peer, rights, PUT_EXACT\)\);\z/
+      /\Aholders_put\(erx_exports_t \*set, const erx_exports_conn_t \*conn, uint8_t rights, put_mode_t mode\)\z/,
+      /\A\t\tput = holders_put\(set, conn, ERX_RIGHT_SEND, PUT_IF_NONE\);\z/,
+      /\A\t\tput = holders_put\(&child->erx_exports, &conn, CHILD_RIGHTS, PUT_WIDEN\);\z/,
+      /\A\treturn \(holders_put\(set, conn, rights, PUT_EXACT\)\);\z/
     )
 
     declare_group(

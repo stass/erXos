@@ -80,6 +80,9 @@
 /* Room for an over-limit exit's reason behind the held control term (input_too_large). */
 #define TOO_LARGE_REASON_MAX	(ERX_FUNNEL_ASM_FIRST - ERX_FUNNEL_ASM_KEEP)
 
+/* The driver's entry, defined at the end of the file; setnode's question compares with it. */
+extern ErlDrvEntry erx_lane_driver_entry;
+
 /* The allowance of one run of the input task, -erx lane_batch. */
 uint32_t erx_lane_batch = ERX_LANE_BATCH_DEFAULT;
 /* -erx test_lane_hold: port_control 4 may hold a port's ring. */
@@ -96,6 +99,9 @@ typedef struct lane_conn {
 	erx_lane_writer_t	 writer;
 	erx_lane_reader_t	 reader;
 	erx_funnel_lane_t	 lane;
+	/* The connection's identity, the lane's lookup's: serial 0, which no holder has, until setnode. */
+	erx_exports_conn_t	 exports_conn;
+	bool			 system;	/* the system connection, which the boot exports go on */
 	erx_funnel_limits_t	 limits;
 	char			 peer_node[NODE_MAX + 1];
 	char			 own_node[NODE_MAX + 1];
@@ -915,8 +921,10 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 	erx_funnel_asm_init(&conn->assembly, erx_runtime_limits()->max_frame);
 	conn->lane = (erx_funnel_lane_t){ .sender_node = conn->peer_node, .sender_node_len = strlen(conn->peer_node),
 		.receiver_node = conn->own_node, .receiver_node_len = strlen(conn->own_node),
-		.lookup = erx_exports_lookup, .exports = &conn->lane.sender_id, .sender_id = open.peer_id,
+		.lookup = erx_exports_lookup, .connection = &conn->exports_conn, .sender_id = open.peer_id,
 		.receiver_id = (uint32_t)erts_this_node->creation };
+	conn->exports_conn = (erx_exports_conn_t){ .peer = open.peer_id };
+	conn->system = open.system;
 	conn->scratch_len = erx_funnel_check_scratch_bytes(&conn->limits);
 	conn->scratch = driver_alloc(conn->scratch_len);
 	conn->in_cap = ERX_FUNNEL_ASM_FIRST;
@@ -931,13 +939,25 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 		goto fail;
 	if (erx_event_register_connection(conn->label, driver_mk_port(port)) != ERX_OK)
 		goto fail;
-	/* What every runtime exports to the system domain before its first frame is read. */
-	if (open.system)
-		erx_exports_boot(open.peer_id);
 	return ((ErlDrvData)conn);
 fail:
 	conn_free(conn);
 	return (ERL_DRV_ERROR_GENERAL);
+}
+
+void
+erx_lane_connect(Port *pp, uint64_t serial, uint32_t *peer)
+{
+	lane_conn_t *conn;
+
+	if (pp->drv_ptr == NULL || pp->drv_ptr->entry != &erx_lane_driver_entry)
+		return;
+	conn = (lane_conn_t *)pp->drv_data;
+	conn->exports_conn.serial = serial;
+	*peer = conn->exports_conn.peer;
+	/* What every runtime exports to the system domain before its first frame is read. */
+	if (conn->system)
+		erx_exports_boot(&conn->exports_conn);
 }
 
 /* The sink goes first, and with it every input task still scheduled. */

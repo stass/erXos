@@ -96,12 +96,15 @@ trace_stop(Ref) ->
 Sets what the domain `Peer` holds on `Name`, one of this domain's own names
 (a live local pid, or the domain's name `{domain, Id}`), to exactly `Rights`:
 `send`, `link`, `exit` and `introduce` for a pid, `spawn` for the domain.
-`[]` ends the hold. Returns `{error, badarg}` for any other name, a process
-that has exited or a malformed argument, and `{error, system_limit}` when the
-export table is full.
+`[]` ends the hold. The hold is on the connection the two domains have and
+ends with it, so a domain exports again after the two are introduced again.
+Returns `{error, badarg}` for any other name, a process that has exited or a
+malformed argument, `{error, noconnection}` for a grant to a `Peer` with no
+connection with this domain, and `{error, system_limit}` when the export
+table is full.
 """.
 -spec export(pid() | {domain, pos_integer()}, [atom()], pos_integer()) ->
-    ok | {error, badarg | system_limit}.
+    ok | {error, badarg | noconnection | system_limit}.
 export(Name, Rights, Peer) ->
     erx_dist:export(Name, Rights, Peer).
 

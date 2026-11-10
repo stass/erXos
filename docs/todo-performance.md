@@ -252,6 +252,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   thread and scheduler wake. `tools/erx bench` runs the oracle alone and has no hosted workload, and only `prim_tty`'s reader
   fires a label today. Settled by a bench of an IRQ object's trigger to a process sink's receive, hosted against stock's
   `enif_select` on a pipe, once the pipe NIF or the device NIF gives it a consumer.
+* [Low] `otp/erts/emulator/sys/erxos/erx_exports.c`, `erx_dist_exports_1`: each holder of the name is checked against its peer's connection, a read of the distribution table and a walk of its connected entries, with no reductions charged, so a name handed to many domains costs holders times connections per call. Settled by the time of `erx_dist:exports/1` on a name with 1,000 holders across 64 connections.
 * [Low] `otp/erts/emulator/sys/erxos/erx_event.c`: `deliver` allocates one short-lived environment per delivery to a process
   sink, on top of the message. Settled by the same bench at an interrupt rate a driver sees, with and without one environment
   kept per entry.

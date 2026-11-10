@@ -98,7 +98,9 @@ class SystemDomainTest < Minitest::Test
     [Suite::CONNECTION_DOWN_ANSWER.sub('{20,true,noconnection}', '{0,true,timeout}'),
      Suite::CONNECTION_DOWN_ANSWER.sub('{ok,noconnection}', '{ok,timeout}'),
      Suite::CONNECTION_DOWN_ANSWER.sub('none,ok,ok', 'closing,{error,closing},ok'),
-     Suite::CONNECTION_DOWN_ANSWER.sub(/none,ok\}\z/, 'gone,{error,system_limit}}')].each do |line|
+     Suite::CONNECTION_DOWN_ANSWER.sub(/none,ok,(\{ok,pong,false,timeout,ok,pong\})\}\z/,
+                                       'gone,{error,system_limit},\1}'),
+     Suite::CONNECTION_DOWN_ANSWER.sub('{ok,pong,false,timeout,ok,pong}', '{ok,pong,true,pong,ok,pong}')].each do |line|
       assert_raises(Erx::Error) { down.fetch(:verify).call("#{line}\r\n") }
     end
     refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"

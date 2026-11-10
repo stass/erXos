@@ -91,6 +91,18 @@ holder_find(const erx_exports_t *set, uint32_t peer)
 	return (NULL);
 }
 
+/*
+ * The holder of conn's peer in set on conn itself, or NULL: one written on an earlier
+ * connection grants nothing on conn. Every reader asks this. Under set's stripe lock.
+ */
+static erx_export_holder_t *
+holder_on(const erx_exports_t *set, const erx_exports_conn_t *conn)
+{
+	erx_export_holder_t *const h = holder_find(set, conn->peer);
+
+	return (h != NULL && h->serial == conn->serial ? h : NULL);
+}
+
 /* Removes the holder h of set. Under set's stripe lock. */
 static void
 holder_remove(erx_exports_t *set, erx_export_holder_t *h)
@@ -99,9 +111,9 @@ holder_remove(erx_exports_t *set, erx_export_holder_t *h)
 	erts_atomic_dec_nob(&live);
 }
 
-/* A new holder of peer with rights in set, within the table's bound. Under the lock. */
+/* A new holder of conn's peer with rights in set, within the table's bound. Under the lock. */
 static put_t
-holder_add(erx_exports_t *set, uint32_t peer, uint8_t rights)
+holder_add(erx_exports_t *set, const erx_exports_conn_t *conn, uint8_t rights)
 {
 	erx_export_holder_t *grown;
 	uint16_t cap;
@@ -120,7 +132,8 @@ holder_add(erx_exports_t *set, uint32_t peer, uint8_t rights)
 		set->holders = grown;
 		set->cap = cap;
 	}
-	set->holders[set->nholders++] = (erx_export_holder_t){ .peer = peer, .rights = rights };
+	set->holders[set->nholders++] = (erx_export_holder_t){ .peer = conn->peer, .rights = rights,
+	    .serial = conn->serial };
 	return (PUT_DONE);
 full:
 	erts_atomic_dec_nob(&live);
@@ -128,22 +141,30 @@ full:
 }
 
 /*
- * The one insert: what peer holds on set's name after mode applies rights. A closed set
- * takes nothing, so a writer that raced the name's end writes nothing.
+ * The one insert: what conn's peer holds on set's name, on conn, after mode applies rights.
+ * A closed set takes nothing, so a writer that raced the name's end writes nothing.
+ * Serials grow with each connection, so the peer's holder is of an earlier connection, of
+ * conn, or of a later one: an earlier one's grants nothing and is dropped first, so the
+ * write goes on as for a peer that held nothing; a later one's means the writer's
+ * connection has ended, an encode that ran across a reintroduction, and it writes nothing.
  */
 static put_t
-holders_put(erx_exports_t *set, uint32_t peer, uint8_t rights, put_mode_t mode)
+holders_put(erx_exports_t *set, const erx_exports_conn_t *conn, uint8_t rights, put_mode_t mode)
 {
 	erts_mtx_t *const lock = stripe_of(set);
 	erx_export_holder_t *h;
 	put_t put = PUT_DONE;
 
 	erts_mtx_lock(lock);
-	h = holder_find(set, peer);	/* a closed set has none */
-	if (set->closed)
+	h = holder_find(set, conn->peer);	/* a closed set has none */
+	if (h != NULL && h->serial < conn->serial) {
+		holder_remove(set, h);
+		h = NULL;
+	}
+	if (set->closed || (h != NULL && h->serial > conn->serial))
 		put = PUT_DONE;
 	else if (h == NULL && rights != 0)
-		put = holder_add(set, peer, rights);
+		put = holder_add(set, conn, rights);
 	else if (h != NULL && mode == PUT_WIDEN)
 		h->rights |= rights;
 	else if (h != NULL && mode == PUT_EXACT && rights != 0)
@@ -154,16 +175,16 @@ holders_put(erx_exports_t *set, uint32_t peer, uint8_t rights, put_mode_t mode)
 	return (put);
 }
 
-/* What peer holds on set's name, read whole under its lock. */
+/* What conn's peer holds on set's name on conn, read whole under its lock. */
 static uint8_t
-holders_rights(const erx_exports_t *set, uint32_t peer)
+holders_rights(const erx_exports_t *set, const erx_exports_conn_t *conn)
 {
 	erts_mtx_t *const lock = stripe_of(set);
 	const erx_export_holder_t *h;
 	uint8_t rights;
 
 	erts_mtx_lock(lock);
-	h = holder_find(set, peer);
+	h = holder_on(set, conn);
 	rights = h == NULL ? 0 : h->rights;
 	erts_mtx_unlock(lock);
 	return (rights);
@@ -201,30 +222,30 @@ live_process(Eterm pid)
  * dead process (design-domains.md, "Exports").
  */
 void
-erx_exports_hand_out(Eterm name, uint32_t peer)
+erx_exports_hand_out(Eterm name, const erx_exports_conn_t *conn)
 {
 	erx_alias_hold_t hold = { NULL };
 	erx_exports_t *set = NULL;
 	Process *p;
 	put_t put = PUT_DONE;
 
-	if (peer == 0)
+	if (conn->peer == 0)
 		return;
 	if (is_internal_pid_ref(name))
 		set = erx_alias_hold(internal_ref_numbers(name), &hold);
 	else if ((p = live_process(name)) != NULL)
 		set = &p->erx_exports;
 	if (set != NULL)
-		put = holders_put(set, peer, ERX_RIGHT_SEND, PUT_IF_NONE);
+		put = holders_put(set, conn, ERX_RIGHT_SEND, PUT_IF_NONE);
 	if (put == PUT_FULL)
 		erts_atomic64_inc_nob(&refused);
 	if (hold.stripe != NULL)
 		erx_alias_release(&hold);
 }
 
-/* What peer holds on the active alias words; nothing once the alias has ended. */
+/* What conn's peer holds on the active alias words; nothing once the alias has ended. */
 static uint8_t
-alias_rights(const uint32_t words[ERX_ALIAS_WORDS], uint32_t peer)
+alias_rights(const uint32_t words[ERX_ALIAS_WORDS], const erx_exports_conn_t *conn)
 {
 	erx_alias_hold_t hold;
 	erx_exports_t *const set = erx_alias_hold(words, &hold);
@@ -232,33 +253,41 @@ alias_rights(const uint32_t words[ERX_ALIAS_WORDS], uint32_t peer)
 
 	if (set == NULL)
 		return (0);
-	rights = holders_rights(set, peer);
+	rights = holders_rights(set, conn);
 	erx_alias_release(&hold);
 	return (rights);
 }
 
-/* Writer 2: a spawn into the domain, before the child runs; a full table's refusal is counted. */
+/*
+ * Writer 2: a spawn into the domain, before the child runs, on the connection its request
+ * came on, conn_id of dep; none once that connection has ended, since the reply is then
+ * dropped too. A full table's refusal is counted.
+ */
 void
-erx_exports_spawned(Process *child, DistEntry *dep)
+erx_exports_spawned(Process *child, DistEntry *dep, Uint32 conn_id)
 {
-	const uint32_t peer = erx_exports_peer_of(dep);
+	erx_exports_conn_t conn = { 0 };
 	put_t put = PUT_DONE;
 
-	if (peer != 0)
-		put = holders_put(&child->erx_exports, peer, CHILD_RIGHTS, PUT_WIDEN);
+	erts_de_rlock(dep);
+	if (dep->state == ERTS_DE_STATE_CONNECTED && dep->connection_id == conn_id)
+		conn = erx_exports_conn_of(dep);
+	erts_de_runlock(dep);
+	if (conn.peer != 0)
+		put = holders_put(&child->erx_exports, &conn, CHILD_RIGHTS, PUT_WIDEN);
 	if (put == PUT_FULL)
 		erts_atomic64_inc_nob(&refused);
 }
 
 /* Writer 3: an explicit export by the name's owner, of exactly rights. */
 static put_t
-exports_set(erx_exports_t *set, uint32_t peer, uint8_t rights)
+exports_set(erx_exports_t *set, const erx_exports_conn_t *conn, uint8_t rights)
 {
-	return (holders_put(set, peer, rights, PUT_EXACT));
+	return (holders_put(set, conn, rights, PUT_EXACT));
 }
 
 void
-erx_exports_boot(uint32_t system)
+erx_exports_boot(const erx_exports_conn_t *system)
 {
 	Process *const init = live_process(erts_init_process_id);
 
@@ -267,11 +296,32 @@ erx_exports_boot(uint32_t system)
 	(void)exports_set(&domain_exports, system, ERX_RIGHT_SPAWN);
 }
 
-uint32_t
-erx_exports_peer_of(DistEntry *dep)
+erx_exports_conn_t
+erx_exports_conn_of(DistEntry *dep)
 {
-	return (dep != NULL && dep != erts_this_dist_entry && erts_dist_peer_is_domain(dep) ?
-	    (uint32_t)dep->creation : 0);
+	if (dep == NULL || dep == erts_this_dist_entry || !erts_dist_peer_is_domain(dep))
+		return ((erx_exports_conn_t){ 0 });
+	return ((erx_exports_conn_t){ .peer = (uint32_t)dep->creation, .serial = dep->erx_serial });
+}
+
+/*
+ * The connection the domain peer has with this one now, false for none: the one connected
+ * entry whose creation is peer (erts_channel_no_to_dist_entry), read under its lock. An
+ * entry of another machine is none either: erx_exports_conn_of gives it peer 0.
+ */
+static bool
+peer_connection(uint32_t peer, erx_exports_conn_t *conn)
+{
+	DistEntry *const dep = erts_channel_no_to_dist_entry(peer);
+	bool up;
+
+	if (dep == NULL || dep == erts_this_dist_entry)
+		return (false);
+	erts_de_rlock(dep);
+	*conn = erx_exports_conn_of(dep);
+	up = dep->state == ERTS_DE_STATE_CONNECTED && conn->peer == peer;
+	erts_de_runlock(dep);
+	return (up);
 }
 
 /* The process a target pid of this node names; the funnel's target rule checked the node. */
@@ -284,19 +334,19 @@ target_process(const erx_etf_pid_t *pid)
 }
 
 erx_funnel_hold_t
-erx_exports_lookup(const void *peerp, const erx_funnel_name_t *name)
+erx_exports_lookup(const void *connp, const erx_funnel_name_t *name)
 {
-	const uint32_t peer = *(const uint32_t *)peerp;
+	const erx_exports_conn_t *const conn = connp;
 	Process *p;
 
 	switch (name->kind) {
 	case ERX_FUNNEL_NAME_PID:
 		p = target_process(name->pid);
-		return ((erx_funnel_hold_t){ .rights = p == NULL ? 0 : holders_rights(&p->erx_exports, peer) });
+		return ((erx_funnel_hold_t){ .rights = p == NULL ? 0 : holders_rights(&p->erx_exports, conn) });
 	case ERX_FUNNEL_NAME_DOMAIN:
-		return ((erx_funnel_hold_t){ .rights = holders_rights(&domain_exports, peer) });
+		return ((erx_funnel_hold_t){ .rights = holders_rights(&domain_exports, conn) });
 	case ERX_FUNNEL_NAME_ALIAS:
-		return ((erx_funnel_hold_t){ .rights = alias_rights(name->alias->words, peer) });
+		return ((erx_funnel_hold_t){ .rights = alias_rights(name->alias->words, conn) });
 	}
 	return ((erx_funnel_hold_t){ 0 });
 }
@@ -374,15 +424,18 @@ own_name(Eterm name, uint8_t *allowed)
 /*
  * erx_dist:export(Name, Rights, Peer): sets what the domain Peer holds on Name, one of
  * this domain's own names, to exactly Rights, a list of send, link, exit and introduce
- * for a pid and spawn for the domain's name; [] ends Peer's hold. ok, {error, badarg}
- * for any other name or a malformed argument, {error, system_limit} when the table is
- * full.
+ * for a pid and spawn for the domain's name; [] ends Peer's hold. The hold is on Peer's
+ * connection with this domain, and ends with it. ok, {error, badarg} for any other name or
+ * a malformed argument, {error, noconnection} for a grant to a Peer with no connection
+ * with this domain ([] then answers ok, the peer holding nothing already), {error, system_limit} when the table is full.
  */
 BIF_RETTYPE
 erx_dist_export_3(BIF_ALIST_3)
 {
+	erx_exports_conn_t conn;
 	erx_exports_t *set;
 	uint8_t rights, allowed;
+	bool up;
 	uint32_t peer;
 	Eterm *hp;
 
@@ -392,14 +445,36 @@ erx_dist_export_3(BIF_ALIST_3)
 		hp = HAlloc(BIF_P, 3);
 		BIF_RET(TUPLE2(hp, am_error, am_badarg));
 	}
-	if (exports_set(set, peer, rights) == PUT_FULL) {
+	up = peer_connection(peer, &conn);
+	if (!up && rights == 0)
+		BIF_RET(am_ok);	/* without a connection the peer holds nothing already */
+	if (!up) {
+		hp = HAlloc(BIF_P, 3);
+		BIF_RET(TUPLE2(hp, am_error, am_noconnection));
+	}
+	if (exports_set(set, &conn, rights) == PUT_FULL) {
 		hp = HAlloc(BIF_P, 3);
 		BIF_RET(TUPLE2(hp, am_error, am_system_limit));
 	}
 	BIF_RET(am_ok);
 }
 
-/* erx_dist:exports(Name): [{Peer, Rights}] for one of this domain's own names. */
+/*
+ * Whether holder h is on its peer's connection with this domain now. Outside every stripe
+ * lock, since it takes the peer's entry lock.
+ */
+static bool
+holder_on_live_connection(const erx_export_holder_t *h)
+{
+	erx_exports_conn_t conn;
+
+	return (peer_connection(h->peer, &conn) && conn.serial == h->serial);
+}
+
+/*
+ * erx_dist:exports(Name): [{Peer, Rights}] for one of this domain's own names, the holders
+ * on the peers' connections now; one of a connection that has ended holds nothing.
+ */
 BIF_RETTYPE
 erx_dist_exports_1(BIF_ALIST_1)
 {
@@ -408,7 +483,7 @@ erx_dist_exports_1(BIF_ALIST_1)
 	erts_mtx_t *lock;
 	Eterm result = NIL, rights, *hp;
 	uint8_t allowed;
-	uint16_t n, i;
+	uint16_t n, i, nlive;
 	size_t r;
 	Uint need;
 
@@ -423,6 +498,10 @@ erx_dist_exports_1(BIF_ALIST_1)
 		sys_memcpy(copy, set->holders, n * sizeof(*copy));
 	}
 	erts_mtx_unlock(lock);
+	for (i = nlive = 0; i < n; i++)	/* keep the holders on a live connection */
+		if (holder_on_live_connection(&copy[i]))
+			copy[nlive++] = copy[i];
+	n = nlive;
 	/* Each holder: a 2-tuple, its cons and a cons per right; a peer id is a small. */
 	need = (Uint)n * 5;
 	for (i = 0; i < n; i++)

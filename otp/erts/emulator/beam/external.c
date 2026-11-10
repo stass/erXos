@@ -3614,8 +3614,8 @@ enc_term_int(TTBEncodeContext* ctx, ErtsAtomCacheMap *acmp, Eterm obj, byte* ep,
 
 	case PID_DEF:
 	    /* erXos: edit 8, handing the pid out to another domain (erx_exports.c). */
-	    if (ctx != NULL && ctx->erx_peer != 0)
-		erx_exports_hand_out(obj, ctx->erx_peer);
+	    if (ctx != NULL && ctx->erx_conn.peer != 0)
+		erx_exports_hand_out(obj, &ctx->erx_conn);
 	    ep = enc_internal_pid(acmp, obj, ep, dflags);
 	    break;
 
@@ -3652,8 +3652,8 @@ enc_term_int(TTBEncodeContext* ctx, ErtsAtomCacheMap *acmp, Eterm obj, byte* ep,
             }
 
             /* erXos: edit 14, handing an alias out to another domain (erx_exports.c). */
-            if (ctx != NULL && ctx->erx_peer != 0 && is_internal_pid_ref(obj))
-                erx_exports_hand_out(obj, ctx->erx_peer);
+            if (ctx != NULL && ctx->erx_conn.peer != 0 && is_internal_pid_ref(obj))
+                erx_exports_hand_out(obj, &ctx->erx_conn);
 
             *ep++ = NEWER_REFERENCE_EXT;
 

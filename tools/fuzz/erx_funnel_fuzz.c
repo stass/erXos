@@ -233,7 +233,7 @@ check(const uint8_t *body, size_t len, size_t held, uint8_t mode,
 		.receiver_node_len = sizeof(receiver) - 1,
 		.receiver_id = 1,
 		.lookup = lookup,
-		.exports = &exports,
+		.connection = &exports,
 	};
 	erx_funnel_verdict_t v;
 	size_t scratch_len;

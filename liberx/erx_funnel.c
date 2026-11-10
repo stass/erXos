@@ -614,7 +614,7 @@ check_frame(const uint8_t *frame, uint32_t frame_len, size_t held,
 			.alias = row->target == ERX_FUNNEL_NAME_ALIAS ?
 			    &v->control.receiver_ref : NULL,
 		};
-		hold = lane->lookup(lane->exports, &name);
+		hold = lane->lookup(lane->connection, &name);
 		if ((hold.rights & row->right) == 0) {
 			v->cause = ERX_FUNNEL_CAUSE_UNAUTHORISED;
 			return (ERX_FUNNEL_OK);

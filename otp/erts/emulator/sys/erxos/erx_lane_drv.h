@@ -33,6 +33,18 @@ extern bool erx_lane_test_hold;
  */
 bool erx_lane_flags(int *argc, char **argv);
 
+struct _erl_drv_port;
+
+/*
+ * setnode's step for the port pp it makes the controller of a connection whose serial the
+ * entry took when it went pending; nothing for a port that is not a lane port. A lane
+ * port it gives the port the serial, so its funnel's lookups and its holders are on this
+ * connection, writes the boot exports on the system connection, before the kick that
+ * starts its reading, and sets *peer to the peer id the port opened with, the one source
+ * of the entry's creation. Under the entry's write lock, with the port locked.
+ */
+void erx_lane_connect(struct _erl_drv_port *pp, uint64_t serial, uint32_t *peer);
+
 /*
  * The bytes of answers a connection's entry may hold unsent (exits, DOWNs, unlink acks and
  * spawn replies it sends with no sending process, which ignore the busy limit) before a

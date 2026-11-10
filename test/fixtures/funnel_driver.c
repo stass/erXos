@@ -347,7 +347,7 @@ check_request(FILE *out, const char *args, uint8_t *bytes)
 		.receiver_node_len = sizeof(receiver) - 1,
 		.receiver_id = 1,
 		.lookup = lookup,
-		.exports = &exports,
+		.connection = &exports,
 	};
 	erx_funnel_verdict_t v;
 	unsigned long long request_words, words;

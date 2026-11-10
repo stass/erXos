@@ -2395,10 +2395,11 @@ it; git history is the record of completed work.
   (RT6b) tells a runtime the connection's values; that cell lands with RT6b.
 * [Medium] Runtime, export table, `erx_exports.c`: what the table does not do yet.
   (1) The spawner's boot exports (`spawn` on the domain, `send` on init) are not written:
-  the boot page names no spawner, only the system domain. (2) A connection's end does not
-  clear the holders toward its peer, which only matters once a peer id can return on a new
-  connection (SV2's introduced connections); the funnel's lookup by peer id keeps a stale
-  holder reachable until then. (3) The bound is the constant 16,384, not a manifest or
+  the boot page names no spawner, only the system domain. (2) A holder of a connection that
+  has ended holds nothing, but keeps its entry, counted against the bound, until its name
+  ends or the next write for that peer on the name replaces it; a long-lived process handed
+  to many peers that have since ended keeps their entries. Drop them at the next write to
+  the set, or at the connection's end. (3) The bound is the constant 16,384, not a manifest or
   `-erx exports` value. (4) The hold's `request_words` is 0 until edit 12 (RT8). (5)
   `ERX_FUNNEL_DELIVER_IF_LINKED` is answered `noproc`, which is wrong when the target already
   holds a link with the sender (one a process of this domain made toward the peer's
@@ -2449,13 +2450,6 @@ it; git history is the record of completed work.
   `sys_memcmp` and word by word, which may stop at the first differing byte. The timing
   says how many leading bytes of a guess match a live identity in the same bucket; a
   constant-time compare of the four words removes the question.
-* [Medium] Runtime, export table and funnel: two sources for a peer's id. The funnel's
-  lookup uses the lane's `sender_id` (`open.peer_id`, `erx_lane_drv.c`), while the writers
-  (`erx_exports_peer_of`) and the origin `D` of edit 16 (`external.c`) use the entry's
-  `creation`, which `erx_dist` sets from the boot page. They agree by convention; an
-  introduced connection (item (3) above) is where they can part. Take both from one
-  source: the lookup reads the entry's creation, or `setnode`'s creation comes from the
-  port. The funnel's `.exports` field, now a pointer to an id, is renamed with it.
 * [Medium] Runtime and domain service, introduced connections, QEMU cases still to write
   (`tools/lib/erx/system_domain.rb`): design-domains' delayed-ready case (a domain whose init
   delays its ready report while its creator writes a spawn request into their connection, with

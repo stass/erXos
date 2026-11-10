@@ -279,6 +279,11 @@ module Erx
     # until its port counts the link sent, so peer takes it first, and writes a frame whose
     # control term is no operation onto its port, which peer's funnel refuses as
     # malformed; it answers what port_command returned and its own 'EXIT'.
+    # Before both, SdSt runs in peer, exports itself to erts with send and answers each
+    # {sd_sp, From} with sd_spong; SdPing pings it from a fresh process of erts. After the
+    # second reintroduction SdSt's holder of the first connection holds nothing
+    # (docs/design-runtime.md, "Connections in ERTS"): erx_dist:exports/1 lists none for erts and the
+    # ping is unheld, so it reaches no one; an export on the new connection lets it through.
     DOWN_BURST = 20
     SERVICE_KILL_DOWN = "SdPid2=#{DOMAINS.fetch('peer')}," \
                         'SdPhase=fun()->erx_domain_links:phase(SdTid,SdPid2,maps:get(links,sys:get_state(erx_domain_srv))) end,' \
@@ -289,6 +294,12 @@ module Erx
                         'SdSentOf=fun(SdSp)-><<SdSw:64,_/binary>>=iolist_to_binary(erlang:port_control(SdSp,0,[])),SdSw end,' \
                         'SdSentBy=fun SdSbf(_,_,0)->timeout;SdSbf(SdSp,SdSn,SdSk)->case SdSentOf(SdSp)>=SdSn of true->ok;' \
                         'false->timer:sleep(1),SdSbf(SdSp,SdSn,SdSk-1) end end,SdDs=self(),' \
+                        "SdSt=spawn(peer@erxos,fun()->ok=erx_dist:export(self(),[send],SdTid),SdDs!{sd_stserving,self()}," \
+                        "(fun SdStf()->receive {erx_origin,_,{sd_sp,SdSpf}}->SdSpf!sd_spong,SdStf() end end)() end)," \
+                        'SdStr=receive {erx_origin,_,{sd_stserving,SdSt}}->ok after 10000->timeout end,' \
+                        "SdPing=fun()->SdPg=spawn(erts@erxos,fun()->SdSt!{sd_sp,self()}," \
+                        "SdDs!{sd_pinged,self(),receive {erx_origin,_,sd_spong}->pong after 3000->timeout end} end)," \
+                        'receive {erx_origin,_,{sd_pinged,SdPg,SdPv}}->SdPv after 10000->none end end,SdPing0=SdPing(),' \
                         "SdKc=fun()->process_flag(trap_exit,true),ok=erx_dist:export(self(),[send,link],SdTid)," \
                         "erlang:port_control(SdLanePort(\" erts@erxos\"),4,<<1>>),SdDs!{sd_kholding,self()}," \
                         "SdKl=fun SdKlf(SdKa)->receive {erx_origin,_,{sd_kb,SdKi}}->SdKlf([SdKi|SdKa]);{'EXIT',_,SdKx}->{lists:reverse(SdKa),SdKx} " \
@@ -312,11 +323,13 @@ module Erx
                         'SdMfp=spawn(erts@erxos,SdMf),' \
                         'SdMfv=receive {erx_origin,_,{sd_mfdone,SdMfp,SdMfs,SdMfc,SdMfx}}->{SdMfs,SdMfc,SdMfx} after 60000->timeout end,' \
                         'SdMwv=receive {erx_origin,_,{sd_mwx,SdMwp,SdMwx}}->SdMwx after 60000->timeout end,' \
-                        'SdN2=SdNone(600),SdR2=SdIntroAgain()'
+                        'SdN2=SdNone(600),SdR2=SdIntroAgain(),' \
+                        'SdStale={SdStr,SdPing0,lists:keymember(SdTid,1,erpc:call(peer@erxos,erx_dist,exports,[SdSt],10000)),SdPing(),' \
+                        'erpc:call(peer@erxos,erx_dist,export,[SdSt,[send],SdTid],10000),SdPing()}'
     # Each case: erts's process told noconnection by its link, peer's by its link behind
     # the whole burst, the objects deleted and the pair introduced again.
     CONNECTION_DOWN_ANSWER = "{connection_down,ok,{ok,noconnection},{#{DOWN_BURST},true,noconnection},none,ok," \
-                             'ok,{ok,true,noconnection},noconnection,none,ok}'
+                             'ok,{ok,true,noconnection},noconnection,none,ok,{ok,pong,false,timeout,ok,pong}}'
     CONNECTION_DOWN_START = /\A\{connection_down,/n
     # A watcher of a process of peer, then peer's system side's port, found by its open
     # command, whose last word is the domain's node (erx_connections:open/3), ended with
@@ -360,7 +373,7 @@ module Erx
                               "#{SERVICE_KILL_TABLE},io:format(\"~0p~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdIntro,SdHeld}])," \
                               "#{SERVICE_KILL_INTRODUCED},io:format(\"~0p~n\",[{introduced,SdUps,SdNodes,SdServing,SdPong}])," \
                               "#{SERVICE_KILL_HOSTILE},io:format(\"~0p~n\",[{hostile,SdZr,SdZw,SdZad,SdZdd,SdZvs,SdZpong,SdZph}])," \
-                              "#{SERVICE_KILL_DOWN},io:format(\"~0p~n\",[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2}])," \
+                              "#{SERVICE_KILL_DOWN},io:format(\"~0p~n\",[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2,SdStale}])," \
                               "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin

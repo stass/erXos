@@ -524,13 +524,16 @@ static const char connection_eval[] =
  * 14 (halts) A pid handed out and then exited
  * 15         is the party's to monitor: with send exported again, the party's m6 says
  *            its monitor was answered DOWN.
- * 16 (halts) A process fills the export table until system_limit, its peers numbered
- *            from 1000, past every domain id the cases make.
+ * 16 (halts) A process fills the export table until a hand-out is refused: it sends the
+ *            party its new aliases 40 at a time, so each frame fits RECORD_MAX, and each
+ *            alias is handed out to the system domain; an explicit export needs a peer's
+ *            connection, and the domain has only the system's. The party skips those
+ *            frames.
  * 17 (halts) While it holds them, a gen_server:call to the party hands out an alias the
  *            table has no room for, so the party's answer reaches no one, the call times
  *            out and the refusal is counted.
  * 18 (halts) The process's exit frees what it held,
- * 19 (halts) so an export succeeds.
+ * 19 (halts) so an export of a process the system domain holds nothing on succeeds.
  */
 static const char exports_eval[] =
     "S='" SYSTEM_NODE "',"
@@ -553,13 +556,14 @@ static const char exports_eval[] =
     "W({'EXIT',P,r7},12),receive {erx_origin,4,m2}->halt(13);m2->halt(13) after 0->ok end,"
     "Q=spawn(fun()->receive go->ok end end),P!{c,Q},R=monitor(process,Q),Q!go,"
     "W({'DOWN',R,process,Q,normal},14),ok=erx_dist:export(Me,[send],4),P!c2,E(m6,15),"
-    "F=fun F(N)->case erx_dist:export(self(),[send],N) of ok->F(N+1);{error,system_limit}->N end end,"
-    "{Fp,Rf}=spawn_monitor(fun()->Me!{k,F(1000)},receive go->ok end end),"
-    "receive {k,K}->erlang:display({exports_filled,K-1000}),H(K>16000,16) end,"
-    "D=erx_dist:exports_refused(),"
-    "H(case catch gen_server:call(P,ping,3000) of {'EXIT',{timeout,_}}->erx_dist:exports_refused()>D;_->false end,17),"
+    "X=fun erx_dist:exports_refused/0,F=fun F(N)->Z=X(),P![alias()||_<-lists:seq(1,40)],"
+    "case X()>Z of true->N;_->F(N+40) end end,"
+    "{Fp,Rf}=spawn_monitor(fun()->Me!{k,F(0)},receive go->ok end end),"
+    "receive {k,K}->erlang:display({exports_filled,K}),H(K>15000,16) end,"
+    "D=X(),"
+    "H(case catch gen_server:call(P,ping,3000) of {'EXIT',{timeout,_}}->X()>D;_->false end,17),"
     "Fp!go,W({'DOWN',Rf,process,Fp,normal},18),"
-    "H(erx_dist:export(Me,[send],5)==ok,19),"
+    "H(erx_dist:export(whereis(code_server),[send],4)==ok,19),"
     "case get(failed) of []->halt(0);Fs->halt(lists:min(Fs)) end";
 
 /*
@@ -926,6 +930,27 @@ party_frame_split(const uint8_t *record, size_t len, party_frame_t *frame)
 }
 
 /* Whether a frame's control term starts with head. */
+static bool
+party_ctl_starts(const party_frame_t *frame, const uint8_t *head, size_t head_len);
+
+/*
+ * The next frame whose control term starts with head, into record and frame, past at most
+ * skips frames of another kind (the exports case's fill). False at a frame that does not
+ * split, or once the skips run out.
+ */
+static bool
+party_take_starting(lane_party_t *party, uint8_t *record, size_t *len, party_frame_t *frame,
+    const uint8_t *head, size_t head_len, int skips)
+{
+	for (; skips >= 0; skips--) {
+		if (!party_take(party, record, NEXT_NS, len) || !party_frame_split(record, *len, frame))
+			return (false);
+		if (party_ctl_starts(frame, head, head_len))
+			return (true);
+	}
+	return (false);
+}
+
 static bool
 party_ctl_starts(const party_frame_t *frame, const uint8_t *head, size_t head_len)
 {
@@ -1486,6 +1511,8 @@ party_alias_send(lane_party_t *party, const erx_etf_ref_t *alias, const char *at
  * {20, From, To, Ref} and SEND_SENDER {22, From, To}, whose From follows the head.
  */
 static const uint8_t party_monitor_head[] = { 104, 4, 97, DOP_MONITOR_P };
+/* The most fill frames the exports case sends before its gen_server:call: about 410. */
+#define FILL_FRAMES_MAX	512
 static const uint8_t party_demonitor_head[] = { 104, 4, 97, DOP_DEMONITOR_P };
 static const uint8_t party_send_head[] = { 104, 3, 97, DOP_SEND_SENDER };
 
@@ -1654,8 +1681,8 @@ exports_party(uint32_t id)
 	    party_monitor(&party, &q) && party_take(&party, record, NEXT_NS, &len) && party_down_noproc(record, len) &&
 	    party_signal(&party, DOP_SEND_SENDER, &eval, "m6");
 	say_count("exports_exited", passed);
-	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_frame_split(record, len, &frame) &&
-	    party_ctl_starts(&frame, party_monitor_head, sizeof(party_monitor_head)) &&
+	passed = passed && party_take_starting(&party, record, &len, &frame, party_monitor_head,
+	    sizeof(party_monitor_head), FILL_FRAMES_MAX) &&
 	    party_take(&party, record, NEXT_NS, &len) && party_frame_split(record, len, &frame) &&
 	    party_gen_call(&party, &frame, &alias) && party_alias_send(&party, &alias, "pong");
 	say_count("exports_alias_refused", passed);

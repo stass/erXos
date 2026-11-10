@@ -282,12 +282,13 @@ typedef struct erx_funnel_hold {
 } erx_funnel_hold_t;
 
 /*
- * The receiver's export table, asked one question for the lane's peer.
- * The runtime answers it from the record it already looks up to deliver
- * to the name (design-domains.md, "Exports"), reading only its own
- * memory; it must not change anything the funnel can see.
+ * The receiver's export table, asked one question for the lane's
+ * connection: what its peer holds on name. The runtime answers it from
+ * the record it already looks up to deliver to the name (design-domains.md,
+ * "Exports"), reading only its own memory; it must not change anything the
+ * funnel can see.
  */
-typedef erx_funnel_hold_t erx_funnel_lookup_fn(const void *exports,
+typedef erx_funnel_hold_t erx_funnel_lookup_fn(const void *connection,
     const erx_funnel_name_t *name);
 
 /*
@@ -302,7 +303,7 @@ typedef struct erx_funnel_lane {
 	const char		*receiver_node;
 	size_t			 receiver_node_len;
 	erx_funnel_lookup_fn	*lookup;
-	const void		*exports;
+	const void		*connection;	/* the runtime's, for lookup */
 	uint32_t		 sender_id;
 	uint32_t		 receiver_id;
 } erx_funnel_lane_t;

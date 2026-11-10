@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a channel number names the node of that creation.
+ * Modified by erXos: a channel number names the node of that creation, and each new
+ * connection of an entry takes a serial no other connection of the boot has.
  *
  * %CopyrightEnd%
  */
@@ -184,6 +185,7 @@ dist_table_alloc(void *dep_tmpl)
     dep->cid				= NIL;
     erts_atomic_init_nob(&dep->input_handler, (erts_aint_t) NIL);
     dep->connection_id			= init_connection_id;
+    dep->erx_serial			= 0;
     dep->state				= ERTS_DE_STATE_IDLE;
     dep->pending_nodedown               = 0;
     dep->suspended_nodeup               = NULL;
@@ -313,6 +315,9 @@ static ERTS_INLINE DistEntry *find_dist_entry(Eterm sysname,
     erts_rwmtx_runlock(&erts_dist_table_rwmtx);
     return res;
 }
+
+/* erXos: the last connection serial an entry took (erts_set_dist_entry_pending). */
+static erts_atomic64_t erx_serials;
 
 DistEntry *
 erts_channel_no_to_dist_entry(Uint cno)
@@ -723,6 +728,8 @@ erts_set_dist_entry_pending(DistEntry *dep)
     dep->state = ERTS_DE_STATE_PENDING;
     dep->dflags = (DFLAG_DIST_MANDATORY | DFLAG_DIST_HOPEFULLY | DFLAG_PENDING_CONNECT);
     dep->connection_id = (dep->connection_id + 1) & ERTS_DIST_CON_ID_MASK;
+    /* erXos: a serial no other connection of the boot has (erx_exports_set.h). */
+    dep->erx_serial = (Uint64) erts_atomic64_inc_read_nob(&erx_serials);
 
     ASSERT(!dep->mld);
     mld->connection_id = dep->connection_id;
@@ -1085,6 +1092,7 @@ void erts_init_node_tables(int dd_sec)
     HashFunctions f;
     ErlNode node_tmpl;
 
+    erts_atomic64_init_nob(&erx_serials, 0);
     if (dd_sec == ERTS_NODE_TAB_DELAY_GC_INFINITY)
 	node_tab_delete_delay = (ErtsMonotonicTime) -1;
     else

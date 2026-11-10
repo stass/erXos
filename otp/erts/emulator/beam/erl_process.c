@@ -13004,7 +13004,7 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
 
         /* erXos: the spawner's rights on its child, before the child runs or the reply
          * hands its pid out (erx_exports.c, writer 2). */
-        erx_exports_spawned(p, so->dist_entry);
+        erx_exports_spawned(p, so->dist_entry, so->conn_id);
 
         code = erts_dsig_prepare(&ctx, so->dist_entry, NULL, 0,
                                  ERTS_DSP_NO_LOCK, 1, 1, 0);

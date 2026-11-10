@@ -988,7 +988,10 @@ introduction's, and no cookie is asked, since the lane itself names the
 peer. It connects a distribution entry for the peer's node name, with
 the port as its controller, through `erlang:setnode/3` with the fixed
 flag set and the peer's id as creation, as `dist_util` does at the end
-of a handshake, and reports the node up to `net_kernel` as `dist_util`
+of a handshake; for a lane port, `setnode/3` takes the creation from the
+port itself, which opened with the introduction's peer id, so the
+entry's creation, edit 16's `D` and the funnel's sender id have the one
+source, and gives the port the connection's serial. It reports the node up to `net_kernel` as `dist_util`
 reports it; the agent then answers `connection_mapped`. The flag set is
 the frames' ([design-domains.md](design-domains.md#the-funnel)): OTP 29's
 mandatory flags plus `PUBLISHED`, `DIST_MONITOR`, `DIST_MONITOR_NAME`,
@@ -1282,8 +1285,25 @@ the outcome nor its timing tells the peer whether the target lives.
 
 Holders end with their name: a process's exit clears its holders (edit
 13), an alias's deactivation, under OTP's own alias rules, clears the
-alias's (edit 14), and a connection's end clears every holder toward its
-peer. A frame that arrives for a name its peer holds nothing on is
+alias's (edit 14), and a connection's end ends every holder toward its
+peer. Each holder is written for one connection: its **serial**, a
+number the peer's distribution entry takes with ERTS's connection id
+when the connection goes pending, and no other connection of the boot
+has, is stored with the holder. The encoder reads it with the connection
+id when it prepares a frame, the spawn-into path only while the
+request's connection is the entry's, and `erx:export/3` from the peer's
+connection that is up; `setnode/3` gives it to the lane port, whose
+funnel's lookup compares a holder's serial with its own. So a holder of a
+connection that has ended holds nothing on any later one: two domains
+introduced again start with no holder of the earlier connection, by
+construction, with no walk over the names. Serials grow, so a write
+finds the peer's holder of an earlier connection, which it drops before
+it goes on as for a peer that held nothing, or of a later one, when the
+writer is an encode that ran across a reintroduction, whose frame is
+dropped too, and then it writes nothing. `erx:exports/1` lists only
+holders on a connection that is up, and `erx:export/3` granting to a
+peer that has no connection with the domain returns
+`{error, noconnection}`. A frame that arrives for a name its peer holds nothing on is
 unheld, and gets what a dead process gets, so a stale pid names nothing
 (D1). A pid export therefore lasts as long as the process, and the
 revocable name is an alias, as in stock OTP.

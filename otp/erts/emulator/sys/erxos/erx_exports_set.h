@@ -12,11 +12,27 @@
 
 #include <stdint.h>
 
-/* What one peer holds on one name: its ERX_RIGHT_* bits, never 0 while it is held. */
+/*
+ * One connection as the export table sees it: the peer's domain id and the connection's
+ * serial, which the peer's distribution entry takes when the connection goes pending
+ * (erl_node_tables.c) and no other connection of the boot shares. Every holder is written for one connection and holds only on it.
+ */
+typedef struct erx_exports_conn {
+	uint32_t		 peer;		/* the peer's domain id; 0 for no domain */
+	uint32_t		 pad;
+	uint64_t		 serial;	/* the connection's own; 0 names none */
+} erx_exports_conn_t;
+
+/*
+ * What one peer holds on one name: its ERX_RIGHT_* bits, never 0 while it is held, on the
+ * connection serial names. Once that connection has ended the holder holds nothing: no
+ * later connection's lookup matches it, and the next write for the peer replaces it.
+ */
 typedef struct erx_export_holder {
 	uint32_t		 peer;		/* a domain that was given the name */
 	uint8_t			 rights;	/* ERX_RIGHT_*: what it holds on it */
 	uint8_t			 pad[3];
+	uint64_t		 serial;	/* the connection it was given on */
 } erx_export_holder_t;
 
 /*

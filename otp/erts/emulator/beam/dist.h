@@ -314,7 +314,7 @@ typedef struct TTBEncodeContext_ {
     int debug_fragments;
     int debug_vlen;
 #endif
-    Uint32 erx_peer; /* erXos: the domain the frame is for, 0 for none (edit 8) */
+    erx_exports_conn_t erx_conn; /* erXos: the connection the frame is for; peer 0 for none (edit 8) */
 } TTBEncodeContext;
 
 #define ERTS_INIT_TTBEncodeContext(Ctx, Flags)                  \
@@ -332,7 +332,7 @@ typedef struct TTBEncodeContext_ {
         (Ctx)->fragment_size = ~((Uint) 0);                     \
         (Ctx)->continue_make_lext_hash = 0;                     \
         (Ctx)->lext_vlen = -1;                                  \
-        (Ctx)->erx_peer = 0;                                    \
+        (Ctx)->erx_conn = (erx_exports_conn_t){ 0 };            \
         if ((Flags) & DFLAG_PENDING_CONNECT) {                  \
             (Ctx)->hopeful_flags = 0;                           \
             (Ctx)->hopeful_flagsp = NULL;                       \
@@ -385,6 +385,7 @@ typedef struct erts_dsig_send_context {
     Eterm node;   /* used if dep == NULL */
     Eterm cid;
     Eterm connection_id;
+    erx_exports_conn_t erx_conn; /* erXos: dep's connection, read with connection_id (edit 8) */
     int deref_dep;
 
     enum erts_dsig_send_phase phase;
