@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/root_open.h"
@@ -69,7 +70,7 @@ say_status(int64_t status)
 	say("erx: task: status ");
 	if (status < 0) {
 		say("-");
-		say_number((uint64_t)-status);
+		say_number((uint64_t)0 - (uint64_t)status);
 	} else {
 		say_number((uint64_t)status);
 	}
@@ -111,6 +112,25 @@ case_ends(const char *name, uint32_t flags, uint64_t mode, int64_t expected)
 
 	say_status(status);
 	say_case(name, status == expected && erx_fiasco_test_task_caps_gone() &&
+	    erx_fiasco_vm_free_pages() == before);
+}
+
+/*
+ * A task cannot make, bind or unbind an IRQ object, and reaches none through a handle it was not
+ * given: the root holds an object, within the handles the task probes, while the task runs, and
+ * still holds it afterwards.
+ */
+static void
+case_irq_refused(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t bell = 0, space = 0;
+	const bool made = erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &bell) == ERX_OK && bell >= 1 && bell <= IRQ_SCAN;
+	const int64_t status = made ? task_run(0, MODE_IRQ_REFUSED, &space) : INT64_MIN;
+	const bool kept = made && erx_object_destroy(bell) == ERX_OK;
+
+	say_status(status);
+	say_case("irq_refused", made && status == 0 && kept && erx_fiasco_test_task_caps_gone() &&
 	    erx_fiasco_vm_free_pages() == before);
 }
 
@@ -168,7 +188,7 @@ erx_fiasco_root_main(void)
 	say_address(ALIAS_RW);
 	case_ends("run_rw", ERX_SPACE_JIT, MODE_RUN_RW, ERX_FIASCO_TASK_STATUS_FAULT);
 	case_ends("no_jit", 0, MODE_NO_JIT, 0);
-	case_ends("irq_refused", 0, MODE_IRQ_REFUSED, 0);
+	case_irq_refused();
 	case_ends("log", 0, MODE_LOG, 0);
 	case_ends("write", 0, MODE_WRITE, 0);
 	case_ends("spin_stop", 0, MODE_SPIN_STOP, STATUS_SPIN_STOP);

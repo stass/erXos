@@ -16,7 +16,7 @@
 #define MODE_SPIN_STOP	5	/* a thread spinning on each CPU while the first stops the task */
 #define MODE_RACE	6	/* a thread looping on commit while the first faults */
 #define MODE_WAIT	7	/* sleeps until the root stops the task */
-#define MODE_IRQ_REFUSED	8	/* every IRQ call through the service: each refused */
+#define MODE_IRQ_REFUSED	8	/* IRQ calls from a task: make, bind, unbind refused, no handle reaches one */
 #define MODE_LOG	9	/* forges the root's lines with erx_debug_log: ends with 0 */
 #define MODE_WRITE	10	/* writes every byte value through a task's standard output: ends with 0 */
 
@@ -30,6 +30,9 @@
  */
 #define WRITE_HEAD	"write case:\t\n\033[2J\xff\n"
 #define WRITE_RUN_BYTES	1103
+
+/* How many handles the IRQ case probes, from 1: the root's object is among them. */
+#define IRQ_SCAN	16u
 
 /* The status a spinning task stops with. */
 #define STATUS_SPIN_STOP	7

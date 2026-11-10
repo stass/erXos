@@ -792,6 +792,37 @@ it; git history is the record of completed work.
   serves IRQ calls from tasks (BK8b), so the ack of handle 0 answers otherwise, the task
   ends with status 82 and `native_task` fails at 1 CPU every run. Decide which is right:
   drop or rewrite the case for the per-holder IRQ objects, or restore the refusal.
+  `gen_statem` and its pure cores `erx_gen_tcp_core` and `erx_gen_udp_core`, `erx_sock_admit`,
+  the socket protocol's `{erx_net, Sender, Body}` messages and byte credit in `erx_tcp_conn` and
+  `erx_udp_sock` with their checks of `ReplyTo`, sends and pushes cut into 64 KiB pieces and the
+  64 requests in flight ("Message sizes", "Requests in flight"), the `grant` key's `Origin` and
+  `erxos/erx_net_client_erxos`, local `controlling_process/2` (`enotsup` today), and `recv`
+  up to 64 MiB in the socket process, where `erx_tcp_conn` answers `{error, enomem}` above its
+  receive buffer.
+* [High] network, `erx_net_client` (`erx_gen_tcp:connect/4`, `erx_gen_udp:open/2`, `erx_inet`;
+  design-network-stack, "Untrusted input", "Answers from the grant"): the grant's answers
+  reach program code unchecked. `connect` and `open` return the grant's reply to their caller
+  as it came, the socket term included, and `erx_inet:grant/0` hands every backend the
+  grant's pid to call itself, so no one check stands between the network domain and the
+  caller. Once the grant is in another domain, a network domain can hand a program any term
+  as its socket, and a backend that later calls that term with `gen_server:call/3` follows
+  `{global, _}` and `{via, Module, _}` names as well as pids. The resolver loader matches
+  `{erx_net_resolver, Grant, Answer}` without its envelope, so a loader in another domain
+  drops every change and keeps its first answer, and it calls `watch_resolver` with a
+  5000 ms timeout where the design's build check allows only `infinity`. To build:
+  `erx_inet:call/1` in place of `grant/0`, as the one reader of the `grant` key and the one
+  caller of the grant, waiting with `infinity`; every answer through
+  `erx_sock_admit:answer/3` against the schema's reply type; an open's socket required to be
+  a pid of the grant's node; the resolver's answers and its change messages, in their
+  envelope with `D` the grant's, checked there too; and the build checks that only
+  `erx_inet` reads the key and that every call's timeout is `infinity`.
+  While the stack runs in the system domain the grant is the caller's own node's, so nothing
+  reaches the client from another domain yet.
+* [Medium] Fiasco backend, `liberx/backend/fiasco/service_task.c` (`erx_fiasco_task_mem_physical_body`),
+  `service.c` (`ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL`): the call is served to any task, not
+  only the root as the call table says, so a task maps a device's registers it was never
+  given. A stopgap residual until erXos's kernel; the `native_task` suite has no case for
+  it. Refuse it with `ERX_ENOTSUP` for a task other than the root and add the case.
 * [High] network and domains, the envelope (design-domains, "Risks and open questions"):
   every message from another domain arrives as `{erx_origin, D, Msg}`, so a socket's
   active-mode delivery `{tcp, S, Data}` (and `gen_udp`'s) reaches an owner outside the
