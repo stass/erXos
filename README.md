@@ -311,7 +311,13 @@ Error in process <0.150.0> with exit value:
   `erx_domain`, starts the manifest's configured domains and creates
   others on request, each running ERTS as the interpreter or as BeamAsm;
   only the BeamAsm image, whose manifest marks it, gets a space that can
-  hold generated code. Domains do not yet talk to each other.
+  hold generated code. `erx_domain:introduce/2` connects two domains,
+  whose processes then message and call each other as Erlang nodes do;
+  when either end goes, both are told `noconnection`. A message from
+  another domain is acted on only by its protocol's owner, and the
+  `system_domain` suite checks that forged connection records are
+  dropped. A session domain's release, with its terminal relay, is
+  built, though no session starts yet.
 * **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
   and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
