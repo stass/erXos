@@ -34,10 +34,33 @@ it; git history is the record of completed work.
   the p620 bulk and request-reply numbers before and after it, and the HVF numbers when it
   changes erXos's code; the gains are estimates from the profile, to be replaced by those
   numbers:
-  1. the benchmarks: bulk and request-reply on p620 against lwIP, with lwIP given a
-     request-reply client, `tools/erx bench net-bulk` and `net-rr` under HVF, and the
-     counters of frames per run and segments per merged unit; no gain, it fixes the
-     baseline;
+  1. the benchmarks, `tools/erx bench net-p620` (bulk and request-reply on p620, erx_net and
+     lwIP, with its counters' hook: the interface's `runs`, `run_frames`, `units`,
+     `unit_segments` and `frames_dropped` totals, reported unsupported until it keeps them)
+     are in the tree; what remains is `tools/erx bench net-bulk` and `net-rr` under HVF,
+     which need a TCP peer on QEMU's medium (the Linux oracle guest is not built yet) and
+     the guest's TCP path beyond ARP and ICMP; no gain, it fixes the baseline;
+     * [Medium] `net-bulk`/`net-rr` under HVF (`tools/erx bench`): no TCP peer on QEMU's
+       medium yet (the Linux oracle guest is not built; the harness's virtio-net hub carries
+       raw frames to a Ruby harness only), the guest's TCP path is tested only to ARP and
+       ICMP, and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
+       `BenchGuest` loads its module. The Linux-guest baseline stays unsupported until then.
+     * [Medium] `erx_net_if_core` counters: the map keeps only counters that were
+       incremented, so "kept, zero" reads as "unsupported" in `tools/erx bench net-p620`.
+       The packages that add `runs`, `run_frames`, `units`, `unit_segments` and
+       `frames_dropped` must make `admin(counters)` return every counter they keep, zeros
+       included; the fast-path check is `--require-fast-path` until then and becomes the
+       default (`docs/design-network-fastpath.md`, "Benchmarks and targets") once they exist.
+     * [Medium] `tools/lib/erx/net_bench_p620.rb`: CPU and context switches are of the whole
+       client process, BEAM boot and the 1 s ARP settle included, which biases CPU per GiB
+       against erx_net; subtract an idle-run baseline per stack. The tap helper's CPU
+       reaches `time -l` only because FreeBSD `timeout(1)` reaps its descendants.
+     * [Low] `net_bench_p620.rb`: no remote lock against two concurrent runs; lwIP's source
+       trees on p620 are not hash-checked per run; erlc, git and rsync run without a
+       deadline; the peer's start is a fixed wait, not a ready line; the stacks' repeats
+       run in blocks, not interleaved; the p99 is the nearest rank plus one in both
+       clients; bulk send differs between the clients (nodelay and 64 KiB against Nagle and
+       32 KiB), as the report's conditions state.
   2. one step per mailbox and a batch on every hop: about 10 to 15 percent sending and 20
      to 30 percent receiving, from fewer loop passes and ACKs;
   3. the lean step: `#tcb{}` split from `#tcb_conf{}`, header prediction finishing its two

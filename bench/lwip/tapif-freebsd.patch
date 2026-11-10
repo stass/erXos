@@ -1,0 +1,34 @@
+--- tapif.c.orig	2026-11-09 13:50:35.720588006 -0800
++++ tapif.c	2026-11-09 13:55:37.631542738 -0800
+@@ -85,7 +85,9 @@
+ #define NETMASK_ARGS "netmask %d.%d.%d.%d"
+ #define IFCONFIG_ARGS "tun0 inet %d.%d.%d.%d " NETMASK_ARGS " link0"
+ #else /* others */
++#ifndef DEVTAP
+ #define DEVTAP "/dev/tap0"
++#endif
+ #define NETMASK_ARGS "netmask %d.%d.%d.%d"
+ #define IFCONFIG_ARGS "tap0 inet %d.%d.%d.%d " NETMASK_ARGS
+ #endif
+@@ -136,7 +138,7 @@
+   /* device capabilities */
+   netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_IGMP;
+ 
+-  tapif->fd = open(DEVTAP, O_RDWR);
++  tapif->fd = open(getenv("TAPDEV") != NULL ? getenv("TAPDEV") : DEVTAP, O_RDWR);
+   LWIP_DEBUGF(TAPIF_DEBUG, ("tapif_init: fd %d\n", tapif->fd));
+   if (tapif->fd == -1) {
+ #ifdef LWIP_UNIX_LINUX
+@@ -239,6 +241,12 @@
+   pbuf_copy_partial(p, buf, p->tot_len, 0);
+ 
+   /* signal that packet should be sent(); */
++  /* FreeBSD: pad runt frames to the 60-byte Ethernet minimum */
++  if (p->tot_len < 60) {
++    memset(buf + p->tot_len, 0, 60 - p->tot_len);
++    written = write(tapif->fd, buf, 60);
++    if (written == 60) written = p->tot_len;
++  } else
+   written = write(tapif->fd, buf, p->tot_len);
+   if (written < p->tot_len) {
+     MIB2_STATS_NETIF_INC(netif, ifoutdiscards);
