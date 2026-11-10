@@ -33,6 +33,20 @@ class RuntimeConsoleTest < Minitest::Test
   BACKSPACE = "\x7f"
   LONG_ATOM = 'a' * 200
 
+  # The Erlang shell prompt before its command count: the node name of the hosted system
+  # domain, in parentheses. `with_stock` gives stock the same prompt, so the two screens
+  # compare.
+  NODE = 'system@erxos'
+  PROMPT = "\\(#{Regexp.escape(NODE)}\\)"
+
+  # A module that gives a stock shell the prompt erXos's has, `(NODE)N> `; an unnamed
+  # stock node prints only `N> `, and a named one would start epmd.
+  PROMPT_MODULE = <<~ERLANG
+    -module(erx_console_test_prompt).
+    -export([prompt/1]).
+    prompt([{history, N}]) -> io_lib:format("(#{NODE})~w> ", [N]).
+  ERLANG
+
   # What a terminal shows: enough of a VT100 to render what prim_tty writes, including a
   # line that fills its last column and wraps on the next character.
   class Screen
@@ -188,44 +202,44 @@ class RuntimeConsoleTest < Minitest::Test
   # Each step is the keys typed and what the screen then shows, ending at the next prompt.
   def dialogue
     [
-      ["1+1.\r", /^2\n2> \z/],
+      ["1+1.\r", /^2\n#{PROMPT}2> \z/],
       # Arrow keys: the 0 goes in the middle of the line.
-      ["1+2#{LEFT}#{LEFT}0#{RIGHT}#{RIGHT}.\r", /^12\n3> \z/],
+      ["1+2#{LEFT}#{LEFT}0#{RIGHT}#{RIGHT}.\r", /^12\n#{PROMPT}3> \z/],
       # History recalls the line just edited.
-      [UP, /^3> 10\+2\.\z/],
-      ["\r", /^12\n4> \z/],
+      [UP, /^#{PROMPT}3> 10\+2\.\z/],
+      ["\r", /^12\n#{PROMPT}4> \z/],
       # Backspace, start and end of line, and kill to the end of the line.
-      ["1+1x#{BACKSPACE}.\r", /^2\n5> \z/],
-      ["+1.#{CTRL_A}2#{CTRL_E}#{LEFT}#{CTRL_K}.\r", /^3\n6> \z/],
-      ["is_list(erlang:processes()).\r", /^true\n7> \z/],
-      ["length(erlang:processes()) > 10.\r", /^true\n8> \z/],
-      ["shell:whereis() =:= undefined.\r", /^false\n9> \z/],
-      ["io:columns().\r", /^\{ok,80\}\n10> \z/],
-      ["io:rows().\r", /^\{ok,24\}\n11> \z/],
+      ["1+1x#{BACKSPACE}.\r", /^2\n#{PROMPT}5> \z/],
+      ["+1.#{CTRL_A}2#{CTRL_E}#{LEFT}#{CTRL_K}.\r", /^3\n#{PROMPT}6> \z/],
+      ["is_list(erlang:processes()).\r", /^true\n#{PROMPT}7> \z/],
+      ["length(erlang:processes()) > 10.\r", /^true\n#{PROMPT}8> \z/],
+      ["shell:whereis() =:= undefined.\r", /^false\n#{PROMPT}9> \z/],
+      ["io:columns().\r", /^\{ok,80\}\n#{PROMPT}10> \z/],
+      ["io:rows().\r", /^\{ok,24\}\n#{PROMPT}11> \z/],
       # A typed line that wraps across three rows, and an edit on its first row.
-      ["length(atom_to_list('#{LONG_ATOM}')).\r", /^200\n12> \z/],
-      ["length(atom_to_list('#{LONG_ATOM}#{"\x02" * 5}b#{CTRL_E}')).\r", /^201\n13> \z/],
+      ["length(atom_to_list('#{LONG_ATOM}')).\r", /^200\n#{PROMPT}12> \z/],
+      ["length(atom_to_list('#{LONG_ATOM}#{"\x02" * 5}b#{CTRL_E}')).\r", /^201\n#{PROMPT}13> \z/],
       # Output that wraps by itself.
-      ["lists:seq(1, 60).\r", /|\.\.\.\]\n14> \z/],
-      ["io:put_chars(lists:duplicate(100, $x) ++ \"\\n\").\r", /^ok\n15> \z/],
+      ["lists:seq(1, 60).\r", /|\.\.\.\]\n#{PROMPT}14> \z/],
+      ["io:put_chars(lists:duplicate(100, $x) ++ \"\\n\").\r", /^ok\n#{PROMPT}15> \z/],
       # Caret notation for control characters, as stock's io:put_chars shows at a shell. Stock
       # sets bit 040 of the character where a caret's letter has bit 0100, so \001 shows as
       # ^!, an upstream quirk pinned here by the comparison.
-      ["io:put_chars(\"a\\001b\\n\").\r", /a\^!b\nok\n16> \z/],
-      ["io:put_chars(\"del\\dend\\n\").\r", /del\^\?end\nok\n17> \z/],
-      ["io:format(\"~s~n\", [[27, $[, $3, $1, $m, $r, 27, $[, $0, $m]]).\r", /^ok\n18> \z/],
+      ["io:put_chars(\"a\\001b\\n\").\r", /a\^!b\nok\n#{PROMPT}16> \z/],
+      ["io:put_chars(\"del\\dend\\n\").\r", /del\^\?end\nok\n#{PROMPT}17> \z/],
+      ["io:format(\"~s~n\", [[27, $[, $3, $1, $m, $r, 27, $[, $0, $m]]).\r", /^ok\n#{PROMPT}18> \z/],
       # Characters past ASCII, one of them two columns wide.
-      ["io:put_chars(\"h\\x{e9}llo\\n\").\r", /h\u00e9llo\nok\n19> \z/],
-      ["length(\"\u65e5\u672c\").\r", /^2\n20> \z/],
+      ["io:put_chars(\"h\\x{e9}llo\\n\").\r", /h\u00e9llo\nok\n#{PROMPT}19> \z/],
+      ["length(\"\u65e5\u672c\").\r", /^2\n#{PROMPT}20> \z/],
       # Completion.
       ["lists:rev\t", /lists:reverse\(\z/],
-      ["\"ab\").\r", /^"ba"\n21> \z/],
+      ["\"ab\").\r", /^"ba"\n#{PROMPT}21> \z/],
       # Ctrl-C interrupts what the shell is evaluating.
       ["io:put_chars(\"sleeping\\n\"), timer:sleep(infinity).\r", /^sleeping\n\z/],
-      [CTRL_C, /killed\n22> \z/],
-      ['abc', /22> abc\z/],
+      [CTRL_C, /killed\n#{PROMPT}22> \z/],
+      ['abc', /#{PROMPT}22> abc\z/],
       [CTRL_C, /> \z/],
-      ["erlang:system_info(wordsize).\r", /^8\n\d+> \z/]
+      ["erlang:system_info(wordsize).\r", /^8\n#{PROMPT}\d+> \z/]
     ]
   end
 
@@ -265,19 +279,33 @@ class RuntimeConsoleTest < Minitest::Test
   def with_erxos
     with_command_shell do |session|
       session.type("erl\r")
-      session.wait_for(/^1> \z/)
+      session.wait_for(/^#{PROMPT}1> \z/)
       yield session
     end
   end
 
+  # Compiles the prompt module into `directory`, which stock's `-pa` then names.
+  def compile_prompt_module(erlc, directory)
+    source = File.join(directory, 'erx_console_test_prompt.erl')
+    File.write(source, PROMPT_MODULE)
+    log, status = Open3.capture2e(erlc, '-o', directory, source)
+    raise "erlc failed: #{log}" unless status.success?
+
+    directory
+  end
+
+  # A session at stock OTP's Erlang shell, prompting as erXos's does.
   def with_stock
     Erx::Oracle.new(root: ROOT).with_runtime('emu') do |tools|
       Dir.mktmpdir('erx-console-stock') do |home|
         environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
           'HOME' => home, 'TERM' => 'xterm', 'LC_ALL' => 'en_US.UTF-8', 'TZ' => 'UTC'
         )
-        spawn_session(environment, tools.fetch('erl'), '+Bc', chdir: home) do |session|
-          session.wait_for(/^1> \z/)
+        prompts = compile_prompt_module(tools.fetch('erlc'), home)
+        spawn_session(environment, tools.fetch('erl'), '+Bc', '-pa', prompts,
+                      '-stdlib', 'shell_prompt_func', '{erx_console_test_prompt,prompt}',
+                      chdir: home) do |session|
+          session.wait_for(/^#{PROMPT}1> \z/)
           yield session
         end
       end
@@ -321,11 +349,11 @@ class RuntimeConsoleTest < Minitest::Test
     session.resize(rows: 30, columns: 40)
     session.type("(fun Ask(0) -> gone; Ask(N) -> case io:columns() of {ok,40} -> resized; _ -> " \
                  "timer:sleep(10), Ask(N-1) end end)(1000).\r")
-    session.wait_for(/^resized\n2> \z/)
+    session.wait_for(/^resized\n#{PROMPT}2> \z/)
     session.type("io:rows().\r")
-    session.wait_for(/^\{ok,30\}\n3> \z/)
+    session.wait_for(/^\{ok,30\}\n#{PROMPT}3> \z/)
     session.type("length(atom_to_list('#{'a' * 100}')).\r")
-    session.wait_for(/^100\n4> \z/)
+    session.wait_for(/^100\n#{PROMPT}4> \z/)
     session.screen.to_s.lines.last(5).join
   end
 
@@ -355,7 +383,7 @@ class RuntimeConsoleTest < Minitest::Test
       }.each_with_index do |(line, pattern), index|
         shown = session.screen.to_s.size
         session.type("#{line}\r")
-        session.wait_for(/^#{index + 2}> \z/)
+        session.wait_for(/^#{PROMPT}#{index + 2}> \z/)
         assert_match pattern, session.screen.to_s[shown..], line
       end
     end
@@ -378,10 +406,10 @@ class RuntimeConsoleTest < Minitest::Test
     ["while(true) true\r", /^% while\(true\) true\n\z/],
     [CTRL_C, /^\^C\n% \z/],
     ["echo xy#{BACKSPACE}z\r", /^xz\n% \z/],
-    ["exit\r", /^% exit\nok\n2> \z/],
-    [UP, /^2> erx_shell:start\(\)\.\z/],
+    ["exit\r", /^% exit\nok\n#{PROMPT}2> \z/],
+    [UP, /^#{PROMPT}2> erx_shell:start\(\)\.\z/],
     ["\r", /\n% \z/],
-    ["exit\r", /^% exit\nok\n3> \z/]
+    ["exit\r", /^% exit\nok\n#{PROMPT}3> \z/]
   ].freeze
 
   RC_TRANSCRIPT = <<~SCREEN.chomp
@@ -413,6 +441,9 @@ class RuntimeConsoleTest < Minitest::Test
     3>
   SCREEN
 
+  # A screen's text with the node name of each prompt line removed.
+  def without_node(text) = text.gsub(/^#{PROMPT}(?=\d+> )/, '')
+
   def test_the_command_shell_takes_the_console_and_gives_it_back
     with_erxos do |session|
       RC_SESSION.each do |keys, pattern|
@@ -420,7 +451,7 @@ class RuntimeConsoleTest < Minitest::Test
         session.wait_for(pattern)
       end
       keep_transcript('rc', session.screen.to_s)
-      assert_equal RC_TRANSCRIPT, session.screen.to_s[/^1> .*/m].rstrip
+      assert_equal RC_TRANSCRIPT, without_node(session.screen.to_s[/^#{PROMPT}1> .*/m]).rstrip
     end
   end
 
@@ -432,7 +463,7 @@ class RuntimeConsoleTest < Minitest::Test
        ["echo a b | cat\r", /^% echo a b \| cat\na b\n% \z/],
        ["nosuch\r", /^nosuch: not found\n% \z/],
        ["echo hello >/tmp/x; cat /tmp/x\r", /^% echo hello >\/tmp\/x; cat \/tmp\/x\nhello\n% \z/],
-       ["exit\r", /^% exit\nok\n2> \z/]].each do |keys, pattern|
+       ["exit\r", /^% exit\nok\n#{PROMPT}2> \z/]].each do |keys, pattern|
         session.type(keys)
         session.wait_for(pattern)
       end
@@ -453,7 +484,7 @@ class RuntimeConsoleTest < Minitest::Test
   def test_shells_on_the_console_end_in_any_order_and_a_hidden_group_is_not_shown
     with_erxos do |session|
       session.type("#{NESTED_SHELLS}\r")
-      session.wait_for(/^done\n2> \z/)
+      session.wait_for(/^done\n#{PROMPT}2> \z/)
       screen = session.screen.to_s
       assert_match(/^first: \{error,first\}$/, screen)
       assert_match(/^second: ok$/, screen)
@@ -494,9 +525,9 @@ class RuntimeConsoleTest < Minitest::Test
       session.type("12#{CTRL_G}")
       session.wait_for(/s\* system shell\n  n  start a session\nEsc returns\. \z/)
       session.type("\e")
-      session.wait_for(/1> 12\z/)
+      session.wait_for(/#{PROMPT}1> 12\z/)
       session.type("3.\r")
-      session.wait_for(/^123\n\S*2> \z/)
+      session.wait_for(/^123\n#{PROMPT}2> \z/)
     end
   end
 
@@ -504,7 +535,7 @@ class RuntimeConsoleTest < Minitest::Test
   def test_standard_error_writes_its_bytes_unchanged
     with_erxos do |session|
       session.type("io:put_chars(standard_error, \"one\\ntwo\\n\").\r")
-      session.wait_for(/ok\n2> \z/)
+      session.wait_for(/ok\n#{PROMPT}2> \z/)
       assert_includes session.screen.raw, "one\ntwo\n"
     end
   end
@@ -533,7 +564,7 @@ class RuntimeConsoleTest < Minitest::Test
         session = Session.new(master, master, pid, columns: 80)
         session.wait_for(CONSOLE_RC)
         session.type("erl\r")
-        session.wait_for(/^1> \z/)
+        session.wait_for(/^#{PROMPT}1> \z/)
         refute slave.echo?, 'raw while the shell runs'
         session.type(line)
         yield session.reap, slave
@@ -584,11 +615,11 @@ class RuntimeConsoleTest < Minitest::Test
   def test_q_and_exit_end_the_erlang_shell_and_return_to_the_command_shell
     with_erxos do |session|
       session.type("q().\r")
-      session.wait_for(/^1> q\(\)\.\n% \z/)
+      session.wait_for(/^#{PROMPT}1> q\(\)\.\n% \z/)
       session.type("erl\r")
-      session.wait_for(/^1> \z/)
+      session.wait_for(/^#{PROMPT}1> \z/)
       session.type("exit().\r")
-      session.wait_for(/^1> exit\(\)\.\n% \z/)
+      session.wait_for(/^#{PROMPT}1> exit\(\)\.\n% \z/)
       session.type("echo running\r")
       session.wait_for(/^running\n% \z/)
     end
