@@ -3957,8 +3957,9 @@ principal's policy:
 | `max_request` | the largest decoded request the grant and its sockets take; the runtime drops a larger one before it is queued | fixed, not a policy's: the schema's largest request, which the generator computes |
 
 Configuring interfaces and reading every client's statistics is a second
-facet, `netadmin`, granted to administrators.
-Its read side for interfaces is `erx_net:interfaces/0`, the one read
+facet, `netadmin`, granted to administrators. Reading the interfaces
+needs only `net`, as FreeBSD's `ifconfig` shows them to any user:
+`erx_net:interfaces/0` is the one read
 path for an interface's state: each interface process answers for itself
 with its name, link-layer address, MTU, link state, configuration
 (static or DHCP), addresses, routes and resolver servers, which

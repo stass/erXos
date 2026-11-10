@@ -41,6 +41,9 @@ and writes the lines.
 -behaviour(erx_cmd).
 -erx_command(host).
 -erx_usage("host name [server]").
+%% The resolver sends its queries through the network stack, a service of
+%% the system domain, which a session reaches only through its net facet.
+-erx_needs([net]).
 
 -export([run/2]).
 -export([candidates/3, reverse/1, answer_lines/1, failure_line/2, server_lines/2]).

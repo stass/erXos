@@ -239,6 +239,41 @@ runner_no_job_control_test() ->
     ?assertEqual(<<"%<U+001B>[2J: no such job">>, Status),
     ?assertEqual(nomatch, binary:match(iolist_to_binary(Err), <<"\e">>)).
 
+%% In a session that holds none of the facets of the system domain's
+%% services, each command that reaches one fails with `no_facet` and its
+%% name before it starts, its arguments unread: ifconfig never reaches the
+%% network stack, which a session's release does not ship and which is not
+%% loaded here, so it would crash with `undef`, and ping and host, run
+%% without the operand they need, never come to their usage line. ps lists
+%% the session's own table, and dmesg reads only what its namespace's /proc
+%% holds, so neither needs a facet.
+session_commands_without_facets_test() ->
+    Me = self(),
+    Err = {tty, fun(Bytes) -> Me ! {err, iolist_to_binary(Bytes)}, ok end},
+    Modules = [erx_cmd_ifconfig, erx_cmd_ping, erx_cmd_host, erx_cmd_ps, erx_cmd_dmesg],
+    {Table, []} = erx_shell_namespace:build(
+                    [{Module, Module:module_info(attributes), Module:module_info(exports)} || Module <- Modules]),
+    Session = erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => null, 2 => Err},
+                                       table => Table, facets => erx_facets:facets({domain, 7}, #{})}),
+    Needy = [[<<"ifconfig">>], [<<"ping">>], [<<"host">>]],
+    ?assertEqual([<<"no_facet">>, <<"no_facet">>, <<"no_facet">>], [run_status(Argv, Session) || Argv <- Needy]),
+    ?assertEqual(<<"ifconfig: no_facet\nping: no_facet\nhost: no_facet\n">>, drain(<<>>)),
+    ?assertEqual(<<>>, run_status([<<"ps">>], Session)),
+    ?assertNotEqual(<<"no_facet">>, run_status([<<"dmesg">>], Session)),
+    _ = drain(<<>>).
+
+%% The system domain's session holds every facet any command of the shell
+%% declares, so the system shell refuses none of them.
+system_facets_cover_every_command_test() ->
+    Dir = filename:dirname(code:which(erx_cmd)),
+    Modules = [list_to_atom(filename:basename(File, ".beam")) || File <- filelib:wildcard("erx_cmd_*.beam", Dir)],
+    {Table, []} = erx_shell_namespace:build(
+                    [{Module, Module:module_info(attributes), Module:module_info(exports)} || Module <- Modules]),
+    ?assert(lists:member(erx_cmd_ifconfig, Modules)),
+    System = erx_facets:facets(system, #{}),
+    ?assertEqual([], [Name || {erlang, #{name := Name, needs := Needs}} <- maps:values(Table),
+                              Need <- Needs, not is_map_key(Need, System)]).
+
 drain(Acc) ->
     receive
         {err, Bytes} -> drain(<<Acc/binary, Bytes/binary>>)

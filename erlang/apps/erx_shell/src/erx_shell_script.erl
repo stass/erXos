@@ -10,13 +10,13 @@ and calls the same evaluator; this module runs a whole source, a line
 typed at the Erlang shell or a script, and gives how it ended.
 
 The evaluator runs in a process of its own with a heap limit, so a
-runaway script ends that process and never its caller (SH2). In Phase 1
-the shell runs in the system domain with the session's whole authority,
-so the context it hands commands holds every facet its commands declare,
-each the system domain's own (docs/plan.md, Phase 1).
+runaway script ends that process and never its caller (SH2). The
+context it hands commands holds the session's facets, those of the
+domain the shell runs in (erx_facets:domain/0), so a command that declares a
+facet the session lacks fails with `no_facet` before it starts.
 """.
 
--export([run/1, run/2, script/1, main/1, session_facets/0]).
+-export([run/1, run/2, script/1, main/1]).
 
 -export_type([options/0, ending/0]).
 
@@ -29,15 +29,6 @@ each the system domain's own (docs/plan.md, Phase 1).
 -type ending() :: {ok | exit | fault | syntax_error, Status :: binary()}.
 
 -define(MAX_HEAP_WORDS, 32 bsl 20).
-
--doc """
-The session's facets in the system domain: the domain's own. A facet's
-value is what its holder hands the service behind it, so the inspect
-facet's is its erx_inspector:scope(), `all` for the system domain's
-session in Phase 1 (docs/design-live.md, "Scopes").
-""".
--spec session_facets() -> #{inspect := erx_inspector:scope()}.
-session_facets() -> #{inspect => all}.
 
 -doc "Runs a source at the terminal, from `/`.".
 -spec run(iodata()) -> ending().
@@ -56,7 +47,7 @@ run(Source, Options) ->
     {Table, _Problems} = erx_shell_namespace:from_applications(
                            maps:get(applications, Options, [erx_shell])),
     State = erx_shell_runner:state(#{cwd => maps:get(cwd, Options, <<"/">>), fds => Fds,
-                                   table => Table, facets => session_facets()}),
+                                   table => Table, facets => erx_facets:domain()}),
     Vars = maps:merge(#{<<"home">> => [<<"/">>], <<"*">> => []}, maps:get(vars, Options, #{})),
     Shell = erx_shell_eval:new(Vars, erx_shell_runner:runner(), State),
     evaluate(iolist_to_binary(Source), Shell).

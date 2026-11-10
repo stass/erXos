@@ -272,13 +272,24 @@ overview_fits_80_columns_test() ->
 
 %%% The session's facet and the domain record
 
-%% The command shell's session holds the system domain's inspect facet, and
-%% its value is the inspector's scope: erx:i/0,1 and the commands hand it to
-%% the inspector as it is.
+%% The system domain's inspect facet, which a development host's runtime
+%% holds too, has as its value the inspector's scope: erx:i/0,1 and the
+%% shell's commands hand it to the inspector as it is.
 session_facet_is_an_inspector_scope_test() ->
-    #{inspect := Scope} = erx_shell_script:session_facets(),
+    #{inspect := Scope} = erx_facets:domain(),
     ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([domains, ?SYSTEM, budget], Scope)),
     ?assertEqual(9, map_size(maps:get(attrs, erx_inspector:scoped(machine(), machine, Scope)))).
+
+%% A domain's facets: the system domain's are the inspect facet of scope
+%% `all` and a facet for each service that runs in it; another domain's are
+%% the local scope of its own id and the facets it was handed, and an
+%% inspect facet handed to it never widens that scope.
+facets_test() ->
+    Net = spawn(fun() -> ok end),
+    ?assertEqual(#{inspect => all, net => local}, erx_facets:facets(system, #{})),
+    ?assertEqual(#{inspect => [7]}, erx_facets:facets({domain, 7}, #{})),
+    ?assertEqual(#{inspect => [7], net => Net}, erx_facets:facets({domain, 7}, #{net => Net})),
+    ?assertEqual(#{inspect => [7]}, erx_facets:facets({domain, 7}, #{inspect => Net})).
 
 %% The system domain's record carries this runtime's figures, its run queue
 %% among them, and the domain service's and the kernel's, which have no

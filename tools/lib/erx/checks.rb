@@ -11,6 +11,7 @@ require_relative 'device_posters'
 require_relative 'erofs_reads'
 require_relative 'generated'
 require_relative 'net_checks'
+require_relative 'command_needs'
 require_relative 'ns_writers'
 require_relative 'origin_unwraps'
 require_relative 'attach_fields'
@@ -154,6 +155,7 @@ module Erx
       check_device_posters(listed)
       check_erofs_reads(listed)
       check_net(listed)
+      check_command_needs(listed)
       check_ns_writers(listed)
       check_origin_unwraps(listed)
       check_attach_fields(listed)
@@ -349,6 +351,14 @@ module Erx
       return if files.empty?
 
       violations = NetChecks.violations(files.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # A command that names a module of a service of the system domain declares the
+    # service's facet, and erx_shell's other modules name none (CommandNeeds).
+    def check_command_needs(listed)
+      sources = listed.select { |relative| CommandNeeds.reads?(relative) && File.file?(File.join(@root, relative)) }
+      violations = CommandNeeds.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

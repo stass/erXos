@@ -17,7 +17,7 @@ class ErxShellTest < Minitest::Test
   # The generated sources named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
   SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
-             *%w[erlang/apps/erx/src/erx_text.erl
+             *%w[erlang/apps/erx/src/erx_text.erl erlang/apps/erx/src/erx_facets.erl
                  erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
                  erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
                  erlang/apps/erx_shell/src/erx_shell.erl erlang/apps/erx_shell/src/erx_shell_jobs.erl

@@ -19,6 +19,7 @@ class ErxCmdDmesgTest < Minitest::Test
   # erx_cmd first, so that the commands find their behaviour.
   SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
              File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_cmd_dmesg_tests.erl')].uniq.freeze

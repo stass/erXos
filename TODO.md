@@ -1237,12 +1237,31 @@ it; git history is the record of completed work.
 * [Low] shell, usage errors: an Erlang command's `{error, usage}` gives the status `usage`, while ping's
   out-of-range values give 64, FreeBSD's `EX_USAGE`, which FreeBSD's `usage()` gives too
   (`erlang/apps/erx_shell/src/erx_shell_runner.erl`). Give `{error, usage}` status 64.
-* [Low] shell, `erlang/apps/erx_shell/src/erx_shell.app.src`: `ifconfig` and `ping` call erx_net, which
-  the application does not list, so on a node without erx_net they end with `undef` rather than a
-  diagnostic. Report a missing stack as `ping: socket: ...` and `ifconfig: network stack: ...` do.
-* [Low] build, `tools/lib/erx/erlang_apps.rb` (`UNRELEASED`): erx_net is compiled only by host tests,
-  because `ReleaseFiles` puts every application of `ErlangApps::APPLICATIONS` into the system domain's
-  release. When the network domain's image lands, replace `UNRELEASED` with per-release membership.
+* [Medium] shell, the network commands in a session (`erlang/apps/erx_shell/src/erx_cmd_ifconfig.erl`,
+  `erx_cmd_ping.erl`, `erx_cmd_host.erl`): each declares `-erx_needs([net])`, so a session without the net
+  facet refuses it with `no_facet`, but one that holds the facet still runs code that works only where the
+  stack runs: `ifconfig` and `ping` call erx_net and erx_icmp_sock, which a session's release does not ship,
+  and `host` opens its sockets through erx_net_client, which it does not ship either, so each ends with
+  `undef`. Reach the stack through the facet's value (`erx_cmd:facet(Ctx, net)`: `local` in the system
+  domain, the facet's pid elsewhere), with erx_net_client and its erXos grant module in the session's
+  release (docs/design-network-stack.md, "Two places, four seams"), and report a missing stack as
+  `ping: socket: ...` and `ifconfig: network stack: ...` do. Then have `erx_shell_runner:command/4` hand
+  each command only the facets it declares (`maps:with(Needs, Facets)`; `top` reads `inspect` without
+  declaring it, so it needs a way to name a facet it uses when present), so a command that forgets its
+  declaration holds no facet by construction, and shrink the command-needs build check
+  (`tools/lib/erx/command_needs.rb`) to "no erx_shell module names a stack module": its list of OTP's
+  network modules and functions is an enumeration that a new OTP call outside it gets past.
+* [Medium] shell and domains, a session's inspect facet (`erlang/apps/erx/src/erx_facets.erl`,
+  `facets/2`; `erlang/apps/erx_domain/src/erx_domain_srv.erl`): a session's scope is always `[Id]`, its
+  own domain's, and a handed facet named `inspect` is dropped, while design-live.md ("Scopes") gives a
+  session its principal's domains and `root`'s development session `all`, through an inspect facet the
+  system domain mints. Mint it (session plan A12, with 1b-C), have `facets/2` take its scope from it, and
+  until then have `erx_domain:create/1` refuse a spec's facet named `inspect`.
+* [Medium] shell, the session_domain QEMU cell of session P6 (`tools/lib/erx/qemu_suites/session_domain.rb`, which
+  session P5 brings with the session domain): `ifconfig` typed in a session prints `ifconfig: no_facet`
+  and sets the status `no_facet`, and in the system shell lists the interfaces; `ps` lists the session's
+  own processes there. The EUnit cases of `test/erlang/erx_shell_runner_tests.erl` run the same commands
+  with a session's facets on the host.
 * [Medium] liberx Fiasco backend, `test/guest/native_task` (`case_ends("service", ...)`): the first
   case hung once under HVF with one CPU, after `erx: task: cpus 1` and before the case's line, so
   `task-service` timed out; the rerun on the same tree passed on one and four CPUs. The task that
@@ -1738,8 +1757,11 @@ it; git history is the record of completed work.
   `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root). The QEMU check that
   calls `erx_kernel_records` from `erl` at the console is not written yet.
 * [Medium] inspector (`erlang/apps/erx/src/erx_inspector.erl`, `erx.erl`, `erx_process_records.erl`):
-  `erx:i/0,1` inspect at scope `all` because every Phase 1 shell runs in the system domain; take the scope from
-  the caller's inspect facet, with `{error, no_facet}`, when sessions run in their own domains. The system domain's
+  the inspector run in a domain other than the system domain names that domain's own processes and kernel
+  records as the system domain's (`owner/1` and `erx_kernel_records:system_domain/0`, a constant 4), so the
+  local scope `[Id]` a session's inspect facet has (`erx_facets:facets/2`) reaches none of them: `erx:i`
+  there answers `{error, scope}` and `top`'s header prints `-`. Name the runtime's own domain from
+  `erx_dist:boot/0`, and read the kernel records of the caller's group, budget and threads. The system domain's
   runtime is not yet the node `system@<host>` (SV2), so its creation is 0 and a process record says `domain 4`
   beside a pid printed `<0.N.S>`
   (design-domains, Text). The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written
@@ -4776,13 +4798,6 @@ document's "residual risks accepted" paragraph.
   [design-display.md](docs/design-display.md#compatibility-and-migration)
   assumes.
 
-* [Medium] erx, the Erlang shell's facets: `erx:i/0,1` reads the system
-  domain's session's facets (`erx_shell_script:session_facets/0`), the
-  one session Phase 1 has; when sessions run in their own domains with
-  scoped facets, the `erl` command must hand the Erlang shell its
-  session's facets and `erx:i` read those and fail without them, or a
-  scoped session's Erlang shell inspects with scope `all`
-  (`erlang/apps/erx/src/erx.erl`, `inspect_scope/0`).
 * [Low] POSIX-lite personality, `sysctl(3)` and `sysctl(8)`: build them
   when a ported FreeBSD program first needs them, as a reader of
   `/proc/status` through the program's own namespace that maps

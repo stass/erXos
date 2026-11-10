@@ -9,7 +9,7 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1]).
+-export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1, caps/0]).
 
 %%% Source lines: erx:source/1.
 
@@ -52,12 +52,11 @@ i(Path) ->
             Error
     end.
 
-%% The scope of the session's inspect facet, the facet's own value. In
-%% Phase 1 the Erlang shell runs only in the system domain's session, whose
-%% facets erx_shell_script:session_facets/0 gives; nothing yet hands the
-%% Erlang shell the facets of the session that started it (TODO.md).
+%% The scope of the inspect facet of the domain the caller runs in, the
+%% facet's own value (erx_facets:domain/0): `all` in the system domain and
+%% the domain's own id in any other.
 inspect_scope() ->
-    #{inspect := Scope} = erx_shell_script:session_facets(),
+    #{inspect := Scope} = erx_facets:domain(),
     Scope.
 
 %% Which build's projection to show: development only when the kernel
@@ -136,4 +135,15 @@ system domain, which reports nothing, holds none.
 """.
 -spec cap(atom()) -> pid() | undefined.
 cap(Name) when is_atom(Name) ->
-    maps:get(Name, persistent_term:get({erx, facets}, #{}), undefined).
+    maps:get(Name, caps(), undefined).
+
+-doc """
+Every facet the domain service minted for this domain when it started, by
+name, each as cap/1 finds it: none in the system domain, and none in a
+domain whose facets did not come in time. For a caller that hands on what
+the domain holds as a whole, as the command shell builds a session's
+facets.
+""".
+-spec caps() -> #{atom() => pid()}.
+caps() ->
+    persistent_term:get({erx, facets}, #{}).

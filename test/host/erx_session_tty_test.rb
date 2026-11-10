@@ -20,7 +20,7 @@ class ErxSessionTtyTest < Minitest::Test
   SHELL = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
   SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
-             *%w[erlang/apps/erx/src/erx_text.erl erlang/apps/erx/src/erx_console.erl
+             *%w[erlang/apps/erx/src/erx_text.erl erlang/apps/erx/src/erx_facets.erl erlang/apps/erx/src/erx_console.erl
                  erlang/apps/erx/src/erx_console_log.erl
                  erlang/apps/erx_session/src/erx_tty_link.erl
                  erlang/apps/erx_session/src/erx_session_tty.erl].map { |path| File.join(ROOT, path) },

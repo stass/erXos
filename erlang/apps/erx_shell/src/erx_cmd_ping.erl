@@ -47,6 +47,9 @@ directly; run/2 owns the socket and the clock.
 -behaviour(erx_cmd).
 -erx_command(ping).
 -erx_usage("ping [-c count] [-i wait] [-s packetsize] [-t timeout] host").
+%% The network stack is a service of the system domain: a session reaches it
+%% only through its net facet.
+-erx_needs([net]).
 
 -export([run/2, ping/3]).
 -export([options/1, payload/2, sent/3, reply/3, header/2, statistics/2, new/1]).

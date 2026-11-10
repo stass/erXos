@@ -25,6 +25,7 @@
              erx_device_record,
              erx_domain_lib,
              erx_facet,
+             erx_facets,
              erx_inspector,
              erx_kernel_records,
              erx_log,

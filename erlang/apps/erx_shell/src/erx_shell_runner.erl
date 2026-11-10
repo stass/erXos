@@ -84,7 +84,7 @@ namespace of the shell's release and the session's facets.
 new(Terminal = #{write := Write}) ->
     {Table, _Problems} = erx_shell_namespace:from_applications([erx_shell]),
     S = state(#{cwd => <<"/">>, fds => #{0 => null, 1 => {tty, Write}, 2 => {tty, Write}},
-                table => Table, facets => erx_shell_script:session_facets()}),
+                table => Table, facets => erx_facets:domain()}),
     JobControl = case Terminal of
                      #{job_control := Shell} -> {Shell, line};
                      _ -> none

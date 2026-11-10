@@ -80,6 +80,12 @@ module Erx
           test: 'test/host/net_checks_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'command-needs', rule: "only a command that declares a service's facet with -erx_needs names a module " \
+                                       'of that service of the system domain, and no other module of erx_shell names one',
+          design: 'docs/design-shell.md#invariants', check: 'CommandNeeds, in Checks',
+          test: 'test/host/command_needs_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
         )

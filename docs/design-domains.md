@@ -2766,6 +2766,7 @@ from a control slot, and the agent acts only on the system domain's.
 -spec erx:export(name(), [right()], Peer :: pos_integer()) -> ok | {error, term()}.
 -spec erx:exports(name()) -> [{Peer :: pos_integer(), [right()]}].
 -spec erx:cap(Name :: atom()) -> pid() | undefined.
+-spec erx:caps() -> #{atom() => pid()}.
 -spec erx:owner(pid() | reference() | port()) -> pos_integer().
 
 %% A start option of gen_server:start/3,4, start_link/3,4, start_monitor/3,4
@@ -2796,7 +2797,10 @@ from a control slot, and the agent acts only on the system domain's.
   lifecycle](#domain-lifecycle)).
 * `erx:cap/1` returns the facet of that name the domain started with, or
   `undefined` when it holds none; it never waits, since init holds the
-  facets before `-eval`, `-s` and `-run`.
+  facets before `-eval`, `-s` and `-run`. `erx:caps/0` returns all of
+  them by name, for a caller that hands on what the domain holds as a
+  whole, as the command shell builds its session's facets
+  ([design-shell.md](design-shell.md#interfaces)).
 * `erx_domain:grant/4` mints a facet for a running domain, in front of a
   live facet the caller holds, within that facet's scope and `Limits`
   ([Facets](#facets)); `{ok, FacetPid}` means the facet runs and its pid has

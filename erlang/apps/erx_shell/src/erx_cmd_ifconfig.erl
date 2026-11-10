@@ -37,6 +37,9 @@ the tests drive directly; run/2 asks the stack and writes the lines.
 -behaviour(erx_cmd).
 -erx_command(ifconfig).
 -erx_usage("ifconfig [-a] [interface]").
+%% The network stack is a service of the system domain: a session reaches it
+%% only through its net facet.
+-erx_needs([net]).
 
 -export([run/2]).
 -export([select/2, flags/1, interface/1]).

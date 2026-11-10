@@ -18,6 +18,7 @@ class ErxCmdHostTest < Minitest::Test
   # erx_cmd first, so that the command finds its behaviour.
   SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              File.join(APPLICATION, 'erx_cmd_host.erl'),
              File.join(ROOT, 'test/erlang/erx_cmd_host_tests.erl')].freeze

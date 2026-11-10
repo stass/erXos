@@ -20,9 +20,9 @@ class ErxInspectorTest < Minitest::Test
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   SOURCES = [*%w[generated/erx_schema erx_text_tables]
                .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
-             *%w[erx_text erx_object_info erx_kernel_records erx_process_records
-                 erx_inspector erx_log_records erx_runtime_records erx].map { |name| File.join(ERX, "src/#{name}.erl") },
-             *%w[erx_render erx_shell_script].map { |name| File.join(ROOT, "erlang/apps/erx_shell/src/#{name}.erl") },
+             *%w[erx_text erx_object_info erx_kernel_records erx_process_records erx_inspector
+                 erx_log_records erx_runtime_records erx_facets erx].map { |name| File.join(ERX, "src/#{name}.erl") },
+             *%w[erx_render].map { |name| File.join(ROOT, "erlang/apps/erx_shell/src/#{name}.erl") },
              File.join(ROOT, 'test/erlang/erx_kernel_records_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspector_tests.erl')].freeze
 
