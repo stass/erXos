@@ -18,9 +18,9 @@
  * does (erl_nif.c).
  *
  * The library is the one the root's start built (erx_dom_lib_system). Where
- * the root built none, no thread starts and every entry but register answers
- * {error, enotsup}. A hosted runtime has no domains and does not link this
- * module (Makefile.in, NIF_OBJS).
+ * there is none, in a domain's runtime and a hosted runtime
+ * (liberx/backend/core/dom_lib_none.c), no thread starts and every
+ * well-formed call, register included, answers {error, enotsup}.
  *
  * The process that registers is the one that hears of every end, and the
  * only one that may change the library: every entry that does (create,
@@ -734,7 +734,9 @@ stop_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
  * process that may change the library. While another registered process
  * lives, the answer is {error, ebusy}, so no process takes the domain
  * service's place; once that process is dead, its restart registers
- * again. Only the caller itself registers, never a pid it names.
+ * again. Only the caller itself registers, never a pid it names. With no
+ * library there is nothing to hear of or change, and the answer is
+ * {error, enotsup}, which tells the domain service to run without one.
  */
 static ERL_NIF_TERM
 register_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -745,6 +747,8 @@ register_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	(void)argv;
 	if (argc != 0 || enif_self(env, &pid) == NULL)
 		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
 	enif_mutex_lock(lib_lock);
 	taken = service_set && enif_compare_pids(&service, &pid) != 0 &&
 	    enif_is_process_alive(env, &service);

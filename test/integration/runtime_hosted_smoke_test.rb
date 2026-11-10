@@ -438,6 +438,28 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # The system domain's release loads erx_domain_lib here as natively, and hosted mode builds
+  # no domain library, so the module loads inert: no on_load fails as the release boots, each
+  # entry refuses with enotsup, register/0 included, and the domain service runs with no library
+  # (docs/design-stopgap.md, "The hosted backend").
+  def test_the_domain_library_module_loads_and_refuses_without_a_library
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home) do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        erlang_shell(reader, writer, transcript, deadline)
+        writer.write("{erx_domain_lib:register(), erx_domain_lib:configured(), erx_domain_lib:start(1), " \
+                     "is_pid(whereis(erx_domain_srv))}.\n")
+        read_until(reader, transcript, /^#{PROMPT}2> /, deadline)
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        @reaped = true if wait_for(pid, deadline, transcript)
+        assert_match(/^\{\{error,enotsup\},\{error,enotsup\},\{error,enotsup\},true\}$/, plain(transcript))
+        refute_match(/on_load function/, plain(transcript))
+      end
+    end
+  end
+
   # A library is not looked for at all: only NIFs linked into the runtime image load.
   def test_a_library_load_is_refused_without_reaching_the_host
     probe = compiled_load_nif_probe

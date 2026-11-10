@@ -79,9 +79,9 @@ module Erx
           pattern: /\berx_dom_(?:plan|lib)_configured\b/,
           # The NIF's configured entry is the one way from Erlang to it, and it
           # refuses every caller but the library's registered process, the
-          # domain service. task_refused.c is the backend's refusing stub.
+          # domain service. dom_lib_none.c is the refusing stub of a runtime with no library.
           sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER, DOM_NIF,
-                  'liberx/backend/fiasco/task_refused.c'].map { |path| Chokepoints::Site.new(glob: path) },
+                  'liberx/backend/core/dom_lib_none.c'].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
                   'liberx/system/dom_life.c' => "status = erx_dom_lib_configured(lib, id, row, &created);\n" }
         ),
@@ -96,7 +96,7 @@ module Erx
           scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
           pattern: /\berx_dom_(?:plan|lib)_session\b/,
           sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_NIF,
-                  'liberx/backend/fiasco/task_refused.c', 'test/fixtures/dom_core_driver.c', 'tools/fuzz/dom_core_fuzz.c']
+                  'liberx/backend/core/dom_lib_none.c', 'test/fixtures/dom_core_driver.c', 'tools/fuzz/dom_core_fuzz.c']
                  .map { |site| Chokepoints::Site.new(glob: site) },
           seed: { 'liberx/system/dom_life.c' => "status = erx_dom_lib_session(lib, id, 0, \"x\", 1, pid, &created);\n" }
         ),

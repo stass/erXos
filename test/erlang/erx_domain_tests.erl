@@ -151,7 +151,11 @@ service_end_shuts_the_supervisor_down_test_() ->
             {"normal", fun(Service) -> sys:terminate(Service, normal) end}],
     [{Name, fun() -> service_end_shuts_down(End) end} || {Name, End} <- Ends].
 
+%% The supervisor starts the service over erx_domain_lib, whose NIFs stock's
+%% emulator does not have: a stand-in loaded here answers register/0 as the
+%% module does where no domain library was built, so the service runs with none.
 service_end_shuts_down(End) ->
+    load_no_library(),
     {ok, Sup} = erx_domain_sup:start_link(),
     unlink(Sup),
     SupDown = monitor(process, Sup),
@@ -163,6 +167,19 @@ service_end_shuts_down(End) ->
     Restarted = whereis(erx_domain_srv),
     is_process_alive(Sup) andalso exit(Sup, kill),
     ?assertEqual({shutdown, undefined}, {Why, Restarted}).
+
+load_no_library() ->
+    code:is_loaded(erx_domain_lib) =:= false andalso load_no_library_module().
+
+load_no_library_module() ->
+    Forms = [begin
+                 {ok, Tokens, _} = erl_scan:string(Text),
+                 {ok, Form} = erl_parse:parse_form(Tokens),
+                 Form
+             end || Text <- ["-module(erx_domain_lib).", "-export([register/0]).",
+                             "register() -> {error, enotsup}."]],
+    {ok, erx_domain_lib, Beam} = compile:forms(Forms),
+    {module, erx_domain_lib} = code:load_binary(erx_domain_lib, "erx_domain_lib.erl", Beam).
 
 %% The service over the stand-ins: configured domains in boot order, each with
 %% its system side opened before its first thread, a create, a stop, a kill,

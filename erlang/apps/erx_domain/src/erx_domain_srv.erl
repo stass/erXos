@@ -43,8 +43,9 @@ Its state, erx_domain_core's and erx_domain_links's, lives in its own heap and n
 service is never restarted: its end, however it comes, ends the system
 domain (erx_domain_sup), and no domain outlives that, so no successor needs
 its records. Where the system domain has no domain library (a hosted
-runtime, whose erx_domain_lib does not load, or a root that built none),
-the service runs with none and every create is {error, enotsup}.
+runtime), erx_domain_lib's register/0 answers
+{error, enotsup}, and the service runs with none and every create is
+{error, enotsup}.
 
 Callers are the system domain's own processes; requests from other domains
 reach it only through facets, which arrive with the connections.
@@ -112,13 +113,14 @@ init(Opts) ->
            held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT)},
      {continue, boot}}.
 
-%% The library, registered with this process as the one that hears of every end, or none.
+%% The library, registered with this process as the one that hears of every end, or none
+%% where the system domain has none. A module that does not load is not a missing
+%% library: its undef ends the service, and with it the system domain.
 library(Lib) ->
-    try Lib:register() of
+    case Lib:register() of
         ok -> Lib;
+        {error, enotsup} -> none;
         {error, Reason} -> error({domain_library, Reason})
-    catch
-        error:undef -> none
     end.
 
 handle_continue(boot, #{lib := Lib} = State) ->

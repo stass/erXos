@@ -20,11 +20,10 @@ return value of the call that caused it.
 
 A refused call is {error, Name}, Name the ABI file's status name with an
 e before it (einval, enomem, ebusy, enotsup), or {error, {status, N}} for
-a status the ABI file does not name. Where the root built no library,
-every well-formed call but register/0 is {error, enotsup}. A hosted
-runtime links no domain library, so this module does not load there; nor
-does it load a second time, since its library, lock and fault thread live
-as long as the system domain.
+a status the ABI file does not name. Where there is no library, in a
+domain's runtime and a hosted runtime, the module loads all the same and
+every well-formed call is {error, enotsup}, register/0 included. It does not load a second time, since its library,
+lock and fault thread live as long as the system domain.
 
 The registered process, the domain service, is also the only one that may
 change the library: create/1, configured/3, session/4, start/1, stop/2, retire/1,
@@ -109,7 +108,7 @@ on_load() ->
 -doc """
 Makes the caller the process that hears of every end and the one that may
 change the library. While another registered process is alive the answer
-is {error, ebusy}.
+is {error, ebusy}, and where there is no library it is {error, enotsup}.
 """.
 -spec register() -> ok | error().
 register() ->

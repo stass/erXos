@@ -83,7 +83,8 @@ module Erx
     # start enters ERTS's main through domain_entry.c, which first checks the boot page;
     # the boot information reader comes as it comes to the root, release_task.c reads the
     # release from its slice through the service, and
-    # task_refused.c answers the calls the service does not answer a task. One
+    # task_refused.c answers the calls the service does not answer a task, and dom_lib_none.c
+    # the domain library's entries, since only the root builds a library. One
     # image serves every domain (docs/design-runtime.md, "The build").
     # What a domain's runtime writes reaches the console as debug log records of its space, one
     # per line (docs/design-runtime.md, "The console and standard I/O"): this is a record's head,
@@ -93,7 +94,7 @@ module Erx
     DOMAIN_RUNTIME = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/domain_entry.c", 'liberx/backend/core/line_gather.c',
                       "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
-                      "#{BACKEND}/task_refused.c", "#{BACKEND}/release_task.c", 'liberx/release_fs.c', 'liberx/system/dom_dump.c',
+                      "#{BACKEND}/task_refused.c", 'liberx/backend/core/dom_lib_none.c', "#{BACKEND}/release_task.c", 'liberx/release_fs.c', 'liberx/system/dom_dump.c',
                       'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c', *CONNECTION].freeze
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
     # the domain library, and the native_domain root and string functions that link it.
