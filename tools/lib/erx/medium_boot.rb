@@ -196,8 +196,9 @@ module Erx
     # stops behind its pid while the next create runs, once the configured one has ended. So
     # the system principal's quota and max_domains go from 0 to 2, and its memory and
     # root_memory each grow by two domains' budgets. The development manifest itself,
-    # what the production image promises, is unchanged.
-    def manifest(source)
+    # what the production image promises, is unchanged. row replaces DOMAIN_ROW for a
+    # harness whose configured domain runs another way (SystemDomain).
+    def manifest(source, row: DOMAIN_ROW)
       growth = 2 * (DOMAIN_MEMORY + DOMAIN_OUTER)
       { /^(principal system\n  memory )([0-9]+)$/ => growth, /^(  root_memory )([0-9]+)$/ => growth,
         /^(principal system\n(?:  .*\n)*?  domains )(0)$/ => 2, /^(  max_domains )(0)$/ => 2 }
@@ -205,7 +206,7 @@ module Erx
           raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
 
           text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + added}" }
-        end + DOMAIN_ROW
+        end + row
     end
 
     # The domain's runtime images and release in the archive at path: the indexes of the

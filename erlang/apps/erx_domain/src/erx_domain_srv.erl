@@ -11,12 +11,12 @@ and every requested domain after, keeps a domain pid for each, and on each
 ends its domain pid with {domain_down, Id, Info}, retires it and restarts a
 configured domain within its restart intensity.
 
-Its state, erx_domain_core's, lives in the table erx_domain_table holds as
-heir, rewritten after every change, so a restarted service serves on from
-it and links to every domain pid again. Where the system domain has no
-domain library (a hosted runtime, whose erx_domain_lib does not load, or a
-root that built none), the service runs with none and every create is
-{error, enotsup}.
+Its state, erx_domain_core's, lives in its own heap and nowhere else. The
+service is never restarted: its end, however it comes, ends the system
+domain (erx_domain_sup), and no domain outlives that, so no successor needs
+its records. Where the system domain has no domain library (a hosted
+runtime, whose erx_domain_lib does not load, or a root that built none),
+the service runs with none and every create is {error, enotsup}.
 
 Callers are the system domain's own processes; requests from other domains
 reach it only through facets, which arrive with the connections.
@@ -42,15 +42,8 @@ start_link(Opts) ->
 
 init(Opts) ->
     process_flag(trap_exit, true),
-    {ok, Table} = erx_domain_table:claim(),
     Lib = library(maps:get(lib, Opts, erx_domain_lib)),
-    case ets:lookup(Table, core) of
-        [{core, Core, Configured}] ->
-            [relink(Domain) || #{pid := Pid} = Domain <- erx_domain_core:domains(Core), is_pid(Pid)],
-            {ok, #{table => Table, lib => Lib, core => Core, configured => Configured}};
-        [] ->
-            {ok, #{table => Table, lib => Lib, core => undefined, configured => #{}}, {continue, boot}}
-    end.
+    {ok, #{lib => Lib, core => undefined, configured => #{}}, {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none.
 library(Lib) ->
@@ -61,19 +54,15 @@ library(Lib) ->
         error:undef -> none
     end.
 
-relink(#{pid := Pid, ref := Ref}) ->
-    link(Pid),
-    Pid ! {Ref, service, self()}.
-
 handle_continue(boot, #{lib := Lib} = State) ->
     case configured(Lib) of
         {ok, #{host := Host, domains := Rows}} ->
             Ordered = lists:sort(fun(#{place := A}, #{place := B}) -> A =< B end, Rows),
             Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
             Booted = State#{core := erx_domain_core:new(Host), configured := Configured},
-            {noreply, lists:foldl(fun start_configured/2, save(Booted), Ordered)};
+            {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
         {error, _} ->
-            {noreply, save(State#{core := erx_domain_core:new(<<>>)})}
+            {noreply, State#{core := erx_domain_core:new(<<>>)}}
     end.
 
 configured(none) -> {error, enotsup};
@@ -160,14 +149,14 @@ build(Ident, Principal, Origin, Make, #{lib := Lib, core := Core} = State) ->
                     Built = erx_domain_core:built(Id, Connection, Pid, Ref, Admitted),
                     case Lib:start(Id) of
                         ok ->
-                            {{ok, {erx_domain, Id, Node, Pid}}, save(State#{core := erx_domain_core:running(Id, Built)})};
+                            {{ok, {erx_domain, Id, Node, Pid}}, State#{core := erx_domain_core:running(Id, Built)}};
                         {error, Reason} ->
-                            Next = save(State#{core := Built}),
+                            Next = State#{core := Built},
                             stop(Id, Next),
                             {{error, {start, Reason}}, Next}
                     end;
                 {error, Reason} ->
-                    {{error, refusal(Reason)}, save(State#{core := erx_domain_core:failed(Id, Admitted)})}
+                    {{error, refusal(Reason)}, State#{core := erx_domain_core:failed(Id, Admitted)}}
             end
     end.
 
@@ -196,7 +185,7 @@ ended(Id, End, #{lib := Lib, core := Core} = State) ->
                           ok -> erx_domain_core:retired(Id, Ended);
                           {error, _} -> Ended
                       end,
-            restart(Origin, save(State#{core := Retired}))
+            restart(Origin, State#{core := Retired})
     end.
 
 %% A crash's slogan, from its crash area, which goes at the retire after it.
@@ -216,10 +205,6 @@ restart(request, State) ->
 restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
     #{Row := #{restarts := Restarts, restart_period_s := Period} = Entry} = Configured,
     case erx_domain_core:restart(Row, Restarts, Period, erlang:monotonic_time(second), Core) of
-        {yes, Next} -> start_configured(Entry, save(State#{core := Next}));
-        {no, Next} -> save(State#{core := Next})
+        {yes, Next} -> start_configured(Entry, State#{core := Next});
+        {no, Next} -> State#{core := Next}
     end.
-
-save(#{table := Table, core := Core, configured := Configured} = State) ->
-    true = ets:insert(Table, {core, Core, Configured}),
-    State.

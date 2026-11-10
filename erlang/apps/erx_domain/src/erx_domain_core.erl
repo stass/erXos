@@ -6,7 +6,7 @@
 The domain service's pure core (docs/design-system.md, "The domain service's
 record"; docs/design-domains.md, "Domain ids, pids and references"): ids,
 names, each domain's life, death records and configured restarts. It makes
-no call; erx_domain_srv does the effects and keeps the state in its table.
+no call; erx_domain_srv does the effects and keeps the state in its own heap.
 
 Ids. The system domain is 4, since a domain's id is its node's creation and
 stock ERTS gives no node a creation below 4. Every other domain takes the

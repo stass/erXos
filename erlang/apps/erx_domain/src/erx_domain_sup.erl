@@ -3,15 +3,13 @@
 
 -module(erx_domain_sup).
 -moduledoc """
-The domain service's supervisor (docs/design-system.md, "System services"):
-the table holder first, then the service, rest for one. The holder is the heir
-of the service's table, so a crash of the service hands the table back to it
-and the restarted service serves on from it. The holder is significant and
-never restarted: its end loses the table while the library's domains live
-on, so a new service would boot the manifest again and hand out ids the
-library still holds. Its end shuts the supervisor down instead, which ends
-the permanent application and the system domain with it, as any fault of
-the system domain does.
+The domain service's supervisor (docs/design-system.md, "System services").
+The service is its one child, temporary and significant, so it is never
+restarted: its end, however it comes, kill included, shuts the supervisor
+down, which ends the permanent application and the system domain with it,
+outside an ordered end, as any fault of the system domain does. The
+service's records of every domain live in its own heap, and no successor
+needs them, since no domain outlives the system domain.
 """.
 -behaviour(supervisor).
 
@@ -21,10 +19,8 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Table = #{id => erx_domain_table, start => {erx_domain_table, start_link, []},
-              restart => temporary, significant => true, shutdown => 2000, type => worker,
-              modules => [erx_domain_table]},
     Service = #{id => erx_domain_srv, start => {erx_domain_srv, start_link, []},
-                restart => permanent, shutdown => 5000, type => worker, modules => [erx_domain_srv]},
-    {ok, {#{strategy => rest_for_one, intensity => 5, period => 10, auto_shutdown => any_significant},
-          [Table, Service]}}.
+                restart => temporary, significant => true, shutdown => 5000, type => worker,
+                modules => [erx_domain_srv]},
+    {ok, {#{strategy => one_for_one, auto_shutdown => any_significant},
+          [Service]}}.

@@ -1126,15 +1126,6 @@ it; git history is the record of completed work.
   down, so its ended record keeps its view slot and its principal's domain count, and
   `retire/1` needs an id nobody heard. Keep a reported flag per record in the view, set when
   the report is sent, and have `register/0` send every ended record not yet reported.
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_sup.erl`,
-  `erx_domain_table.erl`, `erx_domain_srv.erl`, `erx_domain_pid.erl`: the service restarts
-  from an ETS table that `erx_domain_table` keeps as its heir, and each domain pid traps the
-  service's exit and waits for the restarted service to link again. design-system.md
-  ("System services") makes the service the significant child instead: its end, `kill`
-  included, ends the system domain and the machine. Make `erx_domain_srv` a `temporary`,
-  `significant` child of `erx_domain_sup` (`auto_shutdown => any_significant`), delete
-  `erx_domain_table` and the table, keep the records in the service's own state, and add the
-  QEMU test of design-system.md ("The root task and its end") that kills the service.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`create/2`):
   `erx_domain:create/1` takes the domain library's own request fields (the boot image's
   runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang
@@ -1160,8 +1151,16 @@ it; git history is the record of completed work.
   machine as a fault would. Report the mark and end the machine on it.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: the service
   trusts every system-domain process. It acts on any `{domain_ended, Id, End, Record}` and
-  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain.
-  Tag the library's reports with a secret the NIF hands the registrant.
+  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain,
+  and a malformed forged report (an end kind `erx_domain_core:info/1` has no clause for, an
+  id that is not an integer) crashes the service, which ends the machine. Other domains cannot send either: their messages
+  arrive in the `erx_origin` envelope. Tag the library's reports with a secret the NIF
+  hands the registrant.
+* [Medium] watchdog, `erlang/apps/erx/src/erx_watchdog.erl`: the process pets unconditionally
+  and makes no liveness calls, where design-system.md (A6, and the failure table's row for a
+  domain service that stops answering) has it pet only after every listed service answers
+  within the period, and kill a domain service that does not, whose end then ends the
+  machine. A deadlocked domain service therefore leaves the machine up. Make the calls.
 * [Medium] domain service, `test/erlang/erx_domain_tests.erl`: nothing tests the `ebusy`
   and `erights` answers, which the stand-in library never gives. Add a stand-in that
   refuses.
@@ -1169,24 +1168,6 @@ it; git history is the record of completed work.
   `<principal>_<n>` ([Identifiers](docs/design-system.md#identifiers)), so stock net_kernel accepts them, but
   an identifier still may hold `.`, which net_kernel refuses in a node name. Build the name pool, and make a
   domain's node name refuse a `.` before the domain boots with an `-sname` its own distribution refuses.
-  on a plain `{'EXIT', DomainPid, _}` message, so a forged one retires or stops a domain;
-  and while it is down between a crash and its restart, any process that calls
-  `erx_domain_lib:register/0` first becomes the library's one driver, and the restarted
-  service then fails on `ebusy` until the supervisor gives up. Tag the library's reports
-  with a secret the NIF hands the registrant, and bind registration to the service's
-  identity (its table holder, or `enif_whereis_pid` of `erx_domain_srv`).
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`,
-  `handle_continue/2`): the table is written after the library's create and start return,
-  and the boot's fold saves only at its end, so a service killed between a library call and
-  its save loses a built domain (its later end is ignored and never retired) and re-admits
-  its id, and one killed mid-boot never starts the remaining configured rows. Save the
-  `building` record and the boot's progress before each library call, and on restart
-  resolve `building` records by id and resume unstarted rows.
-* [Medium] domain service, `test/erlang/erx_domain_tests.erl`: nothing tests the service
-  restarting from its table (reclaiming it, relinking the domain pids, ids still increasing,
-  an end after the restart retired), the table holder's end shutting the supervisor down, or
-  the `ebusy` and `erights` answers, which the stand-in library never gives. Add a
-  kill-and-restart case and a stand-in that refuses.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the name pool
   (`<principal>_<n>`, [Identifiers](docs/design-system.md#identifiers)) is not built. Build it.
 * [Medium] domain service, connections, `erlang/apps/erx_domain/src/erx_domain_links.erl` and its

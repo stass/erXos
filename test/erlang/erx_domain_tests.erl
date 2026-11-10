@@ -140,25 +140,48 @@ restart_test() ->
     {yes, _} = erx_domain_core:restart(0, 2, 10, 111, Core3),
     {no, _} = erx_domain_core:restart(1, 0, 10, 100, Core0).
 
+%% The domain service is the supervisor's significant child and is never
+%% restarted: its end, however it comes, shuts the supervisor down, which ends
+%% the application and with it the system domain. A kill, an end with an
+%% error and a normal end each do; the service traps exits, so another
+%% process's exit/2 with any other reason is a message to it, not its end.
+service_end_shuts_the_supervisor_down_test_() ->
+    Ends = [{"kill", fun(Service) -> exit(Service, kill) end},
+            {"crash", fun(Service) -> sys:terminate(Service, crashed) end},
+            {"normal", fun(Service) -> sys:terminate(Service, normal) end}],
+    [{Name, fun() -> service_end_shuts_down(End) end} || {Name, End} <- Ends].
+
+service_end_shuts_down(End) ->
+    {ok, Sup} = erx_domain_sup:start_link(),
+    unlink(Sup),
+    SupDown = monitor(process, Sup),
+    Service = whereis(erx_domain_srv),
+    ?assert(is_pid(Service)),
+    End(Service),
+    Why = receive {'DOWN', SupDown, process, Sup, Reason} -> Reason after 2000 -> still_up end,
+    %% A restarted service is registered again. Clean up before asserting.
+    Restarted = whereis(erx_domain_srv),
+    is_process_alive(Sup) andalso exit(Sup, kill),
+    ?assertEqual({shutdown, undefined}, {Why, Restarted}).
+
 %% The service over the stand-in: configured domains in boot order, a create,
 %% a stop, a kill, {domain_down, Id, Info} at the domain pid's monitors, and a
-%% configured domain's restarts within its intensity.
+%% configured domain's restarts within its intensity; last, the service's own
+%% end, which ends every domain pid.
 service_test_() ->
     {setup,
      fun() ->
              Log = erx_domain_fake_lib:start_log(),
-             {ok, Table} = erx_domain_table:start_link(),
-             unlink(Table),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib}),
              unlink(Service),
-             {Log, Table, Service}
+             {Log, Service}
      end,
-     fun({Log, Table, Service}) ->
+     fun({Log, Service}) ->
              exit(Service, kill),
-             exit(Table, kill),
              exit(Log, kill)
      end,
-     fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0]} end}.
+     fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0,
+                          fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
     erx_domain_fake_lib:next_call().
@@ -219,3 +242,19 @@ configured_restart() ->
     ?assertEqual({retire, 10}, next_call()),
     {ok, _} = erx_domain:create(#{name => <<"after">>, memory => 4096}),
     ?assertMatch({create, #{id := 11}}, next_call()).
+
+service_end_ends_domain_pids() ->
+    %% The service's end ends every domain pid with its reason: no domain
+    %% outlives the system domain, so the pid has nothing left to stop.
+    ?assertEqual({start, 11}, next_call()),
+    {ok, Domain} = erx_domain:create(#{name => <<"last">>, memory => 4096}),
+    ?assertMatch({create, #{id := 12}}, next_call()),
+    ?assertEqual({start, 12}, next_call()),
+    Pid = erx_domain:pid(Domain),
+    Ref = monitor(process, Pid),
+    %% An exit message forged in the service's name while it lives ends nothing.
+    Service = whereis(erx_domain_srv),
+    Pid ! {'EXIT', Service, {domain_down, 12, {halt, 0}}},
+    ?assertEqual(timeout, receive {'DOWN', Ref, process, _, Forged} -> Forged after 200 -> timeout end),
+    exit(Service, kill),
+    ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).
