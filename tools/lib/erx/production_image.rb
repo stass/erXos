@@ -420,10 +420,12 @@ module Erx
                         "false->Busy(T) end end,Busy(erlang:monotonic_time(millisecond)+500).\r"
       # An erx. word of no known kind, which refuses the boot.
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
-      # The program's name and the node flag with its name, before the page's words, and
-      # the five words of -erx console_uart, the four of -erx boot VALUE SLOT and the three of
-      # -erx build ID, which the root adds to the manifest's.
-      ARGUMENTS_ALWAYS = 15
+      # The program's name, the twelve words of the flags erx_boot_argv_plan derives from the
+      # page's limits and grant (-P, -Q, -t, -S, -SDcpu and -SDio with their values) and the node
+      # flag with its name, around the page's words, and the five words of -erx console_uart, the
+      # four of -erx boot VALUE SLOT and the three of -erx build ID, which the root adds to the
+      # manifest's.
+      ARGUMENTS_ALWAYS = 27
       # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
       # for each device of a RECORD_UNITS unit (docs/design-stopgap.md, "Device records").
       DEVICE_RECORD_WORDS = 8

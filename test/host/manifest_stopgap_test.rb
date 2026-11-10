@@ -160,13 +160,16 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   # Property 4: budgets, grants and the root startup rule.
+  # The development manifest's system_baseline, which the sums below fit against.
+  def baseline = Integer(@source[/^  system_baseline (\d+)$/, 1])
+
   def test_budgets_over_root_memory_are_refused
-    refused(Erx::Manifest::Invalid, 4, 'principals.memory', @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - 81_788_928 + 4096}"))
+    refused(Erx::Manifest::Invalid, 4, 'principals.memory', @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - baseline + 4096}"))
   end
 
   def test_device_memory_counts_against_root_memory
     # Principal and baseline alone fit by exactly the device's reservation less one page.
-    source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - 81_788_928 - 2_097_152 + 4096}")
+    source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - baseline - 2_097_152 + 4096}")
     refused(Erx::Manifest::Invalid, 4, 'principals.memory', source)
   end
 

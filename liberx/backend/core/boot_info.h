@@ -85,10 +85,41 @@ typedef struct erx_boot_view {
 	const char	*env;
 } erx_boot_view_t;
 
-/* What a vector for erl_start takes: argc, and the bytes of its strings. */
+/*
+ * What a page lets its ERTS create (docs/design-runtime.md, "Starting a runtime"): the process
+ * and atom tables are the startup limits' processes and atoms, and the normal and dirty CPU
+ * schedulers are the CPUs of the grant's cpuset, at most ERX_BOOT_ERTS_SCHEDULERS_MAX, with
+ * the grant's capacity rounded up online. They reach ERTS as the vector's first flags, which
+ * ERTS's own parser checks against its ranges, so a page's flag after them may lower a
+ * setting; erx_boot_erts_admit then refuses any setting a flag raised past them.
+ */
+#define ERX_BOOT_ERTS_SCHEDULERS_MAX	32	/* a group's 64 executor slots hold both pools */
+#define ERX_BOOT_ERTS_PORTS		1024	/* ERTS's least port table, not a startup limit */
+#define ERX_BOOT_ERTS_DIRTY_IO		2	/* dirty I/O schedulers, workers that hold no slot */
+#define ERX_BOOT_ERTS_WORDS_MAX		80	/* six flags, their values, and their NULs */
+
+typedef struct erx_boot_erts_limits {
+	uint32_t	processes;	/* -P, a power of two, so ERTS's rounding up keeps it */
+	uint32_t	atoms;		/* -t */
+	uint32_t	schedulers;	/* -S and -SDcpu: those created */
+	uint32_t	online;		/* -S and -SDcpu: those online */
+} erx_boot_erts_limits_t;
+
+/* What ERTS's arguments left it, read once they are parsed: what erx_boot_erts_admit checks. */
+typedef struct erx_boot_erts_settings {
+	int64_t	processes;
+	int64_t	atoms;
+	int64_t	schedulers;
+	int64_t	online;
+} erx_boot_erts_settings_t;
+
+/* What a vector for erl_start takes: argc, the bytes of its strings, and its first flags. */
 typedef struct erx_boot_argv_plan {
-	size_t	argc;
-	size_t	strings;
+	size_t			argc;
+	size_t			strings;
+	erx_boot_erts_limits_t	limits;
+	char			lead[ERX_BOOT_ERTS_WORDS_MAX];	/* the flags limits gives, each NUL-ended */
+	size_t			lead_len;
 } erx_boot_argv_plan_t;
 
 /* Writes the page, or refuses and leaves it untouched. size is what page holds. */
@@ -98,11 +129,16 @@ erx_boot_info_status_t	erx_boot_info_read(const void *page, size_t size, erx_boo
 const char		*erx_boot_info_reason(erx_boot_info_status_t status);
 
 /*
- * The vector from a page erx_boot_info_read accepted: beam, its words, then -name under a
- * dotted host or -sname otherwise, and the node name. argv takes argc + 1 pointers and
- * strings the plan's bytes; both are the caller's, since erl_start edits what it is given.
+ * The vector from a page erx_boot_info_read accepted: beam, the flags of the page's ERTS
+ * limits, its words, then -name under a dotted host or -sname otherwise, and the node name.
+ * The plan refuses a page whose limits ERTS cannot keep, and returns why, or NULL. argv takes
+ * argc + 1 pointers and strings the plan's bytes; both are the caller's, since erl_start
+ * edits what it is given.
  */
-erx_boot_argv_plan_t	erx_boot_argv_plan(const erx_boot_view_t *view);
-void			erx_boot_argv_fill(const erx_boot_view_t *view, char **argv, char *strings);
+const char		*erx_boot_argv_plan(const erx_boot_view_t *view, erx_boot_argv_plan_t *plan) ERX_WARN_UNUSED_RESULT;
+void			 erx_boot_argv_fill(const erx_boot_view_t *view, const erx_boot_argv_plan_t *plan, char **argv,
+			    char *strings);
+/* NULL when no setting is above limits, or the first one that is. */
+const char		*erx_boot_erts_admit(const erx_boot_erts_limits_t *limits, const erx_boot_erts_settings_t *settings);
 
 #endif /* ERX_BACKEND_BOOT_INFO_H */

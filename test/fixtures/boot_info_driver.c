@@ -346,7 +346,8 @@ static void
 check_vector(const char *node, size_t node_len, const char *flag)
 {
 	erx_boot_inputs_t inputs = good_inputs();
-	const char *const words[] = { "beam", "-S", "2:2", "--", "-boot", "/bin/start", flag, node };
+	const char *const words[] = { "beam", "-P", "4096", "-Q", "1024", "-t", "65536", "-S", "4:4", "-SDcpu", "4:4",
+	    "-SDio", "2", "-S", "2:2", "--", "-boot", "/bin/start", flag, node };
 	erx_boot_view_t view;
 	erx_boot_argv_plan_t plan;
 	char **argv;
@@ -354,16 +355,18 @@ check_vector(const char *node, size_t node_len, const char *flag)
 
 	inputs.node = node;
 	inputs.node_len = node_len;
+	inputs.limits.processes = 4096;
+	inputs.limits.atoms = 65536;
 	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "the page");
 	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "the view");
-	plan = erx_boot_argv_plan(&view);
-	CHECK(plan.argc == COUNT(words), "argc is %zu", plan.argc);
+	CHECK(erx_boot_argv_plan(&view, &plan) == NULL, "erts flags: a good page refused");
+	CHECK(plan.argc == COUNT(words), "erts flags: argc is %zu", plan.argc);
 	argv = malloc((plan.argc + 1) * sizeof(*argv));
 	strings = malloc(plan.strings);
 	CHECK(argv != NULL && strings != NULL, "no memory");
-	erx_boot_argv_fill(&view, argv, strings);
+	erx_boot_argv_fill(&view, &plan, argv, strings);
 	for (size_t at = 0; at < plan.argc; at++) {
-		CHECK(strcmp(argv[at], words[at]) == 0, "argv[%zu] is %s", at, argv[at]);
+		CHECK(strcmp(argv[at], words[at]) == 0, "erts flags: argv[%zu] is %s", at, argv[at]);
 		CHECK(argv[at] >= strings && argv[at] < strings + plan.strings, "argv[%zu] lies outside writable memory", at);
 	}
 	CHECK(argv[plan.argc] == NULL, "argv ends in NULL");
@@ -463,6 +466,83 @@ test_command_line(void)
 	free(line);
 }
 
+/* The plan of a page with these limits and this grant, or the reason it is refused. */
+static const char *
+erts_plan(uint32_t processes, uint32_t atoms, uint64_t cpuset, uint32_t capacity_mcpu, erx_boot_argv_plan_t *plan)
+{
+	erx_boot_inputs_t inputs = good_inputs();
+	erx_boot_view_t view;
+
+	inputs.limits.processes = processes;
+	inputs.limits.atoms = atoms;
+	inputs.cpuset = cpuset;
+	inputs.capacity_mcpu = capacity_mcpu;
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "the page");
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "the view");
+	return (erx_boot_argv_plan(&view, plan));
+}
+
+/* The schedulers a grant gives, created and online. */
+static void
+check_schedulers(uint64_t cpuset, uint32_t capacity_mcpu, uint32_t schedulers, uint32_t online)
+{
+	erx_boot_argv_plan_t plan;
+
+	CHECK(erts_plan(1024, 8192, cpuset, capacity_mcpu, &plan) == NULL, "schedulers: a good grant refused");
+	CHECK(plan.limits.schedulers == schedulers && plan.limits.online == online,
+	    "schedulers: cpuset %#llx capacity %u gives %u:%u, not %u:%u", (unsigned long long)cpuset, capacity_mcpu,
+	    plan.limits.schedulers, plan.limits.online, schedulers, online);
+}
+
+/*
+ * Each startup limit reaches its flag, the schedulers follow the grant, a page ERTS cannot
+ * keep is refused, and a setting above what the flags gave is refused while one at or below
+ * them is not (docs/design-runtime.md, "Starting a runtime").
+ */
+static void
+test_erts_limits(void)
+{
+	const char lead[] = "-P\0" "131072\0" "-Q\0" "1024\0" "-t\0" "262144\0" "-S\0" "3:2\0" "-SDcpu\0" "3:2\0" "-SDio\0" "2";
+	erx_boot_argv_plan_t plan;
+	erx_boot_erts_settings_t settings;
+
+	CHECK(erts_plan(131072, 262144, 0x15, 1500, &plan) == NULL, "erts flags: a good page refused");
+	CHECK(plan.limits.processes == 131072 && plan.limits.atoms == 262144, "erts flags: the tables are not the limits");
+	CHECK(plan.lead_len == sizeof(lead) && memcmp(plan.lead, lead, sizeof(lead)) == 0, "erts flags: the words are not %s",
+	    "-P 131072 -Q 1024 -t 262144 -S 3:2 -SDcpu 3:2 -SDio 2");
+
+	check_schedulers(0x1, 1000, 1, 1);
+	check_schedulers(0xf, 4000, 4, 4);
+	check_schedulers(0xff, 2500, 8, 3);
+	check_schedulers(0xff, 2001, 8, 3);
+	check_schedulers(0x3, 0, 2, 1);
+	check_schedulers(0x3, 9000, 2, 2);
+	check_schedulers(0x3, UINT32_MAX, 2, 2);
+	check_schedulers(UINT64_MAX, 64000, ERX_BOOT_ERTS_SCHEDULERS_MAX, ERX_BOOT_ERTS_SCHEDULERS_MAX);
+
+	CHECK(erts_plan(0, 8192, 0xf, 4000, &plan) != NULL, "erts refusal: no processes accepted");
+	CHECK(erts_plan(3000, 8192, 0xf, 4000, &plan) != NULL, "erts refusal: processes not a power of two accepted");
+	CHECK(erts_plan(1024, 8192, 0, 4000, &plan) != NULL, "erts refusal: a cpuset with no CPU accepted");
+	CHECK(erts_plan(UINT32_C(1) << 31, 8192, 0xf, 4000, &plan) == NULL, "erts refusal: the largest power of two refused");
+
+	CHECK(erts_plan(4096, 65536, 0xf, 2000, &plan) == NULL, "admit: a good page refused");
+	settings = (erx_boot_erts_settings_t){ .processes = 4096, .atoms = 65536, .schedulers = 4, .online = 2 };
+	CHECK(erx_boot_erts_admit(&plan.limits, &settings) == NULL, "admit: the flags' own settings refused");
+	CHECK(erx_boot_erts_admit(&plan.limits, &(erx_boot_erts_settings_t){ .processes = 1024, .atoms = 8192,
+	    .schedulers = 1, .online = 1 }) == NULL, "admit: lower settings refused");
+	settings.processes = 4097;
+	CHECK(erx_boot_erts_admit(&plan.limits, &settings) != NULL, "admit: -P above processes accepted");
+	settings.processes = 4096;
+	settings.atoms = 65537;
+	CHECK(erx_boot_erts_admit(&plan.limits, &settings) != NULL, "admit: -t above atoms accepted");
+	settings.atoms = 65536;
+	settings.schedulers = 5;
+	CHECK(erx_boot_erts_admit(&plan.limits, &settings) != NULL, "admit: schedulers above the cpuset accepted");
+	settings.schedulers = 4;
+	settings.online = 3;
+	CHECK(erx_boot_erts_admit(&plan.limits, &settings) != NULL, "admit: online above the capacity accepted");
+}
+
 int
 main(void)
 {
@@ -477,6 +557,7 @@ main(void)
 	check_vector("system@host", 11, "-sname");
 	check_vector("system@host.example", 19, "-name");
 	check_vector("a.b@host", 8, "-sname");
+	test_erts_limits();
 	test_command_line();
 	for (int status = ERX_BOOT_INFO_OK; status <= ERX_BOOT_INFO_ENV; status++) {
 		const char *reason = erx_boot_info_reason((erx_boot_info_status_t)status);

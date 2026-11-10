@@ -11,8 +11,12 @@
 #define BOOT_PROGRAM		"beam"
 #define BOOT_FLAG_DOTTED	"-name"
 #define BOOT_FLAG_PLAIN		"-sname"
+#define MCPU_PER_CPU		1000
 
 _Static_assert(ERX_CAP_NULL == 0, "a zeroed page holds null capabilities");
+/* The flags and their NULs, each number at most ten digits: 3 + 11 + 3 + 5 + 3 + 11 + 3 + 6 + 7 + 6 + 6 + 2. */
+_Static_assert(ERX_BOOT_ERTS_WORDS_MAX >= 66 && ERX_BOOT_ERTS_SCHEDULERS_MAX <= 99 && ERX_BOOT_ERTS_PORTS <= 9999 &&
+    ERX_BOOT_ERTS_DIRTY_IO <= 9, "the ERTS flags fit their buffer");
 
 static size_t
 fixed_size(uint32_t flags)
@@ -324,19 +328,130 @@ node_flag(const erx_boot_view_t *view)
 	return (memchr(at + 1, '.', host) != NULL ? BOOT_FLAG_DOTTED : BOOT_FLAG_PLAIN);
 }
 
-erx_boot_argv_plan_t
-erx_boot_argv_plan(const erx_boot_view_t *view)
+/* NUMBER in decimal and its NUL at WORDS + USED; returns the new length. */
+static size_t
+decimal_append(char *words, size_t used, uint32_t number)
 {
-	erx_boot_argv_plan_t plan = {
-		.argc = 3,
-		.strings = sizeof(BOOT_PROGRAM) + view->info.args_len + strlen(node_flag(view)) + 1 + view->info.node_len + 1,
-	};
+	char digits[10];
+	size_t count = 0;
 
-	for (uint32_t at = 0; at < view->info.args_len; at++) {
-		if (view->args[at] == '\0')
-			plan.argc++;
+	do {
+		digits[count++] = (char)('0' + number % 10);
+		number /= 10;
+	} while (number != 0);
+	while (count != 0)
+		words[used++] = digits[--count];
+	words[used++] = '\0';
+	return (used);
+}
+
+/* TEXT and its NUL at WORDS + USED; returns the new length. */
+static size_t
+text_append(char *words, size_t used, const char *text)
+{
+	const size_t length = strlen(text) + 1;
+
+	memcpy(words + used, text, length);
+	return (used + length);
+}
+
+/* N:M at WORDS + USED, then its NUL; returns the new length. */
+static size_t
+pair_append(char *words, size_t used, uint32_t created, uint32_t online)
+{
+	used = decimal_append(words, used, created);
+	words[used - 1] = ':';
+	return (decimal_append(words, used, online));
+}
+
+/*
+ * What the page lets its ERTS create, or why ERTS could not keep it. ERTS rounds its process
+ * table up to a power of two, so processes must be one; the online count is the capacity in
+ * whole CPUs rounded up, and one when the grant has no capacity, as docs/design-system.md
+ * reads capacity 0.
+ */
+static const char *
+erts_limits(const erx_boot_info_t *info, erx_boot_erts_limits_t *limits)
+{
+	const uint32_t processes = info->limits.processes;
+	const uint32_t cpus = (uint32_t)__builtin_popcountll(info->cpuset);
+	const uint32_t schedulers = cpus < ERX_BOOT_ERTS_SCHEDULERS_MAX ? cpus : ERX_BOOT_ERTS_SCHEDULERS_MAX;
+	const uint64_t capacity_cpus = ((uint64_t)info->capacity_mcpu + MCPU_PER_CPU - 1) / MCPU_PER_CPU;
+
+	if (processes == 0 || (processes & (processes - 1)) != 0)
+		return ("the startup limits: processes is not a power of two, which ERTS's process table would round up past");
+	if (schedulers == 0)
+		return ("the grant: a cpuset with no CPU, so ERTS has no scheduler");
+	*limits = (erx_boot_erts_limits_t){
+		.processes = processes,
+		.atoms = info->limits.atoms,
+		.schedulers = schedulers,
+		.online = capacity_cpus == 0 ? 1 : (capacity_cpus > schedulers ? schedulers : (uint32_t)capacity_cpus),
+	};
+	return (NULL);
+}
+
+/* The flags of LIMITS at WORDS, which hold ERX_BOOT_ERTS_WORDS_MAX bytes; returns their length. */
+static size_t
+erts_words(const erx_boot_erts_limits_t *limits, char *words)
+{
+	size_t used = 0;
+
+	used = text_append(words, used, "-P");
+	used = decimal_append(words, used, limits->processes);
+	used = text_append(words, used, "-Q");
+	used = decimal_append(words, used, ERX_BOOT_ERTS_PORTS);
+	used = text_append(words, used, "-t");
+	used = decimal_append(words, used, limits->atoms);
+	used = text_append(words, used, "-S");
+	used = pair_append(words, used, limits->schedulers, limits->online);
+	used = text_append(words, used, "-SDcpu");
+	used = pair_append(words, used, limits->schedulers, limits->online);
+	used = text_append(words, used, "-SDio");
+	used = decimal_append(words, used, ERX_BOOT_ERTS_DIRTY_IO);
+	return (used);
+}
+
+/* The NUL-ended words of LENGTH bytes at WORDS. */
+static size_t
+word_count(const char *words, size_t length)
+{
+	size_t count = 0;
+
+	for (size_t at = 0; at < length; at++) {
+		if (words[at] == '\0')
+			count++;
 	}
-	return (plan);
+	return (count);
+}
+
+const char *
+erx_boot_argv_plan(const erx_boot_view_t *view, erx_boot_argv_plan_t *plan)
+{
+	const char *reason;
+
+	reason = erts_limits(&view->info, &plan->limits);
+	if (reason != NULL)
+		return (reason);
+	plan->lead_len = erts_words(&plan->limits, plan->lead);
+	plan->argc = 3 + word_count(plan->lead, plan->lead_len) + word_count(view->args, view->info.args_len);
+	plan->strings = sizeof(BOOT_PROGRAM) + plan->lead_len + view->info.args_len + strlen(node_flag(view)) + 1 +
+	    view->info.node_len + 1;
+	return (NULL);
+}
+
+const char *
+erx_boot_erts_admit(const erx_boot_erts_limits_t *limits, const erx_boot_erts_settings_t *settings)
+{
+	if (settings->processes > limits->processes)
+		return ("-P above the startup limits' processes");
+	if (settings->atoms > limits->atoms)
+		return ("-t above the startup limits' atoms");
+	if (settings->schedulers > limits->schedulers)
+		return ("schedulers above the grant's CPUs");
+	if (settings->online > limits->online)
+		return ("schedulers online above the grant's capacity");
+	return (NULL);
 }
 
 /* Copies a string, its NUL added, and returns where the next one goes. */
@@ -348,22 +463,33 @@ string_copy(char *out, const char *text, size_t length)
 	return (out + length + 1);
 }
 
+/* Points the next argv entries at copies of the NUL-ended words of LENGTH bytes at WORDS. */
+static char *
+words_copy(char **argv, size_t *argc, char *out, const char *words, size_t length)
+{
+	size_t used = 0;
+
+	while (used < length) {
+		const size_t word = strlen(words + used);
+
+		argv[(*argc)++] = out;
+		out = string_copy(out, words + used, word);
+		used += word + 1;
+	}
+	return (out);
+}
+
 void
-erx_boot_argv_fill(const erx_boot_view_t *view, char **argv, char *strings)
+erx_boot_argv_fill(const erx_boot_view_t *view, const erx_boot_argv_plan_t *plan, char **argv, char *strings)
 {
 	const char *const flag = node_flag(view);
-	size_t argc = 0, used = 0;
+	size_t argc = 0;
 	char *out = strings;
 
 	argv[argc++] = out;
 	out = string_copy(out, BOOT_PROGRAM, strlen(BOOT_PROGRAM));
-	while (used < view->info.args_len) {
-		const size_t word = strlen(view->args + used);
-
-		argv[argc++] = out;
-		out = string_copy(out, view->args + used, word);
-		used += word + 1;
-	}
+	out = words_copy(argv, &argc, out, plan->lead, plan->lead_len);
+	out = words_copy(argv, &argc, out, view->args, view->info.args_len);
 	argv[argc++] = out;
 	out = string_copy(out, flag, strlen(flag));
 	argv[argc++] = out;

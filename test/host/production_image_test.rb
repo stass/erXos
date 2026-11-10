@@ -468,8 +468,8 @@ class ProductionImageTest < Minitest::Test
 
   def test_the_manifest_line_must_carry_the_sources_numbers
     verify = checkpoint_verifier('root-manifest')
-    verify.call("erx: root task: manifest root_memory 100925440 baseline 81788928 units 4 pool pages 12\n")
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 81788928 units 4 pool pages 12\n") }
+    verify.call("erx: root task: manifest root_memory 100925440 baseline 60817408 units 4 pool pages 12\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 60817408 units 4 pool pages 12\n") }
   end
 
   # A build/production-image that links out of the tree is refused before

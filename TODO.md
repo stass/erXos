@@ -2107,6 +2107,22 @@ it; git history is the record of completed work.
 * [Medium] tools, `tools/lib/erx/production_image.rb`: `Run.checkpoints` predicts the root's `-erx device` records from unit names (`RECORD_UNITS`), while the root keys on the unit's holder, each device's role and compatible string, and `machine.hostlink`, and a placement may hold several devices. A unit named otherwise, a unit held by another domain or a two-device placement fails the boot suites falsely. Take the count from the root's own record walk over the manifest (the host build `boot_manifest_test.rb` runs prints the records) and delete the list.
 * [Low] tools, `tools/lib/erx/boot_image.rb`: `BootImage#build` removes its directory before `OutputDirectory.prepare` checks the path, so a `build/` that links out of the tree has the linked directory removed. Clear it through a check first, as `ProductionImage.clear_directory` does, with a test like `production_image_test.rb`'s link test.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
+* [Medium] runtime, `liberx/backend/core/boot_info.c` and `liberx/system/dom_core.c`: a startup
+  limit ERTS cannot keep (`processes` not a power of two or below 1,024, `atoms` below 8,192) is
+  accepted by the manifest check and by domain creation and refused only when the domain's ERTS
+  starts, through ERTS's usage text for the minimums. One C predicate used by the argv plan,
+  `dom_limits_within` and the manifest reader would refuse it before anything is applied.
+* [Medium] runtime, `otp/erts/emulator/beam/erl_init.c`: no test runs ERTS through
+  `erx_runtime_settings_check`; the pure check is tested by `test/host/boot_info_test.rb` only.
+  A hosted test (`beam ARCHIVE -P <twice the limit>` exits 1, `-SP 200:200` likewise, `-P <half>`
+  starts) with a seeded wrong argument would cover the call.
+* [Low] runtime, `otp/erts/lib_src/common/erl_misc_utils.c`: ERTS's own scheduler baseline is the
+  cpuset's uncapped CPU count, so a relative `+S :M` or `+S -N` resolves against it rather than the
+  plan's `-S`, and on a cpuset over 32 CPUs, or with capacity below the cpuset, a flag meant to
+  lower a count is refused. Taking configured, online and quota from the plan's limits would let
+  the leading `-S`/`-SDcpu` and `ProductionImage::Run.schedulers` go.
+* [Low] runtime, `docs/design-runtime.md`, "Starting a runtime": a specification may lower `+t`
+  below its own `foreign_atoms`; once `foreign_atoms` is enforced the lowering should be bounded by it.
 * [Medium] runtime, `tools/fuzz/boot_manifest_fuzz.c`: the target compares the page with the reader's own result, so a swapped limit or a wrong host byte in `erx_boot_manifest_read` passes. Compare with `erx_manifest_open` and `erx_manifest_runtime_limits_at` called directly, field by field.
 * [Low] runtime, `liberx/backend/fiasco/runtime_entry.c`: an `erx.arg` word of the kernel command line reaches ERTS's flag diagnostics unchecked, where the reader in `boot_manifest.c` holds `system_args` to printable ASCII. The command line is the operator's own.
 * [Medium] runtime, `erlang/apps/erx/src/erx_device_record.erl`: `erx.arg` words of the kernel command line can spell `-erx device ...` and add a device record the manifest never assigned, which a driver opens like the root's own; on the stopgap the command line is the operator's, but the manifest should stay the one source of which domain holds a device. Carry the records in a boot-information field only the root writes, or have the system domain's Erlang select them from the manifest through `erx_manifest`.
@@ -3640,10 +3656,6 @@ to the corpus and follow rc
   showing a pid's node name beside its text in the inspector; the user
   decides
   ([design-runtime.md](docs/design-runtime.md#risks-and-open-questions)).
-* [Low] scheduler and runtime, executors per group: the cap is 64, and
-  ERTS with dirty CPU schedulers as executors wants up to 128 at 64 CPUs.
-  Raise the cap or cap the schedulers from the capacity
-  ([design-scheduler.md](docs/design-scheduler.md#data-model)).
 * [Low] platforms, the real-time clock: neither board has the PL031 the
   kernel's device table takes as its real-time clock. Name each board's
   clock, or read wall time from the firmware
@@ -4111,7 +4123,8 @@ to the corpus and follow rc
   `activate/1` makes each manifest name an atom before ERTS's loader checks it
   against the module's bytes, so a load the loader refuses still leaves up to
   1,024 atoms of at most 255 bytes, with no bound across loads; a holder of the
-  install facet can exhaust the system domain's atom table and reset the
+  install facet can exhaust the system domain's atom table, sized by the
+  manifest's `atoms` (65,536 in the development manifest), and reset the
   machine. A successful load also makes every atom of each module's atom table.
   The fix reads the module name from the blob's atom chunk with a bounded pure
   parser, with a fuzz target, and compares it as a binary before any atom is

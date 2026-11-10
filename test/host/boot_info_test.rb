@@ -30,6 +30,10 @@ class BootInfoTest < Minitest::Test
     'the node let through as its own peer' => [INFO, 'return (peer_len != node_len || memcmp(peer, node, node_len) != 0);', 'return ((void)node, (void)node_len, (void)peer, true);', 'own peer'],
     'a connection with no peer let through' => [INFO, 'return (all_zero((const uint8_t *)&connection, sizeof(connection)));', 'return (true);', 'no peer'],
     'an empty word let through' => [INFO, 'if (word == 0)', 'if (false)', 'word list'],
+    'the process table flag dropped' => [INFO, "\tused = text_append(words, used, \"-P\");\n\tused = decimal_append(words, used, limits->processes);\n", "", 'erts flags'],
+    'processes not a power of two let through' => [INFO, 'if (processes == 0 || (processes & (processes - 1)) != 0)', 'if (processes == 0)', 'erts refusal'],
+    'online taken from the cpuset' => [INFO, '(capacity_cpus > schedulers ? schedulers : (uint32_t)capacity_cpus)', 'schedulers', 'erts flags: the words'],
+    'a raised process table admitted' => [INFO, 'if (settings->processes > limits->processes)', 'if (false)', 'admit'],
     'the page marked before the checks' => [INFO, "\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", "\tmemset(page, 0, size);\n\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", 'untouched']
   }.freeze
 

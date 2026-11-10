@@ -209,6 +209,8 @@ const struct erx_boot_info *erx_runtime_boot(void);
 const char *erx_runtime_system_node(size_t *length);
 const struct erx_runtime_limits *erx_runtime_limits(void);
 int erx_runtime_is_system(void);
+/* Ends the start if an argument raised a table or scheduler count past the page's flags. */
+void erx_runtime_settings_check(int processes, int atoms, int schedulers, int online);
 
 /*
  * Functions for getting the performance counter

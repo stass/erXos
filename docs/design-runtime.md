@@ -393,7 +393,7 @@ of behaviour, however many lines it touches:
 | `beam/beam_load.c` | 21. `prepare_loading` accepts, in the system domain, only bytes in installed storage |
 | `beam/erl_nif.c` | 22. `enif_select` is removed; the device and pipe NIFs register events through the event table |
 | `beam/jit/`, asmjit's `VirtMem` | 23. executable memory is a JIT object mapped twice; 24. the translator's error paths fail a load instead of ignoring an error |
-| `beam/erl_init.c` | 25. the environment and the node name come from the boot information page, and the arguments arrive as the `argv` that `sys/erxos`'s `erx_runtime_main` builds from it for `erl_start` |
+| `beam/erl_init.c` | 25. the environment and the node name come from the boot information page, and the arguments arrive as the `argv` that `sys/erxos`'s `erx_runtime_main` builds from it for `erl_start`, the flags of the page's limits and grant first; once they are read, `erx_runtime_settings_check` refuses a process table, atom table or scheduler count above those flags |
 | `beam/io.c`, `beam/erl_port_task.c` | 26. `open_port` accepts only erXos's linked-in drivers; spawn, `fd` and forker paths are deleted |
 | `beam/dist.c`, `beam/bif.c` (registered names) | 27. on a connection to another domain, the sender drops every operation on the peer's registered names: a send to `{Name, Node}` (`REG_SEND`) is dropped in `erts_dsig_send_msg`, the one encoder of a send, and counted for `erx_dist:names_dropped/0`, a send toward a domain whose connection is not up yet included, and a monitor by name is answered by `monitor/2,3` with a `DOWN` of reason `noproc` locally and never sent, and `demonitor/1,2` sends no `DEMONITOR_P` for a monitor its connection never carried, so stock code writes no frame the receiving funnel refuses; a peer is another domain when its node name is at this node's host name, the rule of `erx_dist:select/1`, and a monitor by name toward a domain whose connection is not up yet, or that has none, gets `noconnection` at once, what stock answers when the attempt fails |
 | `lib/kernel/src/net_adm.erl` | 28. `ping/1` toward a node at the machine's host name answers `pong` when the node is `node()` or a member of `nodes()` and `pang` otherwise, and never calls `erlang:disconnect_node/1`, where stock OTP calls `net_kernel` by its registered name and disconnects the node after a failure: a connection between domains exists only by introduction, so a ping of an unconnected domain has nothing to try, and a ping of a connected one needs no call; a ping of another machine's node is stock's |
@@ -721,8 +721,23 @@ creation, so every pid names its domain
 The number of normal schedulers is the CPU count of the domain's cpuset,
 at most 32, and the number of dirty CPU schedulers equals it, so the two
 pools fit a group's 64 executor slots. The number online is the capacity
-rounded up, so ERTS's `+S` is computed from the grant, not from the
-hardware; a `+S` argument can lower both numbers but not raise them. The
+rounded up, one when the grant has no capacity, so
+ERTS's `+S` is computed from the grant, not from the hardware. The
+process table is the startup limits' `processes` and the atom table their
+`atoms`, not ERTS's host defaults. One function, `erx_boot_argv_plan` in
+`liberx/backend/core/boot_info.c`, derives all of them from the page and
+writes them as the vector's first flags, `+P`, `+Q 1024`, `+t`, `+S N:M`,
+`+SDcpu N:M` and `+SDio 2`, so ERTS's own parser checks each against its
+ranges and a specification's flag after them lowers a setting. Once the
+arguments are read, `erx_runtime_settings_check` compares the process
+table, the atom table and both scheduler counts with what the plan
+derived and ends the start with a diagnostic if any argument, `+SP`
+percentages included, raised one; a limit ERTS cannot keep, `processes`
+not a power of two (ERTS rounds its table up to one) or below ERTS's
+1,024, `atoms` below ERTS's 8,192, or a cpuset with no CPU, ends it the
+same way. The ports and dirty I/O counts are the adapter's defaults,
+which a specification may change: neither is a startup limit, and what
+either costs is charged to the domain's own budget. The
 main thread then becomes ERTS's system thread as on a host, or exits.
 `kernel` starts `net_kernel` under the page's node name with `erx_dist`
 as its carrier, and `erx_connections`, the carrier's acceptor, opens the
@@ -3286,9 +3301,12 @@ specification writes each `+` as `-`:
 
 | Flag | In erXos |
 | --- | --- |
-| `+S N:M` | lowers the schedulers created and the limit online; never above the cpuset's CPU count or 32 |
+| `+P N` | lowers the process table; the startup limits' `processes` by default, and a larger value ends the start ([Starting a runtime](#starting-a-runtime)) |
+| `+t N` | lowers the atom table; the startup limits' `atoms` by default, and a larger value ends the start |
+| `+Q N` | the port table; 1,024 by default, not a startup limit |
+| `+S N:M`, `+SP N:M` | lowers the schedulers created and the limit online; the grant's by default, and a larger value ends the start |
 | `+SDcpu N:M` | lowers the dirty CPU schedulers; never above the normal schedulers |
-| `+SDio N` | dirty I/O schedulers, workers; ERTS's default of 10 |
+| `+SDio N` | dirty I/O schedulers, workers; 2 by default |
 | `+sbt u` | executors unpinned, placed by the kernel at each wake; any other value pins in cpuset order |
 | `+sbwt`, `+sbwtdcpu`, `+sbwtdio`: `none` (default) or `very_short` | busy waiting before parking, which spends the group's quota; longer settings are clamped to `very_short` |
 | `+JPperf`, `+JMsingle` | ignored with a warning: there is no `perf`, and a mapping is never writable and executable at once |

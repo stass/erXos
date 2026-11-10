@@ -2502,6 +2502,9 @@ erl_start(int argc, char **argv)
 	erts_replace_intr();
 #endif
 
+    /* erXos: no argument raises the page's tables or schedulers (erl_main.c). */
+    erx_runtime_settings_check(proc_tab_sz, erts_atom_table_size, no_schedulers, no_schedulers_online);
+
     boot_argc = argc - i;  /* Number of arguments to init */
     boot_argv = &argv[i];
 

@@ -2419,7 +2419,7 @@ when it reported ready, and marks those values `reported_by => runtime`
 ### Atoms, code, ETS and names
 
 Each runtime has its own atom table, sized by the domain's `atoms` limit
-(ERTS's `+t`; 262,144 by default).
+(ERTS's `+t`, at least ERTS's 8,192; 262,144 by default).
 
 * **Foreign entries.** Decoding frames may create at most `foreign_atoms`
   atoms over the domain's life (16,384 by default), and frames from any one
@@ -2543,7 +2543,7 @@ A domain's limits, fixed at creation within its principal's ceilings:
 | `tmp` | bytes its RAM file system may hold | its own runtime | an eighth of `memory` |
 | `overlay` | bytes of blobs its specification's overlay may name | the code service | 16 MiB |
 | `atoms`, `foreign_atoms` | atom table; atoms, funs and exports decoding may create, a sixteenth of them per peer | its own runtime | 262,144; 16,384 |
-| `processes` | ERTS's `+P` | its own runtime | 65,536 |
+| `processes` | ERTS's `+P`: a power of two, at least ERTS's 1,024 ([design-runtime.md](design-runtime.md#starting-a-runtime)) | its own runtime | 65,536 |
 
 Every limit a receiver enforces protects the receiver itself, which is why
 its own runtime may enforce it; the limits that protect someone else, a

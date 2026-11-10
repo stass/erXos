@@ -276,7 +276,9 @@ partial page.
 A reader, `erx_boot_info_read(page, size, view)`, checks the version, the ABI version, the flags, the
 reserved words and every string against the page and `ERX_BOOT_STRINGS_MAX`, and `sys/erxos`'s
 `erx_runtime_main` starts ERTS on nothing else. `erx_boot_argv_plan` and `erx_boot_argv_fill` make
-[the vector for `erl_start`](design-runtime.md#configuration) from what it accepted. A word list on
+[the vector for `erl_start`](design-runtime.md#configuration) from what it accepted, led by the flags of its ERTS limits
+([Starting a runtime](design-runtime.md#starting-a-runtime)), and `erx_boot_erts_admit` holds
+ERTS's parsed settings to them. A word list on
 the page has no empty word, and an environment word is `KEY=VALUE`. Both the build and the read refuse
 anything else with its reason, and a refused build writes nothing.
 

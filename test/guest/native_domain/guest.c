@@ -167,7 +167,7 @@ static erx_runtime_limits_t
 limits_default(void)
 {
 	return ((erx_runtime_limits_t){ .max_frame = 65536, .max_message_heap = MIB, .funnel_depth = 64,
-	    .exports = 64, .tmp = MIB, .overlay = MIB, .atoms = 1024, .foreign_atoms = 1024, .processes = 1024,
+	    .exports = 64, .tmp = MIB, .overlay = MIB, .atoms = 65536, .foreign_atoms = 1024, .processes = 1024,
 	    .peer_held = MIB, .peer_held_total = 4 * MIB });
 }
 
