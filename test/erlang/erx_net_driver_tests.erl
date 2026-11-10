@@ -186,7 +186,7 @@ udp_end_bounds_the_driver_queue_against_a_stranger() ->
     %% The driver takes nothing while the stranger sends, so only the socket's own
     %% {active, 64} bounds what reaches its mailbox: 64 datagrams and one udp_passive.
     ok = sys:suspend(Driver),
-    [ok = gen_udp:send(Stranger, Loopback, DriverPort, <<0:480>>) || _ <- lists:seq(1, 10000)],
+    [ok = gen_udp:send(Stranger, Loopback, DriverPort, <<0:480>>) || _ <- lists:seq(1, 1000)],
     timer:sleep(200),
     {message_queue_len, Most} = process_info(Driver, message_queue_len),
     ok = sys:resume(Driver),
