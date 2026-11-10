@@ -902,19 +902,6 @@ it; git history is the record of completed work.
   `erxos/erx_net_client_erxos` answering the `grant` key with the domain's `Origin`, local
   `controlling_process/2` (`enotsup` today), and `recv` up to 64 MiB in the socket process,
   where `erx_tcp_conn` answers `{error, enomem}` above its receive buffer.
-* [Medium] Fiasco backend and its QEMU suite, `test/guest/native_task/program.c`
-  (`mode_irq_refused`), `liberx/backend/fiasco/service.c` (`service_irq`): the task case
-  `irq_refused` expects every IRQ call from a task to answer `ERX_ENOTSUP`, but the service
-  serves IRQ calls from tasks (BK8b), so the ack of handle 0 answers otherwise, the task
-  ends with status 82 and `native_task` fails at 1 CPU every run. Decide which is right:
-  drop or rewrite the case for the per-holder IRQ objects, or restore the refusal.
-  `gen_statem` and its pure cores `erx_gen_tcp_core` and `erx_gen_udp_core`, `erx_sock_admit`,
-  the socket protocol's `{erx_net, Sender, Body}` messages and byte credit in `erx_tcp_conn` and
-  `erx_udp_sock` with their checks of `ReplyTo`, sends and pushes cut into 64 KiB pieces and the
-  64 requests in flight ("Message sizes", "Requests in flight"), the `grant` key's `Origin` and
-  `erxos/erx_net_client_erxos`, local `controlling_process/2` (`enotsup` today), and `recv`
-  up to 64 MiB in the socket process, where `erx_tcp_conn` answers `{error, enomem}` above its
-  receive buffer.
 * [High] network, `erx_net_client` (`erx_gen_tcp:connect/4`, `erx_gen_udp:open/2`, `erx_inet`;
   design-network-stack, "Untrusted input", "Answers from the grant"): the grant's answers
   reach program code unchecked. `connect` and `open` return the grant's reply to their caller

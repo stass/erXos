@@ -14,22 +14,29 @@ module Erx
   # Interrupts through the readiness interface on QEMU (docs/design-stopgap.md,
   # "Interrupts and readiness", "Verification"): test/guest/native_irq sets up a device
   # line and software objects, parks an executor, and asks for each character the
-  # harness types, whose label and byte come back on the same serial line.
+  # harness types, whose label and byte come back on the same serial line. Last, a holder
+  # task (test/guest/native_irq/program.c) binds the line the root passed it, and the
+  # third character's label is the holder's.
   module NativeIrq
     MEMORY_MIB = 512
-    SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'otp/erts/emulator/nifs/erxos/erx_device_core.c',
+    PROGRAM_PATH = 'boot/native-irq-holder'
+    PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_irq/program.c'].freeze
+    SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH, 'otp/erts/emulator/nifs/erxos/erx_device_core.c',
                'otp/erts/emulator/nifs/erxos/erx_device.c',
                'otp/erts/emulator/nifs/erxos/erx_device_queue.c', 'test/guest/native_irq/guest.c'].freeze
     LABEL_UART = 0x55a0
+    # test/guest/native_irq/holder.h's HOLDER_LABEL.
+    LABEL_HOLDER = 0x55f5
     # What the harness types, one character per prompt.
     FIRST = 'a'
     SECOND = 'b'
+    HOLDER = 'c'
     FAILED_LINE = /^erx: irq: .* FAILED/n
 
     module_function
 
-    def uart_line(byte)
-      /\Aerx: irq: uart label byte 0x#{format('%016x', LABEL_UART)} 0x#{format('%016x', byte.ord)}\r?\n/n
+    def uart_line(byte, who: 'uart', label: LABEL_UART)
+      /\Aerx: irq: #{who} label byte 0x#{format('%016x', label)} 0x#{format('%016x', byte.ord)}\r?\n/n
     end
 
     def checkpoints
@@ -47,6 +54,8 @@ module Erx
        point('irq-first-character', uart_line(FIRST), 60),
        point('irq-prompt-second', /\Aerx: irq: type another/n, 30, type: SECOND),
        point('irq-second-character', uart_line(SECOND), 60),
+       point('irq-holder-prompt', /\Aerx: irq: the holder waits for a character/n, 60, type: HOLDER),
+       point('irq-holder-character', uart_line(HOLDER, who: 'holder', label: LABEL_HOLDER), 60),
        point('irq-done', /\Aerx: irq: done/n, 30)].freeze
     end
 
@@ -98,10 +107,11 @@ module Erx
       end
 
       def image(fiasco)
-        root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                              .build(name: 'irq-root', sources: SOURCES, directory: File.join(@build, 'root'), flags: ['-DERX_FIASCO_TEST_HOOKS'])
+        native = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        program = native.build_task(name: 'native-irq-holder', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: [])
+        root_task = native.build(name: 'irq-root', sources: SOURCES, directory: File.join(@build, 'root'), flags: ['-DERX_FIASCO_TEST_HOOKS'])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
-                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
+                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task, programs: { PROGRAM_PATH => program })
       end
     end
   end

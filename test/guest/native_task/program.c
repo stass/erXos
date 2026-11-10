@@ -298,11 +298,11 @@ mode_race(void)
 }
 
 /*
- * Only the root makes, binds and unbinds IRQ objects, whatever the kind, so a task asks
- * the service directly and each of those answers ERX_ENOTSUP. Any holder triggers and
- * acks, but through a handle of its own table, which holds no IRQ object: ERX_CAP_NULL
+ * Only the root makes IRQ objects, whatever the kind, so a task asks the service directly
+ * and each create answers ERX_ENOTSUP. A holder binds, unbinds, triggers and acks an object
+ * it was given, but through a handle of its own table, which holds none here: ERX_CAP_NULL
  * names nothing (ERX_EINVAL), and none of the handles 1 to IRQ_SCAN, which include the
- * object the root made before it started this task, answers ERX_OK.
+ * object the root made before it started this task, answers ERX_OK to any of the four.
  */
 static int64_t
 mode_irq_refused(void)
@@ -310,7 +310,7 @@ mode_irq_refused(void)
 	const uint64_t caller = erx_fiasco_thread_self()->index;
 	const erx_fiasco_irq_create_request_t soft = { .caller = caller, .kind = ERX_IRQ_SOFT };
 	const erx_fiasco_irq_create_request_t line = { .caller = caller, .kind = ERX_IRQ_LINE };
-	const erx_fiasco_irq_bind_request_t bind = { .caller = caller };
+	const erx_fiasco_irq_bind_request_t bind = { .caller = caller, .irq = ERX_CAP_NULL, .group = ERX_CAP_SELF };
 	const erx_fiasco_irq_request_t none = { .caller = caller, .irq = ERX_CAP_NULL };
 	erx_fiasco_reply_t reply;
 
@@ -318,9 +318,9 @@ mode_irq_refused(void)
 		return (80);
 	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &line, sizeof(line), &reply) != ERX_ENOTSUP)
 		return (81);
-	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &bind, sizeof(bind), &reply) != ERX_ENOTSUP)
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &bind, sizeof(bind), &reply) != ERX_EINVAL)
 		return (82);
-	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &none, sizeof(none), &reply) != ERX_ENOTSUP)
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &none, sizeof(none), &reply) != ERX_EINVAL)
 		return (83);
 	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_ACK, &none, sizeof(none), &reply) != ERX_EINVAL)
 		return (84);
@@ -328,10 +328,12 @@ mode_irq_refused(void)
 		return (85);
 	for (uint64_t handle = 1; handle <= IRQ_SCAN; handle++) {
 		const erx_fiasco_irq_request_t held = { .caller = caller, .irq = handle };
+		const erx_fiasco_irq_bind_request_t held_bind = { .caller = caller, .irq = handle, .group = ERX_CAP_SELF };
 
-		if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_ACK, &held, sizeof(held), &reply) == ERX_OK)
-			return (100 + (int64_t)handle);
-		if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_TRIGGER, &held, sizeof(held), &reply) == ERX_OK)
+		if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_ACK, &held, sizeof(held), &reply) == ERX_OK ||
+		    erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_TRIGGER, &held, sizeof(held), &reply) == ERX_OK ||
+		    erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &held_bind, sizeof(held_bind), &reply) == ERX_OK ||
+		    erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &held, sizeof(held), &reply) == ERX_OK)
 			return (100 + (int64_t)handle);
 	}
 	return (0);

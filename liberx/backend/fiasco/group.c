@@ -5,11 +5,12 @@
 
 /*
  * Groups as records (docs/design-stopgap.md, "Budgets and groups as records"): the
- * service's group records and their homes, and the root's stubs of the group and IRQ
- * calls. A group record is an object record of kind group in the root's handle table.
- * Its home, the one task its threads run in, is that task's row (service_task.h), which
- * the group's first thread sets; a task is the home of one group at most. The home's
- * park record (park.c) holds the group's readiness and the dispatcher that triggers it.
+ * service's group records and their homes, and the root's stubs of the group calls and
+ * of erx_irq_create. A group record is an object record of kind group in the root's
+ * handle table. Its home, the one task its threads run in, is that task's row
+ * (service_task.h), which the group's first thread sets; a task is the home of one group
+ * at most. The home's park record (park.c) holds the group's readiness and the
+ * dispatcher that triggers it.
  */
 
 #include <stdatomic.h>
@@ -221,24 +222,6 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selec
 	if (status == ERX_OK)
 		*irq = reply.first;
 	return (status);
-}
-
-/* ERX_CAP_NULL unbinds; the service keeps every bind and writes each label (irq.c). */
-int
-erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label)
-{
-	erx_fiasco_reply_t reply;
-
-	if (group == ERX_CAP_NULL) {
-		const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
-
-		return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &request, sizeof(request), &reply));
-	}
-
-	const erx_fiasco_irq_bind_request_t request = { .caller = erx_fiasco_thread_self()->index,
-	    .irq = irq, .group = group, .label = label };
-
-	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &request, sizeof(request), &reply));
 }
 
 /*

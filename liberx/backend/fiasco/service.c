@@ -281,8 +281,9 @@ service_main(void)
 }
 
 /*
- * The IRQ calls (irq.c): the root makes, binds and unbinds an object, and any task
- * holding its handle triggers and acks it.
+ * The IRQ calls (irq.c): the root makes an object, and any task holding its handle
+ * triggers, acks, binds and unbinds it, a task other than the root only within the group
+ * it is the home of.
  */
 static int
 service_irq(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)

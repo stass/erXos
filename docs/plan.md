@@ -1828,8 +1828,8 @@ the oracle and nothing imported, and M6's block driver among them; the
 restart demo. Drivers run in their own domains rather than the system
 domain, since that is the structure a person sees and the device
 service's first real exercise; the unconfined DMA residual is the same
-either way. The backend gains no device call from a task other than the
-root: the domain library creates each device's register window, line
+either way. No task other than the root creates a device object: the
+domain library creates each device's register window, line
 object and contiguous memory in the root and passes them to the holder,
 which maps the window and binds the line to its own group, and at the
 holder's end deletes the window's and the line's objects and keeps the

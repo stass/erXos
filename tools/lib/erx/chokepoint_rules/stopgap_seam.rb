@@ -196,6 +196,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_irq/program.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_libc_test/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_task/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_task/program.c'),

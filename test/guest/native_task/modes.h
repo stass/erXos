@@ -16,7 +16,7 @@
 #define MODE_SPIN_STOP	5	/* a thread spinning on each CPU while the first stops the task */
 #define MODE_RACE	6	/* a thread looping on commit while the first faults */
 #define MODE_WAIT	7	/* sleeps until the root stops the task */
-#define MODE_IRQ_REFUSED	8	/* IRQ calls from a task: make, bind, unbind refused, no handle reaches one */
+#define MODE_IRQ_REFUSED	8	/* IRQ calls from a task: make refused, no handle reaches an object */
 #define MODE_LOG	9	/* forges the root's lines with erx_debug_log: ends with 0 */
 #define MODE_WRITE	10	/* writes every byte value through a task's standard output: ends with 0 */
 #define MODE_DEVICE_REFUSED	11	/* device memory from a task: a physical or contiguous create refused */

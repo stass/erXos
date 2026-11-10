@@ -116,9 +116,9 @@ case_ends(const char *name, uint32_t flags, uint64_t mode, int64_t expected)
 }
 
 /*
- * A task cannot make, bind or unbind an IRQ object, and reaches none through a handle it was not
- * given: the root holds an object, within the handles the task probes, while the task runs, and
- * still holds it afterwards.
+ * A task cannot make an IRQ object, and reaches none through a handle it was not given: the
+ * root holds an object, within the handles the task probes, while the task runs, and still
+ * holds it afterwards.
  */
 static void
 case_irq_refused(void)

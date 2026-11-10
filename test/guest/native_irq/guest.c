@@ -8,7 +8,9 @@
  * readiness", "Verification"), as the root task; tools/lib/erx/native_irq.rb judges the
  * transcript and types the characters. The first thread rings the software object when
  * the executor is seen parked, a handshake that needs no sleep; the executor runs on
- * another CPU when there is one, so a wake crosses CPUs.
+ * another CPU when there is one, so a wake crosses CPUs. Last, the root passes a device's
+ * objects to a holder task, test/guest/native_irq/program.c, which binds the line to its
+ * own group and takes the third character.
  */
 
 #include <stdatomic.h>
@@ -16,16 +18,21 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/pack.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/group.h"
+#include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/park.h"
+#include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "otp/erts/emulator/nifs/erxos/erx_device.h"
+#include "test/guest/native_irq/holder.h"
 
 /* QEMU virt's PL011: its registers, and its receive line, SPI 1. */
 #define UART_PHYS	UINT64_C(0x9000000)
@@ -44,11 +51,13 @@
 #define REPEATS		3u
 #define STACK_BYTES	16384u
 #define WALL_NS		(UINT64_C(1800000000) * UINT64_C(1000000000))
+#define HOLDER_PROGRAM	"boot/native-irq-holder"
 
 void erx_fiasco_root_main(void);
 
 static _Alignas(16) uint8_t executor_stack[STACK_BYTES];
-static uint64_t irq_uart, irq_soft, irq_other;
+static uint64_t irq_uart, irq_soft, irq_other, root_group;
+static uint32_t holder_entry;
 static const erx_device_t *uart;
 /* The executor's ask of the first thread: ring the software object once it is parked. */
 static _Atomic uint32_t ring_wanted;
@@ -90,6 +99,33 @@ report(const char *what, uint64_t value, uint64_t other)
 	}
 	line[at++] = '\n';
 	erx_fiasco_console_write(line, at);
+}
+
+/*
+ * The holder's status, in decimal as program.c numbers its steps, in the line that fails the
+ * suite; a fault's status is negative.
+ */
+static _Noreturn void
+fail_status(int64_t status)
+{
+	static const char head[] = "erx: irq: the holder's status ", tail[] = " FAILED\n";
+	char line[sizeof(head) + 20 + sizeof(tail)], digits[20];
+	uint64_t magnitude = status < 0 ? (uint64_t)0 - (uint64_t)status : (uint64_t)status;
+	size_t at = 0, used = 0;
+
+	for (size_t index = 0; index < sizeof(head) - 1; index++)
+		line[at++] = head[index];
+	if (status < 0)
+		line[at++] = '-';
+	do {
+		digits[used++] = (char)('0' + magnitude % 10);
+		magnitude /= 10;
+	} while (magnitude != 0);
+	while (used > 0)
+		line[at++] = digits[--used];
+	for (size_t index = 0; index < sizeof(tail); index++)
+		line[at++] = tail[index];
+	fail(line);
 }
 
 static const erx_device_register_t *
@@ -337,6 +373,131 @@ case_uart(const char *prompt)
 		fail("erx: irq: the service refused an ack FAILED\n");
 }
 
+/* One item of the caller's UTCB for erx_cap_pass: a copy of cap with mask's rights. */
+static void
+item_put(uint32_t item, uint64_t cap, uint32_t mask)
+{
+	uint64_t desc = 0;
+
+	(void)erx_msg_item_desc_rights_set(&desc, mask);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 2 * item, desc);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 2 * item + 1, cap);
+}
+
+/*
+ * Passes the holder's handles into task, in holder.h's order and as many at a time as a
+ * pass takes, and gives their values in task's table packed as the holder's argument.
+ */
+static uint64_t
+holder_pass(uint64_t task, const uint64_t objects[HOLDER_HANDLES], const uint32_t masks[HOLDER_HANDLES])
+{
+	uint64_t argument = 0;
+
+	for (uint32_t first = 0; first < HOLDER_HANDLES; first += ERX_MSG_CAPS) {
+		const uint32_t count = HOLDER_HANDLES - first < ERX_MSG_CAPS ? HOLDER_HANDLES - first : ERX_MSG_CAPS;
+
+		for (uint32_t item = 0; item < count; item++)
+			item_put(item, objects[first + item], masks[first + item]);
+		if (erx_cap_pass(ERX_CAP_SELF, task, count) != ERX_OK)
+			fail("erx: irq: the holder's handles were not passed FAILED\n");
+		for (uint32_t item = 0; item < count; item++) {
+			uint64_t value = ERX_CAP_NULL;
+
+			(void)erx_utcb_mr_load(erx_utcb_self(), 2 * item + 1, &value);
+			if (value == ERX_CAP_NULL || value > HOLDER_HANDLE_MASK)
+				fail("erx: irq: a holder's handle does not fit its argument FAILED\n");
+			argument |= value << ((first + item) * HOLDER_HANDLE_BITS);
+		}
+	}
+	return (argument);
+}
+
+/*
+ * The holder's objects, made in the root as the domain library makes a device's for its
+ * holder: the root gives up its own object of the UART's line, which a line has one of,
+ * and makes it again, then a register window over the UART and a contiguous run. The
+ * run's first word holds the DMA address the root got for it, for the holder to compare.
+ */
+static void
+holder_objects_make(uint64_t objects[HOLDER_HANDLES])
+{
+	uint64_t addr, dma;
+
+	if (erx_object_destroy(irq_uart) != ERX_OK)
+		fail("erx: irq: the root's line object was not destroyed FAILED\n");
+	if (erx_irq_create(0, 0, ERX_IRQ_LINE, UART_LINE, &objects[HOLDER_LINE]) != ERX_OK)
+		fail("erx: irq: the line's object was not made again FAILED\n");
+	if (erx_mem_create_physical(0, 0, UART_PHYS, ERX_PAGE_SIZE, ERX_MEM_ATTR_DEVICE, &objects[HOLDER_WINDOW]) != ERX_OK)
+		fail("erx: irq: the holder's window was not made FAILED\n");
+	if (erx_mem_create_contiguous(0, 0, HOLDER_RUN_BYTES, 0, &objects[HOLDER_RUN]) != ERX_OK)
+		fail("erx: irq: the holder's run was not made FAILED\n");
+	if (erx_vm_reserve(ERX_CAP_SELF, 0, HOLDER_RUN_BYTES, 0, &addr) != ERX_OK ||
+	    erx_vm_map(ERX_CAP_SELF, addr, HOLDER_RUN_BYTES, objects[HOLDER_RUN], 0, ERX_PROT_RW) != ERX_OK)
+		fail("erx: irq: the holder's run was not mapped FAILED\n");
+	if (erx_mem_dma_addr(objects[HOLDER_RUN], 0, &dma) != ERX_OK)
+		fail("erx: irq: the run had no DMA address FAILED\n");
+	*(volatile uint64_t *)(uintptr_t)addr = dma;
+	objects[HOLDER_ROOT_GROUP] = root_group;
+	objects[HOLDER_ROOT_SOFT] = irq_soft;
+}
+
+/*
+ * Makes the holder task, passes it the objects and starts its first thread in a new group,
+ * which makes the holder that group's home, then waits for its end and gives its status.
+ * The masks are the rights the target design gives each handle; this backend records none
+ * (docs/design-stopgap.md, "Capabilities in Fiasco's object space"), so they limit nothing here.
+ */
+static int64_t
+holder_run(const uint64_t objects[HOLDER_HANDLES])
+{
+	static const uint32_t masks[HOLDER_HANDLES] = {
+		[HOLDER_LINE] = ERX_HR_BIND | ERX_HR_ACK, [HOLDER_WINDOW] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
+		[HOLDER_RUN] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP | ERX_HR_PHYS, [HOLDER_ROOT_GROUP] = ERX_HR_ATTACH,
+		[HOLDER_ROOT_SOFT] = ERX_HR_TRIGGER };
+	uint64_t group, task, pc, thread;
+	int64_t status = INT64_MIN;
+
+	if (erx_group_create(0, 0, &group) != ERX_OK)
+		fail("erx: irq: no group for the holder FAILED\n");
+	if (erx_fiasco_launch_make(holder_entry, 0, &task, &pc) != ERX_OK)
+		fail("erx: irq: no holder task FAILED\n");
+	erx_fiasco_launch_set_registers(pc, holder_pass(task, objects, masks));
+	if (erx_thread_create(0, task, group, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK || erx_thread_start(thread) != ERX_OK)
+		fail("erx: irq: the holder's first thread did not start FAILED\n");
+	if (erx_fiasco_task_join(task, &status) != ERX_OK)
+		fail("erx: irq: the holder was not joined FAILED\n");
+	/* The group went with its home, so the handle is stale; its close only frees the entry. */
+	(void)erx_cap_close(group);
+	return (status);
+}
+
+/*
+ * A device another domain holds (docs/design-stopgap.md, "Device records"): the root makes
+ * a device's objects and passes them, with the root's own group and a software object bound
+ * there, to a holder task (program.c), whose status says how far it got. The byte the line
+ * fired for is still waiting, and the root reads it through its own window, so the harness
+ * sees the holder's label and the byte as for the root's characters. The objects stay the
+ * root's, and its destroy of each is the last check.
+ */
+static void
+case_holder(void)
+{
+	uint64_t objects[HOLDER_HANDLES], byte;
+	int64_t status;
+
+	holder_objects_make(objects);
+	status = holder_run(objects);
+	if (status != 0)
+		fail_status(status);
+	if (uart_read_field("fr", "rxfe") != 0)
+		fail("erx: irq: the holder's line fired with no byte waiting FAILED\n");
+	byte = uart_read_field("dr", "data");
+	report("erx: irq: holder label byte", HOLDER_LABEL, byte);
+	if (erx_object_destroy(objects[HOLDER_LINE]) != ERX_OK || erx_object_destroy(objects[HOLDER_WINDOW]) != ERX_OK ||
+	    erx_object_destroy(objects[HOLDER_RUN]) != ERX_OK)
+		fail("erx: irq: the holder's objects were not the root's FAILED\n");
+}
+
 static void
 executor_main(uint64_t unused)
 {
@@ -358,6 +519,7 @@ executor_main(uint64_t unused)
 		fail("erx: irq: the line was not bound again FAILED\n");
 	case_uart("erx: irq: type a character\n");
 	case_uart("erx: irq: type another\n");
+	case_holder();
 	say("erx: irq: done\n");
 	erx_fiasco_machine_off();
 }
@@ -434,6 +596,7 @@ bind_objects(void)
 
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		fail("erx: irq: no group FAILED\n");
+	root_group = group;
 	/* A second group has no home, so nothing holds it but its handle, which its destroy leaves stale. */
 	if (erx_group_create(0, 0, &gone) != ERX_OK || erx_irq_bind(0, gone, 1) != ERX_EINVAL ||
 	    erx_object_destroy(gone) != ERX_OK)
@@ -473,12 +636,19 @@ bind_objects(void)
 void
 erx_fiasco_root_main(void)
 {
-	const char *reason = erx_fiasco_root_up(NULL, 0);
+	static erx_boot_handoff_view_t handoff;
+	static erx_pack_view_t pack;
+	const char *reason = erx_fiasco_root_open(&handoff, &pack);
 
+	if (reason == NULL)
+		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
 	if (reason != NULL) {
 		say(reason);
 		erx_fiasco_machine_off();
 	}
+	erx_fiasco_task_set_archive(&pack);
+	if (erx_fiasco_launcher_find(&pack, HOLDER_PROGRAM, &holder_entry) != ERX_OK)
+		fail("erx: irq: the archive holds no holder program FAILED\n");
 	check_time();
 	bind_objects();
 	start_executor();

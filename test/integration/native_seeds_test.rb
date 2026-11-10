@@ -12,7 +12,7 @@ require_relative '../../tools/lib/erx/native_task'
 require_relative '../../tools/lib/erx/native_watchdog'
 require_relative '../fixtures/generated_tree'
 
-# The threads, watchdog and interrupt suites' seeded failures (docs/design-stopgap.md,
+# The threads, watchdog, task and interrupt suites' seeded failures (docs/design-stopgap.md,
 # "Verification"): each seed breaks one thing in a copy of the sources, and the suite's
 # run under TCG must say so, naming the case. A seed that makes no difference means its
 # case does not run the code it claims to. Each boots QEMU and those that lose a wake
@@ -33,7 +33,7 @@ class NativeSeedsTest < Minitest::Test
   IRQ = 'liberx/backend/fiasco/irq.c'
   DISPATCHER = 'liberx/backend/fiasco/park.c'
   IRQ_GUEST = 'test/guest/native_irq/guest.c'
-  ACK_BODY = "\tif (irq_objects[irq].bound)\n\t\t(void)l4_irq_unmask(irq_cap((uint32_t)irq));\n"
+  ACK_BODY = "\tif (status == ERX_OK && object->made)\n\t\t(void)l4_irq_unmask(irq_cap(object));\n"
   REAP_CALL = "\tif (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_REAP, &request, sizeof(request), &reply) != ERX_OK)\n" \
               "\t\treaper_refused(\"erx: reaper: the service refused a deletion\\n\");\n"
   CLEAR = "\tif (record->clear_word != 0) {\n" \
@@ -76,7 +76,11 @@ class NativeSeedsTest < Minitest::Test
     'the dispatcher triggers nothing' => Seed.new(file: DISPATCHER, from: "\t\terx_fiasco_group_signal((uint32_t)record);\n", to: "\t\tcontinue;\n",
                                                   suite: :irq, cpus: 1, expected: /a lost wake/),
     'the hook before the park removed' => Seed.new(file: IRQ_GUEST, from: "\ttrigger_and_see(irq_soft);\n\tif (erx_park(group, slot,", to: "\tif (erx_park(group, slot,",
-                                                   suite: :irq, cpus: 1, expected: /a trigger before the park was lost/)
+                                                   suite: :irq, cpus: 1, expected: /a trigger before the park was lost/),
+    'a task binds into a group it does not home' => Seed.new(file: IRQ, from: "\tif (!irq_group_allowed(task, group) || (object->group", to: "\tif ((object->group",
+                                                             suite: :irq, cpus: 1, expected: /the holder's status 30 FAILED/),
+    'a task makes an IRQ object' => Seed.new(file: IRQ, from: "\tif (task != ERX_FIASCO_TASK_ROOT || request->kind == ERX_IRQ_MSI)\n", to: "\tif (request->kind == ERX_IRQ_MSI)\n",
+                                             suite: :task, cpus: 1, expected: /irq_refused FAILED/)
   }.freeze
 
   def run_suite(source, seed)

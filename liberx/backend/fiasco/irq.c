@@ -6,8 +6,11 @@
 /*
  * The IRQ calls' bodies, on the service, which alone touches this table
  * (docs/design-stopgap.md, "Interrupts and readiness"). An IRQ object is an object
- * record of kind IRQ, the root's to make and bind, and any holder's to trigger and ack;
- * its kernel object sits in one of the root's slots, kept here with its bind.
+ * record of kind IRQ, the root's to make, and any holder's to trigger, ack and bind; its
+ * kernel object sits in one of the root's slots, kept here with its bind. The root binds
+ * into any group it holds, as the domain library binds a domain's bell, and the root's own
+ * drivers their lines; another holder binds only within the group it is the home of
+ * (irq_group_allowed).
  *
  * A bind gives the object a free entry of its group, one of the 64 the group's home
  * task has labels for, stores the caller's label on the home's label page through the
@@ -188,6 +191,19 @@ erx_fiasco_irq_create_body(uint32_t task, const erx_fiasco_irq_create_request_t 
 	return (erx_fiasco_object_create(task, ERX_BACKEND_OBJECT_IRQ, request->budget, irq_fill, request, irq));
 }
 
+/*
+ * Whether the task may bind into the group record, or move or unbind an object bound
+ * there: the root in any group it holds, and any other task only in the group it is the
+ * home of (docs/design-stopgap.md, "Device records"), so a holder's driver binds the
+ * line it was given to its own group and reaches no other domain's. A task's row names
+ * the one group it is the home of (group.c), and the caller's row is live.
+ */
+static bool
+irq_group_allowed(uint32_t task, uint32_t group)
+{
+	return (task == ERX_FIASCO_TASK_ROOT || erx_fiasco_task(task)->group == group + 1);
+}
+
 /* ERX_CAP_SELF names the caller's home group, which the root's first group is for the root. */
 static int
 irq_group_named(uint32_t task, uint64_t group, uint32_t *record)
@@ -207,13 +223,14 @@ erx_fiasco_irq_bind_body(uint32_t task, const erx_fiasco_irq_bind_request_t *req
 	uint32_t group, entry, home;
 	int status;
 
-	if (task != ERX_FIASCO_TASK_ROOT)
-		return (ERX_ENOTSUP);
 	status = irq_named(task, request->irq, &object);
 	if (status == ERX_OK)
 		status = irq_group_named(task, request->group, &group);
 	if (status != ERX_OK)
 		return (status);
+	/* The target, and the group a bound object is in, must both be the caller's to name. */
+	if (!irq_group_allowed(task, group) || (object->group != IRQ_UNBOUND && !irq_group_allowed(task, object->group - 1)))
+		return (ERX_ETYPE);
 	if (object->group != IRQ_UNBOUND) {
 		/* A move changes only the label a later take reads: the dispatcher stays its receiver. */
 		if (object->group != group + 1)
@@ -240,8 +257,10 @@ int
 erx_fiasco_irq_unbind_body(uint32_t task, uint64_t irq)
 {
 	irq_object_t *object;
-	const int status = task == ERX_FIASCO_TASK_ROOT ? irq_named(task, irq, &object) : ERX_ENOTSUP;
+	int status = irq_named(task, irq, &object);
 
+	if (status == ERX_OK && object->group != IRQ_UNBOUND && !irq_group_allowed(task, object->group - 1))
+		status = ERX_ETYPE;
 	if (status == ERX_OK)
 		irq_unbind(object);
 	return (status);

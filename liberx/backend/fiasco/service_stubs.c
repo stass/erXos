@@ -507,6 +507,27 @@ erx_budget_watch(uint64_t budget, uint64_t irq, uint64_t threshold)
 	return (ERX_ENOTSUP);
 }
 
+/*
+ * ERX_CAP_NULL unbinds. The service keeps every bind, writes each label and checks the
+ * group, so a task other than the root binds only within its own home group (irq.c).
+ */
+int
+erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label)
+{
+	erx_fiasco_reply_t reply;
+
+	if (group == ERX_CAP_NULL) {
+		const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
+
+		return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &request, sizeof(request), &reply));
+	}
+
+	const erx_fiasco_irq_bind_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	    .irq = irq, .group = group, .label = label };
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &request, sizeof(request), &reply));
+}
+
 /* A doorbell from any task holding the object: one service round trip (irq.c). */
 int
 erx_irq_trigger(uint64_t irq)
