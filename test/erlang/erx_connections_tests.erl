@@ -240,14 +240,17 @@ facets(Agent) ->
     Agent ! {erx_origin, ?SYSTEM, {erx_origin, ?PEER, {erx_facets, #{forged => Facet}}}},
     record(Agent, {erx_facets, #{echo => Facet, <<"bin">> => Facet, bad => 3}}),
     ?assertEqual(4, erx_connections:dropped()),
+    First = init_facets(2000),
     erlang:trace(Init, false, ['receive']),
-    ?assertEqual([#{echo => Facet}], init_facets()),
+    ?assertEqual([#{echo => Facet}], First ++ init_facets(100)),
     Facet ! stop.
 
-%% The facets answers init received, in order, from the trace of its receives.
-init_facets() ->
+%% The facets answers init received, in order, from the trace of its receives, waiting
+%% at most Ms for each. The first wait is long: the agent has answered dropped/0 once it
+%% has sent the answer, but the trace of init's receive may come later on a loaded host.
+init_facets(Ms) ->
     receive
-        {trace, _, 'receive', {erx_facets, Facets}} -> [Facets | init_facets()];
-        {trace, _, 'receive', _} -> init_facets()
-    after 100 -> []
+        {trace, _, 'receive', {erx_facets, Facets}} -> [Facets | init_facets(100)];
+        {trace, _, 'receive', _} -> init_facets(Ms)
+    after Ms -> []
     end.
