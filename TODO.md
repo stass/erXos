@@ -1189,6 +1189,16 @@ it; git history is the record of completed work.
   kill-and-restart case and a stand-in that refuses.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the name pool
   (`<principal>_<n>`, [Identifiers](docs/design-system.md#identifiers)) is not built. Build it.
+* [Medium] domain service, connections, `erlang/apps/erx_domain/src/erx_domain_links.erl` and its
+  caller: three points the effect layer that drives the core must settle. An introduction of a
+  pair whose connection is still closing or gone fails in `connect/4` as a caller bug, and
+  design-domains.md ("Introduction and connection down") does not say what it does; refuse it
+  with an error until `phase/3` is `none` and state that there. The core drops `connection_lost`
+  while `connection_up` is unanswered, as Connection.tla's A never loses an unmapped connection,
+  so the connection agent must answer `connection_mapped` before its port can report
+  `connection_lost` (answer before handing the port over). The `connections` quota must count
+  `held/2`, not the live connections, or a closing connection's outstanding record outgrows
+  the reserve.
 * [Low] domain library, `liberx/backend/core/boot_info.c` (`node_flag`), `boot_info.h`,
   `test/fixtures/boot_info_driver.c`, `docs/design-runtime.md`: a host is an identifier and has no
   `.`, so the `-name` branch for a dotted host is unreachable; always pass `-sname`, delete
@@ -4036,6 +4046,13 @@ document's "residual risks accepted" paragraph.
   process already holds queued, so a peer can grow any process's queue it can name without bound, and two domains
   that send toward each other in a cycle grow each other's queues with nothing to stop them. RT8's quota leaves the
   next frame in the lane at a process at its quota; the stopgap has no bound here.
+* [Low] domains, control records (`erlang/apps/erx_domain/src/erx_domain_links.erl`, the system
+  domain's control writer): a domain that answers a record before reading it, such as
+  `connection_unmapped` before its `connection_down`, lets the domain service send its next
+  record while the earlier one is still in the domain's lane from the system domain, so that
+  lane can hold more control records than its reserve, up to two per connection the domain
+  holds. Only the liar's own lane is affected; the writer must then neither block the system
+  domain nor drop a record, and its design has to show how.
 
 ## Planned features
 
