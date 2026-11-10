@@ -60,8 +60,10 @@ Decisions every reader needs:
   image is a pure decision; a domain not granted it loads its code
   privately. A granted domain that cannot adopt it ends its start with a
   diagnostic; it never falls back.
-* **BeamAsm domains share nothing of this.** Which domains run the
-  interpreter is the open decision at the end of this document.
+* **BeamAsm domains share nothing of this.** Sessions and command
+  domains run the interpreter; the system domain runs it but never adopts
+  the image; every other ERTS domain, the storage and network domains
+  included, runs BeamAsm ([design-runtime.md](design-runtime.md#beamasm)).
 
 ## The problem and its evidence
 
@@ -204,10 +206,13 @@ The design is ready; its implementation waits for the system to need it.
   or the start time of command domains needing what adoption saves. The
   system domain never adopts the image, and with two adopters the image
   about breaks even ([Memory saved and what it costs](#memory-saved-and-what-it-costs)),
-  so a count of interpreter domains overstates the gain. 1b-E's manifest
-  of [plan.md](plan.md) has at most three adopters: root's session, and
-  the storage and network domains if they run the interpreter, which is
-  open decision 1 below.
+  so a count of interpreter domains overstates the gain. In 1b-E's manifest
+  of [plan.md](plan.md) root's session is the one adopter: the storage
+  and network domains run BeamAsm, the default of
+  [design-runtime.md](design-runtime.md#beamasm) for an ordinary domain,
+  since BeamAsm costs such a domain about 0.4 MB beyond the interpreter
+  at rest (the medium boot cell's `DlJitExtra`) and the interpreter
+  moves bulk TCP at less than half BeamAsm's rate.
 * **The order of work before it.** Each step is cheaper than this design
   and helps every domain, whether or not it adopts an image:
   1. Measure a session's pages at its prompt, with the funnel's scratch
@@ -215,8 +220,7 @@ The design is ready; its implementation waits for the system to need it.
      costs](#memory-saved-and-what-it-costs).
   2. Land the shared image segments of [The executable's own
      pages](#the-executables-own-pages).
-  3. Settle open decision 1, which domains run the interpreter.
-  4. Build this design, if the count of adopters and the session's
+  3. Build this design, if the count of adopters and the session's
      measurement still call for it.
 
   The session's measurement also weighs [binding less per
@@ -1404,21 +1408,7 @@ collector.
 
 ## Open decisions
 
-1. **Which domains run the interpreter image.** Sessions and command
-   domains run `runtimes/emu`; every other ERTS domain except the system
-   domain runs BeamAsm unless its specification chooses the interpreter
-   ([design-runtime.md](design-runtime.md#beamasm)). The choice turns on
-   what BeamAsm's code space costs a domain beyond the interpreter's,
-   which the medium boot cell measures (`DlJitExtra`): the code space
-   starts with a 2 MiB block and each later block doubles the last, up to
-   64 MiB, so it stays within about twice the code a domain loads. It
-   does not turn on this image, which saves an interpreter domain about
-   7 MB. Recommendation: measure a BeamAsm domain against an interpreter
-   domain, and default to the interpreter for every domain whose
-   measurement does
-   not show the interpreter limiting it. This decision constrains several
-   subsystems and belongs in [design.md](design.md) once made.
-2. **Interactive-mode loading.** Recommendation: accept that the image's
+1. **Interactive-mode loading.** Recommendation: accept that the image's
    modules are loaded from the start, as documented and tested, and keep
    binding on first load as the alternative above.
 
