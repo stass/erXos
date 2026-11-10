@@ -74,8 +74,17 @@ it; git history is the record of completed work.
      cases, the header template, the send log of runs with its extension rule: the
      connection's time per segment from 12.3 us to 3 to 4 us, and throughput about 1.3 to
      1.5 times until the driver binds;
-     * the send log of runs and header prediction's finished cases are in the tree; the
-       header template and the `#tcb{}`/`#tcb_conf{}` split remain.
+     * the send log of runs and header prediction's finished cases are in the tree, and
+       `erx_tcp_wire:add_options/1` writes a run's two option layouts (none, `NOP NOP TS`)
+       directly instead of through `tcp_addoptions`' fold, which output, the frame layer and
+       `encode/3` each ran for every segment. The `#tcb{}`/`#tcb_conf{}` split remains, and
+       so does the header template itself, the IP and TCP headers with their options encoded
+       once per connection: its full gain comes with the runs and the cut, when the frame
+       layer writes no header bytes per run. Before them it would save per segment only the
+       IP header's build (`erx_net_frame:output/6`'s map, `erx_ip4:output/4`'s checks and
+       encoding) and the pseudo-header sum, which no measurement backs yet; measure a hack
+       that skips them for a don't-fragment segment that fits the MTU before building the
+       template ahead of the cut.
      * [Medium] `erx_tcp_input_ack_tests` (header prediction's property): its generator
        never sends in-order data larger than the receive space, so a header prediction
        that takes such data is not caught there; the precondition's seeded fault is the

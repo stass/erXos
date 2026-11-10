@@ -74,3 +74,123 @@ addoptions_layout_test() ->
                  decode(encoded(Ack))).
 
 encoded(Tcp) -> iolist_to_binary(erx_tcp_wire:encode(Tcp, <<>>, pseudo(0))).
+
+%% The run layouts' clauses against the fold: over random option sets, half of them a run's
+%% layout (none, or the timestamps alone), each with a random header, payload and
+%% pseudo-header sum, `encode/3` gives the bytes of the reference encoder below and
+%% `optlen/1` the length of its options. Signature is drawn too, since the encoder writes
+%% none whatever it says.
+encoder_matches_reference_test() ->
+    lists:foldl(fun(_, R0) ->
+                        {Tcp, Payload, Pseudo, R} = random_segment(R0),
+                        Expected = reference_encode(Tcp, Payload, Pseudo),
+                        ?assertEqual({Tcp, Expected},
+                                     {Tcp, iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, Pseudo))}),
+                        ?assertEqual({Tcp#tcp.opts, byte_size(reference_options(Tcp#tcp.opts))},
+                                     {Tcp#tcp.opts, erx_tcp_wire:optlen(Tcp#tcp.opts)}),
+                        R
+                end, rand:seed_s(exsss, {3, 5, 7}), lists:seq(1, 20000)).
+
+random_segment(R0) ->
+    {[Sport, Dport, Win, Urp, Pseudo], R1} = values(5, 16#ffff, R0),
+    {[Seq, Ack], R2} = values(2, 16#ffffffff, R1),
+    {Flags, R3} = value(16#fff, R2),
+    {PayloadLen, R4} = value(63, R3),
+    {Opts, R5} = random_opts(R4),
+    {#tcp{sport = Sport, dport = Dport, seq = Seq, ack = Ack, flags = Flags, win = Win,
+          urp = Urp, opts = Opts}, binary:copy(<<16#5a>>, PayloadLen), Pseudo, R5}.
+
+%% A run's layout, or any option set: each option present half the time, which draws the
+%% near misses of a run's layout too, such as the timestamps with SACK blocks after them,
+%% an acknowledgement's options during loss, which must take the fold.
+random_opts(R0) ->
+    {Ts, R1} = random_ts(R0),
+    {Signature, R2} = coin(R1),
+    case coin(R2) of
+        {true, R3} ->
+            {#tcp_opts{ts = Ts, signature = Signature}, R3};
+        {false, R3} ->
+            {Mss, R4} = maybe_value(16#ffff, R3),
+            {Wscale, R5} = maybe_value(14, R4),
+            {Permitted, R6} = coin(R5),
+            {Blocks, R7} = value(5, R6),
+            {Sacks, R8} = lists:mapfoldl(fun(_, R) ->
+                                                 {[L, H], Next} = values(2, 16#ffffffff, R),
+                                                 {{L, H}, Next}
+                                         end, R7, lists:seq(1, Blocks)),
+            {#tcp_opts{mss = Mss, wscale = Wscale, sack_permitted = Permitted, ts = Ts,
+                       sacks = Sacks, signature = Signature}, R8}
+    end.
+
+%% No timestamps, random ones, or the edges of the 32-bit range, a third of the time each.
+random_ts(R0) ->
+    case value(2, R0) of
+        {0, R} -> {none, R};
+        {1, R1} -> {[V, E], R} = values(2, 16#ffffffff, R1), {{V, E}, R};
+        {2, R} -> {{0, 16#ffffffff}, R}
+    end.
+
+maybe_value(Max, R0) ->
+    case coin(R0) of
+        {true, R1} -> value(Max, R1);
+        {false, R1} -> {none, R1}
+    end.
+
+coin(R0) ->
+    {N, R} = rand:uniform_s(2, R0),
+    {N =:= 1, R}.
+
+%% A uniform draw from 0..Max, and Count such draws.
+value(Max, R0) ->
+    {N, R} = rand:uniform_s(Max + 1, R0),
+    {N - 1, R}.
+
+values(Count, Max, R0) ->
+    lists:mapfoldl(fun(_, R) -> value(Max, R) end, R0, lists:seq(1, Count)).
+
+%% The reference encoder: the header as `encode/3` lays it out, with `tcp_addoptions`
+%% transcribed a second time without the run layouts' clauses. It is not independent
+%% evidence about FreeBSD, since it repeats the fold's reading of `tcp_addoptions`; that
+%% reading rests on `addoptions_layout_test`'s known answers. What it checks is that the
+%% clauses give what the fold gives for every option set they take, and take no other.
+reference_encode(#tcp{sport = Sport, dport = Dport, seq = Seq, ack = Ack, flags = Flags,
+                      win = Win, urp = Urp, opts = Opts}, Payload, Pseudo) ->
+    Options = reference_options(Opts),
+    Off = 5 + byte_size(Options) div 4,
+    Len = Off * 4 + byte_size(Payload),
+    Head = <<Sport:16, Dport:16, Seq:32, Ack:32, Off:4, Flags:12, Win:16>>,
+    Tail = <<Urp:16, Options/binary, Payload/binary>>,
+    Sum = bnot erx_bytes:inet_csum(Pseudo, [<<Len:16>>, Head, Tail]) band 16#ffff,
+    <<Head/binary, Sum:16, Tail/binary>>.
+
+reference_options(#tcp_opts{mss = Mss, wscale = Wscale, sack_permitted = Permitted, ts = Ts,
+                            sacks = Sacks}) ->
+    Steps = [{Mss =/= none, {4, 0}, fun() -> <<2, 4, Mss:16>> end},
+             {Wscale =/= none, {2, 1}, fun() -> <<3, 3, Wscale>> end},
+             {Permitted, {2, 0}, fun() -> <<4, 2>> end},
+             {Ts =/= none, {4, 2}, fun() -> {V, E} = Ts, <<8, 10, V:32, E:32>> end}],
+    Fixed = lists:foldl(fun({false, _, _}, Acc) -> Acc;
+                           ({true, Alignment, Option}, Acc) -> reference_add(Acc, Alignment, Option())
+                        end, <<>>, Steps),
+    Options = reference_sack(Fixed, Sacks),
+    <<Options/binary, 0:((4 - byte_size(Options) rem 4) rem 4 * 8)>>.
+
+reference_add(Acc, _, _) when byte_size(Acc) =:= 40 -> Acc;
+reference_add(Acc, Alignment, Option) ->
+    Aligned = reference_align(Acc, Alignment),
+    case 40 - byte_size(Aligned) >= byte_size(Option) of
+        true -> <<Aligned/binary, Option/binary>>;
+        false -> Aligned
+    end.
+
+reference_sack(Acc, []) -> Acc;
+reference_sack(Acc, _) when byte_size(Acc) =:= 40 -> Acc;
+reference_sack(Acc, Sacks) ->
+    Aligned = reference_align(Acc, {4, 2}),
+    case lists:sublist(Sacks, max(0, (40 - byte_size(Aligned) - 2) div 8)) of
+        [] -> Aligned;
+        Fit -> <<Aligned/binary, 5, (2 + 8 * length(Fit)), << <<L:32, H:32>> || {L, H} <- Fit >>/binary>>
+    end.
+
+reference_align(Acc, {Mod, Rem}) when byte_size(Acc) rem Mod =:= Rem -> Acc;
+reference_align(Acc, Alignment) -> reference_align(<<Acc/binary, 1>>, Alignment).

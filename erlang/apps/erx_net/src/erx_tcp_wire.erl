@@ -278,8 +278,20 @@ Translates `tcp_addoptions`: the options in FreeBSD's order (MSS, window scale,
 SACK-permitted, timestamps, SACK; never a signature), each after the no-operation bytes that align it as FreeBSD
 aligns it, an option that does not fit left out (its alignment kept, as FreeBSD keeps it),
 as many SACK blocks as fit, and end-of-options and zeros to a 4-byte boundary.
+
+The options of almost every segment of an established connection are one of the two
+layouts a run's frames share (docs/design-network-fastpath.md, "A run"): none, or the
+timestamps alone, which the translation lays out as `NOP NOP TS` (`tcp_output.c:1794`).
+Output, the frame layer and `encode/3` each ask for a segment's options, so those two are
+written directly; `erx_tcp_wire_tests` checks them against the fold over random option
+sets.
 """.
 -spec add_options(#tcp_opts{}) -> binary().
+add_options(#tcp_opts{mss = none, wscale = none, sack_permitted = false, ts = none, sacks = []}) ->
+    <<>>;
+add_options(#tcp_opts{mss = none, wscale = none, sack_permitted = false, ts = {TsVal, TsEcr},
+                      sacks = []}) ->
+    <<?TCPOPT_NOP, ?TCPOPT_NOP, ?TCPOPT_TIMESTAMP, ?TCPOLEN_TIMESTAMP, TsVal:32, TsEcr:32>>;
 add_options(#tcp_opts{} = Opts) ->
     Options = lists:foldl(fun(Step, Acc) -> add_option(Step, Opts, Acc) end, <<>>,
                           [mss, wscale, sack_permitted, ts, sacks]),
