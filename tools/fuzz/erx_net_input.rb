@@ -64,9 +64,20 @@ module ErxNetInputFuzz
               exact: '<<_:Hl/unit:32, Upper/binary>> = Invoking,',
               faulty: '<<_:20/binary, Upper/binary>> = Invoking,',
               fault: "reading a quote's ports at 20 bytes whatever its header length", caught: JUDGE),
-    Fault.new(exact: "?IP6_HDR_LEN + HdrLen);", faulty: "?IP6_HDR_LEN);",
+    Fault.new(exact: "?IP6_HDR_LEN + HdrLen));", faulty: "?IP6_HDR_LEN));",
               fault: "deriving an IPv6 datagram's sum above IP without its extension headers",
-              caught: %w[network_sum_differs])
+                caught: %w[network_sum_differs]),
+      Fault.new(exact: 'case is_integer(N) andalso N >= 2 andalso length(Payload) =< N andalso N =< MaxFrames of',
+                faulty: 'case is_integer(N) andalso MaxFrames > 0 of',
+                fault: "charging a unit's count without checking it against its pieces and the merge's limit",
+                caught: %w[forged_unit_accepted]),
+      Fault.new(exact: '        andalso LastSeq =:= erx_tcp_seq:wire(Seq + Size - byte_size(LastPayload))',
+                faulty: '        andalso is_integer(LastSeq) andalso is_binary(LastPayload)',
+                fault: "taking a unit whose pieces end before its last frame starts", caught: %w[forged_unit_accepted]),
+      Fault.new(exact: 'unit(N, ether(First, FirstSum, View), fun() -> ether(Last, LastSum, View) end, Payload);',
+                faulty: 'unit(N, ether(Last, LastSum, View), fun() -> ether(First, FirstSum, View) end, Payload);',
+                fault: 'classifying a unit by its last frame',
+                caught: %w[unit_bytes_not_the_streams unit_ack_not_the_last unit_not_its_last_frame])
   ].freeze
 
   module_function

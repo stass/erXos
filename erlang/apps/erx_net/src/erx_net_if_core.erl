@@ -83,6 +83,7 @@ and its burst.
     | {accept_refused, Conn :: term(), erx_tcp:segment()}
     | {admin, Request :: term(), From :: term()}     % netadmin's requests
     | {drop, Reason :: atom()}                       % the loop dropped a frame
+    | {merged, Units :: pos_integer(), Segments :: pos_integer()} % a batch's units of the merge
     | {expired, Now :: integer()}.
 
 -type action() ::
@@ -216,6 +217,10 @@ step({admin, Request, From}, Core, _Ctx) ->
     {Core, [{reply, From, admin(Request, Core)}]};
 step({drop, Reason}, Core, _Ctx) when is_atom(Reason) ->
     {count(Reason, Core), []};
+%% The units of the merge a batch held and the segments in them, the totals the benchmarks
+%% read as segments per merged unit (docs/design-network-fastpath.md, "Verification").
+step({merged, Units, Segments}, Core, _Ctx) ->
+    {add(units, Units, add(unit_segments, Segments, Core)), []};
 step({expired, Now}, #core{arp = Arp0} = Core, _Ctx) ->
     {Arp, Actions} = erx_arp:expired(Now div 1000, arp_iface(Core), Arp0),
     arp_actions(Actions, Core#core{arp = Arp});
@@ -476,5 +481,8 @@ status(#core{name = Name, lladdr = Lladdr, mtu = Mtu, link = Link, dhcp = Dhcp, 
       config => case Dhcp of true -> dhcp; false -> static end,
       addrs => [Row || {_, Row} <- Addrs], routes => Routes, dns => Dns, search => Search}.
 
-count(Reason, #core{counters = Counters} = Core) ->
-    Core#core{counters = maps:update_with(Reason, fun(N) -> N + 1 end, 1, Counters)}.
+count(Reason, Core) ->
+    add(Reason, 1, Core).
+
+add(Name, By, #core{counters = Counters} = Core) ->
+    Core#core{counters = maps:update_with(Name, fun(N) -> N + By end, By, Counters)}.

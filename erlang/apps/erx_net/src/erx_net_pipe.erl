@@ -16,9 +16,11 @@ take as `refused`.
   dropped as `stranger`. UDP has no carrier, so the link is `up` from `init` on.
 * `{process, Far}`, a test: `Far` is a pid, or a registered name looked up once at
   `init`, so that a restarted driver finds the far end registered since. Each frame is a
-  message `{erx_net_pipe, Pid, Frame}` in either direction; a `Frame` that is not a
-  binary is dropped as `malformed` (a type check, not a parse), and one from another pid
-  as `stranger`. The pipe monitors the far end and stops when it ends, which ends the
+  message `{erx_net_pipe, Pid, Frame}` in either direction, and the far end may also send
+  `{erx_net_pipe, Pid, {frames, Frames}}`, which reaches the driver as one batch, as a burst a
+  medium hands up at once (docs/design-network-fastpath.md, "Verification"); a `Frame`
+  that is not a binary is dropped as `malformed` (a type check, not a parse), and one from
+  another pid as `stranger`. The pipe monitors the far end and stops when it ends, which ends the
   driver. A name that names no other process stops the pipe at its first message.
 
 The pipe reports its link `up` from `init` on; the far end's end stops it instead of
@@ -113,11 +115,10 @@ event({udp, Socket, Ip, Port, Data}, #udp{socket = Socket} = T) ->
 event({udp_passive, Socket}, #udp{socket = Socket} = T) ->
     ok = inet:setopts(Socket, [{active, ?ACTIVE}]),
     {[], T};
-event({erx_net_pipe, Pid, Frame}, #process{pid = Pid, mtu = Mtu} = T) when is_binary(Frame) ->
-    case byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN of
-        true -> {[{frames, [received(Frame, T)]}], T};
-        false -> {[{dropped, too_long}], T}
-    end;
+event({erx_net_pipe, Pid, Frame}, #process{pid = Pid} = T) when is_binary(Frame) ->
+    {burst([Frame], T), T};
+event({erx_net_pipe, Pid, {frames, Frames}}, #process{pid = Pid} = T) when is_list(Frames) ->
+    {burst(Frames, T), T};
 event({erx_net_pipe, Pid, _}, #process{pid = Pid} = T) ->
     {[{dropped, malformed}], T};
 event({erx_net_pipe, _, _}, #process{} = T) ->
@@ -148,6 +149,18 @@ split(Datagrams, #udp{peer = {PeerIp, PeerPort}, mtu = Mtu}) ->
                             {D, [Data | F]}
                     end, {[], []}, Datagrams),
     Drops ++ [{frames, Frames}].
+
+%% The frames of one message from a process end as one batch, each that is a binary and fits
+%% the MTU; the others dropped, by reason.
+burst(Frames, #process{mtu = Mtu} = T) ->
+    {Drops, Kept} = lists:foldr(fun(Frame, {D, K}) when not is_binary(Frame) ->
+                                        {[{dropped, malformed} | D], K};
+                                   (Frame, {D, K}) when byte_size(Frame) > Mtu + ?ETHER_HDR_LEN ->
+                                        {[{dropped, too_long} | D], K};
+                                   (Frame, {D, K}) ->
+                                        {D, [received(Frame, T) | K]}
+                                end, {[], []}, Frames),
+    Drops ++ [{frames, Kept} || Kept =/= []].
 
 %% In the offload mode a frame comes with its network sum, as from a medium whose copy sums.
 received(<<_:?ETHER_HDR_LEN/binary, Above/binary>> = Frame, #process{offload = true}) ->

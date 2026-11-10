@@ -46,7 +46,8 @@ module Erx
   # Last, the Erlang shell opens TCP connections with erx_gen_tcp (tcp_checkpoints): one
   # through slirp's guest forward to the harness's echo server (EchoServer), over which
   # it sends TCP_BYTES random bytes and must read the same bytes back, while the server's
-  # MD5 of what it took must equal the guest's of what it sent; and one to the gateway,
+  # MD5 of what it took must equal the guest's of what it sent, and whose echo, coming back
+  # in bursts, the interface must have merged into units at least once; and one to the gateway,
   # 10.0.2.2, at the echo server's own host port. An unrestricted slirp would carry that
   # one to the host's loopback, where the echo server listens, and connect; slirp in
   # restricted mode must refuse it, since the guest reaches the host only through the
@@ -113,6 +114,10 @@ module Erx
                 "T = erlang:monotonic_time(millisecond) - T0, E =:= D.\r".freeze
     DIGEST_LINE = "{T, binary:encode_hex(erlang:md5(D))}.\r"
     CLOSE_LINE = "erx_gen_tcp:close(S).\r"
+    # Whether vtnet0's interface merged any of the bursts the echo came back in: its count of
+    # merged units (docs/design-network-fastpath.md, "The merge, before classification").
+    MERGED_LINE = 'begin {ok, #{pid := If}} = erx_net_tables:interface(vtnet0), ' \
+                  "{ok, C} = erx_net_if:admin(If, counters), maps:get(units, C, 0) > 0 end.\r"
 
     module_function
 
@@ -169,7 +174,8 @@ module Erx
       [erl_point('tcp-connect', 'ok', type: DATA_LINE),
        erl_point('tcp-data', TCP_BYTES.to_s, type: ECHO_LINE),
        erl_point('tcp-echo', '(?:true|false)', seconds: TCP_SECONDS, verify: echoed, type: DIGEST_LINE),
-       erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: CLOSE_LINE),
+       erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: MERGED_LINE),
+       erl_point('tcp-merged', 'true', type: CLOSE_LINE),
        erl_point('tcp-close', 'ok', type: refused_line(refused_port)),
        erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'))].freeze
     end

@@ -407,3 +407,99 @@ other_protocols_draw_an_error_only_when_they_may_be_answered_test() ->
     %% payload is a jumbogram, dropped before).
     None = ip6(?PEER6, ?ME6, ?PROTO_NONE, <<0:64>>),
     ?assertEqual({drop, no_next_header}, classify(ip6_frame(None), view())).
+
+%% --- Units of the merge ------------------------------------------------------------
+%% (docs/design-network-fastpath.md, "The merge, before classification", "What the stack
+%% believes"): a unit is classified by its first frame, takes N units of credit, has its
+%% first and last frames verified and becomes one segment; a unit whose own claims fail is
+%% dropped as malformed.
+
+-define(CONN, {tcp, inet, ?ME4, 80, ?PEER4, 4000}).
+
+%% A frame of the peer's connection from port Sport to 80.
+peer_seg(Sport, Seq, Ack, Flags, Payload) ->
+    Header = #tcp{sport = Sport, dport = 80, seq = Seq, ack = Ack, flags = Flags, win = 100, urp = 0},
+    Seg = iolist_to_binary(erx_tcp_wire:encode(Header, Payload, pseudo(?PEER4, ?ME4, ?PROTO_TCP), sender)),
+    eth(?MINE, ?ETHERTYPE_IP, ip4(?PEER4, ?ME4, ?PROTO_TCP, Seg)).
+
+summed(Frame) -> {sum, network_sum(Frame), Frame}.
+
+conn_view() -> view(#{demux => demux(holders([{?CONN, conn}]))}).
+
+three_frames() ->
+    [peer_seg(4000, 1 + 100 * I, 2 + I, ?TH_ACK, binary:copy(<<($a + I)>>, 100)) || I <- [0, 1, 2]].
+
+merged_unit_is_one_segment_of_its_connection_test() ->
+    [{merged, 3, _, _, Pieces} = Unit] = erx_bytes:tcp_merge(three_frames()),
+    {owned, [{_, conn}], Pending} = Verdict = erx_net_input:classify(Unit, conn_view()),
+    ?assertEqual(3, erx_net_input:units(Pending)),
+    {[conn], {ok, {#tcp{seq = 1, ack = 4, flags = ?TH_ACK}, {merged, 3, Pieces}, 0, unicast}}} = owned(Verdict),
+    ?assertEqual(<<(binary:copy(<<"a">>, 100))/binary, (binary:copy(<<"b">>, 100))/binary,
+                   (binary:copy(<<"c">>, 100))/binary>>, iolist_to_binary(Pieces)).
+
+%% A frame on its own takes one unit.
+lone_frame_takes_one_unit_test() ->
+    {owned, _, Pending} = classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_TCP,
+                                                  tcp(?PEER4, ?ME4, 4000, 80, 16, <<"x">>))),
+                                   conn_view()),
+    ?assertEqual(1, erx_net_input:units(Pending)).
+
+%% A count that does not cover the pieces, or exceeds the merge's limit, is refused before
+%% any credit is charged.
+forged_count_is_malformed_test() ->
+    [{merged, 3, First, Last, Pieces}] = erx_bytes:tcp_merge(three_frames()),
+    [?assertEqual({drop, malformed}, erx_net_input:classify({merged, N, First, Last, Pieces}, conn_view()))
+     || N <- [0, 1, 2, 257, -1, three]].
+
+%% A last frame of another connection: refused at classification when its holders differ,
+%% and at verification when one holder holds both.
+last_frame_of_another_flow_is_malformed_test() ->
+    [First, _, _] = three_frames(),
+    Other = peer_seg(4001, 201, 4, ?TH_ACK, binary:copy(<<"c">>, 100)),
+    Pieces = [binary:copy(<<"a">>, 100), binary:copy(<<"b">>, 100), binary:copy(<<"c">>, 100)],
+    Unit = {merged, 3, summed(First), summed(Other), Pieces},
+    Apart = demux(holders([{?CONN, conn}, {{tcp, inet, ?ME4, 80, ?PEER4, 4001}, other}])),
+    ?assertEqual({drop, malformed}, erx_net_input:classify(Unit, view(#{demux => Apart}))),
+    Entry = #{pid => self(), credit => conn},
+    Together = demux(#{?CONN => [Entry], {tcp, inet, ?ME4, 80, ?PEER4, 4001} => [Entry]}),
+    {owned, _, Pending} = erx_net_input:classify(Unit, view(#{demux => Together})),
+    ?assertEqual({drop, malformed}, erx_net_input:verify(Pending)).
+
+%% The unit's claims Erlang checks: the last frame where the pieces before it end, and its
+%% first and last frames merge candidates.
+inconsistent_unit_is_malformed_test() ->
+    [{merged, 3, First, Last, [P1, P2, P3]}] = erx_bytes:tcp_merge(three_frames()),
+    Short = {merged, 3, First, Last, [P1, binary:part(P2, 0, 99), P3]},
+    {owned, _, Pending} = erx_net_input:classify(Short, conn_view()),
+    ?assertEqual({drop, malformed}, erx_net_input:verify(Pending)),
+    Syn = peer_seg(4000, 1, 2, ?TH_ACK bor ?TH_SYN, P1),
+    {owned, _, SynPending} = erx_net_input:classify({merged, 3, summed(Syn), Last, [P1, P2, P3]}, conn_view()),
+    ?assertEqual({drop, malformed}, erx_net_input:verify(SynPending)).
+
+%% A last frame whose checksum fails drops the unit for its decoder's reason.
+unit_with_a_bad_last_checksum_is_dropped_test() ->
+    [{merged, 3, First, {sum, Sum, Last}, Pieces}] = erx_bytes:tcp_merge(three_frames()),
+    Spoiled = {merged, 3, First, {sum, (Sum + 1) band 16#ffff, Last}, Pieces},
+    {owned, _, Pending} = erx_net_input:classify(Spoiled, conn_view()),
+    ?assertMatch({drop, _}, erx_net_input:verify(Pending)),
+    ?assertNotEqual({drop, malformed}, erx_net_input:verify(Pending)).
+
+%% A middle frame with a bad checksum is no candidate, as FreeBSD merges only frames whose
+%% checksums were validated: it ends the unit before it, arrives alone and is dropped by its
+%% decoder, and the frame after it arrives alone.
+bad_middle_checksum_arrives_alone_test() ->
+    [A, <<Head:60/binary, Byte, Rest/binary>>, C] = three_frames(),
+    Units = erx_bytes:tcp_merge([A, <<Head/binary, (Byte bxor 1), Rest/binary>>, C]),
+    ?assertMatch([{sum, _, _}, {sum, _, _}, {sum, _, _}], Units),
+    Verified = [element(2, owned(erx_net_input:classify({frame, F, S}, conn_view()))) || {sum, S, F} <- Units],
+    ?assertMatch([{ok, _}, {drop, _}, {ok, _}], Verified).
+
+%% A unit no connection holds is taken as its last frame, whose acknowledgement FreeBSD's
+%% merged segment carries, so a closed port answers it once.
+unit_to_a_closed_port_is_its_last_frame_test() ->
+    [{merged, 3, _, Last, _} = Unit] = erx_bytes:tcp_merge(three_frames()),
+    {sum, Sum, LastFrame} = Last,
+    ?assertEqual(erx_net_input:classify({frame, LastFrame, Sum}, view()),
+                 erx_net_input:classify(Unit, view())),
+    {local, Pending} = erx_net_input:classify(Unit, view()),
+    ?assertMatch({ok, {tcp, _, #tcp{seq = 201, ack = 4}, _, none}}, erx_net_input:verify(Pending)).

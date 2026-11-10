@@ -247,7 +247,7 @@ against the view's `groups`, which hold no IPv4 group until sockets join one.
 -include("erx_udp_wire.hrl").
 -include("erx_tcp_wire.hrl").
 
--export([classify/2, verify/1, arp_reply/1]).
+-export([classify/2, verify/1, units/1, arp_reply/1]).
 
 -export_type([input/0, view/0, key/0, entry/0, verdict/0, pending/0, item/0, head/0,
               link_cast/0, reason/0]).
@@ -257,6 +257,10 @@ against the view's `groups`, which hold no IPv4 group until sockets join one.
 -define(PROTO_UDP, 17).
 -define(PROTO_ICMPV6, 58).
 -define(PROTO_NONE, 59).
+%% The most bytes an IP packet's length field counts (IP_MAXPACKET, netinet/ip.h), and
+%% IPv4's fixed header.
+-define(IP_MAXPACKET, 65535).
+-define(IP4_HDR_LEN, 20).
 %% The DHCP client's port (`LOCAL_PORT`, sbin/dhclient), the one its filter accepts.
 -define(DHCP_CLIENT_PORT, 68).
 -define(UDP_HDR_LEN, 8).
@@ -284,11 +288,14 @@ What the interface classifies: a frame from its driver, with its network sum or 
 the loopback interface, an IP
 packet with the zone its sender's path gave it; or a datagram erx_ip4_reass or
 erx_ip6_reass rebuilt, with its family and the zone and link cast of its fragment at
-offset 0 (IPv4's zone is `none`).
+offset 0 (IPv4's zone is `none`); or, on an Ethernet interface, a unit of the merge as
+`erx_bytes:tcp_merge/1` answers it.
 """.
 -type input() :: {frame, binary(), erx_net_sum:sum() | none}
                | {frame, Zone :: term(), binary()}
-               | {reassembled, family(), Zone :: term(), link_cast(), binary()}.
+               | {reassembled, family(), Zone :: term(), link_cast(), binary()}
+               | {merged, 2..256, First :: {sum, erx_net_sum:sum(), binary()},
+                  Last :: {sum, erx_net_sum:sum(), binary()}, Payload :: [binary()]}.
 
 -doc """
 What `classify/2` reads of the interface: its link (`none` for the loopback interface) and
@@ -332,10 +339,11 @@ Why a frame was dropped: the link's `other_host` and `ethertype`, Ethernet's and
 layers' own reasons, `not_member` for a group the interface has not joined, and the reasons
 of the table above IP (`bcast_tcp`, `no_reply`, `no_port`, `no_socket`, `icmp_type`,
 `no_next_header`, and a quote's `bad_length` or `bad_addr`), `too_short` for a datagram
-without the fields its row reads; and from `verify/1`, the decoders' reasons.
+without the fields its row reads, `malformed` for a unit of the merge whose claims fail; and
+from `verify/1`, the decoders' reasons.
 """.
 -type reason() :: other_host | ethertype | not_member | bcast_tcp | no_reply | no_port
-                | no_socket | icmp_type | no_next_header | too_short | bad_length | bad_addr
+                | no_socket | icmp_type | no_next_header | too_short | bad_length | bad_addr | malformed
                 | erx_net_eth:error_reason() | erx_ip4:reason() | erx_ip6:reason()
                 | erx_tcp_wire:reason() | erx_udp_wire:reason() | erx_icmp4_wire:reason()
                 | erx_icmp6_wire:reason() | erx_arp_wire:error_reason().
@@ -354,7 +362,9 @@ A classified frame waiting for `verify/1`: its kind (what its consumer is), its 
 the bytes above IP, for a segment to a listener the listener's entry, and for the DHCP
 path, ARP, a fragment and a parameter problem what each needs: a fragment its zone and its
 frame's link cast, which reassembly keeps for the datagram, and a parameter problem its
-packet's zone, so the error goes back to the zoned source. A datagram's consumer above IP
+packet's zone, so the error goes back to the zoned source; and a unit of the merge its
+count, its first and last frames' pending connection segments and its payload pieces. A
+datagram's consumer above IP
 comes with what the sum of the bytes above IP is derived from, or `none` when its decoder
 sums them.
 """.
@@ -362,7 +372,8 @@ sums them.
                    | {dhcp, #ip4{}, binary()}
                    | {arp, binary()}
                    | {fragment, family(), Zone :: term(), link_cast(), #ip4{} | #ip6{}, binary()}
-                   | {param_problem, family(), Zone :: term(), Problem :: tuple(), Packet :: binary()}.
+                   | {param_problem, family(), Zone :: term(), Problem :: tuple(), Packet :: binary()}
+                   | {merged, 2..256, First :: pending(), Last :: pending(), Payload :: [binary()]}.
 
 %% A classified datagram's consumer above IP: its kind, its head and the bytes above IP, and
 %% for a segment to a listener the listener's entry.
@@ -406,7 +417,33 @@ classify({frame, Zone, Bytes}, #{link := none} = View) ->
 classify({reassembled, inet, none, LinkCast, Bytes}, View) ->
     ip4(Bytes, none, LinkCast, View);
 classify({reassembled, inet6, Zone, LinkCast, Bytes}, View) ->
-    ip6(Bytes, none, reassembled, LinkCast, Zone, View).
+    ip6(Bytes, none, reassembled, LinkCast, Zone, View);
+classify({merged, N, {sum, FirstSum, First}, {sum, LastSum, Last}, Payload}, #{link := ethernet} = View)
+  when is_binary(First), is_binary(Last) ->
+    {MaxFrames, _} = erx_bytes:tcp_merge_limit(),
+    case is_integer(N) andalso N >= 2 andalso length(Payload) =< N andalso N =< MaxFrames of
+        true -> unit(N, ether(First, FirstSum, View), fun() -> ether(Last, LastSum, View) end, Payload);
+        false -> {drop, malformed}
+    end.
+
+%% A unit of the merge (docs/design-network-fastpath.md, "The merge, before
+%% classification") is classified by its first frame, its count checked against the pieces
+%% Erlang sees before anyone is charged for it. A unit for a connection is owned when its
+%% last frame classifies as a segment of a connection with the same holders; verify/1 then
+%% checks that the two name one flow. A unit no connection holds, for a closed port or a
+%% listener, or one dropped, is taken as its last frame, whose acknowledgement FreeBSD's
+%% merged segment carries (tcp_lro.c:731-740), so a closed port answers it with the one RST
+%% tcp_dropwithreset makes for the LRO packet. The last frame comes as a fun, ClassifyLast,
+%% so that it is classified once on either path.
+unit(N, {owned, Holders, {above, _, {conn, _, _}} = First}, ClassifyLast, Payload) ->
+    case ClassifyLast() of
+        {owned, Holders, {above, _, {conn, _, _}} = LastPending} ->
+            {owned, Holders, {merged, N, First, LastPending, Payload}};
+        _ ->
+            {drop, malformed}
+    end;
+unit(_N, _NotConnection, ClassifyLast, _Payload) ->
+    ClassifyLast().
 
 %% ether_input drops a frame to another host's unicast address (no promiscuous mode), and
 %% ether_demux one of a type no protocol takes. The frame's network sum is the sum of its bytes
@@ -681,7 +718,50 @@ verify({arp, Bytes}) ->
 verify({fragment, _, _, _, _, _} = Fragment) ->
     {ok, Fragment};
 verify({param_problem, _, _, _, _} = Problem) ->
-    {ok, Problem}.
+    {ok, Problem};
+verify({merged, N, {above, FirstFrom, {conn, FirstHead, FirstUpper} = FirstAbove},
+        {above, LastFrom, {conn, LastHead, LastUpper} = LastAbove}, Payload}) ->
+    maybe
+        {ok, First} ?= verify_above(FirstAbove, upper_sum(FirstFrom, FirstUpper)),
+        {ok, Last} ?= verify_above(LastAbove, upper_sum(LastFrom, LastUpper)),
+        true ?= (flow(FirstHead, FirstUpper) =:= flow(LastHead, LastUpper)
+                 andalso unit_claims_hold(FirstHead, FirstUpper, First, Last, Payload))
+                orelse {drop, malformed},
+        {ok, erx_tcp:merged(First, Last, {N, Payload})}
+    end.
+
+-doc """
+The units of a holder's credit a pending frame takes: N for a unit of the merge, so that a
+merged segment costs its connection what its N frames would have
+(docs/design-network-fastpath.md, "Credit counts segments"), and one for anything else.
+The connection takes back as many for the segment `verify/1` makes of it.
+""".
+-spec units(pending()) -> 1..256.
+units({merged, N, _, _, _}) -> N;
+units(_) -> 1.
+
+%% What makes two segments of a unit one flow: their heads but for the IP headers' own
+%% fields, their ECN fields and their ports.
+flow(Head, <<Sport:16, Dport:16, _/binary>>) -> {maps:remove(ip, Head), ecn(Head), Sport, Dport}.
+
+%% What Erlang can check of a unit without its middle frames: its first and last frames are
+%% merge candidates (ACK, and no other flag but PSH), the last starts where the pieces before
+%% it end, and the pieces fit one IP packet behind the first frame's headers. Only a bug of
+%% the merge makes a unit that fails.
+unit_claims_hold(Head, Upper, {#tcp{seq = Seq, flags = FirstFlags}, FirstPayload, _, _},
+         {#tcp{seq = LastSeq, flags = LastFlags}, LastPayload, _, _}, Payload) ->
+    Size = erx_tcp_payload:size(Payload),
+    TcpHeader = byte_size(Upper) - byte_size(FirstPayload),
+    candidate(FirstFlags) andalso candidate(LastFlags)
+        andalso LastSeq =:= erx_tcp_seq:wire(Seq + Size - byte_size(LastPayload))
+        andalso ip_header(Head) + TcpHeader + Size =< ?IP_MAXPACKET.
+
+candidate(Flags) -> Flags band ?TH_ACK =/= 0 andalso Flags band bnot (?TH_ACK bor ?TH_PUSH) =:= 0.
+
+%% The bytes of the IP header an IP packet's length counts: IPv4's whole header, and none of
+%% IPv6's, whose payload length leaves its fixed header out.
+ip_header(#{ip := #ip4{options = Options}}) -> ?IP4_HDR_LEN + byte_size(Options);
+ip_header(#{ip := #ip6{}}) -> 0.
 
 %% A consumer above IP, with Sum the sum of its bytes above IP, the third element of each, or none.
 verify_above({conn, Head, Upper}, Sum) ->

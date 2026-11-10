@@ -145,6 +145,25 @@ class NetChecksTest < Minitest::Test
     assert_equal [['notices', nil]], rules({ "#{SRC}/m.erl" => module_text('') }, notice: nil)
   end
 
+  # The design's test 12: an iolist_to_binary/1 added to erx_tcp_output fails, as does
+  # every other copying call in a module a payload passes through.
+  def test_payload_copies_fail_outside_their_sites
+    { 'out(P) -> iolist_to_binary(P).' => 2, "out(P) ->\n  erlang:list_to_binary(P)." => 3,
+      'out(P) -> binary:copy(P).' => 2, "out(P) -> 'binary':list_to_bin(P)." => 2,
+      'out(P) -> erlang:iolist_to_iovec(P).' => 2, 'out() -> fun iolist_to_binary/1.' => 2 }.each do |body, line|
+      assert_equal [['payload-copy', line]], source_rules("#{SRC}/erx_tcp_output.erl", body), body
+    end
+    assert_equal [['payload-copy', 3]], source_rules("#{SRC}/erx_net_if.erl", "a(X) -> X.\nb(P) -> iolist_to_binary(P).")
+    assert_equal [['payload-copy', 2]], source_rules("#{SRC}/erx_tcp_conn.erl", 'join(Q) -> iolist_to_binary(Q).')
+  end
+
+  def test_payload_copies_pass_at_their_sites_in_comments_and_other_modules
+    assert_empty source_rules("#{SRC}/erx_tcp_conn.erl", "take(Q) ->\n  iolist_to_binary(Q).")
+    assert_empty source_rules("#{SRC}/erx_tcp_reass.erl", 'hold(D) -> binary:copy(D).')
+    assert_empty source_rules("#{SRC}/erx_tcp_output.erl", "%% iolist_to_binary(P)\nout(P) -> my_iolist_to_binary(P).")
+    assert_empty source_rules("#{SRC}/erx_udp.erl", 'out(P) -> iolist_to_binary(P).')
+  end
+
   # The design's seeded failure: a backend that reads the grant key itself
   # and so calls the grant past erx_sock_admit.
   def test_grant_key_reads_fail_outside_erx_inet

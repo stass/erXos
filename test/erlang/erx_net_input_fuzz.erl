@@ -21,6 +21,15 @@ fragments. It checks that:
   the raw bytes the table names, an error's quote included, which it reads itself;
 * changing a byte above IP that the table does not name leaves the verdict as it was, and
   changing the checksum above IP turns `verify/1`'s result only into a drop for its sum;
+* a burst of one connection's segments merged by `erx_bytes:tcp_merge/1` (IPv4 or IPv6,
+  data and pure ACKs, PSH, timestamps, other flags, frames of another connection and
+  spoiled payload bytes among them) classifies and verifies unit by unit as the
+  interface takes it: every segment `verify/1` accepts, merged or alone, carries the
+  connection's own bytes at its sequence number, a merged one takes as many units as it
+  holds and acknowledges as its last frame does, a unit no connection holds is classified
+  as its last frame, and a unit forged from a real one (a count below its pieces or past
+  the merge's limit, a last frame of the other connection, a piece cut short) is dropped
+  as `malformed`;
 * an Ethernet frame with its network sum, as a summing transport hands it up, classifies
   and verifies exactly as the same frame without one, whose decoders sum it themselves.
   Each Ethernet frame comes with its sum or without one at random, so the other
@@ -32,6 +41,7 @@ status 1.
 
 -include("erx_ip4_wire.hrl").
 -include("erx_ip6.hrl").
+-include("erx_tcp_wire.hrl").
 
 -export([judge/3, run/1]).
 
@@ -70,6 +80,12 @@ fail(Tag, Detail) -> throw({fail, Tag, Detail}).
 %% `{loop, Zone}`, a looped packet with its zone; or `{reassembled, Family, Zone,
 %% LinkCast}`, a datagram a reassembly rebuilt, on the Ethernet interface.
 round() ->
+    case rand:uniform(8) of
+        1 -> unit_round();
+        _ -> packet_round()
+    end.
+
+packet_round() ->
     Kind = pick([ether, ether, ether, ether, ether, loop, loop, reassembled]),
     View0 = view(Kind =:= loop),
     {Ip, Upper, Family} = packet(Kind, View0),
@@ -655,3 +671,155 @@ quoted_ports(_, _) ->
 
 subset(List) -> [X || X <- List, rand:uniform(3) =/= 1].
 pick(List) -> lists:nth(rand:uniform(length(List)), List).
+
+%% ---------------------------------------------------------------------------------------
+%% Units of the merge
+
+-define(CONN_PORT, 4000).
+
+%% One burst of the connection from port ?CONN_PORT to 80, merged and taken unit by unit.
+unit_round() ->
+    Family = pick([inet, inet6]),
+    {Src, Dst} = case Family of inet -> {?PEER4, ?ME4}; inet6 -> {?PEER6, ?ME6} end,
+    Base = rand:uniform(16#ffffffff) - 1,
+    Members = members(rand:uniform(12), Base, rand:uniform(16#ffffffff) - 1, pick([none, rand:uniform(1000)])),
+    Stream = << <<P/binary>> || #{payload := P} <- Members >>,
+    Frames = [unit_frame(Family, Src, Dst, M) || M <- Members],
+    ByFrame = maps:from_list(lists:zip(Frames, Members)),
+    Entry = #{pid => self(), credit => conn},
+    Key = {tcp, Family, Dst, 80, Src, ?CONN_PORT},
+    View = unit_view(fun(K) when K =:= Key -> [Entry]; (_) -> [] end),
+    Units = erx_bytes:tcp_merge([pick([F, {sum, net_sum(F), F}]) || F <- Frames]),
+    Results = [take_unit(Unit, View, ByFrame, Base, Stream) || Unit <- Units],
+    case [U || {merged, _, _, _, _} = U <- Units] of
+        [Merged | _] when Members =/= [] -> forged(Merged, Family, Src, Dst, View);
+        _ -> ok
+    end,
+    case lists:member(ok, Results) of true -> owned; false -> drop end.
+
+%% N members after one another: data of 0 to 1448 bytes, the acknowledgement moving by
+%% 0 to 1000, ACK with PSH at random, now and then another flag or a frame of another
+%% connection (port ?CONN_PORT + 1), and now and then a payload byte flipped after the
+%% checksum was computed.
+members(0, _Seq, _Ack, _Ts) ->
+    [];
+members(N, Seq, Ack, Ts) ->
+    Payload = random_bytes(pick([0, 0, 1, 100, 1448, rand:uniform(1448)])),
+    Flags = 16#10 bor pick([0, 0, 16#08]) bor pick([0, 0, 0, 0, 0, 0, 0, 16#01, 16#02, 16#04, 16#20, 16#40, 16#80]),
+    Member = #{sport => pick([?CONN_PORT, ?CONN_PORT, ?CONN_PORT, ?CONN_PORT, ?CONN_PORT + 1]), seq => Seq,
+               ack => Ack, flags => Flags, payload => Payload, ts => Ts,
+               spoiled => byte_size(Payload) > 0 andalso rand:uniform(10) =:= 1},
+    Next = (Seq + byte_size(Payload)) band 16#ffffffff,
+    [Member | members(N - 1, Next, (Ack + pick([0, 1, 1000])) band 16#ffffffff, next_ts(Ts))].
+
+next_ts(none) -> none;
+next_ts(Ts) -> Ts + pick([0, 1]).
+
+random_bytes(N) -> << <<(rand:uniform(256) - 1)>> || _ <- lists:seq(1, N) >>.
+
+unit_frame(Family, Src, Dst, #{sport := Sport, seq := Seq, ack := Ack, flags := Flags, payload := Payload,
+                               ts := Ts, spoiled := Spoiled}) ->
+    Opts = case Ts of none -> #tcp_opts{}; _ -> #tcp_opts{ts = {Ts, 7}} end,
+    Tcp = #tcp{sport = Sport, dport = 80, seq = Seq, ack = Ack, flags = Flags, win = 512, urp = 0, opts = Opts},
+    Pseudo = case Family of
+                 inet -> erx_ip4_wire:pseudo_sum(Src, Dst, 0, 6);
+                 inet6 -> erx_ip6_wire:pseudo_sum(Src, Dst, 0, 6)
+             end,
+    Seg0 = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, Pseudo, sender)),
+    Seg = case Spoiled of
+              true -> Head = byte_size(Seg0) - 1, <<H:Head/binary, Last>> = Seg0, <<H/binary, (Last bxor 1)>>;
+              false -> Seg0
+          end,
+    {Type, Packet} =
+        case Family of
+            inet -> {16#0800, <<(erx_ip4_wire:encode(#ip4{len = 20 + byte_size(Seg), ttl = 64, p = 6, df = 1,
+                                                          src = Src, dst = Dst}))/binary, Seg/binary>>};
+            inet6 -> {16#86dd, iolist_to_binary(erx_ip6_wire:encode(#ip6{tclass = 0, flow = 0, hlim = 64, src = Src,
+                                                                         dst = Dst, proto = 6}, Seg))}
+        end,
+    <<?MINE/binary, 2, 0, 0, 0, 0, 9, Type:16, Packet/binary>>.
+
+unit_view(Demux) ->
+    #{link => ethernet, lladdr => ?MINE,
+      ip4 => #{addrs => [?ME4], broadcasts => [?BCAST4], loopback => false},
+      ip6 => #{addrs => [?ME6], notready => [], loopback => false, zone => em0},
+      groups => [], dhcp => false, demux => Demux}.
+
+%% One unit as the interface takes it; ok when it reached the connection.
+take_unit({sum, Sum, Frame}, View, _ByFrame, Base, Stream) ->
+    case accepted(classify({frame, Frame, Sum}, View), Base, Stream, 1) of
+        {ok, _} -> ok;
+        drop -> drop
+    end;
+take_unit({merged, N, _, {sum, LastSum, LastFrame}, _} = Unit, View, ByFrame, Base, Stream) ->
+    case classify(Unit, View) of
+        {owned, _, Pending} = Verdict ->
+            N =:= erx_net_input:units(Pending) orelse fail(unit_units, {Unit, Pending}),
+            #{ack := Ack} = maps:get(LastFrame, ByFrame),
+            case accepted(Verdict, Base, Stream, N) of
+                {ok, #tcp{ack = Ack}} -> ok;
+                {ok, Tcp} -> fail(unit_ack_not_the_last, {Unit, Tcp});
+                drop -> drop
+            end;
+        Verdict ->
+            Verdict =:= classify({frame, LastFrame, LastSum}, View)
+                orelse fail(unit_not_its_last_frame, {Unit, Verdict}),
+            drop
+    end.
+
+%% A segment the connection takes carries the connection's own bytes at its number.
+accepted({owned, _, Pending}, Base, Stream, N) ->
+    case erx_net_input:verify(Pending) of
+        {ok, {#tcp{seq = Seq} = Tcp, Payload, _, _}} ->
+            Bytes = case Payload of
+                        {merged, N, Pieces} -> iolist_to_binary(Pieces);
+                        _ when is_binary(Payload), N =:= 1 -> Payload;
+                        _ -> fail(unit_payload_shape, Payload)
+                    end,
+            Offset = (Seq - Base) band 16#ffffffff,
+            Offset + byte_size(Bytes) =< byte_size(Stream)
+                andalso binary:part(Stream, Offset, byte_size(Bytes)) =:= Bytes
+                orelse fail(unit_bytes_not_the_streams, {Seq, Base, Bytes}),
+            {ok, Tcp};
+        {drop, _} ->
+            drop;
+        Other ->
+            fail(bad_verify_shape, Other)
+    end;
+accepted(_, _, _, _) ->
+    drop.
+
+%% A merged unit of the connection with one of its claims forged: refused at classification
+%% or verification.
+forged(Unit, Family, Src, Dst, View) ->
+    case classify(Unit, View) of
+        {owned, _, _} -> forge(Unit, Family, Src, Dst, View);
+        _ -> ok
+    end.
+
+forge({merged, N, First, Last, Pieces}, Family, Src, Dst, View) ->
+    {Kind, Forged} =
+        case pick([low, high, last, short]) of
+            low -> {low, {merged, min(length(Pieces) - 1, pick([0, 1])), First, Last, Pieces}};
+            high -> {high, {merged, 257, First, Last, Pieces}};
+            last ->
+                Other = unit_frame(Family, Src, Dst, #{sport => ?CONN_PORT + 1, seq => 0, ack => 0, flags => 16#10,
+                                                      payload => <<>>, ts => none, spoiled => false}),
+                {last, {merged, N, First, {sum, net_sum(Other), Other}, Pieces}};
+            short ->
+                {short, {merged, N, First, Last, shortened(Pieces)}}
+        end,
+    case classify(Forged, View) of
+        {drop, malformed} -> ok;
+        {owned, _, Pending} when Kind =:= last; Kind =:= short ->
+            case erx_net_input:verify(Pending) of
+                {drop, malformed} -> ok;
+                %% A unit of pure ACKs has no piece to cut, so its forge changed nothing.
+                Got when Kind =:= short, Pieces =:= [] -> Got;
+                Got -> fail(forged_unit_accepted, {Kind, Forged, Got})
+            end;
+        Got -> fail(forged_unit_accepted, {Kind, Forged, Got})
+    end.
+
+shortened([]) -> [];
+shortened([Piece | Rest]) -> [binary:part(Piece, 0, byte_size(Piece) - 1) | Rest].

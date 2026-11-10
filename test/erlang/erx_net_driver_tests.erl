@@ -340,6 +340,8 @@ far_end_test_() ->
      {timeout, 30, fun far_end_never_there_spins_no_supervisor/0},
      {timeout, 30, fun crash_at_start_spins_no_supervisor/0},
      {timeout, 20, fun queued_batches_reach_a_holder_as_one_message/0},
+     {timeout, 20, fun a_burst_reaches_its_connection_as_one_segment/0},
+     {timeout, 20, fun credit_counts_segments/0},
      {timeout, 20, fun offload_pipe_finishes_the_stacks_segments/0}].
 
 %% A pipe whose far end ends ends its driver, and the link supervisor starts the link
@@ -397,6 +399,69 @@ queued_batches_reach_a_holder_as_one_message() ->
         stop_far()
     end.
 
+%% A burst of in-order segments the far end hands up as one batch is merged by the
+%% interface (docs/design-network-fastpath.md, "The merge, before classification"): the
+%% holder gets one segment, the first frame's sequence number with the last's
+%% acknowledgement, holding every payload in order, and its eight units.
+a_burst_reaches_its_connection_as_one_segment() ->
+    with_holder(64, fun(Far, Driver, If, Port, Credit) ->
+        Far ! {inject, Driver, {frames, burst(Port, 1000, 8)}},
+        receive
+            {items, If, [{#tcp{seq = 1000, ack = 7}, {merged, 8, Pieces}, 0, unicast}]} ->
+                ?assertEqual(iolist_to_binary([payload(I) || I <- lists:seq(0, 7)]),
+                             iolist_to_binary(Pieces))
+        after 3000 -> error(no_items)
+        end,
+        ?assertEqual(64 - 8, erx_net_credit:free(Credit))
+    end).
+
+%% Test 8 of the design: a connection slower than the peer's bursts never has more than
+%% its credit's limit of frames waiting for it, merged or not, since a merged segment takes
+%% a unit for each segment it holds. The holder, the test, takes no unit back while ten
+%% bursts of eight arrive, and the interface hands it 16 frames' worth and no more.
+credit_counts_segments() ->
+    with_holder(16, fun(Far, Driver, If, Port, Credit) ->
+        [Far ! {inject, Driver, {frames, burst(Port, 1000 + B * 800, 8)}} || B <- lists:seq(0, 9)],
+        settle(Driver),
+        _ = sys:get_state(If),
+        Held = lists:sum([frames_held(Item) || Item <- held_items(If)]),
+        ?assertEqual(16, Held),
+        ?assertEqual(0, erx_net_credit:free(Credit))
+    end).
+
+%% The stack over a pipe with the test as the holder of a four-tuple whose credit has Limit
+%% units; Fun gets the far end, the driver, the interface, the local port and the credit.
+with_holder(Limit, Fun) ->
+    wait_gone(erx_net_tables),
+    flush(),
+    Far = far_end(),
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [static_pipe()]}),
+    unlink(Stack),
+    try
+        Driver = answers_arp(Far, 50),
+        [{en0, If, _}] = ets:lookup(erx_net_ifs, en0),
+        KeyOf = fun(P) -> {tcp, inet, ?ME4, P, ?PEER4, ?PEER_PORT} end,
+        Credit = erx_net_credit:new(Limit),
+        Entry = #{pid => self(), credit => Credit},
+        {ok, Port, _, _} = erx_net_bind:claim_tcp(KeyOf, 49152, self(), Entry, erx_net_clock:now()),
+        Fun(Far, Driver, If, Port, Credit)
+    after
+        ok = proc_lib:stop(Stack, shutdown, infinity),
+        stop_far()
+    end.
+
+%% N in-order data segments of 100 bytes from Seq, their acknowledgements advancing.
+burst(Port, Seq, N) ->
+    [peer_segment(Port, Seq + 100 * I, I, payload(I)) || I <- lists:seq(0, N - 1)].
+
+payload(I) -> binary:copy(<<($a + I rem 26)>>, 100).
+
+held_items(If) ->
+    receive {items, If, Items} -> Items ++ held_items(If) after 200 -> [] end.
+
+frames_held({_, {merged, N, _}, _, _}) -> N;
+frames_held(_) -> 1.
+
 %% The stack over a pipe in its offload mode and over a plain one: the interface's row
 %% names the driver's finisher, and a segment to a closed port, which reaches the stack
 %% with its network sum in the offload mode, is answered with a RST whose checksum the
@@ -453,9 +518,12 @@ pipe_offload_mode_test() ->
 
 %% A frame from the peer to ?ME4's Port: a TCP segment with sequence number Seq.
 peer_segment(Port, Seq) ->
-    Tcp = #tcp{sport = ?PEER_PORT, dport = Port, seq = Seq, ack = 0, flags = ?TH_ACK,
+    peer_segment(Port, Seq, 0, <<"batch">>).
+
+peer_segment(Port, Seq, Ack, Payload) ->
+    Tcp = #tcp{sport = ?PEER_PORT, dport = Port, seq = Seq, ack = Ack, flags = ?TH_ACK,
                win = 65535, urp = 0},
-    Seg = iolist_to_binary(erx_tcp_wire:encode(Tcp, <<"batch">>,
+    Seg = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload,
                                                erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6), sender)),
     Ip = erx_ip4_wire:encode(#ip4{len = 20 + byte_size(Seg), ttl = 64, p = 6, src = ?PEER4,
                                   dst = ?ME4}),

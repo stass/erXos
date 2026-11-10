@@ -204,7 +204,7 @@ handle_cast(_Msg, S) ->
 handle_info({items, _If, Items}, #state{credit = Credit} = S0) when is_list(Items) ->
     Batch = queued_items([Items]),
     S = items(Batch, S0),
-    ok = erx_net_credit:take(Credit, length(Batch)),
+    ok = erx_net_credit:take(Credit, lists:sum([units(Item) || Item <- Batch])),
     settle(S);
 handle_info({erx_net_clock, hint}, S) ->
     settle(timeouts(step({expired, erx_net_clock:now()}, S#state{armed = infinity})));
@@ -226,9 +226,9 @@ format_status(Status) ->
 %% --- Steps -------------------------------------------------------------------------
 
 %% The items of the messages taken so far (`Taken`, newest first) followed by those of every
-%% further `{items, _, _}` message already in the mailbox, one unit each. No unit is taken
-%% back while the drain runs, so the interface hands nothing past the credit's room and the
-%% drain ends within the credit's limit.
+%% further `{items, _, _}` message already in the mailbox. No unit is taken back while the
+%% drain runs, so the interface hands nothing past the credit's room and the drain ends
+%% within the credit's limit.
 queued_items(Taken) ->
     receive
         {items, _If, Items} when is_list(Items) ->
@@ -236,6 +236,12 @@ queued_items(Taken) ->
     after 0 ->
         lists:append(lists:reverse(Taken))
     end.
+
+%% The credit an item took at the interface (erx_net_input:units/1): a merged segment one unit
+%% for each of the segments it holds (docs/design-network-fastpath.md, "Credit counts
+%% segments"), anything else one.
+units({_Tcp, {merged, N, _Pieces}, _IpEcn, _LinkCast}) -> N;
+units(_Item) -> 1.
 
 %% A batch's segments go to the step together, in arrival order, and each ICMP report on
 %% its own, so the step sees the items as the interfaces handed them.

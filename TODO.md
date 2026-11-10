@@ -175,6 +175,25 @@ it; git history is the record of completed work.
      segment `erx_tcp:merged/3` makes; credit by segments; and the copy check, with the tests
      7, 8 and 12 of the fast path's design, the `net_device` bursts and the input fuzz target
      reaching merged units;
+  6. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
+     the tap and netmap NIFs, and `erx_net_frame:cut/1` as the reference: send toward
+     4.4 Gbit/s;
+  7. the merge on receive is in the tree: the interface merges each batch
+     (`erx_bytes:tcp_merge/1`), classifies a unit by its first frame, charges its N segments to
+     the connection's credit, verifies its first and last frames and hands on the segment
+     `erx_tcp:merged/3` makes; bulk receive on the FreeBSD test host went from 1,883 to 3,605
+     Mbit/s (33 segments per unit) and bulk send from 1,148 to 1,438 (the peer's ACKs, 11 per
+     unit). What remains of it: the design's test 11 (packet scripts through the pipe's
+     offload mode, the merge's visible behaviour against FreeBSD); a unit no connection owns
+     is taken as its last frame, which answers a closed port as FreeBSD does but would hand a
+     listener the last frame's sequence number where FreeBSD's syncache takes the first's
+     (latent while the core counts a listener's segment as unsupported: hand the listener
+     the merged segment once the syncache joins the step); the credit a merged item takes
+     back is read in two places (`erx_net_input:units/1`, `erx_tcp_conn:units/1`), which
+     `{items, If, Items, Units}` would make one; a unit that finds less than N units of room
+     is dropped whole where unmerged frames would deliver the first R, a cliff to measure
+     under load; drop counters count a unit once, not its N frames; and request-reply with
+     16 connections lost about 2% (89,306 to 87,513 transactions in 10 s), to profile;
   8. netmap with runs and merged batches, over VALE against lwIP over VALE;
   9. request-reply: the driver-to-interface hop and scheduler placement measured, and what
      their profiles name changed, toward the request-reply target;

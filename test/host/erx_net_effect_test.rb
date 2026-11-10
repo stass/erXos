@@ -47,7 +47,7 @@ class ErxNetEffectTest < Minitest::Test
     ],
     # A batch's units never taken: the peer's segments hold the credit for good.
     credit_is_taken_as_items_arrive: [
-      'ok = erx_net_credit:take(Credit, length(Batch)),', '_ = Credit,'
+      'ok = erx_net_credit:take(Credit, lists:sum([units(Item) || Item <- Batch])),', '_ = Credit, _ = fun units/1,'
     ],
     # The drain stopped after the first message: each queued message is stepped on its own,
     # and five queued segments are acknowledged in more than one ACK.
@@ -95,7 +95,8 @@ class ErxNetEffectTest < Minitest::Test
     # A process end without its type check.
     process_end_counts_a_frame_that_is_not_a_binary: [
       'erx_net_pipe',
-      ['#process{pid = Pid, mtu = Mtu} = T) when is_binary(Frame) ->', '#process{pid = Pid, mtu = Mtu} = T) ->']
+      ["event({erx_net_pipe, Pid, Frame}, #process{pid = Pid} = T) when is_binary(Frame) ->\n    {burst([Frame], T), T};",
+       "event({erx_net_pipe, Pid, Frame}, #process{pid = Pid} = T) ->\n    {[{frames, [received(Frame, T)]}], T};"]
     ],
     # A socket opened {active, true}.
     udp_end_bounds_the_driver_queue_against_a_stranger: [
@@ -126,6 +127,17 @@ class ErxNetEffectTest < Minitest::Test
     # The driver's cut removed: an event reaches the interface whole, past the merge's limit.
     batches_are_cut_to_the_merge_limit: [
       'erx_net_driver', ['    cut(Frames, Limit, [], 0, 0, [], 0).', '    _ = fun cut/7, _ = Limit, {[Frames], 0}.']
+    ],
+    # Credit by units: a merged segment takes one unit of its connection's credit, so the
+    # interface hands a slow connection more than its limit of frames.
+    credit_counts_segments: [
+      'erx_net_input', ['units({merged, N, _, _, _}) -> N;', 'units({merged, _N, _, _, _}) -> 1;']
+    ],
+    # A unit classified by its last frame: its segment starts at the last frame's sequence
+    # number, which the unit's own claims refuse, so nothing reaches the connection.
+    a_burst_reaches_its_connection_as_one_segment: [
+      'erx_net_input', ['unit(N, ether(First, FirstSum, View), fun() -> ether(Last, LastSum, View) end, Payload);',
+                        'unit(N, ether(Last, LastSum, View), fun() -> ether(First, FirstSum, View) end, Payload);']
     ],
     # A link start that fails when its driver ends under it: the stack's own start fails.
     crash_at_start_spins_no_supervisor: [

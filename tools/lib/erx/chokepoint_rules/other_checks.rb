@@ -57,6 +57,12 @@ module Erx
           test: 'test/host/net_checks_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'net-payload-copy', rule: 'the modules a TCP payload passes through copy one only at the sites the fast ' \
+                                          "path's design lists",
+          design: 'docs/design-network-fastpath.md#copies', check: 'NetChecks, in Checks',
+          test: 'test/host/net_checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'net-seq-wrap', rule: 'among the TCP modules of erx_net, only erx_tcp_seq does sequence-space wrap arithmetic',
           design: 'docs/design-network-stack.md#build-checks', check: 'NetChecks, in Checks',
           test: 'test/host/net_checks_test.rb'

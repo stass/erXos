@@ -668,16 +668,30 @@ checksum anyway. So `verify/1` always has a sum for a frame, and summing
 in `verify/1` is left only for what never passes the merge, loopback
 packets and reassembled datagrams.
 
-The interface classifies a unit by its first frame, reserves room for N
-segments ([Credit counts segments](#credit-counts-segments)), verifies
-the first and the last frame as it verifies any frame, checks that the
-last names the first's flow, and hands the connection one segment: the
-first frame's header with the last frame's acknowledgement, window and
-timestamps, the payload pieces, and N. `erx_tcp:merged/3` builds that
-segment from the first and last frames as `erx_tcp_wire` decoded them,
-with `{merged, N, Pieces}` in the place of a frame's payload binary; the
-flags are the first frame's, as in FreeBSD's LRO packet, and every
-member's are ACK and at most PSH.
+The interface classifies a unit by its first frame, after checking that
+`length(Payload) =< N =< 256`. A unit whose first frame a connection
+owns is owned when its last frame classifies as a segment of a
+connection with the same holders; the interface reserves room for N
+segments in each holder's credit ([Credit counts
+segments](#credit-counts-segments)), verifies the first and the last
+frame as it verifies any frame, checks that the last names the first's
+flow (the same addresses, zone, link cast, ECN field and ports) and the
+unit's own claims ([What the stack believes](#what-the-stack-believes)),
+and hands the connection one segment: the first frame's header with the
+last frame's acknowledgement, window and timestamps, the payload pieces,
+and N. `erx_tcp:merged/3` builds that segment from the first and last
+frames as `erx_tcp_wire` decoded them, with `{merged, N, Pieces}` in the
+place of a frame's payload binary; the flags are the first frame's, as
+in FreeBSD's LRO packet, and every member's are ACK and at most PSH. A
+unit no connection owns, for a closed port or a listener, or one the
+table drops, is taken as its last frame alone, which carries the
+acknowledgement FreeBSD's merged segment does
+(`tcp_lro.c:731-740`), so a closed port answers it with the one RST
+`tcp_dropwithreset` makes for the LRO packet. Only the Ethernet
+interface merges: the loopback interface's packets carry their zone and
+go to classification as they came. The interface counts each batch's
+units and the segments they hold as its `units` and `unit_segments`,
+which the benchmarks report as segments per merged unit.
 
 ### A merged segment in TCP
 
@@ -990,12 +1004,20 @@ in `make check` reads the modules a TCP payload passes through (the
 `erx_net_if`, `erx_net_input` and the transports) and fails the build on
 any call of `iolist_to_binary/1`, `list_to_binary/1`, `binary:copy/1,2`,
 `binary:list_to_bin/1` or `erlang:iolist_to_iovec/1` outside its list.
-The list has three entries: the receive and reassembly queues' copy of a
-small piece (`erx_tcp_conn:compact/1` and `queue/2`, `erx_tcp_reass`),
-which keeps a few bytes from holding a frame alive; the pipe's `process` end, whose
-far end, a test, takes each frame as one binary; and the loop
-transport's copy of each packet it returns, the one copy a device makes
-elsewhere ([The driver](design-network-stack.md#the-driver)). IP fragmentation
+The list names the functions that may copy: the receive and reassembly
+queues' copy of a small piece (`erx_tcp_conn:compact/1`,
+`erx_tcp_reass:hold/1`), which keeps a few bytes from holding a frame
+alive; the receive queue's one join at the owner's read
+(`erx_tcp_conn:take/2`), the join a delivery needs once, which the
+socket process makes in this design; the pipe's `process` end
+(`erx_net_pipe:send/2`), whose far end, a test, takes each frame as one
+binary; the frame layer's finishing of a delayed checksum for a
+transport that does not finish (`erx_net_frame:finish/1`), the copy the
+medium's own copy makes elsewhere; the virtio transport's join of a frame
+of more binaries than one request posts (`erx_virtio_net`'s
+`segments/1`); and the loop transport's copy of each packet it returns,
+the one copy a device makes elsewhere
+([The driver](design-network-stack.md#the-driver)). IP fragmentation
 and reassembly, which a datagram's layout forces, and the socket
 process's join, in `erx_net_client`, are outside the modules it reads.
 A seeded violation in its test shows the check catches a new site.
@@ -1077,9 +1099,12 @@ checked.
 * **What Erlang re-checks.** The first and last frames of a unit pass
   `classify/2` and `verify/1` like any frame, IPv4 header checksum and
   every length included, and every value TCP acts on is decoded from
-  them. The interface checks that `length(Payload) =< N =< 256` and that
-  the pieces' total plus the first frame's headers fits one IP packet,
-  and drops a unit that fails as `malformed`; only a merge bug makes one.
+  them. The interface checks that `length(Payload) =< N =< 256`, that
+  the last frame names the first's flow, that both are merge candidates
+  (ACK, and no other flag but PSH), that the last frame's sequence
+  number is where the pieces before it end, and that the pieces' total
+  plus the first frame's headers fits one IP packet, and drops a unit
+  that fails as `malformed`; only a merge bug makes one.
   It charges N units of credit, so a count the merge understated would
   still be bounded by the piece count Erlang sees, and a count it
   overstated costs only credit. Congestion control reads N only in slow
@@ -1226,8 +1251,12 @@ Each test is paired with a seeded fault it must catch.
 8. **Credit counts segments.** A peer that sends a connection in-order
    data in bursts the merge merges, faster than the connection steps,
    never has more than the credit limit's worth of frames queued at the
-   connection. *Seeded fault:* one unit per merged segment, which lets
-   the queue exceed the bound.
+   connection: through the pipe's `process` end, whose far end hands the
+   driver a burst as one batch, ten bursts of eight reach a holder of 16
+   units as 16 frames' worth. A burst on its own reaches its connection
+   as one segment holding every payload in order. *Seeded faults:* one
+   unit per merged segment, which lets the queue exceed the bound; a unit
+   classified by its last frame, which the unit's own claims refuse.
 9. **The device NIF.** On the hosted backend's model device: a run
    posted as N requests whose bytes equal the cut's frames; a full queue
    that takes a run's first frames, and the tail that later posts the
@@ -1260,7 +1289,9 @@ Each test is paired with a seeded fault it must catch.
     that mode; and its cut turned off, so the count of runs the pipe cut
     stays at zero.
 12. **The copy check.** The source check's seeded violation, an
-    `iolist_to_binary/1` added to `erx_tcp_output`, fails `make check`.
+    `iolist_to_binary/1` added to `erx_tcp_output`, fails `make check`
+    (`net-payload-copy`, `test/host/net_checks_test.rb`), and so does each
+    other copying call outside the listed functions.
 13. **The driver cuts every batch to the merge's limit.** Through the
     pipe's `process` end in its offload mode, which hands the driver all
     the frames a test injects at once as one event, a test injects 1,000
@@ -1287,9 +1318,21 @@ Each test is paired with a seeded fault it must catch.
   flow, each member's checksums correct, and every input frame in exactly
   one unit or output on its own. *Seeded fault:* a merge across differing
   ports, which the oracle catches.
+* **`erx_net_input`** (the classifier's target) reaches merged units: a
+  burst of one connection's segments, with frames of another connection,
+  other flags and spoiled payload bytes among them, merged by the C and
+  taken unit by unit as the interface takes them. Every segment `verify/1`
+  accepts carries the connection's own bytes at its sequence number, a
+  merged one takes as many units as it holds and the last frame's
+  acknowledgement, a unit no connection holds is classified as its last
+  frame, and a unit forged from a real one (a count below its pieces or past
+  the limit, a last frame of another connection, a piece cut short) is
+  dropped as `malformed`. *Seeded faults:* the count unchecked, the last
+  frame's sequence number unchecked, and a unit classified by its last
+  frame.
 
-Both land with their cores and run in `make check-fuzz` at the milestone
-gate.
+The first two land with their cores, and all run in `make check-fuzz` at the
+milestone gate.
 
 ### Benchmarks and targets
 

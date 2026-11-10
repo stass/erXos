@@ -32,7 +32,14 @@ module Erx
   # * call-timeout: in erx_net and erx_net_client, every gen_server:call and
   #   gen_statem:call has three arguments and every gen:call four, the last
   #   the literal `infinity`, and no `fun` names one of them, so no wait of
-  #   the stack or its clients ends on a clock of its own.
+  #   the stack or its clients ends on a clock of its own;
+  # * payload-copy: the modules a TCP payload passes through (erx_tcp and
+  #   erx_tcp_*, erx_net_frame, erx_net_tx, erx_net_driver, erx_net_if,
+  #   erx_net_input and the transports) call iolist_to_binary/1,
+  #   list_to_binary/1, binary:copy/1,2, binary:list_to_bin/1 or
+  #   erlang:iolist_to_iovec/1 only in the functions COPY_SITES lists, so a
+  #   payload byte is copied only where the fast path's design says
+  #   (docs/design-network-fastpath.md, "Copies").
   #
   # Like DeviceCallers these read the source text with comments removed, and
   # catch a slip, not a determined bypass that builds a name from pieces. The
@@ -90,6 +97,22 @@ module Erx
     CLOSER = { '(' => ')', '[' => ']', '{' => '}', '<<' => '>>' }.freeze
     BRACKET = /<<|>>|[()\[\]{},]/
 
+    # The modules a TCP payload passes through, by file name, and the calls that
+    # copy one (docs/design-network-fastpath.md, "Copies").
+    PAYLOAD_MODULE = /\A(?:erx_tcp(?:_[a-z0-9_]+)?|erx_net_(?:frame|tx|driver|if|input|pipe|loop)|erx_tap|erx_netmap|erx_virtio_net)\.erl\z/
+    COPY_CALL = /(?<![A-Za-z0-9_@])(?:(?:erlang\s*:\s*)?(?:iolist_to_binary|list_to_binary|iolist_to_iovec)|binary\s*:\s*(?:copy|list_to_bin))(?![A-Za-z0-9_@])/
+    # The functions that may copy, each with its reason: a small piece copied out
+    # so that it does not keep its frame alive, the receive queue's one join at
+    # the owner's read, the pipe's frame to a test, the frame layer's finishing
+    # of a checksum for a transport that does not finish, and the virtio
+    # transport's join of a frame of more binaries than a request posts.
+    COPY_SITES = {
+      'erx_tcp_conn' => %w[compact take], 'erx_tcp_reass' => %w[hold], 'erx_net_pipe' => %w[send],
+      'erx_net_frame' => %w[finish], 'erx_virtio_net' => %w[segments]
+    }.freeze
+    # The head of a function clause, which starts its line.
+    CLAUSE_HEAD = /\A([a-z][A-Za-z0-9_@]*)\(/
+
     # A FreeBSD file named by a module's header, alone on its line.
     HEADER_MARK = /\A%+[ \t]*FreeBSD:[ \t]+(?<path>\S+)[ \t]*\z/
     FREEBSD_PATH = %r{\A[a-z0-9_]+(?:/[A-Za-z0-9_][A-Za-z0-9_.-]*)+\z}
@@ -120,7 +143,28 @@ module Erx
       client = files.select { |path, _| File.fnmatch?(CLIENT_SCOPE, path, GLOB_FLAGS) }
       [*atom_violations(sources), *random_violations(sources), *seq_violations(sources),
        *notice_violations(sources, notice: files[NOTICE]), *grant_key_violations(client),
-       *call_timeout_violations(sources.merge(client))]
+       *call_timeout_violations(sources.merge(client)), *copy_violations(sources)]
+    end
+
+    def copy_violations(sources)
+      sources.select { |path, _| File.basename(path).match?(PAYLOAD_MODULE) }.flat_map do |path, text|
+        allowed = COPY_SITES.fetch(File.basename(path, '.erl'), [])
+        code = calls_text(text)
+        matches(code, COPY_CALL).filter_map do |line, call|
+          function = enclosing_function(code, line)
+          next if allowed.include?(function)
+
+          Violation.new(rule: 'payload-copy', path: path, line: line,
+                        detail: "#{call.delete(" \t\n")} in #{function || 'a declaration'}: a payload " \
+                                'is copied only at the sites the fast path lists')
+        end
+      end
+    end
+
+    # The function whose clause holds line number `line` of code: the last clause head
+    # at or above it, or nil above the first.
+    def enclosing_function(code, line)
+      code.each_line.first(line).reverse_each.lazy.filter_map { |text| text[CLAUSE_HEAD, 1] }.first
     end
 
     def grant_key_violations(client)

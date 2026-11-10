@@ -12,9 +12,11 @@ performs the actions in order, and decides nothing a pure function could decide.
    the core's steps `{config, Gen, Snapshot}` from `erx_net_tables:configuration/0`.
 2. A batch `{frames, Driver, Frames}` is taken with every further batch from the driver
    already in the mailbox, up to a link notice, which is stepped after them
-   (docs/design-network-fastpath.md, "Processes and batching"). Each frame of the batches
-   in turn is classified against the core's view with the demultiplexing lookup added. An
-   `owned` frame reserves a unit of each holder's credit and is verified; its item is kept
+   (docs/design-network-fastpath.md, "Processes and batching"). On an Ethernet interface
+   each batch is merged (erx_bytes:tcp_merge/1), and each frame or unit of the merge in
+   turn is classified against the core's view with the demultiplexing lookup added. An
+   `owned` frame reserves a unit of each holder's credit, a unit of the merge N of them,
+   and is verified; its item is kept
    for each holder that took it, or the units are released when it fails. A `local` frame
    is stepped at once; a step that raises is counted as `raised` and the core keeps its
    value from before the frame, so a frame that trips a bug costs only itself. A `drop` is
@@ -57,7 +59,8 @@ Messages:
                 sender :: erx_net_credit:credit(),
                 tx :: erx_net_credit:credit(),
                 dhcp = none :: none | {pid(), reference()},
-                armed = infinity :: erx_net_clock:armed()}).
+                armed = infinity :: erx_net_clock:armed(),
+                link :: ethernet | none}).                % the driver's link, which decides the merge
 
 -doc """
 Starts the interface `Name` with its configuration (`erx_net_if_core:config()`), over the
@@ -82,7 +85,7 @@ init({Name, Config}) ->
     {ok, Link, Tx} = erx_net_driver:attach(Driver, Rx),
     Gen = erx_net_rand:new(erx_net_clock:entropy(16)),
     Core = erx_net_if_core:new(#{name => Name, link => Link, gen => Gen, config => Config}),
-    S = #state{name = Name, core = Core, driver = Driver, rx = Rx,
+    S = #state{name = Name, core = Core, driver = Driver, rx = Rx, link = maps:get(link, Link),
                sender = erx_net_credit:new(?SENDER_LIMIT), tx = Tx},
     {ok, finish(step(start, S))}.
 
@@ -159,25 +162,51 @@ queued_frames(Taken, #state{driver = Driver} = S) ->
         frames(lists:reverse(Taken), S)
     end.
 
-%% Classifies the frames of the batches in the order the driver handed them, the batches
-%% kept apart, hands each holder its items of all of them in one message, and then takes
-%% the batches' units from the receive credit.
-frames(Batches, #state{rx = Rx} = S0) ->
-    {S, ByHolder} = lists:foldl(fun(Frames, Acc) ->
-                                        lists:foldl(fun(Frame, {S1, B}) ->
-                                                            input(frame_input(Frame), S1, B)
-                                                    end, Acc, Frames)
-                                end, {S0, #{}}, Batches),
+%% Merges each batch and classifies its units in the order the driver handed them, the
+%% batches kept apart, hands each holder its items of all of them in one message, and then
+%% takes the batches' units from the receive credit, one for each frame the driver handed.
+frames(Batches, #state{rx = Rx, link = Link} = S0) ->
+    {S, ByHolder} = lists:foldl(fun(Frames, Acc) -> batch(Link, Frames, Acc) end, {S0, #{}}, Batches),
     maps:foreach(fun(Pid, Items) ->
                          ok = erx_net_credit:send(Pid, {items, self(), lists:reverse(Items)})
                  end, ByHolder),
     ok = erx_net_credit:take(Rx, lists:sum([length(Frames) || Frames <- Batches])),
     S.
 
-%% A frame as its driver handed it, with the network sum its transport's copy computed or
-%% without one, as `classify/2` takes it. Any other shape goes on as it is and raises in the
-%% guarded classification, so it costs only itself.
+%% One batch: merged, its units counted, and each frame or unit classified in turn.
+batch(Link, Frames, {S0, ByHolder0}) ->
+    Units = merged(Link, Frames),
+    lists:foldl(fun(Unit, {S, ByHolder}) -> input(frame_input(Unit), S, ByHolder) end,
+                {count_units(Units, S0), ByHolder0}, Units).
+
+%% An Ethernet interface merges each batch before it classifies anything
+%% (docs/design-network-fastpath.md, "The merge, before classification"), in one call over
+%% the batch, which the driver cut to the merge's limit. The merge answers every frame with
+%% its network sum, alone or in a unit. A looped packet carries its zone, which no merge
+%% reads, so the loopback interface's batches go on as they came. A batch the merge refuses,
+%% which only a bug of the cut or the merge makes, goes on unmerged, each frame classified
+%% alone, so the bug costs only the merge and strands no holder's units.
+merged(ethernet, Frames) ->
+    try
+        erx_bytes:tcp_merge(Frames)
+    catch
+        error:_ -> Frames
+    end;
+merged(none, Frames) -> Frames.
+
+%% A batch's units of the merge and the segments they hold, counted as the interface's
+%% `units` and `unit_segments`, which the benchmarks read.
+count_units(Units, S) ->
+    case [N || {merged, N, _, _, _} <- Units] of
+        [] -> S;
+        Counts -> step({merged, length(Counts), lists:sum(Counts)}, S)
+    end.
+
+%% A frame or unit as the merge answered it, or a frame as its driver handed it, as
+%% `classify/2` takes it. Any other shape goes on as it is and raises in the guarded
+%% classification, so it costs only itself.
 frame_input({sum, Sum, Bytes}) -> {frame, Bytes, Sum};
+frame_input({merged, _, _, _, _} = Unit) -> Unit;
 frame_input(Bytes) -> {frame, Bytes, none}.
 
 input(Input, #state{core = Core} = S, ByHolder) ->
@@ -201,9 +230,11 @@ guarded_input(Fun) ->
     end.
 
 %% An owned frame is verified only once some holder has room for it: each holder whose
-%% credit takes a unit is kept.
+%% credit takes its units, one for a frame and N for a unit of the merge
+%% (erx_net_input:units/1), is kept.
 owned(Holders, Pending, S, ByHolder) ->
-    case lists:filter(fun({_Pid, Credit}) -> erx_net_credit:reserve(Credit, 1) =:= ok end, Holders) of
+    Units = erx_net_input:units(Pending),
+    case lists:filter(fun({_Pid, Credit}) -> erx_net_credit:reserve(Credit, Units) =:= ok end, Holders) of
         [] ->
             {step({drop, no_room}, S), ByHolder};
         Taken ->
@@ -214,7 +245,7 @@ owned(Holders, Pending, S, ByHolder) ->
                                                              [Item], B)
                                     end, ByHolder, Taken)};
                 {drop, Reason} ->
-                    [ok = erx_net_credit:release(Credit, 1) || {_, Credit} <- Taken],
+                    [ok = erx_net_credit:release(Credit, Units) || {_, Credit} <- Taken],
                     {step({drop, Reason}, S), ByHolder}
             end
     end.
