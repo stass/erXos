@@ -258,7 +258,8 @@ Error in process <0.150.0> with exit value:
 * **The serial console's driver** (PL011) is an Erlang process.
 * **Files work.** The file protocol, per-domain namespaces and `/tmp` all
   run, `/tmp` on a RAM file system written in Erlang. `prim_file` reaches
-  file servers through grants.
+  file servers through grants, and that works across domains: a file
+  server in one domain serves a client in another over their connection.
 * **Storage works**: M6's demo of the [roadmap](docs/plan.md) runs. A
   virtio block driver in Erlang (`erx_blk`) serves the partitions of an
   MBR with extended boot records as windows. littlefs serves `/data`; a
@@ -313,11 +314,19 @@ Error in process <0.150.0> with exit value:
   only the BeamAsm image, whose manifest marks it, gets a space that can
   hold generated code. `erx_domain:introduce/2` connects two domains,
   whose processes then message and call each other as Erlang nodes do;
-  when either end goes, both are told `noconnection`. A message from
+  when either end goes, both are told `noconnection`. An ended domain
+  releases its record at once, and a domain of the same name starts again
+  while a peer still holds a connection to the old one. A message from
   another domain is acted on only by its protocol's owner, and the
   `system_domain` suite checks that forged connection records are
   dropped. A session domain's release, with its terminal relay, is
-  built, though no session starts yet.
+  built, though no session starts yet. A device's holder domain, the one
+  given the device, binds the interrupt line it was given to its own
+  group and opens the device in the form it was given, with the device's
+  queues carved from one block of memory; the booted system does not
+  start a driver domain over it yet. The funnel sizes its scratch space
+  from the frame it checks, so a connection between domains costs about
+  132 KiB, not 16 MiB.
 * **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
   and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
@@ -366,7 +375,16 @@ Error in process <0.150.0> with exit value:
   through the grant, `gen_udp` and `gen_tcp` go through the grant by
   default, and the `host` command looks names and addresses up in
   FreeBSD's lines. The network domain it moves into later is not built
-  yet.
+  yet. Its fast path (checksums folded into the copy, whole runs of
+  segments sent and merged on receive) was measured on the FreeBSD
+  x86-64 test host, over a native FreeBSD tap, with erXos running in
+  hosted mode (the medians of 5 runs). Bulk send reaches about 2,470
+  Mbit/s and bulk receive about 3,600 Mbit/s. A request and reply of 64
+  bytes does about 15,000 transactions a second, and about 87,000 with 16
+  in flight. For scale, lwIP, a small stack that stands as the baseline,
+  on the same tap (its 64 KiB window variant) reaches 6,537 Mbit/s
+  sending and 6,809 Mbit/s receiving, so bulk transfer is still well
+  behind it. The raw data lives outside this repository.
 * **The display has host-built parts:** the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
