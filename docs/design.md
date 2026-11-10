@@ -1697,7 +1697,8 @@ docs/             design, plan, research records, style
 The development host is macOS on Apple Silicon. Tools, installed through
 Homebrew or built from pinned sources: LLVM's clang and `lld` (the latter
 a separate formula) for erXos's own code and the runtimes; the GNU cross
-toolchain `aarch64-elf-gcc` and binutils, GNU make 4.4.1 and
+toolchain `aarch64-elf-gcc` and binutils (FreeBSD's port names them
+`aarch64-none-elf-`, and the build takes either prefix), GNU make 4.4.1 and
 Perl for the stopgap Fiasco, as L4Re's macOS guide prescribes
 ([research](research-hierarchical-scheduling.md#fiasco-under-hvf)); Ruby;
 QEMU 11.1; `dtc`; CBMC, at the version `test/cbmc/roster.json` pins, for `make check-cbmc`; `b3sum`, the oracle the imported BLAKE3 is compared with;

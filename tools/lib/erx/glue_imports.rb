@@ -60,15 +60,16 @@ module Erx
     # The glue a kernel build holds, of the files in its directory.
     def built_glue(names) = (names - OUT_OF_BUILD).sort.freeze
 
-    # The effect: reads each glue object of a kernel build and refuses it.
-    def check(source:, allowlist:, objects:, runner:, env: {})
+    # The effect: reads each glue object of a kernel build with nm, the cross
+    # binutils' (CrossToolchain), and refuses it.
+    def check(source:, allowlist:, objects:, nm:, runner:, env: {})
       entries = parse(BoundedFile.read(allowlist, maximum: MAX_ALLOWLIST_BYTES))
       undefined = built_glue(Dir.glob('*.cpp', base: File.join(source, GLUE))).to_h do |name|
         object = File.join(objects, "#{File.basename(name, '.cpp')}.o")
         raise Error, "glue object not built: #{object}" unless File.file?(object)
 
-        result = runner.run(['aarch64-elf-nm', '-u', object], name: "glue-imports-#{File.basename(object, ".o")}",
-                                                              deadline: 30, env: env)
+        result = runner.run([nm, '-u', object], name: "glue-imports-#{File.basename(object, ".o")}",
+                                                deadline: 30, env: env)
         [name, undefined_symbols(BoundedFile.read(result.fetch('log'), maximum: MAX_ALLOWLIST_BYTES))]
       end
       refused = violations(entries: entries, undefined: undefined)

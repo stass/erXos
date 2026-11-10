@@ -16,7 +16,7 @@ class FiascoTest < Minitest::Test
                   "CONFIG_PERFORMANCE=y\nCONFIG_PERF_CNT_USER=y\n"
 
   def test_build_environment_supplies_the_host_temporary_directory
-    assert_equal File.realpath(Dir.tmpdir), Erx::Fiasco.build_environment.fetch('TMPDIR')
+    assert_equal File.realpath(Dir.tmpdir), Erx::Fiasco.build_environment(cross: Erx::CrossToolchain.find).fetch('TMPDIR')
   end
   # These tests exercise orchestration with a recording runner. Native build
   # integration exercises the real provenance/replay boundary.
@@ -121,7 +121,7 @@ class FiascoTest < Minitest::Test
     cores = File.join(@directory, 'build/fiasco/cores')
     assert_includes kernel.fetch(:argv), "ERX_CORE_ARCHIVE=#{cores}/erx_cores.a"
     assert_includes kernel.fetch(:argv), "ERX_CORE_INCLUDE=#{cores}/seam"
-    assert_includes users.fetch(:argv), 'CROSS_COMPILE=aarch64-elf-'
+    assert_includes users.fetch(:argv), "CROSS_COMPILE=#{Erx::CrossToolchain.find.prefix}"
   end
 
   def test_kernel_uses_recorded_private_inputs_and_rejects_later_repository_edits
@@ -247,6 +247,35 @@ class FiascoTest < Minitest::Test
     assert commands_of_a_build(fiasco).positive?, 'a program added beside the others builds again'
   end
 
+  # The prefix is an input: a build under the other one, installed in a
+  # directory ahead on PATH, runs again, naming that prefix to every inherited
+  # make and in the users' Makeconf.local, with that directory on its PATH.
+  def test_another_cross_prefix_builds_again_with_that_prefix
+    assert commands_of_a_build.positive?
+    assert_equal 0, commands_of_a_build
+    other = (Erx::CrossToolchain::PREFIXES - [Erx::CrossToolchain.find.prefix]).first
+    programs = File.join(File.realpath(@directory), 'other-toolchain')
+    FileUtils.mkdir_p(programs)
+    Erx::CrossToolchain::PROBES.each do |probe|
+      File.write(File.join(programs, other + probe), "#!/bin/sh\n")
+      File.chmod(0o755, File.join(programs, other + probe))
+    end
+    path = ENV.fetch('PATH')
+    ENV['PATH'] = [programs, path].join(File::PATH_SEPARATOR)
+    fiasco = FixtureBuild.new(root: @directory, runner: @runner, compiler: '/fixture/clang',
+                              cross: Erx::CrossToolchain::Toolchain.new(prefix: other))
+    before = @runner.commands.size
+    assert commands_of_a_build(fiasco).positive?
+    makes = @runner.commands.drop(before).select { |command| command.fetch(:argv).first == 'gmake' }
+    refute_empty makes
+    assert makes.all? { |command| command.fetch(:argv).include?("CROSS_COMPILE=#{other}") }
+    assert makes.all? { |command| command.fetch(:options).fetch(:env).fetch('PATH').split(File::PATH_SEPARATOR).include?(programs) }
+    local = File.read(File.join(@directory, 'build/fiasco/users/Makeconf.local'))
+    assert_includes local, "CROSS_COMPILE := #{other}\n"
+  ensure
+    ENV['PATH'] = path if path
+  end
+
   def test_the_user_headers_are_outputs_of_the_build
     header = File.join(@directory, 'build/fiasco/users/include/l4/sys/consts.h')
     assert commands_of_a_build.positive?
@@ -259,7 +288,7 @@ class FiascoTest < Minitest::Test
   end
 
   def test_the_build_path_holds_only_program_directories_and_the_system
-    path = Erx::Fiasco.build_environment.fetch('PATH').split(File::PATH_SEPARATOR)
+    path = Erx::Fiasco.build_environment(cross: Erx::CrossToolchain.find).fetch('PATH').split(File::PATH_SEPARATOR)
     packages = path - Erx::BuildMemo::SYSTEM_DIRECTORIES
     assert packages.all? { |directory| directory == File.realpath(directory) }, packages.inspect
     ambient = ENV.fetch('PATH').split(File::PATH_SEPARATOR) - Erx::BuildMemo::SYSTEM_DIRECTORIES

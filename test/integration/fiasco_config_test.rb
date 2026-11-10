@@ -75,12 +75,15 @@ class FiascoConfigIntegrationTest < Minitest::Test
     File.binwrite(path, content.sub(after) { after + text })
   end
 
+  def cross = @cross ||= Erx::CrossToolchain.find
+
   def resolve(source, name:, defconfig_extra: '')
     build = File.join(@directory, name, 'build')
     defconfig = File.join(@directory, name, 'kernel.defconfig')
     File.binwrite(defconfig, File.binread(DEFCONFIG) + defconfig_extra)
-    @runner.run(['gmake', '-C', source, "B=#{build}", "DEFCONFIG=#{defconfig}", 'CROSS_COMPILE=aarch64-elf-'],
-                name: "fiasco-config-#{name}", deadline: 120, env: Erx::Fiasco.build_environment)
+    @runner.run(['gmake', '-C', source, "B=#{build}", "DEFCONFIG=#{defconfig}",
+                 "CROSS_COMPILE=#{cross.prefix}"],
+                name: "fiasco-config-#{name}", deadline: 120, env: Erx::Fiasco.build_environment(cross: cross))
     File.join(build, 'globalconfig.out')
   end
 end

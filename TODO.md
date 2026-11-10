@@ -3878,13 +3878,6 @@ to the corpus and follow rc
   flags, which CLAUDE.md requires of every performance number; re-measure
   them with the flags recorded, in a new dated record.
 
-* [Medium] host tooling, the Fiasco build (`tools/lib/erx/fiasco.rb`,
-  `fiasco_provenance.rb`, `glue_imports.rb`): the AArch64 cross GCC is
-  named `aarch64-elf-` (Homebrew's) in about twenty places, from
-  `CROSS_COMPILE` to `lib/gcc/aarch64-elf/` and `aarch64-elf-nm`, and
-  FreeBSD's port names it `aarch64-none-elf-`. Find the prefix once, by
-  probing PATH for either, and derive every name and path from it; test
-  it on a FreeBSD host with the port installed.
 * [Low] host tooling, the build memo (`tools/lib/erx/build_memo.rb`):
   records are reused only on macOS, whose sealed system volume the
   system release names; on FreeBSD every step runs. FreeBSD's base

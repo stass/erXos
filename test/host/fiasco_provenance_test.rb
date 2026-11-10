@@ -201,7 +201,8 @@ class FiascoProvenanceTest < Minitest::Test
       FileUtils.mkdir_p(File.join(root, 'build/fiasco'))
       path = File.join(root, 'build/fiasco/profile.json')
       File.write(path, 'profile')
-      auditor = Erx::FiascoProvenance.new(root: root, runner: nil)
+      port = Erx::CrossToolchain::Toolchain.new(prefix: 'aarch64-none-elf-')
+      auditor = Erx::FiascoProvenance.new(root: root, runner: nil, cross: port)
       auditor.define_singleton_method(:load_build_inputs) {}
       auditor.define_singleton_method(:load_generation_profiles) { @generation_profile = path }
       auditor.define_singleton_method(:tool_identity) do |program, **options|
@@ -210,7 +211,7 @@ class FiascoProvenanceTest < Minitest::Test
       auditor.define_singleton_method(:audit_executable) { |name, *_paths| { 'name' => name } }
       auditor.define_singleton_method(:audit_image) { |_executables| {} }
       auditor.audit
-      assert_equal '/tools/versioned-aarch64-elf-objcopy-1', auditor.instance_variable_get(:@image_objcopy)
+      assert_equal '/tools/versioned-aarch64-none-elf-objcopy-1', auditor.instance_variable_get(:@image_objcopy)
       assert_equal '/tools/versioned-perl-1', auditor.instance_variable_get(:@image_perl)
     end
   end

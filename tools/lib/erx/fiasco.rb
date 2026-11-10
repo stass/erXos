@@ -17,6 +17,8 @@ require_relative 'fiasco_config'
 require_relative 'core_archive'
 require_relative 'stack_proof_run'
 require_relative 'glue_imports'
+require_relative 'cross_toolchain'
+require_relative 'host_path'
 require_relative 'output_directory'
 require_relative 'origin'
 
@@ -73,23 +75,26 @@ module Erx
     BOOTSTRAP_OBJECTS = 'pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain'
     # Upper bound of a record this tool writes into the build tree.
     BUILD_RECORD_BYTES = 65_536
-    # One program of each package the build runs from outside the operating system:
-    # GNU make, the cross gcc and binutils, gawk (the inherited Makeconf's AWKP), dtc and,
-    # on macOS, GNU coreutils, findutils and sed. The directory each really lives in goes on
-    # the build's PATH (program_directories), so the build finds every other program of
-    # those packages beside it, and memo_key names every program in those directories.
-    PROGRAMS = [*%w[gmake aarch64-elf-gcc aarch64-elf-as gawk dtc],
-                *(RUBY_PLATFORM.include?('darwin') ? %w[gcp gfind gsed] : [])].freeze
+    # Beside the cross gcc and binutils (CrossToolchain::PROBES), one program of each
+    # package the build runs from outside the operating system: GNU make, gawk (the
+    # inherited Makeconf's AWKP), dtc and, on macOS, GNU coreutils, findutils and sed. The
+    # directory each really lives in goes on the build's PATH (program_directories), so
+    # the build finds every other program of those packages beside it, and memo_key names
+    # every program in those directories.
+    PROGRAMS = [*%w[gmake gawk dtc], *(RUBY_PLATFORM.include?('darwin') ? %w[gcp gfind gsed] : [])].freeze
     # The packages whose plain GNU names (make, cp, find), in their libexec/gnubin, the
     # inherited build expects ahead of the operating system's programs of those names.
     GNU_NAMED = %w[gmake gcp gfind].freeze
 
     # compiler is the LLVM clang that builds the C17 cores' archive; the
     # resource headers it compiles with must be those the reviewed LLVM
-    # profile admits (ToolchainProvenance.llvm).
+    # profile admits (ToolchainProvenance.llvm). cross is the cross gcc and binutils
+    # (CrossToolchain) the build runs; by default CrossToolchain.find picks them when the
+    # build first needs them.
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                   compiler: ENV.fetch('ERX_CLANG', ''))
+                   compiler: ENV.fetch('ERX_CLANG', ''), cross: nil)
       @root = File.expand_path(root)
+      @cross_toolchain = cross
       @runner = runner
       @compiler = compiler
       @source = File.join(@root, 'fiasco')
@@ -196,16 +201,17 @@ module Erx
     private
 
     # What the build reads: every captured input by content (FiascoInputs' record), the
-    # Ruby that drives it, the compiler, and the environment it runs in. The build finds
-    # programs only on that environment's PATH, which holds the operating system's
-    # directories, named by its release, and directories every program of which the key
-    # names by identity.
+    # Ruby that drives it, the compiler, the cross prefix, and the environment it runs
+    # in. The build finds programs only on that environment's PATH, which holds the
+    # operating system's directories, named by its release, and directories every
+    # program of which the key names by identity.
     def memo_key
       environment = build_environment.compact
       programs = environment.fetch('PATH').split(File::PATH_SEPARATOR).reject { |directory| BuildMemo::SYSTEM_DIRECTORIES.include?(directory) }
                             .to_h { |directory| [directory, directory_programs(directory)] }
       BuildMemo.key('inputs' => @captured.fetch('sha256'), 'tools' => BuildMemo.tools_digest(root: @root),
-                    'compiler' => BuildMemo.program_identity(@compiler), 'programs' => programs,
+                    'compiler' => BuildMemo.program_identity(@compiler), 'cross_compile' => cross_toolchain.prefix,
+                    'programs' => programs,
                     'system' => BuildMemo.system_release, 'environment' => environment)
     end
 
@@ -228,23 +234,24 @@ module Erx
       require_relative 'fiasco_provenance'
       auditor = FiascoProvenance.new(root: @root, runner: @runner,
                                      external: FiascoProvenance.external_registry(root: @root, compiler: @compiler,
-                                                                                  runner: @runner),
-                                     compiler: @compiler)
+                                                                                  runner: @runner, cross: cross_toolchain),
+                                     compiler: @compiler, cross: cross_toolchain)
       auditor.capture_construction
       report = auditor.audit
       auditor.record_receipt(report)
     end
 
-    # Inherited dependency stamps do not cover every generator's code. A
-    # source change therefore discards that component's derived outputs;
-    # ordinary incremental work is reused only for the same source bytes.
+    # Inherited dependency stamps do not cover every generator's code or the
+    # cross compiler. A source or cross prefix change therefore discards that
+    # component's derived outputs; ordinary incremental work is reused only
+    # for the same source bytes and prefix.
     def prepare_source_cache
       @inputs = FiascoInputs.new(root: @root)
       captured = @captured = @inputs.prepare
       expected = {
-        'kernel' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + CoreArchive::IMPLEMENTATION_SHA256 +
+        'kernel' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + CoreArchive::IMPLEMENTATION_SHA256 + cross_toolchain.prefix +
                                              @inputs.component_id(captured, component: 'kernel')),
-        'users' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + @inputs.component_id(captured, component: 'users'))
+        'users' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + cross_toolchain.prefix + @inputs.component_id(captured, component: 'users'))
       }
       marker = File.join(@build, '.erx-inputs.json')
       previous = {}
@@ -347,11 +354,11 @@ module Erx
       FiascoConfig.check(File.join(directory, 'globalconfig.out'))
       # The kernel's Makeconf reads this file from its build directory.
       File.write(File.join(directory, 'Makeconf.local'), "CPPFLAGS += #{defines.join(' ')}\n") unless defines.empty?
-      @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-',
+      @runner.run(['gmake', '-C', directory, "-j#{jobs}", cross_compile,
                    "ERX_CORE_ARCHIVE=#{cores.archive}", "ERX_CORE_INCLUDE=#{cores.seam}"],
                   name: 'fiasco-kernel-build', deadline: 600, env: build_environment)
       GlueImports.check(source: @inputs.part('kernel'), allowlist: File.join(@source, GlueImports::ALLOWLIST),
-                        objects: directory, runner: @runner, env: build_environment)
+                        objects: directory, nm: cross_toolchain.program('nm'), runner: @runner, env: build_environment)
       directory
     end
 
@@ -411,9 +418,9 @@ module Erx
       # Image tools clear MAKEFLAGS when querying the configuration. Keep the
       # compiler prefix in the build's own configuration as well as argv.
       local = File.join(directory, 'Makeconf.local')
-      settings = "# Generated by erXos.\nCROSS_COMPILE := aarch64-elf-\nBOOTSTRAP_CMDLINE := #{KERNEL_OPTIONS}\n"
+      settings = "# Generated by erXos.\nCROSS_COMPILE := #{cross_toolchain.prefix}\nBOOTSTRAP_CMDLINE := #{KERNEL_OPTIONS}\n"
       File.write(local, settings) unless File.file?(local) && File.read(local) == settings
-      @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-',
+      @runner.run(['gmake', '-C', directory, "-j#{jobs}", cross_compile,
                    "ERX_BOOT_ARCHIVE=#{boot_cores.archive}", "ERX_BOOT_INCLUDE=#{boot_cores.seam}"],
                   name: 'fiasco-users-build', deadline: 600, env: build_environment)
       directory
@@ -433,12 +440,12 @@ module Erx
       end
       if File.file?(File.join(directory, 'Makefile'))
         FileUtils.copy_file(input, resolved)
-        @runner.run(['gmake', '-C', directory, 'olddefconfig', 'CROSS_COMPILE=aarch64-elf-'],
+        @runner.run(['gmake', '-C', directory, 'olddefconfig', cross_compile],
                     name: name, deadline: 120, env: build_environment)
       else
         writable_input = build_configuration_copy(input)
         @runner.run(['gmake', '-C', source, "B=#{directory}", "DEFCONFIG=#{writable_input}",
-                     'CROSS_COMPILE=aarch64-elf-'], name: name, deadline: 120,
+                     cross_compile], name: name, deadline: 120,
                     env: build_environment)
       end
       raise Error, "configuration did not produce #{output}" unless File.file?(resolved)
@@ -484,25 +491,35 @@ module Erx
     end
 
     def build_environment
-      self.class.build_environment
+      self.class.build_environment(cross: cross_toolchain)
     end
 
-    # The build's whole environment: every variable of this process's unset but these.
-    def self.build_environment
-      ENV.keys.to_h { |name| [name, nil] }.merge('PATH' => program_directories.join(File::PATH_SEPARATOR), 'SOURCE_DATE_EPOCH' => '0',
+    # The cross gcc and binutils this build runs: one value for every command and record.
+    def cross_toolchain
+      @cross_toolchain ||= CrossToolchain.find
+    end
+
+    # The inherited make system's argument naming the cross prefix.
+    def cross_compile = "CROSS_COMPILE=#{cross_toolchain.prefix}"
+
+    # The build's whole environment, for the cross gcc and binutils cross: every variable
+    # of this process's unset but these.
+    def self.build_environment(cross:)
+      ENV.keys.to_h { |name| [name, nil] }.merge('PATH' => program_directories(cross: cross).join(File::PATH_SEPARATOR),
+                                                'SOURCE_DATE_EPOCH' => '0',
                                                 'LC_ALL' => 'C', 'TZ' => 'UTC',
                                                 'TMPDIR' => File.realpath(Dir.tmpdir))
     end
 
-    # The build's PATH: for each of PROGRAMS, found on this process's PATH, the directory
+    # The build's PATH: for the programs of cross named in CrossToolchain::PROBES and each
+    # of PROGRAMS, found in the absolute directories of this process's PATH, the directory
     # it really lives in, after its package's GNU names (GNU_NAMED); then the operating
     # system's directories. Nothing else on the caller's PATH reaches the build, so it
     # runs no program memo_key does not name.
-    def self.program_directories
-      search = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
-      found = PROGRAMS.flat_map do |program|
-        executable = search.map { |directory| File.join(directory, program) }
-                           .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
+    def self.program_directories(cross:)
+      search = HostPath.directories(ENV.fetch('PATH', ''))
+      found = [*CrossToolchain::PROBES.map { |probe| cross.program(probe) }, *PROGRAMS].flat_map do |program|
+        executable = HostPath.find_program(program, directories: search)
         raise Error, "missing #{program}; install it (README.md, \"Host setup\")" unless executable
 
         bin = File.dirname(File.realpath(executable))

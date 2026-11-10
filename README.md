@@ -500,10 +500,11 @@ FreeBSD (x86-64, 16-CURRENT) is a host too. Install the same tools from
 packages: `llvm23`, `gmake`, `coreutils` (for `gtimeout`), `gawk`,
 `perl5`, `autoconf`, `automake`, `libtool`, `ruby` with
 `rubygem-minitest` and `rubygem-rexml`, `b3sum`, `node`, and the
-AArch64 ELF GCC and binutils, plus QEMU, a JVM and Docker for what
-needs them as above. The Fiasco build expects the cross tools under the
-`aarch64-elf-` prefix, while the port names them `aarch64-none-elf-`
-(TODO.md, "the Fiasco build"). The base system's `dtc` serves. Run the
+AArch64 ELF GCC and binutils (`aarch64-none-elf-gcc`), plus QEMU, a JVM
+and Docker for what needs them as above. The Fiasco build takes the cross
+tools under the port's `aarch64-none-elf-` prefix or Homebrew's
+`aarch64-elf-`, preferring Homebrew's where both are on `PATH`. The base
+system's `dtc` serves. Run the
 top-level targets with GNU make (`gmake check`), and point the build at
 the port's LLVM:
 

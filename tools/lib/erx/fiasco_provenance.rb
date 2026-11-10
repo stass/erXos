@@ -12,6 +12,8 @@ require_relative 'archive_member'
 require_relative 'fiasco_inputs'
 require_relative 'build_inputs'
 require_relative 'core_archive'
+require_relative 'cross_toolchain'
+require_relative 'host_path'
 
 module Erx
   # Audits the inherited build's recorded evidence. This is an evidence report,
@@ -32,12 +34,17 @@ module Erx
     ERXOS_HEADER_LINES = 8
 
     # compiler, when the build compiled the C17 cores, is the clang that
-    # did; the audit records its identity and that of its llvm-ar.
-    def initialize(root:, runner:, external: [], archive_program: 'aarch64-elf-ar', compiler: nil)
+    # did; the audit records its identity and that of its llvm-ar. cross is
+    # the cross gcc and binutils (CrossToolchain) the audit runs and records,
+    # the build's own when Fiasco passes it, else CrossToolchain.find's when
+    # first needed; their ar reads the archives unless archive_program names
+    # another.
+    def initialize(root:, runner:, external: [], archive_program: nil, compiler: nil, cross: nil)
       @root = File.realpath(root)
       @build = File.join(@root, 'build/fiasco')
       @runner = runner
       @compiler = compiler
+      @cross = cross
       @archive_program = archive_program
       @archive_requested = archive_program
       @external = external.to_h { |entry| [File.realpath(entry.fetch('path')), entry] }
@@ -64,7 +71,7 @@ module Erx
       @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
       load_build_inputs
       load_generation_profiles
-      archive_tool = tool_identity(@archive_requested, role: 'archive')
+      archive_tool = tool_identity(@archive_requested || cross_toolchain.program('ar'), role: 'archive')
       @archive_program = archive_tool.fetch('path')
       executables = MAPS.map do |name, (artifact, map)|
         audit_executable(name, File.join(@build, artifact), File.join(@build, map))
@@ -72,14 +79,14 @@ module Erx
       tools = [archive_tool]
       image = nil
       if @unresolved.empty?
-        tools.concat(%w[gmake aarch64-elf-gcc aarch64-elf-g++ aarch64-elf-objcopy perl].map { |program| tool_identity(program) })
+        tools.concat(['gmake', *%w[gcc g++ objcopy].map { |name| cross_toolchain.program(name) }, 'perl'].map { |program| tool_identity(program) })
         if @compiler
           llvm = File.dirname(File.realpath(@compiler))
           tools << tool_identity(File.realpath(@compiler), role: 'clang')
           tools << tool_identity(File.join(llvm, 'llvm-ar'), role: 'llvm-ar')
         end
         programs = tools.to_h { |tool| [tool.fetch('program'), tool.fetch('path')] }
-        @image_objcopy = programs.fetch('aarch64-elf-objcopy')
+        @image_objcopy = programs.fetch(cross_toolchain.program('objcopy'))
         @image_perl = programs.fetch('perl')
         image = audit_image(executables)
         @bytes.each do |path, snapshot|
@@ -106,10 +113,10 @@ module Erx
     def capture_construction
       require_relative 'fiasco'
       load_build_inputs
-      environment = Fiasco.build_environment
+      environment = command_environment
       kernel = File.join(@build, 'kernel')
       emit = lambda do |directory, output, variable, arguments|
-        @runner.run(['gmake', '-C', directory, *arguments, 'CROSS_COMPILE=aarch64-elf-',
+        @runner.run(['gmake', '-C', directory, *arguments, "CROSS_COMPILE=#{cross_toolchain.prefix}",
                      '--eval=.PHONY: erx-provenance',
                      "--eval=erx-provenance: ; $(file >#{output},$(#{variable}))", 'erx-provenance'],
                     name: 'fiasco-construction', deadline: 45, env: environment)
@@ -125,10 +132,10 @@ module Erx
 
     # The toolchain files a build may compile from: GCC's, and, when the
     # C17 cores were built with clang (compiler), LLVM's resource headers,
-    # which runner asks that clang to locate. Each must be one its reviewed
-    # profile admits.
-    def self.external_registry(root:, compiler: nil, runner: nil)
-      gcc_registry(root: root) + llvm_registry(root: root, compiler: compiler, runner: runner)
+    # which runner asks that clang to locate; GCC's of the cross gcc that
+    # cross names. Each must be one its reviewed profile admits.
+    def self.external_registry(root:, cross:, compiler: nil, runner: nil)
+      gcc_registry(root: root, cross: cross) + llvm_registry(root: root, compiler: compiler, runner: runner)
     end
 
     def self.llvm_registry(root:, compiler:, runner:)
@@ -140,24 +147,24 @@ module Erx
     end
 
     # GCC's stdbool.h, the one GCC header Fiasco's build includes, from
-    # whatever aarch64-elf-gcc release is first on PATH, recorded with its
+    # whatever release of the cross gcc (CrossToolchain) is first on PATH, recorded with its
     # release and the hash of its bytes. Its notices are the tree's copies
     # of GCC's license texts, which do not vary between GCC releases.
     GCC_LICENSE = 'GPL-3.0-or-later WITH GCC-exception-3.1'
     GCC_NOTICES = %w[COPYING3 COPYING.RUNTIME].map { |name| "fiasco/l4re-core/libgcc/contrib/gcc-16/#{name}" }.freeze
 
-    def self.gcc_registry(root:)
-      compiler = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, 'aarch64-elf-gcc') }
-                    .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
-      raise Error, 'missing aarch64-elf-gcc' unless compiler
+    def self.gcc_registry(root:, cross:)
+      gcc = cross.program('gcc')
+      compiler = HostPath.find_program(gcc, directories: HostPath.directories(ENV.fetch('PATH', '')))
+      raise Error, "missing #{gcc}" unless compiler
       installation = File.expand_path('..', File.dirname(File.realpath(compiler)))
       # GCC installs its headers in lib/gcc/<target>/<release>/include.
-      headers = Dir.glob('lib/gcc/aarch64-elf/*/include/stdbool.h', base: installation)
-      raise Error, "cannot find one stdbool.h of aarch64-elf-gcc under #{installation}" unless headers.size == 1
+      headers = Dir.glob("lib/gcc/#{cross.target}/*/include/stdbool.h", base: installation)
+      raise Error, "cannot find one stdbool.h of #{gcc} under #{installation}" unless headers.size == 1
       release = headers.first.split('/').fetch(3)
-      raise Error, "unexpected aarch64-elf-gcc release directory: #{release}" unless /\A[0-9][0-9.]{0,31}\z/.match?(release)
+      raise Error, "unexpected #{gcc} release directory: #{release}" unless /\A[0-9][0-9.]{0,31}\z/.match?(release)
       header = File.realpath(File.join(installation, headers.first))
-      raise Error, "aarch64-elf-gcc's stdbool.h leaves its installation" unless header.start_with?(File.realpath(installation) + '/')
+      raise Error, "#{gcc}'s stdbool.h leaves its installation" unless header.start_with?(File.realpath(installation) + '/')
       notices = GCC_NOTICES.map do |relative|
         path = File.join(root, relative)
         { 'path' => path, 'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: 1024 * 1024)) }.freeze
@@ -282,8 +289,8 @@ module Erx
         linked = File.join(directory, 'bootstrap.elf')
         replayed = File.join(directory, 'bootstrap.raw')
         File.binwrite(linked, read(File.join(@root, inputs.fetch('bootstrap').fetch('path'))))
-        @runner.run([@image_objcopy || 'aarch64-elf-objcopy', '-O', 'binary', linked, replayed],
-                    name: 'fiasco-image-proof', deadline: 30, env: Fiasco.build_environment)
+        @runner.run([@image_objcopy || cross_toolchain.program('objcopy'), '-O', 'binary', linked, replayed],
+                    name: 'fiasco-image-proof', deadline: 30, env: command_environment)
         unless BoundedFile.read(replayed, maximum: PackProvenance::MAX_METADATA) == original
           raise Error, 'final Fiasco image differs from its fixed construction replay'
         end
@@ -398,8 +405,7 @@ module Erx
       path = if program.include?('/')
                File.realpath(program)
              else
-               ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, program) }
-                  .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
+               HostPath.find_program(program, directories: HostPath.directories(command_environment.fetch('PATH')))
              end
       raise Error, "missing build audit tool: #{program}" unless path
       path = File.realpath(path)
@@ -410,9 +416,14 @@ module Erx
         'role' => 'external build tool; no linked contribution' }
     end
 
+    # The environment the build ran its commands in, which the audit runs its own in.
     def command_environment
       require_relative 'fiasco'
-      Fiasco.build_environment
+      Fiasco.build_environment(cross: cross_toolchain)
+    end
+
+    def cross_toolchain
+      @cross ||= CrossToolchain.find
     end
 
     def audit_executable(name, artifact, map)
