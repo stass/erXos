@@ -20,7 +20,7 @@
  *   over REASON OFFSET
  *
  * so the caller can compare COPY with the input under binary_to_term.
- * The scratch is exactly erx_etf_scratch_bytes(rules), allocated for each
+ * The scratch is exactly erx_etf_scratch_bytes(rules, len), allocated for
  * request, so ASan sees any write past it.  A line "scratch N ..." instead
  * checks with N bytes of scratch.
  */
@@ -277,7 +277,7 @@ answer(FILE *out, const char *line, uint8_t *term, uint8_t *copy)
 	};
 	len = unhex(line + used, term);
 	if (!sized)
-		scratch_len = erx_etf_scratch_bytes(&rules);
+		scratch_len = erx_etf_scratch_bytes(&rules, len);
 	scratch = malloc(scratch_len == 0 ? 1 : scratch_len);
 	if (scratch == NULL)
 		fail("out of memory");

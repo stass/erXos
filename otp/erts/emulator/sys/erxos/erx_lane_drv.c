@@ -392,6 +392,30 @@ input_grow(lane_conn_t *conn, size_t want)
 }
 
 /*
+ * Grows the funnel's scratch to what judging held bytes of a frame needs, which is
+ * proportional to them, not to max_message_heap. The scratch starts at what any control
+ * term needs, so a growth that cannot be allocated leaves the control term judged whole and
+ * the payload refused as over a limit, as erx_funnel_check refuses one past the word limit.
+ */
+static void
+scratch_grow(lane_conn_t *conn, size_t held)
+{
+	const size_t want = erx_funnel_check_scratch_bytes(&conn->limits, held);
+	void *grown;
+
+	/* SIZE_MAX, an overflow, is never asked of the allocator: held is bounded by the buffer. */
+	if (want <= conn->scratch_len || want == SIZE_MAX)
+		return;
+	/* A fresh block, not a realloc: nothing in the scratch outlives a judgment. */
+	grown = driver_alloc(want);
+	if (grown == NULL)
+		return;
+	driver_free(conn->scratch);
+	conn->scratch = grown;
+	conn->scratch_len = want;
+}
+
+/*
  * A frame to judge and act on: the ring's open record, in the record buffer, or a control
  * slot's copy, in ctl_in. len is the record's len, held the bytes of it in buf (fewer only
  * for a ring record in discard mode), cap the bytes buf holds.
@@ -550,6 +574,7 @@ frame_judge(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const lane_frame_
 	erx_lane_port_do_t what;
 	bool answerable;
 
+	scratch_grow(conn, frame->held);
 	erx_funnel_check(frame->buf, frame->len, frame->held, &conn->lane, &conn->limits, conn->scratch,
 	    conn->scratch_len, &verdict);
 	answerable = dep != NULL && verdict.action != ERX_FUNNEL_MALFORMED &&
@@ -925,7 +950,7 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 		.receiver_id = (uint32_t)erts_this_node->creation };
 	conn->exports_conn = (erx_exports_conn_t){ .peer = open.peer_id };
 	conn->system = open.system;
-	conn->scratch_len = erx_funnel_check_scratch_bytes(&conn->limits);
+	conn->scratch_len = ERX_FUNNEL_CTL_SCRATCH;
 	conn->scratch = driver_alloc(conn->scratch_len);
 	conn->in_cap = ERX_FUNNEL_ASM_FIRST;
 	conn->in = erts_alloc_fnf(ERTS_ALC_T_DRV, conn->in_cap);

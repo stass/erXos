@@ -6,8 +6,9 @@
 # tools/fuzz/erx_funnel_fuzz.c's format: a mode byte, a cut byte, then a
 # frame body (header, control term, payload) or a bare control term or
 # payload: a frame of every operation, held with every right and with
-# none, the spawn request with options of every shape, and a payload with a
-# repeated map key.
+# none, the spawn request with options of every shape, a payload with a
+# repeated map key, and one with the most scratch per byte: record field
+# names.
 atom = ->(name) { [119, name.bytesize].pack('CC') + name }
 # The harness's lane runs from web@erxos, domain 3, to system@erxos, domain 1.
 pid = ->(node, id, creation) { "\x58".b + atom.call(node) + [id, 0, creation].pack('NNN') }
@@ -47,6 +48,7 @@ Erx::PackFuzz.declare_target(
   seeds: seeds.merge(
     'control-spawn' => "\x05\x00".b + "\x83".b + controls.fetch('spawn-request').first,
     'payload-key' => "\x3e\x00".b + "\x83".b + [116, 2, 97, 1, 106].pack('CNCCC') + [110, 1, 0, 1, 106].pack('C*'),
-    'payload-system' => "\x7e\x00".b + payload
+    'payload-system' => "\x7e\x00".b + payload,
+    'payload-names' => "\x3e\x00\x83".b + [67, 64, 1].pack('CNC') + atom.call('m') + atom.call('r') + (atom.call('') * 64)
   )
 )

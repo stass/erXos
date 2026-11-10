@@ -21,7 +21,9 @@ require_relative '../fixtures/etf_wire'
 # * a generated term, unmutated, erx_etf accepts exactly when stock OTP
 #   decodes it, so map keys are refused exactly when OTP refuses them, and
 #   its decoded heap is at most the words erx_etf counted, and exactly
-#   those words when it holds nothing ERTS's size pass overestimates.
+#   those words when it holds nothing ERTS's size pass overestimates;
+#   among them the terms that keep the most of erx_etf's scratch per byte,
+#   checked with exactly the scratch their length promises.
 #
 # Two runs of the driver and one of erl serve the whole class.
 class ErxEtfOracleTest < Minitest::Test
@@ -29,13 +31,20 @@ class ErxEtfOracleTest < Minitest::Test
   SEED = Integer(ENV.fetch('ERX_ETF_SEED', '20261107'))
   GENERATED = 2500
   MUTATED = 2500
+  # Maps inside a key, whose 2-byte pairs keep 32 bytes of scratch each,
+  # with keys repeated and distinct, and a record's distinct field names.
+  DENSE = [
+    EtfWire.map([EtfWire.map(*Array.new(200) { [EtfWire.nil_, EtfWire.nil_] }), EtfWire.nil_]),
+    EtfWire.map([EtfWire.map(*Array.new(200) { |key| [EtfWire.small(key), EtfWire.nil_] }), EtfWire.nil_]),
+    EtfWire.record(Array.new(200) { |field| EtfWire.atom(field.to_s) }, Array.new(200) { EtfWire.nil_ })
+  ].map { |bytes| EtfGenerator::Encoded.new(bytes, false, 0) }.freeze
 
   class << self
     def inputs
       @inputs ||= begin
         random = Random.new(SEED)
         generator = EtfGenerator.new(random, Random.new(SEED + 1))
-        generated = Array.new(GENERATED) { generator.term(1 + random.rand(4)) }
+        generated = Array.new(GENERATED) { generator.term(1 + random.rand(4)) } + DENSE
         mutated = Array.new(MUTATED) { mutate(random, "\x83".b + generated[random.rand(GENERATED)].bytes) }
         { generated: generated.map { |term| ["\x83".b + term.bytes, term] }, mutated: mutated }
       end

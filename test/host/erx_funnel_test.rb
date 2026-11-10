@@ -45,6 +45,7 @@ class ErxFunnelTest < Minitest::Test
   def header(frame_len, ctl_len, payload_len) = "header #{frame_len} #{[ctl_len, payload_len].pack('VV').unpack1('H*')}"
   def control(bytes, payload_len = 0) = "control #{payload_len} #{bytes.unpack1('H*')}"
   def payload(bytes, system: 0, depth: 8, words: 1000) = "payload #{system} #{depth} #{words} #{bytes.unpack1('H*')}"
+  def scratch(words, held) = "scratch #{words} #{held}"
   def answers(cases) = cases.keys.zip(@driver.check(cases.values.map(&:first)))
 
   def test_the_header_adds_up_to_the_frame
@@ -196,5 +197,17 @@ class ErxFunnelTest < Minitest::Test
       'trailing byte' => [payload("#{ten_words}\x6a"), 'malformed trailing']
     }
     answers(cases).each { |name, answer| assert_equal cases.fetch(name).last, answer, name }
+  end
+
+  # The scratch a frame needs follows the bytes held, never max_message_heap:
+  # a lane connection of a runtime whose limit is 1 Mi words holds no more
+  # scratch for a short frame than one whose limit is 64 words.
+  def test_the_scratch_follows_the_frame_not_the_word_limit
+    small, large, longer = @driver.check([scratch(64, 4096), scratch(1 << 20, 4096), scratch(1 << 20, 65_536)])
+                                  .map { |answer| Integer(answer, 10) }
+    assert_equal small, large
+    assert_operator large, :<, longer
+    # Without accept, 2 bytes a byte of field names, and 16 frames.
+    assert_operator longer, :<=, (2 * 65_536) + (16 * 64) + 8
   end
 end

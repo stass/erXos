@@ -1433,6 +1433,25 @@ field names are distinct by sorting an index of them, at most 65,535 entries
 of 4 bytes, in the connection's scratch, as ERTS's decoder refuses
 duplicates (`beam/external.c:5338-5348`).
 
+The connection's scratch holds the check's explicit stack and its entries,
+those field-name indexes and the map-key digests below, and its size
+follows the bytes judged, never `max_message_heap`. Each stack frame is an
+open container, which takes at least 2 bytes but for an export, whose 1
+byte the version byte pays for, as it is only ever the top frame; so a
+term of `n` bytes opens at most `n / 2` frames, and never more than
+`funnel_depth`. A field name is an atom of at least 2 bytes, so the
+structural pass keeps at most 2 bytes of entries a byte. The control
+term's check, which also refuses repeated map keys, keeps a 16-byte digest
+of each key, and of its value beside it in a map inside a key: 32 bytes for
+a pair's two items, so at most 16 bytes a byte, the one pair still waiting
+for its value charged to the version byte. The scratch starts at what the
+longest control term needs, 65 KiB, so a control term is always judged
+whole, and grows to what each record judged needs, 2 bytes a byte and up to
+`funnel_depth` frames; like the record buffer, it keeps its largest size
+for the connection's life. A growth the receiver cannot allocate makes that
+payload over a limit, as one past `max_message_heap` is, though it is the
+receiver's memory that ran short.
+
 **Semantic acceptance.** The funnel's structural pass is the first stage; an
 encoded queue entry is pending validation, never an accepted term. At the
 receiver, ERTS's decoder, or the native `erx_etf` decoder, completes the
@@ -1727,7 +1746,7 @@ is a sum fixed when the domain is admitted, with these terms per domain:
 | Term | Bound |
 | --- | --- |
 | its mappings of the domain's system connection and the capability slots that name its objects, whose pages are charged to the domain's child for that connection | the mappings and capability slots alone, and the writer's copy of each control slot's `seq`, 8 bytes per slot: the lane it reads, `system_lane` bytes with its ring header and reader page, and the control table it writes are the domain's to pay for ([Connections](#connections)) |
-| the one record it is reading from that lane, in a private buffer that grows as the record's bytes arrive and is never allocated whole on the header's word | the system domain's `max_frame`, which is the largest `max_request` a grant may name ([Principals, sessions and quotas](#principals-sessions-and-quotas)) |
+| the one record it is reading from that lane, in a private buffer that grows as the record's bytes arrive and is never allocated whole on the header's word, and the funnel's scratch for judging it ([The funnel](#the-funnel)) | the system domain's `max_frame`, which is the largest `max_request` a grant may name ([Principals, sessions and quotas](#principals-sessions-and-quotas)), and of scratch the larger of 65 KiB and twice the record with `funnel_depth` stack frames |
 | its queue to the domain while the domain's lane from it is full | `system_queue`: past it a message is dropped and counted, and any other signal ends the connection instead |
 | what it holds because of the domain's processes: their links and monitors with system processes, and the signals queued for them | its own `peer_held` |
 | each facet granted to the domain, with the requests queued on it | that facet's queue quota for the requests queued on it undecoded, plus the one frame that crossed it, and its `max_heap_size` for what it decodes and keeps ([Facets](#facets)) |

@@ -13,7 +13,8 @@
  * offset agree; that with the scratch erx_etf_scratch_bytes promises the
  * check never runs out of it; that checking without accept refuses
  * nothing accept accepts, and that accept refuses only for map keys or
- * scratch beyond what the structural pass refuses; and that an accepted
+ * scratch beyond what the structural pass refuses, unless half the scratch
+ * ran the structural pass out of it; and that an accepted
  * term reads item by item to its end, writes again to a term the check
  * accepts with no more words, whose own copy is the same bytes.
  */
@@ -39,7 +40,7 @@ check(const uint8_t *term, size_t len, const erx_etf_rules_t *rules,
 	size_t scratch_len;
 	void *scratch;
 
-	scratch_len = erx_etf_scratch_bytes(rules);
+	scratch_len = erx_etf_scratch_bytes(rules, len);
 	if (halve)
 		scratch_len /= 2;
 	scratch = malloc(scratch_len == 0 ? 1 : scratch_len);
@@ -161,13 +162,17 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	rules.accept = !rules.accept;
 	check(data, size, &rules, halve, &loose);
 	rules.accept = !rules.accept;
-	if (rules.accept && result.verdict != loose.verdict) {
-		/* Only accept's own checks may refuse beyond the structure. */
-		if (result.verdict == ERX_ETF_ACCEPTED ||
-		    (result.reason != ERX_ETF_ERR_MAP_KEY &&
-		    result.reason != ERX_ETF_ERR_SCRATCH))
-			abort();
-	}
+	/*
+	 * Only accept's own checks may refuse beyond the structure.  With
+	 * half the scratch, the structural pass, promised less of it, may run
+	 * out where accept goes on.
+	 */
+	if (rules.accept && result.verdict != loose.verdict &&
+	    !(halve && loose.reason == ERX_ETF_ERR_SCRATCH) &&
+	    (result.verdict == ERX_ETF_ACCEPTED ||
+	    (result.reason != ERX_ETF_ERR_MAP_KEY &&
+	    result.reason != ERX_ETF_ERR_SCRATCH)))
+		abort();
 	if (result.verdict != ERX_ETF_ACCEPTED)
 		return (0);
 

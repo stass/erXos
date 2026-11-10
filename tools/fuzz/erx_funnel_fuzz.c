@@ -18,7 +18,9 @@
  * term is refused; and the payload's verdict and reason agree and an
  * accepted payload's words stay within the limit.  The harness also runs
  * erx_funnel_check on the frame, whole and in discard mode, with the
- * export table's rights chosen by the cut byte.
+ * export table's rights chosen by the cut byte, with the scratch
+ * erx_funnel_check_scratch_bytes promises for the bytes held, which never
+ * runs out.
  */
 
 #include <stdbool.h>
@@ -164,7 +166,7 @@ payload(const uint8_t *term, size_t len, uint8_t mode)
 	size_t scratch_len;
 	void *scratch;
 
-	scratch_len = erx_funnel_payload_scratch_bytes(&limits);
+	scratch_len = erx_funnel_payload_scratch_bytes(&limits, len);
 	if ((scratch = malloc(scratch_len == 0 ? 1 : scratch_len)) == NULL)
 		abort();
 	verdict = erx_funnel_payload(term, len, &limits, scratch, scratch_len,
@@ -240,7 +242,7 @@ check(const uint8_t *body, size_t len, size_t held, uint8_t mode,
 	uint8_t *frame;
 	void *scratch;
 
-	scratch_len = erx_funnel_check_scratch_bytes(&limits);
+	scratch_len = erx_funnel_check_scratch_bytes(&limits, held);
 	if ((frame = malloc(held == 0 ? 1 : held)) == NULL ||
 	    (scratch = malloc(scratch_len)) == NULL)
 		abort();
@@ -254,7 +256,8 @@ check(const uint8_t *body, size_t len, size_t held, uint8_t mode,
 	    (v.reason != ERX_FUNNEL_OK) || asked > 1 ||
 	    (v.cause == ERX_FUNNEL_CAUSE_UNAUTHORISED && asked != 1) ||
 	    (v.cause == ERX_FUNNEL_CAUSE_DEAD && asked != 0) ||
-	    v.reason == ERX_FUNNEL_ERR_VERDICT)
+	    v.reason == ERX_FUNNEL_ERR_VERDICT ||
+	    v.etf.reason == ERX_ETF_ERR_SCRATCH)
 		abort();
 	if (v.cause == ERX_FUNNEL_CAUSE_MALFORMED) {
 		free(frame);

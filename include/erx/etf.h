@@ -149,16 +149,20 @@ struct erx_etf_result {
 /*
  * Judges len bytes at term.  scratch holds the explicit stack and the
  * records the check keeps for map keys and record field names;
- * erx_etf_scratch_bytes(rules) bytes always suffice, since what a map or a
- * record keeps is bounded by the words it is charged.  scratch may have any
- * alignment: the check aligns its stack inside it, and the size
- * erx_etf_scratch_bytes returns includes that padding.  Pure: it reads only
+ * erx_etf_scratch_bytes(rules, len) bytes always suffice, since both grow
+ * only with the bytes read: at most one frame per two bytes, up to
+ * rules.max_depth, and 16 bytes of entries per byte with accept, 2
+ * without.  With less, the check refuses with ERX_ETF_ERR_SCRATCH and
+ * never writes past scratch_len.  scratch may have any alignment: the
+ * check aligns its stack inside it, and the size erx_etf_scratch_bytes
+ * returns includes that padding; it returns SIZE_MAX when the size
+ * overflows.  Pure: it reads only
  * its arguments and writes only scratch and *result.
  */
 erx_etf_verdict_t erx_etf_check(const uint8_t *term, size_t len,
     const erx_etf_rules_t *rules, void *scratch, size_t scratch_len,
     erx_etf_result_t *result);
-size_t erx_etf_scratch_bytes(const erx_etf_rules_t *rules);
+size_t erx_etf_scratch_bytes(const erx_etf_rules_t *rules, size_t len);
 
 /* The kinds of item, and the fields of erx_etf_item_t each one sets. */
 typedef enum erx_etf_kind {

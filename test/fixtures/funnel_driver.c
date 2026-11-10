@@ -16,6 +16,9 @@
  *     -> accepted WORDS | malformed ETF_REASON | over ETF_REASON
  *   check RIGHTS REQUEST_WORDS HELD WORDS HEX
  *     -> ACTION CAUSE REASON ASKED WORDS
+ *   scratch WORDS HELD         the scratch erx_funnel_check needs to judge
+ *     -> BYTES                 HELD bytes of a frame, under the check
+ *                              request's limits with max_message_heap WORDS
  *
  * TERM is the accepted control tuple rebuilt from erx_funnel_control_t as
  * Erlang source, so the oracle compares it with binary_to_term/1 of the
@@ -260,7 +263,7 @@ payload_request(FILE *out, const char *args, uint8_t *bytes)
 	limits.depth = depth;
 	limits.max_words = words;
 	len = unhex(args + skip, bytes);
-	scratch_len = erx_funnel_payload_scratch_bytes(&limits);
+	scratch_len = erx_funnel_payload_scratch_bytes(&limits, len);
 	if ((scratch = malloc(scratch_len)) == NULL)
 		abort();
 	verdict = erx_funnel_payload(bytes, len, &limits, scratch,
@@ -374,7 +377,7 @@ check_request(FILE *out, const char *args, uint8_t *bytes)
 	 * read past them.
 	 */
 	copied = held < len ? held : len;
-	scratch_len = erx_funnel_check_scratch_bytes(&limits);
+	scratch_len = erx_funnel_check_scratch_bytes(&limits, held);
 	if ((frame = malloc(copied == 0 ? 1 : copied)) == NULL ||
 	    (scratch = malloc(scratch_len)) == NULL)
 		abort();
@@ -389,6 +392,22 @@ check_request(FILE *out, const char *args, uint8_t *bytes)
 	    funnel_reasons[v.reason], asked.name,
 	    (unsigned long long)(v.cause == ERX_FUNNEL_CAUSE_ACCEPTED ?
 	    v.etf.words : 0));
+}
+
+static void
+scratch_request(FILE *out, const char *args)
+{
+	erx_funnel_limits_t limits = { .host = host,
+	    .host_len = sizeof(host) - 1, .depth = 16, .system = true };
+	unsigned long long words, held;
+
+	if (sscanf(args, "%llu %llu", &words, &held) != 2) {
+		fputs("bad request\n", out);
+		return;
+	}
+	limits.max_words = words;
+	fprintf(out, "%zu\n", erx_funnel_check_scratch_bytes(&limits,
+	    (size_t)held));
 }
 
 int
@@ -413,6 +432,8 @@ main(int argc, char **argv)
 			payload_request(out, line + 8, bytes);
 		else if (strncmp(line, "check ", 6) == 0)
 			check_request(out, line + 6, bytes);
+		else if (strncmp(line, "scratch ", 8) == 0)
+			scratch_request(out, line + 8);
 		else
 			fputs("bad request\n", out);
 	}

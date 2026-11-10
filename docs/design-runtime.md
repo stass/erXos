@@ -1839,7 +1839,10 @@ it is a bound the runtime enforces:
 * the **open record** it is reading from that lane, in a buffer that
   grows as the record's bytes arrive, up to the system domain's
   `max_frame`, the largest `max_request` a grant may name ([Connections
-  in ERTS](#connections-in-erts));
+  in ERTS](#connections-in-erts)), and the funnel's scratch for judging
+  it, at least 65 KiB, which grows to twice the largest record with
+  `funnel_depth` stack frames and keeps that size
+  ([design-domains.md](design-domains.md#the-funnel));
 * its **queue** to the domain, up to the manifest's `system_queue`, past
   which a message is dropped and any other signal ends the connection (edit 10);
 * what it holds because of the domain's processes, their links and

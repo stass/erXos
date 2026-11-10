@@ -6,7 +6,8 @@
 # format: a byte of rules (grammar, depth, words, accept, scratch), then a
 # term: one of every kind of the grammar; a map with a key repeated in
 # another encoding; a key that is a map; lists split across tails; deep
-# nesting on the left and on the right; and a pid off the host.
+# nesting on the left and on the right; a pid off the host; and the terms
+# that keep the most scratch per byte, with and without accept.
 atom = ->(name) { [119, name.bytesize].pack('CC') + name }
 pid = ->(node) { "\x58".b + atom.call(node) + [1, 2, 3].pack('NNN') }
 every_kind = [104, 15].pack('CC') + [97, 5, 98, -7].pack('CCCl>') + [110, 9, 1, *([1] * 9)].pack('C*') +
@@ -21,6 +22,8 @@ map_key = [116, 1].pack('CN') + [116, 2, 97, 1, 106, 97, 2, 106].pack('CNC*') + 
 tails = [108, 1, 97, 1, 108, 0, 108, 1, 97, 2, 107, 1, 3].pack('CNCCCNCNCCCnC')
 right = ("\x68\x02\x6a" * 40) + "\x6a"
 left = ("\x68\x02" * 40) + ("\x6a\x6a" * 40)
+dense_keys = [116, 1, 116, 64].pack('CNCN') + ("\x6a" * 129)
+dense_names = [67, 64, 1].pack('CNC') + atom.call('m') + atom.call('r') + (atom.call('') * 64)
 Erx::PackFuzz.declare_target(
   sources: %w[liberx/erx_etf.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c],
   seeds: {
@@ -28,6 +31,7 @@ Erx::PackFuzz.declare_target(
     'every-kind-host' => "\x7e\x83".b + every_kind, 'duplicate-key' => "\x7c\x83".b + duplicate_key,
     'map-key' => "\x7c\x83".b + map_key, 'tails' => "\x7c\x83".b + tails, 'right' => "\x44\x83".b + right,
     'left' => "\x7c\x83".b + left, 'halved' => "\xfc\x83".b + map_key,
-    'off-host' => "\x7c\x83".b + pid.call('web@elsewhere')
+    'off-host' => "\x7c\x83".b + pid.call('web@elsewhere'), 'export-cut' => "\x7c\x83\x71".b,
+    'dense-keys' => "\x7c\x83".b + dense_keys, 'dense-names' => "\x3c\x83".b + dense_names
   }
 )

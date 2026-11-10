@@ -147,6 +147,7 @@ struct etf_check {
 	const uint8_t		*term;
 	size_t			 len;
 	etf_frame_t		*frames;
+	size_t			 frames_cap;
 	uint8_t			*entries;
 	size_t			 entries_cap;
 	size_t			 entries_len;
@@ -188,6 +189,7 @@ static erx_etf_reason_t	 ended(etf_check_t *, bool, const uint8_t [DIGEST]);
 static uint8_t		*entry_push(etf_check_t *, size_t);
 static erx_etf_reason_t	 finish(etf_check_t *, etf_frame_t *,
 			    uint8_t [DIGEST]);
+static size_t		 frames_for(const erx_etf_rules_t *, size_t);
 static void		 frame_open(etf_check_t *, etf_frame_t *,
 			    const erx_etf_item_t *, bool);
 static bool		 has_equal_neighbours(const uint8_t *, size_t, size_t,
@@ -1310,21 +1312,46 @@ verdict_of(erx_etf_reason_t reason)
 	}
 }
 
+/*
+ * The frames a term of len bytes, its version byte among them, can have
+ * open at once: never more than max_depth, and at most len / 2.  Every
+ * container takes at least two bytes before its first element
+ * (SMALL_TUPLE_EXT) but an export (EXPORT_EXT), which takes one; an export
+ * holds only leaves, so it is only ever the top frame, and the version
+ * byte, which is no item, pays for its missing byte.
+ */
+static size_t
+frames_for(const erx_etf_rules_t *rules, size_t len)
+{
+	return (len / 2 < rules->max_depth ? len / 2 : rules->max_depth);
+}
+
+/*
+ * Entry-stack bytes a byte of the term can make the check keep, charged
+ * to the items they are kept for; every item takes at least one byte.
+ * Without accept, only a record's field names are kept, 4 bytes each, and
+ * a name is an atom of at least two bytes: 2 bytes a byte.  With accept,
+ * also a map's keys: a pair keeps at most 32 bytes, a key digest and, in a
+ * map inside a key, its value's beside it, and takes two items, its key
+ * and its value, which belong to no other pair or record: 16 bytes an
+ * item.  Only the pair whose key ended last can be waiting for its value,
+ * since the next item read starts that value; its other 16 bytes are
+ * charged to the version byte, a budget apart from the frames' own.  So
+ * 16 bytes a byte.
+ */
+#define ENTRY_BYTES_PER_BYTE		2
+#define ENTRY_BYTES_PER_BYTE_ACCEPT	16
+
+/* The frames and entries a term of len bytes can take, and the padding. */
 size_t
-erx_etf_scratch_bytes(const erx_etf_rules_t *rules)
+erx_etf_scratch_bytes(const erx_etf_rules_t *rules, size_t len)
 {
 	size_t entries, frames, total;
 
-	/*
-	 * A map keeps at most 32 bytes a pair and is charged at least two
-	 * words a pair; a record keeps 4 bytes a field and is charged at
-	 * least three words a field.  So 16 bytes a word bound the entries.
-	 */
-	if (__builtin_mul_overflow((size_t)rules->max_depth,
-	    sizeof(etf_frame_t), &frames) ||
-	    rules->max_words > SIZE_MAX / 16 ||
-	    __builtin_mul_overflow((size_t)rules->max_words, (size_t)16,
-	    &entries) ||
+	if (__builtin_mul_overflow(frames_for(rules, len), sizeof(etf_frame_t),
+	    &frames) ||
+	    __builtin_mul_overflow(len, (size_t)(rules->accept ?
+	    ENTRY_BYTES_PER_BYTE_ACCEPT : ENTRY_BYTES_PER_BYTE), &entries) ||
 	    __builtin_add_overflow(frames, entries, &total) ||
 	    __builtin_add_overflow(total, _Alignof(etf_frame_t), &total))
 		return (SIZE_MAX);
@@ -1367,8 +1394,9 @@ erx_etf_check(const uint8_t *term, size_t len, const erx_etf_rules_t *rules,
 		reason = ERX_ETF_ERR_VERSION_BYTE;
 		goto done;
 	}
-	if (__builtin_mul_overflow((size_t)rules->max_depth,
-	    sizeof(etf_frame_t), &frames_bytes) || pad > scratch_len ||
+	c.frames_cap = frames_for(rules, len);
+	if (__builtin_mul_overflow(c.frames_cap, sizeof(etf_frame_t),
+	    &frames_bytes) || pad > scratch_len ||
 	    frames_bytes > scratch_len - pad) {
 		reason = ERX_ETF_ERR_SCRATCH;
 		goto done;
@@ -1424,6 +1452,14 @@ erx_etf_check(const uint8_t *term, size_t len, const erx_etf_rules_t *rules,
 				c.depth--;
 			if (c.depth >= rules->max_depth) {
 				reason = ERX_ETF_ERR_DEPTH;
+				goto done;
+			}
+			/*
+			 * Never, while frames_for is right; were it wrong, the
+			 * term would be over a limit, never written past the stack.
+			 */
+			if (c.depth >= c.frames_cap) {
+				reason = ERX_ETF_ERR_SCRATCH;
 				goto done;
 			}
 			frame_open(&c, &c.frames[c.depth], &t.item, in_key);

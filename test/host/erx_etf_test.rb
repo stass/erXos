@@ -233,6 +233,27 @@ class ErxEtfTest < Minitest::Test
     assert_equal ['accepted', 'over scratch', 'over scratch', 'accepted'], answers.map { |answer| verdict(answer) }
   end
 
+  # The scratch erx_etf_scratch_bytes promises for a term's length suffices
+  # for the terms that keep the most per byte, so none is refused as over
+  # scratch: an export cut after its tag, the one term whose every byte
+  # needs its frame; a
+  # map inside a key, whose 2-byte pairs keep 32 bytes each, with its keys
+  # repeated and distinct; and without accept a record's 2-byte field
+  # names, 4 bytes each, repeated and cut after the last, and distinct.
+  # Each term is refused for what it is, or accepted. A bound one frame
+  # short, or one byte a byte short, fails here.
+  def test_the_promised_scratch_holds_the_densest_terms
+    keyed = map([map(*Array.new(200) { [nil_, nil_] }), nil_])
+    distinct = map([map(*Array.new(200) { |key| [small(key), nil_] }), nil_])
+    names = record(Array.new(200) { atom('') }, [])
+    fields = record(Array.new(200) { |field| atom(field.to_s) }, Array.new(200) { nil_ })
+    answers = check([term("\x71".b, depth: 1024), term("\x71".b, accept: 0, depth: 1024), term(keyed, depth: 1024),
+                     term(distinct, depth: 1024), term(names, accept: 0, depth: 1024), term(fields, accept: 0, depth: 1024)])
+    assert_equal ['malformed truncated', 'malformed truncated', 'malformed map_key', 'accepted', 'malformed record',
+                  'accepted'],
+                 answers.map { |answer| verdict(answer) }
+  end
+
   def test_the_writer_refuses_what_no_term_can_hold
     assert_equal ['writer 14'], check(['writer'])
   end

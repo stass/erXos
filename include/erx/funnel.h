@@ -246,12 +246,14 @@ typedef struct erx_funnel_limits {
 
 /*
  * The payload's structural pass.  scratch is the connection's funnel
- * state: erx_funnel_payload_scratch_bytes(limits) bytes always suffice.
+ * state: erx_funnel_payload_scratch_bytes(limits, len) bytes always
+ * suffice.
  */
 erx_etf_verdict_t erx_funnel_payload(const uint8_t *term, size_t len,
     const erx_funnel_limits_t *limits, void *scratch, size_t scratch_len,
     erx_etf_result_t *result);
-size_t erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits);
+size_t erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits,
+    size_t len);
 
 /*
  * A name of the receiving domain the export table is asked about: the
@@ -389,13 +391,17 @@ typedef struct erx_funnel_verdict {
  *      limit), is over a limit; one erx_etf refuses is malformed.
  *
  * The action is the verdict table's for the operation and the cause, in
- * erx_funnel.c.  scratch holds erx_funnel_check_scratch_bytes(limits)
- * bytes.  Pointers in verdict->control point into frame.
+ * erx_funnel.c.  scratch holds at least ERX_FUNNEL_CTL_SCRATCH bytes, so
+ * every control term is judged whole; erx_funnel_check_scratch_bytes(limits,
+ * held) bytes, which grow with held, suffice for the payload too.  With
+ * fewer, a payload that needs more is over a limit, as one past
+ * limits->max_words is.  Pointers in verdict->control point into frame.
  */
 void erx_funnel_check(const uint8_t *frame, uint32_t frame_len, size_t held,
     const erx_funnel_lane_t *lane, const erx_funnel_limits_t *limits,
     void *scratch, size_t scratch_len, erx_funnel_verdict_t *verdict);
-size_t erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits);
+size_t erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits,
+    size_t held);
 
 /*
  * A frame's assembly from the parts erx_lane_take returns, a pure state

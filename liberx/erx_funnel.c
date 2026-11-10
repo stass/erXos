@@ -141,11 +141,11 @@ erx_funnel_payload(const uint8_t *term, size_t len,
 }
 
 size_t
-erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits)
+erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits, size_t len)
 {
 	const erx_etf_rules_t rules = payload_rules(limits);
 
-	return (erx_etf_scratch_bytes(&rules));
+	return (erx_etf_scratch_bytes(&rules, len));
 }
 
 /*
@@ -540,9 +540,9 @@ erx_funnel_check(const uint8_t *frame, uint32_t frame_len, size_t held,
 }
 
 size_t
-erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits)
+erx_funnel_check_scratch_bytes(const erx_funnel_limits_t *limits, size_t held)
 {
-	size_t payload = erx_funnel_payload_scratch_bytes(limits);
+	size_t payload = erx_funnel_payload_scratch_bytes(limits, held);
 
 	return (payload > ERX_FUNNEL_CTL_SCRATCH ? payload :
 	    ERX_FUNNEL_CTL_SCRATCH);
