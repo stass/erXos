@@ -174,7 +174,8 @@ service_test_() ->
     {setup,
      fun() ->
              Log = erx_domain_fake_lib:start_log(),
-             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib}),
+             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                          exports => erx_domain_fake_lib}),
              unlink(Service),
              {Log, Service}
      end,
@@ -183,7 +184,8 @@ service_test_() ->
              exit(Log, kill)
      end,
      fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0,
-                          fun refused_side/0, fun side_ended/0, fun service_end_ends_domain_pids/0]} end}.
+                          fun refused_side/0, fun side_ended/0, fun ready_report/0, fun boot_timeout/0,
+                          fun report_overtaken/0, fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
     erx_domain_fake_lib:next_call().
@@ -192,9 +194,11 @@ boot_order() ->
     %% Row 1 (a) is first in the boot order, so it takes id 5.
     ?assertEqual({configured, 5, 1}, next_call()),
     ?assertEqual({open_side, 5, 'a@erxos', 50}, next_call()),
+    ?assertEqual({export, 5, [send]}, next_call()),
     ?assertEqual({start, 5}, next_call()),
     ?assertEqual({configured, 6, 0}, next_call()),
     ?assertEqual({open_side, 6, 'b@erxos', 60}, next_call()),
+    ?assertEqual({export, 6, [send]}, next_call()),
     ?assertEqual({start, 6}, next_call()).
 
 create_stop_kill() ->
@@ -218,6 +222,7 @@ create_stop_kill() ->
     {create, #{id := 8, name := <<"web">>, principal := 1, memory := 4096, domain_pid := DomainPid}} = next_call(),
     ?assertEqual(erx_domain:pid(Domain), DomainPid),
     ?assertEqual({open_side, 8, 'web@erxos', 80}, next_call()),
+    ?assertEqual({export, 8, [send]}, next_call()),
     ?assertEqual({start, 8}, next_call()),
     Ref = monitor(process, erx_domain:pid(Domain)),
     %% A normal exit signal is ignored, as by a process that does not trap exits.
@@ -232,7 +237,7 @@ create_stop_kill() ->
     %% The name is free again at the domain's end; kill ends the pid at once.
     {ok, Again} = erx_domain:create(Spec),
     ?assertEqual(9, erx_domain:id(Again)),
-    _ = [next_call(), next_call(), next_call()],
+    _ = [next_call(), next_call(), next_call(), next_call()],
     Ref2 = monitor(process, erx_domain:pid(Again)),
     ok = erx_domain:stop(Again, kill),
     ?assertEqual(killed, receive {'DOWN', Ref2, process, _, R2} -> R2 after 5000 -> timeout end),
@@ -250,6 +255,7 @@ configured_restart() ->
     ?assertEqual({retire, 6}, next_call()),
     ?assertEqual({configured, 10, 0}, next_call()),
     ?assertEqual({open_side, 10, 'b@erxos', 100}, next_call()),
+    ?assertEqual({export, 10, [send]}, next_call()),
     ?assertEqual({start, 10}, next_call()),
     %% Its second end within the minute is final: the next call the library
     %% sees is a request's create, which takes the next id.
@@ -260,6 +266,7 @@ configured_restart() ->
     {ok, _} = erx_domain:create(#{name => <<"after">>, memory => 4096}),
     ?assertMatch({create, #{id := 11}}, next_call()),
     ?assertEqual({open_side, 11, 'after@erxos', 110}, next_call()),
+    ?assertEqual({export, 11, [send]}, next_call()),
     ?assertEqual({start, 11}, next_call()).
 
 refused_side() ->
@@ -279,6 +286,7 @@ side_ended() ->
     {ok, _} = erx_domain:create(#{name => <<"lost">>, memory => 4096}),
     ?assertMatch({create, #{id := 13}}, next_call()),
     ?assertEqual({open_side, 13, 'lost@erxos', 130}, next_call()),
+    ?assertEqual({export, 13, [send]}, next_call()),
     ?assertEqual({start, 13}, next_call()),
     erx_domain_srv ! {system_side_ended, 13},
     ?assertEqual({stop, 13}, next_call()),
@@ -289,26 +297,116 @@ side_ended() ->
     erx_domain_srv ! {system_side_ended, 12},
     erx_domain_srv ! {system_side_ended, 99},
     %% Domain 11 still runs, and the next call the library sees is the next create's.
-    ?assertMatch(#{11 := #{state := running}},
+    ?assertMatch(#{11 := #{state := ready}},
                  maps:from_list([{I, D} || #{id := I} = D <- erx_domain_core:domains(
                                                                maps:get(core, sys:get_state(erx_domain_srv)))])),
     {ok, _} = erx_domain:create(#{name => <<"next">>, memory => 4096}),
     ?assertMatch({create, #{id := 14}}, next_call()),
     ?assertEqual({open_side, 14, 'next@erxos', 140}, next_call()),
+    ?assertEqual({export, 14, [send]}, next_call()),
     ?assertEqual({start, 14}, next_call()).
+
+ready_report() ->
+    %% A create answers once its domain's init reports ready to the domain pid, in
+    %% the envelope of a message from the domain; the pid keeps the agent the report
+    %% names, and a second report is dropped and counted.
+    {ok, Domain} = erx_domain:create(#{name => <<"ready">>, memory => 4096}),
+    ?assertMatch({create, #{id := 15}}, next_call()),
+    ?assertEqual({open_side, 15, 'ready@erxos', 150}, next_call()),
+    ?assertEqual({export, 15, [send]}, next_call()),
+    ?assertEqual({start, 15}, next_call()),
+    Agent = erx_domain_fake_lib:agent(<<"ready">>, 15),
+    ?assertEqual({ok, #{connections => Agent, dropped => 0}}, erx_domain:info(Domain)),
+    erx_domain:pid(Domain) ! {erx_origin, 15, {erx_ready, #{connections => Agent}}},
+    ?assertEqual({ok, #{connections => Agent, dropped => 1}}, erx_domain:info(Domain)),
+    ok = erx_domain:stop(Domain, shutdown),
+    ?assertEqual({stop, 15}, next_call()),
+    ?assertEqual({close_side, 15, {domain_down, 15, stopped}}, next_call()),
+    ?assertEqual({disconnect, 150}, next_call()),
+    ?assertEqual({retire, 15}, next_call()),
+    ?assertEqual({error, badarg}, erx_domain:info(Domain)).
+
+boot_timeout() ->
+    %% A domain whose init never reports is stopped once its boot timeout passes,
+    %% and its create answers timeout when nothing of it remains. No report but its
+    %% own domain's, naming a pid of its node, counts: not the creator's unwrapped
+    %% one, nor one in another domain's envelope, nor one naming another node's pid.
+    Self = self(),
+    spawn_link(fun() -> Self ! {created, erx_domain:create(#{name => <<"silent">>, memory => 4096,
+                                                             boot_timeout => 500})} end),
+    {create, #{id := 16, domain_pid := Pid}} = next_call(),
+    ?assertEqual({open_side, 16, 'silent@erxos', 160}, next_call()),
+    ?assertEqual({export, 16, [send]}, next_call()),
+    ?assertEqual({start, 16}, next_call()),
+    Agent = erx_domain_fake_lib:agent(<<"silent">>, 16),
+    Pid ! {erx_ready, #{connections => Agent}},
+    Pid ! {erx_origin, 5, {erx_ready, #{connections => Agent}}},
+    Pid ! {erx_origin, 16, {erx_ready, #{connections => erx_domain_fake_lib:agent(<<"a">>, 5)}}},
+    ?assertEqual({ok, #{connections => none, dropped => 3}},
+                 gen_server:call(erx_domain_srv, {info, 16})),
+    ?assertEqual({stop, 16}, next_call()),
+    ?assertEqual({close_side, 16, {domain_down, 16, stopped}}, next_call()),
+    ?assertEqual({disconnect, 160}, next_call()),
+    ?assertEqual({retire, 16}, next_call()),
+    ?assertEqual({created, {error, timeout}}, receive {created, _} = Created -> Created after 5000 -> none end),
+    ?assertEqual({error, {bad_spec, boot_timeout}},
+                 erx_domain:create(#{name => <<"never">>, memory => 4096, boot_timeout => -1})),
+    %% A domain that ends before it reports, here stopped through its pid, answers its
+    %% create with its end.
+    spawn_link(fun() -> Self ! {created, erx_domain:create(#{name => <<"silent">>, memory => 4096,
+                                                             boot_timeout => infinity})} end),
+    {create, #{id := 17, domain_pid := Stopped}} = next_call(),
+    _ = [next_call(), next_call(), next_call()],
+    exit(Stopped, shutdown),
+    ?assertEqual({stop, 17}, next_call()),
+    _ = [next_call(), next_call(), next_call()],
+    ?assertEqual({created, {error, {boot, stopped}}}, receive {created, _} = Ended -> Ended after 5000 -> none end).
+
+report_overtaken() ->
+    %% A domain that reports ready and ends at once: its end reaches the service
+    %% before its report, which its side hands the domain pid only as the service
+    %% closes that side (the fake's close_side, as the lane driver's finish reads
+    %% the lane to its end). The create still answers ok, the pid passing the report
+    %% on before it ends.
+    {ok, Domain} = erx_domain:create(#{name => <<"overtaken">>, memory => 4096}),
+    ?assertEqual(18, erx_domain:id(Domain)),
+    ?assertMatch({create, #{id := 18}}, next_call()),
+    _ = [next_call(), next_call(), next_call()],
+    ?assertEqual({close_side, 18, {domain_down, 18, {halt, 0}}}, next_call()),
+    ?assertEqual({disconnect, 180}, next_call()),
+    ?assertEqual({retire, 18}, next_call()),
+    %% The side's frame may reach the pid behind the service's domain_down, since ERTS
+    %% orders only one sender's messages: the pid passes on the report still queued
+    %% behind it before it ends, and the create still answers ok.
+    {ok, Behind} = erx_domain:create(#{name => <<"behind">>, memory => 4096}),
+    ?assertEqual(19, erx_domain:id(Behind)),
+    _ = [next_call(), next_call(), next_call(), next_call(), next_call(), next_call()],
+    ?assertEqual({retire, 19}, next_call()),
+    %% A domain pid killed before its domain ends passes on no report after: the
+    %% create answers with the end once the domain is gone.
+    Self = self(),
+    spawn_link(fun() -> Self ! {created, erx_domain:create(#{name => <<"silent">>, memory => 4096,
+                                                             boot_timeout => infinity})} end),
+    {create, #{id := 20, domain_pid := Killed}} = next_call(),
+    _ = [next_call(), next_call(), next_call()],
+    exit(Killed, kill),
+    ?assertEqual({stop, 20}, next_call()),
+    _ = [next_call(), next_call(), next_call()],
+    ?assertEqual({created, {error, {boot, stopped}}}, receive {created, _} = Ended -> Ended after 5000 -> none end).
 
 service_end_ends_domain_pids() ->
     %% The service's end ends every domain pid with its reason: no domain
     %% outlives the system domain, so the pid has nothing left to stop.
     {ok, Domain} = erx_domain:create(#{name => <<"last">>, memory => 4096}),
-    ?assertMatch({create, #{id := 15}}, next_call()),
-    ?assertEqual({open_side, 15, 'last@erxos', 150}, next_call()),
-    ?assertEqual({start, 15}, next_call()),
+    ?assertMatch({create, #{id := 21}}, next_call()),
+    ?assertEqual({open_side, 21, 'last@erxos', 210}, next_call()),
+    ?assertEqual({export, 21, [send]}, next_call()),
+    ?assertEqual({start, 21}, next_call()),
     Pid = erx_domain:pid(Domain),
     Ref = monitor(process, Pid),
     %% An exit message forged in the service's name while it lives ends nothing.
     Service = whereis(erx_domain_srv),
-    Pid ! {'EXIT', Service, {domain_down, 15, {halt, 0}}},
+    Pid ! {'EXIT', Service, {domain_down, 21, {halt, 0}}},
     ?assertEqual(timeout, receive {'DOWN', Ref, process, _, Forged} -> Forged after 200 -> timeout end),
     exit(Service, kill),
     ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).

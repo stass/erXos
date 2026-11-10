@@ -1141,7 +1141,10 @@ The domain pid is also its domain's **correspondent**: the one process of
 the system domain the domain knows from its start, since its boot
 information names it and it exports itself to the domain with `send`
 before the domain's first thread runs. Init reports ready to it, naming
-the domain's agents; the domain pid keeps the connection agent's pid from
+the domain's agents, with `{erx_ready, #{connections => Agent}}` (edit 65
+of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)),
+once its boot script has started every application and before any `-eval`;
+the domain pid keeps the connection agent's pid from
 that report for the domain's life, which is the agent's life too
 ([design-runtime.md](design-runtime.md#connections-in-erts)), and passes
 the report on to the domain service. From then on it relays the
@@ -2011,7 +2014,8 @@ logger proxy, which sends the domain's log records to
 the console facet ([design-live.md](design-live.md#the-console)); and the
 domain agent that answers inspection ([design-live.md](design-live.md)).
 Init reports ready to the domain pid, naming the agents, the connection
-agent among them, which exports them to the system domain by that
+agent among them, in `{erx_ready, #{connections => Agent}}`, a map other
+agents join as they come to exist, which exports them to the system domain by that
 message; the domain pid keeps the connection agent's pid, the one process
 that does, and passes the report to the domain service, which from then
 on sends the domain, through the domain pid, the connection-control

@@ -123,10 +123,14 @@ class MediumBootTest < Minitest::Test
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
     assert_includes expression, 'DlNotService=Lib:configured(12,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
-    assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields)->DlRunWith=fun(Name,Fields,Then)->')
+    assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields,UpFields)->DlDeath=fun(Id)->')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.
-    assert_match(/\},\#\{runtime=>42,args=><<"--",0,.*"-eval",0,"erlang:halt\(case erlang:system_info\(emu_flavor\) of jit->0;_->2 end\)",0>>\}\)\]\)\.\z/,
+    assert_match(/\},\#\{runtime=>42,args=><<"--",0,.*"-eval",0,"erlang:halt\(case erlang:system_info\(emu_flavor\) of jit->0;_->2 end\)",0>>\},/,
                  expression)
+    # The stopped and the killed domain stay up as nodes: no -eval, so no halt of their own.
+    up = expression[/\},(\#\{args=><<[^>]*>>\})\)\]\)\.\z/, 1]
+    assert_includes up, '"-proto_dist",0,"erx",0>>'
+    refute_includes up, '-eval'
     assert_match(/args=><<"--",0,"-root",0,.*"-eval",0,"erlang:halt\(length\(.*init:get_argument\(sname\){7}",0>>,env=><<>>/, expression)
     refute_match(/[^\x20-\x7e]/, expression)
     merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],

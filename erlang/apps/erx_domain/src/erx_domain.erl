@@ -6,8 +6,12 @@
 Creating and stopping domains (docs/design-domains.md, "Erlang interface").
 
 create/1 asks the domain service for a domain and returns {ok, Domain} once
-the domain's first thread runs. Spec names the domain, an identifier, and
-gives the domain library's request fields directly (TODO.md, the request
+the domain's init reports ready to its domain pid, after the boot script has
+started every application and before any -eval runs (edit 65 of
+docs/design-runtime.md); a domain with no system connection, which has no way
+to report, is ready when its first thread runs. Spec names the domain, an
+identifier, may set boot_timeout, how long in milliseconds init has to report
+(default 10000, or infinity), and gives the domain library's request fields directly (TODO.md, the request
 fields item): runtime, release and release_files (the boot image's
 indexes), memory, outer, grant, lane, args, env, and optionally
 connections, flags, spaces and limits (erx_domain_lib's spec(), less id and
@@ -20,7 +24,7 @@ domain. Monitoring the domain pid watches the domain: it ends with
 or stopped.
 """.
 
--export([create/1, stop/2, id/1, node/1, pid/1]).
+-export([create/1, info/1, stop/2, id/1, node/1, pid/1]).
 -export_type([domain/0, spec/0]).
 
 -opaque domain() :: {erx_domain, Id :: pos_integer(), Node :: node(), Pid :: pid()}.
@@ -29,15 +33,30 @@ or stopped.
 -doc """
 Creates a domain: {ok, Domain}, or {error, Reason}, Reason bad_identifier,
 name_taken, quota, system_limit, no_memory, badarg (a field of the wrong
-shape), {bad_spec, Key} (a key the spec does not take), {system_side,
-Error} (the system side of its system connection did not open: noproc where
-the system domain is no node), {start, Error}, or the domain library's own
-refusal. On every error nothing of the domain
-remains but its id, which is never reused.
+shape), {bad_spec, Key} (a key the spec does not take, or a boot_timeout
+that is no timeout), {system_side, Error} (the system side of its system
+connection did not open: noproc where the system domain is no node),
+{export, Error} (the export table refused the domain pid's), {start, Error},
+timeout (init did not report ready within boot_timeout, and the service
+stopped the domain), {boot, Info} (the domain ended before it reported,
+Info as in {domain_down, Id, Info}), or the domain library's own refusal.
+On every error nothing of the domain remains but its id, which is never
+reused.
 """.
 -spec create(spec()) -> {ok, domain()} | {error, term()}.
 create(Spec) ->
     gen_server:call(erx_domain_srv, {create, Spec}, infinity).
+
+-doc """
+What Domain's domain pid holds: connections, the connection agent its init's
+ready report named (none before the report), and dropped, how many messages
+it dropped as none its domain may send it. {error, badarg} for a domain that
+has ended. The domain pid answers itself, behind whatever its mailbox holds,
+so a caller waits at most five seconds and exits with timeout past that.
+""".
+-spec info(domain()) -> {ok, #{connections := pid() | none, dropped := non_neg_integer()}} | {error, badarg}.
+info({erx_domain, Id, _, _}) ->
+    gen_server:call(erx_domain_srv, {info, Id}, 5000).
 
 -doc "exit(pid(Domain), Reason).".
 -spec stop(domain(), term()) -> ok.

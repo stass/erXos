@@ -1310,14 +1310,51 @@ party_forged(lane_party_t *party, const erx_etf_pid_t *eval)
 }
 
 /*
+ * Whether a frame record is init's ready report (edit 65 of docs/design-runtime.md): a
+ * SEND_SENDER {22, From, To} from a domain pid to the domain pid the root wrote on the
+ * boot page, a pid of the system node of words BOOT_PID_NUMBER and BOOT_PID_SERIAL and
+ * creation 4, of {erx_ready, #{connections => Agent}}, Agent a pid of the domain.
+ */
+static bool
+party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
+{
+	/* SMALL_TUPLE_EXT of 3, SMALL_INTEGER_EXT DOP_SEND_SENDER */
+	static const uint8_t ctl_head[] = { 104, 3, 97, DOP_SEND_SENDER };
+	/* NEW_PID_EXT, SMALL_ATOM_UTF8_EXT of the system node; ID, Serial and Creation follow */
+	static const uint8_t to_head[] = { 88, 119, sizeof(SYSTEM_NODE) - 1 };
+	const size_t to_len = sizeof(to_head) + sizeof(SYSTEM_NODE) - 1 + 12;
+	/* SMALL_TUPLE_EXT of 2, the atom erx_ready, MAP_EXT of one pair, the atom connections; Agent follows */
+	static const uint8_t head[] = { 104, 2, 119, 9, 'e', 'r', 'x', '_', 'r', 'e', 'a', 'd', 'y', 116, 0, 0, 0, 1,
+	    119, 11, 'c', 'o', 'n', 'n', 'e', 'c', 't', 'i', 'o', 'n', 's' };
+	party_frame_t frame;
+	erx_etf_pid_t from, agent;
+	const uint8_t *to, *numbers;
+
+	if (!party_frame_split(record, len, &frame) || !party_ctl_starts(&frame, ctl_head, sizeof(ctl_head)) ||
+	    frame.ctl_len != sizeof(ctl_head) + PARTY_PID_LEN + to_len ||
+	    !party_pid_read(party, frame.ctl + sizeof(ctl_head), PARTY_PID_LEN, &from))
+		return (false);
+	to = frame.ctl + sizeof(ctl_head) + PARTY_PID_LEN;
+	numbers = to + sizeof(to_head) + sizeof(SYSTEM_NODE) - 1;
+	return (memcmp(to, to_head, sizeof(to_head)) == 0 &&
+	    memcmp(to + sizeof(to_head), SYSTEM_NODE, sizeof(SYSTEM_NODE) - 1) == 0 &&
+	    party_be32(numbers) == BOOT_PID_NUMBER && party_be32(numbers + 4) == BOOT_PID_SERIAL &&
+	    party_be32(numbers + 8) == 4 && frame.payload_len == sizeof(head) + PARTY_PID_LEN &&
+	    memcmp(frame.payload, head, sizeof(head)) == 0 &&
+	    party_pid_read(party, frame.payload + sizeof(head), PARTY_PID_LEN, &agent));
+}
+
+/*
  * Maps both sides of domain id's system connection into the root as the system domain's
- * runtime would, and opens party on them. False on any failure; party_close releases
- * what it mapped either way.
+ * runtime would, opens party on them and takes the domain's first frame, its init's ready
+ * report. False on any failure; party_close releases what it mapped either way.
  */
 static bool
 party_open(uint32_t id, lane_party_t *party)
 {
 	const erx_dom_handles_t *held;
+	static uint8_t record[RECORD_MAX];
+	size_t len;
 	erx_boot_connection_t sys;
 	uint64_t page;
 
@@ -1341,7 +1378,7 @@ party_open(uint32_t id, lane_party_t *party)
 	    erx_lane_writer_init(&party->writer, (void *)(uintptr_t)party->own, (const void *)(uintptr_t)party->peer_side,
 	    sys.in_size) &&
 	    erx_lane_reader_init(&party->reader, (const void *)(uintptr_t)party->peer_side, (void *)(uintptr_t)party->own,
-	    sys.out_size));
+	    sys.out_size) && party_take(party, record, FIRST_NS, &len) && party_ready(party, record, len));
 }
 
 /* Releases what party_open mapped. False when a release fails. */

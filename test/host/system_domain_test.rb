@@ -12,12 +12,13 @@ class SystemDomainTest < Minitest::Test
   PLAIN = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
 
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
-  # and over the erx carrier in place of none, so each is a node; the manifest differs
+  # over the erx carrier, as MediumBoot's, so each is a node; the manifest differs
   # from MediumBoot's only in that row's arguments and in the second row, peer.
   def test_the_configured_domains_stay_up_as_nodes_and_are_the_manifests_one_change
     row_args = Suite::DOMAIN_ROW[/^  args "(.*)"$/, 1].split
     medium_args = Erx::MediumBoot::DOMAIN_ARGS[0...-2]
-    assert_equal medium_args.join(' ').sub('-kernel start_distribution false', '-no_epmd -proto_dist erx'), row_args.join(' ')
+    assert_equal medium_args, row_args
+    assert_equal %w[-no_epmd -proto_dist erx], row_args.each_cons(3).find { |three| three.first == '-no_epmd' }
     refute_includes row_args, '-eval'
     refute_includes row_args, 'start_distribution'
     assert_match(/^  restarts 0$/, Suite::DOMAIN_ROW)
@@ -44,17 +45,17 @@ class SystemDomainTest < Minitest::Test
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
     running, ends, ended = points.last(3)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
-    good = '{service_kill,[{5,erts@erxos,running},{6,peer@erxos,running}],system@erxos,4,' \
-           '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}]}'
+    good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
+           '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
     running.fetch(:verify).call("1> #{good}\r\n")
     ['timeout', good.sub('system@erxos,4', 'nonode@nohost,0'), good.sub('[erts@erxos,peer@erxos]', '[erts@erxos]'),
      good.sub('{6,peer@erxos,6}', '{6,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
-     good.sub('{6,peer@erxos,running}', '{6,peer@erxos,built}')].each do |line|
+     good.sub('{6,peer@erxos,ready}', '{6,peer@erxos,running}'), good.sub('{2,erts@erxos}', '{3,erts@erxos}')].each do |line|
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
     end
     refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     down = '{domain_down,5,{halt,69}}'
-    good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,running}],[noconnection,noconnection],gone,' \
+    good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,ready}],[noconnection,noconnection],gone,' \
                 "[{5,{halt,69}},{6,stopped}],[#{down},#{down},{error,#{down}}]," \
                 'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection]}'
     ends.fetch(:verify).call("#{good_ends}\r\n")
@@ -62,7 +63,7 @@ class SystemDomainTest < Minitest::Test
     # told noconnection for erts's end (no edit 56) or erts's reason for peer's end (no
     # creation check); erts still answering when the spawn was made; a library call given
     # the raw domain_down reason, not stock's result for a node gone down.
-    [good_ends.sub('[{5,erts@erxos,running}]', '[]'), good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{5,stopped},{6,stopped}]'),
+    [good_ends.sub('[{5,erts@erxos,ready}]', '[]'), good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{5,stopped},{6,stopped}]'),
      good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{6,stopped}]'),
      good_ends.sub("[#{down},#{down},{error,#{down}}]", '[noconnection,noconnection,{error,noconnection}]'),
      good_ends.sub('[noconnection,noconnection]', '[{domain_down,5,x},{domain_down,5,x}]'),

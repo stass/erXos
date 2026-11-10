@@ -43,17 +43,11 @@ module Erx
   module SystemDomain
     MACHINE = MediumBoot::MACHINE
     # What the configured domains' ERTS runs: MediumBoot's arguments without the -eval
-    # that halts, so its init runs the release's boot script and the domain stays up, and
-    # over the erx carrier in place of no carrier, so the domain is a node.
-    NO_CARRIER = %w[-kernel start_distribution false].freeze
-    CARRIER = %w[-no_epmd -proto_dist erx].freeze
+    # that halts, so its init runs the release's boot script over the erx carrier and the
+    # domain stays up as a node.
     raise Error, 'MediumBoot::DOMAIN_ARGS no longer ends in its -eval' unless MediumBoot::DOMAIN_ARGS[-2] == '-eval'
 
-    BOOT_ARGS = MediumBoot::DOMAIN_ARGS[0...-2]
-    NO_CARRIER_AT = BOOT_ARGS.each_cons(NO_CARRIER.size).find_index(NO_CARRIER)
-    raise Error, 'MediumBoot::DOMAIN_ARGS no longer runs with no carrier' unless NO_CARRIER_AT
-
-    DOMAIN_ARGS = [*BOOT_ARGS[0...NO_CARRIER_AT], *CARRIER, *BOOT_ARGS[(NO_CARRIER_AT + NO_CARRIER.size)..]].freeze
+    DOMAIN_ARGS = MediumBoot::UP_ARGS
 
     # MediumBoot's configured row with DOMAIN_ARGS, and a second domain, peer, of the same
     # limits and arguments: restarts 0, so the domain service starts each once, at boot.
@@ -78,10 +72,10 @@ module Erx
     # built.
     SERVICE_KILL_LIVES = 'SdLives=fun()->lists:sort([{SdI,SdN,SdS}||#{id:=SdI,node:=SdN,state:=SdS}<-' \
                          'erx_domain_core:domains(maps:get(core,sys:get_state(erx_domain_srv)))]) end'
-    # SdWait: polls SdLives every 100 ms at most N times until two domains run, and answers
-    # the last SdLives.
+    # SdWait: polls SdLives every 100 ms at most N times until two domains are ready, their
+    # inits having reported, and answers the last SdLives.
     SERVICE_KILL_WAIT = 'SdWait=fun SdW(0)->SdLives();SdW(SdK)->case SdLives() of ' \
-                        '[{_,_,running},{_,_,running}]=SdLv->SdLv;_->timer:sleep(100),SdW(SdK-1) end end'
+                        '[{_,_,ready},{_,_,ready}]=SdLv->SdLv;_->timer:sleep(100),SdW(SdK-1) end end'
     # SdAsk: erpc:call of erlang:F(A) at a node, within 10 s, or the class and reason it
     # raised. SdPeers: each domain's id with its node() and creation, as it answers them.
     SERVICE_KILL_ASK = 'SdAsk=fun(SdN,SdF,SdA)->try erpc:call(SdN,erlang,SdF,SdA,10000) catch SdC:SdR->{SdC,SdR} end end,' \
@@ -97,6 +91,15 @@ module Erx
                           'maps:get(core,sys:get_state(erx_domain_srv)))]) end,' \
                           'SdUntil=fun SdU(_,0)->SdDeaths();SdU(SdN,SdK)->case SdDeaths() of SdDs when length(SdDs)>=SdN->SdDs;' \
                           '_->timer:sleep(100),SdU(SdN,SdK-1) end end'
+    # SdForged: messages to domain I's domain pid, of node N, shaped as the domain's own,
+    # the ready report and an answer, but sent by this shell, unwrapped: the pid drops and
+    # counts both, and its info names the agent the domain's own report named, a process
+    # of N. Answers the count and the agent's node.
+    SERVICE_KILL_FORGED = 'SdForged=fun(SdI,SdN)->SdPid=hd([SdP||#{id:=SdJ,pid:=SdP}<-erx_domain_core:domains(' \
+                          'maps:get(core,sys:get_state(erx_domain_srv))),SdJ=:=SdI]),' \
+                          'SdPid!{erx_ready,#{connections=>self()}},SdPid!{erx_connection_mapped,1},' \
+                          '{ok,#{connections:=SdAg,dropped:=SdDr}}=erx_domain:info({erx_domain,SdI,SdN,SdPid}),' \
+                          '{SdDr,node(SdAg)} end'
     # SdWatch: a system-domain process that traps exits, links to and monitors process P of
     # a domain, and answers the shell once it watches. Told {sd_spawn, Node}, it then makes a
     # spawn_request into Node and says so; told sd_go, it makes none. It answers
@@ -169,16 +172,17 @@ module Erx
     # Prints the answer, ends the two domains, prints how they ended, then kills the
     # service. The line starts with a binding, so the shell's echo of it starts neither
     # {service_kill nor {domain_ends, and only the printed answers match.
-    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL}," \
+    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
+                              "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL}," \
                               'SdL=SdWait(600),' \
-                              "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL)}])," \
+                              "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
                               "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
-      lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,running}" }.join(',')
+      lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,ready}" }.join(',')
       nodes = DOMAINS.keys.map { |name| "#{name}@erxos" }.join(',')
       peers = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,#{id}}" }.join(',')
-      "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}]}".freeze
+      "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}],{2,erts@erxos}}".freeze
     end
     SERVICE_KILL_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{service_kill,/n
     # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
@@ -189,7 +193,7 @@ module Erx
       erts = DOMAINS.fetch('erts')
       peer = DOMAINS.fetch('peer')
       down = "{domain_down,#{erts},{halt,69}}"
-      "{domain_ends,[{#{peer},stopped}],[{#{erts},erts@erxos,running}],[noconnection,noconnection],gone," \
+      "{domain_ends,[{#{peer},stopped}],[{#{erts},erts@erxos,ready}],[noconnection,noconnection],gone," \
         "[{#{erts},{halt,69}},{#{peer},stopped}],[#{down},#{down},{error,#{down}}]," \
         'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection]}'.freeze
     end

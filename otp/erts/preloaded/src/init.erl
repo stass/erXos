@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: a domain's runtime reports ready to its domain pid before -s,
+%% -run and -eval (report_ready/0).
+%%
 %% %CopyrightEnd%
 %%
 %%
@@ -1214,6 +1217,7 @@ do_boot(Init,Flags,Start) ->
 	     vars=BootVars},
     eval_script(BootList, Es),
 
+    report_ready(),
     start_em(Start),
     case b2a(get_flag(profile_boot,Flags,false)) of
         false -> ok;
@@ -1222,6 +1226,27 @@ do_boot(Init,Flags,Start) ->
             debug_profile_stop()
     end,
     ok.
+
+%% erXos edit 65 (docs/design-runtime.md, "The edits outside sys/erxos"): once the boot
+%% script has started every application, and before any -s, -run or -eval, a domain's
+%% runtime reports ready to its domain pid, which the boot page names, with
+%% {erx_ready, #{connections => Agent}}, naming its connection agent; the frame's
+%% encoding hands the agent out to the system domain with send (edit 8). The system
+%% domain, whose boot page names no domain pid, and a runtime that is no node, which
+%% runs no agent and has no system connection up, report nothing.
+report_ready() ->
+    case erlang:system_info(os_type) of
+        {unix, erxos} ->
+            case {erx_dist:boot(), whereis(erx_connections)} of
+                {{_Id, {_SystemId, _SystemNode, DomainPid}}, Agent} when is_pid(Agent) ->
+                    DomainPid ! {erx_ready, #{connections => Agent}},
+                    ok;
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
 
 get_root(Flags) ->
     case get_argument(root, Flags) of

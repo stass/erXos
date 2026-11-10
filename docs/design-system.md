@@ -1212,6 +1212,15 @@ ready, or `{error, Reason}` when the runtime fails or the spec's boot
 timeout passes first, after which the domain service has stopped and
 destroyed the domain, so in every error case nothing of it remains (A4,
 [design-domains.md](design-domains.md#principals-sessions-and-quotas)).
+A domain may report and end at once, as one whose `-eval` halts does, and
+its end may reach the domain service before its report. The service tells
+the domain pid of the end only once the domain's system side is closed,
+which reads the lane to its end, and the pid passes on every report still
+in its queue before it ends, so the service answers a create whose domain
+ended unreported only once its domain pid has ended too: `{ok, Domain}` if
+the report came, its end otherwise. A runtime that is no node reports
+nothing, so a domain with a system connection runs its release over the
+`erx` carrier, as every domain's release does.
 
 **On the stopgap.** The plan, its checks and its undo are the same code.
 Each step's kernel call is a request to the stopgap's root service, the

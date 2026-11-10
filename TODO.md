@@ -1268,11 +1268,23 @@ it; git history is the record of completed work.
   `runtimes/emu` and, under `erx.det=1`, forces `runtimes/emu` for every domain, configured rows
   included, whatever it names (design-runtime.md, "BeamAsm"), once the boot's mode reaches the
   system domain. Until then a create names the BeamAsm image by its index and gets it in any boot mode.
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`build/5`):
-  `create/1` answers once the domain's first thread starts, not on the domain's ready report,
-  and `boot_timeout` (design-domains.md "Erlang interface") is not implemented, so a domain
-  whose runtime never comes up still counts as created. Wait for the ready report, with the
-  timeout, once runtimes send it.
+* [Medium] connection agent, `otp/lib/kernel/src/erx_connections.erl` (`close_side`): a
+  domain that reports ready and ends at once (an `-eval` that halts) may have its end reach
+  the domain service while its report is still in the lane, unread by the system side's
+  port, and `close_side` ends that port without reading the lane to its `wpos`, so the
+  report is lost and the create answers `{error, {boot, Info}}` though the domain reported.
+  The service already answers such a create only once the domain pid has ended, which
+  follows every report the side delivered (`erx_domain_srv:settle/2`,
+  `erx_domain_pid:finish/2`); the lane driver's finish (control command 2,
+  design-runtime.md "Connections in ERTS") closes the rest. medium_boot's halting domains run this race until then.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_pid.erl`: a domain can
+  fill its domain pid's mailbox as fast as its lane delivers, and the pid passes each
+  answer-shaped message after the ready report on to the domain service, which every domain
+  shares; the service drops them without counting (design-system.md "What a domain sends
+  the domain service"). Bound what a domain can make the pid and the service spend, and
+  count the service's drops, when the connection protocol applies answers.
+* [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
+  always get the default 10 s boot timeout; the manifest has no field for it.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names
   quota is fixed at 64 per principal, not the manifest principal's own field, which the
   library's view does not expose yet. Expose it in `configured/0` (or a principal entry) and

@@ -25,13 +25,16 @@ domains bind theirs at boot outside the quota, since the checked manifest
 bounds them.
 
 A domain's life: building (admitted, the library not yet asked) -> built
-(the library made it) -> running (its first thread started) -> ended (its
-end arrived) -> retired (its record is gone). A creation the library refuses
+(the library made it) -> running (its first thread started) -> ready (its
+init reported ready) -> ended (its end arrived) -> retired (its record is
+gone). A running domain whose boot timeout passed is stopping instead of
+ready, so no late report makes it ready; a domain may end from built,
+running, ready or stopping. A creation the library refuses
 goes from building to nothing, freeing its name. A transition from any other
 state is a bug of the caller and fails with a badmatch.
 """.
 
--export([new/1, host/1, admit/4, built/5, running/2, failed/2, ended/5, retired/2,
+-export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5, retired/2,
          restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0]).
 
@@ -41,7 +44,7 @@ state is a bug of the caller and fails with a badmatch.
 -define(DEATHS_KEPT, 16).
 
 -type origin() :: request | {configured, Row :: non_neg_integer()}.
--type life() :: building | built | running | ended.
+-type life() :: building | built | running | ready | stopping | ended.
 -type info() :: {halt, integer()} | crash | {fault, integer()} | stopped.
 -type domain() :: #{id := pos_integer(), name := erx_ident:t(), node := node(),
                     principal := pos_integer(), origin := origin(), state := life(),
@@ -111,6 +114,16 @@ built(Id, Connection, Pid, Ref, State) ->
 running(Id, State) ->
     update(Id, built, #{state => running}, State).
 
+-doc "Domain Id's init reported ready.".
+-spec ready(pos_integer(), state()) -> state().
+ready(Id, State) ->
+    update(Id, running, #{state => ready}, State).
+
+-doc "Domain Id's boot timeout passed before its init reported ready, and it is being stopped.".
+-spec stopping(pos_integer(), state()) -> state().
+stopping(Id, State) ->
+    update(Id, running, #{state => stopping}, State).
+
 -doc "The library refused to build domain Id: its record goes and its name is free. Its id stays spent.".
 -spec failed(pos_integer(), state()) -> state().
 failed(Id, #{domains := Domains} = State) ->
@@ -123,14 +136,15 @@ Info for {domain_down, Id, Info}, the domain as it was, and the state with the
 domain ended, its name free and its death recorded, the last ?DEATHS_KEPT per
 principal. Slogan is what the domain service read from a crash's crash
 area, which the crash's death record keeps; none for any other end. The end
-of an unknown id, or of a domain neither built nor running, is none.
+of an unknown id, or of a domain neither built, running, ready nor stopping,
+is none.
 """.
 -spec ended(pos_integer(), {atom(), integer()}, slogan() | none, integer(), state()) ->
           {info(), domain(), state()} | none.
 ended(Id, End, Slogan, Now, #{domains := Domains, deaths := Deaths} = State) ->
     case Domains of
         #{Id := #{state := Life, principal := Principal, name := Name} = Domain}
-          when Life =:= built; Life =:= running ->
+          when Life =:= built; Life =:= running; Life =:= ready; Life =:= stopping ->
             Info = info(End),
             Death = death(#{id => Id, name => Name, info => Info, at => Now}, Slogan),
             Kept = lists:sublist([Death | maps:get(Principal, Deaths, [])], ?DEATHS_KEPT),
