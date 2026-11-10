@@ -162,12 +162,12 @@ The order reaches a usable system first:
   person can watch before erXos's kernel exists. The order puts the
   demos a person sees soonest first. Domains over connections come first
   (1b-A), since every later item is a domain or runs in one; then
-  1b-B's first slice, the session domain, and the web on the developer's
-  host over the host link, which needs no device on the machine (1b-C's
-  parts 1 and 2); then drivers in their own domains (1b-E) and
-  networking on QEMU (1b-G), which starts at once in the system domain,
-  as M6's block driver did, and moves into the network domain with
-  1b-E; then the kiosk on QEMU `virt` drawn by LVGL
+  1b-B's first slice, the session domain; then drivers in their own
+  domains (1b-E), with the storage domain, and networking on QEMU
+  (1b-G), which starts at once in the system domain, as M6's block
+  driver did, and moves into the network domain with 1b-E; then the
+  web on the developer's host over the host link, which needs no device
+  on the machine (1b-C's parts 1 and 2); then the kiosk on QEMU `virt` drawn by LVGL
   (1b-C's part 3), with 1b-B's sub-space ports, which run the LVGL
   program. Programs as ports of their sessions over pipes and the first
   part of the POSIX personality (1b-D) follow, with toybox's applets, the
@@ -2560,7 +2560,7 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
   beside M1 and carries ERTS's port before the QEMU boot of M3; the shell
   follows M4.
 * Phase 1b runs in the order of its visible demos: 1b-A; the session
-  domain and 1b-C's parts 1 and 2; 1b-E and 1b-G; 1b-C's part 3 with
+  domain; 1b-E and 1b-G; 1b-C's parts 1 and 2; 1b-C's part 3 with
   1b-B's sub-space ports; 1b-D, then toybox's applets; 1b-F last, part 7
   after 1b-D. 1b-A comes first because every other item is a domain or
   runs in one. BeamAsm runs beside 1b-A, and 1b-H whenever capacity is
