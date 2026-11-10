@@ -7,6 +7,7 @@ require 'fileutils'
 require 'set'
 require 'json'
 require_relative 'bootstrap_memory'
+require_relative 'qemu_reuse'
 require_relative 'runner'
 
 module Erx
@@ -353,6 +354,11 @@ module Erx
     # 'link'. The guest, not link, ends a run with machine_end, so the two do not combine.
     # Without link, hostlink is QemuPlan.argv's: nil for QEMU's null device, or
     # QemuPlan::NO_HOSTLINK for a machine with no host link UART.
+    #
+    # Inside the QEMU gate (QemuReuse.active), a boot that passed before on
+    # the same inputs does not start QEMU: its stored serial log is written to
+    # the run's serial log and replayed, and the report names it under
+    # 'reused_from'.
     def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
             dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
@@ -368,11 +374,20 @@ module Erx
       serial = File.join(directory, 'serial.log')
       socket = link && File.join(directory, 'hostlink.sock')
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
-      argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
-                           cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd, command_line: command_line,
-                           dtb: dtb, disks: disks, hostlink: socket || hostlink, nic: nic)
+      plan = { accel: accel, cpus: cpus, memory_mib: memory_mib, program: @program, command_line: command_line }
+      argv = QemuPlan.argv(**plan, image: image, serial: serial, serial_input: keyboard, initrd: initrd, dtb: dtb,
+                                   disks: disks, hostlink: socket || hostlink, nic: nic)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
+      reuse = QemuReuse.active
+      key = nil
+      if reuse && reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink)
+        key = boot_key(reuse, plan: plan, image_sha256: report.fetch('image_sha256'), typed: matcher.types?, initrd: initrd,
+                              dtb: dtb, hostlink: hostlink, checkpoints: checkpoints, machine_end: machine_end)
+        stored = stored_boot(reuse, key, report: report, checkpoints: checkpoints, directory: directory) if key
+        return stored if stored
+      end
+      reuse&.ran
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       typing = nil
       session = nil
@@ -394,6 +409,8 @@ module Erx
         matcher.drain(serial, elapsed: elapsed(guest_started))
         raise Error, early_end_message(record.fetch('log')) unless matcher.done?
         report['state'] = 'passed'
+        report['elapsed_seconds'] = elapsed(started)
+        reuse.hold(key: key, serial: serial, report: report) if key
       rescue CommandError => error
         report['state'] = error.result.fetch('state') == 'timed_out' ? 'timed_out' : 'failed'
         raise
@@ -414,6 +431,54 @@ module Erx
     end
 
     private
+
+    # Whether QEMU's inputs alone determine this boot (QemuReuse): no disk the
+    # guest may write, no network device, and no host link a host side serves.
+    def reusable?(link:, nic:, disks:, hostlink:)
+      link.nil? && nic.nil? && disks.empty? && (hostlink.nil? || hostlink == QemuPlan::NO_HOSTLINK)
+    end
+
+    # The boot's key. The keyed plan is the boot's own (plan, as run passes it
+    # to QemuPlan.argv) with each input file by its SHA-256 and the run's own
+    # paths by fixed names. Nil, so the boot runs, when QEMU, an initrd or a
+    # device tree is not a file.
+    def boot_key(reuse, plan:, image_sha256:, typed:, initrd:, dtb:, hostlink:, checkpoints:, machine_end:)
+      qemu = QemuReuse.qemu_identity(@program)
+      return nil unless qemu && [initrd, dtb].compact.all? { |path| File.file?(path) }
+
+      by_digest = ->(path) { path && "sha256:#{Digest::SHA256.file(path).hexdigest}" }
+      keyed = QemuPlan.argv(**plan, image: "sha256:#{image_sha256}", serial: '/serial.log', serial_input: typed ? '/keyboard' : nil,
+                                    initrd: by_digest.call(initrd), dtb: by_digest.call(dtb), hostlink: hostlink)
+      QemuReuse.boot_key(plan: keyed, checkpoints: checkpoints, machine_end: machine_end, qemu: qemu, harness: reuse.harness)
+    end
+
+    # The report of the stored boot of key, or nil when there is none or its
+    # log no longer completes today's transcript and verifiers, which leaves
+    # a diagnostic and removes the log written for the replay before QEMU
+    # writes the fresh one. A reused report carries the passing run's
+    # checkpoints and time and names the stored log under 'reused_from'.
+    def stored_boot(reuse, key, report:, checkpoints:, directory:)
+      hit = reuse.find(key)
+      return nil unless hit
+
+      serial = report.fetch('serial_log')
+      File.binwrite(serial, hit.bytes)
+      unless Transcript.new(checkpoints: checkpoints).drain(serial, elapsed: 0)
+        reuse.diagnose("#{hit.serial} no longer completes the transcript; the boot runs fresh")
+        FileUtils.rm_f(serial)
+        return nil
+      end
+
+      reused = report.merge('state' => 'passed', 'checkpoints' => hit.checkpoints, 'elapsed_seconds' => hit.elapsed_seconds,
+                            'reused_from' => hit.serial)
+      File.write(File.join(directory, 'report.json'), JSON.pretty_generate(reused) + "\n")
+      reuse.reused(key, hit)
+      reused
+    rescue Error, SystemCallError => e
+      reuse.diagnose("#{hit&.serial || key} did not replay (#{e.message}); the boot runs fresh")
+      FileUtils.rm_f(report.fetch('serial_log'))
+      nil
+    end
 
     # Why QEMU ended before the transcript was whole: a signal its log names, or an exit.
     # Only the signal's and the sender's numbers reach the message. An unreadable log

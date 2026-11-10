@@ -6,6 +6,7 @@ require_relative 'bounded_file'
 require_relative 'declaration_files'
 require_relative 'error'
 require_relative 'qemu'
+require_relative 'qemu_reuse'
 require_relative 'runner'
 
 module Erx
@@ -49,12 +50,15 @@ module Erx
     Context = Data.define(:root, :jobs)
 
     # Cells map a name to one of CELL_STATUSES; a status outside it cannot be built.
-    Result = Data.define(:cells, :notes) do
-      def initialize(cells:, notes:)
+    # Boots is how the suite's boots went (QemuReuse::Boots): reuse is not a
+    # cell status, because a cell over a reused boot is still judged by
+    # today's code, from the stored log; the table names every reused log.
+    Result = Data.define(:cells, :notes, :boots) do
+      def initialize(cells:, notes:, boots: QemuReuse::NO_BOOTS)
         unknown = cells.values - CELL_STATUSES
         raise Error, "QEMU suites: unknown cell status #{unknown.first.inspect}" unless unknown.empty?
 
-        super(cells: cells.dup.freeze, notes: notes.dup.freeze)
+        super(cells: cells.dup.freeze, notes: notes.dup.freeze, boots: boots)
       end
     end
 
@@ -129,30 +133,55 @@ module Erx
     # beyond the expected ones, such as a conformance case, is kept as
     # reported. A suite that raises a domain error is a failed suite carrying
     # the message; any other exception is a bug in the gate and propagates.
-    def run(suites:, context:)
+    # With reuse, a QemuReuse::Session, each suite runs inside it: its
+    # reusable boots that passed before are reused, and its fresh boots are
+    # recorded only when the suite passed; a suite that did not pass forgets
+    # the boots it reused, so its next run boots them again.
+    def run(suites:, context:, reuse: nil)
       suites.to_h do |suite|
-        [suite.name, held_to_its_cells(suite, suite.run.call(context))]
-      rescue Error => error
-        [suite.name, result({ 'run' => 'failed' }, notes: [error.message])]
+        next [suite.name, judged(suite, context)] unless reuse
+
+        result, boots = reuse.suite(suite.name) { judged(suite, context) }
+        [suite.name, result.with(boots: boots.close(passed: status(result) == 'passed'))]
       end
     end
 
-    # The report as terminal lines: one row per suite, the notes of each
-    # suite that did not pass, then the gate's own line.
+    def judged(suite, context)
+      held_to_its_cells(suite, suite.run.call(context))
+    rescue Error => error
+      result({ 'run' => 'failed' }, notes: [error.message])
+    end
+    private_class_method :judged
+
+    # The report as terminal lines: one row per suite, with how many of its
+    # boots were reused; the notes of each suite that did not pass; each
+    # reused log and each reuse diagnostic; then the gate's own line, which
+    # counts the boots reused.
     def table(results)
       rows = results.map do |name, entry|
         cells = entry.cells.map { |cell, value| "#{cell} #{value}" }.join(', ')
-        "#{name.ljust(16)} #{status(entry).ljust(11)} #{cells}"
+        "#{name.ljust(16)} #{status(entry).ljust(11)} #{cells}#{reuse_mark(entry.boots)}"
       end
       notes = results.flat_map do |name, entry|
         status(entry) == 'passed' ? [] : entry.notes.map { |note| "#{name}: #{note}" }
       end
+      reused_lines = results.flat_map { |name, entry| entry.boots.reused.map { |log| "#{name}: reused from #{log}" } }
+      reuse_diagnostics = results.flat_map { |name, entry| entry.boots.diagnostics.map { |text| "#{name}: #{text}" } }
       statuses = results.values.map { |entry| status(entry) }
       pending = statuses.count('pending')
-      [*rows, *notes,
+      reused = results.values.sum { |entry| entry.boots.reused.size }
+      [*rows, *notes, *reused_lines, *reuse_diagnostics,
        "qemu gate: #{overall(statuses)}; #{results.size} suites, #{pending} pending; " \
+       "#{reused} boots reused from earlier passes; " \
        "suites under #{SUITE_ACCELERATOR}, smoke under #{SMOKE_ACCELERATOR}"]
     end
+
+    def reuse_mark(boots)
+      return '' if boots.reused.empty?
+
+      " (#{boots.reused.size} of #{boots.reused.size + boots.fresh} boots reused)"
+    end
+    private_class_method :reuse_mark
 
     # A declared cell reported pending beside cells that ran did not run either: only a
     # suite whose every cell is pending may leave one pending.

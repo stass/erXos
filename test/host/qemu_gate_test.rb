@@ -176,6 +176,6 @@ class QemuGateTest < Minitest::Test
     assert_match(/\Aa +incomplete +hvf-1cpu passed, hvf-4cpu not_run\z/, lines[0])
     assert_match(/\Ab +pending +case x pending\z/, lines[1])
     assert_equal 'a: hvf-4cpu was expected', lines[2]
-    assert_equal 'qemu gate: incomplete; 2 suites, 1 pending; suites under hvf, smoke under tcg', lines[3]
+    assert_equal 'qemu gate: incomplete; 2 suites, 1 pending; 0 boots reused from earlier passes; suites under hvf, smoke under tcg', lines[3]
   end
 end

@@ -51,9 +51,10 @@ check-sources:
 # Every kernel-touching change runs this: all QEMU suites, discovered from
 # tools/lib/erx/qemu_suites/, under HVF; TCG runs only the production image's
 # deterministic transcript and a one-CPU boot smoke. A host whose QEMU lacks
-# HVF or TCG fails the gate.
+# HVF or TCG fails the gate. It runs every boot fresh; `tools/erx check-qemu`
+# without --fresh reuses boots that passed on the same inputs.
 check-qemu:
-	$(RUBY) tools/erx check-qemu --jobs $(JOBS)
+	$(RUBY) tools/erx check-qemu --fresh --jobs $(JOBS)
 
 # Seeds a failure into a copy of the sources and checks the gate reports it.
 check-qemu-mutant:

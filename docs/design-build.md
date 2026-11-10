@@ -85,6 +85,65 @@ A record is written by rename after its step finishes, so an interrupted
 step leaves no record, and a record of another shape is refused with a
 diagnostic. Removing `build/memo` makes every step run again.
 
+### Reusing passing boots
+
+The QEMU gate (`tools/erx check-qemu`) does not boot again a guest that
+already passed on the same inputs: the boot's serial log is kept in a
+store and the suite judges that log instead (`tools/lib/erx/qemu_reuse.rb`).
+A suite's boots that go through `Qemu#run` are keyed there, by the SHA-256
+of what the guest's output depends on; a boot a suite starts some other
+way, such as the conformance roster's, always runs:
+
+* QEMU's arguments as `QemuPlan.argv` makes them, with the image, initrd
+  and device tree replaced by their SHA-256 and the run's own paths by
+  fixed names, so the accelerator, the CPU count, the memory and the
+  kernel command line are in it and no input's path is;
+* the transcript the harness watches and types from, and whether the guest
+  must end the machine;
+* QEMU itself, named as the build memo names a program (its real path,
+  its content, its install's libraries and the operating system's release);
+* the build tools' own code, tools/erx and every file below tools/lib, which
+  holds the suite files and the harness.
+
+Only a boot those inputs decide is reusable. One with a disk, a network
+device, a host link socket or a host link session talks to the host or
+leaves state its caller reads afterwards, and always runs. Reuse saves the
+boot, not the build: a suite builds its images first, since the key needs
+their content.
+
+On a hit QEMU does not start. The stored log is copied into the run's
+directory and replayed through the transcript, verifiers included; the
+report carries the stored run's checkpoint times and elapsed time and
+names the stored log under `reused_from`. The suite then judges the log
+with the code of the tree it runs in, as it would a fresh one, so a cell
+over a reused boot is passed or failed by today's judgement; reuse is not a
+cell status. The table marks each suite that reused a boot with how many,
+lists every reused log, and the gate's last line counts the boots reused.
+A log that no longer completes the transcript is a miss with a diagnostic.
+
+A fresh boot that completed its transcript is held, its log read at once,
+until its suite's verdict, and only a suite that passed records its boots;
+a suite that failed, timed out or went incomplete records nothing and
+forgets the records it reused, so its next run boots them again. The
+store is the directory `ERX_QEMU_RESULTS` names, by default
+`build/qemu-results`; worktrees on one host may share one, since no
+input's path is in the key. A store belongs to one host: the host's CPU
+model, which HVF hands the guest, is not in the key. Each record,
+`KEY.json` beside its log `KEY.log`, both owner-only, holds the key, the
+suite, the time, the log's SHA-256, the checkpoint times and the path of
+the run it came from, and is written by rename after its log. A record
+that does not parse, names another key, holds an impossible time, or whose
+log is missing, unreadable, over 64 MiB or changed is a miss with a
+diagnostic, never a hit and never a crash. The store is local developer
+state: a record lets the gate skip a boot and nothing more, and no build
+reads it. Those checks guard against damage; whoever can write the store
+can forge a pass, as whoever can write the tree can.
+
+`--fresh` runs every boot, for hunting a flaky test, and still records the
+passes. `make check-qemu`, the milestone gate's full QEMU suite, runs fresh;
+the landing gate's `tools/erx check-qemu --suite NAME` reuses. Removing the
+store makes every boot run again.
+
 ## Sources and imports
 
 `deps.lock` is a checked data file, with unique source identifiers, exact
