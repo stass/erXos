@@ -2450,13 +2450,17 @@ system domain gives it and keeps for it:
   `net` facet with its limits (`sockets`, `buffers`, `time_wait`,
   `ports`, `listen`, `addresses` and its `share`), each within its
   principal's policy and defaulting to the values the network stack's
-  design gives ([design-network-stack.md](design-network-stack.md#the-grant)).
-  The facet is a process of the network domain, which the network
-  service makes when the domain service introduces the client to it, as
-  a storage service makes its grants; the domain service keeps its grant
-  record as for any facet. The `netadmin` facet, which configures
-  interfaces and reads every client's statistics, is granted to
-  administrators only.
+  design gives
+  ([design-network-stack.md](design-network-stack.md#the-grant)). The
+  facet is a process of the network domain, which the network service
+  makes when the domain service introduces the client to it, as a
+  storage service makes its grants; the domain service keeps its grant
+  record as for any facet. The introduction carries the limits and the
+  client's `max_frame`, whose floor for a domain that holds `net` the
+  grant checks
+  ([design-domains.md](design-domains.md#principals-sessions-and-quotas)).
+  The `netadmin` facet, which configures interfaces and reads every
+  client's statistics, is granted to administrators only.
 * **A restart makes the grants anew.** A network domain that ends is
   restarted within its intensity as any configured domain is; every
   socket ended with it, and the grants with it. Once it reports ready,

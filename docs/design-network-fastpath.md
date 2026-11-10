@@ -62,7 +62,7 @@ Decisions every reader needs:
 11. [Concurrency and failure](#concurrency-and-failure)
 12. [Refusals and error results](#refusals-and-error-results)
 13. [Verification](#verification)
-14. [Open decisions](#open-decisions)
+14. [Decisions](#decisions)
 15. [Alternatives considered](#alternatives-considered)
 16. [References](#references)
 
@@ -303,7 +303,7 @@ classifies anything, with one call of a per-byte primitive:
 
 ```erlang
 -spec erx_bytes:tcp_merge(Frames) -> Units
-    when Frames :: [binary() | {sum, Sum, binary()}],      % one driver batch: at most 256 frames, 64 KiB
+    when Frames :: [binary() | {sum, Sum, binary()}],      % one driver batch, within the merge's limit
          Units :: [{sum, Sum, binary()}                     % a frame on its own, with its network sum
                  | {merged, NSegs :: 2..256,
                     First :: {sum, Sum, binary()},          % the unit's first frame, as it arrived
@@ -319,6 +319,21 @@ erXos linked into ERTS as the other per-byte primitives are, and outside
 erXos a NIF of the portable build. The rule is FreeBSD's
 (`tcp_lro_rx_common`, `tcp_lro.c:1280-1426`; `tcp_lro_condense`,
 `:963-1106`); [The merge](#the-merge) gives it in full.
+
+**The merge's limit.** One call takes at most 256 frames, and the frames
+before its last hold less than 64 KiB, so a call's work is bounded and it
+runs on a normal scheduler. `erx_bytes:tcp_merge_limit/0` answers the C
+core's own two constants, `{256, 65536}`, so no other copy of them
+exists. The bound holds by construction at the one place every
+transport's frames pass: `erx_net_driver`, the code all transports
+share, cuts each `{frames, Frames}` event of its transport into batches
+within the limit before it hands any to the interface
+([The driver](design-network-stack.md#the-driver)). A batch ends at the
+256th frame, or at the frame that brings it to 64 KiB. So whatever a
+medium gives at once, virtio's completions, a burst of datagrams, a
+netmap ring or a test's injected frames, no batch of a correct stack
+exceeds the limit, and a flood of minimum-size frames costs more batches,
+never a refusal by the merge.
 
 The merge writes no header. FreeBSD rewrites the merged packet's first
 header with the last segment's acknowledgement, window and timestamps
@@ -456,7 +471,7 @@ the differential tests compare the C with it.
 `erx_tcp_sendlog:sent/5` records a run as one range with its segment
 size, `#sent{next, seg, sent_at, transmissions, sacked, lost, rxt}`. A
 range's segment boundaries are its start plus multiples of `seg`; its
-last segment may be shorter. Two rules keep the two properties the
+last segment may be shorter. Three rules keep the two properties the
 stack's design states for the log ([The send log, SACK and
 reassembly](design-network-stack.md#the-send-log-sack-and-reassembly)):
 
@@ -467,6 +482,16 @@ reassembly](design-network-stack.md#the-send-log-sack-and-reassembly)):
   transmissions it sent, and a peer cannot split the log below them.
   An acknowledgement inside a segment cuts its range there and at that
   segment's end, so every range starts on a boundary.
+* **A range keeps its segment size.** `seg` is fixed when a range is
+  sent. When `t_maxseg` changes, after a path MTU drop for example, a
+  retransmission is cut at the new size, so the segments the peer
+  receives and SACKs need not fall on the range's boundaries. A block
+  then marks the range's segments it covers whole and leaves the others
+  unmarked, as for any block covering part of a segment: output may send
+  again bytes the peer holds, until a wider block or the cumulative
+  acknowledgement covers them, but no byte the peer lacks is ever marked,
+  and the log is never split below the boundaries the range was sent
+  with.
 * **New data extends the last range.** `sent/5` at `snd_max` extends the
   highest range instead of adding one when that range is unmarked, sent
   once, of the same segment size, sent at the same time and ending on a
@@ -492,9 +517,11 @@ A transport that has room for fewer frames than a run holds takes the
 first ones and answers `{ok, N}`. The driver keeps the rest in its
 backlog as `erx_net_frame:run_tail(Run, N)`, the same run with its
 sequence number advanced and its payload starting `N * seg` bytes later,
-so a run never waits whole for room that is partly there. The transmit
-credit's units for the frames still in the backlog stay reserved, as for
-any frame there.
+so a run never waits whole for room that is partly there. A partial take
+is what a tap gives anyway: the kernel takes a run one frame per write,
+and a write can find the device full in the middle of a run, after
+frames that cannot be taken back. The transmit credit's units for the
+frames still in the backlog stay reserved, as for any frame there.
 
 The same calls take a frame that is not a run (an irregular segment,
 ARP, ICMP, UDP) as iodata that the C walks itself, at most 64 binaries,
@@ -510,14 +537,19 @@ the device take one request of up to 64 KiB whose `virtio_net_hdr` names
 cut it itself (virtio 1.2, section 5.1.6.2), as FreeBSD hands a capable
 interface a TSO segment marked `CSUM_TSO` with its `tso_segsz`
 (`tcp_output.c:1398-1406`). A run maps onto that header field for field.
-The device path needs `VIRTIO_NET_F_CSUM` as well, a transmit queue
-whose buffers hold 64 KiB or chains across buffers, the header's fields
-in `abi/formats/virtio.txt`, and the bits in `negotiate/2`'s wanted set.
-It saves the guest the per-frame header work and descriptors, not the
-copy, since no binary ever aliases memory a device can reach (R9 of
+The device finishes only when it offers `VIRTIO_NET_F_CSUM`, `HOST_TSO4`
+and `HOST_TSO6` together, since one `finish` key names who finishes both
+a delayed checksum and a run's cut ([The seam](#the-seam)); a device that
+offers checksum offload alone is finished by the copy. The device path
+needs a transmit queue whose buffers hold 64 KiB or chains across
+buffers, the header's fields in `abi/formats/virtio.txt`, and the bits in
+`negotiate/2`'s wanted set. It saves the guest the per-frame header work
+and descriptors, not the copy, since no binary ever aliases memory a
+device can reach (R9 of
 [design-runtime.md](design-runtime.md#invariants)); on QEMU the host
-process then does the cutting. It is an extension ([Open
-decisions](#open-decisions), 3).
+process then does the cutting. It is an extension of the stack
+([Scope](design-network-stack.md#scope)), tested against the copy on a
+medium that offers the three bits.
 
 What QEMU offers was checked only in part. QEMU 11.1.3 on the
 development host (Homebrew) lists, for `qemu-system-aarch64 -device
@@ -625,16 +657,19 @@ once, in the socket process, where `gen_tcp`'s API needs one
 The connection takes a merged segment as FreeBSD's `tcp_do_segment`
 takes an LRO packet:
 
-* **The count.** `cc_ack_received` limits window growth to `nsegs` times
-  `tcp_abc_l_var` segments (`tcp_input.c:290-314`, `nsegs` taken from the
-  packet at `:1534`; RFC 3465), and the stack passes N as `#cc_ack.nsegs`,
-  which `erx_tcp_cc` already reads. FreeBSD's LRO counts only the data
-  segments it merges (`tcp_lro_mbuf_append_pkthdr`, `tcp_lro.c:937-960`)
-  and drops the pure ACKs it merges uncounted (`:1088-1091`), so a run of
-  pure ACKs reaches congestion control as one. The stack counts each
-  merged ACK, so a sender's window grows as the separate ACKs would have
-  let it. N also counts segments received in the connection's
-  statistics.
+* **The count.** `cc_ack_received` hands congestion control `nsegs` with
+  the bytes the ACK acknowledges (`tcp_input.c:290-300`, `nsegs` taken
+  from the packet at `:1534`), and slow start grows the window by the
+  smaller of those bytes and `nsegs` times `tcp_abc_l_var` segments (RFC
+  3465; `cubic_does_slow_start`, `cc/cc_cubic.c:218-222`, and the same
+  rule in `cc/cc.c:590-594` and `cc/cc_newreno.c:326-330`). The stack
+  passes N as `#cc_ack.nsegs`, which `erx_tcp_cc` already reads.
+  FreeBSD's LRO counts only the data segments it merges
+  (`tcp_lro_mbuf_append_pkthdr`, `tcp_lro.c:937-960`) and drops the pure
+  ACKs it merges uncounted (`:1088-1091`), so a run of pure ACKs reaches
+  congestion control as one. The stack counts each merged ACK, so a
+  sender's window grows as the separate ACKs would have let it. N also
+  counts segments received in the connection's statistics.
 * **The acknowledgement.** `DELAY_ACK` delays only a segment of at most
   `t_maxseg` (`tcp_input.c:511`). A merged data segment is longer, so it
   is acknowledged at once, as FreeBSD acknowledges an LRO packet and
@@ -646,6 +681,16 @@ takes an LRO packet:
 * **Timestamps.** The last segment's TSval and TSecr, as FreeBSD stores
   them, so `ts_recent` takes the last TSval and the ACK echoes it, and the
   round-trip sample is taken from the last echo.
+* **The window.** The send window is updated as for any segment, from the
+  segment's sequence number, the first frame's, with the last frame's
+  acknowledgement and window, as FreeBSD's LRO packet carries them. So
+  `snd_wnd` and `snd_wl2` end as the per-segment frames would leave them,
+  and `snd_wl1` holds the first frame's sequence number where the
+  per-segment frames leave the last's. One case differs: a unit whose
+  first frame starts at `snd_wl1` and whose acknowledgement stays at
+  `snd_wl2` takes the last window only if it grew, so a peer that shrinks
+  its window inside such a unit keeps its old window until its next
+  segment, as under FreeBSD's LRO.
 
 What the merged segment does not carry, and why that is acceptable: one
 round-trip sample per unit instead of one per ACK, the latest; the
@@ -658,9 +703,10 @@ FreeBSD with LRO does.
 ### Credit counts segments
 
 A merged segment takes one unit of its connection's credit for each
-segment it holds, and one token of the interface's ingress bucket for
-each, so a connection's credit still bounds the bytes queued for it by
-its limit times one frame, merged or not
+segment it holds, so a connection's credit still bounds the bytes queued
+for it by its limit times one frame, merged or not. A merged segment is
+owned traffic, so it takes no token of the interface's ingress bucket,
+which only frames the interface itself handles spend
 ([Credited queues](design-network-stack.md#credited-queues)). The
 interface checks N against what it can see before it charges it
 ([What the stack believes](#what-the-stack-believes)).
@@ -737,8 +783,10 @@ finished case, and one meaning: the stack's property test of header
 prediction, which runs every segment header prediction accepts, and its
 near misses, through the general stages and requires the same state and
 actions, compares the two implementations. The general stages stay for
-every other segment and as the oracle. Merged segments take the fast
-path too, since a unit is in-order data or a pure ACK by construction.
+every other segment and as the oracle. A merged segment takes the fast
+path when it meets the same preconditions as any segment. A unit is in
+order by construction, but it can carry data and acknowledge new data
+at once, which is neither case, and the general stages then take it.
 Output has the same shape: in the established steady state (no
 recovery, an open window, no SACK information, nothing irregular) one
 pass decides, makes a run and commits it with one update of the control
@@ -814,7 +862,8 @@ calls ([The seam](#the-seam)). Framing, cutting, merging and summing are
 calls in the process that holds the bytes.
 
 **Batching per message.** Every hop carries all its sender holds: the
-driver one `{frames, ...}` message per transport batch, up to 64 KiB;
+driver one `{frames, ...}` message per batch, each within the merge's
+limit ([The merge, before classification](#the-merge-before-classification));
 the interface one `{items, ...}` message per destination per batch; the
 connection one `{transmit, ...}` message per step, holding runs. Every
 receiver steps everything that waits for it, bounded by its credit: the
@@ -862,6 +911,7 @@ fits a piece. A push carries the receive queue's pieces as they are, and
 the socket process joins them into one binary when it hands the owner
 data, once per delivery, in the owner's domain. The socket protocol's
 push carries `{data, [binary()]}`, a flat list of at most 64 binaries
+and at most one piece in all
 ([Message sizes](design-network-stack.md#message-sizes)).
 
 ## Copies
@@ -986,9 +1036,12 @@ checked.
   and drops a unit that fails as `malformed`; only a merge bug makes one.
   It charges N units of credit, so a count the merge understated would
   still be bounded by the piece count Erlang sees, and a count it
-  overstated costs only credit. `cc_ack_received` grows the window by at
-  most the bytes the ACK acknowledges whatever the count
-  (`tcp_input.c:290-314`), so an inflated N cannot inflate the window.
+  overstated costs only credit. Congestion control reads N only in slow
+  start, where it raises the cap on the growth from one ACK, and the
+  growth is never more than the bytes the ACK acknowledges, whatever the
+  count (`cubic_does_slow_start`, `cc/cc_cubic.c:218-222`; congestion
+  avoidance does not read `nsegs`), so an inflated N cannot inflate the
+  window past what the acknowledged bytes allow.
 * **Device claims.** None is believed: virtio's receive header is never
   read, the receive offloads are never negotiated, and tap and netmap
   give none.
@@ -1005,10 +1058,19 @@ No process, lock or shared state is added. The cut runs inside the
 driver's NIF call, the merge inside the interface's call, and each
 finishes within its call: the cut at one run (at most 65,535 bytes, 64
 pieces and 45 frames at a 1,500-byte MTU), the merge at a driver's
-batch, 256 frames and 64 KiB, and both charge reductions for the bytes
-they read. The merge closes every
+batch, within the merge's limit, and both charge reductions for the
+bytes they read. The merge closes every
 unit when its call returns, so nothing is held between calls.
 
+* **Receive credit and the merge.** The interface takes a batch's units
+  from its receive credit as it takes the batch's message, before it
+  merges, as every receiver takes its units
+  ([Credited queues](design-network-stack.md#credited-queues)). A merge
+  that raised, which only a bug can make once the driver cuts every
+  batch, strands no credit: the interface drops the batch, counts and
+  logs it, and keeps its state, as for a frame whose step raised
+  ([What fails and what
+  survives](design-network-stack.md#what-fails-and-what-survives)).
 * **A run partly taken** waits in the driver's backlog as its tail, with
   its credit, and leaves at the transport's next `writable` event, as any
   frame there does.
@@ -1042,8 +1104,10 @@ unit when its call returns, so nothing is held between calls.
 * A transport whose `finish` is `none` drops a run it is given as
   `malformed` and counts it; only a framing bug makes one, since the
   frame layer cuts runs for such a transport.
-* `erx_bytes:tcp_merge/1` answers `badarg` for a list of more than 256
-  frames or 64 KiB, or an element of another shape. It refuses no frame:
+* `erx_bytes:tcp_merge/1` answers `badarg` for a list past its limit,
+  more than 256 frames or 64 KiB or more before its last frame, or an element of
+  another shape; only a bug of the driver's cut reaches the first. It
+  refuses no frame:
   a frame it cannot merge passes on alone, and one whose checksum fails
   passes on alone for `verify/1` to drop and count as `bad_sum`, so that
   count has one place.
@@ -1073,10 +1137,13 @@ Each test is paired with a seeded fault it must catch.
    run not trimmed to whole segments; a run's RTT probe started at its
    last frame instead of its first.
 3. **The send log's rules.** A property test over random runs, SACK
-   blocks and acknowledgements: the log of k per-segment sends equals
-   the log of one run, and no range boundary falls inside a segment.
-   *Seeded faults:* a SACK block that splits a segment; the extension
-   rule taking a range of another segment size.
+   blocks and acknowledgements, with `t_maxseg` lowered during recovery
+   so that retransmissions are cut at another size than their ranges:
+   the log of k per-segment sends equals the log of one run, no range
+   boundary falls inside a segment it was sent with, and no byte is
+   marked SACKed that the peer's blocks do not cover. *Seeded faults:* a
+   SACK block that splits a segment; the extension rule taking a range of
+   another segment size; a block marking a segment it covers in part.
 4. **The merge equals its model.** `erx_tcp_merge_model`, an Erlang
    model written from `tcp_lro_condense`'s rule as this document states
    it, against the C over random batches: interleaved flows past eight,
@@ -1087,12 +1154,17 @@ Each test is paired with a seeded fault it must catch.
    pure ACK that does not advance merged.
 5. **Merged input against per-segment input.** A property test of the
    core: the same bytes stepped as merged segments and as single ones
-   give the same delivered bytes, `rcv_nxt`, `snd_una` and send log; the
-   ACK after a merged segment carries the ACK value of the per-segment
-   run's last ACK; after a slow start of merged ACKs the congestion
-   window is within one segment of the per-segment run's. *Seeded
-   fault:* N not passed to `cc_ack_received`, which leaves the window
-   short by more than the bound.
+   give the same delivered bytes, `rcv_nxt`, `snd_una`, `snd_wnd`,
+   `snd_wl2` and send log, and `snd_wl1` the first frame's sequence
+   number where the per-segment run's is the last's, but for the one case
+   [A merged segment in TCP](#a-merged-segment-in-tcp) states, which the
+   generator includes and where the old window is required; the ACK
+   after a merged segment carries the ACK value of the per-segment run's
+   last ACK; after a slow start of merged ACKs the congestion window is
+   within one segment of the per-segment run's. *Seeded faults:* N not
+   passed to `cc_ack_received`, which leaves the window short by more
+   than the bound; the window taken from the first frame instead of the
+   last, which leaves `snd_wnd` different.
 6. **Header prediction equals the general stages.** The existing
    property test, which requires the general stages' control block and
    actions for every segment header prediction accepts, run against the
@@ -1124,8 +1196,8 @@ Each test is paired with a seeded fault it must catch.
     FreeBSD](design-network-stack.md#packet-scripts-against-freebsd))
     run once more through the pipe's `process` end in its offload mode:
     its `finish` is `copy`, a host test NIF over `erx_tcp_cut.c` cutting
-    the runs it is given, and it hands the interface the frames a script
-    injects at once as one batch, so the merge sees bursts. Every
+    the runs it is given, and it hands the driver the frames a script
+    injects at once as one event, so the merge sees bursts. Every
     verdict must equal the one through the plain `process` end and
     FreeBSD's. New erXos scripts inject bursts and check the merge's
     visible behaviour: one ACK per merged segment, echoing the last
@@ -1137,6 +1209,16 @@ Each test is paired with a seeded fault it must catch.
     stays at zero.
 12. **The copy check.** The source check's seeded violation, an
     `iolist_to_binary/1` added to `erx_tcp_output`, fails `make check`.
+13. **The driver cuts every batch to the merge's limit.** Through the
+    pipe's `process` end in its offload mode, which hands the driver all
+    the frames a test injects at once as one event, a test injects 1,000
+    minimum-size TCP frames of one flow, then 300 frames of 9,014 bytes:
+    every batch the interface takes is within
+    `erx_bytes:tcp_merge_limit/0`, the merge never answers `badarg`, and
+    every injected frame reaches `classify/2`, counted once. *Seeded
+    fault:* the driver's cut removed, so each event reaches the merge
+    whole, which answers `badarg`, and the count of frames that reached
+    `classify/2` falls short of what was injected.
 
 ### Fuzz targets
 
@@ -1146,8 +1228,9 @@ Each test is paired with a seeded fault it must catch.
   frame's length, sequence number and checksum from the input. *Seeded
   fault:* the TCP header's length bound off by one, which the target
   must find within its budget.
-* **`tcp_merge`:** arbitrary batches of up to 256 frames and 64 KiB,
-  with and without sums, under AddressSanitizer. Its oracle checks every unit:
+* **`tcp_merge`:** arbitrary batches within the merge's limit, and
+  past it, which must be refused, with and without sums, under
+  AddressSanitizer. Its oracle checks every unit:
   the pieces are the members' payloads, contiguous in sequence, of one
   flow, each member's checksums correct, and every input frame in exactly
   one unit or output on its own. *Seeded fault:* a merge across differing
@@ -1202,37 +1285,35 @@ order of the parts and the gain each is expected to give are kept in
 | the merge | segments per unit; the interface's and the connection's time per received segment; receive throughput and the sender's throughput, which merged ACKs serve |
 | netmap with runs and the merge | the same over VALE, against lwIP over VALE |
 
-## Open decisions
+## Decisions
 
-1. **C does per-frame work inside the copy and the merge.**
+The owner settled these.
+
+1. **C does per-frame work inside the copy and the merge,** cutting runs
+   and grouping segments, and no TCP decision moves to C.
    [design.md](design.md#decisions) gives C the work done once per byte
-   and Erlang the work done once per packet, and leaves native code for
-   TCP's fast path to the measurement on erXos's kernel (gate GK3). The
-   cut writes header fields per frame inside the copy's per-byte pass,
-   and the merge reads per-frame headers and groups frames by a fixed
-   rule. Neither makes a TCP decision: what to send and what a segment
-   means stay in Erlang. *Recommended:* adopt it before GK3, on the p620
-   evidence. The bottleneck shown there is the number of per-segment
-   Erlang steps in one process, which does not depend on the kernel
-   below. GK3 still decides whether any TCP decision needs native code.
-2. **The tap transport becomes a NIF.** Sending, the helper took 11.9
-   percent of all CPU samples on p620, against 62.7 for the BEAM, and a
-   frame costs three system calls and four copies through it, where the
-   lwIP baseline runs over the same tap with one copy in user space and
-   one in the kernel. The spawn driver's 64 KiB read buffer, allocated
-   and freed at every read (`ready_input` in `sys_drivers.c`), is the
-   likely, unconfirmed, source of the 8 to 10 percent of kernel lock
-   spinning under `munmap`. The NIF is the netmap transport's
-   construction without shared memory. *Recommended:* replace the helper
-   and the pipe's `port` end with `erx_tap`, and run the bulk benchmark
-   over both tap and VALE.
-3. **Device segmentation.** `VIRTIO_NET_F_HOST_TSO4` and `HOST_TSO6`
-   need a queue of 64 KiB buffers or chains, new fields in the ABI file
-   and a second finisher in the transport, save no copy, and are likely
-   not offered on the harness's hub port. *Recommended:* an extension
-   until a harness medium offers the bits, tested there against the
-   copy. It shares the checksum design's open decision on
-   `VIRTIO_NET_F_CSUM`.
+   and Erlang the work done once per packet. The cut writes the header
+   values Erlang chose per frame inside the copy's per-byte pass, and the
+   merge reads per-frame headers and groups frames by a fixed rule; what
+   to send and what a segment means stay in Erlang. It is taken before
+   gate GK3, on the p620 evidence: the bottleneck there is the number of
+   per-segment Erlang steps in one process, which does not depend on the
+   kernel below. GK3 still decides whether any TCP decision needs native
+   code.
+2. **A tap NIF replaces the tap helper and the pipe's `port` end.**
+   Sending, the helper took 11.9 percent of all CPU samples on p620,
+   against 62.7 for the BEAM, and a frame cost three system calls and
+   four copies through it, where the lwIP baseline runs over the same tap
+   with one copy in user space and one in the kernel. The spawn driver's
+   64 KiB read buffer, allocated and freed at every read (`ready_input`
+   in `sys_drivers.c`), is the likely, unconfirmed, source of the 8 to 10
+   percent of kernel lock spinning under `munmap`. `erx_tap` is the
+   netmap transport's construction without shared memory, and the bulk
+   benchmark runs over both tap and VALE.
+3. **The device finishes only with `VIRTIO_NET_F_CSUM`, `HOST_TSO4` and
+   `HOST_TSO6` together,** since one `finish` key covers a delayed
+   checksum and a run's cut; a device that offers checksum offload alone
+   uses the copy ([Device segmentation](#device-segmentation)).
 
 ## Alternatives considered
 
@@ -1250,9 +1331,12 @@ order of the parts and the gain each is expected to give are kept in
   device NIF, which parses nothing a device wrote, needs a snapshot and a
   plan in each NIF to read each byte once, and on tap needs a `readv`
   layout, since the kernel's copy lands a frame before its header has
-  been seen. One merge after the copy, over immutable binaries, is simpler
-  and the same for every transport; the join it leaves on erXos is on the
-  watch list.
+  been seen. The merge is a C parser of device-written bytes too; what
+  the choice decides is which C parses them, not whether C does: the
+  merge reads only immutable binaries, in the interface, where a bug
+  cannot reach the device's rings, rather than inside the NIF that owns
+  them. One merge after the copy is simpler and the same for every
+  transport; the join it leaves on erXos is on the watch list.
 * **The merge in Erlang.** Grouping frames in the interface in Erlang
   still costs per-frame Erlang work at line rate, the cost the merge is
   there to remove.
@@ -1285,9 +1369,14 @@ order of the parts and the gain each is expected to give are kept in
   `tcp_lro_mbuf_append_pkthdr`, `:937-960`; `tcp_lro_update_checksum`,
   `:678`; `tcp_flush_out_entry`, `:790`; `tcp_push_and_replace`, `:903`);
   `sys/netinet/tcp_lro.h` (`TCP_LRO_ENTRIES`, `:41`; `TCP_LRO_LENGTH_MAX`,
-  `:200`); `sys/netinet/tcp_input.c` (`cc_ack_received`, `:290-314`;
+  `:200`); `sys/netinet/tcp_input.c` (`cc_ack_received`, `:290-300`;
   `DELAY_ACK`, `:511`; `nsegs`, `:1534`; header prediction,
-  `:1731-1950`); `sys/net/if_tap.h:58` (`TAPSVNETHDR`).
+  `:1731-1950`); slow start's cap on one ACK's growth,
+  `min(bytes_this_ack, nsegs * abc_val * mss)`, in
+  `sys/netinet/cc/cc_cubic.c:218-222` (`cubic_does_slow_start`),
+  `sys/netinet/cc/cc.c:590-594` (`newreno_cc_cwnd_in_slow_start`) and
+  `sys/netinet/cc/cc_newreno.c:326-330` (`newreno_ack_received`);
+  `sys/net/if_tap.h:58` (`TAPSVNETHDR`).
 * Virtual I/O Device (VIRTIO) 1.2, section 5.1: the network device, its
   feature bits and `virtio_net_hdr`'s GSO fields (5.1.6.2).
 * RFC 3465 (appropriate byte counting), RFC 5681 section 4.2 (ACK

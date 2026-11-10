@@ -2302,10 +2302,10 @@ descriptor against its own table and its length against what the chain
 let the device write. It copies the bytes the device wrote, in the
 order of the chain's `in` segments and cut at the length it reported,
 into a fresh binary, returns the buffer to its pool, and returns
-`{ok, [{Tag, Bytes}]}`, stopping once 64 KiB are copied, at most 64 KiB
-and one buffer, so a call stays
-within a reduction slice; the driver calls again until it gets
-`{ok, []}`. That copy is the one per-byte copy of a receive path,
+`{ok, [{Tag, Bytes}]}` for as many completions as are ready, stopping
+after the one that brings what it copied to 64 KiB, so a call copies
+less than 64 KiB and one buffer and stays within a reduction slice; the
+driver calls again until it gets `{ok, []}`. That copy is the one per-byte copy of a receive path,
 per-byte C like the post's: a device can write a buffer again after its
 completion, and ERTS assumes a binary never changes, so no binary ever
 aliases memory a device can reach (R9). The driver parses the bytes in
@@ -2387,7 +2387,10 @@ accessors, called only by its BIFs and its NIF, touch a register window, and no 
 or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
 over device-written bytes in the NIF, whose copy at completion is one
-call of the bulk copy. The network's cut core, linked in for
+call of the bulk copy, or for `complete/3` one call of the network's
+`erx_inet_copy_sum`, which stores and adds each word it loads and
+interprets none, and which the check names as the second call allowed
+there. The network's cut core, linked in for
 `post_frame/5`, reads only bytes a sender passed and writes them into
 pool buffers, so the rule holds over it as well.
 Only the driver's modules reference the device NIF: ERTS binds a static NIF
@@ -2422,7 +2425,7 @@ done once per packet, per block and per file around them.
 | `erx_device:post/4`'s copy | copies a request's `out` bytes into its pool buffer ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | `erx_device:complete/2`'s copy, and `complete/3`'s | copies a completed buffer's returned bytes into a fresh binary ([The device NIF](#the-device-nif)); `complete/3`, given an even offset, also returns the Internet checksum's one's-complement sum of each binary from that offset, computed over the bytes stored, each word loaded once, as `{ok, [{Tag, Bytes, Sum}]}` ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)) | drivers; `complete/3` the network's | a byte-for-byte comparison; for the sum, `erx_bytes:inet_csum/2` over the binary |
 | `erx_device:post_frame/5`'s copy | copies a frame's binaries into a pool buffer, finishing a delayed Internet checksum in the same pass through the network's `erx_inet_copy_sum` ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)), or cuts a run of TCP segments into frames as it copies them, summing each frame's checksums ([The device NIF](#the-device-nif)) | the network's virtio transport | the bytes of the same frame encoded with its checksum complete, and `erx_net_frame:cut/1`, byte for byte ([design-network-fastpath.md](design-network-fastpath.md#tests)) |
-| `erx_bytes:tcp_merge/1` | groups a batch of received Ethernet frames, at most 256 frames and 64 KiB, into merged TCP segments by FreeBSD's LRO rule, returning sub-binaries of the frames, and sums each frame that came without its network sum | the network stack's interface process ([design-network-fastpath.md](design-network-fastpath.md#the-merge)) | `erx_tcp_merge_model`, an Erlang model of the rule |
+| `erx_bytes:tcp_merge/1`, with `tcp_merge_limit/0` | groups a batch of received Ethernet frames, at most 256 frames with less than 64 KiB before the last, the limit `tcp_merge_limit/0` answers and the network driver cuts every batch to, into merged TCP segments by FreeBSD's LRO rule, returning sub-binaries of the frames, and sums each frame that came without its network sum | the network stack's interface process ([design-network-fastpath.md](design-network-fastpath.md#the-merge)) | `erx_tcp_merge_model`, an Erlang model of the rule |
 | the pipe NIF's record copy | copies a record between a pipe's ring and a binary | the session's pipe ends | the pipe tests |
 
 * **Bounded.** A NIF call works on at most 64 KiB of hashing or checksumming

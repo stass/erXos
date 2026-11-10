@@ -47,20 +47,32 @@ it; git history is the record of completed work.
   4. the tap transport, `erx_tap` and its NIF, replacing `erx_net_tap` and the pipe's
      `port` end: with packages 2 and 3, about 2 to 2.5 times the baseline, and three fewer
      copies of a sent byte;
-  5. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
+  5. checksums in the copy
+     ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), the
+     owner's decision to build it as part of the fast path, since the cut and the merge rest
+     on it: `erx_inet_copy_sum` in `erx_inet_csum.c` with its host test and the `inet_csum`
+     fuzz target's new case; `erx_device:complete/3` and `post_frame/5`'s delayed frames;
+     `erx_net_sum` (P); the sum argument of the decoders above IP and `erx_net_input`'s
+     `{frame, Bytes, Sum}`; `erx_tcp_wire:encode/4` and `erx_net_frame`'s
+     `{csum, Start, Field, Packet}`; `link_info`'s `finish` and the interface row's;
+     `erx_virtio_net` on `complete/3` and `post_frame/5` with its start line naming the
+     finisher; the pipe's `process` end taking `{sum, S, Frame}`; the tap and netmap NIFs on
+     the same core; and the tests of that section's Verification;
+  6. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
      the tap and netmap NIFs, and `erx_net_frame:cut/1` as the reference: send toward
      4.4 Gbit/s;
-  6. the merge on receive: `erx_bytes:tcp_merge/1`, segment counts in TCP, payloads as lists
-     of binaries, credit by segments and the copy check: receive toward 4.4 Gbit/s, and a
-     sender's ACKs cut by the merged units' length;
-  7. netmap with runs and merged batches, over VALE against lwIP over VALE;
-  8. request-reply: the driver-to-interface hop and scheduler placement measured, and what
+  7. the merge on receive: `erx_bytes:tcp_merge/1` with `tcp_merge_limit/0`, the driver's cut
+     of every batch to that limit, segment counts in TCP, payloads as lists of binaries,
+     credit by segments and the copy check: receive toward 4.4 Gbit/s, and a sender's ACKs
+     cut by the merged units' length;
+  8. netmap with runs and merged batches, over VALE against lwIP over VALE;
+  9. request-reply: the driver-to-interface hop and scheduler placement measured, and what
      their profiles name changed, toward the request-reply target;
-  9. device segmentation (`VIRTIO_NET_F_HOST_TSO4`, `HOST_TSO6`), an extension, once a
-     harness medium offers it.
-  Packages 5 and 6 build on the designs of checksums in the copy (its item below), the netmap
-  transport and the socket process, whose push carries `{data, [binary()]}`, a flat list of
-  pieces. Package 4 also ends the tap helper's items under Bugs by subsystem.
+  10. device finishing, on `VIRTIO_NET_F_CSUM` with `HOST_TSO4` and `HOST_TSO6` together, an
+     extension, once a harness medium offers the three bits.
+  Packages 6 and 7 build on the designs of the netmap transport and the socket process, whose
+  push carries `{data, [binary()]}`, at most 64 binaries and one piece in all. Package 4 also
+  ends the tap helper's items under Bugs by subsystem.
 
 ## Stopgap replacements
 
@@ -975,18 +987,23 @@ it; git history is the record of completed work.
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
   is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
   connection's credit limit and buffer sizes are fixed defines, not application keys.
+* [Medium] network, `erx_tcp_conn` (`guarded/2`): a raising step must end the connection, the
+  owner's decision ([design-network-stack.md](docs/design-network-stack.md#decisions), 15): from its
+  state before the event, with a RST, `{error, econnaborted}` to its socket process and an exit with
+  the exception, for a batch of drained messages as for one. `guarded/2` instead counts the raise
+  and goes on with the state it had, after the effects of the step may already have run, and a raise
+  outside a segment step crashes the process with no RST. Change both, with a regression test that
+  plants a raise in the step and checks the RST and the error the owner sees.
 * [Medium] network, `erx_tcp_conn` (E2 review): a refused or timed-out connect in active mode still
   sends `tcp_error` and `tcp_closed` for a socket the caller never got; calls after `close` are
   served (a `recv` waits until the connection ends) where stock answers `{error, closed}`; a RST
-  surfaces as `econnreset` where stock's `show_econnreset` false gives `closed`; a raise outside
-  a segment step crashes the process with no RST, and `guarded` keeps state after effects already
-  ran, where the design ("What fails and what survives") drops the connection with
-  `econnaborted`; the crash report's `reason` and queued messages can hold peer bytes despite
-  `format_status`; a `recv` timeout past `send_after`'s range crashes the connection;
-  `erx_tcp:answer_send` keeps filling the buffer after `snd_closed`; steps continue after
-  `finish`; `watch_holder` runs after the claim, so a kill between them strands the entry; port
-  exhaustion answers `eaddrinuse` where the design says `eaddrnotavail`. The socket's flags
-  (`eof`, `ended`, `told`, `finished`, `connect`, owner `none`) want one closed phase value.
+  surfaces as `econnreset` where stock's `show_econnreset` false gives `closed`; the crash report's
+  `reason` and queued messages can hold peer bytes despite `format_status`; a `recv` timeout past
+  `send_after`'s range crashes the connection; `erx_tcp:answer_send` keeps filling the buffer after
+  `snd_closed`; steps continue after `finish`; `watch_holder` runs after the claim, so a kill
+  between them strands the entry; port exhaustion answers `eaddrinuse` where the design says
+  `eaddrnotavail`. The socket's flags (`eof`, `ended`, `told`, `finished`, `connect`, owner `none`)
+  want one closed phase value.
 * [Medium] network, `erx_net_if` (`owned/4`): an interface that dies between reserving a holder's
   unit and the batch's end (a raise outside a frame's step, or its link supervisor's shutdown)
   leaves those units counted on credits that outlive it; trap exits and release the batch, or
@@ -4161,20 +4178,6 @@ document's "residual risks accepted" paragraph.
   can put two jails behind separate tap devices for the relay's FreeBSD
   baseline, and that a stock OTP 29.1.2 builds there for the stack's
   host runs (29.1.1 is installed).
-* [Medium] network, checksums in the copy
-  ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)): the copy between a
-  device's buffer and a binary sums each received frame and finishes each sent TCP segment's delayed
-  checksum, so no pass reads a segment only to sum it. The baseline is taken, and the design's first open
-  decision recommends building it with the fast path, whose cut and merge rest on it (the fast path item
-  above). To build, in `erx_net`'s `c_src/`: `erx_inet_copy_sum` in `erx_inet_csum.c` with its host test
-  and the `inet_csum` fuzz target's new case; `erx_device:complete/3` and `post_frame/5`'s delayed frames;
-  `erx_net_sum` (P); the sum argument of the decoders above IP and `erx_net_input`'s `{frame, Bytes, Sum}`;
-  `erx_tcp_wire:encode/4` and `erx_net_frame`'s `{csum, Start, Field, Packet}`; `link_info`'s `finish` and
-  the interface row's; `erx_virtio_net` on `complete/3` and `post_frame/5` with its start line naming the
-  finisher; the pipe's `process` end taking `{sum, S, Frame}`; and the tests of the design's Verification
-  section. The netmap and tap transports' NIFs take the same core. The device finishing, on
-  `VIRTIO_NET_F_CSUM` with `HOST_TSO4` and `HOST_TSO6`, stays an extension until a harness medium offers
-  the bits.
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,

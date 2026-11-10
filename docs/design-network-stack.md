@@ -718,9 +718,9 @@ domain D:
    first frame stood and counts the segments it holds
    ([design-network-fastpath.md](design-network-fastpath.md#the-merge)).
    A merged segment passes every step below as one frame, its first and
-   last frames verified, and takes one unit of credit for each segment
-   it holds. For each frame the interface process runs two pure
-   functions of `erx_net_input` around one effect:
+   last frames verified, and takes one unit of its connection's credit
+   for each segment it holds. For each frame the interface process runs
+   two pure functions of `erx_net_input` around one effect:
    ```erlang
    classify(Input, View) -> {owned, [{Pid, Credit}, ...], pending()}
                           | {local, pending()}
@@ -740,19 +740,22 @@ domain D:
    dropped and counted. Only a frame that holds its unit or token reaches
    `verify/1`, which runs the decoder of the layer above IP, or ARP's:
    for TCP, UDP, ICMP and ICMPv6 the checksum first, then the header and
-   options. The checksum comes from the frame's network sum when its
-   transport gave one, which reads only headers and padding, and
-   otherwise from `erx_bytes:inet_csum/2`, a read pass with no copy
+   options. The checksum comes from the frame's network sum, which
+   reads only headers and padding: the transport's copy gave it, or the
+   merge computed it for a frame that came without one. Only a
+   reassembled datagram and a loopback packet are summed here, with
+   `erx_bytes:inet_csum/2`, a read pass with no copy
    ([Checksums in the copy](#checksums-in-the-copy)). A frame that fails
-   gives its unit or token back and is dropped. So where the checksum
-   still reads the frame, that cost, the one that grows with a frame's
-   length, is spent only on a frame something has room for, and a
-   frame dropped for want of room costs a header decode and one lookup,
-   whoever it names. A frame that holds room and then fails its checksum
-   costs the checksum as well, and because it gives its unit or token
-   back, neither credit nor the ingress bucket bounds that work: frames
-   with bad checksums are checksummed at the rate the link delivers
-   them, as FreeBSD checksums every frame it receives.
+   gives its unit or token back and is dropped. So a frame dropped for
+   want of room costs a header decode and one lookup, whoever it names,
+   on every transport whose copy sums. On the pipe, whose frames come
+   without a sum, the merge sums every frame before it is classified, so
+   there each frame costs the read of its bytes whether or not anything
+   has room for it ([Residuals](#residuals)). A frame that holds room
+   and then fails its checksum costs the checksum as well, and because
+   it gives its unit or token back, neither credit nor the ingress
+   bucket bounds that work: frames with bad checksums are checksummed at
+   the rate the link delivers them, as FreeBSD checksums every frame it receives.
    The fields `classify/2` reads are the only ones read before their
    checksum is checked, and they are used for the lookup alone: a local
    frame is answered only from its verified item, so a segment with a
@@ -1379,8 +1382,8 @@ sum of `Bytes` from the even offset `SumFrom` to its end, and 0 when
 `Bytes` is shorter. The virtio transport passes 26: its 12-byte
 `virtio_net_hdr` and the 14-byte Ethernet header. So after it strips its
 header, each `{sum, S, Frame}` carries the network sum of `Frame`. The
-copy is the same bounded call as before: 64 KiB of frames per call,
-with nothing added but the additions.
+copy is the same bounded call as `complete/2`, less than 64 KiB and one
+buffer per call, with nothing added but the additions.
 
 In the stack, a frame's input to `classify/2` carries its sum,
 `{frame, Bytes, Sum}` with `Sum` a sum or `none`. Every Ethernet frame
@@ -1496,7 +1499,10 @@ backend carries virtio-net headers, as a tap or vhost backend does, and
 this has not been checked against QEMU's source. The device finishes
 only together with device segmentation, which needs `HOST_TSO4` and
 `HOST_TSO6` as well, since one `finish` names who finishes both
-([design-network-fastpath.md](design-network-fastpath.md#device-segmentation)).
+([design-network-fastpath.md](design-network-fastpath.md#device-segmentation)):
+a device that offers `VIRTIO_NET_F_CSUM` alone is finished by the copy,
+and the stack is tested on the device path against the copy on a medium
+that offers all three bits.
 The transport logs which way it finishes at each start (`finish copy`
 or `finish device`), so a run shows which path it took.
 
@@ -1550,32 +1556,18 @@ bug in the transport reaches `badarg`. A delayed frame given to a
 transport that does not finish is dropped as `malformed`, and a frame
 that fails its check as `bad_sum`.
 
-**Open decisions.**
+**Part of the fast path.** The fast path's cut finishes every checksum
+as it copies, and its merge reads each frame's network sum, so this
+design is part of that one, not a saving judged on its own share
+([design-network-fastpath.md](design-network-fastpath.md#the-construction-runs)).
+That share was small: with the C primitive loaded, `erx_bytes` held 3.1
+percent of the connection's samples on send on p620.
 
-1. *Build it on its own share, or with the fast path.* The baseline is
-   taken: with the C primitive loaded, `erx_bytes` held 3.1 percent of
-   the connection's samples on send on p620, below the 5 percent this
-   design set as the bar for building on the share alone; the
-   interface's receiving share was not reported. The fast path's cut
-   finishes every checksum as it copies, and its merge reads each
-   frame's network sum, so both halves of this design are parts of that
-   one ([design-network-fastpath.md](design-network-fastpath.md#the-construction-runs)).
-   Recommended: build both halves together, as the first package of the
-   fast path, since they share the core and the tests.
-2. *Device finishing in the core or as an extension.* The `device` path needs the
-   `VIRTIO_NET_F_CSUM` and `HOST_TSO` bits and the `virtio_net_hdr`'s checksum
-   and segmentation fields in `abi/formats/virtio.txt`, and one branch in the
-   transport, and no suite of the harness reaches it; it is the fast path's
-   device segmentation decision too
-   ([design-network-fastpath.md](design-network-fastpath.md#open-decisions), 3).
-   Recommended: keep it an extension until the
-   plan brings a harness medium that offers the bit, a Linux host with
-   a tap backend, and test it there against the copy.
-3. *UDP.* Datagrams could be delayed too. That needs RFC 768's rule
-   that a computed zero is sent as 16#ffff in every finisher, and a
-   device's finisher may not apply it; it also needs the looped frames
-   finished before they are looped. Recommended: no, until a UDP bulk
-   workload is measured.
+**Open decision.** *UDP.* Datagrams could be delayed too. That needs RFC
+768's rule that a computed zero is sent as 16#ffff in every finisher, and
+a device's finisher may not apply it; it also needs the looped frames
+finished before they are looped. Recommended: no, until a UDP bulk
+workload is measured.
 
 ### Loopback
 
@@ -2726,11 +2718,17 @@ those fields have one source
 interface is attached, the driver drops what it receives and counts it
 as `detached`.
 
-**Receiving.** For each `{frames, Frames}` event the driver hands the
-interface `{frames, self(), Frames}` against the receive credit, one unit
-per frame, and drops a refused batch whole, counted as `no_room`. A batch
-is what one event gives: virtio's `complete/3` calls until 64 KiB, the
-pipe's waiting datagrams up to the same 64 KiB.
+**Receiving.** A `{frames, Frames}` event holds what one event of the
+medium gave: virtio's `complete/3` calls, the pipe's waiting datagrams or
+a test's injected frames, a tap or netmap `recv/1`. The driver cuts it
+into batches within the merge's limit, `erx_bytes:tcp_merge_limit/0`: a
+batch ends at its 256th frame, or at the frame that brings it to 64 KiB
+([design-network-fastpath.md](design-network-fastpath.md#the-merge-before-classification)).
+It hands each batch to the interface as `{frames, self(), Batch}`
+against the receive credit, one unit per frame, and drops a refused batch
+whole, counted as `no_room`. Since every transport's frames pass this one
+cut, the interface's merge never meets more than its limit, whatever a
+medium gives at once and whatever a peer floods it with.
 
 **Link changes.** The driver keeps the transport's latest link state and
 the last one it told the interface. While the two differ, it hands
@@ -2852,8 +2850,9 @@ longer than the MTU and the 14-byte Ethernet header is dropped as
 * **`udp`**, as QEMU's `dgram` network backend carries frames. The pipe
   opens its socket with `{active, 64}` and sets it to 64 again at each
   `udp_passive`, so at most 64 datagrams wait in the driver's mailbox
-  and the host's socket buffer is the only queue ahead of it; a batch is
-  the datagrams waiting, up to 64 KiB. A datagram from any other address
+  and the host's socket buffer is the only queue ahead of it; an event is
+  the datagrams waiting, which the driver cuts into batches as it cuts
+  every event. A datagram from any other address
   than `Peer` is dropped as `stranger`. UDP has no carrier, so the state
   is `up` from `init` to the end.
 * **`process`**, a test. The far end is a pid, or a registered name
@@ -3572,7 +3571,7 @@ message is sent. Each credit's unit and limit:
 | a driver's transmit credit | the driver, at `init` | a frame |
 | an interface's receive credit | the interface | a frame of a batch, or a link notice |
 | an interface's sender credit | the interface | a handed message |
-| a connection's or datagram socket's credit | the socket, or the interface for a connection it starts | an item |
+| a connection's or datagram socket's credit | the socket, or the interface for a connection it starts | a segment, datagram or ICMP report; a merged segment takes one for each segment it holds |
 | a listener's accept credit | the listener | a connection, its limit the backlog |
 
 The limits are keys of the `erx_net` application's environment, whose
@@ -3734,7 +3733,7 @@ modules are marked P; process modules E.
 | `erx_in6_src` | `in6_src.c` | source address selection | P |
 | `erx_net_addr` | `in.c`, `in6.c` | address checks | P |
 | `erx_net_route` | none | longest-prefix lookup | P |
-| `erx_net_sum` | none: RFC 1071's arithmetic | one's-complement addition and subtraction of sums, and the sum of a span of a packet from the packet's sum ([Checksums in the copy](#checksums-in-the-copy)) | P |
+| `erx_net_sum` | none: RFC 1071's arithmetic | one's-complement addition and subtraction of sums, `add/2` among them, and `span/4`, the sum of a span of a packet from the packet's sum ([Checksums in the copy](#checksums-in-the-copy)) | P |
 | `erx_udp_wire`, `erx_udp` | `udp_usrreq.c`, `udp6_usrreq.c` | UDP codec, with the checksum and length rules of each IP version; decisions | P |
 | `erx_tcp_wire` | `tcp.h`, the checksum and data-offset checks of `tcp_input_with_port` (`tcp_input.c:640-756`), `tcp_dooptions` (`tcp_input.c:3501`), `tcp_addoptions` (`tcp_output.c:1794`) | TCP codec, checksum first, and options | P |
 | `erx_tcp_seq` | `tcp_seq.h` | lifting and wire conversion | P |
@@ -3777,7 +3776,6 @@ modules are marked P; process modules E.
 | `erx_net_bytes`, `erx_inet_csum`, `erx_siphash` (in `c_src/`, C17) | none | the per-byte primitives' C, linked into erXos's ERTS and built into the portable library | per-byte |
 | `erx_tcp_cut`, `erx_tcp_merge` (in `c_src/`, C17) | the rules of `tcp_output`'s TSO handling and of `tcp_lro_rx_common` and `tcp_lro_condense` (`tcp_lro.c`) | the cut of a run into frames, linked by the transports' NIFs; the merge of received segments behind `erx_bytes:tcp_merge/1` ([design-network-fastpath.md](design-network-fastpath.md)) | per-byte |
 | `erx_tcp_payload` | none | payloads as flat lists of binaries: length, part | P |
-| `erx_net_sum` | none | one's-complement sums: `add/2`, and `span/4`, a layer's sum from the network sum ([Checksums in the copy](#checksums-in-the-copy)) | P |
 | `erx_tap`, `erx_tap_nif` (in `portable/`) | none | the tap transport and its NIF's loader ([The tap transport](#the-tap-transport)) | E |
 | `erx_tap_nif.c` (in `c_src/`, C17) | none | the tap NIF: reads, `writev` and the cut's headers over the tap's descriptor | host NIF |
 | `erx_netmap`, `erx_netmap_nif` (in `portable/`) | none | the netmap transport and its NIF's loader | E |
@@ -4416,7 +4414,7 @@ under 1 KiB, the 64 binaries' encoding included: the control term, the message's
 | Limit | Value | Checked by | Past it |
 | --- | --- | --- | --- |
 | `ERX_FRAME_MAX` | 16 MiB (`abi/erx_abi.txt`) | the sender's runtime | the send fails with `system_limit` |
-| the receiver's `max_frame` | 1 MiB by default, set by the receiver's own runtime | the receiver's funnel, on the payload's bytes | the frame is dropped as it passes, and counted |
+| the receiver's `max_frame` | 1 MiB by default, set by the receiver's own runtime; at least 128 KiB in a domain that holds `net` | the receiver's funnel, on the payload's bytes; the floor by the grant | the frame is dropped as it passes, and counted; below the floor, the grant opens no socket |
 | the receiver's `max_message_heap` | 8 MiB by default | the receiver's funnel, on the decoded size | dropped and counted |
 | the target's request limit | the grant's `max_request` | the network domain's funnel, on the decoded size of a message to the grant or a socket | dropped before it is queued, and counted |
 
@@ -4427,14 +4425,28 @@ of a message, which the schema bounds. A frame is one record that the
 receiver reads as its bytes arrive, so a frame longer than the lane is
 never cut into fragments to reassemble, and `max_frame` is its only bound
 on length. A frame of a piece and its header is far below
-`ERX_FRAME_MAX` and below every `max_frame` of 128 KiB or more, the
-floor of [Open decisions](#open-decisions), 1. So a correct socket's
-frame is never dropped for its size. That matters most for pushes: a
-dropped push would strand the credit it carried, the socket process
-would count it as outstanding for good, and the socket would never push
-again. `erx_sock_admit` refuses a push longer than a piece, or of more
-than 64 binaries, as it refuses one past the credit, so a push of another size aborts its socket rather
-than being taken.
+`ERX_FRAME_MAX` and below 128 KiB, the floor design-domains sets on the
+`max_frame` of every domain that holds `net`
+([design-domains.md](design-domains.md#principals-sessions-and-quotas)).
+So a correct socket's frame is never dropped for its size. That matters
+most for pushes: a dropped push would strand the credit it carried, the
+socket process would count it as outstanding for good, and the socket
+would never push again. `erx_sock_admit` refuses a push longer than a
+piece, or of more than 64 binaries, as it refuses one past the credit, so
+a push of another size aborts its socket rather than being taken.
+
+**The floor is checked at the grant.** The introduction that makes a
+grant carries, with the grant's limits, the client's `max_frame`, which
+the domain service holds from the client's creation limits and which is
+the value the client's runtime runs with, since no runtime option
+changes it ([design-runtime.md](design-runtime.md#configuration)). A
+grant whose client's `max_frame` is below 128 KiB writes one line to the
+kernel log when it is made, naming the domain, its `max_frame` and the
+floor, and answers every open of a socket, stream or datagram, with
+`{error, enobufs}`. Every other operation of the grant still works.
+So a domain configured below the floor fails at its first socket, loudly
+and with the reason in the log, and never meets the silent hang of a
+dropped push.
 
 A socket process sends the next piece of a send only after the reply to
 the last, so a connection holds at most one piece beyond its send
@@ -4660,7 +4672,7 @@ until it catches up, which loses nothing; since no process waits in
 `receive` at its quota ([design-domains.md](design-domains.md#flow-control)),
 a pause cannot deadlock. A client domain's processes have a quota only
 where its runtime sets `-erx queue_quota`, and which domains do is the
-owner's ([Open decisions](#open-decisions), 2). Until RT8, the funnel
+owner's ([Open decisions](#open-decisions), 1). Until RT8, the funnel
 delivers every authorised frame whatever its target already holds, so a
 flood that outruns a socket process grows its queue with nothing to stop
 it but the client domain's budget, the gap of the stopgap funnel that
@@ -4719,8 +4731,11 @@ flood measurements of plan.md's network gates.
 **What a flood costs the interface.** Every frame, owned or unowned,
 costs the interface process a header decode and one lookup before it is
 kept or dropped, and only a frame that holds room costs more: its check,
-which reads the frame only when its transport gave no network sum, and
-its decode ([Receiving](#receiving)). A flood of frames with valid checksums aimed
+a constant with the network sum, and its decode
+([Receiving](#receiving)). The pipe is the exception: its frames come
+without a sum, and the merge sums each one before classification, so
+there every frame of a flood costs a read of its bytes, whatever room it
+finds. A flood of frames with valid checksums aimed
 at one client's established connection therefore costs the interface
 process no more per frame than any flood of minimum-size frames: once
 the connection's credit is full, each further frame is decoded, looked
@@ -4743,9 +4758,12 @@ Each of these is a known gap, with the reason it stays:
   flood that the interface process cannot decode as fast as it arrives
   makes the driver drop frames for every client, whatever they are. The
   cost per frame dropped for want of room is a header decode and a
-  lookup, kept small by [Receiving](#receiving)'s order, but a frame that
-  holds room and fails its checksum costs a checksum as well, at the rate
-  the link delivers such frames, when its transport gave no network sum; one interface process per receive
+  lookup, kept small by [Receiving](#receiving)'s order, where the
+  transport's copy gives each frame its network sum. Over the pipe, whose
+  frames come without one, the merge sums every frame before it is
+  classified, so each frame costs a read of its bytes, kept or dropped;
+  the pipe is a host transport for development and tests, never
+  erXos's medium, so the cost stays there. One interface process per receive
   queue, on devices that hash flows to several queues ([Scope](#scope)),
   divides the work. A bound per client here would need a classifier ahead
   of the interface process, which is what the interface process is.
@@ -4821,7 +4839,10 @@ A raising step is caught in three places, and in each the step's purity
 makes the handling complete: the exception leaves the state exactly as
 it was before the event. The interface process drops the frame, keeps
 its state and goes on, since a frame is its unit of work and its state
-serves many flows. A socket, and a socket process in the owner's domain,
+serves many flows; a merge that raises, which only a bug can make once
+the driver cuts every batch to the merge's limit, drops its batch the
+same way, the batch's receive credit already taken
+([design-network-fastpath.md](design-network-fastpath.md#concurrency-and-failure)). A socket, and a socket process in the owner's domain,
 ends itself properly from its intact state, as the table says, and then
 exits with the exception as its reason, since its state is one flow's
 and a bug in it is not worth keeping alive. All three
@@ -4855,7 +4876,7 @@ client domain is affected beyond its sockets.
 | --- | --- |
 | `{error, eacces}` | the domain holds no `net` grant; the grant does not allow the port, address or `listen` |
 | `{error, emfile}` | the grant's `sockets` limit is reached |
-| `{error, enobufs}` | a buffer reservation exceeds the grant's `buffers` limit |
+| `{error, enobufs}` | a buffer reservation exceeds the grant's `buffers` limit; every open of a socket when the grant's domain has a `max_frame` below 128 KiB, the floor of [Message sizes](#message-sizes) |
 | `{error, eaddrinuse}` | the key is held, under FreeBSD's reuse rules |
 | `{error, eaddrnotavail}` | the local address is not the machine's, no usable source address leaves through the route's interface, or no ephemeral port is free |
 | `{error, econnrefused}` | a RST answered the SYN |
@@ -5647,7 +5668,11 @@ once must all be answered, each send's bytes contiguous at the peer;
 100 acceptors on one listener must each receive a connection; and an
 `accept` with a timeout of one second, called behind 64 others that
 wait, must time out one second after one of them is answered, the
-documented difference of [Requests in flight](#requests-in-flight). A third
+documented difference of [Requests in flight](#requests-in-flight). A
+second test domain, holding `net` with its `max_frame` at 64 KiB, must
+have its `gen_tcp:connect` and `gen_udp:open` each answer
+`{error, enobufs}` at once, and the kernel log must hold the grant's one
+line naming that domain and the floor. A third
 domain, handed the socket term and the
 connection's pid, sends the socket process crafted
 `{erx_net, Conn, {data, Pieces}}` messages, none of whose bytes may reach
@@ -5667,7 +5692,10 @@ through the socket process; a socket process that sends a send whole,
 and a connection that pushes all its credit in one message, must each
 leave the 1 MiB send or the 8 MiB recv unanswered past the test's
 deadline, which shows the pieces are what keeps frames within
-`max_frame`; and an answer check that leaves out the node comparison
+`max_frame`; a grant without its floor check must let the second test
+domain's connect succeed and its first `recv` of a full piece wait past
+the test's deadline, the hang the check exists to turn into an error;
+and an answer check that leaves out the node comparison
 must let the lying grant's open answer `{ok, S}`.
 
 **cowboy and ranch.** Once the web domain's front end exists
@@ -5859,9 +5887,10 @@ it plugs into, except pacing, which BBR brings.
 ## Decisions
 
 The owner settled these: the first five and the seventh as the design
-recommended, the eighth, ninth and eleventh by direction, and the sixth,
-the tenth and the thirteenth by approving the design's recommendation.
-Two questions that reach into the domains design remain the owner's
+recommended, the eighth, ninth, eleventh, fourteenth and fifteenth by
+direction, and the sixth, the tenth and the thirteenth by approving the
+design's recommendation. One question that
+reaches into the domains design remains the owner's
 ([Open decisions](#open-decisions)).
 
 1. **The grant's account covers its sockets.** Every reduction a grant's
@@ -5969,27 +5998,28 @@ Two questions that reach into the domains design remain the owner's
     replies and deliveries, `controlling_process` and the owner's exit
     follow without a rule of their own, and the universal envelope of
     [design-domains.md](design-domains.md#the-peer) keeps no exception.
+14. **A domain that holds `net` has a `max_frame` of at least 128 KiB,**
+    a floor in design-domains' table of limits
+    ([design-domains.md](design-domains.md#principals-sessions-and-quotas)),
+    since every frame of the socket protocol is at most a piece and its
+    header and a dropped push would hang its socket for good. The floor
+    binds no other domain, the system domain included unless it holds
+    `net`. The grant checks it, and refuses every open of a socket for a
+    domain below it with `{error, enobufs}` and one line in the kernel
+    log ([Message sizes](#message-sizes)), so a misconfigured domain fails
+    loudly at its first socket instead of hanging.
+15. **A raising connection step ends the connection.** A socket whose
+    step raises ends itself from its state before the event, sends a
+    RST, pushes `{error, econnaborted}` and exits with the exception
+    ([What fails and what survives](#what-fails-and-what-survives)); it
+    never counts the raise and goes on with the state it had, since a
+    bug in one flow's state is not worth keeping alive. A step that
+    raises over a batch of drained messages ends the connection the same
+    way ([design-network-fastpath.md](design-network-fastpath.md#one-step-per-mailbox)).
 
 ### Open decisions
 
-1. **A floor for `max_frame`.** Every frame of the socket protocol is at
-   most a piece and its header, 65 KiB ([Message sizes](#message-sizes)),
-   and a frame past its receiver's `max_frame` is dropped, which for a
-   push strands the credit it carried. design-domains bounds `max_frame`
-   above by `ERX_FRAME_MAX` and sets no floor. The recommendation, which
-   [Message sizes](#message-sizes) assumes: a floor of 128 KiB on every
-   domain's `max_frame` in design-domains' table of limits, checked where
-   a domain's specification is checked, so that every runtime takes a
-   socket's frames by construction. The system domain keeps its own rule,
-   the largest `max_request` its grants may name, and the floor binds it
-   only if it holds a `net` grant. One alternative is a refusal at the
-   grant, the network service giving no `net` grant to a domain below
-   the floor, which keeps the change inside this design but makes the
-   network service check another subsystem's limit. Another is a piece
-   each socket process chooses from its own runtime's `max_frame` and
-   names in its open request, which needs that limit visible to Erlang
-   and a piece per socket.
-2. **Which client domains run with a queue quota.** What a socket
+1. **Which client domains run with a queue quota.** What a socket
    process has not yet taken from a hostile network domain is bounded
    only by its runtime's queue quota
    ([Untrusted input](#untrusted-input)), and design-runtime leaves
