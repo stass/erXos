@@ -168,8 +168,10 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def test_device_memory_counts_against_root_memory
-    # Principal and baseline alone fit by exactly the device's reservation less one page.
-    source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - baseline - 2_097_152 + 4096}")
+    # Principal and baseline alone fit by exactly the devices' reservations less one page.
+    root_memory = Integer(@source[/root_memory (\d+)/, 1])
+    device_memory = @platform.fetch('units').sum { |unit| unit.fetch('devices').sum { |device| device.fetch('dma_memory') } }
+    source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{root_memory - baseline - device_memory + 4096}")
     refused(Erx::Manifest::Invalid, 4, 'principals.memory', source)
   end
 

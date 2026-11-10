@@ -30,7 +30,7 @@
         { "selector": "dt", "role": "block", "path": "/virtio_mmio@a003e00", "bridge": "",
           "base": 167788032, "size": 512, "line": 79,
           "compatible": "virtio,mmio", "bus": 0, "device": 0, "function": 0,
-          "dma": "unconfined", "flags": 1, "dma_memory": 2097152, "placement_key": "block" }
+          "dma": "unconfined", "flags": 1, "dma_memory": 1048576, "placement_key": "block" }
       ]
     },
     {

@@ -15,9 +15,13 @@
  * its own buffer, and a broken queue refused until the next negotiation.
  */
 
+#include <sys/mman.h>
+#include <sys/wait.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
@@ -31,11 +35,22 @@
 		}								\
 	} while (0)
 
-#define MEMORIES_MAX	8u
+#define MEMORIES_MAX	16u
 #define BUFFER_SIZE	ERX_DEVICE_BUFFER_MAX
 #define QUEUE_SIZE	8u
+/* A given device's queues have smaller buffers, so a few fit its memory. */
+#define GIVEN_BUFFER	ERX_PAGE_SIZE
+/* The pages one given queue takes: its rings', which fit one page at QUEUE_SIZE, and its pool's. */
+#define GIVEN_QUEUE_PAGES	(1u + QUEUE_SIZE * GIVEN_BUFFER / ERX_PAGE_SIZE)
+/* Where a given device's registers lie in its window object, as a virtio-mmio slot does in its page. */
+#define GIVEN_OFFSET	0xe00u
+#define GIVEN_LINE	33u
 
-/* Every memory object the effects make, as plain memory whose device address is its own. */
+/*
+ * Every memory object, as plain memory whose device address is its own. It is shared, so
+ * what one record and the device leave in it outlives the process of that record, as kept
+ * memory outlives a holder.
+ */
 typedef struct memory {
 	uint8_t		*bytes;
 	uint64_t	size;
@@ -43,15 +58,29 @@ typedef struct memory {
 
 static memory_t memories[MEMORIES_MAX];
 static uint32_t memory_count;
+/* The objects the effects will map, in order: each made here, or given to a record. */
+static uint64_t maps[MEMORIES_MAX];
+static uint32_t maps_pushed, maps_done;
+static uint32_t irqs_created;
 static const erx_device_peripheral_t *virtio;
 static uint8_t *window;
+
+static void
+expect_map(uint64_t mem)
+{
+	CHECK(maps_pushed < MEMORIES_MAX);
+	maps[maps_pushed++] = mem;
+}
 
 static uint64_t
 make_memory(uint64_t size)
 {
-	CHECK(memory_count < MEMORIES_MAX);
-	memories[memory_count].bytes = aligned_alloc(ERX_PAGE_SIZE, size);
-	CHECK(memories[memory_count].bytes != NULL);
+	void *bytes;
+
+	CHECK(memory_count < MEMORIES_MAX && size % ERX_PAGE_SIZE == 0);
+	bytes = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
+	CHECK(bytes != MAP_FAILED);
+	memories[memory_count].bytes = bytes;
 	memories[memory_count].size = size;
 	return (memory_count++);
 }
@@ -63,10 +92,10 @@ erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint6
 	(void)resource;
 	/* Both backends refuse what the kernel interface refuses: anything but whole pages. */
 	CHECK(erx_backend_physical_check(base, size, attr) == ERX_OK);
-	*mem = make_memory(ERX_PAGE_SIZE);
 	CHECK(size <= ERX_PAGE_SIZE);
-	memset(memories[*mem].bytes, 0, ERX_PAGE_SIZE);
+	*mem = make_memory(ERX_PAGE_SIZE);
 	window = memories[*mem].bytes;
+	expect_map(*mem);
 	return (ERX_OK);
 }
 
@@ -79,6 +108,7 @@ erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uin
 	*mem = make_memory(size);
 	/* Garbage, so the reset is seen to zero the rings. */
 	memset(memories[*mem].bytes, 0xa5, size);
+	expect_map(*mem);
 	return (ERX_OK);
 }
 
@@ -93,20 +123,23 @@ erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
 	return (ERX_OK);
 }
 
-/* Each reservation is for the memory made just before it, at that memory's own address. */
+/* Each reservation is for the next object to map, at that object's own address. */
 int
 erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 {
-	CHECK(space == ERX_CAP_SELF && addr == 0 && flags == 0 && memory_count > 0 && size <= memories[memory_count - 1].size);
-	*reserved = (uint64_t)(uintptr_t)memories[memory_count - 1].bytes;
+	CHECK(space == ERX_CAP_SELF && addr == 0 && flags == 0 && maps_done < maps_pushed);
+	CHECK(size <= memories[maps[maps_done]].size);
+	*reserved = (uint64_t)(uintptr_t)memories[maps[maps_done]].bytes;
 	return (ERX_OK);
 }
 
 int
 erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot)
 {
-	CHECK(space == ERX_CAP_SELF && mem < memory_count && addr == (uint64_t)(uintptr_t)memories[mem].bytes &&
-	    size <= memories[mem].size && offset == 0 && prot == ERX_PROT_RW);
+	CHECK(space == ERX_CAP_SELF && maps_done < maps_pushed && mem == maps[maps_done] &&
+	    addr == (uint64_t)(uintptr_t)memories[mem].bytes && size <= memories[mem].size && offset == 0 &&
+	    prot == ERX_PROT_RW);
+	maps_done++;
 	return (ERX_OK);
 }
 
@@ -116,6 +149,7 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selec
 	(void)budget;
 	(void)resource;
 	(void)kind;
+	irqs_created++;
 	*irq = selector;
 	return (ERX_OK);
 }
@@ -566,8 +600,192 @@ check_broken(const erx_device_t *device, uint32_t queue, rings_t *rings, uint16_
 	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
 }
 
-int
-main(void)
+/* A device the harness offers: version 2, queues up to 256 and VERSION_1 with one type bit. */
+static void
+device_offers(void)
+{
+	*reg("version") = ERX_VIRTIO_MMIO_VERSION;
+	*reg("queue_num_max") = 256;
+	model.offered = bit(ERX_VIRTIO_F_VERSION_1) | bit(3);
+}
+
+/* A given virtio-mmio device: its registers at GIVEN_OFFSET in `window_object`, one line and `memory`. */
+static erx_device_spec_t
+given_spec(uint64_t window_object, uint64_t memory)
+{
+	return ((erx_device_spec_t){ .peripheral = "virtio_mmio", .peripheral_length = 11, .form = ERX_DEVICE_FORM_GIVEN,
+	    .window = window_object, .base = GIVEN_OFFSET, .size = 512, .line_count = 1, .lines = { GIVEN_LINE },
+	    .memory = memory, .memory_size = memories[memory].size });
+}
+
+/* Opens a given device, which maps its window object and then its memory, and nothing else. */
+static const erx_device_t *
+open_given(const erx_device_spec_t *spec)
+{
+	const uint32_t created = irqs_created;
+	uint32_t device;
+	uint64_t irq;
+
+	expect_map(spec->window);
+	expect_map(spec->memory);
+	CHECK(erx_device_open(spec, NULL, NULL, &device) == ERX_OK);
+	CHECK(maps_done == maps_pushed && irqs_created == created);
+	window = memories[spec->window].bytes + GIVEN_OFFSET;
+	CHECK(erx_device_line_irq(erx_device_get(device), 0, &irq) && irq == GIVEN_LINE);
+	return (erx_device_get(device));
+}
+
+/* Posts one chain of a whole buffer the device writes, tagged `tag`. */
+static int
+post_one(const erx_device_t *device, uint32_t queue, uint64_t tag)
+{
+	const erx_device_piece_t whole[] = { { .device_writes = true, .length = GIVEN_BUFFER } };
+
+	return (erx_device_post(device, queue, tag, whole, 1));
+}
+
+/*
+ * A given device: what open refuses, the same spec again, and the queues carved from its one
+ * memory, rings then pool, each at the next page, the same queue again carving nothing and a
+ * queue past the memory's end refused.
+ */
+static void
+check_given(void)
+{
+	/* Room for one queue and a smaller one: a second of the first's size starts inside it and ends past it. */
+	const uint64_t memory = make_memory((2 * GIVEN_QUEUE_PAGES - 1) * ERX_PAGE_SIZE);
+	const uint64_t window_object = make_memory(ERX_PAGE_SIZE);
+	const erx_device_spec_t spec = given_spec(window_object, memory);
+	const uint8_t *const base = memories[memory].bytes;
+	erx_device_queue_layout_t layout;
+	erx_device_spec_t other = spec;
+	const erx_device_t *device;
+	uint32_t index, first, again, second;
+	rings_t rings;
+
+	other.memory_size = ERX_PAGE_SIZE + 1;
+	CHECK(erx_device_open(&other, NULL, NULL, &index) == ERX_EINVAL);
+	other = spec;
+	other.form = ERX_DEVICE_FORM_PHYSICAL;
+	CHECK(erx_device_open(&other, NULL, NULL, &index) == ERX_EINVAL);
+	CHECK(maps_pushed == 0);
+	device = open_given(&spec);
+	CHECK(erx_device_open(&spec, NULL, NULL, &index) == ERX_OK && erx_device_get(index) == device);
+	other = spec;
+	other.memory_size = ERX_PAGE_SIZE;
+	CHECK(erx_device_open(&other, NULL, NULL, &index) == ERX_EBUSY);
+	other = spec;
+	other.base = 0;
+	CHECK(erx_device_open(&other, NULL, NULL, &index) == ERX_EBUSY);
+	other = spec;
+	other.window = make_memory(ERX_PAGE_SIZE);
+	CHECK(erx_device_open(&other, NULL, NULL, &index) == ERX_EBUSY);
+	CHECK(maps_done == maps_pushed);
+
+	device_offers();
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, GIVEN_BUFFER, &first) == ERX_OK);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, GIVEN_BUFFER, &again) == ERX_OK && again == first);
+	CHECK(erx_device_queue_create(device, 1, QUEUE_SIZE, GIVEN_BUFFER, &second) == ERX_ERANGE);
+	CHECK(erx_device_queue_create(device, 1, QUEUE_SIZE / 2, GIVEN_BUFFER, &second) == ERX_OK);
+	CHECK(maps_done == maps_pushed);
+
+	/* The install leaves the second queue's registers last: its rings follow the first queue's pages, as the refusal took none. */
+	CHECK(negotiate(device) == ERX_OK);
+	CHECK(erx_device_queue_layout(QUEUE_SIZE / 2, &layout));
+	rings = device_rings();
+	CHECK((const uint8_t *)rings.desc == base + GIVEN_QUEUE_PAGES * ERX_PAGE_SIZE);
+	CHECK((const uint8_t *)rings.avail == (const uint8_t *)rings.desc + layout.avail);
+	CHECK((const uint8_t *)rings.used == (const uint8_t *)rings.desc + layout.used);
+	/* The first queue's chain lies in its pool, after its rings' page and before the second queue. */
+	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
+	CHECK(post_one(device, first, 1) == ERX_OK);
+	const erx_virtq_desc_t *const table = (const erx_virtq_desc_t *)(const void *)base;
+	const uint16_t head = ((const uint16_t *)(const void *)(base + layout.avail + ERX_VIRTQ_RING_HEAD_SIZE))[0];
+	CHECK(table[head].addr >= (uint64_t)(uintptr_t)(base + ERX_PAGE_SIZE));
+	CHECK(table[head].addr + GIVEN_BUFFER <= (uint64_t)(uintptr_t)(base + GIVEN_QUEUE_PAGES * ERX_PAGE_SIZE));
+}
+
+/*
+ * A driver's restart within one record: its successor opens the same spec, finds its queue
+ * with every buffer still posted, and has them all back from its negotiation.
+ */
+static void
+check_driver_restart(void)
+{
+	const erx_device_spec_t spec = given_spec(make_memory(ERX_PAGE_SIZE), make_memory(GIVEN_QUEUE_PAGES * ERX_PAGE_SIZE));
+	const erx_device_t *device = open_given(&spec);
+	uint32_t queue, again, index;
+
+	device_offers();
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, GIVEN_BUFFER, &queue) == ERX_OK);
+	CHECK(negotiate(device) == ERX_OK);
+	for (uint32_t tag = 0; tag < QUEUE_SIZE; tag++)
+		CHECK(post_one(device, queue, tag) == ERX_OK);
+	CHECK(post_one(device, queue, QUEUE_SIZE) == ERX_EWOULDBLOCK);
+
+	CHECK(erx_device_open(&spec, NULL, NULL, &index) == ERX_OK && erx_device_get(index) == device);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, GIVEN_BUFFER, &again) == ERX_OK && again == queue);
+	CHECK(negotiate(device) == ERX_OK);
+	for (uint32_t tag = 0; tag < QUEUE_SIZE; tag++)
+		CHECK(post_one(device, queue, tag) == ERX_OK);
+}
+
+/* A holder's device, whose memory and window outlive each record over them. */
+static erx_device_spec_t kept;
+
+/*
+ * A holder's former record, in a process of its own: it posts three chains, the device serves
+ * two, and the record ends with the device still running, which then writes a used index far
+ * past anything posted. All of it stays in the kept memory and the window.
+ */
+static void
+former_record(void)
+{
+	const erx_device_t *device = open_given(&kept);
+	uint16_t seen = 0;
+	uint32_t queue;
+	rings_t rings;
+
+	device_offers();
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, GIVEN_BUFFER, &queue) == ERX_OK);
+	CHECK(negotiate(device) == ERX_OK);
+	rings = device_rings();
+	for (uint64_t tag = 1; tag <= 3; tag++)
+		CHECK(post_one(device, queue, tag) == ERX_OK);
+	device_serve(&rings, &seen, 0x31, 16);
+	device_serve(&rings, &seen, 0x32, 16);
+	rings.used->idx += 5;
+}
+
+/*
+ * The holder's next record over the same memory, in a fresh process: its queue is carved
+ * again, and after its negotiation one chain posted and served completes alone, with its own
+ * tag and bytes, whatever the former record and the device left behind.
+ */
+static void
+next_record(void)
+{
+	const erx_device_t *device = open_given(&kept);
+	uint16_t seen = 0;
+	uint32_t queue, count;
+	rings_t rings;
+
+	device_offers();
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, GIVEN_BUFFER, &queue) == ERX_OK);
+	CHECK(negotiate(device) == ERX_OK);
+	rings = device_rings();
+	CHECK((const uint8_t *)rings.desc == memories[kept.memory].bytes);
+	CHECK(post_one(device, queue, 41) == ERX_OK);
+	device_serve(&rings, &seen, 0x41, 7);
+	sunk = 0;
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 1);
+	CHECK(sunk == 1 && sunk_tags[0] == 41 && sunk_lengths[0] == 7 && sunk_bytes[0][6] == 0x41);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 0);
+}
+
+/* The physical form, whose window and queues' memory the effects make. */
+static void
+check_physical(void)
 {
 	const erx_device_t *device;
 	uint32_t queue;
@@ -582,6 +800,47 @@ main(void)
 	check_read(device, queue, &rings, &seen);
 	check_posts(device, queue, &rings);
 	check_broken(device, queue, &rings, &seen);
+}
+
+typedef void scenario_t(void);
+
+/*
+ * Each scenario runs in a process of its own, so each starts with no record, as a domain's
+ * runtime does, and shares only the memory made before it. False when it failed.
+ */
+static bool
+run(const char *name, scenario_t *scenario)
+{
+	pid_t child;
+	int status;
+
+	fflush(stdout);
+	child = fork();
+	CHECK(child >= 0);
+	if (child == 0) {
+		scenario();
+		printf("%s ok\n", name);
+		exit(0);
+	}
+	CHECK(waitpid(child, &status, 0) == child);
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+int
+main(void)
+{
+	bool passed = true;
+
+	virtio = erx_device_peripheral_find("virtio_mmio", 11);
+	CHECK(virtio != NULL);
+	passed &= run("physical", check_physical);
+	passed &= run("given", check_given);
+	passed &= run("driver restart", check_driver_restart);
+	kept = given_spec(make_memory(ERX_PAGE_SIZE), make_memory(GIVEN_QUEUE_PAGES * ERX_PAGE_SIZE));
+	passed &= run("former record", former_record);
+	passed &= run("next record", next_record);
+	if (!passed)
+		return (1);
 	printf("erx_device_dma done\n");
 	return (0);
 }

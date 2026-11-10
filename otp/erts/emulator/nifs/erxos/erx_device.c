@@ -28,13 +28,17 @@
 struct erx_device {
 	const erx_device_peripheral_t	*peripheral;
 	volatile uint8_t		*windows[ERX_DEVICE_WINDOWS_MAX];
+	erx_device_form_t		form;
+	uint64_t			window;		/* a given device's window object */
 	uint64_t			base;
 	uint64_t			size;
 	erx_device_pages_t		pages;
-	bool				stand_in;
 	uint32_t			line_count;
-	uint64_t			selectors[ERX_DEVICE_LINES_MAX];
+	uint64_t			lines[ERX_DEVICE_LINES_MAX];	/* as the spec named them */
 	uint64_t			irqs[ERX_DEVICE_LINES_MAX];
+	uint64_t			memory;		/* a given device's memory object */
+	uint64_t			memory_size;	/* its bytes, 0 for none */
+	uint8_t				*dma;		/* this domain's mapping of it */
 	uintptr_t			register_keys[ERX_DEVICE_REGISTERS_MAX];
 	uintptr_t			field_keys[ERX_DEVICE_FIELDS_MAX];
 };
@@ -42,57 +46,119 @@ struct erx_device {
 static erx_device_t devices[ERX_DEVICE_MAX];
 static _Atomic uint32_t devices_open;
 
+/* `size` bytes of the object from `offset`, mapped read and write where the kernel reserves room. */
+static int
+map_object(uint64_t mem, uint64_t offset, uint64_t size, uint64_t *addr)
+{
+	int status = erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, addr);
+
+	if (status == ERX_OK)
+		status = erx_vm_map(ERX_CAP_SELF, *addr, size, mem, offset, ERX_PROT_RW);
+	return (status);
+}
+
+/* A hosted stand-in's window, `size` bytes of plain memory; no other build has one. */
+static int
+stand_in_window(uint64_t size, volatile uint8_t **window)
+{
+#ifdef ERX_DEVICE_STAND_IN
+	*window = calloc(1, size);
+	return (*window != NULL ? ERX_OK : ERX_ENOMEM);
+#else
+	(void)size;
+	(void)window;
+	return (ERX_ENOTSUP);
+#endif
+}
+
 /*
- * A window's mapping: the pages that hold it, as device memory from the kernel, with the
- * window at its offset inside them; or the hosted stand-in's plain memory, `size` bytes.
+ * A window's mapping: the pages that hold it, with the window at its offset inside them. A
+ * physical device's pages are an object made here from their addresses; a given device's
+ * are the pages of its window object at their offsets in it.
  */
 static int
 map_window(const erx_device_spec_t *spec, const erx_device_pages_t *pages, uint64_t size, volatile uint8_t **window)
 {
-	uint64_t mem, addr;
-	int status;
+	uint64_t mem = spec->window, offset = pages->base, addr;
+	int status = ERX_OK;
 
-#ifdef ERX_DEVICE_STAND_IN
-	if (spec->stand_in) {
-		*window = calloc(1, size);
-		return (*window != NULL ? ERX_OK : ERX_ENOMEM);
+	if (spec->form == ERX_DEVICE_FORM_STAND_IN)
+		return (stand_in_window(size, window));
+	if (spec->form == ERX_DEVICE_FORM_PHYSICAL) {
+		status = erx_mem_create_physical(0, 0, pages->base, pages->size, ERX_MEM_ATTR_DEVICE, &mem);
+		offset = 0;
 	}
-#else
-	(void)size;
-	if (spec->stand_in)
-		return (ERX_ENOTSUP);
-#endif
-	status = erx_mem_create_physical(0, 0, pages->base, pages->size, ERX_MEM_ATTR_DEVICE, &mem);
 	if (status == ERX_OK)
-		status = erx_vm_reserve(ERX_CAP_SELF, 0, pages->size, 0, &addr);
-	if (status == ERX_OK)
-		status = erx_vm_map(ERX_CAP_SELF, addr, pages->size, mem, 0, ERX_PROT_RW);
+		status = map_object(mem, offset, pages->size, &addr);
 	if (status == ERX_OK)
 		*window = (volatile uint8_t *)(uintptr_t)(addr + pages->offset);
 	return (status);
 }
 
+/* The lines' IRQ objects: a given device's as it was given them, any other's made from their selectors. */
+static int
+take_lines(const erx_device_spec_t *spec, uint64_t *irqs)
+{
+	const uint32_t kind = spec->form == ERX_DEVICE_FORM_STAND_IN ? ERX_IRQ_SOFT : ERX_IRQ_LINE;
+	int status = ERX_OK;
+
+	for (uint32_t line = 0; status == ERX_OK && line < spec->line_count; line++) {
+		if (spec->form == ERX_DEVICE_FORM_GIVEN)
+			irqs[line] = spec->lines[line];
+		else
+			status = erx_irq_create(0, 0, kind, spec->lines[line], &irqs[line]);
+	}
+	return (status);
+}
+
+/* A given device's memory, mapped here whole, or nothing for a device with none. */
+static int
+map_memory(const erx_device_spec_t *spec, uint8_t **dma)
+{
+	uint64_t addr;
+	int status;
+
+	*dma = NULL;
+	if (spec->memory_size == 0)
+		return (ERX_OK);
+	status = map_object(spec->memory, 0, spec->memory_size, &addr);
+	if (status == ERX_OK)
+		*dma = (uint8_t *)(uintptr_t)addr;
+	return (status);
+}
+
 /*
  * Every part of the spec the table or the record bounds, checked before anything is made,
- * and the pages a window's mapping covers. A stand-in has none.
+ * and the pages a window's mapping covers. A stand-in has none. Memory is a given device's
+ * alone, and whole pages.
  */
 static bool
 spec_fits(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, erx_device_pages_t *pages)
 {
 	*pages = (erx_device_pages_t){ 0 };
-	return (peripheral != NULL && spec->line_count <= ERX_DEVICE_LINES_MAX &&
-	    (spec->stand_in ||
+	if (peripheral == NULL || spec->line_count > ERX_DEVICE_LINES_MAX ||
+	    (spec->form != ERX_DEVICE_FORM_GIVEN && spec->memory_size != 0) || (spec->memory_size & (ERX_PAGE_SIZE - 1)) != 0)
+		return (false);
+	return (spec->form == ERX_DEVICE_FORM_STAND_IN ||
 	    (spec->size >= peripheral->window_size && erx_device_base_aligned(peripheral, spec->base) &&
-	    erx_device_window_pages(spec->base, spec->size, pages))));
+	    erx_device_window_pages(spec->base, spec->size, pages)));
+}
+
+/* Whether a record's window and the spec's are in one space: physical memory, or one window object. */
+static bool
+same_space(const erx_device_t *record, const erx_device_spec_t *spec)
+{
+	return (record->form == spec->form && record->window == spec->window);
 }
 
 static bool
 same_spec(const erx_device_t *record, const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral)
 {
-	if (record->peripheral != peripheral || record->size != spec->size || record->line_count != spec->line_count)
+	if (record->peripheral != peripheral || record->size != spec->size || record->line_count != spec->line_count ||
+	    record->memory != spec->memory || record->memory_size != spec->memory_size)
 		return (false);
 	for (uint32_t line = 0; line < spec->line_count; line++) {
-		if (record->selectors[line] != spec->lines[line])
+		if (record->lines[line] != spec->lines[line])
 			return (false);
 	}
 	return (true);
@@ -101,22 +167,26 @@ same_spec(const erx_device_t *record, const erx_device_spec_t *spec, const erx_d
 /*
  * Whether an earlier open decides this one, and what it decides. The same window is that
  * device again, or refused if anything else differs. A window whose pages another window's
- * mapping holds is refused: one device page has one mapping, its record's. A stand-in has no window to share, so it
- * is always a new device.
+ * mapping holds is refused: one device page has one mapping, its record's. So is memory
+ * another record holds, since each device's queues are carved from its own. A stand-in has no
+ * window to share, so it is always a new device.
  */
 static bool
 find_open(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, const erx_device_pages_t *pages,
     uint32_t open, uint32_t *device, int *status)
 {
-	for (uint32_t index = 0; index < open && !spec->stand_in; index++) {
-		if (devices[index].stand_in)
+	for (uint32_t index = 0; index < open && spec->form != ERX_DEVICE_FORM_STAND_IN; index++) {
+		const erx_device_t *const record = &devices[index];
+
+		if (record->form == ERX_DEVICE_FORM_STAND_IN)
 			continue;
-		if (devices[index].base == spec->base) {
+		if (same_space(record, spec) && record->base == spec->base) {
 			*device = index;
-			*status = same_spec(&devices[index], spec, peripheral) ? ERX_OK : ERX_EBUSY;
+			*status = same_spec(record, spec, peripheral) ? ERX_OK : ERX_EBUSY;
 			return (true);
 		}
-		if (erx_device_pages_overlap(&devices[index].pages, pages)) {
+		if ((same_space(record, spec) && erx_device_pages_overlap(&record->pages, pages)) ||
+		    (spec->memory_size != 0 && record->memory_size != 0 && record->memory == spec->memory)) {
 			*status = ERX_EBUSY;
 			return (true);
 		}
@@ -142,19 +212,23 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 		return (ERX_ELIMIT);
 	record = &devices[open];
 	status = map_window(spec, &pages, peripheral->window_size, &record->windows[0]);
-	for (uint32_t line = 0; status == ERX_OK && line < spec->line_count; line++) {
-		status = erx_irq_create(0, 0, spec->stand_in ? ERX_IRQ_SOFT : ERX_IRQ_LINE, spec->lines[line],
-		    &record->irqs[line]);
-		record->selectors[line] = spec->lines[line];
-	}
+	if (status == ERX_OK)
+		status = take_lines(spec, record->irqs);
+	if (status == ERX_OK)
+		status = map_memory(spec, &record->dma);
 	if (status != ERX_OK)
 		return (status);
 	record->peripheral = peripheral;
+	record->form = spec->form;
+	record->window = spec->window;
 	record->base = spec->base;
 	record->size = spec->size;
 	record->pages = pages;
-	record->stand_in = spec->stand_in;
 	record->line_count = spec->line_count;
+	for (uint32_t line = 0; line < spec->line_count; line++)
+		record->lines[line] = spec->lines[line];
+	record->memory = spec->memory;
+	record->memory_size = spec->memory_size;
 	for (uint32_t index = 0; register_keys != NULL && index < peripheral->register_count; index++)
 		record->register_keys[index] = register_keys[index];
 	for (uint32_t index = 0; field_keys != NULL && index < peripheral->field_count; index++)
@@ -327,6 +401,8 @@ typedef struct queue_record {
 
 static queue_record_t queues[ERX_DEVICE_QUEUES_MAX];
 static uint32_t queues_open;
+/* The bytes of each given device's memory its queues have taken, from the start, by the device's index. */
+static uint64_t memory_taken[ERX_DEVICE_MAX];
 
 /* A plain register of the device's table by name, or NULL; only virtio's queue sequence names them. */
 static const erx_device_register_t *
@@ -410,25 +486,28 @@ write_address(const erx_device_t *device, const erx_device_register_t *const wor
 	put(device, words[1], addr >> 32);
 }
 
-/* Contiguous memory of at least `size` bytes, mapped here, and its object. */
+/* Contiguous memory of at least `size` bytes, made here and mapped, and its object. */
 static int
 map_dma(uint64_t size, uint64_t *mem, uint8_t **mapping)
 {
-	const uint64_t rounded = (size + ERX_PAGE_SIZE - 1) & ~(uint64_t)(ERX_PAGE_SIZE - 1);
-	uint64_t addr;
+	uint64_t rounded, addr;
 	int status;
 
+	if (!erx_device_page_round(size, &rounded))
+		return (ERX_EINVAL);
 	status = erx_mem_create_contiguous(0, 0, rounded, 0, mem);
 	if (status == ERX_OK)
-		status = erx_vm_reserve(ERX_CAP_SELF, 0, rounded, 0, &addr);
-	if (status == ERX_OK)
-		status = erx_vm_map(ERX_CAP_SELF, addr, rounded, *mem, 0, ERX_PROT_RW);
+		status = map_object(*mem, 0, rounded, &addr);
 	if (status == ERX_OK)
 		*mapping = (uint8_t *)(uintptr_t)addr;
 	return (status);
 }
 
-/* The rings' memory and the pool's, with every device address the queue needs, from the kernel. */
+/*
+ * A physical device's queue: its rings' memory and its pool's, each made here, which only the
+ * root may, with every device address the queue needs. The system domain's devices that do
+ * DMA open in the physical form and take their queues this way (TODO.md, "one DMA form").
+ */
 static int
 make_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
 {
@@ -449,6 +528,39 @@ make_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
 	if (!erx_device_queue_init(&record->core, size, buffer_size, pool))
 		return (ERX_ERANGE);
 	record->rings = rings;
+	return (ERX_OK);
+}
+
+/*
+ * A given device's queue, in the next pages of the device's one memory object: its rings, then
+ * its pool, each device address from the object and an offset in it. Nothing is read from
+ * the memory, which a former record and the device may have written: the install writes the
+ * rings whole. ERX_ERANGE, taking nothing, for a queue the memory has no room for; the pages
+ * are taken only once everything else has succeeded.
+ */
+static int
+carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
+{
+	const erx_device_t *const device = record->device;
+	const uint32_t offsets[3] = { record->layout.desc, record->layout.avail, record->layout.used };
+	uint64_t *const taken = &memory_taken[device - devices];
+	erx_device_carve_t carve;
+	uint64_t pool;
+	int status = ERX_OK;
+
+	if (!erx_device_carve(*taken, device->memory_size, record->layout.bytes, (uint64_t)size * buffer_size, &carve))
+		return (ERX_ERANGE);
+	for (uint32_t ring = 0; status == ERX_OK && ring < 3; ring++)
+		status = erx_mem_dma_addr(device->memory, carve.rings + offsets[ring], &record->ring_addrs[ring]);
+	if (status == ERX_OK)
+		status = erx_mem_dma_addr(device->memory, carve.pool, &pool);
+	if (status != ERX_OK)
+		return (status);
+	if (!erx_device_queue_init(&record->core, size, buffer_size, pool))
+		return (ERX_ERANGE);
+	record->rings = device->dma + carve.rings;
+	record->buffers = device->dma + carve.pool;
+	*taken = carve.end;
 	return (ERX_OK);
 }
 
@@ -483,7 +595,10 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	record->device = device;
 	record->index = index;
 	record->layout = layout;
-	status = make_queue_memory(record, size, buffer_size);
+	if (device->form == ERX_DEVICE_FORM_GIVEN)
+		status = carve_queue_memory(record, size, buffer_size);
+	else
+		status = make_queue_memory(record, size, buffer_size);
 	if (status != ERX_OK)
 		return (status);
 	*queue = queues_open++;
@@ -508,7 +623,11 @@ install_check(const queue_record_t *record)
 	return (ERX_OK);
 }
 
-/* The install's effects for one queue, which cannot fail: forget, zero, then size, addresses and ready. */
+/*
+ * The install's effects for one queue, which cannot fail: forget, zero, then size, addresses and
+ * ready. The rings are zeroed whole, so no index a former driver, a former record or the device
+ * left in them is ever read.
+ */
 static void
 install_apply(queue_record_t *record)
 {

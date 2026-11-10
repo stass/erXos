@@ -15,7 +15,7 @@
 # CPUs, one boot of the interactive development image); 1,000 more idle processes
 # add about 4 MiB, and the rest of the baseline over ERTS and /tmp, 5.8 MiB, is the
 # margin. With the system principal's 16 MiB the baseline leaves root_memory the
-# block device's 2 MiB, the network device's 256 KiB and 20 MiB no one is promised.
+# block device's 1 MiB, the network device's 256 KiB and 21 MiB no one is promised.
 # A test
 # image that needs more names a larger machine (ProductionImage::Machine), which
 # grows root_memory, the baseline and /tmp's cap.

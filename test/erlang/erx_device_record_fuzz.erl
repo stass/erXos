@@ -45,21 +45,34 @@ verdict({ok, Specs}) -> {ok, Specs};
 verdict({error, {Reason, _Text}}) -> {error, Reason}.
 
 reference(Arguments) ->
-    Records = lists:filter(fun(["device", "block", "virtio_mmio" | _]) -> true; (_) -> false end, Arguments),
-    Specs = [spec(Words) || ["device", "block", "virtio_mmio" | Words] <- Records],
+    Records = lists:filter(fun([Form, "block", "virtio_mmio" | _]) -> lists:member(Form, ["device", "given"]);
+                              (_) -> false
+                           end, Arguments),
+    Specs = [spec(Form, Words) || [Form, "block", "virtio_mmio" | Words] <- Records],
     case lists:all(fun is_map/1, Specs) of
         true -> {ok, Specs};
         false -> {error, bad_device_record}
     end.
 
-spec([Base, Size, Line, Dma | _]) ->
+spec("given", [Window, Offset, Size, Line, Memory, Bytes | _]) ->
+    case [decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]] of
+        [W, O, S, L, M, 0] when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M) ->
+            #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}]};
+        [W, O, S, L, M, B] when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
+                                is_integer(B) ->
+            #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}],
+              memory => {object, M, B}};
+        _ ->
+            bad
+    end;
+spec("device", [Base, Size, Line, Dma | _]) ->
     case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32), decimal(Dma, ?U64)} of
         {B, S, L, D} when is_integer(B), is_integer(S), is_integer(L), is_integer(D) ->
             #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [L], dma_memory => D};
         _ ->
             bad
     end;
-spec(_) ->
+spec(_Form, _Words) ->
     bad.
 
 %% Digits only, and no more of them than Max has.
@@ -78,16 +91,18 @@ decimal(Word, Max) ->
 arguments() ->
     [entry() || _ <- lists:seq(1, rand:uniform(?MAX_ENTRIES + 1) - 1)].
 
-%% Half of the entries are records of the asked role and peripheral, half of those with
-%% four number words, some within their fields and some just past them, so the accepting
-%% path and the field bounds are reached often.
+%% Half of the entries are records of the asked role and peripheral, in either form, half of
+%% those with their form's count of number words, some within their fields and some just
+%% past them, so the accepting path and the field bounds are reached often.
 entry() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
+    Form = Pick(["device", "given"]),
+    Count = #{"device" => 4, "given" => 6},
     case rand:uniform(4) of
-        1 -> ["device", "block", "virtio_mmio" | Words];
-        2 -> ["device", "block", "virtio_mmio", number(), number(), number(), number() | Words];
-        3 -> [Pick(["device", "console_uart"]), Pick(["block", "network", ""]),
+        1 -> [Form, "block", "virtio_mmio" | Words];
+        2 -> [Form, "block", "virtio_mmio" | [number() || _ <- lists:seq(1, maps:get(Form, Count))] ++ Words];
+        3 -> [Pick(["device", "given", "console_uart"]), Pick(["block", "network", ""]),
               Pick(["virtio_mmio", "sdhci", "virtio_mmio "]) | Words];
         4 -> Words
     end.

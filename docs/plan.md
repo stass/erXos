@@ -1816,8 +1816,9 @@ system manifest's placement of devices and its `/dev` tree
 the device NIF's address rule, under which an unconfined device's memory
 is the system domain's for the boot and a confined device's is freed only
 after the kernel unbinds it from the device's window,
-resource binaries over pool buffers that return to the pool when
-collected, transmit copies as per-byte C, interrupt acknowledgement, and
+receive as a copy into a fresh binary at completion, so no term aliases
+memory the device can write, transmit copies as per-byte C, interrupt
+acknowledgement, and
 the build check that register accessors are referenced only from the
 device NIF ([design-runtime.md](design-runtime.md#the-device-nif)); the
 block, network, GPU and input drivers in Erlang over virtio-mmio, each a

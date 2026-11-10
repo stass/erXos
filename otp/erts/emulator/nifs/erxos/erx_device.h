@@ -28,15 +28,37 @@
 
 typedef struct erx_device erx_device_t;
 
-/* What erx_device:open/1 was given. `lines` is what erx_irq_create takes as its selector. */
+/*
+ * Where a device's objects come from. A given device's window, lines and memory are objects
+ * its domain was given, which it maps and binds; a physical one's are made here, which only
+ * the root may, and serve the system domain's devices; a stand-in is a hosted test's plain
+ * memory and software lines.
+ */
+typedef enum erx_device_form {
+	ERX_DEVICE_FORM_PHYSICAL = 0,
+	ERX_DEVICE_FORM_GIVEN,
+	ERX_DEVICE_FORM_STAND_IN
+} erx_device_form_t;
+
+/*
+ * What erx_device:open/1 was given. `base` is where the window starts: a physical address,
+ * or for a given device an offset in its window object `window`. `lines` are what
+ * erx_irq_create takes as a selector, or for a given device its lines' IRQ objects. A given
+ * device that does DMA has `memory`, a contiguous object of `memory_size` bytes, a multiple of
+ * the page, that every queue of the device is carved from; `memory_size` is 0 for none and for
+ * every other form.
+ */
 typedef struct erx_device_spec {
-	const char	*peripheral;
-	size_t		peripheral_length;
-	uint64_t	base;
-	uint64_t	size;
-	bool		stand_in;
-	uint32_t	line_count;
-	uint64_t	lines[ERX_DEVICE_LINES_MAX];
+	const char		*peripheral;
+	size_t			peripheral_length;
+	erx_device_form_t	form;
+	uint64_t		window;
+	uint64_t		base;
+	uint64_t		size;
+	uint32_t		line_count;
+	uint64_t		lines[ERX_DEVICE_LINES_MAX];
+	uint64_t		memory;
+	uint64_t		memory_size;
 } erx_device_spec_t;
 
 /* Which element of a register: a plain register takes none, an array one below its count. */
@@ -48,12 +70,15 @@ typedef struct erx_device_element {
 /*
  * ERX_OK with the device's index. The same spec again is that device again, so a restarted
  * driver finds its record, and the same window with anything else is ERX_EBUSY, as is a
- * window in a page another record's window holds. A new spec maps the pages that hold the
- * window and makes the lines' objects. A spec that does not fit its peripheral, or whose base
- * misaligns one of its registers, is ERX_EINVAL. A hosted stand-in, always a new device, is plain memory of the peripheral's
- * size with software objects for lines; elsewhere one is ERX_ENOTSUP. A failure may leave a
- * mapping and a line's object made, for the boot. The keys are what the caller interned the
- * table's names as, in the table's order, and may be NULL. The caller serialises opens.
+ * window in a page another record's window holds and memory another record holds. A new
+ * spec maps the pages that hold the window; a physical one makes them and the lines'
+ * objects, and a given one maps its window object and its memory and takes its lines' objects
+ * as they are. A spec that does not fit its peripheral, whose base misaligns one of its
+ * registers, or whose memory is not whole pages of a given device, is ERX_EINVAL. A hosted
+ * stand-in, always a new device, is plain memory of the peripheral's size with software
+ * objects for lines; elsewhere one is ERX_ENOTSUP. A failure may leave a mapping and a line's
+ * object made, for the boot. The keys are what the caller interned the table's names as, in
+ * the table's order, and may be NULL. The caller serialises opens.
  */
 int	erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, const uintptr_t *field_keys,
 	    uint32_t *device);
@@ -94,9 +119,12 @@ bool	erx_device_line_irq(const erx_device_t *device, uint64_t line, uint64_t *ir
 /*
  * Queues (docs/design-runtime.md, "Queues" to "The reset rule"), for a virtio-mmio device of
  * version 2. A queue is state of the device's record for the boot: erx_device_queue's
- * bookkeeping, its rings and its pool of `size` buffers, each in contiguous memory mapped
- * here, whose device addresses nothing outside this file sees. The caller serialises every
- * call below; the register accesses above stay lock-free.
+ * bookkeeping, its rings and its pool of `size` buffers, in contiguous memory mapped here,
+ * whose device addresses nothing outside this file sees. A given device's queues are carved
+ * from its one memory object, a physical device's are each made here. The bookkeeping lives
+ * in this record alone and the rings are written whole at the install, so a new record over
+ * memory a former record and the device wrote never reads what they left. The caller
+ * serialises every call below; the register accesses above stay lock-free.
  */
 #define ERX_DEVICE_QUEUES_MAX		4u
 /* What one erx_device_complete copies before it stops: the entry that crosses it is copied whole. */
@@ -118,7 +146,9 @@ typedef uint8_t	*erx_device_sink_t(void *context, uint64_t tag, uint32_t length)
  * the pool at most ERX_MEM_CONTIGUOUS_MAX, else ERX_EINVAL. The same queue again is that queue
  * again, posted buffers and all, so a restarted driver finds it, and the same index with
  * another geometry is ERX_EBUSY. A device that is not virtio-mmio version 2 is ERX_ENOTSUP. A
- * new queue is not on the device until erx_device_negotiate installs it. A failure may leave
+ * given device's queue takes the next pages of its memory, and one they do not fit, or a
+ * given device with no memory, is ERX_ERANGE with nothing taken. A new queue is not on the
+ * device until erx_device_negotiate installs it. A physical device's failure may leave
  * memory made, for the boot.
  */
 int	erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t size, uint32_t buffer_size,

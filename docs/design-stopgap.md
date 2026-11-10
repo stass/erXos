@@ -1442,8 +1442,10 @@ the domain library deletes the register window's object and the line's IRQ objec
 device's for the boot, as [design-system.md](design-system.md#devices) says; the restarted holder's give creates the
 window and the line's object again and passes the same contiguous memory. A register range stays in the root's device
 window for the boot once `sigma0` gave it, so a create over it maps from the window again and asks `sigma0` for nothing;
-two devices whose ranges overlap are refused above this backend, by `erx_dom_device_give`. The new driver resets the
-device before it posts anything, so what the old holder left in the device or its memory is not trusted.
+two devices whose ranges overlap are refused above this backend, by `erx_dom_device_give`. The new driver's
+`negotiate/2` resets the device before it posts anything and before it installs a ring, and nothing reads the kept memory
+before then, so what the old holder left in the device or its memory is not trusted
+([design-runtime.md](design-runtime.md#the-device-nif), "The reset rule").
 
 Which of QEMU's 32 virtio-mmio transports is which device is configuration: the platform
 record names a transport for each role, the bus the harness pins that role's device to,
@@ -1461,10 +1463,20 @@ driver's first reads of the transport, its magic, version and device id, say whe
 device is behind it. A manifest with no such unit has no record, and a machine without the
 device boots the same, with nothing for its driver to drive.
 
+A holder domain's records have a word of their own, `-erx given ROLE PERIPHERAL WINDOW_H
+OFFSET SIZE LINE_H MEM_H MEM_SIZE`: the handles of the window, line and memory objects the
+domain library installed when it created the domain, the transport's offset and size in the
+window object, and the memory's bytes, 0 for a device that does no DMA. Since each form has
+its own word, the reader never tells one from the other by counting numbers, and a plain
+word of the command line after a record cannot make one form look like the other.
+
 A driver finds its records with `erx_device_record:find(Role, Peripheral)`, which returns
-each as a spec for `erx_device:open/1`, with `dma_memory` beside the window and line, and
-`{ok, []}` when there is none. Words after the four numbers are not the record's. Each number must be decimal within its field (64, 64, 32
-and 64 bits), or the records of that role and peripheral are refused with a stated reason
+each as a spec for `erx_device:open/1`: a `device` record's with `dma_memory` beside the
+physical window and line, a `given` record's as `{object, Window, Offset, Size}`, `[{object,
+Line}]` and, for a nonzero size, `memory => {object, Memory, Bytes}`; and `{ok, []}` when
+there is none. Words after a record's numbers are not the record's. Each number must be
+decimal within its field (64, 64, 32 and 64 bits for a `device` record, 64 bits each for a
+`given` one), or the records of that role and peripheral are refused with a stated reason
 (`erx_device_record:find/3`, which has a fuzz target). The hosted entry adds no record,
 since a hosted runtime has no devices. More records than `ERX_BOOT_DEVICES_MAX` refuse
 the manifest at boot.

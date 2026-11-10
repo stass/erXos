@@ -20,8 +20,6 @@
 #include "config.h"
 #endif
 
-#include <string.h>
-
 #include "erl_nif.h"
 #include "erx_event.h"
 
@@ -68,29 +66,80 @@ status_error(ErlNifEnv *env, int status)
 	return (enif_make_tuple2(env, enif_make_atom(env, "error"), enif_make_atom(env, name)));
 }
 
-/* `{physical, Base, Size}`, or `stand_in` for a hosted test's plain memory. */
+/* A tuple of `arity` whose first element is the atom `tag`, and its elements. */
+static bool
+tagged(ErlNifEnv *env, ERL_NIF_TERM term, const char *tag, int arity, const ERL_NIF_TERM **parts)
+{
+	int found;
+
+	return (enif_get_tuple(env, term, &found, parts) && found == arity &&
+	    enif_is_identical((*parts)[0], enif_make_atom(env, tag)));
+}
+
+/*
+ * `{object, Window, Offset, Size}` for a given device, `{physical, Base, Size}`, or `stand_in`
+ * for a hosted test's plain memory.
+ */
 static bool
 decode_window(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_spec_t *spec)
 {
 	const ERL_NIF_TERM *parts;
-	char tag[16];
-	ErlNifUInt64 base, size;
-	int arity;
+	ErlNifUInt64 window, base, size;
 
 	if (enif_is_identical(term, enif_make_atom(env, "stand_in"))) {
-		spec->stand_in = true;
+		spec->form = ERX_DEVICE_FORM_STAND_IN;
 		return (true);
 	}
-	if (!enif_get_tuple(env, term, &arity, &parts) || arity != 3 ||
-	    !enif_get_atom(env, parts[0], tag, sizeof(tag), ERL_NIF_LATIN1) || strcmp(tag, "physical") != 0 ||
-	    !enif_get_uint64(env, parts[1], &base) || !enif_get_uint64(env, parts[2], &size))
+	if (tagged(env, term, "object", 4, &parts) && enif_get_uint64(env, parts[1], &window) &&
+	    enif_get_uint64(env, parts[2], &base) && enif_get_uint64(env, parts[3], &size)) {
+		spec->form = ERX_DEVICE_FORM_GIVEN;
+		spec->window = window;
+	} else if (!tagged(env, term, "physical", 3, &parts) || !enif_get_uint64(env, parts[1], &base) ||
+	    !enif_get_uint64(env, parts[2], &size)) {
 		return (false);
+	}
 	spec->base = base;
 	spec->size = size;
 	return (true);
 }
 
-/* #{peripheral := atom(), window := window(), lines := [non_neg_integer()]}. */
+/* A given device's line is `{object, Irq}`; any other's is its selector. */
+static bool
+decode_line(ErlNifEnv *env, ERL_NIF_TERM term, const erx_device_spec_t *spec, uint64_t *line)
+{
+	const ERL_NIF_TERM *parts;
+	ErlNifUInt64 value;
+
+	if (spec->form == ERX_DEVICE_FORM_GIVEN) {
+		if (!tagged(env, term, "object", 2, &parts))
+			return (false);
+		term = parts[1];
+	}
+	if (!enif_get_uint64(env, term, &value))
+		return (false);
+	*line = value;
+	return (true);
+}
+
+/* A given device's `memory => {object, Memory, Bytes}`, Bytes nonzero, which no other form has. */
+static bool
+decode_memory(ErlNifEnv *env, ERL_NIF_TERM map, erx_device_spec_t *spec)
+{
+	const ERL_NIF_TERM *parts;
+	ERL_NIF_TERM value;
+	ErlNifUInt64 memory, bytes;
+
+	if (!enif_get_map_value(env, map, enif_make_atom(env, "memory"), &value))
+		return (true);
+	if (spec->form != ERX_DEVICE_FORM_GIVEN || !tagged(env, value, "object", 3, &parts) ||
+	    !enif_get_uint64(env, parts[1], &memory) || !enif_get_uint64(env, parts[2], &bytes) || bytes == 0)
+		return (false);
+	spec->memory = memory;
+	spec->memory_size = bytes;
+	return (true);
+}
+
+/* #{peripheral := atom(), window := window(), lines := [line()], memory => memory()}. */
 static bool
 decode_spec(ErlNifEnv *env, ERL_NIF_TERM term, char *peripheral, erx_device_spec_t *spec)
 {
@@ -112,13 +161,10 @@ decode_spec(ErlNifEnv *env, ERL_NIF_TERM term, char *peripheral, erx_device_spec
 		return (false);
 	spec->line_count = length;
 	for (unsigned index = 0; index < length; index++) {
-		ErlNifUInt64 selector;
-
-		if (!enif_get_list_cell(env, list, &head, &list) || !enif_get_uint64(env, head, &selector))
+		if (!enif_get_list_cell(env, list, &head, &list) || !decode_line(env, head, spec, &spec->lines[index]))
 			return (false);
-		spec->lines[index] = selector;
 	}
-	return (true);
+	return (decode_memory(env, term, spec));
 }
 
 static ERL_NIF_TERM

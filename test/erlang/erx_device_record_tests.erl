@@ -22,8 +22,8 @@ record(Numbers) ->
 
 %% The words the root writes for QEMU virt's block transport.
 the_root_s_record_test() ->
-    ?assertEqual({ok, [spec(167788032, 512, 79, 2097152)]},
-                 find([record(["167788032", "512", "79", "2097152"])])).
+    ?assertEqual({ok, [spec(167788032, 512, 79, 1048576)]},
+                 find([record(["167788032", "512", "79", "1048576"])])).
 
 a_missing_disk_is_no_record_test() ->
     ?assertEqual({ok, []}, find([])),
@@ -53,3 +53,37 @@ malformed_numbers_refuse_test() ->
 a_short_record_refuses_even_after_a_good_one_test() ->
     ?assertMatch({error, {bad_device_record, _}}, find([record(["1", "2", "3", "4"]), record(["1", "2", "3"])])),
     ?assertMatch({error, {bad_device_record, _}}, find([record([])])).
+
+given(Numbers) ->
+    ["given", "block", "virtio_mmio" | Numbers].
+
+given_spec(Window, Offset, Size, Line) ->
+    #{peripheral => virtio_mmio, window => {object, Window, Offset, Size}, lines => [{object, Line}]}.
+
+%% The words the domain library writes for a holder of QEMU virt's block transport: the
+%% window object's handle, the transport at 0xe00 in its page, the line's handle and the
+%% device's one memory.
+a_holder_s_record_test() ->
+    ?assertEqual({ok, [(given_spec(12, 3584, 512, 13))#{memory => {object, 14, 1048576}}]},
+                 find([given(["12", "3584", "512", "13", "14", "1048576"])])).
+
+a_given_record_of_no_memory_has_no_memory_key_test() ->
+    ?assertEqual({ok, [given_spec(12, 0, 4096, 13)]}, find([given(["12", "0", "4096", "13", "0", "0"])])).
+
+the_two_forms_keep_their_order_and_their_own_counts_test() ->
+    ?assertEqual({ok, [spec(1, 2, 3, 4), given_spec(5, 6, 7, 8), spec(9, 10, 11, 0)]},
+                 find([record(["1", "2", "3", "4", "5", "6"]), given(["5", "6", "7", "8", "0", "0", "word"]),
+                       record(["9", "10", "11", "0"])])).
+
+given_field_bounds_test() ->
+    ?assertEqual({ok, [(given_spec(18446744073709551615, 0, 18446744073709551615, 18446744073709551615))
+                       #{memory => {object, 18446744073709551615, 18446744073709551615}}]},
+                 find([given([?U64_MAX, "0", ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U64_MAX])])),
+    [?assertMatch({error, {bad_device_record, _}}, find([given(Numbers)]))
+     || Numbers <- [["18446744073709551616", "0", "1", "1", "1", "1"], ["1", "0", "1", "1", "1", "-1"],
+                    ["1", "0x0", "1", "1", "1", "1"], ["1", "0", "1", "1", "1", "018446744073709551615"]]].
+
+a_short_given_record_refuses_test() ->
+    ?assertMatch({error, {bad_device_record, _}}, find([given(["1", "2", "3", "4", "5"])])),
+    ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1"]),
+                                                        given([])])).

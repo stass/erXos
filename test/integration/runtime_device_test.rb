@@ -67,6 +67,26 @@ class RuntimeDeviceTest < Minitest::Test
     ERLANG
   end
 
+  # A given spec decodes on a hosted runtime, which has no objects to map, so its open fails
+  # at the window's map; one that mixes the forms is badarg before anything is mapped.
+  def test_a_given_device_decodes_and_a_mixed_spec_is_badarg
+    assert_equal 'ok', evaluate(<<~'ERLANG')
+      {error, einval} = erx_device:open(#{peripheral => pl011, window => {object, 1, 0, 4096}, lines => [{object, 2}]}),
+      {error, einval} = erx_device:open(#{peripheral => pl011, window => {object, 1, 0, 4096}, lines => [],
+                                          memory => {object, 3, 8192}}),
+      io:format("~s~n", [ok]), halt().
+    ERLANG
+    assert_equal 'ok', evaluate(<<~'ERLANG')
+      {'EXIT', {badarg, _}} = (catch erx_device:open(#{peripheral => pl011, window => {object, 1, 0, 4096}, lines => [2]})),
+      {'EXIT', {badarg, _}} = (catch erx_device:open(#{peripheral => pl011, window => {physical, 0, 4096}, lines => [],
+                                                       memory => {object, 3, 8192}})),
+      {'EXIT', {badarg, _}} = (catch erx_device:open(#{peripheral => pl011, window => {object, 1, 0}, lines => []})),
+      {'EXIT', {badarg, _}} = (catch erx_device:open(#{peripheral => pl011, window => {object, 1, 0, 4096}, lines => [],
+                                                       memory => {object, 3, 0}})),
+      io:format("~s~n", [ok]), halt().
+    ERLANG
+  end
+
   def test_a_line_reaches_the_process_bound_to_it
     assert_equal 'ok', evaluate(<<~'ERLANG')
       {ok, D} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [0, 0]}),

@@ -326,7 +326,7 @@ check_open(const char *name)
 
 	/* No build but a hosted runtime's has a stand-in. */
 	spec = spec_of(name, 0x9000000);
-	spec.stand_in = true;
+	spec.form = ERX_DEVICE_FORM_STAND_IN;
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_ENOTSUP);
 
 	spec = spec_of(name, 0x9000000);

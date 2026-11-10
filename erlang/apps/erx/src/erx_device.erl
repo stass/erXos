@@ -36,8 +36,11 @@
 
 -opaque device() :: non_neg_integer().
 -type register_name() :: atom() | {atom(), non_neg_integer()}.
--type window() :: {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
--type spec() :: #{peripheral := atom(), window := window(), lines := [non_neg_integer()],
+-type window() :: {object, Window :: non_neg_integer(), Offset :: non_neg_integer(), Size :: non_neg_integer()}
+                | {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
+-type line() :: {object, Irq :: non_neg_integer()} | non_neg_integer().
+-type spec() :: #{peripheral := atom(), window := window(), lines := [line()],
+                  memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
                   dma_memory => non_neg_integer()}.
 -opaque queue() :: non_neg_integer().
 -type segment() :: {out, binary()} | {in, pos_integer()}.
@@ -47,12 +50,15 @@ init() ->
 
 %% The device's record, for the boot: a second open of a window names the same device, so
 %% a restarted driver finds what its predecessor had, and the same window with anything
-%% else is `{error, ebusy}`, as is a window in a page another device's window holds. Spec is what the device service
-%% hands a driver, which does not look inside it: the peripheral's name in the SVD source,
-%% its register window and its lines' selectors, and for a device that does DMA the bytes of
-%% memory the boot reserves for it (erx_device_record). A hosted runtime has no devices, so
-%% `{physical, _, _}` is `{error, enotsup}` there, and `stand_in` gives plain memory and
-%% software lines for tests; natively `stand_in` is `{error, enotsup}`.
+%% else is `{error, ebusy}`, as is a window in a page another device's window holds, or a
+%% memory object another device's record holds. Spec is what erx_device_record finds for a
+%% driver, which does not look inside it: the peripheral's name in the SVD source, and either
+%% a given device's objects (`{object, Window, Offset, Size}`, `{object, Irq}` lines and
+%% `memory => {object, Memory, Bytes}` for a device that does DMA, whose queues are carved
+%% from that one memory, `{error, erange}` past its end) or a physical device's window, line
+%% selectors and the boot's DMA memory. A hosted runtime has no devices, so either form is an
+%% error there, and `stand_in` gives plain memory and software lines for tests; natively
+%% `stand_in` is `{error, enotsup}`.
 -spec open(spec()) -> {ok, device()} | {error, atom() | {status, integer()}}.
 open(_Spec) ->
     erlang:nif_error(undef).

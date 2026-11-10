@@ -103,8 +103,8 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "devices 3\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
                             "words-erx device hostlink pl011 151257088 4096 40 0 exact 1 short 0\n"
-    assert_includes output, "device block virtio_mmio 167788032 512 79 2097152 " \
-                            "words-erx device block virtio_mmio 167788032 512 79 2097152 exact 1 short 0\n"
+    assert_includes output, "device block virtio_mmio 167788032 512 79 1048576 " \
+                            "words-erx device block virtio_mmio 167788032 512 79 1048576 exact 1 short 0\n"
     assert_includes output, "device net virtio_mmio 167783936 512 71 262144 words-erx device net virtio_mmio 167783936 512 71 262144 exact 1 short 0\n"
   end
 

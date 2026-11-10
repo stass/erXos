@@ -2244,8 +2244,8 @@ made for it. Pools and queues are state of that record, never resources
 of a process: a driver process names them, and when it exits or crashes
 they stay as they are, posted buffers included, so nothing the device
 may still hold is given out again. Pool memory is never freed while the
-device can reach it: an unconfined device's is the system domain's for
-the whole boot and never freed, and a confined device's is freed only
+device can reach it: an unconfined device's is its one contiguous
+memory object, kept for the whole boot and never freed, and a confined device's is freed only
 after the kernel has unbound it from the device's window.
 
 **Windows smaller than a page.** A device's register window may be
@@ -2305,8 +2305,13 @@ layout the device uses, and the queue's pool of `Size` buffers of
 `BufferSize` bytes. The rings and the pool are each memory the record
 holds: for a confined device a memory object from the domain's budget,
 mapped into the domain and into the device's DMA window with
-`erx_dma_map`; for an unconfined one contiguous memory, the system
-domain's for the whole boot. It returns `{ok, Q}`, the queue's name in
+`erx_dma_map`; for an unconfined one, pages of the device's one
+contiguous memory object, the `memory => {object, Memory, Bytes}` the
+domain was given with the device, which is the device's for the whole
+boot. Each queue takes its rings at the first page no earlier queue
+took and its pool at the page after them, so no two queues share a
+page and no queue makes memory of its own; a queue past the object's
+end is `{error, erange}`, taking nothing. It returns `{ok, Q}`, the queue's name in
 that record; the same queue again is that queue again, posted buffers
 and all, so a restarted driver finds it. Every buffer the device ever
 addresses is a range of a pool, and every device address is built by the
@@ -2433,6 +2438,16 @@ predecessor made; `negotiate/2`; then `irq_bind/2` and the reads of the
 device's configuration. A queue created after `negotiate/2` is not on the
 device until the next one. The queue's size is the driver's bound on what
 the device may hold at once.
+
+A holder's restart opens a new record over the kept memory, which the
+former driver and the device wrote. The reset that makes it safe is
+`negotiate/2`'s, not `open/1`'s: `open/1` and `queue_create/4` read
+nothing from the memory, and the install writes each queue's rings
+whole and starts its bookkeeping from nothing only after the device has
+read back status 0. So no index or descriptor the former record left is
+ever read, and the device is given no address of the new record before
+it has let the old ones go; what it writes into the memory before then
+nothing reads.
 
 **Interrupts.** `erx_device:irq_bind(Dev, Line)`, whose `Line` indexes
 the lines of the device's record, binds the line's IRQ

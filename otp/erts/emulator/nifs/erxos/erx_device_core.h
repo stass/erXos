@@ -25,7 +25,7 @@
  * table's offsets apply from `offset`, the window's base inside the first page.
  */
 typedef struct erx_device_pages {
-	uint64_t	base;	/* the first page's physical address */
+	uint64_t	base;	/* the first page: physical, or an offset in the window object */
 	uint64_t	size;	/* the bytes of the pages, a multiple of ERX_PAGE_SIZE */
 	uint64_t	offset;	/* the window's base less `base`, below ERX_PAGE_SIZE */
 } erx_device_pages_t;
@@ -69,6 +69,47 @@ static inline bool
 erx_device_pages_overlap(const erx_device_pages_t *a, const erx_device_pages_t *b)
 {
 	return (a->base < b->base + b->size && b->base < a->base + a->size);
+}
+
+/*
+ * Where a queue lies in its device's one memory object: its rings at the first page no
+ * earlier queue took, its pool at the page after them, and `end`, the bytes taken with it.
+ * Each starts on a page, so no queue shares a page with another's rings or pool.
+ */
+typedef struct erx_device_carve {
+	uint64_t	rings;
+	uint64_t	pool;
+	uint64_t	end;
+} erx_device_carve_t;
+
+/* Bytes rounded up to whole pages; false when the rounding wraps. */
+static inline bool
+erx_device_page_round(uint64_t bytes, uint64_t *rounded)
+{
+	const uint64_t mask = ERX_PAGE_SIZE - 1;
+
+	if (__builtin_add_overflow(bytes, mask, rounded))
+		return (false);
+	*rounded &= ~mask;
+	return (true);
+}
+
+/*
+ * The next queue's place after the `taken` bytes of a memory of `size`, for rings of
+ * `ring_bytes` and a pool of `pool_bytes`. False, deciding nothing, when the queue would end
+ * past `size` or a sum wraps. `taken` is always whole pages, as every `end` is.
+ */
+static inline bool
+erx_device_carve(uint64_t taken, uint64_t size, uint64_t ring_bytes, uint64_t pool_bytes, erx_device_carve_t *carve)
+{
+	uint64_t rings_rounded, pool_rounded, pool, end;
+
+	if (!erx_device_page_round(ring_bytes, &rings_rounded) || !erx_device_page_round(pool_bytes, &pool_rounded) ||
+	    __builtin_add_overflow(taken, rings_rounded, &pool) || __builtin_add_overflow(pool, pool_rounded, &end) ||
+	    end > size)
+		return (false);
+	*carve = (erx_device_carve_t){ .rings = taken, .pool = pool, .end = end };
+	return (true);
 }
 
 /* What writing a field takes, decided before any access. */
