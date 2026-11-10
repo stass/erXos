@@ -139,7 +139,7 @@ The 32-bit numbers stay as received; erx_tcp_seq lifts them inside the connectio
 
 -include("erx_tcp_wire.hrl").
 
--export([decode/2, encode/3, optlen/1]).
+-export([decode/2, decode/3, encode/3, optlen/1]).
 
 -export_type([reason/0]).
 
@@ -186,18 +186,34 @@ Decodes the TCP segment in Segment, the payload of its IP packet, with `PseudoSu
 partial sum of its pseudo-header over `byte_size(Segment)` (`erx_ip4_wire:pseudo_sum/4`,
 `erx_ip6_wire:pseudo_sum/4`), as for every decoder above IP. Translates the checks of
 `tcp_input_with_port` before its lookup, then `tcp_dooptions` over the options. A sum outside
-0..16#ffff raises, since the IP layer computes it.
+0..16#ffff raises, since the IP layer computes it. The segment's own sum is computed here;
+`decode/3` takes it from the copy instead.
 """.
 -spec decode(0..16#ffff, binary()) -> {ok, #tcp{}, Payload :: binary()} | {error, reason()}.
-decode(_, Segment) when not is_binary(Segment); byte_size(Segment) < ?TCP_HDR_LEN ->
-    {error, too_short};
-decode(_, Segment) when byte_size(Segment) > ?TCP_MAXSEG ->
-    {error, too_long};
 decode(PseudoSum, Segment) ->
-    case erx_bytes:inet_csum(PseudoSum, Segment) of
+    decode(PseudoSum, Segment, none).
+
+-doc """
+As `decode/2`, with `Sum` the sum of Segment's bytes (`erx_net_sum`), which the copy computed
+and the IP layer derived from the frame's network sum, or `none` to sum them here
+(docs/design-network-stack.md, "Checksums in the copy"). The checksum is checked the same
+way from either, and no length is taken from the sum.
+""".
+-spec decode(0..16#ffff, binary(), erx_net_sum:sum() | none) ->
+          {ok, #tcp{}, Payload :: binary()} | {error, reason()}.
+decode(_, Segment, _) when not is_binary(Segment); byte_size(Segment) < ?TCP_HDR_LEN ->
+    {error, too_short};
+decode(_, Segment, _) when byte_size(Segment) > ?TCP_MAXSEG ->
+    {error, too_long};
+decode(PseudoSum, Segment, Sum) ->
+    case checked(PseudoSum, Segment, Sum) of
         16#ffff -> header(Segment);
         _ -> {error, bad_sum}
     end.
+
+%% The sum over the pseudo-header and the segment, from the copy's sum or computed.
+checked(PseudoSum, Segment, none) -> erx_bytes:inet_csum(PseudoSum, Segment);
+checked(PseudoSum, _, Sum) -> erx_net_sum:add(PseudoSum, Sum).
 
 %% The checksum is right, so the fields may be read. The sum of a right segment is 16#ffff and
 %% never 0, since the pseudo-header's protocol word is nonzero.

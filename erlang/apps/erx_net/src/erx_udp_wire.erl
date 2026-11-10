@@ -107,7 +107,7 @@ not the wire: another version, or a sum outside 0..16#ffff, raises.
 
 -include("erx_udp_wire.hrl").
 
--export([decode/3, encode/3]).
+-export([decode/3, decode/4, encode/3]).
 
 -export_type([family/0, reason/0]).
 
@@ -128,26 +128,42 @@ not the wire: another version, or a sum outside 0..16#ffff, raises.
 -doc """
 Decodes the UDP datagram in Bytes, the payload of its IP packet, with `PseudoSum` the partial
 sum of its pseudo-header over `byte_size(Bytes)`. Translates the checks of `udp_input` or
-`udp6_input` in their order but for the port (see the module's departure).
+`udp6_input` in their order but for the port (see the module's departure). The datagram's
+own sum is computed here; `decode/4` takes it from the copy instead.
 """.
 -spec decode(family(), 0..16#ffff, binary()) -> {ok, #udp{}, Payload :: binary()} | {error, reason()}.
-decode(_, _, Bytes) when not is_binary(Bytes); byte_size(Bytes) < ?UDP_HDR_LEN ->
+decode(Family, PseudoSum, Bytes) ->
+    decode(Family, PseudoSum, Bytes, none).
+
+-doc """
+As `decode/3`, with `Sum` the sum of Bytes (`erx_net_sum`) that the IP layer derived from the
+frame's network sum, or `none` to sum them here (docs/design-network-stack.md, "Checksums in
+the copy"). Over IPv4 the datagram is cut at its UDP length, and the cut's sum is taken from
+Sum with `erx_net_sum:span/4`.
+""".
+-spec decode(family(), 0..16#ffff, binary(), erx_net_sum:sum() | none) ->
+          {ok, #udp{}, Payload :: binary()} | {error, reason()}.
+decode(_, _, Bytes, _) when not is_binary(Bytes); byte_size(Bytes) < ?UDP_HDR_LEN ->
     {error, too_short};
-decode(_, _, Bytes) when byte_size(Bytes) > ?MAX_DATAGRAM ->
+decode(_, _, Bytes, _) when byte_size(Bytes) > ?MAX_DATAGRAM ->
     {error, bad_len};
-decode(inet6, _, <<_:32, Ulen:16, _/binary>> = Bytes) when Ulen =/= byte_size(Bytes) ->
+decode(inet6, _, <<_:32, Ulen:16, _/binary>> = Bytes, _) when Ulen =/= byte_size(Bytes) ->
     {error, bad_len};
-decode(inet6, _, <<_:48, 0:16, _/binary>>) ->
+decode(inet6, _, <<_:48, 0:16, _/binary>>, _) ->
     {error, no_sum};
-decode(inet6, PseudoSum, Bytes) ->
-    checksum(PseudoSum, Bytes);
-decode(inet, _, <<_:32, Ulen:16, _/binary>> = Bytes) when Ulen < ?UDP_HDR_LEN; Ulen > byte_size(Bytes) ->
+decode(inet6, PseudoSum, Bytes, Sum) ->
+    checksum(PseudoSum, Bytes, Sum);
+decode(inet, _, <<_:32, Ulen:16, _/binary>> = Bytes, _) when Ulen < ?UDP_HDR_LEN; Ulen > byte_size(Bytes) ->
     {error, bad_len};
-decode(inet, _, <<Sport:16, Dport:16, Ulen:16, 0:16, Rest/binary>>) ->
+decode(inet, _, <<Sport:16, Dport:16, Ulen:16, 0:16, Rest/binary>>, _) ->
     dest_port(#udp{sport = Sport, dport = Dport}, binary:part(Rest, 0, Ulen - ?UDP_HDR_LEN));
-decode(inet, PseudoSum, <<_:32, Ulen:16, _/binary>> = Bytes) ->
+decode(inet, PseudoSum, <<_:32, Ulen:16, _/binary>> = Bytes, Sum) ->
     <<Datagram:Ulen/binary, _Trailing/binary>> = Bytes,
-    checksum(with_length(PseudoSum, byte_size(Bytes), Ulen), Datagram).
+    checksum(with_length(PseudoSum, byte_size(Bytes), Ulen), Datagram, datagram_sum(Bytes, Sum, Ulen)).
+
+%% The sum of the datagram's Ulen bytes, from Sum, that of the IP payload they start.
+datagram_sum(_, none, _) -> none;
+datagram_sum(Bytes, Sum, Ulen) -> erx_net_sum:span(Bytes, Sum, 0, Ulen).
 
 %% The pseudo-header's sum with its length Delivered replaced by Ulen: adding the ones'
 %% complement of a word subtracts it (RFC 1071), and the length is one 16-bit word of the
@@ -156,11 +172,15 @@ decode(inet, PseudoSum, <<_:32, Ulen:16, _/binary>> = Bytes) ->
 with_length(PseudoSum, Delivered, Ulen) ->
     erx_bytes:inet_csum(PseudoSum, <<(16#ffff - Delivered):16, Ulen:16>>).
 
-checksum(PseudoSum, <<Sport:16, Dport:16, _:32, Payload/binary>> = Datagram) ->
-    case erx_bytes:inet_csum(PseudoSum, Datagram) of
+checksum(PseudoSum, <<Sport:16, Dport:16, _:32, Payload/binary>> = Datagram, Sum) ->
+    case checked(PseudoSum, Datagram, Sum) of
         16#ffff -> dest_port(#udp{sport = Sport, dport = Dport}, Payload);
         _ -> {error, bad_sum}
     end.
+
+%% The sum over the pseudo-header and the datagram, from the copy's sum or computed.
+checked(PseudoSum, Datagram, none) -> erx_bytes:inet_csum(PseudoSum, Datagram);
+checked(PseudoSum, _, Sum) -> erx_net_sum:add(PseudoSum, Sum).
 
 dest_port(#udp{dport = 0}, _) -> {error, bad_port};
 dest_port(Udp, Payload) -> {ok, Udp, Payload}.

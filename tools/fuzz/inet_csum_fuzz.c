@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 
 #include "erx_inet_csum.h"
@@ -35,14 +36,15 @@ bytewise_sum(uint16_t sum, const uint8_t *data, size_t length)
  * The first two bytes are a starting sum, little-endian; the third chooses a cut; the fourth
  * and fifth choose an even offset and an even span; the next eight are the span's new bytes;
  * the rest is the input. The sum must equal the model's, also when summed as the two pieces
- * of the cut; and updating the input's checksum field for the span's new bytes must give the
+ * of the cut, and when the second piece is copied through erx_inet_copy_sum, which must store
+ * its bytes unchanged; and updating the input's checksum field for the span's new bytes must give the
  * recomputed field, or 0x0000 where that is 0xffff.
  */
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
 	const uint8_t *input, *replacement;
-	uint8_t *changed;
+	uint8_t *changed, *copy;
 	size_t length, cut, offset, span;
 	uint16_t start, want, field, recomputed;
 
@@ -58,6 +60,13 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		abort();
 	if (erx_inet_sum(erx_inet_sum(start, input, cut, 0), input + cut, length - cut, cut) != want)
 		abort();
+	copy = malloc(length + 1);
+	if (copy == NULL)
+		return (0);
+	if (erx_inet_copy_sum(erx_inet_sum(start, input, cut, 0), copy + 1, input + cut, length - cut,
+	    cut) != want || memcmp(copy + 1, input + cut, length - cut) != 0)
+		abort();
+	free(copy);
 	if (length < 2)
 		return (0);
 	offset = 2 * (data[3] % (length / 2));

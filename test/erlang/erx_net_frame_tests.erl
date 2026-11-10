@@ -326,7 +326,7 @@ frame_then_classify_round_trip_test() ->
               {send, [Frame]} = erx_net_frame:address(Path, {?PEER, fresh}, [P]),
               %% The peer's own view: its address, and the connection from this host.
               View = rx_view(ethernet, ?PEER, [Dst], [Dst], [], [{{tcp, Family, Dst, 80, Src, 4000}, peer}]),
-              {owned, [{_, peer}], Pending} = erx_net_input:classify({frame, iolist_to_binary(Frame)}, View),
+              {owned, [{_, peer}], Pending} = erx_net_input:classify({frame, iolist_to_binary(Frame), none}, View),
               ?assertEqual({ok, {element(1, segment(Data, 2, true)), <<"abcdefg">>, 2, unicast}},
                            erx_net_input:verify(Pending))
       end, [{v4("10.0.0.9"), inet}, {v6("2001:db8:9::1"), inet6}]).
@@ -343,7 +343,7 @@ looped_broadcast_and_multicast_find_a_local_socket_test() ->
               Bytes = iolist_to_binary(Frame),
               Table = [{{udp, Family, any, 5353}, socket}],
               Joined = rx_view(ethernet, ?MAC0, [v4("10.0.0.5")], Addrs6, Groups, Table),
-              {owned, [{_, socket}], Pending} = erx_net_input:classify({frame, Bytes}, Joined),
+              {owned, [{_, socket}], Pending} = erx_net_input:classify({frame, Bytes, none}, Joined),
               #{src := Src, dst := To} = Path,
               Zone = fun(Addr) -> erx_net_addr:zoned(Addr, eth0) end,
               ?assertEqual({ok, {datagram, {Zone(Src), 5353}, Zone(To), <<"q">>}}, erx_net_input:verify(Pending)),
@@ -351,7 +351,7 @@ looped_broadcast_and_multicast_find_a_local_socket_test() ->
               Unjoined = rx_view(ethernet, ?MAC0, [v4("10.0.0.5")], Addrs6, [], Table),
               case Groups of
                   [] -> ok;
-                  [_] -> ?assertEqual({drop, not_member}, erx_net_input:classify({frame, Bytes}, Unjoined))
+                  [_] -> ?assertEqual({drop, not_member}, erx_net_input:classify({frame, Bytes, none}, Unjoined))
               end
       end, [{v4("10.0.0.255"), #{broadcast => true}, inet, []},
             {v4("224.0.0.251"), #{via => eth0}, inet, [v4("224.0.0.251")]},

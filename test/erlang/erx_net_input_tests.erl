@@ -112,7 +112,22 @@ quote4(Proto) ->
             end,
     binary:part(ip4(?ME4, ?PEER4, Proto, Upper), 0, 28).
 
-classify(Frame, View) -> erx_net_input:classify(Frame, View).
+%% A frame from the driver, {frame, Bytes}, is classified as it comes without its network sum,
+%% and again with it, as a summing transport hands it up: both must classify and verify alike.
+classify({frame, Bytes}, View) ->
+    Verdict = erx_net_input:classify({frame, Bytes, none}, View),
+    ?assertEqual(verified(Verdict), verified(erx_net_input:classify({frame, Bytes, network_sum(Bytes)}, View))),
+    Verdict;
+classify(Input, View) ->
+    erx_net_input:classify(Input, View).
+
+verified({owned, Holders, Pending}) -> {owned, Holders, erx_net_input:verify(Pending)};
+verified({local, Pending}) -> {local, erx_net_input:verify(Pending)};
+verified({drop, _} = Drop) -> Drop.
+
+%% The sum a summing transport hands up with a frame: of its bytes after the link header.
+network_sum(Frame) when byte_size(Frame) >= 14 -> erx_bytes:inet_csum(0, binary:part(Frame, 14, byte_size(Frame) - 14));
+network_sum(_) -> none.
 
 %% A frame to the interface's own address, from the peer.
 unicast(Packet, Type) -> {frame, eth(?MINE, Type, Packet)}.
@@ -129,6 +144,50 @@ local(Verdict) ->
 owned(Verdict) ->
     {owned, Holders, Pending} = Verdict,
     {[Credit || {_, Credit} <- Holders], erx_net_input:verify(Pending)}.
+
+%% --- Network sums ------------------------------------------------------------
+
+%% The checksum above IP is checked from the frame's network sum: the sum of the bytes above
+%% IP is the network sum less the IP header's, options or extension headers included, and
+%% less the padding's after the packet, here of an odd count from an odd offset. With a sum
+%% off by one the segment is dropped as bad_sum, as a corrupted one is.
+network_sum_behind_ip4_options_and_padding_test() ->
+    Tcp = tcp(?PEER4, ?ME4, 4000, 80, 16, <<"odd">>),
+    Header = erx_ip4_wire:encode(#ip4{len = 24 + byte_size(Tcp), df = 1, ttl = 64, p = ?PROTO_TCP,
+                                      src = ?PEER4, dst = ?ME4, options = <<1, 1, 1, 0>>}),
+    24 = byte_size(Header),
+    summed_segment(unicast(<<Header/binary, Tcp/binary, 16#ab, 16#cd, 16#ef>>, ?ETHERTYPE_IP),
+                   {tcp, inet, ?ME4, 80, ?PEER4, 4000}).
+
+network_sum_behind_an_ip6_extension_header_test() ->
+    Tcp = tcp(?PEER6, ?ME6, 4000, 80, 16, <<"odd">>),
+    HopByHop = <<?PROTO_TCP, 0, 1, 4, 0:32>>,
+    Header = <<6:4, 0:8, 0:20, (8 + byte_size(Tcp)):16, 0, 64, ?PEER6/binary, ?ME6/binary>>,
+    summed_segment(unicast(<<Header/binary, HopByHop/binary, Tcp/binary, 16#ab>>, ?ETHERTYPE_IPV6),
+                   {tcp, inet6, ?ME6, 80, ?PEER6, 4000}).
+
+summed_segment({frame, Bytes} = Frame, Key) ->
+    View = view(#{demux => demux(holders([{Key, conn}]))}),
+    {[conn], {ok, {#tcp{sport = 4000, dport = 80}, <<"odd">>, 0, unicast}}} = owned(classify(Frame, View)),
+    Wrong = erx_net_sum:add(network_sum(Bytes), 1),
+    ?assertEqual({[conn], {drop, bad_sum}}, owned(erx_net_input:classify({frame, Bytes, Wrong}, View))).
+
+%% A UDP datagram over IPv4 shorter than its IP payload, of an odd length, is checked over its
+%% UDP length alone: its sum is the payload's less that of the bytes after it.
+network_sum_of_a_udp_datagram_cut_at_its_length_test() ->
+    Udp = udp(?PEER4, ?ME4, 4000, 80, <<"odd">>),
+    11 = byte_size(Udp),
+    Demux = holders([{{udp, inet, any, 80}, sock}]),
+    ?assertMatch({[sock], {ok, {datagram, _, _, <<"odd">>}}},
+                 owned(classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_UDP, <<Udp/binary, 16#ab, 16#cd, 16#ef>>)),
+                                view(#{demux => demux(Demux)})))).
+
+%% An all-zero ICMP message sums to 0, which no sum derived from a nonzero network sum is,
+%% and is dropped as bad_sum with its network sum as without it, as FreeBSD's in_cksum drops it.
+network_sum_of_an_all_zero_icmp_message_test() ->
+    Demux = holders([{{icmp_echo, inet, 0}, pinger}]),
+    ?assertEqual({[pinger], {drop, bad_sum}},
+                 owned(classify(ip4_frame(ip4(?PEER4, ?ME4, ?PROTO_ICMP, <<0:64>>)), view(#{demux => demux(Demux)})))).
 
 %% --- Link --------------------------------------------------------------------
 

@@ -1394,7 +1394,9 @@ In the stack, a frame's input to `classify/2` carries its sum,
 has its sum by then, since the interface's merge sums each frame that
 came without one
 ([design-network-fastpath.md](design-network-fastpath.md#the-merge)); a
-reassembled datagram and every loopback packet carry `none`. Ethernet decoding strips the
+reassembled datagram and every loopback packet carry `none`, and so does
+a datagram on the DHCP client's path, which leaves the frame before the
+IP layer does. Ethernet decoding strips the
 link header, which the sum does not cover. The IP layer decodes its
 header as before, and IPv4 still checks its header checksum over the
 header's own 20 to 60 bytes, which it reads to decode them anyway. The
@@ -1425,8 +1427,11 @@ length, and it takes the cut's sum with `span/4` as well.
 ICMP and ICMPv6. Each decoder checks
 `erx_net_sum:add(PseudoSum, Sum) =:= 16#ffff` when `Sum` is a sum, and
 `erx_bytes:inet_csum(PseudoSum, Segment) =:= 16#ffff` when it is `none`,
-then decodes as before. ICMPv4 has no pseudo-header, so its `PseudoSum`
-is 0. The decoders still make every segment, datagram and ICMP record
+then decodes as before. ICMPv4 has no pseudo-header, so its decoder
+takes the message and its sum alone, `erx_icmp4_wire:decode(Message,
+Sum)`, and checks `Sum =:= 16#ffff`. Each decoder keeps its form without
+the sum, which is the form with `none`, for callers that hold no sum,
+such as tests. The decoders still make every segment, datagram and ICMP record
 after checking a checksum. Only where the sum comes from changes.
 
 One's-complement arithmetic has two zeros, 0 and 16#ffff. A fold of a

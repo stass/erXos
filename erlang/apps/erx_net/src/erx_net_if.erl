@@ -33,7 +33,7 @@ sender credits (`rx_credit`, `credit`) and its driver's pid and transmit credit 
 
 Messages:
 
-* from the driver: `{frames, Driver, [binary()]}`, `{link, Driver, up | down}`;
+* from the driver: `{frames, Driver, [erx_net_driver:rx_frame()]}`, `{link, Driver, up | down}`;
 * from senders: `{resolve, NextHop, Src, Packets}`, a connection's `{reset, NextHop, Src,
   Packets}` and `charge_rst`, each against `credit`, and `{hint, NextHop}`;
 * from its erx_dhcp4: `{dhcp_attach, Pid}` once, then `{dhcp, Pid, erx_dhcp4_core:action()}`;
@@ -165,7 +165,7 @@ queued_frames(Taken, #state{driver = Driver} = S) ->
 frames(Batches, #state{rx = Rx} = S0) ->
     {S, ByHolder} = lists:foldl(fun(Frames, Acc) ->
                                         lists:foldl(fun(Frame, {S1, B}) ->
-                                                            input({frame, Frame}, S1, B)
+                                                            input(frame_input(Frame), S1, B)
                                                     end, Acc, Frames)
                                 end, {S0, #{}}, Batches),
     maps:foreach(fun(Pid, Items) ->
@@ -173,6 +173,12 @@ frames(Batches, #state{rx = Rx} = S0) ->
                  end, ByHolder),
     ok = erx_net_credit:take(Rx, lists:sum([length(Frames) || Frames <- Batches])),
     S.
+
+%% A frame as its driver handed it, with the network sum its transport's copy computed or
+%% without one, as `classify/2` takes it. Any other shape goes on as it is and raises in the
+%% guarded classification, so it costs only itself.
+frame_input({sum, Sum, Bytes}) -> {frame, Bytes, Sum};
+frame_input(Bytes) -> {frame, Bytes, none}.
 
 input(Input, #state{core = Core} = S, ByHolder) ->
     View = (erx_net_if_core:view(Core))#{demux => fun erx_net_tables:demux/1},

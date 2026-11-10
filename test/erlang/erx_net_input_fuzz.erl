@@ -20,7 +20,11 @@ fragments. It checks that:
   table over pkt's decoding of the link layer, erx_ip4's and erx_ip6's IP decision, and
   the raw bytes the table names, an error's quote included, which it reads itself;
 * changing a byte above IP that the table does not name leaves the verdict as it was, and
-  changing the checksum above IP turns `verify/1`'s result only into a drop for its sum.
+  changing the checksum above IP turns `verify/1`'s result only into a drop for its sum;
+* an Ethernet frame with its network sum, as a summing transport hands it up, classifies
+  and verifies exactly as the same frame without one, whose decoders sum it themselves.
+  Each Ethernet frame comes with its sum or without one at random, so the other
+  properties hold on both paths.
 
 `run/1` prints `fuzz: N rounds ok, M accepted`, or the first failure's tag and halts with
 status 1.
@@ -81,14 +85,33 @@ round() ->
     Verified = verify(Input, Verdict),
     unnamed_bytes(Form, Prefix, Upper, View, Verdict),
     checksum(Form, Prefix, Upper, View, Verdict, Verified),
+    network_sum(Form, Input, View, Verdict, Verified),
     element(1, Verdict).
+
+%% The frame with its network sum and without one give the same verdict and the same item.
+network_sum(ether, {frame, Frame, _} = Input, View, Verdict, Verified) ->
+    Other = case Input of
+                {frame, _, none} -> {frame, Frame, net_sum(Frame)};
+                _ -> {frame, Frame, none}
+            end,
+    Again = classify(Other, View),
+    case {shape(Again) =:= shape(Verdict), verify(Other, Again)} of
+        {true, Verified} -> ok;
+        {_, Got} -> fail(network_sum_differs, {Input, Verified, Got})
+    end;
+network_sum(_, _, _, _, _) ->
+    ok.
+
+%% The sum a summing transport hands up: of the bytes after the link header.
+net_sum(Frame) when byte_size(Frame) >= 14 -> erx_bytes:inet_csum(0, binary:part(Frame, 14, byte_size(Frame) - 14));
+net_sum(_) -> none.
 
 classify(Input, View) ->
     try erx_net_input:classify(Input, View)
     catch Class:Reason:Stack -> fail(raised, {Input, Class, Reason, Stack})
     end.
 
-verify(Input, {drop, _}) -> {Input, none};
+verify(_, {drop, _}) -> {drop_verdict, none};
 verify(Input, Verdict) ->
     Pending = element(tuple_size(Verdict), Verdict),
     try erx_net_input:verify(Pending) of
@@ -100,16 +123,26 @@ verify(Input, Verdict) ->
 
 %% The verdict as the judge states it: the holders' credits and the pending kind, the
 %% local kind (with a segment's listener), or the drop reason.
-shape({owned, [_ | _] = Holders, Pending}) -> {owned, lists:sort([C || {_, C} <- Holders]), element(1, Pending)};
-shape({local, {tcp, _, _, Listener}}) -> {local, tcp, listener_id(Listener)};
-shape({local, Pending}) -> {local, element(1, Pending)};
+shape({owned, [_ | _] = Holders, Pending}) -> {owned, lists:sort([C || {_, C} <- Holders]), kind(Pending)};
+shape({local, Pending}) -> local_shape(inner(Pending));
 shape({drop, Reason}) -> {drop, Reason};
 shape(Other) -> fail(bad_verdict_shape, Other).
+
+local_shape({tcp, _, _, Listener}) -> {local, tcp, listener_id(Listener)};
+local_shape(Pending) -> {local, element(1, Pending)}.
+
+%% A pending datagram above IP comes with the sum of its bytes above IP.
+inner({above, _, Above}) -> Above;
+inner(Pending) -> Pending.
+
+kind(Pending) -> element(1, inner(Pending)).
 
 listener_id(none) -> none;
 listener_id(#{credit := Credit}) -> Credit.
 
-input(ether, Prefix, Upper) -> {frame, <<Prefix/binary, Upper/binary>>};
+input(ether, Prefix, Upper) ->
+    Frame = <<Prefix/binary, Upper/binary>>,
+    {frame, Frame, pick([none, net_sum(Frame)])};
 input({loop, Zone}, Prefix, Upper) -> {frame, Zone, <<Prefix/binary, Upper/binary>>};
 input({reassembled, Family, Zone, LinkCast}, Prefix, Upper) ->
     {reassembled, Family, Zone, LinkCast, <<Prefix/binary, Upper/binary>>}.
@@ -130,7 +163,7 @@ judge({reassembled, inet, none, Cast, Packet}, View, Map) ->
     ip4(Packet, Cast, View, Map);
 judge({reassembled, inet6, Zone, Cast, Packet}, View, Map) ->
     ip6(Packet, reassembled, Cast, Zone, View, Map);
-judge({frame, Bytes}, #{lladdr := Mine, ip6 := #{zone := Zone}} = View, Map) ->
+judge({frame, Bytes, _}, #{lladdr := Mine, ip6 := #{zone := Zone}} = View, Map) ->
     case erx_net_pkt_oracle:ether(Bytes) of
         {ok, #{dst := Dst, type := Type}, Payload} when byte_size(Bytes) >= 14 ->
             Group = binary:first(Dst) band 1 =:= 1,
@@ -380,7 +413,7 @@ checksum(_, _, _, _, _, _) ->
 
 %% The pending kinds whose verify/1 checks a sum above IP.
 summed_kind(Verdict) ->
-    lists:member(element(1, element(tuple_size(Verdict), Verdict)),
+    lists:member(kind(element(tuple_size(Verdict), Verdict)),
                  [conn, tcp, datagram, udp, dhcp, report, echo, icmp]).
 
 sum_offset(6, Upper) when byte_size(Upper) >= 18 -> 16;

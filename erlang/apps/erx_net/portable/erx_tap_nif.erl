@@ -64,13 +64,16 @@ adopt(_Fd, _Mtu) ->
 
 -doc """
 The frames waiting on the device: each `read` one frame, into a binary of its own, at most 64
-reads or 64 KiB in all. `Drops` counts by reason the frames dropped: `malformed`, shorter than
-the Ethernet header, and `too_long`, longer than the MTU and the header. `armed` when the
-device had no frame left, which arms it for reading; `more` when a bound was reached and frames
-may wait. `{error, Reason}` ends the medium: `eof`, `arm`, or `{read, Errno}`.
+reads or 64 KiB in all, each as `{sum, Sum, Frame}` with its network sum, the sum
+(`erx_net_sum`) of its bytes after the Ethernet header. `Drops` counts by reason the frames
+dropped: `malformed`, shorter than the Ethernet header, and `too_long`, longer than the MTU
+and the header. `armed` when the device had no frame left, which arms it for reading; `more`
+when a bound was reached and frames may wait. `{error, Reason}` ends the medium: `eof`, `arm`,
+or `{read, Errno}`.
 """.
 -spec recv(handle()) ->
-    {ok, [binary()], #{malformed | too_long => pos_integer()}, more | armed} | {error, term()}.
+    {ok, [{sum, erx_net_sum:sum(), binary()}], #{malformed | too_long => pos_integer()}, more | armed}
+    | {error, term()}.
 recv(_Handle) ->
     erlang:nif_error(undef).
 

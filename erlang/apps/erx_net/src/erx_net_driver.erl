@@ -52,7 +52,7 @@ either and only checks a frame's type and length.
 -export([start_link/3, attach/2, counters/1, starts_within/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, format_status/1]).
 
--export_type([link_info/0, event/0]).
+-export_type([link_info/0, event/0, rx_frame/0]).
 
 -define(RETRY_US, 10000).
 %% How long a driver lives at the least: an end sooner waits out the rest.
@@ -69,11 +69,21 @@ the link state and how many frames may wait at the driver.
                        tx_limit := pos_integer()}.
 
 -doc """
+A received frame: its bytes alone, which the frame's decoders sum; with its network sum, the
+sum (`erx_net_sum`) of its bytes after the link header, which the transport's copy computed
+over the bytes the binary holds (docs/design-network-stack.md, "Checksums in the copy"); or
+the loopback interface's packet with its zone.
+""".
+-type rx_frame() :: binary()
+                  | {sum, erx_net_sum:sum(), binary()}
+                  | {Zone :: term(), binary()}.
+
+-doc """
 What a transport makes of a message from its medium: a batch of frames, a link change,
 room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`,
 `malformed`).
 """.
--type event() :: {frames, [binary() | {Zone :: term(), binary()}]}
+-type event() :: {frames, [rx_frame()]}
                | {link, up | down}
                | writable
                | {dropped, Reason :: atom()}.

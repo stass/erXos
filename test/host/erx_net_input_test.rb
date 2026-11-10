@@ -6,8 +6,10 @@ require 'minitest/autorun'
 require_relative 'erx_net_eunit'
 
 # Runs the EUnit cases of erx_net_input (test/erlang/erx_net_input_tests.erl): one per row of
-# the design's "Classifying a frame" verdict table; and requires four seeded faults, each aimed
-# at a real break of the classification, to fail their cases.
+# the design's "Classifying a frame" verdict table, each frame classified with its network sum
+# and without one, and those of erx_net_sum (test/erlang/erx_net_sum_tests.erl); and requires
+# seeded faults, each aimed at a real break of the classification or of the sums, to fail their
+# cases.
 class ErxNetInputTest < Minitest::Test
   include ErxNetEunit
 
@@ -33,16 +35,36 @@ class ErxNetInputTest < Minitest::Test
       'erx_net_input', "Id:16, _Seq:16, _/binary>> = Upper, \#{demux := Demux}) ->\n    case Demux({icmp_echo, inet, Id})",
       "_Id:16, _Seq:16, _/binary>> = Upper, \#{demux := Demux}) ->\n    case Demux({icmp_echo, inet, 16#e1})",
       'icmp_echo_reply_is_owned_by_its_identifier_test'
-    ]
-  }.freeze
+    ],
+    ip6_sum_without_the_extension_headers: [
+      'erx_net_input', '?IP6_HDR_LEN + HdrLen);', '?IP6_HDR_LEN + 0 * HdrLen);',
+      'network_sum_behind_an_ip6_extension_header_test'
+    ],
+    span_keeps_the_padding: [
+      'erx_net_sum', 'at(Start + Length, erx_bytes:inet_csum(0, After))', 'at(Start + Length, 0 * byte_size(After))',
+      'network_sum_behind_ip4_options_and_padding_test'
+    ],
+    span_padding_from_an_odd_offset_unswapped: [
+      'erx_net_sum', 'at(_, Sum) -> (Sum bsr 8) bor ((Sum band 16#ff) bsl 8).', 'at(_, Sum) -> Sum.',
+    'span_after_an_odd_length_test'
+  ],
+  udp_datagram_sum_not_cut: [
+    'erx_udp_wire', 'datagram_sum(Bytes, Sum, Ulen) -> erx_net_sum:span(Bytes, Sum, 0, Ulen).',
+    'datagram_sum(_, Sum, _) -> Sum.', 'network_sum_of_a_udp_datagram_cut_at_its_length_test'
+  ],
+  icmp4_zero_field_taken_from_the_sum: [
+    'erx_icmp4_wire', "checked(<<_:16, 0:16, _/binary>> = Message, _) -> erx_bytes:inet_csum(0, Message);\n", '',
+    'network_sum_of_an_all_zero_icmp_message_test'
+  ]
+}.freeze
 
   def test_classification_cases_pass_under_eunit
-    assert_erx_net_eunit(:erx_net_input_tests)
+    assert_erx_net_eunit(:erx_net_input_tests, :erx_net_sum_tests)
   end
 
   SEEDED.each do |name, (mod, exact, faulty, failing)|
     define_method("test_seeded_#{name}_is_caught") do
-      output = refute_erx_net_eunit(:erx_net_input_tests, fault: { mod => [exact, faulty] })
+      output = refute_erx_net_eunit(:erx_net_input_tests, :erx_net_sum_tests, fault: { mod => [exact, faulty] })
       assert_match(/#{failing}/, output)
     end
   end

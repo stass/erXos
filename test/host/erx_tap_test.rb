@@ -33,6 +33,13 @@ class ErxTapTest < Minitest::Test
                        'cap = (size_t)tap->mtu + ERX_TAP_ETHER_HDR_LEN;'])
   end
 
+  # A network sum taken from the start of the frame, over its link header, is not the sum of
+  # the bytes after it, which the received frames' sums are checked against.
+  def test_seeded_sum_over_the_link_header_is_caught
+    assert_seed_fails('frames_cross_both_ways_test',
+                      ['sum = erx_inet_sum(0, bin.data + ERX_TAP_ETHER_HDR_LEN,', 'sum = erx_inet_sum(0, bin.data,'])
+  end
+
   # A stop callback that leaves the descriptor open keeps an armed handle's descriptor
   # after its owner has ended.
   def test_seeded_stop_without_close_is_caught

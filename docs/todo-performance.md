@@ -745,3 +745,16 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   for, each of which waits for every executor. Settle it with a `tools/erx
   bench` workload that loads and purges a small module in a loop at 1, 2
   and 4 CPUs under the interpreter and BeamAsm images.
+
+* **The receive sums' own costs** (`c_src/erx_tap_nif.c`, `erx_net_sum:span/4`). With the
+  tap NIF summing each received frame and the decoders checking from that sum, bulk receive
+  on the FreeBSD test host (FreeBSD 16.0-CURRENT amd64, native, stock OTP 29, 512 MiB over
+  `/dev/tap1`, median of 5 against the same tree without the sums) went from 1,911 to 1,867
+  Mbit/s, where skipping the receive check altogether had gained 4 percent. The suspects:
+  the tap NIF sums with `erx_inet_sum`, the portable two-byte loop, not the eight-byte loop
+  of `erx_inet_copy_sum`, in the driver process, which may be receive's bottleneck; and
+  `span/4` makes two `inet_csum` calls a frame, one usually over no bytes, the other over
+  an IPv4 header whose sum is 16#ffff once its checksum has been checked, so it need not be
+  read again. Settled by a profile of bulk receive that names either, or by a run with the
+  eight-byte loop in `erx_inet_sum` and a `span/4` that takes the IPv4 header's sum as
+  known and skips the empty call; the merge (fast path 7) reads the same sums.

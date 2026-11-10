@@ -80,7 +80,7 @@ step(Event, Core, Now) -> erx_net_if_core:step(Event, Core, #{now => Now}).
 %% A frame as the interface's loop gives it to the core: classified against its view.
 local(Frame, Core) ->
     View = (erx_net_if_core:view(Core))#{demux => fun(_) -> [] end},
-    {local, Pending} = erx_net_input:classify({frame, Frame}, View),
+    {local, Pending} = erx_net_input:classify({frame, Frame, none}, View),
     {local, Pending}.
 
 gen() -> erx_net_rand:new(<<9:128>>).

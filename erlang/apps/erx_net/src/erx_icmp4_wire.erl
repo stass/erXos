@@ -57,7 +57,7 @@ address, an echo to a broadcast address, the rate limits) are erx_icmp4's.
 
 -include("erx_icmp4_wire.hrl").
 
--export([decode/1, encode/2]).
+-export([decode/1, decode/2, encode/2]).
 
 -export_type([msg/0, reason/0]).
 
@@ -89,18 +89,36 @@ request keeps its identifier, sequence number and the three timestamps of RFC 79
 
 -doc """
 Decodes one ICMPv4 message, the payload of its IPv4 datagram. Translates the checks of
-`icmp_input` in its order: the length, the checksum, then each type's code and length.
+`icmp_input` in its order: the length, the checksum, then each type's code and length. The
+message's own sum is computed here; `decode/2` takes it from the copy instead.
 """.
 -spec decode(binary()) -> {ok, #icmp4{}, Rest :: binary()} | {error, reason()}.
-decode(Message) when not is_binary(Message); byte_size(Message) < ?ICMP_MINLEN ->
+decode(Message) ->
+    decode(Message, none).
+
+-doc """
+As `decode/1`, with `Sum` the sum of Message (`erx_net_sum`) that the IP layer derived from
+the frame's network sum, or `none` to sum it here. ICMP has no pseudo-header, so the
+checksum is right when the sum is 16#ffff.
+""".
+-spec decode(binary(), erx_net_sum:sum() | none) -> {ok, #icmp4{}, Rest :: binary()} | {error, reason()}.
+decode(Message, _) when not is_binary(Message); byte_size(Message) < ?ICMP_MINLEN ->
     {error, too_short};
-decode(Message) when byte_size(Message) > ?MAX_MESSAGE ->
+decode(Message, _) when byte_size(Message) > ?MAX_MESSAGE ->
     {error, bad_length};
-decode(<<Type, Code, _Sum:16, Body/binary>> = Message) ->
-    case erx_bytes:inet_csum(0, Message) of
+decode(<<Type, Code, _Sum:16, Body/binary>> = Message, Sum) ->
+    case checked(Message, Sum) of
         16#ffff -> message(Type, Code, Body);
         _ -> {error, bad_sum}
     end.
+
+%% The message's sum, from the copy's or computed. With no pseudo-header to add, the two zeros
+%% of one's-complement arithmetic stay apart here: an all-zero message sums to 0, which is
+%% wrong, but a sum derived from a nonzero network sum writes its zero 16#ffff. Such a message
+%% has a zero checksum field, so a message with one is summed here, as without a sum.
+checked(Message, none) -> erx_bytes:inet_csum(0, Message);
+checked(<<_:16, 0:16, _/binary>> = Message, _) -> erx_bytes:inet_csum(0, Message);
+checked(_, Sum) -> Sum.
 
 %% icmp_input's switch on the type: the code first, then the length.
 message(Type, Code, <<Word:32, Invoking/binary>>) when ?IS_ERROR(Type) ->

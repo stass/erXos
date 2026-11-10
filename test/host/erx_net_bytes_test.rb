@@ -73,13 +73,22 @@ class ErxNetBytesTest < Minitest::Test
       kind: 'inet_csum', source: 'erx_inet_csum.c', harness: 'erx_inet_csum_harness.c', done: 'erx_inet_csum done',
       mutants: {
         'a single fold' => ['while (total > 0xffffu)', 'if (total > 0xffffu)'],
-        'odd start not swapped' => ['piece = (uint16_t)(piece << 8 | piece >> 8);', '(void)piece;'],
+        'odd start not swapped' => ["if (offset % 2 != 0)\n\t\tpiece = swap(piece);", '(void)offset;'],
         'last odd byte in the low half' => ['total += (uint64_t)data[i] << 8;', 'total += data[i];'],
         'update adds the words before' => ['total += 0xffffu ^ (', 'total += 0x0000u ^ ('],
         'update skips the last word' => ['for (i = 0; i + 1 < length; i += 2) {', 'for (i = 0; i + 3 < length; i += 2) {'],
-        'update takes the field uncomplemented' => ['uint64_t total = (uint16_t)~checksum;', 'uint64_t total = checksum;']
+        'update takes the field uncomplemented' => ['uint64_t total = (uint16_t)~checksum;', 'uint64_t total = checksum;'],
+        'copy: the carry not wrapped' => ["\t\ttotal += total < word;\n", ''],
+        'copy: no swap on a little-endian host' => ["#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__\n\tpiece = swap(piece);\n#endif\n", ''],
+        'copy: the last odd byte dropped' => ["\tfor (; i < length; i++) {", "\tfor (; i + 1 < length; i++) {"],
+        'copy: a word read past the end' => ['length - i >= sizeof(word)', 'length - i + 1 >= sizeof(word)'],
+        'copy: odd start not swapped' => ["\tpiece = fold(piece + tail);\n\tif (offset % 2 != 0)\n\t\tpiece = swap(piece);",
+                                          "\tpiece = fold(piece + tail);\n\t(void)offset;"],
+        'copy: a tail byte in the wrong half' => ['tail += i % 2 == 0 ? (uint64_t)byte << 8 : byte;',
+                                                  'tail += i % 2 == 1 ? (uint64_t)byte << 8 : byte;']
       },
-      fuzz_catches: ['odd start not swapped', 'update skips the last word']
+      fuzz_catches: ['odd start not swapped', 'update skips the last word', 'copy: no swap on a little-endian host',
+                     'copy: the last odd byte dropped']
     ),
     Core.new(
       kind: 'siphash', source: 'erx_siphash.c', harness: 'erx_siphash_harness.c', done: 'erx_siphash done',

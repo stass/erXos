@@ -4,7 +4,8 @@
  *
  * erx_inet_sum and erx_inet_csum_update against RFC 1071's and RFC 1624's worked examples, a
  * real IPv4 header, a model that adds one byte at a time, and themselves over every way of
- * cutting an input in two. Prints "erx_inet_csum done" and exits 0 when all hold; on a failure
+ * cutting an input in two; erx_inet_copy_sum against erx_inet_sum and the model, at every
+ * alignment of its source and destination. Prints "erx_inet_csum done" and exits 0 when all hold; on a failure
  * it prints the case and exits 1.
  */
 
@@ -154,6 +155,65 @@ cuts_updates_and_model(void)
 	}
 }
 
+/*
+ * Every length up to 300 bytes, from every alignment of the source to every alignment of the
+ * destination, at an even and an odd offset: the copy stores exactly the source's bytes, touches
+ * no byte around them, and returns erx_inet_sum's sum over them, which at offset 0 is also the
+ * model's.
+ */
+static void
+copy_sums(void)
+{
+	uint8_t src[320], dst[336];
+	uint32_t seed = 977u;
+	uint16_t got;
+	size_t length, from, to, offset, i;
+	char what[96];
+
+	for (i = 0; i < sizeof(src); i++)
+		src[i] = (uint8_t)next_random(&seed);
+	for (length = 0; length <= 300; length++)
+		for (from = 0; from < 8; from++)
+			for (to = 0; to < 8; to++)
+				for (offset = 0; offset < 2; offset++) {
+					memset(dst, 0xa5, sizeof(dst));
+					got = erx_inet_copy_sum(0x0102u, dst + 8 + to, src + from, length, offset);
+					snprintf(what, sizeof(what), "copy of %zu from +%zu to +%zu at offset %zu",
+					    length, from, to, offset);
+					expect(what, got, erx_inet_sum(0x0102u, src + from, length, offset));
+					if (offset == 0)
+						expect(what, got, bytewise_sum(0x0102u, src + from, length));
+					if (memcmp(dst + 8 + to, src + from, length) != 0) {
+						printf("%s: the bytes differ\n", what);
+						exit(1);
+					}
+					for (i = 0; i < sizeof(dst); i++)
+						if ((i < 8 + to || i >= 8 + to + length) && dst[i] != 0xa5) {
+							printf("%s: byte %zu outside the copy changed\n", what, i);
+							exit(1);
+						}
+				}
+	expect("an empty copy of nothing", erx_inet_copy_sum(0x1234u, NULL, NULL, 0, 0), 0x1234u);
+}
+
+/* The largest call copied, all ff, so its 64-bit total needs more than one fold. */
+static void
+largest_copy(void)
+{
+	uint8_t *data, *copy;
+
+	data = malloc(LARGEST_CALL + 1);
+	copy = malloc(LARGEST_CALL + 1);
+	if (data == NULL || copy == NULL)
+		exit(1);
+	memset(data, 0xff, LARGEST_CALL + 1);
+	expect("a copy of 64 KiB of ff", erx_inet_copy_sum(0, copy, data, LARGEST_CALL, 0), 0xffffu);
+	expect("a copy of 64 KiB and one of ff, at an odd offset",
+	    erx_inet_copy_sum(0, copy, data, LARGEST_CALL + 1, 1), 0x00ffu);
+	free(copy);
+	free(data);
+}
+
 /* Calls of the largest size the NIF admits, and one byte more, run clean under the sanitizers. */
 static void
 largest_call(void)
@@ -167,6 +227,7 @@ largest_call(void)
 	expect("64 KiB of ff", erx_inet_sum(0, data, LARGEST_CALL, 0), 0xffffu);
 	expect("64 KiB and one of ff, at an odd offset", erx_inet_sum(0, data, LARGEST_CALL + 1, 1), 0x00ffu);
 	free(data);
+	largest_copy();
 }
 
 int
@@ -178,6 +239,7 @@ main(void)
 	rfc_1624_example();
 	edges();
 	cuts_updates_and_model();
+	copy_sums();
 	largest_call();
 	printf("erx_inet_csum done\n");
 	return (0);

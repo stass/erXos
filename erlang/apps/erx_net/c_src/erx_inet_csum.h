@@ -40,4 +40,16 @@ uint16_t erx_inet_sum(uint16_t sum, const uint8_t *data, size_t length, size_t o
 uint16_t erx_inet_csum_update(uint16_t checksum, const uint8_t *before, const uint8_t *after,
     size_t length);
 
+/*
+ * Copies length bytes from src to dst and returns sum continued over the bytes stored, as
+ * erx_inet_sum(sum, dst, length, offset) would return after the copy. Each word of src is
+ * loaded into a local, and that value is both stored and added, so the sum is that of the
+ * bytes dst holds even when src changes during the copy, as a device's buffer may. C does not
+ * forbid a compiler to load src again for one of the two uses: that each word is read once
+ * rests on code generation (TODO.md). src and dst need no alignment and must not overlap;
+ * either may be NULL when length is 0.
+ */
+uint16_t erx_inet_copy_sum(uint16_t sum, uint8_t *dst, const uint8_t *src, size_t length,
+    size_t offset);
+
 #endif

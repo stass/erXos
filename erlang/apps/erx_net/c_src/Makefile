@@ -23,7 +23,8 @@ PRIV = ../priv
 ERX_CFLAGS = -std=c17 -O2 -Wall -Wextra -Wpedantic
 NIF_SOURCES = erx_bytes_nif.c erx_iodata.c erx_inet_csum.c erx_siphash.c
 NIF_HEADERS = erx_iodata.h erx_inet_csum.h erx_siphash.h
-TAP_SOURCES = erx_tap_nif.c
+TAP_SOURCES = erx_tap_nif.c erx_inet_csum.c
+TAP_HEADERS = erx_inet_csum.h
 # A NIF library from its sources: the headers of the emulator ERL runs, then
 # uname's way to link a loadable module.
 NIF_BUILD = include=`$(ERL) -noshell -eval 'io:format("~ts", [filename:join([code:root_dir(), "erts-" ++ erlang:system_info(version), "include"])]), halt().'` && \
@@ -41,7 +42,7 @@ $(PRIV)/erx_bytes_nif.so: $(NIF_SOURCES) $(NIF_HEADERS)
 	mkdir -p "$(PRIV)"
 	$(NIF_BUILD) $(NIF_SOURCES)
 
-$(PRIV)/erx_tap_nif.so: $(TAP_SOURCES)
+$(PRIV)/erx_tap_nif.so: $(TAP_SOURCES) $(TAP_HEADERS)
 	mkdir -p "$(PRIV)"
 	$(NIF_BUILD) $(TAP_SOURCES)
 

@@ -26,9 +26,14 @@
  * device is armed for reading, and a full one for writing, with
  * enif_select, whose message is the transport's wake.
  *
- * Frames are untrusted.  No byte of one is read here: a received frame's
- * length, which read(2) returns, is the one value taken from the device,
- * checked against the buffer before it is used.
+ * Frames are untrusted.  None is parsed here: a received frame's length,
+ * which read(2) returns, is the one value taken from the device, checked
+ * against the buffer before it is used.  Each received frame is handed up
+ * with its network sum, the Internet checksum sum of its bytes after the
+ * Ethernet header (erx_inet_csum.c), taken right after the read while the
+ * bytes are in the cache, so no Erlang process reads them to check a
+ * checksum (docs/design-network-stack.md, "Checksums in the copy").  The
+ * sum is a sum of whatever bytes the frame holds, never a verdict.
  */
 
 #define _POSIX_C_SOURCE	200809L
@@ -45,6 +50,8 @@
 #include <unistd.h>
 
 #include "erl_nif.h"
+
+#include "erx_inet_csum.h"
 
 #define ERX_TAP_ETHER_HDR_LEN	14
 #define ERX_TAP_MTU_MIN		68
@@ -109,7 +116,7 @@ static ErlNifResourceType *erx_tap_type;
 
 static ERL_NIF_TERM atom_armed, atom_drop, atom_eof, atom_error, atom_erx_tap,
     atom_full, atom_malformed, atom_more, atom_ok, atom_partial, atom_readable,
-    atom_refused, atom_too_long, atom_undefined, atom_writable;
+    atom_refused, atom_sum, atom_too_long, atom_undefined, atom_writable;
 
 /* --- The decision core ------------------------------------------------- */
 
@@ -390,7 +397,8 @@ erx_tap_adopt(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 
 /*
  * recv(Handle) -> {ok, Frames, Drops, more | armed} | {error, Reason}: the
- * frames waiting, each read into a binary of its own, up to the bounds.
+ * frames waiting, each read into a binary of its own and handed up as
+ * {sum, Sum, Frame} with its network sum, up to the bounds.
  * Drops counts the frames dropped by reason.  armed: the device had no
  * frame left and is armed for reading; more: a bound was reached.
  */
@@ -404,6 +412,7 @@ erx_tap_recv(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_tap_t *tap;
 	size_t cap, bytes, malformed, too_long;
 	ssize_t n;
+	uint16_t sum;
 	bool have;
 	int error, reads, kept, pct;
 
@@ -456,7 +465,10 @@ erx_tap_recv(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 				end = ERX_TAP_END_NOMEM;
 				break;
 			}
-			frames[kept++] = enif_make_binary(env, &bin);
+			sum = erx_inet_sum(0, bin.data + ERX_TAP_ETHER_HDR_LEN,
+			    (size_t)n - ERX_TAP_ETHER_HDR_LEN, 0);
+			frames[kept++] = enif_make_tuple3(env, atom_sum,
+			    enif_make_uint(env, sum), enif_make_binary(env, &bin));
 			have = false;
 			bytes += (size_t)n;
 			break;
@@ -642,6 +654,7 @@ erx_tap_load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	atom_partial = enif_make_atom(env, "partial");
 	atom_readable = enif_make_atom(env, "readable");
 	atom_refused = enif_make_atom(env, "refused");
+	atom_sum = enif_make_atom(env, "sum");
 	atom_too_long = enif_make_atom(env, "too_long");
 	atom_undefined = enif_make_atom(env, "undefined");
 	atom_writable = enif_make_atom(env, "writable");

@@ -98,14 +98,32 @@ it; git history is the record of completed work.
   5. checksums in the copy
      ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), the
      owner's decision to build it as part of the fast path, since the cut and the merge rest
-     on it: `erx_inet_copy_sum` in `erx_inet_csum.c` with its host test and the `inet_csum`
-     fuzz target's new case; `erx_device:complete/3` and `post_frame/5`'s delayed frames;
-     `erx_net_sum` (P); the sum argument of the decoders above IP and `erx_net_input`'s
-     `{frame, Bytes, Sum}`; `erx_tcp_wire:encode/4` and `erx_net_frame`'s
-     `{csum, Start, Field, Packet}`; `link_info`'s `finish` and the interface row's;
-     `erx_virtio_net` on `complete/3` and `post_frame/5` with its start line naming the
-     finisher; the pipe's `process` end taking `{sum, S, Frame}`; the tap and netmap NIFs on
-     the same core; and the tests of that section's Verification;
+     on it. The receive half is in the tree: `erx_inet_copy_sum` in `erx_inet_csum.c` with its
+     harness cases, mutants and the `inet_csum` fuzz target's copy case; `erx_net_sum`; the
+     sum argument of the decoders above IP; `erx_net_input`'s `{frame, Bytes, Sum}`, checked
+     against the unsummed path by its EUnit cases and its fuzz target; and the tap NIF's
+     `{sum, S, Frame}`. What remains is the send half and the other media:
+     `erx_tcp_wire:encode/4` and `erx_net_frame`'s `{csum, Start, Field, Packet}`;
+     `link_info`'s `finish` and the interface row's; the tap NIF finishing a delayed frame;
+     `erx_device:complete/3` and `post_frame/5`'s delayed frames; `erx_virtio_net` on
+     `complete/3` and `post_frame/5` with its start line naming the finisher; and the pipe's
+     `process` end taking `{sum, S, Frame}`. The netmap NIF takes the same core when it is
+     built;
+     * [Medium] `erx_inet_copy_sum` (`c_src/erx_inet_csum.c`): the single read of each source
+       word that makes the sum that of the bytes stored rests on code generation, since C
+       allows a second load of a plain `memcpy` source; before the device NIF or the cut copies
+       from memory a device can write, make it explicit (a relaxed atomic load of aligned
+       words, or a compiler barrier on the loaded word through the inline-assembly allowlist)
+       or check the emitted code in the build.
+     * [Medium] `erx_net_input_fuzz`: its frames carry no Ethernet padding and its UDP lengths
+       always fill the IP payload, so `erx_net_sum:span/4`'s bytes after the packet and
+       `erx_udp_wire`'s datagram sum are checked only by EUnit cases
+       (`erx_net_input_tests`' network sum cases and their seeds); pad some frames and cut some
+       datagrams short, with the judge tolerating both.
+     * [Low] `erx_net_input`: the loopback input `{frame, Zone, Bytes}` shares its tag and size
+       with `{frame, Bytes, Sum}`, told apart only by the view's link, and `erx_net_if`'s
+       `frame_input/1` does not map the driver's `{Zone, Bytes}` frame; give the loopback
+       input its own tag when the loop transport is built.
   6. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
      the tap and netmap NIFs, and `erx_net_frame:cut/1` as the reference: send toward
      4.4 Gbit/s;

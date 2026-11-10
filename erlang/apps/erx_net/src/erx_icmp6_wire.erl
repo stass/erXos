@@ -96,7 +96,7 @@ erx_nd6_rtr's.
 
 -include("erx_ip6.hrl").
 
--export([decode/2, encode/3]).
+-export([decode/2, decode/3, encode/3]).
 
 -export_type([msg/0, nd_opts/0, prefix/0, reason/0]).
 
@@ -161,18 +161,32 @@ Decodes one ICMPv6 message, the payload of its IPv6 packet, with
 `PseudoSum` the partial sum of its pseudo-header. Translates the
 checks of FreeBSD's `icmp6_input`, `icmp6_notify_error`, `nd6_option_init`,
 `nd6_option` and `nd6_options`, and of `nd6_ra_input` on its prefix and MTU
-options' lengths.
+options' lengths. The message's own sum is computed here; `decode/3` takes it from the copy
+instead.
 """.
 -spec decode(0..16#ffff, binary()) -> {ok, #icmp6{}, Rest :: binary()} | {error, reason()}.
-decode(_, Message) when not is_binary(Message); byte_size(Message) < ?ICMP6_HDR_LEN ->
+decode(PseudoSum, Message) ->
+    decode(PseudoSum, Message, none).
+
+-doc """
+As `decode/2`, with `Sum` the sum of Message (`erx_net_sum`) that the IP layer derived from
+the frame's network sum, or `none` to sum it here.
+""".
+-spec decode(0..16#ffff, binary(), erx_net_sum:sum() | none) ->
+          {ok, #icmp6{}, Rest :: binary()} | {error, reason()}.
+decode(_, Message, _) when not is_binary(Message); byte_size(Message) < ?ICMP6_HDR_LEN ->
     {error, too_short};
-decode(_, Message) when byte_size(Message) > ?IPV6_MAXPACKET ->
+decode(_, Message, _) when byte_size(Message) > ?IPV6_MAXPACKET ->
     {error, bad_length};
-decode(PseudoSum, <<Type, Code, _Sum:16, Body/binary>> = Message) ->
-    case erx_bytes:inet_csum(PseudoSum, Message) of
+decode(PseudoSum, <<Type, Code, _Sum:16, Body/binary>> = Message, Sum) ->
+    case checked(PseudoSum, Message, Sum) of
         16#ffff -> message(Type, Code, Body);
         _ -> {error, bad_sum}
     end.
+
+%% The sum over the pseudo-header and the message, from the copy's sum or computed.
+checked(PseudoSum, Message, none) -> erx_bytes:inet_csum(PseudoSum, Message);
+checked(PseudoSum, _, Sum) -> erx_net_sum:add(PseudoSum, Sum).
 
 %% icmp6_input's switch on the type: the code first, then the length.
 message(Type, Code, <<Word:32, Invoking/binary>>) when Type < ?ICMP6_INFOMSG_MASK ->

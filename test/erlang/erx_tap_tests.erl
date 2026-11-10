@@ -32,14 +32,14 @@ frames_cross_both_ways_test() ->
              ?assertEqual({ok, 1}, erx_tap_nif:send(H, Pieces)),
              ?assertEqual({ok, Frame}, socket:recv(Far, 0, ?WAIT_MS))
          end || Size <- [14, 60, 1514]],
-        Frames = [frame(I, Size) || {I, Size} <- [{1, 14}, {2, 60}, {3, 1514}]],
+        Frames = [frame(I, Size) || {I, Size} <- [{1, 14}, {2, 60}, {3, 1514}, {5, 61}]],
         [ok = socket:send(Far, F) || F <- Frames],
-        ?assertEqual({ok, Frames, #{}, armed}, erx_tap_nif:recv(H)),
+        ?assertEqual({ok, summed(Frames), #{}, armed}, erx_tap_nif:recv(H)),
         %% The arm's message comes once a frame arrives, and not before.
         ?assertEqual(none, readable(0)),
         ok = socket:send(Far, frame(4, 60)),
         ?assertEqual(readable, readable(?WAIT_MS)),
-        ?assertEqual({ok, [frame(4, 60)], #{}, armed}, erx_tap_nif:recv(H))
+        ?assertEqual({ok, summed([frame(4, 60)]), #{}, armed}, erx_tap_nif:recv(H))
     end).
 
 %% One call reads at most 64 frames and answers `more`; the next reads the rest.
@@ -48,8 +48,8 @@ recv_batch_is_bounded_test() ->
         Frames = [frame(I, 60) || I <- lists:seq(1, 70)],
         [ok = socket:send(Far, F) || F <- Frames],
         {First, Rest} = lists:split(64, Frames),
-        ?assertEqual({ok, First, #{}, more}, erx_tap_nif:recv(H)),
-        ?assertEqual({ok, Rest, #{}, armed}, erx_tap_nif:recv(H))
+        ?assertEqual({ok, summed(First), #{}, more}, erx_tap_nif:recv(H)),
+        ?assertEqual({ok, summed(Rest), #{}, armed}, erx_tap_nif:recv(H))
     end).
 
 %% A frame shorter than the Ethernet header, or longer than the MTU and the header, is
@@ -57,7 +57,7 @@ recv_batch_is_bounded_test() ->
 short_and_long_frames_are_dropped_test() ->
     with_pair(fun(H, Far) ->
         [ok = socket:send(Far, F) || F <- [frame(1, 13), frame(2, ?MTU + 15), frame(3, ?MTU + 14)]],
-        ?assertEqual({ok, [frame(3, ?MTU + 14)], #{malformed => 1, too_long => 1}, armed},
+        ?assertEqual({ok, summed([frame(3, ?MTU + 14)]), #{malformed => 1, too_long => 1}, armed},
                      erx_tap_nif:recv(H)),
         ?assertEqual({drop, malformed}, erx_tap_nif:send(H, frame(4, 13))),
         ?assertEqual({drop, too_long}, erx_tap_nif:send(H, [frame(5, ?MTU), frame(6, 15)])),
@@ -186,7 +186,7 @@ transport_receives_and_transmits_test() ->
         ok = socket:send(Far, frame(1, 60)),
         ok = socket:send(Far, frame(2, 13)),
         {Events, T1} = erx_tap:event(wake(more), T0),
-        ?assertEqual([{dropped, malformed}, {frames, [frame(1, 60)]}], Events),
+        ?assertEqual([{dropped, malformed}, {frames, summed([frame(1, 60)])}], Events),
         ok = socket:send(Far, frame(3, 60)),
         ?assertMatch({[{frames, [_]}], _}, erx_tap:event(wake(readable), T1)),
         ?assertMatch({ok, _}, erx_tap:transmit([frame(4, 60)], T1)),
@@ -251,6 +251,11 @@ frame(I, Size) when Size >= 4 ->
     <<I:32, (binary:copy(<<(I band 16#ff)>>, Size - 4))/binary>>;
 frame(I, Size) ->
     binary:part(<<I:32>>, 0, Size).
+
+%% Each frame as the NIF hands it up: with its network sum, the sum of its bytes after the
+%% Ethernet header, which must be what inet_csum/2 gives for them.
+summed(Frames) ->
+    [{sum, erx_bytes:inet_csum(0, binary:part(F, 14, byte_size(F) - 14)), F} || F <- Frames].
 
 frames(From, N) ->
     iolist_to_binary([frame(I, 60) || I <- lists:seq(From, From + N - 1)]).

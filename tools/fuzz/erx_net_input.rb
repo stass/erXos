@@ -45,8 +45,8 @@ module ErxNetInputFuzz
               faulty: 'src => Src, dst => Dst, zone => Zone}.',
               fault: 'building keys from link-local addresses without their zone', caught: JUDGE),
     Fault.new(exact: "    case dhcp(Packet) of\n        {ok, Ip, Upper} -> {local, {dhcp, Ip, Upper}};\n" \
-                     "        no -> ip4(Packet, LinkCast, View)\n    end;\n",
-              faulty: "    case {ip4(Packet, LinkCast, View), Packet} of\n" \
+                     "        no -> ip4(Packet, Sum, LinkCast, View)\n    end;\n",
+              faulty: "    case {ip4(Packet, Sum, LinkCast, View), Packet} of\n" \
                       "        {{drop, not_ours}, <<4:4, Hl:4, _:8/binary, 17, _/binary>>}\n" \
                       "          when Hl >= 5, byte_size(Packet) >= Hl * 4 + 8 ->\n" \
                       "            Upper = binary:part(Packet, Hl * 4, byte_size(Packet) - Hl * 4),\n" \
@@ -63,7 +63,10 @@ module ErxNetInputFuzz
     Fault.new(source: File.join(APPLICATION, 'src/erx_icmp4.erl'),
               exact: '<<_:Hl/unit:32, Upper/binary>> = Invoking,',
               faulty: '<<_:20/binary, Upper/binary>> = Invoking,',
-              fault: "reading a quote's ports at 20 bytes whatever its header length", caught: JUDGE)
+              fault: "reading a quote's ports at 20 bytes whatever its header length", caught: JUDGE),
+    Fault.new(exact: "?IP6_HDR_LEN + HdrLen);", faulty: "?IP6_HDR_LEN);",
+              fault: "deriving an IPv6 datagram's sum above IP without its extension headers",
+              caught: %w[network_sum_differs])
   ].freeze
 
   module_function

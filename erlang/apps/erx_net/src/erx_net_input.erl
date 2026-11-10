@@ -215,7 +215,12 @@ ports its quote names. It answers `owned` with the holders a frame belongs to, `
 the interface itself, or `drop` with a reason. The caller then reserves a unit of each
 holder's credit or a token of its ingress bucket, and only a frame that holds one reaches
 `verify/1`, which runs the decoder of the layer above IP (or ARP's), checksum first, and
-returns the item its consumer takes. A frame that fails `verify/1` was looked up by
+returns the item its consumer takes. A frame may come with its network sum, the sum the copy
+computed over its bytes after the link header; the IP layer's classification derives the sum
+of the bytes above IP from it with `erx_net_sum:span/4`, and the decoder checks the checksum
+from that sum instead of reading the bytes again (docs/design-network-stack.md, "Checksums in
+the copy"). A frame without one, a looped packet and a reassembled datagram are summed by their
+decoder. No length or offset is taken from a sum. A frame that fails `verify/1` was looked up by
 unverified fields alone, so nothing it carries above the fields named here is acted on.
 
 Inside the stack an IPv6 address of link-local or interface-local scope is zoned
@@ -255,6 +260,9 @@ against the view's `groups`, which hold no IPv4 group until sockets join one.
 %% The DHCP client's port (`LOCAL_PORT`, sbin/dhclient), the one its filter accepts.
 -define(DHCP_CLIENT_PORT, 68).
 -define(UDP_HDR_LEN, 8).
+%% The fixed IP headers, before IPv4 options and IPv6 extension headers.
+-define(IP_HDR_LEN, 20).
+-define(IP6_HDR_LEN, 40).
 %% An ICMP or ICMPv6 message's fixed fields: type, code, checksum and one word.
 -define(ICMP_HDR_LEN, 8).
 -define(MLD_LISTENER_QUERY, 130).
@@ -272,12 +280,13 @@ A looped packet is `unicast`.
 -type link_cast() :: unicast | broadcast | multicast.
 
 -doc """
-What the interface classifies: a frame from its driver; on the loopback interface, an IP
+What the interface classifies: a frame from its driver, with its network sum or `none`; on
+the loopback interface, an IP
 packet with the zone its sender's path gave it; or a datagram erx_ip4_reass or
 erx_ip6_reass rebuilt, with its family and the zone and link cast of its fragment at
 offset 0 (IPv4's zone is `none`).
 """.
--type input() :: {frame, binary()}
+-type input() :: {frame, binary(), erx_net_sum:sum() | none}
                | {frame, Zone :: term(), binary()}
                | {reassembled, family(), Zone :: term(), link_cast(), binary()}.
 
@@ -345,14 +354,20 @@ A classified frame waiting for `verify/1`: its kind (what its consumer is), its 
 the bytes above IP, for a segment to a listener the listener's entry, and for the DHCP
 path, ARP, a fragment and a parameter problem what each needs: a fragment its zone and its
 frame's link cast, which reassembly keeps for the datagram, and a parameter problem its
-packet's zone, so the error goes back to the zoned source.
+packet's zone, so the error goes back to the zoned source. A datagram's consumer above IP
+comes with what the sum of the bytes above IP is derived from, or `none` when its decoder
+sums them.
 """.
--opaque pending() :: {conn | datagram | report | echo | udp | icmp | other, head(), binary()}
-                   | {tcp, head(), binary(), entry() | none}
+-opaque pending() :: {above, {binary(), erx_net_sum:sum(), Start :: non_neg_integer()} | none, above()}
                    | {dhcp, #ip4{}, binary()}
                    | {arp, binary()}
                    | {fragment, family(), Zone :: term(), link_cast(), #ip4{} | #ip6{}, binary()}
                    | {param_problem, family(), Zone :: term(), Problem :: tuple(), Packet :: binary()}.
+
+%% A classified datagram's consumer above IP: its kind, its head and the bytes above IP, and
+%% for a segment to a listener the listener's entry.
+-type above() :: {conn | datagram | report | echo | udp | icmp | other, head(), binary()}
+               | {tcp, head(), binary(), entry() | none}.
 
 -doc """
 What `verify/1` hands on. For the holders of an owned frame: a connection's
@@ -384,23 +399,24 @@ with the packet it is about, for erx_icmp4 or erx_icmp6 to answer.
 
 -doc "Where Input goes, given the receiving interface's View.".
 -spec classify(input(), view()) -> verdict().
-classify({frame, Bytes}, #{link := ethernet} = View) ->
-    ether(Bytes, View);
+classify({frame, Bytes, Sum}, #{link := ethernet} = View) when is_binary(Bytes) ->
+    ether(Bytes, Sum, View);
 classify({frame, Zone, Bytes}, #{link := none} = View) ->
     loopback(Zone, Bytes, View);
 classify({reassembled, inet, none, LinkCast, Bytes}, View) ->
-    ip4(Bytes, LinkCast, View);
+    ip4(Bytes, none, LinkCast, View);
 classify({reassembled, inet6, Zone, LinkCast, Bytes}, View) ->
-    ip6(Bytes, reassembled, LinkCast, Zone, View).
+    ip6(Bytes, none, reassembled, LinkCast, Zone, View).
 
 %% ether_input drops a frame to another host's unicast address (no promiscuous mode), and
-%% ether_demux one of a type no protocol takes.
-ether(Bytes, #{lladdr := Mine, ip6 := #{zone := Zone}} = View) ->
+%% ether_demux one of a type no protocol takes. The frame's network sum is the sum of its bytes
+%% after the link header, so it is the IP packet's.
+ether(Bytes, Sum, #{lladdr := Mine, ip6 := #{zone := Zone}} = View) ->
     case erx_net_eth:decode(Bytes) of
         {ok, #eth{dst = Dst, type = Type}, Payload} ->
             case link_cast(Dst, Mine) of
                 other_host -> {drop, other_host};
-                LinkCast -> ethertype(Type, Payload, LinkCast, Zone, View)
+                LinkCast -> ethertype(Type, Payload, Sum, LinkCast, Zone, View)
             end;
         {error, Reason} ->
             {drop, Reason}
@@ -411,23 +427,23 @@ link_cast(?ETHER_BROADCAST, _) -> broadcast;
 link_cast(<<_:7, 1:1, _:40>>, _) -> multicast;
 link_cast(_, _) -> other_host.
 
-ethertype(?ETHERTYPE_IP, Packet, LinkCast, _, #{dhcp := true} = View) ->
+ethertype(?ETHERTYPE_IP, Packet, Sum, LinkCast, _, #{dhcp := true} = View) ->
     case dhcp(Packet) of
         {ok, Ip, Upper} -> {local, {dhcp, Ip, Upper}};
-        no -> ip4(Packet, LinkCast, View)
+        no -> ip4(Packet, Sum, LinkCast, View)
     end;
-ethertype(?ETHERTYPE_IP, Packet, LinkCast, _, View) ->
-    ip4(Packet, LinkCast, View);
-ethertype(?ETHERTYPE_IPV6, Packet, LinkCast, Zone, View) ->
-    ip6(Packet, received, LinkCast, Zone, View);
-ethertype(?ETHERTYPE_ARP, Packet, _, _, _) ->
+ethertype(?ETHERTYPE_IP, Packet, Sum, LinkCast, _, View) ->
+    ip4(Packet, Sum, LinkCast, View);
+ethertype(?ETHERTYPE_IPV6, Packet, Sum, LinkCast, Zone, View) ->
+    ip6(Packet, Sum, received, LinkCast, Zone, View);
+ethertype(?ETHERTYPE_ARP, Packet, _, _, _, _) ->
     {local, {arp, Packet}};
-ethertype(_, _, _, _, _) ->
+ethertype(_, _, _, _, _, _) ->
     {drop, ethertype}.
 
 %% The loopback interface's frame is the IP packet itself, its family read from the version.
-loopback(Zone, <<6:4, _/bits>> = Packet, View) -> ip6(Packet, received, unicast, Zone, View);
-loopback(_, Packet, View) -> ip4(Packet, unicast, View).
+loopback(Zone, <<6:4, _/bits>> = Packet, View) -> ip6(Packet, none, received, unicast, Zone, View);
+loopback(_, Packet, View) -> ip4(Packet, none, unicast, View).
 
 %% dhcp_bpf_filter: an IPv4 packet that is not a fragment, carrying UDP to the client's
 %% port, whatever its destination address, since the offer may be unicast to the address
@@ -443,25 +459,43 @@ dhcp(Packet) ->
             no
     end.
 
-ip4(Packet, LinkCast, #{ip4 := Ip4View} = View) ->
+ip4(Packet, Sum, LinkCast, #{ip4 := Ip4View} = View) ->
     case erx_ip4:input(Packet, LinkCast, Ip4View) of
-        {ours, Cast, Reply, #ip4{p = Proto, src = Src, dst = Dst} = Ip, Upper} ->
+        {ours, Cast, Reply, #ip4{p = Proto, src = Src, dst = Dst, options = Options} = Ip, Upper} ->
             Head = head(inet, Ip, LinkCast, Cast, Reply, Src, Dst, none),
-            member(Head, Proto, Upper, View);
+            above_sum(member(Head, Proto, Upper, View), Packet, Sum, ?IP_HDR_LEN + byte_size(Options));
         {fragment, Ip, Payload} -> {local, {fragment, inet, none, LinkCast, Ip, Payload}};
         {param_problem, _} = Problem -> {local, {param_problem, inet, none, Problem, Packet}};
         {drop, _} = Drop -> Drop
     end.
 
-ip6(Packet, Origin, LinkCast, Zone, #{ip6 := Ip6View} = View) ->
+ip6(Packet, Sum, Origin, LinkCast, Zone, #{ip6 := Ip6View} = View) ->
     case erx_ip6:input(Packet, Origin, LinkCast, Ip6View#{zone := Zone}) of
-        {ours, Cast, Reply, #ip6{proto = Proto, src = Src, dst = Dst} = Ip, Upper} ->
+        {ours, Cast, Reply, #ip6{proto = Proto, src = Src, dst = Dst, hdrlen = HdrLen} = Ip, Upper} ->
             Head = head(inet6, Ip, LinkCast, Cast, Reply, Src, Dst, Zone),
-            member(Head, Proto, Upper, View);
+            above_sum(member(Head, Proto, Upper, View), Packet, Sum, ?IP6_HDR_LEN + HdrLen);
         {fragment, Ip, Payload} -> {local, {fragment, inet6, Zone, LinkCast, Ip, Payload}};
         {param_problem, _, _} = Problem -> {local, {param_problem, inet6, Zone, Problem, Packet}};
         {drop, _} = Drop -> Drop
     end.
+
+%% A datagram for a consumer above IP carries what the sum of its bytes above IP comes from:
+%% its packet, the packet's network sum and Start, where the bytes above IP begin in it, or
+%% `none` without a network sum. `verify/1` derives the sum, so a frame dropped for want of
+%% room costs no addition.
+above_sum({owned, Holders, Above}, Packet, Sum, Start) ->
+    {owned, Holders, {above, sum_from(Packet, Sum, Start), Above}};
+above_sum({local, Above}, Packet, Sum, Start) ->
+    {local, {above, sum_from(Packet, Sum, Start), Above}};
+above_sum({drop, _} = Drop, _, _, _) ->
+    Drop.
+
+sum_from(_, none, _) -> none;
+sum_from(Packet, Sum, Start) -> {Packet, Sum, Start}.
+
+%% The sum of Upper, the bytes above IP: the packet's sum less its header's and its padding's.
+upper_sum(none, _) -> none;
+upper_sum({Packet, Sum, Start}, Upper) -> erx_net_sum:span(Packet, Sum, Start, byte_size(Upper)).
 
 head(Family, Ip, LinkCast, Cast, Reply, Src, Dst, Zone) ->
     #{family => Family, ip => Ip, link => LinkCast, cast => Cast, reply => Reply,
@@ -630,20 +664,30 @@ decoder, and returns the item its consumer takes, or the decoder's reason to dro
 fragment, a parameter problem and a datagram of another protocol pass as they are.
 """.
 -spec verify(pending()) -> {ok, item()} | {drop, reason()}.
-verify({conn, Head, Upper}) ->
-    then(tcp_wire(Head, Upper),
-         fun(Tcp, Payload) -> {Tcp, Payload, ecn(Head), maps:get(link, Head)} end);
-verify({tcp, Head, Upper, Listener}) ->
-    then(tcp_wire(Head, Upper), fun(Tcp, Payload) -> {tcp, Head, Tcp, Payload, Listener} end);
-verify({datagram, #{src := Src, dst := Dst} = Head, Upper}) ->
-    then(udp_wire(Head, Upper), fun(#udp{sport = Sport}, Payload) -> {datagram, {Src, Sport}, Dst, Payload} end);
-verify({udp, Head, Upper}) ->
-    then(udp_wire(Head, Upper), fun(Udp, _Payload) -> {udp, Head, Udp, Upper} end);
+verify({above, From, Above}) ->
+    verify_above(Above, upper_sum(From, element(3, Above)));
 verify({dhcp, #ip4{src = Src, dst = Dst} = Ip, Upper}) ->
     Sum = erx_ip4_wire:pseudo_sum(Src, Dst, byte_size(Upper), ?PROTO_UDP),
     then(erx_udp_wire:decode(inet, Sum, Upper), fun(Udp, Payload) -> {dhcp, Ip, Udp, Payload} end);
-verify({report, Head, Upper}) ->
-    case icmp_wire(Head, Upper) of
+verify({arp, Bytes}) ->
+    then(erx_arp_wire:decode(Bytes), fun(Arp, _) -> {arp, Arp} end);
+verify({fragment, _, _, _, _, _} = Fragment) ->
+    {ok, Fragment};
+verify({param_problem, _, _, _, _} = Problem) ->
+    {ok, Problem}.
+
+%% A consumer above IP, with Sum the sum of its bytes above IP, the third element of each, or none.
+verify_above({conn, Head, Upper}, Sum) ->
+    then(tcp_wire(Head, Upper, Sum),
+         fun(Tcp, Payload) -> {Tcp, Payload, ecn(Head), maps:get(link, Head)} end);
+verify_above({tcp, Head, Upper, Listener}, Sum) ->
+    then(tcp_wire(Head, Upper, Sum), fun(Tcp, Payload) -> {tcp, Head, Tcp, Payload, Listener} end);
+verify_above({datagram, #{src := Src, dst := Dst} = Head, Upper}, Sum) ->
+    then(udp_wire(Head, Upper, Sum), fun(#udp{sport = Sport}, Payload) -> {datagram, {Src, Sport}, Dst, Payload} end);
+verify_above({udp, Head, Upper}, Sum) ->
+    then(udp_wire(Head, Upper, Sum), fun(Udp, _Payload) -> {udp, Head, Udp, Upper} end);
+verify_above({report, Head, Upper}, Sum) ->
+    case icmp_wire(Head, Upper, Sum) of
         {ok, Icmp, Invoking} ->
             case decode_quoted(Head, Invoking) of
                 {ok, Quoted} -> {ok, {report, Icmp, Quoted}};
@@ -652,31 +696,25 @@ verify({report, Head, Upper}) ->
         {error, Reason} ->
             {drop, Reason}
     end;
-verify({echo, #{ip := #ip4{src = Src, ttl = Ttl}}, Upper}) ->
-    then(erx_icmp4_wire:decode(Upper),
+verify_above({echo, #{ip := #ip4{src = Src, ttl = Ttl}}, Upper}, Sum) ->
+    then(erx_icmp4_wire:decode(Upper, Sum),
          fun(#icmp4{msg = {echo, Id, Seq}}, Data) -> {echo_reply, Src, Ttl, Id, Seq, Data} end);
-verify({icmp, Head, Upper}) ->
-    then(icmp_wire(Head, Upper), fun(Icmp, Rest) -> {icmp, Head, Icmp, Rest} end);
-verify({arp, Bytes}) ->
-    then(erx_arp_wire:decode(Bytes), fun(Arp, _) -> {arp, Arp} end);
-verify({other, _, _} = Other) ->
-    {ok, Other};
-verify({fragment, _, _, _, _, _} = Fragment) ->
-    {ok, Fragment};
-verify({param_problem, _, _, _, _} = Problem) ->
-    {ok, Problem}.
+verify_above({icmp, Head, Upper}, Sum) ->
+    then(icmp_wire(Head, Upper, Sum), fun(Icmp, Rest) -> {icmp, Head, Icmp, Rest} end);
+verify_above({other, _, _} = Other, _) ->
+    {ok, Other}.
 
 then({ok, Record, Rest}, Item) -> {ok, Item(Record, Rest)};
 then({error, Reason}, _) -> {drop, Reason}.
 
-tcp_wire(Head, Upper) -> erx_tcp_wire:decode(pseudo_sum(Head, Upper, ?PROTO_TCP), Upper).
+tcp_wire(Head, Upper, Sum) -> erx_tcp_wire:decode(pseudo_sum(Head, Upper, ?PROTO_TCP), Upper, Sum).
 
-udp_wire(#{family := Family} = Head, Upper) ->
-    erx_udp_wire:decode(Family, pseudo_sum(Head, Upper, ?PROTO_UDP), Upper).
+udp_wire(#{family := Family} = Head, Upper, Sum) ->
+    erx_udp_wire:decode(Family, pseudo_sum(Head, Upper, ?PROTO_UDP), Upper, Sum).
 
-icmp_wire(#{family := inet}, Upper) -> erx_icmp4_wire:decode(Upper);
-icmp_wire(#{family := inet6} = Head, Upper) ->
-    erx_icmp6_wire:decode(pseudo_sum(Head, Upper, ?PROTO_ICMPV6), Upper).
+icmp_wire(#{family := inet}, Upper, Sum) -> erx_icmp4_wire:decode(Upper, Sum);
+icmp_wire(#{family := inet6} = Head, Upper, Sum) ->
+    erx_icmp6_wire:decode(pseudo_sum(Head, Upper, ?PROTO_ICMPV6), Upper, Sum).
 
 decode_quoted(#{family := inet}, Invoking) -> erx_icmp4:decode_quoted(Invoking);
 decode_quoted(#{family := inet6}, Invoking) -> erx_icmp6:decode_quoted(Invoking).

@@ -7,8 +7,10 @@ The tap transport (docs/design-network-stack.md, "The tap transport"): Ethernet 
 without their frame check sequence, exchanged with a host's tap device through the NIF
 `erx_tap_nif`, one frame per `read` and per `writev`, the kernel's copy the only copy of a
 frame's bytes. Built only outside erXos; on FreeBSD the device is `/dev/tapN`. It parses
-nothing. A frame shorter than the Ethernet header is dropped as `malformed`, one longer than
-the MTU and its 14-byte header as `too_long`, and one the tap discards as `refused`.
+nothing. Each received frame comes as `{sum, Sum, Frame}`, with the network sum the NIF took
+right after the `read` (docs/design-network-stack.md, "Checksums in the copy"). A frame
+shorter than the Ethernet header is dropped as `malformed`, one longer than the MTU and its
+14-byte header as `too_long`, and one the tap discards as `refused`.
 
 Each direction has exactly one wake. Receiving, either the device is armed for reading, and
 its `{erx_tap, readable}` will come, or the transport has sent itself one `{erx_tap, more}`;
