@@ -197,8 +197,9 @@ through the fourteen stages of `erx_tcp_input`, `lift` to `fin`; header predicti
 recognises its two common cases and jumps to the `ack` stage, from which
 the general stages run. Output then answers about every second segment
 with an ACK, and a batch stepped together with one, encoded as any
-segment is, and a `recv` joins the queued payloads into one binary
-(`erx_tcp_conn:take/2`).
+segment is. The socket process answers a `recv` from its held pieces
+(`erx_gen_tcp_core:split/2`): a delivery within one piece is a
+sub-binary of it, and one that spans pieces is joined from its own bytes.
 
 ## The construction: runs
 
@@ -988,9 +989,10 @@ in the send buffer as one binary, and a run of at most 65,535 bytes covers
 at most the end of one piece and the start of the next. A connection
 pushes received bytes within the credit the socket process granted, at
 most a piece per push. A merged segment's payload, at most 65,280 bytes,
-fits a piece. A push carries the receive queue's pieces as they are, and
-the socket process joins them into one binary when it hands the owner
-data, once per delivery, in the owner's domain. The socket protocol's
+fits a piece. A push carries the receive queue's pieces as they are. The
+socket process hands the owner a delivery that lies within one piece as
+a sub-binary of it, and joins the pieces of one that spans several into
+one binary, once per delivery, in the owner's domain. The socket protocol's
 push carries `{data, [binary()]}`, a flat list of at most 64 binaries
 and at most one piece in all
 ([Message sizes](design-network-stack.md#message-sizes)).
@@ -1002,7 +1004,7 @@ Copies of a payload byte after this design, by path and medium:
 | Path | Medium | Copies | Total |
 | --- | --- | --- | --- |
 | send | virtio, erXos | the lane's two, from the owner's domain into the network domain; the cut, into the pool buffer | 3 |
-| receive | virtio, erXos | `complete/3`, into a binary; the lane's two, into the owner's domain; the socket process's join when a delivery holds more than one piece | 3 to 4 |
+| receive | virtio, erXos | `complete/3`, into a binary; the lane's two, into the owner's domain; the socket process's join when a delivery spans more than one piece | 3 to 4 |
 | send | tap, a host | the kernel's write; the payload is read once more to sum it | 1 |
 | receive | tap, a host | the kernel's read, summed as it is kept; the join, as on erXos | 1 to 2 |
 | send | netmap, a host | the cut, into the slot | 1 |
@@ -1023,15 +1025,19 @@ holds is in a binary the owner, the lane or the medium's copy made, or a
 sub-binary of one. Every other copy is at a listed site. A source check
 in `make check` reads the modules a TCP payload passes through (the
 `erx_tcp_` modules, `erx_net_frame`, `erx_net_tx`, `erx_net_driver`,
-`erx_net_if`, `erx_net_input` and the transports) and fails the build on
+`erx_net_if`, `erx_net_input`, the transports, and the socket process's
+`erx_gen_tcp` and `erx_gen_tcp_core`) and fails the build on
 any call of `iolist_to_binary/1`, `list_to_binary/1`, `binary:copy/1,2`,
 `binary:list_to_bin/1` or `erlang:iolist_to_iovec/1` outside its list.
 The list names the functions that may copy: the receive and reassembly
 queues' copy of a small piece (`erx_tcp_conn:compact/1`,
 `erx_tcp_reass:hold/1`), which keeps a few bytes from holding a frame
-alive; the receive queue's one join at the owner's read
-(`erx_tcp_conn:take/2`), the join a delivery needs once, which the
-socket process makes in this design; the pipe's `process` end
+alive; the socket process's join of a delivery that spans pieces
+(`erx_gen_tcp_core`'s `split/2`), which copies exactly the delivery's
+bytes once and which a delivery within one piece skips; the owner's
+iodata made into the one binary a send carries (`erx_gen_tcp:send/2`),
+nothing for a binary, where stock hands its port the iodata as an I/O
+vector; the pipe's `process` end
 (`erx_net_pipe:send/2`), whose far end, a test, takes each frame as one
 binary; the frame layer's finishing of a delayed checksum for a
 transport that does not finish (`erx_net_frame:finish/1`), the copy the
@@ -1040,8 +1046,8 @@ of more binaries than one request posts (`erx_virtio_net`'s
 `segments/1`); and the loop transport's copy of each packet it returns,
 the one copy a device makes elsewhere
 ([The driver](design-network-stack.md#the-driver)). IP fragmentation
-and reassembly, which a datagram's layout forces, and the socket
-process's join, in `erx_net_client`, are outside the modules it reads.
+and reassembly, which a datagram's layout forces, are outside the
+modules it reads.
 A seeded violation in its test shows the check catches a new site.
 
 ## The seam

@@ -154,14 +154,19 @@ class NetChecksTest < Minitest::Test
       assert_equal [['payload-copy', line]], source_rules("#{SRC}/erx_tcp_output.erl", body), body
     end
     assert_equal [['payload-copy', 3]], source_rules("#{SRC}/erx_net_if.erl", "a(X) -> X.\nb(P) -> iolist_to_binary(P).")
-    assert_equal [['payload-copy', 2]], source_rules("#{SRC}/erx_tcp_conn.erl", 'join(Q) -> iolist_to_binary(Q).')
+    assert_equal [['payload-copy', 2]], source_rules("#{SRC}/erx_tcp_conn.erl", 'take(Q) -> iolist_to_binary(Q).')
+    assert_equal [['payload-copy', 2]], source_rules("#{CLIENT}/erx_gen_tcp_core.erl", 'take(L, H) -> iolist_to_binary(H).')
+    assert_equal [['payload-copy', 2]], source_rules("#{CLIENT}/erx_gen_tcp.erl", 'recv(B) -> binary:copy(B).')
   end
 
   def test_payload_copies_pass_at_their_sites_in_comments_and_other_modules
-    assert_empty source_rules("#{SRC}/erx_tcp_conn.erl", "take(Q) ->\n  iolist_to_binary(Q).")
+    assert_empty source_rules("#{SRC}/erx_tcp_conn.erl", "compact(B) ->\n  binary:copy(B).")
     assert_empty source_rules("#{SRC}/erx_tcp_reass.erl", 'hold(D) -> binary:copy(D).')
+    assert_empty source_rules("#{CLIENT}/erx_gen_tcp_core.erl", 'split(L, P) -> iolist_to_binary(P).')
+    assert_empty source_rules("#{CLIENT}/erx_gen_tcp.erl", 'send(S, D) -> iolist_to_binary(D).')
     assert_empty source_rules("#{SRC}/erx_tcp_output.erl", "%% iolist_to_binary(P)\nout(P) -> my_iolist_to_binary(P).")
     assert_empty source_rules("#{SRC}/erx_udp.erl", 'out(P) -> iolist_to_binary(P).')
+    assert_empty source_rules("#{CLIENT}/erx_gen_udp.erl", 'send(S, P) -> iolist_to_binary(P).')
   end
 
   # The design's seeded failure: a backend that reads the grant key itself

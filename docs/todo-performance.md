@@ -533,14 +533,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   against a build whose send call goes to the connection directly. The
   fix on the table is the connection answering a one-piece send's caller
   itself, with the socket process forwarding the call.
-* **[Low] network, a recv flattens all the socket process holds**
-  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
-  `erx_gen_tcp_core:take/2` joins every held push into one binary for
-  each recv, so small recvs interleaved with small pushes (a peer's tiny
-  segments) copy up to the 64 KiB target each time. Settled by a passive
-  loop of `recv(S, 4)` against 64-byte segments, bytes copied per byte
-  received; the fix on the table is splitting off only the prefix a recv
-  takes.
+* **[Low] network, a send of iodata is flattened**
+  ([design-network-fastpath.md](design-network-fastpath.md#copies)).
+  `erx_gen_tcp:send/2` makes the owner's iodata one binary, a copy of
+  every byte of a send of more than one binary, where stock hands
+  its port an I/O vector that references large binaries. Settled by a
+  bulk send of 64 KiB iolists of 1 KiB binaries against the same bytes as
+  one binary, throughput and bytes copied; the fix on the table is the
+  socket process cutting pieces from the iodata's binaries.
 * **[Low] network, the receive join on erXos**
   ([design-network-fastpath.md](design-network-fastpath.md#copies)). The merge leaves a merged segment's payload
   as its frames' sub-binaries, so the socket process joins a delivery of

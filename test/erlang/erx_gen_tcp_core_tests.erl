@@ -54,7 +54,9 @@ core_test_() ->
      {"eof then closed after once ran out is one tcp_closed", fun once_spent_eof_closed/0},
      {"an error in passive mode waits for a recv", fun passive_error_recv/0},
      {"a waiting recv is answered einval when the socket turns active", fun recv_then_active/0},
-     {"a recv timeout past the longest timer is einval", fun recv_timeout_bound/0}].
+     {"a recv timeout past the longest timer is einval", fun recv_timeout_bound/0},
+     {"a delivery within one piece shares it, not a copy", fun one_piece_shared/0},
+     {"a delivery across pieces joins them in order", fun pieces_joined/0}].
 
 send_in_pieces() ->
     C0 = new(#{}),
@@ -303,3 +305,52 @@ request_test_() ->
 recv_timeout_bound() ->
     ?assertEqual([{reply, f1, {error, einval}}], element(2, call(f1, {recv, 10, 4294967296}, new(#{})))),
     ?assertEqual([{recv_timer, 4294967295}], element(2, call(f2, {recv, 10, 4294967295}, new(#{})))).
+
+pieces(Pieces, Core) -> step({push, {ok, {data, Pieces}}}, Core).
+
+recv(From, Length, Core) ->
+    {Core1, [{reply, From, {ok, Data}} | _]} = call(From, {recv, Length, infinity}, Core),
+    {Data, Core1}.
+
+%% A merged segment's payload is a sub-binary of its frame (docs/design-network-fastpath.md,
+%% "Copies"). A delivery that lies within one piece is a sub-binary of that piece, still
+%% sharing the frame, not a copy; a copy would reference only its own bytes.
+one_piece_shared() ->
+    Frame = binary:copy(<<"f">>, 1500),
+    Piece = binary:part(Frame, 40, 1400),
+    {C1, _} = pieces([Piece], new(#{})),
+    {Whole, _} = recv(f1, 0, C1),
+    ?assertEqual(Piece, Whole),
+    ?assertEqual(1500, binary:referenced_byte_size(Whole)),
+    {Head, C2} = recv(f1, 100, C1),
+    {Rest, _} = recv(f2, 0, C2),
+    ?assertEqual(Piece, <<Head/binary, Rest/binary>>),
+    ?assertEqual([1500, 1500], [binary:referenced_byte_size(B) || B <- [Head, Rest]]),
+    {_, [{tell, {tcp, _, Told}}]} = pieces([Piece], new(#{active => true})),
+    ?assertEqual(1500, binary:referenced_byte_size(Told)),
+    {C3, _} = pieces([Piece, binary:copy(<<"g">>, 200)], new(#{})),
+    {Shared, _} = recv(f1, 100, C3),
+    ?assertEqual(1500, binary:referenced_byte_size(Shared)),
+    {C4, _} = pieces([Piece], new(#{mode => list})),
+    ?assertEqual(binary_to_list(Piece), element(1, recv(f1, 0, C4))).
+
+%% Pieces held from several pushes are delivered oldest first, whatever bytes a recv
+%% takes and whatever is pushed between recvs, in either mode. A delivery across pieces
+%% is the join of its own bytes only, and leaves the rest of the last piece shared.
+pieces_joined() ->
+    Core = lists:foldl(fun(Push, C) -> element(1, pieces(Push, C)) end, new(#{}),
+                       [[<<"ab">>, <<"cd">>], [<<"ef">>]]),
+    {A, C1} = recv(f1, 1, Core),
+    {BCD, C2} = recv(f2, 3, C1),
+    {C3, _} = pieces([<<"gh">>], C2),
+    {EFG, C4} = recv(f3, 3, C3),
+    {H, _} = recv(f4, 0, C4),
+    ?assertEqual([<<"a">>, <<"bcd">>, <<"efg">>, <<"h">>], [A, BCD, EFG, H]),
+    ?assertEqual(<<"abcdef">>, element(1, recv(f1, 0, Core))),
+    Frame = binary:copy(<<"f">>, 1500),
+    {J1, _} = pieces([binary:part(Frame, 0, 100), binary:part(Frame, 100, 1400)], new(#{})),
+    {Joined, J2} = recv(f1, 200, J1),
+    {Left, _} = recv(f2, 0, J2),
+    ?assertEqual([200, 1500], [binary:referenced_byte_size(B) || B <- [Joined, Left]]),
+    {L1, _} = pieces([<<"ab">>, <<"cd">>], new(#{mode => list})),
+    ?assertEqual("abc", element(1, recv(f1, 3, L1))).

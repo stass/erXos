@@ -35,7 +35,8 @@ module Erx
   #   the stack or its clients ends on a clock of its own;
   # * payload-copy: the modules a TCP payload passes through (erx_tcp and
   #   erx_tcp_*, erx_net_frame, erx_net_tx, erx_net_driver, erx_net_if,
-  #   erx_net_input and the transports) call iolist_to_binary/1,
+  #   erx_net_input, the transports, and the client's erx_gen_tcp and
+  #   erx_gen_tcp_core, the socket process) call iolist_to_binary/1,
   #   list_to_binary/1, binary:copy/1,2, binary:list_to_bin/1 or
   #   erlang:iolist_to_iovec/1 only in the functions COPY_SITES lists, so a
   #   payload byte is copied only where the fast path's design says
@@ -99,16 +100,18 @@ module Erx
 
     # The modules a TCP payload passes through, by file name, and the calls that
     # copy one (docs/design-network-fastpath.md, "Copies").
-    PAYLOAD_MODULE = /\A(?:erx_tcp(?:_[a-z0-9_]+)?|erx_net_(?:frame|tx|driver|if|input|pipe|loop)|erx_tap|erx_netmap|erx_virtio_net)\.erl\z/
+    PAYLOAD_MODULE = /\A(?:erx_tcp(?:_[a-z0-9_]+)?|erx_net_(?:frame|tx|driver|if|input|pipe|loop)|erx_tap|erx_netmap|erx_virtio_net|erx_gen_tcp(?:_core)?)\.erl\z/
     COPY_CALL = /(?<![A-Za-z0-9_@])(?:(?:erlang\s*:\s*)?(?:iolist_to_binary|list_to_binary|iolist_to_iovec)|binary\s*:\s*(?:copy|list_to_bin))(?![A-Za-z0-9_@])/
     # The functions that may copy, each with its reason: a small piece copied out
-    # so that it does not keep its frame alive, the receive queue's one join at
-    # the owner's read, the pipe's frame to a test, the frame layer's finishing
-    # of a checksum for a transport that does not finish, and the virtio
-    # transport's join of a frame of more binaries than a request posts.
+    # so that it does not keep its frame alive, the pipe's frame to a test, the
+    # frame layer's finishing of a checksum for a transport that does not finish,
+    # the virtio transport's join of a frame of more binaries than a request
+    # posts, the owner's iodata made into the one binary a send carries, and the
+    # socket process's join of a delivery that spans pieces.
     COPY_SITES = {
-      'erx_tcp_conn' => %w[compact take], 'erx_tcp_reass' => %w[hold], 'erx_net_pipe' => %w[send],
-      'erx_net_frame' => %w[finish], 'erx_virtio_net' => %w[segments]
+      'erx_tcp_conn' => %w[compact], 'erx_tcp_reass' => %w[hold], 'erx_net_pipe' => %w[send],
+      'erx_net_frame' => %w[finish], 'erx_virtio_net' => %w[segments],
+      'erx_gen_tcp' => %w[send], 'erx_gen_tcp_core' => %w[split]
     }.freeze
     # The head of a function clause, which starts its line.
     CLAUSE_HEAD = /\A([a-z][A-Za-z0-9_@]*)\(/
@@ -143,7 +146,7 @@ module Erx
       client = files.select { |path, _| File.fnmatch?(CLIENT_SCOPE, path, GLOB_FLAGS) }
       [*atom_violations(sources), *random_violations(sources), *seq_violations(sources),
        *notice_violations(sources, notice: files[NOTICE]), *grant_key_violations(client),
-       *call_timeout_violations(sources.merge(client)), *copy_violations(sources)]
+       *call_timeout_violations(sources.merge(client)), *copy_violations(sources.merge(client))]
     end
 
     def copy_violations(sources)

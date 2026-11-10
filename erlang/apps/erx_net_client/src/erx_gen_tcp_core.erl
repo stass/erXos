@@ -114,7 +114,8 @@ cancelled, a protocol break counted, the end of the socket process.
                state = open :: open | closed,
                mode :: binary | list,
                active :: active(),
-               held = [] :: [iodata()],              % pushes, newest first
+               held = [] :: [[binary()]],            % pushes' pieces and a take's leftover:
+                                                     % lists newest first, each oldest first
                held_bytes = 0 :: non_neg_integer(),
                outstanding = 0 :: non_neg_integer(), % credit granted, not yet pushed
                next = 0 :: non_neg_integer(),        % the next request's N
@@ -450,8 +451,28 @@ take(all, #core{held_bytes = Bytes} = C) ->
 take(Length, #core{held_bytes = Bytes}) when Length > Bytes ->
     short;
 take(Length, #core{held = Held, held_bytes = Bytes} = C) ->
-    <<Data:Length/binary, Left/binary>> = iolist_to_binary(lists:reverse(Held)),
-    {ok, Data, C#core{held = [Left || Left =/= <<>>], held_bytes = Bytes - Length}}.
+    {Data, Left} = split(Length, lists:append(lists:reverse(Held))),
+    {ok, Data, C#core{held = [Left || Left =/= []], held_bytes = Bytes - Length}}.
+
+%% The first Length bytes of Pieces, the held binaries oldest first, and the binaries
+%% after them; take/2 ensures 0 < Length =< the bytes held. A delivery within one piece
+%% is a sub-binary of it, not a copy. A delivery across pieces is the join of exactly
+%% its bytes, the socket process's one copy of them (docs/design-network-fastpath.md,
+%% "Copies"), so it references only its own bytes and no byte is joined twice. The
+%% binaries left stay the pieces or a sub-binary of one.
+split(Length, Pieces) ->
+    case cut(Length, Pieces, []) of
+        {[One], Left} -> {One, Left};
+        {Head, Left} -> {iolist_to_binary(Head), Left}
+    end.
+
+%% The pieces holding the first Length bytes, the last one cut at them, oldest first,
+%% and the pieces after them. Head collects the whole pieces taken, newest first.
+cut(Length, [Piece | Rest], Head) when byte_size(Piece) >= Length ->
+    <<Last:Length/binary, Tail/binary>> = Piece,
+    {lists:reverse(Head, [Last]), [Tail || Tail =/= <<>>] ++ Rest};
+cut(Length, [Piece | Rest], Head) ->
+    cut(Length - byte_size(Piece), Rest, [Piece | Head]).
 
 data(binary, Data) -> Data;
 data(list, Data) -> binary_to_list(Data).
