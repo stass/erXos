@@ -50,8 +50,11 @@
 # code, literal_alloc 2.0 MiB); and 3.1 MiB left for the threads' stacks (one
 # scheduler, one dirty CPU scheduler, two dirty IO schedulers and one async thread)
 # and the rest. Release files are mapped from the archive's pages, so they cost the
-# domain nothing; each added domain release costs the archive about 11 MB, as it
-# carries its own copy of the domain base. Loading the modules adds 192 pages even to
+# domain nothing. The archive holds one domain release, each application's files
+# once, with a boot script per name, so a name costs it only the files of
+# applications no other script boots and its script: the archive column is the
+# domain release's bytes, and the session script's erx_shell and erx_session add
+# 0.50 MB more. Loading the modules adds 192 pages even to
 # the bare release, which has none to load: carriers the step's work frees stay in
 # mseg_alloc's cache of two. Loading erx_blk's 9 modules adds 0.5 MiB of memory and
 # 320-384 pages; erx_net's and erx_net_client's 82 add 1.7 MiB of memory and 928
@@ -65,12 +68,13 @@
 # The 160 MiB machine does not hold the system domain, the root's session at 36 MiB, a
 # storage domain and a network domain. At rest they need about 108 MiB of pool
 # (36 + 36 + 18 + 18) against root_memory's 96.25 MiB, and the archive of the
-# Footprint image, which carries the system release, the three domain releases and
-# the interpreter and BeamAsm runtime images, is 68.8 MiB against the 47.75 MiB the
-# machine leaves for it and the bootstrap: about 193 MiB in all with the Fiasco
-# reserve's 16 MiB. Admission charges budgets, not use, and the system baseline is
-# 46 MiB, so the shortfall is larger. The driver domains need a machine of 256 MiB,
-# the 160 MiB machine staying for the system domain and one session.
+# Footprint image, which carries the system release, the one domain release (bare,
+# storage, network and session scripts) and the interpreter and BeamAsm runtime
+# images, is 49,545,216 bytes (47.25 MiB) against the 47.75 MiB the machine leaves
+# for it and the bootstrap: about 171 MiB in all with the Fiasco reserve's 16 MiB.
+# Admission charges budgets, not use, and the system baseline is
+# 46 MiB, so the shortfall is larger. What machine the driver domains need is for
+# Footprint to measure on one tree with the shared segments and the one domain release.
 #
 # The image release is the system release's EROFS image in the slot, with no
 # hash tree; the packer takes its extent from the image it builds
@@ -164,7 +168,7 @@ session system
   limits @limits.session
   runtime @artifact.emu
   release @artifact.session
-  args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie -no_epmd -proto_dist erx -eval ok=application:start(erx_session)"
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -eval ok=application:start(erx_session)"
 machine
   flags development
   host "erxos"

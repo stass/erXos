@@ -98,7 +98,7 @@ class ReleaseFilesTest < Minitest::Test
     paths = entries.map { |entry| entry.fetch('path') }
     assert_includes paths, "system/lib/compiler-#{VERSION}/ebin/compiler.app"
     assert_includes paths, "system/lib/runtime_tools-#{VERSION}/ebin/dbg.beam"
-    release = File.read(File.join(@scratch, 'release/start.rel'))
+    release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
     [*%w[kernel stdlib], *(Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY - Erx::ReleaseFiles::DOMAIN_ONLY)].each do |application|
@@ -110,7 +110,7 @@ class ReleaseFilesTest < Minitest::Test
   # its end does not end the system domain.
   def test_the_release_file_starts_the_network_stack_temporary
     entries
-    release = File.read(File.join(@scratch, 'release/start.rel'))
+    release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     assert_includes release, "{erx_net,\"#{VERSION}\",temporary}"
   end
 
@@ -149,70 +149,101 @@ class ReleaseFilesTest < Minitest::Test
                           codec: Codec.new, oracle: FakeOracle.new, release: release).entries
   end
 
-  # A domain release is laid out as the system release is, under domains/<name>/, and
+  def base_boot(name = 'base') = Erx::ReleaseFiles.domain_boot(name, applications: %w[erx_files stdlib erx kernel])
+
+  # The release file a boot script of the domain release was made from.
+  def boot_release_file(name) = File.read(File.join(@scratch, "domain/boot/#{name}/start.rel"))
+
+  # The domain release is laid out as the system release is, under domains/erxos/, and
   # no file of it carries the system mark, which only the system release's files carry.
-  def test_a_domain_release_lies_under_its_prefix_without_the_system_mark
-    files = domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[erx_files stdlib erx kernel]))
+  def test_the_domain_release_lies_under_its_prefix_without_the_system_mark
+    files = domain_entries(Erx::ReleaseFiles.domain([base_boot]))
     paths = files.map { |entry| entry.fetch('path') }
-    assert_includes paths, "domains/base/lib/kernel-#{VERSION}/ebin/kernel.app"
-    assert_includes paths, "domains/base/lib/stdlib-#{VERSION}/include/qlc.hrl"
-    assert_includes paths, 'domains/base/bin/start.boot'
-    assert(paths.all? { |path| path.start_with?('domains/base/') }, paths.join(', '))
+    assert_includes paths, "domains/erxos/lib/kernel-#{VERSION}/ebin/kernel.app"
+    assert_includes paths, "domains/erxos/lib/stdlib-#{VERSION}/include/qlc.hrl"
+    assert_includes paths, 'domains/erxos/bin/base.boot'
+    assert(paths.all? { |path| path.start_with?('domains/erxos/') }, paths.join(', '))
     assert_equal [0], files.map { |entry| entry.fetch('flags') }.uniq
     assert_equal ['system'], entries.map { |entry| entry.fetch('flags') }.uniq
   end
 
-  # The release table's session release (ProductionImage::DOMAIN_RELEASES) ships the
-  # command shell and erx_session beside what every domain boots through, and starts the
-  # shell but only loads erx_session, which the session template's -eval starts once init
-  # holds the domain's facets; a name the table does not hold ships the base alone.
-  def test_the_session_release_ships_the_shell_and_erx_session
-    paths = domain_entries(Erx::ProductionImage.domain_release('session')).map { |entry| entry.fetch('path') }
-    assert_includes paths, "domains/session/lib/erx_shell-#{VERSION}/ebin/erx_shell.app"
-    assert_includes paths, "domains/session/lib/erx_session-#{VERSION}/ebin/erx_session.app"
-    release = File.read(File.join(@scratch, 'domain/start.rel'))
-    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_session,"#{VERSION}",load\}\]\}\.\n\z/, release,
-                 'the session release only loads erx_session')
-    assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_release('erts').applications
+  # One release holds every script's applications, each file once, and a script per
+  # name; each script's release file is named after the script and lists only its own
+  # applications, so a domain boots only what its script names and init:script_id() says which.
+  def test_each_boot_script_lists_only_its_own_applications
+    session = Erx::ProductionImage.domain_boot('session')
+    paths = domain_entries(Erx::ReleaseFiles.domain([session, base_boot('erts')])).map { |entry| entry.fetch('path') }
+    assert_equal paths.uniq, paths
+    assert_equal 1, paths.count("domains/erxos/lib/kernel-#{VERSION}/ebin/kernel.app")
+    assert_includes paths, "domains/erxos/lib/erx_shell-#{VERSION}/ebin/erx_shell.app"
+    assert_equal %w[domains/erxos/bin/erts.boot domains/erxos/bin/session.boot], paths.grep(%r{/bin/})
+    erts = boot_release_file('erts')
+    assert_equal "{release,{\"erts\",\"1\"},{erts,\"#{VERSION}\"},[{kernel,\"#{VERSION}\"},{stdlib,\"#{VERSION}\"}," \
+                 "{erx,\"#{VERSION}\"},{erx_files,\"#{VERSION}\"}]}.\n", erts
+    assert_includes boot_release_file('session'), "{erx_shell,\"#{VERSION}\"}"
   end
 
-  # Its release file carries the domain's name and its applications alone, in the
+  # The boot table's session script (ProductionImage::DOMAIN_BOOTS) boots the command
+  # shell and erx_session beside what every domain boots through, and starts the shell
+  # but only loads erx_session, which the session template's -eval starts once init
+  # holds the domain's facets; a name the table does not hold boots the base alone.
+  def test_the_session_script_boots_the_shell_and_erx_session
+    domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('session')]))
+    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_session,"#{VERSION}",load\}\]\}\.\n\z/, boot_release_file('session'),
+                 'the session script only loads erx_session')
+    assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_boot('erts').applications
+  end
+  # A script's release file names the script and its applications alone, in the
+  # A script's release file names the release and its applications alone, in the
   # system release's order whatever order they were asked in.
-  def test_a_domain_release_file_names_the_domain_and_only_its_applications
-    domain_entries(Erx::ReleaseFiles.domain('base', applications: %w[erx_files stdlib erx kernel]))
-    release = File.read(File.join(@scratch, 'domain/start.rel'))
-    assert_equal "{release,{\"base\",\"1\"},{erts,\"#{VERSION}\"},[{kernel,\"#{VERSION}\"},{stdlib,\"#{VERSION}\"},{erx,\"#{VERSION}\"},{erx_files,\"#{VERSION}\"}]}.\n", release
+  def test_a_boot_script_takes_the_system_release_order
+    domain_entries(Erx::ReleaseFiles.domain([base_boot]))
+    assert_equal "{release,{\"base\",\"1\"},{erts,\"#{VERSION}\"},[{kernel,\"#{VERSION}\"},{stdlib,\"#{VERSION}\"},{erx,\"#{VERSION}\"},{erx_files,\"#{VERSION}\"}]}.\n",
+                 boot_release_file('base')
   end
 
-  def test_a_domain_release_name_is_one_manifest_identifier
+  def test_a_boot_script_name_is_one_manifest_identifier
     ['', 'Base', '../x', 'a/b', 'a.b', '.hidden', 'x' * 64, :base].each do |name|
-      assert_raises(Erx::Error, name.inspect) { Erx::ReleaseFiles.domain(name, applications: Erx::ReleaseFiles::DOMAIN_BASE) }
+      assert_raises(Erx::Error, name.inspect) { Erx::ReleaseFiles.domain_boot(name, applications: Erx::ReleaseFiles::DOMAIN_BASE) }
     end
-    assert_equal 'domains/a-b_c1/', Erx::ReleaseFiles.domain('a-b_c1', applications: Erx::ReleaseFiles::DOMAIN_BASE).prefix
+    assert_equal 'a-b_c1', Erx::ReleaseFiles.domain_boot('a-b_c1', applications: Erx::ReleaseFiles::DOMAIN_BASE).name
   end
 
-  def test_a_domain_release_boots_through_kernel_and_stdlib_and_ships_only_what_is_built
-    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: %w[kernel]) }
+  def test_a_boot_script_boots_through_kernel_and_stdlib_and_only_what_is_built
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_boot('base', applications: %w[kernel]) }
     assert_includes error.message, 'stdlib'
-    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain('base', applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'mnesia']) }
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_boot('base', applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'mnesia']) }
     assert_includes error.message, 'mnesia'
   end
 
-  # In an archive's sorted index each domain release is one run of whole entries,
-  # between boot/'s files and the system release, which it does not split.
-  def test_each_domain_release_is_one_run_of_the_sorted_index
-    paths = ['boot/kernel', 'boot/sigma0', 'domains/a/bin/start.boot', 'domains/a/lib/x', 'domains/b/bin/start.boot',
+  # The release takes only scripts domain_boot made, at least one, each name once.
+  def test_the_domain_release_takes_distinct_scripts_domain_boot_made
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain([]) }
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain([base_boot, base_boot]) }
+    forged = Erx::ReleaseFiles::DomainBoot.new(name: '../x', applications: Erx::ReleaseFiles::DOMAIN_BASE)
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain([forged]) }
+  end
+
+  # In an archive's sorted index the domain release is one run of whole entries,
+  # between boot/'s files and the system release, which it does not split, and each of
+  # its boot scripts names that run.
+  def test_each_boot_script_names_the_domain_release_run
+    paths = ['boot/kernel', 'boot/sigma0', 'domains/erxos/bin/a.boot', 'domains/erxos/bin/b.boot', 'domains/erxos/lib/x',
              'runtimes/emu', 'system/bin/start.boot', 'system/root']
-    assert_equal({ 'a' => { 'kind' => 'release', 'entry' => 2, 'files' => 2 },
-                   'b' => { 'kind' => 'release', 'entry' => 4, 'files' => 1 } }, Erx::ReleaseFiles.domain_runs(paths))
+    run = { 'kind' => 'release', 'entry' => 2, 'files' => 3 }
+    assert_equal({ 'a' => run, 'b' => run }, Erx::ReleaseFiles.domain_runs(paths))
     assert_empty Erx::ReleaseFiles.domain_runs(['boot/kernel', 'system/root'])
   end
 
-  def test_a_domain_run_out_of_order_or_without_a_directory_is_refused
-    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a/y', 'domains/a/x']) }
-    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a/x', 'domains/a/x']) }
-    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a', 'system/root']) }
-    assert_includes error.message, 'not a release directory'
+  # A release out of order, a file under domains/ outside it, or a release with no boot
+  # script, whose files no row could name, is refused.
+  def test_a_domain_run_out_of_order_or_outside_the_release_is_refused
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/erxos/y', 'domains/erxos/x']) }
+    assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/erxos/x', 'domains/erxos/x']) }
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/a/bin/a.boot', 'system/root']) }
+    assert_includes error.message, 'not in the domain release'
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_runs(['domains/erxos/lib/x', 'system/root']) }
+    assert_includes error.message, 'no boot script'
   end
 
   def test_the_hosted_tree_ships_headers_from_the_tree_and_no_appup

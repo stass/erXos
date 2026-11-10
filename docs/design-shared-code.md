@@ -24,8 +24,8 @@ Decisions every reader needs:
   read-only at the same addresses. Nothing is relocated, so every page of
   it stays shared.
 * **The image holds the preloaded modules and the applications every
-  domain release ships**: `kernel`, `stdlib`, `erx` and `erx_files`
-  (`ReleaseFiles::DOMAIN_BASE`, `tools/lib/erx/release_files.rb:68`).
+  domain boots**: `kernel`, `stdlib`, `erx` and `erx_files`
+  (`ReleaseFiles::DOMAIN_BASE`, `tools/lib/erx/release_files.rb:75`).
   A module whose literals name an identity or hold a reference-counted
   binary, or that has an `on_load` function, is left out and loads
   privately.
@@ -414,9 +414,9 @@ the file check at its first slice verify it
 `shared_code_image`, true or false; with false the build packs no image,
 and every domain loads its code privately. The image holds the preloaded
 modules and every module of `DOMAIN_BASE`, in a fixed order, minus the
-exclusions below. Every domain release ships `DOMAIN_BASE`
-(`release_files.rb:68-83`), so there is no per-release choice of what is
-shared.
+exclusions below. Every boot script of the domain release boots
+`DOMAIN_BASE` (`release_files.rb:75-94`), so there is no per-script choice
+of what is shared.
 
 **The build run.** The build boots a build-only image under QEMU on the
 build host, with TCG in deterministic mode (`erx.det=1`) and QEMU's

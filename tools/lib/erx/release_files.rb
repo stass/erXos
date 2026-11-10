@@ -19,8 +19,11 @@ module Erx
   # headers ship so that code compiled on erXos finds them through include_lib, as on
   # stock. The hosted archive (Release) and the native one (ProductionImage) both take
   # their files from here, each from its own build of the applications, and
-  # `+deterministic` makes those builds the same bytes. A domain release (domain) is laid
-  # out the same way under its own prefix, from the same builds, without the system mark.
+  # `+deterministic` makes those builds the same bytes. The one domain release (domain)
+  # is laid out the same way under domains/erxos/, from the same builds, without the
+  # system mark: each file of the applications its boot scripts name, once, and a boot
+  # script bin/<name>.boot for each name (domain_boot), whose release file lists only
+  # that script's applications.
   class ReleaseFiles
     # In the release file's order, each after the applications it depends on.
     APPLICATIONS = [*Runtime::APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
@@ -38,7 +41,7 @@ module Erx
     # it ends the stack, never the system domain.
     TEMPORARY = %w[erx_net].freeze
     # A domain's own applications: the system release ships them, so that a domain
-    # release can take them, and every release only loads them, so that none runs in the
+    # boot script can take them, and every release only loads them, so that none runs in the
     # system domain and none starts before its domain's facets: the session template's
     # arguments start erx_session with -eval, which runs once init has them
     # (docs/design-runtime.md, edit 65).
@@ -53,55 +56,81 @@ module Erx
     # A file of the release: its path in the archive, the built file and what it came from.
     ReleaseFile = Data.define(:path, :artifact, :sources)
 
-    # Which release the files are: its name in its release file, the prefix its paths
-    # take in the archive, its applications in the release file's order, and whether its
+    # Which release the files are: its name in its release files, the prefix its paths
+    # take in the archive, its applications in the release file's order, whether its
     # files carry the system mark, which only the system release's do
-    # (docs/design-kernel.md, "The boot image").
-    Release = Data.define(:name, :prefix, :applications, :system)
-    SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: APPLICATIONS, system: true)
-    # Where every domain release lies: domains/<name>/, which sorts after boot/ and
-    # before system/, so a domain release is one run of whole entries that splits
-    # neither the system run nor another domain's (docs/design-stopgap.md, "The
-    # production image").
+    # (docs/design-kernel.md, "The boot image"), and its boot scripts: for each name,
+    # bin/<name>.boot, whose release file names the applications given, in that order.
+    Release = Data.define(:name, :prefix, :applications, :system, :boots)
+    SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: APPLICATIONS, system: true,
+                         boots: { 'start' => APPLICATIONS }.freeze)
+    # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
+    # before system/, so it is one run of whole entries that does not split the system
+    # run (docs/design-stopgap.md, "The production image").
     DOMAINS_PREFIX = 'domains/'
-    # What every domain release ships: kernel and stdlib, which a release boots through,
-    # and erx and erx_files, whose processes erXos's kernel_sup and kernel_safe_sup start
-    # in every domain (its watchdog's child, its namespace table, /tmp and /proc).
+    DOMAIN_PREFIX = "#{DOMAINS_PREFIX}#{NAME}/".freeze
+    # What every domain boots: kernel and stdlib, which a release boots through, and erx
+    # and erx_files, whose processes erXos's kernel_sup and kernel_safe_sup start in every
+    # domain (its watchdog's child, its namespace table, /tmp and /proc).
     DOMAIN_BASE = %w[kernel stdlib erx erx_files].freeze
 
-    # A domain release named name, of applications, which the system release ships too,
-    # DOMAIN_BASE among them, since a release boots through it. A name is a
-    # manifest identifier, so a domain row's @artifact.NAME names the release, and it is
-    # one path component. It ships DOMAIN_BASE at the least.
-    def self.domain(name, applications:)
-      raise Error, "a domain release's name is an identifier, not #{name.inspect}" unless
+    # One boot script of the domain release: its name, which a domain row's
+    # `release @artifact.NAME` names, and the applications it boots.
+    DomainBoot = Data.define(:name, :applications)
+
+    # The boot script named name, of applications, which the system release ships too,
+    # DOMAIN_BASE among them, since a release boots through it. A name is a manifest
+    # identifier, so a domain row's @artifact.NAME names the script, and it is one path
+    # component.
+    def self.domain_boot(name, applications:)
+      raise Error, "a domain boot script's name is an identifier, not #{name.inspect}" unless
         name.is_a?(String) && name.match?(Manifest::Frontend::IDENTIFIER) && !name.include?('/')
       unknown = applications - APPLICATIONS
-      raise Error, "a domain release ships only applications the runtime builds, not #{unknown.join(', ')}" unless unknown.empty?
+      raise Error, "a domain boot script boots only applications the runtime builds, not #{unknown.join(', ')}" unless unknown.empty?
       missing = DOMAIN_BASE - applications
-      raise Error, "a domain release ships what every domain's kernel starts: #{missing.join(', ')}" unless missing.empty?
+      raise Error, "a domain boot script boots what every domain's kernel starts: #{missing.join(', ')}" unless missing.empty?
 
-      Release.new(name: name, prefix: "#{DOMAINS_PREFIX}#{name}/", applications: APPLICATIONS & applications, system: false)
+      DomainBoot.new(name: name, applications: (APPLICATIONS & applications).freeze)
     end
 
-    # Each domain release in an archive's sorted paths, as the manifest's artifact a
-    # domain row's release names: the index of its first entry and its count of files.
-    # The paths ascend strictly, so each prefix is one run; a list out of order is
-    # refused, and so is a file directly under domains/, which no release holds.
+    # The one domain release: each file of boots' applications once, and a boot script
+    # for each of boots, so a domain boots only its own script's applications while the
+    # archive stores what the scripts share once. Each of boots is one domain_boot made,
+    # and two of one name are refused.
+    def self.domain(boots)
+      raise Error, 'a domain release has a boot script' if boots.empty?
+      raise Error, 'a domain boot script is one ReleaseFiles.domain_boot made' unless
+        boots.all? { |boot| boot.is_a?(DomainBoot) && boot == domain_boot(boot.name, applications: boot.applications) }
+      raise Error, 'two domain boot scripts share a name' unless boots.map(&:name).uniq.size == boots.size
+
+      Release.new(name: NAME, prefix: DOMAIN_PREFIX, applications: (APPLICATIONS & boots.flat_map(&:applications)).freeze,
+                  system: false, boots: boots.sort_by(&:name).to_h { |boot| [boot.name, boot.applications] }.freeze)
+    end
+
+    # What a domain row's release names in an archive's sorted paths: each boot script
+    # of the domain release, domains/erxos/bin/<name>.boot, as artifact <name>, which is
+    # the release's whole run of entries (the index of its first entry and its count of
+    # files), so every name gives the one slice and a row's name picks only its script.
+    # The paths ascend strictly, so the release is one run; a list out of order is
+    # refused, and so is a file under domains/ outside the release or a release with no
+    # boot script.
     def self.domain_runs(paths)
       raise Error, 'archive paths must ascend strictly' unless paths.each_cons(2).all? { |left, right| left.b < right.b }
 
-      named = paths.each_with_index.filter_map do |path, index|
-        [path.b[%r{\A#{DOMAINS_PREFIX}([^/]+)/}o, 1], index] if path.b.start_with?(DOMAINS_PREFIX)
-      end
-      named.group_by(&:first).to_h do |name, members|
-        raise Error, "#{DOMAINS_PREFIX}#{name} is not a release directory" if name.nil?
+      run = paths.each_index.select { |index| paths[index].b.start_with?(DOMAINS_PREFIX) }
+      stray = run.map { |index| paths[index] }.find { |path| !path.b.start_with?(DOMAIN_PREFIX) }
+      raise Error, "#{stray} is not in the domain release" if stray
+      return {}.freeze if run.empty?
 
-        [name, { 'kind' => 'release', 'entry' => members.first.last, 'files' => members.size }.freeze]
-      end.freeze
+      slice = { 'kind' => 'release', 'entry' => run.first, 'files' => run.size }.freeze
+      names = run.filter_map { |index| paths[index].b[%r{\A#{DOMAIN_PREFIX}bin/([^/]+)\.boot\z}o, 1] }
+      raise Error, 'the domain release has no boot script' if names.empty?
+
+      names.to_h { |name| [name, slice] }.freeze
     end
 
-    # otp is the built OTP copy; directory is where start.boot and the receipts go;
+    # otp is the built OTP copy; directory is where each boot script, under
+    # boot/<name>/, and the receipts go;
     # release is which release they are, the system release unless a domain's is asked.
     def initialize(root:, otp:, directory:, runner:, codec:, oracle: Oracle.new(root: root, runner: runner), release: SYSTEM)
       raise Error, 'a release is a ReleaseFiles::Release' unless release.is_a?(Release)
@@ -118,7 +147,7 @@ module Erx
     # Each file as an entry for Pack#build, with its receipt written.
     def entries
       FileUtils.mkdir_p(@directory)
-      [*application_files, boot_file].map { |file| file_entry(file) }
+      [*application_files, *boot_files].map { |file| file_entry(file) }
     end
 
     # The files a pack's build inputs must name for these entries: each built file and its
@@ -239,19 +268,24 @@ module Erx
 
     def erts_version = self.class.erts_version(@otp)
 
-    # The system's boot script: its release file names every application, and the stock
-    # host build's systools writes the script from it (ReleaseFiles.make_boot_script).
-    def boot_file
-      applications = @release.applications.map { |application| release_entry(application) }.join(',')
-      paths = @release.applications.map { |application| File.join(@otp, 'lib', application, 'ebin') }
-      boot = self.class.make_boot_script(
-        erl: @oracle.erl_path(Runtime::HOST_OTP_FLAVOUR), directory: @directory, runner: @runner, paths: paths,
-        release: "{release,{\"#{@release.name}\",\"1\"},{erts,\"#{erts_version}\"},[#{applications}]}.\n"
-      )
-      sources = @release.applications.map do |application|
-        File.join(@root, self.class.source_directory(application), 'src', "#{application}.app.src")
+    # The release's boot scripts, bin/<name>.boot each: a script's release file names
+    # its own applications, and the stock host build's systools writes the script from
+    # it (ReleaseFiles.make_boot_script), each in a directory of its own. A domain
+    # script's release is named after the script, so init:script_id() in a domain names
+    # the script it booted; the system release's one script keeps the release's name.
+    def boot_files
+      @release.boots.map do |name, applications|
+        directory = File.join(@directory, 'boot', name)
+        FileUtils.mkdir_p(directory)
+        boot = self.class.make_boot_script(
+          erl: @oracle.erl_path(Runtime::HOST_OTP_FLAVOUR), directory: directory, runner: @runner,
+          paths: applications.map { |application| File.join(@otp, 'lib', application, 'ebin') },
+          release: "{release,{\"#{@release.system ? @release.name : name}\",\"1\"},{erts,\"#{erts_version}\"}," \
+                   "[#{applications.map { |application| release_entry(application) }.join(',')}]}.\n"
+        )
+        sources = applications.map { |application| File.join(@root, self.class.source_directory(application), 'src', "#{application}.app.src") }
+        ReleaseFile.new(path: "#{@release.prefix}bin/#{name}.boot", artifact: boot, sources: sources)
       end
-      ReleaseFile.new(path: "#{@release.prefix}bin/start.boot", artifact: boot, sources: sources)
     end
 
     # An application's term in the release file: its name and version, and the start

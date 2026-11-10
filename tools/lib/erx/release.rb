@@ -104,21 +104,20 @@ module Erx
         'id' => 'root', 'artifact' => root_task.fetch('artifact'), 'receipt' => root_task.fetch('receipt') }
     end
 
-    # The domain releases the manifest's session and domain rows name, each under
-    # domains/ as the production image carries it, and in the domain runtime's place
-    # (ProductionImage::DOMAIN_RUNTIME_PATH) the root again, so that the manifest's
-    # references resolve here as they do natively. Neither runs: hosted, erx_domain_lib
-    # does not load, so the domain service makes no domain and starts no session.
+    # The domain release, with a boot script for each name the manifest's session and
+    # domain rows give their release, under domains/ as the production image carries it,
+    # and in the domain runtime's place (ProductionImage::DOMAIN_RUNTIME_PATH) the root
+    # again, so that the manifest's references resolve here as they do natively. Neither
+    # runs: hosted, erx_domain_lib does not load, so the domain service makes no domain
+    # and starts no session.
     def domain_entries(manifest_source, root_task)
-      releases = Manifest.release_names(source: manifest_source, codec: @codec).map { |name| ProductionImage.domain_release(name) }
-      return [] if releases.empty?
+      boots = Manifest.release_names(source: manifest_source, codec: @codec).map { |name| ProductionImage.domain_boot(name) }
+      return [] if boots.empty?
 
       runtime = { 'path' => ProductionImage::DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
                   'id' => 'domain-runtime', 'artifact' => root_task.fetch('artifact'), 'receipt' => root_task.fetch('receipt') }
-      [runtime, *releases.flat_map do |release|
-        ReleaseFiles.new(root: @root, otp: @otp, directory: File.join(@directory, 'domains', release.name), runner: @runner,
-                         codec: @codec, oracle: @oracle, release: release).entries
-      end]
+      [runtime, *ReleaseFiles.new(root: @root, otp: @otp, directory: File.join(@directory, 'domains'), runner: @runner,
+                                  codec: @codec, oracle: @oracle, release: ReleaseFiles.domain(boots)).entries]
     end
 
     # The archive's sorted paths, which take in the two files the pack adds, and by

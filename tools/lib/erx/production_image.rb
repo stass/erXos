@@ -88,22 +88,23 @@ module Erx
     NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
     private_constant :NOTHING_ADDED
 
-    # The domain releases an image carries are those its manifest's domain rows name
-    # (domain_releases), and with any of them the one runtime image every domain runs.
-    # The build's release table defines a domain release's applications under its name
-    # (docs/design-stopgap.md, "The production image"); the manifest only names the
-    # release, so two rows naming one release cannot disagree on what it holds. The
-    # session release, which a principal's session domain boots, adds the command shell
-    # and erx_session (docs/design-domains.md, "Principals, sessions and quotas"); a
-    # name the table does not hold takes DOMAIN_APPLICATIONS, the applications every
-    # domain boots through. The development manifest configures no domains, so the
-    # production image carries neither; medium_boot's manifest configures one
-    # (MediumBoot.manifest), and a test image may carry some (build_test_image's domains).
+    # An image carries one domain release (ReleaseFiles.domain) with a boot script for
+    # each name its manifest's domain rows and session templates give as their release
+    # (domain_boots), and with it the one runtime image every domain runs. The build's
+    # boot table defines a script's applications under its name (docs/design-stopgap.md,
+    # "The production image"); the manifest only names the script, so two rows naming
+    # one cannot disagree on what it boots. The session script, which a principal's
+    # session domain boots, adds the command shell and erx_session
+    # (docs/design-domains.md, "Principals, sessions and quotas"); a name the table does
+    # not hold boots DOMAIN_APPLICATIONS, the applications every domain boots through.
+    # The development manifest's session template names the session script;
+    # medium_boot's manifest configures a domain (MediumBoot.manifest), and a test image
+    # may carry more scripts (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
-    DOMAIN_RELEASES = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze }.freeze
+    DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze }.freeze
 
-    # The domain release named name, with the applications the release table gives it.
-    def self.domain_release(name) = ReleaseFiles.domain(name, applications: DOMAIN_RELEASES.fetch(name, DOMAIN_APPLICATIONS))
+    # The domain boot script named name, with the applications the boot table gives it.
+    def self.domain_boot(name) = ReleaseFiles.domain_boot(name, applications: DOMAIN_BOOTS.fetch(name, DOMAIN_APPLICATIONS))
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
     # artifact name a domain row's runtime takes. It sorts after domains/ and before
@@ -209,7 +210,7 @@ module Erx
     # and nothing else.
     def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
       assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
-               machine: DEVELOPMENT_MACHINE, domains: domain_releases(manifest_source))
+               machine: DEVELOPMENT_MACHINE, domains: domain_boots(manifest_source))
     end
 
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
@@ -218,7 +219,7 @@ module Erx
     # domain row names the release and runtime image the image then carries.
     def build_medium(directory:, machine: DEVELOPMENT_MACHINE, manifest_source: File.binread(File.join(@root, MANIFEST)))
       built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
-                       machine: machine, domains: domain_releases(manifest_source))
+                       machine: machine, domains: domain_boots(manifest_source))
       [built, ReleaseMedium.write(built: built, directory: built_directory(built))]
     end
 
@@ -226,14 +227,15 @@ module Erx
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
     # test code, OracleQemu and BlockDevice, call it, which the source check holds
-    # (Checks::TEST_IMAGE_BUILDERS). domains are the domain releases it carries
-    # (ReleaseFiles.domain), each under domains/<name>/, with the domain runtime image.
+    # (Checks::TEST_IMAGE_BUILDERS). domains are the domain boot scripts it carries
+    # (ReleaseFiles.domain_boot) beside the manifest's, in the one domain release, with
+    # the domain runtime image.
     def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE, domains: [])
       raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
 
       source = machine.manifest(File.binread(File.join(@root, MANIFEST)))
-      # The manifest's own releases, beside those added.
-      carried = (domain_releases(source) + domains).uniq(&:name)
+      # The manifest's own scripts, beside those added.
+      carried = (domain_boots(source) + domains).uniq(&:name)
       assemble(directory: directory, manifest_source: source, added: added, test_code: true, machine: machine,
                domains: carried)
     end
@@ -1164,31 +1166,28 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    # The domain releases a manifest's domain rows name. Only their release references
-    # are read here, so the image can carry what they name; the manifest check proves
-    # the rows, each reference included, when Pack#build admits the manifest.
-    def domain_releases(manifest_source)
-      Manifest.release_names(source: manifest_source, codec: @codec).map { |name| self.class.domain_release(name) }
+    # The domain boot scripts a manifest's domain rows and session templates name. Only
+    # their release references are read here, so the image can carry what they name; the
+    # manifest check proves the rows, each reference included, when Pack#build admits
+    # the manifest.
+    def domain_boots(manifest_source)
+      Manifest.release_names(source: manifest_source, codec: @codec).map { |name| self.class.domain_boot(name) }
     end
 
-    # The domain releases' entries, each file under its release's prefix without the
-    # system mark, and the two runtime images', the interpreter's and the BeamAsm one
-    # (jit, NativeJitRuntime's build), with the files their receipts name; nothing when
-    # there are no domain releases.
-    def domain_parts(domains, erts:, jit:, archives:, directory:)
-      return NOTHING_ADDED if domains.empty?
-      # Only ReleaseFiles.domain checks a name, so a release built any other way, whose
-      # name could leave the work directory or disagree with its prefix, is refused.
-      raise Error, 'a domain release is one ReleaseFiles.domain made' unless
-        domains.all? { |release| release.is_a?(ReleaseFiles::Release) && release == ReleaseFiles.domain(release.name, applications: release.applications) }
-      raise Error, 'two domain releases share a name' unless domains.map(&:name).uniq.size == domains.size
+    # The domain release's entries, each file once under domains/erxos/ without the
+    # system mark, with a boot script for each of boots, and the two runtime images', the
+    # interpreter's and the BeamAsm one (jit, NativeJitRuntime's build), with the files
+    # their receipts name; nothing when there are no boot scripts. ReleaseFiles.domain
+    # refuses a script it did not make, whose name could leave the work directory, and
+    # two scripts of one name.
+    def domain_parts(boots, erts:, jit:, archives:, directory:)
+      return NOTHING_ADDED if boots.empty?
 
+      release = ReleaseFiles.domain(boots)
       runtime = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
                           .build_domain_runtime_receipted(directory: File.join(directory, 'domain-runtime'), archives: archives)
-      releases = domains.flat_map do |release|
-        ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains', release.name), runner: @runner,
-                         codec: @codec, release: release).entries
-      end
+      releases = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains'), runner: @runner,
+                                  codec: @codec, release: release).entries
       beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
                                                        archives: jit.link_archives(libgcc: @fiasco.user_library('libgcc.a')))
@@ -1203,7 +1202,7 @@ module Erx
 
     # What a manifest's references name in an archive of these sorted paths: the root
     # and the two domain runtime images as executables, images as built EROFS artifacts, and
-    # each domain release as its run of entries (ReleaseFiles.domain_runs). Two of them
+    # each domain boot script as the release's run of entries (ReleaseFiles.domain_runs). Two
     # under one name would leave a reference ambiguous, so that is refused.
     def self.artifacts(paths, images:)
       named = [{ 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } }, images,

@@ -85,7 +85,7 @@ class ManifestDomainsTest < Minitest::Test
     domains = rows(view, 'domains')
     assert_equal %w[beta gamma], domains.map { |row| view.string(row.fetch('name')) }
     emu = @context.artifacts.fetch('emu').fetch('entry')
-    assert_equal [[emu, 0, 2]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
+    assert_equal [[emu, 0, 3]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
     assert_equal [@codec.member('mf_domain_flags', 'rescue'), 0], domains.map { |row| row.fetch('flags') }
     assert_equal [[3, 5]] * 2, domains.map { |row| row.values_at('restarts', 'restart_period_s') }
     assert_equal [0, 1], rows(view, 'boot_order').map { |row| row.fetch('domain') }
@@ -233,6 +233,33 @@ class ManifestDomainsTest < Minitest::Test
   def test_arguments_and_environment_over_the_boot_page_are_refused
     long = "  args \"#{'a' * 1500}\"\n  env \"X=#{'b' * 1500}\"\n"
     refused(Erx::Manifest::Invalid, 12, 'domain.args', with_domains(self.class.domain('alpha') + long))
+  end
+
+  # A row's release names a boot script of the domain release, and the packer binds it:
+  # the packed arguments are the row's emulator flags, then -- -boot /bin/<name> --,
+  # then the row's init arguments, so the binding is init's first flag and no later word
+  # (-extra, a final -S) can make it a plain argument. A row whose own arguments name
+  # -boot is refused, so no row boots a script its release does not name.
+  def test_a_domain_boots_the_script_its_release_names
+    { '-x y' => "-x\0y\0--\0-boot\0/bin/app\0--\0",
+      '-x -- -nouser -extra a' => "-x\0--\0-boot\0/bin/app\0--\0-nouser\0-extra\0a\0" }.each do |args, packed|
+      view = @codec.open('manifest', admit(with_domains(self.class.domain('alpha') + "  args \"#{args}\"\n")).bytes)
+      assert_equal packed, view.string(rows(view, 'domains').fetch(0).fetch('args'))
+    end
+  end
+
+  def test_a_domain_naming_boot_is_refused
+    ['-boot /bin/session', '-x -boot /bin/app'].each do |args|
+      refused(Erx::Manifest::Invalid, 12, 'domain.args', with_domains(self.class.domain('alpha') + "  args \"#{args}\"\n"),
+              message: /-boot/)
+    end
+  end
+
+  def test_a_session_template_boots_the_script_its_release_names
+    view = @codec.open('manifest', admit(with_session(self.class.session)).bytes)
+    assert_equal "-x\0y\0--\0-boot\0/bin/app\0--\0", view.string(rows(view, 'sessions').fetch(0).fetch('args'))
+    refused(Erx::Manifest::Invalid, 14, 'session.args', with_session(self.class.session.sub('-x y', '-boot /bin/app')),
+            message: /-boot/)
   end
 
   # Property 7: no secret domain, since no entry carries the sealing secret.

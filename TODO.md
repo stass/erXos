@@ -1430,6 +1430,16 @@ it; git history is the record of completed work.
   `runtimes/emu` and, under `erx.det=1`, forces `runtimes/emu` for every domain, configured rows
   included, whatever it names (design-runtime.md, "BeamAsm"), once the boot's mode reaches the
   system domain. Until then a create names the BeamAsm image by its index and gets it in any boot mode.
+  The release name replaces the stopgap's `boot` field too: once the library takes the
+  release by name it binds `-boot` itself, and the two bindings in the manifest's packer
+  (`Erx::Manifest#boot_args`) and the service (`boot_args/2`) go, with the gap
+  design-domains.md records for system-domain code that calls `erx_domain_lib:create/1`
+  directly and names its own `-boot`.
+* [Low] domain library, `liberx/backend/core/boot_info.c` (`erx_boot_argv_fill`): the node
+  flag (`-sname` or `-name` and the domain's node name) follows the boot page's args, so args
+  that end in `-extra`, or in a `-S` with no later `--`, make it a plain argument and the
+  domain boots without its node name. Place it right after the args' first `--`, as the
+  packer and the domain service place `-boot`.
 * [Medium] lane driver's finish, `otp/erts/emulator/sys/erxos/erx_lane_drv.c` and the
   system_domain QEMU suite: the finish's decisions are tested on the host
   (`test/host/erx_lane_core_test.rb`, with the cut record, the full answers bound and their
@@ -1571,8 +1581,8 @@ it; git history is the record of completed work.
   design-system.md do not, and property 12 enforces the library's reading.
 * [Medium] packer, `tools/lib/erx/production_image.rb` (`build_test_image`): a test
   image's `domains:` is checked against no manifest row, since the test manifest is the
-  development one grown. Build test images' domain releases from their manifest's rows,
-  as the production image does.
+  development one grown. Build test images' domain boot scripts from their manifest's
+  rows, as the production image does.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_and_place`):
   facet records are refused (`unsupported`, naming M5) after properties 2, 10 and 11
   are proved over them, because a facet's operations and parameters resolve against its

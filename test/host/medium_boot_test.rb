@@ -120,8 +120,8 @@ class MediumBootTest < Minitest::Test
   end
 
   # The footprint cell's manifest has room for its three domains and sets the system domain's
-  # /tmp cap; its expression creates one domain per step, the last with a tmp cap, and says
-  # what it measures.
+  # /tmp cap; its expression creates one domain per step, booting the step's script, the
+  # last with a tmp cap, and says what it measures.
   def test_the_footprint_cell_has_room_for_its_domains_and_one_step_each
     plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
     cell = Boot::Footprint
@@ -139,8 +139,8 @@ class MediumBootTest < Minitest::Test
     assert_raises(Erx::Error) { cell.manifest(without_tmp, system_tmp: 0) }
     runs = cell::RELEASES.keys.to_h { |name| [name, { 'entry' => name.size, 'files' => 7 }] }
     expression = cell.expression(runs: runs, runtime: 41)
-    assert_equal cell::STEPS.size, expression.scan(/\{<<"[a-z0-9-]+">>,[0-9]+,7,[0-9]+\}/).size
-    assert_match(/<<"bare-tmp4">>,4,7,4194304\}/, expression)
+    assert_equal cell::STEPS.size, expression.scan(/\{<<"[a-z0-9-]+">>,<<"[a-z]+">>,[0-9]+,7,[0-9]+\}/).size
+    assert_match(/<<"bare-tmp4">>,<<"bare">>,4,7,4194304\}/, expression)
     assert_match(/\.\z/, expression)
   end
 
@@ -165,7 +165,8 @@ class MediumBootTest < Minitest::Test
     up = expression[/\},(\#\{args=><<[^>]*>>\})\)\]\)\.\z/, 1]
     assert_includes up, '"-proto_dist",0,"erx",0>>'
     refute_includes up, '-eval'
-    assert_match(/args=><<"--",0,"-root",0,.*"-eval",0,"erlang:halt\(length\(.*init:get_argument\(sname\){7}",0>>,env=><<>>/, expression)
+    assert_match(/args=><<"--",0,"-root",0,.*"-eval",0,"erlang:halt\(length\(.*init:get_argument\(sname\){6}\+100-lists:sum\(\[100\|\|\{S,_\}<-\[init:script_id\(\)\],S=:=atom_to_list\(erts\)\]\)\)",0>>,env=><<>>/,
+                 expression)
     refute_match(/[^\x20-\x7e]/, expression)
     merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],
                               Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN)

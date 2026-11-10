@@ -920,7 +920,8 @@ module Erx
           invalid('a configured domain\'s name has a pooled name\'s form', 5, 'domain.name') if pooled&.[](:stem)&.match?(Frontend::IDENTIFIER)
           invalid('a configured domain shares a principal\'s name', 5, 'domain.name') if principals.include?(record.name)
           invalid('the system domain\'s name is not a configured domain\'s', 5, 'domain.name') if record.name == 'system'
-          strings = words(record, 'args').bytesize + words(record, 'env').bytesize
+          args = boot_args(record, property: 12, field: 'domain.args')
+          strings = args.bytesize + words(record, 'env').bytesize
           invalid('arguments and environment exceed the boot page\'s strings', 12, 'domain.args') if
             strings > @codec.constant('boot_strings_max')
           kind = enum(record, 'kind', 'mf_kind')
@@ -931,8 +932,8 @@ module Erx
             'flags' => flags(record, 'flags', 'mf_domain_flags'), 'runtime' => runtime.fetch('entry'),
             'release' => release.fetch('entry'), 'release_files' => release.fetch('files'),
             'limits' => reference(record, 'limits', 'limits'), 'restarts' => number(record, 'restarts'),
-            'restart_period_s' => number(record, 'restart_period_s'), 'args' => words(record, 'args'),
-            'env' => words(record, 'env') }
+            'restart_period_s' => number(record, 'restart_period_s'),
+            'args' => args, 'env' => words(record, 'env') }
         end
       end
 
@@ -954,14 +955,39 @@ module Erx
           limits = reference(record, 'limits', 'limits')
           invalid('a session template\'s limits do not enable SPACES', 14, 'session.limits') if
             (rows.fetch('limits').fetch(limits).fetch('flags') & spaces).zero?
+          args = boot_args(record, property: 14, field: 'session.args')
           invalid('arguments and environment exceed the boot page\'s strings', 14, 'session.args') if
-            words(record, 'args').bytesize + words(record, 'env').bytesize > @codec.constant('boot_strings_max')
+            args.bytesize + words(record, 'env').bytesize > @codec.constant('boot_strings_max')
           runtime = artifact(record, 'runtime', 'executable', property: 14, field: 'session.runtime')
           release = artifact(record, 'release', 'release', property: 14, field: 'session.release')
           { 'principal' => principal, 'limits' => limits, 'runtime' => runtime.fetch('entry'),
             'release' => release.fetch('entry'), 'release_files' => release.fetch('files'),
-            'args' => words(record, 'args'), 'env' => words(record, 'env') }
+            'args' => args, 'env' => words(record, 'env') }
         end.sort_by { |row| row.fetch('principal') }
+      end
+
+      # A domain row's or session template's arguments as its boot page holds them: its
+      # emulator flags (the words before the first --), then -- -boot /bin/<name> --,
+      # then its init arguments (the words after that --). /bin/<name> is the boot
+      # script of the domain release that its `release @artifact.<name>` names
+      # (docs/design-stopgap.md, "The production image"). The binding is init's first
+      # flag and the second -- closes its value, so no later word (-extra, a final -S)
+      # can make it a plain argument and leave init to its default script. Its own
+      # arguments naming -boot are refused, since its release names the script.
+      # erx_domain_srv:boot_args/2 binds a created domain's the same way.
+      def boot_args(record, property:, field:)
+        args = words(record, 'args').split("\0")
+        invalid('the arguments name -boot, which the release sets', property, field) if args.include?('-boot')
+        name = release_name(record, property: property, field: field.sub('args', 'release'))
+        emulator, init = args.index('--').then { |at| at ? [args[0...at], args[at + 1..]] : [args, []] }
+        [*emulator, '--', '-boot', "/bin/#{name}", '--', *init].map { |word| "#{word}\0" }.join.b
+      end
+
+      # The <name> of a record's `release @artifact.<name>`, once artifact has checked that
+      # it names a release.
+      def release_name(record, property:, field:)
+        artifact(record, 'release', 'release', property: property, field: field)
+        one(record, 'release').value.delete_prefix('@artifact.')
       end
 
       # The artifact a record's key names, of the kind the packer recorded for it.

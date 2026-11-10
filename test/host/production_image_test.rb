@@ -303,14 +303,16 @@ class ProductionImageTest < Minitest::Test
     assert_equal %w[beta zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
   end
 
-  # A domain row's runtime names the domain runtime image and its release the run of
-  # its release's entries, beside the root and the release medium's EROFS image.
-  def test_the_artifacts_name_the_root_the_domain_runtime_and_each_domain_release
-    paths = ['boot/kernel', 'domains/base/bin/start.boot', 'domains/base/lib/x', 'runtimes/emu', 'system/manifest', 'system/root']
+  # A domain row's runtime names the domain runtime image and its release a boot script
+  # of the domain release, as the run of the release's entries, beside the root and the
+  # release medium's EROFS image.
+  def test_the_artifacts_name_the_root_the_domain_runtime_and_each_boot_script
+    paths = ['boot/kernel', 'domains/erxos/bin/base.boot', 'domains/erxos/bin/session.boot', 'domains/erxos/lib/x',
+             'runtimes/emu', 'system/manifest', 'system/root']
     images = { 'release' => { 'kind' => 'erofs_image' } }
-    assert_equal({ 'root' => { 'kind' => 'executable', 'entry' => 5 }, 'release' => { 'kind' => 'erofs_image' },
-                   'base' => { 'kind' => 'release', 'entry' => 1, 'files' => 2 },
-                   'emu' => { 'kind' => 'executable', 'entry' => 3 } },
+    run = { 'kind' => 'release', 'entry' => 1, 'files' => 3 }
+    assert_equal({ 'root' => { 'kind' => 'executable', 'entry' => 6 }, 'release' => { 'kind' => 'erofs_image' },
+                   'base' => run, 'session' => run, 'emu' => { 'kind' => 'executable', 'entry' => 4 } },
                  Erx::ProductionImage.artifacts(paths, images: images))
     assert_equal({ 'root' => { 'kind' => 'executable', 'entry' => 1 } },
                  Erx::ProductionImage.artifacts(['system/manifest', 'system/root'], images: {}))
@@ -319,13 +321,13 @@ class ProductionImageTest < Minitest::Test
   # The BeamAsm image is an executable artifact of its own, which a domain row's runtime
   # names as jit.
   def test_the_artifacts_name_the_beamasm_image
-    paths = ['domains/base/bin/start.boot', 'runtimes/emu', 'runtimes/jit', 'system/root']
+    paths = ['domains/erxos/bin/base.boot', 'runtimes/emu', 'runtimes/jit', 'system/root']
     assert_equal({ 'kind' => 'executable', 'entry' => 2 }, Erx::ProductionImage.artifacts(paths, images: {}).fetch('jit'))
   end
 
-  def test_a_domain_release_named_as_another_artifact_is_refused
+  def test_a_boot_script_named_as_another_artifact_is_refused
     %w[root emu release].each do |name|
-      paths = ["domains/#{name}/bin/start.boot", 'runtimes/emu', 'system/root']
+      paths = ["domains/erxos/bin/#{name}.boot", 'runtimes/emu', 'system/root']
       error = assert_raises(Erx::Error) do
         Erx::ProductionImage.artifacts(paths, images: { 'release' => { 'kind' => 'erofs_image' } })
       end

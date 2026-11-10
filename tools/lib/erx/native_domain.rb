@@ -31,11 +31,12 @@ module Erx
     # The domains' release: one file, which program.c reads through its slice.
     RELEASE_PATH = 'domains/native/release'
     RELEASE_SOURCE = 'test/guest/native_domain/release.txt'
-    # ERTS's image and its release, at the paths guest.c finds them by. Both runtimes are
-    # image entries, as a domain runtime is in a system image, so their read-only segments
-    # are shared by every domain that runs them.
+    # ERTS's image and the domain release, with its one boot script bin/erts.boot, at the
+    # paths guest.c finds them by. Both runtimes are image entries, as a domain runtime is
+    # in a system image, so their read-only segments are shared by every domain that runs
+    # them.
     ERTS_PATH = 'runtimes/emu'
-    ERTS_RELEASE = ReleaseFiles.domain('erts', applications: ReleaseFiles::DOMAIN_BASE)
+    ERTS_RELEASE = ReleaseFiles.domain([ReleaseFiles.domain_boot('erts', applications: ReleaseFiles::DOMAIN_BASE)])
     JIT_PATH = 'runtimes/jit'
     # The modules a BeamAsm domain loads from /test/ (jit_reload.erl): the driver,
     # and jit_probe compiled once for each of the three versions it reloads.

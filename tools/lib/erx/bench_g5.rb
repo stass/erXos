@@ -100,6 +100,7 @@ module Erx
       end
       args = domain_args(plan).map { |arg| "\"#{arg}\",0" }.join(',')
       spec = MediumBoot.erlang_map(release: domain.release, release_files: domain.release_files,
+                                   boot: "<<\"#{MediumBoot::DOMAIN_BOOT.name}\">>",
                                    memory: MediumBoot::DOMAIN_MEMORY, outer: MediumBoot::DOMAIN_OUTER,
                                    grant: MediumBoot.erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
                                    lane: 4096, args: "<<#{args}>>", env: '<<>>')

@@ -34,30 +34,28 @@ module ManifestContextFixture
                        'mem_size' => 64, 'prot' => codec.member('prot', 'rx'), 'flags' => 0 }] }
   end
 
-  # The archive the development manifest names, as both packs carry it: the session
-  # release its session template names, of one file under domains/session/, the domain
-  # runtime image, runtimes/emu, and the system release's generated files and root.
-  def arguments(codec) = archive_arguments(codec, releases: { 'session' => %w[bin/start.boot] })
+  # The archive the development manifest names, as both packs carry it: the domain
+  # release under domains/erxos/ with the session boot script its session template
+  # names, the domain runtime image, runtimes/emu, and the system release's generated
+  # files and root.
+  def arguments(codec) = archive_arguments(codec, boots: %w[session])
 
-  # The same archive with the domain release app, of two files under domains/app/,
-  # which domain_source's domains name.
-  def domain_arguments(codec)
-    archive_arguments(codec, releases: { 'app' => %w[bin/start.boot lib/kernel.beam], 'session' => %w[bin/start.boot] })
-  end
+  # The same archive with the boot script app beside session, which domain_source's
+  # domains name.
+  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app session])
 
-  # An archive of releases (name => files) under domains/, then runtimes/emu, then
-  # system/, the order the archive's sorted paths take, with its artifacts named as
-  # ProductionImage.artifacts names them.
-  def archive_arguments(codec, releases:)
+  # An archive of the domain release, with a boot script for each of boots and one
+  # library file, then runtimes/emu, then system/, the order the archive's sorted paths
+  # take, with its artifacts named as ProductionImage.artifacts names them: each boot
+  # script names the release's whole run.
+  def archive_arguments(codec, boots:)
     system = codec.member('entry_flags', 'system')
     ordinary = codec.member('entry_kind', 'file')
     executable = codec.member('entry_kind', 'image')
-    domains = releases.flat_map do |name, files|
-      files.map do |file|
-        path = "domains/#{name}/#{file}"
-        { 'path' => path, 'kind' => ordinary, 'flags' => 0,
-          'source' => { 'kind' => 'artifact', 'id' => path, 'sha256' => Digest::SHA256.hexdigest(path) } }
-      end
+    domains = [*boots.sort.map { |name| "bin/#{name}.boot" }, 'lib/kernel.beam'].map do |file|
+      path = "domains/erxos/#{file}"
+      { 'path' => path, 'kind' => ordinary, 'flags' => 0,
+        'source' => { 'kind' => 'artifact', 'id' => path, 'sha256' => Digest::SHA256.hexdigest(path) } }
     end
     catalog = [
       *domains,
@@ -72,9 +70,7 @@ module ManifestContextFixture
         'image' => image(codec) }
     ]
     paths = catalog.map { |row| row.fetch('path') }
-    runs = releases.to_h do |name, files|
-      [name, { 'kind' => 'release', 'entry' => paths.index { |path| path.start_with?("domains/#{name}/") }, 'files' => files.size }]
-    end
+    runs = boots.to_h { |name| [name, { 'kind' => 'release', 'entry' => 0, 'files' => domains.size }] }
     root = paths.index('system/root')
     { build_kind: 'development', platform: platform, root_entry: root,
       artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root },

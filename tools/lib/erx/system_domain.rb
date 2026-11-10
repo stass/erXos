@@ -546,12 +546,13 @@ module Erx
 
     # The request erx_domain:create/1 takes for SERVICE_KILL_LATER's later domain of peer:
     # the configured rows' runtime image and release, at domain's indexes in the image's
-    # archive (MediumBoot.domain_in), their budgets, lane and arguments, MediumBoot's grant
-    # for the domains its shell creates, and one connection, so it can be introduced. Its
-    # runtime limits are the system principal's defaults, the same profile as the rows'.
+    # archive (MediumBoot.domain_in), and their boot script, budgets, lane and arguments,
+    # MediumBoot's grant for the domains its shell creates, and one connection, so it can
+    # be introduced. Its runtime limits are the system principal's defaults, the same profile as the rows'.
     def later_spec(domain)
       MediumBoot.erlang_map(name: '<<"peer">>', runtime: domain.runtime, release: domain.release,
-                            release_files: domain.release_files, memory: MediumBoot::DOMAIN_MEMORY,
+                            release_files: domain.release_files, boot: "<<\"#{MediumBoot::DOMAIN_BOOT.name}\">>",
+                            memory: MediumBoot::DOMAIN_MEMORY,
                             outer: MediumBoot::DOMAIN_OUTER,
                             grant: MediumBoot.erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
                             lane: 4096, args: MediumBoot.binary_args(DOMAIN_ARGS), env: '<<>>', connections: 1)

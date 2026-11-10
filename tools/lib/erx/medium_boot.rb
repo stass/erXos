@@ -53,26 +53,31 @@ module Erx
     # the device tree 128 MiB into a machine this large (docs/design-platforms.md).
     MACHINE = ProductionImage::Machine.new(memory_mib: 768, fiasco_reserve_mib: 48, system_growth_mib: 0, tmp_growth_mib: 0,
                                            root_mib: 192)
-    # The halt DOMAIN_ARGS evaluates: erlang:halt(N), N the digits leading its -sname.
-    NAMED_HALT = 'erlang:halt(length(lists:takewhile(fun(C)->(C>=$0)andalso(C=<$9)end,' \
-                 'hd(hd(element(2,init:get_argument(sname)))))))'
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
     DOMAIN_MEMORY = 160 << 20
     DOMAIN_OUTER = 1 << 20
-    # The release the domain runs, the applications every domain boots through, as the
-    # image's build defines a domain release named by a manifest row (ProductionImage).
-    DOMAIN_RELEASE = ReleaseFiles.domain('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
-    # What the domain's ERTS runs: its release's boot script, as the system's system_args
-    # do, over the erx carrier, as every domain's release does, so the domain is a node and
-    # its init reports ready before -eval (docs/design-runtime.md, edit 65); then a halt
-    # whose status is the count of digits that lead the -sname the boot page gave
-    # (Name@Host). So a halt with status 0 says init ran the boot script and -eval, and
-    # that the node is named by the domain's name, not by its id.
-    DOMAIN_ARGS = %W[-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie
+    # The boot script the domain runs, of the applications every domain boots through, as
+    # the image's build defines a boot script named by a manifest row (ProductionImage).
+    DOMAIN_BOOT = ReleaseFiles.domain_boot('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
+    # The halt DOMAIN_ARGS evaluates: erlang:halt(N), N the digits leading its -sname,
+    # plus 100 unless init:script_id() names DOMAIN_BOOT, whose release file is named
+    # after it (ReleaseFiles#boot_files). Its words hold no space and no double quote,
+    # since a manifest row's args are one quoted string split at spaces.
+    NAMED_HALT = 'erlang:halt(length(lists:takewhile(fun(C)->(C>=$0)andalso(C=<$9)end,' \
+                 'hd(hd(element(2,init:get_argument(sname))))))' \
+                 "+100-lists:sum([100||{S,_}<-[init:script_id()],S=:=atom_to_list(#{DOMAIN_BOOT.name})]))"
+    # What the domain's ERTS runs: its boot script, which the manifest's packer and the
+    # domain service bind as -boot before these words (they start with --, so the
+    # binding is init's first flag), over the erx carrier, as every domain's release
+    # does, so the domain is a node and its init reports ready before -eval
+    # (docs/design-runtime.md, edit 65); then NAMED_HALT. So a halt with status 0 says
+    # init ran DOMAIN_BOOT's script and -eval, and that the node is named by the
+    # domain's name, not by its id.
+    DOMAIN_ARGS = %W[-- -root / -bindir /bin -progname erl -home / -nouser -nocookie
                      -no_epmd -proto_dist erx -eval #{NAMED_HALT}].freeze
     # DOMAIN_ARGS without the halt: a domain that stays up until it is stopped.
     UP_ARGS = DOMAIN_ARGS[0...-2].freeze
-    # The medium manifest's configured domain: the interpreter's image on DOMAIN_RELEASE,
+    # The medium manifest's configured domain: the interpreter's image on DOMAIN_BOOT,
     # in a limits profile of the domain's budgets, with DOMAIN_ARGS, the arguments the
     # cell's own creates pass. The domain service starts it at boot and, with restarts 0,
     # never again once it halts.
@@ -80,7 +85,7 @@ module Erx
                  "  lane 4096\n  connections 0\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                  "  peer_held 4096\n  peer_held_total 4096\n" \
                  "domain erts\n  principal @principal.system\n  limits @limits.erts\n  kind service\n  flags none\n" \
-                 "  runtime @artifact.#{ProductionImage::DOMAIN_RUNTIME_ARTIFACT}\n  release @artifact.#{DOMAIN_RELEASE.name}\n" \
+                 "  runtime @artifact.#{ProductionImage::DOMAIN_RUNTIME_ARTIFACT}\n  release @artifact.#{DOMAIN_BOOT.name}\n" \
                  "  restarts 0\n  restart_period_s 5\n  args \"#{DOMAIN_ARGS.join(' ')}\"\n"
 
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
@@ -102,7 +107,7 @@ module Erx
     # (docs/design-runtime.md, "BeamAsm"), and that the image it runs is BeamAsm's.
     JIT_HALT = 'erlang:halt(case erlang:system_info(emu_flavor) of jit->0;_->2 end)'
     JIT_ARGS = [*DOMAIN_ARGS[0...-1], JIT_HALT].freeze
-    # The most, in bytes, a BeamAsm domain of DOMAIN_RELEASE may take from the machine's
+    # The most, in bytes, a BeamAsm domain of DOMAIN_BOOT may take from the machine's
     # free memory beyond what an interpreter domain of it takes. The interpreter holds its
     # loaded code, about 5 MiB of this release, in ERTS's own memory; BeamAsm holds it in
     # its code space instead, two blocks of 2 and 4 MiB, so the extra is the code space
@@ -178,15 +183,15 @@ module Erx
     # answers, so the monitor's noproc is read from the service's record of the death,
     # whose Info the pid's reason carries otherwise. DlRun is DlRunWith with Spec's own
     # fields.
-    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name})) of ' \
+    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name,boot=><<"%<boot>s">>})) of ' \
                      '{ok,DlDomain}->DlMonitor=monitor(process,erx_domain:pid(DlDomain)),DlThen=Then(DlDomain),' \
                      'DlWhy=receive {\'DOWN\',DlMonitor,process,_,noproc}->DlDeath(erx_domain:id(DlDomain));' \
                      '{\'DOWN\',DlMonitor,process,_,DlReason}->DlReason after 60000->timeout end,' \
                      '{erx_domain:id(DlDomain),DlThen,DlWhy};' \
-                     'DlRefused->DlRefused end end'
+                     'DlRefused->DlRefused end end' % { boot: DOMAIN_BOOT.name }
     # DlAsk: the domain service's answer to a create of Name with the request fields of Spec
     # changed by Fields.
-    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name})) end'
+    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name,boot=><<"%<boot>s">>})) end' % { boot: DOMAIN_BOOT.name }
     # DlFirstDeaths: the system principal's deaths as {Id, Info}, once there is one, polled from the
     # domain service's state every 100 ms at most N times; timeout if none comes.
     DOMAIN_LIB_WAIT = 'fun DlWait(0)->timeout;DlWait(N)->' \
@@ -276,12 +281,12 @@ module Erx
     end
 
     # The domain's runtime images and release in the archive at path: the indexes of the
-    # interpreter's image, of the BeamAsm image and of DOMAIN_RELEASE's run of entries.
+    # interpreter's image, of the BeamAsm image and of DOMAIN_BOOT's run of entries.
     def domain_in(archive, codec:)
       paths = PackWire.entries_of(File.binread(archive), codec).map(&:first)
       runtime = paths.index(ProductionImage::DOMAIN_RUNTIME_PATH.b)
       jit = paths.index(ProductionImage::JIT_RUNTIME_PATH.b)
-      run = ReleaseFiles.domain_runs(paths)[DOMAIN_RELEASE.name]
+      run = ReleaseFiles.domain_runs(paths)[DOMAIN_BOOT.name]
       raise Error, "the archive #{archive} lacks a domain runtime image or the release" unless runtime && jit && run
 
       Domain.new(runtime: runtime, jit: jit, release: run.fetch('entry'), release_files: run.fetch('files'))
@@ -486,14 +491,15 @@ module Erx
 
     # The measuring cell of the driver domains' footprint (docs/plan.md, G6 and G9; no
     # product code). It boots MACHINE's image with three configured domains that halt at
-    # once, so the archive carries their releases: bare (the domain base), storage (base and
-    # erx_blk) and network (base, erx_net and erx_net_client), each in a small
-    # runtime_limits profile. At the system domain's shell it creates each release as a
-    # domain, reads the root's pool pages in use (the system domain's budget record) with
-    # the domain up and again once it has stopped, and asks the domain over its system
-    # connection for erlang:memory(), its allocators' carriers, its threads and its loaded
-    # modules. Pool pages up minus after is the domain's cost to the root, ERTS copy
-    # included; it is an upper bound, since nothing of ERTS is shared between domains.
+    # once, so the archive's domain release carries their boot scripts: bare (the domain
+    # base), storage (base and erx_blk) and network (base, erx_net and erx_net_client),
+    # each in a small runtime_limits profile. At the system domain's shell it creates a
+    # domain booting each script, reads the root's pool pages in use (the system
+    # domain's budget record) with the domain up and again once it has stopped, and asks
+    # the domain over its system connection for erlang:memory(), its allocators' carriers,
+    # its threads and its loaded modules. Pool pages up minus after is the domain's cost
+    # to the root, ERTS copy included; it is an upper bound, since nothing of ERTS is
+    # shared between domains.
     # erx_net and erx_blk are loaded and not started: erx_net's application needs the
     # system domain's local transport and a device needs a holder, so the figure is the
     # domain at rest with its modules loaded.
@@ -569,7 +575,7 @@ module Erx
 
       # The build's release table with the three releases of RELEASES.
       module Table
-        def domain_release(name) = RELEASES.key?(name) ? ReleaseFiles.domain(name, applications: RELEASES.fetch(name)) : super
+        def domain_boot(name) = RELEASES.key?(name) ? ReleaseFiles.domain_boot(name, applications: RELEASES.fetch(name)) : super
       end
 
       module_function
@@ -608,7 +614,7 @@ module Erx
                                      args: MediumBoot.binary_args(UP_ARGS), env: '<<>>', connections: 1)
         calls = STEPS.map do |name, release, tmp|
           run = runs.fetch(release)
-          "{<<\"#{name}\">>,#{run.fetch('entry')},#{run.fetch('files')},#{tmp}}"
+          "{<<\"#{name}\">>,<<\"#{release}\">>,#{run.fetch('entry')},#{run.fetch('files')},#{tmp}}"
         end
         [
           'FpEnded=fun FpE(0)->timeout;FpE(FpK)->case length(erx_domain_core:deaths(1,maps:get(core,sys:get_state(erx_domain_srv)))) >= ' \
@@ -622,8 +628,8 @@ module Erx
           '||{instance,_,FpIn}<-FpList(FpAsk(FpN,erlang,system_info,[{allocator,FpA}]))])],FpSz>0])) end',
           'FpThreads=fun(FpN)->[FpAsk(FpN,erlang,system_info,[FpT])||FpT<-[schedulers,dirty_cpu_schedulers,dirty_io_schedulers,thread_pool_size]] end',
           "FpSpec=#{spec}",
-          "FpStep=fun(FpName,FpRel,FpNf,FpTmp)->FpU0=FpUsed(),FpLim=\#{processes=>#{PROCESSES},atoms=>#{ATOMS},tmp=>FpTmp}," \
-          'case erx_domain:create(FpSpec#{name=>FpName,release=>FpRel,release_files=>FpNf,limits=>FpLim}) of ' \
+          "FpStep=fun(FpName,FpBoot,FpRel,FpNf,FpTmp)->FpU0=FpUsed(),FpLim=\#{processes=>#{PROCESSES},atoms=>#{ATOMS},tmp=>FpTmp}," \
+          'case erx_domain:create(FpSpec#{name=>FpName,boot=>FpBoot,release=>FpRel,release_files=>FpNf,limits=>FpLim}) of ' \
           '{ok,FpD}->FpNode=erx_domain:node(FpD),timer:sleep(15000),FpU1=FpUsed(),' \
           'FpRow={FpAsk(FpNode,erlang,memory,[]),FpCarriers(FpNode),FpThreads(FpNode),FpAsk(FpNode,erlang,system_info,[process_count]),' \
           'FpAsk(FpNode,erlang,system_info,[atom_count]),length(FpList(FpAsk(FpNode,code,all_loaded,[])))},' \
@@ -636,7 +642,7 @@ module Erx
           'FpWaited=FpEnded(600)',
           'timer:sleep(3000)',
           'FpSys={erlang:memory(),FpCarriers(node()),FpThreads(node()),FpUsed()}',
-          "FpRun=lists:map(fun({FpA2,FpB2,FpC2,FpD2})->FpStep(FpA2,FpB2,FpC2,FpD2) end,[#{calls.join(',')}])",
+          "FpRun=lists:map(fun({FpA2,FpE2,FpB2,FpC2,FpD2})->FpStep(FpA2,FpE2,FpB2,FpC2,FpD2) end,[#{calls.join(',')}])",
           'io:format("~0p~n",[{fp_report,FpWaited,FpSys,FpRun,FpUsed()}])'
         ].join(',') + '.'
       end
@@ -691,7 +697,7 @@ module Erx
           boot(cpus, built, manifest, entries.map(&:first), File.join(directory, "serial-tmp#{system_tmp}-#{cpus}cpu.log"))
         end
 
-        # Bytes of data per group of archive entries: each domain release, each runtime image,
+        # Bytes of data per group of archive entries: the domain release, each runtime image,
         # the system release and the boot files.
         def archive_sizes(entries, file_bytes)
           sizes = entries.each_with_object(Hash.new(0)) do |(path, entry), by_group|

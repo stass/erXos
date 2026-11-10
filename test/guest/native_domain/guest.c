@@ -65,7 +65,8 @@
 #define RELEASE		"domains/native/release"
 #define ERTS		"runtimes/emu"
 #define JIT		"runtimes/jit"
-#define ERTS_RELEASE	"domains/erts/"
+/* The domain release, whose boot script bin/erts.boot boots ERTS's domains. */
+#define ERTS_RELEASE	"domains/erxos/"
 #define ERTS_MEMORY	(UINT64_C(160) << 20)
 #define LIBRARY_MEMORY	(UINT64_C(256) << 20)
 /* Under the suite's 60 s per case: a BeamAsm domain boots and reloads for some seconds. */
@@ -99,7 +100,7 @@ static uint32_t erts_release, erts_files;
  * starts no user; erlang:display writes to the console through the service.
  */
 #define ERTS_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
-    "-boot\0/bin/start\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0-eval\0"
+    "-boot\0/bin/erts\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0-eval\0"
 static const char erts_args[] = ERTS_BOOT "erlang:display(init_started),erlang:halt(0)";
 /*
  * What the logger case's domain runs: an error logged through the logger, whose text
@@ -476,7 +477,7 @@ page_spoil(uint32_t id)
 /* erx_dist's status when the system connection ends: EX_UNAVAILABLE of sysexits(3). */
 #define DIST_LOST_STATUS	69
 #define ERTS_DIST_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
-    "-boot\0/bin/start\0-nouser\0-nocookie\0-no_epmd\0-proto_dist\0erx\0-eval\0"
+    "-boot\0/bin/erts\0-nouser\0-nocookie\0-no_epmd\0-proto_dist\0erx\0-eval\0"
 static const char connection_eval[] =
     "S='" SYSTEM_NODE "',"
     "Up=fun U(0)->false;U(T)->lists:member(S,nodes()) orelse receive after 50->U(T-1) end end,"

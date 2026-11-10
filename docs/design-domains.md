@@ -2845,6 +2845,24 @@ from a control slot, and the agent acts only on the system domain's.
   ([design-system.md](design-system.md#identifiers)), `{error, {boot,
   Reason}}` when the runtime fails to boot, and `{error, timeout}` when
   `boot_timeout` passes first.
+* `release` names a boot script of the boot image's one domain release,
+  `bin/<release>.boot` ([design-stopgap.md](design-stopgap.md#the-production-image)),
+  whose release file lists the applications the domain boots; the release
+  stores each application's files once for every script. The domain
+  service binds it: the runtime's init arguments begin with `-boot
+  /bin/<release> --`, which nothing in a request sets and which no later
+  argument (`-extra`, a final `-S`) can turn into a plain argument that
+  leaves init to its default script, so a domain boots only the script its
+  request names, as a configured row and a session template boot the one
+  their `release @artifact.<name>` names, which the manifest's packer binds
+  the same way. On the stopgap the request names the release's run of
+  entries by its indexes, `release` and `release_files`, and the script by
+  `boot`, and it carries the runtime's own `args`; a request whose `args`
+  name `-boot` is refused with `{error, {bad_spec, boot}}`, as the packer
+  refuses such a row. The domain library takes the arguments it is given,
+  so the system domain's own code calling `erx_domain_lib:create/1`
+  directly, which is trusted, names its script itself, and the refusal
+  does not cover it.
 * `erx_domain:node/1` returns the domain's node name, toward which stock
   calls address it: `spawn_opt/5`, `spawn_request/5`, `erpc`, `rpc`,
   `monitor_node/2`. A missing spawn right, a dead

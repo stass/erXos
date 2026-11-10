@@ -62,7 +62,7 @@ reach it only through facets, which arrive with the connections.
 %% principal, the system principal, is root (docs/design-domains.md, "Principals, sessions
 %% and quotas").
 -define(SESSION_PREFIX, <<"root">>).
-%% The keys of a request beyond its name and boot_timeout: erx_domain_lib:spec()'s, less
+%% The keys of a request beyond its name, boot and boot_timeout: erx_domain_lib:spec()'s, less
 %% id, principal and domain_pid, which the service sets, and facets, the service's own.
 -define(REQUEST_KEYS, [runtime, release, release_files, memory, outer, grant, lane, args, env,
                        connections, flags, spaces, limits, facets]).
@@ -295,7 +295,11 @@ handle_info({'EXIT', Pid, _Reason}, #{core := Core} = State) when Core =/= undef
 handle_info(_Message, State) ->
     {noreply, State}.
 
-%% A request: its name and fields checked, then built as a configured row is. Its facets
+%% A request: its name and fields checked, then built as a configured row is. Its boot
+%% names the domain release's boot script, bin/<boot>.boot, which the service binds
+%% with -boot /bin/<boot> as init's first flag (boot_args/2), as the manifest's packer
+%% does for a configured row and a session template (docs/design-stopgap.md, "The
+%% production image"), so args that name -boot are refused. Its facets
 %% name processes of the system domain, by facet name, each with its grant's limits or
 %% none; the domain gets a facet in front of each once it reports ready (grant_facets/2),
 %% and the library never sees them.
@@ -305,7 +309,8 @@ create(#{name := Name} = Spec, State) ->
     Timeout = maps:get(boot_timeout, Spec, ?BOOT_TIMEOUT),
     Facets = facets(maps:get(facets, Spec, #{})),
     ValidFacets = Facets =/= invalid,
-    Fields = maps:without([name, boot_timeout], Spec),
+    Fields = maps:without([name, boot, boot_timeout], Spec),
+    Args = boot_args(maps:get(args, Fields, <<>>), maps:get(boot, Spec, none)),
     case [Key || Key <- maps:keys(Fields), not lists:member(Key, ?REQUEST_KEYS)] of
         [Key | _] ->
             {{error, {bad_spec, Key}}, State};
@@ -314,6 +319,10 @@ create(#{name := Name} = Spec, State) ->
             {{error, {bad_spec, boot_timeout}}, State};
         [] when not ValidFacets ->
             {{error, {bad_spec, facets}}, State};
+        [] when Args =:= badarg ->
+            {{error, badarg}, State};
+        [] when Args =:= invalid ->
+            {{error, {bad_spec, boot}}, State};
         [] ->
             case erx_ident:new(Name) of
                 {error, bad_identifier} = Error ->
@@ -321,7 +330,7 @@ create(#{name := Name} = Spec, State) ->
                 Ident ->
                     #{lib := Lib} = State,
                     Make = fun(Id, Pid) ->
-                                   Lib:create((maps:without([facets], Fields))#{id => Id, name => Name,
+                                   Lib:create((maps:without([facets], Fields))#{id => Id, name => Name, args => Args,
                                                                                 principal => ?SYSTEM_PRINCIPAL,
                                                                                 domain_pid => Pid})
                            end,
@@ -330,6 +339,31 @@ create(#{name := Name} = Spec, State) ->
     end;
 create(_Spec, State) ->
     {{error, {bad_spec, name}}, State}.
+
+%% A request's args as its boot page holds them: its emulator flags (the NUL-ended words
+%% before the first --), then -- -boot /bin/Boot --, then its init arguments (the words
+%% after that --), as the manifest's packer binds a configured row's (Erx::Manifest
+%% boot_args). The binding is init's first flag and the second -- closes its value, so
+%% no later word (-extra, a final -S) can make it a plain argument and leave init to its
+%% default script. Invalid when the request names no boot, when Boot is no identifier,
+%% so the path is one name under /bin, or when the words name -boot themselves;
+%% badarg when Args is no binary, a field of the wrong shape.
+boot_args(Args, Boot) when is_binary(Args), is_binary(Boot) ->
+    Words = binary:split(Args, <<0>>, [global, trim]),
+    {Emulator, Rest} = lists:splitwith(fun(Word) -> Word =/= <<"--">> end, Words),
+    Init = case Rest of
+               [<<"--">> | After] -> After;
+               [] -> []
+           end,
+    Bound = Emulator ++ [<<"--">>, <<"-boot">>, <<"/bin/", Boot/binary>>, <<"--">> | Init],
+    case erx_ident:new(Boot) =/= {error, bad_identifier} andalso not lists:member(<<"-boot">>, Words) of
+        true -> << <<Word/binary, 0>> || Word <- Bound >>;
+        false -> invalid
+    end;
+boot_args(Args, _Boot) when not is_binary(Args) ->
+    badarg;
+boot_args(_Args, _Boot) ->
+    invalid.
 
 %% A spec's facets, each as {Behind, Limits}, or invalid: a map from facet names to live or
 %% dead processes of the system domain, each alone or with the limits of its grant that

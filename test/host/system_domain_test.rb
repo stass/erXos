@@ -50,8 +50,9 @@ class SystemDomainTest < Minitest::Test
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
     assert_equal "#{line}\r", points[2].fetch(:type)
-    # The later domain's request names the image's runtime and release, and one connection.
-    assert line.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,')
+    # The later domain's request names the image's runtime and release, the rows' boot
+    # script, and one connection.
+    assert line.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,boot=><<"erts">>,')
     assert_includes line, ',connections=>1},SdLives='
     running, table, _introduced, _hostile, _down, ignored, later, ends, ended = points.last(9)
     refute_match running.fetch(:pattern), "1> #{line}\r\n"

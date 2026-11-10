@@ -205,11 +205,11 @@ class PackTest < Minitest::Test
     reject(mutated { |bytes| PackFixture.integer(bytes, 12, 6) }, 'header_values')
   end
 
-  # A domain release sorts after boot/'s files and the domain runtime image after it,
+  # The domain release sorts after boot/'s files and the domain runtime image after it,
   # both before the system release and without its mark, so the archive check takes
   # them as whole entries outside one unbroken system run.
   def test_unmarked_domain_runs_and_runtime_before_the_system_release_are_valid
-    paths = ['boot/kernel', 'domains/a/bin/start.boot', 'domains/a/lib/x', 'domains/b/bin/start.boot', 'runtimes/emu',
+    paths = ['boot/kernel', 'domains/erxos/bin/a.boot', 'domains/erxos/bin/b.boot', 'domains/erxos/lib/x', 'runtimes/emu',
              'system/root']
     status, output = check(PackFixture.valid(paths: paths))
     assert_equal 0, status, output

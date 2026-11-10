@@ -1997,7 +1997,7 @@ facet ([design-storage.md](design-storage.md)).
 
 **The release file system is a view of a sorted list of paths.** A release is
 the archive's entries whose paths start with its prefix, `system/` for the
-system release and `domains/<name>/` for a domain's; the index is sorted, so
+system release and `domains/erxos/` for the domain release; the index is sorted, so
 they form one run, and a file's path in the namespace is its entry's path
 without that prefix. The packer and `erx_pack_open` both refuse a file that is a prefix
 of another path, so a directory needs no record of its own: `d` is a directory
