@@ -54,11 +54,30 @@
 %% It is the log sink's end too: the system domain's erx_log_h sends it each log event as a
 %% record, {log, Level, Text}, and erx_console_log decides whether to take it and renders its
 %% line, with the line escape, under the system domain's id, principal and name.
+%%
+%% It is the master of each session's tty (docs/design-live.md, "Between domains"). A
+%% session's create spec names `console => facet()`, and the domain service mints the
+%% session its own console facet in front of the console's facet endpoint
+%% (facet_endpoint/1); the facet checks the sender, the size and the number in flight,
+%% and forwards each of the tty's messages with its grantee's domain id, in a shape no
+%% call of the grantee's can take. The endpoint refuses every call, so a session reaches
+%% none of the console's own calls through its facet. The console keeps, for
+%% each session by domain id, the master's state (erx_tty_master, which checks every
+%% message), the tty, which add_session/2 names, and a monitor of the facet, whose end is
+%% the session's. The line belongs to the console's own groups or to one connected
+%% session (connect/1): a connected session's output is copied to the line as bytes, as a
+%% tty's master copies them, each answered only once the driver has written it, and the
+%% bytes typed go to its tty, except Ctrl-G, which never reaches a session and gives the
+%% line back to the console's groups. While the line is theirs, every session's tty is
+%% stopped. A tty that fails a check is detached for good, with a log line naming its
+%% domain; the console's own notices naming a domain go to the line through the line
+%% escape.
 
 -module(erx_console).
 -behaviour(gen_server).
 
 -export([start/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
+-export([facet/0, add_session/2, connect/1, detach/0]).
 -export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -115,7 +134,18 @@
                 %% Each domain's log records this second, and those dropped.
                 log_records = erx_console_log:new() :: erx_console_log:state(),
                 %% The start of a character whose other bytes have not been read yet.
-                pending = <<>> :: binary()}).
+                pending = <<>> :: binary(),
+                %% Who has the line: the console's own groups, or a domain's session.
+                line = system :: system | {session, pos_integer()},
+                %% The sessions whose tty the console is the master of, by domain id.
+                sessions = #{} :: #{pos_integer() => session()},
+                %% The process behind every session's console facet (facet_endpoint/1).
+                endpoint :: pid()}).
+
+%% A session: its tty, once add_session/2 names it; the monitor of its console facet, once
+%% the facet has forwarded a message; and the master's side of its tty.
+-type session() :: #{tty := pid() | none, facet := reference() | none,
+                     master := erx_tty_master:master()}.
 
 %% user_sup calls this, and waits for the `user` group to register.
 -spec start() -> {ok, pid()} | {error, term()}.
@@ -182,11 +212,45 @@ terminal(Name) ->
     #{write => fun(Bytes) -> write(Name, Bytes) end,
       run_shell => fun(Shell) -> run_shell(Name, Shell) end}.
 
+-doc """
+What a session's create spec names as its console facet, `console => facet()`: this
+console, in front of which the domain service mints each session a facet of its own,
+whose max_request is the largest message a tty sends (erx_tty_master:max_message/0).
+""".
+-spec facet() -> {pid(), #{max_request := pos_integer()}}.
+facet() ->
+    gen_server:call(?MODULE, facet).
+
+-doc """
+Names Tty, the `tty` agent of domain Domain's ready report, as the tty of that domain's
+session: the console sends it the session's input, size and answers.
+""".
+-spec add_session(pos_integer(), pid()) -> ok.
+add_session(Domain, Tty) when is_integer(Domain), Domain > 0, is_pid(Tty) ->
+    gen_server:call(?MODULE, {add_session, Domain, Tty}).
+
+-doc """
+Gives the line to domain Domain's session, taking it from whoever had it: the session's
+held output is written, and the bytes typed go to its tty until Ctrl-G or detach/0
+gives the line back to the console's own groups, or the session ends or fails a check.
+{error, unknown} for a domain with no session, {error, no_tty} for a session whose tty
+add_session/2 has not named, and {error, refused} for one detached for a failed check.
+""".
+-spec connect(pos_integer()) -> ok | {error, unknown | no_tty | refused}.
+connect(Domain) ->
+    gen_server:call(?MODULE, {connect, Domain}).
+
+-doc "Gives the line back to the console's own groups; every session's tty is stopped.".
+-spec detach() -> ok.
+detach() ->
+    gen_server:call(?MODULE, detach).
+
 -spec init(config()) -> {ok, #state{}}.
 init(#{role := Role, name := Name, driver := Start, first_shell := FirstShell}) ->
     process_flag(trap_exit, true),
     %% A domain has one line, which terminal/0 names.
     persistent_term:put({?MODULE, line}, Name),
+    Console = self(),
     {ok, DriverPid, Terminal} = Start(self()),
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
@@ -208,7 +272,8 @@ init(#{role := Role, name := Name, driver := Start, first_shell := FirstShell}) 
                            user = User,
                            tty = TTY,
                            size = ?DEFAULT_SIZE,
-                           terminal = Terminal})}.
+                           terminal = Terminal,
+                           endpoint = spawn(fun() -> facet_endpoint(Console) end)})}.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
 banner(session, TTY, _Driver) ->
@@ -295,6 +360,15 @@ handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal =
 handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
     {noreply, State};
+handle_call(facet, _From, State = #state{endpoint = Endpoint}) ->
+    {reply, {Endpoint, #{max_request => erx_tty_master:max_message()}}, State};
+handle_call({add_session, Domain, Tty}, _From, State) ->
+    {reply, ok, with_session(Domain, fun(Session) -> Session#{tty := Tty} end, State)};
+handle_call({connect, Domain}, _From, State) ->
+    {Reply, Next} = connect_session(Domain, State),
+    {reply, Reply, Next};
+handle_call(detach, _From, State) ->
+    {reply, ok, to_groups(none, State)};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
@@ -303,6 +377,16 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), #state{}) -> {noreply, #state{}} | {stop, term(), #state{}}.
+handle_info({erx_console_input, Bytes}, State = #state{line = {session, Domain}}) ->
+    %% Ctrl-G belongs to the console and never reaches a session: the bytes before it go
+    %% to the session's tty, and the line goes back to the console's groups, which get the
+    %% bytes after it.
+    case binary:split(Bytes, <<$\^G>>) of
+        [ToSession] ->
+            {noreply, to_session(Domain, ToSession, State)};
+        [ToSession, Rest] ->
+            handle_info({erx_console_input, Rest}, to_groups(none, to_session(Domain, ToSession, State)))
+    end;
 handle_info({erx_console_input, Bytes}, State = #state{pending = Pending}) ->
     {Events, Left} = input(Pending, Bytes),
     lists:foreach(fun(Event) -> deliver(Event, State) end, Events),
@@ -320,8 +404,8 @@ handle_info(erx_console_eof, State = #state{pending = Pending}) ->
 handle_info({erx_console_size, Columns, Rows}, State = #state{tty = TTY})
   when is_integer(Columns), is_integer(Rows),
        Columns >= 1, Columns =< ?MAX_SIDE, Rows >= 1, Rows =< ?MAX_SIDE ->
-    {noreply, State#state{tty = prim_tty:update_geometry(TTY, Columns, Rows),
-                          size = {Columns, Rows}}};
+    {noreply, session_size(State#state{tty = prim_tty:update_geometry(TTY, Columns, Rows),
+                                       size = {Columns, Rows}})};
 handle_info({erx_console_size, _Columns, _Rows}, State) ->
     {noreply, State};
 handle_info(erx_log_poll, State = #state{driver = Driver}) ->
@@ -354,6 +438,25 @@ handle_info({log, _Level, _Text} = Record,
     end;
 handle_info({erx_console_written, none}, State) ->
     {noreply, State};
+handle_info({erx_console_written, {tty, Domain, N}}, State = #state{sessions = Sessions}) ->
+    %% Output N of Domain's tty is on the line: only now is it taken.
+    case Sessions of
+        #{Domain := #{master := Master}} -> {noreply, carry_out(Domain, erx_tty_master:written(N, Master), State)};
+        #{} -> {noreply, State}
+    end;
+handle_info({erx_tty_message, {Facet, _Tag} = From, Domain, Message}, State) ->
+    %% A message of Domain's tty, which its console facet admitted and forwarded through
+    %% the endpoint. It is answered once acted on, so the facet's limit in flight bounds
+    %% what the session has queued here; the facet drops the answer.
+    Next = from_tty(Domain, Facet, Message, State),
+    gen:reply(From, ok),
+    {noreply, Next};
+handle_info({'DOWN', Monitor, process, _Facet, _Reason}, State = #state{sessions = Sessions}) ->
+    %% A console facet ends with its domain: the session has ended.
+    case [Domain || Domain := #{facet := Facet} <- Sessions, Facet =:= Monitor] of
+        [Domain] -> {noreply, session_ended(Domain, State)};
+        [] -> {noreply, State}
+    end;
 handle_info({erx_console_written, {caller, From}}, State) ->
     gen_server:reply(From, ok),
     {noreply, State};
@@ -401,12 +504,13 @@ handle_info({'EXIT', Pid, Reason},
         false ->
             {noreply, State}
     end;
-handle_info(Message, State = #state{user = User})
+handle_info(Message, State = #state{user = User, line = Line})
   when is_tuple(Message), tuple_size(Message) >= 2, is_pid(element(1, Message)) ->
     Pid = element(1, Message),
     Current = current(State),
     case is_group(Pid, State) of
-        true when Pid =:= User; Pid =:= Current ->
+        %% While a session has the line, the current group is hidden too.
+        true when Pid =:= User; Pid =:= Current, Line =:= system ->
             {noreply, from_group(Message, State)};
         true ->
             {noreply, from_hidden_group(Message, State)};
@@ -482,6 +586,126 @@ driver_module() ->
 
 encoding(true) -> unicode;
 encoding(false) -> latin1.
+
+%% -- Sessions -------------------------------------------------------------------------
+
+%% Domain's session after Update, made first if the console knows none of Domain's: a
+%% session begins at its tty's first message or at add_session/2, whichever comes first.
+with_session(Domain, Update, State = #state{sessions = Sessions}) ->
+    Session = maps:get(Domain, Sessions, #{tty => none, facet => none, master => erx_tty_master:new()}),
+    State#state{sessions = Sessions#{Domain => Update(Session)}}.
+
+%% A message of Domain's tty, through Facet, whose end the console watches from the
+%% first one on.
+from_tty(Domain, Facet, Message, State0) ->
+    State = with_session(Domain, fun(Session = #{facet := none}) -> Session#{facet := monitor(process, Facet)};
+                                    (Session) -> Session
+                                 end, State0),
+    #{Domain := #{master := Master}} = State#state.sessions,
+    carry_out(Domain, erx_tty_master:output(Message, Master), State).
+
+%% Bytes typed at the line, for Domain's session, which has it.
+to_session(Domain, Bytes, State = #state{sessions = Sessions}) ->
+    #{Domain := #{master := Master}} = Sessions,
+    carry_out(Domain, erx_tty_master:input(Bytes, Master), State).
+
+%% The line's size, for the session that has the line.
+session_size(State = #state{line = {session, Domain}, size = {Columns, Rows}, sessions = Sessions}) ->
+    #{Domain := #{master := Master}} = Sessions,
+    carry_out(Domain, erx_tty_master:size({Rows, Columns}, Master), State);
+session_size(State) ->
+    State.
+
+%% Domain's session takes the line from whoever had it, unless its tty is unnamed or
+%% refused.
+connect_session(Domain, State0 = #state{sessions = Sessions}) ->
+    case Sessions of
+        #{Domain := #{tty := none}} ->
+            {{error, no_tty}, State0};
+        #{Domain := #{master := Master}} ->
+            case erx_tty_master:is_refused(Master) of
+                true ->
+                    {{error, refused}, State0};
+                false ->
+                    State = (to_groups(none, State0))#state{line = {session, Domain}},
+                    #state{size = {Columns, Rows}, sessions = #{Domain := #{master := Disconnected}}} = State,
+                    {ok, carry_out(Domain, erx_tty_master:connect({Rows, Columns}, Disconnected), State)}
+            end;
+        #{} ->
+            {{error, unknown}, State0}
+    end.
+
+%% The line back to the console's own groups, after Notice, the console's own text, if
+%% there is one; the session that had it is no longer connected, and its tty is stopped.
+to_groups(_Notice, State = #state{line = system}) ->
+    State;
+to_groups(Notice, State = #state{line = {session, Domain}, sessions = Sessions, driver = Driver}) ->
+    %% A session may have left a string open or its text hidden: both end first.
+    [Driver ! {erx_console_output, none, [<<"\e\\\e[0m\r\n">>, erx_text:escape_line(Notice), <<"\r\n">>]}
+     || Notice =/= none],
+    Disconnected = case Sessions of
+                       #{Domain := Session = #{master := Master}} ->
+                           Sessions#{Domain := Session#{master := erx_tty_master:disconnect(Master)}};
+                       #{} ->
+                           Sessions
+                   end,
+    State#state{line = system, sessions = Disconnected}.
+
+%% Domain's console facet has ended, and its session with it.
+session_ended(Domain, State = #state{line = Line}) ->
+    Back = case Line of
+               {session, Domain} ->
+                   to_groups(io_lib:format("erx_console: the session of domain ~b has ended", [Domain]), State);
+               _ ->
+                   State
+           end,
+    Back#state{sessions = maps:remove(Domain, Back#state.sessions)}.
+
+%% Domain's master after Actions, which it carries out in order: a write goes to the driver,
+%% which says when it is written; a message goes to the session's tty; and a detach, for
+%% a tty that failed a check, takes the line from it, if it has it, and logs a line naming
+%% the domain under the system domain's own source.
+carry_out(Domain, {Actions, Master}, State = #state{sessions = Sessions}) ->
+    Session = #{tty := Tty} = maps:get(Domain, Sessions),
+    Next = State#state{sessions = Sessions#{Domain := Session#{master := Master}}},
+    lists:foldl(fun(Action, Acc) -> carry_out_one(Domain, Tty, Action, Acc) end, Next, Actions).
+
+carry_out_one(Domain, _Tty, {write, N, Bytes}, State = #state{driver = Driver}) ->
+    Driver ! {erx_console_output, {tty, Domain, N}, Bytes},
+    State;
+carry_out_one(_Domain, Tty, {send, Message}, State) when is_pid(Tty) ->
+    Tty ! Message,
+    State;
+carry_out_one(_Domain, none, {send, _Message}, State) ->
+    State;
+carry_out_one(Domain, _Tty, detach, State = #state{line = Line}) ->
+    logger:notice("erx_console: domain ~b's tty failed the console's checks; detached", [Domain]),
+    case Line of
+        {session, Domain} -> to_groups(none, State);
+        _ -> State
+    end.
+
+%% The process behind every session's console facet. It takes only what a facet forwards
+%% of its grantee's messages, '$erx_facet_message', which no request a grantee sends
+%% through its facet can be, and passes each to the console; it refuses every call, so no
+%% session reaches the console's own calls (run_shell, write, connect and the rest). It
+%% ends with the console, whatever the reason, and every console facet with it.
+facet_endpoint(Console) ->
+    Monitor = monitor(process, Console),
+    facet_endpoint(Console, Monitor).
+
+facet_endpoint(Console, Monitor) ->
+    receive
+        {'$erx_facet_message', {Facet, _Tag} = From, Domain, Message} when is_pid(Facet), is_integer(Domain) ->
+            Console ! {erx_tty_message, From, Domain, Message};
+        {'$gen_call', {Caller, _Tag} = From, _Request} when is_pid(Caller) ->
+            gen:reply(From, {error, badarg});
+        {'DOWN', Monitor, process, Console, Reason} ->
+            exit(Reason);
+        _Other ->
+            ok
+    end,
+    facet_endpoint(Console, Monitor).
 
 %% -- Input ----------------------------------------------------------------------------
 

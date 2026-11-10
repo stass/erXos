@@ -640,7 +640,17 @@ pseudo-terminal's, sends the same messages as plain Erlang messages, which
 are not dropped.
 
 The tty learns its master from `erx:cap(console)`, and the console learns
-the tty from the `tty` agent of the session domain's ready report. A master
+the tty from the `tty` agent of the session domain's ready report. That
+master is the session's own console facet, which the domain service mints
+from the session's spec, `console => erx_console:facet()`, in front of the
+console's facet endpoint, a process that takes the facets' forwarded
+messages and refuses every call, so a session reaches nothing of the
+console but its tty's five messages; the facet's `max_request` is the
+encoded size of the largest `tty_output`, and it forwards each of the
+tty's messages with the session's domain id
+([Facets](design-domains.md#facets)). The console
+takes an output only once its line driver has written it, so a session
+has at most one output in the console and the driver together. A master
 in another domain is heard only through the envelope of its own domain
 (D18). Once `tty_hangup` holds, the tty drops what it holds and takes every
 later write at once with nothing sent, and the relay ends every shell on

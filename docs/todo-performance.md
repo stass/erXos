@@ -755,3 +755,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   bench` workload that loads and purges a small module in a loop at 1, 2
   and 4 CPUs under the interpreter and BeamAsm images.
 
+
+* **A stopped session's resends** (`erlang/apps/erx/src/erx_console.erl`,
+  `erlang/apps/erx_session/src/erx_tty_link.erl`): a session not connected
+  to the console resends its held output, empty, once a second for as long
+  as it lives, and each crosses its console facet into `erx_console`, which
+  ignores it. Settle it with a `tools/erx bench` workload that holds 1, 16
+  and 64 stopped sessions and measures the system domain's reductions and
+  the UART's latency; the fix on the table is a master that tells the tty
+  it holds the output, so the tty stops asking.

@@ -2326,7 +2326,22 @@ before its callback sees a request:
   it mints a handle from the facet's scope, or refuses. The reply target
   must be a name of the grantee's, a pid or an alias the grantee's own
   runtime exported to the facet's domain by encoding it; it names where the
-  result goes, never who asks.
+  result goes, never who asks. A request in no call's shape is a
+  **message**, for a protocol of plain messages such as a tty's
+  ([design-live.md](design-live.md#the-tty)): the grantee's
+  origin and its size are checked as a call's, the callback forwards or
+  drops it, and the behaviour forwards it as
+  `{'$erx_facet_message', ReplyTo, Grantee, Msg}`, which the service answers
+  as a call. Every request is forwarded inside a `'$gen_call'`, so no
+  request of the grantee's takes that shape: the service learns the grantee
+  from the facet and never from the grantee, and nothing of the grantee's
+  reaches the service in a shape an OTP module acts on. A service that takes
+  only messages stands behind its facets as a process that refuses every
+  call, since a facet that admits every request would hand the grantee the
+  service's whole call interface. The service's answer
+  is dropped, and the forward counts toward the requests in flight, so a
+  grantee has at most that many messages in the service's queue; past it a
+  message is dropped and counted, since it has no one to answer.
 
 A request that fails the origin check, its lane's domain not the grantee,
 the size check or the reply-target check is dropped and counted,
@@ -2721,9 +2736,11 @@ from a control slot, and the agent acts only on the system domain's.
                                                % per name
                   release := binary(),         % a boot script in the boot image
                   flavour => jit | emu,        % default jit; deterministic mode forces emu
-                  facets => #{atom() => pid()},
+                  facets => #{atom() => pid() | {pid(), #{max_request => pos_integer(),
+                                                          in_flight => pos_integer()}}},
                                                % facets the domain starts with, each
-                                               % one the caller holds, attenuated for it
+                                               % one the caller holds, attenuated for it,
+                                               % with its grant's own limits if named
                   files => #{binary() => atom()},
                                                % mount point => the name of one of
                                                % its facets that serves a tree

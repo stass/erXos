@@ -208,14 +208,15 @@ handle_info(_Message, State) ->
     {noreply, State}.
 
 %% A request: its name and fields checked, then built as a configured row is. Its facets
-%% name processes of the system domain, by facet name; the domain gets a facet in front of
-%% each once it reports ready (grant_facets/2), and the library never sees them.
+%% name processes of the system domain, by facet name, each with its grant's limits or
+%% none; the domain gets a facet in front of each once it reports ready (grant_facets/2),
+%% and the library never sees them.
 create(_Spec, #{lib := none} = State) ->
     {{error, enotsup}, State};
 create(#{name := Name} = Spec, State) ->
     Timeout = maps:get(boot_timeout, Spec, ?BOOT_TIMEOUT),
-    Facets = maps:get(facets, Spec, #{}),
-    ValidFacets = valid_facets(Facets),
+    Facets = facets(maps:get(facets, Spec, #{})),
+    ValidFacets = Facets =/= invalid,
     Fields = maps:without([name, boot_timeout], Spec),
     case [Key || Key <- maps:keys(Fields), not lists:member(Key, ?REQUEST_KEYS)] of
         [Key | _] ->
@@ -242,11 +243,30 @@ create(#{name := Name} = Spec, State) ->
 create(_Spec, State) ->
     {{error, {bad_spec, name}}, State}.
 
-%% A spec's facets: a map from facet names to live or dead processes of the system domain.
-valid_facets(Facets) when is_map(Facets) ->
-    lists:all(fun({Name, Behind}) -> is_atom(Name) andalso is_pid(Behind) andalso node(Behind) =:= node() end,
-              maps:to_list(Facets));
-valid_facets(_Facets) ->
+%% A spec's facets, each as {Behind, Limits}, or invalid: a map from facet names to live or
+%% dead processes of the system domain, each alone or with the limits of its grant that
+%% differ from erx_facet's defaults, max_request and in_flight.
+facets(Facets) when is_map(Facets) ->
+    Valid = maps:filtermap(fun(Name, Facet) when is_atom(Name) -> facet(Facet);
+                              (_Name, _Facet) -> false
+                           end, Facets),
+    case map_size(Valid) =:= map_size(Facets) of
+        true -> Valid;
+        false -> invalid
+    end;
+facets(_Facets) ->
+    invalid.
+
+facet(Behind) when is_pid(Behind) ->
+    facet({Behind, #{}});
+facet({Behind, Limits}) when is_pid(Behind), node(Behind) =:= node(), is_map(Limits) ->
+    Positive = fun(Key) -> is_integer(map_get(Key, Limits)) andalso map_get(Key, Limits) > 0 end,
+    case lists:all(Positive, maps:keys(maps:with([max_request, in_flight], Limits))) andalso
+         map_size(maps:without([max_request, in_flight], Limits)) =:= 0 of
+        true -> {true, {Behind, Limits}};
+        false -> false
+    end;
+facet(_Facet) ->
     false.
 
 start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := Lib} = State) ->
@@ -386,12 +406,12 @@ ready(Id, Ref, #{core := Core, waiting := Waiting} = State) ->
 %% that reported is answered, with no facets too.
 grant_facets(Id, #{core := Core, exports := Exports} = State) ->
     {ok, #{pid := Pid, ref := Ref, facets := Facets}} = erx_domain_core:fetch(Id, Core),
-    Minted = maps:filtermap(fun(Name, Behind) -> mint(Id, Pid, Name, Behind, Exports) end, Facets),
+    Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, Facets),
     Pid ! {Ref, facets, Minted},
     State.
 
-mint(Id, DomainPid, Name, Behind, Exports) ->
-    Grant = #{grantee => Id, ends_with => [DomainPid, Behind], behind => Behind},
+mint(Id, DomainPid, Name, {Behind, Limits}, Exports) ->
+    Grant = Limits#{grantee => Id, ends_with => [DomainPid, Behind], behind => Behind},
     case erx_facet:start(erx_domain_facet, Grant, #{exports => Exports}) of
         {ok, Facet} ->
             {true, Facet};

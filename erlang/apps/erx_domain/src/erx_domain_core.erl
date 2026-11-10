@@ -51,7 +51,7 @@ state is a bug of the caller and fails with a badmatch.
                     pid := pid() | undefined, ref := reference() | undefined,
                     connection := non_neg_integer(), ended := undefined | {info(), integer()},
                     ctl_slots := non_neg_integer(), reader := non_neg_integer(),
-                    facets := #{atom() => pid()}}.
+                    facets := #{atom() => {pid(), map()}}}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
 -type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
                    slogan => slogan()}.

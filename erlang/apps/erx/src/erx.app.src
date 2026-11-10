@@ -43,6 +43,7 @@
              erx_trace,
              erx_trace_ring,
              erx_tracer,
+             erx_tty_master,
              erx_ui_schema,
              erx_ui_wire,
              erx_watchdog,

@@ -710,13 +710,16 @@ facets() ->
                  erx_domain:create(#{name => <<"f">>, facets => #{<<"echo">> => Echo}})),
     ?assertEqual({error, {bad_spec, facets}},
                  erx_domain:create(#{name => <<"f">>, facets => #{echo => erx_domain_fake_lib:agent(<<"f">>, 5)}})),
+    %% A facet may name its grant's limits, max_request and in_flight, and nothing else.
+    [?assertEqual({error, {bad_spec, facets}}, erx_domain:create(#{name => <<"f">>, facets => #{echo => {Echo, Limits}}}))
+     || Limits <- [#{max_request => 0}, #{in_flight => -1}, #{max_request => many}, #{other => 1}, [], {}]],
     %% The service mints a facet in front of each, bound to the domain, which exports
     %% itself to the domain, and answers the domain's report, through its domain pid,
     %% with the facets by name, only once the report has come: the pid's first message
     %% from the service after the report is the answer.
     Self = self(),
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
-    {ok, Domain} = erx_domain:create(#{name => <<"facets">>, memory => 4096, facets => #{echo => Echo}}),
+    {ok, Domain} = erx_domain:create(#{name => <<"facets">>, memory => 4096, facets => #{echo => {Echo, #{max_request => 5000}}}}),
     erlang:trace(new_processes, false, ['receive']),
     Id = erx_domain:id(Domain),
     Pid = erx_domain:pid(Domain),
@@ -731,7 +734,7 @@ facets() ->
     [#{echo := Facet}] = [Facets || {_, facets, Facets} <- Received],
     _ = [erlang:trace(Traced, false, ['receive']) || Traced <- [Pid, Facet]],
     _ = trace_messages(),
-    ?assertMatch(#{grantee := Id, dropped := 0}, erx_facet:info(Facet)),
+    ?assertMatch(#{grantee := Id, dropped := 0, max_request := 5000}, erx_facet:info(Facet)),
     %% The facet ends with the domain.
     Monitor = monitor(process, Facet),
     ok = erx_domain:stop(Domain, shutdown),

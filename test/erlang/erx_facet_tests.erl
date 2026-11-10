@@ -89,7 +89,27 @@ admits_only_its_grantee_test() ->
     ?assertEqual(none, call(Facet, binary:copy(<<0>>, 4096))),
     ?assertEqual({echo, small}, call(Facet, small)),
     ?assertEqual(none, try gen_server:call(Facet, ping, 300) catch exit:{timeout, _} -> none end),
-    ?assertEqual(#{grantee => ?GRANTEE, dropped => 5, refused => 0, outstanding => 0}, erx_facet:info(Facet)).
+    ?assertMatch(#{grantee := ?GRANTEE, dropped := 5, refused := 0, outstanding := 0}, erx_facet:info(Facet)).
+
+%% A message of the grantee's that is no call reaches the process behind, here the test,
+%% as {'$erx_facet_message', ReplyTo, Grantee, Message}, whose answer the facet takes and
+%% drops; another domain's message, one past max_request and one past the limit in
+%% flight are dropped and counted, with nothing forwarded.
+forwards_its_grantees_messages_test() ->
+    Facet = facet(self(), domain_pid(), #{max_request => 64, in_flight => 2}),
+    Facet ! {erx_origin, ?GRANTEE, {tty_output, 0, <<"hi">>}},
+    {From, Forwarded} = receive {'$erx_facet_message', {Facet, _} = F, G, M} -> {F, {G, M}}
+                        after 1000 -> {none, none} end,
+    ?assertEqual({?GRANTEE, {tty_output, 0, <<"hi">>}}, Forwarded),
+    gen:reply(From, ok),
+    Facet ! {erx_origin, ?OTHER, hello},
+    Facet ! {erx_origin, ?GRANTEE, binary:copy(<<0>>, 64)},
+    [Facet ! {erx_origin, ?GRANTEE, Word} || Word <- [one, two, three]],
+    [?assertEqual({?GRANTEE, Word},
+                  receive {'$erx_facet_message', {Facet, _}, G2, M2} -> {G2, M2} after 1000 -> none end)
+     || Word <- [one, two]],
+    ?assertEqual(none, receive {'$erx_facet_message', _, _, M3} -> M3 after 300 -> none end),
+    ?assertMatch(#{grantee := ?GRANTEE, dropped := 3, refused := 0, outstanding := 2}, erx_facet:info(Facet)).
 
 %% Past the grant's limit in flight a request is refused with {error, badarg}, and a
 %% reply that names no outstanding forward reaches no one.
