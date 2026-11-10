@@ -31,7 +31,7 @@ class DomPlannerTest < Minitest::Test
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
-    @plain = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    @plain = ManifestContextFixture.sessionless(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')))
     @source = with_domains('alpha')
     @directory = Dir.mktmpdir('dom-planner-')
     @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
@@ -53,7 +53,7 @@ class DomPlannerTest < Minitest::Test
   def with_domains(*names, quota: names.size, share: 'users')
     rows = names.map { |name| DOMAINS.delete_prefix(LIMITS).sub('domain alpha', "domain #{name}") }
     limits = LIMITS.sub('grant @share.users', "grant @share.#{share}")
-    @plain.sub("  domains 0\n", "  domains #{quota}\n").sub('max_domains 0', "max_domains #{quota}") + limits + rows.join
+    ManifestContextFixture.with_quota(@plain, quota) + limits + rows.join
   end
 
   def refused(source, field, message)
@@ -66,22 +66,25 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
   end
 
-  # Two principals' session templates (property 14), each its principal's; system
-  # and guest split users between them, and guest takes a page of system's memory.
+  # Two principals' session templates (property 14), each its principal's, of the
+  # profile split; system and guest split users between them, and guest takes a page
+  # of system's memory.
   SESSIONS = NARROW +
-             LIMITS.sub('limits app', 'limits session').sub('grant @share.users', 'grant @share.narrow')
+             LIMITS.sub('limits app', 'limits split').sub('grant @share.users', 'grant @share.narrow')
                    .sub('  spaces none', '  spaces @share.narrow').sub("  flags none\n", "  flags spaces\n") +
              "principal guest\n  memory 4096\n  grant @share.narrow\n  domains 0\n  names 0\n" \
              "  default_limits @limits.native\n  ceiling_limits @limits.native\n" +
              %w[guest system].map do |principal|
-               "session #{principal}\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.app\n"
+               "session #{principal}\n  limits @limits.split\n  runtime @artifact.emu\n  release @artifact.app\n"
              end.join
 
   def with_sessions
-    with_domains('alpha', share: 'narrow').sub("principal system\n  memory 16777216\n  grant @share.users",
-                                               "principal system\n  memory 16773120\n  grant @share.narrow")
-                                          .sub(/(limits native\n(?:  .*\n)*?  grant )@share\.users/, '\1@share.narrow') +
-      SESSIONS
+    source = with_domains('alpha', share: 'narrow')
+    system = source.sub(/^(principal system\n  memory )(\d+)\n  grant @share\.users$/) do
+      "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2)) - 4096}\n  grant @share.narrow"
+    end
+    refute_equal source, system, "the system principal's memory and grant"
+    system.sub(/(limits native\n(?:  .*\n)*?  grant )@share\.users/, '\1@share.narrow') + SESSIONS
   end
 
   def test_session_templates_are_read_but_never_planned
@@ -131,9 +134,11 @@ class DomPlannerTest < Minitest::Test
     refused(with_domains('alpha', 'beta', 'gamma'), 'domain', /configured domain gamma with inval/)
   end
 
+  # Two domains of 8 MiB each past a principal of 16 MiB.
   def test_budgets_past_their_principal_fail_at_the_domain_that_overflows
-    refused(with_domains('alpha', 'beta').sub("limits app\n  memory 4194304", "limits app\n  memory 8388608"),
-            'domain', /configured domain beta with nomem/)
+    source = ManifestContextFixture.substitute(with_domains('alpha', 'beta'), /^(?<head>principal system\n  memory )\d+$/,
+                                               '\k<head>16777216')
+    refused(source.sub("limits app\n  memory 4194304", "limits app\n  memory 8388608"), 'domain', /configured domain beta with nomem/)
   end
 
   def test_domains_past_their_principal_quota_fail_the_build
@@ -179,7 +184,7 @@ class DomPlannerTest < Minitest::Test
   def test_a_runtime_without_an_accepted_image_fails_the_build
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).then do |arguments|
       arguments.merge(platform: @context.platform,
-                      catalog: arguments.fetch(:catalog).each_with_index.map { |row, index| index == 2 ? row.except('image') : row })
+                      catalog: arguments.fetch(:catalog).map { |row| row.fetch('path') == 'runtimes/emu' ? row.except('image') : row })
     end)
     assert_equal 12, assert_raises(Erx::Manifest::Invalid) { admit(@source) }.property
   end

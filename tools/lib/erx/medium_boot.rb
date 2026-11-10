@@ -256,15 +256,18 @@ module Erx
     # the build's planner plans against the principal and which runs while the shell starts,
     # and one domain of the shell's, or two at once after a kill, whose domain the service
     # stops behind its pid while the next create runs, once the configured one has ended. So
-    # the system principal's quota and max_domains go from 0 to domains (2), and its memory and
-    # root_memory each grow by two domains' budgets. The development manifest itself,
-    # what the production image promises, is unchanged. row replaces DOMAIN_ROW for a
-    # harness whose configured domain runs another way (SystemDomain); domains is how many
-    # of domain_memory's domains the principal gains room for.
+    # the system principal's quota and max_domains each grow by domains (2), and its memory
+    # and root_memory each by that many domains' budgets. Machine#manifest drops the system
+    # principal's session template, so the console's login at boot starts no session and
+    # the ids and the room are the cell's own. The development manifest itself, what the
+    # production image promises, is unchanged. row replaces DOMAIN_ROW for a harness whose
+    # configured domain runs another way (SystemDomain); domains is how many of
+    # domain_memory's domains the principal gains room for.
     def manifest(source, row: DOMAIN_ROW, domains: 2, domain_memory: DOMAIN_MEMORY)
       growth = domains * (domain_memory + DOMAIN_OUTER)
       { /^(principal system\n  memory )([0-9]+)$/ => growth, /^(  root_memory )([0-9]+)$/ => growth,
-        /^(principal system\n(?:  .*\n)*?  domains )(0)$/ => domains, /^(  max_domains )(0)$/ => domains }
+        /^(principal system\n(?:  .*\n)*?  domains )([0-9]+)$/ => domains,
+        /^(  max_domains )([0-9]+)$/ => domains }
         .reduce(MACHINE.manifest(source)) do |text, (pattern, added)|
           raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
 
@@ -512,7 +515,8 @@ module Erx
       # has a tmp cap above 0: the pool figure must not change, since a tmp cap is charged on use.
       STEPS = [['bare', 'bare', 0], ['storage', 'storage', 0], ['network', 'network', 0],
                ['bare-tmp4', 'bare', 4 << 20]].freeze
-      TMP_LINE = "  tmp 16777216\n"
+      # The system domain's /tmp cap: the tmp line of the runtime_limits system row.
+      TMP_LINE = /^(runtime_limits system\n(?:  .*\n)*?  tmp )[0-9]+$/
 
       PROFILE = <<~ROW
         share drivers
@@ -579,9 +583,9 @@ module Erx
       # MACHINE's manifest with room for the three domains, the configured rows, and the
       # system domain's /tmp cap at system_tmp bytes.
       def manifest(source, system_tmp:)
-        raise Error, 'the development manifest does not have exactly one tmp line' unless source.scan(TMP_LINE).size == 1
+        raise Error, 'the development manifest does not have exactly one tmp line in its runtime_limits system row' unless source.scan(TMP_LINE).size == 1
 
-        MediumBoot.manifest(source.sub(TMP_LINE, "  tmp #{system_tmp}\n"), domains: RELEASES.size, domain_memory: MEMORY,
+        MediumBoot.manifest(source.sub(TMP_LINE) { "#{Regexp.last_match(1)}#{system_tmp}" }, domains: RELEASES.size, domain_memory: MEMORY,
                                                                           row: PROFILE + RELEASES.keys.map { |name| domain_row(name) }.join)
       end
 

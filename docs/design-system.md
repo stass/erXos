@@ -559,7 +559,7 @@ the rows, which each name two ids, bound the remains at twice
 ```c
 typedef struct erx_dom_origin {
 	uint32_t	kind;		/* ERX_DOM_REQUEST, ERX_DOM_CONFIGURED,
-					 * or ERX_DOM_PARTIAL_BOOT */
+					 * ERX_DOM_PARTIAL_BOOT or ERX_DOM_SESSION */
 	uint32_t	record;		/* REQUEST: ERX_MF_NONE; otherwise the
 					 * index in the origin's manifest table */
 } erx_dom_origin_t;
@@ -845,7 +845,10 @@ and 6 give way to the partial boot below.
    the machine has one. Each line starts with a login in release builds;
    in development builds the console logs `root` in at the UART and,
    when the host opens it, at the host link's `console` line, both
-   secure lines, so each shows the system shell
+   secure lines. The login asks the domain service for root's session,
+   from the system principal's session template, and the session takes
+   the line once its tty names itself; the system shell stays one menu
+   key away, and when the session ends the console logs `root` in again
    ([design-live.md](design-live.md#the-console)).
 5. **Each display's session.** For each display domain whose manifest
    entry names a session principal, the domain service starts that
@@ -1070,7 +1073,15 @@ caller ever hands the planner a specification or an origin:
 * `erx_dom_plan_partial(view, id, row)` takes a checked native program
   row of a partial-boot manifest, with the partial boot's system
   principal and the manifest's native limits; it sets
-  `ERX_DOM_PARTIAL_BOOT`.
+  `ERX_DOM_PARTIAL_BOOT`;
+* `erx_dom_plan_session(view, id, template, name, name_len, domain_pid)`
+  takes an index into the checked manifest's session templates and the
+  name the domain service chose; everything else (principal, images,
+  arguments, complete limits and flags) is the template's and its limits
+  record's, so a session is its template by construction. A template
+  whose limits lack `ERX_DOM_SPACES` is `ERX_EINVAL`. It sets
+  `ERX_DOM_SESSION` with the template's index; only the domain service's
+  start of a session (`erx_domain:start_session/2`) calls it.
 
 Every resolved limit is checked against the independent
 `ceiling_limits`, and the specification holds the complete runtime-limit
@@ -1269,6 +1280,21 @@ ended unreported only once its domain pid has ended too: `{ok, Domain}` if
 the report came, its end otherwise. A runtime that is no node reports
 nothing, so a domain with a system connection runs its release over the
 `erx` carrier, as every domain's release does.
+
+A domain counts against its principal's domain quota until the library
+retires it, but its domain pid can end first: a kill ends the pid at once,
+while the library is still tearing the domain down. A caller that acts on
+the pid's end, as the console starting a login again after its session was
+killed does, would then be refused with `elimit` for a domain it saw end.
+So the domain service holds a create or a session's start for a principal
+one of whose domains is ending, its domain pid gone but the domain not yet
+retired, and runs it once that domain is retired, in arrival order with the
+principal's other held starts. The hold is bounded (10 seconds): a domain
+the library never retires holds no start for longer, and the library then
+answers the start as it stands. The service judges an ending domain by its
+pid's liveness, not by the pid's exit signal, which may still be in its
+queue when the caller's start arrives, so the rule holds for every caller
+by construction and no caller retries.
 
 **On the stopgap.** The plan, its checks and its undo are the same code.
 Each step's kernel call is a request to the stopgap's root service, the

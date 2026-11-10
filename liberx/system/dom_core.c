@@ -107,6 +107,8 @@ static void	dom_spec_configured(const erx_dom_view_t *, uint32_t,
 		    uint32_t, erx_dom_pid_t, erx_dom_spec_t *);
 static void	dom_spec_partial(const erx_dom_view_t *, uint32_t, uint32_t,
 		    erx_dom_spec_t *);
+static void	dom_spec_session(const erx_dom_view_t *, uint32_t, uint32_t,
+		    const char *, uint32_t, erx_dom_pid_t, erx_dom_spec_t *);
 static void	dom_decimal(uint32_t, erx_dom_spec_t *);
 static erx_status_t dom_plan(const erx_dom_spec_t *, const erx_dom_view_t *,
 		    erx_dom_plan_t *);
@@ -351,6 +353,10 @@ dom_check_origin(const erx_dom_spec_t *spec, const erx_dom_view_t *view)
 		return (spec->origin.record < view->nconfigured ? ERX_OK : ERX_EINVAL);
 	case ERX_DOM_PARTIAL_BOOT:
 		return (spec->origin.record < view->npartial ? ERX_OK : ERX_EINVAL);
+	case ERX_DOM_SESSION:
+		/* A session makes its programs as sub-spaces (property 14). */
+		return (spec->origin.record < view->ntemplates &&
+		    (spec->flags & ERX_DOM_SPACES) != 0 ? ERX_OK : ERX_EINVAL);
 	default:
 		return (ERX_EINVAL);
 	}
@@ -648,6 +654,52 @@ dom_spec_partial(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 	spec->crash = ERX_CRASH_SIZE;
 }
 
+/*
+ * The session constructor: everything but the id, the pid and the name is
+ * session template `template`'s and its resolved limits'; the name is the
+ * one the domain service chose. The template's arguments and environment
+ * fit the spec's strings, which boot_templates checked when it built the
+ * view. A name that does not fit is left empty, which planning refuses, as
+ * it refuses an empty name of a configured row.
+ */
+static void
+dom_spec_session(const erx_dom_view_t *view, uint32_t id, uint32_t template,
+    const char *name, uint32_t name_len, erx_dom_pid_t domain_pid,
+    erx_dom_spec_t *spec)
+{
+	const erx_dom_template_t *source = &view->templates[template];
+
+	memset(spec, 0, sizeof(*spec));
+	spec->version = ERX_DOM_SPEC_VERSION;
+	spec->id = id;
+	spec->principal = source->principal;
+	spec->domain_pid = domain_pid;
+	spec->origin = (erx_dom_origin_t){ ERX_DOM_SESSION, template };
+	spec->flags = source->flags;
+	spec->release = source->release;
+	spec->release_files = source->release_files;
+	spec->runtime = source->runtime;
+	spec->memory = source->memory;
+	spec->outer = source->outer;
+	spec->grant = source->grant;
+	spec->spaces = source->spaces;
+	spec->runtime_limits = source->runtime_limits;
+	spec->lane = source->lane;
+	spec->connections = source->connections;
+	spec->system_lane = view->system_lane;
+	spec->crash = ERX_CRASH_SIZE;
+	if (name != NULL && name_len <= sizeof(spec->name)) {
+		spec->name_len = name_len;
+		memcpy(spec->name, name, name_len);
+	}
+	spec->args_len = source->args_len;
+	spec->env_len = source->env_len;
+	if (source->args_len != 0)
+		memcpy(spec->strings, source->args, source->args_len);
+	if (source->env_len != 0)
+		memcpy(spec->strings + source->args_len, source->env, source->env_len);
+}
+
 /* id in decimal as spec's name: at most ten digits, which ERX_DOM_NAME_MAX holds. */
 static void
 dom_decimal(uint32_t id, erx_dom_spec_t *spec)
@@ -866,6 +918,19 @@ erx_dom_plan_partial(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 	if (row >= view->npartial)
 		return (ERX_EINVAL);
 	dom_spec_partial(view, id, row, &spec);
+	return (dom_plan(&spec, view, plan));
+}
+
+erx_status_t
+erx_dom_plan_session(const erx_dom_view_t *view, uint32_t id,
+    uint32_t template, const char *name, uint32_t name_len,
+    erx_dom_pid_t domain_pid, erx_dom_plan_t *plan)
+{
+	erx_dom_spec_t spec;
+
+	if (template >= view->ntemplates)
+		return (ERX_EINVAL);
+	dom_spec_session(view, id, template, name, name_len, domain_pid, &spec);
 	return (dom_plan(&spec, view, plan));
 }
 

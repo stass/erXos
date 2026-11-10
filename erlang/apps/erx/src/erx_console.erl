@@ -63,8 +63,21 @@
 %% call of the grantee's can take. The endpoint refuses every call, so a session reaches
 %% none of the console's own calls through its facet. The console keeps, for
 %% each session by domain id, the master's state (erx_tty_master, which checks every
-%% message); the tty, name, principal and domain pid that add_session/2 names, whose
-%% domain pid it monitors; and a monitor of the facet. Either end is the session's.
+%% message); the name, principal and domain pid that add_session/2 names, whose domain
+%% pid it monitors; the tty, which names itself through the facet ({tty_open, Tty}, a pid
+%% of the facet's grantee); and a monitor of the facet. Either end is the session's.
+%%
+%% It starts the sessions of its line's principal (start_session/2): at boot, once the
+%% domain service runs (login/0, boot step 4 of docs/design-system.md), and from the
+%% menu's "start a session". A helper asks the domain service, which builds the session
+%% from the principal's session template with the line's console facet, and the console
+%% hears the answer as a message, never waiting for a domain to boot. The session the
+%% login starts takes the line once its tty names itself, so the UART's first prompt is
+%% root's session's; one that cannot start leaves the line with the system shell after
+%% one line saying why, and a principal with no session template, or a runtime with no
+%% domain service, leaves it there silently. A session that ends while it has the line
+%% gives it back after one line, `session root_1 ended: {halt,3}`, through the line
+%% escape, and when the login's session ends the console logs the principal in again.
 %%
 %% The line belongs to the console's own groups, to one connected session (connect/1), or
 %% to the Ctrl-G menu (erx_console_menu). A connected session's output is copied to the
@@ -83,7 +96,7 @@
 -behaviour(gen_server).
 
 -export([start/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
--export([facet/0, add_session/2, connect/1, detach/0, first_group/0]).
+-export([facet/0, add_session/2, login/0, connect/1, detach/0, first_group/0]).
 -export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -109,8 +122,11 @@
 %% it registers.
 %% `menu` says whether a typed Ctrl-G opens the Ctrl-G menu, by default for the system
 %% console only: a session's relay reads every BEL as a byte, as a raw tty does.
+%% `owner` is the domain a pid belongs to, erx:owner/1 by default, which a host test
+%% replaces as it replaces the export table.
 -type config() :: #{role := system | session,
                     menu => boolean(),
+                    owner => fun((pid()) -> non_neg_integer()),
                     name := atom(),
                     driver := fun((Console :: pid()) -> {ok, pid(), Terminal :: boolean()}),
                     first_shell := first_shell() | shell()}.
@@ -129,8 +145,10 @@
                 %% The group the console started with, which the others return the input to:
                 %% the command shell's, or `user` with no shell.
                 base :: pid(),
-                %% The `user` group, which only the system console has.
-                user :: pid() | none,
+                %% The `user` group, which every console has (start_user/0): the
+                %% groups ask it the line's encoding (shell:prompt_width/1), and a session's
+                %% domain, started with -nouser, has no other.
+                user :: pid(),
                 tty :: prim_tty:state(),
                 size :: {pos_integer(), pos_integer()},
                 terminal :: boolean(),
@@ -158,8 +176,15 @@
                 menu :: boolean(),
                 %% The sessions whose tty the console is the master of, by domain id.
                 sessions = #{} :: #{pos_integer() => session()},
+                %% The line's login session (login/0): none, being started, or the domain
+                %% of the one started, which takes the line once its tty names itself;
+                %% connected once it has had the line, and only then started again when
+                %% it ends.
+                login = none :: none | starting | {started | connected, pos_integer()},
                 %% The process behind every session's console facet (facet_endpoint/1).
-                endpoint :: pid()}).
+                endpoint :: pid(),
+                %% The domain a pid belongs to (config()).
+                owner :: fun((pid()) -> non_neg_integer())}).
 
 %% A session: its tty, name, principal and domain pid with the pid's monitor, once
 %% add_session/2 names them; the monitor of its console facet, once the facet has
@@ -167,10 +192,9 @@
 -type session() :: #{tty := pid() | none, name := binary() | none, principal := pos_integer() | none,
                      domain := {pid(), reference()} | none, facet := reference() | none,
                      master := erx_tty_master:master()}.
-%% What add_session/2 names of a session: its tty (the `tty` agent of its domain's ready
-%% report), its name, its principal and its domain pid (erx_domain:pid/1).
--type session_spec() :: #{tty := pid(), name := binary(), principal := pos_integer(),
-                          domain_pid := pid()}.
+%% What add_session/2 names of a session: its name, its principal and its domain pid
+%% (erx_domain:pid/1). Its tty names itself, through its console facet.
+-type session_spec() :: #{name := binary(), principal := pos_integer(), domain_pid := pid()}.
 
 %% user_sup calls this, and waits for the `user` group to register.
 -spec start() -> {ok, pid()} | {error, term()}.
@@ -249,13 +273,26 @@ facet() ->
 -doc """
 Names the session of domain Domain as Spec says: the console sends its tty the session's
 input, size and answers, lists it by its name in the Ctrl-G menu of a line whose
-principal is its principal, and ends it when its domain pid ends.
+principal is its principal, and ends it when its domain pid ends. Spec names no tty:
+every session's tty names itself, through its console facet ({tty_open, Tty}), which
+the console checks is the domain's own.
 """.
 -spec add_session(pos_integer(), session_spec()) -> ok.
-add_session(Domain, Spec = #{tty := Tty, name := Name, principal := Principal, domain_pid := DomainPid})
-  when is_integer(Domain), Domain > 0, is_pid(Tty), is_binary(Name), is_integer(Principal), Principal > 0,
+add_session(Domain, Spec = #{name := Name, principal := Principal, domain_pid := DomainPid})
+  when is_integer(Domain), Domain > 0, is_binary(Name), is_integer(Principal), Principal > 0,
        is_pid(DomainPid) ->
-    gen_server:call(?MODULE, {add_session, Domain, maps:with([tty, name, principal, domain_pid], Spec)}).
+    gen_server:call(?MODULE, {add_session, Domain, maps:with([name, principal, domain_pid], Spec)}).
+
+-doc """
+Boot step 4 (docs/design-system.md, "Booting"), once the domain service runs: the
+console logs the line's principal in at the line, root at the UART in a development
+build, which starts that principal's session (erx_domain:start_session/2). The session
+takes the line once its tty names itself, and is started again whenever it ends; if it
+cannot start, the line stays with the system shell after one line saying why.
+""".
+-spec login() -> ok.
+login() ->
+    gen_server:cast(?MODULE, login).
 
 -doc """
 Gives the line to domain Domain's session, taking it from whoever had it: the session's
@@ -292,10 +329,7 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
     TTY = banner(Role, prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
-    User = case Role of
-               system -> group:start(self(), noshell, [{name, user}]);
-               session -> none
-           end,
+    User = start_user(),
     Group = case FirstShell of
                 none -> User;
                 Shell -> start_shell(Shell, Terminal)
@@ -311,6 +345,7 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
                            size = ?DEFAULT_SIZE,
                            terminal = Terminal,
                            menu = maps:get(menu, Config, Role =:= system),
+                           owner = maps:get(owner, Config, fun erx:owner/1),
                            endpoint = spawn(fun() -> facet_endpoint(Console) end)})}.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
@@ -370,6 +405,14 @@ The first group never runs the Erlang shell (first_shell/1).
 erlang_shell_group([{Group, _Caller, {shell, start, _Args}} | _]) -> Group;
 erlang_shell_group(_Shells) -> undefined.
 
+%% The `user` group, started and registered as user_drv's start_user/0 does, unless a
+%% `user` already exists.
+start_user() ->
+    case whereis(user) of
+        undefined -> group:start(self(), noshell, [{name, user}]);
+        User -> User
+    end.
+
 %% Starts Shell on a new group with the options every shell but the Erlang shell
 %% gets: no completion, since the Erlang shell's would complete Erlang.
 start_shell(Shell, Terminal) ->
@@ -401,15 +444,9 @@ handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
     {noreply, State};
 handle_call(facet, _From, State = #state{endpoint = Endpoint}) ->
-    {reply, {Endpoint, #{max_request => erx_tty_master:max_message()}}, State};
-handle_call({add_session, Domain, #{tty := Tty, name := Name, principal := Principal, domain_pid := Pid}},
-            _From, State) ->
-    Named = fun(Session = #{domain := Old}) ->
-                    [demonitor(Monitor, [flush]) || {_Pid, Monitor} <- [Old]],
-                    Session#{tty := Tty, name := Name, principal := Principal,
-                             domain := {Pid, monitor(process, Pid)}}
-            end,
-    {reply, ok, with_session(Domain, Named, State)};
+    {reply, console_facet(Endpoint), State};
+handle_call({add_session, Domain, Spec}, _From, State) ->
+    {reply, ok, named(Domain, Spec, State)};
 handle_call({connect, Domain}, _From, State) ->
     {Reply, Next} = connect_session(Domain, State),
     {reply, Reply, Next};
@@ -419,6 +456,8 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
 -spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
+handle_cast(login, State = #state{role = system}) ->
+    {noreply, start_login(State)};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -492,13 +531,15 @@ handle_info({erx_tty_message, {Facet, _Tag} = From, Domain, Message}, State) ->
     Next = from_tty(Domain, Facet, Message, State),
     gen:reply(From, ok),
     {noreply, Next};
-handle_info({'DOWN', Monitor, process, _Pid, _Reason}, State = #state{sessions = Sessions}) ->
+handle_info({'DOWN', Monitor, process, _Pid, Reason}, State = #state{sessions = Sessions}) ->
     %% A session's domain pid or its console facet, which ends with its domain, has ended:
     %% so has the session.
     case [Domain || Domain := Session <- Sessions, lists:member(Monitor, monitors(Session))] of
-        [Domain] -> {noreply, session_ended(Domain, State)};
+        [Domain] -> {noreply, session_ended(Domain, Reason, State)};
         [] -> {noreply, State}
     end;
+handle_info({erx_console_started, Why, Principal, Started}, State) ->
+    {noreply, session_started(Why, Principal, Started, State)};
 handle_info({erx_console_written, {caller, From}}, State) ->
     gen_server:reply(From, ok),
     {noreply, State};
@@ -506,7 +547,7 @@ handle_info({erx_console_written, {Group, Reply}}, State) ->
     Group ! {reply, Reply, ok},
     {noreply, State};
 handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
-    %% user_sup kills `user` when the system stops: the runtime is on its way out.
+    %% `user` ends only as the runtime stops (user_sup kills the system console's).
     {stop, Reason, State};
 handle_info({'EXIT', Pid, Reason},
             State = #state{role = Role, driver = Driver, base = Base, shells = Shells,
@@ -655,8 +696,56 @@ from_tty(Domain, Facet, Message, State0) ->
     State = with_session(Domain, fun(Session = #{facet := none}) -> Session#{facet := monitor(process, Facet)};
                                     (Session) -> Session
                                  end, State0),
-    #{Domain := #{master := Master}} = State#state.sessions,
-    carry_out(Domain, erx_tty_master:output(Message, Master), State).
+    #{Domain := Session = #{master := Master}} = State#state.sessions,
+    case Message of
+        {tty_open, Tty} -> tty_opened(Domain, Tty, Session, State);
+        _ -> carry_out(Domain, erx_tty_master:output(Message, Master), State)
+    end.
+
+%% The tty of Domain's session names itself through its console facet, which says the
+%% message is Domain's (docs/design-live.md, "Between domains"): the first names it, if
+%% it is a process of Domain's own; the same again is nothing, since the tty sends it
+%% with each resend, and any other fails the master's check, as any message it does not
+%% know does. A session the menu then lists is drawn in it, and the login's session takes
+%% the line (take_login_line/2).
+tty_opened(Domain, Tty, #{tty := none}, State = #state{owner = Owner}) when is_pid(Tty) ->
+    case Owner(Tty) of
+        Domain ->
+            Named = with_session(Domain, fun(Session) -> Session#{tty := Tty} end, State),
+            take_login_line(Domain, redraw_if_listed(Domain, Named));
+        _Other -> tty_refused(Domain, Tty, State)
+    end;
+tty_opened(_Domain, Tty, #{tty := Tty}, State) ->
+    State;
+tty_opened(Domain, Tty, _Session, State) ->
+    tty_refused(Domain, Tty, State).
+
+tty_refused(Domain, Tty, State = #state{sessions = Sessions}) ->
+    #{Domain := #{master := Master}} = Sessions,
+    carry_out(Domain, erx_tty_master:output({tty_open, Tty}, Master), State).
+
+%% Domain's session named by Spec (session_spec()), its domain pid watched from now on.
+named(Domain, #{name := Name, principal := Principal, domain_pid := Pid}, State) ->
+    Named = fun(Session = #{domain := Old}) ->
+                    [demonitor(Monitor, [flush]) || {_Pid, Monitor} <- [Old]],
+                    Session#{name := Name, principal := Principal, domain := {Pid, monitor(process, Pid)}}
+            end,
+    with_session(Domain, Named, State).
+
+%% The menu drawn again when it has the line and Domain's session, now live, is one it
+%% lists: one of the line's principal.
+redraw_if_listed(Domain, State = #state{line = {menu, Menu}, principal = Principal, sessions = Sessions}) ->
+    case Sessions of
+        #{Domain := Session = #{principal := Principal}} ->
+            case is_live(Session) of
+                true -> open_menu(none, erx_console_menu:back(Menu), State);
+                false -> State
+            end;
+        #{} ->
+            State
+    end;
+redraw_if_listed(_Domain, State) ->
+    State.
 
 %% Bytes typed at the line, for Domain's session, which has it.
 to_session(Domain, Bytes, State = #state{sessions = Sessions}) ->
@@ -674,25 +763,31 @@ session_size(State) ->
 %% refused.
 connect_session(Domain, State0 = #state{sessions = Sessions}) ->
     case Sessions of
-        #{Domain := #{tty := none}} ->
-            {{error, no_tty}, State0};
-        #{Domain := Session = #{master := Master}} ->
-            case {erx_tty_master:is_refused(Master), is_live(Session)} of
-                {true, _} ->
+        #{Domain := Session = #{tty := Tty, master := Master}} ->
+            %% A tty that failed a check is refused, whether or not it named itself first.
+            case {erx_tty_master:is_refused(Master), Tty, is_live(Session)} of
+                {true, _, _} ->
                     {{error, refused}, State0};
-                {false, false} ->
+                {false, none, _} ->
+                    {{error, no_tty}, State0};
+                {false, _, false} ->
                     {{error, unknown}, State0};
-                {false, true} ->
-                    %% Whatever the line's last holder left, a string open or its text
-                    %% hidden, ends before the session's held output.
-                    ok = reset_line(State0),
-                    State = (release(State0))#state{line = {session, Domain}},
+                {false, _, true} ->
+                    %% Whatever the line's last holder left, a string open, its text
+                    %% hidden or the system shell's prompt, ends before the session's
+                    %% held output, which starts on a line of its own.
+                    ok = new_line(none, State0),
+                    State = login_connected(Domain, (release(State0))#state{line = {session, Domain}}),
                     #state{size = {Columns, Rows}, sessions = #{Domain := #{master := Disconnected}}} = State,
                     {ok, carry_out(Domain, erx_tty_master:connect({Rows, Columns}, Disconnected), State)}
             end;
         #{} ->
             {{error, unknown}, State0}
     end.
+
+%% State with the login's session marked as one that has had the line, if Domain's is it.
+login_connected(Domain, State = #state{login = {started, Domain}}) -> State#state{login = {connected, Domain}};
+login_connected(_Domain, State) -> State.
 
 %% State with the line taken from the session that has it, if one does: the session is no
 %% longer connected, and its tty is stopped. Who has the line next is the caller's to set.
@@ -717,11 +812,6 @@ to_groups(Notice, State0) ->
     current(State) ! {self(), activate},
     State.
 
-%% Ends what the line's last holder left on it before another takes it, unless the
-%% console's own groups had it.
-reset_line(#state{line = system}) -> ok;
-reset_line(State) -> new_line(none, State).
-
 %% Ends whatever a session or a command left on the line, a string open or its text
 %% hidden, and starts a new line, with Notice on it if there is one.
 new_line(Notice, #state{driver = Driver}) ->
@@ -729,31 +819,60 @@ new_line(Notice, #state{driver = Driver}) ->
     Driver ! {erx_console_output, none, [<<"\e\\\e[0m\r\n">>, Line]},
     ok.
 
-%% Domain's session has ended: its domain pid or its console facet has. If it had the
-%% line, the line goes back to the groups, and if the menu has the line and shows it, the
-%% menu is drawn again without it; a session the menu does not show, another principal's,
-%% is not named on this line.
-session_ended(Domain, State0 = #state{line = Line, sessions = Sessions}) ->
+%% Domain's session has ended, for Reason: its domain pid or its console facet has. If it
+%% had the line, the line goes back to the groups after one line saying how, and if the
+%% menu has the line and shows it, the menu is drawn again without it, after that line; a
+%% session the menu does not show, another principal's, is not named on this line. The
+%% login's session is started again (start_login/1), which takes the line when it is up,
+%% if it ever had the line; one that never had it, which ended as it came up, is not
+%% started again, so a session that cannot come up does not loop, and the line stays
+%% with the system shell after the same one line (login_ended/2).
+session_ended(Domain, Reason, State0 = #state{line = Line, sessions = Sessions}) ->
     Principal = maps:get(principal, maps:get(Domain, Sessions)),
     State = State0#state{sessions = maps:remove(Domain, Sessions)},
-    Notice = [<<"erx_console: ">>, session_label(Domain, maps:get(Domain, Sessions)), <<" has ended">>],
-    case Line of
-        {session, Domain} -> to_groups(Notice, State);
-        {menu, Menu} ->
-            %% A session of the line's principal may be one the menu only counts.
-            case erx_console_menu:shows(Domain, Menu) orelse Principal =:= State#state.principal of
-                true -> open_menu(Notice, erx_console_menu:back(Menu), State);
-                false -> State
-            end;
-        _ -> State
+    Notice = [session_label(Domain, maps:get(Domain, Sessions)), <<" ended: ">>, how_ended(Reason)],
+    Shown = case Line of
+                {session, Domain} -> to_groups(Notice, State);
+                {menu, Menu} ->
+                    %% A session of the line's principal may be one the menu only counts.
+                    case erx_console_menu:shows(Domain, Menu) orelse Principal =:= State#state.principal of
+                        true -> open_menu(Notice, erx_console_menu:back(Menu), State);
+                        false -> State
+                    end;
+                _ -> State
+            end,
+    case Shown of
+        #state{login = {connected, Domain}} -> start_login(Shown);
+        #state{login = {started, Domain}} -> login_ended(Notice, Shown);
+        #state{} -> Shown
     end.
 
+%% The login's session ended before it ever had the line: the line stays with whoever has
+%% it, and the system shell, if that is who, prompts again after Notice.
+login_ended(Notice, State = #state{line = system}) ->
+    ok = new_line(Notice, State),
+    current(State) ! {self(), activate},
+    State#state{login = none};
+login_ended(_Notice, State) ->
+    State#state{login = none}.
+
 %% How a notice names Domain's session: by the name add_session/2 gave it, attributed text
-%% that the line escape later makes safe to show, and its domain id.
+%% that the line escape later makes safe to show, or by its domain id.
 session_label(Domain, #{name := none}) ->
     [<<"the session of domain ">>, integer_to_binary(Domain)];
-session_label(Domain, #{name := Name}) ->
-    [<<"session ">>, Name, <<" (domain ">>, integer_to_binary(Domain), <<")">>].
+session_label(_Domain, #{name := Name}) ->
+    [<<"session ">>, Name].
+
+%% How a session's domain ended, as its domain pid's end says: {domain_down, Id, Info}'s
+%% Info ({halt, Status}, crash, {fault, Kind} or stopped), or the pid's own exit reason,
+%% killed by a kill. Info is one of those four shapes, cut at a depth all the same; any
+%% other reason is the system domain's own state, which the line names only by its
+%% atom and the kernel log records whole.
+how_ended({domain_down, _Domain, Info}) -> io_lib:format("~0P", [Info, 8]);
+how_ended(Reason) when is_atom(Reason) -> atom_to_binary(Reason);
+how_ended(Reason) ->
+    logger:notice("erx_console: a session's domain pid ended: ~0P", [Reason, 16]),
+    <<"an error in the system domain">>.
 
 %% -- The Ctrl-G menu ------------------------------------------------------------------
 
@@ -803,18 +922,102 @@ menu_action({connect, Domain}, Menu, State = #state{principal = Principal, sessi
             Notice = io_lib:format("erx_console: cannot connect domain ~b: ~p", [Domain, Reason]),
             open_menu(Notice, erx_console_menu:back(Menu), Refused)
     end;
-menu_action(start, Menu, State = #state{principal = Principal}) ->
-    {error, Reason} = start_session(Principal),
-    Notice = io_lib:format("erx_console: cannot start a session: ~p", [Reason]),
-    open_menu(Notice, erx_console_menu:back(Menu), State).
+menu_action(start, Menu, State) ->
+    ok = start_session(menu, State),
+    open_menu(<<"erx_console: starting a session">>, erx_console_menu:back(Menu), State).
 
+%% Starts a session of the line's principal at this line, for the boot's login and the
+%% menu's "start a session", with the line's console facet as its console. Creating a
+%% domain takes seconds, so a helper asks the domain service and the console hears
+%% {erx_console_started, Why, Principal, Started}, Started the service's answer, once
+%% the session's init has reported ready or the start is refused (session_started/4).
+%% The helper never calls the console, which is not waiting for it.
+start_session(Why, #state{principal = Principal, endpoint = Endpoint}) ->
+    Console = self(),
+    Facets = #{console => console_facet(Endpoint)},
+    _ = spawn(fun() -> Console ! {erx_console_started, Why, Principal, started(Principal, Facets)} end),
+    ok.
 
-%% Starts a session of Principal at this line, for the menu's "start a session": the
-%% domain service's call that makes one from the principal's session template does not
-%% exist yet, so every start is refused.
--spec start_session(pos_integer()) -> {error, enotsup}.
-start_session(_Principal) ->
-    {error, enotsup}.
+%% The domain service's answer to a session's start; a runtime with no domain service, or
+%% none loaded, as a hosted one, starts none.
+started(Principal, Facets) ->
+    try erx_domain:start_session(Principal, Facets)
+    catch
+        exit:{noproc, _} -> {error, enotsup};
+        error:undef -> {error, enotsup};
+        %% The service ended during the call: the menu shows that the start failed.
+        exit:Reason -> {error, Reason}
+    end.
+
+%% A session the console started, named by its domain (add_session/2), and the menu drawn
+%% again if it lists it; the login's session also takes the line if its tty has named
+%% itself by now (take_login_line/2), and otherwise once it does. A session whose domain
+%% pid has ended by now leaves nothing to show, and a login's is a start that failed. A
+%% refusal is a start that failed (start_failed/3). A login at a line whose principal
+%% has no session template, or in a runtime with no domain library, starts nothing and
+%% says nothing.
+session_started(Why, Principal, {ok, Domain}, State) ->
+    Id = erx_domain:id(Domain),
+    [Name | _] = binary:split(atom_to_binary(erx_domain:node(Domain)), <<"@">>),
+    Pid = erx_domain:pid(Domain),
+    case {is_process_alive(Pid), Why} of
+        {true, login} ->
+            Named = named(Id, #{name => Name, principal => Principal, domain_pid => Pid}, State),
+            take_login_line(Id, redraw_if_listed(Id, Named#state{login = {started, Id}}));
+        {true, menu} ->
+            redraw_if_listed(Id, named(Id, #{name => Name, principal => Principal, domain_pid => Pid}, State));
+        {false, login} ->
+            start_failed(login, ended, State);
+        {false, menu} ->
+            State
+    end;
+session_started(login, _Principal, {error, Quiet}, State) when Quiet =:= no_template; Quiet =:= enotsup ->
+    State#state{login = none};
+session_started(Why, _Principal, {error, Reason}, State) ->
+    start_failed(Why, Reason, State).
+
+%% A start that failed, for Reason. A login's leaves the line with the system shell, after
+%% one line saying why if the shell has the line, so the line is never left without a
+%% prompt; the menu shows any refusal if it has the line, and the log reports it otherwise.
+start_failed(login, Reason, State = #state{line = system}) ->
+    ok = new_line(io_lib:format("erx_console: the login session did not start: ~0P", [Reason, 8]), State),
+    current(State) ! {self(), activate},
+    State#state{login = none};
+start_failed(Why, Reason, State0) ->
+    State = case Why of
+                login -> State0#state{login = none};
+                menu -> State0
+            end,
+    case State of
+        #state{line = {menu, Menu}} ->
+            Notice = io_lib:format("erx_console: cannot start a session: ~0P", [Reason, 8]),
+            open_menu(Notice, erx_console_menu:back(Menu), State);
+        #state{} ->
+            logger:notice("erx_console: a session did not start: ~0P", [Reason, 8]),
+            State
+    end.
+
+%% The console's login (login/0): root's session started at this line, the line's
+%% principal's in general (docs/design-system.md, "Booting", step 4).
+start_login(State) ->
+    ok = start_session(login, State),
+    State#state{login = starting}.
+
+%% The line given to Domain's session if it is the login's and the console's own groups
+%% have the line: a person who has opened the menu or connected another session keeps it.
+%% A session whose tty has not named itself yet takes the line when it does.
+take_login_line(Domain, State = #state{login = {started, Domain}, line = system}) ->
+    case connect_session(Domain, State) of
+        {ok, Next} -> Next;
+        {{error, _Reason}, Same} -> Same
+    end;
+take_login_line(_Domain, State) ->
+    State.
+
+%% What a session's create spec names as its console: this console's endpoint, with the
+%% largest message a tty sends as the facet's max_request.
+console_facet(Endpoint) ->
+    {Endpoint, #{max_request => erx_tty_master:max_message()}}.
 
 bell(#state{driver = Driver, tty = TTY}) ->
     {Bytes, _} = prim_tty:handle_request(TTY, beep),

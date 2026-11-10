@@ -39,7 +39,7 @@ domain. Monitoring the domain pid watches the domain: it ends with
 or stopped.
 """.
 
--export([create/1, info/1, introduce/2, stop/2, id/1, node/1, pid/1]).
+-export([create/1, start_session/2, info/1, introduce/2, stop/2, id/1, node/1, pid/1]).
 -export_type([domain/0, spec/0]).
 
 -opaque domain() :: {erx_domain, Id :: pos_integer(), Node :: node(), Pid :: pid()}.
@@ -77,6 +77,23 @@ so a caller waits at most five seconds and exits with timeout past that.
 -spec info(domain()) -> {ok, #{connections := pid() | none, dropped := non_neg_integer()}} | {error, badarg}.
 info({erx_domain, Id, _, _}) ->
     gen_server:call(erx_domain_srv, {info, Id}, 5000).
+
+-doc """
+Starts a session of principal Principal (docs/design-domains.md, "Principals,
+sessions and quotas"): {ok, Domain} once its init reports ready, as create/1
+answers. The domain is made from the principal's session template alone, its
+runtime, release, arguments, environment and limits, which the domain
+library judges against the principal's ceilings, share, budget and domain
+quota; Facets, as a create's spec takes them, are its facets, whose console
+names the line the session starts at. The session's name is the principal's
+prefix and the lowest number no living session of it holds, root_1, and root_2
+beside it, in a development build, whose one principal is root. {error,
+no_template} for a principal with no template, and every error of create/1
+else.
+""".
+-spec start_session(pos_integer(), #{atom() => term()}) -> {ok, domain()} | {error, term()}.
+start_session(Principal, Facets) when is_integer(Principal), Principal > 0 ->
+    gen_server:call(erx_domain_srv, {start_session, Principal, Facets}, infinity).
 
 -doc "Introduces domains A and B: ok once their connection is up at both ends.".
 -spec introduce(domain(), domain()) -> ok | {error, term()}.

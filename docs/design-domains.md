@@ -2584,6 +2584,22 @@ the session a display's manifest entry names
 is its facets and its session domain, created when it starts, in which
 the principal's shells run, at its own line and in its terminals on a
 display, and whose sub-spaces are the principal's programs.
+The domain service starts it with `erx_domain:start_session(Principal,
+Facets)`, from the principal's session template alone: the domain library
+builds the domain from the template's runtime, release, arguments,
+environment and limits record (the origin `ERX_DOM_SESSION`, whose record is
+the template's index) and judges it as any domain of the principal, against
+its ceilings, share, budget and domain quota, and a template whose limits
+lack `SPACES` makes no session. The service chooses only the name and the
+facets. The name is the principal's prefix and the lowest number no living
+session of the principal holds (`root_1`, and `root_2` beside it, in a
+development build), so a refused or ended session's name is taken again
+and the names a principal binds are bounded by its living sessions; each
+new binding counts against the domain service's names quota of 64 per
+principal. The facets' `console` names the line the session starts at.
+The domain service restarts no session: an ended session's domain is
+gone, and a login at a line asks for a new session, with a new id
+([design-live.md](design-live.md#the-console)).
 Every domain belongs to one principal, and its budgets are children of
 that principal's budget. A requested domain's CPU group is a child of
 its principal's group under `users`; a configured service domain's group

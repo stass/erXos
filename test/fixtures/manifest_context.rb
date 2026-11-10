@@ -4,6 +4,8 @@
 
 # Unit tests supply the checked-boundary facts below explicitly. Real pack
 # integration obtains its image facts from erx_elf_plan and provenance receipts.
+require 'digest'
+
 module ManifestContextFixture
   module_function
 
@@ -32,31 +34,62 @@ module ManifestContextFixture
                        'mem_size' => 64, 'prot' => codec.member('prot', 'rx'), 'flags' => 0 }] }
   end
 
-  def arguments(codec)
+  # The archive the development manifest names, as both packs carry it: the session
+  # release its session template names, of one file under domains/session/, the domain
+  # runtime image, runtimes/emu, and the system release's generated files and root.
+  def arguments(codec) = archive_arguments(codec, releases: { 'session' => %w[bin/start.boot] })
+
+  # The same archive with the domain release app, of two files under domains/app/,
+  # which domain_source's domains name.
+  def domain_arguments(codec)
+    archive_arguments(codec, releases: { 'app' => %w[bin/start.boot lib/kernel.beam], 'session' => %w[bin/start.boot] })
+  end
+
+  # An archive of releases (name => files) under domains/, then runtimes/emu, then
+  # system/, the order the archive's sorted paths take, with its artifacts named as
+  # ProductionImage.artifacts names them.
+  def archive_arguments(codec, releases:)
     system = codec.member('entry_flags', 'system')
     ordinary = codec.member('entry_kind', 'file')
-    { build_kind: 'development', platform: platform, root_entry: 2,
-      artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(images),
-      catalog: [
-        { 'path' => 'system/NOTICES', 'kind' => ordinary, 'flags' => system,
-          'source' => { 'kind' => 'generated', 'producer' => 'notices' } },
-        { 'path' => 'system/manifest', 'kind' => ordinary, 'flags' => system,
-          'source' => { 'kind' => 'generated', 'producer' => 'manifest' } },
-        { 'path' => 'system/root', 'kind' => codec.member('entry_kind', 'image'), 'flags' => system,
-          'source' => { 'kind' => 'artifact', 'id' => 'root', 'sha256' => 'a' * 64 },
-          'image' => image(codec) }
-      ],
+    executable = codec.member('entry_kind', 'image')
+    domains = releases.flat_map do |name, files|
+      files.map do |file|
+        path = "domains/#{name}/#{file}"
+        { 'path' => path, 'kind' => ordinary, 'flags' => 0,
+          'source' => { 'kind' => 'artifact', 'id' => path, 'sha256' => Digest::SHA256.hexdigest(path) } }
+      end
+    end
+    catalog = [
+      *domains,
+      { 'path' => 'runtimes/emu', 'kind' => executable, 'flags' => 0,
+        'source' => { 'kind' => 'artifact', 'id' => 'domain-runtime', 'sha256' => 'd' * 64 }, 'image' => image(codec) },
+      { 'path' => 'system/NOTICES', 'kind' => ordinary, 'flags' => system,
+        'source' => { 'kind' => 'generated', 'producer' => 'notices' } },
+      { 'path' => 'system/manifest', 'kind' => ordinary, 'flags' => system,
+        'source' => { 'kind' => 'generated', 'producer' => 'manifest' } },
+      { 'path' => 'system/root', 'kind' => executable, 'flags' => system,
+        'source' => { 'kind' => 'artifact', 'id' => 'root', 'sha256' => 'a' * 64 },
+        'image' => image(codec) }
+    ]
+    paths = catalog.map { |row| row.fetch('path') }
+    runs = releases.to_h do |name, files|
+      [name, { 'kind' => 'release', 'entry' => paths.index { |path| path.start_with?("domains/#{name}/") }, 'files' => files.size }]
+    end
+    root = paths.index('system/root')
+    { build_kind: 'development', platform: platform, root_entry: root,
+      artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root },
+                   'emu' => { 'kind' => 'executable', 'entry' => paths.index('runtimes/emu') } }.merge(runs, images),
+      catalog: catalog,
       provenance: [{ 'path' => 'fixture/root.c', 'sha256' => 'a' * 64,
                      'license' => 'BSD-2-Clause', 'evidence' => 'fixture',
                      'status' => 'permanent', 'notice' => "original\xffnotice".b }] }
   end
 
-  # A development manifest's text with two configured domains of the domain
+  # The development manifest's text with two configured domains of the domain
   # release app and the runtime emu (domain_arguments), alpha and beta, beta started
   # by the rescue configuration; a service alpha serves, their introduction and the
-  # data window held by alpha; and the system principal's session template, which
-  # the boot does not create, of the profile session, which enables SPACES. The
-  # system principal's quota covers the domains, and max_domains is that quota.
+  # data window held by alpha. The manifest's own session template stays. The system
+  # principal's quota covers the domains and one session, and max_domains is that quota.
   def domain_source(plain)
     domain = lambda do |name, flags|
       "domain #{name}\n  principal @principal.system\n  limits @limits.app\n  kind service\n  flags #{flags}\n" \
@@ -65,36 +98,35 @@ module ManifestContextFixture
     app = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
           "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
           "  peer_held 4096\n  peer_held_total 4096\n"
-    session = app.sub('limits app', 'limits session').sub('  spaces none', '  spaces @share.users').sub("  flags none\n", "  flags spaces\n")
-    plain.sub("  domains 0\n", "  domains 2\n").sub('max_domains 0', 'max_domains 2')
-         .sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
-      app + session + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
-      "session system\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.app\n" +
+    with_quota(plain, 3).sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
+      app + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
       "service log\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
+  end
+
+  # The system principal's session template, its domain quota and max_domains in
+  # the development manifest.
+  SESSION_TEMPLATE = /^session system\n(?:  .*\n)*/
+  SYSTEM_QUOTA = /^(principal system\n(?:  .*\n)*?  domains )\d+$/
+  MAX_DOMAINS = /^(  max_domains )\d+$/
+
+  # The development manifest as the domain tests start from it: without its session
+  # template, since they write their own, and with no domain quota or max_domains,
+  # since they set what their rows need.
+  def sessionless(source) = with_quota(substitute(source, SESSION_TEMPLATE, ''), 0)
+
+  # source with the system principal's domain quota and max_domains both quota.
+  def with_quota(source, quota) = substitute(substitute(source, SYSTEM_QUOTA, "\\1#{quota}"), MAX_DOMAINS, "\\1#{quota}")
+
+  # source with pattern's first match replaced. A pattern that no longer matches the
+  # manifest raises, so a test built on it fails rather than testing the manifest
+  # unchanged.
+  def substitute(source, pattern, replacement)
+    raise ArgumentError, "the manifest has no match for #{pattern.inspect}" unless source.match?(pattern)
+
+    source.sub(pattern, replacement)
   end
 
   # A planner that plans every configured domain and introduction, for checks that
   # test the rest.
   def accepting_planner = ->(view) { { 'domains' => view.fetch('order').map { 0 }, 'introductions' => view.fetch('introductions').map { 0 } } }
-
-  # The same pack with a domain release, app, of two files under domains/app/ and the
-  # domain runtime image, runtimes/emu, as ProductionImage.artifacts names them: the
-  # archive's paths sort domains/ first, then runtimes/, then system/.
-  def domain_arguments(codec)
-    base = arguments(codec)
-    file = codec.member('entry_kind', 'file')
-    added = [
-      { 'path' => 'domains/app/bin/start.boot', 'kind' => file, 'flags' => 0,
-        'source' => { 'kind' => 'artifact', 'id' => 'app-boot', 'sha256' => 'b' * 64 } },
-      { 'path' => 'domains/app/lib/kernel.beam', 'kind' => file, 'flags' => 0,
-        'source' => { 'kind' => 'artifact', 'id' => 'app-kernel', 'sha256' => 'c' * 64 } },
-      { 'path' => 'runtimes/emu', 'kind' => codec.member('entry_kind', 'image'), 'flags' => 0,
-        'source' => { 'kind' => 'artifact', 'id' => 'domain-runtime', 'sha256' => 'd' * 64 }, 'image' => image(codec) }
-    ]
-    root = added.size + base.fetch(:root_entry)
-    base.merge(catalog: added + base.fetch(:catalog), root_entry: root,
-               artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root },
-                            'emu' => { 'kind' => 'executable', 'entry' => 2 },
-                            'app' => { 'kind' => 'release', 'entry' => 0, 'files' => 2 } }.merge(images))
-  end
 end

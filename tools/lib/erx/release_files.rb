@@ -38,8 +38,10 @@ module Erx
     # it ends the stack, never the system domain.
     TEMPORARY = %w[erx_net].freeze
     # A domain's own applications: the system release ships them, so that a domain
-    # release can take them, and only loads them, so that none runs in the system
-    # domain; a domain release that holds one starts it.
+    # release can take them, and every release only loads them, so that none runs in the
+    # system domain and none starts before its domain's facets: the session template's
+    # arguments start erx_session with -eval, which runs once init has them
+    # (docs/design-runtime.md, edit 65).
     DOMAIN_ONLY = %w[erx_session].freeze
     raise Error, "DOMAIN_ONLY names what the release does not ship: #{DOMAIN_ONLY - APPLICATIONS}" unless
       (DOMAIN_ONLY - APPLICATIONS).empty?
@@ -253,11 +255,11 @@ module Erx
     end
 
     # An application's term in the release file: its name and version, and the start
-    # type load for one only loaded, DOMAIN_ONLY's in the system release among them,
+    # type load for one only loaded, DOMAIN_ONLY's among them in every release,
     # and temporary for TEMPORARY's; the others take systools' default, permanent.
     def release_entry(application)
       term = "#{application},\"#{version(application)}\""
-      if LOAD_ONLY.include?(application) || (@release.system && DOMAIN_ONLY.include?(application))
+      if LOAD_ONLY.include?(application) || DOMAIN_ONLY.include?(application)
         "{#{term},load}"
       elsif TEMPORARY.include?(application) then "{#{term},temporary}"
       else "{#{term}}"

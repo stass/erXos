@@ -105,7 +105,7 @@ erx_watchdog_pet
 # area is copied into, with its reader. Native only: a hosted runtime has no domains and
 # links neither.
 [only_erx_domain_lib_nif]
-erx_dom_lib_configured erx_dom_lib_connect erx_dom_lib_create erx_dom_lib_disconnect erx_dom_lib_record erx_dom_lib_retire
+erx_dom_lib_configured erx_dom_lib_connect erx_dom_lib_create erx_dom_lib_disconnect erx_dom_lib_record erx_dom_lib_retire erx_dom_lib_session
 erx_dom_lib_start erx_dom_lib_stop erx_dom_lib_system erx_dom_lib_take erx_gate_bind
 erx_dom_lib_crash_copy erx_dom_dump_read erx_mem_create erx_cap_close
 

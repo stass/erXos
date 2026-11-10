@@ -163,14 +163,16 @@ class ReleaseFilesTest < Minitest::Test
   end
 
   # The release table's session release (ProductionImage::DOMAIN_RELEASES) ships the
-  # command shell and erx_session beside what every domain boots through, and starts
-  # them; a name the table does not hold ships the base alone.
+  # command shell and erx_session beside what every domain boots through, and starts the
+  # shell but only loads erx_session, which the session template's -eval starts once init
+  # holds the domain's facets; a name the table does not hold ships the base alone.
   def test_the_session_release_ships_the_shell_and_erx_session
     paths = domain_entries(Erx::ProductionImage.domain_release('session')).map { |entry| entry.fetch('path') }
     assert_includes paths, "domains/session/lib/erx_shell-#{VERSION}/ebin/erx_shell.app"
     assert_includes paths, "domains/session/lib/erx_session-#{VERSION}/ebin/erx_session.app"
     release = File.read(File.join(@scratch, 'domain/start.rel'))
-    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_session,"#{VERSION}"\}\]\}\.\n\z/, release, 'the session release starts erx_session')
+    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_session,"#{VERSION}",load\}\]\}\.\n\z/, release,
+                 'the session release only loads erx_session')
     assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_release('erts').applications
   end
 

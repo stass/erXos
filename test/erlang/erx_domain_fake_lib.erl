@@ -17,7 +17,10 @@
 %% and whose report reaches the domain pid behind the service's domain_down, the
 %% pid suspended from close_side until retire, which the service calls after it
 %% sends domain_down, has sent the report. Principal 1 has a session template, which
-%% the boot never starts. A domain named lost has a side that has
+%% the boot never starts and which makes one session at a time: another is refused
+%% with elimit, as the library refuses a principal's domain past its quota, until
+%% the session is retired. A session's teardown takes a while, as the library's
+%% does: its end comes ?SESSION_TEARDOWN_MS after its stop. A domain named lost has a side that has
 %% ended by the time open_side answers, so its pid has no port to write a record
 %% into. Retire, as the library's, releases the domain whatever connections to other
 %% domains stand, but refuses with ebusy while its system connection stands, and a configured row has room for one domain until the retire of the
@@ -27,10 +30,12 @@
 %% so the process dictionary keeps each domain's pid and node and each connection.
 -module(erx_domain_fake_lib).
 -export([start_log/0, next_call/0]).
--export([register/0, configured/0, configured/3, templates/0, create/1, start/1, stop/2, retire/1, crash/1,
+-export([register/0, configured/0, configured/3, templates/0, session/4, create/1, start/1, stop/2, retire/1, crash/1,
          connect/4, disconnect/1]).
 -export([open_side/2, close_side/2, export/3]).
 -export([agent/2, reader/1]).
+
+-define(SESSION_TEARDOWN_MS, 100).
 
 start_log() ->
     Pid = spawn(fun() -> queue([], []) end),
@@ -57,6 +62,15 @@ configured() ->
                        #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
                          restarts => 1, restart_period_s => 60}]}}.
 templates() -> {ok, [#{template => 0, principal => 1}]}.
+session(Id, Template, Name, DomainPid) when is_pid(DomainPid) ->
+    session(get(session), Id, Template, Name, DomainPid).
+
+session(undefined, Id, Template, Name, DomainPid) ->
+    put({domain, Id}, {DomainPid, Name}),
+    put(session, Id),
+    log({session, Id, Template, Name}), {ok, created(Id, 4)};
+session(_Live, _Id, Template, Name, DomainPid) ->
+    log({refused, Template, Name, DomainPid}), {error, elimit}.
 configured(Id, Row, DomainPid) when is_pid(DomainPid) ->
     {ok, #{domains := Rows}} = configured(),
     [Name] = [Name || #{row := R, name := Name} <- Rows, R =:= Row],
@@ -83,9 +97,10 @@ start(Id) ->
 stop(Id, _Status) ->
     log({stop, Id}),
     End = {domain_ended, Id, {stopped, 0}, #{}},
-    case get({domain, Id}) of
-        {_, <<"noside">>} -> ok;
-        {_, <<"nostop">>} -> {error, einval};
+    case {get({domain, Id}), get(session)} of
+        {{_, <<"noside">>}, _} -> ok;
+        {{_, <<"nostop">>}, _} -> {error, einval};
+        {_, Id} -> _ = erlang:send_after(?SESSION_TEARDOWN_MS, erx_domain_srv, End), ok;
         _ -> erx_domain_srv ! End, ok
     end.
 retire(Id) ->
@@ -104,6 +119,7 @@ retired(Id) ->
             ok
     end,
     _ = [erase({row, Row}) || {{row, Row}, Held} <- get(), Held =:= Id],
+    _ = [erase(session) || get(session) =:= Id],
     log({retire, Id}).
 crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
 disconnect(Number) -> erase({connection, Number}), erase({system, Number}), log({disconnect, Number}).

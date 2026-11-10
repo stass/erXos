@@ -29,6 +29,14 @@ class ManifestStopgapTest < Minitest::Test
     Erx::Manifest::Context.new(**arguments)
   end
 
+  # source, which a test made from the development manifest, after checking that it
+  # differs from it, so a substitution that no longer matches fails rather than
+  # testing the manifest unchanged.
+  def changed(source)
+    refute_equal @source, source, 'the substitution matches the development manifest'
+    source
+  end
+
   def admit(source = @source, against = @context)
     Erx::Manifest.admit(source: source, codec: @codec, context: against)
   end
@@ -105,13 +113,17 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 4096, report.fetch('root_image_loadable_bytes')
   end
 
+  # The development manifest as a partial boot, which makes no sessions, so without
+  # its session template.
+  def partial_boot = changed(@source.sub('flags development', 'flags development,partial_boot').sub(/^session system\n(?:  .*\n)*/, ''))
+
   def test_a_partial_boot_flag_without_partial_boot_records_is_admitted
-    source = @source.sub('flags development', 'flags development,partial_boot')
+    source = partial_boot
     assert_equal 'stopgap', admit(source).report.fetch('mode')
   end
 
   def test_a_partial_boot_runs_no_services
-    source = @source.sub('flags development', 'flags development,partial_boot') + SERVICE
+    source = partial_boot + SERVICE
     refused(Erx::Manifest::Invalid, 2, 'service', source)
   end
 
@@ -162,21 +174,26 @@ class ManifestStopgapTest < Minitest::Test
   # Property 4: budgets, grants and the root startup rule.
   # The development manifest's system_baseline, which the sums below fit against.
   def baseline = Integer(@source[/^  system_baseline (\d+)$/, 1])
+  def root_memory = Integer(@source[/^  root_memory (\d+)$/, 1])
+  # The development manifest with the system principal's budget set to bytes.
+  def with_system_memory(bytes) = changed(@source.sub(/^(principal system\n  memory )\d+$/) { "#{Regexp.last_match(1)}#{bytes}" })
 
   def test_budgets_over_root_memory_are_refused
-    refused(Erx::Manifest::Invalid, 4, 'principals.memory', @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - baseline + 4096}"))
+    refused(Erx::Manifest::Invalid, 4, 'principals.memory', with_system_memory(root_memory - baseline + 4096))
   end
 
+  # The platform's DMA reservations, which property 4 counts beside the budgets.
+  def device_memory = @platform.fetch('units').sum { |unit| unit.fetch('devices').sum { |device| device.fetch('dma_memory') } }
+
+  # Principal and baseline fit with the devices' reservations exactly, and one page
+  # more does not.
   def test_device_memory_counts_against_root_memory
-    # Principal and baseline alone fit by exactly the devices' reservations less one page.
-    root_memory = Integer(@source[/root_memory (\d+)/, 1])
-    device_memory = @platform.fetch('units').sum { |unit| unit.fetch('devices').sum { |device| device.fetch('dma_memory') } }
-    source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{root_memory - baseline - device_memory + 4096}")
-    refused(Erx::Manifest::Invalid, 4, 'principals.memory', source)
+    assert admit(with_system_memory(root_memory - baseline - device_memory))
+    refused(Erx::Manifest::Invalid, 4, 'principals.memory', with_system_memory(root_memory - baseline - device_memory + 4096))
   end
 
   def test_a_principal_domain_quota_is_refused
-    refused(Erx::Manifest::Invalid, 4, 'principals.domains', @source.sub('domains 0', 'domains 1'))
+    refused(Erx::Manifest::Invalid, 4, 'principals.domains', changed(@source.sub(/^(principal system\n(?:  .*\n)*?  domains )(\d+)$/) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2)) + 1}" }))
   end
 
   def test_shares_over_the_root_rate_are_refused

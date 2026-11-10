@@ -97,20 +97,26 @@ class MediumBootTest < Minitest::Test
     end
   end
 
-  # The medium manifest gives the system principal room for two domains, appends the
-  # configured one, and leaves every other line of the development manifest as it was.
+  # The medium manifest gives the system principal room for two more domains, drops its
+  # session template, appends the configured one, and leaves every other line of the
+  # development manifest as it was.
   def test_the_medium_manifest_has_room_for_two_domains_and_changes_nothing_else
     plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
     grown = Boot.manifest(plain)
     growth = 2 * (Boot::DOMAIN_MEMORY + Boot::DOMAIN_OUTER)
-    assert_equal ["principal system\n  memory #{16_777_216 + growth}", "  root_memory #{100_925_440 + growth}",
-                  "  domains 2", "  max_domains 2"],
+    memory, root_memory = [/^principal system\n  memory ([0-9]+)$/, /^  root_memory ([0-9]+)$/]
+                          .map { |pattern| Integer(plain[pattern, 1], 10) }
+    assert_equal ["principal system\n  memory #{memory + growth}", "  root_memory #{root_memory + growth}",
+                  "  domains 3", "  max_domains 3"],
                  [grown[/^principal system\n  memory [0-9]+$/], grown[/^  root_memory [0-9]+$/],
                   grown[/^principal system\n(?:  .*\n)*?(  domains [0-9]+)$/, 1], grown[/^  max_domains [0-9]+$/]]
-    assert_equal 4, plain.lines.zip(grown.lines).count { |left, right| left != right }
-    assert_equal plain.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
+    sessionless = Erx::ProductionImage.without_sessions(plain)
+    refute_match(/^session /, sessionless)
+    assert_equal 5, plain.lines.size - sessionless.lines.size
+    assert_equal 4, sessionless.lines.zip(grown.lines).count { |left, right| left != right }
+    assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)
-    assert_raises(Erx::Error) { Boot.manifest(plain.sub("  max_domains 0\n", '')) }
+    assert_raises(Erx::Error) { Boot.manifest(plain.sub("  max_domains 1\n", '')) }
   end
 
   # The footprint cell's manifest has room for its three domains and sets the system domain's
@@ -119,14 +125,18 @@ class MediumBootTest < Minitest::Test
   def test_the_footprint_cell_has_room_for_its_domains_and_one_step_each
     plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
     cell = Boot::Footprint
-    grown = cell.manifest(plain, system_tmp: 4_194_304)
-    assert_equal 1, grown.scan("  tmp 4194304\n").size
-    assert_equal 3, grown[/^  max_domains ([0-9]+)$/, 1].to_i
+    system_tmp = /^runtime_limits system\n(?:  .*\n)*?  tmp ([0-9]+)$/
+    grown = cell.manifest(plain, system_tmp: 8_388_608)
+    assert_equal 8_388_608, grown[system_tmp, 1].to_i
+    figure = ->(text, pattern) { text[pattern, 1].to_i }
+    assert_equal figure.(plain, /^  max_domains ([0-9]+)$/) + 3, figure.(grown, /^  max_domains ([0-9]+)$/)
     growth = 3 * (cell::MEMORY + Boot::DOMAIN_OUTER)
-    assert_equal 100_925_440 + growth, grown[/^  root_memory ([0-9]+)$/, 1].to_i
-    assert_equal 16_777_216 + growth, grown[/^principal system\n  memory ([0-9]+)$/, 1].to_i
+    assert_equal figure.(plain, /^  root_memory ([0-9]+)$/) + growth, figure.(grown, /^  root_memory ([0-9]+)$/)
+    assert_equal figure.(plain, /^principal system\n  memory ([0-9]+)$/) + growth,
+                 figure.(grown, /^principal system\n  memory ([0-9]+)$/)
     assert_equal %w[bare storage network], grown.scan(/^domain ([a-z]+)$/).flatten
-    assert_raises(Erx::Error) { cell.manifest(plain.sub("  tmp 16777216\n", ''), system_tmp: 0) }
+    without_tmp = plain.sub(/^(runtime_limits system\n(?:  .*\n)*?)  tmp [0-9]+\n/, '\1')
+    assert_raises(Erx::Error) { cell.manifest(without_tmp, system_tmp: 0) }
     runs = cell::RELEASES.keys.to_h { |name| [name, { 'entry' => name.size, 'files' => 7 }] }
     expression = cell.expression(runs: runs, runtime: 41)
     assert_equal cell::STEPS.size, expression.scan(/\{<<"[a-z0-9-]+">>,[0-9]+,7,[0-9]+\}/).size

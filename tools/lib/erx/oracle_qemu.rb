@@ -50,7 +50,7 @@ module Erx
     # The machine the suites run on. OTP's suites need more than the development
     # manifest's system domain holds: compiler's beam_ssa_check_SUITE asks for a
     # 98 MiB heap, which the 78 MiB baseline cannot give, and ERTS then ends the
-    # whole run; stdlib's suites fill about 97 MiB of /tmp, past its 16 MiB cap. The
+    # whole run; stdlib's suites fill about 97 MiB of /tmp, past its 4 MiB cap. The
     # archive, which carries a group's suites, their data and stock's applications,
     # is 55 MB for the compiler group, past the 48 MiB the development layout leaves
     # bootstrap for it. A 2 GiB machine, whose Fiasco keeps about 123 MiB for kernel
@@ -61,7 +61,7 @@ module Erx
     # leave the archive 768 MiB; the root, linked 192 MiB into RAM, holds it to about
     # 187 MiB, since QEMU puts the device tree at 128 MiB or, for a longer file, at the
     # next 2 MiB boundary behind it (docs/design-platforms.md, "Boot").
-    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 144,
+    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 156,
                                            root_mib: 192)
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'

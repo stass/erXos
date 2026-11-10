@@ -24,7 +24,8 @@
  *
  * The process that registers is the one that hears of every end, and the
  * only one that may change the library: every entry that does (create,
- * configured_create, start, stop, retire, connect, disconnect) asks
+ * configured_create, session_create, start, stop, retire, connect,
+ * disconnect) asks
  * caller_is_service first, under the lock, and answers {error, erights} to
  * any other caller. So only the process that registered drives the
  * library, and no domain the module made can end with no one to hear of
@@ -487,6 +488,37 @@ configured_create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (created_term(env, &created));
 }
 
+/*
+ * A session's start: creates a session of template Template under id Id,
+ * name Name and domain pid DomainPid (erx_dom_lib_session). Only the domain
+ * service may, so a session is built only from a template the view holds,
+ * whose index the library bounds, never from fields a request carries.
+ */
+static ERL_NIF_TERM
+session_create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_dom_created_t created;
+	erx_dom_pid_t domain_pid;
+	erx_status_t status;
+	ErlNifBinary name;
+	unsigned int id, template;
+
+	if (argc != 4 || !enif_get_uint(env, argv[0], &id) || !enif_get_uint(env, argv[1], &template) ||
+	    !enif_inspect_binary(env, argv[2], &name) || name.size == 0 || name.size > ERX_DOM_NAME_MAX ||
+	    !domain_pid_from(env, argv[3], &domain_pid))
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	enif_mutex_lock(lib_lock);
+	status = caller_is_service(env) ?
+	    erx_dom_lib_session(lib, id, template, (const char *)name.data, (uint32_t)name.size, domain_pid, &created) :
+	    ERX_ERIGHTS;
+	enif_mutex_unlock(lib_lock);
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (created_term(env, &created));
+}
+
 static ERL_NIF_TERM
 create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
@@ -892,6 +924,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "templates_nif", 0, templates_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_create_nif", 3, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "session_create_nif", 4, session_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 };
 
 ERL_NIF_INIT(erx_domain_lib, nif_funcs, load, NULL, NULL, NULL)

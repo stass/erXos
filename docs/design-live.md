@@ -611,13 +611,14 @@ runs no line discipline for it, and copies bytes between the driver and the
 group's `prim_tty`. `erx:console_size/2` checks the size as `erx_tty:size/3`
 does, so a zero column count never reaches `prim_tty`.
 
-**Between domains.** A tty and a master in the system domain exchange five
+**Between domains.** A tty and a master in the system domain exchange six
 closed messages, as frames on the domain's connection to the system domain.
 Nothing crosses that the console has to interpret. Each receiver checks what it
 gets, whatever the sender's own limits:
 
 | Message | Direction | The receiver's check | If it fails |
 | --- | --- | --- | --- |
+| `{tty_open, Tty}` | tty to master | `Tty` is a pid of the domain its console facet names; the first names the session's tty, and the same pid again is nothing | the console detaches the tty and logs a line under the domain's id |
 | `{tty_output, N, Bytes}` | tty to master | a binary of at most 4 KiB, charged after `output/3`; `N` is the tty's next output number, or the last one again with `Bytes` empty | the console detaches the tty and logs a line under the domain's id |
 | `{tty_taken, N}` | master to tty | `N` is the output outstanding | ignored, since it is a late repeat |
 | `{tty_input, Bytes}` | master to tty | a binary of at most 4 KiB; `input/2` bounds what waits unread | dropped and counted |
@@ -628,7 +629,8 @@ gets, whatever the sender's own limits:
 message to a domain whose lane stays full
 ([design-domains.md](design-domains.md#the-peer)), and a `{tty_taken, N}` is
 such a message. So the tty has one output outstanding and numbers it, and with
-no answer in 1 s it sends `{tty_output, N, <<>>}`, and again each second. A
+no answer in 1 s it sends `{tty_open, Tty}` and `{tty_output, N, <<>>}`, and
+again each second. A
 master that has taken output `N` answers `{tty_taken, N}` again, with the
 current `{tty_size, Rows, Columns}`, and `tty_hangup` if it has hung up: these
 are states, so a repeat of them is harmless and a lost one is sent again. A
@@ -640,12 +642,15 @@ pseudo-terminal's, sends the same messages as plain Erlang messages, which
 are not dropped.
 
 The tty learns its master from `erx:cap(console)`, and the console learns
-the tty from the `tty` agent of the session domain's ready report. That
+the tty from the tty's own `{tty_open, Tty}`, which its console facet
+forwards with the session's domain id, so the console takes as a session's
+tty only a process of that session's domain; the ready report names no
+tty, since the relay starts after it, once init holds the domain's facets. That
 master is the session's own console facet, which the domain service mints
 from the session's spec, `console => erx_console:facet()`, in front of the
 console's facet endpoint, a process that takes the facets' forwarded
 messages and refuses every call, so a session reaches nothing of the
-console but its tty's five messages; the facet's `max_request` is the
+console but its tty's six messages; the facet's `max_request` is the
 encoded size of the largest `tty_output`, and it forwards each of the
 tty's messages with the session's domain id
 ([Facets](design-domains.md#facets)). The console
@@ -846,9 +851,13 @@ reads them with `erx_log_read` and writes each as a log line
   Connecting a session or leaving the menu first ends whatever the line's
   last holder left, a string open or its text hidden, and the system
   shell, when it gets the line back at a terminal, draws its line again,
-  since what it wrote while hidden was dropped. A session the menu shows
+  since what it wrote while hidden was dropped. A session that ends while
+  it has the line, its domain pid ending with `{domain_down, Id, Info}`,
+  gives the line back to the system shell after one line, `session root_1
+  ended: {halt,3}`, its name and `Info` through the line escape, since a
+  crash's slogan is the session's own text. A session the menu shows
   that ends while the menu has the line leaves it, and the menu is drawn
-  again under a line naming it; the end of a session the menu does not
+  again under that line; the end of a session the menu does not
   show is not shown at that line unless it is the line principal's, which
   the menu may only count. Only the console
   of a line has the menu: a session's tty relay reads a BEL as a raw tty
@@ -885,8 +894,19 @@ reads them with `erx_log_read` and writes each as a log line
   and the console connects that session's tty at the line. In a development
   build the console logs `root` in at the UART at boot and at the host
   link's `console` line when the host opens it, each a login at a secure
-  line (**Secure lines**, above), so their first prompt is the command
-  shell's and the system shell is one `erl` away from it. Logins at a
+  line (**Secure lines**, above). At the UART the login starts root's
+  session, `root_1`, which takes the line once its tty names itself, so
+  the first prompt a person answers is the session's command shell, and
+  V6 holds in the session's own shells; the system domain's command shell,
+  with the system shell one `erl` away, is the menu's `s`. A login session
+  that cannot start leaves the line with the system's command shell after
+  one line saying why. When a login's session that has had the line ends,
+  the console logs `root` in again, as getty starts another login, and the
+  new session takes the line; one that ended before it ever had the line
+  is not started again, so a session that cannot come up does not loop. A
+  new session, from the login or the menu, takes the lowest name no living
+  session holds: `root_1` again once it has ended, `root_2` beside it,
+  within the principal's domain quota. Logins at a
   display are not designed: a display serves the session its manifest
   entry names, started without a login
   ([design-display.md](design-display.md#a-displays-session)).

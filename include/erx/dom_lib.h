@@ -319,4 +319,16 @@ const char	*erx_dom_boot_up(erx_dom_lib_t *, const erx_boot_info_t *system_page,
 erx_status_t	erx_dom_lib_configured(erx_dom_lib_t *, uint32_t id, uint32_t row,
 		    erx_dom_pid_t domain_pid, erx_dom_created_t *created) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * A session's start: erx_dom_create of a session of session template
+ * `template`, the template's index in the view, under domain id `id`,
+ * domain pid `domain_pid` and the name_len bytes of `name` the domain
+ * service chose, planned by erx_dom_plan_session and applied as
+ * erx_dom_lib_create applies a request's plan, under the caller's one
+ * library lock.
+ */
+erx_status_t	erx_dom_lib_session(erx_dom_lib_t *, uint32_t id, uint32_t template,
+		    const char *name, uint32_t name_len, erx_dom_pid_t domain_pid,
+		    erx_dom_created_t *created) ERX_WARN_UNUSED_RESULT;
+
 #endif /* ERX_DOM_LIB_H */

@@ -243,7 +243,8 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 }
 
 /*
- * Each session template, keyed by its principal: the check writes them in
+ * Each session template, keyed by its principal, its limits resolved from
+ * its limits record as a configured row's: the check writes them in
  * principal order, one per principal (property 14), and a manifest that
  * gives a principal two is refused.
  */
@@ -251,6 +252,7 @@ static const char *
 boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_template_t *templates)
 {
 	erx_mf_session_t session;
+	erx_mf_limits_t profile;
 	const char *strings;
 	uint32_t principal;
 
@@ -262,7 +264,7 @@ boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_do
 		if (!erx_manifest_sessions_at(manifest, index, &session))
 			return ("manifest: a session template the reader cannot read");
 		if (session.principal >= manifest->header.principals.count ||
-		    session.limits >= manifest->header.limits.count)
+		    !erx_manifest_limits_at(manifest, session.limits, &profile))
 			return ("manifest: a session template names no principal or limits record");
 		/* The principal's number, from 1, as the view numbers principals. */
 		principal = session.principal + 1;
@@ -271,10 +273,15 @@ boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_do
 		if ((uint64_t)session.args.length + session.env.length > ERX_BOOT_STRINGS_MAX)
 			return ("manifest: a session template's arguments and environment exceed the boot page's strings");
 		templates[index] = (erx_dom_template_t){ .principal = principal,
-		    .limits = session.limits, .release = session.release,
+		    .flags = (profile.flags & ERX_MF_LIMITS_SPACES) != 0 ? ERX_DOM_SPACES : 0,
+		    .memory = profile.memory, .outer = profile.outer, .grant = profile.grant,
+		    .spaces = profile.spaces, .lane = profile.lane, .connections = profile.connections,
+		    .release = session.release,
 		    .release_files = session.release_files, .runtime = session.runtime,
 		    .args = strings + session.args.offset, .args_len = session.args.length,
 		    .env = strings + session.env.offset, .env_len = session.env.length };
+		if (!boot_limits(manifest, session.limits, &templates[index].runtime_limits))
+			return ("manifest: a session template names no limits record");
 		view->ntemplates = index + 1;
 	}
 	return (NULL);

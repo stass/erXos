@@ -19,7 +19,17 @@ the resend second. A hangup ends the relay.
 relay_test_() ->
     {timeout, 60, fun relay/0}.
 
+%% A session's domain starts with -nouser, so no `user` is registered but the
+%% relay's own: the node's is set aside for the run, and its own is gone with it.
 relay() ->
+    Host = whereis(user),
+    true = unregister(user),
+    try relay_without_user() after
+        [unregister(user) || whereis(user) =/= undefined],
+        register(user, Host)
+    end.
+
+relay_without_user() ->
     Master = self(),
     process_flag(trap_exit, true),
     {ok, Shells} = erx_session_tty:start_link(fun() -> Master end),

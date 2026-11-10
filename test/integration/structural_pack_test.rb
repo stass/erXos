@@ -10,6 +10,7 @@ require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/pack_tools'
 require_relative '../../tools/lib/erx/pack'
+require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/toolchain_provenance'
 
 class StructuralPackTest < Minitest::Test
@@ -86,6 +87,8 @@ class StructuralPackTest < Minitest::Test
     assert_equal 'existing output', File.binread(output)
   end
 
+  # This pack holds the root alone, no domain runtime or release, so the session template,
+  # which names both, is left out; the packs that carry them admit it.
   def test_the_real_development_manifest_is_admitted_and_packed
     native = fixture('admitted').fetch('native')
     planner = Erx::ElfPlanner.new(helper: @tools.fetch('planner'), runner: @runner, codec: @codec)
@@ -100,7 +103,7 @@ class StructuralPackTest < Minitest::Test
     result = production.build(entries: entries, root_path: 'system/root', build_kind: 'development',
                               platform: JSON.parse(File.read(File.join(@root, 'config/platforms/qemu-virt.json'))),
                               artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(ManifestContextFixture.images),
-                              manifest_source: File.binread(File.join(@root, 'config/manifest/qemu-virt-development.txt')),
+                              manifest_source: Erx::ProductionImage.sessionless_manifest(@root),
                               output: output)
     assert_equal 'stopgap', result.fetch('manifest').fetch('mode')
     assert_equal 'declared', result.fetch('manifest').fetch('root_startup')

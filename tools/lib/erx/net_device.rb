@@ -334,7 +334,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/net-device/image'))
         image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                               .build(directory: directory).single
+                               .build(directory: directory, manifest_source: ProductionImage.sessionless_manifest(@root)).single
         accels.to_h { |accel| ["#{accel}-1cpu", boot(accel, image)] }
       end
 

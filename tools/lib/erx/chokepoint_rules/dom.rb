@@ -52,7 +52,7 @@ module Erx
                 'the origin kinds',
           design: 'docs/design-system.md#the-domain-library',
           scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
-          pattern: /\bERX_DOM_(?:REQUEST|CONFIGURED|PARTIAL_BOOT)\b/,
+          pattern: /\bERX_DOM_(?:REQUEST|CONFIGURED|PARTIAL_BOOT|SESSION)\b/,
           sites: [DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/system/dom_apply.c' => "spec.origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, row };\n",
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' => "origin.kind = ERX_DOM_REQUEST;\n" }
@@ -77,6 +77,21 @@ module Erx
                   'liberx/backend/fiasco/task_refused.c'].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
                   'liberx/system/dom_life.c' => "status = erx_dom_lib_configured(lib, id, row, &created);\n" }
+        ),
+        # A session is made only from a template the view holds, and only the
+        # domain service makes one, through its NIF entry, which refuses every
+        # other caller; the backend's refusing stub names the entry too.
+        Chokepoints::Forbidden.new(
+          name: 'dom-session-entries',
+          rule: "only the domain service, through #{DOM_NIF}, calls erx_dom_lib_session, and only #{DOM_BOOT} " \
+                'calls erx_dom_plan_session, beside the host driver and the fuzz target; no domain facet reaches either',
+          design: 'docs/design-domains.md#principals-sessions-and-quotas',
+          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, ERXOS_NIFS]),
+          pattern: /\berx_dom_(?:plan|lib)_session\b/,
+          sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_NIF,
+                  'liberx/backend/fiasco/task_refused.c', 'test/fixtures/dom_core_driver.c', 'tools/fuzz/dom_core_fuzz.c']
+                 .map { |site| Chokepoints::Site.new(glob: site) },
+          seed: { 'liberx/system/dom_life.c' => "status = erx_dom_lib_session(lib, id, 0, \"x\", 1, pid, &created);\n" }
         ),
         # The apply phase runs a plan only from the library's own entries,
         # which planned it: no other file names erx_dom_lib_apply, so no

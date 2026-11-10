@@ -68,6 +68,7 @@ master_test_() ->
 master() ->
     process_flag(trap_exit, true),
     {ok, Console} = erx_console:start_link(#{role => session, name => erx_console, menu => true,
+                                             owner => fun tty_owner/1,
                                              driver => driver(self()),
                                              first_shell => {?MODULE, shell, []}}),
     type(<<"a\r">>),
@@ -76,6 +77,7 @@ master() ->
     Domain = spawn(fun() -> receive after infinity -> ok end end),
     Facet = facet(7, Domain, Console),
     ok = erx_console:add_session(7, session(<<"root_1">>, 1, Domain)),
+    ok = tty_named(Facet),
     a_grantees_calls_reach_nothing(Facet),
     held_until_connected(Facet),
     input_goes_to_the_session(),
@@ -86,6 +88,8 @@ master() ->
     the_facet_bounds_messages(Console),
     the_menu_lists_the_principals_live_sessions(),
     a_session_that_ends_gives_the_line_back(Console),
+    a_tty_names_itself(Console),
+    the_end_line_is_escaped(Console),
     the_facets_end_with_the_console(Console, Facet).
 
 %% The console facet takes the tty's messages and nothing else: every call of the
@@ -176,9 +180,12 @@ the_menu_lists_the_principals_live_sessions() ->
     Up = fun() -> spawn(fun() -> receive after infinity -> ok end end) end,
     Theirs = Up(),
     ok = erx_console:add_session(10, session(<<"theirs">>, 2, Theirs)),
-    ok = erx_console:add_session(11, session(<<"x\e]0;owned", $\^G, "\e[2J">>, 1, Up())),
+    Listed = Up(),
+    ok = erx_console:add_session(11, session(<<"x\e]0;owned", $\^G, "\e[2J">>, 1, Listed)),
+    ok = tty_named(facet(11, Listed, erx_console)),
     Down = Up(),
     ok = erx_console:add_session(12, session(<<"gone">>, 1, Down)),
+    ok = tty_named(facet(12, Down, erx_console)),
     exit(Down, kill),
     ?assertEqual({error, unknown}, erx_console:connect(12)),
     type(<<$\^G>>),
@@ -227,6 +234,7 @@ a_wrong_number_detaches(Facet) ->
 the_facet_bounds_messages(Console) ->
     Facet = facet(8, spawn(fun() -> receive after infinity -> ok end end), Console),
     ok = erx_console:add_session(8, session(<<"root_2">>, 1, spawn(fun() -> receive after infinity -> ok end end))),
+    ok = tty_named(Facet),
     Facet ! {erx_origin, 8, {tty_output, 0, binary:copy(<<$y>>, 5120)}},
     Full = binary:copy(<<$z>>, 4096),
     Facet ! {erx_origin, 8, {tty_output, 0, Full}},
@@ -238,21 +246,83 @@ the_facet_bounds_messages(Console) ->
     ?assertMatch(#{dropped := 1}, erx_facet:info(Facet)).
 
 %% A session's facet ends with its domain, and the session with it: the line goes back
-%% to the system shell, with a notice naming the domain.
+%% to the system shell after one line, which names the session and how its domain ended.
 a_session_that_ends_gives_the_line_back(Console) ->
     Domain = spawn(fun() -> receive after infinity -> ok end end),
     Facet = facet(9, Domain, Console),
     ok = erx_console:add_session(9, session(<<"root_3">>, 1, Domain)),
+    ok = tty_named(Facet),
     tty_output(Facet, 0, <<"S9">>),
     ok = erx_console:connect(9),
     ?assertEqual({tty_size, 24, 80}, from_console()),
     {ok, _} = await(<<"S9">>),
     ?assertEqual({tty_taken, 0}, from_console()),
-    exit(Domain, kill),
-    {ok, _} = await(<<"domain 9">>),
+    exit(Domain, {domain_down, 9, {halt, 3}}),
+    {ok, _} = await(<<"\r\nsession root_3 ended: {halt,3}\r\n">>),
     type(<<"d\r">>),
     {ok, _} = await(<<"sys:d">>),
     ?assertEqual({error, unknown}, erx_console:connect(9)).
+
+%% A session the console did not hear a tty for names it through its facet: the first
+%% {tty_open, Tty} names it when Tty is the grantee's own, which the console takes every
+%% pid of the test for in domain 14, and the session can then connect; for another grantee the
+%% same pid fails the check, and that tty is detached for good.
+a_tty_names_itself(Console) ->
+    Up = fun() -> spawn(fun() -> receive after infinity -> ok end end) end,
+    Facet = facet(14, Up(), Console),
+    ok = erx_console:add_session(14, session(<<"root_4">>, 1, Up())),
+    ?assertEqual({error, no_tty}, erx_console:connect(14)),
+    Facet ! {erx_origin, 14, {tty_open, self()}},
+    Facet ! {erx_origin, 14, {tty_open, self()}},
+    tty_output(Facet, 0, <<"S14">>),
+    ok = wait_connect(14),
+    ?assertEqual({tty_size, 24, 80}, from_console()),
+    {ok, _} = await(<<"S14">>),
+    ?assertEqual({tty_taken, 0}, from_console()),
+    Other = facet(12, Up(), Console),
+    ok = erx_console:add_session(12, session(<<"theirs">>, 1, Up())),
+    Other ! {erx_origin, 12, {tty_open, self()}},
+    ?assertEqual({error, refused}, wait_refused(12)),
+    ok = erx_console:detach().
+
+%% The end line is attributed text: a session's name and how it ended reach the line
+%% only through the line escape, so neither can write a control sequence there.
+the_end_line_is_escaped(Console) ->
+    Domain = spawn(fun() -> receive after infinity -> ok end end),
+    Facet = facet(13, Domain, Console),
+    ok = erx_console:add_session(13, session(<<"x\e]0;owned", $\^G>>, 1, Domain)),
+    ok = tty_named(Facet),
+    tty_output(Facet, 0, <<"S13">>),
+    ok = erx_console:connect(13),
+    {ok, _} = await(<<"S13">>),
+    exit(Domain, {domain_down, 13, {crash, <<"\e[2J", 16#9B>>}}),
+    %% The console writes the line whole, so the bytes that hold " ended: " hold all of it.
+    {ok, Seen} = await(<<" ended: ">>),
+    [_, Ended] = binary:split(Seen, <<"session ">>),
+    ?assertMatch({_, _}, binary:match(Ended, <<"\r\n">>)),
+    ?assertEqual(nomatch, binary:match(Ended, [<<?ESC>>, <<$\^G>>, <<16#9B>>])).
+
+%% connect/1 once the console has taken the tty's naming, which arrives through the facet.
+wait_connect(Domain) ->
+    wait_connect(Domain, 20).
+
+wait_connect(Domain, 0) -> erx_console:connect(Domain);
+wait_connect(Domain, Left) ->
+    case erx_console:connect(Domain) of
+        {error, no_tty} -> timer:sleep(50), wait_connect(Domain, Left - 1);
+        Answer -> Answer
+    end.
+
+%% connect/1 once the console has refused the tty that named itself.
+wait_refused(Domain) ->
+    wait_refused(Domain, 20).
+
+wait_refused(Domain, 0) -> erx_console:connect(Domain);
+wait_refused(Domain, Left) ->
+    case erx_console:connect(Domain) of
+        {error, refused} = Refused -> Refused;
+        _ -> timer:sleep(50), wait_refused(Domain, Left - 1)
+    end.
 
 %% A console that stops, normally too, ends every console facet in front of it, so no
 %% session's tty is left asking a master that is gone.
@@ -264,9 +334,27 @@ the_facets_end_with_the_console(Console, Facet) ->
 
 %%% Helpers
 
-%% What add_session/2 names of a session whose tty is the test.
+%% What add_session/2 names of a session.
 session(Name, Principal, DomainPid) ->
-    #{tty => self(), name => Name, principal => Principal, domain_pid => DomainPid}.
+    #{name => Name, principal => Principal, domain_pid => DomainPid}.
+
+%% The domain whose tty Pid is, as the console's owner check asks: a tty that
+%% tty_named/1 made is its facet's grantee's, and any other pid of the test is domain 14's.
+tty_owner(Pid) -> persistent_term:get({?MODULE, tty, Pid}, 14).
+
+%% A tty of Facet's grantee, which hands the test what the console sends it, named to the
+%% console through Facet as a session's tty names itself; it returns once the console has
+%% taken the naming, since the facet forwards before it answers its info call and the
+%% console reads the forward before the test's call that follows.
+tty_named(Facet) ->
+    #{grantee := Grantee} = erx_facet:info(Facet),
+    Test = self(),
+    Tty = spawn(fun Relay() -> receive Message -> Test ! Message, Relay() end end),
+    persistent_term:put({?MODULE, tty, Tty}, Grantee),
+    Facet ! {erx_origin, Grantee, {tty_open, Tty}},
+    _ = erx_facet:info(Facet),
+    _ = erx_console:facet(),
+    ok.
 
 %% A console facet for Grantee, minted as the domain service mints one from a spec's
 %% `console => erx_console:facet()`, ending with Domain or the process behind it.

@@ -1,21 +1,28 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# The development manifest of QEMU virt: the system domain alone, as
-# docs/design-stopgap.md's "The Phase 1 manifest check" admits it. Fixed
+# The development manifest of QEMU virt: the system domain, configured with no
+# other domain, as docs/design-stopgap.md's "The Phase 1 manifest check" admits
+# it, and the system principal's session template, from which the console starts
+# root's session at boot (docs/design-system.md, "Booting"). Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 160 MiB of RAM (config/platforms/qemu-virt.json), small for the
 # browser emulator yet roomy at the shell; root_memory, 96.25 MiB, leaves 47.75 MiB
 # below RAM less fiasco_reserve for bootstrap and the boot archive. The system
-# baseline, 58 MiB, holds ERTS at the shell and /tmp, whose cap is 16 MiB. ERTS
+# baseline, 46 MiB, holds ERTS at the shell and /tmp, whose cap is 4 MiB. ERTS
 # sizes its tables and schedulers from runtime_limits and the system share
 # (docs/design-runtime.md, "Starting a runtime"): at the Erlang shell, with 85
 # processes and 213 modules, the system domain holds 9,268 liberx pool pages,
 # 36.2 MiB (an Apple M3 Max host, HVF, QEMU 11.1.3, Homebrew clang 23.1.3, 4 guest
 # CPUs, one boot of the interactive development image); 1,000 more idle processes
 # add about 4 MiB, and the rest of the baseline over ERTS and /tmp, 5.8 MiB, is the
-# margin. With the system principal's 16 MiB the baseline leaves root_memory the
-# block device's 1 MiB, the network device's 256 KiB and 21 MiB no one is promised.
+# margin. The system principal's 37 MiB holds root's one session, whose limits'
+# memory is 36 MiB and outer 1 MiB; with it the baseline leaves root_memory the
+# block device's 1 MiB, the network device's 256 KiB and 12 MiB no one is promised.
+# One session at its command shell maps 21.4 MB of ERTS memory, 15.3 MB of it
+# erlang:memory (the same host, 1 CPU), with its runtime_limits' max_message_heap
+# of 131072 words and its template's allocator flags: -MLlmbcs 1024 -MLsmbcs 128 keep
+# the literal allocator's carriers small and -MMmcs 0 caches no free segment.
 # A test
 # image that needs more names a larger machine (ProductionImage::Machine), which
 # grows root_memory, the baseline and /tmp's cap.
@@ -91,16 +98,37 @@ share users
   base 16
   ceiling 31
   flags none
+share session
+  quota_ns 10000000
+  period_ns 10000000
+  cpuset 1
+  capacity_mcpu 1000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 16
+  ceiling 31
+  flags none
 runtime_limits system
   max_frame 65536
   max_message_heap 1048576
   funnel_depth 64
   exports 256
-  tmp 16777216
+  tmp 4194304
   overlay 0
   atoms 65536
   foreign_atoms 1024
   processes 4096
+runtime_limits session
+  max_frame 65536
+  max_message_heap 131072
+  funnel_depth 64
+  exports 256
+  tmp 2097152
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 1024
 limits native
   memory 16777216
   outer 1048576
@@ -113,13 +141,30 @@ limits native
   runtime_limits @runtime_limits.system
   peer_held 4096
   peer_held_total 4096
+limits session
+  memory 37748736
+  outer 1048576
+  grant @share.session
+  spaces @share.session
+  lane 4096
+  connections 1
+  crash 0
+  flags spaces
+  runtime_limits @runtime_limits.session
+  peer_held 4096
+  peer_held_total 4096
 principal system
-  memory 16777216
+  memory 38797312
   grant @share.users
-  domains 0
-  names 0
+  domains 1
+  names 64
   default_limits @limits.native
   ceiling_limits @limits.native
+session system
+  limits @limits.session
+  runtime @artifact.emu
+  release @artifact.session
+  args "-MLlmbcs 1024 -MLsmbcs 128 -MMmcs 0 -- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie -no_epmd -proto_dist erx -eval ok=application:start(erx_session)"
 machine
   flags development
   host "erxos"
@@ -127,11 +172,11 @@ machine
   hostlink "/pl011@9040000"
   platform "qemu-virt"
   root_memory 100925440
-  system_baseline 60817408
+  system_baseline 48234496
   system_share @share.system
   users_share @share.users
   system_principal @principal.system
-  max_domains 0
+  max_domains 1
   max_connections 4
   system_lane 4096
   system_queue 16384

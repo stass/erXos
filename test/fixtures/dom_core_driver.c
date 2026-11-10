@@ -5,7 +5,7 @@
 
 /*
  * Host driver for the domain library's pure core (liberx/system/dom_core.c),
- * judged by test/host/dom_core_test.rb. Three modes:
+ * judged by test/host/dom_core_test.rb. Five modes:
  *
  * explore  plans each creation variant, prints its steps, then applies it
  *          to an independent model of budgets and objects, failing at
@@ -15,8 +15,11 @@
  *          line for any breach, and counters.
  * cases    plans one mutation of a valid specification per case and prints
  *          "case NAME STATUS"; the test holds the expected statuses.
+ *          A session case plans session template case_row of the view.
  * seeded   checks plans with one seeded violation each and prints
- *          "seeded NAME STATUS".
+ *          "seeded NAME STATUS", after the constructor cases' "ctor" lines.
+ * principal  checks one principal configuration per case.
+ * record   records plans into the view and prints what each left there.
  */
 
 #include <stdbool.h>
@@ -36,6 +39,7 @@ static erx_dom_remains_t remains[2 * NCONNECTIONS];
 static erx_dom_principal_t principal;
 static erx_dom_configured_t configured;
 static erx_dom_partial_t partial;
+static erx_dom_template_t session_template;
 static erx_dom_view_t view;
 static unsigned long failures;
 
@@ -115,6 +119,15 @@ reset_view(void)
 	    .spaces = grant(UINT64_C(2500000), 0x1, 50),
 	    .runtime_limits = limits(1), .lane = 65536, .connections = 2,
 	    .name = "srv", .name_len = 3 };
+	/* Atoms the principal's default is not, so a plan shows the template's. */
+	session_template = (erx_dom_template_t){ .principal = 1,
+	    .flags = ERX_DOM_SPACES, .release = 2, .release_files = 3,
+	    .runtime = 1, .memory = 4 * MIB, .outer = MIB,
+	    .grant = grant(UINT64_C(5000000), 0x3, 30),
+	    .spaces = grant(UINT64_C(2500000), 0x1, 30),
+	    .runtime_limits = limits(1), .lane = 65536, .connections = 2,
+	    .args = "a", .args_len = 2 };
+	session_template.runtime_limits.atoms = 6000;
 	partial = (erx_dom_partial_t){ .runtime = 0, .memory = MIB,
 	    .outer = 64 * 1024, .grant = grant(UINT64_C(1000000), 0x1, 10) };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
@@ -124,6 +137,7 @@ reset_view(void)
 	    .nfiles = sizeof(files) / sizeof(files[0]),
 	    .configured = &configured, .nconfigured = 1, .partial = &partial,
 	    .npartial = 1, .partial_principal = 1, .native_limits = limits(1),
+	    .templates = &session_template, .ntemplates = 1,
 	    .system_grant = grant(ERX_QUOTA_NONE, 0xf, 63),
 	    .system_reserve = 250, .system_lane = 16384, .next_connection = 1 };
 }
@@ -152,7 +166,10 @@ base_request(void)
 	return (req);
 }
 
-/* The row a configured or partial-boot case plans; a mutation may move it. */
+/*
+ * The row a configured or partial-boot case plans, or the template a
+ * session case plans; a mutation may move it.
+ */
 static uint32_t case_row;
 
 /* The independent model: what is alive and what pays for it. */
@@ -386,11 +403,14 @@ explore(void)
 	return (failures == 0 ? 0 : 1);
 }
 
-typedef enum origin_pick { PICK_REQUEST, PICK_CONFIGURED, PICK_PARTIAL } origin_pick_t;
+typedef enum origin_pick {
+	PICK_REQUEST, PICK_CONFIGURED, PICK_PARTIAL, PICK_SESSION
+} origin_pick_t;
 
 /*
  * One case: mutate the request or the view, plan from the origin, print.
- * A configured or partial-boot case's mutations change the view's rows.
+ * A configured, partial-boot or session case's mutations change the
+ * view's rows; a session is named by the request's name.
  */
 static void
 run_case(const char *name, origin_pick_t pick,
@@ -414,6 +434,10 @@ run_case(const char *name, origin_pick_t pick,
 		break;
 	case PICK_PARTIAL:
 		status = erx_dom_plan_partial(&view, 7, case_row, &plan);
+		break;
+	case PICK_SESSION:
+		status = erx_dom_plan_session(&view, 8, case_row, req.name,
+		    req.name_len, ERX_DOM_PID_NONE, &plan);
 		break;
 	default:
 		status = ERX_EINVAL;
@@ -442,6 +466,12 @@ MUTATION(m_secret, s->flags |= ERX_DOM_SECRET)
 MUTATION(m_unknown_principal, s->principal = 9)
 MUTATION(m_configured_row_out, case_row = 1)
 MUTATION(m_partial_row_out, case_row = 1)
+MUTATION(m_template_at, case_row = 1)
+MUTATION(m_template_past, case_row = UINT32_C(0xffffffff))
+/* No sub-space grant either, so only the origin's SPACES clause refuses it. */
+MUTATION(m_session_no_spaces, (session_template.flags = 0,
+    memset(&session_template.spaces, 0, sizeof(session_template.spaces))))
+MUTATION(m_session_ceiling, session_template.runtime_limits.atoms = limits(2).atoms + 1)
 MUTATION(m_name_empty, s->name_len = 0)
 MUTATION(m_name_lead, s->name[0] = '-')
 MUTATION(m_name_upper, s->name[1] = 'O')
@@ -579,6 +609,13 @@ cases(void)
 	run_case("services_outside", PICK_CONFIGURED, m_services_outside);
 	run_case("narrow_share_configured", PICK_CONFIGURED, m_narrow_share);
 	run_case("narrow_share_request", PICK_REQUEST, m_narrow_share_request);
+	run_case("ok_session", PICK_SESSION, NULL);
+	run_case("session_no_spaces", PICK_SESSION, m_session_no_spaces);
+	run_case("session_ceiling", PICK_SESSION, m_session_ceiling);
+	run_case("session_principal_memory", PICK_SESSION, m_principal_memory);
+	run_case("session_quota_full", PICK_SESSION, m_quota_full);
+	run_case("session_template_at", PICK_SESSION, m_template_at);
+	run_case("session_template_past", PICK_SESSION, m_template_past);
 	return (0);
 }
 
@@ -635,6 +672,14 @@ constructors(void)
 	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
 	printf("ctor configured_owned %d %u %u %u %.*s\n", (int)status,
 	    plan.spec.origin.kind, plan.spec.origin.record, (unsigned)plan.parent,
+	    (int)plan.spec.name_len, plan.spec.name);
+	/* Everything but the name, id and pid is the template's. */
+	status = erx_dom_plan_session(&view, 8, 0, "sess", 4,
+	    (erx_dom_pid_t){ 3, 1 }, &plan);
+	printf("ctor session_owned %d %u %u %u %u %u %u %u %.*s\n", (int)status,
+	    plan.spec.origin.kind, plan.spec.origin.record, (unsigned)plan.parent,
+	    plan.spec.flags, plan.spec.runtime_limits.atoms,
+	    (unsigned)(plan.spec.memory / MIB), plan.spec.domain_pid.number,
 	    (int)plan.spec.name_len, plan.spec.name);
 	status = erx_dom_plan_partial(&view, 7, 0, &plan);
 	printf("ctor partial_owned %d %u %u %u %.*s\n", (int)status,

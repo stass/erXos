@@ -79,8 +79,16 @@ tty_init(Parent, Console, MasterFun) ->
     _ = erlang:monitor(process, Console),
     proc_lib:init_ack(Parent, {ok, self()}),
     Master = MasterFun(),
+    ok = open(Master),
     loop(#{console => Console, master => Master, origin => origin(Master),
            link => erx_tty_link:new()}).
+
+%% The tty names itself to its master, the console facet that tells the console whose tty
+%% it is (docs/design-live.md, "Between domains"), and again with each resend, since a
+%% message the system domain's peer drops is lost for good; the master takes the first
+%% and ignores the same again.
+open(undefined) -> ok;
+open(Master) -> Master ! {tty_open, self()}, ok.
 
 %% Where the master's messages come from: plain from a master in this domain,
 %% enveloped from one in another, and from nowhere with no master.
@@ -95,6 +103,7 @@ loop(Tty = #{link := Link, origin := Origin}) ->
         {'DOWN', _Ref, process, Console, Reason} when Console =:= map_get(console, Tty) ->
             exit(Reason);
         {erx_tty_resend, N} ->
+            ok = open(map_get(master, Tty)),
             loop(effects(erx_tty_link:timeout(N, Link), Tty));
         {erx_origin, D, Message} when Origin =:= {domain, D} ->
             loop(effects(erx_tty_link:master(Message, Link), Tty));

@@ -48,6 +48,7 @@
 #define ERX_DOM_REQUEST		1u
 #define ERX_DOM_CONFIGURED	2u
 #define ERX_DOM_PARTIAL_BOOT	3u
+#define ERX_DOM_SESSION		4u
 
 /* Specification and record flags. */
 #define ERX_DOM_SECRET		0x1u	/* the vault's; refused in Phase 1b-A */
@@ -65,7 +66,7 @@
 
 typedef struct erx_dom_origin {
 	uint32_t	kind;		/* ERX_DOM_REQUEST, ERX_DOM_CONFIGURED,
-					 * or ERX_DOM_PARTIAL_BOOT */
+					 * ERX_DOM_PARTIAL_BOOT or ERX_DOM_SESSION */
 	uint32_t	record;		/* REQUEST: ERX_MF_NONE; otherwise the
 					 * index in the origin's manifest table */
 } erx_dom_origin_t;
@@ -302,7 +303,12 @@ typedef struct erx_dom_configured {
  */
 typedef struct erx_dom_template {
 	uint32_t	principal;	/* its principal's number, from 1 */
-	uint32_t	limits;		/* the index of its limits record */
+	/* Its limits, resolved from its limits record as a configured row's. */
+	uint32_t	flags;		/* ERX_DOM_SPACES */
+	uint64_t	memory, outer;
+	erx_grant_t	grant, spaces;
+	erx_runtime_limits_t runtime_limits;
+	uint32_t	lane, connections;
 	uint32_t	release, release_files, runtime;
 	/* Its arguments and environment, as a configured row's. */
 	const char	*args, *env;
@@ -554,6 +560,21 @@ erx_status_t	erx_dom_plan_configured(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_pid_t domain_pid, erx_dom_plan_t *plan);
 erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_plan_t *plan);
+/*
+ * erx_dom_plan_session plans a session of session template `template` of
+ * the view, under domain id `id`, domain pid `domain_pid` and name_len
+ * bytes of `name`, the name the domain service chose; only the domain
+ * service's start of a session calls it. Everything but the name, id and
+ * pid is the template's and its limits record's, so a session is its
+ * template by construction, and planning it as any other domain judges
+ * its limits against its principal's ceilings, its group against its
+ * principal's share, and its budgets against its principal's budget and
+ * domain quota. A template whose limits lack ERX_DOM_SPACES is
+ * ERX_EINVAL, since a session makes its programs as sub-spaces.
+ */
+erx_status_t	erx_dom_plan_session(const erx_dom_view_t *, uint32_t id,
+		    uint32_t template, const char *name, uint32_t name_len,
+		    erx_dom_pid_t domain_pid, erx_dom_plan_t *plan);
 
 /*
  * Records a creation plan in the view it was planned against, as the

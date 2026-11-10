@@ -13,6 +13,7 @@
  *   pass erx_dom_plan_check, carry the origin of the entry that made it
  *   and the CPU parent that origin selects;
  *   for a request, hold zeros past the arguments and environment;
+ *   for a session, hold ERX_DOM_SPACES and the name it was given;
  *   name a free record and an id no record holds;
  *   fit what each carved budget pays for within its size (the outer
  *   budget's crash area and system child, the child's sides and bells);
@@ -134,6 +135,8 @@ typedef struct fuzz_input {
 	erx_dom_device_t	dev_records[2];
 	uint32_t		dev_index;
 	erx_dom_principal_t	principal;
+	/* The session template, planned at row and named by req's name. */
+	erx_dom_template_t	template;
 } fuzz_input_t;
 
 /*
@@ -154,12 +157,14 @@ typedef struct fuzz_input {
  * their lengths to ERX_DOM_NAME_MAX and ERX_BOOT_STRINGS_MAX. Patches choose
  * the lengths and the bytes, never the pointers, so these are set again
  * after the patches, into the input's own strings, and the lengths held to
- * them.
+ * them. The session template's arguments and environment are held the
+ * same way, as boot_templates holds them.
  */
 static void
 fuzz_row_strings(fuzz_input_t *in)
 {
 	erx_dom_configured_t *row = &in->configured;
+	erx_dom_template_t *template = &in->template;
 
 	if (row->name_len > sizeof(in->names))
 		row->name_len = sizeof(in->names);
@@ -170,6 +175,12 @@ fuzz_row_strings(fuzz_input_t *in)
 	row->name = in->names;
 	row->args = in->strings;
 	row->env = in->strings + row->args_len;
+	if (template->args_len > sizeof(in->strings))
+		template->args_len = sizeof(in->strings);
+	if (template->env_len > sizeof(in->strings) - template->args_len)
+		template->env_len = (uint32_t)(sizeof(in->strings) - template->args_len);
+	template->args = in->strings;
+	template->env = in->strings + template->args_len;
 }
 
 /* The rows of the three that name id. */
@@ -350,6 +361,11 @@ fuzz_check(const fuzz_input_t *in, uint32_t origin, const erx_dom_view_t *view,
 			if (spec->strings[index] != 0)
 				abort();
 	}
+	if (origin == ERX_DOM_SESSION &&
+	    ((spec->flags & ERX_DOM_SPACES) == 0 || spec->origin.record != 0 ||
+	    spec->name_len != in->req.name_len ||
+	    memcmp(spec->name, in->req.name, spec->name_len) != 0))
+		abort();
 	if (spec->id <= ERX_DOM_SYSTEM_ID || plan->slot >= view->max_domains ||
 	    view->domains[plan->slot].id != 0)
 		abort();
@@ -406,7 +422,7 @@ fuzz_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 /*
  * The input: one byte picking the entry (0 request, 1 configured, 2
  * partial boot, 3 connect, 4 disconnect, retire, stop and the record
- * step), then patches, each a little-endian u16 offset into the
+ * step, 5 session), then patches, each a little-endian u16 offset into the
  * fuzz_input_t (modulo its size), a length byte and that many bytes,
  * clipped at its end.
  */
@@ -455,6 +471,13 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		.principal = { .number = 2, .memory = 16 * FUZZ_MIB, .domains_max = 2,
 		    .share = fuzz_grant(UINT64_C(5000000), 0x3),
 		    .default_limits = fuzz_limits(1), .ceiling_limits = fuzz_limits(2) },
+		.template = { .principal = 1, .flags = ERX_DOM_SPACES,
+		    .release = 2, .release_files = 2, .runtime = 1,
+		    .memory = 4 * FUZZ_MIB, .outer = FUZZ_MIB,
+		    .grant = fuzz_grant(UINT64_C(5000000), 0x3),
+		    .spaces = fuzz_grant(UINT64_C(2500000), 0x1),
+		    .runtime_limits = fuzz_limits(1), .lane = 65536,
+		    .connections = 2 },
 	};
 	erx_dom_t domains[2];
 	erx_dom_connection_t connections[2];
@@ -464,6 +487,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	    .nfiles = sizeof(fuzz_files) / sizeof(fuzz_files[0]),
 	    .configured = &in.configured, .nconfigured = 1,
 	    .partial = &in.partial, .npartial = 1, .partial_principal = 1,
+	    .templates = &in.template, .ntemplates = 1,
 	    .native_limits = fuzz_limits(1),
 	    .system_grant = fuzz_grant(ERX_QUOTA_NONE, 0xf),
 	    .system_reserve = 250, .system_lane = 16384,
@@ -493,11 +517,11 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	/* Each run starts from the same records; a record writes only these. */
 	memcpy(domains, fuzz_domains, sizeof(domains));
 	memcpy(connections, fuzz_connections, sizeof(connections));
-	if (bytes[0] % 5 >= 3) {
-		fuzz_life(&in, bytes[0] % 5 == 3);
+	if (bytes[0] % 6 == 3 || bytes[0] % 6 == 4) {
+		fuzz_life(&in, bytes[0] % 6 == 3);
 		return (0);
 	}
-	switch (bytes[0] % 3) {
+	switch (bytes[0] % 6) {
 	case 0:
 		origin = ERX_DOM_REQUEST;
 		status = erx_dom_plan_request(&view, &in.req, &in.limits,
@@ -506,6 +530,11 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	case 1:
 		origin = ERX_DOM_CONFIGURED;
 		status = erx_dom_plan_configured(&view, in.id, in.row, ERX_DOM_PID_NONE, &plan);
+		break;
+	case 5:
+		origin = ERX_DOM_SESSION;
+		status = erx_dom_plan_session(&view, in.id, in.row, in.req.name,
+		    in.req.name_len, ERX_DOM_PID_NONE, &plan);
 		break;
 	default:
 		origin = ERX_DOM_PARTIAL_BOOT;
@@ -523,6 +552,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		break;
 	case ERX_DOM_CONFIGURED:
 		status = erx_dom_plan_configured(&view, in.id, in.row, ERX_DOM_PID_NONE, &plan);
+		break;
+	case ERX_DOM_SESSION:
+		status = erx_dom_plan_session(&view, in.id, in.row, in.req.name,
+		    in.req.name_len, ERX_DOM_PID_NONE, &plan);
 		break;
 	default:
 		status = erx_dom_plan_partial(&view, in.id, in.row, &plan);

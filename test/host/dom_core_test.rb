@@ -37,9 +37,11 @@ class DomCoreTest < Minitest::Test
   OUTER_KEEPS = %w[OUTER CRASH SYS_BUDGET SYS_SIDE DOM_SIDE SYS_BELL DOM_BELL].freeze
 
   OK_CASES = %w[ok_request ok_configured ok_partial partial_connections_full env_ok spaces_ok
-                services_room services_request narrow_share_configured limits_reserved_cleared].freeze
+                services_room services_request narrow_share_configured limits_reserved_cleared
+                ok_session].freeze
   OTHER_CASES = { 'quota_full' => ELIMIT, 'table_full' => ELIMIT, 'connections_full' => ELIMIT,
-                  'principal_memory' => ENOMEM, 'ending' => EBUSY }.freeze
+                  'principal_memory' => ENOMEM, 'ending' => EBUSY,
+                  'session_quota_full' => ELIMIT, 'session_principal_memory' => ENOMEM }.freeze
   EINVAL_CASES = %w[id_zero id_system id_last id_in_use unknown_flag secret unknown_principal
                     configured_row_out partial_row_out name_empty name_lead name_upper name_dot name_long runtime_out runtime_file runtime_bad
                     release_past_end release_empty release_system release_sealed release_image release_wraps
@@ -47,7 +49,8 @@ class DomCoreTest < Minitest::Test
                     strings_long strings_wrap args_no_nul env_no_nul limits_ceiling
                     limits_frame_zero grant_cpus grant_empty grant_rate grant_ceiling grant_period grant_quota
                     grant_padding spaces_no_flag spaces_over services_over services_outside
-                    narrow_share_request configured_outside configured_ceiling configured_flags].freeze
+                    narrow_share_request configured_outside configured_ceiling configured_flags
+                    session_no_spaces session_ceiling session_template_at session_template_past].freeze
 
   # One-line edits of the core, each a failure the driver must catch.
   MUTANTS = {
@@ -78,7 +81,11 @@ class DomCoreTest < Minitest::Test
     'reserve counts an ended domain' => ["\tcase ERX_DOM_RUNNING:\n\t\treturn (true);\n\tcase ERX_DOM_FREE:\n\tcase ERX_DOM_ENDED:\n",
                                          "\tcase ERX_DOM_RUNNING:\n\tcase ERX_DOM_ENDED:\n\t\treturn (true);\n\tcase ERX_DOM_FREE:\n"],
     'record overwrites a taken slot' => ["plan->slot >= view->max_domains ||\n\t    view->domains[plan->slot].id != 0)\n",
-                                       "plan->slot >= view->max_domains)\n"]
+                                       "plan->slot >= view->max_domains)\n"],
+    'session origin without the spaces flag' =>
+      ["spec->origin.record < view->ntemplates &&\n\t\t    (spec->flags & ERX_DOM_SPACES) != 0 ?",
+       'spec->origin.record < view->ntemplates ?'],
+    'session name not copied' => ["\t\tmemcpy(spec->name, name, name_len);\n", '']
   }.freeze
 
   def setup
@@ -182,6 +189,9 @@ class DomCoreTest < Minitest::Test
     assert_includes lines, 'ctor request_owned 0 1 1 4294967295 16384 16384 2 0',
                     'a forged origin and library fields are overwritten; the strings tail is zeroed'
     assert_includes lines, 'ctor configured_owned 0 2 0 1 srv', 'a configured domain goes under system, named by its row'
+    assert_includes lines, 'ctor session_owned 0 4 0 2 2 6000 4 3 sess',
+                    'a session is its template: under its principal, SPACES, the template\'s limits and memory, ' \
+                    'with the caller\'s pid and name'
     assert_includes lines, 'ctor partial_owned 0 3 0 4294967295 7',
                     'a partial-boot domain has no connection row and its id for a name'
   end

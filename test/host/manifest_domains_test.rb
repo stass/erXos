@@ -17,9 +17,6 @@ class ManifestDomainsTest < Minitest::Test
   APP_LIMITS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
                "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                "  peer_held 4096\n  peer_held_total 4096\n"
-  # A session's profile: the app profile with SPACES, its sub-spaces under users.
-  SESSION_LIMITS = APP_LIMITS.sub('limits app', 'limits session').sub('  spaces none', '  spaces @share.users')
-                             .sub("  flags none\n", "  flags spaces\n")
 
   # Each domain's status, in boot order, and each introduction's; [] plans them all.
   class RecordingPlanner
@@ -46,7 +43,8 @@ class ManifestDomainsTest < Minitest::Test
   def setup
     root = File.expand_path('../..', __dir__)
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)))
-    @plain = File.binread(File.join(root, 'config/manifest/qemu-virt-development.txt'))
+    # The tests write their own session templates, of the manifest's session profile.
+    @plain = ManifestContextFixture.sessionless(File.binread(File.join(root, 'config/manifest/qemu-virt-development.txt')))
     @platform = JSON.parse(File.read(File.join(root, 'config/platforms/qemu-virt.json')))
     @source = with_domains(self.class.domain('alpha'), self.class.domain('beta', flags: 'rescue'))
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: @platform))
@@ -56,8 +54,7 @@ class ManifestDomainsTest < Minitest::Test
   # The rows, with the system principal's domain quota covering them, and max_domains
   # the sum of the quotas, as property 4 asks.
   def with_domains(*rows)
-    @plain.sub("  domains 0\n", "  domains #{rows.size}\n").sub('max_domains 0', "max_domains #{rows.size}") +
-      APP_LIMITS + rows.join
+    ManifestContextFixture.with_quota(@plain, rows.size) + APP_LIMITS + rows.join
   end
 
   def admit(source = @source, planner: @planner)
@@ -87,7 +84,8 @@ class ManifestDomainsTest < Minitest::Test
     view = @codec.open('manifest', admit(@source.sub('domain alpha', 'domain gamma')).bytes)
     domains = rows(view, 'domains')
     assert_equal %w[beta gamma], domains.map { |row| view.string(row.fetch('name')) }
-    assert_equal [[2, 0, 2]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
+    emu = @context.artifacts.fetch('emu').fetch('entry')
+    assert_equal [[emu, 0, 2]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
     assert_equal [@codec.member('mf_domain_flags', 'rescue'), 0], domains.map { |row| row.fetch('flags') }
     assert_equal [[3, 5]] * 2, domains.map { |row| row.values_at('restarts', 'restart_period_s') }
     assert_equal [0, 1], rows(view, 'boot_order').map { |row| row.fetch('domain') }
@@ -319,7 +317,7 @@ class ManifestDomainsTest < Minitest::Test
     "session #{principal}\n  limits #{limits}\n  runtime @artifact.emu\n  release @artifact.app\n  args \"-x y\"\n"
   end
 
-  def with_session(*sessions) = with_domains(self.class.domain('alpha'), self.class.domain('beta', flags: 'rescue')) + SESSION_LIMITS + sessions.join
+  def with_session(*sessions) = with_domains(self.class.domain('alpha'), self.class.domain('beta', flags: 'rescue')) + sessions.join
 
   def test_a_session_template_is_packed_but_neither_ordered_nor_planned
     admitted = admit(with_session(self.class.session))
@@ -346,7 +344,7 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   def test_a_partial_boot_makes_no_sessions
-    source = @plain.sub('flags development', 'flags development,partial_boot') + APP_LIMITS + SESSION_LIMITS + self.class.session
+    source = @plain.sub('flags development', 'flags development,partial_boot') + APP_LIMITS + self.class.session
     refused(Erx::Manifest::Invalid, 14, 'session', source)
   end
 

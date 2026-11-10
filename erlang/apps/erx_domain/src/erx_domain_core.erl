@@ -18,7 +18,7 @@ planner assumes.
 
 Names. A name binds to the principal whose domain first takes it, for the
 boot; at most one living domain holds it. Each principal binds at most
-?NAMES_QUOTA names by request, which bounds the node-name atoms admit/4 makes
+?NAMES_QUOTA names by request or session start, which bounds the node-name atoms admit/4 makes
 (D5): the atom is made once, when the name is first bound and after the
 quota check, and every later domain of the name reuses it. The configured
 domains bind theirs at boot outside the quota, since the checked manifest
@@ -35,7 +35,7 @@ state is a bug of the caller and fails with a badmatch.
 """.
 
 -export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5,
-         restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1]).
+         restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, session_name/3]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0]).
 
 -define(SYSTEM_ID, 4).
@@ -43,7 +43,7 @@ state is a bug of the caller and fails with a badmatch.
 -define(NAMES_QUOTA, 64).
 -define(DEATHS_KEPT, 16).
 
--type origin() :: request | {configured, Row :: non_neg_integer()}.
+-type origin() :: request | {configured, Row :: non_neg_integer()} | {session, Template :: non_neg_integer()}.
 -type life() :: building | built | running | ready | stopping.
 -type info() :: {halt, integer()} | crash | {fault, integer()} | stopped.
 -type domain() :: #{id := pos_integer(), name := erx_ident:t(), node := node(),
@@ -85,17 +85,38 @@ admit(_Name, _Principal, _Origin, #{next_id := Id}) when Id > ?ID_MAX ->
 admit(Name, Principal, Origin, #{names := Names, bound := Bound} = State) ->
     Bytes = erx_ident:to_binary(Name),
     Count = maps:get(Principal, Bound, 0),
+    %% Only the configured domains, which the checked manifest bounds, bind outside it.
+    Counted = case Origin of {configured, _} -> false; _ -> true end,
     case Names of
         #{Bytes := #{principal := Principal, holder := none} = Binding} ->
             take(Name, Binding, Principal, Origin, State);
         #{Bytes := _} ->
             {error, name_taken};
-        #{} when Origin =:= request, Count >= ?NAMES_QUOTA ->
+        #{} when Count >= ?NAMES_QUOTA, Counted ->
             {error, quota};
         #{} ->
             Node = binary_to_atom(<<Bytes/binary, $@, (host(State))/binary>>, latin1),
             Binding = #{principal => Principal, node => Node, holder => none},
             take(Name, Binding, Principal, Origin, State#{bound := Bound#{Principal => Count + 1}})
+    end.
+
+-doc """
+The name Principal's next session takes: Prefix_N for the lowest N from 1 whose
+name Principal may take without a new binding or, if none, the first one no
+principal has bound. A refused or ended session's name is so taken again, and a
+principal's session names are bounded by its living sessions, not by its starts.
+""".
+-spec session_name(binary(), pos_integer(), state()) -> binary().
+session_name(Prefix, Principal, #{names := Names}) ->
+    session_name(Prefix, Principal, Names, 1).
+
+%% Ends: each step passes a name bound in the finite Names.
+session_name(Prefix, Principal, Names, N) ->
+    Name = <<Prefix/binary, $_, (integer_to_binary(N))/binary>>,
+    case Names of
+        #{Name := #{principal := Principal, holder := none}} -> Name;
+        #{Name := _} -> session_name(Prefix, Principal, Names, N + 1);
+        #{} -> Name
     end.
 
 take(Name, #{node := Node} = Binding, Principal, Origin,

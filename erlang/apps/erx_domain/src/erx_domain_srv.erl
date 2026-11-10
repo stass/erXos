@@ -15,9 +15,20 @@ reports ended, and on each
 {domain_ended, Id, End, Record} has the agent close that side, disconnects
 the connection, ends its domain pid with {domain_down, Id, Info}, has the library
 retire it at once, whatever its peers still map, and restarts a configured
-domain within its restart intensity. It keeps the manifest's session templates by principal, from which each session of that
-principal is made; a template is no configured domain, so the boot never
-starts one and nothing restarts one.
+domain within its restart intensity. It keeps the
+manifest's session templates by principal and makes each session of a
+principal from its template alone (start_session): the library builds the
+domain from the template's row and judges it against the principal, and the
+service chooses only its name and its facets. A template is no configured
+domain, so the boot never starts one, and nothing restarts one or a session.
+
+A create or a session's start for a principal one of whose domains is
+ending, its domain pid gone but its end not yet arrived, is held until that
+end has retired the domain and answered then (start/3): the library still
+counts such a domain against the principal's domain quota, while its pid's
+end has already told the caller it is gone, so a login started again on a
+killed session's end would otherwise be refused. The hold is bounded by
+release_wait, after which the library answers the start as it stands.
 
 It also introduces domains (docs/design-domains.md, "Introduction and
 connection down"): introduce/2 has the library connect two domains and
@@ -46,6 +57,10 @@ reach it only through facets, which arrive with the connections.
 %% Every domain is the system principal's, number 1, the one principal the library's
 %% view has (include/erx/dom.h, erx_dom_principal_t).
 -define(SYSTEM_PRINCIPAL, 1).
+%% The name a principal's sessions take before _1, _2 and on: the development build's one
+%% principal, the system principal, is root (docs/design-domains.md, "Principals, sessions
+%% and quotas").
+-define(SESSION_PREFIX, <<"root">>).
 %% The keys of a request beyond its name and boot_timeout: erx_domain_lib:spec()'s, less
 %% id, principal and domain_pid, which the service sets, and facets, the service's own.
 -define(REQUEST_KEYS, [runtime, release, release_files, memory, outer, grant, lane, args, env,
@@ -58,6 +73,9 @@ reach it only through facets, which arrive with the connections.
 %% milliseconds, unless start_link/1's introduce_timeout sets it (docs/design-domains.md,
 %% "Erlang interface").
 -define(INTRODUCE_TIMEOUT, 10000).
+%% How long a start waits for its principal's ending domains to be retired, in
+%% milliseconds, unless start_link/1's release_wait sets it (start/3).
+-define(RELEASE_WAIT, 10000).
 %% The longest boot_timeout erlang:start_timer/3 takes.
 -define(BOOT_TIMEOUT_MAX, 16#ffffffff).
 %% A domain that has not ended, whose domain pid stands for it (erx_domain_core:ended/5).
@@ -69,8 +87,9 @@ start_link() ->
 -doc """
 Opts may name lib, the domain library's module (erx_domain_lib), agent, the
 connection agent's (erx_connections), exports, the export table's
-(erx_dist), and introduce_timeout, an introduce/2 caller's deadline in
-milliseconds, for a host test's stand-ins.
+(erx_dist), introduce_timeout, an introduce/2 caller's deadline in
+milliseconds, and release_wait, a held start's (start/3), for a host test's
+stand-ins.
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -85,9 +104,12 @@ init(Opts) ->
     %% holds, by domain id, each create not yet answered (wait_created/4).
     %% Introducing holds, by the pair's key, each introduce/2 caller waiting for its
     %% connection to come up, with the timer of its deadline (settle_introductions/1).
+    %% Held holds, by principal and in arrival order, each start waiting for the
+    %% principal's ending domains to be retired, with the timer of its bound (start/3).
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
            configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
-           introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT)},
+           introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT),
+           held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT)},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none.
@@ -121,19 +143,9 @@ templates(none) -> {error, enotsup};
 templates(Lib) -> Lib:templates().
 
 handle_call({create, Spec}, From, State) ->
-    case create(Spec, State) of
-        {{waiting, Domain}, Next} ->
-            %% Answered by ready/3, or by settle/2 once nothing of the domain remains.
-            {noreply, wait_created(Domain, none, From, Next)};
-        {{refused, Domain, Refusal}, Next} ->
-            %% Answered Refusal by settle/2 once the stop has ended the domain and nothing
-            %% of it remains.
-            {noreply, wait_created(Domain, Refusal, From, Next)};
-        {{ready, Domain}, Next} ->
-            {reply, {ok, Domain}, Next};
-        {{error, _} = Error, Next} ->
-            {reply, Error, Next}
-    end;
+    {noreply, start({create, Spec}, From, State)};
+handle_call({start_session, Principal, Facets}, From, State) ->
+    {noreply, start({start_session, Principal, Facets}, From, State)};
 handle_call({info, Id}, From, #{core := Core} = State) ->
     %% The domain pid answers the caller itself, so a flood in its mailbox delays only
     %% this caller, never the service.
@@ -154,6 +166,78 @@ handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, badarg}, State}.
 
+%% A create or a session's start from From: run now, or held while a domain of its
+%% principal is ending (ending/2) or an earlier start of the principal is held, so the
+%% principal's starts run in arrival order. A held start runs once none of the
+%% principal's domains is ending (release/1), or at its bound, release_wait, when the
+%% library answers it as it stands.
+start(Start, From, #{held := Held, release_wait := Wait} = State) ->
+    Principal = principal(Start),
+    case maps:is_key(Principal, Held) orelse ending(Principal, State) =/= [] of
+        false ->
+            run(Start, From, State);
+        true ->
+            Timer = erlang:start_timer(Wait, self(), {release_wait, Principal}),
+            State#{held := Held#{Principal => maps:get(Principal, Held, []) ++ [{Timer, Start, From}]}}
+    end.
+
+principal({create, _Spec}) -> ?SYSTEM_PRINCIPAL;
+principal({start_session, Principal, _Facets}) -> Principal.
+
+%% Principal's domains whose domain pid has ended before their end arrived, so the
+%% library has not yet retired them and each still counts against the principal's
+%% domain quota. The pid's
+%% liveness is read, not the 'EXIT' the service may not have taken yet: a caller acts
+%% on the pid's end, so its next start must see that end.
+ending(Principal, #{core := Core}) ->
+    [Id || #{id := Id, principal := P, pid := Pid} <- erx_domain_core:domains(Core),
+           P =:= Principal, is_pid(Pid), not is_process_alive(Pid)].
+
+%% Runs, in arrival order, the held starts of every principal none of whose domains is
+%% ending any longer. ended/3, the one place the service retires a domain, calls it, so
+%% no retirement a held start waits for passes it by.
+release(#{held := Held} = State) ->
+    lists:foldl(fun release/2, State, [P || P := _ <- Held, ending(P, State) =:= []]).
+
+release(Principal, #{held := Held} = State) ->
+    {Starts, Rest} = maps:take(Principal, Held),
+    lists:foldl(fun({Timer, Start, From}, Acc) ->
+                        _ = erlang:cancel_timer(Timer, [{async, true}, {info, false}]),
+                        run(Start, From, Acc)
+                end, State#{held := Rest}, Starts).
+
+%% A held start whose bound passed runs now; a timer whose start ran already finds none.
+release_timed_out(Principal, Timer, #{held := Held} = State) ->
+    case lists:keytake(Timer, 1, maps:get(Principal, Held, [])) of
+        {value, {Timer, Start, From}, []} -> run(Start, From, State#{held := maps:remove(Principal, Held)});
+        {value, {Timer, Start, From}, Rest} -> run(Start, From, State#{held := Held#{Principal := Rest}});
+        false -> State
+    end.
+
+run({create, Spec}, From, State) ->
+    answer_create(create(Spec, State), From);
+run({start_session, Principal, Facets}, From, State) ->
+    answer_create(start_session(Principal, Facets, State), From).
+
+%% A create's or a session's start's answer to From, now or once the domain reports or
+%% is retired.
+answer_create(Built, From) ->
+    case Built of
+        {{waiting, Domain}, Next} ->
+            %% Answered by ready/3, or by settle/2 once nothing of the domain remains.
+            wait_created(Domain, none, From, Next);
+        {{refused, Domain, Refusal}, Next} ->
+            %% Answered Refusal by settle/2 once the stop has ended the domain and nothing
+            %% of it remains.
+            wait_created(Domain, Refusal, From, Next);
+        {{ready, Domain}, Next} ->
+            gen_server:reply(From, {ok, Domain}),
+            Next;
+        {{error, _} = Error, Next} ->
+            gen_server:reply(From, Error),
+            Next
+    end.
+
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -165,6 +249,8 @@ handle_info({domain_answer, Ref, Id, Answer}, State) ->
     {noreply, answer(Id, Ref, Answer, State)};
 handle_info({timeout, Timer, {introduce_timeout, Key, From}}, State) ->
     {noreply, introduce_timed_out(Key, From, Timer, State)};
+handle_info({timeout, Timer, {release_wait, Principal}}, State) ->
+    {noreply, release_timed_out(Principal, Timer, State)};
 handle_info({timeout, _Timer, {boot_timeout, Id}}, #{core := Core} = State) ->
     %% Ids are never reused, so the timer of a domain that reported ready or ended finds
     %% it ready or gone. A domain stopping for its timeout takes no late report
@@ -268,6 +354,26 @@ facet({Behind, Limits}) when is_pid(Behind), node(Behind) =:= node(), is_map(Lim
     end;
 facet(_Facet) ->
     false.
+
+%% A session of Principal, made from its session template alone, with Facets checked as a
+%% request's: the console names the line it starts the session at by the console facet it
+%% hands. The service chooses only the name, the principal's prefix and the lowest number
+%% no living session holds (erx_domain_core:session_name/3), so a refused start binds
+%% no name for good.
+start_session(_Principal, _Facets, #{lib := none} = State) ->
+    {{error, enotsup}, State};
+start_session(Principal, Facets, #{templates := Templates} = State) ->
+    case {Templates, facets(Facets)} of
+        {#{Principal := _}, invalid} ->
+            {{error, {bad_spec, facets}}, State};
+        {#{Principal := #{template := Template}}, Valid} ->
+            #{lib := Lib, core := Core} = State,
+            Name = erx_domain_core:session_name(?SESSION_PREFIX, Principal, Core),
+            Make = fun(Id, Pid) -> Lib:session(Id, Template, Name, Pid) end,
+            build(erx_ident:new(Name), Principal, {session, Template}, Make, Valid, ?BOOT_TIMEOUT, State);
+        {#{}, _} ->
+            {{error, no_template}, State}
+    end.
 
 start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := Lib} = State) ->
     case erx_ident:new(Name) of
@@ -686,7 +792,7 @@ ended(Id, End, #{lib := Lib, core := Core, links := Links} = State) ->
             {Actions, Unlinked} = erx_domain_links:ended(Id, Info, Links),
             Told = perform(Actions, State#{core := Ended, links := Unlinked}),
             _ = retire(Lib, Id),
-            restart(Origin, waiter_ended(Id, Life, Info, Told))
+            release(restart(Origin, waiter_ended(Id, Life, Info, Told)))
     end.
 
 %% A crash's slogan, from its crash area, which goes at the retire after it.
@@ -721,6 +827,8 @@ disconnect(Lib, Connection) ->
     end.
 
 restart(request, State) ->
+    State;
+restart({session, _Template}, State) ->
     State;
 restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
     #{Row := #{restarts := Restarts, restart_period_s := Period} = Entry} = Configured,

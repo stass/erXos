@@ -27,15 +27,15 @@ does it load a second time, since its library, lock and fault thread live
 as long as the system domain.
 
 The registered process, the domain service, is also the only one that may
-change the library: create/1, configured/3, start/1, stop/2, retire/1,
+change the library: create/1, configured/3, session/4, start/1, stop/2, retire/1,
 connect/4 and disconnect/1 answer {error, erights} to any other caller, and
 so does crash/1, which reads a domain's crash dump.
 """.
 
 -export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/4, disconnect/1,
-         configured/0, configured/3, templates/0, code_object/2, code_drop/2]).
+         configured/0, configured/3, templates/0, session/4, code_object/2, code_drop/2]).
 -nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/4,
-       disconnect_nif/1, configured_nif/0, configured_create_nif/3, templates_nif/0]).
+       disconnect_nif/1, configured_nif/0, configured_create_nif/3, templates_nif/0, session_create_nif/4]).
 -on_load(on_load/0).
 
 -export_type([spec/0, created/0, error/0, configured/0, template/0]).
@@ -192,6 +192,18 @@ request names.
 configured(Id, Row, DomainPid) ->
     configured_create_nif(Id, Row, DomainPid).
 
+-doc """
+A session's start: builds a session of template Template, an index
+templates/0 gave, under id Id, name Name and domain pid DomainPid, as
+create/1 builds a request's domain. Everything else is the template's and
+its limits record's, which the library judges against the template's
+principal as it judges a request: its ceilings, share, budget and domain
+quota, and SPACES, which a session's limits must hold.
+""".
+-spec session(pos_integer(), non_neg_integer(), binary(), pid()) -> {ok, created()} | error().
+session(Id, Template, Name, DomainPid) ->
+    session_create_nif(Id, Template, Name, DomainPid).
+
 -doc "A session's code object: {error, enotsup} until sessions exist.".
 -spec code_object(pos_integer(), non_neg_integer()) -> {ok, map()} | error().
 code_object(_Session, _Size) ->
@@ -233,4 +245,7 @@ configured_create_nif(_Id, _Row, _DomainPid) ->
     erlang:nif_error(undef).
 
 templates_nif() ->
+    erlang:nif_error(undef).
+
+session_create_nif(_Id, _Template, _Name, _DomainPid) ->
     erlang:nif_error(undef).

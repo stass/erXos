@@ -26,6 +26,11 @@ class ChokepointsDomTest < Minitest::Test
     refute_empty evaluate(entries, { Rules::DOM_LIFE => CONFIGURED_CALL })
     refute_empty evaluate(entries, { Rules::DOM_LIFE => "status = erx_dom_lib_configured(lib, id, row, &created);\n" })
     assert_empty evaluate(entries, { Rules::DOM_LIB_HEADER => "erx_status_t erx_dom_lib_configured(void);\n" })
+    # A session's entries are the domain service's and the boot file's alone.
+    sessions = [rule('dom-session-entries')]
+    assert_empty evaluate(sessions, { Rules::DOM_NIF => "erx_dom_lib_session(lib, id, t, n, l, p, &c);\n" })
+    refute_empty evaluate(sessions, { Rules::DOM_LIFE => "erx_dom_lib_session(lib, id, t, n, l, p, &c);\n" })
+    refute_empty evaluate(sessions, { Rules::DOM_APPLY => "erx_dom_plan_session(v, id, t, n, l, p, &plan);\n" })
     found = evaluate(entries, { Rules::DOM_BOOT => "status = erx_dom_plan_partial(&lib->view, id, row, &plan);\n" })
     assert_equal ['dom-partial-entry-uncalled'], found.map(&:rule)
   end

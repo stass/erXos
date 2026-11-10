@@ -17,6 +17,7 @@ require_relative 'pack'
 require_relative 'pack_provenance'
 require_relative 'pack_tools'
 require_relative 'pack_wire'
+require_relative 'production_image'
 require_relative 'release_files'
 require_relative 'release_medium'
 require_relative 'runner'
@@ -83,14 +84,16 @@ module Erx
       root_task = PackRootFixture.build(root: @root, directory: File.join(@directory, 'root'), codec: @codec,
                                         runner: @runner, compiler: @compiler, linker: @linker)
       files = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle).entries
-      entries = [root_entry(root_task), *files]
+      manifest_source = File.binread(File.join(@root, MANIFEST))
+      domains = domain_entries(manifest_source, root_task)
+      entries = [root_entry(root_task), *files, *domains]
       _erofs, images = ReleaseMedium.image(entries: files, directory: @directory, runner: @runner)
-      catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of(files, root: @root)))
+      catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of([*files, *domains], root: @root)))
       pack_with(tools, catalog).build(
         entries: entries, root_path: 'system/root', build_kind: 'development',
         platform: JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 1024 * 1024, label: 'platform record'),
-        artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_index(entries) } }.merge(images),
-        manifest_source: File.binread(File.join(@root, MANIFEST)), output: output
+        artifacts: ProductionImage.artifacts(archive_paths(entries), images: images),
+        manifest_source: manifest_source, output: output
       )
     end
 
@@ -101,10 +104,28 @@ module Erx
         'id' => 'root', 'artifact' => root_task.fetch('artifact'), 'receipt' => root_task.fetch('receipt') }
     end
 
-    # The root's place in the index, whose order takes in the two files the pack adds.
-    def root_index(entries)
+    # The domain releases the manifest's session and domain rows name, each under
+    # domains/ as the production image carries it, and in the domain runtime's place
+    # (ProductionImage::DOMAIN_RUNTIME_PATH) the root again, so that the manifest's
+    # references resolve here as they do natively. Neither runs: hosted, erx_domain_lib
+    # does not load, so the domain service makes no domain and starts no session.
+    def domain_entries(manifest_source, root_task)
+      releases = Manifest.release_names(source: manifest_source, codec: @codec).map { |name| ProductionImage.domain_release(name) }
+      return [] if releases.empty?
+
+      runtime = { 'path' => ProductionImage::DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
+                  'id' => 'domain-runtime', 'artifact' => root_task.fetch('artifact'), 'receipt' => root_task.fetch('receipt') }
+      [runtime, *releases.flat_map do |release|
+        ReleaseFiles.new(root: @root, otp: @otp, directory: File.join(@directory, 'domains', release.name), runner: @runner,
+                         codec: @codec, oracle: @oracle, release: release).entries
+      end]
+    end
+
+    # The archive's sorted paths, which take in the two files the pack adds, and by
+    # which ProductionImage.artifacts names the root, the runtime and each release.
+    def archive_paths(entries)
       generated = [@codec.fixed_bytes('system_manifest_path'), 'system/NOTICES']
-      [*entries.map { |entry| entry.fetch('path') }, *generated].map(&:b).sort.index('system/root')
+      [*entries.map { |entry| entry.fetch('path') }, *generated].map(&:b).sort
     end
 
     def pack_with(tools, catalog)

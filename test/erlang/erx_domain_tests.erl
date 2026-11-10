@@ -176,7 +176,7 @@ service_test_() ->
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
-                                                          introduce_timeout => 2000}),
+                                                          introduce_timeout => 2000, release_wait => 1000}),
              unlink(Service),
              {Log, Service}
      end,
@@ -189,7 +189,8 @@ service_test_() ->
                           fun report_overtaken/0, fun introduce/0, {timeout, 30, fun connection_down/0},
                           fun retire_answers_create/0, fun lost_side/0, fun ended_in_library/0,
                           fun forged_answer/0, fun refused_stop/0, fun facets/0,
-                          fun configured_restart_held/0,
+                          fun configured_restart_held/0, fun sessions/0, fun killed_session_restarts/0,
+                          fun release_wait_bound/0,
                           fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
@@ -774,6 +775,98 @@ facets() ->
 %% The trace messages that have come, in order.
 trace_messages() ->
     receive {trace, _, _, _} = T -> [T | trace_messages()] after 100 -> [] end.
+
+sessions() ->
+    %% A session is its principal's template and the name the service gives it: the
+    %% library hears only the template's index, the id, the name and the domain pid, and
+    %% each start takes the lowest name of the principal no living session holds.
+    Echo = spawn(fun Loop() -> receive {'$gen_call', From, Req} -> gen:reply(From, Req), Loop() end end),
+    ?assertEqual({error, no_template}, erx_domain:start_session(2, #{})),
+    ?assertEqual({error, {bad_spec, facets}}, erx_domain:start_session(1, #{console => self})),
+    {ok, First} = erx_domain:start_session(1, #{console => Echo}),
+    Id = erx_domain:id(First),
+    ?assertEqual('root_1@erxos', erx_domain:node(First)),
+    ?assertEqual({session, Id, 0, <<"root_1">>}, next_call()),
+    ?assertEqual({open_side, Id, 'root_1@erxos', Id * 10}, next_call()),
+    ?assertEqual({export, Id, [send]}, next_call()),
+    ?assertEqual({start, Id}, next_call()),
+    %% The fake makes one session at a time: refused starts spend an id each, but no
+    %% name, so they never use up the principal's names quota.
+    Refused = [erx_domain:start_session(1, #{}) || _ <- lists:seq(1, 70)],
+    ?assertEqual([{error, elimit}], lists:usort(Refused)),
+    ?assertEqual(lists:duplicate(70, <<"root_2">>), refused_names(70)),
+    Ref = monitor(process, erx_domain:pid(First)),
+    ok = erx_domain:stop(First, kill),
+    ?assertEqual(killed, receive {'DOWN', Ref, process, _, Why} -> Why after 5000 -> timeout end),
+    retired(Id),
+    %% The name root_1 is free again and the next session takes it, under a new id;
+    %% no session is restarted.
+    {ok, Second} = erx_domain:start_session(1, #{}),
+    ?assertEqual('root_1@erxos', erx_domain:node(Second)),
+    ?assertEqual({session, Id + 71, 0, <<"root_1">>}, next_call()),
+    _ = [next_call() || _ <- [open_side, export, start]],
+    ok = erx_domain:stop(Second, shutdown),
+    retired(Id + 71),
+    exit(Echo, kill).
+
+killed_session_restarts() ->
+    %% A killed session's pid ends at once, while the library still tears its domain
+    %% down and the principal's quota still counts it: the principal's next start waits
+    %% for that domain's release and is answered then, so a login started again on the
+    %% pid's end is not refused.
+    {ok, First} = erx_domain:start_session(1, #{}),
+    Id = erx_domain:id(First),
+    ?assertEqual({session, Id, 0, <<"root_1">>}, next_call()),
+    _ = [next_call() || _ <- [open_side, export, start]],
+    Ref = monitor(process, erx_domain:pid(First)),
+    ok = erx_domain:stop(First, kill),
+    ?assertEqual(killed, receive {'DOWN', Ref, process, _, Why} -> Why after 5000 -> timeout end),
+    {ok, Second} = erx_domain:start_session(1, #{}),
+    ?assertEqual({stop, Id}, next_call()),
+    ?assertEqual({close_side, Id, {domain_down, Id, stopped}}, next_call()),
+    ?assertEqual({disconnect, Id * 10}, next_call()),
+    ?assertEqual({retire, Id}, next_call()),
+    ?assertEqual({session, Id + 1, 0, <<"root_1">>}, next_call()),
+    _ = [next_call() || _ <- [open_side, export, start]],
+    ok = erx_domain:stop(Second, shutdown),
+    retired(Id + 1).
+
+release_wait_bound() ->
+    %% refused_stop's domain, whose stop the library refuses, never ends. With its pid
+    %% gone it holds its principal's starts only for the bound, 1000 ms here; then the
+    %% library answers them. The service answers other calls meanwhile.
+    #{core := Core} = sys:get_state(erx_domain_srv),
+    [#{id := Stuck, pid := StuckPid}] = [D || #{name := N} = D <- erx_domain_core:domains(Core),
+                                               erx_ident:to_binary(N) =:= <<"nostop">>],
+    exit(StuckPid, kill),
+    ?assertEqual({stop, Stuck}, next_call()),
+    Self = self(),
+    Started = erlang:monotonic_time(millisecond),
+    spawn_link(fun() -> Self ! {created, erx_domain:create(#{name => <<"held">>, memory => 4096})} end),
+    ?assertEqual({error, badarg}, gen_server:call(erx_domain_srv, {info, Stuck + 1000}, 500)),
+    {created, {ok, Held}} = receive {created, _} = Created -> Created after 5000 -> timeout end,
+    ?assert(erlang:monotonic_time(millisecond) - Started >= 1000),
+    HeldId = erx_domain:id(Held),
+    ?assertMatch({create, #{id := HeldId}}, next_call()),
+    _ = [next_call() || _ <- [open_side, export, start]],
+    ok = erx_domain:stop(Held, shutdown),
+    retired(HeldId).
+
+%% The names of the next N sessions the library refused, past its other calls.
+refused_names(0) ->
+    [];
+refused_names(N) ->
+    case next_call() of
+        {refused, 0, Name, _Pid} -> [Name | refused_names(N - 1)];
+        _ -> refused_names(N)
+    end.
+
+%% The library calls up to domain Id's retire.
+retired(Id) ->
+    case next_call() of
+        {retire, Id} -> ok;
+        _ -> retired(Id)
+    end.
 
 service_end_ends_domain_pids() ->
     %% The service's end ends every domain pid with its reason: no domain

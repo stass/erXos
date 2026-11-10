@@ -8,6 +8,7 @@ require 'open3'
 require 'pathname'
 require 'rbconfig'
 require_relative '../../tools/lib/erx/oracle_qemu'
+require_relative '../../tools/lib/erx/medium_boot'
 require_relative '../../tools/lib/erx/production_image'
 
 # The production image's host-side rules. Its boot is the QEMU gate's production_image suite.
@@ -282,13 +283,16 @@ class ProductionImageTest < Minitest::Test
                  Erx::ProductionImage.instance_method(:build_test_image).parameters
   end
 
-  # The production image carries the domain releases its manifest's domain rows name.
-  # The development manifest configures no domains, so it carries none and no runtime
-  # image; a manifest with domain rows names each release once, and a reference of
-  # another form names nothing, for the manifest check to refuse.
+  # The production image carries the domain releases its manifest's domain rows and
+  # session templates name. The development manifest configures no domains, so it carries
+  # only its session template's, the session release; a manifest with domain rows names
+  # each release once, and a reference of another form names nothing, for the manifest
+  # check to refuse.
   def test_the_production_image_carries_the_releases_its_domain_rows_name
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    assert_equal ['session'], Erx::Manifest.release_names(source: source, codec: codec)
+    source = Erx::ProductionImage.without_sessions(source)
     assert_empty Erx::Manifest.release_names(source: source, codec: codec)
     rows = %w[zeta beta zeta].each_with_index.map do |release, index|
       "domain d#{index}\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
@@ -333,15 +337,18 @@ class ProductionImageTest < Minitest::Test
   # cap by its own, and leaves every other line alone, so the manifest check proves the
   # same properties.
   def test_a_larger_machine_grows_the_root_the_system_baseline_and_tmp_alone
-    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    plain = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    source = Erx::ProductionImage.without_sessions(plain)
+    refute_equal plain, source, 'the development manifest has a session template'
+    refute_match(/^session /, source)
     machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64, root_mib: 64)
-    grown = machine.manifest(source)
+    grown = machine.manifest(plain)
     { 'root_memory' => 1024, 'system_baseline' => 1024, 'tmp' => 64 }.each do |field, growth|
       assert_equal manifest_number(source, field) + (growth << 20), manifest_number(grown, field)
     end
     changed = source.lines.zip(grown.lines).reject { |old, new| old == new }.map { |old, _| old[/\A *[a-z_]+/].strip }
     assert_equal %w[tmp root_memory system_baseline], changed
-    assert_equal source, Erx::ProductionImage::DEVELOPMENT_MACHINE.manifest(source)
+    assert_equal source, Erx::ProductionImage::DEVELOPMENT_MACHINE.manifest(plain)
     record = JSON.parse(File.read(File.join(ROOT, Erx::ProductionImage::PLATFORM)))
     assert_equal record, Erx::ProductionImage::DEVELOPMENT_MACHINE.platform(record), 'the development machine is the record'
     assert_equal({ 'ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20, 'units' => [] },
@@ -472,8 +479,11 @@ class ProductionImageTest < Minitest::Test
 
   def test_the_manifest_line_must_carry_the_sources_numbers
     verify = checkpoint_verifier('root-manifest')
-    verify.call("erx: root task: manifest root_memory 100925440 baseline 60817408 units 4 pool pages 12\n")
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 60817408 units 4 pool pages 12\n") }
+    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    memory, baseline = manifest_number(source, 'root_memory'), manifest_number(source, 'system_baseline')
+    verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline #{baseline} units 4 pool pages 12\n") }
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline 1 units 4 pool pages 12\n") }
   end
 
   # A build/production-image that links out of the tree is refused before

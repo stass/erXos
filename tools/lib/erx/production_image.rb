@@ -144,15 +144,18 @@ module Erx
 
       def platform(record) = record.merge('ram_bytes' => memory_mib << 20, 'fiasco_reserve' => fiasco_reserve_mib << 20)
 
-      # The development manifest's text with root_memory and system_baseline each grown
-      # by system_growth_mib and /tmp's cap by tmp_growth_mib; any other line is unchanged.
+      # The development manifest's text for a test image on this machine: with no session
+      # template (ProductionImage.without_sessions), so the console's login at boot starts
+      # no session and the UART stays with the system shell, and with root_memory and
+      # system_baseline each grown by system_growth_mib and the system domain's /tmp cap,
+      # its runtime limits' tmp, by tmp_growth_mib; any other line is unchanged.
       def manifest(source)
         raise Error, "/tmp's growth is more than the system's" if tmp_growth_mib > system_growth_mib
 
-        { 'root_memory' => system_growth_mib, 'system_baseline' => system_growth_mib, 'tmp' => tmp_growth_mib }
-          .reduce(source) do |text, (field, growth_mib)|
-            pattern = /^(  #{field} )([0-9]+)$/
-            raise Error, "the manifest does not have exactly one #{field} line" unless text.scan(pattern).size == 1
+        { /^(  root_memory )([0-9]+)$/ => system_growth_mib, /^(  system_baseline )([0-9]+)$/ => system_growth_mib,
+          /^(runtime_limits system\n(?:  .*\n)*?  tmp )([0-9]+)$/ => tmp_growth_mib }
+          .reduce(ProductionImage.without_sessions(source)) do |text, (pattern, growth_mib)|
+            raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
 
             text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + (growth_mib << 20)}" }
           end
@@ -160,6 +163,16 @@ module Erx
     end
     DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 16, system_growth_mib: 0, tmp_growth_mib: 0,
                                       root_mib: 64)
+
+    # source with no session template: each `session` record, to the next record. The
+    # production image keeps its template, so the console logs root in at boot and the
+    # UART's first prompt is root's session; a harness whose cells type at the system
+    # shell, and every test image (Machine#manifest), boots without one.
+    def self.without_sessions(source) = source.gsub(/^session [a-z0-9_]+\n(?:  .*\n)*/, '')
+
+    # The development manifest without its session template, for the harnesses that type
+    # at the system shell.
+    def self.sessionless_manifest(root) = without_sessions(File.binread(File.join(root, MANIFEST)))
 
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                    runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco),
@@ -218,8 +231,11 @@ module Erx
     def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE, domains: [])
       raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
 
-      assemble(directory: directory, manifest_source: machine.manifest(File.binread(File.join(@root, MANIFEST))), added: added,
-               test_code: true, machine: machine, domains: domains)
+      source = machine.manifest(File.binread(File.join(@root, MANIFEST)))
+      # The manifest's own releases, beside those added.
+      carried = (domain_releases(source) + domains).uniq(&:name)
+      assemble(directory: directory, manifest_source: source, added: added, test_code: true, machine: machine,
+               domains: carried)
     end
 
     # Both entry points' one build: the system release, the domain releases with their
@@ -1069,10 +1085,13 @@ module Erx
         seeded
       end
 
+      # The production image without its session template, since this suite's cells type
+      # at the system shell (ProductionImage.without_sessions), unless manifest_source names another.
       def image(fiasco, directory: 'build/production-image/boot', manifest_source: nil)
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, directory))
+        manifest_source ||= ProductionImage.sessionless_manifest(@root)
         ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                       .build(directory: directory, **{ manifest_source: manifest_source }.compact)
+                       .build(directory: directory, manifest_source: manifest_source)
       end
 
       # The manifest with the system share on the machine's first two CPUs only. A boot of it
@@ -1080,7 +1099,7 @@ module Erx
       # together from one taken from the online CPUs alone, which the manifest's own cpuset,
       # every CPU the runs have, cannot.
       def narrow_manifest
-        File.read(File.join(@root, MANIFEST)).sub(/^(share system\n(?:  .*\n)*?  cpuset )\d+$/) { "#{Regexp.last_match(1)}#{NARROW_CPUSET}" }
+        ProductionImage.sessionless_manifest(@root).sub(/^(share system\n(?:  .*\n)*?  cpuset )\d+$/) { "#{Regexp.last_match(1)}#{NARROW_CPUSET}" }
       end
 
       def boot_narrow(accel, count, built)
