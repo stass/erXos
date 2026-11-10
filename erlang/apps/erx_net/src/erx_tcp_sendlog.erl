@@ -28,9 +28,9 @@ Invariants:
   segment's end too (split/2), so every range starts on a boundary of its own segments.
   A SACK block marks the whole segments it covers and leaves a segment it covers in part
   unmarked, so a peer cannot split the log below the segments that were sent, and no byte
-  is marked SACKed that a block does not cover. Merging SACKed neighbours only removes
-  boundaries, and makes each acknowledgement's work proportional to the ranges it newly
-  SACKs, not to the window.
+  is marked SACKed that a block does not cover. Merging SACKed neighbours whose segments
+  line up only removes boundaries; neighbours that do not line up (a short last segment, a
+  segment size changed) stay apart, so a SACKed stretch can be several ranges.
 * New data extends the highest range when that range is unmarked, sent once, at the same
   time, with the same segment size, and ends on a full segment (extend/5), so the log of
   k segments sent in one step equals the log of one run of k.
@@ -185,8 +185,15 @@ steps 2 and 3), and the bytes a window that shrank to zero took. Marking starts 
 `snd_una`, so the lost ranges this marks are always a prefix of the log.
 """.
 -spec lose(log(), integer()) -> log().
-lose(#sendlog{ranges = Ranges} = Log, Next) when is_integer(Next) ->
-    lose(gb_trees:next(gb_trees:iterator(Ranges)), Next, Log).
+lose(#sendlog{ranges = Ranges0} = Log0, Next) when is_integer(Next) ->
+    %% A run is marked only up to the end of the segment holding Next - 1, not whole.
+    Log = case gb_trees:smaller(Next, Ranges0) of
+              {Start, #sent{next = End, seg = Seg}} when End > Next ->
+                  split(Log0, Start + ceil_div(Next - Start, Seg) * Seg);
+              _ ->
+                  Log0
+          end,
+    lose(gb_trees:next(gb_trees:iterator(Log#sendlog.ranges)), Next, Log).
 
 lose({Key, #sent{} = Old, Iter}, Next, Log) when Key < Next ->
     Log1 = case Old#sent.sacked of
@@ -271,13 +278,16 @@ rescue_seg(#sendlog{una = Una, rescue = RescueRxt, ranges = Ranges, high_rxt = H
   when RescueRxt =:= none; Una > RescueRxt ->
     %% Rule 4 rescues only an unSACKed byte above HighRxt (HighRxt < S2 <= HighData).
     case highest_unsacked(gb_trees:next(gb_trees:iterator(Ranges, reversed))) of
-        {Start, Next} when Next > HighRxt -> {rescue, max(Start, Next - Mss), Next};
+        {Start, Next, Seg} when Next > HighRxt ->
+            %% The last segment as it was sent, at most Mss of it.
+            Last = Start + ((Next - 1 - Start) div Seg) * Seg,
+            {rescue, max(Last, Next - Mss), Next};
         _ -> none
     end;
 rescue_seg(_, _) ->
     none.
 
-highest_unsacked({Start, #sent{sacked = false, next = Next}, _}) -> {Start, Next};
+highest_unsacked({Start, #sent{sacked = false, next = Next, seg = Seg}, _}) -> {Start, Next, Seg};
 highest_unsacked({_, _, Iter}) -> highest_unsacked(gb_trees:next(Iter));
 highest_unsacked(none) -> none.
 
@@ -428,7 +438,8 @@ update_ranges(_, _, _, Log) ->
     Log.
 
 %% Cuts the range containing Seq at Seq and, when Seq lies inside one of its segments, at
-%% that segment's end too, so both pieces above the cut start on a boundary the sender made.
+%% that segment's end too: the piece from Seq is the rest of one segment, and the range
+%% above it keeps the segment boundaries the sender made.
 split(#sendlog{ranges = Ranges} = Log, Seq) ->
     case gb_trees:smaller(Seq, Ranges) of
         {Start, #sent{next = Next, seg = Seg} = Sent} when Next > Seq ->

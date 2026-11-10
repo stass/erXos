@@ -37,6 +37,14 @@ class ErxTcpLossTest < Minitest::Test
   MARKS_A_PART = ['false -> Start + ((To - Start) div Seg) * Seg',
                   'false -> Start + ceil_div(To - Start, Seg) * Seg'].freeze
 
+  LOSES_A_RUN = ['{Start, #sent{next = End, seg = Seg}} when End > Next ->',
+                 '{Start, #sent{next = End, seg = Seg}} when End > Next, false ->'].freeze
+
+  def test_newreno_marking_a_whole_run_lost_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_sendlog_tests, fault: { 'erx_tcp_sendlog' => LOSES_A_RUN })
+    assert_match(/run_lose_and_rescue_test/, output)
+  end
+
   [[:splits_a_segment, SPLITS_A_SEGMENT], [:extends_another_size, EXTENDS_ANOTHER_SIZE],
    [:marks_a_part, MARKS_A_PART]].each do |name, fault|
     define_method(:"test_runs_property_catches_one_that_#{name}") do

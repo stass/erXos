@@ -238,3 +238,13 @@ runs_check(Where, Whole, Cut, #runs{made = Made, covered = Covered}) ->
     Uncovered = [B || {S, N, #{sacked := true}} <- Ranges, B <- lists:seq(S, N - 1),
                       not maps:is_key(B, Covered)],
     ?assertEqual({Where, []}, {Where, Uncovered}).
+
+%% NewReno's inference marks lost the segment at snd_una, not the run that holds it, and the
+%% rescue resends the run's last segment as it was sent.
+run_lose_and_rescue_test() ->
+    Run = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(0), 0, 1000, ?MSS, 1),
+    Lost = erx_tcp_sendlog:lose(Run, 1),
+    ?assertEqual(?MSS, erx_tcp_sendlog:pipe(Run) - erx_tcp_sendlog:pipe(Lost)),
+    {Sacked, _} = erx_tcp_sendlog:ack(Run, 0, [{0, 100}]),
+    Opts = #{mss => ?MSS + 12, recover => 1000, new_data => false, rescue => true},
+    ?assertEqual({rescue, 900, 1000}, erx_tcp_sendlog:next_seg(Sacked, Opts)).

@@ -175,7 +175,7 @@ Departures, each from erXos's model:
                   source :: next | retransmit | rescue,
                   %% A full segment of this pass, t_maxseg less the options: the segment
                   %% size the send log records it with (erx_tcp_sendlog:sent/5).
-                  size = 1 :: pos_integer(),
+                  size :: pos_integer() | undefined,
                   sendalot :: boolean()}).
 
 -doc """
