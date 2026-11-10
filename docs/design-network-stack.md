@@ -2164,7 +2164,7 @@ tap device or another medium (N12).
 
 | Seam | erXos's implementation | The portable one | Chosen by |
 | --- | --- | --- | --- |
-| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp`, a port program or a test process | each interface's entry in the `interfaces` key |
+| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp`, a port program or a test process; `erx_netmap`, over netmap's rings | each interface's entry in the `interfaces` key |
 | the clock and entropy | `erx_net_clock` over ERTS's monotonic clock and `erx_bytes:entropy/1` | the same; in a test run, the virtual clock and its seeded generator | the `clock` key |
 | the per-byte primitives | `erx_bytes` of the `erx` application, statically linked NIFs, those of the network over the C of `erx_net`'s `c_src/` | `erx_bytes` of `erx_net`'s `portable/` directory: the same C, loaded from `priv/erx_bytes_nif.so`, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
 | the runtime | `erx_net_erxos`: the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
@@ -2240,9 +2240,11 @@ host tests. `entropy/1` outside erXos is the host's generator,
 failure of the host's generator raises `crypto`'s error and never
 returns other bytes.
 
-Faster media are the other extension point: an `AF_PACKET`, netmap or
-DPDK transport is a NIF or port transport behind `erx_net_driver`, and
-nothing above the driver changes for it.
+Faster media are the other extension point. They are transports behind
+`erx_net_driver`, and nothing above the driver changes for them:
+`erx_netmap` reaches netmap's rings through a NIF of its own
+([The netmap transport](#the-netmap-transport)), and an `AF_PACKET` or
+DPDK transport would come the same way.
 
 ### The driver
 
@@ -2372,6 +2374,7 @@ credit, and the link stays stuck until the driver's next end.
 | `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size |
 | `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured |
 | `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured |
+| `erx_netmap` | `ethernet`; the configured address, which must be unicast | configured, default 1,500, from 1,280 to 9,000 and within the port's buffer with the Ethernet header | `up` from a successful registration; `down` from an `init` whose registration failed, and while the driver waits out its hold | configured, default the transmit ring's slot count |
 
 The virtio transport posts at most four `out` segments: its
 `virtio_net_hdr`, then the frame's binaries in order, all but the last
@@ -2467,6 +2470,479 @@ file. Either way the port closes, the driver ends, and its link
 supervisor starts it again with a new helper ([Ending](#the-driver)).
 A port's messages reach the driver as fast as the tap delivers them,
 with no credit ahead of the mailbox ([Residuals](#residuals)).
+
+#### The netmap transport
+
+`erx_netmap` exchanges Ethernet frames with a netmap port: a port of a
+VALE software switch such as `vale0:erx`, or a network card in netmap
+mode, on FreeBSD and on Linux with netmap's kernel module. It is the
+medium of the standalone runs that compare the stack with other stacks
+on one switch: `pkt-gen`, lwIP over netmap, and FreeBSD's own stack in a
+jail whose `epair` joins the switch through netmap's emulated mode. Like
+the pipe, it parses nothing. Unlike the pipe, it reaches the frames
+where netmap leaves them, in rings of slots and buffers that the kernel
+shares with the process, through a NIF of its own. It lives in
+`portable/`, with that NIF's loader `erx_netmap_nif`, so it is never in
+an erXos image; its C is in `c_src/`. DPDK, which gives no file
+descriptor to wait on, would need a different scheduling answer from
+the one below.
+
+**The construction.** Two rules carry the design.
+
+* *The NIF is a device NIF for a host's rings.* `erx_netmap_nif` is to
+  a netmap port what the device NIF is to a virtio queue
+  ([design-runtime.md](design-runtime.md#the-device-nif)). It copies
+  each frame once on receive, out of its slot's buffer into a fresh
+  binary, and once on transmit, from one binary into a slot's buffer,
+  and no binary ever aliases the shared memory. Each call does a
+  bounded amount of work. Nothing in the shared memory is trusted. Each
+  call reads every field the kernel writes once, into a snapshot, and a
+  pure C core, `erx_netmap_ring`, turns the snapshot, with the size of
+  a frame to send, into a plan: which slots hold frames, which are
+  dropped and why, and for each copy an offset and length checked to
+  lie inside one buffer of the mapping. The NIF copies only what the
+  plan names, and the plan is complete before the first byte moves.
+* *Each direction has exactly one wake.* For receiving, either the
+  port's descriptor is armed for reading with `enif_select`, or the
+  transport has sent itself one `{erx_netmap, more}`: never both and
+  never neither. For transmitting, either the ring had room at the last
+  send, or the descriptor is armed for writing and the driver's backlog
+  waits for the `writable` event that the arm's message gives. A send
+  that leaves frames in the ring without a sync has one
+  `{erx_netmap, flush}` on its way.
+
+The first rule is the memory-safety argument and the second the
+liveness and bounds argument; together they remove the list of cases a
+ring driver otherwise keeps. A call that cannot keep either rule, for
+any reason, answers `{error, Reason}`, and every such answer ends the
+medium (*Ending the medium*, below), so no failure leaves the transport
+waiting for a wake that will not come. The driver's mailbox holds at
+most one of each message the transport causes, since each arm is
+one-shot, the receive rule allows one `more`, and the transport keeps a
+flag for its `flush` and one for its `failed`; a burst from a peer
+cannot fill it, unlike the tap helper's port.
+
+**Configuration.** An interface's entry names the transport as
+`{erx_netmap, #{port := Port, lladdr := Addr}}` with these keys:
+
+| Key | Value | Checked at `init` |
+| --- | --- | --- |
+| `port` | the netmap port's name: `vale0:erx` for a port of the switch `vale0` (created when it is opened and gone when it is closed), `ix0` for a card | 1 to 63 bytes, the kernel's `NETMAP_REQ_IFNAMSIZ` less its terminator, each an ASCII letter or digit, `.`, `_`, `-` or `:`, else `{error, {port, Port}}`. The kernel reads other bytes of a name as its own syntax (`{` and `}` name a netmap pipe), so such a name would bind some other port rather than fail |
+| `ring` | which ring pair of the port to bind, default 0 | below 65,536, else `{error, {ring, N}}` |
+| `lladdr` | the interface's Ethernet address. A switch port has none of its own; a card's own address may be given | unicast, else `{error, {lladdr, Addr}}` |
+| `mtu` | default 1,500 | 1,280 to 9,000, and with the 14-byte Ethernet header within the port's buffer size, else `{error, {mtu, N}}` |
+| `tx_limit` | frames that may wait at the driver; default the transmit ring's slot count | a positive integer, else `{error, {tx_limit, N}}` |
+
+The address is not required to be locally administered, as the pipe's
+is, since a card in netmap mode keeps its own; a switch port should
+still be given a locally administered one. netmap reports no carrier,
+so a card's cable is not seen.
+
+**One ring pair per transport.** The transport registers one ring pair,
+`NR_REG_ONE_NIC` with the configured ring, so each interface has one
+descriptor, one receive ring and one transmit ring. A switch port has
+one pair by default. A card with several queues is set to one queue
+pair (on FreeBSD the `iflib` tunables `override_nrxqs` and
+`override_ntxqs`, on Linux `ethtool -L`), or becomes several
+interfaces, one per pair, which is the stack's extension of one
+interface process per receive queue ([Scope](#scope)). One transport
+over every ring is not offered: one descriptor over several rings would
+put the frames of one flow on whichever transmit ring had room, so a
+card could reorder them on the wire, and `poll` reports such a
+descriptor writable when any of its rings has room.
+
+**Opening.** `erx_netmap_nif:open(Port, #{ring := N, mtu := Mtu})` runs
+on a dirty I/O scheduler, since the registration allocates the port's
+memory and may take milliseconds. `init` calls it once, and it does
+this, in order:
+
+1. Open `/dev/netmap`, read and write, close-on-exec.
+2. Register with `NIOCCTRL`: `NETMAP_API` of the headers the NIF was
+   built against, `NETMAP_REQ_REGISTER`, the port's name, and
+   `NR_REG_ONE_NIC` with the ring and two flags, `NR_EXCLUSIVE`, so the
+   kernel refuses a second registration of the same rings by any
+   process, and `NR_NO_TX_POLL`, so a wait for reading does not also
+   sync the transmit ring. Every other field is zero: the port's own
+   slot and ring counts, a region the kernel chooses, no extra buffers,
+   and no `NR_ACCEPT_VNET_HDR`, so a port that would put a virtio-net
+   header before each frame refuses, and every slot holds a bare frame.
+3. Map the region the answer names, `nr_memsize` bytes, shared, read and
+   write.
+4. Check the layout. These fields are read once and kept in the NIF's
+   handle: the interface descriptor at `nr_offset`, its ring counts, the
+   offsets of ring `N` of each direction, and each ring's slot count,
+   buffer size and buffer offset. `erx_netmap_ring` checks with checked
+   arithmetic that each ring's header and slots lie inside the mapping,
+   that each ring carries its ring number and its direction, that the
+   slot count is at least 2, and that the buffer size holds the MTU and
+   the Ethernet header.
+5. Monitor the calling process, the handle's owner.
+
+It answers `{ok, Handle, TxSlots}`, the transmit ring's slot count and
+`tx_limit`'s default, or `{error, Reason}`: `{mtu, Mtu}` or `{api,
+Kernel, Built}`, which refuse `init`, or else `{Step, Errno}`, or
+`{layout, broken}`. The handle is a NIF resource. Every later call
+checks that its caller is the owner and is `badarg` otherwise, so the
+handle's state has one user and needs no lock.
+
+**Receiving.** `erx_netmap_nif:recv(Handle)` does one batch:
+
+1. `NIOCRXSYNC`, which returns the slots the transport released and
+   moves the ring's `tail` past the frames that have arrived.
+2. Read `tail` once and check it is below the slot count. Then read each
+   slot from the handle's own `head` towards `tail` once: its buffer
+   index, its length and whether `NS_MOREFRAG` is set. At most 256 slots
+   are read.
+3. The core plans the batch from that snapshot. A slot whose buffer lies
+   outside the mapping, or whose length exceeds the buffer size, breaks
+   the ring, since these are the kernel's own structure, as a virtio
+   completion naming no posted buffer breaks a queue. A frame shorter
+   than the Ethernet header is dropped as `malformed`, and one longer
+   than the MTU and the header as `too_long`, as is every slot of a
+   chain that `NS_MOREFRAG` marks (a switch makes one when a peer sends
+   a frame larger than one buffer); the handle keeps whether a chain is
+   open, so a chain across two calls is dropped whole. Every other slot
+   is a frame. The plan stops at 64 KiB of frames or 256 slots.
+4. Copy each frame into a new binary. Then store the new `cur`, then the
+   new `head`, with release ordering. That order keeps every pair the
+   kernel reads valid, `head` never past `cur`, even when ERTS's poll
+   thread syncs the ring from another thread in the middle.
+5. If the plan stopped at its limit with slots left, answer `more`.
+   Otherwise the ring is empty after the call's own sync, and the call
+   arms the descriptor for reading and answers `armed`.
+
+The answer is `{ok, Frames, Drops, more | armed}` with `Drops` a count
+per reason, or `{error, Reason}`: `broken`, the sync's error number, or
+`arm` when `enif_select` answers a negative value, the batch's frames
+then going with the medium. The call charges `enif_consume_timeslice`
+for the bytes it copied and the slots it read. The transport turns the
+answer into one `{dropped, Reason}` event per dropped frame and
+`{frames, Frames}`, and on `more` sends itself `{erx_netmap, more}`, so
+the interface runs between batches as it does between virtio's.
+`init` sends itself the first `more`, so frames that arrived before the
+start are read through the same path as every later batch.
+
+**No lost wakeup.** Nothing is lost between a call's sync and its arm,
+in either direction. Registering the descriptor with ERTS's poll set
+polls it once, through kqueue's attach on FreeBSD and `epoll_ctl` on
+Linux, and netmap answers that poll from the rings after a sync of its
+own (`netmap_poll`): a poll for reading syncs the receive ring, and a
+poll for writing syncs the transmit ring, which with `NR_NO_TX_POLL` is
+the only poll that does. So a frame that lands, or a transmit slot the
+kernel finishes, between the call's sync and its arm is reported by the
+arm itself. This rests on netmap's poll handler, not on anything erXos
+controls. The switch run below checks the receive side. The write arm
+meets a real kernel only on a card, since a switch port's sync gives
+back every slot it sends (`netmap_vp_txsync`); until a test host has a
+card in netmap mode, the write arm is tested over the fake ring alone.
+
+**Transmitting.** `transmit/2` drops a loopback frame, which names a
+zone, as `malformed`, as every transport does, and once the medium has
+failed drops every frame as `refused` without a call. It hands every
+other frame to `erx_netmap_nif:send(Handle, Bin)` as one binary: a
+frame that is one binary as it is, any other iodata joined first with
+`iolist_to_binary/1`. That join is the one way a frame of several
+binaries, such as a TCP segment's headers and payload, is shaped for
+the ring. It is a second copy of such a frame, on the
+[watch list](todo-performance.md), and in return the NIF walks no list:
+a frame reaches the C as one binary's size, which the core checks like
+every other length. `enif_inspect_iovec` would spare the join, but OTP
+lets the vector it returns hold more elements than the bound it is
+given, so its count would be one more length crossing into C, and a
+frame past the bound would still need a second path.
+
+The core plans the send from the binary's size and a snapshot of the
+slot at the handle's `head`. A size below the Ethernet header's 14
+bytes is dropped as `malformed` and one above the MTU and the header as
+`too_long`; the slot's buffer index, read once, is checked as on
+receive. When the ring has no room by the `tail` of the last sync, the
+NIF first syncs, which sends what is staged and gives back the slots
+the kernel is done with, and plans again from the new `tail`. It copies
+the binary into the buffer, sets the slot's length with every flag
+clear, advances `cur`, then `head`, and answers one of these:
+
+* `ok`: the frame is in the ring, not yet synced. The transport sends
+  itself `{erx_netmap, flush}` if none is on its way. `flush/1` is one
+  `NIOCTXSYNC`, so every frame the driver gives the transport before
+  that message comes back, from the backlog and the transmits already
+  in its mailbox, leaves in one sync, which the transmit credit bounds.
+  A switch moves the frame to its destination inside the sender's sync,
+  so on a switch port the flush is also the send.
+* `full`: no room even after that sync. The NIF has armed the
+  descriptor for writing, and the arm's message is the `writable`
+  event.
+* `{drop, malformed}`, `{drop, too_long}`: as the driver counts drops.
+* `{error, Reason}`: the sync of a full ring failed (its error number),
+  the arm failed (`arm`), or the slot's buffer broke the ring
+  (`broken`). The frame is dropped as `refused`, and the transport
+  records the failure and sends itself one `{erx_netmap, failed,
+  Reason}`, since `transmit/2` cannot stop the driver itself.
+
+**Scheduling.** Every call but `open/2` runs on a normal scheduler and
+is bounded: `recv/1` at 64 KiB, 256 slots and one sync, `send/2` at one
+frame of at most 9,014 bytes and one sync, and `flush/1` at one sync. A
+sync is a system call that never blocks, so a dirty scheduler would
+cost a switch per batch and buy nothing. No thread of the transport's
+own waits: ERTS's poll threads do, and `enif_select` turns readiness
+into a message to the driver. Nor does it spin on the ring, which would
+hold a core and which netmap cannot use, since `tail` moves only at a
+sync ([todo-performance.md](todo-performance.md) weighs latency at low
+rates).
+
+**What the shared memory may hold.** The mapping is shared with the
+kernel, and with any process that registers a port in the same region:
+a switch port has a region of its own, but a host's cards share
+netmap's global region, which any process that can open `/dev/netmap`
+can map. Such a process is as trusted as the node (p620 gives
+`/dev/netmap` to the node's own user alone), and still every field is
+treated as a value that may change at any time and may be wrong:
+
+* The fields fixed at registration are read once, at open, checked, and
+  kept in the handle; `head` and `cur` are the handle's own, written
+  and never read back.
+* `tail` and each slot's buffer index, length and flags are read once
+  per call, into the snapshot. A buffer is a range of the mapping
+  computed with checked arithmetic from the ring's offset, its buffer
+  offset (a signed 64-bit value) and the index, and must end within the
+  mapping; a length is checked against the buffer size, then the MTU.
+* A frame's bytes may change while they are copied. The copy is then
+  wrong but within its bounds, the binary made from it never changes
+  afterwards, and the stack treats it as untrusted like any frame.
+* The C reads no byte of a frame. Error numbers become atoms from a
+  fixed table in the NIF (`eacces`, `ebusy`, `einval`, `enoent`,
+  `enomem`, `enxio`, `eperm` and the rest of the list), any other
+  number stays an integer, and no atom is made from the mapping.
+
+A peer controls a frame's bytes, its length, which is checked, and the
+rate, which costs the driver one bounded, preemptible call per batch.
+
+**Ending the medium.** Every `{error, Reason}` the NIF answers means the
+medium has ended, and `event/2` answers `{stop, {netmap, Reason}}`: at
+once for `recv/1` and `flush/1`, through the `failed` message for
+`send/2`. No list of failures is kept; a failed sync (the card is
+detached, the port is gone, or the descriptor is in error, which ERTS
+reports as readiness and the next sync turns into an error number), a
+broken ring and a failed arm end the medium alike. The driver then
+ends as [Ending](#the-driver) sets out for every driver: held to a
+second from its start with its link told `down`, and its link started
+again by the interfaces supervisor, whose intensity a link ending at
+that pace never exhausts. The new driver registers the port again; a
+switch port's slots and buffers start clean, and the new registration
+resets a card's ring.
+
+A failed registration is the medium ending too, not a refusal, because
+a transport whose `init` fails is not held and is retried at once
+([Ending](#the-driver)). `init` answers `{ok, Info, T}` with the link
+`down` and the medium failed, and sends itself `{erx_netmap, failed,
+{Step, Reason}}`. A missing card, `/dev/netmap` without permission, a
+port another process holds (`ebusy`) or a predecessor's registration
+that ERTS has not yet closed thus restarts the link at most once a
+second for as long as it lasts, and fails neither the link's start nor
+the stack's. A switch going away is not an event this transport sees:
+the switch exists while any port is on it, this one included.
+
+The handle closes in one place, the stop callback of `enif_select`,
+which unmaps the region and closes the descriptor once ERTS's poll set
+lets go of it. Two things request that stop: the owner's monitor, when
+the driver ends however it ends, and the resource's destructor. Neither
+leaves a caller behind, since only the owner may call and the
+destructor runs only when no process holds the handle, so the NIF has
+no close call and no closed state.
+
+**Refusals at `init`.** Configuration and build errors refuse the start
+with `{error, Reason}`, as the pipe's do, since restarting cannot fix
+them: the keys of the table above, `{netmap, unavailable}` when the NIF
+library is absent, `{netmap, {api, Kernel, Built}}` when the kernel
+answers the registration with an API version other than the NIF's
+headers, and `{mtu, N}` when the port's buffers cannot hold the MTU and
+the Ethernet header.
+
+**Building.** `make -C c_src` builds `priv/erx_netmap_nif.so` beside the
+tap helper and the per-byte primitives' NIF library when the host's
+compiler finds `<net/netmap.h>`: FreeBSD has it in its base system, and
+Linux once netmap's headers are installed or `NETMAP_INCLUDE` names
+them. Elsewhere, macOS included, the make prints one line saying the
+transport is not built, and builds the rest. The headers fix the API
+version the NIF requests. The NIF does not link `libnetmap`, whose
+`nmport_open` adds a port-name syntax of options, extra memory and ring
+suffixes this transport does not use; the raw `NIOCCTRL` request is the
+kernel's own interface on both systems. It is a library of its own, so
+that the per-byte primitives, which build everywhere, do not depend on
+netmap. `erx_netmap_nif`'s `on_load` answers `ok` when its library is
+missing and every call then answers `{error, unavailable}`, so a host
+without netmap still loads the application and refuses only an
+interface that names this transport. The ERTS headers come from the
+`erl` that runs the node (`code:root_dir()`'s `usr/include`).
+`erx_netmap_ring.c` includes no netmap header and works on the plain
+values the NIF reads, such as a slot's chain flag as a boolean, so its
+tests and fuzz target run on every host, macOS included. Only
+`erx_netmap_nif.c` includes `<net/netmap.h>` and reads or writes the
+mapping, with every offset taken from a plan of the core's
+([Build checks](#build-checks)).
+
+**Why a NIF, and why a copy.** A port program in the manner of the tap
+helper would keep C out of the node, but it relays every frame through
+a pipe, a copy in and a copy out with system calls on both sides, which
+are the costs netmap exists to remove and which the comparison would
+then measure instead of the stack; it would also repeat the port end's
+uncredited mailbox ([Residuals](#residuals)). The NIF keeps to the rule
+that C does only per-byte work, copying bytes and checking lengths and
+indices as the device NIF does, while every decision about a frame
+stays in Erlang. A bug in it takes down the node, which outside erXos
+is the whole stack, so its C is small and its decisions are in a pure
+core under unit tests, a fuzz target and the sanitizers.
+
+Receive copies rather than lending slots to binaries. The stack keeps
+sub-binaries of received frames in reassembly queues and receive
+buffers as long as a peer keeps data out of order, and a netmap ring
+returns its slots in order, so one held 60-byte segment would hold
+every slot behind it and stop the interface's receive for all clients.
+Swapping a held slot's buffer for a spare avoids the stall, but needs a
+pool of spares, a destructor that returns them from any thread, and a
+copy anyway once the pool is empty: three new rules where the copy has
+none. A 1,514-byte copy is expected to be a small part of the 12.3 us
+a full-size frame may take at 1 Gb/s
+([Where C is used](#where-c-is-used-and-what-is-measured)), an estimate
+that measurement 2 replaces with a measured share. Transmit copies too:
+`NS_INDIRECT`, a switch reading the frame from the process's memory,
+exists only on switch ports and needs the frame kept alive until the
+sync, which `erx_net_driver`'s contract does not give a transport.
+
+**Tests.** Each is paired with a seeded fault that it must catch.
+
+* *The core, on every host.* C unit tests of `erx_netmap_ring` run under
+  `make check`. Layout: an honest layout passes; a ring past the end of
+  the mapping, a buffer offset before it, an index whose product with
+  the buffer size overflows, a slot count of 1 and a buffer smaller than
+  the MTU and header are refused. Receive: an honest ring; a `tail` at
+  the slot count and a length one past the buffer size break the ring;
+  lengths of 13 and of the MTU and header plus one are dropped
+  `malformed` and `too_long`; a chain of three slots split across two
+  calls is dropped whole; a batch stops at 64 KiB and at 256 slots with
+  `more`. Transmit: room up to `tail` and no further; a full ring; sizes
+  of 13 and of the MTU and header plus one, dropped as on receive.
+  *Seeded failures:* the receive length check removed, the `tail` check
+  written `<=`, and the transmit size check removed must each fail
+  their case.
+* *The fuzz target.* `tools/fuzz/netmap_ring_fuzz.c` drives the core
+  over a fake mapping built from its input: the layout fields, the
+  slots, a sequence of `tail` values across calls, and the sizes of
+  frames to send. It checks that every planned copy, received or sent,
+  lies inside one buffer and inside the mapping, that `head` moves only
+  towards `tail`, that a receive plans at most 64 KiB and one frame and
+  at most 256 slots, and that no slot of a chain is ever planned as a
+  frame. It runs under the sanitizers, as every C target does. *Seeded
+  failures:* the receive buffer bound removed, the transmit size bound
+  removed, and a chain flag that each call starts clear must each fail
+  within the target's budget.
+* *The transport over a fake ring.* In tests only, the `nif` key of the
+  configuration names a module of the same functions over a ring held
+  in Erlang, which sends the select messages itself and, as the NIF
+  is, is `badarg` on a `send/2` whose frame is not a binary. A property
+  test over random orders of arrivals, sends of frames of one or many
+  binaries, and wakes checks that at most one receive wake is ever in
+  flight, that a frame in the fake ring always has a wake on its way,
+  that every transmit before a flush leaves in that one sync, and that
+  `writable` comes only from the write arm's message. Driver tests
+  check that each error the fake can answer (a failed sync from each
+  call, a failed arm from `recv/1` and from a full `send/2`, a broken
+  ring, a failed registration) ends the driver with `{shutdown,
+  {netmap, Reason}}` no sooner than a second after its start; that many
+  queued transmits meeting one failure send one `failed`; and that each
+  refusal of `init` is the one listed. *Seeded failures:* a transport
+  that sends itself `more` after `armed` must break the one-wake
+  property; one that never arms after emptying the ring must leave a
+  frame with no wake; one that reports `writable` at a flush must fail
+  the `writable` check; one that hands the NIF a frame unjoined must
+  fail on many binaries; one that reads `{error, arm}` as `armed` must
+  leave the driver running; and one that refuses `init` on a failed
+  registration must end sooner than a second.
+* *The p620 switch run.* A host test, run on the FreeBSD test host,
+  skipped elsewhere with its reason stated, never counted as passed.
+  Two drivers on `vale0` exchange frames of 60, 1,514 and the MTU's
+  largest size, each sent as one binary and as headers and a payload of
+  several binaries, unchanged in both directions. The stack takes jail
+  `erxpeer0`'s ARP and ping over the switch and runs a UDP echo and a
+  TCP transfer with it. A second registration of the same port is
+  refused with `ebusy`. A killed driver's link is started again,
+  re-registers the port and answers ping again. An MTU over the buffer
+  size is refused at `init`. A stream of single frames at random gaps,
+  about 100,000 empty-ring arms in all, gets every frame through within
+  100 ms, which checks the lost-wakeup argument against FreeBSD's
+  `netmap_poll` and ERTS's kqueue. *Seeded failures:* a NIF that sets
+  each slot's length one short must fail the 1,514-byte case, and one
+  that never arms must stall the stream. The same run on a Linux host
+  with netmap's module, once one joins the test hosts, checks the NIF's
+  `ioctl` numbers and `epoll` against netmap's poll handler there.
+
+**Measurements.** The numbers name the host, the operating system and
+kernel, OTP, the compiler and flags, the frame sizes and the baseline,
+as every network number does; raw data goes in `~/erxos-history`, and
+the record in a research report that cites it. The per-byte primitives
+are the same C on every host
+([Two places, four seams](#two-places-four-seams)), so the stack's
+checksums cost what they cost on erXos. Two measurements, of what the
+transport itself costs, are owed before it lands:
+
+1. *The switch's ceiling.* `pkt-gen` sending to `pkt-gen` on `vale0`,
+   60- and 1,514-byte frames, packets per second and Gb/s, one core
+   each.
+2. *The transport alone.* `pkt-gen` sending to a driver whose
+   stand-in interface takes and counts every batch, and the driver
+   sending prebuilt frames as fast as its credit lets it to `pkt-gen`,
+   once as single binaries and once as headers and a payload. Same
+   sizes, with the node's CPU time from `getrusage` and a profile that
+   gives the share of the copies, the join, the binaries and the syncs.
+
+The comparisons are owed after it lands, and each decides only where
+the stack's own time goes:
+
+3. TCP bulk transfer, one flow each way, and request-response, between
+   `erx_net` and FreeBSD's stack in `erxpeer0` over the switch, with the
+   CPU time of the node and of the host's kernel. The jail's `epair` is
+   in netmap's emulated mode, which copies through mbufs, so `pkt-gen`
+   to the jail gives that path's own ceiling first.
+4. The same loads between lwIP over netmap and the jail, and between
+   two jails on the switch, as the two baselines. lwIP has no netmap
+   port of its own, so it runs over a small `netif` for lwIP's UNIX
+   port written against `NIOCCTRL` as this NIF is, kept outside erXos's
+   tree and fetched at a pinned commit like the other oracle tools; both
+   sides then use the same registration and sync pattern.
+5. Minimum-size UDP frames from `pkt-gen` to an `erx_net` socket:
+   receive packets per second and drops by reason, which is the
+   interface process's ceiling over a medium that costs almost nothing.
+
+Over the tap helper on p620, the helper used about 2 percent of a CPU
+and the limit was the stack's per-segment work
+([todo-performance.md](todo-performance.md)), so this transport is not
+expected to raise TCP throughput much. It gives the comparison the
+medium the other stacks use, at a measured and small cost, and the
+packet rate of minimum-size frames.
+
+**Residuals of the transport.**
+
+* A process that can open `/dev/netmap` can read and write the buffers
+  of every port in a shared memory region, a card's included. This is
+  netmap's own model. The transport's checks keep such a process from
+  corrupting the node's memory, but not from altering frames.
+* A netmap that reported a descriptor readable while its ring held
+  neither frames nor an error would make the driver arm, wake and find
+  nothing, again and again. Each round is preemptible and bounded. That
+  behaviour has not been seen, and the switch run watches the driver's
+  wakes per frame.
+* Frames past the interface's receive credit are copied before the
+  driver drops them as `no_room`. A driver that told the transport to
+  leave them in the ring, where the switch or the card drops them for
+  nothing, would need the receive credit's state across the
+  transport's callbacks. That change waits for the flood numbers
+  ([todo-performance.md](todo-performance.md)).
+
+**Open decision for the owner.** *A second jail on the switch,* for the
+FreeBSD-to-FreeBSD baseline of measurement 4. It changes p620's setup,
+which puts only `erxpeer0`'s `epair` on `vale0`, and so is the owner's
+to allow. Recommended: allow it; it is the one baseline that shows what
+the switch and the emulated mode cost a kernel stack, apart from any
+user-mode stack.
 
 ### The interface core
 
@@ -2795,7 +3271,9 @@ modules are marked P; process modules E.
 | `erx_virtio_net`, `erx_net_erxos` (in `erxos/`) | none | erXos's transport and runtime | seam |
 | `erx_bytes`, `erx_net_local` (in `portable/`) | none | the portable per-byte primitives and runtime | seam |
 | `erx_net_bytes`, `erx_inet_csum`, `erx_siphash` (in `c_src/`, C17) | none | the per-byte primitives' C, linked into erXos's ERTS and built into the portable library | per-byte |
+| `erx_netmap`, `erx_netmap_nif` (in `portable/`) | none | the netmap transport and its NIF's loader | E |
 | `erx_net_tap` (in `c_src/`, C17) | none | the tap helper, a port program | host tool |
+| `erx_netmap_nif.c`, `erx_netmap_ring.c` (in `c_src/`, C17) | none | the netmap NIF: its effects over the mapping, and the pure core that plans each call | host NIF |
 | `erx_icmp_sock` | `raw_ip.c` (`rip_input`, `rip_send`), the parts `ping` uses | the ICMP echo socket | E |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd` | none | processes | E |
 
@@ -3249,6 +3727,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | Traffic that names no socket spends the interface's budget | the ingress limiter, below |
 | Packets queued for any process are bounded | credits |
 | Text from packets reaches logs and the inspector only through the sink's escaping function | `erx_log` |
+| Ring fields a netmap port shares are read once per call and checked before a byte is copied: offsets and sizes at registration, `tail` and each slot's buffer index and length at each call; every copy lies inside one buffer of the mapping | `erx_netmap_ring`, its tests and fuzz target ([The netmap transport](#the-netmap-transport)) |
 
 **The ingress limiter.** Owned traffic, a frame that demultiplexes to a
 socket, is bounded by that socket's credit, and what the socket spends on
@@ -3327,8 +3806,9 @@ Each of these is a known gap, with the reason it stays:
   data as fast as the port program reads it, so a tap peer that floods
   fills the driver's mailbox, where the virtio and UDP ends bound it. The
   port end serves the test host's own jails and nodes outside erXos;
-  floods are tested on QEMU, through virtio. A NIF transport that reads
-  only on demand would bound it.
+  floods are tested on QEMU, through virtio. The netmap transport,
+  which reads its ring only when its one receive wake arrives, has no
+  such gap ([The netmap transport](#the-netmap-transport)).
 
 ## Concurrency and failure
 
@@ -3352,6 +3832,7 @@ packet input.
 | the driver crashes, or the device breaks its queue | its link supervisor, which ends the link; the interfaces supervisor starts it again, at most once a second while the device keeps failing | every connection; their unacknowledged data is retransmitted | the device's queued frames; the interface process restarts after the driver's reset |
 | the driver has no attached interface, between an interface's end and its restart | the driver, which monitors the attached interface | everything | the frames received meanwhile, dropped and counted as `detached` |
 | a device's queue is full, or a transport refuses a frame | the driver | everything | nothing while the backlog has room, which the transmit credit bounds; past it senders' hand-overs are refused and counted where they are made |
+| a call on a netmap port fails (its registration, a sync or an arm), or its ring breaks | the netmap transport, which ends the driver, whose link the interfaces supervisor starts again | every connection | the link's soft state, as a driver crash; a port that stays unregistrable restarts the link at most once a second ([Ending](#the-driver), [The netmap transport](#the-netmap-transport)) |
 | a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by its port's monitor (or the port's exit signal), each ending the driver, whose link the interfaces supervisor starts again; a `udp` end only as refused sends | every connection | the link's soft state, as a driver crash; a far end that stays away restarts the link once a second; TCP retransmits once the far end returns |
 | a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST, and its owner receives `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or a waiting call gets the error |
 | a socket process is killed or crashes outside a step | its grant, which deletes its entries | everything else | the socket, silently: the peer times out or meets a RST later, and the owner's next call gets `{error, closed}` |
@@ -3426,8 +3907,13 @@ refuses, is no interface rather than a fault: its `init` answers
 `ignore`, the link supervisor starts nothing and answers `ignore` too,
 and the stack starts without it, as the block driver does without a
 disk; any refusal but an empty transport's is one line in the kernel log
-([The driver](#the-driver)). The application
-itself refuses to start with `{seam, Key, Module}` when a configuration
+([The driver](#the-driver)). A netmap transport refuses only what
+restarting cannot fix, its configuration and its build (`{netmap,
+unavailable}`, `{netmap, {api, Kernel, Built}}`, `{mtu, N}` over the
+port's buffers), and takes a port it cannot register as its medium
+ending, so its link is held and restarted, at most once a second
+([Ending](#the-driver), [The netmap transport](#the-netmap-transport)).
+The application itself refuses to start with `{seam, Key, Module}` when a configuration
 key names a seam module the build does not hold
 ([Two places, four seams](#two-places-four-seams)).
 
@@ -4092,6 +4578,12 @@ Each with a test proving it catches a violation:
   `-include`, `-include_lib` or file name in the app's source reaches a
   path outside the app directory (N12);
 * no `binary_to_atom`, `list_to_atom` or `binary_to_term` in `erx_net`;
+* only `erx_netmap` calls `erx_netmap_nif`, and only `erx_netmap_nif.c`
+  includes a netmap header or reads or writes netmap's mapping, every
+  offset it uses coming from a plan of `erx_netmap_ring`'s; the check
+  is that no other file of `c_src/` includes `<net/netmap.h>` and that
+  `erx_netmap_nif.c` computes no address but through the core's plan
+  types ([The netmap transport](#the-netmap-transport));
 * every module whose header carries a FreeBSD notice is listed with the
   same files in `NOTICE-freebsd`, and the reverse.
 
@@ -4337,6 +4829,12 @@ would cut its window for it ([The driver](#the-driver)).
 on macOS. It needs an emulator on a test host that runs none; the tap
 helper is a short C program that does one thing, and serves a node
 outside erXos as well.
+
+**A netmap port program, or slots lent to binaries.** A helper relaying
+netmap's rings through a pipe adds two copies per frame and an
+uncredited mailbox; binaries over ring slots save the receive copy but
+let one held segment stop a ring that returns its slots in order. Both
+are weighed in [The netmap transport](#the-netmap-transport).
 
 **lwIP behind a NIF.** A C stack in the domain that parses hostile
 packets, whose numbers would decide nothing about an Erlang stack. The

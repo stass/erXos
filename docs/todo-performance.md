@@ -590,6 +590,49 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   65,000 frames a second, 2 percent of a CPU. Settled by its CPU time at
   the frame rates a faster stack reaches; the fix on the table is several
   frames per read, write and port message.
+* **[Low] network, the netmap transport's receive copy and binary per frame**
+  ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
+  `erx_netmap_nif:recv/1` copies each frame out of its slot into a new
+  binary. Settled by the profile of the transport-alone measurement of
+  that section, 60- and 1,514-byte frames from `pkt-gen` on `vale0`: the
+  share of the copies and the binary allocations in the node's time per
+  frame. The fix on the table is lending slots to binaries with spare
+  buffers swapped in, which the section weighs and rejects unless this
+  share is large.
+* **[Low] network, a NIF call per transmitted frame**
+  ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
+  `erx_net_driver` gives a transport one frame per `transmit/2`, so
+  `erx_netmap` enters the NIF once per frame and syncs once per mailbox
+  pass. Settled by the driver's transmit rate to `pkt-gen` against
+  `pkt-gen` to `pkt-gen` on the same switch, at 60 bytes. The fix on the
+  table is a transport callback that takes the backlog's frames in one
+  call.
+* **[Low] network, the netmap transport's join of a frame of several binaries**
+  ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
+  `erx_netmap` joins every frame that is not one binary with
+  `iolist_to_binary/1` before `send/2` copies it into a slot, so a TCP
+  segment's headers and payload are copied twice. Settled by the
+  transport-alone measurement of that section, the driver sending
+  1,514-byte frames as headers and a payload against the same frames as
+  one binary: the join's share of the node's time per frame. The fix on
+  the table is the NIF copying each binary of a flat list straight into
+  the slot, with the list's length counted by the NIF itself and checked
+  by the core's plan, never taken from `enif_inspect_iovec`'s answer.
+* **[Low] network, frames copied only to be dropped for want of credit**
+  ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
+  Under a flood past the interface's receive credit, the netmap
+  transport still copies each batch before the driver drops it as
+  `no_room`. Settled by the node's CPU time per dropped frame under a
+  `pkt-gen` flood at 60 bytes with the credit full. The fix on the table
+  is for the driver to skip the receive call while its credit is full,
+  leaving the frames to the switch or card to drop.
+* **[Low] network, a poll-thread wake per empty-to-busy ring**
+  ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
+  At low rates each frame that finds the ring empty costs a poll
+  thread's wake and a message to the driver before it is read. Settled
+  by request-response latency between `erx_net` and `pkt-gen`'s ping
+  and pong over `vale0`, against `pkt-gen` to itself. The fix on the
+  table is a short bounded re-check of the ring before arming.
 
 * The syntax-tree chokepoint pass (`tools/lib/erx/syntax_tree.rb`, run by
   `StackProofRun`): it dumps every core's tree, 20-27 MB of JSON each,
