@@ -25,6 +25,42 @@ it; git history is the record of completed work.
   repeat the G3 run for HVF and TCG on a quiet host, since the first run was
   taken at a load average of 44 to 55, and find why stock OTP on the host
   is slower than the guest at the same four operations under HVF.
+* [High] network, the fast path
+  ([docs/design-network-fastpath.md](docs/design-network-fastpath.md)): one connection over
+  p620's tap sends at 890 Mbit/s and receives at 1,143, against lwIP's 6,537 and 6,809 on the
+  same tap, held there by the connection's per-segment step. The targets are two thirds of
+  lwIP's bulk throughput each way over the same medium, and for request-reply a third of
+  lwIP's rate at no more than three times its CPU per transaction. Each package lands with
+  the p620 bulk and request-reply numbers before and after it, and the HVF numbers when it
+  changes erXos's code; the gains are estimates from the profile, to be replaced by those
+  numbers:
+  1. the benchmarks: bulk and request-reply on p620 against lwIP, with lwIP given a
+     request-reply client, `tools/erx bench net-bulk` and `net-rr` under HVF, and the
+     counters of frames per run and segments per merged unit; no gain, it fixes the
+     baseline;
+  2. one step per mailbox and a batch on every hop: about 10 to 15 percent sending and 20
+     to 30 percent receiving, from fewer loop passes and ACKs;
+  3. the lean step: `#tcb{}` split from `#tcb_conf{}`, header prediction finishing its two
+     cases, the header template, the send log of runs with its extension rule: the
+     connection's time per segment from 12.3 us to 3 to 4 us, and throughput about 1.3 to
+     1.5 times until the driver binds;
+  4. the tap transport, `erx_tap` and its NIF, replacing `erx_net_tap` and the pipe's
+     `port` end: with packages 2 and 3, about 2 to 2.5 times the baseline, and three fewer
+     copies of a sent byte;
+  5. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
+     the tap and netmap NIFs, and `erx_net_frame:cut/1` as the reference: send toward
+     4.4 Gbit/s;
+  6. the merge on receive: `erx_bytes:tcp_merge/1`, segment counts in TCP, payloads as lists
+     of binaries, credit by segments and the copy check: receive toward 4.4 Gbit/s, and a
+     sender's ACKs cut by the merged units' length;
+  7. netmap with runs and merged batches, over VALE against lwIP over VALE;
+  8. request-reply: the driver-to-interface hop and scheduler placement measured, and what
+     their profiles name changed, toward the request-reply target;
+  9. device segmentation (`VIRTIO_NET_F_HOST_TSO4`, `HOST_TSO6`), an extension, once a
+     harness medium offers it.
+  Packages 5 and 6 build on the designs of checksums in the copy (its item below), the netmap
+  transport and the socket process, whose push carries `{data, [binary()]}`, a flat list of
+  pieces. Package 4 also ends the tap helper's items under Bugs by subsystem.
 
 ## Stopgap replacements
 
@@ -3817,7 +3853,10 @@ to the corpus and follow rc
   parser of `erx_net` runs in the trusted base, beside the system domain's unconfined device
   memory, so a bug a packet reaches is a bug of the system domain's. `erx_net` starts as a
   `temporary` application (`ReleaseFiles::TEMPORARY`), so a crash loop in it ends the stack and
-  not the system domain; a memory-safety bug in a NIF it calls is not contained. Closed by 1b-E.
+  not the system domain; a memory-safety bug in a NIF it calls is not contained, the merge's C
+  over frames a device wrote among them (`erx_bytes:tcp_merge/1`,
+  [design-network-fastpath.md](docs/design-network-fastpath.md#what-the-stack-believes)).
+  Closed by 1b-E.
 * [Medium] network, sockets (`erlang/apps/erx_net/src/erx_net_grant.erl`, `erx_net_bind`,
   `erx_net_input:udp/3`): a socket bound to a specific address and a port takes that address's
   datagrams from a socket another domain bound to `any` on the same port, since input tries the
@@ -3826,13 +3865,6 @@ to the corpus and follow rc
   another user. And a grant opens any number of sockets, since `erx_net_grant_core`'s limits are not
   built, so one domain can hold every ephemeral port. Refuse a specific bind over another grant's
   wildcard one, as FreeBSD does across users, and cap each grant's sockets with the grant's limits.
-* [Low] network, packet modes (`docs/design-network-stack.md`, Residuals):
-  `gen_tcp`'s packet modes are framed in the network domain with ERTS's C
-  `erlang:decode_packet/3`, so a memory-safety bug in it that a peer can
-  reach ends the network domain and every client's connections, where on
-  stock it ends one node. Its fuzz target over every mode offered lands
-  with the stack; the owner accepted the reach over a client-side process
-  per socket.
 * [Low] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): every session is root's, so ping
   takes `-s` up to 65507 and `-i` down to 1 ms for everyone. Once sessions have users, a non-root
   session gets FreeBSD's limits: `-s` at most 56 bytes and `-i` at least 1 s (ping.c's `uid` checks).
@@ -4122,32 +4154,27 @@ document's "residual risks accepted" paragraph.
   `erx_net_if_core`, `erx_net_driver` with `erx_net_pipe` and
   `erx_net_loop`, `erx_net_runtime` with `erx_net_local`, the processes,
   then `erx_net_vclock`, `erx_net_script`, `erx_net_impair` and
-  `erx_net_relay` in the app's `test/`; `erx_virtio_net` and `erx_net_erxos` with the network
-  domain. Two things to confirm on the FreeBSD test host `p620` before
-  the relay's runs: that the bridge can put two jails behind separate tap
-  devices for the relay's FreeBSD baseline, and that a stock OTP 29.1.2
-  builds there for the stack's host runs (29.1.1 is installed).
-  `erx_net_relay` in the app's `test/`, and the tap helper `erx_net_tap`
-  in `c_src/`. `erx_virtio_net` and `erx_net_erxos` run in the system
-  domain, the stopgap placement, until 1b-E's network domain. Three things to confirm on the FreeBSD test host `p620` before
-  its runs: that the test user can open `/dev/tapN` (a devfs rule) and
+  `erx_net_relay` in the app's `test/`; `erx_virtio_net` and `erx_net_erxos`, which run in the
+  system domain, the stopgap placement, until 1b-E's network domain. Three things to confirm on
+  the FreeBSD test host `p620` before its runs: that the test user can open `/dev/tapN` (a devfs rule) and
   the tap comes up on open (`net.link.tap.up_on_open`), that the bridge
   can put two jails behind separate tap devices for the relay's FreeBSD
   baseline, and that a stock OTP 29.1.2 builds there for the stack's
-  host runs.
+  host runs (29.1.1 is installed).
 * [Medium] network, checksums in the copy
   ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)): the copy between a
   device's buffer and a binary sums each received frame and finishes each sent TCP segment's delayed
-  checksum, so no pass reads a segment only to sum it. First the p620 rerun with the C primitive loaded
-  from `priv/`, the baseline (the design's first open decision). Then, after `erx_net`'s `c_src/` holds the
-  checksum core: `erx_inet_copy_sum` in `erx_inet_csum.c` with its host test and the `inet_csum` fuzz
-  target's new case; `erx_device:complete/3` and `post/5`; `erx_net_sum` (P); the sum argument of the
-  decoders above IP and `erx_net_input`'s `{frame, Bytes, Sum}`; `erx_tcp_wire:encode/4` and
-  `erx_net_frame`'s `{csum, Start, Field, Packet}`; `link_info`'s `csum` and the interface row's;
-  `erx_virtio_net` on `complete/3` and `post/5` with its start line naming the finisher; the pipe's
-  `process` end taking `{sum, S, Frame}`; and the tests of the design's Verification section. The netmap
-  transport's NIF takes the same core when it lands. The device finishing on `VIRTIO_NET_F_CSUM` stays an
-  extension until a harness medium offers the bit.
+  checksum, so no pass reads a segment only to sum it. The baseline is taken, and the design's first open
+  decision recommends building it with the fast path, whose cut and merge rest on it (the fast path item
+  above). To build, in `erx_net`'s `c_src/`: `erx_inet_copy_sum` in `erx_inet_csum.c` with its host test
+  and the `inet_csum` fuzz target's new case; `erx_device:complete/3` and `post_frame/5`'s delayed frames;
+  `erx_net_sum` (P); the sum argument of the decoders above IP and `erx_net_input`'s `{frame, Bytes, Sum}`;
+  `erx_tcp_wire:encode/4` and `erx_net_frame`'s `{csum, Start, Field, Packet}`; `link_info`'s `finish` and
+  the interface row's; `erx_virtio_net` on `complete/3` and `post_frame/5` with its start line naming the
+  finisher; the pipe's `process` end taking `{sum, S, Frame}`; and the tests of the design's Verification
+  section. The netmap and tap transports' NIFs take the same core. The device finishing, on
+  `VIRTIO_NET_F_CSUM` with `HOST_TSO4` and `HOST_TSO6`, stays an extension until a harness medium offers
+  the bits.
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,

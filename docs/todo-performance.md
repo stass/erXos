@@ -496,17 +496,58 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   reductions per delivered byte in the owner's domain, and memory per
   socket. The fixes on the table are coalescing several pushes into one
   delivery when the owner is behind, and granting credit less often.
-* **[Low] network, one message per in-order segment against coalescing**
-  ([design-network-stack.md](design-network-stack.md#hops-and-copies)).
-  A connection delivers each step's in-order data in one message; joining
-  several segments' payloads into one binary saves messages and lane
-  frames at the cost of a copy. In the p620 run of 2026-11-09 (see the
-  entry on one connection process per flow) `{active, true}` received
-  512 MiB in 370,768 `{tcp, S, Data}` messages, one per 1,448-byte
-  segment, at 952 Mbit/s against 1,115 for passive `recv(S, 0)` (median
-  of 3 each). Settled by a bulk receive's CPU time per byte both ways, and
-  by the same active receive with one message per drain of the receive
-  queue.
+* **[Low] network, the receive join on erXos**
+  ([design-network-fastpath.md](design-network-fastpath.md#copies)). The merge leaves a merged segment's payload
+  as its frames' sub-binaries, so the socket process joins a delivery of
+  several pieces into one binary: four copies of a received byte on
+  erXos (the device's copy, the lane's two, the join) against three if
+  the device NIF's copy laid a unit's payloads end to end. Settled by the
+  CPU time per byte of a bulk receive on QEMU `virt` under HVF, with the
+  join's share from a profile; the fix on the table is the merge inside
+  the device NIF's copy, which needs a parser of device-written bytes in
+  the NIF.
+* **[Medium] network, stretch acknowledgements from merged segments**
+  ([design-network-fastpath.md](design-network-fastpath.md#a-merged-segment-in-tcp)). The receiver acknowledges
+  a merged segment once, so a sender sees one ACK for up to 45 segments
+  where RFC 5681 asks for one every second segment, and with a 64 KiB
+  receive buffer a unit can be most of the window. Settled by the bulk
+  receive on p620 with the merge on and off: throughput, the FreeBSD
+  sender's congestion window over time (`tcp_log` or `siftr`) and
+  retransmissions; the fix on the table is ending a unit at a number of
+  segments that follows from the receive window.
+* **[Low] network, the tap transport's system call and sum per frame**
+  ([design-network-stack.md](design-network-stack.md#the-tap-transport)).
+  A tap takes one frame per `write` and gives one per `read`, and the
+  transport reads each payload once more to sum it. Settled by the CPU
+  per GiB of the p620 bulk runs split by function; the fixes on the
+  table are the tap's virtio-net header (`TAPSVNETHDR`) with its
+  checksum and segmentation offloads, if `bridge0` and `epair` honour
+  them, and the netmap transport.
+* **[Low] network, scheduler placement of the driver, interface and
+  connection** ([design-network-fastpath.md](design-network-fastpath.md#processes-and-batching)). On a host with
+  128 schedulers the three processes of a flow run on different cores
+  and wake each other about 15 times a segment. Settled by the p620
+  bulk and request-reply runs at default flags, at `+S 4:4`, and with
+  the three processes bound to one run queue through ERTS's undocumented
+  `scheduler` option of `spawn_opt` and `process_flag/2`: CPU per GiB,
+  context switches and throughput; the fix on the table is that binding
+  for a flow's processes.
+* **[Medium] network, the driver-to-interface hop for request-reply**
+  ([design-network-fastpath.md](design-network-fastpath.md#processes-and-batching)). A received segment passes the
+  driver and the interface before its connection, one message each,
+  about a microsecond of a small transaction's cost. Settled by the
+  request-reply benchmark's profile on p620 once the lean step lands;
+  the fixes on the table are the driver classifying over the
+  interface's published view, or the transport running inside the
+  interface.
+* **[Low] network, runs cut short by many small sends**
+  ([design-network-fastpath.md](design-network-fastpath.md#output-makes-runs)). A run holds at most 64 of the
+  send buffer's binaries, so an owner that writes 100-byte binaries gets
+  runs of a few frames. Settled by the p620 bulk send written as
+  100-byte `gen_tcp:send/2` calls against one written as 64 KiB calls:
+  frames per run and throughput; the fix on the table is joining small
+  binaries once as the send buffer takes them, as FreeBSD's `sbcompress`
+  compacts mbufs.
 * **[Low] network, a reassembled datagram copied and decoded again**
   ([design-network-stack.md](design-network-stack.md#ipv4-and-arp)).
   `erx_ip4_reass` and `erx_ip6_reass` return a completed datagram as a
@@ -534,16 +575,6 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Each hand-over costs an `atomics:add_get/3` and each socket step two
   `process_info/2` reads and an `atomics:add/3`. Settled by the time per
   frame of a bulk transfer with both and with a build that leaves them out.
-* **[Low] network, the virtio transport's payload join**
-  ([design-network-stack.md](design-network-stack.md#the-driver)).
-  `erx_virtio_net` posts a frame's last two binaries as segments of
-  their own and joins the ones before them, the headers and any payload
-  binaries past two, into one; an owner that sends many small binaries
-  pays that copy on most segments. Settled by the CPU time per byte of a bulk send written as
-  100-byte `gen_tcp:send/2` calls against one written as 64 KiB calls, on
-  QEMU `virt` under HVF; the fixes on the table are more `out` segments
-  per request in the device NIF, or joining small binaries once as the
-  send buffer takes them.
 * **[Medium] network, one connection process per flow as a ceiling**
   ([design-network-stack.md](design-network-stack.md#one-owner-one-step)).
   Every segment of a connection is stepped in its one process, so a flow
@@ -563,17 +594,22 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   interface process ran at 95M and the connection at 59M. Past the
   checksum (the per-byte primitives' entry), the per-segment work adds up:
   `erx_tcp_wire:add_options`, the send log's and the reassembly queue's
-  `gb_trees`, decide and commit. Settled by an eprof of `erx_tcp_conn`
-  over 1 GiB with the checksum stubbed; the fix on the table is several
-  segments per step. A FreeBSD-stack baseline through the same tap needs
+  `gb_trees`, decide and commit. The profile of the p620 runs of
+  2026-11-09 (`~/erxos-history/net-perf-p620-2026-11-09/`, erxos-history
+  commit c4f9bf5) found the connection the serial stage, its cost spread
+  over the per-segment step, and [design-network-fastpath.md](design-network-fastpath.md)
+  is the fix: runs, the merge and the lean step. Settled by that design's
+  bulk benchmark meeting its target. A FreeBSD-stack baseline through the same tap needs
   an address on the host's side of bridge0, a setting change on p620 that
   waits for the owner's go-ahead.
 * **[Medium] network, checksums in the copy**
   ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)). The design
   removes the separate checksum pass on each path: `erx_tcp_wire:encode/3`'s sum in the
   connection process and `decode/2`'s in the interface process. The copy computes the sum
-  instead. The only figure behind the change is the pure-Erlang stand-in's 55 percent in
-  the p620 run of 2026-11-09. The C primitive costs about 0.30 microseconds for a
+  instead. With the C primitive loaded, `erx_bytes` held 3.1 percent of the connection's
+  samples on send in the p620 profile of 2026-11-09
+  ([design-network-fastpath.md](design-network-fastpath.md#where-a-segments-cost-goes));
+  the interface's receiving share was not reported. The C primitive costs about 0.30 microseconds for a
   1,480-byte segment on the development host (Apple M3 Max, macOS, stock OTP 29.1.2 JIT,
   clang -O2, 200,000 calls), which would be about a sixth of a scheduler per direction at
   lwIP's 550,000 frames a second, an estimate that is not measured. Measure, before and
@@ -583,10 +619,9 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
     That network entry is not written yet. Record which finisher the device took (the
     transport's start line). The harness's hub port is expected to offer no
     `VIRTIO_NET_F_CSUM`, so the copy finishes there;
-  - the p620 send and receive of 2026-11-09 repeated with the C primitive loaded from
-    `priv/` as the baseline, over tap, where nothing should change, and over netmap,
-    where the copy sums, with the share of the connection's and the interface's samples
-    in `erx_bytes:inet_csum/2` and in the NIF's copy;
+  - the p620 send and receive over tap and over netmap, before and after, with the share
+    of the connection's and the interface's samples in `erx_bytes:inet_csum/2` and in
+    the NIFs' copies;
   - `erx_inet_copy_sum` against a plain copy followed by `erx_inet_sum` over the
     destination in one C call, over 64 to 9,014 bytes, on the development host and on
     p620. If the fused loop is slower at frame sizes, the core does the copy and then
@@ -627,14 +662,6 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   pipe, with a step per push and with one per quarter buffer pushed; the
   fix on the table is the latter, as FreeBSD's `tcp_output` sends a
   window update only for a significant change.
-* **[Low] network, the tap helper's frame per system call**
-  ([design-network-stack.md](design-network-stack.md#the-tap-helper)).
-  `erx_net_tap` reads and writes one frame per system call and port
-  message. In the p620 run of 2026-11-09 (the entry on one connection
-  process per flow) it used 0.18 s of CPU in 11 s of a 1 GiB send, about
-  65,000 frames a second, 2 percent of a CPU. Settled by its CPU time at
-  the frame rates a faster stack reaches; the fix on the table is several
-  frames per read, write and port message.
 * **[Low] network, the netmap transport's receive copy and binary per frame**
   ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
   `erx_netmap_nif:recv/1` copies each frame out of its slot into a new
@@ -644,25 +671,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   frame. The fix on the table is lending slots to binaries with spare
   buffers swapped in, which the section weighs and rejects unless this
   share is large.
-* **[Low] network, a NIF call per transmitted frame**
+* **[Low] network, a NIF call per transmitted frame that is not a run**
   ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
-  `erx_net_driver` gives a transport one frame per `transmit/2`, so
-  `erx_netmap` enters the NIF once per frame and syncs once per mailbox
-  pass. Settled by the driver's transmit rate to `pkt-gen` against
+  `erx_net_driver` gives a transport one frame or run per `transmit/2`, so
+  `erx_netmap` enters the NIF once per run and once per plain frame, such
+  as a small datagram, and syncs once per mailbox pass. Settled by the driver's transmit rate to `pkt-gen` against
   `pkt-gen` to `pkt-gen` on the same switch, at 60 bytes. The fix on the
   table is a transport callback that takes the backlog's frames in one
   call.
-* **[Low] network, the netmap transport's join of a frame of several binaries**
-  ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
-  `erx_netmap` joins every frame that is not one binary with
-  `iolist_to_binary/1` before `send/2` copies it into a slot, so a TCP
-  segment's headers and payload are copied twice. Settled by the
-  transport-alone measurement of that section, the driver sending
-  1,514-byte frames as headers and a payload against the same frames as
-  one binary: the join's share of the node's time per frame. The fix on
-  the table is the NIF copying each binary of a flat list straight into
-  the slot, with the list's length counted by the NIF itself and checked
-  by the core's plan, never taken from `enif_inspect_iovec`'s answer.
 * **[Low] network, frames copied only to be dropped for want of credit**
   ([design-network-stack.md](design-network-stack.md#the-netmap-transport)).
   Under a flood past the interface's receive credit, the netmap

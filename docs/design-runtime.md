@@ -2274,6 +2274,27 @@ segments longer than a buffer, empty or out of order are `badarg`. An
 `out` is a binary, never an iolist, so the NIF knows its size before it
 copies or flattens anything.
 
+The network's form of posting, `erx_device:post_frame(Dev, Q, Tag,
+Prefix, Frame)`, puts `Prefix`, the transport's device header, before
+each frame it posts, one request per frame. `Frame` is a frame as iodata
+of at most 64 binaries, which the NIF walks once to bound and size
+before it copies anything; a delayed frame, `{csum, Start, Field,
+Iodata}`, both offsets even and the field inside the frame, whose bytes
+from `Start` on the NIF copies through the network's
+`erx_inet_copy_sum` and whose field at `Start + Field` it then sets to
+the complement of that sum, in network byte order
+([design-network-stack.md](design-network-stack.md#checksums-in-the-copy));
+or a run of TCP segments, which the network's
+cut core, `erx_tcp_cut.c`, linked into the NIF, plans and checks whole
+first and then cuts into its frames as the NIF copies them, summing each
+frame's checksums in the same pass
+([design-network-fastpath.md](design-network-fastpath.md#each-transports-cut)).
+The answer is `{ok, Posted}`, the frames posted from the first, so a run
+that finds fewer free heads than it has frames is posted in part;
+`{error, full}` with nothing posted; and `{error, broken}` as `post/4`
+answers it. The cut reads only what the sender passed, the stack's own
+header template and payload, never memory a device can write.
+
 **Completing.** `erx_device:complete(Dev, Q)` reads the used ring's index
 once and each entry's two fields once, from the slot `erx_device_queue`
 names, which checks the index against what is in flight, the entry's
@@ -2366,7 +2387,9 @@ accessors, called only by its BIFs and its NIF, touch a register window, and no 
 or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
 over device-written bytes in the NIF, whose copy at completion is one
-call of the bulk copy.
+call of the bulk copy. The network's cut core, linked in for
+`post_frame/5`, reads only bytes a sender passed and writes them into
+pool buffers, so the rule holds over it as well.
 Only the driver's modules reference the device NIF: ERTS binds a static NIF
 only to the module of its name, and the register BIFs are that module's, so
 Erlang reaches a device only by naming `erx_device`, and a source check
@@ -2396,8 +2419,10 @@ done once per packet, per block and per file around them.
 | `erx_bytes:siphash24/2` | SipHash-2-4 with a 16-byte key over iodata, as a 64-bit integer | the network stack: initial sequence numbers, timestamp offsets, SYN cookies and the stream of its random generator, `erx_net_rand` ([design-network-stack.md](design-network-stack.md#where-c-is-used-and-what-is-measured)) | the SipHash paper's test vectors; an Erlang model |
 | `erlang:crc32/2`, ERTS's own | CRC-32, through ERTS's bundled zlib | F2FS's checksums | the host's stock OTP |
 | `erx_verity:check/3` | checks blocks of an EROFS image, given as binaries with their block numbers, against the image's dm-verity tree, keeping the tree's checked blocks in a bounded cache, and returns `{ok, Blocks}` with only blocks that matched, or `{error, eio}` naming the first that did not; the tree's layout, root and salt come from the image's record in the system configuration, in the layout `erx_verity_t` of the ABI file ([design-storage.md](design-storage.md#data-model)) | the EROFS reader | the tests over trees the packer writes, and the reader's fuzz target |
-| `erx_device:post/4`'s copy, and `post/5`'s | copies a request's `out` bytes into its pool buffer ([The device NIF](#the-device-nif)); `post/5`, given `{inet_csum, Start, Field}` with both even and the field inside the `out` bytes, also sums the bytes from `Start` to the end as it copies them, through the network's `erx_inet_copy_sum`, and stores the complement at `Start + Field`, finishing a delayed Internet checksum in the same pass ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)) | drivers; `post/5` the network's | a byte-for-byte comparison; for `post/5`, the bytes of the same segment encoded with its checksum complete |
+| `erx_device:post/4`'s copy | copies a request's `out` bytes into its pool buffer ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | `erx_device:complete/2`'s copy, and `complete/3`'s | copies a completed buffer's returned bytes into a fresh binary ([The device NIF](#the-device-nif)); `complete/3`, given an even offset, also returns the Internet checksum's one's-complement sum of each binary from that offset, computed over the bytes stored, each word loaded once, as `{ok, [{Tag, Bytes, Sum}]}` ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)) | drivers; `complete/3` the network's | a byte-for-byte comparison; for the sum, `erx_bytes:inet_csum/2` over the binary |
+| `erx_device:post_frame/5`'s copy | copies a frame's binaries into a pool buffer, finishing a delayed Internet checksum in the same pass through the network's `erx_inet_copy_sum` ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)), or cuts a run of TCP segments into frames as it copies them, summing each frame's checksums ([The device NIF](#the-device-nif)) | the network's virtio transport | the bytes of the same frame encoded with its checksum complete, and `erx_net_frame:cut/1`, byte for byte ([design-network-fastpath.md](design-network-fastpath.md#tests)) |
+| `erx_bytes:tcp_merge/1` | groups a batch of received Ethernet frames, at most 256 frames and 64 KiB, into merged TCP segments by FreeBSD's LRO rule, returning sub-binaries of the frames, and sums each frame that came without its network sum | the network stack's interface process ([design-network-fastpath.md](design-network-fastpath.md#the-merge)) | `erx_tcp_merge_model`, an Erlang model of the rule |
 | the pipe NIF's record copy | copies a record between a pipe's ring and a binary | the session's pipe ends | the pipe tests |
 
 * **Bounded.** A NIF call works on at most 64 KiB of hashing or checksumming

@@ -66,9 +66,16 @@ Decisions every reader needs:
   serves both FreeBSD's RFC 6675 recovery and RACK-TLP. The default
   stack is the reference, by the owner's decision; RACK-TLP and BBR are
   left for later, each a module behind these seams.
-* **C does only per-byte work:** the Internet checksum and the SipHash
-  keyed hash, both per-byte primitives of the runtime. Whether TCP's
-  established path needs native code is measured on this stack, on
+* **A run is the unit of TCP work, and C does only work that rides on
+  bytes.** Output emits runs, segments that share one header, and the
+  copy into each medium cuts a run into frames as it copies; the
+  interface merges each received batch's in-order segments of one flow
+  before it classifies them. A segment is a run of one, and the step it
+  pays alone is lean
+  ([design-network-fastpath.md](design-network-fastpath.md)). Besides
+  the cut and the merge, C does the Internet checksum and the SipHash
+  keyed hash, per-byte primitives of the runtime. Every TCP decision is
+  Erlang's; whether one needs native code is measured on this stack, on
   erXos's kernel.
 * **The stack is an ordinary OTP application.** `erx_net` runs
   unchanged on stock OTP 29.1.2, outside erXos as well as on a
@@ -204,8 +211,10 @@ steps and carry out their actions. Beneath them:
   segments of one request and copies them into a pool buffer, and
   `erx_device:complete/2` returns up to 64 KiB of completed buffers as
   fresh binaries per call
-  ([design-runtime.md](design-runtime.md#the-device-nif)); `post/5` and
-  `complete/3` also finish or compute the Internet checksum in that copy
+  ([design-runtime.md](design-runtime.md#the-device-nif));
+  `post_frame/5`, the network's form of posting, cuts a run into frames
+  and finishes their checksums, and a delayed frame's, in that copy, and
+  `complete/3` computes each frame's network sum in it
   ([Checksums in the copy](#checksums-in-the-copy)).
 * **OTP's dispatch on module sockets.** `gen_tcp`, `gen_udp` and `inet`
   dispatch every call on a socket of the form `{'$inet', Module, Handle}`
@@ -702,9 +711,16 @@ domain D:
    ([The driver](#the-driver)). The driver
    parses nothing else, as sDDF's split of driver and protocol prescribes
    ([design.md](design.md#drivers-and-dma)).
-2. **Interface: classify, reserve, complete.** For each frame the
-   interface process runs two pure functions of `erx_net_input` around
-   one effect:
+2. **Interface: merge, classify, reserve, complete.** The interface
+   first merges the batch: one call of `erx_bytes:tcp_merge/1` groups
+   consecutive in-order segments of one flow, by the rule of FreeBSD's
+   large receive offload, into one merged segment that stands where its
+   first frame stood and counts the segments it holds
+   ([design-network-fastpath.md](design-network-fastpath.md#the-merge)).
+   A merged segment passes every step below as one frame, its first and
+   last frames verified, and takes one unit of credit for each segment
+   it holds. For each frame the interface process runs two pure
+   functions of `erx_net_input` around one effect:
    ```erlang
    classify(Input, View) -> {owned, [{Pid, Credit}, ...], pending()}
                           | {local, pending()}
@@ -758,23 +774,27 @@ domain D:
    by destination, and each destination gets one message holding its
    items in arrival order and naming the interface, against its credit.
    The items are records whose payloads are sub-binaries of the frames,
-   so nothing is copied.
-4. **Connection.** The connection folds `erx_tcp:step/3` over the
-   segments, one at a time, exactly as FreeBSD processes one segment at a
-   time, collecting the actions. It then sends all frames the steps
-   produced (ACKs, data) to the driver in one message, pushes the
-   in-order data its socket process has credit for to that process, in
-   pushes of at most one piece of 64 KiB each
-   ([Message sizes](#message-sizes)), replies to its requests and re-arms
-   its timer.
+   a merged segment's the list of its frames' payloads, so nothing is
+   copied.
+4. **Connection.** The connection takes every items message waiting in
+   its mailbox and folds `erx_tcp:step/3` over their segments, one at a
+   time, a merged segment as one, exactly as FreeBSD processes one
+   segment, or one LRO packet, at a time, collecting the actions
+   ([design-network-fastpath.md](design-network-fastpath.md#one-step-per-mailbox)).
+   It then sends all frames and runs the steps produced (ACKs, data) to
+   the driver in one message, pushes the in-order data its socket
+   process has credit for to that process, in pushes of at most one
+   piece of 64 KiB each ([Message sizes](#message-sizes)), replies to
+   its requests and re-arms its timer.
 5. **Connection to socket process.** The push is
-   `{erx_net, Conn, {data, Data}}`, a frame on the lane from the network
-   domain to the owner's domain D, decoded by D's funnel and delivered as
-   `{erx_origin, Net, {erx_net, Conn, {data, Data}}}`.
+   `{erx_net, Conn, {data, Pieces}}`, `Pieces` the receive queue's
+   binaries as they are, a frame on the lane from the network domain to
+   the owner's domain D, decoded by D's funnel and delivered as
+   `{erx_origin, Net, {erx_net, Conn, {data, Pieces}}}`.
 6. **Socket process to owner.** The socket process checks the push and
    presents it as its options say: in active raw mode as one
-   `{tcp, Socket, Data}`, a local message in D
-   ([The socket process](#the-socket-process)).
+   `{tcp, Socket, Data}`, its pieces joined into one binary, a local
+   message in D ([The socket process](#the-socket-process)).
 
 ### Classifying a frame
 
@@ -956,27 +976,34 @@ looks each segment up anew and finds the listener or nothing.
 
 ### Transmitting
 
-1. **Owner to connection.** `gen_tcp:send/2` in D sends `{send, Data}` to
-   the connection with a reply alias: a frame on the lane, decoded by the
+1. **Owner to connection.** `gen_tcp:send/2` in D calls the socket
+   process, a local call, which sends the data to the connection in
+   pieces of at most 64 KiB, one at a time, each
+   `{erx_net, SockProc, {call, N, {send, Piece}}}`
+   ([Message sizes](#message-sizes)): a frame on the lane, decoded by the
    network domain's funnel into a binary of the network domain.
-2. **Connection.** The step appends the binary to the send buffer, a queue
-   of binaries, and runs output. Each segment's payload is a sub-binary
-   of the buffer. The connection encodes the TCP, IP and link headers
-   with `erx_net_frame` over its path and the next hop's neighbour row
-   ([Framing](#framing)). When the interface's driver finishes
-   checksums, the segment's checksum is left delayed for the copy in
+2. **Connection.** The step appends the binary to the send buffer, a
+   queue of binaries, and runs output. Output emits runs, segments that
+   share one header: a run's payload is sub-binaries of the buffer, and
+   its header is the connection's template with the values output chose
+   and the next hop's link header from its neighbour row
+   ([design-network-fastpath.md](design-network-fastpath.md#sending)). A
+   segment no run can carry, a SYN or a segment with SACK blocks among
+   them, is encoded with `erx_net_frame` over its path and the neighbour
+   row ([Framing](#framing)). When the interface's driver finishes
+   checksums, that segment's checksum is left delayed for the copy in
    step 4; otherwise it is computed over the headers and payload with
    `erx_bytes:inet_csum/2` ([Checksums in the copy](#checksums-in-the-copy)).
-3. **Connection to driver.** All frames of the step go to the driver in
-   one message against the driver's credit, each frame as its header
-   binary and its payload sub-binaries.
-4. **Driver to device.** The driver posts each frame with
-   `erx_device:post/4`, or `post/5` when the copy finishes a delayed
-   checksum, as at most four segments, `[{out, DeviceHeader},
-   {out, Headers}, {out, Payload}, ...]`, joined as
-   [The driver](#the-driver) says; the NIF lays them end to end in a pool
-   buffer, the one per-byte copy of the transmit path, and with
-   `post/5` finishes a delayed checksum in that copy.
+3. **Connection to driver.** All runs and frames of the step go to the
+   driver in one message against the driver's credit, one unit for each
+   frame a run holds, each frame as its header binary and its payload
+   sub-binaries.
+4. **Driver to device.** The driver posts each run and frame with
+   `erx_device:post_frame/5`, which walks a frame's binaries itself and
+   cuts a run into frames as it lays each in a pool buffer behind the
+   device's header, finishing its checksums and a delayed frame's: the
+   one per-byte copy of the transmit path
+   ([design-network-fastpath.md](design-network-fastpath.md#each-transports-cut)).
 
 ### Framing
 
@@ -1204,16 +1231,18 @@ holds is not counted, a residual ([Residuals](#residuals)).
 | Path | Local messages | Lane crossings | Copies in the network domain |
 | --- | --- | --- | --- |
 | receive, TCP segment | driver to interface (per batch), interface to connection (per batch); in the owner's domain, socket process to owner (per delivery) | one per push of up to a piece, and one credit message per half of the socket process's target, in every active mode | one, `erx_device:complete/3`, which also sums the frame |
-| transmit, TCP segment | in the owner's domain, caller to socket process (per `send` call); connection to driver (per step) | two per piece of a `send`, the request and its reply | one, `post/5`, which also finishes the checksum |
+| transmit, TCP segment | in the owner's domain, caller to socket process (per `send` call); connection to driver (per step) | two per piece of a `send`, the request and its reply | one, `post_frame/5`, which cuts runs and finishes checksums as it copies |
 | receive, UDP datagram | driver to interface, interface to socket; in the owner's domain, socket process to owner | one per datagram, and one credit message per half of the socket process's target | one |
 | ARP, neighbour discovery, ICMP echo, SYN | driver to interface; replies interface to driver | none | one each way |
 
 A lane crossing copies the payload into the lane and out of it, by the
-domains design ([design-domains.md](design-domains.md#flow-control)); a
-delivery that coalesces several segments' payloads into one binary adds
-a copy to save messages, a trade on the performance watch list. The
-local hop from the socket process to the owner copies no payload over
-64 bytes, since ERTS passes a binary that size or larger by reference.
+domains design ([design-domains.md](design-domains.md#flow-control)), and
+a delivery's payload pieces become one binary once, in the socket
+process, where `gen_tcp`'s API needs one. The local hop from the socket
+process to the owner copies no payload over 64 bytes, since ERTS passes
+a binary that size or larger by reference. The copies of each path on
+each medium are counted in
+[design-network-fastpath.md](design-network-fastpath.md#copies).
 
 ### Checksums in the copy
 
@@ -1221,8 +1250,12 @@ Inside the network domain each byte of a TCP segment is read once on
 each path: by the copy between a device's buffer and a binary. That copy
 also computes the segment's Internet checksum, so no second pass reads
 the segment to sum it. The same holds on a host whose transport copies
-frames in C, as a netmap transport does; over a tap device it does not,
-and this section says why that is accepted.
+frames in C, as the netmap transport does. Over a tap device the
+kernel's `read` and `writev` are the copy, and the tap transport's NIF
+sums each frame in the same call, reading its bytes once more while
+they are in the cache ([The tap transport](#the-tap-transport)). The
+copy that sums also cuts a run into its frames
+([design-network-fastpath.md](design-network-fastpath.md#the-cut-in-the-copy)).
 
 **The problem.** Without this, a received segment is read twice: by the
 copy out of the device's buffer, and by `erx_tcp_wire:decode/2`, which
@@ -1235,10 +1268,11 @@ over its bytes, in the two processes every segment passes through: the
 interface process, which classifies for every client, and the
 connection, which is one flow's ceiling
 ([todo-performance.md](todo-performance.md)). The evidence is thin, and
-the measurements below settle it. In the p620 run of 2026-11-09 the
-checksum held 55 percent of the connection process's samples on send,
-but that was the pure-Erlang stand-in, which the C primitive replaces
-([Two places, four seams](#two-places-four-seams)). The C primitive
+the measurements below settle it. In the p620 run of 2026-11-09 with the
+C primitive loaded, `erx_bytes` held 3.1 percent of the connection
+process's samples on send
+([design-network-fastpath.md](design-network-fastpath.md#where-a-segments-cost-goes)),
+where the pure-Erlang stand-in it replaces had held 55 percent. The C primitive
 takes about 0.30 microseconds for a 1,480-byte segment on the
 development host (Apple M3 Max, macOS, stock OTP 29.1.2 with the JIT,
 clang -O2, 200,000 calls). lwIP reached 6.5 Gbit/s over the same tap,
@@ -1281,11 +1315,11 @@ driver states once, when the interface attaches.
 [The driver](#the-driver) and [Framing](#framing):
 
 ```erlang
-%% erx_net_driver: a received frame, and who finishes a delayed checksum
--type rx_frame() :: binary()                      % no sum: verify/1 sums it
+%% erx_net_driver: a received frame, and who finishes a delayed checksum and a run's cut
+-type rx_frame() :: binary()                      % no sum: the merge sums it
                   | {sum, 0..16#ffff, binary()}   % with its network sum
                   | {Zone :: term(), binary()}.   % the loopback interface's
--type link_info() :: #{..., csum := device | copy | none}.
+-type link_info() :: #{..., finish := copy | device | none}.
 
 %% erx_net_frame: a frame handed to a driver
 -type frame() :: iodata()
@@ -1293,21 +1327,26 @@ driver states once, when the interface attaches.
                | {Zone :: term(), packet()}.
 ```
 
-`csum` says who finishes a delayed checksum: `device` when the device
-does, `copy` when the transport's own copy does, and `none` when nobody
-below the sender does. With `none`, the sender finishes every checksum
-itself. The interface writes `csum` into its row with the MTU, from the
-one answer to its attach, so the value has one source. Who finishes is
-a fixed property of the transport: `erx_virtio_net` finishes through the
-device or its copy at every start, a ring transport always through its
-copy, and the pipe and the loop never. So a driver's restart never
-changes whether a row's driver finishes.
+`finish` says who finishes what the sender leaves unfinished, a delayed
+checksum and a run's cut, since one copy does both
+([design-network-fastpath.md](design-network-fastpath.md#the-seam)):
+`device` when the device does, `copy` when the transport's own copy
+does, and `none` when nobody below the sender does. With `none`, the
+frame layer finishes every checksum and cuts every run itself. The
+interface writes `finish` into its row with the MTU, from the one
+answer to its attach, so the value has one source. Who finishes is a
+fixed property of the transport: `erx_virtio_net` finishes through the
+device or its copy at every start, the tap and netmap transports always
+through their copy, and the pipe and the loop never, but for the test
+configuration of the pipe's `process` end in its offload mode. So a
+driver's restart never changes whether a row's driver finishes.
 
-| Transport | Received frames | `csum` |
+| Transport | Received frames | `finish` |
 | --- | --- | --- |
-| `erx_virtio_net` | `{sum, S, Frame}`, from `erx_device:complete/3` | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM`, an extension ([Scope](#scope)) |
-| a ring transport of a host whose NIF copies the slots, such as netmap's | `{sum, S, Frame}`, from its NIF's copy | `copy` |
-| `erx_net_pipe` | `Frame`; a test's `process` end may give `{sum, S, Frame}` | `none` |
+| `erx_virtio_net` | `{sum, S, Frame}`, from `erx_device:complete/3` | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM` with `VIRTIO_NET_F_HOST_TSO4` and `HOST_TSO6`, an extension ([Scope](#scope)) |
+| `erx_netmap` | `{sum, S, Frame}`, from its NIF's copy | `copy` |
+| `erx_tap` | `{sum, S, Frame}`, summed by its NIF after the kernel's `read` | `copy` |
+| `erx_net_pipe` | `Frame`, which the interface's merge sums; a test's `process` end may give `{sum, S, Frame}` | `none`; `copy` in the `process` end's offload mode |
 | `erx_net_loop` | `{Zone, Packet}` | `none` |
 
 **The copy's core.** The C core of the checksum, `erx_inet_csum.c` in
@@ -1344,8 +1383,11 @@ copy is the same bounded call as before: 64 KiB of frames per call,
 with nothing added but the additions.
 
 In the stack, a frame's input to `classify/2` carries its sum,
-`{frame, Bytes, Sum}` with `Sum` a sum or `none`. A reassembled datagram
-and every loopback packet carry `none`. Ethernet decoding strips the
+`{frame, Bytes, Sum}` with `Sum` a sum or `none`. Every Ethernet frame
+has its sum by then, since the interface's merge sums each frame that
+came without one
+([design-network-fastpath.md](design-network-fastpath.md#the-merge)); a
+reassembled datagram and every loopback packet carry `none`. Ethernet decoding strips the
 link header, which the sum does not cover. The IP layer decodes its
 header as before, and IPv4 still checks its header checksum over the
 header's own 20 to 60 bytes, which it reads to decode them anyway. The
@@ -1404,7 +1446,7 @@ pseudo-header, the length, the header and the payload. With `driver`, it
 is `erx_net_sum:add(PseudoSum, Len)` and no payload byte is read.
 Finishing sums the field along with the rest, so both give the same
 bytes on the wire. `erx_net_frame:tcp/3` chooses `driver` when the path
-interface's row has `csum` other than `none` and IP will not fragment
+interface's row has `finish` other than `none` and IP will not fragment
 the segment, and `sender` otherwise. A delayed segment's packet is
 `{csum, Start, 16, Packet}`, with `Start` the IP header's length and 16
 the offset of `th_sum`. `address/3` and `link/3` add the link header's
@@ -1422,25 +1464,25 @@ earlier transmission of the same bytes looked like. The copy of that
 pass sums exactly the bytes it sends.
 
 The virtio transport finishes a delayed frame in one of two ways, by its
-`csum`:
+`finish`:
 
-* `copy`: `erx_device:post(Dev, Tx, Tag, Segments, {inet_csum, 12 + Start, Field})`
-  with a zero `virtio_net_hdr`, the 12 bytes in front of the frame. The
-  NIF copies the `out` bytes before `12 + Start` plainly and the rest
+* `copy`: `erx_device:post_frame(Dev, Tx, Tag, Hdr, {csum, Start, Field, Frame})`
+  with a zero `virtio_net_hdr` as `Hdr`, the 12 bytes in front of the
+  frame ([design-runtime.md](design-runtime.md#the-device-nif)). The
+  NIF copies the frame's bytes before `Start` plainly and the rest
   through `erx_inet_copy_sum`, in one pass, and then stores the
-  complement of that sum at `12 + Start + Field`, in network byte order.
-  Both offsets must be even, and the field must lie inside the `out`
-  bytes.
-* `device`: `post/4` with the `virtio_net_hdr`'s `NEEDS_CSUM` flag,
-  `csum_start` equal to `Start` and `csum_offset` equal to `Field`, as
-  section 5.1.6.2 of the virtio specification has a driver ask the
-  device to finish a partial checksum.
+  complement of that sum at `Start + Field`, in network byte order.
+  Both offsets must be even, and the field must lie inside the frame.
+* `device`: the `virtio_net_hdr`'s `NEEDS_CSUM` flag, `csum_start`
+  equal to `Start` and `csum_offset` equal to `Field`, as section
+  5.1.6.2 of the virtio specification has a driver ask the device to
+  finish a partial checksum.
 
-A frame that is not delayed is posted with `post/4` as before. A delayed
-frame whose field does not lie inside it is dropped as `malformed`.
-Only a bug in framing can make one. A transport whose `csum` is `none`
-drops a delayed frame as `malformed`, as every transport drops a frame
-shape it does not take.
+A frame that is not delayed is posted with `post_frame/5` without the
+`csum` wrapper. A delayed frame whose field does not lie inside it is
+dropped as `malformed`. Only a bug in framing can make one. A transport
+whose `finish` is `none` drops a delayed frame as `malformed`, as every
+transport drops a frame shape it does not take.
 
 **Device offload.** On transmit, `VIRTIO_NET_F_CSUM` lets the device
 finish the checksum, so the guest spends nothing on it. It fits behind
@@ -1451,9 +1493,12 @@ core ([Scope](#scope)), because no medium of the test harness reaches
 it. The harness's virtio device sits on a QEMU hub port. As far as this
 design knows, QEMU offers `CSUM` and `GUEST_CSUM` only when the device's
 backend carries virtio-net headers, as a tap or vhost backend does, and
-this has not been checked against QEMU's source. The transport logs
-which way it finishes at each start (`checksum copy` or
-`checksum device`), so a run shows which path it took.
+this has not been checked against QEMU's source. The device finishes
+only together with device segmentation, which needs `HOST_TSO4` and
+`HOST_TSO6` as well, since one `finish` names who finishes both
+([design-network-fastpath.md](design-network-fastpath.md#device-segmentation)).
+The transport logs which way it finishes at each start (`finish copy`
+or `finish device`), so a run shows which path it took.
 
 On receive, the stack never negotiates `VIRTIO_NET_F_GUEST_CSUM`.
 Without it the device delivers frames with complete checksums
@@ -1464,19 +1509,19 @@ would have to accept unchecked. The copy's network sum makes both
 unnecessary at the cost of the additions, so the stack takes no
 checksum claim from any device. A netmap port gives no claim either:
 the netmap transport does not accept virtio-net headers, so each slot
-holds a bare frame. Its NIF's copies call the same core. Receiving
-returns `{sum, S, Frame}`, and sending finishes a delayed frame as it
-copies the frame into the slot.
+holds a bare frame, and neither does a tap device, whose virtio-net
+header the tap transport does not use. Both NIFs call the same core.
+Receiving returns `{sum, S, Frame}`, and sending finishes a delayed
+frame as it copies the frame into the slot or hands it to the kernel.
 
-**Tap.** Over a tap device the idea is not worth its complexity. The
-tap helper relays each frame with one `read` and one `write` and
-inspects no byte ([The tap helper](#the-tap-helper)). There is no copy
-of ours to add to. Summing in the helper would add a pass there, and the
-helper would need the request in its framing. Each frame on that path
-already costs three copies in the kernel and as many system calls. So
-`erx_net_pipe`'s `csum` is `none` and its frames carry no sum. A stack
-over tap sums each segment once more, in C: in the connection on send
-and in the interface on receive.
+**Tap.** Over a tap device the kernel makes the only copy, so there is
+no copy of ours to sum in. The tap transport's NIF sums each received
+frame right after its `read`, and on send sums each frame's payload
+slice where it lies as it writes the frame's headers, through
+`erx_tcp_cut_header`, in the same call as the `writev`
+([The tap transport](#the-tap-transport)). The payload is read once
+more than on the other media, while it is in the cache, and no Erlang
+process reads it, so its `finish` is `copy`.
 
 **What the stack believes.** The stack believes one thing: the network
 sum a transport of `erx_net` hands up, computed by the stack's own C
@@ -1499,26 +1544,31 @@ are counted as `bad_sum`, as a corrupted frame is, and `netadmin` and
 the inspector show that count.
 
 **Refusals.** `complete/3` with an odd `SumFrom` is `badarg`. So is
-`post/5` with an odd offset or `Field`, or a field outside the `out`
-bytes. The transport's own check drops such a frame first, so only a
+`post_frame/5` with an odd `Start` or `Field`, or a field outside the
+frame. The transport's own check drops such a frame first, so only a
 bug in the transport reaches `badarg`. A delayed frame given to a
 transport that does not finish is dropped as `malformed`, and a frame
 that fails its check as `bad_sum`.
 
 **Open decisions.**
 
-1. *Build before the baseline, or after.* The only measured share is
-   the pure-Erlang stand-in's. The p620 rerun with the C primitive
-   loaded from `priv/` is this change's baseline in any case, and it is
-   cheap. Recommended: take it first, and build both halves together,
-   since they share the core and the tests, if `erx_bytes:inet_csum/2`
-   still holds more than about 5 percent of the connection's or the
-   interface's samples; below that, the owner decides whether one
-   function in each copy is still worth the change.
-2. *Device finishing in the core or as an extension.* The `device` path needs a
-   `VIRTIO_NET_F_CSUM` bit and the `virtio_net_hdr`'s checksum fields
-   in `abi/formats/virtio.txt`, and one branch in the transport, and no
-   suite of the harness reaches it. Recommended: keep it an extension until the
+1. *Build it on its own share, or with the fast path.* The baseline is
+   taken: with the C primitive loaded, `erx_bytes` held 3.1 percent of
+   the connection's samples on send on p620, below the 5 percent this
+   design set as the bar for building on the share alone; the
+   interface's receiving share was not reported. The fast path's cut
+   finishes every checksum as it copies, and its merge reads each
+   frame's network sum, so both halves of this design are parts of that
+   one ([design-network-fastpath.md](design-network-fastpath.md#the-construction-runs)).
+   Recommended: build both halves together, as the first package of the
+   fast path, since they share the core and the tests.
+2. *Device finishing in the core or as an extension.* The `device` path needs the
+   `VIRTIO_NET_F_CSUM` and `HOST_TSO` bits and the `virtio_net_hdr`'s checksum
+   and segmentation fields in `abi/formats/virtio.txt`, and one branch in the
+   transport, and no suite of the harness reaches it; it is the fast path's
+   device segmentation decision too
+   ([design-network-fastpath.md](design-network-fastpath.md#open-decisions), 3).
+   Recommended: keep it an extension until the
    plan brings a harness medium that offers the bit, a Linux host with
    a tap backend, and test it there against the copy.
 3. *UDP.* Datagrams could be delayed too. That needs RFC 768's rule
@@ -1565,6 +1615,13 @@ hold the legal ones:
 Options negotiated in the handshake (MSS, window scaling, timestamps,
 SACK, ECN) are set once, when the connection is synchronized, and never
 change afterwards.
+
+The record keeps what an established connection's data and
+acknowledgements change, about 38 fields, and holds in one field a
+second record, `#tcb_conf{}`, with what only the handshake, an option, a
+path change or the owner's requests change, so a stage that updates the
+control block copies the small record
+([design-network-fastpath.md](design-network-fastpath.md#the-control-block-hot-and-cold)).
 
 ### Events and the step
 
@@ -1771,24 +1828,24 @@ established connection, the segment at `rcv_nxt` with only ACK set, the
 window unchanged, no retransmission in progress, an empty reassembly
 queue, the timestamp no older than the last), so it takes the branch
 FreeBSD takes. What it does with a segment it takes is the general
-stages' work from `ack` on: it applies what the checks it skips would
-set (the receive window, `ts_recent`, ECN) and jumps to `ack`. FreeBSD's
+stages' work from `ack` on, finished in one function for each case so
+that the control block is built once
+([design-network-fastpath.md](design-network-fastpath.md#header-prediction-finishes-its-cases)):
+it applies what the checks it skips would set (the receive window,
+`ts_recent`, ECN) and what the stages from `ack` on would do. FreeBSD's
 fast path repeats that work in a shorter form that leaves different
 state (`snd_wl1` and `rcv_up` after a pure ACK, `t_dupacks`, the
-spurious-timeout rule), and one translation of each effect cannot
-drift. It is also where a native fast path would
-go, if one is ever measured to be needed
-([Where C is used, and what is measured](#where-c-is-used-and-what-is-measured)).
-Its decision to skip the checks must not drift from them, so a property
-test runs generated segments and states, those header prediction accepts
-and their near misses, through the general stages too and requires the
-same state and actions wherever header prediction accepts
-([The TCP core: exhaustive exploration](#the-tcp-core-exhaustive-exploration)).
-A difference it finds is either a translation bug or a branch FreeBSD
-really takes differently, which a packet script then pins. If the
-property finds none and the measurements of plan.md's network gates show
-the stage saves no time, the stage is deleted, since the general path
-then produces the same wire behaviour.
+spurious-timeout rule); the stack's leaves the general stages' state, so
+each effect has one meaning. It is also where a native fast path would
+go, if one is ever measured to be needed ([Where C is used, and what is
+measured](#where-c-is-used-and-what-is-measured)). Its decision to skip
+the checks must not drift from them, so a property test runs generated
+segments and states, those header prediction accepts and their near
+misses, through the general stages too and requires the same state and
+actions wherever header prediction accepts ([The TCP core: exhaustive
+exploration](#the-tcp-core-exhaustive-exploration)). A difference it
+finds is a bug of one of the two, or a branch FreeBSD really takes
+differently, which a packet script then pins.
 
 ### Output
 
@@ -1816,7 +1873,10 @@ sent that IP must refuse; an IPv6 segment carries no don't-fragment
 ([Events and the step](#events-and-the-step)), so one over a lowered
 IPv6 link MTU is fragmented, as `ip6_output` fragments it. It produces
 `outgoing()` segments; `erx_net_frame` encodes them with the path's
-headers. The stack uses no segmentation offload.
+headers. Where per-segment output would send several full segments back
+to back from `snd_nxt` under one header, output emits them as one run,
+which the copy into the medium cuts into those same frames
+([design-network-fastpath.md](design-network-fastpath.md#output-makes-runs)).
 
 ### Timers
 
@@ -1852,8 +1912,9 @@ FreeBSD (`tcp_ts_offset_per_conn`, `tcp_subr.c:224`).
 
 The sender's record of what it has sent is one structure,
 `erx_tcp_sendlog`: an ordered map from each sent range's first byte to
-`#sent{next, sent_at, transmissions, sacked, lost, rxt}`, `next` being the
-sequence number after the range. Because sequence
+`#sent{next, seg, sent_at, transmissions, sacked, lost, rxt}`, `next` being
+the sequence number after the range and `seg` the segment size it was
+cut at. Because sequence
 numbers are integers, the map is an ordinary `gb_trees` keyed by them.
 RFC 6675's scoreboard is computed from it, holes, `IsLost`, `NextSeg` and
 the pipe included (RFC 6675 section 4), and so is what RACK-TLP needs:
@@ -1866,13 +1927,16 @@ loss modules read and mark the one log, and output takes the next range
 to send from it (`NextSeg`). The log is written from RFC 6675, not
 translated from `tcp_sack.c`.
 
-Two properties hold by construction. A SACK block marks only the ranges
-it covers whole, so only the sender's own transmissions create range
-boundaries and a peer cannot split the log into pieces smaller than what
-was sent; a block covering part of a range is conservative, the range
-stays unSACKed, and neighbouring SACKed ranges merge, so repeated or
-wide blocks cannot grow the log. And the unSACKed ranges marked lost are
-a prefix of the unSACKed ranges, since `IsLost` is monotone downwards and
+Two properties hold by construction. A SACK block marks only the
+segments it covers whole, a range's segments being its start plus
+multiples of `seg`, and splits the range at their boundaries, so only
+the segments the sender cut create range boundaries and a peer cannot
+split the log into pieces smaller than what was sent
+([design-network-fastpath.md](design-network-fastpath.md#the-send-log-keeps-runs));
+a block covering part of a segment is conservative, the segment stays
+unSACKed, and neighbouring SACKed ranges merge, so repeated or wide
+blocks cannot grow the log. And the unSACKed ranges marked lost are a
+prefix of the unSACKed ranges, since `IsLost` is monotone downwards and
 `lose/2` takes only an end and marks from `snd_una`, so the pipe is a
 constant-time sum of byte counters kept by the one function that changes
 a range, `(snd_max - snd_una) - sacked - lost + rxt`, as FreeBSD's
@@ -2522,7 +2586,7 @@ tap device or another medium (N12).
 
 | Seam | erXos's implementation | The portable one | Chosen by |
 | --- | --- | --- | --- |
-| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp`, a port program or a test process; `erx_netmap`, over netmap's rings | each interface's entry in the `interfaces` key |
+| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp` or a test process; `erx_tap`, over a tap device; `erx_netmap`, over netmap's rings | each interface's entry in the `interfaces` key |
 | the clock and entropy | `erx_net_clock` over ERTS's monotonic clock and `erx_bytes:entropy/1` | the same; in a test run, the virtual clock and its seeded generator | the `clock` key |
 | the per-byte primitives | `erx_bytes` of the `erx` application, statically linked NIFs, those of the network over the C of `erx_net`'s `c_src/` | `erx_bytes` of `erx_net`'s `portable/` directory: the same C, loaded from `priv/erx_bytes_nif.so`, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
 | the runtime | `erx_net_erxos`: the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
@@ -2560,23 +2624,27 @@ and no module asks where it runs. The source is laid out by seam:
 `src/` holds the stack, which names no module of erXos's but
 `erx_bytes`, which both builds provide; `erxos/` holds
 `erx_virtio_net` and `erx_net_erxos`, built only into erXos's images;
-`portable/` holds `erx_bytes` and `erx_net_local`, built only outside
-erXos, so a network domain can never be configured with the local
-runtime. A key that names a module the build does not hold stops the
+`portable/` holds `erx_bytes`, `erx_net_local` and the host
+transports `erx_tap` and `erx_netmap` with their NIFs' loaders, built
+only outside erXos, so a network domain can never be configured with
+the local runtime or a host's medium. A key that names a module the build does not hold stops the
 application's start with `{error, {seam, Key, Module}}`. `erx_net_local`
 doing nothing for `serve/1` is correct, not merely harmless: no message
 outside erXos comes from another domain, so none arrives in an envelope
 and there is no lane to limit, and the grant's admission needs no variant of
 its own ([The grant's contract](#the-grants-contract)).
 
-`c_src/` holds the stack's C. Beside the tap helper, built only on a
-host ([The tap helper](#the-tap-helper)), it holds the C of the
-per-byte primitives: the Internet checksum and SipHash-2-4 cores,
-`erx_inet_csum.c` and `erx_siphash.c`, and their NIF functions,
-`erx_net_bytes.c`, which check the arguments and walk an iodata
-argument's pieces. That C has one copy, and both builds compile it from
-there. erXos's ERTS build links it statically, and erXos's `erx_bytes`
-NIF table lists its functions through the one macro of
+`c_src/` holds the stack's C. Beside the tap and netmap transports'
+NIFs, built only on a host ([The tap transport](#the-tap-transport),
+[The netmap transport](#the-netmap-transport)), it holds the C of
+the per-byte primitives: the Internet checksum and SipHash-2-4 cores,
+`erx_inet_csum.c` and `erx_siphash.c`, the cut of a run and the merge of
+received segments, `erx_tcp_cut.c` and `erx_tcp_merge.c`
+([design-network-fastpath.md](design-network-fastpath.md)), and their
+NIF functions, `erx_net_bytes.c`, which check the arguments and walk an
+iodata argument's pieces. That C has one copy, and both builds compile
+it from there. erXos's ERTS build links it statically, and erXos's
+`erx_bytes` NIF table lists its functions through the one macro of
 `erx_net_bytes.h`, so the names, arities and checks cannot differ
 between the builds. Outside erXos, `c_src/Makefile` (POSIX make, which
 BSD and GNU make both read) builds the same files, with
@@ -2595,8 +2663,8 @@ The portable `erx_bytes` has no Erlang fallback. Its `on_load` loads
 server logs why, the module stays unloaded, every call to it fails with
 `undef`, `entropy/1`'s included, and the stack does not start. Nothing
 stands in for the C, so the stack never runs on another implementation
-than the one erXos runs, and what a host run measures, over a tap device
-today and netmap, F-Stack or DPDK later, is the stack. The two modules'
+than the one erXos runs, and what a host run measures, over a tap device,
+netmap, F-Stack or DPDK, is the stack. The two modules'
 Erlang wrappers carry the same guards; one probe of their shared
 contract judges erXos's NIF in a release and the portable one on stock
 OTP, and both answer the same random calls as the Erlang models of the
@@ -2605,9 +2673,11 @@ host tests. `entropy/1` outside erXos is the host's generator,
 failure of the host's generator raises `crypto`'s error and never
 returns other bytes.
 
-Faster media are the other extension point. They are transports behind
-`erx_net_driver`, and nothing above the driver changes for them:
-`erx_netmap` reaches netmap's rings through a NIF of its own
+Faster media are the other extension point. They are NIF transports
+behind `erx_net_driver`, each cutting runs in its copy
+([design-network-fastpath.md](design-network-fastpath.md#the-seam)), and
+nothing above the driver changes for them: `erx_netmap` reaches
+netmap's rings through a NIF of its own
 ([The netmap transport](#the-netmap-transport)), and an `AF_PACKET` or
 DPDK transport would come the same way.
 
@@ -2622,14 +2692,15 @@ only its medium.
 ```erlang
 -callback init(Config :: map()) -> {ok, link_info(), T} | ignore | {error, Reason :: term()}.
 -callback event(Msg :: term(), T) -> {[event()], T} | {stop, Reason :: term()}.
--callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}.
+-callback transmit(erx_net_frame:frame() | erx_net_frame:run(), T) ->
+    {ok | {ok, Taken :: pos_integer()} | full | {drop, Reason :: atom()}, T}.
 
 -type link_info() :: #{link := ethernet | none,
                        lladdr := <<_:48>> | none,
                        mtu := 68..65535,
                        state := up | down,
                        tx_limit := pos_integer(),      % frames waiting at the driver
-                       csum := device | copy | none}.  % who finishes a delayed checksum
+                       finish := copy | device | none}.  % who finishes a delayed checksum and a run's cut
 -type event() :: {frames, [rx_frame()]}                % binary(), {sum, S, binary()}, {Zone, binary()}
                | {link, up | down}
                | writable                            % room to transmit again
@@ -2649,8 +2720,9 @@ started after it by their link supervisor, finds it.
 its receive credit. The driver monitors the caller and answers
 `{ok, link_info(), TxCredit}`, its transmit credit made at `init` with
 `tx_limit` as its limit. The interface writes its row's driver pid and
-credit, link, link-layer address, MTU and `csum` from that answer, so those
-fields have one source ([Checksums in the copy](#checksums-in-the-copy)). A restarted interface attaches again; while no
+credit, link, link-layer address, MTU and `finish` from that answer, so
+those fields have one source
+([Checksums in the copy](#checksums-in-the-copy)). A restarted interface attaches again; while no
 interface is attached, the driver drops what it receives and counts it
 as `detached`.
 
@@ -2678,10 +2750,15 @@ shown by `netadmin` and the inspector, not a published row, so a
 flapping link moves no configuration generation.
 
 **Transmitting.** A sender hands `{transmit, Frames}` against the
-transmit credit, one unit per frame. The driver gives each frame to
-`transmit/2` in order: `ok` and `{drop, Reason}` take the frame's unit,
-the second counted by its reason; `full` keeps that frame and those after
-it in a backlog, which the next `writable` event resumes. A unit is taken
+transmit credit, one unit per frame, a run taking one for each frame it
+holds. The driver gives each frame and run to `transmit/2` in order:
+`ok` and `{drop, Reason}` take its units, the second counted by its
+reason; `{ok, Taken}` takes the first `Taken` frames of a run and keeps
+its tail, `erx_net_frame:run_tail(Run, Taken)`, at the head of the
+backlog
+([design-network-fastpath.md](design-network-fastpath.md#each-transports-cut));
+`full` keeps that frame and those after it in a backlog, which the next
+`writable` event resumes. A unit is taken
 when its frame leaves the driver, not when its message arrives, so the
 transmit credit bounds the driver's mailbox and its backlog together.
 The backlog is kept rather than a full device queue dropping the frame:
@@ -2698,8 +2775,7 @@ over nothing. A transport whose medium has ended, a pipe whose far end
 ended, answers `{stop, Reason}` from `event/2`, and the driver ends
 with `{shutdown, Reason}`. The driver traps exits, so an exit signal
 from what it is linked to other than its supervisor, a port or socket
-of its medium, such as a tap helper's port failing with `epipe`, ends
-it the same way, with `{shutdown, {linked, Reason}}`. A crash ends it
+of its medium, ends it the same way, with `{shutdown, {linked, Reason}}`. A crash ends it
 too, a virtio device's broken queue included. Once the driver runs, no
 end but its supervisor's own stop (`shutdown`) comes before it has lived
 a second, and a driver that has lived longer ends at once. A stop sooner
@@ -2735,27 +2811,27 @@ the rest of that second. A device that stops completing transmits ends
 nothing: its backlog fills, senders are refused against the transmit
 credit, and the link stays stuck until the driver's next end.
 
-| Transport | `link`, `lladdr` | `mtu` | `state` | `tx_limit` | `csum` |
+| Transport | `link`, `lladdr` | `mtu` | `state` | `tx_limit` | `finish` |
 | --- | --- | --- | --- | --- | --- |
-| `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM`, an extension |
+| `erx_virtio_net` | `ethernet`; the device's address when it offers `VIRTIO_NET_F_MAC`, else a random locally administered unicast address drawn at `init` with `erx_net_clock:entropy/1`, as the virtio specification (section 5.1.5) asks a driver to generate | the device's `mtu` field when it offers `VIRTIO_NET_F_MTU`, else 1,500 | `VIRTIO_NET_S_LINK_UP` of the status field when the device offers `VIRTIO_NET_F_STATUS`, read again at each configuration-change interrupt; else always `up`, as the specification says to assume | the transmit queue's size | `copy`; `device` where the device offers `VIRTIO_NET_F_CSUM` with `VIRTIO_NET_F_HOST_TSO4` and `HOST_TSO6`, an extension |
 | `erx_net_loop` | `none`, `none` | 16,384, FreeBSD's `LOMTU` (`if_loop.c:80`) | always `up` | configured | `none` |
 | `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured | `none` |
+| `erx_tap` | `ethernet`; the configured address, checked as the pipe's | configured, checked as the pipe's | `up` from `init`; an error of its descriptor ends the medium, and the driver tells the interface `down` while it waits out its hold | configured, default 256 | `copy` |
 | `erx_netmap` | `ethernet`; the configured address, which must be unicast | configured, default 1,500, from 1,280 to 9,000 and within the port's buffer with the Ethernet header | `up` from a successful registration; `down` from an `init` whose registration failed, and while the driver waits out its hold | configured, default the transmit ring's slot count | `copy` |
 
-The virtio transport posts at most four `out` segments: its
-`virtio_net_hdr`, then the frame's binaries in order, all but the last
-two joined into one segment when there are more than three. A frame is
-its headers and its payload's binaries, so a payload of one or two
-binaries is posted as it is and only headers are joined; the transport
-needs no knowledge of a frame's layers to do it. A payload that spans
-more than two of a send buffer's binaries has its first ones joined with
-the headers, a copy which for an owner that writes many small binaries
-is most segments; its cost is on the
-[watch list](todo-performance.md). A delayed frame's checksum is
-finished by the copy of `post/5` or by the device, and receive
-completions are taken with `complete/3`, which sums each frame past its
-Ethernet header ([Checksums in the copy](#checksums-in-the-copy)). The loop
-transport makes each frame `{Zone, Packet}` into `{Zone,
+`finish` says who finishes what the stack leaves unfinished, a run's
+cut and a delayed checksum: `copy` for a transport whose copy does it,
+`device` for a device that cuts and sums (an extension), and `none` for
+the pipe and the loop, whose frames the frame layer finishes
+([Checksums in the copy](#checksums-in-the-copy),
+[design-network-fastpath.md](design-network-fastpath.md#the-seam)). The
+virtio transport hands each frame and run to `erx_device:post_frame/5`,
+which walks a frame's binaries itself, at most 64, behind the
+transport's `virtio_net_hdr`, cuts a run and finishes a delayed checksum
+as it copies, so the transport joins nothing and needs no knowledge of a
+frame's layers; it takes receive completions with `complete/3`, which
+sums each frame past its Ethernet header. The
+loop transport makes each frame `{Zone, Packet}` into `{Zone,
 iolist_to_binary(Packet)}`, the one copy a device makes elsewhere, and
 returns it as received.
 
@@ -2765,12 +2841,11 @@ and parses nothing:
 ```erlang
 -type far() :: {udp, Local :: {inet:ip_address(), inet:port_number()},
                      Peer :: {inet:ip_address(), inet:port_number()}}
-             | {port, Device :: file:filename()}
              | {process, pid()}.
 ```
 
 Each end carries one Ethernet frame, without its frame check sequence,
-per datagram, port message or Erlang message. On every end, a frame
+per datagram or Erlang message. On every end, a frame
 longer than the MTU and the 14-byte Ethernet header is dropped as
 `too_long`, and a send the far end cannot take as `refused`.
 
@@ -2781,23 +2856,6 @@ longer than the MTU and the 14-byte Ethernet header is dropped as
   the datagrams waiting, up to 64 KiB. A datagram from any other address
   than `Peer` is dropped as `stranger`. UDP has no carrier, so the state
   is `up` from `init` to the end.
-* **`port`**, a tap device through `erx_net_tap`, a C17 port program
-  ([the tap helper](#the-tap-helper)). The pipe opens it with
-  `open_port({spawn_executable, Helper}, [{args, [Device]}, {packet, 2},
-  binary])`, `Helper` in `erx_net`'s `priv/` directory, so each port
-  message is one frame, and monitors the port; `port_command/2` suspends
-  the driver while the port is busy, so the helper's input is the
-  transmit backlog. Without `exit_status` the port closes, with reason
-  `normal`, as soon as the helper closes its output, which a failing
-  helper does before it stops reading its input, so the port does not
-  fail with `epipe` under a frame it is writing. The monitor's `'DOWN'`
-  stops the pipe, and the driver ends and is started again with a new
-  helper ([Ending](#the-driver)). A helper killed by a signal closes
-  both pipes at once, and a frame written then makes the port fail with
-  `epipe`, an exit signal the driver traps and ends on just the same. The
-  pipe's state stays `up`; a frame sent after the
-  port has closed but before the driver has seen it is dropped as
-  `refused`.
 * **`process`**, a test. The far end is a pid, or a registered name
   looked up at `init`, so that a restarted driver finds the far end
   registered since. Each frame is a message `{erx_net_pipe, Pid,
@@ -2816,33 +2874,79 @@ QEMU's user networking (slirp) on macOS reaches the pipe through a QEMU
 process that runs no machine, `-machine none`, with a `user` backend and
 a `dgram` backend joined on one hub (`-netdev hubport`).
 
-#### The tap helper
+#### The tap transport
 
-`erx_net_tap` relays whole frames between a tap device and its standard
-input and output and does nothing else. It is C17 in `erx_net`'s
-`c_src/`, built on the host it runs on, by that host's C compiler, into
-`priv/`; it is never built for erXos's target and never in an image. It
-runs with the node's own user and privileges; the tap device's
-permissions are the host's setup. It takes the device as its one
-argument (on FreeBSD the node `/dev/tapN`; other systems' tap devices
-are added as they are needed), opens it, and polls both sides: each read
-of the tap is one frame, which it writes to standard output behind a
-2-byte big-endian length, continuing a write a signal cuts short, so a
-frame is never split; on standard input it reads a 2-byte length and
-exactly that many bytes, and writes them to the tap in one write. It
-inspects no byte of a frame. A tap may discard a frame as a wire loses one:
-a write that takes none of it, which FreeBSD's `tunwrite` returns while
-the interface is down, or `ENOBUFS`, drops that frame and the relay goes
-on. The port closing, seen as end of file on its input between frames
-or `EPIPE` on its output, ends it with status 0; end of file on the tap
-or inside a frame, a frame longer than the length can carry, a write to
-the tap that takes part of the frame, or any other error but `EINTR` on
-either side ends it with status 1 and a one-line diagnostic on standard
-error, after it has closed its output and read its input to end of
-file. Either way the port closes, the driver ends, and its link
-supervisor starts it again with a new helper ([Ending](#the-driver)).
-A port's messages reach the driver as fast as the tap delivers them,
-with no credit ahead of the mailbox ([Residuals](#residuals)).
+`erx_tap` exchanges Ethernet frames with a host's tap device, on FreeBSD
+the node `/dev/tapN`; other systems' tap devices are added as they are
+needed. It is the medium of the runs on the FreeBSD test host, where the
+stack and lwIP reach the jails' bridge through tap devices. It lives in
+`portable/`, with its NIF's loader `erx_tap_nif`, so it is never in an
+erXos image; its C, `erx_tap_nif.c`, is in `c_src/` and built on the
+host it runs on, by that host's C compiler, into `priv/`. It runs with
+the node's own user and privileges; the tap device's permissions are
+the host's setup. Like the pipe, it parses nothing. Two rules carry it,
+the netmap transport's, over a file descriptor and without shared
+memory:
+
+* *The kernel's copy is the only copy.* `recv/1` reads each frame with
+  one `read` into a fresh binary, and `send/2` hands the kernel each
+  frame with one `writev` of the frame's headers and its payload's
+  binaries, cutting a run frame by frame with `erx_tcp_cut_header`
+  ([design-network-fastpath.md](design-network-fastpath.md#each-transports-cut)).
+  Each call does a bounded amount of work on a normal scheduler: at most
+  64 frames or 64 KiB read, and at most one run or frame written.
+* *Each direction has exactly one wake.* For receiving, either the
+  descriptor is armed for reading with `enif_select`, or the transport
+  has sent itself one `{erx_tap, more}`: never both and never neither.
+  For transmitting, either the last `send/2` was taken whole, or the
+  descriptor is armed for writing and the driver's backlog waits for the
+  `writable` event that the arm's message gives.
+
+**Configuration.** `{erx_tap, #{device := Path, lladdr := Addr}}`, with
+`mtu` (1,500 when absent) and `tx_limit` (256 when absent), each checked
+at `init` as the pipe checks it. `init` opens the device for reading and
+writing, non-blocking and close-on-exec, and sends itself the first
+`more`. The NIF's handle is a resource that monitors its owner, the
+driver, and every call from another process is `badarg`, so the handle
+has one user and needs no lock.
+
+**Receiving.** `recv/1` reads until the device has no frame (`EAGAIN`)
+or the batch is full. FreeBSD's tap gives one frame per `read`. Each
+`read` asks for the MTU, the 14-byte Ethernet header and one byte more,
+so a frame shorter than the header is dropped as `malformed` and one
+that fills the buffer as `too_long`. Each frame kept is summed and
+leaves as `{sum, S, Frame}`
+([Checksums in the copy](#checksums-in-the-copy)). An empty device arms
+the descriptor for reading and answers `armed`; a full batch answers
+`more`. The answer is `{ok, Frames, Drops, more | armed}`, with `Drops` a
+count per reason, and the call charges `enif_consume_timeslice` for the
+bytes it read and summed.
+
+**Transmitting.** `send/2` takes a frame, as iodata of at most 64
+binaries, a delayed frame or a run. A delayed frame,
+`{csum, Start, Field, Frame}`, has its bytes up to the end of its
+checksum field copied to the NIF's scratch, where the field is finished
+from the sum of the bytes from `Start` on, read where they lie, and the
+scratch and the rest of the frame go out in one `writev`
+([Checksums in the copy](#checksums-in-the-copy)). It writes frames until the device would block
+(`EAGAIN`), then arms the descriptor for writing, and answers `{ok, N}`
+for the frames it took, or `full` when it took none. A tap may discard a
+frame as a wire loses one: a `write` that takes none of it, which
+FreeBSD's `tunwrite` returns while the interface is down, or `ENOBUFS`,
+drops that frame, counted as `refused`, and the call goes on.
+
+**Ending the medium.** A `write` that takes part of a frame, end of file
+on a `read`, and every other error but `EINTR` answer `{error, Reason}`.
+The transport answers `{stop, Reason}` from `event/2` at once for
+`recv/1`, and for `send/2`, which `transmit/2` cannot stop the driver
+from, through the one `{erx_tap, failed, Reason}` it sends itself, as
+the netmap transport does; the driver
+ends and is started again with a new descriptor ([Ending](#the-driver)).
+The driver's mailbox holds at most one `more`, one read arm's message,
+one write arm's message and one `failed`, and the tap's own queue is the only queue ahead
+of the driver, so a peer that floods is bounded as the `udp` end bounds
+it. The tap's virtio-net header (`TAPSVNETHDR`) is not used, so each
+`read` and `write` is one bare frame.
 
 #### The netmap transport
 
@@ -2866,12 +2970,13 @@ the one below.
   a netmap port what the device NIF is to a virtio queue
   ([design-runtime.md](design-runtime.md#the-device-nif)). It copies
   each frame once on receive, out of its slot's buffer into a fresh
-  binary, and once on transmit, from one binary into a slot's buffer,
-  and no binary ever aliases the shared memory. Each call does a
+  binary, and once on transmit, from a frame's binaries, or a run cut
+  frame by frame, into slots' buffers, and no binary ever aliases the
+  shared memory. Each call does a
   bounded amount of work. Nothing in the shared memory is trusted. Each
   call reads every field the kernel writes once, into a snapshot, and a
-  pure C core, `erx_netmap_ring`, turns the snapshot, with the size of
-  a frame to send, into a plan: which slots hold frames, which are
+  pure C core, `erx_netmap_ring`, turns the snapshot, with the sizes of
+  the frames to send, into a plan: which slots hold frames, which are
   dropped and why, and for each copy an offset and length checked to
   lie inside one buffer of the mapping. The NIF copies only what the
   plan names, and the plan is complete before the first byte moves.
@@ -2893,7 +2998,7 @@ waiting for a wake that will not come. The driver's mailbox holds at
 most one of each message the transport causes, since each arm is
 one-shot, the receive rule allows one `more`, and the transport keeps a
 flag for its `flush` and one for its `failed`; a burst from a peer
-cannot fill it, unlike the tap helper's port.
+cannot fill it.
 
 **Configuration.** An interface's entry names the transport as
 `{erx_netmap, #{port := Port, lladdr := Addr}}` with these keys:
@@ -3014,51 +3119,55 @@ card in netmap mode, the write arm is tested over the fake ring alone.
 **Transmitting.** `transmit/2` drops a loopback frame, which names a
 zone, as `malformed`, as every transport does, and once the medium has
 failed drops every frame as `refused` without a call. It hands every
-other frame to `erx_netmap_nif:send(Handle, Bin)` as one binary: a
-frame that is one binary as it is, any other iodata joined first with
-`iolist_to_binary/1`. That join is the one way a frame of several
-binaries, such as a TCP segment's headers and payload, is shaped for
-the ring. It is a second copy of such a frame, on the
-[watch list](todo-performance.md), and in return the NIF walks no list:
-a frame reaches the C as one binary's size, which the core checks like
-every other length. `enif_inspect_iovec` would spare the join, but OTP
-lets the vector it returns hold more elements than the bound it is
-given, so its count would be one more length crossing into C, and a
-frame past the bound would still need a second path. A delayed frame,
-`{csum, Start, Field, Frame}`, is joined the same way, and the NIF
-finishes its checksum as it copies the binary into the slot
-([Checksums in the copy](#checksums-in-the-copy)).
+other frame and run to `erx_netmap_nif:send(Handle, FrameOrRun)` as it
+came: a frame as iodata of at most 64 binaries, which the NIF walks
+itself, counting the pieces and their sizes before it copies anything;
+a delayed frame, `{csum, Start, Field, Frame}`, whose checksum the NIF
+finishes as it copies ([Checksums in the copy](#checksums-in-the-copy));
+or a run, which the NIF cuts into its frames through the cut's core
+([design-network-fastpath.md](design-network-fastpath.md#each-transports-cut)).
+No frame is joined in Erlang, so no frame is copied twice.
+`enif_inspect_iovec` is not used: OTP lets the vector it returns hold
+more elements than the bound it is given, so its count would be one more
+length crossing into C.
 
-The core plans the send from the binary's size and a snapshot of the
-slot at the handle's `head`. A size below the Ethernet header's 14
-bytes is dropped as `malformed` and one above the MTU and the header as
-`too_long`; the slot's buffer index, read once, is checked as on
-receive. When the ring has no room by the `tail` of the last sync, the
-NIF first syncs, which sends what is staged and gives back the slots
-the kernel is done with, and plans again from the new `tail`. It copies
-the binary into the buffer, sets the slot's length with every flag
-clear, advances `cur`, then `head`, and answers one of these:
+The core plans the send from the sizes the NIF counted, or the cut's
+plan of a run, and a snapshot of the slots from the handle's `head`. A
+frame below the Ethernet header's 14 bytes is dropped as `malformed`
+and one above the MTU and the header as `too_long`; each slot's buffer
+index, read once, is checked as on receive. When the ring has no room
+by the `tail` of the last sync, the NIF syncs once, which sends what is
+staged and gives back the slots the kernel is done with, and plans again
+from the new `tail`. It copies each frame into its slot's buffer, sets
+the slot's length with every flag clear, advances `cur`, then `head`,
+and answers one of these:
 
-* `ok`: the frame is in the ring, not yet synced. The transport sends
-  itself `{erx_netmap, flush}` if none is on its way. `flush/1` is one
+* `{ok, N}`: the first `N` frames, every frame of a plain frame or of a
+  run that fit, are in the ring, not yet synced. When a run did not fit
+  whole even after the sync, the NIF has armed the descriptor for
+  writing, and its tail waits in the driver's backlog for the `writable`
+  event, as after `full`. The transport sends itself
+  `{erx_netmap, flush}` if none is on its way. `flush/1` is one
   `NIOCTXSYNC`, so every frame the driver gives the transport before
   that message comes back, from the backlog and the transmits already
   in its mailbox, leaves in one sync, which the transmit credit bounds.
-  A switch moves the frame to its destination inside the sender's sync,
-  so on a switch port the flush is also the send.
-* `full`: no room even after that sync. The NIF has armed the
-  descriptor for writing, and the arm's message is the `writable`
-  event.
-* `{drop, malformed}`, `{drop, too_long}`: as the driver counts drops.
+  A switch moves the frames to their destination inside the sender's
+  sync, so on a switch port the flush is also the send.
+* `full`: no room for the first frame even after that sync. The NIF has
+  armed the descriptor for writing, and the arm's message is the
+  `writable` event.
+* `{drop, malformed}`, `{drop, too_long}`: for a plain frame, as the
+  driver counts drops.
 * `{error, Reason}`: the sync of a full ring failed (its error number),
-  the arm failed (`arm`), or the slot's buffer broke the ring
-  (`broken`). The frame is dropped as `refused`, and the transport
-  records the failure and sends itself one `{erx_netmap, failed,
-  Reason}`, since `transmit/2` cannot stop the driver itself.
+  the arm failed (`arm`), or a slot's buffer broke the ring (`broken`).
+  What was not taken is dropped as `refused`, and the transport records
+  the failure and sends itself one `{erx_netmap, failed, Reason}`, since
+  `transmit/2` cannot stop the driver itself.
 
 **Scheduling.** Every call but `open/2` runs on a normal scheduler and
 is bounded: `recv/1` at 64 KiB, 256 slots and one sync, `send/2` at one
-frame of at most 9,014 bytes and one sync, and `flush/1` at one sync. A
+run of at most 65,535 bytes or one frame of at most 9,014, and one
+sync, and `flush/1` at one sync. A
 sync is a system call that never blocks, so a dirty scheduler would
 cost a switch per batch and buy nothing. No thread of the transport's
 own waits: ERTS's poll threads do, and `enif_select` turns readiness
@@ -3136,7 +3245,7 @@ headers, and `{mtu, N}` when the port's buffers cannot hold the MTU and
 the Ethernet header.
 
 **Building.** `make -C c_src` builds `priv/erx_netmap_nif.so` beside the
-tap helper and the per-byte primitives' NIF library when the host's
+tap transport's NIF and the per-byte primitives' NIF library when the host's
 compiler finds `<net/netmap.h>`: FreeBSD has it in its base system, and
 Linux once netmap's headers are installed or `NETMAP_INCLUDE` names
 them. Elsewhere, macOS included, the make prints one line saying the
@@ -3158,15 +3267,16 @@ tests and fuzz target run on every host, macOS included. Only
 mapping, with every offset taken from a plan of the core's
 ([Build checks](#build-checks)).
 
-**Why a NIF, and why a copy.** A port program in the manner of the tap
-helper would keep C out of the node, but it relays every frame through
-a pipe, a copy in and a copy out with system calls on both sides, which
-are the costs netmap exists to remove and which the comparison would
-then measure instead of the stack; it would also repeat the port end's
-uncredited mailbox ([Residuals](#residuals)). The NIF keeps to the rule
-that C does only per-byte work, copying bytes and checking lengths and
-indices as the device NIF does, while every decision about a frame
-stays in Erlang. A bug in it takes down the node, which outside erXos
+**Why a NIF, and why a copy.** A port program would keep C out of the
+node, but it relays every frame through a pipe, a copy in and a copy
+out with system calls on both sides, which are the costs netmap exists
+to remove and which the comparison would then measure instead of the
+stack; and ERTS delivers a port's data as fast as the program reads
+it, so its frames would reach the driver's mailbox with no credit ahead
+of them. The NIF keeps to the rule that C does only per-byte work and
+the per-frame work that rides on it, copying bytes, cutting runs and
+checking lengths and indices as the device NIF does, while every
+decision about a frame stays in Erlang. A bug in it takes down the node, which outside erXos
 is the whole stack, so its C is small and its decisions are in a pure
 core under unit tests, a fuzz target and the sanitizers.
 
@@ -3197,8 +3307,9 @@ sync, which `erx_net_driver`'s contract does not give a transport.
   lengths of 13 and of the MTU and header plus one are dropped
   `malformed` and `too_long`; a chain of three slots split across two
   calls is dropped whole; a batch stops at 64 KiB and at 256 slots with
-  `more`. Transmit: room up to `tail` and no further; a full ring; sizes
-  of 13 and of the MTU and header plus one, dropped as on receive.
+  `more`. Transmit: room up to `tail` and no further; a full ring; a run
+  that fits in part, planned for the slots there are; sizes of 13 and of
+  the MTU and header plus one, dropped as on receive.
   *Seeded failures:* the receive length check removed, the `tail` check
   written `<=`, and the transmit size check removed must each fail
   their case.
@@ -3216,9 +3327,9 @@ sync, which `erx_net_driver`'s contract does not give a transport.
 * *The transport over a fake ring.* In tests only, the `nif` key of the
   configuration names a module of the same functions over a ring held
   in Erlang, which sends the select messages itself and, as the NIF
-  is, is `badarg` on a `send/2` whose frame is not a binary. A property
-  test over random orders of arrivals, sends of frames of one or many
-  binaries, and wakes checks that at most one receive wake is ever in
+  is, is `badarg` on a `send/2` whose frame has more than 64 binaries.
+  A property test over random orders of arrivals, sends of frames of one
+  or many binaries and of runs, and wakes checks that at most one receive wake is ever in
   flight, that a frame in the fake ring always has a wake on its way,
   that every transmit before a flush leaves in that one sync, and that
   `writable` comes only from the write arm's message. Driver tests
@@ -3231,8 +3342,8 @@ sync, which `erx_net_driver`'s contract does not give a transport.
   that sends itself `more` after `armed` must break the one-wake
   property; one that never arms after emptying the ring must leave a
   frame with no wake; one that reports `writable` at a flush must fail
-  the `writable` check; one that hands the NIF a frame unjoined must
-  fail on many binaries; one that reads `{error, arm}` as `armed` must
+  the `writable` check; one that answers a run partly taken as taken
+  whole must lose the frames the test counts; one that reads `{error, arm}` as `armed` must
   leave the driver running; and one that refuses `init` on a failed
   registration must end sooner than a second.
 * *The p620 switch run.* A host test, run on the FreeBSD test host,
@@ -3268,9 +3379,10 @@ transport itself costs, are owed before it lands:
 2. *The transport alone.* `pkt-gen` sending to a driver whose
    stand-in interface takes and counts every batch, and the driver
    sending prebuilt frames as fast as its credit lets it to `pkt-gen`,
-   once as single binaries and once as headers and a payload. Same
-   sizes, with the node's CPU time from `getrusage` and a profile that
-   gives the share of the copies, the join, the binaries and the syncs.
+   once as single binaries, once as headers and a payload, and once as
+   runs. Same sizes, with the node's CPU time from `getrusage` and a
+   profile that gives the share of the copies, the cut, the binaries and
+   the syncs.
 
 The comparisons are owed after it lands, and each decides only where
 the stack's own time goes:
@@ -3290,12 +3402,13 @@ the stack's own time goes:
    receive packets per second and drops by reason, which is the
    interface process's ceiling over a medium that costs almost nothing.
 
-Over the tap helper on p620, the helper used about 2 percent of a CPU
-and the limit was the stack's per-segment work
-([todo-performance.md](todo-performance.md)), so this transport is not
-expected to raise TCP throughput much. It gives the comparison the
-medium the other stacks use, at a measured and small cost, and the
-packet rate of minimum-size frames.
+Over a tap on p620 the limit was the stack's per-segment work, not the
+medium ([design-network-fastpath.md](design-network-fastpath.md#what-was-measured)),
+so this transport alone is not expected to raise TCP throughput much;
+with the fast path's runs and merge it is where the stack is compared
+with lwIP over the same switch. It gives the comparison the medium the
+other stacks use, at a measured and small cost, and the packet rate of
+minimum-size frames.
 
 **Residuals of the transport.**
 
@@ -3662,8 +3775,12 @@ modules are marked P; process modules E.
 | `erx_virtio_net`, `erx_net_erxos` (in `erxos/`) | none | erXos's transport and runtime | seam |
 | `erx_bytes`, `erx_net_local` (in `portable/`) | none | the portable per-byte primitives and runtime | seam |
 | `erx_net_bytes`, `erx_inet_csum`, `erx_siphash` (in `c_src/`, C17) | none | the per-byte primitives' C, linked into erXos's ERTS and built into the portable library | per-byte |
+| `erx_tcp_cut`, `erx_tcp_merge` (in `c_src/`, C17) | the rules of `tcp_output`'s TSO handling and of `tcp_lro_rx_common` and `tcp_lro_condense` (`tcp_lro.c`) | the cut of a run into frames, linked by the transports' NIFs; the merge of received segments behind `erx_bytes:tcp_merge/1` ([design-network-fastpath.md](design-network-fastpath.md)) | per-byte |
+| `erx_tcp_payload` | none | payloads as flat lists of binaries: length, part | P |
+| `erx_net_sum` | none | one's-complement sums: `add/2`, and `span/4`, a layer's sum from the network sum ([Checksums in the copy](#checksums-in-the-copy)) | P |
+| `erx_tap`, `erx_tap_nif` (in `portable/`) | none | the tap transport and its NIF's loader ([The tap transport](#the-tap-transport)) | E |
+| `erx_tap_nif.c` (in `c_src/`, C17) | none | the tap NIF: reads, `writev` and the cut's headers over the tap's descriptor | host NIF |
 | `erx_netmap`, `erx_netmap_nif` (in `portable/`) | none | the netmap transport and its NIF's loader | E |
-| `erx_net_tap` (in `c_src/`, C17) | none | the tap helper, a port program | host tool |
 | `erx_netmap_nif.c`, `erx_netmap_ring.c` (in `c_src/`, C17) | none | the netmap NIF: its effects over the mapping, and the pure core that plans each call | host NIF |
 | `erx_icmp_sock` | `raw_ip.c` (`rip_input`, `rip_send`), the parts `ping` uses | the ICMP echo socket | E |
 | `erx_net_if`, `erx_tcp_conn`, `erx_tcp_listen`, `erx_udp_sock`, `erx_net_grant`, `erx_net_tables`, `erx_dhcp4`, `erx_epmd` | none | processes | E |
@@ -4048,7 +4165,9 @@ protocol, a closed set of shapes, each `{erx_net, Sender, Body}` with
 %% Socket to socket process.
 -type push_body() ::
       {reply, N :: non_neg_integer(), Result :: term()}
-    | {data, binary()}                      % in-order bytes, at most a piece
+    | {data, [binary()]}                    % in-order bytes, the receive queue's
+                                            % pieces as they are: at most 64 binaries
+                                            % and at most a piece in all
     | {datagram, inet:ip_address(), inet:port_number(), binary()}
                                             % one whole datagram
     | eof                                   % the peer's FIN, after every byte
@@ -4262,12 +4381,16 @@ socket across domains rests on them.
 #### Message sizes
 
 Every message of the socket protocol fits every receiver, because one
-constant bounds every binary it carries: the **piece**, 64 KiB.
+constant bounds the bytes it carries: the **piece**, 64 KiB.
 
 * A push carries at most a piece. A connection pushes its credited
-  in-order bytes in as many `{data, Bytes}` pushes as it takes, each at
-  most a piece, and a datagram is one push, since a UDP payload is at
-  most 65,527 bytes.
+  in-order bytes in as many `{data, Pieces}` pushes as it takes, each a
+  flat list of the receive queue's binaries as they are, at most 64 of
+  them and at most a piece in all, and a datagram is one push, since a
+  UDP payload is at most 65,527 bytes. The count bounds what the list
+  adds to a frame, 5 bytes of its encoding per binary, so a peer that
+  sends one-byte segments cannot make a push's frame grow past its
+  piece and header.
 * A request carries at most a piece. The socket process cuts the data of
   a `gen_tcp:send/2` into pieces and sends them in order, one at a time,
   each as `{call, N, {send, Piece}}`, and answers the caller after the
@@ -4285,7 +4408,7 @@ constant bounds every binary it carries: the **piece**, 64 KiB.
   receiver's atom table.
 
 Every frame of the protocol is therefore at most a piece plus a header
-under 1 KiB: the control term, the message's tags, the sender's pid and
+under 1 KiB, the 64 binaries' encoding included: the control term, the message's tags, the sender's pid and
 `N`. These are the limits it meets on a lane
 ([design-domains.md](design-domains.md#data-model),
 [the funnel](design-domains.md#the-funnel)):
@@ -4309,8 +4432,8 @@ floor of [Open decisions](#open-decisions), 1. So a correct socket's
 frame is never dropped for its size. That matters most for pushes: a
 dropped push would strand the credit it carried, the socket process
 would count it as outstanding for good, and the socket would never push
-again. `erx_sock_admit` refuses a push longer than a piece as it refuses
-one past the credit, so a push of another size aborts its socket rather
+again. `erx_sock_admit` refuses a push longer than a piece, or of more
+than 64 binaries, as it refuses one past the credit, so a push of another size aborts its socket rather
 than being taken.
 
 A socket process sends the next piece of a send only after the reply to
@@ -4496,7 +4619,7 @@ Every packet is hostile. The rules, and where each is enforced:
 | Text from packets reaches logs and the inspector only through the sink's escaping function | `erx_log` |
 | Ring fields a netmap port shares are read once per call and checked before a byte is copied: offsets and sizes at registration, `tail` and each slot's buffer index and length at each call; every copy lies inside one buffer of the mapping | `erx_netmap_ring`, its tests and fuzz target ([The netmap transport](#the-netmap-transport)) |
 | A socket takes requests only from its one socket process | the socket's check of `ReplyTo` after `erx_net_admit` |
-| A socket process takes a message from its socket only when it passes `erx_sock_admit`: the origin its grant was found with, its own socket's pid, a shape of the socket protocol, data within the credit outstanding and at most a piece, a datagram's address and port well formed, an end reason from the closed list, a reply under an `N` in flight in the reply shape its operation declares | `erx_sock_admit`; its fuzz target |
+| A socket process takes a message from its socket only when it passes `erx_sock_admit`: the origin its grant was found with, its own socket's pid, a shape of the socket protocol, data within the credit outstanding and at most a piece in at most 64 binaries, a datagram's address and port well formed, an end reason from the closed list, a reply under an `N` in flight in the reply shape its operation declares | `erx_sock_admit`; its fuzz target |
 | No term the network domain chose reaches program code: every push and every answer of the grant passes `erx_sock_admit`, and what an owner or a caller receives is built from its checked parts | `erx_sock_admit`; `erx_gen_tcp_core`, `erx_gen_udp_core`; `erx_inet:call/1`, the one path to the grant |
 
 **A socket process's trust in its socket.** A push from the network
@@ -4648,13 +4771,6 @@ Each of these is a known gap, with the reason it stays:
   delay resolution and handshakes until it drains. FreeBSD's send queue
   has no reserved share either; a small share of the transmit credit for
   the interface's own frames would bound it, and `TODO.md` records it.
-* **A port transport's frames are not credited.** ERTS delivers a port's
-  data as fast as the port program reads it, so a tap peer that floods
-  fills the driver's mailbox, where the virtio and UDP ends bound it. The
-  port end serves the test host's own jails and nodes outside erXos;
-  floods are tested on QEMU, through virtio. The netmap transport,
-  which reads its ring only when its one receive wake arrives, has no
-  such gap ([The netmap transport](#the-netmap-transport)).
 
 ## Concurrency and failure
 
@@ -4684,7 +4800,7 @@ stops reading stalls only its own sockets.
 | the driver has no attached interface, between an interface's end and its restart | the driver, which monitors the attached interface | everything | the frames received meanwhile, dropped and counted as `detached` |
 | a device's queue is full, or a transport refuses a frame | the driver | everything | nothing while the backlog has room, which the transmit credit bounds; past it senders' hand-overs are refused and counted where they are made |
 | a call on a netmap port fails (its registration, a sync or an arm), or its ring breaks | the netmap transport, which ends the driver, whose link the interfaces supervisor starts again | every connection | the link's soft state, as a driver crash; a port that stays unregistrable restarts the link at most once a second ([Ending](#the-driver), [The netmap transport](#the-netmap-transport)) |
-| a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by its port's monitor (or the port's exit signal), each ending the driver, whose link the interfaces supervisor starts again; a `udp` end only as refused sends | every connection | the link's soft state, as a driver crash; a far end that stays away restarts the link once a second; TCP retransmits once the far end returns |
+| a pipe's far end goes away | the pipe: a `process` end by its monitor, and the tap transport by an error of its descriptor, each ending the driver, whose link the interfaces supervisor starts again; a `udp` end only as refused sends | every connection | the link's soft state, as a driver crash; a far end that stays away restarts the link once a second; TCP retransmits once the far end returns |
 | a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST and pushes `{error, econnaborted}`, which its socket process presents as `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or as the error of a waiting call |
 | a socket is killed or crashes outside a step | its grant, which deletes its entries; its socket process, by its monitor | everything else | the socket: the peer times out or meets a RST later; the socket process presents the end as `{error, econnaborted}` |
 | a socket's owner exits | its socket process, which monitors it and stops | everything else | the socket process; its socket, by its monitor, closes as `close/1` does: a connection sends FIN, or RST if `linger` is zero |
@@ -4777,8 +4893,8 @@ key names a seam module the build does not hold
 
 ## Where C is used, and what is measured
 
-C does per-byte work only, as the design requires
-([design.md](design.md#decisions)).
+C does per-byte work, and the per-frame work that rides on a pass over
+the bytes, as the design requires ([design.md](design.md#decisions)).
 
 * **The Internet checksum,** `erx_bytes:inet_csum/2`, already among the
   per-byte primitives, over an iolist so headers and payload are summed
@@ -4811,6 +4927,13 @@ C does per-byte work only, as the design requires
   `erx_net_clock`, only when an owner starts and when
   `erx_net_tables` draws or rotates a secret
   ([One owner, one step](#one-owner-one-step)).
+
+* **The cut and the merge,** `erx_tcp_cut.c` in each transport's copy
+  and `erx_bytes:tcp_merge/1` in the interface: the cut writes the
+  header values Erlang chose into each frame of a run as it copies the
+  frame, and the merge groups received frames by a fixed rule and
+  decodes nothing TCP acts on
+  ([design-network-fastpath.md](design-network-fastpath.md)).
 
 Everything else is Erlang. Whether TCP's established path also needs
 native code is measured on this stack: a bulk transfer and a
@@ -4961,9 +5084,9 @@ oracle throughout is the plain checksum, `erx_inet_sum` in C and
   `driver`, finished by an Erlang model of the finisher (the field
   replaced by the complement of `erx_bytes:inet_csum/2` over the range),
   must give the same bytes as `encode/4` with `sender`. A host
-  transport's NIF, which runs the core over a frame's pieces as `post/5`
-  does, is checked over its fake ring against the `sender` bytes.
-  `post/5` itself is checked end to end, below, since the hosted
+  transport's NIF, which runs the core over a frame's pieces as
+  `post_frame/5` does, is checked over its fake ring against the
+  `sender` bytes. `post_frame/5` itself is checked end to end, below, since the hosted
   runtime has no device with queues. *Seeded failure:* a delayed field
   without the segment's length, which every comparison must catch.
 * **The interface's gate, with a lying transport.** This extends the
@@ -4982,20 +5105,20 @@ oracle throughout is the plain checksum, `erx_inet_sum` in C and
   the test that shows the sum is used. A `verify/1` that skips the
   check fails the third case.
 * **End to end.** The network QEMU suite's TCP transfer to the host's
-  peer runs through `complete/3` and `post/5`. A wrong sum either way
+  peer runs through `complete/3` and `post_frame/5`. A wrong sum either way
   stalls it, since the peer's stack drops what our copy finished wrongly
   and ours drops what its copy summed wrongly. The transport's start line
-  names `checksum copy` or `checksum device`. On p620 the netmap run
+  names `finish copy` or `finish device`. On p620 the netmap run
   through the VALE switch to FreeBSD's jail must end with the jail's
   count of segments discarded for bad checksums
   (`netstat -s -p tcp`) and the stack's `bad_sum` counts both unchanged.
-  *Seeded failure:* a `post/5` that stores the sum uncomplemented,
+  *Seeded failure:* a `post_frame/5` that stores the sum uncomplemented,
   which must make the transfer fail.
 
 The measurements this change owes are on the
 [watch list](todo-performance.md): the stage breakdown of the bulk
 transfer, with `tools/erx bench` under HVF, before and after; the p620
-run repeated over tap and netmap with the C primitive as the baseline;
+run over tap and netmap, before and after;
 and the copy core against a copy followed by a separate sum.
 
 ### Classification and framing
@@ -5285,14 +5408,17 @@ runners execute it:
   `freebsd-version -k` and `uname -v` print it, and packetdrill's
   version. The records are raw run data and live in the separate history
   repository, never in this one.
-* **On erXos.** `erx_net_script`, erXos's own runner in Erlang, reads the
-  scripts' language, with no code of packetdrill's, and drives the stack
-  under the virtual clock ([The clock](#the-clock)) in two ways: against
-  the pure core, and against the whole stack on a development host
-  through the pipe driver's `process` end, so the effect layer runs too.
-  A script's socket calls become socket requests; its packets are
-  injected at the pipe; its expected packets are matched against what the
-  pipe is given.
+* **On erXos.** `erx_net_script`, erXos's own runner in Erlang, reads
+  the scripts' language, with no code of packetdrill's, and drives the
+  stack under the virtual clock ([The clock](#the-clock)) in two ways:
+  against the pure core, and against the whole stack on a development
+  host through the pipe driver's `process` end, so the effect layer runs
+  too. A script's socket calls become socket requests; its packets are
+  injected at the pipe; its expected packets are matched against what
+  the pipe is given. The whole-stack runs are made twice, the second
+  through the `process` end's offload mode, which cuts runs and batches
+  bursts through the C of the cut and the merge
+  ([design-network-fastpath.md](design-network-fastpath.md#tests)).
 
 The oracle is a moving -CURRENT, so a comparison names the kernel it
 compares with: every script's verdict on erXos must equal its verdict in
@@ -5338,11 +5464,11 @@ take three peers:
 * **FreeBSD's jails on `p620`.** The host's tap devices `/dev/tap0` to
   `tap7` join a bridge with the vnet jails `erxpeer0` to `erxpeer3`
   (10.77.0.10 to 10.77.0.13/24), whose stack is the oracle's own kernel;
-  the stack runs on the host's own OTP, and the tap helper joins a tap
-  device to a pipe's `port` end. Bulk transfers, many short connections
+  the stack runs on the host's own OTP over a tap device through the tap
+  transport ([The tap transport](#the-tap-transport)). Bulk transfers, many short connections
   and request-response loads run between the stack and a jail through
   `erx_net_relay`, and the same loads between two jails, each joined to
-  the relay's `port` end on a tap device of its own, under the same
+  the relay through a tap device of its own, under the same
   schedule, are FreeBSD's baseline. The tests
   check completion, delivered bytes, and that retransmissions and
   throughput stay within stated bounds of the baseline's. Each run's
@@ -5359,7 +5485,8 @@ take three peers:
   exceed the retransmission bound under a reordering schedule.
 
 **The impairment.** `erx_net_relay` forwards frames between two ends,
-each a pipe-shaped `process`, `udp` or `port` end, and runs each direction
+each a pipe-shaped `process` or `udp` end or a tap device through
+`erx_tap_nif`, and runs each direction
 through `erx_net_impair`, a pure state machine keyed by a seed:
 
 ```erlang
@@ -5426,12 +5553,12 @@ than at its virtual time; an interface that draws its key from
 `erx_bytes:entropy/1` directly must fail the build check and the
 byte-identical run.
 
-**The tap helper.** On the FreeBSD test host, frames of 60, 1,514 and
-9,014 bytes cross the helper both ways unchanged, end of file on its
-input ends it with status 0, and a tap destroyed under it ends it with
-status 1, after which the pipe stops and the driver ends. *Seeded
-failure:* a helper that writes only the low byte of the length must
-fail the 1,514-byte case.
+**The tap transport.** On the FreeBSD test host, frames of 60, 1,514
+and 9,014 bytes cross the transport both ways unchanged, a run is cut
+into the frames `erx_net_frame:cut/1` gives, and a tap destroyed under
+it ends the medium and the driver. *Seeded failure:* a `send/2` that
+answers a run as taken whole when the device would block before its last
+frame must fail the run's frame count.
 
 ### Traffic against FreeBSD and Linux
 
@@ -5440,7 +5567,7 @@ between an erXos guest on QEMU and a jail of the FreeBSD test host, and
 between erXos and the Linux oracle guest, through `erx_net_relay` with a
 seeded schedule. For a jail, the relay runs on the test host, its `udp`
 end pinned to the guest's `dgram` backend across the network and its
-`port` end on a tap device of the jails' bridge. The tests check
+other end on a tap device of the jails' bridge, through `erx_tap_nif`. The tests check
 completion, delivered bytes, and that retransmission counts and
 throughput stay within stated bounds of FreeBSD's own against the same
 schedule, as the host runs above do.
@@ -5523,7 +5650,7 @@ wait, must time out one second after one of them is answered, the
 documented difference of [Requests in flight](#requests-in-flight). A third
 domain, handed the socket term and the
 connection's pid, sends the socket process crafted
-`{erx_net, Conn, {data, Bytes}}` messages, none of whose bytes may reach
+`{erx_net, Conn, {data, Pieces}}` messages, none of whose bytes may reach
 the owner; and a process of the owner's domain other than the socket
 process sends the connection a well-formed request, which must have no
 effect. A test grant that lies answers an open with a pid of the third
@@ -5633,6 +5760,9 @@ Each with a test proving it catches a violation:
   key, so the grant's pid is known to `erx_inet:call/1` alone and every
   answer of the grant passes `erx_sock_admit`
   ([Untrusted input](#untrusted-input));
+* no module a TCP payload passes through copies or joins it in Erlang
+  outside the sites the fast path lists
+  ([design-network-fastpath.md](design-network-fastpath.md#copies));
 * only `erx_gen_tcp` and `erx_gen_udp` build a socket term
   `{'$inet', _, _}`, so no message the network domain sends has the shape
   of a stock socket message;
@@ -5671,7 +5801,9 @@ ARP; IPv4 with reassembly, fragmentation on output and ICMP; IPv6 with
 extension headers, reassembly, ICMPv6, neighbour discovery, duplicate
 address detection, autoconfiguration with RFC 7217 identifiers and the
 narrow MLDv2 listener; static configuration and DHCPv4; loopback; UDP;
-TCP with the defaults of [Defaults kept](#defaults-kept); the grant, its
+TCP with the defaults of [Defaults kept](#defaults-kept); runs, their
+cut in each transport's copy and the merge of received segments
+([design-network-fastpath.md](design-network-fastpath.md)); the grant, its
 limits and its account; `gen_tcp`, `gen_udp` and `inet`; the POSIX socket
 protocol; the resolver operation; the port mapper; and every test of
 [Verification](#verification).
@@ -5688,9 +5820,12 @@ behind the same processes, with no change to the core's structure:
   key, so the identifier filter `ping` applies to its raw socket is the
   classifier's ([Classifying a frame](#classifying-a-frame)), and whose
   credit bounds the replies waiting for its owner;
-* the device finishing a sent segment's delayed checksum where
-  virtio-net offers `VIRTIO_NET_F_CSUM`, behind the same request the
-  copy finishes ([Checksums in the copy](#checksums-in-the-copy));
+* the device finishing what the copy finishes, a run's cut and a sent
+  segment's delayed checksum, where virtio-net offers
+  `VIRTIO_NET_F_CSUM` with `VIRTIO_NET_F_HOST_TSO4` and `HOST_TSO6`,
+  behind the same requests
+  ([Checksums in the copy](#checksums-in-the-copy),
+  [design-network-fastpath.md](design-network-fastpath.md#device-segmentation));
 * one interface process per receive queue on a device that hashes flows
   to several, so each flow still passes through one interface process
   and [Ordering](#ordering) holds;
@@ -5790,7 +5925,7 @@ Two questions that reach into the domains design remain the owner's
    Since the host tracks -CURRENT, every verdict record names its kernel
    ([Packet scripts against FreeBSD](#packet-scripts-against-freebsd)).
    QEMU is not installed there, so the host runs reach its tap devices
-   through the tap helper, and the stack runs on the host's own OTP
+   through the tap transport, and the stack runs on the host's own OTP
    ([The driver](#the-driver)).
 9. **The translation follows FreeBSD 16 at commit `975e3605ebb1`**
    (`main-n285245`), the kernel of the test host, for its more recent
@@ -5981,8 +6116,9 @@ would cut its window for it ([The driver](#the-driver)).
 
 **A QEMU hub for tap devices on the FreeBSD host,** as slirp is reached
 on macOS. It needs an emulator on a test host that runs none; the tap
-helper is a short C program that does one thing, and serves a node
-outside erXos as well.
+transport is the netmap transport's construction over a file
+descriptor, and serves a node outside erXos as well
+([The tap transport](#the-tap-transport)).
 
 **A netmap port program, or slots lent to binaries.** A helper relaying
 netmap's rings through a pipe adds two copies per frame and an
