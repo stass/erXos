@@ -870,6 +870,10 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] oracle log tree test (`test/integration/oracle_log_tree_test.rb`, `tools/lib/erx/oracle_hosted.rb`): the
+  test assumes a /tmp cap of 160 MiB (`TMP_CAP`), but the hosted oracle takes the system
+  domain's cap from the development manifest, 4 MiB, and runs its suites in /tmp/ct on it. Give the
+  oracle's work directory a tree of its own, or derive `TMP_CAP` from the manifest.
 * [Low] host tests on FreeBSD, `tools/lib/erx/runner.rb`: the seeded-fault (mutant) binaries
   that abort by design dump core into the tree root (`mutant-*.core`, `page.core`,
   `object.core`; FreeBSD's `kern.corefile` is `%N.core` in the working directory), 17 files

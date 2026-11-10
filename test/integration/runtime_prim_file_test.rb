@@ -731,7 +731,9 @@ class RuntimePrimFileTest < Minitest::Test
 
   # Seeded faults of design-tmp.md's Verification for /tmp. Each replaces passages of one
   # module; `mode` is the run it is loaded into: `tmp-seeded` runs the /tmp transcript and
-  # `caught` lists the lines that must then differ from the unseeded run's, `cold` runs the
+  # `caught` lists the lines that must then differ from the unseeded run's, `tmp-held` runs
+  # only the steps that check what an open file holds (for a leak that would fill /tmp before
+  # the whole transcript got there, whatever /tmp's cap), `cold` runs the
   # code-from-/tmp case and `caught` names what that run shows. A client seed is loaded
   # after boot (the client is preloaded); any other module is put first on the code path.
   TmpSeed = Data.define(:name, :source, :passages, :mode, :caught)
@@ -743,7 +745,7 @@ class RuntimePrimFileTest < Minitest::Test
     TmpSeed.new(name: 'tmp-setattr-node', source: CORE, mode: 'tmp-seeded', caught: ['tmp truncate 0444'],
                 passages: [["        {Ino, Access, _} = Handle,\n        {ok, Ino, N, {open, Access}}\n",
                             "        {Ino, _Access, _} = Handle,\n        {ok, Ino, N, node}\n"]]),
-    TmpSeed.new(name: 'tmp-clunk-keeps-charge', source: CORE, mode: 'tmp-seeded',
+    TmpSeed.new(name: 'tmp-clunk-keeps-charge', source: CORE, mode: 'tmp-held',
                 caught: ['tmpx held after close'],
                 passages: [["            {done, ok, charged(-freed_charge(N1), release(Ino, N1, Tree))};\n",
                             "            {done, ok, release(Ino, N1, Tree)};\n"]]),
@@ -764,15 +766,24 @@ class RuntimePrimFileTest < Minitest::Test
 
   # Each caught line must differ from the unseeded run's, which is the one design-tmp.md
   # and stock agree on, so the named line is what shows the fault.
-  TMP_SEEDS.select { |seed| seed.mode == 'tmp-seeded' }.each do |seed|
+  TMP_SEEDS.select { |seed| %w[tmp-seeded tmp-held].include?(seed.mode) }.each do |seed|
     define_method(:"test_seeded_#{seed.name.tr('-', '_')}_is_caught") do
       transcript = table(seeded_tmp_run(seed))
-      refute_empty transcript.keys.grep(/\Atmpx? /), "the /tmp transcript ran under #{seed.name}"
+      refute_empty transcript.keys.grep(/\Atmpx? /), "/tmp lines were printed under #{seed.name}"
       seed.caught.each do |key|
         assert transcript.key?(key), "#{key} is in the seeded run under #{seed.name}"
         refute_equal table(@fixture.release).fetch(key), transcript.fetch(key), "#{seed.name} left #{key} as it was"
       end
     end
+  end
+
+  # The `tmp-held` run without a fault prints what the whole transcript does at those
+  # steps, so a seed caught there is caught by its fault and not by the run being partial.
+  def test_the_held_steps_alone_agree_with_the_whole_transcript
+    alone = table(run_beam(@fixture.archive, '/', 'tmp-held', 'none', boot: '/bin/start').first)
+    refute_empty alone
+    whole = table(@fixture.release)
+    alone.each { |key, value| assert_equal whole.fetch(key), value, key }
   end
 
   # The unseeded run of the cold case: a fresh runtime, every serving module loaded at
@@ -804,7 +815,7 @@ class RuntimePrimFileTest < Minitest::Test
   end
 
   def seeded_tmp_run(seed)
-    output, status = run_beam(@fixture.archive, '/', 'tmp-seeded', seed.name, boot: '/bin/start', seed_dir: seed.name)
+    output, status = run_beam(@fixture.archive, '/', seed.mode, seed.name, boot: '/bin/start', seed_dir: seed.name)
     assert_equal 0, status.exitstatus, output.last(20).join("\n")
     output
   end

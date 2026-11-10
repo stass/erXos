@@ -31,6 +31,12 @@ main([_, "tmp-seeded", Seed]) ->
     load_seeded_client(Seed),
     tmp(<<>>, "release"),
     erlang:halt(0);
+%% Only the steps that show a charge kept past the close, for a seed whose leak would fill
+%% /tmp before the whole transcript reaches them.
+main([_, "tmp-held", Seed]) ->
+    load_seeded_client(Seed),
+    tmp_held(fun(Step, Result) -> io:format("tmpx ~s\t~0tp~n", [Step, Result]) end),
+    erlang:halt(0);
 %% Code from /tmp in a runtime whose first use of /tmp is the code server's.
 main([_, "cold", Seed]) ->
     load_seeded_client(Seed),
@@ -1505,29 +1511,7 @@ tmp_erxos("release") ->
     Show("zero dir", file:make_dir(<<"/zero/d">>)),
     unlink(Zero),
     exit(Zero, shutdown),
-    %% Open after unlink: what a file holds is given back at its last close, and a
-    %% process that opens a file, removes it and is killed gives it back too. The
-    %% grant answers a close when it hands the clunk to the file's owner, so the
-    %% charge comes back just after close returns, and both checks wait for it.
-    Free = tmp_free(erx_ramfs),
-    {ok, Gone} = file:open(<<"/tmp/held">>, [read, write, binary]),
-    ok = file:delete(<<"/tmp/held">>),
-    ok = file:write(Gone, binary:copy(<<7>>, 50000)),
-    Show("held while open", tmp_free(erx_ramfs) < Free),
-    ok = file:close(Gone),
-    Show("held after close", tmp_wait_free(erx_ramfs, Free, 100) =:= ok),
-    Parent = self(),
-    Killed = spawn(fun() ->
-                           {ok, Fd} = file:open(<<"/tmp/held2">>, [read, write, binary]),
-                           ok = file:delete(<<"/tmp/held2">>),
-                           ok = file:write(Fd, binary:copy(<<8>>, 50000)),
-                           Parent ! {written, self()},
-                           receive never -> ok end
-                   end),
-    receive {written, Killed} -> ok after ?HELPER_WAIT -> helper_silent(held_writer) end,
-    Show("held while owner lives", tmp_free(erx_ramfs) < Free),
-    exit(Killed, kill),
-    Show("held after owner killed", tmp_wait_free(erx_ramfs, Free, 100)),
+    tmp_held(Show),
     %% A file written and renamed over b while others stat b: every stat finds b. Then
     %% writers filling the tree stop at the cap together.
     {ok, Conc} = erx_ramfs_sup:start_link(?CONC_CAP, <<"/conc">>, erx_ramfs_conc),
@@ -1552,6 +1536,33 @@ tmp_erxos("release") ->
     {ok, #file_info{inode = NewInode}} = file:read_file_info(<<"/tmp/after">>),
     Show("inode above", NewInode > OldInode),
     ok.
+
+%% Open after unlink: what a file holds is given back at its last close, and a
+%% process that opens a file, removes it and is killed gives it back too. The
+%% grant answers a close when it hands the clunk to the file's owner, so the
+%% charge comes back just after close returns, and both checks wait for it. It
+%% compares /tmp's free blocks before and after, so it also runs alone (main/1,
+%% "tmp-held").
+tmp_held(Show) ->
+    Free = tmp_free(erx_ramfs),
+    {ok, Gone} = file:open(<<"/tmp/held">>, [read, write, binary]),
+    ok = file:delete(<<"/tmp/held">>),
+    ok = file:write(Gone, binary:copy(<<7>>, 50000)),
+    Show("held while open", tmp_free(erx_ramfs) < Free),
+    ok = file:close(Gone),
+    Show("held after close", tmp_wait_free(erx_ramfs, Free, 100) =:= ok),
+    Parent = self(),
+    Killed = spawn(fun() ->
+                           {ok, Fd} = file:open(<<"/tmp/held2">>, [read, write, binary]),
+                           ok = file:delete(<<"/tmp/held2">>),
+                           ok = file:write(Fd, binary:copy(<<8>>, 50000)),
+                           Parent ! {written, self()},
+                           receive never -> ok end
+                   end),
+    receive {written, Killed} -> ok after ?HELPER_WAIT -> helper_silent(held_writer) end,
+    Show("held while owner lives", tmp_free(erx_ramfs) < Free),
+    exit(Killed, kill),
+    Show("held after owner killed", tmp_wait_free(erx_ramfs, Free, 100)).
 
 %% Free blocks of a tree, through the callback the grant uses.
 tmp_free(Name) ->
