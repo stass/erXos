@@ -1,3 +1,5 @@
+// Modified by erXos: a receive from the thread itself whose timeout hit
+// before it would wait yields the time slice (docs/design-stopgap.md, "Scheduling").
 INTERFACE [debug]:
 
 #include "tb_entry.h"
@@ -443,6 +445,30 @@ Thread::do_receive_wait(Sender *sender)
   assert (state() & Thread_ready);
 }
 
+/**
+ * Give up the rest of the current time slice without blocking.
+ *
+ * The current scheduling context goes behind the other ready contexts of its
+ * priority, as do_receive_wait() puts it for a receive from the thread itself,
+ * and the CPU goes to the head of the ready queue, which is this thread again
+ * if no other thread of its priority is ready.
+ *
+ * A thread being migrated runs on a CPU whose ready queue is not its own, and
+ * keeps the CPU.
+ *
+ * \pre The thread is the current one, it is ready, and cpu_lock is held.
+ */
+PRIVATE inline
+void
+Thread::yield_timeslice()
+{
+  if (home_cpu() != ::current_cpu()) [[unlikely]]
+    return;
+
+  switch_sched(sched(), &Sched_context::rq.current());
+  schedule();
+}
+
 
 
 /**
@@ -799,10 +825,19 @@ Thread::do_ipc_receive(bool have_receive, Thread *partner, Sender *sender,
       }
     else if (have_receive)
       {
+        Mword ipc_state = state() & Thread_full_ipc_mask;
+
         // If the receive timeout has not yet been hit and the IPC has not been
         // cancelled, enter receive wait.
-        if ((state() & Thread_full_ipc_mask) == Thread_receive_wait)
+        if (ipc_state == Thread_receive_wait)
           do_receive_wait(sender);
+        // A receive from the thread itself whose timeout hit before it would
+        // wait (zero, as l4_thread_yield() gives it, or already passed) is a
+        // yield: the thread stays ready, goes behind the other ready threads
+        // of its priority, and reports the timeout when it runs again.
+        else if (sender == this
+                 && ipc_state == (Thread_receive_wait | Thread_timeout))
+          yield_timeslice();
       }
   }
 

@@ -31,6 +31,7 @@
 #define STACK_BYTES	(4 * PAGE)
 #define CPUS_TRIED	4u
 #define REWRITE_ROUNDS	2000u
+#define YIELD_ROUNDS	1000u
 /* QEMU virt's fw_cfg and RAM (hw/arm/virt.c), as test/guest/function_api/device_cases.c uses them. */
 #define FW_CFG_PHYS	UINT64_C(0x9020000)
 #define RAM_PHYS	UINT64_C(0x40000000)
@@ -139,6 +140,45 @@ thread_join_word(void)
 
 	while ((value = atomic_load_explicit(&clear_word, memory_order_acquire)) != 0)
 		(void)erx_umtx_wait((uint64_t)(uintptr_t)&clear_word, value, ERX_FIASCO_UMTX_FOREVER);
+}
+
+/* Takes each odd count the first thread posts and posts the next even one. */
+static void
+yield_helper(uint64_t rounds)
+{
+	for (uint32_t round = 1; round <= rounds; round++) {
+		while (atomic_load_explicit(&posted, memory_order_acquire) != 2 * round - 1)
+			erx_yield();
+		atomic_store_explicit(&posted, 2 * round, memory_order_release);
+	}
+	erx_thread_exit();
+}
+
+/*
+ * Two threads pinned to CPU 0 hand a count back and forth, each spinning on erx_yield until
+ * the other has moved it. Every wait lasts as long as a yield takes to hand the CPU over, so
+ * a yield that keeps the CPU to the end of its time slice makes the case take seconds.
+ */
+static int64_t
+mode_yield(void)
+{
+	uint64_t thread;
+	int64_t step;
+
+	if (erx_thread_set_affinity(erx_fiasco_thread_self()->index, UINT64_C(1)) != ERX_OK)
+		return (80);
+	atomic_store_explicit(&posted, 0, memory_order_relaxed);
+	atomic_store_explicit(&clear_word, 1, memory_order_relaxed);
+	step = thread_spawn(yield_helper, YIELD_ROUNDS, UINT64_C(1), &clear_word, &thread);
+	if (step != 0)
+		return (step);
+	for (uint32_t round = 1; round <= YIELD_ROUNDS; round++) {
+		atomic_store_explicit(&posted, 2 * round - 1, memory_order_release);
+		while (atomic_load_explicit(&posted, memory_order_acquire) != 2 * round)
+			erx_yield();
+	}
+	thread_join_word();
+	return (0);
 }
 
 /* Rewrites on this thread's CPU, and runs on the helper's, which the mask names. */
@@ -422,6 +462,8 @@ erx_task_main(uint64_t argument)
 		return (mode_irq_refused());
 	case MODE_DEVICE_REFUSED:
 		return (mode_device_refused());
+	case MODE_YIELD:
+		return (mode_yield());
 	default:
 		return (90);
 	}

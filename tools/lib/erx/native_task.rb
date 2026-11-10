@@ -25,6 +25,9 @@ module Erx
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_task/program.c'].freeze
     # The race's boots of a task take the time, under TCG above all.
     RACE_SECONDS = 400
+    # The yield case's 1000 hand-overs on one CPU: a yield that keeps the CPU to the end of
+    # its time slice takes about 20 s, one that hands it over takes milliseconds.
+    YIELD_SECONDS = 5
     CASE_LINE = /\Aerx: task: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
     STATUS_FAULT = -1
     WRITE_BIT = 2
@@ -43,7 +46,7 @@ module Erx
     def checkpoints
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), case_point('program_found', seconds: 30),
        { name: 'task-cpus', pattern: /\Aerx: task: cpus [1-9]/n, seconds: 30 }.freeze,
-       case_point('service', seconds: 180), case_point('write_rx', seconds: 30), case_point('run_rw', seconds: 30),
+       case_point('yield', seconds: YIELD_SECONDS), case_point('service', seconds: 30), case_point('write_rx', seconds: 30), case_point('run_rw', seconds: 30),
        case_point('no_jit', seconds: 30), case_point('irq_refused', seconds: 30),
        case_point('device_refused', seconds: 30), case_point('log', seconds: 30),
        case_point('write', seconds: 30), case_point('spin_stop', seconds: 60), case_point('root_stops', seconds: 30),

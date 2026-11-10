@@ -784,9 +784,21 @@ Fiasco's fixed-priority scheduler schedules every thread; ERTS schedules its pro
 but the watchdog runs at Fiasco's default priority of 1, as the root's first thread and `sigma0` do, so a spinner
 never outranks a preempted lock holder on its CPU. The watchdog, which takes no lock, runs at 255.
 `l4_scheduler_run_thread(L4_BASE_SCHEDULER_CAP, thread, &param)` starts each thread, with `param` from
-`l4_sched_param(priority, 0)` and the CPU mask in `param.affinity`. A thread with no mask set stays on the CPU it
-was created on (`scheduler.cpp:98-103`). `erx_thread_set_affinity` before the start takes effect at the start, and after it
+`l4_sched_param(priority, 0)` and the CPU mask in `param.affinity`. A thread with no mask set stays on the CPU of
+the thread whose `l4_scheduler_run_thread` starts it, the root service's thread for a task's threads
+(`scheduler.cpp:98-103`). `erx_thread_set_affinity` before the start takes effect at the start, and after it
 moves the thread at once, through the same call.
+
+**A yield.** `erx_yield`, musl's `sched_yield` through it, and every failed attempt at a backend lock
+([Locks](#locks)) call `l4_thread_yield`, which is a receive from the thread itself with a zero timeout. Upstream
+Fiasco's receive phase marks that timeout as hit before it would wait, so the call returns at once and the caller
+keeps its CPU to the end of its time slice: a spinner waiting for a thread on its own CPU waits a whole slice each
+turn. The fork changes one thing in `Thread::do_ipc_receive` (`thread-ipc.cpp`): a receive from the thread itself whose
+timeout hit before it would wait calls `Thread::yield_timeslice`, which puts the thread's own scheduling context behind
+the other ready ones of its priority, as a receive from itself with a timeout to wait does, and schedules. The thread
+stays ready and gets the timeout result when it runs again. With every thread at priority 1, a yield hands the CPU to
+the next ready thread on its CPU, and a thread alone on its CPU runs on at once. The native task suite's `yield` case
+is its test.
 
 ### Thread creation
 

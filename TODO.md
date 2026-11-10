@@ -1137,7 +1137,9 @@ it; git history is the record of completed work.
   case hung once under HVF with one CPU, after `erx: task: cpus 1` and before the case's line, so
   `task-service` timed out; the rerun on the same tree passed on one and four CPUs. The task that
   `erx_fiasco_launch` starts with `ERX_SPACE_JIT` and `MODE_SERVICE` never ended, so the root's
-  join waited for good. Find the wait it stuck in.
+  join waited for good. Find the wait it stuck in. The case's rewrite rounds yield on one CPU, and
+  with the fork's yield (docs/design-stopgap.md, "Scheduling") the case takes well under a second
+  of its 30 s, so a timeout there is a hang, not a slow run.
 * [Medium] liberx Fiasco backend, `launcher.c` `erx_fiasco_task_join_until` and `object.c`
   `erx_fiasco_object_drain`: a task holding the last handle of its own space's budget is deleted in
   the request that ends it, its ended semaphore with it, so a root join that got `ERX_EBUSY` before

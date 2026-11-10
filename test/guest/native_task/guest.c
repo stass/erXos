@@ -182,6 +182,7 @@ erx_fiasco_root_main(void)
 	say_number(erx_fiasco_test_cpu_count());
 	say("\n");
 
+	case_ends("yield", 0, MODE_YIELD, 0);
 	case_ends("service", ERX_SPACE_JIT, MODE_SERVICE, 0);
 	say_address(ALIAS_RX);
 	case_ends("write_rx", ERX_SPACE_JIT, MODE_WRITE_RX, ERX_FIASCO_TASK_STATUS_FAULT);
