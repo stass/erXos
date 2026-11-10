@@ -1,13 +1,16 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% A stand-in for erx_domain_lib in erx_domain_tests: it logs every call to
-%% the queue start_log/0 starts, which next_call/0 takes from in order, and a
-%% stop sends the service the end the library's fault thread would.
+%% A stand-in for erx_domain_lib and for the connection agent, erx_connections,
+%% in erx_domain_tests: it logs every call to the queue start_log/0 starts,
+%% which next_call/0 takes from in order, and a stop sends the service the end
+%% the library's fault thread would. The agent refuses the side of a domain
+%% named noside, as the lane driver refuses an open it cannot map.
 -module(erx_domain_fake_lib).
 -export([start_log/0, next_call/0]).
 -export([register/0, configured/0, configured/3, create/1, start/1, stop/2, retire/1, crash/1,
          disconnect/1]).
+-export([open_side/2, close_side/2]).
 
 start_log() ->
     Pid = spawn(fun() -> queue([], []) end),
@@ -42,3 +45,11 @@ stop(Id, _Status) -> log({stop, Id}), erx_domain_srv ! {domain_ended, Id, {stopp
 retire(Id) -> log({retire, Id}).
 crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
 disconnect(Number) -> log({disconnect, Number}).
+
+open_side(Id, #{node := Node, connection := Connection}) ->
+    log({open_side, Id, Node, Connection}),
+    case Node of
+        'noside@erxos' -> {error, enomem};
+        _ -> {ok, list_to_port("#Port<0.1>")}
+    end.
+close_side(Id, Reason) -> log({close_side, Id, Reason}).

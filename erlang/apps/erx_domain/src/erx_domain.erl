@@ -29,8 +29,10 @@ or stopped.
 -doc """
 Creates a domain: {ok, Domain}, or {error, Reason}, Reason bad_identifier,
 name_taken, quota, system_limit, no_memory, badarg (a field of the wrong
-shape), {bad_spec, Key} (a key the spec does not take), {start, Error}, or
-the domain library's own refusal. On every error nothing of the domain
+shape), {bad_spec, Key} (a key the spec does not take), {system_side,
+Error} (the system side of its system connection did not open: noproc where
+the system domain is no node), {start, Error}, or the domain library's own
+refusal. On every error nothing of the domain
 remains but its id, which is never reused.
 """.
 -spec create(spec()) -> {ok, domain()} | {error, term()}.

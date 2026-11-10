@@ -361,14 +361,16 @@ spec_from(ErlNifEnv *env, ERL_NIF_TERM map, erx_dom_spec_t *spec, erx_runtime_li
 static ERL_NIF_TERM
 created_term(ErlNifEnv *env, const erx_dom_created_t *created)
 {
-	ERL_NIF_TERM keys[5], values[5], result;
+	ERL_NIF_TERM keys[7], values[7], result;
 
 	keys[0] = atom(env, "id"), values[0] = enif_make_uint(env, created->id);
 	keys[1] = atom(env, "connection"), values[1] = enif_make_uint(env, created->connection);
 	keys[2] = atom(env, "side"), values[2] = enif_make_uint64(env, created->side);
 	keys[3] = atom(env, "peer_side"), values[3] = enif_make_uint64(env, created->peer_side);
 	keys[4] = atom(env, "bell"), values[4] = enif_make_uint64(env, created->bell);
-	if (!enif_make_map_from_arrays(env, keys, values, 5, &result))
+	keys[5] = atom(env, "reader"), values[5] = enif_make_uint(env, created->reader);
+	keys[6] = atom(env, "system_lane"), values[6] = enif_make_uint(env, created->system_lane);
+	if (!enif_make_map_from_arrays(env, keys, values, 7, &result))
 		return (enif_make_badarg(env));
 	return (enif_make_tuple2(env, atom(env, "ok"), result));
 }

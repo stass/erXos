@@ -79,7 +79,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos \n"
+    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos \n"
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 

@@ -110,9 +110,9 @@ module Erx
        shell_point('host-pointer', Regexp.escape("10.2.0.192.in-addr.arpa domain name pointer #{name}."),
                    type: ProductionImage::Run::ERL_LINE),
        ProductionImage::Run::ERLANG_SHELL.merge(type: RESOLVER_LINE).freeze,
-       { name: 'resolver-config', pattern: /\A(?:[0-9]+> )?#{Regexp.escape(RESOLVER_ANSWER)}\r*\n\z/n,
+       { name: 'resolver-config', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(RESOLVER_ANSWER)}\r*\n\z/n,
          seconds: SHELL_SECONDS, type: IDS_LINE }.freeze,
-       { name: 'query-ids', pattern: /\A(?:[0-9]+> )?\{[0-9]+,[0-9]+,[0-9]+,[0-9]+\}\r*\n\z/n,
+       { name: 'query-ids', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{[0-9]+,[0-9]+,[0-9]+,[0-9]+\}\r*\n\z/n,
          seconds: SHELL_SECONDS, verify: method(:random_ids!) }.freeze]
     end
 

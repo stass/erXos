@@ -44,7 +44,7 @@ module Erx
     # 2D78517F is the CRC-32C of 20000 copies of "erXos", from the bitwise model in
     # test/host/medium_boot_test.rb.
     CRC32C_ANSWER = '{crc32c,"E3069283","2D78517F",badarg}'
-    CRC32C_START = /\A(?:[0-9]+> )?\{crc32c,/n
+    CRC32C_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{crc32c,/n
     # The machine of a medium boot: the production image's, with room for the medium
     # manifest's two domains (manifest). RAM grows to 768 MiB, Fiasco keeping about
     # 6% of it, and the root moves up to 192 MiB, as on the QEMU oracle's machine, since the
@@ -155,7 +155,7 @@ module Erx
                       'DlDeaths->[{DlI,DlInfo}||#{id:=DlI,info:=DlInfo}<-DlDeaths] end end'
     # The line the cell prints: every step's answer, in order.
     DOMAIN_LIB_ANSWER = "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:last).join(',')}}".freeze
-    DOMAIN_LIB_START = /\A(?:[0-9]+> )?\{domain_lib,/n
+    DOMAIN_LIB_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{domain_lib,/n
 
     module_function
 
@@ -260,7 +260,7 @@ module Erx
     # After the shell's line previous, the person types CRC32C_EXPRESSION, and its answer
     # must be CRC32C_ANSWER whole.
     def crc32c_checkpoints(previous)
-      whole = /\A(?:[0-9]+> )?#{Regexp.escape(CRC32C_ANSWER)}\r*\n\z/n
+      whole = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(CRC32C_ANSWER)}\r*\n\z/n
       [previous.merge(type: "#{CRC32C_EXPRESSION}\r").freeze,
        { name: 'crc32c', pattern: CRC32C_START, seconds: 30,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
@@ -271,7 +271,7 @@ module Erx
     # boot and end before it, the configured one first, so it has more time than the other
     # answers.
     def domain_lib_checkpoints(previous, domain)
-      whole = /\A(?:[0-9]+> )?#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
+      whole = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
       [previous.merge(type: "#{domain_lib_expression(domain)}\r").freeze,
        { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 300,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the domain library expression" unless whole.match?(text) } }.freeze]
@@ -344,9 +344,9 @@ module Erx
       digest = Digest::MD5.file(entry.fetch('artifact')).hexdigest.upcase
       expression = "application:ensure_all_started(erx_blk),case file:read_file(\"#{path}\") of " \
                    "{ok,B}->{image_md5,binary:encode_hex(erlang:md5(B))};E->{image_md5,E} end.\r"
-      whole = /\A(?:[0-9]+> )?\{image_md5,<<"#{digest}">>\}\r*\n\z/n
+      whole = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{image_md5,<<"#{digest}">>\}\r*\n\z/n
       [shell.merge(type: expression).freeze,
-       { name: 'image-md5', pattern: /\A(?:[0-9]+> )?\{image_md5,/n, seconds: 120,
+       { name: 'image-md5', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{image_md5,/n, seconds: 120,
          verify: ->(text) { raise Error, "the shell read #{text.inspect} from the image" unless whole.match?(text) } }.freeze]
     end
 

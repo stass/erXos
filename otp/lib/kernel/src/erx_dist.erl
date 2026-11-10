@@ -11,7 +11,9 @@
 %%
 %%   listen/2             the creation, from the boot page; no port mapper
 %%   accept/1             starts erx_connections, the acceptor, which opens the system
-%%                        connection from the boot page and hands it to net_kernel
+%%                        connection from the boot page and hands it to net_kernel; in
+%%                        the system domain, each domain's system side as the domain
+%%                        service asks
 %%   accept_connection/5  the connection's owner: setnode/3, then nodeup, then it waits
 %%   setup/5              fails at once: only the system domain makes connections
 %%   select/1             every node name at this machine's host
@@ -157,6 +159,7 @@ owner_up(Kernel, AcceptPid, MyNode, #{port := Port, node := Peer, id := PeerId} 
     Kernel ! {self(), {accept_pending, MyNode, Peer, normal}},
     receive
         {Kernel, {accept_pending, Pending}} when Pending =:= ok; Pending =:= ok_pending -> ok;
+        {Kernel, {accept_pending, up_pending}} -> wait_pending(Kernel, Peer);
         {Kernel, {accept_pending, Refused}} -> ended(Connection, {accept_pending, Refused})
     end,
     DHandle = erlang:setnode(Peer, Port, {?FLAGS, PeerId}),
@@ -166,6 +169,13 @@ owner_up(Kernel, AcceptPid, MyNode, #{port := Port, node := Peer, id := PeerId} 
         {Kernel, inserted, _TickIntensity} -> owner_loop(Kernel, DHandle, Connection);
         {Kernel, bad_request} -> ended(Connection, bad_request)
     end.
+
+%% A domain whose name an ended domain had, while net_kernel still holds the ended one's
+%% connection: its owner waits for that connection's end, as dist_util's wait_pending does,
+%% net_kernel ending its controller if it still lives.
+wait_pending(Kernel, Peer) ->
+    Kernel ! {self(), {wait_pending, Peer}},
+    receive {Kernel, pending} -> ok end.
 
 %% What net_kernel asks of a connection's owner, as dist_util's con_loop answers it. Ticks
 %% are ignored: a silent peer is only silent, and a peer's end arrives from the system

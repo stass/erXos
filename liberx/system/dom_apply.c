@@ -536,6 +536,8 @@ apply_keep(apply_t *apply, erx_dom_created_t *created)
 	created->side = made[ERX_DOM_OBJ_DOM_SIDE];
 	created->peer_side = made[ERX_DOM_OBJ_SYS_SIDE];
 	created->bell = made[ERX_DOM_OBJ_DOM_BELL];
+	created->reader = (uint32_t)plan->reader;
+	created->system_lane = plan->spec.system_lane;
 }
 
 /*

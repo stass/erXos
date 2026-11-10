@@ -6,10 +6,12 @@
 The domain service (docs/design-system.md, "Creating a domain", "Ending a
 domain", "System services"): the domain library's one registrant, which
 creates the manifest's configured domains in boot order at its first start
-and every requested domain after, keeps a domain pid for each, and on each
-{domain_ended, Id, End, Record} disconnects the domain's system connection,
-ends its domain pid with {domain_down, Id, Info}, retires it and restarts a
-configured domain within its restart intensity.
+and every requested domain after, keeps a domain pid for each, has the
+system domain's connection agent (erx_connections) open the system side of
+each domain's system connection before its first thread runs, and on each
+{domain_ended, Id, End, Record} has the agent close that side, disconnects
+the connection, ends its domain pid with {domain_down, Id, Info}, retires it
+and restarts a configured domain within its restart intensity.
 
 Its state, erx_domain_core's, lives in its own heap and nowhere else. The
 service is never restarted: its end, however it comes, ends the system
@@ -37,14 +39,21 @@ reach it only through facets, which arrive with the connections.
 start_link() ->
     start_link(#{}).
 
--doc "Opts may name lib, the domain library's module (erx_domain_lib), for a host test's stand-in.".
+-doc """
+Opts may name lib, the domain library's module (erx_domain_lib), and agent, the
+connection agent's (erx_connections), for a host test's stand-ins.
+""".
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
 init(Opts) ->
     process_flag(trap_exit, true),
     Lib = library(maps:get(lib, Opts, erx_domain_lib)),
-    {ok, #{lib => Lib, core => undefined, configured => #{}}, {continue, boot}}.
+    Agent = maps:get(agent, Opts, erx_connections),
+    %% Whether the runtime is a node, as kernel's start left it, since net_kernel starts
+    %% before any application; its end later leaves the sides it served open (close_side/4).
+    {ok, #{lib => Lib, agent => Agent, node => erlang:is_alive(), core => undefined, configured => #{}},
+     {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none.
 library(Lib) ->
@@ -137,10 +146,11 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
     end.
 
 %% Admits Ident, makes its domain pid, which its boot page names, has the library
-%% make it with Make(Id, Pid) and starts its first thread. A refused plan ends the
-%% pid, unlinked first, so no domain is stopped for it; a domain the library made
-%% whose start is refused is stopped, and its end retires it as any end does.
-build(Ident, Principal, Origin, Make, #{lib := Lib, core := Core} = State) ->
+%% make it with Make(Id, Pid) and starts its first thread once the system side of its
+%% system connection is open. A refused plan ends the pid, unlinked first, so no
+%% domain is stopped for it; a domain the library made whose side or start is refused
+%% is stopped, and its end retires it as any end does.
+build(Ident, Principal, Origin, Make, #{core := Core} = State) ->
     case erx_domain_core:admit(Ident, Principal, Origin, Core) of
         {error, _} = Error ->
             {Error, State};
@@ -148,15 +158,15 @@ build(Ident, Principal, Origin, Make, #{lib := Lib, core := Core} = State) ->
             Ref = make_ref(),
             Pid = erx_domain_pid:start_link(self(), Id, Ref),
             case made(Make, Id, Pid) of
-                {ok, #{connection := Connection}} ->
+                {ok, #{connection := Connection} = Created} ->
                     Built = erx_domain_core:built(Id, Connection, Pid, Ref, Admitted),
-                    case Lib:start(Id) of
+                    Next = State#{core := Built},
+                    case started(Id, Created#{node => Node}, Next) of
                         ok ->
                             {{ok, {erx_domain, Id, Node, Pid}}, State#{core := erx_domain_core:running(Id, Built)}};
-                        {error, Reason} ->
-                            Next = State#{core := Built},
+                        {error, _} = Refused ->
                             stop(Id, Next),
-                            {{error, {start, Reason}}, Next}
+                            {Refused, Next}
                     end;
                 {error, Reason} ->
                     unlink(Pid),
@@ -180,17 +190,42 @@ made(Make, Id, Pid) ->
 refusal(enomem) -> no_memory;
 refusal(Reason) -> Reason.
 
+%% A made domain's system side, opened with the library's values of it and the domain's
+%% node, then its first thread; a domain with no system connection has no side.
+started(Id, Values, #{lib := Lib, agent := Agent}) ->
+    case open_side(Agent, Id, Values) of
+        ok ->
+            case Lib:start(Id) of
+                ok -> ok;
+                {error, Reason} -> {error, {start, Reason}}
+            end;
+        {error, Reason} ->
+            {error, {system_side, Reason}}
+    end.
+
+open_side(_Agent, _Id, #{connection := 0}) ->
+    ok;
+open_side(Agent, Id, Values) ->
+    case Agent:open_side(Id, Values) of
+        {ok, _Port} -> ok;
+        {error, _} = Refused -> Refused
+    end.
+
 stop(Id, #{lib := Lib}) ->
     case Lib:stop(Id, 0) of
         ok -> ok;
         {error, Reason} -> logger:error("erx_domain: the library refused to stop domain ~b: ~0p", [Id, Reason])
     end.
 
+%% A domain's end: its system side's port ends before its connection's objects are
+%% destroyed and before its domain pid ends, so no driver callback touches them once they
+%% are gone (the unmap itself may still trail the port's end: TODO.md).
 ended(Id, End, #{lib := Lib, core := Core} = State) ->
     case erx_domain_core:ended(Id, End, slogan(Lib, Id, End), erlang:system_time(second), Core) of
         none ->
             State;
         {Info, #{pid := Pid, ref := Ref, connection := Connection, origin := Origin}, Ended} ->
+            close_side(Id, Connection, {domain_down, Id, Info}, State),
             disconnect(Lib, Connection),
             Pid ! {Ref, domain_down, Info},
             Retired = case Lib:retire(Id) of
@@ -208,6 +243,19 @@ slogan(Lib, Id, {crash, _}) ->
     end;
 slogan(_Lib, _Id, _End) ->
     none.
+
+%% A domain with no system connection has no side, and a runtime that was no node at the
+%% service's start, where no agent runs, opened none. In a node, the agent's end leaves its
+%% ports to their owners, so the service ends, and the system domain with it, rather than
+%% destroy objects a live port may map.
+close_side(_Id, 0, _Reason, _State) ->
+    ok;
+close_side(Id, _Connection, Reason, #{agent := Agent, node := Node}) ->
+    case {Agent:close_side(Id, Reason), Node} of
+        {ok, _} -> ok;
+        {{error, noproc}, false} -> ok;
+        {{error, noproc}, true} -> error({connection_agent, noproc})
+    end.
 
 disconnect(_Lib, 0) -> ok;
 disconnect(Lib, Connection) -> Lib:disconnect(Connection).

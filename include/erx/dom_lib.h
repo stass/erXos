@@ -108,13 +108,22 @@ typedef struct erx_dom_lib {
 
 #define ERX_DOM_HOST_MAX	64u
 
-/* What erx_dom_create returns: the domain's id and the system domain's values of its connection. */
+/*
+ * What erx_dom_create returns: the domain's id and the system domain's values
+ * of its connection, which its agent opens the system side's port with.
+ */
 typedef struct erx_dom_created {
 	uint32_t	id;
-	uint32_t	connection;	/* its number; 0 for none */
+	uint32_t	connection;	/* its number, which is also the label
+					 * the system domain's bell is bound
+					 * with; 0 for none */
 	uint64_t	side;		/* the domain's side: the system domain reads it */
 	uint64_t	peer_side;	/* the system domain's side: it writes it */
 	uint64_t	bell;		/* the domain's bell: the system domain triggers it */
+	uint32_t	reader;		/* data area of peer_side's lane, the
+					 * one the domain reads */
+	uint32_t	system_lane;	/* data area of side's lane, the one
+					 * the system domain reads */
 } erx_dom_created_t;
 
 /* An end the fault thread reports as {domain_ended, Id, End, Record}. */

@@ -3490,8 +3490,9 @@ own domain, so a runtime that lies harms only itself.
 * **The system node and closing.** Before the domain service starts, the
   system domain's `node()` is `system@<host>` and
   `erlang:system_info(creation)` is 4; seeded failure: a system release
-  with `-kernel start_distribution false`, under which the lane driver
-  refuses to open the first system side and the first creation fails. A
+  with `-kernel start_distribution false`, under which the system domain
+  is no node, so no agent runs to open the first system side and the
+  first creation fails. A
   domain halts with `erlang:halt(3)` in the middle of a burst to a peer
   whose process holds a link to and a monitor on one of its processes and
   a pending `spawn_request` into it: the peer gets the whole burst, then

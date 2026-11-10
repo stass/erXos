@@ -88,7 +88,7 @@ machine
   sealing none
   system_runtime_limits @runtime_limits.system
   native_limits @limits.native
-  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos"
+  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos"
 unit console
   placement "console-uart"
   holder system

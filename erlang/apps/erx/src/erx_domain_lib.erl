@@ -72,9 +72,16 @@ it makes anything.
                   lane := non_neg_integer(), args := binary(), env := binary(),
                   connections => non_neg_integer(), flags => non_neg_integer(),
                   spaces => grant(), limits => limits()}.
--doc "A created domain: its id and the system domain's values of its connection.".
+-doc """
+A created domain: its id and the system domain's values of its connection. connection is
+its number, 0 for none, and also the label the system domain's bell is bound with; side,
+the domain's side, and bell, the domain's bell, are slots of the system domain's table;
+peer_side is the system domain's side; reader and system_lane are the data areas of the
+lanes the domain and the system domain read.
+""".
 -type created() :: #{id := pos_integer(), connection := non_neg_integer(), side := non_neg_integer(),
-                     peer_side := non_neg_integer(), bell := non_neg_integer()}.
+                     peer_side := non_neg_integer(), bell := non_neg_integer(),
+                     reader := non_neg_integer(), system_lane := non_neg_integer()}.
 
 -doc """
 A configured domain of the system manifest: its row in the manifest's domain

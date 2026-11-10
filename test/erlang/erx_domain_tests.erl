@@ -164,15 +164,17 @@ service_end_shuts_down(End) ->
     is_process_alive(Sup) andalso exit(Sup, kill),
     ?assertEqual({shutdown, undefined}, {Why, Restarted}).
 
-%% The service over the stand-in: configured domains in boot order, a create,
-%% a stop, a kill, {domain_down, Id, Info} at the domain pid's monitors, and a
-%% configured domain's restarts within its intensity; last, the service's own
-%% end, which ends every domain pid.
+%% The service over the stand-ins: configured domains in boot order, each with
+%% its system side opened before its first thread, a create, a stop, a kill,
+%% {domain_down, Id, Info} at the domain pid's monitors, the side closed before
+%% the connection's objects go, a configured domain's restarts within its
+%% intensity and a side the agent refuses; last, the service's own end, which
+%% ends every domain pid.
 service_test_() ->
     {setup,
      fun() ->
              Log = erx_domain_fake_lib:start_log(),
-             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib}),
+             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib}),
              unlink(Service),
              {Log, Service}
      end,
@@ -181,7 +183,7 @@ service_test_() ->
              exit(Log, kill)
      end,
      fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0,
-                          fun service_end_ends_domain_pids/0]} end}.
+                          fun refused_side/0, fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
     erx_domain_fake_lib:next_call().
@@ -189,8 +191,10 @@ next_call() ->
 boot_order() ->
     %% Row 1 (a) is first in the boot order, so it takes id 5.
     ?assertEqual({configured, 5, 1}, next_call()),
+    ?assertEqual({open_side, 5, 'a@erxos', 50}, next_call()),
     ?assertEqual({start, 5}, next_call()),
     ?assertEqual({configured, 6, 0}, next_call()),
+    ?assertEqual({open_side, 6, 'b@erxos', 60}, next_call()),
     ?assertEqual({start, 6}, next_call()).
 
 create_stop_kill() ->
@@ -213,12 +217,14 @@ create_stop_kill() ->
     %% The pid the library was given, which the boot page names, is the domain pid.
     {create, #{id := 8, name := <<"web">>, principal := 1, memory := 4096, domain_pid := DomainPid}} = next_call(),
     ?assertEqual(erx_domain:pid(Domain), DomainPid),
+    ?assertEqual({open_side, 8, 'web@erxos', 80}, next_call()),
     ?assertEqual({start, 8}, next_call()),
     Ref = monitor(process, erx_domain:pid(Domain)),
     %% A normal exit signal is ignored, as by a process that does not trap exits.
     ok = erx_domain:stop(Domain, normal),
     ok = erx_domain:stop(Domain, shutdown),
     ?assertEqual({stop, 8}, next_call()),
+    ?assertEqual({close_side, 8, {domain_down, 8, stopped}}, next_call()),
     ?assertEqual({disconnect, 80}, next_call()),
     ?assertEqual({retire, 8}, next_call()),
     Down = receive {'DOWN', Ref, process, _, Reason} -> Reason after 5000 -> timeout end,
@@ -226,11 +232,12 @@ create_stop_kill() ->
     %% The name is free again at the domain's end; kill ends the pid at once.
     {ok, Again} = erx_domain:create(Spec),
     ?assertEqual(9, erx_domain:id(Again)),
-    _ = [next_call(), next_call()],
+    _ = [next_call(), next_call(), next_call()],
     Ref2 = monitor(process, erx_domain:pid(Again)),
     ok = erx_domain:stop(Again, kill),
     ?assertEqual(killed, receive {'DOWN', Ref2, process, _, R2} -> R2 after 5000 -> timeout end),
     ?assertEqual({stop, 9}, next_call()),
+    ?assertEqual({close_side, 9, {domain_down, 9, stopped}}, next_call()),
     ?assertEqual({disconnect, 90}, next_call()),
     ?assertEqual({retire, 9}, next_call()).
 
@@ -238,30 +245,46 @@ configured_restart() ->
     %% Row 0 (b, id 6) may restart once a minute: its first end restarts it
     %% under the next id, keeping its name.
     erx_domain_srv ! {domain_ended, 6, {halt, 1}, #{}},
+    ?assertMatch({close_side, 6, {domain_down, 6, _}}, next_call()),
     ?assertEqual({disconnect, 60}, next_call()),
     ?assertEqual({retire, 6}, next_call()),
     ?assertEqual({configured, 10, 0}, next_call()),
+    ?assertEqual({open_side, 10, 'b@erxos', 100}, next_call()),
     ?assertEqual({start, 10}, next_call()),
     %% Its second end within the minute is final: the next call the library
     %% sees is a request's create, which takes the next id.
     erx_domain_srv ! {domain_ended, 10, {halt, 1}, #{}},
+    ?assertMatch({close_side, 10, {domain_down, 10, _}}, next_call()),
     ?assertEqual({disconnect, 100}, next_call()),
     ?assertEqual({retire, 10}, next_call()),
     {ok, _} = erx_domain:create(#{name => <<"after">>, memory => 4096}),
-    ?assertMatch({create, #{id := 11}}, next_call()).
+    ?assertMatch({create, #{id := 11}}, next_call()),
+    ?assertEqual({open_side, 11, 'after@erxos', 110}, next_call()),
+    ?assertEqual({start, 11}, next_call()).
+
+refused_side() ->
+    %% A side the agent refuses fails the create, and the domain the library
+    %% made is stopped without its first thread, its end retiring it as any does.
+    ?assertEqual({error, {system_side, enomem}}, erx_domain:create(#{name => <<"noside">>, memory => 4096})),
+    ?assertMatch({create, #{id := 12}}, next_call()),
+    ?assertEqual({open_side, 12, 'noside@erxos', 120}, next_call()),
+    ?assertEqual({stop, 12}, next_call()),
+    ?assertEqual({close_side, 12, {domain_down, 12, stopped}}, next_call()),
+    ?assertEqual({disconnect, 120}, next_call()),
+    ?assertEqual({retire, 12}, next_call()).
 
 service_end_ends_domain_pids() ->
     %% The service's end ends every domain pid with its reason: no domain
     %% outlives the system domain, so the pid has nothing left to stop.
-    ?assertEqual({start, 11}, next_call()),
     {ok, Domain} = erx_domain:create(#{name => <<"last">>, memory => 4096}),
-    ?assertMatch({create, #{id := 12}}, next_call()),
-    ?assertEqual({start, 12}, next_call()),
+    ?assertMatch({create, #{id := 13}}, next_call()),
+    ?assertEqual({open_side, 13, 'last@erxos', 130}, next_call()),
+    ?assertEqual({start, 13}, next_call()),
     Pid = erx_domain:pid(Domain),
     Ref = monitor(process, Pid),
     %% An exit message forged in the service's name while it lives ends nothing.
     Service = whereis(erx_domain_srv),
-    Pid ! {'EXIT', Service, {domain_down, 12, {halt, 0}}},
+    Pid ! {'EXIT', Service, {domain_down, 13, {halt, 0}}},
     ?assertEqual(timeout, receive {'DOWN', Ref, process, _, Forged} -> Forged after 200 -> timeout end),
     exit(Service, kill),
     ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).

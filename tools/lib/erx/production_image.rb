@@ -400,10 +400,11 @@ module Erx
       # with Eshell V and whose prompt, `1> `, ends no line.
       ERL_LINE = "erl\r"
       ERLANG_SHELL = { name: 'erlang-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze
-      # kernel_sup's children at a boot with no carrier, in which_children's order: the last
+      # kernel_sup's children in the system release, a node over the erx carrier (net_sup
+      # holds net_kernel and the connection agent), in which_children's order: the last
       # started first (docs/design-runtime.md, Configuration).
       KERNEL_CHILDREN = %w[kernel_safe_sup kernel_refc kernel_config logger_sup user erl_signal_server
-                           global_group global_name_server rex inet_db erx_watchdog on_load
+                           global_group net_sup global_name_server rex inet_db erx_watchdog on_load
                            file_server_2 standard_error code_server].freeze
       # From the banner to -eval's first output, which loads the evaluator: long under TCG.
       EVAL_SECONDS = 120
@@ -463,9 +464,9 @@ module Erx
       # its answer starts: one record, or a listing's status and records. The Erlang shell
       # writes each answer whole on one line with ~w (docs/design-stopgap.md, "Reporting
       # kernel objects"); the line typed for it starts io:format, so only the answer matches.
-      KERNEL_RECORD_ANSWERS = { 'machine' => /\A(?:[0-9]+> )?#\{/n, 'cpus' => /\A(?:[0-9]+> )?\{(?:ok|partial),\[/n,
-                                'group' => /\A(?:[0-9]+> )?#\{/n, 'budget' => /\A(?:[0-9]+> )?#\{/n,
-                                'threads' => /\A(?:[0-9]+> )?\{(?:ok|partial),\[/n }.freeze
+      KERNEL_RECORD_ANSWERS = { 'machine' => /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#\{/n, 'cpus' => /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{(?:ok|partial),\[/n,
+                                'group' => /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#\{/n, 'budget' => /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#\{/n,
+                                'threads' => /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{(?:ok|partial),\[/n }.freeze
       # The five records again, each without its {kernel,unsupported} attributes, so what is
       # left is what the stopgap reports: for a listing its status, its length and the
       # attributes any of its records reports.
@@ -598,7 +599,7 @@ module Erx
         end
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
          RELEASE_SHELL.merge(type: ERL_LINE).freeze, ERLANG_SHELL.merge(type: typed.first).freeze, *answers,
-         { name: 'kernel-record-summary', pattern: /\A(?:[0-9]+> )?\{object_info,/n, seconds: EVAL_SECONDS,
+         { name: 'kernel-record-summary', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{object_info,/n, seconds: EVAL_SECONDS,
            verify: whole_line(kernel_record_line(cpus: cpus), speaker: 'the kernel records read') }.freeze].freeze
       end
 
@@ -617,7 +618,7 @@ module Erx
         budget = text.call('[{used,{{stopgap,liberx_pool},{partial,') + positive + text.call('}}}]')
         threads = text.call('{ok,') + positive + text.call(',[]}')
         summary = text.call('{object_info,') + [machine, cpu_listing, group, budget, threads].join(',') + text.call('}')
-        /\A(?:[0-9]+> )?#{summary}\r*\n\z/n
+        /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{summary}\r*\n\z/n
       end
       private_class_method :kernel_record_line
 
@@ -650,18 +651,18 @@ module Erx
          console_point('long-answer', /\Aok\r*\n\z/n, type: LOG_AFTER_HANDOFF),
          # A record logged once the driver owns the UART: the console reads it and writes it
          # escaped, tab and escape byte as text, never as the bytes themselves.
-         console_point('log-after-handoff', /\A(?:[0-9]+> )?#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n,
+         console_point('log-after-handoff', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n,
                        type: PROCESSES_EXPRESSION),
          # The echo of the line reads {processes,length, so only the answer matches.
-         console_point('processes', /\A(?:[0-9]+> )?\{processes,[0-9]/n,
-                       whole: /\A(?:[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n, type: LOAD_ONLY_EXPRESSION),
+         console_point('processes', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{processes,[0-9]/n,
+                       whole: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n, type: LOAD_ONLY_EXPRESSION),
          # The echo of the line starts {ok,M,B}=, so only the answer matches.
-         console_point('load-only', /\A(?:[0-9]+> )?\{load_only,/n,
-                       whole: /\A(?:[0-9]+> )?\{load_only,\[false,false\],\[true,true\],compiled,ok,ok\}\r*\n\z/n,
+         console_point('load-only', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{load_only,/n,
+                       whole: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{load_only,\[false,false\],\[true,true\],compiled,ok,ok\}\r*\n\z/n,
                        type: RC_EXPRESSION),
          # The echo of the line holds `echo rc:`, so only the output starts with rc:.
-         console_point('rc-output', /\A(?:[0-9]+> )?rc: /n, whole: /\A(?:[0-9]+> )?rc: 2 hello world f \|\r*\n\z/n),
-         console_point('rc-ending', /\A(?:[0-9]+> )?\{ok,<<>>\}\r*\n\z/n, type: "erx:i().\r"),
+         console_point('rc-output', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?rc: /n, whole: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?rc: 2 hello world f \|\r*\n\z/n),
+         console_point('rc-ending', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{ok,<<>>\}\r*\n\z/n, type: "erx:i().\r"),
          # The echo of the line holds erx:i(), so only the machine record's title matches.
          console_point('inspect-machine', %r{\A/  machine\r*\n\z}n),
          console_point('inspect-memory', /\A  memory_total +root pool +\[partial\]\r*\n\z/n),
@@ -673,7 +674,7 @@ module Erx
          # ls -1 /proc, sorted, then the console process's status, the machine's and the system
          # domain's budget's, each attribute a line of name, value and reporter. The console's
          # terminal-less rendering writes each tab of the file as CHT, ESC [ I.
-         console_point('proc-ls-domains', /\A(?:[0-9]+> )?domains\r*\n\z/n),
+         console_point('proc-ls-domains', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?domains\r*\n\z/n),
          console_point('proc-ls-processes', /\Aprocesses\r*\n\z/n),
          console_point('proc-ls-status', /\Astatus\r*\n\z/n),
          console_point('proc-process-domain', /\Adomain#{TAB}4#{TAB}service\r*\n\z/n),
@@ -683,14 +684,14 @@ module Erx
          console_point('proc-budget-used', /\Aused#{TAB}\[partial\]#{TAB}root pool\r*\n\z/n),
          console_point('proc-ending', /\A\{ok,<<>>\}\r*\n\z/n, type: PROC_READ_EXPRESSION),
          # The echo of the line holds {proc_read, so only the answer matches.
-         console_point('proc-read', /\A(?:[0-9]+> )?\{proc_read,/n,
-                       whole: /\A(?:[0-9]+> )?\{proc_read,true,true,true\}\r*\n\z/n, type: TOP_EXPRESSION),
+         console_point('proc-read', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{proc_read,/n,
+                       whole: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{proc_read,true,true,true\}\r*\n\z/n, type: TOP_EXPRESSION),
          # top's header through the inspector with the session's facet: the run queue and the
          # uptime ok; the pool's memory and the root's used partial, each line's numbers all
          # the pool's, so its label names the pool; the rest of the budget unsupported, so `-`.
          # The echo holds top -b, so only the header matches.
-         console_point('top-first', /\A(?:[0-9]+> )?run queue: [0-9]+;  up /n,
-                       whole: /\A(?:[0-9]+> )?run queue: [0-9]+;  up 0\+00:[0-5][0-9]:[0-5][0-9]    [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\r*\n\z/n),
+         console_point('top-first', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?run queue: [0-9]+;  up /n,
+                       whole: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?run queue: [0-9]+;  up 0\+00:[0-5][0-9]:[0-5][0-9]    [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\r*\n\z/n),
          console_point('top-states', /\A[1-9][0-9]* processes: /n),
          console_point('top-memory', /\AMem \(root pool\): [1-9][0-9]{0,3}[KMG] Total, [0-9]{1,4}[KMG] Free\r*\n\z/n),
          console_point('top-budget',
@@ -732,7 +733,7 @@ module Erx
          console_point('trace-workload-in', / erts in /n,
                        whole: %r{#{TRACE_TIME} erts in pid=<0\.[0-9]+\.0> domain=4 mfa=[^ ]+ \[runtime\]\r*\n\z}n,
                        type: TRACE_STOP),
-         console_point('trace-stopped', /\A(?:[^\n]*\e\[J)?(?:[0-9]+> )?trace_stopped\r*\n\z/n)].freeze
+         console_point('trace-stopped', /\A(?:[^\n]*\e\[J)?(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?trace_stopped\r*\n\z/n)].freeze
       end
 
       # What the tracer's case got wrong on its serial log, beyond the checkpoints: the

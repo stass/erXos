@@ -2365,6 +2365,25 @@ it; git history is the record of completed work.
 * [Low] Runtime, `net_adm:ping/1` (edit 28) decides by `erx_dist:select/1` whether
   the carrier is in use; a node of this kernel under another `-proto_dist` answers
   `pang` for an unconnected node at its own host without trying.
+* [Medium] Runtime and domain service, `erx_connections.erl` (`close/2`),
+  `erx_domain_srv.erl` (`ended/3`): the agent answers `close_side` on the port monitor's
+  `DOWN`, which ERTS fires (`erts_deliver_port_exit`, `io.c`) before `terminate_port` calls
+  the lane driver's stop, so when the exit ran on another scheduler the domain service's
+  `Lib:disconnect` can destroy the connection's objects before `lane_stop` has released the
+  system domain's mappings of them. No driver callback runs in that window. Whether the
+  Fiasco backend's destroy also removes the system domain's mapping was not checked; if it
+  does not, the pages can be reused while still mapped. Make the unmap the signal: the
+  finish (control command 2) or a synchronous close unmaps both sides before it answers.
+* [Low] Runtime, `erx_event_table.h`: the system domain binds one connection sink per
+  live domain, at most `ERX_EVENT_CONNECTIONS` (64), and nothing ties the manifest's
+  `max_domains` to it, so creates past it, or earlier while slots stay unsettled, fail
+  with `{system_side, _}`. Bound `max_domains` in the manifest reader, or size the sinks
+  from the manifest.
+* [Low] Domain library, `liberx/system/dom_core.c` (connection numbers): `next_connection`
+  runs to `UINT32_MAX`, but the system domain's bell takes the number as its label, and
+  labels at or above `ERX_LABEL_SPLIT` belong to the runtime's half of the event table, so
+  the lane driver refuses such an open once the objects are built. Refuse the number in the
+  plan with `ERX_ELIMIT`, as a link's label is (`dom_life.c`).
 * [Low] Runtime, `erx_connections.erl`: if the acceptor ends before it hands the system
   connection over, net_kernel restarts it and the port is opened again mid-stream;
   design-runtime.md ("Connections in ERTS") has the end of the agent, at any time, halt its

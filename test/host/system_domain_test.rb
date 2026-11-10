@@ -11,24 +11,30 @@ class SystemDomainTest < Minitest::Test
   Suite = Erx::SystemDomain
   PLAIN = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
 
-  # The row is MediumBoot's with the halt dropped, so the configured domain stays up,
-  # and the manifest differs from MediumBoot's only in that row.
-  def test_the_configured_domain_stays_up_and_is_the_manifests_one_change
+  # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
+  # and over the erx carrier in place of none, so each is a node; the manifest differs
+  # from MediumBoot's only in that row's arguments and in the second row, peer.
+  def test_the_configured_domains_stay_up_as_nodes_and_are_the_manifests_one_change
     row_args = Suite::DOMAIN_ROW[/^  args "(.*)"$/, 1].split
-    assert_equal Erx::MediumBoot::DOMAIN_ARGS[0...-2], row_args
+    medium_args = Erx::MediumBoot::DOMAIN_ARGS[0...-2]
+    assert_equal medium_args.join(' ').sub('-kernel start_distribution false', '-no_epmd -proto_dist erx'), row_args.join(' ')
     refute_includes row_args, '-eval'
+    refute_includes row_args, 'start_distribution'
     assert_match(/^  restarts 0$/, Suite::DOMAIN_ROW)
+    assert_equal Suite::DOMAIN_ROW[/^domain erts\n.*/m].sub("domain erts\n", "domain peer\n"), Suite::PEER_ROW
     medium = Erx::MediumBoot.manifest(PLAIN)
     ours = Suite.manifest(PLAIN)
-    assert ours.end_with?(Suite::DOMAIN_ROW)
-    assert_equal medium.lines[0...-1], ours.lines[0...-1]
+    assert ours.end_with?(Suite::DOMAIN_ROW + Suite::PEER_ROW)
+    kept = medium.lines.size - 1
+    assert_equal medium.lines[0...-1], ours.lines[0...kept]
     assert_match(/^  args ".* -eval /, medium.lines.last)
-    assert_equal "  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", ours.lines.last
+    assert_equal ["  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", *Suite::PEER_ROW.lines], ours.lines[kept..]
   end
 
-  # The kill follows the Erlang shell; the answer must name the configured domain
-  # running, and the runtime must end with the slogan of erx_domain's end, not another.
-  def test_the_kill_waits_for_the_running_domain_and_must_see_the_applications_end
+  # The kill follows the Erlang shell; the answer must name both configured domains
+  # running, the system node, and each domain's own answers over its system connection,
+  # and the runtime must end with the slogan of erx_domain's end, not another.
+  def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
     assert_equal %w[image-identity release-shell erlang-shell domain-running system-domain-ended], points.map { |point| point.fetch(:name) }
@@ -36,9 +42,13 @@ class SystemDomainTest < Minitest::Test
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
     running, ended = points.last(2)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
-    running.fetch(:verify).call("1> {service_kill,#{Suite::CONFIGURED_ID},running}\r\n")
-    ["timeout\r\n", "{service_kill,#{Suite::CONFIGURED_ID + 1},running}\r\n"].each do |line|
-      assert_raises(Erx::Error) { running.fetch(:verify).call(line) }
+    good = '{service_kill,[{5,erts@erxos,running},{6,peer@erxos,running}],system@erxos,4,' \
+           '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}]}'
+    running.fetch(:verify).call("1> #{good}\r\n")
+    ['timeout', good.sub('system@erxos,4', 'nonode@nohost,0'), good.sub('[erts@erxos,peer@erxos]', '[erts@erxos]'),
+     good.sub('{6,peer@erxos,6}', '{6,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
+     good.sub('{6,peer@erxos,running}', '{6,peer@erxos,built}')].each do |line|
+      assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
     end
     # The line as a boot printed it, after the shell's prompt.
     ended.fetch(:verify).call("2> Kernel pid terminated (application_controller) (\"{application_terminated,erx_domain,shutdown}\")\r\r\n")
