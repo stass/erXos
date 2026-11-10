@@ -22,6 +22,10 @@ require_relative '../../tools/lib/erx/release'
 class RuntimeReleaseTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   OUTPUT = Erx::Runtime.output(root: ROOT)
+  # The erXos files that live in OTP's applications: the carrier between domains and the
+  # log sink's handler, which OTP's kernel is edited to hold (`otp/lib/kernel/src/kernel.app.src`
+  # and its Makefile list them). No other OTP application holds an erx_ file.
+  OTP_HELD_ERX_FILES = %w[kernel/erx_connections.beam kernel/erx_dist.beam kernel/erx_log_h.beam].freeze
 
   class << self
     attr_accessor :second
@@ -51,12 +55,13 @@ class RuntimeReleaseTest < Minitest::Test
       assert(paths.any? { |path| path.match?(%r{\Asystem/lib/#{application}-[0-9.]+/#{Regexp.escape(rest)}\z}) }, file)
     end
     shipped = paths.filter_map { |path| path[%r{\Asystem/lib/([a-z_]+)-[^/]+/}, 1] }.uniq
-    assert_equal %w[compiler erx erx_blk erx_code erx_files erx_hostlink erx_shell erx_uart kernel runtime_tools stdlib], shipped.sort,
+    assert_equal %w[compiler erx erx_blk erx_code erx_domain erx_files erx_hostlink erx_net erx_net_client erx_session
+                    erx_shell erx_uart kernel runtime_tools stdlib], shipped.sort,
                  'the release holds its applications and no more'
   end
 
   # Each of erXos's applications holds the modules of its sources and no other, and
-  # OTP's applications hold none of erXos's.
+  # OTP's applications hold none of erXos's but the files named above.
   def test_erxos_modules_are_in_their_own_applications
     paths = @table.map(&:first)
     Erx::ErlangApps::APPLICATIONS.each do |application|
@@ -64,7 +69,11 @@ class RuntimeReleaseTest < Minitest::Test
       beams = paths.filter_map { |path| path[%r{\Asystem/lib/#{application}-[^/]+/ebin/([^/]+\.beam)\z}, 1] }
       assert_equal sources.map { |source| "#{File.basename(source, '.erl')}.beam" }.sort, beams.sort, application
     end
-    assert_empty paths.grep(%r{\Asystem/lib/(?:kernel|stdlib)-[^/]+/ebin/erx_}), 'OTP applications hold no erx_ module'
+    otp_held = paths.filter_map do |path|
+      application, file = path.match(%r{\Asystem/lib/([a-z_]+)-[^/]+/ebin/(erx_[^/]+)\z})&.captures
+      "#{application}/#{file}" if application && !Erx::ErlangApps::APPLICATIONS.include?(application)
+    end
+    assert_equal OTP_HELD_ERX_FILES, otp_held.sort, "OTP's applications hold the erx_ files they are edited to hold and no others"
   end
 
   # otp/ tracks no beam the release could hold (runtime_build_test), so every beam is
