@@ -86,7 +86,9 @@ driver_test_() ->
                  fun process_end_counts_a_frame_that_is_not_a_binary/0,
                  fun process_end_ends_the_driver_after_its_hold/0,
                  fun linked_exit_ends_the_driver_after_its_hold/0,
-                 fun udp_end_bounds_the_driver_queue_against_a_stranger/0]).
+                 %% A thousand loopback sends outlast eunit's 5 s default on a loaded
+                 %% host, and a timeout would hide the bound's own failure.
+                 {timeout, 60, fun udp_end_bounds_the_driver_queue_against_a_stranger/0}]).
 
 refused_batch_is_dropped_whole() ->
     Driver = stub(0, 4),
