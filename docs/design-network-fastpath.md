@@ -70,7 +70,7 @@ Decisions every reader needs:
 
 ### What was measured
 
-On the FreeBSD test host, p620, on 2026-11-09: FreeBSD 16.0-CURRENT
+On the FreeBSD x86-64 test host, on 2026-11-09: FreeBSD 16.0-CURRENT
 (GENERIC-NODEBUG), AMD Ryzen Threadripper PRO 5995WX with 128 hardware
 threads, native. Stock OTP 29.1.1 (erts 17.1, FreeBSD's port, with the
 JIT) at default flags, so 128 schedulers. `erx_net` at f3c91786 with the
@@ -79,9 +79,9 @@ through the pipe transport's tap helper, then `bridge0` and an `epair`
 into a jail running FreeBSD's own stack. Each transfer moved 512 MiB in
 64 KiB sends, received with passive `recv(S, 0)`; figures are the median
 of three. The raw data, scripts and profiles are in the history
-repository at `~/erxos-history/net-perf-p620-2026-11-09/` (commit
-`c4f9bf5`). lwIP's measurements are at
-`~/erxos-history/net-bench-p620-lwip-2026-11-09/` (commit `8b22014`):
+repository at `~/erxos-history/net-perf-freebsd-2026-11-09/` (commit
+`d5bcd46`). lwIP's measurements are at
+`~/erxos-history/net-bench-freebsd-lwip-2026-11-09/` (commit `d5bcd46`):
 lwIP 2.2.1 with contrib 2.1.0's `tapif`, one thread, the raw API, `-O2`,
 a 64 KiB window, over the same tap.
 
@@ -133,7 +133,7 @@ What the profiles and the experiments established:
 ### The two targets
 
 1. **Bulk.** One connection's send and its receive, each at least two
-   thirds of lwIP's over the same medium: 4.4 Gbit/s each way over p620's
+   thirds of lwIP's over the same medium: 4.4 Gbit/s each way over the FreeBSD test host's
    tap. At lwIP's rate a segment has about 1.8 us of wall time, which
    every serial stage of the stack must meet once its cost is divided by
    the segments it handles at once.
@@ -935,7 +935,7 @@ Copies of a payload byte after this design, by path and medium:
 | send | netmap, a host | the cut, into the slot | 1 |
 | receive | netmap, a host | the NIF's copy, into a binary; the join, as on erXos | 1 to 2 |
 
-The per-segment stack over p620's tap copies a byte four times sending
+The per-segment stack over the FreeBSD test host's tap copies a byte four times sending
 and five times receiving. On erXos the counts change little: what the
 design removes there is per-segment work and the virtio transport's
 frame join, and `recv`'s join of the receive queue moves from the
@@ -1260,14 +1260,14 @@ run, segments per merged unit and frames dropped. A bulk measurement
 whose counters show no runs sent or no units merged fails, so the number
 is known to come from the path under test.
 
-* **Bulk on p620.** 512 MiB each way in 64 KiB sends, passive
+* **Bulk on the FreeBSD test host.** 512 MiB each way in 64 KiB sends, passive
   `recv(S, 0)`, the median of three, over the tap transport and over a
   VALE port of netmap; throughput, CPU seconds per GiB from the BEAM's
   `rusage`, and context switches. Baseline: lwIP 2.2.1 over the same tap
-  (`~/erxos-history/net-bench-p620-lwip-2026-11-09/`) and over VALE (the
+  (`~/erxos-history/net-bench-freebsd-lwip-2026-11-09/`) and over VALE (the
   netmap transport's pinned lwIP). *Target:* at least two thirds of
   lwIP's throughput each way over the same medium, 4.4 Gbit/s over tap.
-* **Request-reply on p620.** One connection, requests and replies of 64
+* **Request-reply on the FreeBSD test host.** One connection, requests and replies of 64
   bytes and of 1 KiB, an echo server in the jail, 10 s; transactions a
   second, median and 99th-percentile latency, CPU per transaction; and
   16 connections at once. Baseline: lwIP's bench program, given a
@@ -1278,12 +1278,12 @@ is known to come from the path under test.
   An erXos guest and the Linux oracle guest on the path plan.md's gate
   GN-QEMU measures, with the same workloads. Baseline: the Linux oracle
   guest at both ends of the same path, which shows what the medium
-  allows; lwIP is the baseline on p620 only, where it runs on the same
+  allows; lwIP is the baseline on the FreeBSD test host only, where it runs on the same
   medium. TCG numbers are not compared with these.
 
 ### What each part is judged by
 
-Each part lands with the bulk and request-reply numbers on p620 before
+Each part lands with the bulk and request-reply numbers on the FreeBSD test host before
 and after it, and with the HVF numbers when it changes erXos's code. The
 order of the parts and the gain each is expected to give are kept in
 `TODO.md`.
@@ -1308,12 +1308,12 @@ The owner settled these.
    values Erlang chose per frame inside the copy's per-byte pass, and the
    merge reads per-frame headers and groups frames by a fixed rule; what
    to send and what a segment means stay in Erlang. It is taken before
-   gate GK3, on the p620 evidence: the bottleneck there is the number of
+   gate GK3, on the FreeBSD evidence: the bottleneck there is the number of
    per-segment Erlang steps in one process, which does not depend on the
    kernel below. GK3 still decides whether any TCP decision needs native
    code.
 2. **A tap NIF replaces the tap helper and the pipe's `port` end.**
-   Sending, the helper took 11.9 percent of all CPU samples on p620,
+   Sending, the helper took 11.9 percent of all CPU samples on the FreeBSD test host,
    against 62.7 for the BEAM, and a frame cost three system calls and
    four copies through it, where the lwIP baseline runs over the same tap
    with one copy in user space and one in the kernel. The spawn driver's
@@ -1394,9 +1394,9 @@ The owner settled these.
 * RFC 3465 (appropriate byte counting), RFC 5681 section 4.2 (ACK
   generation), RFC 6864 (the identification of atomic datagrams), RFC
   7323 (timestamps and PAWS).
-* The measurements: `~/erxos-history/net-perf-p620-2026-11-09/` (commit
-  `c4f9bf5`) and `~/erxos-history/net-bench-p620-lwip-2026-11-09/`
-  (commit `8b22014`).
+* The measurements: `~/erxos-history/net-perf-freebsd-2026-11-09/` (commit
+  `d5bcd46`) and `~/erxos-history/net-bench-freebsd-lwip-2026-11-09/`
+  (commit `d5bcd46`).
 * [design-network-stack.md](design-network-stack.md): the stack, its
   checksum, netmap and socket-process designs;
   [design-runtime.md](design-runtime.md#the-device-nif): the device NIF;

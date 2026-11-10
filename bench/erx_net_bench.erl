@@ -13,7 +13,7 @@ already running, so `run/1` measures it as it is. Every run ends in one line,
 
     RESULT key=value key=value ...
 
-whose keys `tools/erx bench net-p620` reads, followed by one
+whose keys `tools/erx bench net-freebsd` reads, followed by one
 `COUNTER name=value` line for each counter the interface keeps. The lwIP
 client (`bench/lwip/lwip_bench.c`) prints the same RESULT lines.
 """.

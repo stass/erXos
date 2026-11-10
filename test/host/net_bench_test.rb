@@ -5,10 +5,10 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/net_bench_p620'
+require_relative '../../tools/lib/erx/net_bench_freebsd'
 
 # What the network benchmarks read from a client's output and print (tools/lib/erx/net_bench.rb),
-# and the one place a remote command string is built (Erx::NetBenchP620::Remote). Nothing connects
+# and the one place a remote command string is built (Erx::NetBenchFreebsd::Remote). Nothing connects
 # to a host here.
 class NetBenchTest < Minitest::Test
   NB = Erx::NetBench
@@ -95,20 +95,21 @@ class NetBenchTest < Minitest::Test
   end
 
   def test_a_remote_command_is_one_quoted_string_and_refuses_what_tcsh_would_expand
-    remote = Erx::NetBenchP620::Remote.new(host: 'p620.example')
+    remote = Erx::NetBenchFreebsd::Remote.new(host: 'freebsd.example')
     # The login shell strips one level of quotes; sh then reads the words back as given.
     text, = Open3.capture2e('sh', '-c', remote.command_string(['echo', 'a  b', "it's"]))
     assert_equal "a  b it's\n", text
-    assert_raises(Erx::NetBenchP620::RemoteError) { remote.command_string(['echo', '!!']) }
-    assert_raises(Erx::NetBenchP620::RemoteError) { remote.command_string(['echo', "a\nb"]) }
-    assert_raises(ArgumentError) { Erx::NetBenchP620::Remote.new(host: '-oProxyCommand=x') }
+    assert_raises(Erx::NetBenchFreebsd::RemoteError) { remote.command_string(['echo', '!!']) }
+    assert_raises(Erx::NetBenchFreebsd::RemoteError) { remote.command_string(['echo', "a\nb"]) }
+    assert_raises(ArgumentError) { Erx::NetBenchFreebsd::Remote.new(host: '-oProxyCommand=x') }
+    assert_raises(ArgumentError) { Erx::NetBenchFreebsd::Remote.new(host: nil) }
   end
 
   # The lock's commands, run here through the same command string as on the host (BSD stat on
   # both), and the decisions read from their answers.
   def test_the_lock_is_taken_once_named_in_a_refusal_released_only_by_its_holder_and_stale_past_its_deadline
-    lock = Erx::NetBenchP620::Lock
-    remote = Erx::NetBenchP620::Remote.new(host: 'p620.example')
+    lock = Erx::NetBenchFreebsd::Lock
+    remote = Erx::NetBenchFreebsd::Remote.new(host: 'freebsd.example')
     run = ->(argv) { Open3.capture2e('sh', '-c', remote.command_string(argv)).first }
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'erx-net-bench.lock')
@@ -127,6 +128,6 @@ class NetBenchTest < Minitest::Test
     assert_equal :held, lock.decide("held age=600 deadline=600\n", fallback_deadline: 1).state
     # A holder that died before writing its line is judged by the run's own deadline.
     assert_equal :stale, lock.decide("held age=31 \n", fallback_deadline: 30).state
-    assert_raises(Erx::NetBenchP620::RemoteError) { lock.decide("sh: mkdir: not found\n", fallback_deadline: 30) }
+    assert_raises(Erx::NetBenchFreebsd::RemoteError) { lock.decide("sh: mkdir: not found\n", fallback_deadline: 30) }
   end
 end

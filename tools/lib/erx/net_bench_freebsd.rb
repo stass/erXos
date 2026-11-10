@@ -16,18 +16,18 @@ require_relative 'line_escape'
 require_relative 'net_bench'
 
 module Erx
-  # The network benchmarks on the FreeBSD test host, p620: erx_net on stock OTP and lwIP,
+  # The network benchmarks on the FreeBSD test host: erx_net on stock OTP and lwIP,
   # each as a client of a peer in a jail on the same tap's bridge, bulk each way and
   # request-reply, as docs/design-network-fastpath.md's "Benchmarks and targets" states.
-  # `tools/erx bench net-p620` stages erx_net's modules (built here, with the host's
-  # erlc), its C sources and the lwIP client on p620, builds the C there, runs every
+  # `tools/erx bench net-freebsd` stages erx_net's modules (built here, with the host's
+  # erlc), its C sources and the lwIP client on the FreeBSD test host, builds the C there, runs every
   # workload of NetBench::WORKLOADS on both stacks `runs` times, and prints the table
   # of NetBench::Report with the conditions it ran under. The raw output of every run
   # is kept in the output directory, never in the tree.
   #
   # Everything remote goes through Remote, one ssh command string built from an argument
-  # vector, since p620's login shell is tcsh.
-  module NetBenchP620
+  # vector, since the host's login shell may be tcsh.
+  module NetBenchFreebsd
     class RemoteError < Error; end
 
     # One ssh destination and the one place its command string is built. The remote login
@@ -136,8 +136,12 @@ module Erx
 
     Setup = Data.define(:host, :jail, :tap, :peer_ip, :remote_dir, :lwip_src, :runs)
 
-    DEFAULTS = Setup.new(host: 'p620.seagull-luma.ts.net', jail: 'erxpeer1', tap: '/dev/tap1', peer_ip: '10.77.0.11',
-                         remote_dir: 'erx-net-bench', lwip_src: 'lwip-bench/src', runs: 3).freeze
+    # The host has no default: each developer names their own FreeBSD host, by `--host` or
+    # by this variable. The rest follow the setup recipe of docs/design-network-stack.md's
+    # "FreeBSD's jails on the test host".
+    HOST_VARIABLE = 'ERX_NET_BENCH_HOST'
+    DEFAULTS = { jail: 'erxpeer1', tap: '/dev/tap1', peer_ip: '10.77.0.11',
+                 remote_dir: 'erx-net-bench', lwip_src: 'lwip-bench/src', runs: 3 }.freeze
 
     STACKS = %w[erx_net lwip].freeze
     FIRST_PORT = 5300
@@ -149,12 +153,12 @@ module Erx
 
     # Stages, builds, runs and reports. The tree it stages is the one at root.
     class Runner
-      def initialize(root:, setup: DEFAULTS, erlc: nil, output: nil, clock: Time)
+      def initialize(root:, setup:, erlc: nil, output: nil, clock: Time)
         @root = File.realpath(root)
         @setup = setup
         @erlc = erlc || ENV.fetch('ERX_ERLC') { File.join(@root, 'build/oracle/jit/install/bin/erlc') }
         @clock = clock
-        @output = output || File.join(@root, 'build/bench', "net-p620-#{clock.now.utc.strftime('%Y%m%dT%H%M%SZ')}")
+        @output = output || File.join(@root, 'build/bench', "net-freebsd-#{clock.now.utc.strftime('%Y%m%dT%H%M%SZ')}")
         @remote = Remote.new(host: setup.host)
         validate(setup)
       end
@@ -210,7 +214,7 @@ module Erx
       def take_lock(path, line, deadline:)
         answer = Lock.decide(@remote.capture!(Lock.acquire_argv(path, line), seconds: 30), fallback_deadline: deadline)
         if answer.state == :stale
-          warn "net-p620: taking over a stale lock (#{answer.age} s old) of #{LineEscape.escape(answer.holder)}"
+          warn "net-freebsd: taking over a stale lock (#{answer.age} s old) of #{LineEscape.escape(answer.holder)}"
           @remote.capture!(Lock.takeover_argv(path), seconds: 30)
           answer = Lock.decide(@remote.capture!(Lock.acquire_argv(path, line), seconds: 30), fallback_deadline: deadline)
         end
@@ -242,7 +246,7 @@ module Erx
         FileUtils.cp_r(File.join(apps, 'erx_net/c_src'), File.join(stage_dir, 'erx_net/c_src'))
         FileUtils.mkdir_p(File.join(stage_dir, 'lwip'))
         FileUtils.cp(Dir[File.join(@root, 'bench/lwip/*')], File.join(stage_dir, 'lwip'))
-        File.write(File.join(stage_dir, MARKER), "staged by tools/erx bench net-p620\n")
+        File.write(File.join(stage_dir, MARKER), "staged by tools/erx bench net-freebsd\n")
         # rsync --delete empties its destination, so only a directory this tool made is synced.
         @remote.capture!(['sh', '-c', %q(if test -e "$0"; then test -f "$0/) + MARKER + %q("; fi), @setup.remote_dir], seconds: 30)
         @remote.rsync(stage_dir, @setup.remote_dir)

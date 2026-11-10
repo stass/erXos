@@ -20,7 +20,7 @@
  *
  *	RESULT key=value key=value ...
  *
- * the format of erx_net_bench, whose keys tools/erx bench net-p620 reads.  The
+ * the format of erx_net_bench, whose keys tools/erx bench net-freebsd reads.  The
  * exit status is 0 only if the run completed.
  */
 

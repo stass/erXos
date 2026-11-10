@@ -44,7 +44,7 @@ begin
   require_relative 'lib/erx/bench_bytes'
   require_relative 'lib/erx/bench_g3'
   require_relative 'lib/erx/bench_g5'
-  require_relative 'lib/erx/net_bench_p620'
+  require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
   require_relative 'lib/erx/code_commands'
 rescue Erx::Error, SystemCallError => error
@@ -651,7 +651,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-p620 [--runs N] [--only LIST] [--require-fast-path] [--host H] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
@@ -1139,31 +1139,40 @@ module Erx
     end
 
     # The network benchmarks (docs/design-network-fastpath.md, "Benchmarks and targets"):
-    # net-p620 runs erx_net and lwIP on the FreeBSD test host and prints one table. The exit
+    # net-freebsd runs erx_net and lwIP on the FreeBSD test host and prints one table. The exit
     # status is nonzero if any run failed.
     def self.bench_net(name, arguments)
-      raise OptionParser::InvalidArgument, "unknown benchmark: #{name}" unless name == 'net-p620'
+      raise OptionParser::InvalidArgument, "unknown benchmark: #{name}" unless name == 'net-freebsd'
 
-      setup = NetBenchP620::DEFAULTS.to_h
+      host_variable = NetBenchFreebsd::HOST_VARIABLE
+      setup = NetBenchFreebsd::DEFAULTS.merge(host: ENV.fetch(host_variable, nil))
       only = nil
       fast_path = false
       out = nil
       OptionParser.new do |flags|
-        %w[host jail tap peer_ip remote_dir lwip_src].each do |key|
+        flags.on('--host H', "the FreeBSD test host's ssh name (default $#{host_variable})") { |value| setup[:host] = value }
+        %w[jail tap peer_ip remote_dir lwip_src].each do |key|
           flags.on("--#{key.tr('_', '-')} VALUE") { |value| setup[key.to_sym] = value }
         end
         flags.on('--runs N', Integer, 'runs per cell, odd (default 3)') { |value| setup[:runs] = value }
         flags.on('--only LIST', Array, "workloads: #{NetBench::WORKLOADS.map(&:name).join(',')}") { |value| only = value }
         flags.on('--require-fast-path', 'fail a run whose erx_net counters show no runs or merges') { fast_path = true }
-        flags.on('--out DIR', 'output directory (default build/bench/net-p620-STAMP)') { |value| out = value }
+        flags.on('--out DIR', 'output directory (default build/bench/net-freebsd-STAMP)') { |value| out = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      if setup[:host].to_s.empty?
+        raise OptionParser::MissingArgument, "--host H or #{host_variable}: the FreeBSD test host to run on"
+      end
 
       unknown = Array(only) - NetBench::WORKLOADS.map(&:name)
       raise OptionParser::InvalidArgument, "unknown workloads: #{unknown.join(', ')}" unless unknown.empty?
 
-      outcome = NetBenchP620::Runner.new(root: ROOT, setup: NetBenchP620::Setup.new(**setup), output: out)
-                                    .call(only: only, require_fast_path: fast_path)
+      runner = begin
+        NetBenchFreebsd::Runner.new(root: ROOT, setup: NetBenchFreebsd::Setup.new(**setup), output: out)
+      rescue ArgumentError => error
+        raise OptionParser::InvalidArgument, error.message
+      end
+      outcome = runner.call(only: only, require_fast_path: fast_path)
       outcome.lines.each { |line| Terminal.puts(line) }
       outcome.failures.empty? ? 0 : 1
     end

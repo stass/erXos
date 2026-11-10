@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
-# Builds lwip_bench, the benchmark client of tools/erx bench net-p620, on the
+# Builds lwip_bench, the benchmark client of tools/erx bench net-freebsd, on the
 # host that runs it.  LWIP and CONTRIB name the unpacked, hash-verified lwIP
 # 2.2.1 and lwIP contrib 2.1.0 trees; tapif.c is contrib's tap interface with
 # tapif-freebsd.patch applied (the tap device named by $TAPDEV, and runt frames

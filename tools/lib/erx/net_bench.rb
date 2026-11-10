@@ -8,7 +8,7 @@ require_relative 'line_escape'
 module Erx
   # The pure half of the network benchmarks (docs/design-network-fastpath.md, "Benchmarks
   # and targets"): what a run's output says, and the report that sets the stacks side by
-  # side. The effects, starting the peers and the clients, belong to NetBenchP620.
+  # side. The effects, starting the peers and the clients, belong to NetBenchFreebsd.
   #
   # A client (bench/erx_net_bench.erl, bench/lwip/lwip_bench.c) ends a run with one
   # `RESULT key=value ...` line and, for erx_net, one `COUNTER name=value` line per counter

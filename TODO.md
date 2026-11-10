@@ -27,14 +27,14 @@ it; git history is the record of completed work.
   is slower than the guest at the same four operations under HVF.
 * [High] network, the fast path
   ([docs/design-network-fastpath.md](docs/design-network-fastpath.md)): one connection over
-  p620's tap sends at 890 Mbit/s and receives at 1,143, against lwIP's 6,537 and 6,809 on the
+  the FreeBSD test host's tap sends at 890 Mbit/s and receives at 1,143, against lwIP's 6,537 and 6,809 on the
   same tap, held there by the connection's per-segment step. The targets are two thirds of
   lwIP's bulk throughput each way over the same medium, and for request-reply a third of
   lwIP's rate at no more than three times its CPU per transaction. Each package lands with
-  the p620 bulk and request-reply numbers before and after it, and the HVF numbers when it
+  the FreeBSD bulk and request-reply numbers before and after it, and the HVF numbers when it
   changes erXos's code; the gains are estimates from the profile, to be replaced by those
   numbers:
-  1. the benchmarks, `tools/erx bench net-p620` (bulk and request-reply on p620, erx_net and
+  1. the benchmarks, `tools/erx bench net-freebsd` (bulk and request-reply on the FreeBSD test host, erx_net and
      lwIP, with its counters' hook: the interface's `runs`, `run_frames`, `units`,
      `unit_segments` and `frames_dropped` totals, reported unsupported until it keeps them)
      are in the tree; what remains is `tools/erx bench net-bulk` and `net-rr` under HVF,
@@ -47,29 +47,29 @@ it; git history is the record of completed work.
        but is no benchmark peer), and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
        `BenchGuest` loads its module. The Linux-guest baseline stays unsupported until then.
      * [Medium] `erx_net_if_core` counters: the map keeps only counters that were
-       incremented, so "kept, zero" reads as "unsupported" in `tools/erx bench net-p620`.
+       incremented, so "kept, zero" reads as "unsupported" in `tools/erx bench net-freebsd`.
        The packages that add `runs`, `run_frames`, `units`, `unit_segments` and
        `frames_dropped` must make `admin(counters)` return every counter they keep, zeros
        included; the fast-path check is `--require-fast-path` until then and becomes the
        default (`docs/design-network-fastpath.md`, "Benchmarks and targets") once they exist.
-     * [Medium] `tools/lib/erx/net_bench_p620.rb`: CPU and context switches are of the whole
+     * [Medium] `tools/lib/erx/net_bench_freebsd.rb`: CPU and context switches are of the whole
        client process, BEAM boot and the 1 s ARP settle included, which biases CPU per GiB
        against erx_net; subtract an idle-run baseline per stack.
-     * [Medium] `net_bench_p620.rb`'s remote lock: a stale lock's takeover is check then
+     * [Medium] `net_bench_freebsd.rb`'s remote lock: a stale lock's takeover is check then
        act (two runners can both take it); an interrupted run releases it while its remote
        peer and client live on to their own deadlines; `run_deadline` leaves out the ssh kill
        grace, the conditions' remote calls and erlc and rsync, so a slow live run can be judged
        stale. FreeBSD `lockf(1)` held from one ssh for the whole run would remove all three.
-     * [Low] `net_bench_p620.rb`: lwIP's source trees on p620 are not hash-checked per run;
+     * [Low] `net_bench_freebsd.rb`: lwIP's source trees on the FreeBSD test host are not hash-checked per run;
        erlc, git and rsync run without a deadline; the peer's start is a fixed wait, not a ready line; the stacks' repeats
        run in blocks, not interleaved; the p99 is the nearest rank plus one in both
        clients; bulk send differs between the clients (nodelay and 64 KiB against Nagle and
        32 KiB), as the report's conditions state.
-  2. one step per mailbox and a batch on every hop are in the tree; on p620 (median of 3,
+  2. one step per mailbox and a batch on every hop are in the tree; on the FreeBSD test host (median of 3,
      against the baseline) bulk receive went from 1,160 to 1,850 Mbit/s, while bulk send
      (903 to 900) and request-reply (64 B 15,661 to 15,521 txn/s, 1 KiB 14,574 to 15,132,
      64 B x16 81,376 to 78,159) did not move: the send side waits for the lean step
-     (raw data: ~/erxos-history net-bench-p620-fast-p2-2026-11-09, commit 8f3cc99);
+     (raw data: ~/erxos-history net-bench-freebsd-fast-p2-2026-11-09, commit d5bcd46);
   3. the lean step: `#tcb{}` split from `#tcb_conf{}`, header prediction finishing its two
      cases, the header template, the send log of runs with its extension rule: the
      connection's time per segment from 12.3 us to 3 to 4 us, and throughput about 1.3 to
@@ -81,11 +81,11 @@ it; git history is the record of completed work.
        that takes such data is not caught there; the precondition's seeded fault is the
        closed owner instead. Add data sizes past `rcv_space` to the generator.
   4. the tap transport, `erx_tap` and its NIF, replacing `erx_net_tap` and the pipe's
-     `port` end, landed (against package 2's tree, p620, median of 3): bulk send 900 to
+     `port` end, landed (against package 2's tree, the FreeBSD test host, median of 3): bulk send 900 to
      1,040 Mbit/s, bulk recv 1,850 to 1,837, rr 64 B 15,521 to 16,150 txn/s, 1 KiB 15,132
      to 17,596, 64 B x16 78,159 to 89,986. Its one-call receive batches exposed a stall in
      `erx_tcp:settle/3` (a waiting writer moved in after output), fixed with it (raw data:
-     ~/erxos-history net-bench-p620-fast-p4-fix-2026-11-09, commit df857bb);
+     ~/erxos-history net-bench-freebsd-fast-p4-fix-2026-11-09, commit d5bcd46);
   5. checksums in the copy
      ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), the
      owner's decision to build it as part of the fast path, since the cut and the merge rest
@@ -179,7 +179,7 @@ it; git history is the record of completed work.
   `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
   of the gate's 2 h 33 min and check what the fuzz targets already check.
   Until the owner decides, the gate runs all nine. In the parallel gate
-  on the Mac Pro (master 83221dc9) every harness verified except
+  on a second development host (master 83221dc9) every harness verified except
   `cap_slot_list`, which timed out at its 3,600 s deadline, as did its
   mutants `insert-leaves-head-prev` and `clear-keeps-head`, so the gate
   fails until that harness shrinks or leaves the gate.
@@ -991,7 +991,7 @@ it; git history is the record of completed work.
   supervisor's intensity (reachable from a peer only through a crash bug). An `erx_tap` restart meets
   this too: FreeBSD's tap opens once, and an armed descriptor of the ended driver closes only when
   ERTS's poll set lets go of it, so the new `init` may find the device busy (`ebusy`); not yet seen
-  on p620. Pacing every link start in `start_link_sup/1`, not each way a driver ends, would close all
+  on the FreeBSD test host. Pacing every link start in `start_link_sup/1`, not each way a driver ends, would close all
   three.
 * [Medium] network, `erx_tap` (`fd => N`): every restart of the driver adopts the integer N
   again, so once N's holder closes it (an OTP socket closes with its controlling process), the
@@ -4345,7 +4345,7 @@ document's "residual risks accepted" paragraph.
   then `erx_net_vclock`, `erx_net_script`, `erx_net_impair` and
   `erx_net_relay` in the app's `test/`; `erx_virtio_net` and `erx_net_erxos`, which run in the
   system domain, the stopgap placement, until 1b-E's network domain. Three things to confirm on
-  the FreeBSD test host `p620` before its runs: that the test user can open `/dev/tapN` (a devfs rule) and
+  the FreeBSD test host before its runs: that the test user can open `/dev/tapN` (a devfs rule) and
   the tap comes up on open (`net.link.tap.up_on_open`), that the bridge
   can put two jails behind separate tap devices for the relay's FreeBSD
   baseline, and that a stock OTP 29.1.2 builds there for the stack's

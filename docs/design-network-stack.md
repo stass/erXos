@@ -1275,7 +1275,7 @@ over its bytes, in the two processes every segment passes through: the
 interface process, which classifies for every client, and the
 connection, which is one flow's ceiling
 ([todo-performance.md](todo-performance.md)). The evidence is thin, and
-the measurements below settle it. In the p620 run of 2026-11-09 with the
+the measurements below settle it. In the FreeBSD run of 2026-11-09 with the
 C primitive loaded, `erx_bytes` held 3.1 percent of the connection
 process's samples on send
 ([design-network-fastpath.md](design-network-fastpath.md#where-a-segments-cost-goes)),
@@ -1285,7 +1285,7 @@ development host (Apple M3 Max, macOS, stock OTP 29.1.2 with the JIT,
 clang -O2, 200,000 calls). lwIP reached 6.5 Gbit/s over the same tap,
 about 550,000 frames a second each way. At that rate, 0.30 microseconds
 a frame would be about a sixth of one scheduler in each direction. That
-estimate is not measured on p620.
+estimate is not measured on the FreeBSD test host.
 
 **The construction.** A checksum is a sum of 16-bit words, and a copy
 reads every word, so the copy sums what it copies. What it hands over
@@ -1565,7 +1565,7 @@ as it copies, and its merge reads each frame's network sum, so this
 design is part of that one, not a saving judged on its own share
 ([design-network-fastpath.md](design-network-fastpath.md#the-construction-runs)).
 That share was small: with the C primitive loaded, `erx_bytes` held 3.1
-percent of the connection's samples on send on p620.
+percent of the connection's samples on send on the FreeBSD test host.
 
 **Open decision.** *UDP.* Datagrams could be delayed too. That needs RFC
 768's rule that a computed zero is sent as 16#ffff in every finisher, and
@@ -3217,7 +3217,7 @@ rates).
 kernel, and with any process that registers a port in the same region:
 a switch port has a region of its own, but a host's cards share
 netmap's global region, which any process that can open `/dev/netmap`
-can map. Such a process is as trusted as the node (p620 gives
+can map. Such a process is as trusted as the node (the test host gives
 `/dev/netmap` to the node's own user alone), and still every field is
 treated as a value that may change at any time and may be wrong:
 
@@ -3383,7 +3383,7 @@ sync, which `erx_net_driver`'s contract does not give a transport.
   whole must lose the frames the test counts; one that reads `{error, arm}` as `armed` must
   leave the driver running; and one that refuses `init` on a failed
   registration must end sooner than a second.
-* *The p620 switch run.* A host test, run on the FreeBSD test host,
+* *The FreeBSD switch run.* A host test, run on the FreeBSD test host,
   skipped elsewhere with its reason stated, never counted as passed.
   Two drivers on `vale0` exchange frames of 60, 1,514 and the MTU's
   largest size, each sent as one binary and as headers and a payload of
@@ -3439,7 +3439,7 @@ the stack's own time goes:
    receive packets per second and drops by reason, which is the
    interface process's ceiling over a medium that costs almost nothing.
 
-Over a tap on p620 the limit was the stack's per-segment work, not the
+Over a tap on the FreeBSD test host the limit was the stack's per-segment work, not the
 medium ([design-network-fastpath.md](design-network-fastpath.md#what-was-measured)),
 so this transport alone is not expected to raise TCP throughput much;
 with the fast path's runs and merge it is where the stack is compared
@@ -3466,7 +3466,7 @@ minimum-size frames.
   ([todo-performance.md](todo-performance.md)).
 
 **Open decision for the owner.** *A second jail on the switch,* for the
-FreeBSD-to-FreeBSD baseline of measurement 4. It changes p620's setup,
+FreeBSD-to-FreeBSD baseline of measurement 4. It changes the test host's setup,
 which puts only `erxpeer0`'s `epair` on `vale0`, and so is the owner's
 to allow. Recommended: allow it; it is the one baseline that shows what
 the switch and the emulated mode cost a kernel stack, apart from any
@@ -5172,7 +5172,7 @@ oracle throughout is the plain checksum, `erx_inet_sum` in C and
   peer runs through `complete/3` and `post_frame/5`. A wrong sum either way
   stalls it, since the peer's stack drops what our copy finished wrongly
   and ours drops what its copy summed wrongly. The transport's start line
-  names `finish copy` or `finish device`. On p620 the netmap run
+  names `finish copy` or `finish device`. On the FreeBSD test host the netmap run
   through the VALE switch to FreeBSD's jail must end with the jail's
   count of segments discarded for bad checksums
   (`netstat -s -p tcp`) and the stack's `bad_sum` counts both unchanged.
@@ -5181,7 +5181,7 @@ oracle throughout is the plain checksum, `erx_inet_sum` in C and
 
 The measurements this change owes are on the
 [watch list](todo-performance.md): the stage breakdown of the bulk
-transfer, with `tools/erx bench` under HVF, before and after; the p620
+transfer, with `tools/erx bench` under HVF, before and after; the FreeBSD
 run over tap and netmap, before and after;
 and the copy core against a copy followed by a separate sum.
 
@@ -5463,7 +5463,7 @@ scripts covering every segment type in every TCP state, overlapping
 received data, the socket API and ICMP, in IPv4 and IPv6 variants. Two
 runners execute it:
 
-* **On FreeBSD.** The FreeBSD test host, `p620`, running FreeBSD
+* **On FreeBSD.** The FreeBSD x86-64 test host, running FreeBSD
   16.0-CURRENT, runs the scripts with nplab's packetdrill, the version
   the suite names. packetdrill is GPL-2.0, so it is built and run only on
   that host as a test tool, never linked to or shipped with anything of
@@ -5525,7 +5525,7 @@ take three peers:
   slirp. *Seeded failure:* an ARP reply with its sender and target
   swapped must leave slirp unable to reach the stack, so the transfer
   times out, which shows slirp spoke to the stack's own ARP.
-* **FreeBSD's jails on `p620`.** The host's tap devices `/dev/tap0` to
+* **FreeBSD's jails on the test host.** The host's tap devices `/dev/tap0` to
   `tap7` join a bridge with the vnet jails `erxpeer0` to `erxpeer3`
   (10.77.0.10 to 10.77.0.13/24), whose stack is the oracle's own kernel;
   the stack runs on the host's own OTP over a tap device through the tap
@@ -5539,6 +5539,8 @@ take three peers:
   record names the kernel as the packet scripts' records do.
   *Seeded failure:* SACK disabled on erXos must push its retransmissions
   past the bound under a loss schedule where FreeBSD recovers with SACK.
+  `tools/erx bench net-freebsd` reaches the host by the ssh name that
+  `--host` or `ERX_NET_BENCH_HOST` gives.
 * **erXos itself.** Two stacks in one node, each through its pipe's
   `process` end to one `erx_net_relay`, under the virtual clock, run bulk
   transfers and many short connections under seeded schedules, each pair
@@ -5992,7 +5994,7 @@ reaches into the domains design remains the owner's
    path and the high-precision timer system; the send log keeps it cheap
    to add as a loss module when its value is measured.
 8. **The packet-script and interop oracle is FreeBSD 16.** The FreeBSD
-   test host `p620`, 16.0-CURRENT, and its vnet jails are the oracle for
+   test host, 16.0-CURRENT, and its vnet jails are the oracle for
    the packet scripts and for traffic; the stack keeps no FreeBSD guest.
    Since the host tracks -CURRENT, every verdict record names its kernel
    ([Packet scripts against FreeBSD](#packet-scripts-against-freebsd)).

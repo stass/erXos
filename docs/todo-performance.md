@@ -431,7 +431,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   reduction slice from these. Measure: the time
   per frame of the bulk-transfer load the network design names, on HVF, against the
   same load with the checksum stubbed; and one 64 KiB call of each on each target
-  board. In the p620 run of 2026-11-09 (the network entry on one connection process per
+  board. In the FreeBSD run of 2026-11-09 (the network entry on one connection process per
   flow), on stock OTP, the pure-Erlang host stand-in for `inet_csum` held 55 percent of
   the connection process's stack samples on send and about half of the busiest process's
   on receive. The host build loads the same C as erXos (`erx_net`'s
@@ -516,7 +516,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   a merged segment once, so a sender sees one ACK for up to 45 segments
   where RFC 5681 asks for one every second segment, and with a 64 KiB
   receive buffer a unit can be most of the window. Settled by the bulk
-  receive on p620 with the merge on and off: throughput, the FreeBSD
+  receive on the FreeBSD test host with the merge on and off: throughput, the FreeBSD
   sender's congestion window over time (`tcp_log` or `siftr`) and
   retransmissions; the fix on the table is ending a unit at a number of
   segments that follows from the receive window.
@@ -524,14 +524,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   ([design-network-stack.md](design-network-stack.md#the-tap-transport)).
   A tap takes one frame per `write` and gives one per `read`, and the
   transport reads each payload once more to sum it. Settled by the CPU
-  per GiB of the p620 bulk runs split by function; the fixes on the
+  per GiB of the FreeBSD bulk runs split by function; the fixes on the
   table are the tap's virtio-net header (`TAPSVNETHDR`) with its
   checksum and segmentation offloads, if `bridge0` and `epair` honour
   them, and the netmap transport.
 * **[Low] network, scheduler placement of the driver, interface and
   connection** ([design-network-fastpath.md](design-network-fastpath.md#processes-and-batching)). On a host with
   128 schedulers the three processes of a flow run on different cores
-  and wake each other about 15 times a segment. Settled by the p620
+  and wake each other about 15 times a segment. Settled by the FreeBSD
   bulk and request-reply runs at default flags, at `+S 4:4`, and with
   the three processes bound to one run queue through ERTS's undocumented
   `scheduler` option of `spawn_opt` and `process_flag/2`: CPU per GiB,
@@ -541,14 +541,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   ([design-network-fastpath.md](design-network-fastpath.md#processes-and-batching)). A received segment passes the
   driver and the interface before its connection, one message each,
   about a microsecond of a small transaction's cost. Settled by the
-  request-reply benchmark's profile on p620 once the lean step lands;
+  request-reply benchmark's profile on the FreeBSD test host once the lean step lands;
   the fixes on the table are the driver classifying over the
   interface's published view, or the transport running inside the
   interface.
 * **[Low] network, runs cut short by many small sends**
   ([design-network-fastpath.md](design-network-fastpath.md#output-makes-runs)). A run holds at most 64 of the
   send buffer's binaries, so an owner that writes 100-byte binaries gets
-  runs of a few frames. Settled by the p620 bulk send written as
+  runs of a few frames. Settled by the FreeBSD bulk send written as
   100-byte `gen_tcp:send/2` calls against one written as 64 KiB calls:
   frames per run and throughput; the fix on the table is joining small
   binaries once as the send buffer takes them, as FreeBSD's `sbcompress`
@@ -583,14 +583,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Medium] network, one connection process per flow as a ceiling**
   ([design-network-stack.md](design-network-stack.md#one-owner-one-step)).
   Every segment of a connection is stepped in its one process, so a flow
-  gets at most one scheduler. The p620 run of 2026-11-09: host p620,
+  gets at most one scheduler. The FreeBSD run of 2026-11-09: an x86-64 host,
   FreeBSD 16.0-CURRENT (main-n285245-975e3605ebb1, GENERIC-NODEBUG), AMD
   Ryzen Threadripper PRO 5995WX, native, stock OTP 29 (erts 17.1) with
   default scheduler flags; erx_net at 6de4bb62 on stock OTP with the
   pure-Erlang host stand-in for `erx_bytes`, over the pipe's port end and
   the tap helper to tap0, bridge0 and an epair into a jail running
   FreeBSD's stack; 512 MiB per run in 64 KiB sends, passive `recv(S, 0)`,
-  median of 3; raw data in `~/erxos-history/net-bench-p620-2026-11-09/` at erxos-history commit f3573e4.
+  median of 3; raw data in `~/erxos-history/net-bench-freebsd-2026-11-09/` at erxos-history commit d5bcd46.
   erx_net sent at 767 Mbit/s and received at 1,115. The baselines, both
   inside FreeBSD's stack over bridge0 without the tap: stock `gen_tcp` in
   a jail with the same driver sent at 7,098 and received at 7,159, and
@@ -599,20 +599,20 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   interface process ran at 95M and the connection at 59M. Past the
   checksum (the per-byte primitives' entry), the per-segment work adds up:
   `erx_tcp_wire:add_options`, the send log's and the reassembly queue's
-  `gb_trees`, decide and commit. The profile of the p620 runs of
-  2026-11-09 (`~/erxos-history/net-perf-p620-2026-11-09/`, erxos-history
-  commit c4f9bf5) found the connection the serial stage, its cost spread
+  `gb_trees`, decide and commit. The profile of the FreeBSD runs of
+  2026-11-09 (`~/erxos-history/net-perf-freebsd-2026-11-09/`, erxos-history
+  commit d5bcd46) found the connection the serial stage, its cost spread
   over the per-segment step, and [design-network-fastpath.md](design-network-fastpath.md)
   is the fix: runs, the merge and the lean step. Settled by that design's
   bulk benchmark meeting its target. A FreeBSD-stack baseline through the same tap needs
-  an address on the host's side of bridge0, a setting change on p620 that
+  an address on the host's side of bridge0, a setting change on the FreeBSD test host that
   waits for the owner's go-ahead.
 * **[Medium] network, checksums in the copy**
   ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)). The design
   removes the separate checksum pass on each path: `erx_tcp_wire:encode/3`'s sum in the
   connection process and `decode/2`'s in the interface process. The copy computes the sum
   instead. With the C primitive loaded, `erx_bytes` held 3.1 percent of the connection's
-  samples on send in the p620 profile of 2026-11-09
+  samples on send in the FreeBSD profile of 2026-11-09
   ([design-network-fastpath.md](design-network-fastpath.md#where-a-segments-cost-goes));
   the interface's receiving share was not reported. The C primitive costs about 0.30 microseconds for a
   1,480-byte segment on the development host (Apple M3 Max, macOS, stock OTP 29.1.2 JIT,
@@ -624,12 +624,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
     That network entry is not written yet. Record which finisher the device took (the
     transport's start line). The harness's hub port is expected to offer no
     `VIRTIO_NET_F_CSUM`, so the copy finishes there;
-  - the p620 send and receive over tap and over netmap, before and after, with the share
+  - the FreeBSD send and receive over tap and over netmap, before and after, with the share
     of the connection's and the interface's samples in `erx_bytes:inet_csum/2` and in
     the NIFs' copies;
   - `erx_inet_copy_sum` against a plain copy followed by `erx_inet_sum` over the
     destination in one C call, over 64 to 9,014 bytes, on the development host and on
-    p620. If the fused loop is slower at frame sizes, the core does the copy and then
+    the FreeBSD test host. If the fused loop is slower at frame sizes, the core does the copy and then
     the sum inside the same call. That keeps the interface and its trust argument, since
     the sum is still over the binary's bytes.
   Remove this item once those numbers are recorded.
@@ -637,7 +637,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   ([design-network-stack.md](design-network-stack.md#credited-queues)).
   A connection has a 32 KiB send buffer and a 64 KiB receive buffer
   (FreeBSD's defaults, without its autosizing) and a credit of 256 items;
-  32 KiB in flight over a path of 0.1 to 0.3 ms caps one flow. In the p620
+  32 KiB in flight over a path of 0.1 to 0.3 ms caps one flow. In the FreeBSD
   run of 2026-11-09 (the entry on one connection process per flow) the
   counters showed no drops and no retransmissions and the tap helper used
   2 percent of a CPU, so the limit is on the Erlang side; the sizes'
@@ -649,7 +649,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   ([design-network-stack.md](design-network-stack.md#the-interface-towards-erlang-programs)).
   `erx_tcp_conn`'s `take/2` joins the whole receive queue into one binary
   for every recv that takes part of it, and each recv is a call to the
-  connection. In the p620 run of 2026-11-09 (the entry on one connection
+  connection. In the FreeBSD run of 2026-11-09 (the entry on one connection
   process per flow, here 64 MiB, one run each) `recv(S, 1460)` read at
   29 Mbit/s (18.5 s), `recv(S, 16384)` at 984 and `recv(S, 0)` at 1,115;
   how the time splits between the join, the call and the acknowledgements
@@ -661,7 +661,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   ([design-network-stack.md](design-network-stack.md#the-socket-process)).
   Every push of bytes to the socket process leaves the receive buffer, so
   it is followed by a `{user, {rcvd, N}}` step and an output pass, where a
-  read once took one per answered recv; the p620 numbers above have no
+  read once took one per answered recv; the FreeBSD numbers above have no
   such step. Settled by the same `recv(S, 16384)` and `recv(S, 65536)`
   receives, or a host benchmark of a 64 MiB receive through the test
   pipe, with a step per push and with one per quarter buffer pushed; the

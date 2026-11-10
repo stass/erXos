@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The stack on a host's own stock OTP joined to a tap device through the tap
-%% transport (docs/design-network-stack.md, "The tap transport", "FreeBSD's jails on p620"). One
+%% transport (docs/design-network-stack.md, "The tap transport", "FreeBSD's jails on the test host"). One
 %% interface takes a static address on the tap's network, resolves a peer by ARP, and then
 %% stays up for a while to answer the peer's ARP and ping, printing its counters at the
 %% end. Each step prints one line; the node halts 0 when the stack resolved the peer.
