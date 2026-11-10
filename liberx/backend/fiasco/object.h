@@ -17,8 +17,9 @@
  * service thread calls these. A memory object's pages are vm.c's, a gate's queue
  * fault_gate.c's, a space's task service_task.c's and a budget's values budget.c's,
  * each kept by the record's index. A record goes at its creator's destroy, at its
- * creator's end, once it has neither a handle nor a mapping, or with its budget; a
- * space's record goes at the space's deletion too.
+ * creator's end, once it has neither a handle nor a mapping and is not kept
+ * (erx_backend_object_unreferenced), or with its budget; a space's record goes at the
+ * space's deletion too.
  */
 
 /* The record table and the root's handle table, which only the pool bounds. NULL or why not. */
@@ -74,12 +75,15 @@ void	erx_fiasco_object_drain(void);
 /* Counts a map of the object at index, which keeps it while it has no handle. */
 void	erx_fiasco_object_mapped(uint32_t index);
 /*
- * Keeps the record at index until the machine ends, as the time page is kept: it counts
- * one mapping that nothing removes, so no close ends it, and every destroy of it is
- * ERX_ERIGHTS. One record is kept; the root's first thread keeps it before the service runs.
+ * Keeps the record at index until the machine ends: its mark stands for a reference
+ * that nothing removes, so no close or unmap ends it, and every destroy of it is
+ * ERX_ERIGHTS.
  */
 void	erx_fiasco_object_keep(uint32_t index);
-/* Counts a mapping of it gone; the object goes once it has neither a handle nor a mapping. */
+/*
+ * Counts a mapping of it gone; the object goes once it has neither a handle nor a
+ * mapping and is not kept.
+ */
 void	erx_fiasco_object_unmapped(uint32_t index);
 
 /* The bodies of erx_cap_dup, erx_cap_close and erx_object_destroy for the calling task. */

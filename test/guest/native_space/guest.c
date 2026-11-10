@@ -38,6 +38,8 @@
 #include "test/guest/native_space/modes.h"
 
 #define PROGRAM		"boot/native-space"
+/* The same program packed as an image entry, as a domain runtime is. */
+#define IMAGE_PROGRAM	"boot/native-space-image"
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
 #define WAIT_NS		UINT64_C(10000000000)
 #define SHORT_NS	UINT64_C(1000000)
@@ -52,6 +54,8 @@
 #define RELEASE_LABEL	UINT64_C(0x5e0000000000c000)
 #define BUDGET_LABEL	UINT64_C(0x5e0000000000d000)
 #define HELD_LABEL	UINT64_C(0x5e0000000000e000)
+#define IMAGE_LABEL	UINT64_C(0x5e0000000000f000)
+#define IMAGE_STATUS	78
 /* More pages than one erx_mem_copy request copies. */
 #define COPY_PAGES	66u
 
@@ -952,13 +956,96 @@ case_time(void)
 	say_case("time", passed);
 }
 
+/* A task of the image entry, its records going to gate under label, started with argument. */
+static bool
+image_task_start(uint32_t entry, uint64_t budget, uint64_t gate, uint64_t label, uint64_t argument, uint64_t *space)
+{
+	uint64_t pc;
+
+	if (erx_space_create(budget, ERX_CAP_SELF, gate, label, 0, TASK_CAP_LIMIT, space) != ERX_OK)
+		return (false);
+	if (erx_image_map(*space, 0, entry, &pc) == ERX_OK && pc == program_pc &&
+	    erx_fiasco_launch_start(*space, pc, argument) == ERX_OK)
+		return (true);
+	task_drop(*space);
+	return (false);
+}
+
+/* Starts a task of the image entry under the root's budget and waits for its status. */
+static int64_t
+image_task_run(uint32_t entry, uint64_t argument)
+{
+	uint64_t space;
+	int64_t status = INT64_MIN;
+
+	if (!image_task_start(entry, ERX_CAP_SELF, 0, 0, argument, &space) ||
+	    erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+		return (INT64_MIN);
+	return (status);
+}
+
+/*
+ * The program packed as an image entry (docs/design-stopgap.md, "The call table",
+ * erx_image_map): every task that runs it maps its code and read-only data from the
+ * archive's own pages, through one slice the service makes at the entry's first map and
+ * charges to the root, and copies only its writable data.
+ *
+ * The first map is in a space under a budget of its own, which the case destroys once
+ * that task has ended; every later task still runs, so the slice outlived the budget.
+ * A map of the image entry takes fewer pool pages than one of the same program as a
+ * file entry, which copies every segment. Each task finds the program's writable word
+ * as linked, though the task before it wrote it. A task that writes its own code faults
+ * at its gate, and the tasks before and after it read the same word there.
+ */
+static void
+case_image_shared(uint32_t entry)
+{
+	uint64_t budget, first, file_space, image_space, gate, writer, label, steady, before, file_taken, image_taken;
+	int64_t status = INT64_MIN, code_before, code_after;
+	erx_fault_t record;
+	bool passed = erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, 64, 64, &budget) == ERX_OK &&
+	    image_task_start(entry, budget, 0, 0, MODE_DATA, &first) &&
+	    erx_fiasco_task_join_until(first, erx_fiasco_clock_ns() + WAIT_NS, &status) == ERX_OK && status == 0 &&
+	    erx_object_destroy(budget) == ERX_OK && erx_cap_close(budget) == ERX_OK;
+
+	steady = erx_fiasco_vm_free_pages();
+	before = steady;
+	passed = passed && erx_fiasco_launch_make(program_entry, 0, &file_space, &program_pc) == ERX_OK;
+	file_taken = before - erx_fiasco_vm_free_pages();
+	if (passed)
+		task_drop(file_space);
+	before = erx_fiasco_vm_free_pages();
+	passed = passed && image_task_start(entry, ERX_CAP_SELF, 0, 0, MODE_DATA, &image_space);
+	image_taken = before - erx_fiasco_vm_free_pages();
+	passed = passed && erx_fiasco_task_join_until(image_space, erx_fiasco_clock_ns() + WAIT_NS, &status) == ERX_OK &&
+	    status == 0;
+	say_count("image_file_pages", file_taken);
+	say_count("image_shared_pages", image_taken);
+	passed = passed && image_taken < file_taken && image_task_run(entry, MODE_DATA) == 0;
+
+	code_before = passed ? image_task_run(entry, MODE_CODE_READ) : INT64_MIN;
+	passed = passed && code_before != INT64_MIN && code_before != 0 &&
+	    erx_gate_create(0, &gate) == ERX_OK && erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
+	    image_task_start(entry, ERX_CAP_SELF, gate, IMAGE_LABEL, MODE_CODE_WRITE, &writer) &&
+	    record_wait(erx_fiasco_clock_ns() + WAIT_NS, &record, &label) && label == IMAGE_LABEL &&
+	    record.kind == ERX_FAULT_MEMORY && record.space != ERX_FIASCO_TASK_ROOT &&
+	    erx_space_stop(writer, IMAGE_STATUS) == ERX_OK &&
+	    record_wait(erx_fiasco_clock_ns() + WAIT_NS, &record, &label) &&
+	    exit_record_is(&record, IMAGE_LABEL, label, IMAGE_STATUS) &&
+	    erx_fiasco_task_join_until(writer, erx_fiasco_clock_ns() + WAIT_NS, &status) == ERX_OK &&
+	    status == IMAGE_STATUS && erx_object_destroy(gate) == ERX_OK && erx_cap_close(gate) == ERX_OK;
+	code_after = passed ? image_task_run(entry, MODE_CODE_READ) : INT64_MIN;
+	passed = passed && code_after == code_before && erx_fiasco_vm_free_pages() == steady;
+	say_case("image_shared", passed);
+}
+
 void
 erx_fiasco_root_main(void)
 {
 	erx_boot_handoff_view_t handoff;
 	static erx_pack_view_t pack;
 	const char *reason = erx_fiasco_root_open(&handoff, &pack);
-	uint32_t release_first = 0;
+	uint32_t release_first = 0, image_entry = 0;
 
 	if (reason == NULL)
 		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
@@ -989,6 +1076,9 @@ erx_fiasco_root_main(void)
 		say("erx: space: no domain release\n");
 	case_slices(release_first);
 	case_copy(release_first);
+	if (erx_fiasco_launcher_find(&pack, IMAGE_PROGRAM, &image_entry) != ERX_OK)
+		say("erx: space: no image program\n");
+	case_image_shared(image_entry);
 	say("erx: space: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

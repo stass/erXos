@@ -56,6 +56,7 @@ typedef struct erx_backend_object {
 	uint32_t	handles;	/* entries in any table naming this record at this generation */
 	uint32_t	mappings;	/* maps made of it, which keep it while it has no handle */
 	uint32_t	ending;		/* nonzero: ended by the service before it answers (fiasco/object.c) */
+	uint32_t	kept;		/* nonzero: kept until the machine ends (erx_fiasco_object_keep) */
 } erx_backend_object_t;
 
 typedef struct erx_backend_handle_entry {
@@ -96,7 +97,7 @@ void	erx_backend_object_unmake(erx_backend_grow_table_t *objects, uint32_t index
 /* Whether a record holds an object: neither free nor retired. */
 bool	erx_backend_object_live(const erx_backend_object_t *);
 
-/* Whether a live record has neither a handle nor a mapping, and so is to be freed. */
+/* Whether a live record has no handle, no mapping and no keep, and so is to be freed. */
 bool	erx_backend_object_unreferenced(const erx_backend_object_t *);
 
 /*

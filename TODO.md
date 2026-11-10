@@ -1290,6 +1290,13 @@ it; git history is the record of completed work.
   charged to it whose home task, charged to another budget, still has threads, which `erx_object_destroy`
   and a last close refuse ("a group never goes before its threads"). Skip such a group in the sweep, or
   stop its home first.
+* [Low] liberx Fiasco backend, `object.c` `erx_fiasco_object_end`: it does not itself refuse a kept
+  record (the time page, an image entry's slice); only `erx_fiasco_object_destroy_body` does. No caller
+  reaches a kept record through an end today, so the guarantee rests on each end path. An end that did
+  reach an image slice would also leave `service_task.c`'s slice cache (`task_image_slice`), which holds
+  a bare record index, naming a freed or reused record, possibly another entry's slice. Make the end
+  refuse a kept record, so the keep holds whatever calls it; no test destroys the time page's handle
+  to check destroy's own refusal (`ERX_ERIGHTS`), so add one to `native_space` with it.
 * [Medium] Image build, `tools/lib/erx/source_revision.rb` (`QUERIES` branch shape): a branch name
   git accepts but the shape refuses (`fix#123`, `stas@wip`, `_tmp`, over 100 bytes) fails the whole
   image build. Either leave such a branch out of the revision, as newvers.sh leaves out a detached

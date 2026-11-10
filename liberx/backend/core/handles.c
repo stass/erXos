@@ -52,6 +52,7 @@ erx_backend_object_take(erx_backend_grow_table_t *objects, uint32_t kind, uint32
 	record->handles = 0;
 	record->mappings = 0;
 	record->ending = 0;
+	record->kept = 0;
 	*index = found;
 	return (ERX_OK);
 }
@@ -64,6 +65,7 @@ erx_backend_object_free(erx_backend_grow_table_t *objects, uint32_t index)
 	record->handles = 0;
 	record->mappings = 0;
 	record->ending = 0;
+	record->kept = 0;
 	if (record->generation == UINT32_MAX) {
 		record->kind = ERX_BACKEND_OBJECT_RETIRED;
 		return;
@@ -87,7 +89,7 @@ erx_backend_object_live(const erx_backend_object_t *record)
 bool
 erx_backend_object_unreferenced(const erx_backend_object_t *record)
 {
-	return (record->handles == 0 && record->mappings == 0);
+	return (record->handles == 0 && record->mappings == 0 && record->kept == 0);
 }
 
 void

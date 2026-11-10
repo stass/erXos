@@ -1,3 +1,4 @@
+/* Modified by erXos: a read-execute root section, for the boot archive (docs/design-stopgap.md, "Boot handoff"). */
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
@@ -63,6 +64,7 @@ public:
     Root_section_w = L4_FPAGE_W,
     Root_section_ro = L4_FPAGE_RO,
     Root_section_rw = L4_FPAGE_RW,
+    Root_section_rx = L4_FPAGE_RX,
     Root_section_rwx = L4_FPAGE_RWX,
   };
 

@@ -32,6 +32,9 @@
 
 int64_t	erx_task_main(uint64_t);
 
+/* A word of the program's writable data, of which each task has its own copy. */
+static volatile uint64_t data_word = DATA_PATTERN;
+
 static uint64_t
 shared_word(uint64_t page)
 {
@@ -244,6 +247,30 @@ mode_release(uint64_t slice)
 	return (erx_fiasco_release_entry(slice, 2, false, &entry) == ERX_ERANGE ? 0 : 84);
 }
 
+static int64_t
+mode_data(void)
+{
+	if (data_word != DATA_PATTERN)
+		return (100);
+	data_word = WRITER_PATTERN;
+	return (data_word == WRITER_PATTERN ? 0 : 101);
+}
+
+/* The first word of erx_task_main's code, through the task's own mapping of it. */
+static volatile uint64_t *
+code_word(void)
+{
+	return ((volatile uint64_t *)(uintptr_t)&erx_task_main);
+}
+
+/* A write to code shared with every task that runs the image: it faults, so the return is a failure. */
+static int64_t
+mode_code_write(void)
+{
+	*code_word() = WRITER_PATTERN;
+	return (110);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -268,6 +295,12 @@ erx_task_main(uint64_t argument)
 		return (mode_bell(argument));
 	case MODE_RELEASE:
 		return (mode_release(argument >> SLOT_SHIFT));
+	case MODE_DATA:
+		return (mode_data());
+	case MODE_CODE_READ:
+		return ((int64_t)*code_word());
+	case MODE_CODE_WRITE:
+		return (mode_code_write());
 	default:
 		return (90);
 	}

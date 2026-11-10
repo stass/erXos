@@ -29,8 +29,10 @@ class HandlesTest < Minitest::Test
                               'past the limit was given'],
     'a stale close counted' => ["\tif (entry_live(objects, entry)) {\n", "\tif (entry->object != 0) {\n",
                               "a close's last reference misjudged"],
-    'a mapping ignored' => ["\treturn (record->handles == 0 && record->mappings == 0);\n",
-                          "\treturn (record->handles == 0);\n", 'a mapped object went with its last handle'],
+    'a mapping ignored' => ["\treturn (record->handles == 0 && record->mappings == 0 && record->kept == 0);\n",
+                          "\treturn (record->handles == 0 && record->kept == 0);\n", 'a mapped object went with its last handle'],
+    'a keep ignored' => ["\treturn (record->handles == 0 && record->mappings == 0 && record->kept == 0);\n",
+                       "\treturn (record->handles == 0 && record->mappings == 0);\n", 'a kept record went unreferenced'],
     'a freed record taken while retired' => ["\twhile (found < capacity && erx_backend_object_at(objects, found)->kind != ERX_BACKEND_OBJECT_FREE)\n",
                                            "\twhile (found < capacity && erx_backend_object_at(objects, found)->kind > ERX_BACKEND_OBJECT_RETIRED)\n",
                                            'a handle answers otherwise than the model']

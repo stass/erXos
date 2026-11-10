@@ -218,9 +218,7 @@ The design is ready; its implementation waits for the system to need it.
   1. Measure a session's pages at its prompt, with the funnel's scratch
      sized by frame, replacing the estimates of [Memory saved and what it
      costs](#memory-saved-and-what-it-costs).
-  2. Land the shared image segments of [The executable's own
-     pages](#the-executables-own-pages).
-  3. Build this design, if the count of adopters and the session's
+  2. Build this design, if the count of adopters and the session's
      measurement still call for it.
 
   The session's measurement also weighs [binding less per
@@ -1067,14 +1065,10 @@ The image loader shares the ERTS executable itself by a separate
 mechanism: for an image entry such as `runtimes/emu`, `erx_image_map`
 maps the read-only and read-execute segments from the boot archive's own
 pages, through one slice per entry that the root keeps, charged to the
-root, and copies only the writable segments into each space. That is the
+root, and copies only the writable segments into each space, as the
 `erx_image_slice` and `erx_image_map` row of
-[design-stopgap.md](design-stopgap.md) as the shared image segments change
-(branch `shared-segments`) writes it; the row on master copies every
-segment. This section depends on that change for the executable's pages
-being shared; nothing else in this design does. Every domain that runs
-`runtimes/emu` then holds one physical copy of its text and read-only
-data.
+[design-stopgap.md](design-stopgap.md) says. Every domain that runs
+`runtimes/emu` holds one physical copy of its text and read-only data.
 
 The two fit together without touching:
 

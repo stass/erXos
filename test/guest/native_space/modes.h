@@ -19,6 +19,9 @@
 #define MODE_TIME	8	/* finds TIME_FIRST_NS, raises its signal, sees TIME_SECOND_NS: ends with 0 */
 #define MODE_BELL	9	/* in its domain group: waits for its bell, then acks it and rings the root's: ends with 0 */
 #define MODE_RELEASE	10	/* lists the slice whose handle the root passed, mapped at SLICE_ADDR: ends with 0 */
+#define MODE_DATA	11	/* finds DATA_PATTERN in its own writable data and writes WRITER_PATTERN there: ends with 0 */
+#define MODE_CODE_READ	12	/* ends with the first word of its own code as its status */
+#define MODE_CODE_WRITE	13	/* writes the first word of its own code, which faults at its gate */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -45,6 +48,7 @@
 
 #define ROOT_PATTERN	UINT64_C(0x5ea5ea5ea5ea5ea5)
 #define WRITER_PATTERN	UINT64_C(0x0ddba11c0ffee000)
+#define DATA_PATTERN	UINT64_C(0xda7ada7ada7ada7a)
 /* What the root passes a first thread it starts above MODE_FIRST, and what that thread ends with. */
 #define FIRST_TAG	UINT64_C(0x5eed)
 #define FIRST_STATUS	55

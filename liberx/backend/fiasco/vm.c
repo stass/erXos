@@ -30,6 +30,7 @@
  * object can put them on the free list.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -84,6 +85,7 @@ typedef struct vm_object {
 	uint64_t		device_base;	/* VM_OBJECT_CONTIGUOUS: offset 0's device address */
 	uint32_t		slice_first;	/* VM_OBJECT_SLICE: its first archive entry */
 	uint32_t		slice_count;	/* VM_OBJECT_SLICE: how many entries it holds */
+	bool			code;		/* VM_OBJECT_SLICE: an image entry's, which erx_fiasco_vm_image_map may execute */
 	uint64_t		size;
 	erx_backend_vm_table_t	table;
 } vm_object_t;
@@ -114,6 +116,7 @@ static vm_task_t *vm_task(uint32_t);
 static vm_object_t *vm_object(uint32_t);
 static uint32_t	vm_label_task(uint32_t);
 static _Noreturn void vm_refused(const char *);
+static int	object_map(uint32_t, uint32_t, uint64_t, uint64_t, uint64_t, uint32_t);
 
 const erx_backend_grow_pages_t erx_fiasco_vm_records = { .take = vm_record_take, .give = vm_record_give };
 
@@ -347,6 +350,7 @@ object_fill(uint32_t index, uint64_t size, const erx_backend_vm_effects_t *effec
 		return (status == ERX_ERANGE ? ERX_ENOMEM : status);
 	}
 	object->kind = kind;
+	object->code = false;
 	object->size = size;
 	return (ERX_OK);
 }
@@ -428,6 +432,12 @@ erx_fiasco_vm_slice_create(uint32_t object, uintptr_t window, uint64_t size, uin
 	return (ERX_OK);
 }
 
+void
+erx_fiasco_vm_slice_code(uint32_t object)
+{
+	vm_object(object)->code = true;
+}
+
 int
 erx_fiasco_vm_slice_entries(uint32_t index, uint32_t *first, uint32_t *count)
 {
@@ -497,8 +507,28 @@ erx_fiasco_vm_object_map(uint32_t task, uint32_t index, uint64_t addr, uint64_t 
 	if ((object->kind != VM_OBJECT_PAGES && prot == ERX_PROT_RX) ||
 	    (object->kind == VM_OBJECT_SLICE && prot != ERX_PROT_R))
 		return (ERX_ERIGHTS);
-	const int status = erx_backend_vm_map_object(&vm_task(task)->table, &object->table, index, &vm_effects, addr, size,
-	    offset, prot);
+	return (object_map(task, index, addr, size, offset, prot));
+}
+
+/*
+ * An image entry's code or read-only data: the archive's pages, which the root holds read
+ * and execute and no task writes, so neither right lets a task change what another runs.
+ */
+int
+erx_fiasco_vm_image_map(uint32_t task, uint32_t index, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
+{
+	const vm_object_t *const object = vm_object(index);
+
+	if (object->kind != VM_OBJECT_SLICE || !object->code || (prot != ERX_PROT_R && prot != ERX_PROT_RX))
+		return (ERX_ERIGHTS);
+	return (object_map(task, index, addr, size, offset, prot));
+}
+
+static int
+object_map(uint32_t task, uint32_t index, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
+{
+	const int status = erx_backend_vm_map_object(&vm_task(task)->table, &vm_object(index)->table, index, &vm_effects,
+	    addr, size, offset, prot);
 
 	/* Each record counts once, here, and goes once, by vm_unmapped or a revoke: the count is the records' number. */
 	if (status == ERX_OK)

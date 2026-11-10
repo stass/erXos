@@ -19,6 +19,7 @@
 #include "blake3/blake3.h"
 #include "erx/abi.h"
 #include "erx/pack.h"
+#include "liberx/backend/fiasco/cache.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/slice.h"
@@ -37,23 +38,78 @@ typedef struct slice_fill {
 	uint32_t	first, count;
 } slice_fill_t;
 
+static int	slice_run(const erx_fiasco_image_slice_request_t *, slice_fill_t *);
+static bool	slice_holds_image(const slice_fill_t *);
 static int	slice_fill(uint32_t, const void *);
 static size_t	slice_prefix(const uint8_t *, size_t);
+
+/* The file checks' hasher: large for the service's stack, and one body runs at a time. */
+static erx_blake3_ctx_t slice_hasher;
+
+int
+erx_fiasco_slice_create_body(uint32_t caller, const erx_fiasco_image_slice_request_t *request, uint64_t *slice)
+{
+	slice_fill_t fill;
+	int status;
+
+	if (caller != ERX_FIASCO_TASK_ROOT || erx_fiasco_task_archive() == NULL)
+		return (ERX_ENOTSUP);
+	status = slice_run(request, &fill);
+	/* An image entry's one slice is erx_image_map's, which no revoke of another may reach. */
+	if (status == ERX_OK && slice_holds_image(&fill))
+		status = ERX_ERANGE;
+	if (status != ERX_OK)
+		return (status);
+	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, slice_fill, &fill, slice));
+}
+
+/*
+ * The entry's file is checked first, its hash, its padding and the image layout
+ * erx_pack_file_check reads, since the map shows its pages as they are. The slice is
+ * the root's and its one handle goes at once: it is kept (erx_fiasco_object_keep), and
+ * with no handle no destroy can name it. The keep comes before the close, which would
+ * otherwise end an object with no reference. The root's budget is
+ * never destroyed, so no budget's walk ends it either.
+ */
+int
+erx_fiasco_slice_image(uint32_t entry, uint32_t *object)
+{
+	const erx_fiasco_image_slice_request_t request = { .caller = ERX_FIASCO_TASK_ROOT, .budget = ERX_CAP_SELF,
+	    .first = entry, .count = 1 };
+	erx_pack_error_t error;
+	slice_fill_t fill;
+	uint64_t handle;
+	int status;
+
+	if (!erx_pack_file_check(erx_fiasco_task_archive(), entry, &slice_hasher, &error))
+		return (ERX_ECORRUPT);
+	status = slice_run(&request, &fill);
+	if (status == ERX_OK)
+		status = erx_fiasco_object_create(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_OBJECT_MEMORY, request.budget, slice_fill, &fill,
+		    &handle);
+	if (status == ERX_OK)
+		status = erx_fiasco_object_find(ERX_FIASCO_TASK_ROOT, handle, ERX_BACKEND_OBJECT_MEMORY, object);
+	if (status != ERX_OK)
+		return (status);
+	erx_fiasco_object_keep(*object);
+	(void)erx_fiasco_cap_close_body(ERX_FIASCO_TASK_ROOT, handle);
+	erx_fiasco_vm_slice_code(*object);
+	erx_fiasco_cache_make_coherent(fill.window, (size_t)fill.size);
+	return (ERX_OK);
+}
 
 /*
  * The run covers its entries' pages: erx_pack_open checked that each run starts on a
  * page inside the archive, whose size is whole pages, so the last run's end rounded up
  * stays inside it too.
  */
-int
-erx_fiasco_slice_create_body(uint32_t caller, const erx_fiasco_image_slice_request_t *request, uint64_t *slice)
+static int
+slice_run(const erx_fiasco_image_slice_request_t *request, slice_fill_t *fill)
 {
 	const erx_pack_view_t *const archive = erx_fiasco_task_archive();
 	erx_pack_entry_t first, last;
 	uint64_t end;
 
-	if (caller != ERX_FIASCO_TASK_ROOT || archive == NULL)
-		return (ERX_ENOTSUP);
 	if (request->count == 0 || request->first >= archive->header.nentries ||
 	    request->count > archive->header.nentries - request->first ||
 	    !erx_pack_entry_at(archive, (uint32_t)request->first, &first) ||
@@ -67,10 +123,21 @@ erx_fiasco_slice_create_body(uint32_t caller, const erx_fiasco_image_slice_reque
 	if (end <= first.data_off || (first.data_off & SLICE_PAGE_MASK) != 0 ||
 	    ((uintptr_t)archive->bytes & SLICE_PAGE_MASK) != 0)
 		return (ERX_ERANGE);
-	const slice_fill_t fill = { .window = (uintptr_t)archive->bytes + (uintptr_t)first.data_off,
+	*fill = (slice_fill_t){ .window = (uintptr_t)archive->bytes + (uintptr_t)first.data_off,
 	    .size = end - first.data_off, .first = (uint32_t)request->first, .count = (uint32_t)request->count };
+	return (ERX_OK);
+}
 
-	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, slice_fill, &fill, slice));
+/* Whether the run holds an image entry; slice_run read each end of it, so each entry is there. */
+static bool
+slice_holds_image(const slice_fill_t *fill)
+{
+	erx_pack_entry_t entry;
+
+	for (uint32_t index = fill->first; index - fill->first < fill->count; index++)
+		if (erx_pack_entry_at(erx_fiasco_task_archive(), index, &entry) && entry.kind == ERX_ENTRY_IMAGE)
+			return (true);
+	return (false);
 }
 
 static int
@@ -103,8 +170,6 @@ erx_fiasco_mem_copy_body(uint32_t caller, const erx_fiasco_mem_copy_request_t *r
 int
 erx_fiasco_release_entry_body(uint32_t task, const erx_fiasco_release_entry_request_t *request, erx_fiasco_reply_t *reply)
 {
-	/* The hasher is large for the service's stack, and one body runs at a time. */
-	static erx_blake3_ctx_t hasher;
 	const erx_pack_view_t *const archive = erx_fiasco_task_archive();
 	erx_fiasco_thread_record_t *const record = erx_fiasco_task_record(task, (uint32_t)request->caller);
 	erx_pack_error_t error = { .reason = "file", .entry = UINT32_MAX };
@@ -131,7 +196,7 @@ erx_fiasco_release_entry_body(uint32_t task, const erx_fiasco_release_entry_requ
 	relative = length - prefix;
 	if (request->piece > relative)
 		return (ERX_ERANGE);
-	if (request->check == 1 && !erx_pack_file_check(archive, index, &hasher, &error))
+	if (request->check == 1 && !erx_pack_file_check(archive, index, &slice_hasher, &error))
 		return (ERX_ECORRUPT);
 	for (size_t done = 0; done < ERX_UTCB_BYTES_MAX && request->piece + done < relative;
 	    done += sizeof(uint64_t)) {

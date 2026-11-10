@@ -20,12 +20,14 @@ module Erx
   module NativeSpace
     MEMORY_MIB = 512
     PROGRAM_PATH = 'boot/native-space'
+    # The same program as an image entry, whose read-only segments every task shares.
+    IMAGE_PATH = 'boot/native-space-image'
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                     'liberx/backend/core/refused.c', 'test/guest/native_space/guest.c'].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_space/program.c'].freeze
     CASES = %w[program_found writer_released between_tasks bounds revoke gate_refusals gate_queue
                created space_refusals released first_thread budget_calls budget_destroy groups passing time budget_held
-               doorbells slices copy].freeze
+               doorbells slices copy image_shared].freeze
     # The image's domains/sample/ release, as test/guest/native_space/modes.h describes it.
     RELEASE_FILES = { 'domains/sample/alpha' => "alpha file\n",
                       "domains/sample/#{'long-name/' * 60}end" => "long file\n" }.freeze
@@ -80,7 +82,8 @@ module Erx
         root_task = native.build(name: 'space-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: [])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task,
-                        programs: { PROGRAM_PATH => program, **release_files(File.join(@build, 'release')) })
+                        programs: { PROGRAM_PATH => program, **release_files(File.join(@build, 'release')) },
+                        images: { IMAGE_PATH => program })
       end
 
       # Writes each file of RELEASE_FILES under directory, by its index in the table.

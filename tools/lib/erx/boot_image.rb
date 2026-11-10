@@ -36,14 +36,16 @@ module Erx
     end
 
     # Rebuilds directory from nothing, so a stale archive cannot stand in. programs maps
-    # further archive paths to files, which a stand-in root loads.
-    def build(directory:, stand_in_root: nil, programs: {})
+    # further archive paths to files, which a stand-in root loads; images maps paths to
+    # executables packed as image entries, as a domain runtime is, and jit names those of
+    # them whose manifest marks ERX_IMAGE_JIT, as the BeamAsm runtime's does.
+    def build(directory:, stand_in_root: nil, programs: {}, images: {}, jit: [])
       FileUtils.remove_entry(directory) if File.exist?(directory)
       OutputDirectory.prepare(root: @root, path: directory)
       recipe = File.join(directory, 'recipe')
       fixture = StructuralPackFixture.build(root: @root, directory: recipe, codec: @codec, runner: @runner, tools: tools,
                                             compiler: @compiler, linker: @linker, external: external,
-                                            extra_files: extra_files(stand_in_root, programs), first_stage: @fiasco.image_path)
+                                            extra_files: extra_files(stand_in_root, programs, images, jit), first_stage: @fiasco.image_path)
       report = fixture.fetch('report')
       header = @codec.decode_layout('erx_pack_header', File.binread(report.fetch('path'), @codec.layout_size('erx_pack_header')))
       Built.new(single: report.fetch('single_path'), archive: report.fetch('path'), first_stage: @fiasco.image_path,
@@ -62,11 +64,15 @@ module Erx
 
     private
 
-    def extra_files(stand_in_root, programs)
-      files = [{ path: @codec.fixed_bytes('boot_kernel_path'), snapshot: @kernel },
+    def extra_files(stand_in_root, programs, images, jit)
+      stray = jit - images.keys
+      raise Error, "jit names #{stray.join(', ')}, which images does not pack" unless stray.empty?
+
+      files =[{ path: @codec.fixed_bytes('boot_kernel_path'), snapshot: @kernel },
                { path: @codec.fixed_bytes('boot_sigma0_path'), snapshot: @fiasco.sigma0_path }]
       files << { path: @codec.fixed_bytes('boot_stand_in_root_path'), snapshot: stand_in_root } if stand_in_root
       files.concat(programs.map { |path, file| { path: path, snapshot: file } })
+      files.concat(images.map { |path, file| { path: path, snapshot: file, image: true, jit: jit.include?(path) } })
       files.each { |file| raise Error, "#{file.fetch(:snapshot)} is not built" unless File.file?(file.fetch(:snapshot)) }
       files
     end

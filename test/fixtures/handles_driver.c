@@ -347,12 +347,19 @@ case_refusals_and_mappings(void)
 	check(erx_backend_handle_close(&objects, &handles, 1, &freed, &found) == ERX_EINVAL, "a closed entry closed again",
 	    0);
 	erx_backend_object_at(&objects, index)->mappings = 0;
+	erx_backend_object_at(&objects, index)->kept = 1;
+	check(!erx_backend_object_unreferenced(erx_backend_object_at(&objects, index)), "a kept record went unreferenced",
+	    0);
+	erx_backend_object_at(&objects, index)->kept = 0;
 	check(erx_backend_object_unreferenced(erx_backend_object_at(&objects, index)), "an unreferenced record kept", 0);
+	/* A record taken again is not kept, whatever its last object was. */
+	erx_backend_object_at(&objects, index)->kept = 1;
 	erx_backend_object_free(&objects, index);
 	check(erx_backend_object_at(&objects, index)->kind == ERX_BACKEND_OBJECT_FREE &&
 	    erx_backend_object_at(&objects, index)->generation == 1, "a free did not move the generation on", 0);
 	check(erx_backend_object_take(&objects, ERX_BACKEND_OBJECT_MEMORY, 3, 4, &found) == ERX_OK && found == index,
 	    "a freed record was not taken again", found);
+	check(erx_backend_object_at(&objects, index)->kept == 0, "a freed record kept its keep", 0);
 	erx_backend_object_unmake(&objects, index);
 	check(erx_backend_object_at(&objects, index)->kind == ERX_BACKEND_OBJECT_FREE &&
 	    erx_backend_object_at(&objects, index)->generation == 1, "an unmake moved the generation", 0);

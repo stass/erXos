@@ -191,11 +191,13 @@ reserve(erx_boot_range_t range, char const *name, Region::Type type,
   mem_manager->regions->add(Region::start_size(range.start, range.size, name, type, rights));
 }
 
-// Reserve the archive first, never to be released, then the images, then copy.
+// Reserve the archive first, never to be released, then the images, then copy. The
+// archive is the root's to read and execute and never to write: the root maps an
+// image entry's code from the archive's own pages into every task that runs it.
 static void
 apply(void)
 {
-  reserve(plan.archive, ".erxpack", Region::Root, Region::Root_section_ro);
+  reserve(plan.archive, ".erxpack", Region::Root, Region::Root_section_rx);
   reserve({plan.kernel.start, plan.kernel.size}, ".kernel", Region::Kernel);
   reserve({plan.sigma0.start, plan.sigma0.size}, ".sigma0", Region::Sigma0);
   // A root region's subtype is what sigma0 may page to the root task. The root

@@ -47,8 +47,6 @@ static void	object_unheld(uint32_t);
 
 /* Every object record, by index. */
 static erx_backend_grow_table_t object_records;
-/* The record erx_fiasco_object_keep keeps, or UINT32_MAX before it runs. */
-static uint32_t object_kept = UINT32_MAX;
 /* Each task's handle table, by the task's index. */
 static erx_backend_grow_table_t object_tables;
 /* Whether a record may be marked to end, so the drain has work. */
@@ -192,8 +190,7 @@ erx_fiasco_object_mapped(uint32_t index)
 void
 erx_fiasco_object_keep(uint32_t index)
 {
-	erx_fiasco_object_mapped(index);
-	object_kept = index;
+	erx_backend_object_at(&object_records, index)->kept = 1;
 }
 
 void
@@ -235,7 +232,7 @@ erx_fiasco_object_destroy_body(uint32_t task, uint64_t handle)
 	if (status != ERX_OK)
 		return (status);
 	record = erx_backend_object_at(&object_records, index);
-	if (record->creator != task || index == object_kept)
+	if (record->creator != task || record->kept != 0)
 		return (ERX_ERIGHTS);
 	/* A group never goes before its threads, which end only by their own exit or with their task. */
 	if (record->kind == ERX_BACKEND_OBJECT_GROUP && erx_fiasco_group_home_has_threads(index))
@@ -252,9 +249,9 @@ object_later(uint32_t index)
 }
 
 /*
- * A record whose last handle went and that has no mapping ends, but for a group whose
- * home has threads: its home holds it, and it goes with that home (service_task.c), so a
- * group never goes before its threads.
+ * A record whose last handle went, that has no mapping and is not kept ends, but for a
+ * group whose home has threads: its home holds it, and it goes with that home
+ * (service_task.c), so a group never goes before its threads.
  */
 static void
 object_unheld(uint32_t index)

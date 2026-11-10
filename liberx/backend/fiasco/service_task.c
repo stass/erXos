@@ -37,6 +37,7 @@
 #include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/object.h"
 #include "liberx/backend/fiasco/service_task.h"
+#include "liberx/backend/fiasco/slice.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/trace.h"
@@ -69,6 +70,8 @@ static void	task_remove(uint32_t);
 static void	task_delete_tree(uint32_t);
 static void	task_delete(uint64_t);
 static bool	task_segment_load(uint32_t, const uint8_t *, const erx_elf_load_t *, uint64_t);
+static bool	task_segment_share(uint32_t, uint32_t, const erx_elf_load_t *, uint64_t);
+static int	task_image_slice(uint32_t, uint32_t *);
 static int	task_fill_pages(uint32_t, const void *);
 static int	task_fill_physical(uint32_t, const void *);
 static int	task_fill_contiguous(uint32_t, const void *);
@@ -84,6 +87,8 @@ static erx_backend_grow_table_t task_rows;
  */
 static erx_backend_grow_table_t task_spaces;
 static const erx_pack_view_t *task_archive;
+/* By archive entry: its image slice's object record index plus one, or 0 before its first map. */
+static erx_backend_grow_table_t task_image_slices;
 /* One plan at a time, as the service runs one body: too large for its stack to spare. */
 static erx_elf_plan_t task_plan;
 
@@ -122,6 +127,7 @@ erx_fiasco_task_table_init(void)
 
 	erx_backend_grow_table_init(&task_rows, sizeof(erx_fiasco_task_t), &erx_fiasco_vm_records);
 	erx_backend_grow_table_init(&task_spaces, sizeof(uint32_t), &erx_fiasco_vm_records);
+	erx_backend_grow_table_init(&task_image_slices, sizeof(uint32_t), &erx_fiasco_vm_records);
 	/* Both first pages now, so a task's first create takes no table page a page count would miss. */
 	if (erx_backend_grow_table_room(&task_rows, 1) != ERX_OK || erx_backend_grow_table_room(&task_spaces, 1) != ERX_OK)
 		return ("memory: the pool cannot hold the task table");
@@ -393,12 +399,54 @@ task_segment_load(uint32_t task, const uint8_t *image, const erx_elf_load_t *loa
 }
 
 /*
+ * One read-only or read-execute segment of an image entry: the entry's own pages in the
+ * archive, mapped from its slice at the segment's protection. The pack tool stores such a
+ * segment's whole memory from a page boundary, zero past its file bytes, which the
+ * file check at the slice's making holds, so its pages are the slice's from its file
+ * offset; the map refuses an offset off a page and pages past the slice.
+ */
+static bool
+task_segment_share(uint32_t task, uint32_t slice, const erx_elf_load_t *load, uint64_t base)
+{
+	const uint64_t start = base + load->segment.mem_offset;
+	const uint64_t size = (load->segment.mem_size + ERX_BACKEND_VM_PAGE_MASK) & ~ERX_BACKEND_VM_PAGE_MASK;
+	uint64_t reserved;
+
+	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, start, size, ERX_VM_FIXED | ERX_VM_NOREPLACE, &reserved) ==
+	    ERX_OK && erx_fiasco_vm_image_map(task, slice, start, size, load->source_offset, load->segment.prot) == ERX_OK);
+}
+
+/* The image entry's slice, made at the entry's first map and the same for every later one. */
+static int
+task_image_slice(uint32_t entry, uint32_t *slice)
+{
+	uint32_t *row;
+	int status;
+
+	/* entry names an entry of the archive, so entry + 1 does not wrap. */
+	if (erx_backend_grow_table_room(&task_image_slices, entry + 1) != ERX_OK)
+		return (ERX_ENOMEM);
+	row = erx_backend_grow_table_at(&task_image_slices, entry);
+	if (*row == 0) {
+		status = erx_fiasco_slice_image(entry, slice);
+		if (status != ERX_OK)
+			return (status);
+		*row = *slice + 1;
+	}
+	*slice = *row - 1;
+	return (ERX_OK);
+}
+
+/*
  * The kernel's call takes a slice of the image and an entry of it; this backend has
  * one image, the boot archive, and no slices, so image is ignored. An entry loads in
  * either of its two forms: an image entry (a domain's runtime) by the manifest the
  * pack tool wrote, through erx_image_plan, or a file entry holding an ELF executable
  * (the test launcher's programs) through erx_elf_plan. Only a program linked at fixed
- * addresses can load, as there is no relocation here.
+ * addresses can load, as there is no relocation here. An image entry's read-only and
+ * read-execute segments are its slice's pages, shared by every space that runs it;
+ * its writable segments, and every segment of a file entry, whose offsets are the
+ * ELF file's, are copied into the space.
  */
 int
 erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start)
@@ -406,7 +454,7 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 	erx_pack_entry_t file;
 	erx_elf_error_t error;
 	const uint8_t *image;
-	uint32_t task;
+	uint32_t task, slice = 0;
 	bool planned;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
@@ -421,9 +469,19 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 		planned = erx_elf_plan(image, (size_t)file.data_size, UINT64_MAX, &task_plan, &error);
 	if (!planned || (task_plan.flags & ERX_IMAGE_FIXED) == 0)
 		return (ERX_EINVAL);
-	for (uint32_t load = 0; load < task_plan.nloads; load++)
-		if (!task_segment_load(task, image, &task_plan.loads[load], task_plan.fixed_base))
+	if (file.kind == ERX_ENTRY_IMAGE && task_image_slice((uint32_t)entry, &slice) != ERX_OK)
+		return (ERX_ENOMEM);
+	for (uint32_t index = 0; index < task_plan.nloads; index++) {
+		const erx_elf_load_t *const load = &task_plan.loads[index];
+		bool loaded;
+
+		if (file.kind == ERX_ENTRY_IMAGE && load->segment.prot != ERX_PROT_RW)
+			loaded = task_segment_share(task, slice, load, task_plan.fixed_base);
+		else
+			loaded = task_segment_load(task, image, load, task_plan.fixed_base);
+		if (!loaded)
 			return (ERX_ENOMEM);
+	}
 	*start = task_plan.fixed_base + task_plan.entry;
 	return (ERX_OK);
 }

@@ -31,7 +31,9 @@ module Erx
     # The domains' release: one file, which program.c reads through its slice.
     RELEASE_PATH = 'domains/native/release'
     RELEASE_SOURCE = 'test/guest/native_domain/release.txt'
-    # ERTS's image and its release, at the paths guest.c finds them by.
+    # ERTS's image and its release, at the paths guest.c finds them by. Both runtimes are
+    # image entries, as a domain runtime is in a system image, so their read-only segments
+    # are shared by every domain that runs them.
     ERTS_PATH = 'runtimes/emu'
     ERTS_RELEASE = ReleaseFiles.domain('erts', applications: ReleaseFiles::DOMAIN_BASE)
     JIT_PATH = 'runtimes/jit'
@@ -129,10 +131,11 @@ module Erx
                                                         archives: [*erts.otp_archives, erts.libc, fiasco.user_library('libgcc.a')])
         root_task = native.build(name: 'domain-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: ROOT_FLAGS)
         programs = { PROGRAM_PATH => program, RELEASE_PATH => File.join(@root, RELEASE_SOURCE),
-                     ERTS_PATH => runtime.fetch(:program), JIT_PATH => jit_runtime(native, fiasco, erts),
                      **release(erts), **jit_modules }
+        images = { ERTS_PATH => runtime.fetch(:program), JIT_PATH => jit_runtime(native, fiasco, erts) }
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
-                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task, programs: programs)
+                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task, programs: programs, images: images,
+                        jit: [JIT_PATH])
       end
 
       # The BeamAsm image, over the interpreter build's musl and release.

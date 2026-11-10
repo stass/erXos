@@ -87,6 +87,17 @@ int	erx_fiasco_vm_object_dma_addr(uint32_t object, uint64_t offset, uint64_t *ad
  */
 int	erx_fiasco_vm_slice_create(uint32_t object, uintptr_t window, uint64_t size, uint32_t first, uint32_t count)
 	    ERX_WARN_UNUSED_RESULT;
+/*
+ * The loader's map of an image entry's read-only or read-execute segment from its slice
+ * (erx_fiasco_task_image_map_body alone): an object that is not a code slice, or a
+ * protection other than R and RX, ERX_ERIGHTS; otherwise erx_fiasco_vm_object_map's
+ * results. erx_vm_map of a slice is read-only, so this is the one map that executes
+ * the archive's pages, and only those of the slices erx_fiasco_vm_slice_code marked.
+ */
+int	erx_fiasco_vm_image_map(uint32_t task, uint32_t object, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
+	    ERX_WARN_UNUSED_RESULT;
+/* Marks a slice an image entry's code slice (erx_fiasco_slice_image alone), which the image map may execute. */
+void	erx_fiasco_vm_slice_code(uint32_t object);
 /* A slice's run of archive entries; another kind of object is ERX_ETYPE. */
 int	erx_fiasco_vm_slice_entries(uint32_t object, uint32_t *first, uint32_t *count) ERX_WARN_UNUSED_RESULT;
 

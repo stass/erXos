@@ -21,8 +21,9 @@ module StructuralPackFixture
   BUDGET = 32 * 1_048_576
   module_function
 
-  # extra_files are further file entries, { path:, snapshot: }, which the wire
-  # format carries and the manifest's catalog binds like any other.
+  # extra_files are further entries, { path:, snapshot: }, which the wire format
+  # carries and the manifest's catalog binds like any other: file entries, or
+  # image entries planned as the root's is when the file says image: true.
   def build(root:, directory:, codec:, runner:, tools:, compiler:, linker:, external:, extra_files: [], first_stage: nil)
     directory = Erx::OutputDirectory.prepare(root: root, path: directory)
     raise Erx::Error, 'structural fixture build requires a clean directory' unless Dir.empty?(directory)
@@ -46,16 +47,11 @@ module StructuralPackFixture
                       'sha256' => Digest::SHA256.file(native.fetch('artifact')).hexdigest },
         'image' => writer.image_manifest(plan) }
     ]
-    rows += extra_files.map do |file|
-      { 'path' => file.fetch(:path), 'kind' => ordinary, 'flags' => 0, 'snapshot' => file.fetch(:snapshot),
-        'size' => File.size(file.fetch(:snapshot)),
-        'source' => { 'kind' => 'artifact', 'id' => file.fetch(:path),
-                      'sha256' => Digest::SHA256.file(file.fetch(:snapshot)).hexdigest } }
-    end
+    rows += extra_files.map { |file| extra_row(file, planner: planner, writer: writer, codec: codec) }
     rows = rows.sort_by { |row| row.fetch('path').b }
     root_entry = rows.index { |row| row.fetch('path') == 'system/root' }
     context = Erx::Manifest::Context.new(build_kind: 'development', platform: ManifestContextFixture.platform,
-                                         catalog: rows.map { |row| row.reject { |key, _| %w[snapshot size].include?(key) } },
+                                         catalog: rows.map { |row| row.reject { |key, _| %w[snapshot size plan].include?(key) } },
                                          root_entry: root_entry,
                                          artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_entry } }.merge(ManifestContextFixture.images),
                                          provenance: provenance)
@@ -104,5 +100,20 @@ module StructuralPackFixture
     File.write(File.join(directory, 'fixture-result.json'), JSON.pretty_generate(report) + "\n")
     { 'report' => report.freeze, 'context' => context, 'manifest_source' => source.freeze,
       'native' => native, 'provenance' => provenance, 'rows' => rows.freeze }.freeze
+  end
+
+  def extra_row(file, planner:, writer:, codec:)
+    snapshot = file.fetch(:snapshot)
+    row = { 'path' => file.fetch(:path), 'kind' => codec.member('entry_kind', 'file'), 'flags' => 0, 'snapshot' => snapshot,
+            'size' => File.size(snapshot),
+            'source' => { 'kind' => 'artifact', 'id' => file.fetch(:path), 'sha256' => Digest::SHA256.file(snapshot).hexdigest } }
+    return row unless file.fetch(:image, false)
+
+    # As Pack#image_manifest does, the JIT mark goes into the manifest only; the plan stays the planner's.
+    plan = planner.call(snapshot, budget: BUDGET)
+    jit = file.fetch(:jit, false) ? codec.member('image_flags', 'jit') : 0
+    manifest = writer.image_manifest(plan.merge('flags' => plan.fetch('flags') | jit))
+    row.merge('kind' => codec.member('entry_kind', 'image'), 'size' => plan.fetch('output_size'), 'plan' => plan,
+              'image' => manifest)
   end
 end

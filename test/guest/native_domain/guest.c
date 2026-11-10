@@ -175,16 +175,28 @@ limits_default(void)
 	    .peer_held = MIB, .peer_held_total = 4 * MIB });
 }
 
-/* The library's view of the boot image's files: each entry's kind, flags and span. */
+/*
+ * The library's view of the boot image's files: each entry's kind, flags and span, and
+ * an image entry's manifest read by erx_dom_boot_image, as the system domain's boot
+ * reads it, so the BeamAsm manifest's ERX_IMAGE_JIT is what makes its spaces JIT.
+ */
 static void
 files_from(const erx_pack_view_t *pack, uint32_t program)
 {
 	erx_pack_entry_t entry;
+	size_t head_len;
 
-	for (uint32_t index = 0; index < pack->header.nentries && index < ERX_PACK_ENTRIES_MAX; index++)
-		if (erx_pack_entry_at(pack, index, &entry))
-			files[index] = (erx_dom_file_t){ .kind = (uint8_t)entry.kind, .flags = (uint8_t)entry.flags,
-			    .offset = entry.data_off, .size = entry.data_size };
+	for (uint32_t index = 0; index < pack->header.nentries && index < ERX_PACK_ENTRIES_MAX; index++) {
+		if (!erx_pack_entry_at(pack, index, &entry))
+			continue;
+		files[index] = (erx_dom_file_t){ .kind = (uint8_t)entry.kind, .flags = (uint8_t)entry.flags,
+		    .offset = entry.data_off, .size = entry.data_size };
+		head_len = 0;
+		if (entry.data_off <= pack->length)
+			head_len = (size_t)(pack->length - entry.data_off < entry.data_size ?
+			    pack->length - entry.data_off : entry.data_size);
+		erx_dom_boot_image(&files[index], head_len == 0 ? NULL : pack->bytes + entry.data_off, head_len);
+	}
 	/* The stand-in program is an ELF file with no image manifest, which the test admits as an accepted image. */
 	files[program].kind = ERX_ENTRY_IMAGE;
 	files[program].image_ok = true;
@@ -1824,13 +1836,19 @@ domain_run(const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t k
 	erx_dom_created_t created;
 	erx_dom_report_t report = { 0 };
 	erx_status_t made;
+	uint64_t free_before, create_start;
 	bool ended_itself, partied, passed, started;
 
 	if (spec == NULL)
 		return (false);
 	/* No end the party took for an earlier case stands for this one. */
 	party_ended = false;
+	free_before = erx_fiasco_vm_free_pages();
+	create_start = erx_fiasco_clock_ns();
 	made = erx_dom_lib_create(&lib, spec, NULL, 0, &created);
+	/* What a creation costs, the pool pages it took and its time, for the transcript: the image map is on this path. */
+	say_count("create_ns", erx_fiasco_clock_ns() - create_start);
+	say_count("create_pages", free_before - erx_fiasco_vm_free_pages());
 	if (made != ERX_OK) {
 		say_count("create_status", (uint64_t)(int64_t)made);
 		say_count("failed_step", lib.failed_at);
@@ -2091,25 +2109,27 @@ erx_fiasco_root_main(void)
 	if (reason == NULL) {
 		erx_fiasco_task_set_archive(&pack);
 		files_from(&pack, program);
-		files[erts].kind = ERX_ENTRY_IMAGE;
-		files[erts].image_ok = true;
-		/*
-		 * The BeamAsm image's manifest marks it ERX_IMAGE_JIT, which the domain
-		 * service reads from it; this root reads no manifest, so it sets the flag
-		 * the library makes ERX_SPACE_JIT from.
-		 */
-		files[jit].kind = ERX_ENTRY_IMAGE;
-		files[jit].image_ok = true;
-		files[jit].image_flags = ERX_IMAGE_JIT;
-		reason = library_up();
+		/* Only the BeamAsm manifest carries the JIT mark. */
+		if (!files[erts].image_ok || (files[erts].image_flags & ERX_IMAGE_JIT) != 0 || !files[jit].image_ok ||
+		    (files[jit].image_flags & ERX_IMAGE_JIT) == 0)
+			reason = "erx: domain: a runtime's image manifest was refused or has the wrong JIT mark\n";
+		else
+			reason = library_up();
 	}
 	if (reason != NULL) {
 		say(reason);
 		erx_fiasco_machine_off();
 	}
 	say_case("library", true);
-	/* The first run takes the root's and the service's tables' pages, so it is not counted. */
-	say_case("warm", domain_run(request_for("halt", program, 0), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS));
+	/*
+	 * The first run takes the root's and the service's tables' pages, and each runtime's
+	 * first map makes its image's slice, which the root keeps, so none of them is counted.
+	 * The runtimes' runs end at their spoiled boot pages.
+	 */
+	say_case("warm", domain_run(request_for("halt", program, 0), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS) &&
+	    domain_run(erts_request(erts), RUN_SPOIL, ERX_DOM_END_HALT, ERX_FIASCO_TASK_STATUS_BOOT_PAGE) &&
+	    domain_run(jit_request(jit, jit_reload_args, sizeof(jit_reload_args)), RUN_SPOIL, ERX_DOM_END_HALT,
+	    ERX_FIASCO_TASK_STATUS_BOOT_PAGE));
 	case_end("halt", request_for("halt", program, 0), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
 	case_end("fault", request_for("fault", program, 0), RUN_PLAIN, ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
 	case_end("stop", request_for("wait", program, 0), RUN_STOP, ERX_DOM_END_STOPPED, 0);
