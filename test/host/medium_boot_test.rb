@@ -113,6 +113,27 @@ class MediumBootTest < Minitest::Test
     assert_raises(Erx::Error) { Boot.manifest(plain.sub("  max_domains 0\n", '')) }
   end
 
+  # The footprint cell's manifest has room for its three domains and sets the system domain's
+  # /tmp cap; its expression creates one domain per step, the last with a tmp cap, and says
+  # what it measures.
+  def test_the_footprint_cell_has_room_for_its_domains_and_one_step_each
+    plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
+    cell = Boot::Footprint
+    grown = cell.manifest(plain, system_tmp: 4_194_304)
+    assert_equal 1, grown.scan("  tmp 4194304\n").size
+    assert_equal 3, grown[/^  max_domains ([0-9]+)$/, 1].to_i
+    growth = 3 * (cell::MEMORY + Boot::DOMAIN_OUTER)
+    assert_equal 100_925_440 + growth, grown[/^  root_memory ([0-9]+)$/, 1].to_i
+    assert_equal 16_777_216 + growth, grown[/^principal system\n  memory ([0-9]+)$/, 1].to_i
+    assert_equal %w[bare storage network], grown.scan(/^domain ([a-z]+)$/).flatten
+    assert_raises(Erx::Error) { cell.manifest(plain.sub("  tmp 16777216\n", ''), system_tmp: 0) }
+    runs = cell::RELEASES.keys.to_h { |name| [name, { 'entry' => name.size, 'files' => 7 }] }
+    expression = cell.expression(runs: runs, runtime: 41)
+    assert_equal cell::STEPS.size, expression.scan(/\{<<"[a-z0-9-]+">>,[0-9]+,7,[0-9]+\}/).size
+    assert_match(/<<"bare-tmp4">>,4,7,4194304\}/, expression)
+    assert_match(/\.\z/, expression)
+  end
+
   # The create map names the archive's indexes, and the answer is the one the configured
   # domain's halt and the cell's halt, stop, kill, BeamAsm halt and faceted halt give; a line with another
   # end, a restarted configured domain or a refused create does not pass.

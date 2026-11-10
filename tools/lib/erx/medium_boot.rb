@@ -4,6 +4,7 @@
 
 require 'digest/md5'
 require 'fileutils'
+require 'json'
 require_relative 'boot_record'
 require_relative 'error'
 require_relative 'fiasco'
@@ -224,18 +225,19 @@ module Erx
     # carries the release and the runtime image it names, which is how a manifest makes
     # its image carry them (docs/design-stopgap.md, "The production image"). The domain
     # service starts the row at boot; the shell creates the cell's domains through the
-    # service, each awaited before the next. The room is for two: the configured row, which
+    # service, each awaited before the next. By default the room is for two: the configured row, which
     # the build's planner plans against the principal and which runs while the shell starts,
     # and one domain of the shell's, or two at once after a kill, whose domain the service
     # stops behind its pid while the next create runs, once the configured one has ended. So
-    # the system principal's quota and max_domains go from 0 to 2, and its memory and
+    # the system principal's quota and max_domains go from 0 to domains (2), and its memory and
     # root_memory each grow by two domains' budgets. The development manifest itself,
     # what the production image promises, is unchanged. row replaces DOMAIN_ROW for a
-    # harness whose configured domain runs another way (SystemDomain).
-    def manifest(source, row: DOMAIN_ROW)
-      growth = 2 * (DOMAIN_MEMORY + DOMAIN_OUTER)
+    # harness whose configured domain runs another way (SystemDomain); domains is how many
+    # of domain_memory's domains the principal gains room for.
+    def manifest(source, row: DOMAIN_ROW, domains: 2, domain_memory: DOMAIN_MEMORY)
+      growth = domains * (domain_memory + DOMAIN_OUTER)
       { /^(principal system\n  memory )([0-9]+)$/ => growth, /^(  root_memory )([0-9]+)$/ => growth,
-        /^(principal system\n(?:  .*\n)*?  domains )(0)$/ => 2, /^(  max_domains )(0)$/ => 2 }
+        /^(principal system\n(?:  .*\n)*?  domains )(0)$/ => domains, /^(  max_domains )(0)$/ => domains }
         .reduce(MACHINE.manifest(source)) do |text, (pattern, added)|
           raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
 
@@ -450,6 +452,247 @@ module Erx
         @runner.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', tree, source], name: 'dtc-firmware-tree', deadline: 30)
         tree
       end
+    end
+
+    # The measuring cell of the driver domains' footprint (docs/plan.md, G6 and G9; no
+    # product code). It boots MACHINE's image with three configured domains that halt at
+    # once, so the archive carries their releases: bare (the domain base), storage (base and
+    # erx_blk) and network (base, erx_net and erx_net_client), each in a small
+    # runtime_limits profile. At the system domain's shell it creates each release as a
+    # domain, reads the root's pool pages in use (the system domain's budget record) with
+    # the domain up and again once it has stopped, and asks the domain over its system
+    # connection for erlang:memory(), its allocators' carriers, its threads and its loaded
+    # modules. Pool pages up minus after is the domain's cost to the root, ERTS copy
+    # included; it is an upper bound, since nothing of ERTS is shared between domains.
+    # erx_net and erx_blk are loaded and not started: erx_net's application needs the
+    # system domain's local transport and a device needs a holder, so the figure is the
+    # domain at rest with its modules loaded.
+    module Footprint
+      RELEASES = {
+        'bare' => ProductionImage::DOMAIN_APPLICATIONS,
+        'storage' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_blk'].freeze,
+        'network' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_net', 'erx_net_client'].freeze
+      }.freeze
+      # Applications a release only loads: erx_net's needs the system domain's local transport and
+      # erx_blk's a device. The cell loads the modules of these and of erx_net_client by hand.
+      LOAD_ONLY = %w[erx_net erx_blk].freeze
+      LOADED = %w[erx_blk erx_net erx_net_client].freeze
+      MEMORY = 64 << 20
+      # The small profile of the session domain, in the configured rows and in every create.
+      PROCESSES = 1024
+      ATOMS = 16_384
+      # A step: its name, its release and the cap of the domain's /tmp in bytes. The last step
+      # has a tmp cap above 0: the pool figure must not change, since a tmp cap is charged on use.
+      STEPS = [['bare', 'bare', 0], ['storage', 'storage', 0], ['network', 'network', 0],
+               ['bare-tmp4', 'bare', 4 << 20]].freeze
+      TMP_LINE = "  tmp 16777216\n"
+
+      PROFILE = <<~ROW
+        share drivers
+          quota_ns 3000000
+          period_ns 10000000
+          cpuset 15
+          capacity_mcpu 300
+          capacity_first 0
+          slice_us 1000
+          grace_us 5
+          base 16
+          ceiling 31
+          flags none
+        runtime_limits small
+          max_frame 65536
+          max_message_heap 1048576
+          funnel_depth 64
+          exports 256
+          tmp 0
+          overlay 0
+          atoms #{ATOMS}
+          foreign_atoms 1024
+          processes #{PROCESSES}
+        limits drv
+          memory #{MEMORY}
+          outer #{DOMAIN_OUTER}
+          grant @share.drivers
+          spaces none
+          lane 4096
+          connections 0
+          crash 0
+          flags none
+          runtime_limits @runtime_limits.small
+          peer_held 4096
+          peer_held_total 4096
+      ROW
+
+      # Start type load for the modules a domain cannot start, in domain releases; in the
+      # system release erx_net and erx_blk are loaded too, so the system domain's figure is
+      # the shell's with no device service running.
+      module LoadOnly
+        private
+
+        def release_entry(application)
+          return "{#{application},\"#{version(application)}\",load}" if LOAD_ONLY.include?(application)
+
+          super
+        end
+      end
+
+      # The build's release table with the three releases of RELEASES.
+      module Table
+        def domain_release(name) = RELEASES.key?(name) ? ReleaseFiles.domain(name, applications: RELEASES.fetch(name)) : super
+      end
+
+      module_function
+
+      def domain_row(name)
+        "domain #{name}\n  principal @principal.system\n  limits @limits.drv\n  kind service\n  flags none\n" \
+          "  runtime @artifact.#{ProductionImage::DOMAIN_RUNTIME_ARTIFACT}\n  release @artifact.#{name}\n" \
+          "  restarts 0\n  restart_period_s 5\n  args \"#{DOMAIN_ARGS.join(' ')}\"\n"
+      end
+
+      # MACHINE's manifest with room for the three domains, the configured rows, and the
+      # system domain's /tmp cap at system_tmp bytes.
+      def manifest(source, system_tmp:)
+        raise Error, 'the development manifest does not have exactly one tmp line' unless source.scan(TMP_LINE).size == 1
+
+        MediumBoot.manifest(source.sub(TMP_LINE, "  tmp #{system_tmp}\n"), domains: RELEASES.size, domain_memory: MEMORY,
+                                                                          row: PROFILE + RELEASES.keys.map { |name| domain_row(name) }.join)
+      end
+
+      # The shell expression. Variables carry the prefix Fp, which nothing else binds, since the
+      # shell keeps every binding. It waits for the configured domains to end, takes the system
+      # domain's own figures, runs every step and prints one {fp_report, ...} line. A step is
+      # {Name, Before, PoolPages, Row, Loaded, Stop} or, when the create fails, {Name, Error}.
+      # Before is the pool pages in use just before the create, so drift shows as drift; PoolPages
+      # is the pages in use with the domain up minus the pages once it has stopped; Row is
+      # {Memory, Carriers, Threads, Processes, Atoms, Modules} of the domain at rest, with Carriers
+      # the bytes each allocator holds from the system. Loaded is {ModuleCount, LoadResult, Memory,
+      # Carriers, PoolPagesUp}: the figures once the modules of the applications a release only
+      # loads are loaded, PoolPagesUp being the pages in use then minus the pages once it has
+      # stopped. Stop is down, or timeout when the domain did not end within 60 s, in which case
+      # PoolPages is no figure. The system's own figures are {Memory, Carriers, Threads, Pool}.
+      # runs: ReleaseFiles.domain_runs(paths).
+      def expression(runs:, runtime:)
+        spec = MediumBoot.erlang_map(runtime: runtime, memory: MEMORY, outer: DOMAIN_OUTER, lane: 4096,
+                                     grant: MediumBoot.erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
+                                     args: MediumBoot.binary_args(UP_ARGS), env: '<<>>', connections: 1)
+        calls = STEPS.map do |name, release, tmp|
+          run = runs.fetch(release)
+          "{<<\"#{name}\">>,#{run.fetch('entry')},#{run.fetch('files')},#{tmp}}"
+        end
+        [
+          'FpEnded=fun FpE(0)->timeout;FpE(FpK)->case length(erx_domain_core:deaths(1,maps:get(core,sys:get_state(erx_domain_srv)))) >= ' \
+          "#{RELEASES.size} of true->ok;false->timer:sleep(200),FpE(FpK-1) end end",
+          'FpUsed=fun()->#{attrs:=#{used:={_,{_,FpU}}}}=erx_kernel_records:budget(),FpU end',
+          'FpAsk=fun(FpN,FpM,FpF,FpA)->try erpc:call(FpN,FpM,FpF,FpA,20000) catch FpC:FpR->{FpC,FpR} end end',
+          'FpList=fun(FpV)->case is_list(FpV) of true->FpV;false->[] end end',
+          # The bytes each allocator holds from the system: every mbcs and sbcs carrier of every instance.
+          'FpCarriers=fun(FpN)->lists:reverse(lists:keysort(2,[{FpA,FpSz}||FpA<-FpList(FpAsk(FpN,erlang,system_info,[alloc_util_allocators])),' \
+          'FpSz<-[lists:sum([lists:sum([FpCs||{FpK,FpL}<-FpIn,FpK=:=mbcs orelse FpK=:=sbcs,{carriers_size,FpCs,_,_}<-FpL])' \
+          '||{instance,_,FpIn}<-FpList(FpAsk(FpN,erlang,system_info,[{allocator,FpA}]))])],FpSz>0])) end',
+          'FpThreads=fun(FpN)->[FpAsk(FpN,erlang,system_info,[FpT])||FpT<-[schedulers,dirty_cpu_schedulers,dirty_io_schedulers,thread_pool_size]] end',
+          "FpSpec=#{spec}",
+          "FpStep=fun(FpName,FpRel,FpNf,FpTmp)->FpU0=FpUsed(),FpLim=\#{processes=>#{PROCESSES},atoms=>#{ATOMS},tmp=>FpTmp}," \
+          'case erx_domain:create(FpSpec#{name=>FpName,release=>FpRel,release_files=>FpNf,limits=>FpLim}) of ' \
+          '{ok,FpD}->FpNode=erx_domain:node(FpD),timer:sleep(15000),FpU1=FpUsed(),' \
+          'FpRow={FpAsk(FpNode,erlang,memory,[]),FpCarriers(FpNode),FpThreads(FpNode),FpAsk(FpNode,erlang,system_info,[process_count]),' \
+          'FpAsk(FpNode,erlang,system_info,[atom_count]),length(FpList(FpAsk(FpNode,code,all_loaded,[])))},' \
+          "FpMods=lists:append([case FpAsk(FpNode,application,get_key,[FpAp,modules]) of {ok,FpMs}->FpMs;_->[] end||FpAp<-[#{LOADED.join(',')}]])," \
+          'FpLoad=FpAsk(FpNode,code,ensure_modules_loaded,[FpMods]),' \
+          'FpRow2={length(FpMods),FpLoad,FpAsk(FpNode,erlang,memory,[]),FpCarriers(FpNode),FpUsed()},' \
+          "FpMon=monitor(process,erx_domain:pid(FpD)),erx_domain:stop(FpD,shutdown)," \
+          "FpStop=receive {'DOWN',FpMon,process,_,_}->down after 60000->timeout end,timer:sleep(3000),FpU2=FpUsed()," \
+          '{FpName,FpU0,case FpStop of down->FpU1-FpU2;_->no_figure end,FpRow,setelement(5,FpRow2,element(5,FpRow2)-FpU2),FpStop};FpBad->{FpName,FpBad} end end',
+          'FpWaited=FpEnded(600)',
+          'timer:sleep(3000)',
+          'FpSys={erlang:memory(),FpCarriers(node()),FpThreads(node()),FpUsed()}',
+          "FpRun=lists:map(fun({FpA2,FpB2,FpC2,FpD2})->FpStep(FpA2,FpB2,FpC2,FpD2) end,[#{calls.join(',')}])",
+          'io:format("~0p~n",[{fp_report,FpWaited,FpSys,FpRun,FpUsed()}])'
+        ].join(',') + '.'
+      end
+
+      # Packs the image, boots it once with cpus guest CPUs, and runs the cell at the system
+      # domain's shell. Returns the paths, in directory, of the archive's sizes (bytes of data per release and runtime
+      # image, as JSON) and of the serial log, whose {fp_report, ...} line holds
+      # the figures. build_medium and the guest's boot are the production image's own;
+      # the table and the load types are replaced in a child process, which only measures.
+      class Run
+        def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
+                       compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+          @root = File.expand_path(root)
+          @runner = runner
+          @compiler = compiler
+          @linker = linker
+          @qemu = qemu
+        end
+
+        # The table and the load types are replaced in a child process, which builds, boots and
+        # writes into directory, so nothing of them outlives the call in the caller.
+        def call(cpus:, system_tmp:, directory:, jobs: 4, build: true)
+          FileUtils.mkdir_p(directory)
+          child = fork do
+            measure(cpus: cpus, system_tmp: system_tmp, directory: directory, jobs: jobs, build: build)
+            exit!(0)
+          rescue StandardError => e
+            warn "#{e.class}: #{e.message}"
+            exit!(1)
+          end
+          _, status = Process.wait2(child)
+          raise Error, "the footprint cell failed (#{status})" unless status.success?
+
+          { archive: File.join(directory, "archive-tmp#{system_tmp}.json"),
+            serial_log: File.join(directory, "serial-tmp#{system_tmp}-#{cpus}cpu.log") }
+        end
+
+        private
+
+        def measure(cpus:, system_tmp:, directory:, jobs:, build:)
+          ProductionImage.singleton_class.prepend(Table)
+          ReleaseFiles.prepend(LoadOnly)
+          manifest = Footprint.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)), system_tmp: system_tmp)
+          fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+          fiasco.build(jobs: jobs) if build
+          image = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/footprint/image'))
+          built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+                                  .build_medium(directory: image, machine: MACHINE, manifest_source: manifest)
+          entries = PackWire.entries_of(File.binread(built.archive), ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
+          File.write(File.join(directory, "archive-tmp#{system_tmp}.json"),
+                     JSON.pretty_generate(archive_sizes(entries, File.size(built.archive))))
+          boot(cpus, built, manifest, entries.map(&:first), File.join(directory, "serial-tmp#{system_tmp}-#{cpus}cpu.log"))
+        end
+
+        # Bytes of data per group of archive entries: each domain release, each runtime image,
+        # the system release and the boot files.
+        def archive_sizes(entries, file_bytes)
+          sizes = entries.each_with_object(Hash.new(0)) do |(path, entry), by_group|
+            by_group[path.b[%r{\A(domains/[^/]+|runtimes/[^/]+|system|boot)}n] || 'other'] += entry.fetch('data_size')
+          end
+          sizes.merge('archive_file_bytes' => file_bytes)
+        end
+
+        def boot(cpus, built, manifest, paths, serial_copy)
+          shell = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: cpus,
+                                                          manifest_source: manifest, memory_mib: MACHINE.memory_mib)
+          raise Error, 'the production checkpoints do not end at the release shell' unless shell.last.fetch(:name) == 'release-shell'
+
+          expression = Footprint.expression(runs: ReleaseFiles.domain_runs(paths),
+                                            runtime: paths.index(ProductionImage::DOMAIN_RUNTIME_PATH.b))
+          checkpoints = [*shell[0...-1], shell.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
+                         ProductionImage::Run::ERLANG_SHELL.merge(type: "#{expression}\r").freeze,
+                         { name: 'fp-report', pattern: REPORT_START, seconds: 900,
+                           verify: ->(text) { raise Error, "the report: #{text[0, 300].inspect}" unless REPORT.match?(text) },
+                           type: "erlang:halt().\r" }.freeze].freeze
+          run_directory = File.join(@root, 'build/footprint/run')
+          FileUtils.rm_rf(run_directory)
+          run = Qemu.new(root: @root, runner: @runner, program: @qemu)
+                    .run(accel: 'hvf', cpus: cpus, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+                         directory: run_directory,
+                         checkpoints: checkpoints)
+          FileUtils.cp(run.fetch('serial_log'), serial_copy)
+        end
+      end
+
+      REPORT_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{fp_report,/n
+      REPORT = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{fp_report,.*\}\r*\n\z/mn
     end
   end
 end
