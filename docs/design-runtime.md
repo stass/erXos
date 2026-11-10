@@ -973,7 +973,9 @@ with, and the two data areas' sizes
 Every message from another domain arrives in its envelope (edit 16), and
 the agent acts only on a record that arrives as `{erx_origin, 4,
 Record}`, from the system connection, so a peer that was handed the
-agent's pid can reach it but not steer it.
+agent's pid can reach it but not steer it; it drops and counts every
+other message but a call from its own domain, and
+`erx_connections:dropped/0` reads the count.
 It answers the domain pid, which the boot information page names and
 `erx_dist:boot/0` returns with the system connection's other values. It
 opens a port on

@@ -162,7 +162,9 @@ ready(Id, #{parties := Parties} = State) ->
 -doc """
 Records the connection the domain library built between parties A and B,
 whose objects Handle names, and queues connection_up for each, carrying
-UpA to A and UpB to B. Both parties are held, distinct and not yet joined.
+UpA to A and UpB to B. Both parties are held, distinct, not yet joined and
+each with room for one more connection (room/2), the precondition the
+service checks before it asks the library to build the connection.
 """.
 -spec connect(term(), {party(), term()}, {party(), term()}, state()) ->
           {[action()], state()}.
@@ -171,6 +173,7 @@ connect(Handle, {A, UpA}, {B, UpB},
   when A =/= B ->
     Key = key(A, B),
     false = is_map_key(Key, Connections),
+    {true, true} = {room(A, State), room(B, State)},
     #{A := #{name := NameA}, B := #{name := NameB}} = Parties,
     Sides = #{A => new_side(B, NameB, UpA), B => new_side(A, NameA, UpB)},
     Connection = #{handle => Handle, phase => up_pending, reason => noconnection,

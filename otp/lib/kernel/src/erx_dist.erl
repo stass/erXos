@@ -192,7 +192,7 @@ owner_up(Kernel, AcceptPid, MyNode, #{port := Port, node := Peer, id := PeerId} 
     end.
 
 %% The peer's entry is up: the agent answers an introduced connection's connection_up
-%% only now (erx_connections, records/4), so the system domain hears ok for an
+%% only now (erx_connections, records/3), so the system domain hears ok for an
 %% introduction once both entries are up. The system connection's agent awaits nothing.
 inserted(_AcceptPid, #{system := true}) ->
     ok;

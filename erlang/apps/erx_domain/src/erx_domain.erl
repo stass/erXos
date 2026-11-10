@@ -56,7 +56,9 @@ timeout (init did not report ready within boot_timeout, and the service
 stopped the domain), {boot, Info} (the domain ended before it reported,
 Info as in {domain_down, Id, Info}), or the domain library's own refusal.
 On every error nothing of the domain remains but its id, which is never
-reused.
+reused: the error comes once the domain is retired, so a domain introduced
+before it reported ready answers only once each peer has unmapped their
+connection.
 """.
 -spec create(spec()) -> {ok, domain()} | {error, term()}.
 create(Spec) ->

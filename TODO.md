@@ -2429,43 +2429,30 @@ it; git history is the record of completed work.
   source: the lookup reads the entry's creation, or `setnode`'s creation comes from the
   port. The funnel's `.exports` field, now a pointer to an id, is renamed with it.
 * [Medium] Runtime and domain service, introduced connections, QEMU cases still to write
-  (`tools/lib/erx/system_domain.rb`): design-domains' tests of a peer handed the agent's pid
-  that sends it `{erx_connection_down, Peer, noconnection}`, and of a third domain that sends
-  a domain pid `{erx_connection_lost, ...}`: both dropped and counted and traffic flowing on,
-  with seeded failures of a domain pid and of an agent without their origin checks; and
-  introduce's delayed-ready and `system_limit` cases, which run on the host only
-  (`erx_domain_tests`), since the suite has two domains and no third to delay or to fill a
-  quota with. The agent's failure paths have no test either: a port that ends while its
-  entry is not yet up (`{map, Reason}` from `ended_itself/6`), `erx_dist`'s inserted report
-  and the port's `DOWN` in either order, a hand-over net_kernel refuses, and a refused
-  finish (`finished/2`'s `refused`); a host test driving `records/4` with a stand-in port,
-  or QEMU cases with a refused hand-over and one to a name still `up_pending`.
-* [Medium] Runtime, `erx_connections.erl` `records/4`: the agent serves every record in
+  (`tools/lib/erx/system_domain.rb`): design-domains' delayed-ready case (a domain whose init
+  delays its ready report while its creator writes a spawn request into their connection, with
+  the seeded domain service that hands the domain pid the record before the report) and
+  introduce's `system_limit` refusal run on the host only (`erx_domain_tests`). Both need a
+  third domain created at run time, which the suite cannot make cheaply: its two configured
+  domains, 160 MiB each (`MediumBoot::DOMAIN_MEMORY`), fill the medium machine
+  (`MediumBoot::MACHINE`, 768 MiB, room for two), and init sends its report before any `-eval`
+  (edit 65), so nothing delays it. Grow the machine or shrink the domains, give the suite an
+  `erx_domain:create/1` of a third domain, and give the delayed case a way to hold the report.
+* [Low] Domain service, `erx_domain_srv.erl` `retire_ended/1` and `act/2`: an ended domain
+  is retired only when `Lib:retire/1` answers ok, and a connection is disconnected only when
+  `Lib:disconnect/1` does; a refusal of either but retire's `ebusy` is only retried at the next event,
+  so a create of that domain waiting for its retire (A4) never answers. `retire/1` documents
+  `ebusy` alone, before the connections are disconnected; decide whether another refusal ends the
+  service, as `close_side/4` does on `noproc`, or answers the create.
+* [Medium] Runtime, `erx_connections.erl` `records/3`: the agent serves every record in
   turn and waits inside a finish, which may pause on a process of the domain at its queue
   quota (design-runtime, "Closing"), the agent itself included when a peer handed its pid
   floods it, so one paused finish holds the domain's answers about every other peer, and
   with them those connections' objects and quota. No queue quota is set by default, so
   nothing pauses yet; before edit 15 lands, exempt the agent from the quota or make the
   finish asynchronous (a finishing phase in `Held`, `erx_lane_finished` and the `DOWN`
-  matched in `records/4`). The test hold (control command 4) can also be set again during
+  matched in `records/3`). The test hold (control command 4) can also be set again during
   a finish, which then never ends; refuse it on a finishing port.
-* [Medium] Domain service, `erx_domain:introduce/2` (`erx_domain_srv.erl`, `erx_domain_links.erl`),
-  two points from the up path's review:
-  (1) a create answered `{error, timeout}` or `{error, {boot, _}}` while a survivor still holds a
-  connection of the domain leaves its outer budget until the survivor answers, against A4 of
-  design-system.md; answer the waiter at the domain's retire instead;
-  (2) the host tests do not catch a dropped retire after disconnect (the fake's `retire/1` never
-  refuses), swapped ring sizes (every fake lane is 4096) or a constant slot; make the fake refuse
-  `retire` while a connection stands, give the domains different lanes, and introduce a second
-  pair. Also: `connect/4` should refuse a party without room itself rather than rely on its
-  caller's `room/2`; an `einval` from the library for a domain it already ended should answer
-  `badarg`; a record due to a party whose system side ended crashes its domain pid with badarg.
-* [Low] Runtime, `erx_connections`, `connection_lost` reasons: the agent tells the domain pid
-  the reason its port ended with, a lane driver atom such as `erx_lane_malformed` or what
-  `net_kernel` ended the owner with, and `{map, Reason}` for a failed map, `Reason` being
-  the open's or hand-over's refusal or the end of a port whose entry was not yet up, not the shapes of
-  design-domains' table of messages (`{malformed, Code}`, `{peer_held, Bytes}`, `disconnect`).
-  The domain service reads none of them, so only the inspector would show the difference.
 * [Low] Lane driver, a test hook: the lane driver's control command 4 (`erx_lane_drv.c`,
   `control_hold`, allowed only under `-erx test_lane_hold`) holds a port's ring takes so the
   system_domain suite can fill the lane from the system domain, and so its connection_down
@@ -2507,7 +2494,7 @@ it; git history is the record of completed work.
   `pang` for an unconnected node at its own host without trying.
 * [Medium] Runtime and domain service, `erx_connections.erl` (`close/2`),
   `erx_domain_srv.erl` (`ended/3`): the agent answers `close_side`, and a domain's agent
-  answers `connection_unmapped` and `connection_lost` (`records/4`), on the port monitor's
+  answers `connection_unmapped` and `connection_lost` (`records/3`), on the port monitor's
   `DOWN`, which ERTS fires (`erts_deliver_port_exit`, `io.c`) before `terminate_port` calls
   the lane driver's stop, so when the exit ran on another scheduler the domain service's
   `Lib:disconnect` can destroy the connection's objects before `lane_stop` has released the

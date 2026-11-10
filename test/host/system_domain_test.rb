@@ -43,12 +43,12 @@ class SystemDomainTest < Minitest::Test
   def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
-    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced connection-down
+    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced hostile connection-down
                     domain-ends system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
-    running, table, _introduced, _down, ends, ended = points.last(6)
+    running, table, _introduced, _hostile, _down, ends, ended = points.last(7)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
@@ -78,6 +78,16 @@ class SystemDomainTest < Minitest::Test
      Suite::INTRODUCED_ANSWER.sub('[peer@erxos,system@erxos]', '[system@erxos]'),
      Suite::INTRODUCED_ANSWER.sub('{pong,5,ping}', '{exit,timeout}')].each do |line|
       assert_raises(Erx::Error) { introduced.fetch(:verify).call("#{line}\r\n") }
+    end
+    # The forged records: one the agent or the domain pid acted on (no origin check), so
+    # nothing more is counted, the call fails or the pair is no longer up, each fails.
+    hostile = points.find { |point| point.fetch(:name) == 'hostile' }
+    refute_match hostile.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    hostile.fetch(:verify).call("#{Suite::HOSTILE_ANSWER}\r\n")
+    [Suite::HOSTILE_ANSWER.sub(',ok,1,1,', ',ok,timeout,1,'), Suite::HOSTILE_ANSWER.sub(',1,1,', ',1,0,'),
+     Suite::HOSTILE_ANSWER.sub('{pong,5,ping}', '{error,{erpc,noconnection}}'),
+     Suite::HOSTILE_ANSWER.sub(/up\}\z/, 'closing}')].each do |line|
+      assert_raises(Erx::Error) { hostile.fetch(:verify).call("#{line}\r\n") }
     end
     # The down path: a burst's tail lost (an agent without the finish), a side never told
     # (no connection_lost from a port that ended by itself), objects never deleted or a

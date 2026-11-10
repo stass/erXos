@@ -226,6 +226,39 @@ module Erx
                               "receive {erx_origin,SdSd,{'$gen_call',SdSf,SdSq}}->gen:reply(SdSf,{pong,SdSd,SdSq}) after 60000->ok end end)," \
                               'SdServing=receive {erx_origin,_,{sd_serving,SdSv}}->ok after 10000->timeout end,' \
                               'SdPong=try erpc:call(erts@erxos,gen_server,call,[SdSv,ping,10000],15000) catch SdPc:SdPr->{SdPc,SdPr} end'
+    # Forged records on the introduced pair (docs/design-domains.md, "Verification and testing"): SdZf runs
+    # in peer, exports itself to erts and waits for erts's agent, which a process of erts
+    # hands it, so peer holds send on the agent (edit 8 of docs/design-runtime.md); it then
+    # sends the agent {erx_connection_down, Peer, noconnection} and erts's domain pid, which
+    # its fun carries from the system domain, {erx_connection_lost, Peer, disconnect}, a
+    # record and an answer only the system domain and erts may give. Each arrives in peer's
+    # envelope, {erx_origin, Peer, Msg}, so the agent and the domain pid drop and count it:
+    # SdZpoll waits until erts's agent counts one more dropped (erx_connections:dropped/0),
+    # SdZi reads the domain pid's count (erx_domain:info/1). Then a gen_server call from erts
+    # to a fresh process of peer comes back, and the pair's phase in the domain service's
+    # core is still up. An agent or a domain pid without its origin check takes the
+    # connection down, and the call fails or the phase is closing.
+    SERVICE_KILL_HOSTILE = "SdZpeer=#{DOMAINS.fetch('peer')},SdZs=self(),SdZdp=element(4,SdDom(SdTid))," \
+                           'SdZask=fun()->try erpc:call(erts@erxos,erx_connections,dropped,[],10000) catch _:_->error end end,' \
+                           'SdZi=fun()->case erx_domain:info(SdDom(SdTid)) of {ok,#{dropped:=SdZn}}->SdZn;SdZe->SdZe end end,' \
+                           'SdZa0=SdZask(),SdZd0=SdZi(),' \
+                           'SdZf=spawn(peer@erxos,fun()->ok=erx_dist:export(self(),[send],SdTid),SdZs!{sd_zready,self()},' \
+                           'receive {erx_origin,_,{sd_zagent,SdZag}}->ok end,SdZag!{erx_connection_down,SdZpeer,noconnection},' \
+                           'SdZdp!{erx_connection_lost,SdZpeer,disconnect},SdZs!{sd_zsent,self()} end),' \
+                           'SdZr=receive {erx_origin,_,{sd_zready,SdZf}}->ok after 10000->timeout end,' \
+                           'spawn(erts@erxos,fun()->SdZf!{sd_zagent,whereis(erx_connections)} end),' \
+                           'SdZw=receive {erx_origin,_,{sd_zsent,SdZf}}->ok after 10000->timeout end,' \
+                           'SdZpoll=fun SdZpf(0)->timeout;SdZpf(SdZk)->case SdZask() of SdZn when is_integer(SdZn),SdZn>SdZa0->' \
+                           'SdZn-SdZa0;_->timer:sleep(100),SdZpf(SdZk-1) end end,SdZad=SdZpoll(50),' \
+                           'SdZdd=case SdZi() of SdZd1 when is_integer(SdZd1)->SdZd1-SdZd0;SdZd1->SdZd1 end,' \
+                           'SdZv=spawn(peer@erxos,fun()->ok=erx_dist:export(self(),[send],SdTid),SdZs!{sd_zserving,self()},' \
+                           "receive {erx_origin,SdZo,{'$gen_call',SdZc,SdZq}}->gen:reply(SdZc,{pong,SdZo,SdZq}) after 60000->ok end end)," \
+                           'SdZvs=receive {erx_origin,_,{sd_zserving,SdZv}}->ok after 10000->timeout end,' \
+                           'SdZpong=try erpc:call(erts@erxos,gen_server,call,[SdZv,ping,10000],15000) catch SdZpc:SdZpr->{SdZpc,SdZpr} end,' \
+                           'SdZph=erx_domain_links:phase(SdTid,SdZpeer,maps:get(links,sys:get_state(erx_domain_srv)))'
+    # Each forgery dropped and counted once, the call answered from erts, the pair up.
+    HOSTILE_ANSWER = "{hostile,ok,ok,1,1,ok,{pong,#{DOMAINS.fetch('erts')},ping},up}"
+    HOSTILE_START = /\A\{hostile,/n
     # The connection's down path (docs/design-domains.md, "Introduction and connection
     # down"), from one side each time, on the introduced pair. SdPhase is the pair's phase
     # in the domain service's core, and SdNone polls it every 100 ms at most K times until
@@ -326,6 +359,7 @@ module Erx
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
                               "#{SERVICE_KILL_TABLE},io:format(\"~0p~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdIntro,SdHeld}])," \
                               "#{SERVICE_KILL_INTRODUCED},io:format(\"~0p~n\",[{introduced,SdUps,SdNodes,SdServing,SdPong}])," \
+                              "#{SERVICE_KILL_HOSTILE},io:format(\"~0p~n\",[{hostile,SdZr,SdZw,SdZad,SdZdd,SdZvs,SdZpong,SdZph}])," \
                               "#{SERVICE_KILL_DOWN},io:format(\"~0p~n\",[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2}])," \
                               "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
                               'exit(whereis(erx_domain_srv),kill).'
@@ -380,6 +414,7 @@ module Erx
       ends = /\A#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
       table = /\A#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
       introduced = /\A#{Regexp.escape(INTRODUCED_ANSWER)}\r*\n\z/n
+      hostile = /\A#{Regexp.escape(HOSTILE_ANSWER)}\r*\n\z/n
       down = /\A#{Regexp.escape(CONNECTION_DOWN_ANSWER)}\r*\n\z/n
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: "#{SERVICE_KILL_EXPRESSION}\r").freeze,
@@ -389,6 +424,8 @@ module Erx
          verify: ->(text) { raise Error, "the control table answered #{text.inspect}" unless table.match?(text) } }.freeze,
        { name: 'introduced', pattern: INTRODUCED_START, seconds: 180,
          verify: ->(text) { raise Error, "the introduced pair answered #{text.inspect}" unless introduced.match?(text) } }.freeze,
+       { name: 'hostile', pattern: HOSTILE_START, seconds: 180,
+         verify: ->(text) { raise Error, "the forged records gave #{text.inspect}" unless hostile.match?(text) } }.freeze,
        { name: 'connection-down', pattern: CONNECTION_DOWN_START, seconds: 180,
          verify: ->(text) { raise Error, "the connection went down as #{text.inspect}" unless down.match?(text) } }.freeze,
        { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,

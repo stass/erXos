@@ -2668,7 +2668,7 @@ answers each as the call's result.
 | `{erx_connection_mapped, Peer}` | agent to domain pid | the domain has mapped the connection's objects and its entry is up |
 | `{erx_connection_down, Peer, Reason}` | domain pid to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent has the port finish at the lane's current position, ends it with `Reason`, which fires its links and monitors with it, unmaps, closes and answers `connection_unmapped`; about a connection the domain has already lost, which it ended from its side while the record was on its way, the agent answers `connection_unmapped` at once, since it has unmapped |
 | `{erx_connection_unmapped, Peer}` | agent to domain pid | the domain has unmapped the connection's objects and closed its capabilities |
-| `{erx_connection_lost, Peer, Reason}` | agent to domain pid | the domain ended the connection from its side: `{malformed, Code}`, `{peer_held, Bytes}`, `{map, Status}` when it could not map it, or `disconnect`; it has already unmapped |
+| `{erx_connection_lost, Peer, Reason}` | agent to domain pid | the domain ended the connection from its side, `Reason` saying how: `malformed` for a malformed frame, position or record from the peer, or a peer that does not read its answers, `no_memory` when the runtime could not allocate for it, `disconnect` after `erlang:disconnect_node/1`, and `noconnection` for any other end, a signal past `peer_held` among them; `{map, refused}` when the open or `net_kernel` refused it, and `{map, R}`, `R` one of the four, when it ended before its entry was up; it has already unmapped |
 
 The two messages to the agent are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,
@@ -3489,11 +3489,11 @@ for the same reason.
   and `create/1` returns first; seeded failure: a domain service that
   hands the domain pid the record before the report, which the domain
   pid, knowing no agent yet, cannot send, so the spawn never runs. The
-  creator sends the domain pid `{erx_connection_lost, Peer, disconnect}`
-  for the domain's live connection to `Peer`, and a peer that was handed
-  the agent's pid sends the agent `{erx_connection_down, Peer,
-  noconnection}`: both are dropped and counted, and the connection
-  carries frames on; seeded failures: a domain pid without its origin
+  domain's peer, handed the domain pid, sends it `{erx_connection_lost,
+  Peer, disconnect}` for the domain's live connection to `Peer`, as its
+  creator in another domain could, and, handed the agent's pid, sends the
+  agent `{erx_connection_down, Peer, noconnection}`: both are dropped and
+  counted, and the connection carries frames on; seeded failures: a domain pid without its origin
   check and an agent without its origin check, under each of which the
   connection goes down.
 * **Sub-spaces and programs:** a domain that ends with sub-spaces nested

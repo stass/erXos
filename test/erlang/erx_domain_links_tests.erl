@@ -614,10 +614,11 @@ run_end(#{core := Core, owed := Owed, a := #{inbox := Inbox}} = S, Trace) ->
 %% lowest slot no outstanding record of its party holds, and its side keeps it until the
 %% answer the record waits for; connection_lost while a connection_down waits frees
 %% nothing, since the party may not have taken the record yet. room/2 counts the
-%% connections not done against the party's slots.
+%% connections not done against the party's slots, and connect/4 refuses a party without room.
 control_slots_test() ->
     S0 = lists:foldl(fun({P, Name}, S) -> erx_domain_links:add_party(P, Name, 2, S) end,
-                     erx_domain_links:new(), [{?A, ?A_NAME}, {11, 'p1@erxos'}, {12, 'p2@erxos'}]),
+                     erx_domain_links:new(), [{?A, ?A_NAME}, {11, 'p1@erxos'}, {12, 'p2@erxos'},
+                                              {13, 'p3@erxos'}]),
     S1 = ready_all(S0, [?A, 11, 12]),
     {[{send, ?A, 0, _}, {send, 11, 0, _}], S2} = erx_domain_links:connect(c1, {?A, u}, {11, u}, S1),
     {[{send, ?A, 1, _}, {send, 12, 0, _}], S3} = erx_domain_links:connect(c2, {?A, u}, {12, u}, S2),
@@ -626,6 +627,9 @@ control_slots_test() ->
     ?assertNot(erx_domain_links:room(99, S3)),
     {[], S4} = erx_domain_links:answer(?A, {connection_mapped, 11}, S3),
     {[], S5} = erx_domain_links:answer(11, {connection_mapped, ?A}, S4),
+    %% A's slot 0 is free, but both its connections still count against it, so
+    %% connect/4 refuses a third rather than trust its caller's room/2.
+    ?assertError({badmatch, {false, true}}, erx_domain_links:connect(c3, {?A, u}, {13, u}, S5)),
     %% A's slot 0 is free again: the down about 11 takes it while slot 1 still waits.
     {[{send, ?A, 0, {connection_down, 11, noconnection}}, {send, 11, 0, _}], S6} =
         erx_domain_links:close(?A, 11, S5),

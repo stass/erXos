@@ -82,9 +82,7 @@ init(Opts) ->
     Exports = maps:get(exports, Opts, erx_dist),
     %% Whether the runtime is a node, as kernel's start left it, since net_kernel starts
     %% before any application and lives as long as the runtime (close_side/4). Waiting
-    %% holds, by domain id, each create whose domain has not reported ready yet: its
-    %% caller, the domain, its domain pid's secret, that pid until it ends and gone after,
-    %% and, once the domain has ended, the life it ended in and its Info (ended/3).
+    %% holds, by domain id, each create not yet answered (wait_created/4).
     %% Introducing holds, by the pair's key, each introduce/2 caller waiting for its
     %% connection to come up, with the timer of its deadline (settle_introductions/1).
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
@@ -124,11 +122,13 @@ templates(Lib) -> Lib:templates().
 
 handle_call({create, Spec}, From, State) ->
     case create(Spec, State) of
-        {{waiting, {erx_domain, Id, _, Pid} = Domain}, #{core := Core, waiting := Waiting} = Next} ->
-            %% Answered by ready/3, or by settle/2 once the domain and its pid are gone.
-            {ok, #{ref := Ref}} = erx_domain_core:fetch(Id, Core),
-            Waiter = #{from => From, domain => Domain, ref => Ref, pid => Pid, ended => none},
-            {noreply, Next#{waiting := Waiting#{Id => Waiter}}};
+        {{waiting, Domain}, Next} ->
+            %% Answered by ready/3, or by settle/2 once nothing of the domain remains.
+            {noreply, wait_created(Domain, none, From, Next)};
+        {{refused, Domain, Refusal}, Next} ->
+            %% Answered Refusal by settle/2 once the stop has ended the domain and nothing
+            %% of it remains.
+            {noreply, wait_created(Domain, Refusal, From, Next)};
         {{ready, Domain}, Next} ->
             {reply, {ok, Domain}, Next};
         {{error, _} = Error, Next} ->
@@ -246,6 +246,9 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
                 {{error, Reason}, Next} ->
                     logger:error("erx_domain: configured domain ~ts did not start: ~0p", [Name, Reason]),
                     Next;
+                {{refused, _Domain, {error, Reason}}, Next} ->
+                    logger:error("erx_domain: configured domain ~ts did not start: ~0p", [Name, Reason]),
+                    Next;
                 {_Started, Next} ->
                     Next
             end
@@ -255,10 +258,10 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
 %% make it with Make(Id, Pid) and starts its first thread once the system side of its
 %% system connection is open and the pid is exported to the domain. A refused plan ends
 %% the pid, unlinked first, so no domain is stopped for it; a domain the library made
-%% whose side, export or start is refused is stopped, and its end retires it as any end
-%% does. A started domain is waiting for its init's ready report, which Timeout bounds,
-%% unless it has no system connection, the one path a report could take: then it is
-%% ready at its start.
+%% whose side, export or start is refused is stopped, its end retires it as any end
+%% does, and its create is refused once it is retired. A started domain is waiting for
+%% its init's ready report, which Timeout bounds, unless it has no system connection,
+%% the one path a report could take: then it is ready at its start.
 build(Ident, Principal, Origin, Make, Timeout, #{core := Core} = State) ->
     case erx_domain_core:admit(Ident, Principal, Origin, Core) of
         {error, _} = Error ->
@@ -279,8 +282,12 @@ build(Ident, Principal, Origin, Make, Timeout, #{core := Core} = State) ->
                             boot_timer(Id, Timeout),
                             {{waiting, Domain}, Next#{core := erx_domain_core:running(Id, Built)}};
                         {error, _} = Refused ->
-                            stop(Id, Next),
-                            {Refused, Next}
+                            %% A stop the library refuses brings no end, so nothing would
+                            %% answer the create later: it is refused now.
+                            case stop(Id, Next) of
+                                ok -> {{refused, Domain, Refused}, Next};
+                                refused -> {Refused, Next}
+                            end
                     end;
                 {error, Reason} ->
                     unlink(Pid),
@@ -365,6 +372,15 @@ answer_ready(Id, #{waiting := Waiting} = State) ->
             State
     end.
 
+%% A create waiting for domain Id: its caller, the domain, its domain pid's secret, that
+%% pid until it ends and gone after, the life the domain ended in and its Info once it has
+%% ended (ended/3), and the refusal to answer once nothing of it remains, none for a
+%% domain that was started.
+wait_created({erx_domain, Id, _, Pid} = Domain, Refusal, From, #{core := Core, waiting := Waiting} = State) ->
+    {ok, #{ref := Ref}} = erx_domain_core:fetch(Id, Core),
+    Waiter = #{from => From, domain => Domain, ref => Ref, pid => Pid, ended => none, refusal => Refusal},
+    State#{waiting := Waiting#{Id => Waiter}}.
+
 %% A create whose domain ended before its report reached the service waits for the
 %% domain pid's end as well: the service tells the pid of the end only once the domain's
 %% system side is closed, and the pid passes on every report the side delivered before it
@@ -382,15 +398,24 @@ pid_ended(Pid, #{waiting := Waiting} = State) ->
     end.
 
 %% Answers the create of domain Id, which ended in life Life before it reported ready,
-%% once nothing of the domain remains (A4) and its domain pid has ended.
-settle(Id, #{waiting := Waiting} = State) ->
-    case Waiting of
-        #{Id := #{from := From, pid := gone, ended := {Life, Info}}} ->
-            gen_server:reply(From, {error, unreported(Life, Info)}),
+%% once nothing of the domain remains (A4 of docs/design-system.md): it has ended, the
+%% library has retired it, which it does only once every connection of the domain is
+%% disconnected, so a survivor that still holds one keeps the answer waiting, and its
+%% domain pid has ended. ended/3, pid_ended/2 and retire_ended/1 each call this, so
+%% whichever of the three comes last answers.
+settle(Id, #{waiting := Waiting, core := Core} = State) ->
+    case {Waiting, erx_domain_core:fetch(Id, Core)} of
+        {#{Id := #{from := From, pid := gone, ended := {Life, Info}, refusal := Refusal}}, none} ->
+            gen_server:reply(From, create_error(Refusal, Life, Info)),
             State#{waiting := maps:remove(Id, Waiting)};
-        #{} ->
+        {#{}, _} ->
             State
     end.
+
+%% The create's answer: the refusal of a domain that was not started, or how one that
+%% was started ended before it reported.
+create_error(none, Life, Info) -> {error, unreported(Life, Info)};
+create_error({error, _} = Refusal, _Life, _Info) -> Refusal.
 
 %% Stopping for its boot timeout, the domain timed out; otherwise it ended by itself.
 unreported(stopping, _Info) -> timeout;
@@ -415,7 +440,8 @@ open_side(Agent, Id, Pid, Ref, Values) ->
 %% included; then the library builds the connection, A reading a ring of its own lane and
 %% B one of its, and the core records it and says which connection_up records go now.
 %% The library's own refusals, a party at its limit or with an outer budget that cannot
-%% fund its child for the connection, are system_limit too.
+%% fund its child for the connection, are system_limit too, and its einval for a domain
+%% it has ended before the end reached the service is badarg, as for any ended domain.
 introduce(_A, _B, #{lib := none} = State) ->
     {{error, enotsup}, State};
 introduce(A, B, #{core := Core, links := Links, lib := Lib} = State) ->
@@ -457,6 +483,10 @@ connect({ok, #{number := Number, a := PartyA, b := PartyB}}, A, B, ReaderA, Read
     {wait, perform(Actions, State#{links := Next})};
 connect({error, Limit}, _A, _B, _ReaderA, _ReaderB, State) when Limit =:= elimit; Limit =:= enomem ->
     {{error, system_limit}, State};
+connect({error, einval}, _A, _B, _ReaderA, _ReaderB, State) ->
+    %% A domain the library has ended, whose end has not reached the service yet: an
+    %% ended domain, as introducible/2 would find it once the end arrives.
+    {{error, badarg}, State};
 connect({error, _} = Refused, _A, _B, _ReaderA, _ReaderB, State) ->
     {Refused, State}.
 
@@ -534,17 +564,20 @@ wire({connection_up, Peer, PeerNode, {Side, PeerSide, PeerBell, Label, OutSize, 
 wire({connection_down, Peer, Reason}) ->
     {erx_connection_down, Peer, Reason}.
 
-%% Retires every ended domain the library now lets go, its connections all disconnected.
+%% Retires every ended domain the library now lets go, its connections all disconnected
+%% (ebusy before), and answers the create of each that still waits.
 retire_ended(#{lib := Lib, core := Core} = State) ->
-    Retired = lists:foldl(fun(#{id := Id, state := ended}, Acc) ->
-                                  case Lib:retire(Id) of
-                                      ok -> erx_domain_core:retired(Id, Acc);
-                                      {error, _} -> Acc
-                                  end;
-                             (_Domain, Acc) ->
-                                  Acc
-                          end, Core, erx_domain_core:domains(Core)),
-    State#{core := Retired}.
+    Ended = [Id || #{id := Id, state := ended} <- erx_domain_core:domains(Core)],
+    Retired = lists:filter(fun(Id) -> retire(Lib, Id) end, Ended),
+    Next = State#{core := lists:foldl(fun erx_domain_core:retired/2, Core, Retired)},
+    lists:foldl(fun settle/2, Next, Retired).
+
+%% Asks the library to retire ended domain Id: true once it has.
+retire(Lib, Id) ->
+    case Lib:retire(Id) of
+        ok -> true;
+        {error, _} -> false
+    end.
 
 %% An answer domain Id's pid passed on with Ref, applied by the protocol's core only when
 %% it names a connection of the domain in the state that expects it; the core drops and
@@ -564,10 +597,15 @@ unwire({erx_connection_unmapped, Peer}) -> {connection_unmapped, Peer};
 unwire({erx_connection_lost, Peer, Reason}) -> {connection_lost, Peer, Reason};
 unwire(Answer) -> Answer.
 
+%% Asks the library to stop domain Id, whose end then arrives as domain_ended: ok, or
+%% refused, logged, when no end will come.
 stop(Id, #{lib := Lib}) ->
     case Lib:stop(Id, 0) of
-        ok -> ok;
-        {error, Reason} -> logger:error("erx_domain: the library refused to stop domain ~b: ~0p", [Id, Reason])
+        ok ->
+            ok;
+        {error, Reason} ->
+            logger:error("erx_domain: the library refused to stop domain ~b: ~0p", [Id, Reason]),
+            refused
     end.
 
 %% A domain's end: its system side's port ends before its connection's objects are

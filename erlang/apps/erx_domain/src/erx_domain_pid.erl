@@ -42,7 +42,8 @@ Port}: with the lane driver's control command 3, as a frame from itself to the
 agent, never as an ordinary message, which could wait behind a full lane or a
 paused port. The driver refuses the call with badarg from any other process
 and for a record that does not fit; the pid does not catch it, so its end
-stops the domain.
+stops the domain. A record for a side that has ended is dropped, since the
+domain's end is under way.
 """.
 
 -export([start_link/4]).
@@ -101,10 +102,21 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
     end.
 
 %% A record into slot Slot of the table, from this pid to the agent the domain's report
-%% named; the service sends none before the report.
+%% named; the service sends none before the report. A side that has ended has no table to
+%% write into, and the record is dropped: the agent's report of that end has the service
+%% stop the domain (system_side_ended), and the domain's end answers the record for it
+%% (erx_domain_links:ended/3), so the pid ends with {domain_down, Id, Info} as at every
+%% end of its domain. Any other refusal ends the pid.
 write(Slot, Record, #{agent := Agent, port := Port}) when is_pid(Agent), is_port(Port) ->
     Ctl = term_to_binary({?SEND_SENDER, self(), Agent}),
-    erlang:port_control(Port, ?CONTROL_RECORD, [<<Slot:32>>, Ctl, term_to_binary(Record)]).
+    try erlang:port_control(Port, ?CONTROL_RECORD, [<<Slot:32>>, Ctl, term_to_binary(Record)])
+    catch
+        error:badarg:Stack ->
+            case erlang:port_info(Port, id) of
+                undefined -> ok;
+                _ -> erlang:raise(error, badarg, Stack)
+            end
+    end.
 
 %% The domain's end, which the service tells the pid only once it has closed the domain's
 %% system side, so every frame the side delivered is in the pid's queue by then, though
