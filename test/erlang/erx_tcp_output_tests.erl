@@ -37,7 +37,7 @@ est(Bytes) ->
 in_flight(Bytes, Sent) ->
     T = est(Bytes),
     T#tcb{snd_nxt = 1001 + Sent, snd_max = 1001 + Sent,
-          sendlog = erx_tcp_sendlog:sent(T#tcb.sendlog, 1001, 1001 + Sent, ?T0),
+          sendlog = erx_tcp_sendlog:sent(T#tcb.sendlog, 1001, 1001 + Sent, 1000, ?T0),
           send_timer = {rexmt, ?T0 + ?S(1000)}}.
 
 lens(Out) -> [iolist_size(Payload) || {_, _, Payload} <- Out].
@@ -114,7 +114,7 @@ fin_and_rst_test() ->
 %% sends nothing else: the only unSACKed range is at or below HighRxt, so RFC 6675's rescue
 %% (section 4, rule 4) does not resend it.
 sack_retransmission_test() ->
-    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, ?T0) end,
+    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, 1000, ?T0) end,
                        erx_tcp_sendlog:new(1001), [1001, 2001, 3001, 4001, 5001]),
     {Log1, _} = erx_tcp_sendlog:ack(Log0, 1001, [{2001, 6001}]),
     {Log, 1000} = erx_tcp_sendlog:mark_lost(Log1, 3, 1000),
@@ -178,7 +178,7 @@ shrink_and_reopen_test() ->
 %% tcp_output.c:370-395: a probe into a zero window takes its byte at snd_nxt even when the
 %% send log holds SACK information.
 probe_with_sack_holes_test() ->
-    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, ?T0) end,
+    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, 1000, ?T0) end,
                        erx_tcp_sendlog:new(1001), lists:seq(1001, 9001, 1000)),
     {Log, _} = erx_tcp_sendlog:ack(Log0, 1001, [{5001, 6001}]),
     T = (est(20000))#tcb{sack = on, sendlog = Log, snd_nxt = 1001, snd_max = 10001,
@@ -189,9 +189,9 @@ probe_with_sack_holes_test() ->
 %% tcp_output.c:1192-1193: the FIN an ACK of FIN-WAIT-1 carries again is not a
 %% retransmission the send log counts, so SACK recovery still finds the holes below it.
 fin_resend_keeps_the_holes_test() ->
-    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, ?T0) end,
+    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, 1000, ?T0) end,
                        erx_tcp_sendlog:new(1001), lists:seq(1001, 5001, 1000)),
-    Log1 = erx_tcp_sendlog:sent(Log0, 6001, 6002, ?T0),
+    Log1 = erx_tcp_sendlog:sent(Log0, 6001, 6002, 1000, ?T0),
     T = (est(5000))#tcb{state = fin_wait_1, fin = {sent, 6001}, sendlog = Log1, sack = on,
                         snd_nxt = 6002, snd_max = 6002, ack_now = true,
                         send_timer = {rexmt, ?T0 + ?S(1000)}},
@@ -204,7 +204,7 @@ fin_resend_keeps_the_holes_test() ->
 %% An acknowledgement of a probe byte leaves snd_nxt behind snd_una; output sends from
 %% snd_una (FreeBSD's input moves snd_nxt up, tcp_input.c:2047).
 snd_nxt_behind_snd_una_test() ->
-    {Log, _} = erx_tcp_sendlog:ack(erx_tcp_sendlog:sent(erx_tcp_sendlog:new(1001), 1001, 1002, ?T0),
+    {Log, _} = erx_tcp_sendlog:ack(erx_tcp_sendlog:sent(erx_tcp_sendlog:new(1001), 1001, 1002, 1000, ?T0),
                                    1002, []),
     T = (est(5000))#tcb{snd_una = 1002, snd_nxt = 1001, snd_max = 1002, sendlog = Log},
     {T1, Out} = out(T#tcb{sndbuf = erx_tcp_sndbuf:drop(T#tcb.sndbuf, 1)}),
@@ -264,7 +264,7 @@ no_route_keeps_the_dsack_block_test() ->
 %% tcp_output.c:1651-1678: a SACK retransmission lost for want of a route leaves snd_nxt and
 %% the send log as they were, so the next pass resends the same range.
 no_route_sack_retransmission_test() ->
-    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, ?T0) end,
+    Log0 = lists:foldl(fun(Start, L) -> erx_tcp_sendlog:sent(L, Start, Start + 1000, 1000, ?T0) end,
                        erx_tcp_sendlog:new(1001), [1001, 2001, 3001, 4001, 5001]),
     {Log1, _} = erx_tcp_sendlog:ack(Log0, 1001, [{2001, 6001}]),
     {Log, 1000} = erx_tcp_sendlog:mark_lost(Log1, 3, 1000),

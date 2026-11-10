@@ -38,7 +38,7 @@ est(Out, Extra) ->
     Una = ?ISS + 1,
     Log = case Out of
               0 -> erx_tcp_sendlog:new(Una);
-              _ -> erx_tcp_sendlog:sent(erx_tcp_sendlog:new(Una), Una, Una + Out, ?T0 - 50000)
+              _ -> erx_tcp_sendlog:sent(erx_tcp_sendlog:new(Una), Una, Una + Out, 1000, ?T0 - 50000)
           end,
     Timer = case Out of
                 0 -> none;
@@ -71,7 +71,7 @@ input(Segments, Tcb, Ctx) -> erx_tcp_input:segments(Segments, Tcb, Ctx).
 
 %% A simultaneous open: our SYN out, the peer's SYN in, then its ACK of our SYN.
 simultaneous_open_completes_on_the_ack_of_our_syn_test() ->
-    Log = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS), ?ISS, ?ISS + 1, ?T0),
+    Log = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS), ?ISS, ?ISS + 1, 1000, ?T0),
     SynSent = (new())#tcb{state = syn_sent, snd_nxt = ?ISS + 1, snd_max = ?ISS + 1,
                           sendlog = Log, send_timer = {rexmt, ?T0 + 3000000}},
     {T1, _} = input([wire(?RCV - 1, 0, ?TH_SYN)], SynSent),
@@ -84,7 +84,7 @@ simultaneous_open_completes_on_the_ack_of_our_syn_test() ->
     ?assertNotEqual(infinity, (T2#tcb.deadlines)#deadlines.keep).
 
 syn_received_with_a_queued_fin_goes_to_fin_wait_1_test() ->
-    Log = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS), ?ISS, ?ISS + 1, ?T0),
+    Log = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS), ?ISS, ?ISS + 1, 1000, ?T0),
     T0 = (est())#tcb{state = syn_received, snd_una = ?ISS, sendlog = Log, fin = queued},
     {T, []} = input([wire(?RCV, ?ISS + 1, ?ACK)], T0),
     ?assertEqual({fin_wait_1, queued, ?ISS + 1}, {T#tcb.state, T#tcb.fin, T#tcb.snd_una}).
@@ -195,7 +195,7 @@ fin_acknowledged_test_() ->
 window_update_test_() ->
     T0 = (est(2000, 0))#tcb{snd_wl1 = ?RCV, snd_wl2 = ?ISS + 1001, snd_una = ?ISS + 1001,
                             sendlog = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS + 1001),
-                                                           ?ISS + 1001, ?ISS + 2001, ?T0)},
+                                                           ?ISS + 1001, ?ISS + 2001, 1000, ?T0)},
     Win = fun(Ack, W) ->
               {T, _} = input([wire(?RCV, Ack, ?ACK, <<>>, #tcp_opts{}, W, 0)], T0),
               {T#tcb.snd_wnd, T#tcb.snd_wl2}
@@ -282,7 +282,7 @@ fin_transitions_test_() ->
      ?_assertEqual({time_wait, ?RCV + 2, true, Eof}, Fin(fin_wait_2)),
      ?_assertEqual({close_wait, ?RCV + 2, true, Eof},
                    begin
-                       Log = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS), ?ISS, ?ISS + 1, ?T0),
+                       Log = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(?ISS), ?ISS, ?ISS + 1, 1000, ?T0),
                        T0 = (est())#tcb{state = syn_received, snd_una = ?ISS, sendlog = Log},
                        {T, A} = input([wire(?RCV, ?ISS + 1, ?FIN_ACK, <<"z">>)], T0),
                        {T#tcb.state, T#tcb.rcv_nxt, T#tcb.ack_now, A}
@@ -384,7 +384,7 @@ generate(R0) ->
     Max = Una + Out,
     Log = case Out of
               0 -> erx_tcp_sendlog:new(Una);
-              _ -> erx_tcp_sendlog:sent(erx_tcp_sendlog:new(Una), Una, Max, ?T0 - 30000)
+              _ -> erx_tcp_sendlog:sent(erx_tcp_sendlog:new(Una), Una, Max, 1000, ?T0 - 30000)
           end,
     Base = est(),
     Recovery = get(recovery, C),

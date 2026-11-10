@@ -18,7 +18,7 @@ ccv(Cwnd, Ssthresh) ->
 
 %% Ten segments [0, 1000) sent.
 log() ->
-    lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, I) end,
+    lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, ?MSS, I) end,
                 erx_tcp_sendlog:new(0), lists:seq(0, 9)).
 
 dup(Log, Ccv) ->
@@ -31,10 +31,10 @@ newreno_limited_transmit_then_recovery_test() ->
     Log0 = log(),
     {drop, Log1, S1, [{ack_received, dupack}]} = erx_tcp_loss_dupack:ack(dup(Log0, Ccv), Log0, S0, 0),
     ?assertEqual({1100, 1000}, erx_tcp_loss_dupack:allowance(Log1, S1, Ccv)),
-    Log2 = erx_tcp_sendlog:sent(Log1, 1000, 1100, 1),
+    Log2 = erx_tcp_sendlog:sent(Log1, 1000, 1100, ?MSS, 1),
     {drop, Log3, S2, _} = erx_tcp_loss_dupack:ack(dup(Log2, Ccv), Log2, S1, 0),
     ?assertEqual({1200, 1000}, erx_tcp_loss_dupack:allowance(Log3, S2, Ccv)),
-    Log4 = erx_tcp_sendlog:sent(Log3, 1100, 1200, 2),
+    Log4 = erx_tcp_sendlog:sent(Log3, 1100, 1200, ?MSS, 2),
     {drop, Log5, S3, Events} = erx_tcp_loss_dupack:ack(dup(Log4, Ccv), Log4, S2, 0),
     ?assertEqual([{cong_signal, ndupack}, {ack_received, dupack}, stop_rexmt], Events),
     %% The segment at snd_una is to be retransmitted; after the signal, ssthresh is 600 and
@@ -45,7 +45,7 @@ newreno_limited_transmit_then_recovery_test() ->
     Signalled = (ccv(1000, 600))#ccv{fast_recovery = true},
     ?assertEqual({1200, 900}, erx_tcp_loss_dupack:allowance(Log5, S3, Signalled)),
     %% A partial acknowledgement retransmits the next segment and deflates the window.
-    Log6 = erx_tcp_sendlog:sent(Log5, 0, 100, 3),
+    Log6 = erx_tcp_sendlog:sent(Log5, 0, 100, ?MSS, 3),
     Partial = #loss_ack{ack = 100, una = 0, snd_nxt = 1200, recover = 1200, pure = true,
                         rexmt_armed = true, ccv = Signalled#ccv{cwnd = 700}},
     {continue, Log7, S4, [stop_rexmt, ack_now]} = erx_tcp_loss_dupack:ack(Partial, Log6, S3, 0),
@@ -80,7 +80,7 @@ sack_recovery_and_prr_test() ->
     ?assertEqual(400, erx_tcp_sendlog:pipe(Log1)),
     Ccv = (ccv(1000, 500))#ccv{fast_recovery = true},
     ?assertEqual({500, 500}, erx_tcp_loss_dupack:allowance(Log1, S1, Ccv)),
-    Log2 = erx_tcp_sendlog:sent(Log1, 0, 100, 1),
+    Log2 = erx_tcp_sendlog:sent(Log1, 0, 100, ?MSS, 1),
     %% A duplicate SACKing [600, 700): DeliveredData 100, pipe 400 below ssthresh 500, so
     %% PRR-SSRB: prr_delivered 200, prr_out 100, sndcnt min(100, 200) is one segment.
     B = A#loss_ack{sack_blocks = [{600, 700}], recover = 1000, ccv = Ccv},
@@ -138,10 +138,10 @@ limited_transmit_counts_its_own_output_test() ->
            end,
     {drop, Log1, S1, _} = erx_tcp_loss_dupack:ack(Sack(Log0, 0, [{900, 1000}]), Log0, S0, 0),
     ?assertEqual({1000, 1000}, erx_tcp_loss_dupack:allowance(Log1, S1, Ccv)),
-    Log2 = erx_tcp_sendlog:sent(Log1, 1000, 1100, 1),
+    Log2 = erx_tcp_sendlog:sent(Log1, 1000, 1100, ?MSS, 1),
     {continue, Log3, S2, []} = erx_tcp_loss_dupack:ack(Sack(Log2, 100, [{900, 1000}]), Log2, S1, 0),
     ?assertEqual(1, erx_tcp_loss_dupack:dupacks(S2)),
-    Log4 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, 2) end,
+    Log4 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, ?MSS, 2) end,
                        Log3, lists:seq(11, 13)),
     {drop, Log5, S3, [{ack_received, dupack}]} =
         erx_tcp_loss_dupack:ack(Sack(Log4, 100, [{900, 1000}, {1300, 1400}]), Log4, S2, 0),
@@ -160,11 +160,11 @@ ecn_reduction_starts_prr_afresh_test() ->
     {drop, Log2, S2, _} = erx_tcp_loss_dupack:ack(Dup(Log1, ccv(1000, 64000)), Log1, S1, 0),
     {drop, Log3, S3, _} = erx_tcp_loss_dupack:ack(Dup(Log2, ccv(1000, 64000)), Log2, S2, 0),
     Fast = (ccv(1000, 500))#ccv{fast_recovery = true},
-    Log4 = erx_tcp_sendlog:sent(Log3, 0, 100, 1),
+    Log4 = erx_tcp_sendlog:sent(Log3, 0, 100, ?MSS, 1),
     Full = #loss_ack{ack = 1000, snd_nxt = 1000, recover = 1000, pure = true, rexmt_armed = true,
                      ccv = Fast},
     {continue, Log5, S4, []} = erx_tcp_loss_dupack:ack(Full, Log4, S3, 0),
-    Log6 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, 2) end,
+    Log6 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * ?MSS, (I + 1) * ?MSS, ?MSS, 2) end,
                        Log5, lists:seq(10, 19)),
     Cong = (ccv(1000, 500))#ccv{cong_recovery = true},
     Ecn = #loss_ack{ack = 1100, snd_nxt = 2000, recover = 2001, pure = true, rexmt_armed = true,
@@ -184,7 +184,7 @@ prr_window_is_over_the_pipe_test() ->
     A = (dup(Log0, ccv(1000, 64000)))#loss_ack{sack_opt = true, sack_blocks = [{300, 600}],
                                                pure = false},
     {drop, Log1, S1, _} = erx_tcp_loss_dupack:ack(A, Log0, S0, 0),
-    Log2 = erx_tcp_sendlog:sent(Log1, 0, 100, 1),
+    Log2 = erx_tcp_sendlog:sent(Log1, 0, 100, ?MSS, 1),
     Fast = (ccv(1000, 500))#ccv{fast_recovery = true},
     Partial = #loss_ack{ack = 600, snd_nxt = 1000, recover = 1000, pure = true, rexmt_armed = true,
                         ccv = Fast},

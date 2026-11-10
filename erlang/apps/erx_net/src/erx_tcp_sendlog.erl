@@ -10,7 +10,8 @@ written from RFC 6675, not translated: FreeBSD's sender-side scoreboard lives in
 `sys/netinet/tcp_sack.c`, whose notice carries an advertising clause erXos does not take.
 
 The log tiles `[snd_una, snd_max)` with ranges, an ordered map from each range's first
-byte to `#sent{}`: where it ends, when it was last sent, how often, and three marks.
+byte to `#sent{}`: where it ends, the segment size it was sent with, when it was last sent,
+how often, and three marks.
 `sacked` is RFC 6675's SACKed. `lost` is `IsLost`, set by the loss module (`mark_lost/3`
 computes RFC 6675's definition; `lose/2` marks what NewReno infers lost; `timeout/2`
 marks everything). `rxt` is "retransmitted during the current recovery", RFC 6675's octets
@@ -20,12 +21,19 @@ one range. Sequence numbers are unwrapped integers.
 
 Invariants:
 * The ranges tile `[snd_una, snd_max)` exactly, without gaps or overlaps.
-* Only the sender's own transmissions create range boundaries (`sent/4`, `rescued/5`,
-  and an acknowledgement that cuts a range at `snd_una`). A SACK block marks only the
-  ranges it covers whole, so a peer cannot split the log into pieces smaller than what
-  was sent, and the log never holds more ranges than the sender made. Merging SACKed
-  neighbours only removes boundaries, and makes each acknowledgement's work proportional
-  to the ranges it newly SACKs, not to the window.
+* A range holds one or more segments of the size it was sent with (docs/design-network-
+  fastpath.md, "The send log keeps runs"). Range boundaries fall only on the segment
+  boundaries the sender made: a transmission (`sent/5`, `rescued/5`) and an
+  acknowledgement cut a range at their edge and, when that lies inside a segment, at the
+  segment's end too (split/2), so every range starts on a boundary of its own segments.
+  A SACK block marks the whole segments it covers and leaves a segment it covers in part
+  unmarked, so a peer cannot split the log below the segments that were sent, and no byte
+  is marked SACKed that a block does not cover. Merging SACKed neighbours only removes
+  boundaries, and makes each acknowledgement's work proportional to the ranges it newly
+  SACKs, not to the window.
+* New data extends the highest range when that range is unmarked, sent once, at the same
+  time, with the same segment size, and ends on a full segment (extend/5), so the log of
+  k segments sent in one step equals the log of one run of k.
 * The unSACKed ranges marked lost are a prefix of the unSACKed ranges. `IsLost` is
   monotone in that direction (a byte below a lost byte has at least as much SACKed data
   above it), and every marking keeps it: `mark_lost/3` marks downward, `lose/2` marks
@@ -36,7 +44,7 @@ Invariants:
   `(snd_max - snd_una) - sacked - lost + rxt`, RFC 6675's `SetPipe`.
 """.
 
--export([new/1, sent/4, rescued/5, ack/3, mark_lost/3, lose/2, timeout/2, timeout_undone/1,
+-export([new/1, sent/5, rescued/5, ack/3, mark_lost/3, lose/2, timeout/2, timeout_undone/1,
          resend_holes/1,
          next_seg/2]).
 -export([snd_una/1, snd_max/1, snd_fack/1, pipe/1, flight/1, sacked_bytes/1, sent_bytes/1,
@@ -45,6 +53,9 @@ Invariants:
 
 -record(sent, {
     next :: integer(),                  % the sequence number after the range
+    %% The segment size the range was sent with: its segment boundaries are its first byte
+    %% plus multiples of `seg`, and its last segment may be shorter.
+    seg :: pos_integer(),
     sent_at :: integer(),               % the last transmission, monotonic microseconds
     transmissions = 1 :: pos_integer(),
     sacked = false :: boolean(),
@@ -88,22 +99,24 @@ retransmission applies, which is only in SACK-based recovery.
 new(Una) when is_integer(Una) -> #sendlog{una = Una, max = Una, fack = Una, high_rxt = Una}.
 
 -doc """
-Records the transmission of `[Start, Next)` at `Now`. The part at or past `snd_max` is new
-data; the part below is a retransmission, which counts as `HighRxt` moving over it
-(RFC 6675 section 5, step (C)). `Start` lies in `[snd_una, snd_max]`.
+Records the transmission of `[Start, Next)` at `Now`, cut into segments of `Seg` bytes:
+one segment, or a run of them. The part at or past `snd_max` is new data, recorded with
+`Seg` as its segment size; the part below is a retransmission, which counts as `HighRxt`
+moving over it (RFC 6675 section 5, step (C)) and leaves the segment sizes of the ranges
+it covers as they were sent. `Start` lies in `[snd_una, snd_max]`.
 """.
--spec sent(log(), integer(), integer(), integer()) -> log().
-sent(#sendlog{una = Una, max = Max} = Log0, Start, Next, Now)
-  when is_integer(Start), is_integer(Next), is_integer(Now), Una =< Start, Start < Next,
-       Start =< Max ->
-    Log1 = case Next > Max of
-        true -> store(Log0#sendlog{max = Next}, Max, none, #sent{next = Next, sent_at = Now});
+-spec sent(log(), integer(), integer(), pos_integer(), integer()) -> log().
+sent(#sendlog{una = Una, max = Max} = Log0, Start, Next, Seg, Now)
+  when is_integer(Start), is_integer(Next), is_integer(Seg), Seg > 0, is_integer(Now),
+       Una =< Start, Start < Next, Start =< Max ->
+    Log1 = case Start < Max of
+        true ->
+            Log1a = update(Log0, Start, min(Next, Max), fun(S) -> resent(S, Now, true) end),
+            Log1a#sendlog{high_rxt = max(Log1a#sendlog.high_rxt, min(Next, Max))};
         false -> Log0
     end,
-    Log2 = case Start < Max of
-        true ->
-            Log1a = update(Log1, Start, min(Next, Max), fun(S) -> resent(S, Now, true) end),
-            Log1a#sendlog{high_rxt = max(Log1a#sendlog.high_rxt, min(Next, Max))};
+    Log2 = case Next > Max of
+        true -> extend(Log1#sendlog{max = Next}, Max, Next, Seg, Now);
         false -> Log1
     end,
     count_sent(Log2, Next - Start).
@@ -124,8 +137,8 @@ Applies an acknowledgement: `Ack` acknowledges everything below it, and `Blocks`
 SACK blocks, `{Left, Right}` with `Right` exclusive, unwrapped by the caller. `Ack` is at
 most `snd_max`, as the connection checks before (`tcp_input.c`'s `tcps_rcvacktoomuch`); an
 `Ack` at or below `snd_una` acknowledges nothing new. A block is clipped to
-`[max(Ack, snd_una), snd_max)` and marks only the ranges it covers whole, so D-SACK blocks
-and blocks outside what was sent change nothing.
+`[max(Ack, snd_una), snd_max)` and marks only the segments it covers whole, so D-SACK
+blocks and blocks outside what was sent change nothing.
 """.
 -spec ack(log(), integer(), [{integer(), integer()}]) -> {log(), ack_info()}.
 ack(#sendlog{una = Una0, max = Max, sacked = Sacked0} = Log0, Ack, Blocks)
@@ -296,8 +309,9 @@ has_holes(#sendlog{sacked = Sacked}) -> Sacked > 0.
 -doc "The ranges in order, for tests and the inspector.".
 -spec to_list(log()) -> [{integer(), integer(), map()}].
 to_list(#sendlog{ranges = Ranges}) ->
-    [{Start, Next, #{sent_at => At, transmissions => N, sacked => Sk, lost => L, rxt => R}}
-     || {Start, #sent{next = Next, sent_at = At, transmissions = N, sacked = Sk, lost = L, rxt = R}}
+    [{Start, Next, #{seg => Seg, sent_at => At, transmissions => N, sacked => Sk, lost => L,
+                     rxt => R}}
+     || {Start, #sent{next = Next, seg = Seg, sent_at = At, transmissions = N, sacked = Sk, lost = L, rxt = R}}
             <- gb_trees:to_list(Ranges)].
 
 %% Internal: the one funnel for changing a range, and what it is built from.
@@ -314,49 +328,89 @@ advance(#sendlog{fack = Fack, high_rxt = HighRxt} = Log, Ack) ->
     Log1 = drop_below(Log, Ack),
     Log1#sendlog{una = Ack, fack = max(Fack, Ack), high_rxt = max(HighRxt, Ack)}.
 
-drop_below(#sendlog{ranges = Ranges} = Log, Ack) ->
+drop_below(Log, Ack) ->
+    drop_ranges_below(split(Log, Ack), Ack).
+
+drop_ranges_below(#sendlog{ranges = Ranges} = Log, Ack) ->
     case gb_trees:is_empty(Ranges) of
         true ->
             Log;
         false ->
             case gb_trees:smallest(Ranges) of
-                {Start, _} when Start >= Ack ->
-                    Log;
-                {Start, #sent{next = Next} = Old} when Next =< Ack ->
-                    drop_below(store(Log, Start, Old, none), Ack);
-                {Start, Old} ->
-                    store(store(Log, Start, Old, none), Ack, none, Old)
+                {Start, Old} when Start < Ack -> drop_ranges_below(store(Log, Start, Old, none), Ack);
+                _ -> Log
             end
     end.
 
-%% Marks SACKed the ranges a block covers whole, merging each with a SACKed neighbour below,
-%% and the range after the block with the block's last.
+%% Marks SACKed the whole segments a block covers, in every range it reaches.
 sack_block({Left, Right}, #sendlog{una = Una, max = Max, ranges = Ranges} = Log)
   when is_integer(Left), is_integer(Right) ->
     From = max(Left, Una),
     To = min(Right, Max),
     case From < To of
         true ->
-            Log1 = sack_ranges(gb_trees:next(gb_trees:iterator_from(From, Ranges)), To, Log),
-            merge_down(Log1, To);
+            First = case gb_trees:smaller(From + 1, Ranges) of
+                        {Start, _} -> Start;
+                        none -> From
+                    end,
+            sack_ranges(gb_trees:next(gb_trees:iterator_from(First, Ranges)), From, To, Log);
         false -> Log
     end.
 
-sack_ranges({Start, #sent{next = Next} = Old, Iter}, To, #sendlog{fack = Fack} = Log)
-  when Next =< To ->
-    Log1 = case Old#sent.sacked of
-        true -> Log;
-        false -> store(Log, Start, Old, Old#sent{sacked = true, lost = false, rxt = false})
-    end,
-    sack_ranges(gb_trees:next(Iter), To, merge_down(Log1#sendlog{fack = max(Fack, Next)}, Start));
-sack_ranges(_, _, Log) ->
+%% The iterator walks the ranges as they were before the block; a range it reaches is
+%% looked up again only through keys the marking has not moved, since marking splits and
+%% merges only the range being marked and SACKed ranges, which are skipped.
+sack_ranges({Start, #sent{sacked = false, next = Next, seg = Seg}, Iter}, From, To, Log)
+  when Start < To ->
+    Low = Start + ceil_div(max(From - Start, 0), Seg) * Seg,
+    High = case To >= Next of
+               true -> Next;
+               false -> Start + ((To - Start) div Seg) * Seg
+           end,
+    Log1 = case Low < High of
+               true -> mark_sacked(split(split(Log, Low), High), Low, High);
+               false -> Log
+           end,
+    sack_ranges(gb_trees:next(Iter), From, To, Log1);
+sack_ranges({Start, #sent{}, Iter}, From, To, Log) when Start < To ->
+    sack_ranges(gb_trees:next(Iter), From, To, Log);
+sack_ranges(_, _, _, Log) ->
     Log.
 
-%% Merges a SACKed range at Start into a SACKed range just below it.
+%% [Low, High) is one range now, whole segments of it; it merges with SACKed neighbours.
+mark_sacked(#sendlog{ranges = Ranges, fack = Fack} = Log, Low, High) ->
+    Old = gb_trees:get(Low, Ranges),
+    Log1 = store(Log, Low, Old, Old#sent{sacked = true, lost = false, rxt = false}),
+    merge_down(merge_down(Log1#sendlog{fack = max(Fack, High)}, Low), High).
+
+ceil_div(A, B) -> (A + B - 1) div B.
+
+%% New data [Max, Next) sent at Now with segment size Seg: it extends the highest range when
+%% that range could have been the start of the same run, and is a range of its own otherwise.
+extend(#sendlog{ranges = Ranges} = Log, Max, Next, Seg, Now) ->
+    New = #sent{next = Next, seg = Seg, sent_at = Now},
+    case gb_trees:is_empty(Ranges) of
+        false ->
+            case gb_trees:largest(Ranges) of
+                {Start, #sent{next = Max, seg = Seg, sent_at = Now, transmissions = 1,
+                              sacked = false, lost = false, rxt = false} = Old}
+                  when (Max - Start) rem Seg =:= 0 ->
+                    store(Log, Start, Old, Old#sent{next = Next});
+                _ ->
+                    store(Log, Max, none, New)
+            end;
+        true ->
+            store(Log, Max, none, New)
+    end.
+
+%% Merges a SACKed range at Start into a SACKed range just below it whose segments run on
+%% into it, so the merged range's segments are still the ones that were sent: a timeout that
+%% forgets SACK information (timeout/2) leaves it to be marked again on those boundaries.
 merge_down(#sendlog{ranges = Ranges} = Log, Start) ->
     case {gb_trees:lookup(Start, Ranges), gb_trees:smaller(Start, Ranges)} of
-        {{value, #sent{sacked = true, next = Next, transmissions = N} = Upper},
-         {Below, #sent{sacked = true, next = Start, transmissions = M} = Lower}} ->
+        {{value, #sent{sacked = true, next = Next, transmissions = N, seg = Seg} = Upper},
+         {Below, #sent{sacked = true, next = Start, transmissions = M, seg = Seg} = Lower}}
+          when (Start - Below) rem Seg =:= 0 ->
             store(store(Log, Start, Upper, none), Below, Lower,
                   Lower#sent{next = Next, transmissions = max(N, M)});
         _ ->
@@ -373,13 +427,24 @@ update_ranges({Start, Old, Iter}, To, Fun, Log) when Start < To ->
 update_ranges(_, _, _, Log) ->
     Log.
 
+%% Cuts the range containing Seq at Seq and, when Seq lies inside one of its segments, at
+%% that segment's end too, so both pieces above the cut start on a boundary the sender made.
 split(#sendlog{ranges = Ranges} = Log, Seq) ->
     case gb_trees:smaller(Seq, Ranges) of
-        {Start, #sent{next = Next} = Sent} when Next > Seq ->
-            store(store(Log, Start, Sent, Sent#sent{next = Seq}), Seq, none, Sent);
+        {Start, #sent{next = Next, seg = Seg} = Sent} when Next > Seq ->
+            Boundary = Start + ceil_div(Seq - Start, Seg) * Seg,
+            Log1 = cut(Log, Start, Sent, Seq),
+            case Boundary > Seq andalso Boundary < Next of
+                true -> cut(Log1, Seq, Sent, Boundary);
+                false -> Log1
+            end;
         _ ->
             Log
     end.
+
+%% Cuts the range at Start, whose marks are Sent's, into [Start, At) and [At, next).
+cut(Log, Start, #sent{} = Sent, At) ->
+    store(store(Log, Start, Sent, Sent#sent{next = At}), At, none, Sent).
 
 %% Replaces the range at Start (none: absent) and keeps the byte counters.
 store(#sendlog{ranges = Ranges, sacked = Sk, lost = Lo, rxt = Rx} = Log, Start, Old, New) ->

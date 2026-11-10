@@ -173,6 +173,9 @@ Departures, each from erXos's model:
                   len :: non_neg_integer(),
                   flags :: 0..16#fff,
                   source :: next | retransmit | rescue,
+                  %% A full segment of this pass, t_maxseg less the options: the segment
+                  %% size the send log records it with (erx_tcp_sendlog:sent/5).
+                  size = 1 :: pos_integer(),
                   sendalot :: boolean()}).
 
 -doc """
@@ -489,8 +492,8 @@ transmit(#out_seg{flags = Flags0} = Seg0, #tcb{maxseg = Mss} = Tcb0,
     Optlen = erx_tcp_wire:optlen(Opts),
     Seg = case Seg0#out_seg.len + Optlen > Mss of
               true -> Seg0#out_seg{len = max(0, Mss - Optlen), flags = Flags0 band bnot ?TH_FIN,
-                                   sendalot = true};
-              false -> Seg0
+                                   sendalot = true, size = max(1, Mss - Optlen)};
+              false -> Seg0#out_seg{size = max(1, Mss - Optlen)}
           end,
     Df = dont_fragment(Tcb0),
     case Df andalso ?IP4_TCP_HDR_LEN + Optlen + Seg#out_seg.len > Mtu of
@@ -656,7 +659,7 @@ rcv_shift(#tcb{}) -> 0.
 %% below snd_max); the retransmission timer starts for what is outstanding, or the persist
 %% timer when data waits and nothing went. A probe into an open window has already stopped
 %% persist in decide/3, so only a probe into a zero window takes the first branch.
-after_send(#out_seg{start = Start, len = Len, flags = Flags, source = Source},
+after_send(#out_seg{start = Start, len = Len, flags = Flags, source = Source, size = Size},
            #tcb{snd_nxt = Nxt0, snd_max = Max0, snd_una = Una, sendlog = Log0,
                 snd_recover = Recover, sndbuf = Buf, fin = Fin0} = Tcb0,
            #tcp_ctx{now = Now} = Ctx) ->
@@ -670,8 +673,8 @@ after_send(#out_seg{start = Start, len = Len, flags = Flags, source = Source},
     Log = if
               End =:= Start -> Log0;
               Source =:= rescue -> erx_tcp_sendlog:rescued(Log0, Start, End, Recover, Now);
-              Source =:= retransmit -> erx_tcp_sendlog:sent(Log0, Start, End, Now);
-              End > Max0 -> erx_tcp_sendlog:sent(Log0, max(Start, Max0), End, Now);
+              Source =:= retransmit -> erx_tcp_sendlog:sent(Log0, Start, End, Size, Now);
+              End > Max0 -> erx_tcp_sendlog:sent(Log0, max(Start, Max0), End, Size, Now);
               true -> Log0
           end,
     Tcb1 = Tcb0#tcb{sendlog = Log, fin = Fin},

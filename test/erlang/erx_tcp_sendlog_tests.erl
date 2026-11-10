@@ -32,7 +32,7 @@ run(Seed) ->
 %% Send new data, unless the window is full: half full-sized segments, half of any size.
 step(1, Now, Log, #model{una = Una, max = Max} = M) when Max - Una < 30 * ?MSS ->
     Next = Max + case rand:uniform(2) of 1 -> ?MSS; 2 -> rand:uniform(?MSS) end,
-    {erx_tcp_sendlog:sent(Log, Max, Next, Now), M#model{max = Next}};
+    {erx_tcp_sendlog:sent(Log, Max, Next, ?MSS, Now), M#model{max = Next}};
 %% An acknowledgement: a cumulative point (a range edge or any byte) and up to three SACK
 %% blocks on range edges.
 step(2, _Now, Log, #model{una = Una, max = Max, sacked = Sacked} = M) when Max > Una ->
@@ -54,7 +54,7 @@ step(2, _Now, Log, #model{una = Una, max = Max, sacked = Sacked} = M) when Max >
 %% A retransmission, if NextSeg offers one.
 step(_, Now, Log, #model{max = Max, high_rxt = HighRxt} = M) ->
     case erx_tcp_sendlog:next_seg(Log, opts(Max)) of
-        {retransmit, S, E} -> {erx_tcp_sendlog:sent(Log, S, E, Now), M#model{high_rxt = max(HighRxt, E)}};
+        {retransmit, S, E} -> {erx_tcp_sendlog:sent(Log, S, E, ?MSS, Now), M#model{high_rxt = max(HighRxt, E)}};
         _ -> {Log, M}
     end.
 
@@ -114,11 +114,11 @@ bytes(_, _) -> [].
 b2i(true) -> 1;
 b2i(false) -> 0.
 
-%% A SACK block that covers only part of a range marks nothing: the peer cannot split the
+%% A SACK block that covers only part of a segment marks nothing: the peer cannot split the
 %% log into pieces smaller than what was sent.
 partial_block_marks_nothing_test() ->
-    Log0 = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(0), 0, 100, 1),
-    Log1 = erx_tcp_sendlog:sent(Log0, 100, 200, 2),
+    Log0 = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(0), 0, 100, ?MSS, 1),
+    Log1 = erx_tcp_sendlog:sent(Log0, 100, 200, ?MSS, 2),
     {Log2, #{sacked := Newly}} = erx_tcp_sendlog:ack(Log1, 0, [{150, 200}, {10, 20}]),
     ?assertEqual(0, Newly),
     ?assertEqual(2, length(erx_tcp_sendlog:to_list(Log2))),
@@ -128,13 +128,13 @@ partial_block_marks_nothing_test() ->
 %% Rule 4: one rescue retransmission per recovery, ending at the highest unSACKed byte, and
 %% none again until snd_una passes the recovery point.
 rescue_test() ->
-    Log0 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * 100, I * 100 + 100, I) end,
+    Log0 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * 100, I * 100 + 100, ?MSS, I) end,
                        erx_tcp_sendlog:new(0), lists:seq(0, 4)),
     {Acked, _} = erx_tcp_sendlog:ack(Log0, 0, [{100, 200}]),
     Opts = #{mss => 60, recover => 500, new_data => false, rescue => true},
     %% Rule 3 first resends the hole below the SACKed range; then only the rescue is left.
     ?assertEqual({retransmit, 0, 60}, erx_tcp_sendlog:next_seg(Acked, Opts)),
-    Log1 = erx_tcp_sendlog:sent(Acked, 0, 100, 5),
+    Log1 = erx_tcp_sendlog:sent(Acked, 0, 100, ?MSS, 5),
     ?assertEqual({rescue, 440, 500}, erx_tcp_sendlog:next_seg(Log1, Opts)),
     Log2 = erx_tcp_sendlog:rescued(Log1, 440, 500, 500, 9),
     ?assertEqual(none, erx_tcp_sendlog:next_seg(Log2, Opts)),
@@ -142,7 +142,7 @@ rescue_test() ->
 
 %% A timeout makes everything unSACKed lost; the first keeps the SACKed ranges.
 timeout_test() ->
-    Log0 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * 100, I * 100 + 100, I) end,
+    Log0 = lists:foldl(fun(I, L) -> erx_tcp_sendlog:sent(L, I * 100, I * 100 + 100, ?MSS, I) end,
                        erx_tcp_sendlog:new(0), lists:seq(0, 4)),
     {Log1, _} = erx_tcp_sendlog:ack(Log0, 0, [{200, 300}]),
     Kept = erx_tcp_sendlog:timeout(Log1, keep),
@@ -153,3 +153,88 @@ timeout_test() ->
     ?assertEqual({retransmit, 0, 100},
                  erx_tcp_sendlog:next_seg(Gone, #{mss => 100, recover => 500, new_data => true,
                                                   rescue => false})).
+
+%% The send log's rules for runs (docs/design-network-fastpath.md, "The send log keeps runs",
+%% and its Verification, test 3), over random runs of new data, acknowledgements with SACK
+%% blocks at any byte, and retransmissions, with t_maxseg lowered once, sometimes within one
+%% step, so that retransmissions are cut at another size than their ranges. Two logs take
+%% the same events, but one is sent each run whole and the other segment by segment; after
+%% every event:
+%% * the two logs are equal, range by range;
+%% * every segment boundary of every range is one the sender made: a boundary of the
+%%   segments new data was cut into, an edge of a retransmission, or a cumulative ACK;
+%% * every byte marked SACKed is one a block covered.
+-record(runs, {una = ?ISS, max = ?ISS, mss = ?MSS, now = 0, made = #{?ISS => true},
+               covered = #{}}).
+
+runs_keep_segments_test() ->
+    lists:foreach(fun runs_run/1, lists:seq(1, 80)).
+
+runs_run(Seed) ->
+    rand:seed(exsss, {Seed, 41, 7}),
+    Empty = erx_tcp_sendlog:new(?ISS),
+    lists:foldl(fun(Step, {Whole, Cut, M}) ->
+                        {Whole1, Cut1, M1} = runs_step(rand:uniform(5), Whole, Cut, M),
+                        runs_check({seed, Seed, step, Step}, Whole1, Cut1, M1),
+                        {Whole1, Cut1, M1}
+                end, {Empty, Empty, #runs{}}, lists:seq(1, 120)).
+
+%% New data: a run of one to five segments, the last one sometimes short, at the step's
+%% time, which half the time is the time of the run before.
+runs_step(1, Whole, Cut, #runs{una = Una, max = Max, mss = Mss, now = Now0} = M)
+  when Max - Una < 30 * ?MSS ->
+    Now = Now0 + rand:uniform(2) - 1,
+    Full = rand:uniform(5),
+    Len = case rand:uniform(2) of 1 -> Full * Mss; 2 -> (Full - 1) * Mss + rand:uniform(Mss) end,
+    Next = Max + Len,
+    Bounds = [min(B, Next) || B <- lists:seq(Max, Next + Mss - 1, Mss)],
+    Cut1 = lists:foldl(fun({S, E}, L) -> erx_tcp_sendlog:sent(L, S, E, Mss, Now) end, Cut,
+                       lists:zip(lists:droplast(Bounds), tl(Bounds))),
+    {erx_tcp_sendlog:sent(Whole, Max, Next, Mss, Now), Cut1,
+     M#runs{max = Next, now = Now, made = runs_made(M#runs.made, [Next | Bounds])}};
+%% An acknowledgement: a cumulative point anywhere, and up to three blocks anywhere.
+runs_step(2, Whole, Cut, #runs{una = Una, max = Max, covered = Covered} = M) when Max > Una ->
+    Ack = case rand:uniform(3) of 1 -> Una + rand:uniform(Max - Una); _ -> Una end,
+    Blocks = [runs_block(Una, Max) || _ <- lists:seq(1, rand:uniform(4) - 1)],
+    Ack1 = fun(L0) ->
+                   {L1, _} = erx_tcp_sendlog:ack(L0, Ack, Blocks),
+                   {L2, _} = erx_tcp_sendlog:mark_lost(L1, ?DUPTHRESH, ?MSS),
+                   L2
+           end,
+    Covered1 = lists:foldl(fun({L, R}, Acc) -> maps:merge(Acc, maps:from_keys(bytes(L, R), true)) end,
+                           maps:filter(fun(B, _) -> B >= Ack end, Covered), Blocks),
+    {Ack1(Whole), Ack1(Cut), M#runs{una = max(Una, Ack), covered = Covered1,
+                                    made = runs_made(M#runs.made, [Ack])}};
+%% A retransmission NextSeg offers, cut at the current segment size.
+runs_step(3, Whole, Cut, #runs{max = Max, mss = Mss, now = Now0} = M) ->
+    Now = Now0 + 1,
+    Opts = #{mss => Mss, recover => Max, new_data => false, rescue => false},
+    case erx_tcp_sendlog:next_seg(Whole, Opts) of
+        {retransmit, S, E} ->
+            {erx_tcp_sendlog:sent(Whole, S, E, Mss, Now), erx_tcp_sendlog:sent(Cut, S, E, Mss, Now),
+             M#runs{now = Now, made = runs_made(M#runs.made, [S, E])}};
+        _ ->
+            {Whole, Cut, M}
+    end;
+%% A path MTU drop: t_maxseg falls once, in the same step as the run before.
+runs_step(4, Whole, Cut, #runs{mss = ?MSS} = M) ->
+    {Whole, Cut, M#runs{mss = 60}};
+runs_step(_, Whole, Cut, M) ->
+    {Whole, Cut, M}.
+
+runs_made(Made, Points) -> maps:merge(Made, maps:from_keys(Points, true)).
+
+runs_block(Una, Max) ->
+    A = Una + rand:uniform(Max - Una + 1) - 1,
+    B = Una + rand:uniform(Max - Una + 1) - 1,
+    {min(A, B), max(A, B) + 1}.
+
+runs_check(Where, Whole, Cut, #runs{made = Made, covered = Covered}) ->
+    Ranges = erx_tcp_sendlog:to_list(Whole),
+    ?assertEqual({Where, Ranges}, {Where, erx_tcp_sendlog:to_list(Cut)}),
+    Inside = [{S, N, B} || {S, N, #{seg := Seg}} <- Ranges, B <- lists:seq(S, N - 1, Seg),
+                           not maps:is_key(B, Made)],
+    ?assertEqual({Where, []}, {Where, Inside}),
+    Uncovered = [B || {S, N, #{sacked := true}} <- Ranges, B <- lists:seq(S, N - 1),
+                      not maps:is_key(B, Covered)],
+    ?assertEqual({Where, []}, {Where, Uncovered}).

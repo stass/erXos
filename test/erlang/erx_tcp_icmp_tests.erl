@@ -41,7 +41,7 @@ est(Family, Maxseg, Iss) ->
           snd_wnd = 65535, max_sndwnd = 65535, maxseg = Maxseg,
           ccv = Ccv#ccv{cwnd = 10 * Maxseg, maxseg = Maxseg}, wscale = {0, 0}, ts = off,
           sack = off, rtt_probe = {Una, ?T0},
-          sendlog = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(Una), Una, Una + ?FLIGHT, ?T0),
+          sendlog = erx_tcp_sendlog:sent(erx_tcp_sendlog:new(Una), Una, Una + ?FLIGHT, 1000, ?T0),
           sndbuf = erx_tcp_sndbuf:append(erx_tcp_sndbuf:new(), binary:copy(<<"x">>, ?FLIGHT)),
           send_timer = {rexmt, ?T0 + 1000000}}.
 
