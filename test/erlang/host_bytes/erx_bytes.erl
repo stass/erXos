@@ -1,21 +1,21 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% A stand-in for erx_bytes on stock's emulator, which lacks erXos's statically linked NIFs,
+%% A stand-in for erx_bytes on stock's emulator, which lacks erXos's erx_bytes BIFs,
 %% so host tests of erXos's applications can run code that calls erx_bytes, and the reference
 %% model that the C cores and erx_net's portable erx_bytes over them are compared with
 %% (test/host/erx_net_bytes_test.rb); erx_net's own host runs load that portable module.
-%% Each primitive is a model written from its definition, sharing nothing with the NIF's C or
-%% with the Ruby host tools, and keeps the NIF's contract, failing with badarg where erx_bytes
-%% does:
+%% Each primitive is a model written from its definition, sharing nothing with the C of the BIFs
+%% and NIFs or with the Ruby host tools, and keeps their contract, failing with badarg where
+%% erx_bytes does:
 %%   * CRC-32C bit by bit: badarg unless Crc is in 0..16#FFFFFFFF and Data a binary of at most
 %%     65536 bytes.
 %%   * The Internet checksum (RFC 1071) a 16-bit word at a time, folding at the end, and RFC
 %%     1624's equation 3 for the update: badarg unless Sum or Checksum is in 0..16#FFFF, Data is
-%%     iodata of at most 65536 bytes, and Before and After are binaries of one even size of at
-%%     most 65536 bytes.
+%%     iodata of at most 65536 bytes in lists of at most 131072 cells in all, and Before and
+%%     After are binaries of one even size of at most 65536 bytes.
 %%   * SipHash-2-4 from the paper, with 64-bit arithmetic masked: badarg unless Key is a 16-byte
-%%     binary and Data iodata of at most 65536 bytes.
+%%     binary and Data iodata of at most 65536 bytes in lists of at most 131072 cells in all.
 %%   * SHA-256 is stock's crypto:hash/2: badarg unless Data is a binary.
 %%   * entropy/1 is stock's crypto:strong_rand_bytes/1, the host's generator: badarg unless N
 %%     is an integer from 1 to 256. It never fails a read, so the raise of a failed read is
@@ -26,6 +26,7 @@
 -export([crc32c/2, inet_csum/2, inet_csum_update/3, siphash24/2, sha256/1, entropy/1]).
 
 -define(CALL_MAX, 65536).
+-define(CELLS_MAX, 131072).
 -define(MASK64, 16#FFFFFFFFFFFFFFFF).
 
 -spec crc32c(0..16#FFFFFFFF, binary()) -> 0..16#FFFFFFFF.
@@ -84,14 +85,20 @@ bits(State, 0) -> State;
 bits(State, N) when State band 1 =:= 1 -> bits((State bsr 1) bxor 16#82F63B78, N - 1);
 bits(State, N) -> bits(State bsr 1, N - 1).
 
-%% Data as one binary, badarg unless it is iodata of at most ?CALL_MAX bytes.
+%% Data as one binary, badarg unless it is iodata of at most ?CALL_MAX bytes in lists of at
+%% most ?CELLS_MAX cells in all.
 call_bytes(Data) when is_binary(Data); is_list(Data) ->
-    case iolist_to_binary(Data) of
-        Bytes when byte_size(Bytes) =< ?CALL_MAX -> Bytes;
-        _ -> erlang:error(badarg)
+    Bytes = iolist_to_binary(Data),
+    case byte_size(Bytes) =< ?CALL_MAX andalso cells(Data, 0) =< ?CELLS_MAX of
+        true -> Bytes;
+        false -> erlang:error(badarg)
     end;
 call_bytes(_Data) ->
     erlang:error(badarg).
+
+%% The list cells of the iodata Data, added to N.
+cells([Head | Tail], N) -> cells(Tail, cells(Head, N + 1));
+cells(_Leaf, N) -> N.
 
 words(<<Word:16, Rest/binary>>, Total) -> words(Rest, Total + Word);
 words(<<Byte>>, Total) -> Total + (Byte bsl 8);

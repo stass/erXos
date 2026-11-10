@@ -5,7 +5,7 @@
 %% (docs/design-live.md, "Host link frames"): the shared vectors of
 %% test/fixtures/hostlink_frames.txt, which the Ruby frame layer checks too, named by
 %% ERX_HOSTLINK_VECTORS, then the session's receiving, sending and credit. Run on stock's
-%% emulator with test/erlang/host_bytes/erx_bytes.erl standing in for the NIF.
+%% emulator with test/erlang/host_bytes/erx_bytes.erl standing in for the BIFs.
 
 -module(erx_hostlink_frame_tests).
 

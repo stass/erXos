@@ -14,12 +14,13 @@ require_relative '../fixtures/generated_tree'
 
 # The network stack's per-byte primitives, erx_bytes:inet_csum/2, inet_csum_update/3 and
 # siphash24/2 (docs/design-runtime.md, "Per-byte primitives"), in their C cores
-# (erlang/apps/erx_net/c_src/erx_inet_csum.c and erx_siphash.c), which erXos's ERTS links
-# statically and the portable erx_bytes loads as erx_net's priv/erx_bytes_nif.so:
+# (erlang/apps/erx_net/c_src/erx_inet_csum.c and erx_siphash.c), which erXos's ERTS links into
+# its erx_bytes BIFs and the portable erx_bytes loads as erx_net's priv/erx_bytes_nif.so:
 # * each core's harness (test/fixtures/erx_*_harness.c) passes the published examples and
 #   vectors, its cuts and its model under the address and undefined sanitizers, and fails for
 #   every mutant, each changing one expression of the core;
-# * each fuzz target is declared over its core, its seeds pass, and they catch a seeded fault;
+# * each fuzz target is declared over its core (the iodata walk's over
+#   erlang/apps/erx_net/c_src/erx_iodata.c), its seeds pass, and they catch a seeded fault;
 # * the cores agree with the Erlang models of the host stand-in
 #   (test/erlang/host_bytes/erx_bytes.erl) over random cases, through
 #   test/fixtures/erx_bytes_cases.c and test/erlang/erx_bytes_cases.erl, and the models pass
@@ -44,15 +45,25 @@ class ErxNetBytesTest < Minitest::Test
   RANDOM_CASES = 600
   EUNIT = 'halt(case eunit:test([erx_bytes_tests], [verbose]) of ok -> 0; _ -> 1 end)'
 
-  # A seeded fault in each primitive's NIF function (c_src/erx_net_bytes.c): the text it
-  # replaces and the faulty text.
+  # A seeded fault in each primitive's NIF function (c_src/erx_bytes_nif.c) and in the iodata
+  # walk under them (c_src/erx_iodata.c): the file, the text it replaces and the faulty text.
   NIF_FAULTS = {
     'inet_csum: a piece at an odd offset summed as at an even one' =>
-      ['*sum = erx_inet_sum(*sum, data, length, before);', '*sum = erx_inet_sum(*sum, data, length, before & ~(size_t)1);'],
+      ['erx_bytes_nif.c', '*sum = erx_inet_sum(*sum, data, length, before);',
+       '*sum = erx_inet_sum(*sum, data, length, before & ~(size_t)1);'],
     'inet_csum_update: the bytes before and after swapped' =>
-      ['(uint16_t)checksum, before.data, after.data,', '(uint16_t)checksum, after.data, before.data,'],
+      ['erx_bytes_nif.c', '(uint16_t)checksum, before.data, after.data,', '(uint16_t)checksum, after.data, before.data,'],
     'siphash24: the last byte of each piece dropped' =>
-      ['erx_siphash24_update(context, data, length);', 'erx_siphash24_update(context, data, length - (length > 0));']
+      ['erx_bytes_nif.c', 'erx_siphash24_update(context, data, length);',
+       'erx_siphash24_update(context, data, length - (length > 0));'],
+    'walk: one cell over the limit taken' =>
+      ['erx_iodata.c', 'if (++walk->cells > ERX_IODATA_CELLS_MAX)', 'if (++walk->cells > ERX_IODATA_CELLS_MAX + 1)'],
+    'walk: an integer tail taken as a byte' =>
+      ['erx_iodata.c', "\t\tcase ERX_IODATA_BYTE:\n\t\tcase ERX_IODATA_OTHER:\n\t\t\treturn (ERX_IODATA_BADARG);",
+       "\t\tcase ERX_IODATA_BYTE:\n\t\t\tif (!take_byte(walk, item.value))\n\t\t\t\treturn (ERX_IODATA_BADARG);\n\t\t\tbreak;\n" \
+       "\t\tcase ERX_IODATA_OTHER:\n\t\t\treturn (ERX_IODATA_BADARG);"],
+    'walk: the last run of integer bytes never visited' =>
+      ['erx_iodata.c', "\tif (status == ERX_IODATA_OK)\n\t\tflush_run(&walk);\n", '']
   }.freeze
 
   Core = Data.define(:kind, :source, :harness, :done, :mutants, :fuzz_catches)
@@ -85,6 +96,24 @@ class ErxNetBytesTest < Minitest::Test
     )
   ].freeze
 
+  # The iodata walk under the NIFs and erXos's BIFs (c_src/erx_iodata.c), which has no harness of
+  # its own: the EUnit cases judge it through the portable library (NIF_FAULTS), and its fuzz
+  # target judges it against a model of its own.
+  WALK = Core.new(
+    kind: 'iodata', source: 'erx_iodata.c', harness: nil, done: nil,
+    mutants: {
+      'a tail kept for later dropped' => ["\twalk->stack[walk->depth++] = tail;", "\twalk->stack[walk->depth++] = tail & 0;"],
+      'the stack copied short when it moves' => ['bcopy(walk->local, grown, sizeof(walk->local));',
+                                                 'bcopy(walk->local, grown, sizeof(walk->local) / 2);'],
+      'a binary of exactly the room left refused' => [
+        'walk->layer->classify(walk->layer->env, cell->head, ERX_BYTES_CALL_MAX - walk->bytes, &head);',
+        'walk->layer->classify(walk->layer->env, cell->head, ERX_BYTES_CALL_MAX - walk->bytes - 1, &head);'
+      ]
+    },
+    fuzz_catches: ['a tail kept for later dropped', 'the stack copied short when it moves',
+                   'a binary of exactly the room left refused']
+  )
+
   def test_each_harness_passes
     CORES.each do |core|
       Dir.mktmpdir("erx-#{core.kind}-") do |directory|
@@ -108,7 +137,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def test_each_fuzz_target_declares_its_core_and_its_seeds_pass
-    CORES.each do |core|
+    [*CORES, WALK].each do |core|
       Dir.mktmpdir("erx-#{core.kind}-fuzz-") do |directory|
         output, status = run_fuzz(directory, core, File.join(C_SRC, core.source))
         assert status.success?, output
@@ -117,7 +146,7 @@ class ErxNetBytesTest < Minitest::Test
   end
 
   def test_each_fuzz_target_catches_its_seeded_faults
-    CORES.each do |core|
+    [*CORES, WALK].each do |core|
       core.fuzz_catches.each do |name|
         original, replacement = core.mutants.fetch(name)
         Dir.mktmpdir("erx-#{core.kind}-fuzz-mutant-") do |directory|
@@ -183,12 +212,61 @@ class ErxNetBytesTest < Minitest::Test
     end
   end
 
+  # A binary at a bit offset is copied whole by enif_inspect_binary, so each argument the
+  # portable library inspects must be refused, when it is large, before it reaches the NIF.
+  # The probe refuses a 32 MiB one in every argument position and reports whether any
+  # temporary block (temp_alloc's largest single-block carrier yet) reached its size.
+  def test_the_portable_nif_refuses_a_large_bit_offset_binary_without_copying_it
+    Dir.mktmpdir('erx-net-bytes-nif-copy-') do |work|
+      output, status = run_erlang(nif_ebin(work), <<~ERLANG.tr("\n", ' '))
+        Size = 32 bsl 20,
+        <<_:1, Big/binary>> = <<0:1, 0:(Size * 8)>>,
+        Calls = [fun() -> erx_bytes:inet_csum(0, Big) end,
+                 fun() -> erx_bytes:inet_csum(0, [<<1>>, Big]) end,
+                 fun() -> erx_bytes:inet_csum_update(0, Big, Big) end,
+                 fun() -> erx_bytes:siphash24(Big, <<>>) end,
+                 fun() -> erx_bytes:siphash24(<<0:128>>, [Big]) end],
+        Refusals = [catch Call() || Call <- Calls],
+        Peak = lists:max([0 | [Max || {instance, _, Info} <- erlang:system_info({allocator, temp_alloc}),
+                                      {sbcs, Carriers} <- [lists:keyfind(sbcs, 1, Info)],
+                                      {carriers_size, _, _, Max} <- Carriers]]),
+        io:format("~p~n", [{[Reason || {'EXIT', {Reason, _}} <- Refusals], Peak < Size}]),
+        halt().
+      ERLANG
+      assert status.success?, output
+      assert_equal '{[badarg,badarg,badarg,badarg,badarg],true}', output.strip
+    end
+  end
+
+  # The size check before the NIF stops near where the walk does: a list that shares its halves
+  # 60 deep, 2^60 cells walked whole, is refused within seconds, not walked. Each calling
+  # process builds the list and sends back only the reason, since a closure or a message that
+  # held the list would copy it unshared.
+  def test_the_portable_size_check_stops_at_the_cell_limit
+    Dir.mktmpdir('erx-net-bytes-nif-cells-') do |work|
+      output, status = run_erlang(nif_ebin(work), <<~ERLANG.tr("\n", ' '))
+        Doubled = fun() -> lists:foldl(fun(_, Half) -> [Half, Half] end, [], lists:seq(1, 60)) end,
+        Self = self(),
+        Calls = [fun(List) -> erx_bytes:inet_csum(0, List) end,
+                 fun(List) -> erx_bytes:siphash24(<<0:128>>, List) end],
+        Reason = fun(Call) -> case catch Call(Doubled()) of {'EXIT', {Why, _}} -> Why; Value -> Value end end,
+        [spawn(fun() -> Self ! {Index, Reason(Call)} end) || {Index, Call} <- lists:enumerate(Calls)],
+        Answers = [receive {Index, Answer} -> Answer after 5000 -> timeout end
+                   || Index <- lists:seq(1, length(Calls))],
+        io:format("~p~n", [Answers]),
+        halt().
+      ERLANG
+      assert status.success?, output
+      assert_equal '[badarg,badarg]', output.strip
+    end
+  end
+
   def test_every_seeded_nif_fault_fails_the_eunit_cases
-    NIF_FAULTS.each do |name, (exact, faulty)|
+    NIF_FAULTS.each do |name, (file, exact, faulty)|
       Dir.mktmpdir('erx-net-bytes-nif-fault-') do |work|
         c_src = File.join(work, 'c_src')
         FileUtils.cp_r(C_SRC, c_src)
-        functions = File.join(c_src, 'erx_net_bytes.c')
+        functions = File.join(c_src, file)
         source = File.read(functions)
         raise "seeded fault site is gone: #{exact}" unless source.include?(exact)
 

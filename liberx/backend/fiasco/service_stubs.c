@@ -17,6 +17,7 @@
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
+#include "erx/explicit_bzero.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
 #include "liberx/backend/core/gate.h"
@@ -239,25 +240,37 @@ erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
 	return (status);
 }
 
-/* A reply holds two words, so a read asks for them until it has its bytes. */
+/*
+ * A reply holds two words, so a read asks for them until it has its bytes. The reply on the
+ * stack is erased once its words are in mr, and a failed read zeroes mr's first len bytes,
+ * so a failure leaves no entropy behind in mr. The generator service's copies, in
+ * its own and this thread's Fiasco UTCB, are the stopgap's (TODO.md, security residuals).
+ */
 int
 erx_entropy_read(uint32_t len)
 {
 	const erx_fiasco_entropy_read_request_t request = { .caller = erx_fiasco_thread_self()->index };
 	const int checked = erx_backend_entropy_read_check(len);
+	erx_utcb_t *const utcb = erx_utcb_self();
 	erx_fiasco_reply_t reply;
+	int status;
 
 	if (checked != ERX_OK)
 		return (checked);
-	for (uint32_t done = 0; done < len; done += 2 * sizeof(uint64_t)) {
-		const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_ENTROPY_READ, &request, sizeof(request), &reply);
-
-		if (status != ERX_OK)
-			return (status);
-		erx_backend_mr_put_bytes(erx_utcb_self(), done, reply.first, len);
-		erx_backend_mr_put_bytes(erx_utcb_self(), done + sizeof(uint64_t), reply.second, len);
+	status = ERX_OK;
+	for (uint32_t done = 0; done < len && status == ERX_OK; done += 2 * sizeof(uint64_t)) {
+		status = erx_fiasco_service_call(ERX_FIASCO_CALL_ENTROPY_READ, &request, sizeof(request), &reply);
+		if (status == ERX_OK) {
+			erx_backend_mr_put_bytes(utcb, done, reply.first, len);
+			erx_backend_mr_put_bytes(utcb, done + sizeof(uint64_t), reply.second, len);
+		}
+		erx_explicit_bzero(&reply, sizeof(reply));
 	}
-	return (ERX_OK);
+	if (status != ERX_OK) {
+		for (uint32_t at = 0; at < len; at += sizeof(uint64_t))
+			erx_backend_mr_put_bytes(utcb, at, 0, len);
+	}
+	return (status);
 }
 
 /* A request holds four words of bytes, so a long add takes several. */

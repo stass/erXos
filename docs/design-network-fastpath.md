@@ -165,8 +165,8 @@ one segment per pass of its `again` loop and commits it, copying the
 control block in `commit/6`, `after_send/3` and `done/2`.
 `erx_net_frame:tcp/3` encodes the TCP header and its options
 (`erx_tcp_wire:encode/3`, `add_options/1`) and the IP and link headers,
-summing the segment with the checksum NIF, three calls and two
-`erlang:iolist_to_iovec/1` per segment. The send log inserts one range per
+summing the segment with the checksum BIF, three calls per segment. The
+send log inserts one range per
 segment. The step's frames go to the driver in one `{transmit, Frames}`
 message, and the driver joins every `{transmit, ...}` waiting in its
 mailbox to its backlog and hands each frame to its transport. The tap
@@ -181,7 +181,7 @@ port; ERTS reads it into a 64 KiB buffer and copies it into a fresh
 binary (`driver_output`), one message to the driver. The driver sends it
 to the interface, one frame per message. The interface takes every
 such message waiting in its mailbox, classifies each frame, checks its
-checksums with three NIF calls, decodes it, and sends each connection
+checksums with three BIF calls, decodes it, and sends each connection
 one message of its items. The connection takes every such message
 waiting in its mailbox and steps their segments as one event, each
 through the fourteen stages of `erx_tcp_input`, `lift` to `fin`; header prediction

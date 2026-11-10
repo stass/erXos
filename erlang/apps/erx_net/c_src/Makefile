@@ -6,7 +6,7 @@
 # * nif: erx_bytes_nif.so, the per-byte primitives of the portable erx_bytes
 #   (portable/erx_bytes.erl), against the headers of the emulator that ERL
 #   runs, the one that will load it. Its cores, erx_inet_csum.c and
-#   erx_siphash.c, and their NIF functions, erx_net_bytes.c, are also linked
+#   erx_siphash.c, and the iodata walk, erx_iodata.c, are also linked
 #   statically into erXos's ERTS, whose build compiles them from here.
 # * tap: erx_net_tap, the tap helper, a port program. It is never built for
 #   erXos's target.
@@ -21,8 +21,8 @@ CC = cc
 ERL = erl
 PRIV = ../priv
 ERX_CFLAGS = -std=c17 -O2 -Wall -Wextra -Wpedantic
-NIF_SOURCES = erx_bytes_nif.c erx_net_bytes.c erx_inet_csum.c erx_siphash.c
-NIF_HEADERS = erx_net_bytes.h erx_inet_csum.h erx_siphash.h
+NIF_SOURCES = erx_bytes_nif.c erx_iodata.c erx_inet_csum.c erx_siphash.c
+NIF_HEADERS = erx_iodata.h erx_inet_csum.h erx_siphash.h
 
 all: nif tap
 

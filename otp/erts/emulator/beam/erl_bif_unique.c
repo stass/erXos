@@ -69,8 +69,8 @@ static void init_magic_ref_tables(void);
 
 /*
  * The domain's reference key, from one erx_entropy_read, taken and zeroed out of the UTCB at
- * once, as the entropy NIF does (nifs/erxos/erx_bytes_nif.c). Without it no reference this
- * runtime makes could be unguessable, so the runtime refuses to start.
+ * once, as erx_bytes:entropy/1's BIF does (nifs/erxos/erx_bytes_bif.c). Without it no reference
+ * this runtime makes could be unguessable, so the runtime refuses to start.
  */
 static void
 read_ref_key(uint8_t key[ERX_REF_KEY_BYTES])

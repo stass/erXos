@@ -2418,10 +2418,12 @@ installed only in its driver's domain.
 
 System code is Erlang, drivers included
 ([design.md](design.md#decisions)), and the work it does once per byte is
-not: a small set of C primitives in both runtime images does it, as
-statically linked NIFs on binaries, each with a fuzz target and a
-differential test against a reference on the host. Erlang does everything
-done once per packet, per block and per file around them.
+not: a small set of C primitives in both runtime images does it, each with
+a fuzz target and a differential test against a reference on the host. The
+primitives of `erx_bytes` are BIFs of erXos's ERTS, registered in its
+`bif.tab`; `erx_verity`, the device copies and the pipe copy are NIFs.
+Erlang does everything done once per packet, per block and per file
+around them.
 
 | Primitive | Does | Used by | Reference |
 | --- | --- | --- | --- |
@@ -2437,15 +2439,21 @@ done once per packet, per block and per file around them.
 | `erx_bytes:tcp_merge/1`, with `tcp_merge_limit/0` | groups a batch of received Ethernet frames, at most 256 frames with less than 64 KiB before the last, the limit `tcp_merge_limit/0` answers and the network driver cuts every batch to, into merged TCP segments by FreeBSD's LRO rule, returning sub-binaries of the frames, and sums each frame that came without its network sum | the network stack's interface process ([design-network-fastpath.md](design-network-fastpath.md#the-merge)) | `erx_tcp_merge_model`, an Erlang model of the rule |
 | the pipe NIF's record copy | copies a record between a pipe's ring and a binary | the session's pipe ends | the pipe tests |
 
-* **Bounded.** A NIF call works on at most 64 KiB of hashing or checksumming
+* **Bounded.** A call works on at most 64 KiB of hashing or checksumming
   or 16 blocks, so it stays within a reduction slice and runs on a normal
-  scheduler; the caller streams longer inputs. The SHA-256 calls take a
-  binary of any size and stream it through calls of 64 KiB themselves,
-  each charged reductions for its bytes, so a blob is checked in one call
-  and the process is still preempted between its pieces; a state of
-  `sha256_init/0` and `sha256_update/2` is an immutable value, so the
-  same state may be extended or finished more than once, within the
-  runtime that made it.
+  scheduler; the caller streams longer inputs. A BIF of `erx_bytes` checks
+  its own arguments and is charged reductions for the work it does, its
+  bytes in proportion and one reduction per 64 cells of an iodata list.
+  `inet_csum/2` and `siphash24/2` take iodata of at most 65536 bytes in
+  lists of at most 131072 cells in all, which one walk in C reads, with
+  its stack of nested lists on the heap and bounded by the cell limit, so
+  no depth of list makes C recurse; a list past the limits, or an improper
+  one, raises `badarg`. The SHA-256 calls take a binary of any size: `sha256_update/2` traps to itself between pieces of
+  64 KiB, as ERTS's `md5_update/2` does, each charged reductions for its
+  bytes, so a blob is checked in one call and the process is still
+  preempted between its pieces; a state of `sha256_init/0` and
+  `sha256_update/2` is an immutable value, so the same state may be
+  extended or finished more than once, within the runtime that made it.
 * **Never blocking.** No primitive waits; every event a driver or a pipe
   end waits for is a message through the event table.
 * **The entropy entry.** `erx_bytes:entropy(N)` is not per-byte work,

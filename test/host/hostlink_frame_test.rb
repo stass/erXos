@@ -15,7 +15,7 @@ require_relative '../../tools/lib/erx/generated'
 # (test/erlang/erx_hostlink_frame_tests.erl); and a cross test in which Ruby frames, Erlang
 # deframes and answers, and Ruby deframes the answers. The Erlang side runs on stock's
 # emulator (ERX_ERL and ERX_ERLC, which make check supplies) with
-# test/erlang/host_bytes/erx_bytes.erl standing in for the CRC NIF.
+# test/erlang/host_bytes/erx_bytes.erl standing in for the CRC BIF.
 class HostlinkFrameTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.

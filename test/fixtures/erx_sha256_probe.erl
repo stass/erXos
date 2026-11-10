@@ -16,7 +16,7 @@ seed of `rand`, so both runtimes, which are the same OTP release, make the same 
 -export([digests/1, check/1]).
 
 %% Lengths around SHA-256's block (64 bytes) and its padding (55, 56, 119, 120), and around
-%% erx_bytes's NIF call of 65536 bytes.
+%% the pieces of 65536 bytes that erx_bytes:sha256_update/2 works in.
 -define(LENGTHS, [0, 1, 55, 56, 63, 64, 65, 119, 120, 1000, 65535, 65536, 65537, 131072,
                   200000]).
 -define(CUTS_PER_MESSAGE, 6).
@@ -117,8 +117,9 @@ random_pieces(Message, Seed) ->
     {[binary:part(Message, From, To - From) || {From, To} <- lists:zip(lists:droplast(Bounds), tl(Bounds))],
      Seed2}.
 
-%% Each malformed call must fail with badarg: a bitstring, a list, a state that is not one, and a
-%% long bitstring that only the streaming clause sees.
+%% Each malformed call must fail with badarg: a bitstring, a list, a long bitstring, and a state
+%% that is not one, a plain reference or another kind of magic reference, which the BIFs must
+%% never read as a SHA-256 context.
 refusals() ->
     State = erx_bytes:sha256_init(),
     Calls = [fun() -> erx_bytes:sha256(<<1:7>>) end,
@@ -130,6 +131,10 @@ refusals() ->
              fun() -> erx_bytes:sha256_update(make_ref(), binary:copy(<<"a">>, 70000)) end,
              fun() -> erx_bytes:sha256_update(<<>>, <<>>) end,
              fun() -> erx_bytes:sha256_final(make_ref()) end,
+             fun() -> erx_bytes:sha256_final(atomics:new(1, [])) end,
+             fun() -> erx_bytes:sha256_final(counters:new(1, [])) end,
+             fun() -> erx_bytes:sha256_update(atomics:new(1, []), <<"abc">>) end,
+             fun() -> erx_bytes:sha256_update(counters:new(1, []), <<"abc">>) end,
              fun() -> erx_bytes:sha256_final(<<0:832>>) end],
     [Result || Result <- [refused(Call) || Call <- Calls], Result =/= badarg].
 

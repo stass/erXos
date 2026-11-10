@@ -416,7 +416,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   the same boot with the check stubbed to the expected digest. If the check is a
   visible share of the boot, add the instructions, chosen by feature detection in the
   architecture layer, with the portable code as their oracle in the same test. The
-  same run should time one 64 KiB call on each target board, since `erx_bytes_nif.c`
+  same run should time one 64 KiB call on each target board, since `erx_bytes_bif.c`
   charges it a quarter of a reduction slice from the host's number.
 * **[Medium] `erx_net_driver:queued_transmits/1` over the tap's `port` end.** Each
   `{transmit, ...}` drains the further ones with a `receive ... after 0`, which scans the
@@ -434,10 +434,9 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   puts behind the architecture layer. In a one-off loop on the development host (Apple
   M3 Max, macOS, native, clang 23.1.3 -O2, 2026-11-08), not a benchmark, a 64 KiB call
   took about 16 microseconds for the checksum and 110 for SipHash-2-4, and a 36-byte
-  SipHash (a SYN cookie's input) about 60 nanoseconds; `erx_net_bytes.c` (in `erx_net`'s
-  `c_src/`) charges 2 and
-  11 percent of a reduction slice from these. A small call also pays the wrappers'
-  `iolist_size/1` and `erlang:iolist_to_iovec/1` when given a list. Measure: the time
+  SipHash (a SYN cookie's input) about 60 nanoseconds; `erx_bytes_reductions` (in
+  `erx_net`'s `c_src/erx_iodata.h`) charges a 64 KiB call 2 and 11 percent of a
+  reduction slice from these. Measure: the time
   per frame of the bulk-transfer load the network design names, on HVF, against the
   same load with the checksum stubbed; and one 64 KiB call of each on each target
   board. In the p620 run of 2026-11-09 (the network entry on one connection process per
@@ -446,9 +445,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   on receive. The host build loads the same C as erXos (`erx_net`'s
   `priv/erx_bytes_nif.so`), so what is left to measure is the call's cost on the same
   run with the library, against that run.
-  `charge` in `erx_net_bytes.c` charges every call at least 1 percent of a slice, about 40
-  reductions, far above a 36-byte SipHash's cost, so a loop of SYN-cookie hashes is preempted
-  early; the same measurement settles whether the floor should go.
+  On erXos the calls are BIFs charged by their work: one reduction, plus the bytes in
+  proportion and a reduction for each 64 list cells walked, so a 36-byte SipHash costs one
+  reduction, not the NIF floor of 1 percent of a slice. The portable NIF library outside
+  erXos still charges through `enif_consume_timeslice`, whose unit is a percent, so a
+  call there costs at least 1 percent of a slice, about 40 reductions; the same
+  measurement on the host settles whether that matters there. The walk charges a reduction
+  for each 64 list cells, a guess eight times below ERTS's own `iolist_size/1` rate; time a
+  call over 131072 cells on each target board and set the rate from it.
   If the checksum is a visible share, add a wider portable loop (32-bit loads,
   deferred carries) and then the AArch64 instructions chosen by feature detection, the
   portable code staying as their oracle.

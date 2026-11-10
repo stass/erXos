@@ -2074,7 +2074,7 @@ it; git history is the record of completed work.
   code; no outside implementation such as `veritysetup` checks the tree format.
 * [Low] runtime, `erx_erofs`: the superblock's CRC-32C is computed bit by bit in Erlang, not by the
   per-byte primitive `erx_bytes:crc32c/2`: the reader's EUnit cases and fuzz target run it on stock
-  OTP, which has no `erx_bytes` NIF, so moving it needs an Erlang stand-in for those runs (at boot
+  OTP, which has no `erx_bytes` BIFs, so moving it needs an Erlang stand-in for those runs (at boot
   only `erx_ns`, in the same `erx` application as the primitive, mounts an image). The reader's form
   is Linux's, seeded with all ones and not inverted at the end, so over the covered bytes it is
   `erx_bytes:crc32c(0, Covered) bxor 16#FFFFFFFF`. Device, FIFO and socket inodes answer `enotsup`, which the
@@ -4181,6 +4181,16 @@ document's "residual risks accepted" paragraph.
   lane can hold more control records than its reserve, up to two per connection the domain
   holds. Only the liar's own lane is affected; the writer must then neither block the system
   domain nor drop a record, and its design has to show how.
+* [Low] stopgap, entropy (`liberx/backend/fiasco/service_stubs.c`, `erx_entropy_read`, and the
+  generator service it calls): the bytes of a read stay in the Fiasco UTCB message registers of
+  the reading thread and of the service until a later message long enough overwrites those
+  words (a read's own one-word request does not), and wherever the service's code leaves them. liberx erases its stack copy and, after a failed read, the erXos UTCB;
+  erXos's kernel puts the bytes in the reader's UTCB itself, so these copies go with Fiasco.
+* [Low] network, the portable `erx_bytes:siphash24/2` (`erlang/apps/erx_net/c_src/erx_bytes_nif.c`):
+  a key at a bit offset is copied by `enif_inspect_binary` into a temporary block that ERTS
+  frees without erasing, and the NIF API offers neither a way to erase it nor one to read the
+  key in place. erXos's BIF erases its copy. The key term itself, in the caller's heap, is no
+  more erased than any Erlang term, so the fix belongs with how keys are held in Erlang.
 
 ## Planned features
 
@@ -4264,6 +4274,13 @@ document's "residual risks accepted" paragraph.
   can put two jails behind separate tap devices for the relay's FreeBSD
   baseline, and that a stock OTP 29.1.2 builds there for the stack's
   host runs (29.1.1 is installed).
+* [Low] network, the checks of `erx_bytes:inet_csum/2`'s starting sum, `siphash24/2`'s key and
+  `inet_csum_update/3`'s binaries are written twice in C, in erXos's BIFs
+  (`otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`) and in the portable NIFs
+  (`erlang/apps/erx_net/c_src/erx_bytes_nif.c`); the iodata walk has one copy. The shared probe
+  (`test/fixtures/erx_net_bytes_probe.erl`) judges both, but a check its contract cases do not
+  cover could make the builds disagree. Give the scalar checks one copy as pure helpers in
+  `c_src` that both term layers call.
 * [Medium] network, `erx_net` as a package of its own (N12 of
   [design-network-stack.md](docs/design-network-stack.md#requirements)):
   lay `erlang/apps/erx_net` out by seam (`src/`, `erxos/`, `portable/`,
@@ -4273,15 +4290,6 @@ document's "residual risks accepted" paragraph.
   app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's licence notice beside `NOTICE-freebsd`; create
   `erlang/apps/erx_net_client`; and add the build check of N12, which
   covers `c_src/`'s `#include` lines too, with its seeded violation.
-* [Medium] network, the guards of `erx_bytes:inet_csum/2`, `inet_csum_update/3` and
-  `siphash24/2` are written twice, in `erlang/apps/erx/src/erx_bytes.erl` and
-  `erlang/apps/erx_net/portable/erx_bytes.erl`, with the 64 KiB bound a literal in each, while
-  their C has one copy (`erlang/apps/erx_net/c_src/erx_net_bytes.c`). The shared probe
-  (`test/fixtures/erx_net_bytes_probe.erl`) judges both, but a guard change its contract
-  cases do not cover would make the builds disagree. Give the wrappers and `call_iovec/1` one
-  copy, a header in `erx_net`'s `include/` that both modules include, once erXos's image
-  build can compile `erx` against `erx_net`'s headers; the C bound already has a
-  `_Static_assert`.
 * [Low] upstream OTP, `erlc` (stock OTP 29.1.2, the oracle's): run from a directory whose
   path is a string prefix of a source's absolute path without being its parent, it strips
   that prefix and fails: from `/Users/stas/erxos`, `erlc -o /tmp/x

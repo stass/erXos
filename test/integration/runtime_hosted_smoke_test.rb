@@ -351,9 +351,9 @@ class RuntimeHostedSmokeTest < Minitest::Test
 
   # The network stack's per-byte primitives run in the release and agree with the host
   # stand-in's models: the probe (test/fixtures/erx_net_bytes_probe.erl) answers its calls on
-  # stock OTP with test/erlang/host_bytes/erx_bytes.erl, then checks the NIF's answers to the
-  # same calls against those, over iolists whose binaries over 512 bytes reach the NIF as pieces
-  # of their own at odd and even offsets, and every refusal and acceptance of the contract
+  # stock OTP with test/erlang/host_bytes/erx_bytes.erl, then checks the BIFs' answers to the
+  # same calls against those, over iolists that nest binaries at odd and even offsets, and
+  # every refusal and acceptance of the contract
   # against its literal answer; the answer is empty lists only if each check passed.
   def test_the_network_primitives_run_in_the_release_and_agree_with_the_models
     Dir.mktmpdir('erx-hosted-net-bytes-') do |directory|

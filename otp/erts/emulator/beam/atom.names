@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, erx_untraced, and the export table's (erx_exports.c).
+# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, entropy of erx_bytes's, erx_untraced, and the export table's (erx_exports.c).
 #
 
 #
@@ -270,6 +270,7 @@ atom emulator
 atom enable_trace
 atom enabled
 atom endian
+atom entropy
 atom entry
 atom env
 atom ensure_at_least ensure_exactly

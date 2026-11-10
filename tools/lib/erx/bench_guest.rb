@@ -80,13 +80,13 @@ module Erx
 
     # The beam as numbered shell lines: each binds a piece, and the last loads their join and
     # prints the digest of the module that loaded.
-    def load_lines(beam)
+    def load_lines(beam, module_name: 'erx_otp_bench')
       pieces = beam.bytes.each_slice(CHUNK_BYTES).map { |slice| "<<#{slice.join(',')}>>" }
       names = pieces.each_index.map { |index| "B#{index}" }
       binds = pieces.zip(names).map { |piece, name| "#{name} = #{piece}, ok.\r" }
-      binds + ['{module,erx_otp_bench}=code:load_binary(erx_otp_bench,"erx_otp_bench.beam",' \
+      binds + ["{module,#{module_name}}=code:load_binary(#{module_name},\"#{module_name}.beam\"," \
                "iolist_to_binary([#{names.join(',')}])),io:format(\"G3BEAM ~s~n\"," \
-               "[binary:encode_hex(erx_otp_bench:module_info(md5),lowercase)]).\r"]
+               "[binary:encode_hex(#{module_name}:module_info(md5),lowercase)]).\r"]
     end
 
     # Everything typed at the Erlang shell, in order. The first line is typed at the Erlang
@@ -109,8 +109,10 @@ module Erx
     # The transcript the harness follows: the boot to the command shell, the Erlang shell
     # started there, then a checkpoint for each exchange's answer that types the next
     # exchange's line.
-    def checkpoints(beam:, plan:)
-      steps = exchanges(beam: beam, plan: plan)
+    def checkpoints(beam:, plan:) = transcript(exchanges(beam: beam, plan: plan))
+
+    # The transcript for any exchanges typed at the Erlang shell, the first at its banner.
+    def transcript(steps)
       boot = Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB).map do |point|
         point.fetch(:name) == FIRST_LINE_AT ? point.merge(type: ProductionImage::Run::ERL_LINE).freeze : point
       end

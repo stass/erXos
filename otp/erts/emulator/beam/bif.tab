@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds erx_device's, erx_trace_ring's and erx_dist's BIFs. Adds erx_dist:aliases/0 (edit 17) and erx_dist:exports_refused/0.
+# Modified by erXos: adds erx_device's, erx_trace_ring's, erx_dist's and erx_bytes's BIFs. Adds erx_dist:aliases/0 (edit 17) and erx_dist:exports_refused/0.
 #
 
 #
@@ -901,3 +901,17 @@ bif erx_dist:exports/1
 bif erx_dist:owner/1
 bif erx_dist:aliases/0
 bif erx_dist:exports_refused/0
+
+#
+# erXos: the per-byte primitives and the entropy entry (docs/design-runtime.md, "Per-byte
+# primitives"), BIFs so the network stack's calls of them each segment skip the NIF call path.
+#
+
+bif erx_bytes:crc32c/2
+bif erx_bytes:inet_csum/2
+bif erx_bytes:inet_csum_update/3
+bif erx_bytes:siphash24/2
+bif erx_bytes:sha256_init/0
+bif erx_bytes:sha256_update/2
+bif erx_bytes:sha256_final/1
+bif erx_bytes:entropy/1

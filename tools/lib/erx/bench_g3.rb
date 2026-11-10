@@ -117,7 +117,7 @@ module Erx
 
     # The compiler and flags of the image under test, gathered before it boots. An image that
     # was handed in was built elsewhere, so this tree says nothing about it.
-    def build_record(image)
+    public def build_record(image)
       return { 'compiler' => IMAGE_SUPPLIED, 'flags' => IMAGE_SUPPLIED } if image
 
       { 'compiler' => compiler_version, 'flags' => build_flags }

@@ -14,7 +14,7 @@
 
 #include "erx_crc32c.h"
 
-/* The largest call of erx_bytes_nif.c. */
+/* The largest call of erx_bytes_bif.c (ERX_BYTES_CALL_MAX, erx_iodata.h). */
 #define LARGEST_CALL	65536u
 
 /* The definition, one bit at a time: no table, and no state between bytes but the register. */

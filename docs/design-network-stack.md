@@ -198,7 +198,7 @@ effect layer, the processes marked E, which read inputs, call the core's
 steps and carry out their actions. Beneath them:
 
 * **The per-byte primitives** `erx_bytes:inet_csum/2`,
-  `inet_csum_update/3` and `siphash24/2`, statically linked NIFs in
+  `inet_csum_update/3` and `siphash24/2`, BIFs of erXos's ERTS over
   portable C, and `erx_bytes:entropy/1`, Erlang's one entry to the
   kernel's generator, `erx_entropy_read`
   ([design-runtime.md](design-runtime.md#per-byte-primitives),
@@ -1270,7 +1270,7 @@ sums the segment with `erx_bytes:inet_csum/2` in the interface process.
 A sent segment is read twice as well: by `erx_tcp_wire:encode/3`, which
 sums its header and payload in the connection process, and by the copy
 into the device's buffer. The second read finds the bytes in the cache,
-but it costs a NIF call, a walk over the frame's binaries and a pass
+but it costs a call, a walk over the frame's pieces and a pass
 over its bytes, in the two processes every segment passes through: the
 interface process, which classifies for every client, and the
 connection, which is one flow's ceiling
@@ -2584,7 +2584,7 @@ tap device or another medium (N12).
 | --- | --- | --- | --- |
 | the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp` or a test process; `erx_tap`, over a tap device; `erx_netmap`, over netmap's rings | each interface's entry in the `interfaces` key |
 | the clock and entropy | `erx_net_clock` over ERTS's monotonic clock and `erx_bytes:entropy/1` | the same; in a test run, the virtual clock and its seeded generator | the `clock` key |
-| the per-byte primitives | `erx_bytes` of the `erx` application, statically linked NIFs, those of the network over the C of `erx_net`'s `c_src/` | `erx_bytes` of `erx_net`'s `portable/` directory: the same C, loaded from `priv/erx_bytes_nif.so`, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
+| the per-byte primitives | `erx_bytes` of the `erx` application, BIFs of erXos's ERTS, those of the network over the C of `erx_net`'s `c_src/` | `erx_bytes` of `erx_net`'s `portable/` directory: the same C, loaded from `priv/erx_bytes_nif.so`, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
 | the runtime | `erx_net_erxos`: the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
 
 The runtime's seam is the behaviour `erx_net_runtime`:
@@ -2634,19 +2634,27 @@ its own ([The grant's contract](#the-grants-contract)).
 NIFs, built only on a host ([The tap transport](#the-tap-transport),
 [The netmap transport](#the-netmap-transport)), it holds the C of
 the per-byte primitives: the Internet checksum and SipHash-2-4 cores,
-`erx_inet_csum.c` and `erx_siphash.c`, the cut of a run and the merge of
-received segments, `erx_tcp_cut.c` and `erx_tcp_merge.c`
-([design-network-fastpath.md](design-network-fastpath.md)), and their
-NIF functions, `erx_net_bytes.c`, which check the arguments and walk an
-iodata argument's pieces. That C has one copy, and both builds compile
-it from there. erXos's ERTS build links it statically, and erXos's
-`erx_bytes` NIF table lists its functions through the one macro of
-`erx_net_bytes.h`, so the names, arities and checks cannot differ
-between the builds. Outside erXos, `c_src/Makefile` (POSIX make, which
-BSD and GNU make both read) builds the same files, with
-`c_src/erx_bytes_nif.c`'s table and nothing else, into
-`priv/erx_bytes_nif.so` against the headers of the host's own OTP. The
-paths run one way: erXos's tree reaches into `erx_net`, and `erx_net`'s
+`erx_inet_csum.c` and `erx_siphash.c`, the walk over an iodata argument,
+`erx_iodata.c`, the cut of a run and the merge of received segments,
+`erx_tcp_cut.c` and `erx_tcp_merge.c`
+([design-network-fastpath.md](design-network-fastpath.md)), and, for a host,
+the NIF library's functions and table, `erx_bytes_nif.c`. The cores and the
+walk are the C that both builds share, and each has one copy. erXos's ERTS
+compiles them with its own `erx_bytes` BIFs, `erx_bytes_bif.c`, so there
+`inet_csum/2`, `inet_csum_update/3` and `siphash24/2` are BIFs; outside
+erXos, `c_src/Makefile` (POSIX make, which BSD and GNU make both read)
+builds them with `erx_bytes_nif.c`, where the same functions are NIFs, into
+`priv/erx_bytes_nif.so` against the headers of the host's own OTP. Each
+build reads its terms its own way, through the walk's classify function,
+and every limit on iodata is the walk's, so the two accept and refuse the
+same iodata; each checks a starting sum, a key and the update's binaries
+itself, and one probe judges both. The NIF API copies a binary that
+starts at a bit offset whole before its size is known, so the portable
+module's functions refuse, before they call a NIF, an argument of more
+than twice the walk's limits, by a bounded Erlang walk that copies
+nothing; within those bounds every refusal is the NIF's. erXos's BIFs
+check the size before they copy. The paths
+run one way: erXos's tree reaches into `erx_net`, and `erx_net`'s
 C includes only its own headers and `erl_nif.h`, so the package builds
 alone on any host with stock OTP and a C compiler. A build step that
 copied the C out of ERTS's tree would make a second copy that a release
@@ -2660,10 +2668,9 @@ server logs why, the module stays unloaded, every call to it fails with
 `undef`, `entropy/1`'s included, and the stack does not start. Nothing
 stands in for the C, so the stack never runs on another implementation
 than the one erXos runs, and what a host run measures, over a tap device,
-netmap, F-Stack or DPDK, is the stack. The two modules'
-Erlang wrappers carry the same guards; one probe of their shared
-contract judges erXos's NIF in a release and the portable one on stock
-OTP, and both answer the same random calls as the Erlang models of the
+netmap, F-Stack or DPDK, is the stack. One probe of the two modules'
+shared contract judges erXos's BIFs in a release and the portable NIFs on
+stock OTP, and both answer the same random calls as the Erlang models of the
 host tests. `entropy/1` outside erXos is the host's generator,
 `crypto:strong_rand_bytes/1`, with the same refusals as erXos's; a
 failure of the host's generator raises `crypto`'s error and never

@@ -16,7 +16,7 @@
 
 #include "erx_siphash.h"
 
-/* The largest call of erx_net_bytes.c. */
+/* The largest call of erx_bytes's BIFs and NIFs (ERX_BYTES_CALL_MAX, erx_iodata.h). */
 #define LARGEST_CALL	65536u
 
 /*

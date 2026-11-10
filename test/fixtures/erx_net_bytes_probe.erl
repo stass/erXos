@@ -8,18 +8,20 @@ Judges erx_bytes's network primitives, `inet_csum/2`, `inet_csum_update/3`, `sip
 `entropy/1`, in a running erXos release against the Erlang models of the host stand-in
 (test/erlang/host_bytes/erx_bytes.erl). The host tests run `answers/0` on stock OTP with the
 stand-in, then load this module into the release and hand those answers to `check/1`, which
-compares them with the NIF's answers to the same calls. The calls come from a fixed seed of
-`rand`, so both runtimes, which are the same OTP release, make the same arguments. Their
-iolists nest binaries over 512 bytes, which `erlang:iolist_to_iovec/1` leaves as pieces of
-their own, at odd and even offsets, so the NIF's walk over pieces is judged as well as its
-arithmetic. `check/1` also judges every refusal and acceptance of the shared contract
-against literal answers, so on stock it judges the stand-in's contract too.
+compares them with the answers of erx_bytes there, the BIFs', to the same calls. The calls come
+from a fixed seed of `rand`, so both runtimes, which are the same OTP release, make the same
+arguments. Their iolists nest binaries at odd and even offsets, so the walk over iodata is
+judged as well as the arithmetic. `check/1` also judges every refusal and acceptance of the
+shared contract against literal answers, so on stock it judges the stand-in's contract too:
+integer bytes, binaries at a bit offset, the cell limit, deep nesting and improper tails
+included.
 """.
 
 -export([answers/0, check/1]).
 
 -define(RANDOM_CALLS, 20).
 -define(CALL_MAX, 65536).
+-define(CELLS_MAX, 131072).
 
 -type answer() :: non_neg_integer() | badarg | {size, pos_integer()} | boolean().
 
@@ -84,6 +86,9 @@ update_arguments() ->
 contract() ->
     Key = list_to_binary(lists:seq(0, 15)),
     Max = binary:copy(<<1>>, ?CALL_MAX),
+    %% Binaries that start at a bit offset, which the BIFs copy before they read them.
+    <<_:1, Odd/binary>> = <<0:1, 1, 2>>,
+    <<_:3, OddKey/binary>> = <<0:3, Key/binary>>,
     [{{inet_csum, [-1, <<>>]}, badarg},
      {{inet_csum, [16#10000, <<>>]}, badarg},
      {{inet_csum, [0, <<Max/binary, 1>>]}, badarg},
@@ -98,6 +103,24 @@ contract() ->
      {{inet_csum, [0, [<<1>> | <<2>>]]}, 16#0102},
      {{inet_csum, [0, Max]}, 16#8080},
      {{inet_csum, [0, [binary:part(Max, 0, ?CALL_MAX - 1), 1]]}, 16#8080},
+     {{inet_csum, [0, [binary:part(Max, 0, ?CALL_MAX - 1), 1, 1]]}, badarg},
+     {{inet_csum, [0, [1, 2]]}, 16#0102},
+     {{inet_csum, [0, [<<1>>, [[2]] | <<3>>]]}, 16#0402},
+     {{inet_csum, [0, Odd]}, 16#0102},
+     {{inet_csum, [0, [<<>>, Odd]]}, 16#0102},
+     {{inet_csum, [0, [Odd, <<3>>, Odd]]}, 16#0603},
+     {{inet_csum, [16#1234, lists:duplicate(?CELLS_MAX, <<>>)]}, 16#1234},
+     {{inet_csum, [16#1234, lists:duplicate(?CELLS_MAX + 1, <<>>)]}, badarg},
+     {{inet_csum, [16#1234, lists:duplicate(?CELLS_MAX + 1, [])]}, badarg},
+     {{inet_csum, [0, left_nested(?CELLS_MAX div 2, <<1>>)]}, 16#8080},
+     {{inet_csum, [0, left_nested(?CELLS_MAX div 2 + 1, <<1>>)]}, badarg},
+     {{inet_csum, [0, right_nested(?CELLS_MAX - 1, [<<1>>])]}, 16#0100},
+     {{inet_csum, [0, right_nested(?CELLS_MAX - 1, [<<1>> | 2])]}, badarg},
+     {{inet_csum, [0, [<<1>> | 2]]}, badarg},
+     {{inet_csum, [0, [-1]]}, badarg},
+     {{inet_csum, [0, [1.0]]}, badarg},
+     {{inet_csum, [0, 1]}, badarg},
+     {{inet_csum, [0, [Max | <<1>>]]}, badarg},
      {{inet_csum_update, [0, <<1>>, <<2>>]}, badarg},
      {{inet_csum_update, [0, <<1, 2>>, <<1, 2, 3, 4>>]}, badarg},
      {{inet_csum_update, [16#10000, <<>>, <<>>]}, badarg},
@@ -111,6 +134,10 @@ contract() ->
      {{siphash24, [Key, <<Max/binary, 1>>]}, badarg},
      {{siphash24, [Key, [1 | 2]]}, badarg},
      {{siphash24, [Key, lists:seq(0, 14)]}, 16#a129ca6149be45e5},
+     {{siphash24, [OddKey, lists:seq(0, 14)]}, 16#a129ca6149be45e5},
+     {{siphash24, [Key, [<<0, 1, 2>>, [[3 | <<4, 5>>]], lists:seq(6, 14)]]}, 16#a129ca6149be45e5},
+     {{siphash24, [Key, lists:duplicate(?CELLS_MAX + 1, [])]}, badarg},
+     {{siphash24, [Key, right_nested(?CELLS_MAX - 1, [<<1>> | 2])]}, badarg},
      {{siphash24, [Key, []]}, 16#726fdb47dd0e0e31},
      {{entropy, [0]}, badarg},
      {{entropy, [257]}, badarg},
@@ -119,3 +146,13 @@ contract() ->
      {{entropy, [atom]}, badarg},
      {{entropy_pair, [32]}, true}
      | [{{entropy, [N]}, {size, N}} || N <- lists:seq(1, 256)]].
+
+%% Leaf inside N lists, each the head of its own one-cell list: [[[Leaf]]] for N of 3. The walk
+%% keeps each level's empty tail on its stack, so this is the case that grows it most.
+right_nested(0, Leaf) -> Leaf;
+right_nested(N, Leaf) -> right_nested(N - 1, [Leaf]).
+
+%% Leaf after N levels of [Acc, Leaf], the shape of [Acc, Piece] built in a loop: two cells a
+%% level, and a tail held on the walk's stack at each.
+left_nested(N, Leaf) ->
+    lists:foldl(fun(_, Acc) -> [Acc, Leaf] end, [], lists:seq(1, N)).

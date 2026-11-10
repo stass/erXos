@@ -63,10 +63,10 @@ module Erx
       end
     end
 
-    # The bench module's beam, compiled by the oracle's erlc.
-    def compile_beam(flavour: 'emu')
+    # A bench module's beam (bench/<name>.erl), compiled by the oracle's erlc.
+    def compile_beam(flavour: 'emu', name: 'erx_otp_bench')
       parent = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/bench'))
-      @oracle.with_runtime(flavour) { |runtime| compile(runtime, Dir.mktmpdir("beam-#{flavour}-", parent)) }
+      @oracle.with_runtime(flavour) { |runtime| compile(runtime, Dir.mktmpdir("beam-#{flavour}-", parent), name: name) }
     end
 
     # What stock OTP holds at a shell-less start, in the shape the guest's footprint line has.
@@ -99,12 +99,12 @@ module Erx
 
     private
 
-    def compile(runtime, directory)
-      source = File.join(directory, 'erx_otp_bench.erl')
-      FileUtils.copy_file(File.join(@root, 'bench/erx_otp_bench.erl'), source)
+    def compile(runtime, directory, name: 'erx_otp_bench')
+      source = File.join(directory, "#{name}.erl")
+      FileUtils.copy_file(File.join(@root, "bench/#{name}.erl"), source)
       @runner.run([runtime.fetch('erlc'), '+warnings_as_errors', '+deterministic',
                    '-o', directory, source], name: 'bench-compile', deadline: 30, env: Oracle::CLEAN_ERLANG_ENV)
-      bytes = File.binread(File.join(directory, 'erx_otp_bench.beam'))
+      bytes = File.binread(File.join(directory, "#{name}.beam"))
       Beam.new(directory: directory, source: source, bytes: bytes, sha256: Digest::SHA256.hexdigest(bytes))
     end
 
