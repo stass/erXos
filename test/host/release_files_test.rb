@@ -8,6 +8,7 @@ require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/oracle_hosted'
+require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/release_files'
 
 # What the system release and the oracle's hosted tree ship: each application's
@@ -99,7 +100,8 @@ class ReleaseFilesTest < Minitest::Test
     assert_includes paths, "system/lib/runtime_tools-#{VERSION}/ebin/dbg.beam"
     release = File.read(File.join(@scratch, 'release/start.rel'))
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
-    [*%w[kernel stdlib], *(Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY)].each do |application|
+    assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
+    [*%w[kernel stdlib], *(Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY - Erx::ReleaseFiles::DOMAIN_ONLY)].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
   end
@@ -158,6 +160,18 @@ class ReleaseFilesTest < Minitest::Test
     assert(paths.all? { |path| path.start_with?('domains/base/') }, paths.join(', '))
     assert_equal [0], files.map { |entry| entry.fetch('flags') }.uniq
     assert_equal ['system'], entries.map { |entry| entry.fetch('flags') }.uniq
+  end
+
+  # The release table's session release (ProductionImage::DOMAIN_RELEASES) ships the
+  # command shell and erx_session beside what every domain boots through, and starts
+  # them; a name the table does not hold ships the base alone.
+  def test_the_session_release_ships_the_shell_and_erx_session
+    paths = domain_entries(Erx::ProductionImage.domain_release('session')).map { |entry| entry.fetch('path') }
+    assert_includes paths, "domains/session/lib/erx_shell-#{VERSION}/ebin/erx_shell.app"
+    assert_includes paths, "domains/session/lib/erx_session-#{VERSION}/ebin/erx_session.app"
+    release = File.read(File.join(@scratch, 'domain/start.rel'))
+    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_session,"#{VERSION}"\}\]\}\.\n\z/, release, 'the session release starts erx_session')
+    assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_release('erts').applications
   end
 
   # Its release file carries the domain's name and its applications alone, in the

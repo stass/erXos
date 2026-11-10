@@ -277,6 +277,21 @@ typedef struct erx_dom_configured {
 	uint32_t	args_len, env_len;
 } erx_dom_configured_t;
 
+/*
+ * A checked session template of the system manifest (property 14 of
+ * docs/design-system.md), from which each session of its principal is made
+ * on request. It is no configured row, so nothing the boot plans reaches it.
+ * The view holds at most one per principal, in principal order.
+ */
+typedef struct erx_dom_template {
+	uint32_t	principal;	/* its principal's number, from 1 */
+	uint32_t	limits;		/* the index of its limits record */
+	uint32_t	release, release_files, runtime;
+	/* Its arguments and environment, as a configured row's. */
+	const char	*args, *env;
+	uint32_t	args_len, env_len;
+} erx_dom_template_t;
+
 /* A checked native program row of a partial-boot manifest. */
 typedef struct erx_dom_partial {
 	uint32_t	runtime;	/* the program's image */
@@ -310,6 +325,8 @@ typedef struct erx_dom_view {
 	uint32_t		 nfiles;
 	const erx_dom_configured_t *configured;
 	uint32_t		 nconfigured;
+	const erx_dom_template_t *templates;	/* in principal order */
+	uint32_t		 ntemplates;
 	const erx_dom_partial_t	*partial;
 	uint32_t		 npartial;
 	uint32_t		 partial_principal;	/* the partial boot's principal */

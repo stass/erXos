@@ -42,7 +42,7 @@ module AbiFuzz
     manifest_seed = File.binread(File.join(root, 'test/fixtures/manifest_empty.txt'))
     wire_seeds = [AbiManifestFixture.valid, AbiManifestFixture.unit_partition,
                   AbiManifestFixture.unit_partition(overlap: true),
-                  AbiManifestFixture.facet_parameter]
+                  AbiManifestFixture.facet_parameter, AbiManifestFixture.session_template]
     random = Random.new(seed)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
     count = 0

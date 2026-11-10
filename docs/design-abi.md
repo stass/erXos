@@ -1214,12 +1214,12 @@ these exact offsets and sizes.
 
 ### Machine header
 
-The header is 368 bytes with alignment 8. Its fields are:
+The header is 384 bytes with alignment 8. Its fields are:
 
 | Offset | Field | Type and meaning |
 | --- | --- | --- |
 | 0, 4, 6 | `magic`, `version`, `flags` | `u32`, `u16`, `u16`; magic/version above; development at flag bit 0, partial boot at bit 1, the UART console line secure at bit 2 and the host-link line secure at bit 3, all other bits zero |
-| 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 368 |
+| 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 384 |
 | 16, 24, 32, 40 | `host`, `console`, `hostlink`, `platform` | four string references; system identifier, absolute device-tree path, optional device-tree path and platform identifier |
 | 48, 56, 64 | `root_memory`, `system_baseline`, `system_reservation` | three `u64` byte counts; the root assumption, configured baseline and checked admission reservation |
 | 72, 120 | `system_share`, `users_share` | two shares, for `system` and `users` |
@@ -1228,14 +1228,17 @@ The header is 368 bytes with alignment 8. Its fields are:
 | 192, 196 | `system_reserve`, `sealing` | two `u32`; unallocated system-rate headroom in thousandths, and none 0, device 1 or TPM 2 |
 | 200, 204 | `system_runtime_limits`, `native_limits` | two `u32` indices; the system runtime's limits and a partial boot's complete native-domain limits |
 | 208 through 360 | table spans | twenty `span` values, in the order below |
+| 368 | `system_args` | string reference; the system runtime's arguments |
+| 376 | `sessions` | `span` of the session templates |
 
-The spans are `principals`, `domains`, `limits`, `runtime_limits`,
-`lane_classes`, `units`, `devices`, `windows`, `services`, `facets`,
-`facet_operations`, `facet_parameters`, `introductions`, `images`,
-`extents`, `boot_order`, `liveness`, `shell_principals`, `partial_boot`
-and `strings`, at offsets 208, 216 and so on through 360. Each table
-starts at its first required alignment boundary after the preceding
-table. The final span's count is bytes. This is the sole packed order.
+The spans at 208 through 360 are `principals`, `domains`, `limits`,
+`runtime_limits`, `lane_classes`, `units`, `devices`, `windows`,
+`services`, `facets`, `facet_operations`, `facet_parameters`,
+`introductions`, `images`, `extents`, `boot_order`, `liveness`,
+`shell_principals`, `partial_boot` and `strings`, at offsets 208, 216
+and so on. The tables are packed in that order, with `sessions` after
+`domains`, each at its first required alignment boundary after the
+preceding table; `strings` comes last, and its span's count is bytes.
 
 `root_memory` is nonzero and page-aligned. Table capacities are 1 through
 65,536, except that `max_domains` may be 0 when no domains are configured, `system_reserve` is 1 through 1,000, and the system grant has a
@@ -1334,7 +1337,16 @@ learns only its own projected limits through its read-only boot page.
 
 ### Domain identity and placement
 
-Domain kind 1 is `service` and 2 is `secret`. Domain flags have required
+Domain kind 1 is `service` and 2 is `secret`. A session template is no
+domain row: the `sessions` table, which the header's span at offset 376
+names and which follows the domain table, holds one 40-byte record per
+template, in principal order and at most one per principal: its principal
+and limits indices, its runtime, release and release-file count as a
+domain row has them, a reserved zero word, and its arguments and
+environment strings (property 14 of
+[design-system.md](design-system.md#the-manifest)). Nothing in the boot
+order, a unit, window, service, facet or introduction indexes it, and a
+partial boot has none. Domain flags have required
 at bit 0 and rescue at bit 1. Domain-limits flag bit 0 enables `SPACES`;
 the enabled record supplies the sub-space group's grant. The rights
 remain installed by the domain library's existing plan, not by a reader.
@@ -1598,6 +1610,7 @@ field or computed charge is an accepted property.
 | `limits NAME` | its packed scalar fields except name, reserved and runtime index; `grant` share reference; `spaces` share reference or `none`; `runtime_limits` runtime-limits reference; `flags` flag list |
 | `lane_class NAME` | `lane` integer |
 | `domain NAME` | `principal`, `limits` references; `kind service\|secret`; `flags` flag list; `runtime`, `release` artifact references; `restarts`, `restart_period_s` integers; `args`, `env` vectors |
+| `session PRINCIPAL` | the session template of the principal its name names, so a principal has one; `limits` reference; `runtime`, `release` artifact references; `args`, `env` vectors |
 | `unit NAME` | `placement` string naming a complete checked platform unit; `holder` domain reference or `system` |
 | `window NAME` | `holder` domain reference; `device` checked platform-device string; `role` declared role name; `partition` integer; `rights` flag list; `image` image reference or `none` |
 | `service NAME` | `server` domain reference or `system`; `interface` qualified ABI service name |
@@ -1765,7 +1778,7 @@ depending on a hash table's iteration order.
 An empty string encodes offset zero and length zero and appends no bytes;
 the same representation satisfies zeroed inactive string fields.
 
-The checker evaluates all thirteen system-manifest properties, with
+The checker evaluates all fourteen system-manifest properties, with
 their property numbers in diagnostics. Resource sums include exact
 principal budgets, device reservations, table sizes and the system's
 baseline and worst admitted-domain reservation. The domain planner is

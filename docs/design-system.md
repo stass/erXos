@@ -469,6 +469,20 @@ violation fails the build with the property, the record and the field:
     before residual parent quota becomes available. Quota phases,
     bursts, urgency and CPU placement still affect when they run
     ([Resource policy](#resource-policy)).
+14. **A session template is not a domain, and the boot never creates
+    one:** a record of the manifest's own session table, keyed by its
+    principal, names the release, runtime, limits, arguments and
+    environment from which the domain service makes each session domain
+    of that principal on request
+    ([design-domains.md](design-domains.md#principals-sessions-and-quotas)).
+    The key gives a principal at most one; the template names a principal
+    that exists, and its limits enable `SPACES`, since a session's programs
+    are its sub-spaces. It has no restart intensity, boot flag or place:
+    the boot order, the plans of property 12 and every unit, window,
+    service, facet and introduction resolve through the domain table, which
+    holds no template, so none of them reaches one. Its limits are judged
+    against its principal's ceilings, budget and quota when a session is
+    made from it, by the request path every principal's domain takes.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -507,7 +521,9 @@ domain library's records, keyed by the same id:
 }).
 ```
 
-A `session` domain holds `SPACES` and creates its programs as sub-spaces; a
+A `session` domain holds `SPACES` and creates its programs as sub-spaces,
+and is made from its principal's session template of the manifest, which
+the boot never creates (property 14); a
 `service` domain is one the manifest lists, which the domain service
 restarts when it ends; a `secret` domain is the vault's, which has no
 crash area and alone receives the sealing page.
@@ -3266,7 +3282,7 @@ under test ran.
   within the period; seeded failure: a manifest built around the check
   that gives the services all of `system`, under which the watchdog's
   deadline passes.
-* **The manifest check:** for each of its thirteen properties a manifest
+* **The manifest check:** for each of its fourteen properties a manifest
   that violates it in one place, which must fail the build with that
   property's diagnostic, beside the shipped manifests, which must pass,
   among them, for property 9, a release build's manifest that gives a

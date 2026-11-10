@@ -22,7 +22,7 @@ module Erx
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
-    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_net erx_net_client erx_shell erx_code erx_hostlink erx_domain].freeze
+    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_net erx_net_client erx_shell erx_code erx_hostlink erx_domain erx_session].freeze
     # Applications of another domain's image, written and tested on the host ahead of
     # the milestone that builds that image (docs/plan.md, "Critical path and parallel
     # tracks"): the host tests compile them, and no release holds them yet.

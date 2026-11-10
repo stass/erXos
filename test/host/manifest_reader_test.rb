@@ -60,7 +60,7 @@ class ManifestReaderTest < Minitest::Test
   end
 
   def test_truncated_index_is_refused
-    bytes = AbiManifestFixture.valid.byteslice(0, 400)
+    bytes = AbiManifestFixture.valid.byteslice(0, 408)
     AbiManifestFixture.integer(bytes, 8, bytes.bytesize)
     status, output = decode(bytes)
     assert_equal 1, status, output
@@ -69,7 +69,7 @@ class ManifestReaderTest < Minitest::Test
 
   def test_out_of_range_string_offset_is_refused
     bytes = AbiManifestFixture.valid
-    AbiManifestFixture.integer(bytes, 376, 0xffffffff)
+    AbiManifestFixture.integer(bytes, 384, 0xffffffff)
     status, output = decode(bytes)
     assert_equal 1, status, output
     assert_match(/error string_range principals\[\].name.offset/, output)
@@ -77,7 +77,7 @@ class ManifestReaderTest < Minitest::Test
 
   def test_inactive_subspace_grant_is_zero
     bytes = AbiManifestFixture.valid
-    AbiManifestFixture.integer(bytes, 528, 1, width: 8)
+    AbiManifestFixture.integer(bytes, 536, 1, width: 8)
     status, output = decode(bytes)
     assert_equal 1, status, output
     assert_match(/error inactive limits\[\].spaces/, output)
@@ -99,9 +99,27 @@ class ManifestReaderTest < Minitest::Test
     assert_match(/error string_class facet_parameters\[\].bytes.offset/, output)
   end
 
+  def test_session_record_is_accepted
+    status, output = decode(AbiManifestFixture.session_template)
+    assert_equal 0, status, output
+    assert_equal "ok 1 0\n", output
+  end
+
+  def test_session_reserved_field_must_be_zero
+    status, output = decode(AbiManifestFixture.session_template(reserved: 1))
+    assert_equal 1, status, output
+    assert_match(/error .*sessions\[\].reserved/, output)
+  end
+
+  def test_session_principal_must_exist
+    status, output = decode(AbiManifestFixture.session_template(principal: 1))
+    assert_equal 1, status, output
+    assert_match(/error index sessions\[\].principal/, output)
+  end
+
   def test_device_selector_refuses_inactive_fields
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.integer(bytes, 720 + 32, 1, width: 2)
+    AbiManifestFixture.integer(bytes, 728 + 32, 1, width: 2)
     status, output = decode(bytes)
     assert_equal 1, status, output
     assert_match(/error inactive devices\[\].bus/, output)

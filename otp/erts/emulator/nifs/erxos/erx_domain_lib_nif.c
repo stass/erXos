@@ -431,6 +431,36 @@ configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /*
+ * The manifest's session templates (property 14 of docs/design-system.md):
+ * {ok, Templates} in principal order, one per principal, each
+ * #{template, principal}, template its index among them. The boot creates
+ * none of them. The view is fixed at boot, so this reads it without the
+ * lock.
+ */
+static ERL_NIF_TERM
+templates_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ERL_NIF_TERM keys[2], values[2], row, rows;
+	uint32_t index;
+
+	(void)argv;
+	if (argc != 0)
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	rows = enif_make_list(env, 0);
+	/* Built from the last template back, so the list's head is template 0. */
+	for (index = lib->view.ntemplates; index-- > 0;) {
+		keys[0] = atom(env, "template"), values[0] = enif_make_uint(env, index);
+		keys[1] = atom(env, "principal"), values[1] = enif_make_uint(env, lib->view.templates[index].principal);
+		if (!enif_make_map_from_arrays(env, keys, values, 2, &row))
+			return (enif_make_badarg(env));
+		rows = enif_make_list_cell(env, row, rows);
+	}
+	return (enif_make_tuple2(env, atom(env, "ok"), rows));
+}
+
+/*
  * Manifest startup and restart: creates configured row Row under id Id
  * (erx_dom_lib_configured). Only the domain service may, as for every
  * entry that changes the library, so a row is built only from one
@@ -860,6 +890,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "connect_nif", 4, connect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "templates_nif", 0, templates_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_create_nif", 3, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 };
 

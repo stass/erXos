@@ -1,0 +1,15 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% A session domain's own processes (docs/design-domains.md, "Principals, sessions
+%% and quotas"): the session release, which a principal's session domain boots, ships
+%% it beside erx_shell, and erx_session_app starts erx_session_sup, which holds what
+%% the domain runs beside its shells.
+{application, erx_session,
+ [{description, "erXos session domain"},
+  {vsn, "1"},
+  {modules, [erx_session_app, erx_session_sup]},
+  {registered, [erx_session_sup]},
+  {applications, [kernel, stdlib, erx]},
+  {mod, {erx_session_app, []}},
+  {env, []}]}.

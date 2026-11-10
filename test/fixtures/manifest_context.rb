@@ -54,18 +54,22 @@ module ManifestContextFixture
   # A development manifest's text with two configured domains of the domain
   # release app and the runtime emu (domain_arguments), alpha and beta, beta started
   # by the rescue configuration; a service alpha serves, their introduction and the
-  # data window held by alpha. The system principal's quota covers them, and
-  # max_domains is that quota.
+  # data window held by alpha; and the system principal's session template, which
+  # the boot does not create, of the profile session, which enables SPACES. The
+  # system principal's quota covers the domains, and max_domains is that quota.
   def domain_source(plain)
     domain = lambda do |name, flags|
       "domain #{name}\n  principal @principal.system\n  limits @limits.app\n  kind service\n  flags #{flags}\n" \
         "  runtime @artifact.emu\n  release @artifact.app\n  restarts 3\n  restart_period_s 5\n  args \"-x y\"\n"
     end
+    app = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
+          "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
+          "  peer_held 4096\n  peer_held_total 4096\n"
+    session = app.sub('limits app', 'limits session').sub('  spaces none', '  spaces @share.users').sub("  flags none\n", "  flags spaces\n")
     plain.sub("  domains 0\n", "  domains 2\n").sub('max_domains 0', 'max_domains 2')
          .sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
-      "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
-      "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
-      "  peer_held 4096\n  peer_held_total 4096\n" + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
+      app + session + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
+      "session system\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.app\n" +
       "service log\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
   end
 

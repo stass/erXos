@@ -66,6 +66,43 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
   end
 
+  # Two principals' session templates (property 14), each its principal's; system
+  # and guest split users between them, and guest takes a page of system's memory.
+  SESSIONS = NARROW +
+             LIMITS.sub('limits app', 'limits session').sub('grant @share.users', 'grant @share.narrow')
+                   .sub('  spaces none', '  spaces @share.narrow').sub("  flags none\n", "  flags spaces\n") +
+             "principal guest\n  memory 4096\n  grant @share.narrow\n  domains 0\n  names 0\n" \
+             "  default_limits @limits.native\n  ceiling_limits @limits.native\n" +
+             %w[guest system].map do |principal|
+               "session #{principal}\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.app\n"
+             end.join
+
+  def with_sessions
+    with_domains('alpha', share: 'narrow').sub("principal system\n  memory 16777216\n  grant @share.users",
+                                               "principal system\n  memory 16773120\n  grant @share.narrow")
+                                          .sub(/(limits native\n(?:  .*\n)*?  grant )@share\.users/, '\1@share.narrow') +
+      SESSIONS
+  end
+
+  def test_session_templates_are_read_but_never_planned
+    assert_equal 1, admit(with_sessions).report.fetch('child_plan_instances')
+  end
+
+  # What the check never writes, which the root's view refuses: two templates out
+  # of principal order, and two of one principal.
+  def test_session_templates_not_one_per_principal_are_refused
+    manifest = admit(with_sessions).bytes
+    offset = @codec.open('manifest', manifest).header.fetch('sessions').fetch('offset')
+    paths = %w[manifest heads plan].map { |name| File.join(@directory, "template-#{name}") }
+    [[1, 0], [0, 0]].each do |first, second|
+      bytes = manifest.dup.tap { |copy| copy[offset, 4] = [first].pack('V') }.tap { |copy| copy[offset + 40, 4] = [second].pack('V') }
+      [bytes, '', "order 0\n"].zip(paths).each { |content, file| File.binwrite(file, content) }
+      record = @helper.run(paths, runner: @runner, name: 'dom-plan-template', deadline: 30)
+      assert_match(/\Arefused manifest: the session templates are not one per principal in principal order\n\z/,
+                   File.binread(record.fetch('log')))
+    end
+  end
+
   # The Ruby check takes any byte count; the library takes only whole pages.
   def test_a_budget_the_library_refuses_fails_the_build
     error = assert_raises(Erx::Manifest::Invalid) { admit(@source.sub("limits app\n  memory 4194304", "limits app\n  memory 4194305")) }

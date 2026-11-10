@@ -33,12 +33,12 @@ so does crash/1, which reads a domain's crash dump.
 """.
 
 -export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/4, disconnect/1,
-         configured/0, configured/3, code_object/2, code_drop/2]).
+         configured/0, configured/3, templates/0, code_object/2, code_drop/2]).
 -nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/4,
-       disconnect_nif/1, configured_nif/0, configured_create_nif/3]).
+       disconnect_nif/1, configured_nif/0, configured_create_nif/3, templates_nif/0]).
 -on_load(on_load/0).
 
--export_type([spec/0, created/0, error/0, configured/0]).
+-export_type([spec/0, created/0, error/0, configured/0, template/0]).
 
 -type error() :: {error, atom() | {status, integer()}}.
 -type grant() :: #{quota_ns := non_neg_integer(), cpuset := non_neg_integer(),
@@ -94,6 +94,14 @@ at most restarts restarts within restart_period_s seconds.
 -type configured() :: #{row := non_neg_integer(), place := non_neg_integer(), name := binary(),
                         principal := pos_integer(), kind := service | secret,
                         restarts := non_neg_integer(), restart_period_s := non_neg_integer()}.
+
+-doc """
+A session template of the system manifest, from which each session of its
+principal is made on request: its index among the templates and its
+principal, which has no other. It is no configured domain, and the boot
+creates none.
+""".
+-type template() :: #{template := non_neg_integer(), principal := pos_integer()}.
 
 on_load() ->
     erlang:load_nif(atom_to_list(?MODULE), #{}).
@@ -168,6 +176,13 @@ configured() ->
     configured_nif().
 
 -doc """
+The system manifest's session templates, in principal order.
+""".
+-spec templates() -> {ok, [template()]} | error().
+templates() ->
+    templates_nif().
+
+-doc """
 Manifest startup and restart: builds configured row Row under id Id and
 domain pid DomainPid, as create/1 builds a request's domain. The domain service calls it from its
 manifest startup and restart with a row configured/0 gave, never a row a
@@ -215,4 +230,7 @@ configured_nif() ->
     erlang:nif_error(undef).
 
 configured_create_nif(_Id, _Row, _DomainPid) ->
+    erlang:nif_error(undef).
+
+templates_nif() ->
     erlang:nif_error(undef).

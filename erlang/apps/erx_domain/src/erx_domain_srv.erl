@@ -14,7 +14,10 @@ domain that does not report within its boot timeout or whose side the agent
 reports ended, and on each
 {domain_ended, Id, End, Record} has the agent close that side, disconnects
 the connection, ends its domain pid with {domain_down, Id, Info}, retires it
-and restarts a configured domain within its restart intensity.
+and restarts a configured domain within its restart intensity. It keeps the
+manifest's session templates by principal, from which each session of that
+principal is made; a template is no configured domain, so the boot never
+starts one and nothing restarts one.
 
 It also introduces domains (docs/design-domains.md, "Introduction and
 connection down"): introduce/2 has the library connect two domains and
@@ -85,8 +88,8 @@ init(Opts) ->
     %% Introducing holds, by the pair's key, each introduce/2 caller waiting for its
     %% connection to come up, with the timer of its deadline (settle_introductions/1).
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
-           configured => #{}, waiting => #{}, links => erx_domain_links:new(), introducing => #{},
-           introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT)},
+           configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
+           introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT)},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none.
@@ -99,18 +102,25 @@ library(Lib) ->
     end.
 
 handle_continue(boot, #{lib := Lib} = State) ->
-    case configured(Lib) of
-        {ok, #{host := Host, domains := Rows}} ->
+    case {configured(Lib), templates(Lib)} of
+        {{ok, #{host := Host, domains := Rows}}, {ok, Templates}} ->
             Ordered = lists:sort(fun(#{place := A}, #{place := B}) -> A =< B end, Rows),
             Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
-            Booted = State#{core := erx_domain_core:new(Host), configured := Configured},
+            Booted = State#{core := erx_domain_core:new(Host), configured := Configured,
+                            templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])},
             {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
-        {error, _} ->
+        {{error, _}, _} ->
+            {noreply, State#{core := erx_domain_core:new(<<>>)}};
+        {_, {error, _}} ->
             {noreply, State#{core := erx_domain_core:new(<<>>)}}
     end.
 
 configured(none) -> {error, enotsup};
 configured(Lib) -> Lib:configured().
+
+%% The library's session templates, or none.
+templates(none) -> {error, enotsup};
+templates(Lib) -> Lib:templates().
 
 handle_call({create, Spec}, From, State) ->
     case create(Spec, State) of

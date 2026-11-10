@@ -201,7 +201,13 @@ boot_order() ->
     ?assertEqual({configured, 6, 0}, next_call()),
     ?assertEqual({open_side, 6, 'b@erxos', 60}, next_call()),
     ?assertEqual({export, 6, [send]}, next_call()),
-    ?assertEqual({start, 6}, next_call()).
+    ?assertEqual({start, 6}, next_call()),
+    %% Principal 1's session template is no configured row: the service keeps it
+    %% by principal and starts nothing from it, so the next call the library hears
+    %% is create_stop_kill's.
+    #{configured := Configured, templates := Templates} = sys:get_state(erx_domain_srv),
+    ?assertEqual([0, 1], lists:sort(maps:keys(Configured))),
+    ?assertEqual(#{1 => #{template => 0, principal => 1}}, Templates).
 
 create_stop_kill() ->
     Spec = #{name => <<"web">>, memory => 4096},

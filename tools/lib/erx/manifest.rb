@@ -162,6 +162,7 @@ module Erx
         'limits' => %w[memory outer grant spaces lane connections crash flags runtime_limits peer_held peer_held_total],
         'lane_class' => %w[lane],
         'domain' => %w[principal limits kind flags runtime release restarts restart_period_s args env],
+        'session' => %w[limits runtime release args env],
         'unit' => %w[placement holder],
         'window' => %w[holder device role partition rights image],
         'service' => %w[name server interface],
@@ -169,7 +170,7 @@ module Erx
         'image' => %w[device input salt],
         'partial_boot' => %w[image]
       }.freeze
-      OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[args env], 'service' => %w[name],
+      OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[args env], 'session' => %w[args env], 'service' => %w[name],
                    'facet' => %w[name queue], 'image' => %w[salt] }.freeze
       DIRECTIVES = { 'introduce' => 2, 'liveness' => 1, 'shell_principal' => 1 }.freeze
       IDENTIFIER = /\A[a-z0-9][a-z0-9_-]{0,62}\z/.freeze
@@ -330,11 +331,13 @@ module Erx
                     planner: planner, consumers: consumers)
     end
 
-    # The artifact names the source's domain rows give as releases, sorted and once
-    # each, read before any check so a build can make what they name. A reference of
-    # another form names nothing here; admission refuses it (Stopgap#artifact).
+    # The artifact names the source's domain rows and session templates give as
+    # releases, sorted and once each, read before any check so a build can make what
+    # they name. A reference of another form names nothing here; admission refuses it
+    # (Stopgap#artifact).
     def self.release_names(source:, codec:)
-      Frontend.parse(source, version: codec.constant('manifest_version')).records.fetch('domain', []).filter_map do |record|
+      records = Frontend.parse(source, version: codec.constant('manifest_version')).records
+      records.values_at('domain', 'session').compact.flatten.filter_map do |record|
         tokens = record.properties.fetch('release')
         token = tokens.first if tokens.size == 1
         token.value.delete_prefix('@artifact.') if token && !token.quoted && token.value.start_with?('@artifact.')
@@ -788,7 +791,7 @@ module Erx
         unless partial
           unsupported('full boot needs the production sizing, planner and service consumers', 'mode')
         end
-        %w[domain partial_boot].each do |kind|
+        %w[domain session partial_boot].each do |kind|
           unsupported('child domain planning is unavailable', kind) unless records(kind).empty?
         end
         %w[window service facet introduce image liveness].each do |kind|
@@ -829,6 +832,7 @@ module Erx
         return unless partial
 
         invalid('a partial boot configures no domains', 12, 'domain') unless records('domain').empty?
+        invalid('a partial boot makes no sessions', 14, 'session') unless records('session').empty?
         %w[service facet introduce liveness].each do |kind|
           invalid('a partial boot runs no services', 2, kind) unless records(kind).empty?
         end
@@ -852,6 +856,7 @@ module Erx
       def check_and_place(rows, root_memory:, baseline:, max_domains:)
         check_identity(rows.fetch('devices'))
         rows['domains'] = normalize_domains(rows)
+        rows['sessions'] = normalize_sessions(rows)
         services = records('service').map { |record| [record, normalize_service(record)] }
                                      .sort_by { |_record, row| [row.fetch('name'), row.fetch('server')] }
         rows['services'] = services.map(&:last)
@@ -929,6 +934,34 @@ module Erx
             'restart_period_s' => number(record, 'restart_period_s'), 'args' => words(record, 'args'),
             'env' => words(record, 'env') }
         end
+      end
+
+      # Property 14: each session template, keyed by its principal, from which the
+      # domain service makes every session of that principal on request
+      # (docs/design-system.md, "The system manifest"). A template is not a domain row,
+      # so the boot order, the plans and every holder, server, grantee and introduction,
+      # which resolve through the domain table, never reach one. A `session NAME`
+      # record's NAME is its principal's, so a principal has one by the source's own
+      # key, and the rows are written in principal order. Its domain makes its
+      # programs as sub-spaces, so its limits enable SPACES; the limits are judged
+      # against the principal's ceilings, budget and quota when a session is made,
+      # on the request path.
+      def normalize_sessions(rows)
+        spaces = @codec.member('mf_limits_flags', 'spaces')
+        records('session').map do |record|
+          principal = @indices.fetch('principal')[record.name] ||
+                      invalid('a session template names no principal', 14, 'session.name')
+          limits = reference(record, 'limits', 'limits')
+          invalid('a session template\'s limits do not enable SPACES', 14, 'session.limits') if
+            (rows.fetch('limits').fetch(limits).fetch('flags') & spaces).zero?
+          invalid('arguments and environment exceed the boot page\'s strings', 14, 'session.args') if
+            words(record, 'args').bytesize + words(record, 'env').bytesize > @codec.constant('boot_strings_max')
+          runtime = artifact(record, 'runtime', 'executable', property: 14, field: 'session.runtime')
+          release = artifact(record, 'release', 'release', property: 14, field: 'session.release')
+          { 'principal' => principal, 'limits' => limits, 'runtime' => runtime.fetch('entry'),
+            'release' => release.fetch('entry'), 'release_files' => release.fetch('files'),
+            'args' => words(record, 'args'), 'env' => words(record, 'env') }
+        end.sort_by { |row| row.fetch('principal') }
       end
 
       # The artifact a record's key names, of the kind the packer recorded for it.

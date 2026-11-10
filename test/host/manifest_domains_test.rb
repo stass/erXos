@@ -17,6 +17,9 @@ class ManifestDomainsTest < Minitest::Test
   APP_LIMITS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
                "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                "  peer_held 4096\n  peer_held_total 4096\n"
+  # A session's profile: the app profile with SPACES, its sub-spaces under users.
+  SESSION_LIMITS = APP_LIMITS.sub('limits app', 'limits session').sub('  spaces none', '  spaces @share.users')
+                             .sub("  flags none\n", "  flags spaces\n")
 
   # Each domain's status, in boot order, and each introduction's; [] plans them all.
   class RecordingPlanner
@@ -308,5 +311,53 @@ class ManifestDomainsTest < Minitest::Test
 
   def test_a_partial_boot_configures_no_domains
     refused(Erx::Manifest::Invalid, 12, 'domain', @source.sub('flags development', 'flags development,partial_boot'))
+  end
+
+  # Property 14: a session template is a record of its own table, keyed by its
+  # principal's name, which the boot never creates.
+  def self.session(principal = 'system', limits: '@limits.session')
+    "session #{principal}\n  limits #{limits}\n  runtime @artifact.emu\n  release @artifact.app\n  args \"-x y\"\n"
+  end
+
+  def with_session(*sessions) = with_domains(self.class.domain('alpha'), self.class.domain('beta', flags: 'rescue')) + SESSION_LIMITS + sessions.join
+
+  def test_a_session_template_is_packed_but_neither_ordered_nor_planned
+    admitted = admit(with_session(self.class.session))
+    view = @codec.open('manifest', admitted.bytes)
+    alpha = rows(view, 'domains').fetch(0)
+    assert_equal [[0, *alpha.values_at('runtime', 'release', 'release_files')]],
+                 rows(view, 'sessions').map { |row| row.values_at('principal', 'runtime', 'release', 'release_files') }
+    assert_equal %w[alpha beta], rows(view, 'domains').map { |row| view.string(row.fetch('name')) }
+    assert_equal [0, 1], rows(view, 'boot_order').map { |row| row.fetch('domain') }
+    assert_equal [0, 1], @planner.views.fetch(0).fetch('order')
+    assert_equal 2, admitted.report.fetch('child_plan_instances')
+  end
+
+  def test_a_session_template_without_sub_spaces_is_refused
+    refused(Erx::Manifest::Invalid, 14, 'session.limits', with_session(self.class.session(limits: '@limits.app')))
+  end
+
+  def test_a_session_template_keyed_by_no_principal_is_refused
+    refused(Erx::Manifest::Invalid, 14, 'session.name', with_session(self.class.session('alpha')))
+  end
+
+  def test_two_session_templates_of_one_principal_are_refused
+    refused(Erx::Manifest::Invalid, 'source', 'session', with_session(self.class.session, self.class.session))
+  end
+
+  def test_a_partial_boot_makes_no_sessions
+    source = @plain.sub('flags development', 'flags development,partial_boot') + APP_LIMITS + SESSION_LIMITS + self.class.session
+    refused(Erx::Manifest::Invalid, 14, 'session', source)
+  end
+
+  # Holders, servers and introductions resolve through the domain table, which
+  # holds no template, so none of them can name one: each is refused under its
+  # own property as naming no configured domain.
+  def test_nothing_names_a_session_template
+    source = with_session(self.class.session)
+    refused(Erx::Manifest::Invalid, 2, 'introduce', "#{source}introduce @domain.alpha @session.system\n")
+    refused(Erx::Manifest::Invalid, 2, 'service.server', source + service('log', '@session.system'))
+    refused(Erx::Manifest::Invalid, 8, 'window.holder', source.sub("window data\n  holder system", "window data\n  holder @session.system"))
+    refused(Erx::Manifest::Invalid, 1, 'unit.holder', source.sub(/(unit block\n(?:  .*\n)*?  holder )system/, '\1@session.system'))
   end
 end

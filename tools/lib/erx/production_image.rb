@@ -92,13 +92,18 @@ module Erx
     # (domain_releases), and with any of them the one runtime image every domain runs.
     # The build's release table defines a domain release's applications under its name
     # (docs/design-stopgap.md, "The production image"); the manifest only names the
-    # release, so two rows naming one release cannot disagree on what it holds. Until a
-    # domain needs more, this one list, the applications every domain boots through,
-    # stands for the table under every name (ReleaseFiles.domain); domain_releases reads
-    # a table by name once one does. The development manifest configures no domains, so
-    # the production image carries neither; medium_boot's manifest configures one
+    # release, so two rows naming one release cannot disagree on what it holds. The
+    # session release, which a principal's session domain boots, adds the command shell
+    # and erx_session (docs/design-domains.md, "Principals, sessions and quotas"); a
+    # name the table does not hold takes DOMAIN_APPLICATIONS, the applications every
+    # domain boots through. The development manifest configures no domains, so the
+    # production image carries neither; medium_boot's manifest configures one
     # (MediumBoot.manifest), and a test image may carry some (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
+    DOMAIN_RELEASES = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze }.freeze
+
+    # The domain release named name, with the applications the release table gives it.
+    def self.domain_release(name) = ReleaseFiles.domain(name, applications: DOMAIN_RELEASES.fetch(name, DOMAIN_APPLICATIONS))
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
     # artifact name a domain row's runtime takes. It sorts after domains/ and before
@@ -1110,9 +1115,7 @@ module Erx
     # are read here, so the image can carry what they name; the manifest check proves
     # the rows, each reference included, when Pack#build admits the manifest.
     def domain_releases(manifest_source)
-      Manifest.release_names(source: manifest_source, codec: @codec).map do |name|
-        ReleaseFiles.domain(name, applications: DOMAIN_APPLICATIONS)
-      end
+      Manifest.release_names(source: manifest_source, codec: @codec).map { |name| self.class.domain_release(name) }
     end
 
     # The domain releases' entries, each file under its release's prefix without the

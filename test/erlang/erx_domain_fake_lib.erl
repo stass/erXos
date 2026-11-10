@@ -14,11 +14,12 @@
 %% driver's finish reads the lane to its end, or behind, which ends at its start
 %% and whose report reaches the domain pid behind the service's domain_down, the
 %% pid suspended from close_side until retire, which the service calls after it
-%% sends domain_down, has sent the report. The service makes every call here in its own
+%% sends domain_down, has sent the report. Principal 1 has a session template, which
+%% the boot never starts. The service makes every call here in its own
 %% process, so the process dictionary keeps each domain's pid and node.
 -module(erx_domain_fake_lib).
 -export([start_log/0, next_call/0]).
--export([register/0, configured/0, configured/3, create/1, start/1, stop/2, retire/1, crash/1,
+-export([register/0, configured/0, configured/3, templates/0, create/1, start/1, stop/2, retire/1, crash/1,
          connect/4, disconnect/1]).
 -export([open_side/2, close_side/2, export/3]).
 -export([agent/2]).
@@ -47,6 +48,7 @@ configured() ->
                          restarts => 1, restart_period_s => 60},
                        #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
                          restarts => 0, restart_period_s => 60}]}}.
+templates() -> {ok, [#{template => 0, principal => 1}]}.
 configured(Id, Row, DomainPid) when is_pid(DomainPid) ->
     {ok, #{domains := Rows}} = configured(),
     [Name] = [Name || #{row := R, name := Name} <- Rows, R =:= Row],

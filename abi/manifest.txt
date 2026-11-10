@@ -95,7 +95,7 @@ layout erx_share wire_le 8 48
   field ceiling urgency 41
   field flags group_flags 42
   padding 44 4
-layout erx_manifest wire_le 8 376
+layout erx_manifest wire_le 8 384
   field magic u32 0
   field version u16 4
   field flags manifest_flags 6
@@ -141,6 +141,7 @@ layout erx_manifest wire_le 8 376
   field partial_boot erx_mf_span 352
   field strings erx_mf_span 360
   field system_args erx_mf_str 368
+  field sessions erx_mf_span 376
 layout erx_mf_principal wire_le 8 80
   field name erx_mf_str 0
   field memory u64 8
@@ -163,6 +164,16 @@ layout erx_mf_domain wire_le 8 64
   field reserved u32 44
   field args erx_mf_str 48
   field env erx_mf_str 56
+  zero reserved all
+layout erx_mf_session wire_le 8 40
+  field principal u32 0
+  field limits u32 4
+  field runtime u32 8
+  field release u32 12
+  field release_files u32 16
+  field reserved u32 20
+  field args erx_mf_str 24
+  field env erx_mf_str 32
   zero reserved all
 layout erx_mf_limits wire_le 8 160
   field name erx_mf_str 0
@@ -295,16 +306,17 @@ reader manifest erx_manifest @manifest_bytes_max
   extent root.length
   value root.magic @manifest_magic
   value root.version @manifest_version
-  value root.header_size 376
+  value root.header_size 384
   range root.max_domains 0 65536
   range root.max_connections 1 65536
   range root.system_reserve 1 1000
-  choice root.flags manifest_mode root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.partial_boot.count
-    case release root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
-    case development root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
+  choice root.flags manifest_mode root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.partial_boot.count
+    case release root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
+    case development root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
     case partial root.partial_boot.count
   table principals erx_mf_principal root.principals.offset root.principals.count @manifest_records_max 8
   table domains erx_mf_domain root.domains.offset root.domains.count @manifest_records_max 8
+  table sessions erx_mf_session root.sessions.offset root.sessions.count @manifest_records_max 8
   table limits erx_mf_limits root.limits.offset root.limits.count @manifest_records_max 8
   table runtime_limits erx_mf_runtime_limits root.runtime_limits.offset root.runtime_limits.count @manifest_records_max 8
   table lane_classes erx_mf_lane_class root.lane_classes.offset root.lane_classes.count @manifest_records_max 8
@@ -323,7 +335,7 @@ reader manifest erx_manifest @manifest_bytes_max
   table shell_principals erx_mf_shell_principal root.shell_principals.offset root.shell_principals.count @manifest_records_max 4
   table partial_boot erx_mf_partial_boot root.partial_boot.offset root.partial_boot.count @manifest_records_max 8
   string_table strings root.strings.offset root.strings.count @manifest_strings_max
-  order principals domains limits runtime_limits lane_classes units devices windows services facets facet_operations facet_parameters introductions images extents boot_order liveness shell_principals partial_boot strings
+  order principals domains sessions limits runtime_limits lane_classes units devices windows services facets facet_operations facet_parameters introductions images extents boot_order liveness shell_principals partial_boot strings
   index root.system_principal principals
   index root.system_runtime_limits runtime_limits
   index root.native_limits limits
@@ -340,6 +352,10 @@ reader manifest erx_manifest @manifest_bytes_max
   string domains[].env.offset domains[].env.length strings env 2048 empty yes
   index domains[].principal principals
   index domains[].limits limits
+  index sessions[].principal principals
+  index sessions[].limits limits
+  string sessions[].args.offset sessions[].args.length strings args 2048 empty yes
+  string sessions[].env.offset sessions[].env.length strings env 2048 empty yes
   string limits[].name.offset limits[].name.length strings identifier 63 empty no
   index limits[].runtime_limits runtime_limits
   optional limits[].spaces limits[].flags spaces

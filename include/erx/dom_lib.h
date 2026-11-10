@@ -234,6 +234,7 @@ typedef struct erx_dom_boot_sizes {
 	uint32_t	max_connections; /* the manifest's: connection rows */
 	uint32_t	nprincipals;	/* the manifest's principal rows */
 	uint32_t	nconfigured;	/* its configured-domain rows */
+	uint32_t	ntemplates;	/* its session templates */
 	uint32_t	nfiles;		/* the boot image's entries */
 } erx_dom_boot_sizes_t;
 
@@ -245,6 +246,7 @@ typedef struct erx_dom_boot_tables {
 	erx_dom_principal_t	*principals;	/* nprincipals */
 	erx_dom_principal_held_t *held;		/* nprincipals */
 	erx_dom_configured_t	*configured;	/* nconfigured */
+	erx_dom_template_t	*templates;	/* ntemplates */
 	erx_dom_file_t		*files;		/* nfiles */
 } erx_dom_boot_tables_t;
 

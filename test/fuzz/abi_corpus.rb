@@ -17,6 +17,7 @@ begin
     'overlap' => AbiManifestFixture.unit_partition(overlap: true),
     'orphan' => AbiManifestFixture.unit_partition(orphan: true),
     'parameter' => AbiManifestFixture.facet_parameter,
+    'session' => AbiManifestFixture.session_template,
     'empty' => ''.b
   }.each do |name, bytes|
     File.open(File.join(directory, name), File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|

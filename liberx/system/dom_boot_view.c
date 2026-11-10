@@ -48,6 +48,8 @@ static const char *boot_principals(erx_dom_lib_t *, const erx_manifest_view_t *,
 static const char *boot_places(erx_dom_configured_t *, uint32_t, const erx_manifest_view_t *);
 static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_configured_t *);
+static const char *boot_templates(erx_dom_view_t *, const erx_manifest_view_t *,
+		    erx_dom_template_t *);
 
 erx_dom_boot_sizes_t
 erx_dom_view_sizes(const erx_manifest_view_t *manifest, uint32_t nfiles)
@@ -55,7 +57,8 @@ erx_dom_view_sizes(const erx_manifest_view_t *manifest, uint32_t nfiles)
 	return ((erx_dom_boot_sizes_t){ .max_domains = manifest->header.max_domains,
 	    .max_connections = manifest->header.max_connections,
 	    .nprincipals = manifest->header.principals.count,
-	    .nconfigured = manifest->header.domains.count, .nfiles = nfiles });
+	    .nconfigured = manifest->header.domains.count,
+	    .ntemplates = manifest->header.sessions.count, .nfiles = nfiles });
 }
 
 /*
@@ -90,6 +93,7 @@ erx_dom_boot_layout(const erx_dom_boot_sizes_t *sizes, uintptr_t base, erx_dom_b
 	    !BOOT_PLACE(principals, sizes->nprincipals) ||
 	    !BOOT_PLACE(held, sizes->nprincipals) ||
 	    !BOOT_PLACE(configured, sizes->nconfigured) ||
+	    !BOOT_PLACE(templates, sizes->ntemplates) ||
 	    !BOOT_PLACE(files, sizes->nfiles))
 		return (false);
 #undef BOOT_PLACE
@@ -236,6 +240,44 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 	return (boot_places(configured, view->nconfigured, manifest));
 }
 
+/*
+ * Each session template, keyed by its principal: the check writes them in
+ * principal order, one per principal (property 14), and a manifest that
+ * gives a principal two is refused.
+ */
+static const char *
+boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_template_t *templates)
+{
+	erx_mf_session_t session;
+	const char *strings;
+	uint32_t principal;
+
+	view->templates = templates;
+	view->ntemplates = 0;
+	/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
+	strings = (const char *)manifest->bytes + manifest->header.strings.offset;
+	for (uint32_t index = 0; index < manifest->header.sessions.count; index++) {
+		if (!erx_manifest_sessions_at(manifest, index, &session))
+			return ("manifest: a session template the reader cannot read");
+		if (session.principal >= manifest->header.principals.count ||
+		    session.limits >= manifest->header.limits.count)
+			return ("manifest: a session template names no principal or limits record");
+		/* The principal's number, from 1, as the view numbers principals. */
+		principal = session.principal + 1;
+		if (index > 0 && principal <= templates[index - 1].principal)
+			return ("manifest: the session templates are not one per principal in principal order");
+		if ((uint64_t)session.args.length + session.env.length > ERX_BOOT_STRINGS_MAX)
+			return ("manifest: a session template's arguments and environment exceed the boot page's strings");
+		templates[index] = (erx_dom_template_t){ .principal = principal,
+		    .limits = session.limits, .release = session.release,
+		    .release_files = session.release_files, .runtime = session.runtime,
+		    .args = strings + session.args.offset, .args_len = session.args.length,
+		    .env = strings + session.env.offset, .env_len = session.env.length };
+		view->ntemplates = index + 1;
+	}
+	return (NULL);
+}
+
 const char *
 erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint32_t nfiles,
     const erx_dom_boot_tables_t *tables)
@@ -260,7 +302,8 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 	lib->links = tables->links;
 	lib->held.principals = tables->held;
 	if ((reason = boot_principals(lib, manifest, tables)) != NULL ||
-	    (reason = boot_configured(&lib->view, manifest, tables->configured)) != NULL)
+	    (reason = boot_configured(&lib->view, manifest, tables->configured)) != NULL ||
+	    (reason = boot_templates(&lib->view, manifest, tables->templates)) != NULL)
 		return (reason);
 	if (!boot_limits(manifest, header->native_limits, &lib->view.native_limits))
 		return ("manifest: native_limits names no limits record");
