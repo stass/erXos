@@ -43,6 +43,7 @@ design places it in the network domain.
 
 -export([interfaces/0]).
 -export([init/1, event/2, transmit/2]).
+-export([frames/2]).
 
 -include("generated/erx_abi.hrl").
 -include("erx_net_frame.hrl").
@@ -238,7 +239,7 @@ receive_batch(T0) ->
     {Completions, More} = take(T0, [], 0),
     [self() ! {?MODULE, more} || More],
     {ok, T} = refill(length(Completions), T0),
-    {Drops, Frames} = lists:foldr(fun(Bytes, Acc) -> frame(Bytes, T#t.mtu, Acc) end, {[], []}, Completions),
+    {Drops, Frames} = frames(Completions, T#t.mtu),
     {Drops ++ [{frames, Frames} || Frames =/= []], T}.
 
 take(#t{dev = Dev, rx = Rx} = T, Got, Bytes) when Bytes < ?BATCH_BYTES ->
@@ -253,6 +254,15 @@ take(#t{dev = Dev, rx = Rx} = T, Got, Bytes) when Bytes < ?BATCH_BYTES ->
     end;
 take(_T, Got, _Bytes) ->
     {lists:append(lists:reverse(Got)), true}.
+
+%% The cut of a batch's completions, the bytes the device wrote, into its drops and its
+%% frames, in order: each completion is the device header and a frame, and the header is
+%% skipped unread. Exported for its fuzz target, tools/fuzz/erx_virtio_net_frame.rb.
+-doc false.
+-spec frames([binary()], pos_integer()) ->
+          {[{dropped, malformed | too_long}], [binary()]}.
+frames(Completions, Mtu) ->
+    lists:foldr(fun(Bytes, Acc) -> frame(Bytes, Mtu, Acc) end, {[], []}, Completions).
 
 frame(<<_Header:?HDR/binary, Frame/binary>>, Mtu, {Drops, Frames}) when byte_size(Frame) >= ?ETHER_HDR_LEN ->
     case byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN of

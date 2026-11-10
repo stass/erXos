@@ -460,6 +460,50 @@ stand_in_fire_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		return (enif_make_badarg(env));
 	return (enif_make_atom(env, "ok"));
 }
+
+/* One `{next, Length}` or `{Id, Length}` of stand_in_used/3. */
+static bool
+decode_used_entry(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_used_entry_t *entry)
+{
+	const ERL_NIF_TERM *pair;
+	unsigned id = 0, length;
+	int arity;
+
+	if (!enif_get_tuple(env, term, &arity, &pair) || arity != 2 || !enif_get_uint(env, pair[1], &length))
+		return (false);
+	entry->next = enif_is_identical(pair[0], enif_make_atom(env, "next"));
+	if (!entry->next && !enif_get_uint(env, pair[0], &id))
+		return (false);
+	entry->id = id;
+	entry->length = length;
+	return (true);
+}
+
+/* stand_in_used(Dev, Q, Entries): a hosted stand-in's device returns entries on a queue, honest or not. */
+static ERL_NIF_TERM
+stand_in_used_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	const erx_device_t *const device = device_of(env, argv[0]);
+	erx_device_used_entry_t entries[ERX_DEVICE_QUEUE_SIZE_MAX];
+	ERL_NIF_TERM list = argv[2], head;
+	unsigned queue, count = 0;
+	int status;
+
+	(void)argc;
+	if (device == NULL || !enif_get_uint(env, argv[1], &queue))
+		return (enif_make_badarg(env));
+	while (enif_get_list_cell(env, list, &head, &list)) {
+		if (count == ERX_DEVICE_QUEUE_SIZE_MAX || !decode_used_entry(env, head, &entries[count]))
+			return (enif_make_badarg(env));
+		count++;
+	}
+	if (!enif_is_empty_list(env, list))
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	status = erx_device_stand_in_used(device, queue, entries, count);
+	enif_mutex_unlock(device_lock);
+	return (status == ERX_OK ? enif_make_atom(env, "ok") : enif_make_badarg(env));
+}
 #endif
 
 static int
@@ -483,6 +527,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "complete", 2, complete_nif, 0 },
 #ifdef ERX_DEVICE_STAND_IN
 	{ "stand_in_fire", 2, stand_in_fire_nif, 0 },
+	{ "stand_in_used", 3, stand_in_used_nif, 0 },
 #endif
 };
 

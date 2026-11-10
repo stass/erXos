@@ -28,7 +28,7 @@
 -export([read/2, write/3, read_field/3, write_field/4, field/4]).
 -export([irq_bind/2, irq_ack/2]).
 -export([queue_create/4, negotiate/2, post/4, complete/2]).
--export([stand_in_fire/2]).
+-export([stand_in_fire/2, stand_in_used/3]).
 
 -export_type([device/0, register_name/0, spec/0, queue/0, segment/0]).
 
@@ -100,8 +100,8 @@ irq_ack(_Dev, _Line) ->
 %% rings and buffers are memory of the device's record for the boot, whose addresses never
 %% reach Erlang. The same queue again is that queue again, so a restarted driver finds it;
 %% the same Index with another geometry is `{error, ebusy}`. A device that is not
-%% virtio-mmio version 2 is `{error, enotsup}`, as any queue is on a hosted runtime. The
-%% device takes the queue at the next negotiate/2.
+%% virtio-mmio version 2 is `{error, enotsup}`, as is every queue on a hosted runtime but a
+%% stand-in's. The device takes the queue at the next negotiate/2.
 -spec queue_create(device(), non_neg_integer(), pos_integer(), pos_integer()) ->
           {ok, queue()} | {error, atom() | {status, integer()}}.
 queue_create(_Dev, _Index, _Size, _BufferSize) ->
@@ -149,4 +149,15 @@ complete(_Dev, _Queue) ->
 %% Hosted only: fires a stand-in's line, as a device would. Natively this stays undef.
 -spec stand_in_fire(device(), non_neg_integer()) -> ok.
 stand_in_fire(_Dev, _Line) ->
+    erlang:nif_error(undef).
+
+%% Hosted only: a virtio stand-in's device returns entries on its queue Queue, as a device
+%% would, honest or hostile, for complete/2 to judge. Each `{Head, Length}` goes into the
+%% next slot of the used ring. Head is `next`, the head the driver made available next, or
+%% any id at all. The used index then moves past them all, so returning more entries than
+%% are posted is an index ahead. badarg for a device that is not a stand-in, a queue that is
+%% not the device's or not installed, or more entries than the queue has. Natively this
+%% stays undef.
+-spec stand_in_used(device(), queue(), [{next | non_neg_integer(), non_neg_integer()}]) -> ok.
+stand_in_used(_Dev, _Queue, _Entries) ->
     erlang:nif_error(undef).

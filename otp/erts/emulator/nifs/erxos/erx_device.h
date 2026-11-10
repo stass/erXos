@@ -189,4 +189,23 @@ int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, co
 int	erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_t *sink, void *context,
 	    uint32_t *completed);
 
+#ifdef ERX_DEVICE_STAND_IN
+/*
+ * A hosted stand-in's device side of a queue, which a test drives as a device would, honest or
+ * hostile. Each entry goes into the next slot of the used ring: its id is the head the driver
+ * made available next, or any id the test names; its length is any the test names. The used
+ * index then moves past them all, so a test makes an index ahead of what is in flight by
+ * returning more entries than were posted. ERX_EINVAL for no such queue of a stand-in, a queue
+ * not installed, or more entries than the queue has.
+ */
+typedef struct erx_device_used_entry {
+	bool		next;		/* the head the driver made available next, not `id` */
+	uint32_t	id;
+	uint32_t	length;
+} erx_device_used_entry_t;
+
+int	erx_device_stand_in_used(const erx_device_t *device, uint32_t queue, const erx_device_used_entry_t *entries,
+	    uint32_t count);
+#endif
+
 #endif /* ERX_DEVICE_H */

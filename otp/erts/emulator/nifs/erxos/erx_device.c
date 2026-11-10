@@ -46,6 +46,12 @@ struct erx_device {
 static erx_device_t devices[ERX_DEVICE_MAX];
 static _Atomic uint32_t devices_open;
 
+#ifdef ERX_DEVICE_STAND_IN
+/* The stand-in's device model, defined below store(), which calls it. */
+static void	stand_in_preset(const erx_device_t *device);
+static void	stand_in_stored(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value);
+#endif
+
 /* `size` bytes of the object from `offset`, mapped read and write where the kernel reserves room. */
 static int
 map_object(uint64_t mem, uint64_t offset, uint64_t size, uint64_t *addr)
@@ -233,6 +239,10 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 		record->register_keys[index] = register_keys[index];
 	for (uint32_t index = 0; field_keys != NULL && index < peripheral->field_count; index++)
 		record->field_keys[index] = field_keys[index];
+#ifdef ERX_DEVICE_STAND_IN
+	if (record->form == ERX_DEVICE_FORM_STAND_IN)
+		stand_in_preset(record);
+#endif
 	atomic_store_explicit(&devices_open, open + 1, memory_order_release);
 	*device = open;
 	return (ERX_OK);
@@ -275,6 +285,7 @@ load(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offs
 	return (erx_device_access_load32(device->windows[reg->window], offset));
 }
 
+/* The one store to a register; a hosted stand-in's device then acts on it, as a device would. */
 static void
 store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offset, uint64_t value)
 {
@@ -282,7 +293,69 @@ store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t off
 		erx_device_access_store64(device->windows[reg->window], offset, value);
 	else
 		erx_device_access_store32(device->windows[reg->window], offset, (uint32_t)value);
+#ifdef ERX_DEVICE_STAND_IN
+	if (device->form == ERX_DEVICE_FORM_STAND_IN)
+		stand_in_stored(device, reg, value);
+#endif
 }
+
+#ifdef ERX_DEVICE_STAND_IN
+/*
+ * The hosted stand-in's model of a virtio-mmio transport, over its plain memory: the device
+ * side of the few registers whose value is not simply what was last stored. It is a version 2
+ * device whose queues take the largest size, offering VERSION_1 alone, and a reset lets every
+ * queue go, as section 4.2.2.1 of the virtio specification has it. Its one ready word serves
+ * every queue selector, so it models a device that holds all its queues ready or none. A
+ * stand-in of another peripheral is plain memory only.
+ */
+static bool
+stand_in_virtio(const erx_device_t *device)
+{
+	return (device->peripheral == erx_device_peripheral_find("virtio_mmio", sizeof("virtio_mmio") - 1));
+}
+
+/*
+ * A register's word of the stand-in's memory, set as its device would set it: straight to the
+ * memory, not through store(), so the model never acts on its own stores. A name the table
+ * does not have sets nothing.
+ */
+static void
+stand_in_set(const erx_device_t *device, const char *name, uint32_t value)
+{
+	const erx_device_peripheral_t *const peripheral = device->peripheral;
+	const uint32_t found = erx_device_register_named(peripheral, name);
+
+	if (found < peripheral->register_count)
+		erx_device_access_store32(device->windows[peripheral->registers[found].window],
+		    peripheral->registers[found].offset, value);
+}
+
+/* What a stand-in's virtio transport reads as before the driver stores anything. */
+static void
+stand_in_preset(const erx_device_t *device)
+{
+	if (!stand_in_virtio(device))
+		return;
+	stand_in_set(device, "magic", ERX_VIRTIO_MMIO_MAGIC);
+	stand_in_set(device, "version", ERX_VIRTIO_MMIO_VERSION);
+	stand_in_set(device, "queue_num_max", ERX_DEVICE_QUEUE_SIZE_MAX);
+}
+
+/* The device's side of a store: the features word the selector names, and the reset. */
+static void
+stand_in_stored(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value)
+{
+	const erx_device_register_t *const owned = device->peripheral->registers;
+	const uint32_t version_word = ERX_VIRTIO_F_VERSION_1 / 32, version_bit = ERX_VIRTIO_F_VERSION_1 % 32;
+
+	if (!stand_in_virtio(device))
+		return;
+	if (reg == &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_DEVICE_FEATURES_SEL])
+		stand_in_set(device, "device_features", value == version_word ? UINT32_C(1) << version_bit : 0);
+	if (reg == &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_STATUS] && value == 0)
+		stand_in_set(device, "queue_ready", 0);
+}
+#endif
 
 bool
 erx_device_read(const erx_device_t *device, const erx_device_register_t *reg, erx_device_element_t element, uint64_t *value)
@@ -564,6 +637,37 @@ carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
 	return (ERX_OK);
 }
 
+/*
+ * A hosted stand-in's queue, in plain memory: its rings and its pool, each zeroed, with this
+ * process's own addresses as their device addresses, since the stand-in's device is code in
+ * this process. No other build has one.
+ */
+static int
+stand_in_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
+{
+#ifdef ERX_DEVICE_STAND_IN
+	uint8_t *const rings = calloc(1, record->layout.bytes);
+	uint8_t *const buffers = calloc(size, buffer_size);
+	const uint32_t offsets[3] = { record->layout.desc, record->layout.avail, record->layout.used };
+
+	if (rings == NULL || buffers == NULL || !erx_device_queue_init(&record->core, size, buffer_size, (uintptr_t)buffers)) {
+		free(rings);
+		free(buffers);
+		return (rings == NULL || buffers == NULL ? ERX_ENOMEM : ERX_ERANGE);
+	}
+	for (uint32_t ring = 0; ring < 3; ring++)
+		record->ring_addrs[ring] = (uintptr_t)(rings + offsets[ring]);
+	record->rings = rings;
+	record->buffers = buffers;
+	return (ERX_OK);
+#else
+	(void)record;
+	(void)size;
+	(void)buffer_size;
+	return (ERX_ENOTSUP);
+#endif
+}
+
 int
 erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t size, uint32_t buffer_size,
     uint32_t *queue)
@@ -597,6 +701,8 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	record->layout = layout;
 	if (device->form == ERX_DEVICE_FORM_GIVEN)
 		status = carve_queue_memory(record, size, buffer_size);
+	else if (device->form == ERX_DEVICE_FORM_STAND_IN)
+		status = stand_in_queue_memory(record, size, buffer_size);
 	else
 		status = make_queue_memory(record, size, buffer_size);
 	if (status != ERX_OK)
@@ -853,3 +959,39 @@ erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_
 	*completed = done;
 	return (done == 0 && record->core.broken ? ERX_ECORRUPT : ERX_OK);
 }
+
+#ifdef ERX_DEVICE_STAND_IN
+/*
+ * The stand-in's device writes the used ring as any device may, honest or not; only the
+ * driver side, erx_device_complete, judges what it wrote. The device's own count of what it
+ * consumed is the used index, so the next available head is the one at that position.
+ */
+int
+erx_device_stand_in_used(const erx_device_t *device, uint32_t queue, const erx_device_used_entry_t *entries,
+    uint32_t count)
+{
+	const queue_record_t *const record = queue_of(device, queue);
+	volatile erx_virtq_ring_head_t *used;
+	volatile erx_virtq_used_elem_t *elems;
+	volatile const uint16_t *avail_ring;
+	uint32_t mask;
+	uint16_t idx;
+
+	if (record == NULL || device->form != ERX_DEVICE_FORM_STAND_IN || !record->ready || count > record->core.size)
+		return (ERX_EINVAL);
+	mask = record->core.size - 1;
+	used = (volatile erx_virtq_ring_head_t *)(record->rings + record->layout.used);
+	elems = (volatile erx_virtq_used_elem_t *)(record->rings + record->layout.used + ERX_VIRTQ_RING_HEAD_SIZE);
+	avail_ring = (volatile const uint16_t *)(record->rings + record->layout.avail + ERX_VIRTQ_RING_HEAD_SIZE);
+	idx = used->idx;
+	for (uint32_t entry = 0; entry < count; entry++) {
+		const uint32_t slot = (uint32_t)(idx + entry) & mask;
+
+		elems[slot].id = entries[entry].next ? avail_ring[slot] : entries[entry].id;
+		elems[slot].len = entries[entry].length;
+	}
+	atomic_thread_fence(memory_order_release);
+	used->idx = (uint16_t)(idx + count);
+	return (ERX_OK);
+}
+#endif
