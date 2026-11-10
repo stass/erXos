@@ -47,7 +47,12 @@ class ErxNetEffectTest < Minitest::Test
     ],
     # A batch's units never taken: the peer's segments hold the credit for good.
     credit_is_taken_as_items_arrive: [
-      "ok = erx_net_credit:take(Credit, length(Items)),\n    settle(", "_ = Credit,\n    settle("
+      'ok = erx_net_credit:take(Credit, length(Batch)),', '_ = Credit,'
+    ],
+    # The drain stopped after the first message: each queued message is stepped on its own,
+    # and five queued segments are acknowledged in more than one ACK.
+    queued_items_are_stepped_once: [
+      'Batch = queued_items([Items]),', '_ = fun queued_items/1, Batch = Items,'
     ]
   }.freeze
 
@@ -105,6 +110,18 @@ class ErxNetEffectTest < Minitest::Test
     # A driver with no hold to speak of: a far end that is never there restarts its link at once.
     far_end_never_there_spins_no_supervisor: [
       'erx_net_driver', ['-define(HOLD_MS, 1000).', '-define(HOLD_MS, 1).']
+    ],
+    # The driver's drain stopped after the first transmit: a transmit queued behind a
+    # message that fills the transport waits for room.
+    queued_transmits_leave_together: [
+      'erx_net_driver',
+      ['drain(S#state{backlog = queued_transmits(queue:join(Backlog, queue:from_list(Frames)))});',
+       '_ = fun queued_transmits/1, drain(S#state{backlog = queue:join(Backlog, queue:from_list(Frames))});']
+    ],
+    # The interface's drain stopped after the first batch: each batch reaches the holder in
+    # a message of its own.
+    queued_batches_reach_a_holder_as_one_message: [
+      'erx_net_if', ['queued_frames([Frames], S);', '_ = fun queued_frames/2, frames([Frames], S);']
     ],
     # A link start that fails when its driver ends under it: the stack's own start fails.
     crash_at_start_spins_no_supervisor: [

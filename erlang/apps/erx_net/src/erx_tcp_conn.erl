@@ -8,9 +8,15 @@ A TCP connection's process (docs/design-network-stack.md, "One owner, one step",
 and the socket layer FreeBSD keeps in `struct socket` (the owner, the active mode, the bytes
 not yet handed over, a waiting `recv`). It decides nothing a step could decide.
 
-**One event.** Each message becomes one step: segments and ICMP reports from an interface,
-`{items, Interface, Items}`, whose units the loop takes from the connection's credit on
-arrival; the owner's requests; the clock's hint, `{expired, Now}`. The step's context is
+**One step per mailbox.** Each message becomes one step, except that an `{items, ...}`
+takes every further one already queued with it: segments and ICMP reports from an
+interface, `{items, Interface, Items}`; the owner's requests; the clock's hint, `{expired,
+Now}`. The loop steps the segments of all the `{items, ...}` it took together, in arrival
+order, and only then takes their units from the connection's credit
+(docs/design-network-fastpath.md, "One step per mailbox"). Until then the interface can
+hand no more than the credit's room, so the batch never exceeds the credit's limit. An
+idle connection steps each message as it arrives, and under load one step and its one
+output pass answer many segments with one ACK. The step's context is
 the clock's time, the room left on the driver's transmit credit, and the path's MTU and
 route, read again whenever the configuration generation moves. The loop performs the
 actions in order:
@@ -43,8 +49,8 @@ its caller. In `{active, true}` mode, as with `gen_tcp`, the owner's mailbox is 
 only by how fast the owner reads.
 
 **Raises.** A step over segments or a report that raises is counted as `raised` and the
-connection keeps its state from before it, so a segment that trips a bug costs only
-itself; nothing of the segment is logged. Should the loop itself crash, its report shows
+connection keeps its state from before it, so segments that trip a bug cost only the
+step they were in; nothing of them is logged. Should the loop itself crash, its report shows
 the connection's state name, four-tuple and counters, never its buffers or the message
 that was in hand, since both hold the peer's bytes.
 
@@ -193,9 +199,11 @@ handle_cast(_Msg, S) ->
     {noreply, S}.
 
 -doc false.
-handle_info({items, _If, Items}, #state{credit = Credit} = S) when is_list(Items) ->
-    ok = erx_net_credit:take(Credit, length(Items)),
-    settle(items(Items, S));
+handle_info({items, _If, Items}, #state{credit = Credit} = S0) when is_list(Items) ->
+    Batch = queued_items([Items]),
+    S = items(Batch, S0),
+    ok = erx_net_credit:take(Credit, length(Batch)),
+    settle(S);
 handle_info({erx_net_clock, hint}, S) ->
     settle(timeouts(step({expired, erx_net_clock:now()}, S#state{armed = infinity})));
 handle_info({'DOWN', Ref, process, _, _}, #state{owner_ref = Ref} = S) ->
@@ -215,8 +223,20 @@ format_status(Status) ->
 
 %% --- Steps -------------------------------------------------------------------------
 
+%% The items of the messages taken so far (`Taken`, newest first) followed by those of every
+%% further `{items, _, _}` message already in the mailbox, one unit each. No unit is taken
+%% back while the drain runs, so the interface hands nothing past the credit's room and the
+%% drain ends within the credit's limit.
+queued_items(Taken) ->
+    receive
+        {items, _If, Items} when is_list(Items) ->
+            queued_items([Items | Taken])
+    after 0 ->
+        lists:append(lists:reverse(Taken))
+    end.
+
 %% A batch's segments go to the step together, in arrival order, and each ICMP report on
-%% its own, so the step sees the items as the interface received them.
+%% its own, so the step sees the items as the interfaces handed them.
 items([], S) ->
     S;
 items([{report, Icmp, Quoted} | Rest], S) ->

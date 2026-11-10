@@ -34,6 +34,7 @@ conn_test_() ->
       {"connect answers once established", fun connect_answers_once_established/0},
       {"a connection's death answers its connect", fun connect_is_answered_when_the_connection_dies/0},
       {"the credit is taken as items arrive", fun credit_is_taken_as_items_arrive/0},
+      {"queued items are stepped once", fun queued_items_are_stepped_once/0},
       {"reading opens the window", fun reading_opens_the_window/0},
       {"a recv of the whole buffer completes", fun recv_of_the_whole_buffer_completes/0},
       {"a recv that times out keeps what it held", fun recv_that_times_out_keeps_what_it_held/0},
@@ -160,6 +161,23 @@ credit_is_taken_as_items_arrive() ->
     [hand(Conn, Port, #{seq => Rcv + I * 100, ack => Snd, flags => ?TH_ACK}, binary:copy(<<"x">>, 100))
      || I <- lists:seq(0, 9)],
     _ = sys:get_state(Conn),
+    [#{credit := Credit}] = erx_net_tables:demux(key(Port)),
+    ?assertEqual(256, erx_net_credit:free(Credit)).
+
+%% Five messages of one in-order segment each, queued while the connection is busy, are
+%% stepped as one event (docs/design-network-fastpath.md, "One step per mailbox"): its one
+%% output pass acknowledges all five in one ACK, where a step per message would acknowledge
+%% every second segment and the fifth on the delayed-ACK timer, and each message's unit
+%% comes back.
+queued_items_are_stepped_once() ->
+    #{conn := Conn, port := Port, snd := Snd, rcv := Rcv} = established(),
+    ok = sys:suspend(Conn),
+    [hand(Conn, Port, #{seq => Rcv + I * 100, ack => Snd, flags => ?TH_ACK}, binary:copy(<<"q">>, 100))
+     || I <- lists:seq(0, 4)],
+    ok = sys:resume(Conn),
+    [{#tcp{flags = ?TH_ACK, ack = Acked}, <<>>}] = segments(),
+    ?assertEqual(Rcv + 500, Acked),
+    ?assertEqual(none, receive {transmit, _} -> another after 200 -> none end),
     [#{credit := Credit}] = erx_net_tables:demux(key(Port)),
     ?assertEqual(256, erx_net_credit:free(Credit)).
 

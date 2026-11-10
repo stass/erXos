@@ -418,6 +418,15 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   architecture layer, with the portable code as their oracle in the same test. The
   same run should time one 64 KiB call on each target board, since `erx_bytes_nif.c`
   charges it a quarter of a reduction slice from the host's number.
+* **[Medium] `erx_net_driver:queued_transmits/1` over the tap's `port` end.** Each
+  `{transmit, ...}` drains the further ones with a `receive ... after 0`, which scans the
+  whole mailbox before it gives up, and the port's frames carry no credit, so under a
+  receive flood that the driver falls behind every ACK costs a scan of every frame waiting,
+  which slows the driver further. The `udp` end bounds its frames at 64 and the `process`
+  end is a test's; the tap NIF of the fast path, one readiness message at a time, removes
+  the unbounded case. Settled by the driver's time per message on p620 under a receive
+  flood at line rate (`tools/erx bench net-p620`'s bulk-recv with a second sender), with
+  and without the drain.
 * **[Low] per-byte primitives, `erx_bytes:inet_csum/2` and `siphash24/2` run portable C
   only.** The checksum adds one 16-bit word at a time into 64 bits and does not use the
   CPU's checksum-friendly instructions that

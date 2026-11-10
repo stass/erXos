@@ -93,16 +93,18 @@ handed it before `lift`, a #seg{} after), the control block and the context.
 segments(Segments, Tcb, Ctx) ->
     segments(Segments, Tcb, Ctx, stages(), []).
 
+%% `Actions` holds each segment's actions, newest segment first, joined once at the end, so
+%% a batch of many segments costs no more per segment than one.
 segments([], Tcb, _, _, Actions) ->
-    {Tcb, Actions};
+    {Tcb, lists:append(lists:reverse(Actions))};
 segments(Rest, #tcb{ended = true} = Tcb, _, _, Actions) ->
-    {Tcb, Actions ++ [{reinject, Segment} || Segment <- Rest]};
+    segments([], Tcb, none, none, [[{reinject, Segment} || Segment <- Rest] | Actions]);
 segments([Segment | Rest], #tcb{state = time_wait} = Tcb0, Ctx, Stages, Actions) ->
     {Tcb, More} = erx_tcp_timewait:check(Segment, Tcb0, Ctx),
-    segments(Rest, Tcb, Ctx, Stages, Actions ++ More);
+    segments(Rest, Tcb, Ctx, Stages, [More | Actions]);
 segments([Segment | Rest], Tcb0, Ctx, Stages, Actions) ->
     {Tcb, More} = run(Stages, Segment, Tcb0, Ctx),
-    segments(Rest, Tcb, Ctx, Stages, Actions ++ More).
+    segments(Rest, Tcb, Ctx, Stages, [More | Actions]).
 
 -doc """
 Runs one segment through the given stages, a suffix of `stages/0` (the segment as the first

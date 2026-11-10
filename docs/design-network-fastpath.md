@@ -168,7 +168,8 @@ control block in `commit/6`, `after_send/3` and `done/2`.
 summing the segment with the checksum NIF, three calls and two
 `erlang:iolist_to_iovec/1` per segment. The send log inserts one range per
 segment. The step's frames go to the driver in one `{transmit, Frames}`
-message, and the driver hands each frame to its transport. The tap
+message, and the driver joins every `{transmit, ...}` waiting in its
+mailbox to its backlog and hands each frame to its transport. The tap
 transport's `port_command/2` makes ERTS flatten the frame into a buffer,
 since the spawn driver has no `outputv` (`io.c` near line 1979;
 `sys_drivers.c`'s `spawn_driver_entry`), and the helper writes it to the
@@ -178,14 +179,17 @@ kernel.
 Receiving: the helper reads a frame from the tap and writes it to its
 port; ERTS reads it into a 64 KiB buffer and copies it into a fresh
 binary (`driver_output`), one message to the driver. The driver sends it
-to the interface, one frame per message. The interface classifies it,
-checks its checksums with three NIF calls, decodes it and sends it to
-the connection, one item per message. The connection runs it through the
-fourteen stages of `erx_tcp_input`, `lift` to `fin`; header prediction
+to the interface, one frame per message. The interface takes every
+such message waiting in its mailbox, classifies each frame, checks its
+checksums with three NIF calls, decodes it, and sends each connection
+one message of its items. The connection takes every such message
+waiting in its mailbox and steps their segments as one event, each
+through the fourteen stages of `erx_tcp_input`, `lift` to `fin`; header prediction
 recognises its two common cases and jumps to the `ack` stage, from which
 the general stages run. Output then answers about every second segment
-with an ACK, encoded as any segment is, and a `recv` joins the queued
-payloads into one binary (`erx_tcp_conn:take/2`).
+with an ACK, and a batch stepped together with one, encoded as any
+segment is, and a `recv` joins the queued payloads into one binary
+(`erx_tcp_conn:take/2`).
 
 ## The construction: runs
 
@@ -798,10 +802,14 @@ A connection whose mailbox holds 13 items steps them 13 times, and pays
 the loop each time: the configuration generation, the clock's hint, the
 credit's atomics and the `gen_server` dispatch. Before it steps an
 `{items, Interface, Items}` message, the connection takes every further
-`{items, _, _}` message already in its mailbox, takes their units from
-its credit, and steps all their segments as one `{segments, Segments}`
-event, in arrival order. The credit bounds what can wait, so it bounds
-the batch too. An idle connection steps each message as it arrives, so
+`{items, _, _}` message already in its mailbox, steps all their segments
+as one `{segments, Segments}` event, in arrival order, and then takes
+their units from its credit. Until then the interface can hand nothing
+past the credit's room, so the credit bounds what waits and what is
+stepped together, and the batch never exceeds its limit; taking the
+units as each message is drained would let the interface refill the
+credit while the drain runs, and a drain that keeps pace with its
+sender would never end. An idle connection steps each message as it arrives, so
 the batch adds no latency; under load it grows by itself. One step over
 many segments ends with one output pass, so ACKs that per-message steps
 would send apart leave as one, the acknowledgement count of FreeBSD with
@@ -1062,9 +1070,9 @@ batch, within the merge's limit, and both charge reductions for the
 bytes they read. The merge closes every
 unit when its call returns, so nothing is held between calls.
 
-* **Receive credit and the merge.** The interface takes a batch's units
-  from its receive credit as it takes the batch's message, before it
-  merges, as every receiver takes its units
+* **Receive credit and the merge.** The interface takes the units of the
+  batches it drained from its receive credit once its pass over them
+  ends, merged or not, as every receiver that drains takes its units
   ([Credited queues](design-network-stack.md#credited-queues)). A merge
   that raised, which only a bug can make once the driver cuts every
   batch, strands no credit: the interface drops the batch, counts and

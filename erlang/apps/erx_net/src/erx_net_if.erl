@@ -4,19 +4,24 @@
 -module(erx_net_if).
 -moduledoc """
 The interface process (docs/design-network-stack.md, "The interface core", "The loop"):
-the effect layer around erx_net_if_core. It takes one message at a time, steps the core
-and performs the actions in order; it decides nothing a pure function could decide.
+the effect layer around erx_net_if_core. It takes one message at a time, except that a
+batch of frames takes every further batch already queued with it; it steps the core and
+performs the actions in order, and decides nothing a pure function could decide.
 
 1. Before anything else it reads the configuration generation, and when it differs from
    the core's steps `{config, Gen, Snapshot}` from `erx_net_tables:configuration/0`.
-2. A batch `{frames, Driver, Frames}` takes its units from the receive credit. Each frame
+2. A batch `{frames, Driver, Frames}` is taken with every further batch from the driver
+   already in the mailbox, up to a link notice, which is stepped after them
+   (docs/design-network-fastpath.md, "Processes and batching"). Each frame of the batches
    in turn is classified against the core's view with the demultiplexing lookup added. An
    `owned` frame reserves a unit of each holder's credit and is verified; its item is kept
    for each holder that took it, or the units are released when it fails. A `local` frame
    is stepped at once; a step that raises is counted as `raised` and the core keeps its
    value from before the frame, so a frame that trips a bug costs only itself. A `drop` is
-   counted. At the batch's end each holder gets one
-   message `{items, Interface, Items}`, its units already reserved.
+   counted. At the pass's end each holder gets one message `{items, Interface, Items}`,
+   its units already reserved, and only then are the batches' units taken from the receive
+   credit, so the driver hands nothing past the credit's room while the pass runs and a
+   pass never exceeds the credit's limit.
 3. A link notice takes its unit of the receive credit, a `{resolve, ...}` hand-over one of
    the sender credit; a hint, the DHCP client's messages and the clock's hint carry none.
 
@@ -95,9 +100,8 @@ handle_info(Msg, S) ->
 
 %% --- One message -----------------------------------------------------------------
 
-message({frames, Driver, Frames}, #state{driver = Driver, rx = Rx} = S) ->
-    ok = erx_net_credit:take(Rx, length(Frames)),
-    frames(Frames, S);
+message({frames, Driver, Frames}, #state{driver = Driver} = S) ->
+    queued_frames([Frames], S);
 message({link, Driver, State}, #state{driver = Driver, rx = Rx} = S) ->
     ok = erx_net_credit:take(Rx, 1),
     step({link, State}, S);
@@ -138,43 +142,74 @@ sync(#state{gen = Gen} = S) ->
 finish(#state{core = Core, armed = Armed} = S) ->
     S#state{armed = erx_net_clock:arm_by(erx_net_if_core:next_deadline(Core), Armed)}.
 
-%% --- A batch of frames -----------------------------------------------------------
+%% --- Batches of frames -----------------------------------------------------------
 
-frames(Frames, S0) ->
-    {S, Batches} = lists:foldl(fun(Frame, {S1, B}) -> input({frame, Frame}, S1, B) end,
-                               {S0, #{}}, Frames),
+%% Takes every further batch the driver has already queued, after those taken so far
+%% (`Taken`, newest first), and classifies them all in one pass. A link notice from the
+%% driver ends the drain and is stepped after the frames that came before it, so the
+%% driver's order holds. No unit is taken back while the drain runs, so the driver hands
+%% nothing past the receive credit's room and the drain ends within the credit's limit.
+queued_frames(Taken, #state{driver = Driver} = S) ->
+    receive
+        {frames, Driver, Frames} ->
+            queued_frames([Frames | Taken], S);
+        {link, Driver, _} = Link ->
+            message(Link, frames(lists:reverse(Taken), S))
+    after 0 ->
+        frames(lists:reverse(Taken), S)
+    end.
+
+%% Classifies the frames of the batches in the order the driver handed them, the batches
+%% kept apart, hands each holder its items of all of them in one message, and then takes
+%% the batches' units from the receive credit.
+frames(Batches, #state{rx = Rx} = S0) ->
+    {S, ByHolder} = lists:foldl(fun(Frames, Acc) ->
+                                        lists:foldl(fun(Frame, {S1, B}) ->
+                                                            input({frame, Frame}, S1, B)
+                                                    end, Acc, Frames)
+                                end, {S0, #{}}, Batches),
     maps:foreach(fun(Pid, Items) ->
                          ok = erx_net_credit:send(Pid, {items, self(), lists:reverse(Items)})
-                 end, Batches),
+                 end, ByHolder),
+    ok = erx_net_credit:take(Rx, lists:sum([length(Frames) || Frames <- Batches])),
     S.
 
-input(Input, #state{core = Core} = S, Batches) ->
+input(Input, #state{core = Core} = S, ByHolder) ->
     View = (erx_net_if_core:view(Core))#{demux => fun erx_net_tables:demux/1},
-    case erx_net_input:classify(Input, View) of
+    case guarded_input(fun() -> erx_net_input:classify(Input, View) end) of
         {owned, Holders, Pending} ->
-            owned(Holders, Pending, S, Batches);
+            owned(Holders, Pending, S, ByHolder);
         {local, Pending} ->
-            {guarded({local, Pending}, S), Batches};
+            {guarded({local, Pending}, S), ByHolder};
         {drop, Reason} ->
-            {step({drop, Reason}, S), Batches}
+            {step({drop, Reason}, S), ByHolder}
+    end.
+
+%% Classifying or verifying a frame that raises drops the frame as `raised`, as a raising
+%% step does, so a frame that trips a bug costs only itself and strands no holder's units.
+guarded_input(Fun) ->
+    try
+        Fun()
+    catch
+        error:_ -> {drop, raised}
     end.
 
 %% An owned frame is verified only once some holder has room for it: each holder whose
 %% credit takes a unit is kept.
-owned(Holders, Pending, S, Batches) ->
+owned(Holders, Pending, S, ByHolder) ->
     case lists:filter(fun({_Pid, Credit}) -> erx_net_credit:reserve(Credit, 1) =:= ok end, Holders) of
         [] ->
-            {step({drop, no_room}, S), Batches};
+            {step({drop, no_room}, S), ByHolder};
         Taken ->
-            case erx_net_input:verify(Pending) of
+            case guarded_input(fun() -> erx_net_input:verify(Pending) end) of
                 {ok, Item} ->
                     {S, lists:foldl(fun({Pid, _}, B) ->
                                             maps:update_with(Pid, fun(Is) -> [Item | Is] end,
                                                              [Item], B)
-                                    end, Batches, Taken)};
+                                    end, ByHolder, Taken)};
                 {drop, Reason} ->
                     [ok = erx_net_credit:release(Credit, 1) || {_, Credit} <- Taken],
-                    {step({drop, Reason}, S), Batches}
+                    {step({drop, Reason}, S), ByHolder}
             end
     end.
 

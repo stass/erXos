@@ -61,8 +61,11 @@ it; git history is the record of completed work.
        run in blocks, not interleaved; the p99 is the nearest rank plus one in both
        clients; bulk send differs between the clients (nodelay and 64 KiB against Nagle and
        32 KiB), as the report's conditions state.
-  2. one step per mailbox and a batch on every hop: about 10 to 15 percent sending and 20
-     to 30 percent receiving, from fewer loop passes and ACKs;
+  2. one step per mailbox and a batch on every hop are in the tree; on p620 (median of 3,
+     against the baseline) bulk receive went from 1,160 to 1,850 Mbit/s, while bulk send
+     (903 to 900) and request-reply (64 B 15,661 to 15,521 txn/s, 1 KiB 14,574 to 15,132,
+     64 B x16 81,376 to 78,159) did not move: the send side waits for the lean step
+     (raw data: ~/erxos-history net-bench-p620-fast-p2-2026-11-09, commit 8f3cc99);
   3. the lean step: `#tcb{}` split from `#tcb_conf{}`, header prediction finishing its two
      cases, the header template, the send log of runs with its extension rule: the
      connection's time per segment from 12.3 us to 3 to 4 us, and throughput about 1.3 to
@@ -1041,7 +1044,9 @@ it; git history is the record of completed work.
   state before the event, with a RST, `{error, econnaborted}` to its socket process and an exit with
   the exception, for a batch of drained messages as for one. `guarded/2` instead counts the raise
   and goes on with the state it had, after the effects of the step may already have run, and a raise
-  outside a segment step crashes the process with no RST. Change both, with a regression test that
+  outside a segment step crashes the process with no RST. Since the connection steps every
+  queued `{items, ...}` together, a raise discards the whole batch, up to the credit's 256
+  segments, so a segment that trips the bug once per batch stalls the connection. Change both, with a regression test that
   plants a raise in the step and checks the RST and the error the owner sees.
 * [Medium] network, `erx_tcp_conn` (E2 review): a refused or timed-out connect in active mode still
   sends `tcp_error` and `tcp_closed` for a socket the caller never got; calls after `close` are

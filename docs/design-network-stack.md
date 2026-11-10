@@ -445,7 +445,11 @@ except through `erx_net_credit`:
 * A sender adds the units it is about to send (frames, segments or
   bytes, as the receiver chose) with `atomics:add_get/3`. If the result
   exceeds the receiver's limit, it subtracts them again and does not send.
-* The receiver subtracts the units of each message it takes.
+* The receiver subtracts the units of each message it takes. A receiver
+  that takes several queued messages into one step subtracts their units
+  once the step is done, so the counter bounds what waits and what it
+  steps together, and the batch never exceeds the limit
+  ([One step per mailbox](design-network-fastpath.md#one-step-per-mailbox)).
 * A sender that reserved units it does not send, for a frame it then
   drops or a hand-over it abandons, subtracts them again.
 
@@ -3500,14 +3504,18 @@ changes.
    it differs from the core's, steps `{config, Gen, Snapshot}` from
    `erx_net_tables:configuration/0`.
 2. A batch `{frames, Driver, Frames}` takes its units from the receive
-   credit, and a `{loop, Frames}` its units from the sender credit. Each
+   credit, and so does every further batch from the driver already in
+   the mailbox, up to a link notice, which is stepped after them
+   ([Processes and batching](design-network-fastpath.md#processes-and-batching));
+   a `{loop, Frames}` takes its units from the sender credit. Each
    frame in turn is classified against `view/1` with the `demux` lookup
    added. An `owned` frame reserves a unit of each destination's credit
    and is verified, its item kept for each destination that took it, or
    its units released if it fails. A `local` frame is stepped at once,
    and every `{input, Input}` action it returns is classified before the
-   next frame. A `drop` is counted. At the batch's end each destination
-   gets one message of its items, its units already reserved.
+   next frame. A `drop` is counted. At the end of the batches taken
+   together each destination gets one message of its items, its units
+   already reserved.
 3. Any other handed message takes its units from the sender credit and
    is stepped. `hint`, `link`, the `erx_dhcp4` messages and the key
    facet's answer carry no credit: a hint is at most one in flight per

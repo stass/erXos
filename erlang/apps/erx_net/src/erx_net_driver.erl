@@ -38,7 +38,10 @@ receive and transmit credits, the transmit backlog and the link state.
   unit per frame. Each frame's unit is taken when the frame leaves the driver, sent or
   dropped, not when its message arrives, so the credit bounds the mailbox and the backlog
   together; a frame the transport cannot take now (`full`) waits in the backlog, with
-  those after it, until the transport's `writable` event.
+  those after it, until the transport's `writable` event. Before it gives the transport
+  anything, the driver joins the frames of every further `{transmit, ...}` already in its
+  mailbox to the backlog, in arrival order (docs/design-network-fastpath.md, "Processes and
+  batching"), so the transport is handed all that waits at once.
 
 Frames are untrusted: the driver reads none of their bytes; a transport parses nothing
 either and only checks a frame's type and length.
@@ -215,7 +218,7 @@ format_status(Status) ->
 %% The state after one message, or `{stop, Reason}` when the message ends the medium.
 
 message({transmit, Frames}, #state{backlog = Backlog} = S) when is_list(Frames) ->
-    drain(S#state{backlog = queue:join(Backlog, queue:from_list(Frames))});
+    drain(S#state{backlog = queued_transmits(queue:join(Backlog, queue:from_list(Frames)))});
 message({erx_net_clock, hint}, S) ->
     S#state{armed = infinity};
 message({'DOWN', Ref, process, _, _}, #state{iface = {_, Ref, _}} = S) ->
@@ -245,6 +248,17 @@ event(writable, S) ->
     drain(S#state{blocked = false});
 event({dropped, Reason}, S) when is_atom(Reason) ->
     count(Reason, 1, S).
+
+%% The backlog with the frames of every further `{transmit, ...}` already in the mailbox
+%% joined in arrival order. Senders hand frames only against the transmit credit, so the
+%% drain ends within its limit.
+queued_transmits(Backlog) ->
+    receive
+        {transmit, Frames} when is_list(Frames) ->
+            queued_transmits(queue:join(Backlog, queue:from_list(Frames)))
+    after 0 ->
+        Backlog
+    end.
 
 %% Gives the transport the backlog's frames in order until it is empty or the transport
 %% is full; each frame that leaves, sent or dropped, takes its unit.

@@ -11,6 +11,8 @@
 -behaviour(erx_net_driver).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("erx_ip4_wire.hrl").
+-include("erx_tcp_wire.hrl").
 
 -export([init/1, event/2, transmit/2]).
 -export([log/2]).
@@ -79,6 +81,7 @@ driver_test_() ->
                  fun flap_while_full_is_not_told/0,
                  fun silent_link_is_told_once_room_returns/0,
                  fun backlog_never_exceeds_the_transmit_credit/0,
+                 fun queued_transmits_leave_together/0,
                  fun detached_frames_are_counted/0,
                  fun process_end_counts_a_frame_that_is_not_a_binary/0,
                  fun process_end_ends_the_driver_after_its_hold/0,
@@ -129,6 +132,20 @@ backlog_never_exceeds_the_transmit_credit() ->
     ?assertEqual(Frames, [receive {sent, F} -> F end || _ <- Frames]),
     settle(Driver),
     ?assertEqual(4, erx_net_credit:free(Tx)).
+
+%% Every transmit waiting at the driver joins the backlog before the transport is handed
+%% anything, in arrival order: a second transmit queued behind a message that leaves the
+%% transport no room still leaves with the first.
+queued_transmits_leave_together() ->
+    Driver = stub(10, 4),
+    {_, Tx} = attached(Driver, 4),
+    ok = sys:suspend(Driver),
+    ok = erx_net_credit:hand(Driver, Tx, 1, {transmit, [<<1>>]}),
+    Driver ! {stub, room, 0},
+    ok = erx_net_credit:hand(Driver, Tx, 1, {transmit, [<<2>>]}),
+    ok = sys:resume(Driver),
+    settle(Driver),
+    ?assertEqual([<<1>>, <<2>>], [receive {sent, F} -> F after 1000 -> none end || _ <- [1, 2]]).
 
 detached_frames_are_counted() ->
     Driver = stub(0, 4),
@@ -280,11 +297,13 @@ wait_gone(Name) ->
 -define(ME4, <<10, 0, 2, 15>>).
 -define(PEER4, <<10, 0, 2, 2>>).
 -define(PEER_MAC, <<2, 0, 0, 0, 0, 9>>).
+-define(PEER_PORT, 7777).
 
 far_end_test_() ->
     [{timeout, 20, fun far_end_end_restarts_the_link/0},
      {timeout, 20, fun far_end_never_there_spins_no_supervisor/0},
-     {timeout, 20, fun crash_at_start_spins_no_supervisor/0}].
+     {timeout, 20, fun crash_at_start_spins_no_supervisor/0},
+     {timeout, 20, fun queued_batches_reach_a_holder_as_one_message/0}].
 
 %% A pipe whose far end ends ends its driver, and the link supervisor starts the link
 %% again: a new driver, over the far end now registered under the same name, answers ARP.
@@ -308,6 +327,48 @@ far_end_end_restarts_the_link() ->
         ok = proc_lib:stop(Stack, shutdown, infinity),
         stop_far()
     end.
+
+%% Batches of frames that wait at the interface while it is busy are classified in one
+%% pass, so a holder gets one `{items, ...}` message for all of them
+%% (docs/design-network-fastpath.md, "Processes and batching"). The test claims a
+%% four-tuple as its holder, and three segments the far end sends, each its own batch at
+%% the driver, reach it as one message of three items, in order.
+queued_batches_reach_a_holder_as_one_message() ->
+    wait_gone(erx_net_tables),
+    flush(),
+    Far = far_end(),
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [static_pipe()]}),
+    unlink(Stack),
+    try
+        Driver = answers_arp(Far, 50),
+        [{en0, If, _}] = ets:lookup(erx_net_ifs, en0),
+        KeyOf = fun(P) -> {tcp, inet, ?ME4, P, ?PEER4, ?PEER_PORT} end,
+        Entry = #{pid => self(), credit => erx_net_credit:new(16)},
+        {ok, Port, _, _} = erx_net_bind:claim_tcp(KeyOf, 49152, self(), Entry, erx_net_clock:now()),
+        ok = sys:suspend(If),
+        [Driver ! {erx_net_pipe, Far, peer_segment(Port, Seq)} || Seq <- [1, 2, 3]],
+        settle(Driver),
+        ok = sys:resume(If),
+        receive
+            {items, If, Items} ->
+                ?assertEqual([1, 2, 3], [Seq || {#tcp{seq = Seq}, _, _, _} <- Items])
+        after 3000 -> error(no_items)
+        end,
+        ?assertEqual(nothing, nothing(items))
+    after
+        ok = proc_lib:stop(Stack, shutdown, infinity),
+        stop_far()
+    end.
+
+%% A frame from the peer to ?ME4's Port: a TCP segment with sequence number Seq.
+peer_segment(Port, Seq) ->
+    Tcp = #tcp{sport = ?PEER_PORT, dport = Port, seq = Seq, ack = 0, flags = ?TH_ACK,
+               win = 65535, urp = 0},
+    Seg = iolist_to_binary(erx_tcp_wire:encode(Tcp, <<"batch">>,
+                                               erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6))),
+    Ip = erx_ip4_wire:encode(#ip4{len = 20 + byte_size(Seg), ttl = 64, p = 6, src = ?PEER4,
+                                  dst = ?ME4}),
+    <<?MAC/binary, ?PEER_MAC/binary, 16#0800:16, Ip/binary, Seg/binary>>.
 
 %% A far end that is never there ends every driver at its start: each lives out its hold,
 %% so the link restarts about once a second and no supervisor above it gives up.
