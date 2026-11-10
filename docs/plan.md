@@ -786,7 +786,7 @@ grants and the hostile runtime, which M5's kernel part adds.
 * **The peer in ERTS**: every domain a node named `<id>@<host>` under
   stock distribution, `<D.N.S>` pids that print the domain id as the
   creation, one distribution entry per connection keyed by the peer's
-  name as stock keys it, the `erx_connections` application and the
+  name as stock keys it, the `erx_connections` process of `erx` and the
   `erx_lane` linked-in driver as the carrier, the busy-port rule when a
   lane is full, the export table with its three writers (`erx:export/3`
   narrowing only), unguessable references, and the receive boost's

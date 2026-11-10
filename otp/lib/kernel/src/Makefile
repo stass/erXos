@@ -1,5 +1,3 @@
-# Modified by erXos: builds erx_dist and erx_connections, the carrier between domains,
-# and erx_log_h, the log sink's handler.
 #
 # %CopyrightBegin%
 #
@@ -80,9 +78,6 @@ MODULES = \
 	erl_kernel_errors \
 	erl_reply \
 	erl_signal_handler \
-	erx_connections \
-	erx_dist \
-	erx_log_h \
 	erpc \
 	erts_debug \
 	error_handler \

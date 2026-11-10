@@ -344,13 +344,37 @@ only the fixtures of OTP's test suites and examples.
 erXos's own Erlang code is applications of its own
 under `erlang/apps/` ([design.md](design.md#repository-layout)), listed
 after OTP's applications in the release file: `erx`, the runtime's
-services (`erx_connections`, `erx_dist`, `erx_program`, `erx_device`,
-`erx_watchdog`, the console, the kernel log and the namespace); `erx_files`,
-the Erlang file servers; and one driver application per device class,
-`erx_uart` the first. None has an application callback: what must run is
-started by `kernel`'s hooks, and the boot script's code path, which names
-every application of the release, finds the modules they call, which the
-code server loads on first call. `crypto`, `ssl`, `ssh`, `inets`
+services (the carrier between domains, `erx_dist`, and its connection
+agent, `erx_connections`; the log sink's handler, `erx_log_h`;
+`erx_program`, `erx_device`, `erx_watchdog`, the console, the kernel log
+and the namespace); `erx_files`, the Erlang file servers; one driver
+application per device class, `erx_uart` and `erx_blk`; `erx_shell`, the
+command shell; and the system services and their clients: `erx_domain`,
+the domain service, which only the system release ships; `erx_code`, the
+code service; `erx_hostlink`, the host link; `erx_net`, the TCP/IP stack;
+`erx_net_client`, its socket backends; and `erx_session`, a session's
+domain. Every domain release ships `kernel`, `stdlib`, `erx` and
+`erx_files` at the least.
+
+`erx`, `erx_files`, `erx_uart` and `erx_shell` have no application
+callback. What of theirs must run, `kernel` starts. Its hooks start the
+watchdog, the namespace's writer, `/tmp`, `/proc` and the console;
+`net_kernel` starts the carrier that `-proto_dist erx` names; and
+`logger` adds `erx_log_h` as its default handler (edit 57). The boot
+script's code path names every application of the release before
+`kernel` starts, so the code server finds each of these modules on its
+first call, and `kernel` itself holds none of erXos's modules: its
+`.app` file and its `Makefile` keep OTP's bytes. `kernel` therefore
+needs `erx` and `erx_files` at run time without declaring them, so
+every boot script on erXos names both: a release erXos builds always
+does, and an embedded-mode boot of a release without them fails as
+`kernel` starts. The other applications start through callbacks of
+their own, under the start types the release file gives them: `erx_net`
+with start type `temporary`, so that a crash loop in the stack ends the
+stack and not the system domain, and `erx_session` with start type
+`load` in the system release, so that it runs only in a domain whose
+release holds it.
+`crypto`, `ssl`, `ssh`, `inets`
 and the rest are outside the shipped set: they depend on a network stack
 and on OpenSSL 3.5 ([design.md](design.md#dependencies)), and arrive with
 the network service ([plan.md](plan.md#m12-storage-networking-boards)).
@@ -624,7 +648,7 @@ An executor is the only writer of its control line, so the adapter stores
 into it without atomic read-modify-write, and only when a value changes.
 
 **The connection table** is `erx_connections`'s, an Erlang process of
-`kernel` in every domain: for each peer domain, its node name and id, the
+`erx` in every domain: for each peer domain, its node name and id, the
 lane port, the distribution entry it controls, and the slots of the
 connection's objects.
 It is Erlang state; the hot path never consults it, since a frame's entry
@@ -2055,7 +2079,7 @@ keys or history, which the first shell's demo needs. Its state comes from
 calls two helpers of the removed NIF, `isprint/1` for each ASCII character
 (`prim_tty.erl:1280`) and `wcwidth/1` for each column count, a prompt's included
 (`:1139`). Edit 38 makes both pure: `wcwidth/1` returns the width from
-`erx_width`, a generated module of the kernel application, so a combining
+`erx_width`, a generated module of the `erx` application, so a combining
 mark counts as no column and a wide character as two, as the terminal
 emulator `erx_vt` and musl's `wcwidth` count them.
 
@@ -2165,7 +2189,7 @@ as `prim_tty`'s reader does. `erx_console:input/2` is that decision, a pure func
 with a fuzz target. `Ctrl-\` is an ordinary byte on this path, as on any raw
 terminal.
 
-`erx_stdio` is an Erlang process in `kernel` over `erx_stdio_nif`. A worker
+`erx_stdio` is an Erlang process of `erx` over `erx_stdio_nif`. A worker
 thread of the NIF, blocked in `poll`, reads standard input into a buffer and
 triggers a software IRQ object bound to the group, whose label the event table
 registers to `erx_stdio`, so input travels the same path as a device's interrupt

@@ -28,6 +28,8 @@ module Erx
     # tracks"): the host tests compile them, and no release holds them yet.
     UNRELEASED = %w[erx_display erx_web].freeze
     SOURCE = 'erlang/apps'
+    # OTP's applications in the tree, whose include/ headers erXos's include_lib reads.
+    OTP_LIB = 'otp/lib'
     # Kernel's own error and warning flags (otp/lib/kernel/src/Makefile, otp/make/otp.mk.in)
     # less its documentation warnings, which erXos's modules do not follow, with
     # `+deterministic` so that another checkout builds the same bytes.
@@ -83,13 +85,15 @@ module Erx
     # erlc's -I flags for every application's include directory under root, those under
     # build/gen ahead of the tree's, relative to root,
     # so one application can include another's headers; a module compiled from the host
-    # (ErlangCompile) gets the same.
+    # (ErlangCompile) gets the same. Last, otp/lib, so that include_lib("kernel/include/
+    # dist.hrl") reads the tree's header, which erXos may edit, before the oracle's: erlc
+    # tries an include_lib path against -I first and only then the compiler's own OTP.
     def self.include_flags(root:)
       generated = APPLICATIONS.map { |application| generated(application) }
       tree = APPLICATIONS.map { |application| source(application) }
       [*generated, *tree].map { |directory| File.join(directory, 'include') }
                          .select { |directory| File.directory?(File.join(root, directory)) }
-                         .flat_map { |directory| ['-I', directory] }
+                         .flat_map { |directory| ['-I', directory] } + ['-I', OTP_LIB]
     end
 
     # Every file a build compiles or copies, as absolute paths: the sources the release's

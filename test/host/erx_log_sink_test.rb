@@ -16,7 +16,7 @@ class ErxLogSinkTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   ESCAPE = %w[build/gen/erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx/src/erx_text.erl].freeze
-  SOURCES = [*ESCAPE, 'erlang/apps/erx/src/erx_console_log.erl', 'otp/lib/kernel/src/erx_log_h.erl',
+  SOURCES = [*ESCAPE, 'erlang/apps/erx/src/erx_console_log.erl', 'erlang/apps/erx/src/erx_log_h.erl',
              'test/erlang/erx_log_sink_tests.erl'].freeze
   # Replaces stock's logger_simple_h with the tree's, makes it the only handler, logs one
   # event and waits for the handler's process to print it.

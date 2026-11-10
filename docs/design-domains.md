@@ -1500,7 +1500,7 @@ and drivers](#native-processes-and-drivers)).
   carrier for every node name at the machine's host, OTP's interface for
   an alternative carrier; the network service's carrier serves the names
   of other machines in an exposed domain. In ERTS the **connection agent**
-  is `erx_connections`, an application of the domain's `kernel` and the
+  is `erx_connections`, a process of the domain's `erx` application and the
   carrier's acceptor: it maps the two sides, records the label the system
   domain bound the domain's bell with, opens a port on the `erx_lane`
   linked-in driver for the connection, and hands the port to `net_kernel`
@@ -2050,8 +2050,8 @@ domain's init process, and before it reads its first frame it exports
 init with `send` and the domain's name with `spawn` to the system domain
 and to its spawner, both named in its boot information, so no frame
 either sends from the start is dropped as one to a name never exported. Init then runs the domain's boot
-script: a small release with `kernel` and `stdlib`, `kernel`'s
-`erx_connections` being the connection agent; the
+script: a small release with `kernel`, `stdlib`, `erx` and `erx_files`
+at the least, `erx`'s `erx_connections` being the connection agent; the
 code server, which loads the release's modules from the domain's slice and
 the modules that arrive through the domain's code facet
 ([design-live.md](design-live.md#the-code-store)); a `user` that writes with

@@ -13,7 +13,7 @@ require 'tmpdir'
 # its failure paths and the records it drops.
 class ErxConnectionsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = [File.join(ROOT, 'otp/lib/kernel/src/erx_connections.erl'),
+  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_connections.erl'),
              File.join(ROOT, 'test/erlang/erx_connections_tests.erl')].freeze
 
   def test_agent_cases_pass_under_eunit

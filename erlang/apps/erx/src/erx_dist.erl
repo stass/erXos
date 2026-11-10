@@ -30,8 +30,8 @@
 -export([boot/0, names_dropped/0, export/3, exports/1, owner/1, aliases/0,
          exports_refused/0]).
 
--include("net_address.hrl").
--include("dist.hrl").
+-include_lib("kernel/include/net_address.hrl").
+-include_lib("kernel/include/dist.hrl").
 
 %% The frames' flag set (docs/design-domains.md, "The funnel"): no atom cache, no fragments.
 -define(FLAGS, (?DFLAGS_MANDATORY bor ?DFLAG_PUBLISHED bor ?DFLAG_DIST_MONITOR bor
