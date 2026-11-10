@@ -19,12 +19,14 @@
 %%   select/1             every node name at this machine's host
 %%
 %% The owner of the system connection halts the domain when the connection ends, since
-%% the domain has no services without it and could tell no one.
+%% the domain has no services without it and could tell no one. The agent and net_kernel
+%% live as long as the runtime: in every domain, the end of either halts it, but for an
+%% ordered stop of net_kernel, which ends the agent quietly (erx_connections).
 -module(erx_dist).
 -moduledoc false.
 
 -export([listen/2, accept/1, accept_connection/5, setup/5, close/1, select/1,
-         address/1, system_lost/1]).
+         address/1, unavailable/2]).
 -export([boot/0, names_dropped/0, export/3, exports/1, owner/1, aliases/0,
          exports_refused/0]).
 
@@ -39,8 +41,12 @@
 %% The lane driver's port_control command that runs its input task once (erx_lane_drv.c).
 -define(CONTROL_KICK, 1).
 
-%% The domain's exit status when its system connection ends: EX_UNAVAILABLE of sysexits(3).
--define(SYSTEM_LOST_STATUS, 69).
+%% The runtime's exit status when its system connection, its agent or net_kernel ends:
+%% EX_UNAVAILABLE of sysexits(3).
+-define(UNAVAILABLE_STATUS, 69).
+
+%% The persistent term accept/1 writes once, at the start of the runtime's one agent.
+-define(AGENT_STARTED, {?MODULE, agent_started}).
 
 %% A connection as the acceptor hands it to net_kernel: its port and its peer.
 -type connection() :: #{port := port(), node := node(), id := pos_integer(),
@@ -111,8 +117,20 @@ address(Host) ->
 address(Id, Host) ->
     #net_address{address = Id, host = Host, protocol = erx, family = erx}.
 
+%% net_kernel calls accept/1 at each of its starts, and again to restart an agent that
+%% ended; only the first call of a runtime starts one. The agent lives as long as the runtime (docs/design-runtime.md, "Connections in ERTS"):
+%% a domain's domain pid keeps its pid for the domain's life, and the system domain's
+%% agent holds every open system side, so a second call halts the runtime instead. The
+%% persistent term, written once per runtime, is what tells the calls apart, so neither a
+%% restarted agent nor a restarted net_kernel ever starts a second agent.
 accept(System) ->
-    erx_connections:start(self(), System).
+    case persistent_term:get(?AGENT_STARTED, false) of
+        false ->
+            persistent_term:put(?AGENT_STARTED, true),
+            erx_connections:start(self(), System);
+        true ->
+            unavailable(connection_agent, ended)
+    end.
 
 close(_System) ->
     ok.
@@ -202,17 +220,18 @@ owner_loop(Kernel, DHandle, Connection) ->
 
 %% The owner's end, which closes the port it is linked to and takes the entry down.
 ended(#{system := true}, Reason) ->
-    system_lost(Reason);
+    unavailable(system_connection, Reason);
 ended(#{system := false}, Reason) ->
     exit({shutdown, Reason}).
 
-%% The system connection ended or never opened: the domain halts. The console line names
-%% an atom reason, the driver's or net_kernel's, and only the class of any other, so no
-%% term from elsewhere reaches it.
--spec system_lost(term()) -> no_return().
-system_lost(Reason) ->
-    erlang:display({erx_dist, system_connection, reason_class(Reason)}),
-    erlang:halt(?SYSTEM_LOST_STATUS).
+%% The system connection, the agent or net_kernel ended, or the system connection never
+%% opened: the runtime halts. The console line names which, with an atom reason, the
+%% driver's or net_kernel's, and only the class of any other, so no term from elsewhere
+%% reaches it.
+-spec unavailable(system_connection | connection_agent | net_kernel, term()) -> no_return().
+unavailable(What, Reason) ->
+    erlang:display({erx_dist, What, reason_class(Reason)}),
+    erlang:halt(?UNAVAILABLE_STATUS).
 
 reason_class(Reason) when is_atom(Reason) -> Reason;
 reason_class({Class, _}) when is_atom(Class) -> Class;

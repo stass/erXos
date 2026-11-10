@@ -2384,10 +2384,19 @@ it; git history is the record of completed work.
   labels at or above `ERX_LABEL_SPLIT` belong to the runtime's half of the event table, so
   the lane driver refuses such an open once the objects are built. Refuse the number in the
   plan with `ERX_ELIMIT`, as a link's label is (`dom_life.c`).
-* [Low] Runtime, `erx_connections.erl`: if the acceptor ends before it hands the system
-  connection over, net_kernel restarts it and the port is opened again mid-stream;
-  design-runtime.md ("Connections in ERTS") has the end of the agent, at any time, halt its
-  domain with status 69, since the domain pid keeps the agent's pid for the domain's life.
+* [Low] Runtime, `erx_dist.erl` (the system connection's owner): a domain's own ordered
+  end, `init:stop()`, shuts `net_kernel` down, which takes the system connection's owner
+  with it, and the owner halts the domain with status 69 rather than 0. Let the owner
+  follow an ordered stop of `net_kernel` quietly, as `erx_connections` does, or have the
+  domain's ordered end halt with its own status first.
+* [Medium] Runtime, `erx_connections.erl` (`kernel_ended/1`): the agent ends quietly on
+  any `shutdown` of `net_kernel`, which is safe only while `net_sup` and `kernel_sup` stay
+  `one_for_all` with intensity 0: a local `supervisor:terminate_child` of `net_sup` or
+  `net_kernel` with no restart leaves the runtime running with no agent, and in the
+  system domain no side reports reach the domain service. Make it hold by construction:
+  quiet only when the runtime's ordered end is under way (a mark written on that path),
+  halt otherwise. Also tighten `{system_side_ended, Id}`, which any local process can send
+  to the service: carry the side's monitor reference, or check the sender is the agent.
 * [Low] Lane driver, `-erx lane_batch`: the allowance is
   `ERX_LANE_BATCH_DEFAULT` (64); `erl_init.c` does not parse the flag yet.
 * [Medium] Lane driver review residuals, `otp/erts/emulator/sys/erxos/erx_lane_drv.c`

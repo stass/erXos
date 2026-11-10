@@ -1057,7 +1057,16 @@ domain pid keeps the agent's pid for the domain's life, so a domain
 whose agent ended could take no connection-control record again, and
 the domain's connections end with `net_kernel`; in the system domain
 every system side ends with them, and no domain could learn of it,
-since a lane has no close.
+since a lane has no close. The one exception is `net_kernel` ending
+with `shutdown`, which only its supervisor gives it: in the runtime's
+own ordered end, or after a sibling's crash in `net_sup` or
+`kernel_sup`. Both supervisors are `one_for_all` with intensity 0, so
+after a crash `kernel_sup` gives up and the runtime ends as well. The
+agent then ends quietly, so an ordered end ends as it was told, and a
+later start of `net_kernel` halts at its first accept, since the
+carrier starts one agent per runtime. This rests on that supervision
+tree: only a local `supervisor:terminate_child` with no restart would
+leave a runtime running without its agent.
 Neither can be ended or steered from another domain, whoever hands its
 pid out. Edit 8 gives a peer only `send` on a pid it encodes, so no peer
 can link to either or send it an exit, and edit 16 wraps every message
@@ -3517,7 +3526,9 @@ own domain, so a runtime that lies harms only itself.
   `net_kernel` runs on; seeded failure: an edit 16 that delivers raw,
   under which the spawn runs. A domain whose
   agent is killed halts with status 69; seeded failure: an agent that
-  `net_kernel` restarts, under which the domain runs on and a later
+  `net_kernel` restarts without opening the system connection again (one
+  that opens it again fails that open and halts with status 69 for the
+  system connection), under which the domain runs on and a later
   introduction never comes up, its `connection_up` sent to the dead
   agent's pid.
 * **The export table.** A source check lists the callers of its insert

@@ -168,8 +168,8 @@ service_end_shuts_down(End) ->
 %% its system side opened before its first thread, a create, a stop, a kill,
 %% {domain_down, Id, Info} at the domain pid's monitors, the side closed before
 %% the connection's objects go, a configured domain's restarts within its
-%% intensity and a side the agent refuses; last, the service's own end, which
-%% ends every domain pid.
+%% intensity, a side the agent refuses and a side the agent reports ended;
+%% last, the service's own end, which ends every domain pid.
 service_test_() ->
     {setup,
      fun() ->
@@ -183,7 +183,7 @@ service_test_() ->
              exit(Log, kill)
      end,
      fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0,
-                          fun refused_side/0, fun service_end_ends_domain_pids/0]} end}.
+                          fun refused_side/0, fun side_ended/0, fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
     erx_domain_fake_lib:next_call().
@@ -273,18 +273,42 @@ refused_side() ->
     ?assertEqual({disconnect, 120}, next_call()),
     ?assertEqual({retire, 12}, next_call()).
 
+side_ended() ->
+    %% The agent's report that a domain's side ended stops that domain and no
+    %% other; a report for an ended or unknown domain stops nothing.
+    {ok, _} = erx_domain:create(#{name => <<"lost">>, memory => 4096}),
+    ?assertMatch({create, #{id := 13}}, next_call()),
+    ?assertEqual({open_side, 13, 'lost@erxos', 130}, next_call()),
+    ?assertEqual({start, 13}, next_call()),
+    erx_domain_srv ! {system_side_ended, 13},
+    ?assertEqual({stop, 13}, next_call()),
+    ?assertEqual({close_side, 13, {domain_down, 13, stopped}}, next_call()),
+    ?assertEqual({disconnect, 130}, next_call()),
+    ?assertEqual({retire, 13}, next_call()),
+    erx_domain_srv ! {system_side_ended, 13},
+    erx_domain_srv ! {system_side_ended, 12},
+    erx_domain_srv ! {system_side_ended, 99},
+    %% Domain 11 still runs, and the next call the library sees is the next create's.
+    ?assertMatch(#{11 := #{state := running}},
+                 maps:from_list([{I, D} || #{id := I} = D <- erx_domain_core:domains(
+                                                               maps:get(core, sys:get_state(erx_domain_srv)))])),
+    {ok, _} = erx_domain:create(#{name => <<"next">>, memory => 4096}),
+    ?assertMatch({create, #{id := 14}}, next_call()),
+    ?assertEqual({open_side, 14, 'next@erxos', 140}, next_call()),
+    ?assertEqual({start, 14}, next_call()).
+
 service_end_ends_domain_pids() ->
     %% The service's end ends every domain pid with its reason: no domain
     %% outlives the system domain, so the pid has nothing left to stop.
     {ok, Domain} = erx_domain:create(#{name => <<"last">>, memory => 4096}),
-    ?assertMatch({create, #{id := 13}}, next_call()),
-    ?assertEqual({open_side, 13, 'last@erxos', 130}, next_call()),
-    ?assertEqual({start, 13}, next_call()),
+    ?assertMatch({create, #{id := 15}}, next_call()),
+    ?assertEqual({open_side, 15, 'last@erxos', 150}, next_call()),
+    ?assertEqual({start, 15}, next_call()),
     Pid = erx_domain:pid(Domain),
     Ref = monitor(process, Pid),
     %% An exit message forged in the service's name while it lives ends nothing.
     Service = whereis(erx_domain_srv),
-    Pid ! {'EXIT', Service, {domain_down, 13, {halt, 0}}},
+    Pid ! {'EXIT', Service, {domain_down, 15, {halt, 0}}},
     ?assertEqual(timeout, receive {'DOWN', Ref, process, _, Forged} -> Forged after 200 -> timeout end),
     exit(Service, kill),
     ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).

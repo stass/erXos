@@ -8,7 +8,8 @@ domain", "System services"): the domain library's one registrant, which
 creates the manifest's configured domains in boot order at its first start
 and every requested domain after, keeps a domain pid for each, has the
 system domain's connection agent (erx_connections) open the system side of
-each domain's system connection before its first thread runs, and on each
+each domain's system connection before its first thread runs, stops a domain
+whose side the agent reports ended, and on each
 {domain_ended, Id, End, Record} has the agent close that side, disconnects
 the connection, ends its domain pid with {domain_down, Id, Info}, retires it
 and restarts a configured domain within its restart intensity.
@@ -51,7 +52,7 @@ init(Opts) ->
     Lib = library(maps:get(lib, Opts, erx_domain_lib)),
     Agent = maps:get(agent, Opts, erx_connections),
     %% Whether the runtime is a node, as kernel's start left it, since net_kernel starts
-    %% before any application; its end later leaves the sides it served open (close_side/4).
+    %% before any application and lives as long as the runtime (close_side/4).
     {ok, #{lib => Lib, agent => Agent, node => erlang:is_alive(), core => undefined, configured => #{}},
      {continue, boot}}.
 
@@ -93,6 +94,20 @@ handle_info({stop_request, Ref, Id}, #{core := Core} = State) ->
     case erx_domain_core:fetch(Id, Core) of
         {ok, #{ref := Ref, state := Life}} when Life =:= built; Life =:= running -> stop(Id, State);
         _ -> ok
+    end,
+    {noreply, State};
+handle_info({system_side_ended, Id}, #{core := Core} = State) ->
+    %% The agent's report that a side it opened for this service ended before the service
+    %% closed it: this runtime ended the connection, for a malformed frame, a peer bound
+    %% passed or its owner's end, so the domain goes (docs/design-system.md, "A lost
+    %% system connection ends the domain"). Ids are never reused, so a late report for an
+    %% ended domain finds it ended or retired.
+    case erx_domain_core:fetch(Id, Core) of
+        {ok, #{state := Life}} when Life =:= built; Life =:= running ->
+            logger:notice("erx_domain: domain ~b's system side ended; stopping the domain", [Id]),
+            stop(Id, State);
+        _ ->
+            ok
     end,
     {noreply, State};
 handle_info({'EXIT', Pid, _Reason}, #{core := Core} = State) when Core =/= undefined ->
@@ -245,9 +260,10 @@ slogan(_Lib, _Id, _End) ->
     none.
 
 %% A domain with no system connection has no side, and a runtime that was no node at the
-%% service's start, where no agent runs, opened none. In a node, the agent's end leaves its
-%% ports to their owners, so the service ends, and the system domain with it, rather than
-%% destroy objects a live port may map.
+%% service's start, where no agent runs, opened none. In a node, the agent ends only as the
+%% runtime ends: it halts it, or follows net_kernel's shutdown in an ordered end or once
+%% kernel_sup gives up (erx_connections:kernel_ended/1), so noproc there finds that end
+%% under way; the service ends rather than destroy objects a live port may map.
 close_side(_Id, 0, _Reason, _State) ->
     ok;
 close_side(Id, _Connection, Reason, #{agent := Agent, node := Node}) ->

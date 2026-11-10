@@ -18,11 +18,15 @@ module Erx
   #
   # Its one cell, service_kill, at each CPU count: once both configured domains run, the
   # shell prints what the system node is and what each domain answers over its system
-  # connection (docs/design-runtime.md, "Connections in ERTS"), then kills the domain
-  # service. The system domain is system@<host> with creation 4, alive since kernel
-  # started net_kernel, before the domain service; each domain's node() is its name at the
-  # host and its creation its id, as erpc:call from the system shell, which needs the
-  # system side to carry frames both ways, answers. The service is the system release's
+  # connection (docs/design-runtime.md, "Connections in ERTS"), ends each domain from its
+  # connection, and then kills the domain service. The system domain is system@<host> with
+  # creation 4, alive since kernel started net_kernel, before the domain service; each
+  # domain's node() is its name at the host and its creation its id, as erpc:call from the
+  # system shell, which needs the system side to carry frames both ways, answers. Killing
+  # the owner of peer's system side in the system domain stops peer and only peer
+  # (docs/design-system.md, "A lost system connection ends the domain"); killing erts's
+  # own agent, its erx_connections, halts erts with status 69; and the system domain runs
+  # on to the service's kill. The service is the system release's
   # significant child, so its end shuts its supervisor down and ends the permanent
   # application, and init ends the runtime with its slogan on the console, which is the
   # report of the failure table's row; the root's stop then ends the machine. The machine
@@ -80,11 +84,30 @@ module Erx
     # alive before the domain service started follows from the configured domains running:
     # the service opened their sides at its start, which a runtime that is no node cannot.
     SERVICE_KILL_SYSTEM = 'node(),erlang:system_info(creation),lists:sort(nodes())'
-    # Prints the answer, then kills the service. The line starts with a binding, so the
-    # shell's echo of it does not start {service_kill, and only the printed answer
-    # matches SERVICE_KILL_START.
-    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},SdL=SdWait(600)," \
+    # SdDeaths: each ended domain's id and info, from the system principal's deaths, which
+    # the domain service keeps after it retires the domain. SdUntil: polls SdDeaths every
+    # 100 ms at most K times until N domains ended, and answers the last SdDeaths.
+    SERVICE_KILL_DEATHS = 'SdDeaths=fun()->lists:sort([{SdI,SdF}||#{id:=SdI,info:=SdF}<-erx_domain_core:deaths(1,' \
+                          'maps:get(core,sys:get_state(erx_domain_srv)))]) end,' \
+                          'SdUntil=fun SdU(_,0)->SdDeaths();SdU(SdN,SdK)->case SdDeaths() of SdDs when length(SdDs)>=SdN->SdDs;' \
+                          '_->timer:sleep(100),SdU(SdN,SdK-1) end end'
+    # Kills the owner of peer's system side, the process its lane port is connected to, the
+    # port found by its open command, whose last word is the domain's node
+    # (erx_connections:open/3); then, once peer has ended, has erts kill its own agent,
+    # its pid asked of erts first, since the system domain may only send to it. SdE1 and
+    # SdE2 are the deaths after each, SdL1 the domains still alive after the first.
+    SERVICE_KILL_ENDS = 'SdOwner=hd([SdC||SdP<-erlang:ports(),{name,SdNm}<-[erlang:port_info(SdP,name)],' \
+                        'lists:suffix(" peer@erxos",SdNm),{connected,SdC}<-[erlang:port_info(SdP,connected)]]),' \
+                        'exit(SdOwner,kill),SdE1=SdUntil(1,600),SdL1=SdLives(),' \
+                        'SdAgent=erpc:call(erts@erxos,erlang,whereis,[erx_connections],10000),' \
+                        'erpc:cast(erts@erxos,erlang,exit,[SdAgent,kill]),SdE2=SdUntil(2,600)'
+    # Prints the answer, ends the two domains, prints how they ended, then kills the
+    # service. The line starts with a binding, so the shell's echo of it starts neither
+    # {service_kill nor {domain_ends, and only the printed answers match.
+    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
+                              'SdL=SdWait(600),' \
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL)}])," \
+                              "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdE2}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
       lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,running}" }.join(',')
@@ -93,6 +116,13 @@ module Erx
       "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}]}".freeze
     end
     SERVICE_KILL_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{service_kill,/n
+    # peer stopped by its side's end while erts runs, then erts halted with status 69.
+    DOMAIN_ENDS_ANSWER = begin
+      erts = DOMAINS.fetch('erts')
+      peer = DOMAINS.fetch('peer')
+      "{domain_ends,[{#{peer},stopped}],[{#{erts},erts@erxos,running}],[{#{erts},{halt,69}},{#{peer},stopped}]}".freeze
+    end
+    DOMAIN_ENDS_START = /\A\{domain_ends,/n
     # init's slogan as it halts the runtime once the permanent application erx_domain has
     # ended, shut down by its supervisor; it may follow an unended prompt. The application
     # controller's reason is a string, which init prints with its quotes:
@@ -111,10 +141,13 @@ module Erx
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       answer = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
+      ends = /\A#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: "#{SERVICE_KILL_EXPRESSION}\r").freeze,
        { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
+       { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,
+         verify: ->(text) { raise Error, "the domains ended as #{text.inspect}" unless ends.match?(text) } }.freeze,
        { name: 'system-domain-ended', pattern: SLOGAN_PATTERN, seconds: 60,
          verify: ->(text) { raise Error, "the runtime ended with #{text.inspect}" unless SLOGAN.match?(text) } }.freeze].freeze
     end

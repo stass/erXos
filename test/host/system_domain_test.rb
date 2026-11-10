@@ -32,15 +32,17 @@ class SystemDomainTest < Minitest::Test
   end
 
   # The kill follows the Erlang shell; the answer must name both configured domains
-  # running, the system node, and each domain's own answers over its system connection,
-  # and the runtime must end with the slogan of erx_domain's end, not another.
+  # running, the system node, and each domain's own answers over its system connection;
+  # the ends must be peer's stop alone, then erts's halt with status 69; and the runtime
+  # must end with the slogan of erx_domain's end, not another.
   def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
-    assert_equal %w[image-identity release-shell erlang-shell domain-running system-domain-ended], points.map { |point| point.fetch(:name) }
+    assert_equal %w[image-identity release-shell erlang-shell domain-running domain-ends system-domain-ended],
+                 points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
-    running, ended = points.last(2)
+    running, ends, ended = points.last(3)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     good = '{service_kill,[{5,erts@erxos,running},{6,peer@erxos,running}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}]}'
@@ -49,6 +51,14 @@ class SystemDomainTest < Minitest::Test
      good.sub('{6,peer@erxos,6}', '{6,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
      good.sub('{6,peer@erxos,running}', '{6,peer@erxos,built}')].each do |line|
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
+    end
+    refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,running}],[{5,{halt,69}},{6,stopped}]}'
+    ends.fetch(:verify).call("#{good_ends}\r\n")
+    # erts stopped with peer, or ended otherwise than by the halt, or not at all.
+    [good_ends.sub('[{5,erts@erxos,running}]', '[]'), good_ends.sub('{halt,69}', 'stopped'),
+     good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{6,stopped}]')].each do |line|
+      assert_raises(Erx::Error) { ends.fetch(:verify).call("#{line}\r\n") }
     end
     # The line as a boot printed it, after the shell's prompt.
     ended.fetch(:verify).call("2> Kernel pid terminated (application_controller) (\"{application_terminated,erx_domain,shutdown}\")\r\r\n")

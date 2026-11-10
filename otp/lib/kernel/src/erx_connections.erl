@@ -7,7 +7,9 @@
 %% net_kernel as an accepted connection; erx_dist's owner then brings the system domain's
 %% entry up. The system domain has no system connection, so its agent opens nothing at
 %% start: it opens the system domain's side of each domain's system connection when the
-%% domain service asks, and closes it at the domain's end.
+%% domain service asks, closes it at the domain's end, and tells the service when a side
+%% ends by itself. The agent and net_kernel live as long as the runtime: the agent halts
+%% it on net_kernel's end other than an ordered stop, and erx_dist:accept/1 on the agent's.
 -module(erx_connections).
 -moduledoc false.
 
@@ -28,9 +30,10 @@ start(Kernel, System) ->
 
 %% In the system domain: opens the system side of domain Id's system connection and hands
 %% it to net_kernel as an accepted connection to the domain's node, before the domain's
-%% first thread runs. {error, noproc} where no agent runs, the runtime being no node; the
-%% lane driver's or net_kernel's refusal otherwise, and badarg for a domain whose side is
-%% open already.
+%% first thread runs. The caller is sent {system_side_ended, Id} if the side ends before
+%% close_side/2 closes it. {error, noproc} where no agent runs, the runtime being no node;
+%% the lane driver's or net_kernel's refusal otherwise, and badarg for a domain whose side
+%% is open already.
 -spec open_side(pos_integer(), side_values()) -> {ok, port()} | {error, term()}.
 open_side(Id, Values) ->
     call({open_side, Id, Values}).
@@ -51,11 +54,13 @@ call(Request) ->
     end.
 
 init(Kernel, System) ->
+    process_flag(trap_exit, true),
     true = register(?MODULE, self()),
     serve(Kernel, System).
 
 %% Any process handed this pid can reach it; what arrives from another domain comes as
-%% {erx_origin, D, Msg} (edit 16), which neither loop acts on, so no peer steers it.
+%% {erx_origin, D, Msg} (edit 16), which neither loop acts on, so no peer steers it. Both
+%% loops act on net_kernel's end, which the agent's link brings as 'EXIT' (kernel_ended/1).
 serve(Kernel, none) ->
     sides(Kernel, #{});
 serve(Kernel, {PeerId, PeerNode, _DomainPid}) ->
@@ -63,27 +68,40 @@ serve(Kernel, {PeerId, PeerNode, _DomainPid}) ->
         Port = open_port({spawn_driver, "erx_lane system"}, [binary]),
         case hand_over(Kernel, #{port => Port, node => PeerNode, id => PeerId, system => true}) of
             ok -> ok;
-            {error, Refusal} -> erx_dist:system_lost(Refusal)
+            {error, Refusal} -> erx_dist:unavailable(system_connection, Refusal)
         end
     catch
-        Class:Reason -> erx_dist:system_lost({Class, Reason})
+        %% net_kernel's shutdown during the hand-over (kernel_ended/1) ends the agent
+        %% quietly, as it does after the hand-over.
+        exit:shutdown -> exit(shutdown);
+        Class:Reason -> erx_dist:unavailable(system_connection, {Class, Reason})
     end,
-    drop().
+    drop(Kernel).
 
-%% The system domain's agent: the domain service's two calls, with the open sides by domain
-%% id. A side whose port ended by itself stays here until its domain's end closes it.
+%% The system domain's agent: the domain service's two calls, with each open side by domain
+%% id as {Port, Monitor, Service}: its port, the monitor on it and the process that opened
+%% it, the domain service.
+%% A side's port ends with its owner (erx_dist), each linked to the other, so its monitor
+%% fires on every end of either: the agent then tells the service, which stops the domain
+%% (docs/design-system.md, "A lost system connection ends the domain"). A side the
+%% service closes is no longer monitored, so its ordered end tells no one.
 sides(Kernel, Sides) ->
     receive
-        {'$gen_call', From, {open_side, Id, Values}} when not is_map_key(Id, Sides) ->
+        {'$gen_call', {Service, _} = From, {open_side, Id, Values}} when not is_map_key(Id, Sides) ->
             Opened = open(Kernel, Id, Values),
+            Next = case Opened of
+                       {ok, Port} ->
+                           Monitor = erlang:monitor(port, Port, [{tag, {side_ended, Id}}]),
+                           Sides#{Id => {Port, Monitor, Service}};
+                       {error, _} ->
+                           Sides
+                   end,
             gen:reply(From, Opened),
-            case Opened of
-                {ok, Port} -> sides(Kernel, Sides#{Id => Port});
-                {error, _} -> sides(Kernel, Sides)
-            end;
+            sides(Kernel, Next);
         {'$gen_call', From, {close_side, Id, Reason}} ->
             case maps:take(Id, Sides) of
-                {Port, Rest} ->
+                {{Port, Monitor, _Service}, Rest} ->
+                    erlang:demonitor(Monitor, [flush]),
                     close(Port, Reason),
                     gen:reply(From, ok),
                     sides(Kernel, Rest);
@@ -94,6 +112,16 @@ sides(Kernel, Sides) ->
         {'$gen_call', From, _Request} ->
             gen:reply(From, {error, badarg}),
             sides(Kernel, Sides);
+        {{side_ended, Id}, Monitor, port, Port, _Reason} ->
+            case maps:take(Id, Sides) of
+                {{Port, Monitor, Service}, Rest} ->
+                    Service ! {system_side_ended, Id},
+                    sides(Kernel, Rest);
+                _ ->
+                    sides(Kernel, Sides)
+            end;
+        {'EXIT', Kernel, Reason} ->
+            kernel_ended(Reason);
         _ ->
             sides(Kernel, Sides)
     end.
@@ -120,7 +148,7 @@ open(_Kernel, _Id, _Values) ->
     {error, badarg}.
 
 %% The port is linked to the agent until hand_over gives it to its owner, so a refused one
-%% is unlinked first, or its end would end the agent.
+%% is unlinked first, or its end would leave an 'EXIT' in the agent's queue.
 accepted(Kernel, Port, Connection) ->
     try hand_over(Kernel, Connection) of
         ok ->
@@ -147,7 +175,8 @@ close(Port, Reason) ->
     receive {'DOWN', Ref, port, Port, _} -> ok end.
 
 %% net_kernel's accept protocol, as inet_tcp_dist's acceptor follows it: net_kernel names
-%% the connection's owner, which then owns the port and is told so.
+%% the connection's owner, which then owns the port and is told so. net_kernel's end
+%% while the agent waits is acted on here, as in the agent's loops.
 hand_over(Kernel, #{port := Port} = Connection) ->
     Kernel ! {accept, self(), Connection, erx, erx},
     receive
@@ -157,9 +186,26 @@ hand_over(Kernel, #{port := Port} = Connection) ->
             Owner ! {self(), controller},
             ok;
         {Kernel, unsupported_protocol} ->
-            {error, unsupported_protocol}
+            {error, unsupported_protocol};
+        {'EXIT', Kernel, Reason} ->
+            kernel_ended(Reason)
     end.
 
-%% A domain's agent acts on nothing else; what arrives is dropped, so its queue stays empty.
-drop() ->
-    receive _ -> drop() end.
+%% A domain's agent acts on nothing but net_kernel's end; what else arrives is dropped, so
+%% its queue stays empty.
+drop(Kernel) ->
+    receive
+        {'EXIT', Kernel, Reason} -> kernel_ended(Reason);
+        _ -> drop(Kernel)
+    end.
+
+%% net_kernel's end. net_kernel traps exits, so only its supervisor ends it with shutdown:
+%% in the runtime's ordered end, or after a sibling's crash in net_sup or kernel_sup. Both
+%% are one_for_all with intensity 0 (erl_distribution.erl, kernel.erl), so after a crash
+%% kernel_sup gives up and the runtime ends too, and a restart of net_kernel halts at its
+%% first erx_dist:accept/1. The agent follows a shutdown quietly, so an ordered end ends as
+%% it was told; this rests on that supervision tree, and only a local terminate_child with
+%% no restart would leave the runtime running without its agent. Any other end halts the
+%% runtime.
+kernel_ended(shutdown) -> exit(shutdown);
+kernel_ended(Reason) -> erx_dist:unavailable(net_kernel, Reason).
