@@ -984,10 +984,9 @@ reset: one open record from that lane, in a buffer
 that grows as its bytes arrive, up to the system domain's `max_frame`, the
 largest request a grant may name; its queue to the domain, up to the
 system manifest's `system_queue`, past which a message is dropped and any
-other signal ends the connection, which ends the domain; the
-connection-control records behind a long frame, one per connection the
-domain's quota allows; what it holds because of the domain's processes, up
-to its own `peer_held`, which is small; and the facet processes it holds
+other signal ends the connection, which ends the domain; what it holds
+because of the domain's processes, up to its own `peer_held`, which is
+small; and the facet processes it holds
 for the domain, each with `max_heap_size` set and off-heap binaries
 counted. The domain service admits a domain only when the system domain's
 budget holds that sum for every admitted domain
@@ -2442,9 +2441,10 @@ user:
   is also its domain's correspondent: the boot information names it,
   init reports ready to it, and it alone relays the connection protocol
   between the domain service and the domain's connection agent, so no
-  export is written for the protocol alone, and the system domain's
-  writer gives its messages alone the reserve of the domain's lane
-  ([design-domains.md](design-domains.md#domains)).
+  export is written for the protocol alone, and it alone writes the
+  domain's control table, a slot per connection outside every ring, so
+  the protocol's records never wait behind other frames
+  ([design-domains.md](design-domains.md#connections)).
 * **A deletion closes first.** Deleting an object invalidates its
   existence lock before it empties its slots, in bounded parts, so the
   object is unreachable from the first part, where Fiasco empties every

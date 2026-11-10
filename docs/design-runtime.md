@@ -524,8 +524,11 @@ typedef struct erx_boot_info {
 		uint32_t	out_size;		/* data area of the lane it
 							 * writes */
 		uint32_t	in_size;		/* data area of the lane it
-							 * reads, the reserve
-							 * included */
+							 * reads */
+		uint32_t	ctl_slots;		/* slots of its control
+							 * table, after that data
+							 * area: its connections
+							 * quota */
 		uint32_t	domain_pid_number, domain_pid_serial;
 							/* its domain pid, a process
 							 * of the system domain's
@@ -1003,9 +1006,49 @@ domain's end finishes it and closes it with the reason the domain
 service gives (**Closing**, below); it serves these two requests as calls
 from the domain service and takes no record from a lane, since the
 system domain is a party of no connection but the system connections.
-The side's writer gives the reserve of the domain's lane from the system
-domain to the messages whose sender is that domain pid, and to no other
-frame ([design-domains.md](design-domains.md#connections)).
+The agent's answer to the open call names the port, which the domain
+service hands to the domain pid.
+
+**Control records.** The system domain's side of each domain's system
+connection ends in the domain's control table
+([design-domains.md](design-domains.md#connections)), and the port the
+agent opens on that side is the only port that writes one. The domain pid
+writes each connection-control record with the lane driver's control
+command 3, `erlang:port_control(Port, 3, [<<Slot:32>>, Ctl, Payload])`,
+`Ctl` being `term_to_binary({22, self(), Agent})`, the `SEND_SENDER`
+control term from the domain pid to the domain's connection agent, and
+`Payload` being `term_to_binary(Record)`. These are the bytes the entry's
+encoder would write for the same send: `term_to_binary/1` and the
+distribution encoder are the same `enc_term` (`beam/external.c`), the
+fixed flags use no atom cache and no distribution header, so each term is
+the version byte and the term, and what a record holds, tuples, small
+UTF-8 atoms, small integers and `NEW_PID_EXT` pids, is encoded alike under
+both, as the funnel's grammar admits. `term_to_binary/1` writes no
+export, as edit 8 does when the entry's encoder encodes an own pid, and
+none is needed: a record's payload names no process, and its control
+term names the domain pid, which exports itself to the domain before the
+domain starts, and the agent, which init's ready report exported to the
+system domain. The driver accepts the command only from the domain pid
+it was opened with, `driver_caller` naming the process of the call; it
+finds the end of the control term with the reader it uses
+for ERTS's own frames, checks the slot against the table's slots and the
+frame against `ERX_LANE_CTL_SLOT`, writes the frame header and the frame
+and then `len` into the slot through `erx_lane_ctl_put`, the table's one
+writer, beside the lane's in `erx_lane.c`, stores the slot's `seq` plus
+one from its own copy with release order, rings the domain's bell, and
+returns once the record is published. The call runs under the port's
+lock, as `outputv` does, so the table has one writer at a time, and it
+touches neither the ring nor the entry's queue: a full ring, a paused
+port, a busy entry and `system_queue` (edit 10) never apply to a record,
+which is why the port may pause its output for ordinary frames.
+
+The driver refuses the command from any process but that domain pid, on
+any port that has no table to write, for a slot past the table's last,
+for a control term that does not end within `ERX_CTL_MAX` bytes and for
+a frame longer than `ERX_LANE_CTL_SLOT`. Each refusal writes nothing and
+raises `badarg` in the caller, which no correct caller meets; a domain
+pid that meets one does not catch it and dies, so the domain service
+stops the domain ([design-domains.md](design-domains.md#domains)).
 
 **The agent and `net_kernel` live as long as their domain.** The agent
 is linked to `net_kernel`, as every carrier's acceptor is, and in every
@@ -1052,7 +1095,9 @@ publishes the position it waits for, leaves the rest at the head of the
 entry's queue and pauses the port's output; the peer, once its read
 position crosses that position, rings this domain's bell, and the lane port's input task, which that bell schedules, resumes the
 output. Frames for a full
-lane therefore wait in the entry's queue, in this domain's memory. The
+lane therefore wait in the entry's queue, in this domain's memory.
+Connection-control records never enter that queue (**Control records**,
+above), so neither the pause nor edit 10 ever applies to them. The
 entry is **busy** once that queue passes ERTS's busy limit, 1 MiB
 (`ERTS_DE_BUSY_LIMIT`), and ERTS suspends a process that sends on a busy
 entry, as it suspends senders to any busy distribution connection;
@@ -1131,6 +1176,27 @@ receiver's `max_heap_size`, which is what the process sees, and a
 process about to wait in `receive` at its quota first decodes what is
 queued on it, so no wait sits behind a pause of its own making.
 
+**The control table.** On the system connection each run of the input
+task first takes the control table, outside its allowance, since the
+table holds at most `ctl_slots` records: for each control slot whose
+`seq`, acquire-loaded, differs from the copy the task keeps,
+`erx_lane_ctl_take`, the table's one
+reader, copies `len` and `zero` once, checks that `len` lies from 8 to
+`ERX_LANE_CTL_SLOT` and `zero` is zero, and copies the frame once into a
+buffer of one slot's size, apart from the buffer of the ring's open
+record, so a long record half read holds no record back. It then
+runs the funnel on the copy and hands it to `erts_net_message` as it does
+a ring's frame, and the task keeps the `seq` it took. A `len` or `zero`
+out of range is malformed, which ends the system connection and so halts
+the domain, as a malformed record of its ring does; a frame whose target
+is at its queue quota stays in its slot, its `seq` not kept, until the
+count falls; a `seq` that moved by more than one since the copy is
+counted as a rewritten slot, and every record taken is counted, both
+among the counts that control command 0 returns. The record's bell rings
+after its `seq` is stored, and the run that bell schedules loads `seq`
+after it, so no record waits for a later bell. A domain's lane ports for
+its other connections have no table.
+
 **Authority.** The funnel's verdict for an operation that needs a right
 the peer does not hold on the target is **unheld**. The driver then does
 what stock ERTS does for the same operation on a process that does not
@@ -1190,9 +1256,10 @@ when a signal does not fit the connection's `peer_held`, when a process
 of the domain calls `erlang:disconnect_node/1` on the peer, or when the
 system domain says the connection is down. When the system domain says
 so, in `connection_down`, the agent first has the port **finish**: the
-lane driver's control command 2, beside 0 for the counts and 1 for one
-run of the input task, reads the lane's write position once and has the
-input task take every whole record before it, through the funnel as
+lane driver's control command 2, beside 0 for the counts, 1 for one
+run of the input task and 3 for a control record (**Control records**,
+above), reads the lane's write position once and has the input task
+take every whole record before it, through the funnel as
 always, waiting on nothing the peer would have to do. A dead peer's
 position is final, so the frames it published before it ended are
 delivered, and a live peer's frames after that position are lost with the
@@ -1702,9 +1769,7 @@ it is a bound the runtime enforces:
   `max_frame`, the largest `max_request` a grant may name ([Connections
   in ERTS](#connections-in-erts));
 * its **queue** to the domain, up to the manifest's `system_queue`, past
-  which a message is dropped and any other signal ends the connection (edit 10),
-  and the connection-control records held behind a long frame, one per
-  connection the domain's quota allows;
+  which a message is dropped and any other signal ends the connection (edit 10);
 * what it holds because of the domain's processes, their links and
   monitors with system processes and the signals queued for them, up to
   its own **`peer_held`** (edit 11);

@@ -499,6 +499,9 @@ domain library's records, keyed by the same id:
 	spec       :: erx_domain:spec(),     % release, runtime image, memory, grant, lanes,
 	                                     % crash area, facets, env, as create/1 received it
 	peers      :: #{erx_connection:number() => erx_domain:id()}, % its connections
+	slots      :: #{erx_connection:number() => non_neg_integer()}, % each one's control
+	                                     % slot, held until the domain has answered
+	                                     % every record written into it
 	devices    :: [erx_device:index()],  % devices the device service gave it
 	ended      :: undefined | {erx_domain:end_(), integer()}  % the end and when
 }).
@@ -987,11 +990,10 @@ typedef struct erx_dom_spec {
 	erx_grant_t	grant;		/* the domain group's grant */
 	erx_grant_t	spaces;		/* ERX_DOM_SPACES: the sub-space group's grant, within `grant` */
 	erx_runtime_limits_t runtime_limits; /* complete per-domain startup values */
-	uint32_t	lane;		/* data area of the lane the domain reads;
-					 * the system domain's side adds the
-					 * reserve for connection-control records */
+	uint32_t	lane;		/* data area of the lane the domain reads */
 	uint32_t	connections;	/* the domain's connections quota, which
-					 * sizes that reserve */
+					 * also gives the control table on the
+					 * system domain's side its slots */
 	uint32_t	system_lane;	/* data area of the lane the system domain
 					 * reads; both lanes of the system
 					 * connection are charged to the domain's
@@ -1132,9 +1134,11 @@ baseline remains the manifest's; runtime changes do not edit it.
       of it charged to one child budget that the library carves from the
       domain's outer budget for that connection, since the system domain
       charges nothing of a domain's to its own: the system domain's side,
-      the ring the domain reads with its `lane` bytes and the **reserve**,
-      room for one connection-control record for each connection the
-      domain's `connections` quota allows; the domain's side, the ring the
+      the ring the domain reads with its `lane` bytes and, after it, the
+      **control table**, one control slot for each connection the
+      domain's `connections` quota allows, in which the system domain
+      writes the domain's connection-control records
+      ([design-domains.md](design-domains.md#connections)); the domain's side, the ring the
       system domain reads, with `system_lane` bytes; and a bell for each
       party, a software IRQ object, which the library binds itself, since
       `BIND` on an object conveys where its deliveries go and each group
@@ -1270,9 +1274,10 @@ and the system domain keeps the delete right to every object of the
 connection and to its child budgets. A connection carries no IPC gate: no
 flow of the design passes a capability between two domains. Each domain
 learns of its new connection, with the values of its share, in
-`connection_up` from the domain service, through its domain pid, on its
-lane from the system domain, once its init has reported ready, which its
-connection agent takes from that lane alone, maps, and answers with `connection_mapped`
+`connection_up` from the domain service, through its domain pid, in its
+control table on its connection to the system domain, once its init has
+reported ready, which its connection agent takes from that connection
+alone, maps, and answers with `connection_mapped`
 ([design-domains.md](design-domains.md#introduction-and-connection-down)).
 The domain service records the connection under both domains.
 
@@ -1280,9 +1285,9 @@ A connection ends when either domain ends, when either runtime ends it and
 tells its domain pid `connection_lost`, or when policy withdraws the
 introduction: each party still running that did not end the connection
 itself is told `connection_down` by the domain service, through its
-domain pid, over its lane from the system domain, into the reserve that
-lane keeps for it, so the record
-is never dropped and never waits behind other frames. Each party takes
+domain pid, into the connection's slot of the party's control table,
+which no ordinary frame can fill, so the record never waits for room or
+behind other frames. Each party takes
 what the lane it reads holds up to that point, fires its links and
 monitors with the reason, unmaps, and answers `connection_unmapped`,
 which its domain pid passes to the domain service
@@ -1913,7 +1918,7 @@ its own budget at its spec's `memory`, and its outer
 budget at its spec's `outer`, which the policy sizes from the
 domain's admission: a child budget for its connection to the system
 domain, holding both of that connection's lanes, the one it reads at its
-lane size with the reserve and the one the system domain reads at
+lane size with the control table and the one the system domain reads at
 `system_lane`, with both bells; a child budget for each connection its
 `connections` quota allows, holding the lane it reads at its lane size
 and its bell; each child's own records; and its crash area
@@ -1967,7 +1972,8 @@ system domain ([design-domains.md](design-domains.md#flow-control)):
   the other lane of that connection is, to the domain's child budget for
   the connection, carved from its outer budget, not to the system
   domain's, so this term is only the system domain's mappings of both
-  sides and the capability slots that name the domain's objects;
+  sides, the capability slots that name the domain's objects, and its
+  copy of each control slot's `seq`, 8 bytes per slot;
 * one open-record buffer for that lane, which grows as the record's
   bytes arrive and is never allocated whole on its header's word, up to
   the system domain's `max_frame`, the largest `max_request` a grant may
@@ -1977,8 +1983,6 @@ system domain ([design-domains.md](design-domains.md#flow-control)):
   frame being written in parts included; past it a message from the system
   domain is dropped and counted, and any other signal ends the connection,
   which ends the domain;
-* the connection-control records held behind such a long frame, one for
-  each connection the domain's `connections` quota allows;
 * what it holds because of the domain's processes, their links and
   monitors with system processes and the signals queued for them, up to
   the system domain's own `peer_held`, which the manifest

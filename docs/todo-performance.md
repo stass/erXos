@@ -461,6 +461,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   distribution port. Settled by the time from the peer's bell to
   `erts_net_message` on HVF, with one scheduler and with every `+S`
   scheduler busy.
+* **[Low] lanes, the control table's scan on every run**
+  ([design-runtime.md](design-runtime.md#connections-in-erts)): each run
+  of a domain's input task on its system connection loads the `seq` of
+  every control slot, 256 words over 4 KiB at the default `connections`,
+  though a record arrives a few times per connection's life. Settled by
+  the time from the system domain's bell to `erts_net_message` for small
+  frames on HVF with `connections` at 1 and at 4,096; the fix on the table
+  is a table-wide count of records written, loaded once per run.
 
 * **[Medium] network, a round trip per `gen_tcp:send/2` across a lane**
   ([design-network-stack.md](design-network-stack.md#the-backend)). Each

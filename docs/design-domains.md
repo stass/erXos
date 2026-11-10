@@ -315,12 +315,12 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | --- | --- | --- | --- |
 | **D1.** A pid never names two processes | a pid is (node name, creation, number, serial), and a domain's node has its domain id as creation, which the domain service never reuses within a boot; within a domain, ERTS's process table never hands out a live (number, serial) twice ([Domain ids, pids and references](#domain-ids-pids-and-references)) | a domain id reused; a domain's node started with a creation other than its id; a runtime that reuses its own pids, which confuses only that domain's own correspondents about that domain's own processes | a test that creates and destroys domains in a loop and checks that ids increase and that each domain's `erlang:system_info(creation)` is its id; ERTS's own process-table tests |
 | **D2.** A node name at the machine's host name belongs to one live domain at a time and is reached only through that domain's connection; a runtime treats a pid or reference as its own exactly when it carries the runtime's node name and creation | the domain service gives a name to no domain while a live domain holds it; the connection agent alone serves node names at the machine's host, and makes an entry for one only from the system domain's `connection_up`; the sender rule requires every sending pid on a lane to carry the lane's node name and domain id; the network carrier refuses a remote node that presents a name at the machine's host ([An exposed domain](#domain-ids-pids-and-references)); ERTS's decoder and constructors already compare both name and creation with the local node's | two live domains with one name; an entry for a name at the machine's host made from anything but `connection_up`; a remote node admitted under such a name; a constructor that ignores creation | a property test: for random pids and references of other domains, `list_to_pid(pid_to_list(P)) =:= P` and `list_to_ref(ref_to_list(R)) =:= R` in every domain, and both stay remote; a test that creating a domain under a live domain's name fails, and that a later domain of an ended domain's name gets a new creation, under which the earlier pids behave as dead; the network service's test that a remote node presenting a name at the machine's host is refused |
-| **D3.** Every frame a runtime accepts passed its funnel | a runtime reads a lane's ring only through the funnel's reader, `erx_lane_take`, which copies a frame out once before anything looks at it, and every path into ERTS's distribution input or a native domain's mailboxes is a return from the funnel's check | a second reader of a lane's ring; a path that queues a frame the funnel did not return | a build check that a lane's pages are read only by `erx_lane_take`, in `erx_lane.c`, with a negative fixture, and one that only the lane driver calls `erts_net_message`, with a seeded violation; the fuzz target drives the funnel with every record and term shape |
+| **D3.** Every frame a runtime accepts passed its funnel | a runtime reads a lane's ring only through the funnel's reader, `erx_lane_take`, and a control table only through `erx_lane_ctl_take`, each of which copies a frame out once before anything looks at it, and every path into ERTS's distribution input or a native domain's mailboxes is a return from the funnel's check | a second reader of a lane's ring; a path that queues a frame the funnel did not return | a build check that a lane's pages are read only by `erx_lane_take` and `erx_lane_ctl_take`, in `erx_lane.c`, with a negative fixture, and one that only the lane driver calls `erts_net_message`, with a seeded violation; the fuzz target drives the funnel with every record and term shape |
 | **D4.** A name alone conveys no authority | an operation on a process is authorised by the target domain's own export table, which its runtime alone writes, in three cases, each an act of the owner: encoding its own name into a frame for that peer, which gives `send` alone; a spawn into it, which gives the spawner every right on the child; and an explicit export, the only source of `link` and `exit` otherwise and of `introduce` on a domain pid ([Exports](#exports)); a registered name is never exported, and the sender's runtime keeps every operation on another node's registered name to itself ([Frames](#frames)); nothing a peer does widens what it holds; a missing export gets dead-process semantics; a name a third domain passes on exports nothing; a privileged service's helpers take only handles its facet minted from its own scope ([Authority](#authority)) | an export written by anyone but the owning runtime, or from a name in a received frame; an encoding that gives more than `send`; an operation that takes a raw pid as authority; a helper that acts on a request's name | the three writers of the export table are the only callers of its insert, which a build check enforces; hostile-runtime tests that forward names, forge senders, name unexported pids, and link to, exit and set the group leader of pids they were handed in replies; a build check that service callbacks reach authority-consuming effects only through generated helpers, with a negative fixture |
 | **D5.** The system domain's atom table grows only within bounds its own policy sets: no frame creates an atom, and the domain service makes an atom only of a domain's node name, within the creating principal's `names` quota | the grammar for frames to the system domain has no fun or export tag, and the system domain's peer decodes every frame in ERTS's safe mode, which never creates an atom; the domain service binds a name to one principal for the boot, counts it against that principal's `names` before it makes the atom, and reuses the atom for every later domain of that name ([Domain ids, pids and references](#domain-ids-pids-and-references)) | a decode of another domain's bytes in the system domain outside the peer, or without safe mode; a service that turns request data into atoms, a name made into an atom before its quota check included | a test that a frame with a fresh atom leaves the system domain's atom count unchanged; the fuzz target checks the count after every input; a test that a principal past its `names` creates no domain under a fresh name and leaves the count unchanged; a build check that system-domain code calls atom-creating functions only from an allowlist |
 | **D6.** A domain reports deaths only of its own processes | the receiver knows the sender by the lane; the sender rule requires every frame's sending pid to carry the lane's node name and domain id; a receiving runtime acts on a link exit or `DOWN` only for a link or monitor it holds, which ERTS already checks | a frame accepted with another domain's sending pid | hostile-runtime tests that forge exits and `DOWN`s for other domains' processes and for processes they are not linked to |
 | **D7.** Stopping a domain never needs its runtime | the kernel's `erx_space_stop` stops every thread of a space at once, and the spaces below it stop with it ([design-kernel.md](design-kernel.md#creating-spaces)); a holder of the exit right on the domain pid stops the domain through the system domain, which needs nothing from the domain | a stop path that waits for the runtime | tests that stop a domain whose runtime never returns, runs a long NIF, or never drains its lanes |
-| **D9.** Signals from one process to another arrive in the order sent | a runtime writes each sending process's frames for one peer into one lane in send order; a lane is a single-producer, single-consumer ring, read in order; `erts_net_message` keeps order per connection; every answer about a process comes from its own runtime, on the same lane behind what it sent before | a path that reorders one pair's frames; an answer about a process written by anyone but its runtime | a property test that interleaves sends, links, monitors of dead and unexported processes, links to processes held without `link`, and exits between three domains and checks per-pair order |
+| **D9.** Signals from one process to another arrive in the order sent, but for a domain pid's connection-control records about different peer node names | a runtime writes each sending process's frames for one peer into one lane in send order; a domain pid's records travel in its domain's control table, outside the lane, and at most one per peer node name is outstanding ([Connections](#connections)); a lane is a single-producer, single-consumer ring, read in order; `erts_net_message` keeps order per connection; every answer about a process comes from its own runtime, on the same lane behind what it sent before | a path that reorders one pair's frames; an answer about a process written by anyone but its runtime | a property test that interleaves sends, links, monitors of dead and unexported processes, links to processes held without `link`, and exits between three domains and checks per-pair order |
 | **D12.** What a peer can make a runtime hold is bounded by the runtime's own limits, and what a domain can make the system domain hold is a sum fixed when the domain is admitted | the lane a receiver reads is sized by its own `lane`; an open record's private buffer grows as its bytes arrive, up to the receiver's own `max_frame`, never allocated whole on a header's word; a decoded term by its `max_message_heap`, or by the target process's own request limit; what its processes keep queued and undecoded by their queue quotas, past which the funnel leaves the next frame for them in the lane, and, for a process without one, by its own `max_heap_size`; the links and monitors it holds with a peer's processes, and the signals it queues for them, by its `peer_held`, past which it ends the connection; its queue to a peer that does not drain by ERTS's busy limit, past which its senders wait, and in the system domain by `system_queue`, past which a message is dropped and any other signal ends the connection; its export table by its `exports`; atoms, funs and exports by its `foreign_atoms`; the system domain's sum per domain is [Flow control](#flow-control)'s | a delivery path that skips a check; a buffer the receiver allocates on a peer's say-so without a bound of its own; a queue in the system domain that grows while a domain does not drain; a funnel that queues a frame on a process at its quota | floods past every limit from many peers at once, and records whose bytes trickle in; the receiver's memory stays within its budget, and the system domain's within the sum per admitted domain |
 | **D13.** A stale export costs nothing to find | an export's holders live on its name's own record, the process or the active alias, and go with it, at the transition that ends the process or deactivates the alias; a peer's holders end when the connection goes down; a pid names its process by number and serial, so a lookup that finds no live record finds no holder | holders kept anywhere but on their name's own record; an entry keyed in a way a later process can match | a soak test of a million alias exports and deactivations from one live process, with every OTP alias mode, and of pids handed out by processes that then exit; the export table stays at its live names |
 | **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each party writes exactly one memory object of a connection and maps the other's read-only; the system domain carves the connection's children and creates both sides and both bells from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
@@ -570,6 +570,9 @@ side of X on the connection X <-> Y: X writes it, Y maps it read-only, Y pays fo
   page 0        ring header of the lane X -> Y          erx_lane_hdr_t
   page 1        reader page of the lane Y -> X          erx_lane_rpage_t
   pages 2 ..    data area of the lane X -> Y            Y's `lane` bytes
+  then          on the system domain's side of a        Y's `connections` slots
+                domain's system connection alone:
+                the control table
 ```
 
 Every page of a connection is therefore written by one party and read by
@@ -602,7 +605,8 @@ charging the reader: both sides and both bells are charged to the domain's
 child for that connection, so no object of a domain's connection is
 charged to the system domain's budget, and the lane it reads from the
 domain, which its own `system_lane` sizes, is the domain's to pay for
-([Flow control](#flow-control)).
+([Flow control](#flow-control)), as is the control table on the system
+domain's side (**The control table**, below).
 
 The system domain carves a connection's children and creates all four
 objects of a connection, two sides and two bells, with `ALLOC` on the
@@ -745,35 +749,89 @@ domain that wants more throughput from a peer raises its own `lane` within
 its principal's ceiling, at its own cost. Experiment E-D1 sets both
 defaults.
 
-**The reserve.** The lane a domain reads from the system domain also holds
-a **reserve** for the connection protocol: room for one connection-control
-record ([Messages between the domain service and a
-runtime](#messages-between-the-domain-service-and-a-runtime)) for each
-connection the domain's `connections` quota allows, each a few hundred
-bytes, whose bound the longest node name fixes. Its data area is the
-smallest power of two that holds the domain's `lane` and the reserve, and
-the domain pays for it, as for both lanes of its system connection. The
-system domain never lets an ordinary frame take the reserve: it writes an
-ordinary record, or the next part of a long one, only into room beyond the
-reserve, and a connection-control record into any room. It tells the two
-apart by sender: a message whose sender is the domain's domain pid, which
-the system side's port is given when it opens, is a control record, and
-every other frame is ordinary. The domain pid sends its domain nothing
-but the records the domain service hands it, so only the domain
-service's records reach the reserve, whatever any other process sends,
-and no record's shape is read to class it. The domain service sends a
-domain the control records about one peer node name one at a time,
-through its domain pid, each once the domain has answered the last: a
-connection's
-`connection_down` waits for the answer to its `connection_up`, and the
-`connection_up` of a later domain of the same name waits for the answer to
-the earlier connection's `connection_down`. So at most one record per peer
-name is ever outstanding, every one fits, since a closing connection still
-counts against `connections`, and a runtime never sees a connection come
-up for a node name whose entry is still up. A control record that comes
-while a long ordinary record is being written in parts goes in right
-behind that record, so the system domain holds at most one per peer name
-meanwhile, and it never drops one.
+**The control table.** The records of the connection protocol,
+`connection_up` and `connection_down` ([Messages between the domain
+service and a
+runtime](#messages-between-the-domain-service-and-a-runtime)), travel in
+no ring. The system domain's side of a domain's system connection ends in
+a **control table**: one **control slot** for each connection the
+domain's `connections` quota allows, each holding at most one
+connection-control record, a frame in the format of [Frames](#frames) of
+at most `ERX_LANE_CTL_SLOT` bytes, the bound the longest record fixes,
+which is the `connection_up` naming a peer of the longest node name. The
+system domain alone writes the table, and the domain maps it read-only
+with the rest of that side, which the domain pays for. A slot is not in
+the ring, so no ordinary frame can take one, a record waits neither for
+room in the ring nor behind anything queued for it, and the ring's data
+area is the domain's `lane` alone.
+
+The table begins where the data area ends, at `ERX_LANE_SIDE_DATA` plus
+the domain's `lane`: an index of one entry per slot, then the slots'
+frames, slot `i`'s at `16 * connections + i * ERX_LANE_CTL_SLOT` from the
+table's start, the whole rounded up to a page. `ERX_LANE_CTL_SLOT` is a
+multiple of 16.
+
+```c
+/*
+ * A control table's index entry for one slot.  The system domain alone
+ * writes it; the domain copies each field once and validates the copy
+ * before it uses it.
+ */
+typedef struct erx_lane_ctl {
+	_Atomic uint64_t	seq;		/* records written into the slot since
+						 * the table was created; stored with
+						 * release order after len and the
+						 * frame, loaded by the domain with
+						 * acquire order */
+	uint32_t		len;		/* bytes of the slot's frame, 8 to
+						 * ERX_LANE_CTL_SLOT */
+	uint32_t		zero;
+} erx_lane_ctl_t;				/* 16 bytes */
+```
+
+The system domain writes a record into a slot by writing the frame and
+`len`, then storing `seq` plus one with release order, and then ringing
+the domain's bell; a record costs one ring, whatever the domain waits
+for. The domain keeps in its own memory the `seq` it last took from each
+slot, and at each look at its system connection takes every slot whose
+`seq` differs from its copy: it copies `len` and `zero` once, checks
+that `len` lies in range and `zero` is zero, copies the frame once and
+runs it through the funnel as it does a frame from the ring, which
+delivers it as a message from its sender, the domain pid
+([design-runtime.md](design-runtime.md#connections-in-erts)). Which slot
+a record goes in is the domain service's choice: a connection of the
+domain holds one slot from its introduction until the domain has
+answered every record written into that slot, or has ended, and takes
+the lowest slot no other connection of the domain holds. A connection
+counts against `connections` for at least that long, so every connection
+the domain service may make finds a free slot.
+
+**A slot is rewritten only after its last record is answered.** A slot
+passes to another connection only once the domain has answered every
+record written into it, and within one connection the domain service
+writes `connection_down` only once the domain has answered the
+connection's `connection_up`. The domain answers a record only after it
+has taken it, so no write overlaps the domain's copy and no record is
+overwritten before it is taken. A `seq` that moved by more than one says
+the system domain broke that rule; the domain counts it as a rewritten
+slot and takes the newest record.
+
+The domain service also sends a domain the control records about one
+peer node name one at a time, through its domain pid, each once the
+domain has answered the last: the `connection_up` of a later domain of
+the same name waits for the answer to the earlier connection's
+`connection_down`. So at most one record per peer name is ever
+outstanding, the records about one peer name arrive in the order sent,
+and a runtime never sees a connection come up for a node name whose entry
+is still up. Records about different peer names may arrive in another
+order than the domain pid wrote them, since the domain takes slots in
+index order; the agent handles each on its own and depends on no order
+between them, which makes this the one exception to D9. The domain pid
+sends its domain nothing else but, at its end, the `DOWN`s of the
+domain's monitors on it, which travel in the ring and may pass a record
+still in its slot; the domain pid and its domain end together
+([Domains](#domains)), so such a record is about a domain that is
+stopping.
 
 ### Frames
 
@@ -1087,9 +1145,12 @@ the domain's agents; the domain pid keeps the connection agent's pid from
 that report for the domain's life, which is the agent's life too
 ([design-runtime.md](design-runtime.md#connections-in-erts)), and passes
 the report on to the domain service. From then on it relays the
-connection protocol: it sends the agent each connection-control record
-the domain service hands it, and passes each of the agent's answers to the
-domain service ([Messages between the domain service and a
+connection protocol: it writes each connection-control record the
+domain service hands it, addressed to the agent, into the record's slot
+of its domain's control table, through the system domain's port for the
+domain's system connection, which the domain service hands it once its
+agent has opened that port ([Connections](#connections)), and passes each
+of the agent's answers to the domain service ([Messages between the domain service and a
 runtime](#messages-between-the-domain-service-and-a-runtime)). It keeps
 no state about any connection: the domain service alone keeps each
 connection's state and decides when each record goes. Every message from
@@ -1149,7 +1210,8 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    pipe's reader follows the same rule
    ([design-pipes.md](design-pipes.md#the-ring)). A build
    check requires that `erx_lane_take` is the only reader of a lane's pages,
-   with a negative fixture.
+   and `erx_lane_ctl_take`, beside it in `erx_lane.c`, of a control
+   table's ([Connections](#connections)), with a negative fixture.
 2. **Record header.** Copy the 16-byte record header and check it: `kind` is
    `ERX_REC_FRAME`, `zero` is zero, `len` is at least 8 and at most
    `ERX_FRAME_MAX` (16 MiB), and `len` rounded up to 16 is what the body
@@ -1535,10 +1597,10 @@ and drivers](#native-processes-and-drivers)).
   process. Any other signal that does not fit, a link exit, a `DOWN` or an
   exit among them, ends the connection instead, since none may vanish, and
   so stops the domain ([The funnel](#the-funnel)). A connection-control
-  record is never dropped and never waits behind queued frames: it goes
-  into the lane's reserve ([Connections](#connections)). A domain that
-  never drains what the system domain sends it loses the system domain's
-  messages, and holds no more of the system domain than
+  record never enters that queue and never waits for room: it goes into
+  its slot of the domain's control table ([Connections](#connections)). A
+  domain that never drains what the system domain sends it loses the
+  system domain's messages, and holds no more of the system domain than
   `system_queue`.
 
 ### Flow control
@@ -1547,9 +1609,9 @@ Flow control is the ring. A frame is written only into room the lane has,
 room returns as the receiver copies the frame out, and a sender with no room
 waits in its own runtime, in its own memory, for its own lane alone. There
 is no credit, no allowance and no exemption; the lane the receiver sized is
-the whole of what a sender can place in it, and the one room set aside in a
-lane is the reserve for connection-control records in each domain's lane
-from the system domain ([Connections](#connections)).
+the whole of what a sender can place in it, and nothing in a lane is set
+aside: connection-control records from the system domain travel outside
+every ring, in each domain's control table ([Connections](#connections)).
 
 What a sender's full lane does, from the sender's side, is ERTS's busy rule:
 processes that send to that domain are suspended once the entry's queue is
@@ -1605,9 +1667,9 @@ but in its sender or its lane:
   lane has room, its process suspended as ERTS suspends a sender to a busy
   distribution connection, or told `nosuspend`; or in the lane, while the
   process it is for, or the process of a frame ahead of it, is at its
-  queue quota; a connection-control record
-  from the system domain waits for nothing but a long record being written
-  ahead of it, since the lane reserves room for it
+  queue quota; a connection-control record from the system domain is in
+  no sender's queue and no lane, and waits in its control slot only while
+  the connection agent is at its queue quota
   ([Connections](#connections));
 * **dropped and counted**, as ERTS drops an undecodable distribution
   message: at the receiver, a frame over its `max_frame`, a message past
@@ -1633,13 +1695,12 @@ is a sum fixed when the domain is admitted, with these terms per domain:
 
 | Term | Bound |
 | --- | --- |
-| its mappings of the domain's system connection and the capability slots that name its objects, whose pages are charged to the domain's child for that connection | the mappings and slots alone: the lane it reads, `system_lane` bytes with its ring header and reader page, is the domain's to pay for ([Connections](#connections)) |
+| its mappings of the domain's system connection and the capability slots that name its objects, whose pages are charged to the domain's child for that connection | the mappings and capability slots alone, and the writer's copy of each control slot's `seq`, 8 bytes per slot: the lane it reads, `system_lane` bytes with its ring header and reader page, and the control table it writes are the domain's to pay for ([Connections](#connections)) |
 | the one record it is reading from that lane, in a private buffer that grows as the record's bytes arrive and is never allocated whole on the header's word | the system domain's `max_frame`, which is the largest `max_request` a grant may name ([Principals, sessions and quotas](#principals-sessions-and-quotas)) |
 | its queue to the domain while the domain's lane from it is full | `system_queue`: past it a message is dropped and counted, and any other signal ends the connection instead |
 | what it holds because of the domain's processes: their links and monitors with system processes, and the signals queued for them | its own `peer_held` |
 | each facet granted to the domain, with the requests queued on it | that facet's queue quota for the requests queued on it undecoded, plus the one frame that crossed it, and its `max_heap_size` for what it decodes and keeps ([Facets](#facets)) |
 | its frames queued undecoded on system processes that are not its facets, such as the domain service | each such process's quota, `system_queue`, plus one frame; every domain that reaches such a process shares that quota, so the system domain reserves it once per process, in its baseline, and not per domain |
-| connection-control records held behind a long record being written into the domain's lane from it | one for each connection the domain's `connections` quota allows |
 
 The domain service reserves that sum in the system domain's own budget
 when it admits a domain, and admits it only when the budget holds the sum
@@ -1647,10 +1708,10 @@ for every admitted domain, the new one included
 ([design-system.md](design-system.md#resource-policy)), so no admitted
 domain, and no set of them, can make the system domain hold more than it
 reserved. No kernel object of a domain's is charged to the system domain's
-budget: the terms are the system domain's runtime's own memory. Every
-other connection-control record goes straight into the room the domain's
-own lane from the system domain reserves for it, which the domain pays
-for.
+budget: the terms are the system domain's runtime's own memory.
+Connection-control records add no term: each goes into its slot of the
+domain's control table, which the domain pays for, through a call that
+queues nothing.
 
 Nothing reorders what Erlang orders: links, monitors, exits and `DOWN`s are
 frames of their lane, in send order (D9). The guarantee is the one
@@ -1696,8 +1757,9 @@ counter the domain service keeps for that domain
 without `DESTROY`; and only then the domain service records the
 connection and tells each party `connection_up`, through the party's
 domain pid, naming the peer's id and node name, the slots, the label and
-the two sizes, in the order of [The reserve](#connections) for that party
-and peer name. It tells a domain nothing before the domain's init has
+the two sizes, in the order of **The control table**
+([Connections](#connections)) for that party and peer name, in the slot
+the domain service gives the connection. It tells a domain nothing before the domain's init has
 reported ready, since only that report gives the domain pid the agent's
 pid, so a connection made with the domain, its creator's included, waits
 in the domain service's record until then; a domain's system connection
@@ -1744,9 +1806,9 @@ constraints:
    otherwise. It sends it once the party has answered the connection's
    `connection_up`, so the
    party has at most one control record about that peer name outstanding,
-   which the reserve of its lane from the system domain holds
-   ([Connections](#connections)); the record is never dropped and never
-   waits behind other frames. When the other party is the system domain,
+   which the connection's slot of the party's control table holds
+   ([Connections](#connections)); the record waits for no room and behind
+   no other frame. When the other party is the system domain,
    at a domain's end, the domain service asks its own agent instead.
 3. **The other party**, on `connection_down`, first has the port finish:
    it takes every whole record before the `wpos` it reads then, through
@@ -1922,7 +1984,8 @@ information names the domain's node name and id, the system domain's
 node name, id and connection, the domain's domain pid, which the domain
 service created before the plan and ends if the plan fails, and the
 creator's domain as `spawner`. The domain service then has its own agent
-open the system domain's side of the system connection, and the domain
+open the system domain's side of the system connection and hands the
+port the agent opened to the domain pid, and the domain
 pid exports itself to the new domain with `send` and to the caller's
 domain with `send`, `link` and `exit`. Only then does the library start
 the domain's first thread.
@@ -2379,7 +2442,7 @@ created because of it:
 | Object | Created by | Charged | Released when |
 | --- | --- | --- | --- |
 | the runtime's memory | the runtime's commits | the pages | decommitted, or the domain ends |
-| the peer's side of each of its connections: the ring it reads and the reader page the peer writes | the domain library, at the introduction | pages of its child for the connection, carved from its outer budget: 8 KiB and the domain's `lane`, and on the connection to the system domain the reserve besides | the system domain deletes the connection and destroys the child, once each party has unmapped it or ended |
+| the peer's side of each of its connections: the ring it reads and the reader page the peer writes | the domain library, at the introduction | pages of its child for the connection, carved from its outer budget: 8 KiB and the domain's `lane`, and on the connection to the system domain the control table besides | the system domain deletes the connection and destroys the child, once each party has unmapped it or ended |
 | its bell on each connection | the domain library, at the introduction | the IRQ object's record, in the same child | with the connection |
 | on its connection to the system domain, its own side, which the system domain reads, and the system domain's bell | the domain library, at creation | pages and records of its child for that connection: 8 KiB and the system domain's `system_lane`, and the bell | with the connection, at the latest when the outer budget is destroyed |
 | its group | the domain library, at creation | the kernel's group record | once its threads are gone ([design-system.md](design-system.md#ending-a-domain)) |
@@ -2453,8 +2516,8 @@ A domain's limits, fixed at creation within its principal's ceilings:
 | --- | --- | --- | --- |
 | `memory` | bytes its budget may hold | the kernel | 256 MiB |
 | `cpu` | its group's grant: quota per period, cpuset, ceiling | the kernel | the principal's share |
-| `lane` | the data area of each lane it reads, a power of two from 4 KiB to 16 MiB; the lane from the system domain holds the reserve besides ([Connections](#connections)) | the domain library, which sizes the object | 64 KiB |
-| `connections` | connections it may have at once, the system connection included | the domain service, at an introduction | 256; for the system domain, the manifest's `max_domains` ([design-system.md](design-system.md#the-manifest)) |
+| `lane` | the data area of each lane it reads, a power of two from 4 KiB to 16 MiB ([Connections](#connections)) | the domain library, which sizes the object | 64 KiB |
+| `connections` | connections it may have at once, the system connection included, and the slots of its control table ([Connections](#connections)) | the domain service, at an introduction | 256; for the system domain, the manifest's `max_domains` ([design-system.md](design-system.md#the-manifest)) |
 | `max_frame` | the largest payload it takes into a buffer of its own, which grows as the bytes arrive; a longer one is dropped as it passes | its own runtime | 1 MiB, at most `ERX_FRAME_MAX`; for the system domain, the largest `max_request` its configuration lets a grant name |
 | `max_message_heap` | the largest decoded message it accepts | its own runtime | 8 MiB, at most 256 MiB |
 | `funnel_depth` | nesting outside tail positions in a frame it accepts | its own runtime | 16,384 |
@@ -2534,8 +2597,9 @@ domain ([Connections](#connections)).
 
 ### Lanes and frames in the ABI
 
-The ring header, reader page, record and frame layouts are fixed binary
-layouts and live in `abi/erx_abi.txt`, from which `liberx` and the peer's C
+The ring header, reader page, record, control-table entry and frame
+layouts are fixed binary layouts and live in `abi/erx_abi.txt`, from which
+`liberx` and the peer's C
 code are generated ([design-kernel.md](design-kernel.md#the-abi-file)),
 pinned with `_Static_assert`, so every runtime agrees on them by
 construction. The same lane layout serves a program's channel, which
@@ -2556,6 +2620,7 @@ its checks and its wake handshake do not change. The constants:
 | `ERX_LANE_SIDE_RPAGE`, `ERX_LANE_SIDE_DATA` | 4 KiB, 8 KiB | the offsets in a side of its reader page and its data area; the ring header is at 0 |
 | `ERX_FRAME_MAX` | 16 MiB | the longest record body any lane carries; a `max_frame` limit lies below it, and a runtime never writes more |
 | `ERX_CTL_MAX` | 4 KiB | the longest control term; the funnel reads it whole before anything else |
+| `ERX_LANE_CTL_SLOT` | a multiple of 16 | the room of one control slot's frame: the longest connection-control record, a `connection_up` naming a peer of the longest node name, with its frame header and control term, which a host test that encodes that record pins |
 | `ERX_REC_FRAME` | the record kind of a frame, on a connection and on a program's channel | |
 | `ERX_LABEL_SPLIT` | 2^31 | splits every group's label space: labels below it are the system domain's, for connection bells; labels at or above it are the domain's own runtime's |
 
@@ -2584,29 +2649,39 @@ answers each as the call's result.
 | --- | --- | --- |
 | `{erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}` | domain pid to agent | a connection to domain `Peer`, node `PeerNode`, exists: the capability slots of the domain's side, the peer's side and the peer's bell, the label the domain's own bell is bound with, and the data areas' sizes, the domain's own lane first; the agent maps, opens the port, brings the entry up and answers `connection_mapped` |
 | `{erx_connection_mapped, Peer}` | agent to domain pid | the domain has mapped the connection's objects and its entry is up |
-| `{erx_connection_down, Peer, Reason}` | domain pid to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent has the port finish at the lane's current position, ends it with `Reason`, which fires its links and monitors with it, unmaps, closes and answers `connection_unmapped` |
+| `{erx_connection_down, Peer, Reason}` | domain pid to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent has the port finish at the lane's current position, ends it with `Reason`, which fires its links and monitors with it, unmaps, closes and answers `connection_unmapped`; about a connection the domain has already lost, which it ended from its side while the record was on its way, the agent answers `connection_unmapped` at once, since it has unmapped |
 | `{erx_connection_unmapped, Peer}` | agent to domain pid | the domain has unmapped the connection's objects and closed its capabilities |
 | `{erx_connection_lost, Peer, Reason}` | agent to domain pid | the domain ended the connection from its side: `{malformed, Code}`, `{peer_held, Bytes}`, `{map, Status}` when it could not map it, or `disconnect`; it has already unmapped |
 
 The two messages to the agent are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,
 each once the agent has answered the last, so at most one per peer name
-is outstanding, and the reserve of the domain's lane from the system
-domain holds every one ([Connections](#connections)). It hands each to the
-domain pid tagged with the secret the two share, and the domain pid sends
-it to the agent at once; the domain pid passes each answer to the domain
-service tagged with the same secret, and keeps nothing of either. Every
-answer is built of atoms the system domain's code already holds, so the
-safe decoder creates none. Of its domain's messages the domain pid
+is outstanding, and every record is answered, which is what frees its
+control slot ([Connections](#connections)). It hands each to the domain
+pid tagged with the secret the two share, with the slot it gave the
+connection, and the domain pid writes it into that slot at once; the
+domain pid passes each answer to the domain service tagged with the same
+secret, and keeps nothing of either. A record travels in the domain's
+control table and never in a ring: the domain pid encodes it as a frame
+from itself to the agent and writes it with a synchronous call on the
+system domain's port for the domain's system connection, the only port
+that writes a control table, which accepts the call from that domain pid
+alone; the domain's lane port takes it at its next look, runs it through
+the funnel and delivers it to the agent as a message from the domain pid
+([design-runtime.md](design-runtime.md#connections-in-erts)). The answers
+are ordinary messages, frames in the domain's lane to the system domain.
+Every answer is built of atoms the system domain's code already holds, so
+the safe decoder creates none. Of its domain's messages the domain pid
 passes on only the three answers and init's ready report, by their
 shapes, and drops and counts any other; the domain service applies an
 answer only to a connection of the domain in the state that expects it,
 and drops and counts the rest ([design-system.md](design-system.md#ending-a-domain)).
 
-A runtime that receives a message of this shape from any lane but the system
-connection ignores it: the envelope the peer puts on every message from
-another domain names the lane, `{erx_origin, 4, Msg}` for the system
-domain's (edit 16), and the agent acts only on the system domain's.
+A runtime that receives a message of this shape from any connection but
+the system connection ignores it: the envelope the peer puts on every
+message from another domain names the connection, `{erx_origin, 4, Msg}`
+for the system domain's (edit 16), whether the frame came from a ring or
+from a control slot, and the agent acts only on the system domain's.
 
 ### Erlang interface
 
@@ -3032,13 +3107,13 @@ for the same reason.
   holders at process exit, at every OTP alias deactivation mode, and at a
   connection's end, and a table at `exports` live entries; the busy rule
   at the entry's queue limit and the system domain's drop and end at
-  `system_queue`; the reserve of a domain's lane from the system
-  domain, filled with ordinary frames and then given one control record
-  per connection, and given as well, while full to the reserve's edge, a
-  record of a control record's shape from a sender other than the domain
-  pid, which waits as an ordinary frame; seeded failure: a writer that
-  classes records by shape, under which that record takes the reserve and
-  a later control record does not fit; the runtime's `peer_held`
+  `system_queue`; the control table's reader, `erx_lane_ctl_take`, with
+  the host's lane fixture as the system domain: every slot written once
+  and taken once, and a slot written twice before the reader looks,
+  which it counts as rewritten and takes once, as the newer record, and
+  a `len` out of range, which it refuses; seeded failure: a reader that
+  takes every change of `seq` as one record, under which the slot written
+  twice goes uncounted; the runtime's `peer_held`
   accounting and its choice of the connection to end; the domain
   service's introduction checks against `erx:exports/1` of each domain
   pid.
@@ -3063,7 +3138,8 @@ for the same reason.
     after the `{domain_down, D, Info}`, no object is deleted while a live
     party that has not answered maps it, every connection whose parties
     have let go is deleted, at most one control record per peer name is
-    outstanding, the later `connection_up` never reaches the domain while
+    outstanding, no control slot is written while a record in it is
+    unanswered, the later `connection_up` never reaches the domain while
     its entry for the name is up, and a runtime that answers
     `connection_unmapped` never touches a deleted page; seeded failures:
     a domain service that sends a connection's `connection_down` before
@@ -3088,7 +3164,11 @@ for the same reason.
   of `rpos` against the producer's acquire load of `rpos` then its writes
   over that room, each together with the same protocol with its acquire
   load made relaxed, which must fail by showing a byte that is stale or
-  overwritten. The first is checked under the C11 model (RC11) as well;
+  overwritten. A control slot's publication, the system domain's writes
+  of a frame and `len` then its release store of `seq` against the
+  domain's acquire load of `seq` then its loads of the frame, has the
+  first one's shape and is checked by it. The first is checked under the
+  C11 model (RC11) as well;
   the second's relaxed form is load buffering, which RC11 forbids for
   every access order, so it is checked under each architecture's model
   alone. `make check-litmus` runs them (`test/litmus/`). A
@@ -3111,9 +3191,10 @@ for the same reason.
 * **Fuzz targets** (`make check-fuzz`): the funnel over a corpus of valid
   frames and their mutations, fed whole and in parts at random boundaries,
   checking that the verdict is one of the table's and that budgets return to
-  their baselines; the lane reader over mutated ring headers, record headers
-  and reader pages; `liberx`'s `erx_etf` decoder; the system domain's safe
-  decode, checking that its atom count never changes; and the facets'
+  their baselines; the lane reader over mutated ring headers, record
+  headers, reader pages and control-table entries; `liberx`'s `erx_etf`
+  decoder; the system domain's safe decode, checking that its atom count
+  never changes; and the facets'
   generated admission over mutated requests.
 * **Hostile runtimes** under QEMU, with HVF. Each is a native
   test domain that holds a connection with the domain under test and does
@@ -3162,7 +3243,7 @@ for the same reason.
     the system domain holds at most `system_queue` for it, drops its
     messages past that, ends its connection, and so the domain, at the
     first other signal past it, and still writes every connection-control
-    record into the reserve;
+    record into its control table;
   * opens a record of the receiver's `max_frame` and trickles its bytes, on
     many connections at once: the receiver holds what has arrived and no
     more;
@@ -3215,6 +3296,22 @@ for the same reason.
   * monitors and links processes it was never given, and processes that sent
     it messages and then died, and checks that every answer arrives after
     those messages.
+* **The control table** between the system domain and an ERTS domain
+  under QEMU, each case with its seeded failure:
+  * a domain whose lane from the system domain is full, since system
+    processes flood one of its processes, which sits at its queue quota
+    and never receives, so the funnel pauses that lane and the system
+    side's port pauses its output, still gets every connection-control
+    record the domain service sends it, delivered to its connection agent
+    as `{erx_origin, 4, Msg}` from the domain pid, and its lane port's
+    count of control records taken grows by one for each; seeded failure:
+    a domain pid that sends each record as an ordinary message, under which
+    the record waits behind the paused port and never arrives;
+  * a system process other than the domain pid that calls the control
+    command on the system side's port gets `badarg`, and no slot changes,
+    so the domain's count of control records taken stays where it was;
+    seeded failure: a lane driver without its caller check, under which
+    the stray call writes a slot and the agent receives the record.
 * **Origins** between two ERTS domains under QEMU, each case with its
   seeded failure:
   * a message to a pid and one to an alias from the other domain arrive
@@ -3410,7 +3507,7 @@ no per-frame bookkeeping anywhere but in the two runtimes.
 | Domain creation to a ready init process, HVF | 300 ms | an embedded boot of a small release takes 0.13 s on the host and translating a module 0.8 to 2.4 ms (both measured, [research](research-baselines.md)), plus the space, two connections and the first frames (target) |
 | Memory of one connection | 2 x (8 KiB + the reader's `lane`), plus two IRQ objects: 144 KiB at the default, 72 KiB paid by each party | arithmetic on the layout and the defaults |
 | What the system domain pays per live domain | no kernel object: its mappings of the domain's system connection and the slots that name it, and at most its `max_frame`, `system_queue`, its `peer_held` and the facets' heap limits, which it reserves at admission ([Flow control](#flow-control)) | arithmetic on the layout and the defaults |
-| What a domain pays for its connections | 72 KiB each at the default, at most `connections` times that: 18 MiB at 256; and its system connection, both sides: 16 KiB, `system_lane`, and the data area of its lane from the system domain, the smallest power of two that holds its `lane` and the reserve; all from its outer budget, through one child per connection | arithmetic on the layout and the defaults |
+| What a domain pays for its connections | 72 KiB each at the default, at most `connections` times that: 18 MiB at 256; and its system connection, both sides: 16 KiB, `system_lane`, its `lane`, and its control table, 16 bytes and `ERX_LANE_CTL_SLOT` bytes for each of its `connections`, rounded up to a page; all from its outer budget, through one child per connection | arithmetic on the layout and the defaults |
 | A runtime's export table | `exports` entries of a few dozen bytes each: under 1 MiB at 16,384 with the table's overhead | arithmetic on the layout and the default |
 
 For comparison, on the development host, a same-node ERTS ping-pong measured

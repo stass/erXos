@@ -1333,10 +1333,12 @@ it; git history is the record of completed work.
   one built-in principal.
 * [Low] domain library, `include/erx/dom.h`: `ERX_DOM_CTL_RESERVE`
   (`ERX_CTL_MAX` plus 64 per connection) and `ERX_DOM_BELL_BYTES` (a
-  page per bell) are hand-chosen bounds. The reserve should be the
-  longest connection-control record from its generated layout (about ten
-  times smaller, so a `connections` quota near 4,096 fits a lane), and
-  the bell's the kernel's IRQ object cost.
+  page per bell) are hand-chosen bounds. The control slot's room,
+  `ERX_LANE_CTL_SLOT` in
+  [design-domains.md](docs/design-domains.md#lanes-and-frames-in-the-abi),
+  should be the longest connection-control record (about ten times
+  smaller, so a domain's control table costs it about 100 KiB at 256
+  connections, not 1 MiB), and the bell's the kernel's IRQ object cost.
 * [Low] domain library, `dom_core.c`: `erx_dom_plan_check` checks a
   plan's structure (order, charges, grants) but not the fields derivable
   from its specification (slice index and count, carve and object sizes,
