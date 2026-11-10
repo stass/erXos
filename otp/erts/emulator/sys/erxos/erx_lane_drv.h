@@ -33,9 +33,9 @@ typedef enum erx_lane_count {
 	ERX_LANE_COUNT_RESUMED,		/* times the bell let it go on */
 	ERX_LANE_COUNT_DELIVERED,	/* frames handed to distribution input */
 	ERX_LANE_COUNT_ANSWERED,	/* frames answered as for an absent target */
-	ERX_LANE_COUNT_DROPPED,		/* frames dropped by the verdict */
+	ERX_LANE_COUNT_DROPPED,		/* frames dropped by the verdict, and records the finish cut */
 	ERX_LANE_COUNT_MALFORMED,	/* lanes ended by a failed check */
-	ERX_LANE_COUNT_OUT_DROPPED,	/* frames of ERTS's no lane carries */
+	ERX_LANE_COUNT_OUT_DROPPED,	/* frames of ERTS's no lane carries, or sent while finishing */
 	ERX_LANE_COUNT_OUT_REFUSED,	/* outputs the lane refused, ending the port */
 	ERX_LANE_COUNT_RING_FAILED,	/* bell triggers that failed */
 	ERX_LANE_COUNTS

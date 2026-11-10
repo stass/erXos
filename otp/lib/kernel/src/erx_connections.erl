@@ -15,6 +15,9 @@
 
 -export([start/2, open_side/2, close_side/2]).
 
+%% The lane driver's port_control command that finishes the port (erx_lane_drv.c).
+-define(CONTROL_FINISH, 2).
+
 %% What erx_domain_lib:create/1 returned for a domain's system connection, with the
 %% domain's node: the slots of the two sides and of the domain's bell, the connection's
 %% number, which labels the system domain's bell, and the two lanes' data areas.
@@ -38,10 +41,11 @@ start(Kernel, System) ->
 open_side(Id, Values) ->
     call({open_side, Id, Values}).
 
-%% In the system domain: ends the system side of domain Id's system connection with
-%% Reason, which takes the domain's entry down, and answers once the port has ended, so the
-%% connection's objects may be destroyed then. ok for a domain whose side is not open.
-%% Reason is not normal, which would end nothing.
+%% In the system domain: finishes the system side of domain Id's system connection, so
+%% every whole frame the domain published is delivered, then ends it with Reason, which takes
+%% the domain's entry down, and answers once the port has ended, so the connection's objects
+%% may be destroyed then. ok for a domain whose side is not open. Reason is not normal,
+%% which would end nothing.
 -spec close_side(pos_integer(), term()) -> ok | {error, noproc}.
 close_side(Id, Reason) when Reason =/= normal ->
     call({close_side, Id, Reason}).
@@ -102,7 +106,7 @@ sides(Kernel, Sides) ->
             case maps:take(Id, Sides) of
                 {{Port, Monitor, _Service}, Rest} ->
                     erlang:demonitor(Monitor, [flush]),
-                    close(Port, Reason),
+                    finish(Port, Reason),
                     gen:reply(From, ok),
                     sides(Kernel, Rest);
                 error ->
@@ -165,6 +169,33 @@ accepted(Kernel, Port, Connection) ->
 refuse(Port) ->
     unlink(Port),
     close(Port, refused).
+
+%% The finish (erx_lane_drv.c, port_control 2): the port takes every whole record the peer
+%% published before the write position it reads once, through the funnel as always, and says
+%% erx_lane_finished; then the port is ended with Reason, behind everything the peer
+%% published. A port that ends by itself first, on a malformed record, has ended as such a
+%% port always does, and one already gone has nothing to finish.
+finish(Port, Reason) ->
+    Ref = erlang:monitor(port, Port),
+    case finished(Port, Ref) of
+        true ->
+            erlang:demonitor(Ref, [flush]),
+            close(Port, Reason);
+        false ->
+            ok
+    end.
+
+%% Whether the port finished: false once it has ended, by itself or before it was asked.
+finished(Port, Ref) ->
+    try erlang:port_control(Port, ?CONTROL_FINISH, []) of
+        _ ->
+            receive
+                {Port, erx_lane_finished} -> true;
+                {'DOWN', Ref, port, Port, _} -> false
+            end
+    catch
+        error:badarg -> receive {'DOWN', Ref, port, Port, _} -> false end
+    end.
 
 %% The port's end, awaited: once this returns no driver callback runs on the port. The
 %% driver's stop, which unmaps the sides, may still be running on another scheduler when

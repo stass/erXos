@@ -112,6 +112,8 @@ struct erx_lane_reader {
 	uint32_t		 kind;		/* ... as copied once */
 	erx_lane_phase_t	 phase;
 	erx_lane_fault_t	 fault;
+	bool			 stopped;	/* erx_lane_reader_stop fixed wpos ... */
+	uint64_t		 stop_wpos;	/* ... at this checked copy */
 };
 
 /*
@@ -134,6 +136,18 @@ bool erx_lane_reader_init(erx_lane_reader_t *, const void *, void *,
 uint64_t erx_lane_side_bytes(uint64_t);
 
 /*
+ * Fixes the write position the reader takes up to: loads wpos once and
+ * checks it as a take does, and every later take reads up to that copy
+ * and never loads wpos again, so nothing the producer publishes after it
+ * is taken.  A record the copy cuts short stays open (phase
+ * ERX_LANE_IN_BODY) once every byte before the copy is taken, and takes
+ * then return ERX_LANE_EMPTY.  A wpos that fails its check refuses the
+ * lane.  Returns false when the lane is refused, now or before; a second
+ * call changes nothing and returns true.
+ */
+bool erx_lane_reader_stop(erx_lane_reader_t *);
+
+/*
  * Takes the next part of the lane into buf, at most max bytes of body.
  * Returns ERX_LANE_TOOK with *part filled, ERX_LANE_EMPTY when nothing new
  * is published, or ERX_LANE_MALFORMED when the lane fails a check, now or
@@ -152,7 +166,8 @@ erx_lane_status_t erx_lane_take(erx_lane_reader_t *, void *, size_t,
  * As erx_lane_take, after publishing in the reader page that the consumer
  * waits for the next byte: wake is the published rpos plus one.  ERX_LANE_EMPTY from it means the producer will
  * ring the consumer's bell when it publishes that byte, so the caller may
- * park on its group.  A caller that is not about to park uses
+ * park on its group; a stopped reader takes nothing past its stop, so no
+ * ring is owed to it.  A caller that is not about to park uses
  * erx_lane_take, so a busy lane costs the producer no ring.
  */
 erx_lane_status_t erx_lane_take_armed(erx_lane_reader_t *, void *, size_t,

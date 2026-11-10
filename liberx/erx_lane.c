@@ -7,7 +7,8 @@
  * The lane's reader and writer.  This file is the only one that names a
  * lane's shared layouts (a build check enforces it).  Only erx_lane_take
  * and the two helpers it calls, lane_copy for the data area and
- * lane_release for need, load from the producer's side; only erx_lane_put
+ * lane_release for need, and erx_lane_reader_stop's one load of wpos, load
+ * from the producer's side; only erx_lane_put
  * and lane_publish, for wake, load from the consumer's side.  The checks of
  * what they load are pure functions (lane_check_wpos, lane_check_record,
  * lane_check_rpos, lane_crossed), as are the writer's sums of room and need
@@ -268,9 +269,14 @@ erx_lane_take(erx_lane_reader_t *reader, void *buf, size_t max,
 
 	/*
 	 * Acquire: pairs with the producer's release store of wpos, so every
-	 * byte it wrote below wpos is visible to the copies below.
+	 * byte it wrote below wpos is visible to the copies below.  A stopped
+	 * reader's copy was loaded the same way, and pos never passes it, so
+	 * it stays sound.
 	 */
-	erx_lane_hdr_wpos_load(lane_header(reader), &wpos);
+	if (reader->stopped)
+		wpos = reader->stop_wpos;
+	else
+		erx_lane_hdr_wpos_load(lane_header(reader), &wpos);
 	fault = lane_check_wpos(reader->pos, reader->size, wpos, &avail);
 	if (fault != ERX_LANE_SOUND)
 		return (lane_refuse(reader, fault));
@@ -319,6 +325,28 @@ erx_lane_take(erx_lane_reader_t *reader, void *buf, size_t max,
 	part->zero = reader->zero;
 	part->ring = lane_release(reader, published);
 	return (ERX_LANE_TOOK);
+}
+
+bool
+erx_lane_reader_stop(erx_lane_reader_t *reader)
+{
+	uint64_t avail, wpos;
+	erx_lane_fault_t fault;
+
+	if (reader->phase == ERX_LANE_REFUSED)
+		return (false);
+	if (reader->stopped)
+		return (true);
+	/* Acquire, as in erx_lane_take: every byte below the copy is visible. */
+	erx_lane_hdr_wpos_load(lane_header(reader), &wpos);
+	fault = lane_check_wpos(reader->pos, reader->size, wpos, &avail);
+	if (fault != ERX_LANE_SOUND) {
+		(void)lane_refuse(reader, fault);
+		return (false);
+	}
+	reader->stop_wpos = wpos;
+	reader->stopped = true;
+	return (true);
 }
 
 erx_lane_status_t

@@ -1277,15 +1277,25 @@ it; git history is the record of completed work.
   `runtimes/emu` and, under `erx.det=1`, forces `runtimes/emu` for every domain, configured rows
   included, whatever it names (design-runtime.md, "BeamAsm"), once the boot's mode reaches the
   system domain. Until then a create names the BeamAsm image by its index and gets it in any boot mode.
-* [Medium] connection agent, `otp/lib/kernel/src/erx_connections.erl` (`close_side`): a
-  domain that reports ready and ends at once (an `-eval` that halts) may have its end reach
-  the domain service while its report is still in the lane, unread by the system side's
-  port, and `close_side` ends that port without reading the lane to its `wpos`, so the
-  report is lost and the create answers `{error, {boot, Info}}` though the domain reported.
-  The service already answers such a create only once the domain pid has ended, which
-  follows every report the side delivered (`erx_domain_srv:settle/2`,
-  `erx_domain_pid:finish/2`); the lane driver's finish (control command 2,
-  design-runtime.md "Connections in ERTS") closes the rest. medium_boot's halting domains run this race until then.
+* [Medium] lane driver's finish, `otp/erts/emulator/sys/erxos/erx_lane_drv.c` and the
+  system_domain QEMU suite: three of the finish's tests in design-runtime.md's list are not
+  written. A peer that halts with half of a long record published, and a finish whose
+  outbound lane is full with the bound on unsent answers reached, each ending with
+  `{domain_down, D, Info}` and the cut record counted as dropped, with their seeded
+  failures (a finish that takes the cut record as malformed, one that keeps the answers
+  bound); neither state can be reached on purpose from the shell, and a port's counts are
+  gone once it ends, so each needs a test hook that holds the system side's input task. The
+  burst cell's seeded failure (an agent that ends the port without the finish) does not
+  fail either: the domain service is suspended while erts halts, so the system side has
+  read the whole burst before the side ends; the same hook would hold the input task until
+  the service ends the side. The host test of the stopped reader (`test/host/lane_test.rb`,
+  `limits`) covers the cut record's detection. Better still, the finish's transitions
+  (finish state and step result to the next action) become a pure function tested on the
+  host. The same hook proves that `close_side` no longer loses a ready report still in the
+  lane when a domain reports and ends at once (medium_boot's halting domains), which the
+  finish closes but no test shows failing before it. While finishing, answerable frames
+  still queue their noproc and spawn answers, which are never sent; dropping and counting
+  them there would make the one-data-area bound hold by construction.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_pid.erl`: a domain can
   fill its domain pid's mailbox as fast as its lane delivers, and the pid passes each
   answer-shaped message after the ready report on to the domain service, which every domain
@@ -2388,8 +2398,8 @@ it; git history is the record of completed work.
   false` in each manifest's `system_args`); the system domain's agent opening, finishing
   and ending the system side of each system connection for the domain service; the domain
   pid as the domain's correspondent, which the boot page and `erx_dist:boot/0` name,
-  relaying the domain service's records to the agent and the agent's answers back; the
-  system side's writer giving the reserve to the domain pid's messages alone; and the lane driver's finish (control command 2).
+  relaying the domain service's records to the agent and the agent's answers back; and the
+  system side's writer giving the reserve to the domain pid's messages alone.
   Order: nothing but `spawn` crosses a connection before RT7, so the protocol needs RT7's
   edit 8 and `erx:export/3` in both runtimes, and edit 16 in its universal form (the
   origins item under "Security residuals"), since the domain pid acts only on
@@ -4206,7 +4216,9 @@ document's "residual risks accepted" paragraph.
   adds the queue quota (design-runtime.md edit 15), the funnel delivers every authorised frame whatever the target
   process already holds queued, so a peer can grow any process's queue it can name without bound, and two domains
   that send toward each other in a cycle grow each other's queues with nothing to stop them. RT8's quota leaves the
-  next frame in the lane at a process at its quota; the stopgap has no bound here.
+  next frame in the lane at a process at its quota; the stopgap has no bound here. The lane driver's finish
+  pauses there too, as at any time (design-runtime.md, "Connections in ERTS"); until the quota lands that clause
+  of the finish has nothing to act on.
 * [Low] domains, control records (`erlang/apps/erx_domain/src/erx_domain_links.erl`, the system
   domain's control writer): a domain that answers a record before reading it, such as
   `connection_unmapped` before its `connection_down`, lets the domain service send its next

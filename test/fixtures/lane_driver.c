@@ -807,6 +807,50 @@ limits(void)
 	CHECK(wake == 48 + 1, "wake", wake, reader.pos);
 	cases++;
 
+	/*
+	 * A stopped reader takes up to the wpos it copied and no further, and
+	 * a record that copy cuts short stays open; a second stop is no load.
+	 */
+	place(&reader, LANE_SIZE, 0);
+	put_header(0, 40);
+	put_header(64, 8);
+	erx_lane_hdr_wpos_store(header(), 64);
+	CHECK(erx_lane_reader_stop(&reader), "stop", reader.fault, 0);
+	CHECK(take_at(&reader, 96, BIG, &part) == ERX_LANE_TOOK &&
+	    part.closed && part.len == 40, "take before the stop", part.len, 40);
+	CHECK(take_at(&reader, 96, BIG, &part) == ERX_LANE_EMPTY &&
+	    reader.pos == 64, "take past the stop", reader.pos, 64);
+	CHECK(erx_lane_reader_stop(&reader) && take_at(&reader, 96, BIG,
+	    &part) == ERX_LANE_EMPTY, "second stop", reader.pos, 64);
+	cases++;
+	place(&reader, LANE_SIZE, 0);
+	put_header(0, 40);
+	erx_lane_hdr_wpos_store(header(), 32);
+	CHECK(erx_lane_reader_stop(&reader), "stop in a record", reader.fault,
+	    0);
+	CHECK(take_at(&reader, 64, BIG, &part) == ERX_LANE_TOOK &&
+	    part.copied == 16 && !part.closed, "cut record's part",
+	    part.copied, 16);
+	CHECK(take_at(&reader, 64, BIG, &part) == ERX_LANE_EMPTY &&
+	    reader.phase == ERX_LANE_IN_BODY && reader.body_left == 24,
+	    "cut record stays open", reader.body_left, 24);
+	cases++;
+	/* The stop's one load is checked as a take's is, and refuses for good. */
+	place(&reader, LANE_SIZE, 0);
+	erx_lane_hdr_wpos_store(header(), 8);
+	CHECK(!erx_lane_reader_stop(&reader) &&
+	    reader.fault == ERX_LANE_WPOS_UNALIGNED, "unaligned stop",
+	    reader.fault, ERX_LANE_WPOS_UNALIGNED);
+	CHECK(!erx_lane_reader_stop(&reader) && take_at(&reader, 0, BIG,
+	    &part) == ERX_LANE_MALFORMED, "refused stop", reader.fault, 0);
+	cases++;
+	place(&reader, LANE_SIZE, 0);
+	erx_lane_hdr_wpos_store(header(), LANE_SIZE + 16);
+	CHECK(!erx_lane_reader_stop(&reader) &&
+	    reader.fault == ERX_LANE_WPOS_AHEAD, "stop ahead", reader.fault,
+	    ERX_LANE_WPOS_AHEAD);
+	cases++;
+
 	printf("limits: cases=%lu\n", cases);
 	return (0);
 }

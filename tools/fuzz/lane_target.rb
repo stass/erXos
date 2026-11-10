@@ -5,8 +5,9 @@
 # The lane reader over a hostile producer's side. Lane scripts in
 # tools/fuzz/lane_fuzz.c's format: a record of 40 bytes published whole and
 # in parts, read with small and large buffers and an armed take, on each
-# area size and start position; one longer than the area; and one refusal
-# of each wpos check.
+# area size and start position; one longer than the area; one refusal
+# of each wpos check; and a stop that cuts a record, the producer then
+# publishing the rest past it.
 record = [3, 40].pack('CV') + [1, 2].pack('Cv') + [5, 5].pack('Cv') + [1, 4].pack('Cv') +
          [5, 1000].pack('Cv') + [6, 1000].pack('Cv')
 Erx::PackFuzz.declare_target(
@@ -18,6 +19,8 @@ Erx::PackFuzz.declare_target(
     'ahead' => "\x00".b + [0, 8192].pack('CQ<') + [5, 16].pack('Cv'),
     'words' => "\x00".b + [2, 2, 40].pack('CvQ<') + [4, 32].pack('CQ<') + [3, 64].pack('CV') + [1, 6].pack('Cv') +
                [5, 100].pack('Cv'),
+    'stop' => "\x00".b + [3, 40].pack('CV') + [1, 2].pack('Cv') + [7].pack('C') + [1, 4].pack('Cv') +
+              [5, 1000].pack('Cv') + [5, 1000].pack('Cv'),
     'too-long' => "\x00".b + [3, 0x1000001].pack('CV') + [1, 1].pack('Cv') + [5, 16].pack('Cv')
   }
 )

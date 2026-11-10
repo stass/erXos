@@ -16,6 +16,8 @@
  *   4  need = any 8-byte value
  *   5  take with a 2-byte max
  *   6  armed take with a 2-byte max
+ *   7  stop: the reader fixes wpos at what it loads, and every later take
+ *      is judged against that copy
  *
  * The harness writes the producer's side only through atomic stores and
  * keeps a plain copy of the area, so after every take it can check that
@@ -143,7 +145,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	erx_lane_part_t part;
 	erx_lane_status_t st;
 	uint64_t area, base, before, last_rpos, op, value, wake, word, wpos;
-	bool refused = false;
+	uint64_t stop_wpos = 0;
+	bool refused = false, stopped = false;
 
 	if (!script_take(&s, 1, &value))
 		return (0);
@@ -162,7 +165,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	last_rpos = base;
 
 	while (script_take(&s, 1, &op)) {
-		switch (op % 7) {
+		switch (op % 8) {
 		case 0:
 			if (!script_take(&s, 8, &wpos))
 				return (0);
@@ -190,11 +193,22 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				return (0);
 			erx_lane_hdr_need_store(header, value);
 			break;
+		case 7:
+			if (erx_lane_reader_stop(&reader)) {
+				check(!refused);
+				if (!stopped)
+					stop_wpos = wpos;
+				stopped = true;
+			} else {
+				check(reader.phase == ERX_LANE_REFUSED);
+				refused = true;
+			}
+			break;
 		default:
 			if (!script_take(&s, 2, &value))
 				return (0);
 			before = reader.pos;
-			if (op % 7 == 5) {
+			if (op % 8 == 5) {
 				st = erx_lane_take(&reader, buf, (size_t)value, &part);
 			} else {
 				st = erx_lane_take_armed(&reader, buf, (size_t)value,
@@ -202,8 +216,9 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				erx_lane_rpage_wake_load(rpage, &wake);
 				check(refused || wake == (before & ~UINT64_C(15)) + 1);
 			}
-			judge(&reader, st, &part, before, wpos, &last_rpos,
-			    (size_t)value, &refused);
+			judge(&reader, st, &part, before,
+			    stopped ? stop_wpos : wpos, &last_rpos, (size_t)value,
+			    &refused);
 			break;
 		}
 	}

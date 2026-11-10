@@ -140,14 +140,38 @@ module Erx
                            'SdC5=SdCall(fun()->SdLp=spawn_link(erts@erxos,timer,sleep,[infinity]),' \
                            'receive {\'EXIT\',SdLp,SdLx}->SdLx after 60000->timeout end end),' \
                            'SdB2=[SdBlocked(SdCb,500)||SdCb<-[SdC2,SdC3,SdC4,SdC5]]'
+    # The burst (D17 of docs/design-runtime.md, the finish): SdBurst runs in erts and, told
+    # {sd_go, R, Agent}, which arrives as every message from another domain does, in
+    # {erx_origin, D, Msg} (edit 16 of docs/design-runtime.md), sends BURST messages
+    # {sd_burst, I} to R in order, then PADDING of sd_pad, which R gets enveloped too, waits until its system side's port counts them all sent into the lane (the
+    # counts' first word, erx_lane_drv.h), so the burst is published, and kills Agent, which
+    # halts erts; it waits on, so its end is erts's. SdCollect: a system-domain process that traps exits, links to the burst's
+    # process P and gathers what arrives until P's 'EXIT'; it answers
+    # {sd_collected, R, {Count, InOrder, Exit}}. The domain service ends erts's side only
+    # after the finish has delivered every published frame, so the whole burst comes before
+    # the exit.
+    BURST = 500
+    PADDING = 16
+    SERVICE_KILL_BURST = "SdBurst=fun()->receive {erx_origin,_,{sd_go,SdTr,SdTa}}->ok end,SdTpt=hd([SdTq||SdTq<-erlang:ports()," \
+                         'erlang:port_info(SdTq,name)=:={name,"erx_lane system"}]),' \
+                         'SdTsent=fun()-><<SdTn:64,_/binary>>=iolist_to_binary(erlang:port_control(SdTpt,0,[])),SdTn end,' \
+                         "SdT0=SdTsent(),[SdTr!{sd_burst,SdTi}||SdTi<-lists:seq(1,#{BURST})],[SdTr!sd_pad||_<-lists:seq(1,#{PADDING})]," \
+                         "SdTw=fun SdTwf(0)->ok;SdTwf(SdTk)->case SdTsent()>=SdT0+#{BURST + PADDING} of true->ok;" \
+                         'false->timer:sleep(1),SdTwf(SdTk-1) end end,SdTw(5000),exit(SdTa,kill),receive after infinity->ok end end,' \
+                         'SdCollect=fun(SdTp)->SdTs=self(),spawn(fun()->process_flag(trap_exit,true),link(SdTp),' \
+                         'SdTs!{sd_collecting,self()},SdTl=fun SdTlf(SdTacc)->receive {erx_origin,_,{sd_burst,SdTj}}->SdTlf([SdTj|SdTacc]);' \
+                         "{erx_origin,_,sd_pad}->SdTlf(SdTacc);{'EXIT',SdTp,SdTx}->{lists:reverse(SdTacc),SdTx} after 60000->" \
+                         '{lists:reverse(SdTacc),timeout} end end,{SdTgot,SdTex}=SdTl([]),SdTs!{sd_collected,self(),' \
+                         '{length(SdTgot),SdTgot=:=lists:seq(1,length(SdTgot)),SdTex}} end),' \
+                         'receive {sd_collecting,SdTc}->SdTc end end'
     # A watcher of a process of peer, then peer's system side's port, found by its open
     # command, whose last word is the domain's node (erx_connections:open/3), ended with
     # {domain_down, D2, x}, D2 erts's id and not peer's: the watcher's link and monitor
     # fire noconnection (edit 56 of docs/design-runtime.md), and peer stops, its system
     # side lost (docs/design-system.md, "A lost system connection ends the domain"). Then a
     # watcher of a process of erts, and erts made to kill its own agent, its pid asked of
-    # erts first, since the system domain may only send to it, with the domain service
-    # suspended until erts no longer answers and the watcher's spawn_request into it is
+    # erts first, since the system domain may only send to it, by SdBurst behind its burst,
+    # with the domain service suspended until erts no longer answers and the watcher's spawn_request into it is
     # made, so the request is pending as the side ends, as are the library calls of
     # SERVICE_KILL_PENDING; SERVICE_KILL_RPC's call runs in erts as it halts. erts halts
     # with status 69, and the link, the monitor and the spawn all fire
@@ -155,7 +179,7 @@ module Erx
     # SdE1 and SdE2 are the deaths after each, SdL1 the domains still alive after the
     # first, SdV1 and SdV2 what the watchers saw, SdG2 the probe's verdict, SdB1 and SdB2 whether each
     # library call was blocked in its request before erts's side ended, SdV3 what the
-    # library calls returned.
+    # library calls returned, SdV4 what the burst's collector gathered.
     SERVICE_KILL_ENDS = 'SdPp=spawn(peer@erxos,timer,sleep,[infinity]),SdW1=SdWatch(SdPp),SdW1!sd_go,' \
                         'SdPort=hd([SdPt||SdPt<-erlang:ports(),{name,SdNm}<-[erlang:port_info(SdPt,name)],' \
                         'lists:suffix(" peer@erxos",SdNm)]),' \
@@ -163,20 +187,21 @@ module Erx
                         'SdV1=receive {sd_watched,SdW1,SdV1w}->SdV1w after 60000->timeout end,' \
                         "SdPe=spawn(erts@erxos,timer,sleep,[infinity]),SdW2=SdWatch(SdPe),#{SERVICE_KILL_RPC}," \
                         'SdAgent=erpc:call(erts@erxos,erlang,whereis,[erx_connections],10000),' \
-                        'sys:suspend(erx_domain_srv),erpc:cast(erts@erxos,erlang,exit,[SdAgent,kill]),' \
+                        'sys:suspend(erx_domain_srv),SdTp=spawn(erts@erxos,SdBurst),SdTr=SdCollect(SdTp),SdTp!{sd_go,SdTr,SdAgent},' \
                         'SdG2=SdGone(erts@erxos,100),SdW2!{sd_spawn,erts@erxos},' \
                         "receive {sd_spawned,SdW2}->ok after 10000->timeout end,#{SERVICE_KILL_PENDING}," \
                         'sys:resume(erx_domain_srv),' \
                         'SdE2=SdUntil(2,600),SdV2=receive {sd_watched,SdW2,SdV2w}->SdV2w after 60000->timeout end,' \
-                        'SdV3=[receive {sd_called,SdCk,SdCv}->SdCv after 60000->timeout end||SdCk<-[SdC1,SdC2,SdC3,SdC4,SdC5]]'
+                        'SdV3=[receive {sd_called,SdCk,SdCv}->SdCv after 60000->timeout end||SdCk<-[SdC1,SdC2,SdC3,SdC4,SdC5]],' \
+                        'SdV4=receive {sd_collected,SdTr,SdTv}->SdTv after 60000->timeout end'
     # Prints the answer, ends the two domains, prints how they ended, then kills the
     # service. The line starts with a binding, so the shell's echo of it starts neither
     # {service_kill nor {domain_ends, and only the printed answers match.
     SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
-                              "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL}," \
+                              "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL},#{SERVICE_KILL_BURST}," \
                               'SdL=SdWait(600),' \
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
-                              "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3}])," \
+                              "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
       lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,ready}" }.join(',')
@@ -188,14 +213,15 @@ module Erx
     # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
     # then erts halted with status 69, its watcher told {domain_down, Erts, {halt, 69}} by
     # the link, the monitor and the spawn's error reply, and the library calls given
-    # stock's results for a node gone down.
+    # stock's results for a node gone down, and the whole burst before erts's exit.
     DOMAIN_ENDS_ANSWER = begin
       erts = DOMAINS.fetch('erts')
       peer = DOMAINS.fetch('peer')
       down = "{domain_down,#{erts},{halt,69}}"
       "{domain_ends,[{#{peer},stopped}],[{#{erts},erts@erxos,ready}],[noconnection,noconnection],gone," \
         "[{#{erts},{halt,69}},{#{peer},stopped}],[#{down},#{down},{error,#{down}}]," \
-        'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection]}'.freeze
+        'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection],' \
+        "{#{BURST},true,#{down}}}".freeze
     end
     DOMAIN_ENDS_START = /\A\{domain_ends,/n
     # init's slogan as it halts the runtime once the permanent application erx_domain has

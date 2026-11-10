@@ -68,6 +68,8 @@ class LaneTest < Minitest::Test
                                           'if (item->iov[i].len >= ERX_FRAME_MAX - total ||'],
     'a put past the last position accepted' => ['} else if (__builtin_add_overflow(writer->pos,',
                                                 '} else if (0 && __builtin_add_overflow(writer->pos,'],
+    'a stopped reader loads wpos again' => ["\tif (reader->stopped)\n\t\twpos = reader->stop_wpos;", "\tif (0)\n\t\twpos = reader->stop_wpos;"],
+    'a stop that skips its check' => ["\tif (fault != ERX_LANE_SOUND) {\n\t\t(void)lane_refuse(reader, fault);", "\tif (0) {\n\t\t(void)lane_refuse(reader, fault);"],
     'a crossed wake not rung' => ['return (lane_crossed(published, writer->pos, wake));', 'return (false);']
   }.freeze
 
@@ -101,7 +103,7 @@ class LaneTest < Minitest::Test
   end
 
   def test_positions_and_lengths_at_their_limits
-    assert_equal({ 'cases' => 42 }, counters(run_mode(driver, 'limits').fetch('limits')))
+    assert_equal({ 'cases' => 46 }, counters(run_mode(driver, 'limits').fetch('limits')))
   end
 
   def test_seeded_failures_are_caught

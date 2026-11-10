@@ -57,7 +57,8 @@ class SystemDomainTest < Minitest::Test
     down = '{domain_down,5,{halt,69}}'
     good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,ready}],[noconnection,noconnection],gone,' \
                 "[{5,{halt,69}},{6,stopped}],[#{down},#{down},{error,#{down}}]," \
-                'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection]}'
+                'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection],' \
+                "{500,true,#{down}}}"
     ends.fetch(:verify).call("#{good_ends}\r\n")
     # erts stopped with peer, or ended otherwise than by the halt, or not at all; a watcher
     # told noconnection for erts's end (no edit 56) or erts's reason for peer's end (no
@@ -72,8 +73,10 @@ class SystemDomainTest < Minitest::Test
      good_ends.sub('{badrpc,nodedown}', "{badrpc,{'EXIT',#{down}}}"),
      good_ends.sub('{exit,{nodedown,erts@erxos}}', "{exit,#{down}}"),
      good_ends.sub('{error,{erpc,noconnection}}', "{error,{erpc,#{down}}}"),
-     good_ends.sub('noconnection,noconnection]}', "{error,#{down}},{error,#{down}}]}"),
-     good_ends.sub('noconnection,noconnection]}', "#{down},#{down}]}")].each do |line|
+     good_ends.sub('noconnection,noconnection],', "{error,#{down}},{error,#{down}}],"),
+     good_ends.sub('noconnection,noconnection],', "#{down},#{down}],"),
+     # the burst's tail lost, or the burst after the exit
+     good_ends.sub("{500,true,#{down}}}", "{437,true,#{down}}}"), good_ends.sub("{500,true,#{down}}}", '{500,true,timeout}}')].each do |line|
       assert_raises(Erx::Error) { ends.fetch(:verify).call("#{line}\r\n") }
     end
     # The line as a boot printed it, after the shell's prompt.
