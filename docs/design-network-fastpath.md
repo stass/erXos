@@ -164,11 +164,13 @@ buffer, a queue of binaries (`erx_tcp_sndbuf`). `erx_tcp_output` decides
 one segment or run per pass of its `again` loop by the run rule of
 [Output makes runs](#output-makes-runs) and commits it, copying the
 control block in `commit/6`, `after_send/3` and `done/2`.
-`erx_net_frame:tcp/3` cuts a run into its segments
-(`erx_tcp_output:segments/1`) and encodes each segment's TCP header and
-its options (`erx_tcp_wire:encode/4`, `add_options/1`) and the IP and
-link headers, the checksum delayed when the transport finishes it, so the frame
-layer's work is still per segment. The send log inserts one range per
+`erx_net_frame:tcp/4` makes a run a `#run{}` over the connection's
+cached template, which the frame layer cuts with `cut/1` for a transport
+that finishes nothing and hands whole to one that does; a segment that is
+not a run is encoded as before (`erx_tcp_wire:encode/4`, `add_options/1`,
+the IP and link headers, the checksum delayed when the transport finishes
+it). The tap cuts a run with `cut/1` in Erlang and writes it frame by
+frame, so a run's frames still cost their headers and checksums in Erlang. The send log inserts one range per
 run. The step's frames go to the driver in one `{transmit, Frames}`
 message, and the driver joins every `{transmit, ...}` waiting in its
 mailbox to its backlog and hands each frame to its transport. The tap
@@ -461,8 +463,10 @@ design.
 The connection keeps the template its runs share in its state: the IP
 and TCP headers, encoded once by `erx_net_frame:template/2` from the path
 and the connection's negotiated options. It is built again only when the
-configuration generation moves, the path changes, or the connection's
-MSS or options change, all of which the loop notices. The link
+path, the ports, the ECN field of the type of service or the timestamps'
+presence differ from those it was built for (`erx_net_frame:tcp/4`); the
+path changes only when the configuration generation moves, so the
+connection compares it as the same term. The link
 header comes from the next hop's neighbour row at each output pass, as
 `erx_net_tx:send/2` reads the row, and the row keeps it encoded. A run
 carries the template by reference and its seven values as integers, so

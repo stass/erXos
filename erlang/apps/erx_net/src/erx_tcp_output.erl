@@ -109,8 +109,9 @@ the context's credit of frames leave it.
 A segment of new data whose header every frame could share is sent as a run
 (docs/design-network-fastpath.md, "Output makes runs"): the whole segments the windows,
 the credit and IP_MAXPACKET allow, in one pass, as FreeBSD's TSO sends a burst. A run's
-outgoing segment carries `seg`, and `segments/1` cuts it into the frames per-segment
-output sends, which the frame layer encodes; the control block after a run is the one
+outgoing segment carries `seg`, which the frame layer makes a run of frames over one
+template (erx_net_frame:tcp/3); `segments/1` cuts it into the segments per-segment output
+sends, the tests' oracle of that cut, and the control block after a run is the one
 after its segments one pass each (`output/3` with runs off, the tests' oracle).
 
 Departures, each from erXos's model:

@@ -11,6 +11,7 @@
 -behaviour(erx_net_driver).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("erx_net_frame.hrl").
 -include("erx_ip4_wire.hrl").
 -include("erx_tcp_wire.hrl").
 
@@ -42,6 +43,16 @@ event({stub, Events}, T) -> {Events, T};
 event(_Msg, T) -> {[], T}.
 
 transmit(_Frame, #{room := 0} = T) -> {full, T};
+%% A run takes the frames there is room for, as a tap that fills in the middle of one.
+transmit(#run{} = Run, #{test := Test, room := Room} = T) ->
+    Frames = erx_net_frame:cut(Run),
+    N = min(Room, length(Frames)),
+    [Test ! {sent, iolist_to_binary(F)} || F <- lists:sublist(Frames, N)],
+    Answer = case N =:= length(Frames) of
+                 true -> ok;
+                 false -> {ok, N}
+             end,
+    {Answer, T#{room := Room - N}};
 transmit(Frame, #{test := Test, room := Room} = T) ->
     Test ! {sent, iolist_to_binary(Frame)},
     {ok, T#{room := Room - 1}}.
@@ -81,6 +92,7 @@ driver_test_() ->
     with_tables([fun refused_batch_is_dropped_whole/0,
                  fun batches_are_cut_to_the_merge_limit/0,
                  fun flap_while_full_is_not_told/0,
+                 fun a_run_taken_in_part_waits_with_its_units/0,
                  fun silent_link_is_told_once_room_returns/0,
                  fun backlog_never_exceeds_the_transmit_credit/0,
                  fun queued_transmits_leave_together/0,
@@ -164,6 +176,28 @@ backlog_never_exceeds_the_transmit_credit() ->
     ?assertEqual(Frames, [receive {sent, F} -> F end || _ <- Frames]),
     settle(Driver),
     ?assertEqual(4, erx_net_credit:free(Tx)).
+
+%% A run counts its frames against the credit; a transport with room for two of five takes
+%% those, the run's tail waits with its three units held, and leaves when room comes.
+a_run_taken_in_part_waits_with_its_units() ->
+    Driver = stub(2, 8),
+    {_, Tx} = attached(Driver, 4),
+    Run = #run{template = <<4:4, 5:4, 0, 0:32, 16#4000:16, 64, 6, 0:16, 10, 0, 0, 1, 10, 0, 0, 2,
+                            1:16, 2:16, 0:64, 5:4, 0:60>>,
+               seq = 16#ffffff00, ack = 7, flags = 16#18, win = 100, ts = none, seg = 100,
+               payload = [binary:copy(<<"p">>, 250), binary:copy(<<"q">>, 230)]},
+    Frames = [iolist_to_binary(F) || F <- erx_net_frame:cut(Run)],
+    ?assertEqual(5, erx_net_frame:units([Run])),
+    ok = erx_net_credit:hand(Driver, Tx, erx_net_frame:units([Run]), {transmit, [Run]}),
+    {First, Rest} = lists:split(2, Frames),
+    ?assertEqual(First, [receive {sent, F} -> F after 1000 -> none end || _ <- First]),
+    settle(Driver),
+    ?assertEqual(nothing, nothing(sent)),
+    ?assertEqual(5, erx_net_credit:free(Tx)),
+    Driver ! {stub, room, 10},
+    ?assertEqual(Rest, [receive {sent, F} -> F after 1000 -> none end || _ <- Rest]),
+    settle(Driver),
+    ?assertEqual(8, erx_net_credit:free(Tx)).
 
 %% Every transmit waiting at the driver joins the backlog before the transport is handed
 %% anything, in arrival order: a second transmit queued behind a message that leaves the

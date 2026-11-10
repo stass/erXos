@@ -45,6 +45,7 @@ design places it in the network domain.
 -export([init/1, event/2, transmit/2]).
 
 -include("generated/erx_abi.hrl").
+-include("erx_net_frame.hrl").
 
 -define(RXQ, ?ERX_VIRTIO_NET_QUEUE_RX).
 -define(TXQ, ?ERX_VIRTIO_NET_QUEUE_TX).
@@ -264,8 +265,10 @@ frame(_Short, _Mtu, {Drops, Frames}) ->
 -doc false.
 transmit({_Zone, _Packet}, T) ->
     {{drop, malformed}, T};
-%% Its finish is none: a delayed frame is a shape it does not take.
+%% Its finish is none: a delayed frame or a run is a shape it does not take.
 transmit({csum, _Start, _Field, _Frame}, T) ->
+    {{drop, malformed}, T};
+transmit(#run{}, T) ->
     {{drop, malformed}, T};
 transmit(Frame, #t{mtu = Mtu} = T) ->
     case iolist_size(Frame) of

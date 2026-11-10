@@ -39,7 +39,11 @@ receive and transmit credits, the transmit backlog and the link state.
   restarts a supervisor above can count. A transport whose `init` fails is not held: it
   never ran, and its start fails.
 * **Transmitting.** A sender hands `{transmit, Frames}` against the transmit credit, one
-  unit per frame. Each frame's unit is taken when the frame leaves the driver, sent or
+  unit per frame, a run counted by its frames (`erx_net_frame:frames/1`). A transport may
+  take a run's first N frames and answer `{ok, N}`; the run's tail
+  (`erx_net_frame:run_tail/2`) goes back to the head of the backlog and is handed to it
+  next, so only the transport's own `full` blocks the backlog.
+  Each frame's unit is taken when the frame leaves the driver, sent or
   dropped, not when its message arrives, so the credit bounds the mailbox and the backlog
   together; a frame the transport cannot take now (`full`) waits in the backlog, with
   those after it, until the transport's `writable` event. Before it gives the transport
@@ -107,7 +111,8 @@ room to transmit again, or a frame it dropped, by reason (`too_long`, `stranger`
 
 -callback init(Config :: map()) -> {ok, link_info(), T :: term()} | ignore | {error, Reason :: term()}.
 -callback event(Msg :: term(), T) -> {[event()], T} | {stop, Reason :: term()} when T :: term().
--callback transmit(erx_net_frame:frame(), T) -> {ok | full | {drop, Reason :: atom()}, T}
+-callback transmit(erx_net_frame:frame(), T) ->
+    {ok | {ok, Taken :: pos_integer()} | full | {drop, Reason :: atom()}, T}
     when T :: term().
 
 -record(state, {transport :: module(),
@@ -289,7 +294,10 @@ queued_transmits(Backlog) ->
     end.
 
 %% Gives the transport the backlog's frames in order until it is empty or the transport
-%% is full; each frame that leaves, sent or dropped, takes its unit.
+%% is full; each frame that leaves, sent or dropped, takes its unit, a run its frames'
+%% units (erx_net_frame:frames/1). When a transport takes a run's first N frames, the run's
+%% tail goes back to the head of the backlog and is handed to it next, so the transport
+%% itself answers `full`, arming its wake, or drops it: blocked always means a wake is armed.
 drain(#state{blocked = true} = S) ->
     S;
 drain(#state{backlog = Backlog0, transport = Transport, t = T0, tx = Tx} = S) ->
@@ -297,13 +305,18 @@ drain(#state{backlog = Backlog0, transport = Transport, t = T0, tx = Tx} = S) ->
         {empty, _} ->
             S;
         {{value, Frame}, Backlog} ->
+            Units = erx_net_frame:frames(Frame),
             case Transport:transmit(Frame, T0) of
                 {ok, T} ->
-                    ok = erx_net_credit:take(Tx, 1),
+                    ok = erx_net_credit:take(Tx, Units),
                     drain(S#state{backlog = Backlog, t = T});
+                {{ok, N}, T} when is_integer(N), N > 0, N < Units ->
+                    ok = erx_net_credit:take(Tx, N),
+                    drain(S#state{backlog = queue:in_r(erx_net_frame:run_tail(Frame, N), Backlog),
+                                  t = T});
                 {{drop, Reason}, T} ->
-                    ok = erx_net_credit:take(Tx, 1),
-                    drain(count(Reason, 1, S#state{backlog = Backlog, t = T}));
+                    ok = erx_net_credit:take(Tx, Units),
+                    drain(count(Reason, Units, S#state{backlog = Backlog, t = T}));
                 {full, T} ->
                     S#state{t = T, blocked = true}
             end

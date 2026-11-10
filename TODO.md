@@ -134,12 +134,17 @@ it; git history is the record of completed work.
      sends whole segments of new data as one run in one pass, an outgoing segment with
      `seg`, and `erx_tcp_output:segments/1` cuts it into the segments per-segment output
      sends, which `erx_net_frame:tcp/3` encodes one by one; `output/3` with runs off is
-     the oracle of the differential case and its seeded faults. On the FreeBSD test host (median of 5, min-max, against master the same hour) bulk send went from 1,141 (1,138-1,163) to 1,225 (1,216-1,238) Mbit/s, bulk receive 1,914 to 1,913, rr 64 B 16,596 (15,999-17,719) to 15,905 (15,779-16,266) txn/s and 64 B x16 90,075 to 89,739, within their spreads (raw data: ~/erxos-history net-bench-freebsd-fast-p6-2026-11-10, commit 87ecd53); the frame layer still encodes each segment, where the hack that cut in the tap gained 25 percent. What remains:
-     * the frame layer's `#run{}` (link header, template, the seven values, payload),
-       built from `erx_net_frame:template/2` and kept in the connection's state, the
-       driver and `erx_net_tx` counting a run's frames against the credits, the
-       transports' partial take `{ok, N}` with `run_tail/2`, and `erx_net_frame:cut/1`
-       as the Erlang reference, judged against per-segment output;
+     the oracle of the differential case and its seeded faults. On the FreeBSD test host (median of 5, min-max, against master the same hour) bulk send went from 1,141 (1,138-1,163) to 1,225 (1,216-1,238) Mbit/s, bulk receive 1,914 to 1,913, rr 64 B 16,596 (15,999-17,719) to 15,905 (15,779-16,266) txn/s and 64 B x16 90,075 to 89,739, within their spreads (raw data: ~/erxos-history net-bench-freebsd-fast-p6-2026-11-10, commit 87ecd53). The frame layer's runs are in the tree too: `erx_net_frame`'s `#run{}`
+     over the template `template/2` builds and the connection caches (`tcp/4`), `cut/1` as
+     the Erlang reference, judged against the run's segments encoded one by one,
+     `run_tail/2`, the credits counting a run's frames (`frames/1`, `units/1`), and the
+     driver's partial take `{ok, N}`; the tap still cuts a run in Erlang with `cut/1` and
+     sends it frame by frame, so the per-frame encode and checksum remain, where the hack
+     that cut in the tap gained 25 percent. On the FreeBSD test host (median of 5, min-max,
+     two rounds interleaved with master) bulk send went from 1,233 (1,218-1,247) and 1,246
+     (1,239-1,264) to 1,434 (1,428-1,531) and 1,431 (1,421-1,476) Mbit/s, bulk receive and
+     both request-reply workloads within their spreads (raw data: ~/erxos-history
+     net-bench-freebsd-fast-p6b-2026-11-10, commit f706d25). What remains:
      * `c_src/erx_tcp_cut.c` (`erx_tcp_cut_plan`, `erx_tcp_cut_frame`,
        `erx_tcp_cut_header`) with its harness cases, a host test NIF judged by `cut/1`
        (design test 1 and its seeds: PSH on every frame, the sequence number advanced by

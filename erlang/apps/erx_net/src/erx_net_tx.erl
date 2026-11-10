@@ -32,7 +32,7 @@ send(#{link := Link, next_hop := NextHop, src := Src,
     case erx_net_frame:address(Path, Neighbour, Packets) of
         {send, Frames} ->
             ok = hint(Neighbour, If, NextHop),
-            erx_net_credit:hand(Driver, Tx, length(Frames), {transmit, Frames});
+            erx_net_credit:hand(Driver, Tx, erx_net_frame:units(Frames), {transmit, Frames});
         {resolve, Unaddressed} ->
             erx_net_credit:hand(If, IfCredit, 1, {resolve, NextHop, Src, Unaddressed})
     end.

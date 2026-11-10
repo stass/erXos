@@ -16,6 +16,7 @@
 -include("erx_tcp_wire.hrl").
 -include("erx_udp_wire.hrl").
 -include("erx_net_eth.hrl").
+-include("erx_net_frame.hrl").
 -include("erx_ip4_wire.hrl").
 -include("erx_ip6.hrl").
 
@@ -436,18 +437,123 @@ looped_icmpv6_error_finds_the_socket_its_quote_names_test() ->
     %% The same bytes in another zone are an error to no address of the stack.
     ?assertMatch({drop, _}, erx_net_input:classify({frame, eth1, iolist_to_binary(Packet)}, View)).
 
-%% A run (docs/design-network-fastpath.md, "A run") gives the packets of its segments, as
-%% erx_tcp_output:segments/1 cuts it, over IPv4 and IPv6, with the checksum delayed or
-%% finished, and fragmented as its segments would be when a frame is over the MTU.
-run_gives_the_packets_of_its_segments_test() ->
-    {Header, Marks, _} = segment([], 0, true),
-    Run = {Header#tcp{flags = ?TH_ACK bor ?TH_PUSH bor ?TH_FIN}, Marks#{seg => 1000},
-           [binary:copy(<<"r">>, 1700), binary:copy(<<"s">>, 1800)]},
+%% A run (docs/design-network-fastpath.md, "A run") gives the bytes of its segments encoded
+%% one by one, as erx_tcp_output:segments/1 cuts it: over IPv4 and IPv6, with and without
+%% timestamps, PSH and FIN, payloads in random pieces and the last frame short, as one
+%% #run{} that cut/1 cuts when the interface has a finisher and as cut/1's packets when it
+%% has none, through link/3 to Ethernet frames and to the loopback; and fragmented as its
+%% segments would be when a frame is over the MTU, or refused as they would be.
+runs_give_the_bytes_of_their_segments_test() ->
+    rand:seed(exsss, {6, 2, 1}),
+    lists:foreach(fun(_) -> run_case(random_run()) end, lists:seq(1, 600)).
+
+run_case({Path, Run}) ->
     Segments = erx_tcp_output:segments(Run),
-    ?assertEqual(4, length(Segments)),
-    V4 = path(v4("8.8.8.8"), #{}),
-    #{iface := If} = V4,
-    Paths = [V4, V4#{iface := If#{finish := copy}}, path(v6("2001:db8:9::1"), #{}),
-             (path(v6("2001:db8:9::1"), #{}))#{mtu := 900}],
-    [?assertEqual(erx_net_frame:tcp(P, Segments, gen()), erx_net_frame:tcp(P, [Run], gen()))
-     || P <- Paths].
+    case {erx_net_frame:tcp(Path, Segments, gen()), erx_net_frame:tcp(Path, [Run], gen())} of
+        {{ok, Expected, _}, {ok, Got, _}} ->
+            ?assertEqual(finished(Expected), finished(Got)),
+            ?assertEqual(erx_net_frame:units(Expected), erx_net_frame:units(Got)),
+            If = maps:get(iface, Path),
+            ?assertEqual(finished(erx_net_frame:link(If, <<2, 0, 0, 0, 0, 9>>, Expected)),
+                         finished(erx_net_frame:link(If, <<2, 0, 0, 0, 0, 9>>, Got))),
+            Loop = fun(Packets) -> [{Z, iolist_to_binary(P)}
+                                    || {Z, P} <- erx_net_frame:link(If#{link := none}, eth0, Packets)]
+                   end,
+            ?assertEqual(Loop(Expected), Loop(Got));
+        {Expected, Got} ->
+            ?assertEqual(Expected, Got)
+    end.
+
+%% A random run over a random path: the family, the finisher, the MTU (a frame over it
+%% sometimes), the type of service and ECN, the flags, the timestamps or none, the segment
+%% size and a payload of 1 to 5 frames in up to 8 pieces.
+random_run() ->
+    Family = pick([inet, inet6]),
+    Dst = case Family of inet -> v4("8.8.8.8"); inet6 -> v6("2001:db8:9::1") end,
+    Path0 = path(Dst, #{tos => pick([0, 16#b8, 16#ff])}),
+    #{iface := If} = Path0,
+    Seg = rand:uniform(1460),
+    Path = Path0#{iface := If#{finish := pick([none, copy])},
+                  mtu := pick([1500, 1500, 1500, 9000, 39 + Seg, 60 + Seg - 1])},
+    Frames = rand:uniform(5),
+    Size = (Frames - 1) * Seg + rand:uniform(Seg),
+    Flags = ?TH_ACK bor pick([0, ?TH_PUSH, ?TH_FIN, ?TH_PUSH bor ?TH_FIN, ?TH_CWR bor ?TH_ECE]),
+    Ts = pick([none, {rand:uniform(1 bsl 32) - 1, rand:uniform(1 bsl 32) - 1}]),
+    Header = #tcp{sport = rand:uniform(65535), dport = 80, seq = rand:uniform(1 bsl 32) - 1,
+                  ack = rand:uniform(1 bsl 32) - 1, flags = Flags, win = rand:uniform(65536) - 1,
+                  urp = 0, opts = #tcp_opts{ts = Ts}},
+    Marks = #{ecn => pick([0, 1, 2]), df => Family =:= inet orelse pick([true, false]), seg => Seg},
+    {Path, {Header, Marks, pieces(crypto:strong_rand_bytes(Size), rand:uniform(8))}}.
+
+pick(List) -> lists:nth(rand:uniform(length(List)), List).
+
+pieces(Bin, 1) -> [Bin];
+pieces(Bin, N) ->
+    At = rand:uniform(byte_size(Bin) + 1) - 1,
+    <<Head:At/binary, Tail/binary>> = Bin,
+    [Head | pieces(Tail, N - 1)].
+
+%% The bytes of packets or frames, each run cut and each delayed checksum finished.
+finished(Packets) ->
+    lists:flatmap(fun(#run{} = Run) -> [iolist_to_binary(F) || F <- erx_net_frame:cut(Run)];
+                     ({csum, _, _, _} = Delayed) -> [erx_net_frame:finish(Delayed)];
+                     (Packet) -> [iolist_to_binary(Packet)]
+                  end, Packets).
+
+%% A run's tail cuts to the run's last frames, and the credit counts a run by its frames.
+run_tail_cuts_to_the_last_frames_test() ->
+    rand:seed(exsss, {6, 2, 2}),
+    lists:foreach(
+      fun(_) ->
+              {Path, Segment} = random_run(),
+              case erx_net_frame:tcp(Path#{iface := (maps:get(iface, Path))#{finish := copy},
+                                           mtu := 9000}, [Segment], gen()) of
+                  {ok, [#run{} = Run], _} ->
+                      Frames = erx_net_frame:cut(Run),
+                      K = erx_net_frame:frames(Run),
+                      ?assertEqual(length(Frames), K),
+                      [?assertEqual([iolist_to_binary(F) || F <- lists:nthtail(N, Frames)],
+                                    [iolist_to_binary(F)
+                                     || F <- erx_net_frame:cut(erx_net_frame:run_tail(Run, N))])
+                       || N <- lists:seq(1, K - 1)],
+                      ?assertError(_, erx_net_frame:run_tail(Run, K));
+                  {ok, _, _} ->
+                      ok
+              end
+      end, lists:seq(1, 200)),
+    ?assertEqual(1, erx_net_frame:frames(<<"plain">>)).
+
+%% The template is built once for a connection's path, ports, ECN field and timestamps, and
+%% again when one of them differs; a run with options other than the timestamps, or with an
+%% urgent pointer, goes as its segments.
+template_cache_and_irregular_runs_test() ->
+    Path0 = path(v4("8.8.8.8"), #{}),
+    #{iface := If} = Path0,
+    Path = Path0#{iface := If#{finish := copy}},
+    {Header, Marks, _} = segment([], 0, true),
+    Run = {Header, Marks#{seg => 100}, [binary:copy(<<"x">>, 250)]},
+    {ok, [#run{template = T1}], _, Cache} = erx_net_frame:tcp(Path, [Run], gen(), erx_net_frame:no_template()),
+    {ok, [#run{template = T2}], _, Cache} = erx_net_frame:tcp(Path, [Run], gen(), Cache),
+    ?assert(T1 =:= T2),
+    {ok, [#run{template = T3}], _, Cache3} =
+        erx_net_frame:tcp(Path, [setelement(2, Run, Marks#{seg => 100, ecn => 2})], gen(), Cache),
+    ?assertNotEqual(T1, T3),
+    ?assertNotEqual(Cache, Cache3),
+    Sacked = setelement(1, Run, Header#tcp{opts = #tcp_opts{ts = {5, 6}, sacks = [{1, 2}]}}),
+    Urgent = setelement(1, Run, Header#tcp{urp = 7}),
+    [?assertMatch({ok, [_, _, _], _}, erx_net_frame:tcp(Path, [Irregular], gen()))
+     || Irregular <- [Sacked, Urgent]],
+    [?assertNot(lists:any(fun(P) -> is_record(P, run) end,
+                          element(2, erx_net_frame:tcp(Path, [Irregular], gen()))))
+     || Irregular <- [Sacked, Urgent]],
+    %% A cached template serves only a run of the same shape: with the cache of a regular
+    %% run, one with SACK blocks or an IPv4 one without don't-fragment goes as segments.
+    Fragmentable = setelement(2, Run, Marks#{seg => 100, df => false}),
+    [?assertNot(lists:any(fun(P) -> is_record(P, run) end,
+                          element(2, erx_net_frame:tcp(Path, [Irregular], gen(), Cache))))
+     || Irregular <- [Sacked, Fragmentable]],
+    %% Resolution holds a run as its packets, which the neighbour's hold counts.
+    {ok, [#run{} = Whole], _} = erx_net_frame:tcp(Path, [Run], gen()),
+    {resolve, Held} = erx_net_frame:address(Path#{link := neighbour}, none, [Whole]),
+    ?assertEqual([iolist_to_binary(P) || P <- erx_net_frame:cut(Whole)],
+                 [iolist_to_binary(P) || P <- Held]).

@@ -10,7 +10,10 @@ frame's bytes. Built only outside erXos; on FreeBSD the device is `/dev/tapN`. I
 nothing. Each received frame comes as `{sum, Sum, Frame}`, with the network sum the NIF took
 right after the `read` (docs/design-network-stack.md, "Checksums in the copy"). The tap
 finishes checksums in its copy (`finish` `copy`): a delayed frame, `{csum, Start, Field,
-Frame}`, has its checksum finished by the NIF as it hands the frame to `writev`. A frame
+Frame}`, has its checksum finished by the NIF as it hands the frame to `writev`. A run
+(`erx_net_frame:run()`) goes frame by frame, as `erx_net_frame:cut/1` cuts it; when a frame
+after the first N is not taken the answer is `{ok, N}`, and the driver hands the rest again,
+which the tap then answers itself (`full`, armed, or a drop). A frame
 shorter than the Ethernet header is dropped as `malformed`, one longer than the MTU and its
 14-byte header as `too_long`, and one the tap discards as `refused`.
 
@@ -39,6 +42,8 @@ absent). The link is `up` from `init` on.
 -behaviour(erx_net_driver).
 
 -export([init/1, event/2, transmit/2]).
+
+-include("erx_net_frame.hrl").
 
 -define(ETHER_HDR_LEN, 14).
 -define(MTU_DEFAULT, 1500).
@@ -137,6 +142,11 @@ transmit({_Zone, _Packet}, T) ->
     {{drop, malformed}, T};
 transmit(_Frame, #tap{failed = true} = T) ->
     {{drop, refused}, T};
+transmit(#run{link = Link, template = Template, seg = Seg} = Run, #tap{mtu = Mtu} = T) ->
+    case byte_size(Link) + byte_size(Template) + Seg =< Mtu + ?ETHER_HDR_LEN of
+        true -> send_run(erx_net_frame:cut(Run), 0, T);
+        false -> {{drop, too_long}, T}
+    end;
 %% The NIF joins a frame of many pieces before it checks its size, so the size is checked
 %% here first, as the pipe checks it.
 transmit({csum, _Start, _Field, Bytes} = Frame, #tap{mtu = Mtu} = T) ->
@@ -153,6 +163,16 @@ transmit(Frame, #tap{mtu = Mtu} = T) when is_list(Frame) ->
     end;
 transmit(Frame, T) ->
     send(Frame, T).
+
+%% A run's frames, each no longer than its first, which was checked; Taken of them went.
+send_run([], _Taken, T) ->
+    {ok, T};
+send_run([Frame | Frames], Taken, T0) ->
+    case {send(Frame, T0), Taken} of
+        {{ok, T}, _} -> send_run(Frames, Taken + 1, T);
+        {{_FullOrDrop, _} = Answer, 0} -> Answer;
+        {{_FullOrDrop, T}, _} -> {{ok, Taken}, T}
+    end.
 
 send(Frame, #tap{handle = Handle} = T) ->
     case erx_tap_nif:send(Handle, Frame) of

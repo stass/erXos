@@ -106,6 +106,7 @@ generator split from the grant's.
                 connect :: none | {gen_server:from(), integer() | infinity},
                 recv = none :: none | {gen_server:from(), non_neg_integer(), integer() | infinity},
                 path :: erx_net_frame:path(),
+                template = erx_net_frame:no_template() :: erx_net_frame:template_cache(),
                 route = ok :: ok | {error, ehostunreach},
                 config_gen :: non_neg_integer(),
                 gen :: erx_net_rand:gen(),
@@ -282,9 +283,10 @@ configured(#state{config_gen = Gen0, path = #{src := Src}, tcb = #tcb{remote = {
             end
     end.
 
-perform({transmit, Segments}, #state{path = Path, gen = Gen0} = S) ->
-    case erx_net_frame:tcp(Path, Segments, Gen0) of
-        {ok, Packets, Gen} -> sent(erx_net_tx:send(Path, Packets), tx_full, S#state{gen = Gen});
+perform({transmit, Segments}, #state{path = Path, gen = Gen0, template = Template0} = S) ->
+    case erx_net_frame:tcp(Path, Segments, Gen0, Template0) of
+        {ok, Packets, Gen, Template} ->
+            sent(erx_net_tx:send(Path, Packets), tx_full, S#state{gen = Gen, template = Template});
         {error, Reason} -> count(Reason, S)
     end;
 perform({deliver, Data}, #state{rcvq = Q, rcv_bytes = N} = S) ->

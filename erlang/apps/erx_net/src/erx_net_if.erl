@@ -266,7 +266,7 @@ step(Event, #state{core = Core0} = S) ->
     lists:foldl(fun perform/2, S#state{core = Core}, Actions).
 
 perform({transmit, Frames}, #state{driver = Driver, tx = Tx} = S) ->
-    case erx_net_credit:hand(Driver, Tx, length(Frames), {transmit, Frames}) of
+    case erx_net_credit:hand(Driver, Tx, erx_net_frame:units(Frames), {transmit, Frames}) of
         ok -> S;
         full -> step({drop, tx_full}, S)
     end;

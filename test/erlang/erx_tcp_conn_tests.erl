@@ -131,7 +131,7 @@ established(SynAckOpts) ->
 %% The loop's invariant: a hint is armed no later than the step's earliest deadline.
 assert_armed(Conn) ->
     {state, Tcb, _Socket, _Key, _Credit, _Owner, _Ref, _Active, _Mode, _Q, _N, _Held, _Eof,
-     _Error, _Ended, _Told, _Finished, _Connect, _Recv, _Path, _Route, _Gen, _Rand, Armed,
+     _Error, _Ended, _Told, _Finished, _Connect, _Recv, _Path, _Template, _Route, _Gen, _Rand, Armed,
      _Counters}
         = sys:get_state(Conn),
     case erx_tcp:next_deadline(Tcb) of

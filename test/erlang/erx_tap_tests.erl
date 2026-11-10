@@ -18,6 +18,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("erx_ip4_wire.hrl").
 -include("erx_tcp_wire.hrl").
+-include("erx_net_frame.hrl").
 
 -define(LLADDR, <<2, 0, 0, 0, 0, 1>>).
 -define(MTU, 1500).
@@ -307,6 +308,45 @@ transport_receives_and_transmits_test() ->
          || Bad <- [{csum, 13, 2, frame(9, 60)}, {csum, 14, 46, frame(9, 61)}]],
         ?assertEqual({error, timeout}, socket:recv(Far, 0, 100))
     end).
+
+%% A run goes frame by frame, as erx_net_frame:cut/1 cuts it; one whose full frame is over
+%% the MTU is dropped before the NIF.
+transport_sends_a_run_frame_by_frame_test() ->
+    with_socket_pair(fun(Near, Far) ->
+        {ok, _, T0} = erx_tap:init(#{fd => near_fd(Near), lladdr => ?LLADDR}),
+        Run = run(100, 450),
+        ?assertMatch({ok, _}, erx_tap:transmit(Run, T0)),
+        [?assertEqual({ok, iolist_to_binary(F)}, socket:recv(Far, 0, ?WAIT_MS))
+         || F <- erx_net_frame:cut(Run)],
+        ?assertMatch({{drop, too_long}, _}, erx_tap:transmit(run(?MTU, 2 * ?MTU), T0)),
+        ?assertEqual({error, timeout}, socket:recv(Far, 0, 100)),
+        flush_more()
+    end).
+
+%% A device that fills in the middle of a run takes its first frames and answers how many;
+%% a full one takes none.
+transport_takes_part_of_a_run_test() ->
+    with_fifo_path(fun(Path) ->
+        {ok, _, T0} = erx_tap:init(#{device => Path, lladdr => ?LLADDR}),
+        flush_more(),
+        _ = transport_fill(T0, 0),
+        Run = run(10, 200),
+        ?assertMatch({full, _}, erx_tap:transmit(Run, T0)),
+        _ = read_exactly(Path, 600),
+        {{ok, N}, _} = erx_tap:transmit(Run, T0),
+        ?assert(N > 0 andalso N < erx_net_frame:frames(Run))
+    end).
+
+%% A run of Size payload bytes in frames of Seg, over IPv4 with the timestamps.
+run(Seg, Size) ->
+    Header = #tcp{sport = 1, dport = 2, seq = 0, ack = 0, flags = 0, win = 0, urp = 0,
+                  opts = #tcp_opts{ts = {1, 2}}},
+    {ok, Template} = erx_net_frame:template(#{family => inet, src => <<10, 0, 0, 1>>,
+                                              dst => <<10, 0, 0, 2>>, hlim => 64, tos => 0},
+                                            {Header, #{ecn => 0, df => true}, []}),
+    #run{link = <<2, 0, 0, 0, 0, 2, ?LLADDR/binary, 8, 0>>, template = Template,
+         seq = 16#fffffff0, ack = 9, flags = 16#19, win = 512, ts = {3, 4}, seg = Seg,
+         payload = [binary:copy(<<"r">>, Size div 2), binary:copy(<<"s">>, Size - Size div 2)]}.
 
 %% A batch that reaches its bound sends the next `more`; the last one arms the device.
 transport_rearms_after_a_full_batch_test() ->

@@ -37,8 +37,8 @@ class ErxNetFrameTest < Minitest::Test
     broadcast_to_a_unicast_address: ['erx_net_frame', '#{link := ethernet}, <<16#ffffffff:32>>) -> ?ETHER_BROADCAST;',
                                      '#{link := ethernet}, <<16#ffffffff:32>>) -> <<2, 0, 0, 0, 0, 7>>;',
                                      'looped_broadcast_and_multicast_find_a_local_socket_test'],
-    loopback_drops_the_zone: ['erx_net_frame', '[{Zone, finished(P)} || P <- Packets].',
-                              '[{element(1, {global, Zone}), finished(P)} || P <- Packets].',
+    loopback_drops_the_zone: ['erx_net_frame', '[{Zone, Finished} || P <- Packets, Finished <- finished(P)].',
+                              '[{element(1, {global, Zone}), Finished} || P <- Packets, Finished <- finished(P)].',
                               'looped_icmpv6_error_finds_the_socket_its_quote_names_test'],
     # A delayed frame whose Start still counts from the IP header has its sum taken over
     # the wrong bytes and its field looked for 14 bytes early.
@@ -57,7 +57,28 @@ class ErxNetFrameTest < Minitest::Test
     # alone.
     delayed_field_without_the_pseudo_header: ['erx_tcp_wire', 'erx_net_sum:add(PseudoSum, Len)',
                                               'erx_net_sum:add(0, Len)',
-                                              'delayed_segments_finish_to_the_senders_bytes_test']
+                                              'delayed_segments_finish_to_the_senders_bytes_test'],
+    # The cut of a run (cut/1), against the run's segments encoded one by one: a last frame
+    # one byte short, the timestamps only in the first frame, every frame at the first
+    # sequence number, the IPv4 header checksum taken before the frame's length is stored,
+    # PSH on every frame; and a run's tail one payload piece short.
+    run_without_its_last_byte: ['erx_net_frame', "when Left =< Seg ->\n    [Payload];",
+                                "when Left =< Seg ->\n    [element(1, split(Payload, Left - 1))];",
+                                'runs_give_the_bytes_of_their_segments_test'],
+    run_options_only_in_the_first_frame: ['erx_net_frame', '[Link, Ip(Len), Head, <<Sum:16>>, Tail | Slice]',
+                                          '[Link, Ip(Len), Head, <<Sum:16>>, case I of 0 -> Tail; _ -> <<0:16>> end | Slice]',
+                                          'runs_give_the_bytes_of_their_segments_test'],
+    run_sequence_not_advanced: ['erx_net_frame', '((Seq + I * Seg) band 16#ffffffff):32, Ack:32, Off:4,',
+                                'Seq:32, Ack:32, Off:4,', 'runs_give_the_bytes_of_their_segments_test'],
+    run_ipv4_checksum_before_the_length: [
+      'erx_net_frame', 'Sum = bnot erx_bytes:inet_csum(0, [Head, Src, Dst]) band 16#ffff,',
+      'Sum = bnot erx_bytes:inet_csum(0, [<<4:4, 5:4, Tos, 0:16, IdFrag:32, Ttl, Proto>>, Src, Dst]) band 16#ffff,',
+      'runs_give_the_bytes_of_their_segments_test'
+    ],
+    run_push_on_every_frame: ['erx_net_frame', 'Flags band bnot (?TH_PUSH bor ?TH_FIN).', 'Flags band bnot ?TH_FIN.',
+                              'runs_give_the_bytes_of_their_segments_test'],
+    run_tail_a_piece_short: ['erx_net_frame', 'payload = Rest}.', 'payload = tl(Rest)}.',
+                             'run_tail_cuts_to_the_last_frames_test']
   }.freeze
 
   def test_framing_cases_pass_under_eunit

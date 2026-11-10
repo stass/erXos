@@ -46,6 +46,8 @@ mode of a process end (false when absent).
 
 -export_type([far/0]).
 
+-include("erx_net_frame.hrl").
+
 -define(ETHER_HDR_LEN, 14).
 -define(ACTIVE, 64).
 -define(BATCH_BYTES, 65536).
@@ -178,10 +180,26 @@ transmit({csum, _Start, _Field, Bytes} = Frame, #process{offload = true} = T) ->
     end;
 transmit({csum, _Start, _Field, _Bytes}, T) ->
     {{drop, malformed}, T};
+%% The offload mode's finish is copy, so the frame layer hands it runs, which it cuts and
+%% sends frame by frame; a frame after the first N that is not sent ends it as `{ok, N}`,
+%% and the driver hands the rest again, as the tap does.
+transmit(#run{} = Run, #process{offload = true} = T) ->
+    run_frames(erx_net_frame:cut(Run), 0, T);
+transmit(#run{}, T) ->
+    {{drop, malformed}, T};
 transmit(Frame, T) ->
     case iolist_size(Frame) =< mtu(T) + ?ETHER_HDR_LEN of
         true -> send(Frame, T);
         false -> {{drop, too_long}, T}
+    end.
+
+run_frames([], _Sent, T) ->
+    {ok, T};
+run_frames([Frame | Frames], Sent, T0) ->
+    case {transmit(Frame, T0), Sent} of
+        {{ok, T}, _} -> run_frames(Frames, Sent + 1, T);
+        {Answer, 0} -> Answer;
+        {{_Unsent, T}, _} -> {{ok, Sent}, T}
     end.
 
 send(Frame, #udp{socket = Socket, peer = {Ip, Port}} = T) ->
