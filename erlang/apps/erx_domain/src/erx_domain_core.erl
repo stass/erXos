@@ -34,9 +34,8 @@ goes from building to nothing, freeing its name. A transition from any other
 state is a bug of the caller and fails with a badmatch.
 """.
 
--export([new/1, host/1, admit/4, built/6, running/2, ready/2, stopping/2, failed/2, ended/5, retired/2,
-         restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, record_slot/4, answered/4,
-         unspent/2]).
+-export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5, retired/2,
+         restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0]).
 
 -define(SYSTEM_ID, 4).
@@ -51,12 +50,7 @@ state is a bug of the caller and fails with a badmatch.
                     principal := pos_integer(), origin := origin(), state := life(),
                     pid := pid() | undefined, ref := reference() | undefined,
                     connection := non_neg_integer(), ended := undefined | {info(), integer()},
-                    ctl_slots := non_neg_integer(), slots := #{non_neg_integer() => {peer(), expects()}}}.
-%% The connection a control record is about, by its peer's domain id.
--type peer() :: pos_integer().
-%% The answer a control record waits for: connection_mapped to a connection_up,
-%% connection_unmapped to a connection_down.
--type expects() :: mapped | unmapped.
+                    ctl_slots := non_neg_integer(), reader := non_neg_integer()}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
 -type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
                    slogan => slogan()}.
@@ -107,19 +101,22 @@ take(Name, #{node := Node} = Binding, Principal, Origin,
      #{next_id := Id, names := Names, domains := Domains} = State) ->
     Domain = #{id => Id, name => Name, node => Node, principal => Principal, origin => Origin,
                state => building, pid => undefined, ref => undefined, connection => 0, ended => undefined,
-               ctl_slots => 0, slots => #{}},
+               ctl_slots => 0, reader => 0},
     Next = State#{next_id := Id + 1, names := Names#{erx_ident:to_binary(Name) => Binding#{holder := Id}},
                   domains := Domains#{Id => Domain}},
     {ok, Domain, Next}.
 
 -doc """
 The library built domain Id, with system connection Connection, whose control table has
-CtlSlots slots; Pid and Ref are its domain pid's.
+CtlSlots slots, one per connection the domain may hold, and whose rings it reads have
+Reader bytes of data each; Pid and Ref are its domain pid's.
 """.
--spec built(pos_integer(), non_neg_integer(), non_neg_integer(), pid(), reference(), state()) -> state().
-built(Id, Connection, CtlSlots, Pid, Ref, State) ->
-    update(Id, building, #{state => built, connection => Connection, ctl_slots => CtlSlots, pid => Pid, ref => Ref},
-           State).
+-spec built(pos_integer(), #{connection := non_neg_integer(), ctl_slots := non_neg_integer(),
+                             reader := non_neg_integer(), atom() => term()},
+            pid(), reference(), state()) -> state().
+built(Id, #{connection := Connection, ctl_slots := CtlSlots, reader := Reader}, Pid, Ref, State) ->
+    update(Id, building, #{state => built, connection => Connection, ctl_slots => CtlSlots, reader => Reader,
+                           pid => Pid, ref => Ref}, State).
 
 -doc "Domain Id's first thread started.".
 -spec running(pos_integer(), state()) -> state().
@@ -186,66 +183,6 @@ restart(Row, Restarts, PeriodS, Now, #{restarts := History} = State) ->
         true -> {yes, State#{restarts := History#{Row => [Now | Recent]}}};
         false -> {no, State#{restarts := History#{Row => Recent}}}
     end.
-
--doc """
-The control slot for a record about connection Peer to ready domain Id
-(docs/design-domains.md, "The control table"): the lowest slot no connection of the
-domain holds. The connection holds it until the domain gives Expects, the answer the
-record waits for (answered/4), so no slot is rewritten before its record is taken.
-{error, busy} while Peer's slot holds an unanswered record, since the service
-writes a connection's next record only once its last is answered; {error, system_limit}
-when every slot is held; {error, badarg} for a domain that is not ready, before which no
-record is sent.
-""".
--spec record_slot(pos_integer(), peer(), expects(), state()) ->
-          {ok, non_neg_integer(), state()} | {error, busy | system_limit | badarg}.
-record_slot(Id, Peer, Expects, #{domains := Domains} = State) ->
-    case Domains of
-        #{Id := #{state := ready, ctl_slots := CtlSlots, slots := Slots} = Domain} ->
-            Held = [Slot || Slot := {P, _} <- Slots, P =:= Peer],
-            Free = [Slot || Slot <- lists:seq(0, CtlSlots - 1), not is_map_key(Slot, Slots)],
-            case {Held, Free} of
-                {[_], _} -> {error, busy};
-                {[], [Slot | _]} -> {ok, Slot, held(Id, Domain, Slots#{Slot => {Peer, Expects}}, State)};
-                {[], []} -> {error, system_limit}
-            end;
-        #{} ->
-            {error, badarg}
-    end.
-
--doc """
-Domain Id answered Kind about connection Peer: Peer's slot is free when Kind answers its
-record, connection_mapped (mapped) or connection_lost (lost) a connection_up, which the
-domain could not map, and connection_unmapped (unmapped) a connection_down. none for
-any other answer, which frees nothing: one about a connection that holds no slot, one
-out of turn, and a connection_lost while a connection_down waits, which the domain may
-send before it has taken the record and still answers connection_unmapped after it.
-""".
--spec answered(pos_integer(), peer(), expects() | lost | other, state()) -> {ok, state()} | none.
-answered(Id, Peer, Kind, #{domains := Domains} = State) ->
-    case Domains of
-        #{Id := #{slots := Slots} = Domain} ->
-            case [Slot || Slot := {P, Expects} <- Slots, P =:= Peer, answers(Kind, Expects)] of
-                [Slot] -> {ok, held(Id, Domain, maps:remove(Slot, Slots), State)};
-                [] -> none
-            end;
-        #{} ->
-            none
-    end.
-
-answers(Kind, Kind) -> true;
-answers(lost, mapped) -> true;
-answers(_Kind, _Expects) -> false.
-
-held(Id, Domain, Slots, #{domains := Domains} = State) ->
-    State#{domains := Domains#{Id := Domain#{slots := Slots}}}.
-
--doc """
-Whether Id is past every id the core has spent, so it names no domain, past or present,
-and so no connection of one.
-""".
--spec unspent(pos_integer(), state()) -> boolean().
-unspent(Id, #{next_id := Next}) -> Id >= Next.
 
 -doc "Domain Id's record, or none.".
 -spec fetch(pos_integer(), state()) -> {ok, domain()} | none.

@@ -16,7 +16,16 @@ reports ended, and on each
 the connection, ends its domain pid with {domain_down, Id, Info}, retires it
 and restarts a configured domain within its restart intensity.
 
-Its state, erx_domain_core's, lives in its own heap and nowhere else. The
+It also introduces domains (docs/design-domains.md, "Introduction and
+connection down"): introduce/2 has the library connect two domains and
+erx_domain_links, the connection protocol's pure core, decide which
+connection-control record goes to which domain, in which slot of its control
+table, and when a connection's objects are deleted; the service performs
+those actions, hands each record to the party's domain pid, which writes it,
+and applies each answer the domain pid passes on. A party is added when its
+domain is built, is ready when its init reports, and ends with its domain.
+
+Its state, erx_domain_core's and erx_domain_links's, lives in its own heap and nowhere else. The
 service is never restarted: its end, however it comes, ends the system
 domain (erx_domain_sup), and no domain outlives that, so no successor needs
 its records. Where the system domain has no domain library (a hosted
@@ -68,8 +77,10 @@ init(Opts) ->
     %% holds, by domain id, each create whose domain has not reported ready yet: its
     %% caller, the domain, its domain pid's secret, that pid until it ends and gone after,
     %% and, once the domain has ended, the life it ended in and its Info (ended/3).
+    %% Introducing holds, by the pair's key, each introduce/2 caller waiting for its
+    %% connection to come up (settle_introductions/1).
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
-           configured => #{}, waiting => #{}},
+           configured => #{}, waiting => #{}, links => erx_domain_links:new(), introducing => #{}},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none.
@@ -117,16 +128,12 @@ handle_call({info, Id}, From, #{core := Core} = State) ->
         _ ->
             {reply, {error, badarg}, State}
     end;
-handle_call({test_record, Id, Peer}, _From, #{core := Core} = State) when is_integer(Peer), Peer > 0 ->
-    %% A test's hook: the domain pid of ready domain Id writes a connection_down about
-    %% connection Peer, which the domain holds none of, so its agent answers it unmapped.
-    %% Peer is an id never spent, so the record can name no connection a domain holds.
-    case erx_domain_core:unspent(Peer, Core) of
-        true ->
-            {Reply, Next} = record(Id, Peer, {erx_connection_down, Peer, noconnection}, State),
-            {reply, Reply, Next};
-        false ->
-            {reply, {error, badarg}, State}
+handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
+    case introduce(A, B, State) of
+        {wait, Next} ->
+            {noreply, wait_introduced(A, B, From, Next)};
+        {Reply, Next} ->
+            {reply, Reply, Next}
     end;
 handle_call(_Request, _From, State) ->
     {reply, {error, badarg}, State}.
@@ -242,17 +249,17 @@ build(Ident, Principal, Origin, Make, Timeout, #{core := Core} = State) ->
             Ref = make_ref(),
             Pid = erx_domain_pid:start_link(self(), Id, Node, Ref),
             case made(Make, Id, Pid) of
-                {ok, #{connection := Connection, ctl_slots := CtlSlots} = Created} ->
-                    Built = erx_domain_core:built(Id, Connection, CtlSlots, Pid, Ref, Admitted),
-                    Next = State#{core := Built},
+                {ok, #{connection := Connection} = Created} ->
+                    Built = erx_domain_core:built(Id, Created, Pid, Ref, Admitted),
+                    Next = State#{core := Built, links := add_party(Id, Node, Created, State)},
                     Domain = {erx_domain, Id, Node, Pid},
                     case started(Id, Pid, Ref, Created#{node => Node}, Next) of
                         ok when Connection =:= 0 ->
                             Ready = erx_domain_core:ready(Id, erx_domain_core:running(Id, Built)),
-                            {{ready, Domain}, State#{core := Ready}};
+                            {{ready, Domain}, Next#{core := Ready}};
                         ok ->
                             boot_timer(Id, Timeout),
-                            {{waiting, Domain}, State#{core := erx_domain_core:running(Id, Built)}};
+                            {{waiting, Domain}, Next#{core := erx_domain_core:running(Id, Built)}};
                         {error, _} = Refused ->
                             stop(Id, Next),
                             {Refused, Next}
@@ -278,6 +285,14 @@ made(Make, Id, Pid) ->
 
 refusal(enomem) -> no_memory;
 refusal(Reason) -> Reason.
+
+%% A built domain is a party of the connection protocol, with one control slot per
+%% connection it may hold. A domain with no system connection has no table and no agent
+%% to read it, so it has no slots and is never ready: it can be introduced to no one.
+add_party(Id, Node, #{connection := 0}, #{links := Links}) ->
+    erx_domain_links:add_party(Id, Node, 0, Links);
+add_party(Id, Node, #{ctl_slots := Slots}, #{links := Links}) ->
+    erx_domain_links:add_party(Id, Node, Slots, Links).
 
 %% A made domain's system side, opened with the library's values of it and the domain's
 %% node, its port handed to the domain pid, which writes the domain's control records
@@ -314,7 +329,9 @@ boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout
 ready(Id, Ref, #{core := Core, waiting := Waiting} = State) ->
     case {erx_domain_core:fetch(Id, Core), Waiting} of
         {{ok, #{ref := Ref, state := running}}, _} ->
-            answer_ready(Id, State#{core := erx_domain_core:ready(Id, Core)});
+            {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
+            Ready = State#{core := erx_domain_core:ready(Id, Core), links := Links},
+            answer_ready(Id, perform(Actions, Ready));
         {_, #{Id := #{ref := Ref, ended := {running, _Info}}}} ->
             answer_ready(Id, State);
         _ ->
@@ -372,44 +389,139 @@ open_side(Agent, Id, Pid, Ref, Values) ->
             Refused
     end.
 
-%% A connection-control record about connection Peer, which domain Id's domain pid writes
-%% at once into the slot the core gives it (docs/design-domains.md, "The control table").
-record(Id, Peer, Record, #{core := Core} = State) ->
-    case erx_domain_core:record_slot(Id, Peer, expects(Record), Core) of
-        {ok, Slot, Next} ->
-            {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(Id, Next),
-            Pid ! {Ref, record, Slot, Record},
-            {{ok, Slot}, State#{core := Next}};
-        {error, _} = Refused ->
-            {Refused, State}
+%% Introducing domains A and B, both of them domains this service built that have not
+%% ended. A pair already joined answers ok when its connection is up and waits while it
+%% comes up; a pair whose connection is closing is refused until it is gone, since a pair
+%% has at most one connection. Otherwise each domain must have room for one more
+%% connection, which erx_domain_links counts until the domain's side is done, closing
+%% included; then the library builds the connection, A reading a ring of its own lane and
+%% B one of its, and the core records it and says which connection_up records go now.
+%% The library's own refusals, a party at its limit or with an outer budget that cannot
+%% fund its child for the connection, are system_limit too.
+introduce(_A, _B, #{lib := none} = State) ->
+    {{error, enotsup}, State};
+introduce(A, B, #{core := Core, links := Links, lib := Lib} = State) ->
+    case {introducible(A, Core), introducible(B, Core)} of
+        {{ok, ReaderA}, {ok, ReaderB}} when A =/= B ->
+            case erx_domain_links:phase(A, B, Links) of
+                up ->
+                    {ok, State};
+                up_pending ->
+                    {wait, State};
+                none ->
+                    case erx_domain_links:room(A, Links) andalso erx_domain_links:room(B, Links) of
+                        true -> connect(Lib:connect(A, B, ReaderA, ReaderB), A, B, ReaderA, ReaderB, State);
+                        false -> {{error, system_limit}, State}
+                    end;
+                _Closing ->
+                    {{error, closing}, State}
+            end;
+        _ ->
+            {{error, badarg}, State}
     end.
 
-%% The answer a record waits for, which alone frees its slot.
-expects({erx_connection_up, _Peer, _Values}) -> mapped;
-expects({erx_connection_down, _Peer, _Reason}) -> unmapped.
+%% A domain that can be introduced, with its lane: one built and not ended.
+introducible(Id, Core) ->
+    case erx_domain_core:fetch(Id, Core) of
+        {ok, #{state := Life, reader := Reader}} when Life =:= built; Life =:= running; Life =:= ready ->
+            {ok, Reader};
+        _ ->
+            none
+    end.
 
-%% An answer domain Id's pid passed on with Ref, which frees the connection's slot when it
-%% is the answer the slot's record waits for; any other changes nothing.
-answer(Id, Ref, Answer, #{core := Core} = State) ->
+%% The library's answer to connecting A and B. Each party's connection_up carries the
+%% slots of its own side, its peer's side and its peer's bell, the label of its own bell,
+%% and the data areas of the ring it writes, which its peer reads, and of the one it reads.
+connect({ok, #{number := Number, a := PartyA, b := PartyB}}, A, B, ReaderA, ReaderB, #{links := Links} = State) ->
+    UpA = up_values(PartyA, ReaderB, ReaderA),
+    UpB = up_values(PartyB, ReaderA, ReaderB),
+    {Actions, Next} = erx_domain_links:connect(Number, {A, UpA}, {B, UpB}, Links),
+    {wait, perform(Actions, State#{links := Next})};
+connect({error, Limit}, _A, _B, _ReaderA, _ReaderB, State) when Limit =:= elimit; Limit =:= enomem ->
+    {{error, system_limit}, State};
+connect({error, _} = Refused, _A, _B, _ReaderA, _ReaderB, State) ->
+    {Refused, State}.
+
+up_values(#{side := Side, peer_side := PeerSide, peer_bell := PeerBell, label := Label}, OutSize, InSize) ->
+    {Side, PeerSide, PeerBell, Label, OutSize, InSize}.
+
+wait_introduced(A, B, From, #{introducing := Introducing} = State) ->
+    Key = {min(A, B), max(A, B)},
+    settle_introductions(State#{introducing := Introducing#{Key => [From | maps:get(Key, Introducing, [])]}}).
+
+%% Answers every introduce/2 caller whose connection has settled: ok once it is up, and
+%% noconnection once it closed before it came up.
+settle_introductions(#{introducing := Introducing, links := Links} = State) ->
+    Pending = maps:filter(fun({A, B}, Callers) ->
+                                  case erx_domain_links:phase(A, B, Links) of
+                                      up_pending -> true;
+                                      up -> answer_callers(Callers, ok);
+                                      _ -> answer_callers(Callers, {error, noconnection})
+                                  end
+                          end, Introducing),
+    State#{introducing := Pending}.
+
+answer_callers(Callers, Reply) ->
+    _ = [gen_server:reply(From, Reply) || From <- Callers],
+    false.
+
+%% Performs erx_domain_links's actions in order: each record goes to its party's domain
+%% pid, tagged with the secret the two share and the slot the core gave it, and the pid
+%% writes it into that slot of the domain's control table at once (erx_domain_pid); a
+%% disconnect destroys the connection's children, with its objects, after which an ended
+%% domain whose last connection that was can be retired.
+perform(Actions, State) ->
+    settle_introductions(lists:foldl(fun act/2, State, Actions)).
+
+act({send, P, Slot, Record}, #{core := Core} = State) ->
+    %% The core sends only to a party it holds, and holds none whose domain has ended.
+    {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(P, Core),
+    Pid ! {Ref, record, Slot, wire(Record)},
+    State;
+act({disconnect, Number}, #{lib := Lib} = State) ->
+    case Lib:disconnect(Number) of
+        ok -> retire_ended(State);
+        {error, Reason} ->
+            logger:error("erx_domain: the library refused to disconnect connection ~b: ~0p", [Number, Reason]),
+            State
+    end.
+
+%% The records as a domain's connection agent reads them (docs/design-domains.md,
+%% "Messages between the domain service and a runtime").
+wire({connection_up, Peer, PeerNode, {Side, PeerSide, PeerBell, Label, OutSize, InSize}}) ->
+    {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize};
+wire({connection_down, Peer, Reason}) ->
+    {erx_connection_down, Peer, Reason}.
+
+%% Retires every ended domain the library now lets go, its connections all disconnected.
+retire_ended(#{lib := Lib, core := Core} = State) ->
+    Retired = lists:foldl(fun(#{id := Id, state := ended}, Acc) ->
+                                  case Lib:retire(Id) of
+                                      ok -> erx_domain_core:retired(Id, Acc);
+                                      {error, _} -> Acc
+                                  end;
+                             (_Domain, Acc) ->
+                                  Acc
+                          end, Core, erx_domain_core:domains(Core)),
+    State#{core := Retired}.
+
+%% An answer domain Id's pid passed on with Ref, applied by the protocol's core only when
+%% it names a connection of the domain in the state that expects it; the core drops and
+%% counts any other.
+answer(Id, Ref, Answer, #{core := Core, links := Links} = State) ->
     case erx_domain_core:fetch(Id, Core) of
         {ok, #{ref := Ref}} ->
-            case erx_domain_core:answered(Id, answer_peer(Answer), answer_kind(Answer), Core) of
-                {ok, Next} -> State#{core := Next};
-                none -> State
-            end;
+            {Actions, Next} = erx_domain_links:answer(Id, unwire(Answer), Links),
+            perform(Actions, State#{links := Next});
         _ ->
             State
     end.
 
-%% The pid passes on only answers (erx_domain_pid:is_answer/1); any other shape, which
-%% would come from a domain, answers no record.
-answer_kind({erx_connection_mapped, _Peer}) -> mapped;
-answer_kind({erx_connection_unmapped, _Peer}) -> unmapped;
-answer_kind({erx_connection_lost, _Peer, _Reason}) -> lost;
-answer_kind(_Answer) -> other.
-
-answer_peer(Answer) when tuple_size(Answer) >= 2 -> element(2, Answer);
-answer_peer(_Answer) -> none.
+%% The pid passes on only the three answers (erx_domain_pid:is_answer/1).
+unwire({erx_connection_mapped, Peer}) -> {connection_mapped, Peer};
+unwire({erx_connection_unmapped, Peer}) -> {connection_unmapped, Peer};
+unwire({erx_connection_lost, Peer, Reason}) -> {connection_lost, Peer, Reason};
+unwire(Answer) -> Answer.
 
 stop(Id, #{lib := Lib}) ->
     case Lib:stop(Id, 0) of
@@ -419,8 +531,12 @@ stop(Id, #{lib := Lib}) ->
 
 %% A domain's end: its system side's port ends before its connection's objects are
 %% destroyed and before its domain pid ends, so no driver callback touches them once they
-%% are gone (the unmap itself may still trail the port's end: TODO.md).
-ended(Id, End, #{lib := Lib, core := Core} = State) ->
+%% are gone (the unmap itself may still trail the port's end: TODO.md). Every peer that
+%% knows of a connection with it is told connection_down with {domain_down, Id, Info};
+%% such a connection's objects go once the peer has answered, and the domain is retired
+%% then (retire_ended/1), since the library keeps an ended domain while a connection of
+%% it stands.
+ended(Id, End, #{lib := Lib, core := Core, links := Links} = State) ->
     case erx_domain_core:ended(Id, End, slogan(Lib, Id, End), erlang:system_time(second), Core) of
         none ->
             State;
@@ -428,11 +544,10 @@ ended(Id, End, #{lib := Lib, core := Core} = State) ->
             close_side(Id, Connection, {domain_down, Id, Info}, State),
             disconnect(Lib, Connection),
             Pid ! {Ref, domain_down, Info},
-            Retired = case Lib:retire(Id) of
-                          ok -> erx_domain_core:retired(Id, Ended);
-                          {error, _} -> Ended
-                      end,
-            restart(Origin, waiter_ended(Id, Life, Info, State#{core := Retired}))
+            {Actions, Unlinked} = erx_domain_links:ended(Id, Info, Links),
+            Told = perform(Actions, State#{core := Ended, links := Unlinked}),
+            Retired = retire_ended(Told),
+            restart(Origin, waiter_ended(Id, Life, Info, Retired))
     end.
 
 %% A crash's slogan, from its crash area, which goes at the retire after it.

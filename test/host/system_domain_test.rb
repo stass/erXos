@@ -43,12 +43,12 @@ class SystemDomainTest < Minitest::Test
   def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
-    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table domain-ends
+    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced domain-ends
                     system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
-    running, table, ends, ended = points.last(4)
+    running, table, _introduced, ends, ended = points.last(5)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
@@ -58,17 +58,26 @@ class SystemDomainTest < Minitest::Test
      good.sub('{6,peer@erxos,ready}', '{6,peer@erxos,running}'), good.sub('{2,erts@erxos}', '{3,erts@erxos}')].each do |line|
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
     end
-    # The control table: every record through the full lane and the paused side, the stray
-    # command 3 refused. A record that waited behind the paused port (a domain pid that sends
-    # it as a message), a stray call that wrote a slot (no caller check), or a lane never
-    # filled each fails.
+    # The control table: the introduction's record through the full lane and the paused
+    # side, the stray command 3 refused. A record that waited behind the paused port (a
+    # domain pid that sends it as a message), a stray call that wrote a slot (no caller
+    # check), or a lane never filled each fails.
     refute_match table.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
-    good_table = '{control_table,ok,full,true,badarg,[ok,ok,ok],{ok,3,0}}'
+    good_table = '{control_table,ok,full,true,badarg,ok,{ok,1,0}}'
     table.fetch(:verify).call("#{good_table}\r\n")
-    [good_table.sub('[ok,ok,ok]', '[timeout,timeout,timeout]').sub('{ok,3,0}', '{timeout,0,0}'),
-     good_table.sub('badarg', 'ok').sub('{ok,3,0}', '{ok,4,0}'), good_table.sub('full', 'never'), good_table.sub(',ok,full', ',timeout,full'),
+    [good_table.sub('badarg,ok', 'badarg,timeout').sub('{ok,1,0}', '{timeout,0,0}'),
+     good_table.sub('badarg', 'ok').sub('{ok,1,0}', '{ok,2,0}'), good_table.sub('full', 'never'), good_table.sub(',ok,full', ',timeout,full'),
      good_table.sub('true', 'false')].each do |line|
       assert_raises(Erx::Error) { table.fetch(:verify).call("#{line}\r\n") }
+    end
+    # The introduced pair: a missing nodeup, a node missing from nodes() or a call that
+    # never came back each fails.
+    introduced = points.find { |point| point.fetch(:name) == 'introduced' }
+    introduced.fetch(:verify).call("#{Suite::INTRODUCED_ANSWER}\r\n")
+    [Suite::INTRODUCED_ANSWER.sub('[peer@erxos,erts@erxos]', '[timeout,erts@erxos]'),
+     Suite::INTRODUCED_ANSWER.sub('[peer@erxos,system@erxos]', '[system@erxos]'),
+     Suite::INTRODUCED_ANSWER.sub('{pong,5,ping}', '{exit,timeout}')].each do |line|
+      assert_raises(Erx::Error) { introduced.fetch(:verify).call("#{line}\r\n") }
     end
     refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     down = '{domain_down,5,{halt,69}}'

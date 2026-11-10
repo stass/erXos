@@ -19,7 +19,7 @@
 -module(erx_domain_fake_lib).
 -export([start_log/0, next_call/0]).
 -export([register/0, configured/0, configured/3, create/1, start/1, stop/2, retire/1, crash/1,
-         disconnect/1]).
+         connect/4, disconnect/1]).
 -export([open_side/2, close_side/2, export/3]).
 -export([agent/2]).
 
@@ -51,11 +51,11 @@ configured(Id, Row, DomainPid) when is_pid(DomainPid) ->
     {ok, #{domains := Rows}} = configured(),
     [Name] = [Name || #{row := R, name := Name} <- Rows, R =:= Row],
     put({domain, Id}, {DomainPid, Name}),
-    log({configured, Id, Row}), {ok, #{id => Id, connection => Id * 10, ctl_slots => 4}}.
+    log({configured, Id, Row}), {ok, created(Id, 4)}.
 create(#{memory := 1, domain_pid := DomainPid}) -> log({refused, DomainPid}), {error, enomem};
 create(#{id := Id, name := Name, domain_pid := DomainPid} = Spec) ->
     put({domain, Id}, {DomainPid, Name}),
-    log({create, Spec}), {ok, #{id => Id, connection => Id * 10, ctl_slots => 4}}.
+    log({create, Spec}), {ok, created(Id, maps:get(connections, Spec, 4))}.
 start(Id) ->
     case get({domain, Id}) of
         {_, <<"silent">>} -> ok;
@@ -76,12 +76,21 @@ retire(Id) ->
     log({retire, Id}).
 crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
 disconnect(Number) -> log({disconnect, Number}).
+%% Each party's values as the library's connect returns them, in its own table.
+connect(A, B, AReads, BReads) ->
+    log({connect, A, B, AReads, BReads}),
+    {ok, #{number => A * 100 + B, a => #{side => 1, peer_side => 2, peer_bell => 3, label => 7},
+           b => #{side => 4, peer_side => 5, peer_bell => 6, label => 8}}}.
+
+%% A created domain whose control table has Slots slots, one per connection, and whose
+%% rings it reads have 4096 bytes of data.
+created(Id, Slots) -> #{id => Id, connection => Id * 10, ctl_slots => Slots, reader => 4096}.
 
 open_side(Id, #{node := Node, connection := Connection}) ->
     log({open_side, Id, Node, Connection}),
     case Node of
         'noside@erxos' -> {error, enomem};
-        _ -> {ok, list_to_port("#Port<0.1>")}
+        _ -> {ok, open_port({spawn_driver, "udp_inet"}, [binary])}
     end.
 close_side(Id, Reason) ->
     case get({domain, Id}) of

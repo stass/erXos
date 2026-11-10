@@ -2778,7 +2778,11 @@ from a control slot, and the agent acts only on the system domain's.
   domain is at its `connections` or cannot fund its side, and `{error,
   badarg}` when the caller does not hold `introduce` on one of the pids,
   which is also the answer for a domain that does not exist, so the call
-  reveals nothing. A domain ends one of its own connections with
+  reveals nothing. Two domains already joined by a connection that is up
+  answer `ok` at once; while their connection is going down, an
+  introduction answers `{error, closing}`, since a pair has at most one
+  connection, and one whose connection closes before it comes up answers
+  `{error, noconnection}`. A domain ends one of its own connections with
   `erlang:disconnect_node/1`, as a malformed frame would, with
   `noconnection` at both ends; ending its connection to the system domain
   ends the domain.

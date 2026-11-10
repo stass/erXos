@@ -51,7 +51,7 @@ nothing_goes_before_ready_test() ->
     ?assertEqual([], Connected),
     ?assertEqual(up_pending, erx_domain_links:phase(?A, 11, S1)),
     {Ready, _} = erx_domain_links:ready(?A, S1),
-    ?assertEqual([{send, ?A, {connection_up, 11, ?PEER_NAME, up_a}}], Ready).
+    ?assertEqual([{send, ?A, 0, {connection_up, 11, ?PEER_NAME, up_a}}], Ready).
 
 %% A later domain of a name reaches A only once A has answered the earlier
 %% connection's connection_down; the earlier connection is deleted first.
@@ -63,16 +63,16 @@ later_incarnation_waits_for_the_earlier_down_test() ->
     ?assertEqual(up, erx_domain_links:phase(?A, 11, S3)),
 
     {Down, S4} = erx_domain_links:ended(11, crash, S3),
-    ?assertEqual([{send, ?A, {connection_down, 11, {domain_down, 11, crash}}}], Down),
-    S5 = erx_domain_links:add_party(12, ?PEER_NAME, S4),
+    ?assertEqual([{send, ?A, 0, {connection_down, 11, {domain_down, 11, crash}}}], Down),
+    S5 = erx_domain_links:add_party(12, ?PEER_NAME, 4, S4),
     {Ready, S6} = erx_domain_links:ready(12, S5),
     {Connected, S7} = erx_domain_links:connect(c2, {?A, up_a2}, {12, up_p2}, S6),
     ?assertEqual([], Ready),
-    ?assertEqual([{send, 12, {connection_up, ?A, ?A_NAME, up_p2}}], Connected),
+    ?assertEqual([{send, 12, 0, {connection_up, ?A, ?A_NAME, up_p2}}], Connected),
     ?assertEqual(2, erx_domain_links:held(?A, S7)),
 
     {Unmapped, S8} = erx_domain_links:answer(?A, {connection_unmapped, 11}, S7),
-    ?assertEqual([{disconnect, c1}, {send, ?A, {connection_up, 12, ?PEER_NAME, up_a2}}],
+    ?assertEqual([{disconnect, c1}, {send, ?A, 0, {connection_up, 12, ?PEER_NAME, up_a2}}],
                  Unmapped),
     ?assertEqual(none, erx_domain_links:phase(?A, 11, S8)),
     ?assertEqual(1, erx_domain_links:held(?A, S8)).
@@ -130,8 +130,8 @@ unexpected_answers_are_dropped_and_counted_test() ->
     ?assertEqual(#{?A => length(Stray), 11 => 0, unknown => 1}, erx_domain_links:dropped(S4)).
 
 core(Parties) ->
-    lists:foldl(fun(?A, S) -> erx_domain_links:add_party(?A, ?A_NAME, S);
-                   (P, S) -> erx_domain_links:add_party(P, ?PEER_NAME, S)
+    lists:foldl(fun(?A, S) -> erx_domain_links:add_party(?A, ?A_NAME, 4, S);
+                   (P, S) -> erx_domain_links:add_party(P, ?PEER_NAME, 4, S)
                 end, erx_domain_links:new(), Parties).
 
 ready_all(S0, Parties) ->
@@ -276,7 +276,8 @@ call(Fun, #{core := Core} = S) ->
     {Actions, Next} = Fun(Core),
     lists:foldl(fun perform/2, S#{core := Next}, Actions).
 
-perform({send, Party, Record}, S) ->
+perform({send, Party, Slot, Record}, S) ->
+    Slot >= 0 andalso Slot < 4 orelse violation({slot_out_of_table, Party, Slot}),
     C = record_connection(Party, Record),
     check_recipient(Party, S),
     Told = told(Party, C, Record, S),
@@ -437,7 +438,7 @@ service_steps(S) ->
     lists:append([connection_service_steps(C, peer(C, S)) || C <- [1, 2]])
         ++ [{p_start, fun(St) -> set_peer(2, #{life => alive},
                                           St#{core := erx_domain_links:add_party(
-                                                          peer_id(2), ?PEER_NAME, maps:get(core, St))})
+                                                          peer_id(2), ?PEER_NAME, 4, maps:get(core, St))})
                       end}
             || maps:get(learnt, peer(1, S)), maps:get(life, peer(2, S)) =:= unborn].
 
@@ -568,3 +569,29 @@ run_end(#{core := Core, owed := Owed, a := #{inbox := Inbox}} = S, Trace) ->
     Inbox =:= [] orelse Fail(queued),
     maps:get(?A, Owed) =:= 0 orelse Fail({owed, Owed}),
     ok.
+
+%% The control slots (docs/design-domains.md, "The control table"): a record takes the
+%% lowest slot no outstanding record of its party holds, and its side keeps it until the
+%% answer the record waits for; connection_lost while a connection_down waits frees
+%% nothing, since the party may not have taken the record yet. room/2 counts the
+%% connections not done against the party's slots.
+control_slots_test() ->
+    S0 = lists:foldl(fun({P, Name}, S) -> erx_domain_links:add_party(P, Name, 2, S) end,
+                     erx_domain_links:new(), [{?A, ?A_NAME}, {11, 'p1@erxos'}, {12, 'p2@erxos'}]),
+    S1 = ready_all(S0, [?A, 11, 12]),
+    {[{send, ?A, 0, _}, {send, 11, 0, _}], S2} = erx_domain_links:connect(c1, {?A, u}, {11, u}, S1),
+    {[{send, ?A, 1, _}, {send, 12, 0, _}], S3} = erx_domain_links:connect(c2, {?A, u}, {12, u}, S2),
+    ?assertNot(erx_domain_links:room(?A, S3)),
+    ?assert(erx_domain_links:room(11, S3)),
+    ?assertNot(erx_domain_links:room(99, S3)),
+    {[], S4} = erx_domain_links:answer(?A, {connection_mapped, 11}, S3),
+    {[], S5} = erx_domain_links:answer(11, {connection_mapped, ?A}, S4),
+    %% A's slot 0 is free again: the down about 11 takes it while slot 1 still waits.
+    {[{send, ?A, 0, {connection_down, 11, noconnection}}, {send, 11, 0, _}], S6} =
+        erx_domain_links:close(?A, 11, S5),
+    {[], S7} = erx_domain_links:answer(?A, {connection_lost, 11, disconnect}, S6),
+    {[], S8} = erx_domain_links:answer(?A, {connection_mapped, 12}, S7),
+    {[], S9} = erx_domain_links:answer(12, {connection_mapped, ?A}, S8),
+    %% Slot 0 still holds the down about 11, so the down about 12 takes slot 1.
+    {[{send, ?A, 1, {connection_down, 12, noconnection}}, {send, 12, 0, _}], _} =
+        erx_domain_links:close(?A, 12, S9).

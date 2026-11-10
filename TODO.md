@@ -1367,16 +1367,6 @@ it; git history is the record of completed work.
   domain's node name refuse a `.` before the domain boots with an `-sname` its own distribution refuses.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the name pool
   (`<principal>_<n>`, [Identifiers](docs/design-system.md#identifiers)) is not built. Build it.
-* [Medium] domain service, connections, `erlang/apps/erx_domain/src/erx_domain_links.erl` and its
-  caller: three points the effect layer that drives the core must settle. An introduction of a
-  pair whose connection is still closing or gone fails in `connect/4` as a caller bug, and
-  design-domains.md ("Introduction and connection down") does not say what it does; refuse it
-  with an error until `phase/3` is `none` and state that there. The core drops `connection_lost`
-  while `connection_up` is unanswered, as Connection.tla's A never loses an unmapped connection,
-  so the connection agent must answer `connection_mapped` before its port can report
-  `connection_lost` (answer before handing the port over). The `connections` quota must count
-  `held/2`, not the live connections, or a closing connection's outstanding record outgrows
-  the reserve.
 * [Low] domain library, `liberx/backend/core/boot_info.c` (`node_flag`), `boot_info.h`,
   `test/fixtures/boot_info_driver.c`, `docs/design-runtime.md`: a host is an identifier and has no
   `.`, so the `-name` branch for a dotted host is unreachable; always pass `-sname`, delete
@@ -2420,40 +2410,49 @@ it; git history is the record of completed work.
   introduced connection (item (3) above) is where they can part. Take both from one
   source: the lookup reads the entry's creation, or `setnode`'s creation comes from the
   port. The funnel's `.exports` field, now a pointer to an id, is renamed with it.
-* [Medium] Runtime, `erx_connections.erl`: the connection agent opens the system
-  connection only, so `erx_dist`'s owner of an introduced connection (`system := false`)
-  is never started. Its protocol (`connection_up`, `connection_mapped`, `connection_down`,
-  `connection_unmapped`, `connection_lost`; design-domains, "Messages between the domain
-  service and a runtime") is built with SV2, because it needs, besides the agent's own
-  code, five things that exist only then: (1) the system domain
-  running as the node `system@<host>` with the system side of each system connection
-  (SV2), since nothing else can send `connection_up`; (2) the agent's pid handed out to the
-  system domain, which edit 8 does once the agent sends it a frame (its ready report); (3) the domain service's pid on the boot page, which
-  design-domains (Domain lifecycle) places there and `boot_info.h` does not carry, as the
-  target of the agent's answers; (4) the lane
-  driver's drain to the write position read at `connection_down`.
-* [Low] Lane driver and domain service, two test hooks: the lane driver's control command 4
-  (`erx_lane_drv.c`, `control_hold`, allowed only under `-erx test_lane_hold`) holds a domain's
-  ring takes so the system_domain suite can fill the lane from the system domain, and
-  `erx_domain_srv`'s `{test_record, Id, Peer}` call has a domain pid write a dummy
-  `connection_down` about a peer id no domain was ever given. Edit 15's queue quota fills a ring by design and introduced connections
-  (`erx_domain:introduce/2`) send real records; once each lands, drive the suite's
-  control_table step from it and delete the hook, with the flag and `DOMAIN_ARGS`'s use of it.
-* [Medium] Domain service, control slots (`erx_domain_core` `record_slot/4`, `answered/4`):
-  the service core keeps a domain's control slots apart from the connection sides of
-  `erx_domain_links`, and frees a slot on the answer its record expects
-  (`connection_mapped` or `connection_lost` to `connection_up`, `connection_unmapped` to
-  `connection_down`), so both must agree on which answer ends a record. When introduced
-  connections send real records, let `erx_domain_links` own each side's slot, given with
-  the record it sends and freed by the one function that moves the side on an answer, and delete the core's slot
-  map. The core's one-record check is per peer domain id, while the design's one
-  outstanding record is per peer node name, which the links queues already keep.
+* [High] Runtime and domain service, introduced connections going down
+  (`otp/lib/kernel/src/erx_connections.erl`, `erx_dist.erl`, `erlang/apps/erx_domain/src/erx_domain_srv.erl`):
+  the agent maps an introduced connection on `connection_up` and, on `connection_down`, ends
+  its port with the reason and answers `connection_unmapped`, but it does not first have the
+  port finish (design-domains, "Introduction and connection down", step 3; the finish's
+  `erx_lane_finished` goes to the port's owner, `erx_dist`'s, which must run it), and a port
+  that ends by itself (a malformed frame, `erlang:disconnect_node/1`, `peer_held`) reports no
+  `connection_lost`, so the domain service never closes that connection and its peer is never
+  told. The QEMU cases of design-domains' tests for `disconnect_node`, a malformed frame, a
+  peer handed the agent's pid and a third domain's forged `connection_lost` are still to be
+  written, as are introduce's delayed-ready and `system_limit` cases on QEMU, which run on the
+  host only (`erx_domain_tests`), since the system_domain suite has two domains and no third
+  to delay or to fill a quota with.
+* [Medium] Domain service, `erx_domain:introduce/2` (`erx_domain_srv.erl`, `erx_domain_links.erl`,
+  `erx_connections.erl`), four points from the up path's review:
+  (1) `ok` can be a false answer: the agent answers `connection_mapped` before it hands the port
+  to net_kernel, so before `setnode` and nodeup, and a failed open or hand-over is answered
+  `connection_mapped` then `connection_lost`, so the caller may hear `ok` for a connection one
+  side never mapped (design-runtime.md, "Connections in ERTS", answers after the node is up);
+  accept `connection_lost` in `up_sent` in the core, answer only it on a failed map, and have
+  erx_dist's owner tell the agent once the entry is inserted, with the Low item below;
+  (2) a create answered `{error, timeout}` or `{error, {boot, _}}` while a survivor still holds a
+  connection of the domain leaves its outer budget until the survivor answers, against A4 of
+  design-system.md; answer the waiter at the domain's retire instead;
+  (3) an introduce caller waits with no deadline on domains that may never answer, and a dead
+  caller's entry stays in `introducing`; give it a deadline answering `{error, timeout}`;
+  (4) the host tests do not catch a dropped retire after disconnect (the fake's `retire/1` never
+  refuses), swapped ring sizes (every fake lane is 4096) or a constant slot; make the fake refuse
+  `retire` while a connection stands, give the domains different lanes, and introduce a second
+  pair. Also: `connect/4` should refuse a party without room itself rather than rely on its
+  caller's `room/2`; an `einval` from the library for a domain it already ended should answer
+  `badarg`; a record due to a party whose system side ended crashes its domain pid with badarg.
+* [Low] Lane driver, a test hook: the lane driver's control command 4 (`erx_lane_drv.c`,
+  `control_hold`, allowed only under `-erx test_lane_hold`) holds a domain's ring takes so the
+  system_domain suite can fill the lane from the system domain. Edit 15's queue quota fills a
+  ring by design; once it lands, drive the suite's control_table step from it and delete the
+  hook, with the flag and `DOMAIN_ARGS`'s use of it.
 * [Low] Domain service, `erx_domain_links`: its model drops a `connection_lost` while a
   side is `up_sent` ("a runtime answers connection_mapped before its port can report
-  connection_lost"), but design-domains' agent protocol answers a `connection_up` it could
-  not map with `{erx_connection_lost, Peer, {map, Status}}`, and the control slots free a
-  `connection_up`'s slot on either. Settle which, and make the links model and its
-  exhaustive test agree.
+  connection_lost"), so a connection agent that could not map a `connection_up` answers
+  `connection_mapped` and then `{erx_connection_lost, Peer, {map, Reason}}`, though
+  design-domains' agent protocol answers it with the second alone. Settle which, and make the
+  links model, its exhaustive test and the agent agree.
 * [Medium] Lane control table, `liberx/erx_lane.c` `erx_lane_ctl_take`: the reader loads a
   slot's `seq`, then copies its frame, and does not load `seq` again after the copy, so a
   writer that rewrote the slot during the copy (one that broke "A slot is rewritten only

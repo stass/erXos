@@ -17,6 +17,19 @@ indexes), memory, outer, grant, lane, args, env, and optionally
 connections, flags, spaces and limits (erx_domain_lib's spec(), less id and
 principal, which the service sets). Every domain is the system principal's.
 
+introduce/2 makes a connection between two domains (docs/design-domains.md,
+"Introduction and connection down"), for processes of the system domain,
+the only callers the domain service has: another domain's request reaches
+it only through a facet. It answers ok once the connection is up at both
+ends, each domain's connection agent having mapped it, which waits for a
+domain whose init has not reported ready yet; ok at once for two domains
+already joined. {error, system_limit} when either domain is at its
+connections limit or cannot fund its side, {error, badarg} for a domain
+that does not exist or has ended, or for one domain twice, {error,
+closing} while the pair's last connection is still going down,
+{error, noconnection} when the connection closed before it came up, and
+the domain library's own refusal otherwise.
+
 stop/2 is exit(pid(Domain), Reason): any reason but normal stops the domain,
 and kill ends the domain pid at once, after which the service stops the
 domain. Monitoring the domain pid watches the domain: it ends with
@@ -24,7 +37,7 @@ domain. Monitoring the domain pid watches the domain: it ends with
 or stopped.
 """.
 
--export([create/1, info/1, stop/2, id/1, node/1, pid/1]).
+-export([create/1, info/1, introduce/2, stop/2, id/1, node/1, pid/1]).
 -export_type([domain/0, spec/0]).
 
 -opaque domain() :: {erx_domain, Id :: pos_integer(), Node :: node(), Pid :: pid()}.
@@ -57,6 +70,11 @@ so a caller waits at most five seconds and exits with timeout past that.
 -spec info(domain()) -> {ok, #{connections := pid() | none, dropped := non_neg_integer()}} | {error, badarg}.
 info({erx_domain, Id, _, _}) ->
     gen_server:call(erx_domain_srv, {info, Id}, 5000).
+
+-doc "Introduces domains A and B: ok once their connection is up at both ends.".
+-spec introduce(domain(), domain()) -> ok | {error, term()}.
+introduce({erx_domain, A, _, _}, {erx_domain, B, _, _}) ->
+    gen_server:call(erx_domain_srv, {introduce, A, B}, infinity).
 
 -doc "exit(pid(Domain), Reason).".
 -spec stop(domain(), term()) -> ok.

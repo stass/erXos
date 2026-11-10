@@ -12,7 +12,7 @@ the domain service performs them.
 
 Parties. A party is a domain, the system domain included, named by its id,
 which no other domain takes within a boot, and known by its node name. The
-domain service adds a party when it admits the domain, marks it ready when
+domain service adds a party when the library has built the domain, marks it ready when
 its init reports ready, and removes it when its end arrives. Nothing is
 sent to a party before it is ready.
 
@@ -61,9 +61,22 @@ port can report connection_lost, as in the model, so connection_lost while
 connection_up is unanswered is dropped like any answer out of turn.
 
 The quota. A connection counts against a party's connections from connect/4
-until the party's side is done, closing included, as held/2 reports, so
-the records that party can be owed never outnumber its connections: the
-reserve of its lane from the system domain is sized for that.
+until the party's side is done, closing included, as held/2 reports, and
+room/2 says whether a party can take one more. So the records that party
+can be owed never outnumber its connections, which is the number of slots
+of its control table (docs/design-domains.md, "The control table").
+
+Slots. The core owns each party's control table. A record goes with the
+lowest slot of the party's table that no outstanding record holds, and its
+side holds that slot while the record is unanswered, that is, while the side
+is up_sent, down_sent or lost_down_sent; the one function that changes a
+side's state frees the slot as the side leaves those states. So a slot is
+written again only once the answer its record waits for has arrived:
+connection_mapped to a connection_up, connection_unmapped to a
+connection_down, or the party's end. A connection_lost while a
+connection_down waits frees nothing, since the party may not have taken the
+record yet. A table never runs out: a party's outstanding records are at
+most its sides not done, which room/2 keeps within its slots.
 
 Every other function is called by the domain service itself. ready/2 may
 come after the party's end, since the init's report and the fault gate race,
@@ -71,27 +84,33 @@ and is then nothing; any other call in a state that does not allow it is a
 bug of the caller and fails with a badmatch or function_clause.
 """.
 
--export([new/0, add_party/3, ready/2, connect/4, answer/3, close/3, ended/3,
-         phase/3, held/2, dropped/1]).
--export_type([state/0, party/0, phase/0, control_record/0, action/0, down_reason/0]).
+-export([new/0, add_party/4, ready/2, connect/4, answer/3, close/3, ended/3,
+         phase/3, held/2, room/2, dropped/1]).
+-export_type([state/0, party/0, slot/0, phase/0, control_record/0, action/0, down_reason/0]).
 
 -type party() :: pos_integer().
+%% A slot of a party's control table, from 0.
+-type slot() :: non_neg_integer().
 -type key() :: {party(), party()}.
 -type phase() :: up_pending | up | closing | gone.
 -type side_state() :: waiting | up_sent | mapped | down_sent
                     | lost_down_sent | lost | unmapped | ended | untold.
 -type down_reason() :: noconnection | {domain_down, party(), term()}.
 %% Up is what the party's connection_up carries besides the peer: its slots,
-%% label and sizes, opaque here.
+%% label and sizes, opaque here. Slot is the control slot its outstanding
+%% record holds, none while it has none.
 -type side() :: #{state := side_state(), peer := party(), peer_name := node(),
-                  up := term()}.
+                  up := term(), slot := slot() | none}.
 %% Reason is what connection_down tells, fixed when the connection starts
 %% closing, as in the model; before that it is noconnection and unread.
 -type connection() :: #{handle := term(), phase := phase(),
                         reason := down_reason(),
                         sides := #{party() => side()}}.
+%% Slots is the size of the party's control table, held the slots its
+%% outstanding records hold, each with the peer the record is about.
 -type party_record() :: #{name := node(), ready := boolean(),
                           queues := #{node() => [party()]},
+                          slots := non_neg_integer(), held := #{slot() => party()},
                           dropped := non_neg_integer()}.
 -opaque state() :: #{parties := #{party() => party_record()},
                      connections := #{key() => connection()},
@@ -100,9 +119,9 @@ bug of the caller and fails with a badmatch or function_clause.
 %% A control record as a party reads it: the peer's id first.
 -type control_record() :: {connection_up, party(), node(), term()}
                 | {connection_down, party(), down_reason()}.
-%% Send a record through a party's domain pid, or delete the objects of the
-%% connection whose handle connect/4 was given.
--type action() :: {send, party(), control_record()} | {disconnect, term()}.
+%% Write a record into a slot of a party's control table, through its domain
+%% pid, or delete the objects of the connection whose handle connect/4 was given.
+-type action() :: {send, party(), slot(), control_record()} | {disconnect, term()}.
 
 %% Actions in reverse order, and the state they lead to.
 -type acc() :: {[action()], state()}.
@@ -112,11 +131,15 @@ bug of the caller and fails with a badmatch or function_clause.
 new() ->
     #{parties => #{}, connections => #{}, dropped_unknown => 0}.
 
--doc "Adds party Id, known by node name Name and not yet ready.".
--spec add_party(party(), node(), state()) -> state().
-add_party(Id, Name, #{parties := Parties} = State)
-  when not is_map_key(Id, Parties) ->
-    Party = #{name => Name, ready => false, queues => #{}, dropped => 0},
+-doc """
+Adds party Id, known by node name Name, whose control table has Slots slots,
+its connections, and not yet ready.
+""".
+-spec add_party(party(), node(), non_neg_integer(), state()) -> state().
+add_party(Id, Name, Slots, #{parties := Parties} = State)
+  when not is_map_key(Id, Parties), is_integer(Slots), Slots >= 0 ->
+    Party = #{name => Name, ready => false, queues => #{}, slots => Slots, held => #{},
+              dropped => 0},
     State#{parties := Parties#{Id => Party}}.
 
 -doc """
@@ -219,6 +242,17 @@ held(P, #{parties := Parties}) ->
     case Parties of
         #{P := #{queues := Queues}} -> lists:sum([length(Q) || Q <- maps:values(Queues)]);
         #{} -> 0
+    end.
+
+-doc """
+Whether party P can take one more connection: it is held and fewer of its
+connections count against it than it has slots.
+""".
+-spec room(party(), state()) -> boolean().
+room(P, #{parties := Parties} = State) ->
+    case Parties of
+        #{P := #{slots := Slots}} -> held(P, State) < Slots;
+        #{} -> false
     end.
 
 -doc "Answers dropped, by party held, and under unknown for any other sender.".
@@ -340,7 +374,7 @@ done(S) -> lists:member(S, [unmapped, lost, ended, untold]).
 %% Send the head of P's queue for peer name Name its next record, if it has
 %% one due: connection_up once P is ready, connection_down once the
 %% connection closes. A party removed or a queue empty sends nothing.
-advance(P, Name, {Actions, #{parties := Parties} = State} = Acc) ->
+advance(P, Name, {_Actions, #{parties := Parties} = State} = Acc) ->
     case Parties of
         #{P := #{ready := Ready, queues := #{Name := [Peer | _]}}} ->
             Key = key(P, Peer),
@@ -348,17 +382,26 @@ advance(P, Name, {Actions, #{parties := Parties} = State} = Acc) ->
             #{state := SideState, up := Up} = Side,
             case next_record(SideState, Phase, Ready) of
                 up ->
-                    Record = {connection_up, Peer, Name, Up},
-                    {[{send, P, Record} | Actions], set_side(Key, P, up_sent, State)};
+                    send(Key, P, up_sent, {connection_up, Peer, Name, Up}, Acc);
                 down ->
-                    Record = {connection_down, Peer, Reason},
-                    {[{send, P, Record} | Actions], set_side(Key, P, down_sent, State)};
+                    send(Key, P, down_sent, {connection_down, Peer, Reason}, Acc);
                 none ->
                     Acc
             end;
         #{} ->
             Acc
     end.
+
+%% P's side of Key goes to New, an outstanding state, with Record in the
+%% lowest slot of P's table that no outstanding record holds. room/2 keeps the
+%% outstanding records within the table, so a free slot always exists.
+send(Key, P, New, Record, {Actions, #{parties := Parties} = State}) ->
+    #{P := #{slots := Slots, held := Held} = Party} = Parties,
+    [Slot | _] = [S || S <- lists:seq(0, Slots - 1), not is_map_key(S, Held)],
+    #{sides := #{P := #{peer := Peer}}} = connection(Key, State),
+    Taken = State#{parties := Parties#{P := Party#{held := Held#{Slot => Peer}}}},
+    Slotted = update_side(Key, P, fun(Side) -> Side#{slot := Slot} end, Taken),
+    {[{send, P, Slot, Record} | Actions], set_side(Key, P, New, Slotted)}.
 
 %% The record due to the head of a queue. Only waiting and mapped have one:
 %% every other state waits on the party or has nothing more to say. A
@@ -372,17 +415,41 @@ enqueue(P, Peer, PeerName, Parties) ->
     Queue = maps:get(PeerName, Queues, []),
     Parties#{P := Party#{queues := Queues#{PeerName => Queue ++ [Peer]}}}.
 
-%% The one place a side changes state. A side that is done leaves its
+%% The one place a side changes state. A side that leaves the states with a
+%% record outstanding frees its slot, and a side that is done leaves its
 %% party's queue, unless the party is gone already.
 set_side(Key, P, New, State) ->
-    Updated = update_connection(
-                Key, fun(#{sides := #{P := Side} = Sides} = C) ->
-                             C#{sides := Sides#{P := Side#{state := New}}}
-                     end, State),
+    Updated = update_side(Key, P, fun(Side) -> Side#{state := New} end, State),
+    Freed = case outstanding(New) of
+                true -> Updated;
+                false -> free_slot(Key, P, Updated)
+            end,
     case done(New) of
-        true -> dequeue(Key, P, Updated);
-        false -> Updated
+        true -> dequeue(Key, P, Freed);
+        false -> Freed
     end.
+
+%% The states in which the party owes an answer to the record its slot holds.
+outstanding(S) -> lists:member(S, [up_sent, down_sent, lost_down_sent]).
+
+free_slot(Key, P, #{parties := Parties} = State) ->
+    case connection(Key, State) of
+        #{sides := #{P := #{slot := none}}} ->
+            State;
+        #{sides := #{P := #{slot := Slot}}} ->
+            Unslotted = update_side(Key, P, fun(Side) -> Side#{slot := none} end, State),
+            case Parties of
+                #{P := #{held := Held} = Party} ->
+                    Unslotted#{parties := Parties#{P := Party#{held := maps:remove(Slot, Held)}}};
+                #{} ->
+                    Unslotted
+            end
+    end.
+
+update_side(Key, P, Fun, State) ->
+    update_connection(Key, fun(#{sides := #{P := Side} = Sides} = C) ->
+                                   C#{sides := Sides#{P := Fun(Side)}}
+                           end, State).
 
 dequeue(Key, P, #{parties := Parties} = State) ->
     #{sides := #{P := #{peer := Peer, peer_name := Name}}} = connection(Key, State),
@@ -404,7 +471,7 @@ key(A, B) when A < B -> {A, B};
 key(A, B) -> {B, A}.
 
 new_side(Peer, PeerName, Up) ->
-    #{state => waiting, peer => Peer, peer_name => PeerName, up => Up}.
+    #{state => waiting, peer => Peer, peer_name => PeerName, up => Up, slot => none}.
 
 connection(Key, #{connections := Connections}) ->
     #{Key := Connection} = Connections,

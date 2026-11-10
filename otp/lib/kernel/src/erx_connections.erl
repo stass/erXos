@@ -8,7 +8,9 @@
 %% entry up. The system domain has no system connection, so its agent opens nothing at
 %% start: it opens the system domain's side of each domain's system connection when the
 %% domain service asks, closes it at the domain's end, and tells the service when a side
-%% ends by itself. The agent and net_kernel live as long as the runtime: the agent halts
+%% ends by itself. A domain's agent also maps each connection the system domain introduces
+%% it to, on the connection_up its domain pid writes, and ends it on connection_down
+%% (records/4). The agent and net_kernel live as long as the runtime: the agent halts
 %% it on net_kernel's end other than an ordered stop, and erx_dist:accept/1 on the agent's.
 -module(erx_connections).
 -moduledoc false.
@@ -81,7 +83,7 @@ serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
         exit:shutdown -> exit(shutdown);
         Class:Reason -> erx_dist:unavailable(system_connection, {Class, Reason})
     end,
-    records(Kernel, PeerId, DomainPid).
+    records(Kernel, PeerId, DomainPid, #{}).
 
 %% The system domain's agent: the domain service's two calls, with each open side by domain
 %% id as {Port, Monitor, Service}: its port, the monitor on it and the process that opened
@@ -230,20 +232,84 @@ hand_over(Kernel, #{port := Port} = Connection) ->
     end.
 
 %% A domain's agent, once its system connection is up: the connection-control records the
-%% system domain's domain pid writes into the control table, which arrive in the envelope
-%% of the system domain, PeerId, and net_kernel's end; what else arrives is dropped, so its
-%% queue stays empty. The agent maps no introduced connection, so a connection_down names
-%% one it does not hold, which it answers as unmapped (docs/design-domains.md, "Messages
-%% between the domain service and a runtime").
-records(Kernel, PeerId, DomainPid) ->
+%% system domain's domain pid writes into the control table, which it acts on only as they
+%% arrive in the envelope of the system connection, {erx_origin, SystemId, Record}, so a
+%% peer handed the agent's pid can reach it but not steer it, and net_kernel's end; what
+%% else arrives is dropped, so its queue stays empty (docs/design-domains.md, "Messages
+%% between the domain service and a runtime"). Held is each introduced connection's port
+%% by the peer's domain id. The system domain sends one record about a peer at a time,
+%% each once the last is answered, so a connection_up names a peer the agent holds no port
+%% for; one that does not is dropped.
+records(Kernel, SystemId, DomainPid, Held) ->
     receive
-        {erx_origin, PeerId, {erx_connection_down, Peer, _Reason}} when is_integer(Peer) ->
-            DomainPid ! {erx_connection_unmapped, Peer},
-            records(Kernel, PeerId, DomainPid);
+        {erx_origin, SystemId, {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}}
+          when is_integer(Peer), is_atom(PeerNode), not is_map_key(Peer, Held) ->
+            Values = [Side, PeerSide, PeerBell, Label, OutSize, InSize],
+            records(Kernel, SystemId, DomainPid, connection_up(Kernel, DomainPid, Peer, PeerNode, Values, Held));
+        {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
+            records(Kernel, SystemId, DomainPid, connection_down(DomainPid, Peer, Reason, Held));
         {'EXIT', Kernel, Reason} ->
             kernel_ended(Reason);
         _ ->
-            records(Kernel, PeerId, DomainPid)
+            records(Kernel, SystemId, DomainPid, Held)
+    end.
+
+%% connection_up: the port opens on the lane driver with the record's words, "erx_lane Side
+%% PeerSide PeerBell Label OutSize InSize Peer PeerNode" (erx_lane_drv.c, lane_open_parse),
+%% whose open maps both sides and registers the label as the connection's sink. The agent
+%% answers connection_mapped once the port has mapped them and before it hands the port to
+%% net_kernel, so the answer precedes any connection_lost of the port's; erx_dist's owner
+%% then brings the peer's entry up with the system domain's id and flags, as for the
+%% system connection, but with system := false, so the connection's end ends only it. An
+%% open the driver refuses, or a port net_kernel does not take, is answered
+%% connection_mapped and then connection_lost with {map, Reason}, the one order of answers
+%% the system domain accepts; the port is gone by then.
+connection_up(Kernel, DomainPid, Peer, PeerNode, Values, Held) ->
+    case open_introduced(Peer, PeerNode, Values) of
+        {ok, Port} ->
+            DomainPid ! {erx_connection_mapped, Peer},
+            case accepted(Kernel, Port, #{port => Port, node => PeerNode, id => Peer, system => false}) of
+                {ok, Port} ->
+                    Held#{Peer => Port};
+                {error, Reason} ->
+                    DomainPid ! {erx_connection_lost, Peer, {map, Reason}},
+                    Held
+            end;
+        {error, Reason} ->
+            DomainPid ! {erx_connection_mapped, Peer},
+            DomainPid ! {erx_connection_lost, Peer, {map, Reason}},
+            Held
+    end.
+
+open_introduced(Peer, PeerNode, Values) ->
+    case lists:all(fun is_integer/1, Values) of
+        true ->
+            Words = [integer_to_list(Word) || Word <- Values ++ [Peer]],
+            Command = lists:flatten(lists:join($\s, ["erx_lane" | Words] ++ [atom_to_list(PeerNode)])),
+            try {ok, open_port({spawn_driver, Command}, [binary])}
+            catch error:Reason -> {error, Reason}
+            end;
+        false ->
+            {error, badarg}
+    end.
+
+%% connection_down: the port ends with the record's reason, which takes the peer's entry
+%% down and fires its links and monitors with it (edit 56), and the driver's stop unmaps
+%% both sides; then the agent answers connection_unmapped. About a peer it holds no port
+%% for, one it never mapped or already lost, it answers at once, having nothing mapped.
+connection_down(DomainPid, Peer, Reason, Held) ->
+    case maps:take(Peer, Held) of
+        {Port, Rest} when Reason =/= normal ->
+            close(Port, Reason),
+            DomainPid ! {erx_connection_unmapped, Peer},
+            Rest;
+        {Port, Rest} ->
+            close(Port, noconnection),
+            DomainPid ! {erx_connection_unmapped, Peer},
+            Rest;
+        error ->
+            DomainPid ! {erx_connection_unmapped, Peer},
+            Held
     end.
 
 %% net_kernel's end. net_kernel traps exits, so only its supervisor ends it with shutdown:
