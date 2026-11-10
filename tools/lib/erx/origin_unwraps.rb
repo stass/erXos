@@ -23,10 +23,11 @@ module Erx
   # takes the envelope whole.
   #
   # OWNERS holds the modules whose unwrap is built, a subset of the owners design.md's
-  # chokepoint row names: gen and io take replies (edits 58 and 60), and erts_internal's
-  # dist_spawn_init a spawn's argument list, and erx_connections, the domain's agent, the
-  # connection-control records of the system domain's domain pid. Each later edit adds its
-  # own module.
+  # chokepoint row names: gen and io take replies (edits 58 and 60), erts_internal's
+  # dist_spawn_init a spawn's argument list, erx_connections, the domain's agent, the
+  # connection-control records of the system domain's domain pid, and erx_file_remote,
+  # the preloaded client of the file protocol, a file server's replies. Each later edit
+  # adds its own module.
   module OriginUnwraps
     SCOPE = %w[otp/**/*.{erl,hrl}].freeze
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
@@ -35,6 +36,7 @@ module Erx
       otp/lib/stdlib/src/io.erl
       otp/erts/preloaded/src/erts_internal.erl
       otp/lib/kernel/src/erx_connections.erl
+      otp/erts/preloaded/src/erx_file_remote.erl
     ].freeze
     ENVELOPE = /(?<![A-Za-z0-9_@'])(?:erx_origin|'erx_origin')(?![A-Za-z0-9_@'])/
 

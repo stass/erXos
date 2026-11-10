@@ -4446,6 +4446,35 @@ document's "residual risks accepted" paragraph.
   key in place. erXos's BIF erases its copy. The key term itself, in the caller's heap, is no
   more erased than any Erlang term, so the fix belongs with how keys are held in Erlang.
 
+* [Medium] Origins from other machines (edit 16 of design-runtime, `erx_fs_grant.erl`
+  `decode/2` and `of_client/2`, gen_server's `{erx_serve, any}` check): an envelope's
+  `D` is the creation of the distribution entry a message came on, and
+  `erx_dist:owner/1` the creation a name carries, neither with its node name. A node
+  of another machine connected to an exposed domain chooses its own creation in the
+  handshake, so once a network carrier exists it can present a domain's id as `D`
+  and in the names it builds, and an `erx_fs` grant for that domain admits its frames.
+  Checking the node name beside the id does not close it, since such a node can build
+  names at any node. Settle it before the network carrier lands: give envelopes from
+  network entries a `D` no domain id can equal, and add the test that a remote node of
+  creation equal to a client's id is refused at its grant.
+* [Medium] File clients (`erx_file_remote.erl`, `collect/3`): an alias stays active
+  until its reply arrives and the wait while the server lives has no deadline, so a
+  server of another domain can hold a request open and send its alias, or the
+  caller's pid it was handed as the owner, messages of any other shape without limit;
+  they stay in the caller's mailbox, the code server's included, and each receive
+  rescans them. Bound what a caller keeps from a server (a deadline, or dropping what
+  arrives at the alias that is not its reply) with a test of a flooding server.
+* [Medium] erx_fs grant fuzz (`test/erlang/erx_fs_grant_fuzz.erl`): every sequence
+  runs a grant for its own domain, and the model's "a reply goes only to the client's
+  domain" is stated by node, so the funnel's path for another domain's client
+  (`decode/2`'s envelope clause, `of_client/2` by id) has only the unit cases of
+  `erx_fs_tests.erl`. Run part of the sequences with an integer client, its frames in
+  its envelope and its names built with that creation.
+* [Low] erx_fs grant client (`erx_fs_grant:new/1`): a grant whose `client` is the
+  server's own domain id, not `own`, drops every frame, since its own domain's frames
+  arrive bare; nothing refuses that option. Refuse it, or take it as `own`, in
+  `erx_fs:init/2`.
+
 ## Planned features
 
 * [Medium] musl, `musl/arch/aarch64/bits/signal.h`, `abi/erx_abi.txt`,

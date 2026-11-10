@@ -369,7 +369,7 @@ core(Rights) ->
     {module, _} = code:ensure_loaded(erx_fs_test_tree),
     {ok, Fs} = erx_fs_test_tree:init([]),
     erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => Rights,
-                       client => node()}).
+                       client => own}).
 
 core_frame(Core, Request) ->
     core_frame(Core, self(), Request).
@@ -446,7 +446,7 @@ refused_remove_still_clunks_its_fid_test() ->
 
 tree_without_write_is_read_only_test() ->
     {ok, Fs} = erx_fs_test_tree:init([]),
-    Core = erx_fs_grant:new(#{module => ?MODULE, fs => Fs, rights => rw, client => node()}),
+    Core = erx_fs_grant:new(#{module => ?MODULE, fs => Fs, rights => rw, client => own}),
     ?assertMatch(#{rights := ro}, erx_fs_grant:info(Core)).
 
 %% Changes on a read-write grant -------------------------------------------
@@ -523,6 +523,58 @@ replies_go_only_to_the_client_domain_test() ->
                                               {erx_9p, Alias, self(),
                                                {attach, 1, ?NOFID, <<"u">>, ?TREE, 0}},
                                               Core)))).
+
+%% Frames from another domain, as edit 16 delivers them: in the envelope
+%% {erx_origin, D, Frame}, D the domain of the connection the frame came on. The
+%% names are built for domain D's node, so erx_dist's stand-in reads D from them as
+%% the BIF does; the core only answers them, so nothing is sent to them.
+-define(CLIENT, 5).
+-define(THIRD, 9).
+
+domain_pid(D) ->
+    binary_to_term(<<131, 88, 119, 9, "d@erxos11", 1:32, 0:32, D:32>>).
+
+domain_ref(D) ->
+    binary_to_term(<<131, 90, 3:16, 119, 9, "d@erxos11", D:32, 1:32, 2:32, 3:32>>).
+
+client_core() ->
+    {ok, Fs} = erx_fs_test_tree:init([]),
+    erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => ro, client => ?CLIENT}).
+
+%% Effects and the refusals counted after Message reaches a fresh core.
+handled(Core, Message) ->
+    {Effects, Core1} = erx_fs_grant:handle_frame(Message, Core),
+    {Effects, maps:get(refused, erx_fs_grant:info(Core1))}.
+
+%% A grant for another domain takes a frame only in that domain's envelope, and
+%% answers it only to that domain's alias, for that domain's owner: a frame
+%% enveloped from a third domain, or bare, from the server's own, is dropped and
+%% counted, with no answer to anyone.
+frames_come_only_from_the_client_domain_test() ->
+    Core = client_core(),
+    Alias = domain_ref(?CLIENT),
+    Version = {version, 8192, <<"9P2000.L">>},
+    Frame = {erx_9p, Alias, domain_pid(?CLIENT), Version},
+    ?assertEqual({[{reply, Alias, {ok, 8192, <<"9P2000.L">>}}], 0},
+                 handled(Core, {erx_origin, ?CLIENT, Frame})),
+    ?assertEqual({[], 1}, handled(Core, {erx_origin, ?THIRD, Frame})),
+    ?assertEqual({[], 1}, handled(Core, Frame)),
+    ?assertEqual({[], 1}, handled(Core, {erx_origin, ?CLIENT, {erx_origin, ?CLIENT, Frame}})),
+    %% In the client's envelope, a third domain's alias is dropped and a third
+    %% domain's owner refused to the client's alias.
+    ThirdAlias = {erx_9p, domain_ref(?THIRD), domain_pid(?CLIENT), Version},
+    ?assertEqual({[], 1}, handled(Core, {erx_origin, ?CLIENT, ThirdAlias})),
+    ThirdOwner = {erx_9p, Alias, domain_pid(?THIRD), {attach, 1, ?NOFID, <<"u">>, ?TREE, 0}},
+    ?assertEqual({[{reply, Alias, {error, einval}}], 1},
+                 handled(Core, {erx_origin, ?CLIENT, ThirdOwner})).
+
+%% A grant for the server's own domain takes bare frames only: one in any
+%% domain's envelope is dropped and counted, whatever names it carries.
+own_grant_drops_every_envelope_test() ->
+    Core = core(ro),
+    Frame = {erx_9p, make_ref(), self(), {version, 8192, <<"9P2000.L">>}},
+    ?assertMatch({[{reply, _, {ok, 8192, _}}], 0}, handled(Core, Frame)),
+    [?assertEqual({[], 1}, handled(Core, {erx_origin, D, Frame})) || D <- [own, 0, ?CLIENT, ?THIRD]].
 
 %% The fid table, exhaustively ---------------------------------------------
 
@@ -1021,7 +1073,7 @@ malformed_core(Malformed) ->
     {module, _} = code:ensure_loaded(erx_fs_stale_tree),
     {ok, Fs} = erx_fs_stale_tree:init([{malformed, Malformed}]),
     erx_fs_grant:new(#{module => erx_fs_stale_tree, fs => Fs, rights => rw,
-                       client => node()}).
+                       client => own}).
 
 %% A malformed qid is answered eio and the grant keeps nothing of the answer:
 %% an attach records no fid and monitors no owner, a walk names no new fid,

@@ -4,9 +4,10 @@
 %% Random sequences of messages through erx_fs_grant, the pure core of one erx_fs grant,
 %% over erx_fs_test_tree: valid requests on a few fids and names of the tree, requests with
 %% one field replaced, arbitrary terms, frames whose alias or owner belongs to another
-%% domain, flushes, owners going down and file answers with the wrong tag. A shell here
-%% performs the core's effects as erx_fs does, holding back a file process's jobs for a
-%% while so requests stay in flight and flushes find them.
+%% domain, frames in another domain's envelope, flushes, owners going down and file
+%% answers with the wrong tag. A shell here performs the core's effects as erx_fs does,
+%% holding back a file process's jobs for a while so requests stay in flight and flushes
+%% find them.
 %%
 %% Whatever arrives, the core never raises, and:
 %% * a reply goes only to an alias of the client's domain whose frame awaits one, and
@@ -53,7 +54,7 @@ sequence(Tally) ->
     Owners = [self() | [spawn_link(fun idle/0) || _ <- [1, 2]]],
     Pool = pick([1, 2, 3, 8, 4096]),
     Core = ?CORE:new(#{module => ?TREE, fs => Fs, rights => pick([ro, rw, rx]),
-                       client => node(), pool => Pool}),
+                       client => own, pool => Pool}),
     Shell = #shell{core = Core, fs = Fs, owners = Owners, pool = Pool, tally = Tally},
     %% Most sequences open as a client does, so later requests find a session and a fid.
     Prologue = case rand:uniform(4) of
@@ -302,16 +303,18 @@ mutated(Request) ->
     setelement(1 + rand:uniform(tuple_size(Request) - 1), Request, random_field()).
 
 %% A frame no client of the domain sends whole: its alias or owner in another domain, an
-%% alias that is no reference, an owner that is no pid, the wrong arity, or any term.
+%% alias that is no reference, an owner that is no pid, the wrong arity, any term, or a
+%% frame of the domain's own in the envelope a frame from another domain arrives in.
 odd_frame(Shell) ->
     {erx_9p, Alias, Owner, Request} = request_frame(request(Shell), Shell),
-    case rand:uniform(6) of
+    case rand:uniform(7) of
         1 -> {erx_9p, foreign_ref(), Owner, Request};
         2 -> {erx_9p, Alias, foreign_pid(), Request};
         3 -> {erx_9p, pick([self(), 1, <<>>]), Owner, Request};
         4 -> {erx_9p, Alias, pick([Alias, node(), 0]), Request};
         5 -> {erx_9p, Alias, Owner};
-        6 -> pick([random_field(), {erx_9p}, {Alias, Request}, Request])
+        6 -> pick([random_field(), {erx_9p}, {Alias, Request}, Request]);
+        7 -> {erx_origin, pick([0, 1, 7]), {erx_9p, Alias, Owner, Request}}
     end.
 
 

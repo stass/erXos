@@ -59,7 +59,7 @@ check rejected, a clunk, `..`, an owner's end.
 -export([new/1, handle_frame/2, monitored/3, owner_down/3, file_started/4,
          file_answer/4, run_job/3, defer/3, complete/3, info/1]).
 
--export_type([grant/0, effect/0, job/0, rights/0]).
+-export_type([grant/0, effect/0, job/0, rights/0, client/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -74,6 +74,8 @@ check rejected, a clunk, `..`, an owner's end.
 -define(DIRENTS_PER_CALL, 256).
 
 -type rights() :: ro | rw | rx.
+%% The domain a grant serves: the server's own, or another by its domain id.
+-type client() :: own | pos_integer().
 -type fid() :: 0..16#fffffffe.
 -type qid() :: {0..255, 0..16#ffffffff, 0..16#ffffffffffffffff}.
 
@@ -112,7 +114,7 @@ check rejected, a clunk, `..`, an owner's end.
 -record(grant, {module :: module(),
                 fs :: term(),
                 rights :: rights(),
-                client :: node(),
+                client :: client(),
                 pool :: pos_integer(),
                 fids = #{} :: #{fid() => #fid{}},
                 owners = #{} :: #{pid() => #owner{}},
@@ -145,13 +147,14 @@ check rejected, a clunk, `..`, an owner's end.
 -doc """
 A grant with no fids. `rights` is the grant's (`ro`, `rw` or `rx`); a tree
 whose module has no `write/4` callback is read-only whatever they say (F5).
-`client` is the node of the domain the grant serves, `pool` its fid bound.
+`client` is the domain the grant serves, `own` for the server's own domain or
+another domain's id, and `pool` its fid bound.
 """.
 -spec new(#{module := module(), fs := term(), rights := rights(),
-            client := node(), pool => pos_integer()}) -> grant().
+            client := client(), pool => pos_integer()}) -> grant().
 new(#{module := Module, fs := Fs, rights := Rights, client := Client} = Options)
   when (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx),
-       is_atom(Client) ->
+       Client =:= own orelse is_integer(Client) andalso Client > 0 ->
     Pool = maps:get(pool, Options, ?DEFAULT_POOL),
     true = is_integer(Pool) andalso Pool > 0,
     Writes = erlang:function_exported(Module, write, 4),
@@ -332,29 +335,61 @@ info(#grant{fids = Fids, owners = Owners, files = Files, in_flight = InFlight,
     #{fids => map_size(Fids), owners => map_size(Owners), files => map_size(Files),
       in_flight => InFlight, refused => Refused, rights => Rights}.
 
-%% The funnel. A frame is admitted only if the grammar accepts it, its owner is
-%% a process of the client's domain, and it does not write on a read-only
-%% grant. A frame without an alias has no one to answer and is dropped, and so
-%% is one whose alias is not the client domain's: the grant answers only its
-%% own client, never a third domain on a client's behalf.
-decode(Frame, #grant{client = Client, rights = Rights}) ->
+%% The funnel. Every message from another domain arrives in the envelope of
+%% edit 16, {erx_origin, D, Frame}, where D is the creation of the connection
+%% the frame came on. A grant takes a frame only from its client domain:
+%%
+%% * a grant for another domain takes it only in an envelope whose D is the
+%%   client's id;
+%% * a grant for the server's own domain takes it only bare.
+%%
+%% Every other message is dropped. A frame taken is admitted only if the grammar
+%% accepts it, its alias and its owner are the client domain's, and it does not
+%% write on a read-only grant. A frame without an alias, or with one not of the
+%% client's domain, has no one the grant may answer and is dropped: the grant
+%% answers only its own client, never a third domain on a client's behalf.
+decode({erx_origin, Client, Frame}, #grant{client = Client} = Grant)
+  when is_integer(Client) ->
+    decode_frame(Frame, Grant);
+decode({erx_origin, _, _}, _) ->
+    drop;
+decode(Frame, #grant{client = own} = Grant) ->
+    decode_frame(Frame, Grant);
+decode(_, _) ->
+    drop.
+
+decode_frame(Frame, #grant{client = Client, rights = Rights}) ->
     case erx_9p_grammar:decode_request_frame(Frame) of
         error ->
             drop;
-        {error, Alias, _} when node(Alias) =/= Client ->
-            drop;
-        {ok, Alias, _, _} when node(Alias) =/= Client ->
-            drop;
         {error, Alias, Posix} ->
-            {refuse, Alias, Posix, none};
-        {ok, Alias, Owner, _} when node(Owner) =/= Client ->
-            {refuse, Alias, einval, none};
+            case of_client(Alias, Client) of
+                true -> {refuse, Alias, Posix, none};
+                false -> drop
+            end;
         {ok, Alias, Owner, Request} ->
-            case Rights =:= rw orelse not erx_9p_grammar:writes(Request) of
-                true -> {admit, Alias, Owner, Request};
-                false -> {refuse, Alias, erofs, Request}
+            case {of_client(Alias, Client), of_client(Owner, Client)} of
+                {false, _} ->
+                    drop;
+                {true, false} ->
+                    {refuse, Alias, einval, none};
+                {true, true} ->
+                    case Rights =:= rw orelse not erx_9p_grammar:writes(Request) of
+                        true -> {admit, Alias, Owner, Request};
+                        false -> {refuse, Alias, erofs, Request}
+                    end
             end
     end.
+
+%% Whether a name a frame carries, its alias or its owner, is the client
+%% domain's: of this node for the server's own domain, and for another domain of
+%% that domain's id, the creation erx_dist:owner/1 reads from the name. Both
+%% this check and the envelope's D compare creations alone, so they hold only
+%% while no connection but the client's lane carries the client's id as its
+%% creation; a node of another machine connected to an exposed domain chooses
+%% its own creation (a security residual in TODO.md).
+of_client(Name, own) -> node(Name) =:= node();
+of_client(Name, Client) -> erx_dist:owner(Name) =:= Client.
 
 %% A remove and a clunk end their fid whatever the outcome, a refusal included,
 %% as clunk(5) and remove(5) say: a fid a refused clunk kept would keep its

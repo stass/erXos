@@ -11,8 +11,10 @@ tree; `erx_fs` owns the protocol, the fids and the checks. Each grant is one
 process that serves one client domain on one tree. It decides nothing itself:
 every message but an owner's `DOWN` goes to `erx_fs_grant`'s funnel, and the
 process performs the effects the core returns, replies, monitors and
-demonitors, in order. Requests arrive as `{erx_9p, Alias, Owner, Request}` and
-replies leave as `{erx_9p, Alias, Reply}` to `Alias`.
+demonitors, in order. Requests arrive as `{erx_9p, Alias, Owner, Request}`, a
+client's of another domain in the envelope `{erx_origin, D, Frame}` that every
+message from another domain arrives in, and replies leave as
+`{erx_9p, Alias, Reply}` to `Alias`.
 
 The grant is a plain `proc_lib` process, not a `gen_server`: whoever holds a
 grant's pid, a process of another domain included, can send it any term, and
@@ -118,11 +120,12 @@ start_link(Module, Args, Rights) ->
     start_link(Module, Args, Rights, #{}).
 
 -doc """
-Serves one grant of `Module`'s tree. `client` names the node of the domain the
-grant is for (the server's own by default) and `pool` its fid bound (4,096).
+Serves one grant of `Module`'s tree. `client` names the domain the grant is
+for, `own` for the server's own (the default) or another domain's id, and
+`pool` its fid bound (4,096).
 """.
 -spec start_link(module(), term(), erx_fs_grant:rights(),
-                 #{client => node(), pool => pos_integer()}) ->
+                 #{client => erx_fs_grant:client(), pool => pos_integer()}) ->
           {ok, pid()} | {error, term()}.
 start_link(Module, Args, Rights, Options) ->
     Heap = #{size => ?MAX_HEAP_WORDS, kill => true, include_shared_binaries => true},
@@ -136,7 +139,7 @@ init(Parent, {Module, Args, Rights, Options}) ->
     {ok, Fs} = Module:init(Args),
     Grant = erx_fs_grant:new((maps:with([pool], Options))#{
                                module => Module, fs => Fs, rights => Rights,
-                               client => maps:get(client, Options, node())}),
+                               client => maps:get(client, Options, own)}),
     proc_lib:init_ack(Parent, {ok, self()}),
     loop(Grant).
 

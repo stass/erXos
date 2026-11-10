@@ -39,7 +39,11 @@
 %% server take, so no walk this client sends names ".", ".." or an empty name, and sends
 %% nothing that writes through rights other than rw; the grammar holds each reply to its
 %% request. A server's reply is untrusted: a reply of any other shape answers eio and
-%% raises nothing in the caller, which may be the code server.
+%% raises nothing in the caller, which may be the code server. A server of another
+%% domain's reply arrives in the envelope of edit 16, {erx_origin, D, {erx_9p, Alias,
+%% Reply}}, and is taken as a bare one is, whatever D, as gen takes a call's reply (edit
+%% 58): each request has an alias of its own, handed only to the server, and an alias
+%% cannot be guessed (edit 17), so whoever answers at it answers for the server.
 %%
 %% This module and the grammar are preloaded and call only BIFs and preloaded modules
 %% (T6 of design-tmp.md), which test/host/erx_file_remote_test.rb checks with xref.
@@ -50,8 +54,9 @@
 -module(erx_file_remote).
 
 %% erx_path's callbacks on a grant, and how prim_file reads a walk's reply; refused/2 and
-%% walk_reply/2 for the fuzz target (test/erlang/erx_file_remote_fuzz.erl).
--export([walk/2, link_text/2, passed/2, refused/2, walk_reply/2]).
+%% walk_reply/2 for the fuzz target (test/erlang/erx_file_remote_fuzz.erl), and sent/2,
+%% the exchange with a server, for it and for test/erlang/erx_file_remote_tests.erl.
+-export([walk/2, link_text/2, passed/2, refused/2, walk_reply/2, sent/2]).
 -export([read_file_info/3, read_link/2, list_dir/2, write_file_info/3, make_dir/2,
          del_dir/2, delete/2, rename/3, make_link/3, make_symlink/3]).
 -export([open/3, read_file/2, set_cwd/2, identity/2]).
@@ -1210,26 +1215,40 @@ send(Pid, Request) ->
     erlang:send(Pid, {erx_9p, Alias, self(), Request}),
     Alias.
 
-%% Each alias stays active until its reply's shape arrives, so a message of another shape
-%% sent to it cannot end it before the reply; the alias ends when the reply is taken.
+%% Liveness is live until the server's monitor fires, and gone after. Each alias stays
+%% active until its reply's shape arrives, so a message of another shape sent to it
+%% cannot end it before the reply; the alias ends when the reply is taken or the server
+%% is gone. A message of another shape at a live alias is not taken and stays in the
+%% caller's mailbox (a security residual in TODO.md).
 collect([], _, _) ->
     [];
-collect([{Alias, Request} | Sent], Monitor, live) ->
-    receive
-        {erx_9p, Alias, Reply} ->
+collect([{Alias, Request} | Sent] = Waiting, Monitor, Liveness) ->
+    case reply(Alias, Monitor, Liveness) of
+        {reply, Reply} ->
             erlang:unalias(Alias),
-            [decoded(Request, Reply) | collect(Sent, Monitor, live)];
-        {'DOWN', Monitor, process, _, _} ->
-            collect([{Alias, Request} | Sent], Monitor, gone)
-    end;
-collect([{Alias, Request} | Sent], Monitor, gone) ->
-    receive
-        {erx_9p, Alias, Reply} ->
-            erlang:unalias(Alias),
-            [decoded(Request, Reply) | collect(Sent, Monitor, gone)]
-    after 0 ->
+            [decoded(Request, Reply) | collect(Sent, Monitor, Liveness)];
+        down ->
+            collect(Waiting, Monitor, gone);
+        none ->
             erlang:unalias(Alias),
             [{error, eio} | collect(Sent, Monitor, gone)]
+    end.
+
+%% Waits for the reply at Alias, bare from a server of this domain or in one envelope
+%% from a server of another. While the server is live it returns {reply, Reply}, or down
+%% when the server's monitor fires first. Once the server is gone it returns
+%% {reply, Reply} for a reply that arrived before the server's end, and none otherwise.
+reply(Alias, Monitor, live) ->
+    receive
+        {erx_9p, Alias, Reply} -> {reply, Reply};
+        {erx_origin, _, {erx_9p, Alias, Reply}} -> {reply, Reply};
+        {'DOWN', Monitor, process, _, _} -> down
+    end;
+reply(Alias, _, gone) ->
+    receive
+        {erx_9p, Alias, Reply} -> {reply, Reply};
+        {erx_origin, _, {erx_9p, Alias, Reply}} -> {reply, Reply}
+    after 0 -> none
     end.
 
 decoded(Request, Reply) ->

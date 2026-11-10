@@ -743,6 +743,24 @@ another domain by forwarding its pid. Within one domain a grant's pid is
 an ordinary pid, so a session's handlers use the session's grants for
 every program of the session.
 
+A grant names its client domain as `own`, the server's own domain, or by
+the other domain's id. Every message from another domain arrives in the
+envelope `{erx_origin, D, Msg}`, `D` set by the connection it came on
+([design-domains.md](design-domains.md#the-peer)), and `erx_fs` owns the
+file protocol, so its funnel takes the envelope off its own frames: a grant
+for another domain takes a frame only in an envelope whose `D` is its
+client's id, and one for its own domain only bare. Every other frame is
+dropped and counted, whatever it names, so a third domain that holds the
+grant's pid cannot act as the client. The names a frame carries, its alias
+and its owner, are the client domain's by `erx_dist:owner/1`, the creation
+each name carries, for another domain, and by their node for the server's
+own. Both checks compare creations, which holds because a domain's id is
+the creation of its lane alone, never one a node of another machine
+presents
+([design-domains.md](design-domains.md#domain-ids-pids-and-references)).
+A process of the server's own domain is inside the server's trust
+boundary and can reach the tree without a grant.
+
 #### Bounds
 
 At every server, each grant holds at most its **pool** of fids, 4,096 by
@@ -1504,7 +1522,10 @@ other client's request can come between its parts:
   open through the grant or one finishing the clunks it was sent.
 * **Checks before callbacks.** Every message a grant receives, but its
   owners' `DOWN`s, passes one decoding funnel, which takes the frame and
-  the grant's rights and admits a request only if the protocol's grammar
+  the grant's rights and admits a request only if it came from the client
+  domain, in that domain's envelope or, for the server's own domain, bare
+  ([Who a grant is for](#who-a-grant-is-for); the frame is dropped
+  otherwise), the protocol's grammar
   accepts it, its alias is the client domain's (the frame is dropped
   otherwise, so no client has the grant answer a third domain), its
   `Owner` is a process of the client's domain (`einval` otherwise), and
@@ -1834,7 +1855,16 @@ stopped short, ended on a link the operation follows, or, for a parent,
 ended on a file that is not a directory, and never reads a
 path's names itself. A walk's reply comes from the server and is
 untrusted: one that lists a qid after a qid that is not a directory names
-a walk on from a file, which no server makes, and answers `eio`. A link that leads a resolution from a grant onto
+a walk on from a file, which no server makes, and answers `eio`. Each
+request goes out with an alias of its own, which only the server is
+handed, and the client takes the reply at that alias bare, from a server
+of its own domain, or in one envelope, `{erx_origin, D, {erx_9p, Alias,
+Reply}}`, from a server of another, whatever `D`: an alias cannot be
+guessed, so whoever answers at it answers for the server, the rule `gen`
+follows for a call's reply
+([design-domains.md](design-domains.md#the-peer)). The reply is held to
+its request by the grammar either way, and a request whose server ends
+before its reply arrives answers `eio`. A link that leads a resolution from a grant onto
 the release or an EROFS image leaves the resolver's next action on that
 entry, and `prim_file` runs the operation there, as on any path the
 caller writes. `erx_file_remote` and `erx_path` are preloaded, as
@@ -2269,7 +2299,8 @@ recovers a value's exact bytes
 * **`erx_fs`**, the behaviour above, and
   `erx_fs:start_link(Module, Args, Rights)` to serve one grant of a tree's
   root to the server's own domain, and `start_link/4`, whose options name
-  the client domain's node (`client`) and the grant's pool (`pool`);
+  the client domain (`client`, `own` or the domain's id) and the grant's
+  pool (`pool`);
   every file server is one. `erx_fs_version:init/0` makes the domain's
   file version counter and `erx_fs_version:draw/0` draws from it
   ([Identity and version](#identity-and-version)).
@@ -2591,12 +2622,22 @@ report, so a passing run shows the code under test ran.
   followed by `file:position(Fd, cur)`, leave the offsets the offset rule
   gives for `At` = `unknown`; seeded: a client that applies the numeric
   rule to `unknown`, which the ordinary write catches.
+* The exchange in `erx_file_remote`, against a server process of the
+  test's that puts its replies in envelopes as a connection does: a
+  reply bare and in one envelope of any domain is taken and held to its
+  request, and one at another alias, in two envelopes or of another
+  shape is not, its request answering `eio` once the server ends; the
+  fuzz target drives the same exchange with random messages; seeded: a
+  client that takes replies only bare, and one that takes another
+  alias's reply out of an envelope, which both catch.
 * `erx_fs`: hostile-client tests (bounds, fid floods, lock floods, walks
   with `..` at the root and `/` inside names, writes through read-only
   grants, slow clients, clients that die, client processes that end with fids and with
   fid-making requests in flight, owners named on another's behalf that
   have already ended, clients that never read their
-  replies, replies sent to another domain's alias, a pipelined `lopen`
+  replies, replies sent to another domain's alias, frames in a third
+  domain's envelope and bare frames at a grant for another domain, each
+  dropped and counted, a pipelined `lopen`
   after a walk that stopped at a link, 100,000 short-lived owners that
   each make and clunk one fid, after which the grant holds no monitor),
   and an exhaustive model of a
@@ -2606,7 +2647,10 @@ report, so a passing run shows the code under test ran.
   catches; a grant that, after an owner's `DOWN`, records a later fid
   made for that owner without monitoring it again, which the ended-owner
   case catches as a fid that stays; a grant that keeps an owner's monitor
-  after its last fid, which the short-lived owners case catches. A tree
+  after its last fid, which the short-lived owners case catches; a grant
+  that takes a frame out of any domain's envelope, and one for another
+  domain that takes its own domain's bare frames, which the envelope
+  cases catch. A tree
   whose callbacks answer with a next state appended, in the grant and in
   an owner, is answered `eio` at the client and the grant goes on
   serving; seeded: a grant that takes a directory's `make` answering

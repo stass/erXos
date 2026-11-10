@@ -20,6 +20,10 @@
 %% own: a malformed reply, or a qid after one that is not a directory, ends the walk in
 %% eio. passed/2 must agree with the model on the kinds it answers, under each mode, and
 %% every outcome of ?OUTCOMES must be met, a walk read on into a later chunk included.
+%%
+%% Then the exchange with a server, sent/2: a server process answers each request with
+%% random messages at its alias, bare and in other domains' envelopes (Exchanges, below),
+%% and the client must take each request's reply as a model does.
 %% The seed comes from make check-fuzz.
 
 -module(erx_file_remote_fuzz).
@@ -35,6 +39,8 @@
                  enxio, exdev, enomem, eagain, enodata, erange, enolck]).
 -define(OUTCOMES, [ok, enoent, enotdir, server, malformed, past_a_file, later_chunk_ok,
                    later_chunk_stop]).
+-define(EXCHANGES, 20000).
+-define(EXCHANGE_OUTCOMES, [none, bare, enveloped, enveloped_rejected]).
 -define(NAMES, [<<"a">>, <<"bc">>, <<".">>, <<"..">>, <<"...">>, <<>>, <<"a/b">>, <<"a", 0>>,
                 <<255>>, <<".a">>, <<"a.">>, <<" ">>]).
 
@@ -43,7 +49,9 @@ run([Seed]) ->
     loop(?BATCHES),
     io:format("fuzz: ~b batches ok~n", [?BATCHES]),
     walk_loop(?WALKS, #{}),
-    io:format("fuzz: ~b walk replies ok~n", [?WALKS]).
+    io:format("fuzz: ~b walk replies ok~n", [?WALKS]),
+    exchange_loop(?EXCHANGES, #{}),
+    io:format("fuzz: ~b exchanges ok~n", [?EXCHANGES]).
 
 loop(0) ->
     ok;
@@ -239,3 +247,74 @@ passes(Kinds, Mode) ->
                     {follow, Last} -> Last =/= link;
                     {directory, Last} -> Last =:= directory
                 end.
+
+%% Exchanges -----------------------------------------------------------------
+
+%% Batches of up to three clunks through sent/2, each answered by a server process with
+%% a random list of messages at its alias, then the server's end. Each message is a reply,
+%% bare or in a random domain's envelope, at the request's alias or another, in two
+%% envelopes, of another shape, or any term. The client must take, for each request, the
+%% first message that is its reply bare or in one envelope, held to its request, and eio
+%% when none came; every outcome of ?EXCHANGE_OUTCOMES must be met.
+exchange_loop(0, Seen) ->
+    case [Outcome || Outcome <- ?EXCHANGE_OUTCOMES, not maps:is_key(Outcome, Seen)] of
+        [] -> ok;
+        Missing -> erlang:error({exchange_outcomes_never_met, Missing, Seen})
+    end;
+exchange_loop(Left, Seen) ->
+    Plans = [[message() || _ <- lists:seq(1, rand:uniform(5) - 1)] || _ <- lists:seq(1, rand:uniform(3))],
+    Requests = [{clunk, Fid} || Fid <- lists:seq(1, length(Plans))],
+    Got = erx_file_remote:sent(exchange_server(Plans), Requests),
+    flush(),
+    Want = [exchange_model(Plan) || Plan <- Plans],
+    case Got of
+        Want -> ok;
+        _ -> erlang:error({sent, Plans, Got, Want})
+    end,
+    exchange_loop(Left - 1, lists:foldl(fun(Plan, Acc) -> Acc#{exchange_outcome(Plan) => true} end,
+                                        Seen, Plans)).
+
+%% A message of a plan, which the server makes into a term with the request's alias.
+message() ->
+    Reply = pick([ok, {error, enoent}, {error, eio}, {ok, 1}, {error, bogus}, junk]),
+    pick([{bare, Reply}, {enveloped, pick([1, 5, 9]), Reply}, {other_alias, Reply},
+          {enveloped_other_alias, Reply}, {twice, Reply}, other_shape, junk]).
+
+exchange_server(Plans) ->
+    spawn(fun() ->
+                  Aliases = [receive {erx_9p, Alias, _, _} -> Alias end || _ <- Plans],
+                  [[Alias ! term(Message, Alias) || Message <- Plan]
+                   || {Alias, Plan} <- lists:zip(Aliases, Plans)]
+          end).
+
+term({bare, Reply}, Alias) -> {erx_9p, Alias, Reply};
+term({enveloped, D, Reply}, Alias) -> {erx_origin, D, {erx_9p, Alias, Reply}};
+term({other_alias, Reply}, _) -> {erx_9p, make_ref(), Reply};
+term({enveloped_other_alias, Reply}, _) -> {erx_origin, 5, {erx_9p, make_ref(), Reply}};
+term({twice, Reply}, Alias) -> {erx_origin, 5, {erx_origin, 9, {erx_9p, Alias, Reply}}};
+term(other_shape, Alias) -> {erx_origin, 5, {erx_9p, Alias}};
+term(junk, Alias) -> {Alias, junk}.
+
+%% The first reply of the plan, bare or in one envelope, read as the grammar reads a
+%% clunk's reply; eio when the plan holds none.
+exchange_model(Plan) ->
+    case [Reply || {Form, Reply} <- [taken(Message) || Message <- Plan], Form =:= reply] of
+        [ok | _] -> ok;
+        [{error, enoent} | _] -> {error, enoent};
+        _ -> {error, eio}
+    end.
+
+taken({bare, Reply}) -> {reply, Reply};
+taken({enveloped, _, Reply}) -> {reply, Reply};
+taken(_) -> {none, none}.
+
+exchange_outcome(Plan) ->
+    case {[Message || Message <- Plan, element(1, taken(Message)) =:= reply], exchange_model(Plan)} of
+        {[], _} -> none;
+        {[{enveloped, _, _} | _], {error, eio}} -> enveloped_rejected;
+        {[{enveloped, _, _} | _], _} -> enveloped;
+        {[{bare, _} | _], _} -> bare
+    end.
+
+flush() ->
+    receive _ -> flush() after 0 -> ok end.

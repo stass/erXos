@@ -325,7 +325,7 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D13.** A stale export costs nothing to find | an export's holders live on its name's own record, the process or the active alias, and go with it, at the transition that ends the process or deactivates the alias; a peer's holders end when the connection goes down; a pid names its process by number and serial, so a lookup that finds no live record finds no holder | holders kept anywhere but on their name's own record; an entry keyed in a way a later process can match | a soak test of a million alias exports and deactivations from one live process, with every OTP alias mode, and of pids handed out by processes that then exit; the export table stays at its live names |
 | **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each party writes exactly one memory object of a connection and maps the other's read-only; the system domain carves the connection's children and creates both sides and both bells from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains, keeping it meanwhile as the domain's remains, charged to its principal, while the domain itself is released at its end | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks, while the ended domain, a configured one, restarts at once; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
 | **D17.** A domain's end reaches each peer behind everything the domain published on their lane | the kernel posts a space's exit record only when no thread of it can run, so the dead domain's write position is final; a runtime told that a connection is down first drains that lane to the position it reads then, waiting on nothing the dead domain would have to do, and only then fires its links and monitors with the peer's processes | a runtime that acts on a connection down before draining; a stop reported while a thread can still run | a test that kills a domain mid-burst on every CPU and checks that each peer sees the burst, then the death |
-| **D18.** No process acts on a message from another domain that the owner of its protocol did not admit | the peer delivers every message from another domain, to a pid or to an alias, as `{erx_origin, D, Msg}`, `D` the domain of the lane it arrived on, with no flag and no exception (edit 16 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), so such a message never has the shape of one from the receiver's own domain; only the owner of a protocol that crosses domains takes the envelope off, in its own receive and only for its own shapes: `erts_internal` for a spawn's argument list, which ERTS queues as the child's first message, `gen` for call replies, `io` for io replies, the io servers for io requests, and `gen_server` and `gen_statem` for calls and casts to a server started with `{erx_serve, any}`; each unwrap of a request admits it only when the names its reply goes to are of `D` ([The peer](#the-peer)); everything else reaches its process as an unknown message that carries its origin, and `sys` takes nothing apart | a delivery path that skips the wrap; an OTP module outside the list that matches the envelope, `sys` or `proc_lib` above all; a served unwrap without the check of `From` | the source check of [design.md](design.md#chokepoint-checks) on OTP's modules, with a seeded extra site; every `sys` call from another domain on a `gen_server`, a `gen_statem`, a `gen_event` and a plain `sys` loop times out, the process runs on and its state is unchanged, with the seeded failure of edit 16 delivering raw ([Verification and testing](#verification-and-testing)) |
+| **D18.** No process acts on a message from another domain that the owner of its protocol did not admit | the peer delivers every message from another domain, to a pid or to an alias, as `{erx_origin, D, Msg}`, `D` the domain of the lane it arrived on, with no flag and no exception (edit 16 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), so such a message never has the shape of one from the receiver's own domain; only the owner of a protocol that crosses domains takes the envelope off, in its own receive and only for its own shapes: `erts_internal` for a spawn's argument list, which ERTS queues as the child's first message, `gen` for call replies, `io` for io replies, `erx_file_remote` for a file server's replies, the io servers for io requests, and `gen_server` and `gen_statem` for calls and casts to a server started with `{erx_serve, any}`; each unwrap of a request admits it only when the names its reply goes to are of `D`, and an unwrap of a reply takes it at the request's own alias whatever `D` ([The peer](#the-peer)); everything else reaches its process as an unknown message that carries its origin, and `sys` takes nothing apart | a delivery path that skips the wrap; an OTP module outside the list that matches the envelope, `sys` or `proc_lib` above all; a served unwrap without the check of `From` | the source check of [design.md](design.md#chokepoint-checks) on OTP's modules, with a seeded extra site; every `sys` call from another domain on a `gen_server`, a `gen_statem`, a `gen_event` and a plain `sys` loop times out, the process runs on and its state is unchanged, with the seeded failure of edit 16 delivering raw ([Verification and testing](#verification-and-testing)) |
 
 ## On the stopgap
 
@@ -486,7 +486,7 @@ name and creation on the network ([design.md](design.md#networking));
 [design-network-stack.md](design-network-stack.md#distribution-to-other-machines)
 defines the carrier that serves those connections, OTP's TLS carrier in
 release builds, and the port mapper that resolves the domain's name
-there. Two rules hold whatever
+there. Three rules hold whatever
 it chooses:
 
 * a node name at the machine's host name is reached only through a lane:
@@ -500,7 +500,13 @@ it chooses:
   another domain work for a remote process stands a local process in for
   it. Lanes therefore carry one shape of name, whose references all have
   four words, and a domain that is not exposed never holds a name it
-  cannot reach.
+  cannot reach;
+* a domain's id is the creation of its lane alone: a message from a node
+  of another machine never arrives in an envelope whose `D` is a domain's
+  id, and the names such a node builds never carry one as their creation
+  to `erx_dist:owner/1`, so a check of `D` or of a name's owner against a
+  domain's id, an `erx_fs` grant's or a served `gen_server`'s, admits
+  only that domain (edit 16).
 
 A runtime needs no permission to create a process: its pid space is its
 node's creation, delegated once when the domain is created.
@@ -1556,7 +1562,12 @@ and drivers](#native-processes-and-drivers)).
     in `send_request`'s `wait_response`, `receive_response` and
     `check_response`; the reply comes to the call's own alias, which only
     the callee's domain was handed;
-  * `io` takes an `io_reply` the same way;
+  * `io` takes an `io_reply` the same way, and `erx_file_remote`, the
+    preloaded client of the file protocol, a file server's reply at its
+    request's alias
+    ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote));
+    a reply is taken at the alias whatever `D`, since the alias reached
+    only the callee, and whoever answers at it answers for the callee;
   * `erts_internal:dist_spawn_init/1` takes a spawn's argument list, which
     ERTS passes to the new process as its first message, so no message of
     a sender's stands in front of it;
@@ -1579,7 +1590,8 @@ and drivers](#native-processes-and-drivers)).
   reads or replaces the state of a process through `sys`, whatever it
   holds on it (D18). erXos's own protocols take the envelope whole: a
   facet and a socket of the network service check `D` against their
-  grantee; a socket process in the client's domain, the owner of the
+  grantee; a file server's grant checks `D` against its client
+  ([design-files.md](design-files.md#who-a-grant-is-for)); a socket process in the client's domain, the owner of the
   socket protocol on that side, checks `D` against the domain its socket
   was opened against and gives its owner `gen_tcp`'s and `gen_udp`'s
   stock messages, bare

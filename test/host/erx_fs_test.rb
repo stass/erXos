@@ -29,6 +29,7 @@ class ErxFsTest < Minitest::Test
     test/erlang/erx_fs_stale_tree.erl
     test/erlang/erx_fs_tests.erl
     test/erlang/erx_fs_version_tests.erl
+    test/erlang/stand_in/erx_dist.erl
   ].freeze
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
   GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
@@ -48,11 +49,19 @@ class ErxFsTest < Minitest::Test
               from: 'when Type band ?ERX_P9_QTDIR =:= 0 ->', to: 'when Type band ?ERX_P9_QTDIR =:= -1 ->',
               caught_by: 'walk_through_a_link_stops_at_it_test'),
     Fault.new(name: "a reply goes to another domain's alias", file: GRANT,
-              from: "        {ok, Alias, _, _} when node(Alias) =/= Client ->\n            drop;\n",
-              to: '', caught_by: 'replies_go_only_to_the_client_domain_test'),
+              from: 'case {of_client(Alias, Client), of_client(Owner, Client)} of',
+              to: 'case {is_reference(Alias), of_client(Owner, Client)} of',
+              caught_by: 'replies_go_only_to_the_client_domain_test'),
     Fault.new(name: 'an owner of another domain is admitted', file: GRANT,
-              from: 'when node(Owner) =/= Client ->', to: "when node(Owner) =/= Client, Client =:= 'none@none' ->",
-              caught_by: 'owner_outside_the_domain_is_refused_test'),
+              from: "{true, false} ->\n                    {refuse, Alias, einval, none};\n                {true, true} ->",
+              to: '{true, _} ->', caught_by: 'owner_outside_the_domain_is_refused_test'),
+    Fault.new(name: "a frame in a third domain's envelope is taken", file: GRANT,
+              from: "decode({erx_origin, _, _}, _) ->\n    drop;",
+              to: "decode({erx_origin, _, Frame}, Grant) ->\n    decode_frame(Frame, Grant);",
+              caught_by: 'frames_come_only_from_the_client_domain_test'),
+    Fault.new(name: "a grant for another domain takes its own domain's bare frames", file: GRANT,
+              from: "decode(_, _) ->\n    drop.", to: "decode(Frame, Grant) ->\n    decode_frame(Frame, Grant).",
+              caught_by: 'frames_come_only_from_the_client_domain_test'),
     Fault.new(name: 'a fid in use is made again', file: GRANT,
               from: 'is_map_key(Fid, Fids) -> {error, einval};', to: 'is_map_key(Fid, Fids), Fid < 0 -> {error, einval};',
               caught_by: 'fid_in_use_is_refused_test'),

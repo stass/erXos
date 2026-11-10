@@ -40,10 +40,10 @@ class ErxRamfsTest < Minitest::Test
                   '_ -> Stamp end, Now, Tree) of',
               caught_by: 'a_fid_never_reaches_a_file_made_after_its_own_test'),
     Fault.new(name: 'a grant that skips the checks for a sender in its own domain', file: "#{APP}/erx_fs_grant.erl",
-              from: "decode(Frame, #grant{client = Client, rights = Rights}) ->\n",
-              to: "decode({erx_9p, Alias, Owner, Request}, #grant{}) when is_reference(Alias), is_pid(Owner), " \
+              from: "decode_frame(Frame, #grant{client = Client, rights = Rights}) ->\n",
+              to: "decode_frame({erx_9p, Alias, Owner, Request}, #grant{}) when is_reference(Alias), is_pid(Owner), " \
                   "node(Alias) =:= node() ->\n    {admit, Alias, Owner, Request};\n" \
-                  "decode(Frame, #grant{client = Client, rights = Rights}) ->\n",
+                  "decode_frame(Frame, #grant{client = Client, rights = Rights}) ->\n",
               caught_by: 'names_that_break_the_grammar_are_refused_before_a_callback_test'),
     Fault.new(name: "a grant that does not clunk a dead owner's fids", file: "#{APP}/erx_fs_grant.erl",
               from: "            drain(lists:foldl(fun end_fid/2, Grant, maps:keys(Fids)));\n",

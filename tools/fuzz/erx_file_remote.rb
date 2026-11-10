@@ -11,10 +11,13 @@ require_relative '../lib/erx/generated'
 # and mkdirs through refused/2 against a model (test/erlang/erx_file_remote_fuzz.erl),
 # and random server replies to walks through walk_reply/2 against a model of how a reply
 # is read, compiled from source with the grammar and run on stock's emulator (ERX_ERL and
-# ERX_ERLC, the oracle's). It runs the client as it is, then each copy of MUTANTS, which
-# the model must catch: one whose request function lets ".." through, one whose walk
-# reader takes a qid after a file as a name walked, and one that forgets the kinds of the
-# chunks before. That shows the inputs reach each check and the model checks them.
+# ERX_ERLC, the oracle's), and random messages at each request's alias, bare and in
+# other domains' envelopes, through sent/2 against a model of which the client takes.
+# It runs the client as it is, then each copy of MUTANTS, which the model must catch:
+# one whose request function lets ".." through, one whose walk reader takes a qid
+# after a file as a name walked, one that forgets the kinds of the chunks before, and
+# one that takes another alias's reply out of an envelope. That shows the inputs reach
+# each check and the model checks them.
 module ErxFileRemoteFuzz
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
@@ -32,7 +35,11 @@ module ErxFileRemoteFuzz
     Mutant.new(what: 'a reader forgetting earlier chunks',
                from: "chunk_end(whole, [directory | _] = Passed, Walks, Replies) -> walk_reply(Walks, Replies, Passed);\n",
                to: "chunk_end(whole, [directory | _], Walks, Replies) -> walk_reply(Walks, Replies, []);\n",
-               caught_by: 'walk_reply')
+               caught_by: 'walk_reply'),
+    Mutant.new(what: "a client taking another alias's reply out of an envelope",
+               from: "        {erx_origin, _, {erx_9p, Alias, Reply}} -> {reply, Reply};\n        {'DOWN'",
+               to: "        {erx_origin, _, {erx_9p, _, Reply}} -> {reply, Reply};\n        {'DOWN'",
+               caught_by: 'sent')
   ].freeze
   DEADLINE_SECONDS = '240'
 
@@ -43,13 +50,13 @@ module ErxFileRemoteFuzz
     MUTANTS.each { |mutant| raise "no line for #{mutant.what} in #{MODULE_SOURCE}" unless source.scan(mutant.from).size == 1 }
 
     output, status = fuzz(source, seed: seed)
-    abort(output) unless status.success? && output.match?(/^fuzz: \d+ batches ok\nfuzz: \d+ walk replies ok$/)
+    abort(output) unless status.success? && output.match?(/^fuzz: \d+ batches ok\nfuzz: \d+ walk replies ok\nfuzz: \d+ exchanges ok$/)
     MUTANTS.each do |mutant|
       output, status = fuzz(source.sub(mutant.from, mutant.to), seed: seed)
       abort("#{mutant.what} passed:\n#{output}") if status.success? || !output.include?(mutant.caught_by)
     end
-    puts 'erx_file_remote refuses every request and reads every walk reply as the model does, ' \
-         'and no copy in MUTANTS does'
+    puts 'erx_file_remote refuses every request, reads every walk reply and takes every ' \
+         'exchange\'s replies as the model does, and no copy in MUTANTS does'
   end
 
   # In a directory of its own, which also takes the crash dump of a failed run.
