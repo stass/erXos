@@ -842,7 +842,7 @@ receives(Actions, #tcb{snd_una = Una}, Peer) ->
                                    _ -> max_known(End, Start + Len)
                                end,
                         P#peer{ours_end = Ours, cwr = pay_cwr(Flags, Owed)}
-                end, Peer, [S || {transmit, Segments} <- Actions, S <- Segments]).
+                end, Peer, [S || {transmit, Segments} <- Actions, S <- lists:flatmap(fun erx_tcp_output:segments/1, Segments)]).
 
 owe_cwr(unowed) -> unowed;
 owe_cwr(_) -> owed.
@@ -854,7 +854,7 @@ pay_cwr(_, Cwr) -> Cwr.
 %% A RST draws nothing but a challenge ACK, so every segment sent in answer to one counts.
 challenged(Flags, Actions, Now, #peer{challenged = Challenged} = Peer)
   when Flags band ?TH_RST =/= 0 ->
-    Answers = length([S || {transmit, Segments} <- Actions, S <- Segments]),
+    Answers = length([S || {transmit, Segments} <- Actions, S <- lists:flatmap(fun erx_tcp_output:segments/1, Segments)]),
     Count = case Challenged of
                 {Now, Before} -> Before + Answers;
                 _ -> Answers
@@ -953,7 +953,8 @@ sent_within_peer_window(#{actions := Actions, post := #tcb{snd_una = Una},
 %% The start and length of the data of each segment sent.
 sent_data(Actions, Una) ->
     [{erx_tcp_seq:lift(Seq, Una) + syn_len(Flags), iolist_size(Payload)}
-     || {transmit, Segments} <- Actions, {#tcp{seq = Seq, flags = Flags}, _, Payload} <- Segments].
+     || {transmit, Segments} <- Actions,
+        {#tcp{seq = Seq, flags = Flags}, _, Payload} <- lists:flatmap(fun erx_tcp_output:segments/1, Segments)].
 
 %% In a synchronized state (and SYN-RECEIVED) a RST ends the connection only at exactly
 %% last_ack_sent (RFC 5961 section 3); SYN-SENT has its own rule and TIME-WAIT ignores RSTs.

@@ -14,6 +14,12 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Medium] network, request-reply under output's run rule.** With runs, rr 64 B on the
+  FreeBSD test host (median of 5, min-max, against master the same hour) went from 16,596
+  (15,999-17,719) to 15,905 (15,779-16,266) txn/s, within the spreads but below the median,
+  where no run is made: what is left per segment is `transmit/4`'s extra tuple, the marks'
+  `case` and the frame layer's match on `seg`. Settle it with interleaved runs of rr 64 B,
+  this tree against its parent, and a profile of the connection if the difference holds.
 * **[Medium] network, SACK walks over unmerged SACKed ranges.** `erx_tcp_sendlog` merges SACKed neighbours only when their segments line up (`merge_down/2`), so a SACKed stretch after app-limited writes, an ACK inside a segment or a path MTU drop can be several ranges, and every ACK that repeats its blocks walks them again in `sack_ranges/4` and `mark_lost/3`. Settle it with a recovery over a 1,000-segment window with 10 percent loss and app-limited writes (`erx_tcp_sendlog` reductions per ACK, against a log whose SACKed stretches are one range each); if it grows with the window, let a SACKed range keep a list of segment sizes instead of refusing the merge.
 * **[Medium] runtime, one AES-128 block per reference.** `erts_sched_make_ref_in_array` (`erl_bif_unique.c`) enciphers a block with ctaes's constant-time software AES for every `make_ref/0`, every `gen_server:call` and every timer, where stock incremented a counter. Settle it with `tools/erx bench` of `make_ref/0` in a loop and of 100 000 local `gen_server:call`s on HVF, this tree against its parent, and try the ARMv8 AES instructions in `erx_ref_permute` if the difference shows.
 * **[Low] runtime, one AES decipher per timer cancel or read.** `erts_get_ref_numbers_thr_id` deciphers a timer's reference to find the scheduler that owns the timer, on every `erlang:cancel_timer/1,2` and `read_timer/1,2`. Settle it with a bench of `start_timer`/`cancel_timer` pairs on HVF against the parent tree.

@@ -26,7 +26,29 @@ class ErxTcpOutputTest < Minitest::Test
                                 'enobufs_keeps_the_ack_owed'],
     # tcp_output.c:1635-1641: only a segment that left clears the D-SACK block.
     dsack_cleared_without_a_route: [LOST, "sent({error, _}, _, RcvSack, Tcb) ->\n    Tcb#tcb{rcv_sack = RcvSack}.",
-                                    'no_route_keeps_the_dsack_block']
+                                    'no_route_keeps_the_dsack_block'],
+    # Runs (docs/design-network-fastpath.md, "Output makes runs"): each fault makes a run's
+    # frames differ from per-segment output's, which the differential case compares.
+    run_drops_its_last_byte: ['Len = Frames * Size,', 'Len = Frames * Size - 1,',
+                              'runs_equal_per_segment_output'],
+    run_loses_its_fin: ["true -> Flags0;\n", "true -> Flags0 band bnot ?TH_FIN;\n",
+                        'runs_equal_per_segment_output'],
+    options_only_in_the_first_frame: ['| cut(Header#tcp{seq = erx_tcp_seq:wire(Seq + Seg)}, Marks',
+                                      '| cut(Header#tcp{seq = erx_tcp_seq:wire(Seq + Seg), opts = #tcp_opts{}}, Marks',
+                                      'runs_equal_per_segment_output'],
+    sequence_not_advanced_per_frame: ['cut(Header#tcp{seq = erx_tcp_seq:wire(Seq + Seg)}',
+                                      'cut(Header#tcp{seq = Seq}', 'runs_equal_per_segment_output'],
+    run_with_sack_blocks: ['andalso Sacks =:= [] andalso Up =< Nxt', 'andalso is_list(Sacks) andalso Up =< Nxt',
+                           'runs_equal_per_segment_output'],
+    run_takes_one_unit_of_credit: ['{Credit - Frames, Runs}', '{Credit - min(Frames, 1), Runs}',
+                                   'runs_equal_per_segment_output'],
+    run_in_recovery: ['Source =:= next andalso not Fast', 'Source =:= next andalso is_boolean(Fast)',
+                      'runs_equal_per_segment_output'],
+    run_without_a_route: ['Route =:= ok andalso erx_tcp:have_established(State)',
+                          'is_tuple(Route) andalso erx_tcp:have_established(State)',
+                          'runs_equal_per_segment_output'],
+    run_with_cwr: ['andalso ecn_steady(ecn(Seg, Tcb), Flags, Ecn).', 'andalso (ecn_steady(ecn(Seg, Tcb), Flags, Ecn) orelse true).',
+                   'runs_equal_per_segment_output']
   }.freeze
 
   def test_output_cases_pass_under_eunit

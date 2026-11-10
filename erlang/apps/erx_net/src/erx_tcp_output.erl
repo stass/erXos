@@ -104,7 +104,14 @@ silly-window avoidance, Nagle, window updates, and the persist or retransmission
 starts when nothing goes. `transmit/3` translates what follows `send:`: the options, the
 MSS clamp, the header and receive window, and the sequence and timer updates after the
 segment. The pass goes round again while a segment was cut short (`sendalot`), and at most
-the context's credit of segments leave it.
+the context's credit of frames leave it.
+
+A segment of new data whose header every frame could share is sent as a run
+(docs/design-network-fastpath.md, "Output makes runs"): the whole segments the windows,
+the credit and IP_MAXPACKET allow, in one pass, as FreeBSD's TSO sends a burst. A run's
+outgoing segment carries `seg`, and `segments/1` cuts it into the frames per-segment
+output sends, which the frame layer encodes; the control block after a run is the one
+after its segments one pass each (`output/3` with runs off, the tests' oracle).
 
 Departures, each from erXos's model:
 
@@ -132,7 +139,11 @@ Departures, each from erXos's model:
   does not move RFC 6675's HighRxt past holes recovery still has to resend.
 * `snd_nxt` is held at or above `snd_una` at the start of each pass, where FreeBSD's input
   moves it up when an acknowledgement passes it.
-* Not built, since erXos offers none of them: TCP Fast Open, segmentation offload, IP
+* A run keeps the per-segment wire where FreeBSD's TSO does not: its FIN rides on its last
+  frame, where FreeBSD sends the FIN after the burst in a segment of its own
+  (tcp_output.c:965-969), and a partial last segment is always a pass of its own, where
+  FreeBSD keeps it in a burst that empties the send buffer (tcp_output.c:940-948).
+* Not built, since erXos offers none of them: TCP Fast Open, IP
   options, TCP-MD5 signatures, UDP tunnelling, `TF_NOOPT`, `TF_NOPUSH`, `TF_MORETOCOME`,
   send-buffer autoscaling and `TCP_MAXUNACKTIME`.
 """.
@@ -140,7 +151,7 @@ Departures, each from erXos's model:
 -include("erx_tcp.hrl").
 -include("erx_tcp_wire.hrl").
 
--export([output/2, setpersist/2, request_r_scale/0]).
+-export([output/2, output/3, setpersist/2, request_r_scale/0, segments/1]).
 
 %% TCP_MAXWIN and TCP_MAX_WINSHIFT (tcp.h).
 -define(TCP_MAXWIN, 16#ffff).
@@ -157,6 +168,12 @@ Departures, each from erXos's model:
 -define(IP4_TCP_HDR_LEN, 40).
 %% PADTCPOLEN(TCPOLEN_TIMESTAMP).
 -define(TS_OPTLEN, 12).
+%% IP_MAXPACKET, the bound on a run with its headers, as on one IP packet and on a TSO
+%% segment (tcp_output.c:916-937); the IPv4 and IPv6 fixed headers and the TCP header.
+-define(IP_MAXPACKET, 16#ffff).
+-define(IP_HDR_LEN, 20).
+-define(IP6_HDR_LEN, 40).
+-define(TCP_HDR_LEN, 20).
 
 %% The segment decide/3 chose: its first sequence number, its payload bytes, its flags,
 %% where its bytes come from (`next`, sequentially from snd_nxt; `retransmit` or `rescue`, a
@@ -176,6 +193,9 @@ Departures, each from erXos's model:
                   %% A full segment of this pass, t_maxseg less the options: the segment
                   %% size the send log records it with (erx_tcp_sendlog:sent/5).
                   size :: pos_integer() | undefined,
+                  %% The frames the segment is cut into: more than one makes it a run of
+                  %% `len` bytes in frames of `size` each but the last (run/6).
+                  frames = 1 :: pos_integer(),
                   sendalot :: boolean()}).
 
 -doc """
@@ -187,15 +207,23 @@ owed, as TF_ACKNOW stays set on every error return. In CLOSED it sends only the 
 a dropped connection that has received a SYN (`reset_peer`, `tcp_outflags[TCPS_CLOSED]`).
 """.
 -spec output(#tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:outgoing()]}.
-output(#tcb{state = closed, reset_peer = true} = Tcb, Ctx) ->
+output(Tcb, Ctx) ->
+    output(Tcb, Ctx, true).
+
+-doc """
+As `output/2`; with Runs `false` every segment is a pass of its own, the per-segment output
+whose frames a run's must equal, which the differential tests compare runs with.
+""".
+-spec output(#tcb{}, #tcp_ctx{}, Runs :: boolean()) -> {#tcb{}, [erx_tcp:outgoing()]}.
+output(#tcb{state = closed, reset_peer = true} = Tcb, Ctx, _Runs) ->
     reset(Tcb, Ctx);
-output(#tcb{state = closed} = Tcb, Ctx) ->
+output(#tcb{state = closed} = Tcb, Ctx, _Runs) ->
     {done(Tcb, Ctx), []};
 output(#tcb{snd_una = Una, snd_max = Max, snd_nxt = Nxt} = Tcb0,
-       #tcp_ctx{credit = Credit} = Ctx) ->
+       #tcp_ctx{credit = Credit} = Ctx, Runs) ->
     Tcb = Tcb0#tcb{snd_nxt = max(Nxt, Una)},
     Idle = Max =:= Una,
-    {Tcb1, Out} = again(after_idle(Idle, Tcb, Ctx), Idle, Credit, Ctx, []),
+    {Tcb1, Out} = again(after_idle(Idle, Tcb, Ctx), Idle, {Credit, Runs}, Ctx, []),
     {done(Tcb1, Ctx), Out}.
 
 -doc """
@@ -223,18 +251,19 @@ request_r_scale() ->
 %% lost (unreachable/4); a segment beyond the credit is the ENOBUFS case; one IP must refuse
 %% under don't-fragment lowers t_maxseg and goes round again (EMSGSIZE), which ends, since
 %% each lowering is strictly smaller and an MSS of TCP_MINMSS or less sets no DF.
-again(Tcb0, Idle, Credit, #tcp_ctx{route = Route} = Ctx, Acc) ->
+%% A run of n frames takes n units of the credit.
+again(Tcb0, Idle, {Credit, Runs} = Room, #tcp_ctx{route = Route} = Ctx, Acc) ->
     case decide(Tcb0, Idle, Ctx) of
         {stop, Tcb} ->
             {Tcb, lists:reverse(Acc)};
         {send, Seg, Tcb} when Credit =:= 0, Route =:= ok ->
             {enobufs(Seg, Tcb, Ctx), lists:reverse(Acc)};
         {send, Seg, Tcb1} ->
-            case transmit(Seg, Tcb1, Ctx) of
-                {emsgsize, Mss} -> again(Tcb1#tcb{maxseg = Mss}, Idle, Credit, Ctx, Acc);
-                {Tcb, Out, _} when Route =/= ok -> {unreachable(Seg, Tcb1, Tcb, Out), []};
-                {Tcb, Out, true} -> again(Tcb, Idle, Credit - 1, Ctx, [Out | Acc]);
-                {Tcb, Out, false} -> {Tcb, lists:reverse([Out | Acc])}
+            case transmit(Seg, Room, Tcb1, Ctx) of
+                {emsgsize, Mss} -> again(Tcb1#tcb{maxseg = Mss}, Idle, Room, Ctx, Acc);
+                {Tcb, Out, _, _} when Route =/= ok -> {unreachable(Seg, Tcb1, Tcb, Out), []};
+                {Tcb, Out, true, Frames} -> again(Tcb, Idle, {Credit - Frames, Runs}, Ctx, [Out | Acc]);
+                {Tcb, Out, false, _} -> {Tcb, lists:reverse([Out | Acc])}
             end
     end.
 
@@ -484,7 +513,7 @@ nothing_sent(Tcb, _) ->
 %% receive window, then the sequence numbers, the send log and the timers. A segment that
 %% would not fit the context's MTU under don't-fragment is not committed: the answer is
 %% `{emsgsize, Mss}`, `tcp_mss_update(tp, -1, mtu)` of that MTU (tcp_output.c:1694-1709).
-transmit(#out_seg{flags = Flags0} = Seg0, #tcb{maxseg = Mss} = Tcb0,
+transmit(#out_seg{flags = Flags0} = Seg0, Room, #tcb{maxseg = Mss} = Tcb0,
          #tcp_ctx{mtu = Mtu} = Ctx) ->
     Syn = Flags0 band ?TH_SYN =/= 0,
     {Sacks, RcvSack} = sack_blocks(Syn, Tcb0),
@@ -498,7 +527,7 @@ transmit(#out_seg{flags = Flags0} = Seg0, #tcb{maxseg = Mss} = Tcb0,
     Df = dont_fragment(Tcb0),
     case Df andalso ?IP4_TCP_HDR_LEN + Optlen + Seg#out_seg.len > Mtu of
         true -> {emsgsize, erx_tcp_mss:update(inet, {mtu, Mtu}, Mtu, 0)};
-        false -> commit(Seg, Opts, RcvSack, Df, Tcb0, Ctx)
+        false -> commit(run(Seg0, Seg, Opts, Room, Tcb0, Ctx), Opts, RcvSack, Df, Tcb0, Ctx)
     end.
 
 %% DF on every IPv4 segment while the MSS is above tcp_minmss (tcp_output.c:1494-1498); an
@@ -511,7 +540,7 @@ dont_fragment(#tcb{family = Family, maxseg = Mss}) ->
 %% waits for the route in sent/4. RcvSack is the receiver's SACK value with the blocks this
 %% segment reports taken, its D-SACK block cleared (tcp_output.c:1635-1641).
 commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, Tcb0, #tcp_ctx{route = Route} = Ctx) ->
-    #out_seg{len = Len, flags = Flags1, sendalot = More} = Seg,
+    #out_seg{len = Len, flags = Flags1, sendalot = More, frames = Frames, size = Size} = Seg,
     {Flags, IpEcn, Tcb2} = ecn(Seg#out_seg{flags = Flags1 bor push(Seg, Tcb0)}, Tcb0),
     {Header, RecWin} = header(Seg#out_seg{flags = Flags}, Opts, Tcb2),
     Payload = case Len of
@@ -526,7 +555,97 @@ commit(#out_seg{start = Start} = Seg, Opts, RcvSack, Df, Tcb0, #tcp_ctx{route = 
     Tcb3 = after_send(Seg#out_seg{flags = Flags}, Tcb2, Ctx),
     Tcb = Tcb3#tcb{snd_up = Up, rxwin0_sent = Header#tcp.win =:= 0,
                    rexmt_prev = badrxtwin(Opts, Tcb3, Ctx)},
-    {sent(Route, RecWin, RcvSack, Tcb), {Header, #{ecn => IpEcn, df => Df}, Payload}, More}.
+    Marks = case Frames of
+                1 -> #{ecn => IpEcn, df => Df};
+                _ -> #{ecn => IpEcn, df => Df, seg => Size}
+            end,
+    {sent(Route, RecWin, RcvSack, Tcb), {Header, Marks, Payload}, More, Frames}.
+
+%% Output's run rule (docs/design-network-fastpath.md, "Output makes runs"): the segment
+%% Seg, already cut to one full segment of `size` bytes, becomes a run of several such
+%% frames when per-segment output would send them one pass after another with headers that
+%% differ only in the sequence number, the lengths and the checksums, and the last frame's
+%% PSH and FIN, which FreeBSD's TSO burst also shares (tcp_output.c:517-565, 916-962).
+%% Seg0 is the segment decide/3 chose, with its length Len0 and its FIN before the cut. The
+%% run takes the whole segments that Len0, the credit and IP_MAXPACKET allow; what is left
+%% of Len0 is the next pass's, decided from the state after the run, as per-segment output
+%% decides it after n full segments.
+run(#out_seg{len = Len0, flags = Flags0}, #out_seg{size = Size} = Seg, Opts, {Credit, true}, Tcb,
+    Ctx) when Len0 >= 2 * Size ->
+    case runs(Seg, Opts, Tcb, Ctx) of
+        true ->
+            Payload = ?IP_MAXPACKET - ip_hlen(Tcb) - ?TCP_HDR_LEN - erx_tcp_wire:optlen(Opts),
+            case lists:min([Len0 div Size, Credit, Payload div Size]) of
+                Frames when Frames >= 2 ->
+                    Len = Frames * Size,
+                    %% The FIN rides on the last frame when the run sends the data's end.
+                    RunFlags = case Len =:= Len0 of
+                                   true -> Flags0;
+                                   false -> Flags0 band bnot ?TH_FIN
+                               end,
+                    Seg#out_seg{len = Len, flags = RunFlags, frames = Frames, sendalot = Len < Len0};
+                _ ->
+                    Seg
+            end;
+        false ->
+            Seg
+    end;
+run(_Seg0, Seg, _Opts, _Room, _Tcb, _Ctx) ->
+    Seg.
+
+%% Whether a segment's header is a run's: synchronized, without SYN or RST; new data at
+%% snd_nxt = snd_max outside fast recovery, where source/3 does not consult the send log, so
+%% the next passes take their bytes from snd_nxt too; not a probe or a persist transmission; no SACK or D-SACK block (tcp_output.c:517-522); no urgent data ahead; ECN
+%% leaving its state as it was and adding no flag, so every frame carries the same
+%% codepoint; don't-fragment on IPv4, so no frame needs an identification; and a route.
+runs(#out_seg{start = Start, flags = Flags, source = Source} = Seg, #tcp_opts{sacks = Sacks},
+     #tcb{state = State, snd_nxt = Nxt, snd_max = Max, snd_up = Up, force_data = Force,
+          family = Family, ecn = Ecn, ccv = #ccv{fast_recovery = Fast}} = Tcb,
+     #tcp_ctx{route = Route}) ->
+    Route =:= ok andalso erx_tcp:have_established(State)
+        andalso Flags band (?TH_SYN bor ?TH_RST) =:= 0
+        andalso Source =:= next andalso not Fast andalso Start =:= Nxt andalso Nxt =:= Max
+        andalso Sacks =:= [] andalso Up =< Nxt
+        andalso not Force andalso not persisting(Tcb)
+        andalso (Family =:= inet6 orelse dont_fragment(Tcb))
+        andalso ecn_steady(ecn(Seg, Tcb), Flags, Ecn).
+
+%% ECN output that adds no flag and leaves the connection's ECN state as it was.
+ecn_steady({Flags, _IpEcn, #tcb{ecn = Ecn}}, Flags, Ecn) -> true;
+ecn_steady(_, _, _) -> false.
+
+ip_hlen(#tcb{family = inet}) -> ?IP_HDR_LEN;
+ip_hlen(#tcb{family = inet6}) -> ?IP6_HDR_LEN.
+
+-doc """
+The segments a run stands for, in order, as per-segment output sends them: each but the
+last carries `seg` bytes of the payload and the run's flags without PSH and FIN, and each
+sequence number advances by `seg` modulo 2^32; every other header field, the options
+included, is the run's. An outgoing segment without `seg` stands for itself.
+""".
+-spec segments(erx_tcp:outgoing()) -> [erx_tcp:outgoing()].
+segments({Header, #{seg := Seg} = Marks, Payload}) when is_integer(Seg), Seg > 0 ->
+    cut(Header, maps:remove(seg, Marks), Seg, Payload, iolist_size(Payload));
+segments({_, Marks, _} = Segment) when not is_map_key(seg, Marks) ->
+    [Segment].
+
+cut(Header, Marks, Seg, Payload, Left) when Left =< Seg ->
+    [{Header, Marks, Payload}];
+cut(#tcp{seq = Seq, flags = Flags} = Header, Marks, Seg, Payload, Left) ->
+    {Slice, Rest} = split(Payload, Seg),
+    [{Header#tcp{flags = Flags band bnot (?TH_PUSH bor ?TH_FIN)}, Marks, Slice}
+     | cut(Header#tcp{seq = erx_tcp_seq:wire(Seq + Seg)}, Marks, Seg, Rest, Left - Seg)].
+
+%% The first N bytes of a list of binaries, and the rest, as sub-binaries.
+split(Bins, N) -> split(Bins, N, []).
+
+split(Rest, 0, Acc) ->
+    {lists:reverse(Acc), Rest};
+split([Bin | Bins], N, Acc) when byte_size(Bin) =< N ->
+    split(Bins, N - byte_size(Bin), [Bin | Acc]);
+split([Bin | Bins], N, Acc) ->
+    <<Head:N/binary, Tail/binary>> = Bin,
+    {lists:reverse([Head | Acc]), [Tail | Bins]}.
 
 %% "Data sent (as far as we can tell)" (tcp_output.c:1722-1735): the largest window
 %% advertised, the last ACK sent, and the pending ACK and delayed ACK settled, with the

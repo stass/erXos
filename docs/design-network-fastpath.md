@@ -161,13 +161,15 @@ its own.
 
 Sending: `gen_tcp:send/2` appends a binary to the connection's send
 buffer, a queue of binaries (`erx_tcp_sndbuf`). `erx_tcp_output` decides
-one segment per pass of its `again` loop and commits it, copying the
+one segment or run per pass of its `again` loop by the run rule of
+[Output makes runs](#output-makes-runs) and commits it, copying the
 control block in `commit/6`, `after_send/3` and `done/2`.
-`erx_net_frame:tcp/3` encodes the TCP header and its options
-(`erx_tcp_wire:encode/4`, `add_options/1`) and the IP and link headers,
-summing the segment with the checksum BIF, three calls per segment. The
-send log inserts one range per
-segment. The step's frames go to the driver in one `{transmit, Frames}`
+`erx_net_frame:tcp/3` cuts a run into its segments
+(`erx_tcp_output:segments/1`) and encodes each segment's TCP header and
+its options (`erx_tcp_wire:encode/4`, `add_options/1`) and the IP and
+link headers, the checksum delayed when the transport finishes it, so the frame
+layer's work is still per segment. The send log inserts one range per
+run. The step's frames go to the driver in one `{transmit, Frames}`
 message, and the driver joins every `{transmit, ...}` waiting in its
 mailbox to its backlog and hands each frame to its transport. The tap
 transport's `port_command/2` makes ERTS flatten the frame into a buffer,
@@ -380,7 +382,8 @@ one frame, which holds when all of these do:
 
 1. the connection is synchronized and the segment carries neither SYN nor
    RST (`tcp_output.c:558-565` excludes a SYN);
-2. its bytes follow `snd_nxt`; a range the send log chose to send again is
+2. its bytes are new data at `snd_nxt`, which is `snd_max`; a range the
+   send log chose to send again is
    sent one segment at a time, as FreeBSD's default `tcp_sack_tso` of 0
    sends a SACK retransmission without TSO (`tcp_sack.c:157`,
    `tcp_output.c:561`);

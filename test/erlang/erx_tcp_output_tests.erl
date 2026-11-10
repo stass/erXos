@@ -40,8 +40,11 @@ in_flight(Bytes, Sent) ->
           sendlog = erx_tcp_sendlog:sent(T#tcb.sendlog, 1001, 1001 + Sent, 1000, ?T0),
           send_timer = {rexmt, ?T0 + ?S(1000)}}.
 
-lens(Out) -> [iolist_size(Payload) || {_, _, Payload} <- Out].
-seqs(Out) -> [Seq || {#tcp{seq = Seq}, _, _} <- Out].
+%% The segments on the wire, each run cut as the frame layer cuts it.
+wire(Out) -> lists:flatmap(fun erx_tcp_output:segments/1, Out).
+
+lens(Out) -> [iolist_size(Payload) || {_, _, Payload} <- wire(Out)].
+seqs(Out) -> [Seq || {#tcp{seq = Seq}, _, _} <- wire(Out)].
 
 %% tcp_output.c:274-275, 412-425, 587-625: the peer's window and the congestion window bound
 %% the data; a remainder under a segment that the window, not the buffer, cut is held.
@@ -145,7 +148,7 @@ mss_clamp_test() ->
     T = (est(2000))#tcb{ts = #ts{recent = 1, offset = 0}, state = fin_wait_1, fin = queued},
     {T1, Out} = out(T),
     ?assertEqual([988, 988, 24], lens(Out)),
-    ?assertEqual([0, 0, ?TH_FIN], [F band ?TH_FIN || {#tcp{flags = F}, _, _} <- Out]),
+    ?assertEqual([0, 0, ?TH_FIN], [F band ?TH_FIN || {#tcp{flags = F}, _, _} <- wire(Out)]),
     ?assertEqual({sent, 3001}, T1#tcb.fin).
 
 %% tcp_output.c:1690-1693: past the credit nothing is sent, the congestion window drops to
@@ -304,3 +307,149 @@ timeout_rewinds_through_the_loss_module_test() ->
     T = spied((in_flight(2000, 2000))#tcb{send_timer = {rexmt, ?T0}}),
     {T1, _} = erx_tcp_timer:expired(T, ctx(64)),
     ?assertEqual({1001, [{timeout, 1}]}, {T1#tcb.snd_nxt, erx_tcp_loss_spy:causes(T1#tcb.loss_state)}).
+
+%% --- Runs (docs/design-network-fastpath.md, "Output makes runs") --------------
+
+%% Output with runs and output without them over the same state: the frames the runs are cut
+%% into, header and payload, are per-segment output's, and the control block after the pass
+%% is the same in every field. Random states cover windows, the congestion window, the
+%% credit, outstanding data, timestamps, MSS and MTU, Nagle, a FIN owed, SACK and D-SACK
+%% blocks to report, and urgent data.
+runs_equal_per_segment_output_test() ->
+    rand:seed(exsss, {6, 6, 6}),
+    Made = lists:sum([differential(random_state()) || _ <- lists:seq(1, 3000)]),
+    %% The property is not vacuous: most states make a run.
+    ?assert(Made > 1000).
+
+differential({Tcb, Ctx}) ->
+    {T1, Out1} = erx_tcp_output:output(Tcb, Ctx, true),
+    {T2, Out2} = erx_tcp_output:output(Tcb, Ctx, false),
+    %% The state is in the assertion, so a failure names its case.
+    ?assertEqual({{Tcb, Ctx}, T2, Out2}, {{Tcb, Ctx}, T1, wire(Out1)}),
+    %% A run's frames fill the credit as its segments would.
+    ?assert(length(wire(Out1)) =< Ctx#tcp_ctx.credit),
+    length([run || {_, #{seg := _}, _} <- Out1]).
+
+random_state() ->
+    Mss = pick([536, 1000, 1448, 1460, 8960]),
+    %% Half the states hold whole segments after what is in flight, so runs end the data.
+    {Bytes, Sent} = case pick([any, whole]) of
+                        any ->
+                            B = rand:uniform(70000) - 1,
+                            {B, rand:uniform(min(B, 20000) + 1) - 1};
+                        whole ->
+                            S = rand:uniform(20001) - 1,
+                            {S + (Mss - pick([0, 12])) * rand:uniform(40), S}
+                    end,
+    T0 = case Sent of
+             0 -> est(Bytes);
+             _ -> in_flight(Bytes, Sent)
+         end,
+    %% Some buffers hold the data in several binaries, so frames cross binary boundaries.
+    Buf = case pick([one, many]) of
+              one -> T0#tcb.sndbuf;
+              many -> lists:foldl(fun(B, Acc) -> erx_tcp_sndbuf:append(Acc, B) end,
+                                  erx_tcp_sndbuf:new(), pieces(Bytes))
+          end,
+    #tcb{ccv = Ccv} = T0,
+    T1 = T0#tcb{maxseg = Mss, ccv = Ccv#ccv{cwnd = rand:uniform(80000), maxseg = Mss},
+                snd_wnd = rand:uniform(65536) - 1, nodelay = pick([true, false]),
+                ts = pick([off, #ts{recent = 77, offset = 5}])},
+    T2 = case pick([plain, plain, fin, sack, dsack, urgent, recovery, ecn, cwr]) of
+             plain -> T1;
+             fin -> T1#tcb{state = fin_wait_1, fin = queued};
+             sack -> T1#tcb{sack = on, rcv_sack = erx_tcp_sack:arrived(erx_tcp_sack:new(),
+                                                                         {6001, 7001}, 5001, [])};
+             dsack -> T1#tcb{sack = on, rcv_sack = erx_tcp_sack:arrived(erx_tcp_sack:new(),
+                                                                          {4001, 5001}, 5001, [])};
+             urgent -> T1#tcb{snd_up = 1001 + Sent + rand:uniform(Bytes - Sent + 1)};
+             recovery when Sent >= 2 * Mss -> recovering(T1, Sent);
+             recovery -> T1;
+             ecn -> T1#tcb{ecn = erx_tcp_ecn:input_syn_sent(?TH_ECE, off)};
+             cwr -> T1#tcb{ecn = erx_tcp_ecn:signal_cwr(erx_tcp_ecn:input_syn_sent(?TH_ECE, off))}
+         end,
+    Route = pick([ok, ok, ok, {error, ehostunreach}]),
+    {T2#tcb{sndbuf = Buf}, #tcp_ctx{now = ?T0, credit = rand:uniform(70) - 1,
+                                    mtu = pick([1500, 9000]), route = Route}}.
+
+%% Bytes of "x" as binaries of random sizes.
+pieces(0) -> [];
+pieces(Bytes) ->
+    N = min(Bytes, rand:uniform(3000)),
+    [binary:copy(<<"x">>, N) | pieces(Bytes - N)].
+
+%% SACK fast recovery after the peer SACKed the upper half of what is in flight.
+recovering(#tcb{maxseg = Mss, ccv = Ccv} = T, Sent) ->
+    Half = 1001 + (Sent div 2 div Mss) * Mss,
+    {Log, _} = erx_tcp_sendlog:ack(T#tcb.sendlog, 1001, [{Half, 1001 + Sent}]),
+    T#tcb{sack = on, sendlog = Log, snd_recover = 1001 + Sent,
+          ccv = Ccv#ccv{fast_recovery = true}}.
+
+pick(List) -> lists:nth(rand:uniform(length(List)), List).
+
+%% tcp_output.c:916-962: a run takes the whole segments the windows allow, ten here; every
+%% frame carries the timestamps, the sequence number advances by the segment size, only the
+%% last frame carries PSH, and the control block moves as after ten segments.
+run_of_full_segments_test() ->
+    T = (est(10000))#tcb{ts = #ts{recent = 99, offset = 7}},
+    {T1, [{#tcp{seq = 1001, flags = ?TH_ACK}, #{seg := 988}, Payload} | _] = Out} = out(T),
+    ?assertEqual(9880, iolist_size(Payload)),
+    Wire = wire(Out),
+    ?assertEqual([988 || _ <- lists:seq(1, 10)] ++ [120], lens(Out)),
+    ?assertEqual([1001 + I * 988 || I <- lists:seq(0, 10)], seqs(Out)),
+    ?assertEqual([?TH_ACK || _ <- lists:seq(1, 10)] ++ [?TH_ACK bor ?TH_PUSH],
+                 [F || {#tcp{flags = F}, _, _} <- Wire]),
+    ?assert(lists:all(fun({#tcp{opts = #tcp_opts{ts = {_, 99}}}, _, _}) -> true end, Wire)),
+    ?assertEqual({11001, 11001}, {T1#tcb.snd_nxt, T1#tcb.snd_max}).
+
+%% A run is bounded by the credit, one unit a frame, and by IP_MAXPACKET with its headers;
+%% a window of less than two segments makes no run.
+run_bounds_test() ->
+    {_, [{_, #{seg := 1000}, P3} | _]} = erx_tcp_output:output(est(10000), ctx(3)),
+    ?assertEqual(3000, iolist_size(P3)),
+    Big = (est(200000))#tcb{snd_wnd = 65535 * 4, wscale = {2, 2},
+                            ccv = (est(0))#tcb.ccv#ccv{cwnd = 200000}},
+    {_, [{_, #{seg := 1000}, P65} | _]} = erx_tcp_output:output(Big, ctx(100)),
+    ?assertEqual(65000, iolist_size(P65)),
+    {_, Two} = out((est(10000))#tcb{snd_wnd = 1999}),
+    ?assertEqual([], [run || {_, #{seg := _}, _} <- Two]).
+
+%% The FIN rides on the last frame of a run that sends the data's end (the per-segment
+%% wire, where FreeBSD sends it apart after a TSO burst, tcp_output.c:965-969).
+run_ends_with_the_fin_test() ->
+    T = (est(3000))#tcb{state = fin_wait_1, fin = queued},
+    {T1, [{#tcp{flags = Flags}, #{seg := 1000}, _}] = Out} = out(T),
+    ?assertEqual(?TH_ACK bor ?TH_PUSH bor ?TH_FIN, Flags),
+    ?assertEqual([0, 0, ?TH_FIN], [F band ?TH_FIN || {#tcp{flags = F}, _, _} <- wire(Out)]),
+    ?assertEqual({sent, 4001}, T1#tcb.fin).
+
+%% During SACK recovery every pass asks the send log first (source/3), so a pass whose bytes
+%% follow snd_max sends no run: per-segment output turns to a hole once the new data passes
+%% the window's right edge over the pipe (NextSeg's rules 3 and 4).
+no_run_in_recovery_test() ->
+    #tcb{ccv = Ccv} = T0 = in_flight(40000, 10000),
+    {Log, _} = erx_tcp_sendlog:ack(T0#tcb.sendlog, 1001, [{6001, 11001}]),
+    T = T0#tcb{sendlog = Log, sack = on, snd_recover = 11001,
+               ccv = Ccv#ccv{cwnd = 12000, fast_recovery = true}},
+    {_, Out} = out(T),
+    ?assertEqual([11001, 12001, 1001, 2001, 3001, 4001, 5001], seqs(Out)),
+    ?assertEqual([], [run || {_, #{seg := _}, _} <- Out]).
+
+%% segments/1 by hand: a run over three binaries cut at 1000 bytes, each frame's bytes, its
+%% sequence number across the wrap and its flags.
+segments_by_hand_test() ->
+    Bytes = << <<(I rem 251)>> || I <- lists:seq(0, 2499) >>,
+    <<A:700/binary, B:1100/binary, C/binary>> = Bytes,
+    Run = {#tcp{sport = 1, dport = 2, seq = 16#ffffff00, ack = 3,
+                flags = ?TH_ACK bor ?TH_PUSH bor ?TH_FIN, win = 4, urp = 0,
+                opts = #tcp_opts{ts = {5, 6}}}, #{ecn => 0, df => true, seg => 1000}, [A, B, C]},
+    Wire = erx_tcp_output:segments(Run),
+    ?assertEqual([binary:part(Bytes, 0, 1000), binary:part(Bytes, 1000, 1000),
+                  binary:part(Bytes, 2000, 500)],
+                 [iolist_to_binary(P) || {_, _, P} <- Wire]),
+    ?assertEqual([16#ffffff00, 16#ffffff00 + 1000 - 16#100000000, 1744],
+                 [Seq || {#tcp{seq = Seq}, _, _} <- Wire]),
+    ?assertEqual([?TH_ACK, ?TH_ACK, ?TH_ACK bor ?TH_PUSH bor ?TH_FIN],
+                 [F || {#tcp{flags = F}, _, _} <- Wire]),
+    ?assertEqual([#{ecn => 0, df => true}], lists:usort([M || {_, M, _} <- Wire])),
+    ?assertEqual([{5, 6}], lists:usort([Ts || {#tcp{opts = #tcp_opts{ts = Ts}}, _, _} <- Wire])).

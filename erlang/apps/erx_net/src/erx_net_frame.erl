@@ -554,13 +554,16 @@ advanced: each segment encoded over the path's pseudo-header, its ECN field in t
 bits of the type of service or traffic class and don't-fragment as it says. `emsgsize`
 when any segment is over 65535 bytes or IP refuses it, and then no packet is returned.
 A segment's checksum is delayed when the path's interface has a finisher and IP sends
-the segment whole, and finished here otherwise.
+the segment whole, and finished here otherwise. A run (`erx_tcp:outgoing()` with `seg`) gives
+the packets of its segments (erx_tcp_output:segments/1).
 """.
 -spec tcp(path(), [erx_tcp:outgoing()], erx_net_rand:gen()) ->
           {ok, [packet()], erx_net_rand:gen()} | {error, emsgsize}.
 tcp(Path, Segments, Gen) ->
     each(fun(Segment, G) -> segment(Path, Segment, G) end, Segments, Gen).
 
+segment(Path, {_, #{seg := _}, _} = Run, Gen) ->
+    tcp(Path, erx_tcp_output:segments(Run), Gen);
 segment(#{iface := #{finish := Finish}} = Path, {#tcp{opts = Opts}, _, Payload} = Segment, Gen) ->
     Len = ?TCP_HDR_LEN + erx_tcp_wire:optlen(Opts) + iolist_size(Payload),
     if

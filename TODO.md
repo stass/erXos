@@ -130,9 +130,35 @@ it; git history is the record of completed work.
        with `{frame, Bytes, Sum}`, told apart only by the view's link, and `erx_net_if`'s
        `frame_input/1` does not map the driver's `{Zone, Bytes}` frame; give the loopback
        input its own tag when the loop transport is built.
-  6. runs on send: output's run rule, `erx_tcp_cut.c`, `erx_device:post_frame/5`, runs in
-     the tap and netmap NIFs, and `erx_net_frame:cut/1` as the reference: send toward
-     4.4 Gbit/s;
+  6. runs on send, toward 4.4 Gbit/s. Output's run rule is in the tree: `erx_tcp_output`
+     sends whole segments of new data as one run in one pass, an outgoing segment with
+     `seg`, and `erx_tcp_output:segments/1` cuts it into the segments per-segment output
+     sends, which `erx_net_frame:tcp/3` encodes one by one; `output/3` with runs off is
+     the oracle of the differential case and its seeded faults. On the FreeBSD test host (median of 5, min-max, against master the same hour) bulk send went from 1,141 (1,138-1,163) to 1,225 (1,216-1,238) Mbit/s, bulk receive 1,914 to 1,913, rr 64 B 16,596 (15,999-17,719) to 15,905 (15,779-16,266) txn/s and 64 B x16 90,075 to 89,739, within their spreads (raw data: ~/erxos-history net-bench-freebsd-fast-p6-2026-11-10, commit 87ecd53); the frame layer still encodes each segment, where the hack that cut in the tap gained 25 percent. What remains:
+     * the frame layer's `#run{}` (link header, template, the seven values, payload),
+       built from `erx_net_frame:template/2` and kept in the connection's state, the
+       driver and `erx_net_tx` counting a run's frames against the credits, the
+       transports' partial take `{ok, N}` with `run_tail/2`, and `erx_net_frame:cut/1`
+       as the Erlang reference, judged against per-segment output;
+     * `c_src/erx_tcp_cut.c` (`erx_tcp_cut_plan`, `erx_tcp_cut_frame`,
+       `erx_tcp_cut_header`) with its harness cases, a host test NIF judged by `cut/1`
+       (design test 1 and its seeds: PSH on every frame, the sequence number advanced by
+       `seg - 1`, the IPv4 checksum before the last length; and a checksum over the wrong
+       range) and its `tcp_cut` fuzz target;
+     * the tap NIF's `send/2` taking a run, each frame's headers through
+       `erx_tcp_cut_header` and one `writev` per frame;
+     * `erx_tcp_sndbuf:range/4` with the 64-binary bound that the C walks, output ending
+       a run where the range ends, and a single segment of more than 64 binaries;
+     * a segment that is not a run of several frames sent as a run of one whenever its
+       header is a run's, retransmissions included;
+     * `erx_device:post_frame/5` in the erXos device NIF and `erx_virtio_net` on it,
+       with package 5's `erx_device:complete/3` and its delayed frames;
+     * the interface's `runs` and `run_frames` counters, and design test 2's remaining
+       parts: the property over event sequences with IPv6 and window scaling among its
+       states (the single-pass differential has neither), the explorer's runs, and the
+       seed that starts a run's RTT probe at its last frame;
+     * [Low] condition 5 refuses a run while ECE is owed, though every frame would carry
+       it and the ECN state would not change, so a congestion episode sends per segment;
   7. the merge on receive: receive toward 4.4 Gbit/s, and a sender's ACKs cut by the merged
      units' length. `erx_bytes:tcp_merge/1` with `tcp_merge_limit/0` is in the tree
      (`c_src/erx_tcp_merge.c`, the portable NIF and erXos's BIF, judged against

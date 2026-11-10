@@ -346,11 +346,11 @@ mtu_drop_mid_transfer_test() ->
     {ok, Path} = erx_net_frame:path(v4("10.0.0.2"), #{}, Small),
     {T1, Out1} = erx_tcp_output:output(conn(inet, v4("10.0.0.5"), v4("10.0.0.2"), 2920),
                                        #tcp_ctx{now = ?T0, credit = 4, mtu = 1500}),
-    ?assertEqual([1460, 1460], [iolist_size(D) || {_, _, D} <- Out1]),
+    ?assertEqual([1460, 1460], [iolist_size(D) || {_, _, D} <- lists:flatmap(fun erx_tcp_output:segments/1, Out1)]),
     %% The interface's MTU drops to 1280: the next full segment is 1280 less the headers.
     More = T1#tcb{sndbuf = erx_tcp_sndbuf:append(T1#tcb.sndbuf, binary:copy(<<"y">>, 2480))},
     {T2, Out2} = erx_tcp_output:output(More, #tcp_ctx{now = ?T0, credit = 4, mtu = 1280}),
-    ?assertEqual([1240, 1240], [iolist_size(D) || {_, _, D} <- Out2]),
+    ?assertEqual([1240, 1240], [iolist_size(D) || {_, _, D} <- lists:flatmap(fun erx_tcp_output:segments/1, Out2)]),
     ?assertEqual(1240, T2#tcb.maxseg),
     {ok, Packets, _} = erx_net_frame:tcp(Path, Out2, gen()),
     ?assertEqual([1280, 1280], [iolist_size(P) || P <- Packets]).
@@ -435,3 +435,19 @@ looped_icmpv6_error_finds_the_socket_its_quote_names_test() ->
     ?assertMatch({ok, {report, #icmp6{type = 1, code = 4}, #{proto := 17}}}, erx_net_input:verify(Pending)),
     %% The same bytes in another zone are an error to no address of the stack.
     ?assertMatch({drop, _}, erx_net_input:classify({frame, eth1, iolist_to_binary(Packet)}, View)).
+
+%% A run (docs/design-network-fastpath.md, "A run") gives the packets of its segments, as
+%% erx_tcp_output:segments/1 cuts it, over IPv4 and IPv6, with the checksum delayed or
+%% finished, and fragmented as its segments would be when a frame is over the MTU.
+run_gives_the_packets_of_its_segments_test() ->
+    {Header, Marks, _} = segment([], 0, true),
+    Run = {Header#tcp{flags = ?TH_ACK bor ?TH_PUSH bor ?TH_FIN}, Marks#{seg => 1000},
+           [binary:copy(<<"r">>, 1700), binary:copy(<<"s">>, 1800)]},
+    Segments = erx_tcp_output:segments(Run),
+    ?assertEqual(4, length(Segments)),
+    V4 = path(v4("8.8.8.8"), #{}),
+    #{iface := If} = V4,
+    Paths = [V4, V4#{iface := If#{finish := copy}}, path(v6("2001:db8:9::1"), #{}),
+             (path(v6("2001:db8:9::1"), #{}))#{mtu := 900}],
+    [?assertEqual(erx_net_frame:tcp(P, Segments, gen()), erx_net_frame:tcp(P, [Run], gen()))
+     || P <- Paths].

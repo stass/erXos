@@ -148,9 +148,12 @@ packet with lro_nsegs.
 
 -doc """
 A segment to send: its TCP header with the values on the wire, and its payload, which
-erx_net_frame encodes with the path's headers.
+erx_net_frame encodes with the path's headers. With `seg` it is a run: the payload is cut into
+frames of `seg` bytes each but the last, as erx_tcp_output:segments/1 gives them
+(docs/design-network-fastpath.md, "A run").
 """.
--type outgoing() :: {#tcp{}, #{ecn := 0..3, df := boolean()}, Payload :: [binary()]}.
+-type outgoing() :: {#tcp{}, #{ecn := 0..3, df := boolean(), seg => pos_integer()},
+                     Payload :: [binary()]}.
 
 -doc """
 What the step asks its process to do, in order. `{reset, Segment}` is a RST answering a
