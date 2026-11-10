@@ -686,6 +686,13 @@ erx_fiasco_task_console_set(uint64_t base)
 }
 
 /*
+ * Device memory, a physical object or a contiguous run, comes from the root only
+ * (docs/design-stopgap.md, "The call table"): the root's own drivers make theirs, and the
+ * domain library makes every other holder's and passes it, so a create from any other
+ * task is ERX_ENOTSUP before its request is read. This body and the contiguous one below
+ * are the only callers of task_fill_physical and task_fill_contiguous, and the service's
+ * dispatch the only caller of the bodies, so the check in each covers every create.
+ *
  * The handoff (docs/design-stopgap.md, "The console"): the driver's first touch of a register
  * needs this reply, so it follows the last log record the service wrote to the UART, and a
  * failed map changes nothing.
@@ -693,13 +700,17 @@ erx_fiasco_task_console_set(uint64_t base)
 int
 erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem)
 {
-	const uint64_t console_base = atomic_load_explicit(&task_console_base, memory_order_relaxed);
-	int status = request->attr > UINT32_MAX ? ERX_EINVAL :
-	    erx_backend_physical_check(request->base, request->size, (uint32_t)request->attr);
+	uint64_t console_base;
+	int status;
 
+	if (caller != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
+	status = request->attr > UINT32_MAX ? ERX_EINVAL :
+	    erx_backend_physical_check(request->base, request->size, (uint32_t)request->attr);
 	if (status != ERX_OK)
 		return (status);
 	status = erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_physical, request, mem);
+	console_base = atomic_load_explicit(&task_console_base, memory_order_relaxed);
 	if (status == ERX_OK && console_base != 0 && request->base == console_base)
 		erx_debug_log_hand_to_console();
 	return (status);
@@ -708,8 +719,11 @@ erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical
 int
 erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contiguous_request_t *request, uint64_t *mem)
 {
-	const int status = erx_backend_contiguous_check(request->size);
+	int status;
 
+	if (caller != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
+	status = erx_backend_contiguous_check(request->size);
 	if (status != ERX_OK)
 		return (status);
 	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_contiguous, request,

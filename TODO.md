@@ -354,7 +354,7 @@ it; git history is the record of completed work.
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
-* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` makes its own window and DMA objects (`map_window`, `map_dma`), which on the Fiasco backend only the root may, so a holder outside the system domain is refused `ERX_ENOTSUP`; the open must take the objects `erx_dom_device_give` passes. It also takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
   record's `window` and `lines` become what that service builds, and drivers, which do not look inside the spec, stay as they are.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made, a retry takes another mapping from the shared device
   window and finds the line `ERX_EBUSY`. A boot's devices are few and a failure is a misconfiguration; the record's cleanup comes with the device service.
@@ -824,11 +824,17 @@ it; git history is the record of completed work.
   `erx_inet` reads the key and that every call's timeout is `infinity`.
   While the stack runs in the system domain the grant is the caller's own node's, so nothing
   reaches the client from another domain yet.
-* [Medium] Fiasco backend, `liberx/backend/fiasco/service_task.c` (`erx_fiasco_task_mem_physical_body`),
-  `service.c` (`ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL`): the call is served to any task, not
-  only the root as the call table says, so a task maps a device's registers it was never
-  given. A stopgap residual until erXos's kernel; the `native_task` suite has no case for
-  it. Refuse it with `ERX_ENOTSUP` for a task other than the root and add the case.
+* [Medium] Fiasco backend, `liberx/backend/fiasco/service_task.c` (`erx_fiasco_task_create_body`):
+  a create from a task other than the root is not refused, though the call table and the
+  deferred table say `ERX_ENOTSUP` in 1b-A (docs/design-stopgap.md, `erx_space_create`), so a task with a fault
+  gate of its own makes Fiasco tasks and spends the service's task rows; the child stays
+  inert, since a thread, an image map or a pass into it is root only. Refuse it and add a
+  `native_task` case. More widely, "root only" is a check in each body (`cap_pass`,
+  `image_map`, `slice_create`, `task_join`, the thread and IRQ bodies, the physical and
+  contiguous creates), and this one was missed: give each call a caller class in
+  `erx_fiasco_wire_words`' table (`service_wire.c`), refuse wholly root-only calls in
+  `erx_fiasco_wire_decode`, and hold the table to the call table's root-only rows with a
+  host test, leaving only the partly root-only calls' checks in their bodies.
 * [High] network and domains, the envelope (design-domains, "Risks and open questions"):
   every message from another domain arrives as `{erx_origin, D, Msg}`, so a socket's
   active-mode delivery `{tcp, S, Data}` (and `gen_udp`'s) reaches an owner outside the

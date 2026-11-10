@@ -189,6 +189,7 @@ erx_fiasco_root_main(void)
 	case_ends("run_rw", ERX_SPACE_JIT, MODE_RUN_RW, ERX_FIASCO_TASK_STATUS_FAULT);
 	case_ends("no_jit", 0, MODE_NO_JIT, 0);
 	case_irq_refused();
+	case_ends("device_refused", 0, MODE_DEVICE_REFUSED, 0);
 	case_ends("log", 0, MODE_LOG, 0);
 	case_ends("write", 0, MODE_WRITE, 0);
 	case_ends("spin_stop", 0, MODE_SPIN_STOP, STATUS_SPIN_STOP);

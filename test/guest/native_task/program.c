@@ -11,6 +11,7 @@
  */
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,6 +31,9 @@
 #define STACK_BYTES	(4 * PAGE)
 #define CPUS_TRIED	4u
 #define REWRITE_ROUNDS	2000u
+/* QEMU virt's fw_cfg and RAM (hw/arm/virt.c), as test/guest/function_api/device_cases.c uses them. */
+#define FW_CFG_PHYS	UINT64_C(0x9020000)
+#define RAM_PHYS	UINT64_C(0x40000000)
 /* movz w0, #value; ret */
 #define INSN_MOVZ_W0(value)	(UINT32_C(0x52800000) | (((uint32_t)(value) & 0xffffu) << 5))
 #define INSN_RET		UINT32_C(0xd65f03c0)
@@ -294,6 +298,33 @@ mode_irq_refused(void)
 }
 
 /*
+ * Only the root makes device memory, which the domain library then passes to a device's
+ * holder, so each create from a task answers ERX_ENOTSUP: a physical object over fw_cfg's
+ * registers, which nothing else in this machine maps (not the console UART, whose first
+ * map would hand the log to the console), and a contiguous run of one page. A physical
+ * object over RAM, which the root would get ERX_ERANGE for, is refused the same way, so
+ * the refusal comes before the request is read and tells a task nothing about which
+ * ranges are device memory. The status says which creates were not refused: 110 plus 1
+ * for the physical, plus 2 for the contiguous, plus 4 for the one over RAM.
+ */
+static int64_t
+mode_device_refused(void)
+{
+	uint64_t mem;
+	const bool physical_served = erx_mem_create_physical(0, 0, FW_CFG_PHYS, PAGE,
+	    ERX_MEM_ATTR_DEVICE, &mem) != ERX_ENOTSUP;
+	const bool contiguous_served = erx_mem_create_contiguous(0, 0, PAGE, 0, &mem) !=
+	    ERX_ENOTSUP;
+	const bool ram_served = erx_mem_create_physical(0, 0, RAM_PHYS, PAGE,
+	    ERX_MEM_ATTR_DEVICE, &mem) != ERX_ENOTSUP;
+
+	if (!physical_served && !contiguous_served && !ram_served)
+		return (0);
+	return (110 + (physical_served ? 1 : 0) + (contiguous_served ? 2 : 0) +
+	    (ram_served ? 4 : 0));
+}
+
+/*
  * The forgery goes out with its newlines and an escape sequence, and the judge reads
  * the serial log for it. A length past the UTCB, one past its register's width and a
  * thread index past the table are refused, and the longest line is not.
@@ -389,6 +420,8 @@ erx_task_main(uint64_t argument)
 		erx_fiasco_sleep_forever();
 	case MODE_IRQ_REFUSED:
 		return (mode_irq_refused());
+	case MODE_DEVICE_REFUSED:
+		return (mode_device_refused());
 	default:
 		return (90);
 	}
