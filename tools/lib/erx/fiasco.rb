@@ -503,7 +503,7 @@ module Erx
       found = PROGRAMS.flat_map do |program|
         executable = search.map { |directory| File.join(directory, program) }
                            .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
-        raise Error, "missing #{program}; install it with Homebrew (README.md)" unless executable
+        raise Error, "missing #{program}; install it (README.md, \"Host setup\")" unless executable
 
         bin = File.dirname(File.realpath(executable))
         gnu = File.expand_path('../libexec/gnubin', bin)

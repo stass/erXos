@@ -29,7 +29,10 @@ class MediumBootTest < Minitest::Test
         blob = File.join(directory, 'tree.dtb')
         dtc('-I', 'dts', '-O', 'dtb', '-o', blob, input: tree + Boot.chosen_source(Choice.new(slot: slot, offset: 0, length: 64)))
         listing = dtc('-I', 'dtb', '-O', 'dts', blob)
-        assert_match(%r{chosen \{\n\t\tstdout-path = "/pl011@9000000";\n\n\t\tbootloader \{\n\t\t\tpartition = <0x0#{partition}>;\n\t\t\ttryboot = <0x00>;\n}, listing)
+        # The device tree compiler's listing, either dtc's (Homebrew's, or FreeBSD's own): they
+        # differ only in blank lines and in how many digits a cell is printed with.
+        assert_match(%r{chosen \{\s*stdout-path = "/pl011@9000000";\s*bootloader \{\s*partition = <0x0?#{partition}>;\s*tryboot = <0x0{1,2}>;\n},
+                     listing)
         assert_equal 1, listing.scan('chosen {').size
       end
     end

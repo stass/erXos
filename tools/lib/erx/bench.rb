@@ -5,6 +5,7 @@
 require 'digest'
 require 'tmpdir'
 require 'rbconfig'
+require_relative 'host_os'
 require_relative 'bench_guest'
 require_relative 'bench_guest_log'
 require_relative 'bench_measurement'
@@ -85,9 +86,10 @@ module Erx
       "#{host_cpu}; #{RbConfig::CONFIG['host_os']}"
     end
 
-    # The host's load average as the host states it, for a report to say how busy the host was.
+    # The host's load average as the host states it, for a report to say how busy the host was:
+    # macOS and FreeBSD give it as one sysctl, Linux in /proc.
     def load_average
-      if RUBY_PLATFORM.include?('darwin')
+      if HostOs::MACOS || HostOs::FREEBSD
         command = @runner.run(['sysctl', '-n', 'vm.loadavg'], name: 'bench-loadavg', deadline: 10)
         File.read(command.fetch('log')).strip
       elsif File.file?('/proc/loadavg')
@@ -109,9 +111,9 @@ module Erx
     end
 
     def host_cpu
-      if RUBY_PLATFORM.include?('darwin')
-        command = @runner.run(['sysctl', '-n', 'machdep.cpu.brand_string'],
-                              name: 'bench-host-cpu', deadline: 10)
+      if HostOs::MACOS || HostOs::FREEBSD
+        name = HostOs::MACOS ? 'machdep.cpu.brand_string' : 'hw.model'
+        command = @runner.run(['sysctl', '-n', name], name: 'bench-host-cpu', deadline: 10)
         File.read(command.fetch('log')).strip
       elsif File.file?('/proc/cpuinfo')
         File.binread('/proc/cpuinfo', 1024 * 1024).lines.find do |line|

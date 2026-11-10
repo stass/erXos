@@ -13,7 +13,7 @@ module Erx
   # LVGL from the git submodule display/lvgl/lvgl (display/lvgl/ORIGIN.md),
   # the generated ui.txt reader and writer, and display/lvgl/erx_lvgl.c,
   # built by display/lvgl/Makefile into build/host/lvgl/VARIANT. The
-  # sanitized variant, under ASan and UBSan, is the one the tests run; make
+  # sanitized variant, under ASan and UBSan, is the one the tests run; GNU make
   # keeps the objects, so a rebuild compiles only what changed. Nothing of
   # the submodule runs: the build compiles its C and nothing else.
   module Lvgl
@@ -119,7 +119,7 @@ module Erx
         tree = Lvgl.source_tree(root: @root, runner: @runner)
         Generated.ensure(root: @root)
         output = File.join(@root, 'build/host/lvgl', @sanitized ? 'sanitized' : 'plain')
-        @runner.run(['make', "-j#{@jobs}", '-f', File.join(@root, MAKEFILE), "LVGL=#{tree}",
+        @runner.run(['gmake', "-j#{@jobs}", '-f', File.join(@root, MAKEFILE), "LVGL=#{tree}",
                      "GEN=#{File.join(@root, Generated::OUTPUT)}", "OUT=#{output}",
                      "CC=#{ENV.fetch('ERX_CLANG', 'clang')}", "SANITIZE=#{@sanitized ? SANITIZE : ''}"],
                     name: "lvgl-#{@sanitized ? 'sanitized' : 'plain'}", deadline: DEADLINE, chdir: @root)

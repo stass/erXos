@@ -9,6 +9,7 @@ require_relative 'bounded_file'
 require_relative 'dependencies'
 require_relative 'json_input'
 require_relative 'error'
+require_relative 'host_os'
 
 module Erx
   # erx_memdraw built for the development host (docs/design-display.md, "The
@@ -27,7 +28,7 @@ module Erx
     OURS = %w[erx_draw_clip erx_memdraw].freeze
     # The imported files keep Plan 9's pragmas and USED(a, b).
     WARNINGS = %w[-Wall -Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function -Werror].freeze
-    NIF_FLAGS = %w[-bundle -undefined dynamic_lookup -DERX_MEMDRAW_LOADABLE].freeze
+    NIF_FLAGS = [*HostOs::NIF_LINK_FLAGS, '-DERX_MEMDRAW_LOADABLE'].freeze
     # UBSan without its runtime: a stock emulator cannot load ASan's into a NIF.
     TRAP_UB = %w[-fsanitize=undefined -fsanitize-trap=undefined].freeze
     SANITIZE = %w[-fsanitize=address,undefined -fno-sanitize-recover=all].freeze
@@ -66,7 +67,8 @@ module Erx
     # The one line erx_memdraw_tests:main/1 prints for mode, or all its output
     # when it crashed before printing it.
     def run_cases(otp:, directory:, mode:, rounds:, seed:)
-      text, = Open3.capture2e(CLEAN_ENVIRONMENT, 'gtimeout', '-k', '10', DEADLINE, File.join(otp, 'bin/erl'),
+      environment = CLEAN_ENVIRONMENT.merge(HostOs.nif_search_environment(directory))
+      text, = Open3.capture2e(environment, 'gtimeout', '-k', '10', DEADLINE, File.join(otp, 'bin/erl'),
                               '-noshell', '-pa', directory, '-run', 'erx_memdraw_tests', 'main', mode, seed.to_s,
                               rounds.to_s, chdir: directory, stdin_data: '')
       text.lines.find { |line| line.start_with?("#{mode} ") }&.chomp || text

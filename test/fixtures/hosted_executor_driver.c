@@ -106,13 +106,31 @@ report(const char *name, bool ok)
 	printf("%s: %s\n", name, ok ? "ok" : "FAILED");
 }
 
+/* The host clock stock OTP reads: macOS's raw counter, FreeBSD's CLOCK_UPTIME, Linux's CLOCK_MONOTONIC. */
+static uint64_t
+host_clock_ns(void)
+{
+#ifdef __APPLE__
+	return (clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
+#else
+	struct timespec now;
+
+#ifdef __FreeBSD__
+	(void)clock_gettime(CLOCK_UPTIME, &now);
+#else
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+#endif
+	return ((uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec);
+#endif
+}
+
 /* erx_clock_ns is the clock stock OTP reads on this host: one read of it falls between two of that. */
 static bool
 clock_is_the_uptime_clock(void)
 {
-	const uint64_t before = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+	const uint64_t before = host_clock_ns();
 	const uint64_t clock = erx_clock_ns();
-	const uint64_t after = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+	const uint64_t after = host_clock_ns();
 
 	return (before <= clock && clock <= after);
 }

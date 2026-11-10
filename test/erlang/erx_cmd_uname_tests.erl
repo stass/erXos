@@ -12,7 +12,8 @@ cannot tell, the build facts' reader (erx_build:parse_facts/1), and the
 usage errors. The emulator
 that runs them is started as the system release is, with
 `-sname uname@erxtest -kernel start_distribution false`
-(test/host/erx_cmd_uname_test.rb), so it runs no distribution and a line
+(test/host/erx_cmd_uname_test.rb), and with `-start_epmd false` so that
+no epmd outlives it; it runs no distribution and a line
 run through the shell finds the host `erxtest` among init's arguments;
 its init has no `-erx build` and its root no build facts, so the build
 configurationifier and every build fact are `unknown`, the never-fabricate case

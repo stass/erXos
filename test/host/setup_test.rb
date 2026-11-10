@@ -11,25 +11,30 @@ require_relative '../../tools/lib/erx/setup'
 
 class SetupTest < Minitest::Test
   LOCK = Erx::DependencySchema.parse(File.binread(File.expand_path('../../deps.lock', __dir__)))
-  NAMES = Erx::Setup.steps(LOCK).map(&:name).freeze
+  NAMES = Erx::Setup.steps(LOCK, hosted_runtime: true).map(&:name).freeze
   PINNED = LOCK.map { |source| source.fetch('id') }.freeze
 
   def everything(value) = NAMES.to_h { |name| [name, value] }
 
   def test_fresh_tree_runs_every_step_in_order
-    assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK)).map(&:name)
+    assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK, hosted_runtime: true)).map(&:name)
     assert_equal NAMES.length - 5, NAMES.take_while { |name| name.start_with?('source-') }.length
     # The runtime build packs the hosted release, whose EROFS image fsimg writes.
     assert_equal %w[oracle-jit oracle-emu fsimg runtime rc-oracle], NAMES.last(5)
   end
 
+  def test_a_host_without_the_hosted_runtime_leaves_out_only_its_step
+    names = Erx::Setup.steps(LOCK, hosted_runtime: false).map(&:name)
+    assert_equal NAMES - ['runtime'], names
+  end
+
   def test_complete_tree_runs_nothing
-    assert_empty Erx::Setup.plan(everything(true), steps: Erx::Setup.steps(LOCK))
+    assert_empty Erx::Setup.plan(everything(true), steps: Erx::Setup.steps(LOCK, hosted_runtime: true))
   end
 
   def test_only_missing_steps_run
     present = everything(true).merge('source-musl' => false, 'runtime' => false)
-    assert_equal %w[source-musl runtime], Erx::Setup.plan(present, steps: Erx::Setup.steps(LOCK)).map(&:name)
+    assert_equal %w[source-musl runtime], Erx::Setup.plan(present, steps: Erx::Setup.steps(LOCK, hosted_runtime: true)).map(&:name)
   end
 
   # Every pinned source is fetched by setup or skipped with its reason, and a
@@ -189,8 +194,10 @@ class SetupDecisionsTest < Minitest::Test
     end
   end
 
-  def toolchain_env(env, runner)
-    Erx::Setup.new(root: File.expand_path('../..', __dir__), runner: runner, env: env).send(:toolchain_env)
+  # The toolchain env Setup finds from env alone: no ports prefix, and PATH only when env names one.
+  def toolchain_env(env, runner, ports_prefix: File.join(Dir.tmpdir, 'erx-no-ports'))
+    Erx::Setup.new(root: File.expand_path('../..', __dir__), runner: runner, env: env, ports_prefix: ports_prefix)
+              .send(:toolchain_env)
   end
 
   def homebrew_tree(directory)
@@ -236,6 +243,41 @@ class SetupDecisionsTest < Minitest::Test
       assert_empty runner.commands
       assert_equal({ 'ERX_LLD' => File.join(prefix, 'bin/ld.lld') },
                    toolchain_env({ 'ERX_CLANG' => '/my/clang', 'HOMEBREW_PREFIX' => prefix }, runner))
+    end
+  end
+
+  def llvm_bin(directory)
+    FileUtils.mkdir_p(directory)
+    %w[clang ld.lld].each do |tool|
+      File.write(File.join(directory, tool), "#!/bin/sh\n")
+      File.chmod(0o755, File.join(directory, tool))
+    end
+    directory
+  end
+
+  # Without Homebrew, the newest FreeBSD port that has both tools is taken.
+  def test_toolchain_comes_from_the_newest_complete_freebsd_port
+    Dir.mktmpdir('erx-ports-') do |ports|
+      llvm_bin(File.join(ports, 'llvm9/bin'))
+      newest = llvm_bin(File.join(ports, 'llvm23/bin'))
+      FileUtils.mkdir_p(File.join(ports, 'llvm24/bin'))
+      FileUtils.mkdir_p(File.join(ports, 'llvm-devel/bin'))
+      found = toolchain_env({}, BrewRunner.new(ports, nil), ports_prefix: ports)
+      assert_equal({ 'ERX_CLANG' => File.join(newest, 'clang'), 'ERX_LLD' => File.join(newest, 'ld.lld') }, found)
+    end
+  end
+
+  # Off macOS, clang and ld.lld on PATH are the last resort; on macOS PATH's clang is Apple's.
+  def test_toolchain_comes_from_path_only_off_macos
+    Dir.mktmpdir('erx-path-') do |directory|
+      bin = llvm_bin(File.join(directory, 'bin'))
+      env = { 'PATH' => "#{File.join(directory, 'empty')}:#{bin}" }
+      if Erx::HostOs::MACOS
+        assert_raises(Erx::Error) { toolchain_env(env, BrewRunner.new(directory, nil)) }
+      else
+        assert_equal({ 'ERX_CLANG' => File.join(bin, 'clang'), 'ERX_LLD' => File.join(bin, 'ld.lld') },
+                     toolchain_env(env, BrewRunner.new(directory, nil)))
+      end
     end
   end
 

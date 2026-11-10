@@ -496,6 +496,26 @@ export PATH=/opt/homebrew/bin:$PATH
 
 For another installation, adjust the paths.
 
+FreeBSD (x86-64, 16-CURRENT) is a host too. Install the same tools from
+packages: `llvm23`, `gmake`, `coreutils` (for `gtimeout`), `gawk`,
+`perl5`, `autoconf`, `automake`, `libtool`, `ruby` with
+`rubygem-minitest` and `rubygem-rexml`, `b3sum`, `node`, and the
+AArch64 ELF GCC and binutils, plus QEMU, a JVM and Docker for what
+needs them as above. The Fiasco build expects the cross tools under the
+`aarch64-elf-` prefix, while the port names them `aarch64-none-elf-`
+(TODO.md, "the Fiasco build"). The base system's `dtc` serves. Run the
+top-level targets with GNU make (`gmake check`), and point the build at
+the port's LLVM:
+
+```sh
+export ERX_CLANG=/usr/local/llvm23/bin/clang
+export ERX_LLD=/usr/local/llvm23/bin/ld.lld
+```
+
+`make setup` finds the newest `/usr/local/llvmNN` by itself when these
+are unset. The hosted runtime builds only on macOS, so on FreeBSD setup
+leaves it out and the tests that need it skip, saying so.
+
 ## Fresh worktree
 
 A new checkout or git worktree needs its sources, the stock OTP oracle and

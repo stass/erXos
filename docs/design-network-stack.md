@@ -2912,13 +2912,40 @@ memory:
   descriptor is armed for writing and the driver's backlog waits for the
   `writable` event that the arm's message gives.
 
-**Configuration.** `{erx_tap, #{device := Path, lladdr := Addr}}`, with
-`mtu` (1,500 when absent) and `tx_limit` (256 when absent), each checked
-at `init` as the pipe checks it. `init` opens the device for reading and
-writing, non-blocking and close-on-exec, and sends itself the first
-`more`. The NIF's handle is a resource that monitors its owner, the
-driver, and every call from another process is `badarg`, so the handle
-has one user and needs no lock.
+**Configuration.** `{erx_tap, #{device := Path, lladdr := Addr}}` or
+`{erx_tap, #{fd := Fd, lladdr := Addr}}`, exactly one of `device` and
+`fd`, with `mtu` (1,500 when absent) and `tx_limit` (256 when absent),
+each checked at `init` as the pipe checks it. With `device`, `init`
+opens the device by name for reading and writing, non-blocking and
+close-on-exec, with `erx_tap_nif:open/2`. With `fd`, `init` adopts a
+descriptor the node already holds open on the device, with
+`erx_tap_nif:adopt/2`: the NIF checks that `Fd` is a non-negative C
+`int`, takes a close-on-exec copy of it with `F_DUPFD_CLOEXEC` and makes
+the copy non-blocking. A descriptor that is not open is refused with
+`{fd, Fd, {adopt, ebadf}}`, and a failure after the copy closes the
+copy. The handle owns only its copy: the node keeps `Fd`, closing it
+leaves the copy open, and each start of the driver adopts a fresh copy
+of the same `Fd`. The two share one open file and so its flags, which
+makes `Fd` non-blocking too, and the node keeps it so while a handle
+lives: a blocking copy would stall the scheduler its `read` runs on.
+OTP's `socket:close/1`, for one, makes a socket blocking before it
+closes it, so a socket's descriptor is adopted only while the socket
+stays open. Either way `init` sends itself the first `more`. The NIF's
+handle is a resource that monitors its owner, the driver, and every
+call from another process is `badarg`, so the handle has one user and
+needs no lock.
+
+Adopting is what lets the node run unprivileged on any host. Opening a
+tap device takes privileges a node should not hold, and naming an
+already open descriptor by a path needs a file system of descriptors
+(FreeBSD's `fdescfs`), which other systems lack or do not give for every
+kind of descriptor. Instead a privileged opener opens the tap and hands
+its descriptor to the node over a UNIX-domain socket in an `SCM_RIGHTS`
+control message, whose `rights` data `socket:recvmsg` hands up as the
+received descriptor's number, a native C `int`, or starts the node with
+the descriptor inherited and its number in the configuration. The tap
+device's permissions then need grant nothing to the node's user. The
+tests adopt one end of a UNIX datagram socket pair the same way.
 
 **Receiving.** `recv/1` reads until the device has no frame (`EAGAIN`)
 or the batch is full. FreeBSD's tap gives one frame per `read`. Each

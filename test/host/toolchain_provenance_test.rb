@@ -92,4 +92,28 @@ class ToolchainProvenanceTest < Minitest::Test
     @document['extra'] = true
     assert_raises(Erx::Error) { registry }
   end
+
+  # LLVM's notice comes from LLVM's own install tree, or from a FreeBSD
+  # port's license directory, where it is named LLVM2; with neither, the
+  # profile's notice is missing and the registry refuses it.
+  def test_llvm_notice_comes_from_the_install_tree_or_the_freebsd_package
+    tree = File.join(@root, 'tree')
+    FileUtils.mkdir_p(File.join(tree, 'config/provenance'))
+    File.binwrite(File.join(tree, Erx::ToolchainProvenance::LLVM_PROFILE),
+                  JSON.generate(@document.merge('files' => ['include/header.h'], 'notices' => ['LICENSE.TXT'])))
+    port = File.join(@root, 'local/llvm23')
+    resource = File.join(port, 'lib/clang/23')
+    FileUtils.mkdir_p(File.join(resource, 'include'))
+    File.binwrite(File.join(resource, 'include/header.h'), "/* SPDX-License-Identifier: MIT */\n")
+    llvm = -> { Erx::ToolchainProvenance.llvm(root: tree, resource_dir: resource).first.fetch('notices').first }
+    assert_raises(Erx::Error) { llvm.call }
+
+    licenses = File.join(@root, 'local/share/licenses/llvm23-23.1.3')
+    FileUtils.mkdir_p(licenses)
+    File.binwrite(File.join(licenses, 'LLVM2'), 'port notice')
+    assert_equal Digest::SHA256.hexdigest('port notice'), llvm.call.fetch('sha256')
+
+    File.binwrite(File.join(port, 'LICENSE.TXT'), 'tree notice')
+    assert_equal Digest::SHA256.hexdigest('tree notice'), llvm.call.fetch('sha256')
+  end
 end

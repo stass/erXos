@@ -23,10 +23,13 @@ from `send`, which `transmit/2` cannot stop the driver from, through the one
 `refused` without a call. The driver ends, and its supervisor starts it again with a new
 descriptor; the old one closes as the driver ends, since the NIF's handle is the driver's.
 
-The configuration: `device`, the device's path; `lladdr`, which must be a unicast address
-with the locally administered bit set; `mtu`, from 1,280 to 9,000 (1,500 when absent); and
-`tx_limit`, the frames that may wait at the driver (256 when absent). The link is `up` from
-`init` on.
+The configuration names the device by exactly one of `device`, its path, which `init` opens,
+and `fd`, a descriptor the node holds open on it, such as one a privileged opener handed over,
+of which `init` adopts a copy, so the node keeps its own and each start of the driver adopts
+again; the node leaves it non-blocking, as `erx_tap_nif:adopt/2` says. The rest: `lladdr`,
+which must be a unicast address with the locally administered bit set; `mtu`, from 1,280 to
+9,000 (1,500 when absent); and `tx_limit`, the frames that may wait at the driver (256 when
+absent). The link is `up` from `init` on.
 """.
 
 -behaviour(erx_net_driver).
@@ -42,15 +45,14 @@ with the locally administered bit set; `mtu`, from 1,280 to 9,000 (1,500 when ab
               failed = false :: boolean()}).
 
 -doc false.
-init(#{device := Device, lladdr := Lladdr} = Config) ->
+init(#{lladdr := Lladdr} = Config) ->
     Mtu = maps:get(mtu, Config, ?MTU_DEFAULT),
     Limit = maps:get(tx_limit, Config, ?TX_LIMIT_DEFAULT),
     maybe
         ok ?= check(lladdr, Lladdr, is_local_unicast(Lladdr)),
         ok ?= check(mtu, Mtu, is_integer(Mtu) andalso Mtu >= 1280 andalso Mtu =< 9000),
         ok ?= check(tx_limit, Limit, is_integer(Limit) andalso Limit > 0),
-        {ok, Path} ?= path(Device),
-        {ok, Handle} ?= open(Path, Mtu),
+        {ok, Handle} ?= medium(maps:with([device, fd], Config), Mtu),
         self() ! {erx_tap, more},
         {ok, #{link => ethernet, lladdr => Lladdr, mtu => Mtu, state => up, tx_limit => Limit},
          #tap{handle = Handle, mtu = Mtu}}
@@ -62,6 +64,17 @@ check(Key, Value, false) -> {error, {Key, Value}}.
 %% Unicast (the group bit clear) and locally administered (the next bit set).
 is_local_unicast(<<_:6, 1:1, 0:1, _:40>>) -> true;
 is_local_unicast(_) -> false.
+
+%% The handle on the medium the configuration names: exactly one of a path or a descriptor.
+medium(#{device := Device} = Medium, Mtu) when map_size(Medium) =:= 1 ->
+    maybe
+        {ok, Path} ?= path(Device),
+        open(Path, Mtu)
+    end;
+medium(#{fd := Fd} = Medium, Mtu) when map_size(Medium) =:= 1 ->
+    adopt(Fd, Mtu);
+medium(Medium, _Mtu) ->
+    {error, {medium, Medium}}.
 
 %% The device's path as the bytes the host's file names are.
 path(Device) when is_list(Device); is_binary(Device) ->
@@ -78,6 +91,14 @@ open(Path, Mtu) ->
         {error, Reason} -> {error, {device, Path, Reason}}
     catch
         error:badarg -> {error, {device, Path}}
+    end.
+
+adopt(Fd, Mtu) ->
+    try erx_tap_nif:adopt(Fd, Mtu) of
+        {ok, _} = Ok -> Ok;
+        {error, Reason} -> {error, {fd, Fd, Reason}}
+    catch
+        error:badarg -> {error, {fd, Fd}}
     end.
 
 -doc false.

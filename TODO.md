@@ -993,6 +993,21 @@ it; git history is the record of completed work.
   ERTS's poll set lets go of it, so the new `init` may find the device busy (`ebusy`); not yet seen
   on p620. Pacing every link start in `start_link_sup/1`, not each way a driver ends, would close all
   three.
+* [Medium] network, `erx_tap` (`fd => N`): every restart of the driver adopts the integer N
+  again, so once N's holder closes it (an OTP socket closes with its controlling process), the
+  next descriptor the node opens under that number (a connection, a file) is adopted, made
+  non-blocking and written frames to. Adopt once into a resource a long-lived process owns and
+  give each driver start a copy of that, or record `st_dev`/`st_ino` at the first adoption and
+  refuse a restart whose descriptor differs.
+* [Medium] network, `erx_tap_nif` (`adopt/2`): the copy shares its open file's flags, so any
+  holder that clears `O_NONBLOCK` (OTP's `socket:close` does) makes the next `recv`/`send` block a
+  normal scheduler. Check `F_GETFL` at each call and fail with `{error, blocking}`, or poll with a
+  zero timeout before each read and write. Also refuse a descriptor not open for reading and
+  writing at adoption.
+* [Low] network, `erx_tap` (unprivileged runs): the privileged opener that hands the node a tap
+  descriptor over `SCM_RIGHTS` ([design-network-stack.md](docs/design-network-stack.md), "The tap
+  transport") is not built; it must hand the descriptor over close-on-exec, so no port program
+  inherits it.
 * [Low] network, `erx_net_sup`: a far end or device that stays dead logs a supervisor report about
   once a second per interface for as long as it stays dead; the log, not the stack, should fold
   repeated reports.
@@ -3863,6 +3878,20 @@ to the corpus and follow rc
   flags, which CLAUDE.md requires of every performance number; re-measure
   them with the flags recorded, in a new dated record.
 
+* [Medium] host tooling, the Fiasco build (`tools/lib/erx/fiasco.rb`,
+  `fiasco_provenance.rb`, `glue_imports.rb`): the AArch64 cross GCC is
+  named `aarch64-elf-` (Homebrew's) in about twenty places, from
+  `CROSS_COMPILE` to `lib/gcc/aarch64-elf/` and `aarch64-elf-nm`, and
+  FreeBSD's port names it `aarch64-none-elf-`. Find the prefix once, by
+  probing PATH for either, and derive every name and path from it; test
+  it on a FreeBSD host with the port installed.
+* [Low] host tooling, the build memo (`tools/lib/erx/build_memo.rb`):
+  records are reused only on macOS, whose sealed system volume the
+  system release names; on FreeBSD every step runs. FreeBSD's base
+  programs change only with a world install, which `uname` does not
+  always show; naming the base world (its libraries' hashes, or
+  `freebsd-version -u` together with the kernel's) would let FreeBSD
+  reuse records too.
 * [Medium] host tooling, the source check (`tools/lib/erx/checks.rb`):
   `Runner` writes a child's stdout and stderr to one log, so the check
   finds a git warning only because it breaks the NUL-terminated listing.

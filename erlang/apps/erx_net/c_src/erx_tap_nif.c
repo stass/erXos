@@ -9,6 +9,10 @@
  * bytes.  c_src/Makefile builds it on the host it runs on into
  * priv/erx_tap_nif.so; it is never built for erXos.
  *
+ * A handle comes from open/2, which opens the device by name, or from
+ * adopt/2, which takes a copy of a descriptor its caller already holds, such
+ * as one a privileged opener handed over; the caller keeps its own.
+ *
  * The handle is a resource holding the descriptor.  It monitors the process
  * that opened it, its owner, and every call from another process is badarg,
  * so the handle has one user and no lock.  The descriptor is closed only
@@ -280,41 +284,31 @@ erx_tap_arm(ErlNifEnv *env, erx_tap_t *tap, bool reading)
 	return (r >= 0);
 }
 
-/* --- The calls ---------------------------------------------------------- */
+/* Reads an MTU the handle accepts, 68 to 9,000, from term. */
+static bool
+erx_tap_get_mtu(ErlNifEnv *env, ERL_NIF_TERM term, unsigned *mtu)
+{
+
+	return (enif_get_uint(env, term, mtu) && *mtu >= ERX_TAP_MTU_MIN &&
+	    *mtu <= ERX_TAP_MTU_MAX);
+}
 
 /*
- * open(Path, Mtu) -> {ok, Handle} | {error, {open, Errno}}: the device read
- * and write, non-blocking and close-on-exec, owned by the caller.
+ * {ok, Handle}: a handle on the descriptor fd, which the calling process
+ * owns.  The handle owns fd from here: a failure closes it at once, and
+ * success hands it to the resource, which closes it once its owner ends;
+ * step is the call a failure names.
  */
 static ERL_NIF_TERM
-erx_tap_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+erx_tap_new(ErlNifEnv *env, int fd, unsigned mtu, const char *step)
 {
-	char path[PATH_MAX];
-	ErlNifBinary name;
 	ERL_NIF_TERM handle;
 	erx_tap_t *tap;
-	unsigned mtu;
-	int fd;
-
-	(void)argc;
-	if (!enif_inspect_binary(env, argv[0], &name) || name.size == 0 ||
-	    name.size >= sizeof(path) || memchr(name.data, 0, name.size) != NULL ||
-	    !enif_get_uint(env, argv[1], &mtu) || mtu < ERX_TAP_MTU_MIN ||
-	    mtu > ERX_TAP_MTU_MAX)
-		return (enif_make_badarg(env));
-	memcpy(path, name.data, name.size);
-	path[name.size] = '\0';
-
-	do
-		fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-	while (fd < 0 && errno == EINTR);
-	if (fd < 0)
-		return (erx_tap_failed(env, "open", errno));
 
 	tap = enif_alloc_resource(erx_tap_type, sizeof(*tap));
 	if (tap == NULL) {
 		(void)close(fd);
-		return (erx_tap_failed(env, "open", ENOMEM));
+		return (erx_tap_failed(env, step, ENOMEM));
 	}
 	tap->fd = fd;
 	tap->selected = false;
@@ -328,6 +322,70 @@ erx_tap_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	handle = enif_make_resource(env, tap);
 	enif_release_resource(tap);
 	return (enif_make_tuple2(env, atom_ok, handle));
+}
+
+/* --- The calls ---------------------------------------------------------- */
+
+/*
+ * open(Path, Mtu) -> {ok, Handle} | {error, {open, Errno}}: the device read
+ * and write, non-blocking and close-on-exec, owned by the caller.
+ */
+static ERL_NIF_TERM
+erx_tap_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	char path[PATH_MAX];
+	ErlNifBinary name;
+	unsigned mtu;
+	int fd;
+
+	(void)argc;
+	if (!enif_inspect_binary(env, argv[0], &name) || name.size == 0 ||
+	    name.size >= sizeof(path) || memchr(name.data, 0, name.size) != NULL ||
+	    !erx_tap_get_mtu(env, argv[1], &mtu))
+		return (enif_make_badarg(env));
+	memcpy(path, name.data, name.size);
+	path[name.size] = '\0';
+
+	do
+		fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+	while (fd < 0 && errno == EINTR);
+	if (fd < 0)
+		return (erx_tap_failed(env, "open", errno));
+	return (erx_tap_new(env, fd, mtu, "open"));
+}
+
+/*
+ * adopt(Fd, Mtu) -> {ok, Handle} | {error, {adopt, Errno}}: a close-on-exec
+ * copy of the caller's open descriptor Fd, made non-blocking, owned by the
+ * caller.  Fd stays the caller's, and close(2) of it leaves the copy open.
+ * The copy shares Fd's open file and so its flags: Fd turns non-blocking too,
+ * and the caller keeps it so while the handle lives, since a read or write of
+ * a blocking copy would stall the scheduler.  OTP's socket:close/1, for one,
+ * makes a socket blocking before it closes it.  A descriptor that is not open
+ * is EBADF, from the copy.
+ */
+static ERL_NIF_TERM
+erx_tap_adopt(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	unsigned mtu;
+	int copy, fd, flags;
+
+	(void)argc;
+	if (!enif_get_int(env, argv[0], &fd) || fd < 0 ||
+	    !erx_tap_get_mtu(env, argv[1], &mtu))
+		return (enif_make_badarg(env));
+
+	copy = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+	if (copy < 0)
+		return (erx_tap_failed(env, "adopt", errno));
+	flags = fcntl(copy, F_GETFL);
+	if (flags < 0 || fcntl(copy, F_SETFL, flags | O_NONBLOCK) < 0) {
+		int error = errno;
+
+		(void)close(copy);
+		return (erx_tap_failed(env, "adopt", error));
+	}
+	return (erx_tap_new(env, copy, mtu, "adopt"));
 }
 
 /*
@@ -591,6 +649,7 @@ erx_tap_load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 }
 
 static ErlNifFunc nif_funcs[] = {
+	{ "adopt", 2, erx_tap_adopt, 0 },
 	{ "open", 2, erx_tap_open, 0 },
 	{ "recv", 1, erx_tap_recv, 0 },
 	{ "send", 2, erx_tap_send, 0 },

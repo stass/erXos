@@ -9,18 +9,20 @@ built only outside erXos: erx_net's `c_src/erx_tap_nif.c`, from `priv/erx_tap_ni
 `make -C c_src tap` builds. Without its library the module does not load, and every call
 fails with `undef`.
 
-The handle `open/2` answers belongs to the calling process: every call from another process
+A handle comes from `open/2`, which opens the device by name, or from `adopt/2`, which takes
+a copy of a descriptor the node already holds, such as a tap's that a privileged opener
+handed over. The handle belongs to the calling process: every call from another process
 is `badarg`, and the descriptor is closed once the owner has ended. Each call is bounded and
 runs on a normal scheduler; the descriptor is non-blocking, and an empty or full device is
 armed with `enif_select`, whose message to the owner, `{erx_tap, readable}` or
 `{erx_tap, writable}`, says it is ready again.
 """.
 
--export([open/2, recv/1, send/2]).
+-export([adopt/2, open/2, recv/1, send/2]).
 
 -export_type([handle/0]).
 
--nifs([open/2, recv/1, send/2]).
+-nifs([adopt/2, open/2, recv/1, send/2]).
 -on_load(on_load/0).
 
 -doc "An open tap device, usable only by the process that opened it.".
@@ -43,6 +45,21 @@ MTU outside 68 to 9,000.
 -spec open(Path :: binary(), Mtu :: 68..9000) ->
     {ok, handle()} | {error, {open, atom() | integer()}}.
 open(_Path, _Mtu) ->
+    erlang:nif_error(undef).
+
+-doc """
+A handle on a close-on-exec copy of the open descriptor `Fd`, made non-blocking, for frames of
+at most `Mtu` bytes past the 14-byte Ethernet header. `Fd` stays the caller's, and closing it
+with `close(2)` leaves the copy open. The copy shares `Fd`'s open file and so its flags: `Fd`
+turns non-blocking too, and the caller keeps it so while the handle lives, since a read or
+write of a blocking copy would stall the scheduler; OTP's `socket:close/1`, for one, makes a
+socket blocking before it closes it. `{error, {adopt, Errno}}` when the system refuses,
+`ebadf` for a descriptor that is not open; `badarg` for an `Fd` that is not a non-negative
+integer that fits a C `int`, or an MTU outside 68 to 9,000.
+""".
+-spec adopt(Fd :: non_neg_integer(), Mtu :: 68..9000) ->
+    {ok, handle()} | {error, {adopt, atom() | integer()}}.
+adopt(_Fd, _Mtu) ->
     erlang:nif_error(undef).
 
 -doc """

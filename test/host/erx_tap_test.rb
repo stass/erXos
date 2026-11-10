@@ -40,6 +40,19 @@ class ErxTapTest < Minitest::Test
                       ['(void)close((int)event);', '(void)event;'])
   end
 
+  # An adopt that hands its handle the caller's descriptor instead of a copy leaves the
+  # handle on a number the caller's socket:close frees, and the next socket or port given
+  # that number meets the handle's arm, which ERTS reports as stealing the descriptor. The
+  # run is cancelled there, before adopted_descriptor_is_a_copy_test, so the report is
+  # what shows the fault.
+  def test_seeded_adopt_without_its_copy_is_caught
+    output, status = run_erx_net_eunit(['erx_tap_tests'], extra: [], pkt: false, tap: true, fault: {},
+                                       c_fault: { NIF => ['copy = fcntl(fd, F_DUPFD_CLOEXEC, 0);',
+                                                          'copy = fd;'] })
+    refute status.success?, "the seeded fault #{NIF} passed:\n#{output}"
+    assert_match(/stealing control of fd=/, output)
+  end
+
   private
 
   def assert_seed_fails(test_case, seed)

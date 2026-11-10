@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../../tools/lib/erx/host_os'
 
 # The littlefs NIF (otp/erts/emulator/nifs/erxos/erx_littlefs_nif.c) built for the host,
 # loaded into the stock OTP 29.1.2 runtime, and driven with erx_lfs over a RAM window by
@@ -52,7 +53,7 @@ class ErxLittlefsTest < Minitest::Test
 
   def build_nif(directory)
     output, status = Open3.capture2e(
-      COMPILER, *FLAGS, '-bundle', '-undefined', 'dynamic_lookup',
+      COMPILER, *FLAGS, *Erx::HostOs::NIF_LINK_FLAGS,
       '-I', File.join(OTP, 'usr/include'), '-I', LITTLEFS, '-I', NIFS,
       File.join(NIFS, 'erx_littlefs_nif.c'), File.join(LITTLEFS, 'lfs.c'), File.join(LITTLEFS, 'lfs_util.c'),
       '-o', File.join(directory, 'erx_littlefs.so'), stdin_data: ''
@@ -72,6 +73,7 @@ class ErxLittlefsTest < Minitest::Test
   def run_cases(directory)
     bin = File.join(Dir.glob(File.join(OTP, 'erts-*')).first, 'bin')
     environment = clean_environment.merge(
+      Erx::HostOs.nif_search_environment(directory),
       'BINDIR' => bin
     )
     output, = Open3.capture2e(environment, 'gtimeout', '-k', '10', '120', File.join(bin, 'beam.smp'),

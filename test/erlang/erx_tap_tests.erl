@@ -4,15 +4,15 @@
 %% EUnit cases of the tap transport and its NIF (docs/design-network-stack.md, "The tap
 %% transport"; docs/design-network-fastpath.md, "Verification", test 10) on a host without a
 %% tap device, run by test/host/erx_tap_test.rb, which builds the NIF into erx_net's priv/.
-%% Two stand-ins take the device's place, each opened by the NIF through /dev/fd or by
-%% name as it opens a tap:
+%% Two stand-ins take the device's place:
 %%
-%% * a connected pair of Unix datagram sockets, which keeps one frame per read and write as
-%%   a tap does; the test holds the far end. A full peer there answers ENOBUFS, which a tap
-%%   gives too, so it is what tests a refused frame;
+%% * a connected pair of UNIX datagram sockets, which keeps one frame per read and write as
+%%   a tap does. The NIF adopts the near end's descriptor, as it adopts a tap's that a
+%%   privileged opener handed over; the test holds the far end. A full peer there answers
+%%   ENOBUFS, which a tap gives too, so it is what tests a refused frame;
 %% * a FIFO, which answers EAGAIN when full and wakes its writer once read, as a full tap
 %%   does; the test reads back what the NIF wrote. Its frames are 60 bytes, below PIPE_BUF,
-%%   so each write is whole or nothing.
+%%   so each write is whole or nothing. The NIF opens it by name, as it opens a tap.
 -module(erx_tap_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -138,6 +138,37 @@ owner_end_closes_the_descriptor_test() ->
          ?assertEqual(eof, reader_result(Reader, ?WAIT_MS))
      end) || Arm <- [false, true]].
 
+%% The handle holds a copy of the descriptor it adopted: its owner's end closes the copy and
+%% leaves the caller's socket working, and the caller can adopt it again. (The caller's own
+%% close is not the test: OTP's socket:close makes the shared open file blocking first.)
+adopted_descriptor_is_a_copy_test() ->
+    with_socket_pair(fun(Near, Far) ->
+        Test = self(),
+        {Owner, Ref} = spawn_monitor(fun() ->
+            {ok, H} = erx_tap_nif:adopt(near_fd(Near), ?MTU),
+            {ok, 1} = erx_tap_nif:send(H, frame(1, 60)),
+            Test ! {sent, self()},
+            exit(done)
+        end),
+        receive {'DOWN', Ref, process, Owner, done} -> ok after ?WAIT_MS -> error(timeout) end,
+        ?assertEqual({sent, Owner}, receive {sent, _} = M -> M after 0 -> none end),
+        ?assertEqual({ok, frame(1, 60)}, socket:recv(Far, 0, ?WAIT_MS)),
+        ?assertEqual(ok, socket:send(Near, frame(2, 60))),
+        ?assertEqual({ok, frame(2, 60)}, socket:recv(Far, 0, ?WAIT_MS)),
+        {ok, H} = erx_tap_nif:adopt(near_fd(Near), ?MTU),
+        ?assertEqual({ok, 1}, erx_tap_nif:send(H, frame(3, 60))),
+        ?assertEqual({ok, frame(3, 60)}, socket:recv(Far, 0, ?WAIT_MS))
+    end).
+
+%% A descriptor that is not an int's non-negative value, or an MTU out of range, is badarg;
+%% one that is not open is the system's refusal. 16#7fffffff fits an int and is past any
+%% descriptor limit, so it is never open.
+adopt_refusals_test() ->
+    ?assertEqual({error, {adopt, ebadf}}, erx_tap_nif:adopt(16#7fffffff, ?MTU)),
+    [?assertError(badarg, erx_tap_nif:adopt(Fd, Mtu))
+     || {Fd, Mtu} <- [{-1, ?MTU}, {1 bsl 31, ?MTU}, {fd, ?MTU}, {"3", ?MTU}, {3.0, ?MTU},
+                      {0, 67}, {0, 9001}]].
+
 open_refusals_test() ->
     ?assertEqual({error, {open, enoent}}, erx_tap_nif:open(<<"/nonexistent/erx_tap">>, ?MTU)),
     [?assertError(badarg, erx_tap_nif:open(Path, Mtu))
@@ -148,10 +179,10 @@ open_refusals_test() ->
 
 %% init sends the first `more`; each later batch comes at the arm's message.
 transport_receives_and_transmits_test() ->
-    with_pair_path(fun(Path, Far) ->
+    with_socket_pair(fun(Near, Far) ->
         {ok, #{link := ethernet, lladdr := ?LLADDR, mtu := ?MTU, state := up,
                tx_limit := 256}, T0} =
-            erx_tap:init(#{device => Path, lladdr => ?LLADDR}),
+            erx_tap:init(#{fd => near_fd(Near), lladdr => ?LLADDR}),
         ok = socket:send(Far, frame(1, 60)),
         ok = socket:send(Far, frame(2, 13)),
         {Events, T1} = erx_tap:event(wake(more), T0),
@@ -165,8 +196,8 @@ transport_receives_and_transmits_test() ->
 
 %% A batch that reaches its bound sends the next `more`; the last one arms the device.
 transport_rearms_after_a_full_batch_test() ->
-    with_pair_path(fun(Path, Far) ->
-        {ok, _, T0} = erx_tap:init(#{device => Path, lladdr => ?LLADDR}),
+    with_socket_pair(fun(Near, Far) ->
+        {ok, _, T0} = erx_tap:init(#{fd => near_fd(Near), lladdr => ?LLADDR}),
         [ok = socket:send(Far, frame(I, 60)) || I <- lists:seq(1, 70)],
         {[{frames, First}], T1} = erx_tap:event(wake(more), T0),
         ?assertEqual(64, length(First)),
@@ -188,7 +219,15 @@ transport_init_refusals_test() ->
     ?assertEqual({error, {tx_limit, 0}}, erx_tap:init(Config#{tx_limit => 0})),
     ?assertEqual({error, {device, <<"/nonexistent/erx_tap">>, {open, enoent}}},
                  erx_tap:init(Config#{device := "/nonexistent/erx_tap"})),
-    ?assertEqual({error, {device, 42}}, erx_tap:init(Config#{device := 42})).
+    ?assertEqual({error, {device, 42}}, erx_tap:init(Config#{device := 42})),
+    Lone = #{lladdr => ?LLADDR},
+    ?assertEqual({error, {fd, -1}}, erx_tap:init(Lone#{fd => -1})),
+    ?assertEqual({error, {fd, "3"}}, erx_tap:init(Lone#{fd => "3"})),
+    ?assertEqual({error, {fd, 16#7fffffff, {adopt, ebadf}}},
+                 erx_tap:init(Lone#{fd => 16#7fffffff})),
+    ?assertEqual({error, {medium, #{device => "/dev/null", fd => 0}}},
+                 erx_tap:init(Config#{fd => 0})),
+    ?assertEqual({error, {medium, #{}}}, erx_tap:init(Lone)).
 
 %% A full device's arm is the driver's `writable` event; a write that takes part of a frame
 %% ends the medium through the one `failed` message, after which frames drop unsent.
@@ -217,14 +256,14 @@ frames(From, N) ->
     iolist_to_binary([frame(I, 60) || I <- lists:seq(From, From + N - 1)]).
 
 with_pair(Fun) ->
-    with_pair_path(fun(Path, Far) ->
-        {ok, H} = erx_tap_nif:open(list_to_binary(Path), ?MTU),
+    with_socket_pair(fun(Near, Far) ->
+        {ok, H} = erx_tap_nif:adopt(near_fd(Near), ?MTU),
         Fun(H, Far)
     end).
 
-%% A connected pair of Unix datagram sockets in a fresh directory: the near end's /dev/fd
-%% path for the NIF, the far end for the test.
-with_pair_path(Fun) ->
+%% A connected pair of UNIX datagram sockets in a fresh directory: the near end, whose
+%% descriptor the NIF adopts, and the far end for the test.
+with_socket_pair(Fun) ->
     Dir = scratch_dir(),
     {ok, Near} = socket:open(local, dgram, default),
     {ok, Far} = socket:open(local, dgram, default),
@@ -237,13 +276,16 @@ with_pair_path(Fun) ->
         ok = socket:connect(Far, NearAddr),
         [ok = socket:setopt(S, {socket, Opt}, ?BUFFER)
          || S <- [Near, Far], Opt <- [sndbuf, rcvbuf]],
-        {ok, Fd} = socket:getopt(Near, {otp, fd}),
-        Fun("/dev/fd/" ++ integer_to_list(Fd), Far)
+        Fun(Near, Far)
     after
         _ = socket:close(Near),
         _ = socket:close(Far),
         _ = file:del_dir_r(Dir)
     end.
+
+near_fd(Near) ->
+    {ok, Fd} = socket:getopt(Near, {otp, fd}),
+    Fd.
 
 with_fifo(Fun) ->
     with_fifo_path(fun(Path) ->
@@ -304,7 +346,10 @@ failed() -> receive {erx_tap, failed, _} = M -> M after ?WAIT_MS -> error(no_fai
 flush_more() -> receive {erx_tap, more} -> ok after ?WAIT_MS -> error(no_more) end.
 
 scratch_dir() ->
-    Dir = filename:join("/tmp", "erx_tap_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    %% The emulator's pid too: unique integers restart with each node, and a node a
+    %% deadline killed leaves its directories behind.
+    Dir = filename:join("/tmp", "erx_tap_" ++ os:getpid() ++ "_" ++
+                            integer_to_list(erlang:unique_integer([positive]))),
     ok = file:make_dir(Dir),
     Dir.
 

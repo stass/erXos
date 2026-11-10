@@ -190,6 +190,10 @@ class RngTest < Minitest::Test
   # Each is judged on the calls of its own kind alone, so a burn too shallow for
   # the hash cannot die on a read's residue instead.
   BurnMutant = Data.define(:name, :kind, :original, :replacement, :levels)
+  # The hash's frame at -O0 is deeper than 768 bytes on an AArch64 host, the
+  # architecture the burn is sized for, and shallower on x86-64, where a 768-byte
+  # burn still covers it and that seed is no fault.
+  AARCH64_HOST = %w[arm64 aarch64].include?(RbConfig::CONFIG.fetch('host_cpu'))
   BURN_MUTANTS = [
     BurnMutant.new(name: 'hash without a burn', kind: 'hash',
                    original: "\terx_rng_burn_stack();\n\treturn (hashed);",
@@ -199,7 +203,7 @@ class RngTest < Minitest::Test
                    replacement: "#define ERX_RNG_BURN_BYTES\t128", levels: %w[-O0 -O2]),
     BurnMutant.new(name: 'a burn shallower than the hash at -O0', kind: 'hash',
                    original: "#define ERX_RNG_BURN_BYTES\t976",
-                   replacement: "#define ERX_RNG_BURN_BYTES\t768", levels: %w[-O0]),
+                   replacement: "#define ERX_RNG_BURN_BYTES\t768", levels: AARCH64_HOST ? %w[-O0] : []),
     BurnMutant.new(name: 'read without a burn', kind: 'read',
                    original: "\terx_rng_burn_stack();\n\treturn (served);",
                    replacement: "\tif (rng == NULL)\n\t\terx_rng_burn_stack();\n\treturn (served);", levels: %w[-O0 -O2]),

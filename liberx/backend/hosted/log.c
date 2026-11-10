@@ -162,13 +162,27 @@ erx_effect_console_write(const char *line, size_t length)
 }
 
 /*
- * The kernel clock's stand-in, and the clock stock OTP takes on macOS: the raw counter.
- * CLOCK_MONOTONIC would not do: macOS derives it from the wall clock, so it can step back.
+ * The kernel clock's stand-in, and the clock stock OTP takes on the host. On macOS it is
+ * the raw counter: CLOCK_MONOTONIC would not do there, since macOS derives it from the
+ * wall clock, so it can step back. Stock OTP takes CLOCK_UPTIME on FreeBSD and
+ * CLOCK_MONOTONIC on Linux, neither of which steps back. The hosted backend builds only
+ * on macOS (tools/lib/erx/runtime.rb), so the other branches are not yet compiled.
  */
 uint64_t
 erx_effect_clock_ns(void)
 {
+#ifdef __APPLE__
 	return (clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
+#else
+	struct timespec now;
+
+#ifdef __FreeBSD__
+	(void)clock_gettime(CLOCK_UPTIME, &now);
+#else
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+#endif
+	return ((uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec);
+#endif
 }
 
 void

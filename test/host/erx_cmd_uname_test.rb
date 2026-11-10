@@ -40,7 +40,9 @@ class ErxCmdUnameTest < Minitest::Test
       assert status.success?, output
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
-                                       '-sname', 'uname@erxtest', '-kernel', 'start_distribution', 'false',
+                                       # A name, but no epmd: one would outlive the test.
+                                       '-sname', 'uname@erxtest', '-start_epmd', 'false',
+                                       '-kernel', 'start_distribution', 'false',
                                        '-eval', 'halt(case eunit:test(erx_cmd_uname_tests) of ok -> 0; _ -> 1 end).',
                                        chdir: work, stdin_data: '')
       assert status.success?, output

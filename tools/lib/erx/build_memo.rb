@@ -8,6 +8,7 @@ require 'fileutils'
 require 'json'
 require 'tmpdir'
 require_relative 'bounded_file'
+require_relative 'host_os'
 require_relative 'error'
 require_relative 'json_input'
 require_relative 'output_directory'
@@ -45,7 +46,7 @@ module Erx
     SYSTEM_DIRECTORIES = %w[/usr/bin /bin /usr/sbin /sbin].freeze
     # Whether the release names those directories' programs. On Linux a package upgrade
     # changes them under the same release, so there no record is reused: every step runs.
-    REUSE = RUBY_PLATFORM.include?('darwin')
+    REUSE = HostOs::MACOS
     SHARED_LIBRARY = /\.(?:dylib|so)\z|\.so\.[0-9.]+\z/
     # The whole environment of a compile whose output a key names (CompileMemo, and the
     # C17 cores the Fiasco build links, CoreArchive): with every other variable unset
@@ -149,8 +150,10 @@ module Erx
 
     # root may be spelled through a link (a temporary directory under /var, which is
     # /private/var); outputs may be named under either spelling.
-    def initialize(root:)
+    # reuse is whether a stored record may stand in for a run (REUSE on this host).
+    def initialize(root:, reuse: REUSE)
       @root = File.realpath(root)
+      @reuse = reuse
       @roots = [@root, File.expand_path(root)].uniq.freeze
       @directory = File.join(@root, OUTPUT)
     end
@@ -160,7 +163,7 @@ module Erx
     # caller runs the step and stores what it made.
     def restore(step, key:, outputs:)
       entry = entry_path(step, key)
-      record = REUSE && find_record(File.join(entry, 'record.json'), key: key)
+      record = @reuse && find_record(File.join(entry, 'record.json'), key: key)
       return false unless record && record.fetch('outputs').is_a?(Hash) && record.fetch('outputs').keys == outputs.map { |path| File.basename(path) }
 
       copy_out(entry, record, outputs)
@@ -191,7 +194,7 @@ module Erx
     # outputs as the block left them.
     def in_place(step, key:, outputs:)
       path = File.join(step_directory(step), 'current.json')
-      record = REUSE && find_record(path, key: key)
+      record = @reuse && find_record(path, key: key)
       return false if record && record.fetch('outputs') == digests(outputs.map { |output| relative(output) })
 
       FileUtils.rm_f(path)

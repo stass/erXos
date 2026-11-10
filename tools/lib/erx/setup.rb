@@ -4,6 +4,7 @@
 
 require 'rbconfig'
 require_relative 'error'
+require_relative 'host_os'
 require_relative 'runner'
 require_relative 'dependencies'
 require_relative 'fsimg'
@@ -50,10 +51,13 @@ module Erx
     ].freeze
 
     # Every step for deps.lock's sources: each source setup fetches, in
-    # deps.lock's order, then the builds that read them.
-    def self.steps(sources)
+    # deps.lock's order, then the builds that read them. The hosted runtime
+    # builds only on macOS (Runtime#build), so elsewhere its step is left
+    # out and the tests that need it skip, saying so.
+    def self.steps(sources, hosted_runtime: HostOs::MACOS)
       fetched = sources.map { |source| source.fetch('id') }.reject { |id| SKIPPED_SOURCES.key?(id) }
-      fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } + COMMAND_STEPS
+      builds = COMMAND_STEPS.reject { |step| step.name == 'runtime' && !hosted_runtime }
+      fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } + builds
     end
 
     # present: a hash of step name => true when the step's output is valid.
@@ -71,18 +75,37 @@ module Erx
 
     TOOLCHAIN_VARIABLES = toolchain_defaults('').keys.freeze
 
+    # FreeBSD's ports install each LLVM release as prefix/llvmNN; the newest
+    # one with both clang and ld.lld, or nil when there is none.
+    def self.ports_toolchain(prefix)
+      return nil unless File.directory?(prefix)
+
+      ports = Dir.children(prefix).select { |name| /\Allvm[0-9]+\z/.match?(name) }
+      ports.sort_by { |name| -Integer(name.delete_prefix('llvm'), 10) }
+           .map { |name| toolchain_files(File.join(prefix, name, 'bin')) }
+           .find { |tools| tools.values.all? { |path| tool?(path) } }
+    end
+
+    def self.toolchain_files(bin) = { 'ERX_CLANG' => File.join(bin, 'clang'), 'ERX_LLD' => File.join(bin, 'ld.lld') }
+    # Whether path is an executable file, not a directory or something absent.
+    def self.tool?(path) = File.file?(path) && File.executable?(path)
+    private_class_method :toolchain_files
+
     # Where another checkout keeps verified archives, derived from a cache
     # directory such as <checkout>/build/third_party.
     def self.archive_directory(cache)
       File.join(File.dirname(File.expand_path(cache)), 'downloads')
     end
 
-    def initialize(root:, runner: nil, cache: ENV.fetch('ERX_SOURCE_CACHE', nil), jobs: 4, env: ENV.to_h)
+    # ports_prefix is where FreeBSD's ports install (LOCALBASE).
+    def initialize(root:, runner: nil, cache: ENV.fetch('ERX_SOURCE_CACHE', nil), jobs: 4, env: ENV.to_h,
+                   ports_prefix: '/usr/local')
       @root = File.expand_path(root)
       @runner = runner || Runner.new(owner_root: @root, log_dir: File.join(@root, 'build/logs'))
       @cache = cache.to_s.empty? ? nil : cache
       @jobs = jobs
       @env = env
+      @ports_prefix = ports_prefix
       @dependencies = Dependencies.new(root: @root, runner: @runner)
       @steps = self.class.steps(@dependencies.sources)
     end
@@ -182,22 +205,35 @@ module Erx
     end
 
     # The LLVM tools the native builds need, for each of ERX_CLANG and ERX_LLD
-    # the caller left unset: Homebrew's, under the prefix HOMEBREW_PREFIX or
-    # `brew --prefix` names. A tool that cannot be found this way is an error
-    # here, before any step runs.
+    # the caller left unset, from the first of these installations that has
+    # both: Homebrew's, under the prefix HOMEBREW_PREFIX or `brew --prefix`
+    # names; the newest FreeBSD port under the ports prefix
+    # (ports_toolchain); or, off macOS, clang and ld.lld on PATH. macOS's own
+    # clang is Apple's, which will not do (README.md). A tool that cannot be
+    # found this way is an error here, before any step runs.
     def toolchain_env
       unset = TOOLCHAIN_VARIABLES.select { |name| @env.fetch(name, '').empty? }
       return {} if unset.empty?
 
       prefix = homebrew_prefix
-      advice = "set #{unset.join(' and ')} to the installed LLVM clang and ld.lld (see README.md)"
-      raise Error, "#{advice}: no Homebrew prefix in HOMEBREW_PREFIX or from `brew --prefix`" unless prefix
+      candidates = [prefix && self.class.toolchain_defaults(prefix), self.class.ports_toolchain(@ports_prefix),
+                    (path_toolchain unless HostOs::MACOS)]
+      found = candidates.compact.find { |tools| tools.slice(*unset).values.all? { |path| self.class.tool?(path) } }
+      return found.slice(*unset) if found
 
-      defaults = self.class.toolchain_defaults(prefix).slice(*unset)
-      missing = defaults.values.reject { |path| File.executable?(path) }
-      raise Error, "#{advice}: not installed at #{missing.join(', ')}" unless missing.empty?
+      homebrew = prefix ? "not installed at #{self.class.toolchain_defaults(prefix).values.join(', ')}" :
+                          'no Homebrew prefix in HOMEBREW_PREFIX or from `brew --prefix`'
+      raise Error, "set #{unset.join(' and ')} to the installed LLVM clang and ld.lld (see README.md): " \
+                   "#{homebrew}; no FreeBSD llvm port under #{@ports_prefix}#{HostOs::MACOS ? '' : '; none on PATH'}"
+    end
 
-      defaults
+    # clang and ld.lld from the first absolute directory of PATH that has both, so the two
+    # come from one installation; nil when none does. A relative entry would name another
+    # directory once a build changes into its own, so it is passed over.
+    def path_toolchain
+      @env.fetch('PATH', '').split(File::PATH_SEPARATOR).select { |directory| File.absolute_path?(directory) }
+          .map { |directory| self.class.send(:toolchain_files, directory) }
+          .find { |tools| tools.values.all? { |path| self.class.tool?(path) } }
     end
 
     # HOMEBREW_PREFIX when set, else what `brew --prefix` prints; nil when

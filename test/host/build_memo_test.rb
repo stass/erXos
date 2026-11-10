@@ -14,11 +14,28 @@ require_relative '../../tools/lib/erx/core_archive'
 class BuildMemoTest < Minitest::Test
   def setup
     @root = File.realpath(Dir.mktmpdir('erx-memo-'))
-    @memo = Erx::BuildMemo.new(root: @root)
+    # Reuse itself is tested on every host, whether or not this host reuses records.
+    @memo = Erx::BuildMemo.new(root: @root, reuse: true)
   end
 
   def teardown
     FileUtils.remove_entry(@root)
+  end
+
+  # A host that reuses no record runs every step, unchanged inputs or not.
+  def test_without_reuse_every_step_runs
+    output = File.join(@root, 'out/a')
+    memo = Erx::BuildMemo.new(root: @root, reuse: false)
+    key = Erx::BuildMemo.key('source' => 'one')
+    runs = 0
+    2.times do
+      assert(memo.in_place('step', key: key, outputs: [output]) do
+        runs += 1
+        FileUtils.mkdir_p(File.dirname(output))
+        File.write(output, 'made')
+      end)
+    end
+    assert_equal 2, runs
   end
 
   def test_in_place_step_runs_again_only_for_another_key_or_changed_output
@@ -105,7 +122,7 @@ class BuildMemoTest < Minitest::Test
 
   def test_root_spelled_through_a_link_names_the_same_outputs
     File.symlink(@root, "#{@root}-link")
-    memo = Erx::BuildMemo.new(root: "#{@root}-link")
+    memo = Erx::BuildMemo.new(root: "#{@root}-link", reuse: true)
     output = File.join("#{@root}-link", 'out/a')
     made = memo.in_place('step', key: Erx::BuildMemo.key('a' => 'b'), outputs: [output]) do
       FileUtils.mkdir_p(File.dirname(output))
@@ -184,7 +201,7 @@ class CompileMemoTest < Minitest::Test
     FileUtils.mkdir_p(out)
     object = File.join(out, 'main.o')
     argv = [@compiler, *@flags, '-MMD', '-MF', "#{object}.d", '-c', 'src/main.c', '-o', object]
-    memo = Erx::CompileMemo.new(root: @root, runner: @runner)
+    memo = Erx::CompileMemo.new(root: @root, runner: @runner, memo: Erx::BuildMemo.new(root: @root, reuse: true))
     memo.compile(argv, chdir: @root, object: object, depfile: "#{object}.d") do |command, environment|
       @seen = { command: command, environment: environment }
       system(environment, *command, chdir: @root, exception: true)

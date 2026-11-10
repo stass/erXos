@@ -4,6 +4,7 @@
 
 require 'rbconfig'
 require_relative 'error'
+require_relative 'host_os'
 
 module Erx
   # The environment every sanitized program in host tooling runs under: the
@@ -24,13 +25,15 @@ module Erx
   module SanitizerEnvironment
     module_function
 
-    MACOS = RbConfig::CONFIG.fetch('host_os').include?('darwin')
     # Halt on the first report, take every check the host supports, and let
     # allocations fail so failure handling runs. LeakSanitizer, and with it
-    # the initialization-order checks, run only off macOS.
+    # the initialization-order checks, run only on Linux: macOS and FreeBSD
+    # have no LeakSanitizer, and their AddressSanitizer refuses to start
+    # when asked for it.
+    LEAK_SANITIZER = HostOs::LINUX
     POLICY = {
       asan: %w[halt_on_error=1 abort_on_error=1 detect_stack_use_after_return=1 allocator_may_return_null=1] +
-        (MACOS ? %w[detect_leaks=0] : %w[detect_leaks=1 check_initialization_order=1 strict_init_order=1]),
+        (LEAK_SANITIZER ? %w[detect_leaks=1 check_initialization_order=1 strict_init_order=1] : %w[detect_leaks=0]),
       ubsan: %w[halt_on_error=1 print_stacktrace=1 report_error_type=1],
       tsan: %w[halt_on_error=1 abort_on_error=1 exitcode=66]
     }.transform_values(&:freeze).freeze
