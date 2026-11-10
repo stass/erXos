@@ -52,9 +52,6 @@ it; git history is the record of completed work.
        `frames_dropped` must make `admin(counters)` return every counter they keep, zeros
        included; the fast-path check is `--require-fast-path` until then and becomes the
        default (`docs/design-network-fastpath.md`, "Benchmarks and targets") once they exist.
-     * [Medium] `tools/lib/erx/net_bench_freebsd.rb`: CPU and context switches are of the whole
-       client process, BEAM boot and the 1 s ARP settle included, which biases CPU per GiB
-       against erx_net; subtract an idle-run baseline per stack.
      * [Medium] `net_bench_freebsd.rb`'s remote lock: a stale lock's takeover is check then
        act (two runners can both take it); an interrupted run releases it while its remote
        peer and client live on to their own deadlines; `run_deadline` leaves out the ssh kill

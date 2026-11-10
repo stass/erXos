@@ -179,19 +179,19 @@ Erlang one call for each 64 of its frames. The send log inserts one range per
 run. The step's frames go to the driver in one `{transmit, Frames}`
 message, and the driver joins every `{transmit, ...}` waiting in its
 mailbox to its backlog and hands each frame to its transport. The tap
-transport's `port_command/2` makes ERTS flatten the frame into a buffer,
-since the spawn driver has no `outputv` (`io.c` near line 1979;
-`sys_drivers.c`'s `spawn_driver_entry`), and the helper writes it to the
-tap: a pipe write, a pipe read and the tap's write, three copies in the
-kernel.
+transport's NIF writes each of them with one `writev` of its binaries
+where they lie (a frame of more than 64 pieces is joined first): the payload's one copy is the kernel's, made by that
+`writev`, and the NIF reads the payload once more to sum it.
 
-Receiving: the helper reads a frame from the tap and writes it to its
-port; ERTS reads it into a 64 KiB buffer and copies it into a fresh
-binary (`driver_output`), one message to the driver. The driver sends it
-to the interface, one frame per message. The interface takes every
-such message waiting in its mailbox, classifies each frame, checks its
-checksums with three BIF calls, decodes it, and sends each connection
-one message of its items. The connection takes every such message
+Receiving: the tap NIF's `recv/1` reads frames from the tap, one `read`
+each and up to its bound in a call, each into a binary of its own that it
+sums as it keeps it, and answers the batch as `{sum, Sum, Frame}` items.
+The driver hands it on in batches within the merge's limit, each as one
+`{frames, ...}` message to the interface. The interface takes every such message waiting in its mailbox,
+merges each batch in one call (`erx_bytes:tcp_merge/1`, [The merge,
+before classification](#the-merge-before-classification)), classifies
+each frame or unit, decodes it, and sends each connection one message of
+its items. The connection takes every such message
 waiting in its mailbox and steps their segments as one event, each
 through the fourteen stages of `erx_tcp_input`, `lift` to `fin`; header prediction
 recognises its two common cases and jumps to the `ack` stage, from which
@@ -1008,11 +1008,12 @@ Copies of a payload byte after this design, by path and medium:
 | send | netmap, a host | the cut, into the slot | 1 |
 | receive | netmap, a host | the NIF's copy, into a binary; the join, as on erXos | 1 to 2 |
 
-The per-segment stack over the FreeBSD test host's tap copies a byte four times sending
-and five times receiving. On erXos the counts change little: what the
-design removes there is per-segment work and the virtio transport's
-frame join, and `recv`'s join of the receive queue moves from the
-connection to the socket process. Placing the merge inside
+Over the FreeBSD test host's tap a payload byte is copied once sending,
+by the kernel's write, which the NIF reads once more to sum, and once
+receiving, by the kernel's read into the frame's own binary, to which
+comes the socket process's join when a delivery holds more than one
+piece. On erXos the virtio rows apply, and the join of the receive queue
+is the socket process's, at `recv`. Placing the merge inside
 the device NIF's copy would make a merged payload contiguous there and
 save the receive join on erXos, at the price of a parser of device-written
 bytes in the device NIF ([Alternatives considered](#alternatives-considered)).
@@ -1382,8 +1383,11 @@ measurements over tap on the FreeBSD test host, and its `--only` picks among the
 
 * **Bulk on the FreeBSD test host.** 512 MiB each way in 64 KiB sends, passive
   `recv(S, 0)`, the median of three, over the tap transport and over a
-  VALE port of netmap; throughput, CPU seconds per GiB from the BEAM's
-  `rusage`, and context switches. Baseline: lwIP 2.2.1 over the same tap
+  VALE port of netmap; throughput, CPU seconds per GiB and context
+  switches, both the client process's own, user and system time of all its
+  threads, over the run (read just before and just after it, so the
+  emulator's start-up is not in them),
+  and the emulator's scheduler settings. Baseline: lwIP 2.2.1 over the same tap
   (`~/erxos-history/net-bench-freebsd-lwip-2026-11-09/`) and over VALE (the
   netmap transport's pinned lwIP). *Target:* at least two thirds of
   lwIP's throughput each way over the same medium, 4.4 Gbit/s over tap.

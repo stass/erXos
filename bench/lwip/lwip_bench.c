@@ -20,9 +20,16 @@
  *
  *	RESULT key=value key=value ...
  *
- * the format of erx_net_bench, whose keys tools/erx bench net-freebsd reads.  The
- * exit status is 0 only if the run completed.
+ * the format of erx_net_bench, whose keys tools/erx bench net-freebsd reads, and
+ * one line of the process's own CPU time and context switches over the run,
+ *
+ *	WINDOW cpu_ms=N voluntary=N involuntary=N
+ *
+ * read from getrusage just before the connection starts and just after the
+ * run ends.  The exit status is 0 only if the run completed.
  */
+
+#include <sys/resource.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -90,6 +97,7 @@ static err_t		lwb_bulk_sent(void *arg, struct tcp_pcb *pcb, u16_t len);
 static int		lwb_compare_u32(const void *a, const void *b);
 static void		lwb_error(void *arg, err_t error);
 static void		lwb_print_rr(void);
+static void		lwb_print_window(const struct rusage *before);
 static err_t		lwb_rr_connected(void *arg, struct tcp_pcb *pcb, err_t error);
 static void		lwb_rr_error(void *arg, err_t error);
 static err_t		lwb_rr_received(void *arg, struct tcp_pcb *pcb, struct pbuf *data, err_t error);
@@ -309,6 +317,26 @@ lwb_compare_u32(const void *a, const void *b)
 	return x < y ? -1 : x > y;
 }
 
+/*
+ * Prints the CPU time and context switches this process used since before, if
+ * getrusage reports them, and nothing where it does not.
+ */
+static void
+lwb_print_window(const struct rusage *before)
+{
+	struct rusage after;
+	long long cpu_ms;
+
+	if (getrusage(RUSAGE_SELF, &after) != 0)
+		return;
+	cpu_ms = ((long long)after.ru_utime.tv_sec - before->ru_utime.tv_sec +
+	    (long long)after.ru_stime.tv_sec - before->ru_stime.tv_sec) * 1000 +
+	    ((long long)after.ru_utime.tv_usec - before->ru_utime.tv_usec +
+	    (long long)after.ru_stime.tv_usec - before->ru_stime.tv_usec) / 1000;
+	printf("WINDOW cpu_ms=%lld voluntary=%ld involuntary=%ld\n", cpu_ms,
+	    after.ru_nvcsw - before->ru_nvcsw, after.ru_nivcsw - before->ru_nivcsw);
+}
+
 static void
 lwb_print_rr(void)
 {
@@ -351,7 +379,9 @@ main(int argc, char **argv)
 {
 	ip4_addr_t ip, mask, gw, peer;
 	u16_t port;
+	struct rusage before;
 	unsigned i;
+	bool have_before;
 
 	if (argc < 2 || !lwb_parse_mode(argv[1], &lwb_mode) ||
 	    argc != (lwb_mode == LWB_RR ? 7 : 5) || !ipaddr_aton(argv[2], &peer)) {
@@ -380,6 +410,7 @@ main(int argc, char **argv)
 	netif_set_up(&lwb_netif);
 	lwb_settle(&peer);
 
+	have_before = getrusage(RUSAGE_SELF, &before) == 0;
 	lwb_start_ns = lwb_now_ns();
 	if (lwb_mode == LWB_RR) {
 		lwb_rr_deadline_ns += lwb_start_ns;
@@ -415,6 +446,8 @@ main(int argc, char **argv)
 		    (unsigned long long)lwb_done_bytes, (unsigned long long)lwb_total_bytes);
 		return 1;
 	}
+	if (have_before)
+		lwb_print_window(&before);
 	if (lwb_mode == LWB_RR)
 		lwb_print_rr();
 	else {

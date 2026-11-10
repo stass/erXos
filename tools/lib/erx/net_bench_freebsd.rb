@@ -176,7 +176,9 @@ module Erx
         medians = runs.group_by { |run| run.workload.name }.transform_values do |per_workload|
           per_workload.group_by(&:stack).transform_values { |per_stack| NetBench.median(per_stack) }
         end
-        lines = NetBench::Report.lines(conditions: conditions, medians: medians, stacks: STACKS, planned: @setup.runs)
+        reported = conditions.merge('erx_net emulator' => NetBench.beam_summary(runs))
+        lines = NetBench::Report.lines(conditions: reported, medians: medians, stacks: STACKS, planned: @setup.runs,
+                                       selected: workloads(only).map(&:name))
         lines += ['', "failed runs: #{failures.length}", *failures.map { |failure| "  #{failure}" }] unless failures.empty?
         File.write(File.join(@output, 'report.txt'), "#{lines.join("\n")}\n")
         File.write(File.join(@output, 'result.json'), JSON.pretty_generate(runs.map { |run| run_record(run) }))
@@ -225,10 +227,13 @@ module Erx
 
       # The longest this run can take: staging, the two builds and every cell's peer and client.
       def run_deadline(only)
-        cells = NetBench::WORKLOADS.select { |w| only.nil? || only.include?(w.name) }
+        cells = workloads(only)
         per_run = cells.sum { |w| client_deadline(w) + PEER_SETTLE.fetch(w.mode).ceil + PEER_GRACE }
         STAGE_SECONDS + 2 * BUILD_SECONDS + per_run * STACKS.length * @setup.runs
       end
+
+      # The workloads to run: all of them, or the ones `only` names.
+      def workloads(only) = NetBench::WORKLOADS.select { |w| only.nil? || only.include?(w.name) }
 
       def home = @home ||= @remote.capture!(%w[printenv HOME], seconds: 30).strip
       def remote_path(*parts) = File.join(home, @setup.remote_dir, *parts)
@@ -274,13 +279,15 @@ module Erx
         {
           'host' => remote_line(%w[uname -srm]),
           'load before the runs' => remote_line(%w[uptime]),
-          'erx_net' => "#{tree_state} on stock OTP #{otp_version}, default flags, no accelerator or QEMU (native)",
+          'erx_net' => "#{tree_state} on stock OTP #{otp_version}, no emulator flags passed, no accelerator or QEMU (native)",
           'erx_net build' => "erlc #{Erx::ErlangApps::FLAGS.join(' ')}; C: #{make_variable('erlang/apps/erx_net/c_src/Makefile', 'ERX_CFLAGS')}",
           'lwIP' => "2.2.1 with contrib 2.1.0, raw API, 65535-byte windows; cc: #{remote_line(['sh', '-c', 'cc --version | head -n 1'])}; " \
                     "flags: #{make_variable('bench/lwip/Makefile', 'CFLAGS')}",
           'medium' => "#{@setup.tap}, bridge0, jail #{@setup.jail} at #{@setup.peer_ip}; peers: nc for bulk, stock gen_tcp echo for request-reply",
           'workloads' => NetBench::WORKLOADS.map { |w| "#{w.name} #{w.arguments.join(' ')}" }.join(', '),
-          'runs' => "#{@setup.runs} per cell, the median reported; CPU and switches are time -l of the whole client process, startup and the 1 s ARP settle included",
+          'runs' => "#{@setup.runs} per cell, the median reported",
+          'CPU and switches' => 'the client process over the run itself, from just before it to just after (the basis column says `run`); ' \
+                                'a client that reports no such window is shown as its whole process by time -l, startup included (`process`)',
           'client differences' => 'erx_net bulk sends 64 KiB with nodelay; lwIP bulk writes 32 KiB from read-only data with Nagle on',
           'fast-path check' => require_fast_path ? 'required' : 'not required (the counters are not kept yet)'
         }
@@ -306,7 +313,7 @@ module Erx
       def measure(only:, require_fast_path:)
         runs = []
         failures = []
-        cells = NetBench::WORKLOADS.select { |w| only.nil? || only.include?(w.name) }.product(STACKS).flat_map { |workload, stack| Array.new(@setup.runs) { |index| [workload, stack, index] } }
+        cells = workloads(only).product(STACKS).flat_map { |workload, stack| Array.new(@setup.runs) { |index| [workload, stack, index] } }
         cells.each_with_index do |(workload, stack, index), number|
           runs << one_run(workload: workload, stack: stack, index: index, port: FIRST_PORT + number,
                           require_fast_path: require_fast_path)
@@ -326,13 +333,13 @@ module Erx
         peer = nil
         raise RemoteError, "client exited #{status.exitstatus}" unless status.success?
 
-        result, counters = NetBench::Output.parse(output)
-        NetBench::Output.validate(result, workload.mode)
-        failure = stack == 'erx_net' && require_fast_path && NetBench::Counters.fast_path_failure(workload.mode, counters)
+        reading = NetBench::Output.parse(output)
+        NetBench::Output.validate(reading.result, workload.mode)
+        failure = stack == 'erx_net' && require_fast_path && NetBench::Counters.fast_path_failure(workload.mode, reading.counters)
         raise NetBench::CounterError, failure if failure
 
-        NetBench::Run.new(stack: stack, workload: workload, result: result, counters: counters,
-                          rusage: NetBench::TimeReport.parse(output))
+        NetBench::Run.new(stack: stack, workload: workload, result: reading.result, counters: reading.counters,
+                          rusage: NetBench::TimeReport.parse(output), window: reading.window, beam: reading.beam)
       ensure
         # An interrupt or an unexpected error must not leave the peer's ssh behind.
         stop_peer(peer) if peer
@@ -395,7 +402,7 @@ module Erx
 
       def run_record(run)
         { 'stack' => run.stack, 'workload' => run.workload.name, 'result' => run.result, 'counters' => run.counters,
-          'rusage' => run.rusage.to_h }
+          'rusage' => run.rusage.to_h, 'window' => run.window&.to_h, 'beam' => run.beam&.to_h }
       end
     end
   end

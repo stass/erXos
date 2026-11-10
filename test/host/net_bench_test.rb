@@ -21,17 +21,52 @@ class NetBenchTest < Minitest::Test
   BULK = "boot noise\nRESULT mode=send stack=erx_net bytes=536870912 secs=4.771 mbit=900.1\n" \
          "COUNTER no_route=3\nCOUNTER ingress=12\n#{TIME_L}"
 
+  WINDOW = "WINDOW cpu_ms=2500 voluntary=900 involuntary=100\n"
+  BEAM = "BEAM schedulers=128 online=128 sbwt=none sbwtdcpu=default sbwtdio=default\n"
+
   def run_of(stack, workload_name, output)
-    result, counters = NB::Output.parse(output)
+    reading = NB::Output.parse(output)
     workload = NB::WORKLOADS.find { |w| w.name == workload_name }
-    NB::Run.new(stack: stack, workload: workload, result: result, counters: counters, rusage: NB::TimeReport.parse(output))
+    NB::Run.new(stack: stack, workload: workload, result: reading.result, counters: reading.counters,
+                rusage: NB::TimeReport.parse(output), window: reading.window, beam: reading.beam)
   end
 
   def test_a_run_is_read_from_its_result_counters_and_time_report
     run = run_of('erx_net', 'bulk-send', BULK)
     assert_equal 900.1, run.metric
     assert_equal({ 'no_route' => 3, 'ingress' => 12 }, run.counters)
+    assert_nil run.window
     assert_equal [6_100_000, 123, 23.5], [run.rusage.voluntary, run.rusage.involuntary, run.rusage.cpu]
+  end
+
+  def test_a_window_is_the_runs_own_cost_and_a_run_without_one_shows_its_whole_process
+    windowed = run_of('erx_net', 'bulk-send', "#{BEAM}#{WINDOW}#{BULK}")
+    assert_equal NB::Cost.new(cpu: 2.5, switches: 1000, basis: 'run'), windowed.cost
+    assert_equal NB::Beam.new(schedulers: '128', online: '128', sbwt: 'none', sbwtdcpu: 'default', sbwtdio: 'default'), windowed.beam
+    whole = run_of('lwip', 'bulk-send', BULK)
+    assert_nil whole.window
+    assert_equal NB::Cost.new(cpu: 23.5, switches: 6_100_123, basis: 'process'), whole.cost
+  end
+
+  def test_a_window_or_beam_line_that_is_repeated_incomplete_or_not_a_count_reads_as_absent
+    base = "RESULT mode=send stack=erx_net bytes=1 secs=1 mbit=1\n"
+    twice = NB::Output.parse("#{base}#{WINDOW}#{WINDOW}")
+    assert_nil twice.window
+    assert_nil NB::Output.parse("#{base}WINDOW cpu_ms=1 voluntary=2\n").window
+    assert_nil NB::Output.parse("#{base}WINDOW cpu_ms=-5 voluntary=2 involuntary=3\n").window
+    assert_nil NB::Output.parse("#{base}WINDOW cpu_ms=1 voluntary=2 involuntary=#{'9' * 16}\n").window
+    assert_nil NB::Output.parse("#{base}WINDOW cpu_ms=1 cpu_ms=9 voluntary=2 involuntary=3\n").window
+    assert_nil NB::Output.parse("#{base}BEAM schedulers=1 online=1 sbwt=none\n").beam
+    assert_nil NB::Output.parse("#{base}BEAM schedulers=1 online=1 sbwt=none sbwtdcpu=x sbwtdio=y;id\n").beam
+  end
+
+  def test_the_emulator_settings_of_the_runs_are_summarized_or_reported_as_absent
+    with = run_of('erx_net', 'bulk-send', "#{BEAM}#{BULK}")
+    other = run_of('erx_net', 'bulk-recv', "#{BEAM.sub('=128', '=1')}#{BULK}")
+    without = run_of('lwip', 'bulk-send', BULK)
+    assert_equal '+S 128:128, +sbwt none, +sbwtdcpu default, +sbwtdio default', NB.beam_summary([with, with, without])
+    assert_equal 2, NB.beam_summary([with, other]).split('; ').length
+    assert_equal 'not reported', NB.beam_summary([without])
   end
 
   def test_output_without_exactly_one_well_formed_result_line_is_refused
@@ -79,7 +114,7 @@ class NetBenchTest < Minitest::Test
     medians = { 'bulk-send' => { 'erx_net' => NB.median([run_of('erx_net', 'bulk-send', BULK)]),
                                  'lwip' => NB.median([run_of('lwip', 'bulk-send', lwip)] * 3) } }
     lines = NB::Report.lines(conditions: { 'host' => "FreeBSD\e]0;x\a" }, medians: medians, stacks: %w[erx_net lwip],
-                             planned: 3)
+                             planned: 3, selected: %w[bulk-send bulk-recv])
     assert_equal 'host: FreeBSD<U+001B>]0;x<U+0007>', lines.first
     assert(lines.any? { |line| line.start_with?('bulk-send') && line.include?('erx_net/lwip') && line.end_with?('0.136') })
     # A cell whose runs failed says how many it is the median of.
@@ -87,6 +122,26 @@ class NetBenchTest < Minitest::Test
     assert(lines.any? { |line| line.start_with?('bulk-send') && line.match?(/lwip\s+3\/3\s/) })
     assert(lines.any? { |line| line.start_with?('bulk-recv') && line.end_with?('missing') })
     assert(lines.any? { |line| line.include?('bulk-send lwip: frames per run: unsupported (reporter: lwip_bench') })
+  end
+
+  # `--only` leaves workloads out: they have no row, and a table with none has no title, so a
+  # workload that was not run never reads as a result that is missing. Each cost cell says
+  # whether it covers the run or the whole process.
+  def test_the_report_prints_only_the_selected_workloads_and_the_basis_of_each_cost
+    windowed = run_of('erx_net', 'bulk-send', "#{WINDOW}#{BULK}")
+    whole = run_of('lwip', 'bulk-send', "RESULT mode=send stack=lwip bytes=536870912 secs=0.65 mbit=6600.0\n#{TIME_L}")
+    medians = { 'bulk-send' => { 'erx_net' => NB.median([windowed]), 'lwip' => NB.median([whole]) } }
+    lines = NB::Report.lines(conditions: {}, medians: medians, stacks: %w[erx_net lwip], planned: 1, selected: %w[bulk-send])
+    text = lines.join("\n")
+    refute_match(/bulk-recv|rr-|request-reply|missing/, text)
+    # 2.5 CPU-s and 1000 switches for 0.5 GiB, against 23.5 CPU-s and 6100123 switches.
+    assert(lines.any? { |line| line.match?(/\Abulk-send\s+erx_net\s+1\/1\s+900\s+5\.00\s+2000\s+run\z/) })
+    assert(lines.any? { |line| line.match?(/\Abulk-send\s+lwip\s+1\/1\s+6600\s+47\.00\s+12200246\s+process\z/) })
+    # A selected workload with no run is the one shown as missing.
+    both = NB::Report.lines(conditions: {}, medians: {}, stacks: %w[erx_net lwip], planned: 1, selected: %w[bulk-send rr-64])
+    assert(both.any? { |line| line.start_with?('bulk-send') && line.include?('0/1') && line.include?('missing') })
+    assert(both.any? { |line| line.start_with?('rr-64') && line.include?('missing') })
+    refute(both.any? { |line| line.start_with?('rr-1k') })
   end
 
   def test_the_median_run_is_the_middle_one_by_its_metric

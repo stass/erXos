@@ -14,8 +14,14 @@ already running, so `run/1` measures it as it is. Every run ends in one line,
     RESULT key=value key=value ...
 
 whose keys `tools/erx bench net-freebsd` reads, followed by one
-`COUNTER name=value` line for each counter the interface keeps. The lwIP
-client (`bench/lwip/lwip_bench.c`) prints the same RESULT lines.
+`COUNTER name=value` line for each counter the interface keeps. `main/1`
+adds two lines, `BEAM schedulers=N online=N sbwt=V sbwtdcpu=V sbwtdio=V`
+(the emulator's scheduler settings, `default` where no flag set one) and
+`WINDOW cpu_ms=N voluntary=N involuntary=N` (the emulator's user and system CPU time and
+context switches from just before the run to just after it, so the
+emulator's start-up is not in them; no WINDOW line where the host's `ps`
+does not report switches). The lwIP client (`bench/lwip/lwip_bench.c`)
+prints the same RESULT and WINDOW lines.
 """.
 
 -export([main/1, run/1, serve/3]).
@@ -35,6 +41,7 @@ client (`bench/lwip/lwip_bench.c`) prints the same RESULT lines.
 Command line entry. `send|recv DEVICE PEER PORT MIB`, `rr DEVICE PEER PORT BYTES
 CONNS SECS` (starting the stack on the tap device DEVICE first) and `echo PEER
 PORT SECS` (stock `gen_tcp`, no stack). Exits 0 only if the run completed.
+It prints the BEAM and WINDOW lines around the run.
 """.
 -spec main([string()]) -> no_return().
 main(["echo", Peer, Port, Secs]) ->
@@ -42,7 +49,11 @@ main(["echo", Peer, Port, Secs]) ->
 main([Mode, Device, Peer, Port | Rest]) when Mode =:= "send"; Mode =:= "recv"; Mode =:= "rr" ->
     start_stack(Device, ip(Peer)),
     Spec = maps:merge(#{mode => list_to_atom(Mode), peer => ip(Peer), port => int(Port)}, sizes(Mode, Rest)),
-    exit_with(try run(Spec) catch Class:Reason:Stack -> {error, {Class, Reason, Stack}} end).
+    print_beam(),
+    Before = run_usage(),
+    Outcome = try run(Spec) catch Class:Reason:Stack -> {error, {Class, Reason, Stack}} end,
+    print_window(Before, run_usage()),
+    exit_with(Outcome).
 
 -doc """
 Measures one run against the running stack and prints its RESULT and COUNTER
@@ -104,6 +115,81 @@ exit_with(ok) -> halt(0);
 exit_with({error, Why}) ->
     io:format(standard_error, "erx_net_bench: ~p~n", [Why]),
     halt(1).
+
+%% The emulator's scheduler settings, as it was started: the flag's value, or `default`.
+print_beam() ->
+    Args = erlang:system_info(emu_args),
+    io:format("BEAM schedulers=~p online=~p sbwt=~s sbwtdcpu=~s sbwtdio=~s~n",
+              [erlang:system_info(schedulers), erlang:system_info(schedulers_online),
+               flag("-sbwt", Args), flag("-sbwtdcpu", Args), flag("-sbwtdio", Args)]).
+
+%% The last setting of a flag, as `-flag value` or attached as `-flagvalue` (the beam takes
+%% the last of a repeated flag). The values of the sbwt flags never start with `d`, which
+%% tells `-sbwtdcpu` from an attached value of `-sbwt`.
+flag(Name, Args) ->
+    Settings = flag_settings(Name, Args),
+    case lists:reverse(Settings) of
+        [Value | _] -> Value;
+        [] -> "default"
+    end.
+
+flag_settings(_, []) -> [];
+flag_settings(Name, [Name, Value | Rest]) -> [Value | flag_settings(Name, Rest)];
+flag_settings(Name, [Arg | Rest]) ->
+    case lists:prefix(Name, Arg) of
+        true when length(Arg) > length(Name) ->
+            case lists:nthtail(length(Name), Arg) of
+                [$d | _] -> flag_settings(Name, Rest);
+                Value -> [Value | flag_settings(Name, Rest)]
+            end;
+        _ ->
+            flag_settings(Name, Rest)
+    end.
+
+%% The emulator process's CPU time (user and system, all its threads, ms) and its voluntary
+%% and involuntary context switches, from one call of the host's ps, which is the
+%% getrusage of the whole process that lwip_bench reads too. `unsupported` where ps does
+%% not answer in the shape of FreeBSD's `time`, `nvcsw` and `nivcsw` columns, so no WINDOW
+%% line carries a number nothing measured.
+-spec run_usage() -> {non_neg_integer(), non_neg_integer(), non_neg_integer()} | unsupported.
+run_usage() ->
+    Ps = os:cmd("ps -o time= -o nvcsw= -o nivcsw= -p " ++ os:getpid()),
+    case string:tokens(Ps, " \t\n") of
+        [Time, Voluntary, Involuntary] ->
+            case {cpu_ms(Time), to_integer(Voluntary), to_integer(Involuntary)} of
+                {Cpu, Vol, Invol} when is_integer(Cpu), is_integer(Vol), is_integer(Invol) ->
+                    {Cpu, Vol, Invol};
+                _ ->
+                    unsupported
+            end;
+        _ ->
+            unsupported
+    end.
+
+%% ps's `time` column, `[[H:]M:]S.cc`, in milliseconds; anything else is not a number.
+cpu_ms(Text) ->
+    try
+        Parts = string:split(Text, ":", all),
+        true = length(Parts) =< 3,
+        {Whole, Cs} = case string:split(lists:last(Parts), ".") of
+                          [Secs, Frac] when length(Frac) =:= 2 -> {Secs, list_to_integer(Frac)};
+                          [Secs] -> {Secs, 0}
+                      end,
+        Fields = lists:droplast(Parts) ++ [Whole],
+        Seconds = lists:foldl(fun(Field, Acc) -> Acc * 60 + list_to_integer(Field) end, 0, Fields),
+        true = Cs >= 0 andalso Seconds >= 0,
+        Seconds * 1000 + Cs * 10
+    catch
+        error:_ -> not_a_number
+    end.
+
+to_integer(Word) ->
+    try list_to_integer(Word) catch error:badarg -> not_a_number end.
+
+print_window({Cpu0, Vol0, Invol0}, {Cpu1, Vol1, Invol1}) ->
+    io:format("WINDOW cpu_ms=~p voluntary=~p involuntary=~p~n", [Cpu1 - Cpu0, Vol1 - Vol0, Invol1 - Invol0]);
+print_window(_, _) ->
+    ok.
 
 %% The stack, started on a tap device as the host runs it, with the peer resolved by
 %% ARP before the clock starts.
