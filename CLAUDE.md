@@ -668,7 +668,7 @@ within about 20 percent of the length, write plain code.
   decoding, `prim_file` path resolution and namespace paths, the 9P2000.L
   codec, the program startup message and protocol, executable headers (`erx_elf_plan`), log records, the funnel,
   cross-domain frames and their reassembly, the host link deframer, device
-  ring processing, PCIe configuration snapshots, `/proc` names, the command
+  ring processing, the netmap ring core, PCIe configuration snapshots, `/proc` names, the command
   shell's parser and `grep`'s pattern translator, each line escaper, the
   partition table, EROFS, F2FS, littlefs and FAT images, update manifests,
   the boot-selection record, the harness's slot parser, the pipe ring and
