@@ -12,7 +12,7 @@
                erx_icmp4, erx_icmp4_wire, erx_icmp6, erx_icmp6_wire, erx_icmp_sock, erx_in6_src,
                erx_ip4, erx_ip4_reass, erx_ip4_wire, erx_ip6, erx_ip6_reass,
                erx_ip6_wire, erx_ip_reass, erx_lltable, erx_nd6, erx_nd6_dad,
-               erx_nd6_rtr, erx_net, erx_net_addr, erx_net_app, erx_net_bandlim,
+               erx_nd6_rtr, erx_net, erx_net_addr, erx_net_admit, erx_net_app, erx_net_bandlim,
                erx_net_bind, erx_net_clock, erx_net_credit, erx_net_driver, erx_net_eth,
                erx_net_frame, erx_net_grant, erx_net_if, erx_net_if_core, erx_net_input,
                erx_net_pipe, erx_net_rand, erx_net_route, erx_net_runtime, erx_net_sum, erx_net_sup,

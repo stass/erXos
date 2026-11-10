@@ -894,21 +894,26 @@ it; git history is the record of completed work.
   fixture run 2 commands instead of none, with the memo key fingerprinting every program in
   `/usr/local/bin` and every library in `/usr/local/lib`; why that key changes between two
   builds is not yet known.
-* [High] network, `erx_net_client` (`erx_gen_tcp`, `erx_gen_udp`; design-network-stack, "The
-  socket process"): the socket process is not built. `erx_gen_tcp` calls the connection
-  directly with `gen_server:call`, and `erx_tcp_conn` and `erx_udp_sock` present the stream
-  themselves (active modes, `recv`, the owner's monitor), so an owner outside the network
-  domain receives its active-mode messages as `{erx_origin, D, {tcp, S, Data}}`, which no stock
-  `receive` matches; cowboy and ranch in the web domain are such owners. To build: the
-  `gen_statem` and its pure cores `erx_gen_tcp_core` and `erx_gen_udp_core`, `erx_sock_admit`'s
-  check of the socket's pushes beside its check of the grant's answers, the socket protocol's
-  `{erx_net, Sender, Body}` messages and byte credit in `erx_tcp_conn` and `erx_udp_sock` with
-  their checks of `ReplyTo`, an open's reply a bare pid (the connection answers its socket
-  term today, which `erx_sock_admit` takes apart), sends and pushes cut into 64 KiB pieces and
-  the 64 requests in flight ("Message sizes", "Requests in flight"),
-  `erxos/erx_net_client_erxos` answering the `grant` key with the domain's `Origin`, local
-  `controlling_process/2` (`enotsup` today), and `recv` up to 64 MiB in the socket process,
-  where `erx_tcp_conn` answers `{error, enomem}` above its receive buffer.
+* [High] network, `erx_net_client` (`erx_gen_udp`, `erx_gen_tcp`; design-network-stack, "The
+  socket process"): TCP has its socket process (`erx_gen_tcp`, `erx_gen_tcp_core`) and the
+  socket protocol; UDP has not. `erx_gen_udp` calls the datagram socket directly with
+  `gen_server:call`, and `erx_udp_sock` presents datagrams itself, so an owner outside the
+  network domain receives `{erx_origin, D, {udp, S, Ip, Port, Data}}`, which no stock
+  `receive` matches. To build (1b-E P9b): `erx_gen_udp_core` and the datagram socket's side of
+  the protocol, with the 128 KiB credit floor. Still missing on the TCP side:
+  `listen/2` and `accept` (the listener's socket process), local `controlling_process/2`
+  (`enotsup`), the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
+  options, the schema-generated request validators, and `erxos/erx_net_client_erxos`
+  answering the `grant` key with the grantee's `Origin` once the grant is in another domain.
+  The calls the socket process forwards (`sockname`, `peername`, `getopts`, `shutdown`) wait
+  for the connection's reply with no deadline of their own, and within one domain a socket
+  protocol message proves its sender only by its pid field. Differences from stock at
+  the end: a setopts with forwarded options whose own options took
+  effect answers `{error, closed}` when the connection closes under it (stock: `ok`);
+  `{active, 0}` or a count that stays at or below 0 fails waiting recvs `einval` though the
+  socket stays passive; only the first waiting recv gets a passive error's reason, the rest
+  `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
+  met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
 * [High] network, `erx_net_client` (`erx_gen_tcp:connect/4`, `erx_gen_udp:open/2`, `erx_inet`;
   design-network-stack, "Untrusted input", "Answers from the grant"): the grant's answers
   reach program code unchecked. `connect` and `open` return the grant's reply to their caller
@@ -940,25 +945,11 @@ it; git history is the record of completed work.
   `erx_fiasco_wire_decode`, and hold the table to the call table's root-only rows with a
   host test, leaving only the partly root-only calls' checks in their bodies.
 * [High] network and domains, the envelope (design-domains, "Risks and open questions"):
-  every message from another domain arrives as `{erx_origin, D, Msg}`, so a socket's
-  active-mode delivery `{tcp, S, Data}` (and `gen_udp`'s) reaches an owner outside the
-  network domain wrapped, and a stock `receive {tcp, S, Data}` never matches it; cowboy
-  and ranch in the web domain are such owners. Needs the user's choice: a relay per socket
-  in the owner's domain under `erx_net_client` that takes the envelope off (recommended,
-  one local message per delivery, to measure), or an exception in edit 16 for socket
-  messages whose socket pid is of the lane's domain. The grant's `{erx_net_resolver, Grant,
-  Answer}` to `erx_inet` in another domain is dropped the same way, so that domain keeps its
-  first answer; `erx_inet`, the protocol's owner on the client side, takes the envelope off it
-  once the grant is in the network domain, checking `D` is the grant's.
+  every message from another domain arrives as `{erx_origin, D, Msg}`. A TCP socket's
+  messages reach its owner through its socket process, which takes the envelope off, so
+  only `gen_udp`'s active-mode deliveries remain wrapped for an owner outside the network
+  domain (the `erx_gen_udp` item above).
 
-* [Medium] network, `erx_tcp_conn` (`handle_call({recv, ...})`,
-  [design-network-stack.md](docs/design-network-stack.md#the-interface-towards-erlang-programs)):
-  `recv(S, Length)` with `Length` above the connection's receive buffer
-  answers `{error, enomem}`, where stock gen_tcp accepts up to 64 MiB. A
-  waiting recv's held bytes are the network domain's memory, which the
-  `buffers` limit counts as a second receive buffer per connection (its
-  reservations are not built yet); lifting the bound means reserving a
-  recv's `Length` against the grant when the recv starts instead.
 * [Low] network, `erx_tcp_conn` (`perform({deliver, _})`): the receive queue
   counts payload bytes only, not the binary and list cell each queued
   segment costs, which `erx_tcp_reass` counts as `PIECE_OVERHEAD`. A peer

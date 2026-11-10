@@ -176,11 +176,11 @@ whole_buffer(Stack, Port) ->
     {[size_of(R) || R <- Reads], iolist_to_binary([D || {ok, D} <- Reads]) =:= Payload}.
 
 %% 3000 bytes echoed and the server's close, read 1460 at a time: two full reads, then
-%% `{error, closed}` for the 80 bytes left, on both. Then stock has discarded the 80 bytes
-%% and its read side (`{error, enotconn}`); the stack keeps them for `recv(_, 0)`.
+%% `{error, closed}` for the 80 bytes left, which are discarded, and `{error, enotconn}`
+%% for the recv after it, on both (inet_drv's tcp_recv_closed).
 tcp_short_tail(Port) ->
     case {short_tail(erx, Port), short_tail(stock, Port)} of
-        {{Same, {ok, 80}}, {Same, {error, enotconn}}} -> ok;
+        {{Same, {error, enotconn}}, {Same, {error, enotconn}}} -> ok;
         Differ -> Differ
     end.
 

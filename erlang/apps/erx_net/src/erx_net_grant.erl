@@ -7,7 +7,8 @@ A client domain's grant (docs/design-network-stack.md, "The grant's contract", "
 grant"), as far as an active open, a datagram socket and name resolution need it.
 
 **Connect.** `{tcp_connect, inet, Ip, Port, Opts, Timeout}` starts the connection linked
-to the grant, with a generator split from its own, and the grant traps exits, so a
+to the grant, with a generator split from its own, owned by the caller, its socket
+process, whose messages arrive as the grantee's do; and the grant traps exits, so a
 connection's end never ends the grant. The connection answers the connect caller; when it
 exits, however it ends, the grant answers that caller `{error, closed}` too, so a
 connection that dies before answering leaves no caller waiting. A caller already answered
@@ -59,23 +60,23 @@ Starts the grant of `Grantee`. The node's own grant, `local`, is registered as
 """.
 -spec start_link(local, map()) -> {ok, pid()} | {error, term()}.
 start_link(local, Limits) when is_map(Limits) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Limits, []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, {local, Limits}, []).
 
 -doc false.
-init(Limits) ->
+init({Grantee, Limits}) ->
     process_flag(trap_exit, true),
     ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
     ok = erx_net_tables:watch_resolver(self()),
-    {ok, #{limits => Limits, gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
+    {ok, #{grantee => Grantee, limits => Limits, gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
            subscriber => none, resolver => none}}.
 
 -doc false.
 handle_call({tcp_connect, inet, {A, B, C, D}, Port, Opts, Timeout}, {Owner, _} = From,
-            #{gen := Gen0, callers := Callers} = S)
+            #{grantee := Grantee, gen := Gen0, callers := Callers} = S)
   when ?IS_BYTE4(A, B, C, D), is_integer(Port), Port > 0, Port =< 16#ffff, is_list(Opts),
        Timeout =:= infinity orelse (is_integer(Timeout) andalso Timeout >= 0) ->
     {Child, Gen} = erx_net_rand:split(Gen0),
-    Start = #{owner => Owner, from => From, remote => {<<A, B, C, D>>, Port}, opts => Opts,
+    Start = #{owner => Owner, origin => Grantee, from => From, remote => {<<A, B, C, D>>, Port}, opts => Opts,
               timeout => Timeout, gen => Child},
     case erx_tcp_conn:start_link(Start) of
         {ok, Conn} -> {noreply, S#{gen := Gen, callers := Callers#{Conn => From}}};

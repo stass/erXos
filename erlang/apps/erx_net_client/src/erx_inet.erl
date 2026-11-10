@@ -49,7 +49,7 @@ servers included, is loaded. A name that passes holds no byte a terminal acts on
 
 -behaviour(gen_server).
 
--export([call/1, start_link/0, resolver_config/1, load/1]).
+-export([call/1, open/1, start_link/0, resolver_config/1, load/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -export_type([request/0, resolver/0]).
@@ -78,6 +78,22 @@ call(Request) ->
     case find() of
         {ok, Grant, _Origin} -> ask(Grant, Request);
         {error, _} = Error -> Error
+    end.
+
+-doc """
+Opens a socket as call/1 does, and answers with the socket's pid the origin its grant
+was found with (erx_sock_admit:origin()), against which the socket's pushes are checked.
+""".
+-spec open(request()) -> {ok, pid(), erx_sock_admit:origin()} | {error, term()}.
+open(Request) ->
+    case find() of
+        {ok, Grant, Origin} ->
+            case ask(Grant, Request) of
+                {ok, Socket} when is_pid(Socket) -> {ok, Socket, Origin};
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
 %% The grant and its origin, from the one reader of the `grant` key.

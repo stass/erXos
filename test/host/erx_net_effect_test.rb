@@ -35,16 +35,6 @@ class ErxNetEffectTest < Minitest::Test
     reading_opens_the_window: [
       'settle(step({user, {rcvd, Released}}, S1))', '_ = Released, settle(S1)'
     ],
-    # A recv short of its length holds nothing: its bytes keep the window shut, and a
-    # sender's silly window avoidance never sends the last part of a segment it waits for.
-    recv_of_the_whole_buffer_completes: [
-      'S#state{rcv_held = N};', '_ = N, S;'
-    ],
-    # Held bytes still marked held once taken: they are stepped as read a second time,
-    # and the window overstates the room.
-    recv_that_times_out_keeps_what_it_held: [
-      'rcv_held = max(Held - Bytes, 0)}}.', 'rcv_held = Held + 0 * Bytes}}.'
-    ],
     # A batch's units never taken: the peer's segments hold the credit for good.
     credit_is_taken_as_items_arrive: [
       'ok = erx_net_credit:take(Credit, lists:sum([units(Item) || Item <- Batch])),', '_ = Credit, _ = fun units/1,'
@@ -55,6 +45,26 @@ class ErxNetEffectTest < Minitest::Test
       'Batch = queued_items([Items]),', '_ = fun queued_items/1, Batch = Items,'
     ]
   }.freeze
+
+  # The socket protocol's seeded failures in other modules than the connection, each
+  # failing its own case: a connection that takes and answers a request in the envelope
+  # of a domain that is not its grantee's, and a socket process that grants no credit,
+  # whose owner stalls with the bytes in the connection.
+  PROTOCOL_FAULTS = {
+    a_non_grantee_envelope_is_dropped_and_counted: [
+      'erx_net_admit', ['when Origin =/= local, D =:= Origin, is_pid(SockProc) ->', 'when Origin =:= Origin, D =:= D, is_pid(SockProc) ->']
+    ],
+    active_mode_delivers_to_the_owner: [
+      'erx_gen_tcp', ['Conn ! {erx_net, self(), {credit, Bytes}},', '_ = {Conn, Bytes},']
+    ]
+  }.freeze
+
+  PROTOCOL_FAULTS.each do |name, (mod, fault)|
+    define_method("test_seeded_fault_fails_#{name}") do
+      output = refute_erx_net_eunit(:erx_tcp_conn_tests, fault: { mod => fault })
+      assert_match(/#{name}/, output)
+    end
+  end
 
   CONN_FAULTS.each do |name, fault|
     define_method("test_seeded_fault_fails_#{name}") do

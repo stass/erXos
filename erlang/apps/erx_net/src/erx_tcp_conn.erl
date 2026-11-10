@@ -5,8 +5,8 @@
 -moduledoc """
 A TCP connection's process (docs/design-network-stack.md, "One owner, one step",
 "Receiving", "Transmitting", "Connection setup"): the loop around the pure `erx_tcp:step/3`
-and the socket layer FreeBSD keeps in `struct socket` (the owner, the active mode, the bytes
-not yet handed over, a waiting `recv`). It decides nothing a step could decide.
+and the socket layer FreeBSD keeps in `struct socket` (the owner, the credit it was
+granted, the bytes not yet pushed). It decides nothing a step could decide.
 
 **One step per mailbox.** Each message becomes one step, except that an `{items, ...}`
 takes every further one already queued with it: segments and ICMP reports from an
@@ -25,28 +25,41 @@ actions in order:
   message (erx_net_tx); a full credit drops them, which the step's retransmission timer
   recovers;
 * `deliver` appends to the receive queue; `notify` records end of stream, an error, or the
-  end; `reply` answers a caller, the connect caller with `{ok, Socket}`;
+  end; `reply` answers the connect caller with `{ok, self()}`, and a request of the socket
+  process with `{reply, N, Result}`;
 * `reset` and `charge_rst` go to the interface, which holds the RST limit;
 * `reserve_buffer` is granted at once, with the size the step asked for, which erx_tcp_mss
   holds to `SB_MAX` (the grant's reservations are not built);
 * `finish` ends the process once the step's answers are out.
 
-After the actions the loop hands the receive queue to the owner, in active mode as one
-`{tcp, Socket, Data}` or to a waiting `recv/3`, and steps `{user, {rcvd, Bytes}}` for what
-left the receive buffer, so the window opens as the owner reads: the bytes it handed, and
-those a recv still short of its length holds, as FreeBSD's soreceive copies them out to
-the caller under MSG_WAITALL. Then it arms the clock no later than the earliest of the
-step's deadline and the connect and recv deadlines.
+After the actions the loop pushes the receive queue to its socket process within the
+credit it holds, and steps `{user, {rcvd, Bytes}}` for what left the receive buffer, so
+the window opens as the socket process takes the bytes. Then it arms the clock no later
+than the earliest of the step's deadline and the connect deadline.
+
+**The socket protocol** (docs/design-network-stack.md, "The socket process"). The
+connection's owner is its socket process, the grant's caller, which it monitors and the
+only party it talks to after the connect. It takes the socket process's messages,
+`{erx_net, SockProc, Body}`, bare when its grantee is `local` or in the envelope of the
+grantee's domain, through erx_net_admit:request/3; any other message is dropped and
+counted (`unknown`), so no reply goes to a party of another domain. Each `{call, N,
+Request}` is answered `{erx_net, self(), {reply, N, Result}}`, at once or, for `send` and
+`shutdown`, when the step answers. At most 64 are in flight, and only one `send`: past
+either, or under an `N` already in flight, the request is answered `{error, badarg}`,
+which only a socket process that breaks the protocol meets. `{credit, Bytes}` adds to the
+bytes the connection may push, up to 64 MiB. It pushes `{data, Pieces}`, each at most a
+piece, 64 KiB, of at most 64 of the receive queue's binaries; then `eof` once every byte
+before the peer's FIN is pushed, and `{error, Reason}` as its last push when it ends with
+the socket process still its owner.
 
 **Bounds.** The interface hands segments only against the connection's credit, and the
-step keeps the bytes it delivered counted until they leave the receive buffer
-(`rcv_buffered`), so the receive queue holds at most the receive buffer and what a recv
-held, which is less than its length; since a recv asks for at most the receive buffer
-(`{error, enomem}` beyond it), the queue holds less than twice the buffer in bytes, whatever
-the peer sends. A payload smaller than a quarter of its frame is copied out as it is queued,
-so tiny segments do not keep their frames alive. The send buffer holds at most its high watermark, the rest of a `send` waiting with
-its caller. In `{active, true}` mode, as with `gen_tcp`, the owner's mailbox is bounded
-only by how fast the owner reads.
+step keeps the bytes it delivered counted until they are pushed (`rcv_buffered`), so the
+receive queue holds at most the receive buffer, whatever the peer sends or the socket
+process grants. A payload smaller than a quarter of its frame is copied out as it is
+queued, so tiny segments do not keep their frames alive. The send buffer holds at most its
+high watermark and one piece beyond it, the piece whose reply waits for room. What a client
+domain can make the connection hold in requests is 64 requests of the protocol's bounded
+shapes, one of them a piece.
 
 **Raises.** A step over segments or a report that raises is counted as `raised` and the
 connection keeps its state from before it, so segments that trip a bug cost only the
@@ -54,8 +67,8 @@ step they were in; nothing of them is logged. Should the loop itself crash, its 
 the connection's state name, four-tuple and counters, never its buffers or the message
 that was in hand, since both hold the peer's bytes.
 
-The process starts in its grant (erx_net_grant), which links to it, and monitors its owner:
-the owner's exit closes the connection as `close/1` does.
+The process starts in its grant (erx_net_grant), which links to it, and monitors its owner,
+the socket process: the owner's exit closes the connection as `close/1` does.
 """.
 
 -behaviour(gen_server).
@@ -69,7 +82,13 @@ the owner's exit closes the connection as `close/1` does.
 -export_type([start/0]).
 
 -define(CREDIT_LIMIT, 256).
--define(MAX_REQUEST, 16).
+%% The socket protocol's bounds (docs/design-network-stack.md, "Message sizes", "Requests
+%% in flight"): a piece, the binaries of one push, the requests in flight, and the most
+%% credit a socket process may hold out, stock's TCP_MAX_PACKET_SIZE.
+-define(PIECE, 65536).
+-define(MAX_PIECES, 64).
+-define(MAX_IN_FLIGHT, 64).
+-define(MAX_PUSH_CREDIT, 67108864).
 %% tcp_sendspace and tcp_recvspace, FreeBSD's default buffer sizes (tcp_usrreq.c).
 -define(SNDBUF, 32768).
 -define(RCVBUF, 65536).
@@ -77,34 +96,31 @@ the owner's exit closes the connection as `close/1` does.
 -define(SMALL_PIECE, 512).
 
 -doc """
-What the grant starts a connection with: its owner, the connect caller it answers, the
-remote address and port, `gen_tcp`'s options, the connect timeout in milliseconds and the
+What the grant starts a connection with: its owner, the socket process; how its grantee's
+messages arrive; the connect caller it answers; the remote address and port; the
+connection's own options (`nodelay`); the connect timeout in milliseconds; and the
 generator split from the grant's.
 """.
--type start() :: #{owner := pid(), from := gen_server:from(),
+-type start() :: #{owner := pid(), origin := erx_net_admit:origin(), from := gen_server:from(),
                    remote := {<<_:32>>, 1..16#ffff}, opts := list(), timeout := timeout(),
                    gen := erx_net_rand:gen()}.
 
--type active() :: boolean() | once | integer().
-
 -record(state, {tcb :: #tcb{},
-                socket :: term(),
                 key :: erx_net_input:key(),
                 credit :: erx_net_credit:credit(),
-                owner :: pid() | none,               % none once the owner closed
+                owner :: pid() | none,               % the socket process; none once it closed
                 owner_ref :: reference() | none,
-                active :: active(),
-                mode :: binary | list,
+                origin :: erx_net_admit:origin(),
+                push_credit = 0 :: non_neg_integer(), % bytes the socket process granted
+                pending = #{} :: #{non_neg_integer() => send | shutdown}, % requests in flight
                 rcvq = [] :: [binary()],             % newest first
                 rcv_bytes = 0 :: non_neg_integer(),
-                rcv_held = 0 :: non_neg_integer(),   % rcvq's first bytes, held by a recv
                 eof = false :: boolean(),            % the peer's FIN
                 error = none :: none | atom(),
                 ended = false :: boolean(),          % the connection closed
-                told = false :: boolean(),           % tcp_closed sent
+                told = none :: none | eof | ended,   % the last of eof and the end pushed
                 finished = false :: boolean(),
                 connect :: none | {gen_server:from(), integer() | infinity},
-                recv = none :: none | {gen_server:from(), non_neg_integer(), integer() | infinity},
                 path :: erx_net_frame:path(),
                 template = erx_net_frame:no_template() :: erx_net_frame:template_cache(),
                 route = ok :: ok | {error, ehostunreach},
@@ -125,11 +141,12 @@ start_link(Start) ->
     gen_server:start_link(?MODULE, Start, []).
 
 -doc false.
-init(#{owner := Owner, from := From, remote := {Raddr, Rport}, opts := Opts0, timeout := Timeout,
-       gen := Rand0}) ->
-    ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
+init(#{owner := Owner, origin := Origin, from := From, remote := {Raddr, Rport}, opts := Opts0,
+       timeout := Timeout, gen := Rand0}) ->
+    %% The requests in flight, the close that goes out past them, and a credit message.
+    ok = (erx_net_sup:runtime()):serve(?MAX_IN_FLIGHT + 2),
     maybe
-        {ok, #{active := Active, mode := Mode} = Opts} ?= options(Opts0, #{active => true, mode => list}),
+        {ok, Opts} ?= options(Opts0, #{}),
         {ConfigGen, Snap} = erx_net_tables:configuration(),
         {ok, #{src := Src} = Path} ?= erx_net_frame:path(Raddr, #{}, Snap),
         Credit = erx_net_credit:new(?CREDIT_LIMIT),
@@ -145,9 +162,9 @@ init(#{owner := Owner, from := From, remote := {Raddr, Rport}, opts := Opts0, ti
                                  cc => erx_tcp_cc_cubic, loss => erx_tcp_loss_dupack,
                                  snd_hiwat => ?SNDBUF, rcv_hiwat => ?RCVBUF, gen => TcbGen,
                                  now => Now, nodelay => maps:get(nodelay, Opts, false)}),
-        S = #state{tcb = Tcb, socket = {'$inet', erx_gen_tcp, self()}, key = KeyOf(Port),
-                   credit = Credit, owner = Owner, owner_ref = erlang:monitor(process, Owner),
-                   active = Active, mode = Mode, connect = {From, deadline(Timeout, Now)},
+        S = #state{tcb = Tcb, key = KeyOf(Port), credit = Credit, owner = Owner,
+                   owner_ref = erlang:monitor(process, Owner), origin = Origin,
+                   connect = {From, deadline(Timeout, Now)},
                    path = Path, config_gen = ConfigGen, gen = Rand},
         {ok, step({user, {connect, From}}, S), {continue, settle}}
     else
@@ -161,39 +178,6 @@ handle_continue(settle, S) ->
     settle(S).
 
 -doc false.
-handle_call({send, Data}, From, S) when is_binary(Data) ->
-    settle(step({user, {send, From, Data}}, S));
-handle_call({recv, _Length, _Timeout}, _From, #state{active = Active} = S) when Active =/= false ->
-    {reply, {error, einval}, S};
-handle_call({recv, _Length, _Timeout}, _From, #state{recv = {_, _, _}} = S) ->
-    {reply, {error, ealready}, S};
-handle_call({recv, Length, _Timeout}, _From, #state{tcb = #tcb{rcv_hiwat = Hiwat}} = S)
-  when is_integer(Length), Length > Hiwat ->
-    {reply, {error, enomem}, S};
-handle_call({recv, Length, Timeout}, From, S)
-  when is_integer(Length), Length >= 0, Timeout =:= infinity;
-       is_integer(Length), Length >= 0, is_integer(Timeout), Timeout >= 0 ->
-    settle(S#state{recv = {From, Length, deadline(Timeout, erx_net_clock:now())}});
-handle_call({shutdown, How}, From, S) when How =:= read; How =:= write; How =:= read_write ->
-    settle(step({user, {shutdown, From, How}}, S));
-handle_call(close, From, S) ->
-    gen_server:reply(From, ok),
-    settle(owner_closed(S));
-handle_call({setopts, Opts}, _From, #state{active = Active0, mode = Mode0} = S0) ->
-    case options(Opts, #{active => Active0, mode => Mode0}) of
-        {ok, #{active := Active, mode := Mode}} ->
-            S = passive_notice(S0#state{active = Active, mode = Mode}),
-            {reply, ok, S, {continue, settle}};
-        {error, _} = Error ->
-            {reply, Error, S0}
-    end;
-handle_call({getopts, Names}, _From, #state{active = Active, mode = Mode} = S) when is_list(Names) ->
-    Known = #{active => Active, mode => Mode},
-    {reply, {ok, [{Name, Value} || Name <- Names, {ok, Value} <- [maps:find(Name, Known)]]}, S};
-handle_call(sockname, _From, #state{tcb = #tcb{local = {Ip, Port}}} = S) ->
-    {reply, {ok, {tuple(Ip), Port}}, S};
-handle_call(peername, _From, #state{tcb = #tcb{remote = {Ip, Port}}} = S) ->
-    {reply, {ok, {tuple(Ip), Port}}, S};
 handle_call(_Request, _From, S) ->
     {reply, {error, einval}, S}.
 
@@ -211,8 +195,51 @@ handle_info({erx_net_clock, hint}, S) ->
     settle(timeouts(step({expired, erx_net_clock:now()}, S#state{armed = infinity})));
 handle_info({'DOWN', Ref, process, _, _}, #state{owner_ref = Ref} = S) ->
     settle(owner_closed(S));
-handle_info(_Msg, S) ->
-    {noreply, S}.
+handle_info(Msg, #state{origin = Origin, owner = Owner} = S) ->
+    case erx_net_admit:request(Origin, Owner, Msg) of
+        {ok, Request} -> request(Request, S);
+        unknown -> {noreply, count(unknown, S)};
+        {refused, Check} -> {noreply, count(Check, S)}
+    end.
+
+%% --- The socket protocol -----------------------------------------------------------
+
+%% A request of the socket process, admitted by erx_net_admit. `send` and `shutdown` are
+%% answered when the step answers them, under `{call, N}`; the rest at once.
+request({credit, Bytes}, #state{push_credit = Credit} = S) ->
+    settle(S#state{push_credit = min(Credit + Bytes, ?MAX_PUSH_CREDIT)});
+request({call, N, _}, #state{pending = Pending} = S)
+  when is_map_key(N, Pending); map_size(Pending) >= ?MAX_IN_FLIGHT ->
+    %% Refused without touching Pending: an N already in flight keeps its entry.
+    {noreply, push({reply, N, {error, badarg}}, S)};
+request({call, N, {send, Piece}}, #state{pending = Pending} = S) ->
+    case lists:member(send, maps:values(Pending)) of
+        true -> {noreply, push({reply, N, {error, badarg}}, S)};
+        false -> settle(step({user, {send, {call, N}, Piece}}, S#state{pending = Pending#{N => send}}))
+    end;
+request({call, N, {shutdown, How}}, #state{pending = Pending} = S) ->
+    settle(step({user, {shutdown, {call, N}, How}}, S#state{pending = Pending#{N => shutdown}}));
+request({call, _N, close}, S) ->
+    settle(owner_closed(S));
+request({call, N, {setopts, Opts}}, #state{tcb = #tcb{nodelay = Nodelay} = Tcb} = S) ->
+    {noreply, answer(N, ok, S#state{tcb = Tcb#tcb{nodelay = proplists:get_value(nodelay, Opts, Nodelay)}})};
+request({call, N, {getopts, Names}}, #state{tcb = #tcb{nodelay = Nodelay}} = S) ->
+    {noreply, answer(N, {ok, [{nodelay, Nodelay} || lists:member(nodelay, Names)]}, S)};
+request({call, N, sockname}, #state{tcb = #tcb{local = {Ip, Port}}} = S) ->
+    {noreply, answer(N, {ok, {tuple(Ip), Port}}, S)};
+request({call, N, peername}, #state{tcb = #tcb{remote = {Ip, Port}}} = S) ->
+    {noreply, answer(N, {ok, {tuple(Ip), Port}}, S)}.
+
+%% The reply to request N, to the socket process while it is the owner.
+answer(N, Result, #state{pending = Pending} = S) ->
+    push({reply, N, Result}, S#state{pending = maps:remove(N, Pending)}).
+
+push(_Body, #state{owner = none} = S) ->
+    S;
+push(Body, #state{owner = Owner} = S) ->
+    Owner ! {erx_net, self(), Body},
+    S.
+
 
 -doc false.
 format_status(Status) ->
@@ -300,12 +327,14 @@ perform({notify, closed}, S) ->
     S#state{ended = true};
 perform({notify, {ready, _}}, S) ->
     S;
-perform({reply, From, Reply}, #state{connect = {From, _}, socket = Sock} = S) ->
+perform({reply, From, Reply}, #state{connect = {From, _}} = S) ->
     gen_server:reply(From, case Reply of
-                               ok -> {ok, Sock};
+                               ok -> {ok, self()};
                                Error -> Error
                            end),
     S#state{connect = none};
+perform({reply, {call, N}, Reply}, S) ->
+    answer(N, Reply, S);
 perform({reply, From, Reply}, S) ->
     gen_server:reply(From, Reply),
     S;
@@ -334,6 +363,8 @@ perform(finish, S) ->
 %% once, when the owner reads (take/2). So the queue keeps alive at most four times its
 %% bytes, plus a few words for each piece of at least ?SMALL_PIECE bytes, within the
 %% eight times of FreeBSD's sb_mbmax (sb_efficiency).
+queue(<<>>, Q) ->
+    Q;
 queue(Piece, [Newest | Q]) when byte_size(Piece) < ?SMALL_PIECE,
                                 byte_size(Newest) < 4 * ?SMALL_PIECE ->
     [<<Newest/binary, Piece/binary>> | Q];
@@ -355,24 +386,23 @@ sent(full, Reason, S) -> count(Reason, S).
 count(Reason, #state{counters = Counters} = S) ->
     S#state{counters = maps:update_with(Reason, fun(N) -> N + 1 end, 1, Counters)}.
 
-%% The owner closed the socket or exited: nothing more reaches it, and a waiting recv is
+%% The owner closed the socket or exited: nothing more reaches it, and no request of it is
 %% answered.
 owner_closed(#state{owner = none} = S) ->
     S;
-owner_closed(#state{owner_ref = Ref, recv = Recv} = S) ->
+owner_closed(#state{owner_ref = Ref} = S) ->
     _ = erlang:demonitor(Ref, [flush]),
-    [gen_server:reply(From, {error, closed}) || {From, _, _} <- [Recv]],
-    step({user, close}, S#state{owner = none, owner_ref = none, recv = none}).
+    step({user, close}, S#state{owner = none, owner_ref = none, pending = #{}}).
 
-%% --- Settling: the owner, the end and the clock --------------------------------------
+%% --- Settling: the socket process, the end and the clock ----------------------------
 
-%% Hands the receive queue over, stepping `rcvd` for what left the receive buffer until
-%% nothing more does, tells the owner of the end, then ends the process or arms the clock.
-%% What left the buffer is what it counted before the hand-over less what it counts after,
-%% so no way of handing over can step more or less than it took.
+%% Pushes the receive queue within the credit, stepping `rcvd` for what left the receive
+%% buffer until nothing more does, pushes the end, then ends the process or arms the clock.
+%% What left the buffer is what it counted before the pushes less what it counts after, so
+%% no way of pushing can step more or less than it took.
 settle(S0) ->
     S1 = hand_over(S0),
-    case counted(S0) - counted(S1) of
+    case S0#state.rcv_bytes - S1#state.rcv_bytes of
         0 ->
             S = tell_end(S1),
             case S of
@@ -386,112 +416,65 @@ settle(S0) ->
             settle(step({user, {rcvd, Released}}, S1))
     end.
 
-%% The queued bytes the receive buffer still counts: those after the held ones.
-counted(#state{rcv_bytes = N, rcv_held = Held}) -> N - Held.
-
-%% What the owner takes now: all of the queue in active mode or for `recv(_, 0, _)`,
-%% `Length` bytes for a recv that waits for them, and the whole queue, dropped, once the
-%% owner is gone.
-%%
-%% A recv still short of its `Length` holds what is queued: those bytes leave the receive
-%% buffer, as soreceive copies them out to the caller under MSG_WAITALL, and stay at the
-%% front of the queue (`rcv_held`), so the window reopens for the rest of the recv. Counted
-%% against the buffer, they would leave a recv near the buffer's size waiting on its last
-%% bytes, less than a segment, which the peer's silly window avoidance sends only as a
-%% persist probe, 5 s or more apart. What a recv held stays held when it times out, for the
-%% next recv or the next hand-over.
+%% The receive queue pushed in pieces while the socket process's credit lasts; dropped
+%% whole once there is no socket process.
 hand_over(#state{rcv_bytes = 0} = S) ->
     S;
 hand_over(#state{owner = none} = S) ->
-    S#state{rcvq = [], rcv_bytes = 0, rcv_held = 0};
-hand_over(#state{active = Active, owner = Owner, socket = Sock, mode = Mode, rcv_bytes = N} = S)
-  when Active =/= false ->
-    {Data, Rest} = take(N, S),
-    Owner ! {tcp, Sock, data(Mode, Data)},
-    passive_notice(Rest#state{active = spend(Active)});
-hand_over(#state{recv = {From, Length, _}, mode = Mode, rcv_bytes = N} = S) when N >= Length ->
-    Take = case Length of
-               0 -> N;
-               _ -> Length
-           end,
-    {Data, Rest} = take(Take, S),
-    gen_server:reply(From, {ok, data(Mode, Data)}),
-    Rest#state{recv = none};
-hand_over(#state{recv = {_, _, _}, rcv_bytes = N} = S) ->
-    S#state{rcv_held = N};
-hand_over(S) ->
-    S.
-
-%% The first Bytes of the queue; the held ones go first.
-take(Bytes, #state{rcvq = Q, rcv_bytes = N, rcv_held = Held} = S) ->
-    <<Data:Bytes/binary, Left/binary>> = iolist_to_binary(lists:reverse(Q)),
-    {Data, S#state{rcvq = [Left || Left =/= <<>>], rcv_bytes = N - Bytes,
-                   rcv_held = max(Held - Bytes, 0)}}.
-
-data(binary, Data) -> Data;
-data(list, Data) -> binary_to_list(Data).
-
-%% `{active, N}` counts deliveries down to passive; `once` is one.
-spend(once) -> false;
-spend(N) when is_integer(N) -> N - 1;
-spend(Active) -> Active.
-
-passive_notice(#state{active = N, owner = Owner, socket = Sock} = S) when is_integer(N), N =< 0 ->
-    [Owner ! {tcp_passive, Sock} || Owner =/= none],
-    S#state{active = false};
-passive_notice(S) ->
-    S.
-
-%% The end of the stream, once everything before it was handed over: in active mode
-%% `{tcp_error, S, Reason}` when there was one and then `{tcp_closed, S}`, once; a waiting
-%% recv gets the error, or `closed`, also when fewer bytes remain than it waits for, as
-%% stock's recv does (inet_drv's tcp_recv_closed). Stock discards those bytes; they stay
-%% queued here, for a `recv(_, 0)` or until the connection ends.
-tell_end(#state{eof = false, ended = false} = S) ->
+    S#state{rcvq = [], rcv_bytes = 0};
+hand_over(#state{push_credit = 0} = S) ->
     S;
+hand_over(#state{rcvq = Q, rcv_bytes = N, push_credit = Credit} = S) ->
+    {Pieces, Bytes, Rest} = pieces(lists:reverse(Q), min(Credit, ?PIECE), ?MAX_PIECES, [], 0),
+    hand_over(push({data, Pieces}, S#state{rcvq = lists:reverse(Rest), rcv_bytes = N - Bytes,
+                                           push_credit = Credit - Bytes})).
+
+%% The oldest binaries of the queue (oldest first), at most Room bytes in at most Count
+%% binaries, the last one cut to fit: the pieces, their bytes and what is left, oldest first.
+pieces([Bin | Rest], Room, Count, Acc, Bytes) when Count > 0, Room > 0 ->
+    case Bin of
+        <<_:Room/binary, _/binary>> when byte_size(Bin) > Room ->
+            <<Part:Room/binary, Left/binary>> = Bin,
+            {lists:reverse([Part | Acc]), Bytes + Room, [Left | Rest]};
+        _ ->
+            pieces(Rest, Room - byte_size(Bin), Count - 1, [Bin | Acc], Bytes + byte_size(Bin))
+    end;
+pieces(Rest, _Room, _Count, Acc, Bytes) ->
+    {lists:reverse(Acc), Bytes, Rest}.
+
+%% The end of the stream, once every byte before it was pushed: `eof` for the peer's FIN,
+%% then `{error, Reason}` (`closed` without an error) as the last push when the connection
+%% ends, at once if it finishes with bytes the socket process has not taken.
 tell_end(#state{owner = none} = S) ->
     S;
-tell_end(#state{active = Active, told = false, rcv_bytes = 0, owner = Owner, socket = Sock,
-                error = Error} = S) when Active =/= false ->
-    [Owner ! {tcp_error, Sock, Error} || Error =/= none],
-    Owner ! {tcp_closed, Sock},
-    S#state{told = true};
-tell_end(#state{recv = {From, Length, _}, rcv_bytes = N, error = Error} = S)
-  when N =:= 0; N < Length ->
-    gen_server:reply(From, {error, case Error of
-                                       none -> closed;
-                                       _ -> Error
-                                   end}),
-    S#state{recv = none};
+tell_end(#state{told = none, eof = true, rcv_bytes = 0} = S) ->
+    tell_end(push(eof, S#state{told = eof}));
+tell_end(#state{told = Told, error = Error, ended = Ended, finished = Finished, rcv_bytes = N} = S)
+  when Told =/= ended, (Error =/= none orelse Ended orelse Finished), (N =:= 0 orelse Finished) ->
+    push({error, case Error of
+                     none -> closed;
+                     _ -> Error
+                 end}, S#state{told = ended});
 tell_end(S) ->
     S.
 
-%% The connect and recv deadlines, which the socket enforces as the step enforces its own:
-%% a connect past its timeout ends the connection, which has received no SYN and so owes
-%% the peer nothing (`tcp_close` in SYN-SENT); a recv past its timeout is answered.
-timeouts(#state{connect = {From, Deadline}} = S0) when is_integer(Deadline) ->
+%% The connect deadline, which the socket enforces as the step enforces its own: a connect
+%% past its timeout ends the connection, which has received no SYN and so owes the peer
+%% nothing (`tcp_close` in SYN-SENT).
+timeouts(#state{connect = {From, Deadline}} = S) when is_integer(Deadline) ->
     case erx_net_clock:now() >= Deadline of
         true ->
             gen_server:reply(From, {error, timeout}),
-            timeouts(S0#state{connect = none, finished = true});
+            S#state{connect = none, finished = true};
         false ->
-            timeouts_recv(S0)
+            S
     end;
 timeouts(S) ->
-    timeouts_recv(S).
-
-timeouts_recv(#state{recv = {From, _, Deadline}} = S) when is_integer(Deadline) ->
-    case erx_net_clock:now() >= Deadline of
-        true -> gen_server:reply(From, {error, timeout}), S#state{recv = none};
-        false -> S
-    end;
-timeouts_recv(S) ->
     S.
 
-%% One hint no later than the earliest deadline: the step's, the connect's and the recv's.
-arm(#state{tcb = Tcb, connect = Connect, recv = Recv, armed = Armed} = S) ->
-    Deadlines = [erx_tcp:next_deadline(Tcb)] ++ [D || {_, D} <- [Connect]]
-        ++ [D || {_, _, D} <- [Recv]],
+%% One hint no later than the earliest deadline: the step's and the connect's.
+arm(#state{tcb = Tcb, connect = Connect, armed = Armed} = S) ->
+    Deadlines = [erx_tcp:next_deadline(Tcb)] ++ [D || {_, D} <- [Connect]],
     S#state{armed = erx_net_clock:arm_by(lists:min(Deadlines), Armed)}.
 
 deadline(infinity, _Now) -> infinity;
@@ -499,34 +482,13 @@ deadline(Ms, Now) -> Now + Ms * 1000.
 
 %% --- Options -----------------------------------------------------------------------
 
-%% The options this connection takes from `gen_tcp:connect/4` and `inet:setopts/2`; any
-%% other is refused.
+%% The options the connection takes at its start: `nodelay`; the socket process keeps the
+%% rest. Any other is refused.
 options([], Acc) ->
     {ok, Acc};
-options([Opt | Rest], Acc) ->
-    case option(Opt) of
-        {ok, Kv} -> options(Rest, maps:merge(Acc, active(Kv, Acc)));
-        error -> {error, einval}
-    end;
+options([{nodelay, B} | Rest], Acc) when is_boolean(B) ->
+    options(Rest, Acc#{nodelay => B});
 options(_Opts, _Acc) ->
     {error, einval}.
-
-option(binary) -> {ok, #{mode => binary}};
-option(list) -> {ok, #{mode => list}};
-option({mode, Mode}) when Mode =:= binary; Mode =:= list -> {ok, #{mode => Mode}};
-option({active, A}) when is_boolean(A); A =:= once -> {ok, #{active => A}};
-option({active, N}) when is_integer(N), N >= -32768, N =< 32767 -> {ok, #{active => {add, N}}};
-option({nodelay, B}) when is_boolean(B) -> {ok, #{nodelay => B}};
-option({packet, P}) when P =:= raw; P =:= 0 -> {ok, #{}};
-option(inet) -> {ok, #{}};
-option(_) -> error.
-
-%% `{active, N}` adds to a count already running, as `inet:setopts/2` does.
-active(#{active := {add, N}} = Kv, #{active := Current}) when is_integer(Current) ->
-    Kv#{active := Current + N};
-active(#{active := {add, N}} = Kv, _Acc) ->
-    Kv#{active := N};
-active(Kv, _Acc) ->
-    Kv.
 
 tuple(<<A, B, C, D>>) -> {A, B, C, D}.

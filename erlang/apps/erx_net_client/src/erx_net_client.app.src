@@ -8,7 +8,7 @@
 {application, erx_net_client,
  [{description, "erXos socket backends"},
   {vsn, "1"},
-  {modules, [erx_gen_tcp, erx_gen_udp, erx_inet, erx_net_client_app, erx_net_client_sup, erx_sock_admit]},
+  {modules, [erx_gen_tcp, erx_gen_tcp_core, erx_gen_udp, erx_inet, erx_net_client_app, erx_net_client_sup, erx_sock_admit]},
   {registered, [erx_inet, erx_net_client_sup]},
   {applications, [kernel, stdlib]},
   {mod, {erx_net_client_app, []}},

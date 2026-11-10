@@ -35,7 +35,7 @@ answer_test_() ->
 open_socket_taken() ->
     Grant = self(),
     Conn = spawn(fun() -> ok end),
-    ?assertEqual({ok, {ok, Conn}}, erx_sock_admit:answer(tcp_connect, Grant, {ok, {'$inet', erx_gen_tcp, Conn}})),
+    ?assertEqual({ok, {ok, Conn}}, erx_sock_admit:answer(tcp_connect, Grant, {ok, Conn})),
     ?assertEqual({ok, {ok, Conn}}, erx_sock_admit:answer(udp_open, Grant, {ok, Conn})),
     ?assertEqual({ok, {error, econnrefused}}, erx_sock_admit:answer(tcp_connect, Grant, {error, econnrefused})),
     ?assertEqual({ok, {error, enoprotoopt}}, erx_sock_admit:answer(tcp_connect, Grant, {error, enoprotoopt})),
@@ -46,7 +46,7 @@ open_socket_taken() ->
 open_socket_other_node() ->
     Remote = remote_pid(),
     ?assertEqual({refused, socket},
-                 erx_sock_admit:answer(tcp_connect, self(), {ok, {'$inet', erx_gen_tcp, Remote}})),
+                 erx_sock_admit:answer(tcp_connect, self(), {ok, Remote})),
     ?assertEqual({refused, socket}, erx_sock_admit:answer(udp_open, self(), {ok, Remote})),
     ?assertEqual({refused, socket}, erx_sock_admit:answer(udp_open, Remote, {ok, self()})).
 
@@ -55,16 +55,16 @@ open_socket_other_node() ->
 open_socket_name() ->
     Names = [erx_net_grant, {global, sock}, {via, global, sock}, {erx_net_grant, node()}, {'$inet', erx_gen_tcp, x}],
     [?assertEqual({refused, socket}, erx_sock_admit:answer(udp_open, self(), {ok, Name})) || Name <- Names],
-    [?assertEqual({refused, socket}, erx_sock_admit:answer(tcp_connect, self(), {ok, {'$inet', erx_gen_tcp, Name}}))
+    [?assertEqual({refused, socket}, erx_sock_admit:answer(tcp_connect, self(), {ok, Name}))
      || Name <- Names].
 
 answer_off_schema() ->
     Me = self(),
     Off = [ok, Me, {ok, Me, extra}, {ok}, {error, econnrefused, extra}, [{ok, Me}], #{ok => Me}],
     [?assertEqual({refused, shape}, erx_sock_admit:answer(udp_open, Me, Answer)) || Answer <- Off],
-    %% A connection is answered in its socket term, never as another backend's.
-    [?assertEqual({refused, shape}, erx_sock_admit:answer(tcp_connect, Me, {ok, Socket}))
-     || Socket <- [Me, {'$inet', erx_gen_udp, Me}, {'$inet', erx_gen_tcp, Me, extra}]].
+    %% A connection is answered as its pid, never as a socket term.
+    [?assertEqual({refused, socket}, erx_sock_admit:answer(tcp_connect, Me, {ok, Socket}))
+     || Socket <- [{'$inet', erx_gen_udp, Me}, {'$inet', erx_gen_tcp, Me, extra}]].
 
 answer_off_reasons() ->
     Off = [made_up, econnrefused_x, {econnrefused}, "closed", <<"closed">>, {'EXIT', self(), kill}, 1],
@@ -130,7 +130,7 @@ call_test_() ->
      {"a grant that ends while asked answers closed", fun call_grant_ends/0}].
 
 connect_forged() ->
-    [with_grant(fun(_) -> {ok, {'$inet', erx_gen_tcp, Forged}} end,
+    [with_grant(fun(_) -> {ok, Forged} end,
                 fun() -> ?assertEqual({error, badarg}, erx_gen_tcp:connect({192, 0, 2, 1}, 80, [], 1000)) end)
      || Forged <- [remote_pid(), {global, sock}, {via, global, sock}]].
 

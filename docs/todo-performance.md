@@ -512,6 +512,33 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   reductions per delivered byte in the owner's domain, and memory per
   socket. The fixes on the table are coalescing several pushes into one
   delivery when the owner is behind, and granting credit less often.
+* **[Medium] network, two local messages more per call through the
+  socket process**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  A `gen_tcp` call that needs the connection goes from its caller to the
+  socket process and on to the connection, and its reply back the same
+  way: two local messages more than a call to the connection itself. In
+  active mode each delivery also takes one more hop, from the connection
+  through the socket process to the owner. Request-reply pays both on
+  every transaction: on the FreeBSD x86-64 test host, natively on stock
+  OTP 29 (erts 17.1), default flags, medians of 5, rr-64 measured 13,824
+  transactions a second against its parent's 15,065 (8 percent less) and
+  rr-64x16 80,035 against 86,775 (`~/erxos-history`,
+  `net-bench/1be-p9a`, commit 3200779, against
+  `net-bench-freebsd-fast-p6c-2026-11-10/branch0`, commit 83f7a0a).
+  Settled by the same rr-64 run with the socket process's share taken
+  apart: messages and reductions per transaction in the socket process,
+  against a build whose send call goes to the connection directly. The
+  fix on the table is the connection answering a one-piece send's caller
+  itself, with the socket process forwarding the call.
+* **[Low] network, a recv flattens all the socket process holds**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  `erx_gen_tcp_core:take/2` joins every held push into one binary for
+  each recv, so small recvs interleaved with small pushes (a peer's tiny
+  segments) copy up to the 64 KiB target each time. Settled by a passive
+  loop of `recv(S, 4)` against 64-byte segments, bytes copied per byte
+  received; the fix on the table is splitting off only the prefix a recv
+  takes.
 * **[Low] network, the receive join on erXos**
   ([design-network-fastpath.md](design-network-fastpath.md#copies)). The merge leaves a merged segment's payload
   as its frames' sub-binaries, so the socket process joins a delivery of

@@ -4168,10 +4168,14 @@ would leave a recv near the buffer's size waiting for the last part of a
 segment, which the sender's silly window avoidance sends only as a
 persist probe. What a waiting recv holds is the owner's domain's memory,
 as stock's is the node's. A recv that times out leaves the bytes held for
-the next one, as stock does. When the peer's FIN leaves fewer bytes than
-a waiting recv asks for, the recv answers as stock's does
-(`tcp_recv_closed`): `{error, closed}`, the bytes discarded, and
-`{error, enotconn}` from then on. In the connection, as in the reassembly
+the next one, as stock does. A recv still waiting when `setopts` turns
+the socket active is answered `{error, einval}`, as a recv of an active
+socket is; stock's driver leaves it waiting until its timeout. When the
+peer's FIN leaves fewer bytes than a waiting recv asks for, the recv
+answers as stock's does (`tcp_recv_closed`): `{error, closed}`, the
+bytes discarded, and every recv after it `{error, enotconn}` and a
+send `{error, closed}`, as stock's do once its driver has closed the
+socket. In the connection, as in the reassembly
 queue, a payload smaller than a quarter of its frame is copied out as it
 is queued, so tiny segments do not keep their frames alive.
 
@@ -4262,7 +4266,7 @@ starts with the request that made it.
 | `opening` | the caller of `connect`, `listen` or `open`; for an accepted connection, the listener's socket process that started it | the grant's answer, or the hand-over from the listener's socket process; the exit of its owner and of that process; postpones everything else | `open` or `listening` with its socket, which it then monitors; on a refusal it answers the caller and stops |
 | `open` | a connection or datagram socket: its owner, its active mode and presentation options, the bytes or datagrams it holds, the credit it granted, a waiting `recv`, its requests in flight and the calls waiting behind them | every call, push and exit | `closed` |
 | `listening` | a listener: its owner, its `accept` calls in flight, each with the socket process it started for its caller, and the calls waiting behind them | every call, push and exit | `closed` |
-| `closed` | in passive mode, the bytes still held when its socket ended | `recv` while bytes are held, `close/1`, which answers `ok`, and its owner's exit; every other call answers as stock's closed socket does | stops |
+| `closed` | the bytes still held and the end its owner has not been shown, which wait for the owner in passive mode | `recv`, which takes what is held and then meets the end; `setopts` while the end waits, so the owner can be shown it in active mode; `close/1`, which answers `ok`, and its owner's exit; every other call answers as stock's closed socket does | stops |
 | `{transfer, NewOwner, State}` | `controlling_process/2` under way | the owner's second call and the owner's exit; postpones everything else, pushes included | `State`, with `NewOwner` as owner |
 
 The state is the effect shell's; what is presented, granted and replied
@@ -4285,16 +4289,29 @@ bytes if they complete it, and otherwise with `{error, timeout}`, late by
 the time they take. Stock's driver takes its input in order too, and a
 second timer would not answer sooner.
 
-At `eof` with `exit_on_close` true, the default, the socket process
-presents what it holds, then `{tcp_closed, S}` in active mode, sends
-`close` and moves to `closed`; with `exit_on_close` false it stays
-`open`, its reads answer as closed and its sends go on. At `{error,
-Reason}`, or its socket's exit, it presents what it holds, then in
-active mode `{tcp_error, S, Reason}` where stock shows the reason
-(`econnreset` only under `show_econnreset`) and `{tcp_closed, S}`, or
-answers a waiting recv with the error, and moves to `closed`. A socket
-that exits without a last push, killed or ended with its domain, is
-taken as `{error, econnaborted}`; a push after the end is ignored.
+At `eof` with `exit_on_close` true, the default, the socket process in
+active mode presents what it holds, then `{tcp_closed, S}`, sends `close`
+and moves to `closed`. In passive mode, whether its owner chose it or an
+active count ran out, the end waits for the owner, as in stock's inet
+driver, which meets the peer's FIN only when it reads: the socket stays
+`open` and its sends go on until a recv that what is held cannot
+complete is answered `{error, closed}` (`tcp_recv_closed`), the recvs
+after it `{error, enotconn}`, or the owner
+turns the socket active and is shown what is held and `{tcp_closed, S}`;
+then it sends `close` and moves to `closed`. With `exit_on_close` false
+it stays `open`, its reads answer as closed and its sends go on.
+
+At `{error, Reason}`, or its socket's exit, the socket is gone: the
+socket process sends `close`, moves to `closed` and answers every call
+it holds `{error, closed}`. In active mode it presents what it holds,
+then `{tcp_error, S, Reason}` where stock shows the reason (`econnreset`
+only under `show_econnreset`) and `{tcp_closed, S}`. In passive mode the
+end waits for the owner as above, and the first recv that what is held
+cannot complete is answered with the error. The owner is shown the first
+end only: after `eof` the stream is whole, and a later end means only
+that the socket is gone. A socket that exits without a last push, killed
+or ended with its domain, is taken as `{error, econnaborted}`; a push
+after the socket process has closed is ignored.
 
 **Accepting.** `gen_tcp:accept/2` calls the listener's socket process,
 which starts a socket process for the caller, owned by it, and sends its
@@ -4946,7 +4963,7 @@ client domain is affected beyond its sockets.
 | `{error, econnreset}` | a RST in a synchronized state, under `show_econnreset` as on stock |
 | `{error, enoprotoopt}` | an ICMP parameter problem answered the SYN, as FreeBSD's `icmp_errmap` maps it |
 | `{error, closed}` | the socket is closed, as on stock; a `recv` that the peer's FIN leaves short, as on stock |
-| `{error, enotconn}` | a `recv` after one the peer's FIN left short, as on stock |
+| `{error, enotconn}` | a `recv` after one the peer's FIN left short, or one answered the socket's error, as on stock |
 | `{error, timeout}` | an Erlang call's own timeout, as on stock |
 | `{error, emsgsize}` | a datagram larger than IP allows, or a packet over `packet_size` |
 | `{error, einval}` | an option value out of range; a socket used from a domain other than its socket process's |

@@ -10,9 +10,12 @@ own, reads the frames the connection hands its driver, and answers with segments
 the connection against the credit of its demultiplexing entry. The pure step is tested on
 its own (erx_tcp_*_tests); these cases check the loop around it: the clock armed after
 every step, the credit taken as items arrive, the window opened as the owner reads, a RST
-ending the process and its entry, a close through TIME-WAIT, and the recv results stock
-gen_tcp gives: a recv for the whole buffer completes, a timed-out recv keeps its bytes,
-and a short tail at the peer's FIN answers closed.
+ending the process and its entry, a close through TIME-WAIT. Each connection is opened
+through its socket process (erx_gen_tcp), owned by the test, so they also check the socket
+protocol end to end: the recv results stock gen_tcp gives (a recv longer than the buffer
+completes, a timed-out recv keeps its bytes, a short tail at the peer's FIN answers
+closed), active-mode delivery to the owner as stock `{tcp, S, Data}`, and a request in
+the envelope of a domain that is not the grantee's dropped and counted.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -41,6 +44,9 @@ conn_test_() ->
       {"a short tail at the FIN answers closed and stays",
        fun short_tail_at_the_fin_answers_closed_and_stays/0},
       {"a RST ends the connection", fun rst_ends_the_connection_and_its_entry/0},
+      {"active mode delivers to the owner", fun active_mode_delivers_to_the_owner/0},
+      {"another domain's envelope is dropped and counted",
+       fun a_non_grantee_envelope_is_dropped_and_counted/0},
       {"close runs FIN both ways into TIME-WAIT", fun close_reaches_time_wait_with_its_timer/0}]].
 
 %% --- The stand-in interface ------------------------------------------------------
@@ -105,12 +111,16 @@ hand(Conn, Port, Fields, Payload) ->
 
 key(Port) -> {tcp, inet, ?OURS, Port, ?PEER, ?PEER_PORT}.
 
-%% Starts a connect as the owner, the test process, and returns its request and its SYN.
+%% Starts a connect through a socket process owned by the test process, and returns its
+%% request, its SYN and the socket process.
 start_connect() ->
-    Req = gen_server:send_request(erx_net_grant,
-                                  {tcp_connect, inet, {10, 0, 2, 2}, ?PEER_PORT,
-                                   [binary, {active, false}], 10000}),
+    start_connect([binary, {active, false}]).
+
+start_connect(Opts) ->
+    {ok, SockProc} = gen_statem:start(erx_gen_tcp, self(), []),
+    Req = gen_statem:send_request(SockProc, {connect, {10, 0, 2, 2}, ?PEER_PORT, Opts, 10000}),
     [{#tcp{flags = ?TH_SYN} = Syn, <<>>}] = segments(),
+    put(sock_proc, SockProc),
     {Req, Syn}.
 
 %% The handshake: SYN out, SYN-ACK in, connect answered, ACK out. The SYN-ACK's options
@@ -119,21 +129,23 @@ established() ->
     established(#tcp_opts{mss = 1460}).
 
 established(SynAckOpts) ->
-    {Req, #tcp{sport = Port, seq = Iss}} = start_connect(),
+    established(SynAckOpts, [binary, {active, false}]).
+
+established(SynAckOpts, Opts) ->
+    {Req, #tcp{sport = Port, seq = Iss}} = start_connect(Opts),
     [{_, Conn, _}] = ets:lookup(erx_net_demux, key(Port)),
     hand(Conn, Port, #{seq => ?PEER_ISS, ack => Iss + 1, flags => ?TH_SYN bor ?TH_ACK,
                        opts => SynAckOpts}, <<>>),
-    {reply, {ok, Sock}} = gen_server:receive_response(Req, ?WAIT),
+    {reply, ok} = gen_statem:receive_response(Req, ?WAIT),
+    Sock = {'$inet', erx_gen_tcp, get(sock_proc)},
     [{#tcp{flags = ?TH_ACK, ack = Ack}, <<>>}] = segments(),
     ?assertEqual(?PEER_ISS + 1, Ack),
     #{sock => Sock, conn => Conn, port => Port, snd => Iss + 1, rcv => ?PEER_ISS + 1}.
 
 %% The loop's invariant: a hint is armed no later than the step's earliest deadline.
 assert_armed(Conn) ->
-    {state, Tcb, _Socket, _Key, _Credit, _Owner, _Ref, _Active, _Mode, _Q, _N, _Held, _Eof,
-     _Error, _Ended, _Told, _Finished, _Connect, _Recv, _Path, _Template, _Route, _Gen, _Rand, Armed,
-     _Counters}
-        = sys:get_state(Conn),
+    State = sys:get_state(Conn),
+    {Tcb, Armed} = {element(2, State), element(tuple_size(State) - 1, State)},
     case erx_tcp:next_deadline(Tcb) of
         infinity -> ok;
         Next -> ?assertMatch({At, _} when At =< Next, Armed)
@@ -151,7 +163,8 @@ syn_is_retransmitted_on_its_timer() ->
 
 connect_answers_once_established() ->
     #{conn := Conn, sock := Sock} = established(),
-    ?assertMatch({'$inet', erx_gen_tcp, Conn}, Sock),
+    {'$inet', erx_gen_tcp, SockProc} = Sock,
+    ?assertNotEqual(Conn, SockProc),
     ?assertEqual({ok, {{10, 0, 2, 2}, ?PEER_PORT}}, erx_gen_tcp:peername(Sock)),
     #tcb{state = established} = assert_armed(Conn).
 
@@ -182,87 +195,80 @@ queued_items_are_stepped_once() ->
     [#{credit := Credit}] = erx_net_tables:demux(key(Port)),
     ?assertEqual(256, erx_net_credit:free(Credit)).
 
-%% Bytes the owner has not read keep the window closed; reading them sends the update that
-%% opens it again.
+%% Bytes past what the passive socket process holds, its target of 64 KiB, stay in the
+%% receive buffer and keep the window closed; reading them grants credit again, and the
+%% connection pushes them and sends the update that opens the window.
 reading_opens_the_window() ->
     #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} = established(),
-    Data = binary:copy(<<"y">>, 60000),
-    hand(Conn, Port, #{seq => Rcv, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH}, Data),
-    [{#tcp{ack = Acked, win = Shut}, <<>>}] = segments(),
-    ?assertEqual(Rcv + 60000, Acked),
-    ?assert(Shut < 10000),
-    ?assertEqual({ok, Data}, erx_gen_tcp:recv(Sock, 0, ?WAIT)),
-    [{#tcp{win = Open}, <<>>}] = segments(),
-    ?assert(Open > 60000).
+    Data = pattern(120000),
+    hand(Conn, Port, #{seq => Rcv, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH}, binary:part(Data, 0, 60000)),
+    _ = window_acking(Rcv + 60000),
+    hand(Conn, Port, #{seq => Rcv + 60000, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH},
+         binary:part(Data, 60000, 60000)),
+    ?assert(window_acking(Rcv + 120000) < 20000),
+    ?assertEqual({ok, binary:part(Data, 0, 65536)}, erx_gen_tcp:recv(Sock, 0, ?WAIT)),
+    window_opens_past(Rcv + 120000, 60000),
+    ?assertEqual({ok, binary:part(Data, 65536, 120000 - 65536)}, erx_gen_tcp:recv(Sock, 0, ?WAIT)).
 
-%% Two recvs in a row for 64 KiB, the receive buffer's size before it is rounded up to
-%% whole segments, each get exactly that, as on stock: the bytes a recv waits for leave the
-%% buffer as they arrive, as FreeBSD's soreceive copies them out under MSG_WAITALL, so the
-%% window reopens before the owner is answered. Counted against the buffer instead, they
-%% would leave the last part of a segment free, which a sender's silly window avoidance
-%% never fills but by persist probes. A recv longer than the buffer, which would hold more
-%% than the buffer outside it, is refused.
+%% A recv for 64 KiB, the receive buffer's size before it is rounded up to whole segments,
+%% then one for twice that, each get exactly that, as on stock: the bytes a recv waits for
+%% leave the buffer as they arrive, pushed to the socket process, which grants the credit
+%% the recv's length needs, as FreeBSD's soreceive copies them out under MSG_WAITALL. Held
+%% in the buffer instead, they would leave the last part of a segment free, which a
+%% sender's silly window avoidance never fills but by persist probes. A recv past stock's
+%% 64 MiB is refused.
 recv_of_the_whole_buffer_completes() ->
     Shift = erx_tcp_output:request_r_scale(),
-    #{conn := Conn, sock := Sock, rcv := Rcv} = C = established(#tcp_opts{mss = 1460, wscale = 0}),
+    #{sock := Sock, rcv := Rcv} = C = established(#tcp_opts{mss = 1460, wscale = 0}),
+    {'$inet', erx_gen_tcp, SockProc} = Sock,
     Stream = pattern(4 * 65536),
-    First = gen_server:send_request(Conn, {recv, 65536, 2000}),
-    _ = sys:get_state(Conn),
+    First = gen_statem:send_request(SockProc, {recv, 65536, 2000}),
+    _ = sys:get_state(SockProc),
     {Reply1, Sent1, Edge1} = feed(C, First, Shift, Stream, 0, Rcv + 65536),
     ?assertEqual({ok, binary:part(Stream, 0, 65536)}, Reply1),
-    Second = gen_server:send_request(Conn, {recv, 65536, 2000}),
+    Second = gen_statem:send_request(SockProc, {recv, 2 * 65536, 2000}),
     {Reply2, Sent, _} = feed(C, Second, Shift, Stream, Sent1, Edge1),
-    ?assertEqual({ok, binary:part(Stream, 65536, 65536)}, Reply2),
-    case Sent - 2 * 65536 of
+    ?assertEqual({ok, binary:part(Stream, 65536, 2 * 65536)}, Reply2),
+    case Sent - 3 * 65536 of
         0 -> ok;
-        More -> ?assertEqual({ok, binary:part(Stream, 2 * 65536, More)}, erx_gen_tcp:recv(Sock, 0, ?WAIT))
+        More -> ?assertEqual({ok, binary:part(Stream, 3 * 65536, More)}, erx_gen_tcp:recv(Sock, 0, ?WAIT))
     end,
-    #tcb{rcv_hiwat = Hiwat} = element(2, sys:get_state(Conn)),
-    ?assertEqual({error, enomem}, erx_gen_tcp:recv(Sock, Hiwat + 1, 0)).
+    ?assertEqual({error, enomem}, erx_gen_tcp:recv(Sock, 64 * 1024 * 1024 + 1, 0)).
 
-%% A recv that times out leaves what it held for the next one, as stock does. A later
-%% take steps as read only what the buffer still counted, so the window keeps counting
-%% what stays queued: the 30000 bytes held left the buffer once, and a recv of 40000 of
-%% the 50000 bytes queued releases 10000 more, leaving 10000 counted, which the next
-%% acknowledgement's window shows (the buffer is 64 KiB rounded up to whole segments).
+%% A recv that times out leaves what it held for the next one, as stock does: the 30000
+%% bytes it waited with are the first of the next recv's 40000, and the rest stays for a
+%% recv of what is there.
 recv_that_times_out_keeps_what_it_held() ->
     #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} = established(),
+    {'$inet', erx_gen_tcp, SockProc} = Sock,
     Data = pattern(51448),
-    Req = gen_server:send_request(Conn, {recv, 65536, 100}),
+    Req = gen_statem:send_request(SockProc, {recv, 65536, 100}),
     hand(Conn, Port, #{seq => Rcv, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH},
          binary:part(Data, 0, 30000)),
-    ?assertEqual({reply, {error, timeout}}, gen_server:receive_response(Req, ?WAIT)),
+    ?assertEqual({reply, {error, timeout}}, gen_statem:receive_response(Req, ?WAIT)),
     hand(Conn, Port, #{seq => Rcv + 30000, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH},
          binary:part(Data, 30000, 20000)),
     ?assertEqual({ok, binary:part(Data, 0, 40000)}, erx_gen_tcp:recv(Sock, 40000, ?WAIT)),
     hand(Conn, Port, #{seq => Rcv + 50000, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH},
          binary:part(Data, 50000, 1448)),
-    #tcb{rcv_hiwat = Hiwat} = element(2, sys:get_state(Conn)),
-    ?assertEqual(Hiwat - 10000 - 1448, window_acking(Rcv + 51448)),
-    ?assertEqual({ok, binary:part(Data, 40000, 11448)}, erx_gen_tcp:recv(Sock, 0, ?WAIT)).
-
-%% The window of the first segment the connection hands its driver that acknowledges Seq.
-window_acking(Seq) ->
-    case [Win || {#tcp{ack = Ack, win = Win}, _} <- segments(), Ack =:= Seq] of
-        [Win | _] -> Win;
-        [] -> window_acking(Seq)
-    end.
+    _ = sys:get_state(Conn),
+    ?assertEqual({ok, binary:part(Data, 40000, 11448)}, erx_gen_tcp:recv(Sock, 11448, ?WAIT)).
 
 %% Fewer bytes than a recv waits for when the peer's FIN comes: the recv answers
-%% `{error, closed}`, as stock's does (inet_drv's tcp_recv_closed). Stock then discards the
-%% bytes; the connection keeps them for a `recv(_, 0)`, after which it answers closed.
+%% `{error, closed}` and the bytes are discarded, as stock's does (inet_drv's
+%% tcp_recv_closed), and the next recv answers `{error, enotconn}`.
 short_tail_at_the_fin_answers_closed_and_stays() ->
     #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} = established(),
     Data = pattern(3000),
     hand(Conn, Port, #{seq => Rcv, ack => Snd, flags => ?TH_ACK}, Data),
     ?assertEqual({ok, binary:part(Data, 0, 1460)}, erx_gen_tcp:recv(Sock, 1460, ?WAIT)),
     ?assertEqual({ok, binary:part(Data, 1460, 1460)}, erx_gen_tcp:recv(Sock, 1460, ?WAIT)),
-    Req = gen_server:send_request(Conn, {recv, 1460, ?WAIT}),
-    _ = sys:get_state(Conn),
+    {'$inet', erx_gen_tcp, SockProc} = Sock,
+    Req = gen_statem:send_request(SockProc, {recv, 1460, ?WAIT}),
+    _ = sys:get_state(SockProc),
     hand(Conn, Port, #{seq => Rcv + 3000, ack => Snd, flags => ?TH_ACK bor ?TH_FIN}, <<>>),
-    ?assertEqual({reply, {error, closed}}, gen_server:receive_response(Req, ?WAIT)),
-    ?assertEqual({ok, binary:part(Data, 2920, 80)}, erx_gen_tcp:recv(Sock, 0, ?WAIT)),
-    ?assertEqual({error, closed}, erx_gen_tcp:recv(Sock, 0, ?WAIT)).
+    ?assertEqual({reply, {error, closed}}, gen_statem:receive_response(Req, ?WAIT)),
+    ?assertEqual({error, enotconn}, erx_gen_tcp:recv(Sock, 0, ?WAIT)).
 
 %% The peer's side of a transfer: it sends Stream from offset Sent on in full segments of
 %% 1448 bytes, an Ethernet MSS less timestamps, each only when it fits below the right edge
@@ -273,7 +279,7 @@ short_tail_at_the_fin_answers_closed_and_stays() ->
 %% bytes sent and the right edge.
 feed(#{conn := Conn, port := Port, snd := Snd, rcv := Rcv} = C, Req, Shift, Stream, Sent, Edge) ->
     Size = min(1448, byte_size(Stream) - Sent),
-    case gen_server:wait_response(Req, 0) of
+    case gen_statem:wait_response(Req, 0) of
         {reply, Reply} ->
             {Reply, Sent, Edge};
         timeout when Size > 0, Rcv + Sent + Size =< Edge ->
@@ -300,6 +306,22 @@ right_edge(Edge, Shift, Wait) ->
     after Wait -> Edge
     end.
 
+%% The window of the first segment the connection hands its driver that acknowledges Seq,
+%% skipping those before it.
+window_acking(Seq) ->
+    case [Win || {#tcp{ack = Ack, win = Win}, _} <- segments(), Ack =:= Seq] of
+        [Win | _] -> Win;
+        [] -> window_acking(Seq)
+    end.
+
+%% Waits for a segment acknowledging Seq whose window is past Min; earlier updates, sent
+%% before the bytes left the receive buffer, are passed over.
+window_opens_past(Seq, Min) ->
+    case [Win || {#tcp{ack = Ack, win = Win}, _} <- segments(), Ack =:= Seq, Win > Min] of
+        [_ | _] -> ok;
+        [] -> window_opens_past(Seq, Min)
+    end.
+
 pattern(N) ->
     << <<(I rem 251)>> || I <- lists:seq(0, N - 1) >>.
 
@@ -313,7 +335,31 @@ rst_ends_the_connection_and_its_entry() ->
     receive {'DOWN', Ref, process, Conn, normal} -> ok after ?WAIT -> error(still_running) end,
     receive {read, Read} -> ?assertEqual({error, econnreset}, Read) after ?WAIT -> error(Reader) end,
     ?assertEqual([], erx_net_tables:demux(key(Port))),
-    ?assertEqual({error, closed}, erx_gen_tcp:recv(Sock, 0, 0)).
+    %% The recv after the one that met the end, as stock's after tcp_recv_error.
+    ?assertEqual({error, enotconn}, erx_gen_tcp:recv(Sock, 0, 0)).
+
+%% In active mode the owner receives stock's messages, built by the socket process with
+%% the socket term: the data, then at the peer's FIN `{tcp_closed, S}`.
+active_mode_delivers_to_the_owner() ->
+    #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} =
+        established(#tcp_opts{mss = 1460}, [binary, {active, true}]),
+    hand(Conn, Port, #{seq => Rcv, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH}, <<"hello">>),
+    receive {tcp, Sock, Data} -> ?assertEqual(<<"hello">>, Data) after ?WAIT -> error(no_data) end,
+    hand(Conn, Port, #{seq => Rcv + 5, ack => Snd, flags => ?TH_ACK bor ?TH_FIN}, <<>>),
+    receive {tcp_closed, Sock} -> ok after ?WAIT -> error(no_close) end.
+
+%% A request in the envelope of a domain that is not the grantee's, which is `local`
+%% here, names the socket process as its sender but is not its: the connection drops it,
+%% answers no one and counts it, and the socket goes on.
+a_non_grantee_envelope_is_dropped_and_counted() ->
+    #{conn := Conn, sock := Sock} = established(),
+    {'$inet', erx_gen_tcp, SockProc} = Sock,
+    Conn ! {erx_origin, 7, {erx_net, SockProc, {call, 900, peername}}},
+    Conn ! {erx_net, self(), {call, 901, peername}},
+    Counters = element(tuple_size(sys:get_state(Conn)), sys:get_state(Conn)),
+    ?assertEqual(2, maps:get(unknown, Counters, 0)),
+    ?assertEqual({ok, {{10, 0, 2, 2}, ?PEER_PORT}}, erx_gen_tcp:peername(Sock)),
+    receive {erx_net, Conn, Stray} -> error({answered, Stray}) after 0 -> ok end.
 
 %% Our FIN, the peer's ACK and FIN, our ACK: TIME-WAIT, whose 2MSL deadline is armed.
 close_reaches_time_wait_with_its_timer() ->
@@ -332,4 +378,4 @@ connect_is_answered_when_the_connection_dies() ->
     {Req, #tcp{sport = Port}} = start_connect(),
     [{_, Conn, _}] = ets:lookup(erx_net_demux, key(Port)),
     exit(Conn, kill),
-    ?assertEqual({reply, {error, closed}}, gen_server:receive_response(Req, ?WAIT)).
+    ?assertEqual({reply, {error, closed}}, gen_statem:receive_response(Req, ?WAIT)).
