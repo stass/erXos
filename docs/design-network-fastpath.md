@@ -1193,12 +1193,16 @@ Each test is paired with a seeded fault it must catch.
    that takes a run's first frames, and the tail that later posts the
    rest. *Seeded fault:* the tail posted from frame 0, which the byte
    check catches.
-10. **The tap NIF.** Over a `socketpair(AF_UNIX, SOCK_DGRAM)`, which
-    keeps one frame per `read` and `write` as a tap does: a run written
-    whole, a run cut short by a full socket and finished at the
-    `writable` event, and a receive batch of 64 frames with their sums.
-    *Seeded fault:* `EAGAIN` in the middle of a run answered as all
-    taken, which loses frames the test counts.
+10. **The tap NIF.** Over a connected pair of Unix datagram sockets,
+    which keeps one frame per `read` and `write` as a tap does: a run
+    written whole, and a receive batch of 64 frames with their sums. A
+    full datagram socket answers `ENOBUFS` on macOS and FreeBSD, which
+    tests a refused frame. A full device is a FIFO, which answers
+    `EAGAIN` and wakes its writer once read: a run cut short there and
+    finished at the `writable` event, its frames short enough that
+    each write is whole or nothing. *Seeded fault:* `EAGAIN` in the
+    middle of a run answered as all taken, which loses frames the
+    test counts.
 11. **Packet scripts against FreeBSD.** The suite's scripts and erXos's
     own ([Packet scripts against
     FreeBSD](design-network-stack.md#packet-scripts-against-freebsd))

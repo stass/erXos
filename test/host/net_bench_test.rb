@@ -4,6 +4,7 @@
 
 require 'minitest/autorun'
 require 'open3'
+require 'tmpdir'
 require_relative '../../tools/lib/erx/net_bench_p620'
 
 # What the network benchmarks read from a client's output and print (tools/lib/erx/net_bench.rb),
@@ -101,5 +102,31 @@ class NetBenchTest < Minitest::Test
     assert_raises(Erx::NetBenchP620::RemoteError) { remote.command_string(['echo', '!!']) }
     assert_raises(Erx::NetBenchP620::RemoteError) { remote.command_string(['echo', "a\nb"]) }
     assert_raises(ArgumentError) { Erx::NetBenchP620::Remote.new(host: '-oProxyCommand=x') }
+  end
+
+  # The lock's commands, run here through the same command string as on the host (BSD stat on
+  # both), and the decisions read from their answers.
+  def test_the_lock_is_taken_once_named_in_a_refusal_released_only_by_its_holder_and_stale_past_its_deadline
+    lock = Erx::NetBenchP620::Lock
+    remote = Erx::NetBenchP620::Remote.new(host: 'p620.example')
+    run = ->(argv) { Open3.capture2e('sh', '-c', remote.command_string(argv)).first }
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'erx-net-bench.lock')
+      mine = lock.holder_line(host: 'mac 1', pid: 42, started: Time.utc(2026, 11, 9), deadline: 600)
+      theirs = lock.holder_line(host: 'other', pid: 7, started: Time.utc(2026, 11, 9), deadline: 600)
+      assert_equal 'host=mac_1 pid=42 started=2026-11-09T00:00:00Z deadline=600', mine
+      assert_equal :acquired, lock.decide(run.call(lock.acquire_argv(path, mine)), fallback_deadline: 600).state
+      refusal = lock.decide(run.call(lock.acquire_argv(path, theirs)), fallback_deadline: 600)
+      assert_equal [:held, mine], [refusal.state, refusal.holder]
+      run.call(lock.release_argv(path, theirs))
+      assert File.directory?(path), 'only the holder releases the lock'
+      run.call(lock.release_argv(path, mine))
+      refute File.exist?(path)
+    end
+    assert_equal :stale, lock.decide("held age=601 deadline=600\n", fallback_deadline: 9999).state
+    assert_equal :held, lock.decide("held age=600 deadline=600\n", fallback_deadline: 1).state
+    # A holder that died before writing its line is judged by the run's own deadline.
+    assert_equal :stale, lock.decide("held age=31 \n", fallback_deadline: 30).state
+    assert_raises(Erx::NetBenchP620::RemoteError) { lock.decide("sh: mkdir: not found\n", fallback_deadline: 30) }
   end
 end

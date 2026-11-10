@@ -53,11 +53,14 @@ it; git history is the record of completed work.
        default (`docs/design-network-fastpath.md`, "Benchmarks and targets") once they exist.
      * [Medium] `tools/lib/erx/net_bench_p620.rb`: CPU and context switches are of the whole
        client process, BEAM boot and the 1 s ARP settle included, which biases CPU per GiB
-       against erx_net; subtract an idle-run baseline per stack. The tap helper's CPU
-       reaches `time -l` only because FreeBSD `timeout(1)` reaps its descendants.
-     * [Low] `net_bench_p620.rb`: no remote lock against two concurrent runs; lwIP's source
-       trees on p620 are not hash-checked per run; erlc, git and rsync run without a
-       deadline; the peer's start is a fixed wait, not a ready line; the stacks' repeats
+       against erx_net; subtract an idle-run baseline per stack.
+     * [Medium] `net_bench_p620.rb`'s remote lock: a stale lock's takeover is check then
+       act (two runners can both take it); an interrupted run releases it while its remote
+       peer and client live on to their own deadlines; `run_deadline` leaves out the ssh kill
+       grace, the conditions' remote calls and erlc and rsync, so a slow live run can be judged
+       stale. FreeBSD `lockf(1)` held from one ssh for the whole run would remove all three.
+     * [Low] `net_bench_p620.rb`: lwIP's source trees on p620 are not hash-checked per run;
+       erlc, git and rsync run without a deadline; the peer's start is a fixed wait, not a ready line; the stacks' repeats
        run in blocks, not interleaved; the p99 is the nearest rank plus one in both
        clients; bulk send differs between the clients (nodelay and 64 KiB against Nagle and
        32 KiB), as the report's conditions state.
@@ -77,8 +80,11 @@ it; git history is the record of completed work.
        that takes such data is not caught there; the precondition's seeded fault is the
        closed owner instead. Add data sizes past `rcv_space` to the generator.
   4. the tap transport, `erx_tap` and its NIF, replacing `erx_net_tap` and the pipe's
-     `port` end: with packages 2 and 3, about 2 to 2.5 times the baseline, and three fewer
-     copies of a sent byte;
+     `port` end, landed (against package 2's tree, p620, median of 3): bulk send 900 to
+     1,040 Mbit/s, bulk recv 1,850 to 1,837, rr 64 B 15,521 to 16,150 txn/s, 1 KiB 15,132
+     to 17,596, 64 B x16 78,159 to 89,986. Its one-call receive batches exposed a stall in
+     `erx_tcp:settle/3` (a waiting writer moved in after output), fixed with it (raw data:
+     ~/erxos-history net-bench-p620-fast-p4-fix-2026-11-09, commit df857bb);
   5. checksums in the copy
      ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), the
      owner's decision to build it as part of the fast path, since the cut and the merge rest
@@ -975,11 +981,14 @@ it; git history is the record of completed work.
   driver that ran, but not a transport whose `init` fails at a restart (the start fails and OTP retries
   at once, so a persistent failure, such as a `udp` end's vanished local address, ends the interfaces
   supervisor and then the stack), nor an `erx_net_if` or `erx_dhcp4` crashing past its link
-  supervisor's intensity (reachable from a peer only through a crash bug). Pacing every link start in
-  `start_link_sup/1`, not each way a driver ends, would close both.
+  supervisor's intensity (reachable from a peer only through a crash bug). An `erx_tap` restart meets
+  this too: FreeBSD's tap opens once, and an armed descriptor of the ended driver closes only when
+  ERTS's poll set lets go of it, so the new `init` may find the device busy (`ebusy`); not yet seen
+  on p620. Pacing every link start in `start_link_sup/1`, not each way a driver ends, would close all
+  three.
 * [Low] network, `erx_net_sup`: a far end or device that stays dead logs a supervisor report about
-  once a second per interface for as long as it stays dead (a tap helper also its standard-error
-  line); the log, not the stack, should fold repeated reports.
+  once a second per interface for as long as it stays dead; the log, not the stack, should fold
+  repeated reports.
 * [Low] network, `erx_net_driver` over `erx_virtio_net`: a device that stops completing transmits
   ends nothing; its backlog fills, senders are refused and the link stays stuck. FreeBSD's vtnet(4)
   reinitialises the interface when its transmit watchdog (`vtnet_watchdog`) expires after 5 seconds;
@@ -1003,21 +1012,6 @@ it; git history is the record of completed work.
   `inet_dns:decode/1`, and the `dns` fuzz target reaches a formatless type only when a flip lands
   on a type or class field, and it calls `inet_dns:decode/1` where `inet_res` calls `decode_reply/3`.
   Make the test decode through `decode_reply/3` as well, and have the fuzz target call `decode_reply/3` with a matching query.
-* [Medium] network, `erx_net_driver` and `erx_net_pipe`: a pipe whose far end ended (a `process`
-  end's peer, a `port` end's helper) reports the link `down` for good, and nothing starts the driver
-  again, since the driver stays alive. Decide whether a far end's end stops the driver so that its
-  supervisor restarts it, with a backoff for a tap that keeps failing.
-* [Low] network, `erx_net_pipe` (`port` end): a tap helper killed by a signal closes both its pipes at
-  once, and a frame the driver writes meanwhile makes ERTS fail the port with `epipe`, which ends the
-  driver linked to it (its supervisor restarts it). A driver that traps exits and takes the port's
-  exit as link `down` would close the case; decide with the restart question above.
-* [Low] network, `erx_net_tap` on Linux: a tap there may refuse a write shorter than an Ethernet
-  header with `EINVAL` and treat a write while down differently from FreeBSD's 0-byte return; check
-  `tun_get_user` and add Linux's discard cases when Linux hosts run the helper.
-* [Low] network, `test/host/erx_net_tap_test.rb`: the end-of-file-on-the-tap case relies on BSD and
-  XNU resetting a datagram socket pair's peer on close; Linux does not wake the peer, so the case
-  would time out there. Use a stream pair with a framing shim, or a Linux tap, when Linux hosts are
-  tested.
 * [Medium] network, effect layer (E1, `erx_net_if`, `erx_udp_sock`, `erx_net_tables`): the first
   package runs ARP, ICMP echo, DHCP and UDP only. Not yet: `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
   start); `erx_net_loop`; grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a

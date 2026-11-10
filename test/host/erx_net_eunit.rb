@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dependencies'
@@ -16,7 +17,8 @@ require_relative '../../tools/lib/erx/generated'
 # (ErlangApps::FLAGS), and runs EUnit over the test modules. The modules go to
 # erx_net/ebin in a temporary directory, and c_src/Makefile builds erx_net/priv
 # beside it (Erx::ErxNetHost): the library of the portable erx_bytes, so the
-# stack runs on the same C as on erXos, and with tap: true the tap helper too.
+# stack runs on the same C as on erXos, and with tap: true the tap
+# transport's NIF library too.
 # With pkt: true it also
 # compiles msantos/pkt from deps.lock's fetched tree, without -Werror since it
 # is not erXos's code, for erx_net_pkt_oracle; a tree without it fails with
@@ -34,9 +36,9 @@ module ErxNetEunit
 
   # Requires every EUnit case of modules, each test/erlang/MODULE.erl, to pass.
   # extra: further test/erlang module names to compile, such as an oracle.
-  # tap: true builds the tap helper into erx_net's priv/.
+  # tap: true builds the tap transport's NIF library into erx_net's priv/.
   def assert_erx_net_eunit(*modules, extra: [], pkt: false, tap: false)
-    output, status = run_erx_net_eunit(modules, extra: extra, pkt: pkt, tap: tap, fault: {})
+    output, status = run_erx_net_eunit(modules, extra: extra, pkt: pkt, tap: tap, fault: {}, c_fault: {})
     assert status.success?, output
     # EUnit words a run of exactly two tests "2 tests passed.", without "All".
     assert_match(/All \d+ tests passed|^\s*2 tests passed|Test passed/, output)
@@ -44,19 +46,21 @@ module ErxNetEunit
 
   # Requires the EUnit cases of modules to fail once each erx_net module named in
   # fault is compiled with its seeded fault, given as [exact text, faulty text],
-  # and returns EUnit's output for the caller to check which case failed.
-  def refute_erx_net_eunit(*modules, fault:, extra: [])
-    output, status = run_erx_net_eunit(modules, extra: extra, pkt: false, tap: false, fault: fault)
-    refute status.success?, "the seeded fault #{fault.keys.join(', ')} passed:\n#{output}"
+  # and each c_src/ file named in c_fault built with its own, and returns EUnit's
+  # output for the caller to check which case failed.
+  def refute_erx_net_eunit(*modules, fault: {}, c_fault: {}, extra: [], tap: false)
+    output, status = run_erx_net_eunit(modules, extra: extra, pkt: false, tap: tap, fault: fault, c_fault: c_fault)
+    seeds = [*fault.keys, *c_fault.keys].join(', ')
+    refute status.success?, "the seeded fault #{seeds} passed:\n#{output}"
     assert_match(/Failed: [1-9]/, output)
     output
   end
 
   private
 
-  def run_erx_net_eunit(modules, extra:, pkt:, tap:, fault:)
+  def run_erx_net_eunit(modules, extra:, pkt:, tap:, fault:, c_fault:)
     Dir.mktmpdir('erx-net-eunit') do |work|
-      ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'), tap: tap)
+      ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'), tap: tap, c_src: faulty_c_src(work, c_fault))
       includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT), '-I', INCLUDE]
       if pkt
         tree = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')
@@ -85,6 +89,23 @@ module ErxNetEunit
     raise "#{source} lacks the text its seeded fault replaces" unless text.include?(exact)
 
     File.join(work, File.basename(source)).tap { |copy| File.write(copy, text.sub(exact, faulty)) }
+  end
+
+  # c_src/ itself, or with c_fault a copy in work whose named files have their exact
+  # text replaced by the faulty text.
+  def faulty_c_src(work, c_fault)
+    return Erx::ErxNetHost::C_SRC if c_fault.empty?
+
+    copy = File.join(work, 'c_src')
+    FileUtils.cp_r(Erx::ErxNetHost::C_SRC, copy)
+    c_fault.each do |name, (exact, faulty)|
+      file = File.join(copy, name)
+      text = File.read(file)
+      raise "#{name} lacks the text its seeded fault replaces" unless text.include?(exact)
+
+      File.write(file, text.sub(exact, faulty))
+    end
+    copy
   end
 
   def erlc(ebin, sources, includes:, flags: [])

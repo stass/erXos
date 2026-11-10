@@ -6,6 +6,7 @@ require 'fileutils'
 require 'json'
 require 'open3'
 require 'shellwords'
+require 'socket'
 require 'time'
 require 'timeout'
 require_relative 'erlang_apps'
@@ -84,6 +85,55 @@ module Erx
       end
     end
 
+    class LockHeld < RemoteError; end
+
+    # One benchmark at a time on the host, whatever its tap or staged directory: a run holds
+    # the directory LOCK_NAME in the remote home, which mkdir either makes or refuses. Inside
+    # it, the file holder has the holder's one line (local host, pid, start and the run's
+    # own deadline in seconds), which names it in a refusal and lets it, and only it,
+    # remove the lock. A lock whose age, from the directory's modification time on the remote
+    # clock, exceeds its holder's deadline is stale: its holder ended without removing it.
+    # The decisions are pure; Runner#with_lock runs the commands.
+    module Lock
+      Answer = Data.define(:state, :holder, :age)
+
+      ACQUIRED = 'acquired'
+
+      def self.holder_line(host:, pid:, started:, deadline:)
+        "host=#{host.gsub(/[^A-Za-z0-9.-]/, '_')} pid=#{Integer(pid)} started=#{started.utc.iso8601} deadline=#{Integer(deadline)}"
+      end
+
+      # Makes the lock and writes the holder's line, or prints `held age=SECONDS LINE`.
+      def self.acquire_argv(path, line)
+        ['sh', '-c', 'if mkdir "$0" 2>/dev/null; then printf "%s\n" "$1" > "$0/holder" && echo ' + ACQUIRED + '; ' \
+                     'else printf "held age=%s " "$(($(date +%s) - $(stat -f %m "$0")))"; cat "$0/holder" 2>/dev/null; echo; fi',
+         path, line]
+      end
+
+      # Removes the lock only while its holder line is still line.
+      def self.release_argv(path, line)
+        ['sh', '-c', 'if test "$(cat "$0/holder" 2>/dev/null)" = "$1"; then rm -rf "$0"; fi', path, line]
+      end
+
+      def self.takeover_argv(path) = ['rm', '-rf', path]
+
+      # The answer of acquire_argv: acquired, or held by holder for age seconds, stale once
+      # the age passes the holder's deadline (fallback_deadline when its line has none).
+      def self.decide(output, fallback_deadline:)
+        case output.strip
+        when ACQUIRED
+          Answer.new(state: :acquired, holder: nil, age: 0)
+        when /\Aheld age=(\d+) ?(.*)\z/m
+          age = Integer(Regexp.last_match(1))
+          holder = Regexp.last_match(2).strip
+          deadline = holder[/\bdeadline=(\d+)\b/, 1]&.then { |text| Integer(text) } || fallback_deadline
+          Answer.new(state: age > deadline ? :stale : :held, holder: holder, age: age)
+        else
+          raise RemoteError, "unreadable answer from the lock: #{LineEscape.escape(output.byteslice(0, 200))}"
+        end
+      end
+    end
+
     Setup = Data.define(:host, :jail, :tap, :peer_ip, :remote_dir, :lwip_src, :runs)
 
     DEFAULTS = Setup.new(host: 'p620.seagull-luma.ts.net', jail: 'erxpeer1', tap: '/dev/tap1', peer_ip: '10.77.0.11',
@@ -93,6 +143,7 @@ module Erx
     FIRST_PORT = 5300
     BULK_SECONDS = 150
     PEER_GRACE = 30
+    CLIENT_GRACE = 20
     MARKER = '.erx-net-bench'
     PEER_SETTLE = { 'send' => 1.5, 'recv' => 1.5, 'rr' => 5 }.freeze
 
@@ -113,10 +164,11 @@ module Erx
 
       def call(only: nil, require_fast_path: false)
         FileUtils.mkdir_p(File.join(@output, 'logs'))
-        stage
-        build
-        conditions = gather_conditions(require_fast_path: require_fast_path)
-        runs, failures = measure(only: only, require_fast_path: require_fast_path)
+        conditions, runs, failures = with_lock(deadline: run_deadline(only)) do
+          stage
+          build
+          [gather_conditions(require_fast_path: require_fast_path), *measure(only: only, require_fast_path: require_fast_path)]
+        end
         medians = runs.group_by { |run| run.workload.name }.transform_values do |per_workload|
           per_workload.group_by(&:stack).transform_values { |per_stack| NetBench.median(per_stack) }
         end
@@ -136,6 +188,42 @@ module Erx
         end
         raise ArgumentError, "remote_dir may not hold . or .. components: #{setup.remote_dir}" if setup.remote_dir.split('/').any? { |part| part.match?(/\A\.*\z/) }
         raise ArgumentError, 'runs must be odd, 1 to 9' unless setup.runs.odd? && setup.runs.between?(1, 9)
+      end
+
+      LOCK_NAME = 'erx-net-bench.lock'
+      STAGE_SECONDS = 120
+      BUILD_SECONDS = 300
+
+      # Holds the host's lock (Lock) around the block and removes it on every way out of it;
+      # a holder killed outright leaves a lock that goes stale at its deadline.
+      def with_lock(deadline:)
+        path = File.join(home, LOCK_NAME)
+        line = Lock.holder_line(host: Socket.gethostname, pid: Process.pid, started: @clock.now, deadline: deadline)
+        take_lock(path, line, deadline: deadline)
+        begin
+          yield
+        ensure
+          @remote.capture(Lock.release_argv(path, line), seconds: 30)
+        end
+      end
+
+      def take_lock(path, line, deadline:)
+        answer = Lock.decide(@remote.capture!(Lock.acquire_argv(path, line), seconds: 30), fallback_deadline: deadline)
+        if answer.state == :stale
+          warn "net-p620: taking over a stale lock (#{answer.age} s old) of #{LineEscape.escape(answer.holder)}"
+          @remote.capture!(Lock.takeover_argv(path), seconds: 30)
+          answer = Lock.decide(@remote.capture!(Lock.acquire_argv(path, line), seconds: 30), fallback_deadline: deadline)
+        end
+        return if answer.state == :acquired
+
+        raise LockHeld, "#{@setup.host} is running another benchmark (#{path}, #{answer.age} s old): #{LineEscape.escape(answer.holder)}"
+      end
+
+      # The longest this run can take: staging, the two builds and every cell's peer and client.
+      def run_deadline(only)
+        cells = NetBench::WORKLOADS.select { |w| only.nil? || only.include?(w.name) }
+        per_run = cells.sum { |w| client_deadline(w) + PEER_SETTLE.fetch(w.mode).ceil + PEER_GRACE }
+        STAGE_SECONDS + 2 * BUILD_SECONDS + per_run * STACKS.length * @setup.runs
       end
 
       def home = @home ||= @remote.capture!(%w[printenv HOME], seconds: 30).strip
@@ -169,9 +257,9 @@ module Erx
       end
 
       def build
-        @remote.capture!(['make', '-C', remote_path('erx_net/c_src'), "ERL=#{erl}", 'nif', 'tap'], seconds: 300)
+        @remote.capture!(['make', '-C', remote_path('erx_net/c_src'), "ERL=#{erl}", 'nif', 'tap'], seconds: BUILD_SECONDS)
         @remote.capture!(['gmake', '-C', remote_path('lwip'), "LWIP=#{lwip_tree('lwip-2.2.1')}",
-                          "CONTRIB=#{lwip_tree('contrib-2.1.0')}"], seconds: 300)
+                          "CONTRIB=#{lwip_tree('contrib-2.1.0')}"], seconds: BUILD_SECONDS)
       end
 
       def erl = File.join(home, 'bin/erl')
@@ -228,7 +316,7 @@ module Erx
         log = File.join(@output, 'logs', "#{stack}-#{workload.name}-#{index + 1}")
         peer = @remote.spawn(peer_argv(workload, port), seconds: peer_seconds(workload), log: "#{log}.peer")
         sleep(PEER_SETTLE.fetch(workload.mode))
-        output, status = @remote.capture(client_argv(stack, workload, port), seconds: client_seconds(workload))
+        output, status = @remote.capture(client_argv(stack, workload, port), seconds: client_deadline(workload))
         File.write("#{log}.client", output)
         finish_peer(peer, abandon: !status.success? || workload.mode == 'rr')
         peer = nil
@@ -255,6 +343,8 @@ module Erx
 
       def peer_seconds(workload) = workload.mode == 'rr' ? rr_seconds(workload) + 30 : BULK_SECONDS + 20
       def client_seconds(workload) = workload.mode == 'rr' ? rr_seconds(workload) + 20 : BULK_SECONDS
+      # ssh outlives the remote deadline, so a client that times out still reports its output.
+      def client_deadline(workload) = client_seconds(workload) + CLIENT_GRACE
       def rr_seconds(workload) = Integer(workload.arguments.last)
 
       # A bulk peer ends with the client's end of stream. A request-reply echo server runs on a

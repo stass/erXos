@@ -86,9 +86,10 @@ translates the FreeBSD code for it, then runs output, as `tcp_do_segment` ends b
   when it was dropped after receiving a SYN (`tcp_drop`, sys/netinet/tcp_subr.c), so that output is the
   RST; its owner is told how it ended, every waiting caller is answered with the error, and
   the last action is `finish`;
-* otherwise output runs, a `connect` caller is answered once the connection is established,
-  and a waiting `send` moves the rest of its bytes into the buffer whenever its free space
-  reaches the low watermark (`sowriteable`) and is answered once they are all in.
+* otherwise a waiting `send` first moves the rest of its bytes into the buffer whenever its
+  free space reaches the low watermark (`sowriteable`), and is answered once they are all in,
+  or with EPIPE once the send side has closed; then output runs, sending what moved in, and
+  a `connect` caller is answered once the connection is established.
 
 Because those answers follow from the state after every step, no stage has to remember to
 give them. The event modules are erx_tcp_input (segments, with erx_tcp_timewait for those
@@ -205,10 +206,13 @@ settle(#tcb{ended = true} = Tcb0, Actions, Ctx) ->
     {Tcb#tcb{connect_waiter = none, send_waiter = none, deadlines = #deadlines{},
              send_timer = none},
      Actions ++ transmit(Out) ++ [{reply, W, {error, Reason}} || W <- Waiters] ++ Told ++ [finish]};
+%% A waiting writer moves into the room the event made before output runs, so its bytes
+%% leave in this step: an ACK that frees the room may be the last event for a while, as when
+%% one batch carries every ACK of what was in flight.
 settle(Tcb0, Actions, Ctx) ->
-    {Tcb1, Out} = erx_tcp_output:output(Tcb0, Ctx),
-    {Tcb2, Connected} = answer_connect(Tcb1),
-    {Tcb, Sent} = answer_send(Tcb2),
+    {Tcb1, Sent} = answer_send(Tcb0),
+    {Tcb2, Out} = erx_tcp_output:output(Tcb1, Ctx),
+    {Tcb, Connected} = answer_connect(Tcb2),
     {Tcb, Actions ++ transmit(Out) ++ Connected ++ Sent}.
 
 transmit([]) -> [];
@@ -223,6 +227,9 @@ answer_connect(#tcb{connect_waiter = From} = Tcb) ->
 
 answer_send(#tcb{send_waiter = none} = Tcb) ->
     {Tcb, []};
+%% sosend checks SBS_CANTSENDMORE again after its sbwait: no byte follows the FIN.
+answer_send(#tcb{send_waiter = {From, _}, snd_closed = true} = Tcb) ->
+    {Tcb#tcb{send_waiter = none}, [{reply, From, {error, epipe}}]};
 answer_send(#tcb{send_waiter = {From, Rest}, sndbuf = Buf, snd_hiwat = Hiwat,
                   snd_lowat = Lowat} = Tcb) ->
     Space = max(0, Hiwat - erx_tcp_sndbuf:size(Buf)),

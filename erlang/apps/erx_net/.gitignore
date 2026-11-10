@@ -1,2 +1,2 @@
-# The tap helper, built by make -C c_src.
+# The native libraries, built by make -C c_src.
 /priv/

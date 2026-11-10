@@ -142,6 +142,39 @@ send_test() ->
     ?assertEqual({[{reply, ?FROM, ok}], none, 51},
                  {Answered, T4#tcb.send_waiter, erx_tcp_sndbuf:size(T4#tcb.sndbuf)}).
 
+%% An ACK that empties the send buffer moves the waiting writer's bytes in, and the same step
+%% sends them: nothing else may follow to send them, since one batch can carry every ACK of
+%% what was in flight (the tap transport reads a burst's ACKs in one call).
+an_ack_that_frees_room_sends_the_waiting_writers_bytes_test() ->
+    Open = (in(established))#tcb{snd_wnd = 65535, max_sndwnd = 65535},
+    T0 = Open#tcb{ccv = (Open#tcb.ccv)#ccv{cwnd = 65535}},
+    {T1, First} = step({user, {send, ?FROM, binary:copy(<<"a">>, 100)}}, T0, ?T0),
+    ?assertEqual({[1001], 100}, {seqs(First), payload_bytes(First)}),
+    {T2, []} = step({user, {send, ?FROM, binary:copy(<<"b">>, 100)}}, T1, ?T0),
+    Ack = {#tcp{sport = 80, dport = 4000, seq = 5001, ack = 1101, flags = ?TH_ACK, win = 65535,
+                urp = 0, opts = #tcp_opts{}}, <<>>, 0, unicast},
+    {T3, Second} = step({segments, [Ack]}, T2, ?T0 + ?S(1)),
+    ?assertEqual({[1101], 100, true, none},
+                 {seqs(Second), payload_bytes(Second), lists:member({reply, ?FROM, ok}, Second),
+                  T3#tcb.send_waiter}).
+
+%% A writer still waiting when the send side closes is answered EPIPE, as sosend answers
+%% after its sbwait, and none of its bytes enter the buffer behind the FIN.
+a_writer_waiting_when_the_send_side_closes_gets_epipe_test() ->
+    Open = (in(established))#tcb{snd_wnd = 65535, max_sndwnd = 65535},
+    T0 = Open#tcb{ccv = (Open#tcb.ccv)#ccv{cwnd = 65535}},
+    {T1, _} = step({user, {send, ?FROM, binary:copy(<<"a">>, 100)}}, T0, ?T0),
+    {T2, []} = step({user, {send, ?FROM, binary:copy(<<"b">>, 100)}}, T1, ?T0),
+    {T3, Closed} = step({user, {shutdown, other, write}}, T2, ?T0),
+    ?assertEqual({true, none, 100},
+                 {lists:member({reply, ?FROM, {error, epipe}}, Closed), T3#tcb.send_waiter,
+                  erx_tcp_sndbuf:size(T3#tcb.sndbuf)}).
+
+seqs(Actions) -> [Seq || {transmit, Segs} <- Actions, {#tcp{seq = Seq}, _, _} <- Segs].
+
+payload_bytes(Actions) ->
+    lists:sum([iolist_size(P) || {transmit, Segs} <- Actions, {_, _, P} <- Segs]).
+
 send_after_shutdown_test() ->
     {T, [{reply, _, ok}, {transmit, _}]} = step({user, {shutdown, ?FROM, write}}, in(close_wait), ?T0),
     ?assertEqual(last_ack, T#tcb.state),

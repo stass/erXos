@@ -350,7 +350,7 @@ Error in process <0.150.0> with exit value:
   a DHCP lease, answers ARP and ping, echoes UDP, and opens TCP
   connections through `gen_tcp`'s calls, echoing 1 MiB each way off a
   host server. On FreeBSD it also runs over a tap device through its tap
-  helper, where a vnet jail resolves and pings it. On erXos under QEMU it
+  transport, where a vnet jail resolves and pings it. On erXos under QEMU it
   runs in the system domain over its virtio-net driver, takes a DHCP
   lease and answers ARP and ping, the command shell's `ifconfig` and
   `ping` show its interface and ping slirp's gateway in FreeBSD's layout,

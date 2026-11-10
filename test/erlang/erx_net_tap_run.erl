@@ -1,8 +1,8 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The stack on a host's own stock OTP joined to a tap device through the pipe's `port`
-%% end (docs/design-network-stack.md, "The tap helper", "FreeBSD's jails on p620"). One
+%% The stack on a host's own stock OTP joined to a tap device through the tap
+%% transport (docs/design-network-stack.md, "The tap transport", "FreeBSD's jails on p620"). One
 %% interface takes a static address on the tap's network, resolves a peer by ARP, and then
 %% stays up for a while to answer the peer's ARP and ping, printing its counters at the
 %% end. Each step prints one line; the node halts 0 when the stack resolved the peer.
@@ -21,7 +21,7 @@ main([Device, Addr, Peer, Seconds]) ->
     {ok, PeerIp} = inet:parse_ipv4strict_address(Peer),
     {ok, _} = erx_net_sup:start_link(#{interfaces => [#{name => en0,
         ip4 => #{addr => ip4(Own), plen => 24},
-        transport => {erx_net_pipe, #{far => {port, Device}, lladdr => ?LLADDR}}}]}),
+        transport => {erx_tap, #{device => Device, lladdr => ?LLADDR}}}]}),
     {ok, #{pid := If}} = erx_net_tables:interface(en0),
     io:format("up ~s on ~s as ~s~n", [Addr, Device, mac(?LLADDR)]),
     Arp = arp(If, PeerIp),

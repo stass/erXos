@@ -12,7 +12,8 @@ module Erx
   # to erx_net/ebin under a work directory, and c_src/Makefile builds its native parts
   # into erx_net/priv beside it, where code:priv_dir(erx_net) finds them. The portable
   # erx_bytes loads priv/erx_bytes_nif.so and fails to load without it, so every host
-  # run of the stack builds the library; tap: true adds the tap helper erx_net_tap.
+  # run of the stack builds the library; tap: true adds the tap transport's NIF
+  # library, priv/erx_tap_nif.so.
   module ErxNetHost
     ROOT = File.expand_path('../../..', __dir__)
     C_SRC = File.join(ROOT, 'erlang/apps/erx_net/c_src')

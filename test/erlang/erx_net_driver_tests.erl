@@ -182,8 +182,8 @@ process_end_ends_the_driver_after_its_hold() ->
     end,
     ?assert(erlang:monotonic_time(millisecond) - Started >= 1000).
 
-%% An exit signal from what the driver is linked to, a tap helper's port failing with
-%% epipe, ends it the same way, after its hold, and not at once.
+%% An exit signal from what the driver is linked to, a port or socket of its medium
+%% failing, ends it the same way, after its hold, and not at once.
 linked_exit_ends_the_driver_after_its_hold() ->
     Started = erlang:monotonic_time(millisecond),
     Driver = stub(0, 4),
