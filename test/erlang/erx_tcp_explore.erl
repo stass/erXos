@@ -1007,15 +1007,15 @@ header_prediction_agrees(#{input := {segment, In},
 header_prediction_agrees(_) ->
     ok.
 
-%% Whether header prediction jumps past the general stages: the stages up to it, with its
-%% jump turned into a marker.
+%% Whether header prediction takes the segment instead of passing it on to the general
+%% stages: the stages up to it, with its answer turned into a marker.
 fast_path_taken(Stages, Segment, Pre, Ctx) ->
     {Before, [{header_prediction, Predict} | _]} =
         lists:splitwith(fun({Name, _}) -> Name =/= header_prediction end, Stages),
     Marked = fun(Seg, Tcb, C) ->
                      case Predict(Seg, Tcb, C) of
-                         {goto, _, _, _, _} -> {done, Tcb, [fast_path]};
-                         _ -> {done, Tcb, []}
+                         {continue, _, _} -> {done, Tcb, []};
+                         _ -> {done, Tcb, [fast_path]}
                      end
              end,
     {_, Actions} = erx_tcp_input:run(Before ++ [{header_prediction, Marked}], Segment, Pre, Ctx),

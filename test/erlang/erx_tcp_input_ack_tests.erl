@@ -308,8 +308,8 @@ header_prediction_takes_the_common_cases_test_() ->
              {continue, T2, S2} = Ts(S1, T1, ctx()),
              element(1, Fun(S2, T2, ctx()))
          end,
-    [?_assertEqual(goto, Hp(wire(?RCV, ?ISS + 501, ?ACK), est(1000, 0))),
-     ?_assertEqual(goto, Hp(wire(?RCV, ?ISS + 1, ?ACK, <<"abc">>), est(1000, 0))),
+    [?_assertEqual(done, Hp(wire(?RCV, ?ISS + 501, ?ACK), est(1000, 0))),
+     ?_assertEqual(done, Hp(wire(?RCV, ?ISS + 1, ?ACK, <<"abc">>), est(1000, 0))),
      %% A changed window, an ACK at snd_una without data, and data with a new ACK go the
      %% general way.
      ?_assertEqual(continue, Hp(wire(?RCV, ?ISS + 501, ?ACK, <<>>, #tcp_opts{}, 9000, 0),
@@ -332,19 +332,18 @@ header_prediction_agrees_with_the_general_stages_test() ->
     ?assertEqual([], [{Wire, Diff} || {_, Wire, Diff} <- lists:sublist(Mismatches, 3)]),
     ?assertMatch(N when N > 300, Taken).
 
-%% Lift and timestamps, then header prediction and the stages from `ack`, against every
-%% stage after header prediction.
+%% Lift and timestamps, then header prediction finishing its case, against every stage after
+%% header prediction.
 compare(Tcb, Wire) ->
     Stages = erx_tcp_input:stages(),
     [{lift, Lift}, {timestamps, Ts}, {header_prediction, Hp} | General] = Stages,
-    FromAck = lists:dropwhile(fun({Name, _}) -> Name =/= ack end, General),
     Ctx = ctx(),
     case Lift(Wire, Tcb, Ctx) of
         {continue, T1, S1} ->
             {continue, T2, S2} = Ts(S1, T1, Ctx),
             case Hp(S2, T2, Ctx) of
-                {goto, ack, T3, S3, []} ->
-                    Fast = erx_tcp_input:run(FromAck, S3, T3, Ctx),
+                {done, T3, Actions} ->
+                    Fast = {T3, Actions},
                     case erx_tcp_input:run(General, S2, T2, Ctx) of
                         Fast -> same;
                         Slow -> diff(Fast, Slow)

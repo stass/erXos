@@ -43,12 +43,15 @@ wire, are `lift`, `timestamps`, `header_prediction`, `syn_sent`, `check_rst`, `c
 
 `header_prediction` is FreeBSD's fast path: for its two common cases, a pure ACK of new data
 and pure in-order data, it decides that the checks from `syn_sent` to `check_ack` would pass
-the segment, applies what they would set, and jumps to `ack`, so both cases take the general
-stages from there. FreeBSD's fast path repeats their bookkeeping in a shorter form, which
-leaves different state behind (`snd_wl1` and `rcv_up` after a pure ACK, `t_dupacks`, the
-spurious-timeout rule); sharing the stages gives one translation of each effect, and a
-property test checks that the general stages give the same result for every segment the
-fast path takes.
+the segment, applies what they would set, and finishes the case itself (pure_ack/3 and
+in_order/3), doing what the stages from `ack` on do for it, with fewer copies of the control
+block and without the stages that have nothing to do. FreeBSD's fast path does less than its
+general stages, which leaves different state behind (`snd_wl1` and `rcv_up` after a pure
+ACK, `t_dupacks`, the spurious-timeout rule); the finished cases do what the general stages
+do instead (docs/design-network-fastpath.md, "Header prediction finishes its cases"). So
+each effect of the two cases has two implementations and one meaning: a property test
+requires the general stages' control block and actions for every segment the fast path
+takes, and the explorer checks the same in every state it reaches.
 
 A stage ends the connection with erx_tcp_user:drop/2 (`tcp_drop`) or close/1 (`tcp_close`).
 The segments of one event are processed in order. Once one ends the connection, the rest
@@ -254,8 +257,10 @@ tolerate_missing_ts() -> true.
 %% recovery, without SACK blocks or a scoreboard (:1771-1775), or data that acknowledges
 %% nothing new and fits the receive buffer (:1863-1864). Recovery is judged after the
 %% segment's ECN, which FreeBSD reads before the fast path. A segment taken here has what
-%% `syn_sent`, `trim` and `check_ack` would set (the receive window, ts_recent, ECN) and jumps
-%% to `ack` (see the module documentation).
+%% `syn_sent`, `trim` and `check_ack` would set (the receive window, ts_recent, ECN), and its
+%% case is finished here (see the module documentation). A pure ACK also acknowledges no more
+%% than the send buffer holds, which with no FIN sent is everything outstanding, so no FIN is
+%% acknowledged on the fast path.
 header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, data = Data,
                        ts = SegTs, sacks = Sacks} = Seg, Tcb0, Ctx) ->
     #tcb{state = State, rcv_nxt = RcvNxt, snd_una = Una, snd_nxt = SndNxt, snd_max = SndMax,
@@ -274,14 +279,63 @@ header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, data = Da
             #ccv{fast_recovery = Fast, cong_recovery = Cong} = Tcb#tcb.ccv,
             PureAck = Data =:= <<>> andalso Ack > Una andalso Ack =< SndMax
                 andalso not Fast andalso not Cong andalso Sacks =:= []
-                andalso not erx_tcp_sendlog:has_holes(Log),
+                andalso not erx_tcp_sendlog:has_holes(Log)
+                andalso Ack =< erx_tcp_sendlog:snd_max(Log)
+                andalso Ack - Una =< erx_tcp_sndbuf:size(Tcb0#tcb.sndbuf),
             InOrder = Data =/= <<>> andalso Ack =:= Una
                 andalso byte_size(Data) =< erx_tcp:rcv_space(Tcb0),
-            case PureAck orelse InOrder of
-                true -> {goto, ack, Tcb, Seg, []};
-                false -> {continue, Tcb0, Seg}
+            if
+                PureAck -> pure_ack(Seg, Tcb, Ctx);
+                InOrder -> in_order(Seg, Tcb, Ctx);
+                true -> {continue, Tcb0, Seg}
             end
     end.
+
+%% The pure ACK of new data, finished: what `ack`, `process_ack` and `step6` do for it (the
+%% loss module's acknowledgement, a spurious timeout undone, the RTT sample, the
+%% retransmission timer, cc_ack_received, the send buffer's drop, snd_una, the end of
+%% recovery, the window and rcv_up), with the acknowledgement's own fields set in one update.
+%% `data` and `fin` have nothing to do for a segment without data or FIN. The loss module
+%% stays the judge of every acknowledgement: what it ends (`drop`) ends here too.
+pure_ack(#seg{ack = Ack} = Seg, Tcb0, Ctx) ->
+    case sent_acknowledged(Seg, Tcb0, Ctx, []) of
+        {continue, #tcb{sendlog = Log} = Tcb1, _, []} ->
+            #tcb{snd_una = Una} = Tcb2 =
+                rexmt_after_ack(Ack, rtt(Seg, spurious_rto(Seg, Tcb1#tcb{sendlog = ack_log(Log, Ack)},
+                                                           Ctx), Ctx), Ctx),
+            Acked = Ack - Una,
+            #tcb{sndbuf = Buf, snd_wnd = SndWnd, snd_nxt = Nxt, ccv = Ccv} = Tcb3 =
+                cc_ack(Acked, Ack, Tcb2, Ctx),
+            Tcb4 = Tcb3#tcb{sndbuf = erx_tcp_sndbuf:drop(Buf, Acked), snd_wnd = max(0, SndWnd - Acked),
+                            snd_una = Ack, snd_nxt = max(Nxt, Ack)},
+            Tcb5 = case Ccv#ccv.fast_recovery orelse Ccv#ccv.cong_recovery of
+                       true -> end_recovery(Ack, Tcb4, Ctx);
+                       false -> Tcb4#tcb{snd_recover = max(Tcb4#tcb.snd_recover, Ack)}
+                   end,
+            {done, window(Seg, Tcb5), []};
+        Other ->
+            Other
+    end.
+
+%% In-order data that acknowledges nothing new, finished: the loss module's acknowledgement
+%% (`ack`), the window and rcv_up (`step6`), and `data`, which for a segment at rcv_nxt with
+%% nothing queued takes the delayed ACK or the ACK now, rcv_nxt, the delivery and the SACK
+%% blocks' record of what arrived, called directly. `fin` has nothing to do for a segment
+%% without FIN.
+in_order(Seg, Tcb0, Ctx) ->
+    case sent_acknowledged(Seg, Tcb0, Ctx, []) of
+        {goto, step6, Tcb1, _, []} ->
+            {continue, Tcb2, _, Actions} = data(Seg, window(Seg, Tcb1), Ctx),
+            {done, Tcb2, Actions};
+        Other ->
+            Other
+    end.
+
+%% step6 itself, for a segment with ACK and without URG, which it always passes on: the
+%% window when it is newer, and rcv_up pulled along to rcv_nxt.
+window(Seg, Tcb0) ->
+    {continue, Tcb, _} = step6(Seg, Tcb0, none),
+    Tcb.
 
 not_older({Val, _}, #ts{recent = Recent}) -> Val >= Recent;
 not_older(_, _) -> true.

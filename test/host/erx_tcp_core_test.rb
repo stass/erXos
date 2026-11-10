@@ -28,6 +28,14 @@ class ErxTcpCoreTest < Minitest::Test
   # Header prediction takes no segment older than ts_recent (PAWS).
   HP_PAWS = 'andalso not_older(SegTs, Ts) andalso not Closed'
   HP_NO_PAWS = 'andalso (not_older(SegTs, Ts) orelse true) andalso not Closed'
+  # The finished pure ACK restarts the retransmission timer as process_ack does
+  # (docs/design-network-fastpath.md, Verification, test 6).
+  HP_REXMT = 'rexmt_after_ack(Ack, rtt(Seg, spurious_rto(Seg, Tcb1#tcb{sendlog'
+  HP_NO_REXMT = '(fun(_, T, _) -> T end)(Ack, rtt(Seg, spurious_rto(Seg, Tcb1#tcb{sendlog'
+  # Header prediction takes nothing once the owner has closed (TF_CLOSED), whose data the
+  # general stages answer with a RST.
+  HP_OPEN = 'andalso not Closed,'
+  HP_CLOSED_TOO = 'andalso (not Closed orelse true),'
   # An acknowledgement of what was never sent is dropped before the loss module sees it.
   ACK_TOO_MUCH = 'case Ack > erx_tcp_sendlog:snd_max(Log) of'
   ACK_ANY = 'case Ack > erx_tcp_sendlog:snd_max(Log) + (1 bsl 32) of'
@@ -72,6 +80,18 @@ class ErxTcpCoreTest < Minitest::Test
   def test_header_prediction_without_paws_is_caught
     output = refute_erx_net_eunit(:erx_tcp_input_ack_tests,
                                   fault: { 'erx_tcp_input' => [HP_PAWS, HP_NO_PAWS] })
+    assert_match(/agrees_with_the_general_stages/, output)
+  end
+
+  def test_a_fast_pure_ack_without_the_retransmission_timer_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_input_ack_tests,
+                                  fault: { 'erx_tcp_input' => [HP_REXMT, HP_NO_REXMT] })
+    assert_match(/agrees_with_the_general_stages/, output)
+  end
+
+  def test_header_prediction_after_the_owner_closed_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_input_ack_tests,
+                                  fault: { 'erx_tcp_input' => [HP_OPEN, HP_CLOSED_TOO] })
     assert_match(/agrees_with_the_general_stages/, output)
   end
 

@@ -70,6 +70,12 @@ it; git history is the record of completed work.
      cases, the header template, the send log of runs with its extension rule: the
      connection's time per segment from 12.3 us to 3 to 4 us, and throughput about 1.3 to
      1.5 times until the driver binds;
+     * the send log of runs and header prediction's finished cases are in the tree; the
+       header template and the `#tcb{}`/`#tcb_conf{}` split remain.
+     * [Medium] `erx_tcp_input_ack_tests` (header prediction's property): its generator
+       never sends in-order data larger than the receive space, so a header prediction
+       that takes such data is not caught there; the precondition's seeded fault is the
+       closed owner instead. Add data sizes past `rcv_space` to the generator.
   4. the tap transport, `erx_tap` and its NIF, replacing `erx_net_tap` and the pipe's
      `port` end: with packages 2 and 3, about 2 to 2.5 times the baseline, and three fewer
      copies of a sent byte;
