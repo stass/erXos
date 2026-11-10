@@ -517,17 +517,20 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'catch open_port({fd, 0, 1}, []).' => /badarg/,
       'catch open_port({spawn_driver, "tcp_inet"}, []).' => /badarg/,
       '[code:which(M) || M <- [prim_socket, prim_net, socket_registry]].' => /^\[non_existing,non_existing,non_existing\]$/,
-      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, auth]].' => /^\[undefined,undefined,undefined,undefined,undefined\]$/,
-      # rex, global and global_group start without a carrier, as on a stock node that is
-      # not distributed, so a name registered globally answers on this node alone.
+      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, auth]].' => /^\[undefined,undefined,undefined,<\d+\.\d+\.\d+>,<\d+\.\d+\.\d+>\]$/,
+      # The system domain is a named node, so net_kernel (and auth, which it starts) run,
+      # as in every domain; rex, global and global_group run on it, and a name registered
+      # globally answers on this node alone, no other domain being connected.
       '[is_pid(whereis(N)) || N <- [rex, global_name_server, global_group]].' => /^\[true,true,true\]$/,
       'global:register_name(erx_local, self()).' => /^yes$/,
       'global:whereis_name(erx_local) =:= self().' => /^true$/,
       '[M || {M, _} <- code:all_loaded(), lists:member(M, [socket, prim_socket, prim_net, socket_registry, gen_tcp, inet_tcp, heart, erl_epmd])].' => /^\[heart\]$/,
       'inet:getaddr("localhost", inet).' => /^\{ok,\{127,0,0,1\}\}$/,
       'inet:gethostbyname("no.such.name").' => /^\{error,nxdomain\}$/,
-      'gen_tcp:listen(0, []).' => /^\{error,eprotonosupport\}$/,
-      'gen_udp:open(0, []).' => /^\{error,eprotonosupport\}$/,
+      # ERTS has no socket driver: gen_tcp and gen_udp reach the network grant through the erx
+      # backend, the default. It opens datagram sockets and does not offer gen_tcp:listen.
+      'gen_tcp:listen(0, []).' => /^\{error,enotsup\}$/,
+      'gen_udp:open(0, []).' => /^\{ok,\{'\$inet',erx_gen_udp,<\d+\.\d+\.\d+>\}\}$/,
       'application:which_applications().' => /kernel/
     }
     Dir.mktmpdir('erx-hosted-home-') do |home|

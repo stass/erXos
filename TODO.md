@@ -404,11 +404,9 @@ it; git history is the record of completed work.
   as `ENOSYS` tracing shows it;
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
-* [Low] `otp/erts/preloaded/src/prim_inet.erl`: `gen_tcp:listen` answers `{error, eprotonosupport}`, stock's answer for a
-  missing inet driver, where `docs/design-runtime.md` says `{error, eacces}` without a grant. The design is the target and
-  stays; the answer changes with the network service's grant check.
-  stays; the answer changes when `erx_gen_tcp`, the default `inet_backend` of `docs/design-network-stack.md`, answers
-  `eacces` without a grant, or with a preloaded rebuild.
+* [Low] `erlang/apps/erx_net_client/src/erx_gen_tcp.erl`: `listen/2` answers `{error, enotsup}`, where
+  `docs/design-runtime.md` says `{error, eacces}` without a grant. The answer changes when the network service offers
+  listening sockets and checks the grant.
 * [Low] `otp/erts/emulator/test/binary_SUITE.erl`: `make_port/0` is `hd(erlang:ports())`, and `ports()` is empty by design,
   so its term-ordering cases fail with `hd([])`. Opening `{spawn_driver, "ram_file_drv"}` there gives a real port (checked on
   hosted), and is the route when the suite is next run for its results.
@@ -2231,8 +2229,6 @@ it; git history is the record of completed work.
 * [Low] runtime, `liberx/backend/core/boot_manifest.c`: the printable rule for `system_args` lives in the reader, so `Manifest.admit` packs a manifest that then fails at boot, and `domains[].args`, the same string class, is not covered. The rule belongs in the `args` class of the ABI generator.
 * [Low] runtime, `tools/fuzz/release_fuzz.c`: does not call `erx_release_check` or compare `erx_release_fs_lookup`'s index with the entry's, and has no seed at the longest path; its `fix_index` is a copy of `pack_fuzz.c`'s.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: the `Ctrl-G` menu (`erx_console_menu`) lists, connects and detaches; interrupting and killing a session, lock and log out (`docs/design-live.md`, "Job control") come with logins (M10), and `erx:console_size/2` is not built.
-* [Low] tests, `test/integration/runtime_hosted_smoke_test.rb` (`make check-runtime-hosted`), `test_init_runs_from_the_archive_alone`: expects `whereis/1` of `net_kernel` and `auth` to be `undefined`, but the hosted system domain is a named node and runs both, so `make check-runtime-hosted` stops at this test before it reaches `runtime_console_test.rb`. Decide which of the two the named node should run and change the expectation or the node.
-* [Low] tests, `test/integration/runtime_console_test.rb`, `KILL_FIRST_SHELL` (`test_a_crash_of_the_first_shell_starts_a_fresh_one`): takes the first shell's group as `element(3, sys:get_state(erx_console))`, which in the console's state record (`role`, `name`, `first_shell`, ...) is the atom `erx_console`, so `process_info/2` fails with `badarg`. Name the group by a function of `erx_console` instead of a record position.
 * [Medium] session, how the console learns a session's tty (`docs/design-live.md`, "Between domains"): the design has the console learn the tty from a `tty` agent in the session domain's ready report, but the relay needs `erx:cap(console)`, which init sets only after that report, so a relay started by the boot script has no master and one started after the report is not in it. Edit 65's `tty` agent, the domain pid's check that every agent is a pid of the domain's node, and a way for the session's creator to read the agents are not built; `erx_console:add_session/2` takes the tty from whoever creates the session. Settle the order when root's session starts at boot.
 * [Low] runtime, `erlang/apps/erx/src/erx_console.erl`: the console never sends `tty_hangup`, which ending a session from the menu or a log-out sends, and a repeated answer would carry.
 * [Low] runtime, `otp/lib/kernel/src/prim_tty.erl`: `init_term/1`, the reader and the writer stay as stubs for `user_drv`'s stock paths, which `load/0` keeps unreachable; they go when `user_drv` itself leaves the release.

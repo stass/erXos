@@ -102,10 +102,11 @@ class RuntimePrimFileTest < Minitest::Test
     refute_includes lines.join("\n"), Digest::MD5.digest(changed).bytes.join(',')
     refute_includes lines.join("\n"), 'torts before'
     # Two runs' memory figures differ by nature, and test_results_agree_with_stock... exempts them too.
-    # The restart case's supervisor report carries the time of each run.
+    # The restart case's supervisor report reaches the console as a log line that carries the
+    # time of each run.
     # The image case's kernel log line carries its time.
     other = (lines - @fixture.release).reject do |line|
-      line.start_with?('resources', '=SUPERVISOR REPORT') || line.match?(IMAGE_LOG)
+      line.start_with?('resources') || line.match?(SUPERVISOR_LOG) || line.match?(IMAGE_LOG)
     end
     diagnostics, refused = other.partition { |line| line.start_with?('prim_file: ') }
     assert_includes diagnostics.first.to_s, 'file_hash'
@@ -422,6 +423,7 @@ class RuntimePrimFileTest < Minitest::Test
     assert(@fixture.release.any? { |line| line.match?(IMAGE_LOG) }, "the refused image's diagnostic reaches the kernel log")
   end
 
+  SUPERVISOR_LOG = /error domain \d+ principal \d+ system: Supervisor: \{<[0-9.]+>,erx_ramfs_sup\}\. Context: child_terminated\./
   IMAGE_LOG = /debug space \d+: erx_ns: image <[0-9.]+>: erofs: block 0: no EROFS magic\z/
 
   def contents(size, seed) = (0...size).map { |index| ((index * 7) + seed) & 0xff }.pack('C*')

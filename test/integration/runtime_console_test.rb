@@ -598,7 +598,7 @@ class RuntimeConsoleTest < Minitest::Test
 
   # A crash of the first shell's process while it has the input starts a fresh one too:
   # the Erlang shell kills it once q() has handed the input back.
-  KILL_FIRST_SHELL = '{dictionary, D} = process_info(element(3, sys:get_state(erx_console)), dictionary), ' \
+  KILL_FIRST_SHELL = '{dictionary, D} = process_info(erx_console:first_group(), dictionary), ' \
                      'Sh = proplists:get_value(shell, D), spawn(fun() -> timer:sleep(300), exit(Sh, kill) end), q().'
 
   def test_a_crash_of_the_first_shell_starts_a_fresh_one

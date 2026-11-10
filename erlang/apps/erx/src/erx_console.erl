@@ -83,7 +83,7 @@
 -behaviour(gen_server).
 
 -export([start/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
--export([facet/0, add_session/2, connect/1, detach/0]).
+-export([facet/0, add_session/2, connect/1, detach/0, first_group/0]).
 -export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -274,6 +274,14 @@ connect(Domain) ->
 detach() ->
     gen_server:call(?MODULE, detach).
 
+-doc """
+The console's first group: the one it started with, or the fresh one that replaced it
+when its shell ended. It is where input returns when no shell run by run_shell/1 is left.
+""".
+-spec first_group() -> pid().
+first_group() ->
+    gen_server:call(?MODULE, first_group).
+
 -spec init(config()) -> {ok, #state{}}.
 init(Config = #{role := Role, name := Name, driver := Start, first_shell := FirstShell}) ->
     process_flag(trap_exit, true),
@@ -387,6 +395,8 @@ handle_call({run_shell, Shell = {shell, start, _}}, From, State = #state{shells 
 handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal = Terminal}) ->
     New = start_shell(Shell, Terminal),
     {noreply, gets_input(State#state{shells = [{New, From, Shell} | Shells]})};
+handle_call(first_group, _From, State = #state{base = Base}) ->
+    {reply, Base, State};
 handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
     {noreply, State};
