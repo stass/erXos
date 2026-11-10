@@ -249,8 +249,10 @@ Error in process <0.150.0> with exit value:
 ```
 
 * **It boots to the command shell** on QEMU `virt` (AArch64), under HVF and
-  TCG, with 1 to 8 CPUs. The QEMU suites run under HVF; TCG runs only the
-  deterministic-mode transcript and a boot smoke.
+  TCG, with 1 to 8 CPUs. The QEMU suites run under HVF; TCG runs the
+  deterministic-mode transcript and a boot smoke, and at the landing gate
+  `tools/erx check-qemu --remote DEST` may move the multi-CPU cells of
+  long suites to a second host under TCG while this one is busy.
 * **ERTS runs in user mode** as the system domain, on `liberx`'s Fiasco
   backend. OTP 29.1.2 and musl live in the tree, modified.
 * **The serial console's driver** (PL011) is an Erlang process.

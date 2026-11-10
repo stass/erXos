@@ -19,7 +19,7 @@ Erx::QemuGate.declare_suite(
     runner = Erx::Runner.new(owner_root: context.root, log_dir: File.join(context.root, 'build/logs'))
     check = Erx::BootImageCheck::Run.new(root: context.root, runner: runner, compiler: ENV.fetch('ERX_CLANG', ''),
                                          linker: ENV.fetch('ERX_LLD', ''))
-    report = check.call(accels: [accel], cpus: cpus, jobs: context.jobs, build: false)
+    report = check.call(accels: [accel], cpus: cpus, jobs: context.jobs, build: false, placement: context.placement)
     Erx::QemuGate.result(report.fetch(:good).transform_values { 'passed' }.merge('damage-cases' => 'passed'))
   end
 )

@@ -144,6 +144,77 @@ passes. `make check-qemu`, the milestone gate's full QEMU suite, runs fresh;
 the landing gate's `tools/erx check-qemu --suite NAME` reuses. Removing the
 store makes every boot run again.
 
+### Placing cells
+
+A suite's cells boot where the gate places them (`tools/lib/erx/qemu_cells.rb`).
+Outside the gate, and on a host with no cores to spare, every cell boots
+here under HVF, one after another. Before each suite the gate reads this
+host's one-minute load average and decides two things:
+
+* **Side by side.** The suite's cells that stay here boot at once, one
+  thread each, when their guest CPUs fit in the cores the load leaves
+  idle (load plus guest CPUs at most the CPU count). A load the gate
+  cannot read places every cell here, one after another.
+* **Moved to a second host.** At the landing gate, `tools/erx check-qemu
+  --remote DEST` names a second development host reached by ssh. A
+  suite's cells at more than one CPU move there, under TCG, only when the
+  suite declares `offload` (one of its multi-CPU cells takes 30 s or more
+  under HVF here) and this host is busy: its one-minute load is at least
+  `--busy-load` (by default its CPU count). The 1-CPU cell stays here under
+  HVF, and the two hosts' boots run at once. A TCG cell on the other host
+  is slower than the HVF cell it replaces; what moving buys is load taken
+  off a saturated host.
+
+`make check-qemu`, the milestone gate, passes `--one-at-a-time`: it never
+moves a cell and never boots two side by side, so every cell runs here
+under HVF, one after another, and a timing-sensitive suite meets no other
+boot of its own.
+
+A moved cell is named for the accelerator it ran under (`tcg-4cpu`), so a
+report never names HVF for a TCG boot; the gate holds the suite to its
+declared cells as placed, so a suite that reports `hvf-4cpu` where the gate
+moved the cell, or the reverse, is incomplete. A failure seen only under
+TCG is a bug until it is explained, as any other.
+
+Only QEMU runs on the other host (`tools/lib/erx/qemu_remote.rb`). The
+harness here builds the image, makes an owner-only run directory with a
+random name under the remote work directory, copies the image, initrd and
+device tree into it over ssh, and starts the remote QEMU with its serial
+line on ssh's standard input and output: the serial log fills here as a
+local boot's does, the transcript types through ssh's standard input, and
+the tree's own checkpoints and verifiers judge it here. Only a boot QEMU's inputs
+alone decide moves, the same boots reuse keys (no disk, network device or
+host link); a suite whose cells need those keeps them here. Reuse keys a
+remote boot by the host, the remote QEMU's path and its SHA-256, so no
+record is shared between hosts.
+
+ssh hands its command to the remote user's shell, which must be of the
+Bourne family (sh, bash, zsh) and print nothing for a command it runs.
+ssh forwards nothing (no agent, X11 or ports, whatever the user's ssh
+configuration says) and shares no connection. Every remote command is
+built from words each quoted with `Shellwords.escape`, joined by fixed
+operators, and every configured word (the destination, the work directory,
+the remote QEMU and GNU timeout) must be plain characters first, with no
+leading dash and no `..` component. Guest output reaches this terminal only
+through the gate's escaping, as a local boot's does. The gate opens no
+connection but ssh to the configured host.
+
+Nothing of a remote boot outlives it. The remote QEMU runs under the remote
+host's GNU timeout, set 30 s past the local deadline, and writes a pid file
+it deletes when it exits; after every boot, passed, failed, timed out or
+interrupted, the harness kills the QEMU that pid file names (by pid and
+QEMU's process name together) and removes the run directory. A harness
+killed outright leaves the remote QEMU to that timeout and its directory
+behind. A host that cannot be reached, or refuses the setup, leaves its
+cell not run, with a line naming why, and the suite incomplete; a remote
+boot that starts and fails fails the suite. The gate starts at most one
+remote boot per suite at a time.
+
+The remote host, the work directory (`erxos-qemu` under the remote home),
+the remote QEMU (`/usr/local/bin/qemu-system-aarch64`) and its GNU timeout
+(`/usr/local/bin/gtimeout`) are set by `--remote` and by
+`ERX_QEMU_REMOTE_DIR`, `ERX_QEMU_REMOTE_QEMU` and `ERX_QEMU_REMOTE_TIMEOUT`.
+
 ## Sources and imports
 
 `deps.lock` is a checked data file, with unique source identifiers, exact
@@ -679,7 +750,7 @@ Each declaration lives with what it declares:
 | Chokepoint checks | `tools/lib/erx/chokepoint_rules/NAME.rb`, one group of rules; a core's group is named after its source and states its rules or why it has none | a `kernel/core` or `kernel/sched` source has no group, or a group file declares nothing, twice, or an empty group |
 | `check-sanitizers` | the line `# erx-gate: sanitizers` in a test under `test/host` or `test/integration` | a comment resembles it but is not it, a test reads the sanitizer switch directly or through a helper without declaring, a core or `liberx` source is named by no declaring test, or nothing declares |
 | Test pool (`check`, `check-sanitizers`) | every `*_test.rb` under `test/host` (and the declaring or non-excused integration tests); `# erx-gate: serial` on a file that cannot share the machine | a file's log has no Minitest summary or zero runs, a file fails or times out, a file is listed twice, or the verdicts differ from the file list |
-| `check-qemu` | `tools/lib/erx/qemu_suites/NAME.rb`, one suite that boots the kernel under QEMU; a suite declares the cells it expects and a callable returning each cell (a configuration or a declared case) as `passed`, `failed`, `timed_out`, `partial`, `not_run` or `pending` | a suite is failed when a cell failed or timed out, or its file raised; it is incomplete when a cell was not run (an expected cell the suite did not report, which the gate marks `not_run`, or a configuration its harness could not run) or partial; a suite with no cell fails; only a pending suite, whose cases await their calls, does not fail the gate. Every suite runs under HVF; TCG runs only the production image's deterministic-mode transcript (`erx.det=1`, which needs TCG with instruction counting) and one boot of it to the shell at one CPU. A host whose QEMU lacks HVF or TCG fails the gate before anything is built, and the gate never falls back from one to the other. Linux hosts are not tested |
+| `check-qemu` | `tools/lib/erx/qemu_suites/NAME.rb`, one suite that boots the kernel under QEMU; a suite declares the cells it expects and a callable returning each cell (a configuration or a declared case) as `passed`, `failed`, `timed_out`, `partial`, `not_run` or `pending` | a suite is failed when a cell failed or timed out, or its file raised; it is incomplete when a cell was not run (an expected cell the suite did not report, which the gate marks `not_run`, or a configuration its harness could not run) or partial; a suite with no cell fails; only a pending suite, whose cases await their calls, does not fail the gate. Every suite runs under HVF here; at the landing gate, `--remote DEST` may move an offload suite's multi-CPU cells to a second host under TCG while this host is busy ("Placing cells"), and `make check-qemu` never does. TCG also runs the production image's deterministic-mode transcript (`erx.det=1`, which needs TCG with instruction counting) and one boot of it to the shell at one CPU. A host whose QEMU lacks HVF or TCG fails the gate before anything is built, and the gate never falls back from one to the other. Linux hosts are not tested |
 | `check-fuzz`, native targets | `tools/fuzz/KIND_target.rb` beside `tools/fuzz/KIND_fuzz.c`, naming sources, include paths and seeds | either file lacks the other, or a declaration is empty or malformed |
 
 Discovery could otherwise make a security gate quietly run less, so

@@ -9,6 +9,7 @@ require_relative 'fiasco'
 require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 require_relative 'runner'
 
 module Erx
@@ -111,15 +112,15 @@ module Erx
       # run can never judge an old kernel, then runs the probe under each
       # accelerator at each CPU count. Returns each run's serial log and image
       # hash; any disagreement raises.
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, placement: QemuCells::HERE)
         expected = DebugLogProbe.transcript(BoundedFile.read(File.join(@source, EXPECTED), maximum: SERIAL_BYTES))
         raise Error, 'the expected debug-log transcript is empty' if expected.empty?
 
         judge('hosted', expected, hosted_output)
         Fiasco.new(root: @root, runner: @runner, compiler: @compiler).build(jobs: jobs) if build
         image = guest_image
-        accels.product(cpus).to_h do |accel, count|
-          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: image,
+        placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
+          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: image,
                                                               memory_mib: MEMORY_MIB, checkpoints: checkpoints, machine_end: true)
           serial = report.fetch('serial_log')
           judge("#{accel}-#{count}cpu", expected, BoundedFile.read(serial, maximum: SERIAL_BYTES))

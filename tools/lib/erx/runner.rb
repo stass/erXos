@@ -55,10 +55,17 @@ module Erx
     # They receive only a log path and must never print its untrusted contents.
     # output_limit is for read-only tools: the child file-size limit also caps
     # any other regular file they write, and disables their core dumps.
-    def run(argv, name:, deadline:, chdir: Dir.pwd, env: {}, success: nil, cancelled: nil, output_limit: nil)
+    # The command reads standard input from stdin, a path, or from the null
+    # device, and writes standard output to stdout, a path it creates owner-only
+    # or truncates, or to the log with its standard error.
+    def run(argv, name:, deadline:, chdir: Dir.pwd, env: {}, success: nil, cancelled: nil, output_limit: nil,
+            stdin: nil, stdout: nil)
       validate(argv, name: name, deadline: deadline)
       unless output_limit.nil? || (output_limit.is_a?(Integer) && output_limit.between?(1, 1 << 40))
         raise Error, 'output limit must be a positive byte count at most 1 TiB'
+      end
+      [stdin, stdout].compact.each do |path|
+        raise Error, 'a command\'s standard input or output is a path' unless path.is_a?(String) && !path.empty? && !path.include?("\0")
       end
       file_limit = [output_limit, *Process.getrlimit(Process::RLIMIT_FSIZE)].min if output_limit
       record = reserve_record(name, argv: argv, deadline: deadline)
@@ -71,7 +78,8 @@ module Erx
 
       begin
         File.open(record.fetch('log'), 'wb') do |log|
-          spawn_options = { chdir: chdir, in: File::NULL, out: log, err: log,
+          output = stdout ? [stdout, File::WRONLY | File::CREAT | File::TRUNC, 0o600] : log
+          spawn_options = { chdir: chdir, in: stdin || File::NULL, out: output, err: log,
                             pgroup: true, close_others: true }
           if output_limit
             spawn_options.merge!(rlimit_fsize: [file_limit, file_limit], rlimit_core: [0, 0])

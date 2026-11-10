@@ -7,6 +7,7 @@ require_relative 'fiasco'
 require_relative 'medium_boot'
 require_relative 'production_image'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 require_relative 'runner'
 
 module Erx
@@ -253,10 +254,10 @@ module Erx
          verify: ->(text) { raise Error, "the runtime ended with #{text.inspect}" unless SLOGAN.match?(text) } }.freeze].freeze
     end
 
-    # Boots the image under HVF at each CPU count. Returns { "hvf-<n>cpu" =>
-    # 'passed' }; any disagreement raises.
+    # Boots the image under HVF at each CPU count, where placement puts each cell.
+    # Returns { "<accel>-<n>cpu" => 'passed' }; any disagreement raises.
     class Run
-      def self.cells(cpus) = cpus.map { |count| "hvf-#{count}cpu" }
+      def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -270,22 +271,24 @@ module Erx
 
       # Packs the image once (with its release medium, which no boot here attaches: the
       # medium build is the one that takes MACHINE), then boots it at each CPU count.
-      def call(cpus:, jobs: 4, build: true)
+      def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain/image'))
         built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
                                 .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
-        Run.cells(cpus).zip(cpus).to_h { |cell, count| [cell, service_kill(count, built)] }
+        placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
+          ["#{accel}-#{count}cpu", service_kill(accel, count, remote, built)]
+        end
       end
 
       private
 
-      def service_kill(count, built)
+      def service_kill(accel, count, remote, built)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
                                                          manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: 'hvf', cpus: count, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+            .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
                  checkpoints: SystemDomain.service_kill_checkpoints(points))
         'passed'
       end

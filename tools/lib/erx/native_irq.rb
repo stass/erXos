@@ -7,6 +7,7 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'native_root'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 require_relative 'runner'
 
 module Erx
@@ -71,20 +72,20 @@ module Erx
 
       # Boots the image under each accelerator at each CPU count, with the kernel
       # as last built unless asked to rebuild. Any disagreement raises.
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         built = image(fiasco)
-        accels.product(cpus).to_h do |accel, count|
-          ["#{accel}-#{count}cpu", boot(built, accel, count).freeze]
+        placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
+          ["#{accel}-#{count}cpu", boot(built, accel, count, remote).freeze]
         end
       end
 
       private
 
-      def boot(built, accel, count)
+      def boot(built, accel, count, remote)
         directory = File.join(@root, 'build/qemu', "irq-#{accel}-#{count}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
-        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB,
+        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                             checkpoints: NativeIrq.checkpoints, machine_end: true, directory: directory)
       rescue Error => e
         serial = File.join(directory, 'serial.log')

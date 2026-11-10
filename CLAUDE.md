@@ -647,9 +647,12 @@ within about 20 percent of the length, write plain code.
   * **The funnel is checked differentially** against `binary_to_term/1`:
     every payload it accepts decodes to the same term.
   * **Architectural behavior follows the Arm Architecture Reference Manual**
-    and the QEMU `virt` documentation. QEMU's suites run under HVF; TCG
-    runs only the deterministic-mode transcript and a boot smoke test, and
-    Linux hosts are not tested until the plan reaches them. A failure seen
+    and the QEMU `virt` documentation. QEMU's suites run under HVF. At
+    the landing gate a suite's multi-CPU cells may instead run under TCG on
+    a second development host, beside its 1-CPU cell under HVF; the
+    milestone gate runs every cell under HVF. TCG also runs the
+    deterministic-mode transcript and a boot smoke test, and Linux hosts
+    are not tested until the plan reaches them. A failure seen
     under one accelerator only is still a bug until explained.
   * **Replacing a stopgap is gated on parity.** The replacement is run
     differentially against the stopgap over the test corpus; every

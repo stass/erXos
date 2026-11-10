@@ -14,7 +14,8 @@ Erx::QemuGate.declare_suite(
   cells: Erx::QemuGate.suite_cells(cpus),
   run: lambda do |context|
     run = Erx::NativeThreads::Run.new(root: context.root)
-    ran = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], cpus: cpus, jobs: context.jobs, build: false)
+    ran = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], cpus: cpus, jobs: context.jobs, build: false,
+                   placement: context.placement)
     Erx::QemuGate.result(ran.transform_values { 'passed' })
   end
 )

@@ -651,7 +651,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-p620 [--runs N] [--only LIST] [--require-fast-path] [--host H] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-p620 [--runs N] [--only LIST] [--require-fast-path] [--host H] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
@@ -1029,13 +1029,24 @@ module Erx
     # A boot that passed before on the same inputs is reused from the store
     # ERX_QEMU_RESULTS names (build/qemu-results by default) and listed as
     # reused (QemuReuse); `--fresh` runs every boot, and still records passes.
+    # `--remote DEST` (an ssh destination) lets the landing gate move the
+    # multi-CPU cells of suites that declare offload to that host, under TCG,
+    # while this host's one-minute load average is at least `--busy-load`
+    # (default: its CPU count); ERX_QEMU_REMOTE_QEMU, ERX_QEMU_REMOTE_TIMEOUT and
+    # ERX_QEMU_REMOTE_DIR override the remote QEMU, GNU timeout and work
+    # directory (QemuRemote::Host). `--one-at-a-time` boots every cell here, one
+    # after another, as the milestone gate does: `make check-qemu` passes it and
+    # none of the remote options.
     def self.check_qemu(input_arguments, runner_class: Runner, fiasco_class: Fiasco)
       arguments = input_arguments.dup
-      options = { jobs: 8, suites: [], fresh: false }
+      options = { jobs: 8, suites: [], fresh: false, remote: nil, busy_load: Etc.nprocessors, one_at_a_time: false }
       OptionParser.new do |flags|
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
         flags.on('--suite NAME', 'Run only this suite; repeatable') { |value| options[:suites] << value }
         flags.on('--fresh', 'Run every boot; reuse none') { options[:fresh] = true }
+        flags.on('--one-at-a-time', 'Boot every cell here, one after another') { options[:one_at_a_time] = true }
+        flags.on('--remote DEST', 'Move offload suites\' multi-CPU cells to this ssh host when busy') { |value| options[:remote] = value }
+        flags.on('--busy-load LOAD', Float, 'One-minute load at which this host is busy') { |value| options[:busy_load] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
@@ -1058,8 +1069,15 @@ module Erx
       fiasco_class.new(root: ROOT, runner: runner).build(jobs: options.fetch(:jobs))
       store = QemuReuse::Store.new(directory: ENV.fetch('ERX_QEMU_RESULTS', File.join(ROOT, QemuReuse::DEFAULT_STORE)))
       reuse = QemuReuse::Session.new(store: store, harness: QemuReuse.harness_digest(ROOT), fresh: options.fetch(:fresh))
-      results = QemuGate.run(suites: suites, context: QemuGate::Context.new(root: ROOT, jobs: options.fetch(:jobs)), reuse: reuse)
-      QemuGate.table(results).each { |line| Terminal.puts(line) }
+      offload = options.fetch(:remote)&.then do |destination|
+        overrides = { work_dir: 'ERX_QEMU_REMOTE_DIR', program: 'ERX_QEMU_REMOTE_QEMU', timeout: 'ERX_QEMU_REMOTE_TIMEOUT' }
+                    .filter_map { |key, name| [key, ENV.fetch(name)] if ENV.key?(name) }.to_h
+        host = QemuRemote::Host.new(destination: destination, **overrides)
+        QemuGate::Offload.new(remote: host, busy_load: options.fetch(:busy_load))
+      end
+      results = QemuGate.run(suites: suites, context: QemuGate::Context.new(root: ROOT, jobs: options.fetch(:jobs)), reuse: reuse,
+                             offload: offload, **(options.fetch(:one_at_a_time) ? { host_load: -> {} } : {}))
+      QemuGate.table(results, remote: offload&.remote).each { |line| Terminal.puts(line) }
       QemuGate.overall(results.values.map { |entry| QemuGate.status(entry) }) == 'passed' ? 0 : 1
     end
 

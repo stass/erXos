@@ -19,7 +19,8 @@ cpus = [1, 4]
 Erx::QemuGate.declare_suite(
   cells: Erx::SystemDomain::Run.cells(cpus),
   run: lambda do |context|
-    ran = Erx::SystemDomain::Run.new(root: context.root).call(cpus: cpus, jobs: context.jobs, build: false)
+    ran = Erx::SystemDomain::Run.new(root: context.root).call(cpus: cpus, jobs: context.jobs, build: false,
+                                                                    placement: context.placement)
     Erx::QemuGate.result(ran)
   end
 )

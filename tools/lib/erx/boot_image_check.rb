@@ -8,6 +8,7 @@ require_relative 'boot_image'
 require_relative 'error'
 require_relative 'output_directory'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 
 module Erx
   # The boot image on QEMU end to end (docs/design-kernel.md, "Tests of the boot
@@ -156,13 +157,13 @@ module Erx
       # Every accelerator and CPU count on the good images, each form; the damage
       # cases on the first accelerator alone, since they stop before the second
       # CPU starts and their code is the same under both. Any disagreement raises.
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, placement: QemuCells::HERE)
         @fiasco.build(jobs: jobs) if build
         recipe = BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
         built = recipe.build(directory: File.join(@build, 'banner'))
         @digest = recipe.method(:digest)
-        good = accels.product(cpus).to_h do |accel, count|
-          ["#{accel}-#{count}cpu-single", boot(accel, count, built.single, built)]
+        good = placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
+          ["#{accel}-#{count}cpu-single", boot(accel, count, built.single, built, remote: remote)]
         end
         two_file = accels.to_h { |accel| ["#{accel}-1cpu-two-file", boot(accel, 1, built.first_stage, built, initrd: built.archive)] }
         { good: good.merge(two_file), refused: refused(accels.first, built) }.freeze
@@ -170,13 +171,13 @@ module Erx
 
       private
 
-      def boot(accel, count, image, built, initrd: nil)
+      def boot(accel, count, image, built, initrd: nil, remote: nil)
         line = BootImageCheck.handoff_line(built)
         handoff = { name: 'handoff', pattern: /\Aerx: boot image build /n, seconds: 30,
                     verify: ->(text) { raise Error, "the kernel reports #{text.inspect}, not this image" unless line.match?(text) } }.freeze
         ordered = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), handoff]
         # No host link, so the kernel command line is empty and the handoff line says bootargs 0.
-        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: image, initrd: initrd,
+        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: image, initrd: initrd,
                                                             memory_mib: MEMORY_MIB, checkpoints: ordered,
                                                             hostlink: QemuPlan::NO_HOSTLINK)
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),

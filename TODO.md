@@ -1691,6 +1691,20 @@ it; git history is the record of completed work.
   or directly) or passes `Erx::SanitizerEnvironment.call` itself. A new test that runs a failing sanitized program
   without either falls back to macOS's `atos`, which can hang until the test's deadline. Load the fixture from one
   place every test loads, or add a check that fails on a test with `-fsanitize` that reaches neither.
+* [Low] QEMU gate cell placement, `tools/lib/erx/qemu_cells.rb`: only native_task declares `offload`, from its
+  measured 4-CPU HVF cell (about 42 s). Measure every suite's multi-CPU cell under HVF and declare `offload` where
+  one takes 30 s or more. The suites whose runs do not go through `QemuCells::Placement` (conformance,
+  native_libc_canary, medium_boot, production_image, block_device, net_device) never boot their local cells
+  side by side; move the ones that only boot `Qemu#run` without a disk or host link onto it.
+* [Medium] QEMU gate cell placement, `tools/lib/erx/qemu_cells.rb`: `QemuCells.lanes` stops a lane with
+  `Thread#kill`, which can land between `Process.spawn` and the pid's assignment in `Runner#run` or inside a
+  cleanup ensure, leaving a local QEMU to its deadline or a remote one to the remote timeout. Give every lane a
+  shared cancellation flag passed to `Runner#run`'s `cancelled:` instead. Cell names are agreed by string: each
+  Run spells `"#{accel}-#{count}cpu"` and the gate parses declared names with `CELL_NAME`; have suites declare
+  `QemuCells::Cell` values and `Placement#each` yield the `Cell`, so names have one source. A moved cell is
+  placed before reuse is consulted, so a busy host turns a stored HVF pass into a fresh TCG boot; look up the
+  local cell's record first. Nothing sweeps run directories a failed remote cleanup leaves under the remote
+  work directory.
 * [Medium] build memo, `tools/lib/erx/build_memo.rb`: a warm `check-qemu --suite medium_boot` still runs the native
   runtime builds (OTP make walks, about 25 s of steps: `runtime-emulator`, `runtime-preloaded`, the Erlang apps),
   the pack-time Fiasco audit (70 `fiasco-audit-member` steps) and about 40 s of the orchestrator's own Ruby

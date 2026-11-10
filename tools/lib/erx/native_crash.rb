@@ -8,6 +8,7 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'native_root'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 require_relative 'runner'
 
 module Erx
@@ -88,20 +89,20 @@ module Erx
 
       # Boots each case under each accelerator at each CPU count, with the kernel as
       # last built unless asked to rebuild. Any disagreement raises.
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         images = CASES.to_h { |kase| [kase, image(fiasco, kase)] }
-        accels.product(cpus).to_h do |accel, count|
-          faults = CASES.to_h { |kase| [kase.name, one(accel, count, kase, images.fetch(kase))] }
+        placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
+          faults = CASES.to_h { |kase| [kase.name, one(accel, count, remote, kase, images.fetch(kase))] }
           ["#{accel}-#{count}cpu", faults.freeze]
         end
       end
 
       private
 
-      def one(accel, count, kase, built)
-        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB,
+      def one(accel, count, remote, kase, built)
+        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                             checkpoints: NativeCrash.checkpoints, machine_end: true)
         NativeCrash.judge(File.binread(File.expand_path(report.fetch('serial_log'), @root)), kase)
       end

@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'etc'
 require_relative 'bounded_file'
 require_relative 'declaration_files'
 require_relative 'error'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 require_relative 'qemu_reuse'
 require_relative 'runner'
 
@@ -31,8 +33,9 @@ module Erx
   # passed otherwise. The gate passes only when no suite is failed or
   # incomplete; a pending suite is listed and does not fail it.
   module QemuGate
-    # Every suite runs under this accelerator.
-    SUITE_ACCELERATOR = 'hvf'
+    # Every suite runs under this accelerator here; a cell the gate moves to a
+    # remote host runs under QemuCells::REMOTE_ACCELERATOR there.
+    SUITE_ACCELERATOR = QemuCells::LOCAL_ACCELERATOR
     # TCG runs only the deterministic-mode transcript (`erx.det=1` needs TCG
     # with instruction counting) and one boot smoke of the production image
     # at one CPU; the production_image suite owns both, as cells of its own.
@@ -46,8 +49,23 @@ module Erx
     FAILED_CELLS = %w[failed timed_out].freeze
     INCOMPLETE_CELLS = %w[partial not_run].freeze
 
-    # What a suite sees: the repository and the build job count.
-    Context = Data.define(:root, :jobs)
+    # What a suite sees: the repository, the build job count, and where its
+    # cells boot (QemuCells::Placement), which it hands its run.
+    Context = Data.define(:root, :jobs, :placement) do
+      def initialize(root:, jobs:, placement: QemuCells::HERE) = super
+    end
+
+    # A remote host for the landing gate: a suite that declares offload moves
+    # its multi-CPU cells there while this host's one-minute load average is
+    # at least busy_load (QemuCells.placement).
+    Offload = Data.define(:remote, :busy_load) do
+      def initialize(remote:, busy_load:)
+        raise Error, 'an offload names a QemuRemote::Host' unless remote.is_a?(QemuRemote::Host)
+        raise Error, 'an offload\'s busy load is a number at least 0' unless busy_load.is_a?(Numeric) && busy_load >= 0
+
+        super
+      end
+    end
 
     # Cells map a name to one of CELL_STATUSES; a status outside it cannot be built.
     # Boots is how the suite's boots went (QemuReuse::Boots): reuse is not a
@@ -62,15 +80,20 @@ module Erx
       end
     end
 
-    # A suite's cells are the ones it must report. The gate holds it to them
-    # (QemuGate.run), so a run that leaves one out cannot pass.
-    Suite = Data.define(:name, :cells, :run) do
-      def initialize(name:, cells:, run:)
+    # A suite's cells are the ones it must report, as named here; the gate
+    # holds it to them where it placed them (QemuGate.run), so a run that
+    # leaves one out cannot pass. offload declares its multi-CPU cells long
+    # enough to be worth moving to a remote host: one takes 30 s or more under
+    # HVF here.
+    Suite = Data.define(:name, :cells, :run, :offload) do
+      def initialize(name:, cells:, run:, offload: false)
         valid = cells.is_a?(Array) && !cells.empty? && cells.all?(String) && cells.uniq.size == cells.size
         raise Error, "QEMU suites: #{name} declares no list of distinct cells" unless valid
         raise Error, "QEMU suites: #{name} is not a callable" unless run.respond_to?(:call)
 
-        super(name: name, cells: cells.dup.freeze, run: run)
+        raise Error, "QEMU suites: #{name} declares offload as neither true nor false" unless [true, false].include?(offload)
+
+        super(name: name, cells: cells.dup.freeze, run: run, offload: offload)
       end
     end
 
@@ -81,14 +104,16 @@ module Erx
 
     # Each file under qemu_suites/ calls this exactly once, with the cells
     # its run reports; load_suites checks both as it builds each Suite.
-    def declare_suite(cells:, run:)
-      SUITE_FILES.declare([cells, run])
+    def declare_suite(cells:, run:, offload: false)
+      SUITE_FILES.declare([cells, run, offload])
     end
 
     # The suites declared in directory, sorted by name. Public so the tests
     # can feed it malformed directories.
     def load_suites(directory)
-      SUITE_FILES.load_all(directory).map { |name, (cells, run)| Suite.new(name: name, cells: cells, run: run) }.freeze
+      SUITE_FILES.load_all(directory).map do |name, (cells, run, offload)|
+        Suite.new(name: name, cells: cells, run: run, offload: offload)
+      end.freeze
     end
 
     def suites = (@suites ||= load_suites(File.join(__dir__, 'qemu_suites')))
@@ -137,17 +162,43 @@ module Erx
     # reusable boots that passed before are reused, and its fresh boots are
     # recorded only when the suite passed; a suite that did not pass forgets
     # the boots it reused, so its next run boots them again.
-    def run(suites:, context:, reuse: nil)
+    #
+    # Each suite is placed (QemuCells.placement) from this host's load as it
+    # starts, which host_load reads (nil when unknown, which places every
+    # cell here, one after another), and is held to its cells as placed. Its
+    # multi-CPU cells move only with offload, an Offload, and only when the
+    # suite declares offload.
+    def run(suites:, context:, reuse: nil, offload: nil, host_load: -> { one_minute_load }, cores: Etc.nprocessors)
       suites.to_h do |suite|
-        next [suite.name, judged(suite, context)] unless reuse
+        placed = context.with(placement: placement(suite, offload: offload, load: host_load.call, cores: cores))
+        next [suite.name, judged(suite, placed)] unless reuse
 
-        result, boots = reuse.suite(suite.name) { judged(suite, context) }
+        result, boots = reuse.suite(suite.name) { judged(suite, placed) }
         [suite.name, result.with(boots: boots.close(passed: status(result) == 'passed'))]
       end
     end
 
+    def placement(suite, offload:, load:, cores:)
+      return QemuCells::HERE if load.nil?
+
+      QemuCells.placement(cells: suite.cells, remote: offload&.remote, offload: suite.offload, load: load,
+                          busy_load: offload&.busy_load, cores: cores)
+    end
+    private_class_method :placement
+
+    # This host's one-minute load average, or nil when it cannot be read.
+    def one_minute_load
+      text = if File.readable?('/proc/loadavg') then File.read('/proc/loadavg')
+             else IO.popen(%w[sysctl -n vm.loadavg], err: File::NULL, &:read)
+             end
+      Float(text.to_s[/\d+(?:\.\d+)?/] || 'unknown', exception: false)
+    rescue SystemCallError
+      nil
+    end
+
     def judged(suite, context)
-      held_to_its_cells(suite, suite.run.call(context))
+      remote = context.placement.remote
+      held_to_its_cells(suite, suite.run.call(context), suite.cells.map { |cell| QemuCells.placed_name(cell, remote) })
     rescue Error => error
       result({ 'run' => 'failed' }, notes: [error.message])
     end
@@ -157,7 +208,8 @@ module Erx
     # boots were reused; the notes of each suite that did not pass; each
     # reused log and each reuse diagnostic; then the gate's own line, which
     # counts the boots reused.
-    def table(results)
+    # With remote, the host the gate may move cells to, the last line names it.
+    def table(results, remote: nil)
       rows = results.map do |name, entry|
         cells = entry.cells.map { |cell, value| "#{cell} #{value}" }.join(', ')
         "#{name.ljust(16)} #{status(entry).ljust(11)} #{cells}#{reuse_mark(entry.boots)}"
@@ -173,7 +225,8 @@ module Erx
       [*rows, *notes, *reused_lines, *reuse_diagnostics,
        "qemu gate: #{overall(statuses)}; #{results.size} suites, #{pending} pending; " \
        "#{reused} boots reused from earlier passes; " \
-       "suites under #{SUITE_ACCELERATOR}, smoke under #{SMOKE_ACCELERATOR}"]
+       "suites under #{SUITE_ACCELERATOR}, smoke under #{SMOKE_ACCELERATOR}" \
+       "#{remote ? "; moved cells under #{QemuCells::REMOTE_ACCELERATOR} on #{remote.destination}" : ''}"]
     end
 
     def reuse_mark(boots)
@@ -183,15 +236,16 @@ module Erx
     end
     private_class_method :reuse_mark
 
-    # A declared cell reported pending beside cells that ran did not run either: only a
-    # suite whose every cell is pending may leave one pending.
-    def held_to_its_cells(suite, reported)
-      waiting = reported.cells.values.all?('pending') ? [] : suite.cells.select { |cell| reported.cells[cell] == 'pending' }
-      missing = suite.cells - reported.cells.keys + waiting
+    # expected is the suite's cells as placed. A declared cell reported pending beside
+    # cells that ran did not run either: only a suite whose every cell is pending may
+    # leave one pending.
+    def held_to_its_cells(suite, reported, expected = suite.cells)
+      waiting = reported.cells.values.all?('pending') ? [] : expected.select { |cell| reported.cells[cell] == 'pending' }
+      missing = expected - reported.cells.keys + waiting
       return reported if missing.empty?
 
       cells = reported.cells.merge(missing.to_h { |cell| [cell, 'not_run'] })
-      result(suite.cells.to_h { |cell| [cell, cells.fetch(cell)] }.merge(cells),
+      result(expected.to_h { |cell| [cell, cells.fetch(cell)] }.merge(cells),
              notes: [*reported.notes, *missing.map { |cell| "#{cell} was expected and did not run" }])
     end
     private_class_method :held_to_its_cells

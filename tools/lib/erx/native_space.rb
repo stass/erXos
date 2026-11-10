@@ -9,6 +9,7 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'native_root'
 require_relative 'qemu'
+require_relative 'qemu_cells'
 require_relative 'runner'
 
 module Erx
@@ -59,12 +60,12 @@ module Erx
         @build = File.join(@root, 'build/native-space')
       end
 
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         built = image(fiasco)
-        accels.product(cpus).to_h do |accel, count|
-          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB,
+        placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
+          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                               checkpoints: NativeSpace.checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: File.expand_path(report.fetch('serial_log'), @root),
                                      seconds: report.fetch('elapsed_seconds') }.freeze]
