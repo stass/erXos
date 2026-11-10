@@ -167,8 +167,8 @@ stages() ->
 lift(_, #tcb{state = State} = Tcb, _) when State =:= closed; State =:= time_wait ->
     {done, Tcb, []};
 lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = Opts},
-      Payload, IpEcn, LinkCast}, Tcb0, Ctx)
-  when is_binary(Payload), is_integer(IpEcn), IpEcn >= 0, IpEcn =< 3,
+      Wire, IpEcn, LinkCast}, Tcb0, Ctx)
+  when is_integer(IpEcn), IpEcn >= 0, IpEcn =< 3,
        LinkCast =:= unicast orelse LinkCast =:= broadcast orelse LinkCast =:= multicast ->
     #tcb{state = State, rcv_nxt = RcvNxt, snd_una = Una, iss = Iss, snd_max = SndMax} = Tcb0,
     %% In SYN-SENT nothing has been received to measure against: the SYN's own number is
@@ -179,9 +179,10 @@ lift({#tcp{seq = Seq0, ack = Ack0, flags = Flags, win = Win, urp = Urp, opts = O
           end,
     Ack = erx_tcp_seq:lift(Ack0, Una),
     First = Seq + syn_len(Flags),
+    {Payload, Len, NSegs} = erx_tcp_payload:from_wire(Wire),
     Seg = #seg{seq = Seq, ack = Ack, flags = Flags, hdr_flags = Flags,
-               win = Win bsl snd_scale(Tcb0), urp = Urp, data = Payload,
-               arrived = {First, First + byte_size(Payload)},
+               win = Win bsl snd_scale(Tcb0), urp = Urp, data = Payload, len = Len,
+               nsegs = NSegs, arrived = {First, First + Len},
                ts = ts_option(Opts#tcp_opts.ts, Tcb0#tcb.ts, Ctx),
                mss = Opts#tcp_opts.mss, wscale = Opts#tcp_opts.wscale,
                sack_permitted = Opts#tcp_opts.sack_permitted,
@@ -261,7 +262,7 @@ tolerate_missing_ts() -> true.
 %% case is finished here (see the module documentation). A pure ACK also acknowledges no more
 %% than the send buffer holds, which with no FIN sent is everything outstanding, so no FIN is
 %% acknowledged on the fast path.
-header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, data = Data,
+header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, len = Len,
                        ts = SegTs, sacks = Sacks} = Seg, Tcb0, Ctx) ->
     #tcb{state = State, rcv_nxt = RcvNxt, snd_una = Una, snd_nxt = SndNxt, snd_max = SndMax,
          snd_wnd = SndWnd, need_syn = NeedSyn, fin = Fin, reass = Reass, ts = Ts,
@@ -277,13 +278,12 @@ header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, data = Da
         true ->
             Tcb = accepted(Seg, ts_recent(Seg, Tcb0#tcb{rcv_wnd = rcv_wnd(Tcb0)}, Ctx), Ctx),
             #ccv{fast_recovery = Fast, cong_recovery = Cong} = Tcb#tcb.ccv,
-            PureAck = Data =:= <<>> andalso Ack > Una andalso Ack =< SndMax
+            PureAck = Len =:= 0 andalso Ack > Una andalso Ack =< SndMax
                 andalso not Fast andalso not Cong andalso Sacks =:= []
                 andalso not erx_tcp_sendlog:has_holes(Log)
                 andalso Ack =< erx_tcp_sendlog:snd_max(Log)
                 andalso Ack - Una =< erx_tcp_sndbuf:size(Tcb0#tcb.sndbuf),
-            InOrder = Data =/= <<>> andalso Ack =:= Una
-                andalso byte_size(Data) =< erx_tcp:rcv_space(Tcb0),
+            InOrder = Len > 0 andalso Ack =:= Una andalso Len =< erx_tcp:rcv_space(Tcb0),
             if
                 PureAck -> pure_ack(Seg, Tcb, Ctx);
                 InOrder -> in_order(Seg, Tcb, Ctx);
@@ -297,7 +297,7 @@ header_prediction(#seg{seq = Seq, ack = Ack, flags = Flags, win = Win, data = Da
 %% recovery, the window and rcv_up), with the acknowledgement's own fields set in one update.
 %% `data` and `fin` have nothing to do for a segment without data or FIN. The loss module
 %% stays the judge of every acknowledgement: what it ends (`drop`) ends here too.
-pure_ack(#seg{ack = Ack} = Seg, Tcb0, Ctx) ->
+pure_ack(#seg{ack = Ack, nsegs = NSegs} = Seg, Tcb0, Ctx) ->
     case sent_acknowledged(Seg, Tcb0, Ctx, []) of
         {continue, #tcb{sendlog = Log} = Tcb1, _, []} ->
             #tcb{snd_una = Una} = Tcb2 =
@@ -305,7 +305,7 @@ pure_ack(#seg{ack = Ack} = Seg, Tcb0, Ctx) ->
                                                            Ctx), Ctx), Ctx),
             Acked = Ack - Una,
             #tcb{sndbuf = Buf, snd_wnd = SndWnd, snd_nxt = Nxt, ccv = Ccv} = Tcb3 =
-                cc_ack(Acked, Ack, Tcb2, Ctx),
+                cc_ack(Acked, Ack, NSegs, Tcb2, Ctx),
             Tcb4 = Tcb3#tcb{sndbuf = erx_tcp_sndbuf:drop(Buf, Acked), snd_wnd = max(0, SndWnd - Acked),
                             snd_una = Ack, snd_nxt = max(Nxt, Ack)},
             Tcb5 = case Ccv#ccv.fast_recovery orelse Ccv#ccv.cong_recovery of
@@ -377,7 +377,8 @@ syn_sent_segment(#seg{flags = Flags} = Seg, Tcb, Ctx) ->
         {false, _, true} -> take_syn(Seg, Tcb, Ctx)
     end.
 
-take_syn(#seg{seq = Irs, flags = Flags0, win = Win, data = Data0} = Seg0, Tcb0, Ctx) ->
+take_syn(#seg{seq = Irs, flags = Flags0, win = Win, data = Data0, len = Len0} = Seg0, Tcb0,
+         Ctx) ->
     {Tcb1, Buffers} = negotiate(Seg0, Tcb0, Ctx),
     %% tcp_rcvseqinit.
     Tcb2 = Tcb1#tcb{irs = Irs, rcv_nxt = Irs + 1, rcv_adv = Irs + 1},
@@ -392,13 +393,16 @@ take_syn(#seg{seq = Irs, flags = Flags0, win = Win, data = Data0} = Seg0, Tcb0, 
     %% The data after the SYN, trimmed to the window, which drops a FIN past it.
     Seq = Irs + 1,
     RcvWnd = Tcb3#tcb.rcv_wnd,
-    {Data, Flags} = case byte_size(Data0) > RcvWnd of
-                        true -> {binary:part(Data0, 0, RcvWnd), Flags1 band bnot ?TH_FIN};
-                        false -> {Data0, Flags1}
-                    end,
+    {Data, Len, Flags} = case Len0 > RcvWnd of
+                             true ->
+                                 {erx_tcp_payload:part(Data0, 0, RcvWnd), RcvWnd,
+                                  Flags1 band bnot ?TH_FIN};
+                             false ->
+                                 {Data0, Len0, Flags1}
+                         end,
     %% An acceptable SYN passed SYN-SENT's checks: t_rcvtime (tcp_input.c:1566).
     Tcb = Tcb3#tcb{snd_wl1 = Seq - 1, rcv_up = Seq, snd_wnd = Win, rcvtime = Ctx#tcp_ctx.now},
-    Seg = Seg0#seg{seq = Seq, data = Data, flags = Flags},
+    Seg = Seg0#seg{seq = Seq, data = Data, len = Len, flags = Flags},
     case has(Flags, ?TH_ACK) of
         true -> {goto, process_ack, Tcb, Seg, Buffers};
         false -> {goto, step6, Tcb, Seg, Buffers}
@@ -448,14 +452,14 @@ tcp_mss(Offer, #tcb{family = Family, snd_hiwat = Snd0, rcv_hiwat = Rcv0} = Tcb,
 %% in FIN-WAIT-1 owing its FIN when the owner shut down first, the SYN then taken out of
 %% the flags. An established connection initialises its congestion window and starts the
 %% keepalive's idle time.
-synack(#seg{flags = Flags, data = Data}, Tcb0, #tcp_ctx{now = Now} = Ctx) ->
+synack(#seg{flags = Flags, len = Len}, Tcb0, #tcp_ctx{now = Now} = Ctx) ->
     #tcb{rcv_adv = RcvAdv, rcv_wnd = RcvWnd, snd_una = Una0, snd_nxt = SndNxt,
          deadlines = D} = Tcb0,
     Una = Una0 + 1,
     Tcb1 = Tcb0#tcb{rcv_adv = RcvAdv + min(RcvWnd, ?TCP_MAXWIN bsl rcv_scale(Tcb0)),
                     snd_una = Una, snd_nxt = max(SndNxt, Una),
                     ecn = erx_tcp_ecn:input_syn_sent(Flags, Tcb0#tcb.ecn)},
-    Tcb2 = case Data =/= <<>> andalso delay_ack(Tcb1, byte_size(Data)) of
+    Tcb2 = case Len > 0 andalso delay_ack(Tcb1, Len) of
                true -> Tcb1#tcb{deadlines = D#deadlines{delack = Now + ms(?TCPTV_DELACK)}};
                false -> Tcb1#tcb{ack_now = true}
            end,
@@ -551,12 +555,12 @@ check_syn(#seg{flags = Flags, seq = Seq} = Seg, #tcb{state = State, rcv_nxt = Rc
 %% 6. paws (tcp_input.c:2218-2245): RFC 7323 PAWS. A TSval older than a valid ts_recent
 %% drops the segment, acknowledging it if it carries data; once ts_recent is more than 24
 %% days old it is invalidated instead, and the segment goes on.
-paws(#seg{ts = {Val, _}, data = Data} = Seg,
+paws(#seg{ts = {Val, _}, len = Len} = Seg,
      #tcb{ts = #ts{recent = Recent, recent_age = Age} = Ts} = Tcb, #tcp_ctx{now = Now} = Ctx)
   when Recent =/= 0, Val < Recent ->
     case Now - Age > ms(?TCP_PAWS_IDLE) of
         true -> {continue, Tcb#tcb{ts = Ts#ts{recent = 0}}, Seg};
-        false when Data =/= <<>> -> dropafterack(Seg, Tcb, Ctx);
+        false when Len > 0 -> dropafterack(Seg, Tcb, Ctx);
         false -> {done, Tcb, []}
     end;
 paws(Seg, Tcb, _) ->
@@ -575,7 +579,7 @@ trim(#seg{seq = Seq} = Seg, #tcb{state = syn_received, irs = Irs} = Tcb, Ctx) wh
 trim(Seg0, Tcb0, Ctx) ->
     {Seg1, Tcb1} = trim_front(Seg0, Tcb0),
     #tcb{user_closed = Closed, state = State} = Tcb1,
-    case Closed andalso Seg1#seg.data =/= <<>> andalso not erx_tcp:have_rcvd_fin(State) of
+    case Closed andalso Seg1#seg.len > 0 andalso not erx_tcp:have_rcvd_fin(State) of
         true ->
             dropwithreset(Seg1, erx_tcp_user:close(Tcb1), Ctx);
         false ->
@@ -590,7 +594,7 @@ trim(Seg0, Tcb0, Ctx) ->
 %% to it without a FIN) loses a duplicate FIN and asks for an ACK now; so does dropping any
 %% data on a SACK connection, whose D-SACK block (erx_tcp_sack:arrived/4) the next ACK must
 %% carry.
-trim_front(#seg{seq = Seq, flags = Flags0, urp = Urp0, data = Data} = Seg,
+trim_front(#seg{seq = Seq, flags = Flags0, urp = Urp0, data = Data, len = Tlen} = Seg,
            #tcb{rcv_nxt = RcvNxt, sack = Sack} = Tcb) when RcvNxt > Seq ->
     {Seq1, Flags1, Urp1, Todrop1} =
         case has(Flags0, ?TH_SYN) of
@@ -598,7 +602,6 @@ trim_front(#seg{seq = Seq, flags = Flags0, urp = Urp0, data = Data} = Seg,
             true when Urp0 > 1 -> {Seq + 1, Flags0 band bnot ?TH_SYN, Urp0 - 1, RcvNxt - Seq - 1};
             true -> {Seq + 1, Flags0 band bnot (?TH_SYN bor ?TH_URG), Urp0, RcvNxt - Seq - 1}
         end,
-    Tlen = byte_size(Data),
     Duplicate = Todrop1 > Tlen orelse (Todrop1 =:= Tlen andalso not has(Flags1, ?TH_FIN)),
     {Todrop, Flags2} = case Duplicate of
                            true -> {Tlen, Flags1 band bnot ?TH_FIN};
@@ -610,37 +613,37 @@ trim_front(#seg{seq = Seq, flags = Flags0, urp = Urp0, data = Data} = Seg,
                    end,
     AckNow = Tcb#tcb.ack_now orelse Duplicate orelse (Todrop > 0 andalso Sack =:= on),
     {Seg#seg{seq = Seq1 + Todrop, flags = Flags, urp = Urp,
-             data = binary:part(Data, Todrop, Tlen - Todrop)},
+             data = erx_tcp_payload:part(Data, Todrop, Tlen - Todrop), len = Tlen - Todrop},
      Tcb#tcb{ack_now = AckNow}};
 trim_front(Seg, Tcb) ->
     {Seg, Tcb}.
 
 %% tcp_input.c:2335-2357: the part past rcv_nxt + rcv_wnd.
-trim_back(#seg{seq = Seq, data = Data, flags = Flags} = Seg,
+trim_back(#seg{seq = Seq, data = Data, len = Tlen, flags = Flags} = Seg,
           #tcb{rcv_nxt = RcvNxt, rcv_wnd = RcvWnd} = Tcb) ->
-    Tlen = byte_size(Data),
     Todrop = Seq + Tlen - (RcvNxt + RcvWnd),
     Cut = Flags band bnot (?TH_PUSH bor ?TH_FIN),
     if
         Todrop =< 0 ->
             {ok, Seg, Tcb};
         Todrop < Tlen ->
-            {ok, Seg#seg{data = binary:part(Data, 0, Tlen - Todrop), flags = Cut}, Tcb};
+            {ok, Seg#seg{data = erx_tcp_payload:part(Data, 0, Tlen - Todrop), len = Tlen - Todrop,
+                         flags = Cut}, Tcb};
         RcvWnd =:= 0, Seq =:= RcvNxt ->
-            {ok, Seg#seg{data = <<>>, flags = Cut}, Tcb#tcb{ack_now = true}};
+            {ok, Seg#seg{data = [], len = 0, flags = Cut}, Tcb#tcb{ack_now = true}};
         true ->
             past_window
     end.
 
 %% tcp_input.c:2385-2389: the boundary check Last.ACK.Sent <= SEG.SEQ + SEG.LEN, counting a
 %% SYN or FIN once, rather than RFC 1323's strict one.
-ts_recent(#seg{ts = {Val, _}, seq = Seq, data = Data, flags = Flags},
+ts_recent(#seg{ts = {Val, _}, seq = Seq, len = Len, flags = Flags},
           #tcb{ts = #ts{} = Ts, last_ack_sent = LastAck} = Tcb, #tcp_ctx{now = Now}) ->
     Control = case Flags band (?TH_SYN bor ?TH_FIN) of
                   0 -> 0;
                   _ -> 1
               end,
-    case Seq =< LastAck andalso LastAck =< Seq + byte_size(Data) + Control of
+    case Seq =< LastAck andalso LastAck =< Seq + Len + Control of
         true -> Tcb#tcb{ts = Ts#ts{recent = erx_tcp_seq:wire(Val), recent_age = Now}};
         false -> Tcb
     end;
@@ -713,14 +716,14 @@ ack(Seg, Tcb, Ctx) ->
 %% SYN before the bytes acknowledged are counted, and the window shifts were fixed when the
 %% SYN was taken. Data queued before ESTABLISHED is handed over now unless this segment
 %% brings more, which `data` then handles.
-leave_syn_received(#seg{seq = Seq, win = Win, data = Data, flags = Flags},
+leave_syn_received(#seg{seq = Seq, win = Win, len = Len, flags = Flags},
                    #tcb{snd_una = Una} = Tcb0, Ctx) ->
     Tcb1 = Tcb0#tcb{snd_wnd = Win, snd_una = Una + 1, need_syn = false, snd_wl1 = Seq - 1},
     Tcb2 = case Tcb1#tcb.fin of
                queued -> Tcb1#tcb{state = fin_wait_1};
                _ -> establish(Tcb1, Ctx)
            end,
-    case Data =:= <<>> andalso not has(Flags, ?TH_FIN) of
+    case Len =:= 0 andalso not has(Flags, ?TH_FIN) of
         true ->
             {Tcb, _Fin, Actions} = reassembled(erx_tcp_reass:present(Tcb2#tcb.reass,
                                                                      Tcb2#tcb.rcv_nxt), Tcb2),
@@ -785,12 +788,13 @@ follow_log(_, Tcb) ->
 %% acknowledged FIN moves FIN-WAIT-1 to FIN-WAIT-2, CLOSING to TIME-WAIT, and ends LAST-ACK.
 %% FreeBSD's `snd_recover = th_ack - 1` for a snd_una that wrapped past it (:3013-3016)
 %% cannot apply to unwrapped numbers.
-process_ack(#seg{ack = Ack} = Seg, #tcb{snd_una = Una, sendlog = Log} = Tcb0, Ctx) ->
+process_ack(#seg{ack = Ack, nsegs = NSegs} = Seg, #tcb{snd_una = Una, sendlog = Log} = Tcb0,
+            Ctx) ->
     Tcb1 = Tcb0#tcb{sendlog = ack_log(Log, Ack)},
     Tcb2 = rexmt_after_ack(Ack, rtt(Seg, spurious_rto(Seg, Tcb1, Ctx), Ctx), Ctx),
     case Ack - Una of
         Acked when Acked > 0 ->
-            {Tcb3, FinAcked} = take_ack(Ack, cc_ack(Acked, Ack, Tcb2, Ctx)),
+            {Tcb3, FinAcked} = take_ack(Ack, cc_ack(Acked, Ack, NSegs, Tcb2, Ctx)),
             fin_acked(FinAcked, Seg, end_recovery(Ack, Tcb3, Ctx), Ctx);
         _ ->
             {goto, step6, Tcb2, Seg, []}
@@ -842,7 +846,7 @@ rexmt_after_ack(_, #tcb{rtt = Rtt} = Tcb, #tcp_ctx{now = Now}) ->
 
 %% cc_ack_received with CC_ACK (:290-339): appropriate byte counting above ssthresh marks a
 %% window's worth acknowledged (CCF_ABC_SENTAWND), then the congestion module's ack_received.
-cc_ack(Bytes, Ack, #tcb{cc = Cc, bytes_acked = Counted0} = Tcb, Ctx) ->
+cc_ack(Bytes, Ack, NSegs, #tcb{cc = Cc, bytes_acked = Counted0} = Tcb, Ctx) ->
     #ccv{cwnd = Cwnd, ssthresh = Ssthresh, snd_wnd = SndWnd} = Ccv0 = erx_tcp:ccv(Tcb, Ctx),
     {Counted, Ccv} = if
                          Cwnd > Ssthresh, Counted0 + Bytes >= Cwnd ->
@@ -852,7 +856,7 @@ cc_ack(Bytes, Ack, #tcb{cc = Cc, bytes_acked = Counted0} = Tcb, Ctx) ->
                          true ->
                              {0, Ccv0#ccv{abc_sentawnd = false}}
                      end,
-    CcAck = #cc_ack{bytes = Bytes, nsegs = 1, cwnd_limited = Cwnd =< SndWnd, curack = Ack},
+    CcAck = #cc_ack{bytes = Bytes, nsegs = NSegs, cwnd_limited = Cwnd =< SndWnd, curack = Ack},
     Tcb#tcb{bytes_acked = Counted, ccv = Cc:ack_received(Ccv, ack, CcAck)}.
 
 %% :2990-3022: snd_una moves to Ack. The acknowledged data leaves the send buffer and the
@@ -920,7 +924,7 @@ newer_window(#seg{seq = Seq, ack = Ack, win = Win},
 %% offered, and gen_tcp, like stock, cannot read the byte). It is kept out by its sequence
 %% number (#tcb.rcv_oob), whether the segment is delivered now or from the reassembly queue.
 %% Without URG, rcv_up follows rcv_nxt.
-urgent(#seg{flags = Flags, urp = Urp, seq = Seq, data = Data} = Seg,
+urgent(#seg{flags = Flags, urp = Urp, seq = Seq, len = Len} = Seg,
        #tcb{state = State, rcv_up = RcvUp, rcv_buffered = Buffered, rcv_oob = Oob0} = Tcb)
   when Flags band ?TH_URG =/= 0, Urp =/= 0 ->
     case erx_tcp:have_rcvd_fin(State) of
@@ -929,7 +933,7 @@ urgent(#seg{flags = Flags, urp = Urp, seq = Seq, data = Data} = Seg,
         false when Urp + Buffered > ?SB_MAX ->
             {continue, Tcb, Seg#seg{urp = 0, flags = Flags band bnot ?TH_URG}};
         false ->
-            Oob = case Urp =< byte_size(Data) of
+            Oob = case Urp =< Len of
                       true -> Seq + Urp - 1;
                       false -> Oob0
                   end,
@@ -949,8 +953,8 @@ pull_rcv_up(#tcb{rcv_up = RcvUp, rcv_nxt = RcvNxt} = Tcb) -> Tcb#tcb{rcv_up = ma
 %% blocks: every segment that reached here, its range as it arrived, so a duplicate trimmed
 %% away entirely is reported as D-SACK too (FreeBSD records that one in its trim,
 %% :2296-2299, and the rest here, :3237-3268).
-data(#seg{data = Data, flags = Flags} = Seg, #tcb{state = State} = Tcb0, Ctx) ->
-    Takes = (Data =/= <<>> orelse has(Flags, ?TH_FIN)) andalso not erx_tcp:have_rcvd_fin(State),
+data(#seg{len = Len, flags = Flags} = Seg, #tcb{state = State} = Tcb0, Ctx) ->
+    Takes = (Len > 0 orelse has(Flags, ?TH_FIN)) andalso not erx_tcp:have_rcvd_fin(State),
     {Tcb1, Fin, Actions} = case Takes of
                                true -> take_data(Seg, Tcb0, Ctx);
                                false -> {Tcb0, false, []}
@@ -962,13 +966,12 @@ data(#seg{data = Data, flags = Flags} = Seg, #tcb{state = State} = Tcb0, Ctx) ->
               end,
     {continue, Tcb, Seg#seg{flags = (Flags band bnot ?TH_FIN) bor FinFlag}, Actions}.
 
-take_data(#seg{seq = Seq, data = Data, flags = Flags},
+take_data(#seg{seq = Seq, data = Data, len = Tlen, flags = Flags},
           #tcb{rcv_nxt = RcvNxt, reass = Reass, state = State} = Tcb0, Ctx) ->
     Fin = has(Flags, ?TH_FIN),
     case Seq =:= RcvNxt andalso erx_tcp_reass:is_empty(Reass)
         andalso erx_tcp:have_established(State) of
         true ->
-            Tlen = byte_size(Data),
             Tcb1 = delay_or_ack(Tcb0, Tlen, Ctx),
             {Tcb, Actions} = deliver(Data, RcvNxt, Tcb1#tcb{rcv_nxt = RcvNxt + Tlen}),
             {Tcb, Fin, Actions};
@@ -998,7 +1001,7 @@ reassembled({dropped, _Why, Queue}, Tcb) ->
 %% though rcv_nxt has passed them.
 deliver(Data0, From, Tcb0) ->
     {Data, Tcb} = without_urgent(Data0, From, Tcb0),
-    case {Tcb#tcb.rcv_closed, iolist_size(Data)} of
+    case {Tcb#tcb.rcv_closed, erx_tcp_payload:size(Data)} of
         {true, _} -> {Tcb, []};
         {false, 0} -> {Tcb, []};
         {false, Size} -> {Tcb#tcb{rcv_buffered = Tcb#tcb.rcv_buffered + Size}, [{deliver, Data}]}
@@ -1006,9 +1009,14 @@ deliver(Data0, From, Tcb0) ->
 
 without_urgent(Data, From, #tcb{rcv_oob = Oob} = Tcb) when is_integer(Oob), Oob >= From ->
     Offset = Oob - From,
-    case iolist_to_binary(Data) of
-        <<Before:Offset/binary, _Urgent, After/binary>> -> {[Before, After], Tcb#tcb{rcv_oob = none}};
-        _ -> {Data, Tcb}
+    Size = erx_tcp_payload:size(Data),
+    case Offset < Size of
+        true ->
+            Before = erx_tcp_payload:part(Data, 0, Offset),
+            After = erx_tcp_payload:part(Data, Offset + 1, Size - Offset - 1),
+            {Before ++ After, Tcb#tcb{rcv_oob = none}};
+        false ->
+            {Data, Tcb}
     end;
 without_urgent(Data, _, Tcb) ->
     {Data, Tcb}.
@@ -1072,7 +1080,7 @@ dropafterack(_, Tcb, _) ->
 %% number; otherwise a RST acknowledging everything the segment occupied. The header's own
 %% flags decide, with the segment's number and length as the stages left them. The
 %% interface sends it within its RST rate limit.
-dropwithreset(#seg{hdr_flags = Flags, ack = Ack, seq = Seq, data = Data, link_cast = LinkCast},
+dropwithreset(#seg{hdr_flags = Flags, ack = Ack, seq = Seq, len = Tlen, link_cast = LinkCast},
               Tcb, Ctx) ->
     if
         Flags band ?TH_RST =/= 0; LinkCast =/= unicast ->
@@ -1080,7 +1088,7 @@ dropwithreset(#seg{hdr_flags = Flags, ack = Ack, seq = Seq, data = Data, link_ca
         Flags band ?TH_ACK =/= 0 ->
             {done, Tcb, [{reset, erx_tcp:respond(Tcb, Ctx, Ack, 0, ?TH_RST)}]};
         true ->
-            Len = byte_size(Data) + syn_len(Flags) + fin_len(Flags),
+            Len = Tlen + syn_len(Flags) + fin_len(Flags),
             {done, Tcb, [{reset, erx_tcp:respond(Tcb, Ctx, 0, Seq + Len, ?TH_RST bor ?TH_ACK)}]}
     end.
 

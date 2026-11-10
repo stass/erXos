@@ -56,13 +56,14 @@ full_depth(_) -> 6.
 
 %% Each dimension's own case: an option stripped and compared, a CWR sent, an urgent byte
 %% kept out, a pass sending more than one segment and a window probe at the edge, a
-%% report in flight acted on.
+%% report in flight acted on; merged segments reach the base cases.
 hits(timestamps) -> [options_unnegotiated_ignored, paws_drops_older];
 hits(ecn) -> [cwr_only_after_reduction, options_unnegotiated_ignored];
 hits(urgent) -> [delivered_in_order];
 hits(sack) -> [options_unnegotiated_ignored];
 hits(window) -> [sent_within_maxseg, sent_within_peer_window, options_unnegotiated_ignored];
-hits(icmp) -> [icmp_outside_flight_changes_nothing].
+hits(icmp) -> [icmp_outside_flight_changes_nothing];
+hits(merged) -> ?BASE_HITS.
 
 base_run_test_() ->
     {timeout, 280, fun() -> explores(#{depth => base_depth(), wrap => false}, ?BASE_HITS) end}.

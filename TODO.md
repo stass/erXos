@@ -137,16 +137,18 @@ it; git history is the record of completed work.
      units' length. `erx_bytes:tcp_merge/1` with `tcp_merge_limit/0` is in the tree
      (`c_src/erx_tcp_merge.c`, the portable NIF and erXos's BIF, judged against
      `erx_tcp_merge_model` by the network primitives' probe and EUnit cases, with its
-     `tcp_merge` fuzz target), and so is the driver's cut of every batch to that limit. What
-     remains is its use: the interface merging each batch before it classifies (the loopback
-     input left out), classifying a unit by its first frame and verifying its first and last;
-     segment counts in TCP, payloads as lists of binaries (`erx_tcp_payload`), the ACK,
-     window and congestion rules of a merged segment; credit by segments; and the copy check,
-     with the tests 5, 7 and 13 of the fast path's design and the `net_device` bursts. A
-     merged payload's pieces are sub-binaries that keep their whole frames alive, so the
-     receive queue and reassembly must count the bytes they hold, or copy small pieces as
-     FreeBSD's `sbcompress` does, before a peer's tiny segments can pin more memory than its
-     window allows;
+     `tcp_merge` fuzz target), and so is the driver's cut of every batch to that limit. So is
+     TCP's side: `erx_tcp:merged/3` makes a unit's one segment, whose payload
+     (`erx_tcp_payload`) stays in pieces through trimming, reassembly and the receive queue,
+     each piece held, costed and copied out on its own, with its count handed to
+     `cc_ack_received`; `erx_tcp_merged_tests` checks it against per-segment input (the
+     design's test 5) and the TCP explorer's `merged` dimension in every state. What remains
+     is the interface: merging each batch before it classifies (the loopback input left out),
+     classifying a unit by its first frame, verifying its first and last, checking that the
+     last names the first's flow and that `length(Payload) =< N =< 256`, and handing on the
+     segment `erx_tcp:merged/3` makes; credit by segments; and the copy check, with the tests
+     7, 8 and 12 of the fast path's design, the `net_device` bursts and the input fuzz target
+     reaching merged units;
   8. netmap with runs and merged batches, over VALE against lwIP over VALE;
   9. request-reply: the driver-to-interface hop and scheduler placement measured, and what
      their profiles name changed, toward the request-reply target;

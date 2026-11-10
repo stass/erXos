@@ -102,7 +102,8 @@ also crosses the wire's wrap.
              win = ?PEER_WIN :: 0..16#ffff,
              urp = 0 :: 0..16#ffff,
              opts = #tcp_opts{} :: #tcp_opts{},
-             ip_ecn = 0 :: 0..3}).
+             ip_ecn = 0 :: 0..3,
+             nsegs = 1 :: 1..2}).        % 2: sent as a unit of the merge (dimension(merged))
 
 -record(peer, {
     iss :: integer(),                   % where the alphabet's SYN-SENT positions are measured
@@ -183,7 +184,7 @@ explore(#{depth := Depth} = Opts) when is_integer(Depth), Depth > 0 ->
 -doc "The extra dimensions of the design, each explored on its own with `dimension => Name`.".
 -spec dimensions() -> [atom()].
 dimensions() ->
-    [timestamps, ecn, urgent, sack, window, icmp].
+    [timestamps, ecn, urgent, sack, window, icmp, merged].
 
 -doc """
 The properties every transition is checked against, by the names a violation carries: the
@@ -441,9 +442,20 @@ event({user, _} = Request, Now) ->
 
 %% The one place a segment of the peer's is encoded, as the interface hands it on.
 wire_segment(#in{seq = Seq, ack = Ack, flags = Flags, data = Data, win = Win, urp = Urp,
-                 opts = Opts, ip_ecn = IpEcn}) ->
+                 opts = Opts, ip_ecn = IpEcn, nsegs = NSegs}) ->
     {#tcp{sport = 80, dport = 4000, seq = erx_tcp_seq:wire(Seq), ack = erx_tcp_seq:wire(Ack),
-          flags = Flags, win = Win, urp = Urp, opts = Opts}, Data, IpEcn, unicast}.
+          flags = Flags, win = Win, urp = Urp, opts = Opts}, payload(Data, NSegs), IpEcn, unicast}.
+
+%% A payload as one binary, or as the merge hands on a unit of NSegs: a pure ACK unit with no
+%% piece, a data unit in two pieces, the second at least one byte.
+payload(Data, 1) ->
+    Data;
+payload(<<>>, NSegs) ->
+    {merged, NSegs, []};
+payload(Data, NSegs) ->
+    Cut = byte_size(Data) div 2,
+    <<A:Cut/binary, B/binary>> = Data,
+    {merged, NSegs, [Piece || Piece <- [A, B], Piece =/= <<>>]}.
 
 %% An ICMPv4 error quoting the start of a segment of ours at Seq, as erx_net_input hands it
 %% on: fragmentation needed proposing ?REPORT_MTU, or port unreachable. The connection is
@@ -605,6 +617,20 @@ dimension(icmp) ->
     (dimension(base))#{events => Events, abstraction => Abs,
                        checks => [{icmp_outside_flight_changes_nothing,
                                    fun icmp_outside_flight_changes_nothing/1}]};
+%% A segment the merge could make (erx_bytes:tcp_merge/1, docs/design-network-fastpath.md, "A
+%% merged segment in TCP"): ACK and no SYN, FIN, RST or URG, as a unit arriving whole, its
+%% data in two pieces, or a pure ACK standing for two segments. The checks are
+%% the base exploration's invariants, judged in every state a unit reaches; agreement with
+%% the members stepped one by one is erx_tcp_merged_tests'.
+dimension(merged) ->
+    Variants = fun(#in{flags = Flags} = In, _)
+                     when Flags band ?TH_ACK =/= 0,
+                          Flags band (?TH_SYN bor ?TH_FIN bor ?TH_RST bor ?TH_URG) =:= 0 ->
+                       [{merged, In#in{nsegs = 2}}];
+                  (_, _) ->
+                       []
+               end,
+    (dimension(base))#{variants => Variants};
 dimension(Name) ->
     erlang:error({unknown_dimension, Name}).
 

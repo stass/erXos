@@ -67,8 +67,8 @@ arrive({_, End}, #{rcv_nxt := RcvNxt} = S, Base, _) when Base + End =< RcvNxt ->
     S;
 arrive({Off0, End}, #{q := Q, rcv_nxt := RcvNxt, out := Out, have := Have, ctx := Ctx} = S, Base, Stream) ->
     Off = max(Off0, RcvNxt - Base),
-    Data = frame(binary:part(Stream, Off, End - Off)),
-    Seg = #{seq => Base + Off, data => Data, fin => End =:= byte_size(Stream)},
+    Data = binary:part(Stream, Off, End - Off),
+    Seg = #{seq => Base + Off, data => pieces(Data), fin => End =:= byte_size(Stream)},
     Have1 = maps:merge(Have, maps:from_keys(lists:seq(Base + Off, Base + End - 1), true)),
     Expect = first_missing(RcvNxt, Have1),
     S1 = case erx_tcp_reass:insert(Q, Seg, RcvNxt, Ctx) of
@@ -112,10 +112,24 @@ frame(Data) ->
         _ -> Data
     end.
 
+%% A payload as a merged segment carries it: its bytes in one to three pieces, each a
+%% sub-binary of its own frame and none empty.
+pieces(<<>>) ->
+    [];
+pieces(Data) ->
+    case rand:uniform(3) of
+        1 when byte_size(Data) > 1 ->
+            Cut = rand:uniform(byte_size(Data) - 1),
+            <<A:Cut/binary, B/binary>> = Data,
+            [frame(A) | pieces(B)];
+        _ ->
+            [frame(Data)]
+    end.
+
 shuffle(List) -> [X || {_, X} <- lists:sort([{rand:uniform(), X} || X <- List])].
 
-seg(Seq, Data) -> #{seq => Seq, data => Data, fin => false}.
-fin(Seq, Data) -> #{seq => Seq, data => Data, fin => true}.
+seg(Seq, Data) -> #{seq => Seq, data => [Data || Data =/= <<>>], fin => false}.
+fin(Seq, Data) -> #{seq => Seq, data => [Data || Data =/= <<>>], fin => true}.
 
 queued({queued, Q}) -> Q.
 

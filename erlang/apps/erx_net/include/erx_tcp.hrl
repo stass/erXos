@@ -167,7 +167,11 @@
     hdr_flags :: 0..16#fff,             % tcp_get_flags(th), what tcp_dropwithreset answers
     win :: non_neg_integer(),           % tiwin: th_win << snd_scale
     urp :: 0..16#ffff,                  % th_urp, which trimming moves
-    data :: binary(),                   % the payload as trimmed so far; tlen is its size
+    data :: erx_tcp_payload:t(),        % the payload as trimmed so far, in pieces
+    len :: non_neg_integer(),           % tlen: the bytes of data
+    %% The segments it stands for: 1, or the count of a merged unit (lro_nsegs), which
+    %% cc_ack_received takes.
+    nsegs = 1 :: 1..256,
     %% The data's range as it arrived, before any trimming, for erx_tcp_sack:arrived/4.
     arrived :: {integer(), integer()},
     %% TOF_TS: TSval against ts_recent, and TSecr less ts_offset on our millisecond clock,

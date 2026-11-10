@@ -73,6 +73,8 @@ the owner's exit closes the connection as `close/1` does.
 %% tcp_sendspace and tcp_recvspace, FreeBSD's default buffer sizes (tcp_usrreq.c).
 -define(SNDBUF, 32768).
 -define(RCVBUF, 65536).
+%% A delivered piece smaller than this joins a small newest piece of the receive queue.
+-define(SMALL_PIECE, 512).
 
 -doc """
 What the grant starts a connection with: its owner, the connect caller it answers, the
@@ -280,8 +282,8 @@ perform({transmit, Segments}, #state{path = Path, gen = Gen0} = S) ->
         {error, Reason} -> count(Reason, S)
     end;
 perform({deliver, Data}, #state{rcvq = Q, rcv_bytes = N} = S) ->
-    Bin = compact(iolist_to_binary(Data)),
-    S#state{rcvq = [Bin | Q], rcv_bytes = N + byte_size(Bin)};
+    S#state{rcvq = lists:foldl(fun queue/2, Q, Data),
+            rcv_bytes = N + erx_tcp_payload:size(Data)};
 perform({notify, eof}, S) ->
     S#state{eof = true};
 perform({notify, {error, Reason}}, S) ->
@@ -316,7 +318,21 @@ perform({reinject, _Segment}, S) ->
 perform(finish, S) ->
     S#state{finished = true}.
 
-%% A payload smaller than a quarter of the frame it references is copied out, as the
+%% A delivered piece onto the receive queue Q, newest first, as sbcompress appends an mbuf
+%% to the socket buffer (uipc_sockbuf.c): a small piece is joined to a small newest one, so
+%% a peer's tiny segments cost the queue their bytes and not a binary and a cons cell each;
+%% any other piece is compacted and queued on its own. The pieces of a merged segment are
+%% judged one by one, each a sub-binary of its own frame, and the queue joins what it holds
+%% once, when the owner reads (take/2). So the queue keeps alive at most four times its
+%% bytes, plus a few words for each piece of at least ?SMALL_PIECE bytes, within the
+%% eight times of FreeBSD's sb_mbmax (sb_efficiency).
+queue(Piece, [Newest | Q]) when byte_size(Piece) < ?SMALL_PIECE,
+                                byte_size(Newest) < 4 * ?SMALL_PIECE ->
+    [<<Newest/binary, Piece/binary>> | Q];
+queue(Piece, Q) ->
+    [compact(Piece) | Q].
+
+%% A payload piece smaller than a quarter of the frame it references is copied out, as the
 %% reassembly queue copies it (erx_tcp_reass), so that queued tiny segments do not keep
 %% their whole frames alive.
 compact(Bin) ->

@@ -105,7 +105,7 @@ receive window it advertises.
 -include("erx_tcp.hrl").
 -include("erx_tcp_wire.hrl").
 
--export([step/3, next_deadline/1]).
+-export([step/3, next_deadline/1, merged/3]).
 -export([have_rcvd_syn/1, have_established/1, have_rcvd_fin/1, rank/1]).
 -export([cong_signal/4, loss_events/4, rewind/3, ccv/2, rxtshift/1, respond/5, challenge_ack/3,
          rcv_space/1, ts_now/2]).
@@ -138,8 +138,12 @@ class byte, tcp_do_segment's `iptos`), and the link cast of its frame
 (`erx_net_input:link_cast()`, FreeBSD's `M_BCAST` and `M_MCAST`). The step answers a segment
 with a `reset` only when its frame was link unicast (`tcp_dropwithreset`,
 tcp_input.c:3450-3451), and a reinjected segment takes its link cast back to the interface.
+A unit the merge made (erx_bytes:tcp_merge/1) is one segment: its first frame's header with
+its last frame's acknowledgement, window and options, and as its payload the members'
+pieces with their count (erx_tcp_payload:wire()), as FreeBSD's LRO hands tcp_input one
+packet with lro_nsegs.
 """.
--type segment() :: {#tcp{}, Payload :: binary(), IpEcn :: 0..3,
+-type segment() :: {#tcp{}, Payload :: erx_tcp_payload:wire(), IpEcn :: 0..3,
                     LinkCast :: unicast | broadcast | multicast}.
 
 -doc """
@@ -155,7 +159,7 @@ segment (`tcp_dropwithreset`), which the interface sends only within its RST rat
 (see challenge_ack/3).
 """.
 -type action() :: {transmit, [outgoing()]}
-                | {deliver, iodata()}
+                | {deliver, erx_tcp_payload:t()}
                 | {notify, eof | closed | {error, atom()} | {ready, [atom()]}}
                 | {reply, gen_server:from(), term()}
                 | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
@@ -392,6 +396,19 @@ loss_event(ack_now, Tcb, _, _) ->
     Tcb#tcb{ack_now = true};
 loss_event(resume_at_max, #tcb{snd_max = SndMax} = Tcb, _, _) ->
     Tcb#tcb{snd_nxt = SndMax}.
+
+-doc """
+The one segment the connection takes for a unit of the merge (erx_bytes:tcp_merge/1), from
+its first and last frames as erx_tcp_wire decoded them and its count and payload pieces:
+the first frame's header with the last frame's acknowledgement, window and options, as
+FreeBSD's LRO writes the last segment's into the first's header (tcp_lro.c:731-740). The IP
+header's ECN field and the link cast are the first frame's, which every member shares, since
+the merge keeps a unit to one flow.
+""".
+-spec merged(segment(), segment(), {2..256, [binary()]}) -> segment().
+merged({#tcp{} = First, _, IpEcn, LinkCast}, {#tcp{ack = Ack, win = Win, opts = Opts}, _, _, _},
+       {N, Pieces}) ->
+    {First#tcp{ack = Ack, win = Win, opts = Opts}, {merged, N, Pieces}, IpEcn, LinkCast}.
 
 -doc """
 `sbspace(&so->so_rcv)`: the receive buffer's free bytes, the window before scaling.

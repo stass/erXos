@@ -225,19 +225,19 @@ urgent_byte_out_of_order_is_kept_out_too_test() ->
 
 urgent_pointer_past_any_buffer_is_ignored_test() ->
     T0 = (est())#tcb{rcv_buffered = 2 * 1024 * 1024},
-    {T, [{deliver, <<"abc">>}]} =
+    {T, [{deliver, [<<"abc">>]}]} =
         input([wire(?RCV, ?ISS + 1, ?ACK bor ?TH_URG, <<"abc">>, #tcp_opts{}, 10000, 2)], T0),
     ?assertEqual(?RCV, T#tcb.rcv_up).
 
 %% --- data, tcp_input.c:3165-3290 --------------------------------------------------------
 
 in_order_data_is_delivered_with_a_delayed_ack_test() ->
-    {T1, [{deliver, <<"abc">>}]} = input([wire(?RCV, ?ISS + 1, ?ACK, <<"abc">>)], est()),
+    {T1, [{deliver, [<<"abc">>]}]} = input([wire(?RCV, ?ISS + 1, ?ACK, <<"abc">>)], est()),
     ?assertEqual({?RCV + 3, 3, false, ?T0 + 40000},
                  {T1#tcb.rcv_nxt, T1#tcb.rcv_buffered, T1#tcb.ack_now,
                   (T1#tcb.deadlines)#deadlines.delack}),
     %% With a delayed ACK already pending, the next segment is acknowledged at once.
-    {T2, [{deliver, <<"de">>}]} = input([wire(?RCV + 3, ?ISS + 1, ?ACK, <<"de">>)], T1),
+    {T2, [{deliver, [<<"de">>]}]} = input([wire(?RCV + 3, ?ISS + 1, ?ACK, <<"de">>)], T1),
     ?assert(T2#tcb.ack_now).
 
 ack_after_a_zero_window_is_not_delayed_test() ->
@@ -276,7 +276,7 @@ fin_transitions_test_() ->
               {T, A} = input([wire(?RCV, ?ISS + 1, ?FIN_ACK, <<"z">>)], (est())#tcb{state = State}),
               {T#tcb.state, T#tcb.rcv_nxt, T#tcb.ack_now, A}
           end,
-    Eof = [{deliver, <<"z">>}, {notify, eof}],
+    Eof = [{deliver, [<<"z">>]}, {notify, eof}],
     [?_assertEqual({close_wait, ?RCV + 2, true, Eof}, Fin(established)),
      ?_assertEqual({closing, ?RCV + 2, true, Eof}, Fin(fin_wait_1)),
      ?_assertEqual({time_wait, ?RCV + 2, true, Eof}, Fin(fin_wait_2)),
@@ -468,7 +468,7 @@ queued(false) ->
     erx_tcp_reass:new();
 queued(true) ->
     {queued, Q} = erx_tcp_reass:insert(erx_tcp_reass:new(),
-                                       #{seq => ?RCV + 2000, data => <<"q">>, fin => false}, ?RCV,
+                                       #{seq => ?RCV + 2000, data => [<<"q">>], fin => false}, ?RCV,
                                        #{established => true, room => 10000, hiwat => 10000,
                                          mss => 1000}),
     Q.

@@ -54,7 +54,8 @@ stage(Name, Seg, Tcb) ->
 
 seg(Seq, Flags, Data) ->
     #seg{seq = Seq, ack = ?ISS + 1, flags = Flags, hdr_flags = Flags, win = 1000, urp = 0,
-         data = Data, arrived = {Seq, Seq + byte_size(Data)}, ip_ecn = 0, link_cast = unicast}.
+         data = [Data || Data =/= <<>>], len = byte_size(Data), arrived = {Seq, Seq + byte_size(Data)},
+         ip_ecn = 0, link_cast = unicast}.
 
 %% The RST a {reset, _} action carries: {Seq, Ack, Flags, Win}.
 resets(Actions) ->
@@ -114,7 +115,7 @@ synack_data_past_the_window_drops_the_fin_test() ->
     Seg = (seg(9000, Flags, <<"abcdef">>))#seg{ack = ?ISS + 1},
     {goto, process_ack, T, Taken, []} = stage(syn_sent, Seg, Tcb),
     ?assertEqual({9001, <<"abcd">>, ?TH_SYN bor ?TH_ACK},
-                 {Taken#seg.seq, Taken#seg.data, Taken#seg.flags}),
+                 {Taken#seg.seq, iolist_to_binary(Taken#seg.data), Taken#seg.flags}),
     %% The data waits for a delayed ACK (DELAY_ACK).
     ?assertEqual({established, ?T0 + ?S(40)}, {T#tcb.state, T#tcb.deadlines#deadlines.delack}).
 
@@ -262,7 +263,7 @@ missing_timestamp_is_tolerated_test() ->
     ?assertEqual({500, false}, {T#tcb.ts#ts.recent, T#tcb.ended}).
 
 unexpected_timestamp_is_ignored_test() ->
-    {T, [{deliver, <<"x">>}]} =
+    {T, [{deliver, [<<"x">>]}]} =
         input([wire(5001, ?ISS + 1, ?TH_ACK, <<"x">>, #tcp_opts{ts = {1, 0}})], est()),
     ?assertEqual({off, false}, {T#tcb.ts, T#tcb.ack_now}).
 
@@ -281,16 +282,16 @@ trim_front_test_() ->
     {continue, Sack, _} = stage(trim, seg(4998, ?TH_ACK, <<"abcdef">>), Tcb#tcb{sack = on}),
     W = ?WRAPPED,
     {continue, _, Wrapped} = stage(trim, seg(W - 2, ?TH_ACK, <<"abcd">>), est(W)),
-    [?_assertEqual({5001, <<"def">>}, {Part#seg.seq, Part#seg.data}),
-     ?_assertEqual({5001, <<"bc">>, ?TH_ACK}, {Syn#seg.seq, Syn#seg.data, Syn#seg.flags}),
+    [?_assertEqual({5001, <<"def">>}, {Part#seg.seq, iolist_to_binary(Part#seg.data)}),
+     ?_assertEqual({5001, <<"bc">>, ?TH_ACK}, {Syn#seg.seq, iolist_to_binary(Syn#seg.data), Syn#seg.flags}),
      %% Wholly old: a duplicate FIN goes and an ACK is owed.
      ?_assertEqual({4993, <<>>, ?TH_ACK, true},
-                   {Old#seg.seq, Old#seg.data, Old#seg.flags, Dup#tcb.ack_now}),
+                   {Old#seg.seq, iolist_to_binary(Old#seg.data), Old#seg.flags, Dup#tcb.ack_now}),
      %% Old data up to rcv_nxt with a new FIN: the FIN stays, no ACK owed for the trim.
      ?_assertEqual({5001, <<>>, ?TH_ACK bor ?TH_FIN, false},
-                   {Fin#seg.seq, Fin#seg.data, Fin#seg.flags, Upto#tcb.ack_now}),
+                   {Fin#seg.seq, iolist_to_binary(Fin#seg.data), Fin#seg.flags, Upto#tcb.ack_now}),
      ?_assert(Sack#tcb.ack_now),
-     ?_assertEqual({W, <<"cd">>}, {Wrapped#seg.seq, Wrapped#seg.data})].
+     ?_assertEqual({W, <<"cd">>}, {Wrapped#seg.seq, iolist_to_binary(Wrapped#seg.data)})].
 
 trim_back_test_() ->
     Tcb = est(),
@@ -301,12 +302,12 @@ trim_back_test_() ->
     Closed = Tcb#tcb{rcv_wnd = 0},
     {continue, Probe, Window} = stage(trim, seg(5001, Push, <<"abc">>), Closed),
     Beyond = stage(trim, seg(5002, ?TH_ACK, <<"abc">>), Closed),
-    [?_assertEqual({<<"abcdef">>, ?TH_ACK}, {Cut#seg.data, Cut#seg.flags}),
-     ?_assertEqual({<<"abcdefgh">>, Push}, {Fits#seg.data, Fits#seg.flags}),
+    [?_assertEqual({<<"abcdef">>, ?TH_ACK}, {iolist_to_binary(Cut#seg.data), Cut#seg.flags}),
+     ?_assertEqual({<<"abcdefgh">>, Push}, {iolist_to_binary(Fits#seg.data), Fits#seg.flags}),
      %% Starting exactly at the window's right edge: acknowledged and dropped.
      ?_assertMatch({done, #tcb{ack_now = true}, []}, Edge),
      %% A closed window takes a segment at rcv_nxt, without its data, and owes an ACK.
-     ?_assertEqual({<<>>, ?TH_ACK, true}, {Window#seg.data, Window#seg.flags, Probe#tcb.ack_now}),
+     ?_assertEqual({<<>>, ?TH_ACK, true}, {iolist_to_binary(Window#seg.data), Window#seg.flags, Probe#tcb.ack_now}),
      ?_assertMatch({done, #tcb{ack_now = true}, []}, Beyond)].
 
 trim_back_runs_on_the_window_of_the_step_test() ->

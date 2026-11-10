@@ -670,7 +670,11 @@ segments ([Credit counts segments](#credit-counts-segments)), verifies
 the first and the last frame as it verifies any frame, checks that the
 last names the first's flow, and hands the connection one segment: the
 first frame's header with the last frame's acknowledgement, window and
-timestamps, the payload pieces, and N.
+timestamps, the payload pieces, and N. `erx_tcp:merged/3` builds that
+segment from the first and last frames as `erx_tcp_wire` decoded them,
+with `{merged, N, Pieces}` in the place of a frame's payload binary; the
+flags are the first frame's, as in FreeBSD's LRO packet, and every
+member's are ACK and at most PSH.
 
 ### A merged segment in TCP
 
@@ -696,8 +700,13 @@ takes an LRO packet:
   (`tcp_lro_mbuf_append_pkthdr`, `tcp_lro.c:937-960`) and drops the pure
   ACKs it merges uncounted (`:1088-1091`), so a run of pure ACKs reaches
   congestion control as one. The stack counts each merged ACK, so a
-  sender's window grows as the separate ACKs would have let it. N also
-  counts segments received in the connection's statistics.
+  sender's window grows as the separate ACKs would have let it when each
+  of them acknowledges at most the limit of one ACK. N counts the data
+  members too, as `lro_nsegs` does, also those whose ACK did not move, so
+  a unit that ends in a stretch ACK raises slow start's cap for that ACK
+  to N times the limit where per-segment input would take one; the growth
+  is still no more than the bytes acknowledged, and it is FreeBSD's with
+  LRO. N also counts segments received in the connection's statistics.
 * **The acknowledgement.** `DELAY_ACK` delays only a segment of at most
   `t_maxseg` (`tcp_input.c:511`). A merged data segment is longer, so it
   is acknowledged at once, as FreeBSD acknowledges an LRO packet and
@@ -848,8 +857,10 @@ do, so draining needs no rule of its own for a bug.
 
 The receive queue holds pieces: `{deliver, Data}` appends the pieces to
 it and copies out only those smaller than a quarter of the binary they
-reference, the stack's rule (`erx_tcp_conn:compact/1`), so no step joins
-payload.
+reference, the stack's rule (`erx_tcp_conn:compact/1`), and joins a piece
+of fewer than 512 bytes to a small newest one, as `sbcompress` joins
+small mbufs, so a peer's tiny segments cost the queue their bytes and not
+a binary each (`erx_tcp_conn:queue/2`); no step joins payload otherwise.
 
 ### The core stays pure
 
@@ -977,8 +988,8 @@ in `make check` reads the modules a TCP payload passes through (the
 any call of `iolist_to_binary/1`, `list_to_binary/1`, `binary:copy/1,2`,
 `binary:list_to_bin/1` or `erlang:iolist_to_iovec/1` outside its list.
 The list has three entries: the receive and reassembly queues' copy of a
-small piece (`erx_tcp_conn:compact/1`, `erx_tcp_reass`), which keeps a
-few bytes from holding a frame alive; the pipe's `process` end, whose
+small piece (`erx_tcp_conn:compact/1` and `queue/2`, `erx_tcp_reass`),
+which keeps a few bytes from holding a frame alive; the pipe's `process` end, whose
 far end, a test, takes each frame as one binary; and the loop
 transport's copy of each packet it returns, the one copy a device makes
 elsewhere ([The driver](design-network-stack.md#the-driver)). IP fragmentation

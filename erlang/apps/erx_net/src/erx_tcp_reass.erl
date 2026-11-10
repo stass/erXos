@@ -101,9 +101,10 @@ that starts earlier merge over a FIN-only entry and lose the FIN.
 -doc """
 A received segment, already trimmed by the caller to start at or after
 `rcv_nxt` and to end inside the receive window: its first sequence number,
-its payload and whether it carries FIN.
+its payload, in pieces (erx_tcp_payload), each of which the queue holds on its own, and
+whether it carries FIN.
 """.
--type segment() :: #{seq := integer(), data := binary(), fin := boolean()}.
+-type segment() :: #{seq := integer(), data := erx_tcp_payload:t(), fin := boolean()}.
 
 -doc """
 What the queue needs from the connection: whether it has reached
@@ -146,11 +147,11 @@ the in-order data, if any, delivered as `present/2` would.
 """.
 -spec insert(reass(), segment(), integer(), context()) -> result().
 insert(Q, #{seq := Seq, data := Data, fin := Fin}, RcvNxt, Ctx)
-  when is_integer(Seq), is_binary(Data), is_boolean(Fin), is_integer(RcvNxt), Seq >= RcvNxt ->
+  when is_integer(Seq), is_list(Data), is_boolean(Fin), is_integer(RcvNxt), Seq >= RcvNxt ->
     #{established := Established, room := Room, hiwat := HiWat, mss := Mss} = Ctx,
-    End = Seq + byte_size(Data),
+    End = Seq + erx_tcp_payload:size(Data),
     InOrder = Seq =:= RcvNxt andalso Established,
-    Fits = InOrder orelse Q#reass.bytes + cost(Data) =< Room,
+    Fits = InOrder orelse Q#reass.bytes + lists:sum([cost(Piece) || Piece <- Data]) =< Room,
     Cap = min(HiWat div Mss + 1, ?MAX_QUEUE_LEN),
     case check(Q, Seq, End, Fin, Established, Fits) of
         ok ->
@@ -160,7 +161,7 @@ insert(Q, #{seq := Seq, data := Data, fin := Fin}, RcvNxt, Ctx)
                 {new_range, Start} when not InOrder, Start < End, length(Q#reass.ranges) >= Cap ->
                     {dropped, queue_full, Q};
                 {_, Start} ->
-                    Q1 = place(Q, Start, End, binary:part(Data, Start - Seq, End - Start)),
+                    Q1 = place(Q, Start, End, erx_tcp_payload:part(Data, Start - Seq, End - Start)),
                     Q2 = case Fin of
                              true -> Q1#reass{fin = End};
                              false -> Q1
@@ -246,16 +247,22 @@ trim(_, Seq, _) ->
     {new_range, Seq}.
 
 %% Hold the trimmed payload Data at [Start, End): drop or cut the held
-%% pieces it covers, since its bytes replace theirs, then add it and merge
-%% its span into the ranges. A bare FIN adds nothing here.
+%% pieces it covers, since its bytes replace theirs, then add each of its
+%% pieces at its own sequence number and merge its span into the ranges.
+%% A bare FIN adds nothing here.
 place(Q, End, End, _) ->
     Q;
 place(#reass{ranges = Ranges, pieces = Pieces, bytes = Bytes} = Q, Start, End, Data) ->
     {Pieces1, Bytes1} = uncover(gb_trees:iterator_from(Start, Pieces), End, Pieces, Bytes),
+    {Pieces2, Bytes2} = add(Data, Start, Pieces1, Bytes1),
+    Q#reass{ranges = merge(Ranges, Start, End), pieces = Pieces2, bytes = Bytes2}.
+
+%% The pieces of a payload, the first at Key, each held at its own sequence number.
+add([], _, Pieces, Bytes) ->
+    {Pieces, Bytes};
+add([Data | Rest], Key, Pieces, Bytes) ->
     {_, Cost} = Piece = hold(Data),
-    Q#reass{ranges = merge(Ranges, Start, End),
-            pieces = gb_trees:insert(Start, Piece, Pieces1),
-            bytes = Bytes1 + Cost}.
+    add(Rest, Key + byte_size(Data), gb_trees:insert(Key, Piece, Pieces), Bytes + Cost).
 
 %% Delete the held pieces that start between the iterator's position and
 %% End, and cut the one that runs past End down to its part after End.

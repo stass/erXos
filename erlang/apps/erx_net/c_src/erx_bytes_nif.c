@@ -235,6 +235,19 @@ get_merge_frame(ErlNifEnv *env, ERL_NIF_TERM term, erx_tcp_merge_in_t *frame, ER
 }
 
 /*
+ * What one call of tcp_merge/1 keeps per frame, about 18 KiB, allocated for the call instead
+ * of on the scheduler's stack, whose size the NIF does not control.
+ */
+typedef struct merge_scratch {
+	erx_tcp_merge_in_t in[ERX_TCP_MERGE_FRAMES_MAX];
+	erx_tcp_merge_out_t out[ERX_TCP_MERGE_FRAMES_MAX];
+	ERL_NIF_TERM given[ERX_TCP_MERGE_FRAMES_MAX], binaries[ERX_TCP_MERGE_FRAMES_MAX];
+	ERL_NIF_TERM summed[ERX_TCP_MERGE_FRAMES_MAX], payloads[ERX_TCP_MERGE_FRAMES_MAX];
+} merge_scratch_t;
+
+static ERL_NIF_TERM tcp_merge_with(ErlNifEnv *, ERL_NIF_TERM, merge_scratch_t *);
+
+/*
  * tcp_merge(Frames): the units of erx_tcp_merge over one batch, in order of their first frames
  * (erx_tcp_merge.h). A frame on its own is {sum, Sum, Frame}, the very term it came as when it
  * came with its sum; a unit of several is {merged, N, First, Last, Payload}, its first and last
@@ -244,17 +257,31 @@ get_merge_frame(ErlNifEnv *env, ERL_NIF_TERM term, erx_tcp_merge_in_t *frame, ER
 static ERL_NIF_TERM
 tcp_merge(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	erx_tcp_merge_in_t in[ERX_TCP_MERGE_FRAMES_MAX];
-	erx_tcp_merge_out_t out[ERX_TCP_MERGE_FRAMES_MAX];
-	ERL_NIF_TERM given[ERX_TCP_MERGE_FRAMES_MAX], binaries[ERX_TCP_MERGE_FRAMES_MAX];
-	ERL_NIF_TERM summed[ERX_TCP_MERGE_FRAMES_MAX], payloads[ERX_TCP_MERGE_FRAMES_MAX];
-	size_t count, i;
-	ERL_NIF_TERM list, head, sum_atom, merged_atom, unit, units;
+	merge_scratch_t *scratch;
+	ERL_NIF_TERM units;
 
 	if (argc != 1)
 		return (enif_make_badarg(env));
+	if ((scratch = enif_alloc(sizeof(*scratch))) == NULL)
+		return (enif_raise_exception(env, enif_make_atom(env, "system_limit")));
+	units = tcp_merge_with(env, argv[0], scratch);
+	enif_free(scratch);
+	return (units);
+}
+
+/* tcp_merge/1 over Frames with its per-frame arrays in scratch. */
+static ERL_NIF_TERM
+tcp_merge_with(ErlNifEnv *env, ERL_NIF_TERM frames, merge_scratch_t *scratch)
+{
+	erx_tcp_merge_in_t *in = scratch->in;
+	erx_tcp_merge_out_t *out = scratch->out;
+	ERL_NIF_TERM *given = scratch->given, *binaries = scratch->binaries;
+	ERL_NIF_TERM *summed = scratch->summed, *payloads = scratch->payloads;
+	size_t count, i;
+	ERL_NIF_TERM list, head, sum_atom, merged_atom, unit, units;
+
 	count = 0;
-	for (list = argv[0]; enif_get_list_cell(env, list, &head, &list); count++) {
+	for (list = frames; enif_get_list_cell(env, list, &head, &list); count++) {
 		if (count == ERX_TCP_MERGE_FRAMES_MAX ||
 		    !get_merge_frame(env, head, &in[count], &binaries[count]))
 			return (enif_make_badarg(env));

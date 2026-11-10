@@ -87,8 +87,7 @@ lifting; its numbers are compared with the connection's as FreeBSD's modular com
 do.
 """.
 -spec check(erx_tcp:segment(), #tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:action()]}.
-check({#tcp{flags = Flags} = Th, Payload, _, _} = Segment, #tcb{state = time_wait} = Tcb, Ctx)
-  when is_binary(Payload) ->
+check({#tcp{flags = Flags} = Th, Payload, _, _} = Segment, #tcb{state = time_wait} = Tcb, Ctx) ->
     if
         Flags band ?TH_RST =/= 0 ->
             {Tcb, []};
@@ -100,7 +99,8 @@ check({#tcp{flags = Flags} = Th, Payload, _, _} = Segment, #tcb{state = time_wai
         Flags band ?TH_ACK =:= 0 ->
             {Tcb, []};
         true ->
-            acknowledge(Th, byte_size(Payload), Tcb, Ctx)
+            {_, Len, _} = erx_tcp_payload:from_wire(Payload),
+            acknowledge(Th, Len, Tcb, Ctx)
     end.
 
 %% RFC 6191 as tcp_twcheck reads it (:262-287): a SYN may reuse the four-tuple when its

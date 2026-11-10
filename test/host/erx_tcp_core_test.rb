@@ -8,7 +8,8 @@ require_relative 'erx_net_eunit'
 # Runs the EUnit cases of the TCP connection core: the step's dispatch and settling, user
 # requests, timer expirations and the send buffer (test/erlang/erx_tcp_tests.erl), and the
 # segment pipeline's stages (test/erlang/erx_tcp_input_tests.erl and, from the ACK on, with
-# header prediction, test/erlang/erx_tcp_input_ack_tests.erl), with seeded faults in the checks
+# header prediction, test/erlang/erx_tcp_input_ack_tests.erl), merged segments against their
+# members stepped one by one (test/erlang/erx_tcp_merged_tests.erl), with seeded faults in the checks
 # that guard against blind injection, at the window's edges and in the fast path's preconditions.
 class ErxTcpCoreTest < Minitest::Test
   include ErxNetEunit
@@ -44,7 +45,30 @@ class ErxTcpCoreTest < Minitest::Test
   RST_FOR_ANY_LINK_CAST = 'Flags band ?TH_RST =/= 0; LinkCast =:= none ->'
 
   def test_core_cases_pass_under_eunit
-    assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests, :erx_tcp_input_ack_tests)
+    assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests, :erx_tcp_input_ack_tests, :erx_tcp_merged_tests)
+  end
+
+  # A merged segment hands cc_ack_received its count of segments (lro_nsegs), and takes the
+  # last member's window.
+  NSEGS_PASSED = 'CcAck = #cc_ack{bytes = Bytes, nsegs = NSegs,'
+  NSEGS_DROPPED = 'CcAck = #cc_ack{bytes = Bytes, nsegs = 1 + 0 * NSegs,'
+  LAST_WINDOW = '{First#tcp{ack = Ack, win = Win, opts = Opts}'
+  FIRST_WINDOW = '{First#tcp{ack = Ack + 0 * Win, opts = Opts}'
+  FIRST_OPTIONS = '{First#tcp{ack = Ack, win = Win, opts = (First#tcp.opts)#tcp_opts{sacks = Opts#tcp_opts.sacks}}'
+
+  def test_a_merged_ack_counted_as_one_segment_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_merged_tests, fault: { 'erx_tcp_input' => [NSEGS_PASSED, NSEGS_DROPPED] })
+    assert_match(/merged_acks_grow_the_window_as_separate_acks/, output)
+  end
+
+  def test_a_merged_window_from_the_first_member_is_caught
+    output = refute_erx_net_eunit(:erx_tcp_merged_tests, fault: { 'erx_tcp' => [LAST_WINDOW, FIRST_WINDOW] })
+    assert_match(/merged_window_is_the_last_members/, output)
+  end
+
+  def test_merged_timestamps_from_the_first_member_are_caught
+    output = refute_erx_net_eunit(:erx_tcp_merged_tests, fault: { 'erx_tcp' => [LAST_WINDOW, FIRST_OPTIONS] })
+    assert_match(/merged_timestamps_are_the_last_members/, output)
   end
 
   def test_an_in_window_rst_that_resets_is_caught
