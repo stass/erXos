@@ -21,7 +21,7 @@ extern uint32_t erx_lane_batch;
 
 /*
  * -erx test_lane_hold, a test's switch, off by default: port_control 4 may then hold the
- * ring of this domain's system connection (erx_lane_drv.c, control_hold).
+ * ring of one of this domain's lane ports (erx_lane_drv.c, control_hold).
  */
 extern bool erx_lane_test_hold;
 

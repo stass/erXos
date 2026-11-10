@@ -226,6 +226,65 @@ module Erx
                               "receive {erx_origin,SdSd,{'$gen_call',SdSf,SdSq}}->gen:reply(SdSf,{pong,SdSd,SdSq}) after 60000->ok end end)," \
                               'SdServing=receive {erx_origin,_,{sd_serving,SdSv}}->ok after 10000->timeout end,' \
                               'SdPong=try erpc:call(erts@erxos,gen_server,call,[SdSv,ping,10000],15000) catch SdPc:SdPr->{SdPc,SdPr} end'
+    # The connection's down path (docs/design-domains.md, "Introduction and connection
+    # down"), from one side each time, on the introduced pair. SdPhase is the pair's phase
+    # in the domain service's core, and SdNone polls it every 100 ms at most K times until
+    # it is none: the objects deleted and the connection forgotten once both parties
+    # unmapped. Each case ends with the pair introduced again, which answers ok only once
+    # each domain's side is done and no longer counts against its one connection.
+    # erlang:disconnect_node/1 in erts, behind a burst the finish must deliver: SdKc runs in
+    # peer, exports itself to erts with send and link, holds its port's ring for erts
+    # (port_control 4, allowed by DOMAIN_ARGS's -erx test_lane_hold) and gathers what
+    # arrives until an 'EXIT', answering {sd_kdone, C, {Count, InOrder, Exit}}; SdKb runs in
+    # erts, links to the collector, sends it DOWN_BURST messages {sd_kb, I}, waits until
+    # its port counts them sent into the lane, so they are published, and disconnects peer,
+    # answering {sd_kbdone, B, Sent, Exit}. erts's port ends, its agent answers
+    # connection_lost, the service tells peer connection_down, and peer's agent has the port
+    # finish, which releases the hold and takes the link and the whole burst before the
+    # port ends with noconnection. Then a malformed frame from erts: SdMw runs in peer,
+    # exports itself to erts and answers its 'EXIT'; SdMf runs in erts, links to it, waits
+    # until its port counts the link sent, so peer takes it first, and writes a frame whose
+    # control term is no operation onto its port, which peer's funnel refuses as
+    # malformed; it answers what port_command returned and its own 'EXIT'.
+    DOWN_BURST = 20
+    SERVICE_KILL_DOWN = "SdPid2=#{DOMAINS.fetch('peer')}," \
+                        'SdPhase=fun()->erx_domain_links:phase(SdTid,SdPid2,maps:get(links,sys:get_state(erx_domain_srv))) end,' \
+                        'SdNone=fun SdNf(0)->SdPhase();SdNf(SdNk)->case SdPhase() of none->none;_->timer:sleep(100),SdNf(SdNk-1) end end,' \
+                        'SdIntroAgain=fun()->erx_domain:introduce(SdDom(SdTid),SdDom(SdPid2)) end,' \
+                        'SdLanePort=fun(SdLs)->hd([SdLp||SdLp<-erlang:ports(),{name,SdLn}<-[erlang:port_info(SdLp,name)],' \
+                        'lists:suffix(SdLs,SdLn)]) end,' \
+                        'SdSentOf=fun(SdSp)-><<SdSw:64,_/binary>>=iolist_to_binary(erlang:port_control(SdSp,0,[])),SdSw end,' \
+                        'SdSentBy=fun SdSbf(_,_,0)->timeout;SdSbf(SdSp,SdSn,SdSk)->case SdSentOf(SdSp)>=SdSn of true->ok;' \
+                        'false->timer:sleep(1),SdSbf(SdSp,SdSn,SdSk-1) end end,SdDs=self(),' \
+                        "SdKc=fun()->process_flag(trap_exit,true),ok=erx_dist:export(self(),[send,link],SdTid)," \
+                        "erlang:port_control(SdLanePort(\" erts@erxos\"),4,<<1>>),SdDs!{sd_kholding,self()}," \
+                        "SdKl=fun SdKlf(SdKa)->receive {erx_origin,_,{sd_kb,SdKi}}->SdKlf([SdKi|SdKa]);{'EXIT',_,SdKx}->{lists:reverse(SdKa),SdKx} " \
+                        'after 60000->{lists:reverse(SdKa),timeout} end end,{SdKg,SdKe}=SdKl([]),' \
+                        'SdDs!{sd_kdone,self(),{length(SdKg),SdKg=:=lists:seq(1,length(SdKg)),SdKe}} end,' \
+                        'SdKcp=spawn(peer@erxos,SdKc),SdKh=receive {erx_origin,_,{sd_kholding,SdKcp}}->ok after 10000->timeout end,' \
+                        "SdKb=fun()->process_flag(trap_exit,true),link(SdKcp),SdKq=SdLanePort(\" peer@erxos\"),SdK0=SdSentOf(SdKq)," \
+                        "[SdKcp!{sd_kb,SdKi}||SdKi<-lists:seq(1,#{DOWN_BURST})],SdKs=SdSentBy(SdKq,SdK0+#{DOWN_BURST},5000)," \
+                        "true=erlang:disconnect_node(peer@erxos),SdKx=receive {'EXIT',SdKcp,SdKx0}->SdKx0 after 60000->timeout end," \
+                        'SdDs!{sd_kbdone,self(),SdKs,SdKx} end,SdKbp=spawn(erts@erxos,SdKb),' \
+                        'SdKbv=receive {erx_origin,_,{sd_kbdone,SdKbp,SdKbs,SdKbx}}->{SdKbs,SdKbx} after 60000->timeout end,' \
+                        'SdKcv=receive {erx_origin,_,{sd_kdone,SdKcp,SdKcv0}}->SdKcv0 after 60000->timeout end,' \
+                        'SdN1=SdNone(600),SdR1=SdIntroAgain(),' \
+                        "SdMw=fun()->process_flag(trap_exit,true),ok=erx_dist:export(self(),[send,link],SdTid),SdDs!{sd_mwatching,self()}," \
+                        "SdDs!{sd_mwx,self(),receive {'EXIT',_,SdMx0}->SdMx0 after 60000->timeout end} end," \
+                        'SdMwp=spawn(peer@erxos,SdMw),SdMh=receive {erx_origin,_,{sd_mwatching,SdMwp}}->ok after 10000->timeout end,' \
+                        "SdMf=fun()->process_flag(trap_exit,true),SdMq=SdLanePort(\" peer@erxos\"),SdM0=SdSentOf(SdMq),link(SdMwp)," \
+                        'SdMs=SdSentBy(SdMq,SdM0+1,5000),' \
+                        'SdMc=try erlang:port_command(SdMq,<<$p,(term_to_binary({99}))/binary>>) catch SdMcc:SdMcr->{SdMcc,SdMcr} end,' \
+                        "SdDs!{sd_mfdone,self(),SdMs,SdMc,receive {'EXIT',SdMwp,SdMx1}->SdMx1 after 60000->timeout end} end," \
+                        'SdMfp=spawn(erts@erxos,SdMf),' \
+                        'SdMfv=receive {erx_origin,_,{sd_mfdone,SdMfp,SdMfs,SdMfc,SdMfx}}->{SdMfs,SdMfc,SdMfx} after 60000->timeout end,' \
+                        'SdMwv=receive {erx_origin,_,{sd_mwx,SdMwp,SdMwx}}->SdMwx after 60000->timeout end,' \
+                        'SdN2=SdNone(600),SdR2=SdIntroAgain()'
+    # Each case: erts's process told noconnection by its link, peer's by its link behind
+    # the whole burst, the objects deleted and the pair introduced again.
+    CONNECTION_DOWN_ANSWER = "{connection_down,ok,{ok,noconnection},{#{DOWN_BURST},true,noconnection},none,ok," \
+                             'ok,{ok,true,noconnection},noconnection,none,ok}'
+    CONNECTION_DOWN_START = /\A\{connection_down,/n
     # A watcher of a process of peer, then peer's system side's port, found by its open
     # command, whose last word is the domain's node (erx_connections:open/3), ended with
     # {domain_down, D2, x}, D2 erts's id and not peer's: the watcher's link and monitor
@@ -267,6 +326,7 @@ module Erx
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
                               "#{SERVICE_KILL_TABLE},io:format(\"~0p~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdIntro,SdHeld}])," \
                               "#{SERVICE_KILL_INTRODUCED},io:format(\"~0p~n\",[{introduced,SdUps,SdNodes,SdServing,SdPong}])," \
+                              "#{SERVICE_KILL_DOWN},io:format(\"~0p~n\",[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2}])," \
                               "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
@@ -320,6 +380,7 @@ module Erx
       ends = /\A#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
       table = /\A#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
       introduced = /\A#{Regexp.escape(INTRODUCED_ANSWER)}\r*\n\z/n
+      down = /\A#{Regexp.escape(CONNECTION_DOWN_ANSWER)}\r*\n\z/n
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: "#{SERVICE_KILL_EXPRESSION}\r").freeze,
        { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
@@ -328,6 +389,8 @@ module Erx
          verify: ->(text) { raise Error, "the control table answered #{text.inspect}" unless table.match?(text) } }.freeze,
        { name: 'introduced', pattern: INTRODUCED_START, seconds: 180,
          verify: ->(text) { raise Error, "the introduced pair answered #{text.inspect}" unless introduced.match?(text) } }.freeze,
+       { name: 'connection-down', pattern: CONNECTION_DOWN_START, seconds: 180,
+         verify: ->(text) { raise Error, "the connection went down as #{text.inspect}" unless down.match?(text) } }.freeze,
        { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,
          verify: ->(text) { raise Error, "the domains ended as #{text.inspect}" unless ends.match?(text) } }.freeze,
        { name: 'system-domain-ended', pattern: SLOGAN_PATTERN, seconds: 60,

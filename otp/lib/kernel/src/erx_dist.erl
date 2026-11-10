@@ -155,7 +155,8 @@ accept_connection(AcceptPid, Connection, MyNode, _Allowed, _SetupTime) ->
 
 %% The connection's owner: takes the port from the acceptor, has net_kernel mark the peer
 %% pending, makes the port the controller of the peer's entry, runs the port's input task
-%% once for the frames that came before, and reports the node up as dist_util does. Every
+%% once for the frames that came before, reports the node up as dist_util does, and tells
+%% the acceptor of an introduced connection once net_kernel has inserted it. Every
 %% way it ends, a refusal or a crash included, goes through ended/2, so the system
 %% connection's owner halts the domain on each. It acts on {Kernel, disconnect}, which
 %% names net_kernel by a pid any peer can write; a message from another domain arrives
@@ -184,9 +185,20 @@ owner_up(Kernel, AcceptPid, MyNode, #{port := Port, node := Peer, id := PeerId} 
     _ = erlang:port_control(Port, ?CONTROL_KICK, []),
     Kernel ! {self(), {nodeup, Peer, address(PeerId, host(Peer)), normal, false}},
     receive
-        {Kernel, inserted, _TickIntensity} -> owner_loop(Kernel, DHandle, Connection);
+        {Kernel, inserted, _TickIntensity} ->
+            inserted(AcceptPid, Connection),
+            owner_loop(Kernel, DHandle, Connection);
         {Kernel, bad_request} -> ended(Connection, bad_request)
     end.
+
+%% The peer's entry is up: the agent answers an introduced connection's connection_up
+%% only now (erx_connections, records/4), so the system domain hears ok for an
+%% introduction once both entries are up. The system connection's agent awaits nothing.
+inserted(_AcceptPid, #{system := true}) ->
+    ok;
+inserted(AcceptPid, #{port := Port, id := PeerId}) ->
+    AcceptPid ! {erx_connection_inserted, PeerId, Port},
+    ok.
 
 %% A domain whose name an ended domain had, while net_kernel still holds the ended one's
 %% connection: its owner waits for that connection's end, as dist_util's wait_pending does,

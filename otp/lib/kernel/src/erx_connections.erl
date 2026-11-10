@@ -9,9 +9,10 @@
 %% start: it opens the system domain's side of each domain's system connection when the
 %% domain service asks, closes it at the domain's end, and tells the service when a side
 %% ends by itself. A domain's agent also maps each connection the system domain introduces
-%% it to, on the connection_up its domain pid writes, and ends it on connection_down
-%% (records/4). The agent and net_kernel live as long as the runtime: the agent halts
-%% it on net_kernel's end other than an ordered stop, and erx_dist:accept/1 on the agent's.
+%% it to, on the connection_up its domain pid writes, finishes and ends it on
+%% connection_down, and tells the domain pid when one ends by itself (records/4). The
+%% agent and net_kernel live as long as the runtime: the agent halts it on net_kernel's
+%% end other than an ordered stop, and erx_dist:accept/1 on the agent's.
 -module(erx_connections).
 -moduledoc false.
 
@@ -91,7 +92,9 @@ serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
 %% A side's port ends with its owner (erx_dist), each linked to the other, so its monitor
 %% fires on every end of either: the agent then tells the service, which stops the domain
 %% (docs/design-system.md, "A lost system connection ends the domain"). A side the
-%% service closes is no longer monitored, so its ordered end tells no one.
+%% service closes is no longer monitored, so its ordered end tells no one. erx_dist's
+%% word that a side's entry is up, which only an introduced connection's agent awaits, is
+%% dropped with the rest.
 sides(Kernel, Sides) ->
     receive
         {'$gen_call', {Service, _} = From, {open_side, Id, Values}} when not is_map_key(Id, Sides) ->
@@ -187,28 +190,32 @@ refuse(Port) ->
 finish(Port, Reason) ->
     Ref = erlang:monitor(port, Port),
     case finished(Port, Ref) of
-        true ->
+        ended ->
+            ok;
+        Live when Live =:= finished; Live =:= refused ->
             erlang:demonitor(Ref, [flush]),
-            close(Port, Reason);
-        false ->
-            ok
+            close(Port, Reason)
     end.
 
-%% Whether the port finished: false once it has ended, by itself or before it was asked.
+%% How the finish went: finished, once the port took every record before its position;
+%% ended, once the port ended during it; refused, for a port gone before it was asked or
+%% finished already, which close/2 ends if it lives and finds gone otherwise, so the agent
+%% never waits on a port that will not end.
 finished(Port, Ref) ->
     try erlang:port_control(Port, ?CONTROL_FINISH, []) of
         _ ->
             receive
-                {Port, erx_lane_finished} -> true;
-                {'DOWN', Ref, port, Port, _} -> false
+                {Port, erx_lane_finished} -> finished;
+                {'DOWN', Ref, port, Port, _} -> ended
             end
     catch
-        error:badarg -> receive {'DOWN', Ref, port, Port, _} -> false end
+        error:badarg -> refused
     end.
 
 %% The port's end, awaited: once this returns no driver callback runs on the port. The
 %% driver's stop, which unmaps the sides, may still be running on another scheduler when
-%% the monitor fires (TODO.md).
+%% the monitor fires, so every answer sent after it, close_side's and records/4's
+%% connection_unmapped and connection_lost, may precede the unmap (TODO.md).
 close(Port, Reason) ->
     Ref = erlang:monitor(port, Port),
     exit(Port, Reason),
@@ -234,12 +241,15 @@ hand_over(Kernel, #{port := Port} = Connection) ->
 %% A domain's agent, once its system connection is up: the connection-control records the
 %% system domain's domain pid writes into the control table, which it acts on only as they
 %% arrive in the envelope of the system connection, {erx_origin, SystemId, Record}, so a
-%% peer handed the agent's pid can reach it but not steer it, and net_kernel's end; what
-%% else arrives is dropped, so its queue stays empty (docs/design-domains.md, "Messages
-%% between the domain service and a runtime"). Held is each introduced connection's port
-%% by the peer's domain id. The system domain sends one record about a peer at a time,
-%% each once the last is answered, so a connection_up names a peer the agent holds no port
-%% for; one that does not is dropped.
+%% peer handed the agent's pid can reach it but not steer it; erx_dist's word that an
+%% introduced connection's entry is up; each introduced port's end; and net_kernel's end.
+%% What else arrives is dropped, so its queue stays empty (docs/design-domains.md,
+%% "Messages between the domain service and a runtime"). Held is each introduced
+%% connection by the peer's domain id, as {Phase, Port, Monitor}: mapping from the port's
+%% open until erx_dist's owner says the peer's entry is up, then up; Monitor watches the
+%% port, so a port that ends by itself is answered. The system domain sends one record
+%% about a peer at a time, each once the last is answered, so a connection_up names a peer
+%% the agent holds no port for; one that does not is dropped.
 records(Kernel, SystemId, DomainPid, Held) ->
     receive
         {erx_origin, SystemId, {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}}
@@ -248,6 +258,10 @@ records(Kernel, SystemId, DomainPid, Held) ->
             records(Kernel, SystemId, DomainPid, connection_up(Kernel, DomainPid, Peer, PeerNode, Values, Held));
         {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
             records(Kernel, SystemId, DomainPid, connection_down(DomainPid, Peer, Reason, Held));
+        {erx_connection_inserted, Peer, Port} ->
+            records(Kernel, SystemId, DomainPid, inserted(DomainPid, Peer, Port, Held));
+        {{connection_ended, Peer}, Monitor, port, Port, Reason} ->
+            records(Kernel, SystemId, DomainPid, ended_itself(DomainPid, Peer, Monitor, Port, Reason, Held));
         {'EXIT', Kernel, Reason} ->
             kernel_ended(Reason);
         _ ->
@@ -256,27 +270,27 @@ records(Kernel, SystemId, DomainPid, Held) ->
 
 %% connection_up: the port opens on the lane driver with the record's words, "erx_lane Side
 %% PeerSide PeerBell Label OutSize InSize Peer PeerNode" (erx_lane_drv.c, lane_open_parse),
-%% whose open maps both sides and registers the label as the connection's sink. The agent
-%% answers connection_mapped once the port has mapped them and before it hands the port to
-%% net_kernel, so the answer precedes any connection_lost of the port's; erx_dist's owner
-%% then brings the peer's entry up with the system domain's id and flags, as for the
-%% system connection, but with system := false, so the connection's end ends only it. An
-%% open the driver refuses, or a port net_kernel does not take, is answered
-%% connection_mapped and then connection_lost with {map, Reason}, the one order of answers
-%% the system domain accepts; the port is gone by then.
+%% whose open maps both sides and registers the label as the connection's sink, and goes to
+%% net_kernel; erx_dist's owner then brings the peer's entry up with the system domain's id
+%% and flags, as for the system connection, but with system := false, so the connection's
+%% end ends only it, and says so (inserted/4). The agent answers connection_mapped only
+%% then, so the system domain hears ok for an introduction once both entries are up
+%% (docs/design-runtime.md, "Connections in ERTS"). An open the driver refuses, or a port
+%% net_kernel does not take, is answered connection_lost with {map, Reason} alone, the port
+%% gone by then.
 connection_up(Kernel, DomainPid, Peer, PeerNode, Values, Held) ->
     case open_introduced(Peer, PeerNode, Values) of
         {ok, Port} ->
-            DomainPid ! {erx_connection_mapped, Peer},
+            Monitor = erlang:monitor(port, Port, [{tag, {connection_ended, Peer}}]),
             case accepted(Kernel, Port, #{port => Port, node => PeerNode, id => Peer, system => false}) of
                 {ok, Port} ->
-                    Held#{Peer => Port};
+                    Held#{Peer => {mapping, Port, Monitor}};
                 {error, Reason} ->
+                    erlang:demonitor(Monitor, [flush]),
                     DomainPid ! {erx_connection_lost, Peer, {map, Reason}},
                     Held
             end;
         {error, Reason} ->
-            DomainPid ! {erx_connection_mapped, Peer},
             DomainPid ! {erx_connection_lost, Peer, {map, Reason}},
             Held
     end.
@@ -293,24 +307,59 @@ open_introduced(Peer, PeerNode, Values) ->
             {error, badarg}
     end.
 
-%% connection_down: the port ends with the record's reason, which takes the peer's entry
-%% down and fires its links and monitors with it (edit 56), and the driver's stop unmaps
-%% both sides; then the agent answers connection_unmapped. About a peer it holds no port
-%% for, one it never mapped or already lost, it answers at once, having nothing mapped.
+%% erx_dist's owner of an introduced port has its peer's entry up: the agent answers
+%% connection_mapped. A port the agent holds no mapping connection for, one that ended
+%% first and was answered connection_lost, is nothing.
+inserted(DomainPid, Peer, Port, Held) ->
+    case Held of
+        #{Peer := {mapping, Port, Monitor}} ->
+            DomainPid ! {erx_connection_mapped, Peer},
+            Held#{Peer := {up, Port, Monitor}};
+        #{} ->
+            Held
+    end.
+
+%% An introduced port ended by itself: a malformed frame or position, a signal past
+%% peer_held, erlang:disconnect_node/1, or its owner's end. ERTS has taken down the entry,
+%% if the port controlled one yet, and the driver's stop unmaps both sides (close/2 says
+%% when), so the agent tells the domain pid connection_lost with the port's reason,
+%% {map, Reason} while the entry was not yet up.
+%% A port the agent ended itself is no longer monitored, so it is never answered here.
+ended_itself(DomainPid, Peer, Monitor, Port, Reason, Held) ->
+    case Held of
+        #{Peer := {Phase, Port, Monitor}} ->
+            Lost = case Phase of
+                       mapping -> {map, Reason};
+                       up -> Reason
+                   end,
+            DomainPid ! {erx_connection_lost, Peer, Lost},
+            maps:remove(Peer, Held);
+        #{} ->
+            Held
+    end.
+
+%% connection_down: the port finishes, so every whole frame the peer published before the
+%% position it reads then is delivered, and then ends with the record's reason, which takes
+%% the peer's entry down and fires its links and monitors with it (edit 56); the driver's
+%% stop unmaps both sides; then the agent answers connection_unmapped. About a peer it holds
+%% no port for, one it never mapped or already lost, it answers at once, having nothing
+%% mapped. A port that ended by itself as the record came is gone already: its end is not
+%% answered connection_lost, since connection_unmapped answers the record.
 connection_down(DomainPid, Peer, Reason, Held) ->
     case maps:take(Peer, Held) of
-        {Port, Rest} when Reason =/= normal ->
-            close(Port, Reason),
-            DomainPid ! {erx_connection_unmapped, Peer},
-            Rest;
-        {Port, Rest} ->
-            close(Port, noconnection),
+        {{_Phase, Port, Monitor}, Rest} ->
+            erlang:demonitor(Monitor, [flush]),
+            finish(Port, down_reason(Reason)),
             DomainPid ! {erx_connection_unmapped, Peer},
             Rest;
         error ->
             DomainPid ! {erx_connection_unmapped, Peer},
             Held
     end.
+
+%% A port ended with normal would not end, so normal ends it as noconnection.
+down_reason(normal) -> noconnection;
+down_reason(Reason) -> Reason.
 
 %% net_kernel's end. net_kernel traps exits, so only its supervisor ends it with shutdown:
 %% in the runtime's ordered end, or after a sibling's crash in net_sup or kernel_sup. Both

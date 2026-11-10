@@ -2782,7 +2782,11 @@ from a control slot, and the agent acts only on the system domain's.
   answer `ok` at once; while their connection is going down, an
   introduction answers `{error, closing}`, since a pair has at most one
   connection, and one whose connection closes before it comes up answers
-  `{error, noconnection}`. A domain ends one of its own connections with
+  `{error, noconnection}`. A caller waits at most ten seconds, then gets
+  `{error, timeout}`, as a domain that has not reported ready or never
+  answers its `connection_up` would otherwise hold it; the connection is
+  left as it is, so a later introduction answers `ok` once it is up. A
+  domain ends one of its own connections with
   `erlang:disconnect_node/1`, as a malformed frame would, with
   `noconnection` at both ends; ending its connection to the system domain
   ends the domain.

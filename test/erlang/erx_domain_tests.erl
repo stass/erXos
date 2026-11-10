@@ -175,7 +175,8 @@ service_test_() ->
      fun() ->
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                          exports => erx_domain_fake_lib}),
+                                                          exports => erx_domain_fake_lib,
+                                                          introduce_timeout => 2000}),
              unlink(Service),
              {Log, Service}
      end,
@@ -185,7 +186,8 @@ service_test_() ->
      end,
      fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0,
                           fun refused_side/0, fun side_ended/0, fun ready_report/0, fun boot_timeout/0,
-                          fun report_overtaken/0, fun introduce/0, fun service_end_ends_domain_pids/0]} end}.
+                          fun report_overtaken/0, fun introduce/0, {timeout, 30, fun connection_down/0},
+                          fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
     erx_domain_fake_lib:next_call().
@@ -451,19 +453,86 @@ introduce() ->
     ?assertEqual({stop, LateId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 3)].
 
+connection_down() ->
+    %% The down path (docs/design-domains.md, "Introduction and connection down"). A
+    %% party that cannot map its connection_up answers connection_lost alone: the
+    %% introduction answers noconnection, the party that mapped is told connection_down,
+    %% and the objects go once it has unmapped. A party whose port ended by itself
+    %% answers connection_lost: its peer is told connection_down with noconnection and
+    %% the objects go once the peer has unmapped. An introduction that is not up at both
+    %% ends within the service's deadline answers timeout and leaves the connection as it
+    %% is, so a later introduction answers ok once it is up.
+    Self = self(),
+    {ok, X} = erx_domain:create(#{name => <<"xdom">>, memory => 4096}),
+    _ = [next_call() || _ <- lists:seq(1, 4)],
+    {ok, Y} = erx_domain:create(#{name => <<"ydom">>, memory => 4096}),
+    _ = [next_call() || _ <- lists:seq(1, 4)],
+    {XId, XPid, YId, YPid} = {erx_domain:id(X), erx_domain:pid(X), erx_domain:id(Y), erx_domain:pid(Y)},
+    Number = XId * 100 + YId,
+    _ = [erlang:trace(Pid, true, ['receive', {tracer, Self}]) || Pid <- [XPid, YPid]],
+    Record = fun(Pid) ->
+                     receive {trace, Pid, 'receive', {_, record, Slot, Rec}} -> {Slot, Rec} after 500 -> none end
+             end,
+    Introduce = fun() -> spawn_link(fun() -> Self ! {introduced, erx_domain:introduce(X, Y)} end) end,
+    Introduced = fun() -> receive {introduced, Reply} -> Reply after 5000 -> none end end,
+    %% A failed map.
+    Introduce(),
+    ?assertEqual({connect, XId, YId, 4096, 4096}, next_call()),
+    {0, {erx_connection_up, YId, 'ydom@erxos', _, _, _, _, _, _}} = Record(XPid),
+    {0, {erx_connection_up, XId, 'xdom@erxos', _, _, _, _, _, _}} = Record(YPid),
+    XPid ! {erx_origin, XId, {erx_connection_mapped, YId}},
+    YPid ! {erx_origin, YId, {erx_connection_lost, XId, {map, enomem}}},
+    ?assertEqual({error, noconnection}, Introduced()),
+    ?assertEqual({0, {erx_connection_down, YId, noconnection}}, Record(XPid)),
+    ?assertEqual(none, Record(YPid)),
+    XPid ! {erx_origin, XId, {erx_connection_unmapped, YId}},
+    ?assertEqual({disconnect, Number}, next_call()),
+    %% A port that ends by itself.
+    Introduce(),
+    ?assertEqual({connect, XId, YId, 4096, 4096}, next_call()),
+    {0, _} = Record(XPid),
+    {0, _} = Record(YPid),
+    XPid ! {erx_origin, XId, {erx_connection_mapped, YId}},
+    YPid ! {erx_origin, YId, {erx_connection_mapped, XId}},
+    ?assertEqual(ok, Introduced()),
+    YPid ! {erx_origin, YId, {erx_connection_lost, XId, erx_lane_malformed}},
+    ?assertEqual({0, {erx_connection_down, YId, noconnection}}, Record(XPid)),
+    ?assertEqual({error, closing}, erx_domain:introduce(X, Y)),
+    XPid ! {erx_origin, XId, {erx_connection_unmapped, YId}},
+    ?assertEqual({disconnect, Number}, next_call()),
+    %% The deadline.
+    Introduce(),
+    ?assertEqual({connect, XId, YId, 4096, 4096}, next_call()),
+    {0, _} = Record(XPid),
+    {0, _} = Record(YPid),
+    ?assertEqual({error, timeout}, Introduced()),
+    XPid ! {erx_origin, XId, {erx_connection_mapped, YId}},
+    YPid ! {erx_origin, YId, {erx_connection_mapped, XId}},
+    ?assertEqual(ok, erx_domain:introduce(Y, X)),
+    _ = erlang:trace(XPid, false, ['receive']),
+    _ = erlang:trace(YPid, false, ['receive']),
+    ok = erx_domain:stop(X, shutdown),
+    ?assertEqual({stop, XId}, next_call()),
+    _ = [next_call() || _ <- lists:seq(1, 3)],
+    YPid ! {erx_origin, YId, {erx_connection_unmapped, XId}},
+    ?assertEqual({disconnect, Number}, next_call()),
+    ok = erx_domain:stop(Y, shutdown),
+    ?assertEqual({stop, YId}, next_call()),
+    _ = [next_call() || _ <- lists:seq(1, 3)].
+
 service_end_ends_domain_pids() ->
     %% The service's end ends every domain pid with its reason: no domain
     %% outlives the system domain, so the pid has nothing left to stop.
     {ok, Domain} = erx_domain:create(#{name => <<"last">>, memory => 4096}),
-    ?assertMatch({create, #{id := 24}}, next_call()),
-    ?assertEqual({open_side, 24, 'last@erxos', 240}, next_call()),
-    ?assertEqual({export, 24, [send]}, next_call()),
-    ?assertEqual({start, 24}, next_call()),
+    ?assertMatch({create, #{id := 26}}, next_call()),
+    ?assertEqual({open_side, 26, 'last@erxos', 260}, next_call()),
+    ?assertEqual({export, 26, [send]}, next_call()),
+    ?assertEqual({start, 26}, next_call()),
     Pid = erx_domain:pid(Domain),
     Ref = monitor(process, Pid),
     %% An exit message forged in the service's name while it lives ends nothing.
     Service = whereis(erx_domain_srv),
-    Pid ! {'EXIT', Service, {domain_down, 24, {halt, 0}}},
+    Pid ! {'EXIT', Service, {domain_down, 26, {halt, 0}}},
     ?assertEqual(timeout, receive {'DOWN', Ref, process, _, Forged} -> Forged after 200 -> timeout end),
     exit(Service, kill),
     ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).

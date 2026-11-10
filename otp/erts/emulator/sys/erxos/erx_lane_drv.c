@@ -82,7 +82,7 @@
 
 /* The allowance of one run of the input task, -erx lane_batch. */
 uint32_t erx_lane_batch = ERX_LANE_BATCH_DEFAULT;
-/* -erx test_lane_hold: port_control 4 may hold the ring of the system connection. */
+/* -erx test_lane_hold: port_control 4 may hold a port's ring. */
 bool erx_lane_test_hold = false;
 
 typedef struct lane_conn {
@@ -984,14 +984,16 @@ control_record(lane_conn_t *conn, const char *buf, ErlDrvSizeT len)
 
 /*
  * port_control(Port, 4, <<Hold>>), a test's only and refused without -erx test_lane_hold:
- * Hold 1 has the system connection's input task take its control table and leave its ring,
- * so the system domain's side fills and pauses while records still arrive; Hold 0 releases
- * it and runs the task. It holds only this domain's own port, so it reaches no other domain.
+ * Hold 1 has the port's input task take its control table, if it has one, and leave its
+ * ring, so the peer's side fills and pauses while records still arrive, or what the peer
+ * published waits for a finish; Hold 0 releases it and runs the task, and so does the
+ * finish, which takes every whole record before its position as always. It holds only this
+ * domain's own port, so it reaches no other domain.
  */
 static ErlDrvSSizeT
 control_hold(lane_conn_t *conn, const char *buf, ErlDrvSizeT len)
 {
-	if (!erx_lane_test_hold || conn->ctl_in == NULL || len != 1 || (buf[0] != 0 && buf[0] != 1))
+	if (!erx_lane_test_hold || len != 1 || (buf[0] != 0 && buf[0] != 1))
 		return (-1);
 	conn->ring_held = buf[0] == 1;
 	if (!conn->ring_held)
@@ -1027,6 +1029,7 @@ lane_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, 
 		    ERX_LANE_COUNT_DROPPED) != ERX_LANE_DO_STOP)
 			return (-1);
 		conn->finisher = driver_caller(conn->port);
+		conn->ring_held = false;
 		(void)erx_lane_reader_stop(&conn->reader);
 		input_schedule(conn);
 		return (0);

@@ -27,6 +27,11 @@
 %%   a connection_down the reason of the step that closed the connection;
 %% * an honest party's answers are all applied, none dropped.
 %%
+%% A party that cannot map a connection_up answers it with connection_lost
+%% alone; told connection_down about it all the same, as only a hostile
+%% party's answer can make the core do, it answers connection_unmapped at
+%% once, having mapped nothing, which an honest run would count as dropped.
+%%
 %% A state with no step left is the end of a run: there every connection is
 %% deleted and forgotten, and nothing is queued or owed. The hostile runs
 %% let one side also send, once, any well-formed answer at any moment, as
@@ -112,14 +117,14 @@ survivor_that_never_answers_keeps_the_connection_test() ->
     ?assertEqual([], Again),
     ?assertEqual(closing, erx_domain_links:phase(?A, 11, S5)).
 
-%% Answers out of turn (connection_lost while connection_up is unanswered
-%% among them), about connections that do not exist, malformed, or from a
-%% party not held change nothing but the count.
+%% Answers out of turn (connection_unmapped while connection_up is
+%% unanswered among them), about connections that do not exist, malformed,
+%% or from a party not held change nothing but the count.
 unexpected_answers_are_dropped_and_counted_test() ->
     S0 = ready_all(core([?A, 11]), [?A, 11]),
     {_, S1} = erx_domain_links:connect(c1, {?A, a}, {11, p}, S0),
     Stray = [{connection_unmapped, 11}, {connection_mapped, 12}, {connection_mapped, ?A},
-             {connection_lost, 11}, {connection_lost, 11, early}, {connection_mapped, 11, extra}, junk,
+             {connection_lost, 11}, {connection_lost, 12, early}, {connection_mapped, 11, extra}, junk,
              {connection_mapped, binary:copy(<<"x">>, 64)}],
     S2 = lists:foldl(fun(Answer, S) -> {[], Next} = erx_domain_links:answer(?A, Answer, S), Next end,
                      S1, Stray),
@@ -137,6 +142,22 @@ core(Parties) ->
 ready_all(S0, Parties) ->
     lists:foldl(fun(P, S) -> {[], Next} = erx_domain_links:ready(P, S), Next end, S0, Parties).
 
+%% A party that cannot map its connection_up answers connection_lost alone,
+%% which frees its slot and closes the connection: the peer that mapped is
+%% told connection_down, and the objects go once it has unmapped.
+failed_map_closes_the_connection_test() ->
+    S0 = ready_all(core([?A, 11]), [?A, 11]),
+    {[{send, ?A, 0, _}, {send, 11, 0, _}], S1} = erx_domain_links:connect(c1, {?A, up_a}, {11, up_p}, S0),
+    {[], S2} = erx_domain_links:answer(?A, {connection_mapped, 11}, S1),
+    {Lost, S3} = erx_domain_links:answer(11, {connection_lost, ?A, {map, enomem}}, S2),
+    ?assertEqual([{send, ?A, 0, {connection_down, 11, noconnection}}], Lost),
+    ?assertEqual(closing, erx_domain_links:phase(?A, 11, S3)),
+    ?assertEqual(0, erx_domain_links:held(11, S3)),
+    ?assertEqual(#{?A => 0, 11 => 0, unknown => 0}, erx_domain_links:dropped(S3)),
+    {Unmapped, S4} = erx_domain_links:answer(?A, {connection_unmapped, 11}, S3),
+    ?assertEqual([{disconnect, c1}], Unmapped),
+    ?assertEqual(none, erx_domain_links:phase(?A, 11, S4)).
+
 %% Exhaustive exploration.
 
 explore_honest_test_() ->
@@ -151,14 +172,16 @@ explore_hostile_peers_test_() ->
 %% Every property holds in every reachable state, and the runs reach the
 %% cases the properties are about: a later incarnation's connection up at A
 %% after the earlier one's end, a connection that closes before A is told
-%% of it, and A ending a connection while its connection_down is on the way.
+%% of it, A ending a connection while its connection_down is on the way, and
+%% A failing to map a connection_up.
 explore_and_report(Mode) ->
     case explore(Mode) of
         {ok, #{states := States, transitions := Transitions, ends := Ends, depth := Depth,
                witnesses := Witnesses}} ->
             io:format(user, "~nerx_domain_links ~p: ~b states, ~b transitions, ~b ends, depth ~b~n",
                       [Mode, States, Transitions, Ends, Depth]),
-            ?assertEqual([a_lost_with_down_sent, later_up_at_a, untold_at_a], lists:sort(maps:keys(Witnesses)));
+            ?assertEqual([a_lost_with_down_sent, later_up_at_a, map_failed_at_a, untold_at_a],
+                         lists:sort(maps:keys(Witnesses)));
         {violation, Name, Trace} ->
             io:format(user, "~nerx_domain_links ~p: violation ~p after~n~p~n", [Mode, Name, Trace]),
             ?assertEqual(no_violation, Name)
@@ -231,11 +254,13 @@ violation(Name) -> throw({violation, Name}).
 %% * a: domain A. ready: its init reported ready; inbox: the records sent to
 %%   it, unread, in order; conn: its view of C, none, mapped, draining
 %%   (told connection_down, delivering up to drainto), gone (answered
-%%   connection_unmapped) or lost (ended C itself); deliv: frames of C's
+%%   connection_unmapped), lost (ended C itself) or failed (could not map
+%%   C's connection_up and answered connection_lost); deliv: frames of C's
 %%   lane delivered; drainto: the wpos A read at C's connection_down.
 %% * peers: peer C. life: unborn, alive or ended; learnt: the service
 %%   learnt of its end; ready, inbox: as for A; answer: its last answer,
-%%   none, mapped, unmapped or lost; sent: frames it wrote to A; introduced,
+%%   none, mapped, unmapped, lost or failed (connection_lost to the
+%%   connection_up, which it could not map); sent: frames it wrote to A; introduced,
 %%   deleted: connect/4 was called for C, its disconnect performed; policy:
 %%   policy closed C; closed: false, or the reason connection_down must
 %%   carry, from the first environment step that closed C.
@@ -349,12 +374,15 @@ read_steps([]) ->
     [];
 read_steps([{connection_up, Peer, _, _} | _]) ->
     C = Peer - ?A,
-    [{{a_map, C}, fun(S) -> a_answer({connection_mapped, Peer}, pop_a(set_a_conn(C, mapped, S))) end}];
+    [{{a_map, C}, fun(S) -> a_answer({connection_mapped, Peer}, pop_a(set_a_conn(C, mapped, S))) end},
+     {{a_map_fails, C}, fun(S) -> a_answer({connection_lost, Peer, {map, enomem}},
+                                           pop_a(set_a_conn(C, failed, close_env(C, noconnection, S)))) end}];
 read_steps([{connection_down, Peer, Reason} | _]) ->
     C = Peer - ?A,
     [{{a_down, C}, fun(S) ->
                            case a_conn(C, S) of
-                               lost -> a_answer({connection_unmapped, Peer}, pop_a(S));
+                               Unmapped when Unmapped =:= lost; Unmapped =:= failed ->
+                                   a_answer({connection_unmapped, Peer}, pop_a(S));
                                mapped -> start_drain(C, Reason, pop_a(S))
                            end
                    end}].
@@ -380,7 +408,12 @@ lane_steps(C, #{a := #{deliv := Deliv, drainto := DrainTo}} = S) ->
 
 pop_a(#{a := #{inbox := [_ | Rest]}} = S) -> set_a(#{inbox => Rest}, S).
 
-%% Only an answer to a record settles it; connection_lost answers nothing.
+%% Only an answer to a record settles it: connection_lost answers a
+%% connection_up the party could not map, which it answers with that alone
+%% (docs/design-domains.md, "Messages between the domain service and a
+%% runtime"), and nothing otherwise.
+a_answer({connection_lost, _, {map, _}} = Answer, S) ->
+    call(fun(Core) -> erx_domain_links:answer(?A, Answer, Core) end, answered(?A, S));
 a_answer({connection_lost, _, _} = Answer, S) ->
     call(fun(Core) -> erx_domain_links:answer(?A, Answer, Core) end, S);
 a_answer(Answer, S) ->
@@ -410,13 +443,19 @@ peer_read_steps(_C, [], _Answer) ->
     [];
 peer_read_steps(C, [{connection_up, ?A, _, _} | Rest], none) ->
     [{{p_map, C}, fun(S) -> p_answer(C, {connection_mapped, ?A},
-                                     set_peer(C, #{inbox => Rest, answer => mapped}, S)) end}];
-peer_read_steps(C, [{connection_down, ?A, _} | Rest], lost) ->
+                                     set_peer(C, #{inbox => Rest, answer => mapped}, S)) end},
+     {{p_map_fails, C}, fun(S) -> p_answer(C, {connection_lost, ?A, {map, enomem}},
+                                           set_peer(C, #{inbox => Rest, answer => failed},
+                                                    close_env(C, noconnection, S))) end}];
+peer_read_steps(C, [{connection_down, ?A, _} | Rest], Unmapped) when Unmapped =:= lost; Unmapped =:= failed ->
     [{{p_down, C}, fun(S) -> p_answer(C, {connection_unmapped, ?A}, set_peer(C, #{inbox => Rest}, S)) end}];
 peer_read_steps(C, [{connection_down, ?A, _} | Rest], mapped) ->
     [{{p_unmap, C}, fun(S) -> p_answer(C, {connection_unmapped, ?A},
                                        set_peer(C, #{inbox => Rest, answer => unmapped}, S)) end}].
 
+p_answer(C, {connection_lost, _, {map, _}} = Answer, S) ->
+    call(fun(Core) -> erx_domain_links:answer(peer_id(C), Answer, Core) end,
+         answered(peer_id(C), S));
 p_answer(C, {connection_lost, _, _} = Answer, S) ->
     call(fun(Core) -> erx_domain_links:answer(peer_id(C), Answer, Core) end, S);
 p_answer(C, Answer, S) ->
@@ -540,12 +579,12 @@ p_maps(C, S) ->
 %% or connection_lost, or ended, or once the connection closed before the
 %% party was told of it, as it then never is.
 a_let_go(C, S) ->
-    lists:member(a_conn(C, S), [gone, lost]) orelse untold(?A, C, S).
+    lists:member(a_conn(C, S), [gone, lost, failed]) orelse untold(?A, C, S).
 
 p_let_go(C, S) ->
     case peer(C, S) of
         #{learnt := true} -> true;
-        #{answer := Answer} when Answer =:= unmapped; Answer =:= lost -> true;
+        #{answer := Answer} when Answer =:= unmapped; Answer =:= lost; Answer =:= failed -> true;
         #{} -> untold(peer_id(C), C, S)
     end.
 
@@ -553,7 +592,8 @@ untold(Party, C, #{told := Told} = S) ->
     maps:get(closed, peer(C, S)) =/= false andalso not is_map_key({Party, C}, Told).
 
 witnesses(#{told := Told} = S) ->
-    [later_up_at_a || lists:member(a_conn(1, S), [gone, lost]), a_conn(2, S) =:= mapped]
+    [later_up_at_a || lists:member(a_conn(1, S), [gone, lost, failed]), a_conn(2, S) =:= mapped]
+        ++ [map_failed_at_a || C <- [1, 2], a_conn(C, S) =:= failed]
         ++ [untold_at_a || C <- [1, 2], maps:get(introduced, peer(C, S)), untold(?A, C, S)]
         ++ [a_lost_with_down_sent || C <- [1, 2], a_conn(C, S) =:= lost,
                                      maps:get({?A, C}, Told, none) =:= down].

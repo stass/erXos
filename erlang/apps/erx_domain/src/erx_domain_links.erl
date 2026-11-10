@@ -22,9 +22,9 @@ side for each party: the service's view of that party's part. A side goes
     waiting -> up_sent -> mapped -> down_sent -> unmapped
 
 waiting until connection_up has gone to the party, up_sent until the party
-answers connection_mapped, mapped while it is up, down_sent once
-connection_down has gone, unmapped when the party answers
-connection_unmapped. The other ends of a side are lost (the party ended the
+answers connection_mapped (or connection_lost, below), mapped while it is
+up, down_sent once connection_down has gone, unmapped when the party
+answers connection_unmapped. The other ends of a side are lost (the party ended the
 connection itself and said connection_lost), lost_down_sent (it did so with
 connection_down outstanding, which it still answers), ended (the party's
 domain ended) and untold (the connection closed before connection_up went
@@ -52,13 +52,15 @@ the sides not done.
 
 Answers come from domains and are untrusted. An answer is applied only when
 it names a connection of the answering party in the state that expects it:
-connection_mapped in up_sent; connection_unmapped in down_sent and
-lost_down_sent; connection_lost in mapped and down_sent. Anything else is
-dropped and counted against the party, or against unknown for a party the
-core does not hold. No answer creates state, and an answer changes only the
-answering party's own side. A runtime answers connection_mapped before its
-port can report connection_lost, as in the model, so connection_lost while
-connection_up is unanswered is dropped like any answer out of turn.
+connection_mapped or connection_lost in up_sent; connection_unmapped in
+down_sent and lost_down_sent; connection_lost in mapped and down_sent.
+Anything else is dropped and counted against the party, or against unknown
+for a party the core does not hold. No answer creates state, and an answer
+changes only the answering party's own side. A runtime answers
+connection_mapped once its entry for the peer is up, and a connection_up
+it cannot map, or whose port ends before the entry is up, it answers with
+connection_lost alone, which settles the record as connection_mapped would
+and closes the connection, as connection_lost from mapped does.
 
 The quota. A connection counts against a party's connections from connect/4
 until the party's side is done, closing included, as held/2 reports, and
@@ -72,8 +74,8 @@ side holds that slot while the record is unanswered, that is, while the side
 is up_sent, down_sent or lost_down_sent; the one function that changes a
 side's state frees the slot as the side leaves those states. So a slot is
 written again only once the answer its record waits for has arrived:
-connection_mapped to a connection_up, connection_unmapped to a
-connection_down, or the party's end. A connection_lost while a
+connection_mapped or connection_lost to a connection_up,
+connection_unmapped to a connection_down, or the party's end. A connection_lost while a
 connection_down waits frees nothing, since the party may not have taken the
 record yet. A table never runs out: a party's outstanding records are at
 most its sides not done, which room/2 keeps within its slots.
@@ -269,6 +271,7 @@ answer_kind(_) -> malformed.
 
 %% The state a side moves to on an answer, or unexpected.
 answered(up_sent, mapped) -> {ok, mapped};
+answered(up_sent, lost) -> {ok, lost};
 answered(mapped, lost) -> {ok, lost};
 answered(down_sent, unmapped) -> {ok, unmapped};
 answered(down_sent, lost) -> {ok, lost_down_sent};

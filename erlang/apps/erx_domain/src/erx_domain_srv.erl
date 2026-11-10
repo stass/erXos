@@ -51,6 +51,10 @@ reach it only through facets, which arrive with the connections.
 %% sets boot_timeout (docs/design-domains.md, "Erlang interface"); a configured domain
 %% always has this long.
 -define(BOOT_TIMEOUT, 10000).
+%% How long an introduce/2 caller waits for the connection to come up at both ends, in
+%% milliseconds, unless start_link/1's introduce_timeout sets it (docs/design-domains.md,
+%% "Erlang interface").
+-define(INTRODUCE_TIMEOUT, 10000).
 %% The longest boot_timeout erlang:start_timer/3 takes.
 -define(BOOT_TIMEOUT_MAX, 16#ffffffff).
 %% A domain that has not ended, whose domain pid stands for it (erx_domain_core:ended/5).
@@ -61,8 +65,9 @@ start_link() ->
 
 -doc """
 Opts may name lib, the domain library's module (erx_domain_lib), agent, the
-connection agent's (erx_connections), and exports, the export table's
-(erx_dist), for a host test's stand-ins.
+connection agent's (erx_connections), exports, the export table's
+(erx_dist), and introduce_timeout, an introduce/2 caller's deadline in
+milliseconds, for a host test's stand-ins.
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -78,9 +83,10 @@ init(Opts) ->
     %% caller, the domain, its domain pid's secret, that pid until it ends and gone after,
     %% and, once the domain has ended, the life it ended in and its Info (ended/3).
     %% Introducing holds, by the pair's key, each introduce/2 caller waiting for its
-    %% connection to come up (settle_introductions/1).
+    %% connection to come up, with the timer of its deadline (settle_introductions/1).
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
-           configured => #{}, waiting => #{}, links => erx_domain_links:new(), introducing => #{}},
+           configured => #{}, waiting => #{}, links => erx_domain_links:new(), introducing => #{},
+           introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT)},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none.
@@ -147,6 +153,8 @@ handle_info({domain_ready, Ref, Id, _Agents}, State) ->
     {noreply, ready(Id, Ref, State)};
 handle_info({domain_answer, Ref, Id, Answer}, State) ->
     {noreply, answer(Id, Ref, Answer, State)};
+handle_info({timeout, Timer, {introduce_timeout, Key, From}}, State) ->
+    {noreply, introduce_timed_out(Key, From, Timer, State)};
 handle_info({timeout, _Timer, {boot_timeout, Id}}, #{core := Core} = State) ->
     %% Ids are never reused, so the timer of a domain that reported ready or ended finds
     %% it ready or gone. A domain stopping for its timeout takes no late report
@@ -445,12 +453,32 @@ connect({error, _} = Refused, _A, _B, _ReaderA, _ReaderB, State) ->
 up_values(#{side := Side, peer_side := PeerSide, peer_bell := PeerBell, label := Label}, OutSize, InSize) ->
     {Side, PeerSide, PeerBell, Label, OutSize, InSize}.
 
-wait_introduced(A, B, From, #{introducing := Introducing} = State) ->
+%% A caller waits at most the service's introduce_timeout, so neither a domain that never
+%% answers its connection_up nor a caller that died first keeps an entry here for longer.
+wait_introduced(A, B, From, #{introducing := Introducing, introduce_timeout := Timeout} = State) ->
     Key = {min(A, B), max(A, B)},
-    settle_introductions(State#{introducing := Introducing#{Key => [From | maps:get(Key, Introducing, [])]}}).
+    Timer = erlang:start_timer(Timeout, self(), {introduce_timeout, Key, From}),
+    Callers = maps:get(Key, Introducing, #{}),
+    settle_introductions(State#{introducing := Introducing#{Key => Callers#{From => Timer}}}).
 
-%% Answers every introduce/2 caller whose connection has settled: ok once it is up, and
-%% noconnection once it closed before it came up.
+%% A caller's deadline passed with its connection still coming up: it is answered timeout,
+%% and the connection is left as it is, so a later introduction answers ok once it is up.
+%% A deadline whose caller was answered already finds no entry with its timer.
+introduce_timed_out(Key, From, Timer, #{introducing := Introducing} = State) ->
+    case Introducing of
+        #{Key := #{From := Timer} = Callers} ->
+            gen_server:reply(From, {error, timeout}),
+            Rest = maps:remove(From, Callers),
+            State#{introducing := case map_size(Rest) of
+                                      0 -> maps:remove(Key, Introducing);
+                                      _ -> Introducing#{Key := Rest}
+                                  end};
+        #{} ->
+            State
+    end.
+
+%% Answers every introduce/2 caller whose connection has settled, and stops its deadline:
+%% ok once it is up, and noconnection once it closed before it came up.
 settle_introductions(#{introducing := Introducing, links := Links} = State) ->
     Pending = maps:filter(fun({A, B}, Callers) ->
                                   case erx_domain_links:phase(A, B, Links) of
@@ -462,7 +490,10 @@ settle_introductions(#{introducing := Introducing, links := Links} = State) ->
     State#{introducing := Pending}.
 
 answer_callers(Callers, Reply) ->
-    _ = [gen_server:reply(From, Reply) || From <- Callers],
+    _ = [begin
+             _ = erlang:cancel_timer(Timer, [{async, true}, {info, false}]),
+             gen_server:reply(From, Reply)
+         end || From := Timer <- Callers],
     false.
 
 %% Performs erx_domain_links's actions in order: each record goes to its party's domain

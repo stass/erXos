@@ -43,12 +43,12 @@ class SystemDomainTest < Minitest::Test
   def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
-    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced domain-ends
-                    system-domain-ended],
+    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced connection-down
+                    domain-ends system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
     assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
-    running, table, _introduced, ends, ended = points.last(5)
+    running, table, _introduced, _down, ends, ended = points.last(6)
     refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
@@ -78,6 +78,18 @@ class SystemDomainTest < Minitest::Test
      Suite::INTRODUCED_ANSWER.sub('[peer@erxos,system@erxos]', '[system@erxos]'),
      Suite::INTRODUCED_ANSWER.sub('{pong,5,ping}', '{exit,timeout}')].each do |line|
       assert_raises(Erx::Error) { introduced.fetch(:verify).call("#{line}\r\n") }
+    end
+    # The down path: a burst's tail lost (an agent without the finish), a side never told
+    # (no connection_lost from a port that ended by itself), objects never deleted or a
+    # quota never freed each fails.
+    down = points.find { |point| point.fetch(:name) == 'connection-down' }
+    refute_match down.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    down.fetch(:verify).call("#{Suite::CONNECTION_DOWN_ANSWER}\r\n")
+    [Suite::CONNECTION_DOWN_ANSWER.sub('{20,true,noconnection}', '{0,true,timeout}'),
+     Suite::CONNECTION_DOWN_ANSWER.sub('{ok,noconnection}', '{ok,timeout}'),
+     Suite::CONNECTION_DOWN_ANSWER.sub('none,ok,ok', 'closing,{error,closing},ok'),
+     Suite::CONNECTION_DOWN_ANSWER.sub(/none,ok\}\z/, 'gone,{error,system_limit}}')].each do |line|
+      assert_raises(Erx::Error) { down.fetch(:verify).call("#{line}\r\n") }
     end
     refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
     down = '{domain_down,5,{halt,69}}'

@@ -27,8 +27,10 @@ already joined. {error, system_limit} when either domain is at its
 connections limit or cannot fund its side, {error, badarg} for a domain
 that does not exist or has ended, or for one domain twice, {error,
 closing} while the pair's last connection is still going down,
-{error, noconnection} when the connection closed before it came up, and
-the domain library's own refusal otherwise.
+{error, noconnection} when the connection closed before it came up,
+{error, timeout} when it is not up at both ends within ten seconds, the
+connection being left as it is, and the domain library's own refusal
+otherwise.
 
 stop/2 is exit(pid(Domain), Reason): any reason but normal stops the domain,
 and kill ends the domain pid at once, after which the service stops the
