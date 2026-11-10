@@ -2,7 +2,8 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * The lane port's decisions; erx_lane_core.h says what they guarantee.
+ * The lane port's decisions; erx_lane_core.h says what they guarantee. It also owns the
+ * funnel's scratch growth, with the allocator the caller supplies.
  */
 
 #include "erx_lane_core.h"
@@ -126,4 +127,24 @@ erx_lane_port_answered(erx_funnel_op_t op)
 {
 	return (op == ERX_FUNNEL_LINK || op == ERX_FUNNEL_MONITOR_P || op == ERX_FUNNEL_UNLINK_ID ||
 	    op == ERX_FUNNEL_SPAWN_REQUEST);
+}
+
+bool
+erx_lane_scratch_grow(erx_lane_scratch_t *scratch, size_t want, void *(*alloc)(size_t),
+    void (*release)(void *))
+{
+	uint8_t *grown;
+
+	if (want <= scratch->len)
+		return (true);
+	/* An overflow is never asked of the allocator. */
+	if (want == SIZE_MAX)
+		return (false);
+	grown = alloc(want);
+	if (grown == NULL)
+		return (false);
+	release(scratch->block);
+	scratch->block = grown;
+	scratch->len = want;
+	return (true);
 }

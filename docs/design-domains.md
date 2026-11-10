@@ -1236,16 +1236,16 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    version byte 131. A body longer than what is published is read as its
    bytes arrive ([Connections](#connections)); the header and the control
    term are complete before anything below runs.
-3. **Payload size.** A `payload_len` past the receiver's `max_frame`, or a
-   private buffer the receiver cannot allocate for it, puts the record in
-   **discard mode**: the funnel still reads the control term, skips the
+3. **Payload size.** A `payload_len` past the receiver's `max_frame` puts
+   the record in **discard mode**: the funnel still reads the control term, skips the
    payload's bytes as they arrive, advancing `rpos` behind them, and
    performs step 7's substitution. The buffer for a payload within the limit
    is the receiver's own and grows as the payload's bytes arrive, never
    allocated whole on the header's word, so a sender that publishes a
    header and trickles the bytes makes the receiver hold what it has sent
-   and no more; a growth the receiver cannot allocate puts the rest of the
-   record in discard mode. Step 3 decides only how the payload is read;
+   and no more; a growth the receiver cannot allocate ends the connection with
+   `no_memory`, as the scratch's does below, since a record dropped for the
+   receiver's shortage would lose a send or an exit unseen. Step 3 decides only how the payload is read;
    whether a frame is over a limit counts only once step 5 has found it
    authorised.
 4. **Control term.** The control grammar admits only the operations of
@@ -1448,9 +1448,10 @@ for its value charged to the version byte. The scratch starts at what the
 longest control term needs, 65 KiB, so a control term is always judged
 whole, and grows to what each record judged needs, 2 bytes a byte and up to
 `funnel_depth` frames; like the record buffer, it keeps its largest size
-for the connection's life. A growth the receiver cannot allocate makes that
-payload over a limit, as one past `max_message_heap` is, though it is the
-receiver's memory that ran short.
+for the connection's life. A growth the receiver cannot allocate
+ends the connection with `no_memory`, as a record buffer that cannot grow
+does: the shortage is the receiver's, so the frame is neither judged against
+a scratch too small for it nor blamed on the peer as over a limit.
 
 **Semantic acceptance.** The funnel's structural pass is the first stage; an
 encoded queue entry is pending validation, never an accepted term. At the

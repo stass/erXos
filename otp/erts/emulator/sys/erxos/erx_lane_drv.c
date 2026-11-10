@@ -116,8 +116,7 @@ typedef struct lane_conn {
 	erx_funnel_asm_t	 assembly;
 	uint8_t			*in;
 	size_t			 in_cap;
-	uint8_t			*scratch;
-	size_t			 scratch_len;
+	erx_lane_scratch_t	 scratch;
 
 	/* Where the port is in its finish, and the process that asked for it, told when done. */
 	erx_lane_port_state_t	 state;
@@ -392,30 +391,6 @@ input_grow(lane_conn_t *conn, size_t want)
 }
 
 /*
- * Grows the funnel's scratch to what judging held bytes of a frame needs, which is
- * proportional to them, not to max_message_heap. The scratch starts at what any control
- * term needs, so a growth that cannot be allocated leaves the control term judged whole and
- * the payload refused as over a limit, as erx_funnel_check refuses one past the word limit.
- */
-static void
-scratch_grow(lane_conn_t *conn, size_t held)
-{
-	const size_t want = erx_funnel_check_scratch_bytes(&conn->limits, held);
-	void *grown;
-
-	/* SIZE_MAX, an overflow, is never asked of the allocator: held is bounded by the buffer. */
-	if (want <= conn->scratch_len || want == SIZE_MAX)
-		return;
-	/* A fresh block, not a realloc: nothing in the scratch outlives a judgment. */
-	grown = driver_alloc(want);
-	if (grown == NULL)
-		return;
-	driver_free(conn->scratch);
-	conn->scratch = grown;
-	conn->scratch_len = want;
-}
-
-/*
  * A frame to judge and act on: the ring's open record, in the record buffer, or a control
  * slot's copy, in ctl_in. len is the record's len, held the bytes of it in buf (fewer only
  * for a ring record in discard mode), cap the bytes buf holds.
@@ -513,7 +488,7 @@ typedef enum {
 	STEP_TOOK,		/* a whole record was taken and acted on, or every changed slot */
 	STEP_EMPTY,		/* nothing more is published, and the wait is */
 	STEP_BROKEN,		/* the lane or a frame failed a check: nothing more is delivered */
-	STEP_NO_MEMORY,		/* the record's buffer could not grow */
+	STEP_NO_MEMORY,		/* the record's buffer or the funnel's scratch could not grow */
 	STEP_ANSWERS_UNREAD	/* an answerable frame came past ERX_LANE_ANSWERS_MAX unsent */
 } step_t;
 
@@ -570,13 +545,16 @@ input_take(lane_conn_t *conn, const erx_funnel_asm_plan_t *plan, erx_lane_part_t
 static step_t
 frame_judge(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id, const lane_frame_t *frame)
 {
+	const size_t need = erx_funnel_check_scratch_bytes(&conn->limits, frame->held);
 	erx_funnel_verdict_t verdict;
 	erx_lane_port_do_t what;
 	bool answerable;
 
-	scratch_grow(conn, frame->held);
-	erx_funnel_check(frame->buf, frame->len, frame->held, &conn->lane, &conn->limits, conn->scratch,
-	    conn->scratch_len, &verdict);
+	/* The receiver's shortage ends the connection, as a record buffer that cannot grow does. */
+	if (!erx_lane_scratch_grow(&conn->scratch, need, driver_alloc, driver_free))
+		return (STEP_NO_MEMORY);
+	erx_funnel_check(frame->buf, frame->len, frame->held, &conn->lane, &conn->limits,
+	    conn->scratch.block, conn->scratch.len, &verdict);
 	answerable = dep != NULL && verdict.action != ERX_FUNNEL_MALFORMED &&
 	    erx_lane_port_answered(verdict.control.op);
 	what = port_decide(conn, &(erx_lane_port_input_t){
@@ -776,8 +754,8 @@ conn_free(lane_conn_t *conn)
 		driver_free(conn->out);
 	if (conn->in != NULL)
 		erts_free(ERTS_ALC_T_DRV, conn->in);
-	if (conn->scratch != NULL)
-		driver_free(conn->scratch);
+	if (conn->scratch.block != NULL)
+		driver_free(conn->scratch.block);
 	if (conn->ctl_seq != NULL)
 		driver_free(conn->ctl_seq);
 	if (conn->ctl_in != NULL)
@@ -950,11 +928,11 @@ lane_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 		.receiver_id = (uint32_t)erts_this_node->creation };
 	conn->exports_conn = (erx_exports_conn_t){ .peer = open.peer_id };
 	conn->system = open.system;
-	conn->scratch_len = ERX_FUNNEL_CTL_SCRATCH;
-	conn->scratch = driver_alloc(conn->scratch_len);
+	conn->scratch.len = ERX_FUNNEL_CTL_SCRATCH;
+	conn->scratch.block = driver_alloc(conn->scratch.len);
 	conn->in_cap = ERX_FUNNEL_ASM_FIRST;
 	conn->in = erts_alloc_fnf(ERTS_ALC_T_DRV, conn->in_cap);
-	if (conn->own_bytes == 0 || conn->peer_bytes == 0 || conn->scratch == NULL || conn->in == NULL)
+	if (conn->own_bytes == 0 || conn->peer_bytes == 0 || conn->scratch.block == NULL || conn->in == NULL)
 		goto fail;
 	conn->own_side = (void *)(uintptr_t)side_map(open.side, conn->own_bytes, ERX_PROT_RW);
 	conn->peer_side = (const void *)(uintptr_t)side_map(open.peer_side, conn->peer_bytes, ERX_PROT_R);

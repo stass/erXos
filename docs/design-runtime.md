@@ -1841,7 +1841,8 @@ it is a bound the runtime enforces:
   `max_frame`, the largest `max_request` a grant may name ([Connections
   in ERTS](#connections-in-erts)), and the funnel's scratch for judging
   it, at least 65 KiB, which grows to twice the largest record with
-  `funnel_depth` stack frames and keeps that size
+  `funnel_depth` stack frames and keeps that size; a scratch growth the
+  system domain cannot allocate ends the connection with `no_memory`, as a record buffer does
   ([design-domains.md](design-domains.md#the-funnel));
 * its **queue** to the domain, up to the manifest's `system_queue`, past
   which a message is dropped and any other signal ends the connection (edit 10);

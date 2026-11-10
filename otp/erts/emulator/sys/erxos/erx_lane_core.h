@@ -25,6 +25,8 @@
 #define ERX_LANE_CORE_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "erx/funnel.h"
 
@@ -85,5 +87,25 @@ erx_lane_port_next_t	erx_lane_port_decide(erx_lane_port_state_t state, const erx
  * bound holds back.
  */
 bool	erx_lane_port_answered(erx_funnel_op_t op);
+
+/*
+ * The funnel's scratch: one block the connection keeps at its largest size. It starts at
+ * ERX_FUNNEL_CTL_SCRATCH, so a control term is always judged whole, and grows before a
+ * frame is judged to what erx_funnel_check_scratch_bytes says the frame's held bytes need.
+ */
+typedef struct erx_lane_scratch {
+	uint8_t		*block;
+	size_t		 len;
+} erx_lane_scratch_t;
+
+/*
+ * Grows scratch to want bytes, which is SIZE_MAX when the size overflows. Returns false when that cannot
+ * be allocated, with scratch unchanged: the receiver is short of memory, which is not the
+ * frame's fault, so the caller ends the connection as it does when its record buffer cannot
+ * grow, and does not judge the frame against a smaller scratch. The block is a fresh one,
+ * as nothing in the scratch outlives a judgment; alloc returns NULL when it cannot.
+ */
+bool	erx_lane_scratch_grow(erx_lane_scratch_t *scratch, size_t want, void *(*alloc)(size_t),
+	    void (*release)(void *));
 
 #endif /* !ERX_LANE_CORE_H */
