@@ -1565,7 +1565,12 @@ and drivers](#native-processes-and-drivers)).
   reads or replaces the state of a process through `sys`, whatever it
   holds on it (D18). erXos's own protocols take the envelope whole: a
   facet and a socket of the network service check `D` against their
-  grantee, the connection agent against the system domain, the domain
+  grantee; a socket process in the client's domain, the owner of the
+  socket protocol on that side, checks `D` against the domain its socket
+  was opened against and gives its owner `gen_tcp`'s and `gen_udp`'s
+  stock messages, bare
+  ([design-network-stack.md](design-network-stack.md#the-socket-process));
+  the connection agent checks `D` against the system domain, the domain
   pid against its own domain, and an application takes the display's
   events as `{erx_origin, D, {ui, Window, Term, Detail}}`.
 * **What it holds for other domains.** A runtime also holds state because of
@@ -2200,8 +2205,10 @@ rooted and restricted there
 **What a facet costs its domain.** A facet runs on its own domain's grant,
 the system domain's for a system facet, which policy caps and sizes for the
 domains it serves ([design-scheduler.md](design-scheduler.md#service-work)).
-A grant names `max_request`, the requests it admits in flight, the
-grantee's **share** of reductions per period, the facet's heap limit and,
+A grant names `max_request`, the largest decoded request the facet takes,
+past which the funnel drops a request before it is queued; its limit of
+requests in flight; the grantee's **share** of reductions per period;
+the facet's heap limit; and,
 where it needs another than the manifest's `system_queue`, the facet's
 queue quota.
 
@@ -2244,7 +2251,8 @@ queue quota.
 
 **Processes a facet starts.** A facet may start processes of its own
 domain that act for its grantee alone, as the network service's grant
-starts a socket process for each of its grantee's sockets
+starts a connection, listener or datagram process for each of its
+grantee's sockets
 ([design-network-stack.md](design-network-stack.md#sockets-act-for-one-domain)).
 Such a process runs the facet's generated admission path on every
 request, exported toward the grantee with `send` alone, and charges the
@@ -3741,38 +3749,23 @@ bound exact at the cost of a configuration step per name. The
 recommendation is binding by first use, with the configured domains' names
 held from boot.
 
-Open question for the user: how a stock protocol that pushes messages
-across domains keeps its stock shape. The network service's sockets send
-their owners `gen_tcp`'s and `gen_udp`'s active-mode messages,
-`{tcp, S, Data}` and its kin ([design-network-stack.md](design-network-stack.md#the-backend)),
-and an owner in another domain receives each as `{erx_origin, D, {tcp, S,
-Data}}`, which no stock `receive {tcp, S, Data}` matches, so an
-application that uses active mode outside the network domain, cowboy and
-ranch in the web domain among them, fails. The recommendation is a relay
-per socket in the owner's domain, started by `erx_net_client` when the
-socket is opened or accepted: the socket sends its deliveries to the
-relay, which, as the protocol's owner on that side, takes the envelope
-off a message whose `D` is the socket's own domain, passes the bare
-message to the owner, follows `controlling_process/2` and ends with the
-owner. It costs one local message per delivery, which is measured against
-the direct send before the choice is made. The alternative, an exception
-in edit 16 for socket messages whose socket pid is of the lane's domain,
-saves that message but puts a list of shapes into the runtime and gives
-D18 an exception.
-
 The user's decisions on every domain being a node,
-spawners' rights, pid text, names as exports and origins are recorded
-where they apply: every domain is a node named by its identifier at the machine's
+spawners' rights, pid text, names as exports, origins and sockets are
+recorded where they apply: every domain is a node named by its identifier at the machine's
 host, its creation its domain id ([Domain ids, pids and
 references](#domain-ids-pids-and-references)); a spawner holds every right
 on its child in another domain ([Authority](#authority)); every pid prints
 as `<D.N.S>`, local pids included, a documented difference from stock OTP
-([Domain ids, pids and references](#domain-ids-pids-and-references)); and
+([Domain ids, pids and references](#domain-ids-pids-and-references));
 a process's own pid, placed in a frame by its owner, exports it, with
-`send` alone ([Exports](#exports)); and every message from another domain
+`send` alone ([Exports](#exports)); every message from another domain
 arrives as `{erx_origin, D, Msg}`, with no flag of the receiving process,
 and only the owner of each protocol takes the envelope off its own shapes
-([The peer](#the-peer)).
+([The peer](#the-peer)); and every network socket has a socket process in
+its owner's domain, the protocol's owner on that side, which alone talks
+to the network domain for it and gives its owner `gen_tcp`'s and
+`gen_udp`'s stock messages, so active-mode code works unchanged in every
+domain ([design-network-stack.md](design-network-stack.md#the-socket-process)).
 
 ## References
 

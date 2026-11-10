@@ -1131,14 +1131,6 @@ another domain.
   grant applies, so a flood faster than it decodes makes the driver drop
   frames for every client alike
   ([design-network-stack.md](design-network-stack.md#residuals)).
-* **ERTS's packet parser runs on peer data in the network domain.**
-  `gen_tcp`'s packet modes are framed there with `erlang:decode_packet/3`,
-  as stock frames them in every node, so a memory-safety bug in that C
-  parser that a peer can reach would end the network domain and every
-  client's connections. It has a fuzz target over every mode offered; by
-  the user's decision it is not moved into the clients' domains, which
-  would cost a client-side process per socket
-  ([design-network-stack.md](design-network-stack.md#residuals)).
 * **The system domain's size.** A defect in its ERTS or services acts with
   its authority over policy, though not over other domains' memory, and a
   fault of its runtime resets the machine. Facets confine what clients

@@ -35,10 +35,15 @@ Decisions every reader needs:
   socket, and a grant process per client domain. Each decides by a pure
   function `step(Event, State, Context) -> {State, Actions}` and then
   performs the actions. Nothing else writes that state.
-* **A connection is the socket.** A program's `gen_tcp` calls go to the
-  connection process directly, across one lane; the interface process
-  hands it segments, one local message per batch of frames. There is no
-  socket process apart from the connection and no process per layer.
+* **A socket is two processes, one on each side of the lane.** In the
+  network domain the connection process holds the TCP state, and the
+  interface process hands it segments, one local message per batch of
+  frames. In the program's own domain a socket process, the shape of
+  stock OTP's `gen_tcp_socket`, presents the stream as `gen_tcp` does:
+  active modes, packet framing, `recv`. The socket process alone talks to
+  the connection and alone sends the program the socket's messages, so
+  stock `receive {tcp, S, Data}` code works in every domain. There is no
+  process per layer.
 * **Deadlines, not timers.** A connection's timers are deadlines in its
   state, as FreeBSD 15 keeps them, and the process holds one Erlang timer
   at the earliest. A timer message is a hint to look at the clock, never
@@ -241,7 +246,9 @@ steps and carry out their actions. Beneath them:
 * **N7. Few hops, few copies.** A received segment reaches its connection
   through two local messages per batch, and a transmitted one reaches the
   driver through one; inside the network domain a frame is copied once on
-  receive and once on transmit, both in the device NIF.
+  receive and once on transmit, both in the device NIF. A delivery takes
+  one local message more, in the owner's domain, from the socket process
+  to the owner.
 * **N8. Functional core.** Every protocol decision is a pure function,
   tested on the host, and protocol state machines are explored
   exhaustively over an abstract alphabet to a stated depth.
@@ -281,10 +288,11 @@ Every piece of protocol state belongs to exactly one process:
 | Owner | Process | State it owns |
 | --- | --- | --- |
 | an interface | `erx_net_if`, one per network interface | its addresses, its neighbour cache (ARP and IPv6 neighbour discovery) and the packets waiting on it, its routers and prefixes, its IP reassembly queues, its share of the syncache, its rate limiters |
-| a TCP connection | `erx_tcp_conn` | the connection's control block (FreeBSD's `struct tcpcb`), its send and receive buffers, its reassembly queue, its owner |
-| a listening socket | `erx_tcp_listen` | its accept queue and its waiting `accept` callers |
-| a UDP socket | `erx_udp_sock` | its receive queue, its options, its owner |
+| a TCP connection | `erx_tcp_conn` | the connection's control block (FreeBSD's `struct tcpcb`), its send and receive buffers, its reassembly queue, its socket process and the credit that process granted |
+| a listening socket | `erx_tcp_listen` | its accept queue and its waiting `accept` requests |
+| a UDP socket | `erx_udp_sock` | its receive queue, its options, its socket process and the credit that process granted |
 | an ICMP echo socket | `erx_icmp_sock` | its echo identifier, its queue of echo replies, its owner |
+| a socket as a program sees it | the socket process, `erx_gen_tcp` or `erx_gen_udp`, in the owner's domain ([The socket process](#the-socket-process)) | its owner, its active mode and presentation options, the bytes or datagrams it holds, the credit it granted, its requests in flight |
 | a client domain's grant | `erx_net_grant` | the domain's limits, its account, its sockets' buffer reservations |
 
 Each owner is a loop around one pure function of its kind:
@@ -446,6 +454,14 @@ The same rule bounds what a remote peer can queue at a connection: a
 connection that falls behind fills its credit, and the interface drops
 further segments for it, which the peer's congestion control sees as
 loss.
+
+The rule crosses the lane unchanged, except that an `atomics` counter
+cannot be shared between domains: a socket pushes to its socket process
+only within the credit that process granted it by message, counted in
+bytes for a connection and for a datagram socket alike
+([The socket process](#the-socket-process)). So what a socket's owner
+does not read waits in the socket, inside its receive buffer or queue,
+and never in a mailbox.
 
 ### Packets become checked records once; sequence numbers are integers
 
@@ -737,12 +753,19 @@ domain D:
 4. **Connection.** The connection folds `erx_tcp:step/3` over the
    segments, one at a time, exactly as FreeBSD processes one segment at a
    time, collecting the actions. It then sends all frames the steps
-   produced (ACKs, data) to the driver in one message, delivers all
-   in-order data in one message to the owner, replies to waiting callers
-   and re-arms its timer.
-5. **Connection to owner.** In active mode the delivery is
-   `{tcp, Socket, Data}` sent to the owner in domain D: a frame on the
-   lane from the network domain to D, decoded by D's funnel.
+   produced (ACKs, data) to the driver in one message, pushes the
+   in-order data its socket process has credit for to that process, in
+   pushes of at most one piece of 64 KiB each
+   ([Message sizes](#message-sizes)), replies to its requests and re-arms
+   its timer.
+5. **Connection to socket process.** The push is
+   `{erx_net, Conn, {data, Data}}`, a frame on the lane from the network
+   domain to the owner's domain D, decoded by D's funnel and delivered as
+   `{erx_origin, Net, {erx_net, Conn, {data, Data}}}`.
+6. **Socket process to owner.** The socket process checks the push and
+   presents it as its options say: in active raw mode as one
+   `{tcp, Socket, Data}`, a local message in D
+   ([The socket process](#the-socket-process)).
 
 ### Classifying a frame
 
@@ -1162,15 +1185,17 @@ holds is not counted, a residual ([Residuals](#residuals)).
 
 | Path | Local messages | Lane crossings | Copies in the network domain |
 | --- | --- | --- | --- |
-| receive, TCP segment | driver to interface (per batch), interface to connection (per batch) | one per delivery | one, `erx_device:complete/2` |
-| transmit, TCP segment | connection to driver (per step) | one per `send` call | one, `post/4` |
-| receive, UDP datagram | driver to interface, interface to socket | one per datagram | one |
+| receive, TCP segment | driver to interface (per batch), interface to connection (per batch); in the owner's domain, socket process to owner (per delivery) | one per push of up to a piece, and one credit message per half of the socket process's target, in every active mode | one, `erx_device:complete/2` |
+| transmit, TCP segment | in the owner's domain, caller to socket process (per `send` call); connection to driver (per step) | two per piece of a `send`, the request and its reply | one, `post/4` |
+| receive, UDP datagram | driver to interface, interface to socket; in the owner's domain, socket process to owner | one per datagram, and one credit message per half of the socket process's target | one |
 | ARP, neighbour discovery, ICMP echo, SYN | driver to interface; replies interface to driver | none | one each way |
 
 A lane crossing copies the payload into the lane and out of it, by the
 domains design ([design-domains.md](design-domains.md#flow-control)); a
 delivery that coalesces several segments' payloads into one binary adds
-a copy to save messages, a trade on the performance watch list.
+a copy to save messages, a trade on the performance watch list. The
+local hop from the socket process to the owner copies no payload over
+64 bytes, since ERTS passes a binary that size or larger by reference.
 
 ### Loopback
 
@@ -1266,13 +1291,14 @@ that translates the FreeBSD code for it, then runs output, as
 `tcp_do_segment` ends by calling `tcp_output` when an ACK or data is due.
 
 The user requests are FreeBSD's `pr_usrreqs` for a connected stream:
-`connect`, `send`, `rcvd` (so many bytes left the receive buffer, read by
-the owner or held by a waiting `recv`, which reopens the window), `shutdown`, `close` and `abort`. The socket layer above them,
-the owner, the active mode, packet framing and the bytes not yet handed to
-the owner, belongs to the connection process; the control block counts
-those bytes, except those a waiting `recv` already holds
-([The interface towards Erlang programs](#the-interface-towards-erlang-programs)),
-so that the advertised window follows them. A request that
+`connect`, `send`, `rcvd` (so many bytes left the receive buffer, pushed
+to the socket process, which reopens the window), `shutdown`, `close` and
+`abort`. The socket layer's buffer, the bytes not yet pushed, belongs to
+the connection process, and the control block counts them so that the
+advertised window follows them; the rest of the socket layer, the owner,
+the active mode, packet framing and the bytes pushed but not yet
+presented, belongs to the socket process in the owner's domain
+([The socket process](#the-socket-process)). A request that
 waits carries its caller, and the step answers it from the state it
 reaches, after output: `connect` once the connection is established,
 `send` once all its bytes are in the send buffer, which takes them as its
@@ -1281,7 +1307,7 @@ waiting caller with the error when the connection ends. A connection
 that `tcp_close` ended (FreeBSD's `INP_DROPPED`, the record's `ended`) is
 done, which a new control block in CLOSED is not: the step runs output
 only for a connection dropped after it received a SYN, so that output is
-the RST of `tcp_drop`, then tells the owner how it ended and returns
+the RST of `tcp_drop`, then tells the socket process how it ended and returns
 `finish`. No stage has to remember any of this, since it follows from the
 state.
 
@@ -2143,8 +2169,10 @@ of the interface process, not a socket, so it needs no exception in
 the socket bound most specifically, ICMP errors delivered to a connected
 socket, and port unreachable errors within the ICMP limit. A datagram
 socket holds received datagrams up to its receive buffer, counted in
-bytes as its credit, and drops beyond it, as a UDP socket's receive
-buffer does. UDP-Lite and encapsulation are not part of the stack, and
+bytes, and drops beyond it, as a UDP socket's receive buffer does; it
+pushes a datagram whole, only when its socket process's byte credit
+covers the datagram's length ([The socket process](#the-socket-process)).
+UDP-Lite and encapsulation are not part of the stack, and
 multicast delivery is `erx_mcast`'s ([Scope](#scope)).
 
 ## The effect layer
@@ -2173,8 +2201,9 @@ The runtime's seam is the behaviour `erx_net_runtime`:
 
 ```erlang
 -callback serve(MaxRequest :: pos_integer()) -> ok.
-    % the calling process takes requests from other domains, at most
-    % MaxRequest at once; on erXos every one arrives enveloped with its
+    % the calling process takes requests from other domains, each at
+    % most MaxRequest in decoded size, the runtime dropping a larger one
+    % before it is queued; on erXos every one arrives enveloped with its
     % origin
 -callback start_grant(Grantee :: local | pos_integer(), Limits :: map()) ->
     {ok, pid()} | {error, Reason :: term()}.
@@ -2184,9 +2213,15 @@ A grant and every socket call `serve/1` as they start; the
 `erx_net:mint_grant/2` of [The grant's contract](#the-grants-contract)
 calls `start_grant/2`. The client side, `erx_net_client`, finds its
 grant through its own `grant` key, a `{Module, Function, Args}` called
-once per socket opened: `{erx, cap, [net]}` on erXos, and outside it
-`{erx_net, local_grant, []}`, the grant `erx_net` minted for its own
-node at start.
+once per socket opened, which answers `{ok, Grant, Origin}` or
+`{error, Reason}`. `Origin` is how messages from the grant's domain
+arrive: `local` when that domain is the caller's own, so they arrive
+bare, and otherwise the domain id their envelope carries. On erXos the
+key names `{erx_net_client_erxos, grant, []}`, the client's one module
+in an `erxos/` directory of its own, which answers from `erx:cap(net)`
+and `erx:owner/1` ([design-domains.md](design-domains.md#erlang-interface));
+outside erXos it names `{erx_net, local_grant, []}`, the grant `erx_net`
+minted for its own node at start, with `Origin` `local`.
 
 The loopback transport, `erx_net_loop`, is the same in both places.
 Nothing else differs: the application, its supervisors, its
@@ -3162,22 +3197,34 @@ the runtime seam nor the facet machinery changes them:
   message without an envelope comes from the receiver's own domain,
   `local` ([design-domains.md](design-domains.md#facets)). The origin
   must be the grantee; `Inner` must be a request of
-  `abi/services/net.txt`, within its sizes; and the reply target, and
-  any new owner a request names, must be a pid of the grantee's domain.
-  A refused request is answered `{error, badarg}` and counted, as a
-  facet refuses ([design-domains.md](design-domains.md#facets)).
+  `abi/services/net.txt`, within the bounds the schema declares for each
+  argument ([Message sizes](#message-sizes)); and the reply target, and
+  any socket process a request names, must be a pid of the grantee's
+  domain. A refused request is answered `{error, badarg}` and counted, as a
+  facet refuses ([design-domains.md](design-domains.md#facets)). A socket
+  then also requires `ReplyTo` to be its own socket process
+  ([Sockets act for one domain](#sockets-act-for-one-domain)).
   `erx_net_admit` is generated from the schema into the app's build
   output, the one generated module `erx_net` needs; an app taken out of
   the tree carries that output with it. Until the schema generator
   exists it is hand-written with the generated module's exact signature
   ([Decisions](#decisions), 10). The grant, under `erx_facet`, reaches
   the same check through the facet's behaviour, and under
-  `erx_net_local`'s loop through a call before each callback. The
-  requests in flight are bounded by the runtime's request limit on the
-  receiving process, which `serve/1` sets from the grant's
-  `max_request`.
+  `erx_net_local`'s loop through a call before each callback. Two
+  bounds apply, and neither drops a request a correct client sends. The
+  runtime's request limit on the receiving process, which `serve/1` sets
+  to the grant's `max_request`, the schema's largest request, drops a
+  larger message before it is queued. The requests in flight are the
+  admission's: the grant's are bounded by its facet's limit in flight,
+  past which requests wait in the facet's queue and then in the
+  grantee's lane ([design-domains.md](design-domains.md#facets)), and a
+  socket's by the socket protocol's 64, which its socket process never
+  exceeds ([Requests in flight](#requests-in-flight)).
 * A client finds its grant through `erx_net_client`'s `grant` key and
-  nothing else: `erx:cap(net)` on erXos.
+  nothing else: `erx:cap(net)` on erXos, with the origin its messages
+  carry ([Two places, four seams](#two-places-four-seams)).
+* A socket speaks to its socket process, and to nothing else, in the
+  socket protocol of [The socket process](#the-socket-process).
 
 With the local runtime, `erx_net` mints its node's grant with the
 grantee `local` at start, and a test harness mints any others the same way. No message
@@ -3286,10 +3333,17 @@ targets and explorer, all run on stock OTP from the app directory alone
 The client side is the application `erx_net_client`, in
 `erlang/apps/erx_net_client/`, which every erXos domain runs beside
 `erx` and a node outside erXos runs beside `erx_net`: `erx_gen_tcp` and
-`erx_gen_udp`, the socket backends, and `erx_inet`, their shared
-requests (`getifaddrs`, host name, name servers). It depends on
+`erx_gen_udp`, the socket backends, each the stubs `gen_tcp`, `gen_udp`
+and `inet` call and the `gen_statem` of its socket process;
+`erx_gen_tcp_core` and `erx_gen_udp_core`, the pure presentation step
+each socket process runs; `erx_sock_admit`, the check of every message
+the client side takes from the network domain, a socket's push or the
+grant's answer; and `erx_inet`, the one path to the grant, `call/1`,
+which the socket processes and `inet:getifaddrs/0` use, and the
+resolver loader. It depends on
 `kernel` and `stdlib` alone, and its one call into erXos is its `grant`
-key's ([Two places, four seams](#two-places-four-seams)).
+key's, through `erxos/erx_net_client_erxos`
+([Two places, four seams](#two-places-four-seams)).
 
 Rough size, from FreeBSD's line counts with what is not translated taken
 out: the TCP core about 9,000 to 12,000 lines of Erlang, IP, neighbours
@@ -3376,12 +3430,13 @@ principal's policy:
 | Limit | Meaning | Default |
 | --- | --- | --- |
 | `sockets` | sockets open at once, listeners and accepted connections included | 1,024 |
-| `buffers` | bytes of send and receive buffer reserved across the grant's sockets; a connection's receive side reserves twice its receive buffer, the buffer and what a waiting `recv` may hold outside it | 16 MiB |
+| `buffers` | bytes of send and receive buffer reserved across the grant's sockets; what a socket has pushed to its socket process is the client's own memory and does not count | 16 MiB |
 | `time_wait` | connections in TIME-WAIT | 4,096 |
 | `ports` | local ports the grant may bind explicitly; ports below 1,024 only when listed, as FreeBSD requires privilege for them (`ipport_reservedhigh`, `in_pcb.c:132`) | 1,024 to 65,535 |
 | `listen` | whether the grant may listen, and on which of its ports | yes |
 | `addresses` | local addresses the grant may bind | all |
 | `share` | reductions per period, the facet's share | the policy's |
+| `max_request` | the largest decoded request the grant and its sockets take; the runtime drops a larger one before it is queued | fixed, not a policy's: the schema's largest request, which the generator computes |
 
 Configuring interfaces and reading every client's statistics is a second
 facet, `netadmin`, granted to administrators.
@@ -3397,18 +3452,37 @@ takes them from the published tables.
 The grant starts the domain's sockets, except connections accepted on
 the domain's listeners, which the interface process starts; every socket
 links to its grant and traps exits, so the grant's end reaches it as a
-message and it ends, a connection with a RST. A
-socket's pid is encoded only in frames to the grantee, so the network
-domain's runtime exports it to the grantee alone, with `send` only, and
-no other domain can message it
+message and it ends, a connection with a RST.
+
+In this document a socket is the network domain's process for it, a
+connection, listener or datagram socket. Each serves exactly one socket
+process, in the grantee's domain
+([The socket process](#the-socket-process)): the caller of the
+`connect`, `listen` or `open` that made it, or, for an accepted
+connection, the socket process its listener's `accept` request names. It
+monitors that process, takes requests from it alone and sends it alone
+its pushes and replies; no owner, and no other process of any domain,
+is known to it. A socket's pid is encoded only in frames to its socket
+process, so the network domain's runtime exports it to the grantee
+alone, with `send` only, and no other domain can message it
 ([design-domains.md](design-domains.md#exports)). A socket receives
 messages from other domains wrapped with their origin, as every process
 does ([design-domains.md](design-domains.md#the-peer)), and checks each
 request as a facet does, through
 the admission path generated from the same schema: the request's origin
 against the grantee, its operation and arguments against the schema, its
-size and the requests in flight. A reply target or a new owner must be a
-pid of the grantee's domain.
+size, and the requests in flight against the socket protocol's limits
+([Requests in flight](#requests-in-flight)). The socket process a request names, as
+the caller of `connect`, `listen` or `open` or in `accept`, must be a
+pid of the grantee's domain. Every later request must then name the
+socket's own socket process as its sender
+(`{erx_net, SockProc, Body}`); one that names any other process is
+dropped and counted, as a message that names no socket is. This check
+is not an authority boundary: the domain is the unit of authority, and
+any process of the grantee's domain may use the socket through its
+socket process, as any process of a node may use a stock socket it
+knows. What it gives is that nothing reaches a socket around its socket
+process, so the ordering of [Ordering](#ordering) holds.
 
 A connection waiting in a listener's backlog counts toward that
 listener's backlog, which is bounded. It becomes one of the grant's
@@ -3417,7 +3491,7 @@ grant has no socket left, leaving the connection queued, as UNIX's
 `accept` does.
 
 **The grant's account.** Every reduction a socket spends, on its
-owner's requests and on the packets that arrive for it, is charged to
+socket process's requests and on the packets that arrive for it, is charged to
 its grant's account, the facet's account of
 [design-domains.md](design-domains.md#facets) extended to the processes
 the facet starts ([Decisions](#decisions), 1). The grant's own work, on
@@ -3519,99 +3593,442 @@ their private two-argument clauses, return `erx_gen_tcp` and
 test calls the backend directly
 ([Running on a development host](#running-on-a-development-host)). A socket is
 `{'$inet', erx_gen_tcp, Pid}` or `{'$inet', erx_gen_udp, Pid}`, where
-`Pid` is the connection, listener or datagram socket, so `gen_tcp`,
-`gen_udp` and `inet` reach the backend through the dispatch they already
-have. The connection builds the same term for the messages it sends, so
-an owner's `receive {tcp, S, Data}` matches as on stock. An owner in
-another domain receives them in the envelope every message from another
-domain arrives in; how they keep their stock shape there is an open
-question for the user in
-[design-domains.md](design-domains.md#risks-and-open-questions).
+`Pid` is the socket's socket process, a process of the owner's own domain
+([The socket process](#the-socket-process)), so `gen_tcp`, `gen_udp` and
+`inet` reach the backend through the dispatch they already have. The
+socket process builds that term for every message it sends the owner, so
+an owner's `receive {tcp, S, Data}` matches as on stock, in any domain.
 
-Each call is one request to one process: the grant for `connect`,
-`listen` and `open`; the socket for the rest.
+Each call is a local call to the socket process. The socket process
+answers what is its own (presentation, `recv`, `controlling_process`)
+by itself, and sends the rest as one request to one process of the
+network domain: the grant for `connect`, `listen` and `open`, and its
+socket for the rest.
 
-| Call | Request | To |
-| --- | --- | --- |
-| `gen_tcp:connect/3,4` | `{tcp_connect, Family, Remote, Port, Opts, Timeout}` | grant |
-| `gen_tcp:listen/2` | `{tcp_listen, Family, Local, Port, Opts}` | grant |
-| `gen_tcp:accept/1,2` | `{accept, Timeout}` | listener |
-| `gen_tcp:send/2` | `{send, Data}`; the reply comes once the data is in the send buffer, later while the buffer is above its high watermark | connection |
-| `gen_tcp:recv/2,3` | `{recv, Length, Timeout}` | connection |
-| `gen_tcp:shutdown/2` | `{shutdown, How}` | connection |
-| `gen_tcp:close/1` | `close` | socket |
-| `gen_tcp:controlling_process/2` | as `inet:tcp_controlling_process/2` (`inet.erl:4595`): `active` set false by request, the caller's queued messages for the socket forwarded, `{owner, Pid}`, `active` restored | socket |
-| `gen_udp:open/1,2` | `{udp_open, Family, Local, Port, Opts}` | grant |
-| `gen_udp:send/2,3,4,5`, `gen_udp:recv/2,3`, `gen_udp:connect/3` | `{send_to, ...}`, `{recv, ...}`, `{connect, ...}` | datagram socket |
-| `inet:setopts/2`, `inet:getopts/2` | `{setopts, Opts}`, `{getopts, Names}` | socket |
-| `inet:peername/1`, `inet:sockname/1`, `inet:port/1`, `inet:getstat/2` | `peername`, `sockname`, `{getstat, Names}` | socket |
-| `inet:getifaddrs/0`, `inet:gethostname/0` | `getifaddrs`, `hostname` | grant |
+| Call | Answered by the socket process | Request to the network domain | To |
+| --- | --- | --- | --- |
+| `gen_tcp:connect/3,4` | started by the stub, owned by the caller | `{tcp_connect, Family, Remote, Port, Opts, Timeout}` | grant |
+| `gen_tcp:listen/2` | started by the stub, owned by the caller | `{tcp_listen, Family, Local, Port, Opts}` | grant |
+| `gen_tcp:accept/1,2` | the listener's socket process starts the new connection's, owned by the caller | `{accept, SockProc, Timeout}`, naming the new socket process | listener |
+| `gen_tcp:send/2` | forwarded in pieces; the caller waits, behind any earlier `send` | `{send, Piece}` for each piece of up to 64 KiB, in order, one at a time ([Message sizes](#message-sizes)); the reply comes once the piece is in the send buffer, later while the buffer is above its high watermark | connection |
+| `gen_tcp:recv/2,3` | from the bytes it holds, waiting until the deadline, behind any earlier `recv` | none; a waiting recv may grant credit | none |
+| `gen_tcp:shutdown/2` | forwarded | `{shutdown, How}` | connection |
+| `gen_tcp:close/1` | forwarded, then the socket process ends | `close` | socket |
+| `gen_tcp:controlling_process/2` | locally, as `gen_tcp_socket` does | none | none |
+| `gen_udp:open/1,2` | started by the stub, owned by the caller | `{udp_open, Family, Local, Port, Opts}` | grant |
+| `gen_udp:send/2,3,4,5`, `gen_udp:connect/3` | forwarded; a datagram larger than IP allows is refused here with `{error, emsgsize}` | `{send_to, ...}`, `{connect, ...}` | datagram socket |
+| `gen_udp:recv/2,3` | from the datagrams it holds, waiting until the deadline, behind any earlier `recv` | none | none |
+| `inet:setopts/2`, `inet:getopts/2` | its own options locally, the rest forwarded ([Options](#options)) | `{setopts, Opts}`, `{getopts, Names}` for the socket's options | socket |
+| `inet:peername/1`, `inet:sockname/1`, `inet:port/1`, `inet:getstat/2` | forwarded | `peername`, `sockname`, `{getstat, Names}` | socket |
+| `inet:getifaddrs/0`, `inet:gethostname/0` | no socket process: the caller calls the grant through `erx_inet:call/1`, which admits the answer ([Untrusted input](#untrusted-input)) | `getifaddrs`, `hostname` | grant |
 
 A socket closes when its owner exits, as a `gen_tcp` socket does: the
-socket monitors its owner. The pushed messages are stock's:
+socket process monitors its owner. The pushed messages are stock's:
 `{tcp, S, Data}`, `{tcp_closed, S}`, `{tcp_error, S, Reason}`,
 `{tcp_passive, S}`, `{udp, S, Address, Port, Data}`, `{udp_passive, S}`.
-Active modes `true`, `false`, `once` and `N` behave as stock. In `true`
-mode, as on stock, nothing limits deliveries except the lane to the
-owner's domain: when that lane is full, the connection waits, its credit
-fills and its segments are dropped, so memory stays bounded and TCP
-recovers when the owner drains.
+Active modes `true`, `false`, `once` and `N` behave as stock. `{active,
+N}` takes `N` from -32768 to 32767 and adds it to the count the socket
+already has when it is in `{active, M}`, rather than setting it, as
+stock does (`inet.erl:932-941`, `gen_tcp_socket.erl:3124-3138`): a sum
+over 32767 is refused with `{error, einval}`, and a count that reaches
+zero or less, by deliveries or by the addition, makes the socket passive
+and sends `{tcp_passive, S}` or `{udp_passive, S}`. In `true` mode, as
+on stock, nothing limits what reaches the owner's mailbox but
+how fast the owner reads it; what limits the network domain is the
+socket process's credit ([The socket process](#the-socket-process)).
 
-In passive raw mode `recv(S, 0)` takes what is queued and `recv(S, Length)`
-waits for exactly `Length` bytes, as stock's does (inet_drv's `tcp_recv`).
-While a recv waits, the bytes queued for it leave the receive buffer, as
+In passive raw mode `recv(S, 0)` takes what the socket process holds, or
+waits for the next push, and `recv(S, Length)` waits for exactly `Length`
+bytes, up to stock's 64 MiB (`TCP_MAX_PACKET_SIZE`), as stock's does
+(inet_drv's `tcp_recv`). While a recv waits, the socket process grants
+the credit its `Length` needs, so the bytes for it leave the connection's
+receive buffer and the window reopens for the rest of the recv, as
 FreeBSD's `soreceive` copies them out to the caller under `MSG_WAITALL`
-and calls `pru_rcvd` before it sleeps, so the window reopens for the rest
-of the recv; counted against the buffer, they would leave a recv near the
-buffer's size waiting for the last part of a segment, which the sender's
-silly window avoidance sends only as a persist probe. A recv that times
-out leaves the bytes queued for the next one, as stock does. The
-connection so holds less than twice its receive buffer in bytes, whatever
-the peer sends: the buffer, and what a recv holds, less than its `Length`.
-As in the reassembly queue, a payload smaller than a quarter of its frame
-is copied out as it is queued, so tiny segments do not keep their frames
-alive. Two results differ from stock's:
-
-* a `Length` above the connection's receive buffer is refused with
-  `{error, enomem}`, where stock accepts up to 64 MiB
-  (`TCP_MAX_PACKET_SIZE`), since what a recv holds is the network
-  domain's memory and no limit of the owner's grant counts it;
-* when the peer's FIN leaves fewer bytes than a waiting recv asks for,
-  the recv answers `{error, closed}`, as stock's does
-  (`tcp_recv_closed`), but the bytes stay queued for a `recv(S, 0)`,
-  after which recvs answer `{error, closed}`; stock discards them and
-  answers `{error, enotconn}` from then on.
+and calls `pru_rcvd` before it sleeps; held in the receive buffer, they
+would leave a recv near the buffer's size waiting for the last part of a
+segment, which the sender's silly window avoidance sends only as a
+persist probe. What a waiting recv holds is the owner's domain's memory,
+as stock's is the node's. A recv that times out leaves the bytes held for
+the next one, as stock does. When the peer's FIN leaves fewer bytes than
+a waiting recv asks for, the recv answers as stock's does
+(`tcp_recv_closed`): `{error, closed}`, the bytes discarded, and
+`{error, enotconn}` from then on. In the connection, as in the reassembly
+queue, a payload smaller than a quarter of its frame is copied out as it
+is queued, so tiny segments do not keep their frames alive.
 
 The packet modes (`{packet, 1|2|4}`, `line`, `http`, `http_bin` and the
-rest) frame the stream in the connection with `erlang:decode_packet/3`,
-where stock frames it in its inet driver, so an owner receives whole
-packets. That is ERTS's C parser running on peer data in the network
-domain, as stock runs it in every node, which the owner accepted
-([Decisions](#decisions), 6): `decode_packet` gets a fuzz target over
-every mode the options offer, and its reach is a security residual
-([Residuals](#residuals)).
+rest) frame the stream in the socket process with
+`erlang:decode_packet/3`, where stock frames it in its inet driver, so an
+owner receives whole packets, and a send in a packet mode gets its
+header there. Framing sits where the unpresented bytes are, so a change
+of packet mode between two packets applies to every byte not yet
+presented, as on stock: an HTTP server that reads its headers in
+`http_bin` and its body in `raw` gets the body's first bytes in `raw`,
+though they arrived with the headers. That is ERTS's C parser running
+on peer data in the owner's domain, as stock runs it in every node; it
+gets a fuzz target over every mode the options offer, and no client's
+framing runs in the network domain ([Decisions](#decisions), 6).
 
 Where stock OTP's result depends on the kernel beneath it, and the oracle
 runs stock on Linux, the stack gives FreeBSD's result, and each such case
 is a documented difference with a test. IPv6-only sockets by default are
 one: Linux's default admits IPv4-mapped addresses, FreeBSD's does not.
 
+### The socket process
+
+Every socket is two processes: its socket, the connection, listener or
+datagram socket in the network domain, and its socket process, a
+`gen_statem` of `erx_gen_tcp` or `erx_gen_udp` in the owner's domain, the
+same shape as stock OTP's `gen_tcp_socket` (`gen_tcp_socket.erl:1565`).
+The construction is one rule:
+
+**The socket process is the only party that talks to the socket, and the
+only party that talks to the owner about it.** Every request a program
+makes reaches the socket process as a local call, and the socket process
+sends it on; every reply and every push comes back to the socket process,
+on the one lane from the network domain to its domain; and the socket
+process alone sends the owner the socket's messages, which it builds
+itself from checked parts.
+
+The socket process makes its requests and takes its pushes in the socket
+protocol, a closed set of shapes, each `{erx_net, Sender, Body}` with
+`Sender` the pid of the process sending it:
+
+```erlang
+%% Socket process to socket.
+-type request_body() ::
+      {call, N :: non_neg_integer(), Request :: erx_net_admit:request()}
+    | {credit, Bytes :: pos_integer()}.     % for a connection and a
+                                            % datagram socket alike
+
+%% Socket to socket process.
+-type push_body() ::
+      {reply, N :: non_neg_integer(), Result :: term()}
+    | {data, binary()}                      % in-order bytes, at most a piece
+    | {datagram, inet:ip_address(), inet:port_number(), binary()}
+                                            % one whole datagram
+    | eof                                   % the peer's FIN, after every byte
+    | {error, erx_sock_admit:end_reason()}. % the socket has ended; its last push
+```
+
+`N` is the socket process's count of its requests, so a reply names the
+request it answers and requests answer in any order: a `send` that waits
+for room in the send buffer never holds up a `close` behind it. The
+socket process never waits for its socket: it sends a request, keeps the
+caller's `From` under `N`, and goes on taking pushes and calls, so an
+owner in active mode receives data while its own `send` waits, as with
+stock's inet driver. Two peers that both send before they read would
+otherwise deadlock on each other's full receive windows. Concurrent
+callers wait in the socket process, never at the funnel
+([Requests in flight](#requests-in-flight)).
+
+Opening a socket is the one exchange outside the socket protocol: the
+socket process calls the grant, a facet, as any client calls a facet
+([design-domains.md](design-domains.md#facets)), through `erx_inet:call/1`,
+and the reply, `{ok, Socket}`, names the socket it will talk to. The
+answer passes `erx_sock_admit` as every message from the network domain
+does ([Untrusted input](#untrusted-input)): `Socket` must be a pid of the
+grant's own node, `node(Socket) =:= node(Grant)`, so a network domain
+that names a process of a third domain is refused at the open, with
+`{error, badarg}`, and every later push check compares against a pid
+the network domain owns. The socket's monitor of its socket process
+starts with the request that made it.
+
+**States.**
+
+| State | The socket process holds | Takes | Leaves for |
+| --- | --- | --- | --- |
+| `opening` | the caller of `connect`, `listen` or `open`; for an accepted connection, the listener's socket process that started it | the grant's answer, or the hand-over from the listener's socket process; the exit of its owner and of that process; postpones everything else | `open` or `listening` with its socket, which it then monitors; on a refusal it answers the caller and stops |
+| `open` | a connection or datagram socket: its owner, its active mode and presentation options, the bytes or datagrams it holds, the credit it granted, a waiting `recv`, its requests in flight and the calls waiting behind them | every call, push and exit | `closed` |
+| `listening` | a listener: its owner, its `accept` calls in flight, each with the socket process it started for its caller, and the calls waiting behind them | every call, push and exit | `closed` |
+| `closed` | in passive mode, the bytes still held when its socket ended | `recv` while bytes are held, `close/1`, which answers `ok`, and its owner's exit; every other call answers as stock's closed socket does | stops |
+| `{transfer, NewOwner, State}` | `controlling_process/2` under way | the owner's second call and the owner's exit; postpones everything else, pushes included | `State`, with `NewOwner` as owner |
+
+The state is the effect shell's; what is presented, granted and replied
+is decided by a pure step, `erx_gen_tcp_core:step(Event, Core) ->
+{Core, [Action]}` and its datagram twin, whose actions are messages to
+the owner, replies to callers, requests and grants to the socket, and
+`stop`, as every stack process decides
+([One owner, one step](#one-owner-one-step)). The core reads no clock;
+the socket process arms its one timer, a waiting recv's deadline, of a
+connection or of a datagram socket, as a `gen_statem` timeout and steps
+on its expiry. The deadlines of `connect` and `accept` are not its own:
+it passes their timeouts to the grant and the listener, whose timers run
+on the stack's clock. The virtual clock of the host runs
+([The clock](#the-clock)) does not reach the recv timer, so those runs
+call `gen_tcp:recv` and `gen_udp:recv` without a timeout. The timer's
+expiry is an event in the socket process's mailbox, taken in order
+behind the pushes already there, so a recv whose deadline passes behind
+a backlog of pushes takes those pushes first: it is answered with their
+bytes if they complete it, and otherwise with `{error, timeout}`, late by
+the time they take. Stock's driver takes its input in order too, and a
+second timer would not answer sooner.
+
+At `eof` with `exit_on_close` true, the default, the socket process
+presents what it holds, then `{tcp_closed, S}` in active mode, sends
+`close` and moves to `closed`; with `exit_on_close` false it stays
+`open`, its reads answer as closed and its sends go on. At `{error,
+Reason}`, or its socket's exit, it presents what it holds, then in
+active mode `{tcp_error, S, Reason}` where stock shows the reason
+(`econnreset` only under `show_econnreset`) and `{tcp_closed, S}`, or
+answers a waiting recv with the error, and moves to `closed`. A socket
+that exits without a last push, killed or ended with its domain, is
+taken as `{error, econnaborted}`; a push after the end is ignored.
+
+**Accepting.** `gen_tcp:accept/2` calls the listener's socket process,
+which starts a socket process for the caller, owned by it, and sends its
+listener `{accept, SockProc, Timeout}` naming the new one. The listener
+binds the connection it hands out to that socket process before it
+answers, and the listener's socket process hands the new one its socket
+and answers the caller with the new socket; on an error or a timeout it
+stops the new socket process and answers the error. Many callers may
+accept on one listener at once, as ranch's acceptors do, each under its
+own `N`. The new socket process grants no credit until it holds its
+socket, so nothing is pushed to it before; an end that arrives first
+waits, postponed, in `opening`.
+
+**Ordering.** One lane carries everything between a socket and its
+socket process, in send order (D9 of
+[design-domains.md](design-domains.md#invariants)), the socket's exit
+included, and the socket process is the one sender of the socket's
+messages to its owner and the one replier to its calls. So the owner sees
+the socket's messages and its calls' replies in the order the socket
+process made them: nothing is presented after the reply to
+`inet:setopts(S, [{active, false}])`, with no message to the network
+domain, and a push that arrived before a reply is presented before that
+reply is given. No program holds a socket's pid, so no request reaches a
+socket around its socket process to overtake one.
+
+**The protocol's owner.** Every push from another domain arrives as
+`{erx_origin, D, {erx_net, Socket, Body}}`
+([design-domains.md](design-domains.md#the-peer)), and the socket process
+is the owner of the socket protocol on its side: it alone takes that
+envelope off, through `erx_sock_admit`, and only for its own shapes. It
+takes a push only when `D` is the origin its grant's domain was found
+with ([Two places, four seams](#two-places-four-seams)), `local` meaning
+bare messages, and `Socket` is its own socket. A message that fails
+either test is not its socket's and is dropped and counted as an
+unknown message; one from its socket that breaks the protocol aborts the
+socket ([Untrusted input](#untrusted-input)). It is started without the
+`{erx_serve, any}` option, so a call from another domain is an unknown
+message too, and a socket used from another domain fails at once in the
+stub, which compares the socket process's node with its own and answers
+`{error, einval}`. Since the stack is erXos's own application under
+`erlang/`, the source check of D18 over OTP's modules does not list it;
+the stack's own build check names `erx_sock_admit` and `erx_net_admit` as
+the only modules of its two applications that match `erx_origin`
+([Build checks](#build-checks)).
+
+**controlling_process.** The owner is known only to the socket process,
+so moving a socket is a local operation, done as `gen_tcp_socket` does
+it (`gen_tcp_socket.erl:686-711`, `:1874-1910`): the owner's first call
+moves the socket process to `{transfer, NewOwner, State}`, which
+postpones every push; the stub moves the socket's messages already in
+the caller's mailbox to the new owner; its second call switches the
+owner's monitor and leaves the state, and the postponed pushes are
+presented to the new owner in order. The network domain takes no part.
+A new owner of another domain is refused with `{error, badarg}`, as
+stock's `port_connect` refuses a process of another node, so a socket
+never has an owner outside its socket process's domain.
+
+**The owner's exit and the socket process's.** Both end at the same
+place. When the owner exits, the socket process stops. When the socket
+process stops, however it stops, its socket sees its monitor fire and
+closes as `close/1` does: a connection sends FIN, or RST under a zero
+`linger`, and goes on to TIME-WAIT without a caller. When the client's
+domain ends, the monitor fires with `noconnection` and the grant's end
+follows ([What fails and what survives](#what-fails-and-what-survives)).
+A socket process that stops while a request is in flight leaves its
+socket to answer a dead pid, which the funnel drops.
+
+**Credit.** The socket process grants its socket credit in bytes, for a
+connection and for a datagram socket alike. The socket pushes only
+within the credit it holds, at most a piece per push
+([Message sizes](#message-sizes)), a datagram whole and only when the
+credit covers its length, and keeps the rest: a connection in its
+receive buffer, whose free space is the window it advertises, and a
+datagram socket in its queue up to its receive buffer, past which it
+drops and counts, as FreeBSD drops on a full receive buffer. The socket
+process keeps what it holds plus the credit outstanding at its target:
+its `buffer` option, the user-level buffer of stock's `inet`, whose
+default is the socket's receive buffer, and for a datagram socket never
+less than 128 KiB. A waiting `recv(S, Length)`, or a packet whose header
+announces more, raises the target to what it needs, up to 64 MiB or
+`packet_size`. The shortfall is the target less what it holds and the
+credit outstanding, and the socket process grants it when it reaches
+half the target, so credit costs one message per half target received,
+and at once when a waiting `recv` or a packet in progress needs more
+than it holds and has outstanding, so no recv waits for bytes its socket
+holds but may not push.
+
+Between grants, what the socket process holds plus the credit
+outstanding therefore stays above half the target, so once it holds
+nothing, its credit outstanding is more than half the target. A datagram
+socket's floor of 128 KiB, twice the largest UDP payload of 65,527
+bytes, makes that enough for any datagram, so no datagram waits in its
+socket for credit while the socket process holds nothing. In passive
+mode a datagram socket thus holds up to its receive buffer in the
+network domain and its socket process up to its target, where stock
+holds only the kernel's receive buffer and its driver reads one datagram
+per recv: a departure of at most the target per socket, 128 KiB by
+default, in the owner's own memory, for the lane crossing that a read
+per recv would cost. Both bounds are bytes, as stock's `recbuf` is. So:
+
+* in `{active, true}` the socket process presents each push at once, so
+  it holds nothing and grants by the half-target rule, one credit
+  message per half target received: the owner's mailbox is bounded only
+  by how fast the owner reads, as on stock, and the lane paces the
+  pushes;
+* in `{active, once}` and `{active, N}`, when the count runs out the
+  socket process sends `{tcp_passive, S}` or `{udp_passive, S}` and
+  stops presenting; what arrives fills its target, its grants stop, and
+  the connection's receive buffer fills and its window closes, as
+  stock's socket stops reading the kernel's buffer. `inet:setopts(S,
+  [{active, N}])` is answered locally and presents what is held at once,
+  so an owner that re-arms after every packet, as cowboy may, costs no
+  message to the network domain;
+* in passive mode a recv is answered from what is held, a local call.
+
+A connection therefore holds at most its receive buffer in the network
+domain, whatever its owner does, and its socket process at most its
+target, in the owner's own memory.
+
+**What it costs.** One local message per delivery, from the socket
+process to the owner, and one per request, from the caller to the socket
+process; a payload of 64 bytes or more crosses that hop by reference. A
+credit message per half target received, a lane round trip per piece
+sent, and a socket process per socket, about
+the size of stock's `gen_tcp_socket` process, in the owner's domain. In
+return a passive `recv`, a `setopts` of active mode and
+`controlling_process` cost no lane crossing. None of this is measured;
+the watch list holds the measurement
+([todo-performance.md](todo-performance.md)).
+
+**What it needs from the runtime.** The socket protocol needs only pid
+exports: the socket's pid reaches the socket process in the grant's
+reply and the socket process's in its requests, each exported with
+`send` by appearing in a frame
+([design-domains.md](design-domains.md#exports)), and a reply names its
+request by the integer `N`. The grant's operations are calls, whose
+replies go to the caller's alias and so reach another domain only
+through the four-word references and the alias registry of
+[design-runtime.md](design-runtime.md#unguessable-references); opening a
+socket across domains rests on them.
+
+#### Message sizes
+
+Every message of the socket protocol fits every receiver, because one
+constant bounds every binary it carries: the **piece**, 64 KiB.
+
+* A push carries at most a piece. A connection pushes its credited
+  in-order bytes in as many `{data, Bytes}` pushes as it takes, each at
+  most a piece, and a datagram is one push, since a UDP payload is at
+  most 65,527 bytes.
+* A request carries at most a piece. The socket process cuts the data of
+  a `gen_tcp:send/2` into pieces and sends them in order, one at a time,
+  each as `{call, N, {send, Piece}}`, and answers the caller after the
+  last piece's reply, or with the first error, as stock's send answers
+  an error after a partial write. A datagram larger than IP allows is
+  refused with `{error, emsgsize}` before anything is sent.
+* Every other request and reply is bounded by the operation schema,
+  `abi/services/net.txt`: the length of an option list, the names
+  `getstat` takes, the shape of each operation's reply. The socket
+  process checks each request with the validators generated from the
+  same schema before it sends it, and answers one the network domain
+  would refuse as the network domain would, so no request a correct
+  client sends is over a limit. Every atom the protocol carries is one
+  the schema names and `erx_sock_admit` mentions, so none is new to a
+  receiver's atom table.
+
+Every frame of the protocol is therefore at most a piece plus a header
+under 1 KiB: the control term, the message's tags, the sender's pid and
+`N`. These are the limits it meets on a lane
+([design-domains.md](design-domains.md#data-model),
+[the funnel](design-domains.md#the-funnel)):
+
+| Limit | Value | Checked by | Past it |
+| --- | --- | --- | --- |
+| `ERX_FRAME_MAX` | 16 MiB (`abi/erx_abi.txt`) | the sender's runtime | the send fails with `system_limit` |
+| the receiver's `max_frame` | 1 MiB by default, set by the receiver's own runtime | the receiver's funnel, on the payload's bytes | the frame is dropped as it passes, and counted |
+| the receiver's `max_message_heap` | 8 MiB by default | the receiver's funnel, on the decoded size | dropped and counted |
+| the target's request limit | the grant's `max_request` | the network domain's funnel, on the decoded size of a message to the grant or a socket | dropped before it is queued, and counted |
+
+The decoded-size limits count a binary over 64 bytes as the few words of
+its reference (`liberx/erx_etf.c`), so a piece's bytes meet only
+`max_frame`, and the request limit and `max_message_heap` meet the rest
+of a message, which the schema bounds. A frame is one record that the
+receiver reads as its bytes arrive, so a frame longer than the lane is
+never cut into fragments to reassemble, and `max_frame` is its only bound
+on length. A frame of a piece and its header is far below
+`ERX_FRAME_MAX` and below every `max_frame` of 128 KiB or more, the
+floor of [Open decisions](#open-decisions), 1. So a correct socket's
+frame is never dropped for its size. That matters most for pushes: a
+dropped push would strand the credit it carried, the socket process
+would count it as outstanding for good, and the socket would never push
+again. `erx_sock_admit` refuses a push longer than a piece as it refuses
+one past the credit, so a push of another size aborts its socket rather
+than being taken.
+
+A socket process sends the next piece of a send only after the reply to
+the last, so a connection holds at most one piece beyond its send
+buffer, and its buffer reservation at the grant includes it. A bulk send
+costs one lane round trip per piece, which the watch list holds
+([todo-performance.md](todo-performance.md)).
+
+#### Requests in flight
+
+A socket process has at most 64 requests in flight to its socket, the
+socket protocol's limit. A call that would be the 65th waits in the
+socket process, in arrival order, until a reply frees a place: the
+core holds the waiting calls, as stock's port holds a caller while it is
+busy, and drops none. Two kinds of call also wait behind their own kind,
+whatever the count:
+
+* a `send` waits for the `send` before it, so the bytes of two sends
+  never interleave, as stock's driver takes one send at a time;
+* a passive `recv` waits for the `recv` before it, as `gen_tcp_socket`
+  postpones a second one (`gen_tcp_socket.erl:2100-2105`), and a `recv`
+  on an active socket answers `{error, einval}`, as there.
+
+Every other call, `close` and `shutdown` among them, goes out as soon as
+it has a place, so it never waits behind a send that waits for buffer
+room. A call that waited for a place takes its timeout from the moment
+its request is sent, not from the call. Of the calls that carry a
+timeout only `accept` can wait so, on a listener with more than 64
+concurrent acceptors; this difference from stock has a test. When
+the socket ends, every waiting call is answered as stock's closed socket
+answers it.
+
+The socket enforces the same limits on what it takes: past 64 requests
+in flight, or a second `send` while one is in flight, it refuses with
+`{error, badarg}`, which only a socket process that breaks the protocol
+meets. What a client domain can make one socket hold in requests is
+therefore 64 requests within the schema's bounds, at most one of them a
+piece.
+
 ### Options
 
 | Options | Where they act |
 | --- | --- |
-| `nodelay`, `keepalive`, `linger`, `sndbuf`, `recbuf`, `buffer`, `tos`, `tclass`, `priority`, `reuseaddr`, `reuseport`, `ipv6_v6only`, `send_timeout`, `send_timeout_close`, `high_watermark`, `low_watermark`, `{congestion, Name}`, `{loss, Name}`, the `raw` options FreeBSD's `TCP_KEEPIDLE`, `TCP_KEEPINTVL`, `TCP_KEEPCNT` and `TCP_MAXSEG` map to | the socket's state, read by its step |
-| `active`, `mode`, `binary`, `list`, `header`, `packet`, `packet_size`, `deliver`, `exit_on_close`, `show_econnreset` | how the socket presents data to its owner |
+| `nodelay`, `keepalive`, `linger`, `sndbuf`, `recbuf`, `tos`, `tclass`, `priority`, `reuseaddr`, `reuseport`, `ipv6_v6only`, `send_timeout`, `send_timeout_close`, `high_watermark`, `low_watermark`, `{congestion, Name}`, `{loss, Name}`, the `raw` options FreeBSD's `TCP_KEEPIDLE`, `TCP_KEEPINTVL`, `TCP_KEEPCNT` and `TCP_MAXSEG` map to | the socket's state, read by its step |
+| `active`, `mode`, `binary`, `list`, `header`, `packet`, `packet_size`, `line_delimiter`, `deliver`, `buffer`, `exit_on_close`, `show_econnreset` | the socket process: how it presents data to its owner, and its credit |
 | `broadcast`, `multicast_*`, `add_membership`, `drop_membership` | `broadcast` acts; the multicast options act through `erx_mcast` ([Scope](#scope)) |
 | `fd`, `netns`, `bind_to_device`, other `raw` options | `{error, enotsup}` |
+
+`inet:setopts/2` with options of both kinds sends the socket's to the
+socket and applies the socket process's own only once the socket has
+accepted the rest, so a refused `setopts` changes nothing;
+`inet:getopts/2` answers the socket process's own and asks the socket
+for the rest, in the order asked.
 
 ### The `socket` and `net` modules
 
 OTP's `socket` module calls the `prim_socket` NIF, which erXos drops. An
 Erlang `prim_socket` takes its place and speaks the same socket protocol
-to the network service, so `socket` and its `gen_tcp_socket` backend
-work over the same connection, listener and datagram processes as
-`gen_tcp` and `gen_udp`; `net`'s interface and host calls are answered
+to the network service, a process of it in the client's domain standing
+as each socket's socket process, so `socket` and its `gen_tcp_socket`
+backend work over the same connection, listener and datagram processes
+as `gen_tcp` and `gen_udp`; `net`'s interface and host calls are answered
 by the grant. `gen_tcp`, `gen_udp`, `ssl`, `ssh` and distribution do not
 use `socket`, so it comes after them, by the owner's decision
 ([Decisions](#decisions), 5), and plan.md schedules it.
@@ -3644,6 +4061,11 @@ rest of the answer loaded. Query IDs are the kernel's random bytes, not
 must guess both the ID and the source port (RFC 5452). The `host`
 command ([design-shell.md](design-shell.md)) asks the same name servers,
 or the one it is named.
+
+The check of each answer, the reply to `watch_resolver` through
+`erx_inet:call/1` and each change message alike, is `erx_sock_admit`'s,
+as for every answer of the grant
+([Untrusted input](#untrusted-input)).
 
 ### Distribution to other machines
 
@@ -3728,6 +4150,90 @@ Every packet is hostile. The rules, and where each is enforced:
 | Packets queued for any process are bounded | credits |
 | Text from packets reaches logs and the inspector only through the sink's escaping function | `erx_log` |
 | Ring fields a netmap port shares are read once per call and checked before a byte is copied: offsets and sizes at registration, `tail` and each slot's buffer index and length at each call; every copy lies inside one buffer of the mapping | `erx_netmap_ring`, its tests and fuzz target ([The netmap transport](#the-netmap-transport)) |
+| A socket takes requests only from its one socket process | the socket's check of `ReplyTo` after `erx_net_admit` |
+| A socket process takes a message from its socket only when it passes `erx_sock_admit`: the origin its grant was found with, its own socket's pid, a shape of the socket protocol, data within the credit outstanding and at most a piece, a datagram's address and port well formed, an end reason from the closed list, a reply under an `N` in flight in the reply shape its operation declares | `erx_sock_admit`; its fuzz target |
+| No term the network domain chose reaches program code: every push and every answer of the grant passes `erx_sock_admit`, and what an owner or a caller receives is built from its checked parts | `erx_sock_admit`; `erx_gen_tcp_core`, `erx_gen_udp_core`; `erx_inet:call/1`, the one path to the grant |
+
+**A socket process's trust in its socket.** A push from the network
+domain is a message from another domain, and untrusted as every such
+message is. `erx_sock_admit` is generated from the operation schema's
+reply types, as `erx_net_admit` is from its requests, and hand-written
+with the generated module's signature until the generator exists
+([Decisions](#decisions), 10). A message from the socket that fails it,
+a shape outside the protocol, data past the credit or longer than a
+piece, or a reply to no request, aborts the socket: the socket process
+sends `close`, presents what it held and then the end as `{error,
+econnaborted}`, and logs one line naming the socket and the check that
+failed, never the message; it never raises. So the network domain can
+do to a client what a network can: send it bytes within its credit, end
+its sockets and answer its requests. It cannot grow what a socket
+process holds past its credit or put a term of its choosing in an
+owner's mailbox.
+
+**What the network domain can make a socket process hold.** Each kind
+of message it may send has its own bound:
+
+* pushes, the credit: a push past the credit outstanding aborts the
+  socket, so the bytes a socket process holds never pass its target;
+* replies, the requests in flight: at most 64, each in its operation's
+  declared shape, and a reply under no `N` in flight aborts the socket;
+* the end, once;
+* anything else, a message to a socket that has ended or one of no
+  protocol, is dropped and counted as the socket process takes it.
+
+What the socket process has not yet taken is bounded by its runtime's
+queue quota (edit 15 of
+[design-runtime.md](design-runtime.md#the-edits-outside-syserxos),
+which plan.md's RT8 builds): past it the funnel leaves the network
+domain's next frame in its lane, which holds back only what the network
+domain sends that client. A correct network domain meets the quota only
+when a socket process falls behind its pushes, and then the lane pauses
+until it catches up, which loses nothing; since no process waits in
+`receive` at its quota ([design-domains.md](design-domains.md#flow-control)),
+a pause cannot deadlock. A client domain's processes have a quota only
+where its runtime sets `-erx queue_quota`, and which domains do is the
+owner's ([Open decisions](#open-decisions), 2). Until RT8, the funnel
+delivers every authorised frame whatever its target already holds, so a
+flood that outruns a socket process grows its queue with nothing to stop
+it but the client domain's budget, the gap of the stopgap funnel that
+`TODO.md` records.
+
+**Answers from the grant.** The grant's reply to a call reaches its
+caller with the envelope already off, since `gen` owns call replies
+([design-domains.md](design-domains.md#the-peer), D18), so it would reach
+program code as the network domain chose it. Every call to the grant
+therefore goes through `erx_inet:call/1`, which finds the grant, calls
+it, and passes the answer through `erx_sock_admit:answer/3`, against the
+reply type the schema declares for that operation and the grant's node,
+and returns what it rebuilt from the checked parts. It waits with the
+timeout `infinity`, as every call of the stack does
+([Build checks](#build-checks)): the call's monitor ends the wait when
+the grant ends, an open's own `Timeout` is the socket's to enforce, and
+a network domain that never answers holds only its caller, as a network
+that never answers would. The resolver loader's `watch_resolver` is such
+a call, and the loader tries again only when it finds no grant or the
+grant ends. What it admits:
+
+* an open's `{ok, Socket}`: `Socket` a pid of the grant's node;
+* `getifaddrs`: interface names of 1 to 15 bytes, FreeBSD's `IFNAMSIZ`,
+  of letters, digits, `.`, `-` and `_`; well-formed addresses; flags
+  from `inet`'s closed list;
+* `hostname`: a name of labels as FreeBSD's `res_hnok` admits;
+* `resolver` and `watch_resolver`: a map of at most three IPv4 name
+  servers on port 53 and at most six search domains, the check
+  `erx_inet:resolver_config/1` makes; each search domain is checked
+  alone, and one that fails is dropped and the rest of the answer kept
+  ([Name resolution](#name-resolution));
+* an error: a reason from the operation's closed list.
+
+The grant's change messages to `erx_inet`'s loader,
+`{erx_net_resolver, Grant, Answer}`, arrive in their envelope and pass
+the same module, against the grant's origin and the `resolver` reply
+type. `erx_inet` exports no grant pid, so no module of `erx_net_client`
+reaches the grant another way. An answer that fails the check is the
+call's `{error, badarg}` and one line in the log naming the operation
+and the check, never the term; a change message that fails it is
+dropped, and the loaded answer stays.
 
 **The ingress limiter.** Owned traffic, a frame that demultiplexes to a
 socket, is bounded by that socket's credit, and what the socket spends on
@@ -3773,13 +4279,6 @@ Each of these is a known gap, with the reason it stays:
   queue, on devices that hash flows to several queues ([Scope](#scope)),
   divides the work. A bound per client here would need a classifier ahead
   of the interface process, which is what the interface process is.
-* **`erlang:decode_packet/3` runs on peer data** in the network domain
-  for the packet modes, as stock runs it in every node. A memory-safety
-  bug in that C parser that a peer can reach would end the network domain
-  and every client's connections, where on stock it ends one node. It has
-  a fuzz target over every mode offered; framing in the client's domain
-  would need a client-side process per socket in packet modes
-  ([Decisions](#decisions), 6).
 * **Resolution is shared between clients.** A client that sends to many
   unresolved on-link addresses makes its interface hold up to 16 packets
   for each, send a request for each, and, once the neighbour table is
@@ -3816,12 +4315,17 @@ Each of these is a known gap, with the reason it stays:
 
 Segments of one connection pass through one interface process and one
 mailbox, in arrival order, and the connection steps through them one at
-a time. A connection's replies and deliveries to its owner travel on one
-lane in order, so a reply to `{setopts, [{active, false}]}` arrives after
-every delivery sent before it, which `controlling_process` relies on.
-Two binders of one key are ordered by `ets:insert_new/2`. The interface
-and the driver never send to another domain, so no client can stall
-packet input.
+a time. A socket's replies and pushes to its socket process travel on one
+lane in order with its exit, and the socket process alone presents them
+to the owner and answers the owner's calls, so the owner sees them in the
+order the socket process made them; `inet:setopts(S, [{active, false}])`
+and `controlling_process` are local to the owner's domain and need
+nothing from the network domain to keep that order
+([The socket process](#the-socket-process)). Two binders of one key are
+ordered by `ets:insert_new/2`. The interface and the driver never send
+to another domain, so no client can stall packet input, and a socket's
+pushes are bounded by its socket process's credit, so a client that
+stops reading stalls only its own sockets.
 
 ### What fails and what survives
 
@@ -3834,11 +4338,15 @@ packet input.
 | a device's queue is full, or a transport refuses a frame | the driver | everything | nothing while the backlog has room, which the transmit credit bounds; past it senders' hand-overs are refused and counted where they are made |
 | a call on a netmap port fails (its registration, a sync or an arm), or its ring breaks | the netmap transport, which ends the driver, whose link the interfaces supervisor starts again | every connection | the link's soft state, as a driver crash; a port that stays unregistrable restarts the link at most once a second ([Ending](#the-driver), [The netmap transport](#the-netmap-transport)) |
 | a pipe's far end goes away | the pipe: a `process` end by its monitor and a `port` end by its port's monitor (or the port's exit signal), each ending the driver, whose link the interfaces supervisor starts again; a `udp` end only as refused sends | every connection | the link's soft state, as a driver crash; a far end that stays away restarts the link once a second; TCP retransmits once the far end returns |
-| a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST, and its owner receives `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or a waiting call gets the error |
-| a socket process is killed or crashes outside a step | its grant, which deletes its entries | everything else | the socket, silently: the peer times out or meets a RST later, and the owner's next call gets `{error, closed}` |
-| a socket's owner exits | the socket, which monitors it | everything else | the socket: a connection sends FIN, or RST if `linger` is zero |
-| the grant ends (revocation, its domain ends) | its sockets, by the link: each connection sends RST and exits | other grants | the domain's sockets and registrations |
-| a client domain stops reading | its lane fills | other domains | that domain's connections slow, then drop, as TCP does |
+| a socket's step raises (a bug) | the socket, which ends itself from its state before the event, then exits with the exception; its grant deletes its entries and logs the exit | everything else | the socket: a connection sends a RST and pushes `{error, econnaborted}`, which its socket process presents as `{tcp_error, S, econnaborted}` and `{tcp_closed, S}`, or as the error of a waiting call |
+| a socket is killed or crashes outside a step | its grant, which deletes its entries; its socket process, by its monitor | everything else | the socket: the peer times out or meets a RST later; the socket process presents the end as `{error, econnaborted}` |
+| a socket's owner exits | its socket process, which monitors it and stops | everything else | the socket process; its socket, by its monitor, closes as `close/1` does: a connection sends FIN, or RST if `linger` is zero |
+| a socket process crashes or is killed | its socket, by its monitor | everything else | the socket, closed as on its owner's exit; the owner's next call gets `{error, closed}`, and in active mode the owner is told nothing, as with stock's `gen_tcp_socket` |
+| a socket process's step raises (a bug) | the socket process, which presents the end as `{error, econnaborted}` from its state before the event, then exits with the exception | everything else | the socket process and, by its monitor, its socket |
+| a push breaks the socket protocol | the socket process, through `erx_sock_admit` | everything else | the socket, aborted ([Untrusted input](#untrusted-input)) |
+| the grant ends (revocation, its domain ends) | its sockets, by the link: each connection sends RST and exits | other grants | the domain's sockets and registrations; each socket process presents its socket's end |
+| a client domain ends | the network domain, by its sockets' monitors and the grant's end | other domains | that domain's sockets, each with a RST |
+| a client stops reading | its socket processes, whose credit runs out | other sockets and domains | nothing: that client's windows close, as TCP's do |
 | a socket died and its entries are not yet deleted | nobody: `classify/2` finds the entry and the frame's message goes to a dead pid | everything else | the frames that arrive before its grant deletes the entries, as if dropped; a TCP peer retransmits and meets a RST once the entry is gone |
 | the configuration changed during a batch or between output passes | the next batch's view, the next pass's path | everything | nothing: frames classified or framed against the old copy behave as under FreeBSD's epoch, which lets a lookup finish against the table it started on |
 | a next hop does not answer resolution | the interface, which holds up to 16 packets for it | everything else | its held packets: dropped after 20 s for ARP, or the oldest returned as an ICMPv6 address-unreachable to the stack's own socket for neighbour discovery ([Framing](#framing)) |
@@ -3846,20 +4354,22 @@ packet input.
 | a route goes away under a connection | the connection's next output pass | the connection, which sends nothing until a route returns | the connection, at its retransmission timeout: with `ehostunreach` once it has received a SYN, with `etimedout` in SYN-SENT |
 | `erx_net_tables` or a top-level child exceeds its restart intensity | the network domain's supervisor | nothing in the domain | every socket; owners' next calls get `{error, closed}` |
 
-A raising step is caught in two places, and in both the step's purity
+A raising step is caught in three places, and in each the step's purity
 makes the handling complete: the exception leaves the state exactly as
 it was before the event. The interface process drops the frame, keeps
 its state and goes on, since a frame is its unit of work and its state
-serves many flows. A socket ends itself properly from its intact state,
-as the table says, and then exits with the exception as its reason, since
-its state is one flow's and a bug in it is not worth keeping alive. Both
+serves many flows. A socket, and a socket process in the owner's domain,
+ends itself properly from its intact state, as the table says, and then
+exits with the exception as its reason, since its state is one flow's
+and a bug in it is not worth keeping alive. All three
 record the exception and the event, a frame's length and its first 128
 bytes escaped, in the kernel log, and count it. The record keeps the
 stack trace with each frame's arguments replaced by their count, and a
 socket's exit reason is the exception's class and reason alone, so a
 `function_clause` never carries the control block into a log; a
 socket's `format_status` likewise leaves out its buffers, its
-reassembly queue and its generator, so `sys:get_status` shows neither a
+reassembly queue and its generator, and a socket process's what it
+holds, so `sys:get_status` shows neither a
 flow's payload nor the generator its sequence numbers and ports come
 from. A request reaches the step only after the admission path has
 checked its shape against the schema, so a malformed request is
@@ -3890,13 +4400,14 @@ client domain is affected beyond its sockets.
 | `{error, enetunreach}` | `connect`, or a datagram sent without a local address, finds no route (`in_pcbladdr`) |
 | `{error, ehostunreach}` | a datagram's route has gone (`ip_output`); a synchronized connection's soft error at its timeout; an unreachable report in SYN-SENT |
 | `{error, econnreset}` | a RST in a synchronized state, under `show_econnreset` as on stock |
-| `{error, closed}` | the socket is closed, as on stock; a `recv` that the peer's FIN leaves short, as on stock, though its bytes stay for `recv(S, 0)` |
+| `{error, closed}` | the socket is closed, as on stock; a `recv` that the peer's FIN leaves short, as on stock |
+| `{error, enotconn}` | a `recv` after one the peer's FIN left short, as on stock |
 | `{error, timeout}` | an Erlang call's own timeout, as on stock |
-| `{error, enomem}` | a `recv` longer than the connection's receive buffer, where stock allows 64 MiB |
 | `{error, emsgsize}` | a datagram larger than IP allows, or a packet over `packet_size` |
-| `{error, einval}` | an option value out of range |
+| `{error, einval}` | an option value out of range; a socket used from a domain other than its socket process's |
+| `{error, not_owner}` | `controlling_process/2` called by a process other than the owner, as on stock |
 | `{error, enotsup}` | `fd`, `netns`, `bind_to_device`, unknown `raw` options, SCTP |
-| `{error, badarg}` | a request the admission path refuses: wrong origin, schema or size |
+| `{error, badarg}` | a request the admission path refuses: wrong origin, schema or size, or past the socket protocol's requests in flight; a grant's answer that fails `erx_sock_admit`, an open's socket of another node among them; `controlling_process/2` to a process of another domain, as stock refuses one of another node |
 
 An interface that cannot start is refused by its driver's `init`, and its
 link supervisor fails to start with the reason: `{lladdr, Addr}` for a
@@ -3956,7 +4467,8 @@ native code is measured on this stack: a bulk transfer and a
 request-response load against line rate at 1 Gb/s (81,274 full-size
 frames a second each way, 12.3 us a frame), with the time per frame
 broken down by stage: completion, classification, checksum, step,
-encoding, posting and the lane crossing. The measurements on erXos's
+encoding, posting, the lane crossing and the socket process's hop to the
+owner. The measurements on erXos's
 kernel decide and those on the Raspberry Pi 4 confirm or reopen the
 decision; the same measurements on QEMU on the stopgap are a baseline
 that decides nothing, since every interrupt and doorbell there passes the
@@ -3980,9 +4492,16 @@ test must catch, kept as a fixture, which proves the code under test ran.
 One fuzz target per decoder, in `erx_net`'s `test/*_fuzz.erl`, run by
 `make check-fuzz`: Ethernet, ARP, IPv4 with options, IPv6 with extension
 headers, ICMP, ICMPv6 with neighbour-discovery options, UDP, TCP with
-options, DHCP, epmd's requests, the packet-mode framing over random
-streams (`decode_packet` over every mode the options offer), and the
-socket protocol's requests through the generated validators. Each
+options, DHCP, epmd's requests, and the socket protocol's requests
+through the generated validators. `erx_net_client`'s `test/` holds two
+more: the packet-mode framing of `erx_gen_tcp_core` over random streams
+cut at random points (`decode_packet` over every mode the options offer),
+whose packets must equal those stock's inet driver frames from the same
+stream on the host; and `erx_sock_admit` over random terms and over
+well-formed pushes and grant answers of every operation with one field
+changed, which must accept exactly the messages a reference judge
+written from the protocol's types accepts, and
+never raise. Each
 target checks that the decoder never raises; that encode then decode
 returns the record; that it accepts or refuses as a reference judge
 does, a short function written from the RFC's validity rules alone; and
@@ -4008,7 +4527,11 @@ raising, must fail its target's agreement check with the reference
 judge, so the judge itself is shown to catch a wrong decoding; so must
 an IPv6 decoder that points a routing header's parameter problem at
 its segments-left byte, and an ICMPv6 decoder that takes an MTU option
-longer than one unit.
+longer than one unit; and an `erx_sock_admit` whose credit check is off
+by one, admitting a push one byte past the credit granted, one that
+admits a push one byte longer than a piece, and one whose answer check
+leaves out the node comparison, admitting an open's socket of another
+node.
 
 ### Checksums and random values: the interface's gate and the generators
 
@@ -4505,17 +5028,122 @@ schedule, as the host runs above do.
 *Seeded failure:* the host runs' seed, SACK disabled on erXos, run on
 the guest.
 
+### The socket process: exploration and two domains
+
+**The core, explored.** `erx_gen_tcp_core` is a protocol state machine
+between three parties, the owner, the socket process and the socket, so
+it is explored exhaustively, as the TCP core is. The socket is modelled
+as the bytes its peer has sent and the credit it holds, pushing whenever
+it has both, at most a piece at a time. The alphabet: the peer sending
+one to three bytes, `eof`, `{error, econnreset}`, the socket's exit,
+`setopts` of each active mode with `N` of -1, 1 and 2, `recv` of 0 and
+of 1 to 5 bytes, `send` of one to three bytes from each of two callers,
+a `getstat` from each of two more callers, so that a call must wait for
+a place, the two calls of `controlling_process`, the
+owner's exit, and replies in and out of order; to depth 10, with a
+`buffer` of 4, a piece of 2 bytes and 2 places for requests in flight.
+In every reachable state:
+
+* the bytes the owners received, in `{tcp, S, Data}` and in recv
+  replies, taken in order, are a prefix of the bytes the peer sent, and
+  each byte presented reaches one owner once;
+* the bytes the socket received from sends are whole sends, one after
+  another, in the order the sends were called, so no two interleave;
+* no push and no send request carries more than a piece, at most one
+  send request is in flight, and at most 2 requests are;
+* nothing is presented after the reply to a `setopts` of
+  `{active, false}` until the next active `setopts`, and nothing while a
+  transfer is under way;
+* the active count is stock's: `{active, N}` on a count `M` makes it
+  `M + N`, and `{tcp_passive, S}` is sent exactly when the count reaches
+  zero or less;
+* the end is presented once, after every byte held;
+* the bytes held plus the credit outstanding never exceed the target;
+* no recv waits while the socket holds bytes it may not push and no
+  grant is in flight;
+* every call is answered once.
+
+`erx_gen_udp_core` is explored the same way, with datagrams of one to
+three bytes, a largest datagram of 3 and a floor of 6 for the target; in
+every reachable state, besides the properties above that apply to it, no
+datagram waits in the socket while the socket process holds nothing.
+
+*Seeded failures:* a core that presents a push during a transfer instead
+of postponing it must break the order property with two owners; one that
+grants credit again when a push arrives, not when it is presented, must
+break the bound in passive mode; one that grants only at half the
+target, never for a waiting recv, must leave a `recv` of 4, after one
+byte presented, waiting with the bytes in the socket; one that sends
+`tcp_passive` before the last delivery of its count must break the
+passive property; one that sends the second caller's first piece before
+the first send's last reply must break the order of sends; one that
+drops a call past its places instead of holding it must leave a call
+unanswered; one that sets the active count to `N` instead of adding it
+must break the count property; and a datagram core whose floor is the
+largest datagram, not twice it, must leave a datagram of 3 waiting in
+the socket while the socket process holds nothing.
+
+**Two domains on QEMU.** An owner in a test domain, beside the network
+domain, runs stock code unchanged: `receive {tcp, S, Data}` loops in
+`{active, true}`, `once` and `N`; `controlling_process` between two of its
+processes with data in flight, checked byte for byte; an owner that
+exits, whose peer must see a FIN; a socket process killed, whose peer
+must see the connection close; a connection killed in the network
+domain, whose owner must receive `{tcp_error, S, econnaborted}` and
+`{tcp_closed, S}`; and a passive socket whose owner never reads, whose
+connection's window must close while its socket process holds no more
+than its `buffer`. With the test domain's `max_frame` at 128 KiB, a
+`gen_tcp:send` of 1 MiB and one of 100 MiB, and a `recv(S, 8 MiB)` on a
+connection whose receive buffer is 4 MiB, must each complete, checked
+byte for byte; 100 processes that each send 64 KiB on one socket at
+once must all be answered, each send's bytes contiguous at the peer;
+100 acceptors on one listener must each receive a connection; and an
+`accept` with a timeout of one second, called behind 64 others that
+wait, must time out one second after one of them is answered, the
+documented difference of [Requests in flight](#requests-in-flight). A third
+domain, handed the socket term and the
+connection's pid, sends the socket process crafted
+`{erx_net, Conn, {data, Bytes}}` messages, none of whose bytes may reach
+the owner; and a process of the owner's domain other than the socket
+process sends the connection a well-formed request, which must have no
+effect. A test grant that lies answers an open with a pid of the third
+domain and `getifaddrs` with an interface name that holds an escape
+byte; each call must answer `{error, badarg}`.
+
+*Seeded failures:* an `erx_sock_admit` that takes `{erx_origin, _, Inner}`
+without comparing the origin must let the third domain's bytes reach the
+owner, which shows the comparison is what stops them; a connection that
+skips its check of `ReplyTo` must act on the direct request; a socket
+process that passes a push on without taking its envelope off must leave
+the stock `receive` loops waiting, which shows the deliveries pass
+through the socket process; a socket process that sends a send whole,
+and a connection that pushes all its credit in one message, must each
+leave the 1 MiB send or the 8 MiB recv unanswered past the test's
+deadline, which shows the pieces are what keeps frames within
+`max_frame`; and an answer check that leaves out the node comparison
+must let the lying grant's open answer `{ok, S}`.
+
+**cowboy and ranch.** Once the web domain's front end exists
+([design-web.md](design-web.md#the-network-front-end)), cowboy serves
+HTTP requests and a WebSocket echo in the web domain over the stack, with
+ranch's acceptors and cowboy's own `active_n`, unchanged. *Seeded
+failure:* a socket process that never sends `{tcp_passive, S}` must stall
+cowboy's connections once their count runs out.
+
 ### OTP's suites
 
 `make check-oracle` runs OTP 29.1.2's `gen_tcp_api_SUITE`,
 `gen_tcp_misc_SUITE`, `gen_tcp_echo_SUITE`, `gen_udp_SUITE` and
 `inet_SUITE` on erXos and on stock on the host and compares them case by
-case, and the `socket` suites, and `ssl` and `ssh` over the stack.
+case, and the `socket` suites, and `ssl` and `ssh` over the stack. On
+erXos the suites run in a test domain and the stack in the network
+domain, so every case crosses a lane through a socket process.
 
 *Seeded failure:* a build whose `inet_backend` default is left at `inet`
 must fail the suites on erXos, since no inet driver exists, which shows
-the suites reach `erx_gen_tcp`; and a backend that drops
-`controlling_process`'s forwarding must fail its cases.
+the suites reach `erx_gen_tcp`; and a stub whose `controlling_process`
+does not move the caller's queued socket messages to the new owner must
+fail its cases.
 
 ### Floods and failure
 
@@ -4531,7 +5159,14 @@ account, staying within its share plus the overrun bound, and drop
 counters by reason. Failure
 tests kill the driver, an interface process, a connection, a grant and
 the whole network domain under load, and check the survivors of
-[Concurrency and failure](#concurrency-and-failure).
+[Concurrency and failure](#concurrency-and-failure). Once RT8's queue
+quota exists, a test network domain floods one socket process of a
+client domain whose runtime sets one with messages of no protocol,
+replies to no request and pushes past its credit: the socket must abort
+at the first breach, the client domain's memory must stay within its
+socket processes' targets and the quota, and a second socket of the same
+client, to a well-behaved test peer, must still make progress once the
+flood stops.
 
 *Seeded failures:* the syncache bound removed must exceed the memory
 bound under the SYN flood; credits disabled must let a connection's
@@ -4539,8 +5174,10 @@ mailbox exceed its bound under a junk flood to its four-tuple; the
 router-list bound removed must grow the interface's memory under the
 advertisement flood; the checksum verified before the credit check must
 show in the interface's time per dropped frame under the flood to one
-connection; and a socket that charges no reductions must let the flooded
-client's sockets spend past that bound.
+connection; a socket that charges no reductions must let the flooded
+client's sockets spend past that bound; and the client's queue quota
+unset must let its memory grow past that bound under the flood to its
+socket process, which shows the quota is what bounds it.
 
 ### Build checks
 
@@ -4561,7 +5198,24 @@ Each with a test proving it catches a violation:
   than `infinity` or 0, and no module of `erx_net` or `erx_net_client`
   calls `gen_server:call/2`, `gen_statem:call/2` or `gen:call/3`, or a
   `call` of theirs whose timeout is not the literal `infinity`, so the
-  virtual clock sees every wait;
+  virtual clock sees every wait but two: a socket process's recv
+  deadline, of a connection or a datagram socket
+  ([The socket process](#the-socket-process)), and the resolver loader's
+  wait before it looks for a grant again, which no packet depends on
+  ([Name resolution](#name-resolution));
+* in `erx_net` and `erx_net_client`, only `erx_net_admit` and
+  `erx_sock_admit` match a tuple tagged `erx_origin`, so each side of
+  the socket protocol takes the envelope off in one place; the source
+  check of D18 ([design.md](design.md#chokepoint-checks)) covers OTP's
+  modules and leaves erXos's applications to own their protocols, and
+  this is that check for the stack's two;
+* in `erx_net_client`, only `erx_inet` reads the application's `grant`
+  key, so the grant's pid is known to `erx_inet:call/1` alone and every
+  answer of the grant passes `erx_sock_admit`
+  ([Untrusted input](#untrusted-input));
+* only `erx_gen_tcp` and `erx_gen_udp` build a socket term
+  `{'$inet', _, _}`, so no message the network domain sends has the shape
+  of a stock socket message;
 * a received segment, datagram or ICMP record is constructed only by its
   `*_wire` decoder; that the decoder checks the checksum before it
   decodes is not something a build check can see, and the decoders' fuzz
@@ -4573,7 +5227,7 @@ Each with a test proving it catches a violation:
 * the modules in `src/` of `erx_net` and `erx_net_client` call only
   modules of `erts`, `kernel`, `stdlib`, their own application and `erx_bytes`,
   which both builds provide; only `erxos/` (`erx_virtio_net`,
-  `erx_net_erxos`) calls a module of erXos's (`erx`, `erx_device`,
+  `erx_net_erxos`, and the client's `erx_net_client_erxos`) calls a module of erXos's (`erx`, `erx_device`,
   `erx_facet` and the rest of the `erx` application) or its BIFs; and no
   `-include`, `-include_lib` or file name in the app's source reaches a
   path outside the app directory (N12);
@@ -4648,13 +5302,15 @@ it plugs into, except pacing, which BBR brings.
 
 ## Decisions
 
-The owner settled these: the first seven as the design recommended, the
-eighth, ninth and eleventh by direction, and the tenth by approving the
-design's recommendation.
+The owner settled these: the first five and the seventh as the design
+recommended, the eighth, ninth and eleventh by direction, and the sixth,
+the tenth and the thirteenth by approving the design's recommendation.
+Two questions that reach into the domains design remain the owner's
+([Open decisions](#open-decisions)).
 
 1. **The grant's account covers its sockets.** Every reduction a grant's
    sockets spend, on requests and on packets, is charged to the grant's
-   account, and client requests go straight to the socket processes,
+   account, and socket processes' requests go straight to the sockets,
    which run the facet's generated admission path
    ([The grant's account](#sockets-act-for-one-domain)). This extends the
    facet mechanism, whose account otherwise covers the facet's own work
@@ -4691,13 +5347,16 @@ design's recommendation.
    schedules the extension. `gen_tcp`, `gen_udp`, `ssl`, `ssh` and
    distribution do not use `socket`, so nothing the system needs waits on
    it.
-6. **Packet modes are framed in the network domain** with ERTS's C
-   `decode_packet`, as stock frames them in its inet driver
-   ([The backend](#the-backend)). The parser gets a fuzz target over
-   every mode offered, and its reach is a security residual
-   ([Residuals](#residuals)). Framing in the client's domain instead
-   would need a client-side process per socket in packet modes, a hop
-   that `gen_tcp`'s other modes do without.
+6. **Packet modes are framed in the socket process,** in the owner's
+   domain, with ERTS's C `decode_packet`, as stock frames them in its
+   inet driver ([The backend](#the-backend)). The framing must sit where
+   the unpresented bytes are: a socket that pushes ahead within its
+   credit has bytes in the socket process that a change of packet mode
+   must still frame, as an HTTP server's switch from `http_bin` to `raw`
+   needs. The parser gets a fuzz target over every mode offered, and
+   runs on peer data only in the domain that reads it, as on stock in
+   the node that reads it, so no client's framing runs in the network
+   domain.
 7. **RACK is deferred.** The default stack is the reference, and
    RACK-TLP and BBR come later behind the seams
    ([Why FreeBSD's default stack](#why-freebsds-default-stack)).
@@ -4741,8 +5400,55 @@ design's recommendation.
 12. **The client backends are an application of their own.**
     `erx_gen_tcp`, `erx_gen_udp` and `erx_inet` live in `erx_net_client`,
     which every domain's image carries beside `erx`, so a client domain
-    carries three modules instead of the stack, and a release of the
-    package is the two applications.
+    carries the backends and their socket processes instead of the
+    stack, and a release of the package is the two applications.
+13. **Every socket has a socket process in its owner's domain,** a
+    `gen_statem` of the same shape as stock OTP's `gen_tcp_socket`
+    ([The socket process](#the-socket-process)). It alone talks to the
+    socket in the network domain, sending every request and taking every
+    push, and it takes the envelope off each push after checking that
+    it comes from the domain the socket was opened against, then gives
+    its owner the stock messages. One mailbox and one lane carry
+    everything between a socket and its program, so the ordering of
+    replies and deliveries, `controlling_process` and the owner's exit
+    follow without a rule of their own, and the universal envelope of
+    [design-domains.md](design-domains.md#the-peer) keeps no exception.
+
+### Open decisions
+
+1. **A floor for `max_frame`.** Every frame of the socket protocol is at
+   most a piece and its header, 65 KiB ([Message sizes](#message-sizes)),
+   and a frame past its receiver's `max_frame` is dropped, which for a
+   push strands the credit it carried. design-domains bounds `max_frame`
+   above by `ERX_FRAME_MAX` and sets no floor. The recommendation, which
+   [Message sizes](#message-sizes) assumes: a floor of 128 KiB on every
+   domain's `max_frame` in design-domains' table of limits, checked where
+   a domain's specification is checked, so that every runtime takes a
+   socket's frames by construction. The system domain keeps its own rule,
+   the largest `max_request` its grants may name, and the floor binds it
+   only if it holds a `net` grant. One alternative is a refusal at the
+   grant, the network service giving no `net` grant to a domain below
+   the floor, which keeps the change inside this design but makes the
+   network service check another subsystem's limit. Another is a piece
+   each socket process chooses from its own runtime's `max_frame` and
+   names in its open request, which needs that limit visible to Erlang
+   and a piece per socket.
+2. **Which client domains run with a queue quota.** What a socket
+   process has not yet taken from a hostile network domain is bounded
+   only by its runtime's queue quota
+   ([Untrusted input](#untrusted-input)), and design-runtime leaves
+   `-erx queue_quota` unset by default, as stock OTP has none. The
+   recommendation: the domain service gives every domain it grants `net`
+   a quota of 1 MiB unless its specification names one. Only the
+   processes another domain may message have frames to count, and in
+   such a domain those are its socket processes, `erx_inet`'s loader and
+   the aliases of its calls, so the quota bounds exactly what the network
+   domain can reach, and a correct network domain meets it only when a
+   socket process falls behind, which pauses its lane and loses nothing.
+   The alternatives are a default quota for every domain, one rule but a
+   change to design-runtime's default for domains that talk to no other
+   service, and a quota each socket process sets on itself, which needs a
+   new runtime call.
 
 ## Alternatives considered
 
@@ -4765,11 +5471,38 @@ the send log keeps it cheap to add later as a loss module.
 and serialise all connections through each layer's process; the
 interface process decodes all layers in one pass.
 
-**Socket processes in the client domain,** as OTP's `socket` backend
-keeps a `gen_statem` per socket in the caller's node. The TCP state
-would still live in the network domain, so a client-side process only
-adds a hop; and with it, active-mode deliveries could not go straight to
-the owner.
+**Deliveries straight to the owner, unwrapped by the runtime.** The
+connection would send `{tcp, S, Data}` to the owner itself, and the
+peer's envelope (edit 16 of
+[design-runtime.md](design-runtime.md#the-edits-outside-syserxos)) would
+make an exception for socket messages whose socket pid is of the lane's
+domain. It saves the local hop but puts a list of message shapes into
+the runtime, gives D18 an exception, and leaves `controlling_process` a
+round trip to the network domain.
+
+**A relay for deliveries alone.** A process in the owner's domain would
+take the envelope off pushes while `recv` and `setopts` replies came
+back to the caller directly. The two paths are two senders, so the owner
+could see later bytes before earlier ones, a reply to `{active, false}`
+could overtake deliveries sent before it, and moving the socket to a new
+owner would have to coordinate both. One process for everything keeps
+the order of one mailbox and one lane.
+
+**Presentation in the connection, the socket process forwarding.** The
+socket process would only forward requests and unwrap pushes, and the
+connection would keep active modes, framing and `recv` as stock's inet
+driver keeps them. Every `setopts` of active mode, every re-arm of
+`{active, once}` and every passive `recv` would cross the lane twice, and
+a change of packet mode could not reach bytes already pushed.
+
+**Framing in the connection.** The connection would frame the stream
+with `decode_packet` and push only whole packets, while active modes and
+`recv` stayed in the socket process. Since the connection pushes ahead
+of what is presented, a change of packet mode would come after the bytes
+it should apply to were framed, each `setopts` that changes a packet
+option would cross the lane, and `decode_packet` would run in the
+network domain on every client's peer data
+([Decisions](#decisions), 6).
 
 **Every request through a facet in the system domain.** The client's
 facet would forward each `send` to the network domain and relay each
@@ -4780,9 +5513,9 @@ services' grants run in theirs ([design-files.md](design-files.md)).
 **Asynchronous sends with a credit window.** `gen_tcp:send` could return
 before the connection has the data, against a byte credit the
 connection returns, as the inet driver queues sends. It saves a round
-trip per call but needs a client-side process to take the returned
-credit for every process that may send. Measured first; the synchronous
-send is what OTP's `socket` backend does too.
+trip per call, and the socket process is where the returned credit
+would be taken for every process that may send. Measured first; the
+synchronous send is what OTP's `socket` backend does too.
 
 **Modular sequence arithmetic, checked by types.** An opaque `seq()` type
 lets Dialyzer report arithmetic on sequence numbers outside their module,

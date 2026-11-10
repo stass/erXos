@@ -691,26 +691,38 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [High] network and domains, the envelope (design-domains, "Risks and open questions"):
-  every message from another domain arrives as `{erx_origin, D, Msg}`, so a socket's
-  active-mode delivery `{tcp, S, Data}` (and `gen_udp`'s) reaches an owner outside the
-  network domain wrapped, and a stock `receive {tcp, S, Data}` never matches it; cowboy
-  and ranch in the web domain are such owners. Needs the user's choice: a relay per socket
-  in the owner's domain under `erx_net_client` that takes the envelope off (recommended,
-  one local message per delivery, to measure), or an exception in edit 16 for socket
-  messages whose socket pid is of the lane's domain. The grant's `{erx_net_resolver, Grant,
-  Answer}` to `erx_inet` in another domain is dropped the same way, so that domain keeps its
-  first answer; `erx_inet`, the protocol's owner on the client side, takes the envelope off it
-  once the grant is in the network domain, checking `D` is the grant's.
-
-* [Medium] network, `erx_tcp_conn` (`handle_call({recv, ...})`,
-  [design-network-stack.md](docs/design-network-stack.md#the-interface-towards-erlang-programs)):
-  `recv(S, Length)` with `Length` above the connection's receive buffer
-  answers `{error, enomem}`, where stock gen_tcp accepts up to 64 MiB. A
-  waiting recv's held bytes are the network domain's memory, which the
-  `buffers` limit counts as a second receive buffer per connection (its
-  reservations are not built yet); lifting the bound means reserving a
-  recv's `Length` against the grant when the recv starts instead.
+* [High] network, `erx_net_client` (`erx_gen_tcp`, `erx_gen_udp`; design-network-stack, "The
+  socket process"): the socket process is not built. `erx_gen_tcp` calls the connection
+  directly with `gen_server:call`, and `erx_tcp_conn` and `erx_udp_sock` present the stream
+  themselves (active modes, `recv`, the owner's monitor), so an owner outside the network
+  domain receives its active-mode messages as `{erx_origin, D, {tcp, S, Data}}`, which no stock
+  `receive` matches; cowboy and ranch in the web domain are such owners. To build: the
+  `gen_statem` and its pure cores `erx_gen_tcp_core` and `erx_gen_udp_core`, `erx_sock_admit`,
+  the socket protocol's `{erx_net, Sender, Body}` messages and byte credit in `erx_tcp_conn` and
+  `erx_udp_sock` with their checks of `ReplyTo`, sends and pushes cut into 64 KiB pieces and the
+  64 requests in flight ("Message sizes", "Requests in flight"), the `grant` key's `Origin` and
+  `erxos/erx_net_client_erxos`, local `controlling_process/2` (`enotsup` today), and `recv`
+  up to 64 MiB in the socket process, where `erx_tcp_conn` answers `{error, enomem}` above its
+  receive buffer.
+* [High] network, `erx_net_client` (`erx_gen_tcp:connect/4`, `erx_gen_udp:open/2`, `erx_inet`;
+  design-network-stack, "Untrusted input", "Answers from the grant"): the grant's answers
+  reach program code unchecked. `connect` and `open` return the grant's reply to their caller
+  as it came, the socket term included, and `erx_inet:grant/0` hands every backend the
+  grant's pid to call itself, so no one check stands between the network domain and the
+  caller. Once the grant is in another domain, a network domain can hand a program any term
+  as its socket, and a backend that later calls that term with `gen_server:call/3` follows
+  `{global, _}` and `{via, Module, _}` names as well as pids. The resolver loader matches
+  `{erx_net_resolver, Grant, Answer}` without its envelope, so a loader in another domain
+  drops every change and keeps its first answer, and it calls `watch_resolver` with a
+  5000 ms timeout where the design's build check allows only `infinity`. To build:
+  `erx_inet:call/1` in place of `grant/0`, as the one reader of the `grant` key and the one
+  caller of the grant, waiting with `infinity`; every answer through
+  `erx_sock_admit:answer/3` against the schema's reply type; an open's socket required to be
+  a pid of the grant's node; the resolver's answers and its change messages, in their
+  envelope with `D` the grant's, checked there too; and the build checks that only
+  `erx_inet` reads the key and that every call's timeout is `infinity`.
+  While the stack runs in the system domain the grant is the caller's own node's, so nothing
+  reaches the client from another domain yet.
 * [Low] network, `erx_tcp_conn` (`perform({deliver, _})`): the receive queue
   counts payload bytes only, not the binary and list cell each queued
   segment costs, which `erx_tcp_reass` counts as `PIECE_OVERHEAD`. A peer

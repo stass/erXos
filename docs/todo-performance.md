@@ -470,12 +470,32 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   frames on HVF with `connections` at 1 and at 4,096; the fix on the table
   is a table-wide count of records written, loaded once per run.
 
-* **[Medium] network, a round trip per `gen_tcp:send/2` across a lane**
-  ([design-network-stack.md](design-network-stack.md#the-backend)). Each
-  send waits for the connection's reply that the data is in its send
-  buffer. Settled by bulk throughput with 1 KiB and 64 KiB sends against
-  line rate; the fix on the table is asynchronous sends against a byte
-  credit, which needs a client-side process per sender.
+* **[Medium] network, a round trip per piece of a `gen_tcp:send/2`
+  across a lane**
+  ([design-network-stack.md](design-network-stack.md#message-sizes)).
+  Each send is cut into pieces of 64 KiB, and the socket process sends
+  the next piece only after the connection's reply that the last is in
+  its send buffer, so a bulk send costs one lane round trip per 64 KiB,
+  and a datagram socket one per datagram, since sends on one socket go
+  one at a time. Settled by bulk throughput with 1 KiB, 64 KiB and 16 MiB
+  sends, and by datagrams per second on one socket, against line rate;
+  the fix on the table is a window of pieces in flight against a byte
+  credit the connection returns, taken by the socket process.
+* **[Medium] network, the socket process's hop**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  Every delivery takes one local message from the socket process to the
+  owner, every call one from the caller to the socket process, and every
+  half buffer of received data one credit message across the lane; each
+  socket also holds a `gen_statem` in the owner's domain. A design
+  review estimated a few percent of a core at the measured active-mode
+  rate; that is not a measurement. Settled by `tools/erx bench` runs of an active-mode bulk
+  receive (`{active, true}` and `{active, 100}`), a 1 KiB request-response
+  loop and a 10,000-socket idle set, with the owner in another domain,
+  against the same loads with a build whose connection sends to an owner
+  in its own domain directly; reported as throughput, latency per request,
+  reductions per delivered byte in the owner's domain, and memory per
+  socket. The fixes on the table are coalescing several pushes into one
+  delivery when the owner is behind, and granting credit less often.
 * **[Low] network, one message per in-order segment against coalescing**
   ([design-network-stack.md](design-network-stack.md#hops-and-copies)).
   A connection delivers each step's in-order data in one message; joining
@@ -568,20 +588,20 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   process per flow, here 64 MiB, one run each) `recv(S, 1460)` read at
   29 Mbit/s (18.5 s), `recv(S, 16384)` at 984 and `recv(S, 0)` at 1,115;
   how the time splits between the join, the call and the acknowledgements
-  was not measured. Settled by a profile of the `recv(S, 1460)` run; the
-  fixes on the table are splitting the queue at the length without
-  joining what stays, and answering a recv from bytes the owner's side
-  already holds.
-* **[Low] network, a `rcvd` step per batch while a recv waits**
-  ([design-network-stack.md](design-network-stack.md#the-interface-towards-erlang-programs)).
-  While a recv longer than what is queued waits, every batch of segments
-  the connection takes is followed by a `{user, {rcvd, N}}` step and an
-  output pass for the bytes the recv now holds, where a read once took one
-  per answered recv. The p620 numbers above predate it. Settled by the
-  same `recv(S, 16384)` and `recv(S, 65536)` receives on that path, or a
-  host benchmark of a 64 MiB receive through the test pipe, with and
-  without the hold; the fix on the table is stepping `rcvd` only once the
-  held bytes reach a quarter of the buffer.
+  was not measured. Settled by a profile of the `recv(S, 1460)` run. The
+  design's socket process answers a recv from the bytes it holds, which
+  removes the call; the fix still on the table is splitting the held
+  bytes at the length without joining what stays.
+* **[Low] network, a `rcvd` step per push**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  Every push of bytes to the socket process leaves the receive buffer, so
+  it is followed by a `{user, {rcvd, N}}` step and an output pass, where a
+  read once took one per answered recv; the p620 numbers above have no
+  such step. Settled by the same `recv(S, 16384)` and `recv(S, 65536)`
+  receives, or a host benchmark of a 64 MiB receive through the test
+  pipe, with a step per push and with one per quarter buffer pushed; the
+  fix on the table is the latter, as FreeBSD's `tcp_output` sends a
+  window update only for a significant change.
 * **[Low] network, the tap helper's frame per system call**
   ([design-network-stack.md](design-network-stack.md#the-tap-helper)).
   `erx_net_tap` reads and writes one frame per system call and port
